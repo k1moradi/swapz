@@ -1681,7 +1681,11 @@ order in verbose `... FAIL`/`... ERROR`
 progress records but groups detailed `ERROR:` blocks ahead of `FAIL:` blocks in
 its summary. Classification must therefore bind the first failed progress record
 to its matching detailed traceback; a later teardown error must not win merely
-because its detailed block is printed first. Synthetic controls without progress
+because its detailed block is printed first. The progress and detailed method
+must agree and belong to the currently executing source-controlled suite
+class; expected negative-test output from another class cannot claim the
+active phase. A progress-only line without a matching detailed block must
+remain unauthenticated rather than claiming a prior fixture's test identity. Synthetic controls without progress
 records may use the first detailed block as a compatibility fallback. Retain the
 allowlisted execution-first unittest name and first assertion or exception
 privately. The official native-stage diagnostic binds unittest identity to the failing
@@ -1746,7 +1750,8 @@ successful output. Require the last complete source-controlled Bash rootless
 marker to match the original child exit and an owned mode-0700 directory
 holding a regular, single-link, mode-0600 attribution-only log; reject symlinks,
 unsafe permissions and pre-captured logs. The entire artifact, including Bash
-attribution, must remain within 256 KiB. Class-specific first-failure matching
+attribution, must remain within 256 KiB. Compaction must reserve space for the
+final attribution trailer even when captured stderr is below 256 KiB. Class-specific first-failure matching
 is limited to source classes in `tmp-cleanup-test.py`, `test-report-test.py`
 and `primary-lifecycle-audit-test.py`; other direct phases receive a clearly
 labeled contextual tail only, never an invented test identity. A silent failure

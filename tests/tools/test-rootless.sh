@@ -138,13 +138,14 @@ finish_rootless_private_stderr_capture() {
 classify_rootless_private_unittest_failure() {
   local diagnostic_path=$1
   local line
-  local detailed_header_regex="^(FAIL|ERROR): (test_[A-Za-z0-9_]{1,96}) \\(__main__\\.(PackageLifecycle|PrimaryRealSwapContracts|SourceAdmissionPeerOwnership|GeneratorPublicationTest)\\.test_[A-Za-z0-9_]{1,96}\\)"
-  local progress_regex="^[[:space:]]*(test_[A-Za-z0-9_]{1,96}) \\(__main__\\.(PackageLifecycle|PrimaryRealSwapContracts|SourceAdmissionPeerOwnership|GeneratorPublicationTest)\\.test_[A-Za-z0-9_]{1,96}\\)( \\(phase='([a-z0-9-]{1,64})'\\))? \\.\\.\\. (FAIL|ERROR)$"
+  local detailed_header_regex="^(FAIL|ERROR): (test_[A-Za-z0-9_]{1,96}) \\(__main__\\.(PackageLifecycle|PrimaryRealSwapContracts|SourceAdmissionPeerOwnership|GeneratorPublicationTest)\\.(test_[A-Za-z0-9_]{1,96})\\)"
+  local progress_regex="^[[:space:]]*(test_[A-Za-z0-9_]{1,96}) \\(__main__\\.(PackageLifecycle|PrimaryRealSwapContracts|SourceAdmissionPeerOwnership|GeneratorPublicationTest)\\.(test_[A-Za-z0-9_]{1,96})\\)( \\(phase='([a-z0-9-]{1,64})'\\))? \\.\\.\\. (FAIL|ERROR)$"
   # Other generator subtest keys identify a failed method, never public data.
-  local generator_progress_regex="^[[:space:]]*(test_[A-Za-z0-9_]{1,96}) \\(__main__\\.GeneratorPublicationTest\\.test_[A-Za-z0-9_]{1,96}\\)( \\([^[:cntrl:]]{1,192}\\))? \\.\\.\\. (FAIL|ERROR)$"
+  local generator_progress_regex="^[[:space:]]*(test_[A-Za-z0-9_]{1,96}) \\(__main__\\.GeneratorPublicationTest\\.(test_[A-Za-z0-9_]{1,96})\\)( \\([^[:cntrl:]]{1,192}\\))? \\.\\.\\. (FAIL|ERROR)$"
   local subtest_regex="\\(phase='([a-z0-9-]{1,64})'\\)$"
   local errno_regex='^(OSError|PermissionError|FileNotFoundError): \[Errno ([1-9][0-9]{0,3})\]'
   local errno_candidate
+  local expected_unittest_class=
   local first_progress_kind=
   local first_progress_test=
   local first_progress_subtest=unavailable
@@ -158,6 +159,19 @@ classify_rootless_private_unittest_failure() {
   rootless_classified_kind=unavailable
   rootless_classified_errno=unavailable
   [[ -f $diagnostic_path && -r $diagnostic_path && ! -L $diagnostic_path ]] || return 0
+  # Only the active source-controlled suite can authenticate a failure.
+  # Expected negative tests may relay stderr from a different unittest class.
+  case $rootless_phase in
+    'tests/runtime/native/package-dkms-test.py')
+      expected_unittest_class=PackageLifecycle ;;
+    'tests/runtime/native/primary-real-swap-test.py')
+      expected_unittest_class=PrimaryRealSwapContracts ;;
+    'tests/runtime/native/primary-real-swap-parent-ownership-test.py')
+      expected_unittest_class=SourceAdmissionPeerOwnership ;;
+    'tests/runtime/native/systemd/swapz-primary-generator-transaction-test.py')
+      expected_unittest_class=GeneratorPublicationTest ;;
+    *) return 0 ;;
+  esac
 
   # unittest preserves execution order in verbose "... FAIL/ERROR" progress
   # records, but groups detailed ERROR blocks before FAIL blocks in its summary.
@@ -165,26 +179,24 @@ classify_rootless_private_unittest_failure() {
   # a later teardown error cannot replace the primary assertion.
   while IFS= read -r line || [[ -n $line ]]; do
     if [[ $line =~ $progress_regex ]]; then
+      [[ ${BASH_REMATCH[2]} == "$expected_unittest_class" &&
+         ${BASH_REMATCH[3]} == "${BASH_REMATCH[1]}" ]] || continue
       first_progress_test=${BASH_REMATCH[1]}
-      first_progress_kind=${BASH_REMATCH[5]}
-      if [[ -n ${BASH_REMATCH[4]} ]]; then
-        first_progress_subtest=${BASH_REMATCH[4]}
+      first_progress_kind=${BASH_REMATCH[6]}
+      if [[ -n ${BASH_REMATCH[5]} ]]; then
+        first_progress_subtest=${BASH_REMATCH[5]}
       fi
-    elif [[ $line =~ $generator_progress_regex ]]; then
+    elif [[ $expected_unittest_class == GeneratorPublicationTest &&
+            $line =~ $generator_progress_regex ]]; then
+      [[ ${BASH_REMATCH[2]} == "${BASH_REMATCH[1]}" ]] || continue
       # Report only the allowlisted method; arbitrary subtest details stay private.
       first_progress_test=${BASH_REMATCH[1]}
-      first_progress_kind=${BASH_REMATCH[3]}
+      first_progress_kind=${BASH_REMATCH[4]}
     else
       continue
     fi
-    rootless_classified_test=$first_progress_test
-    rootless_classified_kind=$first_progress_kind
-    rootless_classified_subtest=$first_progress_subtest
-    if [[ $first_progress_kind == FAIL ]]; then
-      rootless_classified_reason=unittest_assertion
-    else
-      rootless_classified_reason=unittest_error
-    fi
+    # A progress-only record is not a confirmed failure: a passing negative
+    # fixture may print it before the actual suite emits its traceback.
     break
   done < "$diagnostic_path"
 
@@ -193,6 +205,8 @@ classify_rootless_private_unittest_failure() {
       if [[ $line =~ $detailed_header_regex ]]; then
         header_kind=${BASH_REMATCH[1]}
         header_test=${BASH_REMATCH[2]}
+        [[ ${BASH_REMATCH[3]} == "$expected_unittest_class" &&
+           ${BASH_REMATCH[4]} == "$header_test" ]] || continue
         header_subtest=unavailable
         if [[ $line =~ $subtest_regex ]]; then
           header_subtest=${BASH_REMATCH[1]}
@@ -207,14 +221,16 @@ classify_rootless_private_unittest_failure() {
         else
           # Synthetic/legacy controls without verbose progress retain the
           # previous first-detailed-block fallback.
-          rootless_classified_test=$header_test
-          rootless_classified_kind=$header_kind
-          rootless_classified_subtest=$header_subtest
-          if [[ $header_kind == FAIL ]]; then
-            rootless_classified_reason=unittest_assertion
-          else
-            rootless_classified_reason=unittest_error
-          fi
+          first_progress_subtest=$header_subtest
+        fi
+        # Authenticate identity only after a matching detailed failure block.
+        rootless_classified_test=$header_test
+        rootless_classified_kind=$header_kind
+        rootless_classified_subtest=$first_progress_subtest
+        if [[ $header_kind == FAIL ]]; then
+          rootless_classified_reason=unittest_assertion
+        else
+          rootless_classified_reason=unittest_error
         fi
         found_failure_header=1
       fi
@@ -368,7 +384,8 @@ report_rootless_failure() {
       rm -f -- "$private_diagnostic_path" 2>/dev/null
       private_diagnostic_path=
       private_diagnostic_log=unavailable
-    elif (( captured_bytes > 262144 )); then
+    elif (( captured_bytes > 258048 )); then
+      # Reserve 4096 bytes for attribution metadata inside the 256-KiB cap.
       # Keep a bounded execution-first failure excerpt plus the transcript
       # tail. Unittest blocks retain both ends; the generated-C fixture also
       # pins its first compiler error so later parallel Make output cannot

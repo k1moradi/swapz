@@ -104,6 +104,42 @@ PY
         'Traceback (most recent call last):' \
         'AssertionError: PRIVATE_ONLY_TRACEBACK_PAYLOAD' >&2
       return 61 ;;
+    foreign_progress)
+      # A passing negative fixture printed another suite's expected failure.
+      printf '%s\n' \
+        "test_expected (__main__.PackageLifecycle.test_expected) ... FAIL" \
+        "FAIL: test_expected (__main__.PackageLifecycle.test_expected)" \
+        'AssertionError: EXPECTED_NEGATIVE_FIXTURE_PAYLOAD' \
+        '======================================================================' \
+        "test_oracle_first (__main__.PrimaryRealSwapContracts.test_oracle_first) ... ERROR" \
+        "ERROR: test_oracle_first (__main__.PrimaryRealSwapContracts.test_oracle_first)" \
+        'Traceback (most recent call last):' \
+        'PermissionError: [Errno 13] PRIVATE_ONLY_TRACEBACK_PAYLOAD' \
+        '======================================================================' >&2
+      return 52 ;;
+    unmatched_progress)
+      # A progress-only line is not a first failing detailed traceback.
+      printf '%s\n' \
+        "test_expected (__main__.PrimaryRealSwapContracts.test_expected) ... FAIL" \
+        "test_oracle_first (__main__.PrimaryRealSwapContracts.test_oracle_first) ... ERROR" \
+        "ERROR: test_oracle_first (__main__.PrimaryRealSwapContracts.test_oracle_first)" \
+        'OSError: [Errno 9] PRIVATE_ONLY_TRACEBACK_PAYLOAD' >&2
+      return 54 ;;
+    mismatched_method)
+      printf '%s\n' \
+        "FAIL: test_forged (__main__.PrimaryRealSwapContracts.test_different)" \
+        'AssertionError: EXPECTED_NEGATIVE_FIXTURE_PAYLOAD' >&2
+      return 55 ;;
+    near_limit)
+      printf '%s\n' \
+        "test_oracle_first (__main__.PrimaryRealSwapContracts.test_oracle_first) ... FAIL" \
+        "FAIL: test_oracle_first (__main__.PrimaryRealSwapContracts.test_oracle_first)" \
+        'Traceback (most recent call last):' \
+        'AssertionError: PRIVATE_ONLY_TRACEBACK_PAYLOAD' \
+        '======================================================================' >&2
+      head -c 260000 /dev/zero | tr '\0' 'x' >&2
+      printf '\n' >&2
+      return 47 ;;
     primary_oversized)
       printf '%s\n' \
         "test_oracle_first (__main__.PrimaryRealSwapContracts.test_oracle_first) ... FAIL" \
@@ -694,6 +730,46 @@ exec "$SWAPZ_REAL_RM" "$@"
             "owned_cleanup=failed", evidence)
         self.assertIn("unittest_kind=ERROR\n", evidence)
         self.assertNotIn("AFTER_PACKAGE", result.stdout)
+
+    def test_foreign_expected_failure_cannot_claim_primary_phase(self):
+        result = self.invoke("foreign_progress", stage=PRIMARY_PHASE)
+        log = self.assert_report(
+            result, status=52, reason="unittest_error",
+            test="test_oracle_first", stage=PRIMARY_PHASE)
+        evidence = log.read_text()
+        self.assertLess(evidence.index("FAIL: test_expected"),
+                        evidence.index("ERROR: test_oracle_first"))
+        self.assertIn("PermissionError: [Errno 13] " + PRIVATE_SENTINEL,
+                      evidence)
+        self.assertIn("first_errno=13\n", evidence)
+        marker = next(line for line in result.stderr.splitlines()
+                      if line.startswith("FAIL: rootless "))
+        self.assertNotIn("test_expected", marker)
+        self.assertNotIn("EXPECTED_NEGATIVE_FIXTURE_PAYLOAD", marker)
+
+    def test_progress_without_matching_detail_cannot_claim_first_failure(self):
+        result = self.invoke("unmatched_progress", stage=PRIMARY_PHASE)
+        log = self.assert_report(
+            result, status=54, reason="nonzero_exit", stage=PRIMARY_PHASE)
+        self.assertIn("OSError: [Errno 9] " + PRIVATE_SENTINEL, log.read_text())
+        self.assertIn("unittest_kind=unavailable\n", log.read_text())
+        self.assertIn("first_errno=unavailable\n", log.read_text())
+
+    def test_mismatched_unittest_method_cannot_claim_first_failure(self):
+        result = self.invoke("mismatched_method", stage=PRIMARY_PHASE)
+        log = self.assert_report(
+            result, status=55, reason="nonzero_exit", stage=PRIMARY_PHASE)
+        self.assertIn("EXPECTED_NEGATIVE_FIXTURE_PAYLOAD", log.read_text())
+        self.assertIn("unittest_kind=unavailable\n", log.read_text())
+
+    def test_capture_near_byte_limit_reserves_space_for_attribution(self):
+        result = self.invoke("near_limit", stage=PRIMARY_PHASE)
+        log = self.assert_report(
+            result, status=47, reason="unittest_assertion",
+            test="test_oracle_first", stage=PRIMARY_PHASE)
+        self.assertLessEqual(log.stat().st_size, 262144)
+        self.assertIn("AssertionError: " + PRIVATE_SENTINEL, log.read_text())
+        self.assertIn("unittest_kind=FAIL\n", log.read_text())
 
     def test_primary_oversized_stderr_keeps_first_traceback(self):
         result = self.invoke("primary_oversized", stage=PRIMARY_PHASE)
