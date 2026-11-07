@@ -132,6 +132,11 @@ exec sleep 30
             ["INFRASTRUCTURE: cannot start test: errno=28 No space left on device"],
             127, "ci-failure-diagnostics")
         self.assertEqual(reported_errno["first_errno"], 28)
+        forged_errno = self.diagnostics.diagnose_ci_failure(
+            ["FAIL: test_errno (__main__.Fixture)",
+             "AssertionError: errno=9 attacker-supplied text"],
+            1, "ci-failure-diagnostics")
+        self.assertIsNone(forged_errno["first_errno"])
         private = self.diagnostics.diagnose_ci_failure(
             ["FAIL: test_private (__main__.Fixture)",
              'AssertionError: expected=/private/fixture/token actual={"id":"FORGED_ID"}'],

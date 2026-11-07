@@ -1720,9 +1720,10 @@ and `primary-lifecycle-audit-test.py`; other direct phases receive a clearly
 labeled contextual tail only, never an invented test identity. A silent failure
 cannot claim a matched traceback. An earlier rootless marker superseded by a
 later marker cannot authenticate the earlier failure. The public report retains
-only source-controlled phase, original exit, fixed reason and sanitized log
-pointer; `subtest=unavailable test=unavailable` remains unless Bash itself
-authenticates nested identity. The official stage reporter must preserve the
+only source-controlled phase, original exit, fixed reason, sanitized log pointer
+and the fixed numeric-errno/cleanup fields defined below;
+`subtest=unavailable test=unavailable` remains unless Bash itself authenticates
+nested identity. The official stage reporter must preserve the
 full relative `log=` pointer for every complete, status-matched final Bash
 marker, including `line=unavailable`; a malformed or exit-mismatched marker
 cannot borrow an earlier suite's apparent test identity. Nested Make exits and
@@ -1817,7 +1818,11 @@ fixed `Reason:` line may append only `first_errno=<number|unavailable>` and
 `cleanup=<fixed-state>`; the CI parser may consume those fields only when
 exit, reason, subtest and safe relative log repeat the final authenticated
 marker exactly. A nested errno may be promoted only from the matched first
-unittest detailed block, never from arbitrary boundary or cleanup text. An
+unittest detailed block, never from arbitrary boundary or cleanup text. Outside
+that authenticated rootless detail, `first_errno` may come only from a genuine
+Python OSError-family exception line or the wrapper's own fixed
+`INFRASTRUCTURE: cannot start test: errno=...` launch diagnostic; a bare
+`errno=N` in assertion or child text is not original-errno evidence. An
 unverified child cleanup remains explicitly
 `not_independently_verified`; relay-only failures may use fixed incomplete or
 cleanup-failure labels but never assert successful child teardown. The existing

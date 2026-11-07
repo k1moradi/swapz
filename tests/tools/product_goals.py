@@ -811,16 +811,22 @@ def diagnose_ci_failure(lines, exit_code, suite):
     if rootless_shell_syntax_check_failed:
         expected_contract = "source-controlled shell script passes bash -n"
 
-    errno_match = re.search(
-        r"(?:\[Errno (?P<exception_errno>[1-9][0-9]{0,3})\]|"
-        r"\berrno=(?P<reported_errno>[1-9][0-9]{0,3})\b)",
+    exception_errno_match = re.match(
+        r"^(?:OSError|PermissionError|FileNotFoundError|TimeoutError|"
+        r"BlockingIOError|InterruptedError|IsADirectoryError|"
+        r"NotADirectoryError|FileExistsError|ChildProcessError|"
+        r"ConnectionAbortedError|ConnectionRefusedError|"
+        r"ConnectionResetError|BrokenPipeError|ProcessLookupError): "
+        r"\[Errno (?P<errno>[1-9][0-9]{0,3})\]",
+        causal_error or "")
+    launch_errno_match = re.match(
+        r"^INFRASTRUCTURE: cannot start test: errno="
+        r"(?P<errno>[1-9][0-9]{0,3})\b",
         causal_error or "")
     first_errno = None
-    if errno_match:
-        errno_text = (errno_match.group("exception_errno") or
-                      errno_match.group("reported_errno"))
-        if int(errno_text) <= 4095:
-            first_errno = int(errno_text)
+    errno_match = exception_errno_match or launch_errno_match
+    if errno_match and int(errno_match.group("errno")) <= 4095:
+        first_errno = int(errno_match.group("errno"))
     cleanup_disposition = {
         "stderr_relay_failure": "relay_incomplete",
         "stderr_relay_cleanup_failure": "relay_cleanup_failed",
