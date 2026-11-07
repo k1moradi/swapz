@@ -3605,6 +3605,47 @@ class ProductionReadinessEvaluatorTest(unittest.TestCase):
             missing_capacity_result["METADATA_RAM_MEASUREMENT"]["status"],
             "NOT_MEASURED")
 
+    def test_measured_decision_fail_requires_coherent_producer_diagnostic(self):
+        policy = acceptance_policy()
+        policy_raw = encoded(policy)
+        coherent_campaign = physical_campaign_decision_failure_evidence(
+            policy_raw)
+        self.assertEqual(
+            evaluate(policy=policy, campaign=coherent_campaign)[
+                "release_verdict"], "FAIL")
+
+        # Fail-first: the original evaluator accepted these contradictions as
+        # terminal measurement FAIL without a coherent decision diagnostic.
+        mutations = (
+            ("expected", "FAIL"),
+            ("observed", 0),
+            ("reason", "failure on protected target " + TARGET["partuuid"]),
+            ("producer_status", "FAIL"),
+        )
+        for field, contradictory_value in mutations:
+            with self.subTest(field=field):
+                campaign = physical_campaign_decision_failure_evidence(
+                    policy_raw)
+                campaign["physical_evidence_audit"]["diagnostics"][0][
+                    field] = contradictory_value
+                result = evaluate(policy=policy, campaign=campaign)
+                self.assertEqual(result["release_verdict"], "BLOCKED")
+                diagnostics = "\n".join(result["code_blockers"])
+                for expected in (
+                        "phase=physical_evidence_audit",
+                        "producer_phase=qualification",
+                        "failed_evidence_field=physical_evidence_audit."
+                        "diagnostics[].decision_failure_binding",
+                        "expected_schema_class=current_verified_"
+                        "measured_decision_FAIL",
+                        "observed_schema_class=missing_or_contradictory",
+                        "original_error=unavailable",
+                        "verdict=BLOCKED",
+                        "safe_action=recapture_and_reseal_campaign"):
+                    self.assertIn(expected, diagnostics)
+                self.assertNotIn(TARGET["partuuid"], diagnostics)
+                self.assertNotIn(SOURCE, diagnostics)
+
     def test_physical_fail_requires_sealed_exact_qualification_target(self):
         # A retained FAIL is authoritative only for the sealed admitted target,
         # not for a stale host capture or a contradictory nested pair binding.

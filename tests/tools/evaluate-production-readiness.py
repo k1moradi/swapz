@@ -808,6 +808,28 @@ def _physical_producer_failure_diagnostic_is_valid(
     )
 
 
+def _physical_decision_failure_diagnostic_is_valid(
+        audit: dict[str, Any], first_failure: dict[str, Any]) -> bool:
+    """Bind a measured cohort FAIL to the sealer's exact retained diagnostic."""
+    diagnostics = audit.get("diagnostics")
+    return isinstance(diagnostics, list) and any(
+        isinstance(diagnostic, dict) and
+        set(diagnostic) == {
+            "status", "metric", "expected", "observed",
+            "workload", "pair_index", "arm", "reason",
+        } and
+        diagnostic.get("status") == "FAIL" and
+        diagnostic.get("metric") == "qualification.decision_status" and
+        diagnostic.get("workload") == first_failure.get("workload") and
+        diagnostic.get("pair_index") is None and
+        diagnostic.get("arm") is None and
+        diagnostic.get("expected") == "PASS" and
+        diagnostic.get("observed") is None and
+        diagnostic.get("reason") == "verified frozen measurements failed"
+        for diagnostic in diagnostics
+    )
+
+
 def _physical_audit_failure_witness_is_valid(
         audit: dict[str, Any],
         producer_workloads: dict[str, Any],
@@ -893,6 +915,8 @@ def _physical_audit_failure_witness_is_valid(
         return (
             pair_index is None and arm is None and
             audit.get("first_failed_phase") == "qualification" and
+            _physical_decision_failure_diagnostic_is_valid(
+                audit, first_failure) and
             count["attempted_pairs"] == required and
             count["accepted_pairs"] == required and
             len(workload_pairs) == required and
@@ -1832,6 +1856,25 @@ def validate_physical_campaign_evidence(
                             "observed_schema_class=missing_or_contradictory "
                             "verdict=BLOCKED "
                             "reason=producer_diagnostic_cannot_authenticate_"
+                            "measurement_failure "
+                            "safe_action=recapture_and_reseal_campaign")
+                    elif (
+                            first_failure.get("metric") ==
+                            "qualification.decision_status" and
+                            not _physical_decision_failure_diagnostic_is_valid(
+                                physical_audit, first_failure)):
+                        reject(
+                            "sealed campaign measured decision FAIL diagnostic "
+                            "cannot authenticate the first failure: "
+                            "phase=physical_evidence_audit "
+                            "producer_phase=qualification "
+                            "failed_evidence_field=physical_evidence_audit."
+                            "diagnostics[].decision_failure_binding "
+                            "expected_schema_class=current_verified_"
+                            "measured_decision_FAIL "
+                            "observed_schema_class=missing_or_contradictory "
+                            "original_error=unavailable verdict=BLOCKED "
+                            "reason=decision_diagnostic_cannot_authenticate_"
                             "measurement_failure "
                             "safe_action=recapture_and_reseal_campaign")
 

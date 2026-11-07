@@ -9078,7 +9078,12 @@ stays in the immutable pair artifact and is never copied into public diagnostics
 Preflight, fill, warmup, teardown and publication failures remain BLOCKED unusable
 evidence. Or (b), the witness may be a
 `qualification.decision_status` FAIL for a complete
-accepted measured cohort. Before either witness can drive release FAIL, the
+accepted measured cohort. That measured decision must retain the producer's
+exact diagnostic field set, expected PASS, null observed value, and canonical
+verified-measurements-failed reason. A contradictory diagnostic or arm-only
+producer-status field cannot authenticate the cohort FAIL: report the
+qualification producer phase, expected/observed evidence classes and unavailable
+original measurement error without exposing private identifiers. Before either witness can drive release FAIL, the
 retained pair manifest must have type-strict PASS/EXCLUDED dispositions and
 unique workload pair indices, pair IDs, artifact basenames and SHA-256 digests,
 with the prescribed counterbalanced order.
