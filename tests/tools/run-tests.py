@@ -2976,7 +2976,21 @@ def first_unittest_failure_details(output):
     marker_start = markers[-1].start()
     footers = list(re.finditer(
         r"(?m)^FAILED \([^\r\n]{1,120}\)$", output[:marker_start]))
-    if not footers or marker_start - footers[-1].end() > 2048:
+    # The physical fixture may print large, legitimate post-test smoke
+    # markers and private report pointers after unittest's FAILED footer.
+    # An exact source-owned phase permits a larger gap, but only a matching
+    # PhysicalSwapProbeTests failure can be promoted from that window.
+    marker_line = output[marker_start:].splitlines()[0]
+    physical_probe_failure = re.fullmatch(
+        r"FAIL: rootless phase=physical-swap-probe-test[.]py "
+        r"subtest=unavailable test=unavailable exit=[1-9][0-9]{0,2} "
+        r"reason=nonzero_exit phase_s=[0-9]+ stage_s=[0-9]+ "
+        r"line=(?:[0-9]+|unavailable) "
+        r"log=(?:unavailable|build/tests/rootless-failure[.]"
+        r"[A-Za-z0-9]{8}/diagnostic[.]log)",
+        marker_line) is not None
+    footer_gap_limit = 32768 if physical_probe_failure else 2048
+    if not footers or marker_start - footers[-1].end() > footer_gap_limit:
         return []
     transcript = output[max(0, footers[-1].start() - 131072):
                         footers[-1].start()]
@@ -2984,6 +2998,10 @@ def first_unittest_failure_details(output):
         r"(?m)^(FAIL|ERROR): (test_[A-Za-z0-9_]{1,96}) "
         r"\(__main__\.([A-Za-z0-9_]{1,96})\.\2\)"
         r"(?: \([^\r\n]{1,160}\))?$", transcript))
+    if physical_probe_failure:
+        headers = [
+            header for header in headers
+            if header.group(3) == "PhysicalSwapProbeTests"]
     if not headers:
         return []
     progress_records = re.finditer(
@@ -3069,6 +3087,22 @@ def first_unittest_failure_details(output):
     # Only derive assertion specifics from a recognized first error.
     # Raw expected/actual payloads remain in the existing private log.
     if exception and exception.group(1) == "AssertionError":
+        if first_header.group(3) == "PhysicalSwapProbeTests":
+            # Reveal only fixed internal restoration states, not arbitrary
+            # values from a failed assertion or a physical-device identity.
+            recovery_states = {
+                "BACKED_UP", "MAPPED", "ORACLE_PASS",
+                "RECOVERY_REQUIRED", "PRE_DESTRUCTIVE_FAILED", "COMPLETE"}
+            recovery_comparison = re.search(
+                r"(?m)^AssertionError: '([A-Z_]{2,32})' != "
+                r"'([A-Z_]{2,32})'$", traceback)
+            if (recovery_comparison is not None and
+                    all(value in recovery_states
+                        for value in recovery_comparison.groups())):
+                details.append(
+                    "Recovery state mismatch: observed "
+                    + recovery_comparison.group(1)
+                    + "; expected " + recovery_comparison.group(2))
         details.extend(safe_assertion_details(traceback))
     elif (exception and exception.group(1) == "PackageInvocationTimeout"
           and first_header.group(3) == "PackageLifecycle"):

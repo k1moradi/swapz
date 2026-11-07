@@ -3,6 +3,7 @@ import hashlib
 from concurrent.futures import ThreadPoolExecutor
 from contextlib import ExitStack
 import errno
+import ast
 import importlib.util
 import json
 import os
@@ -1772,7 +1773,21 @@ class PhysicalSwapProbeTests(unittest.TestCase):
         runner = (ROOT / "tools/run-tests.py").read_text()
         makefile = (ROOT.parent / "Makefile").read_text()
         script = SCRIPT.read_text()
-        self.assertNotIn("physical-swap-probe.py", runner)
+        # Diagnostic source-frame matching may mention the probe filename.
+        # Only a physical-probe execution command would violate the gate.
+        invocation_calls = [
+            node for node in ast.walk(ast.parse(runner))
+            if isinstance(node, ast.Call) and (
+                isinstance(node.func, ast.Name) and
+                node.func.id == "run_stage" or
+                isinstance(node.func, ast.Attribute) and
+                node.func.attr in {"run", "Popen"})
+        ]
+        self.assertTrue(invocation_calls)
+        self.assertFalse(any(
+            "physical-swap-probe.py" in ast.dump(
+                call, include_attributes=False)
+            for call in invocation_calls))
         self.assertNotIn("physical-swap-probe.py", makefile)
         self.assertIn('["swapon", target["device"]]', script)
         self.assertNotIn('["swapon", mapper]', script)
@@ -2659,6 +2674,17 @@ class PhysicalSwapProbeTests(unittest.TestCase):
                         recovery_record_substitution is not None):
                     state["_test_results"] = json.loads(
                         (Path(directory) / probe.RESULTS_NAME).read_text())
+                if ((recovery_failure or teardown_not_complete) and
+                        not recovery_state_save_failure):
+                    # Recovery reopens the durable state and may rebind its
+                    # local dictionary. Observe that committed record rather
+                    # than the simulator's pre-recovery in-memory alias.
+                    saved_state = json.loads(
+                        (Path(directory) / probe.STATE_NAME).read_text())
+                    for key in ("stage", "stage_before_recovery",
+                                "recovery_error"):
+                        if key in saved_state:
+                            state[key] = saved_state[key]
                 if state.get("stage") == "COMPLETE":
                     # The producer commits oracle_suite=PASS only after final
                     # restoration/evidence validation; the teardown snapshot
@@ -3973,7 +3999,18 @@ class PhysicalSwapProbeTests(unittest.TestCase):
                          "device_arg": target["device_arg"],
                          "size_bytes": target["size_bytes"],
                          "swap_size_kib": target["swap_size_kib"],
-                         "swap_priority": target["swap_priority"]}
+                         "swap_priority": target["swap_priority"],
+                         # Mirror the immutable fields that run_probe uses
+                         # before synthetic snapshot failure admission.
+                         "parent_major_minor": target["parent_major_minor"],
+                         "parent_model": target["parent_model"],
+                         "parent_transport": target["parent_transport"],
+                         "parent_size_bytes": target["parent_size_bytes"],
+                         "parent_removable": target["parent_removable"],
+                         "card_identity_sha256":
+                             target["card_identity_sha256"],
+                         "swap_was_active": target["swap_was_active"],
+                         "ownership_phase": probe.RECOVERY_OWNERSHIP_PHASE}
                 prepare = mock.Mock(
                     return_value=(state, state_dir),
                     side_effect=(probe.ProbeError("injected prepare failure")

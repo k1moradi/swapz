@@ -1963,9 +1963,21 @@ Authenticated PhysicalSwapProbeTests recovery failures additionally show the
 deepest source-controlled physical-swap-probe.py frame (basename and line),
 physical_swap_probe.ProbeError class, and allowlisted immutable binding field.
 They never expose mismatching state values, private host paths or unrecognized
-field names. Synthetic recovery fixtures must populate the same immutable
-run_id in both the state and results records, without weakening the real
-recovery binding validator.
+field names. Source-owned physical probe failures can retain an authenticated
+unittest traceback across a bounded 32-KiB post-footer diagnostics trailer,
+rather than discarding all cause detail after 2 KiB of private smoke paths.
+Only an exact physical-probe rootless failure marker and a matching
+PhysicalSwapProbeTests class may use that wider window; unrelated phases
+retain the conservative 2-KiB limit. Two allowlisted restoration-state
+constants may appear as explicit observed/expected values; arbitrary assertion
+operands remain private. Synthetic recovery fixtures must populate the same
+immutable run_id in both the state and results records, without weakening the
+real recovery binding validator. Rootless physical-recovery simulation must
+report the durably reread state after cleanup, not a stale pre-recovery
+dictionary alias; the negative interrupted-fsync fixture must not invent a
+successful persistence claim. The source-contract guard checks that the
+physical probe is absent from executable make-test commands, without
+forbidding its filename in observational diagnostics.
 Comparisons of two exact fixed sanitized markers (for example, a withheld
 unittest identity versus a private-exception omission marker) show both
 observed and expected fixed states without exposing arbitrary child text.

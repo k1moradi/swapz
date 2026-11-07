@@ -3730,6 +3730,66 @@ class ReportContract(unittest.TestCase):
                 self.assertNotIn("PRIVATE_SUBPROCESS_COMMAND",
                                  console.getvalue())
 
+    def test_physical_probe_reports_first_cause_after_bounded_trailer(self):
+        from types import SimpleNamespace
+        from unittest.mock import patch
+
+        phase = "physical-swap-probe-test.py"
+        method = "test_development_oracle_outcome_requires_executed_comparison"
+        prefix = (
+            f"{method} (__main__.PhysicalSwapProbeTests.{method}) ... FAIL\n"
+            "======================================================================\n"
+            f"FAIL: {method} (__main__.PhysicalSwapProbeTests.{method})\n"
+            "Traceback (most recent call last):\n"
+            f'  File "/private/host/tests/runtime/native/{phase}", '
+            f'line 3336, in {method}\n'
+            "AssertionError: 'MAPPED' != 'RECOVERY_REQUIRED'\n"
+            "----------------------------------------------------------------------\n"
+            "Ran 124 tests in 2s\n"
+            "FAILED (failures=1)\n"
+        )
+        marker = (
+            f"FAIL: rootless phase={phase} subtest=unavailable "
+            "test=unavailable exit=1 reason=nonzero_exit "
+            "phase_s=2 stage_s=200 line=754 "
+            "log=build/tests/rootless-failure.ABC12345/diagnostic.log\n"
+        )
+        # A large post-footer data-path diagnostic must not suppress the
+        # source-authenticated first failure or leak its private contents.
+        transcript = (
+            prefix
+            + "PHYSICAL_RESULTS=/private/host/" + ("secret-data-" * 320) + "\n"
+            + marker
+        )
+        expected = [
+            f"First failing unittest: {method}",
+            f"Location: {phase}:3336",
+            "Exception: AssertionError",
+            "Recovery state mismatch: observed MAPPED; expected RECOVERY_REQUIRED",
+        ]
+        self.assertEqual(
+            runner.first_unittest_failure_details(transcript), expected)
+        console = io.StringIO()
+        with patch.object(
+                runner.subprocess, "run", return_value=SimpleNamespace(
+                    stdout=transcript, returncode=1)), \
+                patch.object(runner, "retain_direct_rootless_first_failure"), \
+                contextlib.redirect_stdout(console):
+            self.assertEqual(runner.run_stage(
+                "Native and rootless contracts", ["synthetic"],
+                {"stages": []}), 1)
+        for fact in expected:
+            self.assertIn("        " + fact, console.getvalue())
+        self.assertNotIn("/private/host", console.getvalue())
+        self.assertNotIn("secret-data", console.getvalue())
+
+        # An unrelated source phase cannot exploit the larger bounded
+        # physical-specific footer window to borrow a stale fixture failure.
+        unrelated = transcript.replace(
+            "phase=physical-swap-probe-test.py subtest=",
+            "phase=source-contract-test.py subtest=")
+        self.assertEqual(runner.first_unittest_failure_details(unrelated), [])
+
     def test_failure_console_reports_source_bound_recovery_error(self):
         from types import SimpleNamespace
         from unittest.mock import patch
