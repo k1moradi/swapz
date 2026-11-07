@@ -965,7 +965,7 @@ run_case low_memory OBSERVED_ID36_EARLY_HOST_MEMORY PASS unavailable
 run_case unrelated_swap LOADED_PREFLIGHT_DM_SWAPZ=absent PASS unavailable
 
 # Exercise the unmodified native creator's configfs proof against private,
-# regular-file fixtures. A startup-only Python shim changes attribute inode
+# regular-file fixtures. A private Python launcher changes attribute inode
 # observations at each fstat, as configfs may do across attribute lookups;
 # the owning directory retains its real, stable identity. This is not a
 # synthetic claim that two ordinary files have the same inode.
@@ -994,7 +994,7 @@ extracted_shell = fixture_root / "native-proof.sh"
 extracted_shell.write_text(source_match.group(0), encoding="utf-8")
 shim_directory = fixture_root / "shim"
 shim_directory.mkdir()
-(shim_directory / "sitecustomize.py").write_text(r'''
+(shim_directory / "volatile_inode_shim.py").write_text(r'''
 import os
 import stat
 
@@ -1056,6 +1056,25 @@ os.write = tracked_write
 os.close = tracked_close
 ''', encoding="ascii")
 
+# Explicitly launch the unchanged native Python here-document with the
+# fixture shim. Host Python startup hooks can shadow PYTHONPATH sitecustomize.
+python_loader = (
+    "import os, runpy, sys; "
+    "runpy.run_path(os.environ['SWAPZ_SHIM_PATH']); "
+    "exec(compile(sys.stdin.read(), '<pinned-nullblk-source>', 'exec'), "
+    "{'__name__': '__main__'})"
+)
+python_wrapper = shim_directory / "python3"
+python_wrapper.write_text(
+    "#!/usr/bin/env bash\n"
+    '[[ "$1" == - ]] || exit 98\n'
+    "shift\n"
+    f'exec {shlex.quote(sys.executable)} -c '
+    f'{shlex.quote(python_loader)} "$@"\n',
+    encoding="ascii",
+)
+python_wrapper.chmod(0o700)
+
 config_name = "nullb-swapz-0123456789abcdef"
 attribute_values = {
     "index": "7\n",
@@ -1096,7 +1115,8 @@ def run_proof(case_root, configfs, identity, power_off):
     inode_trace = case_root / "attribute-inodes"
     power_trace = case_root / "power-writes"
     environment = os.environ.copy()
-    environment["PYTHONPATH"] = str(shim_directory)
+    environment["PATH"] = str(shim_directory) + os.pathsep + os.environ["PATH"]
+    environment["SWAPZ_SHIM_PATH"] = str(shim_directory / "volatile_inode_shim.py")
     environment["SWAPZ_INODE_TRACE"] = str(inode_trace)
     environment["SWAPZ_POWER_TRACE"] = str(power_trace)
     program = "\n".join((
