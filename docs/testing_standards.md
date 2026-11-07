@@ -7676,7 +7676,11 @@ rule, PARTUUID and DEVPATH remain in root-owned private failure evidence;
 public diagnostics carry only phase, original errno when observable (or
 `unavailable`), expected and observed identity classes, ownership status,
 and the next read-only inspection action. A definitely failed setup operation
-after fresh null_blk creation is FAIL, not preclaim BLOCKED. Missing exact udev
+after fresh null_blk creation is FAIL, not preclaim BLOCKED. The rootless
+partition-write failure fixture must initialize its synthetic disk ID before
+expanding the real sfdisk here-document, so the injected command failure
+reaches the owned-operation FAIL classifier rather than an unrelated shell
+nounset/redirection failure. Missing exact udev
 publication after otherwise successful commands is not a proven owned-operation
 failure: it remains BLOCKED. Preserve its raw diagnostic only in private
 evidence, then allow normal identity-revalidated teardown of the positively

@@ -2810,9 +2810,12 @@ CONTROL=/private-mock-only
         end = self.script.index("\nfi", start) + len("\nfi")
         helper_start = self.script.index("owned_setup_failed() {")
         helper_end = self.script.index("\n}", helper_start) + len("\n}")
+        # The extracted sfdisk here-document needs its synthetic disk ID;
+        # otherwise nounset exits during redirection before the failure handler.
         shell = (
             "set -Eeuo pipefail\n"
             'LOWER=/fake-owned-only\n'
+            'DISK_ID=1a2b3c4d\n'
             'fail() { printf "FAIL_PRIMARY_NULLBLK_LIFECYCLE: %s\\n" "$*" >&2; exit 1; }\n'
             'blocked() { printf "BLOCKED_PRIMARY_NULLBLK_LIFECYCLE: %s\\n" "$*" >&2; exit 2; }\n'
             'sfdisk() { return 11; }\n'
