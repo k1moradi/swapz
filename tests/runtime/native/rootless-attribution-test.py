@@ -748,6 +748,11 @@ exec "$SWAPZ_REAL_RM" "$@"
             valid, status=1, reason="unittest_timeout", test="test_first")
         self.assertIn("PackageInvocationTimeout:", evidence.read_text())
         self.assertIn("PRIVATE_ONLY_TRACEBACK_PAYLOAD", evidence.read_text())
+        # Both cases intentionally fail and retain diagnostics. Remove only the
+        # first fully asserted, fixture-owned log so the next case's single-log
+        # ownership assertion cannot count unrelated earlier evidence.
+        evidence.unlink()
+        evidence.parent.rmdir()
         # The standalone relay intentionally preserves private stderr. Only
         # Bash's fixed public markers and the official make test summary
         # must exclude it.

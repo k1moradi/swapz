@@ -1895,7 +1895,12 @@ log into the console or JSON, and it does not relax any watchdog or gate.
 The standalone rootless stderr relay still preserves private child bytes
 unchanged for its bounded capture; public privacy assertions apply to the
 fixed Bash marker fields and the official `make test` summary, not the
-unsanitized intermediate relay transcript.
+unsanitized intermediate relay transcript. When a rootless attribution
+regression runs successive failing scenarios in the same isolated fixture,
+it must inspect the first retained diagnostic before removing only that
+fixture-owned regular log and its empty directory. The next scenario's
+single-log assertion must not count the preceding scenario's evidence;
+production failure retention and first-failure ordering remain unchanged.
 
 ### Native CI failure evidence contract
 
