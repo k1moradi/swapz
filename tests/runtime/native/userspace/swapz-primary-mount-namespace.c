@@ -120,6 +120,13 @@ static unsigned int fixture_namespace_syscall_error_after_call;
 static enum fixture_namespace_kind fixture_root_statx_error_kind =
 	FIXTURE_NAMESPACE_NONE;
 static int fixture_root_statx_error;
+static int fixture_init_root_statx_error;
+static dev_t fixture_self_process_root_device;
+static dev_t fixture_init_root_device;
+static uint64_t fixture_self_process_root_inode;
+static uint64_t fixture_init_root_inode;
+static unsigned int fixture_self_root_statx_calls;
+static int fixture_process_root_changes_on_confirmation;
 static unsigned int
 	fixture_namespace_inventory_scans[FIXTURE_NAMESPACE_KIND_COUNT];
 static unsigned int
@@ -195,6 +202,8 @@ static enum fixture_namespace_kind fixture_namespace_kind_for_path(
 {
 	if (!path)
 		return FIXTURE_NAMESPACE_NONE;
+	if (!strcmp(path, "/proc/1/root"))
+		return FIXTURE_NAMESPACE_SELF;
 	if (strstr(path, "/3031/task/3032/"))
 		return FIXTURE_NAMESPACE_FOREIGN_TASK;
 	if (strstr(path, "/self/task/65536/"))
@@ -237,6 +246,29 @@ static dev_t fixture_namespace_default_root_device(
 	default:
 		return 0;
 	}
+}
+
+static dev_t fixture_mountinfo_root_device(enum fixture_namespace_kind kind)
+{
+	const char *proc_path = fixture_namespace_mountinfo_path(kind);
+	char converted[PATH_MAX];
+	char line[1024];
+	FILE *stream;
+	unsigned int device_major;
+	unsigned int device_minor;
+
+	if (!proc_path)
+		return fixture_namespace_default_root_device(kind);
+	stream = fopen(fixture_path(proc_path, converted), "r");
+	if (!stream)
+		return fixture_namespace_default_root_device(kind);
+	if (!fgets(line, sizeof(line), stream) ||
+	    sscanf(line, "%*u %*u %u:%u", &device_major, &device_minor) != 2) {
+		assert(fclose(stream) == 0);
+		return fixture_namespace_default_root_device(kind);
+	}
+	assert(fclose(stream) == 0);
+	return makedev(device_major, device_minor);
 }
 
 static uint64_t fixture_namespace_mount_id_base(
@@ -325,18 +357,63 @@ static int fixture_statx(int directory_fd, const char *path, int flags,
 {
 	enum fixture_namespace_kind kind =
 		fixture_namespace_kind_for_path(path);
+	int init_root = path && !strcmp(path, "/proc/1/root");
 
 	if (kind != FIXTURE_NAMESPACE_NONE &&
 	    fixture_path_has_suffix(path, "root")) {
+		dev_t root_device;
+		uint64_t root_inode;
+		uint64_t root_mount_id;
+
+		if (init_root && fixture_init_root_statx_error) {
+			errno = fixture_init_root_statx_error;
+			return -1;
+		}
 		if (fixture_root_statx_error_kind == kind &&
 		    fixture_root_statx_error) {
 			errno = fixture_root_statx_error;
 			return -1;
 		}
 		memset(info, 0, sizeof(*info));
-		info->stx_mask = 0x00004000U;
-		info->stx_mnt_id = fixture_namespace_mount_id_base(kind) +
+		info->stx_mask = mask;
+		info->stx_mode = S_IFDIR | 0755;
+		if (kind == FIXTURE_NAMESPACE_SELF) {
+			dev_t process_root_device =
+				fixture_self_process_root_device ?
+				fixture_self_process_root_device :
+				fixture_mountinfo_root_device(kind);
+			uint64_t process_root_inode =
+				fixture_self_process_root_inode ?
+				fixture_self_process_root_inode : 100U;
+
+			root_device = init_root ?
+				(fixture_init_root_device ? fixture_init_root_device :
+				 process_root_device) : process_root_device;
+			root_inode = init_root ?
+				(fixture_init_root_inode ? fixture_init_root_inode :
+				 process_root_inode) : process_root_inode;
+			if (!init_root) {
+				++fixture_self_root_statx_calls;
+				if (fixture_process_root_changes_on_confirmation &&
+				    fixture_self_root_statx_calls > 1U) {
+					root_device = makedev(8U, 9U);
+					++root_inode;
+				}
+			}
+		} else {
+			root_device = fixture_namespace_default_root_device(kind);
+			root_inode = 100U + (uint64_t)kind;
+		}
+		root_mount_id = fixture_namespace_mount_id_base(kind) +
 			(fixture_nested_process_root_kind == kind ? 2U : 1U);
+		if (!init_root && kind == FIXTURE_NAMESPACE_SELF &&
+		    fixture_process_root_changes_on_confirmation &&
+		    fixture_self_root_statx_calls > 1U)
+			++root_mount_id;
+		info->stx_ino = root_inode;
+		info->stx_dev_major = major(root_device);
+		info->stx_dev_minor = minor(root_device);
+		info->stx_mnt_id = root_mount_id;
 		return 0;
 	}
 	return statx(directory_fd, path, flags, mask, info);
@@ -1023,6 +1100,13 @@ static void fixture_reset(void)
 	fixture_nested_process_root_kind = FIXTURE_NAMESPACE_NONE;
 	fixture_namespace_inventory_error_kind = FIXTURE_NAMESPACE_NONE;
 	fixture_namespace_inventory_error = 0;
+	fixture_init_root_statx_error = 0;
+	fixture_self_process_root_device = 0;
+	fixture_init_root_device = 0;
+	fixture_self_process_root_inode = 0U;
+	fixture_init_root_inode = 0U;
+	fixture_self_root_statx_calls = 0U;
+	fixture_process_root_changes_on_confirmation = 0;
 	fixture_namespace_syscall_error_kind = FIXTURE_NAMESPACE_NONE;
 	fixture_namespace_syscall_error_number = 0;
 	fixture_namespace_syscall_error = 0;
@@ -1950,38 +2034,100 @@ static void test_independent_admission_gates(void)
 
 
 /*
- * Linux reports a same-process /proc/self/root link of "/" after chrooting to
- * another mount root. A clean direct inventory is therefore insufficient if
- * the retained root_device belongs to that nested mount rather than the pinned
- * namespace root.
+ * A switched-root system can have the same process/init root on a child mount
+ * while the namespace's top mount is rootfs. The complete pinned namespace
+ * inventory must still run, and distinct or changing process-root identity
+ * must refuse.
  */
 static void test_nested_coordinator_root_identity(void)
 {
 	fixture_reset();
 	fixture_namespace_root_override_kind = FIXTURE_NAMESPACE_SELF;
-	fixture_namespace_root_override_device = makedev(8U, 4U);
+	fixture_namespace_root_override_device = makedev(0U, 2U);
 	fixture_nested_process_root_kind = FIXTURE_NAMESPACE_SELF;
+	fixture_self_process_root_device = makedev(8U, 6U);
+	fixture_init_root_device = makedev(8U, 6U);
+	fixture_self_process_root_inode = 206U;
+	fixture_init_root_inode = 206U;
 	fixture_file("self/mountinfo",
-		     "36 25 259:11 / / rw - ext4 /chroot-root rw\n");
+		     "36 25 8:6 / / rw - ext4 /switched-root rw\n");
 	expect_mount_identity_admission(
-		"coordinator child-mount chroot keeps self root link slash",
-		makedev(259U, 11U), makedev(8U, 0U), 0, EAGAIN,
-		"coordinator-root-namespace-identity");
+		"switched root matches init and enumerates namespace root",
+		makedev(8U, 6U), makedev(8U, 0U), 1, 0,
+		"coordinator-process-root-identity");
+	if (!fixture_namespace_listmount_calls[FIXTURE_NAMESPACE_SELF]) {
+		fprintf(stderr,
+			"FAIL: phase=namespace-inventory case=switched-root "
+			"expected=complete-direct-inventory observed=no-listmount "
+			"safe_action=retain-inactive-target\n");
+		++fixture_failures;
+	}
+
+	/* A different PID 1 root object on the same device remains ambiguous. */
+	fixture_reset();
+	fixture_namespace_root_override_kind = FIXTURE_NAMESPACE_SELF;
+	fixture_namespace_root_override_device = makedev(0U, 2U);
+	fixture_nested_process_root_kind = FIXTURE_NAMESPACE_SELF;
+	fixture_self_process_root_device = makedev(8U, 6U);
+	fixture_init_root_device = makedev(8U, 6U);
+	fixture_self_process_root_inode = 207U;
+	fixture_init_root_inode = 208U;
+	fixture_file("self/mountinfo",
+		     "36 25 8:6 / / rw - ext4 /switched-root rw\n");
+	expect_mount_identity_admission(
+		"different coordinator and init root objects refuse",
+		makedev(8U, 6U), makedev(8U, 0U), 0, EAGAIN,
+		"coordinator-init-root-identity");
+
+	/* The direct namespace walk must still catch a hidden selected mount. */
+	fixture_reset();
+	fixture_namespace_root_override_kind = FIXTURE_NAMESPACE_SELF;
+	fixture_namespace_root_override_device = makedev(0U, 2U);
+	fixture_nested_process_root_kind = FIXTURE_NAMESPACE_SELF;
+	fixture_self_process_root_device = makedev(8U, 6U);
+	fixture_init_root_device = makedev(8U, 6U);
+	fixture_self_process_root_inode = 209U;
+	fixture_init_root_inode = 209U;
+	fixture_hidden_namespace_kind = FIXTURE_NAMESPACE_SELF;
+	fixture_hidden_namespace_device = makedev(8U, 1U);
+	fixture_file("self/mountinfo",
+		     "36 25 8:6 / / rw - ext4 /switched-root rw\n");
+	expect_mount_identity_admission(
+		"switched-root direct inventory catches selected mount",
+		makedev(8U, 6U), makedev(8U, 0U), 0, 0,
+		"complete-coordinator-namespace-inventory");
 
 	/*
-	 * Root ABA: mountinfo was captured while the coordinator root was the
-	 * child mount, but the statx seed has already returned to the namespace
-	 * root. Mount-ID equality alone must not retain the stale child device.
+	 * Root ABA: mountinfo captured the switched root, but statx now names the
+	 * namespace root. The process-root device must still match the retained
+	 * mountinfo root device before admission.
 	 */
 	fixture_reset();
 	fixture_namespace_root_override_kind = FIXTURE_NAMESPACE_SELF;
-	fixture_namespace_root_override_device = makedev(8U, 4U);
+	fixture_namespace_root_override_device = makedev(0U, 2U);
+	fixture_self_process_root_device = makedev(0U, 2U);
+	fixture_init_root_device = makedev(0U, 2U);
 	fixture_file("self/mountinfo",
-		     "36 25 259:11 / / rw - ext4 /chroot-root rw\n");
+		     "36 25 8:6 / / rw - ext4 /switched-root rw\n");
 	expect_mount_identity_admission(
-		"coordinator root ABA restores before statx root seed",
-		makedev(259U, 11U), makedev(8U, 0U), 0, EAGAIN,
+		"coordinator root ABA differs from captured mountinfo root",
+		makedev(8U, 6U), makedev(8U, 0U), 0, EAGAIN,
 		"coordinator-root-device-identity");
+
+	/* Final identity failure must remain an error, not a clean return. */
+	fixture_reset();
+	fixture_process_root_changes_on_confirmation = 1;
+	expect_mount_identity_admission(
+		"coordinator root changes during direct inventory",
+		makedev(259U, 0U), makedev(8U, 0U), 0, EAGAIN,
+		"coordinator-root-revalidation");
+
+	fixture_reset();
+	fixture_init_root_statx_error = EACCES;
+	expect_mount_identity_admission(
+		"unavailable init root identity refuses",
+		makedev(259U, 0U), makedev(8U, 0U), 0, EACCES,
+		"coordinator-init-root-identity");
 }
 
 /* A clean-looking foreign mountinfo view can omit selected or parent mounts. */

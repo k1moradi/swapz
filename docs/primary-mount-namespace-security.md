@@ -84,20 +84,27 @@ a different root inside the same namespace still walks to the same namespace
 root.
 
 The coordinator retains its ordinary mountinfo separately because that table
-provides the current root-device safety fact. A same-process
-`readlink("/proc/self/root") == "/"` is not proof that this is the mount
-namespace root: Linux still reports `/` after a process chroots to the root of
-a child mount. The coordinator therefore pins its own namespace, seeds the walk
-with `statx(STATX_MNT_ID_UNIQUE)`, follows `statmount` parents, and requires
-both that seed mount ID equal the resulting namespace-root mount ID and that the
-namespace-root `statmount` superblock device equal the root `dev_t` captured
-by the already-opened self mountinfo. A stable nested coordinator root fails the
-mount-ID check; a temporary root ABA restored before `statx` fails the device
-cross-check. Both refuse with `EAGAIN`. The direct inventory being complete is
-not enough to retain the wrong root-device identity. Only after those checks
-and the direct inventory can the same-namespace peer shortcut apply. Leader disappearance
-still authorizes skipping only the leader table; visible non-leader tasks retain
-their existing bounded scan and fail-closed rules.
+provides the current process-root device safety fact. A normal switched-root
+boot can leave the process root on a child mount while the mount namespace's
+top mount remains rootfs. A same-process
+`readlink("/proc/self/root") == "/"` is not proof of either identity: Linux
+also reports `/` after a process chroots to a child mount. The coordinator
+therefore pins its own namespace, seeds the walk with
+`statx(STATX_MNT_ID_UNIQUE)`, follows `statmount` parents to the self-parent
+namespace root, and enumerates from that root with `listmount`/`statmount`.
+The process-root `statx` device and the seeded mount's `statmount` superblock
+device must both equal the root `dev_t` captured by self mountinfo. The
+process-root directory's device and inode must also match `/proc/1/root` at the
+initial and final observations, and the process root's unique mount ID and
+directory identity must remain stable across inventory. This admits a stable
+switched-root layout only when the coordinator and PID 1 use the same root
+object; a distinct chroot, root ABA inconsistent with mountinfo, or a root
+change during the scan refuses with `EAGAIN`. The process-root seed need not be
+the namespace-root mount ID because the complete direct inventory is walked
+from the discovered namespace root. Only after that inventory and the root
+identity checks can the same-namespace peer shortcut apply. Leader
+disappearance still authorizes skipping only the leader table; visible
+non-leader tasks retain their existing bounded scan and fail-closed rules.
 
 The current foreign-namespace descriptor form of statmount/listmount requires
 Linux 6.18 or newer. Missing syscall support, missing unique mount IDs,
@@ -145,7 +152,9 @@ alone proves the required refusal-before-mutation contract.
 | Synthetic observation | Expected result |
 | --- | --- |
 | Local root only; unrelated PID or sibling `8:2` | Admit; preserve root `259:0` |
-| Coordinator chrooted to a child mount while its self root link still reports `/`, including restore-before-`statx` root ABA | Refuse with `EAGAIN`; require namespace-root mount ID and device to agree with the retained self-root identity |
+| Stable switched-root process root on a child mount, identical to PID 1's root object | Directly enumerate from the namespace root and admit only if process-root, PID 1, mountinfo, and seeded `statmount` device identities agree |
+| Coordinator root is a different object from PID 1's root, even on the same filesystem | Refuse with `EAGAIN` |
+| Mountinfo root and later `statx` root identify different devices, or root identity changes during inventory | Refuse with `EAGAIN`; do not publish a clean mount inventory |
 | Selected partition `8:1` only in PID `3031` | Refuse |
 | Selected parent `8:0` only in PID `3031` | Refuse |
 | Local or other PID mountinfo malformed, empty or missing while namespace lives | Refuse |

@@ -334,17 +334,22 @@ coordinator while its process-root-filtered mountinfo is empty. The coordinator
 may skip that redundant view only after its own mountinfo has a valid root row
 and its pinned direct namespace walk is complete. Do not treat
 `readlink("/proc/self/root") == "/"` as namespace-root proof: Linux reports
-that string after the same process chroots to the root of a child mount. The
-fixture must model that real semantic with a nested coordinator root whose
-`statx(STATX_MNT_ID_UNIQUE)` seed has a different `statmount` parent, and
-require fail-closed refusal before the mountinfo-derived child device can become
-the root safety identity. It must separately model root ABA where mountinfo
-captured that child device but the later statx seed has already returned to the
-namespace-root mount; the namespace-root statmount device must still match the
-root device parsed from self mountinfo. A second namespace identity check must
-still guard the same-namespace peer shortcut. An empty table in a foreign namespace remains
-ambiguous and must fail closed. Include a regression proving the shortcut
-cannot hide a selected-device mount already present in the coordinator's table.
+that string after the same process chroots to the root of a child mount, and
+after a normal switched-root boot whose namespace top remains rootfs. For the
+coordinator, require its process-root directory to match `/proc/1/root` by
+device and inode, require the process-root and seeded `statmount` devices to
+match the root device parsed from self mountinfo, and revalidate both root
+objects plus the process-root unique mount ID after direct inventory. A stable
+switched-root child mount may pass only after the parent walk reaches the
+self-parent namespace root and `listmount`/`statmount` completes from that root.
+A different chroot root, a mismatch between mountinfo and the current `statx`
+root, or a root change during inventory must refuse with `EAGAIN`. The fixture
+must prove the direct inventory actually ran, and separately cover a selected
+mount hidden from the process-root view, a root ABA, a distinct PID 1 root, an
+unavailable PID 1 root, and a process-root change during the scan. An empty
+table in a foreign namespace remains ambiguous and must fail closed. Include a
+regression proving the shortcut cannot hide a selected-device mount already
+present in the coordinator's table.
 
 For the opt-in host-bound same-root-parent scope, keep the direct production-C
 mount-namespace controls independent from the scope-policy and late-race
@@ -465,13 +470,18 @@ If unique mount IDs, foreign-namespace statmount/listmount, namespace identity,
 or any listed mount cannot be proven, admission is BLOCKED; never fall back to
 the filtered table. The current foreign-namespace descriptor ABI requires
 Linux 6.18 or newer, so an older running kernel refuses this admission path.
-The coordinator may retain its mountinfo-derived root-device fact only after
-the pinned self-namespace walk proves that the `statx` root seed is the
-namespace-root mount itself and the namespace-root `statmount` superblock
-device exactly matches the root device parsed from self mountinfo. A self
-root-link string of `/` is insufficient. Before using the same-namespace
-shortcut it must also complete the pinned namespace inventory for its own
-namespace.
+The coordinator may retain its mountinfo-derived process-root device fact only
+after `statx` identifies a stable process-root directory whose device and
+inode match `/proc/1/root`, and both that device and the seeded mount's
+`statmount` superblock device exactly match the root device parsed from self
+mountinfo. The seed may be a child mount in a normal switched-root layout; the
+parent walk must reach the self-parent namespace root and the complete
+`listmount`/`statmount` inventory must start there. A self root-link string of
+`/` is insufficient. A distinct process/PID 1 root, a mismatch with the
+mountinfo root, unavailable PID 1 identity, a root change during inventory, or
+an incomplete namespace walk refuses. Before using the same-namespace
+shortcut, the coordinator must also complete the pinned namespace inventory
+for its own namespace and revalidate process/PID 1 root identity.
 
 The direct namespace walk is still a bounded snapshot, not a mount lock. PID
 reuse or root ABA after the namespace descriptor is pinned cannot hide an

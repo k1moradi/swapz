@@ -4004,8 +4004,8 @@ static int swapz_primary_mountinfo_read_fd(
 static int swapz_primary_mountinfo_full_root(
 	const char *namespace_path, const char *root_path,
 	const struct stat *expected_namespace_info, dev_t parent_device,
-	dev_t expected_namespace_root_device,
-	int require_root_mount_is_namespace_root)
+	dev_t expected_process_root_device,
+	int require_process_root_matches_init)
 {
 #ifdef FIXTURE_DIAGNOSTIC_BYTES
 	char root_link[PATH_MAX];
@@ -4014,8 +4014,8 @@ static int swapz_primary_mountinfo_full_root(
 	(void)namespace_path;
 	(void)expected_namespace_info;
 	(void)parent_device;
-	(void)expected_namespace_root_device;
-	(void)require_root_mount_is_namespace_root;
+	(void)expected_process_root_device;
+	(void)require_process_root_matches_init;
 	if (!root_path) {
 		errno = EINVAL;
 		return -1;
@@ -4034,8 +4034,8 @@ static int swapz_primary_mountinfo_full_root(
 	(void)root_path;
 	(void)expected_namespace_info;
 	(void)parent_device;
-	(void)expected_namespace_root_device;
-	(void)require_root_mount_is_namespace_root;
+	(void)expected_process_root_device;
+	(void)require_process_root_matches_init;
 	errno = EOPNOTSUPP;
 	return -1;
 #else
@@ -4048,6 +4048,11 @@ static int swapz_primary_mountinfo_full_root(
 	};
 	const uint64_t statmount_required_mask = 0x00000003ULL;
 	const unsigned int statx_mount_id_unique = 0x00004000U;
+	const unsigned int statx_root_request_mask =
+		STATX_BASIC_STATS | statx_mount_id_unique;
+	const unsigned int statx_root_identity_mask = STATX_TYPE | STATX_INO;
+	const unsigned int statx_root_required_mask =
+		STATX_TYPE | STATX_INO | statx_mount_id_unique;
 	struct mount_id_request {
 		uint32_t size;
 		uint32_t namespace_fd;
@@ -4071,12 +4076,14 @@ static int swapz_primary_mountinfo_full_root(
 	struct statmount_basic mount_status;
 	struct stat opened_namespace_info;
 	struct statx root_info = {0};
+	struct statx init_root_info = {0};
+	struct statx confirmed_root_info = {0};
+	struct statx confirmed_init_root_info = {0};
 	uint64_t mount_ids[namespace_mount_batch];
 	uint64_t current_mount_id;
 	uint64_t root_mount_id;
 	uint64_t namespace_root_mount_id = 0;
 	uint64_t last_mount_id = 0;
-	dev_t namespace_root_device = 0;
 	size_t mount_count = 0;
 	int namespace_fd = -1;
 	int result = -1;
@@ -4126,16 +4133,38 @@ static int swapz_primary_mountinfo_full_root(
 		errno = EAGAIN;
 		goto out;
 	}
-	if (statx(AT_FDCWD, root_path, 0, statx_mount_id_unique,
+	if (statx(AT_FDCWD, root_path, 0, statx_root_request_mask,
 		  &root_info) < 0)
 		goto out;
-	if (!(root_info.stx_mask & statx_mount_id_unique) ||
+	if ((root_info.stx_mask & statx_root_required_mask) !=
+		    statx_root_required_mask ||
 	    !root_info.stx_mnt_id) {
 		errno = EOPNOTSUPP;
 		goto out;
 	}
 	current_mount_id = root_info.stx_mnt_id;
 	root_mount_id = current_mount_id;
+	if (require_process_root_matches_init) {
+		if (statx(AT_FDCWD, "/proc/1/root", 0,
+			  statx_root_request_mask, &init_root_info) < 0)
+			goto out;
+		if ((init_root_info.stx_mask & statx_root_identity_mask) !=
+		    statx_root_identity_mask) {
+			errno = EOPNOTSUPP;
+			goto out;
+		}
+		if (!S_ISDIR(root_info.stx_mode) ||
+		    !S_ISDIR(init_root_info.stx_mode) ||
+		    root_info.stx_ino != init_root_info.stx_ino ||
+		    makedev(root_info.stx_dev_major, root_info.stx_dev_minor) !=
+			expected_process_root_device ||
+		    makedev(init_root_info.stx_dev_major,
+			    init_root_info.stx_dev_minor) !=
+			expected_process_root_device) {
+			errno = EAGAIN;
+			goto out;
+		}
+	}
 
 	for (size_t depth = 0; depth < namespace_parent_depth_max; ++depth) {
 		dev_t mounted_device;
@@ -4164,9 +4193,14 @@ static int swapz_primary_mountinfo_full_root(
 			result = 1;
 			goto out;
 		}
+		if (require_process_root_matches_init &&
+		    current_mount_id == root_mount_id &&
+		    mounted_device != expected_process_root_device) {
+			errno = EAGAIN;
+			goto out;
+		}
 		if (mount_status.parent_mount_id == current_mount_id) {
 			namespace_root_mount_id = current_mount_id;
-			namespace_root_device = mounted_device;
 			break;
 		}
 		if (!mount_status.parent_mount_id) {
@@ -4179,13 +4213,6 @@ static int swapz_primary_mountinfo_full_root(
 		errno = EOVERFLOW;
 		goto out;
 	}
-	if (require_root_mount_is_namespace_root &&
-	    (root_mount_id != namespace_root_mount_id ||
-	     namespace_root_device != expected_namespace_root_device)) {
-		errno = EAGAIN;
-		goto out;
-	}
-
 	request = (struct mount_id_request) {
 		.size = mount_id_request_bytes,
 		.namespace_fd = (uint32_t)namespace_fd,
@@ -4245,6 +4272,44 @@ static int swapz_primary_mountinfo_full_root(
 		}
 		request.mount_id = namespace_root_mount_id;
 	}
+	if (require_process_root_matches_init) {
+		if (statx(AT_FDCWD, root_path, 0, statx_root_request_mask,
+			  &confirmed_root_info) < 0 ||
+		    statx(AT_FDCWD, "/proc/1/root", 0,
+			  statx_root_request_mask,
+			  &confirmed_init_root_info) < 0)
+			goto out;
+		if ((confirmed_root_info.stx_mask & statx_root_required_mask) !=
+			    statx_root_required_mask ||
+		    (confirmed_init_root_info.stx_mask &
+			     statx_root_identity_mask) != statx_root_identity_mask) {
+			errno = EOPNOTSUPP;
+			goto out;
+		}
+		if (confirmed_root_info.stx_mnt_id != root_mount_id ||
+		    !S_ISDIR(confirmed_root_info.stx_mode) ||
+		    !S_ISDIR(confirmed_init_root_info.stx_mode) ||
+		    confirmed_root_info.stx_ino != root_info.stx_ino ||
+		    confirmed_root_info.stx_dev_major != root_info.stx_dev_major ||
+		    confirmed_root_info.stx_dev_minor != root_info.stx_dev_minor ||
+		    confirmed_init_root_info.stx_ino != init_root_info.stx_ino ||
+		    confirmed_init_root_info.stx_dev_major !=
+			    init_root_info.stx_dev_major ||
+		    confirmed_init_root_info.stx_dev_minor !=
+			    init_root_info.stx_dev_minor ||
+		    confirmed_root_info.stx_ino !=
+			    confirmed_init_root_info.stx_ino ||
+		    confirmed_root_info.stx_dev_major !=
+			    confirmed_init_root_info.stx_dev_major ||
+		    confirmed_root_info.stx_dev_minor !=
+			    confirmed_init_root_info.stx_dev_minor ||
+		    makedev(confirmed_root_info.stx_dev_major,
+			    confirmed_root_info.stx_dev_minor) !=
+			expected_process_root_device) {
+			errno = EAGAIN;
+			goto out;
+		}
+	}
 	result = 0;
 
 out:
@@ -4273,7 +4338,8 @@ static int swapz_primary_mountinfo_exit_error(int error)
 static int swapz_primary_read_nonleader_mount_facts(
 	const char *task_directory_path, const char *leader_namespace_path,
 	const char *leader_tid, int is_self, dev_t parent_device,
-	const struct stat *self_namespace_info, int self_root_is_namespace_root,
+	const struct stat *self_namespace_info,
+	int coordinator_namespace_inventory_complete,
 	struct swapz_primary_mount_facts *combined, size_t *visible_task_count,
 	size_t *total_bytes)
 {
@@ -4341,7 +4407,7 @@ static int swapz_primary_read_nonleader_mount_facts(
 			break;
 		}
 		/* The coordinator's complete root table covers this exact namespace. */
-		if (self_root_is_namespace_root &&
+		if (coordinator_namespace_inventory_complete &&
 		    namespace_info.st_dev == self_namespace_info->st_dev &&
 		    namespace_info.st_ino == self_namespace_info->st_ino) {
 			if (stat(namespace_path, &confirmed_namespace_info) < 0) {
@@ -4473,7 +4539,7 @@ static int swapz_primary_read_mount_facts(
 	int fd;
 	int saved_errno = 0;
 	int path_length;
-	int self_root_is_namespace_root = 0;
+	int coordinator_namespace_inventory_complete = 0;
 	size_t bytes_read = 0;
 
 	if (!facts) {
@@ -4515,7 +4581,7 @@ static int swapz_primary_read_mount_facts(
 			*facts = combined;
 			return 0;
 		}
-		self_root_is_namespace_root = 1;
+		coordinator_namespace_inventory_complete = 1;
 	}
 	/*
 	 * mountinfo is scoped to a task's mount namespace. Top-level /proc
@@ -4525,12 +4591,14 @@ static int swapz_primary_read_mount_facts(
 	 * The coordinator's pinned namespace-ID inventory covers mounts that a
 	 * process-root-filtered mountinfo view can hide. A task in that same
 	 * namespace may therefore be skipped only after its namespace inode matches
-	 * and that identity is revalidated immediately before skipping. The
-	 * coordinator's statx root seed must also be the pinned namespace root,
-	 * and that root's statmount device must match the root device captured by
-	 * self mountinfo. Its root-link spelling alone is not identity proof. This
-	 * is a bounded snapshot, so every
-	 * unreadable, unsupported or ambiguous inventory fails
+	 * and that identity is revalidated immediately before skipping. A normal
+	 * switched-root boot can leave the coordinator's process root on a child
+	 * mount while the namespace root is rootfs. Require the process-root object
+	 * to match PID 1's root, cross-check its device against self mountinfo and
+	 * statmount, and complete the pinned inventory from the namespace root
+	 * before using the same-namespace shortcut. A root-link spelling alone is
+	 * not identity proof. This is a bounded snapshot, so every unreadable,
+	 * unsupported or ambiguous inventory fails
 	 * closed rather than being treated as evidence that the device is unused.
 	 */
 	path_length = snprintf(self_pid, sizeof(self_pid), "%lu",
@@ -4542,7 +4610,8 @@ static int swapz_primary_read_mount_facts(
 	if (swapz_primary_read_nonleader_mount_facts(
 		    "/proc/self/task", "/proc/self/ns/mnt", self_pid, 1,
 		    parent_device, &self_namespace_info,
-		    self_root_is_namespace_root, &combined, &visible_task_count,
+		    coordinator_namespace_inventory_complete, &combined,
+		    &visible_task_count,
 		    &total_bytes) < 0)
 		return -1;
 	if (combined.target_mounted) {
@@ -4596,7 +4665,8 @@ static int swapz_primary_read_mount_facts(
 				break;
 			}
 		}
-		if (!skip_leader_mountinfo && self_root_is_namespace_root &&
+		if (!skip_leader_mountinfo &&
+		    coordinator_namespace_inventory_complete &&
 		    namespace_info.st_dev == self_namespace_info.st_dev &&
 		    namespace_info.st_ino == self_namespace_info.st_ino) {
 			if (stat(namespace_path, &confirmed_namespace_info) < 0) {
@@ -4711,7 +4781,8 @@ static int swapz_primary_read_mount_facts(
 		}
 		if (swapz_primary_read_nonleader_mount_facts(
 			    path, namespace_path, entry->d_name, 0, parent_device,
-			    &self_namespace_info, self_root_is_namespace_root,
+			    &self_namespace_info,
+			    coordinator_namespace_inventory_complete,
 			    &combined, &visible_task_count, &total_bytes) < 0) {
 			saved_errno = errno ? errno : EIO;
 			break;
