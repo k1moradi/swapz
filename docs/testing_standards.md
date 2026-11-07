@@ -1229,12 +1229,23 @@ For diagnostics, read-only checks may evaluate the single-mapper inventory,
 canonical major:minor, benchmark versus primary UUID namespace, dependency
 name and devno, null_blk configfs attributes and index, sysfs alias and
 driver major/minor, lower node rdev, partition markers, active swap aliases,
-mounts, exact holder and pinned configfs/power inode identities. A matching
+mounts, exact holder and captured configfs directory identity. Configfs
+attribute pseudo-file inode numbers may be regenerated on each lookup and must
+not be compared as persistent identities. Before the creator powers off its
+device, it opens the named config directory without following symlinks,
+compares that descriptor's device/inode/owner with the creation-time identity,
+revalidates the directory entry, and opens each kernel-defined attribute
+relative to that pinned directory descriptor. It verifies canonical attribute
+contents and file type/owner; the `power` write is opened relative to that same
+descriptor with no-follow, no-create and nonblocking flags, then its result is
+verified before the directory can be removed. A matching
 snapshot is **live identity only** and still refuses with
 `expected_proof=creation_authority observed_proof=live_identity_only`
 before the first removal. Missing, substituted, malformed, multiply aliased
 or unreadable evidence must refuse at its earlier specific check; a name
 reused after a snapshot or a foreign active swap cannot be cleaned up.
+There is no atomic compare-and-rmdir operation: retain the existing
+post-power identity checks and do not claim that a pathname removal is atomic.
 Loaded preflight must use the native strict identity helper for sysfs devno
 records and alternate index aliases. Any alternate disk entry is ambiguity,
 including an empty directory or a dangling dev symlink. For an index-named
@@ -1273,6 +1284,12 @@ that field. Exit status 2 is reserved by the loaded wrapper for an
 unclassified shell/runtime failure before a normal safety diagnostic.
 Unexpected internal failures retain their actual status and are FAIL, not
 ownership BLOCKED.
+
+The loaded lifecycle's repeated `recover` call after durable `COMPLETE` is an
+expected negative case. Capture and validate its terminal refusal and prove
+that durable state and swap inventory remain unchanged, but do not print the
+expected `BLOCKED:` command diagnostic into the stage transcript; the runner
+classifies emitted blocked markers as admission failures.
 
 The private `tests/runtime/native/nullblk-identity-test.sh` fixture must
 rewrite host /proc, /sys, /dev and package paths in a single ordered pass
@@ -2905,7 +2922,8 @@ child exit 0, the report must still classify the stage as FAIL, preserve
 sanitized diagnostic. Its regression must cover both the matching nonzero
 child exit and the contradictory zero exit. The private owned-null_blk qualification report must bind the same live host
 digest as production: `swapz-host-v2` with its terminating NUL, canonical
-lowercase 36-byte DMI product UUID, and lowercase 32-byte machine ID. Its two
+lowercase 36-byte DMI product UUID in `8-4-4-4-12` hexadecimal form, and
+lowercase 32-byte machine ID. Its two
 host-identity records must use the same trusted byte-input rules as production:
 root-owned single-link non-group/world-writable regular files, no symlink
 following, stable metadata, bounded reads, and exactly zero or one trailing LF.

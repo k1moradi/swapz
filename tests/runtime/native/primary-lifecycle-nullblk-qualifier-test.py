@@ -1,11 +1,11 @@
 #!/usr/bin/env python3
 """Canonical rootless contracts for the native owned-null_blk qualifier.
 
-Finalizer safety standard: retain creation and power-inode identity, refuse
-same-name replacement and unobservable/foreign state before recovery, bind
-the destructive power write to the pinned original inode without creation,
-keep partial-setup cleanup nounset-safe, preserve the first error, and redact
-private cleanup diagnostics.
+Finalizer safety standard: retain the created config-directory identity,
+refuse same-name replacement and unobservable/foreign state before recovery,
+bind power writes through a pinned configfs directory descriptor without
+creation, keep partial-setup cleanup nounset-safe, preserve the first error,
+and redact private cleanup diagnostics.
 """
 
 from pathlib import Path
@@ -101,6 +101,53 @@ class PrimaryLifecycleNullblkQualifierContract(unittest.TestCase):
         self.assertIn("assert_repeat_recovery_is_safe", self.script)
         self.assertIn('[[ "$rc" -ne 0 ]]', self.script)
         self.assertIn('[[ "$after_state" == "$before_state"', self.script)
+
+    def test_expected_repeat_recovery_refusal_is_not_emitted_as_stage_block(self):
+        begin = self.script.index("assert_repeat_recovery_is_safe() {")
+        end = self.script.index("\n}", begin) + 2
+        helper = self.script[begin:end].replace(
+            "[[ ! -d /sys/module/dm_swapz ]]",
+            '[[ ! -d "$MODULE_PATH" ]]')
+
+        with TemporaryDirectory(
+                prefix="swapz-repeat-recovery-refusal-") as directory:
+            fixture = Path(directory)
+            recovery = fixture / "recovery"
+            recovery.mkdir()
+            (recovery / "primary-state.json").write_text(
+                '{"stage":"COMPLETE"}\n', encoding="ascii")
+            control = fixture / "control"
+            control.write_text(
+                "#!/bin/sh\nprintf '%s\n' "
+                "'BLOCKED: primary-swap recovery failed: Operation not permitted' "
+                " >&2\nexit 2\n",
+                encoding="ascii")
+            control.chmod(0o700)
+            module_path = fixture / "absent-module"
+            setup = "\n".join((
+                f"RECOVERY_BASE={shlex.quote(str(recovery))}",
+                f"CONTROL={shlex.quote(str(control))}",
+                f"MODULE_PATH={shlex.quote(str(module_path))}",
+                f"RUN_ID={'a' * 32}",
+                "SWAPS_ID_BEFORE=unchanged",
+            ))
+            stubs = r'''
+fail() { printf 'FAIL: %s\n' "$*" >&2; exit 1; }
+swapz_swap_inventory_identity() { printf 'unchanged\n'; }
+assert_lifecycle_state() {
+    [[ "$1" == "$RUN_ID" && "$2" == COMPLETE && "$3" == null ]]
+}
+mapper_absence_proven() { return 0; }
+'''
+            result = subprocess.run(
+                ["bash", "-c", setup + "\n" + stubs + "\n" + helper +
+                 "\nassert_repeat_recovery_is_safe regression null\n"],
+                cwd=ROOT, capture_output=True, text=True,
+                timeout=5, check=False)
+
+            self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+            self.assertEqual(result.stdout, "")
+            self.assertEqual(result.stderr, "")
 
     def test_wrong_mapper_case_never_forces_removal(self):
         self.assertNotRegex(self.script, r"dmsetup\s+remove\s+--force")
@@ -2981,6 +3028,7 @@ CONTROL=/private-mock-only
             return self.script[begin:end]
 
         helpers = "\n".join(shell_function(name) for name in (
+            "owned_nullblk_configfs_proof",
             "owned_nullblk_config_identity_unchanged",
             "owned_nullblk_live_identity_unchanged",
         ))
@@ -3002,7 +3050,6 @@ CONTROL=/private-mock-only
                     ("power", "1\n")):
                 (config / attribute).write_text(value, encoding="ascii")
             config_identity = config.stat()
-            power_identity = (config / "power").stat()
             action_log = fixture / "actions"
 
             fixture_cleanup = cleanup.replace(
@@ -3015,11 +3062,6 @@ CONTROL=/private-mock-only
                     f"{config_identity.st_dev}:"
                     f"{config_identity.st_ino}:"
                     f"{config_identity.st_uid}"
-                ),
-                "CONFIG_POWER_IDENTITY": (
-                    f"{power_identity.st_dev}:"
-                    f"{power_identity.st_ino}:"
-                    f"{power_identity.st_uid}"
                 ),
                 "NULLBLK_SIZE_MIB": "256",
                 "INDEX": "",
@@ -3115,51 +3157,73 @@ rmdir() {
         self.assertIn('(( original_rc == 0 )) && original_rc=1', cleanup)
         self.assertIn('exit "$original_rc"', cleanup)
         self.assertIn('CONFIG_IDENTITY="$(stat -c', self.script)
-        power_capture = self.script.index(
-            'CONFIG_POWER_IDENTITY="$(stat -Lc')
         first_config_write = self.script.index(
-            'echo "$NULLBLK_SIZE_MIB" > "$CONFIG/size"', power_capture)
-        self.assertLess(power_capture, first_config_write)
+            'echo "$NULLBLK_SIZE_MIB" > "$CONFIG/size"')
+        self.assertLess(self.script.index('CONFIG_IDENTITY="$(stat -c'),
+                        first_config_write)
+        self.assertNotIn("CONFIG_POWER_IDENTITY", self.script)
+        proof_start = self.script.index("owned_nullblk_configfs_proof() {")
+        proof_end = self.script.index("\n}", proof_start)
+        proof = self.script[proof_start:proof_end]
+        self.assertIn("os.O_WRONLY", proof)
+        self.assertIn("os.O_NOFOLLOW", proof)
+        self.assertIn("os.O_NONBLOCK", proof)
+        self.assertNotIn("os.O_CREAT", proof)
         self.assertIn(
-            '"$observed_power_identity" == "$CONFIG_POWER_IDENTITY"',
-            self.script)
-        power_helper_start = self.script.index(
-            "owned_nullblk_power_off_pinned() {")
-        power_helper_end = self.script.index("\n}", power_helper_start)
-        power_helper = self.script[power_helper_start:power_helper_end]
-        self.assertIn("os.O_WRONLY", power_helper)
-        self.assertIn("os.O_NOFOLLOW", power_helper)
-        self.assertIn("os.O_NONBLOCK", power_helper)
-        self.assertNotIn("os.O_CREAT", power_helper)
-        self.assertIn("identity = os.fstat(fd)", power_helper)
-        self.assertIn('os.write(fd, b"0\\n")', power_helper)
-        self.assertIn("pending_exception = sys.exc_info()[0]", power_helper)
-        self.assertLess(
-            power_helper.index("pending_exception = sys.exc_info()[0]"),
-            power_helper.index("os.close(fd)"),
-        )
+            "os.open(config_name, directory_flags, dir_fd=configfs_fd)",
+            proof)
+        self.assertIn("os.fstat(config_fd)", proof)
+        self.assertIn("dir_fd=config_fd", proof)
+        self.assertIn('os.write(power_fd, b"0\\n")', proof)
+        self.assertIn("verify_named_config()", proof)
+        self.assertNotIn("observed_power_identity", proof)
+        self.assertNotIn("power_inode", proof)
+
+        repeat_start = self.script.index("assert_repeat_recovery_is_safe() {")
+        repeat_end = self.script.index("\n}", repeat_start)
+        repeat = self.script[repeat_start:repeat_end]
+        self.assertIn('LC_ALL=C timeout', repeat)
+        self.assertIn(
+            '"$output" == "BLOCKED: primary-swap recovery failed: '
+            'Operation not permitted"', repeat)
+        self.assertNotIn('printf \'%s\\n\' "$output"', repeat)
 
     def test_rootless_pinned_power_refuses_unobservable_path_without_blocking(self):
-        begin = self.script.index("owned_nullblk_power_off_pinned() {")
-        end = self.script.index("\n}", begin) + 2
-        helper = self.script[begin:end]
+        def shell_function(name):
+            begin = self.script.index(name + "() {")
+            end = self.script.index("\n}", begin) + 2
+            return self.script[begin:end]
+
+        helper = "\n".join(shell_function(name) for name in (
+            "owned_nullblk_configfs_proof",
+            "owned_nullblk_power_off_pinned",
+        ))
 
         with TemporaryDirectory(
                 prefix="swapz-primary-pinned-power-") as directory:
             fixture = Path(directory)
-            config = fixture / ("nullb-swapz-" + "e" * 16)
+            name = "nullb-swapz-" + "e" * 16
+            config = fixture / name
             config.mkdir()
+            for attribute, value in (
+                    ("index", "7\n"),
+                    ("memory_backed", "1\n"),
+                    ("size", "256\n"),
+                    ("blocksize", "4096\n"),
+            ):
+                (config / attribute).write_text(value, encoding="ascii")
             power = config / "power"
             power.write_text("1\n", encoding="ascii")
-            identity = power.stat()
-            expected_identity = (
-                f"{identity.st_dev}:{identity.st_ino}:{identity.st_uid}"
-            )
+            identity = config.stat()
+            expected_identity = f"{identity.st_dev}:{identity.st_ino}:{identity.st_uid}"
 
             def run_helper():
                 program = (
+                    f"CONFIGFS={shlex.quote(str(fixture))}\n"
+                    f"CONFIGNAME={shlex.quote(name)}\n"
                     f"CONFIG={shlex.quote(str(config))}\n"
-                    f"CONFIG_POWER_IDENTITY={shlex.quote(expected_identity)}\n"
+                    f"CONFIG_IDENTITY={shlex.quote(expected_identity)}\n"
+                    "INDEX=7\nNULLBLK_SIZE_MIB=256\n"
                     + helper + "\nowned_nullblk_power_off_pinned\n"
                 )
                 return subprocess.run(
@@ -3194,6 +3258,7 @@ rmdir() {
             return self.script[begin:end]
 
         helpers = "\n".join(shell_function(name) for name in (
+            "owned_nullblk_configfs_proof",
             "owned_nullblk_config_identity_unchanged",
             "owned_nullblk_live_identity_unchanged",
             "owned_nullblk_mapper_identity_unchanged",
@@ -3255,7 +3320,6 @@ fi
                 for attribute, value in attributes.items():
                     (config / attribute).write_text(value, encoding="ascii")
                 config_identity = config.stat()
-                power_identity = (config / "power").stat()
 
                 sysblock = fixture / "sys/block"
                 disk = sysblock / "nullb7"
@@ -3294,11 +3358,6 @@ fi
                         f"{config_identity.st_dev}:"
                         f"{config_identity.st_ino}:"
                         f"{config_identity.st_uid}"
-                    ),
-                    "CONFIG_POWER_IDENTITY": (
-                        f"{power_identity.st_dev}:"
-                        f"{power_identity.st_ino}:"
-                        f"{power_identity.st_uid}"
                     ),
                     "NULLBLK_SIZE_MIB": "256",
                     "INDEX": "7",
@@ -3398,6 +3457,7 @@ rmdir() {
             return self.script[begin:end]
 
         helpers = "\n".join(shell_function(name) for name in (
+            "owned_nullblk_configfs_proof",
             "owned_nullblk_config_identity_unchanged",
             "owned_nullblk_live_identity_unchanged",
             "owned_nullblk_mapper_identity_unchanged",
@@ -3447,12 +3507,7 @@ exit 0
                 captured_identity = (
                     f"{identity.st_dev}:{identity.st_ino}:{identity.st_uid}"
                 )
-                power_identity = (config / "power").stat()
-                captured_power_identity = (
-                    f"{power_identity.st_dev}:"
-                    f"{power_identity.st_ino}:"
-                    f"{power_identity.st_uid}"
-                )
+                power_inode = (config / "power").stat().st_ino
                 sysblock = fixture / "sys/block"
                 disk = sysblock / "nullb7"
                 partition = disk / "nullb7p1"
@@ -3483,7 +3538,14 @@ exit 0
                     (config / "power").rename(config / "retained-original-power")
                     (config / "power").write_text("1\n", encoding="ascii")
                     self.assertNotEqual(
-                        (config / "power").stat().st_ino, power_identity.st_ino)
+                        (config / "power").stat().st_ino, power_inode)
+                elif scenario == "power_symlink":
+                    (config / "power").unlink()
+                    foreign_power = fixture / "foreign-power"
+                    foreign_power.write_text("1\n", encoding="ascii")
+                    (config / "power").symlink_to(foreign_power)
+                elif scenario == "wrong_power":
+                    (config / "power").write_text("0\n", encoding="ascii")
                 elif scenario == "missing_index":
                     (config / "index").unlink()
                 elif scenario == "wrong_index":
@@ -3541,7 +3603,6 @@ exit 0
                     "CONFIGNAME": name,
                     "CONFIG": config,
                     "CONFIG_IDENTITY": captured_identity,
-                    "CONFIG_POWER_IDENTITY": captured_power_identity,
                     "NULLBLK_SIZE_MIB": "256",
                     "INDEX": "7",
                     "DISK": "nullb7",
@@ -3646,7 +3707,15 @@ rmdir() {
         self.assertFalse(exists)
         self.assertEqual(actions, ["rmdir"])
 
-        for scenario in ("replacement", "changed_power_inode", "missing_index",
+        changed_inode, power, exists, actions = run_fixture("changed_power_inode")
+        self.assertEqual(changed_inode.returncode, 0,
+                         changed_inode.stdout + changed_inode.stderr)
+        self.assertIsNone(power)
+        self.assertFalse(exists)
+        self.assertEqual(actions, ["rmdir"])
+
+        for scenario in ("replacement", "power_symlink", "wrong_power",
+                         "missing_index",
                          "wrong_index",
                          "wrong_sysfs_devno", "wrong_block_devno",
                          "wrong_partition_devno", "wrong_size",
@@ -3655,7 +3724,7 @@ rmdir() {
                 result, power, exists, actions = run_fixture(scenario)
                 self.assertEqual(result.returncode, 1,
                                  result.stdout + result.stderr)
-                self.assertEqual(power, "1")
+                self.assertEqual(power, "0" if scenario == "wrong_power" else "1")
                 self.assertTrue(exists)
                 self.assertEqual(actions, [])
                 self.assertIn(

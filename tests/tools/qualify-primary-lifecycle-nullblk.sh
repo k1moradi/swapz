@@ -166,77 +166,130 @@ mapper_absence_proven() {
 }
 
 
-# This pathname is not an ownership token. Keep the original configfs inode
-# and check every observable attribute again before any teardown mutation.
+# This pathname is not an ownership token. Pin the created config directory,
+# compare its stable inode with the captured identity, and verify each
+# kernel-defined attribute through that descriptor before teardown. Configfs
+# synthesizes a new pseudo-file inode on attribute lookup, so an attribute's
+# inode is not a persistent identity across opens.
 # Configfs cannot provide an atomic compare-and-rmdir operation or an
 # independent creation generation; uncertainty must retain the resource.
-owned_nullblk_config_identity_unchanged() {
-	local observed_identity observed_power_identity
+owned_nullblk_configfs_proof() {
+	local expected_power="$1" power_off="$2" python_status=0
 
 	[[ "$CONFIGNAME" =~ ^nullb-swapz-[a-f0-9]{16}$ &&
 	   "$CONFIG" == "$CONFIGFS/$CONFIGNAME" &&
 	   "$INDEX" =~ ^(0|[1-9][0-9]*)$ &&
+	   "$NULLBLK_SIZE_MIB" =~ ^[1-9][0-9]*$ &&
 	   "$CONFIG_IDENTITY" =~ ^[0-9]+:[0-9]+:[0-9]+$ &&
-	   "$CONFIG_POWER_IDENTITY" =~ ^[0-9]+:[0-9]+:[0-9]+$ &&
-	   -d "$CONFIG" && ! -L "$CONFIG" ]] || return 1
-	observed_identity="$(stat -c '%d:%i:%u' -- "$CONFIG" 2>/dev/null)" ||
-		return 1
-	observed_power_identity="$(stat -Lc '%d:%i:%u' -- "$CONFIG/power" 2>/dev/null)" ||
-		return 1
-	[[ "$observed_identity" == "$CONFIG_IDENTITY" &&
-	   "$observed_power_identity" == "$CONFIG_POWER_IDENTITY" &&
-	   -f "$CONFIG/power" && ! -L "$CONFIG/power" &&
-	   ! -L "$CONFIG/index" && -r "$CONFIG/index" &&
-	   "$(cat "$CONFIG/index" 2>/dev/null)" == "$INDEX" &&
-	   ! -L "$CONFIG/memory_backed" && -r "$CONFIG/memory_backed" &&
-	   "$(cat "$CONFIG/memory_backed" 2>/dev/null)" == 1 &&
-	   ! -L "$CONFIG/size" && -r "$CONFIG/size" &&
-	   "$(cat "$CONFIG/size" 2>/dev/null)" == "$NULLBLK_SIZE_MIB" &&
-	   ! -L "$CONFIG/blocksize" && -r "$CONFIG/blocksize" &&
-	   "$(cat "$CONFIG/blocksize" 2>/dev/null)" == 4096 ]]
-}
-
-# Bind the destructive power write to the original configfs power inode.
-# Opening without O_CREAT prevents a switched ordinary directory from gaining
-# a new file, and fstat rejects a same-name replacement before any write.
-owned_nullblk_power_off_pinned() {
-	local python_status=0
+	   "$expected_power" =~ ^[01]$ && "$power_off" =~ ^[01]$ &&
+	   ( "$power_off" == 0 || "$expected_power" == 1 ) ]] || return 1
 
 	# Keep the failure handler on the opener; otherwise it becomes Python input.
-	python3 - "$CONFIG/power" "$CONFIG_POWER_IDENTITY" 2>/dev/null <<'PY' || python_status=$?
+	python3 - "$CONFIGFS" "$CONFIGNAME" "$CONFIG_IDENTITY" \
+		"$INDEX" "$NULLBLK_SIZE_MIB" "$expected_power" "$power_off" \
+		2>/dev/null <<'PY' || python_status=$?
 import os
 import stat
 import sys
 
-path, expected_identity = sys.argv[1:3]
-fd = -1
+
+class IdentityMismatch(Exception):
+    pass
+
+
+class PowerWriteFailure(Exception):
+    pass
+
+
+(configfs_path, config_name, expected_identity, index, size_mib,
+ expected_power, power_off) = sys.argv[1:8]
+directory_flags = os.O_RDONLY | os.O_DIRECTORY | os.O_CLOEXEC | os.O_NOFOLLOW
+read_flags = os.O_RDONLY | os.O_CLOEXEC | os.O_NOFOLLOW | os.O_NONBLOCK
+write_flags = os.O_WRONLY | os.O_CLOEXEC | os.O_NOFOLLOW | os.O_NONBLOCK
+configfs_fd = -1
+config_fd = -1
+power_fd = -1
+write_started = False
+result = 2
+
+
+def identity(metadata):
+    return f"{metadata.st_dev}:{metadata.st_ino}:{metadata.st_uid}"
+
+
+def verify_config_name(metadata):
+    if (not stat.S_ISDIR(metadata.st_mode) or
+            identity(metadata) != expected_identity):
+        raise IdentityMismatch
+
+
+def verify_named_config():
+    named = os.stat(
+        config_name, dir_fd=configfs_fd, follow_symlinks=False)
+    verify_config_name(named)
+
+
+def open_attribute(attribute, flags):
+    descriptor = os.open(attribute, flags, dir_fd=config_fd)
+    metadata = os.fstat(descriptor)
+    if (not stat.S_ISREG(metadata.st_mode) or
+            metadata.st_dev != config_metadata.st_dev or
+            metadata.st_uid != config_metadata.st_uid):
+        os.close(descriptor)
+        raise IdentityMismatch
+    return descriptor
+
+
+def verify_attribute(attribute, expected):
+    descriptor = open_attribute(attribute, read_flags)
+    try:
+        if os.read(descriptor, 65) != expected:
+            raise IdentityMismatch
+    finally:
+        os.close(descriptor)
+
+
 try:
-    try:
-        fd = os.open(
-            path,
-            os.O_WRONLY | os.O_CLOEXEC | os.O_NOFOLLOW | os.O_NONBLOCK,
-        )
-        identity = os.fstat(fd)
-    except OSError:
-        raise SystemExit(2)
-    observed_identity = f"{identity.st_dev}:{identity.st_ino}:{identity.st_uid}"
-    if (not stat.S_ISREG(identity.st_mode) or
-            observed_identity != expected_identity):
-        raise SystemExit(2)
-    try:
-        written = os.write(fd, b"0\n")
-    except OSError:
-        raise SystemExit(3)
-    if written != 2:
-        raise SystemExit(3)
+    configfs_fd = os.open(configfs_path, directory_flags)
+    config_fd = os.open(config_name, directory_flags, dir_fd=configfs_fd)
+    config_metadata = os.fstat(config_fd)
+    verify_config_name(config_metadata)
+    verify_named_config()
+    verify_attribute("index", index.encode("ascii") + b"\n")
+    verify_attribute("memory_backed", b"1\n")
+    verify_attribute("size", size_mib.encode("ascii") + b"\n")
+    verify_attribute("blocksize", b"4096\n")
+    verify_attribute("power", expected_power.encode("ascii") + b"\n")
+
+    if power_off == "1":
+        verify_named_config()
+        power_fd = open_attribute("power", write_flags)
+        verify_named_config()
+        write_started = True
+        if os.write(power_fd, b"0\n") != 2:
+            raise PowerWriteFailure
+        descriptor = power_fd
+        power_fd = -1
+        os.close(descriptor)
+        verify_attribute("power", b"0\n")
+        verify_named_config()
+    result = 0
+except IdentityMismatch:
+    result = 2
+except PowerWriteFailure:
+    result = 3
+except OSError:
+    result = 3 if write_started else 2
 finally:
-    pending_exception = sys.exc_info()[0]
-    if fd >= 0:
-        try:
-            os.close(fd)
-        except OSError:
-            if pending_exception is None:
-                raise SystemExit(3)
+    for descriptor_name in ("power_fd", "config_fd", "configfs_fd"):
+        descriptor = locals()[descriptor_name]
+        if descriptor >= 0:
+            try:
+                os.close(descriptor)
+            except OSError:
+                if result == 0:
+                    result = 3 if write_started else 2
+raise SystemExit(result)
 PY
 	case "$python_status" in
 	0) return 0 ;;
@@ -245,12 +298,19 @@ PY
 	esac
 }
 
+owned_nullblk_config_identity_unchanged() {
+	local expected_power="${1:-1}"
+	owned_nullblk_configfs_proof "$expected_power" 0
+}
+
+owned_nullblk_power_off_pinned() {
+	owned_nullblk_configfs_proof 1 1
+}
+
 owned_nullblk_live_identity_unchanged() {
 	local observed_disk resolved_partition resolved_dev_block
 
-	owned_nullblk_config_identity_unchanged || return 1
-	[[ -r "$CONFIG/power" && ! -L "$CONFIG/power" &&
-	   "$(cat "$CONFIG/power" 2>/dev/null)" == 1 ]] || return 1
+	owned_nullblk_config_identity_unchanged 1 || return 1
 	[[ -n "$DISK" && -n "$PART_NAME" &&
 	   "$DEVNO" =~ ^[0-9]+:[0-9]+$ &&
 	   "$PART_DEVNO" =~ ^[0-9]+:[0-9]+$ &&
@@ -303,9 +363,7 @@ owned_nullblk_mapper_identity_unchanged() {
 # Power-off removes sysfs block identities. Recheck those still observable
 # and the pinned configfs identity before removing its directory.
 owned_nullblk_post_power_identity_unchanged() {
-	owned_nullblk_config_identity_unchanged || return 1
-	[[ -r "$CONFIG/power" && ! -L "$CONFIG/power" &&
-	   "$(cat "$CONFIG/power" 2>/dev/null)" == 0 ]] || return 1
+	owned_nullblk_config_identity_unchanged 0 || return 1
 	# On successful power-off both sysfs nodes may disappear. A node that
 	# remains observable must still match the captured device identity.
 	if [[ -e "/sys/block/$DISK/dev" || -L "/sys/block/$DISK/dev" ]]; then
@@ -394,7 +452,6 @@ PARTUUID=
 PART_DEVNO=
 PARTITION_NODE_DEVNO=
 CONFIG_IDENTITY=
-CONFIG_POWER_IDENTITY=
 BY_PARTUUID=
 RUN_ID=
 
@@ -880,12 +937,13 @@ assert_repeat_recovery_is_safe() {
 	before_swaps="$(swapz_swap_inventory_identity /proc/swaps)" ||
 		fail "cannot snapshot swaps before repeated recovery"
 	set +e
-	output="$(timeout --signal=TERM --kill-after=10s 90s "$CONTROL" primary recover 2>&1)"
+	output="$(LC_ALL=C timeout --signal=TERM --kill-after=10s 90s \
+		"$CONTROL" primary recover 2>&1)"
 	rc=$?
 	set -e
-	printf '%s\n' "$output"
-	[[ "$rc" -ne 0 ]] ||
-		fail "repeated recovery after $phase unexpectedly reopened COMPLETE"
+	[[ "$rc" -eq 2 &&
+	   "$output" == "BLOCKED: primary-swap recovery failed: Operation not permitted" ]] ||
+		fail "repeated recovery after $phase lacked the expected COMPLETE refusal"
 	after_state="$(sha256sum "$RECOVERY_BASE/primary-state.json" | awk '{print $1}')" ||
 		fail "cannot hash COMPLETE state after repeated recovery"
 	after_swaps="$(swapz_swap_inventory_identity /proc/swaps)" ||
@@ -1690,10 +1748,7 @@ mkdir -- "$CONFIG" 2>/dev/null || blocked "cannot allocate owned null_blk config
 OWN_NULL=1
 CONFIG_IDENTITY="$(stat -c '%d:%i:%u' -- "$CONFIG" 2>/dev/null)" ||
 	fail "cannot capture created null_blk configfs identity"
-CONFIG_POWER_IDENTITY="$(stat -Lc '%d:%i:%u' -- "$CONFIG/power" 2>/dev/null)" ||
-	fail "cannot capture created null_blk power identity"
-[[ "$CONFIG_IDENTITY" =~ ^[0-9]+:[0-9]+:0$ &&
-   "$CONFIG_POWER_IDENTITY" =~ ^[0-9]+:[0-9]+:0$ &&
+	[[ "$CONFIG_IDENTITY" =~ ^[0-9]+:[0-9]+:0$ &&
    -d "$CONFIG" && ! -L "$CONFIG" &&
    -f "$CONFIG/power" && ! -L "$CONFIG/power" &&
    "$(stat -c '%d:%i:%u' -- "$CONFIG" 2>/dev/null)" == "$CONFIG_IDENTITY" ]] ||
