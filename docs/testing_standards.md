@@ -724,6 +724,12 @@ source-admission peer proof must also keep every peer-to-Popen ancestry entry in
 that launch-owned private session; a descendant that calls `setsid()` remains
 an ancestry descendant but is a wrong-session substitution and must BLOCK. A
 deterministic rootless negative control must exercise that detached descendant.
+The same suite must model /proc states independently of cached socket peer
+credentials: an otherwise matching live peer-to-launch lineage must pass the
+process-ownership predicate, while Z, X and x states for either peer or launch
+ancestor must report `observed=exited_peer_process`, `errno=none` and
+`authorization=BLOCKED` before source verification. This does not attest to
+the message writer.
 A rootless descendant that ignores SIGTERM is a required negative control: direct-
 child-only cleanup must not be accepted as complete. Exit observation for a
 marked session leader must use a non-reaping wait boundary until group-wide

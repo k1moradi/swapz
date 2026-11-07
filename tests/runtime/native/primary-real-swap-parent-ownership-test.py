@@ -331,6 +331,19 @@ class SourceAdmissionPeerOwnership(unittest.TestCase):
                             "errno=none", "authorization=BLOCKED"):
                         self.assertIn(detail, str(refusal.exception))
 
+        peer_state = "S"
+        for launched_state in ("Z", "X", "x"):
+            launched_stat = process_stat(
+                launched_process_id, os.getpid(), launched_state)
+            with self.subTest(launched_state=launched_state), mock.patch.object(
+                    parent.Path, "read_text", autospec=True,
+                    side_effect=read_process_stat):
+                with self.assertRaises(parent.Blocked) as refusal:
+                    parent._owned_peer_process_lineage(
+                        launched_child, peer_process_id, "initial")
+                self.assertIn("observed=exited_peer_process",
+                              str(refusal.exception))
+
     def test_source_change_precedes_identity_missing_refusal(self):
         result, responses, diagnostic, _child, check = self.run_exchange(
             os.getpid(), [self.request("initial")],
