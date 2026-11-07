@@ -2106,7 +2106,9 @@ is not by itself a classified causal error. When a subsequent exception
 exists, its sanitized class and fixed omission marker supply the first cause
 without restoring an untrusted test identity. A withheld heading alone
 remains a generic UNKNOWN_FAILURE, never a proven runtime assertion; later
-cleanup exceptions must not displace an earlier sanitized cause. The native
+cleanup exceptions must not displace an earlier sanitized cause.
+A standalone authenticated teardown failure remains attributable only when
+no earlier classified cause was observed. The native
 CI diagnostics tests must distinguish allowlisted numeric `expected=N
 observed=N` assertions (preserve exact numbers and first-cause identity)
 from arbitrary child-authored assertion/setup strings (retain the exception

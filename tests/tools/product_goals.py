@@ -536,7 +536,12 @@ def diagnose_ci_failure(lines, exit_code, suite):
             r"tearDown(?:Class|Module)?)\s+\(([^)]+)\)",
             safe_line)
         if unittest_match:
-            if failing_test is None:
+            # A later teardown heading cannot borrow an exception already
+            # observed after a rejected first unittest identity. Standalone
+            # teardown failures with no earlier cause remain attributable.
+            if (failing_test is None and not (
+                    first_error is not None and
+                    unittest_match.group(1).startswith("tearDown"))):
                 failing_test = _ci_unittest_name(
                     unittest_match.group(1), unittest_match.group(2))
                 unittest_header = safe_line

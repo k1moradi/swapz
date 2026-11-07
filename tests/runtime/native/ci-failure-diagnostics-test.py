@@ -232,6 +232,17 @@ exec sleep 30
         self.assertEqual(hostile_cleanup["category"], "RUNTIME_ASSERTION")
         self.assertEqual(hostile_cleanup["test"], "ci-failure-diagnostics")
         self.assertNotIn("PRIVATE_", json.dumps(hostile_cleanup))
+        # Without an earlier exception the legitimate standalone teardown
+        # error retains its fully-qualified unittest identity.
+        standalone_teardown = self.diagnostics.diagnose_ci_failure(
+            ["ERROR: tearDown (__main__.Single.tearDown)",
+             "ValueError: PRIVATE_CLEANUP"],
+            1, "ci-failure-diagnostics")
+        self.assertEqual(standalone_teardown["test"],
+                         "__main__.Single.tearDown")
+        self.assertEqual(standalone_teardown["first_error"],
+                         "ValueError: [private exception detail omitted]")
+        self.assertNotIn("PRIVATE_CLEANUP", json.dumps(standalone_teardown))
         self.assertEqual(
             self.diagnostics._ci_safe_line(
                 "subprocess.TimeoutExpired: PRIVATE_TIMEOUT_ARGUMENT"),
