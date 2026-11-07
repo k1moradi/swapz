@@ -38,14 +38,17 @@ note() {
 
 
 # Keep the first refusal actionable without echoing free-form command output:
-# only a single canonical errno/phase record may escape this private harness.
+# only the canonical errno/phase record and its optional authenticated
+# mount-inventory EAGAIN step may escape this private harness.
 verify_prepare_failure_diagnostic() {
 	local output="$1"
 	local line phase number description expected_error
 	local diagnostic_count=0
 	local wrapper_count=0
+	local mount_diagnostic_count=0
 	local diagnostic=""
 	local wrapper=""
+	local mount_diagnostic=""
 
 	while IFS= read -r line; do
 		[[ -n "$line" ]] ||
@@ -107,6 +110,15 @@ verify_prepare_failure_diagnostic() {
 			diagnostic="$line"
 			continue
 		fi
+		if [[ "$line" == "SWAPZ_PRIMARY_MOUNT_INVENTORY_FAILURE"* ]]; then
+			mount_diagnostic_count=$((mount_diagnostic_count + 1))
+			# Source-controlled fields only: no PID, path, namespace or device.
+			if [[ ! "$line" =~ ^SWAPZ_PRIMARY_MOUNT_INVENTORY_FAILURE[[:space:]]step=(namespace-fd|root-object|init-root|root-walk|mount-list|listed-mount|root-revalidation)[[:space:]]errno=11$ ]]; then
+				fail "prepare refusal has a malformed mount-inventory diagnostic"
+			fi
+			mount_diagnostic="$line"
+			continue
+		fi
 		if [[ "$line" == "BLOCKED: primary-swap preparation failed: "* ]]; then
 			wrapper_count=$((wrapper_count + 1))
 			wrapper="$line"
@@ -120,6 +132,15 @@ verify_prepare_failure_diagnostic() {
 		fail "prepare refusal did not emit exactly one coordinator wrapper"
 	[[ "$wrapper" == "BLOCKED: primary-swap preparation failed: $expected_error" ]] ||
 		fail "prepare refusal wrapper disagrees with errno"
+	(( mount_diagnostic_count <= 1 )) ||
+		fail "prepare refusal emitted duplicate mount-inventory diagnostics"
+	if (( mount_diagnostic_count == 1 )); then
+		# A scan marker belongs only to the original fail-closed EAGAIN gate.
+		[[ "$number" == 11 && ( "$phase" == cross-namespace-mount-inventory ||
+			"$phase" == repeated-cross-namespace-mount-inventory ) ]] ||
+			fail "prepare refusal mount-inventory diagnostic disagrees with phase or errno"
+		printf '%s\n' "$mount_diagnostic" >&2
+	fi
 	printf '%s\n' "$diagnostic" >&2
 }
 

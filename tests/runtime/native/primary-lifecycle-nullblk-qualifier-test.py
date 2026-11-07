@@ -2374,7 +2374,13 @@ int main(int argc, char **argv)
                 expected = next(
                     line for line in output.splitlines()
                     if line.startswith("PRIMARY_PREPARE=FAILED "))
-                self.assertEqual(result.stderr.strip(), expected)
+                mount_diagnostics = [
+                    line for line in output.splitlines()
+                    if line.startswith("SWAPZ_PRIMARY_MOUNT_INVENTORY_FAILURE ")
+                ]
+                self.assertEqual(
+                    result.stderr.strip(),
+                    "\n".join(mount_diagnostics + [expected]))
             else:
                 self.assertEqual(result.stderr.strip(), "FAIL")
             self.assertEqual(result.stdout, "")
@@ -2404,6 +2410,24 @@ int main(int argc, char **argv)
         check(command_output(package_busy, busy), True)
         check(command_output(lock_close, close_error), True)
 
+        mount_eagain = "Resource temporarily unavailable"
+        mount_marker = (
+            "SWAPZ_PRIMARY_MOUNT_INVENTORY_FAILURE "
+            "step=root-revalidation errno=11"
+        )
+        mount_initial = (
+            "PRIMARY_PREPARE=FAILED phase=cross-namespace-mount-inventory "
+            f"errno=11 error={mount_eagain} claim=none"
+        )
+        mount_repeated = (
+            "PRIMARY_PREPARE=FAILED phase=repeated-cross-namespace-mount-inventory "
+            f"errno=11 error={mount_eagain} claim=none"
+        )
+        check(mount_marker + "\n" +
+              command_output(mount_initial, mount_eagain), True)
+        check(mount_marker + "\n" +
+              command_output(mount_repeated, mount_eagain), True)
+
         for output in (
             "",
             "PRIMARY_PREPARE=FAILED",
@@ -2411,6 +2435,21 @@ int main(int argc, char **argv)
             command_output(source_mismatch, busy),
             command_output(source_mismatch, permitted) + "\n/private/secret",
             command_output(source_mismatch, permitted) + "\nsecret=private",
+            mount_marker,
+            mount_marker + "\n" + command_output(source_mismatch, permitted),
+            mount_marker + "\n" + command_output(mount_initial, mount_eagain) +
+            "\n" + mount_marker,
+            mount_marker + "\n" + command_output(mount_initial, mount_eagain) +
+            "\nSWAPZ_PRIMARY_MOUNT_INVENTORY_FAILURE step=root-walk errno=11",
+            mount_marker.replace("root-revalidation", "invented-step") + "\n" +
+            command_output(mount_initial, mount_eagain),
+            mount_marker.replace("errno=11", "errno=5") + "\n" +
+            command_output(mount_initial, mount_eagain),
+            mount_marker + " private=/proc/hidden\n" +
+            command_output(mount_initial, mount_eagain),
+            mount_marker + "\n" + command_output(
+                mount_initial.replace("errno=11", "errno=16"),
+                "Device or resource busy"),
             command_output(source_mismatch, permitted) + "\ntransaction_id=private",
             command_output(source_mismatch, permitted) + "\nswap=/unrelated",
             command_output(source_mismatch, permitted) + "\n"

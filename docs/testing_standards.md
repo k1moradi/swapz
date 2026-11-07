@@ -268,7 +268,13 @@ namespace, mount or device identifiers. The loaded reporter may attribute
 that step only to a matching coordinator initial/repeated cross-namespace
 preparation failure; it must reject malformed or contradictory child markers.
 This diagnostic never upgrades a BLOCKED run into permission to retry or
-mutate physical storage.
+mutate physical storage. The private loaded null_blk prepare verifier must
+permit exactly one canonical mount-scan record only alongside the matching
+initial/repeated cross-namespace EAGAIN refusal (errno 11), then re-emit that
+record with the normal canonical prepare failure. Duplicate, malformed,
+unmatched or free-form sideband output remains FAIL; the original admission
+refusal remains BLOCKED. Rootless tests must cover both accepted scan phases
+and reject mismatched errno, duplicate markers and private values.
 
 
 The direct-C mount reader fixture must exercise the actual production reader
