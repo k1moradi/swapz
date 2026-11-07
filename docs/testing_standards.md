@@ -6100,6 +6100,9 @@ write/durability and secondary close failures. The default-CLI synthetic
 opened-descriptor fault matrix must inject failure of the first exact 4,096-byte
 read, a possibly torn 2,048-of-4,096-byte pwrite, failed fsync, failed exact
 4,096-byte readback, and failed close after otherwise durable publication.
+An interrupted header pwrite returning EINTR after possible prefix mutation
+must remain one non-resumed write attempt and report UNCERTAIN/RECOVERY REQUIRED
+with originating EINTR despite diagnostic and close errors; no fsync may follow.
 Every pre-publication failure must retain original errno and byte-for-byte
 unchanged block zero; every failure after attempting the header pwrite must
 return status 3 UNCERTAIN, include RECOVERY REQUIRED, retain observable media

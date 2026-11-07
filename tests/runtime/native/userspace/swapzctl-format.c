@@ -1226,6 +1226,9 @@ static void test_real_cli_io_faults_keep_recovery_evidence(void)
 		  1, EIO, "header read", 1U, 0U, 0U, 0U },
 		{ "torn-header-write", 0, 0, EIO, 0, EOVERFLOW,
 		  3, EIO, "write", 1U, 1U, 0U, 0U },
+		/* EINTR cannot justify replaying a possibly modified header. */
+		{ "interrupted-header-write", 0, 0, EINTR, 0, EOVERFLOW,
+		  3, EINTR, "write", 1U, 1U, 0U, 0U },
 		/*
 		 * Stop before the UUID so the retained media is observably partial.
 		 * A 2,048-byte prefix would already cover every non-reserved field.
@@ -1504,6 +1507,12 @@ static ssize_t test_format_pwrite(int fd, const void *buffer, size_t length,
 			return -1;
 		}
 		if (admission_fixture.write_error) {
+			/* Bound a forbidden retry after an interrupted publication. */
+			if (admission_fixture.write_error == EINTR &&
+			    admission_fixture.writes > 1U) {
+				errno = EIO;
+				return -1;
+			}
 			/* A failed pwrite may already have published 2,048 bytes. */
 			memcpy(admission_fixture.block_zero, buffer, length / 2U);
 			errno = admission_fixture.write_error;
