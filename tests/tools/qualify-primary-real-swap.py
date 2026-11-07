@@ -2544,6 +2544,13 @@ def _admit_initial_target(
         target_path, target_device, parent_device = verify_authorized_target(
             plan, selector_partuuid, authorization_snapshot,
             observed_identity=identities)
+    except TargetProofFailed as exc:
+        raise Blocked(
+            "initial target admission phase=live_target "
+            "expected=descriptor-topology-reader-proof "
+            f"observed=failed-{exc.proof} errno=none; "
+            "owned_state_may_have_changed=true; "
+            "target_mutation_reached=false; action=BLOCK-before-prepare") from exc
     except QualificationFailure as exc:
         status = _qualification_failure_exit_status(exc)
         status_detail = f" status={status}" if status is not None else ""
@@ -2554,9 +2561,18 @@ def _admit_initial_target(
             f"{status_detail}; owned_state_may_have_changed=true; "
             "target_mutation_reached=false; action=BLOCK-before-prepare") from exc
     except Blocked as exc:
+        original_error = (
+            exc.__cause__ if isinstance(exc.__cause__, OSError) else None)
+        error_number = (
+            original_error.errno
+            if original_error is not None and original_error.errno is not None
+            else "none")
         raise Blocked(
-            f"{exc}; owned_state_may_have_changed=true; "
-            "target_mutation_reached=false") from exc
+            "initial target admission phase=live_target "
+            "expected=descriptor-topology-reader-proof "
+            "observed=authorization-unavailable-or-mismatch "
+            f"errno={error_number}; owned_state_may_have_changed=true; "
+            "target_mutation_reached=false; action=BLOCK-before-prepare") from exc
     if len(identities) != 1:
         raise Blocked(
             "initial target admission phase=live_target "

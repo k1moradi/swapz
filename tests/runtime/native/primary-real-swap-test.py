@@ -573,6 +573,21 @@ class PrimaryRealSwapContracts(unittest.TestCase):
         self.assertNotIn("/private", str(refused.exception))
         self.assertNotIn("hidden", str(refused.exception))
 
+    def test_initial_target_admission_redacts_blocked_payload_and_keeps_errno(self):
+        original = OSError(errno.EIO, "/private/device")
+        blocked = qualify.Blocked("/private/secret")
+        blocked.__cause__ = original
+        with mock.patch.object(
+                qualify, "verify_authorized_target", side_effect=blocked), \
+                self.assertRaisesRegex(
+                    qualify.Blocked,
+                    "observed=authorization-unavailable-or-mismatch.*errno=5"
+                    ".*target_mutation_reached=false") as refused:
+            qualify._admit_initial_target(
+                {}, "aaaaaaaa", {"authorized_target": {}})
+        self.assertNotIn("/private", str(refused.exception))
+        self.assertNotIn("secret", str(refused.exception))
+
     def test_initial_target_admission_requires_one_published_identity(self):
         with mock.patch.object(
                 qualify, "verify_authorized_target",

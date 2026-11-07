@@ -933,7 +933,9 @@ zero mocked prepare/start/write calls. Initial admission is after private
 qualification import, so its fail-only record must distinguish
 `owned_state_may_have_changed=true` from
 `target_mutation_reached=false`, preserve a verifier child exit status without
-command/path text, and require exactly one verifier-published bound identity. The verifier must open the resolved
+command/path text, reduce generic verifier refusal to a bounded proof class
+while retaining the first syscall errno, and require exactly one
+verifier-published bound identity. The verifier must open the resolved
 target once with `O_NOFOLLOW|O_EXCL`, derive device and geometry from the
 opened target descriptor, open and bind the parent block descriptor separately,
 and recheck both opened and named inodes after topology/source-policy
