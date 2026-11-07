@@ -855,8 +855,17 @@ authorization observation at this boundary must likewise become BLOCKED before
 prepare, retain the numeric status when available, and redact command/path
 details. Each negative fixture must show BLOCKED before a primary operation,
 with bounded redacted phase, expected/observed category, errno/status and safe
-next action. These synthetic proofs do not qualify a live physical reader or
-prove the coordinator's last-use target binding.
+next action. The real-swap helper must recheck the admitted selector inode
+**after** independent target inspection, preserving the first descriptor I/O
+errno on cleanup failure. Revalidate the same source-bound partition, physical
+parent and geometry after each completed cycle and again at final publication.
+A rootless two-cycle control must reject simulated post-cycle selector drift
+before the second prepare, with zero intercepted primary mutations and BLOCKED
+evidence; unchanged selector identity remains the positive control. Identical
+bytes at a substituted inode or protected-directory replacement are not
+identity proof. Two snapshots do not exclude a completely hidden selector
+ABA, make the last-use interval kernel-atomic, or identify a unique physical
+card and reader; physical admission stays BLOCKED without those guarantees.
 
 The real-swap byte oracle is qualification authority: `--oracle` must resolve
 to the exact source-controlled `tests/tools/primary-real-swap-oracle.py`, never

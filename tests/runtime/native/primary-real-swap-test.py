@@ -1389,7 +1389,7 @@ class PrimaryRealSwapContracts(unittest.TestCase):
 
     def test_terminal_pass_waits_for_owned_cleanup(self):
         for failure_point in ("private workspace", "source admission channel",
-                              "final source change"):
+                              "final source change", "postcycle selector drift"):
             with self.subTest(failure_point=failure_point), \
                     tempfile.TemporaryDirectory() as directory:
                 root = Path(directory)
@@ -1471,7 +1471,13 @@ class PrimaryRealSwapContracts(unittest.TestCase):
                     if index == 2:
                         self.assertIn("1" * 32, kwargs["prior_run_ids"])
                     return next(cycle_results)
-                selector_gate = mock.Mock()
+                selector_gate = mock.Mock(
+                    side_effect=qualify.Blocked(
+                        "primary selector phase=policy_use expected=admitted "
+                        "observed=changed-selector-identity errno=none; "
+                        "action=BLOCK-before-prepare")
+                    if failure_point == "postcycle selector drift" else None)
+                cycle_runner = mock.Mock(side_effect=fake_cycle)
                 with contextlib.ExitStack() as stack:
                     stack.enter_context(
                         mock.patch.object(
@@ -1573,15 +1579,16 @@ class PrimaryRealSwapContracts(unittest.TestCase):
                             qualify, "require_final_installed_artifact_identity"))
                     stack.enter_context(
                         mock.patch.object(
-                            qualify, "run_cycle",
-                            side_effect=fake_cycle))
+                            qualify, "run_cycle", cycle_runner))
+                    intercepted_primary = stack.enter_context(
+                        mock.patch.object(qualify, "_primary"))
                     stack.enter_context(
                         mock.patch.object(
                             qualify, "_require_selector_at_policy_use",
                             selector_gate))
                     stack.enter_context(
                         self.assertRaises(
-                            qualify.Blocked if failure_point == "final source change"
+                            qualify.Blocked if failure_point in ("final source change", "postcycle selector drift")
                             else qualify.QualificationFailure))
                     qualify._execute_admitted(
                         args, admission, terminal_cleanup=terminal_cleanup)
@@ -1591,17 +1598,27 @@ class PrimaryRealSwapContracts(unittest.TestCase):
                     status for status, _reason
                     in evidence_instances[0].finish_calls]
                 self.assertEqual(
-                    statuses, ["BLOCKED"] if failure_point == "final source change"
+                    statuses, ["BLOCKED"] if failure_point in ("final source change", "postcycle selector drift")
                     else ["FAIL"])
                 failure_reason = evidence_instances[0].finish_calls[-1][1]
                 self.assertEqual(statuses[-1],
-                                 "BLOCKED" if failure_point == "final source change"
+                                 "BLOCKED" if failure_point in ("final source change", "postcycle selector drift")
                                  else "FAIL")
                 self.assertEqual(
                     selector_gate.call_count,
+                    1 if failure_point == "postcycle selector drift" else
                     2 if failure_point in ("private workspace", "final source change")
                     else 3)
-                if failure_point == "private workspace":
+                self.assertEqual(
+                    cycle_runner.call_count,
+                    1 if failure_point == "postcycle selector drift" else 2)
+                intercepted_primary.assert_not_called()
+                if failure_point == "postcycle selector drift":
+                    self.assertEqual(workspace_cleanup_calls, [True])
+                    self.assertEqual(terminal_cleanup_calls, [])
+                    self.assertIn("phase=policy_use", failure_reason)
+                    self.assertNotIn("/private", failure_reason)
+                elif failure_point == "private workspace":
                     self.assertEqual(workspace_cleanup_calls, [True, True])
                     self.assertEqual(terminal_cleanup_calls, [])
                     self.assertIn(
