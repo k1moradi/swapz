@@ -129,8 +129,9 @@ class SourceAdmissionPeerOwnership(unittest.TestCase):
         self.assertEqual(check.call_count, 1)
 
     def test_matching_historical_device_labels_do_not_authorize_another_card(self):
-        # Two synthetic card/reader pairs collide on every historical display
-        # field. Neither pair has independently owner-authorized live identity.
+        # Two different synthetic card/reader pairs intentionally collide on
+        # every historical display field. The current wire schema has no field
+        # that can distinguish them, so both source requests are identical.
         historical_display = {
             "partuuid": "a1b2c3d4", "major_minor": "8:1",
             "size_bytes": 32 * 1024**3, "model": "synthetic-reader-model",
@@ -147,10 +148,26 @@ class SourceAdmissionPeerOwnership(unittest.TestCase):
         self.assertNotEqual(
             (synthetic_devices[0]["card"], synthetic_devices[0]["reader"]),
             (synthetic_devices[1]["card"], synthetic_devices[1]["reader"]))
-        for device in synthetic_devices:
-            with self.subTest(card=device["card"]):
-                result, responses, diagnostic, _child, check = self.run_exchange(
-                    os.getpid(), [self.request("initial")])
+
+        source_requests = (
+            self.request("initial", "1" * 32),
+            self.request("initial", "1" * 32),
+        )
+        self.assertEqual(source_requests[0], source_requests[1])
+        self.assertEqual(
+            set(source_requests[0]),
+            {"schema", "source_sha", "phase", "nonce",
+             "physical_control_inputs_sha256", "executed_helper_sha256"})
+        for forbidden_field in (
+                "partuuid", "major_minor", "size_bytes", "model",
+                "card_identity", "reader_identity",
+                "owner_authorization_material"):
+            self.assertNotIn(forbidden_field, source_requests[0])
+
+        for device, request in zip(synthetic_devices, source_requests):
+            with self.subTest(card=device["card"], reader=device["reader"]):
+                result, responses, diagnostic, child, check = self.run_exchange(
+                    os.getpid(), [request])
                 self.assertEqual(result, 2)
                 self.assertEqual(len(responses), 1)
                 self.assertEqual(responses[0]["status"], "BLOCKED")
@@ -158,9 +175,22 @@ class SourceAdmissionPeerOwnership(unittest.TestCase):
                     responses[0]["reason"], "physical_admission_identity_missing")
                 self.assertIn("physical_admission_identity:phase=initial",
                               diagnostic)
+                self.assertIn(
+                    "expected=source_exact_sender_run_phase_target_required_evidence",
+                    diagnostic)
+                self.assertIn(
+                    "observed=source_connection_peer_phase_control_inputs_only",
+                    diagnostic)
+                self.assertIn("request_writer_identity=UNPROVEN", diagnostic)
+                self.assertIn("owner_authorization_material=missing", diagnostic)
+                self.assertIn("fresh_card_reader_identity=missing", diagnostic)
                 self.assertIn("card_reader_identity=UNPROVEN", diagnostic)
                 self.assertIn("physical=BLOCKED", diagnostic)
+                self.assertIn("errno=none", diagnostic)
+                self.assertIn("authorization=BLOCKED", diagnostic)
                 self.assertNotIn("synthetic-card-", diagnostic)
+                self.assertNotIn("synthetic-reader-", diagnostic)
+                child.terminate.assert_called_once_with()
                 self.assertEqual(check.call_count, 1)
 
     def test_untrusted_child_card_claim_fails_at_request_gate(self):
@@ -173,6 +203,7 @@ class SourceAdmissionPeerOwnership(unittest.TestCase):
         untrusted_claims = (
             {"selected_device": dict(historical_display)},
             {"reader_serial": "synthetic-invented-serial"},
+            {"reader_serial": "unknown"},
             {"immutable_authorization_token": "synthetic-stale-token"},
         )
         for claim in untrusted_claims:

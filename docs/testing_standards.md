@@ -774,16 +774,24 @@ rootless synthetic approval supplies selected-card/reader or last-use physical
 evidence. Physical source-only admission remains unconditionally BLOCKED.
 A deterministic two-card/two-reader rootless control must give both devices
 the same historical PARTUUID, major:minor, size and model but distinct
-synthetic physical identities; both must refuse at the physical identity gate
-after a valid source check, with `card_reader_identity=UNPROVEN` and
-`physical=BLOCKED`. Extra child-claimed target, reader or authorization-token
-fields must instead fail first at request parsing, before Git provenance or
-any reply. Missing live /proc peer identity retains its original numeric errno,
-while mismatched peer UID refuses before the request is read. These controls
-prove only source-parent refusal: synthetic identity labels are not hardware
-serials and cannot serve as owner authorization. Independent owner-protected
-immutable card **and** reader binding, plus fresh observation tied to the
-exact opened target at last safe use, remain required on the physical host.
+synthetic physical identities. It must additionally prove that the current
+source-only admission schema produces identical requests for those two devices:
+the synthetic card/reader labels are test witnesses and must not be smuggled
+into the request as authorization. After a valid source check, each identical
+request must refuse with `request_writer_identity=UNPROVEN`,
+`owner_authorization_material=missing`,
+`fresh_card_reader_identity=missing`, `card_reader_identity=UNPROVEN` and
+`physical=BLOCKED`; the owned synthetic child must be reclaimed. This proves
+wire-level inability to distinguish the colliding devices plus fail-closed
+behavior, not actual physical-device discrimination. Extra child-claimed
+target, reader, invented/unknown serial, or authorization-token fields must
+instead fail first at request parsing, before Git provenance or any reply.
+Missing live /proc peer identity retains its original numeric errno, while
+mismatched peer UID refuses before the request is read. These controls prove
+only source-parent refusal: synthetic identity labels are not hardware serials
+and cannot serve as owner authorization. Independent owner-protected immutable
+card **and** reader binding, plus fresh observation tied to the exact opened
+target at last safe use, remain required on the physical host.
 
 The current wire schema carries source, helper and control-input identity but
 no independently authenticated exact message sender, physical qualification
