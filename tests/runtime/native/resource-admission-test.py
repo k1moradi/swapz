@@ -1412,6 +1412,98 @@ wait "$parent"
             'SCRIPT_DIR="$(cd -- "$script_directory" 2>/dev/null && pwd -P)" ||',
             preflight)
 
+    def test_loaded_preflight_runtime_identity_first_failure_is_specific(self):
+        # Source-extracted only: fake id/uname never run full privileged preflight.
+        source = PREFLIGHT.read_text(encoding="utf-8")
+        helper = (shell_function(PREFLIGHT, "refuse")
+                  + shell_function(PREFLIGHT, "is_uint")
+                  + shell_function(PREFLIGHT, "check_loaded_runtime_identity"))
+        accepted_id = "id() { printf '0\n'; }\n"
+        accepted_release = "uname() { printf '6.8.0-test+arm64\n'; }\n"
+        probes = (
+            ("id command failed", "id() { return 7; }\n"
+             "uname() { return 9; }\n",
+             "LOADED_PREFLIGHT=BLOCKED check=effective_uid",
+             "original_errno_or_exit=7"),
+            ("id output malformed", "id() { printf 'root\n'; }\n"
+             + accepted_release,
+             "LOADED_PREFLIGHT=BLOCKED check=effective_uid",
+             "id -u returned a malformed effective UID"),
+            ("nonroot", "id() { printf '1000\n'; }\n" + accepted_release,
+             "LOADED_PREFLIGHT=NOT_AUTHORIZED check=effective_uid",
+             "provide noninteractive root authorization"),
+            ("uname command failed", accepted_id + "uname() { return 9; }\n",
+             "LOADED_PREFLIGHT=BLOCKED check=running_kernel_release",
+             "original_errno_or_exit=9"),
+            ("uname output malformed", accepted_id
+             + "uname() { printf '../other-kernel\n'; }\n",
+             "LOADED_PREFLIGHT=BLOCKED check=running_kernel_release",
+             "uname -r returned a malformed kernel release"),
+        )
+        for label, commands, check, reason in probes:
+            with self.subTest(label=label):
+                result = self.run_shell(
+                    helper + commands + "check_loaded_runtime_identity\n"
+                    + "printf 'UNEXPECTED_LOADED_ADMISSION\n'")
+                self.assertEqual(result.returncode, 1, result.stderr)
+                self.assertIn(check, result.stderr)
+                self.assertIn(reason, result.stderr)
+                self.assertEqual(result.stderr.count("LOADED_PREFLIGHT="), 1)
+                self.assertNotIn("FAIL: loaded preflight internal", result.stderr)
+                self.assertNotIn("unclaimed_null_blk", result.stderr)
+                self.assertNotIn("host_identity", result.stderr)
+                self.assertEqual(result.stdout, "")
+
+        accepted = self.run_shell(
+            helper + accepted_id + accepted_release
+            + "check_loaded_runtime_identity\n"
+            + "printf 'ADMITTED:%s\n' \"$running_kernel_release\"")
+        self.assertEqual(accepted.returncode, 0, accepted.stderr)
+        self.assertEqual(accepted.stdout, "ADMITTED:6.8.0-test+arm64\n")
+        self.assertEqual(accepted.stderr, "")
+        self.assertLess(
+            source.index("\ncheck_loaded_runtime_identity\n"),
+            source.index("capability_status="))
+        self.assertIn('"/boot/config-$running_kernel_release"', source)
+        self.assertIn('"/lib/modules/$running_kernel_release/build/.config"',
+                      source)
+
+    def test_loaded_preflight_module_probe_preserves_first_dry_run_exit(self):
+        # Only a fake modprobe and disposable configfs path are consulted.
+        source = PREFLIGHT.read_text(encoding="utf-8")
+        helper = (shell_function(PREFLIGHT, "refuse")
+                  + shell_function(PREFLIGHT,
+                                   "check_null_blk_module_available"))
+        absent_directory = self.root / "missing-configfs"
+        existing_directory = self.root / "built-in-configfs"
+        existing_directory.mkdir()
+
+        for directory, fake_probe, expected_code, expected_reason in (
+                (absent_directory, "modprobe() { return 9; }\n", 1,
+                 "original_errno_or_exit=9"),
+                (absent_directory, "modprobe() { return 0; }\n", 0, ""),
+                (existing_directory,
+                 "modprobe() { printf 'UNEXPECTED_MODULE_PROBE\n'; return 9; }\n",
+                 0, "")):
+            with self.subTest(directory=directory, fake_probe=fake_probe):
+                result = self.run_shell(
+                    helper + fake_probe
+                    + 'check_null_blk_module_available "$1"\n', directory)
+                self.assertEqual(result.returncode, expected_code,
+                                 result.stderr)
+                self.assertIn(expected_reason, result.stderr)
+                self.assertNotIn("UNEXPECTED_MODULE_PROBE", result.stdout)
+                self.assertEqual(
+                    result.stderr.count("LOADED_PREFLIGHT="),
+                    1 if expected_code else 0)
+                if expected_code:
+                    self.assertIn("check=null_blk_module", result.stderr)
+                else:
+                    self.assertEqual(result.stderr, "")
+        self.assertLess(
+            source.index("\ncheck_null_blk_module_available /sys/kernel/config/nullb"),
+            source.index("package_journal=/var/lib/swapz-package-transactions"))
+
     def test_loaded_preflight_bootstrap_refuses_unavailable_cleanup(self):
         preflight = PREFLIGHT.read_text(encoding="utf-8")
         # Exercise only the bootstrap prefix, never the privileged preflight.

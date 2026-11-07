@@ -84,8 +84,32 @@ for cmd in dmsetup modprobe timeout awk tr findmnt cat readlink stat sleep id ls
     command -v "$cmd" >/dev/null ||
         refuse BLOCKED required_tool unavailable "install required executable $cmd before make test"
 done
-[[ $(id -u) == 0 ]] ||
-    refuse NOT_AUTHORIZED effective_uid unavailable "provide noninteractive root authorization"
+# Read-only prerequisite telemetry must have a valid command status before
+# interpreting its value. A failing id/uname probe is not proof of missing
+# authorization, and a blank kernel release must not select unrelated config.
+check_loaded_runtime_identity() {
+    local uid_status release_status
+    if effective_uid="$(id -u 2>/dev/null)"; then
+        :
+    else
+        uid_status=$?
+        refuse BLOCKED effective_uid unavailable "id_u_exit=$uid_status; original_errno_or_exit=$uid_status; inspect effective UID read-only"
+    fi
+    is_uint "$effective_uid" ||
+        refuse BLOCKED effective_uid unavailable "id -u returned a malformed effective UID"
+    [[ $effective_uid == 0 ]] ||
+        refuse NOT_AUTHORIZED effective_uid unavailable "provide noninteractive root authorization"
+
+    if running_kernel_release="$(uname -r 2>/dev/null)"; then
+        :
+    else
+        release_status=$?
+        refuse BLOCKED running_kernel_release unavailable "uname_r_exit=$release_status; original_errno_or_exit=$release_status; inspect running kernel identity read-only"
+    fi
+    [[ $running_kernel_release =~ ^[a-zA-Z0-9][a-zA-Z0-9._+~-]{0,127}$ ]] ||
+        refuse BLOCKED running_kernel_release unavailable "uname -r returned a malformed kernel release"
+}
+check_loaded_runtime_identity
 
 # UID zero in a container need not have host CAP_SYS_ADMIN. This read-only
 # probe returns the original file-read errno, never a guessed command errno.
@@ -117,15 +141,22 @@ esac
 
 # Probe module support without loading any module. A configured built-in
 # null_blk is already sufficient for this gate.
-if [[ ! -d /sys/kernel/config/nullb ]] &&
-   ! modprobe -n -q null_blk >/dev/null 2>&1; then
-    refuse BLOCKED null_blk_module unavailable "null_blk is not discoverable; restore its kernel module/configuration"
-fi
+check_null_blk_module_available() {
+    local configfs_directory="$1" module_probe_status
+    [[ -d $configfs_directory ]] && return 0
+    if modprobe -n -q null_blk >/dev/null 2>&1; then
+        return 0
+    else
+        module_probe_status=$?
+        refuse BLOCKED null_blk_module unavailable "modprobe_dry_run_exit=$module_probe_status; original_errno_or_exit=$module_probe_status; null_blk support could not be confirmed without loading it; inspect module configuration read-only"
+    fi
+}
+check_null_blk_module_available /sys/kernel/config/nullb
 
 # The later loaded debug evidence remains authoritative. Reject only an
 # available but contradictory kernel .config here; a missing config remains
 # UNAVAILABLE evidence, not a fabricated sanitizer failure.
-kernel_debug_status="$(python3 - /proc/config.gz "/boot/config-$(uname -r)" "/lib/modules/$(uname -r)/build/.config" <<'PY'
+kernel_debug_status="$(python3 - /proc/config.gz "/boot/config-$running_kernel_release" "/lib/modules/$running_kernel_release/build/.config" <<'PY'
 import gzip
 import os
 import sys
