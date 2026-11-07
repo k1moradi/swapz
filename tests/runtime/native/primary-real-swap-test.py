@@ -60,14 +60,14 @@ class PrimaryRealSwapContracts(unittest.TestCase):
         try:
             with mock.patch.object(
                     parent, "_connection_peer_pidfd",
-                    return_value=peer_pidfd), \
+                    return_value=peer_pidfd) as peer_pidfd_probe, \
                     mock.patch.object(
                         parent, "_owned_peer_process_lineage",
                         return_value=((123, 456, 789),)), \
                     mock.patch.object(
                         parent, "_owned_live_connection_peer_lineage",
                         return_value=((123, 456, 789),)):
-                yield
+                yield peer_pidfd_probe
         finally:
             for descriptor in (peer_pidfd, peer_pidfd_writer):
                 try:
@@ -2377,7 +2377,7 @@ class PrimaryRealSwapContracts(unittest.TestCase):
             subprocess.TimeoutExpired("qualifier", 5),
         ]
         stderr = io.StringIO()
-        with self._mock_owned_admission_peer(), \
+        with self._mock_owned_admission_peer() as peer_pidfd_probe, \
                 mock.patch.object(parent, "_check_git_source"):
             with contextlib.redirect_stderr(stderr):
                 with self.assertRaisesRegex(
@@ -2386,6 +2386,8 @@ class PrimaryRealSwapContracts(unittest.TestCase):
                     parent._serve_admission(
                         server, child, source_sha, "/usr/bin/git", "d" * 64,
                         hashes, "8" * 64, 2)
+        peer_pidfd_probe.assert_called_once_with(
+            connection, child, "authenticated_channel")
         self.assertEqual(
             child.wait.call_args_list,
             [mock.call(timeout=10), mock.call(timeout=5)])

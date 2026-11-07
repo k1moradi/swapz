@@ -814,7 +814,9 @@ identity; neither alone proves message authorship. In-memory admission-sequencin
 fixtures that are not themselves testing pidfd acquisition must provide a real
 disposable descriptor as the synthetic connection peer pidfd and stub only the
 live-lineage proof; a generic `getsockopt` byte mock must not accidentally turn
-the fixture into a malformed-pidfd test. The parent still lacks
+the fixture into a malformed-pidfd test. The bounded unadmitted-child teardown
+fixture must assert that this synthetic peer-pidfd acquisition was actually
+reached before it evaluates refusal cleanup and timeout/kill precedence. The parent still lacks
 independent authentication of the privileged **request** writer, and no
 rootless synthetic approval supplies selected-card/reader or last-use physical
 evidence. Physical source-only admission remains unconditionally BLOCKED.
