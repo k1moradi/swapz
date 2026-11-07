@@ -249,46 +249,46 @@
 "gc_scan_scale": {
 "rows": [
 {
-"incremental_select_ns": 824,
-"legacy_dead_probe_ns": 128746,
-"legacy_score_scan_ns": 980983,
+"incremental_select_ns": 1977,
+"legacy_dead_probe_ns": 214382,
+"legacy_score_scan_ns": 2266355,
 "logical_pages": 262144,
-"mapped_dead_probe_ns": 590,
-"relocation_list_ns": 467,
-"relocation_scan_ns": 212326,
+"mapped_dead_probe_ns": 930,
+"relocation_list_ns": 931,
+"relocation_scan_ns": 635116,
 "segments": 1024,
 "victim_records": 256
 },
 {
-"incremental_select_ns": 3327,
-"legacy_dead_probe_ns": 508155,
-"legacy_score_scan_ns": 3955913,
+"incremental_select_ns": 3275,
+"legacy_dead_probe_ns": 519758,
+"legacy_score_scan_ns": 4879673,
 "logical_pages": 1048576,
-"mapped_dead_probe_ns": 2031,
-"relocation_list_ns": 743,
-"relocation_scan_ns": 1346629,
+"mapped_dead_probe_ns": 2401,
+"relocation_list_ns": 772,
+"relocation_scan_ns": 1351615,
 "segments": 4096,
 "victim_records": 256
 },
 {
-"incremental_select_ns": 12673,
-"legacy_dead_probe_ns": 2044213,
-"legacy_score_scan_ns": 16043046,
+"incremental_select_ns": 12876,
+"legacy_dead_probe_ns": 2038792,
+"legacy_score_scan_ns": 15977713,
 "logical_pages": 4194304,
-"mapped_dead_probe_ns": 7734,
-"relocation_list_ns": 745,
-"relocation_scan_ns": 5517998,
+"mapped_dead_probe_ns": 7281,
+"relocation_list_ns": 703,
+"relocation_scan_ns": 5233415,
 "segments": 16384,
 "victim_records": 256
 },
 {
-"incremental_select_ns": 87345,
-"legacy_dead_probe_ns": 12687796,
-"legacy_score_scan_ns": 101629876,
+"incremental_select_ns": 85970,
+"legacy_dead_probe_ns": 12332156,
+"legacy_score_scan_ns": 100889496,
 "logical_pages": 27080192,
-"mapped_dead_probe_ns": 53321,
-"relocation_list_ns": 796,
-"relocation_scan_ns": 34957497,
+"mapped_dead_probe_ns": 53643,
+"relocation_list_ns": 786,
+"relocation_scan_ns": 35045442,
 "segments": 105782,
 "victim_records": 256
 }
@@ -298,22 +298,22 @@
 "predictor": {
 "backend_benchmarks": [
 {
-"inverse_ns_per_page": 184,
+"inverse_ns_per_page": 188,
 "name": "scalar",
-"transform_ns_per_page": 247
+"transform_ns_per_page": 246
 },
 {
-"inverse_ns_per_page": 274,
+"inverse_ns_per_page": 277,
 "name": "sse2",
 "transform_ns_per_page": 176
 },
 {
 "inverse_ns_per_page": 127,
 "name": "avx2",
-"transform_ns_per_page": 82
+"transform_ns_per_page": 83
 },
 {
-"inverse_ns_per_page": 87,
+"inverse_ns_per_page": 86,
 "name": "avx512",
 "transform_ns_per_page": 69
 }
@@ -325,9 +325,9 @@
 "candidate": "delta64",
 "early_abort_pages": 223,
 "eligible_pages": 512,
-"ns_per_page": 77,
+"ns_per_page": 73,
 "sample_pairs": 32,
-"scalar_ns_per_page": 77,
+"scalar_ns_per_page": 73,
 "stage1_min_score": 2,
 "stage1_pairs": 8
 },
@@ -342,7 +342,7 @@
 "planner_blocks": 384,
 "planner_extents": 273,
 "raw_pages": 192,
-"wall_ns_per_page": 2397
+"wall_ns_per_page": 2399
 },
 {
 "acceleration": 2,
@@ -350,7 +350,7 @@
 "planner_blocks": 384,
 "planner_extents": 273,
 "raw_pages": 192,
-"wall_ns_per_page": 2240
+"wall_ns_per_page": 2239
 },
 {
 "acceleration": 3,
@@ -358,7 +358,7 @@
 "planner_blocks": 384,
 "planner_extents": 272,
 "raw_pages": 192,
-"wall_ns_per_page": 2131
+"wall_ns_per_page": 2130
 },
 {
 "acceleration": 4,
@@ -366,7 +366,7 @@
 "planner_blocks": 384,
 "planner_extents": 272,
 "raw_pages": 192,
-"wall_ns_per_page": 2108
+"wall_ns_per_page": 2106
 }
 ],
 "negative_pages": 256,
@@ -383,9 +383,9 @@
 "extents_saved": 49,
 "general_threshold": 24,
 "lz4_rescues": 192,
-"modeled_wall_ns_per_page": 1650,
-"modeled_wall_ns_total": 950528,
-"ns_per_saved_block": 18279,
+"modeled_wall_ns_per_page": 1644,
+"modeled_wall_ns_total": 947456,
+"ns_per_saved_block": 18220,
 "packing_adoptions": 0,
 "packing_eligible_pages": 51,
 "packing_threshold": 16,
@@ -415,12 +415,12 @@
 "unrolled_ns_per_page": 174
 },
 {
-"baseline_ns_per_page": 181,
+"baseline_ns_per_page": 182,
 "order": "unrolled_first",
 "unrolled_ns_per_page": 175
 },
 {
-"baseline_ns_per_page": 181,
+"baseline_ns_per_page": 183,
 "order": "baseline_first",
 "unrolled_ns_per_page": 174
 },
@@ -481,14 +481,14 @@
 }
 ],
 "negative_useful": 0,
-"ns_per_saved_block": 18736,
+"ns_per_saved_block": 18680,
 "routed_baseline_blocks": 257,
 "routed_baseline_extents": 182,
 "routed_blocks_saved": 57,
 "routed_candidate_blocks": 200,
 "routed_candidate_extents": 113,
-"routed_cpu_ns_per_page": 1854,
-"routed_cpu_ns_total": 1067975,
+"routed_cpu_ns_per_page": 1848,
+"routed_cpu_ns_total": 1064771,
 "routed_extents_saved": 69,
 "structured_calls": 279,
 "structured_eligible": 320,
@@ -536,14 +536,14 @@
 }
 ],
 "negative_useful": 0,
-"ns_per_saved_block": 18835,
+"ns_per_saved_block": 18777,
 "routed_baseline_blocks": 257,
 "routed_baseline_extents": 182,
 "routed_blocks_saved": 55,
 "routed_candidate_blocks": 202,
 "routed_candidate_extents": 121,
-"routed_cpu_ns_per_page": 1798,
-"routed_cpu_ns_total": 1035944,
+"routed_cpu_ns_per_page": 1793,
+"routed_cpu_ns_total": 1032776,
 "routed_extents_saved": 61,
 "structured_calls": 272,
 "structured_eligible": 320,
@@ -591,14 +591,14 @@
 }
 ],
 "negative_useful": 0,
-"ns_per_saved_block": 18279,
+"ns_per_saved_block": 18220,
 "routed_baseline_blocks": 257,
 "routed_baseline_extents": 182,
 "routed_blocks_saved": 52,
 "routed_candidate_blocks": 205,
 "routed_candidate_extents": 133,
-"routed_cpu_ns_per_page": 1650,
-"routed_cpu_ns_total": 950528,
+"routed_cpu_ns_per_page": 1644,
+"routed_cpu_ns_total": 947456,
 "routed_extents_saved": 49,
 "structured_calls": 256,
 "structured_eligible": 320,
@@ -646,14 +646,14 @@
 }
 ],
 "negative_useful": 0,
-"ns_per_saved_block": 18279,
+"ns_per_saved_block": 18220,
 "routed_baseline_blocks": 257,
 "routed_baseline_extents": 182,
 "routed_blocks_saved": 52,
 "routed_candidate_blocks": 205,
 "routed_candidate_extents": 133,
-"routed_cpu_ns_per_page": 1650,
-"routed_cpu_ns_total": 950528,
+"routed_cpu_ns_per_page": 1644,
+"routed_cpu_ns_total": 947456,
 "routed_extents_saved": 49,
 "structured_calls": 256,
 "structured_eligible": 320,
@@ -701,14 +701,14 @@
 }
 ],
 "negative_useful": 0,
-"ns_per_saved_block": 18279,
+"ns_per_saved_block": 18220,
 "routed_baseline_blocks": 257,
 "routed_baseline_extents": 182,
 "routed_blocks_saved": 52,
 "routed_candidate_blocks": 205,
 "routed_candidate_extents": 133,
-"routed_cpu_ns_per_page": 1650,
-"routed_cpu_ns_total": 950528,
+"routed_cpu_ns_per_page": 1644,
+"routed_cpu_ns_total": 947456,
 "routed_extents_saved": 49,
 "structured_calls": 256,
 "structured_eligible": 320,
@@ -725,15 +725,15 @@
 "candidate_extents": 84,
 "cliff_2024": 160,
 "inverse_backend": "avx512",
-"inverse_ns_per_page": 87,
+"inverse_ns_per_page": 86,
 "name": "delta64",
 "planner_blocks_saved": 65,
 "planner_extents_saved": 98,
 "raw_rescued": 128,
 "saved_payload_bytes": 284772,
-"scalar_inverse_ns_per_page": 184,
-"scalar_transform_ns_per_page": 247,
-"second_lz4_ns_per_page": 3490,
+"scalar_inverse_ns_per_page": 188,
+"scalar_transform_ns_per_page": 246,
+"second_lz4_ns_per_page": 3486,
 "transform_backend": "avx512",
 "transform_ns_per_page": 69
 }
@@ -752,23 +752,23 @@
 "overall": "FAIL",
 "qualification": "RAM_BACKED_NULL_BLK_ONLY",
 "qualified_artifacts": {
-"formatter_sha256": "7c70b1e53d8e8de6ee5e7551f93e6055969229e66b54ff85ecc6589276ee8107",
-"module_sha256": "b00cd2a38e7e9226581409d8c3ed24b981631b6559870cb72e934d766da059f2",
+"formatter_sha256": "2ecdd1619109065dce7665a5d5ede6a82d797b14d48e7516165a466e6734bcb3",
+"module_sha256": "aa28284cfa42bfbb489c1d779381856afbdd08a1b5c3dc4f5948a8b5d72a5942",
 "oracle_sha256": "871d809976361bcd2d30b91bd4f661da8c712c16e4f5fa584696140261b57f26",
 "status": "AVAILABLE"
 },
 "schema": "swapz-test-results-v1",
-"source_sha": "fcce1d76b505802a117d46efd6b0a4a03f34cb40",
+"source_sha": "e9ddd7e1e3b1e26a68efcf6845637203292dbf4c",
 "stages": [
 {
-"elapsed_s": 3.748,
+"elapsed_s": 3.78,
 "exit_code": 0,
 "name": "Build module and helpers",
 "status": "PASS"
 },
 {
-"diagnostic": "Unit test failed: test_real_sigkill_phases_block_both_commands_not_cleanup; child_exit=1 reason=unittest_assertion subtest=unavailable test=test_real_sigkill_phases_block_both_commands_not_cleanup log=build/tests/rootless-failure.OrR1zW8K/diagnostic.log",
-"elapsed_s": 169.546,
+"diagnostic": "Unit test failed: test_real_sigkill_phases_block_both_commands_not_cleanup; child_exit=1 reason=unittest_assertion subtest=unavailable test=test_real_sigkill_phases_block_both_commands_not_cleanup log=build/tests/rootless-failure.dvGms55T/diagnostic.log",
+"elapsed_s": 151.799,
 "exit_code": 1,
 "failed_phase": "primary-lifecycle-audit-test.py",
 "name": "Native and rootless contracts",
@@ -780,5 +780,5 @@
 "status": "FAIL"
 }
 ],
-"tested_commit_sha": "fcce1d76b505802a117d46efd6b0a4a03f34cb40"
+"tested_commit_sha": "e9ddd7e1e3b1e26a68efcf6845637203292dbf4c"
 }
