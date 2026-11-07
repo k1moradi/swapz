@@ -3579,6 +3579,9 @@ class ReportContract(unittest.TestCase):
             "elapsed_seconds=15.086 budget_seconds=15 "
             "budget_reason=ordinary_fixture_watchdog "
             "final_process_disposition=reaped_exit_-9 "
+            "original_process_exit_status=still_running "
+            "fixture_phase=command_watchdog "
+            "recovery_disposition=journal_not_assessed "
             "first_cause=fixture_watchdog_expired")
         transcript = (
             "FAIL: test_expected (__main__.NegativeFixture.test_expected)\n"
@@ -3599,7 +3602,9 @@ class ReportContract(unittest.TestCase):
             "Package fixture watchdog: action=install elapsed=15.086s "
             "budget=15s codec=uncompressed "
             "budget_reason=ordinary_fixture_watchdog "
-            "process_disposition=reaped_exit_-9")
+            "process_disposition=reaped_exit_-9 "
+            "phase=command_watchdog first_cause=fixture_watchdog_expired "
+            "original_status=still_running recovery=journal_not_assessed")
         details = runner.first_unittest_failure_details(transcript)
         self.assertIn("Exception: PackageInvocationTimeout", details)
         self.assertIn(expected, details)
@@ -3633,6 +3638,15 @@ class ReportContract(unittest.TestCase):
                 transcript.replace("reason=unittest_timeout",
                                    "reason=nonzero_exit"),
                 transcript.replace("FAILED (errors=2)", "OK"),
+                transcript.replace(
+                    "original_process_exit_status=still_running",
+                    "original_process_exit_status=74"),
+                transcript.replace(
+                    "fixture_phase=command_watchdog",
+                    "fixture_phase=pipe_drain"),
+                transcript.replace(
+                    "recovery_disposition=journal_not_assessed",
+                    "recovery_disposition=PRIVATE_OVERRIDDEN"),
                 transcript.replace(
                     "first_cause=fixture_watchdog_expired",
                     "first_cause=PRIVATE_OVERRIDDEN")):
@@ -4712,6 +4726,30 @@ class ReportContract(unittest.TestCase):
         self.assertIn("Unit test failed: test_nested", reason)
         self.assertIn("nested [path]: [path] failed", reason)
         self.assertNotIn("/home/private", reason)
+
+    def test_loaded_mount_inventory_eagain_reports_only_fixed_read_step(self):
+        transcript = (
+            "START_LOADED_PRIMARY_NULLBLK_LIFECYCLE=prepare\n"
+            "SWAPZ_PRIMARY_MOUNT_INVENTORY_FAILURE "
+            "step=root-revalidation errno=11\n"
+            "PRIMARY_PREPARE=FAILED phase=cross-namespace-mount-inventory "
+            "errno=11 error=Resource temporarily unavailable\n"
+            "BLOCKED_PRIMARY_NULLBLK_LIFECYCLE: preparation blocked\n"
+        )
+        phase, reason = runner.failure_context(transcript)
+        self.assertEqual(phase, "owned RAM primary lifecycle prepare")
+        self.assertIn("mount_step=root-revalidation", reason)
+        self.assertIn("errno=11", reason)
+        for unsafe in (
+                transcript.replace("step=root-revalidation", "step=/proc/SECRET"),
+                transcript.replace("step=root-revalidation errno=11",
+                                   "step=root-revalidation errno=11 host=SECRET"),
+                transcript.replace("errno=11 error=Resource",
+                                   "errno=1 error=Resource")):
+            with self.subTest(unsafe=unsafe[-100:]):
+                _, safe_reason = runner.failure_context(unsafe)
+                self.assertNotIn("mount_step=", safe_reason)
+                self.assertNotIn("SECRET", safe_reason)
 
     def test_loaded_failure_diagnostic_stays_with_current_phase(self):
         log = (

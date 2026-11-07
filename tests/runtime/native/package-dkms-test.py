@@ -30,11 +30,12 @@ STAGES = (
 # Upgrade publication can exceed the old 8-second test deadline on this host.
 # Keep crash-injection waits bounded while allowing durable filesystem work to finish.
 DURABLE_CHECKPOINT_TIMEOUT_SECONDS = 30
-# Keep the ordinary fixture watchdog unchanged. Only known compressed-DKMS
-# variants get the wider budget proven necessary by the controlled 16-second
-# fsync witness below. Process-group reaping after a watchdog kill is bounded
-# independently so timeout cleanup cannot become an unbounded wait.
-PACKAGE_TRANSACTION_TIMEOUT_SECONDS = 15
+# Two different uncompressed packaging fixtures exceeded 15 seconds on
+# independent slower hosts during exact-source qualification. Bound ordinary
+# durable transactions to 60 seconds without relaxing negative checks or the
+# explicit short watchdogs used by fault-injection tests.
+# Process-group reaping after a watchdog kill remains independently bounded.
+PACKAGE_TRANSACTION_TIMEOUT_SECONDS = 60
 COMPRESSED_DKMS_TRANSACTION_TIMEOUT_SECONDS = 60
 PACKAGE_PROCESS_GROUP_REAP_TIMEOUT_SECONDS = 8
 COMPRESSED_DKMS_SUFFIXES = frozenset((".zst", ".xz", ".gz"))

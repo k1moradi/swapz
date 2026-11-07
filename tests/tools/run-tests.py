@@ -2556,12 +2556,21 @@ def failure_context(output, *, loaded=True, default_phase=None,
 
     primary_lifecycle_command_failure = None
     primary_prepare_failure = None
+    mount_inventory_failure = None
     if loaded:
         # Preserve only fixed coordinator phases and strerror-shaped text;
         # never copy paths, IDs or arbitrary child output. The prepare helper
         # validates and re-emits its phase record, but intentionally keeps the
         # coordinator wrapper private, so the report must not depend on it.
         for line in diagnostic_lines:
+            # Never trust host paths or task identities from a child marker.
+            mount_match = re.fullmatch(
+                r"SWAPZ_PRIMARY_MOUNT_INVENTORY_FAILURE "
+                r"step=(namespace-fd|root-object|init-root|root-walk|"
+                r"mount-list|listed-mount|root-revalidation) errno=(11)",
+                line.strip())
+            if mount_match and mount_inventory_failure is None:
+                mount_inventory_failure = mount_match.groups()
             prepare_match = re.fullmatch(
                 r"PRIMARY_PREPARE=FAILED phase=([a-z0-9-]{1,64}) "
                 r"errno=([0-9]{1,3}) error=([A-Za-z0-9 .()_-]{1,64})"
@@ -2799,7 +2808,14 @@ def failure_context(output, *, loaded=True, default_phase=None,
                     reason = (
                         f"{label}: coordinator preparation phase="
                         f"{detail_phase} errno={error_number} "
-                        f"error={detail_error}")[:180]
+                        f"error={detail_error}")
+                    if (detail_phase in (
+                            "cross-namespace-mount-inventory",
+                            "repeated-cross-namespace-mount-inventory") and
+                            mount_inventory_failure is not None and
+                            mount_inventory_failure[1] == error_number):
+                        reason += f"; mount_step={mount_inventory_failure[0]}"
+                    reason = reason[:220]
                 elif primary_lifecycle_command_failure is not None:
                     operation, coordinator_error = (
                         primary_lifecycle_command_failure)
@@ -3185,15 +3201,31 @@ def first_unittest_failure_details(output):
                 r"compressed_dkms_durable_io|explicit_test_watchdog) "
                 r"final_process_disposition=(reaped_exit_-?[0-9]{1,3}|"
                 r"kill_sent_reap_timeout) "
-                r"first_cause=fixture_watchdog_expired$", traceback)
+                r"original_process_exit_status=(still_running|-?[0-9]{1,3}) "
+                r"fixture_phase=(command_watchdog|pipe_drain) "
+                r"recovery_disposition=journal_not_assessed "
+                r"first_cause=(fixture_watchdog_expired|"
+                r"package_exit_before_pipe_drain)$", traceback)
             if timeout:
-                codec, operation, elapsed, budget, budget_reason, disposition = (
-                    timeout.groups())
-                details.append(
-                    f"Package fixture watchdog: action={operation} "
-                    f"elapsed={elapsed}s budget={budget}s codec={codec} "
-                    f"budget_reason={budget_reason} "
-                    f"process_disposition={disposition}")
+                (codec, operation, elapsed, budget, budget_reason, disposition,
+                 original_status, fixture_phase, first_cause) = timeout.groups()
+                # Distinguish an active shell from an exited shell whose child
+                # still owns an output pipe; never replace the first failure.
+                if ((fixture_phase == "command_watchdog" and
+                        original_status == "still_running" and
+                        first_cause == "fixture_watchdog_expired") or
+                        (fixture_phase == "pipe_drain" and
+                         original_status != "still_running" and
+                         first_cause == "package_exit_before_pipe_drain")):
+                    details.append(
+                        f"Package fixture watchdog: action={operation} "
+                        f"elapsed={elapsed}s budget={budget}s codec={codec} "
+                        f"budget_reason={budget_reason} "
+                        f"process_disposition={disposition} "
+                        f"phase={fixture_phase} first_cause={first_cause} "
+                        f"original_status={original_status} "
+                        "recovery=journal_not_assessed")
+
     return details
 
 

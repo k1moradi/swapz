@@ -261,6 +261,16 @@ loaded evidence and does not prove kernel mapper/swap ownership or teardown.
 
 ### Primary cross-namespace mount admission evidence (issue #94)
 
+On an ambiguous pinned mount-namespace scan, production must continue
+to refuse admission. For an EAGAIN from the direct namespace walk, emit a
+fail-only, bounded mount-scan step and numeric errno, without host, PID,
+namespace, mount or device identifiers. The loaded reporter may attribute
+that step only to a matching coordinator initial/repeated cross-namespace
+preparation failure; it must reject malformed or contradictory child markers.
+This diagnostic never upgrades a BLOCKED run into permission to retry or
+mutate physical storage.
+
+
 The direct-C mount reader fixture must exercise the actual production reader
 with private, regular-file proc inventories: selected partition and parent
 only in a foreign visible PID, a sibling before a selected row, an unreadable
@@ -1728,6 +1738,16 @@ coverage must include SSE2, AVX2, AVX-512 and ARM64/NEON where hardware is
 available.
 
 ## Required stages
+
+Packaging rootless test fixtures use a 60-second bounded default transaction
+watchdog after two different ordinary package test cases timed out on separate
+slower hosts at the prior 15-second limit. Explicit short fault-injection
+timeouts still take precedence; kill-and-reap remains separately bounded.
+An expired watchdog is not by itself proof that the package is defective:
+authenticated console diagnostics must distinguish a still-running command
+from a package process that exited while a descendant retained output pipes,
+preserving the original exit, bounded budget and recovery-not-assessed state.
+
 
 A complete run includes:
 

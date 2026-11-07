@@ -4096,6 +4096,7 @@ static int swapz_primary_mountinfo_full_root(
 	int namespace_fd = -1;
 	int result = -1;
 	int saved_errno = 0;
+	const char *failure_step = "namespace-fd";
 
 	_Static_assert(sizeof(struct mount_id_request) == mount_id_request_bytes,
 		       "mount ID request ABI size changed");
@@ -4141,6 +4142,7 @@ static int swapz_primary_mountinfo_full_root(
 		errno = EAGAIN;
 		goto out;
 	}
+	failure_step = "root-object";
 	if (statx(AT_FDCWD, root_path, 0, statx_root_request_mask,
 		  &root_info) < 0)
 		goto out;
@@ -4153,6 +4155,7 @@ static int swapz_primary_mountinfo_full_root(
 	current_mount_id = root_info.stx_mnt_id;
 	root_mount_id = current_mount_id;
 	if (require_process_root_matches_init) {
+		failure_step = "init-root";
 		if (statx(AT_FDCWD, "/proc/1/root", 0,
 			  statx_root_request_mask, &init_root_info) < 0)
 			goto out;
@@ -4174,6 +4177,7 @@ static int swapz_primary_mountinfo_full_root(
 		}
 	}
 
+	failure_step = "root-walk";
 	for (size_t depth = 0; depth < namespace_parent_depth_max; ++depth) {
 		dev_t mounted_device;
 
@@ -4226,6 +4230,7 @@ static int swapz_primary_mountinfo_full_root(
 		.namespace_fd = (uint32_t)namespace_fd,
 		.mount_id = namespace_root_mount_id,
 	};
+	failure_step = "mount-list";
 	for (;;) {
 		long listed_mounts;
 
@@ -4259,6 +4264,7 @@ static int swapz_primary_mountinfo_full_root(
 				.mount_id = mount_ids[index],
 				.parameter = statmount_required_mask,
 			};
+			failure_step = "listed-mount";
 			if (syscall(statmount_syscall_number, &request, &mount_status,
 				    sizeof(mount_status), 0U) < 0)
 				goto out;
@@ -4279,8 +4285,10 @@ static int swapz_primary_mountinfo_full_root(
 			}
 		}
 		request.mount_id = namespace_root_mount_id;
+		failure_step = "mount-list";
 	}
 	if (require_process_root_matches_init) {
+		failure_step = "root-revalidation";
 		if (statx(AT_FDCWD, root_path, 0, statx_root_request_mask,
 			  &confirmed_root_info) < 0 ||
 		    statx(AT_FDCWD, "/proc/1/root", 0,
@@ -4327,8 +4335,19 @@ out:
 		saved_errno = errno ? errno : EIO;
 		result = -1;
 	}
-	if (result < 0)
+	if (result < 0) {
+		/*
+		 * Refuse inconsistent mount views. Log only a fixed scan step
+		 * and errno, not mount, PID, namespace or device identities.
+		 * Restore the original errno after reporting the failure.
+		 */
+		if (saved_errno == EAGAIN)
+			(void)fprintf(stderr,
+				      "SWAPZ_PRIMARY_MOUNT_INVENTORY_FAILURE "
+				      "step=%s errno=%d\n",
+				      failure_step, saved_errno);
 		errno = saved_errno;
+	}
 	return result;
 #endif
 #endif
