@@ -838,8 +838,8 @@ exec "$SWAPZ_REAL_RM" "$@"
             test="test_committed_journal_then_verified_package_recovery_allows_reentry",
             stage=LIFECYCLE_PHASE)
         evidence = log.read_text()
-        self.assertIn("unittest_kind=FAIL\\n", evidence)
-        self.assertIn("first_errno=unavailable\\n", evidence)
+        self.assertIn("unittest_kind=FAIL\n", evidence)
+        self.assertIn("first_errno=unavailable\n", evidence)
         self.assertIn(PRIVATE_SENTINEL, evidence)
         self.assertIn(LATER_TEARDOWN_SENTINEL, evidence)
         self.assertNotIn("AFTER_PACKAGE", result.stdout)
@@ -849,13 +849,13 @@ exec "$SWAPZ_REAL_RM" "$@"
         log = self.assert_report(
             result, status=39, reason="nonzero_exit", stage=LIFECYCLE_PHASE)
         self.assertIn(PRIVATE_SENTINEL, log.read_text())
-        self.assertIn("unittest_kind=unavailable\\n", log.read_text())
+        self.assertIn("unittest_kind=unavailable\n", log.read_text())
 
     def test_lifecycle_audit_pass_preserves_streams(self):
         result = self.invoke("pass", stage=LIFECYCLE_PHASE)
         self.assertEqual(result.returncode, 0, result.stderr)
-        self.assertEqual(result.stdout, "SYNTHETIC_STDOUT\\nAFTER_PACKAGE\\n")
-        self.assertEqual(result.stderr, "SYNTHETIC_STDERR\\n")
+        self.assertEqual(result.stdout, "SYNTHETIC_STDOUT\nAFTER_PACKAGE\n")
+        self.assertEqual(result.stderr, "SYNTHETIC_STDERR\n")
         self.assertEqual(list(self.root.glob("build/tests/rootless-failure.*")), [])
 
     def test_primary_pass_preserves_streams_and_removes_capture(self):
