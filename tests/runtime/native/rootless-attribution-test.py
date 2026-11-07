@@ -161,6 +161,22 @@ PY
         "FAIL: test_second (__main__.PackageLifecycle.test_second) (phase='cleanup')" \
         'AssertionError: should not override timeout' >&2
       return 1 ;;
+    underscored_phase_ordered)
+      # Real PackageLifecycle phases use underscores. Preserve verbose
+      # execution order even though unittest groups ERROR details before FAIL.
+      printf '%s\n' \
+        "test_first (__main__.PackageLifecycle.test_first) (phase='detached_signature') ... FAIL" \
+        "test_second (__main__.PackageLifecycle.test_second) (phase='cleanup') ... ERROR" \
+        '======================================================================' \
+        "ERROR: test_second (__main__.PackageLifecycle.test_second) (phase='cleanup')" \
+        'Traceback (most recent call last):' \
+        'OSError: LATER_TEARDOWN_PRIVATE_PAYLOAD' \
+        '======================================================================' \
+        "FAIL: test_first (__main__.PackageLifecycle.test_first) (phase='detached_signature')" \
+        'Traceback (most recent call last):' \
+        'AssertionError: PRIVATE_ONLY_TRACEBACK_PAYLOAD' \
+        '======================================================================' >&2
+      return 58 ;;
     oversized)
       head -c 307200 /dev/zero | tr '\0' 'x' >&2
       printf '\n%s\n' \
@@ -653,6 +669,25 @@ exec "$SWAPZ_REAL_RM" "$@"
         self.assert_report(result, status=1,
                            reason="unittest_timeout", subtest="prepare",
                            test="test_first")
+
+    def test_underscored_phase_progress_keeps_first_assertion(self):
+        result = self.invoke("underscored_phase_ordered")
+        log = self.assert_report(
+            result, status=58, reason="unittest_assertion",
+            test="test_first")
+        evidence = log.read_text()
+        self.assertLess(
+            evidence.index("test_first (__main__.PackageLifecycle.test_first)"),
+            evidence.index("test_second (__main__.PackageLifecycle.test_second)"))
+        self.assertLess(evidence.index("ERROR: test_second"),
+                        evidence.index("FAIL: test_first"))
+        self.assertIn("AssertionError: " + PRIVATE_SENTINEL, evidence)
+        self.assertIn("OSError: " + LATER_TEARDOWN_SENTINEL, evidence)
+        self.assertIn("unittest_kind=FAIL\n", evidence)
+        marker = next(line for line in result.stderr.splitlines()
+                      if line.startswith("FAIL: rootless "))
+        self.assertIn("subtest=unavailable test=test_first", marker)
+        self.assertNotIn("detached_signature", marker)
 
     def test_real_subprocess_timeout_expired_is_classified(self):
         result = self.invoke("timeout")

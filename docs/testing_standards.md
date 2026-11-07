@@ -1725,7 +1725,14 @@ because its detailed block is printed first. The progress and detailed method
 must agree and belong to the currently executing source-controlled suite
 class; expected negative-test output from another class cannot claim the
 active phase. A progress-only line without a matching detailed block must
-remain unauthenticated rather than claiming a prior fixture's test identity. Synthetic controls without progress
+remain unauthenticated rather than claiming a prior fixture's test identity.
+Private progress/detail matching must accept source-controlled unittest
+`phase=` labels containing underscores (for example `detached_signature`)
+so their execution-order record cannot be skipped in favor of a later ERROR.
+The existing public rootless-marker subtest grammar remains lowercase
+alphanumeric plus hyphen; an authenticated underscore-bearing phase therefore
+stays private and is reported publicly as `subtest=unavailable`, without
+losing the authenticated test name or failure kind. Synthetic controls without progress
 records may use the first detailed block as a compatibility fallback. Retain the
 allowlisted execution-first unittest name and first assertion or exception
 privately. The official native-stage diagnostic binds unittest identity to the failing

@@ -139,10 +139,10 @@ classify_rootless_private_unittest_failure() {
   local diagnostic_path=$1
   local line
   local detailed_header_regex="^(FAIL|ERROR): (test_[A-Za-z0-9_]{1,96}) \\(__main__\\.(PackageLifecycle|PrimaryRealSwapContracts|SourceAdmissionPeerOwnership|GeneratorPublicationTest)\\.(test_[A-Za-z0-9_]{1,96})\\)"
-  local progress_regex="^[[:space:]]*(test_[A-Za-z0-9_]{1,96}) \\(__main__\\.(PackageLifecycle|PrimaryRealSwapContracts|SourceAdmissionPeerOwnership|GeneratorPublicationTest)\\.(test_[A-Za-z0-9_]{1,96})\\)( \\(phase='([a-z0-9-]{1,64})'\\))? \\.\\.\\. (FAIL|ERROR)$"
+  local progress_regex="^[[:space:]]*(test_[A-Za-z0-9_]{1,96}) \\(__main__\\.(PackageLifecycle|PrimaryRealSwapContracts|SourceAdmissionPeerOwnership|GeneratorPublicationTest)\\.(test_[A-Za-z0-9_]{1,96})\\)( \\(phase='([a-z0-9_-]{1,64})'\\))? \\.\\.\\. (FAIL|ERROR)$"
   # Other generator subtest keys identify a failed method, never public data.
   local generator_progress_regex="^[[:space:]]*(test_[A-Za-z0-9_]{1,96}) \\(__main__\\.GeneratorPublicationTest\\.(test_[A-Za-z0-9_]{1,96})\\)( \\([^[:cntrl:]]{1,192}\\))? \\.\\.\\. (FAIL|ERROR)$"
-  local subtest_regex="\\(phase='([a-z0-9-]{1,64})'\\)$"
+  local subtest_regex="\\(phase='([a-z0-9_-]{1,64})'\\)$"
   local errno_regex='^(OSError|PermissionError|FileNotFoundError): \[Errno ([1-9][0-9]{0,3})\]'
   local errno_candidate
   local expected_unittest_class=
@@ -226,7 +226,13 @@ classify_rootless_private_unittest_failure() {
         # Authenticate identity only after a matching detailed failure block.
         rootless_classified_test=$header_test
         rootless_classified_kind=$header_kind
-        rootless_classified_subtest=$first_progress_subtest
+        # Real unittest phase labels may contain underscores. They are useful
+        # for private execution-order matching, but the existing public marker
+        # grammar intentionally exposes only lowercase alnum/hyphen subtests.
+        rootless_classified_subtest=unavailable
+        if [[ $first_progress_subtest =~ ^[a-z0-9-]{1,64}$ ]]; then
+          rootless_classified_subtest=$first_progress_subtest
+        fi
         if [[ $header_kind == FAIL ]]; then
           rootless_classified_reason=unittest_assertion
         else
