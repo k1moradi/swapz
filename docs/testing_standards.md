@@ -764,6 +764,18 @@ identity; neither alone proves message authorship. The parent still lacks
 independent authentication of the privileged **request** writer, and no
 rootless synthetic approval supplies selected-card/reader or last-use physical
 evidence. Physical source-only admission remains unconditionally BLOCKED.
+A deterministic two-card/two-reader rootless control must give both devices
+the same historical PARTUUID, major:minor, size and model but distinct
+synthetic physical identities; both must refuse at the physical identity gate
+after a valid source check, with `card_reader_identity=UNPROVEN` and
+`physical=BLOCKED`. Extra child-claimed target, reader or authorization-token
+fields must instead fail first at request parsing, before Git provenance or
+any reply. Missing live /proc peer identity retains its original numeric errno,
+while mismatched peer UID refuses before the request is read. These controls
+prove only source-parent refusal: synthetic identity labels are not hardware
+serials and cannot serve as owner authorization. Independent owner-protected
+immutable card **and** reader binding, plus fresh observation tied to the
+exact opened target at last safe use, remain required on the physical host.
 
 The current wire schema carries source, helper and control-input identity but
 no independently authenticated exact message sender, physical qualification

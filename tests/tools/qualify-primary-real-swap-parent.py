@@ -673,6 +673,9 @@ def _serve_admission(server: socket.socket,
                             "BLOCKED_PRIMARY_REAL_SWAP_PARENT=" + str(exc),
                             file=sys.stderr)
                         break
+                    # Historical PARTUUID, major:minor, geometry and model are
+                    # display facts, not owner-authenticated card/reader identity.
+                    # The child cannot supply the missing physical authority.
                     parent_rejected = True
                     child_exit = _child_exit_status(child)
                     _reply(
@@ -683,6 +686,7 @@ def _serve_admission(server: socket.socket,
                         f"physical_admission_identity:phase={expected_phase}:"
                         "expected=source_exact_sender_run_phase_target_required_evidence:"
                         "observed=source_connection_peer_phase_control_inputs_only:"
+                        "card_reader_identity=UNPROVEN:physical=BLOCKED:"
                         "errno=none:"
                         f"child_exit={child_exit if child_exit is not None else 'running'}:"
                         "authorization=BLOCKED:"

@@ -77,12 +77,14 @@ class SourceAdmissionPeerOwnership(unittest.TestCase):
             "executed_helper_sha256": self.HELPER_DIGEST,
         }
 
-    def run_exchange(self, peer_pid, requests, *, child=None, git_check=None):
+    def run_exchange(self, peer_pid, requests, *, child=None,
+                     git_check=None, peer_uid=0):
         stream = self.Stream(requests)
         connection = mock.MagicMock()
         # Kernel-returned SO_PEERCRED is modeled, not spoofed on a live socket.
         # No real root peer or privileged operation is ever created.
-        connection.getsockopt.return_value = struct.pack("3i", peer_pid, 0, 0)
+        connection.getsockopt.return_value = struct.pack(
+            "3i", peer_pid, peer_uid, 0)
         connection.makefile.return_value = stream
         server = mock.Mock()
         server.accept.return_value = connection, None
@@ -125,6 +127,95 @@ class SourceAdmissionPeerOwnership(unittest.TestCase):
             diagnostic)
         self.assertIn("authorization=BLOCKED", diagnostic)
         self.assertEqual(check.call_count, 1)
+
+    def test_matching_historical_device_labels_do_not_authorize_another_card(self):
+        # Two synthetic card/reader pairs collide on every historical display
+        # field. Neither pair has independently owner-authorized live identity.
+        historical_display = {
+            "partuuid": "a1b2c3d4", "major_minor": "8:1",
+            "size_bytes": 32 * 1024**3, "model": "synthetic-reader-model",
+        }
+        synthetic_devices = (
+            {"card": "synthetic-card-A", "reader": "synthetic-reader-A",
+             "historical": historical_display},
+            {"card": "synthetic-card-B", "reader": "synthetic-reader-B",
+             "historical": dict(historical_display)},
+        )
+        self.assertEqual(
+            synthetic_devices[0]["historical"],
+            synthetic_devices[1]["historical"])
+        self.assertNotEqual(
+            (synthetic_devices[0]["card"], synthetic_devices[0]["reader"]),
+            (synthetic_devices[1]["card"], synthetic_devices[1]["reader"]))
+        for device in synthetic_devices:
+            with self.subTest(card=device["card"]):
+                result, responses, diagnostic, _child, check = self.run_exchange(
+                    os.getpid(), [self.request("initial")])
+                self.assertEqual(result, 2)
+                self.assertEqual(len(responses), 1)
+                self.assertEqual(responses[0]["status"], "BLOCKED")
+                self.assertEqual(
+                    responses[0]["reason"], "physical_admission_identity_missing")
+                self.assertIn("physical_admission_identity:phase=initial",
+                              diagnostic)
+                self.assertIn("card_reader_identity=UNPROVEN", diagnostic)
+                self.assertIn("physical=BLOCKED", diagnostic)
+                self.assertNotIn("synthetic-card-", diagnostic)
+                self.assertEqual(check.call_count, 1)
+
+    def test_untrusted_child_card_claim_fails_at_request_gate(self):
+        # Child-supplied selectors, invented reader IDs and stale "tokens"
+        # cannot extend the exact source-only wire schema into authorization.
+        historical_display = {
+            "partuuid": "a1b2c3d4", "major_minor": "8:1",
+            "size_bytes": 32 * 1024**3, "model": "synthetic-reader-model",
+        }
+        untrusted_claims = (
+            {"selected_device": dict(historical_display)},
+            {"reader_serial": "synthetic-invented-serial"},
+            {"immutable_authorization_token": "synthetic-stale-token"},
+        )
+        for claim in untrusted_claims:
+            with self.subTest(field=next(iter(claim))):
+                request = self.request("initial")
+                request.update(claim)
+                result, responses, diagnostic, _child, check = self.run_exchange(
+                    os.getpid(), [request])
+                self.assertEqual(result, 2)
+                self.assertFalse(responses)
+                self.assertIn("source admission request identity is invalid",
+                              diagnostic)
+                self.assertNotIn("physical_admission_identity:", diagnostic)
+                self.assertNotIn("synthetic-", diagnostic)
+                check.assert_not_called()
+
+    def test_untrusted_peer_uid_fails_before_source_request(self):
+        result, responses, diagnostic, child, check = self.run_exchange(
+            os.getpid(), [self.request("initial")], peer_uid=1000)
+        self.assertEqual(result, 2)
+        self.assertFalse(responses)
+        self.assertIn("source admission peer is not privileged", diagnostic)
+        self.assertNotIn("physical_admission_identity:", diagnostic)
+        child.terminate.assert_called_once_with()
+        check.assert_not_called()
+
+    def test_unavailable_peer_identity_preserves_original_errno(self):
+        private_error = "private-synthetic-process-location"
+        with mock.patch.object(
+                parent.Path, "read_text",
+                side_effect=FileNotFoundError(2, private_error)):
+            result, responses, diagnostic, _child, check = self.run_exchange(
+                os.getpid(), [self.request("initial")])
+        self.assertEqual(result, 2)
+        self.assertFalse(responses)
+        self.assertIn(
+            "source_admission_peer_identity:phase=authenticated_channel",
+            diagnostic)
+        self.assertIn("observed=unavailable_process_identity:errno=2",
+                      diagnostic)
+        self.assertIn("authorization=BLOCKED", diagnostic)
+        self.assertNotIn(private_error, diagnostic)
+        check.assert_not_called()
 
     def test_source_change_precedes_identity_missing_refusal(self):
         result, responses, diagnostic, _child, check = self.run_exchange(
