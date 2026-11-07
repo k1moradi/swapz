@@ -168,6 +168,8 @@ static struct {
 	int descriptor_mode, descriptor_error, close_error;
 	/* Deterministic failures on the synthetic opened 4,096-byte descriptor. */
 	int read_error, read_error_after_write, write_error, sync_error;
+	/* A positive short count models torn publication, not a new write. */
+	size_t short_write_bytes;
 	int observed_descriptor_flags;
 	unsigned int descriptor_queries;
 	unsigned int swap_inventory_checks_at_descriptor_query;
@@ -1218,17 +1220,21 @@ static void test_real_cli_io_faults_keep_recovery_evidence(void)
 		int close_error, expected_status, expected_errno;
 		const char *expected_stage;
 		unsigned int expected_reads, expected_writes, expected_syncs;
+		size_t short_write_bytes;
 	} cases[] = {
 		{ "read-before-write", EIO, 0, 0, 0, EOVERFLOW,
-		  1, EIO, "header read", 1U, 0U, 0U },
+		  1, EIO, "header read", 1U, 0U, 0U, 0U },
 		{ "torn-header-write", 0, 0, EIO, 0, EOVERFLOW,
-		  3, EIO, "write", 1U, 1U, 0U },
+		  3, EIO, "write", 1U, 1U, 0U, 0U },
+		{ "short-header-write", 0, 0, 0, 0, EOVERFLOW,
+		  3, EIO, "write", 1U, 1U, 0U,
+		  SWAPZ_SUPERBLOCK_BYTES / 2U },
 		{ "durability-sync", 0, 0, 0, ENOSPC, EOVERFLOW,
-		  3, ENOSPC, "durability", 1U, 1U, 1U },
+		  3, ENOSPC, "durability", 1U, 1U, 1U, 0U },
 		{ "readback-after-write", ENODATA, 1, 0, 0, EOVERFLOW,
-		  3, ENODATA, "durability", 2U, 1U, 1U },
+		  3, ENODATA, "durability", 2U, 1U, 1U, 0U },
 		{ "close-after-write", 0, 0, 0, 0, ENOTCONN,
-		  3, ENOTCONN, "durability", 2U, 1U, 1U },
+		  3, ENOTCONN, "durability", 2U, 1U, 1U, 0U },
 	};
 
 	for (size_t index = 0; index < sizeof(cases) / sizeof(cases[0]);
@@ -1250,6 +1256,8 @@ static void test_real_cli_io_faults_keep_recovery_evidence(void)
 		admission_fixture.read_error_after_write =
 			cases[index].read_error_after_write;
 		admission_fixture.write_error = cases[index].write_error;
+		admission_fixture.short_write_bytes =
+			cases[index].short_write_bytes;
 		admission_fixture.sync_error = cases[index].sync_error;
 		admission_fixture.close_error = cases[index].close_error;
 		errno_length = snprintf(errno_field, sizeof(errno_field),
@@ -1290,18 +1298,24 @@ static void test_real_cli_io_faults_keep_recovery_evidence(void)
 		      !strstr(report, "no header write attempted"))) ||
 		    (cases[index].expected_status == 3 &&
 		     (!strstr(report, "UNCERTAIN:") ||
-		      !strstr(report, "RECOVERY REQUIRED"))) ||
-		    (cases[index].write_error &&
+		      !strstr(report, "action=RECOVERY REQUIRED") ||
+		      strstr(report, "REFUSED:") ||
+		      strstr(report, "swapoff") ||
+		      strstr(report, "dmsetup remove --force") ||
+		      strstr(report, "automatic format retry"))) ||
+		    ((cases[index].write_error || cases[index].short_write_bytes) &&
 		     memcmp(admission_fixture.block_zero +
 				    SWAPZ_SUPERBLOCK_BYTES / 2U,
 			    original_header + SWAPZ_SUPERBLOCK_BYTES / 2U,
 			    SWAPZ_SUPERBLOCK_BYTES / 2U)) ||
 		    (!cases[index].write_error &&
+		     !cases[index].short_write_bytes &&
 		     cases[index].expected_writes &&
 		     !swapz_sb_valid(admission_fixture.block_zero,
 				     admission_fixture.geometry_bytes)) ||
 		    ((cases[index].expected_status == 1 ||
-		      cases[index].write_error || cases[index].sync_error ||
+		      cases[index].write_error || cases[index].short_write_bytes ||
+		      cases[index].sync_error ||
 		      cases[index].read_error_after_write) &&
 		     !strstr(report, "CLEANUP FAILED: close"))) {
 			fprintf(stderr, "FAIL: phase=synthetic-cli-io "
@@ -1471,6 +1485,12 @@ static ssize_t test_format_pwrite(int fd, const void *buffer, size_t length,
 			memcpy(admission_fixture.block_zero, buffer, length / 2U);
 			errno = admission_fixture.write_error;
 			return -1;
+		}
+		if (admission_fixture.short_write_bytes) {
+			assert(admission_fixture.short_write_bytes == length / 2U);
+			memcpy(admission_fixture.block_zero, buffer,
+			       admission_fixture.short_write_bytes);
+			return (ssize_t)admission_fixture.short_write_bytes;
 		}
 		memcpy(admission_fixture.block_zero, buffer, length);
 		return (ssize_t)length;
