@@ -1009,6 +1009,40 @@ static void fixture_bytes(const char *relative, const void *contents,
 	assert(fclose(stream) == 0);
 }
 
+/* Model a valid large mountinfo table: growing beyond the old 64 KiB
+ * reading buffer is not evidence of a mounted selected device.
+ */
+static void fixture_large_valid_mountinfo(const char *relative)
+{
+	char path[PATH_MAX];
+	FILE *stream;
+	size_t bytes_written;
+	unsigned int mount_identifier = 1000U;
+	const char *root_entry = "36 25 259:0 / / rw - ext4 /dev/root rw\n";
+	int length = snprintf(path, sizeof(path), "%s/%s",
+			      fixture_proc_root, relative);
+
+	assert(length > 0 && (size_t)length < sizeof(path));
+	stream = fopen(path, "wb");
+	assert(stream != NULL);
+	assert(fputs(root_entry, stream) >= 0);
+	bytes_written = strlen(root_entry);
+	while (bytes_written <= SWAPZ_PRIMARY_MOUNTINFO_INITIAL_BYTES + 4096U) {
+		char row[160];
+		int row_length = snprintf(row, sizeof(row),
+					  "%u 36 0:42 / /child%u rw - tmpfs tmpfs rw\n",
+					  mount_identifier, mount_identifier);
+
+		assert(row_length > 0 && (size_t)row_length < sizeof(row));
+		assert(fwrite(row, 1U, (size_t)row_length, stream) ==
+		       (size_t)row_length);
+		bytes_written += (size_t)row_length;
+		++mount_identifier;
+	}
+	assert(bytes_written < SWAPZ_PRIMARY_MOUNTINFO_BUFFER_BYTES);
+	assert(fclose(stream) == 0);
+}
+
 /* Exceed the production per-table cap with bounded, fixed-size writes. */
 static void fixture_oversized_file(const char *relative)
 {
@@ -2873,6 +2907,12 @@ int main(void)
 		     "36 25 259:0 / / rw - ext4 /dev/root rw\n"
 		     "37 36 8:1 / /selected rw - ext4 /dev/selected");
 	expect_mount_admission("truncated local mount row", 0, EINVAL);
+	fixture_reset();
+	fixture_large_valid_mountinfo("self/mountinfo");
+	expect_mount_admission("large valid local mount table", 1, 0);
+	fixture_reset();
+	fixture_large_valid_mountinfo("3031/mountinfo");
+	expect_mount_admission("large valid remote mount table", 1, 0);
 	fixture_reset();
 	fixture_oversized_file("3031/mountinfo");
 	expect_mount_admission("oversized remote mount table", 0, EOVERFLOW);

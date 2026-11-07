@@ -117,7 +117,7 @@ verify_prepare_failure_diagnostic() {
 		if [[ "$line" == "SWAPZ_PRIMARY_MOUNT_INVENTORY_FAILURE"* ]]; then
 			mount_diagnostic_count=$((mount_diagnostic_count + 1))
 			# Source-controlled fields only: no PID, path, namespace or device.
-			if [[ ! "$line" =~ ^SWAPZ_PRIMARY_MOUNT_INVENTORY_FAILURE[[:space:]]step=(namespace-fd|root-object|init-root|root-walk|mount-list|listed-mount|root-revalidation)[[:space:]]errno=(11|75)([[:space:]]reason=(init-root-statx-race|process-root-not-directory|init-root-not-directory|root-inode-mismatch|root-device-mismatch|process-root-device-mismatch|init-root-device-mismatch|root-superblock-device-mismatch|statmount-buffer-too-small|root-parent-depth-limit|mount-count-limit|listmount-overflow))?([[:space:]]peer_root=(matches-process|differs-process))?$ ]]; then
+			if [[ ! "$line" =~ ^SWAPZ_PRIMARY_MOUNT_INVENTORY_FAILURE[[:space:]]step=(namespace-fd|root-object|init-root|root-walk|mount-list|listed-mount|root-revalidation|mountinfo-read|mountinfo-aggregate)[[:space:]]errno=(11|75)([[:space:]]reason=(init-root-statx-race|process-root-not-directory|init-root-not-directory|root-inode-mismatch|root-device-mismatch|process-root-device-mismatch|init-root-device-mismatch|root-superblock-device-mismatch|statmount-buffer-too-small|root-parent-depth-limit|mount-count-limit|listmount-overflow|per-table-byte-limit|read-overflow|aggregate-byte-limit))?([[:space:]]peer_root=(matches-process|differs-process))?$ ]]; then
 				fail "prepare refusal has a malformed mount-inventory diagnostic"
 			fi
 			mount_step="${BASH_REMATCH[1]}"
@@ -144,7 +144,10 @@ verify_prepare_failure_diagnostic() {
 				statmount-buffer-too-small:listed-mount|\
 				root-parent-depth-limit:root-walk|\
 				mount-count-limit:mount-list|\
-				listmount-overflow:mount-list)
+				listmount-overflow:mount-list|\
+				per-table-byte-limit:mountinfo-read|\
+				read-overflow:mountinfo-read|\
+				aggregate-byte-limit:mountinfo-aggregate)
 					;;
 				*)
 					fail "prepare overflow diagnostic disagrees with scan step"
@@ -1004,9 +1007,21 @@ assert_repeat_recovery_is_safe() {
 		"$CONTROL" primary recover 2>&1)"
 	rc=$?
 	set -e
-	[[ "$rc" -eq 2 &&
-	   "$output" == "BLOCKED: primary-swap recovery failed: Operation not permitted" ]] ||
-		fail "repeated recovery after $phase lacked the expected COMPLETE refusal"
+	# A COMPLETE refusal emits one structured failure record and one
+	# wrapper. Never expose unvalidated child output or transaction identity.
+	local expected_diagnostic="PRIMARY_RECOVER=FAILED phase=admission errno=1 error=Operation not permitted original_errno=1 persistence_boundary=none durable=UNOBSERVED mapper=UNOBSERVED swap=UNOBSERVED"
+	local expected_wrapper="BLOCKED: primary-swap recovery failed: Operation not permitted"
+	if [[ "$rc" -ne 2 ||
+	      "$output" != "$expected_diagnostic"$'\n'"$expected_wrapper" ]]; then
+		local observed_diagnostic=missing
+		local observed_wrapper=missing
+
+		[[ "$output" != *"PRIMARY_RECOVER=FAILED"* ]] ||
+			observed_diagnostic=present
+		[[ "$output" != *"BLOCKED: primary-swap recovery failed:"* ]] ||
+			observed_wrapper=present
+		fail "repeated recovery after $phase expected=COMPLETE-admission-refusal-with-structured-diagnostic observed_diagnostic=$observed_diagnostic observed_wrapper=$observed_wrapper child_exit=$rc"
+	fi
 	after_state="$(sha256sum "$RECOVERY_BASE/primary-state.json" | awk '{print $1}')" ||
 		fail "cannot hash COMPLETE state after repeated recovery"
 	after_swaps="$(swapz_swap_inventory_identity /proc/swaps)" ||

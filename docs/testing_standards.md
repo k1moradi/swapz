@@ -256,8 +256,14 @@ the current COMPLETE recovery rejection to occur before mapper/swap cleanup
 calls. Fresh fixture processes must remain BLOCKED with byte-exact COMPLETE
 state whether the unconfirmed unlink is modeled as persisted or the prior
 marker is modeled as present, and repeat attempts must preserve that same
-private state. This exposes an owner-release retry/progress gap; it is not
-loaded evidence and does not prove kernel mapper/swap ownership or teardown.
+private state. The loaded repeated-recovery-after-COMPLETE check must require
+process exit 2, the fixed `PRIMARY_RECOVER=FAILED phase=admission errno=1`
+record with honest UNOBSERVED resource fields and its matching
+`BLOCKED: primary-swap recovery failed: Operation not permitted` line.
+No extra sideband output is accepted; a mismatch reports only bounded marker
+presence and exit status, never arbitrary coordinator output. This exposes
+an owner-release retry/progress gap; it is not loaded evidence and does not
+prove kernel mapper/swap ownership or teardown.
 
 ### Primary cross-namespace mount admission evidence (issue #94)
 
@@ -374,7 +380,15 @@ A production scanner must enumerate those task views (or
 establish equivalent complete namespace coverage) with the same bounded,
 fail-closed rules. Count thread-group leaders and non-leader tasks against one
 4,194,304-entry ceiling, and apply the aggregate 64 MiB mountinfo-byte limit
-across parsed leader and task tables. Revalidate each task's namespace identity
+across parsed leader and task tables. A single opened table may exceed the
+ordinary 64 KiB stack read buffer: grow to no more than 1 MiB with allocation
+only when required, accept only a complete, strictly parsed table, and refuse
+larger tables with EOVERFLOW. An opened table at the old 64 KiB boundary
+must not be mistaken for an unsafe/empty table; fixtures must include valid
+tables above 64 KiB and oversized tables above 1 MiB. Preserve the 64 MiB
+aggregate gate and surface fixed, host-private-ID-free reasons
+`per-table-byte-limit`, `read-overflow` or `aggregate-byte-limit` with
+errno 75 on `mountinfo-read` or `mountinfo-aggregate` steps. Revalidate each task's namespace identity
 after reading its mountinfo; a task that changes namespace during the read must
 refuse the inventory. A task-directory enumeration failure or a still-present
 namespace whose mountinfo cannot be opened is ambiguity and must fail closed.
@@ -388,9 +402,10 @@ and its pinned direct namespace walk is complete. Do not treat
 that string after the same process chroots to the root of a child mount, and
 after a normal switched-root boot whose namespace top remains rootfs. For the
 coordinator, require its process-root directory to match `/proc/1/root` by
-device and inode, require the process-root and seeded `statmount` devices to
-match the root device parsed from self mountinfo, and revalidate both root
-objects plus the process-root unique mount ID after direct inventory. A stable
+device and inode, require the seeded `statmount` superblock device to
+match the root device parsed from self mountinfo independently of Btrfs inode
+`st_dev`, and revalidate both root objects plus the process-root unique
+mount ID after direct inventory. A stable
 switched-root child mount may pass only after the parent walk reaches the
 self-parent namespace root and `listmount`/`statmount` completes from that root.
 A different chroot root, a mismatch between mountinfo and the current `statx`

@@ -4768,6 +4768,33 @@ class ReportContract(unittest.TestCase):
                 self.assertNotIn("peer_root=", safe_reason)
                 self.assertNotIn("SECRET", safe_reason)
 
+    def test_mountinfo_table_overflow_reports_bounded_read_cause(self):
+        for step, cause in (
+                ("mountinfo-read", "per-table-byte-limit"),
+                ("mountinfo-read", "read-overflow"),
+                ("mountinfo-aggregate", "aggregate-byte-limit")):
+            with self.subTest(step=step, cause=cause):
+                transcript = (
+                    "START_LOADED_PRIMARY_NULLBLK_LIFECYCLE=prepare\n"
+                    "SWAPZ_PRIMARY_MOUNT_INVENTORY_FAILURE "
+                    f"step={step} errno=75 reason={cause}\n"
+                    "PRIMARY_PREPARE=FAILED "
+                    "phase=cross-namespace-mount-inventory "
+                    "errno=75 error=Value too large for defined data type\n"
+                    "BLOCKED_PRIMARY_NULLBLK_LIFECYCLE: "
+                    "preparation blocked\n"
+                )
+                phase, reason = runner.failure_context(transcript)
+                self.assertEqual(phase, "owned RAM primary lifecycle prepare")
+                self.assertIn(f"mount_step={step}", reason)
+                self.assertIn(f"mount_cause={cause}", reason)
+                invalid = transcript.replace(f"step={step}",
+                                             "step=init-root")
+                _, rejected = runner.failure_context(invalid)
+                self.assertNotIn("mount_step=", rejected)
+                self.assertNotIn("mount_cause=", rejected)
+                self.assertNotIn("/proc/", reason)
+
     def test_mount_inventory_overflow_reports_fixed_operation_and_cause(self):
         transcript = (
             "START_LOADED_PRIMARY_NULLBLK_LIFECYCLE=prepare\n"

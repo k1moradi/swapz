@@ -210,7 +210,10 @@ _Static_assert(SWAPZ_BLOCK_BYTES % 512U == 0U,
 #define SWAPZ_PRIMARY_SWAP_SIZE_KIB \
 	(swapz_primary_swap_size_kib(SWAPZ_PRIMARY_DEVICE_BYTES))
 #define SWAPZ_PRIMARY_PLAN_BUFFER_BYTES 16384U
-#define SWAPZ_PRIMARY_MOUNTINFO_BUFFER_BYTES 65536U
+/* Keep ordinary mount reads on stack; grow only for unusually large hosts.
+ * Both the per-table and 64 MiB aggregate read budgets remain bounded. */
+#define SWAPZ_PRIMARY_MOUNTINFO_INITIAL_BYTES 65536U
+#define SWAPZ_PRIMARY_MOUNTINFO_BUFFER_BYTES (1024U * 1024U)
 #define SWAPZ_PRIMARY_DM_MAPPERS_MAX 512U
 #define SWAPZ_PRIMARY_SWAP_ROWS_MAX 32U
 #define SWAPZ_PRIMARY_STATE_RECORD_MAX 4096U
@@ -3942,53 +3945,88 @@ static int swapz_primary_mountinfo_read_fd(
 	int fd, dev_t parent_device, struct swapz_primary_mount_facts *facts,
 	size_t *bytes_read)
 {
-	char buffer[SWAPZ_PRIMARY_MOUNTINFO_BUFFER_BYTES];
+	char initial_buffer[SWAPZ_PRIMARY_MOUNTINFO_INITIAL_BYTES];
+	char *buffer = initial_buffer;
+	char *expanded_buffer = NULL;
+	size_t capacity = sizeof(initial_buffer);
 	size_t used = 0;
 	int read_error = 0;
+	int parse_result;
+	int parse_errno;
 
 	if (fd < 0 || !facts) {
 		errno = EINVAL;
 		return -1;
 	}
-	while (used + 1U < sizeof(buffer)) {
-		ssize_t count = read(fd, buffer + used, sizeof(buffer) - used - 1U);
+	for (;;) {
+		ssize_t count;
 
+		if (used + 1U == capacity) {
+			if (capacity == SWAPZ_PRIMARY_MOUNTINFO_BUFFER_BYTES) {
+				/* Do not interpret a truncated table as a clear view.
+				 * Report no process, mount or host identifiers.
+				 */
+				(void)fprintf(stderr,
+					      "SWAPZ_PRIMARY_MOUNT_INVENTORY_FAILURE "
+					      "step=mountinfo-read errno=%d "
+					      "reason=per-table-byte-limit\n",
+					      EOVERFLOW);
+				read_error = EOVERFLOW;
+				break;
+			}
+			expanded_buffer =
+				malloc(SWAPZ_PRIMARY_MOUNTINFO_BUFFER_BYTES);
+			if (!expanded_buffer) {
+				read_error = errno ? errno : ENOMEM;
+				break;
+			}
+			memcpy(expanded_buffer, initial_buffer, used);
+			buffer = expanded_buffer;
+			capacity = SWAPZ_PRIMARY_MOUNTINFO_BUFFER_BYTES;
+		}
+		count = read(fd, buffer + used, capacity - used - 1U);
 		if (count < 0 && errno == EINTR)
 			continue;
 		if (count < 0) {
 			read_error = errno ? errno : EIO;
+			if (read_error == EOVERFLOW)
+				(void)fprintf(stderr,
+					      "SWAPZ_PRIMARY_MOUNT_INVENTORY_FAILURE "
+					      "step=mountinfo-read errno=%d "
+					      "reason=read-overflow\n",
+					      read_error);
 			break;
 		}
 		if (!count)
 			break;
 		used += (size_t)count;
 	}
+	if (close(fd) < 0 && !read_error)
+		read_error = errno ? errno : EIO;
 	if (read_error) {
-		(void)close(fd);
+		free(expanded_buffer);
 		errno = read_error;
 		return -1;
 	}
-	if (used + 1U == sizeof(buffer)) {
-		(void)close(fd);
-		errno = EOVERFLOW;
-		return -1;
-	}
-	if (close(fd) < 0)
-		return -1;
 	if (!used || buffer[used - 1U] != '\n' ||
 	    memchr(buffer, '\0', used)) {
+		free(expanded_buffer);
 		errno = EINVAL;
 		return -1;
 	}
 	buffer[used] = '\0';
-	if (swapz_primary_parse_mountinfo(
-		    buffer, SWAPZ_PRIMARY_TARGET_DEVICE, parent_device, facts) < 0)
+	parse_result = swapz_primary_parse_mountinfo(
+		buffer, SWAPZ_PRIMARY_TARGET_DEVICE, parent_device, facts);
+	parse_errno = errno;
+	free(expanded_buffer);
+	if (parse_result < 0) {
+		errno = parse_errno ? parse_errno : EINVAL;
 		return -1;
+	}
 	if (bytes_read)
 		*bytes_read = used;
 	return 0;
 }
-
 
 /*
  * Linux filters a task's mountinfo by the task's filesystem root at open time.
@@ -4539,6 +4577,10 @@ static int swapz_primary_read_nonleader_mount_facts(
 		}
 
 		if (bytes_read > SWAPZ_PRIMARY_MOUNTINFO_TOTAL_BYTES - *total_bytes) {
+			(void)fprintf(stderr,
+				      "SWAPZ_PRIMARY_MOUNT_INVENTORY_FAILURE "
+				      "step=mountinfo-aggregate errno=%d "
+				      "reason=aggregate-byte-limit\n", EOVERFLOW);
 			saved_errno = EOVERFLOW;
 			break;
 		}
@@ -4802,6 +4844,10 @@ static int swapz_primary_read_mount_facts(
 
 			if (bytes_read >
 			    SWAPZ_PRIMARY_MOUNTINFO_TOTAL_BYTES - total_bytes) {
+				(void)fprintf(stderr,
+					      "SWAPZ_PRIMARY_MOUNT_INVENTORY_FAILURE "
+					      "step=mountinfo-aggregate errno=%d "
+					      "reason=aggregate-byte-limit\n", EOVERFLOW);
 				saved_errno = EOVERFLOW;
 				break;
 			}

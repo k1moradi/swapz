@@ -118,7 +118,11 @@ class PrimaryLifecycleNullblkQualifierContract(unittest.TestCase):
                 '{"stage":"COMPLETE"}\n', encoding="ascii")
             control = fixture / "control"
             control.write_text(
-                "#!/bin/sh\nprintf '%s\n' "
+                "#!/bin/sh\nprintf '%s\\n' "
+                "'PRIMARY_RECOVER=FAILED phase=admission errno=1 "
+                "error=Operation not permitted original_errno=1 "
+                "persistence_boundary=none durable=UNOBSERVED "
+                "mapper=UNOBSERVED swap=UNOBSERVED' "
                 "'BLOCKED: primary-swap recovery failed: Operation not permitted' "
                 " >&2\nexit 2\n",
                 encoding="ascii")
@@ -148,6 +152,23 @@ mapper_absence_proven() { return 0; }
             self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
             self.assertEqual(result.stdout, "")
             self.assertEqual(result.stderr, "")
+
+            # Wrapper-only output is missing the coordinator's fail record.
+            control.write_text(
+                "#!/bin/sh\nprintf '%s\\n' "
+                "'BLOCKED: primary-swap recovery failed: Operation not permitted' "
+                " >&2\nexit 2\n",
+                encoding="ascii")
+            refused = subprocess.run(
+                ["bash", "-c", setup + "\n" + stubs + "\n" + helper +
+                 "\nassert_repeat_recovery_is_safe regression null\n"],
+                cwd=ROOT, capture_output=True, text=True,
+                timeout=5, check=False)
+            self.assertEqual(refused.returncode, 1,
+                             refused.stdout + refused.stderr)
+            self.assertIn("observed_diagnostic=missing observed_wrapper=present "
+                          "child_exit=2", refused.stderr)
+            self.assertNotIn("PRIMARY_RECOVER=FAILED", refused.stderr)
 
     def test_wrong_mapper_case_never_forces_removal(self):
         self.assertNotRegex(self.script, r"dmsetup\s+remove\s+--force")
@@ -2453,7 +2474,10 @@ int main(int argc, char **argv)
                 ("listed-mount", "statmount-buffer-too-small"),
                 ("root-walk", "root-parent-depth-limit"),
                 ("mount-list", "mount-count-limit"),
-                ("mount-list", "listmount-overflow")):
+                ("mount-list", "listmount-overflow"),
+                ("mountinfo-read", "per-table-byte-limit"),
+                ("mountinfo-read", "read-overflow"),
+                ("mountinfo-aggregate", "aggregate-byte-limit")):
             check(
                 "SWAPZ_PRIMARY_MOUNT_INVENTORY_FAILURE "
                 f"step={step} errno=75 reason={cause}\n" +
@@ -2513,6 +2537,12 @@ int main(int argc, char **argv)
             command_output(overflow_initial, mount_overflow),
             "SWAPZ_PRIMARY_MOUNT_INVENTORY_FAILURE "
             "step=root-walk errno=75 reason=mount-count-limit\n" +
+            command_output(overflow_initial, mount_overflow),
+            "SWAPZ_PRIMARY_MOUNT_INVENTORY_FAILURE "
+            "step=mountinfo-aggregate errno=75 reason=per-table-byte-limit\n" +
+            command_output(overflow_initial, mount_overflow),
+            "SWAPZ_PRIMARY_MOUNT_INVENTORY_FAILURE "
+            "step=mountinfo-read errno=75 reason=aggregate-byte-limit\n" +
             command_output(overflow_initial, mount_overflow),
             "SWAPZ_PRIMARY_MOUNT_INVENTORY_FAILURE "
             "step=root-walk errno=75\n" +
@@ -3354,9 +3384,9 @@ rmdir() {
         repeat_end = self.script.index("\n}", repeat_start)
         repeat = self.script[repeat_start:repeat_end]
         self.assertIn('LC_ALL=C timeout', repeat)
-        self.assertIn(
-            '"$output" == "BLOCKED: primary-swap recovery failed: '
-            'Operation not permitted"', repeat)
+        self.assertIn('expected_diagnostic="PRIMARY_RECOVER=FAILED '
+                      'phase=admission errno=1', repeat)
+        self.assertIn('"$output" != "$expected_diagnostic"', repeat)
         self.assertNotIn('printf \'%s\\n\' "$output"', repeat)
 
     def test_rootless_pinned_power_refuses_unobservable_path_without_blocking(self):

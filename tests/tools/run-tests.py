@@ -2567,14 +2567,16 @@ def failure_context(output, *, loaded=True, default_phase=None,
             mount_match = re.fullmatch(
                 r"SWAPZ_PRIMARY_MOUNT_INVENTORY_FAILURE "
                 r"step=(namespace-fd|root-object|init-root|root-walk|"
-                r"mount-list|listed-mount|root-revalidation) errno=(11|75)"
+                r"mount-list|listed-mount|root-revalidation|"
+                r"mountinfo-read|mountinfo-aggregate) errno=(11|75)"
                 r"(?: reason=(init-root-statx-race|"
                 r"process-root-not-directory|init-root-not-directory|"
                 r"root-inode-mismatch|root-device-mismatch|"
                 r"process-root-device-mismatch|init-root-device-mismatch|"
                 r"root-superblock-device-mismatch|"
                 r"statmount-buffer-too-small|root-parent-depth-limit|"
-                r"mount-count-limit|listmount-overflow))?"
+                r"mount-count-limit|listmount-overflow|per-table-byte-limit|"
+                r"read-overflow|aggregate-byte-limit))?"
                 r"(?: peer_root=(matches-process|differs-process))?",
                 line.strip())
             if mount_match and mount_inventory_failure is None:
@@ -2596,7 +2598,11 @@ def failure_context(output, *, loaded=True, default_phase=None,
                      (cause == "root-parent-depth-limit" and
                       step == "root-walk") or
                      (cause in ("mount-count-limit", "listmount-overflow") and
-                      step == "mount-list")))
+                      step == "mount-list") or
+                     (cause in ("per-table-byte-limit", "read-overflow") and
+                      step == "mountinfo-read") or
+                     (cause == "aggregate-byte-limit" and
+                      step == "mountinfo-aggregate")))
                 if eagain_shape or overflow_shape:
                     mount_inventory_failure = mount_match.groups()
             prepare_match = re.fullmatch(
