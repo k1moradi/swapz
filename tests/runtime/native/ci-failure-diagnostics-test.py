@@ -173,7 +173,7 @@ exec sleep 30
         exception_json = self.diagnostics._ci_safe_line(
             'AssertionError: mismatch {"campaign_id":"FORGED_CAMPAIGN"}')
         self.assertNotIn("FORGED_CAMPAIGN", exception_json)
-        self.assertIn("<structured-evidence-redacted>", exception_json)
+        self.assertIn("[private exception detail omitted]", exception_json)
 
     def test_unstructured_exceptions_and_hostile_unittest_names_stay_private(self):
         # Before the fix an arbitrary Unicode exception message survived both
