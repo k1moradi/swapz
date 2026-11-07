@@ -66,22 +66,32 @@ class PackageInvocationTimeout(subprocess.TimeoutExpired):
 
     def __init__(
             self, action, codec_variant, budget, budget_reason, elapsed,
-            disposition):
+            disposition, original_exit_status):
         super().__init__(["bash", "package-dkms.sh", action], budget)
         self.action = action
         self.codec_variant = codec_variant
         self.budget_reason = budget_reason
         self.elapsed = elapsed
         self.disposition = disposition
+        self.original_exit_status = original_exit_status
 
     def __str__(self):
+        if self.original_exit_status is None:
+            first_cause = "fixture_watchdog_expired"
+            original_exit_status = "still_running"
+        else:
+            # A descendant can keep output pipes open after the package exits.
+            # Never replace that original exit status with the pipe watchdog.
+            first_cause = "package_exit_before_pipe_drain"
+            original_exit_status = str(self.original_exit_status)
         return (
             f"SWAPZ_PACKAGE_TEST_TIMEOUT codec_variant={self.codec_variant} "
             f"operation={self.action} elapsed_seconds={self.elapsed:.3f} "
             f"budget_seconds={self.timeout:g} "
             f"budget_reason={self.budget_reason} "
             f"final_process_disposition={self.disposition} "
-            "first_cause=fixture_watchdog_expired"
+            f"original_process_exit_status={original_exit_status} "
+            f"first_cause={first_cause}"
         )
 
 
@@ -536,6 +546,9 @@ esac
         try:
             stdout, stderr = process.communicate(timeout=timeout)
         except subprocess.TimeoutExpired:
+            # communicate can time out on inherited pipes after the shell
+            # already failed; capture its first exit before killing the group.
+            original_exit_status = process.poll()
             # The timed-out shell's children must not outlive the sandbox.
             try:
                 os.killpg(process.pid, signal.SIGKILL)
@@ -552,7 +565,8 @@ esac
                         stream.close()
             raise PackageInvocationTimeout(
                 action, codec_variant, timeout, budget_reason,
-                time.monotonic() - start_time, disposition) from None
+                time.monotonic() - start_time, disposition,
+                original_exit_status) from None
         finally:
             if process.poll() is not None:
                 for stream in (process.stdout, process.stderr):
@@ -675,6 +689,35 @@ esac
             self.script = original_script
         self.assertTrue(ready_marker.exists(), "timeout fixture never started")
         # Exceed the child's entire sleep even if startup reached the deadline.
+        time.sleep(2.1)
+        self.assertFalse(late_marker.exists(), "timed-out descendant survived")
+
+    def test_package_exit_before_pipe_drain_preserves_original_failure(self):
+        # A child retaining a pipe must not hide the package shell's exit 74.
+        # The test watchdog still kills its process group and reaps the shell.
+        late_marker = self.home / "exit-before-drain-late"
+        fixture = self.home / "exit-before-drain.sh"
+        fixture.write_text(
+            "#!/bin/sh\n"
+            "(\n"
+            "  sleep 2\n"
+            "  : > \"$SWAPZ_PACKAGE_TEST_ROOT/exit-before-drain-late\"\n"
+            ") &\n"
+            "exit 74\n")
+        original_script = self.script
+        try:
+            self.script = fixture
+            with self.assertRaises(PackageInvocationTimeout) as caught:
+                self.invoke("uninstall", timeout=1)
+            diagnostic = str(caught.exception)
+            self.assertIn("operation=uninstall", diagnostic)
+            self.assertIn("original_process_exit_status=74", diagnostic)
+            self.assertIn("final_process_disposition=reaped_exit_74", diagnostic)
+            self.assertIn("first_cause=package_exit_before_pipe_drain", diagnostic)
+            self.assertNotIn("first_cause=fixture_watchdog_expired", diagnostic)
+            self.assertNotIn(str(self.home), diagnostic)
+        finally:
+            self.script = original_script
         time.sleep(2.1)
         self.assertFalse(late_marker.exists(), "timed-out descendant survived")
 
