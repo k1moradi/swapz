@@ -9813,7 +9813,9 @@ current evaluator/sealer SHA-256 proofs cannot authenticate FAIL. The sealed
 qualification target binding must retain the current sealer's complete physical
 and parent identity (PARTUUID, size, lower and parent major:minor, parent model
 and transport); omitting parent fields is unverifiable rather than a weaker
-identity schema. The release evaluator must reject floating-point or boolean
+identity schema. The lower-device and parent major:minor values must be
+distinct: equality is a contradictory self-parent topology and is BLOCKED for
+both PASS claims and purported authenticated physical FAIL. The release evaluator must reject floating-point or boolean
 physical byte sizes and missing nested target/physical-parent fields even
 when a campaign self-declares PASS. Its refusal retains
 `first_failed_phase=qualification_target_binding`, the expected schema class

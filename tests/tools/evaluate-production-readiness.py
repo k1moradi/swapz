@@ -638,7 +638,7 @@ def _physical_device_boundary_is_quiescent(
 
 def _physical_qualification_target_binding_is_valid(
         value: Any, target: tuple[str, int] | None) -> bool:
-    """Require the complete current sealer target and parent identity."""
+    """Require the complete current sealer target and distinct parent identity."""
     if (
             not isinstance(value, dict) or
             set(value) != PHYSICAL_QUALIFICATION_TARGET_BINDING_KEYS or
