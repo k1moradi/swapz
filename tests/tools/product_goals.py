@@ -415,6 +415,13 @@ def _ci_failure_category(line, contract_suite):
     """Classify one already-sanitized causal candidate, or return None."""
     import re
 
+    # A rejected unittest identity is a privacy fallback, not an authenticated
+    # causal failure. Allow a later redacted exception class to identify the
+    # first cause; a header alone still fails with UNKNOWN_FAILURE.
+    if line in ("FAIL: unittest identity withheld",
+                "ERROR: unittest identity withheld"):
+        return None
+
     if re.search(
             r"(?i)source.sha.*mismatch|source.contract.mismatch|"
             r"contract violation|standards.cochange|SOURCE_CONTRACT_MISMATCH",

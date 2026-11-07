@@ -2099,7 +2099,14 @@ fixed `[truncated]` witness even when unsafe child exception detail is
 replaced by the sanitized `[private exception detail omitted]` placeholder.
 The witness must never reinstate drained suffix bytes or cause private
 tokens to enter public CI output or the retained failure log. Synthetic
-byte-stream regression must verify both retention and redaction. The native
+byte-stream regression must verify both retention and redaction.
+A hostile or malformed unittest heading sanitized to the fixed
+`FAIL: unittest identity withheld` or `ERROR: unittest identity withheld`
+is not by itself a classified causal error. When a subsequent exception
+exists, its sanitized class and fixed omission marker supply the first cause
+without restoring an untrusted test identity. A withheld heading alone
+remains a generic UNKNOWN_FAILURE, never a proven runtime assertion; later
+cleanup exceptions must not displace an earlier sanitized cause. The native
 CI diagnostics tests must distinguish allowlisted numeric `expected=N
 observed=N` assertions (preserve exact numbers and first-cause identity)
 from arbitrary child-authored assertion/setup strings (retain the exception

@@ -211,6 +211,27 @@ exec sleep 30
         self.assertEqual(
             self.diagnostics._ci_safe_line(hostile_header),
             "FAIL: unittest identity withheld")
+        # No exception after the rejected heading means no authenticated
+        # causal class; it must not be classified as a runtime assertion.
+        heading_only = self.diagnostics.diagnose_ci_failure(
+            [hostile_header], 1, "ci-failure-diagnostics")
+        self.assertEqual(heading_only["first_error"],
+                         "FAIL: unittest identity withheld")
+        self.assertEqual(heading_only["category"], "UNKNOWN_FAILURE")
+        self.assertEqual(heading_only["test"], "ci-failure-diagnostics")
+        # A later sanitized exception supplies the first causal category but
+        # may never restore the hostile unittest identity or payload.
+        hostile_cleanup = self.diagnostics.diagnose_ci_failure(
+            [hostile_header,
+             "RuntimeError: PRIVATE_ORIGINAL_PAYLOAD",
+             "ERROR: tearDown (__main__.Other.test_later)",
+             "ValueError: PRIVATE_SECONDARY_PAYLOAD"],
+            1, "ci-failure-diagnostics")
+        self.assertEqual(hostile_cleanup["first_error"],
+                         "RuntimeError: [private exception detail omitted]")
+        self.assertEqual(hostile_cleanup["category"], "RUNTIME_ASSERTION")
+        self.assertEqual(hostile_cleanup["test"], "ci-failure-diagnostics")
+        self.assertNotIn("PRIVATE_", json.dumps(hostile_cleanup))
         self.assertEqual(
             self.diagnostics._ci_safe_line(
                 "subprocess.TimeoutExpired: PRIVATE_TIMEOUT_ARGUMENT"),
