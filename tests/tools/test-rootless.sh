@@ -562,7 +562,10 @@ trap 'report_rootless_failure 143 unavailable received_TERM' TERM
 trap 'report_rootless_failure 130 unavailable received_INT' INT
 export PYTHONPYCACHEPREFIX="$ROOT/build/python-cache"
 mkdir -p build/python-cache
-make_args=(make)
+# The inherited GNU Make jobserver may run native evidence-producing targets
+# concurrently. Keep each target's output together so structured records stay
+# intact for the official reporter.
+make_args=(make --output-sync=target)
 if [[ -n ${SWAPZ_TEST_JOBS:-} ]]; then
   [[ $SWAPZ_TEST_JOBS =~ ^[1-9][0-9]*$ ]] && (( SWAPZ_TEST_JOBS <= 16 )) ||
     { printf '%s\n' 'BLOCKED: invalid automatic build job count' >&2; exit 2; }

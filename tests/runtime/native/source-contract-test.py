@@ -126,6 +126,12 @@ def status_format_sequence(source: str = "") -> str:
 
 
 class SwapzProductionSourceQualification(unittest.TestCase):
+    def test_rootless_native_make_synchronizes_parallel_evidence_output(self):
+        runner = (ROOT / "tests/tools/test-rootless.sh").read_text(
+            encoding="utf-8")
+        self.assertIn("make_args=(make --output-sync=target)", runner)
+        self.assertIn('"${make_args[@]}" -C tests test', runner)
+
     def test_rootless_runner_registers_every_mandatory_python_suite_once(self):
         runner = (ROOT / "tests/tools/test-rootless.sh").read_text(
             encoding="utf-8")

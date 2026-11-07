@@ -5511,6 +5511,13 @@ gate with 20 relocation-list visits for 20 relocated pages,
 all 4,096 logical pages. Keep the full-map relocation path only as the portable
 fallback when the segment-membership sidecar is absent.
 
+The native tests can run concurrently under an inherited GNU Make jobserver,
+but their structured evidence markers are line-oriented records consumed by
+the official reporter. `tests/tools/test-rootless.sh` must invoke the native
+Make stage with `--output-sync=target` so sibling target output cannot
+interleave and corrupt a marker. Keep the evidence parser strict; do not accept
+embedded or partially interleaved records as valid evidence.
+
 
 ### Placement/reclaim qualification
 
