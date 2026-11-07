@@ -1214,6 +1214,9 @@ static void test_real_cli_post_snapshot_swap_exclusion_remains_unproven(void)
  */
 static void test_real_cli_io_faults_keep_recovery_evidence(void)
 {
+	static const char expected_recovery_action[] =
+		"action=RECOVERY REQUIRED before retry; inspect header and "
+		"target identity read-only";
 	static const struct {
 		const char *scenario;
 		int read_error, read_error_after_write, write_error, sync_error;
@@ -1305,7 +1308,7 @@ static void test_real_cli_io_faults_keep_recovery_evidence(void)
 		      !strstr(report, "no header write attempted"))) ||
 		    (cases[index].expected_status == 3 &&
 		     (!strstr(report, "UNCERTAIN:") ||
-		      !strstr(report, "action=RECOVERY REQUIRED") ||
+		      !strstr(report, expected_recovery_action) ||
 		      strstr(report, "REFUSED:") ||
 		      strstr(report, "swapoff") ||
 		      strstr(report, "dmsetup remove --force") ||
