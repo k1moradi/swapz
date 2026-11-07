@@ -269,29 +269,33 @@ def _ci_safe_line(line):
         r"\1<redacted>", line)
     line = re.sub(r"\b(?:github_pat_|gh[pousr]_)[A-Za-z0-9_]{12,}",
                   "<redacted>", line)
-    # Child-supplied structured values and absolute host paths are never
-    # public first-error evidence, even when attached to an AssertionError.
-    line = re.sub(r"\{[^\r\n]*\}", "<structured-evidence-redacted>", line)
+    # Child-supplied structured diagnostic values are private, but source
+    # syntax in a traceback is repository-controlled context and must remain
+    # intact (for example, mapping["category"] is not a JSON array).
+    json_string = r'"(?:\\.|[^"\\])*"'
     json_scalar = (
-        r'"(?:\\.|[^"\\])*"|'
+        json_string + r"|"
         r"-?(?:0|[1-9][0-9]*)(?:\.[0-9]+)?(?:[eE][+-]?[0-9]+)?|"
         r"true|false|null"
     )
-    json_array_pattern = (
+    json_array = (
         r"\[(?:\s*(?:" + json_scalar + r")"
         + r"(?:\s*,\s*(?:" + json_scalar + r"))*\s*)\]"
     )
-    line = re.sub(
-        json_array_pattern, "<structured-evidence-redacted>", line)
+    json_object = r"\{[^\r\n]*\}"
+    structured_value = (
+        r"(?:" + json_object + r"|" + json_array + r"|" + json_string + r")"
+    )
     # Expected/actual numeric counters are safe and diagnostically necessary.
-    # Redact structured or quoted identity-bearing values, plus all JSON-valued
-    # payload/response fields, without erasing ordinary numeric comparisons.
     line = re.sub(
-        r'(?i)\b((?:actual|observed)\s*[:=]\s*)"(?:\\.|[^"\\])*"',
+        r"(?i)\b((?:actual|observed)\s*[:=]\s*)" + structured_value,
         r"\1<structured-evidence-redacted>", line)
     line = re.sub(
         r"(?i)\b((?:payload|response|json)\s*[:=]\s*)"
-        r"(?:" + json_scalar + r")",
+        r"(?:" + json_object + r"|" + json_array + r"|" + json_scalar + r")",
+        r"\1<structured-evidence-redacted>", line)
+    line = re.sub(
+        r"^(AssertionError:\s*)(?:" + json_object + r"|" + json_array + r")$",
         r"\1<structured-evidence-redacted>", line)
     # Preserve only the two source-controlled contract-suite basenames so
     # failure classification survives redaction of their containing host root.

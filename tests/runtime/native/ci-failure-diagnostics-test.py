@@ -161,6 +161,11 @@ exec sleep 30
             "AssertionError: expected=4096 observed=8192")
         self.assertEqual(
             numeric, "AssertionError: expected=4096 observed=8192")
+        source_context = self.diagnostics._ci_safe_line(
+            'self.assertEqual(aborted["category"], "RUNTIME_ASSERTION")')
+        self.assertEqual(
+            source_context,
+            'self.assertEqual(aborted["category"], "RUNTIME_ASSERTION")')
 
     def test_contract_classification_survives_private_root_redaction(self):
         failure = self.diagnostics.diagnose_ci_failure(
