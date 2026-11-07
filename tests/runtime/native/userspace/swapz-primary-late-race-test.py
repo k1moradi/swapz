@@ -113,6 +113,27 @@ def restore_independent_selector_reread(function: str) -> str:
         original, "swapz_primary_target_config_read(prewrite_partuuid)")
 
 
+def omit_post_target_selector_recheck(function: str) -> str:
+    """Negative control: recreate the pre-fix target-inspection race window."""
+    block = (
+        '\t/*\n'
+        '\t * Target revalidation performs fresh pathname/sysfs inspection after the\n'
+        '\t * earlier selector proof. Recheck the admitted selector identity once more\n'
+        '\t * so a replacement during that inspection cannot become the last live\n'
+        '\t * authorization state before block-zero mutation. This remains a snapshot,\n'
+        '\t * not an atomic exclusion mechanism.\n'
+        '\t */\n'
+        '\tfailure_phase = "prewrite-protected-selector-identity";\n'
+        '\tfailure_expected = "unchanged-admitted-selector-directory-and-file";\n'
+        '\tif (swapz_primary_selector_admission_still_live(\n'
+        '\t\t&selector_admission, &failure_observed) < 0)\n'
+        '\t\tgoto out;\n')
+    if function.count(block) != 1:
+        raise AssertionError("Expected one post-target selector identity recheck")
+    return function.replace(
+        block, '(void)0; /* negative-control post-target selector omission */\n')
+
+
 # The fixture never calls any privileged system operation. Production start
 # control flow is preserved; C shims supply staged, synthetic inventory data.
 HARNESS = r'''
@@ -203,6 +224,7 @@ enum fixture_scenario {
     FIXTURE_TARGET_GEOMETRY_CHANGED_AFTER_ADMISSION,
     FIXTURE_SELECTOR_CROSS_READ_ABA,
     FIXTURE_TARGET_IDENTITY_RACED_RESTORED,
+    FIXTURE_SELECTOR_REPLACED_DURING_TARGET_REVALIDATION,
     FIXTURE_SCENARIO_COUNT
 };
 static const char *const scenario_names[] = {
@@ -238,7 +260,8 @@ static const char *const scenario_names[] = {
     "protected configuration-directory inode changes after initial admission",
     "selected target geometry changes after initial admission",
     "transient ancestor path selects different target then original tree returns",
-    "target identity changes at last-use inspection then is restored"
+    "target identity changes at last-use inspection then is restored",
+    "same-byte selector inode changes during final target revalidation"
 };
 static enum fixture_scenario scenario;
 static int late;
@@ -267,6 +290,7 @@ static unsigned int fixture_selector_reads;
 static unsigned int fixture_selector_aba_windows;
 static unsigned int fixture_geometry_last_use_checks;
 static unsigned int fixture_target_identity_last_use_checks;
+static unsigned int fixture_selector_during_target_revalidation_checks;
 static struct stat fixture_initial_selector_info;
 static struct stat fixture_initial_config_info;
 static struct swapz_primary_target selected_target;
@@ -748,7 +772,8 @@ static int fixture_selector_race(enum fixture_scenario candidate)
     return candidate == FIXTURE_LIVE_SELECTOR_CHANGED_AFTER_ADMISSION ||
            candidate == FIXTURE_LIVE_SELECTOR_INODE_REPLACED_AFTER_ADMISSION ||
            candidate == FIXTURE_LIVE_CONFIG_DIRECTORY_REPLACED_AFTER_ADMISSION ||
-           candidate == FIXTURE_SELECTOR_CROSS_READ_ABA;
+           candidate == FIXTURE_SELECTOR_CROSS_READ_ABA ||
+           candidate == FIXTURE_SELECTOR_REPLACED_DURING_TARGET_REVALIDATION;
 }
 
 static void fixture_selector_path(char path[PATH_MAX], const char *name)
@@ -1084,6 +1109,15 @@ static int fixture_target_inspect(const char *partuuid,
         if (fixture_target_identity_last_use_checks == 1U)
             target->device_minor = 2U;
     }
+    if (scenario == FIXTURE_SELECTOR_REPLACED_DURING_TARGET_REVALIDATION &&
+        late) {
+        ++fixture_selector_during_target_revalidation_checks;
+        if (fixture_selector_during_target_revalidation_checks == 1U) {
+            /* Same selector bytes, but a new live inode after prior proof. */
+            fixture_replace_selector("f13428f6-01");
+            post_snapshot_injected = 1;
+        }
+    }
     if (scenario == FIXTURE_STALE_PARTUUID)
         strcpy(target->partuuid, "f13428f6-02");
     return 0;
@@ -1376,6 +1410,7 @@ static int check_case(enum fixture_scenario candidate)
     post_snapshot_injected = 0;
     fixture_selector_reads = fixture_selector_aba_windows = 0U;
     fixture_geometry_last_use_checks = fixture_target_identity_last_use_checks = 0U;
+    fixture_selector_during_target_revalidation_checks = 0U;
     fixture_prepare_selector(candidate);
     fixture_reset_mount_inventory();
     if (candidate == FIXTURE_FOREIGN_SELECTED_INITIAL)
@@ -1496,6 +1531,7 @@ static int check_case(enum fixture_scenario candidate)
     case FIXTURE_TARGET_GEOMETRY_CHANGED_AFTER_ADMISSION:
     case FIXTURE_SELECTOR_CROSS_READ_ABA:
     case FIXTURE_TARGET_IDENTITY_RACED_RESTORED:
+    case FIXTURE_SELECTOR_REPLACED_DURING_TARGET_REVALIDATION:
         /* These mutation controls have their own explicit last-use verdict. */
         break;
     default:
@@ -1526,6 +1562,8 @@ static int check_case(enum fixture_scenario candidate)
         int selector_aba = candidate == FIXTURE_SELECTOR_CROSS_READ_ABA;
         int target_restored =
             candidate == FIXTURE_TARGET_IDENTITY_RACED_RESTORED;
+        int selector_during_target =
+            candidate == FIXTURE_SELECTOR_REPLACED_DURING_TARGET_REVALIDATION;
         const char *expected_phase = geometry_drift || target_restored ?
             "phase=prewrite-target-identity" :
             "phase=prewrite-protected-selector-identity";
@@ -1551,6 +1589,9 @@ static int check_case(enum fixture_scenario candidate)
             target_restored ?
                 post_snapshot_injected == 1 &&
                 fixture_target_identity_last_use_checks >= 2U :
+            selector_during_target ?
+                post_snapshot_injected == 1 &&
+                fixture_selector_during_target_revalidation_checks == 1U :
             geometry_drift ?
                 post_snapshot_injected == 1 &&
                 fixture_geometry_last_use_checks >= 1U :
@@ -1575,13 +1616,16 @@ static int check_case(enum fixture_scenario candidate)
                     "expected=ESTALE-and-zero-mutation "
                     "observed=%s first_errno=%d mutations=%u "
                     "selector_reads=%u selector_aba=%u geometry_rechecks=%u "
-                    "target_identity_rechecks=%u case=%d\n",
+                    "target_identity_rechecks=%u selector_target_rechecks=%u "
+                    "case=%d\n",
                     result == 0 ? "stale-selection-reached-mutation" :
                                   "incorrect-refusal",
                     result_errno, writes, fixture_selector_reads,
                     fixture_selector_aba_windows,
                     fixture_geometry_last_use_checks,
-                    fixture_target_identity_last_use_checks, candidate);
+                    fixture_target_identity_last_use_checks,
+                    fixture_selector_during_target_revalidation_checks,
+                    candidate);
             return 1;
         }
         printf("DENY: phase=post-admission-last-use case=%d "
@@ -1785,6 +1829,8 @@ int main(int argc, char **argv)
             selected_case = FIXTURE_FOREIGN_SELECTED;
         else if (!strcmp(argv[1], "selector-aba-negative-control"))
             selected_case = FIXTURE_SELECTOR_CROSS_READ_ABA;
+        else if (!strcmp(argv[1], "post-target-selector-negative-control"))
+            selected_case = FIXTURE_SELECTOR_REPLACED_DURING_TARGET_REVALIDATION;
         else
             return 2;
     }
@@ -2156,6 +2202,7 @@ def compile_and_run_last_use(source: str, workdir: Path) -> subprocess.Completed
 def compile_and_run(
     source: str, workdir: Path, *, mutant: bool,
     selector_aba_mutant: bool = False,
+    post_target_selector_mutant: bool = False,
 ) -> subprocess.CompletedProcess[str]:
     helpers = (
         "swapz_primary_parse_u64", "swapz_primary_parse_priority",
@@ -2199,12 +2246,14 @@ def compile_and_run(
     recovery_failure_helper = production_function(
         source, "swapz_primary_require_recovery_preserving_errno")
     coordinator = production_function(source, "swapz_primary_start_prepared")
-    if mutant and selector_aba_mutant:
+    if sum((mutant, selector_aba_mutant, post_target_selector_mutant)) > 1:
         raise AssertionError("Negative-control mutations are mutually exclusive")
     if mutant:
         coordinator = omit_final_revalidation(coordinator)
     elif selector_aba_mutant:
         coordinator = restore_independent_selector_reread(coordinator)
+    elif post_target_selector_mutant:
+        coordinator = omit_post_target_selector_recheck(coordinator)
     unit = HARNESS.replace('@@PRODUCTION_DEFINES@@', production_defines).replace(
         '@@PARSERS@@', parser_source).replace(
         '@@SELECTOR_ADMISSION_TYPE@@',
@@ -2222,6 +2271,8 @@ def compile_and_run(
         unit_name = "mutant"
     elif selector_aba_mutant:
         unit_name = "selector-aba-mutant"
+    elif post_target_selector_mutant:
+        unit_name = "post-target-selector-mutant"
     else:
         unit_name = "production"
     c_path = workdir / f"{unit_name}.c"
@@ -2247,6 +2298,8 @@ def compile_and_run(
         arguments.append("negative-control")
     elif selector_aba_mutant:
         arguments.append("selector-aba-negative-control")
+    elif post_target_selector_mutant:
+        arguments.append("post-target-selector-negative-control")
     return subprocess.run(
         arguments, text=True, capture_output=True, env=sanitizer_environment,
         timeout=10, check=False)
@@ -2404,6 +2457,21 @@ def main() -> int:
                   file=sys.stderr, end="")
             return 1
         print("PASS: cross-read ABA negative control reaches all intercepted mutations")
+        post_target_selector_mutant = compile_and_run(
+            source, workdir, mutant=False, post_target_selector_mutant=True)
+        if (post_target_selector_mutant.returncode != 1 or
+                "observed=stale-selection-reached-mutation" not in
+                    post_target_selector_mutant.stderr or
+                "mutations=4" not in post_target_selector_mutant.stderr or
+                "selector_target_rechecks=1" not in
+                    post_target_selector_mutant.stderr):
+            print("FAIL: missing post-target selector recheck did not reach mutations",
+                  file=sys.stderr)
+            print(post_target_selector_mutant.stdout +
+                  post_target_selector_mutant.stderr,
+                  file=sys.stderr, end="")
+            return 1
+        print("PASS: post-target selector negative control reaches all intercepted mutations")
         last_use = compile_and_run_last_use(source, workdir)
         if last_use.returncode:
             print(last_use.stdout, end="")

@@ -12714,6 +12714,18 @@ static int swapz_primary_start_prepared(void)
 		errno = first_errno;
 		goto out;
 	}
+	/*
+	 * Target revalidation performs fresh pathname/sysfs inspection after the
+	 * earlier selector proof. Recheck the admitted selector identity once more
+	 * so a replacement during that inspection cannot become the last live
+	 * authorization state before block-zero mutation. This remains a snapshot,
+	 * not an atomic exclusion mechanism.
+	 */
+	failure_phase = "prewrite-protected-selector-identity";
+	failure_expected = "unchanged-admitted-selector-directory-and-file";
+	if (swapz_primary_selector_admission_still_live(
+		&selector_admission, &failure_observed) < 0)
+		goto out;
 	failure_phase = "prewrite-selector-descriptor-close";
 	failure_expected = "both-admitted-descriptors-closed";
 	if (swapz_primary_selector_admission_close(&selector_admission) < 0) {

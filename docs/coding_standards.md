@@ -654,10 +654,13 @@ metadata still matches both live names; bounded-read and parse the normalized
 selector from the **retained selector descriptor** without changing its file
 offset; compare those identity-bound bytes to the manifest; revalidate both live
 names again; then revalidate the inspected partition major:minor, PARTUUID and
-geometry. Any mismatch must fail closed before header write, mapper creation,
-formatter or swapon, report a redacted phase/mismatch class and first errno, and
-preserve STARTING recovery ownership and close-error precedence. Close both
-retained pins successfully before destructive work. A diagnostic target
+geometry. Because that target inspection is itself a race interval, repeat the
+admitted selector directory/file live-identity check after it succeeds and
+before closing either selector pin. Any mismatch must fail closed before header
+write, mapper creation, formatter or swapon, report a redacted
+phase/mismatch class and first errno, and preserve STARTING recovery ownership
+and close-error precedence. Close both retained pins successfully before
+destructive work. A diagnostic target
 reinspection that now exactly matches the admitted target after an earlier
 `ESTALE` must be classified as raced-or-restored, not falsely as a current
 partition mismatch. This is last-use validation, not a kernel-atomic exclusion

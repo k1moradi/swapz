@@ -574,12 +574,21 @@ target-geometry drift control and a target-identity race/restoration diagnostic
 control: if the first final inspection mismatches but the classification
 inspection sees the admitted target again, require
 `target-identity-raced-or-restored`, not a fabricated partition mismatch.
-The existing selected-parent and root-parent substitution controls must refuse
-before any mutation. The unsafe baseline has successful initial/final mount
-reads, four independent swap-inventory observations and no false mount
-conflicts. Keep the separate post-final-snapshot mount/swap/inventory races
-explicitly UNPROVEN: no rootless read-only recheck demonstrates atomic
-exclusion or binds a physical reader across device-number reuse.
+Add a same-byte selector-inode replacement injected from the final target
+inspection seam, after the earlier selector content/live-name proof has
+completed. Production must repeat the admitted selector live-identity check
+after successful target revalidation and refuse that replacement with original
+`ESTALE`, the redacted selector-file mismatch class and zero intercepted
+mutations. A source-extracted negative-control mutant that removes only this
+post-target selector check must reach header/mapper/formatter/swapon, proving
+the regression is ordering-sensitive rather than satisfied by an earlier
+selector snapshot. The existing selected-parent and root-parent substitution
+controls must refuse before any mutation. The unsafe baseline has successful
+initial/final mount reads, four independent swap-inventory observations and no
+false mount conflicts. Keep the separate post-final-snapshot
+mount/swap/inventory races explicitly UNPROVEN: no rootless read-only recheck
+demonstrates atomic exclusion or binds a physical reader across device-number
+reuse.
 The source-extracted coordinator must intercept both admission-time and
 failure-classification target-inspection calls with the same private fixture.
 Source-extracted target-parent and root-parent drift controls must compare
