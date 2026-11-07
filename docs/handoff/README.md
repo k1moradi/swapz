@@ -25,7 +25,7 @@ must be checked against the source being evaluated.
 - **Release blockers:** [readiness gates](../AGENT_CONTEXT.md#production-readiness-definition) and [evidence integrity](../testing_standards.md#qualification-discovery-and-release-evidence-integrity); [readiness snapshot](production-readiness.json) is **HISTORICAL**.
 - **Exact-source CI:** [same-commit standards](../compile.md#direct-main-ci-standards-co-changes); mandatory [project-goals](../../.github/workflows/project-goals.yml), [product-codec](../../.github/workflows/product-codec.yml) and [systemd/package](../../.github/workflows/systemd-package-readiness.yml). CI is not loaded-host PASS.
 - **Owner ARM64/NEON VM:** [development/performance history](../ROADMAP.md) belongs to a third environment, not either physical card; its results do not qualify a physical target.
-- **Code de-bloat:** [source-pinned register](verified-debloat-register.md) separates verified repetition from unproved equivalence, names owning agents and specifies deferred regressions.
+- **Code de-bloat:** [source-pinned register](verified-debloat-register.md) separates verified repetition from unproved equivalence, records that owning-kernel-agent approval is required without inventing a named code owner, and specifies deferred regressions.
 
 **Private evidence on each Codex machine:** checkout-local
 `build/tests/fast-test/development-evidence.json`,

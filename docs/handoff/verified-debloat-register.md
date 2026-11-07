@@ -1,7 +1,9 @@
 # Verified de-bloat register (source-pinned, editorial only)
 
 **Audited source:** [`4c4fc4446e57ed25b491125a2d8941ddf8555559`](https://github.com/k1moradi/swapz/commit/4c4fc4446e57ed25b491125a2d8941ddf8555559)
-of `src/kernel/dm-target.c`. Evidence below verifies overlapping code or
+of `src/kernel/dm-target.c`, blob
+`a67d0b1c1e19f969f5f188121171da40d6037905`. Independent re-audit confirmed
+that the then-current `main` still used this exact blob. Evidence below verifies overlapping code or
 a false-positive candidate by source inspection. It does **not** prove
 functional equivalence, unreachable code, production readiness, performance,
 loaded-kernel behavior or physical PASS. This file is a review queue, not an
@@ -13,8 +15,8 @@ is the diagnostic entry point.
 ## P2. RAW BIO snapshot, codec and publication duplication — DEFER
 
 **File/functions:** `src/kernel/dm-target.c`:
-`swapz_submitter_prepare_payload()` ([source](https://github.com/k1moradi/swapz/blob/4c4fc4446e57ed25b491125a2d8941ddf8555559/src/kernel/dm-target.c#L3360-L3465)) and
-`swapz_preparation_worker()` ([source](https://github.com/k1moradi/swapz/blob/4c4fc4446e57ed25b491125a2d8941ddf8555559/src/kernel/dm-target.c#L3595-L3735)).
+`swapz_submitter_prepare_payload()` ([source](https://github.com/k1moradi/swapz/blob/4c4fc4446e57ed25b491125a2d8941ddf8555559/src/kernel/dm-target.c#L3348-L3470)) and
+`swapz_preparation_worker()` ([source](https://github.com/k1moradi/swapz/blob/4c4fc4446e57ed25b491125a2d8941ddf8555559/src/kernel/dm-target.c#L3523-L3753)).
 
 **Redundancy evidence:** both map a pinned input with
 `swapz_map_single_bio_input()` or fall back to
@@ -27,7 +29,7 @@ consumer; the background worker has two references and a `queue_lock`
 descriptor handoff. Fault category, RAW-selected races, first-error election,
 wakeups, and access after `preparation_snapshot_ready` differ.
 
-**Owner:** kernel DM-target/concurrency agent (agreement pending).
+**Owner:** owning kernel agent for `src/kernel/dm-target.c`; no named owner is identified by repository metadata in this audit, so explicit agreement is still required.
 **Equivalence regression:** byte-exact single-/multi-bvec snapshots, CRC and
 fault results for both routes; race RAW-selected/CANCELLED/retire/drain and
 producer-first/consumer-first teardown using existing
@@ -48,16 +50,16 @@ sum delta64, LZ4 bins, copied bytes and CRC using `READ_ONCE`.
 and background-only lower-write-overlap fields; a generic loop could silently
 alter diagnostic aggregation or concurrent sample semantics.
 
-**Owner:** kernel DM-target/observability agent (agreement pending).
+**Owner:** owning kernel agent for `src/kernel/dm-target.c`; no named owner is identified by repository metadata in this audit, so explicit agreement is still required.
 **Equivalence regression:** per-field asymmetric golden values, zero and max
 lane counts, simultaneous updates, unchanged status output and no lost fields.
 **Safe disposition:** defer aggregation consolidation.
 
 ## P3. Lower WRITE queue and completion counters — DEFER
 
-**File/functions:** `swapz_submit_inflight_write()` ([source](https://github.com/k1moradi/swapz/blob/4c4fc4446e57ed25b491125a2d8941ddf8555559/src/kernel/dm-target.c#L2205-L2236)),
-`swapz_lower()` ([source](https://github.com/k1moradi/swapz/blob/4c4fc4446e57ed25b491125a2d8941ddf8555559/src/kernel/dm-target.c#L2538-L2568)),
-`swapz_async_lower_write_done()` ([source](https://github.com/k1moradi/swapz/blob/4c4fc4446e57ed25b491125a2d8941ddf8555559/src/kernel/dm-target.c#L2045-L2071)).
+**File/functions:** `swapz_submit_inflight_write()` ([source](https://github.com/k1moradi/swapz/blob/4c4fc4446e57ed25b491125a2d8941ddf8555559/src/kernel/dm-target.c#L2148-L2248)),
+`swapz_lower()` ([source](https://github.com/k1moradi/swapz/blob/4c4fc4446e57ed25b491125a2d8941ddf8555559/src/kernel/dm-target.c#L2453-L2631)),
+`swapz_async_lower_write_done()` ([source](https://github.com/k1moradi/swapz/blob/4c4fc4446e57ed25b491125a2d8941ddf8555559/src/kernel/dm-target.c#L2025-L2071)).
 
 **Redundancy evidence:** the paths count queued preparers at submit/end,
 record nonempty transitions and wake workers during lower WRITE service.
@@ -67,7 +69,7 @@ an active count, and callback completion publishes `lower_done` under
 `queue_lock` after electing the original lower errno. Same-looking
 accounting blocks do not establish interchangeable ordering.
 
-**Owner:** kernel DM-target/I/O ordering agent (agreement pending).
+**Owner:** owning kernel agent for `src/kernel/dm-target.c`; no named owner is identified by repository metadata in this audit, so explicit agreement is still required.
 **Equivalence regression:** sync/detached success and submission/callback
 errors under concurrent preparation and teardown; compare queue counters,
 first errno, wakeups, active count and no post-completion target access.
@@ -75,15 +77,15 @@ first errno, wakeups, active count and no post-completion target access.
 
 ## P3. Similar BIO fast checks — REJECT AS DE-BLOAT
 
-**File/functions:** `swapz_copy_bio()` ([source](https://github.com/k1moradi/swapz/blob/4c4fc4446e57ed25b491125a2d8941ddf8555559/src/kernel/dm-target.c#L2963-L2998))
-and `swapz_map_single_bio_input()` ([source](https://github.com/k1moradi/swapz/blob/4c4fc4446e57ed25b491125a2d8941ddf8555559/src/kernel/dm-target.c#L3007-L3031)).
+**File/functions:** `swapz_copy_bio()` ([source](https://github.com/k1moradi/swapz/blob/4c4fc4446e57ed25b491125a2d8941ddf8555559/src/kernel/dm-target.c#L2963-L3000))
+and `swapz_map_single_bio_input()` ([source](https://github.com/k1moradi/swapz/blob/4c4fc4446e57ed25b491125a2d8941ddf8555559/src/kernel/dm-target.c#L3007-L3032)).
 
 **Evidence:** both inspect a one-block vector, but the former copies in
 either direction and supports segmented fallback. The latter maps a zero-offset
 single-vector **input** only while upper-BIO ownership remains valid,
 returning NULL for copy fallback. Neither is unreachable or redundant.
 
-**Owner:** kernel DM-target agent. **Regression if revisited:** nonzero
+**Owner:** owning kernel agent for `src/kernel/dm-target.c`; no named owner is identified by repository metadata in this audit. **Regression if revisited:** nonzero
 bvec offsets, segmented BIO, invalid sizes, copy directions, pin/map lifetime
 and exact byte equality. **Safe disposition:** retain both helpers.
 
