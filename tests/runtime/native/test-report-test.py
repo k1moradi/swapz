@@ -3512,6 +3512,57 @@ class ReportContract(unittest.TestCase):
         self.assertEqual(runner.qualification_overall(
             2, [{"status": "BLOCKED"}]), "BLOCKED")
 
+    def test_failure_console_details_are_fail_only_bounded_and_private(self):
+        # The first real failing subtest, not an earlier synthetic negative,
+        # must own the diagnostic. Never print the actual document or host path.
+        stage_output = (
+            "FAIL: test_fake (__main__.Fixture.test_fake)\n"
+            "test_separate_target_and_release_metadata "
+            "(__main__.SwapzProductionSourceQualification."
+            "test_separate_target_and_release_metadata) "
+            "(naming_policy='docs/README.md') ... FAIL\n"
+            "======================================================================\n"
+            "FAIL: test_separate_target_and_release_metadata "
+            "(__main__.SwapzProductionSourceQualification."
+            "test_separate_target_and_release_metadata) "
+            "(naming_policy='docs/README.md')\n"
+            "----------------------------------------------------------------------\n"
+            "Traceback (most recent call last):\n"
+            "  File \"/home/private/secret/source-contract-test.py\", line 1274, "
+            "in test_separate_target_and_release_metadata\n"
+            "AssertionError: 'Immutable naming policy "
+            "(read before every prompt)' not found in \"PRIVATE_DOC_BYTES\"\n"
+            "----------------------------------------------------------------------\n"
+            "Ran 138 tests in 11.621s\n"
+            "FAILED (failures=1)\n"
+            "FAIL: rootless phase=source-contract-test.py "
+            "subtest=unavailable test=unavailable exit=1 reason=nonzero_exit "
+            "phase_s=11 stage_s=20 line=99 "
+            "log=build/tests/rootless-failure.ABC12345/diagnostic.log\n"
+        )
+        details = runner.first_unittest_failure_details(stage_output)
+        self.assertEqual(details, [
+            "First failing unittest: test_separate_target_and_release_metadata "
+            "[naming_policy=docs/README.md]",
+            "Location: source-contract-test.py:1274",
+            "Exception: AssertionError",
+            "Missing expected text: Immutable naming policy "
+            "(read before every prompt)",
+        ])
+        self.assertNotIn("/home/private", " ".join(details))
+        self.assertNotIn("PRIVATE_DOC_BYTES", " ".join(details))
+        self.assertNotIn("test_fake", " ".join(details))
+        self.assertEqual(runner.first_unittest_failure_details(
+            stage_output.replace("FAILED (failures=1)", "OK")), [])
+        self.assertEqual(runner.first_unittest_failure_details(
+            stage_output.replace("FAIL: rootless phase=", "PASS: rootless phase=")), [])
+        self.assertEqual(runner.first_unittest_failure_details(
+            "Ran 1 test in 0.001s\nOK\n"), [])
+        self.assertEqual(runner.first_compiler_failure_location(
+            "/home/private/kernel/dm-target.c:42:7: error: secret device\n"),
+            ["Compiler location: dm-target.c:42:7"])
+        self.assertEqual(runner.first_compiler_failure_location("PASS: clean\n"), [])
+
     def test_rootless_unittest_failure_names_safe_test(self):
         phase, reason = runner.failure_context(
             "FAIL: test_fixture_schema (__main__.Contract.test_fixture_schema)\n"

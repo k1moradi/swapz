@@ -2879,6 +2879,90 @@ def loaded_progress_line(line):
     return stripped
 
 
+def first_unittest_failure_details(output):
+    """Return only safe first-cause facts for a failed rootless unittest.
+
+    Full tracebacks, host paths, assertion payloads and local device identity
+    remain in the existing private failure log, never the public console/report.
+    This is observational and runs only after a failing child.
+    """
+    markers = list(re.finditer(
+        r"(?m)^FAIL: rootless phase=[A-Za-z0-9 ._:+-]{1,96} ", output))
+    if not markers:
+        return []
+    # Require the final rootless failure to immediately follow a real unittest
+    # FAILED footer. Earlier negative fixtures can print synthetic failures.
+    marker_start = markers[-1].start()
+    footers = list(re.finditer(
+        r"(?m)^FAILED \([^\r\n]{1,120}\)$", output[:marker_start]))
+    if not footers or marker_start - footers[-1].end() > 2048:
+        return []
+    transcript = output[max(0, footers[-1].start() - 131072):
+                        footers[-1].start()]
+    headers = list(re.finditer(
+        r"(?m)^(FAIL|ERROR): (test_[A-Za-z0-9_]{1,96}) "
+        r"\(__main__\.([A-Za-z0-9_]{1,96})\.\2\)"
+        r"(?: \([^\r\n]{1,160}\))?$", transcript))
+    if not headers:
+        return []
+    progress_records = re.finditer(
+        r"(?m)^[ \t]*(test_[A-Za-z0-9_]{1,96}) "
+        r"\(__main__\.([A-Za-z0-9_]{1,96})\.\1\)"
+        r"(?: \([^\r\n]{1,160}\))? \.\.\. (FAIL|ERROR)$",
+        transcript)
+    first_header = next((
+        header for progress in progress_records for header in headers
+        if header.group(2) == progress.group(1) and
+           header.group(3) == progress.group(2) and
+           header.group(1) == progress.group(3)), headers[0])
+    details = [f"First failing unittest: {first_header.group(2)}"]
+    subtest = re.search(
+        r"\(naming_policy='(docs/[A-Za-z0-9_-]{1,64}\.md)'\)",
+        first_header.group(0))
+    if subtest:
+        details[0] += f" [naming_policy={subtest.group(1)}]"
+
+    following = next((
+        header.start() for header in headers
+        if header.start() > first_header.start()), len(transcript))
+    traceback = transcript[first_header.end():following]
+    location = re.search(
+        r'(?m)^[ \t]*File "([^"\r\n]{1,400})", line ([1-9][0-9]{0,6}), in '
+        + re.escape(first_header.group(2)) + r"$", traceback)
+    if location:
+        basename = Path(location.group(1)).name
+        if re.fullmatch(r"[A-Za-z0-9_-]{1,100}\.py", basename):
+            details.append(f"Location: {basename}:{location.group(2)}")
+    exception = re.search(
+        r"(?m)^(AssertionError|[A-Za-z][A-Za-z0-9_]{0,60}"
+        r"(?:Error|Exception|Failure))(?::|$)", traceback)
+    if exception:
+        details.append("Exception: " + exception.group(1))
+    # Only a short, human-readable expected assertIn literal is safe to show.
+    # Never print the actual value: it may be an entire document or secret.
+    expected = re.search(
+        r"(?m)^AssertionError: '([A-Za-z][A-Za-z0-9 ,.()_-]{2,95})' "
+        r"not found in\b", traceback)
+    if expected and len(expected.group(1).split()) >= 3 and not re.search(
+            r"[A-Za-z0-9]{18,}", expected.group(1)):
+        details.append("Missing expected text: " + expected.group(1))
+    return details
+
+
+def first_compiler_failure_location(output):
+    """Locate a native compiler error without printing host paths or source."""
+    match = re.search(
+        r"(?m)^(?:[^\r\n]*[/\\])?([A-Za-z0-9._-]{1,100}"
+        r"\.(?:c|cc|cpp|h|py)):(\d{1,7})(?::(\d{1,5}))?: "
+        r"(?:fatal )?error:", output)
+    if match:
+        location = f"{match.group(1)}:{match.group(2)}"
+        if match.group(3):
+            location += ":" + match.group(3)
+        return ["Compiler location: " + location]
+    return []
+
+
 def run_stage(title, command, result, *, parse_bench=False):
     start = time.monotonic()
     try:
@@ -3144,6 +3228,14 @@ def run_stage(title, command, result, *, parse_bench=False):
     if rc and "diagnostic" in record:
         print(f"        Failed during: {record['failed_phase']}", flush=True)
         print(f"        Reason: {record['diagnostic']}", flush=True)
+        # The complete child output stays private. Give the operator enough
+        # source-bound first-error detail to diagnose without a manual log tail.
+        details = (first_unittest_failure_details(output)
+                   if title == "Native and rootless contracts" else [])
+        if not details:
+            details = first_compiler_failure_location(output)
+        for detail in details:
+            print(f"        {detail}", flush=True)
     return rc
 
 
