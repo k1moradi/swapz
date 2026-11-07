@@ -6327,6 +6327,27 @@ has already failed, diagnostics must keep `first_errno` distinct from
 has no numeric errno; never label the secondary persistence errno as original.
 Rootless coverage must fail both secondary writes and verify their separate
 errno attribution while retaining the first failure and owner state.
+The probe's block-zero writer issues exactly one bounded 4096-byte offset-zero
+`pwrite()` per header transition. A positive short return is a failed mutation:
+do not resume it, do not `fsync` it as success, and retain the exact written
+prefix for recovery. Before the initial clear, durable
+`HEADER_CLEAR_PENDING` must precede the write. Before restoring the saved
+header, durable `HEADER_RESTORE_PENDING` must bind the exact authenticated
+pre-restoration 4096 bytes, their SHA-256 and their prior recovery stage.
+A retry may accept only a single saved-header prefix plus authenticated-source
+suffix boundary (including either complete endpoint); any foreign byte remains
+manual-review recovery and receives no additional device write.
+Descriptor close, temporary-file cleanup and ownership-marker release errors
+must not replace an earlier read/write/fsync errno. If the active ownership
+marker is unlinked but the recovery-directory fsync fails, the helper must
+re-create and durably sync the exact owner marker before reporting it retained;
+otherwise ownership is explicitly uncertain. The helper terminal status is
+`BLOCKED`/exit 2 for preflight or evidence refusal, `FAIL`/exit 1 for an
+executed destructive run that fails but is fully recovered, and
+`RECOVERY_REQUIRED`/exit 3 whenever cleanup/ownership is unresolved.
+`UNCERTAIN` remains evidence-durability metadata and must never be promoted
+to PASS; standalone formatter `REFUSED` is a separate status and must not be
+inferred from the physical helper's terminal label.
 
 A source-drift refusal before block-zero mutation is
 `PRE_DESTRUCTIVE_FAILED`, preserving the original reason and zero executed

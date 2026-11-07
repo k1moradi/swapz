@@ -98,6 +98,44 @@ class ProbeError(RuntimeError):
     pass
 
 
+class ProbeFailure(ProbeError):
+    """A physical execution ran and failed, with cleanup otherwise complete."""
+
+
+class RecoveryRequiredError(ProbeError):
+    """Recovery or ownership is incomplete/uncertain and must stay non-PASS."""
+
+
+def _terminal_error_status(error):
+    if isinstance(error, RecoveryRequiredError):
+        return "RECOVERY_REQUIRED", 3
+    if isinstance(error, ProbeFailure):
+        return "FAIL", 1
+    return "BLOCKED", 2
+
+
+def _close_fd_preserving_active_error(fd):
+    """Close once; a cleanup error must not replace an active first failure."""
+    had_active_error = sys.exc_info()[0] is not None
+    try:
+        os.close(fd)
+    except OSError:
+        if not had_active_error:
+            raise
+
+
+def _unlink_path_preserving_active_error(path):
+    """Best-effort temporary cleanup without masking an active first failure."""
+    had_active_error = sys.exc_info()[0] is not None
+    try:
+        os.unlink(path)
+    except FileNotFoundError:
+        return
+    except OSError:
+        if not had_active_error:
+            raise
+
+
 def _run(args, timeout=15, check=True, cwd=None, env=None):
     try:
         result = subprocess.run(
@@ -274,13 +312,7 @@ def _read_block0(device, target):
         return _read_exact_block0(fd)
     finally:
         # A secondary close error must not hide the first identity/I/O fault.
-        if sys.exc_info()[0] is None:
-            os.close(fd)
-        else:
-            try:
-                os.close(fd)
-            except OSError:
-                pass
+        _close_fd_preserving_active_error(fd)
 
 
 def swapz_header_valid(header, size_bytes):
@@ -810,7 +842,7 @@ def _read_fast_test_development_evidence(path, expected_uid, head, nonce):
             f"observed=errno_{exc.errno}") from exc
     finally:
         if descriptor >= 0:
-            os.close(descriptor)
+            _close_fd_preserving_active_error(descriptor)
     if (not isinstance(record, dict) or
             record.get("schema") != "swapz-fast-test-development-evidence-v1" or
             record.get("head") != head or record.get("dirty") is not False or
@@ -964,7 +996,7 @@ def _artifact_digests():
             ) from exc
         finally:
             if descriptor >= 0:
-                os.close(descriptor)
+                _close_fd_preserving_active_error(descriptor)
     return digests
 
 
@@ -1023,14 +1055,11 @@ def _snapshot_reviewed_artifacts(state_dir, expected_digests):
             ) from exc
         finally:
             if destination_fd >= 0:
-                os.close(destination_fd)
+                _close_fd_preserving_active_error(destination_fd)
             if source_fd >= 0:
-                os.close(source_fd)
+                _close_fd_preserving_active_error(source_fd)
             if destination_created and not succeeded:
-                try:
-                    destination.unlink()
-                except FileNotFoundError:
-                    pass
+                _unlink_path_preserving_active_error(destination)
     return snapshots
 
 
@@ -1100,7 +1129,7 @@ def _fsync_directory(directory):
     try:
         os.fsync(fd)
     finally:
-        os.close(fd)
+        _close_fd_preserving_active_error(fd)
 
 
 def _recovery_base(target=None):
@@ -1190,7 +1219,7 @@ def _partition_lock(partuuid):
         _fsync_directory(base)
         return fd
     except BaseException:
-        os.close(fd)
+        _close_fd_preserving_active_error(fd)
         raise
 
 
@@ -1201,7 +1230,7 @@ def _durable_exclusive_record(path, record):
         _write_all(fd, (json.dumps(record, sort_keys=True) + "\n").encode())
         os.fsync(fd)
     finally:
-        os.close(fd)
+        _close_fd_preserving_active_error(fd)
     _fsync_directory(path.parent)
 
 
@@ -1261,7 +1290,7 @@ def _release_partition_ownership(state):
         observed_stage = (
             stage if type(stage) is str and stage in {
                 "BACKED_UP", "SWAP_OFF", "HEADER_CLEAR_PENDING",
-                "HEADER_CLEARED", "SWZ_FORMATTED",
+                "HEADER_CLEARED", "HEADER_RESTORE_PENDING", "SWZ_FORMATTED",
                 "MODULE_PENDING", "MODULE_OWNED", "MAPPED", "ORACLE_PASS",
                 "RECOVERY_REQUIRED", "PRE_DESTRUCTIVE_FAILED",
             } else "invalid_or_unknown")
@@ -1287,7 +1316,27 @@ def _release_partition_ownership(state):
     if used != marker:
         raise ProbeError("consumed review identity does not match partition owner")
     active_path.unlink()
-    _fsync_directory(base)
+    try:
+        _fsync_directory(base)
+    except OSError as release_sync_error:
+        # A failed directory sync makes marker deletion durability ambiguous.
+        # Re-create and durably sync the exact owner before reporting failure.
+        try:
+            _durable_exclusive_record(active_path, marker)
+        except BaseException as retention_error:
+            raise ProbeError(
+                "partition ownership release durability uncertain: "
+                f"first_errno={_errno_text(release_sync_error)} "
+                f"retention_errno={_errno_text(retention_error)} "
+                "owner_marker=uncertain; "
+                "safe_next_step=inspect_owner_and_state_read_only"
+            ) from release_sync_error
+        raise ProbeError(
+            "partition ownership release durability uncertain: "
+            f"first_errno={_errno_text(release_sync_error)} "
+            "owner_marker=retained; "
+            "safe_next_step=retry_recovery_after_read_only_inspection"
+        ) from release_sync_error
 
 
 def _validate_state_dir(state_dir):
@@ -1326,21 +1375,21 @@ def _save_state(state_dir, state):
         os.fchmod(fd, 0o600)
         _write_all(fd, (json.dumps(state, sort_keys=True, indent=2) + "\n").encode())
         os.fsync(fd)
-        os.close(fd)
+        closing_fd = fd
         fd = -1
+        _close_fd_preserving_active_error(closing_fd)
         os.replace(temp_name, state_dir / STATE_NAME)
         dir_fd = os.open(state_dir, os.O_RDONLY | os.O_DIRECTORY)
         try:
             os.fsync(dir_fd)
         finally:
-            os.close(dir_fd)
+            _close_fd_preserving_active_error(dir_fd)
     finally:
         if fd >= 0:
-            os.close(fd)
-        try:
-            os.unlink(temp_name)
-        except FileNotFoundError:
-            pass
+            closing_fd = fd
+            fd = -1
+            _close_fd_preserving_active_error(closing_fd)
+        _unlink_path_preserving_active_error(temp_name)
 
 
 def _utc_timestamp():
@@ -1360,9 +1409,17 @@ def _bounded_text(value, limit=MAX_RECORDED_OUTPUT_CHARS):
 
 
 def _errno_text(error):
-    value = getattr(error, "errno", None)
-    if isinstance(value, int) and not isinstance(value, bool):
-        return str(value)
+    """Return the first numeric errno from a wrapped failure chain."""
+    seen = set()
+    current = error
+    while isinstance(current, BaseException) and id(current) not in seen:
+        seen.add(id(current))
+        value = getattr(current, "errno", None)
+        if isinstance(value, int) and not isinstance(value, bool):
+            return str(value)
+        cause = getattr(current, "__cause__", None)
+        current = cause if isinstance(cause, BaseException) else getattr(
+            current, "__context__", None)
     return "unavailable"
 
 
@@ -1375,17 +1432,17 @@ def _save_results(state_dir, results):
         payload = (json.dumps(results, sort_keys=True, indent=2) + "\n").encode()
         _write_all(fd, payload)
         os.fsync(fd)
-        os.close(fd)
+        closing_fd = fd
         fd = -1
+        _close_fd_preserving_active_error(closing_fd)
         os.replace(temp_name, state_dir / RESULTS_NAME)
         _fsync_directory(state_dir)
     finally:
         if fd >= 0:
-            os.close(fd)
-        try:
-            os.unlink(temp_name)
-        except FileNotFoundError:
-            pass
+            closing_fd = fd
+            fd = -1
+            _close_fd_preserving_active_error(closing_fd)
+        _unlink_path_preserving_active_error(temp_name)
 
 
 def _captured_command(args, timeout=15):
@@ -1913,36 +1970,28 @@ def _write_block0(device, data, target, expected_current=None):
         if expected_current is not None and (
                 _read_exact_block0(fd) != expected_current):
             raise ProbeError("partition header changed before exclusive update")
-        offset = 0
-        while offset < PAGE_BYTES:
-            remaining_bytes = PAGE_BYTES - offset
-            try:
-                written = os.pwrite(fd, data[offset:], offset)
-            except OSError as exc:
-                raise ProbeError(
-                    f"operation=header_write offset={offset} "
-                    f"original_errno={exc.errno} "
-                    "safe_next_step=recover_with_durable_state") from exc
-            if not 0 < written <= remaining_bytes:
-                raise ProbeError(
-                    f"operation=header_write offset={offset} "
-                    "expected=remaining_4096_byte_range "
-                    "observed=short_or_invalid_write "
-                    "safe_next_step=recover_with_durable_state")
-            offset += written
+        try:
+            written = os.pwrite(fd, data, 0)
+        except OSError as exc:
+            raise ProbeError(
+                "operation=header_write offset=0 "
+                f"original_errno={exc.errno} "
+                "safe_next_step=recover_with_durable_state") from exc
+        if type(written) is not int or written != PAGE_BYTES:
+            observed_written = (
+                written if type(written) is int and written >= 0 else "invalid")
+            raise ProbeError(
+                "operation=header_write offset=0 original_errno=unavailable "
+                "expected=4096_bytes observed=short_or_invalid_write "
+                f"written_bytes={observed_written!r} "
+                "safe_next_step=recover_with_durable_state")
         os.fsync(fd)
         if _read_exact_block0(fd) != data:
             raise ProbeError("partition header readback did not match")
     finally:
-        # Preserve the first failure, including a partial-write errno.
-        if sys.exc_info()[0] is None:
-            os.close(fd)
-        else:
-            try:
-                os.close(fd)
-            except OSError:
-                pass
-
+        # Never resume a short block-device write; recovery owns any partial
+        # mutation. A secondary close failure cannot replace the first fault.
+        _close_fd_preserving_active_error(fd)
 
 def _active_swap_for(major, minor):
     """Resolve all active swap entries without mistaking swapfiles for devices."""
@@ -2189,35 +2238,88 @@ def _mapper_exists(state):
     return True
 
 
+def _header_prefix_transition_matches(current_header, prefix_header,
+                                      suffix_header):
+    """Accept only one prefix/suffix boundary, including either endpoint."""
+    if any(len(value) != PAGE_BYTES for value in (
+            current_header, prefix_header, suffix_header)):
+        return False
+    last_suffix_difference = max((
+        offset for offset in range(PAGE_BYTES)
+        if current_header[offset] != suffix_header[offset]), default=-1)
+    first_prefix_difference = next((
+        offset for offset in range(PAGE_BYTES)
+        if current_header[offset] != prefix_header[offset]), PAGE_BYTES)
+    return last_suffix_difference < first_prefix_difference
+
+
+def _recovery_header_stage(state):
+    stage = state.get("stage")
+    if stage == "RECOVERY_REQUIRED":
+        return state.get("stage_before_recovery", stage)
+    return stage
+
+
+def _header_matches_recovery_stage(header, backup, state, size_bytes, stage):
+    if header == backup:
+        return True
+    if stage == "HEADER_CLEAR_PENDING" and _header_prefix_transition_matches(
+            header, bytes(PAGE_BYTES), backup):
+        return True
+    if header == bytes(PAGE_BYTES) and stage in {
+            "SWAP_OFF", "HEADER_CLEARED"}:
+        return True
+    digest = state.get("formatted_header_sha256")
+    return (
+        stage in {"SWZ_FORMATTED", "MODULE_PENDING", "MODULE_OWNED",
+                  "MAPPED", "ORACLE_PASS"}
+        and isinstance(digest, str)
+        and hashlib.sha256(header).hexdigest() == digest
+        and swapz_header_valid(header, size_bytes)
+    )
+
+
+def _saved_header_restore_source(state, backup, size_bytes):
+    source_stage = state.get("header_restore_source_stage")
+    source_hex = state.get("header_restore_source_hex")
+    source_sha256 = state.get("header_restore_source_sha256")
+    if (source_stage not in {
+            "SWAP_OFF", "HEADER_CLEAR_PENDING", "HEADER_CLEARED",
+            "SWZ_FORMATTED", "MODULE_PENDING", "MODULE_OWNED",
+            "MAPPED", "ORACLE_PASS"} or
+            not isinstance(source_hex, str) or
+            len(source_hex) != PAGE_BYTES * 2 or
+            re.fullmatch(r"[0-9a-f]+", source_hex) is None or
+            not isinstance(source_sha256, str) or
+            re.fullmatch(r"[0-9a-f]{64}", source_sha256) is None):
+        raise ProbeError(
+            "saved header restoration source is missing or malformed; "
+            "manual review required")
+    source = bytes.fromhex(source_hex)
+    if (source == backup or
+            hashlib.sha256(source).hexdigest() != source_sha256 or
+            not _header_matches_recovery_stage(
+                source, backup, state, size_bytes, source_stage)):
+        raise ProbeError(
+            "saved header restoration source is not an authenticated "
+            "pre-restoration state; manual review required")
+    return source
+
+
 def _validate_recovery_header(current_header, backup, state, size_bytes):
     if len(current_header) != PAGE_BYTES or len(backup) != PAGE_BYTES:
         raise ProbeError("recovery header must be exactly 4096 bytes")
-    if current_header == backup:
-        return
-    stage = state.get("stage_before_recovery", state.get("stage"))
-    if stage == "HEADER_CLEAR_PENDING":
-        # A short write leaves only a zero prefix of the original header.
-        # Any other changed byte is foreign or ambiguous: do not overwrite.
-        changed_prefix_bytes = next((
-            offset + 1 for offset in range(PAGE_BYTES - 1, -1, -1)
-            if current_header[offset] != backup[offset]), 0)
-        if (not any(current_header[:changed_prefix_bytes]) and
-                current_header[changed_prefix_bytes:] ==
-                backup[changed_prefix_bytes:]):
+    stage = _recovery_header_stage(state)
+    if stage == "HEADER_RESTORE_PENDING":
+        source = _saved_header_restore_source(state, backup, size_bytes)
+        if _header_prefix_transition_matches(
+                current_header, backup, source):
             return
-    if current_header == bytes(PAGE_BYTES) and stage in {
-            "SWAP_OFF", "HEADER_CLEAR_PENDING", "HEADER_CLEARED"}:
-        return
-    digest = state.get("formatted_header_sha256")
-    if stage in {"SWZ_FORMATTED", "MODULE_PENDING", "MODULE_OWNED",
-                 "MAPPED", "ORACLE_PASS"} and (
-            isinstance(digest, str) and
-            hashlib.sha256(current_header).hexdigest() == digest and
-            swapz_header_valid(current_header, size_bytes)):
+    elif _header_matches_recovery_stage(
+            current_header, backup, state, size_bytes, stage):
         return
     raise ProbeError(
         "partition header is not an expected recovery state; manual review required")
-
 
 def recover(state_dir, device_arg, confirm_arg, lock_held=False,
             module_owned_by_process=False):
@@ -2355,6 +2457,15 @@ def recover(state_dir, device_arg, confirm_arg, lock_held=False,
         if current_header != backup:
             if active is not None:
                 raise ProbeError("cannot restore header while swap is active")
+            if _recovery_header_stage(state) != "HEADER_RESTORE_PENDING":
+                source_stage = _recovery_header_stage(state)
+                state["header_restore_source_stage"] = source_stage
+                state["header_restore_source_sha256"] = hashlib.sha256(
+                    current_header).hexdigest()
+                state["header_restore_source_hex"] = current_header.hex()
+                state["stage_before_recovery"] = "HEADER_RESTORE_PENDING"
+                state["stage"] = "HEADER_RESTORE_PENDING"
+                _save_state(state_dir, state)
             _verify_target_identity(target)
             _write_block0(target["device"], backup, target,
                           expected_current=current_header)
@@ -2418,7 +2529,7 @@ def recover(state_dir, device_arg, confirm_arg, lock_held=False,
         return state
     finally:
         if lock_fd is not None:
-            os.close(lock_fd)
+            _close_fd_preserving_active_error(lock_fd)
 
 
 def inspect_target_identity_for_recovery(state, device_arg, confirm_arg):
@@ -2504,7 +2615,7 @@ def _prepare_state(target, state_dir, evidence, review):
         _write_all(backup_fd, target["header"])
         os.fsync(backup_fd)
     finally:
-        os.close(backup_fd)
+        _close_fd_preserving_active_error(backup_fd)
     _fsync_directory(state_dir)
     state = {
         "device_arg": target["device_arg"],
@@ -2863,6 +2974,8 @@ def run_probe(device_arg, confirm_arg, state_dir_arg, review_path,
         }
         _save_results(state_dir, results)
         failure = None
+        execution_failure = False
+        destructive_execution_started = False
         partition_claim_attempted = False
         try:
             artifacts = _snapshot_reviewed_artifacts(
@@ -2914,6 +3027,7 @@ def run_probe(device_arg, confirm_arg, state_dir_arg, review_path,
             # Durable mutation intent precedes even the first partial pwrite.
             state["stage"] = "HEADER_CLEAR_PENDING"
             _save_state(state_dir, state)
+            destructive_execution_started = True
             _write_block0(target["device"], bytes(PAGE_BYTES), target,
                           expected_current=target["header"])
             state["stage"] = "HEADER_CLEARED"
@@ -3012,6 +3126,7 @@ def run_probe(device_arg, confirm_arg, state_dir_arg, review_path,
             _save_results(state_dir, results)
         except BaseException as exc:
             failure = exc
+            execution_failure = destructive_execution_started
         if partition_claim_attempted:
             try:
                 state = _remove_test_objects(state, state_dir)
@@ -3067,8 +3182,9 @@ def run_probe(device_arg, confirm_arg, state_dir_arg, review_path,
                         f"results_errno={_errno_text(results_exc)} "
                         "safe_next_step=inspect_owner_and_state_read_only",
                         file=sys.stderr)
-                print(f"RECOVERY_REQUIRED: owner retained at {state_dir}",
-                      file=sys.stderr)
+                print(
+                    "RECOVERY_REQUIRED: inspect durable owner/state at "
+                    f"{state_dir}", file=sys.stderr)
                 if failure is None:
                     failure = cleanup_exc
         elif failure is not None:
@@ -3173,6 +3289,11 @@ def run_probe(device_arg, confirm_arg, state_dir_arg, review_path,
                 f"observed={state.get('stage')!r}")
         if failure is not None:
             print(f"PHYSICAL_RESULTS={state_dir / RESULTS_NAME}", file=sys.stderr)
+            if (state.get("stage") == "RECOVERY_REQUIRED" or
+                    results.get("recovery_state_durability") == "UNCERTAIN"):
+                raise RecoveryRequiredError(str(failure)) from failure
+            if execution_failure:
+                raise ProbeFailure(str(failure)) from failure
             raise ProbeError(str(failure)) from failure
         # Persist the final PASS only after verified recovery and the exact
         # durable oracle/source/target evidence agree.
@@ -3189,7 +3310,7 @@ def run_probe(device_arg, confirm_arg, state_dir_arg, review_path,
             print(f"PHYSICAL_SMOKE_RESTORED=swap-enabled state={state_dir}")
         print(f"PHYSICAL_RESULTS={state_dir / RESULTS_NAME}")
     finally:
-        os.close(lock_fd)
+        _close_fd_preserving_active_error(lock_fd)
 
 
 def plan(device_arg, confirm_arg, review_path=None):
@@ -3647,7 +3768,15 @@ def main(argv=None):
     if args.action == "recover":
         if os.geteuid() != 0:
             raise ProbeError("recover action requires root")
-        state = recover(args.state_dir, args.device, args.confirm_device)
+        try:
+            state = recover(args.state_dir, args.device, args.confirm_device)
+        except ProbeError as exc:
+            raise RecoveryRequiredError(str(exc)) from exc
+        except OSError as exc:
+            raise RecoveryRequiredError(
+                "recovery operation failed "
+                f"original_errno={_errno_text(exc)} "
+                "safe_next_step=inspect_owner_and_state_read_only") from exc
         print(f"PHYSICAL_RECOVERY=COMPLETE stage={state['stage']}")
         return 0
     def handle_sigterm(signum, frame):
@@ -3664,5 +3793,6 @@ if __name__ == "__main__":
     try:
         raise SystemExit(main())
     except ProbeError as exc:
-        print(f"BLOCKED: {exc}", file=sys.stderr)
-        raise SystemExit(2)
+        status, exit_code = _terminal_error_status(exc)
+        print(f"{status}: {exc}", file=sys.stderr)
+        raise SystemExit(exit_code)

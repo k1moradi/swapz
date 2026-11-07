@@ -2462,6 +2462,7 @@ class PhysicalSwapProbeTests(unittest.TestCase):
                 if teardown_not_complete:
                     with self.assertRaises(probe.ProbeError) as rejected:
                         execute()
+                    state["_test_failure_type"] = type(rejected.exception)
                     self.assertEqual(
                         str(rejected.exception),
                         "partition ownership release refused: "
@@ -2481,6 +2482,7 @@ class PhysicalSwapProbeTests(unittest.TestCase):
                         execute()
                     except probe.ProbeError as rejected:
                         state["_test_first_failure"] = str(rejected)
+                        state["_test_failure_type"] = type(rejected)
                         state["_test_final_evidence_rejected"] = True
                 elif fault or identity_failure_at is not None or \
                         oracle_failure_at is not None or \
@@ -2495,6 +2497,7 @@ class PhysicalSwapProbeTests(unittest.TestCase):
                             "mapper|UUID|identity|table|backing|injected|phase failed|oracle phase .* failed|restoration/evidence|final_recovery_state|main or the bound helper changed|qualified artifacts changed") as rejected:
                         execute()
                     state["_test_first_failure"] = str(rejected.exception)
+                    state["_test_failure_type"] = type(rejected.exception)
                 else:
                     execute()
                 if (source_drift is not None or helper_sha_mismatch or
@@ -2519,15 +2522,16 @@ class PhysicalSwapProbeTests(unittest.TestCase):
     def test_short_header_io_retains_exact_offsets_and_original_errno(self):
         original = b"H" * probe.PAGE_BYTES
         observed = bytearray(original)
-        writes = []
 
         def read_fragment(_fd, count, offset):
             return bytes(observed[offset:offset + min(113, count)])
 
-        def write_fragment(_fd, data, offset):
-            length = min(257, len(data))
-            self.assertLessEqual(offset + length, probe.PAGE_BYTES)
-            observed[offset:offset + length] = data[:length]
+        writes = []
+
+        def short_write(_fd, data, offset):
+            self.assertEqual(offset, 0)
+            length = 257
+            observed[:length] = data[:length]
             writes.append((offset, length))
             return length
 
@@ -2536,61 +2540,61 @@ class PhysicalSwapProbeTests(unittest.TestCase):
                                                   return_value=123))
             stack.enter_context(mock.patch.object(probe.os, "pread",
                                                   side_effect=read_fragment))
-            stack.enter_context(mock.patch.object(probe.os, "pwrite",
-                                                  side_effect=write_fragment))
-            stack.enter_context(mock.patch.object(probe.os, "fsync"))
+            actual_write = stack.enter_context(mock.patch.object(
+                probe.os, "pwrite", side_effect=short_write))
+            synced = stack.enter_context(mock.patch.object(probe.os, "fsync"))
             stack.enter_context(mock.patch.object(probe.os, "close"))
             stack.enter_context(mock.patch.object(
                 probe, "_verify_open_block_device"))
             self.assertEqual(probe._read_block0("/dev/mock", {}), original)
-            probe._write_block0("/dev/mock", bytes(probe.PAGE_BYTES), {},
-                                expected_current=original)
-        self.assertEqual(bytes(observed), bytes(probe.PAGE_BYTES))
-        self.assertEqual([offset for offset, _ in writes],
-                         list(range(0, probe.PAGE_BYTES, 257)))
-        self.assertEqual(writes[-1][0] + writes[-1][1], probe.PAGE_BYTES)
+            with self.assertRaisesRegex(
+                    probe.ProbeError,
+                    "operation=header_write offset=0 "
+                    "original_errno=unavailable.*written_bytes=257"):
+                probe._write_block0(
+                    "/dev/mock", bytes(probe.PAGE_BYTES), {},
+                    expected_current=original)
+        self.assertEqual(actual_write.call_count, 1)
+        synced.assert_not_called()
+        self.assertEqual(writes, [(0, 257)])
+        self.assertEqual(bytes(observed), bytes(257) + original[257:])
+        probe._validate_recovery_header(
+            bytes(observed), original, {"stage": "HEADER_CLEAR_PENDING"},
+            probe.PAGE_BYTES)
 
         observed[:] = original
-        writes.clear()
-
-        def fail_after_partial(fd, data, offset):
-            if offset:
-                raise OSError(errno.EIO, "injected interrupted write")
-            return write_fragment(fd, data, offset)
-
         with ExitStack() as stack:
             stack.enter_context(mock.patch.object(probe.os, "open",
                                                   return_value=123))
             stack.enter_context(mock.patch.object(probe.os, "pread",
                                                   side_effect=read_fragment))
             actual_write = stack.enter_context(mock.patch.object(
-                probe.os, "pwrite", side_effect=fail_after_partial))
-            stack.enter_context(mock.patch.object(probe.os, "fsync"))
+                probe.os, "pwrite",
+                side_effect=OSError(errno.EIO, "injected write failure")))
+            synced = stack.enter_context(mock.patch.object(probe.os, "fsync"))
             stack.enter_context(mock.patch.object(probe.os, "close"))
             stack.enter_context(mock.patch.object(
                 probe, "_verify_open_block_device"))
             with self.assertRaisesRegex(
-                    probe.ProbeError, "operation=header_write offset=257 "
-                    "original_errno=5"):
+                    probe.ProbeError,
+                    "operation=header_write offset=0 original_errno=5"):
                 probe._write_block0(
                     "/dev/mock", bytes(probe.PAGE_BYTES), {},
                     expected_current=original)
-        self.assertEqual(actual_write.call_count, 2)
-        self.assertEqual(writes, [(0, 257)])
-        self.assertEqual(bytes(observed), bytes(257) + original[257:])
-        probe._validate_recovery_header(
-            bytes(observed), original, {"stage": "HEADER_CLEAR_PENDING"},
-            probe.PAGE_BYTES)
-        with self.assertRaisesRegex(probe.ProbeError, "manual review"):
-            probe._validate_recovery_header(
-                bytes(observed), original, {"stage": "SWAP_OFF"},
-                probe.PAGE_BYTES)
-        observed[300] = 0x42
-        with self.assertRaisesRegex(probe.ProbeError, "manual review"):
-            probe._validate_recovery_header(
-                bytes(observed), original, {"stage": "HEADER_CLEAR_PENDING"},
-                probe.PAGE_BYTES)
+        self.assertEqual(actual_write.call_count, 1)
+        synced.assert_not_called()
+        self.assertEqual(bytes(observed), original)
 
+        with self.assertRaisesRegex(probe.ProbeError, "manual review"):
+            probe._validate_recovery_header(
+                bytes(257) + original[257:], original,
+                {"stage": "SWAP_OFF"}, probe.PAGE_BYTES)
+        foreign = bytearray(bytes(257) + original[257:])
+        foreign[300] = 0x42
+        with self.assertRaisesRegex(probe.ProbeError, "manual review"):
+            probe._validate_recovery_header(
+                bytes(foreign), original, {"stage": "HEADER_CLEAR_PENDING"},
+                probe.PAGE_BYTES)
     def test_recovery_restores_only_exact_partial_clear_and_retains_owner_on_foreign_change(self):
         for foreign_change in (False, True):
             with self.subTest(foreign_change=foreign_change):
@@ -2675,6 +2679,188 @@ class PhysicalSwapProbeTests(unittest.TestCase):
                     self.assertEqual(
                         saved_state["stage"], "HEADER_CLEAR_PENDING"
                         if foreign_change else "COMPLETE")
+
+    def test_interrupted_header_restoration_is_durable_and_retryable(self):
+        with tempfile.TemporaryDirectory() as directory:
+            state_dir = Path(directory) / "state"
+            state, backup = self.make_recovery_state(state_dir)
+            state.update({
+                "stage": "HEADER_CLEARED",
+                "swap_was_active": False,
+                "swap_path": None,
+                "swap_size_kib": None,
+                "swap_priority": None,
+                "swap_used_kib": None,
+                "development_only": True,
+                "development_scope": probe.DEVELOPMENT_SCOPE,
+            })
+            (state_dir / probe.STATE_NAME).write_text(json.dumps(state))
+            current_header = bytearray(probe.PAGE_BYTES)
+            write_attempts = 0
+            target = {
+                "device": state["device"], "major": state["major"],
+                "minor": state["minor"], "size_bytes": state["size_bytes"],
+                "partuuid": state["partuuid"],
+            }
+
+            def read_header(_device, _target):
+                return bytes(current_header)
+
+            def restore_header(_device, header, _target, expected_current):
+                nonlocal write_attempts
+                write_attempts += 1
+                self.assertEqual(expected_current, bytes(current_header))
+                if write_attempts == 1:
+                    current_header[:257] = header[:257]
+                    raise probe.ProbeError(
+                        "operation=header_write offset=0 "
+                        "original_errno=unavailable "
+                        "observed=short_write written_bytes=257")
+                current_header[:] = header
+
+            owner_marker = (
+                self.recovery_base /
+                f"partition-{state['partuuid']}.active")
+            with ExitStack() as stack:
+                stack.enter_context(mock.patch.object(
+                    probe, "_validate_state_dir"))
+                stack.enter_context(mock.patch.object(
+                    probe, "inspect_target_identity_for_recovery",
+                    return_value=target))
+                stack.enter_context(mock.patch.object(
+                    probe, "_mapper_exists", return_value=False))
+                stack.enter_context(mock.patch.object(
+                    probe, "_active_swap_for", return_value=None))
+                stack.enter_context(mock.patch.object(
+                    probe, "_read_block0", side_effect=read_header))
+                stack.enter_context(mock.patch.object(
+                    probe, "_write_block0", side_effect=restore_header))
+                stack.enter_context(mock.patch.object(
+                    probe, "_verify_target_identity"))
+                stack.enter_context(mock.patch.object(
+                    probe, "_holder_names", return_value=[]))
+                stack.enter_context(mock.patch.object(
+                    probe, "_mountinfo_has_device", return_value=False))
+                stack.enter_context(mock.patch.object(
+                    probe.Path, "exists", return_value=False))
+
+                with self.assertRaisesRegex(
+                        probe.ProbeError, "written_bytes=257"):
+                    probe.recover(
+                        state_dir, state["device_arg"], state["device_arg"])
+                pending = json.loads(
+                    (state_dir / probe.STATE_NAME).read_text())
+                self.assertEqual(pending["stage"], "HEADER_RESTORE_PENDING")
+                self.assertEqual(
+                    pending["stage_before_recovery"],
+                    "HEADER_RESTORE_PENDING")
+                self.assertEqual(
+                    pending["header_restore_source_stage"],
+                    "HEADER_CLEARED")
+                self.assertEqual(
+                    pending["header_restore_source_sha256"],
+                    hashlib.sha256(bytes(probe.PAGE_BYTES)).hexdigest())
+                self.assertEqual(
+                    bytes.fromhex(pending["header_restore_source_hex"]),
+                    bytes(probe.PAGE_BYTES))
+                self.assertTrue(owner_marker.exists())
+                self.assertEqual(
+                    bytes(current_header),
+                    backup[:257] + bytes(probe.PAGE_BYTES - 257))
+
+                recovered = probe.recover(
+                    state_dir, state["device_arg"], state["device_arg"])
+                self.assertEqual(recovered["stage"], "COMPLETE")
+
+            self.assertEqual(write_attempts, 2)
+            self.assertEqual(bytes(current_header), backup)
+            self.assertFalse(owner_marker.exists())
+            self.assertTrue(
+                (self.recovery_base /
+                 f"consumed-{state['run_id']}.json").exists())
+
+    def test_owner_marker_is_restored_when_release_sync_fails(self):
+        target, _, review = self.reviewed_device_fixture()
+        probe._consume_review(target, review["run_id"])
+        marker_path = (
+            self.recovery_base /
+            f"partition-{target['partuuid']}.active")
+        consumed_path = (
+            self.recovery_base /
+            f"consumed-{review['run_id']}.json")
+        state = {
+            "stage": "COMPLETE",
+            "run_id": review["run_id"],
+            "partuuid": target["partuuid"],
+            "major": target["major"],
+            "minor": target["minor"],
+        }
+        with mock.patch.object(
+                probe, "_fsync_directory",
+                side_effect=[OSError(errno.EIO, "injected release fsync"), None]):
+            with self.assertRaisesRegex(
+                    probe.ProbeError,
+                    "first_errno=5 owner_marker=retained"):
+                probe._release_partition_ownership(state)
+        self.assertTrue(marker_path.exists())
+        self.assertTrue(consumed_path.exists())
+        marker = probe._load_unique_json(marker_path.read_bytes())
+        self.assertEqual(marker["run_id"], state["run_id"])
+
+        probe._release_partition_ownership(state)
+        self.assertFalse(marker_path.exists())
+        self.assertTrue(consumed_path.exists())
+
+    def test_persistence_cleanup_does_not_mask_first_fsync_errno(self):
+        for function, filename in (
+                (probe._save_state, probe.STATE_NAME),
+                (probe._save_results, probe.RESULTS_NAME)):
+            with self.subTest(function=function.__name__), \
+                    tempfile.TemporaryDirectory() as directory:
+                state_dir = Path(directory)
+                real_close = os.close
+
+                def close_after_kernel_release(fd):
+                    real_close(fd)
+                    raise OSError(errno.EIO, "injected close failure")
+
+                with mock.patch.object(
+                        probe.os, "fsync",
+                        side_effect=OSError(errno.ENOSPC,
+                                           "injected first fsync failure")), \
+                        mock.patch.object(
+                            probe.os, "close",
+                            side_effect=close_after_kernel_release):
+                    with self.assertRaises(OSError) as rejected:
+                        function(state_dir, {"stage": "BACKED_UP"})
+                self.assertEqual(rejected.exception.errno, errno.ENOSPC)
+                self.assertFalse((state_dir / filename).exists())
+
+    def test_terminal_status_separates_failure_block_and_recovery(self):
+        self.assertEqual(
+            probe._terminal_error_status(probe.ProbeError("blocked")),
+            ("BLOCKED", 2))
+        self.assertEqual(
+            probe._terminal_error_status(probe.ProbeFailure("failed")),
+            ("FAIL", 1))
+        self.assertEqual(
+            probe._terminal_error_status(
+                probe.RecoveryRequiredError("recovery")),
+            ("RECOVERY_REQUIRED", 3))
+
+        _, failed, _ = self.simulate_physical_run(
+            development_only=True, oracle_failure_at=1)
+        self.assertIs(failed["_test_failure_type"], probe.ProbeFailure)
+
+        _, recovery, _ = self.simulate_physical_run(
+            development_only=True, oracle_failure_at=1,
+            recovery_failure=True)
+        self.assertIs(
+            recovery["_test_failure_type"], probe.RecoveryRequiredError)
+
+        _, blocked, _ = self.simulate_physical_run(
+            development_only=True, source_drift="local")
+        self.assertIs(blocked["_test_failure_type"], probe.ProbeError)
 
     def test_cleanup_persistence_failure_does_not_mask_oracle_failure(self):
         with mock.patch("builtins.print") as printed:
