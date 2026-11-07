@@ -149,7 +149,15 @@ test-gc: $(OUT)/gc-forbidden-victim $(OUT)/gc-cost-accounting $(OUT)/gc-recovery
 	@set -e; "$(OUT)/gc-forbidden-victim"; "$(OUT)/gc-cost-accounting"; "$(OUT)/gc-recovery-policy"; "$(OUT)/gc-scan-scaling"; "$(OUT)/gc-rotation"; "$(OUT)/gc-engine-rotation"; "$(OUT)/gc-high-occupancy"
 
 test-lower-io: $(OUT)/flush-ordering $(OUT)/lower-write-aggregation $(OUT)/window-policy $(OUT)/preparation-slots $(OUT)/preparation-codec-result $(OUT)/preparation-publication-lifetime $(OUT)/lane-gap
-	@set -e; "$(OUT)/flush-ordering"; "$(OUT)/lower-write-aggregation"; "$(OUT)/window-policy"; "$(OUT)/preparation-slots"; "$(OUT)/preparation-codec-result"; "$(OUT)/preparation-publication-lifetime"; "$(OUT)/lane-gap"
+	@set -e; \
+	  for native_test in flush-ordering lower-write-aggregation window-policy preparation-slots preparation-codec-result preparation-publication-lifetime lane-gap; do \
+	    if "$(OUT)/$$native_test"; then :; else \
+	      native_exit_status=$$?; \
+	      # Keep the original failed executable's status, not a later Make exit. \
+	      printf 'FAIL: native test-lower-io binary=%s exit=%s\n' "$$native_test" "$$native_exit_status" >&2; \
+	      exit "$$native_exit_status"; \
+	    fi; \
+	  done
 
 test-concurrency: $(OUT)/preparation-slots $(OUT)/preparation-codec-result $(OUT)/preparation-publication-lifetime
 	@set -e; "$(OUT)/preparation-slots"; "$(OUT)/preparation-codec-result"; "$(OUT)/preparation-publication-lifetime"

@@ -3959,6 +3959,51 @@ class ReportContract(unittest.TestCase):
             "Package watchdog:" in detail
             for detail in runner.first_unittest_failure_details(untrusted)))
 
+    def test_native_lower_io_console_reports_failing_binary_and_source(self):
+        from types import SimpleNamespace
+        from unittest.mock import patch
+
+        transcript = (
+            "/PRIVATE/host/tests/runtime/native/io/"
+            "lower-write-aggregation.c:14 expression=PRIVATE_EXPRESSION\n"
+            "FAIL: native test-lower-io binary=lower-write-aggregation exit=1\n"
+            "make[2]: *** [Makefile:156: test-lower-io] Error 1\n"
+            "FAIL: rootless phase=Makefile native and metadata "
+            "subtest=test-lower-io test=unavailable "
+            "exit=2 reason=nonzero_exit phase_s=11 stage_s=16 line=603 "
+            "log=build/tests/rootless-failure.ABC12345/diagnostic.log\n"
+        )
+        expected = [
+            "First failing native test: lower-write-aggregation (exit=1)",
+            "Native assertion location: lower-write-aggregation.c:14",
+        ]
+        self.assertEqual(
+            runner.first_native_lower_io_failure_details(transcript), expected)
+        console = io.StringIO()
+        with patch.object(runner.subprocess, "run",
+                          return_value=SimpleNamespace(
+                              stdout=transcript, returncode=2)), \
+                patch.object(runner, "retain_direct_rootless_first_failure"), \
+                contextlib.redirect_stdout(console):
+            self.assertEqual(runner.run_stage(
+                "Native and rootless contracts", ["synthetic"],
+                {"stages": []}), 2)
+        for detail in expected:
+            self.assertIn("        " + detail, console.getvalue())
+        self.assertNotIn("PRIVATE_EXPRESSION", console.getvalue())
+        self.assertNotIn("/PRIVATE/host", console.getvalue())
+
+        for malicious in (
+            transcript.replace("binary=lower-write-aggregation",
+                               "binary=private-host-value"),
+            transcript.replace("subtest=test-lower-io", "subtest=test-gc"),
+            transcript.replace("Error 1\n", "Error 2\n"),
+            transcript.replace("exit=2 reason=nonzero_exit",
+                               "exit=1 reason=nonzero_exit"),
+        ):
+            self.assertEqual(
+                runner.first_native_lower_io_failure_details(malicious), [])
+
     def test_failure_console_assertions_show_safe_expected_and_observed(self):
         # Reproduce the originally hidden nullblk fixture nounset failure.
         # The actual stderr may contain private paths and keys.

@@ -1969,7 +1969,15 @@ case/line/reason/status evidence on both assertion and unexpected-command
 failures. The public make-test reporter validates the case against the
 current fixture source, and can display only its finite native configfs
 proof phase/status. Raw device identities, sandbox paths, exception messages
-and child stderr remain private.
+and child stderr remain private. For the source-controlled `test-lower-io`
+Make target, the seven native C fixtures run in their existing order and
+retain the original failing executable's exit code. On failure only, the
+native recipe emits a fixed `FAIL: native test-lower-io binary=... exit=...`
+marker. The official `make test` reporter authenticates it against the
+source target's prerequisites, its nested Make error and the final rootless
+phase before printing the executable and a source-bounded .c assertion
+location when present. Arbitrary C assertion operands, host paths and
+device data remain private. Keep nullblk-identity-test.sh executable in Git.
 Authenticated PhysicalSwapProbeTests recovery failures additionally show the
 deepest source-controlled physical-swap-probe.py frame (basename and line),
 physical_swap_probe.ProbeError class, and allowlisted immutable binding field.
