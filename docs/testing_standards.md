@@ -6180,12 +6180,16 @@ performs no write, zero-header initialization attempts exactly one header
 `pwrite()`, a partial `pwrite()` is not resumed, and every failure after the
 publication call is issued has the explicit status-3 `UNCERTAIN`/recovery
 disposition rather than being reported as an ordinary no-write failure.
-The captured production-CLI fixture must also inject a positive 2,048-byte
-return from the single 4,096-byte offset-zero `pwrite()`, and prove one
-write attempt without resume or `fsync`, retained partial header bytes,
-status-3 `UNCERTAIN` with `RECOVERY REQUIRED`, and originating `EIO`
-despite later diagnostic/close errors; never suggest unowned `swapoff`,
-forced mapper removal, or automatic format retry.
+The captured production-CLI fixture must also inject a positive 24-byte
+return from the single 4,096-byte offset-zero `pwrite()`, stopping exactly
+before the UUID so the retained media is observably incomplete. It must prove
+one write attempt without resume or `fsync`, an unchanged tail, populated
+magic/version/header-size/device-size fields with an unwritten zero UUID,
+status-3 `UNCERTAIN` with `RECOVERY REQUIRED`, and originating `EIO` despite
+later diagnostic/close errors. A 2,048-byte prefix is insufficient torn-media
+evidence because it already covers every non-reserved SWZ field and can leave
+a structurally valid image when block zero was initially zero. Never suggest
+unowned `swapoff`, forced mapper removal, or automatic format retry.
 Post-write readback/identity failures are never success, unknown nonzero block
 zero remains a recovery condition, and the standalone formatter contains no
 DISCARD/TRIM behavior. A focused removable-media identity binary must cover

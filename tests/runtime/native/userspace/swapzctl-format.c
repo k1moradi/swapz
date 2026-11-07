@@ -1226,9 +1226,13 @@ static void test_real_cli_io_faults_keep_recovery_evidence(void)
 		  1, EIO, "header read", 1U, 0U, 0U, 0U },
 		{ "torn-header-write", 0, 0, EIO, 0, EOVERFLOW,
 		  3, EIO, "write", 1U, 1U, 0U, 0U },
+		/*
+		 * Stop before the UUID so the retained media is observably partial.
+		 * A 2,048-byte prefix would already cover every non-reserved field.
+		 */
 		{ "short-header-write", 0, 0, 0, 0, EOVERFLOW,
 		  3, EIO, "write", 1U, 1U, 0U,
-		  SWAPZ_SUPERBLOCK_BYTES / 2U },
+		  SWAPZ_SUPERBLOCK_UUID_OFFSET },
 		{ "durability-sync", 0, 0, 0, ENOSPC, EOVERFLOW,
 		  3, ENOSPC, "durability", 1U, 1U, 1U, 0U },
 		{ "readback-after-write", ENODATA, 1, 0, 0, EOVERFLOW,
@@ -1303,11 +1307,30 @@ static void test_real_cli_io_faults_keep_recovery_evidence(void)
 		      strstr(report, "swapoff") ||
 		      strstr(report, "dmsetup remove --force") ||
 		      strstr(report, "automatic format retry"))) ||
-		    ((cases[index].write_error || cases[index].short_write_bytes) &&
+		    (cases[index].write_error &&
 		     memcmp(admission_fixture.block_zero +
 				    SWAPZ_SUPERBLOCK_BYTES / 2U,
 			    original_header + SWAPZ_SUPERBLOCK_BYTES / 2U,
 			    SWAPZ_SUPERBLOCK_BYTES / 2U)) ||
+		    (cases[index].short_write_bytes &&
+		     (memcmp(admission_fixture.block_zero +
+			     cases[index].short_write_bytes,
+			     original_header + cases[index].short_write_bytes,
+			     SWAPZ_SUPERBLOCK_BYTES -
+				     cases[index].short_write_bytes) ||
+		      !swapz_sb_magic_matches(admission_fixture.block_zero) ||
+		      swapz_sb_get_u32(admission_fixture.block_zero +
+				       SWAPZ_SUPERBLOCK_VERSION_OFFSET) !=
+			      SWAPZ_SUPERBLOCK_VERSION ||
+		      swapz_sb_get_u32(admission_fixture.block_zero +
+				       SWAPZ_SUPERBLOCK_HEADER_BYTES_OFFSET) !=
+			      SWAPZ_SUPERBLOCK_BYTES ||
+		      swapz_sb_get_u64(admission_fixture.block_zero +
+				       SWAPZ_SUPERBLOCK_DEVICE_BYTES_OFFSET) !=
+			      admission_fixture.geometry_bytes ||
+		      swapz_sb_uuid_nonzero(admission_fixture.block_zero) ||
+		      swapz_sb_valid(admission_fixture.block_zero,
+				     admission_fixture.geometry_bytes))) ||
 		    (!cases[index].write_error &&
 		     !cases[index].short_write_bytes &&
 		     cases[index].expected_writes &&
@@ -1487,7 +1510,8 @@ static ssize_t test_format_pwrite(int fd, const void *buffer, size_t length,
 			return -1;
 		}
 		if (admission_fixture.short_write_bytes) {
-			assert(admission_fixture.short_write_bytes == length / 2U);
+			assert(admission_fixture.short_write_bytes > 0U &&
+			       admission_fixture.short_write_bytes < length);
 			memcpy(admission_fixture.block_zero, buffer,
 			       admission_fixture.short_write_bytes);
 			return (ssize_t)admission_fixture.short_write_bytes;
