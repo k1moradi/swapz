@@ -1076,6 +1076,155 @@ static int same_authoritative_map(const struct swapz_map *actual,
 }
 
 /*
+ * Keep first-error selection separate from retained GC ownership. A completed
+ * lower run first fails replay integrity, then a later paused transaction fails
+ * cleanup. After repairing only the synthetic corruption, the paused owner must
+ * still fence a foreground stage and DISCARD until controlled cleanup consumes
+ * that ownership. This is a bounded serialized interleaving, not a kernel race.
+ */
+static int test_gc_replay_cleanup_failure_fences_foreground(void)
+{
+	struct swapz_compressed_page pages[5];
+	struct swapz_io_run run = {
+		.bytes = bulk_scratch,
+		.txs = bulk_txs,
+	};
+	struct swapz_map original[5], foreground_before;
+	struct swapz_tx blocked;
+	swapz_u8 roles_before[4];
+	swapz_u8 prepared = 0U, committed = 99U, pending_before;
+	swapz_u16 completed = 0U;
+	swapz_u32 filler_generation, tail_logical, saved_tail_generation;
+	swapz_u32 destination, cursor_before_foreground, foreground_logical = 6U;
+	swapz_u32 completed_blocks_before, abandoned_blocks_before;
+	size_t corrupted_byte;
+	unsigned int index;
+	int replay_error, cleanup_error, stage_error, discard_error;
+
+	CHECK(setup_gc_bulk_victim(original, &filler_generation) == 0);
+	prepare_gc_bulk_pages(pages);
+	e.bulk_enabled = 1;
+	e.bulk_scratch = bulk_scratch;
+	e.bulk_txs = bulk_txs;
+	e.io.write_run = lower_write_run;
+	CHECK(swapz_gc_begin_rotation(&a, 0U) == 0);
+	destination = a.gc_destination;
+	CHECK(a.gc_allocation && destination < 4U && destination != 0U &&
+	      a.open_segment == destination);
+
+	CHECK(swapz_engine_prepare_batched_run(
+		      &e, pages, 5U, &run, &prepared, 0U) == 0);
+	CHECK(prepared == 5U && run.extent_count >= 2U);
+	pending_before = a.batch_pending;
+	completed_blocks_before = e.completed_blocks;
+	abandoned_blocks_before = a.abandoned_blocks;
+	CHECK(lower_write_run(
+		      NULL, run.start_block, run.blocks, run.bytes, &completed) == 0);
+	CHECK(completed == run.blocks);
+
+	tail_logical = run.txs[1].records[0].logical_page;
+	CHECK(tail_logical < 5U);
+	saved_tail_generation = maps[tail_logical].generation;
+	maps[tail_logical].generation++;
+	corrupted_byte =
+		((size_t)run.offsets[0] + run.txs[0].extent_blocks) *
+		SWAPZ_BLOCK_BYTES - 1U;
+	run.bytes[corrupted_byte] ^= 1U;
+
+	replay_error = swapz_engine_complete_batched_run(
+		&e, &run, completed, 0, &committed);
+	/* The failed cleanup is read-only on this stale tail. Repeat the same
+	 * resume check to expose its errno without consuming retained ownership. */
+	cleanup_error = swapz_batch_resume(&a, &run.txs[1]);
+	if (replay_error != -EBADMSG || cleanup_error != -ESTALE ||
+	    committed != 0U || e.completed_blocks != completed_blocks_before ||
+	    a.batch_pending != pending_before - 1U || a.batch_consumed != 1U ||
+	    a.in_flight || a.batch_replaying ||
+	    a.abandoned_blocks !=
+		    abandoned_blocks_before + run.txs[0].extent_blocks ||
+	    !a.gc_allocation || a.gc_destination != destination ||
+	    a.open_segment != destination) {
+		fprintf(stderr,
+			"%s:%d FAIL GC phase=replay-cleanup original_errno=%d "
+			"cleanup_errno=%d expected_errno=%d committed=%u "
+			"completed_blocks_before=%u completed_blocks_after=%u "
+			"expected_pending=%u observed_pending=%u batch_consumed=%u "
+			"in_flight=%u batch_replaying=%u "
+			"expected_abandoned=%u observed_abandoned=%u "
+			"gc_owned=%u destination=%u observed_destination=%u "
+			"disposition=terminal-integrity bounded_attempts=1\n",
+			__FILE__, __LINE__, replay_error, cleanup_error, -EBADMSG,
+			(unsigned int)committed, completed_blocks_before,
+			e.completed_blocks, (unsigned int)(pending_before - 1U),
+			(unsigned int)a.batch_pending,
+			(unsigned int)a.batch_consumed, (unsigned int)a.in_flight,
+			(unsigned int)a.batch_replaying,
+			abandoned_blocks_before + run.txs[0].extent_blocks,
+			a.abandoned_blocks, (unsigned int)a.gc_allocation,
+			destination, a.gc_destination);
+		return 1;
+	}
+
+	/*
+	 * Restore only the injected corruption. The paused transactions remain
+	 * owned, so the following unrelated foreground-like mutations must still
+	 * be rejected solely because cleanup did not release that ownership.
+	 */
+	run.bytes[corrupted_byte] ^= 1U;
+	maps[tail_logical].generation = saved_tail_generation;
+	foreground_before = maps[foreground_logical];
+	cursor_before_foreground = a.next_block;
+	memcpy(roles_before, roles, sizeof(roles_before));
+
+	stage_error = swapz_stage(
+		&a, &foreground_logical, 1U, 1U, &blocked);
+	discard_error = swapz_discard_page(&a, foreground_logical);
+	if (stage_error != -EBUSY || discard_error != -EBUSY ||
+	    a.next_block != cursor_before_foreground ||
+	    !same_authoritative_map(
+		    &maps[foreground_logical], &foreground_before) ||
+	    memcmp(roles, roles_before, sizeof(roles_before)) ||
+	    !a.gc_allocation || a.gc_destination != destination ||
+	    a.open_segment != destination ||
+	    a.batch_pending != pending_before - 1U) {
+		fprintf(stderr,
+			"%s:%d FAIL GC phase=foreground-after-cleanup-failure "
+			"original_errno=%d cleanup_errno=%d stage_errno=%d "
+			"discard_errno=%d expected_errno=%d "
+			"mapping_preserved=%d cursor_before=%u cursor_after=%u "
+			"roles_preserved=%d gc_owned=%u destination=%u "
+			"observed_destination=%u expected_pending=%u "
+			"observed_pending=%u retry_disposition=refuse-foreground "
+			"authority=retained-paused-owner bounded_attempts=1\n",
+			__FILE__, __LINE__, replay_error, cleanup_error, stage_error,
+			discard_error, -EBUSY,
+			same_authoritative_map(
+				&maps[foreground_logical], &foreground_before),
+			cursor_before_foreground, a.next_block,
+			!memcmp(roles, roles_before, sizeof(roles_before)),
+			(unsigned int)a.gc_allocation, destination, a.gc_destination,
+			(unsigned int)(pending_before - 1U),
+			(unsigned int)a.batch_pending);
+		return 1;
+	}
+
+	for (index = 1U; index < run.extent_count; ++index) {
+		CHECK(swapz_batch_resume(&a, &run.txs[index]) == 0);
+		CHECK(swapz_abort(&a, &a.active_tx) == 0);
+	}
+	CHECK(!a.batch_pending && !a.batch_replaying && !a.in_flight);
+	CHECK(a.next_block == cursor_before_foreground);
+	CHECK(a.gc_allocation && a.gc_destination == destination &&
+	      a.open_segment == destination);
+	CHECK(same_authoritative_map(
+		      &maps[foreground_logical], &foreground_before));
+	for (index = 0U; index < 5U; ++index)
+		CHECK(same_authoritative_map(&maps[index], &original[index]));
+	CHECK(filler_generation == maps[7U].generation);
+	return 0;
+}
+
+/*
  * Source READ -EIO after a prior compressed GC publication is recoverable:
  * the published prefix remains authoritative, the failed read consumes no
  * destination blocks, and retry visits only the still-mapped victim members.
@@ -1636,6 +1785,7 @@ int main(void)
 	CHECK(test_late_replay_failure_reports_committed_prefix() == 0); passed++;
 	CHECK(test_gc_torn_run_resumes_same_destination() == 0); passed++;
 	CHECK(test_gc_publication_prefix_is_not_republished() == 0); passed++;
+	CHECK(test_gc_replay_cleanup_failure_fences_foreground() == 0); passed++;
 	CHECK(test_gc_read_eio_after_published_prefix_resume() == 0); passed++;
 	CHECK(test_partial_gc_failures_resume_same_reserve() == 0); passed++;
 	CHECK(test_last_compressed_page_boundary_retry() == 0); passed++;
