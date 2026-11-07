@@ -3646,6 +3646,50 @@ class ProductionReadinessEvaluatorTest(unittest.TestCase):
                 self.assertNotIn(TARGET["partuuid"], diagnostics)
                 self.assertNotIn(SOURCE, diagnostics)
 
+    def test_first_failure_diagnostic_identity_must_be_unique(self):
+        policy = acceptance_policy()
+        policy_raw = encoded(policy)
+        cases = (
+            (
+                "arm",
+                physical_campaign_failure_evidence,
+                "failure_phase",
+                "gc",
+                "producer_failure_binding",
+            ),
+            (
+                "decision",
+                physical_campaign_decision_failure_evidence,
+                "expected",
+                "FAIL",
+                "decision_failure_binding",
+            ),
+        )
+        for (
+                name, campaign_factory, conflicting_field, conflicting_value,
+                binding_field) in cases:
+            with self.subTest(name=name):
+                campaign = campaign_factory(policy_raw)
+                audit = campaign["physical_evidence_audit"]
+                conflicting = dict(audit["diagnostics"][0])
+                conflicting[conflicting_field] = conflicting_value
+                audit["diagnostics"].append(conflicting)
+
+                # Fail-first: the prior evaluator authenticated whichever
+                # favorable duplicate it found and ignored the contradiction.
+                result = evaluate(policy=policy, campaign=campaign)
+                self.assertEqual(result["release_verdict"], "BLOCKED")
+                diagnostics = "\n".join(result["code_blockers"])
+                self.assertIn(
+                    "failed_evidence_field=physical_evidence_audit."
+                    f"diagnostics[].{binding_field}",
+                    diagnostics)
+                self.assertIn(
+                    "observed_schema_class=missing_or_contradictory",
+                    diagnostics)
+                self.assertNotIn(TARGET["partuuid"], diagnostics)
+                self.assertNotIn(SOURCE, diagnostics)
+
     def test_physical_fail_requires_sealed_exact_qualification_target(self):
         # A retained FAIL is authoritative only for the sealed admitted target,
         # not for a stale host capture or a contradictory nested pair binding.

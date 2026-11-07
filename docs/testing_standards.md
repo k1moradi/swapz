@@ -9142,7 +9142,9 @@ separately authenticated producer or measured FAIL.
 
 A source/target/policy/tool-bound campaign can establish producer-proven FAIL
 only from the current audit's retained first-failure witness. The first failure
-must match a retained FAIL diagnostic and either (a) be an authenticated
+must match exactly one retained diagnostic with its workload/pair/arm/metric
+identity; duplicate same-identity rows are contradictory even when one row is
+otherwise canonical. That unique diagnostic must be FAIL and either (a) be an authenticated
 non-setup `arm.verdict` producer FAIL with the same workload/pair/arm and one
 matching EXCLUDED pair-manifest entry with a producer-recorded
 measurement phase and retain a nonempty original producer error; the error
@@ -9152,8 +9154,8 @@ evidence. Or (b), the witness may be a
 `qualification.decision_status` FAIL for a complete
 accepted measured cohort. That measured decision must retain the producer's
 exact diagnostic field set, expected PASS, null observed value, and canonical
-verified-measurements-failed reason. A contradictory diagnostic or arm-only
-producer-status field cannot authenticate the cohort FAIL: report the
+verified-measurements-failed reason. A contradictory or duplicate diagnostic or
+arm-only producer-status field cannot authenticate the cohort FAIL: report the
 qualification producer phase, expected/observed evidence classes and unavailable
 original measurement error without exposing private identifiers. Before either witness can drive release FAIL, the
 retained pair manifest must have type-strict PASS/EXCLUDED dispositions and

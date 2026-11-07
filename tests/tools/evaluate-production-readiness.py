@@ -778,42 +778,66 @@ def _physical_audit_binding_is_valid(
     return True
 
 
+def _physical_failure_diagnostics_for_witness(
+        audit: dict[str, Any],
+        first_failure: dict[str, Any]) -> list[dict[str, Any]] | None:
+    """Return retained diagnostics with the exact first-failure identity."""
+    diagnostics = audit.get("diagnostics")
+    if not isinstance(diagnostics, list):
+        return None
+    return [
+        diagnostic for diagnostic in diagnostics
+        if isinstance(diagnostic, dict) and
+        diagnostic.get("metric") == first_failure.get("metric") and
+        diagnostic.get("workload") == first_failure.get("workload") and
+        diagnostic.get("pair_index") == first_failure.get("pair_index") and
+        diagnostic.get("arm") == first_failure.get("arm")
+    ]
+
+
 def _physical_producer_failure_diagnostic_is_valid(
         audit: dict[str, Any], first_failure: dict[str, Any]) -> bool:
-    """Bind an arm FAIL to the producer's bounded retained diagnostic."""
+    """Bind an arm FAIL to the producer's unique bounded diagnostic."""
     phase = audit.get("first_failed_phase")
-    diagnostics = audit.get("diagnostics")
+    matching_diagnostics = _physical_failure_diagnostics_for_witness(
+        audit, first_failure)
     if (
-            not isinstance(diagnostics, list) or
             first_failure.get("metric") != "arm.verdict" or
             not isinstance(phase, str) or
             re.fullmatch(
                 r"(?:measure|steady|gc|"
-                r"round-[1-9][0-9]*(?:-verify)?)", phase) is None):
+                r"round-[1-9][0-9]*(?:-verify)?)", phase) is None or
+            matching_diagnostics is None or
+            len(matching_diagnostics) != 1):
         return False
-    return any(
-        isinstance(diagnostic, dict) and
+    diagnostic = matching_diagnostics[0]
+    return (
+        set(diagnostic) == {
+            "status", "metric", "expected", "observed",
+            "workload", "pair_index", "arm", "reason",
+            "producer_status", "failure_phase",
+        } and
         diagnostic.get("status") == "FAIL" and
-        diagnostic.get("metric") == "arm.verdict" and
-        diagnostic.get("workload") == first_failure.get("workload") and
-        diagnostic.get("pair_index") == first_failure.get("pair_index") and
-        diagnostic.get("arm") == first_failure.get("arm") and
         diagnostic.get("producer_status") == "FAIL" and
         diagnostic.get("failure_phase") == phase and
         diagnostic.get("expected") == "PASS" and
         diagnostic.get("observed") is None and
         diagnostic.get("reason") ==
         "authenticated physical producer terminal measurement failure"
-        for diagnostic in diagnostics
     )
 
 
 def _physical_decision_failure_diagnostic_is_valid(
         audit: dict[str, Any], first_failure: dict[str, Any]) -> bool:
-    """Bind a measured cohort FAIL to the sealer's exact retained diagnostic."""
-    diagnostics = audit.get("diagnostics")
-    return isinstance(diagnostics, list) and any(
-        isinstance(diagnostic, dict) and
+    """Bind a measured cohort FAIL to one exact retained diagnostic."""
+    matching_diagnostics = _physical_failure_diagnostics_for_witness(
+        audit, first_failure)
+    if (
+            matching_diagnostics is None or
+            len(matching_diagnostics) != 1):
+        return False
+    diagnostic = matching_diagnostics[0]
+    return (
         set(diagnostic) == {
             "status", "metric", "expected", "observed",
             "workload", "pair_index", "arm", "reason",
@@ -826,7 +850,6 @@ def _physical_decision_failure_diagnostic_is_valid(
         diagnostic.get("expected") == "PASS" and
         diagnostic.get("observed") is None and
         diagnostic.get("reason") == "verified frozen measurements failed"
-        for diagnostic in diagnostics
     )
 
 
