@@ -7054,12 +7054,31 @@ page eviction, missing command, a short page or mismatched data must never
 produce a PASS.
 
 After the five RAM stages pass, interactive `make test` may use the separate
-unprivileged `tests/tools/algorithm-physical.py` to discover exactly one
-inactive, unmounted, single-partition USB disk bearing a swap signature on a
-bare-metal x86_64 host. It asks one default-No question showing partition,
-parent, PARTUUID and geometry, before starting the existing private
+unprivileged `tests/tools/algorithm-physical.py` to identify one exact swap
+partition on a USB disk, including a swap partition that shares its parent
+with mounted root/boot siblings. Read-only discovery must select only the
+partition carrying the swap signature, not any sibling filesystem or the
+whole disk, and cross-check `[SWAP]` from lsblk against the exact live block
+device in `/proc/swaps`. Nonzero used KiB is recorded as an observation,
+not construed as permission or as a permanent prohibition of Linux
+`swapoff`; migrating used pages requires privileged, bounded, revalidated
+admission and sufficient memory headroom. Duplicate or unverifiable active
+block identities refuse admission.
+
+The current development writer remains limited to a dedicated, inactive,
+single-partition USB card with no other active swap. A shared-root candidate
+such as the separately authorized Lubuntu `/dev/sda4`, an active target or
+other active swap may be displayed for read-only diagnosis but must report
+BLOCKED before prompting or invoking privileged code. It cannot skip the
+root-owned shared-parent scope record or independent persistent recovery
+storage mandated by `docs/AGENT_CONTEXT.md`. Once those checks and the exact
+target's fail-closed swapoff/restoration transaction are implemented, ask
+one default-No question naming the exact target. A Yes approves only the
+guarded attempt, not unconditional swapoff or a forced mapper teardown.
+The existing dedicated-card path asks one default-No question showing
+partition, parent, PARTUUID and geometry, before starting
 `physical-swap-probe.py run --development-only --algorithm-real-swap`
-path through noninteractive privilege. The original 4096-byte header and
+through noninteractive privilege. The original 4096-byte header and
 run-owned mapping still require backed-up, durable, verified cleanup.
 Only the exact run-owned mapper may be swapped on and off; never force-remove
 an active mapper. The controller pins the worker source and revalidates the

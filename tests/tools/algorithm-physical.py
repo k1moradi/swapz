@@ -10,6 +10,7 @@ from pathlib import Path
 import platform
 import re
 import shutil
+import stat
 import subprocess
 import sys
 
@@ -29,17 +30,25 @@ def _eligible_partitions(lsblk_output: dict) -> list[dict]:
                 disk.get("tran") != "usb":
             continue
         children = disk.get("children")
-        # A dedicated disposable card has one partition. Refuse shared-root,
-        # boot, mapper or multi-partition media instead of inferring consent
-        # from the presence of a swap signature on one sibling partition.
-        if not isinstance(children, list) or len(children) != 1:
+        # Discovery is read-only. A shared-root USB disk may contain one
+        # authorized swap partition without authorizing any sibling partition
+        # or allowing the current private physical writer to use that disk.
+        if (not isinstance(children, list) or not children or
+                any(not isinstance(partition, dict) for partition in children)):
+            continue
+        child_paths = [partition.get("path") for partition in children]
+        if (any(not isinstance(path, str) or not path.startswith("/dev/")
+                for path in child_paths) or len(child_paths) != len(set(child_paths))):
             continue
         for partition in children:
             if not isinstance(partition, dict) or \
                     partition.get("type") != "part" or \
                     partition.get("fstype") != "swap":
                 continue
-            if partition.get("mountpoints") not in (None, [], [None]):
+            # lsblk uses [SWAP] for an active swap area; it is not a
+            # filesystem mount. Cross-check it against /proc/swaps below.
+            if partition.get("mountpoints") not in (
+                    None, [], [None], ["[SWAP]"]):
                 continue
             partuuid = partition.get("partuuid")
             swap_uuid = partition.get("uuid")
@@ -58,8 +67,64 @@ def _eligible_partitions(lsblk_output: dict) -> list[dict]:
                 "path": path, "partuuid": partuuid,
                 "uuid": swap_uuid, "size_bytes": size,
                 "parent": disk.get("path"),
+                "parent_has_other_partitions": len(children) != 1,
+                "lsblk_active_swap": partition.get("mountpoints") == ["[SWAP]"],
             })
     return candidates
+
+
+def _selected_swap_inventory(partition: dict, swap_lines: list[str]) -> dict:
+    """Observe exact active swap identity, never authorize a swapoff.
+
+    The root-controlled worker must recheck every observation before mutation.
+    """
+    try:
+        selected_stat = os.stat(partition["path"])
+    except OSError as error:
+        raise ValueError("cannot stat selected swap partition") from error
+    if not stat.S_ISBLK(selected_stat.st_mode):
+        raise ValueError("selected swap partition is not a block device")
+    matching = []
+    unrelated = 0
+    for line in swap_lines[1:]:
+        fields = line.split()
+        if len(fields) != 5:
+            raise ValueError("swap inventory row is malformed")
+        swap_path, swap_kind, capacity, used, priority = fields
+        if (not swap_path.startswith("/") or
+                swap_kind not in {"partition", "file"}):
+            raise ValueError("swap inventory type or path is invalid")
+        try:
+            capacity_kib = int(capacity)
+            used_kib = int(used)
+            priority_number = int(priority)
+        except ValueError as error:
+            raise ValueError("swap inventory numeric field is invalid") from error
+        if (not capacity.isdecimal() or not used.isdecimal() or
+                capacity_kib < 1 or used_kib < 0 or used_kib > capacity_kib or
+                not -32768 <= priority_number <= 32767):
+            raise ValueError("swap inventory capacity or priority is invalid")
+        if swap_kind == "file":
+            unrelated += 1
+            continue
+        try:
+            active_stat = os.stat(swap_path)
+        except OSError as error:
+            raise ValueError("cannot identify active block swap") from error
+        if not stat.S_ISBLK(active_stat.st_mode):
+            raise ValueError("active swap entry is not a block device")
+        if active_stat.st_rdev == selected_stat.st_rdev:
+            matching.append({"used_kib": used_kib,
+                             "priority": priority_number,
+                             "capacity_kib": capacity_kib})
+        else:
+            unrelated += 1
+    if len(matching) > 1:
+        raise ValueError("duplicate active swap entries for selected partition")
+    active = matching[0] if matching else None
+    if partition.get("lsblk_active_swap") and active is None:
+        raise ValueError("lsblk swap marker disagrees with active swap inventory")
+    return {"active_swap": active, "other_active_swap_count": unrelated}
 
 
 def _require_read_only_preflight() -> dict:
@@ -79,9 +144,8 @@ def _require_read_only_preflight() -> dict:
     except (OSError, UnicodeError) as error:
         raise ValueError("cannot read current swap inventory") from error
     if not swap_lines or swap_lines[0].split() != [
-            "Filename", "Type", "Size", "Used", "Priority"] or \
-            len(swap_lines) != 1:
-        raise ValueError("swap already active or inventory ambiguous")
+            "Filename", "Type", "Size", "Used", "Priority"]:
+        raise ValueError("swap inventory header is malformed")
     block_info = subprocess.run([
         "lsblk", "--json", "--bytes", "--output",
         "PATH,TYPE,FSTYPE,UUID,PARTUUID,SIZE,TRAN,MOUNTPOINTS"],
@@ -93,8 +157,9 @@ def _require_read_only_preflight() -> dict:
     except (ValueError, TypeError, RecursionError) as error:
         raise ValueError("invalid or ambiguous block inventory") from error
     if len(candidates) != 1:
-        raise ValueError("expected exactly one inactive USB-card swap partition")
+        raise ValueError("expected exactly one identifiable USB swap partition")
     selected = candidates[0]
+    selected.update(_selected_swap_inventory(selected, swap_lines))
     selector = Path("/dev/disk/by-uuid") / selected["uuid"]
     if not selector.is_symlink() or \
             os.path.realpath(selector) != os.path.realpath(selected["path"]):
@@ -114,7 +179,24 @@ def main() -> int:
     print("Physical algorithm trial (disposable swap data):")
     print(f"  Partition: {selected['path']}  Parent: {selected['parent']}")
     print(f"  PARTUUID: {selected['partuuid']}  Bytes: {selected['size_bytes']}")
-    print("  Swap status: inactive; test will use normal swapon/swapoff")
+    active_swap = selected.get("active_swap")
+    if active_swap is not None:
+        print(f"  Swap status: ACTIVE; used={active_swap['used_kib']} KiB, "
+              f"priority={active_swap['priority']}")
+    else:
+        print("  Swap status: inactive")
+    blockers = []
+    if selected.get("parent_has_other_partitions"):
+        blockers.append("shared_root_scope_and_independent_recovery_required")
+    if active_swap is not None:
+        blockers.append("active_target_swapoff_not_implemented")
+    if selected.get("other_active_swap_count", 0):
+        blockers.append("formatter_rejects_other_active_swap")
+    if blockers:
+        # A Yes/No answer must never bypass a missing privileged safety gate.
+        print("PHYSICAL_ALGORITHM_REAL_SWAP=BLOCKED reason=" +
+              ",".join(blockers))
+        return 2
     print("  Existing swap header is restored after successful teardown")
     try:
         confirmed = input("Run bounded swapz Linux swap trial on this partition? [y/N] ")
