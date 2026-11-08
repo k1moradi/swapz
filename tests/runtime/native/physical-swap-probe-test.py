@@ -2159,6 +2159,72 @@ class PhysicalSwapProbeTests(unittest.TestCase):
                         probe.ProbeError, "verified persistent block source"):
                     probe._recovery_base()
 
+    def test_recovery_parent_must_differ_from_target_physical_disk(self):
+        # /dev/sda3 may mount / while /dev/sda4 is swap. Different
+        # partition identifiers do not establish independent durable recovery.
+        with tempfile.TemporaryDirectory() as directory:
+            base = Path(directory) / "recovery"
+            base.mkdir(mode=0o700)
+            original_lstat = probe.Path.lstat
+
+            def owned_lstat(path):
+                info = original_lstat(path)
+                fields = list(info)
+                fields[4] = 0
+                if path != base:
+                    fields[0] = stat.S_IFDIR | 0o755
+                return os.stat_result(fields)
+
+            calls = []
+
+            def read_only_observation(command, **kwargs):
+                del kwargs
+                calls.append(command)
+                if command[:5] == [
+                        "findmnt", "--first-only", "--noheadings",
+                        "--output", "FSTYPE"]:
+                    return subprocess.CompletedProcess(
+                        command, 0, stdout="ext4\n", stderr="")
+                if command[:5] == [
+                        "findmnt", "--first-only", "--noheadings",
+                        "--output", "SOURCE"]:
+                    return subprocess.CompletedProcess(
+                        command, 0, stdout="/dev/sda3\n", stderr="")
+                if command[0] == "lsblk":
+                    return subprocess.CompletedProcess(
+                        command, 0, stdout=(
+                            "8:3 part sda3\n"
+                            "8:0 disk sda\n"), stderr="")
+                self.fail(f"unexpected recovery preflight command: {command}")
+
+            with mock.patch.object(probe, "_recovery_base",
+                                   REAL_RECOVERY_BASE), \
+                 mock.patch.object(probe, "RECOVERY_BASE", base), \
+                 mock.patch.object(probe.Path, "lstat", owned_lstat), \
+                 mock.patch.object(probe, "_run",
+                                   side_effect=read_only_observation):
+                target = {"major": 8, "minor": 4,
+                          "parent_major_minor": "8:0"}
+                with self.assertRaisesRegex(
+                        probe.ProbeError, "selected swap physical parent"):
+                    probe._recovery_base(target)
+                self.assertEqual(len(calls), 3)
+
+                # The refusal is a property of the parent identity, not of
+                # the target's swap-use count or its partition number.
+                target["minor"] = 9
+                with self.assertRaisesRegex(
+                        probe.ProbeError, "selected swap physical parent"):
+                    probe._recovery_base(target)
+
+                target["parent_major_minor"] = "259:0"
+                self.assertEqual(probe._recovery_base(target), base)
+
+                del target["parent_major_minor"]
+                with self.assertRaisesRegex(
+                        probe.ProbeError, "target physical parent"):
+                    probe._recovery_base(target)
+
     def test_parent_entry_fsync_failure_prevents_state_admission(self):
         target, evidence = self.physical_preparation_fixture()
         _, _, review = self.reviewed_device_fixture()

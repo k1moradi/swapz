@@ -7069,6 +7069,15 @@ not construed as permission or as a permanent prohibition of Linux
 admission and sufficient memory headroom. Duplicate or unverifiable active
 block identities refuse admission.
 
+The physical recovery storage check must compare the selected target's
+verified physical parent (disk major:minor) against the complete backing
+ancestry of the persistent recovery filesystem, not merely compare the two
+partition numbers. On Lubuntu, recovery on `/dev/sda3` is not independent of
+the `/dev/sda4` target because both have physical parent `/dev/sda`.
+A missing, ambiguous or identical physical parent blocks mutation before
+state backup, `swapoff` or any block-zero write. Rootless regression must
+exercise both same-parent sibling refusal and independently backed recovery.
+
 The current development writer remains limited to a dedicated, inactive,
 single-partition USB card with no other active swap. A shared-root candidate
 such as the separately authorized Lubuntu `/dev/sda4`, an active target or

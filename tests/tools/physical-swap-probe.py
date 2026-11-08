@@ -1175,9 +1175,26 @@ def _recovery_base(target=None):
             r"^(?:loop|ram|zram|nullb)", row[2]) for row in devices) or (
             not any(row[1] == "disk" for row in devices)):
         raise ProbeError("recovery backing chain is volatile or unverifiable")
-    if target is not None and f"{target['major']}:{target['minor']}" in {
-            row[0] for row in devices}:
-        raise ProbeError("recovery storage is on the selected swap partition")
+    if target is not None:
+        # A different partition on the SAME physical disk is not independent
+        # recovery storage. Never admit shared-root swap just because its
+        # partition major:minor differs from the mounted root partition.
+        target_parent = target.get("parent_major_minor")
+        if (not isinstance(target_parent, str) or
+                re.fullmatch(r"(0|[1-9][0-9]*):(0|[1-9][0-9]*)",
+                             target_parent) is None):
+            raise ProbeError("target physical parent identity is unavailable")
+        physical_disk_parents = {
+            row[0] for row in devices if row[1] == "disk"
+        }
+        if len(physical_disk_parents) != 1:
+            raise ProbeError("recovery physical parent identity is ambiguous")
+        recovery_devices = {row[0] for row in devices}
+        if (f"{target['major']}:{target['minor']}" in recovery_devices or
+                target_parent in recovery_devices or
+                target_parent in physical_disk_parents):
+            raise ProbeError(
+                "recovery storage is on the selected swap physical parent")
     return base
 
 
