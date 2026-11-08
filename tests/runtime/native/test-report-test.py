@@ -248,6 +248,26 @@ class NativeTimingContract(unittest.TestCase):
                 self.assertIsNone(
                     runner.parse_owned_pair_phase_timings(malformed))
 
+    def test_loaded_mapper_inventory_failure_preserves_source_category(self):
+        for source, status in (("dmsetup", 2), ("record_parser", 2)):
+            observation = (f"LOADED_MAPPER_INVENTORY_SOURCE={source} "
+                           f"status={status}\n")
+            self.assertEqual(
+                runner.parse_loaded_mapper_inventory_failure(observation),
+                {"source": source, "exit_code": status})
+        for invalid in (
+                "",
+                "LOADED_MAPPER_INVENTORY_SOURCE=dmsetup status=0\n",
+                "LOADED_MAPPER_INVENTORY_SOURCE=dmsetup status=002\n",
+                "LOADED_MAPPER_INVENTORY_SOURCE=dmsetup status=256\n",
+                "LOADED_MAPPER_INVENTORY_SOURCE=arbitrary status=2\n",
+                "LOADED_MAPPER_INVENTORY_SOURCE=dmsetup status=2 "
+                "device=/private/path\n",
+                "LOADED_MAPPER_INVENTORY_SOURCE=dmsetup status=2\n" * 2):
+            with self.subTest(invalid=invalid[:40]):
+                self.assertIsNone(
+                    runner.parse_loaded_mapper_inventory_failure(invalid))
+
     def test_primary_lifecycle_case_timings_require_source_allowlist(self):
         first = (
             "PRIMARY_LIFECYCLE_CASE_TIMING index=0 elapsed_ms=21 "

@@ -3230,7 +3230,14 @@ canonical unsigned-decimal major:minor tuple, without leading zeroes. Empty
 lines, extra fields, or malformed device numbers are not proof of a single
 owned mapper: refuse at `mapper_inventory` before any holder signaling or
 device cleanup, report the pipeline status and safe inventory inspection,
-never echo inventory/device paths. The parser may retain at most two validated
+never echo inventory/device paths. On any failed enumeration, capture both pipeline statuses before running
+another shell command and emit a bounded failure-only category identifying
+whether `dmsetup` itself failed or the strict AWK record parser refused its
+output. The reporter may attach `mapper_inventory_failure` with only
+`source` and numeric `exit_code` on a loaded preflight failure. This is
+read-only diagnosis and does not promote or bypass the existing mapper
+inventory BLOCKED gate; neither raw mapper names nor device paths are printed.
+The parser may retain at most two validated
 records because any second mapping already proves cleanup ambiguity. For the
 single admitted record, its decimal major:minor is part of the ownership proof
 and must match both the mapper node and its canonical resolved node before any

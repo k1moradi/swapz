@@ -3600,6 +3600,23 @@ def rootless_phase_progress(line, allowed_names):
     return match.group(1), int(match.group(2)), int(match.group(3)), match.group(4)
 
 
+LOADED_MAPPER_INVENTORY_SOURCE_PATTERN = re.compile(
+    r"LOADED_MAPPER_INVENTORY_SOURCE=(dmsetup|record_parser) "
+    r"status=([1-9][0-9]{0,2})")
+
+
+def parse_loaded_mapper_inventory_failure(output):
+    """Classify only a source-controlled read-only preflight refusal."""
+    matches = [line for line in output.splitlines()
+               if line.startswith("LOADED_MAPPER_INVENTORY_SOURCE=")]
+    if len(matches) != 1:
+        return None
+    match = LOADED_MAPPER_INVENTORY_SOURCE_PATTERN.fullmatch(matches[0])
+    if match is None or int(match.group(2)) > 255:
+        return None
+    return {"source": match.group(1), "exit_code": int(match.group(2))}
+
+
 OWNED_PAIR_PHASE_PATTERN = re.compile(
     r"OWNED_PAIR_PHASE_TIMING phase=(setup|fixture|replay|verification|teardown) "
     r"elapsed_ms=(0|[1-9][0-9]{0,7})")
@@ -3997,6 +4014,10 @@ def run_stage(title, command, result, *, parse_bench=False,
             record["primary_lifecycle_case_elapsed_ms"] = case_timings
     if parse_bench and loaded_timing_phases:
         record["phase_elapsed_s"] = loaded_timing_phases
+    if parse_bench and rc and "LOADED_QUALIFICATION_SOURCE=" not in output:
+        mapper_inventory_failure = parse_loaded_mapper_inventory_failure(output)
+        if mapper_inventory_failure is not None:
+            record["mapper_inventory_failure"] = mapper_inventory_failure
     if rc:
         if rc != observed_exit_code:
             record["child_exit_code"] = observed_exit_code
@@ -4129,6 +4150,11 @@ def run_stage(title, command, result, *, parse_bench=False,
               f"remaining contracts: {timing['remaining_contracts_s']}s",
               flush=True)
     if rc and "diagnostic" in record:
+        if "mapper_inventory_failure" in record:
+            inventory_failure = record["mapper_inventory_failure"]
+            print("        Mapper inventory read-only source: "
+                  f"{inventory_failure['source']} "
+                  f"(exit {inventory_failure['exit_code']})", flush=True)
         print(f"        Failed during: {record['failed_phase']}", flush=True)
         print(f"        Reason: {record['diagnostic']}", flush=True)
         if (record["failed_phase"] == "owned RAM primary lifecycle prepare"

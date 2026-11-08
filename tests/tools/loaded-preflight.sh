@@ -342,6 +342,20 @@ if swapz_map_list="$(
             }
             END { if (malformed) exit 2 }
         '
+    # Preserve both pipeline exit statuses before any other shell command.
+    # A malformed record and a failing dmsetup are different read-only
+    # diagnostics; both keep the existing fail-closed mapper gate.
+    mapper_pipeline_status=("${PIPESTATUS[@]}")
+    if [[ ${mapper_pipeline_status[0]} != 0 ]]; then
+        printf 'LOADED_MAPPER_INVENTORY_SOURCE=dmsetup status=%s\n' \
+            "${mapper_pipeline_status[0]}" >&2
+        exit "${mapper_pipeline_status[0]}"
+    fi
+    if [[ ${mapper_pipeline_status[1]} != 0 ]]; then
+        printf 'LOADED_MAPPER_INVENTORY_SOURCE=record_parser status=%s\n' \
+            "${mapper_pipeline_status[1]}" >&2
+        exit "${mapper_pipeline_status[1]}"
+    fi
 )"; then
     :
 else
