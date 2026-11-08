@@ -3656,11 +3656,17 @@ def rootless_suite_display_name(label):
     return name if len(name) <= ROOTLESS_NAME_WIDTH else name[:37] + "..."
 
 
+def progress_table_row(index, name, verdict, duration):
+    """Share one fixed-width format between rootless and loaded suites."""
+    return (f"    {index + 1:>2} | "
+            f"{name:<{ROOTLESS_NAME_WIDTH}} | "
+            f"{verdict:<10} | {duration:>8}")
+
+
 def rootless_suite_table_row(index, label, verdict, duration):
     """Keep active and completed rows exactly the same terminal width."""
-    return (f"    {index + 1:>2} | "
-            f"{rootless_suite_display_name(label):<{ROOTLESS_NAME_WIDTH}} | "
-            f"{verdict:<10} | {duration:>8}")
+    return progress_table_row(
+        index, rootless_suite_display_name(label), verdict, duration)
 
 
 LOADED_MAPPER_INVENTORY_SOURCE_PATTERN = re.compile(
@@ -3812,6 +3818,71 @@ LOADED_TIMING_BOUNDARIES = (
 )
 
 
+# Display-only phase names. The original markers and report keys are unchanged.
+LOADED_PHASE_DISPLAY_NAMES = {
+    "preflight": "Loaded host preflight",
+    "kernel-debug-config": "Kernel debug configuration",
+    "maximum-capacity": "Maximum swap capacity",
+    "gc-roll-forward": "GC roll-forward recovery",
+    "owned-nullblk-smoke": "Owned RAM null_blk correctness",
+    "primary-lifecycle": "Primary swap lifecycle and recovery",
+    "plan-allocation": "Benchmark plan allocation",
+    "plan-fixture": "Benchmark fixture preparation",
+    "plan-traces": "Benchmark trace generation",
+    "plan-write-traces": "Benchmark write trace planning",
+    "plan-verification": "Benchmark plan verification",
+    "raw-read-fanout": "Raw read fanout verification",
+    "mixed-sd": "SD mixed workloads",
+    "mixed-ssd": "SSD mixed workloads",
+    "storage-sd-card": "SD card storage envelope",
+    "storage-sata-ssd": "SATA SSD storage envelope",
+    "storage-nvme-gen4": "NVMe Gen4 storage envelope",
+    "storage-nvme-gen5": "NVMe Gen5 storage envelope",
+    "read-coalesce-fast": "Fast read coalescing A/B",
+    "read-coalesce-serial": "SD serial read coalescing A/B",
+    "write-saturation-sd": "SD write saturation",
+    "write-saturation-ssd": "SSD write saturation",
+    "id36-pressure": "ID36 constrained resource pressure",
+    "kernel-debug-final": "Final kernel debug checks",
+    "final-cleanup": "Loaded qualification cleanup",
+}
+
+# Timing boundaries are NOT PASS gates. A phase gets a visible PASS only
+# after its corresponding source-controlled child completion marker.
+LOADED_PHASE_PASS_MARKERS = {
+    "maximum-capacity": "PASS_LOADED_MAXIMUM_CAPACITY",
+    "gc-roll-forward": "PASS_LOADED_GC_ROLL_FORWARD_RECOVERY",
+    "owned-nullblk-smoke": "PASS_LOADED_OWNED_NULLBLK_SMOKE",
+    "primary-lifecycle": "PASS_LOADED_PRIMARY_NULLBLK_NEGATIVE_RECOVERY",
+    "plan-verification": "PASS_LOADED_SHARED_BENCHMARK_PLAN",
+    "raw-read-fanout": "PASS_LOADED_RAW_READ_FANOUT",
+    "mixed-sd": "PASS_OWNED_RAM_REGIME=sd_emulated",
+    "mixed-ssd": "PASS_OWNED_RAM_REGIME=ssd_emulated",
+    "storage-sd-card": "PASS_STORAGE_ENVELOPE=sd_card",
+    "storage-sata-ssd": "PASS_STORAGE_ENVELOPE=sata_ssd",
+    "storage-nvme-gen4": "PASS_STORAGE_ENVELOPE=nvme_gen4",
+    "storage-nvme-gen5": "PASS_STORAGE_ENVELOPE=nvme_gen5",
+    "write-saturation-sd": "PASS_WRITE_SATURATION_REGIME=sd_emulated",
+    "write-saturation-ssd": "PASS_WRITE_SATURATION_REGIME=ssd_emulated",
+    "id36-pressure": "PASS_ID36_RESOURCE_PRESSURE",
+}
+
+
+def loaded_phase_has_success_marker(phase, line):
+    marker = LOADED_PHASE_PASS_MARKERS.get(phase)
+    if marker is None:
+        return False
+    text = line.rstrip("\n")
+    return (text == marker or text.startswith(marker + "=") or
+            text.startswith(marker + ":"))
+
+
+def loaded_phase_table_row(index, phase, verdict, duration):
+    """Match the rootless table width without printing child-supplied labels."""
+    return progress_table_row(
+        index, LOADED_PHASE_DISPLAY_NAMES[phase], verdict, duration)
+
+
 def loaded_timing_phase(line):
     """Identify an observational loaded boundary; ignore all other output."""
     for marker, phase in LOADED_TIMING_BOUNDARIES:
@@ -3826,6 +3897,11 @@ def run_stage(title, command, result, *, parse_bench=False,
     loaded_timing_phases = []
     loaded_current_phase = "preflight"
     loaded_current_phase_started = start
+    loaded_phase_index = 0
+    loaded_phase_passed = False
+    loaded_phase_problem = None
+    loaded_is_tty = False
+    loaded_phase_open = False
     rootless_active_phase = None
     rootless_active_started = start
     rootless_is_tty = False
@@ -3840,12 +3916,20 @@ def run_stage(title, command, result, *, parse_bench=False,
         if parse_bench or stream_rootless_progress:
             if parse_bench:
                 print("       loaded qualification progress:")
+                loaded_is_tty = sys.stdout.isatty()
+                loaded_phase_open = True
             else:
                 print("       Rootless suite results:", flush=True)
-                print(f"    {'ID':>2} | {'Name':<{ROOTLESS_NAME_WIDTH}} | "
-                      f"{'Verdict':<10} | {'Time':>8}", flush=True)
-                print(f"    {'-' * 2}-+-{'-' * ROOTLESS_NAME_WIDTH}-+-"
-                      f"{'-' * 10}-+-{'-' * 8}", flush=True)
+            print(f"    {'ID':>2} | {'Name':<{ROOTLESS_NAME_WIDTH}} | "
+                  f"{'Verdict':<10} | {'Time':>8}", flush=True)
+            print(f"    {'-' * 2}-+-{'-' * ROOTLESS_NAME_WIDTH}-+-"
+                  f"{'-' * 10}-+-{'-' * 8}", flush=True)
+            if loaded_is_tty:
+                sys.stdout.write(
+                    "\r" + loaded_phase_table_row(
+                        loaded_phase_index, loaded_current_phase,
+                        "RUNNING", "-"))
+                sys.stdout.flush()
             rootless_allowed_names = (
                 rootless_phase_names() if stream_rootless_progress
                 else frozenset())
@@ -3887,19 +3971,9 @@ def run_stage(title, command, result, *, parse_bench=False,
                             rootless_next_index += 1
                             rootless_active_phase = None
                 if parse_bench:
-                    next_phase = loaded_timing_phase(line)
-                    if next_phase is not None and next_phase != loaded_current_phase:
-                        boundary = time.monotonic()
-                        duration = round(
-                            boundary - loaded_current_phase_started, 3)
-                        loaded_timing_phases.append({
-                            "name": loaded_current_phase,
-                            "elapsed_s": duration})
-                        sys.stdout.write(
-                            f"       Time {loaded_current_phase}: {duration:.3f}s\n")
-                        sys.stdout.flush()
-                        loaded_current_phase = next_phase
-                        loaded_current_phase_started = boundary
+                    # Some PASS markers are also boundaries for the next phase.
+                    if loaded_phase_has_success_marker(loaded_current_phase, line):
+                        loaded_phase_passed = True
                     if line.startswith("START_LOADED_PRIMARY_NULLBLK_NEGATIVE="):
                         match = PRIMARY_NEGATIVE_CASE_START.fullmatch(line.strip())
                         negative_case = (match.group(1) if match and
@@ -3911,7 +3985,38 @@ def run_stage(title, command, result, *, parse_bench=False,
                     progress = loaded_progress_line(
                         line, negative_case=negative_case)
                     if progress is not None:
-                        sys.stdout.write("       " + progress + "\n")
+                        if progress.startswith((
+                                "FAIL:", "FAIL_PRIMARY_NULLBLK_LIFECYCLE")):
+                            loaded_phase_problem = "FAIL"
+                        elif progress.startswith((
+                                "BLOCKED:", "BLOCKED_PRIMARY_NULLBLK_LIFECYCLE")):
+                            if loaded_phase_problem != "FAIL":
+                                loaded_phase_problem = "BLOCKED"
+                    next_phase = loaded_timing_phase(line)
+                    if next_phase is not None and next_phase != loaded_current_phase:
+                        boundary = time.monotonic()
+                        duration = round(
+                            boundary - loaded_current_phase_started, 3)
+                        loaded_timing_phases.append({
+                            "name": loaded_current_phase,
+                            "elapsed_s": duration})
+                        verdict = loaded_phase_problem or (
+                            "PASS" if loaded_phase_passed else "DONE")
+                        sys.stdout.write(
+                            ("\r" if loaded_is_tty else "") +
+                            loaded_phase_table_row(
+                                loaded_phase_index, loaded_current_phase,
+                                verdict, f"{duration:.3f}s") + "\n")
+                        loaded_phase_index += 1
+                        loaded_current_phase = next_phase
+                        loaded_current_phase_started = boundary
+                        loaded_phase_passed = False
+                        loaded_phase_problem = None
+                        if loaded_is_tty:
+                            sys.stdout.write(
+                                "\r" + loaded_phase_table_row(
+                                    loaded_phase_index, loaded_current_phase,
+                                    "RUNNING", "-"))
                         sys.stdout.flush()
             rc = proc.wait()
             proc.stdout.close()
@@ -3921,9 +4026,16 @@ def run_stage(title, command, result, *, parse_bench=False,
                 loaded_timing_phases.append({
                     "name": loaded_current_phase,
                     "elapsed_s": duration})
+                verdict = loaded_phase_problem or (
+                    "FAIL" if rc else
+                    "PASS" if loaded_phase_passed else "DONE")
                 sys.stdout.write(
-                    f"       Time {loaded_current_phase}: {duration:.3f}s\n")
+                    ("\r" if loaded_is_tty else "") +
+                    loaded_phase_table_row(
+                        loaded_phase_index, loaded_current_phase,
+                        verdict, f"{duration:.3f}s") + "\n")
                 sys.stdout.flush()
+                loaded_phase_open = False
             output = "".join(chunks)
         else:
             proc = subprocess.run(
@@ -3934,6 +4046,14 @@ def run_stage(title, command, result, *, parse_bench=False,
             output, rc = proc.stdout, proc.returncode
     except OSError as exc:
         output, rc = type(exc).__name__, 127
+    if parse_bench and loaded_phase_open:
+        duration = round(time.monotonic() - loaded_current_phase_started, 3)
+        sys.stdout.write(
+            ("\r" if loaded_is_tty else "") +
+            loaded_phase_table_row(
+                loaded_phase_index, loaded_current_phase,
+                "FAIL", f"{duration:.3f}s") + "\n")
+        sys.stdout.flush()
     if stream_rootless_progress and rootless_active_phase is not None:
         # No authenticated completion: finalize the active row, not a PASS.
         elapsed_s = max(0.0, time.monotonic() - rootless_active_started)

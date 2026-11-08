@@ -70,7 +70,16 @@ each `RUNNING` row in place to `PASS` with carriage return, yielding one
 visible row per test. Redirected logs emit only one terminal row per suite,
 without control sequences. An unfinished suite gets a single `FAIL` row for
 nonzero exit or `INCOMPLETE` if its completion marker is missing after zero
-exit. Existing loaded-phase elapsed times remain separately displayed.
+exit. Loaded qualification uses the same four-column table, displaying each
+source-controlled phase or benchmark family once, with a short descriptive
+name instead of hundreds of internal START/PASS and per-pair markers. Live
+terminals rewrite the active RUNNING row; redirected logs only print completed
+rows. PASS requires a matching phase-specific success marker; DONE represents
+only an observational elapsed-time boundary, not a qualification PASS. Failed
+or interrupted phases end as non-PASS rows. Full loaded child transcripts,
+individual benchmark evidence, negative-case refusals and original first-error
+attribution remain available in the existing private/report artifacts.
+Loaded-phase elapsed times remain separately retained in the report.
 The rootless stderr-relay pass fixtures must preserve and authenticate the
 harness's fixed START/PASS phase markers before comparing the unchanged child
 stdout and private stderr. Allow nonnegative integer elapsed seconds rather

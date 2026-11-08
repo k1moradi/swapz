@@ -2324,6 +2324,85 @@ class ReportContract(unittest.TestCase):
         history.draw_goal(axes, goals.goal_for("nvme_gen5", goals.MIXED))
         self.assertEqual(axes.lines, [-5.0])
 
+    def test_loaded_progress_table_labels_and_success_markers(self):
+        phases = {"preflight"} | {
+            phase for _, phase in runner.LOADED_TIMING_BOUNDARIES
+        }
+        self.assertEqual(set(runner.LOADED_PHASE_DISPLAY_NAMES), phases)
+        names = list(runner.LOADED_PHASE_DISPLAY_NAMES.values())
+        self.assertEqual(len(names), len(set(names)))
+        self.assertTrue(all(len(name) <= runner.ROOTLESS_NAME_WIDTH
+                            and not name.startswith("tests/") for name in names))
+        self.assertFalse(runner.loaded_phase_has_success_marker(
+            "maximum-capacity", "PASS_LOADED_MAXIMUM_CAPACITY_FORGED\n"))
+        self.assertTrue(runner.loaded_phase_has_success_marker(
+            "maximum-capacity", "PASS_LOADED_MAXIMUM_CAPACITY\n"))
+        self.assertFalse(runner.loaded_phase_has_success_marker(
+            "plan-fixture", "PASS_LOADED_MAXIMUM_CAPACITY\n"))
+
+    def test_loaded_progress_table_preserves_failure_and_hides_raw_markers(self):
+        from unittest import mock
+
+        transcript = (
+            "LOADED_QUALIFICATION_SOURCE=ready\n"
+            "START_LOADED_MAXIMUM_CAPACITY\n"
+            "PASS_LOADED_MAXIMUM_CAPACITY\n"
+            "START_LOADED_GC_ROLL_FORWARD_RECOVERY\n"
+            "PASS_LOADED_GC_ROLL_FORWARD_RECOVERY\n"
+            "START_LOADED_OWNED_NULLBLK_SMOKE\n"
+            "START_OWNED_RAM_PAIR_ASYNC_PREPARE=1\n"
+            "BLOCKED: private/path must not leak\n")
+        captured = io.StringIO()
+        result = {"stages": [], "benchmarks": {}}
+        with mock.patch.object(
+                runner.subprocess, "Popen",
+                return_value=FakeStreamingProcess(transcript, returncode=1)), \
+                contextlib.redirect_stdout(captured):
+            runner.run_stage("Owned RAM smoke + mixed/QD pilot",
+                             ["unused"], result, parse_bench=True)
+        printed = captured.getvalue()
+        self.assertIn("ID | Name", printed)
+        for label in ("Loaded host preflight", "Maximum swap capacity",
+                      "GC roll-forward recovery",
+                      "Owned RAM null_blk correctness"):
+            self.assertEqual(printed.count(label), 1)
+        self.assertTrue(any(
+            "GC roll-forward recovery" in line and "| PASS" in line
+            for line in printed.splitlines()))
+        self.assertIn("BLOCKED", printed)
+        self.assertNotIn("START_LOADED", printed)
+        self.assertNotIn("PASS_LOADED", printed)
+        self.assertNotIn("START_OWNED_RAM_PAIR", printed)
+        self.assertNotIn("private/path", printed)
+        self.assertEqual(result["stages"][-1]["status"], "BLOCKED")
+
+    def test_loaded_progress_table_updates_terminal_row_in_place(self):
+        from unittest import mock
+
+        class TerminalOutput(io.StringIO):
+            def isatty(self):
+                return True
+
+        transcript = (
+            "START_LOADED_MAXIMUM_CAPACITY\n"
+            "PASS_LOADED_MAXIMUM_CAPACITY\n"
+            "START_LOADED_GC_ROLL_FORWARD_RECOVERY\n")
+        output = TerminalOutput()
+        result = {"stages": [], "benchmarks": {}}
+        with mock.patch.object(
+                runner.subprocess, "Popen",
+                return_value=FakeStreamingProcess(transcript, returncode=1)), \
+                contextlib.redirect_stdout(output):
+            runner.run_stage("Owned RAM smoke + mixed/QD pilot",
+                             ["unused"], result, parse_bench=True)
+        printed = output.getvalue()
+        self.assertIn("\r" + runner.loaded_phase_table_row(
+            0, "preflight", "RUNNING", "-"), printed)
+        self.assertIn("\r" + runner.loaded_phase_table_row(
+            1, "maximum-capacity", "RUNNING", "-"), printed)
+        self.assertEqual(printed.count("\r"), 6)
+        self.assertNotIn("START_LOADED", printed)
+
     def test_loaded_progress_stream_hides_bulk_evidence_but_keeps_phase_and_failure(self):
         self.assertIsNone(runner.loaded_progress_line(
             "TARGET_STATUS_AFTER=0 8192 swapz physical_write=123456"))
