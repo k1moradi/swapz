@@ -290,46 +290,46 @@
 "gc_scan_scale": {
 "rows": [
 {
-"incremental_select_ns": 750,
-"legacy_dead_probe_ns": 75959,
-"legacy_score_scan_ns": 646256,
+"incremental_select_ns": 708,
+"legacy_dead_probe_ns": 75792,
+"legacy_score_scan_ns": 496170,
 "logical_pages": 262144,
-"mapped_dead_probe_ns": 625,
+"mapped_dead_probe_ns": 708,
 "relocation_list_ns": 417,
-"relocation_scan_ns": 88501,
+"relocation_scan_ns": 86418,
 "segments": 1024,
 "victim_records": 256
 },
 {
-"incremental_select_ns": 4250,
-"legacy_dead_probe_ns": 413921,
-"legacy_score_scan_ns": 3602203,
+"incremental_select_ns": 3084,
+"legacy_dead_probe_ns": 340003,
+"legacy_score_scan_ns": 2371766,
 "logical_pages": 1048576,
-"mapped_dead_probe_ns": 2126,
-"relocation_list_ns": 667,
-"relocation_scan_ns": 521881,
+"mapped_dead_probe_ns": 2167,
+"relocation_list_ns": 541,
+"relocation_scan_ns": 382044,
 "segments": 4096,
 "victim_records": 256
 },
 {
-"incremental_select_ns": 11500,
-"legacy_dead_probe_ns": 1197220,
-"legacy_score_scan_ns": 8338750,
+"incremental_select_ns": 10042,
+"legacy_dead_probe_ns": 1262717,
+"legacy_score_scan_ns": 13215422,
 "logical_pages": 4194304,
 "mapped_dead_probe_ns": 7959,
-"relocation_list_ns": 791,
-"relocation_scan_ns": 1504974,
+"relocation_list_ns": 709,
+"relocation_scan_ns": 1667095,
 "segments": 16384,
 "victim_records": 256
 },
 {
-"incremental_select_ns": 61167,
-"legacy_dead_probe_ns": 8030080,
-"legacy_score_scan_ns": 81394550,
+"incremental_select_ns": 61709,
+"legacy_dead_probe_ns": 8437638,
+"legacy_score_scan_ns": 61562025,
 "logical_pages": 27080192,
-"mapped_dead_probe_ns": 50709,
-"relocation_list_ns": 1334,
-"relocation_scan_ns": 9690304,
+"mapped_dead_probe_ns": 50375,
+"relocation_list_ns": 1209,
+"relocation_scan_ns": 10117024,
 "segments": 105782,
 "victim_records": 256
 }
@@ -343,14 +343,14 @@
 "predictor": {
 "backend_benchmarks": [
 {
-"inverse_ns_per_page": 169,
+"inverse_ns_per_page": 149,
 "name": "scalar",
-"transform_ns_per_page": 144
+"transform_ns_per_page": 139
 },
 {
-"inverse_ns_per_page": 87,
+"inverse_ns_per_page": 100,
 "name": "neon",
-"transform_ns_per_page": 91
+"transform_ns_per_page": 71
 }
 ],
 "classifier": {
@@ -360,9 +360,9 @@
 "candidate": "delta64",
 "early_abort_pages": 223,
 "eligible_pages": 512,
-"ns_per_page": 30,
+"ns_per_page": 28,
 "sample_pairs": 32,
-"scalar_ns_per_page": 30,
+"scalar_ns_per_page": 28,
 "stage1_min_score": 2,
 "stage1_pairs": 8
 },
@@ -377,7 +377,7 @@
 "planner_blocks": 384,
 "planner_extents": 273,
 "raw_pages": 192,
-"wall_ns_per_page": 2115
+"wall_ns_per_page": 1878
 },
 {
 "acceleration": 2,
@@ -385,7 +385,7 @@
 "planner_blocks": 384,
 "planner_extents": 273,
 "raw_pages": 192,
-"wall_ns_per_page": 1829
+"wall_ns_per_page": 1758
 },
 {
 "acceleration": 3,
@@ -393,7 +393,7 @@
 "planner_blocks": 384,
 "planner_extents": 272,
 "raw_pages": 192,
-"wall_ns_per_page": 1755
+"wall_ns_per_page": 1743
 },
 {
 "acceleration": 4,
@@ -401,7 +401,7 @@
 "planner_blocks": 384,
 "planner_extents": 272,
 "raw_pages": 192,
-"wall_ns_per_page": 1728
+"wall_ns_per_page": 1668
 }
 ],
 "negative_pages": 256,
@@ -418,9 +418,9 @@
 "extents_saved": 49,
 "general_threshold": 24,
 "lz4_rescues": 192,
-"modeled_wall_ns_per_page": 1452,
-"modeled_wall_ns_total": 836864,
-"ns_per_saved_block": 16093,
+"modeled_wall_ns_per_page": 1439,
+"modeled_wall_ns_total": 829184,
+"ns_per_saved_block": 15945,
 "packing_adoptions": 0,
 "packing_eligible_pages": 51,
 "packing_threshold": 16,
@@ -485,14 +485,14 @@
 }
 ],
 "negative_useful": 0,
-"ns_per_saved_block": 16539,
+"ns_per_saved_block": 16389,
 "routed_baseline_blocks": 257,
 "routed_baseline_extents": 182,
 "routed_blocks_saved": 57,
 "routed_candidate_blocks": 200,
 "routed_candidate_extents": 113,
-"routed_cpu_ns_per_page": 1636,
-"routed_cpu_ns_total": 942761,
+"routed_cpu_ns_per_page": 1621,
+"routed_cpu_ns_total": 934223,
 "routed_extents_saved": 69,
 "structured_calls": 279,
 "structured_eligible": 320,
@@ -540,14 +540,14 @@
 }
 ],
 "negative_useful": 0,
-"ns_per_saved_block": 16616,
+"ns_per_saved_block": 16465,
 "routed_baseline_blocks": 257,
 "routed_baseline_extents": 182,
 "routed_blocks_saved": 55,
 "routed_candidate_blocks": 202,
 "routed_candidate_extents": 121,
-"routed_cpu_ns_per_page": 1586,
-"routed_cpu_ns_total": 913880,
+"routed_cpu_ns_per_page": 1572,
+"routed_cpu_ns_total": 905576,
 "routed_extents_saved": 61,
 "structured_calls": 272,
 "structured_eligible": 320,
@@ -595,14 +595,14 @@
 }
 ],
 "negative_useful": 0,
-"ns_per_saved_block": 16093,
+"ns_per_saved_block": 15945,
 "routed_baseline_blocks": 257,
 "routed_baseline_extents": 182,
 "routed_blocks_saved": 52,
 "routed_candidate_blocks": 205,
 "routed_candidate_extents": 133,
-"routed_cpu_ns_per_page": 1452,
-"routed_cpu_ns_total": 836864,
+"routed_cpu_ns_per_page": 1439,
+"routed_cpu_ns_total": 829184,
 "routed_extents_saved": 49,
 "structured_calls": 256,
 "structured_eligible": 320,
@@ -650,14 +650,14 @@
 }
 ],
 "negative_useful": 0,
-"ns_per_saved_block": 16093,
+"ns_per_saved_block": 15945,
 "routed_baseline_blocks": 257,
 "routed_baseline_extents": 182,
 "routed_blocks_saved": 52,
 "routed_candidate_blocks": 205,
 "routed_candidate_extents": 133,
-"routed_cpu_ns_per_page": 1452,
-"routed_cpu_ns_total": 836864,
+"routed_cpu_ns_per_page": 1439,
+"routed_cpu_ns_total": 829184,
 "routed_extents_saved": 49,
 "structured_calls": 256,
 "structured_eligible": 320,
@@ -705,14 +705,14 @@
 }
 ],
 "negative_useful": 0,
-"ns_per_saved_block": 16093,
+"ns_per_saved_block": 15945,
 "routed_baseline_blocks": 257,
 "routed_baseline_extents": 182,
 "routed_blocks_saved": 52,
 "routed_candidate_blocks": 205,
 "routed_candidate_extents": 133,
-"routed_cpu_ns_per_page": 1452,
-"routed_cpu_ns_total": 836864,
+"routed_cpu_ns_per_page": 1439,
+"routed_cpu_ns_total": 829184,
 "routed_extents_saved": 49,
 "structured_calls": 256,
 "structured_eligible": 320,
@@ -729,17 +729,17 @@
 "candidate_extents": 84,
 "cliff_2024": 160,
 "inverse_backend": "neon",
-"inverse_ns_per_page": 87,
+"inverse_ns_per_page": 100,
 "name": "delta64",
 "planner_blocks_saved": 65,
 "planner_extents_saved": 98,
 "raw_rescued": 128,
 "saved_payload_bytes": 284772,
-"scalar_inverse_ns_per_page": 169,
-"scalar_transform_ns_per_page": 144,
-"second_lz4_ns_per_page": 3118,
+"scalar_inverse_ns_per_page": 149,
+"scalar_transform_ns_per_page": 139,
+"second_lz4_ns_per_page": 3112,
 "transform_backend": "neon",
-"transform_ns_per_page": 91
+"transform_ns_per_page": 71
 }
 ]
 }
@@ -756,45 +756,45 @@
 "overall": "FAIL",
 "qualification": "RAM_BACKED_NULL_BLK_ONLY",
 "qualified_artifacts": {
-"formatter_sha256": "340ebf792956f5ea67696ce860986ced13a85001acdcad50d845f18677d15a6b",
-"module_sha256": "83fa3802f4e0f547ac87d8fde9712e22ba2f3f0a3a0a8b2fb11c0f488474c5fa",
+"formatter_sha256": "286b481b3568ed16459becbf5b9ecc53380b06b4b3a5de14351d28b11ec0ec8e",
+"module_sha256": "14a0f9f7675f8281443b36826f11a10b00a6f68b55a8f8ebb63cb8ffe68f8d9f",
 "oracle_sha256": "429ff40c94125cb8e8309537c17a32db28bf9a176567b8f0587bd8f5ae5e6c5b",
 "status": "AVAILABLE"
 },
 "schema": "swapz-test-results-v1",
-"source_sha": "c52664b5ca4e4a884629cfa1a57e743b8c7b0d1e",
+"source_sha": "c15a643520dbe6020366b5a2eb0f5959f204d0ac",
 "stages": [
 {
-"elapsed_s": 2.5,
+"elapsed_s": 2.256,
 "exit_code": 0,
 "name": "Build module and helpers",
 "status": "PASS"
 },
 {
-"elapsed_s": 315.169,
+"elapsed_s": 317.033,
 "exit_code": 0,
 "name": "Native and rootless contracts",
 "status": "PASS",
 "substage_elapsed_s": {
 "native_make_s": 8,
-"remaining_contracts_s": 307
+"remaining_contracts_s": 309
 }
 },
 {
-"elapsed_s": 0.242,
+"elapsed_s": 0.24,
 "exit_code": 0,
 "name": "Kernel warnings W=1",
 "status": "PASS"
 },
 {
-"elapsed_s": 0.267,
+"elapsed_s": 0.274,
 "exit_code": 0,
 "name": "Kernel warnings W=2",
 "status": "PASS"
 },
 {
-"diagnostic": "FAIL_PRIMARY_NULLBLK_LIFECYCLE: swapon-eintr-noeffect expected=canonical-refusal-lines:3 observed_lines=5",
-"elapsed_s": 20.615,
+"diagnostic": "FAIL_PRIMARY_NULLBLK_LIFECYCLE: swapon-eintr-noeffect expected=canonical-refusal-lines:3 observed_lines=5 marker=1 failure=1 detail=0 recovery_failure=0 wrapper=1 blank=0 other=2",
+"elapsed_s": 20.331,
 "exit_code": 1,
 "failed_phase": "owned RAM primary lifecycle interruption recover-restored",
 "name": "Owned RAM smoke + mixed/QD pilot",
@@ -823,5 +823,5 @@
 "status": "FAIL"
 }
 ],
-"tested_commit_sha": "c52664b5ca4e4a884629cfa1a57e743b8c7b0d1e"
+"tested_commit_sha": "c15a643520dbe6020366b5a2eb0f5959f204d0ac"
 }
