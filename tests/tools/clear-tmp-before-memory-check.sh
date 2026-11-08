@@ -1,6 +1,7 @@
-# Clean only fully completed, private swapz benchmark sessions before a
-# host-memory observation. Other /tmp occupants, incomplete/quarantined runs,
-# and swapz sessions without completion proof are never cleanup candidates.
+# Clean fully completed private benchmark sessions and deployments older
+# than one hour before the host-memory observation.
+# Keep unrelated /tmp occupants, recent deployments, failed/quarantined
+# sessions and all sessions without matching completion proof.
 swapz_clear_tmp_before_memory_check() {
     [[ $# == 0 && $(id -u) == 0 ]] || {
         printf '%s\n' 'BLOCKED: owned /tmp cleanup requires root and no arguments' >&2

@@ -11,6 +11,7 @@ import select
 import subprocess
 import sys
 import tempfile
+import time
 import unittest
 from unittest import mock
 
@@ -84,6 +85,32 @@ class OwnedTemporaryCleanupTests(unittest.TestCase):
         (directory / "session.log").write_text(content)
         (directory / "session.log").chmod(0o600)
 
+    def deployment_session(self, suffix, *, complete=True, passed=True,
+                           active=False, legacy=False, terminal=None):
+        directory = self.root / f"swapz-deploy.{suffix}"
+        directory.mkdir(mode=0o700)
+        owner_record = (f"pid={os.getpid() if active else 99999999}\n"
+                        f"source_sha={self.source_sha}\n")
+        if not legacy:
+            owner = directory / cleanup_module.DEPLOY_OWNER_FILE
+            owner.write_text(owner_record)
+            owner.chmod(0o600)
+            if complete:
+                completion = directory / cleanup_module.DEPLOY_COMPLETE_FILE
+                completion.write_text(owner_record)
+                completion.chmod(0o600)
+        if terminal is None:
+            terminal = ("PASS: loaded isolated swapz byte-exact I/O, clean teardown"
+                        if passed else "FAIL: teardown was unsuccessful")
+        log = directory / "session.log"
+        log.write_text(
+            f"SOURCE_HEAD={self.source_sha}\n"
+            "RUNNING_KERNEL=fixture\n"
+            "BOOT_ID=00000000-0000-0000-0000-000000000000\n"
+            f"{terminal}\nEVIDENCE={log}\n")
+        log.chmod(0o600)
+        return directory
+
     def run_cleanup(self):
         arguments = [str(HELPER), str(self.root), str(self.owner_uid), "700"]
         # Invoke the real CLI entry point in-process so its scoped process
@@ -94,6 +121,73 @@ class OwnedTemporaryCleanupTests(unittest.TestCase):
             status = cleanup_module.main()
         return subprocess.CompletedProcess(
             arguments, status, output.getvalue(), diagnostics.getvalue())
+
+    def test_recent_deployment_is_retained_until_one_hour_has_elapsed(self):
+        deployed = self.deployment_session("Abcd1234")
+        recent = self.run_cleanup()
+        self.assertEqual(recent.returncode, 0, recent.stderr)
+        self.assertIn("removed:0 retained:1", recent.stdout)
+        self.assertIn("retained_recent:1", recent.stdout)
+        self.assertTrue(deployed.exists())
+        future = time.time_ns() + 2 * cleanup_module.DEPLOY_RETENTION_NS
+        with mock.patch.object(cleanup_module.time, "time_ns", return_value=future):
+            expired = self.run_cleanup()
+        self.assertEqual(expired.returncode, 0, expired.stderr)
+        self.assertIn("removed:1", expired.stdout)
+        self.assertFalse(deployed.exists())
+
+    def test_old_deployment_requires_private_proof_and_clean_teardown(self):
+        failed = self.deployment_session("Abcd1234", passed=False)
+        incomplete = self.deployment_session("Bcde1234", complete=False)
+        quarantined = self.deployment_session(
+            "Cdef1234", terminal="BLOCKED: resource retained, never forced")
+        legacy = self.deployment_session("Defg1234", legacy=True)
+        active = self.deployment_session("Efgh1234", active=True)
+        future = time.time_ns() + 2 * cleanup_module.DEPLOY_RETENTION_NS
+        with mock.patch.object(cleanup_module.time, "time_ns", return_value=future):
+            result = self.run_cleanup()
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("removed:0 retained:5", result.stdout)
+        for retained in (failed, incomplete, quarantined, legacy, active):
+            self.assertTrue(retained.exists())
+
+    def test_all_clean_deployment_probes_use_exact_terminal_evidence(self):
+        sessions = [
+            self.deployment_session(suffix, terminal=terminal.decode("ascii"))
+            for suffix, terminal in zip(
+                ("Abcd1234", "Bcde1234", "Cdef1234"),
+                cleanup_module.DEPLOY_TERMINAL_EVIDENCE)
+        ]
+        future = time.time_ns() + 2 * cleanup_module.DEPLOY_RETENTION_NS
+        with mock.patch.object(cleanup_module.time, "time_ns", return_value=future):
+            result = self.run_cleanup()
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("removed:3", result.stdout)
+        self.assertTrue(all(not session.exists() for session in sessions))
+
+    def test_deployment_foreign_log_and_marker_changes_never_authorize_deletion(self):
+        foreign = self.deployment_session("Abcd1234")
+        mismatched = self.deployment_session("Bcde1234")
+        (foreign / "session.log").write_bytes((mismatched / "session.log").read_bytes())
+        (mismatched / cleanup_module.DEPLOY_COMPLETE_FILE).write_text(
+            self.record.replace(self.source_sha, "b" * 40))
+        future = time.time_ns() + 2 * cleanup_module.DEPLOY_RETENTION_NS
+        with mock.patch.object(cleanup_module.time, "time_ns", return_value=future):
+            result = self.run_cleanup()
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("removed:0 retained:2", result.stdout)
+        self.assertTrue(foreign.exists())
+        self.assertTrue(mismatched.exists())
+
+    def test_deployment_producer_commits_completion_after_joined_log(self):
+        producer = (ROOT / "tests/tools/deploy-nullblk.sh").read_text()
+        owner = producer.index('> "$SESSION/.swapz-deploy-owner"')
+        joined_log = producer.index('wait "$SESSION_TEE_PID"')
+        final_evidence = producer.index("EVIDENCE=%s/session.log")
+        completed = producer.index('> "$SESSION/.swapz-deploy-complete"')
+        self.assertLess(owner, joined_log)
+        self.assertLess(joined_log, final_evidence)
+        self.assertLess(final_evidence, completed)
 
     def test_only_completed_owned_sessions_are_removed_and_foreign_survives(self):
         foreign = self.root / "some-other-application-database"

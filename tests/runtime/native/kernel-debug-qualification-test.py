@@ -328,9 +328,7 @@ class KernelDebugQualificationTests(unittest.TestCase):
 
         reader = shell_function("swapz_read_session_boot_id")
         cleanup = shell_function("cleanup")
-        session_marker = (
-            "printf 'BOOT_ID=%s\\n%s\\n' "
-            '"$SESSION_BOOT_ID" "$terminal_success" >> "$SESSION/session.log"')
+        session_marker = "printf 'BOOT_ID=%s\\n%s\\nEVIDENCE=%s/session.log\\n'"
         execution_marker = (
             "printf 'BOOT_ID=%s\\n%s\\n' "
             '"$SESSION_BOOT_ID" "$terminal_success" >&"$SESSION_OUTPUT_FD"')
@@ -373,6 +371,8 @@ tee() {
     return "$rc"
 }
 SESSION="$TEST_SESSION_DIR"
+SOURCE_HEAD=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+printf 'pid=%s\nsource_sha=%s\n' "$$" "$SOURCE_HEAD" > "$SESSION/.swapz-deploy-owner"
 SWAPS_ID_BEFORE="stable"
 OWN_DM=0
 OWN_NULL=0
@@ -469,6 +469,13 @@ exit 0
                 retained = (retained_path.read_text(encoding="utf-8")
                             if retained_path.exists() else "")
                 self.assertEqual(completed.returncode, expected_exit, output)
+                completion_marker = session_directory / ".swapz-deploy-complete"
+                owner_marker = session_directory / ".swapz-deploy-owner"
+                self.assertTrue(owner_marker.is_file())
+                self.assertEqual(completion_marker.exists(), not bool(phase))
+                if not phase:
+                    self.assertEqual(completion_marker.read_bytes(),
+                                     owner_marker.read_bytes())
                 published = [
                     line for line in output.splitlines()
                     if line.startswith("BOOT_ID=")]

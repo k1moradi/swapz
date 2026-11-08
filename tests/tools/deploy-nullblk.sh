@@ -145,6 +145,12 @@ done
 	fail "another dm_swapz module already loaded; do not touch it"
 [[ -r /proc/swaps ]] || fail "cannot audit host swap"
 SESSION="$(mktemp -d "${TMPDIR:-/tmp}/swapz-deploy.XXXXXXXX")"
+# Record the exact owner/source identity before the log producer starts.
+# A failed or interrupted run never publishes its matching completion marker.
+if ! printf 'pid=%s\nsource_sha=%s\n' "$$" "$VALIDATED_SOURCE" \
+        > "$SESSION/.swapz-deploy-owner"; then
+    fail "cannot preserve private deployment ownership proof"
+fi
 # Keep the caller output descriptor so terminal evidence can be published only
 # after the asynchronous session-log fanout has drained.
 exec {SESSION_OUTPUT_FD}>&1
@@ -282,10 +288,15 @@ cleanup() {
 	elif (( rc == 0 )); then
 		# Commit the terminal pair to retained evidence before exposing it to the
 		# caller. If retention fails, publish no execution BOOT_ID or PASS claim.
-		if ! printf 'BOOT_ID=%s\n%s\n' "$SESSION_BOOT_ID" "$terminal_success" >> "$SESSION/session.log"; then
+		if ! printf 'BOOT_ID=%s\n%s\nEVIDENCE=%s/session.log\n' \
+                "$SESSION_BOOT_ID" "$terminal_success" "$SESSION" >> "$SESSION/session.log"; then
 			rc=1
 			printf '%s\n' "BLOCKED_KERNEL_DEBUG_PRODUCER phase=evidence_commit expected=$expected_boot_marker observed=retention_write_failed evidence_retained=partial" >&"$SESSION_OUTPUT_FD"
-		elif ! printf 'BOOT_ID=%s\n%s\n' "$SESSION_BOOT_ID" "$terminal_success" >&"$SESSION_OUTPUT_FD"; then
+		elif ! printf 'pid=%s\nsource_sha=%s\n' "$$" "$SOURCE_HEAD" \
+                > "$SESSION/.swapz-deploy-complete"; then
+            rc=1
+            printf '%s\n' "BLOCKED_KERNEL_DEBUG_PRODUCER phase=completion_commit expected=$expected_boot_marker observed=retention_write_failed evidence_retained=partial" >&"$SESSION_OUTPUT_FD"
+        elif ! printf 'BOOT_ID=%s\n%s\n' "$SESSION_BOOT_ID" "$terminal_success" >&"$SESSION_OUTPUT_FD"; then
 			rc=1
 		else
 			# Preserve the existing success-only evidence locator without

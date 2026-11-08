@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Remove only completed, positively owned swapz benchmark scratch sessions.
+"""Remove only completed, positively owned swapz benchmark/deploy scratch sessions.
 
 Private qualification helper. Directory descriptors pin traversal; no path below the
 validated temporary root is followed through a symlink or another mount.
@@ -10,13 +10,22 @@ import os
 import re
 import stat
 import sys
+import time
 from dataclasses import dataclass
 
 
-SESSION_NAME = re.compile(r"swapz-benchmark\.[A-Za-z0-9]{8}\Z")
+SESSION_NAME = re.compile(r"swapz-(benchmark|deploy)\.[A-Za-z0-9]{8}\Z")
 OWNER_RECORD = re.compile(rb"pid=([1-9][0-9]*)\nsource_sha=([0-9a-f]{40})\n\Z")
 OWNER_FILE = ".swapz-benchmark-owner"
 COMPLETE_FILE = ".swapz-benchmark-complete"
+DEPLOY_OWNER_FILE = ".swapz-deploy-owner"
+DEPLOY_COMPLETE_FILE = ".swapz-deploy-complete"
+DEPLOY_RETENTION_NS = 60 * 60 * 1_000_000_000
+DEPLOY_TERMINAL_EVIDENCE = (
+    b"PASS: loaded maximum-capacity constructor and boundary roundtrip, clean teardown",
+    b"PASS: loaded GC roll-forward fault recovery, clean teardown",
+    b"PASS: loaded isolated swapz byte-exact I/O, clean teardown",
+)
 EVIDENCE_FILE = "session.log"
 EVIDENCE_WINDOW = 4096
 MAX_ROOT_ENTRIES = 100_000
@@ -75,12 +84,14 @@ class Entry:
 @dataclass
 class CleanupState:
     phase: str = "invocation"
+    session_class: str = "benchmark"
     removed: int = 0
     retained: int = 0
     reclaimed_logical_bytes: int = 0
     retained_unproved: int = 0
     retained_identity: int = 0
     retained_active: int = 0
+    retained_recent: int = 0
     partial: bool = False
 
 
@@ -149,7 +160,7 @@ def read_marker(directory: int, name: str, owner_uid: int, expected_mount: str) 
 
 
 def completed_evidence(directory: int, owner_uid: int, expected_mount: str,
-                       source_sha: bytes) -> bool:
+                       source_sha: bytes, session_class: str = "benchmark") -> bool:
     """Require bounded producer PASS evidence as well as matching PID markers.
 
     This is private same-UID provenance, not cryptographic attestation against a
@@ -180,6 +191,12 @@ def completed_evidence(directory: int, owner_uid: int, expected_mount: str,
         directory_path = os.readlink(os.fsencode(f"/proc/self/fd/{directory}"))
         expected_evidence = (b"EVIDENCE=" + os.path.join(
             directory_path, os.fsencode(EVIDENCE_FILE)) + b"\n")
+        if session_class == "deploy":
+            # Require the producer's exact terminal success and matching
+            # session-specific locator, not a copied or partial PASS log.
+            return (b"\nSOURCE_HEAD=" + source_sha + b"\n" in b"\n" + beginning
+                    and any(ending.endswith(b"\n" + terminal + b"\n" + expected_evidence)
+                            for terminal in DEPLOY_TERMINAL_EVIDENCE))
         return (b"\nSOURCE_HEAD=" + source_sha + b" " in b"\n" + beginning
                 and b"\nPASS: isolated pair and ordinary teardown\n" in b"\n" + ending
                 and ending.endswith(expected_evidence))
@@ -187,13 +204,21 @@ def completed_evidence(directory: int, owner_uid: int, expected_mount: str,
         close_preserving_first_error(descriptor)
 
 
-def owned_complete(directory: int, owner_uid: int, expected_mount: str) -> bool:
-    owner = read_marker(directory, OWNER_FILE, owner_uid, expected_mount)
-    complete = read_marker(directory, COMPLETE_FILE, owner_uid, expected_mount)
+def owned_complete(directory: int, owner_uid: int, expected_mount: str,
+                   session_class: str = "benchmark") -> bool:
+    if session_class == "benchmark":
+        owner_file, complete_file = OWNER_FILE, COMPLETE_FILE
+    elif session_class == "deploy":
+        owner_file, complete_file = DEPLOY_OWNER_FILE, DEPLOY_COMPLETE_FILE
+    else:
+        raise CleanupBlocked("unsupported scratch session class", "invalid-input")
+    owner = read_marker(directory, owner_file, owner_uid, expected_mount)
+    complete = read_marker(directory, complete_file, owner_uid, expected_mount)
     if owner is None or owner != complete:
         return False
     match = OWNER_RECORD.fullmatch(owner)
-    if match is None or not completed_evidence(directory, owner_uid, expected_mount, match.group(2)):
+    if match is None or not completed_evidence(
+            directory, owner_uid, expected_mount, match.group(2), session_class):
         return False
     process_id = int(match.group(1))
     try:
@@ -203,6 +228,22 @@ def owned_complete(directory: int, owner_uid: int, expected_mount: str) -> bool:
     except (OverflowError, PermissionError):
         return False  # Unobservable or malformed PID is not deletion proof.
     return False
+
+
+def deploy_retention_expired(directory_stat) -> bool:
+    # Creating the completion marker advances directory ctime/mtime. Also
+    # retain timestamps from the future or recently changed session entries.
+    latest_change_ns = max(directory_stat.st_ctime_ns, directory_stat.st_mtime_ns)
+    return time.time_ns() - latest_change_ns >= DEPLOY_RETENTION_NS
+
+
+def inspected_session_complete(directory: int, owner_uid: int,
+                               expected_mount: str, session_class: str) -> bool:
+    # Preserve the benchmark three-argument call for existing error-injection
+    # fixtures and apply exactly the same proof checks to deployment sessions.
+    if session_class == "benchmark":
+        return owned_complete(directory, owner_uid, expected_mount)
+    return owned_complete(directory, owner_uid, expected_mount, session_class)
 
 
 def inspect(directory: int, expected_mount: str, owner_uid: int,
@@ -407,13 +448,15 @@ def verify_entry(directory: int, entry: Entry, expected_mount: str) -> int:
 
 
 def remove_tree(directory: int, entries: list[Entry], expected_mount: str,
-                preserve_markers: bool = False) -> None:
+                preserve_markers: bool = False,
+                marker_files: tuple[str, str] = (OWNER_FILE, COMPLETE_FILE)) -> None:
     # Keep the bounded teardown log and completion records until scratch data
     # is gone. A failure after proof removal leaves a non-resumable partial
     # session; never claim proof survives every interruption.
+    owner_file, complete_file = marker_files
     ordinary = [entry for entry in entries if not preserve_markers or
-                entry.name not in (EVIDENCE_FILE, OWNER_FILE, COMPLETE_FILE)]
-    markers = ([entry for name in (EVIDENCE_FILE, COMPLETE_FILE, OWNER_FILE)
+                entry.name not in (EVIDENCE_FILE, owner_file, complete_file)]
+    markers = ([entry for name in (EVIDENCE_FILE, complete_file, owner_file)
                 for entry in entries if entry.name == name]
                if preserve_markers else [])
     for entry in ordinary + markers:
@@ -456,8 +499,11 @@ def cleanup(root_path: str, owner_uid: int, root_mode: int,
                 require(budget.root_entries <= MAX_ROOT_ENTRIES,
                         "too many temporary root entries", "bound")
                 name = directory_entry.name
-                if SESSION_NAME.fullmatch(name) is None:
+                session_match = SESSION_NAME.fullmatch(name)
+                if session_match is None:
                     continue
+                session_class = session_match.group(1)
+                state.session_class = session_class
                 state.phase = "session-identity"
                 candidate_stat = os.stat(name, dir_fd=root, follow_symlinks=False)
                 if not (stat.S_ISDIR(candidate_stat.st_mode) and
@@ -467,6 +513,11 @@ def cleanup(root_path: str, owner_uid: int, root_mode: int,
                     state.retained_identity += 1
                     state.phase = "root-inventory"
                     continue  # Unproved or foreign data must survive.
+                if session_class == "deploy" and not deploy_retention_expired(candidate_stat):
+                    state.retained += 1
+                    state.retained_recent += 1
+                    state.phase = "root-inventory"
+                    continue
                 candidate = os.open(name, os.O_DIRECTORY | OPEN_FLAGS, dir_fd=root)
                 try:
                     opened = os.fstat(candidate)
@@ -475,7 +526,8 @@ def cleanup(root_path: str, owner_uid: int, root_mode: int,
                     require(mount_id(candidate) == expected_mount,
                             "session is a separate mount", "mount-identity")
                     state.phase = "session-provenance"
-                    if not owned_complete(candidate, owner_uid, expected_mount):
+                    if not inspected_session_complete(
+                            candidate, owner_uid, expected_mount, session_class):
                         state.retained += 1
                         state.retained_unproved += 1
                         continue  # Incomplete/quarantined/live benchmark.
@@ -513,13 +565,28 @@ def cleanup(root_path: str, owner_uid: int, root_mode: int,
                     # marker rewrite on a coarse-timestamp filesystem. Reprove
                     # complete ownership immediately before the first unlink.
                     state.phase = "session-provenance"
-                    if not owned_complete(candidate, owner_uid, expected_mount):
+                    if not inspected_session_complete(
+                            candidate, owner_uid, expected_mount, session_class):
                         state.retained += 1
                         state.retained_unproved += 1
                         continue
+                    # A concurrent producer may have updated a directory after
+                    # the initial age check; never unlink a recently changed one.
+                    if session_class == "deploy" and not deploy_retention_expired(
+                            os.fstat(candidate)):
+                        state.retained += 1
+                        state.retained_recent += 1
+                        state.phase = "root-inventory"
+                        continue
                     state.phase = "session-removal"
                     state.partial = True  # An unlink may succeed before a later error.
-                    remove_tree(candidate, entries, expected_mount, preserve_markers=True)
+                    if session_class == "benchmark":
+                        remove_tree(candidate, entries, expected_mount,
+                                    preserve_markers=True)
+                    else:
+                        remove_tree(candidate, entries, expected_mount,
+                                    preserve_markers=True,
+                                    marker_files=(DEPLOY_OWNER_FILE, DEPLOY_COMPLETE_FILE))
                 finally:
                     close_preserving_first_error(candidate)
                 state.phase = "session-finalization"
@@ -580,14 +647,15 @@ def main() -> int:
         print(f"BLOCKED: tmp-cleanup phase={state.phase} category={category} "
               f"original_errno={original_errno} observed_uncertainty={observed_uncertainty} "
               f"exit_code={exit_code} retained={retained} removed={state.removed} "
-              f"session_class=swapz-benchmark ownership_identity={ownership_identity} "
+              f"session_class=swapz-{state.session_class} ownership_identity={ownership_identity} "
               f"safe_next_action={safe_next_action}", file=sys.stderr)
         return exit_code
     print(f"SWAPZ_TMP_CLEANUP=completed-owned-only removed:{removed} retained:{state.retained} "
           f"reclaimed_logical_bytes:{state.reclaimed_logical_bytes} "
           f"retained_unproved:{state.retained_unproved} "
           f"retained_identity:{state.retained_identity} "
-          f"retained_active:{state.retained_active}")
+          f"retained_active:{state.retained_active} "
+          f"retained_recent:{state.retained_recent}")
     return 0
 
 

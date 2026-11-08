@@ -5417,9 +5417,22 @@ successful cleanup. Rootless contracts must pin that fail-before-evidence
 branch rather than require an obsolete shell `||` spelling.
 
 The shared helper inspects the real root-owned mode-1777 `/tmp` and deletes
-only positively owned swapz benchmark sessions with matching completion proof,
-an exited owner process, and no same-owner process still referencing the
-inspected session directory or files through cwd, root, or an open descriptor.
+only positively owned swapz benchmark or deployment sessions with matching
+completion proof, an exited owner process, and no same-owner process still
+referencing the inspected session directory or files through cwd, root, or an
+open descriptor. The existing `make test` loaded-preflight and ID36 admission
+invocations automatically sweep both classes, without any additional public
+command. Deployment sessions (`swapz-deploy.*`) additionally require one
+hour since their most recent directory metadata change, including publication
+of the completion marker; the age check repeats immediately before unlink.
+A new deployment records the root-owned, private owner PID and exact source
+SHA before executing; it writes the matching completion marker only after
+safe teardown and successful session-log fanout drain. The private log must
+contain the exact source SHA and one of the three accepted clean-teardown
+terminal PASS records directly followed by its pinned session-specific
+`EVIDENCE` locator. Legacy deployment logs without explicit matching
+owner/completion markers are unverified and never automatically deleted,
+even if their text contains PASS.
 Unrelated occupants, incomplete/quarantined
 sessions, and unproved ownership remain untouched. Unsafe mounts, unreadable
 proofs or failed owned cleanup block admission; neither helper broadly empties
