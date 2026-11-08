@@ -248,6 +248,41 @@ class NativeTimingContract(unittest.TestCase):
                 self.assertIsNone(
                     runner.parse_owned_pair_phase_timings(malformed))
 
+    def test_primary_lifecycle_case_timings_require_source_allowlist(self):
+        first = (
+            "PRIMARY_LIFECYCLE_CASE_TIMING index=0 elapsed_ms=21 "
+            "class=PrimaryLifecycleBehaviorTest "
+            "method=test_active_requires_exact_kernel_inventory_proof\n")
+        second = (
+            "PRIMARY_LIFECYCLE_CASE_TIMING index=1 elapsed_ms=1300 "
+            "class=PrimaryLifecycleBehaviorTest "
+            "method=test_duplicate_start_is_rejected\n")
+        expected = [
+            {"class": "PrimaryLifecycleBehaviorTest",
+             "method": "test_active_requires_exact_kernel_inventory_proof",
+             "elapsed_ms": 21},
+            {"class": "PrimaryLifecycleBehaviorTest",
+             "method": "test_duplicate_start_is_rejected",
+             "elapsed_ms": 1300},
+        ]
+        self.assertEqual(
+            runner.parse_primary_lifecycle_case_timings(first + second),
+            expected)
+        self.assertIsNone(runner.parse_primary_lifecycle_case_timings(""))
+        for malformed in (
+                first + first,
+                second,
+                first.replace("elapsed_ms=21", "elapsed_ms=021"),
+                first.replace("class=PrimaryLifecycleBehaviorTest",
+                              "class=private_path"),
+                first.replace(
+                    "method=test_active_requires_exact_kernel_inventory_proof",
+                    "method=test_not_in_source"),
+                (first + second) * 1025):
+            with self.subTest(malformed=malformed[:54]):
+                self.assertIsNone(
+                    runner.parse_primary_lifecycle_case_timings(malformed))
+
     def test_loaded_timing_boundaries_do_not_use_child_supplied_labels(self):
         self.assertEqual(runner.loaded_timing_phase(
             "START_LOADED_PRIMARY_NULLBLK_LIFECYCLE\n"), "primary-lifecycle")

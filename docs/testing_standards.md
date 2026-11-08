@@ -89,6 +89,14 @@ field stores only complete, ordered five-phase pairs and their execution
 indices; private redirected raw-read and incomplete sessions may be absent.
 The helper never shares resources between pairs, never changes the official
 benchmark workload, and timing-read or display failures do not alter verdicts.
+The primary lifecycle rootless audit emits per-unittest-method monotonic
+elapsed milliseconds (including per-case setup/teardown) from its existing
+in-process runner. The reporter stores only contiguous indexed cases whose
+class and method are present in that suite's source AST under the optional
+rootless-stage `primary_lifecycle_case_elapsed_ms` field. Class-wide setup
+and runner startup remain outside individual case times; compare their sum to
+the suite total before considering any fixture reuse. Timing is descriptive,
+not authorization, qualification, or a separate public test command.
 Missing or malformed timing evidence must not alter PASS/FAIL/BLOCKED. Sensitive child
 output must never become a phase label. A protected identity read may use
 only the fixed, bounded, pinned, read-only noninteractive privileged fallback. If its authorization or trust checks

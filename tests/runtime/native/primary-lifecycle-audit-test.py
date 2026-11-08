@@ -16,6 +16,7 @@ from enum import Enum, auto
 from pathlib import Path
 import re
 import subprocess
+import time
 import unittest
 
 ROOT = Path(__file__).resolve().parents[3]
@@ -2356,5 +2357,44 @@ int main(int argc, char **argv)
                         self.assertEqual(after, before, recovery_diagnostic)
 
 
+class PrimaryLifecycleTimingResult(unittest.TextTestResult):
+    """Observational individual-case wall time including setup and teardown.
+
+    Emitting timing cannot change unittest's outcome or expose case-generated
+    stdout/stderr. Only source-defined class and method identifiers are used.
+    """
+    def startTest(self, test):
+        super().startTest(test)
+        try:
+            self._case_start_ns = time.monotonic_ns()
+        except OSError:
+            self._case_start_ns = None
+
+    def stopTest(self, test):
+        try:
+            started_ns = getattr(self, "_case_start_ns", None)
+            if started_ns is not None:
+                elapsed_ns = time.monotonic_ns() - started_ns
+                class_name = type(test).__name__
+                method_name = getattr(test, "_testMethodName", "")
+                if (elapsed_ns >= 0 and
+                        re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]{0,127}", class_name)
+                        and re.fullmatch(r"test_[A-Za-z0-9_]{1,126}", method_name)):
+                    print(
+                        f"PRIMARY_LIFECYCLE_CASE_TIMING index={self.testsRun - 1} "
+                        f"elapsed_ms={elapsed_ns // 1_000_000} "
+                        f"class={class_name} method={method_name}",
+                        flush=True)
+        except (OSError, ValueError, OverflowError):
+            # A failed clock or output pipe is not a test failure.
+            pass
+        finally:
+            super().stopTest(test)
+
+
+class PrimaryLifecycleTimingRunner(unittest.TextTestRunner):
+    resultclass = PrimaryLifecycleTimingResult
+
+
 if __name__ == "__main__":
-    unittest.main()
+    unittest.main(testRunner=PrimaryLifecycleTimingRunner)

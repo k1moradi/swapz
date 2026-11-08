@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Private make test runner: one bounded, replace-in-place, sanitized report."""
 import argparse
+import ast
 import hashlib
 import json
 import math
@@ -3633,6 +3634,50 @@ def parse_owned_pair_phase_timings(output):
     return complete_pairs
 
 
+PRIMARY_LIFECYCLE_TIMING_PATTERN = re.compile(
+    r"PRIMARY_LIFECYCLE_CASE_TIMING index=(0|[1-9][0-9]{0,3}) "
+    r"elapsed_ms=(0|[1-9][0-9]{0,9}) "
+    r"class=([A-Za-z_][A-Za-z0-9_]{0,127}) "
+    r"method=(test_[A-Za-z0-9_]{1,126})")
+
+
+def parse_primary_lifecycle_case_timings(output):
+    """Accept case durations only for actual source-defined unittest methods.
+
+    The source AST is the allowlist, not the child-provided marker. These
+    diagnostics cannot modify PASS/FAIL or expose untrusted test output.
+    """
+    records = [line for line in output.splitlines()
+               if line.startswith("PRIMARY_LIFECYCLE_CASE_TIMING ")]
+    if not records:
+        return None
+    if len(records) > 2048:
+        return None
+    try:
+        tree = ast.parse((ROOT / "tests/runtime/native/"
+                          "primary-lifecycle-audit-test.py").read_text(
+                              encoding="utf-8"))
+    except (OSError, SyntaxError, UnicodeError, ValueError):
+        return None
+    allowlisted = frozenset(
+        (node.name, child.name)
+        for node in tree.body if isinstance(node, ast.ClassDef)
+        for child in node.body if isinstance(child, ast.FunctionDef)
+        and child.name.startswith("test_"))
+    timings = []
+    for line in records:
+        match = PRIMARY_LIFECYCLE_TIMING_PATTERN.fullmatch(line)
+        if (match is None or int(match.group(1)) != len(timings)
+                or (match.group(3), match.group(4)) not in allowlisted):
+            return None
+        timings.append({
+            "class": match.group(3),
+            "method": match.group(4),
+            "elapsed_ms": int(match.group(2)),
+        })
+    return timings
+
+
 def parse_rootless_phase_timings(output):
     """Return bounded, source-allowlisted suite times, never a PASS gate."""
     prefix = "ROOTLESS_PHASE_TIMING "
@@ -3947,6 +3992,9 @@ def run_stage(title, command, result, *, parse_bench=False,
                     sum(phase["elapsed_s"] for phase in rootless_phases)
                     <= record["elapsed_s"] + 2):
                 record["phase_elapsed_s"] = rootless_phases
+        case_timings = parse_primary_lifecycle_case_timings(output)
+        if case_timings is not None:
+            record["primary_lifecycle_case_elapsed_ms"] = case_timings
     if parse_bench and loaded_timing_phases:
         record["phase_elapsed_s"] = loaded_timing_phases
     if rc:
