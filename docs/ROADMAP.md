@@ -614,10 +614,15 @@ authorization; the archived wording does not override that policy.
 
 ## Immediate work queue
 
-**Debugging-only hold (owner direction, 2026-11-05):** No new features,
-optimization pilots, speculative concurrency/layout changes, interface changes,
-broad refactors or alternative test entry points. First bind the live `main`
-source to [the canonical test report](../test_results.json) and
+**Debugging-first hold (owner direction, 2026-11-05), with a scoped x86
+development resumption (2026-11-07):** The owner has directed development to
+continue on a free x86-64 host with AVX-512 while the ARM64 host is busy. This
+reopens development-only performance investigation on that x86 host; it does
+not authorize a pilot on the busy ARM64 host, change physical-device scope, or
+promote a candidate into production. Keep one hypothesis per round, use only
+the existing evidence and qualification contracts, and keep host-specific
+results separate. Before choosing work, bind live `main` to
+[the canonical test report](../test_results.json) and
 [first-failure triage](README.md#diagnose-the-first-record); an older report is
 historical, not a present-source failure or PASS. Reproduce a specific defect
 before editing, keep ownership and fail-closed behavior intact, and require a
@@ -626,11 +631,12 @@ Host-only or missing evidence remains BLOCKED/UNPROVEN, never inferred PASS.
 Use the existing [production gates](AGENT_CONTEXT.md#production-readiness-definition)
 and [qualification contract](testing_standards.md), not a new release policy.
 
-**Current execution order:** primary lifecycle interruption/recovery and
-owned-RAM correctness evidence, then authorized physical-card correctness,
-capacity/peak-memory and sustained-GC proof, followed by deployment/boot
-qualification. Do not resume performance work while this debugging-only hold
-applies; recheck live source and exact-source CI before attributing any result.
+**Current production execution order:** primary lifecycle
+interruption/recovery and owned-RAM correctness evidence, then authorized
+physical-card correctness, capacity/peak-memory and sustained-GC proof,
+followed by deployment/boot qualification. The x86 resumption is a separate
+development-only lane: it cannot substitute for these production gates. Recheck
+live source and exact-source CI before attributing any result.
 
 **Historical optimization queue (2026-11-02):** the ID181 retirement plan,
 old-host QD4 measurements, ID169/ID175 follow-ups and prior experimental
