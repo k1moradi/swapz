@@ -68,7 +68,7 @@ build/userspace/swapzctl: src/userspace/swapzctl.c src/userspace/swapz-primary.c
 	$(CC) -std=c11 -O2 -g -Wall -Wextra -Werror -include build/source-build-info.h '-DSWAPZ_VERSION="$(shell cat src/kernel/VERSION)"' src/userspace/swapzctl.c src/userspace/swapz-primary.c -o $@
 
 # Installation is admission-only: preserve the exact artifacts and provenance
-# already qualified by make test instead of rebuilding after a report-only commit.
+# already qualified by make test_full's RAM gate; physical admission remains separate.
 install:
 	@sudo bash packaging/package-dkms.sh install "$(PREFIX)"
 

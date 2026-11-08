@@ -89,7 +89,7 @@ separate project policy decision before they can be claimed.
 Exactly six commands are public:
 
 - `make`: build product artifacts without loading them.
-- `make install`: admit and install the exact artifacts already qualified by `make test`; it does not rebuild, re-sign, load the module, create a mapper, or activate swap.
+- `make install`: admit the exact artifacts with a five-stage `make test_full` RAM/integration PASS and matching provenance; this is admission-only, not physical or boot acceptance, and it does not rebuild, re-sign, load the module, create a mapper, or activate swap.
 - `make uninstall`: remove only the matching owned installation.
 - `make test`: source/native, warning and loaded RAM algorithm tests;
   rootless package/DKMS/systemd integration is excluded. Result remains
