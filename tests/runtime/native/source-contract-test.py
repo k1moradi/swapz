@@ -269,7 +269,12 @@ class SwapzProductionSourceQualification(unittest.TestCase):
         self.assertIn("$(foreach program,$(PROGRAMS),$(eval ", suites)
         self.assertIn("$$(filter-out $$(PRODUCTION_C_SOURCES)", suites)
         self.assertIn("native-compiler-configuration-force", suites)
-        self.assertIn("$(NATIVE_COMPILER_CONFIGURATION)", suites)
+        self.assertIn(
+            "NATIVE_BUILD_RULES := $(lastword $(MAKEFILE_LIST))", suites)
+        self.assertIn(
+            "NATIVE_BUILD_PREREQUISITES := "
+            "$(NATIVE_COMPILER_CONFIGURATION) $(NATIVE_BUILD_RULES)", suites)
+        self.assertIn("$$(NATIVE_BUILD_PREREQUISITES)", suites)
         self.assertIn("-MMD -MP -MF", suites)
         for source_name in ("codec", "authority", "engine"):
             self.assertIn(f"$(OUT)/production-{source_name}.o:", suites)

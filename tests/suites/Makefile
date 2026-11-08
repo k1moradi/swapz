@@ -92,6 +92,10 @@ anon-page-analyzer_LDLIBS := -llz4
 PRODUCTION_C_SOURCES := $(CODEC) $(AUTH) $(ENGINE)
 PRODUCTION_OBJECTS := $(OUT)/production-codec.o $(OUT)/production-authority.o $(OUT)/production-engine.o
 NATIVE_COMPILER_CONFIGURATION := $(OUT)/native-compiler-configuration
+# The source-controlled build recipe is part of artifact identity. Without
+# this direct prerequisite, a rule-only main update can reuse stale binaries.
+NATIVE_BUILD_RULES := $(lastword $(MAKEFILE_LIST))
+NATIVE_BUILD_PREREQUISITES := $(NATIVE_COMPILER_CONFIGURATION) $(NATIVE_BUILD_RULES)
 native_production_objects = $(strip $(if $(filter $(CODEC),$(1)),$(OUT)/production-codec.o) $(if $(filter $(AUTH),$(1)),$(OUT)/production-authority.o) $(if $(filter $(ENGINE),$(1)),$(OUT)/production-engine.o))
 $(foreach program,$(PROGRAMS),$(eval $(program)_PRODUCTION_OBJECTS := $(call native_production_objects,$($(program)_SRC))))
 -include $(PRODUCTION_OBJECTS:.o=.d)
@@ -108,40 +112,40 @@ $(NATIVE_COMPILER_CONFIGURATION): native-compiler-configuration-force | $(OUT)
 	  printf '%s\n' 'CC=$(CC)' 'CPPFLAGS=$(CPPFLAGS)' 'CFLAGS=$(CFLAGS)' > "$$temporary_file"; \
 	  if ! cmp -s "$$temporary_file" "$@"; then mv -f "$$temporary_file" "$@"; fi
 
-$(OUT)/production-codec.o: $(CODEC) $(NATIVE_COMPILER_CONFIGURATION) | $(OUT)
+$(OUT)/production-codec.o: $(CODEC) $(NATIVE_BUILD_PREREQUISITES) | $(OUT)
 	$(CC) $(CPPFLAGS) $(CFLAGS) -MMD -MP -MF "$(@:.o=.d)" -c "$<" -o "$@"
 
-$(OUT)/production-authority.o: $(AUTH) $(NATIVE_COMPILER_CONFIGURATION) | $(OUT)
+$(OUT)/production-authority.o: $(AUTH) $(NATIVE_BUILD_PREREQUISITES) | $(OUT)
 	$(CC) $(CPPFLAGS) $(CFLAGS) -MMD -MP -MF "$(@:.o=.d)" -c "$<" -o "$@"
 
-$(OUT)/production-engine.o: $(ENGINE) $(NATIVE_COMPILER_CONFIGURATION) | $(OUT)
+$(OUT)/production-engine.o: $(ENGINE) $(NATIVE_BUILD_PREREQUISITES) | $(OUT)
 	$(CC) $(CPPFLAGS) $(CFLAGS) -MMD -MP -MF "$(@:.o=.d)" -c "$<" -o "$@"
 
 # Consolidate identical compile recipes, not the individual safety assertions.
 define BUILD_NATIVE
-$(OUT)/$(1): $$($(1)_SRC) $$($(1)_HDR) $$($(1)_PRODUCTION_OBJECTS) $$(NATIVE_COMPILER_CONFIGURATION) | $(OUT)
+$(OUT)/$(1): $$($(1)_SRC) $$($(1)_HDR) $$($(1)_PRODUCTION_OBJECTS) $$(NATIVE_BUILD_PREREQUISITES) | $(OUT)
 	$$(CC) $$(CPPFLAGS) $$(CFLAGS) $$(filter-out $$(PRODUCTION_C_SOURCES),$$($(1)_SRC)) $$($(1)_PRODUCTION_OBJECTS) -o "$$@" $$($(1)_LDLIBS)
 endef
 $(foreach name,$(PROGRAMS),$(eval $(call BUILD_NATIVE,$(name))))
 
-$(PREDICTOR_CORE_OBJ): $(KERNEL)/predictor.c $(KERNEL)/predictor.h $(KERNEL)/predictor-internal.h $(NATIVE_COMPILER_CONFIGURATION) | $(OUT)
+$(PREDICTOR_CORE_OBJ): $(KERNEL)/predictor.c $(KERNEL)/predictor.h $(KERNEL)/predictor-internal.h $(NATIVE_BUILD_PREREQUISITES) | $(OUT)
 	$(CC) $(CPPFLAGS) $(CFLAGS) -c $(KERNEL)/predictor.c -o "$@"
 
-$(OUT)/predictor-sse2.o: $(KERNEL)/predictor-sse2.c $(KERNEL)/predictor.h $(KERNEL)/predictor-internal.h $(KERNEL)/predictor-shuffle.h $(NATIVE_COMPILER_CONFIGURATION) | $(OUT)
+$(OUT)/predictor-sse2.o: $(KERNEL)/predictor-sse2.c $(KERNEL)/predictor.h $(KERNEL)/predictor-internal.h $(KERNEL)/predictor-shuffle.h $(NATIVE_BUILD_PREREQUISITES) | $(OUT)
 	$(CC) $(CPPFLAGS) $(CFLAGS) -msse2 -c $(KERNEL)/predictor-sse2.c -o "$@"
 
-$(OUT)/predictor-avx2.o: $(KERNEL)/predictor-avx2.c $(KERNEL)/predictor.h $(KERNEL)/predictor-internal.h $(KERNEL)/predictor-shuffle.h $(NATIVE_COMPILER_CONFIGURATION) | $(OUT)
+$(OUT)/predictor-avx2.o: $(KERNEL)/predictor-avx2.c $(KERNEL)/predictor.h $(KERNEL)/predictor-internal.h $(KERNEL)/predictor-shuffle.h $(NATIVE_BUILD_PREREQUISITES) | $(OUT)
 	$(CC) $(CPPFLAGS) $(CFLAGS) -mavx2 -c $(KERNEL)/predictor-avx2.c -o "$@"
 
-$(OUT)/predictor-avx512.o: $(KERNEL)/predictor-avx512.c $(KERNEL)/predictor.h $(KERNEL)/predictor-internal.h $(KERNEL)/predictor-shuffle.h $(NATIVE_COMPILER_CONFIGURATION) | $(OUT)
+$(OUT)/predictor-avx512.o: $(KERNEL)/predictor-avx512.c $(KERNEL)/predictor.h $(KERNEL)/predictor-internal.h $(KERNEL)/predictor-shuffle.h $(NATIVE_BUILD_PREREQUISITES) | $(OUT)
 	$(CC) $(CPPFLAGS) $(CFLAGS) -mavx512f -c $(KERNEL)/predictor-avx512.c -o "$@"
 
-$(OUT)/predictor-neon.o: $(KERNEL)/predictor-neon.c $(KERNEL)/predictor.h $(KERNEL)/predictor-internal.h $(KERNEL)/predictor-shuffle.h $(NATIVE_COMPILER_CONFIGURATION) | $(OUT)
+$(OUT)/predictor-neon.o: $(KERNEL)/predictor-neon.c $(KERNEL)/predictor.h $(KERNEL)/predictor-internal.h $(KERNEL)/predictor-shuffle.h $(NATIVE_BUILD_PREREQUISITES) | $(OUT)
 	$(CC) $(CPPFLAGS) $(CFLAGS) -c $(KERNEL)/predictor-neon.c -o "$@"
 
 $(OUT)/predictor-qualification: $(NATIVE)/codec/predictor-qualification.c \
 		$(KERNEL)/predictor-route.h $(ENGINE) $(AUTH) $(CODEC) \
-		$(PREDICTOR_CORE_OBJ) $(PREDICTOR_ARCH_OBJS) $(PRODUCTION_OBJECTS) $(NATIVE_COMPILER_CONFIGURATION) | $(OUT)
+		$(PREDICTOR_CORE_OBJ) $(PREDICTOR_ARCH_OBJS) $(PRODUCTION_OBJECTS) $(NATIVE_BUILD_PREREQUISITES) | $(OUT)
 	$(CC) $(CPPFLAGS) $(CFLAGS) $(NATIVE)/codec/predictor-qualification.c \
 		$(PRODUCTION_OBJECTS) $(PREDICTOR_CORE_OBJ) $(PREDICTOR_ARCH_OBJS) \
 		-o "$@" -llz4

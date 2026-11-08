@@ -494,6 +494,75 @@ class PublicMakeContract(unittest.TestCase):
         self.assertNotIn("must bind the exact partition identity, original-header backup",
                          testing)
 
+    def test_native_suite_rebuilds_after_build_rule_change(self):
+        """A rule-only Makefile change must invalidate existing native output."""
+        import time
+
+        build_tests = ROOT / "build/tests"
+        build_tests.mkdir(parents=True, exist_ok=True)
+        with tempfile.TemporaryDirectory(prefix="native-rule-identity-",
+                                         dir=build_tests) as directory:
+            fixture = pathlib.Path(directory)
+            native_makefile = fixture / "NativeMakefile"
+            native_makefile.write_text(
+                (ROOT / "tests/suites/Makefile").read_text(encoding="utf-8"),
+                encoding="utf-8")
+            output = fixture / "out"
+            output.mkdir()
+            compiler_log = fixture / "compiler.log"
+            fake_compiler = fixture / "fake-cc"
+            fake_compiler.write_text(
+                "#!/bin/sh\n"
+                "set -eu\n"
+                ": \"${SWAPZ_FAKE_CC_LOG:?}\"\n"
+                "printf '%s\\n' \"$*\" >> \"$SWAPZ_FAKE_CC_LOG\"\n"
+                "output=\n"
+                "dependency=\n"
+                "while [ \"$#\" -gt 0 ]; do\n"
+                "  case \"$1\" in\n"
+                "    -o) shift; output=$1 ;;\n"
+                "    -MF) shift; dependency=$1 ;;\n"
+                "  esac\n"
+                "  shift\n"
+                "done\n"
+                "[ -n \"$output\" ] || exit 2\n"
+                "mkdir -p -- \"$(dirname -- \"$output\")\"\n"
+                ": > \"$output\"\n"
+                "[ -z \"$dependency\" ] || : > \"$dependency\"\n",
+                encoding="utf-8")
+            fake_compiler.chmod(0o700)
+            environment = os.environ.copy()
+            environment["SWAPZ_FAKE_CC_LOG"] = str(compiler_log)
+            target = output / "mapping-authority"
+            command = [
+                "make", "--no-print-directory", "-s",
+                "-f", str(native_makefile), str(target),
+                f"OUT={output}", f"CC={fake_compiler}",
+            ]
+
+            initial = subprocess.run(
+                command, cwd=ROOT / "tests/suites", env=environment,
+                capture_output=True, text=True, check=False, timeout=10)
+            self.assertEqual(initial.returncode, 0, initial.stderr)
+            self.assertTrue(compiler_log.read_text(encoding="utf-8").strip())
+
+            compiler_log.write_text("", encoding="utf-8")
+            # Ensure the copied build recipe is observably newer than every
+            # artifact produced by the first invocation.
+            time.sleep(0.02)
+            native_makefile.write_text(
+                native_makefile.read_text(encoding="utf-8") +
+                "\n# fixture: source-controlled build rule changed\n",
+                encoding="utf-8")
+
+            rebuilt = subprocess.run(
+                command, cwd=ROOT / "tests/suites", env=environment,
+                capture_output=True, text=True, check=False, timeout=10)
+            self.assertEqual(rebuilt.returncode, 0, rebuilt.stderr)
+            self.assertTrue(
+                compiler_log.read_text(encoding="utf-8").strip(),
+                "rule-only Makefile change reused stale native output")
+
     def test_parallel_build_is_incremental_and_test_stages_stay_ordered(self):
         """Run the REAL root/extent Makefiles using a fake, unprivileged Kbuild.
 
