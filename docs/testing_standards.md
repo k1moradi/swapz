@@ -82,6 +82,10 @@ only the fixed, bounded, pinned, read-only noninteractive privileged fallback. I
 fail, the host identity remains UNAVAILABLE; no insecure file mode change,
 substituted machine ID, unbounded read or privileged checkout execution is
 authorized.
+The hermetic incremental Make-interface fixture exercises `make test_full`,
+which preserves the original five-stage RAM build-order and exact-artifact
+PASS/refusal contract. It must not treat an algorithm-tier physical-INCOMPLETE
+result as a compile failure or weaken its no-op rebuild checks.
 Hermetic shell-recipe regressions using a substituted native output directory
 must stage their own compiler-configuration and shared-object prerequisites
 before creating fake test executables; those fixtures must not silently compile

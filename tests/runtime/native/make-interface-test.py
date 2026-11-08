@@ -1572,7 +1572,7 @@ class PublicMakeContract(unittest.TestCase):
             def execute(phase, *, expect_clean):
                 print(f"MAKE_INCREMENTAL_PHASE={phase}", flush=True)
                 proc = subprocess.run(
-                    ["make", "test", f"KDIR={fixture / 'fake-headers'}"],
+                    ["make", "test_full", f"KDIR={fixture / 'fake-headers'}"],
                     cwd=fixture, env=env, capture_output=True, text=True,
                     timeout=30)
                 if expect_clean:
@@ -1647,7 +1647,7 @@ class PublicMakeContract(unittest.TestCase):
             execute("unchanged", expect_clean=True)
             self.assertEqual(first,
                              {p: p.stat().st_mtime_ns for p in tracked},
-                             "An unchanged make test must reuse binaries "
+                             "An unchanged make test_full must reuse binaries "
                              "and staged kernel sources")
 
             time.sleep(0.03)
