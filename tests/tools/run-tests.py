@@ -2906,20 +2906,20 @@ def failure_context(output, *, loaded=True, default_phase=None,
 # Each of these source-controlled cases has an independently validated
 # negative/recovery oracle. Never suppress an unrelated or malformed BLOCKED,
 # any FAIL, a missing case, a nonzero child exit or an incomplete loaded gate.
-PRIMARY_NEGATIVE_CASE_OPERATIONS = {
+PRIMARY_NEGATIVE_CASE_REFUSALS = {
     "swapon-eintr-applied": None,
-    "swapon-eintr-noeffect": "start",
-    "swapon-eio-noeffect": "start",
-    "post-swapon-inventory-eio": "start",
+    "swapon-eintr-noeffect": ("start", "Interrupted system call"),
+    "swapon-eio-noeffect": ("start", "Input/output error"),
+    "post-swapon-inventory-eio": ("start", "Input/output error"),
     "swapoff-eintr-applied": None,
-    "swapoff-eintr-noeffect": "stop",
-    "swapoff-eio-noeffect": "stop",
-    "swapoff-ebusy-noeffect": "stop",
-    "post-swapoff-inventory-eio": "stop",
-    "state-dir-fsync": "start",
-    "stale-run-id": "recovery",
-    "lost-state-provenance": "recovery",
-    "wrong-mapper-identity": "recovery",
+    "swapoff-eintr-noeffect": ("stop", "Interrupted system call"),
+    "swapoff-eio-noeffect": ("stop", "Input/output error"),
+    "swapoff-ebusy-noeffect": ("stop", "Device or resource busy"),
+    "post-swapoff-inventory-eio": ("stop", "Input/output error"),
+    "state-dir-fsync": ("start", "Input/output error"),
+    "stale-run-id": ("recovery", "Operation not permitted"),
+    "lost-state-provenance": ("recovery", "Operation not permitted"),
+    "wrong-mapper-identity": ("recovery", "File exists"),
 }
 
 PRIMARY_NEGATIVE_CASE_START = re.compile(
@@ -2928,28 +2928,32 @@ PRIMARY_NEGATIVE_CASE_START = re.compile(
 
 
 def expected_primary_negative_refusal(line, case):
-    """Match one bounded, operation-correct refusal; never return child text."""
-    expected_operation = PRIMARY_NEGATIVE_CASE_OPERATIONS.get(case)
-    if expected_operation is None:
+    """Match exactly the source-controlled refusal for one injected fault."""
+    expected = PRIMARY_NEGATIVE_CASE_REFUSALS.get(case)
+    if expected is None:
         return False
-    observed = re.fullmatch(
-        r"BLOCKED: primary-swap (start|stop|recovery) failed: "
-        r"[A-Za-z0-9 .()_-]{1,96}", line.strip())
-    return observed is not None and observed.group(1) == expected_operation
+    operation, error_text = expected
+    return line.strip() == (
+        f"BLOCKED: primary-swap {operation} failed: {error_text}")
 
 
 def authenticated_primary_negative_refusal_indices(
         lines, loaded_correctness, observed_exit_code):
-    """Exclude only authenticated expected refusals from the global BLOCKED gate.
+    """Return exact expected-refusal indices, or None if evidence is invalid.
 
-    All thirteen named cases, their completion marker, a loaded terminal marker
-    and integer-zero child exit are required. Any other BLOCKED remains fatal.
+    All thirteen named cases, every required case-specific refusal, the
+    completion marker, loaded terminal marker and integer-zero child exit are
+    required. Any missing, duplicate, malformed or unrelated refusal disables
+    the exemption.
     """
     if (observed_exit_code != 0 or
             not isinstance(loaded_correctness, dict) or
             loaded_correctness.get("overall") != "PASS"):
-        return frozenset()
-    ordered_cases = tuple(PRIMARY_NEGATIVE_CASE_OPERATIONS)
+        return None
+    ordered_cases = tuple(PRIMARY_NEGATIVE_CASE_REFUSALS)
+    expected_refusal_count = sum(
+        contract is not None
+        for contract in PRIMARY_NEGATIVE_CASE_REFUSALS.values())
     observed_cases = []
     permitted = set()
     current_case = None
@@ -2957,33 +2961,42 @@ def authenticated_primary_negative_refusal_indices(
     recovery_complete = False
     loaded_complete = False
 
+    def prior_case_complete():
+        return (current_case is None or
+                PRIMARY_NEGATIVE_CASE_REFUSALS[current_case] is None or
+                current_case_refusal_seen)
+
     for line_number, line in enumerate(lines):
         if line.startswith("START_LOADED_PRIMARY_NULLBLK_NEGATIVE="):
             match = PRIMARY_NEGATIVE_CASE_START.fullmatch(line)
             if (match is None or recovery_complete or
+                    not prior_case_complete() or
                     len(observed_cases) >= len(ordered_cases) or
                     match.group(1) != ordered_cases[len(observed_cases)]):
-                return frozenset()
+                return None
             current_case = match.group(1)
             observed_cases.append(current_case)
             current_case_refusal_seen = False
         elif line.startswith("PASS_LOADED_PRIMARY_NULLBLK_NEGATIVE_RECOVERY="):
-            if (recovery_complete or tuple(observed_cases) != ordered_cases):
-                return frozenset()
+            if (recovery_complete or not prior_case_complete() or
+                    tuple(observed_cases) != ordered_cases):
+                return None
             recovery_complete = True
             current_case = None
         elif line.startswith("PASS_LOADED_TEST_EXECUTION:"):
             if not recovery_complete or loaded_complete:
-                return frozenset()
+                return None
             loaded_complete = True
         elif line.startswith("BLOCKED:") and current_case is not None:
-            if (not current_case_refusal_seen and
-                    expected_primary_negative_refusal(line, current_case)):
-                permitted.add(line_number)
-                current_case_refusal_seen = True
+            if (current_case_refusal_seen or
+                    not expected_primary_negative_refusal(line, current_case)):
+                return None
+            permitted.add(line_number)
+            current_case_refusal_seen = True
 
-    if not (recovery_complete and loaded_complete):
-        return frozenset()
+    if (not recovery_complete or not loaded_complete or
+            len(permitted) != expected_refusal_count):
+        return None
     return frozenset(permitted)
 
 
@@ -3550,7 +3563,7 @@ def run_stage(title, command, result, *, parse_bench=False):
                     match = PRIMARY_NEGATIVE_CASE_START.fullmatch(line.strip())
                     negative_case = (match.group(1) if match and
                                      match.group(1) in
-                                     PRIMARY_NEGATIVE_CASE_OPERATIONS else None)
+                                     PRIMARY_NEGATIVE_CASE_REFUSALS else None)
                 elif line.startswith(
                         "PASS_LOADED_PRIMARY_NULLBLK_NEGATIVE_RECOVERY="):
                     negative_case = None
@@ -3651,8 +3664,22 @@ def run_stage(title, command, result, *, parse_bench=False):
         storage_envelope_verdict(storage_envelope_sessions)
         if storage_envelope_sessions else
         {"overall": "NOT_RUN", "reason": "storage-envelope sweep not executed"})
+    loaded_lines = output.splitlines() if parse_bench else ()
+    negative_refusal_evidence_present = parse_bench and any(
+        line.startswith("START_LOADED_PRIMARY_NULLBLK_NEGATIVE=")
+        for line in loaded_lines)
+    negative_refusal_indices = (
+        authenticated_primary_negative_refusal_indices(
+            loaded_lines, loaded_correctness, observed_exit_code)
+        if negative_refusal_evidence_present else frozenset())
+    negative_refusal_auth_failure = (
+        negative_refusal_evidence_present and negative_refusal_indices is None)
+    expected_negative_refusals = (
+        frozenset() if negative_refusal_indices is None
+        else negative_refusal_indices)
     marker_failure = (parse_bench and rc == 0 and
                       (loaded_correctness.get("overall") != "PASS" or
+                       negative_refusal_auth_failure or
                        kernel_debug_failure or
                        read_coalesce_diagnostic.get("overall") !=
                        "PASS_READ_COALESCE_AB_CONFIRMATION" or
@@ -3666,11 +3693,6 @@ def run_stage(title, command, result, *, parse_bench=False):
         title == "Build module and helpers" and any(
             line.startswith("BLOCKED: Secure Boot module signing:")
             for line in output.splitlines()))
-    loaded_lines = output.splitlines() if parse_bench else ()
-    expected_negative_refusals = (
-        authenticated_primary_negative_refusal_indices(
-            loaded_lines, loaded_correctness, observed_exit_code)
-        if parse_bench else frozenset())
     blocked_marker = secure_boot_signing_blocked or (parse_bench and any(
         line.startswith((
             "BLOCKED:", "BLOCKED_LOADED_QUALIFICATION",
@@ -3689,7 +3711,8 @@ def run_stage(title, command, result, *, parse_bench=False):
     if inconsistent_exit and rc == 0:
         rc = 1
     status = ("PASS" if rc == 0 else
-              "FAIL" if (explicit_primary_failure or explicit_loaded_failure)
+              "FAIL" if (explicit_primary_failure or explicit_loaded_failure or
+                         negative_refusal_auth_failure)
               else "BLOCKED" if blocked_marker else "FAIL")
     record = {"name": title, "status": status, "elapsed_s":
               round(time.monotonic() - start, 3), "exit_code": rc}
@@ -3709,7 +3732,12 @@ def run_stage(title, command, result, *, parse_bench=False):
         # when the same output is also missing the overall loaded PASS record.
         # Keep the FAIL marker's phase and use failure_context() to attach only
         # its sanitized, allowlisted coordinator detail.
-        if explicit_primary_failure or explicit_loaded_failure or blocked_marker:
+        if negative_refusal_auth_failure:
+            record["failed_phase"] = (
+                "owned RAM primary lifecycle negative recovery")
+            record["diagnostic"] = (
+                "Negative-recovery refusal evidence failed authentication")
+        elif explicit_primary_failure or explicit_loaded_failure or blocked_marker:
             record["failed_phase"], record["diagnostic"] = failure_context(
                 output, loaded=parse_bench,
                 default_phase=None if parse_bench else title,

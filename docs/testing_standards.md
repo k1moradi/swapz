@@ -3281,7 +3281,35 @@ or a nonzero child exit must still fail/block qualification.
 Progress for an operation-correct negative-case refusal is observational, not
 an overall BLOCKED or independently sufficient PASS. The ID61 source-contract
 test verifies the progress helper's scoped negative-case context and the
-authenticated-refusal filter, not the obsolete one-argument spelling. The human qualification summary
+authenticated-refusal filter, not the obsolete one-argument spelling.
+The qualifier itself must authenticate each refusal-producing negative case
+before emitting its child output: child exit must be exactly 2, the optional
+selected-fault marker must be exact, the single `PRIMARY_START/STOP/RECOVER=FAILED`
+record must carry the case's fixed errno and C-locale strerror with bounded
+phase/persistence/resource fields, and the following `BLOCKED: primary-swap
+<operation> failed: <strerror>` wrapper must match exactly. A timeout,
+unrelated nonzero exit, missing/duplicate line, wrong errno/cause, malformed
+resource field or extra sideband is a harness FAIL and must not be echoed.
+For the reporter exemption, the fixed case-to-refusal contracts are:
+`swapon-eintr-noeffect=start/EINTR`,
+`swapon-eio-noeffect=start/EIO`,
+`post-swapon-inventory-eio=start/EIO`,
+`swapoff-eintr-noeffect=stop/EINTR`,
+`swapoff-eio-noeffect=stop/EIO`,
+`swapoff-ebusy-noeffect=stop/EBUSY`,
+`post-swapoff-inventory-eio=stop/EIO`,
+`state-dir-fsync=start/EIO`, stale-run and lost-provenance as
+`recovery/EPERM`, and wrong-mapper-identity as `recovery/EEXIST`. Stale-run
+and lost-provenance are admission refusals and must preserve the exact durable
+state bytes. Wrong-mapper is different: recovery may first normalize the
+interrupted STARTING record to durable
+`RECOVERY_REQUIRED(previous=STARTING)`; that exact transition is required,
+while the foreign inactive mapper, ownership records and host swap identity
+must remain unchanged. The two applied-EINTR reconciliation cases emit no
+refusal. The reporter must authenticate all eleven required
+refusals; one missing, duplicated, wrong-cause or wrong-operation refusal
+invalidates the entire exemption and fails the loaded evidence contract.
+The human qualification summary
 must also display the verified process-death recovery count and negative-case
 count so reviewers do not need to infer lifecycle coverage from raw log text.
 

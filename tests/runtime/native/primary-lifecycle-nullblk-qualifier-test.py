@@ -99,7 +99,8 @@ class PrimaryLifecycleNullblkQualifierContract(unittest.TestCase):
         self.assertIn('"$table_lower" == "$PART_DEVNO"', self.script)
         self.assertIn("assert_unrelated_host_swap_identity", self.script)
         self.assertIn("assert_repeat_recovery_is_safe", self.script)
-        self.assertIn('[[ "$rc" -ne 0 ]]', self.script)
+        self.assertIn("verify_expected_primary_refusal", self.script)
+        self.assertIn('[[ "$child_exit" -eq 2 ]]', self.script)
         self.assertIn('[[ "$after_state" == "$before_state"', self.script)
 
     def test_expected_repeat_recovery_refusal_is_not_emitted_as_stage_block(self):
@@ -170,12 +171,113 @@ mapper_absence_proven() { return 0; }
                           "child_exit=2", refused.stderr)
             self.assertNotIn("PRIMARY_RECOVER=FAILED", refused.stderr)
 
+    def test_negative_refusal_verifier_rejects_timeout_wrong_cause_and_sideband(self):
+        def shell_function(name):
+            begin = self.script.index(name + "() {")
+            end = self.script.index("\n}", begin) + 2
+            return self.script[begin:end]
+
+        helper = "\n\n".join(shell_function(name) for name in (
+            "primary_fault_refusal_contract",
+            "primary_recovery_refusal_contract",
+            "verify_expected_primary_refusal",
+        ))
+        marker = "SWAPZ_PRIMARY_TEST_FAULT_HIT=swapon-eintr-noeffect"
+        structured = (
+            "PRIMARY_START=FAILED phase=swapon errno=4 "
+            "error=Interrupted system call original_errno=4 "
+            "persistence_boundary=none durable=OBSERVED "
+            "mapper=OBSERVED swap=UNCERTAIN")
+        wrapper = (
+            "BLOCKED: primary-swap start failed: Interrupted system call")
+        canonical = "\n".join((marker, structured, wrapper))
+        failure = r'''
+fail() { printf 'FAIL: %s\n' "$*" >&2; exit 1; }
+'''
+
+        def verify(output, child_exit=2, expected_errno=4,
+                   expected_error="Interrupted system call",
+                   expected_marker=marker):
+            script = (failure + "\n" + helper + "\n" +
+                      "output=" + shlex.quote(output) + "\n" +
+                      "verify_expected_primary_refusal case start " +
+                      str(expected_errno) + " " +
+                      shlex.quote(expected_error) + " " +
+                      shlex.quote(expected_marker) +
+                      " \"$output\" " + str(child_exit) + "\n")
+            return subprocess.run(
+                ["bash", "-c", script], cwd=ROOT, capture_output=True,
+                text=True, timeout=5, check=False)
+
+        accepted = verify(canonical)
+        self.assertEqual(accepted.returncode, 0,
+                         accepted.stdout + accepted.stderr)
+        self.assertEqual(accepted.stdout + accepted.stderr, "")
+
+        contract_script = (
+            helper + "\nprimary_fault_refusal_contract "
+            "swapoff-ebusy-noeffect\n")
+        contract = subprocess.run(
+            ["bash", "-c", contract_script], cwd=ROOT,
+            capture_output=True, text=True, timeout=5, check=False)
+        self.assertEqual(contract.returncode, 0, contract.stderr)
+        self.assertEqual(contract.stdout, "16\tDevice or resource busy\n")
+        recovery_contract = subprocess.run(
+            ["bash", "-c", helper +
+             "\nprimary_recovery_refusal_contract wrong-mapper-identity\n"],
+            cwd=ROOT, capture_output=True, text=True, timeout=5, check=False)
+        self.assertEqual(recovery_contract.returncode, 0,
+                         recovery_contract.stderr)
+        self.assertEqual(recovery_contract.stdout, "17\tFile exists\n")
+
+        cases = (
+            ("timeout", canonical, 124, "observed_exit=124"),
+            ("wrong wrapper cause", canonical.replace(
+                wrapper,
+                "BLOCKED: primary-swap start failed: Input/output error"),
+             2, "canonical-start-wrapper"),
+            ("wrong structured errno", canonical.replace(
+                "errno=4 error=Interrupted system call original_errno=4",
+                "errno=5 error=Input/output error original_errno=5"),
+             2, "observed=structured-refusal-mismatch"),
+            ("missing structured", "\n".join((marker, wrapper)),
+             2, "canonical-refusal-lines:3"),
+            ("extra private sideband", canonical +
+             "\npath=/private/SECRET", 2, "canonical-refusal-lines:3"),
+            ("wrong marker", canonical.replace(
+                marker, "SWAPZ_PRIMARY_TEST_FAULT_HIT=other"),
+             2, "selected-fault-marker"),
+            ("private resource field", canonical.replace(
+                "mapper=OBSERVED", "mapper=/private/SECRET"),
+             2, "bounded-resource-observations"),
+        )
+        for title, output, child_exit, diagnostic in cases:
+            with self.subTest(title=title):
+                refused = verify(output, child_exit=child_exit)
+                self.assertEqual(refused.returncode, 1,
+                                 refused.stdout + refused.stderr)
+                self.assertIn(diagnostic, refused.stderr)
+                self.assertNotIn("/private/SECRET", refused.stderr)
+                self.assertNotIn("PRIMARY_START=FAILED", refused.stderr)
     def test_wrong_mapper_case_never_forces_removal(self):
         self.assertNotRegex(self.script, r"dmsetup\s+remove\s+--force")
         self.assertNotRegex(self.script, r"\brmmod\b")
         self.assertIn('[[ "$open_count" == 0 ]]', self.script)
         self.assertIn('[[ "$(mapper_swap_entry_count)" == 0 ]]', self.script)
         self.assertIn('dmsetup remove "$DMNAME"', self.script)
+        begin = self.script.index("run_wrong_mapper_identity_case() {")
+        end = self.script.index("\n}", begin) + 2
+        wrong_mapper = self.script[begin:end]
+        self.assertIn(
+            "primary_recovery_refusal_contract wrong-mapper-identity",
+            wrong_mapper)
+        self.assertIn(
+            "verify_expected_primary_refusal wrong-mapper-identity recovery",
+            wrong_mapper)
+        self.assertIn(
+            'assert_lifecycle_state "$RUN_ID" RECOVERY_REQUIRED STARTING',
+            wrong_mapper)
+        self.assertNotIn('[[ "$before_state" == "$after_state"', wrong_mapper)
 
     def test_private_btrfs_recovery_resolves_only_one_verified_member(self):
         # The physical/production parser must retain its Btrfs exclusion.
@@ -3202,8 +3304,9 @@ CONTROL=/private-mock-only
         self.assertIn("report_fault_hit", self.shim)
         self.assertIn("SWAPZ_PRIMARY_TEST_FAULT_HIT", self.shim)
         self.assertIn("SWAPZ_PRIMARY_TEST_FSYNC_DIRECTORY_HIT", self.shim)
+        self.assertIn("primary_fault_refusal_contract", self.script)
         self.assertIn(
-            'grep -Fxq "SWAPZ_PRIMARY_TEST_FAULT_HIT=$fault"',
+            '"SWAPZ_PRIMARY_TEST_FAULT_HIT=$fault" "$output" "$rc"',
             self.script)
         for name in ("swapon-eintr-applied", "swapoff-eintr-applied"):
             self.assertIn(f"SWAPZ_PRIMARY_TEST_FAULT_HIT={name}", self.script)

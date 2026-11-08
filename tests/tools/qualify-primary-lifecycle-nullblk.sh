@@ -1037,22 +1037,106 @@ assert_repeat_recovery_is_safe() {
 		fail "repeated recovery after $phase recreated swapz-primary"
 }
 
+primary_fault_refusal_contract() {
+	case "$1" in
+	swapon-eintr-noeffect|swapoff-eintr-noeffect)
+		printf '4\tInterrupted system call\n'
+		;;
+	swapon-eio-noeffect|post-swapon-inventory-eio|\
+	swapoff-eio-noeffect|post-swapoff-inventory-eio)
+		printf '5\tInput/output error\n'
+		;;
+	swapoff-ebusy-noeffect)
+		printf '16\tDevice or resource busy\n'
+		;;
+	*)
+		return 1
+		;;
+	esac
+}
+
+primary_recovery_refusal_contract() {
+	case "$1" in
+	stale-run-id|lost-state-provenance)
+		printf '1\tOperation not permitted\n'
+		;;
+	wrong-mapper-identity)
+		printf '17\tFile exists\n'
+		;;
+	*)
+		return 1
+		;;
+	esac
+}
+verify_expected_primary_refusal() {
+	local case_name="$1"
+	local action="$2"
+	local expected_errno="$3"
+	local expected_error="$4"
+	local expected_marker="$5"
+	local output="$6"
+	local child_exit="$7"
+	local action_upper="${action^^}"
+	local prefix="PRIMARY_${action_upper}=FAILED phase="
+	local expected_wrapper="BLOCKED: primary-swap $action failed: $expected_error"
+	local expected_lines=2
+	local line_index=0
+	local line rest phase boundary
+	local expected_fields
+	local -a lines=()
+
+	mapfile -t lines < <(printf '%s\n' "$output")
+	[[ -z "$expected_marker" ]] || expected_lines=3
+	[[ "$child_exit" -eq 2 ]] ||
+		fail "$case_name expected=controlled-refusal-exit-2 observed_exit=$child_exit"
+	[[ "${#lines[@]}" -eq "$expected_lines" ]] ||
+		fail "$case_name expected=canonical-refusal-lines:$expected_lines observed_lines=${#lines[@]}"
+	if [[ -n "$expected_marker" ]]; then
+		[[ "${lines[0]}" == "$expected_marker" ]] ||
+			fail "$case_name expected=selected-fault-marker observed=missing-or-mismatched"
+		line_index=1
+	fi
+
+	line="${lines[$line_index]}"
+	[[ "$line" == "$prefix"* ]] ||
+		fail "$case_name expected=structured-$action-refusal observed=missing-or-mismatched"
+	rest="${line#"$prefix"}"
+	phase="${rest%% *}"
+	[[ "$phase" =~ ^[a-z0-9-]+$ ]] ||
+		fail "$case_name expected=bounded-refusal-phase observed=malformed"
+	rest="${rest#"$phase "}"
+	expected_fields="errno=$expected_errno error=$expected_error original_errno=$expected_errno persistence_boundary="
+	[[ "$rest" == "$expected_fields"* ]] ||
+		fail "$case_name expected=errno:$expected_errno observed=structured-refusal-mismatch"
+	rest="${rest#"$expected_fields"}"
+	boundary="${rest%% *}"
+	[[ "$boundary" =~ ^[a-z0-9-]+$ ]] ||
+		fail "$case_name expected=bounded-persistence-boundary observed=malformed"
+	rest="${rest#"$boundary "}"
+	[[ "$rest" =~ ^durable=(UNOBSERVED|OBSERVED|UNCERTAIN)[[:space:]]mapper=(UNOBSERVED|OBSERVED|UNCERTAIN)[[:space:]]swap=(UNOBSERVED|OBSERVED|UNCERTAIN)$ ]] ||
+		fail "$case_name expected=bounded-resource-observations observed=malformed"
+	[[ "${lines[$((line_index + 1))]}" == "$expected_wrapper" ]] ||
+		fail "$case_name expected=canonical-$action-wrapper observed=missing-or-mismatched"
+}
 run_faulted_start_failure() {
 	local fault="$1"
 	local expected_swap="$2"
-	local output rc observed_swap
+	local output rc observed_swap contract expected_errno expected_error
 
+	contract="$(primary_fault_refusal_contract "$fault")" ||
+		fail "$fault lacks a refusal contract"
+	expected_errno="${contract%%$'\t'*}"
+	expected_error="${contract#*$'\t'}"
 	prepare_interruption_run
 	note "START_LOADED_PRIMARY_NULLBLK_NEGATIVE=$fault run_id:$RUN_ID"
 	set +e
-	output="$(SWAPZ_PRIMARY_TEST_FAULT="$fault" \
+	output="$(LC_ALL=C SWAPZ_PRIMARY_TEST_FAULT="$fault" \
 		timeout --signal=TERM --kill-after=10s 90s "$CONTROL" primary start 2>&1)"
 	rc=$?
 	set -e
+	verify_expected_primary_refusal "$fault" start "$expected_errno" \
+		"$expected_error" "SWAPZ_PRIMARY_TEST_FAULT_HIT=$fault" "$output" "$rc"
 	printf '%s\n' "$output"
-	[[ "$rc" -ne 0 ]] || fail "$fault unexpectedly completed primary start"
-	grep -Fxq "SWAPZ_PRIMARY_TEST_FAULT_HIT=$fault" <<< "$output" ||
-		fail "$fault failed for an unrelated reason: no selected fault hit"
 	assert_lifecycle_state "$RUN_ID" RECOVERY_REQUIRED STARTING ||
 		fail "$fault did not preserve STARTING recovery provenance"
 	assert_exact_owned_mapper 1
@@ -1071,20 +1155,23 @@ run_faulted_start_failure() {
 run_faulted_stop_failure() {
 	local fault="$1"
 	local expected_swap="$2"
-	local output rc observed_swap
+	local output rc observed_swap contract expected_errno expected_error
 
+	contract="$(primary_fault_refusal_contract "$fault")" ||
+		fail "$fault lacks a refusal contract"
+	expected_errno="${contract%%$'\t'*}"
+	expected_error="${contract#*$'\t'}"
 	prepare_interruption_run
 	start_interruption_baseline
 	note "START_LOADED_PRIMARY_NULLBLK_NEGATIVE=$fault run_id:$RUN_ID"
 	set +e
-	output="$(SWAPZ_PRIMARY_TEST_FAULT="$fault" \
+	output="$(LC_ALL=C SWAPZ_PRIMARY_TEST_FAULT="$fault" \
 		timeout --signal=TERM --kill-after=10s 90s "$CONTROL" primary stop 2>&1)"
 	rc=$?
 	set -e
+	verify_expected_primary_refusal "$fault" stop "$expected_errno" \
+		"$expected_error" "SWAPZ_PRIMARY_TEST_FAULT_HIT=$fault" "$output" "$rc"
 	printf '%s\n' "$output"
-	[[ "$rc" -ne 0 ]] || fail "$fault unexpectedly completed primary stop"
-	grep -Fxq "SWAPZ_PRIMARY_TEST_FAULT_HIT=$fault" <<< "$output" ||
-		fail "$fault failed for an unrelated reason: no selected fault hit"
 	assert_lifecycle_state "$RUN_ID" RECOVERY_REQUIRED STOPPING ||
 		fail "$fault did not preserve STOPPING recovery provenance"
 	assert_exact_owned_mapper 1
@@ -1176,14 +1263,14 @@ run_failed_fsync_case() {
 	prepare_interruption_run
 	note "START_LOADED_PRIMARY_NULLBLK_NEGATIVE=state-dir-fsync run_id:$RUN_ID"
 	set +e
-	output="$(SWAPZ_PRIMARY_TEST_FSYNC_FAIL_DIRECTORY_CALL=2 \
+	output="$(LC_ALL=C SWAPZ_PRIMARY_TEST_FSYNC_FAIL_DIRECTORY_CALL=2 \
 		timeout --signal=TERM --kill-after=10s 90s "$CONTROL" primary start 2>&1)"
 	rc=$?
 	set -e
+	verify_expected_primary_refusal state-dir-fsync start 5 \
+		"Input/output error" "SWAPZ_PRIMARY_TEST_FSYNC_DIRECTORY_HIT=2" \
+		"$output" "$rc"
 	printf '%s\n' "$output"
-	[[ "$rc" -ne 0 ]] || fail "injected state directory fsync failure was ignored"
-	grep -Fxq "SWAPZ_PRIMARY_TEST_FSYNC_DIRECTORY_HIT=2" <<< "$output" ||
-		fail "selected post-rename state-directory fsync did not fail"
 	assert_lifecycle_state "$RUN_ID" STARTING null ||
 		fail "fsync failure did not retain the renamed STARTING record"
 	[[ -f "$RECOVERY_BASE/partition-$PARTUUID.active" ]] ||
@@ -1255,9 +1342,15 @@ expect_recovery_refusal_preserves_kernel() {
 	local case_name="$1"
 	local phase="$2"
 	local output rc before_state after_state before_claim after_claim
+	local contract expected_errno expected_error
 	local state_file="$RECOVERY_BASE/primary-state.json"
 	local active_claim="$RECOVERY_BASE/partition-$PARTUUID.active"
 	local consumed_claim="$RECOVERY_BASE/consumed-$RUN_ID.json"
+
+	contract="$(primary_recovery_refusal_contract "$case_name")" ||
+		fail "$case_name lacks a recovery-refusal contract"
+	expected_errno="${contract%%$'\t'*}"
+	expected_error="${contract#*$'\t'}"
 
 	before_state=missing
 	[[ ! -e "$state_file" && ! -L "$state_file" ]] ||
@@ -1266,11 +1359,13 @@ expect_recovery_refusal_preserves_kernel() {
 	before_claim="$(sha256sum "$active_claim" "$consumed_claim")" ||
 		fail "cannot snapshot denied-recovery ownership records"
 	set +e
-	output="$(timeout --signal=TERM --kill-after=10s 90s "$CONTROL" primary recover 2>&1)"
+	output="$(LC_ALL=C timeout --signal=TERM --kill-after=10s 90s \
+		"$CONTROL" primary recover 2>&1)"
 	rc=$?
 	set -e
+	verify_expected_primary_refusal "$case_name" recovery "$expected_errno" \
+		"$expected_error" "" "$output" "$rc"
 	printf '%s\n' "$output"
-	[[ "$rc" -ne 0 ]] || fail "$case_name unexpectedly authorized recovery"
 	after_state=missing
 	[[ ! -e "$state_file" && ! -L "$state_file" ]] ||
 		after_state="$(sha256sum "$state_file" | awk '{print $1}')" ||
@@ -1364,7 +1459,12 @@ PY
 
 run_wrong_mapper_identity_case() {
 	local mapper_table exact_uuid wrong_uuid open_count output rc
+	local contract expected_errno expected_error
 
+	contract="$(primary_recovery_refusal_contract wrong-mapper-identity)" ||
+		fail "wrong-mapper-identity lacks a recovery-refusal contract"
+	expected_errno="${contract%%$'\t'*}"
+	expected_error="${contract#*$'\t'}"
 	prepare_interruption_run
 	interrupt_lifecycle start start-mapper-resumed STARTING
 	note "START_LOADED_PRIMARY_NULLBLK_NEGATIVE=wrong-mapper-identity run_id:$RUN_ID"
@@ -1386,11 +1486,13 @@ run_wrong_mapper_identity_case() {
 	dmsetup create "$DMNAME" --uuid "$wrong_uuid" --table "$mapper_table" ||
 		fail "cannot create wrong-identity negative mapper"
 	set +e
-	output="$(timeout --signal=TERM --kill-after=10s 90s "$CONTROL" primary recover 2>&1)"
+	output="$(LC_ALL=C timeout --signal=TERM --kill-after=10s 90s \
+		"$CONTROL" primary recover 2>&1)"
 	rc=$?
 	set -e
+	verify_expected_primary_refusal wrong-mapper-identity recovery \
+		"$expected_errno" "$expected_error" "" "$output" "$rc"
 	printf '%s\n' "$output"
-	[[ "$rc" -ne 0 ]] || fail "recovery accepted wrong mapper identity"
 	[[ "$(dmsetup info -c --noheadings -o uuid "$DMNAME" 2>/dev/null |
 		tr -d '[:space:]')" == "$wrong_uuid" ]] ||
 		fail "recovery altered the wrong mapper"
