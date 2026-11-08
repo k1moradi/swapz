@@ -2846,6 +2846,11 @@ def _run_algorithm_live_swap_oracle(mapper, state, target, state_dir):
 
     private_oracle, oracle_sha256 = _algorithm_pageout_oracle_snapshot(
         state_dir, state["source_sha"])
+    # Oracle pinning may take time. Recheck the exact owned DM identity
+    # immediately before mkswap touches the mapper's visible block zero.
+    if (_verify_owned_mapper(state, target) != mapper or
+            block_identity(mapper) != mapper_device):
+        raise ProbeError("owned mapper changed before real-swap formatting")
     # A run-owned mapper needs no force override: preserve mkswap's
     # partition-table and geometry refusal checks before activation.
     _run(["mkswap", "--", mapper], timeout=30)

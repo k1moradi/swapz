@@ -132,6 +132,29 @@ class PhysicalSwapProbeTests(unittest.TestCase):
         identify.assert_not_called()
         command.assert_not_called()
 
+    def test_real_swap_rechecks_mapper_after_pin_before_mkswap(self):
+        mapper = "/dev/mapper/swapz-demo-physical-1234567890abcdef"
+        with mock.patch.object(
+                probe, "_verify_owned_mapper",
+                side_effect=[mapper, "/dev/mapper/substituted"]) as verify, \
+             mock.patch.object(probe, "block_identity",
+                               return_value=(253, 12)), \
+             mock.patch.object(probe, "_active_swap_for",
+                               return_value=None), \
+             mock.patch.object(
+                 probe, "_algorithm_pageout_oracle_snapshot",
+                 return_value=(Path("/private/algorithm-oracle.py"),
+                               "a" * 64)), \
+             mock.patch.object(probe.Path, "read_text",
+                               return_value="MemAvailable: 8000000 kB\n"), \
+             mock.patch.object(probe, "_run") as command:
+            with self.assertRaisesRegex(
+                    probe.ProbeError, "changed before real-swap formatting"):
+                probe._run_algorithm_live_swap_oracle(
+                    mapper, {"source_sha": "a" * 40}, {}, Path("/private"))
+        self.assertEqual(verify.call_count, 2)
+        command.assert_not_called()
+
     def test_algorithm_physical_single_confirmation_unit_contracts(self):
         command = [sys.executable, "-B",
                    str(ROOT / "runtime/native/algorithm-physical-test.py"),

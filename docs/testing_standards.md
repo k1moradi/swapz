@@ -7050,7 +7050,11 @@ parent, PARTUUID and geometry, before starting the existing private
 path through noninteractive privilege. The original 4096-byte header and
 run-owned mapping still require backed-up, durable, verified cleanup.
 Only the exact run-owned mapper may be swapped on and off; never force-remove
-an active mapper. Ambiguous target, VM, existing active swap, preloaded module,
+an active mapper. The controller pins the worker source and revalidates the
+owned mapper name, UUID and block major:minor immediately before calling
+unforced `mkswap`. It never bypasses standard mkswap partition-label and
+geometry refusal checks; a changed or unverified mapper blocks formatting.
+Ambiguous target, VM, existing active swap, preloaded module,
 missing noninteractive root, uncertain recovery storage or changed source
 must refuse without device mutation. Current algorithm live-swap evidence is
 DEVELOPMENT_ONLY and cannot promote `make test` to official physical PASS:
