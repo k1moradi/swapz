@@ -28,6 +28,7 @@ REAL_RECOVERY_BASE = probe._recovery_base
 REAL_PARTITION_LOCK = probe._partition_lock
 REAL_PATH_READ_TEXT = Path.read_text
 REAL_PATH_IS_FILE = Path.is_file
+REAL_PATH_EXISTS = Path.exists
 
 
 class PhysicalSwapProbeTests(unittest.TestCase):
@@ -37,6 +38,17 @@ class PhysicalSwapProbeTests(unittest.TestCase):
         temporary = tempfile.TemporaryDirectory()
         self.addCleanup(temporary.cleanup)
         self.recovery_base = Path(temporary.name)
+        # Synthetic recovery fixtures must not inherit a real host module.
+        # Tests that exercise module ownership explicitly override this view.
+        def fixture_exists(path):
+            if str(path) == "/sys/module/dm_swapz":
+                return False
+            return REAL_PATH_EXISTS(path)
+
+        module_presence = mock.patch.object(
+            probe.Path, "exists", new=fixture_exists)
+        module_presence.start()
+        self.addCleanup(module_presence.stop)
         for name, replacement in (
             ("_recovery_base", lambda target=None: self.recovery_base),
             ("_recovery_run_directory", lambda path, run_id=None: Path(path)),
@@ -139,6 +151,16 @@ class PhysicalSwapProbeTests(unittest.TestCase):
         (self.recovery_base / f"consumed-{state['run_id']}.json").write_text(
             json.dumps(marker))
         return state, header
+
+    def test_recovery_fixture_does_not_inherit_host_module_presence(self):
+        # A loaded host module is unrelated to the synthetic recovery run.
+        self.assertFalse(Path("/sys/module/dm_swapz").exists())
+        with tempfile.TemporaryDirectory() as directory:
+            self.assertTrue(Path(directory).exists())
+        # Other tests must still be able to model module ownership explicitly.
+        with mock.patch.object(probe.Path, "exists", autospec=True,
+                               return_value=True):
+            self.assertTrue(Path("/sys/module/dm_swapz").exists())
 
     def test_dm_inventory_accepts_canonical_empty_dmsetup_output(self):
         expected = {

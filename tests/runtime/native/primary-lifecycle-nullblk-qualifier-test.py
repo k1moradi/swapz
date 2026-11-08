@@ -43,6 +43,19 @@ class PrimaryLifecycleNullblkQualifierContract(unittest.TestCase):
         self.assertNotIn(
             "SWAPZ_PRIMARY_TEST_FSYNC_FAIL_DIRECTORY_CALL", self.primary)
 
+    def test_mount_inventory_pins_namespace_id_for_older_kernel_uapi(self):
+        # Linux 6.11-6.17 requires a namespace ID; the reserved word cannot
+        # be used as a namespace fd until the 6.18 interface is available.
+        function = self.primary.split(
+            "static int swapz_primary_mountinfo_full_root(", 1)[1].split(
+                "static int swapz_primary_mountinfo_exit_error(", 1)[0]
+        self.assertIn("SWAPZ_PRIMARY_NS_GET_MNTNS_ID", self.primary)
+        self.assertIn("ioctl(namespace_fd, SWAPZ_PRIMARY_NS_GET_MNTNS_ID,", function)
+        self.assertIn('failure_step = "namespace-id";', function)
+        self.assertEqual(function.count(".namespace_id = pinned_namespace_id,"), 3)
+        self.assertNotIn(".namespace_fd = (uint32_t)namespace_fd", function)
+        self.assertIn("saved_errno == EINVAL", function)
+
     def test_all_native_interruption_and_negative_cases_are_declared(self):
         for phase in (
             "start-starting",

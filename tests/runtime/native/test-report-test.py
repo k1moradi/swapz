@@ -5937,7 +5937,10 @@ class ReportContract(unittest.TestCase):
             git("add", "source.c", cwd=peer)
             git("commit", "-m", "Concurrent source", cwd=peer)
             concurrent_sha = git("rev-parse", "HEAD", cwd=peer).stdout.strip()
-            git("push", "origin", "main", cwd=peer)
+            # Populate the private bare remote without host pre-push hooks.
+            # The publisher's own push behavior is exercised separately.
+            git("--git-dir", str(origin), "fetch", "--no-tags",
+                str(peer), "main:refs/heads/main", cwd=sandbox)
 
             old_root, old_report, old_git_result = (
                 runner.ROOT, runner.REPORT, runner.git_result)
@@ -6033,7 +6036,10 @@ class ReportContract(unittest.TestCase):
                 f"test: latest run for {source_sha[:12]} [skip ci]",
                 cwd=peer)
             peer_report_sha = git("rev-parse", "HEAD", cwd=peer).stdout.strip()
-            git("push", "origin", "main", cwd=peer)
+            # Populate the private bare remote without host pre-push hooks.
+            # The publisher's own push behavior is exercised separately.
+            git("--git-dir", str(origin), "fetch", "--no-tags",
+                str(peer), "main:refs/heads/main", cwd=sandbox)
 
             old_root, old_report, old_git_result = (
                 runner.ROOT, runner.REPORT, runner.git_result)
@@ -6143,7 +6149,10 @@ class ReportContract(unittest.TestCase):
             git("commit", "-m", f"test: latest run for {c2_sha[:12]} [skip ci]",
                 cwd=peer)
             peer_report_sha = git("rev-parse", "HEAD", cwd=peer).stdout.strip()
-            git("push", "origin", "main", cwd=peer)
+            # Populate the private bare remote without host pre-push hooks.
+            # The publisher's own push behavior is exercised separately.
+            git("--git-dir", str(origin), "fetch", "--no-tags",
+                str(peer), "main:refs/heads/main", cwd=sandbox)
 
             old_root, old_report, old_git_result = (
                 runner.ROOT, runner.REPORT, runner.git_result)
@@ -6230,7 +6239,10 @@ class ReportContract(unittest.TestCase):
             git("add", runner.GIT_RESULT, cwd=peer)
             git("commit", "-m", f"test: latest run for {c2_sha[:12]} [skip ci]",
                 cwd=peer)
-            git("push", "origin", "main", cwd=peer)
+            # Populate the private bare remote without host pre-push hooks.
+            # The publisher's own push behavior is exercised separately.
+            git("--git-dir", str(origin), "fetch", "--no-tags",
+                str(peer), "main:refs/heads/main", cwd=sandbox)
 
             old_root, old_report, old_git_result = (
                 runner.ROOT, runner.REPORT, runner.git_result)
@@ -6323,7 +6335,10 @@ class ReportContract(unittest.TestCase):
             (peer / "README.md").write_text("concurrent doc\n")
             git("add", "README.md", cwd=peer)
             git("commit", "-m", "Concurrent doc commit C3", cwd=peer)
-            git("push", "origin", "main", cwd=peer)
+            # Populate the private bare remote without host pre-push hooks.
+            # The publisher's own push behavior is exercised separately.
+            git("--git-dir", str(origin), "fetch", "--no-tags",
+                str(peer), "main:refs/heads/main", cwd=sandbox)
 
             old_root, old_report, old_git_result = (
                 runner.ROOT, runner.REPORT, runner.git_result)

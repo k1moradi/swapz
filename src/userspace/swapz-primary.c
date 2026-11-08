@@ -41,6 +41,12 @@
  * SWAP_FLAG_DISCARD, so keep the released-cluster selector local. */
 #define SWAPZ_PRIMARY_SWAP_FLAG_DISCARD_PAGES 0x40000
 
+/* NS_GET_MNTNS_ID is available since Linux 6.11, including on systems
+ * whose userspace headers predate its declaration. Keep the namespace fd
+ * pinned, but pass its stable kernel ID to statmount/listmount. Passing the fd
+ * in the reserved request word is only supported since Linux 6.18. */
+#define SWAPZ_PRIMARY_NS_GET_MNTNS_ID _IOR(0xb7, 0x5, uint64_t)
+
 static struct swapz_primary_target swapz_primary_selected_target;
 
 static void swapz_primary_selected_target_clear(void)
@@ -4020,6 +4026,11 @@ static int swapz_primary_mountinfo_read_fd(
 	parse_errno = errno;
 	free(expanded_buffer);
 	if (parse_result < 0) {
+		if (parse_errno == EINVAL)
+			(void)fprintf(stderr,
+				      "SWAPZ_PRIMARY_MOUNT_INVENTORY_FAILURE "
+				      "step=mountinfo-parse errno=%d "
+				      "reason=malformed-mountinfo\n", EINVAL);
 		errno = parse_errno ? parse_errno : EINVAL;
 		return -1;
 	}
@@ -4102,7 +4113,7 @@ static int swapz_primary_mountinfo_full_root(
 		STATX_TYPE | STATX_INO | statx_mount_id_unique;
 	struct mount_id_request {
 		uint32_t size;
-		uint32_t namespace_fd;
+		uint32_t namespace_reserved;
 		uint64_t mount_id;
 		uint64_t parameter;
 		uint64_t namespace_id;
@@ -4131,6 +4142,7 @@ static int swapz_primary_mountinfo_full_root(
 	struct statx confirmed_init_root_info = {0};
 	uint64_t mount_ids[namespace_mount_batch];
 	uint64_t current_mount_id;
+	uint64_t pinned_namespace_id = 0;
 	uint64_t root_mount_id;
 	uint64_t namespace_root_mount_id = 0;
 	uint64_t last_mount_id = 0;
@@ -4183,6 +4195,14 @@ static int swapz_primary_mountinfo_full_root(
 	if (opened_namespace_info.st_dev != expected_namespace_info->st_dev ||
 	    opened_namespace_info.st_ino != expected_namespace_info->st_ino) {
 		errno = EAGAIN;
+		goto out;
+	}
+	failure_step = "namespace-id";
+	if (ioctl(namespace_fd, SWAPZ_PRIMARY_NS_GET_MNTNS_ID,
+		  &pinned_namespace_id) < 0)
+		goto out;
+	if (!pinned_namespace_id) {
+		errno = EOPNOTSUPP;
 		goto out;
 	}
 	failure_step = "root-object";
@@ -4238,7 +4258,7 @@ static int swapz_primary_mountinfo_full_root(
 		memset(&mount_status, 0, sizeof(mount_status));
 		request = (struct mount_id_request) {
 			.size = mount_id_request_bytes,
-			.namespace_fd = (uint32_t)namespace_fd,
+			.namespace_id = pinned_namespace_id,
 			.mount_id = current_mount_id,
 			.parameter = statmount_required_mask,
 		};
@@ -4291,7 +4311,7 @@ static int swapz_primary_mountinfo_full_root(
 	}
 	request = (struct mount_id_request) {
 		.size = mount_id_request_bytes,
-		.namespace_fd = (uint32_t)namespace_fd,
+		.namespace_id = pinned_namespace_id,
 		.mount_id = namespace_root_mount_id,
 	};
 	failure_step = "mount-list";
@@ -4328,7 +4348,7 @@ static int swapz_primary_mountinfo_full_root(
 			memset(&mount_status, 0, sizeof(mount_status));
 			request = (struct mount_id_request) {
 				.size = mount_id_request_bytes,
-				.namespace_fd = (uint32_t)namespace_fd,
+				.namespace_id = pinned_namespace_id,
 				.mount_id = mount_ids[index],
 				.parameter = statmount_required_mask,
 			};
@@ -4409,7 +4429,8 @@ out:
 		 * and errno, not mount, PID, namespace or device identities.
 		 * Restore the original errno after reporting the failure.
 		 */
-		if (saved_errno == EAGAIN ||
+		if (saved_errno == EINVAL || saved_errno == ENOSYS ||
+		    saved_errno == EAGAIN ||
 		    (saved_errno == EOVERFLOW && failure_reason))
 			(void)fprintf(stderr,
 				      "SWAPZ_PRIMARY_MOUNT_INVENTORY_FAILURE "
