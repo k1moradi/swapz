@@ -4772,6 +4772,8 @@ class ReportContract(unittest.TestCase):
 
         original_block = ("BLOCKED: primary-swap start failed: "
                           "Interrupted system call")
+        # Authentication failures are FAIL; independent explicit FAIL/BLOCKED
+        # evidence keeps its own established stage semantics.
         adversarial = (
             ("unrelated after terminal", full_log +
              "BLOCKED: unexpected admission refusal\n", 0, "BLOCKED"),

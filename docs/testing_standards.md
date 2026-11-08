@@ -3309,6 +3309,10 @@ must remain unchanged. The two applied-EINTR reconciliation cases emit no
 refusal. The reporter must authenticate all eleven required
 refusals; one missing, duplicated, wrong-cause or wrong-operation refusal
 invalidates the entire exemption and fails the loaded evidence contract.
+That authentication failure is a harness FAIL. Independent explicit
+`FAIL:` evidence keeps its own failure phase, while unrelated
+`BLOCKED_LOADED_QUALIFICATION:` evidence remains BLOCKED; neither is
+reclassified merely because the negative-refusal matrix itself authenticated.
 The human qualification summary
 must also display the verified process-death recovery count and negative-case
 count so reviewers do not need to infer lifecycle coverage from raw log text.
