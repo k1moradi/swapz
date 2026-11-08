@@ -3337,7 +3337,9 @@ count so reviewers do not need to infer lifecycle coverage from raw log text.
 Failure attribution must be scoped to the current negative-case start marker;
 an earlier authenticated refusal must not replace a later lifecycle failure's
 phase or diagnostic. The report regression must cover consecutive negative
-cases with different expected operations.
+cases with different expected operations. Lifecycle refusal checks must keep
+the human operation label separate from its structured record name: recovery
+uses the wrapper label `recovery` and the protocol prefix `PRIMARY_RECOVER`.
 
 Benchmark telemetry and storage-envelope parsers must safely handle directional workloads where specific operation latencies are omitted (for example, read p99 latency during write-only saturation or delta64 rescue sweeps), converting missing numeric fields safely without type errors.
 

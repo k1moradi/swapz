@@ -1077,6 +1077,9 @@ verify_expected_primary_refusal() {
 	local output="$6"
 	local child_exit="$7"
 	local action_upper="${action^^}"
+	# The CLI action is named "recovery" in its human-facing wrapper, while
+	# the structured protocol deliberately uses PRIMARY_RECOVER.
+	[[ "$action" != recovery ]] || action_upper=RECOVER
 	local prefix="PRIMARY_${action_upper}=FAILED phase="
 	local expected_wrapper="BLOCKED: primary-swap $action failed: $expected_error"
 	local expected_lines=2

@@ -281,6 +281,39 @@ fail() { printf 'FAIL: %s\n' "$*" >&2; exit 1; }
                 self.assertNotIn("PRIMARY_START=FAILED", refused.stderr)
                 if title == "extra private sideband":
                     self.assertIn("other=1", refused.stderr)
+
+    def test_recovery_refusal_verifier_uses_recover_record_name(self):
+        def shell_function(name):
+            begin = self.script.index(name + "() {")
+            end = self.script.index("\n}", begin) + 2
+            return self.script[begin:end]
+
+        helper = "\n\n".join(shell_function(name) for name in (
+            "primary_recovery_refusal_contract",
+            "verify_expected_primary_refusal",
+        ))
+        failure = r'''
+fail() { printf 'FAIL: %s\n' "$*" >&2; exit 1; }
+'''
+        output = "\n".join((
+            "PRIMARY_RECOVER=FAILED phase=admission errno=1 "
+            "error=Operation not permitted original_errno=1 "
+            "persistence_boundary=none durable=UNOBSERVED "
+            "mapper=UNOBSERVED swap=UNOBSERVED",
+            "BLOCKED: primary-swap recovery failed: Operation not permitted",
+        ))
+        script = (
+            failure + "\n" + helper + "\n" +
+            "output=" + shlex.quote(output) + "\n" +
+            "verify_expected_primary_refusal stale-run-id recovery 1 "
+            "'Operation not permitted' '' \"$output\" 2\n")
+        accepted = subprocess.run(
+            ["bash", "-c", script], cwd=ROOT, capture_output=True,
+            text=True, timeout=5, check=False)
+        self.assertEqual(accepted.returncode, 0,
+                         accepted.stdout + accepted.stderr)
+        self.assertEqual(accepted.stdout + accepted.stderr, "")
+
     def test_wrong_mapper_case_never_forces_removal(self):
         self.assertNotRegex(self.script, r"dmsetup\s+remove\s+--force")
         self.assertNotRegex(self.script, r"\brmmod\b")
