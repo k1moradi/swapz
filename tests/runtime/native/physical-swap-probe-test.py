@@ -10,6 +10,7 @@ import os
 from pathlib import Path
 import shutil
 import subprocess
+import sys
 import struct
 import stat
 from types import SimpleNamespace
@@ -57,6 +58,17 @@ class PhysicalSwapProbeTests(unittest.TestCase):
             patch = mock.patch.object(probe, name, replacement)
             patch.start()
             self.addCleanup(patch.stop)
+
+    def test_algorithm_pageout_oracle_unit_contracts(self):
+        # The separate source-bound worker is never privileged in this test.
+        # A no-swap host must not accidentally be used as real-swap evidence.
+        command = [sys.executable, "-B",
+                   str(ROOT / "runtime/native/algorithm-pageout-oracle-test.py"),
+                   "-v"]
+        completed = subprocess.run(
+            command, cwd=ROOT, check=False, capture_output=True,
+            text=True, timeout=20)
+        self.assertEqual(completed.returncode, 0, completed.stderr[-2000:])
 
     def save_recovery_fixture(self, state_dir, state):
         """Keep both synthetic records tied to their edited state identity."""

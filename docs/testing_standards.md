@@ -6995,6 +6995,18 @@ are admitted, that a canonical inactive recovery restores the header without
 This test path is not invoked by routine `make test` and cannot be described as
 a passing full physical or real-swap qualification.
 
+The algorithm anonymous-page oracle at
+`tests/tools/algorithm-pageout-oracle.py` writes a bounded 64 MiB of
+run-unique 4096-byte patterns, requests `MADV_PAGEOUT`, then waits for its
+controller before reading each page back and checking every byte. Its READY
+event alone is never proof of swap-out, swapz use, or physical-device access:
+the separate, privileged physical controller must authenticate the exact
+owned mapper in `/proc/swaps`, observe positive mapper swap use and independently
+verified lower-I/O evidence before issuing VERIFY. Failed page eviction,
+missing command, a short page or mismatched data must never produce a PASS.
+The worker never opens, formats or selects a block device; this rootless
+contract is preparatory only and does not lift the physical admission blocker.
+
 #### Physical admission and qualified-artifact policy
 
 Physical admission is bare-metal x86_64-only. Before qualification evidence is
