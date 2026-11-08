@@ -62,7 +62,13 @@ The native/rootless stage records separate native Make and remaining-contract
 wall times as optional observational evidence, not qualification PASS gates.
 The official `make test` and `make test_full` terminals stream CTest-style start/completion and
 elapsed-second progress for source-controlled rootless suite labels, plus
-elapsed time for existing loaded-phase boundaries. Progress is strictly
+elapsed time for existing loaded-phase boundaries.
+The rootless stderr-relay pass fixtures must preserve and authenticate the
+harness's fixed START/PASS phase markers before comparing the unchanged child
+stdout and private stderr. Allow nonnegative integer elapsed seconds rather
+than assuming initialization takes exactly zero seconds; an extra or missing
+progress line must still fail the fixture. Fail-only private capture and
+first-error attribution remain independently enforced. Progress is strictly
 observational, filters labels against the source-controlled allowlist, and
 must never print raw child output or promote a successful suite to overall
 qualification PASS. A progress event with an unsupported state, malformed

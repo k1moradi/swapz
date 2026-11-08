@@ -558,10 +558,29 @@ class RootlessAttribution(unittest.TestCase):
         return log
 
 
+    def assert_pass_stdout(self, result, phase, child_output):
+        # The harness owns the fixed progress events; the child owns only its
+        # unchanged stdout bytes. Do not assume a zero-second initialization.
+        lines = result.stdout.splitlines(keepends=True)
+        self.assertEqual(len(lines), 5, result.stdout[-2000:])
+        self.assertEqual(
+            lines[0],
+            "ROOTLESS_PHASE_PROGRESS state=START index=0 elapsed_s=0 "
+            "label=rootless initialization\n")
+        self.assertRegex(
+            lines[1],
+            r"^ROOTLESS_PHASE_PROGRESS state=PASS index=0 "
+            r"elapsed_s=(0|[1-9][0-9]*) label=rootless initialization\n$")
+        self.assertEqual(
+            lines[2],
+            "ROOTLESS_PHASE_PROGRESS state=START index=1 elapsed_s=0 "
+            f"label={phase}\n")
+        self.assertEqual("".join(lines[3:]), child_output)
+
     def test_make_pass_preserves_streams_and_removes_capture(self):
         result = self.invoke("pass", stage=MAKE_PHASE)
         self.assertEqual(result.returncode, 0, result.stderr)
-        self.assertEqual(result.stdout, "MAKE_STDOUT\nAFTER_PACKAGE\n")
+        self.assert_pass_stdout(result, MAKE_PHASE, "MAKE_STDOUT\nAFTER_PACKAGE\n")
         self.assertEqual(result.stderr, "MAKE_STDERR\n")
         self.assertEqual(list(self.root.glob("build/tests/rootless-failure.*")), [])
 
@@ -699,7 +718,7 @@ class RootlessAttribution(unittest.TestCase):
     def test_pass_preserves_streams_and_removes_private_capture(self):
         result = self.invoke("pass")
         self.assertEqual(result.returncode, 0, result.stderr)
-        self.assertEqual(result.stdout, "SYNTHETIC_STDOUT\nAFTER_PACKAGE\n")
+        self.assert_pass_stdout(result, PACKAGE_PHASE, "SYNTHETIC_STDOUT\nAFTER_PACKAGE\n")
         self.assertEqual(result.stderr, "SYNTHETIC_STDERR\n")
         self.assertEqual(list(self.root.glob("build/tests/rootless-failure.*")), [])
 
@@ -912,14 +931,14 @@ exec "$SWAPZ_REAL_RM" "$@"
     def test_lifecycle_audit_pass_preserves_streams(self):
         result = self.invoke("pass", stage=LIFECYCLE_PHASE)
         self.assertEqual(result.returncode, 0, result.stderr)
-        self.assertEqual(result.stdout, "SYNTHETIC_STDOUT\nAFTER_PACKAGE\n")
+        self.assert_pass_stdout(result, LIFECYCLE_PHASE, "SYNTHETIC_STDOUT\nAFTER_PACKAGE\n")
         self.assertEqual(result.stderr, "SYNTHETIC_STDERR\n")
         self.assertEqual(list(self.root.glob("build/tests/rootless-failure.*")), [])
 
     def test_primary_pass_preserves_streams_and_removes_capture(self):
         result = self.invoke("pass", stage=PRIMARY_PHASE)
         self.assertEqual(result.returncode, 0, result.stderr)
-        self.assertEqual(result.stdout, "SYNTHETIC_STDOUT\nAFTER_PACKAGE\n")
+        self.assert_pass_stdout(result, PRIMARY_PHASE, "SYNTHETIC_STDOUT\nAFTER_PACKAGE\n")
         self.assertEqual(result.stderr, "SYNTHETIC_STDERR\n")
         self.assertEqual(list(self.root.glob("build/tests/rootless-failure.*")), [])
 
