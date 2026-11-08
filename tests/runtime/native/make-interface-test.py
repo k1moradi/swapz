@@ -1770,6 +1770,43 @@ class PublicMakeContract(unittest.TestCase):
                 else:
                     self.assertIn("BLOCKED:", result.stderr)
 
+    def test_loaded_preflight_mapper_enumerator_accepts_canonical_dmsetup_formats(self):
+        # Exercise the exact embedded read-only parser, not a duplicate model.
+        preflight = (ROOT / "tests/tools/loaded-preflight.sh").read_text()
+        command = "dmsetup ls --target swapz --noheadings 2>/dev/null |\n        awk '\n"
+        terminator = "\n        '\n    # Preserve both pipeline exit statuses"
+        self.assertEqual(preflight.count(command), 1)
+        parser_source = preflight.split(command, 1)[1].split(terminator, 1)[0]
+        self.assertTrue(parser_source)
+        self.assertIn("END { if (malformed) exit 2 }", parser_source)
+
+        def parse_listing(source):
+            return subprocess.run(
+                ["awk", parser_source], input=source,
+                capture_output=True, text=True, timeout=5)
+
+        for listing, expected in (
+                ("swapz-demo-a (253:4)\n", "swapz-demo-a\t253:4\n"),
+                ("swapz-demo-a (253, 4)\n", "swapz-demo-a\t253:4\n"),
+                ("swapz-demo-a (0:0)\n", "swapz-demo-a\t0:0\n"),
+                ("swapz-demo-a (0, 0)\n", "swapz-demo-a\t0:0\n")):
+            with self.subTest(listing=listing):
+                result = parse_listing(listing)
+                self.assertEqual(result.returncode, 0, result.stderr)
+                self.assertEqual(result.stdout, expected)
+
+        for listing in (
+                "swapz-demo-a (0253:4)\n",
+                "swapz-demo-a (253:04)\n",
+                "swapz-demo-a (0253, 4)\n",
+                "swapz-demo-a (253, 04)\n",
+                "swapz-demo-a (253,4)\n",
+                "swapz-demo-a (253, 4) trailing\n",
+                "No devices found\n"):
+            with self.subTest(rejected=listing):
+                result = parse_listing(listing)
+                self.assertEqual(result.returncode, 2, result.stdout)
+
     def test_packaging_and_loaded_tests_are_bounded(self):
         self.assertIn("packaging/package-dkms.sh install", MAKE)
         self.assertIn("packaging/package-dkms.sh uninstall", MAKE)

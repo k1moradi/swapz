@@ -331,14 +331,28 @@ if swapz_map_list="$(
     dmsetup ls --target swapz --noheadings 2>/dev/null |
         awk '
             {
-                if (NF != 2 || length($1) > 127 || length($2) > 23 ||
-                    $2 !~ /^[(](0|[1-9][0-9]*):(0|[1-9][0-9]*)[)]$/) {
+                # dmsetup accepts either (major:minor) or (major, minor)
+                # depending on its userspace version. Normalize only those
+                # two exact canonical forms; never infer a device identity.
+                if (length($1) > 127) {
+                    malformed = 1
+                    next
+                }
+                if (NF == 2 && length($2) <= 23 &&
+                    $2 ~ /^[(](0|[1-9][0-9]*):(0|[1-9][0-9]*)[)]$/) {
+                    devno = substr($2, 2, length($2) - 2)
+                } else if (NF == 3 && length($2) + length($3) <= 23 &&
+                           $2 ~ /^[(](0|[1-9][0-9]*),$/ &&
+                           $3 ~ /^(0|[1-9][0-9]*)[)]$/) {
+                    devno = substr($2, 2, length($2) - 2) ":" \
+                            substr($3, 1, length($3) - 1)
+                } else {
                     malformed = 1
                     next
                 }
                 ++records
                 if (records <= 2)
-                    printf "%s\t%s\n", $1, substr($2, 2, length($2) - 2)
+                    printf "%s\t%s\n", $1, devno
             }
             END { if (malformed) exit 2 }
         '

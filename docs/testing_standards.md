@@ -3233,11 +3233,15 @@ required-command audit must include every unconditional utility it executes.
 Mapper enumeration and lower-dependency parsing are explicit fail-closed
 operations; they must not rely on an unguarded pipeline/assignment under
 `set -e`. Busy-module `dmsetup ls --target swapz --noheadings` records
-must have exactly two bounded fields: one mapper name and one parenthesized,
-canonical unsigned-decimal major:minor tuple, without leading zeroes. Empty
-lines, extra fields, or malformed device numbers are not proof of a single
-owned mapper: refuse at `mapper_inventory` before any holder signaling or
-device cleanup, report the pipeline status and safe inventory inspection,
+must contain one bounded mapper name and one parenthesized canonical
+unsigned-decimal device number, without leading zeroes. Support both
+`(major:minor)` and `(major, minor)` forms emitted by dmsetup versions;
+the parser normalizes either exactly to `major:minor` for the subsequent
+independent mapper-node identity comparisons. The comma-space form occupies
+three whitespace-separated fields; neither form authorizes removal by itself.
+Empty lines, extra fields, noncanonical numbers or `No devices found` are
+not proof of a single owned mapper: refuse at `mapper_inventory` before any
+holder signaling or device cleanup, report pipeline status and safe inventory inspection,
 never echo inventory/device paths. On any failed enumeration, capture both pipeline statuses before running
 another shell command and emit a bounded failure-only category identifying
 whether `dmsetup` itself failed or the strict AWK record parser refused its
