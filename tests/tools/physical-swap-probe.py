@@ -2846,7 +2846,9 @@ def _run_algorithm_live_swap_oracle(mapper, state, target, state_dir):
 
     private_oracle, oracle_sha256 = _algorithm_pageout_oracle_snapshot(
         state_dir, state["source_sha"])
-    _run(["mkswap", "--force", "--", mapper], timeout=30)
+    # A run-owned mapper needs no force override: preserve mkswap's
+    # partition-table and geometry refusal checks before activation.
+    _run(["mkswap", "--", mapper], timeout=30)
     # The state already durably recorded the real-swap mode before mutation.
     # A failure after swapon must always retain the normal swapoff path.
     _run(["swapon", "--priority", "32767", "--", mapper], timeout=30)

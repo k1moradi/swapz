@@ -1897,6 +1897,14 @@ class PhysicalSwapProbeTests(unittest.TestCase):
         self.assertIn('["swapon", target["device"]]', script)
         self.assertNotIn('["swapon", mapper]', script)
         self.assertNotIn('"--force"', script)
+        # Real-swap opt-in may format only its exact owned mapper, using
+        # ordinary mkswap refusal rules rather than bypassing them.
+        self.assertIn('["mkswap", "--", mapper]', script)
+        with self.assertRaisesRegex(
+                probe.ProbeError, "requires development-only admission"):
+            probe.run_probe(
+                "/dev/disk/by-uuid/inactive", "/dev/disk/by-uuid/inactive",
+                None, None, algorithm_real_swap=True)
         self.assertNotIn("ssh-keygen", script)
         self.assertNotIn("allowed_signers", script)
         self.assertNotIn("REVIEW_NAMESPACE", script)
