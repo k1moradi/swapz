@@ -1234,6 +1234,23 @@ class PublicMakeContract(unittest.TestCase):
                 "PASS_LOADED_PRIMARY_NULLBLK_INTERRUPTION_RECOVERY=cases:18 fresh_process:true host_swap_identity:preserved repeat_recovery:safe",
                 "PASS_LOADED_PRIMARY_NULLBLK_NEGATIVE_RECOVERY=cases:13 ambiguous_syscall:true inventory_failure:true definite_io_error:true wrong_mapper:true failed_swapoff:true stale_run:true fsync_failure:true lost_provenance:true repeat_recovery:safe host_swap_identity:preserved",
             ]
+            negative_aggregate_index = next(
+                index for index, line in enumerate(records)
+                if line.startswith(
+                    "PASS_LOADED_PRIMARY_NULLBLK_NEGATIVE_RECOVERY="))
+            negative_details = []
+            for case_index, (case_name, contract) in enumerate(
+                    runner_contract.PRIMARY_NEGATIVE_CASE_REFUSALS.items()):
+                negative_details.append(
+                    "START_LOADED_PRIMARY_NULLBLK_NEGATIVE="
+                    f"{case_name} run_id:{case_index + 1:032x}")
+                if contract is not None:
+                    operation, error_text = contract
+                    negative_details.append(
+                        f"BLOCKED: primary-swap {operation} failed: "
+                        f"{error_text}")
+            records[negative_aggregate_index:
+                    negative_aggregate_index] = negative_details
             specs = (("sd_emulated", 10, 1000000, 2, 2, 1, 1),
                      ("ssd_emulated", 80, 150000, 2, 2, 1, 64))
             confirmation = (0, 1, 1, 0, 0, 1, 1, 0, 0, 1)
@@ -1437,6 +1454,8 @@ class PublicMakeContract(unittest.TestCase):
                     json.dumps(off if index % 2 else swapz, sort_keys=True),
                     f"PASS_WRITE_PIPELINE_DEPTH={depth}",
                 ))
+            records.append(
+                "PASS_LOADED_TEST_EXECUTION: synthetic loaded gate completed")
             script = ("#!/bin/bash\nset -eu\n"
                       "source_sha=$(git rev-parse --verify HEAD)\n"
                       "test \"$(tail -n 1 build/order.log)\" = 'kbuild:2'\n"

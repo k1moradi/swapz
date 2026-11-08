@@ -918,6 +918,20 @@ def synthetic_log():
            "PASS_LOADED_PRIMARY_NULLBLK_INTERRUPTION_RECOVERY=cases:18 fresh_process:true host_swap_identity:preserved repeat_recovery:safe",
            "PASS_LOADED_PRIMARY_NULLBLK_NEGATIVE_RECOVERY=cases:13 ambiguous_syscall:true inventory_failure:true definite_io_error:true wrong_mapper:true failed_swapoff:true stale_run:true fsync_failure:true lost_provenance:true repeat_recovery:safe host_swap_identity:preserved",
            "PASS_LOADED_OWNED_NULLBLK_SMOKE"]
+    negative_aggregate_index = next(
+        index for index, line in enumerate(out)
+        if line.startswith("PASS_LOADED_PRIMARY_NULLBLK_NEGATIVE_RECOVERY="))
+    negative_details = []
+    for case_index, (case_name, contract) in enumerate(
+            runner.PRIMARY_NEGATIVE_CASE_REFUSALS.items()):
+        negative_details.append(
+            "START_LOADED_PRIMARY_NULLBLK_NEGATIVE="
+            f"{case_name} run_id:{case_index + 1:032x}")
+        if contract is not None:
+            operation, error_text = contract
+            negative_details.append(
+                f"BLOCKED: primary-swap {operation} failed: {error_text}")
+    out[negative_aggregate_index:negative_aggregate_index] = negative_details
     for regime in runner.MODEL_ORDER:
         spec = runner.MODEL_SPECS[regime]
         out.append(f"START_OWNED_RAM_REGIME={regime}")
@@ -1099,6 +1113,7 @@ def synthetic_log():
         for record in ((swapz, off) if index % 2 else (off, swapz)):
             out.append(json.dumps(record))
         out.append(f"PASS_WRITE_PIPELINE_DEPTH={depth}")
+    out.append("PASS_LOADED_TEST_EXECUTION: synthetic full gate completed")
     return "\n".join(out) + "\n"
 
 
@@ -4726,9 +4741,7 @@ class ReportContract(unittest.TestCase):
             "definite_io_error:true wrong_mapper:true failed_swapoff:true "
             "stale_run:true fsync_failure:true lost_provenance:true "
             "repeat_recovery:safe host_swap_identity:preserved")
-        full_log = (synthetic_log().replace(
-            completion, "\n".join(negative_lines) + "\n" + completion, 1)
-            + "PASS_LOADED_TEST_EXECUTION: full gate completed\n")
+        full_log = synthetic_log()
         correctness = runner.parse_loaded_correctness(full_log)
         self.assertEqual(correctness["overall"], "PASS")
         expected_refusals = runner.authenticated_primary_negative_refusal_indices(
