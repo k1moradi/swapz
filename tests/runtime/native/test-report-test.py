@@ -18,6 +18,67 @@ spec.loader.exec_module(runner)
 
 
 class NativeTimingContract(unittest.TestCase):
+    def test_rootless_progress_rejects_unsafe_and_invalid_records(self):
+        allowed = runner.rootless_phase_names()
+        self.assertEqual(
+            runner.rootless_phase_progress(
+                "ROOTLESS_PHASE_PROGRESS state=START index=0 elapsed_s=0 "
+                "label=rootless initialization\n", allowed),
+            ("START", 0, 0, "rootless initialization"))
+        self.assertEqual(
+            runner.rootless_phase_progress(
+                "ROOTLESS_PHASE_PROGRESS state=PASS index=1 elapsed_s=12 "
+                "label=tests/Makefile native and metadata\n", allowed),
+            ("PASS", 1, 12, "tests/Makefile native and metadata"))
+        self.assertIsNone(runner.rootless_phase_progress(
+            "ROOTLESS_PHASE_PROGRESS state=PASS index=2 elapsed_s=1 "
+            "label=/private/user/device", allowed))
+        self.assertIsNone(runner.rootless_phase_progress(
+            "ROOTLESS_PHASE_PROGRESS state=PASS index=02 elapsed_s=1 "
+            "label=tests/Makefile native and metadata", allowed))
+
+    def test_streamed_rootless_progress_preserves_original_failure(self):
+        from unittest import mock
+
+        transcript = (
+            "ROOTLESS_PHASE_PROGRESS state=START index=0 elapsed_s=0 "
+            "label=rootless initialization\n"
+            "ROOTLESS_PHASE_PROGRESS state=PASS index=0 elapsed_s=0 "
+            "label=rootless initialization\n"
+            "ROOTLESS_PHASE_PROGRESS state=START index=1 elapsed_s=0 "
+            "label=tests/Makefile native and metadata\n"
+            "ROOTLESS_PHASE_PROGRESS state=PASS index=1 elapsed_s=4 "
+            "label=tests/Makefile native and metadata\n"
+            "ROOTLESS_PHASE_PROGRESS state=START index=2 elapsed_s=0 "
+            "label=tests/runtime/native/source-contract-test.py\n"
+            # Untrusted output cannot spoof a suite name or skip an index.
+            "ROOTLESS_PHASE_PROGRESS state=PASS index=2 elapsed_s=3 "
+            "label=/private/secret\n"
+            "ROOTLESS_PHASE_PROGRESS state=PASS index=4 elapsed_s=3 "
+            "label=tests/runtime/native/source-contract-test.py\n")
+        result = {"stages": [], "benchmarks": {}}
+        stream = io.StringIO()
+        with mock.patch.object(
+                runner.subprocess, "Popen",
+                return_value=FakeStreamingProcess(transcript, returncode=1)), \
+                mock.patch.object(
+                    runner, "retain_direct_rootless_first_failure"), \
+                contextlib.redirect_stdout(stream):
+            self.assertNotEqual(runner.run_stage(
+                "Native and rootless contracts", ["unused"], result,
+                stream_rootless_progress=True), 0)
+        text = stream.getvalue()
+        self.assertIn("Start   1: rootless initialization", text)
+        self.assertIn(
+            "Test    2: tests/Makefile native and metadata ... Passed 4s",
+            text)
+        self.assertIn(
+            "Start   3: tests/runtime/native/source-contract-test.py",
+            text)
+        self.assertNotIn("/private/secret", text)
+        self.assertNotIn("Test    3:", text)
+        self.assertEqual(result["stages"][-1]["status"], "FAIL")
+
     def test_per_suite_rootless_timings_reject_spoofed_and_duplicate_records(self):
         valid = (
             "ROOTLESS_PHASE_TIMING index=0 elapsed_s=0 label=rootless initialization\n"

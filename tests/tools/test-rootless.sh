@@ -18,12 +18,23 @@ rootless_failure_reported=0
 rootless_timed_phase=$rootless_phase
 rootless_timing_names=()
 rootless_timing_seconds=()
+rootless_timing_index=0
+# Stream only these source-controlled labels. The reporter filters them before
+# displaying progress; completed times are not qualification evidence.
+printf 'ROOTLESS_PHASE_PROGRESS state=START index=%d elapsed_s=0 label=%s\n' \
+  "$rootless_timing_index" "$rootless_timed_phase"
 rootless_begin_phase() {
   local phase_boundary_seconds=$SECONDS
+  local phase_elapsed_seconds=$((phase_boundary_seconds - rootless_phase_started_seconds))
   rootless_timing_names+=("$rootless_timed_phase")
-  rootless_timing_seconds+=("$((phase_boundary_seconds - rootless_phase_started_seconds))")
+  rootless_timing_seconds+=("$phase_elapsed_seconds")
+  printf 'ROOTLESS_PHASE_PROGRESS state=PASS index=%d elapsed_s=%d label=%s\n' \
+    "$rootless_timing_index" "$phase_elapsed_seconds" "$rootless_timed_phase"
+  rootless_timing_index=$((rootless_timing_index + 1))
   rootless_timed_phase=$rootless_phase
   rootless_phase_started_seconds=$phase_boundary_seconds
+  printf 'ROOTLESS_PHASE_PROGRESS state=START index=%d elapsed_s=0 label=%s\n' \
+    "$rootless_timing_index" "$rootless_timed_phase"
 }
 
 rootless_private_diagnostic_path=
@@ -914,6 +925,10 @@ grep -Fq -- '--verify-series' tests/tools/device-roundtrip.c
 rootless_timing_finished_seconds=$SECONDS
 rootless_timing_names+=("$rootless_phase")
 rootless_timing_seconds+=("$((rootless_timing_finished_seconds - rootless_phase_started_seconds))")
+printf 'ROOTLESS_PHASE_PROGRESS state=PASS index=%d elapsed_s=%d label=%s\n' \
+  "$rootless_timing_index" \
+  "$((rootless_timing_finished_seconds - rootless_phase_started_seconds))" \
+  "$rootless_phase"
 for phase_index in "${!rootless_timing_names[@]}"; do
   printf 'ROOTLESS_PHASE_TIMING index=%d elapsed_s=%d label=%s\n' \
     "$phase_index" "${rootless_timing_seconds[phase_index]}" \

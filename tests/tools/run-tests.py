@@ -3559,19 +3559,49 @@ def parse_rootless_timing(output):
             "remaining_contracts_s": contracts_seconds}
 
 
+def rootless_phase_names():
+    """Names declared by the rootless harness, not from child test output."""
+    try:
+        source = (ROOT / "tests/tools/test-rootless.sh").read_text(
+            encoding="utf-8")
+    except (OSError, UnicodeError):
+        return frozenset()
+    return frozenset(re.findall(
+        r"(?m)^rootless_phase='([^'\r\n]{1,128})'$", source))
+
+
+def rootless_phase_name_allowed(name, allowed_names):
+    """Accept only source-controlled suite names and bounded syntax labels."""
+    return name in allowed_names or (
+        name.startswith("bash syntax ") and
+        re.fullmatch(
+            r"(?:[A-Za-z0-9_-]{1,64}\.sh|swapz-primary-boot-verify)",
+            name[12:]) is not None)
+
+
+ROOTLESS_PROGRESS_PATTERN = re.compile(
+    r"ROOTLESS_PHASE_PROGRESS state=(START|PASS) "
+    r"index=(0|[1-9][0-9]{0,2}) "
+    r"elapsed_s=(0|[1-9][0-9]{0,7}) "
+    r"label=([A-Za-z0-9_./ :+-]{1,128})")
+
+
+def rootless_phase_progress(line, allowed_names):
+    """Validate an observational start/completion event before displaying."""
+    match = ROOTLESS_PROGRESS_PATTERN.fullmatch(line.rstrip("\n"))
+    if match is None or not rootless_phase_name_allowed(
+            match.group(4), allowed_names):
+        return None
+    return match.group(1), int(match.group(2)), int(match.group(3)), match.group(4)
+
+
 def parse_rootless_phase_timings(output):
     """Return bounded, source-allowlisted suite times, never a PASS gate."""
     prefix = "ROOTLESS_PHASE_TIMING "
     records = [line for line in output.splitlines() if line.startswith(prefix)]
     if not records or len(records) > 128:
         return None
-    try:
-        source = (ROOT / "tests/tools/test-rootless.sh").read_text(
-            encoding="utf-8")
-    except (OSError, UnicodeError):
-        return None
-    allowed_names = set(re.findall(
-        r"(?m)^rootless_phase='([^'\r\n]{1,128})'$", source))
+    allowed_names = rootless_phase_names()
     pattern = re.compile(
         r"ROOTLESS_PHASE_TIMING index=(0|[1-9][0-9]{0,2}) "
         r"elapsed_s=(0|[1-9][0-9]{0,7}) "
@@ -3582,11 +3612,7 @@ def parse_rootless_phase_timings(output):
         if match is None or int(match.group(1)) != len(timings):
             return None
         label = match.group(3)
-        if label not in allowed_names and not (
-                label.startswith("bash syntax ") and
-                re.fullmatch(
-                    r"(?:[A-Za-z0-9_-]{1,64}\.sh|swapz-primary-boot-verify)",
-                    label[12:])):
+        if not rootless_phase_name_allowed(label, allowed_names):
             return None
         timings.append({"name": label, "elapsed_s": int(match.group(2))})
     return timings
@@ -3631,7 +3657,8 @@ def loaded_timing_phase(line):
     return None
 
 
-def run_stage(title, command, result, *, parse_bench=False):
+def run_stage(title, command, result, *, parse_bench=False,
+              stream_rootless_progress=False):
     start = time.monotonic()
     loaded_timing_phases = []
     loaded_current_phase = "preflight"
@@ -3644,8 +3671,16 @@ def run_stage(title, command, result, *, parse_bench=False):
             child_env["SWAPZ_TESTED_SOURCE_SHA"] = tested_source
         if title == "Build module and helpers":
             child_env["SWAPZ_SIGN_NONINTERACTIVE"] = "1"
-        if parse_bench:
-            print("       loaded qualification progress:")
+        if parse_bench or stream_rootless_progress:
+            if parse_bench:
+                print("       loaded qualification progress:", flush=True)
+            else:
+                print("       rootless suite progress:", flush=True)
+            rootless_allowed_names = (
+                rootless_phase_names() if stream_rootless_progress
+                else frozenset())
+            rootless_next_index = 0
+            rootless_active_phase = None
             proc = subprocess.Popen(
                 command, cwd=ROOT, text=True, encoding="utf-8",
                 errors="replace", stdout=subprocess.PIPE,
@@ -3656,34 +3691,64 @@ def run_stage(title, command, result, *, parse_bench=False):
             assert proc.stdout is not None
             for line in proc.stdout:
                 chunks.append(line)
-                next_phase = loaded_timing_phase(line)
-                if next_phase is not None and next_phase != loaded_current_phase:
-                    boundary = time.monotonic()
-                    loaded_timing_phases.append({
-                        "name": loaded_current_phase,
-                        "elapsed_s": round(
-                            boundary - loaded_current_phase_started, 3)})
-                    loaded_current_phase = next_phase
-                    loaded_current_phase_started = boundary
-                if line.startswith("START_LOADED_PRIMARY_NULLBLK_NEGATIVE="):
-                    match = PRIMARY_NEGATIVE_CASE_START.fullmatch(line.strip())
-                    negative_case = (match.group(1) if match and
-                                     match.group(1) in
-                                     PRIMARY_NEGATIVE_CASE_REFUSALS else None)
-                elif line.startswith(
-                        "PASS_LOADED_PRIMARY_NULLBLK_NEGATIVE_RECOVERY="):
-                    negative_case = None
-                progress = loaded_progress_line(
-                    line, negative_case=negative_case)
-                if progress is not None:
-                    sys.stdout.write("       " + progress + "\n")
-                    sys.stdout.flush()
+                if stream_rootless_progress:
+                    event = rootless_phase_progress(line, rootless_allowed_names)
+                    if event is not None:
+                        state, index, seconds, name = event
+                        if (state == "START" and seconds == 0 and
+                                index == rootless_next_index and
+                                rootless_active_phase is None):
+                            rootless_active_phase = name
+                            sys.stdout.write(
+                                f"       Start {index + 1:>3}: {name}\n")
+                            sys.stdout.flush()
+                        elif (state == "PASS" and
+                              index == rootless_next_index and
+                              name == rootless_active_phase):
+                            sys.stdout.write(
+                                f"       Test  {index + 1:>3}: {name} "
+                                f"... Passed {seconds}s\n")
+                            sys.stdout.flush()
+                            rootless_next_index += 1
+                            rootless_active_phase = None
+                if parse_bench:
+                    next_phase = loaded_timing_phase(line)
+                    if next_phase is not None and next_phase != loaded_current_phase:
+                        boundary = time.monotonic()
+                        duration = round(
+                            boundary - loaded_current_phase_started, 3)
+                        loaded_timing_phases.append({
+                            "name": loaded_current_phase,
+                            "elapsed_s": duration})
+                        sys.stdout.write(
+                            f"       Time {loaded_current_phase}: {duration:.3f}s\n")
+                        sys.stdout.flush()
+                        loaded_current_phase = next_phase
+                        loaded_current_phase_started = boundary
+                    if line.startswith("START_LOADED_PRIMARY_NULLBLK_NEGATIVE="):
+                        match = PRIMARY_NEGATIVE_CASE_START.fullmatch(line.strip())
+                        negative_case = (match.group(1) if match and
+                                         match.group(1) in
+                                         PRIMARY_NEGATIVE_CASE_REFUSALS else None)
+                    elif line.startswith(
+                            "PASS_LOADED_PRIMARY_NULLBLK_NEGATIVE_RECOVERY="):
+                        negative_case = None
+                    progress = loaded_progress_line(
+                        line, negative_case=negative_case)
+                    if progress is not None:
+                        sys.stdout.write("       " + progress + "\n")
+                        sys.stdout.flush()
             rc = proc.wait()
             proc.stdout.close()
-            loaded_timing_phases.append({
-                "name": loaded_current_phase,
-                "elapsed_s": round(
-                    time.monotonic() - loaded_current_phase_started, 3)})
+            if parse_bench:
+                duration = round(
+                    time.monotonic() - loaded_current_phase_started, 3)
+                loaded_timing_phases.append({
+                    "name": loaded_current_phase,
+                    "elapsed_s": duration})
+                sys.stdout.write(
+                    f"       Time {loaded_current_phase}: {duration:.3f}s\n")
+                sys.stdout.flush()
             output = "".join(chunks)
         else:
             proc = subprocess.run(
@@ -9794,7 +9859,9 @@ def main():
     ]
     exit_code = 0
     for i, (title, command) in enumerate(stages):
-        code = run_stage(title, command, result, parse_bench=(i == 4))
+        code = run_stage(
+            title, command, result, parse_bench=(i == 4),
+            stream_rootless_progress=(i == 1))
         if code:
             exit_code = code
             break
