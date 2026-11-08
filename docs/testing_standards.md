@@ -82,6 +82,9 @@ only the fixed, bounded, pinned, read-only noninteractive privileged fallback. I
 fail, the host identity remains UNAVAILABLE; no insecure file mode change,
 substituted machine ID, unbounded read or privileged checkout execution is
 authorized.
+The CI Make-policy guard must recognize exactly six public root goals,
+require explicit algorithm/full tier routing, and retain the restriction on
+directly invoking privileged provisioning from a root recipe.
 The hermetic incremental Make-interface fixture exercises `make test_full`,
 which preserves the original five-stage RAM build-order and exact-artifact
 PASS/refusal contract. It must not treat an algorithm-tier physical-INCOMPLETE

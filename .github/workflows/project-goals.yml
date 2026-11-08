@@ -84,7 +84,9 @@ jobs:
           set -Eeuo pipefail
           trap 'printf "SOURCE_CONTRACT_MISMATCH: check failed at line %s: %s\n" "$LINENO" "$BASH_COMMAND" >&2' ERR
           grep -Fxq '.DEFAULT_GOAL := all' Makefile
-          grep -Fxq '.PHONY: all install uninstall test fast_test' Makefile
+          grep -Fxq '.PHONY: all install uninstall test test_full fast_test' Makefile
+          grep -Fq -- '--tier algorithm' Makefile
+          grep -Fq -- '--tier full' Makefile
           grep -Fq '@+python3 -B tests/tools/run-tests.py --kdir' Makefile
           grep -Fq 'tests/tools/test-rootless.sh' tests/tools/run-tests.py
           grep -Fq 'python3 -B tests/runtime/native/source-contract-test.py -v' tests/tools/test-rootless.sh
