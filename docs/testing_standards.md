@@ -7056,10 +7056,14 @@ produce a PASS.
 After the five RAM stages pass, interactive `make test` may use the separate
 unprivileged `tests/tools/algorithm-physical.py` to identify one exact swap
 partition on a USB disk, including a swap partition that shares its parent
-with mounted root/boot siblings. Read-only discovery must select only the
-partition carrying the swap signature, not any sibling filesystem or the
-whole disk, and cross-check `[SWAP]` from lsblk against the exact live block
-device in `/proc/swaps`. Nonzero used KiB is recorded as an observation,
+with mounted root/boot siblings. The `lsblk --json` query must explicitly
+use `--tree` with its PATH identity column: without NAME or --tree,
+util-linux omits the `children[]` JSON hierarchy, silently hiding all USB
+partitions from the existing scanner. Rootless tests must validate the real
+subprocess argument vector, not only synthetic JSON with prefilled children.
+Read-only discovery must select only the partition carrying the swap
+signature, not any sibling filesystem or the whole disk, and cross-check
+`[SWAP]` from lsblk against the exact live block device in `/proc/swaps`. Nonzero used KiB is recorded as an observation,
 not construed as permission or as a permanent prohibition of Linux
 `swapoff`; migrating used pages requires privileged, bounded, revalidated
 admission and sufficient memory headroom. Duplicate or unverifiable active

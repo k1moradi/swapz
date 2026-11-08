@@ -107,6 +107,64 @@ class AlgorithmPhysicalTest(unittest.TestCase):
         self.assertTrue(candidates[0]["parent_has_other_partitions"])
         self.assertTrue(candidates[0]["lsblk_active_swap"])
 
+    def test_live_inventory_requests_lsblk_hierarchy_for_shared_root_swap(self):
+        # A flat lsblk JSON result omits children[] and hides /dev/sda4.
+        # Assert the actual command requests --tree, not just that synthetic
+        # hierarchy fixtures happen to contain the correct partition.
+        import json
+
+        swap_uuid = "00112233-4455-6677-8899-aabbccddeeff"
+        disk = {"path": "/dev/sda", "type": "disk", "tran": "usb",
+                "children": [
+                    {"path": "/dev/sda1", "type": "part", "fstype": "vfat",
+                     "mountpoints": ["/boot/efi"]},
+                    {"path": "/dev/sda2", "type": "part", "fstype": "ext4",
+                     "mountpoints": ["/boot"]},
+                    {"path": "/dev/sda3", "type": "part", "fstype": "f2fs",
+                     "mountpoints": ["/"]},
+                    {**self.device["children"][0],
+                     "path": "/dev/sda4", "partuuid": "7fb9401d-04",
+                     "mountpoints": ["[SWAP]"]}]}
+        commands = []
+
+        def run(command, **_kwargs):
+            commands.append(command)
+            if command == ["systemd-detect-virt", "--quiet"]:
+                return SimpleNamespace(returncode=1)
+            if command[0] == "lsblk":
+                self.assertEqual(command[:4], [
+                    "lsblk", "--json", "--tree", "--bytes"])
+                self.assertEqual(command[-1],
+                                 "PATH,TYPE,FSTYPE,UUID,PARTUUID,SIZE,TRAN,MOUNTPOINTS")
+                return SimpleNamespace(returncode=0,
+                                       stdout=json.dumps({"blockdevices": [disk]}))
+            self.fail("unexpected subprocess invocation")
+
+        def resolve(path):
+            if str(path) == "/dev/disk/by-uuid/" + swap_uuid:
+                return "/dev/sda4"
+            return str(path)
+
+        with mock.patch.object(subject.os, "geteuid", return_value=1000), \
+             mock.patch.object(subject.platform, "machine",
+                               return_value="x86_64"), \
+             mock.patch.object(subject.subprocess, "run", side_effect=run), \
+             mock.patch.object(subject.Path, "exists", return_value=False), \
+             mock.patch.object(subject.Path, "read_text", return_value=(
+                 "Filename Type Size Used Priority\n"
+                 "/dev/sda4 partition 16777212 0 -1\n")), \
+             mock.patch.object(subject.os, "stat", return_value=SimpleNamespace(
+                 st_mode=stat.S_IFBLK, st_rdev=42)), \
+             mock.patch.object(subject.Path, "is_symlink", return_value=True), \
+             mock.patch.object(subject.os.path, "realpath", side_effect=resolve):
+            selected = subject._require_read_only_preflight()
+
+        self.assertEqual(len(commands), 2)
+        self.assertEqual(selected["path"], "/dev/sda4")
+        self.assertEqual(selected["partuuid"], "7fb9401d-04")
+        self.assertTrue(selected["parent_has_other_partitions"])
+        self.assertEqual(selected["active_swap"]["used_kib"], 0)
+
     def test_active_swap_usage_is_observed_not_treated_as_swapoff_proof(self):
         candidate = {"path": "/dev/sda4", "lsblk_active_swap": True}
         rows = [

@@ -146,8 +146,11 @@ def _require_read_only_preflight() -> dict:
     if not swap_lines or swap_lines[0].split() != [
             "Filename", "Type", "Size", "Used", "Priority"]:
         raise ValueError("swap inventory header is malformed")
+    # JSON children[] is absent unless NAME is selected or --tree is used.
+    # PATH is the identity-bearing column here; preserve it and request the
+    # hierarchy explicitly so USB partition children cannot disappear.
     block_info = subprocess.run([
-        "lsblk", "--json", "--bytes", "--output",
+        "lsblk", "--json", "--tree", "--bytes", "--output",
         "PATH,TYPE,FSTYPE,UUID,PARTUUID,SIZE,TRAN,MOUNTPOINTS"],
         capture_output=True, text=True, check=False, timeout=15)
     if block_info.returncode != 0 or len(block_info.stdout) > 1024 * 1024:
