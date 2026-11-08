@@ -2500,6 +2500,13 @@ def failure_context(output, *, loaded=True, default_phase=None,
                 phase = "owned RAM primary lifecycle " + match.group(1)
             elif line.startswith("START_LOADED_PRIMARY_NULLBLK_LIFECYCLE"):
                 phase = "owned RAM primary lifecycle rehearsal"
+            elif line.startswith("START_LOADED_PRIMARY_NULLBLK_NEGATIVE="):
+                negative_match = PRIMARY_NEGATIVE_CASE_START.fullmatch(line)
+                phase = (
+                    "owned RAM primary lifecycle negative " +
+                    negative_match.group(1)
+                    if negative_match is not None else
+                    "owned RAM primary lifecycle negative case")
             elif (match := re.fullmatch(
                     r"START_LOADED_PRIMARY_NULLBLK_INTERRUPTION=([a-z0-9-]+)"
                     r"(?:\s+.*)?", line)):
@@ -2562,7 +2569,18 @@ def failure_context(output, *, loaded=True, default_phase=None,
         # never copy paths, IDs or arbitrary child output. The prepare helper
         # validates and re-emits its phase record, but intentionally keeps the
         # coordinator wrapper private, so the report must not depend on it.
+        negative_case = None
         for line in diagnostic_lines:
+            if line.startswith("START_LOADED_PRIMARY_NULLBLK_NEGATIVE="):
+                negative_match = PRIMARY_NEGATIVE_CASE_START.fullmatch(line)
+                negative_case = (
+                    negative_match.group(1)
+                    if negative_match is not None else None)
+                continue
+            if line.startswith(
+                    "PASS_LOADED_PRIMARY_NULLBLK_NEGATIVE_RECOVERY="):
+                negative_case = None
+                continue
             # Never trust host paths or task identities from a child marker.
             mount_match = re.fullmatch(
                 r"SWAPZ_PRIMARY_MOUNT_INVENTORY_FAILURE "
@@ -2621,6 +2639,8 @@ def failure_context(output, *, loaded=True, default_phase=None,
                 r"([A-Za-z0-9 .()_-]{1,96})",
                 line.strip())
             if match:
+                if expected_primary_negative_refusal(line, negative_case):
+                    continue
                 primary_lifecycle_command_failure = match.groups()
 
     unittest_failure = None

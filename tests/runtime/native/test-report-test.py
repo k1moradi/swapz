@@ -5171,6 +5171,31 @@ class ReportContract(unittest.TestCase):
         finally:
             runner.subprocess.Popen = original_popen
 
+    def test_primary_negative_refusal_does_not_mask_later_case_failure(self):
+        run_id = "a" * 32
+        log = (
+            "START_LOADED_PRIMARY_NULLBLK_INTERRUPTION=recover-restored "
+            f"run_id:{run_id}\n"
+            "PASS_LOADED_PRIMARY_NULLBLK_INTERRUPTION_RECOVERY=cases:18\n"
+            "START_LOADED_PRIMARY_NULLBLK_NEGATIVE="
+            f"swapoff-ebusy-noeffect run_id:{run_id}\n"
+            "BLOCKED: primary-swap stop failed: Device or resource busy\n"
+            "START_LOADED_PRIMARY_NULLBLK_NEGATIVE="
+            f"stale-run-id run_id:{run_id}\n"
+            "BLOCKED: primary-swap recovery failed: Operation not permitted\n"
+            "FAIL_PRIMARY_NULLBLK_LIFECYCLE: stale-run-id "
+            "expected=canonical-refusal-lines:2 observed_lines=3\n"
+        )
+
+        phase, reason = runner.failure_context(log)
+        self.assertEqual(
+            phase,
+            "owned RAM primary lifecycle negative stale-run-id")
+        self.assertEqual(
+            reason,
+            "FAIL_PRIMARY_NULLBLK_LIFECYCLE: stale-run-id "
+            "expected=canonical-refusal-lines:2 observed_lines=3")
+
     def test_owner_artifact_digests_required(self):
         hashes = {"status": "AVAILABLE", "formatter_sha256": "a" * 64,
                   "module_sha256": "b" * 64, "oracle_sha256": "c" * 64}

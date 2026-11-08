@@ -3334,6 +3334,10 @@ reclassified merely because the negative-refusal matrix itself authenticated.
 The human qualification summary
 must also display the verified process-death recovery count and negative-case
 count so reviewers do not need to infer lifecycle coverage from raw log text.
+Failure attribution must be scoped to the current negative-case start marker;
+an earlier authenticated refusal must not replace a later lifecycle failure's
+phase or diagnostic. The report regression must cover consecutive negative
+cases with different expected operations.
 
 Benchmark telemetry and storage-envelope parsers must safely handle directional workloads where specific operation latencies are omitted (for example, read p99 latency during write-only saturation or delta64 rescue sweeps), converting missing numeric fields safely without type errors.
 
