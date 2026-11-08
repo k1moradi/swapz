@@ -513,11 +513,6 @@ def cleanup(root_path: str, owner_uid: int, root_mode: int,
                     state.retained_identity += 1
                     state.phase = "root-inventory"
                     continue  # Unproved or foreign data must survive.
-                if session_class == "deploy" and not deploy_retention_expired(candidate_stat):
-                    state.retained += 1
-                    state.retained_recent += 1
-                    state.phase = "root-inventory"
-                    continue
                 candidate = os.open(name, os.O_DIRECTORY | OPEN_FLAGS, dir_fd=root)
                 try:
                     opened = os.fstat(candidate)
@@ -525,6 +520,15 @@ def cleanup(root_path: str, owner_uid: int, root_mode: int,
                             "session directory changed", "substitution")
                     require(mount_id(candidate) == expected_mount,
                             "session is a separate mount", "mount-identity")
+                    # Even a recent deployment must first prove that its pinned
+                    # directory is the same object and mount observed under the
+                    # validated temporary root. Age only suppresses deeper
+                    # provenance inspection and deletion.
+                    if session_class == "deploy" and not deploy_retention_expired(opened):
+                        state.retained += 1
+                        state.retained_recent += 1
+                        state.phase = "root-inventory"
+                        continue
                     state.phase = "session-provenance"
                     if not inspected_session_complete(
                             candidate, owner_uid, expected_mount, session_class):

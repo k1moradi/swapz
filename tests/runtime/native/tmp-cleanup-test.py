@@ -136,6 +136,22 @@ class OwnedTemporaryCleanupTests(unittest.TestCase):
         self.assertIn("removed:1", expired.stdout)
         self.assertFalse(deployed.exists())
 
+    def test_recent_deployment_validates_mount_before_age_retention(self):
+        deployed = self.deployment_session("Zabc1234")
+        real_mount_id = cleanup_module.mount_id
+
+        def pretend_separate_mount(descriptor):
+            if os.fstat(descriptor).st_ino == deployed.stat().st_ino:
+                return "999999999"
+            return real_mount_id(descriptor)
+
+        with mock.patch.object(cleanup_module, "mount_id",
+                               side_effect=pretend_separate_mount):
+            with self.assertRaisesRegex(cleanup_module.CleanupBlocked,
+                                        "session is a separate mount"):
+                cleanup_module.cleanup(str(self.root), self.owner_uid, 0o700)
+        self.assertTrue(deployed.exists())
+
     def test_old_deployment_requires_private_proof_and_clean_teardown(self):
         failed = self.deployment_session("Abcd1234", passed=False)
         incomplete = self.deployment_session("Bcde1234", complete=False)
@@ -179,15 +195,19 @@ class OwnedTemporaryCleanupTests(unittest.TestCase):
         self.assertTrue(foreign.exists())
         self.assertTrue(mismatched.exists())
 
-    def test_deployment_producer_commits_completion_after_joined_log(self):
+    def test_deployment_producer_commits_completion_after_full_publication(self):
         producer = (ROOT / "tests/tools/deploy-nullblk.sh").read_text()
         owner = producer.index('> "$SESSION/.swapz-deploy-owner"')
         joined_log = producer.index('wait "$SESSION_TEE_PID"')
-        final_evidence = producer.index("EVIDENCE=%s/session.log")
+        retained_success = producer.index(
+            '"$SESSION_BOOT_ID" "$terminal_success" "$SESSION" >> "$SESSION/session.log"')
+        published_success = producer.index(
+            '"$SESSION_BOOT_ID" "$terminal_success" "$SESSION" >&"$SESSION_OUTPUT_FD"')
         completed = producer.index('> "$SESSION/.swapz-deploy-complete"')
         self.assertLess(owner, joined_log)
-        self.assertLess(joined_log, final_evidence)
-        self.assertLess(final_evidence, completed)
+        self.assertLess(joined_log, retained_success)
+        self.assertLess(retained_success, published_success)
+        self.assertLess(published_success, completed)
 
     def test_only_completed_owned_sessions_are_removed_and_foreign_survives(self):
         foreign = self.root / "some-other-application-database"

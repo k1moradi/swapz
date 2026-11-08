@@ -328,17 +328,24 @@ class KernelDebugQualificationTests(unittest.TestCase):
 
         reader = shell_function("swapz_read_session_boot_id")
         cleanup = shell_function("cleanup")
-        session_marker = "printf 'BOOT_ID=%s\\n%s\\nEVIDENCE=%s/session.log\\n'"
-        execution_marker = (
-            "printf 'BOOT_ID=%s\\n%s\\n' "
-            '"$SESSION_BOOT_ID" "$terminal_success" >&"$SESSION_OUTPUT_FD"')
-        self.assertEqual(cleanup.count(session_marker), 1)
-        self.assertEqual(cleanup.count(execution_marker), 1)
+        retained_success = (
+            '"$SESSION_BOOT_ID" "$terminal_success" "$SESSION" '
+            '>> "$SESSION/session.log"')
+        published_success = (
+            '"$SESSION_BOOT_ID" "$terminal_success" "$SESSION" '
+            '>&"$SESSION_OUTPUT_FD"')
+        completion_marker = '> "$SESSION/.swapz-deploy-complete"'
+        self.assertEqual(cleanup.count(retained_success), 1)
+        self.assertEqual(cleanup.count(published_success), 1)
+        self.assertEqual(cleanup.count(completion_marker), 1)
         self.assertLess(cleanup.index('if (( QUARANTINE )); then'),
                         cleanup.index('BOOT_ID_PRODUCER_PHASE="publication_capture"'))
         self.assertLess(cleanup.index('wait "$SESSION_TEE_PID"'),
-                        cleanup.index(session_marker))
-        self.assertLess(cleanup.index(session_marker), cleanup.index(execution_marker))
+                        cleanup.index(retained_success))
+        self.assertLess(cleanup.index(retained_success),
+                        cleanup.index(published_success))
+        self.assertLess(cleanup.index(published_success),
+                        cleanup.index(completion_marker))
         self.assertEqual(source.count("SESSION_TEE_PID=$!"), 1)
         identity_path = "/proc/sys/kernel/random/boot_id"
         self.assertEqual(cleanup.count(identity_path), 1)

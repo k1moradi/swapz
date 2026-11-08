@@ -5441,10 +5441,14 @@ open descriptor. The existing `make test` loaded-preflight and ID36 admission
 invocations automatically sweep both classes, without any additional public
 command. Deployment sessions (`swapz-deploy.*`) additionally require one
 hour since their most recent directory metadata change, including publication
-of the completion marker; the age check repeats immediately before unlink.
-A new deployment records the root-owned, private owner PID and exact source
-SHA before executing; it writes the matching completion marker only after
-safe teardown and successful session-log fanout drain. The private log must
+of the completion marker; the pinned directory identity and mount must be
+validated before this age-based retention short-circuit, and the age check
+repeats immediately before unlink. A new deployment records the root-owned,
+private owner PID and exact source SHA before executing; it writes the matching
+completion marker only after safe teardown, successful session-log fanout
+drain, retained terminal evidence publication and successful caller-facing
+terminal PASS/EVIDENCE publication. A failed caller publication must leave no
+completion marker. The private log must
 contain the exact source SHA and one of the three accepted clean-teardown
 terminal PASS records directly followed by its pinned session-specific
 `EVIDENCE` locator. Legacy deployment logs without explicit matching
@@ -5556,9 +5560,9 @@ disposition and read-only safe next action, without echoing paths or PID
 inventories. The first
 operation error takes precedence over secondary descriptor-close failure.
 Successful output is a single bounded aggregate of completed removals,
-unproved retained candidates, identity-rejected candidates, active-use retained
-candidates, and logical bytes unlinked by fully removed sessions, never per-entry
-success chatter. Logical
+unproved retained candidates, identity-rejected candidates, active-use and
+recent-age retained candidates, and logical bytes unlinked by fully removed
+sessions, never per-entry success chatter. Logical
 file bytes are not a claim of immediate physical or tmpfs RAM release: sparse
 files and still-open descriptors can make actual reclamation differ. A failed
 or partial session never contributes to successful reclaimed-byte totals. The existing

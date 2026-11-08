@@ -286,22 +286,22 @@ cleanup() {
 		rc=1
 		printf '%s\n' "BLOCKED_KERNEL_DEBUG_PRODUCER phase=evidence_flush expected=$expected_boot_marker observed=retention_flush_failed evidence_retained=unknown" >&"$SESSION_OUTPUT_FD"
 	elif (( rc == 0 )); then
-		# Commit the terminal pair to retained evidence before exposing it to the
-		# caller. If retention fails, publish no execution BOOT_ID or PASS claim.
+		# First commit the terminal success and session-specific evidence locator
+		# to the retained log, then publish the same complete success record to the
+		# caller. Only after both writes succeed may the completion marker grant
+		# future cleanup authority. A failed publication therefore remains
+		# unverified and is retained.
 		if ! printf 'BOOT_ID=%s\n%s\nEVIDENCE=%s/session.log\n' \
                 "$SESSION_BOOT_ID" "$terminal_success" "$SESSION" >> "$SESSION/session.log"; then
 			rc=1
 			printf '%s\n' "BLOCKED_KERNEL_DEBUG_PRODUCER phase=evidence_commit expected=$expected_boot_marker observed=retention_write_failed evidence_retained=partial" >&"$SESSION_OUTPUT_FD"
+		elif ! printf 'BOOT_ID=%s\n%s\nEVIDENCE=%s/session.log\n' \
+                "$SESSION_BOOT_ID" "$terminal_success" "$SESSION" >&"$SESSION_OUTPUT_FD"; then
+			rc=1
 		elif ! printf 'pid=%s\nsource_sha=%s\n' "$$" "$SOURCE_HEAD" \
                 > "$SESSION/.swapz-deploy-complete"; then
-            rc=1
-            printf '%s\n' "BLOCKED_KERNEL_DEBUG_PRODUCER phase=completion_commit expected=$expected_boot_marker observed=retention_write_failed evidence_retained=partial" >&"$SESSION_OUTPUT_FD"
-        elif ! printf 'BOOT_ID=%s\n%s\n' "$SESSION_BOOT_ID" "$terminal_success" >&"$SESSION_OUTPUT_FD"; then
 			rc=1
-		else
-			# Preserve the existing success-only evidence locator without
-			# disclosing a private session path on failed publication.
-			printf 'EVIDENCE=%s/session.log\n' "$SESSION" >&"$SESSION_OUTPUT_FD"
+			printf '%s\n' "BLOCKED_KERNEL_DEBUG_PRODUCER phase=completion_commit expected=$expected_boot_marker observed=retention_write_failed evidence_retained=partial" >&"$SESSION_OUTPUT_FD"
 		fi
 	fi
 	exec {SESSION_OUTPUT_FD}>&-
