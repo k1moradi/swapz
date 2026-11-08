@@ -6226,23 +6226,23 @@ class ReportContract(unittest.TestCase):
                     f"{remote_head}^", cwd=sandbox).stdout.strip()
                 archived_report = json.loads(git(
                     "--git-dir", str(origin), "show",
-                    f"{archived_sha.decode()}:{runner.GIT_RESULT}",
+                    f"{archived_sha}:{runner.GIT_RESULT}",
                     cwd=sandbox).stdout)
                 self.assertEqual(archived_report, delayed)
                 self.assertEqual(git(
                     "--git-dir", str(origin), "rev-parse",
-                    f"{archived_sha.decode()}^", cwd=sandbox
+                    f"{archived_sha}^", cwd=sandbox
                 ).stdout.strip(), peer_report_sha)
                 self.assertEqual(
                     git("--git-dir", str(origin), "show", "-s",
-                        "--format=%s", remote_head.decode(),
+                        "--format=%s", remote_head,
                         cwd=sandbox).stdout.strip(),
                     f"test: latest run for {source_sha[:12]} "
-                    "[skip ci]".encode())
+                    "[skip ci]")
                 self.assertIn(
-                    b"swapz-canonical-restore: true",
+                    "swapz-canonical-restore: true",
                     git("--git-dir", str(origin), "show", "-s",
-                        "--format=%b", remote_head.decode(),
+                        "--format=%b", remote_head,
                         cwd=sandbox).stdout)
                 self.assertEqual(
                     git("rev-parse", "HEAD", cwd=checkout).stdout.strip(),

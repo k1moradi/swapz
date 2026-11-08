@@ -3813,6 +3813,9 @@ checkout. Restoration commits use the normal report-only subject for exact
 source identity, with a `swapz-canonical-restore: true` trailer that the
 history plotter ignores to prevent duplicate history points. Report comparison,
 restore-tree, and ancestor errors fail closed with `GIT_SYNC_FAILED`.
+The local-bare-Git concurrency regression uses text-mode Git subprocess
+output, and verifies the archived revision, restored public tree, unaltered
+local checkout, and restoration trailer without coercing SHA strings to bytes.
 
 Every console table printed by the official `make test` reporter must have a
 clear, self-contained Markdown title immediately before an unindented
