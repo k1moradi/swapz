@@ -100,8 +100,10 @@ Its mocked loaded phase must initialize the ordinary optional
 admission gate; absence of unrelated fixture fields is not physical evidence.
 Rootless failure-attribution unit fixtures must extract only the wrapped
 package/systemd child recipes, excluding their surrounding tier-selection
-control-flow delimiters. This preserves the private first-error assertions
-without executing unrelated packages in the synthetic test.
+control-flow delimiters. Preserve the final newline of every extracted child
+recipe, so the following fixture command cannot concatenate with the retained
+failure's source-line argument. This keeps first-error attribution independent
+of tier guard syntax without executing unrelated packages in synthetic tests.
 On the single canonical `test_results.json` publication path, a same-source
 algorithm-tier INCOMPLETE report must never replace full-suite evidence,
 including a recorded full-suite failure. Earlier five-stage reports without

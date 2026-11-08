@@ -436,7 +436,9 @@ class RootlessAttribution(unittest.TestCase):
         generator_end = source.index(
             "\nfi\nrootless_phase='tests/runtime/native/physical-swap-probe-test.py'",
             generator_begin)
-        cls.generator_stage = source[generator_begin:generator_end]
+        # Keep the extracted child recipe newline: the next synthetic
+        # fixture command must not be appended to the command-line marker.
+        cls.generator_stage = source[generator_begin:generator_end] + "\n"
         assert not cls.generator_stage.rstrip().endswith("\nfi")
         assert source.count(f"python3 -B {OWNERSHIP_PHASE} -v") == 1
         assert cls.ownership_stage.count(
