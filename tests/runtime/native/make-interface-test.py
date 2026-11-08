@@ -496,8 +496,6 @@ class PublicMakeContract(unittest.TestCase):
 
     def test_native_suite_rebuilds_after_build_rule_change(self):
         """A rule-only Makefile change must invalidate existing native output."""
-        import time
-
         build_tests = ROOT / "build/tests"
         build_tests.mkdir(parents=True, exist_ok=True)
         with tempfile.TemporaryDirectory(prefix="native-rule-identity-",
@@ -547,13 +545,33 @@ class PublicMakeContract(unittest.TestCase):
             self.assertTrue(compiler_log.read_text(encoding="utf-8").strip())
 
             compiler_log.write_text("", encoding="utf-8")
-            # Ensure the copied build recipe is observably newer than every
-            # artifact produced by the first invocation.
-            time.sleep(0.02)
+            unchanged = subprocess.run(
+                command, cwd=ROOT / "tests/suites", env=environment,
+                capture_output=True, text=True, check=False, timeout=10)
+            self.assertEqual(unchanged.returncode, 0, unchanged.stderr)
+            self.assertEqual(
+                compiler_log.read_text(encoding="utf-8"), "",
+                "unchanged native build unexpectedly invoked the compiler")
+
             native_makefile.write_text(
                 native_makefile.read_text(encoding="utf-8") +
                 "\n# fixture: source-controlled build rule changed\n",
                 encoding="utf-8")
+            # Force a strict order even on coarse-resolution filesystems,
+            # without sleeping or depending on the host wall clock.
+            newest_artifact_mtime_ns = max(
+                artifact.stat().st_mtime_ns
+                for artifact in output.iterdir() if artifact.is_file())
+            newer_makefile_mtime_ns = max(
+                native_makefile.stat().st_mtime_ns,
+                newest_artifact_mtime_ns) + 2_000_000_000
+            os.utime(
+                native_makefile,
+                ns=(newer_makefile_mtime_ns, newer_makefile_mtime_ns))
+            self.assertGreater(
+                native_makefile.stat().st_mtime_ns,
+                newest_artifact_mtime_ns,
+                "fixture filesystem cannot establish a newer build rule")
 
             rebuilt = subprocess.run(
                 command, cwd=ROOT / "tests/suites", env=environment,

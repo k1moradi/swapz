@@ -36,8 +36,12 @@ independent test executables. Shared object reuse must track included headers,
 compiler/preprocessor flags, sanitizer configuration and the source-controlled
 native build rules; changing any of those inputs invalidates the objects and
 dependent executables. A rule-only main update must never reuse an artifact
-whose compile/link dependency graph came from the prior Makefile. Never merge independent
-assertion/failure boundaries or omit ASan/UBSan/TSan qualification for speed.
+whose compile/link dependency graph came from the prior Makefile. The
+hermetic build-rule regression must verify both a no-op incremental invocation
+and a rebuild after setting the copied Makefile's timestamp strictly newer
+than all native artifacts, without sleeps or wall-clock assumptions. Never
+merge independent assertion/failure boundaries or omit ASan/UBSan/TSan
+qualification for speed.
 The native/rootless stage records separate native Make and remaining-contract
 wall times as optional observational evidence, not qualification PASS gates.
 Hermetic shell-recipe regressions using a substituted native output directory
