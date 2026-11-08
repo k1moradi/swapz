@@ -1089,8 +1089,28 @@ verify_expected_primary_refusal() {
 	[[ -z "$expected_marker" ]] || expected_lines=3
 	[[ "$child_exit" -eq 2 ]] ||
 		fail "$case_name expected=controlled-refusal-exit-2 observed_exit=$child_exit"
-	[[ "${#lines[@]}" -eq "$expected_lines" ]] ||
-		fail "$case_name expected=canonical-refusal-lines:$expected_lines observed_lines=${#lines[@]}"
+	if [[ "${#lines[@]}" -ne "$expected_lines" ]]; then
+		local marker_lines=0 failure_lines=0 detail_lines=0
+		local recovery_failure_lines=0 wrapper_lines=0 blank_lines=0 other_lines=0
+		for line in "${lines[@]}"; do
+			if [[ -n "$expected_marker" && "$line" == "$expected_marker" ]]; then
+				marker_lines=$((marker_lines + 1))
+			elif [[ "$line" == "$prefix"* ]]; then
+				failure_lines=$((failure_lines + 1))
+			elif [[ "$line" == "PRIMARY_${action_upper}=ADMISSION_DETAIL "* ]]; then
+				detail_lines=$((detail_lines + 1))
+			elif [[ "$line" == "PRIMARY_${action_upper}=RECOVERY_STATE_FAILED "* ]]; then
+				recovery_failure_lines=$((recovery_failure_lines + 1))
+			elif [[ "$line" == "$expected_wrapper" ]]; then
+				wrapper_lines=$((wrapper_lines + 1))
+			elif [[ -z "$line" ]]; then
+				blank_lines=$((blank_lines + 1))
+			else
+				other_lines=$((other_lines + 1))
+			fi
+		done
+		fail "$case_name expected=canonical-refusal-lines:$expected_lines observed_lines=${#lines[@]} marker=$marker_lines failure=$failure_lines detail=$detail_lines recovery_failure=$recovery_failure_lines wrapper=$wrapper_lines blank=$blank_lines other=$other_lines"
+	fi
 	if [[ -n "$expected_marker" ]]; then
 		[[ "${lines[0]}" == "$expected_marker" ]] ||
 			fail "$case_name expected=selected-fault-marker observed=missing-or-mismatched"

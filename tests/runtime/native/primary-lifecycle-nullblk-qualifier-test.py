@@ -259,6 +259,8 @@ fail() { printf 'FAIL: %s\n' "$*" >&2; exit 1; }
                 self.assertIn(diagnostic, refused.stderr)
                 self.assertNotIn("/private/SECRET", refused.stderr)
                 self.assertNotIn("PRIMARY_START=FAILED", refused.stderr)
+                if title == "extra private sideband":
+                    self.assertIn("other=1", refused.stderr)
     def test_wrong_mapper_case_never_forces_removal(self):
         self.assertNotRegex(self.script, r"dmsetup\s+remove\s+--force")
         self.assertNotRegex(self.script, r"\brmmod\b")
