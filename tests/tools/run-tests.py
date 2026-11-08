@@ -2902,6 +2902,91 @@ def failure_context(output, *, loaded=True, default_phase=None,
         reason += "; " + rootless_attribution
     return phase, reason
 
+# A fault-injection refusal is not an overall qualification refusal.
+# Each of these source-controlled cases has an independently validated
+# negative/recovery oracle. Never suppress an unrelated or malformed BLOCKED,
+# any FAIL, a missing case, a nonzero child exit or an incomplete loaded gate.
+PRIMARY_NEGATIVE_CASE_OPERATIONS = {
+    "swapon-eintr-applied": None,
+    "swapon-eintr-noeffect": "start",
+    "swapon-eio-noeffect": "start",
+    "post-swapon-inventory-eio": "start",
+    "swapoff-eintr-applied": None,
+    "swapoff-eintr-noeffect": "stop",
+    "swapoff-eio-noeffect": "stop",
+    "swapoff-ebusy-noeffect": "stop",
+    "post-swapoff-inventory-eio": "stop",
+    "state-dir-fsync": "start",
+    "stale-run-id": "recovery",
+    "lost-state-provenance": "recovery",
+    "wrong-mapper-identity": "recovery",
+}
+
+PRIMARY_NEGATIVE_CASE_START = re.compile(
+    r"START_LOADED_PRIMARY_NULLBLK_NEGATIVE=([a-z0-9-]+) "
+    r"run_id:[0-9a-f]{32}")
+
+
+def expected_primary_negative_refusal(line, case):
+    """Match one bounded, operation-correct refusal; never return child text."""
+    expected_operation = PRIMARY_NEGATIVE_CASE_OPERATIONS.get(case)
+    if expected_operation is None:
+        return False
+    observed = re.fullmatch(
+        r"BLOCKED: primary-swap (start|stop|recovery) failed: "
+        r"[A-Za-z0-9 .()_-]{1,96}", line.strip())
+    return observed is not None and observed.group(1) == expected_operation
+
+
+def authenticated_primary_negative_refusal_indices(
+        lines, loaded_correctness, observed_exit_code):
+    """Exclude only authenticated expected refusals from the global BLOCKED gate.
+
+    All thirteen named cases, their completion marker, a loaded terminal marker
+    and integer-zero child exit are required. Any other BLOCKED remains fatal.
+    """
+    if (observed_exit_code != 0 or
+            not isinstance(loaded_correctness, dict) or
+            loaded_correctness.get("overall") != "PASS"):
+        return frozenset()
+    ordered_cases = tuple(PRIMARY_NEGATIVE_CASE_OPERATIONS)
+    observed_cases = []
+    permitted = set()
+    current_case = None
+    current_case_refusal_seen = False
+    recovery_complete = False
+    loaded_complete = False
+
+    for line_number, line in enumerate(lines):
+        if line.startswith("START_LOADED_PRIMARY_NULLBLK_NEGATIVE="):
+            match = PRIMARY_NEGATIVE_CASE_START.fullmatch(line)
+            if (match is None or recovery_complete or
+                    len(observed_cases) >= len(ordered_cases) or
+                    match.group(1) != ordered_cases[len(observed_cases)]):
+                return frozenset()
+            current_case = match.group(1)
+            observed_cases.append(current_case)
+            current_case_refusal_seen = False
+        elif line.startswith("PASS_LOADED_PRIMARY_NULLBLK_NEGATIVE_RECOVERY="):
+            if (recovery_complete or tuple(observed_cases) != ordered_cases):
+                return frozenset()
+            recovery_complete = True
+            current_case = None
+        elif line.startswith("PASS_LOADED_TEST_EXECUTION:"):
+            if not recovery_complete or loaded_complete:
+                return frozenset()
+            loaded_complete = True
+        elif line.startswith("BLOCKED:") and current_case is not None:
+            if (not current_case_refusal_seen and
+                    expected_primary_negative_refusal(line, current_case)):
+                permitted.add(line_number)
+                current_case_refusal_seen = True
+
+    if not (recovery_complete and loaded_complete):
+        return frozenset()
+    return frozenset(permitted)
+
+
 LOADED_PROGRESS_PREFIXES = (
     "START_LOADED_", "PASS_LOADED_", "PASS_RETAINED_SYNTHETIC_",
     "START_OWNED_RAM_REGIME=", "PASS_OWNED_RAM_REGIME=",
@@ -2915,9 +3000,11 @@ LOADED_PROGRESS_PREFIXES = (
 )
 
 
-def loaded_progress_line(line):
+def loaded_progress_line(line, *, negative_case=None):
     """Return concise live stage-5 progress while retaining full captured output."""
     stripped = line.strip()
+    if expected_primary_negative_refusal(stripped, negative_case):
+        return "OBSERVED_PRIMARY_NEGATIVE_REFUSAL"
     if stripped.startswith(("BLOCKED:", "BLOCKED_LOADED_QUALIFICATION:", "FAIL:")):
         # Live child output may contain private paths; stage diagnostics follow.
         return stripped.split(":", 1)[0] + ": diagnostic retained for stage summary"
@@ -3455,10 +3542,20 @@ def run_stage(title, command, result, *, parse_bench=False):
                 stderr=subprocess.STDOUT, pass_fds=jobserver_fds(),
                 env=child_env, bufsize=1)
             chunks = []
+            negative_case = None
             assert proc.stdout is not None
             for line in proc.stdout:
                 chunks.append(line)
-                progress = loaded_progress_line(line)
+                if line.startswith("START_LOADED_PRIMARY_NULLBLK_NEGATIVE="):
+                    match = PRIMARY_NEGATIVE_CASE_START.fullmatch(line.strip())
+                    negative_case = (match.group(1) if match and
+                                     match.group(1) in
+                                     PRIMARY_NEGATIVE_CASE_OPERATIONS else None)
+                elif line.startswith(
+                        "PASS_LOADED_PRIMARY_NULLBLK_NEGATIVE_RECOVERY="):
+                    negative_case = None
+                progress = loaded_progress_line(
+                    line, negative_case=negative_case)
                 if progress is not None:
                     sys.stdout.write("       " + progress + "\n")
                     sys.stdout.flush()
@@ -3569,11 +3666,17 @@ def run_stage(title, command, result, *, parse_bench=False):
         title == "Build module and helpers" and any(
             line.startswith("BLOCKED: Secure Boot module signing:")
             for line in output.splitlines()))
+    loaded_lines = output.splitlines() if parse_bench else ()
+    expected_negative_refusals = (
+        authenticated_primary_negative_refusal_indices(
+            loaded_lines, loaded_correctness, observed_exit_code)
+        if parse_bench else frozenset())
     blocked_marker = secure_boot_signing_blocked or (parse_bench and any(
         line.startswith((
             "BLOCKED:", "BLOCKED_LOADED_QUALIFICATION",
-            "BLOCKED_PRIMARY_NULLBLK_LIFECYCLE:"))
-        for line in output.splitlines()))
+            "BLOCKED_PRIMARY_NULLBLK_LIFECYCLE:")) and
+        line_index not in expected_negative_refusals
+        for line_index, line in enumerate(loaded_lines)))
     # A coordinator BLOCKED diagnostic may precede a genuine lifecycle FAIL.
     # An explicit qualifier FAIL wins even if its process exit is wrong.
     explicit_primary_failure = parse_bench and any(

@@ -4701,6 +4701,106 @@ class ReportContract(unittest.TestCase):
                          "adjacent READ coalescing A/B evidence")
         self.assertIn("confirmation", stage["diagnostic"])
 
+    def test_expected_negative_recovery_refusals_do_not_mask_real_blocks(self):
+        from unittest import mock
+
+        # The live negative-recovery oracle prints command BLOCKED lines
+        # before validating all 13 cases. A successful complete matrix may
+        # authenticate only one operation-correct refusal per named case.
+        operations = runner.PRIMARY_NEGATIVE_CASE_OPERATIONS
+        self.assertEqual(len(operations), 13)
+        negative_lines = []
+        for case_index, (case_name, operation) in enumerate(operations.items()):
+            negative_lines.append(
+                "START_LOADED_PRIMARY_NULLBLK_NEGATIVE="
+                f"{case_name} run_id:{case_index + 1:032x}")
+            if operation is not None:
+                negative_lines.append(
+                    f"BLOCKED: primary-swap {operation} failed: "
+                    "Operation not permitted")
+        completion = (
+            "PASS_LOADED_PRIMARY_NULLBLK_NEGATIVE_RECOVERY=cases:13 "
+            "ambiguous_syscall:true inventory_failure:true "
+            "definite_io_error:true wrong_mapper:true failed_swapoff:true "
+            "stale_run:true fsync_failure:true lost_provenance:true "
+            "repeat_recovery:safe host_swap_identity:preserved")
+        full_log = (synthetic_log().replace(
+            completion, "\n".join(negative_lines) + "\n" + completion, 1)
+            + "PASS_LOADED_TEST_EXECUTION: full gate completed\n")
+        self.assertEqual(runner.parse_loaded_correctness(full_log)["overall"],
+                         "PASS")
+        expected_refusals = runner.authenticated_primary_negative_refusal_indices(
+            full_log.splitlines(), runner.parse_loaded_correctness(full_log), 0)
+        self.assertEqual(len(expected_refusals), 11)
+        self.assertEqual(
+            runner.loaded_progress_line(
+                "BLOCKED: primary-swap stop failed: Operation not permitted",
+                negative_case="swapoff-ebusy-noeffect"),
+            "OBSERVED_PRIMARY_NEGATIVE_REFUSAL")
+        self.assertEqual(
+            runner.loaded_progress_line(
+                "BLOCKED: primary-swap recovery failed: Operation not permitted",
+                negative_case="swapon-eintr-applied"),
+            "BLOCKED: diagnostic retained for stage summary")
+
+        def run_synthetic(transcript, child_exit=0):
+            report = {"schema": "swapz-test-results-v1", "stages": [],
+                      "benchmarks": {"sessions": [], "verdicts": {}}}
+            with mock.patch.object(
+                    runner.subprocess, "Popen",
+                    return_value=FakeStreamingProcess(
+                        transcript, returncode=child_exit)), \
+                    contextlib.redirect_stdout(io.StringIO()) as console:
+                code = runner.run_stage(
+                    "Owned RAM smoke + mixed/QD pilot", ["unused"],
+                    report, parse_bench=True)
+            return code, report["stages"][-1], console.getvalue()
+
+        code, stage, output = run_synthetic(full_log)
+        self.assertEqual((code, stage["status"]), (0, "PASS"), stage)
+        self.assertNotIn("observed_exit=0", output)
+        self.assertNotIn("BLOCKED: diagnostic retained", output)
+        self.assertIn("OBSERVED_PRIMARY_NEGATIVE_REFUSAL", output)
+
+        original_block = ("BLOCKED: primary-swap start failed: "
+                          "Operation not permitted")
+        for title, transcript, child_exit, status in (
+                ("unrelated after terminal", full_log +
+                 "BLOCKED: unexpected admission refusal\n", 0, "BLOCKED"),
+                ("wrong operation", full_log.replace(
+                    original_block,
+                    "BLOCKED: primary-swap recovery failed: "
+                    "Operation not permitted", 1), 0, "BLOCKED"),
+                ("duplicated refusal", full_log.replace(
+                    original_block, original_block + "\n" + original_block,
+                    1), 0, "BLOCKED"),
+                ("private data", full_log.replace(
+                    original_block, original_block + " path=/private/SECRET",
+                    1), 0, "BLOCKED"),
+                ("untrusted case", full_log.replace(
+                    "NEGATIVE=swapon-eintr-noeffect",
+                    "NEGATIVE=unexpected-case", 1), 0, "BLOCKED"),
+                ("incomplete matrix", full_log.replace(
+                    completion + "\n", "", 1), 0, "BLOCKED"),
+                ("nonzero child", full_log, 2, "BLOCKED"),
+                ("genuine failure", full_log.replace(
+                    original_block,
+                    original_block + "\nFAIL: unanticipated fault", 1),
+                 0, "FAIL"),
+                ("privilege block", full_log.replace(
+                    original_block,
+                    original_block + "\n"
+                    "BLOCKED_LOADED_QUALIFICATION: root unavailable", 1),
+                 0, "BLOCKED")):
+            with self.subTest(title=title):
+                actual, stage, output = run_synthetic(transcript, child_exit)
+                self.assertNotEqual(actual, 0, stage)
+                self.assertEqual(stage["status"], status)
+                if title == "private data":
+                    self.assertNotIn("/private/SECRET", output)
+                    self.assertNotIn("/private/SECRET",
+                                     json.dumps(stage))
+
     def test_zero_exit_with_loaded_failure_evidence_stays_nonpass(self):
         from unittest import mock
 

@@ -3262,7 +3262,20 @@ definite pre-effect `EIO` failures for both `swapon` and `swapoff`, and
 must carry `definite_io_error:true`. Those definite errors are never reconciled
 as ambiguous success: start remains recoverable without activation, and stop
 preserves the active mapper until a later independently successful normal
-`swapoff` proves deactivation. The human qualification summary
+`swapoff` proves deactivation.
+The private qualifier may print the coordinator's expected
+`BLOCKED: primary-swap <operation> failed: <bounded strerror>` while
+deliberately injecting those failures. The official reporter may exclude
+at most one operation-correct refusal per enumerated negative case from its
+global `BLOCKED:` gate only when all thirteen start markers are present in
+canonical order, the negative-recovery aggregate and terminal
+`PASS_LOADED_TEST_EXECUTION` marker are present, the independently parsed
+loaded-correctness oracle passes, and the child exits zero. Missing, malformed,
+duplicated, out-of-order or out-of-scope refusal markers, unexpected operations,
+private text, any explicit `FAIL:`, an unrelated privilege/quarantine refusal,
+or a nonzero child exit must still fail/block qualification.
+Progress for an operation-correct negative-case refusal is observational, not
+an overall BLOCKED or independently sufficient PASS. The human qualification summary
 must also display the verified process-death recovery count and negative-case
 count so reviewers do not need to infer lifecycle coverage from raw log text.
 
