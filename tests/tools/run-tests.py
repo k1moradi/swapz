@@ -3738,16 +3738,24 @@ def run_stage(title, command, result, *, parse_bench=False):
         # The sanitized report may be published via Git only.
         # Do not publish an untrusted last log line: it can contain a host
         # path, swap inventory, block-device identity or local username.
-        # A primary lifecycle FAIL marker is the most specific diagnosis even
-        # when the same output is also missing the overall loaded PASS record.
-        # Keep the FAIL marker's phase and use failure_context() to attach only
-        # its sanitized, allowlisted coordinator detail.
-        if negative_refusal_auth_failure:
+        # Explicit operation/loaded FAIL evidence keeps its own phase even
+        # when a nonzero child exit also invalidates refusal authentication.
+        # failure_context() attaches only sanitized, allowlisted detail.
+        if explicit_primary_failure or explicit_loaded_failure:
+            record["failed_phase"], record["diagnostic"] = failure_context(
+                output, loaded=parse_bench,
+                default_phase=None if parse_bench else title,
+                child_exit_code=observed_exit_code)
+            if inconsistent_exit:
+                record["diagnostic"] += (
+                    f"; expected=nonzero observed_exit={observed_exit_code}"
+                    " evidence=recognized-failure-marker")
+        elif negative_refusal_auth_failure:
             record["failed_phase"] = (
                 "owned RAM primary lifecycle negative recovery")
             record["diagnostic"] = (
                 "Negative-recovery refusal evidence failed authentication")
-        elif explicit_primary_failure or explicit_loaded_failure or blocked_marker:
+        elif blocked_marker:
             record["failed_phase"], record["diagnostic"] = failure_context(
                 output, loaded=parse_bench,
                 default_phase=None if parse_bench else title,
