@@ -3673,7 +3673,7 @@ def run_stage(title, command, result, *, parse_bench=False,
             child_env["SWAPZ_SIGN_NONINTERACTIVE"] = "1"
         if parse_bench or stream_rootless_progress:
             if parse_bench:
-                print("       loaded qualification progress:", flush=True)
+                print("       loaded qualification progress:")
             else:
                 print("       rootless suite progress:", flush=True)
             rootless_allowed_names = (
