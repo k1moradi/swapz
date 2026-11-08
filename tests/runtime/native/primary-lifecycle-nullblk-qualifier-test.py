@@ -190,8 +190,10 @@ mapper_absence_proven() { return 0; }
         for marker in (
                 "BTRFS_IOC_FS_INFO",
                 "BTRFS_IOC_DEV_INFO",
+                "swapz_primary_owned_nullblk_btrfs_filesystems_match(",
                 "filesystem.num_devices != 1U",
                 "filesystem.max_id != 1U",
+                "root_mount_source",
                 "memcmp(filesystem.fsid, backing.fsid, BTRFS_FSID_SIZE)",
                 "O_PATH | O_CLOEXEC | O_NOFOLLOW",
                 "S_ISBLK(node_info.st_mode)",
@@ -201,10 +203,22 @@ mapper_absence_proven() { return 0; }
                 "rechecked_filesystem.max_id != 1U",
                 "memcmp(rechecked_backing.uuid, backing.uuid,",
                 "close(recovery_fd)",
+                "close(root_fd)",
                 "close(device_fd)",
         ):
             with self.subTest(marker=marker):
                 self.assertIn(marker, private)
+        root_chain_begin = source.index(
+            "static int swapz_primary_root_source_chain(")
+        root_chain_end = source.index(
+            "static int swapz_primary_recovery_preflight(", root_chain_begin)
+        root_chain = source[root_chain_begin:root_chain_end]
+        self.assertIn("swapz_primary_owned_nullblk_btrfs_partition(",
+                      root_chain)
+        self.assertIn("root_device, 1, &root_device", root_chain)
+        self.assertIn("#else\n\t/* Production and physical admission never resolve Btrfs",
+                      root_chain)
+        self.assertIn("swapz_primary_root_source_chain(", source)
         self.assertIn(
             "#ifdef SWAPZ_PRIMARY_OWNED_NULLBLK_TEST\n"
             "\t/* Resolve Btrfs virtual st_dev", source)

@@ -1321,6 +1321,7 @@ static int fixture_hashes(char *control, char *module, char *oracle)
 #define swapz_primary_qualification_artifacts_match(...) 1
 #define swapz_primary_recovery_preflight(a,b,c,d,e,f,g,h,i) fixture_recovery(a,b,c,d,e,f,g,h,i)
 #define swapz_primary_recovery_source_chain(a,b,c,d) fixture_source_chain(a,b,c,d)
+#define swapz_primary_root_source_chain(a,b,c,d) fixture_source_chain(a,b,c,d)
 #define swapz_primary_read_mount_facts(facts, parent) fixture_read_mount_facts(facts,parent)
 #define swapz_primary_read_module_mapper_inventory(a,b) fixture_module_inventory(a,b)
 #define swapz_primary_header_backup_read_at(...) 0

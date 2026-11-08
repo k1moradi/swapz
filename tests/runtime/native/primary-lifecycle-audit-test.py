@@ -684,6 +684,135 @@ class PrimaryLifecycleBehaviorTest(unittest.TestCase):
 
 
 class PrimaryLifecycleSourceGuardTest(unittest.TestCase):
+    def test_owned_nullblk_btrfs_root_matches_recovery_across_dev_numbers(self):
+        source = PRIMARY_SOURCE.read_text(encoding="utf-8")
+        body = c_function_body(
+            source,
+            "swapz_primary_owned_nullblk_btrfs_filesystems_match",
+            code_only=False)
+        fixture = r'''#define _GNU_SOURCE
+#include <linux/btrfs.h>
+#include <linux/magic.h>
+#include <sys/stat.h>
+#include <sys/sysmacros.h>
+#include <sys/vfs.h>
+#include <string.h>
+
+static int swapz_primary_owned_nullblk_btrfs_filesystems_match(
+    const struct stat *root_directory,
+    const struct statfs *root_filesystem_info,
+    const struct btrfs_ioctl_fs_info_args *root_filesystem,
+    const struct stat *recovery_directory,
+    const struct statfs *recovery_filesystem_info,
+    const struct btrfs_ioctl_fs_info_args *recovery_filesystem)
+{
+''' + body + r'''
+}
+
+static void set_valid_fs(struct btrfs_ioctl_fs_info_args *filesystem,
+                         unsigned char fsid_byte)
+{
+    filesystem->num_devices = 1;
+    filesystem->max_id = 1;
+    memset(filesystem->fsid, fsid_byte, BTRFS_FSID_SIZE);
+}
+
+int main(void)
+{
+    struct stat root_directory = {
+        .st_dev = makedev(0, 38), .st_mode = S_IFDIR | 0755
+    };
+    struct stat recovery_directory = {
+        .st_dev = makedev(0, 39), .st_mode = S_IFDIR | 0700
+    };
+    struct statfs root_filesystem_info = {.f_type = BTRFS_SUPER_MAGIC};
+    struct statfs recovery_filesystem_info = {
+        .f_type = BTRFS_SUPER_MAGIC
+    };
+    struct btrfs_ioctl_fs_info_args root_filesystem = {0};
+    struct btrfs_ioctl_fs_info_args recovery_filesystem = {0};
+
+    set_valid_fs(&root_filesystem, 0x5a);
+    set_valid_fs(&recovery_filesystem, 0x5a);
+    if (!swapz_primary_owned_nullblk_btrfs_filesystems_match(
+            &root_directory, &root_filesystem_info, &root_filesystem,
+            &recovery_directory, &recovery_filesystem_info,
+            &recovery_filesystem))
+        return 1;
+
+    recovery_filesystem.fsid[0] ^= 1;
+    if (swapz_primary_owned_nullblk_btrfs_filesystems_match(
+            &root_directory, &root_filesystem_info, &root_filesystem,
+            &recovery_directory, &recovery_filesystem_info,
+            &recovery_filesystem))
+        return 2;
+
+    recovery_filesystem.fsid[0] ^= 1;
+    root_filesystem.num_devices = 2;
+    if (swapz_primary_owned_nullblk_btrfs_filesystems_match(
+            &root_directory, &root_filesystem_info, &root_filesystem,
+            &recovery_directory, &recovery_filesystem_info,
+            &recovery_filesystem))
+        return 3;
+
+    root_filesystem.num_devices = 1;
+    root_filesystem.max_id = 2;
+    if (swapz_primary_owned_nullblk_btrfs_filesystems_match(
+            &root_directory, &root_filesystem_info, &root_filesystem,
+            &recovery_directory, &recovery_filesystem_info,
+            &recovery_filesystem))
+        return 4;
+
+    root_filesystem.max_id = 1;
+    root_directory.st_dev = makedev(259, 2);
+    if (swapz_primary_owned_nullblk_btrfs_filesystems_match(
+            &root_directory, &root_filesystem_info, &root_filesystem,
+            &recovery_directory, &recovery_filesystem_info,
+            &recovery_filesystem))
+        return 5;
+
+    root_directory.st_dev = makedev(0, 38);
+    root_filesystem_info.f_type = 0xEF53;
+    if (swapz_primary_owned_nullblk_btrfs_filesystems_match(
+            &root_directory, &root_filesystem_info, &root_filesystem,
+            &recovery_directory, &recovery_filesystem_info,
+            &recovery_filesystem))
+        return 6;
+
+    root_filesystem_info.f_type = BTRFS_SUPER_MAGIC;
+    root_directory.st_dev = makedev(0, 0);
+    if (swapz_primary_owned_nullblk_btrfs_filesystems_match(
+            &root_directory, &root_filesystem_info, &root_filesystem,
+            &recovery_directory, &recovery_filesystem_info,
+            &recovery_filesystem))
+        return 7;
+
+    root_directory.st_dev = makedev(0, 38);
+    recovery_directory.st_dev = makedev(8, 3);
+    if (swapz_primary_owned_nullblk_btrfs_filesystems_match(
+            &root_directory, &root_filesystem_info, &root_filesystem,
+            &recovery_directory, &recovery_filesystem_info,
+            &recovery_filesystem))
+        return 8;
+    return 0;
+}
+'''
+        with tempfile.TemporaryDirectory(
+                prefix="swapz-btrfs-root-identity-") as directory:
+            fixture_path = Path(directory) / "fixture.c"
+            executable = Path(directory) / "fixture"
+            fixture_path.write_text(fixture, encoding="utf-8")
+            compiled = subprocess.run(
+                ["cc", "-std=c11", "-O2", "-Wall", "-Wextra", "-Werror",
+                 str(fixture_path), "-o", str(executable)],
+                cwd=ROOT, capture_output=True, text=True, check=False)
+            self.assertEqual(compiled.returncode, 0, compiled.stderr)
+            result = subprocess.run(
+                [str(executable)], cwd=ROOT, capture_output=True, text=True,
+                check=False)
+            self.assertEqual(result.returncode, 0,
+                             result.stdout + result.stderr)
+
     def test_native_swap_operations_are_transaction_ordered(self):
         source = PRIMARY_SOURCE.read_text(encoding="utf-8")
         native_swapon = c_function_body(
@@ -833,6 +962,7 @@ class PrimaryLifecycleSourceGuardTest(unittest.TestCase):
         # active-swap, DM and holder/topology gates.
         for body in (prepare, start):
             self.assertIn("swapz_primary_recovery_source_chain(", body)
+            self.assertIn("swapz_primary_root_source_chain(", body)
             self.assertIn("swapz_primary_read_module_mapper_inventory(", body)
         self.assertIn("swapz_primary_original_swap_is_quiescent()", prepare)
         self.assertIn("swapz_primary_swap_device_active(", start)

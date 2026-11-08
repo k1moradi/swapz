@@ -755,6 +755,16 @@ standalone formatter's command-line identity bundle as an ownership grant. The
 historical physical-swap probe's older formatter invocation is retained only as
 historical correctness machinery and is not a production activation path.
 
+For the private owned-RAM `null_blk` rehearsal only, a Btrfs root source must
+be identified by opening `/` and the recovery directory and matching their
+kernel-reported Btrfs FSIDs, each with a single device (`num_devices == 1` and
+`max_id == 1`). Do not require the mountinfo root superblock `major:minor` to
+equal a Btrfs subvolume directory's `st_dev`; Linux may report different
+virtual device numbers for the same filesystem. Recheck both pinned filesystem
+identities and the sole member before mapping it through the physical sysfs
+parent chain. This test-only exception never admits Btrfs for production or
+physical backing.
+
 The primary manager's per-transaction SWZ authorization header must be built in
 memory from a freshly generated lowercase 32-hex transaction ID using the
 system random source. Convert those 16 bytes directly into the 16-byte header

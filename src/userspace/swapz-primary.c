@@ -5208,6 +5208,36 @@ static int swapz_primary_owned_nullblk_parent(
 
 
 #ifdef SWAPZ_PRIMARY_OWNED_NULLBLK_TEST
+static int swapz_primary_owned_nullblk_btrfs_filesystems_match(
+	const struct stat *root_directory,
+	const struct statfs *root_filesystem_info,
+	const struct btrfs_ioctl_fs_info_args *root_filesystem,
+	const struct stat *recovery_directory,
+	const struct statfs *recovery_filesystem_info,
+	const struct btrfs_ioctl_fs_info_args *recovery_filesystem)
+{
+	static const unsigned char zero_fsid[BTRFS_FSID_SIZE];
+
+	return root_directory && root_filesystem_info && root_filesystem &&
+	       recovery_directory && recovery_filesystem_info &&
+	       recovery_filesystem && S_ISDIR(root_directory->st_mode) &&
+	       S_ISDIR(recovery_directory->st_mode) &&
+	       major(root_directory->st_dev) == 0U &&
+	       minor(root_directory->st_dev) != 0U &&
+	       major(recovery_directory->st_dev) == 0U &&
+	       minor(recovery_directory->st_dev) != 0U &&
+	       (unsigned long)root_filesystem_info->f_type == BTRFS_SUPER_MAGIC &&
+	       (unsigned long)recovery_filesystem_info->f_type ==
+		       BTRFS_SUPER_MAGIC &&
+	       root_filesystem->num_devices == 1U &&
+	       root_filesystem->max_id == 1U &&
+	       recovery_filesystem->num_devices == 1U &&
+	       recovery_filesystem->max_id == 1U &&
+	       !memcmp(root_filesystem->fsid, recovery_filesystem->fsid,
+		       BTRFS_FSID_SIZE) &&
+	       memcmp(root_filesystem->fsid, zero_fsid, BTRFS_FSID_SIZE);
+}
+
 /*
  * Btrfs reports a virtual st_dev rather than its underlying block partition.
  * Resolve it only for the private RAM-backed lifecycle, and only after proving
@@ -5215,18 +5245,26 @@ static int swapz_primary_owned_nullblk_parent(
  * Production and physical admission must continue rejecting Btrfs.
  */
 static int swapz_primary_owned_nullblk_btrfs_partition(
-	dev_t filesystem_device, dev_t *partition_device)
+	dev_t filesystem_device, int root_mount_source,
+	dev_t *partition_device)
 {
 	static const char hexadecimal[] = "0123456789abcdef";
 	struct btrfs_ioctl_fs_info_args filesystem = {0};
 	struct btrfs_ioctl_fs_info_args rechecked_filesystem = {0};
+	struct btrfs_ioctl_fs_info_args root_filesystem = {0};
+	struct btrfs_ioctl_fs_info_args rechecked_root_filesystem = {0};
 	struct btrfs_ioctl_dev_info_args backing = {.devid = 1U};
 	struct btrfs_ioctl_dev_info_args rechecked_backing = {.devid = 1U};
 	struct stat directory_info;
 	struct stat checked_directory;
+	struct stat root_directory_info;
+	struct stat checked_root_directory;
 	struct stat node_info;
 	struct stat link_info;
 	struct statfs filesystem_info;
+	struct statfs root_filesystem_info;
+	struct statfs checked_filesystem_info;
+	struct statfs checked_root_filesystem_info;
 	char backing_path[BTRFS_DEVICE_PATH_NAME_MAX];
 	char filesystem_uuid[37];
 	char sysfs_link[PATH_MAX];
@@ -5237,6 +5275,7 @@ static int swapz_primary_owned_nullblk_btrfs_partition(
 	size_t uuid_offset = 0;
 	size_t index;
 	int recovery_fd = -1;
+	int root_fd = -1;
 	int device_fd = -1;
 	int valid = 0;
 
@@ -5247,12 +5286,25 @@ static int swapz_primary_owned_nullblk_btrfs_partition(
 	if (recovery_fd < 0)
 		return 0;
 	if (fstat(recovery_fd, &directory_info) < 0 ||
-	    directory_info.st_dev != filesystem_device ||
+	    !S_ISDIR(directory_info.st_mode) ||
 	    fstatfs(recovery_fd, &filesystem_info) < 0 ||
 	    (unsigned long)filesystem_info.f_type != BTRFS_SUPER_MAGIC ||
 	    ioctl(recovery_fd, BTRFS_IOC_FS_INFO, &filesystem) < 0 ||
 	    filesystem.num_devices != 1U || filesystem.max_id != 1U ||
-	    ioctl(recovery_fd, BTRFS_IOC_DEV_INFO, &backing) < 0 ||
+	    (!root_mount_source && directory_info.st_dev != filesystem_device))
+		goto out;
+	if (root_mount_source) {
+		root_fd = open("/", O_RDONLY | O_DIRECTORY | O_CLOEXEC | O_NOFOLLOW);
+		if (root_fd < 0 || fstat(root_fd, &root_directory_info) < 0 ||
+		    fstatfs(root_fd, &root_filesystem_info) < 0 ||
+		    ioctl(root_fd, BTRFS_IOC_FS_INFO, &root_filesystem) < 0 ||
+		    !swapz_primary_owned_nullblk_btrfs_filesystems_match(
+			    &root_directory_info, &root_filesystem_info,
+			    &root_filesystem, &directory_info, &filesystem_info,
+			    &filesystem))
+			goto out;
+	}
+	if (ioctl(recovery_fd, BTRFS_IOC_DEV_INFO, &backing) < 0 ||
 	    backing.devid != 1U ||
 	    memcmp(filesystem.fsid, backing.fsid, BTRFS_FSID_SIZE))
 		goto out;
@@ -5301,6 +5353,7 @@ static int swapz_primary_owned_nullblk_btrfs_partition(
 	if (fstat(recovery_fd, &checked_directory) < 0 ||
 	    checked_directory.st_dev != directory_info.st_dev ||
 	    checked_directory.st_ino != directory_info.st_ino ||
+	    fstatfs(recovery_fd, &checked_filesystem_info) < 0 ||
 	    ioctl(recovery_fd, BTRFS_IOC_FS_INFO,
 		  &rechecked_filesystem) < 0 ||
 	    rechecked_filesystem.num_devices != 1U ||
@@ -5313,10 +5366,24 @@ static int swapz_primary_owned_nullblk_btrfs_partition(
 	    memcmp(rechecked_backing.uuid, backing.uuid, BTRFS_UUID_SIZE) ||
 	    memcmp(rechecked_backing.path, backing.path, sizeof(backing.path)))
 		goto out;
+	if (root_mount_source &&
+	    (fstat(root_fd, &checked_root_directory) < 0 ||
+	     checked_root_directory.st_dev != root_directory_info.st_dev ||
+	     checked_root_directory.st_ino != root_directory_info.st_ino ||
+	     fstatfs(root_fd, &checked_root_filesystem_info) < 0 ||
+	     ioctl(root_fd, BTRFS_IOC_FS_INFO,
+		   &rechecked_root_filesystem) < 0 ||
+	     !swapz_primary_owned_nullblk_btrfs_filesystems_match(
+		     &checked_root_directory, &checked_root_filesystem_info,
+		     &rechecked_root_filesystem, &checked_directory,
+		     &checked_filesystem_info, &rechecked_filesystem)))
+		goto out;
 	*partition_device = node_info.st_rdev;
 	valid = 1;
 out:
 	if (device_fd >= 0 && close(device_fd) < 0)
+		valid = 0;
+	if (root_fd >= 0 && close(root_fd) < 0)
 		valid = 0;
 	if (close(recovery_fd) < 0)
 		valid = 0;
@@ -5358,7 +5425,7 @@ static int swapz_primary_recovery_source_chain(
 	/* Resolve Btrfs virtual st_dev only after its sole-member identity proof. */
 	if (major(source_device) == 0U &&
 	    !swapz_primary_owned_nullblk_btrfs_partition(
-		    source_device, &source_device))
+		    source_device, 0, &source_device))
 		return 0;
 #endif
 	if (swapz_primary_path_format(devices_root, sizeof(devices_root),
@@ -5449,6 +5516,29 @@ static int swapz_primary_recovery_source_chain(
 rejected:
 	free(resolved_devices_root);
 	return 0;
+}
+
+static int swapz_primary_root_source_chain(
+	const char *sysfs_root, dev_t root_device, dev_t target_device,
+	dev_t *physical_parent_device)
+{
+#ifdef SWAPZ_PRIMARY_OWNED_NULLBLK_TEST
+	/*
+	 * A Btrfs root mount's mountinfo superblock device can differ from the
+	 * st_dev reported by a directory in its subvolume. Bind both pinned paths
+	 * by kernel FSID before resolving the sole member in this private test.
+	 */
+	if (major(root_device) == 0U &&
+	    !swapz_primary_owned_nullblk_btrfs_partition(
+		    root_device, 1, &root_device))
+		return 0;
+#else
+	/* Production and physical admission never resolve Btrfs backing here. */
+	if (major(root_device) == 0U)
+		return 0;
+#endif
+	return swapz_primary_recovery_source_chain(
+		sysfs_root, root_device, target_device, physical_parent_device);
 }
 
 static int swapz_primary_recovery_preflight(
@@ -12278,7 +12368,7 @@ static int swapz_primary_prepare_metadata(
 		goto out;
 	}
 	failure_phase = "root-device-parent-identity";
-	if (!swapz_primary_recovery_source_chain(
+	if (!swapz_primary_root_source_chain(
 		    "/sys", mount_facts.root_device, SWAPZ_PRIMARY_TARGET_DEVICE,
 		    &root_parent)) {
 		errno = EPERM;
@@ -12323,7 +12413,7 @@ static int swapz_primary_prepare_metadata(
 		goto out;
 	}
 	failure_phase = "repeated-root-device-parent-identity";
-	if (!swapz_primary_recovery_source_chain(
+	if (!swapz_primary_root_source_chain(
 		    "/sys", mount_facts.root_device, SWAPZ_PRIMARY_TARGET_DEVICE,
 		    &root_parent)) {
 		errno = EPERM;
@@ -12414,7 +12504,7 @@ static int swapz_primary_prepare_metadata(
 			    &verified_mount_facts, verified_target_parent) < 0 ||
 		    verified_mount_facts.target_mounted ||
 		    verified_mount_facts.root_device != mount_facts.root_device ||
-		    !swapz_primary_recovery_source_chain(
+		    !swapz_primary_root_source_chain(
 			    "/sys", verified_mount_facts.root_device,
 			    SWAPZ_PRIMARY_TARGET_DEVICE, &verified_root_parent) ||
 		    verified_root_parent != root_parent ||
@@ -12844,7 +12934,7 @@ static int swapz_primary_start_prepared(void)
 		goto out;
 	}
 	failure_phase = "root-device-parent-identity";
-	if (!swapz_primary_recovery_source_chain(
+	if (!swapz_primary_root_source_chain(
 		    "/sys", mount_facts.root_device, SWAPZ_PRIMARY_TARGET_DEVICE,
 		    &root_parent)) {
 		errno = EPERM;
@@ -12951,7 +13041,7 @@ static int swapz_primary_start_prepared(void)
 			errno = EBUSY;
 			goto out;
 		}
-		if (!swapz_primary_recovery_source_chain(
+		if (!swapz_primary_root_source_chain(
 			    "/sys", prewrite_mount_facts.root_device,
 			    SWAPZ_PRIMARY_TARGET_DEVICE, &prewrite_root_parent))
 			goto out;
@@ -13786,7 +13876,7 @@ static int swapz_primary_read_only_plan(void)
 			recovery_physical_parent_minor) == target_physical_parent;
 	root_mount_source_chain_checked = mount_inventory_read &&
 		target_device_chain_checked &&
-		swapz_primary_recovery_source_chain(
+		swapz_primary_root_source_chain(
 			"/sys", mount_facts.root_device, SWAPZ_PRIMARY_TARGET_DEVICE,
 			&root_physical_parent);
 	root_same_physical_disk = root_mount_source_chain_checked &&

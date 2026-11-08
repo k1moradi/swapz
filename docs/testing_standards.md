@@ -7715,6 +7715,16 @@ filesystem IDs, an opened non-symlink /dev block node, and a matching
 /sys/fs/btrfs/<filesystem-id>/devices member resolved against /sys/dev/block.
 Recheck the filesystem and member identity before passing the real partition
 major:minor through the existing physical sysfs parent-chain validation.
+When the source being checked is the root mount, mountinfo's superblock
+major:minor is not a substitute for the root directory's `st_dev`: Btrfs
+subvolumes may report different virtual device numbers. Pin an open descriptor
+for `/` and one for the recovery directory, require Btrfs `f_type` on both,
+and compare their authoritative FS_INFO FSIDs plus the one-device/max-id
+proof. Repeat the check on both descriptors before accepting the backing
+member. For non-root recovery-source checks, retain the exact filesystem-device
+match. This Btrfs root-source resolution remains available only in private
+owned-RAM qualification; it cannot enable production or physical Btrfs
+admission.
 Any missing, changing or multidevice identity must remain BLOCKED; this
 private relaxation does not apply to production or physical qualification. Report whether recovery
 storage shares the target's physical disk; that is a relevant failure-domain
