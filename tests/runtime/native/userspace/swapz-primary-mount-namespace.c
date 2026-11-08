@@ -101,6 +101,7 @@ enum fixture_namespace_kind {
 
 static int fixture_namespace_fd = -1;
 static int fixture_namespace_id_ioctl_error;
+static int fixture_namespace_id_ioctl_returns_zero;
 static enum fixture_namespace_kind fixture_namespace_fd_kind =
 	FIXTURE_NAMESPACE_NONE;
 static enum fixture_namespace_kind fixture_hidden_namespace_kind =
@@ -309,6 +310,10 @@ static int fixture_ioctl(int descriptor, unsigned long command, void *argument)
 	if (fixture_namespace_id_ioctl_error) {
 		errno = fixture_namespace_id_ioctl_error;
 		return -1;
+	}
+	if (fixture_namespace_id_ioctl_returns_zero) {
+		*(uint64_t *)argument = 0;
+		return 0;
 	}
 	*(uint64_t *)argument = fixture_namespace_id(fixture_namespace_fd_kind);
 	return 0;
@@ -1190,6 +1195,7 @@ static void fixture_reset(void)
 	fixture_namespace_fd = -1;
 	fixture_namespace_fd_kind = FIXTURE_NAMESPACE_NONE;
 	fixture_namespace_id_ioctl_error = 0;
+	fixture_namespace_id_ioctl_returns_zero = 0;
 	fixture_hidden_namespace_kind = FIXTURE_NAMESPACE_NONE;
 	fixture_hidden_namespace_device = 0;
 	fixture_hidden_namespace_padding_mounts = 0U;
@@ -2875,6 +2881,9 @@ int main(void)
 	fixture_reset();
 	fixture_namespace_id_ioctl_error = EINVAL;
 	expect_mount_admission("invalid namespace ID request", 0, EINVAL);
+	fixture_reset();
+	fixture_namespace_id_ioctl_returns_zero = 1;
+	expect_mount_admission("zero namespace ID is not admission", 0, EOPNOTSUPP);
 	fixture_reset();
 	fixture_file("self/mountinfo", "malformed\n");
 	expect_mount_admission("malformed local mount table", 0, EINVAL);

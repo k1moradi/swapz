@@ -551,7 +551,14 @@ admission must pin that task's mount-namespace descriptor, obtain the task-root
 mount's unique ID with `statx(STATX_MNT_ID_UNIQUE)`, walk
 `statmount(STATMOUNT_MNT_BASIC)` parent IDs to the namespace-root mount, and
 enumerate that pinned namespace with `listmount` plus
-`statmount(STATMOUNT_SB_BASIC)`. Compare every returned superblock device
+`statmount(STATMOUNT_SB_BASIC)`. Resolve the pinned namespace descriptor
+through `NS_GET_MNTNS_ID`, available since Linux 6.11, and supply that
+stable 64-bit ID in the request's `namespace_id` field; the reserved
+32-bit field must be zero, never a file descriptor. Keep the namespace
+descriptor open for the entire read. The native fixture must simulate
+that ioctl and reject unavailable IDs (`ENOTTY`, `EINVAL`), a successful
+zero ID, and any unrecognized ioctl, without treating them as permission
+to inspect a less complete mount view. Compare every returned superblock device
 number against the exact selected partition and physical parent. The focused
 production-C fixture must keep filtered leader and non-leader mountinfo
 syntactically clean while this direct namespace inventory contains a hidden
@@ -562,8 +569,9 @@ production uses the architecture-common Linux syscall numbers 457/458 even when
 libc headers predate the `SYS_statmount`/`SYS_listmount` names; when those
 names are present, compile-time assertions must agree. The synthetic fixture
 may define the same numbers solely for its intercepted seam. Neither case
-asserts the running kernel implements the 6.18 foreign-namespace ABI: runtime
-`ENOSYS` or an unsupported request remains a fail-closed admission result.
+asserts the running kernel implements all required mount-namespace ID and
+inventory syscalls: runtime `ENOSYS` or an unsupported request remains a
+fail-closed admission result.
 The syscall seam must independently inject `ENOSYS` and `EPERM` into
 `statmount` and `listmount`, force more than one 256-ID `listmount`
 batch with the selected device only in a later batch, and fail closed when a
@@ -602,8 +610,10 @@ mount/swapon exclusion. Post-snapshot physical exclusion remains UNPROVEN.
 
 If unique mount IDs, foreign-namespace statmount/listmount, namespace identity,
 or any listed mount cannot be proven, admission is BLOCKED; never fall back to
-the filtered table. The current foreign-namespace descriptor ABI requires
-Linux 6.18 or newer, so an older running kernel refuses this admission path.
+the filtered table. The namespace-fd request form requires Linux 6.18, but the current
+coordinator uses the kernel-assigned namespace-ID request form supported
+since Linux 6.11. Older kernels or unavailable ID retrieval remain BLOCKED;
+never guess a namespace ID or use the filtered mountinfo view as a fallback.
 The coordinator may retain its mountinfo-derived process-root device fact only
 after `statx` identifies a stable process-root directory whose device and
 inode match `/proc/1/root`, and both that device and the seeded mount's
