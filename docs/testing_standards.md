@@ -50,8 +50,11 @@ elapsed-second progress for source-controlled rootless suite labels, plus
 elapsed time for existing loaded-phase boundaries. Progress is strictly
 observational, filters labels against the source-controlled allowlist, and
 must never print raw child output or promote a successful suite to overall
-qualification PASS. On failures, retain the existing first-error attribution
-and private diagnostic log; an unfinished suite remains visibly started.
+qualification PASS. A progress event with an unsupported state, malformed
+numeric duration, unallowlisted suite name or wrong sequence number must be
+ignored rather than displayed. On failures, retain the existing first-error
+attribution and private diagnostic log; an unfinished suite remains visibly
+started.
 A bounded per-suite rootless breakdown uses Bash's built-in SECONDS and
 source-controlled phase labels; the loaded reporter attributes wall time from
 existing streamed markers to preflight, lifecycle, fixture preparation,

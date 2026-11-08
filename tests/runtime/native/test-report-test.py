@@ -36,6 +36,12 @@ class NativeTimingContract(unittest.TestCase):
         self.assertIsNone(runner.rootless_phase_progress(
             "ROOTLESS_PHASE_PROGRESS state=PASS index=02 elapsed_s=1 "
             "label=tests/Makefile native and metadata", allowed))
+        self.assertIsNone(runner.rootless_phase_progress(
+            "ROOTLESS_PHASE_PROGRESS state=PASS index=2 elapsed_s=01 "
+            "label=tests/Makefile native and metadata", allowed))
+        self.assertIsNone(runner.rootless_phase_progress(
+            "ROOTLESS_PHASE_PROGRESS state=SKIP index=2 elapsed_s=1 "
+            "label=tests/Makefile native and metadata", allowed))
 
     def test_streamed_rootless_progress_preserves_original_failure(self):
         from unittest import mock
