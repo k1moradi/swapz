@@ -96,6 +96,14 @@ Rootless failure-attribution unit fixtures must extract only the wrapped
 package/systemd child recipes, excluding their surrounding tier-selection
 control-flow delimiters. This preserves the private first-error assertions
 without executing unrelated packages in the synthetic test.
+On the single canonical `test_results.json` publication path, a same-source
+algorithm-tier INCOMPLETE report must never replace full-suite evidence,
+including a recorded full-suite failure. Earlier five-stage reports without
+a tier field remain full-suite evidence. Full-suite runs can supersede
+algorithm-tier reports; rootless or RAM-only evidence never becomes physical
+PASS. This precedence guard applies before the publisher's initial Git push,
+not only during concurrent-push retries.
+
 The hermetic incremental Make-interface fixture exercises `make test_full`,
 which preserves the original five-stage RAM build-order and exact-artifact
 PASS/refusal contract. It must not treat an algorithm-tier physical-INCOMPLETE

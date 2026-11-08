@@ -18,6 +18,42 @@ spec.loader.exec_module(runner)
 
 
 class NativeTimingContract(unittest.TestCase):
+    def test_algorithm_scope_cannot_replace_same_source_full_evidence(self):
+        source = "a" * 40
+        new_report = {
+            "schema": "swapz-test-results-v1",
+            "qualification": "RAM_BACKED_NULL_BLK_ONLY",
+            "qualification_tier": "ALGORITHM_PHYSICAL_PENDING",
+            "tested_commit_sha": source, "source_sha": source,
+            "overall": "INCOMPLETE",
+        }
+        full = {
+            **new_report, "qualification_tier": "FULL_INTEGRATION_RAM_ONLY",
+            "overall": "PASS",
+        }
+        self.assertTrue(runner.stronger_published_qualification_scope(
+            full, new_report))
+        for state in ("FAIL", "BLOCKED", "INCOMPLETE"):
+            with self.subTest(state=state):
+                self.assertTrue(
+                    runner.stronger_published_qualification_scope(
+                        {**full, "overall": state}, new_report))
+        self.assertTrue(runner.stronger_published_qualification_scope(
+            {key: value for key, value in full.items()
+             if key != "qualification_tier"}, new_report))
+        self.assertFalse(runner.stronger_published_qualification_scope(
+            {**full, "source_sha": "b" * 40}, new_report))
+        self.assertFalse(runner.stronger_published_qualification_scope(
+            {**full, "qualification_tier": "ALGORITHM_PHYSICAL_PENDING"},
+            new_report))
+        self.assertFalse(runner.stronger_published_qualification_scope(
+            new_report, {**new_report, "qualification_tier":
+                         "FULL_INTEGRATION_RAM_ONLY"}))
+        self.assertEqual(
+            runner.official_pass_binding_refusal(
+                {**new_report, "overall": "PASS"}, source),
+            "physical_admission_not_qualified")
+
     def test_tier_routing_cannot_promote_ram_only_to_physical_pass(self):
         from unittest import mock
 

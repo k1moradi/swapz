@@ -2185,6 +2185,10 @@ def official_pass_binding_refusal(report, source_sha):
         return "invalid_report_schema"
     if report.get("qualification") != "RAM_BACKED_NULL_BLK_ONLY":
         return "invalid_qualification_scope"
+    # A RAM-only algorithm run must never be promoted to physical PASS by
+    # a forged report or an external publication caller.
+    if report.get("qualification_tier") == "ALGORITHM_PHYSICAL_PENDING":
+        return "physical_admission_not_qualified"
     if (report.get("source_sha") != source_sha or
             report.get("tested_commit_sha") != source_sha):
         return "source_identity_mismatch"
@@ -9368,6 +9372,26 @@ def git_result(command, *, data=None, timeout=15, env=None):
         return None
 
 
+def stronger_published_qualification_scope(existing_report, new_report):
+    """An algorithm-only run cannot displace same-source full-suite evidence."""
+    if (not isinstance(existing_report, dict) or
+            not isinstance(new_report, dict) or
+            new_report.get("qualification_tier") != "ALGORITHM_PHYSICAL_PENDING" or
+            existing_report.get("schema") != "swapz-test-results-v1" or
+            existing_report.get("qualification") != "RAM_BACKED_NULL_BLK_ONLY" or
+            existing_report.get("overall") not in (
+                "PASS", "FAIL", "BLOCKED", "INCOMPLETE")):
+        return False
+    tested_source = new_report.get("tested_commit_sha")
+    if (not isinstance(tested_source, str) or
+            existing_report.get("tested_commit_sha") != tested_source or
+            existing_report.get("source_sha") != tested_source):
+        return False
+    # Missing tier means the legacy complete five-stage qualification.
+    return existing_report.get("qualification_tier", "FULL_INTEGRATION_RAM_ONLY") == (
+        "FULL_INTEGRATION_RAM_ONLY")
+
+
 def publish(source_sha):
     """Publish the canonical report with bounded nonforce retry.
 
@@ -9416,6 +9440,18 @@ def publish(source_sha):
     head_sha = head.stdout.decode("ascii", "replace").strip()
     if not re.fullmatch(r"[0-9a-f]{40}", head_sha) or git_sha() != source_sha:
         return "SKIPPED_GIT_SYNC: checkout changed during testing"
+
+    # Initial fast-forward pushes can otherwise replace a stronger full-tier
+    # report with an algorithm-only INCOMPLETE from the exact same source.
+    current_report = run("show", f"{head_sha}:{GIT_RESULT}")
+    if current_report is not None and current_report.returncode == 0:
+        try:
+            previous = json.loads(current_report.stdout.decode("utf-8"))
+        except (ValueError, UnicodeDecodeError):
+            previous = None
+        if stronger_published_qualification_scope(previous, contents):
+            return ("SKIPPED_GIT_SYNC: same-source full integration "
+                    "qualification evidence has higher precedence")
 
     remote = run("remote", "get-url", "--push", "origin")
     if remote is None or remote.returncode:
