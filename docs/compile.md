@@ -79,8 +79,9 @@ those version boundaries is currently defined.
 These CI builds are compile-only evidence, not DKMS registration, a
 successfully loaded module, real-host Secure Boot acceptance, boot validation
 or swap correctness. A kernel update still requires matching headers, new
-exact-kernel qualification through `make test` on the actual host and an
-explicit qualified install; `AUTOINSTALL="no"` remains in force. A defined
+exact-kernel algorithm/RAM qualification and `make test_full` integration
+evidence on the actual host, then separate authorized physical acceptance
+and an explicit qualified install; `AUTOINSTALL="no"` remains in force. A defined
 kernel compatibility range and its oldest/current compile matrix require a
 separate project policy decision before they can be claimed.
 
@@ -153,8 +154,9 @@ Fetch and verify `origin/main` before publication; publish only by a
 non-force, head-checked fast-forward. If `main` advances concurrently,
 reconcile the unpublished implementation and standard edits against its new
 head and recheck before pushing. Do not create a branch or PR or rewrite
-published commits. `make test` remains the sole official qualification
-command, with `make fast_test` only the nonqualifying development loop.
+published commits. The public testing tiers are `make fast_test`
+(nonqualifying development), `make test` (algorithm/RAM with physical
+admission currently INCOMPLETE), and `make test_full` (RAM plus integration).
 
 Documentation-only changes and generated `test_results.json`-only evidence
 commits require no extra standards edit. The test reporter labels its
@@ -168,7 +170,8 @@ implementation work. An implementation commit labeled `[skip ci]` remains
 noncompliant without a same-commit standard update and must never be used to
 bypass the direct-main policy. Rootless CI is partial evidence: the exact-SHA
 conclusion rejects failed, skipped, and cancelled dependencies and never
-substitutes for owner-run `make test` qualification.
+substitutes for owner-run `make test_full` RAM/integration evidence
+or separately authorized real-physical acceptance.
 
 A same-commit policy failure on published history cannot be repaired
 retroactively. Its diagnostic must name the offending SHA and path, explain the

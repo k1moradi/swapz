@@ -299,7 +299,10 @@ The mission has three separately reported outcomes.
 
 Require all of the following for the exact source:
 
-- required source/native/W=1/W=2 and exact-host `make test` qualification PASS;
+- required source/native/W=1/W=2 and exact-host `make test_full` RAM/integration
+  PASS, plus `make test` real-physical algorithm PASS once its trusted admission
+  protocol exists; the current physical-INCOMPLETE algorithm tier cannot
+  satisfy this production-ready gate;
 - required GitHub CI PASS on current `main`;
 - real Linux anonymous-page swap-out and swap-in through swapz PASS;
 - full authorized-card backing geometry and maximum safe logical capacity

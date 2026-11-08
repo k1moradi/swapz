@@ -1589,10 +1589,10 @@ loaded qualification or permission to recover the first host's objects.
 
 ### Development decision loop
 
-The project-goal CI policy validates all five root Make targets
-(`all install uninstall test fast_test`). This does not make `fast_test` a
-second public qualification command: `make test` remains the sole official
-qualification entrypoint.
+The project-goal CI policy validates all six root Make targets
+(`all install uninstall test test_full fast_test`). `make fast_test` remains
+a nonqualifying development loop; `make test` and `make test_full`
+have distinct algorithm/RAM and full rootless-integration scopes.
 
 `make fast_test` is the owner-approved development loop, not a qualification
 command. It builds the current working tree (dirty trees allowed), runs the
@@ -2122,7 +2122,8 @@ Shell snippets that extract and invoke the classifier must initialize
 class; this preserves the active-suite binding under `set -u`.
 Synthetic marker mutations must preserve token boundaries; changing `test=`
 must not also alter the suffix of `subtest=` or invalidate the marker grammar.
-These regressions are not substitutes for the single official `make test`.
+These regressions do not substitute for the loaded checks in either public
+qualification tier or physical admission.
 
 For direct rootless phases whose stderr was not pre-captured, the official
 reporter may append bounded first-error context from its already captured
@@ -2227,7 +2228,7 @@ production failure retention and first-failure ordering remain unchanged.
 
 The private project-goal wrapper in `tests/tools/product_goals.py` is
 observational and fail-only; it must not alter suite discovery, execution
-order, qualification severity or the single official `make test` gate.
+order, qualification severity or either source-bound public Make tier.
 On a failing exact-SHA command, its existing `swapz-ci-diagnostic-v1` record
 retains the public suite and artifact name, actual wrapper `exit_code`,
 first causal `first_error`, category and reason, and now also explicitly
@@ -4333,8 +4334,9 @@ extent count, physical run count/splits and requests, alignment padding,
 segment-tail waste, read CRC/generation correctness and CPU/dispatch cost.
 Reject any candidate that delays an otherwise dispatchable WRITE, adds
 extra blocks/requests or crosses a same-page/barrier dependency. No
-alternative test entrypoint; `make test` remains the official qualification
-command and `make fast_test` remains development-only.
+alternative test entrypoint; `make test` runs algorithm/RAM checks,
+`make test_full` retains the integration suite, and `make fast_test`
+remains development-only.
 
 Source contracts should assert retained scheduling semantics rather than a
 particular obsolete branch spelling: retained writes must reach the ordered
@@ -6408,7 +6410,9 @@ deliberately rather than pre-versioning an undeployed format.
 
 ## ID73 CPU/cache qualification
 
-`make test -jN` remains the only public qualification entry point. The native
+`make test` and `make test_full` are the two source-bound public tiers;
+the runner derives bounded compilation parallelism or inherits the Make
+jobserver, and neither tier skips native CPU/cache correctness. The native
 predictor stage must additionally verify x86 SSE2 object code contains
 `shufpd` and `pslldq`; byte-exact scalar/SIMD round-trip tests remain
 authoritative for semantics. Do not impose a cross-host nanosecond threshold on
@@ -6762,14 +6766,15 @@ copied identifiers, alias replacement, parent/geometry drift, holder/activity
 conflicts and reconnection repinning without opening any host block device. Source contracts
 continue to verify the kernel opt-in superblock gate, reserved data offset, and
 exclusion of block 0 from all data/discard paths. Exact-current-main must still
-pass ordinary `make test` before physical-media qualification or acceptance
-evidence is considered. The development-only debugging path below may produce
+pass exact-source `make test_full` RAM/integration qualification before the
+legacy private physical helper considers physical-media evidence. The new
+algorithm tier remains INCOMPLETE until protected physical admission exists. The development-only debugging path below may produce
 experimental card-backed observations, but those observations are never
 physical-media qualification evidence.
 
 The production-readiness evaluator must also bind the CURRENT release-host
 platform to the owner qualification: x86_64, 4096-byte pages, and an exact
-well-formed `kernel_release` matching the owner `make test` report. A kernel
+well-formed `kernel_release` matching the owner `make test_full` RAM report. A kernel
 upgrade or platform mismatch makes the release BLOCKED until fresh owner
 qualification and downstream exact-source evidence are regenerated.
 
@@ -6794,11 +6799,12 @@ activation merely to preserve its former formatter argument list.
 
 A separately owner-authorized physical swap-partition correctness smoke is
 implemented only by the private tests/tools/physical-swap-probe.py helper. It
-is never called by make test and does not qualify performance, endurance or
-general physical-media behavior. Its full `run` mode remains behind exact
-owner `make test` evidence and the reviewed run record. Owner-provided make
-test reports are read and verified; do not rerun make test or make fast_test
-for that qualified physical smoke. The separate `--development-only` debugging
+is not called by either current Make qualification tier and does not qualify
+performance, endurance or general physical-media behavior. Its full `run`
+mode still requires a matching legacy five-stage owner RAM PASS (now
+`make test_full`) and a reviewed run record; this helper remains a separate
+physical gate. Do not rerun `make test_full` or `make fast_test` merely to
+replace already valid, exact-source physical-smoke evidence. The separate `--development-only` debugging
 mode below is the explicit exception and cannot satisfy its evidence gate.
 
 #### Development-only card-backed data-path smoke
@@ -6818,8 +6824,9 @@ loaded path may either pass completely or stop only at the exact
 leave every ambiguous null_blk instance untouched. Any native/build error,
 other loaded-preflight failure, dirty source, changed main, stale/malformed
 record or artifact mismatch blocks the card run. This narrow admission is only
-for the development smoke and does not replace the complete five-stage
-`make test` gate for physical qualification or production readiness.
+for the development smoke and does not replace complete five-stage
+`make test_full` RAM evidence, qualified physical admission or production
+readiness.
 
 Before running that fresh `make fast_test`, creating recovery state, or clearing
 block zero, development-only mode must parse `/proc/swaps` and require a
@@ -7241,7 +7248,8 @@ replace the real read-only device plan.
 
 ### Alpha.29 work-conserving dispatcher qualification
 
-The public command remains exactly `make test`. Native qualification exercises
+Both public qualification commands retain native correctness; `make test_full`
+adds rootless integration. Native qualification exercises
 the production PREPARING/READY/RAW_SELECTED atomic race. Source contracts require
 the stable `raw_bytes` snapshot, two-reference slot ownership, producer BIO
 access ending before `preparation_snapshot_ready`, and worker-owned
@@ -7718,7 +7726,8 @@ suite must compile its exact `tests/suites/Makefile` leaf targets for
 a missing compiler, failed build or nonexecutable output is a failure, never
 an oracle skip. Keep compilation unprivileged and separate from the release
 qualification interface: `make fast_test` is still development-only, and
-`make test` remains the sole qualification command. Rootless failures
+`make test` and `make test_full` are the two source-bound qualification
+tiers, with physical acceptance still a distinct gate. Rootless failures
 must name the phase, scenario, candidate, mismatched invariant or child exit
 status, and a bounded reason without publishing representative samples or
 private paths. Negative `MIXED_OPS=65536` CLI probes must still assert
