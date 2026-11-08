@@ -4805,8 +4805,13 @@ class ReportContract(unittest.TestCase):
                 original_block,
                 original_block + "\n"
                 "BLOCKED_LOADED_QUALIFICATION: root unavailable", 1),
-             0, "FAIL"),
+             0, "BLOCKED"),
         )
+        authentication_failures = {
+            "wrong operation", "wrong cause", "duplicated refusal",
+            "missing refusal", "private data", "untrusted case",
+            "incomplete matrix", "nonzero child",
+        }
         for title, transcript, child_exit, status in adversarial:
             with self.subTest(title=title):
                 actual, stage, output = run_synthetic(transcript, child_exit)
@@ -4815,12 +4820,18 @@ class ReportContract(unittest.TestCase):
                 if title == "private data":
                     self.assertNotIn("/private/SECRET", output)
                     self.assertNotIn("/private/SECRET", json.dumps(stage))
-                if title != "unrelated after terminal":
+                if title in authentication_failures:
                     self.assertEqual(
                         stage["failed_phase"],
                         "owned RAM primary lifecycle negative recovery")
                     self.assertIn("failed authentication",
                                   stage["diagnostic"])
+                else:
+                    self.assertNotEqual(
+                        stage.get("failed_phase"),
+                        "owned RAM primary lifecycle negative recovery")
+                    self.assertNotIn(
+                        "failed authentication", stage.get("diagnostic", ""))
 
     def test_zero_exit_with_loaded_failure_evidence_stays_nonpass(self):
         from unittest import mock
