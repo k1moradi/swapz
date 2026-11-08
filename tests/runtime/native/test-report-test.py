@@ -18,6 +18,84 @@ spec.loader.exec_module(runner)
 
 
 class NativeTimingContract(unittest.TestCase):
+    def test_tier_routing_cannot_promote_ram_only_to_physical_pass(self):
+        from unittest import mock
+
+        source_sha = "a" * 40
+        for tier, expected_overall, expected_exit in (
+                ("algorithm", "INCOMPLETE", 2),
+                ("full", "PASS", 0)):
+            with self.subTest(tier=tier):
+                observed_commands = []
+                report_snapshots = []
+
+                def synthetic_stage(title, command, result, **options):
+                    observed_commands.append((title, tuple(command), options))
+                    result["stages"].append({
+                        "name": title, "status": "PASS",
+                        "elapsed_s": 0.0, "exit_code": 0,
+                    })
+                    return 0
+
+                with mock.patch.object(
+                        runner.argparse.ArgumentParser, "parse_args",
+                        return_value=mock.Mock(kdir="/unused", tier=tier)), \
+                        mock.patch.object(
+                            runner, "report_host_identity",
+                            return_value={"status": "AVAILABLE"}), \
+                        mock.patch.object(
+                            runner, "git_sha", return_value=source_sha), \
+                        mock.patch.object(
+                            runner, "make_invocation",
+                            return_value=(["make"], "fixture")), \
+                        mock.patch.object(
+                            runner, "run_stage", side_effect=synthetic_stage), \
+                        mock.patch.object(
+                            runner, "qualification_artifact_digests",
+                            return_value={"status": "AVAILABLE"}), \
+                        mock.patch.object(
+                            runner, "owner_qualification_artifacts_available",
+                            return_value=True), \
+                        mock.patch.object(
+                            runner, "required_benchmark_gates_pass",
+                            return_value=True), \
+                        mock.patch.object(
+                            runner, "official_pass_binding_refusal",
+                            return_value=None), \
+                        mock.patch.object(
+                            runner, "lane_gap_attribution_rows",
+                            return_value=[]), \
+                        mock.patch.object(
+                            runner, "goal_scorecard",
+                            return_value={"overall": "UNAVAILABLE"}), \
+                        mock.patch.object(
+                            runner, "write_report",
+                            side_effect=lambda report: report_snapshots.append(
+                                json.loads(json.dumps(report)))), \
+                        mock.patch.object(runner, "print_bench"), \
+                        mock.patch.object(
+                            runner, "publish", return_value="fixture"), \
+                        mock.patch.object(
+                            runner, "refresh_history",
+                            return_value="NOT UPDATED: fixture"), \
+                        contextlib.redirect_stdout(io.StringIO()):
+                    self.assertEqual(runner.main(), expected_exit)
+
+                self.assertEqual(len(observed_commands), 5)
+                rootless_command = observed_commands[1][1]
+                self.assertEqual(rootless_command[-1:] == ("--algorithm",),
+                                 tier == "algorithm")
+                self.assertEqual(report_snapshots[0]["overall"],
+                                 expected_overall)
+                if tier == "algorithm":
+                    self.assertEqual(
+                        report_snapshots[0]["physical_qualification"],
+                        {"overall": "NOT_RUN",
+                         "reason": "physical_source_admission_protocol_not_qualified"})
+                else:
+                    self.assertNotIn("physical_qualification",
+                                     report_snapshots[0])
+
     def test_rootless_progress_rejects_unsafe_and_invalid_records(self):
         allowed = runner.rootless_phase_names()
         self.assertEqual(
