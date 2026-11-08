@@ -30,6 +30,15 @@ An inherited jobserver takes precedence. Operators do not need to choose a
 manual `-j` value; qualification stages and privileged device sessions remain
 strictly sequential.
 
+The native production-C suite may compile the unchanged production sources
+once into shared, compiler-configuration-bound objects, then link the existing
+independent test executables. Shared object reuse must track included headers,
+compiler/preprocessor flags and sanitizer configuration; changing those inputs
+invalidates the objects and dependent executables. Never merge independent
+assertion/failure boundaries or omit ASan/UBSan/TSan qualification for speed.
+The native/rootless stage records separate native Make and remaining-contract
+wall times as optional observational evidence, not qualification PASS gates.
+
 It must execute the supported qualification in order and fail closed. Rootless/CI-only success is partial evidence and cannot substitute for the loaded owned-RAM phase. The Device Mapper target is exactly `swapz`; the module alias is `dm-swapz`.
 
 ### Primary lifecycle transaction-state contract

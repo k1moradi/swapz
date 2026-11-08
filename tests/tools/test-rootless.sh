@@ -644,6 +644,8 @@ if [[ -n $rootless_capture_failure_reason ]]; then
   report_rootless_failure 1 "$rootless_make_command_line" "$rootless_capture_failure_reason" \
     unavailable unavailable unavailable unavailable "$rootless_make_cleanup_disposition"
 fi
+rootless_native_make_elapsed_seconds=$((SECONDS - rootless_phase_started_seconds))
+rootless_contracts_started_seconds=$SECONDS
 rootless_phase='tests/runtime/native/source-contract-test.py'
 rootless_phase_started_seconds=$SECONDS
 python3 -B tests/runtime/native/source-contract-test.py -v
@@ -893,4 +895,7 @@ grep -Fq 'PASS_RETAINED_SYNTHETIC_WRITE_FAULT=' tests/tools/deploy-nullblk.sh
 grep -Fq 'PASS_RETAINED_SYNTHETIC_FLUSH_FAULT=' tests/tools/deploy-nullblk.sh
 grep -Fq -- '--write-series' tests/tools/device-roundtrip.c
 grep -Fq -- '--verify-series' tests/tools/device-roundtrip.c
+# Observational timing only: no new subprocesses or test-order changes.
+printf 'ROOTLESS_TIMING native_make_s=%d remaining_contracts_s=%d\n' \
+  "$rootless_native_make_elapsed_seconds" "$((SECONDS - rootless_contracts_started_seconds))"
 printf '%s\n' 'PASS: rootless C tests, source contracts, Make policy and owned-device preflights'

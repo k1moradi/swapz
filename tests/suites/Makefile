@@ -87,36 +87,63 @@ anon-page-analyzer_SRC := $(NATIVE)/codec/anon-page-analyzer.c $(ENGINE) $(AUTH)
 anon-page-analyzer_HDR := $(KERNEL)/engine.h $(KERNEL)/predictor-route.h $(KERNEL)/predictor.h $(KERNEL)/predictor-internal.h $(KERNEL)/codec.h
 anon-page-analyzer_LDLIBS := -llz4
 
+# Compile exact production C once per native configuration, then link its
+# objects into independent test executables. Dependency files track headers.
+PRODUCTION_C_SOURCES := $(CODEC) $(AUTH) $(ENGINE)
+PRODUCTION_OBJECTS := $(OUT)/production-codec.o $(OUT)/production-authority.o $(OUT)/production-engine.o
+NATIVE_COMPILER_CONFIGURATION := $(OUT)/native-compiler-configuration
+native_production_objects = $(strip $(if $(filter $(CODEC),$(1)),$(OUT)/production-codec.o) $(if $(filter $(AUTH),$(1)),$(OUT)/production-authority.o) $(if $(filter $(ENGINE),$(1)),$(OUT)/production-engine.o))
+$(foreach program,$(PROGRAMS),$(eval $(program)_PRODUCTION_OBJECTS := $(call native_production_objects,$($(program)_SRC))))
+-include $(PRODUCTION_OBJECTS:.o=.d)
+
 $(OUT):
 	@mkdir -p "$@"
 
+# A content-stable stamp prevents stale plain, ASan/UBSan, or TSan binaries
+# from being reused after changing compiler flags or build configuration.
+.PHONY: native-compiler-configuration-force
+$(NATIVE_COMPILER_CONFIGURATION): native-compiler-configuration-force | $(OUT)
+	@set -eu; temporary_file="$@.tmp.$$$$"; \
+	  trap 'rm -f -- "$$temporary_file"' EXIT; \
+	  printf '%s\n' 'CC=$(CC)' 'CPPFLAGS=$(CPPFLAGS)' 'CFLAGS=$(CFLAGS)' > "$$temporary_file"; \
+	  if ! cmp -s "$$temporary_file" "$@"; then mv -f "$$temporary_file" "$@"; fi
+
+$(OUT)/production-codec.o: $(CODEC) $(NATIVE_COMPILER_CONFIGURATION) | $(OUT)
+	$(CC) $(CPPFLAGS) $(CFLAGS) -MMD -MP -MF "$(@:.o=.d)" -c "$<" -o "$@"
+
+$(OUT)/production-authority.o: $(AUTH) $(NATIVE_COMPILER_CONFIGURATION) | $(OUT)
+	$(CC) $(CPPFLAGS) $(CFLAGS) -MMD -MP -MF "$(@:.o=.d)" -c "$<" -o "$@"
+
+$(OUT)/production-engine.o: $(ENGINE) $(NATIVE_COMPILER_CONFIGURATION) | $(OUT)
+	$(CC) $(CPPFLAGS) $(CFLAGS) -MMD -MP -MF "$(@:.o=.d)" -c "$<" -o "$@"
+
 # Consolidate identical compile recipes, not the individual safety assertions.
 define BUILD_NATIVE
-$(OUT)/$(1): $$($(1)_SRC) $$($(1)_HDR) | $(OUT)
-	$$(CC) $$(CPPFLAGS) $$(CFLAGS) $$($(1)_SRC) -o "$$@" $$($(1)_LDLIBS)
+$(OUT)/$(1): $$($(1)_SRC) $$($(1)_HDR) $$($(1)_PRODUCTION_OBJECTS) $$(NATIVE_COMPILER_CONFIGURATION) | $(OUT)
+	$$(CC) $$(CPPFLAGS) $$(CFLAGS) $$(filter-out $$(PRODUCTION_C_SOURCES),$$($(1)_SRC)) $$($(1)_PRODUCTION_OBJECTS) -o "$$@" $$($(1)_LDLIBS)
 endef
 $(foreach name,$(PROGRAMS),$(eval $(call BUILD_NATIVE,$(name))))
 
-$(PREDICTOR_CORE_OBJ): $(KERNEL)/predictor.c $(KERNEL)/predictor.h $(KERNEL)/predictor-internal.h | $(OUT)
+$(PREDICTOR_CORE_OBJ): $(KERNEL)/predictor.c $(KERNEL)/predictor.h $(KERNEL)/predictor-internal.h $(NATIVE_COMPILER_CONFIGURATION) | $(OUT)
 	$(CC) $(CPPFLAGS) $(CFLAGS) -c $(KERNEL)/predictor.c -o "$@"
 
-$(OUT)/predictor-sse2.o: $(KERNEL)/predictor-sse2.c $(KERNEL)/predictor.h $(KERNEL)/predictor-internal.h $(KERNEL)/predictor-shuffle.h | $(OUT)
+$(OUT)/predictor-sse2.o: $(KERNEL)/predictor-sse2.c $(KERNEL)/predictor.h $(KERNEL)/predictor-internal.h $(KERNEL)/predictor-shuffle.h $(NATIVE_COMPILER_CONFIGURATION) | $(OUT)
 	$(CC) $(CPPFLAGS) $(CFLAGS) -msse2 -c $(KERNEL)/predictor-sse2.c -o "$@"
 
-$(OUT)/predictor-avx2.o: $(KERNEL)/predictor-avx2.c $(KERNEL)/predictor.h $(KERNEL)/predictor-internal.h $(KERNEL)/predictor-shuffle.h | $(OUT)
+$(OUT)/predictor-avx2.o: $(KERNEL)/predictor-avx2.c $(KERNEL)/predictor.h $(KERNEL)/predictor-internal.h $(KERNEL)/predictor-shuffle.h $(NATIVE_COMPILER_CONFIGURATION) | $(OUT)
 	$(CC) $(CPPFLAGS) $(CFLAGS) -mavx2 -c $(KERNEL)/predictor-avx2.c -o "$@"
 
-$(OUT)/predictor-avx512.o: $(KERNEL)/predictor-avx512.c $(KERNEL)/predictor.h $(KERNEL)/predictor-internal.h $(KERNEL)/predictor-shuffle.h | $(OUT)
+$(OUT)/predictor-avx512.o: $(KERNEL)/predictor-avx512.c $(KERNEL)/predictor.h $(KERNEL)/predictor-internal.h $(KERNEL)/predictor-shuffle.h $(NATIVE_COMPILER_CONFIGURATION) | $(OUT)
 	$(CC) $(CPPFLAGS) $(CFLAGS) -mavx512f -c $(KERNEL)/predictor-avx512.c -o "$@"
 
-$(OUT)/predictor-neon.o: $(KERNEL)/predictor-neon.c $(KERNEL)/predictor.h $(KERNEL)/predictor-internal.h $(KERNEL)/predictor-shuffle.h | $(OUT)
+$(OUT)/predictor-neon.o: $(KERNEL)/predictor-neon.c $(KERNEL)/predictor.h $(KERNEL)/predictor-internal.h $(KERNEL)/predictor-shuffle.h $(NATIVE_COMPILER_CONFIGURATION) | $(OUT)
 	$(CC) $(CPPFLAGS) $(CFLAGS) -c $(KERNEL)/predictor-neon.c -o "$@"
 
 $(OUT)/predictor-qualification: $(NATIVE)/codec/predictor-qualification.c \
 		$(KERNEL)/predictor-route.h $(ENGINE) $(AUTH) $(CODEC) \
-		$(PREDICTOR_CORE_OBJ) $(PREDICTOR_ARCH_OBJS) | $(OUT)
+		$(PREDICTOR_CORE_OBJ) $(PREDICTOR_ARCH_OBJS) $(PRODUCTION_OBJECTS) $(NATIVE_COMPILER_CONFIGURATION) | $(OUT)
 	$(CC) $(CPPFLAGS) $(CFLAGS) $(NATIVE)/codec/predictor-qualification.c \
-		$(ENGINE) $(AUTH) $(CODEC) $(PREDICTOR_CORE_OBJ) $(PREDICTOR_ARCH_OBJS) \
+		$(PRODUCTION_OBJECTS) $(PREDICTOR_CORE_OBJ) $(PREDICTOR_ARCH_OBJS) \
 		-o "$@" -llz4
 
 test-codec: $(OUT)/codec-roundtrip $(OUT)/extent-geometry $(OUT)/superblock
@@ -173,7 +200,9 @@ test-all: test-codec test-predictor test-mapping test-gc test-lower-io test-user
 
 clean:
 	@rm -f $(addprefix $(OUT)/,$(PROGRAMS)) $(OUT)/predictor-qualification \
-		$(PREDICTOR_CORE_OBJ) $(OUT)/predictor-sse2.o \
+		$(PREDICTOR_CORE_OBJ) $(PRODUCTION_OBJECTS) \
+		$(PRODUCTION_OBJECTS:.o=.d) $(NATIVE_COMPILER_CONFIGURATION) \
+		$(OUT)/predictor-sse2.o \
 		$(OUT)/predictor-avx2.o $(OUT)/predictor-avx512.o \
 		$(OUT)/predictor-neon.o \
 		$(OUT)/predictor-entropy.bin $(OUT)/predictor-entropy.json \

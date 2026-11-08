@@ -263,6 +263,19 @@ class SwapzProductionSourceQualification(unittest.TestCase):
             "test-anon-page-analyzer", suites)
         self.assertIn("test-all: test-codec test-predictor", suites)
 
+    def test_native_compilation_shares_objects_without_merging_tests(self):
+        suites = (ROOT / "tests/suites/Makefile").read_text(encoding="utf-8")
+        self.assertIn("native_production_objects = ", suites)
+        self.assertIn("$(foreach program,$(PROGRAMS),$(eval ", suites)
+        self.assertIn("$$(filter-out $$(PRODUCTION_C_SOURCES)", suites)
+        self.assertIn("native-compiler-configuration-force", suites)
+        self.assertIn("$(NATIVE_COMPILER_CONFIGURATION)", suites)
+        self.assertIn("-MMD -MP -MF", suites)
+        for source_name in ("codec", "authority", "engine"):
+            self.assertIn(f"$(OUT)/production-{source_name}.o:", suites)
+        self.assertIn("test-mapping: $(OUT)/zero-write-elision", suites)
+        self.assertIn("test-gc: $(OUT)/gc-forbidden-victim", suites)
+
     def test_native_sanitizers_fail_hard_in_ci(self):
         suites = (ROOT / "tests/suites/Makefile").read_text(encoding="utf-8")
         workflow = (

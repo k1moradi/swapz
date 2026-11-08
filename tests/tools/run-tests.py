@@ -3425,6 +3425,18 @@ def first_compiler_failure_location(output):
     return []
 
 
+def parse_rootless_timing(output):
+    """Return optional wall-time attribution, never a qualification gate."""
+    matches = re.findall(
+        r"(?m)^ROOTLESS_TIMING native_make_s=(0|[1-9][0-9]{0,7}) "
+        r"remaining_contracts_s=(0|[1-9][0-9]{0,7})$", output)
+    if len(matches) != 1:
+        return None
+    native_make_seconds, contracts_seconds = map(int, matches[0])
+    return {"native_make_s": native_make_seconds,
+            "remaining_contracts_s": contracts_seconds}
+
+
 def run_stage(title, command, result, *, parse_bench=False):
     start = time.monotonic()
     try:
@@ -3578,6 +3590,11 @@ def run_stage(title, command, result, *, parse_bench=False):
               else "BLOCKED" if blocked_marker else "FAIL")
     record = {"name": title, "status": status, "elapsed_s":
               round(time.monotonic() - start, 3), "exit_code": rc}
+    if title == "Native and rootless contracts":
+        rootless_timing = parse_rootless_timing(output)
+        if rootless_timing is not None and (
+                sum(rootless_timing.values()) <= record["elapsed_s"] + 2):
+            record["substage_elapsed_s"] = rootless_timing
     if rc:
         if rc != observed_exit_code:
             record["child_exit_code"] = observed_exit_code
@@ -3687,6 +3704,11 @@ def run_stage(title, command, result, *, parse_bench=False):
         result["benchmarks"]["storage_envelopes"] = storage_envelope_diagnostic
     print(f"  {len(result['stages']):>2}/5  {title:<29} "
           f"{status:<8} {record['elapsed_s']:>8.2f}s", flush=True)
+    if "substage_elapsed_s" in record:
+        timing = record["substage_elapsed_s"]
+        print(f"        native make: {timing['native_make_s']}s; "
+              f"remaining contracts: {timing['remaining_contracts_s']}s",
+              flush=True)
     if rc and "diagnostic" in record:
         print(f"        Failed during: {record['failed_phase']}", flush=True)
         print(f"        Reason: {record['diagnostic']}", flush=True)

@@ -17,6 +17,20 @@ runner = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(runner)
 
 
+class NativeTimingContract(unittest.TestCase):
+    def test_rootless_timing_is_observational_and_rejects_ambiguous_records(self):
+        valid = "ROOTLESS_TIMING native_make_s=12 remaining_contracts_s=34\n"
+        self.assertEqual(
+            runner.parse_rootless_timing(valid),
+            {"native_make_s": 12, "remaining_contracts_s": 34})
+        self.assertIsNone(runner.parse_rootless_timing(""))
+        self.assertIsNone(runner.parse_rootless_timing(valid + valid))
+        self.assertIsNone(runner.parse_rootless_timing(
+            "ROOTLESS_TIMING native_make_s=-1 remaining_contracts_s=34\n"))
+        self.assertIsNone(runner.parse_rootless_timing(
+            "ROOTLESS_TIMING native_make_s=01 remaining_contracts_s=34\n"))
+
+
 class FakeStreamingProcess:
     """Minimal Popen-compatible process for streamed loaded-stage tests."""
 
