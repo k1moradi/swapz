@@ -81,8 +81,15 @@ source-controlled phase labels; the loaded reporter attributes wall time from
 existing streamed markers to preflight, lifecycle, fixture preparation,
 individual matched benchmark families, ID36 and terminal cleanup. Both
 breakdowns are optional observational report fields, never new qualification
-gates, session scheduling changes, or substitutes for per-I/O latency. Missing
-or malformed timing evidence must not alter PASS/FAIL/BLOCKED. Sensitive child
+gates, session scheduling changes, or substitutes for per-I/O latency.
+Each visible owned-RAM benchmark pair also records bounded monotonic-uptime
+elapsed milliseconds for setup, fixture, replay, verification and ownership-
+safe teardown. The optional `benchmarks.owned_pair_phase_timings` report
+field stores only complete, ordered five-phase pairs and their execution
+indices; private redirected raw-read and incomplete sessions may be absent.
+The helper never shares resources between pairs, never changes the official
+benchmark workload, and timing-read or display failures do not alter verdicts.
+Missing or malformed timing evidence must not alter PASS/FAIL/BLOCKED. Sensitive child
 output must never become a phase label. A protected identity read may use
 only the fixed, bounded, pinned, read-only noninteractive privileged fallback. If its authorization or trust checks
 fail, the host identity remains UNAVAILABLE; no insecure file mode change,

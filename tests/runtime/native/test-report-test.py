@@ -222,6 +222,32 @@ class NativeTimingContract(unittest.TestCase):
         self.assertIsNone(runner.parse_rootless_phase_timings(
             valid.replace("source-contract-test.py", "/private/secret")))
 
+    def test_owned_pair_phase_timings_are_ordered_and_never_gates(self):
+        records = (
+            "OWNED_PAIR_PHASE_TIMING phase=setup elapsed_ms=120\n"
+            "OWNED_PAIR_PHASE_TIMING phase=fixture elapsed_ms=45\n"
+            "OWNED_PAIR_PHASE_TIMING phase=replay elapsed_ms=12000\n"
+            "OWNED_PAIR_PHASE_TIMING phase=verification elapsed_ms=30\n"
+            "OWNED_PAIR_PHASE_TIMING phase=teardown elapsed_ms=190\n")
+        self.assertEqual(runner.parse_owned_pair_phase_timings(records), [{
+            "pair_index": 0,
+            "phase_elapsed_ms": [
+                {"phase": phase, "elapsed_ms": duration}
+                for phase, duration in (
+                    ("setup", 120), ("fixture", 45), ("replay", 12000),
+                    ("verification", 30), ("teardown", 190))]}])
+        self.assertEqual(runner.parse_owned_pair_phase_timings(
+            records + "OWNED_PAIR_PHASE_TIMING phase=setup elapsed_ms=1\n"),
+            runner.parse_owned_pair_phase_timings(records))
+        for malformed in (
+                records.replace("phase=replay", "phase=teardown"),
+                records.replace("elapsed_ms=45", "elapsed_ms=04"),
+                records.replace("phase=fixture", "phase=/private/name"),
+                records * 161):
+            with self.subTest(malformed=malformed[:40]):
+                self.assertIsNone(
+                    runner.parse_owned_pair_phase_timings(malformed))
+
     def test_loaded_timing_boundaries_do_not_use_child_supplied_labels(self):
         self.assertEqual(runner.loaded_timing_phase(
             "START_LOADED_PRIMARY_NULLBLK_LIFECYCLE\n"), "primary-lifecycle")

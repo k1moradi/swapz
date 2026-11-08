@@ -3599,6 +3599,40 @@ def rootless_phase_progress(line, allowed_names):
     return match.group(1), int(match.group(2)), int(match.group(3)), match.group(4)
 
 
+OWNED_PAIR_PHASE_PATTERN = re.compile(
+    r"OWNED_PAIR_PHASE_TIMING phase=(setup|fixture|replay|verification|teardown) "
+    r"elapsed_ms=(0|[1-9][0-9]{0,7})")
+
+
+def parse_owned_pair_phase_timings(output):
+    """Capture complete in-order pair boundaries without trusting child labels.
+
+    This is optional wall-time evidence, not a benchmark or cleanup gate.
+    An interrupted pair retains any earlier completed pairs, not an invented
+    zero-duration teardown for the unfinished session.
+    """
+    lines = [line for line in output.splitlines()
+             if line.startswith("OWNED_PAIR_PHASE_TIMING ")]
+    if len(lines) > 800:
+        return None
+    phases = ("setup", "fixture", "replay", "verification", "teardown")
+    complete_pairs = []
+    current = []
+    for line in lines:
+        match = OWNED_PAIR_PHASE_PATTERN.fullmatch(line)
+        if match is None or match.group(1) != phases[len(current)]:
+            return None
+        current.append({"phase": match.group(1),
+                        "elapsed_ms": int(match.group(2))})
+        if len(current) == len(phases):
+            complete_pairs.append({
+                "pair_index": len(complete_pairs),
+                "phase_elapsed_ms": current,
+            })
+            current = []
+    return complete_pairs
+
+
 def parse_rootless_phase_timings(output):
     """Return bounded, source-allowlisted suite times, never a PASS gate."""
     prefix = "ROOTLESS_PHASE_TIMING "
@@ -4000,6 +4034,10 @@ def run_stage(title, command, result, *, parse_bench=False,
         result["benchmarks"]["loaded_correctness"] = loaded_correctness
         result.setdefault("evidence", {})["kernel_debug"] = kernel_debug_evidence
         result["benchmarks"]["sessions"] = parse_sessions(output)
+        owned_pair_timings = parse_owned_pair_phase_timings(output)
+        if owned_pair_timings is not None:
+            result["benchmarks"]["owned_pair_phase_timings"] = (
+                owned_pair_timings)
         result["benchmarks"]["verdicts"] = benchmark_verdicts(
             result["benchmarks"]["sessions"])
         if (loaded_correctness.get("overall") == "PASS" and

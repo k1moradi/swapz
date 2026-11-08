@@ -288,6 +288,29 @@ DMDEV=""
 DMKNAME=""
 note() { printf '%s\n' "$*"; }
 fail() { note "BLOCKED: $*" >&2; exit 1; }
+
+# Read Linux's monotonic uptime directly without spawning a timing process.
+# All timing failures remain observational; ownership and replay verdicts win.
+pair_elapsed_clock_ms() {
+    local uptime unused
+    IFS=' ' read -r uptime unused < /proc/uptime || return 1
+    [[ $uptime =~ ^([0-9]{1,10})[.]([0-9]{2})[0-9]*$ ]] || return 1
+    printf '%d\n' "$((10#${BASH_REMATCH[1]} * 1000 +
+                         10#${BASH_REMATCH[2]} * 10))"
+}
+pair_timing_boundary() {
+    local completed_phase=$1 current_ms
+    [[ -n ${PAIR_TIMING_START_MS:-} ]] || return 0
+    current_ms="$(pair_elapsed_clock_ms)" || {
+        PAIR_TIMING_START_MS=
+        return 0
+    }
+    if (( current_ms >= PAIR_TIMING_START_MS )); then
+        printf 'OWNED_PAIR_PHASE_TIMING phase=%s elapsed_ms=%d\n' \
+            "$completed_phase" "$((current_ms - PAIR_TIMING_START_MS))" || :
+    fi
+    PAIR_TIMING_START_MS=$current_ms
+}
 devno() {
     local encoded major minor
     encoded="$(stat -Lc '%t:%T' "$1")" || return 1
@@ -380,6 +403,7 @@ done
 [[ ! -d /sys/module/dm_swapz && -r /proc/swaps ]] ||
     fail "another dm_swapz loaded or swap inventory unavailable"
 SESSION="$(mktemp -d "${TMPDIR:-/tmp}/swapz-benchmark.XXXXXXXX")"
+PAIR_TIMING_START_MS="$(pair_elapsed_clock_ms)" || PAIR_TIMING_START_MS=
 printf 'pid=%s\nsource_sha=%s\n' "$$" "$VALIDATED_SOURCE" \
     > "$SESSION/.swapz-benchmark-owner"
 exec > >(tee -a "$SESSION/session.log") 2>&1
@@ -532,6 +556,7 @@ cleanup() {
         printf 'pid=%s\nsource_sha=%s\n' "$$" "$SOURCE" \
             > "$SESSION/.swapz-benchmark-complete"
     fi
+    pair_timing_boundary teardown
     note "EVIDENCE=$SESSION/session.log"
     exit "$result"
 }
@@ -769,6 +794,7 @@ dm_sysfs="$(readlink -f "/sys/dev/block/$DMDEV")"
 DMKNAME="${dm_sysfs##*/}"
 [[ "$DMKNAME" =~ ^dm-[0-9]+$ ]] ||
     fail 'owned DM kernel identity is ambiguous'
+pair_timing_boundary setup
 FIXTURE_PATH="$SESSION/fixture.bin"
 if [[ -n $SHARED_PLAN ]]; then
     plan_dir="$SHARED_PLAN/plan"
@@ -925,6 +951,7 @@ replay_swapz() {
         fail 'swapz replay exceeded bounded timeout'
     return "$rc"
 }
+pair_timing_boundary fixture
 if (( REPLAY_SWAPZ_FIRST )); then
     note 'REPLAY_ORDER=swapz-first'
     replay_swapz
@@ -934,6 +961,7 @@ else
     replay_off
     replay_swapz
 fi
+pair_timing_boundary replay
 swapz_status_after="$(dmsetup status "$DMNAME")"
 note "SWAPZ_STATUS_AFTER=$swapz_status_after"
 if (( !LINEAR_CALIBRATION )); then
@@ -977,4 +1005,5 @@ python3 -B tests/runtime/benchmark/io-replay.py compare \
     "${COMPARE_ARGS[@]}" \
     --reports "$SESSION/off.json" "$SESSION/swapz.json" |
     tee "$SESSION/pair.json" || fail 'pair verification rejected'
+pair_timing_boundary verification
 note 'PASS: bounded owned-RAM same-work pilot; not physical SD, full-card, real-swap or sustained qualification'
