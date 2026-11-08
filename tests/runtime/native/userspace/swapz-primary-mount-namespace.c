@@ -13,6 +13,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <sys/stat.h>
+#include <sys/ioctl.h>
 #include <sys/syscall.h>
 #include <sys/sysmacros.h>
 #include <unistd.h>
@@ -99,6 +100,7 @@ enum fixture_namespace_kind {
 };
 
 static int fixture_namespace_fd = -1;
+static int fixture_namespace_id_ioctl_error;
 static enum fixture_namespace_kind fixture_namespace_fd_kind =
 	FIXTURE_NAMESPACE_NONE;
 static enum fixture_namespace_kind fixture_hidden_namespace_kind =
@@ -284,6 +286,34 @@ static uint64_t fixture_namespace_mount_id_base(
 	return 0x100000000ULL + ((uint64_t)kind << 20);
 }
 
+/* Model the kernel-assigned namespace ID, not the descriptor number.
+ * It remains stable for the pinned namespace across statmount/listmount.
+ */
+static uint64_t fixture_namespace_id(enum fixture_namespace_kind kind)
+{
+	assert(kind != FIXTURE_NAMESPACE_NONE);
+	return 0x200000000ULL + (uint64_t)kind;
+}
+
+static int fixture_ioctl(int descriptor, unsigned long command, void *argument)
+{
+	/* Keep the native model read-only. Unexpected ioctls cannot mutate
+	 * devices or turn an unavailable namespace ID into authorization.
+	 */
+	if (descriptor != fixture_namespace_fd ||
+	    command != _IOR(0xb7, 0x5, uint64_t) ||
+	    fixture_namespace_fd_kind == FIXTURE_NAMESPACE_NONE || !argument) {
+		errno = ENOTTY;
+		return -1;
+	}
+	if (fixture_namespace_id_ioctl_error) {
+		errno = fixture_namespace_id_ioctl_error;
+		return -1;
+	}
+	*(uint64_t *)argument = fixture_namespace_id(fixture_namespace_fd_kind);
+	return 0;
+}
+
 static size_t fixture_namespace_devices(
 	enum fixture_namespace_kind kind, dev_t *devices, size_t capacity)
 {
@@ -340,7 +370,7 @@ static size_t fixture_namespace_devices(
 
 struct fixture_mount_id_request {
 	uint32_t size;
-	uint32_t namespace_fd;
+	uint32_t namespace_reserved;
 	uint64_t mount_id;
 	uint64_t parameter;
 	uint64_t namespace_id;
@@ -449,7 +479,8 @@ static long fixture_syscall(long number, ...)
 		assert(request != NULL);
 		assert(status != NULL);
 		assert(status_size >= sizeof(*status));
-		assert(request->namespace_fd == (uint32_t)fixture_namespace_fd);
+		assert(request->namespace_reserved == 0U);
+		assert(request->namespace_id == fixture_namespace_id(kind));
 		if (status_size < FIXTURE_STATMOUNT_FIXED_BYTES) {
 			fixture_statmount_short_buffer_injected = 1;
 			errno = EOVERFLOW;
@@ -520,7 +551,8 @@ static long fixture_syscall(long number, ...)
 		(void)flags;
 		assert(request != NULL);
 		assert(mount_ids != NULL);
-		assert(request->namespace_fd == (uint32_t)fixture_namespace_fd);
+		assert(request->namespace_reserved == 0U);
+		assert(request->namespace_id == fixture_namespace_id(kind));
 		assert(kind != FIXTURE_NAMESPACE_NONE);
 		++fixture_namespace_listmount_calls[kind];
 		if (fixture_namespace_syscall_error_kind == kind &&
@@ -960,12 +992,14 @@ static ssize_t fixture_readlink(const char *path, char *buffer, size_t size)
 #define readlink(...) fixture_readlink(__VA_ARGS__)
 #define statx(...) fixture_statx(__VA_ARGS__)
 #define syscall(...) fixture_syscall(__VA_ARGS__)
+#define ioctl(...) fixture_ioctl(__VA_ARGS__)
 /* Keep the synthetic foreign PID distinct from the production reader's self. */
 #define getpid() ((pid_t)65535)
 #define main swapz_primary_program_main
 #include "../../../../src/userspace/swapz-primary.c"
 #undef main
 #undef getpid
+#undef ioctl
 #undef syscall
 #undef statx
 #undef lstat
@@ -1155,6 +1189,7 @@ static void fixture_reset(void)
 	strcpy(fixture_self_root, "/");
 	fixture_namespace_fd = -1;
 	fixture_namespace_fd_kind = FIXTURE_NAMESPACE_NONE;
+	fixture_namespace_id_ioctl_error = 0;
 	fixture_hidden_namespace_kind = FIXTURE_NAMESPACE_NONE;
 	fixture_hidden_namespace_device = 0;
 	fixture_hidden_namespace_padding_mounts = 0U;
@@ -2834,6 +2869,12 @@ int main(void)
 		     "37 36 8:0 / /parent rw - ext4 /dev/sda rw\n");
 	expect_mount_admission("selected parent mounted locally", 0, 0);
 
+	fixture_reset();
+	fixture_namespace_id_ioctl_error = ENOTTY;
+	expect_mount_admission("unavailable pinned namespace ID", 0, ENOTTY);
+	fixture_reset();
+	fixture_namespace_id_ioctl_error = EINVAL;
+	expect_mount_admission("invalid namespace ID request", 0, EINVAL);
 	fixture_reset();
 	fixture_file("self/mountinfo", "malformed\n");
 	expect_mount_admission("malformed local mount table", 0, EINVAL);
