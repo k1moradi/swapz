@@ -5751,7 +5751,9 @@ class ReportContract(unittest.TestCase):
             git("commit", "-m", "Testable source", cwd=checkout)
             source_sha = git("rev-parse", "HEAD", cwd=checkout).stdout.strip()
             git("remote", "add", "origin", str(origin), cwd=checkout)
-            git("push", "origin", "main", cwd=checkout)
+            # Seed the local bare remote without invoking host pre-push hooks.
+            git("--git-dir", str(origin), "fetch", "--no-tags",
+                str(checkout), "main:refs/heads/main", cwd=sandbox)
 
             old_root, old_report, old_git_result = (
                 runner.ROOT, runner.REPORT, runner.git_result)
@@ -5928,7 +5930,9 @@ class ReportContract(unittest.TestCase):
             git("commit", "-m", "Tested source", cwd=checkout)
             source_sha = git("rev-parse", "HEAD", cwd=checkout).stdout.strip()
             git("remote", "add", "origin", str(origin), cwd=checkout)
-            git("push", "origin", "main", cwd=checkout)
+            # Seed the local bare remote without invoking host pre-push hooks.
+            git("--git-dir", str(origin), "fetch", "--no-tags",
+                str(checkout), "main:refs/heads/main", cwd=sandbox)
 
             git("clone", "-b", "main", str(origin), str(peer), cwd=sandbox)
             git("config", "user.name", "concurrent writer", cwd=peer)
@@ -6017,7 +6021,9 @@ class ReportContract(unittest.TestCase):
             git("commit", "-m", "Tested source", cwd=checkout)
             source_sha = git("rev-parse", "HEAD", cwd=checkout).stdout.strip()
             git("remote", "add", "origin", str(origin), cwd=checkout)
-            git("push", "origin", "main", cwd=checkout)
+            # Seed the local bare remote without invoking host pre-push hooks.
+            git("--git-dir", str(origin), "fetch", "--no-tags",
+                str(checkout), "main:refs/heads/main", cwd=sandbox)
 
             git("clone", "-b", "main", str(origin), str(peer), cwd=sandbox)
             git("config", "user.name", "concurrent tester", cwd=peer)
@@ -6127,7 +6133,9 @@ class ReportContract(unittest.TestCase):
             git("commit", "-m", "Older source C1", cwd=checkout)
             c1_sha = git("rev-parse", "HEAD", cwd=checkout).stdout.strip()
             git("remote", "add", "origin", str(origin), cwd=checkout)
-            git("push", "origin", "main", cwd=checkout)
+            # Seed the local bare remote without invoking host pre-push hooks.
+            git("--git-dir", str(origin), "fetch", "--no-tags",
+                str(checkout), "main:refs/heads/main", cwd=sandbox)
 
             git("clone", "-b", "main", str(origin), str(peer), cwd=sandbox)
             git("config", "user.name", "newer tester", cwd=peer)
@@ -6218,7 +6226,9 @@ class ReportContract(unittest.TestCase):
             git("commit", "-m", "Older source C1", cwd=checkout)
             c1_sha = git("rev-parse", "HEAD", cwd=checkout).stdout.strip()
             git("remote", "add", "origin", str(origin), cwd=checkout)
-            git("push", "origin", "main", cwd=checkout)
+            # Seed the local bare remote without invoking host pre-push hooks.
+            git("--git-dir", str(origin), "fetch", "--no-tags",
+                str(checkout), "main:refs/heads/main", cwd=sandbox)
 
             git("clone", "-b", "main", str(origin), str(peer), cwd=sandbox)
             git("config", "user.name", "newer tester", cwd=peer)
@@ -6319,14 +6329,18 @@ class ReportContract(unittest.TestCase):
             git("commit", "-m", "Older source C1 with old report", cwd=checkout)
             c1_sha = git("rev-parse", "HEAD", cwd=checkout).stdout.strip()
             git("remote", "add", "origin", str(origin), cwd=checkout)
-            git("push", "origin", "main", cwd=checkout)
+            # Seed the local bare remote without invoking host pre-push hooks.
+            git("--git-dir", str(origin), "fetch", "--no-tags",
+                str(checkout), "main:refs/heads/main", cwd=sandbox)
 
             # Checkout advances to C2 (tested commit)
             (checkout / "source.c").write_text("v2 source\n")
             git("add", "source.c", cwd=checkout)
             git("commit", "-m", "Newer source C2", cwd=checkout)
             c2_sha = git("rev-parse", "HEAD", cwd=checkout).stdout.strip()
-            git("push", "origin", "main", cwd=checkout)
+            # Seed the local bare remote without invoking host pre-push hooks.
+            git("--git-dir", str(origin), "fetch", "--no-tags",
+                str(checkout), "main:refs/heads/main", cwd=sandbox)
 
             # Peer clones and adds a concurrent docs commit C3 on top of C2
             git("clone", "-b", "main", str(origin), str(peer), cwd=sandbox)
@@ -6401,7 +6415,9 @@ class ReportContract(unittest.TestCase):
             git("commit", "-m", "Tested source", cwd=checkout)
             source_sha = git("rev-parse", "HEAD", cwd=checkout).stdout.strip()
             git("remote", "add", "origin", str(origin), cwd=checkout)
-            git("push", "origin", "main", cwd=checkout)
+            # Seed the local bare remote without invoking host pre-push hooks.
+            git("--git-dir", str(origin), "fetch", "--no-tags",
+                str(checkout), "main:refs/heads/main", cwd=sandbox)
 
             old_root, old_report, old_git_result = (
                 runner.ROOT, runner.REPORT, runner.git_result)
