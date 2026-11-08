@@ -35,6 +35,9 @@ class NativeTimingContract(unittest.TestCase):
                         "name": title, "status": "PASS",
                         "elapsed_s": 0.0, "exit_code": 0,
                     })
+                    if options.get("parse_bench"):
+                        result["benchmarks"]["delta64_prepare"] = {
+                            "overall": "NOT_RUN"}
                     return 0
 
                 with mock.patch.object(

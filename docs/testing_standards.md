@@ -89,6 +89,9 @@ The tier-routing regression must prove the same five source/native/kernel/
 RAM stage calls are preserved, the algorithm rootless command uniquely selects
 `--algorithm`, and an all-PASS RAM stage array cannot qualify a physical
 device. The full-tier fixture retains the original RAM PASS semantics.
+Its mocked loaded phase must initialize the ordinary optional
+`delta64_prepare` benchmark record as NOT_RUN before reaching the report
+admission gate; absence of unrelated fixture fields is not physical evidence.
 The hermetic incremental Make-interface fixture exercises `make test_full`,
 which preserves the original five-stage RAM build-order and exact-artifact
 PASS/refusal contract. It must not treat an algorithm-tier physical-INCOMPLETE
