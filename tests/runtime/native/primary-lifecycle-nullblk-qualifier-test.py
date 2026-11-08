@@ -103,6 +103,26 @@ class PrimaryLifecycleNullblkQualifierContract(unittest.TestCase):
         self.assertIn('[[ "$child_exit" -eq 2 ]]', self.script)
         self.assertIn('[[ "$after_state" == "$before_state"', self.script)
 
+    def test_mkswap_tool_output_cannot_leak_into_lifecycle_diagnostics(self):
+        output_start = self.primary.index(
+            "static int swapz_primary_mkswap_output_open(void)")
+        output_end = self.primary.index("\nstatic int swapz_primary_run_mkswap(",
+                                        output_start)
+        output_open = self.primary[output_start:output_end]
+        run_start = output_end + 1
+        run_end = self.primary.index("\n}\n#endif", run_start) + 2
+        runner = self.primary[run_start:run_end]
+
+        self.assertIn('open("/dev/null", O_WRONLY | O_NOFOLLOW | O_CLOEXEC)',
+                      output_open)
+        self.assertIn("F_DUPFD_CLOEXEC", output_open)
+        self.assertIn("!S_ISCHR(output_info.st_mode)", output_open)
+        self.assertIn("output_info.st_rdev != makedev(1U, 3U)", output_open)
+        self.assertIn("dup2(output_fd, STDOUT_FILENO)", runner)
+        self.assertIn("dup2(output_fd, STDERR_FILENO)", runner)
+        self.assertLess(runner.index("dup2(output_fd, STDERR_FILENO)"),
+                        runner.index("fexecve(mkswap_fd, arguments, environment)"))
+
     def test_expected_repeat_recovery_refusal_is_not_emitted_as_stage_block(self):
         begin = self.script.index("assert_repeat_recovery_is_safe() {")
         end = self.script.index("\n}", begin) + 2

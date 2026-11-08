@@ -10803,6 +10803,48 @@ failed:
 	return -1;
 }
 
+static int swapz_primary_mkswap_output_open(void)
+{
+	struct stat output_info;
+	int fd;
+
+	fd = open("/dev/null", O_WRONLY | O_NOFOLLOW | O_CLOEXEC);
+	if (fd < 0)
+		return -1;
+	if (fd <= STDERR_FILENO) {
+		int retained_fd = fcntl(fd, F_DUPFD_CLOEXEC,
+					STDERR_FILENO + 1);
+
+		if (retained_fd < 0)
+			goto failed;
+		if (close(fd) < 0) {
+			int saved_errno = errno;
+
+			(void)close(retained_fd);
+			errno = saved_errno;
+			return -1;
+		}
+		fd = retained_fd;
+	}
+	if (fstat(fd, &output_info) < 0)
+		goto failed;
+	if (!S_ISCHR(output_info.st_mode) ||
+	    output_info.st_rdev != makedev(1U, 3U)) {
+		errno = EPERM;
+		goto failed;
+	}
+	return fd;
+
+failed:
+	{
+		int saved_errno = errno;
+
+		(void)close(fd);
+		errno = saved_errno;
+	}
+	return -1;
+}
+
 static int swapz_primary_run_mkswap(int mkswap_fd, int mapper_fd)
 {
 	char mapper_path[64];
@@ -10814,17 +10856,29 @@ static int swapz_primary_run_mkswap(int mkswap_fd, int mapper_fd)
 	};
 	pid_t child;
 	int status;
+	int output_fd;
 
 	if (swapz_primary_proc_fd_path(
 		    mapper_fd, mapper_path, sizeof(mapper_path)) < 0)
 		return -1;
-	child = fork();
-	if (child < 0)
+	output_fd = swapz_primary_mkswap_output_open();
+	if (output_fd < 0)
 		return -1;
+	child = fork();
+	if (child < 0) {
+		int saved_errno = errno;
+
+		(void)close(output_fd);
+		errno = saved_errno;
+		return -1;
+	}
 	if (child == 0) {
 		int descriptor_flags = fcntl(mapper_fd, F_GETFD);
 
-		if (descriptor_flags < 0 ||
+		if (dup2(output_fd, STDOUT_FILENO) < 0 ||
+		    dup2(output_fd, STDERR_FILENO) < 0 ||
+		    close(output_fd) < 0 ||
+		    descriptor_flags < 0 ||
 		    fcntl(mapper_fd, F_SETFD,
 			  descriptor_flags & ~FD_CLOEXEC) < 0)
 			_exit(126);
@@ -10834,9 +10888,16 @@ static int swapz_primary_run_mkswap(int mkswap_fd, int mapper_fd)
 	for (;;) {
 		if (waitpid(child, &status, 0) >= 0)
 			break;
-		if (errno != EINTR)
+		if (errno != EINTR) {
+			int saved_errno = errno;
+
+			(void)close(output_fd);
+			errno = saved_errno;
 			return -1;
+		}
 	}
+	if (close(output_fd) < 0)
+		return -1;
 	if (!WIFEXITED(status) || WEXITSTATUS(status) != 0) {
 		errno = EIO;
 		return -1;

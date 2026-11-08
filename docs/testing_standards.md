@@ -3291,6 +3291,12 @@ phase/persistence/resource fields, and the following `BLOCKED: primary-swap
 <operation> failed: <strerror>` wrapper must match exactly. A timeout,
 unrelated nonzero exit, missing/duplicate line, wrong errno/cause, malformed
 resource field or extra sideband is a harness FAIL and must not be echoed.
+The privileged manager must suppress both output streams from its pinned
+`mkswap` child so tool status text, including generated identifiers, cannot
+enter the coordinator's authenticated refusal output. The child still reports
+failure through its exit status and the manager's bounded structured record.
+The source regression must require a verified `/dev/null` output descriptor
+and redirection of both child streams before `fexecve()`.
 For the reporter exemption, the fixed case-to-refusal contracts are:
 `swapon-eintr-noeffect=start/EINTR`,
 `swapon-eio-noeffect=start/EIO`,
