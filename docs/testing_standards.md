@@ -83,6 +83,9 @@ The eleven expected fault-injection BLOCKED refusals remain authenticated
 against the exact captured case matrix but are not printed as separate table
 rows; an unexpected BLOCKED or FAIL remains a non-PASS terminal row and
 the existing stage failure summary preserves the original attribution.
+Generic BLOCKED/FAIL summary text must redact relative as well as absolute
+child-supplied paths; a known preflight BLOCKED marker must remain BLOCKED
+in its single displayed row, not be mislabeled FAIL.
 A synthetic report-contract fixture may contain authenticated negative-case
 records without a top-level lifecycle START boundary; such a fixture must
 not demand a lifecycle display row that the child never started.

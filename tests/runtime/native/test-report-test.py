@@ -2376,6 +2376,24 @@ class ReportContract(unittest.TestCase):
         self.assertNotIn("private/path", printed)
         self.assertEqual(result["stages"][-1]["status"], "BLOCKED")
 
+    def test_loaded_table_preflight_block_is_one_safe_row(self):
+        from unittest import mock
+
+        result = {"stages": [], "benchmarks": {}}
+        output = io.StringIO()
+        transcript = "BLOCKED_LOADED_QUALIFICATION: /private/host/path\n"
+        with mock.patch.object(
+                runner.subprocess, "Popen",
+                return_value=FakeStreamingProcess(transcript, returncode=2)), \
+                contextlib.redirect_stdout(output):
+            runner.run_stage("Owned RAM smoke + mixed/QD pilot",
+                             ["unused"], result, parse_bench=True)
+        printed = output.getvalue()
+        self.assertIn("Loaded host preflight", printed)
+        self.assertIn("| BLOCKED", printed)
+        self.assertNotIn("/private", printed)
+        self.assertEqual(result["stages"][-1]["status"], "BLOCKED")
+
     def test_loaded_progress_table_updates_terminal_row_in_place(self):
         from unittest import mock
 
