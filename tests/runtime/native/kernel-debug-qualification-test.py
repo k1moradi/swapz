@@ -354,6 +354,16 @@ class KernelDebugQualificationTests(unittest.TestCase):
         # Only this in-memory test copy redirects the immutable production
         # procfs path. Ownership flags disable every real teardown operation.
         cleanup = cleanup.replace(identity_path, '"$TEST_BOOT_ID_FILE"')
+        # Inject a caller-output failure only after the real tee fanout joins.
+        # This exercises publication failure without affecting its log writes.
+        joined_fanout = 'wait "$SESSION_TEE_PID" || tee_rc=$?'
+        self.assertEqual(cleanup.count(joined_fanout), 1)
+        cleanup = cleanup.replace(
+            joined_fanout,
+            joined_fanout + '\n'
+            '    if [[ "$SCENARIO" == publication_output_failure ]]; then\n'
+            '        exec {SESSION_OUTPUT_FD}> /dev/full\n'
+            '    fi')
         shell = "set -Eeuo pipefail\n" + reader + "\n" + cleanup + r"""
 note() { printf '%s\n' "$*"; }
 fail() { printf 'BLOCKED: %s\n' "$*" >&2; exit 1; }
@@ -380,6 +390,10 @@ tee() {
 SESSION="$TEST_SESSION_DIR"
 SOURCE_HEAD=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
 printf 'pid=%s\nsource_sha=%s\n' "$$" "$SOURCE_HEAD" > "$SESSION/.swapz-deploy-owner"
+# A directory cannot be mistaken for a successfully committed marker.
+if [[ "$SCENARIO" == completion_commit_failure ]]; then
+    mkdir "$SESSION/.swapz-deploy-complete"
+fi
 SWAPS_ID_BEFORE="stable"
 OWN_DM=0
 OWN_NULL=0
@@ -446,6 +460,10 @@ exit 0
              "evidence_flush", "retention_flush_failed", "unknown"),
             ("evidence_commit_failure", BOOT_ID + "\n", 1,
              "evidence_commit", "retention_write_failed", "partial"),
+            ("publication_output_failure", BOOT_ID + "\n", 1,
+             "publication_output", "write_failed", "partial"),
+            ("completion_commit_failure", BOOT_ID + "\n", 1,
+             "completion_commit", "retention_write_failed", "partial"),
         )
         synthetic_records = "\n".join(
             line for line in GOOD_LOG.splitlines()
@@ -479,7 +497,7 @@ exit 0
                 completion_marker = session_directory / ".swapz-deploy-complete"
                 owner_marker = session_directory / ".swapz-deploy-owner"
                 self.assertTrue(owner_marker.is_file())
-                self.assertEqual(completion_marker.exists(), not bool(phase))
+                self.assertEqual(completion_marker.is_file(), not bool(phase))
                 if not phase:
                     self.assertEqual(completion_marker.read_bytes(),
                                      owner_marker.read_bytes())
@@ -496,6 +514,32 @@ exit 0
                     self.assertIn(f"BOOT_ID={BOOT_ID}", retained)
                     self.assertIn("PASS: loaded isolated swapz byte-exact I/O", retained)
                     self.assertNotIn("BLOCKED_KERNEL_DEBUG_PRODUCER", output)
+                elif phase == "publication_output":
+                    # The retained log succeeded, but the caller never
+                    # received the terminal record: deletion remains denied.
+                    self.assertEqual(published, [])
+                    self.assertNotEqual(status, "PASS", reason)
+                    self.assertIn("PASS: loaded isolated swapz byte-exact I/O",
+                                  retained)
+                    self.assertIn(f"EVIDENCE={session_directory}/session.log",
+                                  retained)
+                    self.assertNotIn("PASS: loaded isolated", output)
+                elif phase == "completion_commit":
+                    # Success bytes may already be in the caller's stream, but
+                    # the failing helper and absent regular completion proof
+                    # must not become a valid qualification or cleanup.
+                    self.assertEqual(published, [f"BOOT_ID={BOOT_ID}"])
+                    self.assertNotEqual(status, "PASS", reason)
+                    self.assertTrue(completion_marker.is_dir())
+                    self.assertIn("PASS: loaded isolated swapz byte-exact I/O",
+                                  output)
+                    self.assertIn("PASS: loaded isolated swapz byte-exact I/O",
+                                  retained)
+                    self.assertIn(f"EVIDENCE={session_directory}/session.log",
+                                  retained)
+                    self.assertIn(
+                        "BLOCKED_KERNEL_DEBUG_PRODUCER phase=completion_commit",
+                        output)
                 else:
                     self.assertEqual(published, [])
                     self.assertEqual(

@@ -5450,7 +5450,11 @@ private owner PID and exact source SHA before executing; it writes the matching
 completion marker only after safe teardown, successful session-log fanout
 drain, retained terminal evidence publication and successful caller-facing
 terminal PASS/EVIDENCE publication. A failed caller publication must leave no
-completion marker. The private log must
+completion marker. Rootless producer regressions must inject a caller-output
+write failure after the log fanout has drained and a completion-marker commit
+failure after caller publication; both must exit nonzero, retain evidence,
+withhold a regular completion marker and never validate the failed run as PASS.
+The private log must
 contain the exact source SHA and one of the three accepted clean-teardown
 terminal PASS records directly followed by its pinned session-specific
 `EVIDENCE` locator. Legacy deployment logs without explicit matching
