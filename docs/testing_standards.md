@@ -3279,7 +3279,9 @@ duplicated, out-of-order or out-of-scope refusal markers, unexpected operations,
 private text, any explicit `FAIL:`, an unrelated privilege/quarantine refusal,
 or a nonzero child exit must still fail/block qualification.
 Progress for an operation-correct negative-case refusal is observational, not
-an overall BLOCKED or independently sufficient PASS. The human qualification summary
+an overall BLOCKED or independently sufficient PASS. The ID61 source-contract
+test verifies the progress helper's scoped negative-case context and the
+authenticated-refusal filter, not the obsolete one-argument spelling. The human qualification summary
 must also display the verified process-death recovery count and negative-case
 count so reviewers do not need to infer lifecycle coverage from raw log text.
 
