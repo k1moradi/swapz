@@ -2943,12 +2943,14 @@ def authenticated_primary_negative_refusal_indices(
 
     All thirteen named cases, every required case-specific refusal, the
     completion marker, loaded terminal marker and integer-zero child exit are
-    required. Any missing, duplicate, malformed or unrelated refusal disables
-    the exemption.
+    required. Loaded-correctness completeness is evaluated separately by the
+    caller: a valid refusal matrix may authenticate its own BLOCKED lines even
+    when another loaded gate is incomplete, but that stage still cannot PASS.
+    Any missing, duplicate, malformed or unrelated refusal disables the
+    exemption.
     """
     if (observed_exit_code != 0 or
-            not isinstance(loaded_correctness, dict) or
-            loaded_correctness.get("overall") != "PASS"):
+            not isinstance(loaded_correctness, dict)):
         return None
     ordered_cases = tuple(PRIMARY_NEGATIVE_CASE_REFUSALS)
     expected_refusal_count = sum(
@@ -3665,9 +3667,16 @@ def run_stage(title, command, result, *, parse_bench=False):
         if storage_envelope_sessions else
         {"overall": "NOT_RUN", "reason": "storage-envelope sweep not executed"})
     loaded_lines = output.splitlines() if parse_bench else ()
+    negative_refusal_evidence_present = parse_bench and any(
+        line.startswith((
+            "START_LOADED_PRIMARY_NULLBLK_NEGATIVE=",
+            "PASS_LOADED_PRIMARY_NULLBLK_NEGATIVE_RECOVERY="))
+        for line in loaded_lines)
     negative_refusal_contract_required = (
-        parse_bench and isinstance(loaded_correctness, dict) and
-        loaded_correctness.get("overall") == "PASS")
+        parse_bench and
+        (negative_refusal_evidence_present or
+         (isinstance(loaded_correctness, dict) and
+          loaded_correctness.get("overall") == "PASS")))
     negative_refusal_indices = (
         authenticated_primary_negative_refusal_indices(
             loaded_lines, loaded_correctness, observed_exit_code)

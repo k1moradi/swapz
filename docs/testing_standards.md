@@ -3316,6 +3316,11 @@ entire exemption and fails the loaded evidence contract. Canonical synthetic
 PASS fixtures used by report and Make-interface tests must model that same
 13-case/11-refusal sequence and the terminal `PASS_LOADED_TEST_EXECUTION`
 marker; aggregate-only synthetic fixtures are intentionally invalid.
+If any case-start or negative-recovery completion marker is present while
+loaded correctness is incomplete, authenticate the attempted matrix as well:
+an incomplete or malformed attempt is a harness FAIL. A complete matrix may
+authenticate only its own expected refusal lines; it does not override another
+incomplete loaded gate, which still prevents stage PASS.
 That authentication failure is a harness FAIL. Independent explicit
 `FAIL:` evidence keeps its own failure phase, while unrelated
 `BLOCKED_LOADED_QUALIFICATION:` evidence remains BLOCKED; neither is

@@ -4790,6 +4790,9 @@ class ReportContract(unittest.TestCase):
         adversarial = (
             ("unrelated after terminal", full_log +
              "BLOCKED: unexpected admission refusal\n", 0, "BLOCKED"),
+            ("unrelated incomplete loaded gate", full_log.replace(
+                "PASS_LOADED_ORACLE_PROFILE=raw_pages:64 zero_pages:9 "
+                "flush_calls:2\n", "", 1), 0, "FAIL"),
             ("wrong operation", full_log.replace(
                 original_block,
                 "BLOCKED: primary-swap recovery failed: "
