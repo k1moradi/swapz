@@ -9432,21 +9432,68 @@ def publish(source_sha):
     return (f"SYNCED_GIT: https://github.com/{REPO}/blob/main/{GIT_RESULT} "
             f"(report {report_sha[:12]}; tested {source_sha[:12]})")
 
+def _validate_host_identity_metadata(metadata):
+    if (not stat.S_ISREG(metadata.st_mode) or metadata.st_uid != 0 or
+            metadata.st_nlink != 1 or (metadata.st_mode & 0o022)):
+        raise ValueError("untrusted_metadata")
+
+
+def _validate_host_identity_metadata_stable(before, after):
+    stable_fields = ("st_dev", "st_ino", "st_mode", "st_uid", "st_gid",
+                     "st_nlink", "st_size", "st_mtime_ns", "st_ctime_ns")
+    if any(getattr(before, field) != getattr(after, field)
+           for field in stable_fields):
+        raise ValueError("changed_during_read")
+
+
+def _read_host_identity_record_privileged(path, byte_limit):
+    """Read a pinned protected identity using a fixed, bounded root command."""
+    if path not in ("/sys/class/dmi/id/product_uuid", "/etc/machine-id"):
+        raise PermissionError("privileged host identity path refused")
+
+    # O_PATH pins the original inode without read permission. The root helper
+    # opens that same inode through procfs, not a second pathname lookup.
+    descriptor = os.open(path, os.O_PATH | os.O_NOFOLLOW | os.O_CLOEXEC)
+    try:
+        before = os.fstat(descriptor)
+        _validate_host_identity_metadata(before)
+        try:
+            # Never execute checkout code as root, prompt for authorization,
+            # or expose raw host identifiers in command arguments or stderr.
+            completed = subprocess.run(
+                ["/usr/bin/sudo", "-n", "--", "/usr/bin/head", "-c",
+                 str(byte_limit), "--", f"/proc/{os.getpid()}/fd/{descriptor}"],
+                stdin=subprocess.DEVNULL, stdout=subprocess.PIPE,
+                stderr=subprocess.DEVNULL, timeout=8, check=False)
+        except (OSError, subprocess.TimeoutExpired):
+            raise PermissionError("privileged host identity read unavailable") from None
+        if completed.returncode:
+            raise PermissionError("privileged host identity read unavailable")
+        record = completed.stdout
+        after = os.fstat(descriptor)
+        _validate_host_identity_metadata_stable(before, after)
+    finally:
+        os.close(descriptor)
+    if len(record) == byte_limit:
+        raise ValueError("oversized_file")
+    return record
+
+
 def _read_host_identity_record(path, byte_limit):
     """Read one trusted, stable host record without following a symlink."""
-    with os.fdopen(os.open(path, os.O_RDONLY | os.O_CLOEXEC |
-                           os.O_NOFOLLOW | os.O_NONBLOCK), "rb") as source:
+    try:
+        descriptor = os.open(path, os.O_RDONLY | os.O_CLOEXEC |
+                             os.O_NOFOLLOW | os.O_NONBLOCK)
+    except PermissionError:
+        # Read-only sudo is already required by the owned-RAM qualification.
+        # A missing noninteractive privilege remains an ordinary refusal.
+        return _read_host_identity_record_privileged(path, byte_limit)
+    with os.fdopen(descriptor, "rb") as source:
         before = os.fstat(source.fileno())
-        if (not stat.S_ISREG(before.st_mode) or before.st_uid != 0 or
-                before.st_nlink != 1 or (before.st_mode & 0o022)):
-            raise ValueError("untrusted_metadata")
+        _validate_host_identity_metadata(before)
         record = source.read(byte_limit)
         after = os.fstat(source.fileno())
-        stable_fields = ("st_dev", "st_ino", "st_mode", "st_uid", "st_gid",
-                         "st_nlink", "st_size", "st_mtime_ns", "st_ctime_ns")
-        if any(getattr(before, field) != getattr(after, field)
-               for field in stable_fields):
-            raise ValueError("changed_during_read")
+        _validate_host_identity_metadata_stable(before, after)
     if len(record) == byte_limit:
         raise ValueError("oversized_file")
     return record

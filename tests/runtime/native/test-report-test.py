@@ -1607,6 +1607,128 @@ class ReportContract(unittest.TestCase):
                     self.assertNotIn("private", json.dumps(result))
 
 
+    def test_host_identity_permission_denial_uses_only_protected_fallback(self):
+        from unittest.mock import patch
+
+        path = "/sys/class/dmi/id/product_uuid"
+        record = b"00112233-4455-6677-8899-aabbccddeeff\n"
+        with patch.object(runner.os, "open",
+                          side_effect=PermissionError(13, "private detail")), \
+                patch.object(runner, "_read_host_identity_record_privileged",
+                             return_value=record) as privileged:
+            self.assertEqual(runner._read_host_identity_record(path, 40), record)
+        privileged.assert_called_once_with(path, 40)
+
+        with patch.object(runner.os, "open",
+                          side_effect=FileNotFoundError("missing")), \
+                patch.object(runner, "_read_host_identity_record_privileged") as privileged:
+            with self.assertRaises(FileNotFoundError):
+                runner._read_host_identity_record(path, 40)
+        privileged.assert_not_called()
+
+    def test_privileged_host_identity_reader_pins_and_bounds_both_inputs(self):
+        from types import SimpleNamespace
+        from unittest.mock import patch
+
+        metadata = SimpleNamespace(
+            st_mode=runner.stat.S_IFREG | 0o400, st_uid=0, st_gid=0,
+            st_nlink=1, st_dev=1, st_ino=2, st_size=37,
+            st_mtime_ns=3, st_ctime_ns=4)
+        records = (
+            ("/sys/class/dmi/id/product_uuid", 40,
+             b"00112233-4455-6677-8899-aabbccddeeff\n"),
+            ("/etc/machine-id", 64, b"0123456789abcdef0123456789abcdef\n"),
+        )
+        for path, byte_limit, record in records:
+            with self.subTest(path=path):
+                completed = runner.subprocess.CompletedProcess(
+                    [], 0, stdout=record)
+                with patch.object(runner.os, "open", return_value=42) as opened, \
+                        patch.object(runner.os, "fstat",
+                                     return_value=metadata) as checked, \
+                        patch.object(runner.os, "close") as closed, \
+                        patch.object(runner.subprocess, "run",
+                                     return_value=completed) as command:
+                    actual = runner._read_host_identity_record_privileged(
+                        path, byte_limit)
+                self.assertEqual(actual, record)
+                opened.assert_called_once_with(
+                    path, runner.os.O_PATH | runner.os.O_NOFOLLOW |
+                    runner.os.O_CLOEXEC)
+                self.assertEqual(checked.call_count, 2)
+                closed.assert_called_once_with(42)
+                arguments, options = command.call_args
+                self.assertEqual(arguments[0], [
+                    "/usr/bin/sudo", "-n", "--", "/usr/bin/head", "-c",
+                    str(byte_limit), "--", f"/proc/{runner.os.getpid()}/fd/42"])
+                self.assertEqual(options, {
+                    "stdin": runner.subprocess.DEVNULL,
+                    "stdout": runner.subprocess.PIPE,
+                    "stderr": runner.subprocess.DEVNULL,
+                    "timeout": 8, "check": False})
+                self.assertNotIn(record.decode().strip(), str(arguments))
+
+    def test_privileged_host_identity_reader_fails_closed_and_closes_fd(self):
+        from types import SimpleNamespace
+        from unittest.mock import patch
+
+        path = "/sys/class/dmi/id/product_uuid"
+        record = b"00112233-4455-6677-8899-aabbccddeeff\n"
+        metadata = SimpleNamespace(
+            st_mode=runner.stat.S_IFREG | 0o400, st_uid=0, st_gid=0,
+            st_nlink=1, st_dev=1, st_ino=2, st_size=37,
+            st_mtime_ns=3, st_ctime_ns=4)
+        changed = SimpleNamespace(**{**vars(metadata), "st_mtime_ns": 5})
+        untrusted = SimpleNamespace(**{**vars(metadata),
+                                       "st_mode": runner.stat.S_IFLNK | 0o777})
+        cases = (
+            ("missing sudo authorization", [metadata, metadata],
+             runner.subprocess.CompletedProcess([], 1, stdout=record),
+             None, PermissionError, True),
+            ("timeout", [metadata, metadata], None,
+             runner.subprocess.TimeoutExpired([], 8), PermissionError, True),
+            ("oversized record", [metadata, metadata],
+             runner.subprocess.CompletedProcess([], 0, stdout=b"x" * 40),
+             None, ValueError, True),
+            ("changed inode", [metadata, changed],
+             runner.subprocess.CompletedProcess([], 0, stdout=record),
+             None, ValueError, True),
+            ("symlink", [untrusted], None,
+             None, ValueError, False),
+        )
+        for name, snapshots, result, failure, exception, invoked in cases:
+            with self.subTest(case=name):
+                with patch.object(runner.os, "open", return_value=42), \
+                        patch.object(runner.os, "fstat",
+                                     side_effect=snapshots), \
+                        patch.object(runner.os, "close") as closed, \
+                        patch.object(runner.subprocess, "run",
+                                     return_value=result,
+                                     side_effect=failure) as command:
+                    with self.assertRaises(exception):
+                        runner._read_host_identity_record_privileged(path, 40)
+                closed.assert_called_once_with(42)
+                self.assertEqual(command.called, invoked)
+
+        with patch.object(runner.os, "open") as opened:
+            with self.assertRaises(PermissionError):
+                runner._read_host_identity_record_privileged("/tmp/unsafe", 40)
+        opened.assert_not_called()
+
+        with patch.object(runner.os, "open",
+                          side_effect=PermissionError("private OS details")), \
+                patch.object(runner, "_read_host_identity_record_privileged",
+                             side_effect=PermissionError("private sudo details")):
+            identity = runner.report_host_identity()
+        self.assertEqual(identity, {
+            "schema": "swapz-host-v1", "status": "UNAVAILABLE",
+            "phase": "host_identity",
+            "expected_input_class":
+                "root_owned_regular_dmi_uuid_36_hex_hyphens_optional_lf",
+            "observed_validity_class": "unreadable",
+            "refusal_reason": "read_failed"})
+        self.assertNotIn("private", json.dumps(identity))
+
     def test_host_identity_architecture_lookup_failure_is_sanitized(self):
         from unittest.mock import patch
 
