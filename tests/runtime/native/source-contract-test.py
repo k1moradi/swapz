@@ -4432,7 +4432,9 @@ int main(void)
         self.assertIn("negative_case=negative_case)", runner)
         self.assertIn("authenticated_primary_negative_refusal_indices(",
                       runner)
-        self.assertIn('sys.stdout.write("       " + progress + "\\n")', runner)
+        self.assertIn("LOADED_PHASE_PASS_MARKERS", runner)
+        self.assertIn("loaded_phase_table_row(", runner)
+        self.assertNotIn('sys.stdout.write("       " + progress + "\\n")', runner)
         self.assertNotIn('sys.stdout.write("       " + line)', runner)
         authority = (ROOT / "src/kernel/authority.h").read_text()
 

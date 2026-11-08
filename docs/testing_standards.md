@@ -79,6 +79,10 @@ only an observational elapsed-time boundary, not a qualification PASS. Failed
 or interrupted phases end as non-PASS rows. Full loaded child transcripts,
 individual benchmark evidence, negative-case refusals and original first-error
 attribution remain available in the existing private/report artifacts.
+The eleven expected fault-injection BLOCKED refusals remain authenticated
+against the exact captured case matrix but are not printed as separate table
+rows; an unexpected BLOCKED or FAIL remains a non-PASS terminal row and
+the existing stage failure summary preserves the original attribution.
 Loaded-phase elapsed times remain separately retained in the report.
 The rootless stderr-relay pass fixtures must preserve and authenticate the
 harness's fixed START/PASS phase markers before comparing the unchanged child

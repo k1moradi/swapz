@@ -5361,7 +5361,8 @@ class ReportContract(unittest.TestCase):
         self.assertEqual((code, stage["status"]), (0, "PASS"), stage)
         self.assertNotIn("observed_exit=0", output)
         self.assertNotIn("BLOCKED: diagnostic retained", output)
-        self.assertIn("OBSERVED_PRIMARY_NEGATIVE_REFUSAL", output)
+        self.assertNotIn("OBSERVED_PRIMARY_NEGATIVE_REFUSAL", output)
+        self.assertIn("Primary swap lifecycle and recovery", output)
 
         original_block = ("BLOCKED: primary-swap start failed: "
                           "Interrupted system call")
