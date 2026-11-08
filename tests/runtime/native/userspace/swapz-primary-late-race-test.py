@@ -1724,6 +1724,19 @@ static int check_case(enum fixture_scenario candidate)
             memcpy(expected_diagnostic, overflow_marker,
                    sizeof(overflow_marker) - 1U);
             expected_diagnostic_length = sizeof(overflow_marker) - 1U;
+        } else if (candidate == FIXTURE_MALFORMED ||
+                   candidate == FIXTURE_LOCAL_MALFORMED) {
+            /* Authenticate the producer's fixed, redacted parse failure
+             * before checking the coordinator's unchanged EINVAL refusal.
+             */
+            static const char parse_marker[] =
+                "SWAPZ_PRIMARY_MOUNT_INVENTORY_FAILURE "
+                "step=mountinfo-parse errno=22 "
+                "reason=malformed-mountinfo\n";
+
+            memcpy(expected_diagnostic, parse_marker,
+                   sizeof(parse_marker) - 1U);
+            expected_diagnostic_length = sizeof(parse_marker) - 1U;
         }
         /* Every refusal case here follows READY state and manifest proof. */
         expected_length = snprintf(

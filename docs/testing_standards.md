@@ -623,6 +623,14 @@ The rootless reader fixture has no physical mutation hooks and must report
 NOT_INTERCEPTED, not claim measured zero intercepted writes or kernel-atomic
 mount/swapon exclusion. Post-snapshot physical exclusion remains UNPROVEN.
 
+The separate production-extracted late-race coordinator fixture must compare
+the exact fixed `SWAPZ_PRIMARY_MOUNT_INVENTORY_FAILURE` parse marker before
+the ordinary coordinator refusal for malformed complete mountinfo records.
+Both local and remote malformed cases retain `EINVAL`, zero destructive
+actions and redacted diagnostics. Empty, truncated and oversized input
+preserve their distinct failure classes; do not hide a newly emitted producer
+diagnostic by weakening or dropping the exact-stderr assertion.
+
 If unique mount IDs, foreign-namespace statmount/listmount, namespace identity,
 or any listed mount cannot be proven, admission is BLOCKED; never fall back to
 the filtered table. The namespace-fd request form requires Linux 6.18, but the current
