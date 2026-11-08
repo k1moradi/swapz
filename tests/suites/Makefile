@@ -92,6 +92,8 @@ anon-page-analyzer_LDLIBS := -llz4
 PRODUCTION_C_SOURCES := $(CODEC) $(AUTH) $(ENGINE)
 PRODUCTION_OBJECTS := $(OUT)/production-codec.o $(OUT)/production-authority.o $(OUT)/production-engine.o
 NATIVE_COMPILER_CONFIGURATION := $(OUT)/native-compiler-configuration
+NATIVE_COMPILER_IDENTITY_SHA256 := $(shell { $(CC) --version 2>&1; \
+	$(CC) -dumpmachine 2>&1; } | sha256sum | cut -d ' ' -f1)
 # The source-controlled build recipe is part of artifact identity. Without
 # this direct prerequisite, a rule-only main update can reuse stale binaries.
 NATIVE_BUILD_RULES := $(lastword $(MAKEFILE_LIST))
@@ -109,7 +111,10 @@ $(OUT):
 $(NATIVE_COMPILER_CONFIGURATION): native-compiler-configuration-force | $(OUT)
 	@set -eu; temporary_file="$@.tmp.$$$$"; \
 	  trap 'rm -f -- "$$temporary_file"' EXIT; \
-	  printf '%s\n' 'CC=$(CC)' 'CPPFLAGS=$(CPPFLAGS)' 'CFLAGS=$(CFLAGS)' > "$$temporary_file"; \
+	  printf '%s\n' 'CC=$(CC)' \
+	    'COMPILER_IDENTITY_SHA256=$(NATIVE_COMPILER_IDENTITY_SHA256)' \
+	    'HOST_ARCH=$(UNAME_M)' \
+	    'CPPFLAGS=$(CPPFLAGS)' 'CFLAGS=$(CFLAGS)' > "$$temporary_file"; \
 	  if ! cmp -s "$$temporary_file" "$@"; then mv -f "$$temporary_file" "$@"; fi
 
 $(OUT)/production-codec.o: $(CODEC) $(NATIVE_BUILD_PREREQUISITES) | $(OUT)

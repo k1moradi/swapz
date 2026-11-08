@@ -98,6 +98,22 @@ class PublicMakeContract(unittest.TestCase):
             self.assertEqual(resolved_after_source_change, next_source_sha)
             check_make_provenance(next_source_sha, "1", "next-source")
 
+            # A report-only-looking commit with a noncanonical subject is not
+            # eligible for report-commit normalization. The two independent
+            # source resolvers must expose the mismatch instead of silently
+            # attributing artifacts to the report commit's parent.
+            report.write_text('{"overall":"BLOCKED"}\n')
+            git("add", "test_results.json")
+            git("commit", "-m",
+                "test: preserve blocked ARM64 qualification result [skip ci]")
+            malformed_report_sha = git("rev-parse", "HEAD").stdout.strip()
+            make_source_sha = git(
+                "log", "-1", "--format=%H", "HEAD", "--", ".",
+                ":(exclude)test_results.json").stdout.strip()
+            self.assertEqual(make_source_sha, next_source_sha)
+            self.assertEqual(runner_contract.git_sha(), malformed_report_sha)
+            self.assertNotEqual(make_source_sha, runner_contract.git_sha())
+
     def test_exact_five_root_goals(self):
         targets = set()
         for line in MAKE.splitlines():
@@ -512,6 +528,14 @@ class PublicMakeContract(unittest.TestCase):
             fake_compiler.write_text(
                 "#!/bin/sh\n"
                 "set -eu\n"
+                "if [ \"${1:-}\" = '--version' ]; then\n"
+                "  printf 'fake compiler %s\\n' \"${SWAPZ_FAKE_CC_VERSION:-1}\"\n"
+                "  exit 0\n"
+                "fi\n"
+                "if [ \"${1:-}\" = '-dumpmachine' ]; then\n"
+                "  printf '%s\\n' \"${SWAPZ_FAKE_CC_TARGET:-fixture-target}\"\n"
+                "  exit 0\n"
+                "fi\n"
                 ": \"${SWAPZ_FAKE_CC_LOG:?}\"\n"
                 "printf '%s\\n' \"$*\" >> \"$SWAPZ_FAKE_CC_LOG\"\n"
                 "output=\n"
@@ -531,6 +555,7 @@ class PublicMakeContract(unittest.TestCase):
             fake_compiler.chmod(0o700)
             environment = os.environ.copy()
             environment["SWAPZ_FAKE_CC_LOG"] = str(compiler_log)
+            environment["SWAPZ_FAKE_CC_VERSION"] = "1"
             target = output / "mapping-authority"
             command = [
                 "make", "--no-print-directory", "-s",
@@ -553,6 +578,49 @@ class PublicMakeContract(unittest.TestCase):
                 compiler_log.read_text(encoding="utf-8"), "",
                 "unchanged native build unexpectedly invoked the compiler")
 
+            configuration = output / "native-compiler-configuration"
+
+            def make_target_older_than_configuration():
+                old_mtime = configuration.stat().st_mtime_ns - 2_000_000_000
+                os.utime(target, ns=(old_mtime, old_mtime))
+
+            compiler_log.write_text("", encoding="utf-8")
+            upgraded_environment = environment.copy()
+            upgraded_environment["SWAPZ_FAKE_CC_VERSION"] = "2"
+            make_target_older_than_configuration()
+            upgraded = subprocess.run(
+                command, cwd=ROOT / "tests/suites", env=upgraded_environment,
+                capture_output=True, text=True, check=False, timeout=10)
+            self.assertEqual(upgraded.returncode, 0, upgraded.stderr)
+            self.assertTrue(
+                compiler_log.read_text(encoding="utf-8").strip(),
+                "compiler version change reused stale native output")
+
+            compiler_log.write_text("", encoding="utf-8")
+            target_environment = upgraded_environment.copy()
+            target_environment["SWAPZ_FAKE_CC_TARGET"] = "different-fixture-target"
+            make_target_older_than_configuration()
+            target_changed = subprocess.run(
+                command, cwd=ROOT / "tests/suites", env=target_environment,
+                capture_output=True, text=True, check=False, timeout=10)
+            self.assertEqual(target_changed.returncode, 0, target_changed.stderr)
+            self.assertTrue(
+                compiler_log.read_text(encoding="utf-8").strip(),
+                "compiler target change reused stale native output")
+
+            compiler_log.write_text("", encoding="utf-8")
+            make_target_older_than_configuration()
+            architecture_changed = subprocess.run(
+                command + ["UNAME_M=fixture-aarch64"],
+                cwd=ROOT / "tests/suites", env=upgraded_environment,
+                capture_output=True, text=True, check=False, timeout=10)
+            self.assertEqual(architecture_changed.returncode, 0,
+                             architecture_changed.stderr)
+            self.assertTrue(
+                compiler_log.read_text(encoding="utf-8").strip(),
+                "host architecture change reused stale native output")
+
+            compiler_log.write_text("", encoding="utf-8")
             native_makefile.write_text(
                 native_makefile.read_text(encoding="utf-8") +
                 "\n# fixture: source-controlled build rule changed\n",

@@ -33,9 +33,10 @@ strictly sequential.
 The native production-C suite may compile the unchanged production sources
 once into shared, compiler-configuration-bound objects, then link the existing
 independent test executables. Shared object reuse must track included headers,
-compiler/preprocessor flags, sanitizer configuration and the source-controlled
-native build rules; changing any of those inputs invalidates the objects and
-dependent executables. A rule-only main update must never reuse an artifact
+compiler/preprocessor flags, sanitizer configuration, compiler version and
+target, host architecture selection, and the source-controlled native build
+rules; changing any of those inputs invalidates the objects and dependent
+executables. A rule-only main update must never reuse an artifact
 whose compile/link dependency graph came from the prior Makefile. The
 hermetic build-rule regression must verify both a no-op incremental invocation
 and a rebuild after setting the copied Makefile's timestamp strictly newer
@@ -4282,6 +4283,13 @@ fixture SHA with clean 1. Later intentional source edits remain uncommitted
 development changes: they retain the same source SHA, generate clean 0, run
 the synthetic stages for incremental timestamp checks, and must refuse
 qualification at report binding rather than claim a clean tested source.
+
+A report-only-looking commit with a noncanonical subject is not a report
+commit: `git_sha()` must retain that commit as its source identity while the
+Makefile's path-based source resolver skips its report-file change. A focused
+synthetic history must preserve this disagreement as an explicit fail-closed
+provenance mismatch; do not broaden the report-commit subject matcher to hide
+it.
 
 After writing the file, `make test` automatically publishes only that report
 to `main` using Git plumbing. `tested_commit_sha` names the nearest
