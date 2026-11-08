@@ -38,6 +38,10 @@ invalidates the objects and dependent executables. Never merge independent
 assertion/failure boundaries or omit ASan/UBSan/TSan qualification for speed.
 The native/rootless stage records separate native Make and remaining-contract
 wall times as optional observational evidence, not qualification PASS gates.
+Hermetic shell-recipe regressions using a substituted native output directory
+must stage their own compiler-configuration and shared-object prerequisites
+before creating fake test executables; those fixtures must not silently compile
+or execute real native tests in place of the shell behavior under test.
 
 It must execute the supported qualification in order and fail closed. Rootless/CI-only success is partial evidence and cannot substitute for the loaded owned-RAM phase. The Device Mapper target is exactly `swapz`; the module alias is `dm-swapz`.
 

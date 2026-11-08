@@ -3999,6 +3999,19 @@ class ReportContract(unittest.TestCase):
         )
         with tempfile.TemporaryDirectory() as temporary_directory:
             output = Path(temporary_directory)
+            # This fixture tests the existing lower-I/O shell recipe, not C
+            # compilation. Seed the real configuration stamp and harmless
+            # object prerequisites before creating newer fake executables.
+            configured = subprocess.run(
+                ["make", "--no-print-directory", "-s",
+                 "-f", str(ROOT / "tests/suites/Makefile"),
+                 str(output / "native-compiler-configuration"),
+                 f"OUT={output}"],
+                cwd=ROOT / "tests/suites", capture_output=True, text=True,
+                check=False, timeout=10)
+            self.assertEqual(configured.returncode, 0, configured.stderr)
+            for production_source in ("codec", "authority", "engine"):
+                (output / f"production-{production_source}.o").touch()
             for program_name in test_programs:
                 executable = output / program_name
                 return_code = 7 if program_name == "lower-write-aggregation" else 0
