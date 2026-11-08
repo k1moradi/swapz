@@ -213,12 +213,23 @@ def collect(profile=None, computer=None, host_registry=None):
         raise ValueError("select either a profile history or an exact computer history")
     legacy_entry = host_registry_entry(host_registry, computer)
     history = subprocess.check_output(
-        ["git", "log", "--reverse", "--format=%H %cI", "--", "test_results.json"],
+        ["git", "log", "--reverse",
+         "--format=%H %cI%x09%(trailers:key=swapz-canonical-restore,valueonly)",
+         "--", "test_results.json"],
         cwd=ROOT, text=True).splitlines()
     reports, points, excluded = [], [], Counter()
     exact_signatures, unidentified_reports = [], []
     for entry in history:
-        sha, stamp = entry.split()
+        fields = entry.split()
+        if len(fields) == 3 and fields[2] == "true":
+            # The intermediate parent contains the competing host's report.
+            # The restoration only returns main to its previous canonical
+            # bytes; it is not another qualification run.
+            continue
+        if len(fields) != 2:
+            excluded["malformed report commit metadata"] += 1
+            continue
+        sha, stamp = fields
         if profile is not None and sha not in profile["report_shas"]:
             excluded["outside audited host report allowlist"] += 1
             continue

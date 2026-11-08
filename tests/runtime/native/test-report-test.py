@@ -1731,9 +1731,16 @@ class ReportContract(unittest.TestCase):
                                       identity), 1):
             reports[f"{index:040x}"] = {"host_identity": host, "overall": "PASS",
                 "stages": [{"status": "PASS"}] * 5, "tested_commit_sha": "f" * 40}
+        # A canonical restoration is an additional Git commit, not a second
+        # execution of the earlier host report.
+        restored_sha = f"{6:040x}"
+        reports[restored_sha] = reports[f"{1:040x}"]
         def git_output(command, **kwargs):
             if command[1] == "log":
-                return "\n".join(sha + " 2026-10-30T12:00:00-07:00" for sha in reports)
+                return "\n".join(
+                    sha + " 2026-10-30T12:00:00-07:00" +
+                    (" true" if sha == restored_sha else "")
+                    for sha in reports)
             return json.dumps(reports[command[2].split(":")[0]]).encode()
         with patch.object(history.subprocess, "check_output", side_effect=git_output), \
                 patch.object(history, "report_points", return_value=[{"target": "ssd_emulated"}]):
@@ -6203,19 +6210,40 @@ class ReportContract(unittest.TestCase):
                         runner.publish(source_sha),
                         "GIT_SYNC_FAILED: could not compare concurrent "
                         "qualification evidence")
-                    self.assertEqual(
-                        runner.publish(source_sha),
-                        "SKIPPED_GIT_SYNC: concurrent qualification evidence "
-                        f"already published ({source_sha[:12]})")
+                    second_notice = runner.publish(source_sha)
+                    self.assertIn("ARCHIVED_GIT", second_notice)
 
                 remote_head = git("--git-dir", str(origin), "rev-parse",
                                   "refs/heads/main", cwd=sandbox).stdout.strip()
-                self.assertEqual(remote_head, peer_report_sha)
+                self.assertNotEqual(remote_head, peer_report_sha)
                 remote_report = json.loads(
                     git("--git-dir", str(origin), "show",
                         f"{remote_head}:{runner.GIT_RESULT}",
                         cwd=sandbox).stdout)
                 self.assertEqual(remote_report, newer)
+                archived_sha = git(
+                    "--git-dir", str(origin), "rev-parse",
+                    f"{remote_head}^", cwd=sandbox).stdout.strip()
+                archived_report = json.loads(git(
+                    "--git-dir", str(origin), "show",
+                    f"{archived_sha.decode()}:{runner.GIT_RESULT}",
+                    cwd=sandbox).stdout)
+                self.assertEqual(archived_report, delayed)
+                self.assertEqual(git(
+                    "--git-dir", str(origin), "rev-parse",
+                    f"{archived_sha.decode()}^", cwd=sandbox
+                ).stdout.strip(), peer_report_sha)
+                self.assertEqual(
+                    git("--git-dir", str(origin), "show", "-s",
+                        "--format=%s", remote_head.decode(),
+                        cwd=sandbox).stdout.strip(),
+                    f"test: latest run for {source_sha[:12]} "
+                    "[skip ci]".encode())
+                self.assertIn(
+                    b"swapz-canonical-restore: true",
+                    git("--git-dir", str(origin), "show", "-s",
+                        "--format=%b", remote_head.decode(),
+                        cwd=sandbox).stdout)
                 self.assertEqual(
                     git("rev-parse", "HEAD", cwd=checkout).stdout.strip(),
                     source_sha)

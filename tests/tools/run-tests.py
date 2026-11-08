@@ -9441,17 +9441,17 @@ def publish(source_sha):
     if not re.fullmatch(r"[0-9a-f]{40}", head_sha) or git_sha() != source_sha:
         return "SKIPPED_GIT_SYNC: checkout changed during testing"
 
-    # Initial fast-forward pushes can otherwise replace a stronger full-tier
-    # report with an algorithm-only INCOMPLETE from the exact same source.
+    # When the local canonical report is stronger, retain it as HEAD while
+    # archiving this run through a report-only commit pair.
+    preserve_canonical = False
     current_report = run("show", f"{head_sha}:{GIT_RESULT}")
     if current_report is not None and current_report.returncode == 0:
         try:
             previous = json.loads(current_report.stdout.decode("utf-8"))
         except (ValueError, UnicodeDecodeError):
             previous = None
-        if stronger_published_qualification_scope(previous, contents):
-            return ("SKIPPED_GIT_SYNC: same-source full integration "
-                    "qualification evidence has higher precedence")
+        preserve_canonical = stronger_published_qualification_scope(
+            previous, contents)
 
     remote = run("remote", "get-url", "--push", "origin")
     if remote is None or remote.returncode:
@@ -9510,7 +9510,43 @@ def publish(source_sha):
             return None, "GIT_SYNC_FAILED: invalid report commit"
         return report_sha, None
 
-    report_sha, error = build_report_commit(head_sha)
+    def build_archived_report_pair(parent_sha):
+        """Archive this report, restoring the existing canonical tree atomically.
+
+        The remote advances by two report-only commits in one nonforce push;
+        the intermediate commit remains addressable in Git history. No new
+        source paths are introduced and the canonical report bytes are stable.
+        """
+        previous_tree = run("rev-parse", f"{parent_sha}^{{tree}}")
+        previous_blob = run("rev-parse", f"{parent_sha}:{GIT_RESULT}")
+        if any(item is None or item.returncode for item in (
+                previous_tree, previous_blob)):
+            return None, "GIT_SYNC_FAILED: canonical report snapshot unavailable"
+        tree_id = previous_tree.stdout.decode("ascii", "replace").strip()
+        previous_id = previous_blob.stdout.decode("ascii", "replace").strip()
+        if not all(re.fullmatch(r"[0-9a-f]{40}", value)
+                   for value in (tree_id, previous_id)):
+            return None, "GIT_SYNC_FAILED: malformed canonical report snapshot"
+        if previous_id == blob_id:
+            return None, "SKIPPED_GIT_SYNC: identical canonical report already published"
+        archived_sha, error = build_report_commit(parent_sha)
+        if error:
+            return None, error
+        restoration_message = (
+            message + b"\n\nswapz-canonical-restore: true\n")
+        restoration = run(
+            "commit-tree", tree_id, "-p", archived_sha,
+            data=restoration_message)
+        if restoration is None or restoration.returncode:
+            return None, "GIT_SYNC_FAILED: canonical restoration commit unavailable"
+        restoration_sha = restoration.stdout.decode("ascii", "replace").strip()
+        if not re.fullmatch(r"[0-9a-f]{40}", restoration_sha):
+            return None, "GIT_SYNC_FAILED: malformed canonical restoration commit"
+        return restoration_sha, None
+
+    report_sha, error = (
+        build_archived_report_pair(head_sha) if preserve_canonical
+        else build_report_commit(head_sha))
     if error:
         return error
     push = run("push", "origin", f"{report_sha}:refs/heads/main", timeout=60)
@@ -9557,10 +9593,10 @@ def publish(source_sha):
                                         "GIT_SYNC_FAILED: could not compare "
                                         "concurrent qualification evidence")
                                 if report_changed.returncode:
-                                    return (
-                                        "SKIPPED_GIT_SYNC: concurrent "
-                                        "qualification evidence already "
-                                        f"published ({remote_tested[:12]})")
+                                    # Preserve the remote canonical snapshot,
+                                    # but commit the delayed host's evidence
+                                    # into the same report-only Git history.
+                                    preserve_canonical = True
                             else:
                                 tested_ancestor = run(
                                     "merge-base", "--is-ancestor",
@@ -9579,7 +9615,9 @@ def publish(source_sha):
                                         f"published ({remote_tested[:12]})")
                     except (ValueError, UnicodeDecodeError):
                         pass
-            retry_sha, error = build_report_commit(remote_sha)
+            retry_sha, error = (
+                build_archived_report_pair(remote_sha) if preserve_canonical
+                else build_report_commit(remote_sha))
             if error:
                 return error
             retry = run("push", "origin",
@@ -9592,6 +9630,13 @@ def publish(source_sha):
         if report_sha is None:
             return ("GIT_SYNC_FAILED: report publication failed after bounded "
                     "noninteractive push/fetch retries")
+
+    if preserve_canonical:
+        # Keep the local report intact for the original host; it is not the
+        # restored canonical file. A later owner sync may refresh this checkout.
+        return (f"ARCHIVED_GIT: https://github.com/{REPO}/commits/main "
+                f"(report history {report_sha[:12]}; "
+                f"canonical test_results.json unchanged; tested {source_sha[:12]})")
 
     if concurrent_parent is not None:
         head_now = run("rev-parse", "HEAD")

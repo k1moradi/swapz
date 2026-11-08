@@ -3801,9 +3801,18 @@ source that is a descendant of the local tested source causes
 evidence. A concurrent main advance that merely inherits the unchanged report
 for the same tested source remains eligible for publication. If the fetched
 head instead changes `test_results.json` while still reporting that same
-tested source, the remote report is newer same-source evidence and the delayed
-local result is declined with `SKIPPED_GIT_SYNC`. Report comparison and
-ancestor errors fail closed with `GIT_SYNC_FAILED`.
+tested source, preserve the remote canonical report but archive the delayed
+host's result as an intermediate report-only commit, followed by a commit that
+restores the original canonical tree. Both commits are sent in **one**
+nonforce fast-forward push, so the public canonical file is never replaced by
+the delayed result; the intermediate revision remains accessible in Git
+history. An algorithm-only run similarly archives instead of replacing a
+same-source full-tier canonical report. Identical reports are not duplicated.
+The local delayed report remains available without resetting the working
+checkout. Restoration commits use the normal report-only subject for exact
+source identity, with a `swapz-canonical-restore: true` trailer that the
+history plotter ignores to prevent duplicate history points. Report comparison,
+restore-tree, and ancestor errors fail closed with `GIT_SYNC_FAILED`.
 
 Every console table printed by the official `make test` reporter must have a
 clear, self-contained Markdown title immediately before an unindented
