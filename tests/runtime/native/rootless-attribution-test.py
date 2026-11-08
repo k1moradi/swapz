@@ -430,10 +430,14 @@ class RootlessAttribution(unittest.TestCase):
             lifecycle_begin)
         cls.lifecycle_stage = source[lifecycle_begin:lifecycle_end]
         generator_begin = source.index(f"rootless_phase='{GENERATOR_PHASE}'")
+        # The integration tier wraps package/systemd scripts in an if block.
+        # Isolated failure-attribution fixtures extract only the child recipe,
+        # not the parent shell's closing control-flow delimiter.
         generator_end = source.index(
-            "rootless_phase='tests/runtime/native/physical-swap-probe-test.py'",
+            "\nfi\nrootless_phase='tests/runtime/native/physical-swap-probe-test.py'",
             generator_begin)
         cls.generator_stage = source[generator_begin:generator_end]
+        assert not cls.generator_stage.rstrip().endswith("\nfi")
         assert source.count(f"python3 -B {OWNERSHIP_PHASE} -v") == 1
         assert cls.ownership_stage.count(
             f"python3 -B {OWNERSHIP_PHASE} -v") == 1
