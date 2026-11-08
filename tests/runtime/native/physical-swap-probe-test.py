@@ -70,6 +70,77 @@ class PhysicalSwapProbeTests(unittest.TestCase):
             text=True, timeout=20)
         self.assertEqual(completed.returncode, 0, completed.stderr[-2000:])
 
+    def test_real_swap_removal_requires_normal_swapoff_and_inactive_proof(self):
+        mapper = "/dev/mapper/swapz-demo-physical-1234567890abcdef"
+        state = {"algorithm_real_swap": True, "development_only": True}
+        active = {"kind": "partition", "used_kib": 12}
+        with mock.patch.object(probe, "_verify_owned_mapper",
+                               return_value=mapper), \
+             mock.patch.object(probe, "block_identity",
+                               return_value=(253, 12)), \
+             mock.patch.object(probe, "_active_swap_for",
+                               side_effect=[active, None]) as inventory, \
+             mock.patch.object(probe, "_run") as command:
+            probe._prepare_owned_mapper_removal(state, {})
+        self.assertEqual(inventory.call_count, 2)
+        command.assert_called_once_with(
+            ["swapoff", "--", mapper], timeout=120)
+
+    def test_real_swap_failed_swapoff_never_certifies_mapper_removal(self):
+        mapper = "/dev/mapper/swapz-demo-physical-1234567890abcdef"
+        state = {"algorithm_real_swap": True, "development_only": True}
+        active = {"kind": "partition", "used_kib": 12}
+        with mock.patch.object(probe, "_verify_owned_mapper",
+                               return_value=mapper), \
+             mock.patch.object(probe, "block_identity",
+                               return_value=(253, 12)), \
+             mock.patch.object(probe, "_active_swap_for",
+                               return_value=active) as inventory, \
+             mock.patch.object(probe, "_run",
+                               side_effect=probe.ProbeError("swapoff failed")) as command:
+            with self.assertRaisesRegex(probe.ProbeError, "swapoff failed"):
+                probe._prepare_owned_mapper_removal(state, {})
+        inventory.assert_called_once_with(253, 12)
+        command.assert_called_once_with(
+            ["swapoff", "--", mapper], timeout=120)
+
+    def test_real_swap_unproven_inactivity_blocks_cleanup(self):
+        mapper = "/dev/mapper/swapz-demo-physical-1234567890abcdef"
+        state = {"algorithm_real_swap": True, "development_only": True}
+        active = {"kind": "partition", "used_kib": 0}
+        with mock.patch.object(probe, "_verify_owned_mapper",
+                               return_value=mapper), \
+             mock.patch.object(probe, "block_identity",
+                               return_value=(253, 12)), \
+             mock.patch.object(probe, "_active_swap_for",
+                               side_effect=[active, active]), \
+             mock.patch.object(probe, "_run") as command:
+            with self.assertRaisesRegex(
+                    probe.ProbeError, "remains active"):
+                probe._prepare_owned_mapper_removal(state, {})
+        command.assert_called_once_with(
+            ["swapoff", "--", mapper], timeout=120)
+
+    def test_real_swap_scope_cannot_activate_non_development_recovery(self):
+        with mock.patch.object(probe, "_verify_owned_mapper",
+                               return_value="/dev/mapper/owned"), \
+             mock.patch.object(probe, "block_identity") as identify, \
+             mock.patch.object(probe, "_run") as command:
+            with self.assertRaisesRegex(probe.ProbeError, "invalid recovery scope"):
+                probe._prepare_owned_mapper_removal(
+                    {"algorithm_real_swap": True, "development_only": False}, {})
+        identify.assert_not_called()
+        command.assert_not_called()
+
+    def test_algorithm_physical_single_confirmation_unit_contracts(self):
+        command = [sys.executable, "-B",
+                   str(ROOT / "runtime/native/algorithm-physical-test.py"),
+                   "-v"]
+        completed = subprocess.run(
+            command, cwd=ROOT, check=False, capture_output=True,
+            text=True, timeout=20)
+        self.assertEqual(completed.returncode, 0, completed.stderr[-2000:])
+
     def save_recovery_fixture(self, state_dir, state):
         """Keep both synthetic records tied to their edited state identity."""
         (state_dir / probe.STATE_NAME).write_text(json.dumps(state))

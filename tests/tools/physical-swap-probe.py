@@ -20,6 +20,7 @@ import platform
 from pathlib import Path
 import re
 import secrets
+import select
 import shutil
 import signal
 import stat
@@ -27,6 +28,7 @@ import struct
 import subprocess
 import sys
 import tempfile
+import time
 
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -2360,6 +2362,10 @@ def _require_recovery_results_binding(state, results):
     """Refuse stale or cross-run results before touching recovery resources."""
     if not isinstance(results, dict):
         raise ProbeError("saved physical results record is not an object")
+    if state.get("algorithm_real_swap") is True and (
+            results.get("algorithm_real_swap") is not True or
+            state.get("development_only") is not True):
+        raise ProbeError("real-swap recovery mode differs from saved results")
     for state_field, result_field in RECOVERY_RECORD_BINDINGS:
         if state_field not in state or result_field not in results or (
                 type(state[state_field]) is not type(results[result_field]) or
@@ -2526,7 +2532,7 @@ def recover(state_dir, device_arg, confirm_arg, lock_held=False,
                 "persisted module ownership cannot prove load continuity; "
                 "manual recovery required")
         if _mapper_exists(state):
-            _verify_owned_mapper(state, target)
+            _prepare_owned_mapper_removal(state, target)
             _run(["dmsetup", "remove", state["dm_name"]], timeout=60)
         if _mapper_exists(state):
             raise ProbeError("helper-owned mapper remains after removal")
@@ -2730,6 +2736,8 @@ def _prepare_state(target, state_dir, evidence, review):
         "swap_size_kib": target.get("swap_size_kib"),
         "swap_used_kib": target.get("swap_used_kib"),
         "development_only": evidence.get("development_only") is True,
+        **({"algorithm_real_swap": True}
+           if evidence.get("algorithm_real_swap") is True else {}),
         "development_scope": (DEVELOPMENT_SCOPE
                               if evidence.get("development_only") is True
                               else None),
@@ -2749,6 +2757,193 @@ def _prepare_state(target, state_dir, evidence, review):
     return state, state_dir
 
 
+def _prepare_owned_mapper_removal(state, target):
+    """Permit DM removal only after normal swapoff of the run-owned mapper.
+
+    No active-page state is inferred from a successful command alone; the
+    exact mapper is independently observed inactive before removal.
+    """
+    mapper = _verify_owned_mapper(state, target)
+    if state.get("algorithm_real_swap") is not True:
+        return
+    if state.get("development_only") is not True:
+        raise ProbeError("real-swap mode has invalid recovery scope")
+    mapper_device = block_identity(mapper)
+    if _active_swap_for(*mapper_device) is not None:
+        _run(["swapoff", "--", mapper], timeout=120)
+        if _active_swap_for(*mapper_device) is not None:
+            raise ProbeError("owned mapper remains active after swapoff")
+
+
+def _algorithm_pageout_event(worker, expected_prefix):
+    """Read one bounded, phase-specific worker record without waiting forever."""
+    if worker.stdout is None:
+        raise ProbeError("real-swap oracle stdout pipe is unavailable")
+    ready, _writable, _exceptional = select.select(
+        [worker.stdout], [], [], 30)
+    if not ready:
+        raise ProbeError("real-swap oracle phase timed out")
+    line = worker.stdout.readline()
+    if (not line.startswith(expected_prefix) or not line.endswith("\n") or
+            len(line) > 512):
+        raise ProbeError("real-swap oracle returned missing or malformed phase")
+    try:
+        record = _load_unique_json(
+            line[len(expected_prefix):-1].encode("ascii"))
+    except (UnicodeError, ValueError) as exc:
+        raise ProbeError("real-swap oracle record is not canonical JSON") from exc
+    if not isinstance(record, dict):
+        raise ProbeError("real-swap oracle phase record is not an object")
+    return record
+
+
+def _algorithm_pageout_oracle_snapshot(state_dir, source_sha):
+    """Execute only source-bound oracle bytes from the private run directory."""
+    relative = "tests/tools/algorithm-pageout-oracle.py"
+    original = ROOT / relative
+    try:
+        payload = original.read_bytes()
+        recorded = _git_result("show", f"{source_sha}:{relative}").stdout.encode(
+            "utf-8")
+    except (OSError, UnicodeError, ProbeError) as exc:
+        raise ProbeError("real-swap oracle source identity unavailable") from exc
+    if not payload or payload != recorded or len(payload) > 65536:
+        raise ProbeError("real-swap oracle differs from the exact source commit")
+    snapshot = state_dir / "algorithm-pageout-oracle.py"
+    descriptor = os.open(
+        snapshot, os.O_WRONLY | os.O_CREAT | os.O_EXCL |
+        os.O_NOFOLLOW | os.O_CLOEXEC, 0o400)
+    try:
+        _write_all(descriptor, payload)
+        os.fsync(descriptor)
+    finally:
+        _close_fd_preserving_active_error(descriptor)
+    _fsync_directory(state_dir)
+    if snapshot.read_bytes() != payload:
+        raise ProbeError("private real-swap oracle source changed after snapshot")
+    return snapshot, hashlib.sha256(payload).hexdigest()
+
+
+def _run_algorithm_live_swap_oracle(mapper, state, target, state_dir):
+    """Prove Linux anonymous pageout/pagein through the exact owned mapper.
+
+    The worker's READY event alone is not evidence. Require positive exact
+    mapper swap usage and lower I/O before accepting byte-exact readback.
+    Recovery, not this function, owns swapoff and mapper destruction.
+    """
+    if _verify_owned_mapper(state, target) != mapper:
+        raise ProbeError("owned mapper changed before real swap")
+    mapper_device = block_identity(mapper)
+    if _active_swap_for(*mapper_device) is not None:
+        raise ProbeError("owned mapper unexpectedly active before real-swap setup")
+    try:
+        meminfo = Path("/proc/meminfo").read_text(encoding="ascii")
+        match = re.search(r"(?m)^MemAvailable:\s+(\d+) kB$", meminfo)
+    except (OSError, UnicodeError) as exc:
+        raise ProbeError("cannot prove safe host memory headroom") from exc
+    if not match or int(match.group(1)) < 512 * 1024:
+        raise ProbeError("insufficient host memory headroom for bounded real swap")
+
+    private_oracle, oracle_sha256 = _algorithm_pageout_oracle_snapshot(
+        state_dir, state["source_sha"])
+    _run(["mkswap", "--force", "--", mapper], timeout=30)
+    # The state already durably recorded the real-swap mode before mutation.
+    # A failure after swapon must always retain the normal swapoff path.
+    _run(["swapon", "--priority", "32767", "--", mapper], timeout=30)
+    active = _active_swap_for(*mapper_device)
+    if active is None or active["used_kib"] != 0:
+        raise ProbeError("run-owned swap mapper activation is unproven")
+    lower_before = _block_stat_snapshot(target)
+    if lower_before.get("available") is not True:
+        raise ProbeError("cannot sample physical I/O before anonymous pageout")
+
+    worker = None
+    try:
+        worker = subprocess.Popen(
+            [sys.executable, "-I", "-B", str(private_oracle),
+             "--seed", state["run_id"]],
+            stdin=subprocess.PIPE, stdout=subprocess.PIPE,
+            stderr=subprocess.DEVNULL, text=True, bufsize=1,
+            start_new_session=True)
+        expected_pages = 2048
+        expected_bytes = expected_pages * PAGE_BYTES
+        ready = _algorithm_pageout_event(worker, "ALGORITHM_PAGEOUT_READY=")
+        if (set(ready) != {"pages", "bytes", "expected_sha256"} or
+                ready["pages"] != expected_pages or
+                ready["bytes"] != expected_bytes or
+                not isinstance(ready["expected_sha256"], str) or
+                re.fullmatch(r"[0-9a-f]{64}", ready["expected_sha256"]) is None):
+            raise ProbeError("real-swap pageout oracle readiness is invalid")
+
+        deadline = time.monotonic() + 10.0
+        used_swap_kib = 0
+        while time.monotonic() < deadline:
+            if _verify_owned_mapper(state, target) != mapper or (
+                    block_identity(mapper) != mapper_device):
+                raise ProbeError("run-owned mapper identity changed during pageout")
+            observed = _active_swap_for(*mapper_device)
+            if observed is None:
+                raise ProbeError("owned mapper lost swap activation during pageout")
+            used_swap_kib = observed["used_kib"]
+            if used_swap_kib > 0:
+                break
+            time.sleep(0.05)
+        lower_after_pageout = _block_stat_snapshot(target)
+        pageout_delta = _lower_io_delta(
+            lower_before, lower_after_pageout)
+        if used_swap_kib <= 0 or pageout_delta["lower_write_bytes"] <= 0:
+            raise ProbeError(
+                "anonymous pageout did not prove exact mapper use and backing writes")
+
+        if worker.stdin is None:
+            raise ProbeError("real-swap oracle command pipe is unavailable")
+        worker.stdin.write("VERIFY\n")
+        worker.stdin.flush()
+        verified = _algorithm_pageout_event(
+            worker, "ALGORITHM_PAGEOUT_VERIFIED=")
+        if (set(verified) != {
+                "pages", "bytes", "mismatches", "actual_sha256",
+                "expected_sha256"} or
+                verified["pages"] != expected_pages or
+                verified["bytes"] != expected_bytes or
+                verified["mismatches"] != 0 or
+                verified["actual_sha256"] != ready["expected_sha256"] or
+                verified["expected_sha256"] != ready["expected_sha256"]):
+            raise ProbeError("real-swap anonymous-page readback is not byte-exact")
+        if worker.wait(timeout=30) != 0:
+            raise ProbeError("real-swap oracle terminated unsuccessfully")
+        readback_delta = _lower_io_delta(
+            lower_after_pageout, _block_stat_snapshot(target))
+        if readback_delta["lower_read_bytes"] <= 0:
+            raise ProbeError("anonymous-page verification did not prove lower reads")
+        return {
+            "status": "PASS",
+            "oracle_sha256": oracle_sha256,
+            "verified_pages": expected_pages,
+            "verified_bytes": expected_bytes,
+            "byte_mismatches": 0,
+            "mapper_used_kib_after_pageout": used_swap_kib,
+            "lower_write_bytes": pageout_delta["lower_write_bytes"],
+            "lower_read_bytes": readback_delta["lower_read_bytes"],
+        }
+    except (OSError, subprocess.TimeoutExpired) as exc:
+        raise ProbeError(
+            "bounded anonymous swap oracle failed to execute or finish") from exc
+    finally:
+        if worker is not None:
+            if worker.poll() is None:
+                try:
+                    worker.kill()
+                except ProcessLookupError:
+                    # A worker may exit between poll() and kill().
+                    pass
+            worker.wait(timeout=15)
+            if worker.stdin is not None:
+                worker.stdin.close()
+            if worker.stdout is not None:
+                worker.stdout.close()
+
+
 def _remove_test_objects(state, state_dir):
     return recover(state_dir, state["device_arg"], state["device_arg"],
                    lock_held=True, module_owned_by_process=True)
@@ -2756,7 +2951,8 @@ def _remove_test_objects(state, state_dir):
 
 def _final_physical_oracle_evidence_error(results, state, target,
                                           evidence, review, phases, oracle,
-                                          mapper, development_only):
+                                          mapper, development_only,
+                                          algorithm_real_swap=False):
     """Fail closed on missing, rewritten, or unbound durable oracle evidence."""
     expected_header_sha256 = hashlib.sha256(target["header"]).hexdigest()
     if (not isinstance(mapper, str) or not mapper.startswith("/dev/mapper/") or
@@ -2815,9 +3011,26 @@ def _final_physical_oracle_evidence_error(results, state, target,
                 "total_distinct_matching_reports": evidence["pass_reports"],
             },
         })
+    if algorithm_real_swap:
+        bindings["algorithm_real_swap"] = True
+        bindings["linux_swap_activation_tested"] = True
     for field, expected in bindings.items():
         if results.get(field) != expected:
             return f"{field}_mismatch"
+    if algorithm_real_swap:
+        record = results.get("algorithm_live_swap")
+        required = ("verified_pages", "verified_bytes",
+                    "mapper_used_kib_after_pageout", "lower_write_bytes",
+                    "lower_read_bytes")
+        if (not isinstance(record, dict) or record.get("status") != "PASS" or
+                record.get("byte_mismatches") != 0 or
+                any(type(record.get(key)) is not int or record[key] <= 0
+                    for key in required) or
+                record["verified_bytes"] != record["verified_pages"] * PAGE_BYTES or
+                record["verified_pages"] != 2048 or
+                not isinstance(record.get("oracle_sha256"), str) or
+                re.fullmatch(r"[0-9a-f]{64}", record["oracle_sha256"]) is None):
+            return "algorithm_real_swap_evidence_missing_or_invalid"
     saved_bindings = {
         "device_arg": target["device_arg"],
         "device": target["device"],
@@ -2936,7 +3149,9 @@ def _final_physical_oracle_evidence_error(results, state, target,
 
 
 def run_probe(device_arg, confirm_arg, state_dir_arg, review_path,
-              development_only=False):
+              development_only=False, algorithm_real_swap=False):
+    if algorithm_real_swap and not development_only:
+        raise ProbeError("real-swap algorithm mode requires development-only admission")
     if os.geteuid() != 0:
         raise ProbeError("run action requires root")
     start_timestamp = _utc_timestamp()
@@ -2947,6 +3162,7 @@ def run_probe(device_arg, confirm_arg, state_dir_arg, review_path,
         # own authoritative last prewrite check later.
         require_development_formatter_inventory_clear()
         evidence = current_development_evidence(None)
+        evidence["algorithm_real_swap"] = algorithm_real_swap
         target = inspect_target(
             device_arg, confirm_arg, allow_inactive_swap=True)
         if target.get("swap_was_active") is not False:
@@ -3018,6 +3234,7 @@ def run_probe(device_arg, confirm_arg, state_dir_arg, review_path,
             "development_only": development_only,
             "scope": (DEVELOPMENT_SCOPE if development_only else EXPECTED_SCOPE),
             "linux_swap_activation_tested": False if development_only else None,
+            **({"algorithm_real_swap": True} if algorithm_real_swap else {}),
             "physical_media_acceptance": False if development_only else None,
             "production_qualification": False if development_only else None,
             "start_timestamp": start_timestamp,
@@ -3224,6 +3441,11 @@ def run_probe(device_arg, confirm_arg, state_dir_arg, review_path,
                 _run_positive_oracle_phase(
                     oracle, mapper, state, target, state_dir, results,
                     phase_name, options)
+            if algorithm_real_swap:
+                results["algorithm_live_swap"] = _run_algorithm_live_swap_oracle(
+                    mapper, state, target, state_dir)
+                results["linux_swap_activation_tested"] = True
+                _save_results(state_dir, results)
             state["stage"] = "ORACLE_PASS"
             _save_state(state_dir, state)
             # Worker success remains provisional until recovery and durable
@@ -3429,7 +3651,7 @@ def run_probe(device_arg, confirm_arg, state_dir_arg, review_path,
                 if failure is None:
                     oracle_error = _final_physical_oracle_evidence_error(
                         results, state, target, evidence, review, phases,
-                        oracle, mapper, development_only)
+                        oracle, mapper, development_only, algorithm_real_swap)
                     if oracle_error is not None:
                         failures.append(
                             "operation=validate_durable_oracle "
@@ -3461,6 +3683,8 @@ def run_probe(device_arg, confirm_arg, state_dir_arg, review_path,
         # A successful oracle alone cannot publish success before normal
         # mapper/module removal, swap restoration, and evidence validation.
         if development_only:
+            if algorithm_real_swap:
+                print("PHYSICAL_ALGORITHM_REAL_SWAP=PASS")
             print("PHYSICAL_DEVELOPMENT_SMOKE=PASS")
             print("EVIDENCE_CLASS=DEVELOPMENT_ONLY_NOT_PHYSICAL_QUALIFICATION")
             print(f"PHYSICAL_SMOKE_RESTORED=original-header; target-inactive state={state_dir}")
@@ -3898,6 +4122,9 @@ def main(argv=None):
     parser.add_argument(
         "--development-only", action="store_true",
         help="run one current-source physical backing smoke; never qualifies production")
+    parser.add_argument(
+        "--algorithm-real-swap", action="store_true",
+        help="bounded real anonymous Linux swap round-trip; development-only")
     args = parser.parse_args(argv)
     if args.action in {"plan", "campaign-plan", "run", "recover"} and not args.device:
         parser.error("--device is required")
@@ -3915,6 +4142,9 @@ def main(argv=None):
         parser.error("--development-only does not accept a review record")
     if args.action != "run" and args.development_only:
         parser.error("--development-only is available only for run")
+    if args.algorithm_real_swap and (args.action != "run" or
+                                     not args.development_only):
+        parser.error("--algorithm-real-swap requires run --development-only")
     if args.action == "recover" and not args.state_dir:
         parser.error("recover requires --state-dir")
     if args.action == "plan":
@@ -3944,7 +4174,8 @@ def main(argv=None):
 
     signal.signal(signal.SIGTERM, handle_sigterm)
     run_probe(args.device, args.confirm_device, args.state_dir,
-              args.review_record, development_only=args.development_only)
+              args.review_record, development_only=args.development_only,
+              algorithm_real_swap=args.algorithm_real_swap)
     return 0
 
 

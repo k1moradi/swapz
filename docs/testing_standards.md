@@ -7008,16 +7008,34 @@ This test path is not invoked by routine `make test` and cannot be described as
 a passing full physical or real-swap qualification.
 
 The algorithm anonymous-page oracle at
-`tests/tools/algorithm-pageout-oracle.py` writes a bounded 64 MiB of
+`tests/tools/algorithm-pageout-oracle.py` writes a bounded 8 MiB of
 run-unique 4096-byte patterns, requests `MADV_PAGEOUT`, then waits for its
 controller before reading each page back and checking every byte. Its READY
 event alone is never proof of swap-out, swapz use, or physical-device access:
 the separate, privileged physical controller must authenticate the exact
 owned mapper in `/proc/swaps`, observe positive mapper swap use and independently
-verified lower-I/O evidence before issuing VERIFY. Failed page eviction,
-missing command, a short page or mismatched data must never produce a PASS.
-The worker never opens, formats or selects a block device; this rootless
-contract is preparatory only and does not lift the physical admission blocker.
+verified lower-write evidence, then prove lower reads during verification.
+A source-bound worker run with no actual mapper traffic is BLOCKED. Failed
+page eviction, missing command, a short page or mismatched data must never
+produce a PASS.
+
+After the five RAM stages pass, interactive `make test` may use the separate
+unprivileged `tests/tools/algorithm-physical.py` to discover exactly one
+inactive, unmounted, single-partition USB disk bearing a swap signature on a
+bare-metal x86_64 host. It asks one default-No question showing partition,
+parent, PARTUUID and geometry, before starting the existing private
+`physical-swap-probe.py run --development-only --algorithm-real-swap`
+path through noninteractive privilege. The original 4096-byte header and
+run-owned mapping still require backed-up, durable, verified cleanup.
+Only the exact run-owned mapper may be swapped on and off; never force-remove
+an active mapper. Ambiguous target, VM, existing active swap, preloaded module,
+missing noninteractive root, uncertain recovery storage or changed source
+must refuse without device mutation. Current algorithm live-swap evidence is
+DEVELOPMENT_ONLY and cannot promote `make test` to official physical PASS:
+production source/run/target admission, sustained media service and
+cross-boot recovery remain separate. A refused or declined option still
+reports algorithm INCOMPLETE; a destructive failure retains FAIL or
+RECOVERY_REQUIRED evidence. Noninteractive and CI runs do not inspect devices.
 
 #### Physical admission and qualified-artifact policy
 

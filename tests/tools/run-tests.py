@@ -10021,16 +10021,54 @@ def main():
         result["overall"] = "INCOMPLETE"
         exit_code = 2
     if not exit_code and result["overall"] == "PASS" and tier == "algorithm":
-        # The physical parent currently refuses run/target ownership admission.
-        # Retain exact RAM results, but never assert a real-device PASS.
+        # This source-built, development-only trial never satisfies the
+        # independently gated production physical qualification protocol.
+        # Avoid any device discovery or prompt in CI and noninteractive runs.
         result["overall"] = "INCOMPLETE"
         result["physical_qualification"] = {
             "overall": "NOT_RUN",
             "reason": "physical_source_admission_protocol_not_qualified",
         }
-        print("  Physical qualification: NOT RUN; "
-              "source/run/target admission protocol is not yet qualified")
-        exit_code = 2
+        if sys.stdin.isatty() and sys.stdout.isatty():
+            print("  RAM qualification passed; checking optional physical "
+                  "algorithm trial admission", flush=True)
+            try:
+                physical_trial = subprocess.run(
+                    [sys.executable, "-B",
+                     str(ROOT / "tests/tools/algorithm-physical.py")],
+                    cwd=ROOT, check=False)
+                physical_exit = physical_trial.returncode
+            except (OSError, subprocess.SubprocessError):
+                physical_exit = 2
+            if physical_exit == 0:
+                result["algorithm_real_swap"] = {
+                    "overall": "PASS_DEVELOPMENT_ONLY",
+                    "reason": "source_built_bounded_swap_roundtrip",
+                }
+                print("  Physical algorithm trial: PASS_DEVELOPMENT_ONLY; "
+                      "production physical acceptance still pending")
+            elif physical_exit in (1, 3):
+                result["algorithm_real_swap"] = {
+                    "overall": ("RECOVERY_REQUIRED" if physical_exit == 3
+                                else "FAIL"),
+                    "reason": "physical_oracle_or_cleanup_failure",
+                }
+                result["overall"] = "FAIL"
+                exit_code = physical_exit
+                print("  Physical algorithm trial: FAIL; inspect root-owned "
+                      "recovery state before another test")
+            else:
+                result["algorithm_real_swap"] = {
+                    "overall": "NOT_RUN",
+                    "reason": "physical_trial_declined_or_blocked",
+                }
+                print("  Physical algorithm trial: NOT RUN; "
+                      "device unchanged or safely refused")
+        else:
+            print("  Physical qualification: NOT RUN; "
+                  "source/run/target admission protocol is not yet qualified")
+        if not exit_code:
+            exit_code = 2
     if not exit_code and result["overall"] == "PASS":
         refusal = official_pass_binding_refusal(
             result, result["tested_commit_sha"])
