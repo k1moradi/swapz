@@ -15,9 +15,10 @@ rejected pilots and deferred research are catalogued in the
 [handoff index](handoff/README.md), not maintained as active instructions here.
 
 **Current contracts (linked rather than restated):** [VISION.md](VISION.md)
-defines immutable product/module/SWZ names and the sole official qualification
-interface `make test`; `make fast_test` remains development-only and never
-qualifies a source. [AGENTS.md](../AGENTS.md) and
+defines immutable product/module/SWZ names and three testing tiers:
+`make fast_test` is nonqualifying development, `make test` is algorithm/RAM
+qualification (currently physical-INCOMPLETE), and `make test_full`
+retains rootless integration and RAM-backed qualification. [AGENTS.md](../AGENTS.md) and
 [AGENT_CONTEXT.md](AGENT_CONTEXT.md) govern execution, device ownership and
 reboot restrictions. Generic loaded qualification uses newly created,
 positively identified RAM-backed `null_blk`; dedicated physical-card

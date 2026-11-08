@@ -1,11 +1,11 @@
-# Exactly five public root Make goals; never add aliases or extra targets.
-# make fast_test is a development-only decision loop; make test alone qualifies.
+# Exactly six public root Make goals; never add aliases or extra targets.
+# fast_test is development-only; physical qualification remains fail-closed.
 .DEFAULT_GOAL := all
 # The internal default target is not an additional user-visible alias.
 # Disallow explicitly specifying it or combining supported goals.
 ifneq ($(strip $(MAKECMDGOALS)),)
-ifeq ($(filter $(MAKECMDGOALS),install uninstall test fast_test),)
-$(error Only make, make install, make uninstall, make test, make fast_test are supported)
+ifeq ($(filter $(MAKECMDGOALS),install uninstall test test_full fast_test),)
+$(error Only make, make install, make uninstall, make test, make test_full, make fast_test are supported)
 endif
 ifneq ($(words $(MAKECMDGOALS)),1)
 $(error Specify exactly one supported Make command)
@@ -36,7 +36,7 @@ build/source-build-info.h: build/source-build-info-force
 	  if ! cmp -s "$$tmp" "$@"; then mv -f "$$tmp" "$@"; \
 	  else rm -f "$$tmp"; fi
 
-.PHONY: all install uninstall test fast_test
+.PHONY: all install uninstall test test_full fast_test
 .PHONY: build/kernel/experimental/dm-swapz.ko
 # Make can compile independent outputs concurrently. The private test reporter
 # chooses a bounded CPU-aware job count automatically when no parent jobserver
@@ -75,12 +75,17 @@ install:
 uninstall:
 	@sudo bash packaging/package-dkms.sh uninstall "$(PREFIX)"
 
-# The only public test goal: all stages are run by the private,
-# bounded reporter, which replaces one JSON report on PASS/FAIL/BLOCKED.
-# The + preserves GNU Make jobserver FDs for parallel compilation;
-# the reporter completes each stage before starting the next.
+# Algorithm-only source/native/owned-RAM tests. The physical admission parent
+# cannot yet authenticate run/target identity; this tier remains INCOMPLETE
+# after RAM success, never a false production/physical PASS.
+# The + preserves GNU Make jobserver FDs for parallel compilation.
 test:
-	@+python3 -B tests/tools/run-tests.py --kdir "$(KDIR)"
+	@+python3 -B tests/tools/run-tests.py --kdir "$(KDIR)" --tier algorithm
+
+# Existing five-stage RAM plus all rootless package/DKMS/systemd integration.
+# Its PASS is not physical-media or cold-boot acceptance.
+test_full:
+	@+python3 -B tests/tools/run-tests.py --kdir "$(KDIR)" --tier full
 
 # Development-only K=1 profiling loop: build, native/replay checks and three
 # paired owned-null_blk repeats for sata-mixed, nvme4-mixed, nvme5-mixed,

@@ -2,7 +2,7 @@
 
 **Immutable naming policy (read before every prompt):** The project is `swapz`; the kernel module is `dm-swapz.ko` (loaded as `dm_swapz`); the Device Mapper target is exactly `swapz`; and the module alias is `dm-swapz`. Never put implementation-generation numbers in product, module, target, source-path, report, workflow, helper, or schema names. `SWZ` is the current unversioned on-disk format identity; do not assign a format version until an incompatible format boundary is justified.
 
-**Single official test command (read before every prompt):** Run `make test` at the repository root for every supported swapz test and benchmark. A complete run must report BLOCKED (nonzero) if safe noninteractive privileged qualification cannot run. Do not create, publish, recommend, or document alternative test commands; the sole owner-approved exception is the development decision loop `make fast_test`, which never qualifies a source, never writes or publishes `test_results.json` and never replaces `make test`. Private scripts and CI jobs are implementation details, not operator interfaces.
+**Three-tier test policy:** `make fast_test` is development-only and never qualifies or publishes `test_results.json`; `make test` runs the algorithm/RAM path and returns INCOMPLETE (nonzero) until physical source/run/target admission is qualified; `make test_full` retains all rootless DKMS/systemd integration and RAM qualification. Both privileged tiers report BLOCKED (nonzero) if noninteractive privilege is unavailable. RAM/integration PASS cannot certify physical storage or cold-boot production acceptance. Private scripts and CI jobs are implementation details, not operator interfaces.
 
 ## Build
 
@@ -86,12 +86,16 @@ separate project policy decision before they can be claimed.
 
 ## Root Make API
 
-Exactly five commands are public:
+Exactly six commands are public:
 
 - `make`: build product artifacts without loading them.
 - `make install`: admit and install the exact artifacts already qualified by `make test`; it does not rebuild, re-sign, load the module, create a mapper, or activate swap.
 - `make uninstall`: remove only the matching owned installation.
-- `make test`: execute the complete supported qualification.
+- `make test`: source/native, warning and loaded RAM algorithm tests;
+  rootless package/DKMS/systemd integration is excluded. Result remains
+  INCOMPLETE until physical source/run/target admission is qualified.
+- `make test_full`: the prior full rootless integration plus RAM benchmark
+  suite; PASS does not certify physical or boot acceptance.
 - `make fast_test`: development-only decision loop: build the working tree,
   run native/replay contract checks and the selected owned-null_blk scenarios
   (three paired repeats per scenario by default), and print compact raw/swapz,

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Owner policy: only five user-visible root Make commands."""
+"""Owner policy: six user-visible root Make commands with three test tiers."""
 import importlib.util
 import json
 import os
@@ -114,7 +114,7 @@ class PublicMakeContract(unittest.TestCase):
             self.assertEqual(runner_contract.git_sha(), malformed_report_sha)
             self.assertNotEqual(make_source_sha, runner_contract.git_sha())
 
-    def test_exact_five_root_goals(self):
+    def test_exact_six_root_goals(self):
         targets = set()
         for line in MAKE.splitlines():
             if not line or line[0].isspace() or line.startswith("#") or line.startswith("."):
@@ -123,13 +123,13 @@ class PublicMakeContract(unittest.TestCase):
             if m:
                 targets.add(m.group(1))
         self.assertEqual(targets, {"all", "install", "uninstall", "test",
-                                   "fast_test"})
+                                   "test_full", "fast_test"})
         self.assertIn(".DEFAULT_GOAL := all", MAKE)
         self.assertIn("Only make, make install, make uninstall, make test, "
-                      "make fast_test are supported", MAKE)
+                      "make test_full, make fast_test are supported", MAKE)
         self.assertNotIn("Only make -j2,", MAKE)
         self.assertNotIn("make test -j", MAKE)
-        self.assertIn(".PHONY: all install uninstall test fast_test", MAKE)
+        self.assertIn(".PHONY: all install uninstall test test_full fast_test", MAKE)
         # make fast_test is a development decision loop: it never writes or
         # publishes the qualification report and never replaces make test.
         self.assertIn("@+python3 -B tests/tools/fast-test.py", MAKE)
@@ -144,7 +144,11 @@ class PublicMakeContract(unittest.TestCase):
         self.assertIn("all: build/kernel/experimental/dm-swapz.ko "
                       "build/tests/device-roundtrip build/userspace/swapzctl", MAKE)
         self.assertIn("@+python3 -B tests/tools/run-tests.py --kdir", MAKE)
+        self.assertIn("--tier algorithm", MAKE)
+        self.assertIn("--tier full", MAKE)
         reporter = (ROOT / "tests/tools/run-tests.py").read_text()
+        self.assertIn('"ALGORITHM_PHYSICAL_PENDING"', reporter)
+        self.assertIn('"FULL_INTEGRATION_RAM_ONLY"', reporter)
         for required in ("tests/tools/test-rootless.sh", "tests/tools/test-loaded.sh",
                          "W=1", "W=2", "test_results.json",
                          "tested_commit_sha", "commit-tree", "mktree",
@@ -459,15 +463,14 @@ class PublicMakeContract(unittest.TestCase):
         canonical = ("docs/README.md", "docs/VISION.md",
                      "docs/coding_standards.md", "docs/testing_standards.md",
                      "docs/compile.md", "docs/benchmark.md")
-        policy = "**Single official test command (read before every prompt):**"
+        policy = "**Three-tier test policy:**"
         for document in canonical:
             with self.subTest(canonical=document):
                 content = (ROOT / document).read_text()
                 self.assertIn(policy, content)
-                self.assertIn("Run `make test` at the repository root", content)
-                self.assertIn("report BLOCKED (nonzero)", content)
-                self.assertIn("Do not create, publish, recommend, or document "
-                              "alternative test commands", content)
+                self.assertIn("make test_full", content)
+                self.assertIn("make fast_test", content)
+                self.assertIn("BLOCKED (nonzero)", content)
 
         readme = (ROOT / "docs/README.md").read_text()
         self.assertIn("[VISION.md](VISION.md)", readme)
@@ -477,11 +480,10 @@ class PublicMakeContract(unittest.TestCase):
         self.assertIn("**Current contracts (linked rather than restated):**",
                       context)
         self.assertIn("[VISION.md](VISION.md)", context)
-        self.assertIn("sole official qualification\ninterface `make test`",
-                      context)
+        self.assertIn("three testing tiers:", context)
 
         testing = (ROOT / "docs/testing_standards.md").read_text()
-        self.assertIn("~~~sh\nmake test\n~~~", testing)
+        self.assertIn("~~~sh\nmake fast_test\nmake test\nmake test_full\n~~~", testing)
         operator_docs = ("docs/README.md", "docs/testing_standards.md")
         for document in operator_docs:
             with self.subTest(official=document):

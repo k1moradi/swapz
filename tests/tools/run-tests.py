@@ -9823,7 +9823,10 @@ def required_benchmark_gates_pass(benchmarks):
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--kdir", required=True)
+    parser.add_argument("--tier", choices=("algorithm", "full"), default="full")
     args = parser.parse_args()
+    # Isolated historical report mocks supply only kdir.
+    tier = args.tier if isinstance(getattr(args, "tier", None), str) else "full"
     result = {
         "schema": "swapz-test-results-v1",
         "host_identity": report_host_identity(),
@@ -9831,6 +9834,9 @@ def main():
         "tested_commit_sha": git_sha(),
         "kernel_release": os.uname().release,
         "qualification": "RAM_BACKED_NULL_BLK_ONLY",
+        "qualification_tier": (
+            "ALGORITHM_PHYSICAL_PENDING" if tier == "algorithm"
+            else "FULL_INTEGRATION_RAM_ONLY"),
         "stages": [],
         "benchmarks": {"sessions": [], "verdicts": {"overall": "NOT_RUN"},
                        "loaded_correctness": {"overall": "NOT_RUN"},
@@ -9846,11 +9852,15 @@ def main():
         "overall": "INCOMPLETE"
     }
     make_cmd, parallelism = make_invocation()
-    print("swapz: full test and benchmark qualification")
+    print("swapz: full test and benchmark qualification"
+          if tier == "full" else
+          "swapz: algorithm RAM qualification; physical admission pending")
     print(f"  Tests are sequential; {parallelism}")
     stages = [
         ("Build module and helpers", [*make_cmd, f"KDIR={args.kdir}"]),
-        ("Native and rootless contracts", ["bash", "tests/tools/test-rootless.sh"]),
+        ("Native and rootless contracts",
+         ["bash", "tests/tools/test-rootless.sh"] +
+         (["--algorithm"] if tier == "algorithm" else [])),
         ("Kernel warnings W=1", [*make_cmd, "-C", "src/kernel",
                                  f"KDIR={args.kdir}", "W=1", "all"]),
         ("Kernel warnings W=2", [*make_cmd, "-C", "src/kernel",
@@ -9928,6 +9938,17 @@ def main():
             result["qualified_artifacts"]):
         # Preserve passed stages; missing artifacts do not qualify source.
         result["overall"] = "INCOMPLETE"
+        exit_code = 2
+    if not exit_code and result["overall"] == "PASS" and tier == "algorithm":
+        # The physical parent currently refuses run/target ownership admission.
+        # Retain exact RAM results, but never assert a real-device PASS.
+        result["overall"] = "INCOMPLETE"
+        result["physical_qualification"] = {
+            "overall": "NOT_RUN",
+            "reason": "physical_source_admission_protocol_not_qualified",
+        }
+        print("  Physical qualification: NOT RUN; "
+              "source/run/target admission protocol is not yet qualified")
         exit_code = 2
     if not exit_code and result["overall"] == "PASS":
         refusal = official_pass_binding_refusal(

@@ -72,6 +72,22 @@ document the former fixed-device design. Any `/dev/sda4`, `8:4`, 16 GiB, or orig
 digest values in those notes are historical test context, not current source
 requirements; use the selector and manifest-bound geometry described above.
 
+## Three-tier testing transition and physical admission blocker
+
+The owner adopted `make fast_test` for agent development, `make test` for
+algorithm qualification on RAM and the owner-authorized physical target,
+and `make test_full` for complete product integration. The current
+first implementation separates rootless DKMS/systemd fixtures from
+algorithm/RAM tests while retaining native, source, warning, ownership,
+loaded correctness and benchmark coverage. The existing physical-source
+admission parent still rejects missing source/run/target authenticated
+identity, so `make test` reports INCOMPLETE even after RAM PASS and does
+not access the physical partition. `make test_full` retains existing rootless
+installation/rollback models and RAM qualifications, but does not yet
+execute actual DKMS installation or verify boot/physical readiness.
+Finish and qualify the protected physical admission protocol before
+promoting either result to production-ready physical acceptance.
+
 ## Current owner requirement: fixed production compression stack
 
 Every emulated device must run the production delta64 + `DELTA64_SHUF8`

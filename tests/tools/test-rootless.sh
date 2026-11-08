@@ -7,6 +7,15 @@ cd "$ROOT"
 # Bash's built-in SECONDS attributes failure wall time without a child process
 # for each passing test. The official reporter still captures unmodified test
 # stdout/stderr; only a failed command creates a local private diagnostic.
+# Only rootless integration suites may be omitted from the algorithm tier.
+if (( $# == 0 )); then
+  rootless_full_integration=1
+elif (( $# == 1 )) && [[ $1 == --algorithm ]]; then
+  rootless_full_integration=0
+else
+  printf '%s\n' 'BLOCKED: unsupported rootless tier' >&2
+  exit 2
+fi
 rootless_stage_started_seconds=$SECONDS
 rootless_phase='rootless initialization'
 rootless_phase_started_seconds=$SECONDS
@@ -751,6 +760,7 @@ python3 -B tests/runtime/native/rootless-attribution-test.py -v
 rootless_phase='tests/runtime/native/ci-failure-diagnostics-test.py'
 rootless_begin_phase
 python3 -B tests/runtime/native/ci-failure-diagnostics-test.py
+if (( rootless_full_integration )); then
 rootless_phase='tests/runtime/native/package-dkms-test.py'
 rootless_begin_phase
 begin_rootless_private_stderr_capture
@@ -776,6 +786,7 @@ else
   rootless_generator_exit_code=$?
 fi
 finish_and_report_rootless_unittest "$rootless_generator_exit_code" "$rootless_generator_command_line"
+fi
 rootless_phase='tests/runtime/native/physical-swap-probe-test.py'
 rootless_begin_phase
 python3 -B tests/runtime/native/physical-swap-probe-test.py -v

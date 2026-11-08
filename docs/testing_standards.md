@@ -2,15 +2,30 @@
 
 **Immutable naming policy (read before every prompt):** The project is `swapz`; the kernel module is `dm-swapz.ko` (loaded as `dm_swapz`); the Device Mapper target is exactly `swapz`; and the module alias is `dm-swapz`. Never put implementation-generation numbers in product, module, target, source-path, report, workflow, helper, or schema names. `SWZ` is the current unversioned on-disk format identity; do not assign a format version until an incompatible format boundary is justified.
 
-**Single official test command (read before every prompt):** Run `make test` at the repository root for every supported swapz test and benchmark. A complete run must report BLOCKED (nonzero) if safe noninteractive privileged qualification cannot run. Do not create, publish, recommend, or document alternative test commands; the sole owner-approved exception is the development decision loop `make fast_test`, which never qualifies a source, never writes or publishes `test_results.json` and never replaces `make test`. Private scripts and CI jobs are implementation details, not operator interfaces.
+**Three-tier test policy:** `make fast_test` is development-only and never qualifies or publishes `test_results.json`; `make test` runs the algorithm/RAM path and returns INCOMPLETE (nonzero) until physical source/run/target admission is qualified; `make test_full` retains all rootless DKMS/systemd integration and RAM qualification. Both privileged tiers report BLOCKED (nonzero) if noninteractive privilege is unavailable. RAM/integration PASS cannot certify physical storage or cold-boot production acceptance. Private scripts and CI jobs are implementation details, not operator interfaces.
 
 ## Official interface
 
-The root checkout has one supported testing interface:
+The root checkout exposes three test tiers:
 
 ~~~sh
+make fast_test
 make test
+make test_full
 ~~~
+
+`make fast_test` is a nonqualifying development loop. `make test` retains
+source, native, ownership, W=1/W=2 and loaded RAM checks, omitting only
+rootless package/DKMS and systemd integration fixtures. After all RAM stages
+pass its overall result must remain INCOMPLETE: the physical source-admission
+parent currently refuses unauthenticated run/target identity, so no actual
+physical partition is tested. `make test_full` retains the previous
+five-stage rootless integration and loaded RAM qualification. Its PASS is
+current-source RAM/integration evidence only, not actual DKMS installation,
+physical-media testing, or cold-boot acceptance. Neither tier may select an
+arbitrary physical device or weaken ownership, byte-exact readback, or safe
+teardown gates. Complete the audited physical admission protocol before any
+algorithm production PASS is enabled.
 
 The isolated Make-interface fixture must use a temporary `main` checkout with
 no remote and a deterministic synthetic host identity. This exercises report
@@ -45,7 +60,7 @@ merge independent assertion/failure boundaries or omit ASan/UBSan/TSan
 qualification for speed.
 The native/rootless stage records separate native Make and remaining-contract
 wall times as optional observational evidence, not qualification PASS gates.
-The official `make test` terminal streams CTest-style start/completion and
+The official `make test` and `make test_full` terminals stream CTest-style start/completion and
 elapsed-second progress for source-controlled rootless suite labels, plus
 elapsed time for existing loaded-phase boundaries. Progress is strictly
 observational, filters labels against the source-controlled allowlist, and

@@ -2,7 +2,7 @@
 
 **Immutable naming policy (read before every prompt):** The project is `swapz`; the kernel module is `dm-swapz.ko` (loaded as `dm_swapz`); the Device Mapper target is exactly `swapz`; and the module alias is `dm-swapz`. Never put implementation-generation numbers in product, module, target, source-path, report, workflow, helper, or schema names. `SWZ` is the current unversioned on-disk format identity; do not assign a format version until an incompatible format boundary is justified.
 
-**Single official test command (read before every prompt):** Run `make test` at the repository root for every supported swapz test and benchmark. A complete run must report BLOCKED (nonzero) if safe noninteractive privileged qualification cannot run. Do not create, publish, recommend, or document alternative test commands; the sole owner-approved exception is the development decision loop `make fast_test`, which never qualifies a source, never writes or publishes `test_results.json` and never replaces `make test`. Private scripts and CI jobs are implementation details, not operator interfaces.
+**Three-tier test policy:** `make fast_test` is development-only and never qualifies or publishes `test_results.json`; `make test` runs the algorithm/RAM path and returns INCOMPLETE (nonzero) until physical source/run/target admission is qualified; `make test_full` retains all rootless DKMS/systemd integration and RAM qualification. Both privileged tiers report BLOCKED (nonzero) if noninteractive privilege is unavailable. RAM/integration PASS cannot certify physical storage or cold-boot production acceptance. Private scripts and CI jobs are implementation details, not operator interfaces.
 
 ## Mission
 
@@ -42,7 +42,7 @@ All allocations, work queues, staging arrays, segment scans and retries must rem
 
 ## Safety scope
 
-Generic loaded qualification remains restricted to newly created, positively identified RAM-backed `null_blk`. Physical backing remains disabled by default and is admitted only behind the explicit module opt-in plus a matching SWZ authorization header. For the current dedicated development PC, the owner has granted standing destructive and live-swap authority over the positively identified removable SD card described in [AGENT_CONTEXT.md](AGENT_CONTEXT.md); repeated per-run owner/external-review permission is not a release gate for that target. Exact device identity, source/artifact qualification, active-page protection and fail-closed lifecycle checks remain mandatory. Codex must not reboot or intentionally crash the PC, and no fallback swap is required.
+Generic loaded qualification remains restricted to newly created, positively identified RAM-backed `null_blk`. The algorithm tier is not physical qualified until the protected admission protocol works; full rootless integration/RAM PASS is not equivalent to physical production acceptance. Physical backing remains disabled by default and is admitted only behind the explicit module opt-in plus a matching SWZ authorization header. For the current dedicated development PC, the owner has granted standing destructive and live-swap authority over the positively identified removable SD card described in [AGENT_CONTEXT.md](AGENT_CONTEXT.md); repeated per-run owner/external-review permission is not a release gate for that target. Exact device identity, source/artifact qualification, active-page protection and fail-closed lifecycle checks remain mandatory. Codex must not reboot or intentionally crash the PC, and no fallback swap is required.
 
 ## Engineering direction
 

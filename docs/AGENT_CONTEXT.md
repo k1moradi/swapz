@@ -177,8 +177,10 @@ safe path to a correct maintainable product:
   the older shared-swap experiment, while retaining technical safety gates;
 - reuse valid evidence instead of rerunning expensive qualification without a
   reason;
-- use `make fast_test` for development decisions and `make test` for exact
-  source qualification;
+- use `make fast_test` for development decisions, `make test` for algorithm
+  RAM checks (physical qualification remains fail-closed), and `make test_full`
+  for exact-source rootless integration and RAM checks; RAM evidence is never
+  physical- or boot-acceptance evidence;
 - use `make fast_test RESUME=1` after interruptions or unrelated main advances;
   it reuses only matching private input/artifact checkpoints and always reruns
   the current product build and loaded preflight;
