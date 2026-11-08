@@ -3306,9 +3306,12 @@ interrupted STARTING record to durable
 `RECOVERY_REQUIRED(previous=STARTING)`; that exact transition is required,
 while the foreign inactive mapper, ownership records and host swap identity
 must remain unchanged. The two applied-EINTR reconciliation cases emit no
-refusal. The reporter must authenticate all eleven required
-refusals; one missing, duplicated, wrong-cause or wrong-operation refusal
-invalidates the entire exemption and fails the loaded evidence contract.
+refusal. The reporter must authenticate all thirteen ordered case-start records and all
+eleven required refusals whenever the overall loaded-correctness parser reaches
+PASS; authentication is mandatory even if **zero** detailed case records are
+present. One missing, duplicated, wrong-cause or wrong-operation refusal, or an
+aggregate-only `cases:13` claim without the detailed sequence, invalidates the
+entire exemption and fails the loaded evidence contract.
 That authentication failure is a harness FAIL. Independent explicit
 `FAIL:` evidence keeps its own failure phase, while unrelated
 `BLOCKED_LOADED_QUALIFICATION:` evidence remains BLOCKED; neither is

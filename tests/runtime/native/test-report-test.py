@@ -4798,6 +4798,8 @@ class ReportContract(unittest.TestCase):
                 "NEGATIVE=unexpected-case", 1), 0, "FAIL"),
             ("incomplete matrix", full_log.replace(
                 completion + "\n", "", 1), 0, "FAIL"),
+            ("aggregate-only matrix", full_log.replace(
+                "\n".join(negative_lines) + "\n", "", 1), 0, "FAIL"),
             ("nonzero child", full_log, 2, "FAIL"),
             ("genuine failure", full_log.replace(
                 original_block,
@@ -4812,7 +4814,7 @@ class ReportContract(unittest.TestCase):
         authentication_failures = {
             "wrong operation", "wrong cause", "duplicated refusal",
             "missing refusal", "private data", "untrusted case",
-            "incomplete matrix", "nonzero child",
+            "incomplete matrix", "aggregate-only matrix", "nonzero child",
         }
         for title, transcript, child_exit, status in adversarial:
             with self.subTest(title=title):

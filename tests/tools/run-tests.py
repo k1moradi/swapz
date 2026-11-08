@@ -3665,15 +3665,16 @@ def run_stage(title, command, result, *, parse_bench=False):
         if storage_envelope_sessions else
         {"overall": "NOT_RUN", "reason": "storage-envelope sweep not executed"})
     loaded_lines = output.splitlines() if parse_bench else ()
-    negative_refusal_evidence_present = parse_bench and any(
-        line.startswith("START_LOADED_PRIMARY_NULLBLK_NEGATIVE=")
-        for line in loaded_lines)
+    negative_refusal_contract_required = (
+        parse_bench and isinstance(loaded_correctness, dict) and
+        loaded_correctness.get("overall") == "PASS")
     negative_refusal_indices = (
         authenticated_primary_negative_refusal_indices(
             loaded_lines, loaded_correctness, observed_exit_code)
-        if negative_refusal_evidence_present else frozenset())
+        if negative_refusal_contract_required else frozenset())
     negative_refusal_auth_failure = (
-        negative_refusal_evidence_present and negative_refusal_indices is None)
+        negative_refusal_contract_required and
+        negative_refusal_indices is None)
     expected_negative_refusals = (
         frozenset() if negative_refusal_indices is None
         else negative_refusal_indices)
