@@ -45,6 +45,18 @@ merge independent assertion/failure boundaries or omit ASan/UBSan/TSan
 qualification for speed.
 The native/rootless stage records separate native Make and remaining-contract
 wall times as optional observational evidence, not qualification PASS gates.
+A bounded per-suite rootless breakdown uses Bash's built-in SECONDS and
+source-controlled phase labels; the loaded reporter attributes wall time from
+existing streamed markers to preflight, lifecycle, fixture preparation,
+individual matched benchmark families, ID36 and terminal cleanup. Both
+breakdowns are optional observational report fields, never new qualification
+gates, session scheduling changes, or substitutes for per-I/O latency. Missing
+or malformed timing evidence must not alter PASS/FAIL/BLOCKED. Sensitive child
+output must never become a phase label. A protected identity read may use
+only the fixed, bounded, pinned, read-only noninteractive privileged fallback. If its authorization or trust checks
+fail, the host identity remains UNAVAILABLE; no insecure file mode change,
+substituted machine ID, unbounded read or privileged checkout execution is
+authorized.
 Hermetic shell-recipe regressions using a substituted native output directory
 must stage their own compiler-configuration and shared-object prerequisites
 before creating fake test executables; those fixtures must not silently compile

@@ -3559,8 +3559,83 @@ def parse_rootless_timing(output):
             "remaining_contracts_s": contracts_seconds}
 
 
+def parse_rootless_phase_timings(output):
+    """Return bounded, source-allowlisted suite times, never a PASS gate."""
+    prefix = "ROOTLESS_PHASE_TIMING "
+    records = [line for line in output.splitlines() if line.startswith(prefix)]
+    if not records or len(records) > 128:
+        return None
+    try:
+        source = (ROOT / "tests/tools/test-rootless.sh").read_text(
+            encoding="utf-8")
+    except (OSError, UnicodeError):
+        return None
+    allowed_names = set(re.findall(
+        r"(?m)^rootless_phase='([^'\r\n]{1,128})'$", source))
+    pattern = re.compile(
+        r"ROOTLESS_PHASE_TIMING index=(0|[1-9][0-9]{0,2}) "
+        r"elapsed_s=(0|[1-9][0-9]{0,7}) "
+        r"label=([A-Za-z0-9_./ :+-]{1,128})")
+    timings = []
+    for line in records:
+        match = pattern.fullmatch(line)
+        if match is None or int(match.group(1)) != len(timings):
+            return None
+        label = match.group(3)
+        if label not in allowed_names and not (
+                label.startswith("bash syntax ") and
+                re.fullmatch(
+                    r"(?:[A-Za-z0-9_-]{1,64}\.sh|swapz-primary-boot-verify)",
+                    label[12:])):
+            return None
+        timings.append({"name": label, "elapsed_s": int(match.group(2))})
+    return timings
+
+
+# Only literal, source-controlled phase labels enter the report. Approximate
+# timing boundaries follow unbuffered loaded-script markers observed by the
+# existing reporter; they are not kernel or per-I/O latency measurements.
+LOADED_TIMING_BOUNDARIES = (
+    ("LOADED_QUALIFICATION_SOURCE=", "kernel-debug-config"),
+    ("START_LOADED_MAXIMUM_CAPACITY", "maximum-capacity"),
+    ("START_LOADED_GC_ROLL_FORWARD_RECOVERY", "gc-roll-forward"),
+    ("START_LOADED_OWNED_NULLBLK_SMOKE", "owned-nullblk-smoke"),
+    ("START_LOADED_PRIMARY_NULLBLK_LIFECYCLE", "primary-lifecycle"),
+    ("START_LOADED_SHARED_BENCHMARK_PLAN=allocation", "plan-allocation"),
+    ("START_LOADED_SHARED_BENCHMARK_PLAN=fixture", "plan-fixture"),
+    ("START_LOADED_SHARED_BENCHMARK_PLAN=trace", "plan-traces"),
+    ("START_LOADED_SHARED_BENCHMARK_PLAN=write-plans", "plan-write-traces"),
+    ("START_LOADED_SHARED_BENCHMARK_PLAN=verify", "plan-verification"),
+    ("START_LOADED_RAW_READ_FANOUT", "raw-read-fanout"),
+    ("START_OWNED_RAM_REGIME=sd_emulated", "mixed-sd"),
+    ("START_OWNED_RAM_REGIME=ssd_emulated", "mixed-ssd"),
+    ("START_STORAGE_ENVELOPE=sd_card", "storage-sd-card"),
+    ("START_STORAGE_ENVELOPE=sata_ssd", "storage-sata-ssd"),
+    ("START_STORAGE_ENVELOPE=nvme_gen4", "storage-nvme-gen4"),
+    ("START_STORAGE_ENVELOPE=nvme_gen5", "storage-nvme-gen5"),
+    ("START_READ_COALESCE_AB=", "read-coalesce-fast"),
+    ("START_SD_READ_COALESCE_AB=", "read-coalesce-serial"),
+    ("START_WRITE_SATURATION_REGIME=sd_emulated", "write-saturation-sd"),
+    ("START_WRITE_SATURATION_REGIME=ssd_emulated", "write-saturation-ssd"),
+    ("PASS_WRITE_SATURATION_REGIME=ssd_emulated", "id36-pressure"),
+    ("KERNEL_DEBUG_OBSERVATION=", "kernel-debug-final"),
+    ("PASS_LOADED_TEST_EXECUTION:", "final-cleanup"),
+)
+
+
+def loaded_timing_phase(line):
+    """Identify an observational loaded boundary; ignore all other output."""
+    for marker, phase in LOADED_TIMING_BOUNDARIES:
+        if line.startswith(marker):
+            return phase
+    return None
+
+
 def run_stage(title, command, result, *, parse_bench=False):
     start = time.monotonic()
+    loaded_timing_phases = []
+    loaded_current_phase = "preflight"
+    loaded_current_phase_started = start
     try:
         child_env = os.environ.copy()
         tested_source = result.get("tested_commit_sha")
@@ -3581,6 +3656,15 @@ def run_stage(title, command, result, *, parse_bench=False):
             assert proc.stdout is not None
             for line in proc.stdout:
                 chunks.append(line)
+                next_phase = loaded_timing_phase(line)
+                if next_phase is not None and next_phase != loaded_current_phase:
+                    boundary = time.monotonic()
+                    loaded_timing_phases.append({
+                        "name": loaded_current_phase,
+                        "elapsed_s": round(
+                            boundary - loaded_current_phase_started, 3)})
+                    loaded_current_phase = next_phase
+                    loaded_current_phase_started = boundary
                 if line.startswith("START_LOADED_PRIMARY_NULLBLK_NEGATIVE="):
                     match = PRIMARY_NEGATIVE_CASE_START.fullmatch(line.strip())
                     negative_case = (match.group(1) if match and
@@ -3596,6 +3680,10 @@ def run_stage(title, command, result, *, parse_bench=False):
                     sys.stdout.flush()
             rc = proc.wait()
             proc.stdout.close()
+            loaded_timing_phases.append({
+                "name": loaded_current_phase,
+                "elapsed_s": round(
+                    time.monotonic() - loaded_current_phase_started, 3)})
             output = "".join(chunks)
         else:
             proc = subprocess.run(
@@ -3751,6 +3839,13 @@ def run_stage(title, command, result, *, parse_bench=False):
         if rootless_timing is not None and (
                 sum(rootless_timing.values()) <= record["elapsed_s"] + 2):
             record["substage_elapsed_s"] = rootless_timing
+            rootless_phases = parse_rootless_phase_timings(output)
+            if rootless_phases is not None and (
+                    sum(phase["elapsed_s"] for phase in rootless_phases)
+                    <= record["elapsed_s"] + 2):
+                record["phase_elapsed_s"] = rootless_phases
+    if parse_bench and loaded_timing_phases:
+        record["phase_elapsed_s"] = loaded_timing_phases
     if rc:
         if rc != observed_exit_code:
             record["child_exit_code"] = observed_exit_code

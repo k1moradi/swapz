@@ -18,6 +18,65 @@ spec.loader.exec_module(runner)
 
 
 class NativeTimingContract(unittest.TestCase):
+    def test_per_suite_rootless_timings_reject_spoofed_and_duplicate_records(self):
+        valid = (
+            "ROOTLESS_PHASE_TIMING index=0 elapsed_s=0 label=rootless initialization\n"
+            "ROOTLESS_PHASE_TIMING index=1 elapsed_s=12 label=tests/Makefile native and metadata\n"
+            "ROOTLESS_PHASE_TIMING index=2 elapsed_s=34 label=tests/runtime/native/source-contract-test.py\n"
+            "ROOTLESS_PHASE_TIMING index=3 elapsed_s=2 label=bash syntax swapz-primary-boot-verify\n")
+        self.assertEqual(runner.parse_rootless_phase_timings(valid), [
+            {"name": "rootless initialization", "elapsed_s": 0},
+            {"name": "tests/Makefile native and metadata", "elapsed_s": 12},
+            {"name": "tests/runtime/native/source-contract-test.py", "elapsed_s": 34},
+            {"name": "bash syntax swapz-primary-boot-verify", "elapsed_s": 2}])
+        self.assertIsNone(runner.parse_rootless_phase_timings(""))
+        self.assertIsNone(runner.parse_rootless_phase_timings(valid + valid))
+        self.assertIsNone(runner.parse_rootless_phase_timings(
+            valid.replace("index=1", "index=2")))
+        self.assertIsNone(runner.parse_rootless_phase_timings(
+            valid.replace("index=2 elapsed_s=34", "index=2 elapsed_s=-1")))
+        self.assertIsNone(runner.parse_rootless_phase_timings(
+            valid.replace("source-contract-test.py", "/private/secret")))
+
+    def test_loaded_timing_boundaries_do_not_use_child_supplied_labels(self):
+        self.assertEqual(runner.loaded_timing_phase(
+            "START_LOADED_PRIMARY_NULLBLK_LIFECYCLE\n"), "primary-lifecycle")
+        self.assertEqual(runner.loaded_timing_phase(
+            "START_STORAGE_ENVELOPE=nvme_gen5\n"), "storage-nvme-gen5")
+        self.assertEqual(runner.loaded_timing_phase(
+            "PASS_WRITE_SATURATION_REGIME=ssd_emulated\n"), "id36-pressure")
+        self.assertIsNone(runner.loaded_timing_phase(
+            "ROOTLESS_PHASE_TIMING index=1 label=/private/secret"))
+        self.assertIsNone(runner.loaded_timing_phase(
+            "START_LOADED_PRIMARY_NULLBLK_NEGATIVE=stale-run-id"))
+
+    def test_failed_loaded_phase_timing_never_grants_qualification(self):
+        from unittest import mock
+
+        transcript = (
+            "LOADED_QUALIFICATION_SOURCE=" + "a" * 40 + "\n"
+            "START_LOADED_MAXIMUM_CAPACITY\n"
+            "START_LOADED_GC_ROLL_FORWARD_RECOVERY\n"
+            "FAIL: synthetic qualification failure\n")
+        result = {"tested_commit_sha": "a" * 40, "stages": [],
+                  "benchmarks": {}}
+        with mock.patch.object(
+                runner.subprocess, "Popen",
+                return_value=FakeStreamingProcess(transcript, returncode=1)), \
+                contextlib.redirect_stdout(io.StringIO()):
+            self.assertNotEqual(
+                runner.run_stage("Owned RAM smoke + mixed/QD pilot", ["unused"],
+                                 result, parse_bench=True), 0)
+        stage = result["stages"][-1]
+        self.assertEqual(stage["status"], "FAIL")
+        self.assertEqual(
+            [phase["name"] for phase in stage["phase_elapsed_s"]],
+            ["preflight", "kernel-debug-config", "maximum-capacity",
+             "gc-roll-forward"])
+        self.assertLessEqual(
+            sum(phase["elapsed_s"] for phase in stage["phase_elapsed_s"]),
+            stage["elapsed_s"] + 0.005)
+
     def test_rootless_timing_is_observational_and_rejects_ambiguous_records(self):
         valid = "ROOTLESS_TIMING native_make_s=12 remaining_contracts_s=34\n"
         self.assertEqual(

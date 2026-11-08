@@ -12,6 +12,20 @@ rootless_phase='rootless initialization'
 rootless_phase_started_seconds=$SECONDS
 rootless_failure_reported=0
 
+# Capture completed source-controlled suite boundaries without new processes
+# or changes to the existing first-failure/cleanup traps. These measurements
+# are observational and emitted only when all rootless contracts finish.
+rootless_timed_phase=$rootless_phase
+rootless_timing_names=()
+rootless_timing_seconds=()
+rootless_begin_phase() {
+  local phase_boundary_seconds=$SECONDS
+  rootless_timing_names+=("$rootless_timed_phase")
+  rootless_timing_seconds+=("$((phase_boundary_seconds - rootless_phase_started_seconds))")
+  rootless_timed_phase=$rootless_phase
+  rootless_phase_started_seconds=$phase_boundary_seconds
+}
+
 rootless_private_diagnostic_path=
 rootless_private_diagnostic_log=
 rootless_capture_directory=
@@ -616,7 +630,7 @@ if [[ -n ${SWAPZ_TEST_JOBS:-} ]]; then
   make_args+=("-j$SWAPZ_TEST_JOBS")
 fi
 rootless_phase='tests/Makefile native and metadata'
-rootless_phase_started_seconds=$SECONDS
+rootless_begin_phase
 # Preserve stdout and stderr relay while privately retaining a failed compile.
 begin_rootless_private_stderr_capture
 rootless_make_command_line=$LINENO
@@ -647,22 +661,22 @@ fi
 rootless_native_make_elapsed_seconds=$((SECONDS - rootless_phase_started_seconds))
 rootless_contracts_started_seconds=$SECONDS
 rootless_phase='tests/runtime/native/source-contract-test.py'
-rootless_phase_started_seconds=$SECONDS
+rootless_begin_phase
 python3 -B tests/runtime/native/source-contract-test.py -v
 rootless_phase='tests/runtime/native/userspace/swapzctl-active-swap-provenance-test.py'
-rootless_phase_started_seconds=$SECONDS
+rootless_begin_phase
 python3 -B tests/runtime/native/userspace/swapzctl-active-swap-provenance-test.py -v
 rootless_phase='tests/runtime/native/tmp-cleanup-test.py'
-rootless_phase_started_seconds=$SECONDS
+rootless_begin_phase
 python3 -B tests/runtime/native/tmp-cleanup-test.py -v
 rootless_phase='tests/runtime/native/resource-admission-test.py'
-rootless_phase_started_seconds=$SECONDS
+rootless_begin_phase
 python3 -B tests/runtime/native/resource-admission-test.py -v
 rootless_phase='tests/runtime/native/resource-pressure-cleanup-ownership-test.py'
-rootless_phase_started_seconds=$SECONDS
+rootless_begin_phase
 python3 -B tests/runtime/native/resource-pressure-cleanup-ownership-test.py -v
 rootless_phase='tests/runtime/native/primary-lifecycle-audit-test.py'
-rootless_phase_started_seconds=$SECONDS
+rootless_begin_phase
 # Preserve the first failure across multiple unittest classes. Any traceback
 # and subtest payload remain confined to the mode-0600 private capture.
 begin_rootless_private_stderr_capture
@@ -675,10 +689,10 @@ else
 fi
 finish_and_report_rootless_unittest "$rootless_audit_exit_code" "$rootless_audit_command_line"
 rootless_phase='tests/runtime/native/primary-lifecycle-nullblk-qualifier-test.py'
-rootless_phase_started_seconds=$SECONDS
+rootless_begin_phase
 python3 -B tests/runtime/native/primary-lifecycle-nullblk-qualifier-test.py -v
 rootless_phase='tests/runtime/native/primary-real-swap-test.py'
-rootless_phase_started_seconds=$SECONDS
+rootless_begin_phase
 begin_rootless_private_stderr_capture
 rootless_primary_command_line=$LINENO
 if python3 -B tests/runtime/native/primary-real-swap-test.py -v \
@@ -689,7 +703,7 @@ else
 fi
 finish_and_report_rootless_unittest "$rootless_primary_exit_code" "$rootless_primary_command_line"
 rootless_phase='tests/runtime/native/primary-real-swap-parent-ownership-test.py'
-rootless_phase_started_seconds=$SECONDS
+rootless_begin_phase
 begin_rootless_private_stderr_capture
 rootless_ownership_command_line=$LINENO
 if python3 -B tests/runtime/native/primary-real-swap-parent-ownership-test.py -v \
@@ -700,34 +714,34 @@ else
 fi
 finish_and_report_rootless_unittest "$rootless_ownership_exit_code" "$rootless_ownership_command_line"
 rootless_phase='tests/runtime/native/primary-real-swap-oracle-terminal-test.py'
-rootless_phase_started_seconds=$SECONDS
+rootless_begin_phase
 python3 -B tests/runtime/native/primary-real-swap-oracle-terminal-test.py -v
 rootless_phase='tests/runtime/benchmark/metadata-ram-evidence-test.py'
-rootless_phase_started_seconds=$SECONDS
+rootless_begin_phase
 python3 -B tests/runtime/benchmark/metadata-ram-evidence-test.py -v
 rootless_phase='tests/runtime/benchmark/io-replay-test.py'
-rootless_phase_started_seconds=$SECONDS
+rootless_begin_phase
 python3 -B tests/runtime/benchmark/io-replay-test.py -v
 rootless_phase='tests/runtime/native/make-interface-test.py'
-rootless_phase_started_seconds=$SECONDS
+rootless_begin_phase
 python3 -B tests/runtime/native/make-interface-test.py -v
 rootless_phase='tests/runtime/native/test-report-test.py'
-rootless_phase_started_seconds=$SECONDS
+rootless_begin_phase
 python3 -B tests/runtime/native/test-report-test.py -v
 rootless_phase='tests/runtime/native/production-readiness-test.py'
-rootless_phase_started_seconds=$SECONDS
+rootless_begin_phase
 python3 -B tests/runtime/native/production-readiness-test.py -v
 rootless_phase='tests/runtime/native/rootless-direct-evidence-test.py'
-rootless_phase_started_seconds=$SECONDS
+rootless_begin_phase
 python3 -B tests/runtime/native/rootless-direct-evidence-test.py -v
 rootless_phase='tests/runtime/native/rootless-attribution-test.py'
-rootless_phase_started_seconds=$SECONDS
+rootless_begin_phase
 python3 -B tests/runtime/native/rootless-attribution-test.py -v
 rootless_phase='tests/runtime/native/ci-failure-diagnostics-test.py'
-rootless_phase_started_seconds=$SECONDS
+rootless_begin_phase
 python3 -B tests/runtime/native/ci-failure-diagnostics-test.py
 rootless_phase='tests/runtime/native/package-dkms-test.py'
-rootless_phase_started_seconds=$SECONDS
+rootless_begin_phase
 begin_rootless_private_stderr_capture
 rootless_package_command_line=$LINENO
 if python3 -B tests/runtime/native/package-dkms-test.py -v \
@@ -738,10 +752,10 @@ else
 fi
 finish_and_report_rootless_unittest "$rootless_package_exit_code" "$rootless_package_command_line"
 rootless_phase='tests/runtime/native/systemd/swapz-primary-systemd-test.py'
-rootless_phase_started_seconds=$SECONDS
+rootless_begin_phase
 python3 -B tests/runtime/native/systemd/swapz-primary-systemd-test.py -v
 rootless_phase='tests/runtime/native/systemd/swapz-primary-generator-transaction-test.py'
-rootless_phase_started_seconds=$SECONDS
+rootless_begin_phase
 begin_rootless_private_stderr_capture
 rootless_generator_command_line=$LINENO
 if python3 -B tests/runtime/native/systemd/swapz-primary-generator-transaction-test.py -v \
@@ -752,16 +766,16 @@ else
 fi
 finish_and_report_rootless_unittest "$rootless_generator_exit_code" "$rootless_generator_command_line"
 rootless_phase='tests/runtime/native/physical-swap-probe-test.py'
-rootless_phase_started_seconds=$SECONDS
+rootless_begin_phase
 python3 -B tests/runtime/native/physical-swap-probe-test.py -v
 rootless_phase='tests/runtime/native/live-swap-supervisor-test.py'
-rootless_phase_started_seconds=$SECONDS
+rootless_begin_phase
 python3 -B tests/runtime/native/live-swap-supervisor-test.py -v
 # Compile the noninstalled lifecycle rehearsal branch on every rootless/CI
 # architecture. Private paths are deliberately nonexistent; this is syntax and
 # warning qualification only and cannot mutate a device.
 rootless_phase='C syntax: owned nullblk lifecycle seam'
-rootless_phase_started_seconds=$SECONDS
+rootless_begin_phase
 cc -std=c11 -O2 -g -Wall -Wextra -Werror -fsyntax-only \
   -DSWAPZ_PRIMARY_OWNED_NULLBLK_TEST=1 \
   '-DSWAPZ_PRIMARY_TEST_CONFIG_BASE="/var/tmp/swapz-primary-owned-nullblk/config"' \
@@ -770,13 +784,13 @@ cc -std=c11 -O2 -g -Wall -Wextra -Werror -fsyntax-only \
   '-DSWAPZ_PRIMARY_TEST_QUALIFICATION_REPORT="/var/tmp/swapz-primary-owned-nullblk/recovery/qualification.json"' \
   src/userspace/swapz-primary.c
 rootless_phase='C syntax: physical lifecycle seam'
-rootless_phase_started_seconds=$SECONDS
+rootless_begin_phase
 cc -std=c11 -O2 -g -Wall -Wextra -Werror -fsyntax-only \
   -DSWAPZ_PRIMARY_PHYSICAL_QUALIFICATION_TEST=1 \
   '-DSWAPZ_PRIMARY_PHYSICAL_QUALIFIED_CONTROL="/usr/local/sbin/swapzctl"' \
   src/userspace/swapz-primary.c
 rootless_phase='C syntax: unqualified physical seam rejection'
-rootless_phase_started_seconds=$SECONDS
+rootless_begin_phase
 if cc -std=c11 -O2 -g -Wall -Wextra -Werror -fsyntax-only \
      -DSWAPZ_PRIMARY_PHYSICAL_QUALIFICATION_TEST=1 \
      src/userspace/swapz-primary.c >/dev/null 2>&1; then
@@ -784,7 +798,7 @@ if cc -std=c11 -O2 -g -Wall -Wextra -Werror -fsyntax-only \
   exit 1
 fi
 rootless_phase='C syntax: mutually exclusive lifecycle seams'
-rootless_phase_started_seconds=$SECONDS
+rootless_begin_phase
 if cc -std=c11 -O2 -g -Wall -Wextra -Werror -fsyntax-only \
      -DSWAPZ_PRIMARY_PHYSICAL_QUALIFICATION_TEST=1 \
      -DSWAPZ_PRIMARY_OWNED_NULLBLK_TEST=1 \
@@ -798,16 +812,16 @@ if cc -std=c11 -O2 -g -Wall -Wextra -Werror -fsyntax-only \
   exit 1
 fi
 rootless_phase='tests/runtime/benchmark/resource-pressure.py --help'
-rootless_phase_started_seconds=$SECONDS
+rootless_begin_phase
 python3 -B tests/runtime/benchmark/resource-pressure.py --help >/dev/null
 rootless_phase='loaded-preflight executable contract'
-rootless_phase_started_seconds=$SECONDS
+rootless_begin_phase
 [[ -x tests/tools/loaded-preflight.sh ]] || {
   printf '%s\n' 'FAIL: loaded-preflight.sh must remain executable' >&2
   exit 1
 }
 rootless_phase='source-contract single test runner'
-rootless_phase_started_seconds=$SECONDS
+rootless_begin_phase
 [[ "$(grep -Fc 'if __name__ == "__main__":' tests/runtime/native/source-contract-test.py)" == 1 ]] || {
   printf '%s\n' 'FAIL: source-contract-test.py must have exactly one test runner' >&2
   exit 1
@@ -825,20 +839,20 @@ for script in tests/tools/test-rootless.sh tests/tools/test-loaded.sh \
   tests/runtime/native/quiet-lower-io-test.sh \
   tests/runtime/native/swap-inventory-test.sh; do
   rootless_phase="bash syntax ${script##*/}"
-  rootless_phase_started_seconds=$SECONDS
+  rootless_begin_phase
   bash -n "$script"
 done
 rootless_phase='tests/runtime/native/nullblk-identity-test.sh'
-rootless_phase_started_seconds=$SECONDS
+rootless_begin_phase
 bash tests/runtime/native/nullblk-identity-test.sh
 rootless_phase='tests/runtime/native/quiet-lower-io-test.sh'
-rootless_phase_started_seconds=$SECONDS
+rootless_begin_phase
 bash tests/runtime/native/quiet-lower-io-test.sh
 rootless_phase='tests/runtime/native/swap-inventory-test.sh'
-rootless_phase_started_seconds=$SECONDS
+rootless_begin_phase
 bash tests/runtime/native/swap-inventory-test.sh
 rootless_phase='x86_64 native SIMD disassembly contracts'
-rootless_phase_started_seconds=$SECONDS
+rootless_begin_phase
 if [[ "$(uname -m)" == "x86_64" ]]; then
   objdump -d build/tests/native/predictor-sse2.o > build/tests/native/predictor-sse2.disasm
   objdump -d build/tests/native/predictor-avx2.o > build/tests/native/predictor-avx2.disasm
@@ -851,7 +865,7 @@ if [[ "$(uname -m)" == "x86_64" ]]; then
     build/tests/native/predictor-avx512.disasm
 fi
 rootless_phase='static source/interface contract assertions'
-rootless_phase_started_seconds=$SECONDS
+rootless_begin_phase
 grep -Fq 'dmsetup create "$DMNAME" --uuid "$UUID"' tests/tools/deploy-nullblk.sh
 grep -Fq 'memory_backed' tests/tools/deploy-nullblk.sh
 grep -Fq 'modprobe lz4_compress || fail "kernel LZ4 compressor unavailable"' tests/tools/deploy-nullblk.sh
@@ -895,6 +909,16 @@ grep -Fq 'PASS_RETAINED_SYNTHETIC_WRITE_FAULT=' tests/tools/deploy-nullblk.sh
 grep -Fq 'PASS_RETAINED_SYNTHETIC_FLUSH_FAULT=' tests/tools/deploy-nullblk.sh
 grep -Fq -- '--write-series' tests/tools/device-roundtrip.c
 grep -Fq -- '--verify-series' tests/tools/device-roundtrip.c
+# Record the final suite before emitting a bounded, source-controlled
+# per-phase breakdown. Never emit these as qualification success markers.
+rootless_timing_finished_seconds=$SECONDS
+rootless_timing_names+=("$rootless_phase")
+rootless_timing_seconds+=("$((rootless_timing_finished_seconds - rootless_phase_started_seconds))")
+for phase_index in "${!rootless_timing_names[@]}"; do
+  printf 'ROOTLESS_PHASE_TIMING index=%d elapsed_s=%d label=%s\n' \
+    "$phase_index" "${rootless_timing_seconds[phase_index]}" \
+    "${rootless_timing_names[phase_index]}"
+done
 # Observational timing only: no new subprocesses or test-order changes.
 printf 'ROOTLESS_TIMING native_make_s=%d remaining_contracts_s=%d\n' \
   "$rootless_native_make_elapsed_seconds" "$((SECONDS - rootless_contracts_started_seconds))"
