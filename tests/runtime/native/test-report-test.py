@@ -215,7 +215,8 @@ class NativeTimingContract(unittest.TestCase):
                          for name in names]
         self.assertEqual(len(display_names), len(set(display_names)))
         self.assertTrue(all(len(name) <= runner.ROOTLESS_NAME_WIDTH
-                            and "/" not in name for name in display_names))
+                            and not name.startswith("tests/")
+                            for name in display_names))
         self.assertEqual(
             runner.rootless_suite_display_name("bash syntax check.sh"),
             "Bash syntax: check.sh")

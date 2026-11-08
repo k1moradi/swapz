@@ -64,7 +64,8 @@ The official `make test` and `make test_full` terminals present rootless
 progress as a compact `ID | Name | Verdict | Time` table. Every source-defined
 suite has a unique, short, descriptive display name rather than a repository
 path; the exact path stays in authenticated progress markers, private
-diagnostics and report evidence for debugging. Interactive terminals update
+diagnostics and report evidence for debugging. Human-readable acronyms
+such as I/O are allowed and are not treated as repository path prefixes. Interactive terminals update
 each `RUNNING` row in place to `PASS` with carriage return, yielding one
 visible row per test. Redirected logs emit only one terminal row per suite,
 without control sequences. An unfinished suite gets a single `FAIL` row for
