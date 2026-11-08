@@ -191,16 +191,62 @@ class NativeTimingContract(unittest.TestCase):
                 "Native and rootless contracts", ["unused"], result,
                 stream_rootless_progress=True), 0)
         text = stream.getvalue()
-        self.assertIn("Start   1: rootless initialization", text)
+        self.assertIn("ID | Name", text)
         self.assertIn(
-            "Test    2: tests/Makefile native and metadata ... Passed 4s",
-            text)
+            runner.rootless_suite_table_row(
+                0, "rootless initialization", "PASS", "0s"), text)
         self.assertIn(
-            "Start   3: tests/runtime/native/source-contract-test.py",
+            runner.rootless_suite_table_row(
+                1, "tests/Makefile native and metadata", "PASS", "4s"),
             text)
+        self.assertRegex(
+            text,
+            r"(?m)^\s*3 \| Source contracts\s+\| FAIL\s+\| +[0-9.]+s$")
+        self.assertEqual(text.count("Source contracts"), 1)
         self.assertNotIn("/private/secret", text)
-        self.assertNotIn("Test    3:", text)
+        self.assertNotIn("Start   ", text)
+        self.assertNotIn("Test    ", text)
         self.assertEqual(result["stages"][-1]["status"], "FAIL")
+
+    def test_rootless_table_names_are_short_unique_and_source_controlled(self):
+        names = runner.rootless_phase_names()
+        self.assertEqual(set(runner.ROOTLESS_SUITE_DISPLAY_NAMES), names)
+        display_names = [runner.rootless_suite_display_name(name)
+                         for name in names]
+        self.assertEqual(len(display_names), len(set(display_names)))
+        self.assertTrue(all(len(name) <= runner.ROOTLESS_NAME_WIDTH
+                            and "/" not in name for name in display_names))
+        self.assertEqual(
+            runner.rootless_suite_display_name("bash syntax check.sh"),
+            "Bash syntax: check.sh")
+
+    def test_rootless_tty_rewrites_running_row_in_place(self):
+        from unittest import mock
+
+        class TerminalOutput(io.StringIO):
+            def isatty(self):
+                return True
+
+        transcript = (
+            "ROOTLESS_PHASE_PROGRESS state=START index=0 elapsed_s=0 "
+            "label=rootless initialization\n"
+            "ROOTLESS_PHASE_PROGRESS state=PASS index=0 elapsed_s=2 "
+            "label=rootless initialization\n")
+        terminal = TerminalOutput()
+        result = {"stages": [], "benchmarks": {}}
+        with mock.patch.object(
+                runner.subprocess, "Popen",
+                return_value=FakeStreamingProcess(transcript)), \
+                contextlib.redirect_stdout(terminal):
+            runner.run_stage("Native and rootless contracts", ["unused"],
+                             result, stream_rootless_progress=True)
+        output = terminal.getvalue()
+        self.assertIn("\r" + runner.rootless_suite_table_row(
+            0, "rootless initialization", "RUNNING", "-"), output)
+        self.assertIn("\r" + runner.rootless_suite_table_row(
+            0, "rootless initialization", "PASS", "2s") + "\n", output)
+        self.assertEqual(output.count("\r"), 2)
+        self.assertNotIn("Start   1:", output)
 
     def test_per_suite_rootless_timings_reject_spoofed_and_duplicate_records(self):
         valid = (

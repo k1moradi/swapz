@@ -60,9 +60,16 @@ merge independent assertion/failure boundaries or omit ASan/UBSan/TSan
 qualification for speed.
 The native/rootless stage records separate native Make and remaining-contract
 wall times as optional observational evidence, not qualification PASS gates.
-The official `make test` and `make test_full` terminals stream CTest-style start/completion and
-elapsed-second progress for source-controlled rootless suite labels, plus
-elapsed time for existing loaded-phase boundaries.
+The official `make test` and `make test_full` terminals present rootless
+progress as a compact `ID | Name | Verdict | Time` table. Every source-defined
+suite has a unique, short, descriptive display name rather than a repository
+path; the exact path stays in authenticated progress markers, private
+diagnostics and report evidence for debugging. Interactive terminals update
+each `RUNNING` row in place to `PASS` with carriage return, yielding one
+visible row per test. Redirected logs emit only one terminal row per suite,
+without control sequences. An unfinished suite gets a single `FAIL` row for
+nonzero exit or `INCOMPLETE` if its completion marker is missing after zero
+exit. Existing loaded-phase elapsed times remain separately displayed.
 The rootless stderr-relay pass fixtures must preserve and authenticate the
 harness's fixed START/PASS phase markers before comparing the unchanged child
 stdout and private stderr. Allow nonnegative integer elapsed seconds rather
@@ -74,8 +81,8 @@ must never print raw child output or promote a successful suite to overall
 qualification PASS. A progress event with an unsupported state, malformed
 numeric duration, unallowlisted suite name or wrong sequence number must be
 ignored rather than displayed. On failures, retain the existing first-error
-attribution and private diagnostic log; an unfinished suite remains visibly
-started.
+attribution and private diagnostic log; an unfinished suite is displayed
+as one non-PASS row.
 A bounded per-suite rootless breakdown uses Bash's built-in SECONDS and
 source-controlled phase labels; the loaded reporter attributes wall time from
 existing streamed markers to preflight, lifecycle, fixture preparation,

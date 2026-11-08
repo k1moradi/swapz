@@ -3600,6 +3600,69 @@ def rootless_phase_progress(line, allowed_names):
     return match.group(1), int(match.group(2)), int(match.group(3)), match.group(4)
 
 
+ROOTLESS_SUITE_DISPLAY_NAMES = {
+    "rootless initialization": "Rootless initialization",
+    "tests/Makefile native and metadata": "Native build and metadata",
+    "tests/runtime/native/source-contract-test.py": "Source contracts",
+    "tests/runtime/native/userspace/swapzctl-active-swap-provenance-test.py": "swapzctl swap provenance",
+    "tests/runtime/native/tmp-cleanup-test.py": "Temporary-file cleanup",
+    "tests/runtime/native/resource-admission-test.py": "Resource admission",
+    "tests/runtime/native/resource-pressure-cleanup-ownership-test.py": "Pressure cleanup ownership",
+    "tests/runtime/native/primary-lifecycle-audit-test.py": "Primary lifecycle audit",
+    "tests/runtime/native/primary-lifecycle-nullblk-qualifier-test.py": "Primary null_blk lifecycle",
+    "tests/runtime/native/primary-real-swap-test.py": "Real swap contracts",
+    "tests/runtime/native/primary-real-swap-parent-ownership-test.py": "Real swap parent ownership",
+    "tests/runtime/native/primary-real-swap-oracle-terminal-test.py": "Real swap terminal oracle",
+    "tests/runtime/benchmark/metadata-ram-evidence-test.py": "Metadata RAM evidence",
+    "tests/runtime/benchmark/io-replay-test.py": "I/O replay",
+    "tests/runtime/native/make-interface-test.py": "Make interface",
+    "tests/runtime/native/test-report-test.py": "Qualification report",
+    "tests/runtime/native/production-readiness-test.py": "Production readiness",
+    "tests/runtime/native/rootless-direct-evidence-test.py": "Rootless evidence",
+    "tests/runtime/native/rootless-attribution-test.py": "Rootless failure attribution",
+    "tests/runtime/native/ci-failure-diagnostics-test.py": "CI failure diagnostics",
+    "tests/runtime/native/package-dkms-test.py": "DKMS packaging",
+    "tests/runtime/native/systemd/swapz-primary-systemd-test.py": "Primary systemd units",
+    "tests/runtime/native/systemd/swapz-primary-generator-transaction-test.py": "Systemd generator transactions",
+    "tests/runtime/native/physical-swap-probe-test.py": "Physical swap probe",
+    "tests/runtime/native/live-swap-supervisor-test.py": "Live swap supervisor",
+    "C syntax: owned nullblk lifecycle seam": "Owned null_blk lifecycle syntax",
+    "C syntax: physical lifecycle seam": "Physical lifecycle syntax",
+    "C syntax: unqualified physical seam rejection": "Unqualified physical seam rejection",
+    "C syntax: mutually exclusive lifecycle seams": "Exclusive lifecycle seam syntax",
+    "tests/runtime/benchmark/resource-pressure.py --help": "Resource-pressure CLI",
+    "loaded-preflight executable contract": "Loaded preflight executable",
+    "source-contract single test runner": "Source contract runner",
+    "tests/runtime/native/nullblk-identity-test.sh": "null_blk identity",
+    "tests/runtime/native/quiet-lower-io-test.sh": "Quiet lower I/O",
+    "tests/runtime/native/swap-inventory-test.sh": "Swap inventory",
+    "x86_64 native SIMD disassembly contracts": "x86-64 SIMD disassembly",
+    "static source/interface contract assertions": "Static source/interface assertions",
+}
+ROOTLESS_NAME_WIDTH = 40
+
+
+def rootless_suite_display_name(label):
+    """Short display labels; original paths remain in authenticated markers."""
+    known = ROOTLESS_SUITE_DISPLAY_NAMES.get(label)
+    if known is not None:
+        return known
+    if label.startswith("bash syntax "):
+        name = "Bash syntax: " + label[12:]
+    else:
+        name = (label.rsplit("/", 1)[-1].removesuffix(".py")
+                .removesuffix(".sh").removesuffix("-test")
+                .replace("-", " ").replace("_", " "))
+    return name if len(name) <= ROOTLESS_NAME_WIDTH else name[:37] + "..."
+
+
+def rootless_suite_table_row(index, label, verdict, duration):
+    """Keep active and completed rows exactly the same terminal width."""
+    return (f"    {index + 1:>2} | "
+            f"{rootless_suite_display_name(label):<{ROOTLESS_NAME_WIDTH}} | "
+            f"{verdict:<10} | {duration:>8}")
+
+
 LOADED_MAPPER_INVENTORY_SOURCE_PATTERN = re.compile(
     r"LOADED_MAPPER_INVENTORY_SOURCE=(dmsetup|record_parser) "
     r"status=([1-9][0-9]{0,2})")
@@ -3763,6 +3826,9 @@ def run_stage(title, command, result, *, parse_bench=False,
     loaded_timing_phases = []
     loaded_current_phase = "preflight"
     loaded_current_phase_started = start
+    rootless_active_phase = None
+    rootless_active_started = start
+    rootless_is_tty = False
     try:
         child_env = os.environ.copy()
         tested_source = result.get("tested_commit_sha")
@@ -3775,12 +3841,16 @@ def run_stage(title, command, result, *, parse_bench=False,
             if parse_bench:
                 print("       loaded qualification progress:")
             else:
-                print("       rootless suite progress:", flush=True)
+                print("       Rootless suite results:", flush=True)
+                print(f"    {'ID':>2} | {'Name':<{ROOTLESS_NAME_WIDTH}} | "
+                      f"{'Verdict':<10} | {'Time':>8}", flush=True)
+                print(f"    {'-' * 2}-+-{'-' * ROOTLESS_NAME_WIDTH}-+-"
+                      f"{'-' * 10}-+-{'-' * 8}", flush=True)
             rootless_allowed_names = (
                 rootless_phase_names() if stream_rootless_progress
                 else frozenset())
             rootless_next_index = 0
-            rootless_active_phase = None
+            rootless_is_tty = stream_rootless_progress and sys.stdout.isatty()
             proc = subprocess.Popen(
                 command, cwd=ROOT, text=True, encoding="utf-8",
                 errors="replace", stdout=subprocess.PIPE,
@@ -3799,15 +3869,20 @@ def run_stage(title, command, result, *, parse_bench=False,
                                 index == rootless_next_index and
                                 rootless_active_phase is None):
                             rootless_active_phase = name
-                            sys.stdout.write(
-                                f"       Start {index + 1:>3}: {name}\n")
-                            sys.stdout.flush()
+                            rootless_active_started = time.monotonic()
+                            if rootless_is_tty:
+                                sys.stdout.write(
+                                    "\r" + rootless_suite_table_row(
+                                        index, name, "RUNNING", "-"))
+                                sys.stdout.flush()
                         elif (state == "PASS" and
                               index == rootless_next_index and
                               name == rootless_active_phase):
                             sys.stdout.write(
-                                f"       Test  {index + 1:>3}: {name} "
-                                f"... Passed {seconds}s\n")
+                                ("\r" if rootless_is_tty else "") +
+                                rootless_suite_table_row(
+                                    index, name, "PASS", f"{seconds}s") +
+                                "\n")
                             sys.stdout.flush()
                             rootless_next_index += 1
                             rootless_active_phase = None
@@ -3859,6 +3934,16 @@ def run_stage(title, command, result, *, parse_bench=False,
             output, rc = proc.stdout, proc.returncode
     except OSError as exc:
         output, rc = type(exc).__name__, 127
+    if stream_rootless_progress and rootless_active_phase is not None:
+        # No authenticated completion: finalize the active row, not a PASS.
+        elapsed_s = max(0.0, time.monotonic() - rootless_active_started)
+        sys.stdout.write(
+            ("\r" if rootless_is_tty else "") +
+            rootless_suite_table_row(
+                rootless_next_index, rootless_active_phase,
+                "FAIL" if rc else "INCOMPLETE", f"{elapsed_s:.1f}s") +
+            "\n")
+        sys.stdout.flush()
     observed_exit_code = rc
     if title == "Native and rootless contracts" and rc != 0:
         retain_direct_rootless_first_failure(output, rc)
