@@ -1000,7 +1000,7 @@ static int swapz_engine_required_read_range_resident(
 			payload_first = map->payload_offset >> SWAPZ_BLOCK_SHIFT;
 			payload_last = ((swapz_u32)map->payload_offset +
 					map->payload_length - 1U) >> SWAPZ_BLOCK_SHIFT;
-			required |= (swapz_u8)(1U | (1U << payload_first) |
+			required |= (swapz_u8)((1U << payload_first) |
 					       (1U << payload_last));
 		}
 	}
@@ -2042,18 +2042,15 @@ int swapz_engine_read_page(struct swapz_engine *engine, swapz_u32 logical_page,
 			 swapz_u8 *payload, swapz_u16 payload_capacity,
 			 swapz_u16 *payload_length)
 {
-	struct swapz_decoded peek;
 	struct swapz_map observed;
-	const swapz_u8 *stored, *metadata;
-	swapz_u32 bytes, first, last, start, count, block;
-	swapz_u32 expected_sequence;
-	swapz_u32 payload_first, payload_last;
-	swapz_u8 initial_blocks = 1, cached_mask, coalesced_mask = 0;
-	swapz_u8 reusable_mask;
+	const swapz_u8 *stored;
+	swapz_u32 extent_bytes, payload_first, payload_last;
+	swapz_u32 start, last, count, block;
+	swapz_u8 cached_mask, coalesced_mask, reusable_mask, validated_mask;
+	swapz_u8 remaining_coalesced, lru_commit_mask;
 	int error;
-	int cached_extent, cached_metadata, cached_full, lru_cached_metadata;
-	int metadata_already_validated;
-	int extent_lru_slot, metadata_lru_slot;
+	int cached_extent, cached_block_zero, cached_full, lru_cached_block_zero;
+	int extent_lru_slot, block_zero_lru_slot;
 
 	if (!engine || !engine->authority || !engine->read_scratch ||
 	    !engine->io.read_blocks || !payload || !payload_length ||
@@ -2071,32 +2068,41 @@ int swapz_engine_read_page(struct swapz_engine *engine, swapz_u32 logical_page,
 	    observed.start_block % SWAPZ_SEGMENT_BLOCKS +
 		observed.extent_blocks > SWAPZ_SEGMENT_BLOCKS ||
 	    !observed.payload_length ||
-	    observed.payload_offset >=
-		(swapz_u32)observed.extent_blocks * SWAPZ_BLOCK_BYTES ||
-	    observed.payload_length >
-		(swapz_u32)observed.extent_blocks * SWAPZ_BLOCK_BYTES -
-		observed.payload_offset)
+	    observed.payload_length > SWAPZ_MAX_COMPRESSED)
 		return -ESTALE;
-	bytes = (swapz_u32)observed.extent_blocks * SWAPZ_BLOCK_BYTES;
+	extent_bytes = (swapz_u32)observed.extent_blocks * SWAPZ_BLOCK_BYTES;
+	if (observed.payload_offset >= extent_bytes ||
+	    observed.payload_length > extent_bytes - observed.payload_offset)
+		return -ESTALE;
+	payload_first = observed.payload_offset >> SWAPZ_BLOCK_SHIFT;
+	payload_last = ((swapz_u32)observed.payload_offset +
+		observed.payload_length - 1U) >> SWAPZ_BLOCK_SHIFT;
+	if (payload_last >= observed.extent_blocks ||
+	    (engine->max_read_blocks_per_record &&
+	     payload_last - payload_first + 1U >
+			engine->max_read_blocks_per_record))
+		return -EUCLEAN;
+
 	/*
-	 * Two-block extent: the bounded one-request read trades up to one
-	 * extra 4KiB block for avoiding a second synchronous lower callback.
-	 * Never exceed the explicit one-block read-budget policy. Other
-	 * extents keep metadata-first selective I/O.
-	 *
-	 * The ordered worker owns read_scratch and invalidates on every
-	 * write/GC/discard/barrier. Only the same immutable physical extent
-	 * can reuse its block-zero metadata or complete two-block contents;
-	 * payload/generation/CRC validation still runs for EVERY logical read.
+	 * RAM mapping state is the only descriptor authority. Cached bytes are
+	 * merely immutable extent data and are accepted only after the current
+	 * mapping identity and payload CRC validate below. The legacy block-zero
+	 * cache remains temporarily for ABI/performance continuity; it no longer
+	 * authenticates a serialized header or record table.
 	 */
 	cached_extent = engine->read_cache_valid &&
 		engine->read_cached_start_block == observed.start_block &&
 		engine->read_cached_extent_blocks == observed.extent_blocks;
-	cached_mask = cached_extent ? engine->read_cached_block_mask : 0;
-	cached_metadata = cached_extent && !!(cached_mask & 1U);
-	cached_full = cached_extent && engine->read_cached_full;
 	coalesced_mask = cached_extent ? engine->read_coalesced_block_mask : 0;
-	extent_lru_slot = engine->max_read_blocks_per_record != 1 ?
+	cached_mask = cached_extent ? engine->read_cached_block_mask : 0;
+	if (engine->max_read_blocks_per_record == 1U)
+		cached_mask &= coalesced_mask;
+	cached_block_zero = !!(cached_mask & 1U);
+	cached_full = engine->max_read_blocks_per_record != 1U &&
+		cached_mask == (swapz_u8)((1U << observed.extent_blocks) - 1U) &&
+		!coalesced_mask;
+
+	extent_lru_slot = engine->max_read_blocks_per_record != 1U ?
 		swapz_read_extent_lru_lookup(engine, observed.start_block,
 					     observed.extent_blocks) : -1;
 	if (extent_lru_slot >= 0) {
@@ -2115,99 +2121,42 @@ int swapz_engine_read_page(struct swapz_engine *engine, swapz_u32 logical_page,
 				       SWAPZ_BLOCK_BYTES);
 		cached_mask |= extent_mask;
 		coalesced_mask &= (swapz_u8)~extent_mask;
-		cached_metadata = !!(cached_mask & 1U);
+		cached_block_zero = !!(cached_mask & 1U);
 		cached_full = cached_mask ==
-			(swapz_u8)((1U << observed.extent_blocks) - 1U);
+			(swapz_u8)((1U << observed.extent_blocks) - 1U) &&
+			!coalesced_mask;
 	}
-	metadata = engine->read_scratch;
-	metadata_lru_slot = -1;
-	if (!cached_metadata && engine->read_metadata_cache)
-		metadata_lru_slot = swapz_read_metadata_lru_lookup(
+
+	block_zero_lru_slot = -1;
+	lru_cached_block_zero = 0;
+	if (engine->max_read_blocks_per_record != 1U &&
+	    payload_first == 0U && !(cached_mask & 1U) &&
+	    engine->read_metadata_cache) {
+		block_zero_lru_slot = swapz_read_metadata_lru_lookup(
 			engine, observed.start_block, observed.extent_blocks);
-	lru_cached_metadata = !cached_metadata && metadata_lru_slot >= 0;
-	metadata_already_validated = lru_cached_metadata ||
-		(cached_metadata && !(coalesced_mask & 1U));
+		if (block_zero_lru_slot >= 0) {
+			swapz_u32 copied_payload_bytes =
+				SWAPZ_BLOCK_BYTES - observed.payload_offset;
+
+			if (copied_payload_bytes > observed.payload_length)
+				copied_payload_bytes = observed.payload_length;
+			memcpy(engine->read_scratch,
+			       engine->read_metadata_cache +
+			       (size_t)block_zero_lru_slot * SWAPZ_BLOCK_BYTES,
+			       SWAPZ_BLOCK_BYTES);
+			engine->read_metadata_copy_bytes += copied_payload_bytes;
+			cached_mask |= 1U;
+			lru_cached_block_zero = 1;
+		}
+	}
+
 	engine->read_cache_valid = 0;
 	engine->read_cached_full = 0;
 	engine->read_cached_block_mask = 0;
 	engine->read_coalesced_block_mask = 0;
-	if (lru_cached_metadata) {
-		metadata = engine->read_metadata_cache +
-			(size_t)metadata_lru_slot * SWAPZ_BLOCK_BYTES;
-		cached_mask |= 1U;
-	} else if (!cached_metadata) {
-		if (observed.extent_blocks == 2 &&
-		    engine->max_read_blocks_per_record != 1 &&
-		    (swapz_u32)observed.payload_offset +
-			observed.payload_length > SWAPZ_BLOCK_BYTES)
-			initial_blocks = 2;
-		error = engine->io.read_blocks(engine->io.opaque,
-					       observed.start_block, initial_blocks,
-					       engine->read_scratch);
-		if (error)
-			return error;
-		engine->physical_read_blocks += initial_blocks;
-		engine->read_metadata_requests++;
-		cached_mask = (swapz_u8)((1U << initial_blocks) - 1U);
-		if (initial_blocks == 2)
-			engine->read_full_extent_requests++;
-		else if (observed.extent_blocks == 2 &&
-			 engine->max_read_blocks_per_record != 1)
-			engine->read_two_block_skips++;
-	}
-	if (metadata_already_validated)
-		error = swapz_lookup_validated_descriptor(
-			metadata, bytes, swapz_map_record_index(&observed),
-			&peek, NULL);
-	else
-		error = swapz_peek(metadata, bytes,
-				  swapz_map_record_index(&observed), &peek);
-	if (error)
-		return error;
-	/*
-	 * A cache hit was fully validated when it was published, but the
-	 * authoritative map remains the source of truth. Its compact extent
-	 * sequence index binds this header to the published mapping. Reject a
-	 * mismatch before issuing any lower payload read.
-	 */
-	{
-		swapz_u32 metadata_sequence =
-			(swapz_u32)metadata[8] |
-			((swapz_u32)metadata[9] << 8) |
-			((swapz_u32)metadata[10] << 16) |
-			((swapz_u32)metadata[11] << 24);
 
-		if (swapz_extent_sequence_lookup(engine->authority,
-						observed.start_block,
-						&expected_sequence) ||
-		    metadata_sequence != expected_sequence)
-			return -EUCLEAN;
-	}
-	if (peek.logical_page != logical_page ||
-	    peek.generation != observed.generation ||
-	    peek.payload_length != observed.payload_length ||
-	    peek.payload_offset != observed.payload_offset)
-		return -EUCLEAN;
-	payload_first = peek.payload_offset >> SWAPZ_BLOCK_SHIFT;
-	payload_last = ((swapz_u32)peek.payload_offset +
-		peek.payload_length - 1U) >> SWAPZ_BLOCK_SHIFT;
-	if (metadata != engine->read_scratch && payload_first == 0) {
-		swapz_u32 metadata_payload_bytes = SWAPZ_BLOCK_BYTES - peek.payload_offset;
-		if (metadata_payload_bytes > peek.payload_length)
-			metadata_payload_bytes = peek.payload_length;
-		memcpy(engine->read_scratch + peek.payload_offset,
-		       metadata + peek.payload_offset, metadata_payload_bytes);
-		engine->read_metadata_copy_bytes += metadata_payload_bytes;
-	}
-	first = payload_first;
+	start = payload_first;
 	last = payload_last;
-	/*
-	 * Block zero is already resident before peek. A compressed record is at
-	 * most SWAPZ_MAX_COMPRESSED bytes, so first..last spans at most two
-	 * contiguous 4KiB blocks. Trimming resident blocks from both ends
-	 * therefore leaves either one contiguous missing run or nothing.
-	 */
-	start = first ? first : 1U;
 	while (start <= last && (cached_mask & (1U << start)))
 		start++;
 	while (start <= last && (cached_mask & (1U << last)))
@@ -2216,74 +2165,72 @@ int swapz_engine_read_page(struct swapz_engine *engine, swapz_u32 logical_page,
 		count = last - start + 1U;
 		if (start + count > observed.extent_blocks)
 			return -EUCLEAN;
-		error = engine->io.read_blocks(engine->io.opaque,
-			observed.start_block + start, count,
+		error = engine->io.read_blocks(
+			engine->io.opaque, observed.start_block + start, count,
 			engine->read_scratch + start * SWAPZ_BLOCK_BYTES);
 		if (error)
 			return error;
 		engine->physical_read_blocks += count;
 		engine->read_payload_requests++;
 		engine->read_payload_blocks += count;
-		/* The explicit one-block budget is selective-I/O semantics, not a
-		 * prefetch/residency mode. Do not retain payload blocks there: the
-		 * next logical read must independently exercise its bounded lower
-		 * payload callback and fail closed if that callback fails. */
-		if (observed.extent_blocks > 1 &&
-		    engine->max_read_blocks_per_record != 1)
+		/* Retain the historical status field as block-zero data I/O only;
+		 * it no longer denotes metadata authentication or descriptor reads. */
+		if (start == 0U)
+			engine->read_metadata_requests++;
+		if (count == observed.extent_blocks)
+			engine->read_full_extent_requests++;
+		else if (observed.extent_blocks == 2U && count == 1U)
+			engine->read_two_block_skips++;
+		if (engine->max_read_blocks_per_record != 1U)
 			for (block = start; block < start + count; ++block)
 				cached_mask |= (swapz_u8)(1U << block);
 	}
-	stored = engine->read_scratch + peek.payload_offset;
-	error = swapz_read_authoritative_peeked_payload(
-		engine->authority, logical_page, &observed, metadata,
-		bytes, &peek, stored, &stored);
+
+	stored = engine->read_scratch + observed.payload_offset;
+	error = swapz_read_authoritative_payload(
+		engine->authority, logical_page, &observed, stored, &stored);
 	if (error)
 		return error;
-	if (peek.payload_length > payload_capacity)
+	if (observed.payload_length > payload_capacity)
 		return -ENOSPC;
-	memcpy(payload, stored, peek.payload_length);
-	*payload_length = peek.payload_length;
-	engine->read_validated_payload_crc32c = peek.payload_crc32c;
-	/* Publish reusable bytes only after successful authority, generation
-	 * and payload-CRC validation. Any error path leaves the cache invalid. */
-	reusable_mask = cached_mask;
-	if (metadata != engine->read_scratch)
-		reusable_mask &= (swapz_u8)~1U;
+	memcpy(payload, stored, observed.payload_length);
+	*payload_length = observed.payload_length;
+	engine->read_validated_payload_crc32c = observed.payload_crc32c;
+
+	validated_mask = swapz_block_range_mask(
+		(swapz_u8)payload_first,
+		(swapz_u8)(payload_last - payload_first + 1U));
+	remaining_coalesced = coalesced_mask & (swapz_u8)~validated_mask;
+	reusable_mask = engine->max_read_blocks_per_record == 1U ?
+		0U : cached_mask;
 	engine->read_cached_start_block = observed.start_block;
 	engine->read_cached_extent_blocks = observed.extent_blocks;
-	/* Preserve the qualified one-block/selective-read contract: "full" is
-	 * reusable multi-block extent residency, never merely a fetched 4KiB
-	 * metadata block. The exact block mask remains authoritative either way. */
-	engine->read_cached_full = observed.extent_blocks > 1 &&
-		engine->max_read_blocks_per_record != 1 &&
-		reusable_mask == (swapz_u8)((1U << observed.extent_blocks) - 1U);
 	engine->read_cached_block_mask = reusable_mask;
-	engine->read_cache_valid = reusable_mask != 0;
-	/* Seeded combined-read blocks become reusable cache only after this
-	 * record validates its immutable metadata/generation/payload CRC. */
-	{
-		swapz_u8 validated = (swapz_u8)(1U | (1U << payload_first) |
-						(1U << payload_last));
+	engine->read_coalesced_block_mask =
+		remaining_coalesced & reusable_mask;
+	engine->read_cached_full = reusable_mask ==
+		(swapz_u8)((1U << observed.extent_blocks) - 1U) &&
+		!engine->read_coalesced_block_mask;
+	engine->read_cache_valid = reusable_mask != 0U;
 
-		engine->read_coalesced_block_mask =
-			coalesced_mask & (swapz_u8)~validated;
-	}
-	if (cached_metadata && !(coalesced_mask & 1U))
+	if (cached_block_zero && payload_first == 0U &&
+	    !(coalesced_mask & 1U))
 		engine->read_metadata_cache_hits++;
-	if (cached_full && !coalesced_mask)
-		engine->read_full_extent_cache_hits++;
-	if (lru_cached_metadata)
+	if (lru_cached_block_zero)
 		engine->read_metadata_lru_hits++;
-	if (engine->read_metadata_cache)
-		swapz_read_metadata_lru_commit(engine, observed.start_block,
-					     observed.extent_blocks,
-					     metadata_lru_slot, metadata);
+	if (cached_full)
+		engine->read_full_extent_cache_hits++;
+
+	lru_commit_mask = reusable_mask &
+		(swapz_u8)~engine->read_coalesced_block_mask;
+	if ((lru_commit_mask & 1U) && engine->read_metadata_cache)
+		swapz_read_metadata_lru_commit(
+			engine, observed.start_block, observed.extent_blocks,
+			block_zero_lru_slot, engine->read_scratch);
 	if (engine->read_extent_cache &&
-	    engine->max_read_blocks_per_record != 1 &&
-	    observed.extent_blocks > 1 && reusable_mask)
-		swapz_read_extent_lru_commit(engine, observed.start_block,
-					     observed.extent_blocks,
-					     extent_lru_slot,
-					     reusable_mask, engine->read_scratch);
+	    observed.extent_blocks > 1U && lru_commit_mask)
+		swapz_read_extent_lru_commit(
+			engine, observed.start_block, observed.extent_blocks,
+			extent_lru_slot, lru_commit_mask, engine->read_scratch);
 	return 0;
 }
