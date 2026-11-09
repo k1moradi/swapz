@@ -208,21 +208,31 @@
 "qualification": "RAM_BACKED_NULL_BLK_ONLY",
 "qualification_tier": "ALGORITHM_PHYSICAL_PENDING",
 "qualified_artifacts": {
-"reason": "build stage did not pass",
-"status": "UNAVAILABLE"
+"formatter_sha256": "3ca332f6b8c46105b4d656b9a2e30d6b18f8dcf871a3ee387fe9153091eee40e",
+"module_sha256": "fe1ab03ddf20ae3f5d47c6a1f05f0a9620ed4981532dc7de7ca8cc390462e922",
+"oracle_sha256": "871d809976361bcd2d30b91bd4f661da8c712c16e4f5fa584696140261b57f26",
+"status": "AVAILABLE"
 },
 "schema": "swapz-test-results-v1",
-"source_sha": "6615c50e3741d20aeb0dae156373697f1d855988",
+"source_sha": "afb84cf9380d56b2c8d87da1a1b7bcbd04cd25ca",
 "stages": [
 {
-"diagnostic": "Native build error: ?expected_header? undeclared (first use in this function); did you mean ?observed_header??",
-"elapsed_s": 12.936,
-"exit_code": 2,
-"failed_phase": "Build module and helpers",
+"elapsed_s": 15.375,
+"exit_code": 0,
 "name": "Build module and helpers",
-"signals": [],
+"status": "PASS"
+},
+{
+"diagnostic": "Rootless child failed; child_exit=2 reason=nonzero_exit subtest=unavailable test=unavailable log=build/tests/rootless-failure.eciVyXj8/diagnostic.log",
+"elapsed_s": 9.867,
+"exit_code": 2,
+"failed_phase": "Makefile native and metadata",
+"name": "Native and rootless contracts",
+"signals": [
+"FAIL"
+],
 "status": "FAIL"
 }
 ],
-"tested_commit_sha": "6615c50e3741d20aeb0dae156373697f1d855988"
+"tested_commit_sha": "afb84cf9380d56b2c8d87da1a1b7bcbd04cd25ca"
 }
