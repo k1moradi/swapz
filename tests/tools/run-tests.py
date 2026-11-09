@@ -10578,8 +10578,8 @@ def main():
                 result["overall"] = "FAIL"
                 exit_code = physical_exit
                 print_physical_trial_result("FAIL", physical_duration)
-                print("  Physical trial recovery: inspect root-owned "
-                      "recovery state before another test")
+                print("  Physical trial cleanup: inspect root-owned same-boot "
+                      "state before another test")
             else:
                 result["algorithm_real_swap"] = {
                     "overall": "NOT_RUN",
