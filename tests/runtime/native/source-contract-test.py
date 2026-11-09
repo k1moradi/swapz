@@ -1167,8 +1167,11 @@ static swapz_u16 swapz_probe_set(
         self.assertNotIn("SWAPZ_VERSION", codec_header)
 
         superblock = (ROOT / "src/kernel/superblock.h").read_text()
-        self.assertIn("#define SWAPZ_SUPERBLOCK_VERSION 1U", superblock)
         self.assertIn("#define SWAPZ_SUPERBLOCK_BYTES 4096U", superblock)
+        self.assertIn("#define SWAPZ_LINUX_SWAP_VERSION_OFFSET 1024U",
+                      superblock)
+        self.assertNotIn("SWAPZ001", superblock)
+        self.assertNotIn("swapz_sb_valid", superblock)
 
     def test_publish_crc_probe_times_only_final_payload_crc(self):
         descriptor = source_body("swapz_lookup_validated_descriptor", CODEC)
@@ -1947,14 +1950,14 @@ dmsetup() {
                          result.stdout + "\\n" + result.stderr)
         self.assertIn("OK", result.stderr)
 
-    def test_physical_backing_is_opt_in_and_superblock_guarded(self):
+    def test_physical_backing_is_opt_in_and_linux_swap_header_guarded(self):
         ctr = body("swapz_ctr")
         lower = body("swapz_lower")
         parallel = body("swapz_parallel_lower_read")
         async_read = body("swapz_submit_read_slot_range")
         submit = body("swapz_submit_inflight_write")
         discard = body("swapz_discard_dead_segment")
-        validator = body("swapz_validate_physical_superblock")
+        validator = body("swapz_validate_linux_swap_header")
         fail_at = body("swapz_fail_at")
         fail = body("swapz_fail")
         process = body("swapz_process")
@@ -1970,31 +1973,31 @@ dmsetup() {
         compact_ctr = re.sub(r"\s+", " ", ctr)
         compact_validator = re.sub(r"\s+", " ", validator)
         self.assertIn(
-            "swapz_validate_physical_superblock( ctx, device_bytes, "
-            "&superblock_magic_present)", compact_ctr)
+            "swapz_validate_linux_swap_header( ctx, device_bytes, "
+            "&swap_magic_present)", compact_ctr)
         self.assertIn(
-            "swapz_validate_physical_superblock( ctx, device_bytes, NULL)",
+            "swapz_validate_linux_swap_header( ctx, device_bytes, NULL)",
             compact_ctr)
-        self.assertIn("error != -EPERM || superblock_magic_present", compact_ctr)
+        self.assertIn("error != -EPERM || swap_magic_present", compact_ctr)
         self.assertIn("if (swapz_allow_physical_backing)", compact_ctr)
         self.assertIn("ctx->physical_backing = true", compact_ctr)
         self.assertIn("ctx->physical_backing = false", compact_ctr)
         self.assertLess(
             compact_ctr.rindex("if (swapz_allow_physical_backing)"),
             compact_ctr.index(
-                "swapz_validate_physical_superblock( ctx, device_bytes, "
-                "&superblock_magic_present)"))
+                "swapz_validate_linux_swap_header( ctx, device_bytes, "
+                "&swap_magic_present)"))
         physical_path = compact_ctr.rsplit(
             "if (!swapz_physical_backing_arch_supported())", 1)[1]
         self.assertLess(physical_path.index("swapz_allow_physical_backing"),
                         physical_path.index(
-                            "swapz_validate_physical_superblock("))
+                            "swapz_validate_linux_swap_header("))
         self.assertIn("ctx->data_start_block = 0", ctr)
         self.assertIn("ctx->data_start_block = 1U", ctr)
         self.assertIn("flush_fail_nth || write_fail_nth", ctr)
-        self.assertIn("swapz_sb_valid(block, device_bytes)", validator)
         self.assertIn("swapz_linux_swap_header_valid(block, device_bytes)",
                       validator)
+        self.assertNotIn("swapz_sb_valid", validator)
         primary_start = (ROOT / "src/userspace/swapz-primary.c").read_text()
         primary_start_body = primary_start.split(
             "static int swapz_primary_start_prepared(void)", 1)[1].split(
@@ -2009,9 +2012,11 @@ dmsetup() {
         self.assertIn("swapz_primary_linux_swap_header_valid(", primary_start)
         self.assertIn(
             "Physical backing requires a valid ordinary Linux swap header", ctr)
-        self.assertIn(
-            "if (!error && magic_present) *magic_present = "
-            "swapz_sb_magic_matches(block)", compact_validator)
+        self.assertIn("if (swap_magic_present) *swap_magic_present = false",
+                      compact_validator)
+        self.assertIn('linux_swap_magic[] = "SWAPSPACE2"', validator)
+        self.assertIn("!memcmp(block + SWAPZ_SUPERBLOCK_BYTES -",
+                      compact_validator)
         self.assertIn("region.sector = 0", validator)
         self.assertIn("ctx->data_start_block + block", lower)
         self.assertIn("ctx->data_start_block + block", parallel)
