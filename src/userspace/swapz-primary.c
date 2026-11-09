@@ -10057,8 +10057,9 @@ static int swapz_primary_swap_device_active(dev_t expected_device)
 }
 
 /* The original SWAPSPACE2 header is immutable for every backing device,
- * including the owned null_blk lifecycle rehearsal. The journal copy is an
- * identity witness only; no lifecycle operation restores or replaces block 0.
+ * including the owned null_blk lifecycle rehearsal. The manifest retains only
+ * its SHA-256 identity; lifecycle and recovery re-read live block zero and
+ * never persist, restore or replace its bytes.
  */
 static int swapz_primary_backing_header_matches_manifest(
 	const unsigned char header[SWAPZ_PRIMARY_BLOCK_BYTES],
