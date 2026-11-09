@@ -182,14 +182,17 @@ class AlgorithmPhysicalTest(unittest.TestCase):
         self.assertEqual(state["active_swap"]["used_kib"], 329984)
         self.assertEqual(state["active_swap"]["priority"], -1)
         self.assertEqual(state["other_active_swap_count"], 1)
+        self.assertEqual(state["other_active_swapfile_count"], 1)
+        self.assertEqual(state["other_active_partition_count"], 0)
 
-    def test_active_swap_or_shared_parent_never_reaches_consent_or_swapoff(self):
+    def test_shared_parent_never_reaches_consent_or_swapoff(self):
         candidate = {
             "path": "/dev/sda4", "parent": "/dev/sda",
             "partuuid": "7fb9401d-04", "size_bytes": 16 * 1024 ** 3,
             "parent_has_other_partitions": True,
             "active_swap": {"used_kib": 0, "priority": -1,
                             "capacity_kib": 16777212},
+            "other_active_partition_count": 0,
         }
         with mock.patch.object(subject.sys.stdin, "isatty",
                                return_value=True), \
@@ -207,7 +210,57 @@ class AlgorithmPhysicalTest(unittest.TestCase):
         self.assertIn("/dev/sda4", messages)
         self.assertIn("shared_root_scope_and_independent_recovery_required",
                       messages)
-        self.assertIn("active_target_swapoff_not_implemented", messages)
+        self.assertNotIn("active_target_swapoff_not_implemented", messages)
+
+    def test_active_target_and_unrelated_swapfile_reach_single_consent(self):
+        candidate = {
+            "path": "/dev/sdb1", "parent": "/dev/sdb",
+            "partuuid": "f13428f6-01", "size_bytes": 116 * 1024 ** 3,
+            "selector": "/dev/disk/by-uuid/example",
+            "parent_has_other_partitions": False,
+            "active_swap": {"used_kib": 4, "priority": -1,
+                            "capacity_kib": 121863164},
+            "other_active_swap_count": 1,
+            "other_active_swapfile_count": 1,
+            "other_active_partition_count": 0,
+        }
+        with mock.patch.object(subject.sys.stdin, "isatty", return_value=True), \
+             mock.patch.object(subject.sys.stdout, "isatty", return_value=True), \
+             mock.patch.object(subject, "_require_read_only_preflight",
+                               return_value=candidate), \
+             mock.patch("builtins.input", return_value="yes") as approval, \
+             mock.patch.object(subject.shutil, "which",
+                               return_value="/usr/bin/sudo"), \
+             mock.patch.object(subject.subprocess, "run",
+                               return_value=mock.Mock(returncode=0)) as command:
+            self.assertEqual(subject.main(), 0)
+        approval.assert_called_once()
+        self.assertEqual(command.call_count, 1)
+        self.assertEqual(command.call_args.args[0][-2:],
+                         ["--development-only", "--algorithm-real-swap"])
+
+    def test_unrelated_active_partition_blocks_before_consent(self):
+        candidate = {
+            "path": "/dev/sdb1", "parent": "/dev/sdb",
+            "partuuid": "f13428f6-01", "size_bytes": 116 * 1024 ** 3,
+            "parent_has_other_partitions": False,
+            "active_swap": {"used_kib": 4, "priority": -1,
+                            "capacity_kib": 121863164},
+            "other_active_partition_count": 1,
+        }
+        with mock.patch.object(subject.sys.stdin, "isatty", return_value=True), \
+             mock.patch.object(subject.sys.stdout, "isatty", return_value=True), \
+             mock.patch.object(subject, "_require_read_only_preflight",
+                               return_value=candidate), \
+             mock.patch("builtins.input") as answer, \
+             mock.patch.object(subject.subprocess, "run") as command, \
+             mock.patch("builtins.print") as output:
+            self.assertEqual(subject.main(), 2)
+        answer.assert_not_called()
+        command.assert_not_called()
+        self.assertTrue(any(
+            "unrelated_active_partition_not_supported" in str(call)
+            for call in output.call_args_list))
 
     def test_inconsistent_swap_identity_and_duplicate_rows_fail_closed(self):
         candidate = {"path": "/dev/sda4", "lsblk_active_swap": True}

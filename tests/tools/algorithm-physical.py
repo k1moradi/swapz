@@ -2,7 +2,7 @@
 """Single-consent physical algorithm trial, after all five RAM stages pass.
 
 The unprivileged selector never writes devices. Only the already-hardened,
-source-bound private probe receives a confirmed inactive USB-card partition.
+source-bound private probe receives the exact confirmed USB swap partition.
 """
 import json
 import os
@@ -86,6 +86,8 @@ def _selected_swap_inventory(partition: dict, swap_lines: list[str]) -> dict:
         raise ValueError("selected swap partition is not a block device")
     matching = []
     unrelated = 0
+    unrelated_swapfiles = 0
+    unrelated_partitions = 0
     for line in swap_lines[1:]:
         fields = line.split()
         if len(fields) != 5:
@@ -106,6 +108,7 @@ def _selected_swap_inventory(partition: dict, swap_lines: list[str]) -> dict:
             raise ValueError("swap inventory capacity or priority is invalid")
         if swap_kind == "file":
             unrelated += 1
+            unrelated_swapfiles += 1
             continue
         try:
             active_stat = os.stat(swap_path)
@@ -119,12 +122,18 @@ def _selected_swap_inventory(partition: dict, swap_lines: list[str]) -> dict:
                              "capacity_kib": capacity_kib})
         else:
             unrelated += 1
+            unrelated_partitions += 1
     if len(matching) > 1:
         raise ValueError("duplicate active swap entries for selected partition")
     active = matching[0] if matching else None
     if partition.get("lsblk_active_swap") and active is None:
         raise ValueError("lsblk swap marker disagrees with active swap inventory")
-    return {"active_swap": active, "other_active_swap_count": unrelated}
+    return {
+        "active_swap": active,
+        "other_active_swap_count": unrelated,
+        "other_active_swapfile_count": unrelated_swapfiles,
+        "other_active_partition_count": unrelated_partitions,
+    }
 
 
 def _require_read_only_preflight() -> dict:
@@ -191,10 +200,8 @@ def main() -> int:
     blockers = []
     if selected.get("parent_has_other_partitions"):
         blockers.append("shared_root_scope_and_independent_recovery_required")
-    if active_swap is not None:
-        blockers.append("active_target_swapoff_not_implemented")
-    if selected.get("other_active_swap_count", 0):
-        blockers.append("formatter_rejects_other_active_swap")
+    if selected.get("other_active_partition_count", 0):
+        blockers.append("unrelated_active_partition_not_supported")
     if blockers:
         # A Yes/No answer must never bypass a missing privileged safety gate.
         print("PHYSICAL_ALGORITHM_REAL_SWAP=BLOCKED reason=" +

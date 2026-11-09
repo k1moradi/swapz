@@ -6953,19 +6953,32 @@ for the development smoke and does not replace complete five-stage
 readiness.
 
 Before running that fresh `make fast_test`, creating recovery state, or clearing
-block zero, development-only mode must parse `/proc/swaps` and require a
-complete zero-row table. Any active row, including an unrelated swapfile, or
-an unreadable/malformed inventory blocks with `header_mutation=not_attempted`.
-This early check prevents a header-only recovery cycle when the strict
-formatter would refuse later; it does not authenticate active swap pathnames
-or replace the formatter's final prewrite inventory check.
+block zero, the header-only development smoke must still parse `/proc/swaps`
+and require a complete zero-row table. The optional
+`--algorithm-real-swap` mode has a narrower transaction for an owner-confirmed
+single-partition USB target: it may start from the exact active target plus
+regular swapfiles, but any unrelated active block-swap partition, malformed
+row, unverifiable swapfile identity or ambiguous alias blocks before mutation.
+The run durably records the original target header, target swap size/priority
+and each unrelated swapfile's path, inode/device identity, size and priority
+before the first `swapoff`. Immediately before quiescing, require
+`MemAvailable` to be at least 1 GiB and at least total observed used-swap plus
+512 MiB. Then use ordinary `swapoff` on the exact selected target followed by
+each saved swapfile, verify a complete zero-row `/proc/swaps` table, and only
+then permit the strict formatter to publish the SWZ header. Never use
+`swapoff -a`.
 
-The selected authorized partition must already be inactive swap. This mode
-must not call `swapoff` or `swapon`, and must not activate the raw partition or
-the SWZ mapper as Linux swap. It saves the exact original 4096-byte block-zero
-header durably on the validated persistent recovery filesystem, records a
-fresh one-use run claim, and exercises only one helper-owned 16 MiB mapper
-with the existing 128-page byte-exact write/flush/overwrite/readback oracle.
+The selected partition and saved swapfiles are recovery-owned until restored.
+After SWZ formatting, restore each exact saved swapfile at its original
+priority before loading/activating the run-owned mapper, so the host regains
+its fallback swap during the live-swap oracle. The mapper is activated only
+for the bounded real-swap oracle at its dedicated high test priority. Normal
+cleanup must swap off the owned mapper, restore the exact original 4096-byte
+target header, verify every saved swapfile, and reactivate the original target
+at its original priority. A path/inode change, failed swapoff/swapon, missing
+headroom or any uncertain restoration retains recovery ownership and cannot
+PASS. Header-only development smoke remains inactive-only and never calls
+`swapoff` or `swapon`.
 The formatter invocation must bind the opened partition major:minor, exact
 byte size, PARTUUID, physical-parent major:minor, parent model and USB
 transport. Resolve transport from the physical parent because `lsblk` may

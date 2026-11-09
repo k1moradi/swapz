@@ -1935,6 +1935,31 @@ class PhysicalSwapProbeTests(unittest.TestCase):
 
 
 
+    def test_algorithm_real_swap_transaction_order_is_fail_closed(self):
+        script = SCRIPT.read_text()
+        run_start = script.index("def run_probe(")
+        run_end = script.index("\ndef plan(", run_start)
+        run = script[run_start:run_end]
+        quiesce = run.index("_quiesce_development_swap_inventory(")
+        first_header_write = run.index("_write_block0(")
+        formatter = run.index('formatter, "format"')
+        restore_swapfiles = run.index("_restore_development_swapfiles(state)")
+        module_load = run.index('["modprobe", "dm_mod"]')
+        self.assertLess(quiesce, first_header_write)
+        self.assertLess(first_header_write, formatter)
+        self.assertLess(formatter, restore_swapfiles)
+        self.assertLess(restore_swapfiles, module_load)
+
+        recovery_start = script.index("def recover(")
+        recovery_end = script.index(
+            "\ndef inspect_target_identity_for_recovery(", recovery_start)
+        recovery = script[recovery_start:recovery_end]
+        restore_fallback = recovery.index(
+            "_restore_development_swapfiles(state)")
+        target_reactivation = recovery.index(
+            '["swapon", target["device"]]')
+        self.assertLess(restore_fallback, target_reactivation)
+
     def simulate_root_owned_directories(self, *directories):
         """Model root ownership in rootless CI; never chown host paths."""
         owned = {str(directory) for directory in directories}
@@ -2600,6 +2625,7 @@ class PhysicalSwapProbeTests(unittest.TestCase):
                 "final_module_present": False,
                 "mapper_removal_succeeded": True,
                 "module_cleanup_succeeded": True,
+                "unrelated_swapfiles_restored": True,
                 "active_partition_marker_present": False,
                 "approval_consumed": None if development_only else True,
                 "run_claim_consumed": True,
@@ -3833,6 +3859,122 @@ class PhysicalSwapProbeTests(unittest.TestCase):
             allow_inactive_swap=True)
         prepare.assert_not_called()
         write.assert_not_called()
+
+    def test_algorithm_real_swap_inventory_accepts_target_and_regular_swapfile(self):
+        with tempfile.NamedTemporaryFile() as swapfile:
+            target = {
+                "major": 8, "minor": 17, "swap_was_active": True,
+                "swap_size_kib": 121863164, "swap_priority": -1,
+            }
+            inventory = (
+                "Filename Type Size Used Priority\n"
+                "/dev/sdb1 partition 121863164 4 -1\n"
+                f"{swapfile.name} file 524284 4 -1\n"
+            )
+            with mock.patch.object(probe.Path, "read_text",
+                                   return_value=inventory), \
+                    mock.patch.object(probe, "block_identity",
+                                      return_value=(8, 17)):
+                target_row, swapfiles = probe._development_swap_inventory_plan(
+                    target)
+            self.assertEqual(target_row["used_kib"], 4)
+            self.assertEqual(len(swapfiles), 1)
+            self.assertEqual(swapfiles[0]["path"], swapfile.name)
+            self.assertEqual(swapfiles[0]["priority"], -1)
+            self.assertGreater(swapfiles[0]["st_ino"], 0)
+
+    def test_algorithm_real_swap_inventory_rejects_unrelated_block_swap(self):
+        target = {
+            "major": 8, "minor": 17, "swap_was_active": True,
+            "swap_size_kib": 121863164, "swap_priority": -1,
+        }
+        inventory = (
+            "Filename Type Size Used Priority\n"
+            "/dev/sdb1 partition 121863164 4 -1\n"
+            "/dev/sdc1 partition 1048572 0 -2\n"
+        )
+
+        def identity(path):
+            return (8, 17) if path == "/dev/sdb1" else (8, 33)
+
+        with mock.patch.object(probe.Path, "read_text",
+                               return_value=inventory), \
+                mock.patch.object(probe, "block_identity",
+                                  side_effect=identity):
+            with self.assertRaisesRegex(
+                    probe.ProbeError, "unrelated active block swap"):
+                probe._development_swap_inventory_plan(target)
+
+    def test_algorithm_real_swap_headroom_includes_all_used_swap(self):
+        target_row = {"used_kib": 128 * 1024}
+        swapfiles = [{"used_kib": 256 * 1024}]
+        enough = "MemAvailable:        2097152 kB\n"
+        with mock.patch.object(probe.Path, "read_text", return_value=enough):
+            probe._require_development_swapoff_headroom(
+                target_row, swapfiles)
+        low = "MemAvailable:         900000 kB\n"
+        with mock.patch.object(probe.Path, "read_text", return_value=low):
+            with self.assertRaisesRegex(
+                    probe.ProbeError, "insufficient host memory headroom"):
+                probe._require_development_swapoff_headroom(
+                    target_row, swapfiles)
+
+    def test_algorithm_real_swap_quiesces_exact_target_then_saved_swapfile(self):
+        target = {"device": "/dev/sdb1", "major": 8, "minor": 17}
+        target_row = {
+            "path": "/dev/sdb1", "kind": "partition",
+            "size_kib": 121863164, "used_kib": 4, "priority": -1,
+        }
+        saved = {
+            "path": "/swapfile", "size_kib": 524284,
+            "used_kib": 4, "priority": -1, "st_dev": 8, "st_ino": 12345,
+        }
+        state = {"unrelated_swapfiles": [dict(saved)], "stage": "BACKED_UP"}
+        current = dict(saved)
+        current["used_kib"] = 8
+        active_file = {
+            "path": "/swapfile", "kind": "file",
+            "size_kib": 524284, "used_kib": 8, "priority": -1,
+        }
+        with mock.patch.object(
+                probe, "_development_swap_inventory_plan",
+                return_value=(target_row, [current])), \
+                mock.patch.object(
+                    probe, "_require_development_swapoff_headroom"), \
+                mock.patch.object(probe, "_verify_target_identity"), \
+                mock.patch.object(probe, "_active_swap_for",
+                                  return_value=None), \
+                mock.patch.object(probe, "_active_swapfile_for",
+                                  side_effect=[active_file, None]), \
+                mock.patch.object(
+                    probe, "require_development_formatter_inventory_clear"), \
+                mock.patch.object(probe, "_save_state") as save_state, \
+                mock.patch.object(probe, "_run") as command:
+            probe._quiesce_development_swap_inventory(
+                state, target, Path("/recovery/run"))
+        self.assertEqual(
+            [call.args[0] for call in command.call_args_list],
+            [["swapoff", "--", "/dev/sdb1"],
+             ["swapoff", "--", "/swapfile"]])
+        self.assertEqual(state["stage"], "SWAP_OFF")
+        save_state.assert_called_once()
+
+    def test_algorithm_real_swap_restores_exact_saved_swapfile(self):
+        saved = {
+            "path": "/swapfile", "size_kib": 524284,
+            "used_kib": 4, "priority": -1, "st_dev": 8, "st_ino": 12345,
+        }
+        active = {
+            "path": "/swapfile", "kind": "file",
+            "size_kib": 524284, "used_kib": 0, "priority": -1,
+        }
+        with mock.patch.object(probe, "_active_swapfile_for",
+                               side_effect=[None, active]), \
+                mock.patch.object(probe, "_run") as command:
+            self.assertTrue(probe._restore_development_swapfiles(
+                {"unrelated_swapfiles": [saved]}))
+        command.assert_called_once_with(
+            ["swapon", "--", "/swapfile"], timeout=60)
 
     def test_development_active_inventory_blocks_before_test_or_header_write(self):
         rows = (
