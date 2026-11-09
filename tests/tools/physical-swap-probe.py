@@ -39,8 +39,11 @@ EXPECTED_SCOPE = "physical swap backing correctness smoke only"
 DEVELOPMENT_SCOPE = (
     "physical backing data-path smoke only; not production qualification")
 STATE_NAME = "state.json"
+# block0.bin is read only for historical pre-migration journals. New trials
+# never copy or restore the ordinary SWAPSPACE2 header.
 BACKUP_NAME = "block0.bin"
 RESULTS_NAME = "results.json"
+RUNTIME_OWNERSHIP_PHASE = "ONE_USE_RUNTIME_BOUND"
 RECOVERY_OWNERSHIP_PHASE = "ONE_USE_RECOVERY_BOUND"
 LEGACY_ACTIVE_RECOVERY_OWNERSHIP_PHASE = "ACTIVE_RECOVERY"
 LEGACY_PRECLAIM_RECOVERY_OWNERSHIP_PHASE = "RECOVERY_PREPARED"
@@ -100,6 +103,10 @@ SWAPZ_HEADER_MAGIC = b"SWAPZ001"
 SWAPZ_HEADER_VERSION = 1
 BLKGETSIZE64 = 0x80081272  # Linux 64-bit x86_64/aarch64 _IOR(0x12, 114, size_t).
 RECOVERY_BASE = Path("/var/lib/swapz/physical-recovery")
+# New development/algorithm trials keep ownership state in tmpfs. If the
+# machine reboots, mapper/module state is gone and the unchanged SWAPSPACE2
+# partition needs no raw-header recovery.
+ALGORITHM_RUNTIME_BASE = Path("/run/swapz/algorithm-physical")
 PERSISTENT_RECOVERY_FILESYSTEMS = frozenset({
     "ext2", "ext3", "ext4", "xfs", "btrfs", "f2fs",
 })
@@ -1479,8 +1486,42 @@ def _fsync_directory(directory):
         _close_fd_preserving_active_error(fd)
 
 
+def _algorithm_runtime_base():
+    """Return a root-only same-boot state directory backed by /run tmpfs."""
+    base = ALGORITHM_RUNTIME_BASE
+    parent = base.parent
+    run_root = parent.parent
+    try:
+        root_info = run_root.lstat()
+    except OSError as exc:
+        raise ProbeError("runtime state root is unavailable") from exc
+    if (not stat.S_ISDIR(root_info.st_mode) or root_info.st_uid != 0 or
+            root_info.st_mode & (stat.S_IWGRP | stat.S_IWOTH)):
+        raise ProbeError("runtime state root is not root-controlled")
+    for directory in (parent, base):
+        try:
+            info = directory.lstat()
+        except FileNotFoundError:
+            try:
+                directory.mkdir(mode=0o700)
+            except OSError as exc:
+                raise ProbeError(
+                    "cannot create root-only runtime state directory") from exc
+            _fsync_directory(directory.parent)
+            info = directory.lstat()
+        except OSError as exc:
+            raise ProbeError("cannot inspect runtime state directory") from exc
+        if (not stat.S_ISDIR(info.st_mode) or info.st_uid != 0 or
+                stat.S_IMODE(info.st_mode) != 0o700):
+            raise ProbeError(
+                "runtime state directory must be root-owned mode 0700")
+    return base
+
+
 def _recovery_base(target=None):
-    """Require an operator-provisioned, non-symlink, root-controlled location."""
+    """Return legacy persistent state or new same-boot development state."""
+    if isinstance(target, dict) and target.get("development_only") is True:
+        return _algorithm_runtime_base()
     base = RECOVERY_BASE
     for directory in (base, *base.parents):
         try:
@@ -1545,10 +1586,13 @@ def _recovery_base(target=None):
 
 
 def _recovery_run_directory(state_dir, run_id=None):
-    base = _recovery_base()
     directory = Path(state_dir)
+    if directory.parent == ALGORITHM_RUNTIME_BASE:
+        base = _algorithm_runtime_base()
+    else:
+        base = _recovery_base()
     if not directory.is_absolute() or directory.parent != base:
-        raise ProbeError("recovery run directory must be a direct child of the fixed base")
+        raise ProbeError("state run directory must be a direct child of its fixed base")
     if run_id is not None:
         if directory.name != f"swapz-physical-{run_id}":
             raise ProbeError("run directory must match the one-use approval run_id")
@@ -1558,20 +1602,24 @@ def _recovery_run_directory(state_dir, run_id=None):
 
 
 def _select_run_directory(state_dir, run_id, development_only):
-    """Use a fresh helper-chosen child only for the unreviewed dev smoke."""
+    """Use a fresh root-only tmpfs child for an unreviewed development trial."""
     if development_only:
         if state_dir is not None:
             raise ProbeError(
-                "development-only mode chooses its own fresh recovery directory")
-        state_dir = RECOVERY_BASE / f"swapz-physical-{run_id}"
+                "development-only mode chooses its own fresh runtime directory")
+        _algorithm_runtime_base()
+        state_dir = ALGORITHM_RUNTIME_BASE / f"swapz-physical-{run_id}"
     elif state_dir is None:
         raise ProbeError("qualified run requires an explicit recovery directory")
     return _recovery_run_directory(state_dir, run_id)
 
 
-def _partition_lock(partuuid):
-    """Permanent lock inode; never unlink it, including after a crash."""
-    base = _recovery_base()
+def _partition_lock(partuuid, base=None):
+    """Lock one partition for the lifetime of the same-boot/legacy state."""
+    if base is None:
+        base = _recovery_base()
+    else:
+        base = Path(base)
     name = f"partition-{partuuid}.lock"
     fd = os.open(base / name, os.O_RDWR | os.O_CREAT |
                  os.O_NOFOLLOW | os.O_CLOEXEC, 0o600)
@@ -1657,7 +1705,7 @@ def _release_partition_ownership(state):
         # Persisted state is untrusted; name only known stages in diagnostics.
         observed_stage = (
             stage if type(stage) is str and stage in {
-                "BACKED_UP", "SWAP_OFF", "HEADER_CLEAR_PENDING",
+                "PREPARED", "BACKED_UP", "SWAP_OFF", "HEADER_CLEAR_PENDING",
                 "HEADER_CLEARED", "HEADER_RESTORE_PENDING", "SWZ_FORMATTED",
                 "EXISTING_SWAP_READY", "MODULE_PENDING", "MODULE_OWNED",
                 "MAPPED", "ORACLE_PASS",
@@ -1717,14 +1765,30 @@ def _validate_state_dir(state_dir):
     if not stat.S_ISDIR(info.st_mode) or info.st_uid != 0 or \
             stat.S_IMODE(info.st_mode) != 0o700:
         raise ProbeError("saved state directory must be a root-owned 0700 directory")
-    for name in (STATE_NAME, BACKUP_NAME):
-        try:
-            entry = (state_dir / name).lstat()
-        except OSError as exc:
-            raise ProbeError(f"missing saved recovery file {name}: {exc}") from exc
-        if not stat.S_ISREG(entry.st_mode) or entry.st_uid != 0 or \
-                stat.S_IMODE(entry.st_mode) != 0o600:
-            raise ProbeError(f"saved recovery file {name} must be root-owned mode 0600")
+    try:
+        state_entry = (state_dir / STATE_NAME).lstat()
+    except OSError as exc:
+        raise ProbeError(f"missing saved state file {STATE_NAME}: {exc}") from exc
+    if (not stat.S_ISREG(state_entry.st_mode) or state_entry.st_uid != 0 or
+            stat.S_IMODE(state_entry.st_mode) != 0o600):
+        raise ProbeError(
+            f"saved state file {STATE_NAME} must be root-owned mode 0600")
+    try:
+        state = _load_unique_json((state_dir / STATE_NAME).read_bytes())
+    except (OSError, ValueError) as exc:
+        raise ProbeError("saved state record is unreadable") from exc
+    if state.get("raw_header_preservation_required") is True:
+        return
+    # Historical pre-migration journals alone need their original header copy.
+    try:
+        backup_entry = (state_dir / BACKUP_NAME).lstat()
+    except OSError as exc:
+        raise ProbeError(
+            f"missing legacy recovery file {BACKUP_NAME}: {exc}") from exc
+    if (not stat.S_ISREG(backup_entry.st_mode) or backup_entry.st_uid != 0 or
+            stat.S_IMODE(backup_entry.st_mode) != 0o600):
+        raise ProbeError(
+            f"legacy recovery file {BACKUP_NAME} must be root-owned mode 0600")
 
 
 def _write_all(fd, data):
@@ -3030,13 +3094,14 @@ def _require_recovery_results_binding(state, results):
             results.get("development_only") is not (
                 state.get("development_only") is True) or
             (ownership_phase not in {
+                RUNTIME_OWNERSHIP_PHASE,
                 RECOVERY_OWNERSHIP_PHASE,
                 LEGACY_ACTIVE_RECOVERY_OWNERSHIP_PHASE,
             } and not legacy_preclaim_recovery)):
         raise ProbeError(
             "saved physical results/state identity or ownership phase "
             "is incomplete; safe_next_step=inspect_records_read_only")
-    if result_stage not in {"BACKED_UP", "ORACLE_PASS",
+    if result_stage not in {"PREPARED", "BACKED_UP", "ORACLE_PASS",
                             "RECOVERY_REQUIRED"} or (
             (state.get("stage") == "RECOVERY_REQUIRED") != (
                 result_stage == "RECOVERY_REQUIRED")):
@@ -3045,7 +3110,7 @@ def _require_recovery_results_binding(state, results):
             "safe_next_step=inspect_records_read_only")
     if state.get("stage") == "RECOVERY_REQUIRED" and (
             state.get("stage_before_recovery") not in {
-                "BACKED_UP", "SWAP_OFF", "HEADER_CLEAR_PENDING",
+                "PREPARED", "BACKED_UP", "SWAP_OFF", "HEADER_CLEAR_PENDING",
                 "HEADER_CLEARED", "HEADER_RESTORE_PENDING", "SWZ_FORMATTED",
                 "EXISTING_SWAP_READY", "MODULE_PENDING", "MODULE_OWNED",
                 "MAPPED", "ORACLE_PASS"}):
@@ -3060,20 +3125,27 @@ def recover(state_dir, device_arg, confirm_arg, lock_held=False,
     _validate_state_dir(state_dir)
     try:
         state = _load_unique_json((state_dir / STATE_NAME).read_bytes())
-        backup = (state_dir / BACKUP_NAME).read_bytes()
     except (OSError, ValueError) as exc:
-        raise ProbeError("cannot load unambiguous saved physical recovery state") from exc
+        raise ProbeError("cannot load unambiguous saved physical state") from exc
     if not isinstance(state, dict) or not re.fullmatch(
             r"[0-9a-f]{32}", str(state.get("run_id", ""))):
-        raise ProbeError("saved recovery state lacks one-use run identity")
+        raise ProbeError("saved state lacks one-use run identity")
+    preserve_header = state.get("raw_header_preservation_required") is True
+    backup = None
+    if not preserve_header:
+        try:
+            backup = (state_dir / BACKUP_NAME).read_bytes()
+        except OSError as exc:
+            raise ProbeError("legacy recovery header copy is unavailable") from exc
     _recovery_run_directory(state_dir, state["run_id"])
     if device_arg != confirm_arg or device_arg != state.get("device_arg"):
         raise ProbeError(
             "recovery requires the exact originally confirmed device path; "
             "safe_next_step=inspect_records_read_only")
-    if len(backup) != PAGE_BYTES or hashlib.sha256(backup).hexdigest() != (
-            state.get("header_sha256")):
-        raise ProbeError("saved original header is missing or digest-mismatched")
+    if (not preserve_header and
+            (len(backup) != PAGE_BYTES or hashlib.sha256(backup).hexdigest() !=
+             state.get("header_sha256"))):
+        raise ProbeError("legacy original header is missing or digest-mismatched")
     if state.get("stage") == "COMPLETE":
         raise ProbeError(
             "saved recovery is already COMPLETE; "
@@ -3147,9 +3219,10 @@ def recover(state_dir, device_arg, confirm_arg, lock_held=False,
         raise ProbeError("saved module ownership is unknown; manual review required")
     _validate_owned_mapper_identity(state)
     _require_recovery_results_binding(state, results)
-    lock_fd = None if lock_held else _partition_lock(state["partuuid"])
+    lock_fd = None if lock_held else _partition_lock(
+        state["partuuid"], base=state_dir.parent)
     try:
-        base = _recovery_base()
+        base = _recovery_base(state)
         try:
             marker = _load_unique_json(
                 (base / f"partition-{state['partuuid']}.active").read_bytes())
@@ -3161,6 +3234,8 @@ def recover(state_dir, device_arg, confirm_arg, lock_held=False,
             raise ProbeError("saved recovery state does not own partition marker")
         target = inspect_target_identity_for_recovery(
             state, device_arg, confirm_arg)
+        target["development_only"] = development_only
+        target["algorithm_real_swap"] = state.get("algorithm_real_swap") is True
         _recovery_base(target)
         module_present = Path("/sys/module/dm_swapz").exists()
         if module_present and state["module_ownership"] != "MODULE_OWNED":
@@ -3199,30 +3274,41 @@ def recover(state_dir, device_arg, confirm_arg, lock_held=False,
         active = _active_swap_for(target["major"], target["minor"])
         if swap_was_active is False and active is not None:
             raise ProbeError(
-                "development recovery refused because the originally inactive "
+                "development cleanup refused because the originally inactive "
                 "partition became active swap")
-        if active is not None and current_header != backup:
-            raise ProbeError("recovery refused to rewrite active swap")
-        _validate_recovery_header(
-            current_header, backup, state, target["size_bytes"])
-        if current_header != backup:
-            if active is not None:
-                raise ProbeError("cannot restore header while swap is active")
-            if _recovery_header_stage(state) != "HEADER_RESTORE_PENDING":
-                source_stage = _recovery_header_stage(state)
-                state["header_restore_source_stage"] = source_stage
-                state["header_restore_source_sha256"] = hashlib.sha256(
-                    current_header).hexdigest()
-                state["header_restore_source_hex"] = current_header.hex()
-                state["stage_before_recovery"] = "HEADER_RESTORE_PENDING"
-                state["stage"] = "HEADER_RESTORE_PENDING"
-                _save_state(state_dir, state)
-            _verify_target_identity(target)
-            _write_block0(target["device"], backup, target,
-                          expected_current=current_header)
-        if _read_block0(target["device"], target) != backup:
-            raise ProbeError("original 4 KiB header not restored exactly")
-        state["final_block0_sha256"] = hashlib.sha256(backup).hexdigest()
+        if preserve_header:
+            current_digest = hashlib.sha256(current_header).hexdigest()
+            if current_digest != state.get("header_sha256"):
+                raise ProbeError(
+                    "ordinary SWAPSPACE2 header changed; raw header writes are "
+                    "forbidden for this trial")
+            state["final_block0_sha256"] = current_digest
+        else:
+            # Historical pre-migration journals alone may restore their saved
+            # block-zero image. No newly created run reaches this branch.
+            if active is not None and current_header != backup:
+                raise ProbeError("recovery refused to rewrite active swap")
+            _validate_recovery_header(
+                current_header, backup, state, target["size_bytes"])
+            if current_header != backup:
+                if active is not None:
+                    raise ProbeError("cannot restore header while swap is active")
+                if _recovery_header_stage(state) != "HEADER_RESTORE_PENDING":
+                    source_stage = _recovery_header_stage(state)
+                    state["header_restore_source_stage"] = source_stage
+                    state["header_restore_source_sha256"] = hashlib.sha256(
+                        current_header).hexdigest()
+                    state["header_restore_source_hex"] = current_header.hex()
+                    state["stage_before_recovery"] = "HEADER_RESTORE_PENDING"
+                    state["stage"] = "HEADER_RESTORE_PENDING"
+                    _save_state(state_dir, state)
+                _verify_target_identity(target)
+                _write_block0(target["device"], backup, target,
+                              expected_current=current_header)
+            if _read_block0(target["device"], target) != backup:
+                raise ProbeError(
+                    "legacy original 4 KiB header not restored exactly")
+            state["final_block0_sha256"] = hashlib.sha256(backup).hexdigest()
 
         if swap_was_active is True:
             if _active_swap_for(target["major"], target["minor"]) is None:
@@ -3274,8 +3360,8 @@ def recover(state_dir, device_arg, confirm_arg, lock_held=False,
 
 
 def recover_pending_algorithm_trial():
-    """Restore one exact run-owned journal, never an unidentified partition."""
-    base = _recovery_base()
+    """Clean one exact same-boot run-owned trial, never an unidentified partition."""
+    base = _algorithm_runtime_base()
     markers = sorted(base.glob("partition-*.active"))
     if not markers:
         print("PHYSICAL_AUTO_RECOVERY=NO_PENDING")
@@ -3403,11 +3489,11 @@ def inspect_target_identity_for_recovery(state, device_arg, confirm_arg):
 
 
 def _prepare_state(target, state_dir, evidence, review):
-    """Create and sync the full recovery record before any destructive action."""
+    """Create the ownership record; block zero is identity-only and immutable."""
     dm_name, dm_uuid = _allocate_dm_identity()
     state_dir = _recovery_run_directory(state_dir, review["run_id"])
     if state_dir.exists() or state_dir.is_symlink():
-        raise ProbeError("one-use recovery run directory already exists")
+        raise ProbeError("one-use state run directory already exists")
     _verify_target_identity(target)
     if _read_block0(target["device"], target) != target["header"]:
         raise ProbeError("original header changed since device review")
@@ -3416,19 +3502,9 @@ def _prepare_state(target, state_dir, evidence, review):
     info = state_dir.lstat()
     if not stat.S_ISDIR(info.st_mode) or info.st_uid != 0 or (
             stat.S_IMODE(info.st_mode) != 0o700):
-        raise ProbeError("recovery run directory is not root-owned mode 0700")
-    # Failure at any point leaves the directory for explicit inspection rather
-    # than deleting a potentially durable backup or claim.
-    backup_fd = os.open(
-        state_dir / BACKUP_NAME,
-        os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW | os.O_CLOEXEC,
-        0o600)
-    try:
-        _write_all(backup_fd, target["header"])
-        os.fsync(backup_fd)
-    finally:
-        _close_fd_preserving_active_error(backup_fd)
-    _fsync_directory(state_dir)
+        raise ProbeError("state run directory is not root-owned mode 0700")
+    # New trials never save or restore block zero. The digest below detects
+    # any violation and forces read-only inspection.
     state = {
         "device_arg": target["device_arg"],
         "device": target["device"],
@@ -3467,10 +3543,10 @@ def _prepare_state(target, state_dir, evidence, review):
         "reviewer": review.get("reviewer"),
         "run_id": review["run_id"],
         "module_ownership": "NOT_STARTED",
-        "ownership_phase": RECOVERY_OWNERSHIP_PHASE,
+        "ownership_phase": RUNTIME_OWNERSHIP_PHASE,
         "dm_name": dm_name,
         "dm_uuid": dm_uuid,
-        "stage": "BACKED_UP",
+        "stage": "PREPARED",
     }
     _save_state(state_dir, state)
     return state, state_dir
@@ -3967,6 +4043,8 @@ def run_probe(device_arg, confirm_arg, state_dir_arg, review_path,
                 f"observed={observed} "
                 "safe_next_step=rerun_read_only_preflight")
     target["device_arg"] = device_arg
+    target["development_only"] = development_only
+    target["algorithm_real_swap"] = algorithm_real_swap
     _recovery_base(target)
     live_artifact_digests = _artifact_digests()
     if live_artifact_digests != evidence["artifact_digests"]:
@@ -4000,7 +4078,8 @@ def run_probe(device_arg, confirm_arg, state_dir_arg, review_path,
             "preflight_lower_io expected=available "
             f"observed={preflight_block_stats.get('error')}")
 
-    lock_fd = _partition_lock(target["partuuid"])
+    lock_fd = _partition_lock(
+        target["partuuid"], base=state_dir_arg.parent)
     try:
         # Burn the one-use run authorization before state preparation. A crash,
         # fsync failure or artifact-snapshot failure can never make it reusable.
@@ -4078,7 +4157,7 @@ def run_probe(device_arg, confirm_arg, state_dir_arg, review_path,
                 VIRTUAL_LOWER_IO_CLAIM_BOUNDARY
                 if virtual_device_only else LOWER_IO_CLAIM_BOUNDARY),
             "physical_oracle_phases": [],
-            "final_recovery_state": "BACKED_UP",
+            "final_recovery_state": "PREPARED",
         }
         _save_results(state_dir, results)
         failure = None
