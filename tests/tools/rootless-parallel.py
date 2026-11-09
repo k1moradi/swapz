@@ -78,23 +78,35 @@ def _private_file(directory, filename):
     return os.fdopen(descriptor, "wb")
 
 
+def _owned_worker_group_exists(process):
+    """Check the original worker group, including surviving descendants."""
+    try:
+        os.killpg(process.pid, 0)
+    except ProcessLookupError:
+        return False
+    return True
+
+
 def _stop_owned_worker(process):
-    """Signal only the fresh session owned by this exact live Popen child."""
-    if process.poll() is not None:
-        return
+    """Stop the entire owned group even when its leader exits before children."""
     try:
         os.killpg(process.pid, signal.SIGTERM)
     except ProcessLookupError:
         pass
-    try:
-        process.wait(timeout=2)
-    except subprocess.TimeoutExpired:
-        if process.poll() is None:
-            try:
-                os.killpg(process.pid, signal.SIGKILL)
-            except ProcessLookupError:
-                pass
-        process.wait(timeout=5)
+    deadline = time.monotonic() + 2
+    while time.monotonic() < deadline:
+        # Reap a completed leader before checking for other group members.
+        process.poll()
+        if not _owned_worker_group_exists(process):
+            break
+        time.sleep(POLL_INTERVAL_SECONDS)
+    process.poll()
+    if _owned_worker_group_exists(process):
+        try:
+            os.killpg(process.pid, signal.SIGKILL)
+        except ProcessLookupError:
+            pass
+    process.wait(timeout=5)
 
 
 def execute_group(directory, tasks, *, jobs, timeout_seconds=MAX_WORKER_SECONDS,
@@ -150,12 +162,19 @@ def execute_group(directory, tasks, *, jobs, timeout_seconds=MAX_WORKER_SECONDS,
             for index, (process, started_at) in tuple(active.items()):
                 exit_code = process.poll()
                 elapsed_seconds = time.monotonic() - started_at
-                if exit_code is None and elapsed_seconds >= timeout_seconds:
+                timed_out = exit_code is None and elapsed_seconds >= timeout_seconds
+                if timed_out:
                     _stop_owned_worker(process)
                     exit_code = 124
                 if exit_code is None:
                     continue
                 process.wait()
+                if not timed_out and _owned_worker_group_exists(process):
+                    # A zero-exit worker must not advertise PASS while its
+                    # process-group descendants still own live resources.
+                    _stop_owned_worker(process)
+                    if exit_code == 0:
+                        exit_code = 125
                 if exit_code < 0:
                     exit_code = 128 - exit_code
                 # The Bash parent and its error reporter accept only small

@@ -87,7 +87,11 @@ worker stdin is disabled. Nested Python processes inherit a no-bytecode-write
 environment so two workers never mutate the shared Python cache. It dispatches
 at most two workers, stops *new* dispatch after a failure, lets started tests
 finish their own cleanup, and
-kills/reaps a worker on its 900-second individual timeout. The Bash parent
+kills/reaps a worker on its 900-second individual timeout. A worker that exits
+zero while a descendant remains in its process group is instead marked failed
+(status 125) and the group is terminated; timeout and signal cleanup also
+escalate after the leader exits, so descendants ignoring SIGTERM cannot remain
+running. The Bash parent
 alone replays output and emits source-ordered progress rows, using actual
 per-worker elapsed times; it keeps only a bounded private failure diagnostic
 and cleans up completed scratch.

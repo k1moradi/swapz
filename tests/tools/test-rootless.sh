@@ -727,6 +727,9 @@ rootless_parallel_collect() {
       fi
     fi
     rootless_parallel_cleanup || :
+    if (( worker_status == 125 )); then
+      report_rootless_failure "$worker_status" "$LINENO" parallel_worker_cleanup
+    fi
     report_rootless_failure "$worker_status" "$LINENO" nonzero_exit
   fi
   rootless_parallel_elapsed_seconds=$worker_seconds

@@ -6,11 +6,15 @@ import importlib.util
 import inspect
 import io
 import json
+import os
 from pathlib import Path
+import signal
+import subprocess
 import sys
 import time
 import tempfile
 import unittest
+from unittest import mock
 
 ROOT = Path(__file__).resolve().parents[3]
 spec = importlib.util.spec_from_file_location("swapz_private_test_runner",
@@ -250,6 +254,89 @@ class RootlessParallelPilotContract(unittest.TestCase):
             with self.assertRaisesRegex(ValueError, "invalid bounded"):
                 parallel_runner.execute_group(directory, tasks, jobs=3)
 
+
+    def test_zero_exit_with_live_descendant_fails_closed(self):
+        with tempfile.TemporaryDirectory(prefix="swapz-parallel-descendant-") as name:
+            directory = Path(name)
+            marker = directory / "descendant-ready"
+            descendant_source = (
+                "import pathlib,signal,sys,time; "
+                "signal.signal(signal.SIGTERM, lambda *_: sys.exit(0)); "
+                "pathlib.Path(sys.argv[1]).write_text('ready'); "
+                "time.sleep(30)")
+            worker_source = (
+                "import pathlib,subprocess,sys,time; "
+                "subprocess.Popen([sys.executable,'-B','-c',sys.argv[2],sys.argv[1]], "
+                "stdin=subprocess.DEVNULL,stdout=subprocess.DEVNULL,"
+                "stderr=subprocess.DEVNULL); "
+                "marker=pathlib.Path(sys.argv[1]); deadline=time.monotonic()+5; "
+                "exec('while not marker.exists() and time.monotonic()<deadline: "
+                "time.sleep(0.01)'); "
+                "sys.exit(0 if marker.exists() else 36)")
+            tasks = (
+                ("leaking-worker", (sys.executable, "-B", "-c",
+                                    worker_source, str(marker), descendant_source)),
+                ("ordinary-worker", (sys.executable, "-B", "-c", "pass")),
+            )
+            self.assertEqual(parallel_runner.execute_group(
+                directory, tasks, jobs=2, timeout_seconds=8,
+                poll_seconds=0.01), 1)
+            self.assertEqual(
+                (directory / "worker-0.result").read_text().split()[0], "125")
+            self.assertEqual(
+                (directory / "worker-1.result").read_text().split()[0], "0")
+
+    def test_stop_escalates_when_leader_exits_before_descendant(self):
+        with tempfile.TemporaryDirectory(prefix="swapz-parallel-group-") as name:
+            directory = Path(name)
+            marker = directory / "descendant-ready"
+            descendant_source = (
+                "import pathlib,signal,sys,time; "
+                "signal.signal(signal.SIGTERM, signal.SIG_IGN); "
+                "pathlib.Path(sys.argv[1]).write_text('ready'); "
+                "time.sleep(30)")
+            worker_source = (
+                "import pathlib,subprocess,sys,time; "
+                "subprocess.Popen([sys.executable,'-B','-c',sys.argv[2],sys.argv[1]], "
+                "stdin=subprocess.DEVNULL,stdout=subprocess.DEVNULL,"
+                "stderr=subprocess.DEVNULL); "
+                "marker=pathlib.Path(sys.argv[1]); deadline=time.monotonic()+5; "
+                "exec('while not marker.exists() and time.monotonic()<deadline: "
+                "time.sleep(0.01)'); "
+                "exec('while True: time.sleep(1)')")
+            worker = subprocess.Popen(
+                (sys.executable, "-B", "-c", worker_source,
+                 str(marker), descendant_source),
+                stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL, start_new_session=True)
+            observed_signals = []
+            original_killpg = os.killpg
+
+            def record_signal(group_id, signal_number):
+                observed_signals.append(signal_number)
+                return original_killpg(group_id, signal_number)
+
+            try:
+                deadline = time.monotonic() + 7
+                while not marker.exists() and time.monotonic() < deadline:
+                    self.assertIsNone(worker.poll())
+                    time.sleep(0.01)
+                self.assertTrue(marker.exists())
+                with mock.patch.object(parallel_runner.os, "killpg",
+                                       side_effect=record_signal):
+                    parallel_runner._stop_owned_worker(worker)
+                self.assertIn(signal.SIGKILL, observed_signals)
+                self.assertIsNotNone(worker.poll())
+            finally:
+                # The fixture must clean up even when the asserted behavior
+                # regresses: no test may leave its synthetic child running.
+                try:
+                    original_killpg(worker.pid, signal.SIGKILL)
+                except ProcessLookupError:
+                    pass
+                if worker.poll() is None:
+                    worker.kill()
+                worker.wait(timeout=5)
 
 
 class NativeTimingContract(unittest.TestCase):
