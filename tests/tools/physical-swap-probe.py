@@ -4327,7 +4327,8 @@ def run_probe(device_arg, confirm_arg, state_dir_arg, review_path,
             results["oracle_suite"] = "PHASES_PASS_RECOVERY_PENDING"
             results["final_recovery_state"] = "ORACLE_PASS"
             _save_results(state_dir, results)
-            if development_only and algorithm_real_swap and                     _operator_keep_swapz_active_after_pass():
+            if (development_only and algorithm_real_swap and
+                    _operator_keep_swapz_active_after_pass()):
                 active_mapper_swap = _verify_kept_swapz_active(
                     state, target, mapper)
                 results["oracle_suite"] = "PASS_ACTIVE_KEPT"
