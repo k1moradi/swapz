@@ -1587,7 +1587,9 @@ mounts, exact holder and captured configfs directory identity. Configfs
 attribute pseudo-file inode numbers may be regenerated on each lookup and must
 not be compared as persistent identities. Loaded preflight instead checks the
 root-owned regular-file type through its pinned power descriptor; that check
-does not grant creator authority to a later preflight process. Before the
+does not grant creator authority to a later preflight process. The native
+source contract requires descriptor type/owner checks and explicitly rejects
+reintroducing cross-lookup power-attribute inode equality. Before the
 creator powers off its
 device, it opens the named config directory without following symlinks,
 compares that descriptor's device/inode/owner with the creation-time identity,
