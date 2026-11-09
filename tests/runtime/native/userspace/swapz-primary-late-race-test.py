@@ -999,8 +999,9 @@ static int fixture_stat(const char *path, struct stat *info)
 
 /*
  * Count calls while preserving the real production swap admission result.
- * The post-snapshot race itself is injected by the header-write seam below,
- * after the coordinator has completed every final inventory observation.
+ * The post-snapshot race is injected immediately before loading the owned
+ * module, after the final verified inventory. The backing swap header must
+ * remain untouched even on the positive control.
  */
 static int fixture_observed_swap_device_active(dev_t device)
 {
@@ -1195,13 +1196,13 @@ static int fixture_intent(void)
     }
     return 0;
 }
-static int fixture_header_write(void)
+static int fixture_pre_mapper_transition(void)
 {
     /*
      * This seam is entered only after production's final mount/parent/swap
      * snapshot has returned safe. Inject immediately before the simulated
-     * block-zero write, then prove a fresh production inventory can see the
-     * change. That exposes the remaining interval without claiming an atomic
+     * module/mapper admission, then prove a fresh production inventory can
+     * see the change without writing the original swap header. That exposes the remaining interval without claiming an atomic
      * kernel exclusion barrier.
      */
     if (scenario == FIXTURE_POST_SNAPSHOT_MOUNT) {
@@ -1252,11 +1253,12 @@ static int fixture_header_write(void)
         assert(swapz_primary_read_mount_facts(
             &facts, makedev(8U, 0U)) < 0 && errno == EACCES);
     }
-    ++header_writes;
     return 0;
 }
 static int fixture_load_module(int *loaded)
 {
+    if (fixture_pre_mapper_transition() < 0)
+        return -1;
     ++module_loads;
     *loaded = 1;
     return 0;
@@ -1329,7 +1331,6 @@ static int fixture_hashes(char *control, char *module, char *oracle)
 #define swapz_primary_exact_read(...) 0
 #define swapz_primary_state_write_at(a,b,state,owner) fixture_state_write(state)
 #define swapz_primary_module_load_intent_write_at(...) fixture_intent()
-#define swapz_primary_write_header_checked_fd(...) fixture_header_write()
 #define swapz_primary_load_qualified_module(loaded) fixture_load_module(loaded)
 #define swapz_primary_module_load_mark_loaded_at(...) 0
 #define swapz_primary_dm_create_mapper(a,b,c,d,e,f,g) fixture_mapper_create(e,f,g)
@@ -1639,7 +1640,7 @@ static int check_case(enum fixture_scenario candidate)
          * reread, but no atomic kernel exclusion is established by this test. */
         if (result != 0 || !post_snapshot_injected ||
             admission_reads != 2U || prewrite_reads != 1U ||
-            active_inventory_reads != 4U || writes != 4U ||
+            active_inventory_reads != 4U || writes != 3U ||
             starting_state_writes != 1U || active_state_writes != 1U ||
             recovery_marks != 0U || owner_release_calls != 0U ||
             mount_conflict_observations != 0U ||
@@ -1653,7 +1654,7 @@ static int check_case(enum fixture_scenario candidate)
             return 1;
         }
         printf("UNPROVEN: %s phase=post-final-snapshot errno=%d "
-               "prevented=none mutations=4; a read-only scan cannot "
+               "prevented=none mutations=3; a read-only scan cannot "
                "exclude changes after it returns\n",
                scenario_names[candidate],
                candidate == FIXTURE_POST_SNAPSHOT_INVENTORY_EACCES
@@ -1662,7 +1663,7 @@ static int check_case(enum fixture_scenario candidate)
     }
     if (expected_safe) {
         if (result != 0 || admission_reads != 2U || prewrite_reads != 1U ||
-            header_writes != 1U || mapper_mutations != 1U ||
+            header_writes != 0U || mapper_mutations != 1U ||
             mkswap_calls != 1U || swapon_calls != 1U ||
             starting_state_writes != 1U || active_state_writes != 1U ||
             recovery_marks != 0U || owner_release_calls != 0U ||
@@ -2483,7 +2484,7 @@ def main() -> int:
             return 1
         print(production.stdout, end="")
         mutant = compile_and_run(source, workdir, mutant=True)
-        expected_mutations = "header_write=1 mapper=1 mkswap=1 swapon=1"
+        expected_mutations = "header_write=0 mapper=1 mkswap=1 swapon=1"
         if mutant.returncode != 1 or expected_mutations not in mutant.stderr:
             print("FAIL: omission of final recheck did not expose all intercepted mutations",
                   file=sys.stderr)
@@ -2495,7 +2496,7 @@ def main() -> int:
         if (selector_aba_mutant.returncode != 1 or
                 "observed=stale-selection-reached-mutation" not in
                     selector_aba_mutant.stderr or
-                "mutations=4" not in selector_aba_mutant.stderr or
+                "mutations=3" not in selector_aba_mutant.stderr or
                 "selector_reads=2 selector_aba=2" not in
                     selector_aba_mutant.stderr):
             print("FAIL: independent final selector reread did not expose cross-read ABA",
