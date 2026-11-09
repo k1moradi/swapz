@@ -202,8 +202,8 @@ static int test_data_only_failed_replacement_keeps_old_generation(void)
 	struct swapz_decoded ram_records[1];
 	struct swapz_ram_extent builder;
 	struct swapz_tx transaction;
-	struct swapz_map previous;
-	swapz_u32 previous_start;
+	struct swapz_map previous = { 0 };
+	swapz_u32 previous_start = 0;
 	unsigned int attempt;
 
 	CHECK(init() == 0);
