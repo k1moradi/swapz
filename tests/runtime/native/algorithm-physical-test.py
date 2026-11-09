@@ -239,7 +239,7 @@ class AlgorithmPhysicalTest(unittest.TestCase):
         approval.assert_called_once()
         self.assertEqual(command.call_count, 1)
         self.assertEqual(command.call_args.args[0], [
-            "/usr/bin/sudo", "-n", "--", subject.sys.executable, "-I", "-B",
+            "/usr/bin/sudo", "--", subject.sys.executable, "-I", "-B",
             str(subject.ROOT / "tests/tools/physical-swap-probe.py"),
             "run", "--device", candidate["selector"],
             "--confirm-device", candidate["selector"],

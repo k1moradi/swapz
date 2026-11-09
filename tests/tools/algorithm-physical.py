@@ -312,8 +312,8 @@ def main() -> int:
     print(f"  Partition: {selected['path']}  Parent: {selected['parent']}")
     print(f"  PARTUUID: {selected['partuuid']}  Bytes: {selected['size_bytes']}")
     if selected.get("virtual_device_only"):
-        print("  VIRTUAL_DEVICE_ONLY: verified VM with separate USB swap device; "
-              "never physical qualification")
+        print("  VIRTUAL_DEVICE_ONLY: verified VM with an exact guest swap "
+              "partition; never physical qualification")
     active_swap = selected.get("active_swap")
     if active_swap is not None:
         print(f"  Swap status: ACTIVE; used={active_swap['used_kib']} KiB, "
@@ -358,7 +358,9 @@ def main() -> int:
         print("PHYSICAL_ALGORITHM_REAL_SWAP=BLOCKED reason=no_sudo")
         return 2
     command = [
-        sudo, "-n", "--", sys.executable, "-I", "-B",
+        # Consent is already explicit; permit sudo to authenticate on the
+        # controlling TTY rather than depending on a cached credential.
+        sudo, "--", sys.executable, "-I", "-B",
         str(ROOT / "tests/tools/physical-swap-probe.py"),
         "run", "--device", selected["selector"],
         "--confirm-device", selected["selector"],

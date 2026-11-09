@@ -7316,7 +7316,9 @@ password before scanning protected journals, rather than treating an expired
 sudo credential timestamp as an unsafe-device or missing-swap condition.
 The unprivileged caller must not impose a timeout or kill the root recovery
 worker, whose internal bounded operations and persistent ownership retain
-authority over header restoration.
+authority over header restoration. After the separate default-No device
+confirmation, the actual root trial may also request sudo authentication on
+the controlling TTY; it must not depend on a previously cached sudo timestamp.
 The development-only algorithm trial supports Linux x86_64 and aarch64 only
 when the kernel uses 4096-byte pages and the process has a 64-bit ABI. The
 privileged worker independently repeats that gate and still requires confirmed
