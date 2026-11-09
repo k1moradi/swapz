@@ -99,10 +99,6 @@ QUALIFICATION_STAGE_NAMES = (
     "Kernel warnings W=1", "Kernel warnings W=2",
     "Owned RAM smoke + mixed/QD pilot",
 )
-# Legacy pre-migration journal recognition only. New runs never create or
-# write this header; physical backing remains ordinary SWAPSPACE2.
-SWAPZ_HEADER_MAGIC = b"SWAPZ001"
-SWAPZ_HEADER_VERSION = 1
 BLKGETSIZE64 = 0x80081272  # Linux 64-bit x86_64/aarch64 _IOR(0x12, 114, size_t).
 RECOVERY_BASE = Path("/var/lib/swapz/physical-recovery")
 # New development/algorithm trials keep ownership state in tmpfs. If the
@@ -341,22 +337,6 @@ def _read_block0(device, target):
     finally:
         # A secondary close error must not hide the first identity/I/O fault.
         _close_fd_preserving_active_error(fd)
-
-
-def swapz_header_valid(header, size_bytes):
-    """Recognize only a legacy pre-migration SWZ recovery header.
-
-    This parser exists solely for historical interrupted journals. It never
-    authorizes a new raw-partition write or defines a current backing format.
-    """
-    return (
-        len(header) == PAGE_BYTES
-        and header[:8] == SWAPZ_HEADER_MAGIC
-        and struct.unpack_from("<IIQ", header, 8) ==
-        (SWAPZ_HEADER_VERSION, PAGE_BYTES, size_bytes)
-        and any(header[24:40])
-        and not any(header[40:])
-    )
 
 
 def _kernel_partition_table_uuid(device):
@@ -2865,114 +2845,6 @@ def _mapper_exists(state):
         raise ProbeError("owned mapper name or UUID was substituted")
     return True
 
-
-def _header_prefix_transition_matches(current_header, prefix_header,
-                                      suffix_header):
-    """Accept only one prefix/suffix boundary, including either endpoint."""
-    if any(len(value) != PAGE_BYTES for value in (
-            current_header, prefix_header, suffix_header)):
-        return False
-    last_suffix_difference = max((
-        offset for offset in range(PAGE_BYTES)
-        if current_header[offset] != suffix_header[offset]), default=-1)
-    first_prefix_difference = next((
-        offset for offset in range(PAGE_BYTES)
-        if current_header[offset] != prefix_header[offset]), PAGE_BYTES)
-    return last_suffix_difference < first_prefix_difference
-
-
-def _recovery_header_stage(state):
-    stage = state.get("stage")
-    if stage == "RECOVERY_REQUIRED":
-        return state.get("stage_before_recovery", stage)
-    return stage
-
-
-def _header_matches_recovery_stage(header, backup, state, size_bytes, stage):
-    if header == backup:
-        return True
-    if stage == "HEADER_CLEAR_PENDING" and _header_prefix_transition_matches(
-            header, bytes(PAGE_BYTES), backup):
-        return True
-    if header == bytes(PAGE_BYTES) and stage in {
-            "SWAP_OFF", "HEADER_CLEARED"}:
-        return True
-    digest = state.get("formatted_header_sha256")
-    return (
-        stage in {"SWZ_FORMATTED", "MODULE_PENDING", "MODULE_OWNED",
-                  "MAPPED", "ORACLE_PASS"}
-        and isinstance(digest, str)
-        and hashlib.sha256(header).hexdigest() == digest
-        and swapz_header_valid(header, size_bytes)
-    )
-
-
-
-
-def _virtual_development_header(size_bytes):
-    """Construct the formatter-compatible SWZ header for VM-only testing."""
-    if type(size_bytes) is not int or size_bytes <= 0:
-        raise ProbeError("virtual development header size is invalid")
-    header = bytearray(PAGE_BYTES)
-    header[:8] = SWAPZ_HEADER_MAGIC
-    struct.pack_into("<IIQ", header, 8,
-                     SWAPZ_HEADER_VERSION, PAGE_BYTES, size_bytes)
-    identifier = bytearray(secrets.token_bytes(16))
-    identifier[6] = (identifier[6] & 0x0f) | 0x40
-    identifier[8] = (identifier[8] & 0x3f) | 0x80
-    header[24:40] = identifier
-    built = bytes(header)
-    if not swapz_header_valid(built, size_bytes):
-        raise ProbeError("virtual development SWZ header construction failed")
-    return built
-
-def _saved_header_restore_source(state, backup, size_bytes):
-    source_stage = state.get("header_restore_source_stage")
-    source_hex = state.get("header_restore_source_hex")
-    source_sha256 = state.get("header_restore_source_sha256")
-    if (source_stage not in {
-            "SWAP_OFF", "HEADER_CLEAR_PENDING", "HEADER_CLEARED",
-            "SWZ_FORMATTED", "MODULE_PENDING", "MODULE_OWNED",
-            "MAPPED", "ORACLE_PASS"} or
-            not isinstance(source_hex, str) or
-            len(source_hex) != PAGE_BYTES * 2 or
-            re.fullmatch(r"[0-9a-f]+", source_hex) is None or
-            not isinstance(source_sha256, str) or
-            re.fullmatch(r"[0-9a-f]{64}", source_sha256) is None):
-        raise ProbeError(
-            "saved header restoration source is missing or malformed; "
-            "manual review required")
-    source = bytes.fromhex(source_hex)
-    if (source == backup or
-            hashlib.sha256(source).hexdigest() != source_sha256 or
-            not _header_matches_recovery_stage(
-                source, backup, state, size_bytes, source_stage)):
-        raise ProbeError(
-            "saved header restoration source is not an authenticated "
-            "pre-restoration state; manual review required")
-    return source
-
-
-def _validate_recovery_header(current_header, backup, state, size_bytes):
-    if len(current_header) != PAGE_BYTES or len(backup) != PAGE_BYTES:
-        raise ProbeError("recovery header must be exactly 4096 bytes")
-    # New SWAPSPACE2 runs must never repair or replace block zero. Historical
-    # interrupted pre-migration journals retain their separate recovery path.
-    if state.get("raw_header_preservation_required") is True and current_header != backup:
-        raise ProbeError(
-            "original SWAPSPACE2 header changed; raw header writes are forbidden "
-            "for this run; preserve journal and inspect read-only")
-    stage = _recovery_header_stage(state)
-    if stage == "HEADER_RESTORE_PENDING":
-        source = _saved_header_restore_source(state, backup, size_bytes)
-        if _header_prefix_transition_matches(
-                current_header, backup, source):
-            return
-    elif _header_matches_recovery_stage(
-            current_header, backup, state, size_bytes, stage):
-        return
-    raise ProbeError(
-        "partition header is not an expected recovery state; manual review required")
 
 RECOVERY_RECORD_BINDINGS = (
     ("run_id", "run_id"),
