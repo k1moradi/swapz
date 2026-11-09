@@ -6977,8 +6977,11 @@ cleanup must swap off the owned mapper, restore the exact original 4096-byte
 target header, verify every saved swapfile, and reactivate the original target
 at its original priority. A path/inode change, failed swapoff/swapon, missing
 headroom or any uncertain restoration retains recovery ownership and cannot
-PASS. Header-only development smoke remains inactive-only and never calls
-`swapoff` or `swapon`.
+PASS. Rootless recovery fixtures that synthesize a successful final cleanup
+observation must include every mandatory cleanup proof, including
+`unrelated_swapfiles_restored=true`; omitting a proof must remain fail-closed
+rather than being inferred from fixture setup. Header-only development smoke
+remains inactive-only and never calls `swapoff` or `swapon`.
 The formatter invocation must bind the opened partition major:minor, exact
 byte size, PARTUUID, physical-parent major:minor, parent model and USB
 transport. Resolve transport from the physical parent because `lsblk` may

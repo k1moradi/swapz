@@ -237,6 +237,8 @@ class PhysicalSwapProbeTests(unittest.TestCase):
         (state_dir / probe.BACKUP_NAME).write_bytes(header)
         # Other recovery tests intercept device and kernel operations. Provide
         # only a synthetic cleanup observation; production code is unmodified.
+        # Synthetic cleanup PASS fixtures must carry every proof required
+        # by _final_cleanup_evidence_error; omission is a fail-closed result.
         clean_observation = {
             "errors": [], "original_header_matches_final": True,
             "restored_swap_verified": True,
