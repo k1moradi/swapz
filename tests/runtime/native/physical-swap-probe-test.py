@@ -1879,6 +1879,30 @@ class PhysicalSwapProbeTests(unittest.TestCase):
                 probe.inspect_target_identity_for_recovery(
                     state, state["device_arg"], state["device_arg"])
 
+    def test_new_raw_header_preservation_claim_is_immutable(self):
+        # Historical journals lack the flag on both sides. Once a new run
+        # records it, later recovery snapshots may not remove or weaken it.
+        original = {field: "same" for field, _ in probe.RECOVERY_RECORD_BINDINGS}
+        self.assertTrue(probe._recovery_state_identity_matches(
+            original, dict(original)))
+        original["raw_header_preservation_required"] = True
+        self.assertTrue(probe._recovery_state_identity_matches(
+            original, dict(original)))
+        for altered in (False, None, "true"):
+            observed = dict(original)
+            observed["raw_header_preservation_required"] = altered
+            self.assertFalse(probe._recovery_state_identity_matches(
+                original, observed))
+        observed = dict(original)
+        del observed["raw_header_preservation_required"]
+        self.assertFalse(probe._recovery_state_identity_matches(
+            original, observed))
+        historical = dict(observed)
+        self.assertFalse(probe._recovery_state_identity_matches(
+            historical, original))
+        self.assertTrue(probe._recovery_state_identity_matches(
+            historical, dict(historical)))
+
     def test_recovery_accepts_only_its_recorded_header_transitions(self):
         size = 1024 * 1024 * 1024
         original = b"O" * probe.PAGE_BYTES

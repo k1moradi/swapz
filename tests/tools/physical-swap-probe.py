@@ -2953,11 +2953,19 @@ RECOVERY_RECORD_BINDINGS = (
 
 def _recovery_state_identity_matches(expected, observed):
     """Recovery stages may advance; their immutable ownership cannot change."""
-    if not isinstance(observed, dict) or not all(
+    if not isinstance(expected, dict) or not isinstance(observed, dict) or not all(
             field in expected and field in observed and
             type(expected[field]) is type(observed[field]) and
             expected[field] == observed[field]
             for field, _ in RECOVERY_RECORD_BINDINGS):
+        return False
+    # A new SWAPSPACE2 trial cannot downgrade its permanent no-header-write
+    # claim by deleting/changing the field in a later recovery state record.
+    # Two absent fields identify historical pre-migration journals only.
+    if ("raw_header_preservation_required" in expected or
+            "raw_header_preservation_required" in observed) and (
+            expected.get("raw_header_preservation_required") is not True or
+            observed.get("raw_header_preservation_required") is not True):
         return False
     if "unrelated_swapfiles" in expected or "unrelated_swapfiles" in observed:
         return expected.get("unrelated_swapfiles") == observed.get(

@@ -13,6 +13,10 @@ is possible. Treat older physical benchmark reports as historical; do not
 extrapolate null_blk figures to ordinary SWAPSPACE2 partition performance.
 A new physical campaign requires the completed RAM-metadata migration and
 matched current-source byte-exact readback/GC checks.
+New physical trials bind `raw_header_preservation_required=True` into
+immutable recovery-state comparisons: a later record removing or changing this
+claim is rejected. Older journals where both snapshots lack the claim remain
+historical recovery evidence, never authority to rewrite a current partition.
 
 ## Ordinary swap and RAM-metadata qualification boundary
 
