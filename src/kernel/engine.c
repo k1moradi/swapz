@@ -1357,9 +1357,9 @@ static int swapz_engine_write_window_planned(struct swapz_engine *engine,
 			/*
 			 * Full write completion does not guarantee the lower media
 			 * actually retained the intended bytes. Optional direct
-			 * readback verifies the exact COMPLETE extent, including
-			 * header, descriptors, padding and sibling payloads.
-			 * Failures abort/quarantine BEFORE any mapping publication.
+			 * readback verifies the exact COMPLETE payload-only extent,
+			 * including deterministic zero padding and sibling payloads.
+			 * Failures abort/quarantine BEFORE any RAM mapping publication.
 			 */
 			error = engine->io.read_blocks(
 				engine->io.opaque, tx->start_block,
@@ -1399,13 +1399,12 @@ abort_transaction:
 
 /*
  * Bounded lower request aggregation (up to 64 adjacent physical 4KiB
- * blocks), WITHOUT changing the independent on-disk SWZ extents.
+ * payload blocks) without changing independent 4/8/16KiB extent ownership.
  *
- * Stage each extent and leave its mapping UNPUBLISHED. Consecutive
- * transaction snapshots are replayed through the original swapz_finish()
- * only after the ONE combined lower I/O has completed successfully.
- * This preserves the original committed-prefix semantics on a failed
- * group, and prevents false acknowledgement of durable media.
+ * Stage each payload-only extent and leave its RAM mapping UNPUBLISHED.
+ * Consecutive transaction snapshots are replayed through swapz_finish() only
+ * after the ONE combined lower I/O has completed successfully. This preserves
+ * committed-prefix semantics on failure and prevents false acknowledgement.
  */
 static int swapz_bulk_abort(struct swapz_engine *e,
 				  const struct swapz_io_run *run,
