@@ -831,6 +831,10 @@ static int swapz_ram_extent_append_checked(struct swapz_ram_extent *builder,
 	    !swapz_encoding_valid(encoding) ||
 	    swapz_payload_overlaps_storage(builder->bytes, builder->bytes_total,
 					   payload, payload_length) ||
+	    /* The builder holds transient descriptor metadata and pointers.
+	     * Those RAM control bytes must never become lower payload data. */
+	    swapz_payload_overlaps_storage(builder, sizeof(*builder),
+					   payload, payload_length) ||
 	    (builder->records && swapz_payload_overlaps_storage(
 		builder->records,
 		(swapz_u32)builder->record_capacity * sizeof(*builder->records),

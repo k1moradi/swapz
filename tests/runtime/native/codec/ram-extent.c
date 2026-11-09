@@ -101,6 +101,11 @@ static int test_unique_mode_without_descriptor_array(void)
 	CHECK(swapz_ram_extent_begin_unique(
 		      &builder, image, SWAPZ_BLOCK_BYTES, 77, 2) == 0);
 	CHECK(builder.records == NULL && builder.logical_pages_unique);
+	/* Unique mode must not serialize transient RAM control metadata. */
+	CHECK(swapz_ram_extent_append(&builder, 30, 3, &builder.last_record,
+				     sizeof(builder.last_record),
+				     SWAPZ_ENCODING_LZ4) == -EINVAL);
+	CHECK(builder.count == 0 && image[0] == 0xa9);
 	CHECK(swapz_ram_extent_append_prehashed(
 		      &builder, 31, 4, payload, 513, crc,
 		      SWAPZ_ENCODING_DELTA64) == 0);
@@ -147,6 +152,10 @@ static int test_full_and_reject(void)
 		      1) == -EINVAL);
 	CHECK(swapz_ram_extent_begin(&builder, image, SWAPZ_BLOCK_BYTES,
 				     1, records, 1) == 0);
+	/* Generic mode cannot reinterpret the builder itself as payload. */
+	CHECK(swapz_ram_extent_append(&builder, 0, 1, &builder,
+				     sizeof(builder), SWAPZ_ENCODING_LZ4) == -EINVAL);
+	CHECK(builder.count == 0);
 	CHECK(swapz_ram_extent_seal(&builder) == -EINVAL);
 	CHECK(swapz_ram_extent_append(&builder, 0, 1, records,
 				     4, SWAPZ_ENCODING_LZ4) == -EINVAL);
