@@ -190,6 +190,78 @@ static int test_data_only_payload_publishes_from_bound_ram_metadata(void)
 	return 0;
 }
 
+/*
+ * The volatile compressed descriptor is necessary but not sufficient to
+ * publish a new mapping. A short/torn lower WRITE and a mismatching payload
+ * CRC must both quarantine their new extent without modifying an earlier
+ * acknowledged generation. Use the production finish() transaction gate.
+ */
+static int test_data_only_failed_replacement_keeps_old_generation(void)
+{
+	const swapz_u32 pages[] = { 18 };
+	struct swapz_decoded ram_records[1];
+	struct swapz_ram_extent builder;
+	struct swapz_tx transaction;
+	struct swapz_map previous;
+	swapz_u32 previous_start;
+	unsigned int attempt;
+
+	CHECK(init() == 0);
+	for (attempt = 0; attempt < 4U; ++attempt) {
+		memset(ram_records, 0, sizeof(ram_records));
+		memset(compressed, (int)(0x41U + attempt), sizeof(compressed));
+		CHECK(swapz_stage(&a, pages, 1, 1, &transaction) == 0);
+		CHECK(swapz_ram_extent_begin(
+			&builder, bytes, SWAPZ_BLOCK_BYTES,
+			transaction.sequence, ram_records, 1) == 0);
+		CHECK(swapz_ram_extent_append(
+			&builder, pages[0], transaction.records[0].generation,
+			compressed, sizeof(compressed), SWAPZ_ENCODING_LZ4) == 0);
+		CHECK(swapz_bind_compressed_record(
+			&a, &transaction, 0, ram_records[0].payload_offset,
+			ram_records[0].payload_length,
+			ram_records[0].payload_crc32c,
+			ram_records[0].encoding) == 0);
+		CHECK(swapz_ram_extent_seal(&builder) == 0);
+		CHECK(swapz_mark_compressed_data_only(&a, &transaction) == 0);
+		if (attempt == 1U) {
+			/* Failed lower completion must NOT publish even if the
+			 * staging buffer still contains correct payload bytes. */
+			CHECK(swapz_finish(&a, &transaction, bytes,
+					   SWAPZ_BLOCK_BYTES, 0, -EIO) == -EIO);
+		} else if (attempt == 2U) {
+			/* Confirmed complete bytes with a bad CRC are likewise
+			 * forbidden to replace the prior authoritative record. */
+			bytes[ram_records[0].payload_offset] ^= 1U;
+			CHECK(swapz_finish(&a, &transaction, bytes,
+					   SWAPZ_BLOCK_BYTES, 1, 0) == -EBADMSG);
+		} else {
+			CHECK(swapz_finish(&a, &transaction, bytes,
+					   SWAPZ_BLOCK_BYTES, 1, 0) == 0);
+		}
+		CHECK(!a.in_flight);
+		if (attempt == 0U) {
+			previous = maps[pages[0]];
+			previous_start = previous.start_block;
+			CHECK(previous.valid && previous.generation == 1U);
+			CHECK(live[previous_start] == 1U);
+		} else if (attempt < 3U) {
+			CHECK(memcmp(&maps[pages[0]], &previous,
+				     sizeof(previous)) == 0);
+			CHECK(live[previous_start] == 1U);
+			CHECK(!live[transaction.start_block]);
+		} else {
+			CHECK(maps[pages[0]].valid &&
+			      maps[pages[0]].generation == 2U &&
+			      maps[pages[0]].start_block != previous_start);
+			CHECK(live[previous_start] == 0U);
+			CHECK(live[maps[pages[0]].start_block] == 1U);
+		}
+	}
+	CHECK(a.abandoned_blocks == 2U);
+	return 0;
+}
+
 static int test_last_sibling_mutation_is_all_or_nothing(void)
 {
 	const swapz_u32 pages[] = {0, 1, 2};
@@ -1015,6 +1087,7 @@ int main(void)
 	CHECK(test_generation_identity_mutation() == 0); passed++;
 	CHECK(test_bound_compressed_metadata_is_transaction_identity() == 0); passed++;
 	CHECK(test_data_only_payload_publishes_from_bound_ram_metadata() == 0); passed++;
+	CHECK(test_data_only_failed_replacement_keeps_old_generation() == 0); passed++;
 	CHECK(test_last_sibling_mutation_is_all_or_nothing() == 0); passed++;
 	CHECK(test_duplicate_media_descriptor_fails_closed() == 0); passed++;
 	CHECK(test_mutated_replacement_preserves_prior_authority() == 0); passed++;
