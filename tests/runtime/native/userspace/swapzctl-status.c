@@ -214,6 +214,34 @@ static void assert_status_problem(const char *status, int expected_result,
 	assert(problem.observed && strstr(problem.observed, condition));
 }
 
+static void test_unsigned_decimal_parser_bounds(void)
+{
+	const char *parsed_end = NULL;
+	unsigned long long value = 42ULL;
+
+	assert(parse_unsigned_decimal("0", 0ULL, &parsed_end, &value) == 0);
+	assert(value == 0ULL && *parsed_end == '\0');
+	assert(parse_unsigned_decimal("18446744073709551615", ULLONG_MAX,
+				      &parsed_end, &value) == 0);
+	assert(value == ULLONG_MAX && *parsed_end == '\0');
+	assert(parse_unsigned_decimal("18446744073709551616", ULLONG_MAX,
+				      &parsed_end, &value) < 0);
+	assert(value == ULLONG_MAX);
+	assert(parse_unsigned_decimal("4294967295", UINT_MAX,
+				      &parsed_end, &value) == 0);
+	assert(value == UINT_MAX && *parsed_end == '\0');
+	assert(parse_unsigned_decimal("4294967296", UINT_MAX,
+				      &parsed_end, &value) < 0);
+	assert(parse_unsigned_decimal("1", 0ULL, &parsed_end, &value) < 0);
+	assert(parse_unsigned_decimal("00", 1ULL, &parsed_end, &value) < 0);
+	assert(parse_unsigned_decimal("01", 1ULL, &parsed_end, &value) < 0);
+	assert(parse_unsigned_decimal("+1", 1ULL, &parsed_end, &value) < 0);
+	assert(parse_unsigned_decimal("-1", 1ULL, &parsed_end, &value) < 0);
+	assert(parse_unsigned_decimal("", 1ULL, &parsed_end, &value) < 0);
+	assert(parse_unsigned_decimal("12x", 12ULL, &parsed_end, &value) == 0);
+	assert(value == 12ULL && *parsed_end == 'x');
+}
+
 static void test_required_tokens_duplicates_and_canonical_numbers(void)
 {
 	const char *reordered =
@@ -2070,6 +2098,7 @@ int main(void)
 	test_missing_or_overflowing_fields_fail();
 	test_failed_target_refuses_ratio();
 	test_ratio_snapshot_equality_covers_all_inputs();
+	test_unsigned_decimal_parser_bounds();
 	test_required_tokens_duplicates_and_canonical_numbers();
 	test_checked_counter_arithmetic();
 	test_dm_wire_alignment_is_host_independent();

@@ -214,6 +214,33 @@ static int status_find_value(const char *status, const char *key,
 	return found;
 }
 
+/*
+ * Parse a canonical unsigned decimal prefix without locale, allocations or
+ * overflow. Leave outputs unchanged on failure; callers verify the token end.
+ */
+static int parse_unsigned_decimal(const char *text, unsigned long long limit,
+				  const char **parsed_end, unsigned long long *value)
+{
+	const char *cursor;
+	unsigned long long number = 0;
+
+	if (!text || !parsed_end || !value || *text < '0' || *text > '9')
+		return -1;
+	if (text[0] == '0' && text[1] >= '0' && text[1] <= '9')
+		return -1;
+	for (cursor = text; *cursor >= '0' && *cursor <= '9'; ++cursor) {
+		const unsigned int digit = (unsigned int)(*cursor - '0');
+
+		if (number > limit / 10ULL ||
+		    (number == limit / 10ULL && digit > limit % 10ULL))
+			return -1;
+		number = number * 10ULL + digit;
+	}
+	*parsed_end = cursor;
+	*value = number;
+	return 0;
+}
+
 static int parse_status_unsigned(const char *status, const char *key,
 				 unsigned long long limit,
 				 unsigned long long *value,
