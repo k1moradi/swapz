@@ -45,7 +45,17 @@ def main() -> None:
     require(physical_gate < target.index("if (is_nullb) {", physical_gate),
             "Synthetic null_blk must remain separate from physical interlock")
 
-    print("PASS: in-band codec cannot admit real physical backing (source contract)")
+    # DM property consumers must see the allocated lower data range, not
+    # the reserved SWAPSPACE2 header or discarded segment-alignment tail.
+    iterator = target.split("static int swapz_iterate_devices(", 1)[1].split(
+        "\nstatic void swapz_io_hints(", 1)[0]
+    require("(sector_t)ctx->data_start_block * SWAPZ_SECTORS" in iterator and
+            "(sector_t)ctx->physical_blocks * SWAPZ_SECTORS" in iterator,
+            "iterate_devices must report data-start and data-length separately")
+    require("(ctx->data_start_block + ctx->physical_blocks)" not in iterator,
+            "iterate_devices must exclude the protected swap header")
+
+    print("PASS: physical metadata lockout and lower data range (source contract)")
 
 
 if __name__ == "__main__":

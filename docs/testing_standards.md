@@ -19,6 +19,9 @@ DISCARD and concurrency, partial/failing I/O, memory capacity and no stale
 mapping after target recreation. Exercise exclusive swapoff and return to
 ordinary swapon without reboot; after success ask owner keep/restore.
 Existing raw-header preservation alone is insufficient for production PASS.
+A source contract must also verify Device Mapper iterate_devices describes
+only the allocated lower data region, excluding the protected first page and
+unused tail for physical backing while retaining zero-based null_blk.
 The source-only interlock check in
 `tests/runtime/native/ram-metadata-admission-test.py` runs under native
 `test-codec` and runs in the ordinary `make fast_test` build step (including

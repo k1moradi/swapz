@@ -15,6 +15,10 @@ Never repartition, run mkswap on, or rewrite its header, UUID or partition
 table. After a safe swapoff and exact-exclusive admission, only the data
 area after the protected 4096-byte first page may be used. The newly
 created virtual Device Mapper mapper alone may receive mkswap.
+Device Mapper iterate_devices must describe only the allocated lower data
+range: start at the reserved-page offset and report exactly the aligned
+physical-block count, excluding the header and unused device tail. A
+header-free null_blk still starts at zero.
 Switch between ordinary swap and swapz with verified swapoff/swapon,
 without reboot. After a successful trial, obtain the owner's choice:
 keep swapz active or return to ordinary Linux swap.

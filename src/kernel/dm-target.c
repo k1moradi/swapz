@@ -9433,9 +9433,13 @@ static int swapz_iterate_devices(struct dm_target *ti,
 {
 	struct swapz_dm *ctx = ti->private;
 
-	return fn(ti, ctx->backing, 0,
-		  (sector_t)(ctx->data_start_block + ctx->physical_blocks) *
-			  SWAPZ_SECTORS, data);
+	/* Report the allocated lower data region, never the protected backing
+	 * swap header or the unallocated segment tail. Null_blk without a
+	 * reserved header continues to report a zero-based range.
+	 */
+	return fn(ti, ctx->backing,
+		  (sector_t)ctx->data_start_block * SWAPZ_SECTORS,
+		  (sector_t)ctx->physical_blocks * SWAPZ_SECTORS, data);
 }
 
 static void swapz_io_hints(struct dm_target *ti, struct queue_limits *limits)
