@@ -10310,6 +10310,13 @@ def refresh_history(host_identity):
             cwd=ROOT, env=env, capture_output=True, text=True,
             timeout=HISTORY_REFRESH_TIMEOUT_S)
         log.write_text(proc.stdout + proc.stderr)
+        if (proc.returncode == 1 and not proc.stdout and
+                proc.stderr.strip() ==
+                "No proven PASS history for the selected host profile"):
+            # No eligible report is a normal history selection outcome, not
+            # a plotting dependency or benchmark execution failure.
+            return ("NOT UPDATED: no proven overall PASS history for this "
+                    "computer (host identity and qualification required)")
         if proc.returncode:
             return f"NOT UPDATED: history helper failed; see {log.relative_to(ROOT)}"
         summary = json.loads(proc.stdout)

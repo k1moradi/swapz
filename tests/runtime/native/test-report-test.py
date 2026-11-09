@@ -2648,6 +2648,14 @@ class ReportContract(unittest.TestCase):
                 self.assertTrue(runner.refresh_history(identity).startswith("NOT UPDATED:"))
                 log = root / "build/history" / ("x86_64-" + "a" * 64) / "refresh.log"
                 self.assertIn("matplotlib unavailable", log.read_text())
+                helper.write_text(
+                    "raise SystemExit('No proven PASS history for the selected host profile')\n")
+                self.assertEqual(
+                    runner.refresh_history(identity),
+                    "NOT UPDATED: no proven overall PASS history for this "
+                    "computer (host identity and qualification required)")
+                self.assertIn("No proven PASS history for the selected host profile",
+                              log.read_text())
                 helper.write_text("print('invalid summary')\n")
                 self.assertTrue(runner.refresh_history(identity).startswith("NOT UPDATED:"))
                 marker.unlink()

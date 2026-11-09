@@ -4085,7 +4085,11 @@ Require overall PASS, default async preparation and a recorded delta64 state
 for mixed points, and matching source/fixture/trace between each pair. Delta64
 off and on are separate series: the production default became rescue-on, so the
 line breaks there instead of joining LZ4-only history. Exclude
-failed/blocked reports and other or unproven hosts. Never pool optional delta64
+failed/blocked reports and other or unproven hosts. If no proven overall
+PASS report matches the selected computer, history generation stays NOT UPDATED
+with an explicit absence-of-evidence notice, not a generic plotting failure.
+RAM stage PASS with overall INCOMPLETE never becomes qualified PASS history.
+Never pool optional delta64
 positive write-only envelopes with ordinary mixed service, or historical wave
 drivers with persistent WRITE. Missing targets/metrics are absent, never zero.
 Kernel/model/content/replay discontinuities break lines.
