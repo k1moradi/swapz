@@ -7432,8 +7432,14 @@ boundary, persistent PARTUUID checks, root/mount/holder checks, descriptor-
 and-geometry-bound formatting, exact SWZ header validation, post-swapoff
 inactivity verification, exact helper-owned mapper UUID/table/16 MiB geometry
 and lower major:minor, oracle verification of its independently opened DM UUID,
-conservative module ownership, and no force-removal. Unknown or torn headers
-require manual recovery. Never activate the SWZ mapper as system swap.
+conservative module ownership, and no force-removal. A missing udev-backed
+lsblk PARTUUID after swap-header replacement may be resolved only from the
+selected major:minor's bounded kernel partition sysfs uevent. The kernel
+record must bind that exact major:minor and partition type, pass the normal
+PARTUUID grammar, and still match the by-partuuid block alias. A conflicting
+non-empty lsblk value, malformed kernel record or missing alias is not a
+license to assume identity. Unknown or torn headers require manual recovery.
+Never activate the SWZ mapper as system swap.
 
 #### Bounded positive physical correctness suite
 

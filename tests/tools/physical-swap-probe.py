@@ -342,6 +342,40 @@ def swapz_header_valid(header, size_bytes):
     )
 
 
+def _kernel_partition_table_uuid(device):
+    """Read the kernel partition identity when udev omits PARTUUID."""
+    major, minor = block_identity(device)
+    descriptor = None
+    try:
+        descriptor = os.open(
+            f"/sys/dev/block/{major}:{minor}/uevent",
+            os.O_RDONLY | os.O_CLOEXEC | os.O_NOFOLLOW | os.O_NONBLOCK)
+        if not stat.S_ISREG(os.fstat(descriptor).st_mode):
+            raise ProbeError("kernel partition identity is not a sysfs file")
+        content = os.read(descriptor, 4097)
+        if len(content) > 4096:
+            raise ProbeError("kernel partition identity exceeds the fixed bound")
+        fields = {}
+        for line in content.decode("ascii").splitlines():
+            key, separator, value = line.partition("=")
+            if not separator or not key or key in fields:
+                raise ProbeError("kernel partition identity is malformed")
+            fields[key] = value
+        if (fields.get("MAJOR") != str(major) or
+                fields.get("MINOR") != str(minor) or
+                fields.get("DEVTYPE") != "partition" or
+                not fields.get("PARTN", "").isdigit() or
+                int(fields["PARTN"]) <= 0):
+            raise ProbeError(
+                "kernel partition identity does not bind the selected device")
+        return fields.get("PARTUUID")
+    except (OSError, UnicodeError, ValueError) as exc:
+        raise ProbeError("kernel partition identity cannot be read") from exc
+    finally:
+        if descriptor is not None:
+            _close_fd_preserving_active_error(descriptor)
+
+
 def _partition_identity(device):
     try:
         result = json.loads(_run([
@@ -353,6 +387,12 @@ def _partition_identity(device):
             raise ProbeError("cannot identify exactly one partition")
         row = rows[0]
         partuuid = row.get("partuuid")
+        # lsblk can lose the udev-backed PARTUUID while the swap/SWZ
+        # signature changes. For a missing field only, use the kernel
+        # partition-table identity, still requiring the exact by-partuuid
+        # block alias below. Never override an explicit lsblk value.
+        if partuuid is None or partuuid == "":
+            partuuid = _kernel_partition_table_uuid(device)
         normalized_partuuid = (
             partuuid.lower() if isinstance(partuuid, str) else None)
         if (

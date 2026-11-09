@@ -1729,6 +1729,61 @@ class PhysicalSwapProbeTests(unittest.TestCase):
                 probe._partition_identity("/dev/test-partition"),
                 ("deadbeef-01", size_bytes))
 
+    def test_partition_identity_kernel_fallback_requires_matching_device(self):
+        """The kernel PARTUUID survives a changed swap header and udev gap."""
+        size_bytes = 1024 * 1024 * 1024
+
+        def lsblk(partuuid):
+            return subprocess.CompletedProcess(
+                [], 0, stdout=json.dumps({"blockdevices": [{
+                    "type": "part", "partuuid": partuuid,
+                    "size": size_bytes}]}), stderr="")
+
+        with tempfile.TemporaryDirectory() as directory:
+            partition_dir = Path(directory) / "8:1"
+            partition_dir.mkdir()
+            uevent = partition_dir / "uevent"
+            good = ("MAJOR=8\nMINOR=1\nDEVNAME=sda1\n"
+                    "DEVTYPE=partition\nPARTN=1\nPARTUUID=DEADBEEF-01\n")
+            real_os_open = os.open
+
+            def redirect_kernel_uevent(path, flags, *args, **kwargs):
+                if str(path) == "/sys/dev/block/8:1/uevent":
+                    path = str(uevent)
+                return real_os_open(path, flags, *args, **kwargs)
+
+            with mock.patch.object(probe, "block_identity",
+                                   return_value=(8, 1)), \
+                 mock.patch.object(probe.os, "open",
+                                   side_effect=redirect_kernel_uevent):
+                uevent.write_text(good, encoding="ascii")
+                for missing in (None, ""):
+                    with self.subTest(missing=missing), \
+                         mock.patch.object(probe, "_run",
+                                           return_value=lsblk(missing)):
+                        self.assertEqual(
+                            probe._partition_identity("/dev/test-partition"),
+                            ("deadbeef-01", size_bytes))
+
+                # Do not silently replace an explicit malformed udev value.
+                with mock.patch.object(probe, "_run",
+                                       return_value=lsblk("invalid::uuid")):
+                    with self.assertRaisesRegex(
+                            probe.ProbeError, "stable PARTUUID"):
+                        probe._partition_identity("/dev/test-partition")
+
+                for malformed in (
+                        good.replace("MAJOR=8", "MAJOR=9"),
+                        good.replace("DEVTYPE=partition", "DEVTYPE=disk"),
+                        good.replace("PARTUUID=DEADBEEF-01\n", ""),
+                        good + "MAJOR=8\n"):
+                    uevent.write_text(malformed, encoding="ascii")
+                    with self.subTest(uevent=malformed), \
+                         mock.patch.object(probe, "_run",
+                                           return_value=lsblk(None)):
+                        with self.assertRaises(probe.ProbeError):
+                            probe._partition_identity("/dev/test-partition")
+
     def test_recovery_survives_removed_original_swap_uuid_symlink(self):
         """Formatting invalidates /dev/disk/by-uuid, not the saved PARTUUID."""
         state = {
