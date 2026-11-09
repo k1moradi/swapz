@@ -3670,6 +3670,38 @@ def _run_algorithm_live_swap_oracle(mapper, state, target, state_dir):
                 worker.stdout.close()
 
 
+def _operator_keep_swapz_active_after_pass():
+    """Ask only after a successful real-swap oracle; default is safe teardown."""
+    try:
+        choice = input(
+            "swapz tests passed. Keep swapz active instead of restoring "
+            "ordinary swap? [y/N] ")
+    except EOFError:
+        return False
+    return choice.strip().lower() in {"y", "yes"}
+
+
+def _verify_kept_swapz_active(state, target, mapper):
+    """Verify the exact successful development mapper before leaving it active."""
+    _verify_target_identity(target)
+    if _read_block0(target["device"], target) != target["header"]:
+        raise ProbeError("ordinary SWAPSPACE2 header changed before keep-active")
+    if _active_swap_for(target["major"], target["minor"]) is not None:
+        raise ProbeError("raw swap partition became active while swapz mapper is kept")
+    if _verify_owned_mapper(state, target) != mapper:
+        raise ProbeError("owned swapz mapper changed before keep-active")
+    mapper_device = block_identity(mapper)
+    active = _active_swap_for(*mapper_device)
+    if active is None:
+        raise ProbeError("owned swapz mapper is not active swap after successful test")
+    if active["priority"] != 32767:
+        raise ProbeError("owned swapz mapper priority changed before keep-active")
+    if (state.get("module_ownership") != "MODULE_OWNED" or
+            not Path("/sys/module/dm_swapz").is_dir()):
+        raise ProbeError("owned dm_swapz module is unavailable before keep-active")
+    return active
+
+
 def _remove_test_objects(state, state_dir):
     return recover(state_dir, state["device_arg"], state["device_arg"],
                    lock_held=True, module_owned_by_process=True)
@@ -4212,11 +4244,36 @@ def run_probe(device_arg, confirm_arg, state_dir_arg, review_path,
                 _save_results(state_dir, results)
             state["stage"] = "ORACLE_PASS"
             _save_state(state_dir, state)
-            # Worker success remains provisional until recovery and durable
-            # evidence are independently verified.
+            # Worker success remains provisional until either verified normal
+            # teardown or an explicit post-PASS operator choice keeps the exact
+            # owned mapper active. Failure paths never offer this choice.
             results["oracle_suite"] = "PHASES_PASS_RECOVERY_PENDING"
             results["final_recovery_state"] = "ORACLE_PASS"
             _save_results(state_dir, results)
+            if development_only and algorithm_real_swap and                     _operator_keep_swapz_active_after_pass():
+                active_mapper_swap = _verify_kept_swapz_active(
+                    state, target, mapper)
+                results["oracle_suite"] = "PASS_ACTIVE_KEPT"
+                results["operator_choice"] = "KEEP_SWAPZ_ACTIVE"
+                results["kept_swapz_active"] = True
+                results["original_header_matches_final"] = True
+                results["mapper_swap_priority"] = active_mapper_swap["priority"]
+                results["end_timestamp"] = _utc_timestamp()
+                _save_results(state_dir, results)
+                print("PHYSICAL_ALGORITHM_REAL_SWAP=PASS")
+                if virtual_device_only:
+                    print("VIRTUAL_DEVICE_ONLY=PASS not_physical_qualification")
+                print("PHYSICAL_DEVELOPMENT_SMOKE=PASS")
+                print("EVIDENCE_CLASS=DEVELOPMENT_ONLY_NOT_PHYSICAL_QUALIFICATION")
+                print(
+                    "PHYSICAL_SWAPZ_STATE=ACTIVE "
+                    "original-swap-header=unchanged "
+                    "next_trial_preflight=restores-owned-session")
+                print(f"PHYSICAL_RESULTS={state_dir / RESULTS_NAME}")
+                return
+            if development_only and algorithm_real_swap:
+                results["operator_choice"] = "RESTORE_ORDINARY_SWAP"
+                _save_results(state_dir, results)
         except BaseException as exc:
             failure = exc
             execution_failure = destructive_execution_started
