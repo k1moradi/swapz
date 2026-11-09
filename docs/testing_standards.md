@@ -91,7 +91,8 @@ kills/reaps a worker on its 900-second individual timeout. A worker that exits
 zero while a descendant remains in its process group is instead marked failed
 (status 125) and the group is terminated; timeout and signal cleanup also
 escalate after the leader exits, so descendants ignoring SIGTERM cannot remain
-running. The Bash parent
+running. The private worker status includes a separate cleanup flag, so an
+ordinary worker exit 125 retains its original failure classification. The Bash parent
 alone replays output and emits source-ordered progress rows, using actual
 per-worker elapsed times; it keeps only a bounded private failure diagnostic
 and cleans up completed scratch.

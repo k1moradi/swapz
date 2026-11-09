@@ -126,9 +126,10 @@ def execute_group(directory, tasks, *, jobs, timeout_seconds=MAX_WORKER_SECONDS,
     next_index = 0
     failed = False
 
-    def record(index, exit_code, elapsed_seconds):
+    def record(index, exit_code, elapsed_seconds, *, cleanup_failure=False):
         with _private_file(directory, f"worker-{index}.result") as output:
-            output.write(f"{exit_code} {elapsed_seconds}\n".encode("ascii"))
+            output.write(
+                f"{exit_code} {elapsed_seconds} {int(cleanup_failure)}\n".encode("ascii"))
 
     try:
         while next_index < len(tasks) or active:
@@ -169,18 +170,21 @@ def execute_group(directory, tasks, *, jobs, timeout_seconds=MAX_WORKER_SECONDS,
                 if exit_code is None:
                     continue
                 process.wait()
+                cleanup_failure = False
                 if not timed_out and _owned_worker_group_exists(process):
                     # A zero-exit worker must not advertise PASS while its
                     # process-group descendants still own live resources.
                     _stop_owned_worker(process)
                     if exit_code == 0:
                         exit_code = 125
+                        cleanup_failure = True
                 if exit_code < 0:
                     exit_code = 128 - exit_code
                 # The Bash parent and its error reporter accept only small
                 # nonnegative decimal statuses and integer timing records.
                 exit_code = min(exit_code, 255)
-                record(index, exit_code, max(0, int(elapsed_seconds)))
+                record(index, exit_code, max(0, int(elapsed_seconds)),
+                       cleanup_failure=cleanup_failure)
                 if exit_code:
                     failed = True
                 del active[index]

@@ -681,23 +681,25 @@ rootless_parallel_run_group() {
 rootless_parallel_collect() {
   local worker_index=$1
   local result_path="$rootless_parallel_directory/worker-$worker_index.result"
-  local worker_status worker_seconds
+  local worker_status worker_seconds worker_cleanup
   [[ -d $rootless_parallel_directory &&
      ! -L $rootless_parallel_directory &&
      -f $result_path && ! -L $result_path ]] || {
     rootless_parallel_cleanup || :
     report_rootless_failure 2 "$LINENO" parallel_worker_status
   }
-  read -r worker_status worker_seconds < "$result_path" || {
+  read -r worker_status worker_seconds worker_cleanup < "$result_path" || {
     rootless_parallel_cleanup || :
     report_rootless_failure 2 "$LINENO" parallel_worker_status
   }
   [[ $worker_status =~ ^(0|[1-9][0-9]{0,2})$ &&
-     $worker_seconds =~ ^(0|[1-9][0-9]{0,7})$ ]] || {
+     $worker_seconds =~ ^(0|[1-9][0-9]{0,7})$ &&
+     $worker_cleanup =~ ^[01]$ ]] || {
     rootless_parallel_cleanup || :
     report_rootless_failure 2 "$LINENO" parallel_worker_status
   }
-  (( worker_status <= 255 )) || {
+  (( worker_status <= 255 &&
+     (worker_cleanup == 0 || worker_status == 125) )) || {
     rootless_parallel_cleanup || :
     report_rootless_failure 2 "$LINENO" parallel_worker_status
   }
@@ -727,7 +729,7 @@ rootless_parallel_collect() {
       fi
     fi
     rootless_parallel_cleanup || :
-    if (( worker_status == 125 )); then
+    if (( worker_cleanup == 1 )); then
       report_rootless_failure "$worker_status" "$LINENO" parallel_worker_cleanup
     fi
     report_rootless_failure "$worker_status" "$LINENO" nonzero_exit

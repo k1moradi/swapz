@@ -260,9 +260,9 @@ class RootlessParallelPilotContract(unittest.TestCase):
             directory = Path(name)
             marker = directory / "descendant-ready"
             descendant_source = (
-                "import pathlib,signal,sys,time; "
+                "import os,pathlib,signal,sys,time; "
                 "signal.signal(signal.SIGTERM, lambda *_: sys.exit(0)); "
-                "pathlib.Path(sys.argv[1]).write_text('ready'); "
+                "pathlib.Path(sys.argv[1]).write_text(str(os.getpgrp())); "
                 "time.sleep(30)")
             worker_source = (
                 "import pathlib,subprocess,sys,time; "
@@ -278,13 +278,40 @@ class RootlessParallelPilotContract(unittest.TestCase):
                                     worker_source, str(marker), descendant_source)),
                 ("ordinary-worker", (sys.executable, "-B", "-c", "pass")),
             )
+            try:
+                self.assertEqual(parallel_runner.execute_group(
+                    directory, tasks, jobs=2, timeout_seconds=8,
+                    poll_seconds=0.01), 1)
+                self.assertEqual(
+                    (directory / "worker-0.result").read_text().split()[0], "125")
+                self.assertEqual(
+                    (directory / "worker-0.result").read_text().split()[2], "1")
+                self.assertEqual(
+                    (directory / "worker-1.result").read_text().split()[0], "0")
+            finally:
+                # Even an old/defective runner must not strand this fixture's
+                # deliberately orphaned process-group descendant.
+                if marker.is_file():
+                    try:
+                        os.killpg(int(marker.read_text()), signal.SIGKILL)
+                    except ProcessLookupError:
+                        pass
+
+    def test_real_worker_exit_125_keeps_original_failure(self):
+        with tempfile.TemporaryDirectory(prefix="swapz-parallel-exit-") as name:
+            directory = Path(name)
+            tasks = (
+                ("exit-125", (sys.executable, "-B", "-c",
+                              "import sys; sys.exit(125)")),
+                ("normal", (sys.executable, "-B", "-c", "pass")),
+            )
             self.assertEqual(parallel_runner.execute_group(
-                directory, tasks, jobs=2, timeout_seconds=8,
+                directory, tasks, jobs=2, timeout_seconds=5,
                 poll_seconds=0.01), 1)
             self.assertEqual(
                 (directory / "worker-0.result").read_text().split()[0], "125")
             self.assertEqual(
-                (directory / "worker-1.result").read_text().split()[0], "0")
+                (directory / "worker-0.result").read_text().split()[2], "0")
 
     def test_stop_escalates_when_leader_exits_before_descendant(self):
         with tempfile.TemporaryDirectory(prefix="swapz-parallel-group-") as name:
