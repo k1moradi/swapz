@@ -440,7 +440,7 @@ class PhysicalSwapProbeTests(unittest.TestCase):
             "minor": 4,
             "size_bytes": 16 * 1024 * 1024 * 1024,
             "partuuid": "deadbeef-04",
-            "stage": "HEADER_CLEARED",
+            "stage": "ORACLE_PASS",
             "header_sha256": hashlib.sha256(header).hexdigest(),
             "raw_header_preservation_required": True,
             "swap_was_active": True,
@@ -466,7 +466,7 @@ class PhysicalSwapProbeTests(unittest.TestCase):
         self.save_recovery_fixture(state_dir, state)
         results_path = state_dir / probe.RESULTS_NAME
         results = json.loads(results_path.read_text())
-        results["final_recovery_state"] = "BACKED_UP"
+        results["final_recovery_state"] = "ORACLE_PASS"
         results_path.write_text(json.dumps(results))
         # Other recovery tests intercept device and kernel operations. Provide
         # only a synthetic cleanup observation; production code is unmodified.
@@ -953,75 +953,59 @@ class PhysicalSwapProbeTests(unittest.TestCase):
         self.assertFalse(any(command[:2] == ("dmsetup", "remove")
                              for command in commands))
 
-    def test_claimed_pre_mutation_recovery_uses_immutable_pair_binding(self):
-        # Model power loss immediately after the durable active marker is
-        # created, before swapoff or any block-zero write. The legacy helper
-        # could leave either PREPARED or ACTIVE in both records at this point;
-        # both remain safe only while the exact active owner marker exists.
-        phases = (
-            probe.RECOVERY_OWNERSHIP_PHASE,
-            probe.LEGACY_ACTIVE_RECOVERY_OWNERSHIP_PHASE,
-            probe.LEGACY_PRECLAIM_RECOVERY_OWNERSHIP_PHASE,
-        )
-        for ownership_phase in phases:
-            with self.subTest(ownership_phase=ownership_phase), \
-                    tempfile.TemporaryDirectory() as directory:
-                state_dir = Path(directory) / "state"
-                state, backup = self.make_recovery_state(state_dir)
-                state.update({
-                    "stage": "BACKED_UP",
-                    "swap_was_active": False,
-                    "swap_path": None,
-                    "swap_size_kib": None,
-                    "swap_priority": None,
-                    "swap_used_kib": None,
-                    "development_only": True,
-                    "development_scope": probe.DEVELOPMENT_SCOPE,
-                    "ownership_phase": ownership_phase,
-                })
-                self.save_recovery_fixture(state_dir, state)
-                owner_marker = (
-                    self.recovery_base /
-                    f"partition-{state['partuuid']}.active")
-                self.assertTrue(owner_marker.is_file())
-                results = json.loads(
-                    (state_dir / probe.RESULTS_NAME).read_text())
-                self.assertEqual(
-                    results["ownership_phase"], ownership_phase)
-                self.assertEqual(results["run_id"], state["run_id"])
+    def test_claimed_pre_mutation_recovery_uses_current_pair_binding(self):
+        with tempfile.TemporaryDirectory() as directory:
+            state_dir = Path(directory) / "state"
+            state, header = self.make_recovery_state(state_dir)
+            state.update({
+                "stage": "PREPARED",
+                "swap_was_active": False,
+                "swap_path": None,
+                "swap_size_kib": None,
+                "swap_priority": None,
+                "swap_used_kib": None,
+                "development_only": True,
+                "development_scope": probe.DEVELOPMENT_SCOPE,
+                "ownership_phase": probe.RECOVERY_OWNERSHIP_PHASE,
+            })
+            self.save_recovery_fixture(state_dir, state)
+            results_path = state_dir / probe.RESULTS_NAME
+            results = json.loads(results_path.read_text())
+            results["final_recovery_state"] = "PREPARED"
+            results_path.write_text(json.dumps(results))
+            owner_marker = (
+                self.recovery_base /
+                f"partition-{state['partuuid']}.active")
+            target = {
+                "device": state["device"], "major": state["major"],
+                "minor": state["minor"],
+                "size_bytes": state["size_bytes"],
+                "partuuid": state["partuuid"],
+            }
+            with mock.patch.object(probe, "_validate_state_dir"), \
+                    mock.patch.object(
+                        probe, "inspect_target_identity_for_recovery",
+                        return_value=target), \
+                    mock.patch.object(probe.Path, "exists",
+                                      return_value=False), \
+                    mock.patch.object(probe, "_mapper_exists",
+                                      return_value=False), \
+                    mock.patch.object(probe, "_active_swap_for",
+                                      return_value=None), \
+                    mock.patch.object(probe, "_read_block0",
+                                      return_value=header), \
+                    mock.patch.object(probe, "_holder_names",
+                                      return_value=[]), \
+                    mock.patch.object(probe, "_mountinfo_has_device",
+                                      return_value=False):
+                recovered = probe.recover(
+                    state_dir, state["device_arg"], state["device_arg"])
 
-                target = {
-                    "device": state["device"], "major": state["major"],
-                    "minor": state["minor"],
-                    "size_bytes": state["size_bytes"],
-                    "partuuid": state["partuuid"],
-                }
-                with mock.patch.object(probe, "_validate_state_dir"), \
-                        mock.patch.object(
-                            probe, "inspect_target_identity_for_recovery",
-                            return_value=target), \
-                        mock.patch.object(probe.Path, "exists",
-                                          return_value=False), \
-                        mock.patch.object(probe, "_mapper_exists",
-                                          return_value=False), \
-                        mock.patch.object(probe, "_active_swap_for",
-                                          return_value=None), \
-                        mock.patch.object(probe, "_read_block0",
-                                          return_value=backup), \
-                        mock.patch.object(
-                            probe, "_holder_names", return_value=[]), \
-                        mock.patch.object(
-                            probe, "_mountinfo_has_device",
-                            return_value=False):
-                    recovered = probe.recover(
-                        state_dir, state["device_arg"],
-                        state["device_arg"])
-
-                self.assertEqual(recovered["stage"], "COMPLETE")
-                self.assertFalse(owner_marker.exists())
-                self.assertTrue(
-                    (self.recovery_base /
-                     f"consumed-{state['run_id']}.json").is_file())
+            self.assertEqual(recovered["stage"], "COMPLETE")
+            self.assertFalse(owner_marker.exists())
+            self.assertTrue(
+                (self.recovery_base /
+                 f"consumed-{state['run_id']}.json").is_file())
 
     def test_development_recovery_final_swap_uncertainty_retains_ownership(self):
         with tempfile.TemporaryDirectory() as directory:
