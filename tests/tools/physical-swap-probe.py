@@ -4936,7 +4936,7 @@ def campaign_plan(device_arg, confirm_arg, expected_partuuid, source_sha):
 
 
 def _require_ram_only_metadata_for_physical_run():
-    """Refuse physical trials before touching swap while extent metadata is on media."""
+    """Refuse physical trials until payload-only metadata has loaded qualification."""
     try:
         source = (ROOT / "src/kernel/codec.h").read_text(encoding="utf-8")
     except (OSError, UnicodeError) as exc:
@@ -4944,6 +4944,12 @@ def _require_ram_only_metadata_for_physical_run():
     if re.search(r"(?m)^#define SWAPZ_CODEC_METADATA_ON_MEDIA 0U$", source) is None:
         raise ProbeError(
             "physical run blocked until compressed extent metadata is RAM-only")
+    if re.search(
+            r"(?m)^#define SWAPZ_PHYSICAL_RAM_METADATA_QUALIFIED 1U$",
+            source) is None:
+        raise ProbeError(
+            "physical run blocked until current-source loaded RAM-metadata "
+            "qualification passes")
 
 
 def main(argv=None):
