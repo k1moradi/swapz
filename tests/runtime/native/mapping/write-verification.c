@@ -329,24 +329,24 @@ static int test_same_extent_read_cache_reuse_and_fail_closed(void)
 		CHECK(size == sizeof(result) &&
 		      !memcmp(result, payloads[index], size));
 	}
-	CHECK(engine.read_metadata_requests == 1);
-	CHECK(engine.read_metadata_cache_hits == 2);
-	CHECK(engine.read_full_extent_requests == 1);
-	CHECK(engine.read_full_extent_cache_hits == 2);
+	CHECK(engine.read_metadata_requests == 0);
+	CHECK(engine.read_metadata_cache_hits == 1);
+	CHECK(engine.read_full_extent_requests == 0);
+	CHECK(engine.read_full_extent_cache_hits == 1);
 	CHECK(engine.physical_read_blocks == 2);
-	CHECK(engine.read_payload_requests == 0);
+	CHECK(engine.read_payload_requests == 2);
 	CHECK(engine.read_cache_valid && engine.read_cached_full);
 
 	/* A caller-owned DISCARD/barrier invalidates even without a WRITE. */
 	swapz_engine_invalidate_read_cache(&engine);
 	CHECK(swapz_engine_read_page(&engine, 1, result,
 					   sizeof(result), &size) == 0);
-	CHECK(engine.read_metadata_requests == 2);
-	CHECK(engine.read_metadata_cache_hits == 2);
-	CHECK(engine.read_full_extent_requests == 2);
+	CHECK(engine.read_metadata_requests == 0);
+	CHECK(engine.read_metadata_cache_hits == 1);
+	CHECK(engine.read_full_extent_requests == 1);
 
-	/* A cold full-extent lower failure cannot leave stale metadata or
-	 * payload available to the next read. */
+	/* A cold lower failure cannot leave stale payload cache or RAM-derived
+	 * mapping authority available to the next read. */
 	swapz_engine_invalidate_read_cache(&engine);
 	fail_read = 1;
 	CHECK(swapz_engine_read_page(&engine, 0, result,
@@ -355,13 +355,13 @@ static int test_same_extent_read_cache_reuse_and_fail_closed(void)
 	fail_read = 0;
 	CHECK(swapz_engine_read_page(&engine, 0, result,
 					   sizeof(result), &size) == 0);
-	CHECK(engine.read_metadata_requests == 3);
-	CHECK(engine.read_full_extent_requests == 3);
+	CHECK(engine.read_metadata_requests == 0);
+	CHECK(engine.read_full_extent_requests == 1);
 	CHECK(size == sizeof(result) &&
 	      !memcmp(result, payloads[0], size));
 
-	/* A new authoritative generation cannot reuse old metadata. The old
-	 * immutable physical extent may remain resident because this append
+	/* A new authoritative generation cannot reuse old payload bytes. The
+	 * old immutable physical extent may remain resident because this append
 	 * mutates a disjoint range; the authoritative start-block mismatch must
 	 * still force a fresh lower read for generation 2. */
 	memset(payloads[0], 0x5a, sizeof(payloads[0]));
@@ -371,17 +371,17 @@ static int test_same_extent_read_cache_reuse_and_fail_closed(void)
 	CHECK(map[0].start_block != old_start && map[0].generation == 2);
 	CHECK(swapz_engine_read_page(&engine, 0, result,
 					   sizeof(result), &size) == 0);
-	CHECK(engine.read_metadata_requests == 4);
-	CHECK(engine.read_full_extent_requests == 4);
+	CHECK(engine.read_metadata_requests == 0);
+	CHECK(engine.read_full_extent_requests == 1);
 	CHECK(size == sizeof(result) &&
 	      !memcmp(result, payloads[0], size));
 	return 0;
 }
 
 /*
- * The explicit one-block read budget must not be bypassed by prefetch,
- * including on the slow payload branch. A failed selective payload read
- * invalidates the cached header and forces a fresh lower metadata read.
+ * The explicit one-block read budget must not be bypassed by prefetch.
+ * A failed selective payload read forces a fresh lower payload read;
+ * there is no serialized metadata block to fetch or cache.
  */
 static int test_one_block_read_budget_remains_selective(void)
 {
@@ -396,11 +396,11 @@ static int test_one_block_read_budget_remains_selective(void)
 	CHECK(swapz_engine_read_page(&engine, 0, result,
 					   sizeof(result), &size) == 0);
 	CHECK(size == sizeof(result) && !memcmp(result, payloads[0], size));
-	CHECK(engine.read_metadata_requests == 1);
+	CHECK(engine.read_metadata_requests == 0);
 	CHECK(engine.read_full_extent_requests == 0);
 	CHECK(engine.read_payload_requests == 1);
-	CHECK(engine.physical_read_blocks == 2);
-	CHECK(!engine.read_cached_full && engine.read_cache_valid);
+	CHECK(engine.physical_read_blocks == 1);
+	CHECK(!engine.read_cached_full && !engine.read_cache_valid);
 	fail_read = 1;
 	CHECK(swapz_engine_read_page(&engine, 0, result,
 					   sizeof(result), &size) == -EIO);
@@ -408,7 +408,7 @@ static int test_one_block_read_budget_remains_selective(void)
 	fail_read = 0;
 	CHECK(swapz_engine_read_page(&engine, 0, result,
 					   sizeof(result), &size) == 0);
-	CHECK(engine.read_metadata_requests == 2);
+	CHECK(engine.read_metadata_requests == 0);
 	CHECK(engine.read_full_extent_requests == 0);
 	CHECK(size == sizeof(result) && !memcmp(result, payloads[0], size));
 	return 0;
@@ -442,34 +442,36 @@ static int test_two_block_payload_offset_skips_unneeded_second_block(void)
 	CHECK(reads == 1 && engine.physical_read_blocks == 1);
 	CHECK(engine.read_two_block_skips == 1);
 	CHECK(!engine.read_cached_full && engine.read_cache_valid);
-	/* Shared block-zero metadata remains validated for sibling access. */
+	/* Block-zero payload remains cached for a sibling whose data spans
+	 * both physical blocks; metadata is never read from backing media. */
 	CHECK(swapz_engine_read_page(&engine, 1, result,
 					   sizeof(result), &size) == 0);
 	CHECK(size == sizeof(result) && !memcmp(result, payloads[1], size));
 	CHECK(reads == 2 && engine.read_metadata_cache_hits == 1);
-	CHECK(engine.read_payload_requests == 1 &&
+	CHECK(engine.read_payload_requests == 2 &&
 	      engine.read_full_extent_requests == 0);
 
-	/* A corrupt mapping hint is never allowed to bypass the on-disk
-	 * descriptor equality check, including when the correct payload
-	 * happens to reside wholly in metadata block zero. */
+	/* A corrupted RAM offset must fail the authoritative payload CRC,
+	 * including when the correct data resides wholly in physical block 0.
+	 * No on-disk descriptor exists to reconstruct a different offset. */
 	swapz_engine_invalidate_read_cache(&engine);
 	offset = map[2].payload_offset;
 	map[2].payload_offset++;
 	before = reads;
 	CHECK(swapz_engine_read_page(&engine, 2, result,
-					   sizeof(result), &size) == -EUCLEAN);
+					   sizeof(result), &size) == -EBADMSG);
 	CHECK(size == 0 && !engine.read_cache_valid && reads == before + 1);
 	map[2].payload_offset = offset;
 
-	/* Other records still get one complete two-block request. */
+	/* A payload already confined to block one needs only that block;
+	 * it must never force the old full-extent metadata-first request. */
 	swapz_engine_invalidate_read_cache(&engine);
 	before = reads;
 	CHECK(swapz_engine_read_page(&engine, 0, result,
 					   sizeof(result), &size) == 0);
 	CHECK(size == sizeof(result) && !memcmp(result, payloads[0], size));
-	CHECK(reads == before + 2 &&
-	      engine.read_full_extent_requests == 1);
+	CHECK(reads == before + 1 &&
+	      engine.read_full_extent_requests == 0);
 	return 0;
 }
 
@@ -1120,7 +1122,6 @@ static int test_engine_prepare_boundary_contact_and_packed_siblings(void)
 {
 	struct swapz_io_run run;
 	struct swapz_compressed_page input[3] = { { 0 } };
-	struct swapz_decoded record;
 	struct proof_diagnostic diagnostic = {
 		.phase = "packed-prepare",
 		.category = "compressed-packed-siblings",
@@ -1156,16 +1157,25 @@ static int test_engine_prepare_boundary_contact_and_packed_siblings(void)
 		    run.blocks == 1 && proof_lower_writes == 0);
 	PROOF_CHECK(&diagnostic, engine.prehashed_records == 2);
 	for (index = 0; index < 3; ++index) {
+		const struct swapz_tx_record *record = &run.txs[0].records[index];
+
+		/* Paused transaction descriptors remain in RAM and are never
+		 * read back from the payload-only lower-run image. */
 		PROOF_CHECK(&diagnostic,
-			    swapz_lookup(run.bytes, SWAPZ_BLOCK_BYTES,
-					 index, &record, &encoded) == 0);
-		PROOF_CHECK(&diagnostic, record.logical_page == 10U + index &&
-			    record.generation == 1 &&
-			    record.encoding == input[index].encoding &&
-			    record.payload_length == input[index].length &&
-			    record.payload_crc32c == swapz_crc32c_bytes(
+			    run.txs[0].compressed_data_only &&
+			    record->compressed_metadata_bound &&
+			    record->payload_offset < SWAPZ_BLOCK_BYTES &&
+			    record->payload_length <=
+				SWAPZ_BLOCK_BYTES - record->payload_offset);
+		encoded = run.bytes + record->payload_offset;
+		PROOF_CHECK(&diagnostic, record->logical_page == 10U + index &&
+			    record->generation == 1 &&
+			    record->encoding == input[index].encoding &&
+			    record->payload_length == input[index].length &&
+			    record->payload_crc32c == swapz_crc32c_bytes(
 				    input[index].payload, input[index].length) &&
-			    !memcmp(encoded, input[index].payload, record.payload_length));
+			    !memcmp(encoded, input[index].payload,
+				    record->payload_length));
 	}
 	diagnostic.phase = "packed-completion";
 	PROOF_CHECK(&diagnostic,
