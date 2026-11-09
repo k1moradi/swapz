@@ -37,6 +37,13 @@ typedef uint64_t swapz_u64;
  */
 #define SWAPZ_CODEC_METADATA_ON_MEDIA 0U
 
+/*
+ * Payload-only production I/O is implemented, but real-device admission stays
+ * closed until the current source passes the loaded algorithm/RAM qualification.
+ * Keep the gate in source permanently; qualification flips only the value.
+ */
+#define SWAPZ_PHYSICAL_RAM_METADATA_QUALIFIED 0U
+
 #define SWAPZ_BLOCK_BYTES 4096U
 #define SWAPZ_BLOCK_SHIFT 12U
 #define SWAPZ_MAX_BLOCKS 4U
