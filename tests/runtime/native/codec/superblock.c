@@ -56,9 +56,13 @@ static int check_linux_swap_header(void)
 	swapz_sb_put_u32(header + SWAPZ_LINUX_SWAP_BAD_PAGES_OFFSET, 1U);
 	failures += swapz_linux_swap_header_valid(header, DEVICE_BYTES);
 	swapz_sb_put_u32(header + SWAPZ_LINUX_SWAP_BAD_PAGES_OFFSET, 0U);
+	/* mkswap -U clear produces valid Linux swap without a UUID. */
 	memset(header + SWAPZ_LINUX_SWAP_UUID_OFFSET, 0,
 	       SWAPZ_LINUX_SWAP_UUID_BYTES);
-	failures += swapz_linux_swap_header_valid(header, DEVICE_BYTES);
+	if (!swapz_linux_swap_header_valid(header, DEVICE_BYTES)) {
+		fprintf(stderr, "FAIL: rejected valid Linux swap with cleared UUID\n");
+		++failures;
+	}
 	if (failures)
 		fprintf(stderr, "FAIL: %d malformed Linux swap headers were accepted\n", failures);
 	return failures != 0;

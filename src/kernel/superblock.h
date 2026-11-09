@@ -125,7 +125,6 @@ static inline int swapz_linux_swap_header_valid(
     };
     unsigned long long pages = device_bytes / SWAPZ_SUPERBLOCK_BYTES;
     unsigned int last_page;
-    unsigned char uuid_nonzero = 0;
     unsigned int index;
 
     if (!block || device_bytes % SWAPZ_SUPERBLOCK_BYTES ||
@@ -140,9 +139,9 @@ static inline int swapz_linux_swap_header_valid(
         if (block[SWAPZ_SUPERBLOCK_BYTES - SWAPZ_LINUX_SWAP_MAGIC_BYTES +
                   index] != magic[index])
             return 0;
-    for (index = 0; index < SWAPZ_LINUX_SWAP_UUID_BYTES; ++index)
-        uuid_nonzero |= block[SWAPZ_LINUX_SWAP_UUID_OFFSET + index];
-    return uuid_nonzero != 0U;
+    /* A Linux swap UUID is optional (for example, mkswap -U clear).
+     * Admission must not mutate the existing signature or UUID bytes. */
+    return 1;
 }
 
 #endif

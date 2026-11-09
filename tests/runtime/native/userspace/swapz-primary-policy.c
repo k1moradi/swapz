@@ -1303,8 +1303,9 @@ static void test_primary_linux_swap_header(void)
 	test_put_u32_le(header, 1032U, 1U);
 	assert(!swapz_primary_linux_swap_header_valid(header, logical_pages));
 	test_put_u32_le(header, 1032U, 0U);
+	/* Ordinary swap can deliberately have no UUID; PARTUUID is the selector. */
 	memset(header + 1036U, 0, SWAPZ_PRIMARY_SWAP_UUID_BYTES);
-	assert(!swapz_primary_linux_swap_header_valid(header, logical_pages));
+	assert(swapz_primary_linux_swap_header_valid(header, logical_pages));
 	header[1036U] = 1U;
 	header[sizeof(header) - 1U] ^= 1U;
 	assert(!swapz_primary_linux_swap_header_valid(header, logical_pages));
