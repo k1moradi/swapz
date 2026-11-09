@@ -11337,7 +11337,6 @@ out:
 		result = -1;
 		saved_errno = errno;
 	}
-	memset(expected_backing_header, 0, sizeof(expected_backing_header));
 	memset(observed_backing_header, 0, sizeof(observed_backing_header));
 	memset(swap_header, 0, sizeof(swap_header));
 	errno = saved_errno;
