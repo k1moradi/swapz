@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
-"""Source-only lockout regression for the pre-migration compressed extent codec.
+"""Source-only contract for RAM-only production metadata and SWAPSPACE2 backing.
 
-This is not a loaded, physical-media or swap-lifecycle qualification test.
-The lockout must remain until compressed descriptors and CRCs reside in RAM.
+This is not loaded or physical-media qualification. It prevents regression to
+an in-band production metadata format while checking the protected lower range.
 """
 from pathlib import Path
 import re
@@ -23,7 +23,8 @@ def main() -> None:
     declarations = re.findall(
         r"(?m)^#define SWAPZ_CODEC_METADATA_ON_MEDIA ([01])U$", codec
     )
-    require(declarations == ["1"], "Legacy in-band codec must retain its physical interlock")
+    require(declarations == ["0"],
+            "Production kernel compressed extents must keep metadata off media")
     require("swapz_u32 payload_crc32c;" in authority,
             "Compressed payload CRC must remain authoritative volatile RAM state")
     require("_Static_assert(sizeof(struct swapz_map) == 20" in authority,
@@ -32,33 +33,17 @@ def main() -> None:
             "Ordinary SWAPSPACE2 validation must remain the physical header contract")
 
     disk_identity = target.index('is_nullb = !strncmp(')
-    physical_gate = target.index(
-        "if (!is_nullb && SWAPZ_CODEC_METADATA_ON_MEDIA) {", disk_identity
-    )
-    gate_end = target.index("\n\t}", physical_gate)
-    gate = target[physical_gate:gate_end]
-    require('error = -EOPNOTSUPP;' in gate and 'goto fail;' in gate
-            and 'ti->error =' in gate,
-            "Real physical backing must fail closed while codec emits in-band metadata")
-    require(disk_identity < physical_gate <
-            target.index("ctx->io_client = dm_io_client_create();", disk_identity),
-            "Physical interlock must precede lower I/O client admission")
-    require(physical_gate < target.index("if (is_nullb) {", physical_gate),
-            "Synthetic null_blk must remain separate from physical interlock")
+    io_client = target.index("ctx->io_client = dm_io_client_create();", disk_identity)
+    require("if (!is_nullb && SWAPZ_CODEC_METADATA_ON_MEDIA) {" not in
+            target[disk_identity:io_client],
+            "Production physical admission must not retain the obsolete metadata lockout")
 
-    # A physical lifecycle cannot swapoff the original partition and only
-    # discover the codec incompatibility during mapper construction.
     lifecycle = primary.index("static int swapz_primary_run_mutating_action(")
-    primary_gate = primary.index("if (SWAPZ_CODEC_METADATA_ON_MEDIA &&", lifecycle)
-    mutation_lock = primary.index("mutation_lock_fd = swapz_primary_mutation_lock();", lifecycle)
-    blocked_scope = primary[lifecycle:mutation_lock]
-    require(lifecycle < primary_gate < mutation_lock,
-            "Primary PREPARE/START must reject in-band metadata before mutation")
-    require("SWAPZ_PRIMARY_MUTATING_PREPARE" in blocked_scope and
-            "SWAPZ_PRIMARY_MUTATING_START" in blocked_scope and
-            "errno = EOPNOTSUPP;" in blocked_scope and
-            "return -1;" in blocked_scope,
-            "Primary physical lifecycle must fail closed before swapoff")
+    mutation_lock = primary.index(
+        "mutation_lock_fd = swapz_primary_mutation_lock();", lifecycle)
+    require("if (SWAPZ_CODEC_METADATA_ON_MEDIA &&" not in
+            primary[lifecycle:mutation_lock],
+            "Primary PREPARE/START must not block the RAM-only production codec")
 
     # DM property consumers must see the allocated lower data range, not
     # the reserved SWAPSPACE2 header or discarded segment-alignment tail.
@@ -70,7 +55,7 @@ def main() -> None:
     require("(ctx->data_start_block + ctx->physical_blocks)" not in iterator,
             "iterate_devices must exclude the protected swap header")
 
-    print("PASS: physical metadata lockout and lower data range (source contract)")
+    print("PASS: RAM-only production metadata and protected SWAPSPACE2 data range")
 
 
 if __name__ == "__main__":
