@@ -7392,7 +7392,9 @@ selector must describe this as a VM shared-disk rule and must not instruct the
 operator to provision the bare-metal shared-root scope record for that case. The VM lane uses the
 selected partition's own kernel I/O counters so guest-root traffic cannot be
 misreported as target traffic. The physical trial and the normal primary manager preserve the original
-4096-byte Linux swap header throughout execution. The source-extracted
+4096-byte Linux swap header throughout execution. The Python physical-probe regressions require
+byte-exact header preservation and zero raw block-zero writes on all
+completed ordinary-swap physical trials. The source-extracted
 late-race tests inject immediately before module/mapper activation, not
 through a removed raw-header-write transition, and require zero raw header
 writes in successful real-device cases. Negative-control mutation totals count only module/mapper, mapper mkswap,

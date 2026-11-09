@@ -3132,10 +3132,11 @@ class PhysicalSwapProbeTests(unittest.TestCase):
             if teardown_not_complete:
                 saved_state["stage"] = "ORACLE_PASS"
             else:
-                # Production recovery restores and rereads block zero before
-                # marking recovery complete and releasing partition ownership.
-                observed_block_zero = target["header"]
-                events.append(("restore0",))
+                # The raw Linux swap header was never modified. A positive
+                # completion verifies it, rather than simulating a write.
+                if observed_block_zero != target["header"]:
+                    raise probe.ProbeError("original swap header changed")
+                events.append(("header_verified",))
                 saved_state["stage"] = "COMPLETE"
             probe._release_partition_ownership(saved_state)
             result_path = Path(saved_state_dir) / probe.RESULTS_NAME
@@ -3382,11 +3383,11 @@ class PhysicalSwapProbeTests(unittest.TestCase):
                                   side_effect=verify_target),
                 mock.patch.object(
                     probe, "_active_swap_for",
-                    side_effect=([None, None] if development_only else [{
+                    side_effect=([None, None, None] if development_only else [{
                         "used_kib": 0,
                         "size_kib": target["swap_size_kib"],
                         "priority": target["swap_priority"],
-                    }, None])),
+                    }, None, None])),
                 mock.patch.object(probe, "_write_block0",
                                   side_effect=write_block0),
                 mock.patch.object(probe, "_read_block0",
@@ -3983,8 +3984,7 @@ class PhysicalSwapProbeTests(unittest.TestCase):
                 self.assertTrue(state["_test_owner_marker"])
                 self.assertTrue(state["_test_consumed_claim"])
                 self.assertEqual(
-                    [event for event in events if event[0] == "write0"],
-                    [("write0",)])
+                    [event for event in events if event[0] == "write0"], [])
 
     def test_terminal_status_separates_failure_block_and_recovery(self):
         self.assertEqual(
@@ -4030,7 +4030,7 @@ class PhysicalSwapProbeTests(unittest.TestCase):
             "first_oracle_exit": 1,
             "recovery_errno": "unavailable",
             "publication_phase": "MAPPED",
-            "header_bytes_possibly_changed": probe.PAGE_BYTES,
+            "header_bytes_possibly_changed": 0,
             "requested_recovery_state": "RECOVERY_REQUIRED",
             "last_readable_saved_state": "MAPPED",
             "state_durability": "UNCERTAIN",
@@ -4050,8 +4050,8 @@ class PhysicalSwapProbeTests(unittest.TestCase):
         self.assertTrue(state["_test_owner_marker"])
         self.assertTrue(state["_test_consumed_claim"])
         self.assertEqual(
-            [event for event in events if event[0] == "write0"], [("write0",)])
-        self.assertNotIn(("restore0",), events)
+            [event for event in events if event[0] == "write0"], [])
+        self.assertNotIn(("header_verified",), events)
         self.assertEqual(
             sum(event[0] == "command" and event[1][0] ==
                 "/reviewed/device-roundtrip" for event in events), 1)
@@ -4151,7 +4151,7 @@ class PhysicalSwapProbeTests(unittest.TestCase):
         self.assertIn("injected recovery uncertainty", results["recovery_error"])
         self.assertTrue(uncertain["_test_owner_marker"])
         self.assertTrue(uncertain["_test_consumed_claim"])
-        self.assertNotIn(("restore0",), events)
+        self.assertNotIn(("header_verified",), events)
 
         _, uncertain, _ = self.simulate_physical_run(
             development_only=True, recovery_failure=True)
@@ -4592,13 +4592,11 @@ class PhysicalSwapProbeTests(unittest.TestCase):
     def test_formatter_and_oracle_use_exact_reviewed_identity_arguments(self):
         events, state, target = self.simulate_physical_run()
         commands = [event[1] for event in events if event[0] == "command"]
-        self.assertIn(("/reviewed/swapzctl", "format", target["device"],
-                       "--expect-major-minor", "8:4", "--expect-bytes",
-                       str(target["size_bytes"]), "--expect-partuuid",
-                       target["partuuid"], "--expect-parent-major-minor",
-                       target["parent_major_minor"], "--expect-parent-model",
-                       target["parent_model"], "--expect-parent-transport",
-                       target["parent_transport"]), commands)
+        self.assertFalse(any(
+            command[:2] == ("/reviewed/swapzctl", "format")
+            for command in commands))
+        self.assertNotIn(("write0",), events)
+        self.assertEqual(state["_test_observed_header"], target["header"])
         self.assertIn(("/reviewed/device-roundtrip",
                        f"/dev/mapper/{state['dm_name']}",
                        "--expect-dm-uuid", state["dm_uuid"]), commands)
@@ -4662,7 +4660,7 @@ class PhysicalSwapProbeTests(unittest.TestCase):
         self.assertEqual(state["_test_results"]["final_recovery_state"],
                          "COMPLETE")
         self.assertNotEqual(state["_test_results"].get("oracle_suite"), "PASS")
-        self.assertIn(("restore0",), events)
+        self.assertIn(("header_verified",), events)
 
     def test_completed_byte_oracle_with_uncertain_recovery_is_not_physical_pass(self):
         # Completed synthetic mapper I/O and successful restoration are
@@ -4670,7 +4668,7 @@ class PhysicalSwapProbeTests(unittest.TestCase):
         events, state, _ = self.simulate_physical_run(recovery_failure=True)
         results = state["_test_results"]
         self.assertIn(("recover",), events)
-        self.assertNotIn(("restore0",), events)
+        self.assertNotIn(("header_verified",), events)
         self.assertEqual(state["stage"], "RECOVERY_REQUIRED")
         self.assertEqual(results["final_recovery_state"], "RECOVERY_REQUIRED")
         self.assertNotEqual(
@@ -4688,15 +4686,20 @@ class PhysicalSwapProbeTests(unittest.TestCase):
         self.assertIn("injected recovery uncertainty",
                       results["recovery_error"])
 
-    def test_partition_identity_is_rechecked_after_clear_before_formatter(self):
-        events, _, _ = self.simulate_physical_run()
-        cleared = events.index(("write0",))
-        formatted = next(index for index, event in enumerate(events) if
-                         event[0] == "command" and
-                         event[1][:2] == ("/reviewed/swapzctl", "format"))
-        self.assertTrue(any(event[0] == "verify" for event in
-                            events[cleared + 1:formatted]),
-                        "partition was not rechecked immediately before formatter")
+    def test_swap_identity_is_rechecked_after_swapoff_before_mapping(self):
+        events, state, target = self.simulate_physical_run()
+        inactive = events.index(("save", "EXISTING_SWAP_READY"))
+        mapper = next(index for index, event in enumerate(events)
+                      if event[0] == "command" and
+                      event[1][:2] == ("dmsetup", "create"))
+        self.assertTrue(any(event[0] == "verify"
+                            for event in events[inactive + 1:mapper]),
+                        "partition identity must be rechecked before mapping")
+        self.assertEqual(state["_test_observed_header"], target["header"])
+        self.assertFalse(any(event[0] == "write0" for event in events))
+        self.assertFalse(any(event[0] == "command" and
+                             event[1][:2] == ("/reviewed/swapzctl", "format")
+                             for event in events))
 
     def test_identity_changes_at_late_boundaries_stop_before_next_action(self):
         cases = (
