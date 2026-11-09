@@ -5403,6 +5403,53 @@ class PhysicalSwapProbeTests(unittest.TestCase):
                     "parent_card_identity changed during the operation"):
                 probe._verify_target_identity(target)
 
+    def test_partuuid_selector_accepts_existing_swap_without_uuid(self):
+        # The swap signature is a format proof, not an identity token.
+        # A valid SWAPSPACE2 area can have its filesystem UUID cleared.
+        selector = "/dev/disk/by-partuuid/deadbeef-01"
+        size_bytes = 64 << 20
+        row = {"type": "part", "fstype": "swap", "uuid": None,
+               "size": size_bytes}
+        lsblk = subprocess.CompletedProcess(
+            [], 0, stdout=json.dumps({"blockdevices": [row]}), stderr="")
+        card = {"model": "synthetic-reader", "transport": "usb",
+                "parent_removable": True, "parent_size_bytes": size_bytes,
+                "sha256": "a" * 64}
+        with mock.patch.object(probe.Path, "resolve",
+                               return_value=Path("/dev/synthetic-part")), \
+             mock.patch.object(probe.Path, "is_file", return_value=True), \
+             mock.patch.object(probe.Path, "iterdir", return_value=iter(())), \
+             mock.patch.object(probe, "block_identity",
+                               return_value=(8, 17)), \
+             mock.patch.object(probe, "_physical_parent_identity",
+                               return_value="8:16"), \
+             mock.patch.object(probe, "_mountinfo_has_device",
+                               return_value=False), \
+             mock.patch.object(probe, "_require_root_not_on_target",
+                               return_value=False), \
+             mock.patch.object(probe, "_run", return_value=lsblk), \
+             mock.patch.object(probe, "_partition_identity",
+                               return_value=("deadbeef-01", size_bytes)), \
+             mock.patch.object(probe, "_active_swap_for",
+                               return_value=None), \
+             mock.patch.object(probe, "_read_block0",
+                               return_value=b"x" * probe.PAGE_BYTES), \
+             mock.patch.object(probe, "swap_signature_valid",
+                               return_value=True), \
+             mock.patch.object(probe, "_campaign_card_identity",
+                               return_value=card):
+            target = probe.inspect_target(
+                selector, selector, allow_inactive_swap=True)
+            self.assertEqual(target["partuuid"], "deadbeef-01")
+            self.assertIsNone(target["uuid"])
+            self.assertFalse(target["swap_was_active"])
+            with self.assertRaisesRegex(
+                    probe.ProbeError, "PARTUUID selector does not match"):
+                probe.inspect_target(
+                    "/dev/disk/by-partuuid/deadcafe-01",
+                    "/dev/disk/by-partuuid/deadcafe-01",
+                    allow_inactive_swap=True)
+
     def test_selected_swap_usage_blocks_smoke_preflight(self):
         # This smoke requires an active but *unused* original swap; the
         # performance campaign instead requires an inactive selected card.
