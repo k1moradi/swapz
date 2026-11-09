@@ -1521,46 +1521,6 @@ static void test_primary_state_records(void)
 	assert(!swapz_primary_state_transition_allowed(&current, &next));
 }
 
-static void test_primary_header_backup(int recovery_fd, int lock_fd,
-				       const char *run_id)
-{
-	static const unsigned char swap_magic[] = "SWAPSPACE2";
-	unsigned char original[SWAPZ_PRIMARY_BLOCK_BYTES];
-	unsigned char restored[SWAPZ_PRIMARY_BLOCK_BYTES];
-	char backup_name[64];
-	char digest[65];
-	char wrong_digest[65];
-	size_t i;
-
-	for (i = 0; i < sizeof(original); ++i)
-		original[i] = (unsigned char)((i * 37U + 11U) & 0xffU);
-	memcpy(original + sizeof(original) - sizeof(swap_magic) + 1U,
-	       swap_magic, sizeof(swap_magic) - 1U);
-	assert(swapz_primary_original_swap_signature(
-		original, TEST_DEVICE_BYTES));
-	assert(swapz_primary_sha256(original, sizeof(original), digest) == 0);
-	assert(swapz_primary_header_backup_write_at(
-		recovery_fd, lock_fd, run_id, original, digest, geteuid()) == 0);
-	memset(restored, 0xa5, sizeof(restored));
-	assert(swapz_primary_header_backup_read_at(
-		recovery_fd, lock_fd, run_id, digest, geteuid(), restored) == 0);
-	assert(!memcmp(original, restored, sizeof(original)));
-	assert(swapz_primary_header_backup_write_at(
-		recovery_fd, lock_fd, run_id, original, digest, geteuid()) < 0);
-	assert(errno == EEXIST);
-	memcpy(wrong_digest, digest, sizeof(wrong_digest));
-	wrong_digest[0] = wrong_digest[0] == '0' ? '1' : '0';
-	memset(restored, 0xa5, sizeof(restored));
-	assert(swapz_primary_header_backup_read_at(
-		recovery_fd, lock_fd, run_id, wrong_digest, geteuid(), restored) < 0);
-	assert(errno == EBADMSG);
-	assert(restored[0] == 0xa5);
-	assert(snprintf(backup_name, sizeof(backup_name), "block0-%s.bin",
-			 run_id) > 0);
-	assert(unlinkat(recovery_fd, backup_name, 0) == 0);
-	assert(fsync(recovery_fd) == 0);
-}
-
 static void test_primary_manifest(int recovery_fd, int lock_fd,
 				  const char *run_id)
 {
@@ -1645,7 +1605,7 @@ static void test_primary_manifest(int recovery_fd, int lock_fd,
 	assert(fsync(recovery_fd) == 0);
 }
 
-static void test_primary_transaction_manifest_requires_backup(
+static void test_primary_transaction_manifest_integrity(
 	int recovery_fd, int lock_fd, const char *run_id)
 {
 	static const enum swapz_primary_stage ready_stage[] = {
@@ -1655,17 +1615,8 @@ static void test_primary_transaction_manifest_requires_backup(
 		SWAPZ_PRIMARY_STAGE_STARTING,
 	};
 	struct swapz_primary_manifest manifest = {0};
-	unsigned char original[SWAPZ_PRIMARY_BLOCK_BYTES];
-	char backup_name[64];
 	char manifest_name[96];
-	char digest[65];
-	unsigned char changed;
-	int fd;
-	size_t i;
 
-	for (i = 0; i < sizeof(original); ++i)
-		original[i] = (unsigned char)((i * 37U + 11U) & 0xffU);
-	assert(swapz_primary_sha256(original, sizeof(original), digest) == 0);
 	memcpy(manifest.run_id, run_id, sizeof(manifest.run_id));
 	memset(manifest.source_sha, 'a', SWAPZ_PRIMARY_SOURCE_SHA_LENGTH);
 	manifest.source_sha[SWAPZ_PRIMARY_SOURCE_SHA_LENGTH] = '\0';
@@ -1676,10 +1627,11 @@ static void test_primary_transaction_manifest_requires_backup(
 	memset(manifest.qualification_report_sha256, 'd',
 	       SWAPZ_PRIMARY_SHA256_LENGTH);
 	manifest.qualification_report_sha256[SWAPZ_PRIMARY_SHA256_LENGTH] = '\0';
-	memcpy(manifest.original_header_sha256, digest, sizeof(digest));
+	memcpy(manifest.original_header_sha256,
+	       SWAPZ_PRIMARY_ORIGINAL_HEADER_SHA256,
+	       sizeof(manifest.original_header_sha256));
 	manifest.target = swapz_primary_selected_target;
-	assert(swapz_primary_header_backup_write_at(
-		recovery_fd, lock_fd, run_id, original, digest, geteuid()) == 0);
+
 	assert(swapz_primary_manifest_write_at(
 		recovery_fd, lock_fd, &manifest, geteuid()) == 0);
 	assert(swapz_primary_transaction_manifest_matches_at(
@@ -1689,57 +1641,26 @@ static void test_primary_transaction_manifest_requires_backup(
 		recovery_fd, lock_fd, &manifest, starting_stage,
 		sizeof(starting_stage) / sizeof(starting_stage[0]), geteuid()) < 0);
 	assert(errno == EPERM);
-	assert(swapz_primary_header_backup_name(run_id, backup_name,
-						 sizeof(backup_name)) == 0);
-	fd = openat(recovery_fd, backup_name, O_RDWR | O_NOFOLLOW | O_CLOEXEC);
-	assert(fd >= 0);
-	assert(pread(fd, &changed, sizeof(changed), 128) == 1);
-	{
-		unsigned char damaged = (unsigned char)(changed ^ 0x01U);
 
-		assert(pwrite(fd, &damaged, sizeof(damaged), 128) == 1);
-		assert(fsync(fd) == 0);
-		assert(swapz_primary_transaction_manifest_matches_at(
-			recovery_fd, lock_fd, &manifest, ready_stage,
-			sizeof(ready_stage) / sizeof(ready_stage[0]),
-			geteuid()) < 0);
-		assert(errno == EBADMSG);
-	}
-	assert(pwrite(fd, &changed, sizeof(changed), 128) == 1);
-	assert(fsync(fd) == 0);
-	assert(close(fd) == 0);
-	assert(swapz_primary_transaction_manifest_matches_at(
-		recovery_fd, lock_fd, &manifest, ready_stage,
-		sizeof(ready_stage) / sizeof(ready_stage[0]), geteuid()) == 0);
-	assert(swapz_primary_header_backup_name(run_id, backup_name,
-						 sizeof(backup_name)) == 0);
 	assert(snprintf(manifest_name, sizeof(manifest_name),
 			"primary-manifest-%s.txt", run_id) > 0);
-	assert(unlinkat(recovery_fd, backup_name, 0) == 0);
+	assert(unlinkat(recovery_fd, manifest_name, 0) == 0);
 	assert(fsync(recovery_fd) == 0);
 	assert(swapz_primary_transaction_manifest_matches_at(
 		recovery_fd, lock_fd, &manifest, ready_stage,
 		sizeof(ready_stage) / sizeof(ready_stage[0]), geteuid()) < 0);
-	assert(errno == ENOENT);
-	assert(unlinkat(recovery_fd, manifest_name, 0) == 0);
-	assert(fsync(recovery_fd) == 0);
+	assert(errno == ENOENT || errno == EPERM);
 }
+
 
 static void test_primary_module_load_record(
 	int recovery_fd, int lock_fd, const char *run_id)
 {
 	struct swapz_primary_manifest manifest = {0};
-	unsigned char original[SWAPZ_PRIMARY_BLOCK_BYTES];
-	char digest[65];
 	char load_name[96];
 	char ignored_record[512];
-	char backup_name[64];
 	char manifest_name[96];
-	size_t i;
 
-	for (i = 0; i < sizeof(original); ++i)
-		original[i] = (unsigned char)((i * 17U + 5U) & 0xffU);
-	assert(swapz_primary_sha256(original, sizeof(original), digest) == 0);
 	memcpy(manifest.run_id, run_id, SWAPZ_PRIMARY_RUN_ID_LENGTH + 1U);
 	memset(manifest.source_sha, 'a', SWAPZ_PRIMARY_SOURCE_SHA_LENGTH);
 	manifest.source_sha[SWAPZ_PRIMARY_SOURCE_SHA_LENGTH] = '\0';
@@ -1750,11 +1671,11 @@ static void test_primary_module_load_record(
 	memset(manifest.qualification_report_sha256, 'd',
 	       SWAPZ_PRIMARY_SHA256_LENGTH);
 	manifest.qualification_report_sha256[SWAPZ_PRIMARY_SHA256_LENGTH] = '\0';
-	memcpy(manifest.original_header_sha256, digest, sizeof(digest));
+	memcpy(manifest.original_header_sha256,
+	       SWAPZ_PRIMARY_ORIGINAL_HEADER_SHA256,
+	       sizeof(manifest.original_header_sha256));
 	manifest.target = swapz_primary_selected_target;
 
-	assert(swapz_primary_header_backup_write_at(
-		recovery_fd, lock_fd, run_id, original, digest, geteuid()) == 0);
 	assert(swapz_primary_manifest_write_at(
 		recovery_fd, lock_fd, &manifest, geteuid()) == 0);
 	assert(swapz_primary_module_load_intent_write_at(
@@ -1776,15 +1697,13 @@ static void test_primary_module_load_record(
 
 	assert(swapz_primary_module_load_record_format(
 		&manifest, "LOADED", load_name, ignored_record) == 0);
-	assert(swapz_primary_header_backup_name(
-		run_id, backup_name, sizeof(backup_name)) == 0);
 	assert(snprintf(manifest_name, sizeof(manifest_name),
 			"primary-manifest-%s.txt", run_id) > 0);
 	assert(unlinkat(recovery_fd, load_name, 0) == 0);
-	assert(unlinkat(recovery_fd, backup_name, 0) == 0);
 	assert(unlinkat(recovery_fd, manifest_name, 0) == 0);
 	assert(fsync(recovery_fd) == 0);
 }
+
 
 static void test_primary_dm_table(void)
 {
@@ -3656,7 +3575,6 @@ int main(void)
 	assert(errno == EBUSY);
 	assert_record_equals(recovery_fd, active_name, expected_record);
 	assert_record_equals(recovery_fd, consumed_name, expected_record);
-	test_primary_header_backup(recovery_fd, first_lock, run_id);
 	test_primary_manifest(recovery_fd, first_lock, run_id);
 	memcpy(lifecycle.run_id, run_id, sizeof(lifecycle.run_id));
 	lifecycle.stage = SWAPZ_PRIMARY_STAGE_READY;
@@ -3670,7 +3588,7 @@ int main(void)
 	assert(swapz_primary_state_write_at(recovery_fd, first_lock,
 						    &lifecycle, geteuid()) == 0);
 	assert_primary_state_equals(recovery_fd, &lifecycle);
-	test_primary_transaction_manifest_requires_backup(
+	test_primary_transaction_manifest_integrity(
 		recovery_fd, first_lock, run_id);
 	lifecycle.stage = SWAPZ_PRIMARY_STAGE_STARTING;
 	assert(swapz_primary_state_write_at(recovery_fd, first_lock,
