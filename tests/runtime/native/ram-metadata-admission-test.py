@@ -94,7 +94,7 @@ def main() -> None:
     # the reserved SWAPSPACE2 header or discarded segment-alignment tail.
     iterator = target.split("static int swapz_iterate_devices(", 1)[1].split(
         "\nstatic void swapz_io_hints(", 1)[0]
-    require("(sector_t)ctx->data_start_block * SWAPZ_SECTORS" in iterator and
+    require("swapz_backing_data_sector(ctx, 0)" in iterator and
             "(sector_t)ctx->physical_blocks * SWAPZ_SECTORS" in iterator,
             "iterate_devices must report data-start and data-length separately")
     require("(ctx->data_start_block + ctx->physical_blocks)" not in iterator,
@@ -111,6 +111,10 @@ def main() -> None:
         target.count("region.sector = swapz_backing_data_sector(ctx,") == 4,
         "Synchronous, async WRITE, parallel READ and async READ must use "
         "the same protected-page sector conversion")
+    discard = target.split("static int swapz_discard_dead_segment(", 1)[1].split(
+        "\nstatic int swapz_parallel_lower_read(", 1)[0]
+    require("start_sector = swapz_backing_data_sector(" in discard,
+            "GC DISCARD must retain the same protected-page address translation")
     require(
         "(sector_t)(ctx->data_start_block +" not in target,
         "Never add 32-bit protected-page offsets before widening")
