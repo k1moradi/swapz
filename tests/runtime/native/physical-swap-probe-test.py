@@ -59,6 +59,30 @@ class PhysicalSwapProbeTests(unittest.TestCase):
             patch.start()
             self.addCleanup(patch.stop)
 
+    def test_development_architecture_gate_requires_4k_64bit_native_linux(self):
+        for machine in ("x86_64", "aarch64"):
+            with self.subTest(machine=machine), \
+                 mock.patch.object(probe.platform, "system", return_value="Linux"), \
+                 mock.patch.object(probe.platform, "machine", return_value=machine), \
+                 mock.patch.object(probe.struct, "calcsize", return_value=8), \
+                 mock.patch.object(probe.os, "sysconf", return_value=4096):
+                probe._require_development_linux_abi()
+        for system, machine, pointer_bytes, page_bytes in (
+                ("Darwin", "aarch64", 8, 4096),
+                ("Linux", "armv7l", 4, 4096),
+                ("Linux", "aarch64", 8, 16384),
+                ("Linux", "aarch64", 4, 4096)):
+            with self.subTest(system=system, machine=machine,
+                              pointer_bytes=pointer_bytes, page_bytes=page_bytes), \
+                 mock.patch.object(probe.platform, "system", return_value=system), \
+                 mock.patch.object(probe.platform, "machine", return_value=machine), \
+                 mock.patch.object(probe.struct, "calcsize",
+                                   return_value=pointer_bytes), \
+                 mock.patch.object(probe.os, "sysconf", return_value=page_bytes):
+                with self.assertRaisesRegex(
+                        probe.ProbeError, "physical development smoke requires"):
+                    probe._require_development_linux_abi()
+
     def test_algorithm_pageout_oracle_unit_contracts(self):
         # The separate source-bound worker is never privileged in this test.
         # A no-swap host must not accidentally be used as real-swap evidence.

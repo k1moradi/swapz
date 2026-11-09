@@ -11,6 +11,7 @@ import platform
 import re
 import shutil
 import stat
+import struct
 import subprocess
 import sys
 
@@ -136,11 +137,19 @@ def _selected_swap_inventory(partition: dict, swap_lines: list[str]) -> dict:
     }
 
 
+def _require_development_linux_abi() -> None:
+    """Reject unsupported kernel page geometry before inspecting storage."""
+    if platform.system() != "Linux" or platform.machine() not in (
+            "x86_64", "aarch64"):
+        raise ValueError("physical trial requires Linux x86_64 or aarch64")
+    if struct.calcsize("P") != 8 or os.sysconf("SC_PAGE_SIZE") != 4096:
+        raise ValueError("physical trial requires 64-bit Linux with 4096-byte pages")
+
+
 def _require_read_only_preflight() -> dict:
     if os.geteuid() == 0:
         raise ValueError("algorithm confirmation must run unprivileged")
-    if platform.machine() != "x86_64":
-        raise ValueError("the existing physical probe is x86_64-only")
+    _require_development_linux_abi()
     virtual = subprocess.run(
         ["systemd-detect-virt", "--quiet"],
         check=False, capture_output=True, timeout=10)

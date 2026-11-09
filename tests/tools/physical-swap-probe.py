@@ -94,7 +94,7 @@ QUALIFICATION_STAGE_NAMES = (
 )
 SWAPZ_HEADER_MAGIC = b"SWAPZ001"
 SWAPZ_HEADER_VERSION = 1
-BLKGETSIZE64 = 0x80081272  # Linux x86_64 _IOR(0x12, 114, size_t).
+BLKGETSIZE64 = 0x80081272  # Linux 64-bit x86_64/aarch64 _IOR(0x12, 114, size_t).
 RECOVERY_BASE = Path("/var/lib/swapz/physical-recovery")
 PERSISTENT_RECOVERY_FILESYSTEMS = frozenset({
     "ext2", "ext3", "ext4", "xfs", "btrfs", "f2fs",
@@ -982,10 +982,19 @@ def _read_fast_test_development_evidence(path, expected_uid, head, nonce):
             "fast_test_status": record["fast_test_status"]}
 
 
+def _require_development_linux_abi():
+    """Require the tested 64-bit/4KiB Linux block and swap ABI."""
+    if platform.system() != "Linux" or platform.machine() not in (
+            "x86_64", "aarch64"):
+        raise ProbeError("physical development smoke requires Linux x86_64 or aarch64")
+    if struct.calcsize("P") != 8 or os.sysconf("SC_PAGE_SIZE") != PAGE_BYTES:
+        raise ProbeError(
+            "physical development smoke requires 64-bit Linux with 4096-byte pages")
+
+
 def current_development_evidence(nonce):
     """Run source-bound fast_test and admit only the isolated dev smoke scope."""
-    if platform.machine() != "x86_64":
-        raise ProbeError("physical development smoke is currently limited to x86_64")
+    _require_development_linux_abi()
     _require_physical_host()
     if os.geteuid() != 0:
         raise ProbeError("development physical smoke evidence requires root wrapper")

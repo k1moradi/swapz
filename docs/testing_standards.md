@@ -7246,6 +7246,15 @@ use `--tree` with its PATH identity column: without NAME or --tree,
 util-linux omits the `children[]` JSON hierarchy, silently hiding all USB
 partitions from the existing scanner. Rootless tests must validate the real
 subprocess argument vector, not only synthetic JSON with prefilled children.
+The development-only algorithm trial supports Linux x86_64 and aarch64 only
+when the kernel uses 4096-byte pages and the process has a 64-bit ABI. The
+privileged worker independently repeats that gate and still requires confirmed
+bare metal, a single precisely identified removable USB swap target, safe
+swapoff, independent persistent recovery, exact-main development evidence and
+verified restoration. An ARM64 VM, 16KiB-page kernel or unknown machine must
+remain BLOCKED; architectural support does not authorize new physical media.
+The separate formal physical correctness/acceptance route stays x86_64-only.
+
 Read-only discovery must select only the partition carrying the swap
 signature, not any sibling filesystem or the whole disk, and cross-check
 `[SWAP]` from lsblk against the exact live block device in `/proc/swaps`. Nonzero used KiB is recorded as an observation,

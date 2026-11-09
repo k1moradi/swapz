@@ -23,6 +23,36 @@ class AlgorithmPhysicalTest(unittest.TestCase):
              "mountpoints": [None]}
         ]}
 
+    def test_physical_development_linux_abi_rejects_unsupported_geometry(self):
+        # Architecture is not host authorization: the privileged probe still
+        # verifies bare metal, source, device topology, and durable recovery.
+        for machine in ("x86_64", "aarch64"):
+            with self.subTest(machine=machine), \
+                 mock.patch.object(subject.platform, "system",
+                                   return_value="Linux"), \
+                 mock.patch.object(subject.platform, "machine",
+                                   return_value=machine), \
+                 mock.patch.object(subject.struct, "calcsize", return_value=8), \
+                 mock.patch.object(subject.os, "sysconf", return_value=4096):
+                subject._require_development_linux_abi()
+        for system, machine, pointer_bytes, page_bytes in (
+                ("Darwin", "aarch64", 8, 4096),
+                ("Linux", "armv7l", 4, 4096),
+                ("Linux", "aarch64", 8, 16384),
+                ("Linux", "aarch64", 4, 4096)):
+            with self.subTest(system=system, machine=machine,
+                              pointer_bytes=pointer_bytes, page_bytes=page_bytes), \
+                 mock.patch.object(subject.platform, "system",
+                                   return_value=system), \
+                 mock.patch.object(subject.platform, "machine",
+                                   return_value=machine), \
+                 mock.patch.object(subject.struct, "calcsize",
+                                   return_value=pointer_bytes), \
+                 mock.patch.object(subject.os, "sysconf",
+                                   return_value=page_bytes):
+                with self.assertRaisesRegex(ValueError, "physical trial requires"):
+                    subject._require_development_linux_abi()
+
     def test_requires_exactly_one_swap_partition(self):
         self.assertEqual(len(subject._eligible_partitions(
             {"blockdevices":[self.device]})), 1)
