@@ -80,6 +80,16 @@ class AlgorithmPhysicalTest(unittest.TestCase):
             with self.assertRaisesRegex(ValueError, "malformed"):
                 subject._algorithm_ram_evidence_arguments()
 
+    def test_virtualization_gate_reports_vm_without_device_discovery(self):
+        with mock.patch.object(subject.shutil, "which",
+                               return_value="/usr/bin/systemd-detect-virt"), \
+             mock.patch.object(
+                 subject.subprocess, "run",
+                 return_value=SimpleNamespace(
+                     returncode=0, stdout="vmware\n", stderr="")):
+            with self.assertRaisesRegex(ValueError, "vm: vmware"):
+                subject._require_bare_metal_host()
+
     def test_declining_confirmation_never_invokes_privilege(self):
         candidate = {"path":"/dev/sda1", "parent":"/dev/sda",
                      "partuuid":"example-01", "size_bytes":128 * 1024 * 1024,
@@ -173,8 +183,10 @@ class AlgorithmPhysicalTest(unittest.TestCase):
 
         def run(command, **_kwargs):
             commands.append(command)
-            if command == ["systemd-detect-virt", "--quiet"]:
-                return SimpleNamespace(returncode=1)
+            if command in (
+                    ["/usr/bin/systemd-detect-virt", "--vm"],
+                    ["/usr/bin/systemd-detect-virt", "--container"]):
+                return SimpleNamespace(returncode=1, stdout="none\n")
             if command[0] == "lsblk":
                 self.assertEqual(command[:4], [
                     "lsblk", "--json", "--tree", "--bytes"])
@@ -192,6 +204,8 @@ class AlgorithmPhysicalTest(unittest.TestCase):
         with mock.patch.object(subject.os, "geteuid", return_value=1000), \
              mock.patch.object(subject.platform, "machine",
                                return_value="x86_64"), \
+             mock.patch.object(subject.shutil, "which",
+                               return_value="/usr/bin/systemd-detect-virt"), \
              mock.patch.object(subject.subprocess, "run", side_effect=run), \
              mock.patch.object(subject.Path, "exists", return_value=False), \
              mock.patch.object(subject.Path, "read_text", return_value=(
@@ -203,7 +217,7 @@ class AlgorithmPhysicalTest(unittest.TestCase):
              mock.patch.object(subject.os.path, "realpath", side_effect=resolve):
             selected = subject._require_read_only_preflight()
 
-        self.assertEqual(len(commands), 2)
+        self.assertEqual(len(commands), 3)
         self.assertEqual(selected["path"], "/dev/sda4")
         self.assertEqual(selected["partuuid"], "7fb9401d-04")
         self.assertTrue(selected["parent_has_other_partitions"])

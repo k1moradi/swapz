@@ -7272,7 +7272,9 @@ privileged worker independently repeats that gate and still requires confirmed
 bare metal, a single precisely identified removable USB swap target, safe
 swapoff, independent persistent recovery, exact-main development evidence and
 verified restoration. An ARM64 VM, 16KiB-page kernel or unknown machine must
-remain BLOCKED; architectural support does not authorize new physical media.
+remain BLOCKED; the unprivileged selector should name a bounded VM/container
+class when systemd can identify it, without exposing host identifiers.
+Architectural support does not authorize new physical media.
 The separate formal physical correctness/acceptance route stays x86_64-only.
 
 Read-only discovery must select only the partition carrying the swap
@@ -7288,12 +7290,12 @@ verified physical parent (disk major:minor) against the complete backing
 ancestry of the persistent recovery filesystem, not merely compare the two
 partition numbers. On Lubuntu, recovery on `/dev/sda3` is not independent of
 the `/dev/sda4` target because both have physical parent `/dev/sda`.
-A missing, ambiguous or identical physical parent blocks mutation before
-state backup, `swapoff` or any block-zero write. The root-owned physical
-worker also refuses a selected partition that shares the root filesystem's
-physical parent, independently of the unprivileged algorithm selector. Rootless
-regression must exercise both same-parent sibling refusal and independently
-backed recovery.
+A missing, ambiguous or identical physical recovery parent blocks mutation
+before state backup, `swapoff` or any block-zero write. The root-owned worker
+refuses a root-parent sibling by default; the separately authorized Lubuntu
+development path may override only that one refusal after the protected
+primary-plan scope and independent-recovery checks below pass. Rootless
+regression must exercise both the default refusal and the scoped exception.
 
 The development writer keeps the dedicated-card path and may also admit the
 separately authorized Lubuntu shared-root `/dev/sda4` only through the

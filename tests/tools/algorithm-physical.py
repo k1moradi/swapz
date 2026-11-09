@@ -146,15 +146,31 @@ def _require_development_linux_abi() -> None:
         raise ValueError("physical trial requires 64-bit Linux with 4096-byte pages")
 
 
+def _require_bare_metal_host() -> None:
+    """Match the privileged VM/container refusal with a bounded diagnosis."""
+    detector = shutil.which("systemd-detect-virt")
+    if detector is None:
+        raise ValueError("systemd-detect-virt is required for physical admission")
+    for mode in ("--vm", "--container"):
+        result = subprocess.run(
+            [detector, mode], check=False, capture_output=True,
+            text=True, timeout=10)
+        detected = result.stdout.strip()
+        if result.returncode == 0:
+            kind = mode[2:]
+            value = detected if re.fullmatch(r"[A-Za-z0-9_.-]{1,32}", detected) else "detected"
+            raise ValueError(
+                f"physical trial is not admitted in a {kind}: {value}")
+        if result.returncode != 1 or detected not in {"", "none"}:
+            raise ValueError(
+                f"cannot verify bare-metal {mode[2:]} status")
+
+
 def _require_read_only_preflight() -> dict:
     if os.geteuid() == 0:
         raise ValueError("algorithm confirmation must run unprivileged")
     _require_development_linux_abi()
-    virtual = subprocess.run(
-        ["systemd-detect-virt", "--quiet"],
-        check=False, capture_output=True, timeout=10)
-    if virtual.returncode != 1:
-        raise ValueError("virtual or unverifiable host is not admitted")
+    _require_bare_metal_host()
     if Path("/sys/module/dm_swapz").exists():
         raise ValueError("dm_swapz is already loaded; foreign module ownership")
     try:
