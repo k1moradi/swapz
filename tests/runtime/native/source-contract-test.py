@@ -1750,12 +1750,13 @@ dmsetup() {
         self.assertIn("read_metadata_requests", header)
         self.assertIn("read_payload_requests", header)
         self.assertIn("read_payload_blocks", header)
-        self.assertIn("engine->read_metadata_requests++", engine)
+        # Kept as a status-ABI counter only; serialized metadata I/O is retired.
+        self.assertNotIn("engine->read_metadata_requests++", engine)
         self.assertIn("engine->read_payload_requests++", engine)
         self.assertIn("engine->read_payload_blocks += count", engine)
-        self.assertLess(engine.index("error = engine->io.read_blocks(", engine.index(
-            "int swapz_engine_read_page(")),
-            engine.index("engine->read_metadata_requests++"))
+        engine_read = source_body("swapz_engine_read_page", engine)
+        self.assertLess(engine_read.index("error = engine->io.read_blocks("),
+                        engine_read.index("engine->read_payload_requests++"))
         self.assertIn("read_meta_reqs=%u read_payload_reqs=%u", status)
         self.assertIn("read_payload_blocks=%u", status)
         self.assertIn("read_meta_cache_hits=%u", status)
@@ -1767,7 +1768,6 @@ dmsetup() {
         self.assertIn("read_full_extent_reqs=%u read_full_cache_hits=%u", status)
         self.assertIn("read_two_block_skips=%u", status)
         self.assertIn("read_two_block_skips++", engine)
-        engine_read = source_body("swapz_engine_read_page", engine)
         ram_authority = source_body("swapz_read_authoritative_payload", AUTH)
         self.assertIn("observed.payload_offset >= extent_bytes", engine_read)
         self.assertIn("swapz_read_authoritative_payload(", engine_read)
@@ -7197,8 +7197,10 @@ int main(void)
             boundary_recompute,
             planner.index("if (prefer_large_ties &&"))
         fit = source_body("swapz_fit_count", engine)
-        self.assertIn("if (blocks == 2U)", fit)
-        self.assertIn("1U + (payload_start > SWAPZ_BLOCK_BYTES)", fit)
+        self.assertIn("swapz_u32 remaining = payload_start", fit)
+        self.assertIn("record_reads = last - first + 1U", fit)
+        self.assertNotIn("sizeof(struct swapz_header)", fit)
+        self.assertNotIn("sizeof(struct swapz_record)", fit)
         batched_write = source_body(
             "swapz_engine_write_window_batched_read_cap", engine)
         self.assertIn("run.bytes = e->bulk_scratch", batched_write)
@@ -7234,8 +7236,9 @@ int main(void)
             "ctx->authority.batch_pending != run->extent_count",
             inflight_touch)
         self.assertIn("return false;", inflight_touch)
-        self.assertIn("if (!cached_metadata && engine->read_metadata_cache)", read)
-        self.assertIn("if (engine->read_metadata_cache)", read)
+        self.assertIn("payload_first == 0U", read)
+        self.assertIn("engine->read_metadata_cache", read)
+        self.assertNotIn("cached_metadata", read)
 
         # Packed payloads are stored back-to-back from bytes_total downward.
         # Exact adjacency plus bounded 16-bit fields makes the removed explicit
@@ -7244,11 +7247,14 @@ int main(void)
         self.assertNotIn("start > bytes_total", validate)
         self.assertNotIn("length > bytes_total - start", validate)
 
-        # Publication authenticates header/descriptor bytes once, then folds
-        # descriptor adjacency/identity into the existing authoritative pass.
-        self.assertIn("swapz_validate_metadata_crc(image", finish)
-        self.assertNotIn("swapz_validate(image", finish)
-        self.assertIn("decoded.payload_offset < metadata_end", finish)
+        # Kernel publication accepts only explicitly marked payload-only
+        # compressed transactions. Legacy serialized validation remains only
+        # in userspace fixtures and is not production authority.
+        self.assertIn("data_only = tx->compressed_data_only != 0", finish)
+        self.assertIn("#ifdef __KERNEL__", finish)
+        self.assertIn("if (!data_only)", finish)
+        self.assertIn("error = -EUCLEAN", finish)
+        self.assertIn("record->compressed_metadata_bound", finish)
         self.assertIn("previous_end = decoded.payload_offset", finish)
         self.assertIn("swapz_record_logical_le", validate)
         self.assertNotIn("swapz_record_logical_le", metadata_validate)
