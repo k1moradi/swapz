@@ -39,9 +39,6 @@ EXPECTED_SCOPE = "physical swap backing correctness smoke only"
 DEVELOPMENT_SCOPE = (
     "physical backing data-path smoke only; not production qualification")
 STATE_NAME = "state.json"
-# block0.bin is read only for historical pre-migration journals. New trials
-# never copy or restore the ordinary SWAPSPACE2 header.
-BACKUP_NAME = "block0.bin"
 RESULTS_NAME = "results.json"
 RUNTIME_OWNERSHIP_PHASE = "ONE_USE_RUNTIME_BOUND"
 RECOVERY_OWNERSHIP_PHASE = "ONE_USE_RECOVERY_BOUND"
@@ -1755,21 +1752,9 @@ def _validate_state_dir(state_dir):
         raise ProbeError(
             f"saved state file {STATE_NAME} must be root-owned mode 0600")
     try:
-        state = _load_unique_json((state_dir / STATE_NAME).read_bytes())
+        _load_unique_json((state_dir / STATE_NAME).read_bytes())
     except (OSError, ValueError) as exc:
         raise ProbeError("saved state record is unreadable") from exc
-    if state.get("raw_header_preservation_required") is True:
-        return
-    # Historical pre-migration journals alone need their original header copy.
-    try:
-        backup_entry = (state_dir / BACKUP_NAME).lstat()
-    except OSError as exc:
-        raise ProbeError(
-            f"missing legacy recovery file {BACKUP_NAME}: {exc}") from exc
-    if (not stat.S_ISREG(backup_entry.st_mode) or backup_entry.st_uid != 0 or
-            stat.S_IMODE(backup_entry.st_mode) != 0o600):
-        raise ProbeError(
-            f"legacy recovery file {BACKUP_NAME} must be root-owned mode 0600")
 
 
 def _write_all(fd, data):
