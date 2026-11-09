@@ -90,6 +90,38 @@ class PhysicalSwapProbeTests(unittest.TestCase):
                     probe.ProbeError, "contains or backs the root filesystem"):
                 probe._require_root_not_on_target(8, 3)
 
+    def test_unprovisioned_recovery_base_is_blocked_not_recovery_required(self):
+        # A fresh VM without recovery storage is not an interrupted trial.
+        # Refuse admission without creating directories or touching devices.
+        with tempfile.TemporaryDirectory() as directory:
+            missing = Path(directory) / "missing-recovery"
+            with mock.patch.object(probe, "_recovery_base",
+                                   REAL_RECOVERY_BASE), \
+                 mock.patch.object(probe, "RECOVERY_BASE", missing), \
+                 mock.patch.object(probe.os, "geteuid", return_value=0), \
+                 mock.patch.object(probe, "recover") as restore:
+                with self.assertRaisesRegex(
+                        probe.ProbeError, "recovery base or a parent is missing"
+                ) as refusal:
+                    probe.main(["recover-pending"])
+                self.assertEqual(
+                    probe._terminal_error_status(refusal.exception),
+                    ("BLOCKED", 2))
+                self.assertFalse(missing.exists())
+                restore.assert_not_called()
+
+    def test_pending_owned_recovery_retains_recovery_required_status(self):
+        with mock.patch.object(probe.os, "geteuid", return_value=0), \
+             mock.patch.object(
+                 probe, "recover_pending_algorithm_trial",
+                 side_effect=probe.RecoveryRequiredError(
+                     "authenticated owned recovery did not finish")):
+            with self.assertRaises(probe.RecoveryRequiredError) as refusal:
+                probe.main(["recover-pending"])
+            self.assertEqual(
+                probe._terminal_error_status(refusal.exception),
+                ("RECOVERY_REQUIRED", 3))
+
     def test_automatic_recovery_refuses_multiple_or_foreign_markers(self):
         one = self.recovery_base / "partition-11111111-01.active"
         two = self.recovery_base / "partition-22222222-01.active"

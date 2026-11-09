@@ -4947,11 +4947,15 @@ def main(argv=None):
         return 0
     if args.action == "recover-pending":
         if os.geteuid() != 0:
-            raise RecoveryRequiredError("automatic recovery requires root")
+            raise ProbeError("automatic recovery requires root")
         try:
             recover_pending_algorithm_trial()
-        except (ProbeError, OSError) as exc:
-            raise RecoveryRequiredError(str(exc)) from exc
+        except OSError as exc:
+            # Journal I/O uncertainty is not evidence that recovery finished.
+            # Keep existing ProbeError classifications: an unprovisioned
+            # recovery directory is BLOCKED, not RECOVERY_REQUIRED.
+            raise RecoveryRequiredError(
+                "automatic recovery journal inspection failed") from exc
         return 0
     if args.action == "recover":
         if os.geteuid() != 0:

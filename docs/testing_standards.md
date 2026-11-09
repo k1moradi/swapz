@@ -7328,8 +7328,19 @@ Before signature-dependent selection, the root helper checks for a single
 authenticated active recovery marker from a prior development real-swap
 trial and resumes the existing exact saved-journal recovery. Missing markers
 are harmless; multiple, malformed, foreign or uncertain markers must block
-the trial with `RECOVERY_REQUIRED` and never trigger a fresh format. The
-interactive root-owned preflight is permitted to request the operator's sudo
+the trial with `RECOVERY_REQUIRED` and never trigger a fresh format.
+A fresh host without provisioned recovery storage is BLOCKED (exit 2), not
+RECOVERY_REQUIRED (exit 3). Never implicitly create a missing recovery
+directory: an absent recovery mount could hide an older run. Persistent
+storage must be independently verified and provisioned before destructive
+admission. Authenticated pending ownership and uncertain journal I/O retain
+RECOVERY_REQUIRED. Rootless tests must distinguish both terminal statuses.
+When physical trials run on several hosts, avoid code-bearing pushes to
+canonical `main` throughout RAM qualification and the physical attempt:
+a real source advance invalidates the source-bound artifacts. Report-only
+advances require the existing independent checks and must not weaken this
+refusal.
+The interactive root-owned preflight is permitted to request the operator's sudo
 password before scanning protected journals, rather than treating an expired
 sudo credential timestamp as an unsafe-device or missing-swap condition.
 The unprivileged caller must not impose a timeout or kill the root recovery
