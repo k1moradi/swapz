@@ -2691,7 +2691,6 @@ int swapz_finish(struct swapz_authority *a, const struct swapz_tx *tx,
 	swapz_u8 payload_encodings[SWAPZ_MAX_RECORDS];
 	swapz_u32 new_segment;
 	swapz_u32 metadata_end, previous_end;
-	swapz_u32 new_record_read_penalty;
 	swapz_u8 new_sequence_delta = 0;
 	swapz_u32 new_gc_live_bytes = 0, new_gc_io_cost = 0;
 	swapz_u16 new_gc_min_live_blocks = 0;
@@ -2710,7 +2709,16 @@ int swapz_finish(struct swapz_authority *a, const struct swapz_tx *tx,
 		goto fail;
 	}
 	data_only = tx->compressed_data_only != 0;
+#ifdef __KERNEL__
+	/* Production compressed publication is RAM-authoritative only. */
 	if (!data_only) {
+		error = -EUCLEAN;
+		goto fail;
+	}
+#endif
+	if (!data_only) {
+		/* Userspace-only legacy authority fixtures remain readable while
+		 * their direct serialized tests are migrated independently. */
 		error = swapz_validate_metadata_crc(image, bytes_total);
 		if (error)
 			goto fail;
@@ -2743,12 +2751,9 @@ int swapz_finish(struct swapz_authority *a, const struct swapz_tx *tx,
 		sizeof(struct swapz_header) +
 		(swapz_u32)tx->count * sizeof(struct swapz_record);
 	previous_end = bytes_total;
-	new_record_read_penalty =
-		(tx->extent_blocks == 4U ? 3U : (swapz_u32)tx->extent_blocks) *
-		SWAPZ_BLOCK_BYTES;
 
 	/*
-	 * Phase 1. Validate every descriptor, payload CRC, generation and old
+	 * Phase 1. Validate every RAM descriptor, payload CRC, generation and old
 	 * liveness while accumulating bounded per-extent/per-segment deltas.
 	 * Global authority and GC accounting remain untouched until all checks
 	 * have succeeded.
@@ -2846,11 +2851,16 @@ int swapz_finish(struct swapz_authority *a, const struct swapz_tx *tx,
 		}
 
 		if (gc_enabled) {
-			swapz_u32 candidate_bytes =
-				(swapz_u32)payload_lengths[index] +
-				sizeof(struct swapz_record);
-			swapz_u32 candidate_io =
-				candidate_bytes + new_record_read_penalty;
+			swapz_u32 payload_first =
+				payload_offsets[index] >> SWAPZ_BLOCK_SHIFT;
+			swapz_u32 payload_last =
+				((swapz_u32)payload_offsets[index] +
+				 payload_lengths[index] - 1U) >>
+				SWAPZ_BLOCK_SHIFT;
+			swapz_u32 candidate_bytes = payload_lengths[index];
+			swapz_u32 candidate_io = candidate_bytes +
+				(payload_last - payload_first + 1U) *
+					SWAPZ_BLOCK_BYTES;
 			swapz_u16 candidate_min_blocks =
 				payload_lengths[index] >=
 				SWAPZ_GC_UNSHAREABLE_MIN_LENGTH ? 1U : 0U;
@@ -2947,10 +2957,11 @@ int swapz_finish(struct swapz_authority *a, const struct swapz_tx *tx,
 				error = -EUCLEAN;
 				goto fail;
 			}
-			io_cost = live_bytes +
-				((old->extent_blocks == 4U ?
-				  3U : (swapz_u32)old->extent_blocks) <<
-				 SWAPZ_BLOCK_SHIFT);
+			io_cost = swapz_gc_estimated_io_cost(old);
+			if (!io_cost) {
+				error = -EUCLEAN;
+				goto fail;
+			}
 			min_live_blocks = swapz_gc_min_live_blocks(old);
 			if (segment_delta->live_bytes >
 			    ~(swapz_u32)0 - live_bytes ||

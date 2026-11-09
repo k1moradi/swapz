@@ -130,95 +130,34 @@ static swapz_u8 swapz_fit_count(const struct swapz_compressed_page *pages,
 				swapz_u32 *read_blocks)
 {
 	swapz_u32 payload_start = (swapz_u32)blocks << SWAPZ_BLOCK_SHIFT;
+	swapz_u32 remaining = payload_start;
 	swapz_u8 included = 0;
 	swapz_u8 index;
 
 	*read_blocks = 0;
-	if (blocks == 1U) {
-		swapz_u32 remaining = SWAPZ_BLOCK_BYTES -
-			sizeof(struct swapz_header);
+	for (index = start; index < count; ++index) {
+		swapz_u8 earlier;
+		swapz_u32 offset, first, last, record_reads;
+		const struct swapz_compressed_page *page = &pages[index];
 
-		for (index = start; index < count; ++index) {
-			swapz_u8 earlier;
-			swapz_u32 need;
-			const struct swapz_compressed_page *page = &pages[index];
-
-			if (included == SWAPZ_MAX_RECORDS)
-				break;
-			if (!logical_pages_unique)
-				for (earlier = start; earlier < index; ++earlier)
-					if (page->logical_page == pages[earlier].logical_page)
-						goto out_one_block;
-			need = (swapz_u32)page->length +
-				sizeof(struct swapz_record);
-			if (remaining < need)
-				break;
-			remaining -= need;
-			included++;
-		}
-out_one_block:
-		*read_blocks = included;
-		return included;
-	}
-	if (max_read_blocks == 1U)
-		return 0;
-	if (blocks == 2U) {
-		swapz_u32 remaining = (2U * SWAPZ_BLOCK_BYTES) -
-			sizeof(struct swapz_header);
-
-		for (index = start; index < count; ++index) {
-			swapz_u8 earlier;
-			swapz_u32 need;
-			const struct swapz_compressed_page *page = &pages[index];
-
-			if (included == SWAPZ_MAX_RECORDS)
-				break;
-			if (!logical_pages_unique)
-				for (earlier = start; earlier < index; ++earlier)
-					if (page->logical_page == pages[earlier].logical_page)
-						return included;
-			need = (swapz_u32)page->length +
-				sizeof(struct swapz_record);
-			if (remaining < need)
-				break;
-			remaining -= need;
-			*read_blocks += 1U + (payload_start > SWAPZ_BLOCK_BYTES);
-			payload_start -= page->length;
-			included++;
-		}
-		return included;
-	}
-	{
-		swapz_u32 remaining = payload_start -
-			sizeof(struct swapz_header);
-
-		for (index = start; index < count; ++index) {
-			swapz_u8 earlier;
-			swapz_u32 offset, need;
-			swapz_u32 first, last, record_reads;
-			const struct swapz_compressed_page *page = &pages[index];
-
-			if (included == SWAPZ_MAX_RECORDS)
-				break;
-			if (!logical_pages_unique)
-				for (earlier = start; earlier < index; ++earlier)
-					if (page->logical_page == pages[earlier].logical_page)
-						return included;
-			need = (swapz_u32)page->length +
-				sizeof(struct swapz_record);
-			if (remaining < need)
-				break;
-			offset = payload_start - page->length;
-			first = offset >> SWAPZ_BLOCK_SHIFT;
-			last = (payload_start - 1U) >> SWAPZ_BLOCK_SHIFT;
-			record_reads = last - first + 1U + (first ? 1U : 0U);
-			if (max_read_blocks && record_reads > max_read_blocks)
-				break;
-			remaining -= need;
-			*read_blocks += record_reads;
-			payload_start = offset;
-			included++;
-		}
+		if (included == SWAPZ_MAX_RECORDS)
+			break;
+		if (!logical_pages_unique)
+			for (earlier = start; earlier < index; ++earlier)
+				if (page->logical_page == pages[earlier].logical_page)
+					return included;
+		if (remaining < page->length)
+			break;
+		offset = payload_start - page->length;
+		first = offset >> SWAPZ_BLOCK_SHIFT;
+		last = (payload_start - 1U) >> SWAPZ_BLOCK_SHIFT;
+		record_reads = last - first + 1U;
+		if (max_read_blocks && record_reads > max_read_blocks)
+			break;
+		remaining -= page->length;
+		*read_blocks += record_reads;
+		payload_start = offset;
+		included++;
 	}
 	return included;
 }
@@ -234,7 +173,7 @@ static int swapz_engine_plan_bounded_policy(
 	/*
 	 * Lexicographic objective in one bounded word:
 	 * bits 16..24 = physical blocks (<= 4 * 64 = 256),
-	 * bits 7..15  = cold read blocks (<= 3 * 64 = 192),
+	 * bits 7..15  = cold payload read blocks (<= 3 * 64 = 192),
 	 * bits 0..6   = extent count (<= 64).
 	 * The fields cannot carry into one another, so unsigned comparison is
 	 * exactly the previous bytes/read/batch ordering. The caller's output
@@ -308,8 +247,7 @@ static int swapz_engine_plan_bounded_policy(
 				classes[index] = blocks;
 				records_per_extent[index] = take;
 			}
-			if (take == (swapz_u8)(count - (swapz_u8)index) ||
-			    (class_index == 0 && max_read_blocks == 1U))
+			if (take == (swapz_u8)(count - (swapz_u8)index))
 				break;
 		}
 		if (!records_per_extent[index])
@@ -408,11 +346,10 @@ swapz_u16 swapz_engine_next_uniform_pack_limit(swapz_u16 length)
 
 	if (length < 48U || length > SWAPZ_MAX_COMPRESSED)
 		return 0;
-	stride = (swapz_u32)length + sizeof(struct swapz_record);
+	stride = length;
 	for (blocks = 1; blocks <= SWAPZ_MAX_BLOCKS; blocks <<= 1) {
 		swapz_u32 available =
-			(swapz_u32)blocks * SWAPZ_BLOCK_BYTES -
-			sizeof(struct swapz_header);
+			(swapz_u32)blocks * SWAPZ_BLOCK_BYTES;
 		swapz_u32 records = available / stride + 1U;
 		swapz_u32 limit;
 
@@ -421,9 +358,6 @@ swapz_u16 swapz_engine_next_uniform_pack_limit(swapz_u16 length)
 		if (records > SWAPZ_MAX_RECORDS)
 			break;
 		limit = available / records;
-		if (limit <= sizeof(struct swapz_record))
-			continue;
-		limit -= sizeof(struct swapz_record);
 		if (limit < length && limit > best)
 			best = limit;
 	}
@@ -2186,10 +2120,7 @@ int swapz_engine_read_page(struct swapz_engine *engine, swapz_u32 logical_page,
 		engine->physical_read_blocks += count;
 		engine->read_payload_requests++;
 		engine->read_payload_blocks += count;
-		/* Retain the historical status field as block-zero data I/O only;
-		 * it no longer denotes metadata authentication or descriptor reads. */
-		if (start == 0U)
-			engine->read_metadata_requests++;
+		/* Block zero is ordinary payload data; metadata lives only in RAM. */
 		if (count == observed.extent_blocks)
 			engine->read_full_extent_requests++;
 		else if (observed.extent_blocks == 2U && count == 1U)

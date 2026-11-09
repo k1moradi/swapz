@@ -14,9 +14,9 @@ static inline int swapz_gc_valid_extent_blocks(swapz_u8 extent_blocks)
 /*
  * This estimator runs over authoritative volatile metadata: no extra
  * lower reads during victim selection. Zero denotes corrupt/not-live input.
- * One 16-byte descriptor per compressed record is included; headers,
- * packing fragmentation and lower read amplification are not predicted.
- * Actual GC lower bytes are separately measured after relocation.
+ * Compressed payload bytes are the only live backing bytes. All descriptors
+ * and integrity metadata are volatile RAM authority. Packing fragmentation and
+ * lower read amplification are accounted separately.
  */
 static inline swapz_u32 swapz_gc_live_byte_cost(const struct swapz_map *m)
 {
@@ -29,7 +29,7 @@ static inline swapz_u32 swapz_gc_live_byte_cost(const struct swapz_map *m)
 			SWAPZ_BLOCK_BYTES : 0;
 	if (!m->payload_length || m->payload_length > SWAPZ_MAX_COMPRESSED)
 		return 0;
-	return (swapz_u32)m->payload_length + sizeof(struct swapz_record);
+	return m->payload_length;
 }
 
 /*
@@ -39,11 +39,23 @@ static inline swapz_u32 swapz_gc_live_byte_cost(const struct swapz_map *m)
 static inline swapz_u32 swapz_gc_estimated_io_cost_with_bytes(
 	const struct swapz_map *m, swapz_u32 bytes)
 {
-	swapz_u32 reads;
+	swapz_u32 first_block, last_block, reads;
 
-	if (!bytes || !swapz_gc_valid_extent_blocks(m->extent_blocks))
+	if (!bytes || !m || !swapz_gc_valid_extent_blocks(m->extent_blocks))
 		return 0;
-	reads = m->extent_blocks == 4 ? 3 : m->extent_blocks;
+	if (m->raw)
+		return m->extent_blocks == 1 ? bytes + SWAPZ_BLOCK_BYTES : 0;
+	if (!m->payload_length ||
+	    m->payload_offset >=
+		(swapz_u32)m->extent_blocks * SWAPZ_BLOCK_BYTES ||
+	    m->payload_length >
+		(swapz_u32)m->extent_blocks * SWAPZ_BLOCK_BYTES -
+		m->payload_offset)
+		return 0;
+	first_block = m->payload_offset >> SWAPZ_BLOCK_SHIFT;
+	last_block = ((swapz_u32)m->payload_offset +
+		      m->payload_length - 1U) >> SWAPZ_BLOCK_SHIFT;
+	reads = last_block - first_block + 1U;
 	return bytes + reads * SWAPZ_BLOCK_BYTES;
 }
 
@@ -55,8 +67,8 @@ static inline swapz_u32 swapz_gc_estimated_io_cost_with_bytes(
  * cache/budget decide the completed count, so this is a selection
  * heuristic, NOT a measured or guaranteed bound on physical IO.
  *
- * Raw: 1 lower 4KiB read + a 4KiB copy; compressed: up to 1/2/3
- * lower reads for 1/2/4-block extents plus payload+descriptor write cost.
+ * Raw: 1 lower 4KiB read + a 4KiB copy; compressed: one or two lower
+ * payload-block reads plus payload-only write cost.
  * Explicitly penalizing PER-RECORD reads corrects the 3 tiny records
  * versus 1 large record counterexample found by loaded alpha.4 tests.
  */
@@ -69,8 +81,8 @@ static inline swapz_u32 swapz_gc_estimated_io_cost(const struct swapz_map *m)
 /*
  * A single 1MiB destination MUST retain some free space for the
  * blocked foreground write. A lower bound on the relocated object
- * footprint is the sum of raw page bytes or compressed payloads plus
- * SWZ descriptors. If even that optimistic lower bound fills the whole
+ * footprint is the sum of raw page bytes or compressed payload bytes. If
+ * even that optimistic lower bound fills the whole
  * destination, no packing heuristic can produce useful reclaim.
  *
  * This is a necessary condition, NOT a promise that a candidate with
@@ -85,8 +97,8 @@ static inline int swapz_gc_has_possible_headroom(swapz_u32 live_bytes)
 /*
  * PROVEN physical lower bound for large compressed GC survivors.
  *
- * At most FOUR >=3258-byte records can occupy one 16KiB SWZ extent:
- * five of them + one header + five 16B descriptors exceed 16384B.
+ * At most FOUR >=3277-byte records can occupy one 16KiB payload extent:
+ * five such payloads exceed 16384B even with no on-media metadata.
  * Similarly at most two can occupy an 8KiB extent, or one a 4KiB
  * extent. Consequently every such survivor requires at least ONE
  * physical 4KiB allocation unit on average, even with perfect packing.
@@ -98,8 +110,7 @@ static inline int swapz_gc_has_possible_headroom(swapz_u32 live_bytes)
  * performing potentially 2MiB of wasted relocation I/O.
  */
 #define SWAPZ_GC_UNSHAREABLE_MIN_LENGTH \
-	((SWAPZ_MAX_EXTENT_BYTES - sizeof(struct swapz_header) - \
-	  5U * sizeof(struct swapz_record)) / 5U + 1U)
+	(SWAPZ_MAX_EXTENT_BYTES / 5U + 1U)
 
 static inline swapz_u8 swapz_gc_min_live_blocks(const struct swapz_map *m)
 {
