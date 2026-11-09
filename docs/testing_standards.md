@@ -217,6 +217,13 @@ The manifest has schema `swapz-optimization-validation-v1`, two complete
 with distinct profiles `x86_64-v2`, `x86_64-v4` and `aarch64`. Each host supplies
 its actual 64-hex-character `host_id_sha256` and an ordered `pairs` array of
 `{"baseline":"report-path.json","candidate":"report-path.json"}` entries.
+Optionally add both `baseline_time` and `candidate_time` keys to every
+pair, referencing GNU `/usr/bin/time -v -o <path>` sidecars produced by the
+same owner `make test` commands. The validator then compares whole-command
+wall, user CPU, system CPU and maximum reported RSS separately from RAM-stage
+elapsed time. GNU time high-water RSS is not an additive or synchronized
+whole-tree memory peak; optional physical prompts can distort whole-command
+wall time. Mixed presence of time sidecars within a host fails closed.
 Paths are relative to the manifest file. Five or more independent paired
 repetitions per host are needed before an exact one-sided sign test can yield
 p <= 0.05; fewer repetitions remain **INSUFFICIENT_REPEATS**. The ISA profile

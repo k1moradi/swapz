@@ -205,6 +205,59 @@ def summarize_report(path, *, source_sha, host_id, architecture):
     }
 
 
+
+def read_gnu_time(path):
+    """Parse bounded /usr/bin/time -v sidecar; never run external commands."""
+    try:
+        with path.open("rb") as stream:
+            payload = stream.read(16385)
+        require(len(payload) <= 16384, f"{path}: GNU time output too large")
+        lines = payload.decode("utf-8").splitlines()
+    except (OSError, UnicodeError) as error:
+        raise InvalidEvidence(f"{path}: unreadable GNU time sidecar: {error}") from error
+    expected = {
+        "User time (seconds)": "cpu_user_s",
+        "System time (seconds)": "cpu_system_s",
+        "Elapsed (wall clock) time (h:mm:ss or m:ss)": "wall_s",
+        "Maximum resident set size (kbytes)": "max_rss_kib",
+        "Exit status": "exit_status",
+    }
+    values = {}
+    for line in lines:
+        key, separator, raw = line.strip().partition(": ")
+        if not separator or key not in expected:
+            continue
+        field = expected[key]
+        require(field not in values, f"{path}: duplicate GNU time field {key}")
+        if field == "wall_s":
+            parts = raw.split(":")
+            require(len(parts) in (2, 3), f"{path}: invalid elapsed format")
+            try:
+                numbers = [float(value) for value in parts]
+            except ValueError as error:
+                raise InvalidEvidence(f"{path}: invalid elapsed time") from error
+            require(all(math.isfinite(value) and value >= 0 for value in numbers)
+                    and numbers[-1] < 60 and
+                    (len(numbers) == 2 or numbers[-2] < 60),
+                    f"{path}: invalid time components")
+            values[field] = sum(number * 60 ** index for index, number in
+                                enumerate(reversed(numbers)))
+        else:
+            try:
+                value = float(raw)
+            except ValueError as error:
+                raise InvalidEvidence(f"{path}: invalid GNU time value") from error
+            finite_number(value, f"{path}: {field}")
+            values[field] = value
+    require(set(values) == set(expected.values()),
+            f"{path}: required GNU time fields unavailable")
+    require(values["exit_status"] in (0, 2),
+            f"{path}: unexpected make test exit status")
+    require(values["max_rss_kib"].is_integer(),
+            f"{path}: noninteger resident memory")
+    return values
+
+
 def one_sided_sign_probability(differences):
     positives = sum(item > 0 for item in differences)
     negatives = sum(item < 0 for item in differences)
@@ -237,9 +290,13 @@ def compare(manifest_path):
         observed = []
         frozen_scope = None
         for index, pair in enumerate(samples):
-            require(isinstance(pair, dict) and set(pair) == {"baseline", "candidate"},
-                    f"{label} pair {index}: expected baseline and candidate paths")
+            require(isinstance(pair, dict) and
+                    set(pair) in ({"baseline", "candidate"},
+                                  {"baseline", "candidate", "baseline_time",
+                                   "candidate_time"}),
+                    f"{label} pair {index}: expected report paths and optional time sidecars")
             entries = []
+            time_observations = []
             for arm, source_sha in zip(("baseline", "candidate"), source):
                 relative_path = pair[arm]
                 require(isinstance(relative_path, str) and relative_path,
@@ -248,6 +305,14 @@ def compare(manifest_path):
                 entries.append(summarize_report(
                     path, source_sha=source_sha, host_id=host_id,
                     architecture=HOST_PROFILES[label]))
+                if f"{arm}_time" in pair:
+                    time_path = pair[f"{arm}_time"]
+                    require(isinstance(time_path, str) and time_path,
+                            f"{label} pair {index}: missing {arm} time sidecar")
+                    time_observations.append(read_gnu_time(
+                        (manifest_path.parent / time_path).resolve()))
+            require(not time_observations or len(time_observations) == 2,
+                    f"{label} pair {index}: unpaired time sidecar")
             left, right = entries
             for summary in entries:
                 scope = (summary["kernel_release"],
@@ -258,34 +323,48 @@ def compare(manifest_path):
                     frozen_scope = scope
                 require(scope == frozen_scope,
                         f"{label} pair {index}: test scope or workload changed")
-            observed.append((left, right))
+            observed.append((left, right, time_observations))
+        require(all(bool(sample[2]) == bool(observed[0][2])
+                    for sample in observed),
+                f"{label}: all pairs must use the same time measurement scope")
         improvements = [before["stage_total_s"] - after["stage_total_s"]
-                        for before, after in observed]
-        baselines = [before["stage_total_s"] for before, _ in observed]
-        candidates = [after["stage_total_s"] for _, after in observed]
+                        for before, after, _ in observed]
+        baselines = [before["stage_total_s"] for before, _, _ in observed]
+        candidates = [after["stage_total_s"] for _, after, _ in observed]
         probability = one_sided_sign_probability(improvements)
         phase_changes = {}
         for stage in ("rootless_s", "loaded_s"):
             phase_changes[stage] = {
-                "baseline_median_s": statistics.median(a[stage] for a, _ in observed),
-                "candidate_median_s": statistics.median(b[stage] for _, b in observed),
+                "baseline_median_s": statistics.median(a[stage] for a, _, _ in observed),
+                "candidate_median_s": statistics.median(b[stage] for _, b, _ in observed),
             }
         phase_changes["pair_phases"] = {
             phase: {"baseline_median_ms": statistics.median(
-                        before["pair_phase_ms"][phase] for before, _ in observed),
+                        before["pair_phase_ms"][phase] for before, _, _ in observed),
                     "candidate_median_ms": statistics.median(
-                        after["pair_phase_ms"][phase] for _, after in observed)}
+                        after["pair_phase_ms"][phase] for _, after, _ in observed)}
             for phase in PAIR_PHASES
         }
         resources = {}
         for key in ("replay_peak_rss_kib", "peak_host_busy_fraction",
                     "peak_host_cpu_psi_fraction", "id36_memory_peak_bytes"):
-            values = [[item[key] for item in pair] for pair in observed]
+            values = [[item[key] for item in pair[:2]] for pair in observed]
             resources[key] = (None if any(value is None for pair in values for value in pair)
                               else {"baseline_median": statistics.median(pair[0] for pair in values),
                                     "candidate_median": statistics.median(pair[1] for pair in values)})
+        whole_test = None
+        if observed[0][2]:
+            whole_test = {}
+            for field in ("wall_s", "cpu_user_s", "cpu_system_s", "max_rss_kib"):
+                whole_test[field] = {
+                    "baseline_median": statistics.median(pair[2][0][field]
+                                                         for pair in observed),
+                    "candidate_median": statistics.median(pair[2][1][field]
+                                                          for pair in observed),
+                }
         output.append({
             "profile": label, "host_id_sha256": host_id, "paired_runs": len(observed),
+            "whole_make_test_gnu_time": whole_test,
             "baseline_median_ram_stage_s": statistics.median(baselines),
             "candidate_median_ram_stage_s": statistics.median(candidates),
             "paired_median_saved_s": statistics.median(improvements),

@@ -8774,6 +8774,34 @@ class OptimizationPhase5ValidationContract(unittest.TestCase):
                 with self.assertRaises(self.validation.InvalidEvidence):
                     self.validation.compare(path)
 
+    def test_gnu_time_sidecars_are_paired_and_invalid_values_rejected(self):
+        with tempfile.TemporaryDirectory() as directory_name:
+            directory = Path(directory_name)
+            manifest_path = self.create_manifest(directory)
+            manifest = json.loads(manifest_path.read_text())
+            # The sidecar records optional whole-make wall/CPU/RSS values.
+            sample = (
+                "User time (seconds): 24.5\n"
+                "System time (seconds): 6.2\n"
+                "Elapsed (wall clock) time (h:mm:ss or m:ss): 1:04.50\n"
+                "Maximum resident set size (kbytes): 17232\n"
+                "Exit status: 2\n")
+            for host in manifest["hosts"]:
+                for index, pair in enumerate(host["pairs"]):
+                    for arm in ("baseline", "candidate"):
+                        name = f"{host['profile']}-{index}-{arm}.time"
+                        (directory / name).write_text(sample)
+                        pair[f"{arm}_time"] = name
+            manifest_path.write_text(json.dumps(manifest))
+            result = self.validation.compare(manifest_path)
+            self.assertEqual(result["hosts"][0]
+                             ["whole_make_test_gnu_time"]["wall_s"]
+                             ["baseline_median"], 64.5)
+            broken = directory / manifest["hosts"][0]["pairs"][0]["baseline_time"]
+            broken.write_text(sample.replace("17232", "not-a-number"))
+            with self.assertRaises(self.validation.InvalidEvidence):
+                self.validation.compare(manifest_path)
+
     def test_exact_paired_sign_probability_and_ties(self):
         self.assertEqual(self.validation.one_sided_sign_probability(
             [0, 0]), 1.0)
