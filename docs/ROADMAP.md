@@ -14,17 +14,17 @@ budget defined in AGENT_CONTEXT.
 
 ## P0: migrate extent metadata to RAM; preserve SWAPSPACE2
 
-**OPEN / RELEASE BLOCKER.** Existing SWAPSPACE2 partition header, UUID and
-partition table must not be changed for swapz. The raw formatter CLI is
-disabled; remaining synthetic SWZ001 tests are legacy. Current compressed
-SWZ extents persist 16-byte headers and 16-byte record descriptors:
-move these to bounded RAM while keeping 4/8/16KiB data-only extents,
-generation/CRC validation, safe GC, and byte-exact READ/WRITE correctness.
-The kernel constructor now rejects all non-null_blk backing while the in-band
-codec remains, before lower I/O admission. This is a temporary P0 safety
-interlock, **not** completion of this migration or permission to run physical
-swapz. It must be removed only together with validated payload-only packing,
-RAM-side compressed CRCs, selective READ and GC rewrites, and updated tests.
+**OPEN / RELEASE BLOCKER (qualification).** Existing SWAPSPACE2 partition
+header, UUID and partition table must not be changed for swapz. The raw
+formatter CLI is disabled; remaining serialized SWZ tests are legacy
+userspace fixtures. Production kernel compressed extents are now payload-only:
+record/extent descriptors, generation, sequence, CRC, offsets/lengths, mapping
+and GC authority are bounded RAM state while 4/8/16KiB packing is preserved.
+The obsolete constructor/lifecycle metadata-migration lockout is removed so
+the already-authorized ordinary-swap test path can exercise this design.
+This does **not** itself qualify physical or production use: current-source
+loaded byte-exact, corruption/error, concurrency, GC, RAM-budget and real
+SWAPSPACE2 header-preservation gates remain mandatory.
 
 Review partition identity and swapoff admission, all lower physical offsets
 including DISCARD, metadata-cache lifetimes, corrupted/partial I/O,
