@@ -426,239 +426,46 @@ before validation rather than reading an arbitrarily large malformed record.
 No telemetry, token, or stale mapper snapshot grants creation authority.
 
 
-### Legacy synthetic formatter descriptor and SWZ header contract (retirement pending)
+### Physical backing format and legacy formatter retirement
 
-The old instructions below are only for synthetic fake devices, not physical
-partition formatting. Production swapzctl format is forbidden.
+Production has no raw-partition swapz formatter. A real backing device is an
+already formatted ordinary Linux `SWAPSPACE2` partition selected through the
+protected PARTUUID lifecycle. No pathname, root privilege, command-line
+identity bundle, development-card authorization or test helper may grant
+permission to replace block zero, create `SWAPZ001`, change the swap UUID, or
+run `mkswap` on the raw partition.
 
-The standalone formatter has no implicit authority derived from a pathname,
-root privilege, or the project's standing permission for one development card.
-There is no destructive `swapzctl format <blockdev>` form. Formatting requires
-one complete identity bundle in fixed order:
-`--expect-major-minor <major>:<minor> --expect-bytes <decimal-bytes>
---expect-partuuid <partuuid> --expect-parent-major-minor <major>:<minor>
---expect-parent-model <model> --expect-parent-transport usb`.
-Integers are canonical unsigned decimal values that must fit the platform
-`dev_t`/64-bit geometry, and the PARTUUID is canonical hexadecimal plus
-single internal hyphens. Numeric parsing must compare each incoming digit to
-the field's limit before computing `limit - digit`, including small sysfs
-ranges such as the removable attribute's 0..1 bound. The formatter contains no hard-coded development
-device path, major:minor, capacity, PARTUUID or parent identity.
+Before a real-device transition, bind the selected PARTUUID to the opened block
+device, exact byte geometry and physical parent; reject mounted, held, aliased,
+zoned, read-only, malformed or otherwise ambiguous targets. Revalidate the
+protected selector and opened target identity at the last safe boundary before
+`swapoff` and mapper creation. The original first 4096 bytes are an immutable
+integrity witness and must byte-match the admitted image throughout the
+transaction. A mismatch is a hard failure requiring read-only inspection, not a
+reason to repair or reformat the partition.
 
-The supplied identity bundle is **not an authorization grant**. Before any
-device open, the standalone formatter must read the existing protected
-root-owned primary-target selector with the manager's read-only verified
-configuration API and require its canonical PARTUUID to match the expected
-partition exactly. Missing, changed, malformed or unreadable protected
-configuration refuses formatting even for an otherwise matching removable
-drive. Recheck that protected selector with every opened-descriptor
-revalidation, especially immediately before the header write. The standalone
-formatter does not acquire privileged lifecycle authority, perform an implicit
-selector update, or authorize a different card merely because its CLI
-arguments and sysfs topology agree.
+The Device Mapper target owns only the aligned data range after the protected
+first page. `iterate_devices`, WRITE, READ, DISCARD and GC must use that same
+range and may never address block zero or the unused alignment tail. All
+swapz-specific mapping, extent/record descriptors, generation/sequence, CRC,
+payload offset/length, allocator and GC authority are bounded volatile RAM
+state. The lower image contains only payload bytes and deterministic zero
+padding while preserving the 4/8/16KiB extent design.
 
-Before opening for mutation, the path and `/dev/disk/by-partuuid/<PARTUUID>`
-alias must both resolve to the expected partition device number. The matching
-`/sys/dev/block/<major>:<minor>` object must identify a real non-virtual
-partition, repeat the same PARTUUID in its uevent, have a distinct physical
-whole-device parent, and that parent must be the exact expected device, report
-removable media, match the expected printable model, and resolve through a USB
-transport path. The selected partition must be the parent's sole partition.
-Both the partition and its parent must have empty holders and slaves, and
-neither may appear mounted or as active swap. Production formatter clearance
-requires a complete well-formed zero-row `/proc/swaps`; every active row,
-including an apparently unrelated regular swapfile or block device, refuses
-with `EOPNOTSUPP` until a separately reviewed kernel-held backing identity,
-lower-device ancestry and exclusion contract is proven through the destructive
-write. `/proc/swaps` is an activity inventory, not a transferable userspace
-identity handle: `seq_file_path()` renders the retained kernel `struct file`
-path, while a later `lstat()` resolves the emitted string through the
-formatter's current mount view. A private bind overmount can preserve the
-retained `d_path()` string while redirecting that lookup to a different
-regular file and filesystem `st_dev`; therefore current `st_dev`/`st_ino`
-or block-node `st_rdev` is not production admission authority. Ordinary
-rename/unlink is a control rather than the demonstrated gap: `d_path()`
-follows the rename and marks an unlinked retained file ` (deleted)`.
+Only a newly created, positively identified run-owned mapper may receive
+`mkswap`. Switching between ordinary swap and swapz is a same-boot lifecycle:
+verified `swapoff` of the exact raw partition, create/activate swapz, and
+either keep the verified mapper active after a successful owner choice or
+remove run-owned state and `swapon` the unchanged raw partition at its
+recorded priority. No reboot or raw-header restoration belongs to this normal
+path.
 
-The readable `/proc/swaps` inventory must contain the kernel's exact tabbed
-five-column header; empty, headerless, malformed or type-inconsistent rows
-refuse formatting rather than being interpreted as no active swap.
-Kernel-escaped swap paths must decode `\\040`, `\\011`, `\\012` and
-`\\134` during inventory validation, while other raw non-NUL filename bytes
-remain valid. Every record must terminate in a newline; embedded NULs, records
-of 8192 bytes or longer, inventories over 16 MiB or 65536 data rows refuse.
-Multiple active rows remain non-clearance; pathname identity deduplication must
-not turn any active inventory into permission to format.
-Mount inventory must inspect the formatter's own mount table and every
-distinct visible mount namespace, not just its own mount namespace. An empty
-opened PID mountinfo table is ambiguous and fails closed except for a peer
-whose mount-namespace device/inode matches the coordinator: that redundant
-view may be skipped only after the coordinator table contains a valid `/`
-mountpoint row, `/proc/self/root` resolves exactly to `/`, and a second
-namespace identity check still matches. The coordinator's full-root mount
-table then covers that shared namespace. A foreign empty table or a chrooted
-coordinator never uses this exception.
-Top-level `/proc` enumeration exposes thread-group leaders only. Enumerate
-each visible `/proc/<pid>/task` directory and inspect every non-leader
-`/proc/<pid>/task/<tid>/ns/mnt` plus its task-specific `mountinfo`; mount
-namespace membership can differ between threads. Count visible leaders and
-non-leader tasks against one finite 4,194,304-entry ceiling, and cap the
-combined bytes parsed from all mount tables at 64 MiB. A task namespace may be
-skipped only when its identity is revalidated and matches the coordinator's
-namespace whose complete root table was already validated. Normal process or
-thread exit is not storage ambiguity: an EINVAL, ENOENT or ESRCH failure to
-open a PID or task mount table may be ignored only when the corresponding
-namespace path is also absent. A still-present namespace, unreadable or
-incomplete task directory, any other open failure, or any failure after a
-mount table was opened refuses formatting. After reading a task table,
-revalidate that its namespace identity did not change. These are repeated
-snapshots, not an atomic freeze against new mounts, detached namespace file
-descriptors or inaccessible mount namespaces.
-Mount inventory parsing
-must accept Linux pseudo-filesystem major-zero device identifiers (for example
-`0:20`) without mistaking them for the selected nonzero-major block device.
-Every opened mount table must contain at least one complete row. Mount IDs
-and known numeric propagation IDs are canonical positive signed-int decimal;
-the device field is a valid major:minor; the mountpoint is an absolute path
-with the kernel's octal escaping; and all three post-separator fields are
-required. The root field is filesystem-specific and may be a non-path token
-(for example nsfs), so it is required but not assumed absolute. Known optional
-propagation tags must validate, while unknown optional fields are ignored as
-required by the extensible Linux mountinfo grammar. Known propagation tags may appear at most once and the mount/superblock option
-fields must carry the kernel's ro/rw prefix. Duplicate mount IDs within one
-table are malformed. The combined process/task scan is finite at Linux's
-64-bit PID_MAX_LIMIT ceiling (4,194,304 task entries), avoiding a lower
-arbitrary process cap that could reject a valid large host. An empty table or
-a structurally incomplete unrelated sibling entry is ambiguity, not clearance. Malformed mountinfo rows and
-unverified target identities still fail closed.
-Missing evidence for an existing mount namespace, malformed, unreadable,
-permission-denied, changing or ambiguous evidence fails closed.
-
-After that read-only preflight, open the requested path exactly once with
-`O_RDWR | O_EXCL | O_CLOEXEC | O_NOFOLLOW`. The requested final path component
-must be a root-owned, non-world-writable block node, never a symlink. The opened
-descriptor is the I/O authority; path and descriptor must also identify the
-same inode (`st_dev`, `st_ino`) and not merely the same block `st_rdev`.
-Before reading block zero, require `fstat()` on that same descriptor plus a
-fresh path/PARTUUID-alias/sysfs/topology/mount/swap snapshot to match the
-expected device, parent and exact `BLKGETSIZE64` byte count. The same opened
-descriptor must report `BLKROGET == 0`; a read-only transition is an identity/
-state failure, not an invitation to try another path. Geometry must be 4KiB
-aligned and large enough for the authorization header plus minimum data.
-Revalidate that same complete opened-descriptor identity immediately before the
-only destructive operation, so a replaced symlink, stale alias, changed
-PARTUUID, changed geometry, new holder/mount/swap use, parent substitution or
-device disappearance cannot reach a write.
-
-The requested O_EXCL flag alone is not proof of a kernel-exclusive admission
-interval. A fake successful exclusive open establishes only the requested
-flags, never BLK_EXCL behavior against real concurrent holders or swapon.
-Synthetic final-gate tests must model reachable failures such as pathname
-terminal-object replacement, descriptor state-query failure, or a read-only
-transition; they must not manufacture an already-open inode changing file type
-or make fstat() stand in for device-driver liveness. The production opener requests O_RDWR/O_EXCL/O_CLOEXEC/O_NOFOLLOW and rechecks
-BLKROGET and descriptor identity. At the last prepublication gate it
-independently requires fcntl(F_GETFL) to succeed and
-`(returned_flags & O_ACCMODE) == O_RDWR`; failed queries preserve the kernel
-errno, while an incompatible access mode refuses with EBADF. This returned-FD
-check does not establish O_EXCL exclusion: F_GETFL cannot report O_EXCL, and
-no additional userspace lock is acquired. Kernel-level exclusivity and
-mount/swap races after the last snapshot remain UNQUALIFIED until separately
-authorized loaded-kernel tests establish them.
-
-Block zero is accepted only when it is all zero or is an exact existing SWZ
-authorization header. The shared validator requires the eight-byte magic,
-format version, 4096-byte header length, exact opened-device byte size, nonzero
-16-byte UUID, and every reserved byte at offsets 40..4095 zero. A valid
-existing header is an idempotent success only after another identity recheck,
-a fresh F_GETFL check that the returned descriptor is O_RDWR, and no write.
-Production-CLI rootless controls must demonstrate both the positive O_RDWR
-existing-header path and negative O_RDONLY/O_WRONLY or failed F_GETFL paths
-with exactly one descriptor close and zero writes or syncs. The positive
-mock does not prove kernel O_EXCL holder exclusion or physical card identity. An unrecognized nonzero header is refused. A new header
-starts from a zeroed 4096-byte buffer, uses a cryptographically random UUID
-with RFC-4122 version/variant bits, leaves all reserved bytes zero, and must pass
-`swapz_sb_valid()` before publication.
-
-A new format attempts exactly one 4096-byte header `pwrite()` at offset zero
-and then an `fsync()`; it never resumes a short successful write, retries an
-interrupted write or issues DISCARD/TRIM. The write is not assumed atomic.
-Once the publication call has been issued, a failed/short write, fsync failure,
-post-write transport/identity/readback failure, or close failure is reported as
-`UNCERTAIN` with process status 3 and requires explicit recovery before retry.
-Status 2 remains a pre-publication refusal and status 1 is reserved for
-operational errors where no header publication was attempted. Every
-pre-publication rejection must preserve the triggering prerequisite errno
-across diagnostic output and descriptor cleanup; reporting functions are not
-allowed to become the returned error authority. Fail-only diagnostics name the
-stage, expected condition, original numeric errno and safe next action without
-exposing device paths or block contents. Admission helpers must propagate the
-actual failing stage instead of collapsing topology or mount/swap inventory
-failures into a generic identity refusal: the formatter distinguishes identity,
-descriptor mode/state, topology and inventory at pre-open, opened-descriptor,
-final-prepublication and postpublication revalidation boundaries. The explicit
-`stage=` field supplements stable human-readable phase summaries; do not rename
-an established summary solely to encode a more specific failing stage. A
-secondary close failure must be reported separately and cannot replace the
-originating failure errno.
-Once publication is attempted, write, durability, identity, readback and
-close failures still retain status 3 and RECOVERY REQUIRED. The standalone
-formatter never creates a mapper or activates swap. After a successful write it
-revalidates device identity, rereads the entire header, requires byte-for-byte
-equality and full SWZ validation, then revalidates identity once more before
-close. A partially written or otherwise unrecognized nonzero header is a
-recovery condition and is never silently retried.
-
-The observable identity bundle does not prove physical-card uniqueness when a
-USB reader does not expose a stable card CID. PARTUUID, path, major:minor,
-capacity, reader model/transport and any reader serial are consistency signals;
-a substituted or exact-cloned card can reproduce some or all of them. The
-current SWZ UUID cannot be repurposed as a stable per-card token because the
-primary lifecycle deliberately derives that field from each transaction run ID.
-A future unpredictable per-card token plus protected off-card binding would
-improve accidental-substitution resistance only if it has a dedicated stable
-on-card location that lifecycle formatting never rewrites; an exact clone can
-still copy such a token. Until that coordinated format/lifecycle design exists,
-the enforceable policy is the complete descriptor/topology/configuration proof
-above, fail-closed on any uncertainty, with no claim of cryptographic or
-physical uniqueness.
-
-All package mutations and mutating primary commands, including
-`qualification-import` and the `prepare/start/stop/recover` lifecycle,
-serialize on the same root-owned global lock at
-`/run/lock/swapz/package.lock`. Primary lock order is global mutation lock
-first and target partition recovery lock second;
-never acquire those in reverse order. Qualification evidence is exact-kernel
-evidence: its top-level `kernel_release` must use the same restricted release-
-token grammar as packaging and must equal the running Linux `uname(2)` release
-at import and every later lifecycle read. A kernel change invalidates prior
-qualification until `make test` and artifact qualification are repeated for
-that kernel; do not infer support from a version range or successful DKMS
-compilation alone. The global lock directory must be owned
-by root and not group/world-writable; the lock file must be a single-link 0600
-regular file owned by root, and the opened descriptor must still match the
-named file after nonblocking `flock(LOCK_EX)`. Because `/run` is volatile,
-the primary may recreate the exact configured lock directory with mode 0755
-when it is absent, but must immediately reopen it with `O_NOFOLLOW` and apply
-the same root-owner/non-writable validation before creating or trusting the lock
-file. It must not create alternate lock paths. Contention is BLOCKED rather
-than retried across mutable installed artifacts. Owned-null_blk qualification
-redirects only this global lock to its token-bound private directory; physical
-and ordinary production use the installed package lock.
-
-Shell option changes are process-wide, even when issued inside a function. A
-helper that disables pathname expansion to parse command output must restore
-the caller's prior option state before returning. Later safety checks may rely
-on bounded, intentional pathname expansion to find retained transaction
-records; leaked `set -f` state can silently turn those globs into literal paths.
-
-When a package transaction revalidates a pinned directory by name, compare the
-named object with the already-open descriptor by inode, device, owner and type,
-as well as mount identity. A same-mount directory replacement is still a path
-substitution and must fail closed. Mutating primary commands must not emit a
-success marker such as `PRIMARY_PREPARE=READY` until every required mutation
-lock has closed successfully; a lock-close error is a failed operation, not a
-successful result with a cleanup warning.
+Legacy serialized SWZ codec helpers and historical pre-migration journal
+recognition may remain only where needed to test or recover old interrupted
+records. They are not a backing format, production admission mechanism, or
+template for new lifecycle code. New tests must prove those legacy writers are
+unreachable from current physical admission rather than preserving their former
+formatter interfaces.
 
 The primary manager must use the same structural PARTUUID grammar as the
 standalone formatter: 8..64 characters, at least eight hexadecimal digits,
