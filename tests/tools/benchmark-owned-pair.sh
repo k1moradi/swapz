@@ -740,47 +740,57 @@ OWN_DM=1
 [[ $(dmsetup info -c --noheadings -o uuid "$DMNAME" |
       tr -d '[:space:]') == "$DMUUID" ]] || fail 'owned DM UUID mismatch'
 if (( !LINEAR_CALIBRATION )); then
-dmsetup status "$DMNAME" | grep -Eq "(^|[[:space:]])retain_ms=$RETAIN_MS([[:space:]]|$)" ||
-    fail 'unexpected swapz retained policy after owned DM creation'
-dmsetup status "$DMNAME" | grep -Eq '(^|[[:space:]])lz4_acceleration=1([[:space:]]|$)' ||
-    fail 'loaded target ordinary LZ4 policy is not fixed at acceleration 1'
-dmsetup status "$DMNAME" | grep -Eq "(^|[[:space:]])delta64_lz4_acceleration=$DELTA64_LZ4_ACCELERATION([[:space:]]|$)" ||
-    fail 'loaded target delta64 second-LZ4 acceleration mismatch'
-dmsetup status "$DMNAME" | grep -Eq '(^|[[:space:]])write_pipeline_depth=1([[:space:]]|$)' ||
-    fail 'loaded target lower-WRITE pipeline depth is not fixed at one'
-dmsetup status "$DMNAME" | grep -Eq "(^|[[:space:]])async_prepare=$ASYNC_PREPARE([[:space:]]|$)" ||
-    fail 'loaded swapz async preparation does not match selected benchmark arm'
+# Capture the freshly created, UUID-verified target once before replay starts.
+# Preserve every fixed-policy check against a consistent read-only snapshot.
+# Do not repeat dmsetup status subprocesses in every fresh owned pair.
+owned_dm_status="$(dmsetup status "$DMNAME")" ||
+    fail 'owned DM target status unavailable'
+check_owned_dm_status() {
+    local expected_pattern=$1 failure_message=$2
+    [[ $owned_dm_status =~ $expected_pattern ]] ||
+        fail "$failure_message"
+}
+check_owned_dm_status "(^|[[:space:]])retain_ms=$RETAIN_MS([[:space:]]|$)" \
+    'unexpected swapz retained policy after owned DM creation'
+check_owned_dm_status '(^|[[:space:]])lz4_acceleration=1([[:space:]]|$)' \
+    'loaded target ordinary LZ4 policy is not fixed at acceleration 1'
+check_owned_dm_status "(^|[[:space:]])delta64_lz4_acceleration=$DELTA64_LZ4_ACCELERATION([[:space:]]|$)" \
+    'loaded target delta64 second-LZ4 acceleration mismatch'
+check_owned_dm_status '(^|[[:space:]])write_pipeline_depth=1([[:space:]]|$)' \
+    'loaded target lower-WRITE pipeline depth is not fixed at one'
+check_owned_dm_status "(^|[[:space:]])async_prepare=$ASYNC_PREPARE([[:space:]]|$)" \
+    'loaded swapz async preparation does not match selected benchmark arm'
 expected_submitter_prepare=$(( ASYNC_PREPARE && SUBMITTER_PREPARE ))
-dmsetup status "$DMNAME" | grep -Eq "(^|[[:space:]])submitter_prepare=$expected_submitter_prepare([[:space:]]|$)" ||
-    fail 'loaded swapz submitter preparation does not match selected benchmark arm'
-    dmsetup status "$DMNAME" | grep -Eq "(^|[[:space:]])work_conserving_hand_records=$HAND_RECORDS([[:space:]]|$)" ||
-        fail 'loaded swapz hand threshold does not match selected benchmark arm'
-dmsetup status "$DMNAME" | grep -Eq "(^|[[:space:]])delta64_rescue=$DELTA64_RESCUE([[:space:]]|$)" ||
-    fail 'loaded swapz delta64 rescue is not the required production default'
+check_owned_dm_status "(^|[[:space:]])submitter_prepare=$expected_submitter_prepare([[:space:]]|$)" \
+    'loaded swapz submitter preparation does not match selected benchmark arm'
+    check_owned_dm_status "(^|[[:space:]])work_conserving_hand_records=$HAND_RECORDS([[:space:]]|$)" \
+    'loaded swapz hand threshold does not match selected benchmark arm'
+check_owned_dm_status "(^|[[:space:]])delta64_rescue=$DELTA64_RESCUE([[:space:]]|$)" \
+    'loaded swapz delta64 rescue is not the required production default'
 expected_delta64_workers=$ASYNC_PREPARE
-dmsetup status "$DMNAME" | grep -Eq "(^|[[:space:]])delta64_prepare_workers=$expected_delta64_workers([[:space:]]|$)" ||
-    fail 'loaded swapz delta64 preparation width does not match selected arm'
-dmsetup status "$DMNAME" | grep -Eq "(^|[[:space:]])guard_inflight_zero_shrink=0([[:space:]]|$)" ||
-    fail 'retired ID64 compatibility token must remain zero'
-dmsetup status "$DMNAME" | grep -Eq "(^|[[:space:]])packed_placement=1([[:space:]]|$)" ||
-    fail 'loaded swapz packed-placement invariant is not canonical'
-dmsetup status "$DMNAME" | grep -Eq "(^|[[:space:]])logical_open_balance=0([[:space:]]|$)" ||
-    fail 'logical-open balance must remain off in placement A/B'
+check_owned_dm_status "(^|[[:space:]])delta64_prepare_workers=$expected_delta64_workers([[:space:]]|$)" \
+    'loaded swapz delta64 preparation width does not match selected arm'
+check_owned_dm_status "(^|[[:space:]])guard_inflight_zero_shrink=0([[:space:]]|$)" \
+    'retired ID64 compatibility token must remain zero'
+check_owned_dm_status "(^|[[:space:]])packed_placement=1([[:space:]]|$)" \
+    'loaded swapz packed-placement invariant is not canonical'
+check_owned_dm_status "(^|[[:space:]])logical_open_balance=0([[:space:]]|$)" \
+    'logical-open balance must remain off in placement A/B'
 expected_grouping=1
 expected_coalescing=$READ_COALESCE
 expected_parallel=1
-dmsetup status "$DMNAME" | grep -Eq "(^|[[:space:]])read_grouping_enabled=$expected_grouping([[:space:]]|$)" ||
-    fail 'loaded swapz read-grouping gate does not match selected benchmark arm'
-dmsetup status "$DMNAME" | grep -Eq "(^|[[:space:]])read_coalescing_enabled=$expected_coalescing([[:space:]]|$)" ||
-    fail 'loaded swapz read-coalescing gate does not match selected benchmark arm'
-dmsetup status "$DMNAME" | grep -Eq '(^|[[:space:]])read_coalesce_max_blocks=8([[:space:]]|$)' ||
-    fail 'loaded swapz READ coalescing cap is not fixed at eight blocks'
-dmsetup status "$DMNAME" | grep -Eq '(^|[[:space:]])k1_allow_after_read_bypass=0([[:space:]]|$)' ||
-    fail 'retired K=1 read-bypass override compatibility token is not zero'
-dmsetup status "$DMNAME" | grep -Eq "(^|[[:space:]])invalidate_cache_on_write_admit=$INVALIDATE_CACHE_ON_WRITE_ADMIT([[:space:]]|$)" ||
-    fail 'loaded swapz write-admission cache policy does not match selected benchmark arm'
-dmsetup status "$DMNAME" | grep -Eq "(^|[[:space:]])parallel_reads_enabled=$expected_parallel([[:space:]]|$)" ||
-    fail 'loaded swapz independent lower-READ fan-out gate does not match selected benchmark arm'
+check_owned_dm_status "(^|[[:space:]])read_grouping_enabled=$expected_grouping([[:space:]]|$)" \
+    'loaded swapz read-grouping gate does not match selected benchmark arm'
+check_owned_dm_status "(^|[[:space:]])read_coalescing_enabled=$expected_coalescing([[:space:]]|$)" \
+    'loaded swapz read-coalescing gate does not match selected benchmark arm'
+check_owned_dm_status '(^|[[:space:]])read_coalesce_max_blocks=8([[:space:]]|$)' \
+    'loaded swapz READ coalescing cap is not fixed at eight blocks'
+check_owned_dm_status '(^|[[:space:]])k1_allow_after_read_bypass=0([[:space:]]|$)' \
+    'retired K=1 read-bypass override compatibility token is not zero'
+check_owned_dm_status "(^|[[:space:]])invalidate_cache_on_write_admit=$INVALIDATE_CACHE_ON_WRITE_ADMIT([[:space:]]|$)" \
+    'loaded swapz write-admission cache policy does not match selected benchmark arm'
+check_owned_dm_status "(^|[[:space:]])parallel_reads_enabled=$expected_parallel([[:space:]]|$)" \
+    'loaded swapz independent lower-READ fan-out gate does not match selected benchmark arm'
 fi
 dmsetup deps -o devname "$DMNAME" | grep -Fq "${DISKS[1]}" ||
     fail 'owned DM backing dependency mismatch'

@@ -194,6 +194,13 @@ complete pairs and observed timing records, with COLLECTED, NOT_RECORDED
 or REJECTED status; an interrupted session may remain unrecorded. The helper
 never shares resources between pairs, never changes the official benchmark
 workload, and timing-read or display failures do not alter verdicts.
+Each owned benchmark mapper still undergoes independent UUID and backing
+identity checks. After creation, its read-only status is captured once and all
+eighteen existing fixed-policy assertions are evaluated against that same
+snapshot before replay. Missing or rejected status remains BLOCKED. This
+eliminates seventeen repeated status subprocesses per pair without reusing
+devices, removing matched observations, or changing teardown. Existing
+five-phase timings establish any actual host wall-clock savings.
 The primary lifecycle rootless audit emits per-unittest-method monotonic
 elapsed milliseconds (including per-case setup/teardown) from its existing
 in-process runner. Write and flush each bounded source-defined marker on

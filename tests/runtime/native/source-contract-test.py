@@ -1316,6 +1316,106 @@ static swapz_u16 swapz_probe_set(
             "[`src/kernel/VERSION`](../src/kernel/VERSION)", README)
         self.assertIn("single source of truth", README)
 
+    def test_owned_pair_mapper_status_snapshot_preserves_all_policy_gates(self):
+        """Hermetically exercise the exact policy guard with a mocked dmsetup."""
+        import os
+        import subprocess
+        import tempfile
+
+        pair = (ROOT / "tests/tools/benchmark-owned-pair.sh").read_text()
+        start = pair.index(
+            "if (( !LINEAR_CALIBRATION )); then\n# Capture the freshly created")
+        end = pair.index("\nfi\ndmsetup deps ", start) + len("\nfi")
+        guard = pair[start:end]
+        self.assertEqual(guard.count("check_owned_dm_status "), 18)
+        self.assertEqual(guard.count('dmsetup status "$DMNAME"'), 1)
+
+        values_and_failures = (
+            ("retain_ms=2", "unexpected swapz retained policy"),
+            ("lz4_acceleration=1", "ordinary LZ4 policy"),
+            ("delta64_lz4_acceleration=4", "second-LZ4 acceleration"),
+            ("write_pipeline_depth=1", "pipeline depth"),
+            ("async_prepare=1", "async preparation does not match"),
+            ("submitter_prepare=1", "submitter preparation does not match"),
+            ("work_conserving_hand_records=8", "hand threshold"),
+            ("delta64_rescue=1", "rescue is not"),
+            ("delta64_prepare_workers=1", "preparation width"),
+            ("guard_inflight_zero_shrink=0", "ID64 compatibility"),
+            ("packed_placement=1", "packed-placement invariant"),
+            ("logical_open_balance=0", "logical-open balance"),
+            ("read_grouping_enabled=1", "read-grouping gate"),
+            ("read_coalescing_enabled=1", "read-coalescing gate"),
+            ("read_coalesce_max_blocks=8", "coalescing cap"),
+            ("k1_allow_after_read_bypass=0", "read-bypass override"),
+            ("invalidate_cache_on_write_admit=0", "write-admission cache policy"),
+            ("parallel_reads_enabled=1", "independent lower-READ"),
+        )
+        self.assertEqual(len(values_and_failures), 18)
+        normal_status = "0 8192 swapz 253:0 " + " ".join(
+            value for value, _ in values_and_failures)
+        mock_prefix = r"""
+set -Eeuo pipefail
+LINEAR_CALIBRATION=0
+DMNAME=owned-fixture
+RETAIN_MS=2
+DELTA64_LZ4_ACCELERATION=4
+ASYNC_PREPARE=$MOCK_ASYNC
+SUBMITTER_PREPARE=1
+HAND_RECORDS=8
+DELTA64_RESCUE=1
+READ_COALESCE=1
+INVALIDATE_CACHE_ON_WRITE_ADMIT=0
+fail() { printf 'BLOCKED: %s\n' "$*" >&2; exit 1; }
+dmsetup() {
+    printf '1' >> "$STATUS_CALLS"
+    [[ $# == 2 && $1 == status && $2 == "$DMNAME" ]] || return 2
+    [[ $MOCK_DM_FAIL == 0 ]] || return 7
+    printf '%s\n' "$MOCK_STATUS"
+}
+"""
+        with tempfile.TemporaryDirectory(prefix="swapz-dm-status-") as folder:
+            calls = Path(folder) / "calls"
+
+            def check_status(status, *, failed_query=False, async_mode=1):
+                calls.write_text("")
+                env = dict(os.environ)
+                env.update({
+                    "STATUS_CALLS": str(calls),
+                    "MOCK_STATUS": status,
+                    "MOCK_DM_FAIL": "1" if failed_query else "0",
+                    "MOCK_ASYNC": str(async_mode),
+                })
+                completed = subprocess.run(
+                    ("bash", "-c", mock_prefix + guard),
+                    env=env, capture_output=True, text=True,
+                    check=False, timeout=4)
+                self.assertEqual(calls.read_text(), "1")
+                return completed
+
+            self.assertEqual(check_status(normal_status).returncode, 0)
+            for token, reason in values_and_failures:
+                with self.subTest(policy=token):
+                    invalid_status = normal_status.replace(
+                        token, token.split("=")[0] + "=999", 1)
+                    result = check_status(invalid_status)
+                    self.assertNotEqual(result.returncode, 0)
+                    self.assertIn(reason, result.stderr)
+
+            # Prefix collisions, query errors, and the synchronous arm
+            # cannot silently pass fixed-policy admission.
+            boundary_status = normal_status.replace(
+                "retain_ms=2", "not_retain_ms=2", 1)
+            self.assertIn("unexpected swapz retained policy",
+                          check_status(boundary_status).stderr)
+            self.assertIn("owned DM target status unavailable",
+                          check_status(normal_status, failed_query=True).stderr)
+            synchronous_status = normal_status.replace(
+                "async_prepare=1", "async_prepare=0", 1).replace(
+                "submitter_prepare=1", "submitter_prepare=0", 1).replace(
+                "delta64_prepare_workers=1", "delta64_prepare_workers=0", 1)
+            self.assertEqual(
+                check_status(synchronous_status, async_mode=0).returncode, 0)
+
     def test_write_saturation_evidence_stays_private_bounded_and_write_only(self):
         loaded = (ROOT / "tests/tools/test-loaded.sh").read_text()
         pair = (ROOT / "tests/tools/benchmark-owned-pair.sh").read_text()
