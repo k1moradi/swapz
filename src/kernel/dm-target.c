@@ -2473,8 +2473,13 @@ static int swapz_finalize_all_inflight(struct swapz_dm *ctx, bool wait)
  * On an error, the entire reserved extent is quarantined by the swapz authority.
  * Scratch is vmalloc-backed: DM_IO_VMA, never DM_IO_KMEM.
  */
-static int swapz_lower(struct swapz_dm *ctx, enum req_op op, swapz_u32 block,
-		     swapz_u16 blocks, u8 *bytes)
+/* Keep the synchronous dm_io frame separate from RAW/GC callers. Inlining
+ * the lower adapter can merge independent I/O frames and exceed the kernel's
+ * 1024-byte per-function stack warning threshold. Completion ownership and
+ * physical addressing remain unchanged.
+ */
+static noinline int swapz_lower(struct swapz_dm *ctx, enum req_op op,
+			      swapz_u32 block, swapz_u16 blocks, u8 *bytes)
 {
 	struct dm_io_region region;
 	struct dm_io_request req = {
