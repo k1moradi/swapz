@@ -189,6 +189,12 @@ module_param_named(allow_physical_backing, swapz_allow_physical_backing, bool, 0
 MODULE_PARM_DESC(allow_physical_backing,
 		 "Allow verified ordinary Linux swap backing; default off");
 
+static bool swapz_physical_ram_metadata_qualified;
+module_param_named(physical_ram_metadata_qualified,
+		   swapz_physical_ram_metadata_qualified, bool, 0444);
+MODULE_PARM_DESC(physical_ram_metadata_qualified,
+		 "Exact-source loaded RAM-metadata qualification token; default off");
+
 static bool swapz_physical_backing_arch_supported(void)
 {
 #if defined(CONFIG_X86_64) || defined(CONFIG_ARM64)
@@ -8967,12 +8973,12 @@ static int swapz_ctr(struct dm_target *ti, unsigned int argc, char **argv)
 	is_nullb = !strncmp(ctx->backing->bdev->bd_disk->disk_name, "nullb", 5);
 	/*
 	 * Payload-only storage is necessary but not sufficient for real-device
-	 * admission. Keep physical backing fail-closed until this exact source
-	 * has passed the loaded algorithm/RAM qualification.
+	 * admission. The same built module is first qualified on owned RAM backing;
+	 * only an evidence-validating loader may then set this immutable token.
 	 */
-	if (!is_nullb && !SWAPZ_PHYSICAL_RAM_METADATA_QUALIFIED) {
+	if (!is_nullb && !swapz_physical_ram_metadata_qualified) {
 		ti->error =
-			"Physical backing blocked pending loaded RAM-metadata qualification";
+			"Physical backing requires exact-source loaded RAM qualification";
 		error = -EOPNOTSUPP;
 		goto fail;
 	}
