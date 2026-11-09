@@ -56,11 +56,13 @@ class RootlessResourceInventoryContract(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "duplicate literal"):
             resource_policy.audit_harness(
                 source + "\nrootless_phase='rootless initialization'\n")
-        self.assertIn("tests/tools/loaded-preflight.sh \\", source)
+        # Change a token inside the genuine loop without breaking its grammar;
+        # reject the new script by source identity rather than shell formatting.
+        original = "for script in tests/tools/test-rootless.sh"
+        self.assertIn(original, source)
         with self.assertRaisesRegex(ValueError, "unreviewed rootless syntax"):
             resource_policy.audit_harness(source.replace(
-                "tests/tools/loaded-preflight.sh \\",
-                "tests/tools/unknown-preflight.sh \\", 1))
+                original, "for script in tests/tools/unknown-check.sh", 1))
 
     def test_duplicate_resource_classifications_fail_closed(self):
         from unittest import mock

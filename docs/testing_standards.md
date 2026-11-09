@@ -51,7 +51,10 @@ rootless phase inventory plus every dynamically iterated `bash -n` script
 as read-only candidates, private-fixture candidates, or serial-only hazards.
 The contract regression in `tests/runtime/native/test-report-test.py` must
 reject added/renamed/unreviewed phases, changed syntax-script lists, duplicate
-labels, unknown resources and shared read/write conflicts. Shared Make/native
+labels, unknown resources and shared read/write conflicts.
+Its dynamic-loop drift fixture must replace one actual source-list token while
+preserving the loop's grammar, proving rejection by the exact path allowlist
+rather than by a malformed shell construct. Shared Make/native
 artifacts, fixed disassembly paths, reporting/history fixtures, diagnostic
 relays, process/descendant cleanup, and package/systemd simulations remain
 serial pending explicit isolation evidence. A private-workspace classification
