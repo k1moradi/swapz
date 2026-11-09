@@ -13501,7 +13501,6 @@ out:
 		(void)close(lock_fd);
 	if (recovery_fd >= 0)
 		(void)close(recovery_fd);
-	memset(original_header, 0, sizeof(original_header));
 	memset(observed_header, 0, sizeof(observed_header));
 	if (result == 0)
 		printf("PRIMARY_RECOVER=COMPLETE run_id=%s swapoff=%s "
