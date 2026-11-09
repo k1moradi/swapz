@@ -189,7 +189,7 @@ class AlgorithmPhysicalTest(unittest.TestCase):
                                return_value=SimpleNamespace(returncode=0)) as run:
             subject._recover_pending_algorithm_trial()
         self.assertEqual(run.call_args.args[0], [
-            "/usr/bin/sudo", "-n", "--", subject.sys.executable, "-I", "-B",
+            "/usr/bin/sudo", "--", subject.sys.executable, "-I", "-B",
             str(subject.ROOT / "tests/tools/physical-swap-probe.py"),
             "recover-pending"])
         with mock.patch.object(subject.shutil, "which",

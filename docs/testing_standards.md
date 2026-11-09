@@ -7296,7 +7296,13 @@ Before signature-dependent selection, the root helper checks for a single
 authenticated active recovery marker from a prior development real-swap
 trial and resumes the existing exact saved-journal recovery. Missing markers
 are harmless; multiple, malformed, foreign or uncertain markers must block
-the trial with `RECOVERY_REQUIRED` and never trigger a fresh format.
+the trial with `RECOVERY_REQUIRED` and never trigger a fresh format. The
+interactive root-owned preflight is permitted to request the operator's sudo
+password before scanning protected journals, rather than treating an expired
+sudo credential timestamp as an unsafe-device or missing-swap condition.
+The unprivileged caller must not impose a timeout or kill the root recovery
+worker, whose internal bounded operations and persistent ownership retain
+authority over header restoration.
 The development-only algorithm trial supports Linux x86_64 and aarch64 only
 when the kernel uses 4096-byte pages and the process has a 64-bit ABI. The
 privileged worker independently repeats that gate and still requires confirmed

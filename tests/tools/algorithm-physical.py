@@ -210,7 +210,9 @@ def _recover_pending_algorithm_trial() -> None:
     if sudo is None:
         raise ValueError("sudo is required for recovery preflight")
     command = [
-        sudo, "-n", "--", sys.executable, "-I", "-B",
+        # sudo may request authentication on the operator's controlling TTY.
+        # Only the root helper can inspect the protected recovery directory.
+        sudo, "--", sys.executable, "-I", "-B",
         str(ROOT / "tests/tools/physical-swap-probe.py"),
         "recover-pending",
     ]
