@@ -90,17 +90,19 @@ class PhysicalSwapProbeTests(unittest.TestCase):
                     probe.ProbeError, "contains or backs the root filesystem"):
                 probe._require_root_not_on_target(8, 3)
 
-    def test_physical_run_rejects_inband_metadata_before_any_probe(self):
-        # The public helper must not reach swapoff on the pre-migration codec.
-        with mock.patch.object(probe, "run_probe") as run_probe:
-            with self.assertRaisesRegex(
-                    probe.ProbeError, "metadata is RAM-only"):
-                probe.main([
-                    "run", "--device", "/dev/swapz-synthetic",
-                    "--confirm-device", "/dev/swapz-synthetic",
-                    "--development-only",
-                ])
-            run_probe.assert_not_called()
+    def test_physical_run_checks_ram_only_metadata_before_probe(self):
+        # Production metadata is already RAM-only, so the gate must execute
+        # and then permit the normal device-specific admission path.
+        with mock.patch.object(
+                probe, "_require_ram_only_metadata_for_physical_run") as gate, \
+             mock.patch.object(probe, "run_probe") as run_probe:
+            self.assertEqual(probe.main([
+                "run", "--device", "/dev/swapz-synthetic",
+                "--confirm-device", "/dev/swapz-synthetic",
+                "--development-only",
+            ]), 0)
+            gate.assert_called_once_with()
+            run_probe.assert_called_once()
 
     def test_unprovisioned_recovery_base_is_blocked_not_recovery_required(self):
         # A fresh VM without recovery storage is not an interrupted trial.
@@ -2516,19 +2518,24 @@ class PhysicalSwapProbeTests(unittest.TestCase):
         run_end = script.index("\ndef plan(", run_start)
         run = script[run_start:run_end]
         quiesce = run.index("_quiesce_development_swap_inventory(")
-        first_header_write = run.index("_write_block0(")
-        formatter = run.index('formatter, "format"')
-        virtual_branch_start = run.index("if virtual_device_only:")
-        virtual_branch_end = run.index("\n            else:", virtual_branch_start)
-        virtual_branch = run[virtual_branch_start:virtual_branch_end]
-        self.assertIn("_write_block0(", virtual_branch)
-        self.assertIn("_read_block0(", virtual_branch)
+        header_verify = run.index(
+            'if _read_block0(target["device"], target) != target["header"]:',
+            quiesce)
         restore_swapfiles = run.index("_restore_development_swapfiles(state)")
         module_load = run.index('["modprobe", "dm_mod"]')
-        self.assertLess(quiesce, first_header_write)
-        self.assertLess(first_header_write, formatter)
-        self.assertLess(formatter, restore_swapfiles)
+        self.assertLess(quiesce, header_verify)
+        self.assertLess(header_verify, restore_swapfiles)
         self.assertLess(restore_swapfiles, module_load)
+        self.assertNotIn("_write_block0(", run)
+        self.assertNotIn('formatter, "format"', run)
+        self.assertNotIn("_virtual_development_header(", run)
+
+        oracle_pass = run.index('state["stage"] = "ORACLE_PASS"')
+        keep_prompt = run.index(
+            "_operator_keep_swapz_active_after_pass()", oracle_pass)
+        cleanup = run.index("if partition_claim_attempted:", keep_prompt)
+        self.assertLess(oracle_pass, keep_prompt)
+        self.assertLess(keep_prompt, cleanup)
 
         recovery_start = script.index("def recover(")
         recovery_end = script.index(
@@ -2539,6 +2546,14 @@ class PhysicalSwapProbeTests(unittest.TestCase):
         target_reactivation = recovery.index(
             '["swapon", target["device"]]')
         self.assertLess(restore_fallback, target_reactivation)
+
+    def test_successful_real_swap_keep_choice_defaults_to_restore(self):
+        with mock.patch("builtins.input", return_value="yes"):
+            self.assertTrue(probe._operator_keep_swapz_active_after_pass())
+        with mock.patch("builtins.input", return_value=""):
+            self.assertFalse(probe._operator_keep_swapz_active_after_pass())
+        with mock.patch("builtins.input", side_effect=EOFError):
+            self.assertFalse(probe._operator_keep_swapz_active_after_pass())
 
     def simulate_root_owned_directories(self, *directories):
         """Model root ownership in rootless CI; never chown host paths."""
