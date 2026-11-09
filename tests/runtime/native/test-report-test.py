@@ -8623,6 +8623,166 @@ class ProductionReadinessEvidenceTest(unittest.TestCase):
         self.assertNotEqual(verdict["DEPLOYMENT_PRODUCTION_READY"], "PASS")
 
 
+class OptimizationPhase5ValidationContract(unittest.TestCase):
+    """Hermetic three-host comparison; no Git, make, swap, or physical I/O."""
+
+    BASELINE_SOURCE = "1" * 40
+    CANDIDATE_SOURCE = "2" * 40
+    HOSTS = (("x86_64-v2", "x86_64", "a" * 64),
+             ("x86_64-v4", "x86_64", "b" * 64),
+             ("aarch64", "aarch64", "c" * 64))
+
+    @classmethod
+    def setUpClass(cls):
+        validation_spec = importlib.util.spec_from_file_location(
+            "swapz_optimization_validation",
+            ROOT / "tests/tools/validate-optimization.py")
+        cls.validation = importlib.util.module_from_spec(validation_spec)
+        validation_spec.loader.exec_module(cls.validation)
+
+    def make_report(self, source, architecture, host_id, total_seconds):
+        stages = []
+        for index, name in enumerate(self.validation.STAGE_NAMES):
+            stage = {"name": name, "status": "PASS", "exit_code": 0,
+                     "elapsed_s": total_seconds / 5}
+            if index == 1:
+                stage["phase_elapsed_s"] = [
+                    {"name": f"rootless-{i}", "elapsed_s": 0}
+                    for i in range(52)]
+                stage["primary_lifecycle_case_timing_coverage"] = {
+                    "status": "COMPLETE", "expected_cases": 50,
+                    "accepted_cases": 50, "observed_records": 50}
+                stage["primary_lifecycle_case_elapsed_ms"] = [
+                    {"class": "LifecycleTest", "method": f"test_{i}",
+                     "elapsed_ms": 1} for i in range(50)]
+            if index == 4:
+                stage["phase_elapsed_s"] = [
+                    {"name": f"loaded-{i}", "elapsed_s": 0}
+                    for i in range(25)]
+            stages.append(stage)
+        pairs = [
+            {"pair_index": index, "phase_elapsed_ms": [
+                {"phase": phase, "elapsed_ms": index + 1}
+                for phase in self.validation.PAIR_PHASES]}
+            for index in range(89)]
+        sample = {
+            "status": "PASS", "source_sha": source,
+            "regime": "ssd_emulated", "order": "off-first",
+            "fixture_sha256": "d" * 64, "trace_sha256": "e" * 64,
+            "device_model": {"hw_queue_depth": 1},
+            "arms": {"off": {
+                "source_sha": source, "mixed_replay_peak_rss_kb": 128,
+                "host_cpu": {"status": "AVAILABLE", "busy_fraction": 0.3,
+                             "pressure_some_fraction": 0.01}}},
+        }
+        return {
+            "schema": self.validation.REPORT_SCHEMA,
+            "kernel_release": "6.9.1", "tested_commit_sha": source,
+            "source_sha": source, "overall": "INCOMPLETE",
+            "qualification": "RAM_BACKED_NULL_BLK_ONLY",
+            "host_identity": {"schema": "swapz-host-v1",
+                              "architecture": architecture,
+                              "id_sha256": host_id},
+            "stages": stages,
+            "qualified_artifacts": {"status": "AVAILABLE"},
+            "benchmarks": {
+                "loaded_correctness": {"overall": "PASS",
+                                       "id36_memory_peak_bytes": 1000},
+                "verdicts": {"overall": "PASS_BOUNDED_RAM_MATRIX"},
+                "write_saturation": {
+                    "overall": "PASS_WRITE_SATURATION_EVIDENCE"},
+                "owned_pair_timing_coverage": {
+                    "status": "COLLECTED", "complete_pairs": 89,
+                    "observed_records": 445},
+                "owned_pair_phase_timings": pairs,
+                "sessions": [sample],
+                "storage_envelope_sessions": [sample],
+                "write_saturation_sessions": [sample],
+            },
+        }
+
+    def create_manifest(self, directory, *, repeats=5, savings=10,
+                        mutate_candidate=None):
+        manifest = {
+            "schema": self.validation.MANIFEST_SCHEMA,
+            "baseline_sha": self.BASELINE_SOURCE,
+            "candidate_sha": self.CANDIDATE_SOURCE,
+            "hosts": [],
+        }
+        for profile, architecture, host_id in self.HOSTS:
+            host = {"profile": profile, "host_id_sha256": host_id,
+                    "pairs": []}
+            for index in range(repeats):
+                entry = {}
+                for arm, source, seconds in (
+                        ("baseline", self.BASELINE_SOURCE, 100 + index),
+                        ("candidate", self.CANDIDATE_SOURCE,
+                         100 + index - savings)):
+                    report = self.make_report(
+                        source, architecture, host_id, seconds)
+                    if (mutate_candidate and profile == "x86_64-v2"
+                            and index == 0 and arm == "candidate"):
+                        mutate_candidate(report)
+                    name = f"{profile}-{index}-{arm}.json"
+                    (directory / name).write_text(json.dumps(report))
+                    entry[arm] = name
+                host["pairs"].append(entry)
+            manifest["hosts"].append(host)
+        path = directory / "manifest.json"
+        path.write_text(json.dumps(manifest))
+        return path
+
+    def test_five_pair_reduction_is_a_signal_not_physical_pass(self):
+        with tempfile.TemporaryDirectory() as directory_name:
+            path = self.create_manifest(Path(directory_name))
+            result = self.validation.compare(path)
+            self.assertEqual(result["status"], "CONSISTENT_REDUCTION_SIGNAL")
+            self.assertEqual(result["hosts"][0]["one_sided_sign_p"], 1 / 32)
+            self.assertEqual(result["hosts"][0]["paired_median_saved_s"], 10)
+            self.assertIn("NOT_FULL_MAKE_TEST", result["scope"])
+
+    def test_insufficient_repeats_and_regression_remain_unqualified(self):
+        with tempfile.TemporaryDirectory() as directory_name:
+            directory = Path(directory_name)
+            self.assertEqual(
+                self.validation.compare(self.create_manifest(
+                    directory, repeats=3))["status"], "INSUFFICIENT_REPEATS")
+            self.assertEqual(
+                self.validation.compare(self.create_manifest(
+                    directory, savings=-1))["status"],
+                "REDUCTION_NOT_DEMONSTRATED")
+
+    def test_source_host_coverage_scope_and_failure_mismatches_reject(self):
+        def changes(report):
+            return (
+                lambda: report.__setitem__("tested_commit_sha", "3" * 40),
+                lambda: report["host_identity"].__setitem__(
+                    "id_sha256", "f" * 64),
+                lambda: report["benchmarks"]["owned_pair_phase_timings"].pop(),
+                lambda: report["benchmarks"]["sessions"][0].__setitem__(
+                    "fixture_sha256", "f" * 64),
+                lambda: report.__setitem__("overall", "FAIL"),
+                lambda: report["stages"][4].__setitem__("status", "FAIL"),
+            )
+        for mutation_index in range(6):
+            with self.subTest(case=mutation_index), \
+                    tempfile.TemporaryDirectory() as directory_name:
+                def mutate(report):
+                    changes(report)[mutation_index]()
+                path = self.create_manifest(
+                    Path(directory_name), mutate_candidate=mutate)
+                with self.assertRaises(self.validation.InvalidEvidence):
+                    self.validation.compare(path)
+
+    def test_exact_paired_sign_probability_and_ties(self):
+        self.assertEqual(self.validation.one_sided_sign_probability(
+            [0, 0]), 1.0)
+        self.assertEqual(self.validation.one_sided_sign_probability(
+            [1] * 5), 1 / 32)
+
+
+
+
 if __name__ == "__main__":
     (ROOT / "build/tests").mkdir(parents=True, exist_ok=True)
     unittest.main()

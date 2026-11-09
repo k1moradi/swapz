@@ -201,6 +201,72 @@ snapshot before replay. Missing or rejected status remains BLOCKED. This
 eliminates seventeen repeated status subprocesses per pair without reusing
 devices, removing matched observations, or changing teardown. Existing
 five-phase timings establish any actual host wall-clock savings.
+### Phase 5: three-host optimization validation (nonqualifying evidence analysis)
+
+`python3 -B tests/tools/validate-optimization.py --manifest /path/to/phase5.json`
+compares copied `test_results.json` snapshots without running commands, opening a
+mapper, changing global state, or publishing an artifact. This **does not**
+replace `make test` or turn algorithm `INCOMPLETE` into physical PASS. Collect
+all snapshots from ordinary owner `make test` runs, preserving original report
+bytes under distinct filenames **before** a later run overwrites them. Do not
+change `main` while a qualification run is in progress. The script neither
+switches branches nor changes the official benchmark matrix.
+
+The manifest has schema `swapz-optimization-validation-v1`, two complete
+`baseline_sha` and `candidate_sha` source revisions and three `hosts` entries
+with distinct profiles `x86_64-v2`, `x86_64-v4` and `aarch64`. Each host supplies
+its actual 64-hex-character `host_id_sha256` and an ordered `pairs` array of
+`{"baseline":"report-path.json","candidate":"report-path.json"}` entries.
+Paths are relative to the manifest file. Five or more independent paired
+repetitions per host are needed before an exact one-sided sign test can yield
+p <= 0.05; fewer repetitions remain **INSUFFICIENT_REPEATS**. The ISA profile
+labels are operator-declared, **not** inferred from `host_identity.architecture`;
+confirm the hardware CPU capability outside the report. All runs must use the
+same host ID and kernel release within each host, the pinned SHA for their arm,
+all five RAM stages PASS, identical 52 rootless and 25 loaded phase labels,
+50/50 complete lifecycle cases, 89/89 owned benchmark pairs with 445/445 phase
+records, benchmark PASS verdicts, and a common trace/fixture/device/workload
+fingerprint. Mismatches fail closed rather than producing comparable numbers.
+Overall `INCOMPLETE` is admitted **only** for all-five-stage-PASS RAM reports;
+failed, blocked or malformed reports are rejected. Physical qualification
+remains independent.
+
+The output separates per-host baseline/candidate median *RAM stage sums*
+(rootless and loaded stages separately), per-pair setup/fixture/replay/
+verification/teardown distributions, paired saved seconds and exact one-sided
+sign-test probabilities. A positive result is a **reduction signal**, not a
+causal performance or production qualification decision. Full `make test`
+wall-clock time includes optional physical admission and publication; the
+five-stage sum intentionally excludes that potentially interactive time.
+Replay peak RSS, ID36 cgroup memory peak, aggregate host CPU busy and CPU PSI
+are compared as **scoped diagnostics**, not whole-test peak resident memory,
+process CPU, or controlled background noise. Any resource regression, missing
+quiet-window evidence, changing source/build/workload, or differing skipped
+test semantics still requires an operator review before default promotion.
+Never infer workload identity merely from matching run durations. Repeating
+source-pinned runs does not justify claiming physical storage endurance or
+causality from host load changes. When reports are insufficient, record the
+`INSUFFICIENT_REPEATS` or `REDUCTION_NOT_DEMONSTRATED` outcome without weakening
+or silently dropping acceptance requirements.
+
+Example manifest (replace host hashes and paths with actual source-bound copies):
+
+```json
+{
+  "schema": "swapz-optimization-validation-v1",
+  "baseline_sha": "1111111111111111111111111111111111111111",
+  "candidate_sha": "2222222222222222222222222222222222222222",
+  "hosts": [
+    {"profile": "x86_64-v2", "host_id_sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "pairs": [{"baseline": "v2/before-1.json", "candidate": "v2/after-1.json"}]},
+    {"profile": "x86_64-v4", "host_id_sha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb", "pairs": [{"baseline": "v4/before-1.json", "candidate": "v4/after-1.json"}]},
+    {"profile": "aarch64", "host_id_sha256": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc", "pairs": [{"baseline": "arm/before-1.json", "candidate": "arm/after-1.json"}]}
+  ]
+}
+```
+
+One pair per host is intentionally below the statistical threshold. This
+read-only comparison must run before recommending opt-in concurrency as the
+default, deleting a benchmark, weakening cleanup, or changing physical gates.
 The primary lifecycle rootless audit emits per-unittest-method monotonic
 elapsed milliseconds (including per-case setup/teardown) from its existing
 in-process runner. Write and flush each bounded source-defined marker on
