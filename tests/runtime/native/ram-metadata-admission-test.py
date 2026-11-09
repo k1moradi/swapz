@@ -100,6 +100,21 @@ def main() -> None:
     require("(ctx->data_start_block + ctx->physical_blocks)" not in iterator,
             "iterate_devices must exclude the protected swap header")
 
+    # Every submitted lower data I/O must widen the protected-page offset
+    # before adding a data block. A cast after u32 addition could silently
+    # wrap large address spaces back to physical block zero.
+    require(
+        "return ((sector_t)ctx->data_start_block + data_block) * "
+        "SWAPZ_SECTORS;" in target,
+        "The shared backing-data sector helper must widen before addition")
+    require(
+        target.count("region.sector = swapz_backing_data_sector(ctx,") == 4,
+        "Synchronous, async WRITE, parallel READ and async READ must use "
+        "the same protected-page sector conversion")
+    require(
+        "(sector_t)(ctx->data_start_block +" not in target,
+        "Never add 32-bit protected-page offsets before widening")
+
     print("PASS: RAM-only production metadata and protected SWAPSPACE2 data range")
 
 
