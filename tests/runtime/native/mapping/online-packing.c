@@ -731,10 +731,12 @@ static int test_prime_absorb_preserves_shared_read_residency(void)
 	CHECK(slot.read_cached_start_block == start);
 	CHECK(slot.read_cached_extent_blocks == 4);
 	CHECK(slot.read_cached_block_mask != 0);
-	CHECK(swapz_engine_read_page(&slot, 1, output,
+	/* Record five spans blocks zero and one. Pull it through the private
+	 * slot so absorb has actually validated block-zero payload bytes. */
+	CHECK(swapz_engine_read_page(&slot, 5, output,
 				     sizeof(output), &length) == 0);
 	slot_mask = slot.read_cached_block_mask;
-	CHECK(slot_mask != 0);
+	CHECK(slot_mask != 0 && (slot_mask & 1U));
 	swapz_engine_absorb_read_slot(&engine, &slot);
 
 	memset(&probe, 0, sizeof(probe));
@@ -744,7 +746,7 @@ static int test_prime_absorb_preserves_shared_read_residency(void)
 	CHECK(probe.read_cache_valid == 1);
 	CHECK((probe.read_cached_block_mask & slot_mask) == slot_mask);
 
-	/* Absorb also publishes block zero into the master's metadata LRU. */
+	/* Absorb also publishes validated block-zero payload bytes into the master's block-zero LRU. */
 	saved_extent_cache = engine.read_extent_cache;
 	engine.read_extent_cache = NULL;
 	engine.read_cache_valid = 0;
