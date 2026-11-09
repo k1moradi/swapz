@@ -50,6 +50,9 @@ production acceptance still require the current-source qualification gates.
 
 Earlier permissions to format/repartition even the dedicated SD card
 are superseded; only post-swapoff swap *data* may be overwritten.
+The RAM extent builder must revalidate 4/8/16KiB extent geometry and bounded
+record capacity at seal, before zeroing padding in its lower-write image.
+Invalid transient builder state must leave that image unchanged.
 
 ## Priority
 
