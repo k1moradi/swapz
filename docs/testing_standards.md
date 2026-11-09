@@ -7234,6 +7234,18 @@ are admitted, that a canonical inactive recovery restores the header without
 This test path is not invoked by routine `make test` and cannot be described as
 a passing full physical or real-swap qualification.
 
+When interactive `make test` reaches the optional physical algorithm trial,
+the completed five-stage RAM run emits one private mode-0600 evidence record
+under `build/tests/` with a fresh nonce, exact HEAD/source identity, the five
+ordered PASS stage identities and final artifact SHA-256 values. The privileged
+physical helper reopens that no-follow file as the sudo operator, revalidates
+main/source/build/artifact identity and canonical remote main, and consumes it
+instead of launching a redundant `make fast_test`. This keeps the device-admission
+window short without weakening the standalone development smoke path, which
+continues to require its own nonce-bound `make fast_test` evidence. The private
+RAM record is deleted by the parent after the physical attempt and is never a
+qualification report or production physical evidence.
+
 The algorithm anonymous-page oracle at
 `tests/tools/algorithm-pageout-oracle.py` writes a bounded 8 MiB of
 run-unique 4096-byte patterns, requests `MADV_PAGEOUT`, then waits for its

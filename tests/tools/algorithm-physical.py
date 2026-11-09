@@ -188,6 +188,20 @@ def _require_read_only_preflight() -> dict:
     return {**selected, "selector": str(selector)}
 
 
+def _algorithm_ram_evidence_arguments() -> list[str]:
+    """Forward only the exact private evidence path created by make test."""
+    path = os.environ.get("SWAPZ_ALGORITHM_RAM_EVIDENCE")
+    nonce = os.environ.get("SWAPZ_ALGORITHM_RAM_NONCE")
+    if path is None and nonce is None:
+        return []
+    expected = str(ROOT / "build/tests/algorithm-ram-evidence.json")
+    if (path != expected or nonce is None or
+            re.fullmatch(r"[0-9a-f]{32}", nonce) is None):
+        raise ValueError("algorithm RAM evidence environment is malformed")
+    return ["--algorithm-ram-evidence", path,
+            "--algorithm-ram-nonce", nonce]
+
+
 def main() -> int:
     if not sys.stdin.isatty() or not sys.stdout.isatty():
         print("PHYSICAL_ALGORITHM_REAL_SWAP=NOT_RUN reason=noninteractive")
@@ -218,6 +232,11 @@ def main() -> int:
         print("  Shared-root candidate: privileged admission requires the "
               "protected host-scope record and recovery storage on another "
               "physical parent")
+    try:
+        algorithm_ram_evidence = _algorithm_ram_evidence_arguments()
+    except ValueError as error:
+        print("PHYSICAL_ALGORITHM_REAL_SWAP=BLOCKED " + str(error))
+        return 2
     print("  Existing swap header is restored after successful teardown")
     try:
         confirmed = input("Run bounded swapz Linux swap trial on this partition? [y/N] ")
@@ -236,6 +255,7 @@ def main() -> int:
         "run", "--device", selected["selector"],
         "--confirm-device", selected["selector"],
         "--development-only", "--algorithm-real-swap",
+        *algorithm_ram_evidence,
     ]
     # The root helper owns recovery and its own bounded child timeouts. Do not
     # SIGKILL it merely because this unprivileged parent reached a wall clock.

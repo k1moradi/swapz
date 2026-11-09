@@ -6573,6 +6573,57 @@ class ReportContract(unittest.TestCase):
 
 
 
+    def test_algorithm_ram_development_evidence_is_private_and_exact_source(self):
+        source = "a" * 40
+        stages = [
+            {"name": name, "status": "PASS", "exit_code": 0, "elapsed_s": 1.0}
+            for name in runner.OFFICIAL_STAGE_NAMES
+        ]
+        artifacts = {
+            "status": "AVAILABLE",
+            "formatter_sha256": "b" * 64,
+            "module_sha256": "c" * 64,
+            "oracle_sha256": "d" * 64,
+        }
+        result = {
+            "source_sha": source,
+            "tested_commit_sha": source,
+            "stages": stages,
+            "qualified_artifacts": artifacts,
+        }
+        with tempfile.TemporaryDirectory() as directory:
+            old_root = runner.ROOT
+            runner.ROOT = Path(directory)
+            head = "e" * 40
+            completed = subprocess.CompletedProcess(
+                ["git", "rev-parse", "HEAD"], 0,
+                stdout=(head + "\n").encode("ascii"), stderr=b"")
+            try:
+                with mock.patch.object(runner, "git_result",
+                                       return_value=completed), \
+                     mock.patch.object(runner, "git_sha", return_value=source):
+                    path, nonce = runner.write_algorithm_ram_development_evidence(
+                        result)
+                self.assertEqual(path.parent, runner.ROOT / "build/tests")
+                self.assertEqual(path.stat().st_mode & 0o777, 0o600)
+                record = json.loads(path.read_text(encoding="utf-8"))
+                self.assertEqual(
+                    record["schema"],
+                    "swapz-algorithm-ram-development-evidence-v1")
+                self.assertEqual(record["head"], head)
+                self.assertEqual(record["source_sha"], source)
+                self.assertEqual(record["nonce"], nonce)
+                self.assertEqual(
+                    record["artifact_sha256"],
+                    {key: artifacts[key] for key in (
+                        "formatter_sha256", "module_sha256", "oracle_sha256")})
+                broken = dict(result)
+                broken["stages"] = stages[:-1]
+                with self.assertRaisesRegex(ValueError, "five exact PASS"):
+                    runner.write_algorithm_ram_development_evidence(broken)
+            finally:
+                runner.ROOT = old_root
+
     def test_git_only_report_sync_updates_main_and_keeps_one_report_file(self):
         """Exercise real Git plumbing against a local bare remote."""
         import os

@@ -2240,6 +2240,72 @@ def official_pass_binding_refusal(report, source_sha):
     return None
 
 
+def write_algorithm_ram_development_evidence(result):
+    """Publish one private nonce-bound record from this completed RAM run."""
+    if (not isinstance(result, dict) or
+            result.get("source_sha") != result.get("tested_commit_sha") or
+            not re.fullmatch(r"[0-9a-f]{40}", str(result.get("source_sha", ""))) or
+            [stage.get("name") for stage in result.get("stages", [])
+             if isinstance(stage, dict)] != list(OFFICIAL_STAGE_NAMES) or
+            any(stage.get("status") != "PASS" or stage.get("exit_code") != 0
+                for stage in result.get("stages", [])
+                if isinstance(stage, dict)) or
+            len(result.get("stages", [])) != len(OFFICIAL_STAGE_NAMES) or
+            not owner_qualification_artifacts_available(
+                result.get("qualified_artifacts"))):
+        raise ValueError("algorithm RAM evidence requires five exact PASS stages")
+
+    head_result = git_result(["rev-parse", "HEAD"])
+    if head_result is None or head_result.returncode:
+        raise ValueError("algorithm RAM evidence cannot identify current HEAD")
+    head = head_result.stdout.decode("ascii", "replace").strip()
+    source_sha = result["source_sha"]
+    if (not re.fullmatch(r"[0-9a-f]{40}", head) or git_sha() != source_sha):
+        raise ValueError("algorithm RAM evidence source changed after qualification")
+
+    nonce = os.urandom(16).hex()
+    artifacts = result["qualified_artifacts"]
+    record = {
+        "schema": "swapz-algorithm-ram-development-evidence-v1",
+        "head": head,
+        "source_sha": source_sha,
+        "nonce": nonce,
+        "stages": [
+            {"name": stage["name"], "status": stage["status"],
+             "exit_code": stage["exit_code"]}
+            for stage in result["stages"]
+        ],
+        "artifact_sha256": {
+            key: artifacts[key] for key in (
+                "formatter_sha256", "module_sha256", "oracle_sha256")
+        },
+    }
+    evidence = ROOT / "build/tests/algorithm-ram-evidence.json"
+    evidence.parent.mkdir(parents=True, exist_ok=True)
+    temporary = evidence.with_name(".algorithm-ram-evidence.json.tmp")
+    payload = json.dumps(
+        record, sort_keys=True, separators=(",", ":"), allow_nan=False
+    ).encode("utf-8") + b"\n"
+    if len(payload) > 65536:
+        raise ValueError("algorithm RAM evidence exceeded its fixed bound")
+    primary_error = None
+    try:
+        with temporary.open("wb") as output:
+            output.write(payload)
+        os.chmod(temporary, 0o600)
+        os.replace(temporary, evidence)
+    except BaseException as error:
+        primary_error = error
+        raise
+    finally:
+        try:
+            temporary.unlink(missing_ok=True)
+        except BaseException:
+            if primary_error is None:
+                raise
+    return evidence, nonce
+
+
 def write_report(result):
     REPORT.parent.mkdir(parents=True, exist_ok=True)
     # Newlines allow ranged reader requests. Omitting indentation keeps the
@@ -10448,14 +10514,28 @@ def main():
             print("  RAM qualification passed; checking optional physical "
                   "algorithm trial admission", flush=True)
             physical_started = time.monotonic()
+            evidence_path = None
             try:
+                evidence_path, evidence_nonce = (
+                    write_algorithm_ram_development_evidence(result))
+                physical_env = os.environ.copy()
+                physical_env["SWAPZ_ALGORITHM_RAM_EVIDENCE"] = str(evidence_path)
+                physical_env["SWAPZ_ALGORITHM_RAM_NONCE"] = evidence_nonce
                 physical_trial = subprocess.run(
                     [sys.executable, "-B",
                      str(ROOT / "tests/tools/algorithm-physical.py")],
-                    cwd=ROOT, check=False)
+                    cwd=ROOT, check=False, env=physical_env)
                 physical_exit = physical_trial.returncode
-            except (OSError, subprocess.SubprocessError):
+            except (OSError, subprocess.SubprocessError, ValueError):
+                print("PHYSICAL_ALGORITHM_REAL_SWAP=BLOCKED "
+                      "reason=algorithm_ram_evidence_unavailable", flush=True)
                 physical_exit = 2
+            finally:
+                if evidence_path is not None:
+                    try:
+                        evidence_path.unlink(missing_ok=True)
+                    except OSError:
+                        pass
             physical_duration = f"{max(0.0, time.monotonic() - physical_started):.2f}s"
             if physical_exit == 0:
                 result["algorithm_real_swap"] = {

@@ -159,6 +159,54 @@ class PhysicalSwapProbeTests(unittest.TestCase):
                         probe._require_shared_root_development_plan(
                             target, evidence)
 
+    def test_make_test_ram_evidence_reuses_exact_pass_without_fast_test(self):
+        import pwd
+        source = "a" * 40
+        head = "b" * 40
+        nonce = "c" * 32
+        expected_uid = os.getuid()
+        path = self.recovery_base / "algorithm-ram-evidence.json"
+        record = {
+            "schema": "swapz-algorithm-ram-development-evidence-v1",
+            "head": head,
+            "source_sha": source,
+            "nonce": nonce,
+            "stages": [
+                {"name": name, "status": "PASS", "exit_code": 0}
+                for name in probe.QUALIFICATION_STAGE_NAMES
+            ],
+            "artifact_sha256": {
+                "formatter_sha256": "d" * 64,
+                "module_sha256": "e" * 64,
+                "oracle_sha256": "f" * 64,
+            },
+        }
+        path.write_text(json.dumps(record), encoding="utf-8")
+        path.chmod(0o600)
+        canonical = probe.ROOT / "build/tests/algorithm-ram-evidence.json"
+        with mock.patch.object(probe, "ROOT", self.recovery_base.parent), \
+             mock.patch.object(probe.Path, "__eq__",
+                               side_effect=lambda other: str(other) == str(path)):
+            pass
+        # Exercise the parser with its canonical path under a temporary ROOT.
+        temporary_root = self.recovery_base / "root"
+        canonical = temporary_root / "build/tests/algorithm-ram-evidence.json"
+        canonical.parent.mkdir(parents=True)
+        canonical.write_text(json.dumps(record), encoding="utf-8")
+        canonical.chmod(0o600)
+        with mock.patch.object(probe, "ROOT", temporary_root):
+            parsed = probe._read_algorithm_ram_development_evidence(
+                canonical, expected_uid, head, source, nonce)
+        self.assertEqual(parsed["outcome"], "MAKE_TEST_RAM_PASS")
+        self.assertEqual(parsed["artifact_digests"], record["artifact_sha256"])
+        record["stages"][0]["status"] = "FAIL"
+        canonical.write_text(json.dumps(record), encoding="utf-8")
+        canonical.chmod(0o600)
+        with mock.patch.object(probe, "ROOT", temporary_root):
+            with self.assertRaisesRegex(probe.ProbeError, "does not match"):
+                probe._read_algorithm_ram_development_evidence(
+                    canonical, expected_uid, head, source, nonce)
+
     def test_development_architecture_gate_requires_4k_64bit_native_linux(self):
         for machine in ("x86_64", "aarch64"):
             with self.subTest(machine=machine), \

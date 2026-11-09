@@ -992,6 +992,68 @@ def _read_fast_test_development_evidence(path, expected_uid, head, nonce):
             "fast_test_status": record["fast_test_status"]}
 
 
+def _read_algorithm_ram_development_evidence(
+        path, expected_uid, head, source_sha, nonce):
+    """Read the exact completed make-test RAM record without rerunning fast_test."""
+    expected_path = ROOT / "build/tests/algorithm-ram-evidence.json"
+    if Path(path) != expected_path:
+        raise ProbeError("algorithm RAM evidence path is not canonical")
+    descriptor = -1
+    try:
+        descriptor = os.open(
+            expected_path, os.O_RDONLY | os.O_NOFOLLOW |
+            os.O_NONBLOCK | os.O_CLOEXEC)
+        before = os.fstat(descriptor)
+        if (not stat.S_ISREG(before.st_mode) or before.st_uid != expected_uid or
+                stat.S_IMODE(before.st_mode) != 0o600 or before.st_nlink != 1 or
+                not 1 <= before.st_size <= 65536):
+            raise ProbeError("algorithm RAM evidence metadata is invalid")
+        payload = bytearray()
+        remaining = before.st_size
+        while remaining:
+            chunk = os.read(descriptor, min(65536, remaining))
+            if not chunk:
+                raise ProbeError("algorithm RAM evidence was truncated")
+            payload.extend(chunk)
+            remaining -= len(chunk)
+        after = os.fstat(descriptor)
+        if (before.st_dev, before.st_ino, before.st_size, before.st_mtime_ns,
+                before.st_ctime_ns) != (
+                after.st_dev, after.st_ino, after.st_size, after.st_mtime_ns,
+                after.st_ctime_ns):
+            raise ProbeError("algorithm RAM evidence changed while reading")
+        record = _load_unique_json(bytes(payload))
+    except (OSError, UnicodeDecodeError, ValueError) as exc:
+        if isinstance(exc, ProbeError):
+            raise
+        raise ProbeError("algorithm RAM evidence is unreadable") from exc
+    finally:
+        if descriptor >= 0:
+            _close_fd_preserving_active_error(descriptor)
+
+    stages = record.get("stages") if isinstance(record, dict) else None
+    expected_stages = [
+        {"name": name, "status": "PASS", "exit_code": 0}
+        for name in QUALIFICATION_STAGE_NAMES
+    ]
+    artifacts = record.get("artifact_sha256") if isinstance(record, dict) else None
+    if (record.get("schema") != "swapz-algorithm-ram-development-evidence-v1" or
+            record.get("head") != head or record.get("source_sha") != source_sha or
+            record.get("nonce") != nonce or stages != expected_stages or
+            not isinstance(artifacts, dict) or
+            set(artifacts) != {key for key, _, _ in PHYSICAL_ARTIFACTS} or
+            any(not isinstance(value, str) or
+                re.fullmatch(r"[0-9a-f]{64}", value) is None
+                for value in artifacts.values())):
+        raise ProbeError("algorithm RAM evidence does not match this qualification")
+    return {
+        "outcome": "MAKE_TEST_RAM_PASS",
+        "source_sha": source_sha,
+        "head": head,
+        "artifact_digests": artifacts,
+    }
+
+
 def _require_development_linux_abi():
     """Require the tested 64-bit/4KiB Linux block and swap ABI."""
     if platform.system() != "Linux" or platform.machine() not in (
@@ -1002,8 +1064,8 @@ def _require_development_linux_abi():
             "physical development smoke requires 64-bit Linux with 4096-byte pages")
 
 
-def current_development_evidence(nonce):
-    """Run source-bound fast_test and admit only the isolated dev smoke scope."""
+def current_development_evidence(nonce, algorithm_ram_evidence=None):
+    """Admit current make-test RAM evidence or run the standalone fast_test path."""
     _require_development_linux_abi()
     _require_physical_host()
     if os.geteuid() != 0:
@@ -1036,34 +1098,40 @@ def current_development_evidence(nonce):
     nonce = nonce or secrets.token_hex(16)
     if not re.fullmatch(r"[0-9a-f]{32}", nonce):
         raise ProbeError("development admission nonce is malformed")
-    runuser = shutil.which("runuser")
-    env = shutil.which("env")
-    make = shutil.which("make")
-    if not runuser or not env or not make:
-        raise ProbeError("runuser, env and make are required for development evidence")
-    try:
-        result = subprocess.run(
-            [runuser, "--user", operator, "--", env,
-             f"SWAPZ_DEVELOPMENT_ADMISSION_NONCE={nonce}", make,
-             "fast_test", "SCENARIOS=fast-mixed", "REPEAT=1",
-             "RESUME=1"],
-            cwd=ROOT, check=False, timeout=1200)
-    except (OSError, subprocess.TimeoutExpired) as exc:
-        raise ProbeError(f"source-bound development test failed to run: {exc}") from exc
-    evidence_path = ROOT / "build/tests/fast-test/development-evidence.json"
-    development = _read_fast_test_development_evidence(
-        evidence_path, operator_uid, head, nonce)
-    if result.returncode == 0:
-        if development["outcome"] != "FAST_TEST_PASS":
-            raise ProbeError(
-                "fast_test returned success without a PASS evidence record")
-    elif result.returncode == 2 and development["outcome"] == \
-            "LOADED_PREFLIGHT_BLOCKED_UNCLAIMED_NULL_BLK":
-        pass
+    if algorithm_ram_evidence is not None:
+        development = _read_algorithm_ram_development_evidence(
+            algorithm_ram_evidence, operator_uid, head, code_source_sha, nonce)
     else:
-        raise ProbeError(
-            "fast_test result expected=0_or_exact_preflight_exit_2 "
-            f"observed={result.returncode}")
+        runuser = shutil.which("runuser")
+        env = shutil.which("env")
+        make = shutil.which("make")
+        if not runuser or not env or not make:
+            raise ProbeError(
+                "runuser, env and make are required for development evidence")
+        try:
+            result = subprocess.run(
+                [runuser, "--user", operator, "--", env,
+                 f"SWAPZ_DEVELOPMENT_ADMISSION_NONCE={nonce}", make,
+                 "fast_test", "SCENARIOS=fast-mixed", "REPEAT=1",
+                 "RESUME=1"],
+                cwd=ROOT, check=False, timeout=1200)
+        except (OSError, subprocess.TimeoutExpired) as exc:
+            raise ProbeError(
+                f"source-bound development test failed to run: {exc}") from exc
+        evidence_path = ROOT / "build/tests/fast-test/development-evidence.json"
+        development = _read_fast_test_development_evidence(
+            evidence_path, operator_uid, head, nonce)
+        if result.returncode == 0:
+            if development["outcome"] != "FAST_TEST_PASS":
+                raise ProbeError(
+                    "fast_test returned success without a PASS evidence record")
+        elif result.returncode == 2 and development["outcome"] == \
+                "LOADED_PREFLIGHT_BLOCKED_UNCLAIMED_NULL_BLK":
+            pass
+        else:
+            raise ProbeError(
+                "fast_test result expected=0_or_exact_preflight_exit_2 "
+                f"observed={result.returncode}")
     try:
         build_info = (ROOT / "build/source-build-info.h").read_text()
     except OSError as exc:
@@ -1079,6 +1147,11 @@ def current_development_evidence(nonce):
             clean_match.group(1) != "1":
         raise ProbeError("development build artifacts are not clean and bound to current main")
     artifact_digests = _artifact_digests()
+    if (algorithm_ram_evidence is not None and
+            development.get("artifact_digests") != artifact_digests):
+        raise ProbeError(
+            "algorithm RAM evidence artifact digests differ from current build")
+    _require_development_canonical_main(head, code_source_sha)
     return {
         "source_sha": code_source_sha,
         "head": head,
@@ -3606,7 +3679,8 @@ def _final_physical_oracle_evidence_error(results, state, target,
 
 
 def run_probe(device_arg, confirm_arg, state_dir_arg, review_path,
-              development_only=False, algorithm_real_swap=False):
+              development_only=False, algorithm_real_swap=False,
+              algorithm_ram_evidence=None, algorithm_ram_nonce=None):
     if algorithm_real_swap and not development_only:
         raise ProbeError("real-swap algorithm mode requires development-only admission")
     if os.geteuid() != 0:
@@ -3617,7 +3691,8 @@ def run_probe(device_arg, confirm_arg, state_dir_arg, review_path,
             # Header-only development smoke retains the historical zero-row
             # contract. Real-swap mode uses a separately durable quiesce.
             require_development_formatter_inventory_clear()
-        evidence = current_development_evidence(None)
+        evidence = current_development_evidence(
+            algorithm_ram_nonce, algorithm_ram_evidence)
         evidence["algorithm_real_swap"] = algorithm_real_swap
         if algorithm_real_swap:
             target = inspect_target(
@@ -4621,6 +4696,8 @@ def main(argv=None):
     parser.add_argument(
         "--algorithm-real-swap", action="store_true",
         help="bounded real anonymous Linux swap round-trip; development-only")
+    parser.add_argument("--algorithm-ram-evidence")
+    parser.add_argument("--algorithm-ram-nonce")
     args = parser.parse_args(argv)
     if args.action in {"plan", "campaign-plan", "run", "recover"} and not args.device:
         parser.error("--device is required")
@@ -4641,6 +4718,16 @@ def main(argv=None):
     if args.algorithm_real_swap and (args.action != "run" or
                                      not args.development_only):
         parser.error("--algorithm-real-swap requires run --development-only")
+    if bool(args.algorithm_ram_evidence) != bool(args.algorithm_ram_nonce):
+        parser.error("algorithm RAM evidence path and nonce are paired")
+    if args.algorithm_ram_evidence and not (
+            args.action == "run" and args.development_only and
+            args.algorithm_real_swap):
+        parser.error(
+            "--algorithm-ram-evidence is only valid for the development real-swap run")
+    if (args.algorithm_ram_nonce and
+            re.fullmatch(r"[0-9a-f]{32}", args.algorithm_ram_nonce) is None):
+        parser.error("--algorithm-ram-nonce must be 32 lowercase hex characters")
     if args.action == "recover" and not args.state_dir:
         parser.error("recover requires --state-dir")
     if args.action == "plan":
@@ -4671,7 +4758,9 @@ def main(argv=None):
     signal.signal(signal.SIGTERM, handle_sigterm)
     run_probe(args.device, args.confirm_device, args.state_dir,
               args.review_record, development_only=args.development_only,
-              algorithm_real_swap=args.algorithm_real_swap)
+              algorithm_real_swap=args.algorithm_real_swap,
+              algorithm_ram_evidence=args.algorithm_ram_evidence,
+              algorithm_ram_nonce=args.algorithm_ram_nonce)
     return 0
 
 

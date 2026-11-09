@@ -66,6 +66,20 @@ class AlgorithmPhysicalTest(unittest.TestCase):
         self.assertEqual(subject._eligible_partitions(
             {"blockdevices":[{**self.device,"tran":"nvme"}]}), [])
 
+    def test_make_test_evidence_is_forwarded_only_as_exact_private_pair(self):
+        expected = str(subject.ROOT / "build/tests/algorithm-ram-evidence.json")
+        with mock.patch.dict(subject.os.environ, {
+                "SWAPZ_ALGORITHM_RAM_EVIDENCE": expected,
+                "SWAPZ_ALGORITHM_RAM_NONCE": "a" * 32}, clear=False):
+            self.assertEqual(subject._algorithm_ram_evidence_arguments(), [
+                "--algorithm-ram-evidence", expected,
+                "--algorithm-ram-nonce", "a" * 32])
+        with mock.patch.dict(subject.os.environ, {
+                "SWAPZ_ALGORITHM_RAM_EVIDENCE": "/tmp/other",
+                "SWAPZ_ALGORITHM_RAM_NONCE": "a" * 32}, clear=False):
+            with self.assertRaisesRegex(ValueError, "malformed"):
+                subject._algorithm_ram_evidence_arguments()
+
     def test_declining_confirmation_never_invokes_privilege(self):
         candidate = {"path":"/dev/sda1", "parent":"/dev/sda",
                      "partuuid":"example-01", "size_bytes":128 * 1024 * 1024,
