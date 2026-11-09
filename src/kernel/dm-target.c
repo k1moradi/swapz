@@ -2168,6 +2168,17 @@ static void swapz_end_accepted_lower_idle(struct swapz_dm *ctx, u64 now_ns)
 	atomic64_set(&ctx->accepted_work_lower_idle_wake_ns, 0);
 }
 
+/* All lower data offsets include the immutable SWAPSPACE2 header page.
+ * Promote before addition so a future larger backing geometry cannot wrap a
+ * u32 data-block index into physical block zero. Bounds are validated by
+ * each caller before this pure address conversion.
+ */
+static inline sector_t swapz_backing_data_sector(const struct swapz_dm *ctx,
+						  swapz_u32 data_block)
+{
+	return ((sector_t)ctx->data_start_block + data_block) * SWAPZ_SECTORS;
+}
+
 static int swapz_submit_inflight_write(struct swapz_dm *ctx,
 				       struct swapz_inflight_write *inflight)
 {
@@ -2215,8 +2226,7 @@ static int swapz_submit_inflight_write(struct swapz_dm *ctx,
 	ctx->lower_write_submitted_reqs++;
 	ctx->engine.submitted_blocks += inflight->run.blocks;
 	region.bdev = ctx->backing->bdev;
-	region.sector = (sector_t)(ctx->data_start_block + inflight->run.start_block) *
-		SWAPZ_SECTORS;
+	region.sector = swapz_backing_data_sector(ctx, inflight->run.start_block);
 	region.count = (sector_t)inflight->run.blocks * SWAPZ_SECTORS;
 	reinit_completion(&inflight->lower_done);
 	inflight->lower_error = 0;
@@ -2509,7 +2519,7 @@ static noinline int swapz_lower(struct swapz_dm *ctx, enum req_op op,
 		return -ERANGE;
 	}
 	region.bdev = ctx->backing->bdev;
-	region.sector = (sector_t)(ctx->data_start_block + block) * SWAPZ_SECTORS;
+	region.sector = swapz_backing_data_sector(ctx, block);
 	region.count = (sector_t)blocks * SWAPZ_SECTORS;
 	/* Inject at the common physical WRITE boundary, including foreground
 	 * mixed runs, serialized controls and GC relocation. Never count this
@@ -2843,7 +2853,7 @@ static int swapz_parallel_lower_read(void *opaque, swapz_u32 block,
 	    blocks > ctx->physical_blocks - block)
 		return -ERANGE;
 	region.bdev = ctx->backing->bdev;
-	region.sector = (sector_t)(ctx->data_start_block + block) * SWAPZ_SECTORS;
+	region.sector = swapz_backing_data_sector(ctx, block);
 	region.count = (sector_t)blocks * SWAPZ_SECTORS;
 	error = swapz_maybe_inject_read_fault(ctx);
 	if (error)
@@ -2917,9 +2927,8 @@ static int swapz_submit_read_slot_range(struct swapz_read_slot *slot,
 	req.mem.ptr.vma = slot->engine.read_scratch +
 		(size_t)first_block * SWAPZ_BLOCK_BYTES;
 	region.bdev = ctx->backing->bdev;
-	region.sector = (sector_t)(ctx->data_start_block +
-			      slot->start_block + first_block) *
-		SWAPZ_SECTORS;
+	region.sector = swapz_backing_data_sector(ctx,
+					      slot->start_block + first_block);
 	region.count = (sector_t)blocks * SWAPZ_SECTORS;
 	error = swapz_maybe_inject_read_fault(ctx);
 	if (error) {
