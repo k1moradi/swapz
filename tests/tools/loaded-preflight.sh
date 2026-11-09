@@ -645,7 +645,7 @@ read_owned_config_uint() {
 read_owned_config_proof() {
     local result_variable="$1" phase="$2" expected_power="$3"
     local config_identity config_index memory_backed config_size blocksize queue_mode
-    local power_identity power_state
+    local power_state
     [[ -d $owned_config && ! -L $owned_config ]] || return 1
     config_identity="$(stat -Lc '%d:%i' "$owned_config" 2>/dev/null)" || return 1
     [[ $config_identity == *:* && $config_identity != *[!0-9:]* ]] || return 1
@@ -658,8 +658,6 @@ read_owned_config_proof() {
     read_owned_config_uint blocksize "$phase" blocksize
     read_owned_config_uint queue_mode "$phase" queue_mode
     read_owned_config_uint power_state "$phase" power
-    power_identity="$(stat -Lc '%d:%i' "$owned_config/power" 2>/dev/null)" || return 1
-    [[ $power_identity == *:* && $power_identity != *[!0-9:]* ]] || return 1
     [[ $memory_backed == 1 && $config_size != 0 && $blocksize == 4096 &&
        $queue_mode == 2 ]] || return 1
     [[ $power_state == "$expected_power" ]] ||
@@ -667,9 +665,9 @@ read_owned_config_proof() {
     [[ -z $lower_index || $lower_index == "$config_index" ]] || return 1
     [[ "$(stat -Lc '%d:%i' "$owned_config" 2>/dev/null)" == "$config_identity" ]] ||
         return 1
-    printf -v "$result_variable" '%s|%s|%s|%s|%s|%s|%s' \
+    printf -v "$result_variable" '%s|%s|%s|%s|%s|%s' \
         "$config_identity" "$config_index" "$memory_backed" "$config_size" \
-        "$blocksize" "$queue_mode" "$power_identity"
+        "$blocksize" "$queue_mode"
 }
 
 read_owned_lower_proof() {
@@ -740,7 +738,7 @@ read_owned_lower_proof() {
 
 assert_owned_config_proof() {
     local phase="$1" expected_power="$2" current_proof
-    local current_config_fd_identity current_power_fd_identity
+    local current_config_fd_identity
     if ! read_owned_config_proof current_proof "$phase" "$expected_power"; then
         ownership_refuse "$phase" null_blk config_inode_index_attributes missing_or_changed
     fi
@@ -748,12 +746,13 @@ assert_owned_config_proof() {
         ownership_refuse "$phase" null_blk original_inode_index_attributes substituted
     current_config_fd_identity="$(stat -Lc '%d:%i' "/proc/$$/fd/$owned_config_fd" 2>/dev/null)" ||
         ownership_refuse "$phase" null_blk pinned_config_inode unreadable
-    current_power_fd_identity="$(stat -Lc '%d:%i' "/proc/$$/fd/$owned_power_fd" 2>/dev/null)" ||
-        ownership_refuse "$phase" null_blk pinned_power_inode unreadable
     [[ $current_config_fd_identity == "$owned_config_identity" ]] ||
         ownership_refuse "$phase" null_blk pinned_config_inode substituted
-    [[ $current_power_fd_identity == "$owned_power_identity" ]] ||
-        ownership_refuse "$phase" null_blk pinned_power_inode substituted
+    # Configfs pseudo-file inode values can change between path and FD lookups.
+    # Validate type and owner through the FD opened under the pinned directory.
+    [[ -f /proc/$$/fd/$owned_power_fd &&
+       "$(stat -Lc '%u' "/proc/$$/fd/$owned_power_fd" 2>/dev/null)" == 0 ]] ||
+        ownership_refuse "$phase" null_blk pinned_power_attribute invalid_type_or_owner
     if [[ $expected_power == 1 ]]; then
         if ! read_owned_lower_proof current_proof "$phase"; then
             ownership_refuse "$phase" null_blk sysfs_major_devno_node_rdev missing_or_changed
@@ -793,19 +792,17 @@ if ! read_owned_config_proof owned_config_proof acquire 1; then
     ownership_refuse acquire null_blk config_inode_index_attributes missing_or_incomplete
 fi
 owned_config_identity="${owned_config_proof%%|*}"
-owned_power_identity="${owned_config_proof##*|}"
 [[ $owned_config_fd_identity == "$owned_config_identity" ]] ||
     ownership_refuse acquire null_blk pinned_config_inode substituted
 # Resolve the power attribute through the already-pinned configfs directory.
 # A public-path replacement between the directory proof and this open cannot
 # redirect the descriptor to a same-named foreign configfs object.
 if ! { exec {owned_power_fd}<> "/proc/$$/fd/$owned_config_fd/power"; } 2>/dev/null; then
-    ownership_refuse acquire null_blk pinned_power_inode open_failed
+    ownership_refuse acquire null_blk pinned_power_attribute open_failed
 fi
-owned_power_fd_identity="$(stat -Lc '%d:%i' "/proc/$$/fd/$owned_power_fd" 2>/dev/null)" ||
-    ownership_refuse acquire null_blk pinned_power_inode fd_stat_failed
-[[ $owned_power_fd_identity == "$owned_power_identity" ]] ||
-    ownership_refuse acquire null_blk pinned_power_inode substituted
+[[ -f /proc/$$/fd/$owned_power_fd &&
+   "$(stat -Lc '%u' "/proc/$$/fd/$owned_power_fd" 2>/dev/null)" == 0 ]] ||
+    ownership_refuse acquire null_blk pinned_power_attribute invalid_type_or_owner
 if ! read_owned_lower_proof owned_lower_proof acquire; then
     ownership_refuse acquire null_blk dependency_sysfs_major_index_devno_node_rdev missing_or_incomplete
 fi
@@ -926,12 +923,11 @@ holder_list="$(ls -A "/sys/block/${owned_lower_proof%%|*}/holders" 2>/dev/null)"
 assert_owned_config_proof power_off 1
 # The power attribute was opened and pinned at acquisition. Re-stat that same
 # descriptor immediately before the write; no pathname lookup can retarget it.
-current_power_fd_identity="$(stat -Lc '%d:%i' "/proc/$$/fd/$owned_power_fd" 2>/dev/null)" ||
-    ownership_refuse power_off null_blk pinned_power_inode fd_stat_failed
-[[ $current_power_fd_identity == "$owned_power_identity" ]] ||
-    ownership_refuse power_off null_blk pinned_power_inode substituted
+[[ -f /proc/$$/fd/$owned_power_fd &&
+   "$(stat -Lc '%u' "/proc/$$/fd/$owned_power_fd" 2>/dev/null)" == 0 ]] ||
+    ownership_refuse power_off null_blk pinned_power_attribute invalid_type_or_owner
 printf '0\n' >&"$owned_power_fd" ||
-    ownership_refuse power_off null_blk pinned_power_inode write_failed "$?" retain_remaining_resources
+    ownership_refuse power_off null_blk pinned_power_attribute write_failed "$?" retain_remaining_resources
 # Power-off removes sysfs block telemetry. Keep checking the captured configfs
 # identity and pinned descriptors through the final pathname-bound rmdir.
 assert_owned_config_proof config_remove 0

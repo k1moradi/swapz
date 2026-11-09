@@ -8,6 +8,7 @@
 #include <errno.h>
 #include <fcntl.h>
 #include <limits.h>
+#include <spawn.h>
 #ifdef SWAPZ_PRIMARY_OWNED_NULLBLK_TEST
 #include <linux/btrfs.h>
 #endif
@@ -9876,6 +9877,47 @@ static int swapz_primary_parse_module_bool(const char *value, int *enabled)
 	return -1;
 }
 
+/* finit_module(2) does not load separate kernel dependencies. Use a fixed
+ * kmod invocation only after qualified artifact hashes have matched; retain
+ * the exact hashed module fd for finit_module. The provider may be shared by
+ * other subsystems and must never be unloaded by swapz.
+ */
+#ifndef SWAPZ_PRIMARY_ROOTLESS_TEST
+static int swapz_primary_ensure_lz4_provider(void)
+{
+	char *const arguments[] = {
+		(char *)"modprobe", (char *)"--ignore-install",
+		(char *)"--", (char *)"lz4_compress", NULL,
+	};
+	char *const environment[] = {
+		(char *)"LC_ALL=C",
+		(char *)"PATH=/usr/sbin:/usr/bin:/sbin:/bin", NULL,
+	};
+	pid_t child;
+	int status;
+	int spawn_status;
+
+	/* No shell, PATH executable lookup, ambient variables or install hook. */
+	spawn_status = posix_spawn(&child, "/usr/sbin/modprobe", NULL, NULL,
+				   arguments, environment);
+	if (spawn_status != 0) {
+		errno = spawn_status;
+		return -1;
+	}
+	for (;;) {
+		if (waitpid(child, &status, 0) == child)
+			break;
+		if (errno != EINTR)
+			return -1;
+	}
+	if (!WIFEXITED(status) || WEXITSTATUS(status) != 0) {
+		errno = EIO;
+		return -1;
+	}
+	return 0;
+}
+#endif
+
 int swapz_primary_load_qualified_module(int *loaded_by_call)
 {
 #ifdef SWAPZ_PRIMARY_ROOTLESS_TEST
@@ -9940,6 +9982,8 @@ int swapz_primary_load_qualified_module(int *loaded_by_call)
 		errno = EBADMSG;
 		goto out;
 	}
+	if (swapz_primary_ensure_lz4_provider() < 0)
+		goto out;
 	if (syscall(SYS_finit_module, module_fd,
 		    "allow_physical_backing=1", 0U) < 0)
 		goto out;

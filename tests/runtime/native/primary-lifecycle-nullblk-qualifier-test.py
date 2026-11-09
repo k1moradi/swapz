@@ -56,6 +56,97 @@ class PrimaryLifecycleNullblkQualifierContract(unittest.TestCase):
         self.assertNotIn(".namespace_fd = (uint32_t)namespace_fd", function)
         self.assertIn("saved_errno == EINVAL", function)
 
+    def test_lz4_provider_loading_is_fixed_and_fail_closed(self):
+        # Exercise the production helper with a private executable, never the
+        # host's modprobe or the kernel module loader.
+        import json
+
+        helper_start = self.primary.index(
+            "static int swapz_primary_ensure_lz4_provider(void)")
+        helper_end = self.primary.index("\n}\n", helper_start) + 3
+        helper = self.primary[helper_start:helper_end]
+        loader_start = self.primary.index(
+            "int swapz_primary_load_qualified_module(int *loaded_by_call)")
+        loader = self.primary[loader_start:self.primary.index(
+            "static int swapz_primary_module_load_record_format(", loader_start)]
+        self.assertIn('"--ignore-install"', helper)
+        self.assertIn('"lz4_compress"', helper)
+        self.assertIn('posix_spawn(&child, "/usr/sbin/modprobe"', helper)
+        self.assertIn('WIFEXITED(status)', helper)
+        self.assertIn('errno = spawn_status;', helper)
+        self.assertIn('errno = EIO;', helper)
+        verified = loader.index("swapz_primary_qualification_artifacts_match(")
+        provider = loader.index("swapz_primary_ensure_lz4_provider()")
+        insertion = loader.index("syscall(SYS_finit_module")
+        self.assertLess(verified, provider)
+        self.assertLess(provider, insertion)
+
+        with TemporaryDirectory(prefix="swapz-lz4-provider-") as folder:
+            test_directory = Path(folder)
+            fake_provider = test_directory / "modprobe"
+            arguments_file = test_directory / "arguments"
+            fixture_source = test_directory / "provider.c"
+            fixture_executable = test_directory / "provider"
+            private_helper = helper.replace(
+                '"/usr/sbin/modprobe"', json.dumps(str(fake_provider)))
+            fixture_source.write_text(
+                "#define _POSIX_C_SOURCE 200809L\n"
+                "#include <errno.h>\n#include <spawn.h>\n"
+                "#include <stdio.h>\n#include <sys/wait.h>\n"
+                + private_helper
+                + "\nint main(void) {\n"
+                  "    if (swapz_primary_ensure_lz4_provider() == 0) {\n"
+                  '        puts("provider=ready");\n'
+                  "        return 0;\n"
+                  "    }\n"
+                  '    printf("provider=failed errno=%d\\n", errno);\n'
+                  "    return 2;\n"
+                  "}\n", encoding="utf-8")
+            subprocess.run(
+                ["cc", "-std=c11", "-O2", "-Wall", "-Wextra", "-Werror",
+                 str(fixture_source), "-o", str(fixture_executable)],
+                check=True, capture_output=True, text=True)
+
+            fake_provider.write_text(
+                "#!/bin/sh\n"
+                f"printf '%s\\n' \"$@\" > {shlex.quote(str(arguments_file))}\n"
+                "exit 0\n", encoding="utf-8")
+            fake_provider.chmod(0o700)
+            completed = subprocess.run(
+                [str(fixture_executable)], capture_output=True, text=True)
+            self.assertEqual(completed.returncode, 0, completed.stderr)
+            self.assertEqual(completed.stdout, "provider=ready\n")
+            self.assertEqual(arguments_file.read_text().splitlines(),
+                             ["--ignore-install", "--", "lz4_compress"])
+
+            fake_provider.write_text("#!/bin/sh\nexit 17\n", encoding="utf-8")
+            completed = subprocess.run(
+                [str(fixture_executable)], capture_output=True, text=True)
+            self.assertEqual(completed.returncode, 2)
+            self.assertEqual(completed.stdout,
+                             f"provider=failed errno={errno.EIO}\n")
+
+            fake_provider.unlink()
+            completed = subprocess.run(
+                [str(fixture_executable)], capture_output=True, text=True)
+            self.assertEqual(completed.returncode, 2)
+            self.assertEqual(completed.stdout,
+                             f"provider=failed errno={errno.ENOENT}\n")
+
+    def test_preflight_configfs_power_inode_is_not_persistent_identity(self):
+        preflight = (ROOT / "tests/tools/loaded-preflight.sh").read_text(
+            encoding="utf-8")
+        self.assertNotIn("owned_power_identity", preflight)
+        self.assertNotIn("current_power_fd_identity", preflight)
+        self.assertNotIn("pinned_power_inode substituted", preflight)
+        self.assertIn("pinned_power_attribute invalid_type_or_owner",
+                      preflight)
+        self.assertIn(
+            "ownership_refuse mapper_remove null_blk creation_authority",
+            preflight)
+        self.assertIn(
+            "live_identity_only", preflight)
+
     def test_malformed_mountinfo_frame_reports_fixed_einval(self):
         # Framing rejection must remain fail-closed and carry no host path,
         # device identity, PID or mount row into the public diagnostic.

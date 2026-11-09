@@ -1528,6 +1528,20 @@ cleanup mutants. `tests/tools/primary-real-swap-oracle.py` only allocates and
 verifies memory; it configures no swap or mapper state. Agent 12 owns shared
 runner/official-pipeline registration; Agent 8 must not edit that wiring.
 
+### Qualified module LZ4 provider
+
+The production primary loader must resolve the fixed `lz4_compress`
+provider before calling `finit_module` on the already authenticated
+`dm-swapz.ko` descriptor. Some kernels build LZ4 compression as a separate
+module while decompression is built in. The dependency load must use a fixed
+absolute kmod executable, fixed arguments with install hooks disabled, and a
+minimal environment; it must occur only after the qualification report and
+all three live artifact hashes match. A dependency failure is a fail-closed
+module-load refusal, not permission to skip the qualified module or retry with
+an unverified path. Neither normal stop nor recovery may remove the shared
+provider. A rootless fixture must test provider success, failure, and absence
+without running the host's modprobe.
+
 ### Loaded-preflight ownership and retained cleanup
 
 The loaded preflight must retain executable mode 0755. The rootless runner
@@ -1571,7 +1585,10 @@ name and devno, null_blk configfs attributes and index, sysfs alias and
 driver major/minor, lower node rdev, partition markers, active swap aliases,
 mounts, exact holder and captured configfs directory identity. Configfs
 attribute pseudo-file inode numbers may be regenerated on each lookup and must
-not be compared as persistent identities. Before the creator powers off its
+not be compared as persistent identities. Loaded preflight instead checks the
+root-owned regular-file type through its pinned power descriptor; that check
+does not grant creator authority to a later preflight process. Before the
+creator powers off its
 device, it opens the named config directory without following symlinks,
 compares that descriptor's device/inode/owner with the creation-time identity,
 revalidates the directory entry, and opens each kernel-defined attribute
