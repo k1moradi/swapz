@@ -902,7 +902,17 @@ int swapz_ram_extent_seal(struct swapz_ram_extent *builder)
 	    builder->record_capacity > SWAPZ_MAX_RECORDS ||
 	    builder->sealed || !builder->count ||
 	    builder->count > builder->record_capacity ||
-	    builder->payload_start > builder->bytes_total)
+	    builder->payload_start > builder->bytes_total ||
+	    /*
+	     * The last appended payload begins at payload_start. Reject a
+	     * damaged cursor before zero-padding could erase live payload bytes
+	     * or leave stale staging bytes in an otherwise sealed lower image.
+	     */
+	    builder->last_record.payload_offset != builder->payload_start ||
+	    !builder->last_record.payload_length ||
+	    builder->last_record.payload_length > SWAPZ_MAX_COMPRESSED ||
+	    builder->last_record.payload_length >
+		    builder->bytes_total - builder->payload_start)
 		return -EINVAL;
 
 	/* No header or descriptor publication to the physical data area. */

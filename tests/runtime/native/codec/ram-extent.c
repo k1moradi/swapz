@@ -78,7 +78,16 @@ static int test_class(swapz_u32 bytes_total)
 		invalid_builder = builder;
 		invalid_builder.bytes_total = 3U * SWAPZ_BLOCK_BYTES;
 		CHECK(swapz_ram_extent_seal(&invalid_builder) == -EINVAL);
+		/* A mismatched cursor would otherwise zero a staged payload or
+		 * retain nonzero padding. Reject both without modifying bytes. */
+		invalid_builder = builder;
+		invalid_builder.payload_start++;
+		CHECK(swapz_ram_extent_seal(&invalid_builder) == -EINVAL);
+		invalid_builder = builder;
+		invalid_builder.payload_start--;
+		CHECK(swapz_ram_extent_seal(&invalid_builder) == -EINVAL);
 		CHECK(image[0] == old_padding && !builder.sealed);
+		CHECK(image[builder.payload_start] == payload[0]);
 	}
 	CHECK(swapz_ram_extent_seal(&builder) == 0);
 	CHECK(swapz_ram_extent_seal(&builder) == -EINVAL);
