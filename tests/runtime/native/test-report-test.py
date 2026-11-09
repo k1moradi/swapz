@@ -2183,6 +2183,19 @@ class ReportContract(unittest.TestCase):
         self.assertTrue(history.host_matches(report))
         points = history.report_points(report)
         self.assertEqual(len(points), 1)
+        ram_only = {**report, "overall": "INCOMPLETE",
+                    "stages": [{"status": "PASS"}] * 5}
+        self.assertEqual(history.report_points(ram_only), [])
+        self.assertEqual(
+            history.report_points(ram_only, include_incomplete_ram=True), points)
+        for invalid in (
+                {**ram_only, "stages": [{"status": "PASS"}] * 4},
+                {**ram_only, "stages": [{"status": "PASS"}] * 4
+                 + [{"status": "NOT_RUN"}]},
+                {**ram_only, "overall": "FAIL"},
+                {**ram_only, "overall": "BLOCKED"}):
+            self.assertEqual(
+                history.report_points(invalid, include_incomplete_ram=True), [])
         for metric in ("write_mbps_gain_pct", "read_mbps_gain_pct", "read_p99_ms_gain_pct"):
             self.assertAlmostEqual(points[0][metric], 50)
         self.assertAlmostEqual(points[0]["lower_write_bytes_gain_pct"], 30)
@@ -2268,6 +2281,8 @@ class ReportContract(unittest.TestCase):
                   "benchmarks": {"sessions": [{"arms": {
                       arm: {"host_cpu": {"online_cpus": 8}} for arm in ("off", "swapz")}}]}}
         self.assertTrue(history.selected_host_report(report, sha, profile))
+        self.assertTrue(history.selected_host_report(
+            {**report, "overall": "INCOMPLETE"}, sha, profile))
         self.assertFalse(history.selected_host_report(report, "c" * 40, profile))
         self.assertFalse(history.selected_host_report(report, sha))
         for mutate in (lambda r: r.update(overall="BLOCKED"),
@@ -2316,6 +2331,12 @@ class ReportContract(unittest.TestCase):
         report = {"host_identity": identity, "overall": "PASS",
                   "stages": [{"status": "PASS"}] * 5}
         self.assertTrue(history.same_computer_report(report, identity))
+        self.assertTrue(history.same_computer_report(
+            {**report, "overall": "INCOMPLETE"}, identity))
+        self.assertFalse(history.same_computer_report(
+            {**report, "overall": "INCOMPLETE",
+             "stages": [{"status": "PASS"}] * 4 + [{"status": "FAIL"}]},
+            identity))
         for different in ({**identity, "id_sha256": "b" * 64},
                           {**identity, "architecture": "aarch64"}, {},
                           {**identity, "schema": "unknown"}):
@@ -2343,6 +2364,13 @@ class ReportContract(unittest.TestCase):
         # execution of the earlier host report.
         restored_sha = f"{6:040x}"
         reports[restored_sha] = reports[f"{1:040x}"]
+        reports[f"{7:040x}"] = {
+            **reports[f"{1:040x}"], "overall": "INCOMPLETE"}
+        reports[f"{8:040x}"] = {
+            **reports[f"{1:040x}"], "overall": "INCOMPLETE",
+            "stages": [{"status": "PASS"}] * 4 + [{"status": "BLOCKED"}]}
+        reports[f"{9:040x}"] = {
+            **reports[f"{1:040x}"], "overall": "FAIL"}
         def git_output(command, **kwargs):
             if command[1] == "log":
                 return "\n".join(
@@ -2354,8 +2382,10 @@ class ReportContract(unittest.TestCase):
                 patch.object(history, "report_points", return_value=[{"target": "ssd_emulated"}]):
             data = history.collect(computer=identity)
         self.assertEqual([r["report_sha"] for r in data["reports"]],
-                         [f"{1:040x}", f"{5:040x}"])
-        self.assertEqual(data["excluded"]["other or unproven host"], 3)
+                         [f"{1:040x}", f"{5:040x}", f"{7:040x}"])
+        self.assertEqual(data["reports"][-1]["overall_verdict"], "INCOMPLETE")
+        self.assertEqual(data["reports"][-1]["ram_stage_evidence"], "FIVE_STAGE_PASS")
+        self.assertEqual(data["excluded"]["other or unproven host"], 5)
 
     def test_host_identity_matches_production_sha256_vectors(self):
         from unittest.mock import call, patch
@@ -2638,7 +2668,7 @@ class ReportContract(unittest.TestCase):
                 "print('{\"reports\": 3, \"latest_source\": \"abcdef0123456789\"}')\n")
             with patch.object(runner, "ROOT", root):
                 result = runner.refresh_history(identity)
-                self.assertIn("UPDATED: 3 this-computer PASS reports", result)
+                self.assertIn("UPDATED: 3 this-computer RAM-backed reports", result)
                 self.assertIn("abcdef012345", result)
                 marker = root / "build/history/marker"
                 command = json.loads(marker.read_text())
@@ -2649,12 +2679,12 @@ class ReportContract(unittest.TestCase):
                 log = root / "build/history" / ("x86_64-" + "a" * 64) / "refresh.log"
                 self.assertIn("matplotlib unavailable", log.read_text())
                 helper.write_text(
-                    "raise SystemExit('No proven PASS history for the selected host profile')\n")
+                    "raise SystemExit('No eligible RAM-backed history for the selected host profile')\n")
                 self.assertEqual(
                     runner.refresh_history(identity),
-                    "NOT UPDATED: no proven overall PASS history for this "
-                    "computer (host identity and qualification required)")
-                self.assertIn("No proven PASS history for the selected host profile",
+                    "NOT UPDATED: no comparable RAM-backed history for this "
+                    "computer (host and five-stage RAM evidence required)")
+                self.assertIn("No eligible RAM-backed history for the selected host profile",
                               log.read_text())
                 helper.write_text("print('invalid summary')\n")
                 self.assertTrue(runner.refresh_history(identity).startswith("NOT UPDATED:"))

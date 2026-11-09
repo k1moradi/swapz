@@ -4081,8 +4081,15 @@ plotting dependency.
 
 ARM64/NEON plus the seven-online-CPU profile selects this VM's historical
 cohort; old reports lack an immutable VM identifier, so record that limitation.
-Require overall PASS, default async preparation and a recorded delta64 state
-for mixed points, and matching source/fixture/trace between each pair. Delta64
+The plots use synthetic RAM-backed benchmark evidence, not physical-device
+qualification. Preserve historical overall PASS reports under their existing
+host-provenance rules; also admit overall INCOMPLETE only when all five
+required RAM qualification stages explicitly PASS. Overall FAIL/BLOCKED
+or any incomplete RAM stage remains excluded. Persist each original overall
+verdict and the five-stage evidence status in history.json and CSV; allowing
+an INCOMPLETE report into descriptive RAM plots never upgrades qualification.
+Require default async preparation and a recorded delta64 state for mixed
+points, and matching source/fixture/trace between each pair. Delta64
 off and on are separate series: the production default became rescue-on, so the
 line breaks there instead of joining LZ4-only history. Exclude
 failed/blocked reports and other or unproven hosts. If no proven overall

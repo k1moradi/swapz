@@ -10312,11 +10312,11 @@ def refresh_history(host_identity):
         log.write_text(proc.stdout + proc.stderr)
         if (proc.returncode == 1 and not proc.stdout and
                 proc.stderr.strip() ==
-                "No proven PASS history for the selected host profile"):
-            # No eligible report is a normal history selection outcome, not
-            # a plotting dependency or benchmark execution failure.
-            return ("NOT UPDATED: no proven overall PASS history for this "
-                    "computer (host identity and qualification required)")
+                "No eligible RAM-backed history for the selected host profile"):
+            # No eligible RAM report is normal, not a plotting dependency or
+            # kernel/device qualification failure.
+            return ("NOT UPDATED: no comparable RAM-backed history for this "
+                    "computer (host and five-stage RAM evidence required)")
         if proc.returncode:
             return f"NOT UPDATED: history helper failed; see {log.relative_to(ROOT)}"
         summary = json.loads(proc.stdout)
@@ -10333,7 +10333,7 @@ def refresh_history(host_identity):
                           f"; {candidate_count} older report candidates need owner confirmation "
                           f"in {candidates_path}"
                           if candidate_count else "")
-        result = (f"UPDATED: {summary['reports']} this-computer PASS reports{legacy_note}; latest source "
+        result = (f"UPDATED: {summary['reports']} this-computer RAM-backed reports{legacy_note}; latest source "
                   f"{summary['latest_source'][:12]}; {output.relative_to(ROOT)}/index.md"
                   f"{candidate_note}")
         # ARM's historical NEON cohort remains a separate descriptive reference.

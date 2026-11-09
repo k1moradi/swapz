@@ -22,7 +22,7 @@ from zoneinfo import ZoneInfo
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from product_goals import (  # noqa: E402
     DEVICE_BOUND, GUARD_FLOOR_PCT, MIXED, PERSISTENT, TARGETS, change,
-    goal_for, report_points, scorecard, service_floor_pct)
+    goal_for, ram_stages_pass, report_points, scorecard, service_floor_pct)
 
 ROOT = Path(__file__).resolve().parents[2]
 OUT = ROOT / "build/history/arm64-neon"
@@ -128,9 +128,9 @@ def host_registry_entry(registry, identity):
 
 
 def report_passed_all_stages(report):
-    stages = report.get("stages", [])
-    return report.get("overall") == "PASS" and len(stages) == 5 and \
-        all(stage.get("status") == "PASS" for stage in stages)
+    # Plot eligibility needs RAM stage evidence, not physical qualification.
+    return report.get("overall") in ("PASS", "INCOMPLETE") and \
+        ram_stages_pass(report)
 
 
 def report_signature(report):
@@ -262,14 +262,19 @@ def collect(profile=None, computer=None, host_registry=None):
         if not selected:
             excluded["other or unproven host"] += 1
             continue
-        if report.get("overall") != "PASS":
-            excluded["selected host FAIL/BLOCKED"] += 1
+        if report.get("overall") not in ("PASS", "INCOMPLETE") or (
+                report.get("overall") == "INCOMPLETE"
+                and not ram_stages_pass(report)):
+            excluded["selected host lacks passing RAM evidence"] += 1
             continue
-        rows = report_points(report)
+        rows = report_points(report, include_incomplete_ram=True)
         if not rows:
             excluded["no comparable default-async sessions"] += 1
             continue
         metadata = {"sequence": len(reports) + 1, "report_sha": sha,
+                    "overall_verdict": report.get("overall"),
+                    "ram_stage_evidence": ("FIVE_STAGE_PASS" if ram_stages_pass(report)
+                                           else "LEGACY_OVERALL_PASS"),
                     "source_sha": report.get("tested_commit_sha") or report.get("source_sha"),
                     "host_profile_id": computer["architecture"] + "-" + computer["id_sha256"] if computer else
                     (profile["id"] if profile else "arm64-neon"),
@@ -332,9 +337,11 @@ def collect(profile=None, computer=None, host_registry=None):
             "owner_confirmed_legacy_reports": legacy_count,
             "legacy_candidates": legacy_candidates,
             "identity_note": identity,
-            "scope": "Historical descriptive " + title + " owner PASS reports. " + identity +
-                     " No quiet-window noise screen in official reports; no causal cross-report "
-                     "inference or physical NVMe fidelity claim from configured RAM-model ceilings."}
+            "scope": "Historical descriptive " + title + " RAM-backed benchmark reports. " +
+                     identity + " Overall INCOMPLETE is permitted only after five RAM stages PASS; "
+                     "physical qualification remains separate. No quiet-window noise screen in "
+                     "official reports; no causal cross-report inference or physical NVMe "
+                     "fidelity claim from configured RAM-model ceilings."}
 
 
 def draw_line(ax, rows, metric, label, color, style="-"):
@@ -407,7 +414,7 @@ def render(data):
             persistent_rows_by_target_and_qd.setdefault(
                 (point["target"], point["qd"]), []).append(point)
     report_span_label = (
-        f"{total} passing reports · {data['reports'][0]['date'][:10]} to "
+        f"{total} RAM-backed reports · {data['reports'][0]['date'][:10]} to "
         f"{data['reports'][-1]['date'][:10]} · latest source "
         f"{data['reports'][-1]['source_sha'][:7]}")
     for filename, (title, metrics) in charts.items():
@@ -441,7 +448,7 @@ def render(data):
         fig.suptitle(data["title"] + " · " + title, fontsize=17, fontweight="bold")
         fig.text(.5, .935, report_span_label,
                  ha="center", fontsize=10, color="#555555")
-        fig.supxlabel("Qualified report sequence · oldest to newest · source/report SHA mapping in CSV", y=.075)
+        fig.supxlabel("RAM-backed report sequence · oldest to newest · source/report SHA mapping in CSV", y=.075)
         scale_note = ("Absolute decimal MB/s; higher is better for both raw and swapz"
                       if filename == "mixed-throughput" else
                       "0% = raw parity · positive = improvement")
@@ -471,7 +478,7 @@ def render(data):
     fig.suptitle(data["title"] + " · sustained WRITE gain versus raw (%)", fontsize=17, fontweight="bold")
     fig.text(.5, .935, report_span_label,
              ha="center", fontsize=10, color="#555555")
-    fig.supxlabel("Qualified report sequence · persistent lane-owned workers only; wave drivers excluded", y=.06)
+    fig.supxlabel("RAM-backed report sequence · persistent lane-owned workers only; wave drivers excluded", y=.06)
     fig.text(.5, .015, "0% = raw parity · dotted red = latency/host-bound guard floor · kernel changes "
              "break lines · descriptive history; host load is uncontrolled",
              ha="center", fontsize=9)
@@ -523,7 +530,7 @@ def main():
             raise SystemExit(f"Invalid or unavailable host history registry {registry_path}: {error}")
     data = collect(profile, computer, host_registry)
     if not data["reports"]:
-        raise SystemExit("No proven PASS history for the selected host profile")
+        raise SystemExit("No eligible RAM-backed history for the selected host profile")
     render(data)
     (OUT / "history.json").write_text(json.dumps(data, indent=2) + "\n")
     fields = sorted({key for point in data["points"] for key in point})
@@ -545,7 +552,7 @@ def main():
             json.dumps(candidates_data, indent=2) + "\n")
     snapshot = snapshot_history(data)
     summary = ["# " + data["title"] + " performance history", "", data["scope"], "",
-               f"{len(data['reports'])} passing report revisions; latest source "
+               f"{len(data['reports'])} RAM-backed report revisions; latest source "
                f"`{data['reports'][-1]['source_sha']}`. " + data["identity_note"], "",
                "Each mixed point uses async sessions and its own raw controls. Current history includes "
                "only delta64-rescue-on sessions; historical delta64-off sessions and the retired write-only "

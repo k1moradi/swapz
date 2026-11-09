@@ -93,9 +93,23 @@ def paired_inputs_match(session, source):
             for key in ("fixture_sha256", "trace_sha256"))
 
 
-def report_points(report):
-    """Keep only production-on async mixed sessions and persistent WRITE QDs."""
-    if report.get("overall") != "PASS":
+def ram_stages_pass(report):
+    """Prove all five RAM stages passed without requiring physical admission."""
+    stages = report.get("stages")
+    return isinstance(stages, list) and len(stages) == 5 and all(
+        isinstance(stage, dict) and stage.get("status") == "PASS"
+        for stage in stages)
+
+
+def report_points(report, *, include_incomplete_ram=False):
+    """Keep comparable production-on async mixed and persistent WRITE QDs.
+
+    The history plotter may include overall INCOMPLETE after all RAM stages
+    pass. Normal report qualification decisions remain unchanged.
+    """
+    if report.get("overall") != "PASS" and not (
+            include_incomplete_ram and report.get("overall") == "INCOMPLETE"
+            and ram_stages_pass(report)):
         return []
     benchmarks = report.get("benchmarks", {})
     groups, metadata = defaultdict(list), {}
