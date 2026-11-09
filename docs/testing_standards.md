@@ -54,6 +54,11 @@ the constructor rejects that ownership violation without changing the image.
 Also reject builders inside either buffer and payload inputs overlapping
 the descriptor array, before any mutation. Exercise exclusive swapoff and return to
 ordinary swapon without reboot; after success ask owner keep/restore.
+Rootless post-PASS keep-choice tests must refuse a changed backing header,
+reactivated raw swap, substituted mapper, incorrect mapper priority,
+missing or unowned module, and missing active mapper. A positive fixture
+must verify both raw and mapper swap-device identities; none of these
+fixtures establish live-host physical qualification.
 Existing raw-header preservation alone is insufficient for production PASS.
 New trial selectors use `/dev/disk/by-partuuid/<PARTUUID>`, not the
 filesystem UUID. An ordinary Linux swap partition may legitimately have a
