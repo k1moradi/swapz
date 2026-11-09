@@ -2898,8 +2898,7 @@ static int swapz_submit_read_slot_range(struct swapz_read_slot *slot,
 		.mem = {
 			.type = DM_IO_VMA,
 			.offset = 0,
-			.ptr.vma = slot->engine.read_scratch +
-				(size_t)first_block * SWAPZ_BLOCK_BYTES,
+			.ptr.vma = NULL,
 		},
 		.notify = {
 			.fn = swapz_async_lower_read_done,
@@ -2914,6 +2913,9 @@ static int swapz_submit_read_slot_range(struct swapz_read_slot *slot,
 	    slot->start_block >= ctx->physical_blocks ||
 	    slot->extent_blocks > ctx->physical_blocks - slot->start_block)
 		return -EINVAL;
+	/* Form the scratch offset only after the extent/block bounds check. */
+	req.mem.ptr.vma = slot->engine.read_scratch +
+		(size_t)first_block * SWAPZ_BLOCK_BYTES;
 	region.bdev = ctx->backing->bdev;
 	region.sector = (sector_t)(ctx->data_start_block +
 			      slot->start_block + first_block) *

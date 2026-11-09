@@ -51,6 +51,16 @@ def main() -> None:
         "inflight->run.bytes" not in async_write[:validation],
         "Async lower WRITE must validate slot before dereferencing its image")
 
+    # Reject an invalid read-slot block range before forming a pointer
+    # outside the slot's allocated scratch image.
+    async_read = target.split("static int swapz_submit_read_slot_range(", 1)[1]
+    read_validation = async_read.index("if (!blocks || first_block >=")
+    read_binding = async_read.index("req.mem.ptr.vma = slot->engine.read_scratch +")
+    require(
+        read_binding > read_validation and
+        "slot->engine.read_scratch +" not in async_read[:read_validation],
+        "Async lower READ must validate block range before scratch offset")
+
     disk_identity = target.index('is_nullb = !strncmp(')
     io_client = target.index("ctx->io_client = dm_io_client_create();", disk_identity)
     disk_classification = target[disk_identity:io_client]
