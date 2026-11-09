@@ -2804,8 +2804,8 @@ static int swapz_discard_dead_segment(void *opaque, swapz_u32 segment)
 		ctx->segment_discards_unsupported++;
 		return 0;
 	}
-	start_sector = (sector_t)ctx->data_start_block * SWAPZ_SECTORS +
-		(sector_t)segment * sectors;
+	start_sector = swapz_backing_data_sector(
+		ctx, segment * SWAPZ_SEGMENT_BLOCKS);
 	ctx->segment_discards_issued++;
 	start_ns = ktime_get_ns();
 	error = blkdev_issue_discard(ctx->backing->bdev, start_sector, sectors,
@@ -9494,8 +9494,7 @@ static int swapz_iterate_devices(struct dm_target *ti,
 	 * swap header or the unallocated segment tail. Null_blk without a
 	 * reserved header continues to report a zero-based range.
 	 */
-	return fn(ti, ctx->backing,
-		  (sector_t)ctx->data_start_block * SWAPZ_SECTORS,
+	return fn(ti, ctx->backing, swapz_backing_data_sector(ctx, 0),
 		  (sector_t)ctx->physical_blocks * SWAPZ_SECTORS, data);
 }
 
