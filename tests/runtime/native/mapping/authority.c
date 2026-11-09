@@ -491,6 +491,12 @@ static int test_full_publish_and_authoritative_reads(void)
 				      extent + observed.payload_offset,
 				      &payload) == -ESTALE);
 			CHECK(payload == NULL);
+			/* A missing byte source must not expose the previous result. */
+			payload = (const swapz_u8 *)1;
+			CHECK(swapz_read_authoritative_payload(
+				      &authority, index, &observed,
+				      NULL, &payload) == -EINVAL);
+			CHECK(payload == NULL);
 			extent[observed.payload_offset] ^= 1U;
 			CHECK(swapz_read_authoritative_payload(
 				      &authority, index, &observed,
