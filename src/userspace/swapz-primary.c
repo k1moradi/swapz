@@ -1742,48 +1742,6 @@ out:
 #endif
 #endif
 
-int swapz_primary_header_build(
-	const char run_id[SWAPZ_PRIMARY_RUN_ID_LENGTH + 1U],
-	uint64_t device_bytes,
-	unsigned char header[SWAPZ_SUPERBLOCK_BYTES])
-{
-	static const char hex[] = "0123456789abcdef";
-	unsigned char candidate[SWAPZ_SUPERBLOCK_BYTES] = {0};
-	unsigned int i;
-
-	if (!run_id || !header || !swapz_primary_valid_run_id(run_id) ||
-	    device_bytes < SWAPZ_PRIMARY_BLOCK_BYTES ||
-	    device_bytes % SWAPZ_PRIMARY_BLOCK_BYTES) {
-		errno = EINVAL;
-		return -1;
-	}
-	memcpy(candidate + SWAPZ_SUPERBLOCK_MAGIC_OFFSET,
-	       swapz_superblock_magic, SWAPZ_SUPERBLOCK_MAGIC_BYTES);
-	swapz_sb_put_u32(candidate + SWAPZ_SUPERBLOCK_VERSION_OFFSET,
-			 SWAPZ_SUPERBLOCK_VERSION);
-	swapz_sb_put_u32(candidate + SWAPZ_SUPERBLOCK_HEADER_BYTES_OFFSET,
-			 SWAPZ_SUPERBLOCK_BYTES);
-	swapz_sb_put_u64(candidate + SWAPZ_SUPERBLOCK_DEVICE_BYTES_OFFSET,
-			 (unsigned long long)device_bytes);
-	for (i = 0; i < SWAPZ_SUPERBLOCK_UUID_BYTES; ++i) {
-		unsigned int high =
-			(unsigned int)(strchr(hex, run_id[i * 2U]) - hex);
-		unsigned int low =
-			(unsigned int)(strchr(hex, run_id[i * 2U + 1U]) - hex);
-
-		candidate[SWAPZ_SUPERBLOCK_UUID_OFFSET + i] =
-			(unsigned char)((high << 4) | low);
-	}
-	if (!swapz_sb_valid(candidate, (unsigned long long)device_bytes)) {
-		memset(candidate, 0, sizeof(candidate));
-		errno = EINVAL;
-		return -1;
-	}
-	memcpy(header, candidate, sizeof(candidate));
-	memset(candidate, 0, sizeof(candidate));
-	return 0;
-}
-
 static int swapz_primary_manifest_take_line(const char **cursor,
 					    const char *end,
 					    const char *key,
@@ -2423,9 +2381,17 @@ static int swapz_primary_optional_uuid_matches_fd(
 	if (lstat(uuid_path, &link_before) < 0) {
 		if (errno != ENOENT)
 			return -1;
-		if (swapz_primary_exact_read(fd, header, sizeof(header)) < 0)
+		/*
+		 * A Linux swap UUID is optional. When no by-UUID alias exists, bind
+		 * admission to the already selected PARTUUID/device geometry and the
+		 * unchanged ordinary SWAPSPACE2 header instead of inventing another
+		 * on-disk identity.
+		 */
+		if (!swapz_primary_target_valid(&swapz_primary_selected_target) ||
+		    swapz_primary_exact_read(fd, header, sizeof(header)) < 0)
 			return -1;
-		if (!swapz_sb_valid(header, SWAPZ_PRIMARY_DEVICE_BYTES)) {
+		if (!swapz_linux_swap_header_valid(
+			    header, swapz_primary_selected_target.device_bytes)) {
 			memset(header, 0, sizeof(header));
 			errno = ENODEV;
 			return -1;
@@ -2451,6 +2417,7 @@ static int swapz_primary_optional_uuid_matches_fd(
 	}
 	return 0;
 }
+
 
 static int swapz_primary_open_target_checked_partuuid_paths_mode(
 	const char *device_path, const char *uuid_path, const char *partuuid_path,
@@ -2540,12 +2507,9 @@ static int swapz_primary_original_swap_signature(
 	const unsigned char block[SWAPZ_PRIMARY_BLOCK_BYTES],
 	uint64_t device_bytes)
 {
-	static const unsigned char magic[] = "SWAPSPACE2";
-
-	return !swapz_sb_valid(block, device_bytes) &&
-	       !memcmp(block + SWAPZ_PRIMARY_BLOCK_BYTES - sizeof(magic) + 1U,
-		       magic, sizeof(magic) - 1U);
+	return swapz_linux_swap_header_valid(block, device_bytes);
 }
+
 
 static uint32_t swapz_primary_read_u32_le(const unsigned char *bytes)
 {
@@ -2593,92 +2557,6 @@ static int swapz_primary_exact_read(int fd, unsigned char *buffer,
 			return -1;
 		}
 		completed += (size_t)count;
-	}
-	return 0;
-}
-
-static int swapz_primary_header_fd_valid(
-	int fd, const struct swapz_primary_target *target)
-{
-	struct stat info;
-	int flags;
-
-	if (fd < 0 || !target || fstat(fd, &info) < 0)
-		return 0;
-	flags = fcntl(fd, F_GETFL);
-	if (flags < 0)
-		return 0;
-	if ((flags & O_ACCMODE) != O_RDWR) {
-		errno = EBADF;
-		return 0;
-	}
-#ifdef SWAPZ_PRIMARY_ROOTLESS_TEST
-	if (!S_ISREG(info.st_mode) ||
-	    info.st_size < (off_t)SWAPZ_PRIMARY_BLOCK_BYTES) {
-		errno = ENODEV;
-		return 0;
-	}
-#else
-	{
-		uint64_t bytes = 0;
-
-		if (!S_ISBLK(info.st_mode) ||
-		    info.st_rdev != makedev(target->device_major,
-				    target->device_minor)) {
-			errno = EPERM;
-			return 0;
-		}
-		if (ioctl(fd, BLKGETSIZE64, &bytes) < 0)
-			return 0;
-		if (bytes != target->device_bytes) {
-			errno = EINVAL;
-			return 0;
-		}
-	}
-#endif
-	return 1;
-}
-
-int swapz_primary_write_header_checked_fd(
-	int fd, const struct swapz_primary_target *target,
-	const unsigned char expected_current[SWAPZ_PRIMARY_BLOCK_BYTES],
-	const unsigned char replacement[SWAPZ_PRIMARY_BLOCK_BYTES])
-{
-	unsigned char observed[SWAPZ_PRIMARY_BLOCK_BYTES];
-	size_t completed = 0;
-
-	if (!target || !expected_current || !replacement) {
-		errno = EINVAL;
-		return -1;
-	}
-	if (!swapz_primary_header_fd_valid(fd, target))
-		return -1;
-	if (swapz_primary_exact_read(fd, observed, sizeof(observed)) < 0)
-		return -1;
-	if (memcmp(observed, expected_current, sizeof(observed))) {
-		errno = ESTALE;
-		return -1;
-	}
-	while (completed < sizeof(observed)) {
-		ssize_t count = pwrite(fd, replacement + completed,
-				       sizeof(observed) - completed,
-				       (off_t)completed);
-
-		if (count < 0 && errno == EINTR)
-			continue;
-		if (count <= 0) {
-			if (!count)
-				errno = EIO;
-			return -1;
-		}
-		completed += (size_t)count;
-	}
-	if (fsync(fd) < 0 || !swapz_primary_header_fd_valid(fd, target) ||
-	    swapz_primary_exact_read(fd, observed, sizeof(observed)) < 0)
-		return -1;
-	if (memcmp(observed, replacement, sizeof(observed))) {
-		errno = EIO;
-		return -1;
 	}
 	return 0;
 }
