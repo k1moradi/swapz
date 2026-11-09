@@ -88,7 +88,11 @@ dispatch after a failure, lets started tests finish their own cleanup, and
 kills/reaps a worker on its 900-second individual timeout. The Bash parent
 alone replays output and emits source-ordered progress rows, using actual
 per-worker elapsed times; it keeps only a bounded private failure diagnostic
-and cleans up completed scratch. The pilot must not reinterpret elapsed-time
+and cleans up completed scratch.
+An unexpected failure or signal also runs the owned scratch cleanup before
+the standard rootless reporter disables traps, without replacing the first
+failure status. The top-level console explicitly announces the opt-in rootless
+worker mode while continuing to identify loaded qualification as sequential. The pilot must not reinterpret elapsed-time
 markers as PASS evidence, nor mix shell output from independent workers.
 `tests/runtime/native/test-report-test.py` tests exact group approval,
 two-worker overlap, private output permissions, stop-dispatch on failure and

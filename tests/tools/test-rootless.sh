@@ -427,6 +427,12 @@ report_rootless_failure() {
   rootless_failure_reported=1
   trap - ERR EXIT INT TERM
   set +e
+  # A signal or an unexpected worker/relay error must not leave a newly
+  # allocated parallel scratch directory behind after disabling EXIT traps.
+  # The original failure status always takes precedence over cleanup.
+  if [[ -n ${rootless_parallel_directory:-} ]]; then
+    rootless_parallel_cleanup || :
+  fi
   if [[ $failure_reason == nonzero_exit &&
         $failed_subtest == unavailable && $failed_test == unavailable ]]; then
     case $original_exit_code in
