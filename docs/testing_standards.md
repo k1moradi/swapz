@@ -24,7 +24,9 @@ record offsets/lengths, 4/8/16KiB packing, read correctness, GC, overwrite,
 DISCARD and concurrency, partial/failing I/O, memory capacity and no stale
 mapping after target recreation. Native data-only builder coverage must also
 alias its descriptor array deliberately with the lower-write image and prove
-the constructor rejects that ownership violation without changing the image. Exercise exclusive swapoff and return to
+the constructor rejects that ownership violation without changing the image.
+Also reject builders inside either buffer and payload inputs overlapping
+the descriptor array, before any mutation. Exercise exclusive swapoff and return to
 ordinary swapon without reboot; after success ask owner keep/restore.
 Existing raw-header preservation alone is insufficient for production PASS.
 The 16 GiB native capacity fixture must account for the expanded 20-byte

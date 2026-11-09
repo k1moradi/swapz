@@ -765,7 +765,11 @@ int swapz_ram_extent_begin(struct swapz_ram_extent *builder, void *bytes,
 	 * ownership domains. Aliasing would make descriptor mutation observable
 	 * as backing bytes or let seal() erase authoritative metadata. */
 	if (swapz_payload_overlaps_storage(bytes, bytes_total,
-					   records, record_bytes))
+					   records, record_bytes) ||
+	    swapz_payload_overlaps_storage(bytes, bytes_total,
+					   builder, sizeof(*builder)) ||
+	    swapz_payload_overlaps_storage(records, record_bytes,
+					   builder, sizeof(*builder)))
 		return -EINVAL;
 
 	*builder = (struct swapz_ram_extent) {
@@ -805,7 +809,11 @@ static int swapz_ram_extent_append_checked(struct swapz_ram_extent *builder,
 	    payload_length > SWAPZ_MAX_COMPRESSED || !generation ||
 	    !swapz_encoding_valid(encoding) ||
 	    swapz_payload_overlaps_storage(builder->bytes, builder->bytes_total,
-					   payload, payload_length))
+					   payload, payload_length) ||
+	    swapz_payload_overlaps_storage(
+		builder->records,
+		(swapz_u32)builder->record_capacity * sizeof(*builder->records),
+		payload, payload_length))
 		return -EINVAL;
 	if (builder->count >= builder->record_capacity)
 		return -ENOSPC;
