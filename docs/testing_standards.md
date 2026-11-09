@@ -25,6 +25,10 @@ DISCARD and concurrency, partial/failing I/O, memory capacity and no stale
 mapping after target recreation. Exercise exclusive swapoff and return to
 ordinary swapon without reboot; after success ask owner keep/restore.
 Existing raw-header preservation alone is insufficient for production PASS.
+The 16 GiB native capacity fixture must account for the expanded 20-byte
+volatile mapping record and current per-segment indexes: expected
+index bytes are 121739228, not the historical 16-byte-map total. Count
+all allocated sidecars and page-rounded memory separately.
 A source contract must also verify Device Mapper iterate_devices describes
 only the allocated lower data region, excluding the protected first page and
 unused tail for physical backing while retaining zero-based null_blk.

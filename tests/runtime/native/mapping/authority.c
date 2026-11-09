@@ -292,7 +292,7 @@ static int test_16gib_fixture_maximum_capacity(void)
 	const swapz_u32 expected_segments = 16383U;
 	const swapz_u64 expected_mapper_bytes = 15268315136ULL;
 	const swapz_u64 expected_linux_swap_bytes = 15268311040ULL;
-	const swapz_u64 expected_index_bytes = 106828764ULL;
+	const swapz_u64 expected_index_bytes = 121739228ULL;
 	const swapz_u32 total_blocks =
 		(swapz_u32)(partition_bytes / SWAPZ_BLOCK_BYTES);
 	const swapz_u32 physical_blocks =
