@@ -185,8 +185,25 @@ static int write_run(void *opaque, swapz_u32 block, swapz_u16 blocks,
 	}
 	memcpy(media + (size_t)block * SWAPZ_BLOCK_BYTES, src,
 	       (size_t)blocks * SWAPZ_BLOCK_BYTES);
-	if (corrupt_on_run && run_calls == corrupt_on_run)
-		media[(size_t)block * SWAPZ_BLOCK_BYTES + 7] ^= 1;
+	if (corrupt_on_run && run_calls == corrupt_on_run) {
+		const struct swapz_tx *transaction = &bulk_txs[0];
+		size_t relative_offset;
+
+		/* Corrupt authoritative payload bytes, not the obsolete serialized
+		 * SWZ header. The paused transaction already owns the exact RAM
+		 * descriptor used for later publication and read validation. */
+		if (!a.batch_pending || !transaction->count ||
+		    !transaction->compressed_data_only ||
+		    !transaction->records[0].compressed_metadata_bound ||
+		    transaction->start_block < block)
+			return -EUCLEAN;
+		relative_offset =
+			(size_t)(transaction->start_block - block) * SWAPZ_BLOCK_BYTES +
+			transaction->records[0].payload_offset;
+		if (relative_offset >= (size_t)blocks * SWAPZ_BLOCK_BYTES)
+			return -EUCLEAN;
+		media[(size_t)block * SWAPZ_BLOCK_BYTES + relative_offset] ^= 1;
+	}
 	lower_written_bytes += (unsigned long long)blocks * SWAPZ_BLOCK_BYTES;
 	*completed = blocks;
 	return 0;
@@ -592,19 +609,18 @@ static int test_corrupted_completed_run_detected_on_read(void)
 	int error;
 
 	CHECK(setup() == 0);
-	/* The lower callback reports full completion, but mutates the
-	 * first extent's on-media header. This models corruption of
-	 * submitted pages BEFORE independent CRC/mapping publication.
-	 * The engine uses its original immutable RAM image for swapz_finish
-	 * and must also be tested with explicit verify_after_write=1
-	 * (which keeps the old serialized full readback path). */
+	/* The lower callback reports full completion, but mutates the first
+	 * extent's payload bytes. This models corruption after submission but
+	 * before publication. The engine publishes from its immutable RAM
+	 * descriptor snapshot; with write verification disabled, the payload CRC
+	 * must catch the lower-device lie on the later read. */
 	corrupt_on_run = 1;
 	error = swapz_engine_write_window_batched(&e, pages, 64,
 					       &committed);
-	/* With write_verify=0, a lower device that lies about writes
-	 * cannot be detected until a later read; logical publication
-	 * remains valid only for the supplied immutable source image.
-	 * The read MUST detect the corrupted on-media metadata. */
+	/* With write_verify=0, a lower device that lies about writes cannot be
+	 * detected until a later read. RAM authority remains valid for the
+	 * submitted source image, and payload CRC verification must reject the
+	 * corrupted lower bytes. */
 	CHECK(error == 0 && committed == 64);
 	{
 		swapz_u8 out[SWAPZ_MAX_COMPRESSED];
