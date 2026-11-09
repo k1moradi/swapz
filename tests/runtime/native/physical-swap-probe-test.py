@@ -90,6 +90,23 @@ class PhysicalSwapProbeTests(unittest.TestCase):
                     probe.ProbeError, "contains or backs the root filesystem"):
                 probe._require_root_not_on_target(8, 3)
 
+    def test_automatic_recovery_refuses_multiple_or_foreign_markers(self):
+        one = self.recovery_base / "partition-11111111-01.active"
+        two = self.recovery_base / "partition-22222222-01.active"
+        with mock.patch.object(probe, "recover") as recovery:
+            self.assertFalse(probe.recover_pending_algorithm_trial())
+            one.write_text("{}")
+            two.write_text("{}")
+            with self.assertRaisesRegex(
+                    probe.RecoveryRequiredError, "multiple recovery markers"):
+                probe.recover_pending_algorithm_trial()
+            recovery.assert_not_called()
+            two.unlink()
+            with self.assertRaisesRegex(
+                    probe.RecoveryRequiredError, "trusted root-owned"):
+                probe.recover_pending_algorithm_trial()
+            recovery.assert_not_called()
+
     def test_shared_root_development_plan_binds_scope_recovery_and_target(self):
         target = {
             "major": 8, "minor": 4, "partuuid": "7fb9401d-04",

@@ -174,17 +174,22 @@ def _require_development_linux_abi() -> None:
         raise ValueError("physical trial requires 64-bit Linux with 4096-byte pages")
 
 
-def _require_bare_metal_host() -> None:
-    """Match the privileged VM/container refusal with a bounded diagnosis."""
+def _require_bare_metal_host(*, allow_virtual=False) -> bool:
+    """Only an explicitly labeled development trial may admit a verified VM."""
     detector = shutil.which("systemd-detect-virt")
     if detector is None:
         raise ValueError("systemd-detect-virt is required for physical admission")
+    virtual_machine = False
     for mode in ("--vm", "--container"):
         result = subprocess.run(
             [detector, mode], check=False, capture_output=True,
             text=True, timeout=10)
         detected = result.stdout.strip()
         if result.returncode == 0:
+            if mode == "--vm" and allow_virtual and re.fullmatch(
+                    r"[A-Za-z0-9_.-]{1,32}", detected):
+                virtual_machine = True
+                continue
             kind = mode[2:]
             value = detected if re.fullmatch(r"[A-Za-z0-9_.-]{1,32}", detected) else "detected"
             raise ValueError(
@@ -192,13 +197,37 @@ def _require_bare_metal_host() -> None:
         if result.returncode != 1 or detected not in {"", "none"}:
             raise ValueError(
                 f"cannot verify bare-metal {mode[2:]} status")
+    return virtual_machine
+
+
+class PendingRecoveryError(ValueError):
+    """Root-owned restoration must finish before the next trial is admitted."""
+
+
+def _recover_pending_algorithm_trial() -> None:
+    """Resume any exact owned journal before signature-dependent discovery."""
+    sudo = shutil.which("sudo")
+    if sudo is None:
+        raise ValueError("sudo is required for recovery preflight")
+    command = [
+        sudo, "-n", "--", sys.executable, "-I", "-B",
+        str(ROOT / "tests/tools/physical-swap-probe.py"),
+        "recover-pending",
+    ]
+    result = subprocess.run(command, cwd=ROOT, check=False, timeout=180)
+    if result.returncode == 3:
+        raise PendingRecoveryError(
+            "owned swap recovery remains unresolved; inspect its saved journal")
+    if result.returncode != 0:
+        raise ValueError("cannot verify pending physical recovery status")
 
 
 def _require_read_only_preflight() -> dict | None:
     if os.geteuid() == 0:
         raise ValueError("algorithm confirmation must run unprivileged")
     _require_development_linux_abi()
-    _require_bare_metal_host()
+    virtual_device_only = _require_bare_metal_host(allow_virtual=True)
+    _recover_pending_algorithm_trial()
     if Path("/sys/module/dm_swapz").exists():
         raise ValueError("dm_swapz is already loaded; foreign module ownership")
     try:
@@ -229,7 +258,8 @@ def _require_read_only_preflight() -> dict | None:
     if not selector.is_symlink() or \
             os.path.realpath(selector) != os.path.realpath(selected["path"]):
         raise ValueError("partition swap UUID link does not match the candidate")
-    return {**selected, "selector": str(selector)}
+    return {**selected, "selector": str(selector),
+            "virtual_device_only": virtual_device_only}
 
 
 def _algorithm_ram_evidence_arguments() -> list[str]:
@@ -252,6 +282,9 @@ def main() -> int:
         return 2
     try:
         selected = _require_read_only_preflight()
+    except PendingRecoveryError as error:
+        print("PHYSICAL_ALGORITHM_REAL_SWAP=RECOVERY_REQUIRED " + str(error))
+        return 3
     except (OSError, subprocess.SubprocessError, ValueError) as error:
         print("PHYSICAL_ALGORITHM_REAL_SWAP=BLOCKED " + str(error))
         return 2
@@ -261,6 +294,9 @@ def main() -> int:
     print("Physical algorithm trial (disposable swap data):")
     print(f"  Partition: {selected['path']}  Parent: {selected['parent']}")
     print(f"  PARTUUID: {selected['partuuid']}  Bytes: {selected['size_bytes']}")
+    if selected.get("virtual_device_only"):
+        print("  VIRTUAL_DEVICE_ONLY: verified VM with separate USB swap device; "
+              "never physical qualification")
     active_swap = selected.get("active_swap")
     if active_swap is not None:
         print(f"  Swap status: ACTIVE; used={active_swap['used_kib']} KiB, "
@@ -305,6 +341,7 @@ def main() -> int:
         "run", "--device", selected["selector"],
         "--confirm-device", selected["selector"],
         "--development-only", "--algorithm-real-swap",
+        *(["--virtual-device-only"] if selected.get("virtual_device_only") else []),
         *algorithm_ram_evidence,
     ]
     # The root helper owns recovery and its own bounded child timeouts. Do not

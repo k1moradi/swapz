@@ -146,6 +146,59 @@ class AlgorithmPhysicalTest(unittest.TestCase):
             with self.assertRaisesRegex(ValueError, "vm: vmware"):
                 subject._require_bare_metal_host()
 
+    def test_vm_development_requires_explicit_mode_and_no_container(self):
+        def detect(command, **_kwargs):
+            virtual = command[-1] == "--vm"
+            return SimpleNamespace(
+                returncode=0 if virtual else 1,
+                stdout="vmware\n" if virtual else "none\n", stderr="")
+        with mock.patch.object(subject.shutil, "which",
+                               return_value="/usr/bin/systemd-detect-virt"), \
+             mock.patch.object(subject.subprocess, "run",
+                               side_effect=detect):
+            self.assertTrue(subject._require_bare_metal_host(
+                allow_virtual=True))
+            with self.assertRaisesRegex(ValueError, "vm: vmware"):
+                subject._require_bare_metal_host()
+        with mock.patch.object(subject.shutil, "which",
+                               return_value="/usr/bin/systemd-detect-virt"), \
+             mock.patch.object(subject.subprocess, "run",
+                               return_value=SimpleNamespace(
+                                   returncode=0, stdout="docker\n", stderr="")):
+            with self.assertRaisesRegex(ValueError, "container"):
+                subject._require_bare_metal_host(allow_virtual=True)
+
+    def test_recovery_precedes_swap_partition_discovery(self):
+        with mock.patch.object(subject.os, "geteuid", return_value=1000), \
+             mock.patch.object(subject, "_require_development_linux_abi"), \
+             mock.patch.object(subject, "_require_bare_metal_host",
+                               return_value=False), \
+             mock.patch.object(subject, "_recover_pending_algorithm_trial",
+                               side_effect=subject.PendingRecoveryError(
+                                   "recovery unresolved")) as recovery, \
+             mock.patch.object(subject.subprocess, "run") as device_discovery:
+            with self.assertRaises(subject.PendingRecoveryError):
+                subject._require_read_only_preflight()
+        recovery.assert_called_once()
+        device_discovery.assert_not_called()
+
+    def test_auto_recovery_is_one_fixed_root_command(self):
+        with mock.patch.object(subject.shutil, "which",
+                               return_value="/usr/bin/sudo"), \
+             mock.patch.object(subject.subprocess, "run",
+                               return_value=SimpleNamespace(returncode=0)) as run:
+            subject._recover_pending_algorithm_trial()
+        self.assertEqual(run.call_args.args[0], [
+            "/usr/bin/sudo", "-n", "--", subject.sys.executable, "-I", "-B",
+            str(subject.ROOT / "tests/tools/physical-swap-probe.py"),
+            "recover-pending"])
+        with mock.patch.object(subject.shutil, "which",
+                               return_value="/usr/bin/sudo"), \
+             mock.patch.object(subject.subprocess, "run",
+                               return_value=SimpleNamespace(returncode=3)):
+            with self.assertRaises(subject.PendingRecoveryError):
+                subject._recover_pending_algorithm_trial()
+
     def test_declining_confirmation_never_invokes_privilege(self):
         candidate = {"path":"/dev/sda1", "parent":"/dev/sda",
                      "partuuid":"example-01", "size_bytes":128 * 1024 * 1024,

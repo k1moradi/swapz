@@ -7284,6 +7284,19 @@ use `--tree` with its PATH identity column: without NAME or --tree,
 util-linux omits the `children[]` JSON hierarchy, silently hiding all USB
 partitions from the existing scanner. Rootless tests must validate the real
 subprocess argument vector, not only synthetic JSON with prefilled children.
+A verified VM (but never a container) may use the separate
+`--virtual-device-only` development algorithm lane only on a guest-visible
+removable USB swap partition on a distinct guest disk, with independent
+persistent recovery and all existing ownership, source, UUID, geometry,
+memory, swapoff, mapper and restoration checks. VM NVMe and shared-root guest
+targets are still excluded by the reviewed USB-only formatter and physical
+parent safety gates. Virtual results are
+`VIRTUAL_DEVICE_ONLY_NOT_PHYSICAL_QUALIFICATION` and never physical evidence.
+Before signature-dependent selection, the root helper checks for a single
+authenticated active recovery marker from a prior development real-swap
+trial and resumes the existing exact saved-journal recovery. Missing markers
+are harmless; multiple, malformed, foreign or uncertain markers must block
+the trial with `RECOVERY_REQUIRED` and never trigger a fresh format.
 The development-only algorithm trial supports Linux x86_64 and aarch64 only
 when the kernel uses 4096-byte pages and the process has a 64-bit ABI. The
 privileged worker independently repeats that gate and still requires confirmed

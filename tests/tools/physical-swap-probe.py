@@ -465,15 +465,20 @@ def live_host_identity():
         # Raw hardware/installation identifiers must never enter diagnostics.
         raise ProbeError("cannot identify the current host for physical smoke") from None
 
-def _require_physical_host():
-    """Reject VM and container execution; unknown detection fails closed."""
+def _require_physical_host(*, allow_virtual=False):
+    """Reject virtual hosts unless a development-only VM lane was requested."""
     detector = shutil.which("systemd-detect-virt")
     if not detector:
         raise ProbeError("systemd-detect-virt is required to verify a physical host")
+    virtual_machine = False
     for mode in ("--vm", "--container"):
         result = _run([detector, mode], check=False)
         detected = result.stdout.strip()
         if result.returncode == 0:
+            if mode == "--vm" and allow_virtual and re.fullmatch(
+                    r"[A-Za-z0-9_.-]{1,32}", detected):
+                virtual_machine = True
+                continue
             raise ProbeError(
                 f"physical swap smoke is not allowed in a {mode[2:]}: "
                 f"{detected or 'virtualized environment'}")
@@ -481,6 +486,9 @@ def _require_physical_host():
             raise ProbeError(
                 f"cannot establish a physical host with {mode}: "
                 f"{_bounded_text(result.stderr or detected)}")
+    if allow_virtual and not virtual_machine:
+        raise ProbeError("virtual-only development requires a verified VM")
+    return virtual_machine
 
 
 def _physical_parent_identity(major, minor):
@@ -1104,10 +1112,11 @@ def _require_development_linux_abi():
             "physical development smoke requires 64-bit Linux with 4096-byte pages")
 
 
-def current_development_evidence(nonce, algorithm_ram_evidence=None):
+def current_development_evidence(nonce, algorithm_ram_evidence=None,
+                                 virtual_device_only=False):
     """Admit current make-test RAM evidence or run the standalone fast_test path."""
     _require_development_linux_abi()
-    _require_physical_host()
+    _require_physical_host(allow_virtual=virtual_device_only)
     if os.geteuid() != 0:
         raise ProbeError("development physical smoke evidence requires root wrapper")
     operator = os.environ.get("SUDO_USER")
@@ -2907,6 +2916,11 @@ def _require_recovery_results_binding(state, results):
     """Refuse stale or cross-run results before touching recovery resources."""
     if not isinstance(results, dict):
         raise ProbeError("saved physical results record is not an object")
+    if state.get("virtual_device_only") is True and (
+            results.get("virtual_device_only") is not True or
+            results.get("evidence_class") !=
+            "VIRTUAL_DEVICE_ONLY_NOT_PHYSICAL_QUALIFICATION"):
+        raise ProbeError("virtual-device recovery evidence label is inconsistent")
     if state.get("algorithm_real_swap") is True and (
             results.get("algorithm_real_swap") is not True or
             state.get("development_only") is not True):
@@ -3186,6 +3200,70 @@ def recover(state_dir, device_arg, confirm_arg, lock_held=False,
             _close_fd_preserving_active_error(lock_fd)
 
 
+def recover_pending_algorithm_trial():
+    """Restore one exact run-owned journal, never an unidentified partition."""
+    base = _recovery_base()
+    markers = sorted(base.glob("partition-*.active"))
+    if not markers:
+        print("PHYSICAL_AUTO_RECOVERY=NO_PENDING")
+        return False
+    if len(markers) != 1:
+        raise RecoveryRequiredError(
+            "multiple recovery markers exist; inspect journals read-only")
+    marker_path = markers[0]
+    info = marker_path.lstat()
+    if (not stat.S_ISREG(info.st_mode) or info.st_uid != 0 or
+            info.st_nlink != 1 or stat.S_IMODE(info.st_mode) != 0o600 or
+            re.fullmatch(r"partition-[0-9a-f-]{8,64}\.active",
+                         marker_path.name) is None):
+        raise RecoveryRequiredError(
+            "active recovery marker is not a trusted root-owned record")
+    try:
+        marker = _load_unique_json(marker_path.read_bytes())
+        run_id = marker["run_id"]
+        partuuid = marker["partuuid"]
+        if (not isinstance(run_id, str) or
+                re.fullmatch(r"[0-9a-f]{32}", run_id) is None or
+                not isinstance(partuuid, str) or
+                marker_path.name != f"partition-{partuuid}.active"):
+            raise ValueError("marker identity invalid")
+        state_dir = _recovery_run_directory(
+            base / f"swapz-physical-{run_id}", run_id)
+        _validate_state_dir(state_dir)
+        state = _load_unique_json((state_dir / STATE_NAME).read_bytes())
+        if (not isinstance(state, dict) or
+                state.get("run_id") != run_id or
+                state.get("partuuid") != partuuid or
+                state.get("development_only") is not True or
+                state.get("algorithm_real_swap") is not True or
+                state.get("ownership_phase") not in {
+                    RECOVERY_OWNERSHIP_PHASE,
+                    LEGACY_ACTIVE_RECOVERY_OWNERSHIP_PHASE,
+                } or marker != {
+                    "run_id": run_id, "partuuid": partuuid,
+                    "major": state.get("major"), "minor": state.get("minor")
+                }):
+            raise ValueError("not an owned development real-swap journal")
+        device_arg = state.get("device_arg")
+        if (not isinstance(device_arg, str) or
+                not device_arg.startswith("/dev/disk/by-uuid/")):
+            raise ValueError("original confirmed device selector invalid")
+    except (OSError, ValueError, KeyError, TypeError) as exc:
+        raise RecoveryRequiredError(
+            "pending recovery journal is ambiguous; inspect read-only") from exc
+    try:
+        recovered = recover(state_dir, device_arg, device_arg)
+    except (ProbeError, OSError) as exc:
+        raise RecoveryRequiredError(
+            "automatic recovery refused; inspect journal: "
+            + _bounded_text(exc)) from exc
+    if recovered.get("stage") != "COMPLETE":
+        raise RecoveryRequiredError(
+            "automatic recovery did not complete; inspect saved journal")
+    print("PHYSICAL_AUTO_RECOVERY=COMPLETE restored_previous_trial")
+    return True
+
+
 def inspect_target_identity_for_recovery(state, device_arg, confirm_arg):
     if device_arg != confirm_arg or device_arg != state.get("device_arg"):
         raise ProbeError("recovery requires the exact originally confirmed device path")
@@ -3292,6 +3370,8 @@ def _prepare_state(target, state_dir, evidence, review):
         "swap_used_kib": target.get("swap_used_kib"),
         "unrelated_swapfiles": target.get("unrelated_swapfiles", []),
         "development_only": evidence.get("development_only") is True,
+        **({"virtual_device_only": True}
+           if evidence.get("virtual_device_only") is True else {}),
         **({"algorithm_real_swap": True}
            if evidence.get("algorithm_real_swap") is True else {}),
         "development_scope": (DEVELOPMENT_SCOPE
@@ -3720,9 +3800,12 @@ def _final_physical_oracle_evidence_error(results, state, target,
 
 def run_probe(device_arg, confirm_arg, state_dir_arg, review_path,
               development_only=False, algorithm_real_swap=False,
-              algorithm_ram_evidence=None, algorithm_ram_nonce=None):
+              algorithm_ram_evidence=None, algorithm_ram_nonce=None,
+              virtual_device_only=False):
     if algorithm_real_swap and not development_only:
         raise ProbeError("real-swap algorithm mode requires development-only admission")
+    if virtual_device_only and not (development_only and algorithm_real_swap):
+        raise ProbeError("virtual-only mode requires development real-swap admission")
     if os.geteuid() != 0:
         raise ProbeError("run action requires root")
     start_timestamp = _utc_timestamp()
@@ -3732,8 +3815,10 @@ def run_probe(device_arg, confirm_arg, state_dir_arg, review_path,
             # contract. Real-swap mode uses a separately durable quiesce.
             require_development_formatter_inventory_clear()
         evidence = current_development_evidence(
-            algorithm_ram_nonce, algorithm_ram_evidence)
+            algorithm_ram_nonce, algorithm_ram_evidence,
+            virtual_device_only=virtual_device_only)
         evidence["algorithm_real_swap"] = algorithm_real_swap
+        evidence["virtual_device_only"] = virtual_device_only
         if algorithm_real_swap:
             target = inspect_target(
                 device_arg, confirm_arg,
@@ -3809,10 +3894,13 @@ def run_probe(device_arg, confirm_arg, state_dir_arg, review_path,
         results = {
             "schema": ("swapz-physical-development-results-v1"
                        if development_only else "swapz-physical-results-v1"),
-            "evidence_class": ("DEVELOPMENT_ONLY_NOT_PHYSICAL_QUALIFICATION"
-                               if development_only else
-                               "PHYSICAL_CORRECTNESS_SMOKE"),
+            "evidence_class": (
+                "VIRTUAL_DEVICE_ONLY_NOT_PHYSICAL_QUALIFICATION"
+                if virtual_device_only else
+                "DEVELOPMENT_ONLY_NOT_PHYSICAL_QUALIFICATION"
+                if development_only else "PHYSICAL_CORRECTNESS_SMOKE"),
             "development_only": development_only,
+            **({"virtual_device_only": True} if virtual_device_only else {}),
             "scope": (DEVELOPMENT_SCOPE if development_only else EXPECTED_SCOPE),
             "linux_swap_activation_tested": False if development_only else None,
             **({"algorithm_real_swap": True} if algorithm_real_swap else {}),
@@ -4291,6 +4379,8 @@ def run_probe(device_arg, confirm_arg, state_dir_arg, review_path,
         if development_only:
             if algorithm_real_swap:
                 print("PHYSICAL_ALGORITHM_REAL_SWAP=PASS")
+            if virtual_device_only:
+                print("VIRTUAL_DEVICE_ONLY=PASS not_physical_qualification")
             print("PHYSICAL_DEVELOPMENT_SMOKE=PASS")
             print("EVIDENCE_CLASS=DEVELOPMENT_ONLY_NOT_PHYSICAL_QUALIFICATION")
             restored_state = (
@@ -4723,7 +4813,8 @@ def main(argv=None):
             "Private physical-swap correctness smoke and read-only campaign "
             "preflight; never part of make test"))
     parser.add_argument(
-        "action", choices=("plan", "campaign-plan", "run", "recover"))
+        "action", choices=("plan", "campaign-plan", "run", "recover",
+                           "recover-pending"))
     parser.add_argument("--device")
     parser.add_argument("--confirm-device")
     parser.add_argument("--partuuid")
@@ -4736,6 +4827,8 @@ def main(argv=None):
     parser.add_argument(
         "--algorithm-real-swap", action="store_true",
         help="bounded real anonymous Linux swap round-trip; development-only")
+    parser.add_argument("--virtual-device-only", action="store_true",
+                        help="development-only USB device in an authenticated VM")
     parser.add_argument("--algorithm-ram-evidence")
     parser.add_argument("--algorithm-ram-nonce")
     args = parser.parse_args(argv)
@@ -4758,6 +4851,15 @@ def main(argv=None):
     if args.algorithm_real_swap and (args.action != "run" or
                                      not args.development_only):
         parser.error("--algorithm-real-swap requires run --development-only")
+    if args.virtual_device_only and not (
+            args.action == "run" and args.development_only and
+            args.algorithm_real_swap):
+        parser.error("--virtual-device-only requires development real-swap run")
+    if args.action == "recover-pending" and any((
+            args.device, args.confirm_device, args.state_dir,
+            args.review_record, args.partuuid, args.source_sha,
+            args.algorithm_ram_evidence, args.algorithm_ram_nonce)):
+        parser.error("recover-pending takes no target or evidence overrides")
     if bool(args.algorithm_ram_evidence) != bool(args.algorithm_ram_nonce):
         parser.error("algorithm RAM evidence path and nonce are paired")
     if args.algorithm_ram_evidence and not (
@@ -4776,6 +4878,14 @@ def main(argv=None):
     if args.action == "campaign-plan":
         campaign_plan(
             args.device, args.confirm_device, args.partuuid, args.source_sha)
+        return 0
+    if args.action == "recover-pending":
+        if os.geteuid() != 0:
+            raise RecoveryRequiredError("automatic recovery requires root")
+        try:
+            recover_pending_algorithm_trial()
+        except (ProbeError, OSError) as exc:
+            raise RecoveryRequiredError(str(exc)) from exc
         return 0
     if args.action == "recover":
         if os.geteuid() != 0:
@@ -4800,7 +4910,8 @@ def main(argv=None):
               args.review_record, development_only=args.development_only,
               algorithm_real_swap=args.algorithm_real_swap,
               algorithm_ram_evidence=args.algorithm_ram_evidence,
-              algorithm_ram_nonce=args.algorithm_ram_nonce)
+              algorithm_ram_nonce=args.algorithm_ram_nonce,
+              virtual_device_only=args.virtual_device_only)
     return 0
 
 
