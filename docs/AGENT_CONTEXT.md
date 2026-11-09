@@ -210,7 +210,7 @@ safe path to a correct maintainable product:
   qualification, use only the private physical helper's explicit
   `--development-only` mode: bind a fresh current-main `make fast_test` record,
   require the card already inactive, run one bounded mapper round-trip, and
-  restore the exact original header while leaving the card inactive. This is
+  verify the original SWAPSPACE2 header stays unchanged while leaving the card inactive. This is
   experimental debugging evidence, never physical acceptance or a production
   readiness result;
 - investigate a failure to cause before repeating it; never rerun until one

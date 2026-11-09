@@ -3,9 +3,11 @@
 #define SWAPZ_SUPERBLOCK_H
 
 /*
- * On-media authorization header for explicitly formatted physical backing.
- * The kernel never writes this block. swapz data starts at physical block 1.
- * Keep this header freestanding so swapzctl and the kernel share one layout.
+ * Legacy synthetic SWZ authorization header (not a physical backing format).
+ * Real backing retains its original Linux SWAPSPACE2 header unmodified.
+ * The kernel reserves the first physical page; swapz data starts at block 1.
+ * Keep this shared layout only for existing synthetic tests and safe handling
+ * of historical interrupted transactions pending removal.
  */
 #define SWAPZ_SUPERBLOCK_BYTES 4096U
 #define SWAPZ_SUPERBLOCK_MAGIC_BYTES 8U

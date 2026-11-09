@@ -50,19 +50,14 @@ static void usage(FILE *out)
 	fputs("Usage: swapzctl version | status | help\n", out);
 	fputs("       swapzctl primary plan|qualification-import <report>|"
 	      "prepare|start|stop|recover\n", out);
-	fputs("       swapzctl format <blockdev> --expect-major-minor <major>:<minor> "
-	      "--expect-bytes <decimal-bytes> --expect-partuuid <partuuid> "
-	      "--expect-parent-major-minor <major>:<minor> "
-	      "--expect-parent-model <model> --expect-parent-transport usb\n", out);
+	fputs("       swapzctl format (disabled; original SWAPSPACE2 preserved)\n", out);
 	fputs("status reports cumulative committed foreground compression ratios "
 	      "for active swapz targets.\n", out);
-	fputs("format is identity-bound: the partition, PARTUUID, exact geometry, "
-	      "removable parent, mounts and holders must all verify.\n", out);
+	fputs("Physical backing requires validated exclusive partition ownership.\n", out);
 	fputs("format is disabled: raw partitions must retain SWAPSPACE2.\n", out);
 	fputs("Primary-swap lifecycle commands remain disabled until separately "
 	      "qualified.\n", out);
-	fputs("The format command creates no mapper target and never enables swap.\n",
-	      out);
+	fputs("Only the new virtual mapper may receive mkswap.\n", out);
 }
 
 struct format_expectation {

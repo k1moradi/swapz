@@ -35,9 +35,10 @@ current-source acceptance tests.
 
 The current target is the owner-dedicated removable SD card whose observed
 partition is `/dev/sda1` (8:1, 124787884032 bytes, PARTUUID
-`f13428f6-01`). The whole positively identified card is disposable development
-media. Standing owner authorization permits repeated destructive physical and
-live-swap work on that card without another per-run reviewer/owner approval.
+`f13428f6-01`). Only the positively identified partition's post-swapoff data region is
+disposable; its existing SWAPSPACE2 header, UUID and partition table are not.
+Standing authority permits bounded data-area and live-swap testing but never
+reformatting or repartitioning the raw card.
 No VM or fallback-swap work is required, and Codex must not reboot or
 intentionally crash the PC. Device identity, exact-source qualification,
 active-page protection and normal teardown remain mandatory.

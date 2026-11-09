@@ -7429,8 +7429,9 @@ written SWZ headers are never required for new physical trials. Legacy
 unfinished recovery journals retain their original guarded restoration path.
 Historical VM-only probes used to construct a bounded v1 4096-byte SWZ
 authorization header directly, immediately rereads it byte-for-byte, and only
-then records the durable `SWZ_FORMATTED` transition; the production
-`swapzctl format` removable-USB policy is intentionally unchanged. Virtual results are
+then records the durable `SWZ_FORMATTED` transition. These are historical
+synthetic fixtures, not an active formatting procedure. Production
+`swapzctl format` is disabled and must not write raw partition headers. Virtual results are
 `VIRTUAL_DEVICE_ONLY_NOT_PHYSICAL_QUALIFICATION` and never physical evidence.
 Before signature-dependent selection, the root helper checks for a single
 authenticated active recovery marker from a prior development real-swap
