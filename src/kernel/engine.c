@@ -1998,8 +1998,9 @@ int swapz_engine_read_page(struct swapz_engine *engine, swapz_u32 logical_page,
 	int cached_extent, cached_block_zero, cached_full, lru_cached_block_zero;
 	int extent_lru_slot, block_zero_lru_slot;
 
-	if (!engine || !engine->authority || !engine->read_scratch ||
-	    !engine->io.read_blocks || !payload || !payload_length ||
+	if (!engine || !engine->authority || !engine->authority->maps ||
+	    !engine->read_scratch || !engine->io.read_blocks ||
+	    !payload || !payload_length ||
 	    logical_page >= engine->authority->logical_pages)
 		return -EINVAL;
 	*payload_length = 0;

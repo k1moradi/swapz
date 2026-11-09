@@ -373,6 +373,18 @@ static int test_engine_extent_geometry_before_lower_read(void)
 	engine.authority = &a;
 	engine.read_scratch = bytes;
 	engine.io.read_blocks = invalid_extent_read;
+	/* Incomplete RAM authority must fail without a null dereference or
+	 * a lower READ. The production constructor normally sets this map. */
+	{
+		struct swapz_map *saved_maps = a.maps;
+
+		a.maps = NULL;
+		CHECK(swapz_engine_read_page(&engine, logical, compressed,
+					    sizeof(compressed), &payload_length) ==
+		      -EINVAL);
+		CHECK(invalid_extent_read_calls == 0);
+		a.maps = saved_maps;
+	}
 	maps[0].valid = 1;
 	maps[0].raw = 0;
 	maps[0].extent_blocks = 2;
