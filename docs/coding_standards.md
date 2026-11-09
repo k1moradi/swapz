@@ -808,21 +808,17 @@ identities and the sole member before mapping it through the physical sysfs
 parent chain. This test-only exception never admits Btrfs for production or
 physical backing.
 
-The primary manager's per-transaction SWZ authorization header must be built in
-memory from a freshly generated lowercase 32-hex transaction ID using the
-system random source. Convert those 16 bytes directly into the 16-byte header
-UUID; do not use timestamps, process IDs or caller-selected identifiers.
-Populate the shared unversioned header layout and bind the **currently verified
-configured target geometry**, never a fixed or historical target size. The
-configured target is resolved from the protected PARTUUID selector, and its
-opened descriptor, discovered device number, byte size and parent relationship
-are checked at runtime. Leave every reserved byte zero and validate the
-complete 4096-byte candidate with `swapz_sb_valid()` before exposing it to the
-caller. Reject malformed or all-zero IDs without changing the caller's output
-buffer. Header construction does not authorize a device write; the writer
-remains the checked, descriptor-bound primitive after the operation owns its
-durable lifecycle transaction. The one-use transaction claim is crash/ownership
-metadata, not a request for another human approval.
+The primary manager's per-transaction run ID is crash/session ownership
+metadata only. Generate it from the system random source as lowercase 32-hex;
+do not derive it from timestamps, process IDs or caller-selected identifiers.
+Bind the durable manifest to the **currently verified configured target
+geometry**, PARTUUID, source/artifact identity and the SHA-256 digest of the
+unchanged 4096-byte SWAPSPACE2 header. The digest is an integrity witness, not
+a backup or restoration image. No transaction field authorizes a raw-partition
+header write. The configured target is resolved from the protected PARTUUID
+selector, and its opened descriptor, discovered device number, byte size and
+parent relationship are rechecked at runtime. The one-use transaction claim is
+crash/ownership metadata, not a request for another human approval.
 
 ### Primary manager module admission
 
@@ -900,12 +896,13 @@ its identity and usage must be understood and safely drained before a destructiv
 transition. Recheck the target, parent, swap inventory and current block-zero
 state immediately before the transaction claim.
 
-After those checks, generate a fresh OS-random run ID, build the candidate SWZ
-header only in memory, durably publish the transaction record, `READY` state
-and active marker, then save the immutable source/artifact/device/geometry
-manifest and read it back byte-for-byte. An original-header backup is optional
-for this disposable SD card and must not become a production gate. Preparation
-must not write the target, change swap state, load a module, or create a mapper.
+After those checks, generate a fresh OS-random run ID, durably publish the
+transaction record, `READY` state and active marker, then save the immutable
+source/artifact/device/geometry manifest plus the unchanged SWAPSPACE2
+header digest and read the manifest back byte-for-byte. Do not persist a
+4096-byte header backup for normal lifecycle operation: block zero is immutable,
+so teardown/recovery verifies it instead of restoring it. Preparation must not
+write the target, change swap state, load a module, or create a mapper.
 Any failure after claim retains active ownership for reconciliation. The later
 `start` path must revalidate the same physical card, qualification and saved
 records, persist `STARTING`, and only then perform its first device or swap

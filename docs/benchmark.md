@@ -7,12 +7,13 @@
 Both qualification tiers retain the loaded RAM algorithm benchmark matrix.
 `make test_full` also includes rootless package/systemd integration. Neither
 RAM result is physical-device performance or endurance evidence.
-While `SWAPZ_CODEC_METADATA_ON_MEDIA` is set, the kernel refuses real
-backing: no new physical swapz throughput, latency or endurance qualification
-is possible. Treat older physical benchmark reports as historical; do not
-extrapolate null_blk figures to ordinary SWAPSPACE2 partition performance.
-A new physical campaign requires the completed RAM-metadata migration and
-matched current-source byte-exact readback/GC checks.
+Production compressed extents are now payload-only and their descriptors are
+RAM-authoritative. That implementation change does not by itself qualify real
+backing: new physical throughput, latency or endurance evidence still requires
+matched current-source byte-exact readback, GC/fault/concurrency coverage,
+RAM-budget evidence and unchanged SWAPSPACE2 block-zero verification. Treat
+older physical benchmark reports as historical; do not extrapolate null_blk
+figures to ordinary SWAPSPACE2 partition performance.
 New physical trials bind `raw_header_preservation_required=True` into
 immutable recovery-state comparisons: a later record removing or changing this
 claim is rejected. Older journals where both snapshots lack the claim remain
@@ -399,7 +400,7 @@ resolved a major page fault. These three pairs are replicated directional
 evidence, not a t-test.
 
 For physical block service the raw arm uses the same selected partition with a
-4096-byte data offset so the SWZ authorization header is not overwritten. It
+4096-byte data offset so the ordinary SWAPSPACE2 header remains untouched. It
 requires no holder, mount or active-swap alias. The swapz arm requires a fresh
 empty mapper whose sole holder/slave relationship is the same partition. Both
 arms use the exact manager maximum logical capacity, fixture hashes, content
