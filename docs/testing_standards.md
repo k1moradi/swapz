@@ -735,8 +735,12 @@ The separate production-extracted late-race coordinator fixture must compare
 the exact fixed `SWAPZ_PRIMARY_MOUNT_INVENTORY_FAILURE` parse marker before
 the ordinary coordinator refusal for malformed complete mountinfo records.
 Both local and remote malformed cases retain `EINVAL`, zero destructive
-actions and redacted diagnostics. Empty, truncated and oversized input
-preserve their distinct failure classes; do not hide a newly emitted producer
+actions and redacted diagnostics. Empty remote and truncated local/remote
+mountinfo tables must separately compare the exact framing marker
+`step=mountinfo-read errno=22 reason=malformed-mountinfo-frame` before the
+coordinator's unchanged EINVAL refusal. Oversized input retains its
+independent errno 75 marker. These cases must continue to prove zero header
+writes, mapper creation, mkswap and swapon and must not hide a new producer
 diagnostic by weakening or dropping the exact-stderr assertion.
 
 If unique mount IDs, foreign-namespace statmount/listmount, namespace identity,

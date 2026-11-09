@@ -1737,6 +1737,21 @@ static int check_case(enum fixture_scenario candidate)
             memcpy(expected_diagnostic, parse_marker,
                    sizeof(parse_marker) - 1U);
             expected_diagnostic_length = sizeof(parse_marker) - 1U;
+        } else if (candidate == FIXTURE_EMPTY ||
+                   candidate == FIXTURE_TRUNCATED_REMOTE ||
+                   candidate == FIXTURE_TRUNCATED_LOCAL) {
+            /* Framing rejects an empty or unterminated table before parse.
+             * Authenticate its fixed marker and the unchanged EINVAL refusal
+             * without accepting free-form producer diagnostics.
+             */
+            static const char framing_marker[] =
+                "SWAPZ_PRIMARY_MOUNT_INVENTORY_FAILURE "
+                "step=mountinfo-read errno=22 "
+                "reason=malformed-mountinfo-frame\n";
+
+            memcpy(expected_diagnostic, framing_marker,
+                   sizeof(framing_marker) - 1U);
+            expected_diagnostic_length = sizeof(framing_marker) - 1U;
         }
         /* Every refusal case here follows READY state and manifest proof. */
         expected_length = snprintf(
