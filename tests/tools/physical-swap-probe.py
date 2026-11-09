@@ -99,7 +99,10 @@ QUALIFICATION_STAGE_NAMES = (
     "Kernel warnings W=1", "Kernel warnings W=2",
     "Owned RAM smoke + mixed/QD pilot",
 )
-# Legacy pre-migration journal recognition only. New runs never create or\n# write this header; physical backing remains ordinary SWAPSPACE2.\nSWAPZ_HEADER_MAGIC = b"SWAPZ001"\nSWAPZ_HEADER_VERSION = 1
+# Legacy pre-migration journal recognition only. New runs never create or
+# write this header; physical backing remains ordinary SWAPSPACE2.
+SWAPZ_HEADER_MAGIC = b"SWAPZ001"
+SWAPZ_HEADER_VERSION = 1
 BLKGETSIZE64 = 0x80081272  # Linux 64-bit x86_64/aarch64 _IOR(0x12, 114, size_t).
 RECOVERY_BASE = Path("/var/lib/swapz/physical-recovery")
 # New development/algorithm trials keep ownership state in tmpfs. If the
@@ -340,7 +343,12 @@ def _read_block0(device, target):
         _close_fd_preserving_active_error(fd)
 
 
-def swapz_header_valid(header, size_bytes):\n    """Recognize only a legacy pre-migration SWZ recovery header.\n\n    This parser exists solely for historical interrupted journals. It never\n    authorizes a new raw-partition write or defines a current backing format.\n    """
+def swapz_header_valid(header, size_bytes):
+    """Recognize only a legacy pre-migration SWZ recovery header.
+
+    This parser exists solely for historical interrupted journals. It never
+    authorizes a new raw-partition write or defines a current backing format.
+    """
     return (
         len(header) == PAGE_BYTES
         and header[:8] == SWAPZ_HEADER_MAGIC
@@ -4215,7 +4223,9 @@ def run_probe(device_arg, confirm_arg, state_dir_arg, review_path,
             # separately durable active marker is the authority that this
             # one-use run currently owns recovery, avoiding a two-file claim
             # publication window that a crash could split.
-            # The consumed one-use run claim, active partition marker and\n            # read-only original-header evidence are durable before swapoff and\n            # post-header data-area mutation. New runs never mutate block zero.
+            # The consumed one-use run claim, active partition marker and
+            # read-only original-header evidence are durable before swapoff and
+            # post-header data-area mutation. New runs never mutate block zero.
             _verify_target_identity(target)
             if development_only and algorithm_real_swap:
                 _quiesce_development_swap_inventory(state, target, state_dir)
@@ -5016,7 +5026,9 @@ def _require_ram_only_metadata_for_physical_run():
 def main(argv=None):
     parser = argparse.ArgumentParser(
         description=(
-            "Private physical-swap correctness smoke and read-only campaign "\n            "preflight; the algorithm real-swap development path is entered "\n            "only after exact-source make test RAM qualification"))
+            "Private physical-swap correctness smoke and read-only campaign "
+            "preflight; the algorithm real-swap development path is entered "
+            "only after exact-source make test RAM qualification"))
     parser.add_argument(
         "action", choices=("plan", "campaign-plan", "run", "recover",
                            "recover-pending"))
@@ -5046,7 +5058,7 @@ def main(argv=None):
     if args.action == "run" and not args.state_dir and not args.development_only:
         parser.error("run requires --state-dir")
     if args.action == "run" and args.development_only and args.state_dir:
-        parser.error("--development-only chooses its own fresh recovery directory")
+        parser.error("--development-only chooses its own fresh runtime directory")
     if args.action == "run" and not args.development_only and not args.review_record:
         parser.error("qualified run requires --review-record")
     if args.action == "run" and args.development_only and args.review_record:
