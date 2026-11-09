@@ -1926,6 +1926,22 @@ class PhysicalSwapProbeTests(unittest.TestCase):
                                         "systemd-detect-virt is required"):
                 probe._require_physical_host()
 
+    def test_virtual_development_header_and_io_source_are_vm_scoped(self):
+        size = 128 * 1024 * 1024
+        first = probe._virtual_development_header(size)
+        second = probe._virtual_development_header(size)
+        self.assertTrue(probe.swapz_header_valid(first, size))
+        self.assertTrue(probe.swapz_header_valid(second, size))
+        self.assertNotEqual(first[24:40], second[24:40])
+        target = {
+            "major": 259, "minor": 3,
+            "parent_major_minor": "259:0",
+            "virtual_device_only": True,
+        }
+        self.assertEqual(probe._lower_io_major_minor(target), "259:3")
+        target["virtual_device_only"] = False
+        self.assertEqual(probe._lower_io_major_minor(target), "259:0")
+
     def test_vm_host_requires_explicit_virtual_lane(self):
         def status(args, **_kwargs):
             if args[-1] == "--vm":

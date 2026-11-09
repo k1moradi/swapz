@@ -20,15 +20,22 @@ PARTUUID_PATTERN = re.compile(r"[A-Za-z0-9][A-Za-z0-9-]{0,71}")
 UUID_PATTERN = re.compile(r"[a-fA-F0-9][a-fA-F0-9-]{7,71}")
 
 
-def _eligible_partitions(lsblk_output: dict) -> list[dict]:
-    """Classify only unmounted swap-signature partitions on USB disks."""
+def _eligible_partitions(lsblk_output: dict, *,
+                         virtual_device_only=False) -> list[dict]:
+    """Classify exact swap partitions; bare metal remains USB-only."""
     disks = lsblk_output.get("blockdevices")
     if not isinstance(disks, list):
         raise ValueError("lsblk did not report canonical block devices")
     candidates = []
     for disk in disks:
-        if not isinstance(disk, dict) or disk.get("type") != "disk" or \
-                disk.get("tran") != "usb":
+        if not isinstance(disk, dict) or disk.get("type") != "disk":
+            continue
+        transport = disk.get("tran")
+        if virtual_device_only:
+            if (not isinstance(transport, str) or
+                    re.fullmatch(r"[A-Za-z0-9_.-]{1,32}", transport) is None):
+                continue
+        elif transport != "usb":
             continue
         children = disk.get("children")
         # Discovery is read-only. A shared-root USB disk may contain one
@@ -68,8 +75,10 @@ def _eligible_partitions(lsblk_output: dict) -> list[dict]:
                 "path": path, "partuuid": partuuid,
                 "uuid": swap_uuid, "size_bytes": size,
                 "parent": disk.get("path"),
+                "parent_transport": transport,
                 "parent_has_other_partitions": len(children) != 1,
                 "lsblk_active_swap": partition.get("mountpoints") == ["[SWAP]"],
+                "virtual_device_only": virtual_device_only,
             })
     return candidates
 
@@ -77,14 +86,16 @@ def _eligible_partitions(lsblk_output: dict) -> list[dict]:
 def _select_swap_partition(candidates: list[dict]) -> dict | None:
     """Select one identified partition, without authorizing any write."""
     if not candidates:
-        raise ValueError("no identifiable USB swap partition")
+        raise ValueError("no identifiable swap partition")
     for key in ("path", "partuuid", "uuid"):
         identities = [candidate[key].lower() for candidate in candidates]
         if len(set(identities)) != len(identities):
             raise ValueError("duplicate USB swap partition identity")
     if len(candidates) == 1:
         return candidates[0]
-    print("Identifiable USB swap partitions (selection is not authorization):")
+    label = ("VM swap partitions" if candidates[0].get("virtual_device_only")
+             else "USB swap partitions")
+    print(f"Identifiable {label} (selection is not authorization):")
     for number, candidate in enumerate(candidates, start=1):
         print(f"  {number}. {candidate['path']}  Parent: {candidate['parent']}  "
               f"PARTUUID: {candidate['partuuid']}  "
@@ -251,7 +262,9 @@ def _require_read_only_preflight() -> dict | None:
     if block_info.returncode != 0 or len(block_info.stdout) > 1024 * 1024:
         raise ValueError("cannot identify an exact candidate partition")
     try:
-        candidates = _eligible_partitions(json.loads(block_info.stdout))
+        candidates = _eligible_partitions(
+            json.loads(block_info.stdout),
+            virtual_device_only=virtual_device_only)
     except (ValueError, TypeError, RecursionError) as error:
         raise ValueError("invalid or ambiguous block inventory") from error
     selected = _select_swap_partition(candidates)

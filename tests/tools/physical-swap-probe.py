@@ -69,6 +69,10 @@ LOWER_IO_CLAIM_BOUNDARY = (
     "lower-device bytes and requests are host-visible physical I/O; "
     "they are not direct NAND-wear or endurance measurements"
 )
+VIRTUAL_LOWER_IO_CLAIM_BOUNDARY = (
+    "guest partition bytes and requests are virtual-device I/O only; "
+    "they are not physical-media, NAND-wear or endurance measurements"
+)
 KERNEL_FATAL_PATTERN = re.compile(
     r"\b(?:BUG|Oops|panic|WARNING|error|failed|failure|drain invariant|"
     r"corrupt(?:ion|ed)?)\b", re.IGNORECASE)
@@ -577,7 +581,8 @@ def _verify_target_identity(target):
 
 
 def inspect_target(device_arg, confirm_arg, *, allow_used_swap=False,
-                   allow_inactive_swap=False, allow_shared_root=False):
+                   allow_inactive_swap=False, allow_shared_root=False,
+                   virtual_device_only=False):
     """Identify the selected partition; dev smoke may preserve inactive swap."""
     if not device_arg or device_arg != confirm_arg:
         raise ProbeError("--device and --confirm-device must match exactly")
@@ -639,7 +644,8 @@ def inspect_target(device_arg, confirm_arg, *, allow_used_swap=False,
     if not swap_signature_valid(header, os.sysconf("SC_PAGE_SIZE")):
         raise ProbeError("selected partition does not have a supported SWAPSPACE2 header")
     card_identity = _campaign_card_identity(device, parent_major_minor)
-    if (card_identity["transport"] != "usb" or
+    if not virtual_device_only and (
+            card_identity["transport"] != "usb" or
             card_identity["parent_removable"] is not True):
         raise ProbeError(
             "physical_parent expected=removable_usb "
@@ -655,6 +661,7 @@ def inspect_target(device_arg, confirm_arg, *, allow_used_swap=False,
         "parent_size_bytes": card_identity["parent_size_bytes"],
         "parent_removable": card_identity["parent_removable"],
         "card_identity_sha256": card_identity["sha256"],
+        "virtual_device_only": virtual_device_only,
         "root_same_physical_parent": root_same_physical_parent,
         "size_bytes": size_bytes,
         "uuid": row["uuid"],
@@ -1255,8 +1262,12 @@ def _artifact_digests():
 
 
 def _require_shared_root_development_plan(target, evidence):
-    """Admit a shared-root target only through the production read-only plan."""
+    """Keep bare-metal shared-root authorization separate from VM-only tests."""
     if target.get("root_same_physical_parent") is not True:
+        return
+    if target.get("virtual_device_only") is True:
+        if evidence.get("virtual_device_only") is not True:
+            raise ProbeError("virtual shared-root target lacks VM-only evidence")
         return
     swapzctl = _artifact_paths()["formatter_sha256"][0]
     result = _run([str(swapzctl), "primary", "plan"],
@@ -1496,9 +1507,9 @@ def _recovery_base(target=None):
             not any(row[1] == "disk" for row in devices)):
         raise ProbeError("recovery backing chain is volatile or unverifiable")
     if target is not None:
-        # A different partition on the SAME physical disk is not independent
-        # recovery storage. Never admit shared-root swap just because its
-        # partition major:minor differs from the mounted root partition.
+        # Bare-metal recovery must remain on another physical disk. A verified
+        # VM-only development run may use a sibling guest partition because it
+        # makes no physical-failure claim, but never the target partition.
         target_parent = target.get("parent_major_minor")
         if (not isinstance(target_parent, str) or
                 re.fullmatch(r"(0|[1-9][0-9]*):(0|[1-9][0-9]*)",
@@ -1510,7 +1521,11 @@ def _recovery_base(target=None):
         if len(physical_disk_parents) != 1:
             raise ProbeError("recovery physical parent identity is ambiguous")
         recovery_devices = {row[0] for row in devices}
-        if (f"{target['major']}:{target['minor']}" in recovery_devices or
+        target_device = f"{target['major']}:{target['minor']}"
+        if target_device in recovery_devices:
+            raise ProbeError(
+                "recovery storage resolves through the selected swap partition")
+        if target.get("virtual_device_only") is not True and (
                 target_parent in recovery_devices or
                 target_parent in physical_disk_parents):
             raise ProbeError(
@@ -1822,14 +1837,26 @@ LOWER_COUNTER_FIELDS = (
 )
 
 
-def _block_stat_snapshot(target):
+def _lower_io_major_minor(target):
+    """Use exact partition counters in VM mode to exclude guest-root traffic."""
+    if target.get("virtual_device_only") is True:
+        major = target.get("major")
+        minor = target.get("minor")
+        if type(major) is int and major >= 0 and type(minor) is int and minor >= 0:
+            return f"{major}:{minor}"
+        return None
     parent = target.get("parent_major_minor")
-    if not isinstance(parent, str) or not re.fullmatch(
-            r"[0-9]+:[0-9]+", parent):
+    return parent if isinstance(parent, str) else None
+
+
+def _block_stat_snapshot(target):
+    lower_identity = _lower_io_major_minor(target)
+    if not isinstance(lower_identity, str) or not re.fullmatch(
+            r"[0-9]+:[0-9]+", lower_identity):
         return {"available": False,
-                "error": "lower_parent_major_minor expected=number:number "
+                "error": "lower_device_major_minor expected=number:number "
                          "observed=invalid_format"}
-    path = Path(f"/sys/dev/block/{parent}/stat")
+    path = Path(f"/sys/dev/block/{lower_identity}/stat")
     try:
         tokens = path.read_text().split()
         if len(tokens) <= LOWER_COUNTER_FIELDS[-1][1]:
@@ -1857,14 +1884,14 @@ def _block_stat_snapshot(target):
                     f"{field} expected<=uint64_max/512 "
                     f"observed={fields[index]}")
         return {"available": True, "values": fields,
-                "device_major_minor": parent, "sector_bytes": 512}
+                "device_major_minor": lower_identity, "sector_bytes": 512}
     except OSError as exc:
         return {"available": False,
                 "error": f"lower_stat_read expected=readable observed=errno_{exc.errno}",
-                "device_major_minor": parent}
+                "device_major_minor": lower_identity}
     except ValueError as exc:
         return {"available": False, "error": _bounded_text(exc),
-                "device_major_minor": parent}
+                "device_major_minor": lower_identity}
 
 
 def _lower_io_delta(before, after):
@@ -2833,6 +2860,25 @@ def _header_matches_recovery_stage(header, backup, state, size_bytes, stage):
     )
 
 
+
+
+def _virtual_development_header(size_bytes):
+    """Construct the formatter-compatible SWZ header for VM-only testing."""
+    if type(size_bytes) is not int or size_bytes <= 0:
+        raise ProbeError("virtual development header size is invalid")
+    header = bytearray(PAGE_BYTES)
+    header[:8] = SWAPZ_HEADER_MAGIC
+    struct.pack_into("<IIQ", header, 8,
+                     SWAPZ_HEADER_VERSION, PAGE_BYTES, size_bytes)
+    identifier = bytearray(secrets.token_bytes(16))
+    identifier[6] = (identifier[6] & 0x0f) | 0x40
+    identifier[8] = (identifier[8] & 0x3f) | 0x80
+    header[24:40] = identifier
+    built = bytes(header)
+    if not swapz_header_valid(built, size_bytes):
+        raise ProbeError("virtual development SWZ header construction failed")
+    return built
+
 def _saved_header_restore_source(state, backup, size_bytes):
     source_stage = state.get("header_restore_source_stage")
     source_hex = state.get("header_restore_source_hex")
@@ -3310,6 +3356,8 @@ def inspect_target_identity_for_recovery(state, device_arg, confirm_arg):
         "major": major,
         "minor": minor,
         "parent_major_minor": parent,
+        **({"virtual_device_only": True}
+           if state.get("virtual_device_only") is True else {}),
         **({
             "parent_model": card_identity["model"],
             "parent_transport": card_identity["transport"],
@@ -3823,7 +3871,8 @@ def run_probe(device_arg, confirm_arg, state_dir_arg, review_path,
             target = inspect_target(
                 device_arg, confirm_arg,
                 allow_used_swap=True, allow_inactive_swap=True,
-                allow_shared_root=True)
+                allow_shared_root=True,
+                virtual_device_only=virtual_device_only)
             _target_row, swapfiles = _development_swap_inventory_plan(target)
             target["unrelated_swapfiles"] = swapfiles
         else:
@@ -3957,8 +4006,10 @@ def run_probe(device_arg, confirm_arg, state_dir_arg, review_path,
             "kernel_diagnostics_preflight": preflight_kernel,
             "block_stats_before": preflight_block_stats,
             "lower_io_source": (
-                f"/sys/dev/block/{target['parent_major_minor']}/stat"),
-            "lower_io_claim_boundary": LOWER_IO_CLAIM_BOUNDARY,
+                f"/sys/dev/block/{_lower_io_major_minor(target)}/stat"),
+            "lower_io_claim_boundary": (
+                VIRTUAL_LOWER_IO_CLAIM_BOUNDARY
+                if virtual_device_only else LOWER_IO_CLAIM_BOUNDARY),
             "physical_oracle_phases": [],
             "final_recovery_state": "BACKED_UP",
         }
@@ -4049,18 +4100,30 @@ def run_probe(device_arg, confirm_arg, state_dir_arg, review_path,
             _verify_target_identity(target)
             if _read_block0(target["device"], target) != bytes(PAGE_BYTES):
                 raise ProbeError("partition block zero changed before formatter")
-            _run([
-                formatter, "format", target["device"], "--expect-major-minor",
-                f"{target['major']}:{target['minor']}", "--expect-bytes",
-                str(target["size_bytes"]), "--expect-partuuid",
-                target["partuuid"], "--expect-parent-major-minor",
-                target["parent_major_minor"], "--expect-parent-model",
-                target["parent_model"], "--expect-parent-transport",
-                target["parent_transport"],
-            ], timeout=30)
-            formatted_header = _read_block0(target["device"], target)
+            if virtual_device_only:
+                formatted_header = _virtual_development_header(
+                    target["size_bytes"])
+                if _active_swap_for(target["major"], target["minor"]) is not None:
+                    raise ProbeError(
+                        "virtual target became active before SWZ header write")
+                _verify_target_identity(target)
+                _write_block0(
+                    target["device"], formatted_header, target,
+                    expected_current=bytes(PAGE_BYTES))
+            else:
+                _run([
+                    formatter, "format", target["device"], "--expect-major-minor",
+                    f"{target['major']}:{target['minor']}", "--expect-bytes",
+                    str(target["size_bytes"]), "--expect-partuuid",
+                    target["partuuid"], "--expect-parent-major-minor",
+                    target["parent_major_minor"], "--expect-parent-model",
+                    target["parent_model"], "--expect-parent-transport",
+                    target["parent_transport"],
+                ], timeout=30)
+                formatted_header = _read_block0(target["device"], target)
             if not swapz_header_valid(formatted_header, target["size_bytes"]):
-                raise ProbeError("formatter did not produce the expected SWZ header")
+                raise ProbeError(
+                    "development formatter did not produce the expected SWZ header")
             state["formatted_header_sha256"] = hashlib.sha256(
                 formatted_header).hexdigest()
             state["stage"] = "SWZ_FORMATTED"

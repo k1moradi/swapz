@@ -7288,12 +7288,20 @@ util-linux omits the `children[]` JSON hierarchy, silently hiding all USB
 partitions from the existing scanner. Rootless tests must validate the real
 subprocess argument vector, not only synthetic JSON with prefilled children.
 A verified VM (but never a container) may use the separate
-`--virtual-device-only` development algorithm lane only on a guest-visible
-removable USB swap partition on a distinct guest disk, with independent
-persistent recovery and all existing ownership, source, UUID, geometry,
-memory, swapoff, mapper and restoration checks. VM NVMe and shared-root guest
-targets are still excluded by the reviewed USB-only formatter and physical
-parent safety gates. Virtual results are
+`--virtual-device-only` development algorithm lane on an exactly identified
+guest swap partition, including an NVMe swap partition that is a sibling of
+the guest root partition. The selected partition itself must not contain or
+back root, be mounted, have holders, or back the recovery filesystem. Normal
+memory-headroom, `swapoff`, UUID/PARTUUID/geometry, mapper ownership, durable
+original-header backup, and restoration checks remain mandatory. Because this
+lane makes no physical-failure claim, its root-owned recovery journal may live
+on a different partition of the same guest virtual disk; the selected swap
+partition itself remains forbidden as recovery backing. The VM lane uses the
+selected partition's own kernel I/O counters so guest-root traffic cannot be
+misreported as target traffic. After the durable zero-header transition, the
+root-owned development probe constructs the same bounded v1 4096-byte SWZ
+authorization header directly; the production `swapzctl format` removable-USB
+policy is intentionally unchanged. Virtual results are
 `VIRTUAL_DEVICE_ONLY_NOT_PHYSICAL_QUALIFICATION` and never physical evidence.
 Before signature-dependent selection, the root helper checks for a single
 authenticated active recovery marker from a prior development real-swap

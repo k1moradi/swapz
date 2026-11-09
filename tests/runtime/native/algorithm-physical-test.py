@@ -63,8 +63,14 @@ class AlgorithmPhysicalTest(unittest.TestCase):
                     {**self.device["children"][0], **mutation}]}
                 self.assertEqual(subject._eligible_partitions(
                     {"blockdevices":[changed]}), [])
+        nvme = {**self.device, "path": "/dev/nvme0n1", "tran": "nvme"}
         self.assertEqual(subject._eligible_partitions(
-            {"blockdevices":[{**self.device,"tran":"nvme"}]}), [])
+            {"blockdevices": [nvme]}), [])
+        virtual = subject._eligible_partitions(
+            {"blockdevices": [nvme]}, virtual_device_only=True)
+        self.assertEqual(len(virtual), 1)
+        self.assertTrue(virtual[0]["virtual_device_only"])
+        self.assertEqual(virtual[0]["parent_transport"], "nvme")
 
     def test_multiple_candidates_require_explicit_selection_before_confirmation(self):
         first = {
