@@ -21,15 +21,15 @@ userspace fixtures. Production kernel compressed extents are now payload-only:
 record/extent descriptors, generation, sequence, CRC, offsets/lengths, mapping
 and GC authority are bounded RAM state while 4/8/16KiB packing is preserved.
 The former in-band-format interlock has been replaced with a separate
-fail-closed physical backing qualification gate. While
-`SWAPZ_PHYSICAL_RAM_METADATA_QUALIFIED` is zero, non-null_blk backing is
-rejected before the mapper can access real swap data. Do not turn this gate
-on merely because the codec has been migrated: first run exact-source
-`make test` for loaded algorithm/RAM qualification, investigate any failing
-native/loaded checks, and retain the documented physical identity,
-corruption/error, concurrency, GC, RAM-budget, and byte-exact SWAPSPACE2
-header-preservation gates. An expected algorithm-tier INCOMPLETE report is
-not physical acceptance or permission to remove the production gate.
+fail-closed physical backing qualification token. The module defaults
+`physical_ram_metadata_qualified=0`; non-null_blk backing is rejected unless
+an evidence-validating loader sets the immutable token to one for the same
+already-built module that passed exact-source `make test` loaded algorithm/RAM
+qualification. Do not encode qualification by editing a source constant after
+testing, because that changes the source SHA and invalidates the evidence.
+Retain the documented physical identity, corruption/error, concurrency, GC,
+RAM-budget, and byte-exact SWAPSPACE2 header-preservation gates. An expected
+algorithm-tier INCOMPLETE report is not physical acceptance by itself.
 
 Review partition identity and swapoff admission, all lower physical offsets
 including DISCARD, metadata-cache lifetimes, corrupted/partial I/O,
