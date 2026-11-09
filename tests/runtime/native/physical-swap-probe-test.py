@@ -26,6 +26,7 @@ probe = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(probe)
 
 REAL_RECOVERY_BASE = probe._recovery_base
+REAL_ALGORITHM_RUNTIME_BASE = probe._algorithm_runtime_base
 REAL_PARTITION_LOCK = probe._partition_lock
 REAL_PATH_READ_TEXT = Path.read_text
 REAL_PATH_IS_FILE = Path.is_file
@@ -50,10 +51,16 @@ class PhysicalSwapProbeTests(unittest.TestCase):
             probe.Path, "exists", new=fixture_exists)
         module_presence.start()
         self.addCleanup(module_presence.stop)
+        runtime_constant = mock.patch.object(
+            probe, "ALGORITHM_RUNTIME_BASE", self.recovery_base)
+        runtime_constant.start()
+        self.addCleanup(runtime_constant.stop)
         for name, replacement in (
             ("_recovery_base", lambda target=None: self.recovery_base),
+            ("_algorithm_runtime_base", lambda: self.recovery_base),
             ("_recovery_run_directory", lambda path, run_id=None: Path(path)),
-            ("_partition_lock", lambda partuuid: os.open(os.devnull, os.O_RDONLY)),
+            ("_partition_lock",
+             lambda partuuid, base=None: os.open(os.devnull, os.O_RDONLY)),
         ):
             patch = mock.patch.object(probe, name, replacement)
             patch.start()
@@ -104,25 +111,16 @@ class PhysicalSwapProbeTests(unittest.TestCase):
             gate.assert_called_once_with()
             run_probe.assert_called_once()
 
-    def test_unprovisioned_recovery_base_is_blocked_not_recovery_required(self):
-        # A fresh VM without recovery storage is not an interrupted trial.
-        # Refuse admission without creating directories or touching devices.
-        with tempfile.TemporaryDirectory() as directory:
-            missing = Path(directory) / "missing-recovery"
-            with mock.patch.object(probe, "_recovery_base",
-                                   REAL_RECOVERY_BASE), \
-                 mock.patch.object(probe, "RECOVERY_BASE", missing), \
-                 mock.patch.object(probe.os, "geteuid", return_value=0), \
-                 mock.patch.object(probe, "recover") as restore:
-                with self.assertRaisesRegex(
-                        probe.ProbeError, "recovery base or a parent is missing"
-                ) as refusal:
-                    probe.main(["recover-pending"])
-                self.assertEqual(
-                    probe._terminal_error_status(refusal.exception),
-                    ("BLOCKED", 2))
-                self.assertFalse(missing.exists())
-                restore.assert_not_called()
+    def test_pending_algorithm_cleanup_uses_runtime_state_only(self):
+        # New algorithm trials must not inspect/provision persistent recovery
+        # storage merely to determine that no same-boot trial is pending.
+        with mock.patch.object(
+                probe, "_recovery_base",
+                side_effect=AssertionError("persistent recovery consulted")), \
+             mock.patch.object(probe.os, "geteuid", return_value=0), \
+             mock.patch.object(probe, "recover") as restore:
+            self.assertEqual(probe.main(["recover-pending"]), 0)
+            restore.assert_not_called()
 
     def test_pending_owned_recovery_retains_recovery_required_status(self):
         with mock.patch.object(probe.os, "geteuid", return_value=0), \
@@ -153,7 +151,7 @@ class PhysicalSwapProbeTests(unittest.TestCase):
                 probe.recover_pending_algorithm_trial()
             recovery.assert_not_called()
 
-    def test_shared_root_development_plan_binds_scope_recovery_and_target(self):
+    def test_shared_root_development_plan_binds_scope_and_target_without_recovery(self):
         target = {
             "major": 8, "minor": 4, "partuuid": "7fb9401d-04",
             "size_bytes": 16 * 1024 ** 3,
@@ -172,13 +170,15 @@ class PhysicalSwapProbeTests(unittest.TestCase):
             "target_device_minor": 4,
             "target_device_bytes": target["size_bytes"],
             "original_swap_signature": True,
-            "recovery_preflight_read": True,
-            "recovery_directory_safe": True,
-            "recovery_filesystem_supported": True,
-            "recovery_directly_not_target": True,
-            "recovery_active_marker_clear": True,
-            "recovery_source_chain_checked": True,
-            "recovery_same_physical_disk_as_target": False,
+            # These deployment-only fields may be false/unavailable: the
+            # bounded algorithm trial owns same-boot state in /run.
+            "recovery_preflight_read": False,
+            "recovery_directory_safe": False,
+            "recovery_filesystem_supported": False,
+            "recovery_directly_not_target": False,
+            "recovery_active_marker_clear": False,
+            "recovery_source_chain_checked": False,
+            "recovery_same_physical_disk_as_target": True,
             "target_device_chain_checked": True,
             "target_physical_parent_major": 8,
             "target_physical_parent_minor": 0,
@@ -204,10 +204,8 @@ class PhysicalSwapProbeTests(unittest.TestCase):
             probe._require_shared_root_development_plan(target, evidence)
 
         rejected = (
-            ({"recovery_same_physical_disk_as_target": True},
-             "independent recovery"),
             ({"shared_root_parent_exception_status": "missing"},
-             "authorization or independent recovery"),
+             "shared-root host authorization"),
             ({"target_device_minor": 5}, "does not bind"),
             ({"target_swap_zero_used": False}, "every required gate"),
         )
@@ -1172,12 +1170,12 @@ class PhysicalSwapProbeTests(unittest.TestCase):
     def test_development_run_directory_uses_its_fresh_run_id(self):
         run_id = "abcdef0123456789abcdef0123456789"
         expected = self.recovery_base / f"swapz-physical-{run_id}"
+        self.assertEqual(
+            probe._select_run_directory(None, run_id, True), expected)
+        with self.assertRaisesRegex(
+                probe.ProbeError, "chooses its own fresh runtime directory"):
+            probe._select_run_directory(expected, run_id, True)
         with mock.patch.object(probe, "RECOVERY_BASE", self.recovery_base):
-            self.assertEqual(
-                probe._select_run_directory(None, run_id, True), expected)
-            with self.assertRaisesRegex(
-                    probe.ProbeError, "chooses its own fresh recovery directory"):
-                probe._select_run_directory(expected, run_id, True)
             self.assertEqual(
                 probe._select_run_directory(expected, run_id, False), expected)
 
@@ -3016,8 +3014,10 @@ class PhysicalSwapProbeTests(unittest.TestCase):
                 self.assertEqual(manifest[key], expected, key)
             self.assertEqual((manifest["major"], manifest["minor"]),
                              (target["major"], target["minor"]))
-            self.assertEqual((state_dir / probe.BACKUP_NAME).read_bytes(),
-                             target["header"])
+            self.assertEqual(manifest["stage"], "PREPARED")
+            self.assertEqual(
+                manifest["ownership_phase"], probe.RUNTIME_OWNERSHIP_PHASE)
+            self.assertFalse((state_dir / probe.BACKUP_NAME).exists())
 
     def test_original_header_read_refuses_unverified_regular_descriptor(self):
         with tempfile.TemporaryDirectory() as directory:
