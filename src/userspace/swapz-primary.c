@@ -14099,6 +14099,26 @@ static int swapz_primary_run_mutating_action(
 	int result;
 	int saved_errno;
 
+#if !defined(SWAPZ_PRIMARY_OWNED_NULLBLK_TEST) && \
+	!defined(SWAPZ_PRIMARY_ROOTLESS_TEST)
+	/*
+	 * Do not let an unqualified payload-only migration make a real swap
+	 * partition the first loaded correctness test. Refuse before lifecycle
+	 * locks, swapoff, module loading or any target mutation.
+	 */
+	if (!SWAPZ_PHYSICAL_RAM_METADATA_QUALIFIED &&
+	    (action == SWAPZ_PRIMARY_MUTATING_PREPARE ||
+	     action == SWAPZ_PRIMARY_MUTATING_START)) {
+		errno = EOPNOTSUPP;
+		fprintf(stderr,
+			"PRIMARY_%s=BLOCKED phase=ram-metadata-qualification "
+			"target_unchanged=true\n",
+			action == SWAPZ_PRIMARY_MUTATING_PREPARE ?
+				"PREPARE" : "START");
+		return -1;
+	}
+#endif
+
 	/*
 	 * Lock order is global package/mutation lock first, then the partition
 	 * recovery lock acquired by the selected lifecycle operation.
