@@ -9964,8 +9964,8 @@ def publish(source_sha):
 
     if push is None or push.returncode:
         report_sha = None
-        for attempt in range(3):
-            time.sleep(2 << attempt)
+        for attempt in range(5):
+            time.sleep(1 << attempt)
             fetch = run("fetch", "--no-tags", "origin", "main", timeout=60)
             if fetch is None or fetch.returncode:
                 continue

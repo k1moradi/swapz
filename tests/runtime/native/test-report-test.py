@@ -7293,7 +7293,7 @@ class ReportContract(unittest.TestCase):
                 runner.ROOT, runner.REPORT, runner.git_result)
             runner.ROOT = checkout
             runner.REPORT = checkout / runner.GIT_RESULT
-            failures = {"push": 1, "fetch": 1}
+            failures = {"push": 3, "fetch": 2}
 
             def intercept(command, *, data=None, timeout=15, env=None):
                 if command == ["remote", "get-url", "--push", "origin"]:
@@ -7327,7 +7327,7 @@ class ReportContract(unittest.TestCase):
                     notice = runner.publish(source_sha)
                 self.assertIn("SYNCED_GIT", notice)
                 self.assertEqual(failures, {"push": 0, "fetch": 0})
-                self.assertGreaterEqual(sleep.call_count, 2)
+                self.assertEqual(sleep.call_count, 5)
                 self.assertEqual(runner.git_sha(), source_sha)
             finally:
                 runner.ROOT, runner.REPORT = old_root, old_report

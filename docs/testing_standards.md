@@ -5365,8 +5365,9 @@ manager.
 
 A separate `ls-remote` authorization probe is not required. Report commits
 are pushed normally (never force-pushed) on the actual current main head, which
-may itself be report-only. After a failed push, bounded retry backs off and
-retries transient fetch/push failures even when origin/main did not move. If it
+may itself be report-only. After a failed push, bounded retry uses five
+noninteractive rounds with 1/2/4/8/16-second backoff and retries transient
+fetch/push failures even when origin/main did not move. If it
 did move, `merge-base --is-ancestor` must prove the tested code revision
 remains in current main history before a report-only child of that fetched head
 is attempted. Rewritten/diverged history or exhausted retries fail closed.
