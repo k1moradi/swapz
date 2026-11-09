@@ -9,11 +9,14 @@ Both qualification tiers retain the loaded RAM algorithm benchmark matrix.
 RAM result is physical-device performance or endurance evidence.
 Production compressed extents are now payload-only and their descriptors are
 RAM-authoritative. That implementation change does not by itself qualify real
-backing: new physical throughput, latency or endurance evidence still requires
-matched current-source byte-exact readback, GC/fault/concurrency coverage,
-RAM-budget evidence and unchanged SWAPSPACE2 block-zero verification. Treat
-older physical benchmark reports as historical; do not extrapolate null_blk
-figures to ordinary SWAPSPACE2 partition performance.
+backing: the module's immutable `physical_ram_metadata_qualified` load token
+defaults off and may be enabled only by an evidence-validating loader for the
+same exact-source artifacts that passed loaded algorithm/RAM qualification.
+Physical throughput, latency or endurance evidence additionally requires
+matched byte-exact readback, GC/fault/concurrency coverage, RAM-budget evidence
+and unchanged SWAPSPACE2 block-zero verification. Treat older physical
+benchmark reports as historical; do not extrapolate null_blk figures to
+ordinary SWAPSPACE2 partition performance.
 New physical trials bind `raw_header_preservation_required=True` into
 immutable recovery-state comparisons: a later record removing or changing this
 claim is rejected. Older journals where both snapshots lack the claim remain
