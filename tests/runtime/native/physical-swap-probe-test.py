@@ -1366,8 +1366,11 @@ class PhysicalSwapProbeTests(unittest.TestCase):
     def test_physical_target_requires_repeated_stable_uuid_path(self):
         with self.assertRaisesRegex(probe.ProbeError, "match exactly"):
             probe.inspect_target("/dev/disk/by-uuid/a", "/dev/disk/by-uuid/b")
-        with self.assertRaisesRegex(probe.ProbeError, "by-uuid"):
+        with self.assertRaisesRegex(probe.ProbeError, "by-partuuid"):
             probe.inspect_target("/dev/sda4", "/dev/sda4")
+        with self.assertRaisesRegex(probe.ProbeError, "by-partuuid"):
+            probe.inspect_target("/dev/disk/by-partuuid/a/../b",
+                                 "/dev/disk/by-partuuid/a/../b")
 
     def test_review_record_is_bound_to_helper_source_and_device(self):
         artifact_digests = {key: str(index) * 64 for index, (key, _, _)

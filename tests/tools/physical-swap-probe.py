@@ -586,8 +586,16 @@ def inspect_target(device_arg, confirm_arg, *, allow_used_swap=False,
     """Identify the selected partition; dev smoke may preserve inactive swap."""
     if not device_arg or device_arg != confirm_arg:
         raise ProbeError("--device and --confirm-device must match exactly")
-    if not device_arg.startswith("/dev/disk/by-uuid/"):
-        raise ProbeError("select the partition through /dev/disk/by-uuid/")
+    # New trials bind the partition table identity. Accept only the legacy
+    # by-UUID selector when processing previously confirmed trial records.
+    by_partuuid = device_arg.startswith("/dev/disk/by-partuuid/")
+    by_swap_uuid = device_arg.startswith("/dev/disk/by-uuid/")
+    if not (by_partuuid or by_swap_uuid) or (
+            device_arg != (
+                "/dev/disk/by-partuuid/" if by_partuuid else
+                "/dev/disk/by-uuid/") + Path(device_arg).name):
+        raise ProbeError("select the partition through /dev/disk/by-partuuid/ "
+                         "(legacy by-uuid remains supported)")
     try:
         device = str(Path(device_arg).resolve(strict=True))
     except OSError as exc:
@@ -617,8 +625,11 @@ def inspect_target(device_arg, confirm_arg, *, allow_used_swap=False,
         raise ProbeError("selected partition is not identified as Linux swap")
     if type(size_bytes) is not int or size_bytes <= 0:
         raise ProbeError("selected swap partition lacks stable identity or size")
-    _require_matching_swap_uuid(device_arg, row.get("uuid"))
     partuuid, partition_size = _partition_identity(device)
+    if by_partuuid and Path(device_arg).name.lower() != partuuid:
+        raise ProbeError("PARTUUID selector does not match the selected partition")
+    if by_swap_uuid:
+        _require_matching_swap_uuid(device_arg, row.get("uuid"))
     if partition_size != size_bytes:
         raise ProbeError("selected partition inventory has inconsistent size")
     if size_bytes < 3 * 1024 * 1024 + PAGE_BYTES:
@@ -664,7 +675,7 @@ def inspect_target(device_arg, confirm_arg, *, allow_used_swap=False,
         "virtual_device_only": virtual_device_only,
         "root_same_physical_parent": root_same_physical_parent,
         "size_bytes": size_bytes,
-        "uuid": row["uuid"],
+        "uuid": row.get("uuid"),
         "partuuid": partuuid,
         "header": header,
         "swap_was_active": active is not None,
@@ -3307,8 +3318,13 @@ def recover_pending_algorithm_trial():
                 }):
             raise ValueError("not an owned development real-swap journal")
         device_arg = state.get("device_arg")
-        if (not isinstance(device_arg, str) or
-                not device_arg.startswith("/dev/disk/by-uuid/")):
+        if (not isinstance(device_arg, str) or not (
+                device_arg.startswith("/dev/disk/by-partuuid/") or
+                device_arg.startswith("/dev/disk/by-uuid/")) or
+                device_arg != (
+                    "/dev/disk/by-partuuid/" if
+                    device_arg.startswith("/dev/disk/by-partuuid/") else
+                    "/dev/disk/by-uuid/") + Path(device_arg).name):
             raise ValueError("original confirmed device selector invalid")
     except (OSError, ValueError, KeyError, TypeError) as exc:
         raise RecoveryRequiredError(

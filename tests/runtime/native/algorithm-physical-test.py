@@ -66,6 +66,10 @@ class AlgorithmPhysicalTest(unittest.TestCase):
         nvme = {**self.device, "path": "/dev/nvme0n1", "tran": "nvme"}
         self.assertEqual(subject._eligible_partitions(
             {"blockdevices": [nvme]}), [])
+        cleared_uuid = {**self.device, "children": [
+            {**self.device["children"][0], "uuid": None}]}
+        self.assertEqual(len(subject._eligible_partitions(
+            {"blockdevices": [cleared_uuid]})), 1)
         virtual = subject._eligible_partitions(
             {"blockdevices": [nvme]}, virtual_device_only=True)
         self.assertEqual(len(virtual), 1)
@@ -106,7 +110,7 @@ class AlgorithmPhysicalTest(unittest.TestCase):
         with mock.patch("builtins.input") as response:
             self.assertIs(subject._select_swap_partition([first]), first)
             response.assert_not_called()
-        for field in ("path", "partuuid", "uuid"):
+        for field in ("path", "partuuid"):
             with self.subTest(field=field):
                 duplicated = {**second, field: first[field]}
                 with self.assertRaisesRegex(ValueError, "duplicate.*identity"):
@@ -337,7 +341,7 @@ class AlgorithmPhysicalTest(unittest.TestCase):
             self.fail("unexpected subprocess invocation")
 
         def resolve(path):
-            if str(path) == "/dev/disk/by-uuid/" + swap_uuid:
+            if str(path) == "/dev/disk/by-partuuid/7fb9401d-04":
                 return "/dev/sda4"
             return str(path)
 
@@ -361,6 +365,8 @@ class AlgorithmPhysicalTest(unittest.TestCase):
         self.assertEqual(len(commands), 3)
         self.assertEqual(selected["path"], "/dev/sda4")
         self.assertEqual(selected["partuuid"], "7fb9401d-04")
+        self.assertEqual(
+            selected["selector"], "/dev/disk/by-partuuid/7fb9401d-04")
         self.assertTrue(selected["parent_has_other_partitions"])
         self.assertEqual(selected["active_swap"]["used_kib"], 0)
 

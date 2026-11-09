@@ -26,12 +26,16 @@ mapping after target recreation. Native data-only builder coverage must also
 alias its descriptor array deliberately with the lower-write image and prove
 the constructor rejects that ownership violation without changing the image.
 Also reject builders inside either buffer and payload inputs overlapping
-the descriptor array, before any mutation. Native coverage must exercise the
-descriptor-array-free unique mode and verify its transient last descriptor is
-sufficient for immediate transaction binding without a large stack array.
-Exercise exclusive swapoff and return to
+the descriptor array, before any mutation. Exercise exclusive swapoff and return to
 ordinary swapon without reboot; after success ask owner keep/restore.
 Existing raw-header preservation alone is insufficient for production PASS.
+New trial selectors use `/dev/disk/by-partuuid/<PARTUUID>`, not the
+filesystem UUID. An ordinary Linux swap partition may legitimately have a
+cleared swap UUID; the original `SWAPSPACE2` signature, stable partition
+identity, full geometry, parent and exclusive ownership must still verify.
+Historical by-UUID selectors in authenticated recovery journals remain
+accepted for the original transaction only. New selector support does not
+bypass the mandatory RAM-only extent metadata interlock.
 The 16 GiB native capacity fixture must account for the expanded 20-byte
 volatile mapping record and current per-segment indexes: expected
 index bytes are 121739228, not the historical 16-byte-map total. Count

@@ -66,8 +66,9 @@ def _eligible_partitions(lsblk_output: dict, *,
                     not disk["path"].startswith("/dev/") or \
                     not isinstance(partuuid, str) or \
                     PARTUUID_PATTERN.fullmatch(partuuid) is None or \
-                    not isinstance(swap_uuid, str) or \
-                    UUID_PATTERN.fullmatch(swap_uuid) is None or \
+                    (swap_uuid is not None and (
+                        not isinstance(swap_uuid, str) or
+                        UUID_PATTERN.fullmatch(swap_uuid) is None)) or \
                     not isinstance(path, str) or not path.startswith("/dev/") or \
                     type(size) is not int or size < 64 * 1024 * 1024:
                 continue
@@ -87,7 +88,9 @@ def _select_swap_partition(candidates: list[dict]) -> dict | None:
     """Select one identified partition, without authorizing any write."""
     if not candidates:
         raise ValueError("no identifiable swap partition")
-    for key in ("path", "partuuid", "uuid"):
+    # The swap UUID can be intentionally cleared or duplicated. Stable
+    # partition-table identities, not swap signatures, select the target.
+    for key in ("path", "partuuid"):
         identities = [candidate[key].lower() for candidate in candidates]
         if len(set(identities)) != len(identities):
             raise ValueError("duplicate USB swap partition identity")
@@ -271,10 +274,10 @@ def _require_read_only_preflight() -> dict | None:
     if selected is None:
         return None
     selected.update(_selected_swap_inventory(selected, swap_lines))
-    selector = Path("/dev/disk/by-uuid") / selected["uuid"]
+    selector = Path("/dev/disk/by-partuuid") / selected["partuuid"]
     if not selector.is_symlink() or \
             os.path.realpath(selector) != os.path.realpath(selected["path"]):
-        raise ValueError("partition swap UUID link does not match the candidate")
+        raise ValueError("partition PARTUUID link does not match the candidate")
     return {**selected, "selector": str(selector),
             "virtual_device_only": virtual_device_only}
 
