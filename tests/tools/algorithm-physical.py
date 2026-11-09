@@ -215,29 +215,29 @@ def _require_bare_metal_host(*, allow_virtual=False) -> bool:
 
 
 class PendingRecoveryError(ValueError):
-    """Root-owned restoration must finish before the next trial is admitted."""
+    """Root-owned same-boot cleanup must finish before another trial."""
 
 
 def _recover_pending_algorithm_trial() -> None:
-    """Resume any exact owned journal before signature-dependent discovery."""
+    """Finish any exact same-boot owned trial before new device discovery."""
     sudo = shutil.which("sudo")
     if sudo is None:
-        raise ValueError("sudo is required for recovery preflight")
+        raise ValueError("sudo is required for prior-trial cleanup preflight")
     command = [
         # sudo may request authentication on the operator's controlling TTY.
-        # Only the root helper can inspect the protected recovery directory.
+        # Only the root helper can inspect the protected /run ownership state.
         sudo, "--", sys.executable, "-I", "-B",
         str(ROOT / "tests/tools/physical-swap-probe.py"),
         "recover-pending",
     ]
-    # The root helper owns recovery and its bounded child operations. Never
-    # terminate it from this unprivileged process during header restoration.
+    # The root helper owns same-boot cleanup and its bounded child operations.
+    # Do not terminate it while it is proving mapper/swap/module ownership.
     result = subprocess.run(command, cwd=ROOT, check=False)
     if result.returncode == 3:
         raise PendingRecoveryError(
-            "owned swap recovery remains unresolved; inspect its saved journal")
+            "owned swap cleanup remains unresolved; inspect same-boot state")
     if result.returncode != 0:
-        raise ValueError("cannot verify pending physical recovery status")
+        raise ValueError("cannot verify pending physical cleanup status")
 
 
 def _require_read_only_preflight() -> dict | None:
@@ -334,20 +334,18 @@ def main() -> int:
     if selected.get("parent_has_other_partitions"):
         if selected.get("virtual_device_only"):
             print("  VM shared-disk candidate: the privileged helper must prove "
-                  "the selected partition is not root and recovery does not "
-                  "resolve through the selected partition")
+                  "the selected partition is not the root partition")
         else:
             print("  Shared-root candidate: privileged admission requires the "
-                  "protected host-scope record and recovery storage on another "
-                  "physical parent")
+                  "protected host-scope record; trial state remains in /run")
     try:
         algorithm_ram_evidence = _algorithm_ram_evidence_arguments()
     except ValueError as error:
         print("PHYSICAL_ALGORITHM_REAL_SWAP=BLOCKED " + str(error))
         return 2
-    print("  After confirmation, the privileged helper durably backs up recovery "
-          "state, checks memory headroom, and calls ordinary swapoff on active "
-          "swap before writing the partition.")
+    print("  After confirmation, the privileged helper records root-only "
+          "same-boot ownership in /run, checks memory headroom, and calls "
+          "ordinary swapoff on active swap before using its data area.")
     print("  The original Linux swap header remains unchanged; "
           "only the temporary mapper may be formatted")
     try:
@@ -372,8 +370,8 @@ def main() -> int:
         *(["--virtual-device-only"] if selected.get("virtual_device_only") else []),
         *algorithm_ram_evidence,
     ]
-    # The root helper owns recovery and its own bounded child timeouts. Do not
-    # SIGKILL it merely because this unprivileged parent reached a wall clock.
+    # The root helper owns mapper/swap cleanup and its bounded child timeouts.
+    # Do not SIGKILL it merely because this parent reached a wall clock.
     try:
         result = subprocess.run(command, cwd=ROOT, check=False)
     except OSError:
