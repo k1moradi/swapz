@@ -2525,7 +2525,7 @@ int swapz_primary_linux_swap_header_valid(
 {
 	static const unsigned char magic[] = "SWAPSPACE2";
 	/* The swap UUID may be intentionally clear; PARTUUID binds the target. */
-	if (!header || !logical_pages || logical_pages > UINT32_MAX ||
+	if (!header || logical_pages < 3U || logical_pages > UINT32_MAX ||
 	    swapz_primary_read_u32_le(
 		header + SWAPZ_PRIMARY_SWAP_VERSION_OFFSET) != 1U ||
 	    swapz_primary_read_u32_le(
