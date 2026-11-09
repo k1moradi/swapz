@@ -7837,7 +7837,7 @@ class CapacityMemoryAccountingContracts(unittest.TestCase):
     """
 
     INDEXES = {
-        "maps": ("logical", "struct swapz_map", 16),
+        "maps": ("logical", "struct swapz_map", 20),
         "page_prev_in_segment": ("logical", "swapz_u32", 4),
         "page_next_in_segment": ("logical", "swapz_u32", 4),
         "live_records": ("physical", "swapz_u16", 2),
@@ -8507,15 +8507,15 @@ class CapacityMemoryAccountingContracts(unittest.TestCase):
                 leaf_pte_pages, leaf_round_input // 512,
                 model["MAX_UINT64"])
             self.assertIsNotNone(leaf_pte_pages)
-        self.assertEqual(payload_bytes, 776070968)
-        self.assertEqual(rounded_index_bytes, 776114176)
+        self.assertEqual(payload_bytes, 884391736)
+        self.assertEqual(rounded_index_bytes, 884436992)
         # Predicted index bytes are source accounting only. Do not compare
         # them with the measured-host peak-RAM acceptance ceiling.
-        self.assertEqual(dict(lengths)["maps"], 433283072)
+        self.assertEqual(dict(lengths)["maps"], 541603840)
         leaf_pte_bytes = model["_checked_product"](
             leaf_pte_pages, page_bytes, model["MAX_UINT64"])
-        self.assertEqual(leaf_pte_pages, 382)
-        self.assertEqual(leaf_pte_bytes, 1564672)
+        self.assertEqual(leaf_pte_pages, 434)
+        self.assertEqual(leaf_pte_bytes, 1777664)
         self.assertIsNone(maximum(partition_bytes + 1))
         exactly_three_data_segments = (
             (3 * segment_blocks + 1) * page_bytes)
@@ -8695,18 +8695,18 @@ class CapacityMemoryAccountingContracts(unittest.TestCase):
             (dimensions[scale] * width, name)
             for name, (scale, _, width) in self.INDEXES.items()
         ]
-        self.assertEqual(sum(length for length, _ in allocations), 776070968)
+        self.assertEqual(sum(length for length, _ in allocations), 884391736)
         allocation_pages = [
             (length + page - 1) // page for length, _ in allocations]
-        self.assertEqual(sum(allocation_pages) * page, 776114176)
+        self.assertEqual(sum(allocation_pages) * page, 884436992)
         # Conservative leaf-PTE scale if every current capacity index is
         # vmalloc-backed and independently mapped. Upper-level vmalloc tables,
         # allocator metadata and any kmalloc/slab rounding remain host-measured.
         leaf_pte_pages = sum(
             (pages + 511) // 512 for pages in allocation_pages)
-        self.assertEqual(leaf_pte_pages, 382)
-        self.assertEqual(leaf_pte_pages * page, 1564672)
-        self.assertEqual(max(allocations), (433283072, "maps"))
+        self.assertEqual(leaf_pte_pages, 434)
+        self.assertEqual(leaf_pte_pages * page, 1777664)
+        self.assertEqual(max(allocations), (541603840, "maps"))
         self.assertEqual(len(allocations), 17)
         self.assertLess(logical * 16, (1 << 32))
         self.assertLess(physical * 2, (1 << 32))

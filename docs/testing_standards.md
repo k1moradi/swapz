@@ -13,6 +13,12 @@ mapper may receive mkswap. Public swapzctl format must fail before any
 raw-device open. Legacy synthetic formatter-success tests do not establish
 a production CLI acceptance result.
 
+A 20-byte authoritative RAM logical map (including compressed CRC32C)
+replaces the prior 16-byte map and increases the dedicated-card source
+index estimate. The source-contract RAM accounting oracle must derive map
+size from the C static assertion and keep its checked concrete reference
+values synchronized; those estimates are not observed peak RAM.
+
 New source/native/loaded qualification must prove in-RAM CRC/generation,
 record offsets/lengths, 4/8/16KiB packing, read correctness, GC, overwrite,
 DISCARD and concurrency, partial/failing I/O, memory capacity and no stale
