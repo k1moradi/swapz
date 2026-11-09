@@ -8342,9 +8342,11 @@ ID. The state-transition predicate alone does not prove the corresponding
 one-use claim exists, authorize a device operation, or establish that a saved
 stage matches the live device. The mutable stage envelope is not a complete
 recovery manifest; durable run evidence must separately bind the exact
-partition identity, qualified source and artifact hashes, and expected mapper
-identity and geometry. If an optional original-header backup is recorded, bind
-its digest to that run's manifest.
+partition identity, qualified source and artifact hashes, expected mapper
+identity and geometry, and the SHA-256 of the immutable ordinary SWAPSPACE2
+block zero. Do not persist a 4096-byte block-zero backup: lifecycle and recovery
+must re-read the exact selected target, validate its Linux swap header and
+geometry, and compare the live block-zero digest with the manifest.
 
 | Current stage | Permitted next stages |
 | --- | --- |
@@ -8657,69 +8659,40 @@ durable stage that may remain after an abrupt process exit once mutation could
 have begun: `STARTING`, `ACTIVE`, `STOPPING`, `RECOVERING`, or
 `RESTORED`. It must reject `READY`, `DISABLING`, and terminal `COMPLETE`.
 For a recoverable non-`RECOVERY_REQUIRED` stage it first validates the exact
-manifest and recognized block-zero bytes, then durably normalizes the state to
-`RECOVERY_REQUIRED` while preserving the original interrupted stage before
-entering `RECOVERING`. This covers process death before the failing coordinator
-could mark recovery itself, including stale `ACTIVE` after a reboot; a live
-swap mapper still cannot be removed because the mapper-removal gate refuses
-active swap and open references. Recovery retains the original interrupted-stage
-provenance through `RECOVERING`, `RESTORED`, and `COMPLETE`. Before cleanup
-it must read block zero through
-the revalidated PARTUUID path and accept only one of two byte-exact values: the
-digest-verified saved original header or the run-bound SWZ authorization
-header. Unknown or torn bytes stop recovery before cleanup. It then persists
+manifest and the live immutable backing header, then durably normalizes the
+state to `RECOVERY_REQUIRED` while preserving the original interrupted stage
+before entering `RECOVERING`. This covers process death before the failing
+coordinator could mark recovery itself, including stale `ACTIVE` after a
+reboot; a live swap mapper still cannot be removed because the mapper-removal
+gate refuses active swap and open references. Recovery retains the original
+interrupted-stage provenance through `RECOVERING`, `RESTORED`, and
+`COMPLETE`. Before cleanup it must revalidate the configured PARTUUID target,
+read block zero, require a valid ordinary `SWAPSPACE2` header with exact
+partition geometry, and require its SHA-256 to match the manifest. Any malformed
+or changed block-zero bytes stop recovery before cleanup. It then persists
 `RECOVERING`, removes or proves absent only the manifest-bound inactive mapper,
 and unloads a module only when live provenance matches the manifest and the
 per-run module-load WAL is `LOADED` or, for the crash window around
 `finit_module`, `INTENT`. A failure before INTENT may have no module-load
 record; recovery may proceed only when the module is actually absent. After
-cleanup it exclusively reopens the same manifest-bound target and rechecks that
-block zero is still one of the same two known values before persisting
+cleanup it exclusively reopens the same manifest-bound target and repeats the
+same SWAPSPACE2-plus-digest verification before persisting
 `RESTORED`/terminal `COMPLETE` and releasing the owner marker. Recovery never
-restores historical raw bytes on the disposable card, never force-removes a
-mapper/module, and never adopts a live module without matching WAL. Any failure
-after entering `RECOVERING` must return to `RECOVERY_REQUIRED` while
-preserving the original interrupted stage. Keep execution disabled until the
-required interruption/null_blk/physical evidence are complete.
+writes or restores block zero, never force-removes a mapper/module, and never
+adopts a live module without matching WAL. Any failure after entering
+`RECOVERING` must return to `RECOVERY_REQUIRED` while preserving the original
+interrupted stage. Keep execution disabled until the required
+interruption/null_blk/physical evidence are complete.
 
-When the primary manager records an optional original-header backup, it is
-immutable per run ID. Its writer must require the exclusive lock and matching
-consumed/active owner claim,
-validate the caller-bound SHA-256 before writing, create a root-owned 0600
-temporary file, fsync it, atomically install the final name without replacing
-an existing backup, and fsync the recovery directory. Its reader must reject
-symlinks, non-regular or multiply linked files, wrong ownership/mode/size,
-short or extended contents, and digest mismatch; it copies bytes to the caller
-only after full validation. Rootless tests must verify exact 4096-byte
-round-trip, no-overwrite behavior, invalid digest refusal, and output-buffer
-preservation on read failure. If a transaction records this optional backup,
-the lifecycle caller must bind its expected hash to block zero read through the
-freshly revalidated descriptor for the configured PARTUUID before the first
-mutation.
-
-Any primary-swap block-zero write must use the checked descriptor primitive in
-`src/userspace/swapz-primary.c`. Before writing, production callers must open
-the configured target by its stable PARTUUID with `O_RDWR|O_EXCL`, then verify
-the opened descriptor's major:minor, `BLKGETSIZE64` geometry and sysfs PARTUUID
-against the immutable transaction manifest. Recheck the by-PARTUUID alias
-before and after opening to close path-substitution races. Do not require a
-content-based by-UUID link: formatting can remove it and the selected target
-may not have had a swap signature. After formatting, use the same stable
-PARTUUID path and manifest-bound identity. The lifecycle caller must validate
-the written SWZ header and run ID against the durable manifest. Rootless path
-tests must use synthetic identities and prove that no host block device is
-opened.
-
-The checked primitive independently requires an open read/write descriptor
-whose device number and capacity match the selected runtime target, compares
-all 4096 current bytes with the caller-bound expected header before writing,
-handles short writes, calls `fsync`, then rereads and compares all 4096
-replacement bytes. A stale header must fail with no write. Rootless direct-C
-coverage uses only temporary regular-file fixtures to verify exact replacement
-and stale-header refusal; it does not qualify kernel block-device
-exclusive-open behavior or physical recovery. Keep the primitive disconnected
-from privileged lifecycle commands until the full manifest binding and
-recovery use are implemented and tested.
+The primary manager must persist only the block-zero SHA-256 in the immutable
+run manifest, never a 4096-byte header copy. Rootless direct-C coverage must
+construct a valid ordinary Linux swap header and prove exact digest acceptance,
+valid-header byte changes returning `ESTALE`, malformed signature/geometry
+returning a fail-closed error, and manifest tampering rejection. Start, stop and
+recovery must read block zero only through the freshly revalidated
+manifest-bound target descriptor. `mkswap` is permitted only on the newly
+created swapz mapper; no lifecycle path may format, replace, zero, restore or
+otherwise write block zero of the backing partition.
 
 The native primary manager's immutable run manifest is separate from the
 mutable lifecycle stage. Its canonical newline-delimited schema has fixed field
