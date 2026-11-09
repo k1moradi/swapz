@@ -97,8 +97,9 @@ The partition path and content UUID are observations, not sufficient identity.
 Before destructive work, prove that the opened partition and parent are the
 same authorized removable card by geometry, partition/parent topology,
 major:minor, stable parent attributes available on the host, and descriptor
-identity. Formatting or repartitioning may intentionally replace UUID/PARTUUID;
-record the controlled identity transition before continuing. Never substitute
+identity. Any observed UUID/PARTUUID or partition-layout change must block
+admission; formatting, repartitioning and replacement identities are forbidden.
+Never substitute
 whatever later happens to be named `/dev/sda` or `/dev/sda1`.
 
 Only the positively identified SD card's post-swapoff data area is disposable.
@@ -109,8 +110,9 @@ physical disk, partition, filesystem, mapper, or swap area is in destructive
 scope.
 
 Use the whole authorized partition as physical backing and expose the largest
-logical swap capacity that remains correct for incompressible data, SWZ metadata,
-alignment, GC reserve and forward-progress reserve. Do not advertise capacity
+logical swap capacity that remains correct for incompressible payload data,
+alignment, GC reserve and forward-progress reserve. Extent metadata resides
+in RAM, not the partition. Do not advertise capacity
 that depends on favorable compression.
 
 ## Standing owner authorization

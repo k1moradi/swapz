@@ -1,6 +1,6 @@
 # Build and Install
 
-**Immutable naming policy (read before every prompt):** The project is `swapz`; the kernel module is `dm-swapz.ko` (loaded as `dm_swapz`); the Device Mapper target is exactly `swapz`; and the module alias is `dm-swapz`. Never put implementation-generation numbers in product, module, target, source-path, report, workflow, helper, or schema names. `SWZ` is the current unversioned on-disk format identity; do not assign a format version until an incompatible format boundary is justified.
+**Immutable naming policy (read before every prompt):** The project is `swapz`; the kernel module is `dm-swapz.ko` (loaded as `dm_swapz`); the Device Mapper target is exactly `swapz`; and the module alias is `dm-swapz`. Never put implementation-generation numbers in product, module, target, source-path, report, workflow, helper, or schema names. `SWAPSPACE2` is the only real backing format. `SWZ` names the internal extent-packing design, not a partition format; legacy persisted extent descriptors are migration debt, not an accepted disk identity.
 
 **Three-tier test policy:** `make fast_test` is development-only and never qualifies or publishes `test_results.json`; `make test` runs the algorithm/RAM path and returns INCOMPLETE (nonzero) until physical source/run/target admission is qualified; `make test_full` retains all rootless DKMS/systemd integration and RAM qualification. Both privileged tiers report BLOCKED (nonzero) if noninteractive privilege is unavailable. RAM/integration PASS cannot certify physical storage or cold-boot production acceptance. Private scripts and CI jobs are implementation details, not operator interfaces.
 
@@ -118,15 +118,18 @@ level; they never admit a production target. Use the
 [host-scoped authority](AGENT_CONTEXT.md#standing-owner-authorization) before
 interpreting any PASS or proceeding to a device operation.
 
-### Formatter descriptor admission evidence
+### Legacy synthetic formatter descriptor admission evidence
 
-Even when a valid existing SWZ authorization header makes formatting
-idempotent, successful formatter admission requires a fresh returned-descriptor
+Public `swapzctl format` rejects raw-device formatting before opening any
+partition. The assertions in this section describe only a retired synthetic
+formatter fixture: even when its mock SWZ header makes simulated formatting
+idempotent, the fixture requires a fresh returned-descriptor
 `fcntl(F_GETFL)` access-mode check reporting `O_RDWR` after its final
 opened-target identity revalidation. Its refusal is a read-only diagnosis:
 `O_RDONLY` or `O_WRONLY` returns `EBADF`, a failed query retains the
 originating errno, and neither case writes, syncs, or replaces the header.
-The independent final prewrite check for new headers remains mandatory.
+The independent final prewrite check remains a synthetic fixture assertion,
+not authorization to write an ordinary swap partition header.
 Rootless tests with fake block descriptors establish these control-flow
 conditions and the `O_EXCL` flags requested by the opener; they cannot
 establish loaded-kernel block holder/mount/swapon exclusion or distinguish
