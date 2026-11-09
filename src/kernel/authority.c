@@ -1105,12 +1105,17 @@ static int swapz_pick_dead_segment(struct swapz_authority *a)
 			 a->physical_blocks - a->reserve_blocks) /
 			SWAPZ_SEGMENT_BLOCKS;
 	unsigned long long probe_start = swapz_authority_now_ns();
-	swapz_u32 scan;
+	swapz_u32 scan, segment;
 
 	if (!count)
 		return swapz_finish_alloc_probe(a, probe_start, -ENOSPC);
-	for (scan = 0; scan < count; ++scan) {
-		swapz_u32 segment = (a->next_segment_probe + scan) % count;
+	/*
+	 * Normalize once, then advance a wrapping cursor instead of dividing
+	 * for every examined segment. The tie/claim order is unchanged.
+	 */
+	for (scan = 0, segment = a->next_segment_probe % count;
+	     scan < count;
+	     ++scan, segment = segment + 1U == count ? 0U : segment + 1U) {
 		int result;
 
 		a->alloc_probe_segments++;

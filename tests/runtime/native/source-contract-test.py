@@ -8730,5 +8730,34 @@ class CapacityMemoryAccountingContracts(unittest.TestCase):
                         constructor.index("ctx->maps = kvcalloc("))
 
 
+    def test_segment_scan_cursor_preserves_rotation_without_per_entry_division(self):
+        # These scans are O(segments), so avoid one dynamic division per
+        # candidate. This is only a source/permutation contract, not a
+        # performance measurement or a substitute for loaded GC coverage.
+        allocator = source_body("swapz_pick_dead_segment", AUTH)
+        victim = body("swapz_gc_choose_victim")
+        self.assertIn("segment = a->next_segment_probe % count", allocator)
+        self.assertIn("segment + 1U == count ? 0U : segment + 1U", allocator)
+        self.assertNotIn("(a->next_segment_probe + scan) % count", allocator)
+        self.assertIn("segment = start_probe % ctx->segment_count", victim)
+        self.assertIn("segment + 1U == ctx->segment_count ?", victim)
+        self.assertNotIn("(start_probe + scan) % ctx->segment_count", victim)
+        self.assertIn("if (!ctx->segment_count)", victim)
+
+        for segment_count in (1, 2, 3, 7, 16, 119006):
+            for probe in (0, 1, segment_count - 1, segment_count,
+                          0xffffffff):
+                start = probe % segment_count
+                cursor = start
+                visited = []
+                for _ in range(segment_count):
+                    visited.append(cursor)
+                    cursor = 0 if cursor + 1 == segment_count else cursor + 1
+                self.assertEqual(visited[0], start)
+                self.assertEqual(visited[-1], (start + segment_count - 1) %
+                                 segment_count)
+                self.assertEqual(len(set(visited)), segment_count)
+                self.assertEqual(cursor, start)
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)

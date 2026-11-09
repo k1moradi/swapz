@@ -4078,11 +4078,18 @@ static int swapz_gc_choose_victim(struct swapz_dm *ctx, swapz_u32 *victim)
 		    ctx->gc_min_live_blocks ||
 	    ctx->authority.segment_mapped_pages != ctx->segment_mapped_pages)
 		return -EUCLEAN;
-	for (scan = 0; scan < ctx->segment_count; ++scan) {
-		swapz_u32 mapped;
-
-		segment = (start_probe + scan) % ctx->segment_count;
-		mapped = ctx->segment_mapped_pages[segment];
+	if (!ctx->segment_count)
+		return -ENOSPC;
+	/*
+	 * A full candidate sweep can span many thousands of segments.
+	 * Divide once for its starting point; preserve circular scan order
+	 * without a remainder calculation on every candidate.
+	 */
+	for (scan = 0, segment = start_probe % ctx->segment_count;
+	     scan < ctx->segment_count;
+	     ++scan, segment = segment + 1U == ctx->segment_count ?
+			      0U : segment + 1U) {
+		swapz_u32 mapped = ctx->segment_mapped_pages[segment];
 		swapz_u16 count;
 		swapz_u32 score;
 
