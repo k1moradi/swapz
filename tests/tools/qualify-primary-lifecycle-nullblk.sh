@@ -80,7 +80,7 @@ verify_prepare_failure_diagnostic() {
 			qualification-report-read|qualification-source-identity|\
 			qualified-artifact-hash-readback|qualified-artifact-identity|\
 			target-header-inspection|target-geometry-identity|\
-			original-header-rollback-proof|original-header-digest|\
+			original-header-identity-proof|original-header-digest|\
 			raw-target-swap-inventory|target-physical-parent-identity|\
 			target-recovery-parent-separation|cross-namespace-mount-inventory|\
 			target-mounted-in-visible-namespace|root-device-parent-identity|\
@@ -96,13 +96,12 @@ verify_prepare_failure_diagnostic() {
 			final-shared-root-parent-authorization|physical-parent-swap-inventory|\
 			module-mapper-inventory|unexpected-module-or-mapper-present|\
 			final-raw-target-swap-inventory|final-preclaim-identity-revalidation|\
-			final-physical-parent-swap-inventory|run-id-and-header-construction|\
+			final-physical-parent-swap-inventory|run-id-construction|\
 			partition-owner-claim)
 				[[ "$description" == "$expected_error claim=none" ]] ||
 					fail "preclaim refusal exposed private state or wrong disposition"
 				;;
-			global-mutation-lock-close|original-header-backup-write|manifest-write|\
-			original-header-backup-readback|manifest-readback|\
+			global-mutation-lock-close|manifest-write|manifest-readback|\
 			partition-lock-close|recovery-directory-close)
 				[[ "$description" == "$expected_error claim=retained target_unchanged=true" ]] ||
 					fail "postclaim refusal lacks retained ownership disposition"
