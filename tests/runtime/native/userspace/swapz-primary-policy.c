@@ -956,6 +956,9 @@ static void test_selected_target_swap_quiescence(void)
 	assert(errno == EBUSY);
 }
 
+static void test_put_u32_le(unsigned char *buffer, size_t offset,
+			   uint32_t value);
+
 static void test_target_identity_and_header_policy(void)
 {
 	unsigned char block[SWAPZ_PRIMARY_BLOCK_BYTES] = {0};
