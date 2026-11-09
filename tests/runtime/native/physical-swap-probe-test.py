@@ -90,17 +90,16 @@ class PhysicalSwapProbeTests(unittest.TestCase):
                     probe.ProbeError, "contains or backs the root filesystem"):
                 probe._require_root_not_on_target(8, 3)
 
-    def test_physical_run_rejects_inband_metadata_before_any_probe(self):
-        # The public helper must not reach swapoff on the pre-migration codec.
-        with mock.patch.object(probe, "run_probe") as run_probe:
+    def test_physical_run_requires_ram_only_metadata_source_gate(self):
+        # Current production source must pass the read-only gate. A simulated
+        # legacy source still fails before any device or swap operation.
+        probe._require_ram_only_metadata_for_physical_run()
+        legacy_source = "#define SWAPZ_CODEC_METADATA_ON_MEDIA 1U\n"
+        with mock.patch.object(probe.Path, "read_text",
+                               return_value=legacy_source):
             with self.assertRaisesRegex(
                     probe.ProbeError, "metadata is RAM-only"):
-                probe.main([
-                    "run", "--device", "/dev/swapz-synthetic",
-                    "--confirm-device", "/dev/swapz-synthetic",
-                    "--development-only",
-                ])
-            run_probe.assert_not_called()
+                probe._require_ram_only_metadata_for_physical_run()
 
     def test_unprovisioned_recovery_base_is_blocked_not_recovery_required(self):
         # A fresh VM without recovery storage is not an interrupted trial.

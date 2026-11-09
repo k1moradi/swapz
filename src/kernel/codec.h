@@ -28,14 +28,12 @@ typedef uint64_t swapz_u64;
 #endif
 
 /*
- * P0 safety interlock, not a runtime feature toggle: compressed extents still
- * carry an SWZ header and 16-byte descriptors in their on-media data blocks.
- * Never permit real physical backing until the production writer, reader, GC
- * and authority have all migrated to data-only extents with bounded RAM-only
- * CRC, generation and mapping metadata. Synthetic null_blk remains eligible.
- * Changing this value requires the new loaded/data-integrity qualification.
+ * Production compressed lower images are payload-only: all swapz descriptors,
+ * offsets, lengths, encodings, generations, sequences and CRCs are volatile
+ * RAM authority. The legacy codec below remains only for historical/native
+ * regression fixtures and must never define physical backing identity.
  */
-#define SWAPZ_CODEC_METADATA_ON_MEDIA 1U
+#define SWAPZ_CODEC_METADATA_ON_MEDIA 0U
 
 #define SWAPZ_BLOCK_BYTES 4096U
 #define SWAPZ_BLOCK_SHIFT 12U
@@ -231,11 +229,27 @@ int swapz_ram_extent_append(struct swapz_ram_extent *builder,
 			    swapz_u32 logical_page, swapz_u32 generation,
 			    const void *payload, swapz_u16 payload_length,
 			    swapz_u8 encoding);
+/* Production fast path after the caller has proved logical-page uniqueness for
+ * the complete packing window. Bounds, overlap and payload-integrity checks are
+ * unchanged; only the redundant bounded duplicate scan is skipped. */
+int swapz_ram_extent_append_unique(struct swapz_ram_extent *builder,
+				   swapz_u32 logical_page,
+				   swapz_u32 generation,
+				   const void *payload,
+				   swapz_u16 payload_length,
+				   swapz_u8 encoding);
 int swapz_ram_extent_append_prehashed(struct swapz_ram_extent *builder,
 				      swapz_u32 logical_page,
 				      swapz_u32 generation, const void *payload,
 				      swapz_u16 payload_length,
 				      swapz_u32 payload_crc32c, swapz_u8 encoding);
+int swapz_ram_extent_append_prehashed_unique(
+				      struct swapz_ram_extent *builder,
+				      swapz_u32 logical_page,
+				      swapz_u32 generation, const void *payload,
+				      swapz_u16 payload_length,
+				      swapz_u32 payload_crc32c,
+				      swapz_u8 encoding);
 int swapz_ram_extent_seal(struct swapz_ram_extent *builder);
 /* Payload pointer remains valid only while the sealed staging buffer lives.
  * Verify independently authoritative logical/generation identity and CRC;

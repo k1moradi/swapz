@@ -745,10 +745,9 @@ int swapz_lookup(const void *bytes, swapz_u32 bytes_total, swapz_u8 index,
 }
 
 /*
- * The migration builder is deliberately independent of the legacy in-band
- * codec. All descriptor bytes live in caller-owned RAM; only packed payload
- * bytes and zero padding can enter a lower write. This primitive must NOT
- * disable SWAPZ_CODEC_METADATA_ON_MEDIA until every live engine path migrates.
+ * The production builder is independent of the legacy in-band codec. All
+ * descriptor bytes live in caller-owned RAM; only packed payload bytes and
+ * deterministic zero padding can enter a lower write.
  */
 int swapz_ram_extent_begin(struct swapz_ram_extent *builder, void *bytes,
 			   swapz_u32 bytes_total, swapz_u32 sequence,
@@ -793,7 +792,8 @@ static int swapz_ram_extent_append_checked(struct swapz_ram_extent *builder,
 					    swapz_u16 payload_length,
 					    swapz_u32 precomputed_crc32c,
 					    swapz_u8 encoding,
-					    int crc_precomputed)
+					    int crc_precomputed,
+					    int logical_page_unique)
 {
 	swapz_u16 payload_offset;
 	swapz_u8 record_index;
@@ -821,9 +821,11 @@ static int swapz_ram_extent_append_checked(struct swapz_ram_extent *builder,
 	    builder->payload_start < payload_length)
 		return -ENOSPC;
 	/* Uniqueness and bounds precede all source reads and image writes. */
-	for (record_index = 0; record_index < builder->count; ++record_index)
-		if (builder->records[record_index].logical_page == logical_page)
-			return -EEXIST;
+	if (!logical_page_unique)
+		for (record_index = 0; record_index < builder->count; ++record_index)
+			if (builder->records[record_index].logical_page ==
+			    logical_page)
+				return -EEXIST;
 	payload_offset = builder->payload_start - payload_length;
 	payload_crc32c = crc_precomputed ? precomputed_crc32c :
 		swapz_crc32c_bytes(payload, payload_length);
@@ -848,7 +850,21 @@ int swapz_ram_extent_append(struct swapz_ram_extent *builder,
 {
 	return swapz_ram_extent_append_checked(builder, logical_page,
 					       generation, payload,
-					       payload_length, 0, encoding, 0);
+					       payload_length, 0, encoding,
+					       0, 0);
+}
+
+int swapz_ram_extent_append_unique(struct swapz_ram_extent *builder,
+				   swapz_u32 logical_page,
+				   swapz_u32 generation,
+				   const void *payload,
+				   swapz_u16 payload_length,
+				   swapz_u8 encoding)
+{
+	return swapz_ram_extent_append_checked(builder, logical_page,
+					       generation, payload,
+					       payload_length, 0, encoding,
+					       0, 1);
 }
 
 int swapz_ram_extent_append_prehashed(struct swapz_ram_extent *builder,
@@ -860,7 +876,21 @@ int swapz_ram_extent_append_prehashed(struct swapz_ram_extent *builder,
 	return swapz_ram_extent_append_checked(builder, logical_page,
 					       generation, payload,
 					       payload_length, payload_crc32c,
-					       encoding, 1);
+					       encoding, 1, 0);
+}
+
+int swapz_ram_extent_append_prehashed_unique(
+				      struct swapz_ram_extent *builder,
+				      swapz_u32 logical_page,
+				      swapz_u32 generation, const void *payload,
+				      swapz_u16 payload_length,
+				      swapz_u32 payload_crc32c,
+				      swapz_u8 encoding)
+{
+	return swapz_ram_extent_append_checked(builder, logical_page,
+					       generation, payload,
+					       payload_length, payload_crc32c,
+					       encoding, 1, 1);
 }
 
 int swapz_ram_extent_seal(struct swapz_ram_extent *builder)

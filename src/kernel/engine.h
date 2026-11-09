@@ -140,6 +140,9 @@ struct swapz_engine {
 	swapz_u32 prehashed_records;
 	/* Context-owned scratch, never a >1KiB frame on the kernel worker stack. */
 	struct swapz_tx pending;
+	/* Data-only packing descriptors are temporary scratch. Publication copies
+	 * each record into pending/bulk transaction RAM before lower submission. */
+	struct swapz_decoded ram_extent_records[SWAPZ_MAX_RECORDS];
 	swapz_u32 logical_scratch[SWAPZ_MAX_RECORDS];
 	swapz_u8 plan_classes[SWAPZ_MAX_RECORDS];
 	swapz_u8 plan_takes[SWAPZ_MAX_RECORDS];
