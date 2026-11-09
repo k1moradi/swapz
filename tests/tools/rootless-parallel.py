@@ -131,9 +131,15 @@ def execute_group(directory, tasks, *, jobs, timeout_seconds=MAX_WORKER_SECONDS,
                     output_file.close()
                     raise
                 try:
+                    # A test may launch a nested Python interpreter without
+                    # -B. Suppress all bytecode writes so concurrent workers
+                    # never race on the inherited shared build/python-cache.
+                    worker_environment = os.environ.copy()
+                    worker_environment["PYTHONDONTWRITEBYTECODE"] = "1"
                     process = subprocess.Popen(
                         command, cwd=ROOT, stdin=subprocess.DEVNULL,
                         stdout=output_file, stderr=error_file,
+                        env=worker_environment,
                         close_fds=True, start_new_session=True)
                 finally:
                     output_file.close()

@@ -83,8 +83,10 @@ The private `tests/tools/rootless-parallel.py` coordinator validates the
 complete Phase 1 inventory and pairwise resources before executing only its
 hardcoded commands. Each worker has an independent process session and
 mode-0600 stdout/stderr/status files in a newly owned mode-0700 directory;
-worker stdin is disabled. It dispatches at most two workers, stops *new*
-dispatch after a failure, lets started tests finish their own cleanup, and
+worker stdin is disabled. Nested Python processes inherit a no-bytecode-write
+environment so two workers never mutate the shared Python cache. It dispatches
+at most two workers, stops *new* dispatch after a failure, lets started tests
+finish their own cleanup, and
 kills/reaps a worker on its 900-second individual timeout. The Bash parent
 alone replays output and emits source-ordered progress rows, using actual
 per-worker elapsed times; it keeps only a bounded private failure diagnostic

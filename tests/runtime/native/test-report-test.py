@@ -175,7 +175,8 @@ class RootlessParallelPilotContract(unittest.TestCase):
             # Each task requires the other to have entered its process; a
             # serial scheduler would time out without reaching both starts.
             script = (
-                "import pathlib,sys,time; "
+                "import os,pathlib,sys,time; "
+                "if os.environ.get('PYTHONDONTWRITEBYTECODE')!='1': sys.exit(35); "
                 "own=pathlib.Path(sys.argv[1]); "
                 "other=pathlib.Path(sys.argv[2]); own.write_text('started'); "
                 "deadline=time.monotonic()+3; "
