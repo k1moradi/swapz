@@ -442,6 +442,7 @@ class PhysicalSwapProbeTests(unittest.TestCase):
             "partuuid": "deadbeef-04",
             "stage": "HEADER_CLEARED",
             "header_sha256": hashlib.sha256(header).hexdigest(),
+            "raw_header_preservation_required": True,
             "swap_was_active": True,
             "swap_priority": -1,
             "module_ownership": "NOT_STARTED",
@@ -3706,173 +3707,56 @@ class PhysicalSwapProbeTests(unittest.TestCase):
                         (Path(directory) / record_name).read_text())
         return events, state, target
 
-    def test_short_header_io_retains_exact_offsets_and_original_errno(self):
+    def test_raw_header_writer_is_permanently_disabled(self):
         original = b"H" * probe.PAGE_BYTES
-        observed = bytearray(original)
-
-        def read_fragment(_fd, count, offset):
-            return bytes(observed[offset:offset + min(113, count)])
-
-        writes = []
-
-        def short_write(_fd, data, offset):
-            self.assertEqual(offset, 0)
-            length = 257
-            observed[:length] = data[:length]
-            writes.append((offset, length))
-            return length
-
-        with ExitStack() as stack:
-            stack.enter_context(mock.patch.object(probe.os, "open",
-                                                  return_value=123))
-            stack.enter_context(mock.patch.object(probe.os, "pread",
-                                                  side_effect=read_fragment))
-            actual_write = stack.enter_context(mock.patch.object(
-                probe.os, "pwrite", side_effect=short_write))
-            synced = stack.enter_context(mock.patch.object(probe.os, "fsync"))
-            stack.enter_context(mock.patch.object(probe.os, "close"))
-            stack.enter_context(mock.patch.object(
-                probe, "_verify_open_block_device"))
-            self.assertEqual(probe._read_block0("/dev/mock", {}), original)
+        with mock.patch.object(probe.os, "open") as opened, \
+                mock.patch.object(probe.os, "pwrite") as written, \
+                mock.patch.object(probe.os, "fsync") as synced:
             with self.assertRaisesRegex(
-                    probe.ProbeError,
-                    "operation=header_write offset=0 "
-                    "original_errno=unavailable.*written_bytes=257"):
+                    probe.ProbeError, "raw block-zero writes are forbidden"):
                 probe._write_block0(
                     "/dev/mock", bytes(probe.PAGE_BYTES), {},
                     expected_current=original)
-        self.assertEqual(actual_write.call_count, 1)
+        opened.assert_not_called()
+        written.assert_not_called()
         synced.assert_not_called()
-        self.assertEqual(writes, [(0, 257)])
-        self.assertEqual(bytes(observed), bytes(257) + original[257:])
-        probe._validate_recovery_header(
-            bytes(observed), original, {"stage": "HEADER_CLEAR_PENDING"},
-            probe.PAGE_BYTES)
+    def test_legacy_header_recovery_is_read_only_manual_only(self):
+        with tempfile.TemporaryDirectory() as directory:
+            saved_dir = Path(directory) / "state"
+            state, _ = self.make_recovery_state(saved_dir)
+            del state["raw_header_preservation_required"]
+            state["stage"] = "HEADER_CLEAR_PENDING"
+            self.save_recovery_fixture(saved_dir, state)
+            owner_marker = (
+                self.recovery_base /
+                f"partition-{state['partuuid']}.active")
+            before_state = (saved_dir / probe.STATE_NAME).read_bytes()
 
-        observed[:] = original
-        with ExitStack() as stack:
-            stack.enter_context(mock.patch.object(probe.os, "open",
-                                                  return_value=123))
-            stack.enter_context(mock.patch.object(probe.os, "pread",
-                                                  side_effect=read_fragment))
-            actual_write = stack.enter_context(mock.patch.object(
-                probe.os, "pwrite",
-                side_effect=OSError(errno.EIO, "injected write failure")))
-            synced = stack.enter_context(mock.patch.object(probe.os, "fsync"))
-            stack.enter_context(mock.patch.object(probe.os, "close"))
-            stack.enter_context(mock.patch.object(
-                probe, "_verify_open_block_device"))
-            with self.assertRaisesRegex(
-                    probe.ProbeError,
-                    "operation=header_write offset=0 original_errno=5"):
-                probe._write_block0(
-                    "/dev/mock", bytes(probe.PAGE_BYTES), {},
-                    expected_current=original)
-        self.assertEqual(actual_write.call_count, 1)
-        synced.assert_not_called()
-        self.assertEqual(bytes(observed), original)
+            with mock.patch.object(probe, "_validate_state_dir"), \
+                    mock.patch.object(
+                        probe, "inspect_target_identity_for_recovery") as inspect, \
+                    mock.patch.object(probe, "_write_block0") as write:
+                with self.assertRaisesRegex(
+                        probe.ProbeError,
+                        "legacy pre-migration recovery journal requires "
+                        "read-only manual recovery"):
+                    probe.recover(
+                        saved_dir, state["device_arg"], state["device_arg"])
 
-        with self.assertRaisesRegex(probe.ProbeError, "manual review"):
-            probe._validate_recovery_header(
-                bytes(257) + original[257:], original,
-                {"stage": "SWAP_OFF"}, probe.PAGE_BYTES)
-        foreign = bytearray(bytes(257) + original[257:])
-        foreign[300] = 0x42
-        with self.assertRaisesRegex(probe.ProbeError, "manual review"):
-            probe._validate_recovery_header(
-                bytes(foreign), original, {"stage": "HEADER_CLEAR_PENDING"},
-                probe.PAGE_BYTES)
-    def test_recovery_restores_only_exact_partial_clear_and_retains_owner_on_foreign_change(self):
-        for foreign_change in (False, True):
-            with self.subTest(foreign_change=foreign_change):
-                with tempfile.TemporaryDirectory() as directory:
-                    saved_dir = Path(directory) / "state"
-                    state, original = self.make_recovery_state(saved_dir)
-                    original = b"H" * 512 + original[512:]
-                    state.update({
-                        "stage": "HEADER_CLEAR_PENDING",
-                        "header_sha256": hashlib.sha256(original).hexdigest(),
-                        "swap_was_active": False, "development_only": True,
-                        "development_scope": probe.DEVELOPMENT_SCOPE,
-                        "swap_path": None, "swap_priority": None,
-                        "swap_size_kib": None, "swap_used_kib": None,
-                    })
-                    (saved_dir / probe.BACKUP_NAME).write_bytes(original)
-                    self.save_recovery_fixture(saved_dir, state)
-                    header = bytearray(bytes(257) + original[257:])
-                    if foreign_change:
-                        header[600] = 0x99
-                    writes = []
-                    target = {
-                        "device": state["device"], "major": state["major"],
-                        "minor": state["minor"], "size_bytes": state["size_bytes"],
-                        "partuuid": state["partuuid"],
-                    }
-                    def restore(_device, new_bytes, _target, expected_current):
-                        self.assertEqual(expected_current, bytes(header))
-                        writes.append(bytes(new_bytes))
-                        header[:] = new_bytes
-
-                    with ExitStack() as stack:
-                        stack.enter_context(mock.patch.object(
-                            probe, "_validate_state_dir"))
-                        stack.enter_context(mock.patch.object(
-                            probe, "inspect_target_identity_for_recovery",
-                            return_value=target))
-                        stack.enter_context(mock.patch.object(
-                            probe, "_mapper_exists", return_value=False))
-                        stack.enter_context(mock.patch.object(
-                            probe, "_active_swap_for", return_value=None))
-                        stack.enter_context(mock.patch.object(
-                            probe, "_read_block0",
-                            side_effect=lambda *_: bytes(header)))
-                        stack.enter_context(mock.patch.object(
-                            probe, "_write_block0", side_effect=restore))
-                        stack.enter_context(mock.patch.object(
-                            probe, "_verify_target_identity"))
-                        stack.enter_context(mock.patch.object(
-                            probe, "_holder_names", return_value=[]))
-                        stack.enter_context(mock.patch.object(
-                            probe, "_mountinfo_has_device", return_value=False))
-                        stack.enter_context(mock.patch.object(
-                            probe.Path, "exists", return_value=False))
-                        if foreign_change:
-                            with self.assertRaisesRegex(
-                                    probe.ProbeError, "manual review"):
-                                probe.recover(
-                                    saved_dir, state["device_arg"],
-                                    state["device_arg"])
-                        else:
-                            restored = probe.recover(
-                                saved_dir, state["device_arg"],
-                                state["device_arg"])
-                            self.assertEqual(restored["stage"], "COMPLETE")
-                    self.assertEqual(
-                        writes, [] if foreign_change else [original])
-                    if not foreign_change:
-                        self.assertEqual(bytes(header), original)
-                    self.assertEqual(
-                        (self.recovery_base /
-                         f"partition-{state['partuuid']}.active").exists(),
-                        foreign_change)
-                    self.assertTrue(
-                        (self.recovery_base /
-                         f"consumed-{state['run_id']}.json").exists())
-                    saved_state = json.loads(
-                        (saved_dir / probe.STATE_NAME).read_text())
-                    self.assertEqual(
-                        saved_state["header_sha256"],
-                        hashlib.sha256(original).hexdigest())
-                    self.assertEqual(
-                        saved_state["stage"], "HEADER_CLEAR_PENDING"
-                        if foreign_change else "COMPLETE")
-
-    def test_interrupted_header_restoration_is_durable_and_retryable(self):
+            inspect.assert_not_called()
+            write.assert_not_called()
+            self.assertEqual(
+                (saved_dir / probe.STATE_NAME).read_bytes(), before_state)
+            self.assertTrue(owner_marker.exists())
+            self.assertTrue(
+                (self.recovery_base /
+                 f"consumed-{state['run_id']}.json").exists())
+    def test_modern_recovery_refuses_changed_header_without_raw_write(self):
         with tempfile.TemporaryDirectory() as directory:
             state_dir = Path(directory) / "state"
-            state, backup = self.make_recovery_state(state_dir)
+            state, _ = self.make_recovery_state(state_dir)
             state.update({
-                "stage": "HEADER_CLEARED",
+                "stage": "ORACLE_PASS",
                 "swap_was_active": False,
                 "swap_path": None,
                 "swap_size_kib": None,
@@ -3882,32 +3766,15 @@ class PhysicalSwapProbeTests(unittest.TestCase):
                 "development_scope": probe.DEVELOPMENT_SCOPE,
             })
             self.save_recovery_fixture(state_dir, state)
-            current_header = bytearray(probe.PAGE_BYTES)
-            write_attempts = 0
             target = {
                 "device": state["device"], "major": state["major"],
                 "minor": state["minor"], "size_bytes": state["size_bytes"],
                 "partuuid": state["partuuid"],
             }
-
-            def read_header(_device, _target):
-                return bytes(current_header)
-
-            def restore_header(_device, header, _target, expected_current):
-                nonlocal write_attempts
-                write_attempts += 1
-                self.assertEqual(expected_current, bytes(current_header))
-                if write_attempts == 1:
-                    current_header[:257] = header[:257]
-                    raise probe.ProbeError(
-                        "operation=header_write offset=0 "
-                        "original_errno=unavailable "
-                        "observed=short_write written_bytes=257")
-                current_header[:] = header
-
             owner_marker = (
                 self.recovery_base /
                 f"partition-{state['partuuid']}.active")
+
             with ExitStack() as stack:
                 stack.enter_context(mock.patch.object(
                     probe, "_validate_state_dir"))
@@ -3919,60 +3786,23 @@ class PhysicalSwapProbeTests(unittest.TestCase):
                 stack.enter_context(mock.patch.object(
                     probe, "_active_swap_for", return_value=None))
                 stack.enter_context(mock.patch.object(
-                    probe, "_read_block0", side_effect=read_header))
-                stack.enter_context(mock.patch.object(
-                    probe, "_write_block0", side_effect=restore_header))
-                stack.enter_context(mock.patch.object(
-                    probe, "_verify_target_identity"))
+                    probe, "_read_block0", return_value=bytes(probe.PAGE_BYTES)))
                 stack.enter_context(mock.patch.object(
                     probe, "_holder_names", return_value=[]))
                 stack.enter_context(mock.patch.object(
                     probe, "_mountinfo_has_device", return_value=False))
                 stack.enter_context(mock.patch.object(
                     probe.Path, "exists", return_value=False))
-
+                write = stack.enter_context(mock.patch.object(
+                    probe, "_write_block0"))
                 with self.assertRaisesRegex(
-                        probe.ProbeError, "written_bytes=257"):
+                        probe.ProbeError,
+                        "ordinary SWAPSPACE2 header changed"):
                     probe.recover(
                         state_dir, state["device_arg"], state["device_arg"])
-                pending = json.loads(
-                    (state_dir / probe.STATE_NAME).read_text())
-                self.assertEqual(pending["stage"], "HEADER_RESTORE_PENDING")
-                self.assertEqual(
-                    pending["stage_before_recovery"],
-                    "HEADER_RESTORE_PENDING")
-                self.assertEqual(
-                    pending["header_restore_source_stage"],
-                    "HEADER_CLEARED")
-                self.assertEqual(
-                    pending["header_restore_source_sha256"],
-                    hashlib.sha256(bytes(probe.PAGE_BYTES)).hexdigest())
-                self.assertEqual(
-                    bytes.fromhex(pending["header_restore_source_hex"]),
-                    bytes(probe.PAGE_BYTES))
-                self.assertEqual(
-                    probe._load_unique_json(owner_marker.read_bytes()),
-                    {
-                        "run_id": state["run_id"],
-                        "partuuid": state["partuuid"],
-                        "major": state["major"],
-                        "minor": state["minor"],
-                    })
-                self.assertEqual(
-                    bytes(current_header),
-                    backup[:257] + bytes(probe.PAGE_BYTES - 257))
 
-                recovered = probe.recover(
-                    state_dir, state["device_arg"], state["device_arg"])
-                self.assertEqual(recovered["stage"], "COMPLETE")
-
-            self.assertEqual(write_attempts, 2)
-            self.assertEqual(bytes(current_header), backup)
-            self.assertFalse(owner_marker.exists())
-            self.assertTrue(
-                (self.recovery_base /
-                 f"consumed-{state['run_id']}.json").exists())
-
+            write.assert_not_called()
+            self.assertTrue(owner_marker.exists())
     def test_owner_marker_is_restored_when_release_sync_fails(self):
         target, _, review = self.reviewed_device_fixture()
         probe._consume_review(target, review["run_id"])
