@@ -1800,8 +1800,14 @@ int swapz_primary_qualification_import_serialized(const char *report_path);
             for name in forbidden:
                 self.assertEqual(calls[name], 0, f"{action}: {result}")
 
-    def _crash_and_reacquire(self, package, action, phase, extra=None):
-        transaction = package.kill_at_durable_phase(action, phase, extra)
+    def _crash_and_reacquire(
+            self, package, action, phase, extra=None, *,
+            checkpoint_timeout_seconds=None):
+        crash_options = (
+            {} if checkpoint_timeout_seconds is None
+            else {"checkpoint_timeout_seconds": checkpoint_timeout_seconds})
+        transaction = package.kill_at_durable_phase(
+            action, phase, extra, **crash_options)
         self.assertTrue(transaction.is_dir())
         self.assertEqual(json.loads((transaction / "state.json").read_text())[
             "phase"], phase)
@@ -1958,10 +1964,23 @@ int swapz_primary_qualification_import_serialized(const char *report_path);
                 self.assertIn(os.strerror(errno.ESTALE), result.stderr)
         self._assert_cleanup_allowed(clean_package)
 
+    def test_crash_checkpoint_timeout_override_is_finite(self):
+        package = self._package_fixture()
+        for timeout_seconds in (0, -1, 91, True):
+            with self.subTest(timeout_seconds=timeout_seconds):
+                with self.assertRaisesRegex(ValueError, "bounded checkpoint"):
+                    package.kill_at_durable_phase(
+                        "install", "committed",
+                        checkpoint_timeout_seconds=timeout_seconds)
+
     def test_committed_journal_then_verified_package_recovery_allows_reentry(self):
         package = self._package_fixture()
+        # Commit-phase fsync/rename work can be slower on USB-root hosts.
+        # Only this durable checkpoint gets a longer finite wait; no crash,
+        # lock, reentry, or exact installed-payload assertion is relaxed.
         transaction = self._crash_and_reacquire(
-            package, "install", "committed")
+            package, "install", "committed",
+            checkpoint_timeout_seconds=90)
         state = json.loads((transaction / "state.json").read_text())
         self.assertEqual(state["schema"], "swapz-package-install-v1")
         self.assertEqual(state["phase"], "committed")

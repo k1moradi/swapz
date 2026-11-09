@@ -758,6 +758,39 @@ def _development_code_source_sha(head):
     return source
 
 
+def _require_development_canonical_main(local_head, code_source_sha):
+    """Permit only proven report-only canonical-main advances.
+
+    Do not change main, origin/main, or the worktree. Fetch canonical Git
+    objects and authenticate every intervening commit before admitting the
+    unchanged code source. A malformed, changed, or racing remote fails closed.
+    """
+    canonical_head = _remote_main_sha()
+    if canonical_head == local_head:
+        return
+    if not re.fullmatch(r"[0-9a-f]{40}", canonical_head):
+        raise ProbeError("canonical main identity is malformed")
+    fetched = _git_result(
+        "-c", "gc.auto=0", "-c", "maintenance.auto=false",
+        "fetch", "--quiet", "--no-write-fetch-head", "--no-tags",
+        "--no-recurse-submodules", CANONICAL_MAIN_REMOTE, "refs/heads/main",
+        timeout=60, check=False)
+    if fetched.returncode:
+        raise ProbeError("cannot verify canonical main report-only advancement")
+    if _remote_main_sha() != canonical_head:
+        raise ProbeError("canonical main advanced during source verification")
+    if (_git("rev-parse", "HEAD") != local_head or
+            _git("rev-parse", "origin/main") != local_head):
+        raise ProbeError("local main or origin/main moved during physical admission")
+    if _git("cat-file", "-t", canonical_head) != "commit":
+        raise ProbeError("canonical main is not a fetched commit")
+    if _git_result("merge-base", "--is-ancestor", local_head,
+                   canonical_head, check=False).returncode:
+        raise ProbeError("canonical main is not a descendant of local main")
+    if _development_code_source_sha(canonical_head) != code_source_sha:
+        raise ProbeError("canonical main contains changed source after qualification")
+
+
 def current_source_evidence():
     if platform.machine() != "x86_64":
         raise ProbeError("physical swap smoke is currently limited to x86_64")
@@ -927,9 +960,10 @@ def current_development_evidence(nonce):
     if _git("status", "--porcelain"):
         raise ProbeError("worktree changes block physical development smoke")
     head = _git("rev-parse", "HEAD")
-    if head != _git("rev-parse", "origin/main") or _remote_main_sha() != head:
-        raise ProbeError("local and canonical origin/main must match before development smoke")
+    if head != _git("rev-parse", "origin/main"):
+        raise ProbeError("local and origin/main must match before development smoke")
     code_source_sha = _development_code_source_sha(head)
+    _require_development_canonical_main(head, code_source_sha)
     try:
         repository_uid = os.stat(ROOT, follow_symlinks=False).st_uid
     except OSError as exc:
@@ -3609,10 +3643,15 @@ def run_probe(device_arg, confirm_arg, state_dir_arg, review_path,
                     evidence["helper_sha256"] or \
                     _git("rev-parse", "HEAD") != evidence["head"] or \
                     _git("rev-parse", "origin/main") != evidence["head"] or \
-                    _git("status", "--porcelain") or \
-                    _remote_main_sha() != evidence["head"]:
+                    _git("status", "--porcelain"):
                 raise ProbeError(
                     "main or the bound helper changed before physical execution")
+            if development_only:
+                _require_development_canonical_main(
+                    evidence["head"], evidence["source_sha"])
+            elif _remote_main_sha() != evidence["head"]:
+                raise ProbeError(
+                    "canonical main changed before physical execution")
             _verify_target_identity(target)
             current_swap = _active_swap_for(target["major"], target["minor"])
             if development_only:

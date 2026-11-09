@@ -3330,8 +3330,17 @@ exec "{flock_binary}" "$@"
                     break
                 self.assertTrue((self.prefix / "sbin/swapzctl").exists())
 
-    def kill_at_durable_phase(self, action, phase, extra=None):
-        """SIGKILL is untrappable, so a durable phase must remain discoverable."""
+    def kill_at_durable_phase(
+            self, action, phase, extra=None, *,
+            checkpoint_timeout_seconds=DURABLE_CHECKPOINT_TIMEOUT_SECONDS):
+        """SIGKILL is untrappable, so a durable phase must remain discoverable.
+
+        This finite override is for slow committed-package fsync checkpoints;
+        ordinary crash-injection tests retain the default shorter deadline.
+        """
+        if (type(checkpoint_timeout_seconds) is not int or
+                not 0 < checkpoint_timeout_seconds <= 90):
+            raise ValueError("invalid bounded checkpoint timeout")
         ready = self.home / "package-checkpoint.ready"
         ready.unlink(missing_ok=True)
         environment = dict(self.env, SWAPZ_TEST_PAUSE_AFTER=phase)
@@ -3342,8 +3351,7 @@ exec "{flock_binary}" "$@"
             cwd=self.repo_root, env=environment, stdout=subprocess.PIPE,
             stderr=subprocess.PIPE, text=True, start_new_session=True)
         try:
-            deadline = (time.monotonic() +
-                        DURABLE_CHECKPOINT_TIMEOUT_SECONDS)
+            deadline = time.monotonic() + checkpoint_timeout_seconds
             while time.monotonic() < deadline and not ready.exists():
                 if process.poll() is not None:
                     stdout, stderr = process.communicate(timeout=8)

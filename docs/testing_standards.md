@@ -2257,8 +2257,12 @@ failure categories). Source-matched package crash subtests additionally
 report only the finite install/uninstall action and durable checkpoint phase,
 and name subprocess.TimeoutExpired by class without showing its command.
 The SIGKILL lifecycle audit may bound its setup install to 30 seconds under
-earlier full-suite host load; the general package fixture's 15-second
-watchdog is unchanged. An imported PackageInvocationTimeout must expose its
+earlier full-suite host load. Its isolated committed-install recovery case
+may allow up to 90 seconds for the durable crash checkpoint on slow USB-root
+hosts; it must still prove SIGKILL, lock reacquisition, recovered exact
+package bytes and clean reentry. The general package operation watchdog
+remains independently bounded at 60 seconds, and all other crash checkpoints
+retain the 30-second default. An imported PackageInvocationTimeout must expose its
 verified class and only authenticated, path-free original operation, elapsed
 time, finite budget, first cause and process disposition on failure.
 The nullblk-identity-test.sh fixture must emit bounded source-owned
@@ -7077,12 +7081,18 @@ the actual code-source SHA prefix, not merely be well-formed hexadecimal.
 Require strict single-parent ancestry,
 canonical report subjects and paths before deriving the build source; bind the
 generated build-header provenance and physical oracle to that code SHA.
-Continue to require exact equality of local HEAD, tracked `origin/main` and
-fresh canonical remote main before the fast test and immediately before any
-physical execution. A concurrent report-only remote advance must still
-refuse; serialize host tests or resynchronize explicitly. Never admit a
-merge, a non-report path change, a noncanonical report publication or a
-missing source identity as a report-only descendant.
+Require exact equality of the checked-out local `main` HEAD and tracked
+`origin/main` before the fast test and immediately before physical execution.
+A newer canonical remote main may be admitted in development-only mode solely
+when the helper fetches the canonical remote Git objects without moving local
+refs or the worktree, rechecks that the canonical remote did not change while
+fetching, proves the local HEAD is an ancestor, and validates every additional
+commit as a single-parent `test_results.json`-only publication with the exact
+qualified code-source prefix in its canonical subject. Verify this invariant
+again immediately before mutation. Never admit changed executable source,
+merges, a non-report path change, an incorrect report subject, an unreachable
+remote tip, or missing proof. Production-mode physical qualification retains
+its existing exact canonical-HEAD equality and independent evidence gates.
 A recovered header alone never establishes byte-oracle success. The
 reviewed C oracle must emit its exact affirmative comparison line with the
 expected operation, page count and round; zero exit with empty output, a

@@ -474,9 +474,80 @@ class PhysicalSwapProbeTests(unittest.TestCase):
         # Report-only descendant acceptance must not bypass either remote
         # gate or the exact HEAD recheck immediately before physical writes.
         self.assertIn(
-            '_remote_main_sha() != head', source_text)
+            '_require_development_canonical_main(head, code_source_sha)',
+            source_text)
         self.assertIn(
-            '_remote_main_sha() != evidence["head"]', source_text)
+            'evidence["head"], evidence["source_sha"]', source_text)
+        self.assertIn(
+            'elif _remote_main_sha() != evidence["head"]', source_text)
+
+    def test_development_remote_report_only_advance_never_moves_local_main(self):
+        """Fetched report-only commits cannot authorize modified source."""
+        with tempfile.TemporaryDirectory() as directory:
+            checkout = Path(directory) / "checkout"
+            checkout.mkdir()
+            canonical = Path(directory) / "canonical.git"
+
+            def run_git(*arguments, cwd=checkout):
+                result = subprocess.run(
+                    ["git", *map(str, arguments)], cwd=cwd, check=False,
+                    capture_output=True, text=True, timeout=15)
+                self.assertEqual(result.returncode, 0, result.stderr)
+                return result.stdout.strip()
+
+            run_git("init", "--bare", "-q", canonical, cwd=Path(directory))
+            run_git("init", "-q", "-b", "main")
+            run_git("config", "user.name", "Swapz Fixture")
+            run_git("config", "user.email", "fixture@example.invalid")
+            (checkout / "source.txt").write_text(
+                "qualified source\n", encoding="utf-8")
+            run_git("add", "source.txt")
+            run_git("commit", "-q", "-m", "source fixture")
+            source = run_git("rev-parse", "HEAD")
+            run_git("update-ref", "refs/remotes/origin/main", source)
+            run_git("switch", "-q", "-c", "report-publisher")
+            for sequence in range(2):
+                (checkout / "test_results.json").write_text(
+                    json.dumps({"run": sequence}) + "\n", encoding="utf-8")
+                run_git("add", "test_results.json")
+                run_git("commit", "-q", "-m",
+                        f"test: latest run for {source[:12]} [skip ci]")
+            remote_report_head = run_git("rev-parse", "HEAD")
+            run_git("push", "-q", canonical, "HEAD:refs/heads/main")
+            run_git("switch", "-q", "main")
+
+            with mock.patch.object(probe, "ROOT", checkout), \
+                    mock.patch.object(
+                        probe, "CANONICAL_MAIN_REMOTE", str(canonical)), \
+                    mock.patch.object(
+                        probe, "_remote_main_sha",
+                        return_value=remote_report_head):
+                probe._require_development_canonical_main(source, source)
+
+            # Fetch must not rewrite the active checkout or its tracking ref.
+            self.assertEqual(run_git("rev-parse", "HEAD"), source)
+            self.assertEqual(run_git("rev-parse", "origin/main"), source)
+            self.assertEqual(
+                (checkout / "source.txt").read_text(encoding="utf-8"),
+                "qualified source\n")
+
+            run_git("switch", "-q", "report-publisher")
+            (checkout / "source.txt").write_text(
+                "changed source\n", encoding="utf-8")
+            run_git("add", "source.txt")
+            run_git("commit", "-q", "-m", "source change after qualification")
+            changed_remote_head = run_git("rev-parse", "HEAD")
+            run_git("push", "-q", canonical, "HEAD:refs/heads/main")
+            run_git("switch", "-q", "main")
+            with mock.patch.object(probe, "ROOT", checkout), \
+                    mock.patch.object(
+                        probe, "CANONICAL_MAIN_REMOTE", str(canonical)), \
+                    mock.patch.object(
+                        probe, "_remote_main_sha",
+                        return_value=changed_remote_head):
+                with self.assertRaisesRegex(
+                        probe.ProbeError, "changed source"):
+                    probe._require_development_canonical_main(source, source)
 
     def test_development_source_drift_before_fast_test_is_preemptive(self):
         import pwd
@@ -509,9 +580,13 @@ class PhysicalSwapProbeTests(unittest.TestCase):
                                         {"SUDO_USER": repository_owner}), \
                         mock.patch.object(probe, "_git", side_effect=git), \
                         mock.patch.object(
-                            probe, "_remote_main_sha",
-                            return_value=(changed_head if drift == "remote"
-                                          else pinned_head)), \
+                            probe, "_development_code_source_sha",
+                            return_value=pinned_head), \
+                        mock.patch.object(
+                            probe, "_require_development_canonical_main",
+                            side_effect=(probe.ProbeError(
+                                "canonical main must match before development smoke")
+                                         if drift == "remote" else None)), \
                         mock.patch.object(probe.subprocess, "run") as fast_test, \
                         mock.patch.object(probe, "_artifact_digests") as digests:
                     with self.assertRaisesRegex(
@@ -2864,9 +2939,15 @@ class PhysicalSwapProbeTests(unittest.TestCase):
                 mock.patch.object(probe.secrets, "token_hex",
                                   return_value=review["run_id"]),
                 mock.patch.object(probe, "_git", side_effect=checked_git),
-                mock.patch.object(probe, "_remote_main_sha",
-                                  return_value=("c" * 40 if source_drift == "remote"
-                                                else evidence["head"])),
+                mock.patch.object(
+                    probe, "_require_development_canonical_main",
+                    side_effect=(probe.ProbeError(
+                        "main or the bound helper changed before physical execution")
+                        if source_drift == "remote" else None)),
+                mock.patch.object(
+                    probe, "_remote_main_sha",
+                    return_value=("c" * 40 if source_drift == "remote"
+                                  else evidence["head"])),
                 mock.patch.object(probe, "inspect_target", return_value=target),
                 mock.patch.object(probe, "_artifact_digests",
                                   side_effect=artifact_digests),
