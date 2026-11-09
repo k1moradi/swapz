@@ -3197,9 +3197,12 @@ int swapz_read_authoritative_payload(const struct swapz_authority *a,
 	const struct swapz_map *current_map;
 	int error;
 
-	if (!stored || !payload)
+	if (!payload)
 		return -EINVAL;
+	/* Clear a borrowed result even when the supplied storage is absent. */
 	*payload = NULL;
+	if (!stored)
+		return -EINVAL;
 	error = swapz_read_observed_authority(
 		a, logical_page, observed, &current_map);
 	if (error)
