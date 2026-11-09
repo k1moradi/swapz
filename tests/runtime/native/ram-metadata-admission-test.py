@@ -23,13 +23,8 @@ def main() -> None:
     declarations = re.findall(
         r"(?m)^#define SWAPZ_CODEC_METADATA_ON_MEDIA ([01])U$", codec
     )
-    qualification = re.findall(
-        r"(?m)^#define SWAPZ_PHYSICAL_RAM_METADATA_QUALIFIED ([01])U$", codec
-    )
     require(declarations == ["0"],
             "Production kernel compressed extents must keep metadata off media")
-    require(len(qualification) == 1,
-            "Physical RAM-metadata qualification gate must be explicit")
     require("swapz_u32 payload_crc32c;" in authority,
             "Compressed payload CRC must remain authoritative volatile RAM state")
     require("_Static_assert(sizeof(struct swapz_map) == 20" in authority,
@@ -39,16 +34,27 @@ def main() -> None:
 
     disk_identity = target.index('is_nullb = !strncmp(')
     io_client = target.index("ctx->io_client = dm_io_client_create();", disk_identity)
-    require("if (!is_nullb && !SWAPZ_PHYSICAL_RAM_METADATA_QUALIFIED) {" in
+    require("module_param_named(physical_ram_metadata_qualified" in target,
+            "Physical RAM qualification must be an immutable module-load token")
+    require("if (!is_nullb && !swapz_physical_ram_metadata_qualified) {" in
             target[disk_identity:io_client],
             "Real backing must retain the loaded-qualification interlock")
 
     lifecycle = primary.index("static int swapz_primary_run_mutating_action(")
     mutation_lock = primary.index(
         "mutation_lock_fd = swapz_primary_mutation_lock();", lifecycle)
-    require("if (!SWAPZ_PHYSICAL_RAM_METADATA_QUALIFIED &&" in
+    require("SWAPZ_PHYSICAL_RAM_METADATA_QUALIFIED" not in
             primary[lifecycle:mutation_lock],
-            "Primary PREPARE/START must fail closed before loaded qualification")
+            "Primary lifecycle must not depend on a source-mutating qualification flag")
+    loader = primary.index("int swapz_primary_load_qualified_module(")
+    loader_end = primary.index("\nstatic int swapz_primary_manifest_equal(", loader)
+    loader_scope = primary[loader:loader_end]
+    require(
+        "allow_physical_backing=1 physical_ram_metadata_qualified=1" in
+        loader_scope and
+        "/sys/module/dm_swapz/parameters/physical_ram_metadata_qualified" in
+        loader_scope,
+        "Qualified primary loading must set and verify the runtime token")
 
     # DM property consumers must see the allocated lower data range, not
     # the reserved SWAPSPACE2 header or discarded segment-alignment tail.
