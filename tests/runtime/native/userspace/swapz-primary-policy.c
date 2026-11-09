@@ -979,6 +979,11 @@ static void test_target_identity_and_header_policy(void)
 	       swap_magic, sizeof(swap_magic) - 1U);
 	assert(swapz_primary_original_swap_signature(block,
 						    TEST_DEVICE_BYTES));
+	/* SWAPSPACE2 capacity is whole-page based. A normal block partition may
+	 * have a sub-page tail, which remains outside swapz's writable range.
+	 */
+	assert(swapz_primary_original_swap_signature(
+		block, TEST_DEVICE_BYTES + 511U));
 	block[SWAPZ_PRIMARY_SWAP_VERSION_OFFSET] = 2U;
 	assert(!swapz_primary_original_swap_signature(block,
 						     TEST_DEVICE_BYTES));
@@ -1188,6 +1193,12 @@ static void test_target_config_and_dynamic_geometry(void)
 		stale = alternate;
 		stale.device_bytes += SWAPZ_PRIMARY_BLOCK_BYTES;
 		assert(!swapz_primary_target_identity_equal(&alternate, &stale));
+		stale = alternate;
+		stale.device_bytes += 511U;
+		assert(swapz_primary_target_valid(&stale));
+		assert(!swapz_primary_target_identity_equal(&alternate, &stale));
+		assert(swapz_primary_physical_blocks(stale.device_bytes) ==
+		       swapz_primary_physical_blocks(alternate.device_bytes));
 		stale = alternate;
 		stale.partuuid[0] = 'z';
 		assert(!swapz_primary_target_identity_equal(&alternate, &stale));
