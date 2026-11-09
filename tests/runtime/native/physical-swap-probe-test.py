@@ -245,6 +245,7 @@ class PhysicalSwapProbeTests(unittest.TestCase):
             "unrelated_mapper_inventory_unchanged": True,
             "active_partition_marker_present": True,
             "run_claim_consumed": True,
+            "unrelated_swapfiles_restored": True,
         }
         cleanup_patch = mock.patch.object(
             probe, "_final_observations", return_value=clean_observation)
@@ -621,6 +622,7 @@ class PhysicalSwapProbeTests(unittest.TestCase):
                     "unrelated_mapper_inventory_unchanged": True,
                     "active_partition_marker_present": True,
                     "run_claim_consumed": True,
+                    "unrelated_swapfiles_restored": True,
                 }
 
             # A successful retry may release the marker, but cannot rewrite
