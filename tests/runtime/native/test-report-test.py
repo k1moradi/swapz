@@ -6828,7 +6828,7 @@ class ReportContract(unittest.TestCase):
                 runner.ROOT = old_root
 
     def test_git_sync_retries_after_concurrent_main_advance(self):
-        """A completed failure report survives a normal source commit race."""
+        """Delayed older-source evidence is archived, never made canonical."""
         import subprocess
         from unittest import mock
 
@@ -6895,25 +6895,38 @@ class ReportContract(unittest.TestCase):
                     }
                     runner.write_report(failed)
                     notice = runner.publish(source_sha)
-                    self.assertIn("SYNCED_GIT_AFTER_ADVANCE", notice)
+                    self.assertIn("ARCHIVED_GIT", notice)
 
-                    final_head = git("rev-parse", "HEAD",
-                                     cwd=checkout).stdout.strip()
                     remote_head = git("--git-dir", str(origin), "rev-parse",
                                       "refs/heads/main",
                                       cwd=sandbox).stdout.strip()
-                    self.assertEqual(final_head, remote_head)
+                    archived_head = git(
+                        "--git-dir", str(origin), "rev-parse",
+                        f"{remote_head}^", cwd=sandbox).stdout.strip()
                     self.assertEqual(
-                        git("rev-parse", "HEAD^",
-                            cwd=checkout).stdout.strip(), concurrent_sha)
-                    self.assertEqual((checkout / "source.c").read_text(),
-                                     "newer source\n")
+                        git("--git-dir", str(origin), "rev-parse",
+                            f"{archived_head}^", cwd=sandbox).stdout.strip(),
+                        concurrent_sha)
                     self.assertEqual(
-                        json.loads((checkout / runner.GIT_RESULT).read_text(
-                            encoding="utf-8")),
+                        git("--git-dir", str(origin), "show",
+                            f"{remote_head}:source.c", cwd=sandbox).stdout,
+                        "newer source\n")
+                    # The restoration commit keeps the newer main tree's
+                    # canonical report; the delayed report is history-only.
+                    self.assertEqual(
+                        git("--git-dir", str(origin), "show",
+                            f"{remote_head}:{runner.GIT_RESULT}",
+                            cwd=sandbox).stdout,
+                        '{"overall":"NOT_RUN"}\n')
+                    self.assertEqual(
+                        json.loads(git(
+                            "--git-dir", str(origin), "show",
+                            f"{archived_head}:{runner.GIT_RESULT}",
+                            cwd=sandbox).stdout),
                         failed)
-                    self.assertEqual(git("status", "--porcelain",
-                                         cwd=checkout).stdout, "")
+                    self.assertEqual(
+                        git("rev-parse", "HEAD", cwd=checkout).stdout.strip(),
+                        source_sha)
             finally:
                 runner.ROOT, runner.REPORT = old_root, old_report
 

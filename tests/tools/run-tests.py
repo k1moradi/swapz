@@ -10054,6 +10054,28 @@ def publish(source_sha):
                 if ancestor.returncode:
                     return ("GIT_SYNC_FAILED: origin/main no longer descends "
                             "from the tested source; report remains local")
+                remote_source = run(
+                    "log", "-1", "--first-parent", "--format=%H", remote_sha,
+                    "--", ".", f":(exclude){GIT_RESULT}")
+                if remote_source is None or remote_source.returncode:
+                    continue
+                remote_source_sha = remote_source.stdout.decode(
+                    "ascii", "replace").strip()
+                if not re.fullmatch(r"[0-9a-f]{40}", remote_source_sha):
+                    return ("GIT_SYNC_FAILED: origin/main source revision "
+                            "is malformed")
+                if remote_source_sha != source_sha:
+                    source_ancestor = run(
+                        "merge-base", "--is-ancestor",
+                        source_sha, remote_source_sha)
+                    if source_ancestor is None:
+                        continue
+                    if source_ancestor.returncode:
+                        return ("GIT_SYNC_FAILED: current main source does not "
+                                "descend from the tested source")
+                    # Preserve delayed evidence in history without replacing
+                    # canonical test_results.json for newer source.
+                    preserve_canonical = True
                 remote_blob = run("show", f"{remote_sha}:{GIT_RESULT}")
                 if remote_blob is not None and not remote_blob.returncode:
                     try:
