@@ -2678,30 +2678,31 @@ int main(void) {
         self.assertIn("engine->read_cached_block_mask = 0", invalidate)
         self.assertIn("read_extent_lru_valid", invalidate)
         self.assertIn("cached_mask = cached_extent ?", read)
-        self.assertIn("cached_metadata = cached_extent && !!(cached_mask & 1U)", read)
+        self.assertIn("cached_block_zero = !!(cached_mask & 1U)", read)
         self.assertIn("cached_mask |= 1U", read)
-        self.assertIn("(1U << initial_blocks) - 1U", read)
+        self.assertIn("payload_first = observed.payload_offset >>", read)
         self.assertIn("while (start <= last && (cached_mask & (1U << start)))",
                       read)
         self.assertIn("while (start <= last && (cached_mask & (1U << last)))",
                       read)
         payload_read = read.index("engine->io.read_blocks",
                                   read.index("if (last >= start)"))
-        residency_gate = read.index("if (observed.extent_blocks > 1 &&",
-                                    payload_read)
+        residency_gate = read.index(
+            "if (engine->max_read_blocks_per_record != 1U)", payload_read)
         self.assertLess(payload_read, residency_gate)
-        self.assertIn("engine->max_read_blocks_per_record != 1",
+        self.assertIn("cached_mask |= (swapz_u8)(1U << block)",
                       read[residency_gate:residency_gate + 300])
         self.assertLess(residency_gate,
                         read.index("cached_mask |=", residency_gate))
-        self.assertIn("reusable_mask = cached_mask", read)
-        self.assertIn("reusable_mask &= (swapz_u8)~1U", read)
-        self.assertIn("engine->read_cached_block_mask = reusable_mask", read)
-        self.assertIn("engine->read_cached_full = observed.extent_blocks > 1 &&",
+        # The one-block policy must not promote raw lower bytes into cache.
+        self.assertIn("reusable_mask = engine->max_read_blocks_per_record == 1U ?",
                       read)
-        self.assertIn("engine->max_read_blocks_per_record != 1",
-                      read[read.index("engine->read_cached_full ="):])
-        self.assertIn("swapz_read_extent_lru_commit(engine", read)
+        self.assertIn("0U : cached_mask", read)
+        self.assertIn("engine->read_cached_block_mask = reusable_mask", read)
+        self.assertIn("engine->read_cached_full = reusable_mask ==", read)
+        self.assertIn("!engine->read_coalesced_block_mask", read)
+        self.assertIn("lru_commit_mask = reusable_mask &", read)
+        self.assertIn("swapz_read_extent_lru_commit(", read)
         # RAM-only WRITE admission must not throw away validated residency.
         # Physical WRITE submission remains the mutation boundary.
         self.assertNotIn("op != REQ_OP_READ", process)
