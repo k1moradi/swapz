@@ -27,9 +27,9 @@ no swapz metadata or recovery image is written to the backing partition.
 Real device/VM backing must already be SWAPSPACE2. Assert byte-exact backing
 first-page preservation, no raw-partition mkswap, no SWAPZ001 publication,
 and no raw-header write on every successful or failed path. Only the virtual
-mapper may receive mkswap. Public swapzctl format must fail before any
-raw-device open. Legacy synthetic formatter-success tests do not establish
-a production CLI acceptance result.
+mapper may receive mkswap. The public raw-device format operation does not exist; any legacy
+`swapzctl format` invocation must be rejected before a raw-device open.
+Deleted formatter-success fixtures must not be recreated as acceptance tests.
 
 A 20-byte authoritative RAM logical map (including compressed CRC32C)
 replaces the prior 16-byte map and increases the dedicated-card source
@@ -6804,17 +6804,18 @@ delta64 adoptions occur. If packing-adopted remains zero, use the score bands to
 choose the next classifier experiment rather than lowering the threshold
 blindly.
 
-### Legacy SWZ codec identity (RAM-only migration pending)
+### Legacy SWZ codec compatibility (non-production)
 
-SWZ identifies the current internal packed-extent implementation, not the
-physical backing partition. The only permitted physical partition signature
-is pre-existing SWAPSPACE2. The current codec retains its historical
-`SWZ\\0` extent header and descriptor validation only until a complete
-RAM-metadata rewrite replaces them. Its rootless source-identity contract
-continues to reject generation-suffixed product/codec names, but must not be
-used to justify creating a new partition header or persisting swapz metadata.
-After migration, update those fixtures to inspect in-memory descriptor
-authority and data-only extent boundaries instead.
+SWZ identifies the internal 4/8/16KiB packed-extent design, not a physical
+backing format. The only permitted physical partition signature is the
+pre-existing SWAPSPACE2 header. Production compressed WRITE, READ, publication
+and GC authority use data-only lower extents plus bounded RAM descriptors.
+
+Historical `SWZ\\0` header/descriptor encode-decode helpers may remain only
+as isolated compatibility/unit-test code. They are not production I/O
+authority, cannot authorize a raw device, and must never be used as a template
+for a new partition header or persistent swapz metadata. Production-facing
+fixtures must inspect RAM descriptor authority and data-only extent boundaries.
 
 ## ID73 CPU/cache qualification
 
