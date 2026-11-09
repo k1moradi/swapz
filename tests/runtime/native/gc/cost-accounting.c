@@ -36,7 +36,7 @@ static int test_bytes_vs_count_victim_policy(void)
 
 	score_one = swapz_gc_live_byte_cost(&one);
 	score_three = 3 * swapz_gc_live_byte_cost(&three);
-	CHECK(score_one == 3516 && score_three == 1548);
+	CHECK(score_one == 3500 && score_three == 1500);
 	CHECK(swapz_gc_prefer(1, 1, 3, 3)); /* old count picks one */
 	CHECK(swapz_gc_prefer(score_three, 3, score_one, 1));
 	CHECK(!swapz_gc_prefer(score_one, 1, score_three, 3));
@@ -55,20 +55,21 @@ static int test_io_aware_cost_corrects_loaded_gc_counterexample(void)
 	struct swapz_map tiny = { .valid = 1, .extent_blocks = 1,
 			       .payload_length = 496 };
 	struct swapz_map multi = { .valid = 1, .extent_blocks = 4,
+				.payload_offset = SWAPZ_BLOCK_BYTES - 1000U,
 				.payload_length = 2082 };
 	swapz_u32 one, three;
 
-	CHECK(swapz_gc_live_byte_cost(&large) == 3351);
-	CHECK(3 * swapz_gc_live_byte_cost(&tiny) == 1536);
+	CHECK(swapz_gc_live_byte_cost(&large) == 3335);
+	CHECK(3 * swapz_gc_live_byte_cost(&tiny) == 1488);
 	CHECK(3 * swapz_gc_live_byte_cost(&tiny) <
 	      swapz_gc_live_byte_cost(&large)); /* byte policy gets it wrong */
 	one = swapz_gc_estimated_io_cost(&large);
 	three = 3 * swapz_gc_estimated_io_cost(&tiny);
-	CHECK(one == 7447 && three == 13824);
+	CHECK(one == 7431 && three == 13776);
 	CHECK(!swapz_gc_prefer(three, 3, one, 1));
 	CHECK(swapz_gc_prefer(one, 1, three, 3));
 	CHECK(swapz_gc_estimated_io_cost(&multi) ==
-	      2098 + 3 * SWAPZ_BLOCK_BYTES);
+	      2082 + 2 * SWAPZ_BLOCK_BYTES);
 	multi.extent_blocks = 3;
 	CHECK(swapz_gc_estimated_io_cost(&multi) == 0);
 	tiny.valid = 0;
@@ -97,41 +98,53 @@ static int test_reclaim_headroom_preflight(void)
 
 static int test_proven_large_record_gc_block_bound(void)
 {
-	struct swapz_map m = { .valid = 1, .extent_blocks = 4,
-			    .payload_length = 3258 };
-	struct swapz_builder builder;
-	swapz_u8 image[SWAPZ_MAX_EXTENT_BYTES];
-	swapz_u8 payload[3258];
-	unsigned int i;
+	struct swapz_map map = { .valid = 1, .extent_blocks = 4,
+				.payload_length = 3277 };
+	struct swapz_ram_extent builder;
+	struct swapz_decoded records[5];
+	static swapz_u8 image[SWAPZ_MAX_EXTENT_BYTES];
+	swapz_u8 payload[3277];
+	unsigned int index;
 	const swapz_u32 optimistic_bytes =
-		SWAPZ_SEGMENT_BLOCKS * (3258U + sizeof(struct swapz_record));
+		SWAPZ_SEGMENT_BLOCKS * 3277U;
 
-	/* Five of 3257B fit a 16KiB extent. Five of 3258B do NOT.
-	 * The exact production codec establishes this physical boundary. */
-	CHECK(SWAPZ_GC_UNSHAREABLE_MIN_LENGTH == 3258);
+	/* Five 3276-byte compressed payloads fit a data-only 16KiB extent.
+	 * Five 3277-byte payloads do NOT. The historical 3258-byte threshold
+	 * depended on the rejected on-media descriptor overhead.
+	 * Test the exact production RAM-only builder, not a synthetic SWZ header.
+	 */
+	CHECK(SWAPZ_GC_UNSHAREABLE_MIN_LENGTH == 3277);
 	memset(payload, 0x34, sizeof(payload));
-	CHECK(swapz_begin(&builder, image, sizeof(image), 3) == 0);
-	for (i = 0; i < 5; ++i)
-		CHECK(swapz_append(&builder, i, 1, payload, 3257) == 0);
-	CHECK(swapz_seal(&builder) == 0);
-	CHECK(swapz_begin(&builder, image, sizeof(image), 4) == 0);
-	for (i = 0; i < 4; ++i)
-		CHECK(swapz_append(&builder, i, 1, payload, 3258) == 0);
-	CHECK(swapz_append(&builder, 4, 1, payload, 3258) != 0);
-	CHECK(swapz_gc_min_live_blocks(&m) == 1);
+	CHECK(swapz_ram_extent_begin(
+	      &builder, image, sizeof(image), 3, records, 5) == 0);
+	for (index = 0; index < 5; ++index)
+		CHECK(swapz_ram_extent_append(
+		      &builder, index, 1, payload, 3276,
+		      SWAPZ_ENCODING_LZ4) == 0);
+	CHECK(swapz_ram_extent_seal(&builder) == 0);
+	CHECK(swapz_ram_extent_begin(
+	      &builder, image, sizeof(image), 4, records, 5) == 0);
+	for (index = 0; index < 4; ++index)
+		CHECK(swapz_ram_extent_append(
+		      &builder, index, 1, payload, 3277,
+		      SWAPZ_ENCODING_LZ4) == 0);
+	CHECK(swapz_ram_extent_append(
+	      &builder, 4, 1, payload, 3277,
+	      SWAPZ_ENCODING_LZ4) == -ENOSPC);
+	CHECK(swapz_gc_min_live_blocks(&map) == 1);
 	CHECK(swapz_gc_has_possible_headroom(optimistic_bytes));
 	CHECK(!swapz_gc_candidate_can_free_block(
 	      optimistic_bytes, SWAPZ_SEGMENT_BLOCKS));
 	CHECK(swapz_gc_candidate_can_free_block(
 	      optimistic_bytes, SWAPZ_SEGMENT_BLOCKS - 1));
-	m.payload_length = 3257;
-	CHECK(!swapz_gc_min_live_blocks(&m));
-	m.payload_length = 3535;
-	CHECK(swapz_gc_min_live_blocks(&m) == 1);
-	m.raw = 1;
-	m.extent_blocks = 1;
-	m.payload_length = 4096;
-	CHECK(swapz_gc_min_live_blocks(&m) == 1);
+	map.payload_length = 3276;
+	CHECK(!swapz_gc_min_live_blocks(&map));
+	map.payload_length = 3535;
+	CHECK(swapz_gc_min_live_blocks(&map) == 1);
+	map.raw = 1;
+	map.extent_blocks = 1;
+	map.payload_length = 4096;
+	CHECK(swapz_gc_min_live_blocks(&map) == 1);
 	return 0;
 }
 
@@ -145,7 +158,7 @@ static int test_raw_and_invalid_cost(void)
 	CHECK(swapz_gc_live_byte_cost(&m) == 0);
 	m.raw = 0;
 	m.payload_length = 3568;
-	CHECK(swapz_gc_live_byte_cost(&m) == 3584);
+	CHECK(swapz_gc_live_byte_cost(&m) == 3568);
 	m.payload_length = 3569;
 	CHECK(swapz_gc_live_byte_cost(&m) == 0);
 	m.payload_length = 0;
@@ -159,7 +172,7 @@ static int test_raw_and_invalid_cost(void)
 static int test_invalid_compressed_extent_classes(void)
 {
 	struct swapz_map map = { .valid = 1, .extent_blocks = 1,
-				  .payload_length = 3258 };
+				  .payload_length = 3277 };
 	unsigned int extent_blocks;
 
 	for (extent_blocks = 0; extent_blocks < 8; ++extent_blocks) {
@@ -198,8 +211,8 @@ static int test_exact_committed_payload_lengths(void)
 	CHECK(swapz_finish(&a, &tx, bytes, sizeof(bytes), 1, 0) == 0);
 	CHECK(maps[2].payload_length == sizeof(p0));
 	CHECK(maps[3].payload_length == sizeof(p1));
-	CHECK(swapz_gc_live_byte_cost(&maps[2]) == sizeof(p0) + 16);
-	CHECK(swapz_gc_live_byte_cost(&maps[3]) == sizeof(p1) + 16);
+	CHECK(swapz_gc_live_byte_cost(&maps[2]) == sizeof(p0));
+	CHECK(swapz_gc_live_byte_cost(&maps[3]) == sizeof(p1));
 	CHECK(live[0] == 2);
 	CHECK(segment_maps[0] == 2);
 	CHECK(segment_bytes[0] ==
@@ -213,7 +226,7 @@ static int test_exact_committed_payload_lengths(void)
 	      swapz_gc_min_live_blocks(&maps[3]));
 	CHECK(swapz_discard_page(&a, 2) == 0);
 	CHECK(swapz_gc_live_byte_cost(&maps[2]) == 0);
-	CHECK(swapz_gc_live_byte_cost(&maps[3]) == sizeof(p1) + 16);
+	CHECK(swapz_gc_live_byte_cost(&maps[3]) == sizeof(p1));
 	CHECK(segment_maps[0] == 1);
 	CHECK(segment_bytes[0] == swapz_gc_live_byte_cost(&maps[3]));
 	CHECK(segment_io[0] == swapz_gc_estimated_io_cost(&maps[3]));
@@ -325,7 +338,7 @@ static int test_failed_lower_writes_preserve_committed_costs(void)
 	CHECK(swapz_finish(&a, &tx, bytes, sizeof(bytes), 1, 0) == 0);
 	CHECK(maps[logical].valid && !maps[logical].raw);
 	CHECK(segment_maps[0] == 1);
-	CHECK(segment_bytes[0] == sizeof(p0) + sizeof(struct swapz_record));
+	CHECK(segment_bytes[0] == sizeof(p0));
 
 	for (failure_case = 0; failure_case < 2; ++failure_case) {
 		const swapz_u8 completed = failure_case == 0 ? 1 : 0;
@@ -449,7 +462,7 @@ static int test_saturated_gc_accounting_preserves_durable_generation(void)
 	memcpy(durable_roles, segment_roles, sizeof(durable_roles));
 	CHECK(durable_map.valid && !durable_map.raw &&
 	      durable_map.generation == 1U &&
-	      durable_live_bytes == sizeof(p0) + sizeof(struct swapz_record));
+	      durable_live_bytes == sizeof(p0));
 
 	for (failure_case = 0; failure_case < 3; ++failure_case) {
 		struct gc_cost_snapshot expected;
