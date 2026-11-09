@@ -270,6 +270,12 @@ def _require_root_not_on_target(major, minor):
                   if line.strip()}
     if f"{major}:{minor}" in identities:
         raise ProbeError("selected partition contains or backs the root filesystem")
+    # A different partition on the root disk is not dedicated development
+    # media. Apply this inside the root-owned writer too, not just in the
+    # unprivileged algorithm selector, before opening recovery or swapping off.
+    if _physical_parent_identity(major, minor) in identities:
+        raise ProbeError(
+            "selected swap partition shares the root filesystem physical parent")
 
 
 def _verify_open_block_device(fd, target):

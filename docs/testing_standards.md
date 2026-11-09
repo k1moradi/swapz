@@ -7271,8 +7271,11 @@ ancestry of the persistent recovery filesystem, not merely compare the two
 partition numbers. On Lubuntu, recovery on `/dev/sda3` is not independent of
 the `/dev/sda4` target because both have physical parent `/dev/sda`.
 A missing, ambiguous or identical physical parent blocks mutation before
-state backup, `swapoff` or any block-zero write. Rootless regression must
-exercise both same-parent sibling refusal and independently backed recovery.
+state backup, `swapoff` or any block-zero write. The root-owned physical
+worker also refuses a selected partition that shares the root filesystem's
+physical parent, independently of the unprivileged algorithm selector. Rootless
+regression must exercise both same-parent sibling refusal and independently
+backed recovery.
 
 The current development writer remains limited to a dedicated, inactive,
 single-partition USB card with no other active swap. A shared-root candidate

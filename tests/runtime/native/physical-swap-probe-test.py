@@ -59,6 +59,32 @@ class PhysicalSwapProbeTests(unittest.TestCase):
             patch.start()
             self.addCleanup(patch.stop)
 
+    def test_privileged_probe_refuses_partition_on_root_physical_parent(self):
+        """A sibling root partition is not safe even when directly invoked."""
+        def run(command, **_kwargs):
+            if command[0] == "findmnt":
+                return SimpleNamespace(stdout="/dev/sda3\n")
+            if command[0] == "lsblk":
+                return SimpleNamespace(stdout="8:3\n8:0\n")
+            self.fail("unexpected read-only topology command")
+
+        with mock.patch.object(probe, "_run", side_effect=run), \
+             mock.patch.object(probe, "_physical_parent_identity",
+                               return_value="8:0"):
+            with self.assertRaisesRegex(
+                    probe.ProbeError, "shares the root filesystem physical parent"):
+                probe._require_root_not_on_target(8, 4)
+        with mock.patch.object(probe, "_run", side_effect=run), \
+             mock.patch.object(probe, "_physical_parent_identity",
+                               return_value="8:16"):
+            probe._require_root_not_on_target(8, 17)
+        with mock.patch.object(probe, "_run", side_effect=run), \
+             mock.patch.object(probe, "_physical_parent_identity",
+                               return_value="8:0"):
+            with self.assertRaisesRegex(
+                    probe.ProbeError, "contains or backs the root filesystem"):
+                probe._require_root_not_on_target(8, 3)
+
     def test_development_architecture_gate_requires_4k_64bit_native_linux(self):
         for machine in ("x86_64", "aarch64"):
             with self.subTest(machine=machine), \
