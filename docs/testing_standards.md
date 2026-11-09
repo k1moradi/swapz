@@ -4541,7 +4541,13 @@ order, exact clean tested-source identity, matching kernel/build provenance,
 the required loaded verdicts, and final formatter/module/oracle digests.
 A report-only advance of `main` may preserve the tested source, but cannot
 make a stale source, changed implementation, dirty input, missing stage or
-missing artifact current qualification. Before recording or publishing PASS,
+missing artifact current qualification.
+A report published late for an older source after a newer code commit remains
+historical evidence, never qualification of the newer code. Development physical
+admission may traverse it only if its sole changed path is the canonical report,
+its subject and embedded source/tested commit match an ancestor, and any
+archive-and-restore pair exactly restores the prior tree. This cannot bypass
+fresh current-main source-built evidence, device admission or recovery checks. Before recording or publishing PASS,
 the runner must also require the actual kernel release, valid current
 hardware-bound host identity, exact clean generated build-source header and
 byte-exact formatter/module/oracle digests. A failed binding refuses PASS

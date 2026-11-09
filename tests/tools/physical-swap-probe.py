@@ -752,8 +752,47 @@ def _development_code_source_sha(head):
         paths = _git("diff-tree", "--no-commit-id", "--name-only", "-r",
                      parents[1], commit).splitlines()
         subject = _git("show", "-s", "--format=%s", commit)
-        if paths != ["test_results.json"] or subject != (
-                f"test: latest run for {source[:12]} [skip ci]"):
+        if paths != ["test_results.json"]:
+            raise ProbeError("development HEAD contains a non-report-only change")
+        if subject == f"test: latest run for {source[:12]} [skip ci]":
+            continue
+        # An older host may publish its old-source result after new code
+        # reaches main. This is report history, never executable source or
+        # qualification of the new revision. Authenticate the publication.
+        publication = re.fullmatch(
+            r"test: latest run for ([0-9a-f]{12}) \[skip ci\]", subject)
+        if publication is None:
+            raise ProbeError("development HEAD contains a non-report-only change")
+        resolved = _git_result(
+            "rev-parse", f"{publication.group(1)}^{{commit}}", check=False)
+        reported_source = resolved.stdout.strip() if not resolved.returncode else ""
+        if (not re.fullmatch(r"[0-9a-f]{40}", reported_source) or
+                _git_result("merge-base", "--is-ancestor",
+                            reported_source, source, check=False).returncode):
+            raise ProbeError("development HEAD contains a non-report-only change")
+
+        message = _git("show", "-s", "--format=%B", commit)
+        report_commit = commit
+        if message == subject + "\n\nswapz-canonical-restore: true":
+            # The publisher archives one old report, then restores the
+            # previously canonical tree. Validate both commits as a pair.
+            if (_git("show", "-s", "--format=%s", parents[1]) != subject or
+                    _git("rev-parse", f"{commit}^{{tree}}") !=
+                    _git("rev-parse", f"{commit}~2^{{tree}}")):
+                raise ProbeError("development HEAD contains a non-report-only change")
+            report_commit = parents[1]
+        elif message != subject:
+            raise ProbeError("development HEAD contains a non-report-only change")
+        try:
+            report = _load_unique_json(
+                _git("show", f"{report_commit}:test_results.json"))
+        except ValueError as exc:
+            raise ProbeError(
+                "development HEAD contains a non-report-only change") from exc
+        if (not isinstance(report, dict) or
+                report.get("schema") != "swapz-test-results-v1" or
+                report.get("source_sha") != reported_source or
+                report.get("tested_commit_sha") != reported_source):
             raise ProbeError("development HEAD contains a non-report-only change")
     return source
 

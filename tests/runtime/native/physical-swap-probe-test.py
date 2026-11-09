@@ -481,6 +481,78 @@ class PhysicalSwapProbeTests(unittest.TestCase):
         self.assertIn(
             'elif _remote_main_sha() != evidence["head"]', source_text)
 
+    def test_development_late_report_and_canonical_restore_preserve_source(self):
+        """A delayed old-source report after newer code is not code drift."""
+        with tempfile.TemporaryDirectory() as directory:
+            checkout = Path(directory)
+
+            def git(*arguments):
+                result = subprocess.run(
+                    ["git", "-C", str(checkout), *arguments],
+                    check=False, capture_output=True, text=True, timeout=10)
+                self.assertEqual(result.returncode, 0, result.stderr)
+                return result.stdout.strip()
+
+            git("init", "-q", "-b", "main")
+            git("config", "user.name", "Swapz Fixture")
+            git("config", "user.email", "fixture@example.invalid")
+            (checkout / "source.c").write_text("old code\n", encoding="utf-8")
+            git("add", "source.c")
+            git("commit", "-q", "-m", "Initial code")
+            old_source = git("rev-parse", "HEAD")
+            (checkout / "source.c").write_text("new code\n", encoding="utf-8")
+            git("add", "source.c")
+            git("commit", "-q", "-m", "New code while old host tests")
+            new_source = git("rev-parse", "HEAD")
+
+            def publish(source):
+                report = {
+                    "schema": "swapz-test-results-v1",
+                    "source_sha": source,
+                    "tested_commit_sha": source,
+                    "overall": "INCOMPLETE",
+                }
+                (checkout / "test_results.json").write_text(
+                    json.dumps(report, sort_keys=True) + "\n", encoding="utf-8")
+                git("add", "test_results.json")
+                git("commit", "-q", "-m",
+                    f"test: latest run for {source[:12]} [skip ci]")
+                return report
+
+            with mock.patch.object(probe, "ROOT", checkout):
+                publish(old_source)
+                self.assertEqual(
+                    probe._development_code_source_sha(git("rev-parse", "HEAD")),
+                    new_source)
+                latest_report = publish(new_source)
+                publish(old_source)
+                (checkout / "test_results.json").write_text(
+                    json.dumps(latest_report, sort_keys=True) + "\n",
+                    encoding="utf-8")
+                git("add", "test_results.json")
+                git("commit", "-q", "-m",
+                    f"test: latest run for {old_source[:12]} [skip ci]",
+                    "-m", "swapz-canonical-restore: true")
+                self.assertEqual(
+                    git("rev-parse", "HEAD^{tree}"),
+                    git("rev-parse", "HEAD~2^{tree}"))
+                self.assertEqual(
+                    probe._development_code_source_sha(git("rev-parse", "HEAD")),
+                    new_source)
+                # A forged old-source report is not authenticated history.
+                (checkout / "test_results.json").write_text(
+                    json.dumps({
+                        "schema": "swapz-test-results-v1",
+                        "source_sha": "f" * 40,
+                        "tested_commit_sha": old_source,
+                    }) + "\n", encoding="utf-8")
+                git("add", "test_results.json")
+                git("commit", "-q", "-m",
+                    f"test: latest run for {old_source[:12]} [skip ci]")
+                with self.assertRaisesRegex(
+                        probe.ProbeError, "non-report-only change"):
+                    probe._development_code_source_sha(git("rev-parse", "HEAD"))
+
     def test_development_remote_report_only_advance_never_moves_local_main(self):
         """Fetched report-only commits cannot authorize modified source."""
         with tempfile.TemporaryDirectory() as directory:
