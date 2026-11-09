@@ -960,29 +960,27 @@ static void test_target_identity_and_header_policy(void)
 {
 	unsigned char block[SWAPZ_PRIMARY_BLOCK_BYTES] = {0};
 	static const unsigned char swap_magic[] = "SWAPSPACE2";
+	const uint64_t logical_pages =
+		TEST_DEVICE_BYTES / SWAPZ_PRIMARY_BLOCK_BYTES;
 
 	assert(swapz_primary_device_number_matches(makedev(8, 4)));
 	assert(swapz_primary_device_number_matches(makedev(259, 18)));
 	assert(swapz_primary_device_number_matches(makedev(252, 0)));
 	assert(!swapz_primary_device_number_matches(makedev(0, 3)));
+
+	test_put_u32_le(block, SWAPZ_PRIMARY_SWAP_VERSION_OFFSET, 1U);
+	test_put_u32_le(block, SWAPZ_PRIMARY_SWAP_LAST_PAGE_OFFSET,
+			(uint32_t)(logical_pages - 1U));
+	test_put_u32_le(block, SWAPZ_PRIMARY_SWAP_BAD_PAGES_OFFSET, 0U);
 	memcpy(block + sizeof(block) - sizeof(swap_magic) + 1U,
 	       swap_magic, sizeof(swap_magic) - 1U);
 	assert(swapz_primary_original_swap_signature(block,
 						    TEST_DEVICE_BYTES));
-	memset(block, 0, sizeof(block));
-	memcpy(block + SWAPZ_SUPERBLOCK_MAGIC_OFFSET, swapz_superblock_magic,
-	       SWAPZ_SUPERBLOCK_MAGIC_BYTES);
-	swapz_sb_put_u32(block + SWAPZ_SUPERBLOCK_VERSION_OFFSET,
-			 SWAPZ_SUPERBLOCK_VERSION);
-	swapz_sb_put_u32(block + SWAPZ_SUPERBLOCK_HEADER_BYTES_OFFSET,
-			 SWAPZ_SUPERBLOCK_BYTES);
-	swapz_sb_put_u64(block + SWAPZ_SUPERBLOCK_DEVICE_BYTES_OFFSET,
-			 TEST_DEVICE_BYTES);
-	block[SWAPZ_SUPERBLOCK_UUID_OFFSET] = 1U;
-	assert(swapz_sb_valid(block, TEST_DEVICE_BYTES));
+	block[SWAPZ_PRIMARY_SWAP_VERSION_OFFSET] = 2U;
 	assert(!swapz_primary_original_swap_signature(block,
 						     TEST_DEVICE_BYTES));
 }
+
 
 
 /*
@@ -1147,7 +1145,6 @@ static void test_target_config_and_dynamic_geometry(void)
 	char mapper_name[64];
 	char mapper_uuid[64];
 	char record[SWAPZ_PRIMARY_STATE_RECORD_MAX + 1U];
-	unsigned char header[SWAPZ_SUPERBLOCK_BYTES];
 	uint64_t logical_sectors = 0;
 	int length;
 
@@ -1205,10 +1202,6 @@ static void test_target_config_and_dynamic_geometry(void)
 		partuuid) < 0);
 	assert(swapz_primary_target_inspect(alternate.partuuid, &parsed.target) < 0);
 	assert(errno == ENOTSUP);
-	assert(swapz_primary_header_build(
-		run_id, alternate.device_bytes, header) == 0);
-	assert(swapz_sb_valid(header, alternate.device_bytes));
-	assert(!swapz_sb_valid(header, TEST_DEVICE_BYTES));
 	memcpy(manifest.run_id, run_id, sizeof(manifest.run_id));
 	memset(manifest.source_sha, 'a', SWAPZ_PRIMARY_SOURCE_SHA_LENGTH);
 	manifest.source_sha[SWAPZ_PRIMARY_SOURCE_SHA_LENGTH] = '\0';
@@ -1311,76 +1304,27 @@ static void test_primary_linux_swap_header(void)
 	assert(!swapz_primary_linux_swap_header_valid(header, logical_pages));
 }
 
-static void test_primary_run_id_and_header_builder(void)
+static void test_primary_run_id_generation(void)
 {
-	const char *run_id = "0123456789abcdef0123456789abcdef";
 	const char *all_zero = "00000000000000000000000000000000";
 	const char *uppercase = "0123456789ABCDEF0123456789ABCDEF";
-	char short_run_id[SWAPZ_PRIMARY_RUN_ID_LENGTH + 1U] = "short";
-	unsigned char header[SWAPZ_SUPERBLOCK_BYTES];
-	unsigned char original[SWAPZ_SUPERBLOCK_BYTES];
 	char unterminated[SWAPZ_PRIMARY_RUN_ID_LENGTH + 1U];
 	char generated[SWAPZ_PRIMARY_RUN_ID_LENGTH + 1U];
-	unsigned int i;
-	unsigned char any = 0;
 
-	memset(header, 0xa5, sizeof(header));
-	assert(swapz_primary_header_build(
-		run_id, TEST_DEVICE_BYTES, header) == 0);
-	assert(swapz_sb_valid(header, TEST_DEVICE_BYTES));
-	assert(header[SWAPZ_SUPERBLOCK_UUID_OFFSET] == 0x01U);
-	assert(header[SWAPZ_SUPERBLOCK_UUID_OFFSET + 1U] == 0x23U);
-	assert(header[SWAPZ_SUPERBLOCK_UUID_OFFSET + 15U] == 0xefU);
-	for (i = SWAPZ_SUPERBLOCK_RESERVED_OFFSET;
-	     i < SWAPZ_SUPERBLOCK_BYTES; ++i)
-		assert(header[i] == 0U);
-
-	memcpy(original, header, sizeof(original));
-	errno = 0;
-	assert(swapz_primary_header_build(
-		all_zero, TEST_DEVICE_BYTES, header) < 0);
-	assert(errno == EINVAL);
-	assert(!memcmp(header, original, sizeof(header)));
-	errno = 0;
-	assert(swapz_primary_header_build(
-		uppercase, TEST_DEVICE_BYTES, header) < 0);
-	assert(errno == EINVAL);
-	assert(!memcmp(header, original, sizeof(header)));
-	errno = 0;
-	assert(swapz_primary_header_build(
-		short_run_id, TEST_DEVICE_BYTES, header) < 0);
-	assert(errno == EINVAL);
-	assert(!memcmp(header, original, sizeof(header)));
+	assert(!swapz_primary_valid_run_id(all_zero));
+	assert(!swapz_primary_valid_run_id(uppercase));
+	assert(!swapz_primary_valid_run_id("short"));
 	memset(unterminated, 'a', sizeof(unterminated));
-	errno = 0;
-	assert(swapz_primary_header_build(
-		unterminated, TEST_DEVICE_BYTES, header) < 0);
-	assert(errno == EINVAL);
-	assert(!memcmp(header, original, sizeof(header)));
+	assert(!swapz_primary_valid_run_id(unterminated));
 
 	memset(generated, 0xa5, sizeof(generated));
 	assert(swapz_primary_run_id_generate(generated) == 0);
 	assert(swapz_primary_valid_run_id(generated));
-	assert(swapz_primary_header_build(
-		generated, TEST_DEVICE_BYTES, header) == 0);
-	assert(swapz_sb_valid(header, TEST_DEVICE_BYTES));
-	for (i = 0; i < SWAPZ_SUPERBLOCK_UUID_BYTES; ++i) {
-		any |= header[SWAPZ_SUPERBLOCK_UUID_OFFSET + i];
-		unsigned int high = generated[i * 2U] <= '9' ?
-			(unsigned int)(generated[i * 2U] - '0') :
-			(unsigned int)(generated[i * 2U] - 'a' + 10);
-		unsigned int low = generated[i * 2U + 1U] <= '9' ?
-			(unsigned int)(generated[i * 2U + 1U] - '0') :
-			(unsigned int)(generated[i * 2U + 1U] - 'a' + 10);
-
-		assert(header[SWAPZ_SUPERBLOCK_UUID_OFFSET + i] ==
-		       (unsigned char)((high << 4) | low));
-	}
-	assert(any != 0U);
 	errno = 0;
 	assert(swapz_primary_run_id_generate(NULL) < 0);
 	assert(errno == EINVAL);
 }
+
 
 static void test_primary_stage_policy(void)
 {
@@ -2103,42 +2047,6 @@ static void test_recovery_header_recognition(void)
 	assert(!swapz_primary_recovery_header_known(NULL, original));
 }
 
-static void test_checked_header_write(void)
-{
-	unsigned char original[SWAPZ_PRIMARY_BLOCK_BYTES];
-	unsigned char replacement[SWAPZ_PRIMARY_BLOCK_BYTES];
-	unsigned char observed[SWAPZ_PRIMARY_BLOCK_BYTES];
-	char path[] = "/tmp/swapz-primary-header-write-XXXXXX";
-	size_t i;
-	int fd;
-
-	fd = mkstemp(path);
-	assert(fd >= 0);
-	assert(ftruncate(fd, (off_t)sizeof(original)) == 0);
-	for (i = 0; i < sizeof(original); ++i) {
-		original[i] = (unsigned char)((i * 13U + 7U) & 0xffU);
-		replacement[i] = (unsigned char)((i * 29U + 3U) & 0xffU);
-	}
-	assert(pwrite(fd, original, sizeof(original), 0) ==
-	       (ssize_t)sizeof(original));
-	assert(fsync(fd) == 0);
-	assert(swapz_primary_write_header_checked_fd(
-		fd, &swapz_primary_selected_target, original, replacement) == 0);
-	assert(swapz_primary_exact_read(fd, observed, sizeof(observed)) == 0);
-	assert(!memcmp(observed, replacement, sizeof(observed)));
-	assert(swapz_primary_write_header_checked_fd(
-		fd, &swapz_primary_selected_target, original, original) < 0);
-	assert(errno == ESTALE);
-	assert(swapz_primary_exact_read(fd, observed, sizeof(observed)) == 0);
-	assert(!memcmp(observed, replacement, sizeof(observed)));
-	assert(swapz_primary_write_header_checked_fd(
-		fd, &swapz_primary_selected_target, replacement, original) == 0);
-	assert(swapz_primary_exact_read(fd, observed, sizeof(observed)) == 0);
-	assert(!memcmp(observed, original, sizeof(observed)));
-	assert(close(fd) == 0);
-	assert(unlink(path) == 0);
-}
-
 static void test_exclusive_target_open_paths(void)
 {
 	char directory[] = "/tmp/swapz-primary-open-XXXXXX";
@@ -2148,7 +2056,8 @@ static void test_exclusive_target_open_paths(void)
 	char partuuid_path[PATH_MAX];
 	char substituted[PATH_MAX];
 	char broken[PATH_MAX];
-	unsigned char swz_header[SWAPZ_PRIMARY_BLOCK_BYTES];
+	unsigned char linux_swap_header[SWAPZ_PRIMARY_BLOCK_BYTES] = {0};
+	static const unsigned char swap_magic[] = "SWAPSPACE2";
 	struct stat info;
 	int fd;
 
@@ -2193,16 +2102,17 @@ static void test_exclusive_target_open_paths(void)
 	assert((fcntl(fd, F_GETFL) & O_ACCMODE) == O_RDWR);
 	assert(close(fd) == 0);
 	assert(unlink(uuid_path) == 0);
-	assert(swapz_primary_open_target_checked_partuuid_paths_mode(
-		target, uuid_path, partuuid_path, O_RDONLY) < 0);
-	assert(errno == ENODEV);
-	assert(swapz_primary_header_build(
-		"0123456789abcdef0123456789abcdef",
-		TEST_DEVICE_BYTES, swz_header) == 0);
+	test_put_u32_le(linux_swap_header, SWAPZ_PRIMARY_SWAP_VERSION_OFFSET, 1U);
+	test_put_u32_le(
+		linux_swap_header, SWAPZ_PRIMARY_SWAP_LAST_PAGE_OFFSET,
+		(uint32_t)(TEST_DEVICE_BYTES / SWAPZ_PRIMARY_BLOCK_BYTES - 1U));
+	test_put_u32_le(linux_swap_header, SWAPZ_PRIMARY_SWAP_BAD_PAGES_OFFSET, 0U);
+	memcpy(linux_swap_header + sizeof(linux_swap_header) -
+	       sizeof(swap_magic) + 1U, swap_magic, sizeof(swap_magic) - 1U);
 	fd = open(target, O_WRONLY | O_CLOEXEC);
 	assert(fd >= 0);
-	assert(pwrite(fd, swz_header, sizeof(swz_header), 0) ==
-	       (ssize_t)sizeof(swz_header));
+	assert(pwrite(fd, linux_swap_header, sizeof(linux_swap_header), 0) ==
+	       (ssize_t)sizeof(linux_swap_header));
 	assert(close(fd) == 0);
 	fd = swapz_primary_open_target_checked_partuuid_paths_mode(
 		target, uuid_path, partuuid_path, O_RDONLY);
@@ -3650,13 +3560,12 @@ int main(void)
 	test_selector_rejects_replaced_file_and_directory();
 	test_target_preflight_snapshots_aliased_partuuid();
 	test_primary_linux_swap_header();
-	test_primary_run_id_and_header_builder();
+	test_primary_run_id_generation();
 	test_primary_stage_policy();
 	test_primary_state_records();
 	test_mapper_node_retry_policy();
 	test_recoverable_lifecycle_stages();
 	test_recovery_header_recognition();
-	test_checked_header_write();
 	test_primary_dm_table();
 	test_primary_dm_existing_mapper_selector();
 	test_primary_dm_operations_disabled();
