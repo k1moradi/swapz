@@ -8965,6 +8965,17 @@ static int swapz_ctr(struct dm_target *ti, unsigned int argc, char **argv)
 		goto fail;
 	}
 	is_nullb = !strncmp(ctx->backing->bdev->bd_disk->disk_name, "nullb", 5);
+	/*
+	 * Payload-only storage is necessary but not sufficient for real-device
+	 * admission. Keep physical backing fail-closed until this exact source
+	 * has passed the loaded algorithm/RAM qualification.
+	 */
+	if (!is_nullb && !SWAPZ_PHYSICAL_RAM_METADATA_QUALIFIED) {
+		ti->error =
+			"Physical backing blocked pending loaded RAM-metadata qualification";
+		error = -EOPNOTSUPP;
+		goto fail;
+	}
 	if (swapz_test_fail_constructor_stage && !is_nullb) {
 		ti->error =
 			"Constructor fault injection is restricted to null_blk";
