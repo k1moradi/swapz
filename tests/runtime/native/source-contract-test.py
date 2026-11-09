@@ -6624,7 +6624,11 @@ int main(void)
             recovery)
         self.assertIn("assert_owned_config_proof power_off 1", recovery)
         self.assertIn("assert_owned_config_proof config_remove 0", recovery)
-        self.assertIn("pinned_power_inode", recovery)
+        # Configfs attribute inode values can be regenerated on lookup:
+        # validate the pinned descriptor's owner/type, not its inode number.
+        self.assertIn("pinned_power_attribute invalid_type_or_owner", recovery)
+        self.assertNotIn("pinned_power_inode substituted", recovery)
+        self.assertNotIn("owned_power_identity", recovery)
         self.assertIn("original_inode_index_attributes", recovery)
         self.assertIn("retained_state_action=", recovery)
         self.assertLess(
