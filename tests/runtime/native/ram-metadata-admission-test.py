@@ -19,6 +19,7 @@ def main() -> None:
     codec = (ROOT / "src/kernel/codec.h").read_text(encoding="utf-8")
     authority = (ROOT / "src/kernel/authority.h").read_text(encoding="utf-8")
     target = (ROOT / "src/kernel/dm-target.c").read_text(encoding="utf-8")
+    primary = (ROOT / "src/userspace/swapz-primary.c").read_text(encoding="utf-8")
     declarations = re.findall(
         r"(?m)^#define SWAPZ_CODEC_METADATA_ON_MEDIA ([01])U$", codec
     )
@@ -44,6 +45,20 @@ def main() -> None:
             "Physical interlock must precede lower I/O client admission")
     require(physical_gate < target.index("if (is_nullb) {", physical_gate),
             "Synthetic null_blk must remain separate from physical interlock")
+
+    # A physical lifecycle cannot swapoff the original partition and only
+    # discover the codec incompatibility during mapper construction.
+    lifecycle = primary.index("static int swapz_primary_run_mutating_action(")
+    primary_gate = primary.index("if (SWAPZ_CODEC_METADATA_ON_MEDIA &&", lifecycle)
+    mutation_lock = primary.index("mutation_lock_fd = swapz_primary_mutation_lock();", lifecycle)
+    blocked_scope = primary[lifecycle:mutation_lock]
+    require(lifecycle < primary_gate < mutation_lock,
+            "Primary PREPARE/START must reject in-band metadata before mutation")
+    require("SWAPZ_PRIMARY_MUTATING_PREPARE" in blocked_scope and
+            "SWAPZ_PRIMARY_MUTATING_START" in blocked_scope and
+            "errno = EOPNOTSUPP;" in blocked_scope and
+            "return -1;" in blocked_scope,
+            "Primary physical lifecycle must fail closed before swapoff")
 
     # DM property consumers must see the allocated lower data range, not
     # the reserved SWAPSPACE2 header or discarded segment-alignment tail.
