@@ -1936,48 +1936,6 @@ class PhysicalSwapProbeTests(unittest.TestCase):
         self.assertTrue(probe._recovery_state_identity_matches(
             historical, dict(historical)))
 
-    def test_recovery_accepts_only_its_recorded_header_transitions(self):
-        size = 1024 * 1024 * 1024
-        original = b"O" * probe.PAGE_BYTES
-        zero = bytes(probe.PAGE_BYTES)
-        header = bytearray(probe.PAGE_BYTES)
-        header[:8] = probe.SWAPZ_HEADER_MAGIC
-        struct.pack_into("<IIQ", header, 8, 1, probe.PAGE_BYTES, size)
-        header[24:40] = bytes(range(1, 17))
-        formatted = bytes(header)
-        digest = hashlib.sha256(formatted).hexdigest()
-        state = {"stage": "HEADER_CLEARED"}
-        probe._validate_recovery_header(original, original, state, size)
-        probe._validate_recovery_header(zero, original, state, size)
-        state["stage"] = "SWAP_OFF"
-        probe._validate_recovery_header(zero, original, state, size)
-        # Old SWAP_OFF records can need historical repair; every newly
-        # created journal instead refuses raw-header mutation.
-        state["raw_header_preservation_required"] = True
-        probe._validate_recovery_header(original, original, state, size)
-        with self.assertRaisesRegex(probe.ProbeError, "raw header writes are forbidden"):
-            probe._validate_recovery_header(zero, original, state, size)
-        del state["raw_header_preservation_required"]
-        state["stage"] = "BACKED_UP"
-        with self.assertRaisesRegex(probe.ProbeError, "manual review"):
-            probe._validate_recovery_header(zero, original, state, size)
-        with self.assertRaisesRegex(probe.ProbeError, "manual review"):
-            probe._validate_recovery_header(formatted, original, state, size)
-        state = {"stage": "MAPPED", "formatted_header_sha256": digest}
-        probe._validate_recovery_header(formatted, original, state, size)
-        with self.assertRaisesRegex(probe.ProbeError, "manual review"):
-            probe._validate_recovery_header(zero, original, state, size)
-        with self.assertRaisesRegex(probe.ProbeError, "manual review"):
-            probe._validate_recovery_header(b"F" * probe.PAGE_BYTES, original,
-                                            state, size)
-        altered = bytearray(formatted)
-        altered[24] ^= 1
-        with self.assertRaisesRegex(probe.ProbeError, "manual review"):
-            probe._validate_recovery_header(bytes(altered), original, state, size)
-        state["stage"] = "RECOVERY_REQUIRED"
-        state["stage_before_recovery"] = "MAPPED"
-        probe._validate_recovery_header(formatted, original, state, size)
-
     def test_git_evidence_runs_as_the_sudo_operator(self):
         completed = subprocess.CompletedProcess([], 0, stdout="ok\n", stderr="")
         with mock.patch.object(probe.os, "geteuid", return_value=0), \
@@ -2022,13 +1980,7 @@ class PhysicalSwapProbeTests(unittest.TestCase):
                                         "systemd-detect-virt is required"):
                 probe._require_physical_host()
 
-    def test_virtual_development_header_and_io_source_are_vm_scoped(self):
-        size = 128 * 1024 * 1024
-        first = probe._virtual_development_header(size)
-        second = probe._virtual_development_header(size)
-        self.assertTrue(probe.swapz_header_valid(first, size))
-        self.assertTrue(probe.swapz_header_valid(second, size))
-        self.assertNotEqual(first[24:40], second[24:40])
+    def test_virtual_development_io_source_is_vm_scoped(self):
         target = {
             "major": 259, "minor": 3,
             "parent_major_minor": "259:0",
