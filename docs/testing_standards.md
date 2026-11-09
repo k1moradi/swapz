@@ -6980,7 +6980,11 @@ headroom or any uncertain restoration retains recovery ownership and cannot
 PASS. Rootless recovery fixtures that synthesize a successful final cleanup
 observation must include every mandatory cleanup proof, including
 `unrelated_swapfiles_restored=true`; omitting a proof must remain fail-closed
-rather than being inferred from fixture setup. Header-only development smoke
+rather than being inferred from fixture setup. Synthetic durable state/result
+pairs must also carry the immutable `unrelated_swapfiles` binding explicitly
+(defaulting to `[]` when no unrelated swapfile exists), matching production
+`_prepare_state()`; absence is not equivalent to an empty saved inventory.
+Header-only development smoke
 remains inactive-only and never calls `swapoff` or `swapon`.
 The formatter invocation must bind the opened partition major:minor, exact
 byte size, PARTUUID, physical-parent major:minor, parent model and USB

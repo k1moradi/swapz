@@ -2328,7 +2328,8 @@ class PhysicalSwapProbeTests(unittest.TestCase):
                     ("swap_path", None),
                     ("swap_size_kib", None),
                     ("swap_priority", None),
-                    ("swap_used_kib", None)):
+                    ("swap_used_kib", None),
+                    ("unrelated_swapfiles", [])):
                 self.assertEqual(manifest[key], expected, key)
             self.assertEqual((manifest["major"], manifest["minor"]),
                              (target["major"], target["minor"]))
@@ -2417,6 +2418,7 @@ class PhysicalSwapProbeTests(unittest.TestCase):
             "swap_size_kib": target["swap_size_kib"],
             "swap_priority": target["swap_priority"],
             "swap_used_kib": target["swap_used_kib"],
+            "unrelated_swapfiles": target.get("unrelated_swapfiles", []),
             "development_only": development_only,
             "development_scope": (
                 probe.DEVELOPMENT_SCOPE if development_only else None),
