@@ -3072,7 +3072,7 @@ class PhysicalSwapProbeTests(unittest.TestCase):
             self.assertEqual(manifest["stage"], "PREPARED")
             self.assertEqual(
                 manifest["ownership_phase"], probe.RUNTIME_OWNERSHIP_PHASE)
-            self.assertFalse((state_dir / probe.BACKUP_NAME).exists())
+            self.assertFalse((state_dir / "block0.bin").exists())
 
     def test_original_header_read_refuses_unverified_regular_descriptor(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -3495,7 +3495,7 @@ class PhysicalSwapProbeTests(unittest.TestCase):
         def prepare_fake_state(*_args):
             state_dir = Path(directory)
             actual_save_state(state_dir, state)
-            self.assertFalse((state_dir / probe.BACKUP_NAME).exists())
+            self.assertFalse((state_dir / "block0.bin").exists())
             return state, state_dir
 
         actual_save_results = probe._save_results
