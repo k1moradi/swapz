@@ -20,7 +20,7 @@ endif
 CPPFLAGS += -I$(KERNEL)
 
 .PHONY: test-all test-codec test-mapping test-gc test-lower-io test-concurrency test-predictor test-anon-page-analyzer test-userspace test-replay-helper clean
-PROGRAMS := io-replay-native codec-roundtrip ram-extent extent-geometry anon-page-analyzer zero-write-elision mapping-authority authority-throughput transaction-publication write-verification dead-segment-reclamation raw-discard online-packing randomized-authority gc-forbidden-victim gc-cost-accounting gc-recovery-policy gc-scan-scaling gc-rotation gc-engine-rotation gc-high-occupancy flush-ordering lower-write-aggregation window-policy preparation-slots preparation-codec-result preparation-publication-lifetime lane-gap superblock swapzctl-status swapzctl-format swapzctl-removable-media swapz-primary-policy swapz-primary-mount-namespace
+PROGRAMS := io-replay-native codec-roundtrip ram-extent extent-geometry anon-page-analyzer zero-write-elision mapping-authority authority-throughput transaction-publication write-verification dead-segment-reclamation raw-discard online-packing randomized-authority gc-forbidden-victim gc-cost-accounting gc-recovery-policy gc-scan-scaling gc-rotation gc-engine-rotation gc-high-occupancy flush-ordering lower-write-aggregation window-policy preparation-slots preparation-codec-result preparation-publication-lifetime lane-gap superblock swapzctl-status swapz-primary-policy swapz-primary-mount-namespace
 
 io-replay-native_SRC := $(BENCHMARK)/io-replay-native.c
 io-replay-native_LDLIBS := -pthread
@@ -77,10 +77,6 @@ superblock_SRC := $(NATIVE)/codec/superblock.c
 superblock_HDR := $(KERNEL)/superblock.h
 swapzctl-status_SRC := $(NATIVE)/userspace/swapzctl-status.c $(USERSPACE)/swapz-primary.c
 swapzctl-status_HDR := $(USERSPACE)/swapzctl.c $(USERSPACE)/swapz-primary.h $(KERNEL)/superblock.h
-swapzctl-format_SRC := $(NATIVE)/userspace/swapzctl-format.c
-swapzctl-format_HDR := $(USERSPACE)/swapzctl.c $(USERSPACE)/swapz-primary.h $(KERNEL)/superblock.h
-swapzctl-removable-media_SRC := $(NATIVE)/userspace/swapzctl-removable-media.c
-swapzctl-removable-media_HDR := $(USERSPACE)/swapzctl.c $(USERSPACE)/swapz-primary.h $(KERNEL)/superblock.h
 swapz-primary-policy_SRC := $(NATIVE)/userspace/swapz-primary-policy.c
 swapz-primary-policy_HDR := $(USERSPACE)/swapz-primary.c $(USERSPACE)/swapz-primary.h
 swapz-primary-mount-namespace_SRC := $(NATIVE)/userspace/swapz-primary-mount-namespace.c
@@ -201,8 +197,8 @@ test-lower-io: $(OUT)/flush-ordering $(OUT)/lower-write-aggregation $(OUT)/windo
 test-concurrency: $(OUT)/preparation-slots $(OUT)/preparation-codec-result $(OUT)/preparation-publication-lifetime
 	@set -e; "$(OUT)/preparation-slots"; "$(OUT)/preparation-codec-result"; "$(OUT)/preparation-publication-lifetime"
 
-test-userspace: $(OUT)/swapzctl-status $(OUT)/swapzctl-format $(OUT)/swapzctl-removable-media $(OUT)/swapz-primary-policy $(OUT)/swapz-primary-mount-namespace
-	@set -e; "$(OUT)/swapzctl-status"; "$(OUT)/swapzctl-format"; "$(OUT)/swapzctl-removable-media"; "$(OUT)/swapz-primary-policy"; "$(OUT)/swapz-primary-mount-namespace"
+test-userspace: $(OUT)/swapzctl-status $(OUT)/swapz-primary-policy $(OUT)/swapz-primary-mount-namespace
+	@set -e; "$(OUT)/swapzctl-status"; "$(OUT)/swapz-primary-policy"; "$(OUT)/swapz-primary-mount-namespace"
 	@python3 -B "$(NATIVE)/userspace/swapz-primary-late-race-test.py"
 
 test-replay-helper: $(OUT)/io-replay-native
