@@ -201,4 +201,47 @@ int swapz_lookup_validated(const void *bytes, swapz_u32 bytes_total,
 			 const swapz_u8 **payload);
 swapz_u32 swapz_crc32c_bytes(const void *bytes, swapz_u32 length);
 
+/*
+ * Data-only compressed extent builder. The `bytes` buffer is the exact
+ * lower-write image: no SWZ header, record table or other swapz metadata is
+ * serialized to it. The caller owns both buffers exclusively until seal and
+ * completed lower I/O; records must remain in bounded volatile RAM.
+ *
+ * A sealed builder is not persistent authority. The ordered engine must
+ * publish verified descriptors into its authoritative RAM mappings only
+ * after successful lower completion, and reject them on target teardown.
+ * The read helper below is scratch-local and cannot reconstruct lost maps.
+ */
+struct swapz_ram_extent {
+	swapz_u8 *bytes;                /* [bytes_total] lower-write payload area */
+	struct swapz_decoded *records;  /* [record_capacity] volatile descriptors */
+	swapz_u32 bytes_total;
+	swapz_u32 sequence;             /* volatile, never written to bytes */
+	swapz_u16 payload_start;
+	swapz_u8 record_capacity;
+	swapz_u8 extent_blocks;
+	swapz_u8 count;
+	swapz_u8 sealed;
+};
+
+int swapz_ram_extent_begin(struct swapz_ram_extent *builder, void *bytes,
+			   swapz_u32 bytes_total, swapz_u32 sequence,
+			   struct swapz_decoded *records, swapz_u8 record_capacity);
+int swapz_ram_extent_append(struct swapz_ram_extent *builder,
+			    swapz_u32 logical_page, swapz_u32 generation,
+			    const void *payload, swapz_u16 payload_length,
+			    swapz_u8 encoding);
+int swapz_ram_extent_append_prehashed(struct swapz_ram_extent *builder,
+				      swapz_u32 logical_page,
+				      swapz_u32 generation, const void *payload,
+				      swapz_u16 payload_length,
+				      swapz_u32 payload_crc32c, swapz_u8 encoding);
+int swapz_ram_extent_seal(struct swapz_ram_extent *builder);
+/* Payload pointer remains valid only while the sealed staging buffer lives.
+ * Verify independently authoritative logical/generation identity and CRC;
+ * never trust a mutable scratch descriptor across concurrent publication. */
+int swapz_ram_extent_read(const struct swapz_ram_extent *builder,
+			  swapz_u8 record_index, swapz_u32 logical_page,
+			  swapz_u32 generation, const swapz_u8 **payload);
+
 #endif

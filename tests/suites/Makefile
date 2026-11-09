@@ -20,12 +20,14 @@ endif
 CPPFLAGS += -I$(KERNEL)
 
 .PHONY: test-all test-codec test-mapping test-gc test-lower-io test-concurrency test-predictor test-anon-page-analyzer test-userspace test-replay-helper clean
-PROGRAMS := io-replay-native codec-roundtrip extent-geometry anon-page-analyzer zero-write-elision mapping-authority authority-throughput transaction-publication write-verification dead-segment-reclamation raw-discard online-packing randomized-authority gc-forbidden-victim gc-cost-accounting gc-recovery-policy gc-scan-scaling gc-rotation gc-engine-rotation gc-high-occupancy flush-ordering lower-write-aggregation window-policy preparation-slots preparation-codec-result preparation-publication-lifetime lane-gap superblock swapzctl-status swapzctl-format swapzctl-removable-media swapz-primary-policy swapz-primary-mount-namespace
+PROGRAMS := io-replay-native codec-roundtrip ram-extent extent-geometry anon-page-analyzer zero-write-elision mapping-authority authority-throughput transaction-publication write-verification dead-segment-reclamation raw-discard online-packing randomized-authority gc-forbidden-victim gc-cost-accounting gc-recovery-policy gc-scan-scaling gc-rotation gc-engine-rotation gc-high-occupancy flush-ordering lower-write-aggregation window-policy preparation-slots preparation-codec-result preparation-publication-lifetime lane-gap superblock swapzctl-status swapzctl-format swapzctl-removable-media swapz-primary-policy swapz-primary-mount-namespace
 
 io-replay-native_SRC := $(BENCHMARK)/io-replay-native.c
 io-replay-native_LDLIBS := -pthread
 codec-roundtrip_SRC := $(NATIVE)/codec/roundtrip.c $(CODEC)
 codec-roundtrip_HDR := $(KERNEL)/codec.h $(KERNEL)/authority.h
+ram-extent_SRC := $(NATIVE)/codec/ram-extent.c $(CODEC)
+ram-extent_HDR := $(KERNEL)/codec.h
 extent-geometry_SRC := $(NATIVE)/codec/extent-geometry.c
 extent-geometry_HDR := $(KERNEL)/codec.h $(KERNEL)/authority.h
 PREDICTOR_CORE_OBJ := $(OUT)/predictor-core.o
@@ -155,8 +157,8 @@ $(OUT)/predictor-qualification: $(NATIVE)/codec/predictor-qualification.c \
 		$(PRODUCTION_OBJECTS) $(PREDICTOR_CORE_OBJ) $(PREDICTOR_ARCH_OBJS) \
 		-o "$@" -llz4
 
-test-codec: $(OUT)/codec-roundtrip $(OUT)/extent-geometry $(OUT)/superblock
-	@set -e; "$(OUT)/codec-roundtrip"; "$(OUT)/extent-geometry"; "$(OUT)/superblock"
+test-codec: $(OUT)/codec-roundtrip $(OUT)/ram-extent $(OUT)/extent-geometry $(OUT)/superblock
+	@set -e; "$(OUT)/codec-roundtrip"; "$(OUT)/ram-extent"; "$(OUT)/extent-geometry"; "$(OUT)/superblock"
 	@python3 -B "$(NATIVE)/ram-metadata-admission-test.py"
 
 test-anon-page-analyzer: $(OUT)/anon-page-analyzer

@@ -50,15 +50,16 @@ static inline int swapz_valid_extent_bytes(swapz_u32 bytes_total)
 /* Reject an append source anywhere inside the builder-owned extent. Compare
  * address differences instead of forming potentially wrapping end addresses;
  * unrelated C object pointers must not be ordered or subtracted directly. */
-static inline int swapz_payload_overlaps_extent(const struct swapz_builder *builder,
-						const void *payload,
-						swapz_u16 length)
+static inline int swapz_payload_overlaps_storage(const void *extent,
+						 swapz_u32 extent_bytes,
+						 const void *payload,
+						 swapz_u16 length)
 {
-	unsigned long extent_address = (unsigned long)builder->bytes;
-	unsigned long payload_address = (unsigned long)payload;
+	const unsigned long extent_address = (unsigned long)extent;
+	const unsigned long payload_address = (unsigned long)payload;
 
 	if (payload_address >= extent_address)
-		return payload_address - extent_address < builder->bytes_total;
+		return payload_address - extent_address < extent_bytes;
 	return extent_address - payload_address < length;
 }
 
@@ -256,7 +257,8 @@ static int swapz_append_validate(struct swapz_builder *builder,
 	if (!builder || !builder->bytes || builder->sealed ||
 	    !payload || !length || length > SWAPZ_MAX_COMPRESSED ||
 	    !generation || !swapz_encoding_valid(encoding) ||
-	    swapz_payload_overlaps_extent(builder, payload, length))
+	    swapz_payload_overlaps_storage(builder->bytes, builder->bytes_total,
+					   payload, length))
 		return -EINVAL;
 	if (builder->count >= SWAPZ_MAX_RECORDS)
 		return -ENOSPC;
@@ -730,4 +732,157 @@ int swapz_lookup(const void *bytes, swapz_u32 bytes_total, swapz_u8 index,
 		return error;
 	}
 	return swapz_lookup_validated(bytes, bytes_total, index, out, payload);
+}
+
+/*
+ * The migration builder is deliberately independent of the legacy in-band
+ * codec. All descriptor bytes live in caller-owned RAM; only packed payload
+ * bytes and zero padding can enter a lower write. This primitive must NOT
+ * disable SWAPZ_CODEC_METADATA_ON_MEDIA until every live engine path migrates.
+ */
+int swapz_ram_extent_begin(struct swapz_ram_extent *builder, void *bytes,
+			   swapz_u32 bytes_total, swapz_u32 sequence,
+			   struct swapz_decoded *records, swapz_u8 record_capacity)
+{
+	if (!builder || !bytes || !records || !sequence ||
+	    !swapz_valid_extent_bytes(bytes_total) ||
+	    !record_capacity || record_capacity > SWAPZ_MAX_RECORDS)
+		return -EINVAL;
+
+	*builder = (struct swapz_ram_extent) {
+		.bytes = bytes,
+		.records = records,
+		.bytes_total = bytes_total,
+		.sequence = sequence,
+		.payload_start = (swapz_u16)bytes_total,
+		.record_capacity = record_capacity,
+		.extent_blocks = (swapz_u8)(bytes_total / SWAPZ_BLOCK_BYTES),
+	};
+	/* Do not touch the lower image until all individual appends succeed.
+	 * seal() clears every byte not covered by a packed payload. */
+	return 0;
+}
+
+static int swapz_ram_extent_append_checked(struct swapz_ram_extent *builder,
+					    swapz_u32 logical_page,
+					    swapz_u32 generation,
+					    const void *payload,
+					    swapz_u16 payload_length,
+					    swapz_u32 precomputed_crc32c,
+					    swapz_u8 encoding,
+					    int crc_precomputed)
+{
+	swapz_u16 payload_offset;
+	swapz_u8 record_index;
+	swapz_u32 payload_crc32c;
+
+	if (!builder || !builder->bytes || !builder->records ||
+	    !builder->sequence || builder->sealed ||
+	    !builder->record_capacity ||
+	    builder->record_capacity > SWAPZ_MAX_RECORDS ||
+	    !swapz_valid_extent_bytes(builder->bytes_total) ||
+	    builder->extent_blocks != builder->bytes_total / SWAPZ_BLOCK_BYTES ||
+	    !payload || !payload_length ||
+	    payload_length > SWAPZ_MAX_COMPRESSED || !generation ||
+	    !swapz_encoding_valid(encoding) ||
+	    swapz_payload_overlaps_storage(builder->bytes, builder->bytes_total,
+					   payload, payload_length))
+		return -EINVAL;
+	if (builder->count >= builder->record_capacity)
+		return -ENOSPC;
+	if (builder->payload_start > builder->bytes_total ||
+	    builder->payload_start < payload_length)
+		return -ENOSPC;
+	/* Uniqueness and bounds precede all source reads and image writes. */
+	for (record_index = 0; record_index < builder->count; ++record_index)
+		if (builder->records[record_index].logical_page == logical_page)
+			return -EEXIST;
+	payload_offset = builder->payload_start - payload_length;
+	payload_crc32c = crc_precomputed ? precomputed_crc32c :
+		swapz_crc32c_bytes(payload, payload_length);
+	memcpy(builder->bytes + payload_offset, payload, payload_length);
+	builder->records[builder->count] = (struct swapz_decoded) {
+		.logical_page = logical_page,
+		.generation = generation,
+		.payload_crc32c = payload_crc32c,
+		.payload_offset = payload_offset,
+		.payload_length = payload_length,
+		.encoding = encoding,
+	};
+	builder->count++;
+	builder->payload_start = payload_offset;
+	return 0;
+}
+
+int swapz_ram_extent_append(struct swapz_ram_extent *builder,
+			    swapz_u32 logical_page, swapz_u32 generation,
+			    const void *payload, swapz_u16 payload_length,
+			    swapz_u8 encoding)
+{
+	return swapz_ram_extent_append_checked(builder, logical_page,
+					       generation, payload,
+					       payload_length, 0, encoding, 0);
+}
+
+int swapz_ram_extent_append_prehashed(struct swapz_ram_extent *builder,
+				      swapz_u32 logical_page,
+				      swapz_u32 generation, const void *payload,
+				      swapz_u16 payload_length,
+				      swapz_u32 payload_crc32c, swapz_u8 encoding)
+{
+	return swapz_ram_extent_append_checked(builder, logical_page,
+					       generation, payload,
+					       payload_length, payload_crc32c,
+					       encoding, 1);
+}
+
+int swapz_ram_extent_seal(struct swapz_ram_extent *builder)
+{
+	if (!builder || !builder->bytes || !builder->records ||
+	    builder->sealed || !builder->count ||
+	    builder->count > builder->record_capacity ||
+	    builder->payload_start > builder->bytes_total)
+		return -EINVAL;
+
+	/* No header or descriptor publication to the physical data area. */
+	memset(builder->bytes, 0, builder->payload_start);
+	builder->sealed = 1;
+	return 0;
+}
+
+int swapz_ram_extent_read(const struct swapz_ram_extent *builder,
+			  swapz_u8 record_index, swapz_u32 logical_page,
+			  swapz_u32 generation, const swapz_u8 **payload)
+{
+	const struct swapz_decoded *record;
+	const swapz_u8 *stored;
+
+	if (!payload)
+		return -EINVAL;
+	*payload = NULL;
+	if (!builder || !builder->bytes || !builder->records ||
+	    !builder->sealed || !builder->sequence ||
+	    !swapz_valid_extent_bytes(builder->bytes_total) ||
+	    !builder->record_capacity ||
+	    builder->record_capacity > SWAPZ_MAX_RECORDS ||
+	    !builder->count || builder->count > builder->record_capacity ||
+	    record_index >= builder->count)
+		return -EINVAL;
+	record = &builder->records[record_index];
+	if (record->logical_page != logical_page ||
+	    record->generation != generation || !generation ||
+	    !record->payload_length ||
+	    record->payload_length > SWAPZ_MAX_COMPRESSED ||
+	    !swapz_encoding_valid(record->encoding) ||
+	    record->payload_offset < builder->payload_start ||
+	    record->payload_offset >= builder->bytes_total ||
+	    record->payload_length >
+		builder->bytes_total - record->payload_offset)
+		return -EUCLEAN;
+	stored = builder->bytes + record->payload_offset;
+	if (swapz_crc32c_bytes(stored, record->payload_length) !=
+	    record->payload_crc32c)
+		return -EBADMSG;
+	*payload = stored;
+	return 0;
 }
