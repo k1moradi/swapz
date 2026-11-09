@@ -46,6 +46,11 @@ preflight must reject compressed RAM map lengths over
 the selected extent (e.g. a 4096-byte record at offset zero in a 4096-byte
 extent); do not submit speculative lower I/O for invalid maps.
 
+The coalesced READ-chain preflight must validate each complete extent against
+physical capacity, segment boundaries and legal 4/8/16KiB classes before
+submitting any lower callback. Negative native tests must observe zero
+lower requests for invalid inputs.
+
 Under an explicit one-block cold-read budget, native packed-read regressions
 must verify one lower payload-block read per logical request, no inherited
 serialized-metadata cache hits, and byte-exact CRC-validated readback after

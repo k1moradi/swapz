@@ -1142,10 +1142,18 @@ int swapz_engine_coalesce_read_chain(
 		swapz_u8 earlier;
 
 		if (!engine || !engine->authority || !engine->read_scratch ||
-		    !extent_blocks[index] || extent_blocks[index] > SWAPZ_MAX_BLOCKS ||
+		    (extent_blocks[index] != 1U &&
+		     extent_blocks[index] != 2U &&
+		     extent_blocks[index] != 4U) ||
 		    !blocks[index] || first_blocks[index] >= extent_blocks[index] ||
 		    blocks[index] > extent_blocks[index] - first_blocks[index] ||
-		    start_blocks[index] > ~(swapz_u32)0 - first_blocks[index])
+		    /* Validate the entire extent, not just its requested blocks.
+		     * Invalid geometry must never reach a lower I/O callback. */
+		    start_blocks[index] >= engine->authority->physical_blocks ||
+		    extent_blocks[index] >
+			engine->authority->physical_blocks - start_blocks[index] ||
+		    start_blocks[index] % SWAPZ_SEGMENT_BLOCKS +
+			extent_blocks[index] > SWAPZ_SEGMENT_BLOCKS)
 			return -EINVAL;
 		if (index && engine->authority != engines[0]->authority)
 			return -EINVAL;

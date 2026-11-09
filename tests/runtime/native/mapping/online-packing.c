@@ -1025,7 +1025,30 @@ static int test_adjacent_distinct_extent_coalescing(void)
 			SWAPZ_SEGMENT_BLOCKS, 1, 0, 1,
 			&combined_start, &combined_blocks) == -EOPNOTSUPP);
 
+	/* An invalid full extent cannot reach lower I/O through the
+	 * coalescer, even if its requested subrange looks harmless. */
 	disk.read_calls = 0;
+	CHECK(swapz_engine_coalesce_read_pair(
+			&first, &second,
+			maps[0].start_block, 1, 0, 1,
+			PHYSICAL_BLOCKS, 1, 0, 1,
+			scratch_coalesced, 2U * SWAPZ_MAX_BLOCKS) == -EINVAL);
+	CHECK(swapz_engine_coalesce_read_pair(
+			&first, &second,
+			PHYSICAL_BLOCKS - 1U, 2, 0, 1,
+			maps[1].start_block, 1, 0, 1,
+			scratch_coalesced, 2U * SWAPZ_MAX_BLOCKS) == -EINVAL);
+	CHECK(swapz_engine_coalesce_read_pair(
+			&first, &second,
+			maps[0].start_block, 3, 0, 1,
+			maps[1].start_block, 1, 0, 1,
+			scratch_coalesced, 2U * SWAPZ_MAX_BLOCKS) == -EINVAL);
+	CHECK(swapz_engine_coalesce_read_pair(
+			&first, &second,
+			SWAPZ_SEGMENT_BLOCKS - 1U, 2, 0, 1,
+			SWAPZ_SEGMENT_BLOCKS + 1U, 1, 0, 1,
+			scratch_coalesced, 2U * SWAPZ_MAX_BLOCKS) == -EINVAL);
+	CHECK(disk.read_calls == 0);
 	disk.read_blocks = 0;
 	CHECK(swapz_engine_coalesce_read_pair(
 			&first, &second,
