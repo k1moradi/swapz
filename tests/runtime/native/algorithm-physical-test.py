@@ -240,6 +240,31 @@ class AlgorithmPhysicalTest(unittest.TestCase):
             "--development-only", "--algorithm-real-swap",
         ])
 
+    def test_vm_confirmation_passes_explicit_flag_to_privileged_helper(self):
+        candidate = {
+            "path": "/dev/sdc1", "parent": "/dev/sdc",
+            "partuuid": "deadbeef-01", "size_bytes": 128 * 1024 * 1024,
+            "selector": "/dev/disk/by-uuid/example",
+            "virtual_device_only": True,
+        }
+        with mock.patch.object(subject.sys.stdin, "isatty",
+                               return_value=True), \
+             mock.patch.object(subject.sys.stdout, "isatty",
+                               return_value=True), \
+             mock.patch.object(subject, "_require_read_only_preflight",
+                               return_value=candidate), \
+             mock.patch("builtins.input", return_value="yes"), \
+             mock.patch.object(subject.shutil, "which",
+                               return_value="/usr/bin/sudo"), \
+             mock.patch.object(subject.subprocess, "run",
+                               return_value=SimpleNamespace(returncode=0)) as run:
+            self.assertEqual(subject.main(), 0)
+        command = run.call_args.args[0]
+        self.assertEqual(command[-3:], [
+            "--development-only", "--algorithm-real-swap",
+            "--virtual-device-only",
+        ])
+
     def test_shared_disk_is_discoverable_but_not_authorized(self):
         shared = {**self.device, "children": [
             self.device["children"][0],
@@ -316,6 +341,7 @@ class AlgorithmPhysicalTest(unittest.TestCase):
              mock.patch.object(subject.shutil, "which",
                                return_value="/usr/bin/systemd-detect-virt"), \
              mock.patch.object(subject.subprocess, "run", side_effect=run), \
+             mock.patch.object(subject, "_recover_pending_algorithm_trial"), \
              mock.patch.object(subject.Path, "exists", return_value=False), \
              mock.patch.object(subject.Path, "read_text", return_value=(
                  "Filename Type Size Used Priority\n"

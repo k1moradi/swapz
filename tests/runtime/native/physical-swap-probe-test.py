@@ -1926,6 +1926,25 @@ class PhysicalSwapProbeTests(unittest.TestCase):
                                         "systemd-detect-virt is required"):
                 probe._require_physical_host()
 
+    def test_vm_host_requires_explicit_virtual_lane(self):
+        def status(args, **_kwargs):
+            if args[-1] == "--vm":
+                return subprocess.CompletedProcess(args, 0, stdout="vmware\n")
+            return subprocess.CompletedProcess(args, 1, stdout="none\n")
+
+        with mock.patch.object(probe.shutil, "which",
+                               return_value="/usr/bin/systemd-detect-virt"), \
+             mock.patch.object(probe, "_run", side_effect=status):
+            self.assertTrue(probe._require_physical_host(allow_virtual=True))
+            with self.assertRaisesRegex(probe.ProbeError, "not allowed in a vm"):
+                probe._require_physical_host()
+        with mock.patch.object(probe.shutil, "which",
+                               return_value="/usr/bin/systemd-detect-virt"), \
+             mock.patch.object(probe, "_run", return_value=(
+                 subprocess.CompletedProcess([], 1, stdout="none\n"))):
+            with self.assertRaisesRegex(probe.ProbeError, "requires a verified VM"):
+                probe._require_physical_host(allow_virtual=True)
+
     def test_verbal_approval_is_bound_to_exact_reviewer_wording(self):
         self.assertEqual(
             probe.VERBAL_APPROVAL_TEXT,

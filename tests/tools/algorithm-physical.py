@@ -214,7 +214,9 @@ def _recover_pending_algorithm_trial() -> None:
         str(ROOT / "tests/tools/physical-swap-probe.py"),
         "recover-pending",
     ]
-    result = subprocess.run(command, cwd=ROOT, check=False, timeout=180)
+    # The root helper owns recovery and its bounded child operations. Never
+    # terminate it from this unprivileged process during header restoration.
+    result = subprocess.run(command, cwd=ROOT, check=False)
     if result.returncode == 3:
         raise PendingRecoveryError(
             "owned swap recovery remains unresolved; inspect its saved journal")
