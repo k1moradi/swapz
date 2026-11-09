@@ -196,9 +196,12 @@ never shares resources between pairs, never changes the official benchmark
 workload, and timing-read or display failures do not alter verdicts.
 The primary lifecycle rootless audit emits per-unittest-method monotonic
 elapsed milliseconds (including per-case setup/teardown) from its existing
-in-process runner. A bounded atomic write to the inherited stdout file
-descriptor avoids losing the source-defined marker when a test redirects
-Python's sys.stdout. The reporter stores only contiguous indexed cases whose
+in-process runner. Write and flush each bounded source-defined marker on
+unittest's original progress stream after the case verdict, retaining the
+existing private stderr relay even when a case redirects Python's sys.stdout.
+A separate direct-stdout write can race the asynchronous stderr relay and
+splice a timing marker into a progress line, so it is not admissible. The
+reporter stores only contiguous indexed cases whose
 class and method are present in that suite's source AST under the optional
 rootless-stage `primary_lifecycle_case_elapsed_ms` field. The corresponding
 `primary_lifecycle_case_timing_coverage` records expected/accepted/observed

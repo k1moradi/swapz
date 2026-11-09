@@ -743,19 +743,43 @@ class NativeTimingContract(unittest.TestCase):
             def test_fast(self):
                 pass
 
-        test_suite = unittest.TestSuite([FastCase("test_fast")])
-        with mock.patch.object(audit.os, "write") as writer, \
+            def test_redirected(self):
+                with contextlib.redirect_stdout(io.StringIO()):
+                    pass
+
+        test_suite = unittest.TestSuite([
+            FastCase("test_fast"), FastCase("test_redirected")])
+        progress_stream = io.StringIO()
+        with mock.patch.object(audit.os, "write",
+                               side_effect=AssertionError("unexpected fd write")), \
                 contextlib.redirect_stdout(io.StringIO()):
             completed = audit.PrimaryLifecycleTimingRunner(
-                stream=io.StringIO(), verbosity=0).run(test_suite)
+                stream=progress_stream, verbosity=2).run(test_suite)
         self.assertTrue(completed.wasSuccessful())
-        writer.assert_called_once()
-        descriptor, marker = writer.call_args.args
-        self.assertEqual(descriptor, 1)
-        self.assertRegex(marker.decode("ascii"),
-                         r"^PRIMARY_LIFECYCLE_CASE_TIMING index=0 "
-                         r"elapsed_ms=[0-9]+ class=FastCase "
-                         r"method=test_fast\n$")
+        progress_lines = progress_stream.getvalue().splitlines()
+        markers = [line for line in progress_lines
+                   if line.startswith("PRIMARY_LIFECYCLE_CASE_TIMING ")]
+        self.assertEqual(len(markers), 2)
+        for index, marker in enumerate(markers):
+            self.assertRegex(
+                marker,
+                rf"^PRIMARY_LIFECYCLE_CASE_TIMING index={index} "
+                r"elapsed_ms=[0-9]+ class=FastCase "
+                rf"method=test_{'fast' if index == 0 else 'redirected'}$")
+            marker_position = progress_lines.index(marker)
+            self.assertTrue(
+                progress_lines[marker_position - 1].endswith(" ... ok"))
+
+        source_cases = frozenset({
+            ("FastCase", "test_fast"), ("FastCase", "test_redirected")})
+        with mock.patch.object(runner, "primary_lifecycle_source_case_methods",
+                               return_value=source_cases):
+            timings = runner.parse_primary_lifecycle_case_timings(
+                progress_stream.getvalue())
+            self.assertEqual(len(timings), 2)
+            self.assertEqual(
+                runner.primary_lifecycle_case_timing_coverage(
+                    progress_stream.getvalue(), timings)["status"], "COMPLETE")
 
     def test_owned_pair_phase_coverage_handles_redirection_and_rejection(self):
         records = "".join(
