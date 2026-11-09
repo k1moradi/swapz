@@ -1883,10 +1883,11 @@ static int swapz_dm_io(struct dm_io_request *req,
 #define SWAPZ_DM_IO_MERGE_UNSUPPORTED(error_name) do { } while (0)
 #endif
 
-static int swapz_validate_physical_superblock(struct swapz_dm *ctx,
-					      u64 device_bytes,
-					      bool *magic_present)
+static int swapz_validate_linux_swap_header(struct swapz_dm *ctx,
+					   u64 device_bytes,
+					   bool *swap_magic_present)
 {
+	static const u8 linux_swap_magic[] = "SWAPSPACE2";
 	struct dm_io_region region;
 	struct dm_io_request req = {
 		.bi_opf = REQ_OP_READ | REQ_SYNC,
@@ -1904,8 +1905,8 @@ static int swapz_validate_physical_superblock(struct swapz_dm *ctx,
 	u8 *block;
 	int error;
 
-	if (magic_present)
-		*magic_present = false;
+	if (swap_magic_present)
+		*swap_magic_present = false;
 	block = kzalloc(SWAPZ_SUPERBLOCK_BYTES, GFP_KERNEL);
 	if (!block)
 		return -ENOMEM;
@@ -1916,15 +1917,17 @@ static int swapz_validate_physical_superblock(struct swapz_dm *ctx,
 	error = swapz_dm_io(&req, &region, &error_bits);
 	if (!error && error_bits)
 		error = -EIO;
-	if (!error && magic_present)
-		*magic_present = swapz_sb_magic_matches(block);
-	/* Null_blk rehearsals retain their synthetic SWZ header contract.
-	 * Ordinary partition backing must retain an existing Linux swap
-	 * signature; its block zero is reserved and is never rewritten here.
+	if (!error && swap_magic_present)
+		*swap_magic_present =
+			!memcmp(block + SWAPZ_SUPERBLOCK_BYTES -
+				 sizeof(linux_swap_magic) + 1U,
+				linux_swap_magic, sizeof(linux_swap_magic) - 1U);
+	/*
+	 * Every header-backed device, including the owned null_blk lifecycle
+	 * rehearsal, uses the same ordinary Linux swap contract. SWZ001 is not
+	 * an authorization format and is never accepted by the data path.
 	 */
-	if (!error && !(magic_present ?
-			swapz_sb_valid(block, device_bytes) :
-			swapz_linux_swap_header_valid(block, device_bytes)))
+	if (!error && !swapz_linux_swap_header_valid(block, device_bytes))
 		error = -EPERM;
 	kfree(block);
 	return error;
@@ -9012,22 +9015,21 @@ static int swapz_ctr(struct dm_target *ti, unsigned int argc, char **argv)
 		ctx->data_start_block = 0;
 		ctx->physical_backing = false;
 		if (swapz_allow_physical_backing) {
-			bool superblock_magic_present = false;
+			bool swap_magic_present = false;
 
 			/*
 			 * Ordinary null_blk tests remain I/O-free and use the full
-			 * device. The primary-lifecycle rehearsal explicitly enables
-			 * header-backed storage and writes a valid SWAPZ header first;
-			 * when present, keep block 0 reserved so mapper mkswap cannot
-			 * overwrite that transaction identity. A malformed SWAPZ
-			 * header must fail closed instead of falling back to test mode.
+			 * device. A lifecycle rehearsal becomes header-backed only
+			 * when block zero already contains a valid SWAPSPACE2 header.
+			 * Keep that first page reserved exactly like a real partition.
+			 * A malformed Linux swap header fails closed rather than
+			 * silently falling back to unrestricted synthetic test mode.
 			 */
-			error = swapz_validate_physical_superblock(
-				ctx, device_bytes, &superblock_magic_present);
-			if (error &&
-			    (error != -EPERM || superblock_magic_present)) {
+			error = swapz_validate_linux_swap_header(
+				ctx, device_bytes, &swap_magic_present);
+			if (error && (error != -EPERM || swap_magic_present)) {
 				ti->error =
-					"Null_blk has an unreadable or invalid SWAPZ header";
+					"Null_blk has an unreadable or invalid Linux swap header";
 				goto fail;
 			}
 			if (!error) {
@@ -9061,7 +9063,7 @@ static int swapz_ctr(struct dm_target *ti, unsigned int argc, char **argv)
 			error = -EINVAL;
 			goto fail;
 		}
-		error = swapz_validate_physical_superblock(
+		error = swapz_validate_linux_swap_header(
 			ctx, device_bytes, NULL);
 		if (error) {
 			ti->error = "Physical backing requires a valid ordinary Linux swap header";

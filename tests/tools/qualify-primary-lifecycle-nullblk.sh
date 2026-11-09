@@ -811,7 +811,7 @@ assert_interruption_kernel_facts() {
 	local observed_swap
 
 	case "$phase" in
-		start-starting|start-header-written)
+		start-starting|start-header-verified)
 			expected_module=0; expected_mapper=0; expected_swap=0
 			;;
 		start-module-inserted|start-module-loaded)
@@ -857,7 +857,7 @@ assert_interruption_kernel_facts() {
 			fail "STARTING interruption unexpectedly published module WAL"
 	else
 		local expected_wal_phase=LOADED
-		if [[ "$phase" == start-header-written ||
+		if [[ "$phase" == start-header-verified ||
 		      "$phase" == start-module-inserted ]]; then
 			expected_wal_phase=INTENT
 		fi
@@ -880,7 +880,7 @@ import sys
 
 recovery_directory, evidence_directory, run_id, partuuid, phase = sys.argv[1:6]
 if (len(run_id) != 32 or any(c not in "0123456789abcdef" for c in run_id) or
-        phase not in {"start-starting", "start-header-written",
+        phase not in {"start-starting", "start-header-verified",
                       "start-module-inserted", "start-module-loaded",
                       "start-mapper-inactive", "start-mapper-resumed",
                       "start-mkswap", "start-swapon",
@@ -2258,7 +2258,7 @@ assert_owned_transaction_records 1 ||
 	fail "start did not retain canonical run-bound consumed/active ownership"
 assert_unrelated_host_swap_identity "normal start"
 active_backing_header_sha256="$(block0_sha256 "$PARTITION")" ||
-	fail "cannot hash run-bound SWZ backing header before stop"
+	fail "cannot hash ordinary SWAPSPACE2 backing header before stop"
 
 note "START_LOADED_PRIMARY_NULLBLK_LIFECYCLE=stop"
 if ! stop_output="$(timeout --signal=TERM --kill-after=10s 90s "$CONTROL" primary stop 2>&1)"; then
@@ -2295,20 +2295,20 @@ SWAPS_ID_AFTER="$(swapz_swap_inventory_identity /proc/swaps)" ||
 [[ "$SWAPS_ID_AFTER" == "$SWAPS_ID_BEFORE" ]] ||
 	fail "host swap identity differs after normal lifecycle teardown"
 stopped_backing_header_sha256="$(block0_sha256 "$PARTITION")" ||
-	fail "cannot hash run-bound SWZ backing header after stop"
+	fail "cannot hash ordinary SWAPSPACE2 backing header after stop"
 [[ "$stopped_backing_header_sha256" == "$active_backing_header_sha256" ]] ||
-	fail "normal stop changed the run-bound SWZ backing header"
+	fail "normal stop changed the ordinary SWAPSPACE2 backing header"
 
 note "PASS_LOADED_PRIMARY_NULLBLK_LIFECYCLE=run_id:$RUN_ID partuuid:$PARTUUID device:$PART_DEVNO prepare:READY start:ACTIVE swapon:true stop:COMPLETE recovery_required:false"
 
-for phase in start-starting start-header-written start-module-inserted \
+for phase in start-starting start-header-verified start-module-inserted \
 	start-module-loaded start-mapper-inactive start-mapper-resumed \
 	start-mkswap start-swapon; do
 	prepare_interruption_run
 	note "START_LOADED_PRIMARY_NULLBLK_INTERRUPTION=$phase run_id:$RUN_ID"
 	interrupt_lifecycle start "$phase" STARTING
 	case "$phase" in
-		start-starting|start-header-written)
+		start-starting|start-header-verified)
 			recover_interruption_run "$phase" STARTING false false false
 			;;
 		start-module-inserted|start-module-loaded)
