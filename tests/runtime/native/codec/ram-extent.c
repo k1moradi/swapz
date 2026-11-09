@@ -65,6 +65,21 @@ static int test_class(swapz_u32 bytes_total)
 	CHECK(swapz_ram_extent_append(&builder, 23, 9, image + 100, 600,
 				     SWAPZ_ENCODING_LZ4) == -EINVAL);
 	CHECK(swapz_ram_extent_read(&builder, 0, 21, 7, &readback) == -EINVAL);
+	/* A damaged transient builder must never zero the payload-only lower
+	 * image during seal. The valid builder remains usable afterwards. */
+	{
+		struct swapz_ram_extent invalid_builder = builder;
+
+		invalid_builder.record_capacity = 0;
+		CHECK(swapz_ram_extent_seal(&invalid_builder) == -EINVAL);
+		invalid_builder = builder;
+		invalid_builder.extent_blocks = 3;
+		CHECK(swapz_ram_extent_seal(&invalid_builder) == -EINVAL);
+		invalid_builder = builder;
+		invalid_builder.bytes_total = 3U * SWAPZ_BLOCK_BYTES;
+		CHECK(swapz_ram_extent_seal(&invalid_builder) == -EINVAL);
+		CHECK(image[0] == old_padding && !builder.sealed);
+	}
 	CHECK(swapz_ram_extent_seal(&builder) == 0);
 	CHECK(swapz_ram_extent_seal(&builder) == -EINVAL);
 	CHECK(swapz_ram_extent_append(&builder, 23, 9, payload, 600,
