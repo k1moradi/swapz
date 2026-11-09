@@ -4016,7 +4016,14 @@ static int swapz_primary_mountinfo_read_fd(
 	}
 	if (!used || buffer[used - 1U] != '\n' ||
 	    memchr(buffer, '\0', used)) {
+		/* An empty, unterminated or NUL-containing snapshot must
+		 * remain a refusal. Report only the fixed framing category.
+		 */
 		free(expanded_buffer);
+		(void)fprintf(stderr,
+			      "SWAPZ_PRIMARY_MOUNT_INVENTORY_FAILURE "
+			      "step=mountinfo-read errno=%d "
+			      "reason=malformed-mountinfo-frame\n", EINVAL);
 		errno = EINVAL;
 		return -1;
 	}

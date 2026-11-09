@@ -117,7 +117,7 @@ verify_prepare_failure_diagnostic() {
 		if [[ "$line" == "SWAPZ_PRIMARY_MOUNT_INVENTORY_FAILURE"* ]]; then
 			mount_diagnostic_count=$((mount_diagnostic_count + 1))
 			# Source-controlled fields only: no PID, path, namespace or device.
-			if [[ ! "$line" =~ ^SWAPZ_PRIMARY_MOUNT_INVENTORY_FAILURE[[:space:]]step=(namespace-fd|namespace-id|root-object|init-root|root-walk|mount-list|listed-mount|root-revalidation|mountinfo-read|mountinfo-aggregate)[[:space:]]errno=(11|22|38|75)([[:space:]]reason=(init-root-statx-race|process-root-not-directory|init-root-not-directory|root-inode-mismatch|root-device-mismatch|process-root-device-mismatch|init-root-device-mismatch|root-superblock-device-mismatch|statmount-buffer-too-small|root-parent-depth-limit|mount-count-limit|listmount-overflow|per-table-byte-limit|read-overflow|aggregate-byte-limit))?([[:space:]]peer_root=(matches-process|differs-process))?$ ]]; then
+			if [[ ! "$line" =~ ^SWAPZ_PRIMARY_MOUNT_INVENTORY_FAILURE[[:space:]]step=(namespace-fd|namespace-id|root-object|init-root|root-walk|mount-list|listed-mount|root-revalidation|mountinfo-read|mountinfo-parse|mountinfo-aggregate)[[:space:]]errno=(11|22|38|75)([[:space:]]reason=(init-root-statx-race|process-root-not-directory|init-root-not-directory|root-inode-mismatch|root-device-mismatch|process-root-device-mismatch|init-root-device-mismatch|root-superblock-device-mismatch|statmount-buffer-too-small|root-parent-depth-limit|mount-count-limit|listmount-overflow|per-table-byte-limit|read-overflow|aggregate-byte-limit|malformed-mountinfo-frame|malformed-mountinfo))?([[:space:]]peer_root=(matches-process|differs-process))?$ ]]; then
 				fail "prepare refusal has a malformed mount-inventory diagnostic"
 			fi
 			mount_step="${BASH_REMATCH[1]}"
@@ -137,16 +137,22 @@ verify_prepare_failure_diagnostic() {
 					fi
 				fi
 			elif [[ "$mount_errno" == 22 || "$mount_errno" == 38 ]]; then
-				# Unsupported/invalid namespace ABI is a refusal, never proof
-				# of a clear mount inventory. Emit fixed step+errno only.
-				[[ -z "$mount_reason" && -z "$mount_peer_root" ]] ||
-					fail "prepare unsupported mount ABI has unexpected fields"
-				case "$mount_step" in
-				namespace-fd|namespace-id|root-object|init-root|root-walk|\
-				mount-list|listed-mount|root-revalidation)
+				# An invalid kernel ABI or malformed opened mountinfo is
+				# never proof of an empty inventory. Match only fixed causes.
+				[[ -z "$mount_peer_root" ]] ||
+					fail "prepare mount refusal has unexpected root comparison"
+				case "$mount_step:$mount_reason:$mount_errno" in
+				mountinfo-read:malformed-mountinfo-frame:22|\
+				mountinfo-parse:malformed-mountinfo:22|\
+				namespace-fd::22|namespace-id::22|root-object::22|\
+				init-root::22|root-walk::22|mount-list::22|\
+				listed-mount::22|root-revalidation::22|\
+				namespace-fd::38|namespace-id::38|root-object::38|\
+				init-root::38|root-walk::38|mount-list::38|\
+				listed-mount::38|root-revalidation::38)
 					;;
 				*)
-					fail "prepare unsupported mount ABI has invalid step"
+					fail "prepare mount refusal has invalid step or cause"
 					;;
 				esac
 			else

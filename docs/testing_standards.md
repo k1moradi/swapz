@@ -423,8 +423,13 @@ record with the normal canonical prepare failure. The same strict step/errno
 matching also accepts the scanner's source-controlled EINVAL (errno 22) and
 ENOSYS (errno 38) kernel ABI refusals, without reason, peer-root or private
 fields, only at fixed namespace-fd, namespace-id, root-object, init-root,
-root-walk, mount-list, listed-mount and root-revalidation steps. These remain
-BLOCKED; they do not establish a clear inventory or authorize mutation.
+root-walk, mount-list, listed-mount and root-revalidation steps. For EINVAL
+from a malformed opened mountinfo snapshot, only
+`step=mountinfo-read errno=22 reason=malformed-mountinfo-frame` (empty,
+unterminated or NUL-containing framing) or
+`step=mountinfo-parse errno=22 reason=malformed-mountinfo` (invalid table
+syntax) is admissible. Every such result remains BLOCKED; it does not
+establish a clear inventory or authorize mutation.
 Duplicate, malformed, unmatched or free-form sideband output remains FAIL;
 the original admission refusal remains BLOCKED. Rootless regressions cover
 both scan phases and reject mismatched errno, duplicates and private values.

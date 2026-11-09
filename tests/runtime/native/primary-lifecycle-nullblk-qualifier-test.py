@@ -56,6 +56,17 @@ class PrimaryLifecycleNullblkQualifierContract(unittest.TestCase):
         self.assertNotIn(".namespace_fd = (uint32_t)namespace_fd", function)
         self.assertIn("saved_errno == EINVAL", function)
 
+    def test_malformed_mountinfo_frame_reports_fixed_einval(self):
+        # Framing rejection must remain fail-closed and carry no host path,
+        # device identity, PID or mount row into the public diagnostic.
+        reader = self.primary.split(
+            "static int swapz_primary_mountinfo_read_fd(", 1)[1].split(
+                "static int swapz_primary_mountinfo_full_root(", 1)[0]
+        self.assertIn('reason=malformed-mountinfo-frame', reader)
+        self.assertIn('step=mountinfo-read errno=%d ', reader)
+        self.assertIn('errno = EINVAL;', reader)
+        self.assertIn('reason=malformed-mountinfo', reader)
+
     def test_all_native_interruption_and_negative_cases_are_declared(self):
         for phase in (
             "start-starting",
@@ -2707,6 +2718,45 @@ int main(int argc, char **argv)
                 "SWAPZ_PRIMARY_MOUNT_INVENTORY_FAILURE "
                 f"step=mountinfo-read errno={errno_number}\n" +
                 command_output(refusal, error_text), False)
+
+        # Both forms of malformed mountinfo must preserve EINVAL, never
+        # expose a pathname, and be accepted only with the exact fixed cause.
+        invalid_argument = "Invalid argument"
+        mount_invalid = (
+            "PRIMARY_PREPARE=FAILED phase=cross-namespace-mount-inventory "
+            f"errno=22 error={invalid_argument} claim=none"
+        )
+        for step, cause in (
+                ("mountinfo-read", "malformed-mountinfo-frame"),
+                ("mountinfo-parse", "malformed-mountinfo")):
+            marker = (
+                "SWAPZ_PRIMARY_MOUNT_INVENTORY_FAILURE "
+                f"step={step} errno=22 reason={cause}"
+            )
+            for phase in (
+                    "cross-namespace-mount-inventory",
+                    "repeated-cross-namespace-mount-inventory"):
+                refusal = mount_invalid.replace(
+                    "phase=cross-namespace-mount-inventory",
+                    f"phase={phase}")
+                check(marker + "\n" +
+                      command_output(refusal, invalid_argument), True)
+            check(marker + " path=/private\n" +
+                  command_output(mount_invalid, invalid_argument), False)
+            check(marker.replace("errno=22", "errno=38") + "\n" +
+                  command_output(mount_invalid, invalid_argument), False)
+            check(marker.replace(f"reason={cause}", "reason=private") + "\n" +
+                  command_output(mount_invalid, invalid_argument), False)
+        check(
+            "SWAPZ_PRIMARY_MOUNT_INVENTORY_FAILURE "
+            "step=mountinfo-parse errno=22 "
+            "reason=malformed-mountinfo-frame\n" +
+            command_output(mount_invalid, invalid_argument), False)
+        check(
+            "SWAPZ_PRIMARY_MOUNT_INVENTORY_FAILURE "
+            "step=mountinfo-read errno=22 "
+            "reason=malformed-mountinfo\n" +
+            command_output(mount_invalid, invalid_argument), False)
 
         for output in (
             "",
