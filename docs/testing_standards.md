@@ -99,6 +99,8 @@ markers as PASS evidence, nor mix shell output from independent workers.
 `tests/runtime/native/test-report-test.py` tests exact group approval,
 two-worker overlap, private output permissions, stop-dispatch on failure and
 bounded timeout/reaping using synthetic unprivileged processes.
+The test fixture asserts inherited bytecode suppression with a simple
+Python statement so its one-line synthetic worker remains valid source.
 
 The native production-C suite may compile the unchanged production sources
 once into shared, compiler-configuration-bound objects, then link the existing

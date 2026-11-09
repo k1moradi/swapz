@@ -176,7 +176,7 @@ class RootlessParallelPilotContract(unittest.TestCase):
             # serial scheduler would time out without reaching both starts.
             script = (
                 "import os,pathlib,sys,time; "
-                "if os.environ.get('PYTHONDONTWRITEBYTECODE')!='1': sys.exit(35); "
+                "assert os.environ.get('PYTHONDONTWRITEBYTECODE')=='1'; "
                 "own=pathlib.Path(sys.argv[1]); "
                 "other=pathlib.Path(sys.argv[2]); own.write_text('started'); "
                 "deadline=time.monotonic()+3; "
