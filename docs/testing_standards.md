@@ -5382,12 +5382,14 @@ isolated behind the reporter's publication-backoff helper so unit tests mock
 only the policy delay; they must not patch the process-global `time.sleep`
 used internally by subprocess polling. If it
 did move, `merge-base --is-ancestor` must prove the tested code revision
-remains in current main history. The publisher must then identify the fetched
-head's nearest non-report source revision. If that source is newer than the
-tested source, the delayed report may be committed only as an intermediate
-history record followed by an atomic restoration commit whose tree preserves
-the fetched head's canonical `test_results.json`; an older run must never
-become canonical merely because it finished later. Rewritten/diverged history,
+remains in current main history. The publisher must then inspect the paths advanced since the tested source.
+A Markdown-only concurrent documentation update does not invalidate the tested
+runtime source, but any other tracked advance except the generated
+`test_results.json` is source-bearing for report publication. When such a
+newer source-bearing change exists, the delayed report may be committed only as
+an intermediate history record followed by an atomic restoration commit whose
+tree preserves the fetched head's canonical `test_results.json`; an older run
+must never become canonical merely because it finished later. Rewritten/diverged history,
 malformed source ancestry, or exhausted retries fail closed.
 
 Native report-publication tests that create temporary Git repositories must use

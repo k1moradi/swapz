@@ -10054,27 +10054,19 @@ def publish(source_sha):
                 if ancestor.returncode:
                     return ("GIT_SYNC_FAILED: origin/main no longer descends "
                             "from the tested source; report remains local")
-                remote_source = run(
-                    "log", "-1", "--first-parent", "--format=%H", remote_sha,
-                    "--", ".", f":(exclude){GIT_RESULT}")
-                if remote_source is None or remote_source.returncode:
+                advanced_paths = run(
+                    "diff", "--name-only", "-z", source_sha, remote_sha,
+                    "--", ".")
+                if advanced_paths is None or advanced_paths.returncode:
                     continue
-                remote_source_sha = remote_source.stdout.decode(
-                    "ascii", "replace").strip()
-                if not re.fullmatch(r"[0-9a-f]{40}", remote_source_sha):
-                    return ("GIT_SYNC_FAILED: origin/main source revision "
-                            "is malformed")
-                if remote_source_sha != source_sha:
-                    source_ancestor = run(
-                        "merge-base", "--is-ancestor",
-                        source_sha, remote_source_sha)
-                    if source_ancestor is None:
-                        continue
-                    if source_ancestor.returncode:
-                        return ("GIT_SYNC_FAILED: current main source does not "
-                                "descend from the tested source")
-                    # Preserve delayed evidence in history without replacing
-                    # canonical test_results.json for newer source.
+                changed_paths = [
+                    path for path in advanced_paths.stdout.split(b"\0") if path]
+                # Markdown-only edits do not invalidate the tested runtime
+                # source. Any other tracked advance (except the generated
+                # report itself) must keep delayed evidence history-only.
+                if any(path != GIT_RESULT.encode("ascii") and
+                       not path.lower().endswith(b".md")
+                       for path in changed_paths):
                     preserve_canonical = True
                 remote_blob = run("show", f"{remote_sha}:{GIT_RESULT}")
                 if remote_blob is not None and not remote_blob.returncode:
