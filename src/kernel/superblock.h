@@ -104,4 +104,43 @@ static inline int swapz_sb_valid(const unsigned char *block,
 	       swapz_sb_reserved_zero(block);
 }
 
+/* A normal Linux swap partition remains formatted as SWAPSPACE2.
+ * Its first page is a protected backing reservation, not SWZ metadata.
+ * All swapz allocation/authority metadata is kept in RAM.
+ */
+#define SWAPZ_LINUX_SWAP_MAGIC_BYTES 10U
+#define SWAPZ_LINUX_SWAP_VERSION_OFFSET 1024U
+#define SWAPZ_LINUX_SWAP_LAST_PAGE_OFFSET 1028U
+#define SWAPZ_LINUX_SWAP_BAD_PAGES_OFFSET 1032U
+#define SWAPZ_LINUX_SWAP_UUID_OFFSET 1036U
+#define SWAPZ_LINUX_SWAP_UUID_BYTES 16U
+
+static inline int swapz_linux_swap_header_valid(
+    const unsigned char *block, unsigned long long device_bytes)
+{
+    static const unsigned char magic[SWAPZ_LINUX_SWAP_MAGIC_BYTES] = {
+        'S', 'W', 'A', 'P', 'S', 'P', 'A', 'C', 'E', '2'
+    };
+    unsigned long long pages = device_bytes / SWAPZ_SUPERBLOCK_BYTES;
+    unsigned int last_page;
+    unsigned char uuid_nonzero = 0;
+    unsigned int index;
+
+    if (!block || device_bytes % SWAPZ_SUPERBLOCK_BYTES ||
+        pages < 3U || pages > 0xffffffffULL ||
+        swapz_sb_get_u32(block + SWAPZ_LINUX_SWAP_VERSION_OFFSET) != 1U ||
+        swapz_sb_get_u32(block + SWAPZ_LINUX_SWAP_BAD_PAGES_OFFSET) != 0U)
+        return 0;
+    last_page = swapz_sb_get_u32(block + SWAPZ_LINUX_SWAP_LAST_PAGE_OFFSET);
+    if (last_page < 2U || (unsigned long long)last_page >= pages)
+        return 0;
+    for (index = 0; index < SWAPZ_LINUX_SWAP_MAGIC_BYTES; ++index)
+        if (block[SWAPZ_SUPERBLOCK_BYTES - SWAPZ_LINUX_SWAP_MAGIC_BYTES +
+                  index] != magic[index])
+            return 0;
+    for (index = 0; index < SWAPZ_LINUX_SWAP_UUID_BYTES; ++index)
+        uuid_nonzero |= block[SWAPZ_LINUX_SWAP_UUID_OFFSET + index];
+    return uuid_nonzero != 0U;
+}
+
 #endif

@@ -185,11 +185,11 @@ MODULE_PARM_DESC(work_conserving_hand_records,
 static bool swapz_allow_physical_backing;
 module_param_named(allow_physical_backing, swapz_allow_physical_backing, bool, 0444);
 MODULE_PARM_DESC(allow_physical_backing,
-		 "Allow explicitly formatted header-backed storage; default off");
+		 "Allow verified ordinary Linux swap backing; default off");
 
 static bool swapz_physical_backing_arch_supported(void)
 {
-#if defined(CONFIG_X86_64)
+#if defined(CONFIG_X86_64) || defined(CONFIG_ARM64)
 	return true;
 #else
 	return false;
@@ -1916,7 +1916,13 @@ static int swapz_validate_physical_superblock(struct swapz_dm *ctx,
 		error = -EIO;
 	if (!error && magic_present)
 		*magic_present = swapz_sb_magic_matches(block);
-	if (!error && !swapz_sb_valid(block, device_bytes))
+	/* Null_blk rehearsals retain their synthetic SWZ header contract.
+	 * Ordinary partition backing must retain an existing Linux swap
+	 * signature; its block zero is reserved and is never rewritten here.
+	 */
+	if (!error && !(magic_present ?
+			swapz_sb_valid(block, device_bytes) :
+			swapz_linux_swap_header_valid(block, device_bytes)))
 		error = -EPERM;
 	kfree(block);
 	return error;
@@ -9026,7 +9032,7 @@ static int swapz_ctr(struct dm_target *ti, unsigned int argc, char **argv)
 		}
 	} else {
 		if (!swapz_physical_backing_arch_supported()) {
-			ti->error = "Physical backing is qualified only on x86_64";
+			ti->error = "Physical backing requires supported x86_64/aarch64";
 			error = -EOPNOTSUPP;
 			goto fail;
 		}
@@ -9044,7 +9050,7 @@ static int swapz_ctr(struct dm_target *ti, unsigned int argc, char **argv)
 		error = swapz_validate_physical_superblock(
 			ctx, device_bytes, NULL);
 		if (error) {
-			ti->error = "Physical backing lacks a valid matching SWAPZ superblock";
+			ti->error = "Physical backing requires a valid ordinary Linux swap header";
 			goto fail;
 		}
 		ctx->data_start_block = 1U;

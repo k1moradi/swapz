@@ -1648,7 +1648,8 @@ def _release_partition_ownership(state):
             stage if type(stage) is str and stage in {
                 "BACKED_UP", "SWAP_OFF", "HEADER_CLEAR_PENDING",
                 "HEADER_CLEARED", "HEADER_RESTORE_PENDING", "SWZ_FORMATTED",
-                "MODULE_PENDING", "MODULE_OWNED", "MAPPED", "ORACLE_PASS",
+                "EXISTING_SWAP_READY", "MODULE_PENDING", "MODULE_OWNED",
+                "MAPPED", "ORACLE_PASS",
                 "RECOVERY_REQUIRED", "PRE_DESTRUCTIVE_FAILED",
             } else "invalid_or_unknown")
         raise ProbeError(
@@ -3021,7 +3022,8 @@ def _require_recovery_results_binding(state, results):
             state.get("stage_before_recovery") not in {
                 "BACKED_UP", "SWAP_OFF", "HEADER_CLEAR_PENDING",
                 "HEADER_CLEARED", "HEADER_RESTORE_PENDING", "SWZ_FORMATTED",
-                "MODULE_PENDING", "MODULE_OWNED", "MAPPED", "ORACLE_PASS"}):
+                "EXISTING_SWAP_READY", "MODULE_PENDING", "MODULE_OWNED",
+                "MAPPED", "ORACLE_PASS"}):
         raise ProbeError(
             "saved RECOVERY_REQUIRED origin is incomplete; "
             "safe_next_step=inspect_records_read_only")
@@ -4088,48 +4090,16 @@ def run_probe(device_arg, confirm_arg, state_dir_arg, review_path,
             state["stage"] = "SWAP_OFF"
             _save_state(state_dir, state)
 
+            # Ordinary swap backing is already formatted. Preserve all 4096
+            # bytes of block zero exactly; the kernel reserves this page
+            # from the mapper's physical allocator. Only the test-owned
+            # mapper is formatted with mkswap, never the user partition.
             _verify_target_identity(target)
-            # Durable mutation intent precedes even the first partial pwrite.
-            state["stage"] = "HEADER_CLEAR_PENDING"
-            _save_state(state_dir, state)
-            destructive_execution_started = True
-            _write_block0(target["device"], bytes(PAGE_BYTES), target,
-                          expected_current=target["header"])
-            state["stage"] = "HEADER_CLEARED"
-            _save_state(state_dir, state)
-            _verify_target_identity(target)
-            if _read_block0(target["device"], target) != bytes(PAGE_BYTES):
-                raise ProbeError("partition block zero changed before formatter")
-            if virtual_device_only:
-                formatted_header = _virtual_development_header(
-                    target["size_bytes"])
-                if _active_swap_for(target["major"], target["minor"]) is not None:
-                    raise ProbeError(
-                        "virtual target became active before SWZ header write")
-                _verify_target_identity(target)
-                _write_block0(
-                    target["device"], formatted_header, target,
-                    expected_current=bytes(PAGE_BYTES))
-                if _read_block0(target["device"], target) != formatted_header:
-                    raise ProbeError(
-                        "virtual SWZ header did not read back exactly")
-            else:
-                _run([
-                    formatter, "format", target["device"], "--expect-major-minor",
-                    f"{target['major']}:{target['minor']}", "--expect-bytes",
-                    str(target["size_bytes"]), "--expect-partuuid",
-                    target["partuuid"], "--expect-parent-major-minor",
-                    target["parent_major_minor"], "--expect-parent-model",
-                    target["parent_model"], "--expect-parent-transport",
-                    target["parent_transport"],
-                ], timeout=30)
-                formatted_header = _read_block0(target["device"], target)
-            if not swapz_header_valid(formatted_header, target["size_bytes"]):
-                raise ProbeError(
-                    "development formatter did not produce the expected SWZ header")
-            state["formatted_header_sha256"] = hashlib.sha256(
-                formatted_header).hexdigest()
-            state["stage"] = "SWZ_FORMATTED"
+            if _active_swap_for(target["major"], target["minor"]) is not None:
+                raise ProbeError("raw swap partition remained active after swapoff")
+            if _read_block0(target["device"], target) != target["header"]:
+                raise ProbeError("original Linux swap header changed before mapping")
+            state["stage"] = "EXISTING_SWAP_READY"
             _save_state(state_dir, state)
             if development_only and algorithm_real_swap:
                 _restore_development_swapfiles(state)
@@ -4154,6 +4124,9 @@ def run_probe(device_arg, confirm_arg, state_dir_arg, review_path,
             state["stage"] = "MODULE_OWNED"
             _save_state(state_dir, state)
 
+            # The first mapper/device write can now begin; the raw swap
+            # header itself is never a mutation target.
+            destructive_execution_started = True
             _verify_target_identity(target)
             table = _expected_dm_table(target)
             _run([
@@ -4291,8 +4264,7 @@ def run_probe(device_arg, confirm_arg, state_dir_arg, review_path,
                                           else first_exit),
                     "recovery_errno": _errno_text(cleanup_exc),
                     "publication_phase": state.get("stage_before_recovery"),
-                    "header_bytes_possibly_changed": (
-                        PAGE_BYTES if destructive_execution_started else 0),
+                    "header_bytes_possibly_changed": 0,
                     "requested_recovery_state": "RECOVERY_REQUIRED",
                     "last_readable_saved_state": (
                         binding_state.get("stage") if state_record_bound

@@ -1961,11 +1961,11 @@ dmsetup() {
 
         self.assertIn('disk_name, "nullb", 5', ctr)
         arch_gate = body("swapz_physical_backing_arch_supported")
-        self.assertIn("#if defined(CONFIG_X86_64)", arch_gate)
+        self.assertIn("#if defined(CONFIG_X86_64) || defined(CONFIG_ARM64)", arch_gate)
         self.assertIn("return true", arch_gate)
         self.assertIn("return false", arch_gate)
         self.assertIn("swapz_physical_backing_arch_supported()", ctr)
-        self.assertIn("Physical backing is qualified only on x86_64", ctr)
+        self.assertIn("Physical backing requires supported x86_64/aarch64", ctr)
         self.assertIn("swapz_allow_physical_backing", ctr)
         compact_ctr = re.sub(r"\s+", " ", ctr)
         compact_validator = re.sub(r"\s+", " ", validator)
@@ -1993,6 +1993,10 @@ dmsetup() {
         self.assertIn("ctx->data_start_block = 1U", ctr)
         self.assertIn("flush_fail_nth || write_fail_nth", ctr)
         self.assertIn("swapz_sb_valid(block, device_bytes)", validator)
+        self.assertIn("swapz_linux_swap_header_valid(block, device_bytes)",
+                      validator)
+        self.assertIn(
+            "Physical backing requires a valid ordinary Linux swap header", ctr)
         self.assertIn(
             "if (!error && magic_present) *magic_present = "
             "swapz_sb_magic_matches(block)", compact_validator)

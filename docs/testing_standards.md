@@ -7391,8 +7391,13 @@ partition itself remains forbidden as recovery backing. The interactive
 selector must describe this as a VM shared-disk rule and must not instruct the
 operator to provision the bare-metal shared-root scope record for that case. The VM lane uses the
 selected partition's own kernel I/O counters so guest-root traffic cannot be
-misreported as target traffic. After the durable zero-header transition, the
-root-owned development probe constructs the same bounded v1 4096-byte SWZ
+misreported as target traffic. The physical trial now preserves the original 4096-byte Linux swap header
+through the entire exercise; only the new Device Mapper node may receive
+`mkswap`. The kernel reserves partition block zero and requires a valid
+ordinary `SWAPSPACE2` signature, version, geometry and UUID. Previously
+written SWZ headers are never required for new physical trials. Legacy
+unfinished recovery journals retain their original guarded restoration path.
+Historical VM-only probes used to construct a bounded v1 4096-byte SWZ
 authorization header directly, immediately rereads it byte-for-byte, and only
 then records the durable `SWZ_FORMATTED` transition; the production
 `swapzctl format` removable-USB policy is intentionally unchanged. Virtual results are
