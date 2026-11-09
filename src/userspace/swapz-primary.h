@@ -160,15 +160,6 @@ int swapz_primary_state_write_at(int recovery_fd, int lock_fd,
 /* Persist RECOVERY_REQUIRED while preserving the original interrupted stage. */
 int swapz_primary_state_require_recovery_at(
 	int recovery_fd, int lock_fd, const char *run_id, uid_t expected_owner);
-/* Save/read the run's immutable exact 4096-byte original partition header. */
-int swapz_primary_header_backup_write_at(
-	int recovery_fd, int lock_fd, const char *run_id,
-	const unsigned char header[4096], const char *expected_sha256,
-	uid_t expected_owner);
-int swapz_primary_header_backup_read_at(
-	int recovery_fd, int lock_fd, const char *run_id,
-	const char *expected_sha256, uid_t expected_owner,
-	unsigned char header[4096]);
 /* Only a COMPLETE state may release the active marker; consumed claim remains. */
 int swapz_primary_release_partition_owner_at(int recovery_fd, int lock_fd,
 						     const char *run_id,
