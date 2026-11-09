@@ -1941,10 +1941,8 @@ static int test_discard_range_prevalidation_restores_shared_compressed_gc_underf
 	}
 	test_live[0] = 2U;
 
-	first_live_bytes = test_maps[0].payload_length +
-			   sizeof(struct swapz_record);
-	second_live_bytes = test_maps[1].payload_length +
-			    sizeof(struct swapz_record);
+	first_live_bytes = test_maps[0].payload_length;
+	second_live_bytes = test_maps[1].payload_length;
 	CHECK(test_gc_live_bytes[0] == first_live_bytes + second_live_bytes);
 
 	/*

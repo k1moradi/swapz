@@ -158,29 +158,23 @@ static int test_pack_ready_small_and_medium_exact_geometry(void)
 	CHECK(!swapz_window_pack_ready(batch, 4, 2, 0));
 	CHECK(!swapz_window_single_pack_ready(batch, 5, 2, 0));
 
-	/* Exact 4KiB two-record pack is deferred; two such packs close
-	 * together at the exact 8KiB four-record metadata limit. */
+	/* Exact payload-only boundaries: RAM metadata consumes no extent bytes. */
 	for (i = 0; i < 4; ++i)
-		batch[i].length = 2028;
-	batch[0].length = 2024;
-	batch[1].length = 2024;
+		batch[i].length = 2048;
 	CHECK(swapz_window_single_pack_ready(batch, 2, 2, 0));
 	CHECK(!swapz_window_single_pack_ready(batch, 3, 2, 0));
 	CHECK(!swapz_window_pack_ready(batch, 2, 2, 0));
-	for (i = 0; i < 4; ++i)
-		batch[i].length = 2028;
 	CHECK(swapz_window_pack_ready(batch, 4, 2, 0));
-	batch[3].length = 2029;
+	batch[3].length = 2049;
 	CHECK(!swapz_window_pack_ready(batch, 4, 2, 0));
 
-	/* Six records have 112 bytes of SWZ header/descriptor overhead:
-	 * 6 * 2712 + 112 == 16384 exactly. */
 	for (i = 0; i < 6; ++i)
-		batch[i].length = 2712;
+		batch[i].length = 2730;
+	batch[5].length = 2734; /* 5 * 2730 + 2734 == 16384 exactly. */
 	CHECK(swapz_window_pack_ready(batch, 6, 2, 0));
-	batch[5].length = 2713;
+	batch[5].length = 2735;
 	CHECK(!swapz_window_pack_ready(batch, 6, 2, 0));
-	batch[5].length = 2712;
+	batch[5].length = 2734;
 	batch[0].raw = 1;
 	CHECK(!swapz_window_pack_ready(batch, 6, 2, 0));
 	batch[0].raw = 0;
@@ -237,10 +231,10 @@ static int test_pack_ready_uses_compressed_geometry_across_raw_slots(void)
 		batch[i].logical = 400 + i;
 		batch[i].length = 2028;
 	}
-	batch[1].length = 2024;
-	batch[2].length = 2024;
+	batch[1].length = 2048;
+	batch[2].length = 2048;
 	/* RAW remains part of the eventual lower run, but it must not poison
-	 * recognition of two compressed records that exactly fit one block. */
+	 * recognition of two compressed payloads that exactly fit one block. */
 	CHECK(!swapz_window_single_pack_ready(batch, 2, 2, 0));
 	CHECK(swapz_window_single_pack_ready(batch, 3, 2, 0));
 	/* RAW skipping must not recreate the refuted total-count-four first-pack
@@ -256,21 +250,22 @@ static int test_pack_ready_uses_compressed_geometry_across_raw_slots(void)
 	batch[4].raw = 1;
 	CHECK(swapz_window_prior_single_pack_ready(batch, 5, 2, 0));
 	batch[4].raw = 0;
-	batch[4].length = 2028;
-	batch[3].length = 2028;
-	/* Four compressed records plus one RAW record exactly fill the same 8KiB
+	batch[4].length = 2048;
+	batch[3].length = 2048;
+	/* Four compressed payloads plus one RAW record exactly fill the same 8KiB
 	 * compressed extent geometry used by a RAW-free four-record prefix. */
-	batch[1].length = 2028;
-	batch[2].length = 2028;
+	batch[1].length = 2048;
+	batch[2].length = 2048;
 	CHECK(swapz_window_pack_ready(batch, 5, 2, 0));
 	/* A RAW newest admission cannot manufacture a fresh geometry transition. */
 	batch[5].length = SWAPZ_BLOCK_BYTES;
 	batch[5].raw = 1;
 	CHECK(!swapz_window_pack_ready(batch, 6, 2, 0));
 	batch[5].raw = 0;
-	/* Six compressed records plus an earlier RAW record fit 16KiB exactly. */
+	/* Six compressed payloads plus an earlier RAW record fill 16KiB exactly. */
 	for (i = 1; i <= 6; ++i)
-		batch[i].length = 2712;
+		batch[i].length = 2730;
+	batch[6].length = 2734;
 	CHECK(swapz_window_pack_ready(batch, 7, 2, 0));
 	/* Invalid compressed records still fail closed even when RAW is skipped. */
 	batch[3].length = 0;

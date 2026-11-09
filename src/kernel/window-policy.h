@@ -73,8 +73,7 @@ static inline int swapz_window_extent_fits(
 	    (extent_blocks != 1U && extent_blocks != 2U &&
 	     extent_blocks != 4U))
 		return 0;
-	extent_bytes = sizeof(struct swapz_header) +
-		(swapz_u32)count * sizeof(struct swapz_record);
+	extent_bytes = 0; /* Lower extent contains payload bytes only; metadata is RAM-resident. */
 	for (i = 0; i < count; ++i) {
 		if (pending[i].raw || !pending[i].length ||
 		    pending[i].length > SWAPZ_MAX_COMPRESSED)
@@ -107,8 +106,7 @@ static inline int swapz_window_compressed_extent_fits(
 	    (extent_blocks != 1U && extent_blocks != 2U &&
 	     extent_blocks != 4U))
 		return 0;
-	extent_bytes = sizeof(struct swapz_header) +
-		(swapz_u32)compressed_target * sizeof(struct swapz_record);
+	extent_bytes = 0; /* Lower extent contains payload bytes only; metadata is RAM-resident. */
 	for (i = 0; i < count; ++i) {
 		if (pending[i].raw)
 			continue;
@@ -143,8 +141,7 @@ static inline int swapz_window_first_compressed_extent_fits(
 	    (extent_blocks != 1U && extent_blocks != 2U &&
 	     extent_blocks != 4U))
 		return 0;
-	extent_bytes = sizeof(struct swapz_header) +
-		(swapz_u32)compressed_target * sizeof(struct swapz_record);
+	extent_bytes = 0; /* Lower extent contains payload bytes only; metadata is RAM-resident. */
 	for (i = 0; i < count; ++i) {
 		if (pending[i].raw)
 			continue;
