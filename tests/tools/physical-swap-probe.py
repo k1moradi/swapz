@@ -1309,12 +1309,9 @@ def _require_shared_root_development_plan(target, evidence):
         "target_config_read",
         "target_device_preflight",
         "original_swap_signature",
-        "recovery_preflight_read",
-        "recovery_directory_safe",
-        "recovery_filesystem_supported",
-        "recovery_directly_not_target",
-        "recovery_active_marker_clear",
-        "recovery_source_chain_checked",
+        # This bounded development trial keeps ownership state in /run and
+        # never rewrites block zero, so persistent-recovery fields from the
+        # primary deployment plan are not admission requirements here.
         "target_device_chain_checked",
         "module_mapper_inventory_read",
         "swapz_mapper_absent",
@@ -1332,10 +1329,8 @@ def _require_shared_root_development_plan(target, evidence):
         raise ProbeError(
             "shared-root authorization plan did not satisfy every required gate")
     if (plan.get("dm_swapz_module_loaded") is not False or
-            plan.get("recovery_same_physical_disk_as_target") is not False or
             plan.get("shared_root_parent_exception_status") != "valid"):
-        raise ProbeError(
-            "shared-root authorization or independent recovery is not valid")
+        raise ProbeError("shared-root host authorization is not valid")
     if (plan.get("control_build_source_sha") != evidence.get("source_sha") or
             plan.get("target_partuuid") != target.get("partuuid") or
             plan.get("target_device_major") != target.get("major") or
@@ -4057,8 +4052,8 @@ def run_probe(device_arg, confirm_arg, state_dir_arg, review_path,
         }
     else:
         review = validate_review(review_path, evidence, target)
-    # The helper owns the dev run ID, so it chooses the matching directory
-    # beneath the already validated persistent recovery base itself.
+    # The helper owns the dev run ID. Development trials use root-only /run
+    # state; qualified legacy runs retain their explicit persistent directory.
     state_dir_arg = _select_run_directory(
         state_dir_arg, review["run_id"], development_only)
     _check_review_unconsumed(target, review["run_id"])
