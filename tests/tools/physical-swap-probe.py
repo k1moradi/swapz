@@ -35,6 +35,7 @@ ROOT = Path(__file__).resolve().parents[2]
 PAGE_BYTES = 4096
 SWAP_SIGNATURE = b"SWAPSPACE2"
 LOGICAL_SECTORS = 32768
+LOGICAL_MAPPER_BYTES = LOGICAL_SECTORS * 512
 EXPECTED_SCOPE = "physical swap backing correctness smoke only"
 DEVELOPMENT_SCOPE = (
     "physical backing data-path smoke only; not production qualification")
@@ -3537,6 +3538,18 @@ def _run_algorithm_live_swap_oracle(mapper, state, target, state_dir):
                 worker.stdout.close()
 
 
+def _keep_active_capacity_supported(target):
+    """Never replace ordinary swap capacity with a smaller test-only mapper.
+
+    The development mapper is fixed at 16 MiB. This bound is deliberately
+    separate from a future full-capacity, independently qualified service.
+    A missing or malformed target size cannot authorize retention.
+    """
+    device_bytes = target.get("size_bytes")
+    return (type(device_bytes) is int and device_bytes > PAGE_BYTES and
+            LOGICAL_MAPPER_BYTES >= device_bytes)
+
+
 def _operator_keep_swapz_active_after_pass():
     """Ask only after a successful real-swap oracle; default is safe teardown."""
     try:
@@ -3550,6 +3563,10 @@ def _operator_keep_swapz_active_after_pass():
 
 def _verify_kept_swapz_active(state, target, mapper):
     """Verify the exact successful development mapper before leaving it active."""
+    if not _keep_active_capacity_supported(target):
+        raise ProbeError(
+            "bounded 16 MiB development mapper cannot retain the original "
+            "swap partition's capacity")
     _verify_target_identity(target)
     if _read_block0(target["device"], target) != target["header"]:
         raise ProbeError("ordinary SWAPSPACE2 header changed before keep-active")
@@ -4128,7 +4145,8 @@ def run_probe(device_arg, confirm_arg, state_dir_arg, review_path,
             results["final_recovery_state"] = "ORACLE_PASS"
             _save_results(state_dir, results)
             if development_only and algorithm_real_swap:
-                if _operator_keep_swapz_active_after_pass():
+                if (_keep_active_capacity_supported(target) and
+                        _operator_keep_swapz_active_after_pass()):
                     active_mapper_swap = _verify_kept_swapz_active(
                         state, target, mapper)
                     # Keep the active marker and root-only /run record. The
@@ -4159,6 +4177,11 @@ def run_probe(device_arg, confirm_arg, state_dir_arg, review_path,
                         "tests/tools/physical-swap-probe.py recover-pending")
                     print(f"PHYSICAL_RESULTS={state_dir / RESULTS_NAME}")
                     return
+                if not _keep_active_capacity_supported(target):
+                    print(
+                        "PHYSICAL_SWAPZ_KEEP_ACTIVE=UNAVAILABLE "
+                        "reason=bounded_16MiB_mapper_smaller_than_original_swap; "
+                        "restoring_ordinary_swap")
                 results["operator_choice"] = "RESTORE_ORDINARY_SWAP"
                 _save_results(state_dir, results)
         except BaseException as exc:

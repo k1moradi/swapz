@@ -8,9 +8,14 @@
 
 After the real-swap oracle passes, the interactive development trial must ask
 whether to keep swapz active or return to ordinary swap. A keep request may
-succeed only after revalidating the unchanged SWAPSPACE2 header, inactive raw
-partition, exact mapper name/UUID/table/lower device, active mapper swap
-priority, and loaded owned module. The helper then records `KEPT_ACTIVE` only
+succeed only when the test mapper's logical capacity is at least the original
+partition capacity, then after revalidating the unchanged SWAPSPACE2 header,
+inactive raw partition, exact mapper name/UUID/table/lower device, active
+mapper swap priority, and loaded owned module. The current bounded physical
+test mapper is only 16 MiB, while eligible physical target partitions are
+at least 64 MiB. Until a separately qualified full-capacity mapper exists,
+the keep-active question must not be offered: print a clear unavailability
+reason and restore ordinary swap on successful cleanup. The helper then records `KEPT_ACTIVE` only
 in root-owned `/run` state and retains the exact active partition marker.
 
 A later cleanup process may inherit module ownership only while that exact

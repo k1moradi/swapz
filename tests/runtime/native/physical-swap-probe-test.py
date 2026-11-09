@@ -2521,11 +2521,42 @@ class PhysicalSwapProbeTests(unittest.TestCase):
         with mock.patch("builtins.input", side_effect=EOFError):
             self.assertFalse(probe._operator_keep_swapz_active_after_pass())
 
+    def test_bounded_test_mapper_cannot_replace_normal_swap_capacity(self):
+        # The existing 16 MiB physical trial must not strand a machine with
+        # only 16 MiB of available swap after its original 64 GiB is disabled.
+        self.assertEqual(probe.LOGICAL_MAPPER_BYTES, 16 * 1024 * 1024)
+        self.assertFalse(probe._keep_active_capacity_supported(
+            {"size_bytes": 64 * 1024 * 1024 * 1024}))
+        self.assertFalse(probe._keep_active_capacity_supported(
+            {"size_bytes": 64 * 1024 * 1024}))
+        for invalid in (None, False, "16777216", 0, -1):
+            with self.subTest(invalid=invalid):
+                self.assertFalse(probe._keep_active_capacity_supported(
+                    {"size_bytes": invalid}))
+        self.assertTrue(probe._keep_active_capacity_supported(
+            {"size_bytes": 8 * 1024 * 1024}))
+        with mock.patch.object(
+                probe, "_verify_target_identity") as verify:
+            with self.assertRaisesRegex(
+                    probe.ProbeError, "cannot retain.*capacity"):
+                probe._verify_kept_swapz_active(
+                    {"module_ownership": "MODULE_OWNED"},
+                    {"size_bytes": 64 * 1024 * 1024},
+                    "/dev/mapper/synthetic")
+            verify.assert_not_called()
+        # Consent is never requested on an undersized mapper.
+        run_source = SCRIPT.read_text()
+        self.assertIn(
+            "if (_keep_active_capacity_supported(target) and\n"
+            "                        _operator_keep_swapz_active_after_pass()):",
+            run_source)
+
     def test_keep_active_verification_requires_exact_owned_swap(self):
         # Purely mocked: these checks must never activate a host swap device.
         target = {
             "device": "/dev/synthetic-part", "header": b"h" * probe.PAGE_BYTES,
             "major": 8, "minor": 17,
+            "size_bytes": 8 * 1024 * 1024,
         }
         state = {"module_ownership": "MODULE_OWNED"}
         mapper = "/dev/mapper/owned-swapz"
@@ -2607,6 +2638,7 @@ class PhysicalSwapProbeTests(unittest.TestCase):
         target = {
             "device": "/dev/synthetic", "header": original_header,
             "major": 8, "minor": 4,
+            "size_bytes": 8 * 1024 * 1024,
         }
         active_mapper = {"priority": 32767, "size_kib": 1024}
 
