@@ -977,6 +977,23 @@ static int test_adjacent_distinct_extent_coalescing(void)
 
 	init_private_read_engine(&first, scratch_read);
 	init_private_read_engine(&second, scratch_read_second);
+	/* A corrupted RAM descriptor can still fit inside its physical
+	 * extent. It must not authorize either direct or cached lower reads
+	 * when the compressed length exceeds the production codec limit. */
+	{
+		const swapz_u16 saved_length = maps[0].payload_length;
+
+		maps[0].payload_length = SWAPZ_BLOCK_BYTES;
+		CHECK(swapz_engine_required_read_range(
+			      &first, logical0, 1,
+			      maps[0].start_block, maps[0].extent_blocks,
+			      &first0, &blocks0) == -ESTALE);
+		CHECK(swapz_engine_required_read_range_cached(
+			      &first, logical0, 1,
+			      maps[0].start_block, maps[0].extent_blocks,
+			      &first0, &blocks0) == -ESTALE);
+		maps[0].payload_length = saved_length;
+	}
 	CHECK(swapz_engine_required_read_range(&first, logical0, 1,
 			maps[0].start_block, maps[0].extent_blocks,
 			&first0, &blocks0) == 0);

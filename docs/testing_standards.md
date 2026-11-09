@@ -33,7 +33,10 @@ values synchronized; those estimates are not observed peak RAM.
 The production-C RAM authority regression must also forge a matching
 out-of-extent compressed payload descriptor and prove `-EUCLEAN`
 before CRC reads the caller-owned image; stale and corrupted-CRC paths
-remain independently checked.
+remain independently checked. The shared direct/cached lower READ-range
+preflight must reject compressed RAM map lengths over
+`SWAPZ_MAX_COMPRESSED` even when the malformed payload still fits within
+the selected extent; do not submit speculative lower I/O for invalid maps.
 
 Under an explicit one-block cold-read budget, native packed-read regressions
 must verify one lower payload-block read per logical request, no inherited

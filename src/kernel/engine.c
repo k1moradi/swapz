@@ -921,6 +921,10 @@ static int swapz_engine_required_read_range_resident(
 			    map->start_block != start_block ||
 			    map->extent_blocks != extent_blocks ||
 			    !map->payload_length ||
+			    /* A payload longer than the codec maximum cannot be
+			     * represented by a valid authoritative RAM mapping.
+			     * Reject it before any lower prefetch or block-mask plan. */
+			    map->payload_length > SWAPZ_MAX_COMPRESSED ||
 			    map->payload_offset >= extent_bytes ||
 			    map->payload_length >
 			    extent_bytes - map->payload_offset)
