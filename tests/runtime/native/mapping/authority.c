@@ -469,6 +469,14 @@ static int test_full_publish_and_authoritative_reads(void)
 		if (index == 0) {
 			struct swapz_map forged = observed;
 
+			/* A missing observed mapping must fail without dereferencing it. */
+			payload = extent;
+			CHECK(swapz_read_authoritative_peeked_payload(
+				      &authority, index, NULL, extent, 16384,
+				      &decoded, extent + observed.payload_offset,
+				      &payload) == -EINVAL);
+			CHECK(payload == NULL);
+
 			forged.payload_offset++;
 			CHECK(swapz_read_authoritative_peeked(&authority, index, &forged,
 					    extent, 16384,

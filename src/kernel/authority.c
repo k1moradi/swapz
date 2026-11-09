@@ -3226,10 +3226,12 @@ int swapz_read_authoritative_peeked_payload(
 	const struct swapz_map *current_map;
 	swapz_u32 expected_sequence;
 	int error;
-	if (!peeked || !stored || !payload) return -EINVAL;
+	if (!payload)
+		return -EINVAL;
 	*payload = NULL;
-	if (!metadata ||
-	    bytes_total != (swapz_u32)observed->extent_blocks * SWAPZ_BLOCK_BYTES)
+	if (!observed || !peeked || !stored || !metadata)
+		return -EINVAL;
+	if (bytes_total != (swapz_u32)observed->extent_blocks * SWAPZ_BLOCK_BYTES)
 		return -EINVAL;
 	error = swapz_read_observed_authority(
 		a, logical_page, observed, &current_map);
