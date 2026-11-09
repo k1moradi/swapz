@@ -2534,6 +2534,10 @@ class PhysicalSwapProbeTests(unittest.TestCase):
         cleanup = run.index("if partition_claim_attempted:", keep_prompt)
         self.assertLess(oracle_pass, keep_prompt)
         self.assertLess(keep_prompt, cleanup)
+        # Do not claim a persistent module owner based on a test process.
+        self.assertIn("KEEP_SWAPZ_BLOCKED_NO_DURABLE_OWNER", run)
+        self.assertIn("no_durable_recovery_owner", run)
+        self.assertNotIn('results["kept_swapz_active"] = True', run)
 
         recovery_start = script.index("def recover(")
         recovery_end = script.index(

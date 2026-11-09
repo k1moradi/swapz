@@ -4327,30 +4327,19 @@ def run_probe(device_arg, confirm_arg, state_dir_arg, review_path,
             results["oracle_suite"] = "PHASES_PASS_RECOVERY_PENDING"
             results["final_recovery_state"] = "ORACLE_PASS"
             _save_results(state_dir, results)
-            if (development_only and algorithm_real_swap and
-                    _operator_keep_swapz_active_after_pass()):
-                active_mapper_swap = _verify_kept_swapz_active(
-                    state, target, mapper)
-                results["oracle_suite"] = "PASS_ACTIVE_KEPT"
-                results["operator_choice"] = "KEEP_SWAPZ_ACTIVE"
-                results["kept_swapz_active"] = True
-                results["original_header_matches_final"] = True
-                results["mapper_swap_priority"] = active_mapper_swap["priority"]
-                results["end_timestamp"] = _utc_timestamp()
-                _save_results(state_dir, results)
-                print("PHYSICAL_ALGORITHM_REAL_SWAP=PASS")
-                if virtual_device_only:
-                    print("VIRTUAL_DEVICE_ONLY=PASS not_physical_qualification")
-                print("PHYSICAL_DEVELOPMENT_SMOKE=PASS")
-                print("EVIDENCE_CLASS=DEVELOPMENT_ONLY_NOT_PHYSICAL_QUALIFICATION")
-                print(
-                    "PHYSICAL_SWAPZ_STATE=ACTIVE "
-                    "original-swap-header=unchanged "
-                    "next_trial_preflight=restores-owned-session")
-                print(f"PHYSICAL_RESULTS={state_dir / RESULTS_NAME}")
-                return
             if development_only and algorithm_real_swap:
-                results["operator_choice"] = "RESTORE_ORDINARY_SWAP"
+                # A PASS cannot transfer module-load ownership. recover()
+                # refuses to remove a module after the owning test process
+                # exits. Never leave active swapz without a durable manager
+                # able to verify and stop the exact mapper and module later.
+                if _operator_keep_swapz_active_after_pass():
+                    results["operator_choice"] = (
+                        "KEEP_SWAPZ_BLOCKED_NO_DURABLE_OWNER")
+                    print(
+                        "KEEP_SWAPZ=BLOCKED reason=no_durable_recovery_owner "
+                        "action=restore_ordinary_swap", file=sys.stderr)
+                else:
+                    results["operator_choice"] = "RESTORE_ORDINARY_SWAP"
                 _save_results(state_dir, results)
         except BaseException as exc:
             failure = exc

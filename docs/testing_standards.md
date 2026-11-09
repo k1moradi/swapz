@@ -4,6 +4,17 @@
 
 **Three-tier test policy:** `make fast_test` is development-only and never qualifies or publishes `test_results.json`; `make test` runs the algorithm/RAM path and returns INCOMPLETE (nonzero) until physical source/run/target admission is qualified; `make test_full` retains all rootless DKMS/systemd integration and RAM qualification. Both privileged tiers report BLOCKED (nonzero) if noninteractive privilege is unavailable. RAM/integration PASS cannot certify physical storage or cold-boot production acceptance. Private scripts and CI jobs are implementation details, not operator interfaces.
 
+## Keep-active lifecycle ownership blocker
+
+A test process's module-load continuity proof does not survive process exit.
+The recovery command intentionally refuses to unload a module without it.
+Until a separate durable manager can accept, verify, and subsequently stop
+the exact mapper/module after the helper exits, a post-PASS keep request must
+record `KEEP_SWAPZ_BLOCKED_NO_DURABLE_OWNER`, print a visible warning, and
+proceed with normal owned teardown and original SWAPSPACE2 swap restoration.
+Do not misreport this as a successful keep-active feature. Re-enable only
+after loaded tests prove cross-process handoff and safe later stop/recovery.
+
 ## New P0 ordinary swap and RAM-metadata acceptance gate
 
 Real device/VM backing must already be SWAPSPACE2. Assert byte-exact backing
