@@ -446,14 +446,14 @@ Unless evidence changes the order, work on:
    retains 3,385,024 GC-reserve blocks plus one independent 256-block foreground
    COW segment, exposes 110,920,466,432 mapper bytes and 110,920,462,336
    Linux-usable swap bytes. The 17 source-derived capacity-index arrays total
-   776,070,968 bytes (740.1189 MiB): 24 bytes per logical page for the
-   16-byte map plus two 32-bit segment-membership links, 4 bytes per physical
+   884,391,736 bytes (843.4217 MiB): 28 bytes per logical page for the
+   20-byte map plus two 32-bit segment-membership links, 4 bytes per physical
    block for live-record, extent-class and sequence-delta indexes, and 36
    bytes per segment for GC/accounting, page-list, trim/role and sequence-base
    sidecars. Independently rounding each array to 4KiB allocation pages yields
-   776,114,176 bytes. The largest single array is the 433,283,072-byte mapping
+   884,436,992 bytes. The largest single array is the 541,603,840-byte mapping
    table. Against the frozen 1.25GiB metadata-and-target peak limit,
-   page-rounded capacity-index arrays leave 566,063,104 bytes (539.84 MiB) for
+   page-rounded capacity-index arrays leave 457,740,288 bytes (436.54 MiB) for
    fixed target allocations and runtime overhead; this is arithmetic headroom,
    not a measured fit. These figures exclude fixed target scratch, caches,
    workspaces, vmalloc metadata, page tables and allocator implementation
