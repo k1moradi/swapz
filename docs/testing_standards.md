@@ -7262,9 +7262,17 @@ page eviction, missing command, a short page or mismatched data must never
 produce a PASS.
 
 After the five RAM stages pass, interactive `make test` may use the separate
-unprivileged `tests/tools/algorithm-physical.py` to identify one exact swap
-partition on a USB disk, including a swap partition that shares its parent
-with mounted root/boot siblings. The `lsblk --json` query must explicitly
+unprivileged `tests/tools/algorithm-physical.py` to identify USB
+swap-partition candidates, including a partition on a disk containing mounted
+root/boot siblings. If more than one candidate has a distinct path, PARTUUID,
+and swap UUID, the selector lists the candidates and requires an explicit
+numerical choice (Enter cancels). Choosing a partition does not authorize a
+write: the user must separately answer one default-No yes/no question naming
+the selected target. Only the root-owned helper can call normal `swapoff`
+on an active target, after revalidating device identity, memory headroom,
+durable backup, recovery-parent separation and ownership. It verifies the
+selected target is inactive before writing any header, and leaves an already
+inactive target alone. A Yes cannot bypass the physical-device admission rules. The `lsblk --json` query must explicitly
 use `--tree` with its PATH identity column: without NAME or --tree,
 util-linux omits the `children[]` JSON hierarchy, silently hiding all USB
 partitions from the existing scanner. Rootless tests must validate the real

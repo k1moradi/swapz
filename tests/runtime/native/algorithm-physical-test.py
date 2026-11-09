@@ -66,6 +66,62 @@ class AlgorithmPhysicalTest(unittest.TestCase):
         self.assertEqual(subject._eligible_partitions(
             {"blockdevices":[{**self.device,"tran":"nvme"}]}), [])
 
+    def test_multiple_candidates_require_explicit_selection_before_confirmation(self):
+        first = {
+            "path": "/dev/sdb1", "parent": "/dev/sdb",
+            "partuuid": "deadbeef-01", "uuid": "aaaaaaaa-0000",
+            "size_bytes": 128 * 1024 * 1024,
+        }
+        second = {
+            "path": "/dev/sdc1", "parent": "/dev/sdc",
+            "partuuid": "cafebabe-01", "uuid": "bbbbbbbb-0000",
+            "size_bytes": 256 * 1024 * 1024,
+        }
+        with mock.patch("builtins.input", return_value="2") as response, \
+             mock.patch("builtins.print") as output:
+            self.assertIs(subject._select_swap_partition([first, second]),
+                          second)
+        response.assert_called_once()
+        self.assertTrue(any("Identifiable USB swap partitions" in str(call)
+                            for call in output.call_args_list))
+        for answer in ("", "0", "3", "yes", "-1", " 2", "２"):
+            with self.subTest(answer=answer), \
+                 mock.patch("builtins.input", return_value=answer), \
+                 mock.patch("builtins.print"):
+                if answer == "":
+                    self.assertIsNone(
+                        subject._select_swap_partition([first, second]))
+                else:
+                    with self.assertRaisesRegex(ValueError, "selection is invalid"):
+                        subject._select_swap_partition([first, second])
+        with mock.patch("builtins.input", side_effect=EOFError), \
+             mock.patch("builtins.print"):
+            self.assertIsNone(subject._select_swap_partition([first, second]))
+        with mock.patch("builtins.input") as response:
+            self.assertIs(subject._select_swap_partition([first]), first)
+            response.assert_not_called()
+        for field in ("path", "partuuid", "uuid"):
+            with self.subTest(field=field):
+                duplicated = {**second, field: first[field]}
+                with self.assertRaisesRegex(ValueError, "duplicate.*identity"):
+                    subject._select_swap_partition([first, duplicated])
+
+    def test_cancelled_partition_selection_never_prompts_or_calls_sudo(self):
+        with mock.patch.object(subject.sys.stdin, "isatty",
+                               return_value=True), \
+             mock.patch.object(subject.sys.stdout, "isatty",
+                               return_value=True), \
+             mock.patch.object(subject, "_require_read_only_preflight",
+                               return_value=None), \
+             mock.patch("builtins.input") as confirmation, \
+             mock.patch.object(subject.subprocess, "run") as command, \
+             mock.patch("builtins.print") as output:
+            self.assertEqual(subject.main(), 2)
+        confirmation.assert_not_called()
+        command.assert_not_called()
+        self.assertTrue(any("selection_declined" in str(call)
+                            for call in output.call_args_list))
+
     def test_make_test_evidence_is_forwarded_only_as_exact_private_pair(self):
         expected = str(subject.ROOT / "build/tests/algorithm-ram-evidence.json")
         with mock.patch.dict(subject.os.environ, {

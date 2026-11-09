@@ -74,6 +74,34 @@ def _eligible_partitions(lsblk_output: dict) -> list[dict]:
     return candidates
 
 
+def _select_swap_partition(candidates: list[dict]) -> dict | None:
+    """Select one identified partition, without authorizing any write."""
+    if not candidates:
+        raise ValueError("no identifiable USB swap partition")
+    for key in ("path", "partuuid", "uuid"):
+        identities = [candidate[key].lower() for candidate in candidates]
+        if len(set(identities)) != len(identities):
+            raise ValueError("duplicate USB swap partition identity")
+    if len(candidates) == 1:
+        return candidates[0]
+    print("Identifiable USB swap partitions (selection is not authorization):")
+    for number, candidate in enumerate(candidates, start=1):
+        print(f"  {number}. {candidate['path']}  Parent: {candidate['parent']}  "
+              f"PARTUUID: {candidate['partuuid']}  "
+              f"Bytes: {candidate['size_bytes']}")
+    try:
+        selection = input(
+            f"Select swap partition [1-{len(candidates)}, Enter to cancel]: ")
+    except EOFError:
+        return None
+    if not selection:
+        return None
+    if (not selection.isascii() or not selection.isdecimal() or
+            int(selection) not in range(1, len(candidates) + 1)):
+        raise ValueError("swap partition selection is invalid")
+    return candidates[int(selection) - 1]
+
+
 def _selected_swap_inventory(partition: dict, swap_lines: list[str]) -> dict:
     """Observe exact active swap identity, never authorize a swapoff.
 
@@ -166,7 +194,7 @@ def _require_bare_metal_host() -> None:
                 f"cannot verify bare-metal {mode[2:]} status")
 
 
-def _require_read_only_preflight() -> dict:
+def _require_read_only_preflight() -> dict | None:
     if os.geteuid() == 0:
         raise ValueError("algorithm confirmation must run unprivileged")
     _require_development_linux_abi()
@@ -193,9 +221,9 @@ def _require_read_only_preflight() -> dict:
         candidates = _eligible_partitions(json.loads(block_info.stdout))
     except (ValueError, TypeError, RecursionError) as error:
         raise ValueError("invalid or ambiguous block inventory") from error
-    if len(candidates) != 1:
-        raise ValueError("expected exactly one identifiable USB swap partition")
-    selected = candidates[0]
+    selected = _select_swap_partition(candidates)
+    if selected is None:
+        return None
     selected.update(_selected_swap_inventory(selected, swap_lines))
     selector = Path("/dev/disk/by-uuid") / selected["uuid"]
     if not selector.is_symlink() or \
@@ -227,6 +255,9 @@ def main() -> int:
     except (OSError, subprocess.SubprocessError, ValueError) as error:
         print("PHYSICAL_ALGORITHM_REAL_SWAP=BLOCKED " + str(error))
         return 2
+    if selected is None:
+        print("PHYSICAL_ALGORITHM_REAL_SWAP=NOT_RUN reason=selection_declined")
+        return 2
     print("Physical algorithm trial (disposable swap data):")
     print(f"  Partition: {selected['path']}  Parent: {selected['parent']}")
     print(f"  PARTUUID: {selected['partuuid']}  Bytes: {selected['size_bytes']}")
@@ -253,6 +284,9 @@ def main() -> int:
     except ValueError as error:
         print("PHYSICAL_ALGORITHM_REAL_SWAP=BLOCKED " + str(error))
         return 2
+    print("  After confirmation, the privileged helper durably backs up recovery "
+          "state, checks memory headroom, and calls ordinary swapoff on active "
+          "swap before writing the partition.")
     print("  Existing swap header is restored after successful teardown")
     try:
         confirmed = input("Run bounded swapz Linux swap trial on this partition? [y/N] ")
