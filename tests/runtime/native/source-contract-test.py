@@ -1767,16 +1767,16 @@ dmsetup() {
         self.assertIn("read_full_extent_reqs=%u read_full_cache_hits=%u", status)
         self.assertIn("read_two_block_skips=%u", status)
         self.assertIn("read_two_block_skips++", engine)
-        self.assertIn("peek.payload_offset != observed.payload_offset", engine)
         engine_read = source_body("swapz_engine_read_page", engine)
-        peeked_authority = source_body(
-            "swapz_read_authoritative_peeked_payload", AUTH)
-        self.assertIn("swapz_read_authoritative_peeked_payload(", engine_read)
-        self.assertNotIn("swapz_read_authoritative(", engine_read)
-        self.assertIn("swapz_crc32c_bytes(", peeked_authority)
-        self.assertIn("swapz_disk_sequence(", peeked_authority)
-        self.assertNotIn("swapz_lookup(", peeked_authority)
-        self.assertIn("payload_offsets[index] = decoded.payload_offset",
+        ram_authority = source_body("swapz_read_authoritative_payload", AUTH)
+        self.assertIn("observed.payload_offset >= extent_bytes", engine_read)
+        self.assertIn("swapz_read_authoritative_payload(", engine_read)
+        self.assertNotIn("swapz_peek(", engine_read)
+        self.assertNotIn("swapz_lookup_validated_descriptor(", engine_read)
+        self.assertIn("swapz_crc32c_bytes(", ram_authority)
+        self.assertNotIn("swapz_disk_sequence(", ram_authority)
+        self.assertNotIn("swapz_lookup(", ram_authority)
+        self.assertIn("payload_offsets[index] = record->payload_offset",
                       (ROOT / "src/kernel/authority.c").read_text())
         self.assertIn("read_full_extent_requests", header)
         self.assertIn("read_full_extent_cache_hits", header)
@@ -1787,9 +1787,9 @@ dmsetup() {
         self.assertIn("engine->read_metadata_lru_hits++", engine)
         self.assertIn("swapz_read_metadata_lru_lookup(", engine)
         self.assertIn("swapz_read_metadata_lru_commit(", engine)
-        self.assertIn("metadata != engine->read_scratch", engine_read)
+        self.assertIn("payload_first == 0U", engine_read)
         self.assertIn("engine->read_metadata_copy_bytes +=", engine_read)
-        self.assertIn("reusable_mask &= (swapz_u8)~1U", engine_read)
+        self.assertIn("remaining_coalesced", engine_read)
         self.assertIn("#define SWAPZ_READ_METADATA_CACHE_ENTRIES 512U", header)
         self.assertIn("#define SWAPZ_READ_METADATA_CACHE_WAYS 4U", header)
         self.assertIn("#define SWAPZ_READ_METADATA_CACHE_CHOICES 2U", header)
@@ -7157,15 +7157,15 @@ int main(void)
         self.assertNotIn("ld4", predictor_neon)
         self.assertNotIn("dup %0.2d", neon_inverse)
 
-        # Validated metadata-cache bytes bypass full swapz_validate(), but a
-        # sequence mismatch is rejected before any lower payload read.
-        self.assertIn("metadata_already_validated", read)
-        self.assertIn("swapz_lookup_validated_descriptor(", read)
-        self.assertIn("&peek, NULL);", read)
-        self.assertIn("swapz_extent_sequence_lookup(", read)
-        self.assertIn("metadata_sequence != expected_sequence", read)
-        self.assertLess(read.index("metadata_sequence != expected_sequence"),
-                        read.index("if (last >= start)"))
+        # Compressed reads derive their exact payload range from volatile RAM
+        # mapping authority; no serialized extent descriptor or sequence field
+        # is required before lower payload I/O.
+        self.assertIn("observed.payload_offset", read)
+        self.assertIn("observed.payload_length", read)
+        self.assertIn("swapz_read_authoritative_payload(", read)
+        self.assertNotIn("swapz_peek(", read)
+        self.assertNotIn("swapz_lookup_validated_descriptor(", read)
+        self.assertNotIn("metadata_sequence", read)
         self.assertIn("copy_mask = extent_mask &", read)
         self.assertIn("coalesced_mask &= (swapz_u8)~extent_mask", read)
         self.assertIn("copy_mask = block_mask &",
@@ -7257,7 +7257,9 @@ int main(void)
         # Generic codec/stage entry points retain duplicate defense, while
         # range/generation checks remain in the unique staging policy.
         self.assertIn("if (!logical_page_unique)", append_crc)
-        self.assertIn("swapz_append_prehashed_encoded_unique", append_page)
+        self.assertIn("swapz_ram_extent_append_prehashed", append_page)
+        self.assertIn("swapz_ram_extent_begin_unique", prepare)
+        self.assertIn("swapz_mark_compressed_data_only", prepare)
         self.assertIn("swapz_stage_batch_unique", prepare)
         self.assertIn("page >= a->logical_pages", stage_policy)
         self.assertIn("generation == ~(swapz_u32)0", stage_policy)
@@ -7330,7 +7332,7 @@ int main(void)
         # fairness across successful GC rotations and equal-cost victim ties.
         self.assertIn("read_validated_payload_crc32c", engine_h)
         self.assertIn(
-            "engine->read_validated_payload_crc32c = peek.payload_crc32c", read)
+            "engine->read_validated_payload_crc32c = observed.payload_crc32c", read)
         self.assertIn("ctx->engine.read_validated_payload_crc32c", gc_relocate)
         self.assertIn("start_probe = ctx->authority.next_segment_probe", gc_choose)
         self.assertIn("(start_probe + scan) % ctx->segment_count", gc_choose)

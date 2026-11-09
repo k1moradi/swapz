@@ -27,7 +27,11 @@ remain independently checked.
 New source/native/loaded qualification must prove in-RAM CRC/generation,
 record offsets/lengths, 4/8/16KiB packing, read correctness, GC, overwrite,
 DISCARD and concurrency, partial/failing I/O, memory capacity and no stale
-mapping after target recreation. Native data-only builder coverage must also
+mapping after target recreation. Source contracts for the migrated engine must reject regressions back to
+serialized descriptor lookup on compressed reads and require data-only writer
+transactions to bind RAM descriptors before publication. Legacy codec helpers
+may remain directly unit-tested but are not production read/write authority.
+Native data-only builder coverage must also
 alias its descriptor array deliberately with the lower-write image and prove
 the constructor rejects that ownership violation without changing the image.
 Also reject builders inside either buffer and payload inputs overlapping
