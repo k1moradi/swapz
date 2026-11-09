@@ -546,6 +546,11 @@ def loaded_preflight_diagnostic(output):
 
 
 def build():
+    # Every real build verifies the in-band codec admission interlock,
+    # including runs that reuse a native/replay checkpoint.
+    run([sys.executable, "-B",
+         "tests/runtime/native/ram-metadata-admission-test.py"],
+        stdout=subprocess.DEVNULL)
     jobs = f"-j{max(1, min(os.cpu_count() or 1, 16))}"
     run(["make", jobs, "--no-print-directory"], stdout=subprocess.DEVNULL)
 
@@ -1384,10 +1389,6 @@ def main():
     }
     write_development_evidence(evidence)
     started = time.monotonic()
-    # Always check the real-device interlock, including RESUME=1 runs.
-    run([sys.executable, "-B",
-         "tests/runtime/native/ram-metadata-admission-test.py"],
-        stdout=subprocess.DEVNULL)
     build()
     try:
         input_sha256 = resume_input_fingerprint()
