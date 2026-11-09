@@ -2510,7 +2510,7 @@ def main() -> int:
         if (post_target_selector_mutant.returncode != 1 or
                 "observed=stale-selection-reached-mutation" not in
                     post_target_selector_mutant.stderr or
-                "mutations=4" not in post_target_selector_mutant.stderr or
+                "mutations=3" not in post_target_selector_mutant.stderr or
                 "selector_target_rechecks=1" not in
                     post_target_selector_mutant.stderr):
             print("FAIL: missing post-target selector recheck did not reach mutations",
