@@ -476,8 +476,8 @@ template for new lifecycle code. New tests must prove those legacy writers are
 unreachable from current physical admission rather than preserving their former
 formatter interfaces.
 
-The primary manager must use the same structural PARTUUID grammar as the
-standalone formatter: 8..64 characters, at least eight hexadecimal digits,
+The primary manager and all physical-admission helpers must use the same
+structural PARTUUID grammar: 8..64 characters, at least eight hexadecimal digits,
 single internal hyphens only, no leading/trailing/consecutive hyphen, ASCII
 hexadecimal only, and canonical lowercase output. Do not specialize this to the
 current MBR-style `8hex-2hex` value because GPT PARTUUIDs remain valid inputs.
