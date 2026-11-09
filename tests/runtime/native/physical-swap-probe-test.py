@@ -1541,11 +1541,13 @@ class PhysicalSwapProbeTests(unittest.TestCase):
                 "dm_uuid": f"SWAPZ-TEST-PHYSICAL-{'0' * 16}",
             })
 
-    def test_recovery_restores_header_before_reenabling_original_swap(self):
+    def test_recovery_verifies_header_before_reenabling_original_swap(self):
         events = []
         with tempfile.TemporaryDirectory() as temp:
             state_dir = Path(temp) / "state"
-            state, backup = self.make_recovery_state(state_dir)
+            state, header = self.make_recovery_state(state_dir)
+            state["stage"] = "ORACLE_PASS"
+            self.save_recovery_fixture(state_dir, state)
             active = {"path": state["device"], "priority": -1,
                       "size_kib": state["swap_size_kib"], "used_kib": 0}
 
@@ -1557,80 +1559,95 @@ class PhysicalSwapProbeTests(unittest.TestCase):
                         args, 0, stdout=state["dm_uuid"] + "\n", stderr="")
                 return subprocess.CompletedProcess(args, 0, stdout="", stderr="")
 
-            def write_header(device, header, target, **kwargs):
-                self.assertEqual(target["major"], 8)
-                events.append(("write", device, header))
+            def read_header(_device, _target):
+                events.append(("header-read",))
+                return header
 
             with mock.patch.object(probe, "_validate_state_dir"), \
                     mock.patch.object(
                         probe, "inspect_target_identity_for_recovery",
                         return_value={"device": state["device"], "major": 8,
-                                      "minor": 4, "size_bytes": state["size_bytes"]}), \
+                                      "minor": 4, "size_bytes": state["size_bytes"],
+                                      "partuuid": state["partuuid"]}), \
                     mock.patch.object(probe, "_run", side_effect=run), \
                     mock.patch.object(probe, "_holder_names", return_value=[]), \
-                    mock.patch.object(probe, "_mountinfo_has_device", return_value=False), \
+                    mock.patch.object(probe, "_mountinfo_has_device",
+                                      return_value=False), \
                     mock.patch.object(probe, "_read_block0",
-                                      side_effect=[bytes(probe.PAGE_BYTES), backup]), \
-                    mock.patch.object(probe, "_verify_target_identity"), \
-                    mock.patch.object(probe, "_write_block0", side_effect=write_header), \
+                                      side_effect=read_header), \
+                    mock.patch.object(probe, "_write_block0") as write_header, \
                     mock.patch.object(probe, "_active_swap_for",
                                       side_effect=[None, None, active]):
                 recovered = probe.recover(
                     state_dir, state["device_arg"], state["device_arg"])
 
         self.assertEqual(recovered["stage"], "COMPLETE")
-        write_event = next(i for i, event in enumerate(events)
-                           if event[0] == "write")
+        write_header.assert_not_called()
+        header_read = next(i for i, event in enumerate(events)
+                           if event[0] == "header-read")
         swapon_event = next(i for i, event in enumerate(events)
                             if event[0] == "run" and event[1][0] == "swapon")
-        self.assertLess(write_event, swapon_event)
-        self.assertEqual(events[write_event], ("write", state["device"], backup))
+        self.assertLess(header_read, swapon_event)
         self.assertEqual(events[swapon_event][1], ("swapon", state["device"]))
-
-    def test_recovery_never_overwrites_a_header_while_swap_is_active(self):
+    def test_recovery_never_writes_header_when_original_swap_is_already_active(self):
         with tempfile.TemporaryDirectory() as temp:
             state_dir = Path(temp) / "state"
-            state, _ = self.make_recovery_state(state_dir)
-            run_calls = []
-            run = mock.Mock(side_effect=lambda args, **kwargs: (
-                run_calls.append(tuple(args)) or subprocess.CompletedProcess(
-                    args, 0, stdout=state["dm_uuid"] + "\n" if args[:2] ==
-                    ["dmsetup", "info"] else "", stderr="")))
+            state, header = self.make_recovery_state(state_dir)
+            state["stage"] = "ORACLE_PASS"
+            self.save_recovery_fixture(state_dir, state)
+            active = {"path": state["device"], "used_kib": 0,
+                      "size_kib": state["swap_size_kib"],
+                      "priority": state["swap_priority"]}
+            commands = []
+
+            def run(args, **kwargs):
+                del kwargs
+                commands.append(tuple(args))
+                return subprocess.CompletedProcess(args, 0, stdout="", stderr="")
+
             with mock.patch.object(probe, "_validate_state_dir"), \
                     mock.patch.object(
                         probe, "inspect_target_identity_for_recovery",
                         return_value={"device": state["device"], "major": 8,
-                                      "minor": 4, "size_bytes": state["size_bytes"]}), \
+                                      "minor": 4, "size_bytes": state["size_bytes"],
+                                      "partuuid": state["partuuid"]}), \
                     mock.patch.object(probe, "_run", side_effect=run), \
                     mock.patch.object(probe, "_holder_names", return_value=[]), \
-                    mock.patch.object(probe, "_mountinfo_has_device", return_value=False), \
-                    mock.patch.object(probe, "_read_block0", return_value=bytes(probe.PAGE_BYTES)), \
+                    mock.patch.object(probe, "_mountinfo_has_device",
+                                      return_value=False), \
+                    mock.patch.object(probe, "_read_block0",
+                                      return_value=header), \
                     mock.patch.object(probe, "_write_block0") as write_header, \
-                    mock.patch.object(probe, "_active_swap_for", return_value={"used_kib": 0}):
-                with self.assertRaisesRegex(probe.ProbeError, "active swap"):
-                    probe.recover(
-                        state_dir, state["device_arg"], state["device_arg"])
+                    mock.patch.object(probe, "_active_swap_for",
+                                      return_value=active):
+                recovered = probe.recover(
+                    state_dir, state["device_arg"], state["device_arg"])
 
+        self.assertEqual(recovered["stage"], "COMPLETE")
         write_header.assert_not_called()
-        self.assertFalse(any(call[0] == "swapon" for call in run_calls))
-
-    def test_recovery_rejects_corrupt_header_backup_before_device_access(self):
+        self.assertFalse(any(call[0] == "swapon" for call in commands))
+    def test_legacy_journal_is_refused_before_device_access(self):
         with tempfile.TemporaryDirectory() as temp:
             state_dir = Path(temp) / "state"
             state, _ = self.make_recovery_state(state_dir)
-            (state_dir / probe.BACKUP_NAME).write_bytes(b"x" * probe.PAGE_BYTES)
+            del state["raw_header_preservation_required"]
+            self.save_recovery_fixture(state_dir, state)
+
             with mock.patch.object(probe, "_validate_state_dir"), \
-                    mock.patch.object(probe, "inspect_target_identity_for_recovery") as inspect, \
+                    mock.patch.object(
+                        probe, "inspect_target_identity_for_recovery") as inspect, \
                     mock.patch.object(probe, "_run") as run, \
                     mock.patch.object(probe, "_write_block0") as write_header:
-                with self.assertRaisesRegex(probe.ProbeError, "digest|header"):
+                with self.assertRaisesRegex(
+                        probe.ProbeError,
+                        "legacy pre-migration recovery journal requires "
+                        "read-only manual recovery"):
                     probe.recover(
                         state_dir, state["device_arg"], state["device_arg"])
 
         inspect.assert_not_called()
         run.assert_not_called()
         write_header.assert_not_called()
-
     def test_recovery_refuses_malformed_original_swap_evidence_before_device_access(self):
         # A damaged saved active-swap flag previously skipped swapon, marked
         # COMPLETE and released ownership even with the original swap absent.
