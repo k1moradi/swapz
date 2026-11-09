@@ -133,7 +133,10 @@ static inline int swapz_linux_swap_header_valid(
         swapz_sb_get_u32(block + SWAPZ_LINUX_SWAP_BAD_PAGES_OFFSET) != 0U)
         return 0;
     last_page = swapz_sb_get_u32(block + SWAPZ_LINUX_SWAP_LAST_PAGE_OFFSET);
-    if (last_page < 2U || (unsigned long long)last_page >= pages)
+    /* Require exact geometry, just as the primary manager does. A shorter
+     * declared swap area cannot authorize writes to the remaining partition.
+     */
+    if ((unsigned long long)last_page != pages - 1U)
         return 0;
     for (index = 0; index < SWAPZ_LINUX_SWAP_MAGIC_BYTES; ++index)
         if (block[SWAPZ_SUPERBLOCK_BYTES - SWAPZ_LINUX_SWAP_MAGIC_BYTES +

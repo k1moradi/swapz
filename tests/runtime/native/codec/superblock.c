@@ -1,5 +1,7 @@
 /* SPDX-License-Identifier: GPL-2.0-only */
-/* Exercise the exact freestanding production SWZ authorization validator. */
+/* Exercise ordinary SWAPSPACE2 admission alongside the legacy synthetic-only
+ * SWZ authorization validator, without opening or writing any block device.
+ */
 #include "superblock.h"
 
 #include <stdio.h>
@@ -22,6 +24,7 @@ static int check_invalid(const unsigned char *header, const char *reason)
 static int check_linux_swap_header(void)
 {
 	unsigned char header[SWAPZ_SUPERBLOCK_BYTES] = { 0 };
+	unsigned char unchanged_header[SWAPZ_SUPERBLOCK_BYTES];
 	unsigned int index;
 	int failures = 0;
 
@@ -33,12 +36,18 @@ static int check_linux_swap_header(void)
 			(unsigned char)(index + 1U);
 	memcpy(header + SWAPZ_SUPERBLOCK_BYTES - SWAPZ_LINUX_SWAP_MAGIC_BYTES,
 	       "SWAPSPACE2", SWAPZ_LINUX_SWAP_MAGIC_BYTES);
+	memcpy(unchanged_header, header, sizeof(unchanged_header));
 	if (!swapz_linux_swap_header_valid(header, DEVICE_BYTES) ||
 	    swapz_sb_valid(header, DEVICE_BYTES)) {
 		fprintf(stderr, "FAIL: ordinary Linux swap header is not admitted independently\n");
 		return 1;
 	}
+	if (memcmp(header, unchanged_header, sizeof(header))) {
+		fprintf(stderr, "FAIL: backing header changed during read-only admission\n");
+		++failures;
+	}
 	if (swapz_linux_swap_header_valid(header, DEVICE_BYTES - 1U) ||
+	    swapz_linux_swap_header_valid(header, DEVICE_BYTES + SWAPZ_SUPERBLOCK_BYTES) ||
 	    swapz_linux_swap_header_valid(header, SWAPZ_SUPERBLOCK_BYTES)) {
 		fprintf(stderr, "FAIL: accepted invalid backing device geometry\n");
 		++failures;
@@ -52,7 +61,13 @@ static int check_linux_swap_header(void)
 	swapz_sb_put_u32(header + SWAPZ_LINUX_SWAP_LAST_PAGE_OFFSET,
 			 (unsigned int)(DEVICE_BYTES / SWAPZ_SUPERBLOCK_BYTES));
 	failures += swapz_linux_swap_header_valid(header, DEVICE_BYTES);
+	/* A valid signature must not admit a truncated in-header capacity.
+	 * The backing geometry is not permission to address unused tail pages.
+	 */
 	swapz_sb_put_u32(header + SWAPZ_LINUX_SWAP_LAST_PAGE_OFFSET, 2U);
+	failures += swapz_linux_swap_header_valid(header, DEVICE_BYTES);
+	swapz_sb_put_u32(header + SWAPZ_LINUX_SWAP_LAST_PAGE_OFFSET,
+			 (unsigned int)(DEVICE_BYTES / SWAPZ_SUPERBLOCK_BYTES - 1ULL));
 	swapz_sb_put_u32(header + SWAPZ_LINUX_SWAP_BAD_PAGES_OFFSET, 1U);
 	failures += swapz_linux_swap_header_valid(header, DEVICE_BYTES);
 	swapz_sb_put_u32(header + SWAPZ_LINUX_SWAP_BAD_PAGES_OFFSET, 0U);

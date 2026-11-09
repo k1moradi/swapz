@@ -25,6 +25,20 @@ historical host-specific authorization text. Historical qualification,
 rejected pilots and deferred research are catalogued in the
 [handoff index](handoff/README.md), not maintained as active instructions here.
 
+**Current physical backing boundary (2026-11-09):** Real devices are existing
+ordinary `SWAPSPACE2` swap partitions, not swapz-formatted disks. The
+unaltered first 4096-byte backing page is never an SWZ extent. After verified
+`swapoff` and exclusive admission, swapz may write data-area payload blocks
+only; it must not change the partition signature, UUID or table. The newly
+created virtual mapper alone may receive `mkswap`. All logical mappings,
+extent descriptors, offsets, lengths, sequence/generation fields, CRCs and
+allocator/GC authority must live in bounded RAM, with explicit lifetime and
+in-flight READ/WRITE ownership. The present codec's on-media extent header
+and record descriptors violate that destination contract; they are migration
+debt, not an acceptable swap partition format. Volatile mapping loss makes
+swapz unsuitable for hibernation/resume; never claim to restore discarded
+swap payloads from a header backup.
+
 **Current contracts (linked rather than restated):** [VISION.md](VISION.md)
 defines immutable product/module/SWZ names and three testing tiers:
 `make fast_test` is nonqualifying development, `make test` is algorithm/RAM

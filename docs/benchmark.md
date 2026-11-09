@@ -8,6 +8,29 @@ Both qualification tiers retain the loaded RAM algorithm benchmark matrix.
 `make test_full` also includes rootless package/systemd integration. Neither
 RAM result is physical-device performance or endurance evidence.
 
+## Ordinary swap and RAM-metadata qualification boundary
+
+A physical or VM device comparison must use a positively identified partition
+already formatted as `SWAPSPACE2`. Record and compare the exact first 4096
+backing bytes before/after admission, workload, failure cleanup and normal
+swapon restoration. Do not run `mkswap` on a backing partition, publish
+`SWAPZ001`, write a raw header, or require a reboot; only the ephemeral
+swapz Device Mapper device may receive `mkswap`. A successful trial must
+offer the owner a keep-swapz/restore-ordinary choice instead of implicitly
+tearing down swapz. A failed or interrupted trial must fail closed on
+uncertain device ownership, without raw-header rewriting.
+
+The new data-only 4/8/16KiB extents must carry compressed payload bytes only;
+all descriptors, offsets, generations, CRCs, mapping and GC state reside in
+bounded RAM. Benchmark both this RAM footprint (allocated/peak/failed
+allocations) and lower READ/WRITE requests and bytes, including GC and flush.
+Header/descriptor-read cache hits from the previous on-media codec are not
+valid evidence of a metadata-free backing path. Paired workloads must include
+byte-exact readback, overwrites, DISCARD, partial I/O, high occupancy and
+mixed concurrent reads/writes. Current synthetic SWZ extent results remain
+legacy baseline measurements until the migration and current-source loaded
+checks pass; they never establish physical partition acceptance.
+
 ## Objective
 
 Benchmark the one product, `swapz`, against an uncompressed `off` control using the same immutable logical workload. The Device Mapper target is exactly `swapz`; the module alias is `dm-swapz`.

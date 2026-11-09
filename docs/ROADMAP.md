@@ -31,6 +31,39 @@ stale state and fail-closed errors. No reboot; after PASS offer owner a
 keep-swapz or restore-ordinary-swap choice. Do not promote before matched
 current-source acceptance tests.
 
+### P0 implementation order and fail-closed gates
+
+1. Freeze the physical admission contract: accept only an exact-geometry
+   `SWAPSPACE2` header, guard the first physical page from every lower
+   WRITE/DISCARD/GC path, and retain exclusive `swapoff`/mapper ownership.
+   Do not make header backup/restore or raw `mkswap` part of normal lifecycle.
+2. Introduce bounded, preallocated RAM-owned extent/record metadata for
+   generation, sequence, CRC, encoding, payload offset and length. Specify
+   per-record/extent memory limits, allocation failure, cancellation and
+   publication atomicity before removing on-media metadata.
+3. Migrate the compressed builder, synchronous/batched writes, asynchronous
+   completion and GC relocation together. Persist only payload blocks in
+   4/8/16KiB data extents; publish RAM authority only after fully confirmed
+   lower I/O. Protect immutable snapshots for concurrent private READ slots.
+4. Migrate targeted and coalesced READs, extent-cache keys and CRC validation
+   to use authoritative RAM descriptors. Remove lower metadata-block reads
+   rather than simulating a cache hit. Keep RAW fallback, zeros, overwrites,
+   DISCARD, barriers and physical capacity conservative under incompressible
+   workloads.
+5. Rework normal prepare/start/stop and test teardown to preserve the backing
+   signature and enable reversible swapoff/swapon without reboot. After test
+   PASS present an explicit keep-swapz or ordinary-swapon decision; keep any
+   crash-safe *session ownership* state separate from obsolete swap-header
+   restoration, without inventing persistent swapz partition metadata.
+6. Replace synthetic SWZ001 fixture assumptions; measure RAM overhead,
+   payload-only lower I/O and cold READ latency, and gate on full byte-exact
+   loaded, fault-injection, concurrency, GC, and real-partition header
+   preservation before enabling physical production testing.
+
+Each step requires a review of cross-thread ownership, bounds/overflow,
+short/error BIO paths, teardown and module unload. A passing source/header
+test cannot certify the unfinished RAM-metadata migration.
+
 ## Current production mission — dedicated SD-card host
 
 The current target is the owner-dedicated removable SD card whose observed
