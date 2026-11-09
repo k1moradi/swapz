@@ -4178,8 +4178,14 @@ def run_probe(device_arg, confirm_arg, state_dir_arg, review_path,
             state["module_ownership"] = "MODULE_PENDING"
             state["stage"] = "MODULE_PENDING"
             _save_state(state_dir, state)
-            _run(["insmod", module, "allow_physical_backing=1",
-                  "async_prepare=1"], timeout=30)
+            loaded_ram_qualified = (not development_only) or algorithm_real_swap
+            if not loaded_ram_qualified:
+                raise ProbeError(
+                    "physical run requires current-source loaded RAM qualification")
+            _run([
+                "insmod", module, "allow_physical_backing=1",
+                "physical_ram_metadata_qualified=1", "async_prepare=1",
+            ], timeout=30)
             parameter = Path(
                 "/sys/module/dm_swapz/parameters/allow_physical_backing")
             if not parameter.is_file() or (
@@ -4936,7 +4942,7 @@ def campaign_plan(device_arg, confirm_arg, expected_partuuid, source_sha):
 
 
 def _require_ram_only_metadata_for_physical_run():
-    """Refuse physical trials until payload-only metadata has loaded qualification."""
+    """Require the payload-only production representation before device admission."""
     try:
         source = (ROOT / "src/kernel/codec.h").read_text(encoding="utf-8")
     except (OSError, UnicodeError) as exc:
@@ -4944,12 +4950,6 @@ def _require_ram_only_metadata_for_physical_run():
     if re.search(r"(?m)^#define SWAPZ_CODEC_METADATA_ON_MEDIA 0U$", source) is None:
         raise ProbeError(
             "physical run blocked until compressed extent metadata is RAM-only")
-    if re.search(
-            r"(?m)^#define SWAPZ_PHYSICAL_RAM_METADATA_QUALIFIED 1U$",
-            source) is None:
-        raise ProbeError(
-            "physical run blocked until current-source loaded RAM-metadata "
-            "qualification passes")
 
 
 def main(argv=None):
