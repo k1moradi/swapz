@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-2.0-only
 /*
- * Exercise the EXACT kernel SWZ codec + authority + bounded I/O engine C
+ * Exercise the exact production payload-only extent engine + RAM authority
  * against a deterministic fault-injectable RAM lower device. No /dev access.
  */
 #include <errno.h>
@@ -207,25 +207,25 @@ static int test_uniform_pack_cliff_reduces_physical_blocks(void)
 	swapz_u32 blocks = 0;
 
 	prepare(pages, 9, 0, 0);
-	CHECK(swapz_engine_next_uniform_pack_limit(2072) == 2030);
-	CHECK(swapz_engine_next_uniform_pack_limit(2024) == 1802);
-	CHECK(swapz_engine_next_uniform_pack_limit(1500) == 1472);
-	CHECK(swapz_engine_next_uniform_pack_limit(568) == 566);
+	CHECK(swapz_engine_next_uniform_pack_limit(2072) == 2048);
+	CHECK(swapz_engine_next_uniform_pack_limit(2024) == 1820);
+	CHECK(swapz_engine_next_uniform_pack_limit(1500) == 1489);
+	CHECK(swapz_engine_next_uniform_pack_limit(568) == 564);
 	CHECK(swapz_engine_next_uniform_pack_limit(1) == 0);
 	CHECK(swapz_engine_next_uniform_pack_limit(3569) == 0);
 
 	for (index = 0; index < 9; ++index)
-		pages[index].length = 1803;
+		pages[index].length = 1821;
 	CHECK(plan_default(pages, 9, classes, takes, &groups) == 0);
 	for (index = 0; index < groups; ++index)
 		blocks += classes[index];
-	/* Five blocks are byte-minimal at 1803. The existing read-cost
-	 * tie-breaker correctly prefers five one-block extents here. */
+	/* Nine 1821-byte payloads exceed 16KiB. Five blocks are byte-minimal;
+	 * the cold-read tie-breaker prefers five one-block extents. */
 	CHECK(blocks == 5 && groups == 5);
 
 	blocks = 0;
 	for (index = 0; index < 9; ++index)
-		pages[index].length = 1802;
+		pages[index].length = 1820;
 	CHECK(plan_default(pages, 9, classes, takes, &groups) == 0);
 	for (index = 0; index < groups; ++index)
 		blocks += classes[index];
@@ -236,8 +236,6 @@ static int test_uniform_pack_cliff_reduces_physical_blocks(void)
 static int test_full_window_and_selective_reads(void)
 {
 	struct swapz_compressed_page pages[16];
-	struct swapz_decoded decoded;
-	const swapz_u8 *stored;
 	swapz_u8 output[3568], committed = 0;
 	swapz_u16 length = 0;
 	swapz_u32 index;
@@ -250,9 +248,8 @@ static int test_full_window_and_selective_reads(void)
 	CHECK(engine.submitted_blocks == 10);
 	CHECK(engine.completed_blocks == 10);
 	CHECK(disk.write_blocks == 10);
-	/* Preserve the existing cold, metadata-first lower-block bound:
-	 * disable prefetch and reuse for BOTH loops in this test. */
-	engine.max_read_blocks_per_record = 1;
+	/* Cold reads derive their exact range from RAM mapping metadata. Disable
+	 * reuse between samples so every lower block count is independently visible. */
 	for (index = 0; index < 16; ++index) {
 		swapz_engine_invalidate_read_cache(&engine);
 		CHECK(maps[index].valid && maps[index].generation == 1);
@@ -263,27 +260,21 @@ static int test_full_window_and_selective_reads(void)
 	}
 	reads = disk.read_blocks;
 	CHECK(reads == engine.physical_read_blocks);
-	CHECK(reads >= 16 && reads <= 48);
-	/* Preserve the original exact metadata-first selective-read contract.
-	 * Explicitly disable two-block prefetch for these per-page read-budget
-	 * checks and invalidate any warm metadata before each sample. The
-	 * separate engine tests verify the bounded full-extent fast path. */
+	CHECK(reads >= 16 && reads <= 32);
+	/* Verify the exact payload-only selective-read contract from authoritative
+	 * RAM offsets. No serialized header or descriptor block is read. */
 	for (index = 0; index < 16; ++index) {
 		const struct swapz_map *m = &maps[index];
 		int expected;
 
-		CHECK(swapz_lookup(disk.storage +
-				 (size_t)m->start_block * SWAPZ_BLOCK_BYTES,
-				 m->extent_blocks * SWAPZ_BLOCK_BYTES,
-				 m->record_index, &decoded, &stored) == 0);
 		{
-			swapz_u32 first = decoded.payload_offset / SWAPZ_BLOCK_BYTES;
-			swapz_u32 last = ((swapz_u32)decoded.payload_offset +
-				decoded.payload_length - 1U) / SWAPZ_BLOCK_BYTES;
+			swapz_u32 first = m->payload_offset / SWAPZ_BLOCK_BYTES;
+			swapz_u32 last = ((swapz_u32)m->payload_offset +
+				m->payload_length - 1U) / SWAPZ_BLOCK_BYTES;
 
-			expected = (int)(last - first + 1U + (first ? 1U : 0U));
+			expected = (int)(last - first + 1U);
 		}
-		CHECK(expected >= 1 && expected <= 3);
+		CHECK(expected >= 1 && expected <= 2);
 		swapz_engine_invalidate_read_cache(&engine);
 		disk.read_blocks = 0;
 		CHECK(swapz_engine_read_page(&engine, index,
@@ -781,8 +772,6 @@ static int test_full_extent_corruption_rejected(void)
 	struct swapz_compressed_page pages[7];
 	swapz_u8 output[3568], committed = 0;
 	swapz_u16 length = 0;
-	struct swapz_decoded d;
-	const swapz_u8 *stored;
 	struct swapz_map map;
 
 	CHECK(setup() == 0);
@@ -790,12 +779,9 @@ static int test_full_extent_corruption_rejected(void)
 	CHECK(write_window_sequential(pages, 7, &committed) == 0);
 	CHECK(committed == 7);
 	map = maps[6];
-	CHECK(swapz_lookup(disk.storage +
-			 (size_t)map.start_block * SWAPZ_BLOCK_BYTES,
-			 map.extent_blocks * SWAPZ_BLOCK_BYTES,
-			 map.record_index, &d, &stored) == 0);
+	CHECK(map.valid && !map.raw && map.payload_length);
 	disk.storage[(size_t)map.start_block * SWAPZ_BLOCK_BYTES +
-		     d.payload_offset] ^= 1;
+		     map.payload_offset] ^= 1;
 	CHECK(swapz_engine_read_page(&engine, 6,
 				   output, sizeof(output), &length) == -EBADMSG);
 	CHECK(length == 0);
