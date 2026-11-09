@@ -210,6 +210,20 @@ cat > "$STUBS/stat" <<SH
 if [[ \${SWAPZ_FIXTURE_CASE:-} == unreadable_identity ]]; then
     exit 13
 fi
+if [[ "\$1" == "-Lc" && "\$2" == "%u" ]]; then
+    case "\$3" in
+        /proc/[0-9]*/fd/[0-9]*)
+            # The sandbox files belong to the CI account, but this descriptor
+            # models a root-owned configfs attribute on the privileged host.
+            if [[ \${SWAPZ_FIXTURE_CASE:-} == power_attribute_wrong_owner ]]; then
+                printf '1000\n'
+            else
+                printf '0\n'
+            fi
+            exit 0
+            ;;
+    esac
+fi
 if [[ "\$1" == "-Lc" && "\$2" == "%Hr:%Lr" &&
       "\$3" == "$FIXTURE/dev/mapper/swapz-demo-$TOKEN" ]]; then
     printf '253:0\n'
@@ -498,7 +512,7 @@ run_case() {
             mkdir -p "$FIXTURE/sys/module/dm_swapz"
             printf '0\n' > "$FIXTURE/sys/module/dm_swapz/refcnt"
             ;;
-        busy_mapper|mapper_inventory_error|noncanonical_mapper_major|malformed_mapper_fields|mapper_inventory_identity_mismatch|stale_token|changed_mapper_token|primary_namespace|wrong_owner|owned_swap|owned_swap_alias|foreign_active_swap|unresolved_swap_alias|unreadable_identity|mounted_mapper|mount_inventory_empty|mount_inventory_error|swap_inventory_error|malformed_swap_inventory|recognized_readfault|recognized_codec|recognized_completion|recognized_constructor|owned_cleanup|replaced_inode|missing_sysfs_proof|mismatched_major|mismatched_devno|mismatched_index|dependency_devno_mismatch|dependency_probe_failure|partitioned_lower|foreign_holder|foreign_dependency|cleanup_failure|ambiguous_index_owner|unknown_index_owner|partial_config_proof|malformed_config_index|reused_index_alias|empty_index_alias|malformed_sysfs_dev|dangling_index_dev|malformed_proc_nullb_major|duplicate_proc_block_header|extra_foreign_holder|changed_holder_target)
+        busy_mapper|mapper_inventory_error|noncanonical_mapper_major|malformed_mapper_fields|mapper_inventory_identity_mismatch|power_attribute_wrong_owner|stale_token|changed_mapper_token|primary_namespace|wrong_owner|owned_swap|owned_swap_alias|foreign_active_swap|unresolved_swap_alias|unreadable_identity|mounted_mapper|mount_inventory_empty|mount_inventory_error|swap_inventory_error|malformed_swap_inventory|recognized_readfault|recognized_codec|recognized_completion|recognized_constructor|owned_cleanup|replaced_inode|missing_sysfs_proof|mismatched_major|mismatched_devno|mismatched_index|dependency_devno_mismatch|dependency_probe_failure|partitioned_lower|foreign_holder|foreign_dependency|cleanup_failure|ambiguous_index_owner|unknown_index_owner|partial_config_proof|malformed_config_index|reused_index_alias|empty_index_alias|malformed_sysfs_dev|dangling_index_dev|malformed_proc_nullb_major|duplicate_proc_block_header|extra_foreign_holder|changed_holder_target)
             setup_busy_module
             ;;
         *) die "unknown fixture case $case_name" ;;
@@ -537,7 +551,7 @@ run_case() {
             setup_owned_lower
             setup_mapper_node
             ;;
-        noncanonical_mapper_major|malformed_mapper_fields|mapper_inventory_identity_mismatch|recognized_readfault|recognized_codec|recognized_completion|recognized_constructor|owned_cleanup|replaced_inode|changed_mapper_token|foreign_active_swap|missing_sysfs_proof|mismatched_major|mismatched_devno|mismatched_index|dependency_devno_mismatch|dependency_probe_failure|partitioned_lower|foreign_holder|foreign_dependency|cleanup_failure|ambiguous_index_owner|unknown_index_owner|partial_config_proof|malformed_config_index|reused_index_alias|empty_index_alias|malformed_sysfs_dev|dangling_index_dev|malformed_proc_nullb_major|duplicate_proc_block_header|extra_foreign_holder|changed_holder_target)
+        noncanonical_mapper_major|malformed_mapper_fields|mapper_inventory_identity_mismatch|power_attribute_wrong_owner|recognized_readfault|recognized_codec|recognized_completion|recognized_constructor|owned_cleanup|replaced_inode|changed_mapper_token|foreign_active_swap|missing_sysfs_proof|mismatched_major|mismatched_devno|mismatched_index|dependency_devno_mismatch|dependency_probe_failure|partitioned_lower|foreign_holder|foreign_dependency|cleanup_failure|ambiguous_index_owner|unknown_index_owner|partial_config_proof|malformed_config_index|reused_index_alias|empty_index_alias|malformed_sysfs_dev|dangling_index_dev|malformed_proc_nullb_major|duplicate_proc_block_header|extra_foreign_holder|changed_holder_target)
             setup_owned_lower
             setup_mapper_node
             if [[ $case_name == missing_sysfs_proof ]]; then
@@ -696,6 +710,9 @@ run_case() {
         [[ "$output" == *'expected dmsetup inventory device identity to match canonical mapper node; observed mismatch; no holder signal; inspect device-mapper inventory and udev state without cleanup'* &&
            "$output" != *"$FIXTURE/dev/"* ]] ||
             die "$case_name did not refuse the stale mapper identity safely: $output"
+    elif [[ "$case_name" == power_attribute_wrong_owner ]]; then
+        [[ "$output" == *'phase=acquire resource_kind=null_blk expected_proof=pinned_power_attribute observed_proof=invalid_type_or_owner'* ]] ||
+            die "$case_name accepted a non-root pinned power attribute: $output"
     fi
     # Exact proof classes, not just exit codes; no host/fixture IDs in a refusal.
     case "$case_name" in
@@ -937,6 +954,7 @@ run_case mapper_inventory_error mapper_inventory BLOCKED unavailable
 run_case noncanonical_mapper_major mapper_inventory BLOCKED unavailable
 run_case malformed_mapper_fields mapper_inventory BLOCKED unavailable
 run_case mapper_inventory_identity_mismatch mapper_device_identity BLOCKED unavailable
+run_case power_attribute_wrong_owner owned_resource_proof BLOCKED unavailable
 run_case stale_token stale_run_token BLOCKED unavailable
 run_case changed_mapper_token owned_resource_proof BLOCKED unavailable
 run_case wrong_owner null_blk_owner BLOCKED unavailable

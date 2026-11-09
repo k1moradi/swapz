@@ -1589,7 +1589,11 @@ not be compared as persistent identities. Loaded preflight instead checks the
 root-owned regular-file type through its pinned power descriptor; that check
 does not grant creator authority to a later preflight process. The native
 source contract requires descriptor type/owner checks and explicitly rejects
-reintroducing cross-lookup power-attribute inode equality. Before the
+reintroducing cross-lookup power-attribute inode equality. Rootless null_blk
+fixtures must model that privileged attribute as root-owned even when the
+fixture files themselves belong to the CI account, and must include a
+non-root-owner negative case that fails at
+`expected_proof=pinned_power_attribute`. Before the
 creator powers off its
 device, it opens the named config directory without following symlinks,
 compares that descriptor's device/inode/owner with the creation-time identity,
