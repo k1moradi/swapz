@@ -472,6 +472,14 @@ int swapz_finish_raw(struct swapz_authority *authority, const struct swapz_tx *t
 /* Check raw payload integrity against volatile authoritative CRC. */
 int swapz_verify_raw(const struct swapz_authority *authority,
 		   swapz_u32 logical_page, const void *raw_page);
+/* RAM-metadata compressed READ authority. The caller supplies bytes at the
+ * observed payload offset; no serialized extent header/descriptor is trusted
+ * or required. Mapping identity is rechecked before payload CRC validation. */
+int swapz_read_authoritative_payload(const struct swapz_authority *authority,
+				   swapz_u32 logical_page,
+				   const struct swapz_map *observed,
+				   const swapz_u8 *stored,
+				   const swapz_u8 **payload);
 /*
  * Allocation-free multi-page DISCARD preflight. It temporarily models cached
  * authority accounting under the serialized owner and restores it before

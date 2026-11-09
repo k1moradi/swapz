@@ -461,6 +461,11 @@ static int test_full_publish_and_authoritative_reads(void)
 		CHECK(observed.payload_offset == decoded.payload_offset);
 		CHECK(observed.payload_crc32c == decoded.payload_crc32c);
 		CHECK(payload[0] == index + 1 && payload[2071] == index + 1);
+		payload = NULL;
+		CHECK(swapz_read_authoritative_payload(
+			      &authority, index, &observed,
+			      extent + observed.payload_offset, &payload) == 0);
+		CHECK(payload == extent + observed.payload_offset);
 		if (index == 0) {
 			struct swapz_map forged = observed;
 
@@ -473,6 +478,18 @@ static int test_full_publish_and_authoritative_reads(void)
 			CHECK(swapz_read_authoritative_peeked(&authority, index, &forged,
 					    extent, 16384,
 					    &decoded, &payload) == -ESTALE);
+			CHECK(swapz_read_authoritative_payload(
+				      &authority, index, &forged,
+				      extent + observed.payload_offset,
+				      &payload) == -ESTALE);
+			CHECK(payload == NULL);
+			extent[observed.payload_offset] ^= 1U;
+			CHECK(swapz_read_authoritative_payload(
+				      &authority, index, &observed,
+				      extent + observed.payload_offset,
+				      &payload) == -EBADMSG);
+			CHECK(payload == NULL);
+			extent[observed.payload_offset] ^= 1U;
 		}
 	}
 	CHECK(swapz_finish(&authority, &tx, extent, 16384, 4, 0) == -ESTALE);
