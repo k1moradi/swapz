@@ -152,9 +152,9 @@ static int test_selected_card_geometry_and_memory_scaling(void)
 	const swapz_u32 expected_segments = 119006U;
 	const swapz_u64 expected_mapper_bytes = 110920466432ULL;
 	const swapz_u64 expected_linux_swap_bytes = 110920462336ULL;
-	const swapz_u64 expected_index_bytes = 776070968ULL;
-	const swapz_u64 expected_page_rounded_bytes = 776114176ULL;
-	const swapz_u64 expected_largest_allocation = 433283072ULL;
+	const swapz_u64 expected_index_bytes = 884391736ULL;
+	const swapz_u64 expected_page_rounded_bytes = 884436992ULL;
+	const swapz_u64 expected_largest_allocation = 541603840ULL;
 	const swapz_u32 near_u32_physical = 0xffffff00U;
 	const swapz_u32 near_u32_logical = 3817748224U;
 	const swapz_u32 near_u32_reserve = 477218528U;
@@ -224,7 +224,7 @@ static int test_selected_card_geometry_and_memory_scaling(void)
 		2U * round_up_4k((swapz_u64)segment_count *
 				 sizeof(swapz_u8));
 	CHECK(rounded_bytes == expected_page_rounded_bytes);
-	CHECK(rounded_bytes - index_bytes == 43208ULL);
+	CHECK(rounded_bytes - index_bytes == 45256ULL);
 
 	/* Count leaf PTE pages if all 17 current indexes are independently
 	 * vmalloc-backed. Actual vmalloc/slab metadata and shared upper page-table
@@ -244,8 +244,8 @@ static int test_selected_card_geometry_and_memory_scaling(void)
 				   sizeof(swapz_u16)) +
 		2U * leaf_pte_pages_4k((swapz_u64)segment_count *
 					 sizeof(swapz_u8));
-	CHECK(leaf_pte_pages == 382ULL);
-	CHECK(leaf_pte_pages * SWAPZ_BLOCK_BYTES == 1564672ULL);
+	CHECK(leaf_pte_pages == 434ULL);
+	CHECK(leaf_pte_pages * SWAPZ_BLOCK_BYTES == 1777664ULL);
 
 	/* Exercise the top aligned u32 geometry without allocating it.
 	 * On 32-bit systems its physical liveness index is unaddressable even
