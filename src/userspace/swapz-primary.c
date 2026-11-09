@@ -12147,7 +12147,7 @@ static int swapz_primary_prepare_metadata(
 		goto out;
 	}
 	if (!original_header_digest_available) {
-		failure_phase = "original-header-rollback-proof";
+		failure_phase = "original-header-identity-proof";
 		errno = EPERM;
 		goto out;
 	}
@@ -12797,7 +12797,7 @@ static int swapz_primary_start_prepared(void)
 	durable_observation = "OBSERVED";
 	persistence_boundary = "none";
 	SWAPZ_PRIMARY_TEST_INTERRUPT_AFTER("start-starting");
-	failure_phase = "header-write";
+	failure_phase = "module-load-intent";
 	if (swapz_primary_module_load_intent_write_at(
 		    recovery_fd, lock_fd, &manifest, 0) < 0)
 		goto out;
@@ -12967,7 +12967,8 @@ static int swapz_primary_start_prepared(void)
 	 */
 	if (swapz_primary_exact_read(
 		    target_fd, observed_header, sizeof(observed_header)) < 0 ||
-	    memcmp(observed_header, original_header, sizeof(observed_header))) {
+	    swapz_primary_backing_header_matches_manifest(
+		    observed_header, &manifest) < 0) {
 		if (!errno)
 			errno = ESTALE;
 		goto out;
@@ -13062,7 +13063,6 @@ out:
 		(void)close(lock_fd);
 	if (recovery_fd >= 0)
 		(void)close(recovery_fd);
-	memset(original_header, 0, sizeof(original_header));
 	memset(observed_header, 0, sizeof(observed_header));
 	memset(prewrite_partuuid, 0, sizeof(prewrite_partuuid));
 	if (result == 0)

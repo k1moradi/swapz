@@ -191,7 +191,7 @@ class SwapzProductionSourceQualification(unittest.TestCase):
                 "qualification-report-read", "qualification-source-identity",
                 "qualified-artifact-hash-readback",
                 "qualified-artifact-identity", "target-header-inspection",
-                "target-geometry-identity", "original-header-rollback-proof",
+                "target-geometry-identity", "original-header-identity-proof",
                 "original-header-digest", "raw-target-swap-inventory",
                 "target-physical-parent-identity",
                 "cross-namespace-mount-inventory",
@@ -211,8 +211,7 @@ class SwapzProductionSourceQualification(unittest.TestCase):
                 "physical-parent-swap-inventory", "module-mapper-inventory",
                 "unexpected-module-or-mapper-present",
                 "final-raw-target-swap-inventory", "partition-owner-claim",
-                "original-header-backup-write", "manifest-write",
-                "original-header-backup-readback", "manifest-readback"):
+                "manifest-write", "manifest-readback"):
             with self.subTest(phase=phase):
                 self.assertIn(f'failure_phase = "{phase}"', prepare)
         self.assertIn(
@@ -2004,11 +2003,15 @@ dmsetup() {
             "static int swapz_primary_state_recoverable(", 1)[0]
         self.assertNotIn("swapz_primary_write_header_checked_fd(",
                          primary_start_body)
-        self.assertIn("memcmp(observed_header, original_header",
+        self.assertNotIn("memcmp(observed_header, original_header",
+                         primary_start_body)
+        self.assertIn("swapz_primary_backing_header_matches_manifest(",
                       primary_start_body)
         self.assertIn("swapz_primary_format_mapper_swap(",
                       primary_start_body)
-        self.assertIn("swapz_primary_expected_backing_header_at(", primary_start)
+        self.assertNotIn("swapz_primary_header_backup_", primary_start)
+        self.assertIn("swapz_primary_backing_header_matches_manifest(",
+                      primary_start)
         self.assertIn("swapz_primary_linux_swap_header_valid(", primary_start)
         self.assertIn(
             "Physical backing requires a valid ordinary Linux swap header", ctr)
