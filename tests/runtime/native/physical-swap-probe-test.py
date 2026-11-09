@@ -5301,7 +5301,7 @@ class PhysicalSwapProbeTests(unittest.TestCase):
                     stack.enter_context(patch)
                 header_write = probe._write_block0
                 with self.assertRaisesRegex(
-                        probe.ProbeError, "load continuity|manual recovery"):
+                        probe.ProbeError, "mapper continuity|manual review"):
                     probe.recover(state_dir, state["device_arg"],
                                   state["device_arg"])
                 self.assertEqual(executed, [])
