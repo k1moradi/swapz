@@ -10057,6 +10057,7 @@ static int swapz_primary_swap_device_active(dev_t expected_device)
 	}
 	return 0;
 }
+#endif /* SWAPZ_PRIMARY_ROOTLESS_TEST: privileged swap inventory */
 
 /* The original SWAPSPACE2 header is immutable for every backing device,
  * including the owned null_blk lifecycle rehearsal. The manifest retains only
@@ -10088,7 +10089,7 @@ static int swapz_primary_backing_header_matches_manifest(
 }
 
 
-
+#ifndef SWAPZ_PRIMARY_ROOTLESS_TEST
 static int swapz_primary_dm_control_open(void)
 {
 #ifdef SWAPZ_PRIMARY_ROOTLESS_TEST
