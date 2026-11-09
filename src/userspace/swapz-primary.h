@@ -91,11 +91,6 @@ int swapz_primary_systemd_target_units(
 	char swap_unit[SWAPZ_PRIMARY_SYSTEMD_UNIT_NAME_MAX]);
 int swapz_primary_target_inspect(const char *partuuid,
 				 struct swapz_primary_target *target);
-/* Build an SWZ authorization header for the opened target geometry. */
-int swapz_primary_header_build(
-	const char run_id[SWAPZ_PRIMARY_RUN_ID_LENGTH + 1U],
-	uint64_t device_bytes,
-	unsigned char header[4096]);
 /* Validate an mkswap v1 header for the exact 4KiB logical page capacity. */
 int swapz_primary_linux_swap_header_valid(
 	const unsigned char header[4096], uint64_t logical_pages);
@@ -119,11 +114,6 @@ int swapz_primary_manifest_read_at(
 /* Open the manifest-bound target through its stable PARTUUID after formatting. */
 int swapz_primary_target_open_exclusive(
 	const struct swapz_primary_manifest *manifest);
-/* Production callers must open the target O_RDWR|O_EXCL before calling. */
-int swapz_primary_write_header_checked_fd(
-	int fd, const struct swapz_primary_target *target,
-	const unsigned char expected_current[4096],
-	const unsigned char replacement[4096]);
 /* Hash a stable, private regular-file descriptor with bounded allocation. */
 int swapz_primary_sha256_regular_fd(int fd, uid_t expected_owner,
 				    uint64_t maximum_bytes, char digest[65]);
