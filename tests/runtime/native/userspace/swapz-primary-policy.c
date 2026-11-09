@@ -1947,24 +1947,51 @@ static void test_recoverable_lifecycle_stages(void)
 	assert(swapz_primary_state_recoverable(&state));
 }
 
-static void test_recovery_header_recognition(void)
+static void test_backing_header_digest_recognition(void)
 {
-	unsigned char original[SWAPZ_PRIMARY_BLOCK_BYTES] = {0};
-	unsigned char swapz_header[SWAPZ_PRIMARY_BLOCK_BYTES] = {0};
-	unsigned char observed[SWAPZ_PRIMARY_BLOCK_BYTES] = {0};
+	static const unsigned char swap_magic[] = "SWAPSPACE2";
+	struct swapz_primary_manifest manifest = {0};
+	unsigned char header[SWAPZ_PRIMARY_BLOCK_BYTES] = {0};
+	unsigned char changed[SWAPZ_PRIMARY_BLOCK_BYTES];
+	const uint64_t logical_pages =
+		TEST_DEVICE_BYTES / SWAPZ_PRIMARY_BLOCK_BYTES;
 
-	original[0] = 0x11U;
-	swapz_header[0] = 0x22U;
-	memcpy(observed, original, sizeof(observed));
-	/* Only the original Linux swap header is recognized during recovery.
-	 * A synthetic SWZ replacement must never authorize a new raw write. */
-	assert(swapz_primary_recovery_header_known(observed, original));
-	memcpy(observed, swapz_header, sizeof(observed));
-	assert(!swapz_primary_recovery_header_known(observed, original));
-	observed[128] ^= 0x01U;
-	assert(!swapz_primary_recovery_header_known(observed, original));
-	assert(!swapz_primary_recovery_header_known(NULL, original));
+	test_put_u32_le(header, SWAPZ_PRIMARY_SWAP_VERSION_OFFSET, 1U);
+	test_put_u32_le(header, SWAPZ_PRIMARY_SWAP_LAST_PAGE_OFFSET,
+			(uint32_t)(logical_pages - 1U));
+	test_put_u32_le(header, SWAPZ_PRIMARY_SWAP_BAD_PAGES_OFFSET, 0U);
+	memcpy(header + sizeof(header) - sizeof(swap_magic) + 1U,
+	       swap_magic, sizeof(swap_magic) - 1U);
+
+	memcpy(manifest.run_id, "0123456789abcdef0123456789abcdef",
+	       sizeof(manifest.run_id));
+	memset(manifest.source_sha, 'a', SWAPZ_PRIMARY_SOURCE_SHA_LENGTH);
+	manifest.source_sha[SWAPZ_PRIMARY_SOURCE_SHA_LENGTH] = '\0';
+	memset(manifest.swapzctl_sha256, 'b', SWAPZ_PRIMARY_SHA256_LENGTH);
+	manifest.swapzctl_sha256[SWAPZ_PRIMARY_SHA256_LENGTH] = '\0';
+	memset(manifest.module_sha256, 'c', SWAPZ_PRIMARY_SHA256_LENGTH);
+	manifest.module_sha256[SWAPZ_PRIMARY_SHA256_LENGTH] = '\0';
+	memset(manifest.qualification_report_sha256, 'd',
+	       SWAPZ_PRIMARY_SHA256_LENGTH);
+	manifest.qualification_report_sha256[SWAPZ_PRIMARY_SHA256_LENGTH] = '\0';
+	manifest.target = swapz_primary_selected_target;
+	assert(swapz_primary_sha256(
+		header, sizeof(header), manifest.original_header_sha256) == 0);
+
+	assert(swapz_primary_backing_header_matches_manifest(
+		header, &manifest) == 0);
+	memcpy(changed, header, sizeof(changed));
+	changed[128] ^= 0x01U;
+	assert(swapz_primary_backing_header_matches_manifest(
+		changed, &manifest) < 0);
+	assert(errno == ESTALE);
+	memcpy(changed, header, sizeof(changed));
+	changed[sizeof(changed) - 1U] ^= 0x01U;
+	assert(swapz_primary_backing_header_matches_manifest(
+		changed, &manifest) < 0);
+	assert(errno == EPERM);
 }
+
 
 static void test_exclusive_target_open_paths(void)
 {
@@ -3484,7 +3511,7 @@ int main(void)
 	test_primary_state_records();
 	test_mapper_node_retry_policy();
 	test_recoverable_lifecycle_stages();
-	test_recovery_header_recognition();
+	test_backing_header_digest_recognition();
 	test_primary_dm_table();
 	test_primary_dm_existing_mapper_selector();
 	test_primary_dm_operations_disabled();
