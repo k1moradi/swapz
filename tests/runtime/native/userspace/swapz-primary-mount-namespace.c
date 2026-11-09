@@ -2420,6 +2420,27 @@ static void test_root_filtered_foreign_mountinfo(void)
 		"missing foreign listmount syscall", FIXTURE_NAMESPACE_FOREIGN_LEADER,
 		SYS_listmount, ENOSYS, 1U);
 
+	/* EINVAL is an ABI/namespace refusal, not proof of an empty mount set.
+	 * Preserve the syscall's original errno for bounded source diagnostics.
+	 */
+	fixture_reset();
+	fixture_namespace_syscall_error_kind = FIXTURE_NAMESPACE_FOREIGN_LEADER;
+	fixture_namespace_syscall_error_number = SYS_statmount;
+	fixture_namespace_syscall_error = EINVAL;
+	expect_mount_admission("invalid foreign statmount request", 0, EINVAL);
+	expect_first_namespace_syscall_failure(
+		"invalid foreign statmount request", FIXTURE_NAMESPACE_FOREIGN_LEADER,
+		SYS_statmount, EINVAL, 0U);
+
+	fixture_reset();
+	fixture_namespace_syscall_error_kind = FIXTURE_NAMESPACE_FOREIGN_LEADER;
+	fixture_namespace_syscall_error_number = SYS_listmount;
+	fixture_namespace_syscall_error = EINVAL;
+	expect_mount_admission("invalid foreign listmount request", 0, EINVAL);
+	expect_first_namespace_syscall_failure(
+		"invalid foreign listmount request", FIXTURE_NAMESPACE_FOREIGN_LEADER,
+		SYS_listmount, EINVAL, 1U);
+
 	fixture_reset();
 	fixture_namespace_syscall_error_kind = FIXTURE_NAMESPACE_FOREIGN_LEADER;
 	fixture_namespace_syscall_error_number = SYS_statmount;

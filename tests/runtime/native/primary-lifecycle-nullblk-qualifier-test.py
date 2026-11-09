@@ -2676,6 +2676,38 @@ int main(int argc, char **argv)
                 f"peer_root={peer_root}\n" +
                 command_output(mount_initial, mount_eagain), True)
 
+        # EINVAL and ENOSYS are genuine fail-closed namespace ABI refusals,
+        # not permission to admit the target. Accept only scanner-generated
+        # fixed step/errno fields whose wrapper matches exactly.
+        for errno_number, error_text in (
+                (22, "Invalid argument"),
+                (38, "Function not implemented")):
+            for step in ("namespace-fd", "namespace-id", "root-walk",
+                         "mount-list", "listed-mount", "root-revalidation"):
+                marker = (
+                    "SWAPZ_PRIMARY_MOUNT_INVENTORY_FAILURE "
+                    f"step={step} errno={errno_number}"
+                )
+                for phase in (
+                        "cross-namespace-mount-inventory",
+                        "repeated-cross-namespace-mount-inventory"):
+                    refusal = (
+                        f"PRIMARY_PREPARE=FAILED phase={phase} "
+                        f"errno={errno_number} error={error_text} claim=none"
+                    )
+                    check(marker + "\n" +
+                          command_output(refusal, error_text), True)
+                check(marker + " reason=private\n" +
+                      command_output(refusal, error_text), False)
+                check(marker + " peer_root=matches-process\n" +
+                      command_output(refusal, error_text), False)
+                check(marker.replace(f"errno={errno_number}", "errno=11") +
+                      "\n" + command_output(refusal, error_text), False)
+            check(
+                "SWAPZ_PRIMARY_MOUNT_INVENTORY_FAILURE "
+                f"step=mountinfo-read errno={errno_number}\n" +
+                command_output(refusal, error_text), False)
+
         for output in (
             "",
             "PRIMARY_PREPARE=FAILED",

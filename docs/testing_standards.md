@@ -419,10 +419,15 @@ This diagnostic never upgrades a BLOCKED run into permission to retry or
 mutate physical storage. The private loaded null_blk prepare verifier must
 permit exactly one canonical mount-scan record only alongside the matching
 initial/repeated cross-namespace EAGAIN refusal (errno 11), then re-emit that
-record with the normal canonical prepare failure. Duplicate, malformed,
-unmatched or free-form sideband output remains FAIL; the original admission
-refusal remains BLOCKED. Rootless tests must cover both accepted scan phases
-and reject mismatched errno, duplicate markers and private values.
+record with the normal canonical prepare failure. The same strict step/errno
+matching also accepts the scanner's source-controlled EINVAL (errno 22) and
+ENOSYS (errno 38) kernel ABI refusals, without reason, peer-root or private
+fields, only at fixed namespace-fd, namespace-id, root-object, init-root,
+root-walk, mount-list, listed-mount and root-revalidation steps. These remain
+BLOCKED; they do not establish a clear inventory or authorize mutation.
+Duplicate, malformed, unmatched or free-form sideband output remains FAIL;
+the original admission refusal remains BLOCKED. Rootless regressions cover
+both scan phases and reject mismatched errno, duplicates and private values.
 At the coordinator's init-root step, an EAGAIN can include one fixed
 `reason=` classification identifying a failed root-type, inode, process-root
 device, init-root device, or init-root statx observation predicate. The verifier
