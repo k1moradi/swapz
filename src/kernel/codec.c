@@ -63,6 +63,16 @@ static inline int swapz_payload_overlaps_storage(const void *extent,
 	return extent_address - payload_address < length;
 }
 
+/* The legacy detach/reattach path also validates overlap against an extent.
+ * Keep its established name while both migration paths coexist. */
+static inline int swapz_payload_overlaps_extent(
+			const struct swapz_builder *builder,
+			const void *payload, swapz_u16 length)
+{
+	return swapz_payload_overlaps_storage(builder->bytes, builder->bytes_total,
+					      payload, length);
+}
+
 static swapz_u32 swapz_crc32c_state(swapz_u32 state, const void *data,
 				    swapz_u32 length)
 {
