@@ -3,15 +3,17 @@
 #define SWAPZ_EXTENT_CODEC_H
 
 /*
- * Legacy 4/8/16 KiB in-band extent codec (RAM-only metadata migration pending).
+ * SWZ 4/8/16 KiB extent codec helpers.
  *
- * This header defines the existing compressed extent representation, NOT a
- * backing partition format: real backing must remain preformatted SWAPSPACE2.
- * Current serialized SWZ extent headers and descriptors are nonconforming with
- * the owner-mandated RAM-only metadata design and must be replaced together
- * with the read, pack, publication and GC paths. Until then, no extent is
- * authoritative before confirmed full-block write and ordered publication.
- * This is a codec, NOT an allocator, write path or GC implementation.
+ * Production kernel extents are data-only: descriptor, generation, sequence,
+ * CRC, offset/length and GC authority live in bounded RAM. The serialized SWZ
+ * header/record helpers below remain only for isolated userspace legacy codec
+ * fixtures and are never a physical backing format or production publication
+ * path. Real backing must remain preformatted SWAPSPACE2.
+ *
+ * No extent is authoritative before confirmed lower completion and ordered
+ * RAM-authority publication. This is a codec, NOT an allocator or ownership
+ * protocol.
  */
 #ifdef __KERNEL__
 #include <linux/types.h>
@@ -28,14 +30,12 @@ typedef uint64_t swapz_u64;
 #endif
 
 /*
- * P0 safety interlock, not a runtime feature toggle: compressed extents still
- * carry an SWZ header and 16-byte descriptors in their on-media data blocks.
- * Never permit real physical backing until the production writer, reader, GC
- * and authority have all migrated to data-only extents with bounded RAM-only
- * CRC, generation and mapping metadata. Synthetic null_blk remains eligible.
- * Changing this value requires the new loaded/data-integrity qualification.
+ * Production kernel publication is payload-only. Keep this compile-time
+ * declaration so source/qualification checks can fail closed if an in-band
+ * kernel representation is ever reintroduced. Legacy userspace fixture
+ * encoders do not change this production contract.
  */
-#define SWAPZ_CODEC_METADATA_ON_MEDIA 1U
+#define SWAPZ_CODEC_METADATA_ON_MEDIA 0U
 
 #define SWAPZ_BLOCK_BYTES 4096U
 #define SWAPZ_BLOCK_SHIFT 12U
