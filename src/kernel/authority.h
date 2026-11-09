@@ -388,7 +388,7 @@ int swapz_enable_extent_sequence_index(struct swapz_authority *authority,
 				       swapz_u8 *sequence_delta,
 				       swapz_u32 *segment_sequence_base,
 				       swapz_u32 segment_count);
-/* Resolve the authoritative on-media sequence for a live extent start. */
+/* Resolve the authoritative volatile RAM sequence for a live extent start. */
 int swapz_extent_sequence_lookup(const struct swapz_authority *authority,
 				swapz_u32 start_block,
 				swapz_u32 *sequence);
