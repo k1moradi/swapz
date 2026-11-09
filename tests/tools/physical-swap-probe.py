@@ -42,8 +42,6 @@ STATE_NAME = "state.json"
 RESULTS_NAME = "results.json"
 RUNTIME_OWNERSHIP_PHASE = "ONE_USE_RUNTIME_BOUND"
 RECOVERY_OWNERSHIP_PHASE = "ONE_USE_RECOVERY_BOUND"
-LEGACY_ACTIVE_RECOVERY_OWNERSHIP_PHASE = "ACTIVE_RECOVERY"
-LEGACY_PRECLAIM_RECOVERY_OWNERSHIP_PHASE = "RECOVERY_PREPARED"
 CANONICAL_MAIN_REMOTE = "https://github.com/k1moradi/swapz.git"
 VERBAL_REVIEWER = "openai-chatgpt-external-reviewer"
 VERBAL_APPROVAL_TEXT = (
@@ -1683,11 +1681,9 @@ def _release_partition_ownership(state):
         # Persisted state is untrusted; name only known stages in diagnostics.
         observed_stage = (
             stage if type(stage) is str and stage in {
-                "PREPARED", "BACKED_UP", "SWAP_OFF", "HEADER_CLEAR_PENDING",
-                "HEADER_CLEARED", "HEADER_RESTORE_PENDING", "SWZ_FORMATTED",
-                "EXISTING_SWAP_READY", "MODULE_PENDING", "MODULE_OWNED",
-                "MAPPED", "ORACLE_PASS", "KEPT_ACTIVE",
-                "RECOVERY_REQUIRED", "PRE_DESTRUCTIVE_FAILED",
+                "PREPARED", "SWAP_OFF", "EXISTING_SWAP_READY",
+                "MODULE_PENDING", "MODULE_OWNED", "MAPPED", "ORACLE_PASS",
+                "KEPT_ACTIVE", "RECOVERY_REQUIRED", "PRE_DESTRUCTIVE_FAILED",
             } else "invalid_or_unknown")
         raise ProbeError(
             "partition ownership release refused: "
@@ -2905,10 +2901,6 @@ def _require_recovery_results_binding(state, results):
             _validate_saved_swapfile(swapfile)
     result_stage = results.get("final_recovery_state")
     ownership_phase = state["ownership_phase"]
-    legacy_preclaim_recovery = (
-        ownership_phase == LEGACY_PRECLAIM_RECOVERY_OWNERSHIP_PHASE
-        and state.get("stage") == "BACKED_UP"
-        and result_stage == "BACKED_UP")
     if (type(state.get("major")) is not int or
             type(state.get("minor")) is not int or
             type(state["source_sha"]) is not str or
@@ -2921,16 +2913,15 @@ def _require_recovery_results_binding(state, results):
             f"{state['major']}:{state['minor']}" or
             results.get("development_only") is not (
                 state.get("development_only") is True) or
-            (ownership_phase not in {
+            ownership_phase not in {
                 RUNTIME_OWNERSHIP_PHASE,
                 RECOVERY_OWNERSHIP_PHASE,
-                LEGACY_ACTIVE_RECOVERY_OWNERSHIP_PHASE,
-            } and not legacy_preclaim_recovery)):
+            }):
         raise ProbeError(
             "saved physical results/state identity or ownership phase "
             "is incomplete; safe_next_step=inspect_records_read_only")
-    if result_stage not in {"PREPARED", "BACKED_UP", "ORACLE_PASS",
-                            "KEPT_ACTIVE", "RECOVERY_REQUIRED"} or (
+    if result_stage not in {"PREPARED", "ORACLE_PASS", "KEPT_ACTIVE",
+                            "RECOVERY_REQUIRED"} or (
             (state.get("stage") == "RECOVERY_REQUIRED") != (
                 result_stage == "RECOVERY_REQUIRED")):
         raise ProbeError(
@@ -2938,10 +2929,9 @@ def _require_recovery_results_binding(state, results):
             "safe_next_step=inspect_records_read_only")
     if state.get("stage") == "RECOVERY_REQUIRED" and (
             state.get("stage_before_recovery") not in {
-                "PREPARED", "BACKED_UP", "SWAP_OFF", "HEADER_CLEAR_PENDING",
-                "HEADER_CLEARED", "HEADER_RESTORE_PENDING", "SWZ_FORMATTED",
-                "EXISTING_SWAP_READY", "MODULE_PENDING", "MODULE_OWNED",
-                "MAPPED", "ORACLE_PASS", "KEPT_ACTIVE"}):
+                "PREPARED", "SWAP_OFF", "EXISTING_SWAP_READY",
+                "MODULE_PENDING", "MODULE_OWNED", "MAPPED", "ORACLE_PASS",
+                "KEPT_ACTIVE"}):
         raise ProbeError(
             "saved RECOVERY_REQUIRED origin is incomplete; "
             "safe_next_step=inspect_records_read_only")
@@ -3198,10 +3188,8 @@ def recover_pending_algorithm_trial():
                 state.get("partuuid") != partuuid or
                 state.get("development_only") is not True or
                 state.get("algorithm_real_swap") is not True or
-                state.get("ownership_phase") not in {
-                    RECOVERY_OWNERSHIP_PHASE,
-                    LEGACY_ACTIVE_RECOVERY_OWNERSHIP_PHASE,
-                } or marker != {
+                state.get("ownership_phase") !=
+                    RECOVERY_OWNERSHIP_PHASE or marker != {
                     "run_id": run_id, "partuuid": partuuid,
                     "major": state.get("major"), "minor": state.get("minor")
                 }):
