@@ -2607,6 +2607,7 @@ int swapz_finish(struct swapz_authority *a, const struct swapz_tx *tx,
 		 swapz_u8 completed_blocks, int io_error)
 {
 	const swapz_u8 *image = extent;
+	swapz_u32 payload_crc32cs[SWAPZ_MAX_RECORDS];
 	swapz_u16 payload_lengths[SWAPZ_MAX_RECORDS];
 	swapz_u16 payload_offsets[SWAPZ_MAX_RECORDS];
 	swapz_u8 payload_encodings[SWAPZ_MAX_RECORDS];
@@ -2694,6 +2695,7 @@ int swapz_finish(struct swapz_authority *a, const struct swapz_tx *tx,
 			error = -EBADMSG;
 			goto fail;
 		}
+		payload_crc32cs[index] = decoded.payload_crc32c;
 		payload_lengths[index] = decoded.payload_length;
 		payload_offsets[index] = decoded.payload_offset;
 		payload_encodings[index] = decoded.encoding;
@@ -2999,6 +3001,7 @@ int swapz_finish(struct swapz_authority *a, const struct swapz_tx *tx,
 		struct swapz_map new_map = {
 			.start_block = tx->start_block,
 			.generation = tx->records[index].generation,
+			.payload_crc32c = payload_crc32cs[index],
 			.payload_length = payload_lengths[index],
 			.payload_offset = payload_offsets[index],
 			.extent_blocks = tx->extent_blocks,
@@ -3051,7 +3054,8 @@ static int swapz_read_observed_authority(
 			return -ESTALE;
 		return -EOPNOTSUPP;
 	}
-	if (current_map->payload_offset != observed->payload_offset)
+	if (current_map->payload_offset != observed->payload_offset ||
+	    current_map->payload_crc32c != observed->payload_crc32c)
 		return -ESTALE;
 	if (!extent ||
 	    bytes_total != (swapz_u32)current_map->extent_blocks * SWAPZ_BLOCK_BYTES)
@@ -3086,6 +3090,7 @@ int swapz_read_authoritative_peeked_payload(
 	    peeked->encoding != swapz_map_encoding(current_map) ||
 	    peeked->payload_length != current_map->payload_length ||
 	    peeked->payload_offset != current_map->payload_offset ||
+	    peeked->payload_crc32c != current_map->payload_crc32c ||
 	    !peeked->payload_length ||
 	    peeked->payload_length > SWAPZ_MAX_COMPRESSED ||
 	    peeked->payload_offset >= bytes_total ||

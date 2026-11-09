@@ -65,6 +65,9 @@ struct swapz_map {
 		swapz_u32 raw_crc32c;
 		swapz_u32 payload_offset;
 	};
+	/* Compressed payload integrity is authoritative RAM state. RAW mappings
+	 * continue to use raw_crc32c above; this field remains zero for RAW. */
+	swapz_u32 payload_crc32c;
 	/* Volatile compressed payload bytes (4096 for raw). Required for
 	 * real live-byte GC victim selection without reading every extent. */
 	swapz_u16 payload_length;
@@ -83,8 +86,8 @@ struct swapz_map {
 	};
 };
 
-_Static_assert(sizeof(struct swapz_map) == 16,
-	       "swapz_map must stay compact for full-capacity metadata");
+_Static_assert(sizeof(struct swapz_map) == 20,
+	       "swapz_map must stay compact for full-capacity RAM metadata");
 
 static inline swapz_u8 swapz_map_record_index(const struct swapz_map *map)
 {

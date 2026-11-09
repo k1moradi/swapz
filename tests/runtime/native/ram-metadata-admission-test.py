@@ -17,11 +17,16 @@ def require(condition: bool, message: str) -> None:
 
 def main() -> None:
     codec = (ROOT / "src/kernel/codec.h").read_text(encoding="utf-8")
+    authority = (ROOT / "src/kernel/authority.h").read_text(encoding="utf-8")
     target = (ROOT / "src/kernel/dm-target.c").read_text(encoding="utf-8")
     declarations = re.findall(
         r"(?m)^#define SWAPZ_CODEC_METADATA_ON_MEDIA ([01])U$", codec
     )
     require(declarations == ["1"], "Legacy in-band codec must retain its physical interlock")
+    require("swapz_u32 payload_crc32c;" in authority,
+            "Compressed payload CRC must remain authoritative volatile RAM state")
+    require("_Static_assert(sizeof(struct swapz_map) == 20" in authority,
+            "Capacity accounting requires the 20-byte RAM mapping record")
     require("swapz_linux_swap_header_valid(block, device_bytes)" in target,
             "Ordinary SWAPSPACE2 validation must remain the physical header contract")
 

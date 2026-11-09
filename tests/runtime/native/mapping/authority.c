@@ -459,11 +459,17 @@ static int test_full_publish_and_authoritative_reads(void)
 					    extent, 16384, &decoded, &payload) == 0);
 		CHECK(decoded.logical_page == index && decoded.generation == 1);
 		CHECK(observed.payload_offset == decoded.payload_offset);
+		CHECK(observed.payload_crc32c == decoded.payload_crc32c);
 		CHECK(payload[0] == index + 1 && payload[2071] == index + 1);
 		if (index == 0) {
 			struct swapz_map forged = observed;
 
 			forged.payload_offset++;
+			CHECK(swapz_read_authoritative_peeked(&authority, index, &forged,
+					    extent, 16384,
+					    &decoded, &payload) == -ESTALE);
+			forged = observed;
+			forged.payload_crc32c ^= 1U;
 			CHECK(swapz_read_authoritative_peeked(&authority, index, &forged,
 					    extent, 16384,
 					    &decoded, &payload) == -ESTALE);
@@ -504,6 +510,11 @@ static int test_peeked_authoritative_read_rechecks_payload_and_sequence(void)
 
 	forged = peeked;
 	forged.generation++;
+	CHECK(swapz_read_authoritative_peeked(&authority, 1, &observed,
+					    extent, 8192,
+					    &forged, &payload) == -EUCLEAN);
+	forged = peeked;
+	forged.payload_crc32c ^= 1U;
 	CHECK(swapz_read_authoritative_peeked(&authority, 1, &observed,
 					    extent, 8192,
 					    &forged, &payload) == -EUCLEAN);
