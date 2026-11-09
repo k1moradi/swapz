@@ -30,20 +30,25 @@ static int swapz_page_valid(const struct swapz_compressed_page *page);
 static int swapz_bind_appended_record(struct swapz_engine *engine,
 				      struct swapz_tx *transaction,
 				      swapz_u8 record_index,
-				      const struct swapz_builder *builder)
+				      const struct swapz_ram_extent *builder)
 {
+	const struct swapz_decoded *record;
+
 	if (!engine || !engine->authority || !transaction || !builder ||
-	    builder->count != record_index + 1U ||
-	    !builder->last_payload_length)
+	    builder->count != record_index + 1U)
+		return -EUCLEAN;
+	record = &builder->last_record;
+	if (record->logical_page != transaction->records[record_index].logical_page ||
+	    record->generation != transaction->records[record_index].generation)
 		return -EUCLEAN;
 	return swapz_bind_compressed_record(
 		engine->authority, transaction, record_index,
-		builder->last_payload_offset, builder->last_payload_length,
-		builder->last_payload_crc32c, builder->last_encoding);
+		record->payload_offset, record->payload_length,
+		record->payload_crc32c, record->encoding);
 }
 
 static int swapz_append_page(struct swapz_engine *engine,
-			    struct swapz_builder *builder,
+			    struct swapz_ram_extent *builder,
 			    const struct swapz_compressed_page *page,
 			    swapz_u32 generation, int logical_page_unique)
 {
@@ -55,21 +60,21 @@ static int swapz_append_page(struct swapz_engine *engine,
 			 * validation and hashes only after those checks succeed. */
 			if (!swapz_page_valid(page) || !generation)
 				return -EINVAL;
-			return swapz_append_encoded_unique(
+			return swapz_ram_extent_append(
 				builder, page->logical_page, generation,
 				page->payload, page->length, page->encoding);
 		}
-		return swapz_append_encoded(
+		return swapz_ram_extent_append(
 			builder, page->logical_page, generation,
 			page->payload, page->length, page->encoding);
 	}
 	if (logical_page_unique)
-		error = swapz_append_prehashed_encoded_unique(
+		error = swapz_ram_extent_append_prehashed(
 			builder, page->logical_page, generation,
 			page->payload, page->length, page->payload_crc32c,
 			page->encoding);
 	else
-		error = swapz_append_prehashed_encoded(
+		error = swapz_ram_extent_append_prehashed(
 			builder, page->logical_page, generation,
 			page->payload, page->length, page->payload_crc32c,
 			page->encoding);
@@ -1334,7 +1339,7 @@ static int swapz_engine_write_window_planned(struct swapz_engine *engine,
 		return error;
 
 	for (group = 0; group < extent_count; ++group) {
-		struct swapz_builder builder;
+		struct swapz_ram_extent builder;
 		swapz_u8 completed = 0;
 		swapz_u8 j;
 		const swapz_u8 blocks = engine->plan_classes[group];
@@ -1349,8 +1354,9 @@ static int swapz_engine_write_window_planned(struct swapz_engine *engine,
 		if (error)
 			return error;
 		phase_start = swapz_engine_now_ns();
-		error = swapz_begin(&builder, engine->write_scratch,
-				  bytes, tx->sequence);
+		error = swapz_ram_extent_begin_unique(
+			&builder, engine->write_scratch, bytes,
+			tx->sequence, take);
 		if (error) {
 			engine->pack_wall_ns += swapz_engine_elapsed_ns(
 				phase_start, swapz_engine_now_ns());
@@ -1370,7 +1376,10 @@ static int swapz_engine_write_window_planned(struct swapz_engine *engine,
 				goto abort_transaction;
 			}
 		}
-		error = swapz_seal(&builder);
+		error = swapz_ram_extent_seal(&builder);
+		if (!error)
+			error = swapz_mark_compressed_data_only(
+				engine->authority, tx);
 		engine->pack_wall_ns += swapz_engine_elapsed_ns(
 			phase_start, swapz_engine_now_ns());
 		if (error)
@@ -1594,7 +1603,7 @@ int swapz_engine_prepare_batched_run(struct swapz_engine *e,
 	}
 
 	for (group = 0; group < extent_count + raw_count; ++group) {
-		struct swapz_builder builder;
+		struct swapz_ram_extent builder;
 		struct swapz_tx *tx;
 		const swapz_u8 raw = group >= extent_count;
 		swapz_u8 blocks = raw ? 1 : e->plan_classes[group];
@@ -1675,9 +1684,10 @@ int swapz_engine_prepare_batched_run(struct swapz_engine *e,
 				}
 				memcpy(image, pages[entry].payload, SWAPZ_BLOCK_BYTES);
 			} else {
-				error = swapz_begin(&builder, image,
-					    (swapz_u32)blocks * SWAPZ_BLOCK_BYTES,
-					    tx->sequence);
+				error = swapz_ram_extent_begin_unique(
+					&builder, image,
+					(swapz_u32)blocks * SWAPZ_BLOCK_BYTES,
+					tx->sequence, take);
 				if (error) {
 					e->pack_wall_ns += swapz_engine_elapsed_ns(
 						phase_start, swapz_engine_now_ns());
@@ -1701,7 +1711,10 @@ int swapz_engine_prepare_batched_run(struct swapz_engine *e,
 						goto abort_current;
 					}
 				}
-				error = swapz_seal(&builder);
+				error = swapz_ram_extent_seal(&builder);
+				if (!error)
+					error = swapz_mark_compressed_data_only(
+						e->authority, tx);
 				if (error) {
 					e->pack_wall_ns += swapz_engine_elapsed_ns(
 						phase_start, swapz_engine_now_ns());
