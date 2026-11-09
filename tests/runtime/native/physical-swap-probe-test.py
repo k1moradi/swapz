@@ -3150,8 +3150,9 @@ class PhysicalSwapProbeTests(unittest.TestCase):
         state = {
             "dm_name": f"swapz-demo-physical-{token}",
             "dm_uuid": f"SWAPZ-TEST-PHYSICAL-{token}",
-            "stage": "BACKED_UP", "module_ownership": "NOT_STARTED",
-            "ownership_phase": probe.RECOVERY_OWNERSHIP_PHASE,
+            "stage": "PREPARED", "module_ownership": "NOT_STARTED",
+            "ownership_phase": probe.RUNTIME_OWNERSHIP_PHASE,
+            "raw_header_preservation_required": True,
         }
         review = {
             "reviewer": None if development_only else probe.VERBAL_REVIEWER,
@@ -3186,12 +3187,6 @@ class PhysicalSwapProbeTests(unittest.TestCase):
             "host_report_count": evidence.get("pass_reports"),
             "reviewer": review["reviewer"],
         })
-        formatted = bytearray(probe.PAGE_BYTES)
-        formatted[:8] = probe.SWAPZ_HEADER_MAGIC
-        struct.pack_into("<IIQ", formatted, 8,
-                         probe.SWAPZ_HEADER_VERSION, probe.PAGE_BYTES,
-                         target["size_bytes"])
-        formatted[24:40] = bytes(range(1, 17))
         mapper = f"/dev/mapper/{state['dm_name']}"
         events = []
         # Model actual block-zero bytes, rather than inferring a write from
@@ -3227,12 +3222,10 @@ class PhysicalSwapProbeTests(unittest.TestCase):
                     f"injected identity change at boundary {identity_verifications}")
 
         def run(command, **kwargs):
-            nonlocal oracle_invocations, observed_block_zero
+            nonlocal oracle_invocations
             del kwargs
             arguments = tuple(str(value) for value in command)
             events.append(("command", arguments))
-            if command[:2] == ["/reviewed/swapzctl", "format"]:
-                observed_block_zero = bytes(formatted)
             if arguments[0] == "/reviewed/device-roundtrip":
                 oracle_invocations += 1
                 if oracle_invocations == oracle_failure_at:
@@ -3330,11 +3323,8 @@ class PhysicalSwapProbeTests(unittest.TestCase):
         def read_block0(_device, _target):
             return observed_block_zero
 
-        def write_block0(_device, header, _target, **kwargs):
-            nonlocal observed_block_zero
-            del kwargs
-            events.append(("write0",))
-            observed_block_zero = bytes(header)
+        def write_block0(*_args, **_kwargs):
+            raise AssertionError("new SWAPSPACE2 trial must never write block zero")
 
         def iter_directory(path):
             if str(path) == "/sys/dev/block/253:0/slaves":
@@ -3525,7 +3515,7 @@ class PhysicalSwapProbeTests(unittest.TestCase):
         def prepare_fake_state(*_args):
             state_dir = Path(directory)
             actual_save_state(state_dir, state)
-            (state_dir / probe.BACKUP_NAME).write_bytes(target["header"])
+            self.assertFalse((state_dir / probe.BACKUP_NAME).exists())
             return state, state_dir
 
         actual_save_results = probe._save_results
