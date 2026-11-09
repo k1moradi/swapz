@@ -50,7 +50,7 @@ cleared swap UUID; the original `SWAPSPACE2` signature, stable partition
 identity, full geometry, parent and exclusive ownership must still verify.
 Historical by-UUID selectors in authenticated recovery journals remain
 accepted for the original transaction only. New selector support does not
-bypass the mandatory RAM-only extent metadata interlock.
+bypass the loaded RAM-metadata qualification gate.
 The 16 GiB native capacity fixture must account for the expanded 20-byte
 volatile mapping record and current per-segment indexes: expected
 index bytes are 121739228, not the historical 16-byte-map total. Count
@@ -58,13 +58,17 @@ all allocated sidecars and page-rounded memory separately.
 A source contract must also verify Device Mapper iterate_devices describes
 only the allocated lower data region, excluding the protected first page and
 unused tail for physical backing while retaining zero-based null_blk.
-The source-only interlock check in
+The source contract in
 `tests/runtime/native/ram-metadata-admission-test.py` runs under native
-`test-codec` and runs in the ordinary `make fast_test` build step (including
-resume). It asserts that the legacy in-band writer cannot admit a real
-device. This is refusal coverage, **not** RAM-metadata or physical qualification.
-After migration, replace the refusal assertions with native, loaded and
-real-SWAPSPACE2 payload-only/CRC/read/GC proof before opening physical admission.
+`test-codec` and in the ordinary `make fast_test` build step (including
+resume). It proves production compressed extents remain payload-only, the
+physical target retains an immutable module-load qualification token defaulting
+off, and the qualified primary loader sets that token only for artifacts bound
+to the exact qualification report. This source check is **not** loaded or
+physical qualification. Exact-source `make test` must pass the loaded
+algorithm/RAM stages before any evidence-validating loader may set the token;
+real-SWAPSPACE2 payload/CRC/read/GC and header-preservation evidence remain
+separate physical qualification.
 Native recovery recognition must accept only the original byte-identical
 SWAPSPACE2 header, rejecting a synthetic SWZ replacement. Cross-namespace
 mount admission must be rechecked after exclusive target open and before
