@@ -51,6 +51,31 @@ static void usage(FILE *out)
 	fputs("Only the new virtual mapper may receive mkswap.\n", out);
 }
 
+/* Parse canonical unsigned decimal without signs, whitespace or overflow. */
+static int parse_unsigned_decimal(const char *text, unsigned long long limit,
+				  const char **end, unsigned long long *value)
+{
+	const char *cursor = text;
+	unsigned long long parsed = 0;
+
+	if (!text || !end || !value || *cursor < '0' || *cursor > '9')
+		return -1;
+	/* Kernel status numeric fields are canonical decimal: no leading zeroes. */
+	if (*cursor == '0' && cursor[1] >= '0' && cursor[1] <= '9')
+		return -1;
+	while (*cursor >= '0' && *cursor <= '9') {
+		const unsigned int digit = (unsigned int)(*cursor - '0');
+
+		if (digit > limit || parsed > (limit - digit) / 10ULL)
+			return -1;
+		parsed = parsed * 10ULL + digit;
+		++cursor;
+	}
+	*end = cursor;
+	*value = parsed;
+	return 0;
+}
+
 struct swapz_ratio_status {
 	unsigned long long logical_write_bytes;
 	unsigned long long physical_write_bytes;
