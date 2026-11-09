@@ -3916,7 +3916,7 @@ LOADED_PHASE_DISPLAY_NAMES = {
     "read-coalesce-serial": "SD serial read coalescing A/B",
     "write-saturation-sd": "SD write saturation",
     "write-saturation-ssd": "SSD write saturation",
-    "id36-pressure": "ID36 constrained resource pressure",
+    "id36-pressure": "Low-memory + heavy-CPU stress test",
     "kernel-debug-final": "Final kernel debug checks",
     "final-cleanup": "Loaded qualification cleanup",
 }

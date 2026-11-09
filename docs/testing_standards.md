@@ -69,6 +69,9 @@ for stages skipped after a failure. The physical trial remains separately
 authorized, and its status cannot be interpreted as production physical
 acceptance. Original protected admission observations and failure-only
 diagnostics remain readable outside the table; they are not test verdicts.
+The internal ID36 pressure gate is shown as "Low-memory + heavy-CPU stress
+test" in the progress table; its internal ID, timing marker, evidence schema,
+and required qualification conditions remain unchanged.
 Rootless progress uses the same four columns. Every source-defined
 suite has a unique, short, descriptive display name rather than a repository
 path; the exact path stays in authenticated progress markers, private

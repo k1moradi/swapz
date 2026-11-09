@@ -2475,6 +2475,10 @@ class ReportContract(unittest.TestCase):
         }
         self.assertEqual(set(runner.LOADED_PHASE_DISPLAY_NAMES), phases)
         names = list(runner.LOADED_PHASE_DISPLAY_NAMES.values())
+        self.assertEqual(
+            runner.LOADED_PHASE_DISPLAY_NAMES["id36-pressure"],
+            "Low-memory + heavy-CPU stress test")
+        self.assertNotIn("ID36 constrained resource pressure", names)
         self.assertEqual(len(names), len(set(names)))
         self.assertTrue(all(len(name) <= runner.ROOTLESS_NAME_WIDTH
                             and not name.startswith("tests/") for name in names))
