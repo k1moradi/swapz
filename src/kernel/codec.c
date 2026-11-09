@@ -896,6 +896,10 @@ int swapz_ram_extent_seal(struct swapz_ram_extent *builder)
 {
 	if (!builder || !builder->bytes ||
 	    (!builder->logical_pages_unique && !builder->records) ||
+	    !swapz_valid_extent_bytes(builder->bytes_total) ||
+	    builder->extent_blocks != builder->bytes_total / SWAPZ_BLOCK_BYTES ||
+	    !builder->record_capacity ||
+	    builder->record_capacity > SWAPZ_MAX_RECORDS ||
 	    builder->sealed || !builder->count ||
 	    builder->count > builder->record_capacity ||
 	    builder->payload_start > builder->bytes_total)
