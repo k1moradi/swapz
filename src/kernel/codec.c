@@ -53,7 +53,7 @@ static inline int swapz_valid_extent_bytes(swapz_u32 bytes_total)
 static inline int swapz_payload_overlaps_storage(const void *extent,
 						 swapz_u32 extent_bytes,
 						 const void *payload,
-						 swapz_u16 length)
+						 swapz_u32 length)
 {
 	const unsigned long extent_address = (unsigned long)extent;
 	const unsigned long payload_address = (unsigned long)payload;
@@ -754,9 +754,18 @@ int swapz_ram_extent_begin(struct swapz_ram_extent *builder, void *bytes,
 			   swapz_u32 bytes_total, swapz_u32 sequence,
 			   struct swapz_decoded *records, swapz_u8 record_capacity)
 {
+	swapz_u32 record_bytes;
+
 	if (!builder || !bytes || !records || !sequence ||
 	    !swapz_valid_extent_bytes(bytes_total) ||
 	    !record_capacity || record_capacity > SWAPZ_MAX_RECORDS)
+		return -EINVAL;
+	record_bytes = (swapz_u32)record_capacity * sizeof(*records);
+	/* RAM descriptors and the exact lower-write image are exclusive
+	 * ownership domains. Aliasing would make descriptor mutation observable
+	 * as backing bytes or let seal() erase authoritative metadata. */
+	if (swapz_payload_overlaps_storage(bytes, bytes_total,
+					   records, record_bytes))
 		return -EINVAL;
 
 	*builder = (struct swapz_ram_extent) {

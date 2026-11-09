@@ -17,6 +17,10 @@
 static swapz_u8 image[SWAPZ_MAX_EXTENT_BYTES];
 static swapz_u8 payload[SWAPZ_MAX_COMPRESSED];
 static struct swapz_decoded records[SWAPZ_MAX_RECORDS];
+static union {
+	struct swapz_decoded records[SWAPZ_MAX_RECORDS];
+	swapz_u8 bytes[SWAPZ_MAX_EXTENT_BYTES];
+} overlapping_storage;
 
 static void set_payload(swapz_u16 length, swapz_u8 salt)
 {
@@ -92,6 +96,11 @@ static int test_full_and_reject(void)
 				     1, records, 1) == -EINVAL);
 	CHECK(swapz_ram_extent_begin(&builder, image, SWAPZ_BLOCK_BYTES,
 				     1, records, 0) == -EINVAL);
+	memset(overlapping_storage.bytes, 0x6b, SWAPZ_BLOCK_BYTES);
+	CHECK(swapz_ram_extent_begin(
+		      &builder, overlapping_storage.bytes, SWAPZ_BLOCK_BYTES,
+		      1, overlapping_storage.records, 1) == -EINVAL);
+	CHECK(overlapping_storage.bytes[0] == 0x6b);
 	CHECK(swapz_ram_extent_begin(&builder, image, SWAPZ_BLOCK_BYTES,
 				     1, records, 1) == 0);
 	CHECK(swapz_ram_extent_seal(&builder) == -EINVAL);
