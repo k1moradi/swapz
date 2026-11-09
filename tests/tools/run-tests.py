@@ -9868,6 +9868,11 @@ def stronger_published_qualification_scope(existing_report, new_report):
         "FULL_INTEGRATION_RAM_ONLY")
 
 
+def _publication_retry_sleep(seconds):
+    """Back off report publication without coupling tests to subprocess waits."""
+    time.sleep(seconds)
+
+
 def publish(source_sha):
     """Publish the canonical report with bounded nonforce retry.
 
@@ -10031,7 +10036,7 @@ def publish(source_sha):
     if push is None or push.returncode:
         report_sha = None
         for attempt in range(5):
-            time.sleep(1 << attempt)
+            _publication_retry_sleep(1 << attempt)
             fetch = run("fetch", "--no-tags", "origin", "main", timeout=60)
             if fetch is None or fetch.returncode:
                 continue

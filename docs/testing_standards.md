@@ -5377,7 +5377,10 @@ A separate `ls-remote` authorization probe is not required. Report commits
 are pushed normally (never force-pushed) on the actual current main head, which
 may itself be report-only. After a failed push, bounded retry uses five
 noninteractive rounds with 1/2/4/8/16-second backoff and retries transient
-fetch/push failures even when origin/main did not move. If it
+fetch/push failures even when origin/main did not move. The retry delay is
+isolated behind the reporter's publication-backoff helper so unit tests mock
+only the policy delay; they must not patch the process-global `time.sleep`
+used internally by subprocess polling. If it
 did move, `merge-base --is-ancestor` must prove the tested code revision
 remains in current main history before a report-only child of that fetched head
 is attempted. Rewritten/diverged history or exhausted retries fail closed.

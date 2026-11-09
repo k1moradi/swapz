@@ -7398,7 +7398,8 @@ class ReportContract(unittest.TestCase):
                 runner.write_report(result)
                 with mock.patch.object(runner, "git_result",
                                        side_effect=intercept), \
-                     mock.patch.object(runner.time, "sleep") as sleep:
+                     mock.patch.object(
+                         runner, "_publication_retry_sleep") as sleep:
                     notice = runner.publish(source_sha)
                 self.assertIn("SYNCED_GIT", notice)
                 self.assertEqual(failures, {"push": 0, "fetch": 0})
