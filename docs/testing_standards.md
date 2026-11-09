@@ -1036,9 +1036,9 @@ between scans, and the same numeric PID retaining its name while its mount-
 namespace identity changes before exposing a selected mount. Inject ambiguous
 late inventory errors as well as conflicts, including an opened mountinfo close
 error and a `readdir()` failure only after at least one foreign PID has been
-processed. For every rejection before the header-write boundary, assert the
-captured production failure phase and *original* errno, zero intercepted header
-writes, mapper operations, `mkswap` and `swapon`, and retention of the READY
+processed. For every rejection before the module/device mutation boundary, assert the
+captured production failure phase and *original* errno, zero intercepted module
+loads, mapper operations, `mkswap` and `swapon`, and retention of the READY
 or recovery-requested owner state. A mount-conflict diagnostic may identify that
 category only when the actual production mount-facts call returned
 `target_mounted`; fixture scenario selection alone is not evidence. Non-mount
@@ -1063,21 +1063,21 @@ separate loaded evidence of the kernel-side exclusion and recovery behavior;
 snapshot-only rootless results cannot provide that proof.
 
 The primary late-race generated-C test must also compile and execute the
-production selector identity, checked-open and header-write functions against
-private rootless regular files. After reading a valid selector, replace its
-named inode with identical or different PARTUUID bytes, replace or remove
-the protected configuration-directory inode, and substitute a symlink. A
-change between parsing and final descriptor/name verification must retain
-`ESTALE` and clear the output; a later independent successful read must
-observe the current selector instead of caching a prior read. At the
-checked-open boundary, swap the named alias for a different regular-file
-inode between pre-open stat and the opened descriptor, require `ENODEV`,
-and verify byte-for-byte that the private target is untouched. A stale
-expected header must return `ESTALE` before any writer mutation; an
-unchanged safe control must write and verify the replacement header on a
-private file. For the coordinator's pre-exclusive-open check, changed
-PARTUUID, dev_t and geometry must return `ESTALE` with zero intercepted
-header, mapper, formatter and swapon actions. These checks must use the
+production selector identity and checked-open functions against private
+rootless regular files. After reading a valid selector, replace its named inode
+with identical or different PARTUUID bytes, replace or remove the protected
+configuration-directory inode, and substitute a symlink. A change between
+parsing and final descriptor/name verification must retain `ESTALE` and clear
+the output; a later independent successful read must observe the current
+selector instead of caching a prior read. At the checked-open boundary, swap
+the named alias for a different regular-file inode between pre-open stat and the
+opened descriptor, require `ENODEV`, and verify byte-for-byte that the private
+target is untouched. The unchanged safe control may open the current private
+target but must leave all header bytes unchanged. Immutable SWAPSPACE2
+header/digest semantics are covered separately by the production-C primary
+policy test. For the coordinator's pre-exclusive-open check, changed PARTUUID,
+dev_t and geometry must return `ESTALE` with zero intercepted module, mapper,
+`mkswap` and `swapon` actions. These checks must use the
 extracted real production functions in dependency order, compile with
 implicit-declaration warnings treated as errors on x86_64 and ARM64, and
 report phase, expected/observed identity and original numeric errno without
@@ -8631,30 +8631,30 @@ transaction whose current configured target, immutable manifest, accepted owner
 qualification and live artifact hashes still match. Before persisting
 `STARTING`, it must revalidate mount/root/recovery topology, prove the selected
 partition is not active swap, verify module/mapper absence, open the
-manifest-bound PARTUUID target exclusively, and compare all 4096 current
-block-zero bytes with the digest-verified saved header. Only after `STARTING`
-is durable may it write the run-bound SWZ header, load the exact qualified
-module, create/resume the exact run-bound mapper, initialize Linux swap metadata
-on that mapper, call native `swapon` through `/proc/self/fd/N` for the already
-verified mapper descriptor, and prove that `/proc/swaps` contains the exact
-mapper device while the raw backing device is absent before persisting
-`ACTIVE`. A successful syscall return alone is not activation proof. The primary
-manager is the sole owner of swap activation; the packaged
-`.swap` unit is a passive status view and must not be independently enabled or
-used as a second lifecycle owner. Every failure after durable `STARTING` must
-mark `RECOVERY_REQUIRED` while the owner lock is still held. Normal stop
-persists `STOPPING` before deactivation and cleanup, calls native `swapoff` for
-the exact verified mapper when active, and proves it absent from `/proc/swaps`
-before mapper removal. It must remove only the exact manifest-bound mapper with
-zero swap/open references, and unload only
-a module backed by the same run's exact `LOADED` ownership record, matching
-loaded source provenance and physical-backing parameter, using non-forced
-`delete_module`. After cleanup it must verify the backing partition still has
-the exact run-bound SWZ header, persist `RESTORED` then terminal `COMPLETE`,
-and release the active owner marker. The disposable-card mission intentionally
-does not restore a historical raw swap/filesystem header during normal stop;
-leaving the SWZ authorization header prevents accidental raw-swap reuse. Any
-failure after `STOPPING` but before `COMPLETE` must mark
+manifest-bound PARTUUID target exclusively, validate the ordinary
+`SWAPSPACE2` header and exact geometry, and require the live 4096-byte
+block-zero SHA-256 to match the manifest. Block zero remains immutable. Only
+after `STARTING` is durable may it record module-load intent, repeat the
+last-use topology/selector/target checks, reverify the same block-zero digest,
+load the exact qualified module, create/resume the exact run-bound mapper,
+initialize Linux swap metadata on that mapper, call native `swapon` through
+`/proc/self/fd/N` for the already verified mapper descriptor, and prove that
+`/proc/swaps` contains the exact mapper device while the raw backing device is
+absent before persisting `ACTIVE`. A successful syscall return alone is not
+activation proof. The primary manager is the sole owner of swap activation; the
+packaged `.swap` unit is a passive status view and must not be independently
+enabled or used as a second lifecycle owner. Every failure after durable
+`STARTING` must mark `RECOVERY_REQUIRED` while the owner lock is still held.
+Normal stop persists `STOPPING` before deactivation and cleanup, calls native
+`swapoff` for the exact verified mapper when active, and proves it absent from
+`/proc/swaps` before mapper removal. It must remove only the exact
+manifest-bound mapper with zero swap/open references, unload only a module
+backed by the same run's exact `LOADED` ownership record and matching source
+provenance, then exclusively reopen the manifest-bound backing target and
+repeat the ordinary-SWAPSPACE2-plus-digest check before persisting `RESTORED`,
+terminal `COMPLETE`, and releasing the active owner marker. Normal stop and
+recovery never format, replace, zero, restore or otherwise write block zero.
+Any failure after `STOPPING` but before `COMPLETE` must mark
 `RECOVERY_REQUIRED`.
 
 Every Device Mapper lookup of an existing mapper must submit its exact
