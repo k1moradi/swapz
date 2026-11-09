@@ -29,6 +29,10 @@ be bounded volatile RAM state. RAM descriptor/transaction storage must be
 disjoint from the exact lower-write image and the builder itself; builders
 reject overlap before reading payload bytes or mutating either ownership
 domain. Appends reject payload sources overlapping either writable buffer.
+Unique-path engine appends must revalidate compressed-page semantics before
+accepting either freshly hashed or prehashed payloads; a supplied CRC must
+not bypass RAW-flag, encoding, length or generation checks.
+
 Production writers that have already proved per-extent logical-page uniqueness
 must use the descriptor-array-free RAM builder mode and bind each transient
 last descriptor immediately into preallocated staged transaction RAM; do not

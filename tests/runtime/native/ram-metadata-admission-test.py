@@ -25,6 +25,15 @@ def main() -> None:
     )
     require(declarations == ["0"],
             "Production kernel compressed extents must keep metadata off media")
+    engine = (ROOT / "src/kernel/engine.c").read_text(encoding="utf-8")
+    append = engine.split("static int swapz_append_page(", 1)[1].split(
+        "\nstatic int swapz_page_valid(", 1)[0]
+    require(append.count("swapz_page_valid(page)") == 1 and
+            append.index("swapz_page_valid(page)") <
+            append.index("page->payload_crc32c_valid") and
+            append.count("swapz_ram_extent_append_prehashed(") == 1,
+            "Both hashed and prehashed unique-page appends must revalidate "
+            "engine page semantics before copying compressed payloads")
     require("swapz_u32 payload_crc32c;" in authority,
             "Compressed payload CRC must remain authoritative volatile RAM state")
     require("_Static_assert(sizeof(struct swapz_map) == 20" in authority,

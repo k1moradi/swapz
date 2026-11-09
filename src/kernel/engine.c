@@ -54,30 +54,19 @@ static int swapz_append_page(struct swapz_engine *engine,
 {
 	int error;
 
-	if (!page->payload_crc32c_valid) {
-		if (logical_page_unique) {
-			/* Preserve engine-only page semantics; codec owns payload-range
-			 * validation and hashes only after those checks succeed. */
-			if (!swapz_page_valid(page) || !generation)
-				return -EINVAL;
-			return swapz_ram_extent_append(
-				builder, page->logical_page, generation,
-				page->payload, page->length, page->encoding);
-		}
+	/* Preserve engine-only page semantics; codec owns payload-range
+	 * validation and hashes only after those checks succeed. */
+	if (logical_page_unique && (!swapz_page_valid(page) || !generation))
+		return -EINVAL;
+	if (!page->payload_crc32c_valid)
 		return swapz_ram_extent_append(
 			builder, page->logical_page, generation,
 			page->payload, page->length, page->encoding);
-	}
-	if (logical_page_unique)
-		error = swapz_ram_extent_append_prehashed(
-			builder, page->logical_page, generation,
-			page->payload, page->length, page->payload_crc32c,
-			page->encoding);
-	else
-		error = swapz_ram_extent_append_prehashed(
-			builder, page->logical_page, generation,
-			page->payload, page->length, page->payload_crc32c,
-			page->encoding);
+
+	error = swapz_ram_extent_append_prehashed(
+		builder, page->logical_page, generation,
+		page->payload, page->length, page->payload_crc32c,
+		page->encoding);
 	if (!error)
 		engine->prehashed_records++;
 	return error;
