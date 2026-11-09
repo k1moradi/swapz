@@ -73,8 +73,10 @@ NAND wear or a replacement for the qualification report.
 The compressed-SWZ ratio uses `compressed * 4096` logical bytes divided by
 successful foreground lower-WRITE bytes attributable to compressed SWZ extents.
 Foreground bytes are `physical_write - gc_write`; subtract exactly one 4KiB
-block for each committed RAW page. This denominator intentionally includes SWZ
-headers, extent rounding and packing cost. The INFO `bulk_padding` field is a
+block for each committed RAW page. This denominator intentionally includes payload-only extent rounding, deterministic
+zero padding and packing cost; it must not assume or charge serialized SWZ
+headers or record descriptors, because production lower extents contain no
+swapz metadata. The INFO `bulk_padding` field is a
 saturating unsigned-32 count of 4KiB padding blocks **staged** by the serialized
 write engine, including stages later aborted or failed; it is not committed
 foreground/GC accounting. Zero means no padding was ever staged, never a
