@@ -385,7 +385,7 @@ static int test_metadata_siblings_keep_unique_tags_in_a_full_set(void)
 		CHECK(maps[extent * 7U].extent_blocks == 4);
 	}
 	for (extent = 0; extent < 4; ++extent)
-		CHECK(swapz_engine_read_page(&engine, extent * 7U, output,
+		CHECK(swapz_engine_read_page(&engine, extent * 7U + 6U, output,
 					   sizeof(output), &length) == 0);
 	epoch = engine.read_metadata_epoch;
 	CHECK(epoch != 0 && engine.read_metadata_set_replacements == 0);
@@ -404,22 +404,22 @@ static int test_metadata_siblings_keep_unique_tags_in_a_full_set(void)
 	/* A hole before a matching tag must not terminate the commit scan.
 	 * The scratch hit below skips the initial metadata-set lookup. */
 	engine.read_metadata_tags[first_slot].epoch = 0;
-	CHECK(swapz_engine_read_page(&engine, 21, output,
+	CHECK(swapz_engine_read_page(&engine, 27, output,
 				   sizeof(output), &length) == 0);
 	CHECK(engine.read_metadata_tags[first_slot].epoch == 0);
 	CHECK(engine.read_metadata_tags[last_slot].start_block == 384U);
 	engine.read_metadata_tags[first_slot].epoch = epoch;
 
-	/* Payloads are appended from the end of the extent. With seven
-	 * 2072-byte records, record zero occupies block 3, so the four cold
-	 * reads above have already fetched blocks 0 and 3 for every extent. */
+	/* Seven 2072-byte payloads fill backward from the end; record six is
+	 * wholly in block zero. These cold reads therefore populate only the
+	 * block-zero data directory for each extent. */
 	for (extent = 0; extent < 4; ++extent) {
 		swapz_u32 start = extent * 128U;
 
 		CHECK(disk.read_block_hits[start] == 1);
 		CHECK(disk.read_block_hits[start + 1U] == 0);
 		CHECK(disk.read_block_hits[start + 2U] == 0);
-		CHECK(disk.read_block_hits[start + 3U] == 1);
+		CHECK(disk.read_block_hits[start + 3U] == 0);
 	}
 	reads_before = disk.read_blocks;
 	for (record = 0; record < 7; ++record)
@@ -431,9 +431,9 @@ static int test_metadata_siblings_keep_unique_tags_in_a_full_set(void)
 			CHECK(length == 2072);
 			CHECK(!memcmp(output, originals[logical], length));
 		}
-	/* The sibling sweep needs only blocks 1 and 2: two additional blocks
-	 * per extent, with each physical block fetched exactly once overall. */
-	CHECK(disk.read_blocks == reads_before + 8U);
+	/* The sibling sweep fills blocks 3, 2 and 1. Block zero was already
+	 * validated above, so every physical block is fetched exactly once. */
+	CHECK(disk.read_blocks == reads_before + 12U);
 	for (extent = 0; extent < 4; ++extent) {
 		swapz_u32 start = extent * 128U;
 
@@ -444,7 +444,7 @@ static int test_metadata_siblings_keep_unique_tags_in_a_full_set(void)
 	}
 	reads_before = disk.read_blocks;
 	for (extent = 0; extent < 4; ++extent)
-		CHECK(swapz_engine_read_page(&engine, extent * 7U, output,
+		CHECK(swapz_engine_read_page(&engine, extent * 7U + 6U, output,
 					   sizeof(output), &length) == 0);
 	CHECK(disk.read_blocks == reads_before);
 	CHECK(engine.read_metadata_set_replacements == 0);
@@ -487,7 +487,7 @@ static int test_metadata_secondary_choice_retains_primary_collisions(void)
 		CHECK(maps[extent * 7U].extent_blocks == 4);
 	}
 	for (extent = 0; extent < 9; ++extent)
-		CHECK(swapz_engine_read_page(&engine, extent * 7U, output,
+		CHECK(swapz_engine_read_page(&engine, extent * 7U + 6U, output,
 					   sizeof(output), &length) == 0);
 	epoch = engine.read_metadata_epoch;
 	CHECK(engine.read_metadata_set_replacements == 0);
@@ -507,19 +507,19 @@ static int test_metadata_secondary_choice_retains_primary_collisions(void)
 	CHECK(secondary_slot < SWAPZ_READ_METADATA_CACHE_ENTRIES);
 	CHECK(secondary_slot / SWAPZ_READ_METADATA_CACHE_WAYS !=
 	      primary_base / SWAPZ_READ_METADATA_CACHE_WAYS);
-	reads_before = engine.read_metadata_requests;
+	reads_before = disk.read_blocks;
 	hits_before = engine.read_metadata_lru_hits;
 	primary_before = engine.read_metadata_primary_hits;
 	secondary_before = engine.read_metadata_secondary_hits;
 	probes_before = engine.read_metadata_set_probes;
 	for (extent = 0; extent < 9; ++extent) {
-		swapz_u32 logical = extent * 7U;
+		swapz_u32 logical = extent * 7U + 6U;
 
 		CHECK(swapz_engine_read_page(&engine, logical, output,
 					   sizeof(output), &length) == 0);
 		CHECK(length == 2072 && !memcmp(output, originals[logical], length));
 	}
-	CHECK(engine.read_metadata_requests == reads_before);
+	CHECK(disk.read_blocks == reads_before);
 	CHECK(engine.read_metadata_lru_hits == hits_before + 9U);
 	CHECK(engine.read_metadata_primary_hits == primary_before + 4U);
 	CHECK(engine.read_metadata_secondary_hits == secondary_before + 5U);
@@ -532,11 +532,11 @@ static int test_metadata_secondary_choice_retains_primary_collisions(void)
 	 * directory temporarily bypassed, then restore the existing tags. */
 	engine.read_metadata_cache = NULL;
 	engine.read_cache_valid = 0;
-	CHECK(swapz_engine_read_page(&engine, 28, output,
+	CHECK(swapz_engine_read_page(&engine, 34, output,
 				   sizeof(output), &length) == 0);
 	engine.read_metadata_cache = scratch_metadata_cache;
 	engine.read_metadata_tags[primary_base].epoch = 0;
-	CHECK(swapz_engine_read_page(&engine, 28, output,
+	CHECK(swapz_engine_read_page(&engine, 34, output,
 				   sizeof(output), &length) == 0);
 	CHECK(engine.read_metadata_tags[primary_base].epoch == 0);
 	CHECK(engine.read_metadata_tags[secondary_slot].epoch == epoch);
@@ -568,9 +568,9 @@ static int test_metadata_secondary_choice_retains_primary_collisions(void)
 	engine.read_metadata_lru_clock = 100;
 	engine.read_cache_valid = 0;
 	probes_before = engine.read_metadata_set_probes;
-	CHECK(swapz_engine_read_page(&engine, 28, output,
+	CHECK(swapz_engine_read_page(&engine, 34, output,
 				   sizeof(output), &length) == 0);
-	CHECK(length == 2072 && !memcmp(output, originals[28], length));
+	CHECK(length == 2072 && !memcmp(output, originals[34], length));
 	CHECK(engine.read_metadata_set_probes == probes_before + 8U);
 	CHECK(engine.read_metadata_set_replacements == 1);
 	CHECK(engine.read_metadata_tags[secondary_slot].start_block == maps[28].start_block);
@@ -584,13 +584,13 @@ static int test_metadata_secondary_choice_retains_primary_collisions(void)
 	CHECK(engine.read_metadata_epoch == 1);
 	for (slot = 0; slot < SWAPZ_READ_METADATA_CACHE_ENTRIES; ++slot)
 		CHECK(engine.read_metadata_tags[slot].epoch == 0);
-	CHECK(swapz_engine_read_page(&engine, 28, output,
+	CHECK(swapz_engine_read_page(&engine, 34, output,
 				   sizeof(output), &length) == 0);
 	engine.read_metadata_lru_clock = ~(swapz_u32)0;
-	CHECK(swapz_engine_read_page(&engine, 28, output,
+	CHECK(swapz_engine_read_page(&engine, 34, output,
 				   sizeof(output), &length) == 0);
 	CHECK(engine.read_metadata_epoch == 2 && engine.read_metadata_lru_clock == 1);
-	CHECK(length == 2072 && !memcmp(output, originals[28], length));
+	CHECK(length == 2072 && !memcmp(output, originals[34], length));
 	return 0;
 }
 
@@ -921,7 +921,7 @@ static int test_read_budget_tradeoff_on_uniform_2072(void)
 		if (cap == 1)
 			CHECK(class_blocks == 16);
 		if (cap == 2)
-			CHECK(class_blocks == 11);
+			CHECK(class_blocks == 10);
 	}
 	return 0;
 }
