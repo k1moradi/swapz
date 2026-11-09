@@ -702,7 +702,7 @@ fail() { printf 'FAIL: %s\n' "$*" >&2; exit 1; }
             "qualification-source-identity",
             "qualified-artifact-identity",
             "target-geometry-identity",
-            "original-header-rollback-proof",
+            "original-header-identity-proof",
             "target-physical-parent-identity",
             "target-recovery-parent-separation",
             "target-mounted-in-visible-namespace",
@@ -770,7 +770,7 @@ fail() { printf 'FAIL: %s\n' "$*" >&2; exit 1; }
         self.assertGreaterEqual(
             start.count("swapz_primary_shared_root_scope_record_live("), 2)
         prewrite = start.index('failure_phase = "prewrite-shared-root-parent-authorization";')
-        target_write = start.index("swapz_primary_write_header_checked_fd(")
+        target_write = start.index("swapz_primary_dm_create_mapper(")
         self.assertLess(prewrite, target_write)
         self.assertRegex(
             start, r"target_fd,\s*rechecked_root_scope_sha256")
@@ -782,7 +782,7 @@ fail() { printf 'FAIL: %s\n' "$*" >&2; exit 1; }
                                self.primary.index("static int swapz_primary_prepare_metadata("))]
         final_check = prepare[
             prepare.index('failure_phase = "final-raw-target-swap-inventory";'):
-            prepare.index('failure_phase = "run-id-and-header-construction";')]
+            prepare.index('failure_phase = "run-id-construction";')]
         # A stale source, parent, mount, or recovery readback is not a raw-swap
         # inventory error. Likewise, an active parent swap is not ESTALE.
         identity_check = final_check[:final_check.index(
