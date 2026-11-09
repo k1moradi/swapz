@@ -7391,9 +7391,14 @@ partition itself remains forbidden as recovery backing. The interactive
 selector must describe this as a VM shared-disk rule and must not instruct the
 operator to provision the bare-metal shared-root scope record for that case. The VM lane uses the
 selected partition's own kernel I/O counters so guest-root traffic cannot be
-misreported as target traffic. The physical trial now preserves the original 4096-byte Linux swap header
-through the entire exercise; only the new Device Mapper node may receive
-`mkswap`. The kernel reserves partition block zero and requires a valid
+misreported as target traffic. The physical trial and the normal primary manager preserve the original
+4096-byte Linux swap header throughout execution. Only the new
+Device Mapper node may receive `mkswap`. The isolated RAM-backed null_blk
+lifecycle fault rehearsal retains its historical synthetic SWZ-header
+transition, and legacy recovery journals may still need the original
+header-restoration mechanism. The real-device primary manager authenticates
+the original backing image against the saved run-bound backup before creating
+or formatting the mapper, and verifies the same image again after stopping. The kernel reserves partition block zero and requires a valid
 ordinary `SWAPSPACE2` signature, version, geometry and UUID. Previously
 written SWZ headers are never required for new physical trials. Legacy
 unfinished recovery journals retain their original guarded restoration path.

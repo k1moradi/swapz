@@ -10373,31 +10373,38 @@ static int swapz_primary_swap_device_active(dev_t expected_device)
 	return 0;
 }
 
-static int swapz_primary_header_matches_run_id(
-	const unsigned char header[SWAPZ_PRIMARY_BLOCK_BYTES],
-	const char *run_id)
+/* The original SWAPSPACE2 header stays in place for real partitions.
+ * SWZ-formatted headers survive only in the isolated RAM-backed rehearsal.
+ * The original image is read from the run-bound, authenticated journal.
+ */
+static int swapz_primary_expected_backing_header_at(
+    int recovery_fd, int lock_fd,
+    const struct swapz_primary_manifest *manifest,
+    unsigned char expected[SWAPZ_PRIMARY_BLOCK_BYTES])
 {
-	unsigned int i;
-
-	if (!header || !swapz_primary_state_run_id_valid(run_id) ||
-	    !swapz_sb_valid(header, SWAPZ_PRIMARY_DEVICE_BYTES))
-		return 0;
-	for (i = 0; i < SWAPZ_SUPERBLOCK_UUID_BYTES; ++i) {
-		unsigned int high;
-		unsigned int low;
-		unsigned char a = (unsigned char)run_id[i * 2U];
-		unsigned char b = (unsigned char)run_id[i * 2U + 1U];
-
-		high = a <= '9' ? (unsigned int)(a - '0') :
-			(unsigned int)(a - 'a' + 10);
-		low = b <= '9' ? (unsigned int)(b - '0') :
-			(unsigned int)(b - 'a' + 10);
-		if (header[SWAPZ_SUPERBLOCK_UUID_OFFSET + i] !=
-		    (unsigned char)((high << 4) | low))
-			return 0;
-	}
-	return 1;
+    if (!manifest || !expected) {
+        errno = EINVAL;
+        return -1;
+    }
+#ifdef SWAPZ_PRIMARY_OWNED_NULLBLK_TEST
+    return swapz_primary_header_build(
+        manifest->run_id, manifest->target.device_bytes, expected);
+#else
+    if (manifest->target.device_bytes % SWAPZ_PRIMARY_BLOCK_BYTES ||
+        swapz_primary_header_backup_read_at(
+            recovery_fd, lock_fd, manifest->run_id,
+            manifest->original_header_sha256, 0, expected) < 0)
+        return -1;
+    if (!swapz_primary_linux_swap_header_valid(
+            expected, manifest->target.device_bytes /
+                          SWAPZ_PRIMARY_BLOCK_BYTES)) {
+        errno = EPERM;
+        return -1;
+    }
+    return 0;
+#endif
 }
+
 
 static int swapz_primary_dm_control_open(void)
 {
@@ -11324,6 +11331,7 @@ int swapz_primary_dm_create_mapper(
 	_Alignas(struct dm_ioctl)
 	unsigned char table_buffer[SWAPZ_PRIMARY_DM_BUFFER_BYTES];
 	unsigned char header[SWAPZ_PRIMARY_BLOCK_BYTES];
+	unsigned char original_header[SWAPZ_PRIMARY_BLOCK_BYTES];
 	char mapper_name[64];
 	char mapper_uuid[64];
 	char table[128];
@@ -11408,8 +11416,10 @@ int swapz_primary_dm_create_mapper(
 		goto out;
 	target_fd = swapz_primary_target_open_exclusive(manifest);
 	if (target_fd < 0 ||
+	    swapz_primary_expected_backing_header_at(
+		    recovery_fd, lock_fd, manifest, original_header) < 0 ||
 	    swapz_primary_exact_read(target_fd, header, sizeof(header)) < 0 ||
-	    !swapz_primary_header_matches_run_id(header, manifest->run_id)) {
+	    memcmp(header, original_header, sizeof(header))) {
 		if (!errno)
 			errno = EPERM;
 		goto out;
@@ -11570,9 +11580,8 @@ int swapz_primary_format_mapper_swap(
 			errno = EBUSY;
 		goto out;
 	}
-	if (swapz_primary_header_build(manifest->run_id,
-				       manifest->target.device_bytes,
-				       expected_backing_header) < 0)
+	if (swapz_primary_expected_backing_header_at(
+		    recovery_fd, lock_fd, manifest, expected_backing_header) < 0)
 		goto out;
 	target_fd = swapz_primary_target_open_readonly();
 	if (target_fd < 0 ||
@@ -13303,9 +13312,24 @@ static int swapz_primary_start_prepared(void)
 	failure_expected = NULL;
 	failure_observed = NULL;
 	failure_phase = "header-write";
+	/* The physical/user swap partition must never be formatted by swapz.
+	 * Reserve the existing Linux swap header; only a mapper may get mkswap.
+	 * The null_blk lifecycle rehearsal retains the historical synthetic
+	 * header transition for its independent recovery fault tests.
+	 */
+#ifdef SWAPZ_PRIMARY_OWNED_NULLBLK_TEST
 	if (swapz_primary_write_header_checked_fd(
 		    target_fd, &manifest.target, original_header, swapz_header) < 0)
 		goto out;
+#else
+	if (swapz_primary_exact_read(
+		    target_fd, observed_header, sizeof(observed_header)) < 0 ||
+	    memcmp(observed_header, original_header, sizeof(observed_header))) {
+		if (!errno)
+			errno = ESTALE;
+		goto out;
+	}
+#endif
 	if (close(target_fd) < 0) {
 		target_fd = -1;
 		goto out;
@@ -13550,9 +13574,8 @@ static int swapz_primary_stop_active(void)
 		goto out;
 	SWAPZ_PRIMARY_TEST_INTERRUPT_AFTER("stop-module-unloaded");
 	failure_phase = "header-verify";
-	if (swapz_primary_header_build(
-		    manifest.run_id, manifest.target.device_bytes,
-		    expected_header) < 0)
+	if (swapz_primary_expected_backing_header_at(
+		    recovery_fd, lock_fd, &manifest, expected_header) < 0)
 		goto out;
 	target_fd = swapz_primary_target_open_exclusive(&manifest);
 	if (target_fd < 0 ||
