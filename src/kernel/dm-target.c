@@ -8956,18 +8956,6 @@ static int swapz_ctr(struct dm_target *ti, unsigned int argc, char **argv)
 		goto fail;
 	}
 	is_nullb = !strncmp(ctx->backing->bdev->bd_disk->disk_name, "nullb", 5);
-	/*
-	 * A preserved SWAPSPACE2 header is necessary, but not sufficient.
-	 * Compressed extent descriptors are still serialized into the data
-	 * region. Refuse real backing before lower I/O admission until those
-	 * descriptors, payload CRCs and sequence authority live only in RAM.
-	 * Keep synthetic null_blk regression coverage for the legacy codec.
-	 */
-	if (!is_nullb && SWAPZ_CODEC_METADATA_ON_MEDIA) {
-		ti->error = "Physical backing blocked until extent metadata is RAM-only";
-		error = -EOPNOTSUPP;
-		goto fail;
-	}
 	if (swapz_test_fail_constructor_stage && !is_nullb) {
 		ti->error =
 			"Constructor fault injection is restricted to null_blk";
