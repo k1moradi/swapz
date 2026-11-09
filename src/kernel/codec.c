@@ -464,6 +464,90 @@ int swapz_seal(struct swapz_builder *builder)
 	return 0;
 }
 
+
+/*
+ * Transitional RAM-only descriptor transport for the existing extent codec.
+ * This primitive does not enable physical backing: the serialized write,
+ * selective/parallel read, GC relocation, and mapping commit paths must all
+ * establish RAM snapshot ownership before the physical interlock can change.
+ *
+ * A successful detach has a zero-filled descriptor prefix. Compressed payload
+ * bytes, offsets and extent geometry remain bit-for-bit identical, including
+ * payload bytes stored later in the first 4096-byte block.
+ */
+int swapz_detach_extent_metadata(
+	struct swapz_builder *builder, struct swapz_ram_extent_metadata *metadata)
+{
+	swapz_u32 metadata_bytes;
+	int error;
+
+	if (!builder || !metadata || !builder->bytes || !builder->sealed ||
+	    !builder->count || builder->count > SWAPZ_MAX_RECORDS ||
+	    !swapz_valid_extent_bytes(builder->bytes_total) ||
+	    swapz_payload_overlaps_extent(
+		    builder, metadata, (swapz_u32)sizeof(*metadata)))
+		return -EINVAL;
+	metadata_bytes = sizeof(struct swapz_header) +
+		(swapz_u32)builder->count * sizeof(struct swapz_record);
+	if (metadata_bytes > sizeof(metadata->bytes) ||
+	    metadata_bytes > builder->payload_start)
+		return -EUCLEAN;
+	error = swapz_validate(builder->bytes, builder->bytes_total);
+	if (error)
+		return error;
+
+	/* Success-only mutation: metadata remains caller-owned RAM and its
+	 * unused tail is initialized, preventing stale descriptors from escaping
+	 * through a recycled snapshot. No allocator or heap ownership involved.
+	 */
+	memset(metadata, 0, sizeof(*metadata));
+	memcpy(metadata->bytes, builder->bytes, metadata_bytes);
+	metadata->length = (swapz_u16)metadata_bytes;
+	memset(builder->bytes, 0, metadata_bytes);
+	return 0;
+}
+
+int swapz_attach_extent_metadata(
+	void *extent, swapz_u32 bytes_total,
+	const struct swapz_ram_extent_metadata *metadata)
+{
+	const swapz_u8 *prefix;
+	swapz_u32 expected_bytes;
+	swapz_u32 index;
+	struct swapz_builder overlap_check;
+	int error;
+
+	if (!extent || !metadata || !swapz_valid_extent_bytes(bytes_total) ||
+	    metadata->length < sizeof(struct swapz_header) ||
+	    metadata->length > sizeof(metadata->bytes))
+		return -EINVAL;
+	overlap_check = (struct swapz_builder){
+		.bytes = extent, .bytes_total = bytes_total,
+	};
+	if (swapz_payload_overlaps_extent(
+		    &overlap_check, metadata, (swapz_u32)sizeof(*metadata)))
+		return -EINVAL;
+
+	/* Reject malformed or substituted snapshots before touching scratch.
+	 * The legacy validator accesses only the count-bounded metadata prefix,
+	 * not the remainder of the stated extent geometry.
+	 */
+	prefix = metadata->bytes;
+	expected_bytes = sizeof(struct swapz_header) +
+		(swapz_u32)prefix[offsetof(struct swapz_header, record_count)] *
+		sizeof(struct swapz_record);
+	if (expected_bytes != metadata->length)
+		return -EUCLEAN;
+	error = swapz_validate(prefix, bytes_total);
+	if (error)
+		return error;
+	for (index = 0; index < metadata->length; ++index)
+		if (((swapz_u8 *)extent)[index] != 0)
+			return -ESTALE;
+	memcpy(extent, prefix, metadata->length);
+	return 0;
+}
+
 int swapz_validate_metadata_crc(const void *bytes, swapz_u32 bytes_total)
 {
 	struct swapz_header header;

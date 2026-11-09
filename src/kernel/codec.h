@@ -77,6 +77,20 @@ struct swapz_record {
 	swapz_u32 payload_crc32c_le;
 } __attribute__((packed));
 
+/* Bounded in-RAM snapshot for the legacy codec's 16-byte header and up to
+ * 64 descriptors. The descriptor image is never part of the detached lower
+ * payload; the target must maintain its own lifetime/transaction ownership
+ * across asynchronous writes, reads and garbage collection.
+ */
+#define SWAPZ_MAX_METADATA_BYTES \
+	(sizeof(struct swapz_header) + \
+	 SWAPZ_MAX_RECORDS * sizeof(struct swapz_record))
+
+struct swapz_ram_extent_metadata {
+	swapz_u16 length;
+	swapz_u8 bytes[SWAPZ_MAX_METADATA_BYTES];
+};
+
 /* Host-side state is NEVER serialized or cast over disk memory. */
 struct swapz_builder {
 	swapz_u8 *bytes;
@@ -135,6 +149,21 @@ int swapz_append_prehashed_encoded_unique(struct swapz_builder *builder,
 		       const void *payload, swapz_u16 length,
 		       swapz_u32 payload_crc32c, swapz_u8 encoding);
 int swapz_seal(struct swapz_builder *builder);
+/* The exclusively owned, sealed extent remains a data-only lower image
+ * after detach: the exact descriptor prefix is zeroed and retained in RAM.
+ * Reattachment is for an exclusively owned RAM read/validation scratch ONLY,
+ * never for a lower I/O buffer. Neither operation performs lower I/O or
+ * publishes a mapping. Caller controls snapshot lifetime and synchronization.
+ *
+ * Failures do not modify extent contents or the supplied RAM metadata.
+ * An attached image must have the same size/class as the original and an
+ * all-zero descriptor prefix, or reattachment is refused.
+ */
+int swapz_detach_extent_metadata(
+	struct swapz_builder *builder, struct swapz_ram_extent_metadata *metadata);
+int swapz_attach_extent_metadata(
+	void *extent, swapz_u32 bytes_total,
+	const struct swapz_ram_extent_metadata *metadata);
 /* Validate extent/header identity plus the metadata CRC only. Descriptor
  * semantic checks remain the caller's responsibility unless swapz_validate()
  * is used. This exists for publication paths that already walk every record. */

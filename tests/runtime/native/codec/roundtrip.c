@@ -1551,6 +1551,79 @@ static int test_rejected_append_never_hashes(void)
 	return 0;
 }
 
+
+/* Exercise the source-only metadata transport before any real backing is
+ * admitted. Descriptor bytes remain entirely in the RAM snapshot; a lower
+ * write would see only payload plus an all-zero reserved descriptor prefix.
+ * The legacy codec is still used for synthetic null_blk until every caller
+ * owns these snapshots across lower I/O and recycling.
+ */
+static int test_detached_ram_extent_metadata(void)
+{
+	static uint8_t expected_extent[SWAPZ_MAX_EXTENT_BYTES];
+	static uint8_t detached_extent[SWAPZ_MAX_EXTENT_BYTES];
+	static struct swapz_ram_extent_metadata metadata;
+	struct swapz_ram_extent_metadata corrupted;
+	struct swapz_builder builder;
+	struct swapz_decoded decoded;
+	const uint8_t *stored;
+	unsigned int classes[] = { 1U, 2U, 4U };
+	unsigned int index, offset;
+
+	set_payload(2017U, 97U);
+	for (index = 0; index < sizeof(classes) / sizeof(classes[0]); ++index) {
+		swapz_u32 bytes_total = classes[index] * SWAPZ_BLOCK_BYTES;
+
+		memset(detached_extent, 0xa7, bytes_total);
+		memset(&metadata, 0x8f, sizeof(metadata));
+		CHECK(swapz_begin(&builder, detached_extent, bytes_total,
+				  1100U + index) == 0);
+		CHECK(swapz_detach_extent_metadata(&builder, &metadata) == -EINVAL);
+		CHECK(swapz_append(&builder, index + 1U, 1U,
+				   payload, 2017U) == 0);
+		CHECK(swapz_append_encoded(&builder, index + 10U, 2U,
+					   payload, 713U,
+					   SWAPZ_ENCODING_DELTA64) == 0);
+		CHECK(swapz_seal(&builder) == 0);
+		memcpy(expected_extent, detached_extent, bytes_total);
+		CHECK(swapz_validate(expected_extent, bytes_total) == 0);
+		CHECK(swapz_detach_extent_metadata(&builder, &metadata) == 0);
+		CHECK(metadata.length == sizeof(struct swapz_header) +
+		      2U * sizeof(struct swapz_record));
+		for (offset = 0; offset < metadata.length; ++offset)
+			CHECK(detached_extent[offset] == 0U);
+		CHECK(memcmp(detached_extent + metadata.length,
+			     expected_extent + metadata.length,
+			     bytes_total - metadata.length) == 0);
+		CHECK(swapz_validate(detached_extent, bytes_total) == -EUCLEAN);
+
+		corrupted = metadata;
+		corrupted.bytes[sizeof(struct swapz_header)] ^= 1U;
+		CHECK(swapz_attach_extent_metadata(
+			      detached_extent, bytes_total, &corrupted) == -EBADMSG);
+		CHECK(detached_extent[0] == 0U);
+		corrupted = metadata;
+		corrupted.length--;
+		CHECK(swapz_attach_extent_metadata(
+			      detached_extent, bytes_total, &corrupted) == -EUCLEAN);
+		CHECK(detached_extent[0] == 0U);
+		detached_extent[0] = 0x7aU;
+		CHECK(swapz_attach_extent_metadata(
+			      detached_extent, bytes_total, &metadata) == -ESTALE);
+		detached_extent[0] = 0U;
+		CHECK(swapz_attach_extent_metadata(
+			      detached_extent, bytes_total, &metadata) == 0);
+		CHECK(memcmp(detached_extent, expected_extent, bytes_total) == 0);
+		CHECK(swapz_lookup(detached_extent, bytes_total, 1U,
+				   &decoded, &stored) == 0);
+		CHECK(decoded.logical_page == index + 10U);
+		CHECK(decoded.encoding == SWAPZ_ENCODING_DELTA64);
+		CHECK(decoded.payload_length == 713U);
+		CHECK(memcmp(stored, payload, decoded.payload_length) == 0);
+	}
+	return 0;
+}
+
 int main(void)
 {
 	int tests = 0;
@@ -1584,6 +1657,7 @@ int main(void)
 	CHECK(test_seeded_descriptor_mutations() == 0); tests++;
 	CHECK(test_truncated_and_corrupt_descriptor_counts() == 0); tests++;
 	CHECK(test_rejected_append_never_hashes() == 0); tests++;
+	CHECK(test_detached_ram_extent_metadata() == 0); tests++;
 	printf("SWAPZ_EXACT_PRODUCTION_C_TESTS_PASS=%d\n", tests);
 	return 0;
 }
