@@ -2910,6 +2910,12 @@ def _saved_header_restore_source(state, backup, size_bytes):
 def _validate_recovery_header(current_header, backup, state, size_bytes):
     if len(current_header) != PAGE_BYTES or len(backup) != PAGE_BYTES:
         raise ProbeError("recovery header must be exactly 4096 bytes")
+    # New SWAPSPACE2 runs must never repair or replace block zero. Historical
+    # interrupted pre-migration journals retain their separate recovery path.
+    if state.get("raw_header_preservation_required") is True and current_header != backup:
+        raise ProbeError(
+            "original SWAPSPACE2 header changed; raw header writes are forbidden "
+            "for this run; preserve journal and inspect read-only")
     stage = _recovery_header_stage(state)
     if stage == "HEADER_RESTORE_PENDING":
         source = _saved_header_restore_source(state, backup, size_bytes)
@@ -3413,6 +3419,9 @@ def _prepare_state(target, state_dir, evidence, review):
         "size_bytes": target["size_bytes"],
         "partuuid": target["partuuid"],
         "header_sha256": hashlib.sha256(target["header"]).hexdigest(),
+        # This durable invariant distinguishes all new non-formatting trials
+        # from historical recovery records that had replaced block zero.
+        "raw_header_preservation_required": True,
         "swap_was_active": target.get("swap_was_active", True),
         "swap_path": target.get("swap_path"),
         "swap_priority": target.get("swap_priority"),

@@ -1894,6 +1894,13 @@ class PhysicalSwapProbeTests(unittest.TestCase):
         probe._validate_recovery_header(zero, original, state, size)
         state["stage"] = "SWAP_OFF"
         probe._validate_recovery_header(zero, original, state, size)
+        # Old SWAP_OFF records can need historical repair; every newly
+        # created journal instead refuses raw-header mutation.
+        state["raw_header_preservation_required"] = True
+        probe._validate_recovery_header(original, original, state, size)
+        with self.assertRaisesRegex(probe.ProbeError, "raw header writes are forbidden"):
+            probe._validate_recovery_header(zero, original, state, size)
+        del state["raw_header_preservation_required"]
         state["stage"] = "BACKED_UP"
         with self.assertRaisesRegex(probe.ProbeError, "manual review"):
             probe._validate_recovery_header(zero, original, state, size)
@@ -2865,6 +2872,7 @@ class PhysicalSwapProbeTests(unittest.TestCase):
                     ("card_identity_sha256", target["card_identity_sha256"]),
                     ("header_sha256",
                      hashlib.sha256(target["header"]).hexdigest()),
+                    ("raw_header_preservation_required", True),
                     ("development_only", True),
                     ("development_scope", probe.DEVELOPMENT_SCOPE),
                     ("swap_was_active", False),
