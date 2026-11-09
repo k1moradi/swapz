@@ -2324,6 +2324,44 @@ class ReportContract(unittest.TestCase):
         history.draw_goal(axes, goals.goal_for("nvme_gen5", goals.MIXED))
         self.assertEqual(axes.lines, [-5.0])
 
+    def test_qualification_stage_table_shows_completed_and_not_run_once(self):
+        captured = io.StringIO()
+        stages = [(name, ["unused"]) for name in (
+            "Build module and helpers",
+            "Native and rootless contracts",
+            "Kernel warnings W=1",
+            "Kernel warnings W=2",
+            "Owned RAM smoke + mixed/QD pilot")]
+        result = [
+            {"status": "PASS", "elapsed_s": 2.5},
+            {"status": "FAIL", "elapsed_s": 4.25},
+        ]
+        with contextlib.redirect_stdout(captured):
+            runner.print_stage_results(stages, result)
+        output = captured.getvalue()
+        self.assertIn("ID | Name", output)
+        for index, (name, _) in enumerate(stages):
+            self.assertEqual(output.count(name), 1)
+            expected_verdict = ("PASS" if index == 0 else
+                                "FAIL" if index == 1 else "NOT RUN")
+            self.assertIn(runner.progress_table_row(
+                index, name, expected_verdict,
+                ("2.50s" if index == 0 else
+                 "4.25s" if index == 1 else "-")), output)
+        self.assertNotIn("/5  ", output)
+
+    def test_physical_trial_table_has_a_single_dev_scoped_row(self):
+        captured = io.StringIO()
+        with contextlib.redirect_stdout(captured):
+            runner.print_physical_trial_result("NOT RUN", "0.03s")
+        output = captured.getvalue()
+        self.assertIn("ID | Name", output)
+        self.assertEqual(
+            output.count("Authorized physical swap trial (dev)"), 1)
+        self.assertIn(runner.progress_table_row(
+            0, "Authorized physical swap trial (dev)",
+            "NOT RUN", "0.03s"), output)
+
     def test_loaded_progress_table_labels_and_success_markers(self):
         phases = {"preflight"} | {
             phase for _, phase in runner.LOADED_TIMING_BOUNDARIES

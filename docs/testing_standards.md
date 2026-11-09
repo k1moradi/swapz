@@ -60,8 +60,16 @@ merge independent assertion/failure boundaries or omit ASan/UBSan/TSan
 qualification for speed.
 The native/rootless stage records separate native Make and remaining-contract
 wall times as optional observational evidence, not qualification PASS gates.
-The official `make test` and `make test_full` terminals present rootless
-progress as a compact `ID | Name | Verdict | Time` table. Every source-defined
+The official `make test` and `make test_full` terminals present all
+qualification results using `ID | Name | Verdict | Time` tables: rootless
+suites, loaded benchmark families, the five top-level stage summaries, and
+the optional development-only physical algorithm trial. Top-level stages
+appear together after the execution sequence, with explicit `NOT RUN` rows
+for stages skipped after a failure. The physical trial remains separately
+authorized, and its status cannot be interpreted as production physical
+acceptance. Original protected admission observations and failure-only
+diagnostics remain readable outside the table; they are not test verdicts.
+Rootless progress uses the same four columns. Every source-defined
 suite has a unique, short, descriptive display name rather than a repository
 path; the exact path stays in authenticated progress markers, private
 diagnostics and report evidence for debugging. Human-readable acronyms

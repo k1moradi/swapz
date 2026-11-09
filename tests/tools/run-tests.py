@@ -3676,6 +3676,39 @@ def rootless_suite_table_row(index, label, verdict, duration):
         index, rootless_suite_display_name(label), verdict, duration)
 
 
+def print_progress_table_header():
+    """Use identical column alignment for every qualification layer."""
+    print(f"    {'ID':>2} | {'Name':<{ROOTLESS_NAME_WIDTH}} | "
+          f"{'Verdict':<10} | {'Time':>8}", flush=True)
+    print(f"    {'-' * 2}-+-{'-' * ROOTLESS_NAME_WIDTH}-+-"
+          f"{'-' * 10}-+-{'-' * 8}", flush=True)
+
+
+def print_stage_results(configured_stages, completed_stages):
+    """Show all five stages, including explicit NOT RUN rows after failure."""
+    print("  Qualification stage results:", flush=True)
+    print_progress_table_header()
+    for index, (name, _) in enumerate(configured_stages):
+        record = (completed_stages[index]
+                  if index < len(completed_stages) else None)
+        if record is None:
+            verdict, duration = "NOT RUN", "-"
+        else:
+            verdict = record.get("status", "INCOMPLETE")
+            duration = f"{record['elapsed_s']:.2f}s"
+        print(progress_table_row(index, name, verdict, duration),
+              flush=True)
+
+
+def print_physical_trial_result(verdict, duration):
+    """Display the optional physical trial without changing its admission."""
+    print("  Optional physical algorithm trial:", flush=True)
+    print_progress_table_header()
+    print(progress_table_row(
+        0, "Authorized physical swap trial (dev)", verdict, duration),
+        flush=True)
+
+
 LOADED_MAPPER_INVENTORY_SOURCE_PATTERN = re.compile(
     r"LOADED_MAPPER_INVENTORY_SOURCE=(dmsetup|record_parser) "
     r"status=([1-9][0-9]{0,2})")
@@ -3927,10 +3960,7 @@ def run_stage(title, command, result, *, parse_bench=False,
                 loaded_phase_open = True
             else:
                 print("       Rootless suite results:", flush=True)
-            print(f"    {'ID':>2} | {'Name':<{ROOTLESS_NAME_WIDTH}} | "
-                  f"{'Verdict':<10} | {'Time':>8}", flush=True)
-            print(f"    {'-' * 2}-+-{'-' * ROOTLESS_NAME_WIDTH}-+-"
-                  f"{'-' * 10}-+-{'-' * 8}", flush=True)
+            print_progress_table_header()
             if loaded_is_tty:
                 sys.stdout.write(
                     "\r" + loaded_phase_table_row(
@@ -4355,8 +4385,6 @@ def run_stage(title, command, result, *, parse_bench=False,
         result["benchmarks"]["storage_envelope_sessions"] = (
             storage_envelope_sessions)
         result["benchmarks"]["storage_envelopes"] = storage_envelope_diagnostic
-    print(f"  {len(result['stages']):>2}/5  {title:<29} "
-          f"{status:<8} {record['elapsed_s']:>8.2f}s", flush=True)
     if "substage_elapsed_s" in record:
         timing = record["substage_elapsed_s"]
         print(f"        native make: {timing['native_make_s']}s; "
@@ -10281,6 +10309,7 @@ def main():
         if code:
             exit_code = code
             break
+    print_stage_results(stages, result["stages"])
     if result["stages"] and result["stages"][0].get("status") == "PASS":
         # Record the bytes left by the complete qualification sequence. Physical
         # smoke later requires this report identity, the signed review identity,
@@ -10357,6 +10386,7 @@ def main():
         if sys.stdin.isatty() and sys.stdout.isatty():
             print("  RAM qualification passed; checking optional physical "
                   "algorithm trial admission", flush=True)
+            physical_started = time.monotonic()
             try:
                 physical_trial = subprocess.run(
                     [sys.executable, "-B",
@@ -10365,13 +10395,13 @@ def main():
                 physical_exit = physical_trial.returncode
             except (OSError, subprocess.SubprocessError):
                 physical_exit = 2
+            physical_duration = f"{max(0.0, time.monotonic() - physical_started):.2f}s"
             if physical_exit == 0:
                 result["algorithm_real_swap"] = {
                     "overall": "PASS_DEVELOPMENT_ONLY",
                     "reason": "source_built_bounded_swap_roundtrip",
                 }
-                print("  Physical algorithm trial: PASS_DEVELOPMENT_ONLY; "
-                      "production physical acceptance still pending")
+                print_physical_trial_result("PASS", physical_duration)
             elif physical_exit in (1, 3):
                 result["algorithm_real_swap"] = {
                     "overall": ("RECOVERY_REQUIRED" if physical_exit == 3
@@ -10380,18 +10410,21 @@ def main():
                 }
                 result["overall"] = "FAIL"
                 exit_code = physical_exit
-                print("  Physical algorithm trial: FAIL; inspect root-owned "
+                print_physical_trial_result("FAIL", physical_duration)
+                print("  Physical trial recovery: inspect root-owned "
                       "recovery state before another test")
             else:
                 result["algorithm_real_swap"] = {
                     "overall": "NOT_RUN",
                     "reason": "physical_trial_declined_or_blocked",
                 }
-                print("  Physical algorithm trial: NOT RUN; "
-                      "device unchanged or safely refused")
+                print_physical_trial_result("NOT RUN", physical_duration)
+                print("  Physical trial admission: device unchanged or "
+                      "safely refused")
         else:
-            print("  Physical qualification: NOT RUN; "
-                  "source/run/target admission protocol is not yet qualified")
+            print_physical_trial_result("NOT RUN", "-")
+            print("  Physical qualification: source/run/target admission "
+                  "protocol is not yet qualified")
         if not exit_code:
             exit_code = 2
     if not exit_code and result["overall"] == "PASS":
