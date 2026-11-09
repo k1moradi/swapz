@@ -678,6 +678,12 @@ struct swapz_dm {
 	int last_error;
 
 	struct swapz_authority authority;
+	/* One reusable RAW transaction for the ordered owner. The foreground
+	 * RAW path invokes GC only before staging its own transaction, and GC
+	 * relocation is synchronous under ordered_owner; these uses never
+	 * overlap. Keep the expanded RAM descriptors off the kernel stack.
+	 */
+	struct swapz_tx raw_io_transaction;
 	struct swapz_gc_recovery gc_recovery;
 	struct swapz_engine engine;
 	struct swapz_map *maps;
@@ -3990,7 +3996,7 @@ static int swapz_gc_flush(struct swapz_dm *ctx)
 static int swapz_gc_move_raw(struct swapz_dm *ctx, swapz_u32 logical,
 			   const struct swapz_map *old)
 {
-	struct swapz_tx tx;
+	struct swapz_tx *transaction = &ctx->raw_io_transaction;
 	swapz_u8 completed = 0;
 	int error, finish_error;
 
@@ -4003,15 +4009,15 @@ static int swapz_gc_move_raw(struct swapz_dm *ctx, swapz_u32 logical,
 	error = swapz_verify_raw(&ctx->authority, logical, ctx->input_page);
 	if (error)
 		return error;
-	error = swapz_stage(&ctx->authority, &logical, 1, 1, &tx);
+	error = swapz_stage(&ctx->authority, &logical, 1, 1, transaction);
 	if (error)
 		return error;
-	error = swapz_lower_write(ctx, tx.start_block, 1,
+	error = swapz_lower_write(ctx, transaction->start_block, 1,
 				ctx->input_page, &completed);
 	if (!error && completed == 1)
-		error = swapz_verify_raw_write(ctx, tx.start_block,
+		error = swapz_verify_raw_write(ctx, transaction->start_block,
 					   ctx->input_page);
-	finish_error = swapz_finish_raw(&ctx->authority, &tx, ctx->input_page,
+	finish_error = swapz_finish_raw(&ctx->authority, transaction, ctx->input_page,
 				      completed, error);
 	if (finish_error && (finish_error != error || ctx->authority.in_flight))
 		swapz_fail_at(ctx, error < 0 ? error : finish_error, "write",
@@ -5320,7 +5326,7 @@ accounted:
 
 static int swapz_raw_write(struct swapz_dm *ctx, struct bio *bio, swapz_u32 logical)
 {
-	struct swapz_tx tx;
+	struct swapz_tx *transaction = &ctx->raw_io_transaction;
 	swapz_u8 completed = 0;
 	int error, finish_error;
 
@@ -5329,7 +5335,7 @@ static int swapz_raw_write(struct swapz_dm *ctx, struct bio *bio, swapz_u32 logi
 					 &ctx->ordered_write_copy_bytes);
 	if (error)
 		return error;
-	error = swapz_stage(&ctx->authority, &logical, 1, 1, &tx);
+	error = swapz_stage(&ctx->authority, &logical, 1, 1, transaction);
 	if (error == -ENOSPC) {
 		/* GC may use input_page, so recopy the still-owned upper BIO
 		 * after victim relocation, before writing a raw replacement. */
@@ -5341,7 +5347,7 @@ static int swapz_raw_write(struct swapz_dm *ctx, struct bio *bio, swapz_u32 logi
 					 &ctx->ordered_write_copy_bytes);
 		if (error)
 			return error;
-		error = swapz_stage(&ctx->authority, &logical, 1, 1, &tx);
+		error = swapz_stage(&ctx->authority, &logical, 1, 1, transaction);
 	}
 	if (error)
 		return error;
@@ -5350,13 +5356,13 @@ static int swapz_raw_write(struct swapz_dm *ctx, struct bio *bio, swapz_u32 logi
 	 * to the actual foreground RAW lower write, never to GC relocation I/O.
 	 */
 	ctx->prepublication_fua = !!(bio->bi_opf & REQ_FUA);
-	error = swapz_lower_write(ctx, tx.start_block, 1, ctx->input_page,
+	error = swapz_lower_write(ctx, transaction->start_block, 1, ctx->input_page,
 				&completed);
 	ctx->prepublication_fua = false;
 	if (!error && completed == 1)
-		error = swapz_verify_raw_write(ctx, tx.start_block,
+		error = swapz_verify_raw_write(ctx, transaction->start_block,
 					   ctx->input_page);
-	finish_error = swapz_finish_raw(&ctx->authority, &tx, ctx->input_page,
+	finish_error = swapz_finish_raw(&ctx->authority, transaction, ctx->input_page,
 				      completed, error);
 	error = swapz_preserve_first_error(error, finish_error);
 	if (!error) {
