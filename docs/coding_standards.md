@@ -3055,6 +3055,11 @@ propagates it to the original BIO. It may enforce terminal fail-closed status
 there but must leave any existing failure unchanged, and must not treat a
 completion counter as proof of the user's write() return value.
 
+The RAM-only compressed READ verifier must reject malformed 4/8/16KiB
+extent geometry or payload offset/length crossing the extent boundary
+before accessing payload bytes for CRC. A matching stale/corrupted observed
+mapping is not permission to hash memory past the selected lower image.
+
 The volatile per-logical-page authority map is part of the full-capacity RAM
 budget and must remain exactly 16 bytes (`_Static_assert`). Its four-byte union
 has mutually exclusive meanings: a RAW mapping stores its volatile CRC32C;

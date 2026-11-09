@@ -3204,9 +3204,25 @@ int swapz_read_authoritative_payload(const struct swapz_authority *a,
 		a, logical_page, observed, &current_map);
 	if (error)
 		return error;
-	if (!current_map->payload_length ||
-	    current_map->payload_length > SWAPZ_MAX_COMPRESSED)
-		return -EUCLEAN;
+	/*
+	 * Check volatile descriptor geometry before hashing caller-provided
+	 * readback. A corrupted offset/length must never turn CRC verification
+	 * into a read beyond the selected 4/8/16KiB extent.
+	 */
+	{
+		const swapz_u32 extent_bytes =
+			(swapz_u32)current_map->extent_blocks << SWAPZ_BLOCK_SHIFT;
+
+		if ((current_map->extent_blocks != 1U &&
+		     current_map->extent_blocks != 2U &&
+		     current_map->extent_blocks != 4U) ||
+		    !current_map->payload_length ||
+		    current_map->payload_length > SWAPZ_MAX_COMPRESSED ||
+		    current_map->payload_offset >= extent_bytes ||
+		    current_map->payload_length >
+			    extent_bytes - current_map->payload_offset)
+			return -EUCLEAN;
+	}
 	if (swapz_crc32c_bytes(stored, current_map->payload_length) !=
 	    current_map->payload_crc32c)
 		return -EBADMSG;

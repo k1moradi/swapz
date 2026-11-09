@@ -498,6 +498,26 @@ static int test_full_publish_and_authoritative_reads(void)
 				      &payload) == -EBADMSG);
 			CHECK(payload == NULL);
 			extent[observed.payload_offset] ^= 1U;
+			/*
+			 * Corrupt the actual RAM authority and match its observed
+			 * identity. Reject a payload crossing the extent boundary
+			 * BEFORE checksum code touches any out-of-range bytes.
+			 */
+			{
+				const struct swapz_map saved = maps[index];
+				struct swapz_map invalid = saved;
+
+				invalid.payload_offset =
+					((swapz_u32)invalid.extent_blocks <<
+					 SWAPZ_BLOCK_SHIFT) - 1U;
+				maps[index] = invalid;
+				CHECK(swapz_read_authoritative_payload(
+					      &authority, index, &invalid,
+					      extent + invalid.payload_offset,
+					      &payload) == -EUCLEAN);
+				CHECK(payload == NULL);
+				maps[index] = saved;
+			}
 		}
 	}
 	CHECK(swapz_finish(&authority, &tx, extent, 16384, 4, 0) == -ESTALE);
