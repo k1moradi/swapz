@@ -3767,41 +3767,75 @@ PRIMARY_LIFECYCLE_TIMING_PATTERN = re.compile(
     r"method=(test_[A-Za-z0-9_]{1,126})")
 
 
-def parse_primary_lifecycle_case_timings(output):
-    """Accept case durations only for actual source-defined unittest methods.
-
-    The source AST is the allowlist, not the child-provided marker. These
-    diagnostics cannot modify PASS/FAIL or expose untrusted test output.
-    """
-    records = [line for line in output.splitlines()
-               if line.startswith("PRIMARY_LIFECYCLE_CASE_TIMING ")]
-    if not records:
-        return None
-    if len(records) > 2048:
-        return None
+def primary_lifecycle_source_case_methods():
+    """Source-defined methods expected from the full rootless audit."""
     try:
         tree = ast.parse((ROOT / "tests/runtime/native/"
                           "primary-lifecycle-audit-test.py").read_text(
                               encoding="utf-8"))
     except (OSError, SyntaxError, UnicodeError, ValueError):
         return None
-    allowlisted = frozenset(
+    return frozenset(
         (node.name, child.name)
         for node in tree.body if isinstance(node, ast.ClassDef)
         for child in node.body if isinstance(child, ast.FunctionDef)
         and child.name.startswith("test_"))
+
+
+def parse_primary_lifecycle_case_timings(output):
+    """Accept indexed case durations only for source-defined unittest methods.
+
+    The source AST is the allowlist, not the child-provided marker. These
+    diagnostics cannot modify PASS/FAIL or expose untrusted test output.
+    """
+    records = [line for line in output.splitlines()
+               if line.startswith("PRIMARY_LIFECYCLE_CASE_TIMING ")]
+    if not records or len(records) > 2048:
+        return None
+    allowlisted = primary_lifecycle_source_case_methods()
+    if not allowlisted:
+        return None
     timings = []
+    seen_methods = set()
     for line in records:
         match = PRIMARY_LIFECYCLE_TIMING_PATTERN.fullmatch(line)
-        if (match is None or int(match.group(1)) != len(timings)
-                or (match.group(3), match.group(4)) not in allowlisted):
+        if match is None:
             return None
+        method_identity = (match.group(3), match.group(4))
+        if (int(match.group(1)) != len(timings)
+                or method_identity not in allowlisted
+                or method_identity in seen_methods):
+            return None
+        seen_methods.add(method_identity)
         timings.append({
             "class": match.group(3),
             "method": match.group(4),
             "elapsed_ms": int(match.group(2)),
         })
     return timings
+
+
+def primary_lifecycle_case_timing_coverage(output, timings):
+    """Make missing or rejected case telemetry visible without changing gates."""
+    source_methods = primary_lifecycle_source_case_methods()
+    observed = min(2049, sum(
+        line.startswith("PRIMARY_LIFECYCLE_CASE_TIMING ")
+        for line in output.splitlines()))
+    accepted = len(timings) if timings is not None else 0
+    expected = len(source_methods) if source_methods is not None else 0
+    if source_methods is None:
+        status = "SOURCE_UNAVAILABLE"
+    elif timings is None:
+        status = "MISSING" if observed == 0 else "REJECTED"
+    else:
+        status = ("COMPLETE" if accepted == expected and observed == expected
+                  else "PARTIAL")
+    return {
+        "status": status,
+        "expected_cases": expected,
+        "accepted_cases": accepted,
+        "observed_records": observed,
+    }
 
 
 def parse_rootless_phase_timings(output):
@@ -4252,9 +4286,20 @@ def run_stage(title, command, result, *, parse_bench=False,
                     sum(phase["elapsed_s"] for phase in rootless_phases)
                     <= record["elapsed_s"] + 2):
                 record["phase_elapsed_s"] = rootless_phases
-        case_timings = parse_primary_lifecycle_case_timings(output)
-        if case_timings is not None:
-            record["primary_lifecycle_case_elapsed_ms"] = case_timings
+        # This suite may be skipped after an earlier failure. Only report
+        # case coverage when the harness actually started its audit phase.
+        lifecycle_start = (
+            "label=tests/runtime/native/primary-lifecycle-audit-test.py")
+        if any(
+                line.startswith("ROOTLESS_PHASE_PROGRESS state=START ") and
+                line.endswith(lifecycle_start)
+                for line in output.splitlines()):
+            case_timings = parse_primary_lifecycle_case_timings(output)
+            if case_timings is not None:
+                record["primary_lifecycle_case_elapsed_ms"] = case_timings
+            record["primary_lifecycle_case_timing_coverage"] = (
+                primary_lifecycle_case_timing_coverage(
+                    output, case_timings))
     if parse_bench and loaded_timing_phases:
         record["phase_elapsed_s"] = loaded_timing_phases
     if parse_bench and rc and "LOADED_QUALIFICATION_SOURCE=" not in output:
@@ -4350,6 +4395,18 @@ def run_stage(title, command, result, *, parse_bench=False,
         if owned_pair_timings is not None:
             result["benchmarks"]["owned_pair_phase_timings"] = (
                 owned_pair_timings)
+        observed_pair_markers = min(801, sum(
+            line.startswith("OWNED_PAIR_PHASE_TIMING ")
+            for line in output.splitlines()))
+        result["benchmarks"]["owned_pair_timing_coverage"] = {
+            "status": (
+                "REJECTED" if owned_pair_timings is None else
+                "COLLECTED" if owned_pair_timings else
+                "NOT_RECORDED"),
+            "complete_pairs": (len(owned_pair_timings)
+                               if owned_pair_timings is not None else 0),
+            "observed_records": observed_pair_markers,
+        }
         result["benchmarks"]["verdicts"] = benchmark_verdicts(
             result["benchmarks"]["sessions"])
         if (loaded_correctness.get("overall") == "PASS" and

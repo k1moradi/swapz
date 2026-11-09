@@ -338,6 +338,7 @@ class NativeTimingContract(unittest.TestCase):
         self.assertIsNone(runner.parse_primary_lifecycle_case_timings(""))
         for malformed in (
                 first + first,
+                first + first.replace("index=0", "index=1"),
                 second,
                 first.replace("elapsed_ms=21", "elapsed_ms=021"),
                 first.replace("class=PrimaryLifecycleBehaviorTest",
@@ -349,6 +350,112 @@ class NativeTimingContract(unittest.TestCase):
             with self.subTest(malformed=malformed[:54]):
                 self.assertIsNone(
                     runner.parse_primary_lifecycle_case_timings(malformed))
+
+    def test_primary_lifecycle_timing_coverage_distinguishes_missing_and_partial(self):
+        methods = runner.primary_lifecycle_source_case_methods()
+        self.assertIsNotNone(methods)
+        self.assertGreater(len(methods), 2)
+        label = ("class=PrimaryLifecycleBehaviorTest "
+                 "method=test_active_requires_exact_kernel_inventory_proof")
+        first = "PRIMARY_LIFECYCLE_CASE_TIMING index=0 elapsed_ms=10 " + label + "\n"
+        self.assertEqual(
+            runner.primary_lifecycle_case_timing_coverage("", None)["status"],
+            "MISSING")
+        self.assertEqual(
+            runner.primary_lifecycle_case_timing_coverage(first, None)["status"],
+            "REJECTED")
+        partial = runner.parse_primary_lifecycle_case_timings(first)
+        self.assertEqual(
+            runner.primary_lifecycle_case_timing_coverage(
+                first, partial)["status"], "PARTIAL")
+        complete = "".join(
+            f"PRIMARY_LIFECYCLE_CASE_TIMING index={index} elapsed_ms=2 "
+            f"class={class_name} method={method_name}\n"
+            for index, (class_name, method_name)
+            in enumerate(sorted(methods)))
+        captured = runner.parse_primary_lifecycle_case_timings(complete)
+        self.assertEqual(len(captured), len(methods))
+        self.assertEqual(
+            runner.primary_lifecycle_case_timing_coverage(
+                complete, captured)["status"], "COMPLETE")
+
+    def test_primary_lifecycle_case_timing_writer_survives_stdout_redirection(self):
+        import sys
+        from unittest import mock
+
+        audit_path = ROOT / "tests/runtime/native/primary-lifecycle-audit-test.py"
+        audit_spec = importlib.util.spec_from_file_location(
+            "swapz_rootless_audit_timing_fixture", audit_path)
+        audit = importlib.util.module_from_spec(audit_spec)
+        with mock.patch.dict(sys.modules, {audit_spec.name: audit}):
+            audit_spec.loader.exec_module(audit)
+
+        class FastCase(unittest.TestCase):
+            def test_fast(self):
+                pass
+
+        test_suite = unittest.TestSuite([FastCase("test_fast")])
+        with mock.patch.object(audit.os, "write") as writer, \
+                contextlib.redirect_stdout(io.StringIO()):
+            completed = audit.PrimaryLifecycleTimingRunner(
+                stream=io.StringIO(), verbosity=0).run(test_suite)
+        self.assertTrue(completed.wasSuccessful())
+        writer.assert_called_once()
+        descriptor, marker = writer.call_args.args
+        self.assertEqual(descriptor, 1)
+        self.assertRegex(marker.decode("ascii"),
+                         r"^PRIMARY_LIFECYCLE_CASE_TIMING index=0 "
+                         r"elapsed_ms=[0-9]+ class=FastCase "
+                         r"method=test_fast\n$")
+
+    def test_owned_pair_phase_coverage_handles_redirection_and_rejection(self):
+        records = "".join(
+            f"OWNED_PAIR_PHASE_TIMING phase={phase} elapsed_ms={index + 3}\n"
+            for index, phase in enumerate(
+                ("setup", "fixture", "replay", "verification", "teardown")))
+        parsed = runner.parse_owned_pair_phase_timings(records * 2)
+        self.assertEqual(len(parsed), 2)
+        self.assertEqual(parsed[0]["pair_index"], 0)
+        self.assertEqual(parsed[1]["pair_index"], 1)
+
+    def test_rootless_audit_case_marker_reaches_stage_evidence(self):
+        from unittest import mock
+
+        phase = "tests/runtime/native/primary-lifecycle-audit-test.py"
+        marker = (
+            "PRIMARY_LIFECYCLE_CASE_TIMING index=0 elapsed_ms=17 "
+            "class=PrimaryLifecycleBehaviorTest "
+            "method=test_active_requires_exact_kernel_inventory_proof\n")
+        transcript = (
+            "ROOTLESS_PHASE_PROGRESS state=START index=0 elapsed_s=0 "
+            "label=rootless initialization\n"
+            "ROOTLESS_PHASE_PROGRESS state=PASS index=0 elapsed_s=0 "
+            "label=rootless initialization\n"
+            f"ROOTLESS_PHASE_PROGRESS state=START index=1 elapsed_s=0 "
+            f"label={phase}\n" +
+            marker +
+            f"ROOTLESS_PHASE_PROGRESS state=PASS index=1 elapsed_s=1 "
+            f"label={phase}\n")
+        result = {"stages": [], "benchmarks": {}}
+        with mock.patch.object(
+                runner.subprocess, "Popen",
+                return_value=FakeStreamingProcess(transcript)), \
+                contextlib.redirect_stdout(io.StringIO()):
+            runner.run_stage(
+                "Native and rootless contracts", ["unused"], result,
+                stream_rootless_progress=True)
+        stage = result["stages"][-1]
+        self.assertEqual(
+            stage["primary_lifecycle_case_elapsed_ms"],
+            [{"class": "PrimaryLifecycleBehaviorTest",
+              "method": "test_active_requires_exact_kernel_inventory_proof",
+              "elapsed_ms": 17}])
+        self.assertEqual(
+            stage["primary_lifecycle_case_timing_coverage"]["status"],
+            "PARTIAL")
+        self.assertEqual(
+            stage["primary_lifecycle_case_timing_coverage"]["observed_records"],
+            1)
 
     def test_loaded_timing_boundaries_do_not_use_child_supplied_labels(self):
         self.assertEqual(runner.loaded_timing_phase(

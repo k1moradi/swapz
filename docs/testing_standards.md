@@ -122,17 +122,27 @@ Each visible owned-RAM benchmark pair also records bounded monotonic-uptime
 elapsed milliseconds for setup, fixture, replay, verification and ownership-
 safe teardown. The optional `benchmarks.owned_pair_phase_timings` report
 field stores only complete, ordered five-phase pairs and their execution
-indices; private redirected raw-read and incomplete sessions may be absent.
-The helper never shares resources between pairs, never changes the official
-benchmark workload, and timing-read or display failures do not alter verdicts.
+indices. Raw-read fanout pairs keep their full output in private logs while
+relaying only fixed, bounded timing lines to the parent reporter. The
+optional `benchmarks.owned_pair_timing_coverage` reports the number of
+complete pairs and observed timing records, with COLLECTED, NOT_RECORDED
+or REJECTED status; an interrupted session may remain unrecorded. The helper
+never shares resources between pairs, never changes the official benchmark
+workload, and timing-read or display failures do not alter verdicts.
 The primary lifecycle rootless audit emits per-unittest-method monotonic
 elapsed milliseconds (including per-case setup/teardown) from its existing
-in-process runner. The reporter stores only contiguous indexed cases whose
+in-process runner. A bounded atomic write to the inherited stdout file
+descriptor avoids losing the source-defined marker when a test redirects
+Python's sys.stdout. The reporter stores only contiguous indexed cases whose
 class and method are present in that suite's source AST under the optional
-rootless-stage `primary_lifecycle_case_elapsed_ms` field. Class-wide setup
-and runner startup remain outside individual case times; compare their sum to
-the suite total before considering any fixture reuse. Timing is descriptive,
-not authorization, qualification, or a separate public test command.
+rootless-stage `primary_lifecycle_case_elapsed_ms` field. The corresponding
+`primary_lifecycle_case_timing_coverage` records expected/accepted/observed
+counts and COMPLETE, PARTIAL, MISSING, REJECTED or SOURCE_UNAVAILABLE status
+when the suite started. Missing or rejected telemetry does not become a
+qualification failure or a fabricated duration. Class-wide setup and runner
+startup remain outside individual case times; compare their sum to the suite
+total before considering any fixture reuse. Timing is descriptive, not
+authorization, qualification, or a separate public test command.
 Missing or malformed timing evidence must not alter PASS/FAIL/BLOCKED. Sensitive child
 output must never become a phase label. A protected identity read may use
 only the fixed, bounded, pinned, read-only noninteractive privileged fallback. If its authorization or trust checks

@@ -2380,11 +2380,14 @@ class PrimaryLifecycleTimingResult(unittest.TextTestResult):
                 if (elapsed_ns >= 0 and
                         re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]{0,127}", class_name)
                         and re.fullmatch(r"test_[A-Za-z0-9_]{1,126}", method_name)):
-                    print(
+                    # Some cases redirect Python-level sys.stdout. Write one
+                    # small, source-defined marker directly to the inherited
+                    # reporting pipe so an otherwise passing case is not lost.
+                    marker = (
                         f"PRIMARY_LIFECYCLE_CASE_TIMING index={self.testsRun - 1} "
                         f"elapsed_ms={elapsed_ns // 1_000_000} "
-                        f"class={class_name} method={method_name}",
-                        flush=True)
+                        f"class={class_name} method={method_name}\n")
+                    os.write(1, marker.encode("ascii"))
         except (OSError, ValueError, OverflowError):
             # A failed clock or output pipe is not a test failure.
             pass

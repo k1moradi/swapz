@@ -309,7 +309,14 @@ for content in entropy balanced; do
         --profile medium --retain-ms 2 --unpaced --lower-mbps 80 \
         --hw-queue-depth 64 --completion-nsec 150000 --async-prepare \
         --shared-plan "$raw_plan" >"$raw_plan/run.log" 2>&1; then
-        :
+        # Preserve the private full transcript. Forward only bounded,
+        # source-defined timing records to the parent qualification reporter.
+        # No device identity, fixture path or child diagnostic is relayed.
+        if [[ -f $raw_plan/run.log && ! -L $raw_plan/run.log ]]; then
+            LC_ALL=C grep -E \
+                '^OWNED_PAIR_PHASE_TIMING phase=(setup|fixture|replay|verification|teardown) elapsed_ms=(0|[1-9][0-9]{0,7})$' \
+                "$raw_plan/run.log" || :
+        fi
     else
         rc=$?
         tail -n 12 "$raw_plan/run.log"
