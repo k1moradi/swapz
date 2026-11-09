@@ -19,6 +19,12 @@ DISCARD and concurrency, partial/failing I/O, memory capacity and no stale
 mapping after target recreation. Exercise exclusive swapoff and return to
 ordinary swapon without reboot; after success ask owner keep/restore.
 Existing raw-header preservation alone is insufficient for production PASS.
+The source-only interlock check in
+`tests/runtime/native/ram-metadata-admission-test.py` runs under native
+`test-codec` and asserts that the legacy in-band writer cannot admit a real
+device. This is refusal coverage, **not** RAM-metadata or physical qualification.
+After migration, replace the refusal assertions with native, loaded and
+real-SWAPSPACE2 payload-only/CRC/read/GC proof before opening physical admission.
 Contradictory historical formatter requirements below are superseded.
 
 ## Official interface

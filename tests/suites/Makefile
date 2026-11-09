@@ -157,6 +157,7 @@ $(OUT)/predictor-qualification: $(NATIVE)/codec/predictor-qualification.c \
 
 test-codec: $(OUT)/codec-roundtrip $(OUT)/extent-geometry $(OUT)/superblock
 	@set -e; "$(OUT)/codec-roundtrip"; "$(OUT)/extent-geometry"; "$(OUT)/superblock"
+	@python3 -B "$(NATIVE)/ram-metadata-admission-test.py"
 
 test-anon-page-analyzer: $(OUT)/anon-page-analyzer
 	@python3 -B "$(NATIVE)/codec/anon-page-analyzer-test.py" "$(OUT)/anon-page-analyzer"

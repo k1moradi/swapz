@@ -1384,6 +1384,10 @@ def main():
     }
     write_development_evidence(evidence)
     started = time.monotonic()
+    # Always check the real-device interlock, including RESUME=1 runs.
+    run([sys.executable, "-B",
+         "tests/runtime/native/ram-metadata-admission-test.py"],
+        stdout=subprocess.DEVNULL)
     build()
     try:
         input_sha256 = resume_input_fingerprint()

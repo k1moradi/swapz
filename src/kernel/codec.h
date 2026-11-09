@@ -27,6 +27,16 @@ typedef uint32_t swapz_u32;
 typedef uint64_t swapz_u64;
 #endif
 
+/*
+ * P0 safety interlock, not a runtime feature toggle: compressed extents still
+ * carry an SWZ header and 16-byte descriptors in their on-media data blocks.
+ * Never permit real physical backing until the production writer, reader, GC
+ * and authority have all migrated to data-only extents with bounded RAM-only
+ * CRC, generation and mapping metadata. Synthetic null_blk remains eligible.
+ * Changing this value requires the new loaded/data-integrity qualification.
+ */
+#define SWAPZ_CODEC_METADATA_ON_MEDIA 1U
+
 #define SWAPZ_BLOCK_BYTES 4096U
 #define SWAPZ_BLOCK_SHIFT 12U
 #define SWAPZ_MAX_BLOCKS 4U

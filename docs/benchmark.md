@@ -7,6 +7,12 @@
 Both qualification tiers retain the loaded RAM algorithm benchmark matrix.
 `make test_full` also includes rootless package/systemd integration. Neither
 RAM result is physical-device performance or endurance evidence.
+While `SWAPZ_CODEC_METADATA_ON_MEDIA` is set, the kernel refuses real
+backing: no new physical swapz throughput, latency or endurance qualification
+is possible. Treat older physical benchmark reports as historical; do not
+extrapolate null_blk figures to ordinary SWAPSPACE2 partition performance.
+A new physical campaign requires the completed RAM-metadata migration and
+matched current-source byte-exact readback/GC checks.
 
 ## Ordinary swap and RAM-metadata qualification boundary
 

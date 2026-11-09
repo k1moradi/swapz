@@ -3024,6 +3024,12 @@ fail while the READ continues against committed authority.
 
 Non-`null_blk` backing is disabled by default. When explicitly enabled it
 requires a valid unchanged SWAPSPACE2 header in reserved block 0.
+During the P0 metadata migration, physical backing additionally fails closed
+in the DM constructor while SWZ compressed extent headers/descriptors are
+written in-band. A valid swap header is never permission to publish legacy
+extent metadata onto a real partition. Removing the constructor interlock
+requires matching native, loaded and physical-data qualification of RAM-only
+CRC, sequence, descriptor, read and GC ownership.
 All mapping data and segment discard ranges start after that reserved block.
 Fault-injection knobs are forbidden on physical backing. Upper WRITE completion accounting distinguishes
 successful BIO acknowledgments from BIO errors; a terminally failed target
