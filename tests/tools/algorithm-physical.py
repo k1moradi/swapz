@@ -329,9 +329,14 @@ def main() -> int:
               ",".join(blockers))
         return 2
     if selected.get("parent_has_other_partitions"):
-        print("  Shared-root candidate: privileged admission requires the "
-              "protected host-scope record and recovery storage on another "
-              "physical parent")
+        if selected.get("virtual_device_only"):
+            print("  VM shared-disk candidate: the privileged helper must prove "
+                  "the selected partition is not root and recovery does not "
+                  "resolve through the selected partition")
+        else:
+            print("  Shared-root candidate: privileged admission requires the "
+                  "protected host-scope record and recovery storage on another "
+                  "physical parent")
     try:
         algorithm_ram_evidence = _algorithm_ram_evidence_arguments()
     except ValueError as error:

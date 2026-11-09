@@ -7296,7 +7296,9 @@ memory-headroom, `swapoff`, UUID/PARTUUID/geometry, mapper ownership, durable
 original-header backup, and restoration checks remain mandatory. Because this
 lane makes no physical-failure claim, its root-owned recovery journal may live
 on a different partition of the same guest virtual disk; the selected swap
-partition itself remains forbidden as recovery backing. The VM lane uses the
+partition itself remains forbidden as recovery backing. The interactive
+selector must describe this as a VM shared-disk rule and must not instruct the
+operator to provision the bare-metal shared-root scope record for that case. The VM lane uses the
 selected partition's own kernel I/O counters so guest-root traffic cannot be
 misreported as target traffic. After the durable zero-header transition, the
 root-owned development probe constructs the same bounded v1 4096-byte SWZ

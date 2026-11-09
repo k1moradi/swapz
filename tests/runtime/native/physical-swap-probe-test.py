@@ -2747,6 +2747,19 @@ class PhysicalSwapProbeTests(unittest.TestCase):
                 target["parent_major_minor"] = "259:0"
                 self.assertEqual(probe._recovery_base(target), base)
 
+                # VM-only evidence may keep the durable journal on a sibling
+                # guest partition of the same virtual disk, but never on the
+                # selected swap partition itself.
+                target["parent_major_minor"] = "8:0"
+                target["virtual_device_only"] = True
+                self.assertEqual(probe._recovery_base(target), base)
+                target["minor"] = 3
+                with self.assertRaisesRegex(
+                        probe.ProbeError, "selected swap partition"):
+                    probe._recovery_base(target)
+                target["minor"] = 9
+                target["virtual_device_only"] = False
+
                 del target["parent_major_minor"]
                 with self.assertRaisesRegex(
                         probe.ProbeError, "target physical parent"):
