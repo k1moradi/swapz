@@ -2698,7 +2698,7 @@ static int swapz_lower_write(void *opaque, swapz_u32 block, swapz_u8 blocks,
 
 /*
  * A single synchronous dm_io submission covers many adjacent, individually
- * valid SWZ extents. The portable engine does NOT publish their logical
+ * valid payload-only swapz extents. The portable engine does NOT publish their logical
  * maps until this WHOLE lower submission has completed successfully.
  * dm_io request count is NOT guaranteed to equal block-queue request
  * count after bio splitting/merging; independent null_blk stat is needed.
@@ -3815,9 +3815,10 @@ static void swapz_order_window_greedy(struct swapz_dm *ctx)
 			first_unused++;
 		ctx->planned_to_batch[position++] = (u8)largest;
 
-		/* SWZ metadata: header(16) + two descriptors(32). */
-		if (SWAPZ_BLOCK_BYTES - 48 - ctx->batch[largest].length >= min_length) {
-			const int budget = (int)SWAPZ_BLOCK_BYTES - 48 -
+		/* Production extents are payload-only; RAM descriptors consume no
+		 * backing bytes. Pair against the complete 4KiB payload budget. */
+		if (SWAPZ_BLOCK_BYTES - ctx->batch[largest].length >= min_length) {
+			const int budget = (int)SWAPZ_BLOCK_BYTES -
 				(int)ctx->batch[largest].length;
 
 			for (i = first_unused; i < ctx->batch_count; ++i) {
@@ -3926,8 +3927,10 @@ static void swapz_gc_sort(struct swapz_dm *ctx)
 		if (largest == (int)first_unused)
 			first_unused++;
 		ctx->gc_to_pending[position++] = largest;
-		if (SWAPZ_BLOCK_BYTES - 48 - ctx->gc_pending[largest].length >= min_length) {
-			const int budget = (int)SWAPZ_BLOCK_BYTES - 48 -
+		/* GC repacks the same payload-only extent representation as
+		 * foreground writes; volatile descriptors consume no media space. */
+		if (SWAPZ_BLOCK_BYTES - ctx->gc_pending[largest].length >= min_length) {
+			const int budget = (int)SWAPZ_BLOCK_BYTES -
 				(int)ctx->gc_pending[largest].length;
 
 			for (i = first_unused; i < ctx->gc_count; ++i) {
@@ -4031,7 +4034,7 @@ static int swapz_gc_move_raw(struct swapz_dm *ctx, swapz_u32 logical,
 }
 
 /*
- * Evaluate actual authoritative compressed-body BYTES + descriptor cost,
+ * Evaluate actual authoritative compressed payload BYTES from RAM metadata,
  * rather than treating a live 200-byte record like a live 4096-byte raw
  * page. This is a conservative cost estimate, not a prediction of the
  * optimizer's final physical extent count or actual read amplification.
