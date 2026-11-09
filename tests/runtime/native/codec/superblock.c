@@ -1,6 +1,8 @@
 /* SPDX-License-Identifier: GPL-2.0-only */
-/* Exercise ordinary SWAPSPACE2 admission alongside the legacy synthetic-only
- * SWZ authorization validator, without opening or writing any block device.
+/*
+ * Exercise the only physical backing-header contract: an existing ordinary
+ * SWAPSPACE2 partition. Validation is read-only and must not depend on a
+ * swapz-specific on-media identity.
  */
 #include "superblock.h"
 
@@ -9,146 +11,94 @@
 
 #define DEVICE_BYTES (16ULL * 1024ULL * 1024ULL * 1024ULL)
 
-static int check_invalid(const unsigned char *header, const char *reason)
+static void put_u32_le(unsigned char *bytes, unsigned int value)
 {
-	if (!swapz_sb_valid(header, DEVICE_BYTES))
-		return 0;
-	fprintf(stderr, "FAIL: accepted %s superblock\n", reason);
-	return 1;
+	bytes[0] = (unsigned char)value;
+	bytes[1] = (unsigned char)(value >> 8);
+	bytes[2] = (unsigned char)(value >> 16);
+	bytes[3] = (unsigned char)(value >> 24);
 }
 
-/* Normal Linux swap is already formatted; no SWZ header is necessary.
- * The raw block-zero image is retained verbatim and never written by this
- * validator. Data placement begins at the following 4096-byte page.
- */
-static int check_linux_swap_header(void)
+static void build_linux_swap_header(unsigned char header[SWAPZ_SUPERBLOCK_BYTES])
 {
-	unsigned char header[SWAPZ_SUPERBLOCK_BYTES] = { 0 };
-	unsigned char unchanged_header[SWAPZ_SUPERBLOCK_BYTES];
 	unsigned int index;
-	int failures = 0;
 
-	swapz_sb_put_u32(header + SWAPZ_LINUX_SWAP_VERSION_OFFSET, 1U);
-	swapz_sb_put_u32(header + SWAPZ_LINUX_SWAP_LAST_PAGE_OFFSET,
-			 (unsigned int)(DEVICE_BYTES / SWAPZ_SUPERBLOCK_BYTES - 1ULL));
+	memset(header, 0, SWAPZ_SUPERBLOCK_BYTES);
+	put_u32_le(header + SWAPZ_LINUX_SWAP_VERSION_OFFSET, 1U);
+	put_u32_le(
+		header + SWAPZ_LINUX_SWAP_LAST_PAGE_OFFSET,
+		(unsigned int)(DEVICE_BYTES / SWAPZ_SUPERBLOCK_BYTES - 1ULL));
+	put_u32_le(header + SWAPZ_LINUX_SWAP_BAD_PAGES_OFFSET, 0U);
 	for (index = 0; index < SWAPZ_LINUX_SWAP_UUID_BYTES; ++index)
 		header[SWAPZ_LINUX_SWAP_UUID_OFFSET + index] =
 			(unsigned char)(index + 1U);
-	memcpy(header + SWAPZ_SUPERBLOCK_BYTES - SWAPZ_LINUX_SWAP_MAGIC_BYTES,
-	       "SWAPSPACE2", SWAPZ_LINUX_SWAP_MAGIC_BYTES);
-	memcpy(unchanged_header, header, sizeof(unchanged_header));
-	if (!swapz_linux_swap_header_valid(header, DEVICE_BYTES) ||
-	    swapz_sb_valid(header, DEVICE_BYTES)) {
-		fprintf(stderr, "FAIL: ordinary Linux swap header is not admitted independently\n");
-		return 1;
-	}
-	if (memcmp(header, unchanged_header, sizeof(header))) {
-		fprintf(stderr, "FAIL: backing header changed during read-only admission\n");
+	memcpy(
+		header + SWAPZ_SUPERBLOCK_BYTES - SWAPZ_LINUX_SWAP_MAGIC_BYTES,
+		"SWAPSPACE2", SWAPZ_LINUX_SWAP_MAGIC_BYTES);
+}
+
+int main(void)
+{
+	unsigned char header[SWAPZ_SUPERBLOCK_BYTES];
+	unsigned char original[SWAPZ_SUPERBLOCK_BYTES];
+	int failures = 0;
+
+	build_linux_swap_header(header);
+	memcpy(original, header, sizeof(original));
+	if (!swapz_linux_swap_header_valid(header, DEVICE_BYTES)) {
+		fprintf(stderr, "FAIL: rejected valid ordinary Linux swap header\n");
 		++failures;
 	}
-	if (swapz_linux_swap_header_valid(header, DEVICE_BYTES - 1U) ||
-	    swapz_linux_swap_header_valid(header, DEVICE_BYTES + SWAPZ_SUPERBLOCK_BYTES) ||
-	    swapz_linux_swap_header_valid(header, SWAPZ_SUPERBLOCK_BYTES)) {
-		fprintf(stderr, "FAIL: accepted invalid backing device geometry\n");
+	if (memcmp(header, original, sizeof(header))) {
+		fprintf(stderr, "FAIL: read-only swap-header validation modified bytes\n");
 		++failures;
 	}
-	header[SWAPZ_SUPERBLOCK_BYTES - 1U] ^= 1U;
-	failures += swapz_linux_swap_header_valid(header, DEVICE_BYTES);
-	header[SWAPZ_SUPERBLOCK_BYTES - 1U] ^= 1U;
-	swapz_sb_put_u32(header + SWAPZ_LINUX_SWAP_VERSION_OFFSET, 2U);
-	failures += swapz_linux_swap_header_valid(header, DEVICE_BYTES);
-	swapz_sb_put_u32(header + SWAPZ_LINUX_SWAP_VERSION_OFFSET, 1U);
-	swapz_sb_put_u32(header + SWAPZ_LINUX_SWAP_LAST_PAGE_OFFSET,
-			 (unsigned int)(DEVICE_BYTES / SWAPZ_SUPERBLOCK_BYTES));
-	failures += swapz_linux_swap_header_valid(header, DEVICE_BYTES);
-	/* A valid signature must not admit a truncated in-header capacity.
-	 * The backing geometry is not permission to address unused tail pages.
-	 */
-	swapz_sb_put_u32(header + SWAPZ_LINUX_SWAP_LAST_PAGE_OFFSET, 2U);
-	failures += swapz_linux_swap_header_valid(header, DEVICE_BYTES);
-	swapz_sb_put_u32(header + SWAPZ_LINUX_SWAP_LAST_PAGE_OFFSET,
-			 (unsigned int)(DEVICE_BYTES / SWAPZ_SUPERBLOCK_BYTES - 1ULL));
-	swapz_sb_put_u32(header + SWAPZ_LINUX_SWAP_BAD_PAGES_OFFSET, 1U);
-	failures += swapz_linux_swap_header_valid(header, DEVICE_BYTES);
-	swapz_sb_put_u32(header + SWAPZ_LINUX_SWAP_BAD_PAGES_OFFSET, 0U);
-	/* mkswap -U clear produces valid Linux swap without a UUID. */
+
+	/* Linux swap UUID is optional; PARTUUID and exact geometry bind backing. */
 	memset(header + SWAPZ_LINUX_SWAP_UUID_OFFSET, 0,
 	       SWAPZ_LINUX_SWAP_UUID_BYTES);
 	if (!swapz_linux_swap_header_valid(header, DEVICE_BYTES)) {
 		fprintf(stderr, "FAIL: rejected valid Linux swap with cleared UUID\n");
 		++failures;
 	}
-	if (failures)
-		fprintf(stderr, "FAIL: %d malformed Linux swap headers were accepted\n", failures);
-	return failures != 0;
-}
 
-int main(void)
-{
-	unsigned char header[SWAPZ_SUPERBLOCK_BYTES] = { 0 };
-	unsigned int index;
-	int failures = 0;
-
-	memcpy(header + SWAPZ_SUPERBLOCK_MAGIC_OFFSET,
-	       swapz_superblock_magic, SWAPZ_SUPERBLOCK_MAGIC_BYTES);
-	swapz_sb_put_u32(header + SWAPZ_SUPERBLOCK_VERSION_OFFSET,
-			 SWAPZ_SUPERBLOCK_VERSION);
-	swapz_sb_put_u32(header + SWAPZ_SUPERBLOCK_HEADER_BYTES_OFFSET,
-			 SWAPZ_SUPERBLOCK_BYTES);
-	swapz_sb_put_u64(header + SWAPZ_SUPERBLOCK_DEVICE_BYTES_OFFSET,
-			 DEVICE_BYTES);
-	for (index = 0; index < SWAPZ_SUPERBLOCK_UUID_BYTES; ++index)
-		header[SWAPZ_SUPERBLOCK_UUID_OFFSET + index] = (unsigned char)(index + 1U);
-	if (!swapz_sb_valid(header, DEVICE_BYTES)) {
-		fprintf(stderr, "FAIL: exact SWZ superblock rejected\n");
-		return 1;
-	}
-
-	header[SWAPZ_SUPERBLOCK_MAGIC_OFFSET] ^= 1U;
-	failures += check_invalid(header, "wrong-magic");
-	header[SWAPZ_SUPERBLOCK_MAGIC_OFFSET] ^= 1U;
-
-	/* The verified device geometry, not just header self-description, matters. */
-	if (swapz_sb_valid(header, DEVICE_BYTES - SWAPZ_SUPERBLOCK_BYTES)) {
-		fprintf(stderr, "FAIL: accepted mismatched device geometry\n");
+	build_linux_swap_header(header);
+	put_u32_le(header + SWAPZ_LINUX_SWAP_VERSION_OFFSET, 2U);
+	if (swapz_linux_swap_header_valid(header, DEVICE_BYTES))
 		++failures;
-	}
-	swapz_sb_put_u64(header + SWAPZ_SUPERBLOCK_DEVICE_BYTES_OFFSET,
-			 DEVICE_BYTES - SWAPZ_SUPERBLOCK_BYTES);
-	failures += check_invalid(header, "header device size mismatch");
-	swapz_sb_put_u64(header + SWAPZ_SUPERBLOCK_DEVICE_BYTES_OFFSET,
-			 DEVICE_BYTES);
 
-	swapz_sb_put_u32(header + SWAPZ_SUPERBLOCK_HEADER_BYTES_OFFSET,
-			 SWAPZ_SUPERBLOCK_BYTES - 1U);
-	failures += check_invalid(header, "header byte count mismatch");
-	swapz_sb_put_u32(header + SWAPZ_SUPERBLOCK_HEADER_BYTES_OFFSET,
-			 SWAPZ_SUPERBLOCK_BYTES);
+	build_linux_swap_header(header);
+	put_u32_le(header + SWAPZ_LINUX_SWAP_BAD_PAGES_OFFSET, 1U);
+	if (swapz_linux_swap_header_valid(header, DEVICE_BYTES))
+		++failures;
 
-	swapz_sb_put_u32(header + SWAPZ_SUPERBLOCK_VERSION_OFFSET,
-			 SWAPZ_SUPERBLOCK_VERSION + 1U);
-	failures += check_invalid(header, "wrong-version");
-	swapz_sb_put_u32(header + SWAPZ_SUPERBLOCK_VERSION_OFFSET,
-			 SWAPZ_SUPERBLOCK_VERSION);
+	build_linux_swap_header(header);
+	put_u32_le(
+		header + SWAPZ_LINUX_SWAP_LAST_PAGE_OFFSET,
+		(unsigned int)(DEVICE_BYTES / SWAPZ_SUPERBLOCK_BYTES - 2ULL));
+	if (swapz_linux_swap_header_valid(header, DEVICE_BYTES))
+		++failures;
 
-	memset(header + SWAPZ_SUPERBLOCK_UUID_OFFSET, 0,
-	       SWAPZ_SUPERBLOCK_UUID_BYTES);
-	failures += check_invalid(header, "zero-uuid");
-	header[SWAPZ_SUPERBLOCK_UUID_OFFSET] = 1U;
+	build_linux_swap_header(header);
+	header[SWAPZ_SUPERBLOCK_BYTES - 1U] ^= 1U;
+	if (swapz_linux_swap_header_valid(header, DEVICE_BYTES))
+		++failures;
 
-	/* Every byte outside the defined 40-byte prefix is reserved and zero. */
-	for (index = SWAPZ_SUPERBLOCK_UUID_OFFSET + SWAPZ_SUPERBLOCK_UUID_BYTES;
-	     index < SWAPZ_SUPERBLOCK_BYTES; ++index) {
-		header[index] = 0x80U;
-		if (swapz_sb_valid(header, DEVICE_BYTES))
-			++failures;
-		header[index] = 0;
-	}
-	failures += check_linux_swap_header();
-	if (failures)
-		fprintf(stderr, "FAIL: %d malformed backing headers were accepted\n", failures);
-	if (failures)
+	build_linux_swap_header(header);
+	if (swapz_linux_swap_header_valid(header, DEVICE_BYTES - 1U) ||
+	    swapz_linux_swap_header_valid(
+		    header, DEVICE_BYTES + SWAPZ_SUPERBLOCK_BYTES) ||
+	    swapz_linux_swap_header_valid(
+		    header, 2ULL * SWAPZ_SUPERBLOCK_BYTES) ||
+	    swapz_linux_swap_header_valid(NULL, DEVICE_BYTES))
+		++failures;
+
+	if (failures) {
+		fprintf(stderr,
+			"FAIL: %d malformed/nonmatching Linux swap headers were admitted\n",
+			failures);
 		return 1;
-	puts("PASS: unchanged Linux swap backing and synthetic SWZ header validators");
+	}
+	puts("PASS: ordinary SWAPSPACE2 validation is read-only and exact-geometry");
 	return 0;
 }
