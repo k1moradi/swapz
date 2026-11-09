@@ -39,8 +39,6 @@ static int injected_write_error;
 static int write_lower(void *unused, swapz_u32 block, swapz_u8 blocks,
 		       const swapz_u8 *bytes, swapz_u8 *completed)
 {
-	struct swapz_decoded d;
-	const swapz_u8 *p;
 	size_t offset = (size_t)block * SWAPZ_BLOCK_BYTES;
 	size_t size = (size_t)blocks * SWAPZ_BLOCK_BYTES;
 
@@ -73,9 +71,18 @@ static int write_lower(void *unused, swapz_u32 block, swapz_u8 blocks,
 	memcpy(disk + offset, bytes, size);
 	*completed = blocks;
 	if (corrupt_after_write) {
-		if (swapz_lookup(bytes, (swapz_u32)size, 0, &d, &p))
+		const struct swapz_tx *transaction = &auth.active_tx;
+		const struct swapz_tx_record *record;
+
+		if (!auth.in_flight || !transaction->compressed_data_only ||
+		    !transaction->count ||
+		    !transaction->records[0].compressed_metadata_bound)
 			return -EUCLEAN;
-		disk[offset + d.payload_offset] ^= 0x80;
+		record = &transaction->records[0];
+		if (record->payload_offset >= size ||
+		    record->payload_length > size - record->payload_offset)
+			return -EUCLEAN;
+		disk[offset + record->payload_offset] ^= 0x80;
 	}
 	return 0;
 }
