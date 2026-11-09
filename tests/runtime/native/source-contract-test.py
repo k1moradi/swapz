@@ -547,33 +547,18 @@ class SwapzProductionSourceQualification(unittest.TestCase):
         self.assertIn("manifest.target = target", PRIMARY)
 
     def test_standalone_formatter_is_identity_bound_and_never_discards(self):
+        # The raw formatter was deleted. Keep that removal as a source contract.
         self.assertNotIn(
             'if (argc == 3 && !strcmp(argv[1], "format"))', SWAPZCTL)
-        for required in (
-                "--expect-major-minor", "--expect-bytes",
-                "--expect-partuuid", "--expect-parent-major-minor",
-                "--expect-parent-model", "--expect-parent-transport",
-                "O_RDWR | O_EXCL | O_CLOEXEC",
-                "BLKROGET",
-                "format_device_with_ops",
-                "format_report_uncertain",
-                "swapz_primary_target_config_read(configured_partuuid)",
-                "format_default_authorized_target_verify",
-                "format_authorized_opened_verify",
-                "format_parent_only_partition",
-                "format_usb_transport_path",
-                "target identity changed before header write",
-                "SWZ header readback mismatch"):
-            self.assertIn(required, SWAPZCTL)
-        self.assertIn("ssize_t count = pwrite(fd, bytes, length, 0);",
-                      SWAPZCTL)
-        self.assertNotIn("pwrite(fd, bytes + done", SWAPZCTL)
-        for destructive in ("BLKDISCARD", "FITRIM"):
-            self.assertNotIn(destructive, SWAPZCTL)
-        for fixed_target in (
-                "/dev/sda1", "/dev/sda4", "124787884032", "f13428f6-01",
-                "Multi-Card"):
-            self.assertNotIn(fixed_target, SWAPZCTL)
+        self.assertNotIn("pwrite(", SWAPZCTL)
+        self.assertNotIn("BLKDISCARD", SWAPZCTL)
+        self.assertNotIn("FITRIM", SWAPZCTL)
+        self.assertNotIn("format_device_with_ops", SWAPZCTL)
+        self.assertNotIn("format_report_uncertain", SWAPZCTL)
+        self.assertNotIn("target identity changed before header write", SWAPZCTL)
+        self.assertNotIn("SWZ header readback mismatch", SWAPZCTL)
+        self.assertIn("Raw backing partitions are never formatted by swapzctl.", SWAPZCTL)
+        self.assertIn("Only the new virtual mapper may receive mkswap.", SWAPZCTL)
 
     def test_lane_gap_observation_only_and_single_owner(self):
         header = (ROOT / "src/kernel/lane-gap.h").read_text()

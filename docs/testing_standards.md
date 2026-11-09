@@ -3074,7 +3074,7 @@ activate real systemd, load a module, mutate swap, require root, or perform
 physical-device operations.
 
 The native authority suite must also exercise a fixed 16 GiB maximum-capacity
-regression fixture: one SWZ header block,
+regression fixture: one protected ordinary-SWAPSPACE2 first page,
 1 MiB segment rounding, and the authority's `ceil(logical_pages / 8)` reserve
 with its two-segment minimum. It must reject the first page beyond the maximum,
 initialize the maximum, attach every capacity-dependent production authority
@@ -6955,231 +6955,52 @@ one-use `physical-swap-probe.py` protocol below records the older
 human-approval mechanics are not a current gate for repeated work on the
 dedicated `/dev/sda1` card. Its device-identity, provenance and fail-closed
 techniques remain useful patterns.
-Rootless qualification must exercise the production formatter decision path
-with synthetic descriptor/kernel operations and identity tables. Deterministic
-diagnostic-clobber injection must prove the original errno survives exclusive
-open, identity/inventory refusal, read, random, final descriptor access mode,
-write/durability and secondary close failures. The default-CLI synthetic
-opened-descriptor fault matrix must inject failure of the first exact 4,096-byte
-read, a possibly torn 2,048-of-4,096-byte pwrite, failed fsync, failed exact
-4,096-byte readback, and failed close after otherwise durable publication.
-An interrupted header pwrite returning EINTR after possible prefix mutation
-must remain one non-resumed write attempt and report UNCERTAIN/RECOVERY REQUIRED
-with originating EINTR despite diagnostic and close errors; no fsync may follow.
-The captured I/O-fault matrix must match the complete safe action requiring
-header and target-identity inspection before retry, not merely the
-RECOVERY REQUIRED classification prefix.
-Every pre-publication failure must retain original errno and byte-for-byte
-unchanged block zero; every failure after attempting the header pwrite must
-return status 3 UNCERTAIN, include RECOVERY REQUIRED, retain observable media
-bytes, and preserve originating errno despite diagnostic I/O or secondary close
-failure. The real final formatter gate
-must query F_GETFL on the returned descriptor, require O_RDWR after O_ACCMODE,
-and refuse a query failure or O_RDONLY/O_WRONLY with zero writes and zero
-syncs. Tests inspect numeric errno, expected condition and safe action in
-diagnostics. Final-gate production-CLI mutations must additionally require the
-diagnostic stage to match the surface that actually failed: PARTUUID/path/
-geometry substitutions are identity, BLKROGET failures or read-only state are
-descriptor mode, parent substitutions are topology, and mount/swap evidence
-failures are inventory. The stable summary
-`target identity changed before header write` may remain for CLI compatibility,
-but it is insufficient by itself: the same diagnostic must carry the precise
-`stage=` classification and stage-specific expected condition. Fake O_EXCL requests never prove kernel BLK_EXCL
-or mount/swap exclusion. It must cover
-malformed PARTUUIDs, numeric overflow and single digits exceeding small
-numeric bounds (for example removable=2 when maximum=1), copied cloneable
-identifiers with a
-different opened device/parent, replaced path/PARTUUID aliases, wrong opened
-device, wrong parent or geometry, a changed major:minor after reconnection,
-non-removable/held topology, missing sole-partition status,
-parent-model/USB-transport mismatch, an opened descriptor that becomes
-read-only, invalid SWZ UUID/reserved bytes, stale identity immediately before
-the write, truncated reads, unexpected permissions, USB/transport-style I/O
-failure, and device disappearance before and after the write. The synthetic default-CLI inventory fixture must include the selected raw
-target and its by-PARTUUID alias at both pre-open and last prewrite admission,
-and the raw parent at pre-open. All are refused with original EOPNOTSUPP,
-zero pwrite/sync calls and unmodified 4,096-byte block zero.
-The swap-inventory gate must reject **every active** `/proc/swaps` row,
-including regular swapfiles and unrelated block devices, with `EOPNOTSUPP`.
-Resolving a reported pathname in the formatter's mount namespace cannot
-authenticate the kernel's already-active backing inode across namespaces;
-a matching local `st_dev`, `st_ino` or `st_rdev` is not admission authority.
-A complete well-formed zero-row snapshot alone clears this inventory gate;
-it is not a kernel exclusion lock. The rootless pathname-provenance regression
-must distinguish ordinary rename/unlink from current-mount-view replacement:
-`/proc/self/fd/N` readlink and `seq_file_path()` both render a retained
-`struct path` through `d_path()`. Renaming the retained file must change the
-rendered name and unlinking it must add ` (deleted)`; inside an isolated
-user+mount namespace, a private bind overmount must be able to preserve that
-rendered pathname while `lstat()` of the same string reaches a different
-regular inode and filesystem `st_dev`. That overmount fixture proves only the
-pathname re-resolution gap, not an actual swap race. It must make mount
-propagation private before fixture mounts, may skip only the overmount arm when
-unprivileged user/mount namespaces are unavailable, and must never activate or
-deactivate swap or open a block device. The `unshare` helper itself is required.
-A missing child marker may skip only on an `unshare` namespace-creation,
-setgroups or user/group-map write failure; missing helper, unexpected interpreter
-or fixture startup failures must fail, not be reported as unavailable namespaces.
-When `/proc/swaps` is supplied as `/dev/stdin`, it may be a one-shot pipe:
-read it once into a mode-0600 private temporary file, reject snapshots larger
-than the parser's 16 MiB bound, and run the existing strict parser on that
-stable snapshot. Do not emit an identity until the whole snapshot parses;
-unlink only the exact snapshot. Preserve the parser's first exit status if
-cleanup also fails, and treat cleanup failure after a successful parse as a
-test failure. Rootless regressions must cover a valid one-shot stream,
-malformed header and row, empty input, over-bound input, and absence of the
-snapshot after each completed parse attempt.
-Rootless stream fixtures must reject
-empty or headerless tables and malformed headers/rows before treating the
-snapshot as clear. Native fixtures also
-cover the literal kernel header, canonical numeric fields, embedded NULs,
-missing final newlines, overlong rows, bounded table/row budgets, duplicate
-mount IDs and duplicate swap backing identities, malformed known mount
-optional fields and octal escapes, forward-compatible unknown mount optional
-fields, duplicate known propagation tags, ro/rw mount and superblock option
-grammar, filesystem-specific non-path mount roots, raw legal filename bytes,
-kernel-escaped swapfile paths and deterministic byte mutations under the
-ASan/UBSan rootless test build. The visible-PID traversal bound must not be
-lower than Linux's maximum possible PID space. A rootless proc-directory fixture must prove that a selected partition or
-parent mounted only in another visible PID's namespace blocks formatting,
-while unrelated sibling mounts remain nonconflicting. Missing or malformed
-mountinfo for a PID whose ns/mnt marker is still present must fail closed;
-the fixture must also model EINVAL/ENOENT/ESRCH from an exiting or zombie task
-with ns/mnt absent and require that process-churn case to be ignored without
-weakening EACCES or opened-table failures. An empty readable mount table or a structurally incomplete unrelated sibling
-entry must fail closed, including when the malformed table is in another PID
-namespace. The mountinfo parser must accept normal major-zero pseudo-filesystem
-entries (including `0:0`) while still rejecting malformed/overflowed rows;
-major zero must remain forbidden for a configured physical partition or parent.
-Rootless formatter tests must also call the production `swapzctl format`
-CLI and its default callback chain through synthetic proc/sysfs and fake
-open/ioctl/read/write seams, not only a canned callback errno or a direct
-identity-helper assertion. Synthetic path routing must cover the exact
-`/proc` and `/sys` roots as well as their descendants; fixture setup must
-never fall through to host namespace directories. The fixture must verify the exact prewrite refusal
-phase, specific errno, observed identity category and unmodified mock block
-zero for PARTUUID drift, changed parent, foreign-mounted parent, active
-swapfile, unreadable foreign mount namespace, vanished PID mount table with
-a still-live namespace, stale size, substituted alias, symlink, and same-dev_t
-inode replacement. The direct-C fake-opened-descriptor fixture must separately
-model current-mount-view bind-overmount ambiguity after the accepted block-zero
-read: pathname `st_dev` and `st_ino` change while the opened descriptor
-identity remains pinned. That synthetic case must return status 2 with
-originating `ESTALE`, zero pwrite/sync calls and byte-identical block zero; it
-models pathname re-resolution only and is not a real mount or swap race.
-Diagnostics must not expose private device paths or serials. The direct-C production-CLI inventory regression must pass synthetic
-active file and block rows, duplicate rows, malformed and empty tables, truncated
-records, and inaccessible inventory through the real formatter gates, not only
-direct parser calls or injected callback errors. Retest late active, duplicated,
-truncated, and inaccessible snapshots after the first fake block-zero read,
-with a previously clear snapshot. Each refusal must retain its original errno,
-identify stage=inventory and a safe action, count zero header pwrite and sync
-calls, and compare the complete in-memory block zero byte-for-byte to its
-pre-invocation state. Failure output must use phase=active_swap_inventory,
-sanitized entry counts/classes where observable, the affected gate and the
-refused operation; never emit raw swap paths. Only fully parsed data rows may
-contribute to an observed-entry count: a truncated row contributes zero, a
-malformed row after one valid row reports one safely observed entry, and an
-unreadable table reports the count as unknown. Captured CLI diagnostics must
-match the exact inventory expected-condition and read-only/no-header-write
-action, and must not echo synthetic swap paths.
-For any nonempty `/proc/swaps` table, the formatter cannot authenticate a
-row's active kernel backing object or its owner, whether it names the selected
-partition, an alias, or unrelated system swap. This identity limitation
-applies both before and after header publication and does not itself authorize
-deactivation. A pre-publication formatter refusal must never recommend
-`swapoff` or deactivation from table membership alone; it must preserve
-originating `EOPNOTSUPP` and require only read-only inventory and ownership
-investigation. Any decision to deactivate swap belongs to a separately
-authenticated and authorized owner, outside the formatter. Rootless
-production-CLI pre-publication regressions must assert this safe guidance for
-selected raw-path, aliased and unrelated active entries, retaining exact errno,
-zero header mutation and zero syncs. If activity is first observed only after
-header publication was attempted, the diagnostic must still avoid unowned
-deactivation advice, retain the originating errno and report status 3
-`UNCERTAIN` with `RECOVERY REQUIRED`; it must not claim a clean no-write
-refusal. Unsafe recovery advice is a regression, not grounds to weaken the
-complete zero-row inventory prerequisite. Synthetic production-CLI active-row
-regressions must also assert that diagnostics never suggest `swapoff` or
-unowned swap deactivation in either a prepublication refusal or a
-postpublication UNCERTAIN result; the diagnostic must instead require
-read-only ownership investigation and defer state changes to a separately
-authenticated owner. Formatter admission diagnostics must identify the
-selected proof class, expected condition, sanitized observed identity/evidence
-class, operation, phase/stage, originating errno and safe next action. When an
-active swap row first appears after publication, the captured diagnostic must
-contain the single postpublication UNCERTAIN classification and must not also
-emit a context-free REFUSED classification. Exclusive-open denials and the
-final returned-descriptor F_GETFL gate must use the same structured admission
-fields, including a sanitized observed class and the attempted operation.
-After switching failure reporters, exact-C warning-clean builds must also reject
-unused leftover static diagnostic wrappers; dead helpers are removed without
-altering the errno or phase-specific refusal behavior.
+Rootless qualification must prove the removed raw-partition formatter cannot
+reappear through current lifecycle code. Exercise the primary admission path
+with synthetic descriptor/kernel operations for PARTUUID, geometry,
+physical-parent identity, exclusive-open state, mount/swap inventory and the
+immutable 4096-byte SWAPSPACE2 block-zero digest. Every refusal before mapper
+creation must leave block zero byte-identical and perform zero raw writes, zero
+raw fsyncs and zero raw formatting. Fault injection belongs on mapper/module/
+swap activation, payload-only lower I/O and durable lifecycle-state publication;
+there is no torn-header-write recovery case in the current design.
 
-This establishes a rootless observed-snapshot safety invariant, not exclusive
-kernel ownership or a bound against swapon racing between the final inventory
-check and header pwrite.
-A separate deterministic rootless boundary model must inject a valid synthetic
-active row only after the third complete zero-row formatter inventory snapshot,
-while servicing final F_GETFL. It must record that exactly three inventory
-checks preceded injection, verify the O_RDWR|O_EXCL request separately from the
-mock-returned O_RDWR access mode, and then observe the in-memory header
-pwrite/sync. The postpublication inventory must report status 3 UNCERTAIN,
-stage=inventory, originating EOPNOTSUPP, and changed block zero. Its positive
-control is the existing late active-row test: activity observed at the final
-prewrite gate returns status 2 with no write or sync. This model proves only
-that zero-row snapshot clearance, requested O_EXCL, and later inventory state
-are distinct observations when the fake descriptor supplies no kernel
-exclusion semantics. It does **not** reproduce a competing swapon, demonstrate
-that Linux BLK_EXCL permits one, or prove failure of real block-device
-exclusion; that kernel interval remains **NOT PROVEN**. Diagnostics must expose
-phase, a synthetic observed-inventory class, original errno, requested flags,
-the actually returned access mode, unavailability of O_EXCL verification, and
-whether block zero was modified, without disclosing private paths. Failure-only
-inventory classification must come from the execution/report evidence, not just
-the fixture's intended injected class.
-The physical-card mapper-page oracle is separate and still required.
-Each case must prove the mutated identity surface was actually
-re-read after the accepted block-zero snapshot rather than deriving the
-observed category only from the fixture selector, and the captured refusal
-diagnostic must carry the expected errno text. A disappeared PID whose mount
-namespace is also absent is a separate permitted-exit negative control, not an unsafe PASS. Retain intentionally
-unsafe cloned-identity negative controls, and never equate successful
-rootless snapshots with a loaded kernel's post-snapshot exclusive-descriptor
-behavior: that remains **NOT PROVEN** until separate safe privileged testing.
-For every ownership/identity uncertainty before publication, the test
-must count zero destructive header writes. Final formatter-path symlinks, node ownership or mode drift,
-a same-`st_rdev` inode replacement, and a substituted symlink in a
-`/proc/swaps` pathname must refuse before any media write. Rootless mocks must cover protected
-root-owned selector absence, mismatched PARTUUID, permission denial, and selector
-revocation at the last prewrite gate; these checks must precede any read-write
-device open or write. It must also prove exact valid-header repeat formatting
-performs no write, zero-header initialization attempts exactly one header
-`pwrite()`, a partial `pwrite()` is not resumed, and every failure after the
-publication call is issued has the explicit status-3 `UNCERTAIN`/recovery
-disposition rather than being reported as an ordinary no-write failure.
-The captured production-CLI fixture must also inject a positive 24-byte
-return from the single 4,096-byte offset-zero `pwrite()`, stopping exactly
-before the UUID so the retained media is observably incomplete. It must prove
-one write attempt without resume or `fsync`, an unchanged tail, populated
-magic/version/header-size/device-size fields with an unwritten zero UUID,
-status-3 `UNCERTAIN` with `RECOVERY REQUIRED`, and originating `EIO` despite
-later diagnostic/close errors. A 2,048-byte prefix is insufficient torn-media
-evidence because it already covers every non-reserved SWZ field and can leave
-a structurally valid image when block zero was initially zero. Never suggest
-unowned `swapoff`, forced mapper removal, or automatic format retry.
-Post-write readback/identity failures are never success, unknown nonzero block
-zero remains a recovery condition, and the standalone formatter contains no
-DISCARD/TRIM behavior. A focused removable-media identity binary must cover
-copied identifiers, alias replacement, parent/geometry drift, holder/activity
-conflicts and reconnection repinning without opening any host block device. Source contracts
-continue to verify the kernel opt-in superblock gate, reserved data offset, and
-exclusion of block 0 from all data/discard paths. Exact-current-main must still
-pass exact-source `make test_full` RAM/integration qualification before the
-legacy private physical helper considers physical-media evidence. The new
-algorithm tier remains INCOMPLETE until protected physical admission exists. The development-only debugging path below may produce
-experimental card-backed observations, but those observations are never
-physical-media qualification evidence.
+The PARTUUID direct-C coverage retains malformed selectors, alias replacement,
+parent/geometry drift, holder/activity, read-only transition, mount/swap
+inventory and reconnection-repinning checks without opening a host block
+device. Source contracts must prove no public or private new-run path contains
+a raw-partition formatter or block-zero write primitive. Historical formatter
+diagnostic strings may be parsed only as legacy evidence and must never be a
+requirement for current source.
+
+A physical ordinary-swap development trial is reached only after the exact
+current source completes the RAM/loaded qualification stages and the private
+handoff supplies source/artifact-bound evidence. The privileged helper may set
+the immutable physical RAM-metadata qualification token only after validating
+that evidence. Noninteractive qualification never discovers, prompts for or
+writes a physical device.
+
+#### Development-only ordinary-SWAPSPACE2 trial
+
+The development trial accepts only an already formatted ordinary Linux
+`SWAPSPACE2` partition selected by stable PARTUUID identity. Its raw header,
+UUID and partition table are immutable. No current path may clear or replace
+block zero, publish `SWAPZ001`, run `mkswap` on the raw partition, or use
+saved bytes as permission to repair/reformat it. Before mutation, revalidate the
+exact partition, geometry, parent topology, active-swap inventory, memory
+headroom, mapper/module ownership and current-source artifacts. Use ordinary
+`swapoff` only for the explicitly selected target; never use `swapoff -a`.
+After swapoff, prove the raw partition inactive and byte-compare block zero with
+the preflight digest before mapper creation.
+
+The Device Mapper target reserves physical block zero and exposes only the
+aligned post-header data region. All swapz mapping, extent/record descriptors,
+generation/sequence, CRC, payload offset/length, allocator and GC authority
+remain bounded RAM state. The lower data region contains payload bytes and
+deterministic zero padding only. The newly created mapper alone may receive
+`mkswap`. On successful completion, preserve the user's same-boot choice:
+keep the verified swapz mapper active or stop it and reactivate the unchanged
+ordinary swap partition at its recorded priority. No reboot is required.
 
 The production-readiness evaluator must also bind the CURRENT release-host
 platform to the owner qualification: x86_64, 4096-byte pages, and an exact
@@ -9176,18 +8997,14 @@ checks do not emulate kernel Device Mapper behavior or authorize a mapper on
 the host.
 
 The shared transaction-to-manifest admission check must require the matching
-owner claim, allowed durable stage and exact stored manifest. If a transaction
-records an original 4096-byte block-zero backup, admission must verify its
-digest before using it; a backup is optional for the disposable development
-card and must not become a lifecycle gate. Rootless direct-C coverage must
-exercise a transaction with no backup, accept arbitrary saved block-zero bytes
-when a backup is present, and refuse a digest-tampered backup or disallowed
-stage before mapper lifecycle operations are admitted. The header-signature
-predicate may identify a Linux swap header but must not require one or treat
-an SWZ header as one. The production digest is bound per transaction in the
-manifest. These tests do not perform or authorize block I/O.
+owner claim, allowed durable stage, exact stored manifest and live block-zero
+SHA-256. The manifest stores only the digest of the immutable ordinary
+`SWAPSPACE2` first page, never a backup copy. Rootless direct-C coverage must
+accept a matching valid Linux swap header/geometry, reject digest changes and
+malformed swap headers before mapper lifecycle operations, and prove no raw
+write is attempted. These tests do not perform or authorize host block I/O.
 
-Before future lifecycle enablement, interruption points after device creation,
+Before future lifecycle enablement, interruption points after device creation,Before future lifecycle enablement, interruption points after device creation,
 inactive-table load, resume and during cleanup must be covered by rootless
 state-machine/direct-C tests and deterministic fault injection against an owned
 RAM-backed `null_blk` target. The lifecycle must then pass safely bounded
@@ -9341,23 +9158,23 @@ incomplete and historical-source evidence remains BLOCKED.
 `docs/handoff/production-readiness.json` is observational release evidence,
 not a qualification result. Every current PASS must bind to the exact
 production source and carry the evidence appropriate to its gate: clean build
-state, qualified formatter/module/oracle hashes, all three required CI workflows,
+state, qualified swapzctl/module/oracle hashes, all three required CI workflows,
 exact-source owner `make test`, owned-null_blk lifecycle qualification, real
 Linux swap-out/in, maximum-capacity plus measured RAM evidence, sustained
 physical performance, lifecycle/deployment state, installed artifact identity,
 armed cold-boot harness, and owner-observed reboot. Missing, historical, stale,
 source-unbound, or structurally incomplete observations are BLOCKED or
 IN_PROGRESS, never PASS; a current FAIL stays FAIL. The owner `make test`
-evidence must carry the same formatter/module/oracle digests as the qualified
+evidence must carry the same swapzctl/module/oracle digests as the qualified
 artifact evidence. Owned-null_blk lifecycle PASS evidence is source-bound but
-uses a private test-seam control binary, so its formatter digest is not compared
+uses a private test-seam control binary, so its swapzctl digest is not compared
 to the production formatter. It must record `overall=PASS`, a valid retained
-`evidence_sha256`, and the formatter/module/oracle hashes emitted by the
-rehearsal qualification report. The private formatter hash is required only for
+`evidence_sha256`, and the swapzctl/module/oracle hashes emitted by the
+rehearsal qualification report. The private lifecycle-control hash is required only for
 structural provenance; the lifecycle module and oracle hashes must exactly match
 the qualified release module and oracle. Missing, malformed, non-PASS, or
 module/oracle-mismatched lifecycle evidence is BLOCKED. Real-swap PASS evidence
-must carry the installed qualified formatter/module/oracle digests observed by
+must carry the installed qualified swapzctl/module/oracle digests observed by
 the physical helper, the SHA-256 of the temporary physical execution control,
 and an explicit
 `installed_control_privileged_execution_enabled=false` observation made after
@@ -9639,7 +9456,7 @@ derives maximum logical pages/bytes and measured target/metadata peak RAM from
 the accepted `sd-high-occupancy-churn` swapz arm, and a PASS campaign is invalid
 without that tuple. The same sealer now rejects a smaller logical mapper
 even if a plausible capacity/peak scalar is provided: capacity is independently
-recomputed from the target partition, its SWZ header reservation, GC reserve,
+recomputed from the target partition, its protected SWAPSPACE2 first page, GC reserve,
 segment alignment and foreground headroom. Rootless synthetic traces never
 qualify the host. A resource PASS must carry source-bound and mapper-UUID-bound
 serialized loaded-host samples from the conservative whole-host measurement

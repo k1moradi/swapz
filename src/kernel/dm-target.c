@@ -6845,7 +6845,7 @@ static bool swapz_try_concurrent_read_slots(struct swapz_dm *ctx,
 			(size_t)output_pages * SWAPZ_BLOCK_BYTES;
 		output_pages += slot->bio_count;
 		if (slot->raw) {
-			/* RAW has no SWZ header or reusable compressed-cache entry. */
+			/* RAW uses one dedicated block and has no reusable compressed-payload cache entry. */
 			first[slot_index] = 0;
 			blocks[slot_index] = 1;
 		} else {

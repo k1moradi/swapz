@@ -436,7 +436,8 @@ Unless evidence changes the order, work on:
    partition and its physical parent, recognizes swapfiles by filesystem
    `st_dev`, and rejects unknown or type-inconsistent `/proc/swaps` rows. Start
    repeats the mount, physical-parent and active-swap checks after opening its
-   exclusive backing descriptor and immediately before the first header write.
+   exclusive backing descriptor and immediately before mapper creation. Block
+   zero remains read-only throughout the lifecycle.
    Focused production-C mount/swap inventory regressions pass; exact-source
    owner qualification remains pending. Do not arm production runtime
    authorization before exact-source and card-specific acceptance gates pass.

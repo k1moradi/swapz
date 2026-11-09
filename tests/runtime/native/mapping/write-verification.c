@@ -415,9 +415,9 @@ static int test_one_block_read_budget_remains_selective(void)
 }
 
 /*
- * A validated volatile offset can save the extra 4KiB without adding a
- * second delayed lower request. This is distinct from the strictly
- * metadata-first budget and complete-two-block read regression above.
+ * RAM-authoritative offset/length metadata avoids descriptor reads entirely.
+ * A payload wholly inside one block reads only that block; a crossing payload
+ * reads only the missing payload block when sibling residency is available.
  */
 static int test_two_block_payload_offset_skips_unneeded_second_block(void)
 {
