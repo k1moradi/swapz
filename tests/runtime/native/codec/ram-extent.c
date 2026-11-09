@@ -90,6 +90,33 @@ static int test_class(swapz_u32 bytes_total)
 	return 0;
 }
 
+static int test_unique_mode_without_descriptor_array(void)
+{
+	struct swapz_ram_extent builder;
+	swapz_u32 crc;
+
+	memset(image, 0xa9, SWAPZ_BLOCK_BYTES);
+	set_payload(513, 19);
+	crc = swapz_crc32c_bytes(payload, 513);
+	CHECK(swapz_ram_extent_begin_unique(
+		      &builder, image, SWAPZ_BLOCK_BYTES, 77, 2) == 0);
+	CHECK(builder.records == NULL && builder.logical_pages_unique);
+	CHECK(swapz_ram_extent_append_prehashed(
+		      &builder, 31, 4, payload, 513, crc,
+		      SWAPZ_ENCODING_DELTA64) == 0);
+	CHECK(builder.last_record.logical_page == 31);
+	CHECK(builder.last_record.generation == 4);
+	CHECK(builder.last_record.payload_crc32c == crc);
+	CHECK(builder.last_record.payload_length == 513);
+	CHECK(builder.last_record.payload_offset == SWAPZ_BLOCK_BYTES - 513U);
+	CHECK(swapz_ram_extent_append(
+		      &builder, 32, 5, payload, 513, SWAPZ_ENCODING_LZ4) == 0);
+	CHECK(builder.last_record.logical_page == 32);
+	CHECK(swapz_ram_extent_seal(&builder) == 0);
+	CHECK(image[0] == 0);
+	return 0;
+}
+
 static int test_full_and_reject(void)
 {
 	struct swapz_ram_extent builder;
@@ -154,6 +181,7 @@ int main(void)
 	CHECK(test_class(SWAPZ_BLOCK_BYTES) == 0);
 	CHECK(test_class(2U * SWAPZ_BLOCK_BYTES) == 0);
 	CHECK(test_class(SWAPZ_MAX_EXTENT_BYTES) == 0);
+	CHECK(test_unique_mode_without_descriptor_array() == 0);
 	CHECK(test_full_and_reject() == 0);
 	puts("PASS: data-only 4/8/16KiB payload packing and RAM-only metadata");
 	return 0;

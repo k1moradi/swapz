@@ -214,7 +214,8 @@ swapz_u32 swapz_crc32c_bytes(const void *bytes, swapz_u32 length);
  */
 struct swapz_ram_extent {
 	swapz_u8 *bytes;                /* [bytes_total] lower-write payload area */
-	struct swapz_decoded *records;  /* [record_capacity] volatile descriptors */
+	struct swapz_decoded *records;  /* [record_capacity], NULL in unique mode */
+	struct swapz_decoded last_record; /* transient; bind immediately to tx RAM */
 	swapz_u32 bytes_total;
 	swapz_u32 sequence;             /* volatile, never written to bytes */
 	swapz_u16 payload_start;
@@ -222,11 +223,18 @@ struct swapz_ram_extent {
 	swapz_u8 extent_blocks;
 	swapz_u8 count;
 	swapz_u8 sealed;
+	swapz_u8 logical_pages_unique;
 };
 
 int swapz_ram_extent_begin(struct swapz_ram_extent *builder, void *bytes,
 			   swapz_u32 bytes_total, swapz_u32 sequence,
 			   struct swapz_decoded *records, swapz_u8 record_capacity);
+/* Production fast path: the caller has already proved every logical page in
+ * this extent unique. No descriptor array is required; last_record must be
+ * bound into the staged transaction immediately after each successful append. */
+int swapz_ram_extent_begin_unique(struct swapz_ram_extent *builder, void *bytes,
+				  swapz_u32 bytes_total, swapz_u32 sequence,
+				  swapz_u8 record_capacity);
 int swapz_ram_extent_append(struct swapz_ram_extent *builder,
 			    swapz_u32 logical_page, swapz_u32 generation,
 			    const void *payload, swapz_u16 payload_length,

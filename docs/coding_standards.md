@@ -28,8 +28,11 @@ generations, CRCs, mapping/segment allocation and GC metadata must
 be bounded volatile RAM state. RAM descriptor/transaction storage must be
 disjoint from the exact lower-write image and the builder itself; builders
 reject overlap before reading payload bytes or mutating either ownership
-domain. Appends reject payload sources overlapping either writable buffer,
-so a data-only
+domain. Appends reject payload sources overlapping either writable buffer.
+Production writers that have already proved per-extent logical-page uniqueness
+must use the descriptor-array-free RAM builder mode and bind each transient
+last descriptor immediately into preallocated staged transaction RAM; do not
+add large per-write kernel stack arrays or heap allocations. Thus a data-only
 backing image contains payload bytes and deterministic zero padding only. The current compressed codec still stores
 extent header/descriptors on backing media, and synthetic null_blk
 rehearsals still use SWAPZ001. Both are nonconforming migration debt,

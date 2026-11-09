@@ -750,26 +750,29 @@ int swapz_lookup(const void *bytes, swapz_u32 bytes_total, swapz_u8 index,
  * bytes and zero padding can enter a lower write. This primitive must NOT
  * disable SWAPZ_CODEC_METADATA_ON_MEDIA until every live engine path migrates.
  */
-int swapz_ram_extent_begin(struct swapz_ram_extent *builder, void *bytes,
-			   swapz_u32 bytes_total, swapz_u32 sequence,
-			   struct swapz_decoded *records, swapz_u8 record_capacity)
+static int swapz_ram_extent_begin_checked(
+	struct swapz_ram_extent *builder, void *bytes, swapz_u32 bytes_total,
+	swapz_u32 sequence, struct swapz_decoded *records,
+	swapz_u8 record_capacity, int logical_pages_unique)
 {
-	swapz_u32 record_bytes;
+	swapz_u32 record_bytes = 0;
 
-	if (!builder || !bytes || !records || !sequence ||
+	if (!builder || !bytes || !sequence ||
 	    !swapz_valid_extent_bytes(bytes_total) ||
-	    !record_capacity || record_capacity > SWAPZ_MAX_RECORDS)
+	    !record_capacity || record_capacity > SWAPZ_MAX_RECORDS ||
+	    (!logical_pages_unique && !records))
 		return -EINVAL;
-	record_bytes = (swapz_u32)record_capacity * sizeof(*records);
+	if (records)
+		record_bytes = (swapz_u32)record_capacity * sizeof(*records);
 	/* RAM descriptors and the exact lower-write image are exclusive
 	 * ownership domains. Aliasing would make descriptor mutation observable
 	 * as backing bytes or let seal() erase authoritative metadata. */
-	if (swapz_payload_overlaps_storage(bytes, bytes_total,
-					   records, record_bytes) ||
+	if ((records && swapz_payload_overlaps_storage(
+			    bytes, bytes_total, records, record_bytes)) ||
 	    swapz_payload_overlaps_storage(bytes, bytes_total,
 					   builder, sizeof(*builder)) ||
-	    swapz_payload_overlaps_storage(records, record_bytes,
-					   builder, sizeof(*builder)))
+	    (records && swapz_payload_overlaps_storage(
+			    records, record_bytes, builder, sizeof(*builder))))
 		return -EINVAL;
 
 	*builder = (struct swapz_ram_extent) {
@@ -780,10 +783,27 @@ int swapz_ram_extent_begin(struct swapz_ram_extent *builder, void *bytes,
 		.payload_start = (swapz_u16)bytes_total,
 		.record_capacity = record_capacity,
 		.extent_blocks = (swapz_u8)(bytes_total / SWAPZ_BLOCK_BYTES),
+		.logical_pages_unique = logical_pages_unique != 0,
 	};
 	/* Do not touch the lower image until all individual appends succeed.
 	 * seal() clears every byte not covered by a packed payload. */
 	return 0;
+}
+
+int swapz_ram_extent_begin(struct swapz_ram_extent *builder, void *bytes,
+			   swapz_u32 bytes_total, swapz_u32 sequence,
+			   struct swapz_decoded *records, swapz_u8 record_capacity)
+{
+	return swapz_ram_extent_begin_checked(
+		builder, bytes, bytes_total, sequence, records, record_capacity, 0);
+}
+
+int swapz_ram_extent_begin_unique(struct swapz_ram_extent *builder, void *bytes,
+				  swapz_u32 bytes_total, swapz_u32 sequence,
+				  swapz_u8 record_capacity)
+{
+	return swapz_ram_extent_begin_checked(
+		builder, bytes, bytes_total, sequence, NULL, record_capacity, 1);
 }
 
 static int swapz_ram_extent_append_checked(struct swapz_ram_extent *builder,
@@ -799,7 +819,8 @@ static int swapz_ram_extent_append_checked(struct swapz_ram_extent *builder,
 	swapz_u8 record_index;
 	swapz_u32 payload_crc32c;
 
-	if (!builder || !builder->bytes || !builder->records ||
+	if (!builder || !builder->bytes ||
+	    (!builder->logical_pages_unique && !builder->records) ||
 	    !builder->sequence || builder->sealed ||
 	    !builder->record_capacity ||
 	    builder->record_capacity > SWAPZ_MAX_RECORDS ||
@@ -810,25 +831,27 @@ static int swapz_ram_extent_append_checked(struct swapz_ram_extent *builder,
 	    !swapz_encoding_valid(encoding) ||
 	    swapz_payload_overlaps_storage(builder->bytes, builder->bytes_total,
 					   payload, payload_length) ||
-	    swapz_payload_overlaps_storage(
+	    (builder->records && swapz_payload_overlaps_storage(
 		builder->records,
 		(swapz_u32)builder->record_capacity * sizeof(*builder->records),
-		payload, payload_length))
+		payload, payload_length)))
 		return -EINVAL;
 	if (builder->count >= builder->record_capacity)
 		return -ENOSPC;
 	if (builder->payload_start > builder->bytes_total ||
 	    builder->payload_start < payload_length)
 		return -ENOSPC;
-	/* Uniqueness and bounds precede all source reads and image writes. */
-	for (record_index = 0; record_index < builder->count; ++record_index)
-		if (builder->records[record_index].logical_page == logical_page)
-			return -EEXIST;
+	/* Generic callers retain duplicate protection. Unique mode is reserved
+	 * for an ordered production owner that proved the extent's page set. */
+	if (!builder->logical_pages_unique)
+		for (record_index = 0; record_index < builder->count; ++record_index)
+			if (builder->records[record_index].logical_page == logical_page)
+				return -EEXIST;
 	payload_offset = builder->payload_start - payload_length;
 	payload_crc32c = crc_precomputed ? precomputed_crc32c :
 		swapz_crc32c_bytes(payload, payload_length);
 	memcpy(builder->bytes + payload_offset, payload, payload_length);
-	builder->records[builder->count] = (struct swapz_decoded) {
+	builder->last_record = (struct swapz_decoded) {
 		.logical_page = logical_page,
 		.generation = generation,
 		.payload_crc32c = payload_crc32c,
@@ -836,6 +859,8 @@ static int swapz_ram_extent_append_checked(struct swapz_ram_extent *builder,
 		.payload_length = payload_length,
 		.encoding = encoding,
 	};
+	if (builder->records)
+		builder->records[builder->count] = builder->last_record;
 	builder->count++;
 	builder->payload_start = payload_offset;
 	return 0;
@@ -865,7 +890,8 @@ int swapz_ram_extent_append_prehashed(struct swapz_ram_extent *builder,
 
 int swapz_ram_extent_seal(struct swapz_ram_extent *builder)
 {
-	if (!builder || !builder->bytes || !builder->records ||
+	if (!builder || !builder->bytes ||
+	    (!builder->logical_pages_unique && !builder->records) ||
 	    builder->sealed || !builder->count ||
 	    builder->count > builder->record_capacity ||
 	    builder->payload_start > builder->bytes_total)
