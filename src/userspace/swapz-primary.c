@@ -9815,6 +9815,7 @@ int swapz_primary_load_qualified_module(int *loaded_by_call)
 	int module_inventory_read;
 	int module_source_clean = 0;
 	int physical_backing_enabled = 0;
+	int ram_metadata_qualified_enabled = 0;
 	int module_fd = -1;
 	int result = -1;
 	int saved_errno;
@@ -9859,7 +9860,8 @@ int swapz_primary_load_qualified_module(int *loaded_by_call)
 	if (swapz_primary_ensure_lz4_provider() < 0)
 		goto out;
 	if (syscall(SYS_finit_module, module_fd,
-		    "allow_physical_backing=1", 0U) < 0)
+		    "allow_physical_backing=1 physical_ram_metadata_qualified=1",
+		    0U) < 0)
 		goto out;
 	*loaded_by_call = 1;
 	if (close(module_fd) < 0) {
@@ -9891,7 +9893,16 @@ int swapz_primary_load_qualified_module(int *loaded_by_call)
 				      sizeof(module_parameter)) < 0 ||
 	    swapz_primary_parse_module_bool(module_parameter,
 					    &physical_backing_enabled) < 0 ||
-	    !physical_backing_enabled) {
+	    !physical_backing_enabled ||
+	    swapz_primary_path_format(
+		    module_parameter_path, sizeof(module_parameter_path),
+		    "/sys/module/dm_swapz/parameters/physical_ram_metadata_qualified") < 0 ||
+	    swapz_primary_read_sysfs_text(module_parameter_path,
+				      module_parameter,
+				      sizeof(module_parameter)) < 0 ||
+	    swapz_primary_parse_module_bool(module_parameter,
+					    &ram_metadata_qualified_enabled) < 0 ||
+	    !ram_metadata_qualified_enabled) {
 		errno = EPERM;
 		goto out;
 	}
@@ -14098,26 +14109,6 @@ static int swapz_primary_run_mutating_action(
 	int mutation_lock_fd;
 	int result;
 	int saved_errno;
-
-#if !defined(SWAPZ_PRIMARY_OWNED_NULLBLK_TEST) && \
-	!defined(SWAPZ_PRIMARY_ROOTLESS_TEST)
-	/*
-	 * Do not let an unqualified payload-only migration make a real swap
-	 * partition the first loaded correctness test. Refuse before lifecycle
-	 * locks, swapoff, module loading or any target mutation.
-	 */
-	if (!SWAPZ_PHYSICAL_RAM_METADATA_QUALIFIED &&
-	    (action == SWAPZ_PRIMARY_MUTATING_PREPARE ||
-	     action == SWAPZ_PRIMARY_MUTATING_START)) {
-		errno = EOPNOTSUPP;
-		fprintf(stderr,
-			"PRIMARY_%s=BLOCKED phase=ram-metadata-qualification "
-			"target_unchanged=true\n",
-			action == SWAPZ_PRIMARY_MUTATING_PREPARE ?
-				"PREPARE" : "START");
-		return -1;
-	}
-#endif
 
 	/*
 	 * Lock order is global package/mutation lock first, then the partition
