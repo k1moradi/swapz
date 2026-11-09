@@ -7282,16 +7282,20 @@ physical parent, independently of the unprivileged algorithm selector. Rootless
 regression must exercise both same-parent sibling refusal and independently
 backed recovery.
 
-The current development writer remains limited to a dedicated, inactive,
-single-partition USB card with no other active swap. A shared-root candidate
-such as the separately authorized Lubuntu `/dev/sda4`, an active target or
-other active swap may be displayed for read-only diagnosis but must report
-BLOCKED before prompting or invoking privileged code. It cannot skip the
-root-owned shared-parent scope record or independent persistent recovery
-storage mandated by `docs/AGENT_CONTEXT.md`. Once those checks and the exact
-target's fail-closed swapoff/restoration transaction are implemented, ask
-one default-No question naming the exact target. A Yes approves only the
-guarded attempt, not unconditional swapoff or a forced mapper teardown.
+The development writer keeps the dedicated-card path and may also admit the
+separately authorized Lubuntu shared-root `/dev/sda4` only through the
+privileged fail-closed gate. The unprivileged selector may identify and prompt
+for that exact candidate, but a Yes never authorizes raw mutation by itself.
+Before swapoff or header writes, the root-owned helper must independently
+require recovery storage on a different physical parent and consume the
+source-built `swapzctl primary plan` as a read-only authorization oracle. The
+plan must bind the current clean source, exact PARTUUID/device/geometry and
+physical parent; report a valid protected shared-root scope fingerprint; prove
+the target is unmounted with zero used swap; prove the module/mapper absent;
+and report every recovery/source-chain gate valid. Any missing, malformed,
+same-parent, stale-source or mismatched plan remains BLOCKED. The shared-root
+scope record never authorizes a sibling partition, the parent disk, forced
+swapoff, or forced mapper teardown.
 The existing dedicated-card path asks one default-No question showing
 partition, parent, PARTUUID and geometry, before starting
 `physical-swap-probe.py run --development-only --algorithm-real-swap`

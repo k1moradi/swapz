@@ -215,10 +215,11 @@ class AlgorithmPhysicalTest(unittest.TestCase):
         self.assertEqual(state["other_active_swapfile_count"], 1)
         self.assertEqual(state["other_active_partition_count"], 0)
 
-    def test_shared_parent_never_reaches_consent_or_swapoff(self):
+    def test_shared_parent_reaches_only_privileged_fail_closed_gate(self):
         candidate = {
             "path": "/dev/sda4", "parent": "/dev/sda",
             "partuuid": "7fb9401d-04", "size_bytes": 16 * 1024 ** 3,
+            "selector": "/dev/disk/by-uuid/example",
             "parent_has_other_partitions": True,
             "active_swap": {"used_kib": 0, "priority": -1,
                             "capacity_kib": 16777212},
@@ -230,17 +231,20 @@ class AlgorithmPhysicalTest(unittest.TestCase):
                                return_value=True), \
              mock.patch.object(subject, "_require_read_only_preflight",
                                return_value=candidate), \
-             mock.patch("builtins.input") as answer, \
-             mock.patch.object(subject.subprocess, "run") as command, \
+             mock.patch("builtins.input", return_value="yes") as answer, \
+             mock.patch.object(subject.shutil, "which",
+                               return_value="/usr/bin/sudo"), \
+             mock.patch.object(subject.subprocess, "run",
+                               return_value=mock.Mock(returncode=2)) as command, \
              mock.patch("builtins.print") as output:
             self.assertEqual(subject.main(), 2)
-        answer.assert_not_called()
-        command.assert_not_called()
+        answer.assert_called_once()
+        command.assert_called_once()
+        self.assertEqual(command.call_args.args[0][-2:],
+                         ["--development-only", "--algorithm-real-swap"])
         messages = "\n".join(str(call) for call in output.call_args_list)
-        self.assertIn("/dev/sda4", messages)
-        self.assertIn("shared_root_scope_and_independent_recovery_required",
-                      messages)
-        self.assertNotIn("active_target_swapoff_not_implemented", messages)
+        self.assertIn("Shared-root candidate", messages)
+        self.assertIn("protected host-scope record", messages)
 
     def test_active_target_and_unrelated_swapfile_reach_single_consent(self):
         candidate = {

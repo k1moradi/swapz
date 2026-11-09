@@ -207,8 +207,6 @@ def main() -> int:
     else:
         print("  Swap status: inactive")
     blockers = []
-    if selected.get("parent_has_other_partitions"):
-        blockers.append("shared_root_scope_and_independent_recovery_required")
     if selected.get("other_active_partition_count", 0):
         blockers.append("unrelated_active_partition_not_supported")
     if blockers:
@@ -216,6 +214,10 @@ def main() -> int:
         print("PHYSICAL_ALGORITHM_REAL_SWAP=BLOCKED reason=" +
               ",".join(blockers))
         return 2
+    if selected.get("parent_has_other_partitions"):
+        print("  Shared-root candidate: privileged admission requires the "
+              "protected host-scope record and recovery storage on another "
+              "physical parent")
     print("  Existing swap header is restored after successful teardown")
     try:
         confirmed = input("Run bounded swapz Linux swap trial on this partition? [y/N] ")

@@ -76,14 +76,88 @@ class PhysicalSwapProbeTests(unittest.TestCase):
                 probe._require_root_not_on_target(8, 4)
         with mock.patch.object(probe, "_run", side_effect=run), \
              mock.patch.object(probe, "_physical_parent_identity",
+                               return_value="8:0"):
+            self.assertTrue(probe._require_root_not_on_target(
+                8, 4, allow_shared_parent=True))
+        with mock.patch.object(probe, "_run", side_effect=run), \
+             mock.patch.object(probe, "_physical_parent_identity",
                                return_value="8:16"):
-            probe._require_root_not_on_target(8, 17)
+            self.assertFalse(probe._require_root_not_on_target(8, 17))
         with mock.patch.object(probe, "_run", side_effect=run), \
              mock.patch.object(probe, "_physical_parent_identity",
                                return_value="8:0"):
             with self.assertRaisesRegex(
                     probe.ProbeError, "contains or backs the root filesystem"):
                 probe._require_root_not_on_target(8, 3)
+
+    def test_shared_root_development_plan_binds_scope_recovery_and_target(self):
+        target = {
+            "major": 8, "minor": 4, "partuuid": "7fb9401d-04",
+            "size_bytes": 16 * 1024 ** 3,
+            "parent_major_minor": "8:0",
+            "root_same_physical_parent": True,
+        }
+        evidence = {"source_sha": "a" * 40}
+        plan = {
+            "schema": "swapz-primary-plan-v1",
+            "control_build_source_clean": True,
+            "control_build_source_sha": evidence["source_sha"],
+            "target_config_read": True,
+            "target_partuuid": target["partuuid"],
+            "target_device_preflight": True,
+            "target_device_major": 8,
+            "target_device_minor": 4,
+            "target_device_bytes": target["size_bytes"],
+            "original_swap_signature": True,
+            "recovery_preflight_read": True,
+            "recovery_directory_safe": True,
+            "recovery_filesystem_supported": True,
+            "recovery_directly_not_target": True,
+            "recovery_active_marker_clear": True,
+            "recovery_source_chain_checked": True,
+            "recovery_same_physical_disk_as_target": False,
+            "target_device_chain_checked": True,
+            "target_physical_parent_major": 8,
+            "target_physical_parent_minor": 0,
+            "module_mapper_inventory_read": True,
+            "dm_swapz_module_loaded": False,
+            "swapz_mapper_absent": True,
+            "mount_inventory_read": True,
+            "target_not_mounted": True,
+            "root_mount_source_chain_checked": True,
+            "root_same_physical_disk_as_target": True,
+            "shared_root_parent_exception_required": True,
+            "shared_root_parent_exception_status": "valid",
+            "shared_root_parent_scope_fingerprint": "b" * 64,
+            "swap_inventory_read": True,
+            "target_swap_size_ok": True,
+            "target_swap_zero_used": True,
+            "target_swap_priority_ok": True,
+        }
+        with mock.patch.object(
+                probe, "_run",
+                return_value=SimpleNamespace(
+                    returncode=2, stdout=json.dumps(plan), stderr="")):
+            probe._require_shared_root_development_plan(target, evidence)
+
+        rejected = (
+            ({"recovery_same_physical_disk_as_target": True},
+             "independent recovery"),
+            ({"shared_root_parent_exception_status": "missing"},
+             "authorization or independent recovery"),
+            ({"target_device_minor": 5}, "does not bind"),
+            ({"target_swap_zero_used": False}, "every required gate"),
+        )
+        for mutation, diagnostic in rejected:
+            with self.subTest(mutation=mutation):
+                invalid = {**plan, **mutation}
+                with mock.patch.object(
+                        probe, "_run",
+                        return_value=SimpleNamespace(
+                            returncode=2, stdout=json.dumps(invalid), stderr="")):
+                    with self.assertRaisesRegex(probe.ProbeError, diagnostic):
+                        probe._require_shared_root_development_plan(
+                            target, evidence)
 
     def test_development_architecture_gate_requires_4k_64bit_native_linux(self):
         for machine in ("x86_64", "aarch64"):

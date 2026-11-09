@@ -255,7 +255,7 @@ def _mountinfo_has_device(major, minor):
                for line in lines)
 
 
-def _require_root_not_on_target(major, minor):
+def _require_root_not_on_target(major, minor, *, allow_shared_parent=False):
     source = _run([
         "findmnt", "--raw", "--noheadings", "--evaluate",
         "--output", "SOURCE", "--target", "/",
@@ -273,9 +273,11 @@ def _require_root_not_on_target(major, minor):
     # A different partition on the root disk is not dedicated development
     # media. Apply this inside the root-owned writer too, not just in the
     # unprivileged algorithm selector, before opening recovery or swapping off.
-    if _physical_parent_identity(major, minor) in identities:
+    shared_parent = _physical_parent_identity(major, minor) in identities
+    if shared_parent and not allow_shared_parent:
         raise ProbeError(
             "selected swap partition shares the root filesystem physical parent")
+    return shared_parent
 
 
 def _verify_open_block_device(fd, target):
@@ -527,7 +529,7 @@ def _verify_target_identity(target):
 
 
 def inspect_target(device_arg, confirm_arg, *, allow_used_swap=False,
-                   allow_inactive_swap=False):
+                   allow_inactive_swap=False, allow_shared_root=False):
     """Identify the selected partition; dev smoke may preserve inactive swap."""
     if not device_arg or device_arg != confirm_arg:
         raise ProbeError("--device and --confirm-device must match exactly")
@@ -546,7 +548,8 @@ def inspect_target(device_arg, confirm_arg, *, allow_used_swap=False,
         raise ProbeError("selected partition has active block-device holders")
     if _mountinfo_has_device(major, minor):
         raise ProbeError("selected partition is mounted")
-    _require_root_not_on_target(major, minor)
+    root_same_physical_parent = _require_root_not_on_target(
+        major, minor, allow_shared_parent=allow_shared_root)
 
     lsblk = json.loads(_run([
         "lsblk", "--json", "--bytes", "--nodeps",
@@ -604,6 +607,7 @@ def inspect_target(device_arg, confirm_arg, *, allow_used_swap=False,
         "parent_size_bytes": card_identity["parent_size_bytes"],
         "parent_removable": card_identity["parent_removable"],
         "card_identity_sha256": card_identity["sha256"],
+        "root_same_physical_parent": root_same_physical_parent,
         "size_bytes": size_bytes,
         "uuid": row["uuid"],
         "partuuid": partuuid,
@@ -1126,6 +1130,77 @@ def _artifact_digests():
             if descriptor >= 0:
                 _close_fd_preserving_active_error(descriptor)
     return digests
+
+
+def _require_shared_root_development_plan(target, evidence):
+    """Admit a shared-root target only through the production read-only plan."""
+    if target.get("root_same_physical_parent") is not True:
+        return
+    swapzctl = _artifact_paths()["formatter_sha256"][0]
+    result = _run([str(swapzctl), "primary", "plan"],
+                  timeout=30, check=False)
+    if result.returncode not in (0, 2) or len(result.stdout) > 65536:
+        raise ProbeError(
+            "shared-root authorization plan is unavailable or oversized")
+    try:
+        plan = _load_unique_json(result.stdout.encode("utf-8"))
+    except (UnicodeEncodeError, ValueError) as exc:
+        raise ProbeError("shared-root authorization plan is malformed") from exc
+    if not isinstance(plan, dict) or plan.get("schema") != "swapz-primary-plan-v1":
+        raise ProbeError("shared-root authorization plan has the wrong schema")
+
+    parent_identity = target.get("parent_major_minor")
+    if (not isinstance(parent_identity, str) or
+            re.fullmatch(r"[0-9]+:[0-9]+", parent_identity) is None):
+        raise ProbeError("shared-root target parent identity is unavailable")
+    parent_major, parent_minor = map(int, parent_identity.split(":"))
+
+    required_true = (
+        "control_build_source_clean",
+        "target_config_read",
+        "target_device_preflight",
+        "original_swap_signature",
+        "recovery_preflight_read",
+        "recovery_directory_safe",
+        "recovery_filesystem_supported",
+        "recovery_directly_not_target",
+        "recovery_active_marker_clear",
+        "recovery_source_chain_checked",
+        "target_device_chain_checked",
+        "module_mapper_inventory_read",
+        "swapz_mapper_absent",
+        "mount_inventory_read",
+        "target_not_mounted",
+        "root_mount_source_chain_checked",
+        "root_same_physical_disk_as_target",
+        "shared_root_parent_exception_required",
+        "swap_inventory_read",
+        "target_swap_size_ok",
+        "target_swap_zero_used",
+        "target_swap_priority_ok",
+    )
+    if any(plan.get(field) is not True for field in required_true):
+        raise ProbeError(
+            "shared-root authorization plan did not satisfy every required gate")
+    if (plan.get("dm_swapz_module_loaded") is not False or
+            plan.get("recovery_same_physical_disk_as_target") is not False or
+            plan.get("shared_root_parent_exception_status") != "valid"):
+        raise ProbeError(
+            "shared-root authorization or independent recovery is not valid")
+    if (plan.get("control_build_source_sha") != evidence.get("source_sha") or
+            plan.get("target_partuuid") != target.get("partuuid") or
+            plan.get("target_device_major") != target.get("major") or
+            plan.get("target_device_minor") != target.get("minor") or
+            plan.get("target_device_bytes") != target.get("size_bytes") or
+            plan.get("target_physical_parent_major") != parent_major or
+            plan.get("target_physical_parent_minor") != parent_minor):
+        raise ProbeError(
+            "shared-root authorization plan does not bind the selected target")
+    fingerprint = plan.get("shared_root_parent_scope_fingerprint")
+    if (not isinstance(fingerprint, str) or
+            re.fullmatch(r"[0-9a-f]{64}", fingerprint) is None):
+        raise ProbeError(
+            "shared-root authorization scope fingerprint is unavailable")
 
 
 def _snapshot_reviewed_artifacts(state_dir, expected_digests):
@@ -3547,7 +3622,8 @@ def run_probe(device_arg, confirm_arg, state_dir_arg, review_path,
         if algorithm_real_swap:
             target = inspect_target(
                 device_arg, confirm_arg,
-                allow_used_swap=True, allow_inactive_swap=True)
+                allow_used_swap=True, allow_inactive_swap=True,
+                allow_shared_root=True)
             _target_row, swapfiles = _development_swap_inventory_plan(target)
             target["unrelated_swapfiles"] = swapfiles
         else:
@@ -3579,6 +3655,8 @@ def run_probe(device_arg, confirm_arg, state_dir_arg, review_path,
     live_artifact_digests = _artifact_digests()
     if live_artifact_digests != evidence["artifact_digests"]:
         raise ProbeError("current build artifacts differ from admitted evidence")
+    if development_only and algorithm_real_swap:
+        _require_shared_root_development_plan(target, evidence)
     if development_only:
         review = {
             "reviewer": None,
