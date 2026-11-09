@@ -56,12 +56,13 @@ keep swapz active or return to ordinary Linux swap.
 
 All swapz-specific record and extent descriptors, offsets, lengths,
 generations, CRCs, mapping/segment allocation and GC metadata must
-be bounded volatile RAM state. The current compressed codec still stores
-extent header/descriptors on backing media, and synthetic null_blk
-rehearsals still use SWAPZ001. Both are nonconforming migration debt,
-not accepted partition-format designs. Preserve 4/8/16KiB packing,
-readback integrity, ordering, concurrency and fail-closed semantics.
-Production acceptance remains blocked until migration and tests pass.
+be bounded volatile RAM state. Production compressed extents now contain
+payload bytes and deterministic zero padding only, with authoritative
+descriptors in RAM. Legacy serialized-codec and synthetic SWAPZ001/null_blk
+fixtures are never an accepted physical partition format or metadata source.
+Preserve 4/8/16KiB packing, readback integrity, ordering, concurrency and
+fail-closed semantics. Production acceptance remains blocked until current-
+source loaded, lifecycle and real-device qualification passes.
 
 Earlier permissions to format/repartition even the dedicated SD card
 are superseded; only post-swapoff swap *data* may be overwritten.
