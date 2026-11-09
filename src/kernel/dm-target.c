@@ -2177,7 +2177,7 @@ static int swapz_submit_inflight_write(struct swapz_dm *ctx,
 		.mem = {
 			.type = DM_IO_VMA,
 			.offset = 0,
-			.ptr.vma = inflight->run.bytes,
+			.ptr.vma = NULL,
 		},
 		.notify = {
 			.fn = swapz_async_lower_write_done,
@@ -2197,6 +2197,8 @@ static int swapz_submit_inflight_write(struct swapz_dm *ctx,
 			      "async-submit-validate");
 		return -EINVAL;
 	}
+	/* The lower image is owned only by a validated inflight slot. */
+	req.mem.ptr.vma = inflight->run.bytes;
 	if (ctx->write_fault_nth &&
 	    ++ctx->write_fault_calls == ctx->write_fault_nth) {
 		ctx->write_fault_injected++;

@@ -41,6 +41,16 @@ def main() -> None:
     require("swapz_linux_swap_header_valid(block, device_bytes)" in target,
             "Ordinary SWAPSPACE2 validation must remain the physical header contract")
 
+    # A null or invalid asynchronous write slot must be rejected before
+    # its lower-image pointer is read while building the dm_io request.
+    async_write = target.split("static int swapz_submit_inflight_write(", 1)[1]
+    validation = async_write.index("if (!inflight ||")
+    image_binding = async_write.index("req.mem.ptr.vma = inflight->run.bytes;")
+    require(
+        image_binding > validation and
+        "inflight->run.bytes" not in async_write[:validation],
+        "Async lower WRITE must validate slot before dereferencing its image")
+
     disk_identity = target.index('is_nullb = !strncmp(')
     io_client = target.index("ctx->io_client = dm_io_client_create();", disk_identity)
     disk_classification = target[disk_identity:io_client]
