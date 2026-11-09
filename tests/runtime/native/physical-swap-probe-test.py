@@ -2534,15 +2534,26 @@ class PhysicalSwapProbeTests(unittest.TestCase):
         cleanup = run.index("if partition_claim_attempted:", keep_prompt)
         self.assertLess(oracle_pass, keep_prompt)
         self.assertLess(keep_prompt, cleanup)
-        # Do not claim a persistent module owner based on a test process.
-        self.assertIn("KEEP_SWAPZ_BLOCKED_NO_DURABLE_OWNER", run)
-        self.assertIn("no_durable_recovery_owner", run)
-        self.assertNotIn('results["kept_swapz_active"] = True', run)
+        keep_verify = run.index("_verify_kept_swapz_active(", keep_prompt)
+        keep_stage = run.index('state["stage"] = "KEPT_ACTIVE"', keep_verify)
+        keep_return = run.index("\n                    return", keep_stage)
+        self.assertLess(keep_prompt, keep_verify)
+        self.assertLess(keep_verify, keep_stage)
+        self.assertLess(keep_stage, keep_return)
+        self.assertLess(keep_return, cleanup)
+        self.assertIn('results["kept_swapz_active"] = True', run)
+        self.assertIn('results["operator_choice"] = "KEEP_SWAPZ_ACTIVE"', run)
+        self.assertNotIn("KEEP_SWAPZ_BLOCKED_NO_DURABLE_OWNER", run)
 
         recovery_start = script.index("def recover(")
         recovery_end = script.index(
             "\ndef inspect_target_identity_for_recovery(", recovery_start)
         recovery = script[recovery_start:recovery_end]
+        self.assertIn("RUNTIME_OWNERSHIP_PHASE", recovery)
+        self.assertIn("mapper_present", recovery)
+        self.assertIn("_verify_owned_mapper(state, target)", recovery)
+        self.assertIn("runtime module ownership lost its mapper continuity",
+                      recovery)
         restore_fallback = recovery.index(
             "_restore_development_swapfiles(state)")
         target_reactivation = recovery.index(
