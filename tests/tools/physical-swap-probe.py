@@ -1709,7 +1709,7 @@ def _release_partition_ownership(state):
                 "PREPARED", "BACKED_UP", "SWAP_OFF", "HEADER_CLEAR_PENDING",
                 "HEADER_CLEARED", "HEADER_RESTORE_PENDING", "SWZ_FORMATTED",
                 "EXISTING_SWAP_READY", "MODULE_PENDING", "MODULE_OWNED",
-                "MAPPED", "ORACLE_PASS",
+                "MAPPED", "ORACLE_PASS", "KEPT_ACTIVE",
                 "RECOVERY_REQUIRED", "PRE_DESTRUCTIVE_FAILED",
             } else "invalid_or_unknown")
         raise ProbeError(
@@ -3103,7 +3103,7 @@ def _require_recovery_results_binding(state, results):
             "saved physical results/state identity or ownership phase "
             "is incomplete; safe_next_step=inspect_records_read_only")
     if result_stage not in {"PREPARED", "BACKED_UP", "ORACLE_PASS",
-                            "RECOVERY_REQUIRED"} or (
+                            "KEPT_ACTIVE", "RECOVERY_REQUIRED"} or (
             (state.get("stage") == "RECOVERY_REQUIRED") != (
                 result_stage == "RECOVERY_REQUIRED")):
         raise ProbeError(
@@ -3114,7 +3114,7 @@ def _require_recovery_results_binding(state, results):
                 "PREPARED", "BACKED_UP", "SWAP_OFF", "HEADER_CLEAR_PENDING",
                 "HEADER_CLEARED", "HEADER_RESTORE_PENDING", "SWZ_FORMATTED",
                 "EXISTING_SWAP_READY", "MODULE_PENDING", "MODULE_OWNED",
-                "MAPPED", "ORACLE_PASS"}):
+                "MAPPED", "ORACLE_PASS", "KEPT_ACTIVE"}):
         raise ProbeError(
             "saved RECOVERY_REQUIRED origin is incomplete; "
             "safe_next_step=inspect_records_read_only")
@@ -3242,11 +3242,19 @@ def recover(state_dir, device_arg, confirm_arg, lock_held=False,
         if module_present and state["module_ownership"] != "MODULE_OWNED":
             raise ProbeError(
                 "module load interrupted or foreign; manual recovery required")
+        mapper_present = _mapper_exists(state)
         if module_present and not module_owned_by_process:
-            raise ProbeError(
-                "persisted module ownership cannot prove load continuity; "
-                "manual recovery required")
-        if _mapper_exists(state):
+            # The exact live DM target pins dm_swapz's module reference. That
+            # makes same-boot /run ownership transferable across helper
+            # processes without persistent partition metadata. If the mapper
+            # disappeared, do not infer that the remaining module is ours.
+            if (state.get("ownership_phase") != RUNTIME_OWNERSHIP_PHASE or
+                    not mapper_present):
+                raise ProbeError(
+                    "runtime module ownership lost its mapper continuity; "
+                    "manual review required")
+            _verify_owned_mapper(state, target)
+        if mapper_present:
             _prepare_owned_mapper_removal(state, target)
             _run(["dmsetup", "remove", state["dm_name"]], timeout=60)
         if _mapper_exists(state):
@@ -4338,18 +4346,38 @@ def run_probe(device_arg, confirm_arg, state_dir_arg, review_path,
             results["final_recovery_state"] = "ORACLE_PASS"
             _save_results(state_dir, results)
             if development_only and algorithm_real_swap:
-                # A PASS cannot transfer module-load ownership. recover()
-                # refuses to remove a module after the owning test process
-                # exits. Never leave active swapz without a durable manager
-                # able to verify and stop the exact mapper and module later.
                 if _operator_keep_swapz_active_after_pass():
-                    results["operator_choice"] = (
-                        "KEEP_SWAPZ_BLOCKED_NO_DURABLE_OWNER")
+                    active_mapper_swap = _verify_kept_swapz_active(
+                        state, target, mapper)
+                    # Keep the active marker and root-only /run record. The
+                    # mapper itself pins dm_swapz, so a later recover-pending
+                    # can prove continuity before swapoff/remove/rmmod.
+                    state["stage"] = "KEPT_ACTIVE"
+                    _save_state(state_dir, state)
+                    results["oracle_suite"] = "PASS_ACTIVE_KEPT"
+                    results["operator_choice"] = "KEEP_SWAPZ_ACTIVE"
+                    results["kept_swapz_active"] = True
+                    results["original_header_matches_final"] = True
+                    results["mapper_swap_priority"] = active_mapper_swap["priority"]
+                    results["final_recovery_state"] = "KEPT_ACTIVE"
+                    results["end_timestamp"] = _utc_timestamp()
+                    _save_results(state_dir, results)
+                    print("PHYSICAL_ALGORITHM_REAL_SWAP=PASS")
+                    if virtual_device_only:
+                        print("VIRTUAL_DEVICE_ONLY=PASS not_physical_qualification")
+                    print("PHYSICAL_DEVELOPMENT_SMOKE=PASS")
                     print(
-                        "KEEP_SWAPZ=BLOCKED reason=no_durable_recovery_owner "
-                        "action=restore_ordinary_swap", file=sys.stderr)
-                else:
-                    results["operator_choice"] = "RESTORE_ORDINARY_SWAP"
+                        "EVIDENCE_CLASS=DEVELOPMENT_ONLY_NOT_PHYSICAL_QUALIFICATION")
+                    print(
+                        "PHYSICAL_SWAPZ_STATE=ACTIVE "
+                        "original-swap-header=unchanged "
+                        "ownership_state=runtime")
+                    print(
+                        "RESTORE_COMMAND=sudo python3 -I -B "
+                        "tests/tools/physical-swap-probe.py recover-pending")
+                    print(f"PHYSICAL_RESULTS={state_dir / RESULTS_NAME}")
+                    return
+                results["operator_choice"] = "RESTORE_ORDINARY_SWAP"
                 _save_results(state_dir, results)
         except BaseException as exc:
             failure = exc
