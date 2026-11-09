@@ -2555,6 +2555,84 @@ class PhysicalSwapProbeTests(unittest.TestCase):
         with mock.patch("builtins.input", side_effect=EOFError):
             self.assertFalse(probe._operator_keep_swapz_active_after_pass())
 
+    def test_keep_active_verification_requires_exact_owned_swap(self):
+        # Purely mocked: these checks must never activate a host swap device.
+        target = {
+            "device": "/dev/synthetic-part", "header": b"h" * probe.PAGE_BYTES,
+            "major": 8, "minor": 17,
+        }
+        state = {"module_ownership": "MODULE_OWNED"}
+        mapper = "/dev/mapper/owned-swapz"
+        healthy = {"priority": 32767, "used_kib": 0, "size_kib": 16384}
+        with mock.patch.object(probe, "_verify_target_identity") as verify, \
+             mock.patch.object(probe, "_read_block0",
+                               return_value=target["header"]) as header, \
+             mock.patch.object(probe, "_verify_owned_mapper",
+                               return_value=mapper) as owned, \
+             mock.patch.object(probe, "block_identity",
+                               return_value=(253, 4)) as mapper_identity, \
+             mock.patch.object(probe, "_active_swap_for",
+                               side_effect=[None, healthy]) as inventory, \
+             mock.patch.object(probe.Path, "is_dir", return_value=True):
+            self.assertEqual(
+                probe._verify_kept_swapz_active(state, target, mapper),
+                healthy)
+            verify.assert_called_once_with(target)
+            header.assert_called_once_with(target["device"], target)
+            owned.assert_called_once_with(state, target)
+            mapper_identity.assert_called_once_with(mapper)
+            self.assertEqual(inventory.call_args_list, [
+                mock.call(8, 17), mock.call(253, 4)])
+
+        scenarios = (
+            ("modified backing signature", {"header": b"x" * probe.PAGE_BYTES},
+             "header changed"),
+            ("raw partition reactivated", {"raw_swap": healthy},
+             "raw swap partition became active"),
+            ("mapper identity substituted", {"owned": "/dev/mapper/other"},
+             "owned swapz mapper changed"),
+            ("mapper swap deactivated", {"mapper_swap": None},
+             "not active swap"),
+            ("mapper priority replaced", {"mapper_swap": {**healthy,
+                                                           "priority": -1}},
+             "priority changed"),
+            ("unowned module", {"module_ownership": "NOT_STARTED"},
+             "module is unavailable"),
+            ("module absent", {"module_loaded": False},
+             "module is unavailable"),
+        )
+        for label, mutation, message in scenarios:
+            with self.subTest(label=label):
+                observed_header = mutation.get("header", target["header"])
+                raw_swap = mutation.get("raw_swap")
+                active_mapper_swap = mutation.get("mapper_swap", healthy)
+                owner = mutation.get("owned", mapper)
+                checked_state = {
+                    "module_ownership":
+                        mutation.get("module_ownership", "MODULE_OWNED")
+                }
+
+                def active_swap(major, minor):
+                    return raw_swap if (major, minor) == (8, 17) else (
+                        active_mapper_swap if (major, minor) == (253, 4)
+                        else None)
+
+                with mock.patch.object(probe, "_verify_target_identity"), \
+                     mock.patch.object(probe, "_read_block0",
+                                       return_value=observed_header), \
+                     mock.patch.object(probe, "_verify_owned_mapper",
+                                       return_value=owner), \
+                     mock.patch.object(probe, "block_identity",
+                                       return_value=(253, 4)), \
+                     mock.patch.object(probe, "_active_swap_for",
+                                       side_effect=active_swap), \
+                     mock.patch.object(
+                         probe.Path, "is_dir",
+                         return_value=mutation.get("module_loaded", True)):
+                    with self.assertRaisesRegex(probe.ProbeError, message):
+                        probe._verify_kept_swapz_active(
+                            checked_state, target, mapper)
+
     def simulate_root_owned_directories(self, *directories):
         """Model root ownership in rootless CI; never chown host paths."""
         owned = {str(directory) for directory in directories}
