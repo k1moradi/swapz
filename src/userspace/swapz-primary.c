@@ -14221,27 +14221,6 @@ static int swapz_primary_run_mutating_action(
 	int result;
 	int saved_errno;
 
-#if !defined(SWAPZ_PRIMARY_OWNED_NULLBLK_TEST) && \
-	!defined(SWAPZ_PRIMARY_ROOTLESS_TEST)
-	/*
-	 * The pre-migration extent codec serializes SWZ descriptors on backing
-	 * media. Refuse physical PREPARE/START before acquiring lifecycle locks
-	 * or changing swap state. Keep STOP/RECOVER available for older runs.
-	 * Synthetic null_blk and rootless policy tests retain their seams.
-	 */
-	if (SWAPZ_CODEC_METADATA_ON_MEDIA &&
-	    (action == SWAPZ_PRIMARY_MUTATING_PREPARE ||
-	     action == SWAPZ_PRIMARY_MUTATING_START)) {
-		errno = EOPNOTSUPP;
-		fprintf(stderr,
-			"PRIMARY_%s=BLOCKED phase=ram-metadata-migration "
-			"target_unchanged=true\n",
-			action == SWAPZ_PRIMARY_MUTATING_PREPARE ?
-				"PREPARE" : "START");
-		return -1;
-	}
-#endif
-
 	/*
 	 * Lock order is global package/mutation lock first, then the partition
 	 * recovery lock acquired by the selected lifecycle operation.
