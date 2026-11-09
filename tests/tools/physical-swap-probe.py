@@ -2415,41 +2415,11 @@ def _allocate_dm_identity():
 
 
 def _write_block0(device, data, target, expected_current=None):
-    if len(data) != PAGE_BYTES:
-        raise ProbeError("recovery header has the wrong length")
-    if expected_current is not None and len(expected_current) != PAGE_BYTES:
-        raise ProbeError("expected partition header has the wrong length")
-    try:
-        fd = os.open(device, os.O_RDWR | os.O_CLOEXEC | os.O_EXCL | os.O_SYNC)
-    except OSError as exc:
-        raise ProbeError(f"cannot exclusively open selected partition: {exc}") from exc
-    try:
-        _verify_open_block_device(fd, target)
-        if expected_current is not None and (
-                _read_exact_block0(fd) != expected_current):
-            raise ProbeError("partition header changed before exclusive update")
-        try:
-            written = os.pwrite(fd, data, 0)
-        except OSError as exc:
-            raise ProbeError(
-                "operation=header_write offset=0 "
-                f"original_errno={exc.errno} "
-                "safe_next_step=recover_with_durable_state") from exc
-        if type(written) is not int or written != PAGE_BYTES:
-            observed_written = (
-                written if type(written) is int and written >= 0 else "invalid")
-            raise ProbeError(
-                "operation=header_write offset=0 original_errno=unavailable "
-                "expected=4096_bytes observed=short_or_invalid_write "
-                f"written_bytes={observed_written!r} "
-                "safe_next_step=recover_with_durable_state")
-        os.fsync(fd)
-        if _read_exact_block0(fd) != data:
-            raise ProbeError("partition header readback did not match")
-    finally:
-        # Never resume a short block-device write; recovery owns any partial
-        # mutation. A secondary close failure cannot replace the first fault.
-        _close_fd_preserving_active_error(fd)
+    """Fail closed: swapz never writes the backing partition's first page."""
+    del device, data, target, expected_current
+    raise ProbeError(
+        "raw block-zero writes are forbidden; legacy pre-migration journals "
+        "require read-only manual recovery")
 
 def _active_swap_for(major, minor):
     """Resolve all active swap entries without mistaking swapfiles for devices."""
@@ -3132,21 +3102,15 @@ def recover(state_dir, device_arg, confirm_arg, lock_held=False,
             r"[0-9a-f]{32}", str(state.get("run_id", ""))):
         raise ProbeError("saved state lacks one-use run identity")
     preserve_header = state.get("raw_header_preservation_required") is True
-    backup = None
     if not preserve_header:
-        try:
-            backup = (state_dir / BACKUP_NAME).read_bytes()
-        except OSError as exc:
-            raise ProbeError("legacy recovery header copy is unavailable") from exc
+        raise ProbeError(
+            "legacy pre-migration recovery journal requires read-only manual "
+            "recovery; automatic block-zero restoration is disabled")
     _recovery_run_directory(state_dir, state["run_id"])
     if device_arg != confirm_arg or device_arg != state.get("device_arg"):
         raise ProbeError(
             "recovery requires the exact originally confirmed device path; "
             "safe_next_step=inspect_records_read_only")
-    if (not preserve_header and
-            (len(backup) != PAGE_BYTES or hashlib.sha256(backup).hexdigest() !=
-             state.get("header_sha256"))):
-        raise ProbeError("legacy original header is missing or digest-mismatched")
     if state.get("stage") == "COMPLETE":
         raise ProbeError(
             "saved recovery is already COMPLETE; "
@@ -3285,39 +3249,12 @@ def recover(state_dir, device_arg, confirm_arg, lock_held=False,
             raise ProbeError(
                 "development cleanup refused because the originally inactive "
                 "partition became active swap")
-        if preserve_header:
-            current_digest = hashlib.sha256(current_header).hexdigest()
-            if current_digest != state.get("header_sha256"):
-                raise ProbeError(
-                    "ordinary SWAPSPACE2 header changed; raw header writes are "
-                    "forbidden for this trial")
-            state["final_block0_sha256"] = current_digest
-        else:
-            # Historical pre-migration journals alone may restore their saved
-            # block-zero image. No newly created run reaches this branch.
-            if active is not None and current_header != backup:
-                raise ProbeError("recovery refused to rewrite active swap")
-            _validate_recovery_header(
-                current_header, backup, state, target["size_bytes"])
-            if current_header != backup:
-                if active is not None:
-                    raise ProbeError("cannot restore header while swap is active")
-                if _recovery_header_stage(state) != "HEADER_RESTORE_PENDING":
-                    source_stage = _recovery_header_stage(state)
-                    state["header_restore_source_stage"] = source_stage
-                    state["header_restore_source_sha256"] = hashlib.sha256(
-                        current_header).hexdigest()
-                    state["header_restore_source_hex"] = current_header.hex()
-                    state["stage_before_recovery"] = "HEADER_RESTORE_PENDING"
-                    state["stage"] = "HEADER_RESTORE_PENDING"
-                    _save_state(state_dir, state)
-                _verify_target_identity(target)
-                _write_block0(target["device"], backup, target,
-                              expected_current=current_header)
-            if _read_block0(target["device"], target) != backup:
-                raise ProbeError(
-                    "legacy original 4 KiB header not restored exactly")
-            state["final_block0_sha256"] = hashlib.sha256(backup).hexdigest()
+        current_digest = hashlib.sha256(current_header).hexdigest()
+        if current_digest != state.get("header_sha256"):
+            raise ProbeError(
+                "ordinary SWAPSPACE2 header changed; raw header writes are "
+                "forbidden for this trial")
+        state["final_block0_sha256"] = current_digest
 
         if swap_was_active is True:
             if _active_swap_for(target["major"], target["minor"]) is None:
@@ -4620,7 +4557,7 @@ def run_probe(device_arg, confirm_arg, state_dir_arg, review_path,
                 "swap-enabled" if target.get("swap_was_active") is True
                 else "target-inactive")
             print(
-                "PHYSICAL_SMOKE_RESTORED=original-header; "
+                "PHYSICAL_SMOKE_RESTORED=backing-header-preserved; "
                 f"{restored_state} state={state_dir}")
         else:
             print("PHYSICAL_SMOKE=BOUNDED_POSITIVE_CORRECTNESS_ONLY")
