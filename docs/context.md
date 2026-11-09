@@ -1,5 +1,16 @@
 # Linux memory, swap, zswap and swapz: technical context
 
+**Owner-mandated architecture correction (2026-11-09):** Physical backing
+is exclusively an already formatted SWAPSPACE2 partition. Its header/UUID and
+partition table never change; only the post-swapoff data region is used.
+All swapz-specific mapping, extent/record descriptor, offset/length, CRC,
+generation, sequence and GC authority must live in RAM. The existing in-band
+SWZ compressed extent headers described later in this technical reference are
+legacy implementation facts, **not** an accepted new partition/data format.
+Their removal must preserve 4/8/16KiB packing, safety, bounded memory and
+byte-exact readback. Do not use legacy source explanations to override the
+mandatory VISION and AGENT_CONTEXT contract.
+
 This is the durable **technical reference** for agents changing swapz behavior
 around memory identity, Linux reclaim, swap I/O, folios, zswap and extent
 locality. It explains what the kernel does and what information crosses the

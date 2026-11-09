@@ -3,11 +3,14 @@
 #define SWAPZ_EXTENT_CODEC_H
 
 /*
- * Experimental unversioned 4/8/16 KiB extent FORMAT ONLY.
+ * Legacy 4/8/16 KiB in-band extent codec (RAM-only metadata migration pending).
  *
- * Existing mappings or records from other disk formats are not interpreted as SWZ.
- * No extent is authoritative until its containing full-block write has
- * completed and the owning mapping transaction explicitly publishes it.
+ * This header defines the existing compressed extent representation, NOT a
+ * backing partition format: real backing must remain preformatted SWAPSPACE2.
+ * Current serialized SWZ extent headers and descriptors are nonconforming with
+ * the owner-mandated RAM-only metadata design and must be replaced together
+ * with the read, pack, publication and GC paths. Until then, no extent is
+ * authoritative before confirmed full-block write and ordered publication.
  * This is a codec, NOT an allocator, write path or GC implementation.
  */
 #ifdef __KERNEL__

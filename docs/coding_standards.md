@@ -1,6 +1,6 @@
 # Coding Standards
 
-**Immutable naming policy (read before every prompt):** The project is `swapz`; the kernel module is `dm-swapz.ko` (loaded as `dm_swapz`); the Device Mapper target is exactly `swapz`; and the module alias is `dm-swapz`. Never put implementation-generation numbers in product, module, target, source-path, report, workflow, helper, or schema names. `SWZ` is the current unversioned on-disk format identity; do not assign a format version until an incompatible format boundary is justified.
+**Immutable naming policy (read before every prompt):** The project is `swapz`; the kernel module is `dm-swapz.ko` (loaded as `dm_swapz`); the Device Mapper target is exactly `swapz`; and the module alias is `dm-swapz`. Never put implementation-generation numbers in product, module, target, source-path, report, workflow, helper, or schema names. `SWAPSPACE2` is the only physical backing partition format. `SWZ` denotes the existing internal extent-packing design and a legacy in-band codec awaiting RAM-only metadata migration; it is **not** a partition format or permission to persist swapz metadata. Do not invent a new format identity.
 
 **Three-tier test policy:** `make fast_test` is development-only and never qualifies or publishes `test_results.json`; `make test` runs the algorithm/RAM path and returns INCOMPLETE (nonzero) until physical source/run/target admission is qualified; `make test_full` retains all rootless DKMS/systemd integration and RAM qualification. Both privileged tiers report BLOCKED (nonzero) if noninteractive privilege is unavailable. RAM/integration PASS cannot certify physical storage or cold-boot production acceptance. Private scripts and CI jobs are implementation details, not operator interfaces.
 
@@ -39,7 +39,7 @@ More than half of ongoing development engineering time should concern production
 
 Active product C/C++ and headers live under `src/`; test-only code lives under `tests/`; maintained project documentation lives under `docs/`; packaging code lives under `packaging/`. The sole root-level Markdown exception is `AGENTS.md`, which is repository-control metadata intentionally rooted for coding-agent discovery and is not product documentation. Do not create any other root Markdown or recreate parallel `kernel/`, `userspace/`, `tools/`, legacy source trees, alternate research modules or historical models.
 
-Use `swapz_` / `SWAPZ_` for implementation identifiers and `swapz` for the product/candidate. The Device Mapper target is exactly `swapz`; the module alias is `dm-swapz`. SWZ may appear only when discussing the current unversioned disk format.
+Use `swapz_` / `SWAPZ_` for implementation identifiers and `swapz` for the product/candidate. The Device Mapper target is exactly `swapz`; the module alias is `dm-swapz`. SWZ may name the internal packing and legacy codec only. The real backing partition remains SWAPSPACE2; no on-disk swapz metadata is permitted in the completed design.
 
 Build provenance must expose a single source SHA and a clean/dirty value to
 userspace and the kernel module. Generate the string form consumed by

@@ -1,6 +1,6 @@
 # Vision
 
-**Immutable naming policy (read before every prompt):** The project is `swapz`; the kernel module is `dm-swapz.ko` (loaded as `dm_swapz`); the Device Mapper target is exactly `swapz`; and the module alias is `dm-swapz`. Never put implementation-generation numbers in product, module, target, source-path, report, workflow, helper, or schema names. `SWZ` is the current unversioned on-disk format identity; do not assign a format version until an incompatible format boundary is justified.
+**Immutable naming policy (read before every prompt):** The project is `swapz`; the kernel module is `dm-swapz.ko` (loaded as `dm_swapz`); the Device Mapper target is exactly `swapz`; and the module alias is `dm-swapz`. Never put implementation-generation numbers in product, module, target, source-path, report, workflow, helper, or schema names. `SWAPSPACE2` is the only physical backing partition format. `SWZ` denotes the existing internal extent-packing design and a legacy in-band codec awaiting RAM-only metadata migration; it is **not** a partition format or permission to persist swapz metadata. Do not invent a new format identity.
 
 **Three-tier test policy:** `make fast_test` is development-only and never qualifies or publishes `test_results.json`; `make test` runs the algorithm/RAM path and returns INCOMPLETE (nonzero) until physical source/run/target admission is qualified; `make test_full` retains all rootless DKMS/systemd integration and RAM qualification. Both privileged tiers report BLOCKED (nonzero) if noninteractive privilege is unavailable. RAM/integration PASS cannot certify physical storage or cold-boot production acceptance. Private scripts and CI jobs are implementation details, not operator interfaces.
 
@@ -45,7 +45,7 @@ Compression ratio, encoded-size diagrams, mock counters, green CI or a single sy
 
 ## Product
 
-There is one implementation and one public product identity. Production kernel code is C under `src/kernel/`; the administrative utility is under `src/userspace/`. SWZ is the current unversioned format name, not a product generation. The Device Mapper target is exactly `swapz`; the module alias is `dm-swapz`.
+There is one implementation and one public product identity. Production kernel code is C under `src/kernel/`; the administrative utility is under `src/userspace/`. SWZ remains the internal extent-packing name, not a partition format or a product generation. The Device Mapper target is exactly `swapz`; the module alias is `dm-swapz`.
 
 `swapzctl status` provides read-only runtime representation accounting for
 active swapz targets. It reports a compressed-SWZ ratio for committed compressed
@@ -55,7 +55,7 @@ GC traffic is shown separately and excluded. They describe the storage
 representation, not current live occupancy, performance qualification or
 physical-media endurance.
 
-The format uses independently decodable 4KiB logical pages, ordinary LZ4 compression, page-local delta64 plus byte-shuffle and LZ4 rescue, whole-page RAW fallback, 4/8/16KiB extents, CRC/generation authority, bounded write windows, and serialized publication only after required lower I/O succeeds. **Main compression requirement:** every emulated device runs and is qualified with delta64 rescue enabled, `DELTA64_SHUF8` byte-plane shuffle (the owner-confirmed requirement is byte shuffle, not a bit-level bitshuffle), and LZ4. Delta64-off is not a performance mode to benchmark, plot or compare. The module-level disable switch is retained only for debugging/compatibility and cannot qualify an emulated-device result. The scalar sampled classifier runs before ordinary LZ4 so high-score pages can try delta64 + shuffle + LZ4 first, while lower-score pages retain the ordinary-LZ4 packing-cliff route. The shuffled payload has its own DELTA64_SHUF8 encoding; plain DELTA64 remains decodable for format compatibility. Delta64 never carries state across logical pages or extents.
+The current implementation's packing design uses independently decodable 4KiB logical pages, ordinary LZ4 compression, page-local delta64 plus byte-shuffle and LZ4 rescue, whole-page RAW fallback, 4/8/16KiB extents, CRC/generation authority, bounded write windows, and serialized publication only after required lower I/O succeeds. **Main compression requirement:** every emulated device runs and is qualified with delta64 rescue enabled, `DELTA64_SHUF8` byte-plane shuffle (the owner-confirmed requirement is byte shuffle, not a bit-level bitshuffle), and LZ4. Delta64-off is not a performance mode to benchmark, plot or compare. The module-level disable switch is retained only for debugging/compatibility and cannot qualify an emulated-device result. The scalar sampled classifier runs before ordinary LZ4 so high-score pages can try delta64 + shuffle + LZ4 first, while lower-score pages retain the ordinary-LZ4 packing-cliff route. The shuffled payload has its own DELTA64_SHUF8 encoding; plain DELTA64 remains decodable for format compatibility. Delta64 never carries state across logical pages or extents.
 
 ## Non-negotiable correctness
 
