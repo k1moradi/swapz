@@ -12,6 +12,25 @@ ROADMAP is a long evidence reference; retrieve only the active rows/sections
 needed for the current decision so total documentation stays within the 64K-token
 budget defined in AGENT_CONTEXT.
 
+## P0: migrate extent metadata to RAM; preserve SWAPSPACE2
+
+**OPEN / RELEASE BLOCKER.** Existing SWAPSPACE2 partition header, UUID and
+partition table must not be changed for swapz. The raw formatter CLI is
+disabled; remaining synthetic SWZ001 tests are legacy. Current compressed
+SWZ extents persist 16-byte headers and 16-byte record descriptors:
+move these to bounded RAM while keeping 4/8/16KiB data-only extents,
+generation/CRC validation, safe GC, and byte-exact READ/WRITE correctness.
+
+Review partition identity and swapoff admission, all lower physical offsets
+including DISCARD, metadata-cache lifetimes, corrupted/partial I/O,
+overwrite, GC, ordering, simultaneous callbacks, suspend/drain, shutdown
+and crash recovery, and test-mode transitions in both directions. Quantify
+the changed RAM/metadata budget and maximum incompressible capacity. Add
+source/native/loaded regressions for zero raw-header writes, full readback,
+stale state and fail-closed errors. No reboot; after PASS offer owner a
+keep-swapz or restore-ordinary-swap choice. Do not promote before matched
+current-source acceptance tests.
+
 ## Current production mission — dedicated SD-card host
 
 The current target is the owner-dedicated removable SD card whose observed

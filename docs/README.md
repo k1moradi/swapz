@@ -13,6 +13,12 @@ complete current RAM and rootless integration suites. The [root Make API](compil
 defines supported command behavior; [testing standards](testing_standards.md)
 define qualification and evidence rules.
 
+**Owner-mandated backing design (2026-11-09):** Physical backing must remain an
+ordinary SWAPSPACE2 swap partition; only the virtual mapper may be formatted.
+All swapz metadata belongs in bounded RAM. In-band SWZ extent descriptors
+and synthetic SWZ001 fixtures remain release-blocking migration work.
+See [VISION.md](VISION.md) and [AGENT_CONTEXT.md](AGENT_CONTEXT.md).
+
 swapz is an experimental Linux Device Mapper target that compresses and packs 4KiB logical pages into 4/8/16KiB SWZ physical extents. Ordinary compression uses LZ4. **Main compression requirement:** every emulated-device test and benchmark runs the production stack with delta64 rescue enabled, the `DELTA64_SHUF8` 8-byte byte-plane shuffle (byte shuffle, confirmed by the owner as the requirement; not a bit-level bitshuffle), and LZ4. A scalar sampled classifier runs before ordinary LZ4; high-score pages may run delta64 + shuffle + LZ4 first and directly adopt a sufficiently small candidate, while lower-score pages retain the ordinary-LZ4 packing-cliff route. Delta64-off is not a supported emulated-device benchmark, plot series, or performance comparison. The module-level disable switch remains only as a debugging/compatibility escape hatch and does not qualify an emulated-device result. The project exists to reduce independently measured lower-device READ and WRITE bytes and requests for the same byte-exact logical workload without sacrificing mapping correctness, ordering, integrity, bounded resource use, or acceptable read latency.
 
 There is one product. The active product source is under `src/`; test-only code is under `tests/`; maintained documentation is under `docs/`; packaging support is under `packaging/`. Historical implementations and rejected experiments belong in Git history, not dormant source trees.
@@ -68,7 +74,7 @@ admission is safe. Physical acceptance remains a separate gate under the
 [frozen policy](production-acceptance.json) and
 [current device authorization](AGENT_CONTEXT.md). Non-`null_blk` backing
 remains disabled by default and requires explicit `allow_physical_backing=1`
-plus a valid exact-size SWZ authorization header. A full `make test` must
+plus a valid unchanged SWAPSPACE2 header and exact ownership. A full `make test` must
 report BLOCKED (nonzero) when safe noninteractive loaded qualification is
 unavailable.
 

@@ -4,6 +4,23 @@
 
 **Three-tier test policy:** `make fast_test` is development-only and never qualifies or publishes `test_results.json`; `make test` runs the algorithm/RAM path and returns INCOMPLETE (nonzero) until physical source/run/target admission is qualified; `make test_full` retains all rootless DKMS/systemd integration and RAM qualification. Both privileged tiers report BLOCKED (nonzero) if noninteractive privilege is unavailable. RAM/integration PASS cannot certify physical storage or cold-boot production acceptance. Private scripts and CI jobs are implementation details, not operator interfaces.
 
+## New P0 ordinary swap and RAM-metadata acceptance gate
+
+Real device/VM backing must already be SWAPSPACE2. Assert byte-exact backing
+first-page preservation, no raw-partition mkswap, no SWAPZ001 publication,
+and no raw-header write on every successful or failed path. Only the virtual
+mapper may receive mkswap. Public swapzctl format must fail before any
+raw-device open. Legacy synthetic formatter-success tests do not establish
+a production CLI acceptance result.
+
+New source/native/loaded qualification must prove in-RAM CRC/generation,
+record offsets/lengths, 4/8/16KiB packing, read correctness, GC, overwrite,
+DISCARD and concurrency, partial/failing I/O, memory capacity and no stale
+mapping after target recreation. Exercise exclusive swapoff and return to
+ordinary swapon without reboot; after success ask owner keep/restore.
+Existing raw-header preservation alone is insufficient for production PASS.
+Contradictory historical formatter requirements below are superseded.
+
 ## Official interface
 
 The root checkout exposes three test tiers:

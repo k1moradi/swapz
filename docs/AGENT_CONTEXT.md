@@ -6,6 +6,29 @@ agents working on swapz. It is the first document to read after every fetch of
 major architecture decision. Longer documents remain authoritative references,
 but retrieve only the sections needed for the current decision.
 
+## Mandatory ordinary Linux swap partition design (2026-11-09)
+
+Real backing must be an existing, valid SWAPSPACE2 Linux swap partition.
+Never repartition, run mkswap on, or rewrite its header, UUID or partition
+table. After a safe swapoff and exact-exclusive admission, only the data
+area after the protected 4096-byte first page may be used. The newly
+created virtual Device Mapper mapper alone may receive mkswap.
+Switch between ordinary swap and swapz with verified swapoff/swapon,
+without reboot. After a successful trial, obtain the owner's choice:
+keep swapz active or return to ordinary Linux swap.
+
+All swapz-specific record and extent descriptors, offsets, lengths,
+generations, CRCs, mapping/segment allocation and GC metadata must
+be bounded volatile RAM state. The current compressed codec still stores
+extent header/descriptors on backing media, and synthetic null_blk
+rehearsals still use SWAPZ001. Both are nonconforming migration debt,
+not accepted partition-format designs. Preserve 4/8/16KiB packing,
+readback integrity, ordering, concurrency and fail-closed semantics.
+Production acceptance remains blocked until migration and tests pass.
+
+Earlier permissions to format/repartition even the dedicated SD card
+are superseded; only post-swapoff swap *data* may be overwritten.
+
 ## Current production mission
 
 The project goal is to make swapz production-ready for ordinary
@@ -78,10 +101,10 @@ identity. Formatting or repartitioning may intentionally replace UUID/PARTUUID;
 record the controlled identity transition before continuing. Never substitute
 whatever later happens to be named `/dev/sda` or `/dev/sda1`.
 
-The entire positively identified SD card and its sole partition are disposable
-development media. Existing card contents need no backup. The owner grants
-standing authority to repartition, format, overwrite, DISCARD/TRIM, benchmark,
-and repeatedly reinitialize that card when useful to the mission. No other
+Only the positively identified SD card's post-swapoff data area is disposable.
+Its existing SWAPSPACE2 header, UUID and partition table must remain untouched.
+Bounded data-area writes and DISCARD/TRIM remain permitted under the current
+exact device ownership gates, but no raw formatting or repartitioning is allowed. No other
 physical disk, partition, filesystem, mapper, or swap area is in destructive
 scope.
 
@@ -94,8 +117,7 @@ that depends on favorable compression.
 
 The owner decision recorded on 2026-11-03 replaces repeated per-run owner or
 external-review permission requests for physical work on this **current
-dedicated SD-card target**. Agents may autonomously use sudo, format the card,
-create/remove verified swapz mappings, run swapoff/swapon for the verified
+dedicated SD-card target**. Agents may autonomously use sudo, create/remove verified swapz mappings, run swapoff/swapon for the verified
 target, perform bounded real-swap qualification, and install deployment
 configuration when the technical gates for that operation pass.
 
@@ -171,8 +193,8 @@ safe path to a correct maintainable product:
 
 - fix the highest production blocker instead of adding ceremony;
 - use direct native-host evidence when it is safe and more informative;
-- freely destroy/reinitialize the authorized SD card instead of preserving
-  irrelevant historical card contents;
+- reuse only the authorized swap partition's data area after safe swapoff,
+  preserving its original header, UUID and partition table;
 - remove obsolete approval gates and recovery complexity that exist only for
   the older shared-swap experiment, while retaining technical safety gates;
 - reuse valid evidence instead of rerunning expensive qualification without a

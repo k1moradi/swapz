@@ -50,6 +50,8 @@ static FILE *test_format_fopen(const char *path, const char *mode);
 #define realpath(...) admission_realpath(__VA_ARGS__)
 #define pwrite test_format_pwrite
 #define fopen test_format_fopen
+/* Legacy formatter tests operate against synthetic fake devices only. */
+#define SWAPZ_FORMATTER_SYNTHETIC_TEST 1
 #define main swapzctl_program_main
 #include "../../../../src/userspace/swapzctl.c"
 #undef main

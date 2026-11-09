@@ -58,8 +58,7 @@ static void usage(FILE *out)
 	      "for active swapz targets.\n", out);
 	fputs("format is identity-bound: the partition, PARTUUID, exact geometry, "
 	      "removable parent, mounts and holders must all verify.\n", out);
-	fputs("format writes only the 4096-byte SWZ authorization header and never "
-	      "issues DISCARD/TRIM.\n", out);
+	fputs("format is disabled: raw partitions must retain SWAPSPACE2.\n", out);
 	fputs("Primary-swap lifecycle commands remain disabled until separately "
 	      "qualified.\n", out);
 	fputs("The format command creates no mapper target and never enables swap.\n",
@@ -4128,6 +4127,17 @@ static int format_device(const char *path,
 int main(int argc, char **argv)
 {
 	struct stat info;
+
+#ifndef SWAPZ_FORMATTER_SYNTHETIC_TEST
+	/* The backing partition retains its original SWAPSPACE2 header.
+	 * Only isolated fake-device tests may invoke the legacy writer.
+	 */
+	if (argc >= 2 && !strcmp(argv[1], "format")) {
+		fputs("swapzctl format: BLOCKED: raw partition formatting is forbidden; "
+		      "preserve SWAPSPACE2.\n", stderr);
+		return 2;
+	}
+#endif
 
 	if (argc >= 2 && !strcmp(argv[1], "primary"))
 		return swapz_primary_command(argc - 2, argv + 2);

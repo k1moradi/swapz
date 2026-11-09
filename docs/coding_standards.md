@@ -8,6 +8,29 @@ The qualification reporter must distinguish the algorithm/RAM and full
 integration tiers in its evidence. No RAM result becomes a physical/production
 PASS until the protected source/run/target admission protocol is qualified.
 
+## Mandatory ordinary Linux swap partition design (2026-11-09)
+
+Real backing must be an existing, valid SWAPSPACE2 Linux swap partition.
+Never repartition, run mkswap on, or rewrite its header, UUID or partition
+table. After a safe swapoff and exact-exclusive admission, only the data
+area after the protected 4096-byte first page may be used. The newly
+created virtual Device Mapper mapper alone may receive mkswap.
+Switch between ordinary swap and swapz with verified swapoff/swapon,
+without reboot. After a successful trial, obtain the owner's choice:
+keep swapz active or return to ordinary Linux swap.
+
+All swapz-specific record and extent descriptors, offsets, lengths,
+generations, CRCs, mapping/segment allocation and GC metadata must
+be bounded volatile RAM state. The current compressed codec still stores
+extent header/descriptors on backing media, and synthetic null_blk
+rehearsals still use SWAPZ001. Both are nonconforming migration debt,
+not accepted partition-format designs. Preserve 4/8/16KiB packing,
+readback integrity, ordering, concurrency and fail-closed semantics.
+Production acceptance remains blocked until migration and tests pass.
+
+Earlier permissions to format/repartition even the dedicated SD card
+are superseded; only post-swapoff swap *data* may be overwritten.
+
 ## Priority
 
 More than half of ongoing development engineering time should concern production Linux kernel C: debugging, profiling, algorithms, I/O ownership, mapping authority, GC and measured performance. Do not invent tests or infrastructure when a direct C fix is the work that matters. Python and shell are thin qualification glue.
@@ -390,7 +413,10 @@ before validation rather than reading an arbitrarily large malformed record.
 No telemetry, token, or stale mapper snapshot grants creation authority.
 
 
-### Physical formatter descriptor and SWZ header contract
+### Legacy synthetic formatter descriptor and SWZ header contract (retirement pending)
+
+The old instructions below are only for synthetic fake devices, not physical
+partition formatting. Production swapzctl format is forbidden.
 
 The standalone formatter has no implicit authority derived from a pathname,
 root privilege, or the project's standing permission for one development card.
@@ -2997,7 +3023,7 @@ first drains an older window that exhausts capacity, the uncommitted writes
 fail while the READ continues against committed authority.
 
 Non-`null_blk` backing is disabled by default. When explicitly enabled it
-requires a valid exact-size SWAPZ authorization header in reserved block 0.
+requires a valid unchanged SWAPSPACE2 header in reserved block 0.
 All mapping data and segment discard ranges start after that reserved block.
 Fault-injection knobs are forbidden on physical backing. Upper WRITE completion accounting distinguishes
 successful BIO acknowledgments from BIO errors; a terminally failed target

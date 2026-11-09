@@ -7,8 +7,10 @@
  * WQ_MEM_RECLAIM owner; bounded private read slots may overlap up to eight
  * independent compressed or RAW lower READs without publishing authority.
  *
- * Physical backing is opt-in and requires an explicit block-0 SWAPZ format
- * header; null_blk remains the default qualification path. Capacity exhaustion
+ * Physical backing is opt-in and requires an existing SWAPSPACE2 header in
+ * protected block zero; null_blk remains the default qualification path.
+ * Synthetic SWZ-header rehearsals are not real physical admission.
+ * Capacity exhaustion
  * fails only the affected write BIOs so committed pages remain readable.
  */
 #define DM_MSG_PREFIX "swapz"
