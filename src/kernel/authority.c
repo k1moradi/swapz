@@ -3174,7 +3174,8 @@ static int swapz_read_observed_authority(
 {
 	const struct swapz_map *current_map;
 
-	if (!a || !observed || !current_out ||
+	/* A partially initialized authority is never readable. */
+	if (!a || !a->maps || !observed || !current_out ||
 	    logical_page >= a->logical_pages)
 		return -EINVAL;
 	current_map = &a->maps[logical_page];
