@@ -1284,6 +1284,14 @@ static void test_primary_linux_swap_header(void)
 	memcpy(header + sizeof(header) - sizeof(magic) + 1U,
 	       magic, sizeof(magic) - 1U);
 	assert(swapz_primary_linux_swap_header_valid(header, logical_pages));
+	/* Reject a syntactically correct but unusably small mapper; the kernel
+	 * validates at least three pages for the same SWAPSPACE2 geometry.
+	 */
+	test_put_u32_le(header, 1028U, 0U);
+	assert(!swapz_primary_linux_swap_header_valid(header, 1U));
+	test_put_u32_le(header, 1028U, 1U);
+	assert(!swapz_primary_linux_swap_header_valid(header, 2U));
+	test_put_u32_le(header, 1028U, (uint32_t)(logical_pages - 1U));
 	assert(!swapz_primary_linux_swap_header_valid(header, 0U));
 	assert(!swapz_primary_linux_swap_header_valid(header,
 							  (uint64_t)UINT32_MAX + 1U));
