@@ -34,8 +34,7 @@ static inline int swapz_linux_swap_header_valid(
 	unsigned int last_page;
 	unsigned int index;
 
-	if (!block || device_bytes % SWAPZ_SUPERBLOCK_BYTES ||
-	    pages < 3U || pages > 0xffffffffULL ||
+	if (!block || pages < 3U || pages > 0xffffffffULL ||
 	    swapz_sb_get_u32(block + SWAPZ_LINUX_SWAP_VERSION_OFFSET) != 1U ||
 	    swapz_sb_get_u32(block + SWAPZ_LINUX_SWAP_BAD_PAGES_OFFSET) != 0U)
 		return 0;
@@ -43,9 +42,9 @@ static inline int swapz_linux_swap_header_valid(
 	last_page = swapz_sb_get_u32(
 		block + SWAPZ_LINUX_SWAP_LAST_PAGE_OFFSET);
 	/*
-	 * The partition geometry and Linux swap header must describe the same
-	 * complete device. A shorter declared swap area cannot authorize writes
-	 * to an otherwise unused partition tail.
+	 * SWAPSPACE2 describes whole PAGE_SIZE pages. A block device may have an
+	 * unusable sub-page byte tail; require last_page to cover every complete
+	 * page and leave that tail outside swapz's lower-I/O range.
 	 */
 	if ((unsigned long long)last_page != pages - 1U)
 		return 0;
