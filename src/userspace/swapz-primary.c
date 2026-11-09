@@ -818,8 +818,7 @@ static int swapz_primary_target_valid(
 	    swapz_primary_partuuid_normalize(target->partuuid, normalized) < 0 ||
 	    strcmp(normalized, target->partuuid) ||
 	    !target->device_major ||
-	    target->device_bytes < SWAPZ_PRIMARY_BLOCK_BYTES ||
-	    target->device_bytes % SWAPZ_PRIMARY_BLOCK_BYTES)
+	    target->device_bytes < SWAPZ_PRIMARY_BLOCK_BYTES)
 		return 0;
 	device = makedev(target->device_major, target->device_minor);
 	return major(device) == target->device_major &&
@@ -1813,9 +1812,12 @@ static uint64_t swapz_primary_physical_blocks(uint64_t device_bytes)
 	uint64_t blocks;
 	uint64_t usable_blocks;
 
-	if (device_bytes < SWAPZ_PRIMARY_BLOCK_BYTES ||
-	    device_bytes % SWAPZ_PRIMARY_BLOCK_BYTES)
+	if (device_bytes < SWAPZ_PRIMARY_BLOCK_BYTES)
 		return 0;
+	/*
+	 * Linux swap capacity is page-granular. Ignore any sub-page device tail;
+	 * the mapper and iterate_devices range must never include those bytes.
+	 */
 	blocks = device_bytes / SWAPZ_PRIMARY_BLOCK_BYTES;
 	usable_blocks = ((blocks - 1ULL) / SWAPZ_PRIMARY_SEGMENT_BLOCKS) *
 			SWAPZ_PRIMARY_SEGMENT_BLOCKS;
