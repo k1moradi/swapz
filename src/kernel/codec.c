@@ -304,6 +304,10 @@ static void swapz_append_record(struct swapz_builder *builder,
 
 	memcpy(builder->bytes + payload_offset, payload, length);
 	swapz_put_record(builder->bytes, builder->count, &record);
+	builder->last_payload_crc32c = payload_crc32c;
+	builder->last_payload_offset = payload_offset;
+	builder->last_payload_length = length;
+	builder->last_encoding = encoding;
 	builder->count++;
 	builder->payload_start = payload_offset;
 }

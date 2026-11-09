@@ -99,6 +99,12 @@ struct swapz_builder {
 	swapz_u8 extent_blocks;
 	swapz_u8 count;
 	swapz_u32 sequence;
+	/* Last appended record metadata is host-side only. Production binds
+	 * these fields into the staged RAM transaction before lower I/O. */
+	swapz_u32 last_payload_crc32c;
+	swapz_u16 last_payload_offset;
+	swapz_u16 last_payload_length;
+	swapz_u8 last_encoding;
 	int sealed;
 };
 

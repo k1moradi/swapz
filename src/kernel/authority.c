@@ -1796,13 +1796,72 @@ static int swapz_is_active(const struct swapz_authority *a,
 	 * A rejected forged handle leaves the original transaction in flight.
 	 */
 	for (index = 0; index < tx->count; ++index) {
-		if (tx->records[index].logical_page !=
-			a->active_tx.records[index].logical_page ||
-		    tx->records[index].generation !=
-			a->active_tx.records[index].generation)
+		const struct swapz_tx_record *caller = &tx->records[index];
+		const struct swapz_tx_record *owned = &a->active_tx.records[index];
+
+		if (caller->logical_page != owned->logical_page ||
+		    caller->generation != owned->generation ||
+		    caller->compressed_metadata_bound !=
+			    owned->compressed_metadata_bound)
+			return 0;
+		if (caller->compressed_metadata_bound &&
+		    (caller->payload_crc32c != owned->payload_crc32c ||
+		     caller->payload_offset != owned->payload_offset ||
+		     caller->payload_length != owned->payload_length ||
+		     caller->encoding != owned->encoding))
 			return 0;
 	}
 	return 1;
+}
+
+int swapz_bind_compressed_record(struct swapz_authority *a,
+			       struct swapz_tx *tx, swapz_u8 record_index,
+			       swapz_u16 payload_offset,
+			       swapz_u16 payload_length,
+			       swapz_u32 payload_crc32c,
+			       swapz_u8 encoding)
+{
+	struct swapz_tx_record *caller, *owned;
+	swapz_u32 bytes_total;
+
+	if (!a || !tx || record_index >= tx->count)
+		return -EINVAL;
+	if (!swapz_is_active(a, tx))
+		return -ESTALE;
+	if (!payload_length || payload_length > SWAPZ_MAX_COMPRESSED ||
+	    (encoding != SWAPZ_ENCODING_LZ4 &&
+	     encoding != SWAPZ_ENCODING_DELTA64 &&
+	     encoding != SWAPZ_ENCODING_DELTA64_SHUF8))
+		return -EINVAL;
+	bytes_total = (swapz_u32)tx->extent_blocks * SWAPZ_BLOCK_BYTES;
+	if (payload_offset >= bytes_total ||
+	    payload_length > bytes_total - payload_offset)
+		return -EINVAL;
+
+	caller = &tx->records[record_index];
+	owned = &a->active_tx.records[record_index];
+	if (caller->compressed_metadata_bound ||
+	    owned->compressed_metadata_bound) {
+		if (caller->compressed_metadata_bound &&
+		    owned->compressed_metadata_bound &&
+		    caller->payload_crc32c == payload_crc32c &&
+		    owned->payload_crc32c == payload_crc32c &&
+		    caller->payload_offset == payload_offset &&
+		    owned->payload_offset == payload_offset &&
+		    caller->payload_length == payload_length &&
+		    owned->payload_length == payload_length &&
+		    caller->encoding == encoding && owned->encoding == encoding)
+			return 0;
+		return -ESTALE;
+	}
+
+	caller->payload_crc32c = payload_crc32c;
+	caller->payload_offset = payload_offset;
+	caller->payload_length = payload_length;
+	caller->encoding = encoding;
+	caller->compressed_metadata_bound = 1;
+	*owned = *caller;
+	return 0;
 }
 
 /*
@@ -2695,10 +2754,28 @@ int swapz_finish(struct swapz_authority *a, const struct swapz_tx *tx,
 			error = -EBADMSG;
 			goto fail;
 		}
-		payload_crc32cs[index] = decoded.payload_crc32c;
-		payload_lengths[index] = decoded.payload_length;
-		payload_offsets[index] = decoded.payload_offset;
-		payload_encodings[index] = decoded.encoding;
+		if (tx->records[index].compressed_metadata_bound) {
+			const struct swapz_tx_record *record = &tx->records[index];
+
+			if (decoded.payload_crc32c != record->payload_crc32c ||
+			    decoded.payload_offset != record->payload_offset ||
+			    decoded.payload_length != record->payload_length ||
+			    decoded.encoding != record->encoding) {
+				error = -EUCLEAN;
+				goto fail;
+			}
+			payload_crc32cs[index] = record->payload_crc32c;
+			payload_lengths[index] = record->payload_length;
+			payload_offsets[index] = record->payload_offset;
+			payload_encodings[index] = record->encoding;
+		} else {
+			/* Legacy direct-authority tests remain readable during the
+			 * migration; production engine transactions are always bound. */
+			payload_crc32cs[index] = decoded.payload_crc32c;
+			payload_lengths[index] = decoded.payload_length;
+			payload_offsets[index] = decoded.payload_offset;
+			payload_encodings[index] = decoded.encoding;
+		}
 		if (!payload_lengths[index] ||
 		    payload_lengths[index] > SWAPZ_MAX_COMPRESSED) {
 			error = -EUCLEAN;

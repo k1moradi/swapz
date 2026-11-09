@@ -114,6 +114,15 @@ static inline swapz_u8 swapz_map_pack_record_index(swapz_u8 index,
 struct swapz_tx_record {
 	swapz_u32 logical_page;
 	swapz_u32 generation;
+	/* Transitional production authority: once bound, these compressed
+	 * descriptor fields are immutable RAM transaction state. The legacy
+	 * codec may still mirror them on synthetic media until the next slice. */
+	swapz_u32 payload_crc32c;
+	swapz_u16 payload_offset;
+	swapz_u16 payload_length;
+	swapz_u8 encoding;
+	swapz_u8 compressed_metadata_bound;
+	swapz_u8 reserved[2];
 };
 
 struct swapz_tx {
@@ -382,6 +391,16 @@ int swapz_extent_sequence_lookup(const struct swapz_authority *authority,
 /* Reserves physical blocks; single worker, one pending transaction. */
 int swapz_stage(struct swapz_authority *authority, const swapz_u32 *logical_pages,
 	      swapz_u8 count, swapz_u8 blocks, struct swapz_tx *out);
+/* Bind one compressed descriptor into both caller and authority-owned staged
+ * transaction snapshots before lower submission. Rebinding different metadata
+ * is stale-handle corruption; RAW transactions leave these fields unbound. */
+int swapz_bind_compressed_record(struct swapz_authority *authority,
+			       struct swapz_tx *transaction,
+			       swapz_u8 record_index,
+			       swapz_u16 payload_offset,
+			       swapz_u16 payload_length,
+			       swapz_u32 payload_crc32c,
+			       swapz_u8 encoding);
 /*
  * Read-only: 1 only if staging one `blocks` extent now reuses the open segment
  * with no segment pick/recycle (synchronous DISCARD callback) and no -ENOSPC.

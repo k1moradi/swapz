@@ -98,6 +98,52 @@ static int test_generation_identity_mutation(void)
 	return 0;
 }
 
+static int test_bound_compressed_metadata_is_transaction_identity(void)
+{
+	const swapz_u32 pages[] = { 5 };
+	struct swapz_builder builder;
+	struct swapz_tx transaction;
+	swapz_u32 payload_crc32c;
+
+	CHECK(init() == 0);
+	memset(compressed, 0x4d, sizeof(compressed));
+	payload_crc32c = swapz_crc32c_bytes(compressed, sizeof(compressed));
+	CHECK(swapz_stage(&a, pages, 1, 1, &transaction) == 0);
+	CHECK(swapz_begin(&builder, bytes, SWAPZ_BLOCK_BYTES,
+			  transaction.sequence) == 0);
+	CHECK(swapz_append_prehashed_encoded(
+			  &builder, transaction.records[0].logical_page,
+			  transaction.records[0].generation,
+			  compressed, sizeof(compressed), payload_crc32c,
+			  SWAPZ_ENCODING_LZ4) == 0);
+	CHECK(swapz_bind_compressed_record(
+			  &a, &transaction, 0,
+			  builder.last_payload_offset,
+			  builder.last_payload_length,
+			  builder.last_payload_crc32c,
+			  builder.last_encoding) == 0);
+	CHECK(swapz_seal(&builder) == 0);
+	CHECK(transaction.records[0].compressed_metadata_bound == 1 &&
+	      a.active_tx.records[0].compressed_metadata_bound == 1);
+	CHECK(transaction.records[0].payload_crc32c == payload_crc32c &&
+	      transaction.records[0].payload_offset ==
+		      builder.last_payload_offset &&
+	      transaction.records[0].payload_length == sizeof(compressed));
+
+	transaction.records[0].payload_crc32c ^= 1U;
+	CHECK(swapz_finish(&a, &transaction, bytes,
+			   SWAPZ_BLOCK_BYTES, 1, 0) == -ESTALE);
+	CHECK(a.in_flight && !maps[5].valid);
+	CHECK(swapz_abort(&a, &transaction) == -ESTALE);
+	transaction.records[0].payload_crc32c ^= 1U;
+	CHECK(swapz_finish(&a, &transaction, bytes,
+			   SWAPZ_BLOCK_BYTES, 1, 0) == 0);
+	CHECK(!a.in_flight && maps[5].valid &&
+	      maps[5].payload_crc32c == payload_crc32c &&
+	      maps[5].payload_offset == builder.last_payload_offset);
+	return 0;
+}
+
 static int test_last_sibling_mutation_is_all_or_nothing(void)
 {
 	const swapz_u32 pages[] = {0, 1, 2};
@@ -921,6 +967,7 @@ int main(void)
 
 	CHECK(test_page_identity_mutation() == 0); passed++;
 	CHECK(test_generation_identity_mutation() == 0); passed++;
+	CHECK(test_bound_compressed_metadata_is_transaction_identity() == 0); passed++;
 	CHECK(test_last_sibling_mutation_is_all_or_nothing() == 0); passed++;
 	CHECK(test_duplicate_media_descriptor_fails_closed() == 0); passed++;
 	CHECK(test_mutated_replacement_preserves_prior_authority() == 0); passed++;

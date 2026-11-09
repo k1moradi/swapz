@@ -27,6 +27,21 @@ static unsigned long long swapz_engine_elapsed_ns(unsigned long long start,
 
 static int swapz_page_valid(const struct swapz_compressed_page *page);
 
+static int swapz_bind_appended_record(struct swapz_engine *engine,
+				      struct swapz_tx *transaction,
+				      swapz_u8 record_index,
+				      const struct swapz_builder *builder)
+{
+	if (!engine || !engine->authority || !transaction || !builder ||
+	    builder->count != record_index + 1U ||
+	    !builder->last_payload_length)
+		return -EUCLEAN;
+	return swapz_bind_compressed_record(
+		engine->authority, transaction, record_index,
+		builder->last_payload_offset, builder->last_payload_length,
+		builder->last_payload_crc32c, builder->last_encoding);
+}
+
 static int swapz_append_page(struct swapz_engine *engine,
 			    struct swapz_builder *builder,
 			    const struct swapz_compressed_page *page,
@@ -1346,6 +1361,9 @@ static int swapz_engine_write_window_planned(struct swapz_engine *engine,
 
 			error = swapz_append_page(engine, &builder, page,
 					       tx->records[j].generation, 0);
+			if (!error)
+				error = swapz_bind_appended_record(
+					engine, tx, j, &builder);
 			if (error) {
 				engine->pack_wall_ns += swapz_engine_elapsed_ns(
 					phase_start, swapz_engine_now_ns());
@@ -1672,6 +1690,9 @@ int swapz_engine_prepare_batched_run(struct swapz_engine *e,
 					error = swapz_append_page(
 						e, &builder, p,
 						tx->records[j].generation, 1);
+					if (!error)
+						error = swapz_bind_appended_record(
+							e, tx, j, &builder);
 					if (error) {
 						e->pack_wall_ns +=
 							swapz_engine_elapsed_ns(
