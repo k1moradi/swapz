@@ -345,7 +345,8 @@ def main() -> int:
     print("  After confirmation, the privileged helper durably backs up recovery "
           "state, checks memory headroom, and calls ordinary swapoff on active "
           "swap before writing the partition.")
-    print("  Existing swap header is restored after successful teardown")
+    print("  The original Linux swap header remains unchanged; "
+          "only the temporary mapper may be formatted")
     try:
         confirmed = input("Run bounded swapz Linux swap trial on this partition? [y/N] ")
     except EOFError:
