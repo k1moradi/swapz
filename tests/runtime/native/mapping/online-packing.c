@@ -939,6 +939,59 @@ static void init_private_read_engine(struct swapz_engine *private,
 	private->read_scratch = scratch;
 }
 
+/* The first data block is not a compulsory metadata read. For a
+ * single compressed record located in a later block, the cached directory
+ * cannot contribute to its read set. The same preflight must fail safely
+ * when volatile mapping ownership has not been initialized.
+ */
+static int test_ram_read_range_preflight_and_block_zero_skip(void)
+{
+	struct swapz_compressed_page pages[3];
+	const swapz_u32 highest_page[1] = { 0 };
+	const swapz_u32 lowest_page[1] = { 2 };
+	struct swapz_map *retained_maps;
+	swapz_u8 committed = 0, first_block = 0, blocks = 0;
+	swapz_u32 start_block;
+
+	CHECK(setup() == 0);
+	prepare(pages, 3, 0, 0);
+	CHECK(write_window_sequential(pages, 3, &committed) == 0);
+	CHECK(committed == 3);
+	CHECK(maps[0].valid && maps[2].valid &&
+	      maps[0].start_block == maps[2].start_block &&
+	      maps[0].extent_blocks == 2);
+	CHECK(maps[0].payload_offset >= SWAPZ_BLOCK_BYTES);
+	CHECK(maps[2].payload_offset < SWAPZ_BLOCK_BYTES);
+	start_block = maps[0].start_block;
+
+	/* Enable an empty block-zero directory. Its presence must not make
+	 * records in the upper 4KiB block depend on lower block zero. */
+	engine.read_metadata_cache = scratch_metadata_cache;
+	engine.read_metadata_epoch = 1;
+	engine.read_metadata_lru_clock = 1;
+	engine.read_metadata_segment_mask =
+		1ULL << ((start_block / SWAPZ_SEGMENT_BLOCKS) & 63U);
+	CHECK(swapz_engine_required_read_range_cached(
+		      &engine, highest_page, 1, start_block, 2,
+		      &first_block, &blocks) == 0);
+	CHECK(first_block == 1 && blocks == 1);
+	CHECK(swapz_engine_required_read_range_cached(
+		      &engine, lowest_page, 1, start_block, 2,
+		      &first_block, &blocks) == 0);
+	CHECK(first_block == 0 && blocks == 1);
+
+	retained_maps = authority.maps;
+	authority.maps = NULL;
+	CHECK(swapz_engine_required_read_range(
+		      &engine, highest_page, 1, start_block, 2,
+		      &first_block, &blocks) == -EINVAL);
+	CHECK(swapz_engine_required_read_range_cached(
+		      &engine, highest_page, 1, start_block, 2,
+		      &first_block, &blocks) == -EINVAL);
+	authority.maps = retained_maps;
+	return 0;
+}
+
 static int test_adjacent_distinct_extent_coalescing(void)
 {
 	struct swapz_compressed_page pages[3];
@@ -1375,6 +1428,7 @@ int main(void)
 	CHECK(test_overwrite_old_mapping_survives_failure() == 0); completed++;
 	CHECK(test_lower_read_failure_does_not_fake_bytes() == 0); completed++;
 	CHECK(test_read_budget_tradeoff_on_uniform_2072() == 0); completed++;
+	CHECK(test_ram_read_range_preflight_and_block_zero_skip() == 0); completed++;
 	CHECK(test_adjacent_distinct_extent_coalescing() == 0); completed++;
 	CHECK(test_mapping_length_mismatch_stops_before_payload_io() == 0); completed++;
 	CHECK(test_private_read_telemetry_merge_preserves_cache_state() == 0); completed++;
