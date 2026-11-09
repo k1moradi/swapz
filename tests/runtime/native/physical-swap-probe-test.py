@@ -2440,6 +2440,11 @@ class PhysicalSwapProbeTests(unittest.TestCase):
         quiesce = run.index("_quiesce_development_swap_inventory(")
         first_header_write = run.index("_write_block0(")
         formatter = run.index('formatter, "format"')
+        virtual_branch_start = run.index("if virtual_device_only:")
+        virtual_branch_end = run.index("\n            else:", virtual_branch_start)
+        virtual_branch = run[virtual_branch_start:virtual_branch_end]
+        self.assertIn("_write_block0(", virtual_branch)
+        self.assertIn("_read_block0(", virtual_branch)
         restore_swapfiles = run.index("_restore_development_swapfiles(state)")
         module_load = run.index('["modprobe", "dm_mod"]')
         self.assertLess(quiesce, first_header_write)

@@ -7300,8 +7300,9 @@ partition itself remains forbidden as recovery backing. The VM lane uses the
 selected partition's own kernel I/O counters so guest-root traffic cannot be
 misreported as target traffic. After the durable zero-header transition, the
 root-owned development probe constructs the same bounded v1 4096-byte SWZ
-authorization header directly; the production `swapzctl format` removable-USB
-policy is intentionally unchanged. Virtual results are
+authorization header directly, immediately rereads it byte-for-byte, and only
+then records the durable `SWZ_FORMATTED` transition; the production
+`swapzctl format` removable-USB policy is intentionally unchanged. Virtual results are
 `VIRTUAL_DEVICE_ONLY_NOT_PHYSICAL_QUALIFICATION` and never physical evidence.
 Before signature-dependent selection, the root helper checks for a single
 authenticated active recovery marker from a prior development real-swap

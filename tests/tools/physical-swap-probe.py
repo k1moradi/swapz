@@ -4110,6 +4110,9 @@ def run_probe(device_arg, confirm_arg, state_dir_arg, review_path,
                 _write_block0(
                     target["device"], formatted_header, target,
                     expected_current=bytes(PAGE_BYTES))
+                if _read_block0(target["device"], target) != formatted_header:
+                    raise ProbeError(
+                        "virtual SWZ header did not read back exactly")
             else:
                 _run([
                     formatter, "format", target["device"], "--expect-major-minor",
