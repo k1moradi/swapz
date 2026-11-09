@@ -33,9 +33,9 @@ only; it must not change the partition signature, UUID or table. The newly
 created virtual mapper alone may receive `mkswap`. All logical mappings,
 extent descriptors, offsets, lengths, sequence/generation fields, CRCs and
 allocator/GC authority must live in bounded RAM, with explicit lifetime and
-in-flight READ/WRITE ownership. The present codec's on-media extent header
-and record descriptors violate that destination contract; they are migration
-debt, not an acceptable swap partition format. Volatile mapping loss makes
+in-flight READ/WRITE ownership. The production kernel data path now follows that payload-only contract;
+legacy serialized codec fixtures are test compatibility code, not an
+acceptable swap partition format. Volatile mapping loss makes
 swapz unsuitable for hibernation/resume; never claim to restore discarded
 swap payloads from a header backup.
 
