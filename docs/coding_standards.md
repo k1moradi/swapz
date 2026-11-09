@@ -33,12 +33,13 @@ Production writers that have already proved per-extent logical-page uniqueness
 must use the descriptor-array-free RAM builder mode and bind each transient
 last descriptor immediately into preallocated staged transaction RAM; do not
 add large per-write kernel stack arrays or heap allocations. Thus a data-only
-backing image contains payload bytes and deterministic zero padding only. The current compressed codec still stores
-extent header/descriptors on backing media, and synthetic null_blk
-rehearsals still use SWAPZ001. Both are nonconforming migration debt,
-not accepted partition-format designs. Preserve 4/8/16KiB packing,
-readback integrity, ordering, concurrency and fail-closed semantics.
-Production acceptance remains blocked until migration and tests pass.
+backing image contains payload bytes and deterministic zero padding only. Production kernel compressed extents store payload bytes and deterministic
+zero padding only; descriptors, offsets/lengths, generations, CRCs, mapping,
+segment allocation and GC authority live in bounded RAM. Legacy serialized
+SWZ codec helpers may remain only in isolated userspace fixtures and are not a
+partition format or production data path. Preserve 4/8/16KiB packing, readback
+integrity, ordering, concurrency and fail-closed semantics. Physical and
+production acceptance still require the current-source qualification gates.
 
 Earlier permissions to format/repartition even the dedicated SD card
 are superseded; only post-swapoff swap *data* may be overwritten.
