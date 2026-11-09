@@ -139,9 +139,9 @@ FULL_ONLY_PHASES = frozenset({
 })
 
 
-# No worker launch, no user-selectable concurrency knob, and no verdict changes
-# are authorized by this inventory.
-ROOTLESS_PARALLEL_EXECUTION_ENABLED = False
+# Only the exact adjacent candidate groups in rootless-parallel.py are
+# authorized for the opt-in two-worker pilot. All other suites stay serial.
+ROOTLESS_PARALLEL_EXECUTION_ENABLED = True
 
 
 def resource_claims():

@@ -7,6 +7,8 @@ import inspect
 import io
 import json
 from pathlib import Path
+import sys
+import time
 import tempfile
 import unittest
 
@@ -45,7 +47,7 @@ class RootlessResourceInventoryContract(unittest.TestCase):
         self.assertEqual(
             set(runner.ROOTLESS_SUITE_DISPLAY_NAMES),
             runner.rootless_phase_names())
-        self.assertFalse(resource_policy.ROOTLESS_PARALLEL_EXECUTION_ENABLED)
+        self.assertTrue(resource_policy.ROOTLESS_PARALLEL_EXECUTION_ENABLED)
 
     def test_unreviewed_or_changed_phase_fails_closed(self):
         source = (ROOT / "tests/tools/test-rootless.sh").read_text(
@@ -105,7 +107,7 @@ class RootlessResourceInventoryContract(unittest.TestCase):
         self.assertNotEqual(claims[source].writes, claims[readiness].writes)
         self.assertEqual(resource_policy.potential_conflicts(source, readiness), ())
         self.assertEqual(resource_policy.potential_conflicts(source, syntax), ())
-        self.assertFalse(resource_policy.ROOTLESS_PARALLEL_EXECUTION_ENABLED)
+        self.assertTrue(resource_policy.ROOTLESS_PARALLEL_EXECUTION_ENABLED)
         for label, claim in claims.items():
             with self.subTest(label=label):
                 self.assertTrue(claim.review)
@@ -133,6 +135,115 @@ class RootlessResourceInventoryContract(unittest.TestCase):
         self.assertEqual(
             resource_policy.potential_conflicts(writer, reader, profiles),
             ("shared:native-artifacts",))
+
+
+parallel_spec = importlib.util.spec_from_file_location(
+    "swapz_rootless_parallel_pilot", ROOT / "tests/tools/rootless-parallel.py")
+parallel_runner = importlib.util.module_from_spec(parallel_spec)
+parallel_spec.loader.exec_module(parallel_runner)
+
+
+class RootlessParallelPilotContract(unittest.TestCase):
+    """Hermetic worker/concurrency regressions; never open a block device."""
+
+    def test_only_source_reviewed_adjacent_nonconflicting_groups(self):
+        source = (ROOT / "tests/tools/test-rootless.sh").read_text(
+            encoding="utf-8")
+        for group, expected_count in (("initial", 2), ("readiness", 2),
+                                      ("syntax", 18)):
+            tasks = parallel_runner.validated_group(group, source)
+            self.assertEqual(len(tasks), expected_count)
+        with self.assertRaisesRegex(ValueError, "unreviewed"):
+            parallel_runner.validated_group("unknown", source)
+        self.assertIn("case ${SWAPZ_ROOTLESS_JOBS:-1} in", source)
+        self.assertIn("rootless_parallel_collect", source)
+        self.assertIn('rootless_parallel_run_group initial', source)
+        self.assertIn('rootless_parallel_run_group readiness', source)
+        self.assertIn('rootless_parallel_run_group syntax', source)
+        self.assertIn('bash -n "$script"', source)
+        self.assertIn('python3 -B tests/runtime/native/source-contract-test.py -v',
+                      source)
+
+    def test_two_workers_execute_simultaneously_with_private_outputs(self):
+        with tempfile.TemporaryDirectory(prefix="swapz-parallel-pilot-") as name:
+            directory = Path(name)
+            # Each task requires the other to have entered its process; a
+            # serial scheduler would time out without reaching both starts.
+            script = (
+                "import pathlib,sys,time; "
+                "own=pathlib.Path(sys.argv[1]); "
+                "other=pathlib.Path(sys.argv[2]); own.write_text('started'); "
+                "deadline=time.monotonic()+3; "
+                "exec('while not other.exists() and time.monotonic()<deadline: "
+                "time.sleep(0.01)'); "
+                "sys.exit(0 if other.exists() else 34)"
+            )
+            first, second = directory / "first", directory / "second"
+            tasks = (
+                ("first", (sys.executable, "-B", "-c", script,
+                           str(first), str(second))),
+                ("second", (sys.executable, "-B", "-c", script,
+                            str(second), str(first))),
+            )
+            self.assertEqual(parallel_runner.execute_group(
+                directory, tasks, jobs=2, timeout_seconds=5,
+                poll_seconds=0.01), 0)
+            for index in (0, 1):
+                self.assertEqual(
+                    (directory / f"worker-{index}.result").read_text()
+                    .split()[0], "0")
+                for suffix in ("stdout", "stderr", "result"):
+                    path = directory / f"worker-{index}.{suffix}"
+                    self.assertEqual(path.stat().st_mode & 0o777, 0o600)
+            self.assertTrue(first.is_file() and second.is_file())
+
+    def test_failure_stops_dispatch_and_drains_active_workers(self):
+        with tempfile.TemporaryDirectory(prefix="swapz-parallel-failure-") as name:
+            directory = Path(name)
+            never_started = directory / "third"
+            tasks = (
+                ("first", (sys.executable, "-B", "-c",
+                           "import sys; print('private_failure', file=sys.stderr); "
+                           "sys.exit(37)")),
+                ("second", (sys.executable, "-B", "-c",
+                            "import time; time.sleep(0.4)")),
+                ("third", (sys.executable, "-B", "-c",
+                           "from pathlib import Path; "
+                           "Path(" + repr(str(never_started)) + ").touch()")),
+            )
+            self.assertEqual(parallel_runner.execute_group(
+                directory, tasks, jobs=2, timeout_seconds=5,
+                poll_seconds=0.01), 1)
+            self.assertEqual(
+                (directory / "worker-0.result").read_text().split()[0], "37")
+            self.assertEqual(
+                (directory / "worker-1.result").read_text().split()[0], "0")
+            self.assertFalse((directory / "worker-2.result").exists())
+            self.assertFalse(never_started.exists())
+            self.assertIn(
+                "private_failure",
+                (directory / "worker-0.stderr").read_text())
+
+    def test_timeout_is_bounded_and_child_is_reaped(self):
+        with tempfile.TemporaryDirectory(prefix="swapz-parallel-timeout-") as name:
+            directory = Path(name)
+            tasks = (
+                ("slow", (sys.executable, "-B", "-c",
+                          "import time; time.sleep(10)")),
+                ("fast", (sys.executable, "-B", "-c", "pass")),
+            )
+            started = time.monotonic()
+            self.assertEqual(parallel_runner.execute_group(
+                directory, tasks, jobs=2, timeout_seconds=0.25,
+                poll_seconds=0.01), 1)
+            self.assertLess(time.monotonic() - started, 5)
+            self.assertEqual(
+                (directory / "worker-0.result").read_text().split()[0], "124")
+            self.assertEqual(
+                (directory / "worker-1.result").read_text().split()[0], "0")
+            with self.assertRaisesRegex(ValueError, "invalid bounded"):
+                parallel_runner.execute_group(directory, tasks, jobs=3)
+
 
 
 class NativeTimingContract(unittest.TestCase):

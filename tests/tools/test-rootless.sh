@@ -28,6 +28,10 @@ rootless_timed_phase=$rootless_phase
 rootless_timing_names=()
 rootless_timing_seconds=()
 rootless_timing_index=0
+rootless_parallel_elapsed_seconds=
+rootless_parallel_directory=
+rootless_parallel_size=0
+rootless_parallel_runner_exit_code=0
 # Stream only these source-controlled labels. The reporter filters them before
 # displaying progress; completed times are not qualification evidence.
 printf 'ROOTLESS_PHASE_PROGRESS state=START index=%d elapsed_s=0 label=%s\n' \
@@ -35,6 +39,11 @@ printf 'ROOTLESS_PHASE_PROGRESS state=START index=%d elapsed_s=0 label=%s\n' \
 rootless_begin_phase() {
   local phase_boundary_seconds=$SECONDS
   local phase_elapsed_seconds=$((phase_boundary_seconds - rootless_phase_started_seconds))
+  if [[ -n ${rootless_parallel_elapsed_seconds:-} ]]; then
+    # A parallel phase records its own worker duration, not the group wall.
+    phase_elapsed_seconds=$rootless_parallel_elapsed_seconds
+    rootless_parallel_elapsed_seconds=
+  fi
   rootless_timing_names+=("$rootless_timed_phase")
   rootless_timing_seconds+=("$phase_elapsed_seconds")
   printf 'ROOTLESS_PHASE_PROGRESS state=PASS index=%d elapsed_s=%d label=%s\n' \
@@ -618,6 +627,111 @@ finish_and_report_rootless_unittest() {
     "$rootless_classified_unittest_class"
 }
 
+# The worker coordinator is optional and never runs privileged/device stages.
+# The parent owns all progress records, status validation, and private logs.
+rootless_parallel_cleanup() {
+  local candidate
+  [[ -n $rootless_parallel_directory ]] || return 0
+  [[ $rootless_parallel_directory == "$ROOT/build/tests/rootless-parallel."* &&
+     -d $rootless_parallel_directory &&
+     ! -L $rootless_parallel_directory ]] || return 1
+  for candidate in "$rootless_parallel_directory"/worker-*; do
+    if [[ -f $candidate && ! -L $candidate ]]; then
+      rm -f -- "$candidate" || return 1
+    elif [[ -e $candidate || -L $candidate ]]; then
+      return 1
+    fi
+  done
+  rmdir -- "$rootless_parallel_directory" || return 1
+  rootless_parallel_directory=
+  rootless_parallel_size=0
+}
+
+rootless_parallel_run_group() {
+  local group=$1
+  [[ -z $rootless_parallel_directory ]] || {
+    report_rootless_failure 2 "$LINENO" parallel_worker_setup
+  }
+  [[ -d "$ROOT/build/tests" && ! -L "$ROOT/build/tests" ]] || {
+    report_rootless_failure 2 "$LINENO" parallel_worker_setup
+  }
+  rootless_parallel_directory=$(
+    mktemp -d "$ROOT/build/tests/rootless-parallel.XXXXXXXX"
+  ) || report_rootless_failure 2 "$LINENO" parallel_worker_setup
+  case $group in
+    initial|readiness) rootless_parallel_size=2 ;;
+    syntax) rootless_parallel_size=18 ;;
+    *) report_rootless_failure 2 "$LINENO" parallel_worker_setup ;;
+  esac
+  if python3 -B tests/tools/rootless-parallel.py \
+       --group "$group" --jobs "$rootless_parallel_jobs" \
+       --output-directory "$rootless_parallel_directory"; then
+    rootless_parallel_runner_exit_code=0
+  else
+    rootless_parallel_runner_exit_code=$?
+  fi
+}
+
+rootless_parallel_collect() {
+  local worker_index=$1
+  local result_path="$rootless_parallel_directory/worker-$worker_index.result"
+  local worker_status worker_seconds
+  [[ -d $rootless_parallel_directory &&
+     ! -L $rootless_parallel_directory &&
+     -f $result_path && ! -L $result_path ]] || {
+    rootless_parallel_cleanup || :
+    report_rootless_failure 2 "$LINENO" parallel_worker_status
+  }
+  read -r worker_status worker_seconds < "$result_path" || {
+    rootless_parallel_cleanup || :
+    report_rootless_failure 2 "$LINENO" parallel_worker_status
+  }
+  [[ $worker_status =~ ^(0|[1-9][0-9]{0,2})$ &&
+     $worker_seconds =~ ^(0|[1-9][0-9]{0,7})$ ]] || {
+    rootless_parallel_cleanup || :
+    report_rootless_failure 2 "$LINENO" parallel_worker_status
+  }
+  (( worker_status <= 255 )) || {
+    rootless_parallel_cleanup || :
+    report_rootless_failure 2 "$LINENO" parallel_worker_status
+  }
+  local stdout_path="$rootless_parallel_directory/worker-$worker_index.stdout"
+  local stderr_path="$rootless_parallel_directory/worker-$worker_index.stderr"
+  [[ -f $stdout_path && ! -L $stdout_path &&
+     -f $stderr_path && ! -L $stderr_path ]] || {
+    rootless_parallel_cleanup || :
+    report_rootless_failure 2 "$LINENO" parallel_worker_status
+  }
+
+  # Replaying in source order keeps public table rows and child transcripts
+  # deterministic, even though execution within a batch was concurrent.
+  cat -- "$stdout_path"
+  cat -- "$stderr_path" >&2
+  if (( worker_status != 0 )); then
+    local failure_directory=
+    local failure_path=
+    if failure_directory=$(
+         mktemp -d "$ROOT/build/tests/rootless-failure.XXXXXXXX"
+       ); then
+      failure_path="$failure_directory/diagnostic.log"
+      if (umask 077; cat -- "$stdout_path" "$stderr_path" > "$failure_path") &&
+         [[ -f $failure_path && ! -L $failure_path ]]; then
+        rootless_private_diagnostic_path=$failure_path
+        rootless_private_diagnostic_log="build/tests/${failure_directory##*/}/diagnostic.log"
+      fi
+    fi
+    rootless_parallel_cleanup || :
+    report_rootless_failure "$worker_status" "$LINENO" nonzero_exit
+  fi
+  rootless_parallel_elapsed_seconds=$worker_seconds
+  if (( worker_index + 1 == rootless_parallel_size )); then
+    if (( rootless_parallel_runner_exit_code != 0 )) ||
+       ! rootless_parallel_cleanup; then
+      report_rootless_failure 2 "$LINENO" parallel_worker_cleanup
+    fi
+  fi
+}
+
 rootless_unexpected_error() {
   local original_exit_code=$1
   local failed_at_line=$2
@@ -629,6 +743,9 @@ rootless_unexpected_error() {
 
 rootless_exit_fallback() {
   local original_exit_code=$1
+  if [[ -n ${rootless_parallel_directory:-} ]]; then
+    rootless_parallel_cleanup || original_exit_code=1
+  fi
   if (( original_exit_code != 0 && rootless_failure_reported == 0 && BASH_SUBSHELL == 0 )); then
     # Explicit 'exit' has no reliable ERR source line.
     report_rootless_failure "$original_exit_code" unavailable
@@ -638,6 +755,12 @@ trap 'rootless_unexpected_error "$?" "$LINENO"' ERR
 trap 'rootless_exit_fallback "$?"' EXIT
 trap 'report_rootless_failure 143 unavailable received_TERM' TERM
 trap 'report_rootless_failure 130 unavailable received_INT' INT
+# Only 1 (unchanged) or 2 (opt-in) workers are supported in this pilot.
+# The global build's -j setting remains a separate GNU Make jobserver policy.
+case ${SWAPZ_ROOTLESS_JOBS:-1} in
+  1|2) rootless_parallel_jobs=${SWAPZ_ROOTLESS_JOBS:-1} ;;
+  *) printf '%s\n' 'BLOCKED: rootless worker count must be 1 or 2' >&2; exit 2 ;;
+esac
 export PYTHONPYCACHEPREFIX="$ROOT/build/python-cache"
 mkdir -p build/python-cache
 # The inherited GNU Make jobserver may run native evidence-producing targets
@@ -682,10 +805,19 @@ rootless_native_make_elapsed_seconds=$((SECONDS - rootless_phase_started_seconds
 rootless_contracts_started_seconds=$SECONDS
 rootless_phase='tests/runtime/native/source-contract-test.py'
 rootless_begin_phase
-python3 -B tests/runtime/native/source-contract-test.py -v
+if (( rootless_parallel_jobs == 2 )); then
+  rootless_parallel_run_group initial
+  rootless_parallel_collect 0
+else
+  python3 -B tests/runtime/native/source-contract-test.py -v
+fi
 rootless_phase='tests/runtime/native/userspace/swapzctl-active-swap-provenance-test.py'
 rootless_begin_phase
-python3 -B tests/runtime/native/userspace/swapzctl-active-swap-provenance-test.py -v
+if (( rootless_parallel_jobs == 2 )); then
+  rootless_parallel_collect 1
+else
+  python3 -B tests/runtime/native/userspace/swapzctl-active-swap-provenance-test.py -v
+fi
 rootless_phase='tests/runtime/native/tmp-cleanup-test.py'
 rootless_begin_phase
 python3 -B tests/runtime/native/tmp-cleanup-test.py -v
@@ -750,10 +882,19 @@ rootless_begin_phase
 python3 -B tests/runtime/native/test-report-test.py -v
 rootless_phase='tests/runtime/native/production-readiness-test.py'
 rootless_begin_phase
-python3 -B tests/runtime/native/production-readiness-test.py -v
+if (( rootless_parallel_jobs == 2 )); then
+  rootless_parallel_run_group readiness
+  rootless_parallel_collect 0
+else
+  python3 -B tests/runtime/native/production-readiness-test.py -v
+fi
 rootless_phase='tests/runtime/native/rootless-direct-evidence-test.py'
 rootless_begin_phase
-python3 -B tests/runtime/native/rootless-direct-evidence-test.py -v
+if (( rootless_parallel_jobs == 2 )); then
+  rootless_parallel_collect 1
+else
+  python3 -B tests/runtime/native/rootless-direct-evidence-test.py -v
+fi
 rootless_phase='tests/runtime/native/rootless-attribution-test.py'
 rootless_begin_phase
 python3 -B tests/runtime/native/rootless-attribution-test.py -v
@@ -848,6 +989,7 @@ rootless_begin_phase
   printf '%s\n' 'FAIL: source-contract-test.py must have exactly one test runner' >&2
   exit 1
 }
+rootless_parallel_syntax_index=0
 for script in tests/tools/test-rootless.sh tests/tools/test-loaded.sh \
   tests/tools/qualify-resource-pressure.sh \
   tests/tools/qualify-logical-open-balance.sh packaging/package-dkms.sh \
@@ -862,7 +1004,15 @@ for script in tests/tools/test-rootless.sh tests/tools/test-loaded.sh \
   tests/runtime/native/swap-inventory-test.sh; do
   rootless_phase="bash syntax ${script##*/}"
   rootless_begin_phase
-  bash -n "$script"
+  if (( rootless_parallel_jobs == 2 )); then
+    if (( rootless_parallel_syntax_index == 0 )); then
+      rootless_parallel_run_group syntax
+    fi
+    rootless_parallel_collect "$rootless_parallel_syntax_index"
+    rootless_parallel_syntax_index=$((rootless_parallel_syntax_index + 1))
+  else
+    bash -n "$script"
+  fi
 done
 rootless_phase='tests/runtime/native/nullblk-identity-test.sh'
 rootless_begin_phase

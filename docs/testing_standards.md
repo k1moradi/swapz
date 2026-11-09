@@ -68,6 +68,32 @@ and qualification gate is authorized by Phase 1. Phase 2 must independently
 prove per-worker isolated outputs/first-error attribution, bounded resource
 admission, cancellation/reaping and teardown before allowing any overlap.
 
+Phase 2 implements a narrowly approved **opt-in two-worker rootless pilot**:
+`SWAPZ_ROOTLESS_JOBS=2 make test` (or `make test_full`). The unset/default
+`SWAPZ_ROOTLESS_JOBS=1` remains exactly sequential; other values fail
+closed. The native Make compilation jobserver remains independent of this
+setting. Only three adjacent, source-declared groups execute concurrently:
+source contracts with swapzctl provenance, production-readiness with direct
+rootless evidence, and the 18 read-only Bash syntax checks. All other
+rootless suites, all privileged lifecycle operations, and all loaded/RAM
+performance benchmarks remain serial; the test sequence, requirements and
+number of cases are unchanged.
+
+The private `tests/tools/rootless-parallel.py` coordinator validates the
+complete Phase 1 inventory and pairwise resources before executing only its
+hardcoded commands. Each worker has an independent process session and
+mode-0600 stdout/stderr/status files in a newly owned mode-0700 directory;
+worker stdin is disabled. It dispatches at most two workers, stops *new*
+dispatch after a failure, lets started tests finish their own cleanup, and
+kills/reaps a worker on its 900-second individual timeout. The Bash parent
+alone replays output and emits source-ordered progress rows, using actual
+per-worker elapsed times; it keeps only a bounded private failure diagnostic
+and cleans up completed scratch. The pilot must not reinterpret elapsed-time
+markers as PASS evidence, nor mix shell output from independent workers.
+`tests/runtime/native/test-report-test.py` tests exact group approval,
+two-worker overlap, private output permissions, stop-dispatch on failure and
+bounded timeout/reaping using synthetic unprivileged processes.
+
 The native production-C suite may compile the unchanged production sources
 once into shared, compiler-configuration-bound objects, then link the existing
 independent test executables. Shared object reuse must track included headers,
