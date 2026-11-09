@@ -726,6 +726,38 @@ def _distinct_report_digest(report):
     return hashlib.sha256(encoded).hexdigest()
 
 
+def _development_code_source_sha(head):
+    """Bind built artifacts to code, not generated report-only main commits.
+
+    The development physical gate still requires local HEAD, tracking main
+    and canonical main to match exactly, including immediately before writes.
+    """
+    source = _git("log", "-1", "--format=%H", head, "--", ".",
+                  ":(exclude)test_results.json")
+    if not re.fullmatch(r"[0-9a-f]{40}", source):
+        raise ProbeError("cannot identify development code source revision")
+    if source == head:
+        return source
+    if _git_result("merge-base", "--is-ancestor", source, head,
+                   check=False).returncode:
+        raise ProbeError("development code source is not an ancestor of main")
+    commits = _git("rev-list", "--reverse", "--first-parent",
+                   f"{source}..{head}").splitlines()
+    if not commits or len(commits) > 1000:
+        raise ProbeError("development report-only history is invalid or excessive")
+    for commit in commits:
+        parents = _git("rev-list", "--parents", "-n", "1", commit).split()
+        if len(parents) != 2 or parents[0] != commit:
+            raise ProbeError("development report-only history contains a merge")
+        paths = _git("diff-tree", "--no-commit-id", "--name-only", "-r",
+                     parents[1], commit).splitlines()
+        subject = _git("show", "-s", "--format=%s", commit)
+        if paths != ["test_results.json"] or re.fullmatch(
+                r"test: latest run for [0-9a-f]{12} \[skip ci\]", subject) is None:
+            raise ProbeError("development HEAD contains a non-report-only change")
+    return source
+
+
 def current_source_evidence():
     if platform.machine() != "x86_64":
         raise ProbeError("physical swap smoke is currently limited to x86_64")
@@ -897,6 +929,7 @@ def current_development_evidence(nonce):
     head = _git("rev-parse", "HEAD")
     if head != _git("rev-parse", "origin/main") or _remote_main_sha() != head:
         raise ProbeError("local and canonical origin/main must match before development smoke")
+    code_source_sha = _development_code_source_sha(head)
     try:
         repository_uid = os.stat(ROOT, follow_symlinks=False).st_uid
     except OSError as exc:
@@ -950,12 +983,12 @@ def current_development_evidence(nonce):
         build_info, re.MULTILINE)
     clean_match = re.search(
         r'^#define SWAPZ_BUILD_SOURCE_CLEAN ([01])$', build_info, re.MULTILINE)
-    if not source_match or source_match.group(1) != head or not clean_match or \
+    if not source_match or source_match.group(1) != code_source_sha or not clean_match or \
             clean_match.group(1) != "1":
         raise ProbeError("development build artifacts are not clean and bound to current main")
     artifact_digests = _artifact_digests()
     return {
-        "source_sha": head,
+        "source_sha": code_source_sha,
         "head": head,
         "development_only": True,
         "scope": DEVELOPMENT_SCOPE,

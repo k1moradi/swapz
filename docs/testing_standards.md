@@ -7067,6 +7067,20 @@ be replaced by optional fast-test telemetry. Keep the final exact-SHA check
 immediately before physical execution. It is point-in-time drift detection,
 not a lock on main; do not move it earlier or treat the pre-fast-test source
 observation as sufficient for that later destructive boundary.
+The development-only fast-test prerequisite must distinguish the exact
+checked-out main HEAD from the embedded production code-source SHA. A
+first-parent descendant that contains only canonical
+`test: latest run for <source-prefix> [skip ci]` report publications changing
+exactly `test_results.json` leaves the code source unchanged, even though
+`HEAD` is a newer report commit. Require strict single-parent ancestry,
+canonical report subjects and paths before deriving the build source; bind the
+generated build-header provenance and physical oracle to that code SHA.
+Continue to require exact equality of local HEAD, tracked `origin/main` and
+fresh canonical remote main before the fast test and immediately before any
+physical execution. A concurrent report-only remote advance must still
+refuse; serialize host tests or resynchronize explicitly. Never admit a
+merge, a non-report path change, a noncanonical report publication or a
+missing source identity as a report-only descendant.
 A recovered header alone never establishes byte-oracle success. The
 reviewed C oracle must emit its exact affirmative comparison line with the
 expected operation, page count and round; zero exit with empty output, a

@@ -411,6 +411,61 @@ class PhysicalSwapProbeTests(unittest.TestCase):
                 probe._read_fast_test_development_evidence(
                     path, os.getuid(), head, nonce)
 
+    def test_development_report_only_descendant_uses_code_source(self):
+        # Report publication advances main without changing the compiled
+        # artifact source. Exercise real Git ancestry rather than invented
+        # mocked revision IDs or a detached checkout.
+        with tempfile.TemporaryDirectory() as directory:
+            repository = Path(directory)
+
+            def git(*args):
+                process = subprocess.run(
+                    ["git", "-C", str(repository), *args],
+                    check=False, capture_output=True, text=True, timeout=10)
+                self.assertEqual(process.returncode, 0, process.stderr)
+                return process.stdout.strip()
+
+            git("init", "-q", "-b", "main")
+            git("config", "user.name", "Swapz Fixture")
+            git("config", "user.email", "fixture@example.invalid")
+            (repository / "source.txt").write_text(
+                "qualified production code\n", encoding="utf-8")
+            git("add", "source.txt")
+            git("commit", "-q", "-m", "test: source fixture")
+            source = git("rev-parse", "HEAD")
+            for publication in range(3):
+                (repository / "test_results.json").write_text(
+                    f'{{"publication":{publication}}}\n', encoding="utf-8")
+                git("add", "test_results.json")
+                git("commit", "-q", "-m",
+                    f"test: latest run for {source[:12]} [skip ci]")
+            report_head = git("rev-parse", "HEAD")
+            with mock.patch.object(probe, "ROOT", repository):
+                self.assertEqual(
+                    probe._development_code_source_sha(report_head), source)
+                self.assertEqual(probe._development_code_source_sha(source),
+                                 source)
+                # A report-file edit with a noncanonical commit message
+                # cannot impersonate an official report-only publication.
+                (repository / "test_results.json").write_text(
+                    '{"publication":"untrusted"}\n', encoding="utf-8")
+                git("add", "test_results.json")
+                git("commit", "-q", "-m", "unreviewed report mutation")
+                with self.assertRaisesRegex(
+                        probe.ProbeError,
+                        "development HEAD contains a non-report-only change"):
+                    probe._development_code_source_sha(git("rev-parse", "HEAD"))
+
+        source_text = SCRIPT.read_text(encoding="utf-8")
+        self.assertIn('source_match.group(1) != code_source_sha', source_text)
+        self.assertIn('"source_sha": code_source_sha', source_text)
+        # Report-only descendant acceptance must not bypass either remote
+        # gate or the exact HEAD recheck immediately before physical writes.
+        self.assertIn(
+            '_remote_main_sha() != head', source_text)
+        self.assertIn(
+            '_remote_main_sha() != evidence["head"]', source_text)
+
     def test_development_source_drift_before_fast_test_is_preemptive(self):
         import pwd
 
