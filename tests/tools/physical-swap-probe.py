@@ -752,8 +752,8 @@ def _development_code_source_sha(head):
         paths = _git("diff-tree", "--no-commit-id", "--name-only", "-r",
                      parents[1], commit).splitlines()
         subject = _git("show", "-s", "--format=%s", commit)
-        if paths != ["test_results.json"] or re.fullmatch(
-                r"test: latest run for [0-9a-f]{12} \[skip ci\]", subject) is None:
+        if paths != ["test_results.json"] or subject != (
+                f"test: latest run for {source[:12]} [skip ci]"):
             raise ProbeError("development HEAD contains a non-report-only change")
     return source
 

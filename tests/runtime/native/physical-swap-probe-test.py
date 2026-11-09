@@ -445,6 +445,18 @@ class PhysicalSwapProbeTests(unittest.TestCase):
                     probe._development_code_source_sha(report_head), source)
                 self.assertEqual(probe._development_code_source_sha(source),
                                  source)
+                # The publication subject must bind the actual code-source
+                # prefix, not merely resemble the report commit grammar.
+                git("switch", "-q", "-c", "wrong-source-prefix", report_head)
+                (repository / "test_results.json").write_text(
+                    '{"publication":"wrong-prefix"}\n', encoding="utf-8")
+                git("add", "test_results.json")
+                git("commit", "-q", "-m",
+                    "test: latest run for ffffffffffff [skip ci]")
+                with self.assertRaisesRegex(
+                        probe.ProbeError, "non-report-only change"):
+                    probe._development_code_source_sha(git("rev-parse", "HEAD"))
+                git("switch", "-q", "main")
                 # A report-file edit with a noncanonical commit message
                 # cannot impersonate an official report-only publication.
                 (repository / "test_results.json").write_text(

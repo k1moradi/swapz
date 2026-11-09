@@ -7072,7 +7072,9 @@ checked-out main HEAD from the embedded production code-source SHA. A
 first-parent descendant that contains only canonical
 `test: latest run for <source-prefix> [skip ci]` report publications changing
 exactly `test_results.json` leaves the code source unchanged, even though
-`HEAD` is a newer report commit. Require strict single-parent ancestry,
+`HEAD` is a newer report commit. The 12-character subject prefix must equal
+the actual code-source SHA prefix, not merely be well-formed hexadecimal.
+Require strict single-parent ancestry,
 canonical report subjects and paths before deriving the build source; bind the
 generated build-header provenance and physical oracle to that code SHA.
 Continue to require exact equality of local HEAD, tracked `origin/main` and
