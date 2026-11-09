@@ -7259,195 +7259,6 @@ failed:
 	return -1;
 }
 
-static int swapz_primary_header_backup_name(const char *run_id,
-						    char *name, size_t capacity)
-{
-	int length;
-
-	if (!swapz_primary_valid_run_id(run_id) || !name || !capacity) {
-		errno = EINVAL;
-		return -1;
-	}
-	length = snprintf(name, capacity, "block0-%s.bin", run_id);
-	if (length < 0 || (size_t)length >= capacity) {
-		errno = ENAMETOOLONG;
-		return -1;
-	}
-	return 0;
-}
-
-int swapz_primary_header_backup_read_at(
-	int recovery_fd, int lock_fd, const char *run_id,
-	const char *expected_sha256, uid_t expected_owner,
-	unsigned char header[SWAPZ_PRIMARY_BLOCK_BYTES])
-{
-	unsigned char saved[SWAPZ_PRIMARY_BLOCK_BYTES + 1U];
-	char name[64];
-	char digest[65];
-	size_t length;
-
-	if (recovery_fd < 0 || lock_fd < 0 || !header ||
-	    !swapz_primary_valid_sha256(expected_sha256) ||
-	    swapz_primary_header_backup_name(run_id, name, sizeof(name)) < 0) {
-		errno = EINVAL;
-		return -1;
-	}
-	if (!swapz_primary_state_lock_valid(recovery_fd, lock_fd,
-					    expected_owner) ||
-	    !swapz_primary_owner_claim_matches_at(recovery_fd, run_id,
-						 expected_owner))
-		return -1;
-	if (swapz_primary_record_read_at(recovery_fd, name, expected_owner,
-					 (char *)saved, sizeof(saved), &length,
-					 NULL) < 0)
-		return -1;
-	if (length != SWAPZ_PRIMARY_BLOCK_BYTES ||
-	    swapz_primary_sha256(saved, length, digest) < 0)
-		return -1;
-	if (strcmp(digest, expected_sha256)) {
-		errno = EBADMSG;
-		return -1;
-	}
-	memcpy(header, saved, SWAPZ_PRIMARY_BLOCK_BYTES);
-	return 0;
-}
-
-int swapz_primary_header_backup_write_at(
-	int recovery_fd, int lock_fd, const char *run_id,
-	const unsigned char header[SWAPZ_PRIMARY_BLOCK_BYTES],
-	const char *expected_sha256, uid_t expected_owner)
-{
-	struct stat directory_info;
-	struct stat temporary_info;
-	struct stat named_info;
-	unsigned char verified[SWAPZ_PRIMARY_BLOCK_BYTES];
-	char name[64];
-	char temporary[96];
-	char digest[65];
-	int fd = -1;
-	int temporary_identity_valid = 0;
-	int saved_errno = 0;
-	int length;
-	size_t written = 0;
-
-	if (recovery_fd < 0 || lock_fd < 0 || !header ||
-	    !swapz_primary_valid_sha256(expected_sha256) ||
-	    swapz_primary_header_backup_name(run_id, name, sizeof(name)) < 0) {
-		errno = EINVAL;
-		return -1;
-	}
-	if (!swapz_primary_state_lock_valid(recovery_fd, lock_fd,
-					    expected_owner) ||
-	    !swapz_primary_owner_claim_matches_at(recovery_fd, run_id,
-						 expected_owner))
-		return -1;
-	if (swapz_primary_sha256(header, SWAPZ_PRIMARY_BLOCK_BYTES, digest) < 0)
-		return -1;
-	if (strcmp(digest, expected_sha256)) {
-		errno = EBADMSG;
-		return -1;
-	}
-	if (fstat(recovery_fd, &directory_info) < 0)
-		return -1;
-	if (!S_ISDIR(directory_info.st_mode) ||
-	    directory_info.st_uid != expected_owner ||
-	    (directory_info.st_mode & 0777U) != 0700U) {
-		errno = EPERM;
-		return -1;
-	}
-	length = snprintf(temporary, sizeof(temporary), ".%s.%s.tmp", name,
-			  run_id);
-	if (length < 0 || (size_t)length >= sizeof(temporary)) {
-		errno = ENAMETOOLONG;
-		return -1;
-	}
-	if (fstatat(recovery_fd, name, &named_info, AT_SYMLINK_NOFOLLOW) == 0) {
-		errno = EEXIST;
-		return -1;
-	}
-	if (errno != ENOENT)
-		return -1;
-	fd = openat(recovery_fd, temporary,
-		    O_WRONLY | O_CREAT | O_EXCL | O_NOFOLLOW | O_CLOEXEC, 0600);
-	if (fd < 0)
-		return -1;
-	if (fstat(fd, &temporary_info) < 0)
-		goto failed;
-	if (!S_ISREG(temporary_info.st_mode) ||
-	    temporary_info.st_uid != expected_owner ||
-	    (temporary_info.st_mode & 0777U) != 0600U ||
-	    temporary_info.st_nlink != 1) {
-		errno = EPERM;
-		goto failed;
-	}
-	temporary_identity_valid = 1;
-	while (written < SWAPZ_PRIMARY_BLOCK_BYTES) {
-		ssize_t count = write(fd, header + written,
-				     SWAPZ_PRIMARY_BLOCK_BYTES - written);
-
-		if (count < 0 && errno == EINTR)
-			continue;
-		if (count <= 0) {
-			if (!count)
-				errno = EIO;
-			goto failed;
-		}
-		written += (size_t)count;
-	}
-	if (fsync(fd) < 0 ||
-	    fstatat(recovery_fd, temporary, &named_info,
-		    AT_SYMLINK_NOFOLLOW) < 0)
-		goto failed;
-	if (named_info.st_dev != temporary_info.st_dev ||
-	    named_info.st_ino != temporary_info.st_ino ||
-	    !S_ISREG(named_info.st_mode) ||
-	    named_info.st_uid != expected_owner ||
-	    (named_info.st_mode & 0777U) != 0600U ||
-	    named_info.st_nlink != 1 ||
-	    named_info.st_size != (off_t)SWAPZ_PRIMARY_BLOCK_BYTES) {
-		errno = EPERM;
-		goto failed;
-	}
-	if (close(fd) < 0) {
-		saved_errno = errno;
-		fd = -1;
-		errno = saved_errno;
-		goto failed;
-	}
-	fd = -1;
-	if (renameat2(recovery_fd, temporary, recovery_fd, name,
-		       RENAME_NOREPLACE) < 0) {
-		saved_errno = errno;
-		goto failed;
-	}
-	if (fsync(recovery_fd) < 0 ||
-	    swapz_primary_header_backup_read_at(recovery_fd, lock_fd, run_id,
-						expected_sha256, expected_owner,
-						verified) < 0)
-		return -1;
-	if (memcmp(header, verified, sizeof(verified))) {
-		errno = EIO;
-		return -1;
-	}
-	return 0;
-
-failed:
-	if (!saved_errno)
-		saved_errno = errno;
-	if (temporary_identity_valid &&
-	    fstatat(recovery_fd, temporary, &named_info,
-		    AT_SYMLINK_NOFOLLOW) == 0 &&
-	    named_info.st_dev == temporary_info.st_dev &&
-	    named_info.st_ino == temporary_info.st_ino) {
-		(void)unlinkat(recovery_fd, temporary, 0);
-		(void)fsync(recovery_fd);
-	}
-	if (fd >= 0)
-		(void)close(fd);
-	errno = saved_errno;
-	return -1;
-}
-
 int swapz_primary_state_write_at(int recovery_fd, int lock_fd,
 				 const struct swapz_primary_state *next,
 				 uid_t expected_owner)
@@ -9942,13 +9753,10 @@ static int swapz_primary_transaction_manifest_matches_at(
 {
 	struct swapz_primary_state state;
 	struct swapz_primary_manifest stored_manifest;
-	unsigned char original_header[SWAPZ_PRIMARY_BLOCK_BYTES] = {0};
 	char record[SWAPZ_PRIMARY_STATE_RECORD_MAX + 1U];
 	size_t record_length = 0;
 	size_t i;
 	int stage_allowed = 0;
-	int result = -1;
-	int saved_errno;
 
 	if (!swapz_primary_manifest_valid(manifest) || !allowed_stages ||
 	    !stage_count ||
@@ -9973,7 +9781,7 @@ static int swapz_primary_transaction_manifest_matches_at(
 			stage_allowed = 1;
 	if (!stage_allowed) {
 		errno = EPERM;
-		goto out;
+		return -1;
 	}
 	if (swapz_primary_manifest_read_at(
 		    recovery_fd, lock_fd, manifest->run_id,
@@ -9981,21 +9789,11 @@ static int swapz_primary_transaction_manifest_matches_at(
 		    &stored_manifest) < 0 ||
 	    !swapz_primary_manifest_equal(manifest, &stored_manifest)) {
 		errno = EPERM;
-		goto out;
+		return -1;
 	}
-	/* A mapper must not exist unless its exact rollback header is durable. */
-	if (swapz_primary_header_backup_read_at(
-		    recovery_fd, lock_fd, manifest->run_id,
-		    manifest->original_header_sha256, expected_owner,
-		    original_header) < 0)
-		goto out;
-	result = 0;
-out:
-	saved_errno = errno;
-	memset(original_header, 0, sizeof(original_header));
-	errno = saved_errno;
-	return result;
+	return 0;
 }
+
 
 static int swapz_primary_module_load_record_format(
 	const struct swapz_primary_manifest *manifest, const char *phase,
@@ -10262,25 +10060,30 @@ static int swapz_primary_swap_device_active(dev_t expected_device)
  * including the owned null_blk lifecycle rehearsal. The journal copy is an
  * identity witness only; no lifecycle operation restores or replaces block 0.
  */
-static int swapz_primary_expected_backing_header_at(
-    int recovery_fd, int lock_fd,
-    const struct swapz_primary_manifest *manifest,
-    unsigned char expected[SWAPZ_PRIMARY_BLOCK_BYTES])
+static int swapz_primary_backing_header_matches_manifest(
+	const unsigned char header[SWAPZ_PRIMARY_BLOCK_BYTES],
+	const struct swapz_primary_manifest *manifest)
 {
-    if (!manifest || !expected ||
-        manifest->target.device_bytes % SWAPZ_PRIMARY_BLOCK_BYTES ||
-        swapz_primary_header_backup_read_at(
-            recovery_fd, lock_fd, manifest->run_id,
-            manifest->original_header_sha256, 0, expected) < 0)
-        return -1;
-    if (!swapz_primary_linux_swap_header_valid(
-            expected, manifest->target.device_bytes /
-                          SWAPZ_PRIMARY_BLOCK_BYTES)) {
-        errno = EPERM;
-        return -1;
-    }
-    return 0;
+	char digest[65];
+
+	if (!header || !swapz_primary_manifest_valid(manifest)) {
+		errno = EINVAL;
+		return -1;
+	}
+	if (!swapz_linux_swap_header_valid(
+		    header, manifest->target.device_bytes)) {
+		errno = EPERM;
+		return -1;
+	}
+	if (swapz_primary_sha256(header, SWAPZ_PRIMARY_BLOCK_BYTES, digest) < 0)
+		return -1;
+	if (strcmp(digest, manifest->original_header_sha256)) {
+		errno = ESTALE;
+		return -1;
+	}
+	return 0;
 }
+
 
 
 static int swapz_primary_dm_control_open(void)
@@ -11208,7 +11011,6 @@ int swapz_primary_dm_create_mapper(
 	_Alignas(struct dm_ioctl)
 	unsigned char table_buffer[SWAPZ_PRIMARY_DM_BUFFER_BYTES];
 	unsigned char header[SWAPZ_PRIMARY_BLOCK_BYTES];
-	unsigned char original_header[SWAPZ_PRIMARY_BLOCK_BYTES];
 	char mapper_name[64];
 	char mapper_uuid[64];
 	char table[128];
@@ -11293,10 +11095,8 @@ int swapz_primary_dm_create_mapper(
 		goto out;
 	target_fd = swapz_primary_target_open_exclusive(manifest);
 	if (target_fd < 0 ||
-	    swapz_primary_expected_backing_header_at(
-		    recovery_fd, lock_fd, manifest, original_header) < 0 ||
 	    swapz_primary_exact_read(target_fd, header, sizeof(header)) < 0 ||
-	    memcmp(header, original_header, sizeof(header))) {
+	    swapz_primary_backing_header_matches_manifest(header, manifest) < 0) {
 		if (!errno)
 			errno = EPERM;
 		goto out;
@@ -11386,7 +11186,6 @@ int swapz_primary_format_mapper_swap(
 	static const enum swapz_primary_stage starting[] = {
 		SWAPZ_PRIMARY_STAGE_STARTING,
 	};
-	unsigned char expected_backing_header[SWAPZ_PRIMARY_BLOCK_BYTES];
 	unsigned char observed_backing_header[SWAPZ_PRIMARY_BLOCK_BYTES];
 	unsigned char swap_header[SWAPZ_PRIMARY_BLOCK_BYTES];
 	char mapper_name[64];
@@ -11457,15 +11256,12 @@ int swapz_primary_format_mapper_swap(
 			errno = EBUSY;
 		goto out;
 	}
-	if (swapz_primary_expected_backing_header_at(
-		    recovery_fd, lock_fd, manifest, expected_backing_header) < 0)
-		goto out;
 	target_fd = swapz_primary_target_open_readonly();
 	if (target_fd < 0 ||
 	    swapz_primary_exact_read(target_fd, observed_backing_header,
 				     sizeof(observed_backing_header)) < 0 ||
-	    memcmp(observed_backing_header, expected_backing_header,
-		   sizeof(expected_backing_header))) {
+	    swapz_primary_backing_header_matches_manifest(
+		    observed_backing_header, manifest) < 0) {
 		if (!errno)
 			errno = ESTALE;
 		goto out;
@@ -11515,8 +11311,8 @@ int swapz_primary_format_mapper_swap(
 	}
 	if (swapz_primary_exact_read(target_fd, observed_backing_header,
 				     sizeof(observed_backing_header)) < 0 ||
-	    memcmp(observed_backing_header, expected_backing_header,
-		   sizeof(expected_backing_header))) {
+	    swapz_primary_backing_header_matches_manifest(
+		    observed_backing_header, manifest) < 0) {
 		if (!errno)
 			errno = ESTALE;
 		goto out;
@@ -12230,7 +12026,6 @@ static int swapz_primary_prepare_metadata(
 	struct swapz_primary_manifest verified_manifest = {0};
 	unsigned char original_header[SWAPZ_PRIMARY_BLOCK_BYTES] = {0};
 	unsigned char verified_current_header[SWAPZ_PRIMARY_BLOCK_BYTES] = {0};
-	unsigned char verified_header[SWAPZ_PRIMARY_BLOCK_BYTES] = {0};
 	char live_swapzctl_sha256[65];
 	char live_module_sha256[65];
 	char live_oracle_sha256[65];
@@ -12614,24 +12409,10 @@ static int swapz_primary_prepare_metadata(
 		    recovery_fd, lock_fd, run_id, 0) < 0)
 		goto out;
 	claimed = 1;
-	failure_phase = "original-header-backup-write";
-	if (swapz_primary_header_backup_write_at(
-		    recovery_fd, lock_fd, run_id, original_header,
-		    original_header_sha256, 0) < 0)
-		goto out;
 	failure_phase = "manifest-write";
 	if (swapz_primary_manifest_write_at(
 		    recovery_fd, lock_fd, &manifest, 0) < 0)
 		goto out;
-	failure_phase = "original-header-backup-readback";
-	if (swapz_primary_header_backup_read_at(
-		    recovery_fd, lock_fd, run_id, original_header_sha256, 0,
-		    verified_header) < 0)
-		goto out;
-	if (memcmp(original_header, verified_header, sizeof(original_header))) {
-		errno = EBADMSG;
-		goto out;
-	}
 	failure_phase = "manifest-readback";
 	if (swapz_primary_manifest_read_at(
 		    recovery_fd, lock_fd, run_id, target.partuuid, 0,
@@ -12656,7 +12437,6 @@ static int swapz_primary_prepare_metadata(
 	}
 	memset(original_header, 0, sizeof(original_header));
 	memset(verified_current_header, 0, sizeof(verified_current_header));
-	memset(verified_header, 0, sizeof(verified_header));
 	if (result == 0) {
 		memcpy(prepared_run_id, run_id, sizeof(run_id));
 		memcpy(prepared_source_sha, manifest.source_sha,
@@ -12808,7 +12588,6 @@ static int swapz_primary_start_prepared(void)
 	struct swapz_primary_state state = {0};
 	struct swapz_primary_state starting_state = {0};
 	struct swapz_primary_state active_state = {0};
-	unsigned char original_header[SWAPZ_PRIMARY_BLOCK_BYTES] = {0};
 	unsigned char observed_header[SWAPZ_PRIMARY_BLOCK_BYTES] = {0};
 	char state_record[SWAPZ_PRIMARY_STATE_RECORD_MAX + 1U];
 	char live_swapzctl_sha256[65];
@@ -12994,16 +12773,13 @@ static int swapz_primary_start_prepared(void)
 			errno = EBUSY;
 		goto out;
 	}
-	if (swapz_primary_header_backup_read_at(
-		    recovery_fd, lock_fd, manifest.run_id,
-		    manifest.original_header_sha256, 0, original_header) < 0)
-		goto out;
 	failure_phase = "target-exclusive-open";
 	target_fd = swapz_primary_target_open_exclusive(&manifest);
 	if (target_fd < 0 ||
 	    swapz_primary_exact_read(
 		    target_fd, observed_header, sizeof(observed_header)) < 0 ||
-	    memcmp(observed_header, original_header, sizeof(original_header))) {
+	    swapz_primary_backing_header_matches_manifest(
+		    observed_header, &manifest) < 0) {
 		if (!errno)
 			errno = ESTALE;
 		goto out;
@@ -13320,14 +13096,6 @@ static int swapz_primary_state_recoverable(
 	return 0;
 }
 
-static int swapz_primary_recovery_header_known(
-	const unsigned char observed[SWAPZ_PRIMARY_BLOCK_BYTES],
-	const unsigned char original[SWAPZ_PRIMARY_BLOCK_BYTES])
-{
-	return observed && original &&
-	       !memcmp(observed, original, SWAPZ_PRIMARY_BLOCK_BYTES);
-}
-
 static int swapz_primary_stop_active(void)
 {
 #ifdef SWAPZ_PRIMARY_ROOTLESS_TEST
@@ -13343,7 +13111,6 @@ static int swapz_primary_stop_active(void)
 	struct swapz_primary_state stopping_state = {0};
 	struct swapz_primary_state restored_state = {0};
 	struct swapz_primary_state complete_state = {0};
-	unsigned char expected_header[SWAPZ_PRIMARY_BLOCK_BYTES] = {0};
 	unsigned char observed_header[SWAPZ_PRIMARY_BLOCK_BYTES] = {0};
 	char state_record[SWAPZ_PRIMARY_STATE_RECORD_MAX + 1U];
 	size_t state_length = 0;
@@ -13436,14 +13203,12 @@ static int swapz_primary_stop_active(void)
 		goto out;
 	SWAPZ_PRIMARY_TEST_INTERRUPT_AFTER("stop-module-unloaded");
 	failure_phase = "header-verify";
-	if (swapz_primary_expected_backing_header_at(
-		    recovery_fd, lock_fd, &manifest, expected_header) < 0)
-		goto out;
 	target_fd = swapz_primary_target_open_exclusive(&manifest);
 	if (target_fd < 0 ||
 	    swapz_primary_exact_read(
 		    target_fd, observed_header, sizeof(observed_header)) < 0 ||
-	    memcmp(observed_header, expected_header, sizeof(expected_header))) {
+	    swapz_primary_backing_header_matches_manifest(
+		    observed_header, &manifest) < 0) {
 		if (!errno)
 			errno = ESTALE;
 		goto out;
@@ -13532,7 +13297,6 @@ static int swapz_primary_recover(void)
 	struct swapz_primary_state recovering_state = {0};
 	struct swapz_primary_state restored_state = {0};
 	struct swapz_primary_state complete_state = {0};
-	unsigned char original_header[SWAPZ_PRIMARY_BLOCK_BYTES] = {0};
 	unsigned char observed_header[SWAPZ_PRIMARY_BLOCK_BYTES] = {0};
 	char state_record[SWAPZ_PRIMARY_STATE_RECORD_MAX + 1U];
 	size_t state_length = 0;
@@ -13585,10 +13349,6 @@ static int swapz_primary_recover(void)
 		goto out;
 	}
 	durable_observation = "OBSERVED";
-	if (swapz_primary_header_backup_read_at(
-		    recovery_fd, lock_fd, manifest.run_id,
-		    manifest.original_header_sha256, 0, original_header) < 0)
-		goto out;
 
 	/*
 	 * The mapper may still own the backing partition, so pre-cleanup header
@@ -13600,8 +13360,8 @@ static int swapz_primary_recover(void)
 	if (target_fd < 0 ||
 	    swapz_primary_exact_read(
 		    target_fd, observed_header, sizeof(observed_header)) < 0 ||
-	    !swapz_primary_recovery_header_known(
-		    observed_header, original_header)) {
+	    swapz_primary_backing_header_matches_manifest(
+		    observed_header, &manifest) < 0) {
 		if (!errno)
 			errno = ESTALE;
 		goto out;
@@ -13681,8 +13441,8 @@ static int swapz_primary_recover(void)
 	if (target_fd < 0 ||
 	    swapz_primary_exact_read(
 		    target_fd, observed_header, sizeof(observed_header)) < 0 ||
-	    !swapz_primary_recovery_header_known(
-		    observed_header, original_header)) {
+	    swapz_primary_backing_header_matches_manifest(
+		    observed_header, &manifest) < 0) {
 		if (!errno)
 			errno = ESTALE;
 		goto out;
