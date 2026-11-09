@@ -4,9 +4,10 @@
 Compile the unmodified start coordinator and actual production mount-inventory
 reader and swap parsers in a private C fixture. Its /proc and mutations are
 intercepted: no real mounts, devices, mappers, mkswap or swapon are touched.
-The late inventory is changed after initial admission, before header write.
-This proves only the bounded final snapshot: it cannot exclude a concurrent
-mount or swap activation after that snapshot returns and before header mutation.
+The late inventory is changed after initial admission, before the first
+module/device mutation. This proves only the bounded final snapshot: it cannot
+exclude a concurrent mount or swap activation after that snapshot returns and
+before the mutation boundary.
 A deliberately weakened local copy must demonstrate the regression's power.
 """
 from pathlib import Path
@@ -79,7 +80,7 @@ SELECTOR_FUNCTIONS = (
 
 
 def omit_final_revalidation(function: str) -> str:
-    """Negative control: remove exactly the block between intent and header write."""
+    """Negative control: remove final revalidation before module/device mutation."""
     masked = code_only(function)
     anchor = masked.index('struct swapz_primary_mount_facts prewrite_mount_facts')
     opening = masked.rfind('{', 0, anchor)
@@ -97,8 +98,8 @@ def omit_final_revalidation(function: str) -> str:
                 break
     if closing is None:
         raise AssertionError('Unclosed final revalidation compound statement')
-    if 'swapz_primary_write_header_checked_fd' not in masked[closing:]:
-        raise AssertionError('No destructive boundary after final check')
+    if 'swapz_primary_load_qualified_module' not in masked[closing:]:
+        raise AssertionError('No module/device mutation boundary after final check')
     return function[:opening] + '(void)0; /* negative-control omission */' + function[closing:]
 
 
@@ -267,7 +268,6 @@ static enum fixture_scenario scenario;
 static int late;
 static unsigned int admission_reads;
 static unsigned int prewrite_reads;
-static unsigned int header_writes;
 static unsigned int mapper_mutations;
 static unsigned int mkswap_calls;
 static unsigned int swapon_calls;
@@ -1326,9 +1326,8 @@ static int fixture_hashes(char *control, char *module, char *oracle)
 #define swapz_primary_root_source_chain(a,b,c,d) fixture_source_chain(a,b,c,d)
 #define swapz_primary_read_mount_facts(facts, parent) fixture_read_mount_facts(facts,parent)
 #define swapz_primary_read_module_mapper_inventory(a,b) fixture_module_inventory(a,b)
-#define swapz_primary_header_backup_read_at(...) 0
-#define swapz_primary_header_build(...) 0
 #define swapz_primary_exact_read(...) 0
+#define swapz_primary_backing_header_matches_manifest(...) 0
 #define swapz_primary_state_write_at(a,b,state,owner) fixture_state_write(state)
 #define swapz_primary_module_load_intent_write_at(...) fixture_intent()
 #define swapz_primary_load_qualified_module(loaded) fixture_load_module(loaded)
@@ -1419,7 +1418,7 @@ static int check_case(enum fixture_scenario candidate)
         fixture_inventory_file("3031/mountinfo",
             "36 25 259:9 / / rw - ext4 /dev/other rw\n"
             "37 36 8:1 / /mnt/selected rw - ext4 /dev/sda1 rw\n");
-    header_writes = mapper_mutations = mkswap_calls = swapon_calls = 0U;
+    mapper_mutations = mkswap_calls = swapon_calls = 0U;
     module_loads = recovery_marks = owner_release_calls = 0U;
     starting_state_writes = active_state_writes = 0U;
     diagnostic_stream = tmpfile();
@@ -1540,7 +1539,7 @@ static int check_case(enum fixture_scenario candidate)
         assert(expected_safe || gap_probe);
         break;
     }
-    writes = header_writes + mapper_mutations + mkswap_calls + swapon_calls;
+    writes = mapper_mutations + mkswap_calls + swapon_calls;
     /* The full production reader must have opened and read real fixture fds. */
     if (fixture_mount_open_count < admission_reads ||
         fixture_mount_read_count < admission_reads ||
@@ -1600,9 +1599,8 @@ static int check_case(enum fixture_scenario candidate)
                 post_snapshot_injected == 1 && fixture_selector_reads >= 1U;
         int refusal = result < 0 && result_errno == ESTALE &&
             race_evidence &&
-            header_writes == 0U && mapper_mutations == 0U &&
-            mkswap_calls == 0U && swapon_calls == 0U &&
-            module_loads == 0U && starting_state_writes == 1U &&
+            mapper_mutations == 0U && mkswap_calls == 0U &&
+            swapon_calls == 0U && module_loads == 0U && starting_state_writes == 1U &&
             active_state_writes == 0U && recovery_marks == 1U &&
             owner_release_calls == 0U &&
             strstr(diagnostic, expected_phase) != NULL &&
@@ -1641,6 +1639,7 @@ static int check_case(enum fixture_scenario candidate)
         if (result != 0 || !post_snapshot_injected ||
             admission_reads != 2U || prewrite_reads != 1U ||
             active_inventory_reads != 4U || writes != 3U ||
+            module_loads != 1U ||
             starting_state_writes != 1U || active_state_writes != 1U ||
             recovery_marks != 0U || owner_release_calls != 0U ||
             mount_conflict_observations != 0U ||
@@ -1663,22 +1662,22 @@ static int check_case(enum fixture_scenario candidate)
     }
     if (expected_safe) {
         if (result != 0 || admission_reads != 2U || prewrite_reads != 1U ||
-            header_writes != 0U || mapper_mutations != 1U ||
-            mkswap_calls != 1U || swapon_calls != 1U ||
+            mapper_mutations != 1U || mkswap_calls != 1U ||
+            swapon_calls != 1U || module_loads != 1U ||
             starting_state_writes != 1U || active_state_writes != 1U ||
             recovery_marks != 0U || owner_release_calls != 0U ||
             mount_conflict_observations != 0U ||
             late_mount_conflict_observations != 0U ||
             diagnostic_length != 0U) {
             fprintf(stderr, "FAIL: %s: safe result=%d initial+late=%u "
-                    "late=%u header_write=%u mapper=%u mkswap=%u swapon=%u\n",
+                    "late=%u module_load=%u mapper=%u mkswap=%u swapon=%u\n",
                     scenario_names[candidate], result, admission_reads,
-                    prewrite_reads, header_writes, mapper_mutations,
+                    prewrite_reads, module_loads, mapper_mutations,
                     mkswap_calls, swapon_calls);
             return 1;
         }
     } else {
-        const char *phase = late ? "header-write" : "admission";
+        const char *phase = late ? "module-load-intent" : "admission";
         size_t expected_diagnostic_length;
         int expected_length;
 
@@ -1840,9 +1839,9 @@ static int check_case(enum fixture_scenario candidate)
               candidate == FIXTURE_FOREIGN_SELECTED_INITIAL) ?
                  prewrite_reads != 0U : prewrite_reads != 1U)) {
             fprintf(stderr, "FAIL: %s: refusal result=%d errno=%d expected=%d "
-                    "initial+late=%u late=%u header_write=%u mapper=%u mkswap=%u swapon=%u\n",
+                    "initial+late=%u late=%u module_load=%u mapper=%u mkswap=%u swapon=%u\n",
                     scenario_names[candidate], result, result_errno, expected_error,
-                    admission_reads, prewrite_reads, header_writes,
+                    admission_reads, prewrite_reads, module_loads,
                     mapper_mutations, mkswap_calls, swapon_calls);
             fprintf(stderr,
                     "FAIL: redacted diagnostic bytes=%zu mount_conflicts=%u "
@@ -1855,7 +1854,7 @@ static int check_case(enum fixture_scenario candidate)
         }
         printf("DENY: %s phase=%s category=\"%s\" errno=%d "
                "evidence=%s claim=retained state=%s "
-               "prevented=header-write,mapper,mkswap,swapon mutations=0\n",
+               "prevented=module-load,mapper,mkswap,swapon mutations=0\n",
                scenario_names[candidate], phase, scenario_names[candidate],
                expected_error,
                expected_mount_conflict
@@ -1949,7 +1948,6 @@ static int fixture_racing_open(const char *path, int flags)
 #define open(path,flags) fixture_racing_open(path,flags)
 @@TARGET_OPEN_FUNCTION@@
 #undef open
-@@HEADER_FUNCTIONS@@
 
 static char fixture_root[PATH_MAX];
 static char fixture_selector_path[PATH_MAX];
@@ -2114,10 +2112,8 @@ static void fixture_check_target_and_header(int race)
     char target_path[PATH_MAX];
     char partuuid_alias_path[PATH_MAX];
     unsigned char original[SWAPZ_PRIMARY_BLOCK_BYTES] = {0};
-    unsigned char replacement[SWAPZ_PRIMARY_BLOCK_BYTES];
     unsigned char observed[SWAPZ_PRIMARY_BLOCK_BYTES];
     int fd;
-    int result;
     int observed_errno;
 
     fixture_create_root();
@@ -2155,32 +2151,11 @@ static void fixture_check_target_and_header(int race)
                "observed=ENODEV errno=%d header=unchanged\n", observed_errno);
     } else {
         assert(fd >= 0 && fixture_alias_switches == 0U);
-        memset(replacement, 0x6a, sizeof(replacement));
-        if (race == 2) {
-            /* A different current header must cause ESTALE before pwrite. */
-            assert(pwrite(fd, replacement, sizeof(replacement), 0) ==
-                   (ssize_t)sizeof(replacement));
-        }
-        errno = 0;
-        result = swapz_primary_write_header_checked_fd(
-            fd, &swapz_primary_selected_target, original,
-            race == 2 ? original : replacement);
-        observed_errno = errno;
         assert(pread(fd, observed, sizeof(observed), 0) ==
                (ssize_t)sizeof(observed));
-        if (race == 2) {
-            assert(result == -1 && observed_errno == ESTALE);
-            assert(memcmp(observed, replacement, sizeof(observed)) == 0);
-        } else {
-            assert(result == 0);
-            assert(memcmp(observed, replacement, sizeof(observed)) == 0);
-        }
-        printf("PASS: phase=header-last-use expected=%s "
-               "observed=%s errno=%d header=%s\n",
-               race == 2 ? "refuse-stale-header" : "write-private-control",
-               race == 2 ? "ESTALE" : "written",
-               race == 2 ? observed_errno : 0,
-               race == 2 ? "unchanged-since-race" : "replacement-verified");
+        assert(memcmp(observed, original, sizeof(original)) == 0);
+        printf("PASS: phase=target-exclusive-open expected=admit-current-alias "
+               "observed=opened errno=0 header=unchanged\n");
     }
     assert(close(fd) == 0);
     fixture_remove_root();
@@ -2195,7 +2170,6 @@ int main(void)
         fixture_check_selector(candidate);
     fixture_check_target_and_header(0);
     fixture_check_target_and_header(1);
-    fixture_check_target_and_header(2);
     return 0;
 }
 '''
@@ -2204,10 +2178,6 @@ int main(void)
 def compile_and_run_last_use(source: str, workdir: Path) -> subprocess.CompletedProcess[str]:
     target_valid_functions = (
         "swapz_primary_target_valid", "swapz_primary_same_target_identity",
-    )
-    header_functions = (
-        "swapz_primary_exact_read", "swapz_primary_header_fd_valid",
-        "swapz_primary_write_header_checked_fd",
     )
     unit = LAST_USE_HARNESS.replace(
         "@@SELECTOR_ADMISSION_TYPE@@",
@@ -2219,10 +2189,7 @@ def compile_and_run_last_use(source: str, workdir: Path) -> subprocess.Completed
         "\n\n".join(production_function(source, name)
                     for name in target_valid_functions)).replace(
         "@@TARGET_OPEN_FUNCTION@@",
-        production_function(source, "swapz_primary_open_target_checked_paths_mode")).replace(
-        "@@HEADER_FUNCTIONS@@",
-        "\n\n".join(production_function(source, name)
-                    for name in header_functions))
+        production_function(source, "swapz_primary_open_target_checked_paths_mode"))
     if "@@" in unit:
         raise AssertionError("Unexpanded production last-use helper")
     c_path = workdir / "last-use.c"
