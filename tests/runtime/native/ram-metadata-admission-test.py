@@ -43,6 +43,11 @@ def main() -> None:
 
     disk_identity = target.index('is_nullb = !strncmp(')
     io_client = target.index("ctx->io_client = dm_io_client_create();", disk_identity)
+    disk_classification = target[disk_identity:io_client]
+    require("ctx->backing->bdev->bd_disk->disk_name + 5" in disk_classification
+            and "if (!*disk_suffix)" in disk_classification
+            and "*disk_suffix < '0' || *disk_suffix > '9'" in disk_classification,
+            "Synthetic null_blk classification must require a decimal index")
     require("module_param_named(physical_ram_metadata_qualified" in target,
             "Physical RAM qualification must be an immutable module-load token")
     require("if (!is_nullb && !swapz_physical_ram_metadata_qualified) {" in

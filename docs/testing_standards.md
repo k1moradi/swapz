@@ -74,6 +74,9 @@ all allocated sidecars and page-rounded memory separately.
 A source contract must also verify Device Mapper iterate_devices describes
 only the allocated lower data region, excluding the protected first page and
 unused tail for physical backing while retaining zero-based null_blk.
+The native source contract must reject restoring prefix-only `nullb` disk
+identification: the kernel constructor requires a decimal-only suffix,
+in addition to the harness's independently verified driver/device identity.
 The source contract in
 `tests/runtime/native/ram-metadata-admission-test.py` runs under native
 `test-codec` and in the ordinary `make fast_test` build step (including

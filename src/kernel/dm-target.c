@@ -8971,6 +8971,24 @@ static int swapz_ctr(struct dm_target *ti, unsigned int argc, char **argv)
 		goto fail;
 	}
 	is_nullb = !strncmp(ctx->backing->bdev->bd_disk->disk_name, "nullb", 5);
+	if (is_nullb) {
+		const char *disk_suffix =
+			ctx->backing->bdev->bd_disk->disk_name + 5;
+
+		/*
+		 * null_blk disk names have a decimal device index. A prefix
+		 * alone must never exempt another disk from SWAPSPACE2 validation
+		 * or authorize null_blk-only fault injection. The privileged
+		 * harness independently verifies actual driver/device identity.
+		 */
+		if (!*disk_suffix)
+			is_nullb = false;
+		for (; *disk_suffix; ++disk_suffix)
+			if (*disk_suffix < '0' || *disk_suffix > '9') {
+				is_nullb = false;
+				break;
+			}
+	}
 	/*
 	 * Payload-only storage is necessary but not sufficient for real-device
 	 * admission. The same built module is first qualified on owned RAM backing;

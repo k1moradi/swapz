@@ -18,7 +18,10 @@ created virtual Device Mapper mapper alone may receive mkswap.
 Device Mapper iterate_devices must describe only the allocated lower data
 range: start at the reserved-page offset and report exactly the aligned
 physical-block count, excluding the header and unused device tail. A
-header-free null_blk still starts at zero.
+header-free null_blk still starts at zero. The constructor must not treat an
+arbitrary disk beginning with `nullb` as synthetic: require the complete
+`nullb<decimal-index>` disk name. The privileged harness independently
+verifies null_blk driver/device identity.
 Switch between ordinary swap and swapz with verified swapoff/swapon,
 without reboot. After a successful trial, obtain the owner's choice:
 keep swapz active or return to ordinary Linux swap.
