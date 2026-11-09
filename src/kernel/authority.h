@@ -130,6 +130,10 @@ struct swapz_tx {
 	swapz_u32 sequence;
 	swapz_u8 extent_blocks;
 	swapz_u8 count;
+	/* Explicit representation authority. Zero keeps the legacy synthetic
+	 * codec; one means lower media contains payload bytes/zero padding only. */
+	swapz_u8 compressed_data_only;
+	swapz_u8 reserved;
 	struct swapz_tx_record records[SWAPZ_MAX_RECORDS];
 };
 
@@ -401,6 +405,10 @@ int swapz_bind_compressed_record(struct swapz_authority *authority,
 			       swapz_u16 payload_length,
 			       swapz_u32 payload_crc32c,
 			       swapz_u8 encoding);
+/* Seal the compressed transaction representation after every descriptor has
+ * been bound. This is immutable publication authority, not a media probe. */
+int swapz_mark_compressed_data_only(struct swapz_authority *authority,
+				    struct swapz_tx *transaction);
 /*
  * Read-only: 1 only if staging one `blocks` extent now reuses the open segment
  * with no segment pick/recycle (synchronous DISCARD callback) and no -ENOSPC.

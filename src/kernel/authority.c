@@ -1781,6 +1781,7 @@ static int swapz_is_active(const struct swapz_authority *a,
 	    tx->sequence != a->active_tx.sequence ||
 	    tx->extent_blocks != a->active_tx.extent_blocks ||
 	    tx->count != a->active_tx.count ||
+	    tx->compressed_data_only != a->active_tx.compressed_data_only ||
 	    !swapz_legal_class(tx->extent_blocks) ||
 	    !tx->count || tx->count > SWAPZ_MAX_RECORDS)
 		return 0;
@@ -1828,6 +1829,8 @@ int swapz_bind_compressed_record(struct swapz_authority *a,
 		return -EINVAL;
 	if (!swapz_is_active(a, tx))
 		return -ESTALE;
+	if (tx->compressed_data_only)
+		return -ESTALE;
 	if (!payload_length || payload_length > SWAPZ_MAX_COMPRESSED ||
 	    (encoding != SWAPZ_ENCODING_LZ4 &&
 	     encoding != SWAPZ_ENCODING_DELTA64 &&
@@ -1861,6 +1864,21 @@ int swapz_bind_compressed_record(struct swapz_authority *a,
 	caller->encoding = encoding;
 	caller->compressed_metadata_bound = 1;
 	*owned = *caller;
+	return 0;
+}
+
+int swapz_mark_compressed_data_only(struct swapz_authority *a,
+				    struct swapz_tx *tx)
+{
+	swapz_u8 index;
+
+	if (!a || !tx || !swapz_is_active(a, tx))
+		return -ESTALE;
+	for (index = 0; index < tx->count; ++index)
+		if (!tx->records[index].compressed_metadata_bound)
+			return -EINVAL;
+	tx->compressed_data_only = 1;
+	a->active_tx.compressed_data_only = 1;
 	return 0;
 }
 
@@ -2113,7 +2131,8 @@ int swapz_finish_raw(struct swapz_authority *a, const struct swapz_tx *tx,
 
 	if (!swapz_is_active(a, tx))
 		return -ESTALE;
-	if (tx->count != 1 || tx->extent_blocks != 1) {
+	if (tx->compressed_data_only ||
+	    tx->count != 1 || tx->extent_blocks != 1) {
 		error = -EINVAL;
 		goto fail;
 	}
@@ -2679,6 +2698,7 @@ int swapz_finish(struct swapz_authority *a, const struct swapz_tx *tx,
 	swapz_u8 extent_delta_count = 0, segment_delta_count = 0;
 	swapz_u8 index;
 	int gc_enabled, page_lists_enabled;
+	int data_only;
 	int error = 0;
 
 	if (!swapz_is_active(a, tx))
@@ -2689,9 +2709,12 @@ int swapz_finish(struct swapz_authority *a, const struct swapz_tx *tx,
 		error = io_error < 0 ? io_error : -EIO;
 		goto fail;
 	}
-	error = swapz_validate_metadata_crc(image, bytes_total);
-	if (error)
-		goto fail;
+	data_only = tx->compressed_data_only != 0;
+	if (!data_only) {
+		error = swapz_validate_metadata_crc(image, bytes_total);
+		if (error)
+			goto fail;
+	}
 	new_segment = tx->start_block / SWAPZ_SEGMENT_BLOCKS;
 	gc_enabled = swapz_gc_accounting_enabled(a);
 	page_lists_enabled = swapz_segment_page_lists_enabled(a);
@@ -2706,7 +2729,8 @@ int swapz_finish(struct swapz_authority *a, const struct swapz_tx *tx,
 		error = -EUCLEAN;
 		goto fail;
 	}
-	if (image[7] != tx->count || swapz_disk_sequence(image) != tx->sequence) {
+	if (!data_only &&
+	    (image[7] != tx->count || swapz_disk_sequence(image) != tx->sequence)) {
 		error = -EUCLEAN;
 		goto fail;
 	}
@@ -2715,7 +2739,8 @@ int swapz_finish(struct swapz_authority *a, const struct swapz_tx *tx,
 						 &new_sequence_delta);
 	if (error)
 		goto fail;
-	metadata_end = sizeof(struct swapz_header) +
+	metadata_end = data_only ? 0 :
+		sizeof(struct swapz_header) +
 		(swapz_u32)tx->count * sizeof(struct swapz_record);
 	previous_end = bytes_total;
 	new_record_read_penalty =
@@ -2738,10 +2763,36 @@ int swapz_finish(struct swapz_authority *a, const struct swapz_tx *tx,
 		swapz_u32 old_segment;
 		int is_new_segment_delta = 0;
 
-		error = swapz_lookup_validated_descriptor(image, bytes_total, index,
-							  &decoded, &payload);
-		if (error)
-			goto fail;
+		if (data_only) {
+			const struct swapz_tx_record *record = &tx->records[index];
+
+			if (!record->compressed_metadata_bound ||
+			    !record->payload_length ||
+			    record->payload_length > SWAPZ_MAX_COMPRESSED ||
+			    record->payload_offset >= bytes_total ||
+			    record->payload_length >
+				    bytes_total - record->payload_offset ||
+			    (record->encoding != SWAPZ_ENCODING_LZ4 &&
+			     record->encoding != SWAPZ_ENCODING_DELTA64 &&
+			     record->encoding != SWAPZ_ENCODING_DELTA64_SHUF8)) {
+				error = -EUCLEAN;
+				goto fail;
+			}
+			decoded = (struct swapz_decoded) {
+				.logical_page = record->logical_page,
+				.generation = record->generation,
+				.payload_crc32c = record->payload_crc32c,
+				.payload_offset = record->payload_offset,
+				.payload_length = record->payload_length,
+				.encoding = record->encoding,
+			};
+			payload = image + record->payload_offset;
+		} else {
+			error = swapz_lookup_validated_descriptor(
+				image, bytes_total, index, &decoded, &payload);
+			if (error)
+				goto fail;
+		}
 		if (decoded.payload_offset < metadata_end ||
 		    (swapz_u32)decoded.payload_offset + decoded.payload_length !=
 			    previous_end) {

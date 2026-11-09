@@ -144,6 +144,52 @@ static int test_bound_compressed_metadata_is_transaction_identity(void)
 	return 0;
 }
 
+static int test_data_only_payload_publishes_from_bound_ram_metadata(void)
+{
+	const swapz_u32 pages[] = { 6, 7 };
+	struct swapz_decoded ram_records[2] = { { 0 } };
+	struct swapz_ram_extent builder;
+	struct swapz_tx transaction;
+	swapz_u8 index;
+
+	CHECK(init() == 0);
+	CHECK(swapz_stage(&a, pages, 2, 2, &transaction) == 0);
+	memset(bytes, 0xa5, 2U * SWAPZ_BLOCK_BYTES);
+	CHECK(swapz_ram_extent_begin(&builder, bytes,
+				     2U * SWAPZ_BLOCK_BYTES,
+				     transaction.sequence, ram_records, 2) == 0);
+	for (index = 0; index < 2; ++index) {
+		memset(compressed, 0x61 + index, sizeof(compressed));
+		CHECK(swapz_ram_extent_append(
+			      &builder, transaction.records[index].logical_page,
+			      transaction.records[index].generation,
+			      compressed, sizeof(compressed),
+			      index ? SWAPZ_ENCODING_DELTA64 :
+				      SWAPZ_ENCODING_LZ4) == 0);
+		CHECK(swapz_bind_compressed_record(
+			      &a, &transaction, index,
+			      ram_records[index].payload_offset,
+			      ram_records[index].payload_length,
+			      ram_records[index].payload_crc32c,
+			      ram_records[index].encoding) == 0);
+	}
+	CHECK(swapz_ram_extent_seal(&builder) == 0);
+	CHECK(swapz_mark_compressed_data_only(&a, &transaction) == 0);
+	CHECK(transaction.compressed_data_only == 1 &&
+	      a.active_tx.compressed_data_only == 1);
+	for (index = 0; index < sizeof(struct swapz_header); ++index)
+		CHECK(bytes[index] == 0);
+	CHECK(swapz_finish(&a, &transaction, bytes,
+			   2U * SWAPZ_BLOCK_BYTES, 2, 0) == 0);
+	CHECK(maps[6].valid && maps[7].valid &&
+	      maps[6].start_block == maps[7].start_block &&
+	      maps[6].payload_crc32c == ram_records[0].payload_crc32c &&
+	      maps[7].payload_crc32c == ram_records[1].payload_crc32c &&
+	      maps[6].payload_offset == ram_records[0].payload_offset &&
+	      maps[7].payload_offset == ram_records[1].payload_offset);
+	return 0;
+}
+
 static int test_last_sibling_mutation_is_all_or_nothing(void)
 {
 	const swapz_u32 pages[] = {0, 1, 2};
@@ -968,6 +1014,7 @@ int main(void)
 	CHECK(test_page_identity_mutation() == 0); passed++;
 	CHECK(test_generation_identity_mutation() == 0); passed++;
 	CHECK(test_bound_compressed_metadata_is_transaction_identity() == 0); passed++;
+	CHECK(test_data_only_payload_publishes_from_bound_ram_metadata() == 0); passed++;
 	CHECK(test_last_sibling_mutation_is_all_or_nothing() == 0); passed++;
 	CHECK(test_duplicate_media_descriptor_fails_closed() == 0); passed++;
 	CHECK(test_mutated_replacement_preserves_prior_authority() == 0); passed++;
