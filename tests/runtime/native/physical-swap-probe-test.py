@@ -90,6 +90,18 @@ class PhysicalSwapProbeTests(unittest.TestCase):
                     probe.ProbeError, "contains or backs the root filesystem"):
                 probe._require_root_not_on_target(8, 3)
 
+    def test_physical_run_rejects_inband_metadata_before_any_probe(self):
+        # The public helper must not reach swapoff on the pre-migration codec.
+        with mock.patch.object(probe, "run_probe") as run_probe:
+            with self.assertRaisesRegex(
+                    probe.ProbeError, "metadata is RAM-only"):
+                probe.main([
+                    "run", "--device", "/dev/swapz-synthetic",
+                    "--confirm-device", "/dev/swapz-synthetic",
+                    "--development-only",
+                ])
+            run_probe.assert_not_called()
+
     def test_unprovisioned_recovery_base_is_blocked_not_recovery_required(self):
         # A fresh VM without recovery storage is not an interrupted trial.
         # Refuse admission without creating directories or touching devices.

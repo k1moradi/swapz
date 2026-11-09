@@ -4862,6 +4862,17 @@ def campaign_plan(device_arg, confirm_arg, expected_partuuid, source_sha):
     print("PHYSICAL_WRITE=NOT_PERFORMED")
 
 
+def _require_ram_only_metadata_for_physical_run():
+    """Refuse physical trials before touching swap while extent metadata is on media."""
+    try:
+        source = (ROOT / "src/kernel/codec.h").read_text(encoding="utf-8")
+    except (OSError, UnicodeError) as exc:
+        raise ProbeError("cannot verify RAM-only extent metadata admission") from exc
+    if re.search(r"(?m)^#define SWAPZ_CODEC_METADATA_ON_MEDIA 0U$", source) is None:
+        raise ProbeError(
+            "physical run blocked until compressed extent metadata is RAM-only")
+
+
 def main(argv=None):
     parser = argparse.ArgumentParser(
         description=(
@@ -4960,6 +4971,10 @@ def main(argv=None):
                 "safe_next_step=inspect_owner_and_state_read_only") from exc
         print(f"PHYSICAL_RECOVERY=COMPLETE stage={state['stage']}")
         return 0
+    # Reject before run_probe can claim a device or call swapoff. Read-only
+    # plan/recovery paths remain available even during codec migration.
+    _require_ram_only_metadata_for_physical_run()
+
     def handle_sigterm(signum, frame):
         del signum, frame
         raise ProbeError("received SIGTERM; attempting safe recovery")
