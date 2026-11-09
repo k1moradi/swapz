@@ -236,8 +236,6 @@ static int test_uniform_pack_cliff_reduces_physical_blocks(void)
 static int test_full_window_and_selective_reads(void)
 {
 	struct swapz_compressed_page pages[16];
-	struct swapz_decoded decoded;
-	const swapz_u8 *stored;
 	swapz_u8 output[3568], committed = 0;
 	swapz_u16 length = 0;
 	swapz_u32 index;
@@ -250,9 +248,9 @@ static int test_full_window_and_selective_reads(void)
 	CHECK(engine.submitted_blocks == 10);
 	CHECK(engine.completed_blocks == 10);
 	CHECK(disk.write_blocks == 10);
-	/* Preserve the existing cold, metadata-first lower-block bound:
-	 * disable prefetch and reuse for BOTH loops in this test. */
-	engine.max_read_blocks_per_record = 1;
+	/* Enforce the explicit one-block payload-read budget and disable reuse
+	 * for both loops. Descriptor metadata is already resident in RAM. */
+	engine.max_read_blocks_per_record = 2;
 	for (index = 0; index < 16; ++index) {
 		swapz_engine_invalidate_read_cache(&engine);
 		CHECK(maps[index].valid && maps[index].generation == 1);
@@ -264,26 +262,17 @@ static int test_full_window_and_selective_reads(void)
 	reads = disk.read_blocks;
 	CHECK(reads == engine.physical_read_blocks);
 	CHECK(reads >= 16 && reads <= 48);
-	/* Preserve the original exact metadata-first selective-read contract.
-	 * Explicitly disable two-block prefetch for these per-page read-budget
-	 * checks and invalidate any warm metadata before each sample. The
-	 * separate engine tests verify the bounded full-extent fast path. */
+	/* RAM offsets define the complete selective-read contract. Invalidate
+	 * all warm data before each sample and count only intersecting payload
+	 * blocks; no block-zero descriptor read exists. */
 	for (index = 0; index < 16; ++index) {
 		const struct swapz_map *m = &maps[index];
-		int expected;
+		swapz_u32 first = m->payload_offset / SWAPZ_BLOCK_BYTES;
+		swapz_u32 last = ((swapz_u32)m->payload_offset +
+			m->payload_length - 1U) / SWAPZ_BLOCK_BYTES;
+		int expected = (int)(last - first + 1U);
 
-		CHECK(swapz_lookup(disk.storage +
-				 (size_t)m->start_block * SWAPZ_BLOCK_BYTES,
-				 m->extent_blocks * SWAPZ_BLOCK_BYTES,
-				 m->record_index, &decoded, &stored) == 0);
-		{
-			swapz_u32 first = decoded.payload_offset / SWAPZ_BLOCK_BYTES;
-			swapz_u32 last = ((swapz_u32)decoded.payload_offset +
-				decoded.payload_length - 1U) / SWAPZ_BLOCK_BYTES;
-
-			expected = (int)(last - first + 1U + (first ? 1U : 0U));
-		}
-		CHECK(expected >= 1 && expected <= 3);
+		CHECK(expected >= 1 && expected <= 2);
 		swapz_engine_invalidate_read_cache(&engine);
 		disk.read_blocks = 0;
 		CHECK(swapz_engine_read_page(&engine, index,
@@ -313,10 +302,11 @@ static int test_metadata_set_cache_reuses_validated_block_zero(void)
 	prepare(pages, 64, 0, 0);
 	CHECK(write_window_sequential(pages, 64, &committed) == 0);
 	CHECK(committed == 64);
+	engine.max_read_blocks_per_record = 0;
 
 	/* Five distinct one-block extents evict the real one-entry cache but not
-	 * the 512-entry four-way metadata cache. A successful set hit must return
-	 * exact data without issuing another lower read. */
+	 * the 512-entry four-way block-zero data cache. A successful set hit must
+	 * return exact CRC-verified data without issuing another lower read. */
 	for (i = 0; i < 5; ++i)
 		CHECK(swapz_engine_read_page(&engine, i, output,
 					   sizeof(output), &length) == 0);
@@ -403,7 +393,7 @@ static int test_metadata_siblings_keep_unique_tags_in_a_full_set(void)
 		CHECK(maps[extent * 7U].extent_blocks == 4);
 	}
 	for (extent = 0; extent < 4; ++extent)
-		CHECK(swapz_engine_read_page(&engine, extent * 7U, output,
+		CHECK(swapz_engine_read_page(&engine, extent * 7U + 6U, output,
 					   sizeof(output), &length) == 0);
 	epoch = engine.read_metadata_epoch;
 	CHECK(epoch != 0 && engine.read_metadata_set_replacements == 0);
@@ -422,22 +412,21 @@ static int test_metadata_siblings_keep_unique_tags_in_a_full_set(void)
 	/* A hole before a matching tag must not terminate the commit scan.
 	 * The scratch hit below skips the initial metadata-set lookup. */
 	engine.read_metadata_tags[first_slot].epoch = 0;
-	CHECK(swapz_engine_read_page(&engine, 21, output,
+	CHECK(swapz_engine_read_page(&engine, 27, output,
 				   sizeof(output), &length) == 0);
 	CHECK(engine.read_metadata_tags[first_slot].epoch == 0);
 	CHECK(engine.read_metadata_tags[last_slot].start_block == 384U);
 	engine.read_metadata_tags[first_slot].epoch = epoch;
 
-	/* Payloads are appended from the end of the extent. With seven
-	 * 2072-byte records, record zero occupies block 3, so the four cold
-	 * reads above have already fetched blocks 0 and 3 for every extent. */
+	/* Payloads are appended from the end of the extent. Record six occupies
+	 * block zero, so each seed read fetches exactly that data block. */
 	for (extent = 0; extent < 4; ++extent) {
 		swapz_u32 start = extent * 128U;
 
 		CHECK(disk.read_block_hits[start] == 1);
 		CHECK(disk.read_block_hits[start + 1U] == 0);
 		CHECK(disk.read_block_hits[start + 2U] == 0);
-		CHECK(disk.read_block_hits[start + 3U] == 1);
+		CHECK(disk.read_block_hits[start + 3U] == 0);
 	}
 	reads_before = disk.read_blocks;
 	for (record = 0; record < 7; ++record)
@@ -449,9 +438,9 @@ static int test_metadata_siblings_keep_unique_tags_in_a_full_set(void)
 			CHECK(length == 2072);
 			CHECK(!memcmp(output, originals[logical], length));
 		}
-	/* The sibling sweep needs only blocks 1 and 2: two additional blocks
-	 * per extent, with each physical block fetched exactly once overall. */
-	CHECK(disk.read_blocks == reads_before + 8U);
+	/* The sibling sweep needs the remaining blocks 1..3: three additional
+	 * blocks per extent, with each physical block fetched exactly once. */
+	CHECK(disk.read_blocks == reads_before + 12U);
 	for (extent = 0; extent < 4; ++extent) {
 		swapz_u32 start = extent * 128U;
 
@@ -505,7 +494,7 @@ static int test_metadata_secondary_choice_retains_primary_collisions(void)
 		CHECK(maps[extent * 7U].extent_blocks == 4);
 	}
 	for (extent = 0; extent < 9; ++extent)
-		CHECK(swapz_engine_read_page(&engine, extent * 7U, output,
+		CHECK(swapz_engine_read_page(&engine, extent * 7U + 6U, output,
 					   sizeof(output), &length) == 0);
 	epoch = engine.read_metadata_epoch;
 	CHECK(engine.read_metadata_set_replacements == 0);
@@ -531,7 +520,7 @@ static int test_metadata_secondary_choice_retains_primary_collisions(void)
 	secondary_before = engine.read_metadata_secondary_hits;
 	probes_before = engine.read_metadata_set_probes;
 	for (extent = 0; extent < 9; ++extent) {
-		swapz_u32 logical = extent * 7U;
+		swapz_u32 logical = extent * 7U + 6U;
 
 		CHECK(swapz_engine_read_page(&engine, logical, output,
 					   sizeof(output), &length) == 0);
@@ -550,11 +539,11 @@ static int test_metadata_secondary_choice_retains_primary_collisions(void)
 	 * directory temporarily bypassed, then restore the existing tags. */
 	engine.read_metadata_cache = NULL;
 	engine.read_cache_valid = 0;
-	CHECK(swapz_engine_read_page(&engine, 28, output,
+	CHECK(swapz_engine_read_page(&engine, 34, output,
 				   sizeof(output), &length) == 0);
 	engine.read_metadata_cache = scratch_metadata_cache;
 	engine.read_metadata_tags[primary_base].epoch = 0;
-	CHECK(swapz_engine_read_page(&engine, 28, output,
+	CHECK(swapz_engine_read_page(&engine, 34, output,
 				   sizeof(output), &length) == 0);
 	CHECK(engine.read_metadata_tags[primary_base].epoch == 0);
 	CHECK(engine.read_metadata_tags[secondary_slot].epoch == epoch);
@@ -586,9 +575,9 @@ static int test_metadata_secondary_choice_retains_primary_collisions(void)
 	engine.read_metadata_lru_clock = 100;
 	engine.read_cache_valid = 0;
 	probes_before = engine.read_metadata_set_probes;
-	CHECK(swapz_engine_read_page(&engine, 28, output,
+	CHECK(swapz_engine_read_page(&engine, 34, output,
 				   sizeof(output), &length) == 0);
-	CHECK(length == 2072 && !memcmp(output, originals[28], length));
+	CHECK(length == 2072 && !memcmp(output, originals[34], length));
 	CHECK(engine.read_metadata_set_probes == probes_before + 8U);
 	CHECK(engine.read_metadata_set_replacements == 1);
 	CHECK(engine.read_metadata_tags[secondary_slot].start_block == maps[28].start_block);
@@ -602,13 +591,13 @@ static int test_metadata_secondary_choice_retains_primary_collisions(void)
 	CHECK(engine.read_metadata_epoch == 1);
 	for (slot = 0; slot < SWAPZ_READ_METADATA_CACHE_ENTRIES; ++slot)
 		CHECK(engine.read_metadata_tags[slot].epoch == 0);
-	CHECK(swapz_engine_read_page(&engine, 28, output,
+	CHECK(swapz_engine_read_page(&engine, 34, output,
 				   sizeof(output), &length) == 0);
 	engine.read_metadata_lru_clock = ~(swapz_u32)0;
-	CHECK(swapz_engine_read_page(&engine, 28, output,
+	CHECK(swapz_engine_read_page(&engine, 34, output,
 				   sizeof(output), &length) == 0);
 	CHECK(engine.read_metadata_epoch == 2 && engine.read_metadata_lru_clock == 1);
-	CHECK(length == 2072 && !memcmp(output, originals[28], length));
+	CHECK(length == 2072 && !memcmp(output, originals[34], length));
 	return 0;
 }
 
@@ -781,8 +770,6 @@ static int test_full_extent_corruption_rejected(void)
 	struct swapz_compressed_page pages[7];
 	swapz_u8 output[3568], committed = 0;
 	swapz_u16 length = 0;
-	struct swapz_decoded d;
-	const swapz_u8 *stored;
 	struct swapz_map map;
 
 	CHECK(setup() == 0);
@@ -790,12 +777,8 @@ static int test_full_extent_corruption_rejected(void)
 	CHECK(write_window_sequential(pages, 7, &committed) == 0);
 	CHECK(committed == 7);
 	map = maps[6];
-	CHECK(swapz_lookup(disk.storage +
-			 (size_t)map.start_block * SWAPZ_BLOCK_BYTES,
-			 map.extent_blocks * SWAPZ_BLOCK_BYTES,
-			 map.record_index, &d, &stored) == 0);
 	disk.storage[(size_t)map.start_block * SWAPZ_BLOCK_BYTES +
-		     d.payload_offset] ^= 1;
+		     map.payload_offset] ^= 1;
 	CHECK(swapz_engine_read_page(&engine, 6,
 				   output, sizeof(output), &length) == -EBADMSG);
 	CHECK(length == 0);
