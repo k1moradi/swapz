@@ -3061,23 +3061,25 @@ before accessing payload bytes for CRC. A matching stale/corrupted observed
 mapping is not permission to hash memory past the selected lower image.
 
 The volatile per-logical-page authority map is part of the full-capacity RAM
-budget and must remain exactly 16 bytes (`_Static_assert`). Its four-byte union
-has mutually exclusive meanings: a RAW mapping stores its volatile CRC32C;
-an LZ4 or delta64 mapping stores its zero-extended payload offset. Compressed
-read paths must reject RAW mappings before examining the offset member, while
-the RAW integrity path must compare the CRC member. The shared one-byte state
-stores extent size, RAW and valid flags; it is in-memory host state and must
-never be serialized as an on-media structure. Transaction sequence is
-extent-scoped: retain it in the separate compact index as an 8-bit offset from
-the first compressed extent sequence in each 1MiB segment. A segment contains
-at most 256 one-block allocations, so the offset fits exactly; reject overflow
-rather than truncate it. Clear the index whenever a dead segment is recycled, and
-validate the decoded sequence against the index before payload I/O. Preserve
-RAW CRC, compressed-offset and sequence-binding behavior in native production-C
-tests whenever this layout changes. Capacity estimates must include the
-per-physical-block sequence offsets and per-segment sequence bases, use
-`sizeof(struct swapz_map)` from the built source, and label array-only totals
-separately from total target memory.
+budget and is currently exactly 20 bytes (`_Static_assert`). Its first
+four-byte union has mutually exclusive meanings: a RAW mapping stores its
+volatile CRC32C; an LZ4 or delta64 mapping stores its zero-extended payload
+offset. Compressed mappings additionally keep payload CRC32C in the dedicated
+RAM field; RAW mappings keep that field zero. Compressed read paths must reject
+RAW mappings before examining the offset member, while the RAW integrity path
+must compare the union CRC member. The shared one-byte state stores extent
+size, RAW and valid flags; it is in-memory host state and must never be
+serialized as an on-media structure. Transaction sequence remains extent-scoped
+in the separate compact index as an 8-bit offset from the first compressed
+extent sequence in each 1MiB segment. A segment contains at most 256 one-block
+allocations, so the offset fits exactly; reject overflow rather than truncate
+it. Clear the index whenever a dead segment is recycled. RAM-authoritative
+compressed READs must not parse or authenticate a sequence from backing media.
+Preserve RAW CRC, compressed offset/CRC and transaction-sequence ownership in
+native production-C tests whenever this layout changes. Capacity estimates
+must include the per-physical-block sequence offsets and per-segment sequence
+bases, use `sizeof(struct swapz_map)` from the built source, and label
+array-only totals separately from total target memory.
 
 
 ### Physical-smoke byte-exact oracle: opened DM identity
