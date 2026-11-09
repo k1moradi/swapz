@@ -497,6 +497,19 @@ static int test_full_publish_and_authoritative_reads(void)
 				      &authority, index, &observed,
 				      NULL, &payload) == -EINVAL);
 			CHECK(payload == NULL);
+			/* A partially initialized authority has no readable RAM map. */
+			{
+				struct swapz_authority absent_maps = {
+					.logical_pages = 1U,
+				};
+
+				payload = extent;
+				CHECK(swapz_read_authoritative_payload(
+					      &absent_maps, 0U, &observed,
+					      extent + observed.payload_offset,
+					      &payload) == -EINVAL);
+				CHECK(payload == NULL);
+			}
 			extent[observed.payload_offset] ^= 1U;
 			CHECK(swapz_read_authoritative_payload(
 				      &authority, index, &observed,
