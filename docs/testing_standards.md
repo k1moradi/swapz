@@ -3019,10 +3019,12 @@ regression fixture: one SWZ header block,
 with its two-segment minimum. It must reject the first page beyond the maximum,
 initialize the maximum, attach every capacity-dependent production authority
 array, and calculate those array bytes from the compiled C types. The volatile
-`struct swapz_map` must remain 16 bytes: raw mappings store their CRC32C in
-the four-byte union, while compressed mappings store a zero-extended payload
-offset in that same union; encoding-specific readers must not inspect the
-other interpretation. The transaction sequence is retained separately with
+`struct swapz_map` is currently 20 bytes: raw mappings store their CRC32C in
+the four-byte union, compressed mappings store a zero-extended payload offset
+in that same union, and compressed mappings additionally retain payload CRC32C
+as authoritative RAM state. Encoding-specific readers must not inspect the
+other union interpretation. Capacity/RAM oracles must derive this width from
+the compiled type and fail closed when source/model accounting diverges. The transaction sequence is retained separately with
 one byte per physical block for a compressed extent's offset from its segment's
 first compressed sequence, plus one 32-bit sequence base per segment. The
 native test must cover the maximum 255 offset and fail closed on overflow. For the current

@@ -4008,7 +4008,7 @@ int main(void)
         engine = (ROOT / "src/kernel/engine.c").read_text()
         dm = (ROOT / "src/kernel/dm-target.c").read_text()
         self.assertIn("raw_crc32c", auth_h)
-        self.assertIn("_Static_assert(sizeof(struct swapz_map) == 16", auth_h)
+        self.assertIn("_Static_assert(sizeof(struct swapz_map) == 20", auth_h)
         self.assertIn("extent_sequence_delta", auth_h)
         self.assertIn("segment_sequence_base", auth_h)
         self.assertIn("swapz_enable_extent_sequence_index(", dm)
@@ -8019,7 +8019,7 @@ class CapacityMemoryAccountingContracts(unittest.TestCase):
             self.assertEqual(
                 len(re.findall(r"\bkvfree\(ctx->" + name + r"\);",
                                destruction)), 1, "missing/duplicate index free")
-        self.assertIn("_Static_assert(sizeof(struct swapz_map) == 16",
+        self.assertIn("_Static_assert(sizeof(struct swapz_map) == 20",
                       (ROOT / "src/kernel/authority.h").read_text())
         authority = source_body(
             "swapz_authority_validate_candidate", AUTH)
@@ -8715,7 +8715,7 @@ class CapacityMemoryAccountingContracts(unittest.TestCase):
         self.assertEqual(leaf_pte_pages * page, 1777664)
         self.assertEqual(max(allocations), (541603840, "maps"))
         self.assertEqual(len(allocations), 17)
-        self.assertLess(logical * 16, (1 << 32))
+        self.assertLess(logical * 20, (1 << 32))
         self.assertLess(physical * 2, (1 << 32))
         # At the top segment-aligned physical u32 geometry, 32-bit
         # addressability rejects liveness before attempting any allocation.

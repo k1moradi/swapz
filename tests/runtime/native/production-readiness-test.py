@@ -1962,8 +1962,8 @@ class ProductionReadinessEvaluatorTest(unittest.TestCase):
         self.assertEqual(estimate["physical_blocks"], 30465536)
         self.assertEqual(estimate["segment_count"], 119006)
         self.assertEqual(estimate["array_count"], 17)
-        self.assertEqual(estimate["payload_bytes"], 776070968)
-        self.assertEqual(estimate["page_rounded_bytes"], 776114176)
+        self.assertEqual(estimate["payload_bytes"], 884391736)
+        self.assertEqual(estimate["page_rounded_bytes"], 884436992)
         self.assertEqual(
             result["ALLOCATION_FAILURE_COVERAGE"],
             "SEPARATE_NOT_CONSTRUCTION_EVIDENCE")
@@ -1992,7 +1992,7 @@ class ProductionReadinessEvaluatorTest(unittest.TestCase):
         self.assertEqual(estimate["status"], "PREDICTED_ONLY")
         self.assertEqual(estimate["logical_pages"], 27080192)
         self.assertEqual(estimate["logical_mapper_bytes"], 110920466432)
-        self.assertEqual(estimate["page_rounded_bytes"], 776114176)
+        self.assertEqual(estimate["page_rounded_bytes"], 884436992)
         self.assertEqual(result["ALLOCATION_FAILURE_COVERAGE"],
                          "SEPARATE_NOT_CONSTRUCTION_EVIDENCE")
 
@@ -2002,8 +2002,8 @@ class ProductionReadinessEvaluatorTest(unittest.TestCase):
             27080192, 30465536, size_t_max=validator["MAX_UINT64"])
         self.assertEqual(estimate, {
             "array_count": 17,
-            "payload_bytes": 776070968,
-            "page_rounded_bytes": 776114176,
+            "payload_bytes": 884391736,
+            "page_rounded_bytes": 884436992,
         })
         self.assertIsNone(validator["capacity_index_estimate"](
             3817748224, 0xffffff00, size_t_max=(1 << 32) - 1))
