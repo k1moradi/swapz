@@ -45,6 +45,26 @@ An inherited jobserver takes precedence. Operators do not need to choose a
 manual `-j` value; qualification stages and privileged device sessions remain
 strictly sequential.
 
+The Phase 1 rootless concurrency audit is source-controlled in
+`tests/tools/rootless-resource-policy.py`. It classifies the exact literal
+rootless phase inventory plus every dynamically iterated `bash -n` script
+as read-only candidates, private-fixture candidates, or serial-only hazards.
+The contract regression in `tests/runtime/native/test-report-test.py` must
+reject added/renamed/unreviewed phases, changed syntax-script lists, duplicate
+labels, unknown resources and shared read/write conflicts. Shared Make/native
+artifacts, fixed disassembly paths, reporting/history fixtures, diagnostic
+relays, process/descendant cleanup, and package/systemd simulations remain
+serial pending explicit isolation evidence. A private-workspace classification
+is a provisional source audit, not a proof against future shared-state edits:
+re-audit when a test's subprocesses, output paths or ownership behavior change.
+Native build remains a mandatory predecessor of every candidate.
+
+This matrix is planning-only: no worker scheduling, concurrent stderr relays,
+parallelism option, new public Make goal, changed test order, or relaxed safety
+and qualification gate is authorized by Phase 1. Phase 2 must independently
+prove per-worker isolated outputs/first-error attribution, bounded resource
+admission, cancellation/reaping and teardown before allowing any overlap.
+
 The native production-C suite may compile the unchanged production sources
 once into shared, compiler-configuration-bound objects, then link the existing
 independent test executables. Shared object reuse must track included headers,

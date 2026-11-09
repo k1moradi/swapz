@@ -17,6 +17,122 @@ runner = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(runner)
 
 
+policy_spec = importlib.util.spec_from_file_location(
+    "swapz_rootless_resource_policy",
+    ROOT / "tests/tools/rootless-resource-policy.py")
+resource_policy = importlib.util.module_from_spec(policy_spec)
+policy_spec.loader.exec_module(resource_policy)
+
+
+class RootlessResourceInventoryContract(unittest.TestCase):
+    """Fail closed before any worker scheduler is introduced."""
+
+    def test_all_full_tier_phases_are_classified_exactly_once(self):
+        source = (ROOT / "tests/tools/test-rootless.sh").read_text(
+            encoding="utf-8")
+        claims = resource_policy.audit_harness(source)
+        syntax_labels = {
+            "bash syntax " + Path(path).name
+            for path in resource_policy.SYNTAX_SCRIPTS
+        }
+        self.assertEqual(len(claims), 55)
+        self.assertEqual(len(claims) - len(resource_policy.FULL_ONLY_PHASES), 52)
+        self.assertTrue(all(
+            claims[phase].classification == "serial"
+            for phase in resource_policy.FULL_ONLY_PHASES))
+        self.assertEqual(
+            set(claims), set(runner.ROOTLESS_SUITE_DISPLAY_NAMES) | syntax_labels)
+        self.assertEqual(
+            set(runner.ROOTLESS_SUITE_DISPLAY_NAMES),
+            runner.rootless_phase_names())
+        self.assertFalse(resource_policy.ROOTLESS_PARALLEL_EXECUTION_ENABLED)
+
+    def test_unreviewed_or_changed_phase_fails_closed(self):
+        source = (ROOT / "tests/tools/test-rootless.sh").read_text(
+            encoding="utf-8")
+        with self.assertRaisesRegex(ValueError, "inventory/harness drift"):
+            resource_policy.audit_harness(
+                source + "\nrootless_phase='unreviewed fixture'\n")
+        with self.assertRaisesRegex(ValueError, "duplicate literal"):
+            resource_policy.audit_harness(
+                source + "\nrootless_phase='rootless initialization'\n")
+        self.assertIn("tests/tools/loaded-preflight.sh \\", source)
+        with self.assertRaisesRegex(ValueError, "unreviewed rootless syntax"):
+            resource_policy.audit_harness(source.replace(
+                "tests/tools/loaded-preflight.sh \\",
+                "tests/tools/unknown-preflight.sh \\", 1))
+
+    def test_duplicate_resource_classifications_fail_closed(self):
+        from unittest import mock
+
+        original = "tests/Makefile native and metadata"
+        with mock.patch.dict(
+                resource_policy.READ_ONLY_PHASES,
+                {original: "incorrectly declared read-only"}):
+            with self.assertRaisesRegex(ValueError, "duplicate or unreviewed"):
+                resource_policy.resource_claims()
+
+    def test_serial_build_and_process_hazards_block_overlap(self):
+        claims = resource_policy.resource_claims()
+        build = "tests/Makefile native and metadata"
+        source = "tests/runtime/native/source-contract-test.py"
+        replay = "tests/runtime/benchmark/io-replay-test.py"
+        lifecycle = "tests/runtime/native/primary-lifecycle-audit-test.py"
+        for serial in (build, replay, lifecycle,
+                       "tests/runtime/native/make-interface-test.py",
+                       "tests/runtime/native/test-report-test.py",
+                       "x86_64 native SIMD disassembly contracts"):
+            self.assertEqual(claims[serial].classification, "serial")
+            self.assertEqual(
+                resource_policy.potential_conflicts(serial, source),
+                ("serial-barrier",))
+        with self.assertRaisesRegex(ValueError, "unclassified"):
+            resource_policy.potential_conflicts("unknown suite", source)
+        self.assertEqual(
+            resource_policy.potential_conflicts(source, source),
+            ("same-phase",))
+
+    def test_provisional_readonly_and_private_scopes_are_disjoint(self):
+        claims = resource_policy.resource_claims()
+        source = "tests/runtime/native/source-contract-test.py"
+        readiness = "tests/runtime/native/production-readiness-test.py"
+        syntax = "bash syntax test-loaded.sh"
+        self.assertEqual(claims[syntax].classification, "read-only")
+        self.assertEqual(claims[source].classification, "private-fixtures")
+        self.assertFalse(claims[syntax].writes)
+        self.assertNotEqual(claims[source].writes, claims[readiness].writes)
+        self.assertEqual(resource_policy.potential_conflicts(source, readiness), ())
+        self.assertEqual(resource_policy.potential_conflicts(source, syntax), ())
+        self.assertFalse(resource_policy.ROOTLESS_PARALLEL_EXECUTION_ENABLED)
+        for label, claim in claims.items():
+            with self.subTest(label=label):
+                self.assertTrue(claim.review)
+                self.assertTrue(claim.reads)
+                if claim.classification == "read-only":
+                    self.assertFalse(claim.writes)
+                elif claim.classification == "private-fixtures":
+                    self.assertEqual(claim.writes, {f"private:{label}"})
+                else:
+                    self.assertEqual(claim.classification, "serial")
+                    self.assertTrue(claim.writes)
+
+    def test_claimed_disjointness_does_not_hide_shared_write_conflicts(self):
+        resource = "native-artifacts"
+        writer = "writer fixture"
+        reader = "reader fixture"
+        profiles = {
+            writer: resource_policy.PhaseResources(
+                "private-fixtures", frozenset({"checkout"}),
+                frozenset({resource}), "synthetic writer"),
+            reader: resource_policy.PhaseResources(
+                "read-only", frozenset({resource}), frozenset(),
+                "synthetic reader"),
+        }
+        self.assertEqual(
+            resource_policy.potential_conflicts(writer, reader, profiles),
+            ("shared:native-artifacts",))
+
+
 class NativeTimingContract(unittest.TestCase):
     def test_algorithm_scope_cannot_replace_same_source_full_evidence(self):
         source = "a" * 40
