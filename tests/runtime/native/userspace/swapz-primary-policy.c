@@ -2093,16 +2093,14 @@ static void test_recovery_header_recognition(void)
 	original[0] = 0x11U;
 	swapz_header[0] = 0x22U;
 	memcpy(observed, original, sizeof(observed));
-	assert(swapz_primary_recovery_header_known(
-		observed, original, swapz_header));
+	/* Only the original Linux swap header is recognized during recovery.
+	 * A synthetic SWZ replacement must never authorize a new raw write. */
+	assert(swapz_primary_recovery_header_known(observed, original));
 	memcpy(observed, swapz_header, sizeof(observed));
-	assert(swapz_primary_recovery_header_known(
-		observed, original, swapz_header));
+	assert(!swapz_primary_recovery_header_known(observed, original));
 	observed[128] ^= 0x01U;
-	assert(!swapz_primary_recovery_header_known(
-		observed, original, swapz_header));
-	assert(!swapz_primary_recovery_header_known(
-		NULL, original, swapz_header));
+	assert(!swapz_primary_recovery_header_known(observed, original));
+	assert(!swapz_primary_recovery_header_known(NULL, original));
 }
 
 static void test_checked_header_write(void)

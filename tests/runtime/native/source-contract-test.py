@@ -1996,8 +1996,15 @@ dmsetup() {
         self.assertIn("swapz_linux_swap_header_valid(block, device_bytes)",
                       validator)
         primary_start = (ROOT / "src/userspace/swapz-primary.c").read_text()
-        self.assertIn("#ifdef SWAPZ_PRIMARY_OWNED_NULLBLK_TEST\n\tif (swapz_primary_write_header_checked_fd(",
-                      primary_start)
+        primary_start_body = primary_start.split(
+            "static int swapz_primary_start_prepared(void)", 1)[1].split(
+            "static int swapz_primary_state_recoverable(", 1)[0]
+        self.assertNotIn("swapz_primary_write_header_checked_fd(",
+                         primary_start_body)
+        self.assertIn("memcmp(observed_header, original_header",
+                      primary_start_body)
+        self.assertIn("swapz_primary_format_mapper_swap(",
+                      primary_start_body)
         self.assertIn("swapz_primary_expected_backing_header_at(", primary_start)
         self.assertIn("swapz_primary_linux_swap_header_valid(", primary_start)
         self.assertIn(

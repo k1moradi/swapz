@@ -904,14 +904,13 @@ int main(void)
 
         # A scanner or one of its wrappers must be used in initial metadata
         # admission, but the critical requirement is a fresh call after the
-        # exact target descriptor is opened and before the first partition
-        # write. This permits implementation wrappers without pinning a name.
+        # exact target descriptor is opened and before mapper creation.
+        # Ordinary swap headers are immutable: there is no raw-header write
+        # boundary. This permits wrappers without pinning a scanner name.
         prepare = c_function_body(source, "swapz_primary_prepare_metadata")
         start = c_function_body(source, "swapz_primary_start_prepared")
         target_open_body = c_function_body(
             source, "swapz_primary_target_open_exclusive")
-        write_checked = c_function_body(
-            source, "swapz_primary_write_header_checked_fd")
 
         def text_reaches_scanner(text: str) -> bool:
             for symbol in functions:
@@ -930,10 +929,10 @@ int main(void)
 
         target_open = start.index("swapz_primary_target_open_exclusive(")
         target_open_complete = start.index(";", target_open) + 1
-        first_partition_write = start.index(
-            "swapz_primary_write_header_checked_fd(")
-        self.assertLess(target_open_complete, first_partition_write)
-        final_window = start[target_open_complete:first_partition_write]
+        mapper_create = start.index("swapz_primary_dm_create_mapper(")
+        self.assertLess(target_open_complete, mapper_create)
+        self.assertNotIn("swapz_primary_write_header_checked_fd(", start)
+        final_window = start[target_open_complete:mapper_create]
         revalidated_in_start = text_reaches_scanner(final_window)
 
         opened_target_call = target_open_body.find(
@@ -946,18 +945,10 @@ int main(void)
                 revalidated_in_target_open = text_reaches_scanner(
                     target_open_body[opened_target_complete + 1:])
 
-        pwrite_position = write_checked.find("pwrite(")
-        self.assertGreaterEqual(
-            pwrite_position, 0,
-            "checked header writer no longer exposes the mutation boundary")
-        revalidated_in_writer = text_reaches_scanner(
-            write_checked[:pwrite_position])
-
         self.assertTrue(
-            revalidated_in_start or revalidated_in_target_open or
-            revalidated_in_writer,
-            "cross-PID mount inventory is not revalidated at the final "
-            "safe pre-mutation boundary")
+            revalidated_in_start or revalidated_in_target_open,
+            "cross-PID mount inventory is not revalidated after opening "
+            "the selected target and before mapper creation")
 
         # The mount scanner supplements rather than replaces independent
         # active-swap, DM and holder/topology gates.

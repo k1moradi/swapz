@@ -35,6 +35,11 @@ resume). It asserts that the legacy in-band writer cannot admit a real
 device. This is refusal coverage, **not** RAM-metadata or physical qualification.
 After migration, replace the refusal assertions with native, loaded and
 real-SWAPSPACE2 payload-only/CRC/read/GC proof before opening physical admission.
+Native recovery recognition must accept only the original byte-identical
+SWAPSPACE2 header, rejecting a synthetic SWZ replacement. Cross-namespace
+mount admission must be rechecked after exclusive target open and before
+creating the Device Mapper target; source contracts must not require or
+authorize obsolete raw-partition header writes.
 Contradictory historical formatter requirements below are superseded.
 
 ## Official interface
