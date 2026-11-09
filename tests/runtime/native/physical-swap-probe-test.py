@@ -468,7 +468,6 @@ class PhysicalSwapProbeTests(unittest.TestCase):
         results = json.loads(results_path.read_text())
         results["final_recovery_state"] = "BACKED_UP"
         results_path.write_text(json.dumps(results))
-        (state_dir / probe.BACKUP_NAME).write_bytes(header)
         # Other recovery tests intercept device and kernel operations. Provide
         # only a synthetic cleanup observation; production code is unmodified.
         # Synthetic cleanup PASS fixtures must carry every proof required
@@ -901,7 +900,7 @@ class PhysicalSwapProbeTests(unittest.TestCase):
                 fast_test.assert_not_called()
                 digests.assert_not_called()
 
-    def test_development_recovery_restores_header_without_swapon(self):
+    def test_development_recovery_preserves_header_without_swapon(self):
         with tempfile.TemporaryDirectory() as directory:
             state_dir = Path(directory) / "state"
             state, backup = self.make_recovery_state(state_dir)
@@ -2812,7 +2811,7 @@ class PhysicalSwapProbeTests(unittest.TestCase):
         evidence["prior_matching_reports"] = 1
         return target, evidence
 
-    def test_refuses_volatile_recovery_state_before_backup(self):
+    def test_refuses_volatile_recovery_state_before_ownership(self):
         if not Path("/dev/shm").is_dir():
             self.skipTest("no known tmpfs location available")
         with tempfile.TemporaryDirectory(dir="/dev/shm") as directory:
@@ -3854,8 +3853,8 @@ class PhysicalSwapProbeTests(unittest.TestCase):
         for label, field, value, expected in cases:
             with self.subTest(label=label), tempfile.TemporaryDirectory() as directory:
                 state_dir = Path(directory) / "state"
-                state, backup = self.make_recovery_state(state_dir)
-                state["stage"] = "HEADER_CLEAR_PENDING"
+                state, _ = self.make_recovery_state(state_dir)
+                state["stage"] = "ORACLE_PASS"
                 self.save_recovery_fixture(state_dir, state)
                 results_path = state_dir / probe.RESULTS_NAME
                 if field is not None:
@@ -3874,7 +3873,6 @@ class PhysicalSwapProbeTests(unittest.TestCase):
                 owner_path = (self.recovery_base /
                               f"partition-{state['partuuid']}.active")
                 owner_before = owner_path.read_bytes()
-                saved_header_before = (state_dir / probe.BACKUP_NAME).read_bytes()
                 device_arg = ("/dev/disk/by-uuid/wrong" if label == "wrong-input"
                               else state["device_arg"])
                 with mock.patch.object(probe, "_validate_state_dir"), \
@@ -3889,10 +3887,6 @@ class PhysicalSwapProbeTests(unittest.TestCase):
                 mapper.assert_not_called()
                 write.assert_not_called()
                 self.assertEqual(owner_path.read_bytes(), owner_before)
-                self.assertEqual(
-                    (state_dir / probe.BACKUP_NAME).read_bytes(),
-                    saved_header_before)
-                self.assertEqual(len(backup), probe.PAGE_BYTES)
 
     def test_recovery_publication_faults_preserve_exact_file_and_owner(self):
         # Before rename: old bytes remain. After rename but failed directory
@@ -3910,7 +3904,9 @@ class PhysicalSwapProbeTests(unittest.TestCase):
             with self.subTest(record_type=record_type, phase=phase), \
                     tempfile.TemporaryDirectory() as directory:
                 state_dir = Path(directory) / "state"
-                state, backup = self.make_recovery_state(state_dir)
+                state, _ = self.make_recovery_state(state_dir)
+                state["stage"] = "ORACLE_PASS"
+                self.save_recovery_fixture(state_dir, state)
                 owner_path = (self.recovery_base /
                               f"partition-{state['partuuid']}.active")
                 owner_before = owner_path.read_bytes()
@@ -3919,7 +3915,11 @@ class PhysicalSwapProbeTests(unittest.TestCase):
                 record_path = state_dir / filename
                 previous_bytes = record_path.read_bytes()
                 if record_type == "state":
-                    new_record = {**state, "stage": "HEADER_CLEAR_PENDING"}
+                    new_record = {
+                        **state,
+                        "stage": "RECOVERY_REQUIRED",
+                        "stage_before_recovery": "ORACLE_PASS",
+                    }
                     publish = lambda: probe._save_state(state_dir, new_record)
                 else:
                     new_record = json.loads(previous_bytes)
@@ -3961,10 +3961,8 @@ class PhysicalSwapProbeTests(unittest.TestCase):
                     (state_dir / probe.STATE_NAME).read_bytes())["stage"]
                 self.assertEqual(
                     actual_state,
-                    "HEADER_CLEAR_PENDING" if record_type == "state" and replaced
-                    else "HEADER_CLEARED")
-                self.assertEqual(
-                    (state_dir / probe.BACKUP_NAME).read_bytes(), backup)
+                    "RECOVERY_REQUIRED" if record_type == "state" and replaced
+                    else "ORACLE_PASS")
                 self.assertEqual(owner_path.read_bytes(), owner_before)
                 failure_records.append({
                     "record_type": record_type,
@@ -5156,7 +5154,7 @@ class PhysicalSwapProbeTests(unittest.TestCase):
                                  "swapz-demo" in " ".join(command)
                                  for command in commands))
 
-    def test_recovery_refuses_ambiguous_module_owner_before_header_restore(self):
+    def test_recovery_refuses_ambiguous_module_owner_before_cleanup(self):
         with tempfile.TemporaryDirectory() as directory:
             state_dir = Path(directory) / "state"
             state, backup = self.make_recovery_state(state_dir)
