@@ -24,6 +24,12 @@ out-of-extent compressed payload descriptor and prove `-EUCLEAN`
 before CRC reads the caller-owned image; stale and corrupted-CRC paths
 remain independently checked.
 
+Under an explicit one-block cold-read budget, native packed-read regressions
+must verify one lower payload-block read per logical request, no inherited
+serialized-metadata cache hits, and byte-exact CRC-validated readback after
+overwrite and mutation fences. A separate zero/unlimited-budget scenario
+covers legitimate extent and block-zero data reuse.
+
 New source/native/loaded qualification must prove in-RAM CRC/generation,
 record offsets/lengths, 4/8/16KiB packing, read correctness, GC, overwrite,
 DISCARD and concurrency, partial/failing I/O, memory capacity and no stale

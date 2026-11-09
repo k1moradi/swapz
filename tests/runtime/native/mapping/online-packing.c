@@ -284,20 +284,20 @@ static int test_full_window_and_selective_reads(void)
 	return 0;
 }
 
-static int test_metadata_set_cache_reuses_validated_block_zero(void)
+/*
+ * Under the explicit one-block cold-read budget, each compressed logical
+ * payload must independently read its one lower data block and validate its
+ * RAM-authoritative CRC. No former in-band metadata-cache hit is allowed to
+ * satisfy a subsequent read, even with the block-zero LRU provisioned.
+ */
+static int test_one_block_budget_does_not_reuse_payload_cache(void)
 {
 	struct swapz_compressed_page pages[64];
 	swapz_u8 committed = 0, output[3568];
 	swapz_u16 length = 0;
-	swapz_u32 i;
-	swapz_u32 reads_before;
-	swapz_u32 epoch_before, epoch_after;
+	swapz_u32 index, reads_before;
 
 	CHECK(setup() == 0);
-	CHECK(sizeof(struct swapz_read_metadata_tag) == 16);
-	CHECK(((uintptr_t)&engine.read_metadata_tags[0] & 63U) == 0);
-	CHECK((uintptr_t)&engine.read_metadata_tags[4] -
-	      (uintptr_t)&engine.read_metadata_tags[0] == 64);
 	memset(scratch_metadata_cache, 0, sizeof(scratch_metadata_cache));
 	engine.read_metadata_cache = scratch_metadata_cache;
 	engine.max_read_blocks_per_record = 1;
@@ -305,43 +305,31 @@ static int test_metadata_set_cache_reuses_validated_block_zero(void)
 	CHECK(write_window_sequential(pages, 64, &committed) == 0);
 	CHECK(committed == 64);
 
-	/* Five distinct one-block extents evict the real one-entry cache but not
-	 * the 512-entry four-way metadata cache. A successful set hit must return
-	 * exact data without issuing another lower read. */
-	for (i = 0; i < 5; ++i)
-		CHECK(swapz_engine_read_page(&engine, i, output,
+	for (index = 0; index < 5; ++index) {
+		reads_before = disk.read_blocks;
+		CHECK(swapz_engine_read_page(&engine, index, output,
 					   sizeof(output), &length) == 0);
+		CHECK(length == 2072);
+		CHECK(!memcmp(output, originals[index], length));
+		CHECK(disk.read_blocks == reads_before + 1U);
+	}
 	reads_before = disk.read_blocks;
 	CHECK(swapz_engine_read_page(&engine, 0, output,
 				   sizeof(output), &length) == 0);
-	CHECK(length == 2072 && !memcmp(output, originals[0], length));
-	CHECK(disk.read_blocks == reads_before);
+	CHECK(!memcmp(output, originals[0], length));
+	CHECK(disk.read_blocks == reads_before + 1U);
 	CHECK(engine.read_metadata_cache_hits == 0);
-	CHECK(engine.read_metadata_lru_hits == 1);
-	CHECK(engine.read_metadata_set_hits >= 1);
-	CHECK(engine.read_metadata_set_probes <=
-	      8U * engine.read_metadata_set_lookups);
-	CHECK(engine.read_metadata_copy_bytes == 2072);
+	CHECK(engine.read_metadata_lru_hits == 0);
+	CHECK(engine.read_metadata_set_hits == 0);
+	CHECK(engine.read_metadata_copy_bytes == 0);
 
-	/* The ordinary mutation fence invalidates by epoch. Re-reading after it
-	 * must hit the lower device again without clearing the 512-tag directory. */
-	epoch_before = engine.read_metadata_epoch;
+	/* Mutation fences cannot resurrect a stale block-zero data cache. */
 	swapz_engine_invalidate_read_cache(&engine);
-	epoch_after = engine.read_metadata_epoch;
-	CHECK(epoch_before != 0 && epoch_after != epoch_before);
-	CHECK(engine.read_metadata_lru_clock == 0);
-	/* Repeated mutation fences on an already-empty metadata LRU are a
-	 * semantic no-op and must not churn the epoch. */
-	swapz_engine_invalidate_read_cache(&engine);
-	CHECK(engine.read_metadata_epoch == epoch_after);
 	reads_before = disk.read_blocks;
 	CHECK(swapz_engine_read_page(&engine, 0, output,
 				   sizeof(output), &length) == 0);
-	CHECK(disk.read_blocks == reads_before + 1);
-	CHECK(engine.read_metadata_lru_hits == 1);
+	CHECK(disk.read_blocks == reads_before + 1U);
 
-	/* A real engine write invokes the same invalidation before publication.
-	 * The old cached block-zero must never survive a generation change. */
 	prepare(pages, 1, 0, 70);
 	committed = 0;
 	CHECK(write_window_sequential(pages, 1, &committed) == 0);
@@ -349,23 +337,26 @@ static int test_metadata_set_cache_reuses_validated_block_zero(void)
 	reads_before = disk.read_blocks;
 	CHECK(swapz_engine_read_page(&engine, 0, output,
 				   sizeof(output), &length) == 0);
-	CHECK(disk.read_blocks == reads_before + 1);
+	CHECK(disk.read_blocks == reads_before + 1U);
 	CHECK(length == 2072 && output[0] == 71);
 
-	/* The measured capacity retains an entry across 63 distinct successors. */
+	/* Even 63 intervening successful reads never turn the 64th into a
+	 * retained payload hit under the one-block cold-read policy. */
 	swapz_engine_invalidate_read_cache(&engine);
-	CHECK(swapz_engine_read_page(&engine, 0, output,
-				   sizeof(output), &length) == 0);
-	for (i = 1; i < 64; ++i)
-		CHECK(swapz_engine_read_page(&engine, i, output,
+	for (index = 1; index < 64; ++index) {
+		reads_before = disk.read_blocks;
+		CHECK(swapz_engine_read_page(&engine, index, output,
 					   sizeof(output), &length) == 0);
-	/* Page 0 is still resident after only 63 distinct successors. */
+		CHECK(length == 2072);
+		CHECK(!memcmp(output, originals[index], length));
+		CHECK(disk.read_blocks == reads_before + 1U);
+	}
 	reads_before = disk.read_blocks;
 	CHECK(swapz_engine_read_page(&engine, 0, output,
 				   sizeof(output), &length) == 0);
-	CHECK(disk.read_blocks == reads_before);
-	CHECK(engine.read_metadata_lru_hits == 2);
-	CHECK(engine.read_metadata_copy_bytes == 4144);
+	CHECK(length == 2072 && output[0] == 71);
+	CHECK(disk.read_blocks == reads_before + 1U);
+	CHECK(engine.read_metadata_lru_hits == 0);
 	return 0;
 }
 
@@ -1325,7 +1316,7 @@ int main(void)
 	CHECK(test_finite_window_planner() == 0); completed++;
 	CHECK(test_uniform_pack_cliff_reduces_physical_blocks() == 0); completed++;
 	CHECK(test_full_window_and_selective_reads() == 0); completed++;
-	CHECK(test_metadata_set_cache_reuses_validated_block_zero() == 0); completed++;
+	CHECK(test_one_block_budget_does_not_reuse_payload_cache() == 0); completed++;
 	CHECK(test_metadata_siblings_keep_unique_tags_in_a_full_set() == 0); completed++;
 	CHECK(test_metadata_secondary_choice_retains_primary_collisions() == 0); completed++;
 	CHECK(test_four_block_extent_reuses_each_payload_block_once() == 0); completed++;
