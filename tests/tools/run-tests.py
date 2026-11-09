@@ -1797,7 +1797,7 @@ def parse_loaded_correctness(output):
             r"repeat_recovery:safe host_swap_identity:preserved$"),
     }
     expected_interruption_phases = (
-        "start-starting", "start-header-written", "start-module-inserted",
+        "start-starting", "start-header-verified", "start-module-inserted",
         "start-module-loaded", "start-mapper-inactive",
         "start-mapper-resumed", "start-mkswap", "start-swapon",
         "stop-stopping", "stop-swapoff", "stop-mapper-removed",
