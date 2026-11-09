@@ -895,8 +895,9 @@ static int swapz_engine_required_read_range_resident(
 	swapz_u8 required = 0, missing;
 	swapz_u8 first, last, index;
 
-	if (!engine || !engine->authority || !logical_pages || !count ||
-	    count > SWAPZ_MAX_RECORDS || !first_block || !blocks ||
+	if (!engine || !engine->authority || !engine->authority->maps ||
+	    !logical_pages || !count || count > SWAPZ_MAX_RECORDS ||
+	    !first_block || !blocks ||
 	    (extent_blocks != 1U && extent_blocks != 2U && extent_blocks != 4U) ||
 	    start_block >= engine->authority->physical_blocks ||
 	    extent_blocks > engine->authority->physical_blocks - start_block ||
@@ -993,7 +994,9 @@ int swapz_engine_required_read_range_cached(
 	 * lookups. A corrupt u8 extent count can otherwise shift by >= 32 before
 	 * required_read_range_resident() gets a chance to reject the map.
 	 */
-	if (!engine || !engine->authority ||
+	if (!engine || !engine->authority || !engine->authority->maps ||
+	    !logical_pages || !count || count > SWAPZ_MAX_RECORDS ||
+	    !first_block || !blocks ||
 	    (extent_blocks != 1U && extent_blocks != 2U && extent_blocks != 4U) ||
 	    start_block >= engine->authority->physical_blocks ||
 	    extent_blocks > engine->authority->physical_blocks - start_block ||
@@ -1011,7 +1014,18 @@ int swapz_engine_required_read_range_cached(
 			engine, start_block, extent_blocks);
 	if (cache_slot >= 0)
 		resident |= engine->read_extent_lru_block_masks[cache_slot];
-	if (!(resident & 1U) && engine->read_metadata_lru_clock &&
+	/* For a single record starting beyond block zero, its compressed
+	 * payload cannot touch the cached first 4KiB block: all valid records
+	 * are at most SWAPZ_MAX_COMPRESSED (< SWAPZ_BLOCK_BYTES). Avoid an
+	 * irrelevant cache set probe before planning the actual READ. Multiple
+	 * records retain the existing conservative lookup.
+	 */
+	if (!(resident & 1U) &&
+	    (count != 1U ||
+	     logical_pages[0] >= engine->authority->logical_pages ||
+	     engine->authority->maps[logical_pages[0]].payload_offset <
+		     SWAPZ_BLOCK_BYTES) &&
+	    engine->read_metadata_lru_clock &&
 	    (engine->read_metadata_segment_mask &
 	     (1ULL << ((start_block / SWAPZ_SEGMENT_BLOCKS) & 63U)))) {
 		metadata_slot = swapz_read_metadata_set_lookup(
