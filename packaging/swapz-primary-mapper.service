@@ -2,6 +2,8 @@
 Description=Own the primary swapz mapper and swap lifecycle
 DefaultDependencies=no
 Requires=-.mount
+# Persistent qualification evidence is read from /var/lib; mutable lifecycle
+# ownership is kept only in RuntimeDirectory=/run/swapz below.
 RequiresMountsFor=/var/lib/swapz/physical-recovery
 After=-.mount systemd-modules-load.service dev-mapper-swapz\x2dprimary.swap
 Before=swap.target shutdown.target
@@ -9,7 +11,7 @@ Conflicts=shutdown.target
 # swapzctl primary start performs swapon; primary stop performs swapoff.
 # Do not start the passive .swap unit as a second activation job. This service
 # is WantedBy=swap.target and must stop *before* the observed .swap unit so
-# that the manager owns the only swapoff and durable ownership transition.
+# that the manager owns the only swapoff and same-boot ownership transition.
 RefuseManualStart=yes
 RefuseManualStop=yes
 
@@ -24,8 +26,9 @@ RuntimeDirectoryMode=0700
 # systemd unit is active or activating. The hibernation side independently
 # refuses the entire configured-primary interval, closing both race directions.
 ExecStartPre=@SWAPZ_SBINDIR@/swapz-primary-runtime-health activation-guard
-# A failed recovery is intentionally followed by prepare: prepare can reconcile
-# metadata-only READY/COMPLETE records, but any unsafe stale state still blocks.
+# A failed same-boot recovery is intentionally followed by prepare: prepare can
+# reconcile volatile READY/COMPLETE ownership records, but unsafe live state
+# still blocks. No raw swap header is restored or reformatted.
 ExecStartPre=@SWAPZ_SBINDIR@/swapz-primary-boot-verify preflight
 ExecStartPre=-@SWAPZ_SBINDIR@/swapzctl primary recover
 ExecStartPre=@SWAPZ_SBINDIR@/swapzctl primary prepare
@@ -45,8 +48,9 @@ UMask=0077
 # Exclude unrelated privileges rather than guessing a tighter untested allowlist.
 CapabilityBoundingSet=~CAP_NET_ADMIN CAP_NET_RAW CAP_NET_BIND_SERVICE CAP_SYS_BOOT CAP_SYS_TIME CAP_SYSLOG CAP_MAC_ADMIN CAP_MAC_OVERRIDE CAP_BPF CAP_PERFMON CAP_CHECKPOINT_RESTORE
 NoNewPrivileges=yes
-# Full (rather than strict) intentionally keeps /run/lock/swapz, /run/swapz,
-# udev coordination and durable /var/lib/swapz recovery writable for the owner.
+# Full (rather than strict) intentionally keeps /run/lock/swapz and /run/swapz
+# writable for ownership, while /var/lib/swapz retains qualification evidence.
+# udev coordination remains available to the lifecycle owner.
 ProtectSystem=full
 ProtectHome=yes
 # PrivateTmp=yes implicitly orders tmp.mount ahead of this early swap owner;
