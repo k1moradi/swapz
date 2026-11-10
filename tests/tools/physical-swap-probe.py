@@ -2698,7 +2698,7 @@ def _restore_development_swapfiles(state):
             raise ProbeError(
                 "unrelated swapfile changed although this run never owned it")
         return True
-    if deactivated_by_run not in {None, True}:
+    if deactivated_by_run is not None and deactivated_by_run is not True:
         raise ProbeError("unrelated swapfile ownership state is malformed")
     # Missing ownership is historical compatibility: older same-boot helpers
     # did temporarily deactivate these exact saved swapfiles.
@@ -3004,8 +3004,13 @@ def _recovery_state_identity_matches(expected, observed):
             return False
     if ("unrelated_swapfiles_deactivated_by_run" in expected or
             "unrelated_swapfiles_deactivated_by_run" in observed):
-        if (expected.get("unrelated_swapfiles_deactivated_by_run") is not
-                observed.get("unrelated_swapfiles_deactivated_by_run")):
+        expected_ownership = expected.get(
+            "unrelated_swapfiles_deactivated_by_run")
+        observed_ownership = observed.get(
+            "unrelated_swapfiles_deactivated_by_run")
+        if (type(expected_ownership) is not bool or
+                type(observed_ownership) is not bool or
+                expected_ownership is not observed_ownership):
             return False
     return True
 
@@ -3039,8 +3044,12 @@ def _require_recovery_results_binding(state, results):
             _validate_saved_swapfile(swapfile)
     if ("unrelated_swapfiles_deactivated_by_run" in state or
             "unrelated_swapfiles_deactivated_by_run" in results):
-        if (state.get("unrelated_swapfiles_deactivated_by_run") is not
-                results.get("unrelated_swapfiles_deactivated_by_run")):
+        state_ownership = state.get("unrelated_swapfiles_deactivated_by_run")
+        result_ownership = results.get(
+            "unrelated_swapfiles_deactivated_by_run")
+        if (type(state_ownership) is not bool or
+                type(result_ownership) is not bool or
+                state_ownership is not result_ownership):
             raise ProbeError(
                 "saved physical results/state binding mismatch: "
                 "unrelated_swapfiles_deactivated_by_run; "
