@@ -162,6 +162,31 @@ class SwapzProductionSourceQualification(unittest.TestCase):
         self.assertGreaterEqual(policy.count(helper), 2)
         self.assertNotIn(helper, mount_namespace)
 
+    def test_late_race_raw_swap_transition_seam_is_single_and_ordered(self):
+        fixture = (
+            ROOT /
+            "tests/runtime/native/userspace/swapz-primary-late-race-test.py"
+        ).read_text(encoding="utf-8")
+        macro = "#define swapz_primary_transition_original_swap("
+        function = "static int fixture_original_swap_transition("
+
+        # START now owns an ordinary-swap transition before mapper mutation.
+        # The generated rootless TU must intercept that boundary exactly once:
+        # duplicate concurrent stubs are a -Werror regression, while omitting
+        # the seam would make the extracted coordinator depend on host swap.
+        self.assertEqual(fixture.count(macro), 1)
+        self.assertEqual(fixture.count(function), 1)
+        self.assertNotIn("fixture_transition_original_swap", fixture)
+        transition = fixture.split(function, 1)[1].split(
+            "static int fixture_swapon(", 1)[0]
+        self.assertIn("starting_state_writes == 1U", transition)
+        self.assertIn("++raw_swap_transition_calls", transition)
+        self.assertIn("++raw_swap_policy_checks", transition)
+        self.assertLess(fixture.index(macro),
+                        fixture.index("@@START_FUNCTION@@"))
+        self.assertIn("#undef swapz_primary_transition_original_swap",
+                      fixture)
+
     def test_package_and_primary_share_global_mutation_lock(self):
         mutation = source_body("swapz_primary_run_mutating_action", PRIMARY)
         command = source_body("swapz_primary_command", PRIMARY)
