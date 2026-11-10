@@ -13146,6 +13146,108 @@ static int swapz_primary_start_prepared(void)
 	durable_observation = "OBSERVED";
 	persistence_boundary = "none";
 	SWAPZ_PRIMARY_TEST_INTERRUPT_AFTER("start-starting");
+
+	/*
+	 * Raw swapoff is now the first device mutation. Revalidate every identity
+	 * and cross-namespace mount fact that authorized PREPARE after STARTING is
+	 * durable and immediately before disabling ordinary swap. If this snapshot
+	 * fails, recovery sees STARTING with the raw partition still untouched.
+	 */
+	{
+		struct swapz_primary_mount_facts preswap_mount_facts = {0};
+		char preswap_partuuid[SWAPZ_PRIMARY_PARTUUID_LENGTH + 1U] = {0};
+		dev_t preswap_target_parent = 0;
+		dev_t preswap_root_parent = 0;
+		int active;
+
+		failure_phase = "preswap-target-parent-identity";
+		if (!swapz_primary_recovery_source_chain(
+			    "/sys", SWAPZ_PRIMARY_TARGET_DEVICE, 0,
+			    &preswap_target_parent) ||
+		    preswap_target_parent != target_parent) {
+			if (!errno)
+				errno = ESTALE;
+			failure_expected = "unchanged-admitted-target-parent-device";
+			failure_observed = "target-parent-device-changed";
+			goto out;
+		}
+		failure_phase = "preswap-cross-namespace-mount-inventory";
+		if (swapz_primary_read_mount_facts(
+			    &preswap_mount_facts, preswap_target_parent) < 0)
+			goto out;
+		if (preswap_mount_facts.target_mounted) {
+			errno = EBUSY;
+			goto out;
+		}
+		failure_phase = "preswap-root-parent-identity";
+		if (!swapz_primary_root_source_chain(
+			    "/sys", preswap_mount_facts.root_device,
+			    SWAPZ_PRIMARY_TARGET_DEVICE, &preswap_root_parent) ||
+		    preswap_root_parent != root_parent ||
+		    ((preswap_target_parent == preswap_root_parent) !=
+		     shared_root_parent_required)) {
+			if (!errno)
+				errno = ESTALE;
+			failure_expected = "unchanged-admitted-root-parent-scope";
+			failure_observed = "root-parent-identity-changed";
+			goto out;
+		}
+		if (shared_root_parent_required) {
+			failure_phase = "preswap-shared-root-parent-authorization";
+			if (swapz_primary_shared_root_scope_record_live(
+				    &target, preswap_mount_facts.root_device,
+				    preswap_target_parent, preswap_root_parent, -1,
+				    rechecked_root_scope_sha256) < 0 ||
+			    strcmp(shared_root_scope_sha256,
+				   rechecked_root_scope_sha256)) {
+				if (!errno)
+					errno = ESTALE;
+				failure_expected =
+					"unchanged-authorized-root-parent-scope";
+				failure_observed =
+					"missing-mismatched-or-changed";
+				goto out;
+			}
+		}
+		active = swapz_primary_swap_device_active(preswap_target_parent);
+		if (active != 0) {
+			if (active > 0)
+				errno = EBUSY;
+			goto out;
+		}
+		failure_phase = "preswap-protected-selector-identity";
+		failure_expected =
+			"unchanged-admitted-selector-directory-and-file";
+		if (swapz_primary_selector_admission_still_live(
+			    &selector_admission, &failure_observed) < 0)
+			goto out;
+		failure_expected =
+			"manifest-target-matches-admitted-selector-content";
+		if (swapz_primary_selector_admission_read_partuuid(
+			    &selector_admission, preswap_partuuid) < 0 ||
+		    strcmp(preswap_partuuid, manifest.target.partuuid)) {
+			if (!errno)
+				errno = ESTALE;
+			failure_observed =
+				"selected-target-not-bound-to-admitted-selector";
+			goto out;
+		}
+		failure_phase = "preswap-target-identity";
+		failure_expected =
+			"unchanged-admitted-target-partition-and-geometry";
+		if (swapz_primary_target_revalidate(&manifest.target) < 0) {
+			failure_observed = "target-identity-unverifiable";
+			goto out;
+		}
+		failure_phase = "preswap-protected-selector-identity";
+		failure_expected =
+			"unchanged-admitted-selector-directory-and-file";
+		if (swapz_primary_selector_admission_still_live(
+			    &selector_admission, &failure_observed) < 0)
+			goto out;
+	}
+	failure_expected = NULL;
+	failure_observed = NULL;
 	failure_phase = "raw-swapoff";
 	swap_observation = "UNCERTAIN";
 	if (swapz_primary_transition_original_swap(
