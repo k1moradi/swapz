@@ -3505,11 +3505,16 @@ static int swapz_primary_original_swap_policy_snapshot(
 	return 0;
 }
 
-static int swapz_primary_original_swap_is_quiescent(
+static int swapz_primary_original_swap_policy_admissible(
 	uint64_t target_size_kib)
 {
+	/*
+	 * An active ordinary swap partition may legitimately contain pages.
+	 * PREPARE verifies identity/type/size/priority but must not require Used=0:
+	 * START's swapoff syscall is the authoritative migration boundary.
+	 */
 	return swapz_primary_original_swap_policy_snapshot(
-		target_size_kib, 1, NULL, NULL);
+		target_size_kib, 0, NULL, NULL);
 }
 #endif
 
@@ -10807,7 +10812,7 @@ static int swapz_primary_transition_original_swap(
 	if (swapz_primary_original_swap_size_from_manifest(
 		    manifest, &target_size_kib) < 0 ||
 	    swapz_primary_original_swap_policy_snapshot(
-		    target_size_kib, activate ? 0 : 1,
+		    target_size_kib, 0,
 		    &current_active, &current_priority) < 0)
 		return -1;
 
@@ -12545,7 +12550,7 @@ static int swapz_primary_prepare_metadata(
 		goto out;
 	}
 	failure_phase = "raw-target-swap-inventory";
-	if (swapz_primary_original_swap_is_quiescent(original_swap_size_kib) < 0)
+	if (swapz_primary_original_swap_policy_admissible(original_swap_size_kib) < 0)
 		goto out;
 	failure_phase = "target-physical-parent-identity";
 	if (!swapz_primary_recovery_source_chain(
@@ -12581,7 +12586,7 @@ static int swapz_primary_prepare_metadata(
 		}
 	}
 	failure_phase = "repeated-raw-target-swap-inventory";
-	if (swapz_primary_original_swap_is_quiescent(original_swap_size_kib) < 0)
+	if (swapz_primary_original_swap_policy_admissible(original_swap_size_kib) < 0)
 		goto out;
 	failure_phase = "repeated-target-physical-parent-identity";
 	if (!swapz_primary_recovery_source_chain(
@@ -12648,7 +12653,7 @@ static int swapz_primary_prepare_metadata(
 		goto out;
 	}
 	failure_phase = "final-raw-target-swap-inventory";
-	if (swapz_primary_original_swap_is_quiescent(original_swap_size_kib) < 0)
+	if (swapz_primary_original_swap_policy_admissible(original_swap_size_kib) < 0)
 		goto out;
 	{
 		struct swapz_primary_mount_facts verified_mount_facts = {0};
