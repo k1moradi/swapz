@@ -18,9 +18,9 @@ and unchanged SWAPSPACE2 block-zero verification. Treat older physical
 benchmark reports as historical; do not extrapolate null_blk figures to
 ordinary SWAPSPACE2 partition performance.
 New physical trials bind `raw_header_preservation_required=True` into
-immutable recovery-state comparisons: a later record removing or changing this
-claim is rejected. Older journals where both snapshots lack the claim remain
-historical recovery evidence, never authority to rewrite a current partition.
+immutable same-boot trial-state comparisons: a later record removing or changing
+this claim is rejected. Older journals where both snapshots lack the claim remain
+historical evidence only, never authority to rewrite a current partition.
 
 ## Ordinary swap and RAM-metadata qualification boundary
 
