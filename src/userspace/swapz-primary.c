@@ -75,8 +75,8 @@ static void swapz_primary_selected_target_clear(void)
 #ifndef SWAPZ_PRIMARY_TEST_CONFIG_BASE
 #error "owned-null_blk lifecycle test requires private config base"
 #endif
-#ifndef SWAPZ_PRIMARY_TEST_RECOVERY_BASE
-#error "owned-null_blk lifecycle test requires private recovery base"
+#ifndef SWAPZ_PRIMARY_TEST_RUNTIME_STATE_BASE
+#error "owned-null_blk lifecycle test requires private runtime-state base"
 #endif
 #ifndef SWAPZ_PRIMARY_TEST_QUALIFICATION_REPORT
 #error "owned-null_blk lifecycle test requires private qualification report"
@@ -85,8 +85,10 @@ static void swapz_primary_selected_target_clear(void)
 #error "owned-null_blk lifecycle test requires private mutation lock directory"
 #endif
 #define SWAPZ_PRIMARY_CONFIG_BASE SWAPZ_PRIMARY_TEST_CONFIG_BASE
-#define SWAPZ_PRIMARY_RUNTIME_STATE_BASE SWAPZ_PRIMARY_TEST_RECOVERY_BASE
-#define SWAPZ_PRIMARY_QUALIFICATION_BASE SWAPZ_PRIMARY_TEST_RECOVERY_BASE
+#define SWAPZ_PRIMARY_RUNTIME_STATE_BASE SWAPZ_PRIMARY_TEST_RUNTIME_STATE_BASE
+/* Private rehearsal keeps its synthetic qualification report beside its
+ * isolated runtime fixture; production evidence remains separately persistent. */
+#define SWAPZ_PRIMARY_QUALIFICATION_BASE SWAPZ_PRIMARY_TEST_RUNTIME_STATE_BASE
 #define SWAPZ_PRIMARY_QUALIFICATION_REPORT \
 	SWAPZ_PRIMARY_TEST_QUALIFICATION_REPORT
 #define SWAPZ_PRIMARY_MUTATION_LOCK_DIRECTORY \
