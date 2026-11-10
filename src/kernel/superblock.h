@@ -105,7 +105,8 @@ static inline int swapz_linux_swap_header_parse(
 		parsed.byte_swapped);
 	if (!parsed.last_page ||
 	    (unsigned long long)parsed.last_page >= complete_pages ||
-	    parsed.bad_pages > SWAPZ_LINUX_SWAP_MAX_BAD_PAGES)
+	    parsed.bad_pages > SWAPZ_LINUX_SWAP_MAX_BAD_PAGES ||
+	    parsed.bad_pages > parsed.last_page)
 		return 0;
 
 	for (index = 0; index < parsed.bad_pages; ++index) {

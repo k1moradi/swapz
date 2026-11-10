@@ -643,7 +643,10 @@ Bind the durable manifest to the **currently verified configured target
 geometry**, PARTUUID, source/artifact identity and the SHA-256 digest of the
 unchanged 4096-byte SWAPSPACE2 header. The digest is an integrity witness, not
 a backup or restoration image. No transaction field authorizes a raw-partition
-header write. The configured target is resolved from the protected PARTUUID
+header write. Read-only Linux swap v1 parsing rejects a listed bad-page count
+exceeding the declared data-page count before traversing that list; it must
+still accept duplicate entries within that bound and deduplicate dirty
+allocation segments separately. The configured target is resolved from the protected PARTUUID
 selector, and its opened descriptor, discovered device number, byte size and
 parent relationship are rechecked at runtime. The one-use transaction claim is
 crash/ownership metadata, not a request for another human approval.

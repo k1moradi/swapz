@@ -124,6 +124,21 @@ int main(void)
 		++failures;
 	}
 
+	/* Duplicate entries are allowed, but more listed bad pages than Linux's
+	 * declared data pages would underflow usable swap capacity. Reject that
+	 * malformed header before segment translation or any lower I/O. */
+	build_linux_swap_header(header);
+	put_u32_le(header + SWAPZ_LINUX_SWAP_LAST_PAGE_OFFSET, 1U);
+	put_u32_le(header + SWAPZ_LINUX_SWAP_BAD_PAGES_OFFSET, 2U);
+	put_u32_le(header + SWAPZ_LINUX_SWAP_BAD_PAGE_LIST_OFFSET, 1U);
+	put_u32_le(header + SWAPZ_LINUX_SWAP_BAD_PAGE_LIST_OFFSET +
+		   sizeof(unsigned int), 1U);
+	if (swapz_linux_swap_header_parse(header, DEVICE_BYTES, &layout)) {
+		fprintf(stderr,
+			"FAIL: swap header admits more bad entries than data pages\n");
+		++failures;
+	}
+
 	/* A larger block device may carry an intentionally smaller declared
 	 * SWAPSPACE2 area; the 32-bit header field limits the area, not the disk. */
 	build_linux_swap_header(header);
