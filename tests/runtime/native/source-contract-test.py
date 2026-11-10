@@ -2005,6 +2005,16 @@ dmsetup() {
                       compact_validator)
         self.assertNotIn("swapz_linux_swap_header_valid", validator)
         self.assertNotIn("swapz_sb_valid", validator)
+        # An undersized ordinary swap layout must fail before allocating
+        # a sparse bitmap or its larger clean-segment translation array.
+        self.assertIn("if (raw_segments < 3U)", compact_layout_builder)
+        self.assertIn("if (clean_segments < 3U)", compact_layout_builder)
+        self.assertLess(
+            layout_builder.index("if (raw_segments < 3U)"),
+            layout_builder.index("bitmap_zalloc(raw_segments, GFP_KERNEL)"))
+        self.assertLess(
+            layout_builder.index("if (clean_segments < 3U)"),
+            layout_builder.index("ctx->segment_backing_pages = kvcalloc("))
         self.assertIn("bitmap_zalloc(raw_segments, GFP_KERNEL)",
                       compact_layout_builder)
         self.assertIn("test_and_set_bit(raw_segment, bad_segments)",
