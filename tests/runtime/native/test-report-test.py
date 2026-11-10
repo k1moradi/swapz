@@ -5307,6 +5307,8 @@ class ReportContract(unittest.TestCase):
                 "binary=swapz-primary-policy exit=7", result.stderr)
             self.assertNotIn("invoked swapz-primary-mount-namespace",
                              result.stdout)
+            self.assertNotIn("ative_test", result.stderr)
+            self.assertNotIn("Illegal number", result.stderr)
 
     def test_native_userspace_console_reports_failing_binary_and_source(self):
         from types import SimpleNamespace
