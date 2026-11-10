@@ -1879,6 +1879,7 @@ class PairReplayContract(unittest.TestCase):
             self.assertEqual(ready.read_text(), "READY\n")
             open_dir = root / "open"
             open_dir.mkdir(mode=0o755)
+            open_dir.chmod(0o755)
             with self.assertRaisesRegex(ValueError, "private and owned"):
                 replay["wait_for_external_start_gate"](
                     open_dir / "ready", open_dir / "start")

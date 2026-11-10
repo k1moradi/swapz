@@ -62,6 +62,10 @@ Shared-root source contracts must require topology validation before exposing
 the scope fingerprint and fingerprint availability before reading the owner's
 scope record. Volatile lifecycle state has no recovery-disk separation phase;
 do not require retired persistent-recovery markers in prepare or plan.
+The external-start-gate permission negative control must explicitly set its
+nonprivate directory to mode 0755 after creation. An inherited restrictive
+umask must not convert that negative fixture into an admitted private gate
+that waits for an intentionally absent start file.
 
 The isolated Make-interface loaded fixture must model the immutable backing
 header by reporting `start-header-verified`, never the retired
