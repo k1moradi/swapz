@@ -25,7 +25,7 @@ SPEC = importlib.util.spec_from_file_location("physical_swap_probe", SCRIPT)
 probe = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(probe)
 
-REAL_RECOVERY_BASE = probe._recovery_base
+REAL_RUNTIME_STATE_BASE = probe._runtime_state_base
 REAL_LEGACY_RECOVERY_BASE = probe._legacy_recovery_base
 REAL_ALGORITHM_RUNTIME_BASE = probe._algorithm_runtime_base
 REAL_PARTITION_LOCK = probe._partition_lock
@@ -76,9 +76,9 @@ class PhysicalSwapProbeTests(unittest.TestCase):
         runtime_constant.start()
         self.addCleanup(runtime_constant.stop)
         for name, replacement in (
-            ("_recovery_base", lambda target=None: self.recovery_base),
+            ("_runtime_state_base", lambda target=None: self.recovery_base),
             ("_algorithm_runtime_base", lambda: self.recovery_base),
-            ("_recovery_run_directory", lambda path, run_id=None: Path(path)),
+            ("_state_run_directory", lambda path, run_id=None: Path(path)),
             ("_partition_lock",
              lambda partuuid, base=None: os.open(os.devnull, os.O_RDONLY)),
         ):
@@ -2924,9 +2924,9 @@ class PhysicalSwapProbeTests(unittest.TestCase):
                  probe, "_legacy_recovery_base",
                  side_effect=AssertionError(
                      "current admission consulted persistent recovery")):
-            self.assertEqual(REAL_RECOVERY_BASE(target), self.recovery_base)
+            self.assertEqual(REAL_RUNTIME_STATE_BASE(target), self.recovery_base)
             target["parent_major_minor"] = "259:0"
-            self.assertEqual(REAL_RECOVERY_BASE(target), self.recovery_base)
+            self.assertEqual(REAL_RUNTIME_STATE_BASE(target), self.recovery_base)
 
     def test_legacy_recovery_base_is_explicit_and_persistent_only(self):
         if not Path("/dev/shm").is_dir():
