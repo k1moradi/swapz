@@ -172,13 +172,17 @@ preserve the default same-parent refusal.
 
 This host-scope record does not authorize the parent disk or any sibling
 partition, and it does not by itself qualify, prepare, start or install
-swapz. All source, artifact, loaded, physical data-integrity, lifecycle,
-recovery and deployment gates remain mandatory. The target/recovery-parent
-separation gate is absolute: the durable recovery filesystem must be
-persistent and on a different physical parent from `/dev/sda4`. The current
-`/var/lib/swapz/physical-recovery` storage is on the same USB parent, so this
-host remains BLOCKED for target mutation until suitable independent persistent
-recovery storage is available. No fallback swap area is required or implied.
+swapz. All source, artifact, loaded, physical data-integrity, lifecycle and
+deployment gates remain mandatory. A separate persistent "recovery" disk is
+not a swapz requirement: the backing `SWAPSPACE2` header is immutable and
+swapz mapping authority is volatile, so there is no swap header or payload
+image to restore after reboot. Mutable run ownership belongs in root-owned
+same-boot RAM-backed state under `/run`; persistent qualification/build
+evidence may remain outside the swap device but must never become data-path
+metadata or a physical-parent admission dependency. Any production path that
+still requires `/var/lib/swapz/physical-recovery` to be on another physical
+device is obsolete P0 migration debt, not a safety requirement. No fallback
+swap area is required or implied.
 
 No fallback swap is required. Do not create or modify unrelated storage merely
 to provide fallback. If the authorized card is unavailable or cannot be proven
