@@ -34,8 +34,17 @@ import time
 ROOT = Path(__file__).resolve().parents[2]
 PAGE_BYTES = 4096
 SWAP_SIGNATURE = b"SWAPSPACE2"
-LOGICAL_SECTORS = 32768
-LOGICAL_MAPPER_BYTES = LOGICAL_SECTORS * 512
+SECTORS_PER_PAGE = PAGE_BYTES // 512
+SWAP_VERSION_OFFSET = 1024
+SWAP_LAST_PAGE_OFFSET = 1028
+SWAP_BAD_PAGES_OFFSET = 1032
+SWAP_BAD_PAGE_LIST_OFFSET = 1536
+SWAPZ_SEGMENT_PAGES = 256
+SWAPZ_FOREGROUND_HEADROOM_PAGES = SWAPZ_SEGMENT_PAGES
+SWAPZ_MIN_GC_RESERVE_PAGES = 2 * SWAPZ_SEGMENT_PAGES
+SWAP_BAD_PAGE_LIST_MAX = (
+    PAGE_BYTES - len(SWAP_SIGNATURE) - SWAP_BAD_PAGE_LIST_OFFSET
+) // 4
 EXPECTED_SCOPE = "physical swap backing correctness smoke only"
 DEVELOPMENT_SCOPE = (
     "physical backing data-path smoke only; not production qualification")
@@ -174,6 +183,93 @@ def swap_signature_valid(header, page_size=PAGE_BYTES):
         and page_size == PAGE_BYTES
         and header[page_size - len(SWAP_SIGNATURE):page_size] == SWAP_SIGNATURE
     )
+
+
+def _swapz_capacity_window(logical_pages, physical_blocks):
+    """Mirror the kernel authority capacity policy exactly."""
+    if (type(logical_pages) is not int or type(physical_blocks) is not int or
+            logical_pages <= 0 or physical_blocks <= 0 or
+            physical_blocks % SWAPZ_SEGMENT_PAGES):
+        return None
+    reserve_pages = (logical_pages // 8) + (logical_pages % 8 != 0)
+    reserve_pages = max(reserve_pages, SWAPZ_MIN_GC_RESERVE_PAGES)
+    if reserve_pages >= physical_blocks:
+        return None
+    foreground_pages = (
+        (physical_blocks - reserve_pages) // SWAPZ_SEGMENT_PAGES
+    ) * SWAPZ_SEGMENT_PAGES
+    if logical_pages + SWAPZ_FOREGROUND_HEADROOM_PAGES > foreground_pages:
+        return None
+    return reserve_pages
+
+
+def _swapz_backing_geometry(header, device_bytes):
+    """Derive full swapz mapper geometry from immutable Linux swap v1 bytes."""
+    if (not swap_signature_valid(header) or type(device_bytes) is not int or
+            device_bytes < 2 * PAGE_BYTES):
+        raise ProbeError("invalid SWAPSPACE2 geometry input")
+    complete_pages = device_bytes // PAGE_BYTES
+    version_le = int.from_bytes(
+        header[SWAP_VERSION_OFFSET:SWAP_VERSION_OFFSET + 4], "little")
+    if version_le == 1:
+        byteorder = "little"
+    elif int.from_bytes(
+            header[SWAP_VERSION_OFFSET:SWAP_VERSION_OFFSET + 4], "big") == 1:
+        byteorder = "big"
+    else:
+        raise ProbeError("unsupported Linux swap v1 byte order/version")
+
+    def field(offset):
+        return int.from_bytes(header[offset:offset + 4], byteorder)
+
+    last_page = field(SWAP_LAST_PAGE_OFFSET)
+    bad_pages = field(SWAP_BAD_PAGES_OFFSET)
+    if (last_page <= 0 or last_page >= complete_pages or
+            bad_pages > SWAP_BAD_PAGE_LIST_MAX):
+        raise ProbeError("invalid Linux swap declared area or bad-page count")
+
+    raw_segments = last_page // SWAPZ_SEGMENT_PAGES
+    contaminated_segments = set()
+    for index in range(bad_pages):
+        bad_page = field(SWAP_BAD_PAGE_LIST_OFFSET + index * 4)
+        if bad_page <= 0 or bad_page > last_page:
+            raise ProbeError("invalid Linux swap bad-page entry")
+        raw_segment = (bad_page - 1) // SWAPZ_SEGMENT_PAGES
+        if raw_segment < raw_segments:
+            contaminated_segments.add(raw_segment)
+
+    physical_blocks = (
+        raw_segments - len(contaminated_segments)
+    ) * SWAPZ_SEGMENT_PAGES
+    if physical_blocks < 3 * SWAPZ_SEGMENT_PAGES:
+        raise ProbeError("SWAPSPACE2 area has fewer than three clean swapz segments")
+
+    low, high, maximum_logical_pages = 1, physical_blocks, 0
+    while low <= high:
+        middle = low + (high - low) // 2
+        if _swapz_capacity_window(middle, physical_blocks) is not None:
+            maximum_logical_pages = middle
+            low = middle + 1
+        else:
+            high = middle - 1
+    reserve_pages = _swapz_capacity_window(
+        maximum_logical_pages, physical_blocks)
+    if maximum_logical_pages <= 1 or reserve_pages is None:
+        raise ProbeError("SWAPSPACE2 area cannot satisfy swapz reserve geometry")
+
+    return {
+        "swap_last_page": last_page,
+        "swap_bad_pages": bad_pages,
+        "swap_skipped_segments": len(contaminated_segments),
+        "swapz_physical_blocks": physical_blocks,
+        "swapz_logical_pages": maximum_logical_pages,
+        "swapz_logical_sectors": maximum_logical_pages * SECTORS_PER_PAGE,
+        "swapz_logical_bytes": maximum_logical_pages * PAGE_BYTES,
+        "swapz_linux_swap_kib":
+            (maximum_logical_pages - 1) * (PAGE_BYTES // 1024),
+        "swapz_gc_reserve_blocks": reserve_pages,
+        "raw_linux_swap_kib": (last_page - bad_pages) * (PAGE_BYTES // 1024),
+    }
 
 
 def parse_swap_rows(contents):
@@ -643,6 +739,10 @@ def inspect_target(device_arg, confirm_arg, *, allow_used_swap=False,
     })
     if not swap_signature_valid(header, os.sysconf("SC_PAGE_SIZE")):
         raise ProbeError("selected partition does not have a supported SWAPSPACE2 header")
+    geometry = _swapz_backing_geometry(header, size_bytes)
+    if active is not None and active["size_kib"] != geometry["raw_linux_swap_kib"]:
+        raise ProbeError(
+            "active Linux swap size does not match the immutable SWAPSPACE2 header")
     card_identity = _campaign_card_identity(device, parent_major_minor)
     if not virtual_device_only and (
             card_identity["transport"] != "usb" or
@@ -672,6 +772,7 @@ def inspect_target(device_arg, confirm_arg, *, allow_used_swap=False,
         "swap_priority": active["priority"] if active is not None else None,
         "swap_size_kib": active["size_kib"] if active is not None else None,
         "swap_used_kib": active["used_kib"] if active is not None else None,
+        **geometry,
     }
 
 
