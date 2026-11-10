@@ -1289,7 +1289,7 @@ static void test_primary_linux_swap_header(void)
 {
 	static const unsigned char magic[] = "SWAPSPACE2";
 	const uint64_t logical_pages =
-		swapz_primary_maximum_logical_pages(SWAPZ_PRIMARY_PHYSICAL_BLOCKS);
+		swapz_primary_maximum_logical_pages(swapz_primary_physical_blocks(SWAPZ_PRIMARY_DEVICE_BYTES));
 	unsigned char header[SWAPZ_PRIMARY_BLOCK_BYTES] = {0};
 
 	test_put_u32_le(header, 1024U, 1U);
@@ -3497,18 +3497,18 @@ int main(void)
 	swapz_primary_selected_target.device_minor = 4U;
 	swapz_primary_selected_target.device_bytes = TEST_DEVICE_BYTES;
 	pages = swapz_primary_maximum_logical_pages(
-		SWAPZ_PRIMARY_PHYSICAL_BLOCKS);
+		swapz_primary_physical_blocks(SWAPZ_PRIMARY_DEVICE_BYTES));
 	assert(pages == 3727616ULL);
 	assert(swapz_authority_capacity_window(
-		(swapz_u32)pages, (swapz_u32)SWAPZ_PRIMARY_PHYSICAL_BLOCKS,
+		(swapz_u32)pages, (swapz_u32)swapz_primary_physical_blocks(SWAPZ_PRIMARY_DEVICE_BYTES),
 		&reserve_blocks));
 	assert(reserve_blocks == 465952U);
-	assert(swapz_primary_page_limit_fits(SWAPZ_PRIMARY_PHYSICAL_BLOCKS,
+	assert(swapz_primary_page_limit_fits(swapz_primary_physical_blocks(SWAPZ_PRIMARY_DEVICE_BYTES),
 						 pages));
-	assert(!swapz_primary_page_limit_fits(SWAPZ_PRIMARY_PHYSICAL_BLOCKS,
+	assert(!swapz_primary_page_limit_fits(swapz_primary_physical_blocks(SWAPZ_PRIMARY_DEVICE_BYTES),
 						  pages + 1ULL));
 	assert(!swapz_primary_page_limit_fits(
-		SWAPZ_PRIMARY_PHYSICAL_BLOCKS, 3727872ULL));
+		swapz_primary_physical_blocks(SWAPZ_PRIMARY_DEVICE_BYTES), 3727872ULL));
 	assert(swapz_primary_maximum_logical_pages(30465536ULL) ==
 	       27080192ULL);
 	reserve_blocks = 0;
