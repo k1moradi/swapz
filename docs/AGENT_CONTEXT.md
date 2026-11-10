@@ -61,9 +61,14 @@ cover the selected target. The packaged systemd source derives the selected `.de
 generator adds exact device ordering and the raw by-PARTUUID conflict without
 embedding a host path or capacity. The selected udev `.device` job has a 30s
 timeout; a separate 300s mapper-job bound allows the manager's 120s start/stop
-and kernel swapoff grace. The mapper service requires the persistent recovery
-mount and runs `preflight -> recover -> prepare -> start`. It deliberately does
-not `BindsTo` removable media. `swapzctl primary start` already performs
+and kernel swapoff grace. The mapper service requires the persistent
+qualification-evidence location because it reads the signed report there; that
+mount is not lifecycle ownership or partition recovery. Mutable ownership is
+same-boot tmpfs state under `/run/swapz`. The service runs
+`preflight -> recover -> prepare -> start`, where `recover` is legacy command
+naming for same-boot lifecycle reconciliation only and never rewrites or
+restores the raw swap header. It deliberately does not `BindsTo` removable
+media. `swapzctl primary start` already performs
 `swapon` and `primary stop` performs `swapoff` and safe owned mapper teardown.
 Therefore the mapper service alone is WantedBy=swap.target and MUST be enabled
 only after qualification; the `.swap` unit is a passive view of the active
