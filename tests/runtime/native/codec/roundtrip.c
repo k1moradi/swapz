@@ -1,7 +1,9 @@
 // SPDX-License-Identifier: GPL-2.0-only
 /*
- * Execute the EXACT src/kernel/codec.c in userspace with Werror.
- * The same production functions are linked by the research .ko.
+ * Execute src/kernel/codec.c in userspace with Werror. Serialized header/record
+ * cases below are legacy compatibility fixtures only; production compressed
+ * lower media is payload-only and uses RAM descriptor authority. Shared CRC and
+ * payload helpers remain production code.
  */
 #include <assert.h>
 #include <errno.h>
