@@ -103,6 +103,10 @@ def main() -> None:
             and "if (!*disk_suffix)" in disk_classification
             and "*disk_suffix < '0' || *disk_suffix > '9'" in disk_classification,
             "Synthetic null_blk classification must require a decimal index")
+    require(
+        "if (!is_nullb && !bdev_is_partition(ctx->backing->bdev)) {" in
+            disk_classification,
+        "Real SWAPSPACE2 backing must be a partition, not a whole disk")
     require("module_param_named(physical_ram_metadata_qualified" in target,
             "Physical RAM qualification must be an immutable module-load token")
     require("if (!is_nullb && !swapz_physical_ram_metadata_qualified) {" in

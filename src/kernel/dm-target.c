@@ -9212,6 +9212,17 @@ static int swapz_ctr(struct dm_target *ti, unsigned int argc, char **argv)
 	 * admission. The same built module is first qualified on owned RAM backing;
 	 * only an evidence-validating loader may then set this immutable token.
 	 */
+	/*
+	 * Only an actual Linux swap partition may serve as physical backing.
+	 * A whole disk or other block device is not authorized merely because
+	 * its first page contains a copied SWAPSPACE2 signature. Owned null_blk
+	 * disks intentionally remain synthetic qualification fixtures.
+	 */
+	if (!is_nullb && !bdev_is_partition(ctx->backing->bdev)) {
+		ti->error = "Physical backing must be an existing swap partition";
+		error = -EINVAL;
+		goto fail;
+	}
 	if (!is_nullb && !swapz_physical_ram_metadata_qualified) {
 		ti->error =
 			"Physical backing requires exact-source loaded RAM qualification";
