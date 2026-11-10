@@ -641,9 +641,10 @@ void swapz_engine_invalidate_read_cache(struct swapz_engine *engine)
 		engine->read_validated_payload_crc32c = 0;
 		engine->read_extent_segment_mask = 0;
 		/*
-		 * clock==0 is the canonical empty metadata-cache state. A mutation
-		 * advances one epoch instead of clearing 512 validity bytes, so stale
-		 * tags become unreachable without streaming writes through L1/L2.
+		 * clock==0 is the canonical empty state for the legacy-named
+		 * first-data-block cache. A mutation advances one epoch instead of
+		 * clearing 512 validity bytes, so stale payload tags become
+		 * unreachable without streaming writes through L1/L2.
 		 */
 		if (engine->read_metadata_lru_clock) {
 			swapz_read_metadata_advance_epoch(engine);
