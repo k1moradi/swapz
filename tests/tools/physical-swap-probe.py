@@ -3470,7 +3470,7 @@ def _prepare_owned_mapper_removal(state, target):
     if state.get("algorithm_real_swap") is not True:
         return
     if state.get("development_only") is not True:
-        raise ProbeError("real-swap mode has invalid recovery scope")
+        raise ProbeError("real-swap mode has invalid runtime ownership scope")
     mapper_device = block_identity(mapper)
     if _active_swap_for(*mapper_device) is not None:
         _run(["swapoff", "--", mapper], timeout=120)
@@ -3532,7 +3532,7 @@ def _run_algorithm_live_swap_oracle(mapper, state, target, state_dir):
 
     The worker's READY event alone is not evidence. Require positive exact
     mapper swap usage and lower I/O before accepting byte-exact readback.
-    Recovery, not this function, owns swapoff and mapper destruction.
+    Lifecycle teardown, not this oracle, owns swapoff and mapper destruction.
     """
     if _verify_owned_mapper(state, target) != mapper:
         raise ProbeError("owned mapper changed before real swap")
@@ -4154,12 +4154,12 @@ def run_probe(device_arg, confirm_arg, state_dir_arg, review_path,
             partition_claim_attempted = True
             _consume_review(target, review["run_id"], preburned=True)
             # Ownership binding is immutable across both JSON records. The
-            # separately durable active marker is the authority that this
-            # one-use run currently owns recovery, avoiding a two-file claim
-            # publication window that a crash could split.
-            # The consumed one-use run claim, active partition marker and
-            # read-only original-header evidence are durable before swapoff and
-            # post-header data-area mutation. New runs never mutate block zero.
+            # separately synchronized same-boot active marker proves that this
+            # run currently owns the partition lifecycle, avoiding a two-file
+            # claim-publication window that a crash could split.
+            # The run claim, active partition marker and read-only original-
+            # header evidence are synchronized before swapoff and post-header
+            # data-area mutation. New runs never mutate block zero.
             _verify_target_identity(target)
             if development_only and algorithm_real_swap:
                 _quiesce_development_swap_inventory(state, target, state_dir)
