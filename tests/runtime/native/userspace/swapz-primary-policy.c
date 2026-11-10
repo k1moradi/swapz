@@ -860,9 +860,10 @@ static void test_swap_inventory_parser(void)
 	assert(rows[0].used_kib == 0ULL);
 	assert(rows[0].priority == -1);
 	assert(swapz_primary_swap_priority_restorable(-1));
+	assert(swapz_primary_swap_priority_restorable(-2));
+	assert(swapz_primary_swap_priority_restorable(-32768));
 	assert(swapz_primary_swap_priority_restorable(0));
 	assert(swapz_primary_swap_priority_restorable(32767));
-	assert(!swapz_primary_swap_priority_restorable(-2));
 	assert(!swapz_primary_swap_priority_restorable(32768));
 	assert(swapz_primary_parse_swaps(
 		"Filename Type Size Used Priority\r\n"
