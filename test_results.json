@@ -296,46 +296,46 @@
 "gc_scan_scale": {
 "rows": [
 {
-"incremental_select_ns": 1083,
-"legacy_dead_probe_ns": 112583,
-"legacy_score_scan_ns": 1096212,
+"incremental_select_ns": 667,
+"legacy_dead_probe_ns": 75833,
+"legacy_score_scan_ns": 604829,
 "logical_pages": 262144,
-"mapped_dead_probe_ns": 916,
-"relocation_list_ns": 625,
-"relocation_scan_ns": 141251,
+"mapped_dead_probe_ns": 417,
+"relocation_list_ns": 500,
+"relocation_scan_ns": 98333,
 "segments": 1024,
 "victim_records": 256
 },
 {
-"incremental_select_ns": 4333,
-"legacy_dead_probe_ns": 438918,
-"legacy_score_scan_ns": 4581518,
+"incremental_select_ns": 2583,
+"legacy_dead_probe_ns": 289539,
+"legacy_score_scan_ns": 2363401,
 "logical_pages": 1048576,
-"mapped_dead_probe_ns": 2292,
-"relocation_list_ns": 750,
-"relocation_scan_ns": 718878,
+"mapped_dead_probe_ns": 1167,
+"relocation_list_ns": 666,
+"relocation_scan_ns": 361747,
 "segments": 4096,
 "victim_records": 256
 },
 {
-"incremental_select_ns": 16667,
-"legacy_dead_probe_ns": 1834257,
-"legacy_score_scan_ns": 19355407,
+"incremental_select_ns": 9875,
+"legacy_dead_probe_ns": 1169742,
+"legacy_score_scan_ns": 9687433,
 "logical_pages": 4194304,
-"mapped_dead_probe_ns": 8959,
-"relocation_list_ns": 959,
-"relocation_scan_ns": 2249716,
+"mapped_dead_probe_ns": 4209,
+"relocation_list_ns": 542,
+"relocation_scan_ns": 1407449,
 "segments": 16384,
 "victim_records": 256
 },
 {
-"incremental_select_ns": 91209,
-"legacy_dead_probe_ns": 12274382,
-"legacy_score_scan_ns": 121615316,
+"incremental_select_ns": 62000,
+"legacy_dead_probe_ns": 7623070,
+"legacy_score_scan_ns": 83787472,
 "logical_pages": 27080192,
-"mapped_dead_probe_ns": 73917,
-"relocation_list_ns": 1291,
-"relocation_scan_ns": 14545349,
+"mapped_dead_probe_ns": 25666,
+"relocation_list_ns": 1166,
+"relocation_scan_ns": 9423890,
 "segments": 105782,
 "victim_records": 256
 }
@@ -349,14 +349,14 @@
 "predictor": {
 "backend_benchmarks": [
 {
-"inverse_ns_per_page": 201,
+"inverse_ns_per_page": 170,
 "name": "scalar",
-"transform_ns_per_page": 230
+"transform_ns_per_page": 134
 },
 {
-"inverse_ns_per_page": 107,
+"inverse_ns_per_page": 79,
 "name": "neon",
-"transform_ns_per_page": 75
+"transform_ns_per_page": 82
 }
 ],
 "classifier": {
@@ -366,9 +366,9 @@
 "candidate": "delta64",
 "early_abort_pages": 223,
 "eligible_pages": 512,
-"ns_per_page": 52,
+"ns_per_page": 44,
 "sample_pairs": 32,
-"scalar_ns_per_page": 52,
+"scalar_ns_per_page": 44,
 "stage1_min_score": 2,
 "stage1_pairs": 8
 },
@@ -383,7 +383,7 @@
 "planner_blocks": 383,
 "planner_extents": 267,
 "raw_pages": 192,
-"wall_ns_per_page": 3123
+"wall_ns_per_page": 1920
 },
 {
 "acceleration": 2,
@@ -391,7 +391,7 @@
 "planner_blocks": 383,
 "planner_extents": 267,
 "raw_pages": 192,
-"wall_ns_per_page": 2225
+"wall_ns_per_page": 1962
 },
 {
 "acceleration": 3,
@@ -399,7 +399,7 @@
 "planner_blocks": 383,
 "planner_extents": 266,
 "raw_pages": 192,
-"wall_ns_per_page": 2401
+"wall_ns_per_page": 1749
 },
 {
 "acceleration": 4,
@@ -407,7 +407,7 @@
 "planner_blocks": 384,
 "planner_extents": 273,
 "raw_pages": 192,
-"wall_ns_per_page": 2124
+"wall_ns_per_page": 1773
 }
 ],
 "negative_pages": 256,
@@ -424,9 +424,9 @@
 "extents_saved": 38,
 "general_threshold": 24,
 "lz4_rescues": 192,
-"modeled_wall_ns_per_page": 1812,
-"modeled_wall_ns_total": 1044224,
-"ns_per_saved_block": 18985,
+"modeled_wall_ns_per_page": 1436,
+"modeled_wall_ns_total": 827136,
+"ns_per_saved_block": 15038,
 "packing_adoptions": 0,
 "packing_eligible_pages": 51,
 "packing_threshold": 16,
@@ -491,14 +491,14 @@
 }
 ],
 "negative_useful": 0,
-"ns_per_saved_block": 19589,
+"ns_per_saved_block": 15514,
 "routed_baseline_blocks": 257,
 "routed_baseline_extents": 182,
 "routed_blocks_saved": 60,
 "routed_candidate_blocks": 197,
 "routed_candidate_extents": 124,
-"routed_cpu_ns_per_page": 2040,
-"routed_cpu_ns_total": 1175399,
+"routed_cpu_ns_per_page": 1616,
+"routed_cpu_ns_total": 930855,
 "routed_extents_saved": 58,
 "structured_calls": 279,
 "structured_eligible": 320,
@@ -546,14 +546,14 @@
 }
 ],
 "negative_useful": 0,
-"ns_per_saved_block": 19648,
+"ns_per_saved_block": 15561,
 "routed_baseline_blocks": 257,
 "routed_baseline_extents": 182,
 "routed_blocks_saved": 58,
 "routed_candidate_blocks": 199,
 "routed_candidate_extents": 132,
-"routed_cpu_ns_per_page": 1978,
-"routed_cpu_ns_total": 1139624,
+"routed_cpu_ns_per_page": 1566,
+"routed_cpu_ns_total": 902568,
 "routed_extents_saved": 50,
 "structured_calls": 272,
 "structured_eligible": 320,
@@ -601,14 +601,14 @@
 }
 ],
 "negative_useful": 0,
-"ns_per_saved_block": 18985,
+"ns_per_saved_block": 15038,
 "routed_baseline_blocks": 257,
 "routed_baseline_extents": 182,
 "routed_blocks_saved": 55,
 "routed_candidate_blocks": 202,
 "routed_candidate_extents": 144,
-"routed_cpu_ns_per_page": 1812,
-"routed_cpu_ns_total": 1044224,
+"routed_cpu_ns_per_page": 1436,
+"routed_cpu_ns_total": 827136,
 "routed_extents_saved": 38,
 "structured_calls": 256,
 "structured_eligible": 320,
@@ -656,14 +656,14 @@
 }
 ],
 "negative_useful": 0,
-"ns_per_saved_block": 18985,
+"ns_per_saved_block": 15038,
 "routed_baseline_blocks": 257,
 "routed_baseline_extents": 182,
 "routed_blocks_saved": 55,
 "routed_candidate_blocks": 202,
 "routed_candidate_extents": 144,
-"routed_cpu_ns_per_page": 1812,
-"routed_cpu_ns_total": 1044224,
+"routed_cpu_ns_per_page": 1436,
+"routed_cpu_ns_total": 827136,
 "routed_extents_saved": 38,
 "structured_calls": 256,
 "structured_eligible": 320,
@@ -711,14 +711,14 @@
 }
 ],
 "negative_useful": 0,
-"ns_per_saved_block": 18985,
+"ns_per_saved_block": 15038,
 "routed_baseline_blocks": 257,
 "routed_baseline_extents": 182,
 "routed_blocks_saved": 55,
 "routed_candidate_blocks": 202,
 "routed_candidate_extents": 144,
-"routed_cpu_ns_per_page": 1812,
-"routed_cpu_ns_total": 1044224,
+"routed_cpu_ns_per_page": 1436,
+"routed_cpu_ns_total": 827136,
 "routed_extents_saved": 38,
 "structured_calls": 256,
 "structured_eligible": 320,
@@ -735,17 +735,17 @@
 "candidate_extents": 93,
 "cliff_2024": 160,
 "inverse_backend": "neon",
-"inverse_ns_per_page": 107,
+"inverse_ns_per_page": 79,
 "name": "delta64",
 "planner_blocks_saved": 68,
 "planner_extents_saved": 89,
 "raw_rescued": 128,
 "saved_payload_bytes": 284772,
-"scalar_inverse_ns_per_page": 201,
-"scalar_transform_ns_per_page": 230,
-"second_lz4_ns_per_page": 3900,
+"scalar_inverse_ns_per_page": 170,
+"scalar_transform_ns_per_page": 134,
+"second_lz4_ns_per_page": 3061,
 "transform_backend": "neon",
-"transform_ns_per_page": 75
+"transform_ns_per_page": 82
 }
 ]
 }
@@ -760,22 +760,22 @@
 "qualification": "RAM_BACKED_NULL_BLK_ONLY",
 "qualification_tier": "ALGORITHM_PHYSICAL_PENDING",
 "qualified_artifacts": {
-"formatter_sha256": "0db3f5ffe3a788281a1f493f671f13cdfe50fb4f4cc71a070bc86a22e72e1719",
-"module_sha256": "526942d9939fca31e69c43d6750f5ff2e847b2bf85c5f1d25d8972eb1790e1ad",
+"formatter_sha256": "6b8d42d27fd337372ad2278f2f14976c4f9548ccf0a39c0570b3f11682f9bcad",
+"module_sha256": "df7769ec0554bbc0f9291fdd0da2136e9aa392dd3c0d80af1427dd3e8f062cf8",
 "oracle_sha256": "429ff40c94125cb8e8309537c17a32db28bf9a176567b8f0587bd8f5ae5e6c5b",
 "status": "AVAILABLE"
 },
 "schema": "swapz-test-results-v1",
-"source_sha": "60c8eba36fcf92bb0aa3fa1ccc21c4bc6db75fed",
+"source_sha": "6ddeace4a1026b3bf0539f5b6ddfcad509aa0bac",
 "stages": [
 {
-"elapsed_s": 3.147,
+"elapsed_s": 2.371,
 "exit_code": 0,
 "name": "Build module and helpers",
 "status": "PASS"
 },
 {
-"elapsed_s": 120.803,
+"elapsed_s": 94.32,
 "exit_code": 0,
 "name": "Native and rootless contracts",
 "phase_elapsed_s": [
@@ -784,11 +784,11 @@
 "name": "rootless initialization"
 },
 {
-"elapsed_s": 10,
+"elapsed_s": 8,
 "name": "tests/Makefile native and metadata"
 },
 {
-"elapsed_s": 16,
+"elapsed_s": 13,
 "name": "tests/runtime/native/source-contract-test.py"
 },
 {
@@ -796,27 +796,27 @@
 "name": "tests/runtime/native/userspace/swapzctl-active-swap-provenance-test.py"
 },
 {
-"elapsed_s": 1,
+"elapsed_s": 0,
 "name": "tests/runtime/native/tmp-cleanup-test.py"
 },
 {
-"elapsed_s": 0,
+"elapsed_s": 1,
 "name": "tests/runtime/native/resource-admission-test.py"
 },
 {
-"elapsed_s": 7,
+"elapsed_s": 6,
 "name": "tests/runtime/native/resource-pressure-cleanup-ownership-test.py"
 },
 {
-"elapsed_s": 14,
+"elapsed_s": 11,
 "name": "tests/runtime/native/primary-lifecycle-audit-test.py"
 },
 {
-"elapsed_s": 4,
+"elapsed_s": 2,
 "name": "tests/runtime/native/primary-lifecycle-nullblk-qualifier-test.py"
 },
 {
-"elapsed_s": 3,
+"elapsed_s": 2,
 "name": "tests/runtime/native/primary-real-swap-test.py"
 },
 {
@@ -832,19 +832,19 @@
 "name": "tests/runtime/benchmark/metadata-ram-evidence-test.py"
 },
 {
-"elapsed_s": 11,
+"elapsed_s": 9,
 "name": "tests/runtime/benchmark/io-replay-test.py"
 },
 {
-"elapsed_s": 13,
+"elapsed_s": 8,
 "name": "tests/runtime/native/make-interface-test.py"
 },
 {
-"elapsed_s": 13,
+"elapsed_s": 11,
 "name": "tests/runtime/native/test-report-test.py"
 },
 {
-"elapsed_s": 3,
+"elapsed_s": 2,
 "name": "tests/runtime/native/production-readiness-test.py"
 },
 {
@@ -860,7 +860,7 @@
 "name": "tests/runtime/native/ci-failure-diagnostics-test.py"
 },
 {
-"elapsed_s": 1,
+"elapsed_s": 0,
 "name": "tests/runtime/native/physical-swap-probe-test.py"
 },
 {
@@ -968,11 +968,11 @@
 "name": "bash syntax swap-inventory-test.sh"
 },
 {
-"elapsed_s": 4,
+"elapsed_s": 3,
 "name": "tests/runtime/native/nullblk-identity-test.sh"
 },
 {
-"elapsed_s": 4,
+"elapsed_s": 2,
 "name": "tests/runtime/native/quiet-lower-io-test.sh"
 },
 {
@@ -991,52 +991,52 @@
 "primary_lifecycle_case_elapsed_ms": [
 {
 "class": "PackageCrashToPrimaryAdmissionTest",
-"elapsed_ms": 162,
+"elapsed_ms": 298,
 "method": "test_all_refusing_coordinator_fake_cannot_satisfy_contract"
 },
 {
 "class": "PackageCrashToPrimaryAdmissionTest",
-"elapsed_ms": 601,
+"elapsed_ms": 446,
 "method": "test_blocked_start_reports_explicit_package_recovery_phase"
 },
 {
 "class": "PackageCrashToPrimaryAdmissionTest",
-"elapsed_ms": 23,
+"elapsed_ms": 15,
 "method": "test_clean_and_empty_directory_admit_and_cleanup"
 },
 {
 "class": "PackageCrashToPrimaryAdmissionTest",
-"elapsed_ms": 1702,
+"elapsed_ms": 1261,
 "method": "test_committed_journal_then_verified_package_recovery_allows_reentry"
 },
 {
 "class": "PackageCrashToPrimaryAdmissionTest",
-"elapsed_ms": 18,
+"elapsed_ms": 15,
 "method": "test_crash_checkpoint_timeout_override_is_finite"
 },
 {
 "class": "PackageCrashToPrimaryAdmissionTest",
-"elapsed_ms": 38,
+"elapsed_ms": 31,
 "method": "test_directory_substitution_during_named_recheck_fails_closed"
 },
 {
 "class": "PackageCrashToPrimaryAdmissionTest",
-"elapsed_ms": 632,
+"elapsed_ms": 873,
 "method": "test_malformed_and_substituted_package_journals_fail_closed"
 },
 {
 "class": "PackageCrashToPrimaryAdmissionTest",
-"elapsed_ms": 5191,
+"elapsed_ms": 3595,
 "method": "test_real_sigkill_phases_block_both_commands_not_cleanup"
 },
 {
 "class": "PackageCrashToPrimaryAdmissionTest",
-"elapsed_ms": 52,
+"elapsed_ms": 36,
 "method": "test_sanitized_fixture_covers_clean_blocked_and_cleanup_paths"
 },
 {
 "class": "PackageCrashToPrimaryAdmissionTest",
-"elapsed_ms": 705,
+"elapsed_ms": 484,
 "method": "test_unsafe_coordinator_bypass_mutant_is_observably_rejected"
 },
 {
@@ -1171,12 +1171,12 @@
 },
 {
 "class": "PrimaryLifecycleSourceGuardTest",
-"elapsed_ms": 3070,
+"elapsed_ms": 2444,
 "method": "test_cross_namespace_mount_scan_revalidates_before_first_mutation"
 },
 {
 "class": "PrimaryLifecycleSourceGuardTest",
-"elapsed_ms": 66,
+"elapsed_ms": 47,
 "method": "test_durable_package_transactions_gate_prepare_and_start"
 },
 {
@@ -1186,37 +1186,37 @@
 },
 {
 "class": "PrimaryLifecycleSourceGuardTest",
-"elapsed_ms": 197,
+"elapsed_ms": 137,
 "method": "test_execution_gate_is_boot_scoped_pending_live_lifecycle_evidence"
 },
 {
 "class": "PrimaryLifecycleSourceGuardTest",
-"elapsed_ms": 18,
+"elapsed_ms": 13,
 "method": "test_native_swap_operations_are_transaction_ordered"
 },
 {
 "class": "PrimaryLifecycleSourceGuardTest",
-"elapsed_ms": 35,
+"elapsed_ms": 24,
 "method": "test_owned_nullblk_btrfs_root_matches_recovery_across_dev_numbers"
 },
 {
 "class": "PrimaryLifecycleSourceGuardTest",
-"elapsed_ms": 39,
+"elapsed_ms": 27,
 "method": "test_package_and_primary_share_global_mutation_lock_identity"
 },
 {
 "class": "PrimaryLifecycleSourceGuardTest",
-"elapsed_ms": 3,
+"elapsed_ms": 2,
 "method": "test_public_swapzctl_primary_dispatch_reaches_admission_interface"
 },
 {
 "class": "PrimaryLifecycleSourceGuardTest",
-"elapsed_ms": 41,
+"elapsed_ms": 31,
 "method": "test_qualification_import_serializes_before_partition_state"
 },
 {
 "class": "PrimaryLifecycleSourceGuardTest",
-"elapsed_ms": 912,
+"elapsed_ms": 657,
 "method": "test_recovery_persists_fail_closed_interruption_order"
 },
 {
@@ -1226,12 +1226,12 @@
 },
 {
 "class": "PrimaryLifecycleSourceGuardTest",
-"elapsed_ms": 5,
+"elapsed_ms": 3,
 "method": "test_source_guard_ignores_comments_and_string_literals"
 },
 {
 "class": "PrimaryOwnerReleaseDurabilityTest",
-"elapsed_ms": 3,
+"elapsed_ms": 1,
 "method": "test_failed_owner_release_fsync_stays_blocked_across_fresh_recovery"
 },
 {
@@ -1248,39 +1248,39 @@
 },
 "status": "PASS",
 "substage_elapsed_s": {
-"native_make_s": 10,
-"remaining_contracts_s": 111
+"native_make_s": 8,
+"remaining_contracts_s": 87
 }
 },
 {
-"elapsed_s": 3.2,
+"elapsed_s": 2.128,
 "exit_code": 0,
 "name": "Kernel warnings W=1",
 "status": "PASS"
 },
 {
-"elapsed_s": 3.135,
+"elapsed_s": 2.181,
 "exit_code": 0,
 "name": "Kernel warnings W=2",
 "status": "PASS"
 },
 {
-"diagnostic": "BLOCKED: maximum-capacity DM mapping creation failed",
-"elapsed_s": 0.281,
+"diagnostic": "BLOCKED: maximum-capacity DM mapping creation failed; dmsetup_rc=1 kernel_reason=device-mapper: table: 252:0: swapz: Physical backing must be an existing swap parti",
+"elapsed_s": 0.25,
 "exit_code": 1,
 "failed_phase": "owned RAM maximum-capacity constructor",
 "name": "Owned RAM smoke + mixed/QD pilot",
 "phase_elapsed_s": [
 {
-"elapsed_s": 0.088,
+"elapsed_s": 0.067,
 "name": "preflight"
 },
 {
-"elapsed_s": 0.009,
+"elapsed_s": 0.006,
 "name": "kernel-debug-config"
 },
 {
-"elapsed_s": 0.181,
+"elapsed_s": 0.176,
 "name": "maximum-capacity"
 }
 ],
@@ -1291,5 +1291,5 @@
 "status": "FAIL"
 }
 ],
-"tested_commit_sha": "60c8eba36fcf92bb0aa3fa1ccc21c4bc6db75fed"
+"tested_commit_sha": "6ddeace4a1026b3bf0539f5b6ddfcad509aa0bac"
 }
