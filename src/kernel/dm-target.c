@@ -9200,18 +9200,37 @@ static int swapz_ctr(struct dm_target *ti, unsigned int argc, char **argv)
 			ctx->backing->bdev->bd_disk->disk_name + 5;
 
 		/*
-		 * null_blk disk names have a decimal device index. A prefix
-		 * alone must never exempt another disk from SWAPSPACE2 validation
-		 * or authorize null_blk-only fault injection. The privileged
-		 * harness independently verifies actual driver/device identity.
+		 * null_blk uses nullbN for indexed devices and the exact configfs
+		 * item name for owned devices. Admit only the harness-created
+		 * nullb-swapz-<16 lowercase hex digits> name as a second synthetic
+		 * shape; do not turn an arbitrary nullb prefix into a bypass of
+		 * real-partition/SWAPSPACE2 admission. The privileged harness also
+		 * verifies actual null_blk driver, configfs and block identity.
 		 */
-		if (!*disk_suffix)
-			is_nullb = false;
-		for (; *disk_suffix; ++disk_suffix)
-			if (*disk_suffix < '0' || *disk_suffix > '9') {
-				is_nullb = false;
-				break;
+		if (!strncmp(disk_suffix, "-swapz-", 6)) {
+			const char *owned_token = disk_suffix + 6;
+			unsigned int token_index;
+
+			for (token_index = 0; token_index < 16; ++token_index) {
+				char token_character = owned_token[token_index];
+
+				if ((token_character < '0' || token_character > '9') &&
+				    (token_character < 'a' || token_character > 'f')) {
+					is_nullb = false;
+					break;
+				}
 			}
+			if (is_nullb && owned_token[16] != '\0')
+				is_nullb = false;
+		} else {
+			if (!*disk_suffix)
+				is_nullb = false;
+			for (; *disk_suffix; ++disk_suffix)
+				if (*disk_suffix < '0' || *disk_suffix > '9') {
+					is_nullb = false;
+					break;
+			}
+		}
 	}
 	/*
 	 * Payload-only storage is necessary but not sufficient for real-device

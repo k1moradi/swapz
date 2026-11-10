@@ -60,6 +60,31 @@ status_u64() {
     printf '%s\n' "${BASH_REMATCH[2]}"
 }
 
+# Report the kernel's exact Device Mapper refusal during a failed owned
+# constructor, rather than asking the operator to inspect journalctl later.
+# This is read-only and fail-only; a missing kernel log is never treated as PASS.
+swapz_dm_constructor_kernel_reason() {
+    local since_epoch="$1" kernel_reason=""
+    if command -v journalctl >/dev/null 2>&1; then
+        kernel_reason="$(journalctl -k -b --since="@$since_epoch" \
+            --no-pager -o cat 2>/dev/null |
+            grep -E 'device-mapper: table:.*: swapz:' | tail -n 1)" ||
+            kernel_reason=""
+    fi
+    if [[ -z "$kernel_reason" ]] && command -v dmesg >/dev/null 2>&1; then
+        kernel_reason="$(dmesg --notime --since \
+            "$(date -d "@$since_epoch" '+%Y-%m-%d %H:%M:%S')" 2>/dev/null |
+            grep -E 'device-mapper: table:.*: swapz:' | tail -n 1)" ||
+            kernel_reason=""
+    fi
+    if [[ -n "$kernel_reason" ]]; then
+        # Keep one bounded kernel line in the qualification failure reason.
+        printf '%.350s' "$kernel_reason"
+    else
+        printf '%s' 'kernel-refusal-unavailable'
+    fi
+}
+
 # The kernel boot identity is the only authority for this execution marker.
 # Read exactly one 36-byte lowercase UUID plus newline, with at most one
 # extra byte to reject duplicate/extended records without unbounded input.
@@ -488,10 +513,17 @@ if (( MAX_BOUNDARY_PROBE )); then
 	note "START_LOADED_MAXIMUM_CAPACITY=logical_pages:$MAX_LOGICAL_PAGES"
 	lower_stats_before="$(cat "/sys/block/$DISK/stat")" ||
 		fail "cannot read capacity-probe lower statistics before create"
-	dmsetup create "$DMNAME" --uuid "$UUID" \
-		--table "0 $MAX_LOGICAL_SECTORS swapz $LOWER 0 64 1 2 0 1 0" ||
-		fail "maximum-capacity DM mapping creation failed"
-	OWN_DM=1
+	# Capture the failure's own kernel-log window before creating the mapper.
+	capacity_create_since_epoch="$(date +%s)"
+	if dmsetup create "$DMNAME" --uuid "$UUID" \
+		--table "0 $MAX_LOGICAL_SECTORS swapz $LOWER 0 64 1 2 0 1 0"; then
+		OWN_DM=1
+	else
+		capacity_create_rc=$?
+		capacity_create_reason="$(swapz_dm_constructor_kernel_reason \
+			"$capacity_create_since_epoch")"
+		fail "maximum-capacity DM mapping creation failed; dmsetup_rc=$capacity_create_rc kernel_reason=$capacity_create_reason"
+	fi
 	[[ "$(dmsetup info -c --noheadings -o uuid "$DMNAME" 2>/dev/null |
 	      tr -d '[:space:]')" == "$UUID" ]] ||
 		fail "maximum-capacity DM UUID mismatch"

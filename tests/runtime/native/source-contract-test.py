@@ -2109,6 +2109,13 @@ dmsetup() {
         process = body("swapz_process")
 
         self.assertIn('disk_name, "nullb", 5', ctr)
+        # Synthetic configfs disks have an owned nullb-swapz-<16hex> name;
+        # arbitrary nullb-prefixed disks must still take physical admission.
+        self.assertIn('!strncmp(disk_suffix, "-swapz-", 6)', ctr)
+        self.assertIn("token_index < 16", ctr)
+        self.assertIn("owned_token[16] != '\\0'", ctr)
+        self.assertIn("token_character < 'a' || token_character > 'f'", ctr)
+        self.assertIn("if (!is_nullb && !bdev_is_partition", ctr)
         arch_gate = body("swapz_physical_backing_arch_supported")
         self.assertIn("#if defined(CONFIG_X86_64)", arch_gate)
         self.assertNotIn("CONFIG_ARM64", arch_gate)
@@ -7045,6 +7052,9 @@ int main(void)
         self.assertIn("if (( MAX_BOUNDARY_PROBE )); then", sizing)
         self.assertIn("NULLBLK_SIZE_MIB=16383", sizing)
 
+        self.assertIn("capacity_create_since_epoch=", deploy)
+        self.assertIn("swapz_dm_constructor_kernel_reason", deploy)
+        self.assertIn("kernel_reason=$capacity_create_reason", deploy)
         capacity_start = deploy.index(
             "if (( MAX_BOUNDARY_PROBE )); then\n\tMAX_LOGICAL_PAGES=3727616")
         capacity_end = deploy.index("\n\texit 0\nfi", capacity_start)
