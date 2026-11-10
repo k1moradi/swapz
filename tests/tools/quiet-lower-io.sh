@@ -34,7 +34,7 @@ swapz_quiet_observe_dmsetup() {
 swapz_quiet_parse_status() {
     local status_text="$1" token key value required_field
     local -n parsed_values="$2"
-    local expected_field_count=477
+    local expected_field_count=479
     local token_index=0
     local -a fields=()
     local -A seen_fields=()
@@ -60,7 +60,7 @@ swapz_quiet_parse_status() {
         return 1
     }
     read -r -a fields <<< "$status_text"
-    # Current production INFO has three DM header fields plus 474 complete
+    # Current production INFO has three DM header fields plus 476 complete
     # key/value fields, including a literal numeric compatibility token.
     # Schema drift blocks qualification until this oracle and its
     # source-derived rootless fixture are updated together.

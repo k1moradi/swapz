@@ -42,7 +42,7 @@ print("0 32768 swapz " + " ".join(tokens))
 PY
 )" || fail 'cannot construct production status fixture'
 LONG_FIELD="$(printf '%065d' 0 | tr '0' 'a')"
-[[ $(wc -w <<< "$EXPECTED_STATUS") == 477 &&
+[[ $(wc -w <<< "$EXPECTED_STATUS") == 479 &&
    $EXPECTED_STATUS == *' gc_pages=0 '* &&
    $EXPECTED_STATUS == *' prep_slots_in_use=0 '* &&
    $EXPECTED_STATUS == *' submitter_prepare_active=0 '* &&
@@ -269,9 +269,9 @@ expect_unavailable final-lower lower-counter-width-changed initial+final
 reset_case width_change_later
 expect_unavailable initial-lower lower-counter-width-changed initial
 reset_case truncated_status
-expect_unavailable initial-status incomplete-status none 3 'field-count:expected=477:actual=476'
+expect_unavailable initial-status incomplete-status none 3 'field-count:expected=479:actual=478'
 reset_case partial_status
-expect_unavailable initial-status incomplete-status none 3 'field-count:expected=477:actual=6'
+expect_unavailable initial-status incomplete-status none 3 'field-count:expected=479:actual=6'
 reset_case internal_truncated_status
 expect_unavailable initial-status incomplete-status none
 reset_case duplicate_status
