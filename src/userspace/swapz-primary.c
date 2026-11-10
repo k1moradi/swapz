@@ -13678,6 +13678,7 @@ static int swapz_primary_recover(void)
 	int mapper_removed_by_call = 0;
 	int module_unloaded_by_call = 0;
 	int swap_deactivated_by_call = 0;
+	int raw_swap_activated_by_call = 0;
 	int recovering_persisted = 0;
 	int complete_persisted = 0;
 	int result = -1;
@@ -13823,6 +13824,13 @@ static int swapz_primary_recover(void)
 		goto out;
 	}
 	target_fd = -1;
+	failure_phase = "raw-swap-restore";
+	swap_observation = "UNCERTAIN";
+	if (swapz_primary_transition_original_swap(
+		    &manifest, 1, &raw_swap_activated_by_call) < 0)
+		goto out;
+	swap_observation = "OBSERVED";
+	SWAPZ_PRIMARY_TEST_INTERRUPT_AFTER("recover-raw-swap-restored");
 	failure_phase = "state-restored";
 
 	restored_state = recovering_state;
@@ -13875,11 +13883,12 @@ out:
 	memset(observed_header, 0, sizeof(observed_header));
 	if (result == 0)
 		printf("PRIMARY_RECOVER=COMPLETE run_id=%s swapoff=%s "
-		       "mapper_removed=%s module_unloaded=%s\n",
+		       "mapper_removed=%s module_unloaded=%s raw_swapon=%s\n",
 		       state.run_id,
 		       swap_deactivated_by_call ? "true" : "false",
 		       mapper_removed_by_call ? "true" : "false",
-		       module_unloaded_by_call ? "true" : "false");
+		       module_unloaded_by_call ? "true" : "false",
+		       raw_swap_activated_by_call ? "true" : "false");
 	if (result < 0)
 		errno = saved_errno;
 	return result;
