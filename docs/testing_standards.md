@@ -286,7 +286,9 @@ documentation aligned with this architecture. Live README evidence text must
 describe byte-exact **header preservation**, never header recovery, and must
 not reintroduce a separate or independent recovery-storage device as a
 physical-admission requirement. Historical documents may retain rejected
-recovery narratives only when they are explicitly marked non-current.
+recovery narratives only when they are explicitly marked non-current. The
+regression normalizes prose whitespace so Markdown wrapping cannot bypass or
+spuriously fail this operator-facing contract.
 
 ## Official interface
 

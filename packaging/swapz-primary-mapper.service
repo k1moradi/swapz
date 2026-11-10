@@ -5,7 +5,7 @@ Requires=-.mount
 # Persistent qualification evidence is read from /var/lib; mutable lifecycle
 # ownership is kept only in RuntimeDirectory=/run/swapz below.
 # Legacy-named persistent path: source-bound qualification evidence only.
-# Lifecycle ownership and all swapz mapping metadata remain volatile in /run/RAM.
+# Lifecycle ownership stays under /run/swapz; mapping/extent/CRC/GC authority stays in RAM.
 RequiresMountsFor=/var/lib/swapz/physical-recovery
 After=-.mount systemd-modules-load.service dev-mapper-swapz\x2dprimary.swap
 Before=swap.target shutdown.target

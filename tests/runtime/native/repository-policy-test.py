@@ -371,10 +371,13 @@ class SyntheticRepositoryPolicy(unittest.TestCase):
 
     def test_live_documentation_preserves_ordinary_swap_contract(self):
         readme = (ROOT / "docs/README.md").read_text()
-        self.assertNotIn("byte comparisons and header recovery", readme)
-        self.assertNotIn("independent recovery-storage", readme)
-        self.assertIn("byte comparisons and header preservation", readme)
-        self.assertIn("No separate recovery storage or recovery device is required.", readme)
+        normalized_readme = " ".join(readme.split())
+        self.assertNotIn("byte comparisons and header recovery", normalized_readme)
+        self.assertNotIn("independent recovery-storage", normalized_readme)
+        self.assertIn("byte comparisons and header preservation", normalized_readme)
+        self.assertIn(
+            "No separate recovery storage or recovery device is required.",
+            normalized_readme)
 
     def test_aggregation_is_race_safe_and_rejects_skipped_jobs(self):
         workflow = WORKFLOW.read_text()
