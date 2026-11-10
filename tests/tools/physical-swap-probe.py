@@ -66,9 +66,9 @@ VERBAL_APPROVAL_TEXT = (
 MAX_RECORDED_OUTPUT_CHARS = 4096
 DEVELOPMENT_SWAPOFF_MIN_AVAILABLE_KIB = 1024 * 1024
 DEVELOPMENT_SWAPOFF_MARGIN_KIB = 512 * 1024
-# Recovery can reproduce Linux's default -1 priority or an explicit
-# util-linux priority in 0..32767. Reject anything else before mutation.
-LINUX_SWAP_PRIORITY_MIN = -1
+# Explicit Linux swap priorities are reproducible exactly in 0..32767.
+# Negative values are kernel-assigned low-priority policy; restore those with
+# plain swapon and verify negative semantics rather than an incidental number.
 LINUX_SWAP_PRIORITY_MAX = 32767
 # The swapz DM status ABI contains many named counters. Preserve a bounded
 # complete status line rather than certifying a clipped prefix as healthy.
@@ -270,6 +270,16 @@ def _swapz_backing_geometry(header, device_bytes):
         "swapz_gc_reserve_blocks": reserve_pages,
         "raw_linux_swap_kib": (last_page - bad_pages) * (PAGE_BYTES // 1024),
     }
+
+
+def _swap_priority_restored(expected, observed):
+    """Explicit priorities are exact; automatic negative priorities are semantic."""
+    return (
+        type(expected) is int
+        and type(observed) is int
+        and ((expected >= 0 and observed == expected) or
+             (expected < 0 and observed < 0))
+    )
 
 
 def parse_swap_rows(contents):
@@ -726,10 +736,9 @@ def inspect_target(device_arg, confirm_arg, *, allow_used_swap=False,
     if active is not None and active["size_kib"] > size_bytes // 1024:
         raise ProbeError(
             "selected swap capacity exceeds the selected partition geometry")
-    if active is not None and not LINUX_SWAP_PRIORITY_MIN <= active["priority"] <= \
-            LINUX_SWAP_PRIORITY_MAX:
+    if active is not None and active["priority"] > LINUX_SWAP_PRIORITY_MAX:
         raise ProbeError(
-            "selected swap priority cannot be restored exactly by this helper")
+            "selected explicit swap priority exceeds Linux's supported range")
     if active is not None and not 0 <= active["used_kib"] <= active["size_kib"]:
         raise ProbeError("selected swap usage is outside its capacity")
     if active is not None and active["used_kib"] != 0 and not allow_used_swap:
@@ -2350,7 +2359,8 @@ def _final_observations(results, state_dir, state, target):
             and type(state.get("swap_size_kib")) is int
             and type(state.get("swap_priority")) is int
             and row.get("size_kib") == state["swap_size_kib"]
-            and row.get("priority") == state["swap_priority"])
+            and _swap_priority_restored(
+                state["swap_priority"], row.get("priority")))
     else:
         # Development-only physical backing smoke preserves an originally
         # inactive target. Absence from /proc/swaps is the required post-state.
@@ -3132,10 +3142,10 @@ def recover(state_dir, device_arg, confirm_arg, lock_held=False,
             "recovery_original_swap_priority expected=integer "
             f"observed={observed}; restoration_stage=not_attempted "
             "ownership_marker_action=not_attempted; manual recovery required")
-    if swap_was_active is True and not LINUX_SWAP_PRIORITY_MIN <= state["swap_priority"] <= \
-            LINUX_SWAP_PRIORITY_MAX:
+    if (swap_was_active is True and
+            state["swap_priority"] > LINUX_SWAP_PRIORITY_MAX):
         raise ProbeError(
-            "recovery_original_swap_priority expected=-1..32767 "
+            "recovery_original_swap_priority expected=negative_auto_or_0..32767 "
             "observed=out_of_range; restoration_stage=not_attempted "
             "ownership_marker_action=not_attempted; manual recovery required")
     if state.get("module_ownership") not in {
@@ -3224,10 +3234,12 @@ def recover(state_dir, device_arg, confirm_arg, lock_held=False,
                 else:
                     _run(["swapon", target["device"]], timeout=60)
             active = _active_swap_for(target["major"], target["minor"])
-            if active is None or active["size_kib"] != state["swap_size_kib"] or (
-                    active["priority"] != state["swap_priority"]):
+            if (active is None or
+                    active["size_kib"] != state["swap_size_kib"] or
+                    not _swap_priority_restored(
+                        state["swap_priority"], active["priority"])):
                 raise ProbeError(
-                    "original swap major, size or priority was not restored")
+                    "original swap size or priority policy was not restored")
         elif _active_swap_for(target["major"], target["minor"]) is not None:
             raise ProbeError(
                 "development recovery expected the partition to remain inactive")
@@ -3909,13 +3921,15 @@ def _final_physical_oracle_evidence_error(results, state, target,
         if target.get("swap_was_active") is True:
             if (not isinstance(row, dict) or row.get("kind") != "partition"
                     or row.get("size_kib") != state.get("swap_size_kib")
-                    or row.get("priority") != state.get("swap_priority")):
+                    or not _swap_priority_restored(
+                        state.get("swap_priority"), row.get("priority"))):
                 return "development_original_swap_not_restored"
         elif row is not None or results.get("target_remains_inactive") is not True:
             return "development_backing_not_inactive"
     elif (not isinstance(row, dict) or row.get("kind") != "partition"
           or row.get("size_kib") != state.get("swap_size_kib")
-          or row.get("priority") != state.get("swap_priority")
+          or not _swap_priority_restored(
+              state.get("swap_priority"), row.get("priority"))
           or results.get("approval_consumed") is not True):
         return "production_swap_or_approval_not_restored"
     return None
