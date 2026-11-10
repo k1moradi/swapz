@@ -5218,8 +5218,7 @@ class ReportContract(unittest.TestCase):
         from unittest.mock import patch
 
         transcript = (
-            "/PRIVATE/host/tests/runtime/native/io/"
-            "lower-write-aggregation.c:14 expression=PRIVATE_EXPRESSION\n"
+            "FAIL: lower-write-aggregation.c:14 expression=PRIVATE_EXPRESSION\n"
             "FAIL: native test-lower-io binary=lower-write-aggregation exit=1\n"
             "make[2]: *** [Makefile:156: test-lower-io] Error 1\n"
             "FAIL: rootless phase=Makefile native and metadata "
