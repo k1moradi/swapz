@@ -519,6 +519,44 @@ class RootlessAttribution(unittest.TestCase):
             capture_output=True, text=True, timeout=12,
         )
 
+    def test_source_contract_failure_identity_is_sanitized(self):
+        diagnostic = self.root / "source-contract-diagnostic.log"
+        method = "test_physical_backing_is_opt_in_and_linux_swap_header_guarded"
+        diagnostic.write_text(
+            f"{method} (__main__.SwapzProductionSourceQualification."
+            f"{method}) ... FAIL\n"
+            "======================================================================\n"
+            f"FAIL: {method} (__main__.SwapzProductionSourceQualification."
+            f"{method})\n"
+            "Traceback (most recent call last):\n"
+            f"AssertionError: {PRIVATE_SENTINEL}\n"
+            "======================================================================\n",
+            encoding="utf-8",
+        )
+        script = (
+            "#!/usr/bin/env bash\nset -Eeuo pipefail\n"
+            + self.functions
+            + "\nrootless_phase='tests/runtime/native/source-contract-test.py'\n"
+            + "classify_rootless_private_unittest_failure "
+            + shlex.quote(str(diagnostic))
+            + "\nprintf '%s|%s|%s|%s\\n' "
+            + '"$rootless_classified_reason" "$rootless_classified_test" '
+            + '"$rootless_classified_unittest_class" '
+            + '"$rootless_classified_subtest"\n'
+        )
+        result = subprocess.run(
+            ["bash", "-c", script], cwd=self.root,
+            capture_output=True, text=True, timeout=12,
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(
+            result.stdout,
+            "unittest_assertion|"
+            f"{method}|SwapzProductionSourceQualification|unavailable\n",
+        )
+        self.assertNotIn(PRIVATE_SENTINEL, result.stdout)
+        self.assertNotIn(str(self.root), result.stdout)
+
     def assert_report(self, result, *, status, reason, subtest="unavailable",
                       test="unavailable", stage=PACKAGE_PHASE, log_available=True):
         self.assertEqual(result.returncode, status, result.stderr[-3000:])
