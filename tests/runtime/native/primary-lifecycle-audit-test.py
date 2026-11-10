@@ -1890,9 +1890,9 @@ int swapz_primary_qualification_import_serialized(const char *report_path);
                 package = self._package_fixture()
                 if install_first:
                     # Earlier rootless work can delay this setup install.
-                    # Use the existing finite durable-checkpoint budget only
-                    # here; the general package watchdog remains 15 seconds.
-                    installed = package.invoke("install", timeout=30)
+                    # Use the ordinary bounded package watchdog; the injected
+                    # SIGKILL checkpoint keeps its separate finite deadline.
+                    installed = package.invoke("install")
                     self.assertEqual(installed.returncode, 0, installed.stderr)
                 self._crash_and_reacquire(package, action, phase)
 
