@@ -5263,6 +5263,101 @@ class ReportContract(unittest.TestCase):
             self.assertEqual(
                 runner.first_native_lower_io_failure_details(malicious), [])
 
+    def test_native_userspace_make_recipe_preserves_failing_binary(self):
+        # Execute only disposable fake userspace binaries. A failure must stop
+        # before the later native binary and Python late-race regression.
+        import subprocess
+
+        test_programs = (
+            "swapzctl-status", "swapz-primary-policy",
+            "swapz-primary-mount-namespace",
+        )
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            output = Path(temporary_directory)
+            configured = subprocess.run(
+                ["make", "--no-print-directory", "-s",
+                 "-f", str(ROOT / "tests/suites/Makefile"),
+                 str(output / "native-compiler-configuration"),
+                 f"OUT={output}"],
+                cwd=ROOT / "tests/suites", capture_output=True, text=True,
+                check=False, timeout=10)
+            self.assertEqual(configured.returncode, 0, configured.stderr)
+            for program_name in test_programs:
+                executable = output / program_name
+                return_code = 7 if program_name == "swapz-primary-policy" else 0
+                executable.write_text(
+                    "#!/bin/sh\n"
+                    f"printf 'invoked {program_name}\\n'\n"
+                    f"exit {return_code}\n",
+                    encoding="ascii")
+                executable.chmod(0o700)
+            result = subprocess.run(
+                ["make", "--no-print-directory", "-s",
+                 "-f", str(ROOT / "tests/suites/Makefile"),
+                 "test-userspace", f"OUT={output}"],
+                cwd=ROOT / "tests/suites", capture_output=True, text=True,
+                check=False, timeout=10)
+            self.assertEqual(result.returncode, 2, result.stderr)
+            self.assertEqual(result.stdout.splitlines(), [
+                "invoked swapzctl-status",
+                "invoked swapz-primary-policy",
+            ])
+            self.assertIn(
+                "FAIL: native test-userspace "
+                "binary=swapz-primary-policy exit=7", result.stderr)
+            self.assertNotIn("invoked swapz-primary-mount-namespace",
+                             result.stdout)
+
+    def test_native_userspace_console_reports_failing_binary_and_source(self):
+        from types import SimpleNamespace
+        from unittest.mock import patch
+
+        transcript = (
+            "/PRIVATE/host/tests/runtime/native/userspace/"
+            "swapz-primary-policy.c:3530 expression=PRIVATE_EXPRESSION\n"
+            "FAIL: native test-userspace binary=swapz-primary-policy exit=134\n"
+            "make[2]: *** [Makefile:205: test-userspace] Error 134\n"
+            "FAIL: rootless phase=Makefile native and metadata "
+            "subtest=test-userspace test=unavailable "
+            "exit=2 reason=nonzero_exit phase_s=12 stage_s=18 line=611 "
+            "log=build/tests/rootless-failure.ABC12345/diagnostic.log\n"
+        )
+        expected = [
+            "First failing native test: swapz-primary-policy (exit=134)",
+            "Native assertion location: swapz-primary-policy.c:3530",
+        ]
+        self.assertEqual(
+            runner.first_native_userspace_failure_details(transcript), expected)
+        console = io.StringIO()
+        result = {"stages": []}
+        with patch.object(runner.subprocess, "run",
+                          return_value=SimpleNamespace(
+                              stdout=transcript, returncode=2)), \
+                patch.object(runner, "retain_direct_rootless_first_failure"), \
+                contextlib.redirect_stdout(console):
+            self.assertEqual(runner.run_stage(
+                "Native and rootless contracts", ["synthetic"], result), 2)
+        for detail in expected:
+            self.assertIn("        " + detail, console.getvalue())
+            self.assertIn(detail, result["stages"][-1]["diagnostic"])
+        self.assertNotIn("PRIVATE_EXPRESSION", console.getvalue())
+        self.assertNotIn("/PRIVATE/host", console.getvalue())
+        self.assertNotIn("PRIVATE_EXPRESSION",
+                         result["stages"][-1]["diagnostic"])
+        self.assertNotIn("/PRIVATE/host",
+                         result["stages"][-1]["diagnostic"])
+
+        for malicious in (
+            transcript.replace("binary=swapz-primary-policy",
+                               "binary=private-host-value"),
+            transcript.replace("subtest=test-userspace", "subtest=test-gc"),
+            transcript.replace("Error 134\n", "Error 133\n"),
+            transcript.replace("exit=2 reason=nonzero_exit",
+                               "exit=1 reason=nonzero_exit"),
+        ):
+            self.assertEqual(
+                runner.first_native_userspace_failure_details(malicious), [])
+
     def test_failure_console_assertions_show_safe_expected_and_observed(self):
         # Reproduce the originally hidden nullblk fixture nounset failure.
         # The actual stderr may contain private paths and keys.
