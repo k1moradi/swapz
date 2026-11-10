@@ -927,6 +927,37 @@ static void test_swap_inventory_parser(void)
 		rows, 0U, &count) < 0);
 }
 
+static void test_memavailable_parser(void)
+{
+	uint64_t available_kib = UINT64_MAX;
+
+	assert(swapz_primary_parse_memavailable_kib(
+		"MemTotal:       8388608 kB\n"
+		"MemAvailable:   1572864 kB\n"
+		"SwapTotal:      1048576 kB\n",
+		&available_kib) == 0);
+	assert(available_kib == 1572864ULL);
+
+	available_kib = UINT64_MAX;
+	errno = 0;
+	assert(swapz_primary_parse_memavailable_kib(
+		"MemTotal: 8388608 kB\n", &available_kib) < 0);
+	assert(errno == ENODATA);
+	assert(available_kib == UINT64_MAX);
+
+	errno = 0;
+	assert(swapz_primary_parse_memavailable_kib(
+		"MemAvailable: 1024 kB\n"
+		"MemAvailable: 1024 kB\n",
+		&available_kib) < 0);
+	assert(errno == EINVAL);
+
+	errno = 0;
+	assert(swapz_primary_parse_memavailable_kib(
+		"MemAvailable: 1024 MB\n", &available_kib) < 0);
+	assert(errno == EINVAL);
+}
+
 static void test_selected_target_swap_admission(void)
 {
 	struct swapz_primary_swap_entry rows[3] = {0};
@@ -3683,6 +3714,7 @@ int main(void)
 	test_recovery_required_state_builder();
 	test_primary_swap_transition_adapter();
 	test_swap_inventory_parser();
+	test_memavailable_parser();
 	test_selected_target_swap_admission();
 	test_target_identity_and_header_policy();
 	test_target_config_and_dynamic_geometry();
