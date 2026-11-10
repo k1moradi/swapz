@@ -1345,14 +1345,13 @@ static int fixture_hashes(char *control, char *module, char *oracle)
  */
 static int swapz_primary_shared_root_scope_record_live(
     const struct swapz_primary_target *target, dev_t root_device,
-    dev_t target_parent, dev_t root_parent, dev_t recovery_parent,
-    int target_fd, char scope_sha256[65])
+    dev_t target_parent, dev_t root_parent, int target_fd,
+    char scope_sha256[65])
 {
     (void)target;
     (void)root_device;
     (void)target_parent;
     (void)root_parent;
-    (void)recovery_parent;
     (void)target_fd;
     if (!scope_sha256) {
         errno = EINVAL;
