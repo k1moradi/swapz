@@ -2636,6 +2636,45 @@ report-write and cleanup errors, and bind publication to `tested_commit_sha`
 rather than treating a report-only commit as a retest.
 
 
+### Mandatory self-contained `make test` failure reports
+
+A report that requires the owner to run a separate Python unittest, grep a
+private log, or manually extract JSON counters to identify the first actionable
+cause is incomplete. Treat that as a **reporting bug** and fix the reporting
+path in the same change as the underlying defect; add a rootless regression
+which exercises the complete official failure-console path. The developer
+must not repeatedly ask for new ad-hoc diagnostic commands as bugs move between
+hosts or phases. The automatic console must identify the authenticated first
+failing stage, source-controlled test/subtest, safe file/line, error class,
+bounded numeric mismatch or counter evidence, and the next safe action when
+these facts exist. Child errors after the first failure and teardown diagnostics
+cannot take precedence. A known cause may be printed only from a validated,
+source-bound finite grammar; do not echo raw traceback text, child output,
+credentials, host identifiers or absolute paths.
+
+Nested unittest subprocesses must retain their stderr privately but promote
+their authenticated inner test name, failure category and safely parsed
+integer comparison into the outer `make test` result automatically. If the
+inner cause cannot be authenticated, print a specific cause-unavailable notice
+and retain the private log rather than inventing a test identity. Failure-only
+private JSON snapshots collect measured rounds for READ coalescing, the
+physical-trial verdict, and publication refusal details without re-running
+any device test. Their 0600 paths must be printed; they must never qualify
+the source or be uploaded to Git without the owner's explicit decision.
+
+Before compiling or running privileged qualification, inspect both index and
+worktree for modified **tracked** source on local `main`, excluding only the
+generated `test_results.json`. A dirty or unverifiable source blocks the
+official run before the expensive stages, lists bounded validated
+repository-relative changed paths, records `BLOCKED` and leaves all five
+stages `NOT RUN`. Leave owner modifications untouched; never stash, reset or
+discard them automatically. A generated report may be dirty without blocking.
+A later source change after preflight must still fail the publication/physical
+source-identity checks. Tests must prove this fast refusal, nested inner
+failure attribution, privacy, first-cause ordering and unchanged gates.
+No troubleshooting fix is complete merely because a separate direct command
+reveals the cause.
+
 ### Native/rootless fail-only subprocess attribution
 
 The private `tests/tools/test-rootless.sh` runner must keep the exact registered
