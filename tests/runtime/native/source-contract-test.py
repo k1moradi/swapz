@@ -1994,10 +1994,12 @@ dmsetup() {
         self.assertNotIn("swapz_sb_valid", validator)
         self.assertIn("bitmap_zalloc(raw_segments, GFP_KERNEL)",
                       compact_layout_builder)
-        self.assertIn("__set_bit(raw_segment, bad_segments)",
+        self.assertIn("test_and_set_bit(raw_segment, bad_segments)",
                       compact_layout_builder)
         self.assertIn("test_bit(raw_segment, bad_segments)",
                       compact_layout_builder)
+        self.assertNotIn("swapz_linux_swap_clean_segment_count(",
+                         layout_builder)
         self.assertNotIn("swapz_linux_swap_segment_has_bad_page(",
                          layout_builder)
         primary_start = (ROOT / "src/userspace/swapz-primary.c").read_text()
