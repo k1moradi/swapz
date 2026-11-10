@@ -7,6 +7,7 @@ import inspect
 import io
 import json
 import os
+import re
 from pathlib import Path
 import signal
 import subprocess
@@ -620,6 +621,66 @@ class NativeTimingContract(unittest.TestCase):
                 else:
                     self.assertNotIn("physical_qualification",
                                      report_snapshots[0])
+
+    def test_unified_progress_table_has_one_header_and_global_ids(self):
+        captured = io.StringIO()
+        stages = [(name, ["unused"]) for name in runner.OFFICIAL_STAGE_NAMES]
+        with contextlib.redirect_stdout(captured):
+            table = runner.QualificationProgressTable()
+            table.complete("Rootless", "Native build and metadata", "PASS", "4s")
+            table.complete("Loaded", "SD mixed workloads", "FAIL", "5.2s")
+            runner.print_stage_results(
+                stages, [{"status": "PASS", "elapsed_s": 2.5}],
+                progress_table=table)
+            runner.print_physical_trial_result(
+                "NOT RUN", "-", progress_table=table)
+        output = captured.getvalue()
+        self.assertEqual(output.count("ID | Suite"), 1)
+        for obsolete_header in (
+                "Rootless suite results:", "Qualification stage results:",
+                "loaded qualification progress:"):
+            self.assertNotIn(obsolete_header, output)
+        rows = [line for line in output.splitlines() if
+                re.match(r"^\s+[1-9][0-9]* \| ", line)]
+        self.assertEqual(len(rows), 8)
+        self.assertEqual(
+            [int(re.match(r"^\s+([0-9]+)", row).group(1)) for row in rows],
+            list(range(1, 9)))
+        self.assertIn("Rootless | Native build and metadata", output)
+        self.assertIn("Loaded   |".replace("   |", "  |") +
+                      " SD mixed workloads", output)
+        self.assertIn("Physical | Authorized physical swap trial (dev)", output)
+        self.assertEqual(output.count("NOT RUN"), 5)
+
+    def test_unified_rootless_failure_keeps_original_exit_and_one_header(self):
+        transcript = (
+            "ROOTLESS_PHASE_PROGRESS state=START index=0 elapsed_s=0 "
+            "label=rootless initialization\n"
+            "ROOTLESS_PHASE_PROGRESS state=PASS index=0 elapsed_s=1 "
+            "label=rootless initialization\n"
+            "ROOTLESS_PHASE_PROGRESS state=START index=1 elapsed_s=0 "
+            "label=tests/Makefile native and metadata\n")
+        result = {"stages": [], "benchmarks": {}}
+        captured = io.StringIO()
+        with mock.patch.object(
+                runner.subprocess, "Popen",
+                return_value=FakeStreamingProcess(transcript, returncode=1)), \
+                mock.patch.object(
+                    runner, "retain_direct_rootless_first_failure"), \
+                contextlib.redirect_stdout(captured):
+            table = runner.QualificationProgressTable()
+            self.assertNotEqual(
+                runner.run_stage(
+                    "Native and rootless contracts", ["unused"], result,
+                    stream_rootless_progress=True, progress_table=table), 0)
+        output = captured.getvalue()
+        self.assertEqual(output.count("ID | Suite"), 1)
+        self.assertEqual(output.count("rootless initialization"), 1)
+        self.assertEqual(output.count("Native build and metadata"), 1)
+        self.assertRegex(
+            output, r"(?m)^\s*2 \| Rootless \|.*\| FAIL\s+\|")
+        self.assertNotIn("\r", output)
+        self.assertEqual(result["stages"][-1]["status"], "FAIL")
 
     def test_rootless_progress_rejects_unsafe_and_invalid_records(self):
         allowed = runner.rootless_phase_names()
@@ -7987,6 +8048,37 @@ class ReportContract(unittest.TestCase):
         self.assertEqual(
             runner.git_publication_failure_reason(None),
             "git_command_unavailable_or_timed_out")
+
+    def test_git_cli_fallback_is_noninteractive_and_preserves_first_cause(self):
+        commands = []
+        cli_authenticated = True
+
+        def git_run(*command, **kwargs):
+            commands.append(command)
+            success = command[0] == "-c" and cli_authenticated
+            return subprocess.CompletedProcess(
+                command, 0 if success else 1, b"",
+                b"" if success else b"Authentication failed")
+
+        result = runner.git_push_with_credential_fallback(
+            git_run, "https://github.com/k1moradi/swapz.git", "a" * 40)
+        self.assertEqual(result.returncode, 0)
+        self.assertEqual(len(commands), 2)
+        self.assertEqual(commands[0][:2], ("push", "origin"))
+        self.assertEqual(commands[1][:2], ("-c", "credential.helper="))
+        self.assertIn("!gh auth git-credential", commands[1])
+        cli_authenticated = False
+        commands.clear()
+        result = runner.git_push_with_credential_fallback(
+            git_run, "https://github.com/k1moradi/swapz.git", "a" * 40)
+        self.assertEqual(
+            runner.git_publication_failure_reason(result),
+            "credentials_or_repository_access")
+        self.assertEqual(len(commands), 2)
+        commands.clear()
+        runner.git_push_with_credential_fallback(
+            git_run, "git@github.com:k1moradi/swapz.git", "a" * 40)
+        self.assertEqual(len(commands), 1)
 
     def test_publisher_preserves_configured_git_credentials(self):
         source = (ROOT / "tests/tools/run-tests.py").read_text()
