@@ -15,6 +15,15 @@ supervisor's `run` and `recover` actions are permanently disabled because their
 device and approval bindings belong to the retired host. The approval mechanics
 below therefore document the historical evidence and cannot enable a new run.
 
+> **Rejected architecture:** the archived steps below that clear, format, back
+> up or restore the raw swap-partition header predate the current design and
+> must never be copied into current code, tests, runbooks or qualification.
+> Current swapz accepts an existing ordinary `SWAPSPACE2` partition, keeps its
+> first 4096-byte page byte-identical, uses only the post-header data area after
+> `swapoff`, and keeps swapz-specific mapping/extent metadata in RAM. Only the
+> virtual swapz mapper may receive `mkswap`; returning to normal swap is
+> `swapoff`/mapper teardown/`swapon` of the unchanged raw partition.
+
 The owner waived the separate external-review requirement for this one trial on
 2026-11-02. That waiver is an owner decision. No external reviewer approval
 exists in this repository or on issue #76. The adversarial review performed
