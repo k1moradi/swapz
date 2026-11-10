@@ -973,6 +973,34 @@ static void test_target_identity_and_header_policy(void)
 	       swap_magic, sizeof(swap_magic) - 1U);
 	assert(swapz_primary_original_swap_signature(block,
 						    TEST_DEVICE_BYTES));
+	assert(swapz_primary_physical_blocks_from_header(
+		       block, TEST_DEVICE_BYTES) ==
+	       swapz_primary_physical_blocks(TEST_DEVICE_BYTES));
+	assert(swapz_primary_swap_size_kib_from_header(
+		       block, TEST_DEVICE_BYTES) == TEST_SWAP_SIZE_KIB);
+
+	/* Two bad pages in one 1MiB segment cost one swapz segment, while Linux
+	 * /proc/swaps charges both listed pages from its raw usable-page count. */
+	test_put_u32_le(block, SWAPZ_PRIMARY_SWAP_BAD_PAGES_OFFSET, 2U);
+	test_put_u32_le(block, SWAPZ_LINUX_SWAP_BAD_PAGE_LIST_OFFSET, 257U);
+	test_put_u32_le(block, SWAPZ_LINUX_SWAP_BAD_PAGE_LIST_OFFSET +
+			sizeof(uint32_t), 258U);
+	assert(swapz_primary_physical_blocks_from_header(
+		       block, TEST_DEVICE_BYTES) ==
+	       swapz_primary_physical_blocks(TEST_DEVICE_BYTES) -
+		       SWAPZ_PRIMARY_SEGMENT_BLOCKS);
+	assert(swapz_primary_swap_size_kib_from_header(
+		       block, TEST_DEVICE_BYTES) == TEST_SWAP_SIZE_KIB - 8U);
+
+	/* A listed bad page in the already-unused segment-alignment tail does
+	 * not reduce swapz capacity again. */
+	test_put_u32_le(block, SWAPZ_PRIMARY_SWAP_BAD_PAGES_OFFSET, 1U);
+	test_put_u32_le(block, SWAPZ_LINUX_SWAP_BAD_PAGE_LIST_OFFSET,
+			(uint32_t)(logical_pages - 1U));
+	assert(swapz_primary_physical_blocks_from_header(
+		       block, TEST_DEVICE_BYTES) ==
+	       swapz_primary_physical_blocks(TEST_DEVICE_BYTES));
+		test_put_u32_le(block, SWAPZ_PRIMARY_SWAP_BAD_PAGES_OFFSET, 0U);
 	/* SWAPSPACE2 capacity is whole-page based. A normal block partition may
 	 * have a sub-page tail, which remains outside swapz's writable range.
 	 */
@@ -1590,6 +1618,16 @@ static void test_primary_manifest(int recovery_fd, int lock_fd,
 	assert(swapz_primary_manifest_parse(damaged, (size_t)length,
 					    &parsed) < 0);
 	assert(((const unsigned char *)&parsed)[0] == 0xa5U);
+	memcpy(damaged, record, (size_t)length);
+	field = strstr(damaged, "backing_physical_blocks=");
+	assert(field);
+	field += strlen("backing_physical_blocks=");
+	assert(*field >= '1' && *field <= '9');
+	*field = *field == '9' ? '8' : '9';
+	memset(&parsed, 0xa5, sizeof(parsed));
+	assert(swapz_primary_manifest_parse(damaged, (size_t)length,
+					    &parsed) < 0);
+	assert(((const unsigned char *)&parsed)[0] == 0xa5U);
 	assert(swapz_primary_manifest_write_at(
 		recovery_fd, lock_fd, &manifest, geteuid()) == 0);
 	memset(&observed, 0, sizeof(observed));
@@ -1777,7 +1815,7 @@ static void test_primary_dm_table(void)
 	assert(!strcmp(mapper_uuid,
 		       "SWAPZ-PRIMARY-0123456789abcdef0123456789abcdef"));
 	logical_pages = swapz_primary_maximum_logical_pages(
-		swapz_primary_physical_blocks(manifest.target.device_bytes));
+		manifest.backing_physical_blocks);
 	assert(logical_pages > 0U);
 	assert(logical_pages <=
 	       UINT64_MAX / SWAPZ_PRIMARY_SECTORS_PER_PAGE);
