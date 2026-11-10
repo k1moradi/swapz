@@ -2181,10 +2181,10 @@ dmsetup() {
         self.assertIn("swapz_authority_validate_geometry(", ctor)
         self.assertLess(
             ctor.index("swapz_authority_validate_geometry("),
-            ctor.index("ctx->gc_scores = kvcalloc"))
+            ctor.index("ctx->gc_scores = kvmalloc_array"))
         self.assertLess(
             ctor.index("swapz_authority_validate_geometry("),
-            ctor.index("ctx->maps = kvcalloc"))
+            ctor.index("ctx->maps = kvmalloc_array"))
         self.assertIn("swapz_gc_flush(ctx)", compact)
         gc_flush = body("swapz_gc_flush")
         gc_raw = body("swapz_gc_move_raw")
@@ -2960,7 +2960,7 @@ int main(void) {
         self.assertIn("for (off = 0; off < SWAPZ_SEGMENT_BLOCKS; ++off)", claim)
         self.assertIn("if (live_total)", claim)
         self.assertIn("a->segment_mapped_pages[victim]", rotate)
-        self.assertIn("ctx->segment_mapped_pages = kvcalloc", ctor)
+        self.assertIn("ctx->segment_mapped_pages = kvmalloc_array", ctor)
         self.assertIn("swapz_enable_segment_mapping_counts(&ctx->authority", ctor)
         self.assertIn("a->segment_mapped_pages[victim]", compact)
 
@@ -2986,7 +2986,7 @@ int main(void) {
         self.assertIn("ctx->gc_destination_advances++", advance)
         self.assertIn("ctx->gc_roll_forwards++", roll_forward)
         self.assertIn("ctx->gc_reserve_segments_current =", ctr)
-        self.assertIn("ctx->gc_min_live_blocks = kvcalloc", ctr)
+        self.assertIn("ctx->gc_min_live_blocks = kvmalloc_array", ctr)
 
     def test_gc_io_aware_default_retains_old_control_policies(self):
         choose = body("swapz_gc_choose_victim")
@@ -8080,9 +8080,10 @@ class CapacityMemoryAccountingContracts(unittest.TestCase):
 
     @staticmethod
     def allocation_inventory(constructor):
-        # Require exactly the production kvcalloc count and sizeof expression.
+        # Require exactly one overflow-safe capacity allocation per index.
+        # Initialization ownership is audited separately below.
         pattern = re.compile(
-            r"ctx->([a-z_]+)\s*=\s*kvcalloc\(\s*"
+            r"ctx->([a-z_]+)\s*=\s*(?:kvcalloc|kvmalloc_array)\(\s*"
             r"(logical|physical|ctx->segment_count)\s*,\s*"
             r"sizeof\(\*ctx->\1\)\s*,\s*GFP_KERNEL\s*\)", re.S)
         return [(match.group(1), match.group(2), match.start())
@@ -8209,6 +8210,57 @@ class CapacityMemoryAccountingContracts(unittest.TestCase):
         self.assertEqual(constructor.count("dm_get_device("), 1)
         self.assertEqual(destruction.count("dm_put_device("), 1)
 
+    def test_authority_indexes_skip_only_redundant_zero_initialization(self):
+        constructor = body("swapz_ctr")
+        authority_initialized = (
+            "maps", "live_records", "extent_classes",
+            "extent_sequence_delta", "segment_sequence_base",
+            "segment_roles", "segment_mapped_pages",
+            "segment_program_counts", "segment_first_page",
+            "segment_last_page", "page_prev_in_segment",
+            "page_next_in_segment", "gc_scores", "gc_io_scores",
+            "gc_min_live_blocks",
+        )
+        for name in authority_initialized:
+            self.assertRegex(
+                constructor,
+                rf"ctx->{name}\\s*=\\s*kvmalloc_array\\(",
+                f"{name} must avoid redundant allocator zeroing")
+            self.assertNotRegex(
+                constructor,
+                rf"ctx->{name}\\s*=\\s*kvcalloc\\(")
+
+        # These sidecars are consumed directly and have no authority-owned
+        # full initializer, so they retain zero-allocation semantics.
+        for name in ("gc_segment_evictions", "segment_trimmed"):
+            self.assertRegex(
+                constructor,
+                rf"ctx->{name}\\s*=\\s*kvcalloc\\(")
+
+        self.assertIn(
+            "memset(maps, 0, (size_t)logical_pages * sizeof(*maps));",
+            AUTH)
+        self.assertIn(
+            "memset(live_records, 0,\n"
+            "       (size_t)physical_blocks * sizeof(*live_records));",
+            AUTH)
+        self.assertIn(
+            "memset(extent_classes, 0,\n"
+            "       (size_t)physical_blocks * sizeof(*extent_classes));",
+            AUTH)
+        self.assertIn("memset(sequence_delta, 0,", AUTH)
+        self.assertIn("memset(segment_sequence_base, 0,", AUTH)
+        self.assertIn("roles[i] = i < foreground ? 1 : 0;", AUTH)
+        self.assertIn("memset(counts, 0, (size_t)count * sizeof(*counts));",
+                      AUTH)
+        self.assertIn("memset(first_page, 0xff,", AUTH)
+        self.assertIn("memset(last_page, 0xff,", AUTH)
+        self.assertIn("memset(prev_page, 0xff,", AUTH)
+        self.assertIn("memset(next_page, 0xff,", AUTH)
+        self.assertIn("memset(live_bytes, 0,", AUTH)
+        self.assertIn("memset(io_cost, 0,", AUTH)
+        self.assertIn("memset(min_live_blocks, 0,", AUTH)
+
     def test_new_or_early_index_allocation_fails_source_audit(self):
         constructor = body("swapz_ctr")
         guard = constructor.index("swapz_authority_validate_geometry(")
@@ -8218,8 +8270,8 @@ class CapacityMemoryAccountingContracts(unittest.TestCase):
         with self.assertRaises(AssertionError):
             self.audit_constructor(injected)
         injected = constructor.replace(
-            "ctx->maps = kvcalloc(logical, sizeof(*ctx->maps), GFP_KERNEL);",
-            "ctx->maps = kvcalloc(physical, sizeof(*ctx->maps), GFP_KERNEL);")
+            "ctx->maps = kvmalloc_array(logical, sizeof(*ctx->maps), GFP_KERNEL);",
+            "ctx->maps = kvmalloc_array(physical, sizeof(*ctx->maps), GFP_KERNEL);")
         with self.assertRaises(AssertionError):
             self.audit_constructor(injected)
         injected = (
@@ -8890,7 +8942,7 @@ class CapacityMemoryAccountingContracts(unittest.TestCase):
         self.assertGreater(3817748224 * 16, (1 << 32) - 1)
         self.assertIn("swapz_authority_validate_geometry(", constructor := body("swapz_ctr"))
         self.assertLess(constructor.index("swapz_authority_validate_geometry("),
-                        constructor.index("ctx->maps = kvcalloc("))
+                        constructor.index("ctx->maps = kvmalloc_array("))
 
 
     def test_segment_scan_cursor_preserves_rotation_without_per_entry_division(self):
