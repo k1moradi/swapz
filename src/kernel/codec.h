@@ -3,7 +3,7 @@
 #define SWAPZ_EXTENT_CODEC_H
 
 /*
- * SWZ 4/8/16 KiB extent codec helpers.
+ * swapz 4/8/16 KiB payload-extent helpers plus legacy serialized fixtures.
  *
  * Production kernel extents are data-only: descriptor, generation, sequence,
  * CRC, offset/length and GC authority live in bounded RAM. The serialized SWZ
@@ -62,7 +62,7 @@ typedef uint64_t swapz_u64;
 /* Endian encoding is little-endian, independently of the host CPU. */
 struct swapz_header {
 	swapz_u32 magic_le;
-	swapz_u16 flags_le; /* reserved; zero until SWZ needs an extension */
+	swapz_u16 flags_le; /* legacy serialized fixture: reserved, must be zero */
 	swapz_u8 extent_blocks;
 	swapz_u8 record_count;
 	swapz_u32 sequence_le;
