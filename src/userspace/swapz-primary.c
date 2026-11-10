@@ -11084,14 +11084,6 @@ static int swapz_primary_deactivate_mapper_swap(
 	}
 	logical_bytes = logical_sectors * 512ULL;
 
-	backing_active =
-		swapz_primary_swap_device_active(SWAPZ_PRIMARY_TARGET_DEVICE);
-	if (backing_active != 0) {
-		if (backing_active > 0)
-			errno = EBUSY;
-		return -1;
-	}
-
 	control_fd = swapz_primary_dm_control_open();
 	if (control_fd < 0)
 		return -1;
@@ -11101,7 +11093,19 @@ static int swapz_primary_deactivate_mapper_swap(
 		    swapz_primary_dm_prove_mapper_absent(
 			    control_fd, mapper_name, mapper_uuid) < 0)
 			goto out;
+		/*
+		 * Recovery may be reconciling a crash after STARTING was durable
+		 * but before raw swapoff. With no owned mapper present, an active
+		 * raw partition is already the safe ordinary-swap state.
+		 */
 		result = 0;
+		goto out;
+	}
+	backing_active =
+		swapz_primary_swap_device_active(SWAPZ_PRIMARY_TARGET_DEVICE);
+	if (backing_active != 0) {
+		if (backing_active > 0)
+			errno = EBUSY;
 		goto out;
 	}
 	if (status.dev == 0U) {
