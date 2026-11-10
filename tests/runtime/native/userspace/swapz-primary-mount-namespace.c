@@ -2120,10 +2120,7 @@ static void test_active_swapfile_gate(void)
 
 static void test_independent_admission_gates(void)
 {
-	struct swapz_primary_swap_entry entries[2] = {0};
 	struct swapz_primary_target wrong_device = swapz_primary_selected_target;
-	dev_t devices[2] = {0};
-	unsigned char is_block[2] = {0};
 	char holder_path[PATH_MAX];
 	int length;
 
@@ -2134,20 +2131,12 @@ static void test_independent_admission_gates(void)
 	assert(!swapz_primary_target_identity_equal(
 		&swapz_primary_selected_target, &wrong_device));
 
-	/* An unrelated active swapfile is not a selected block-swap alias. */
-	strcpy(entries[0].path, "/unrelated-swapfile");
-	strcpy(entries[0].type, "file");
-	assert(swapz_primary_swap_inventory_target_is_quiescent(
-		entries, devices, is_block, 1U, makedev(8U, 1U), 4096U) == 0);
-	strcpy(entries[1].path, "/dev/selected");
-	strcpy(entries[1].type, "partition");
-	entries[1].size_kib = 4096U;
-	entries[1].used_kib = 1U;
-	devices[1] = makedev(8U, 1U);
-	is_block[1] = 1;
-	assert(swapz_primary_swap_inventory_target_is_quiescent(
-		entries, devices, is_block, 2U, makedev(8U, 1U), 4096U) < 0);
-
+	/*
+	 * Swap-inventory kind/quiescence policy is exercised by the dedicated
+	 * SWAPZ_PRIMARY_ROOTLESS_TEST fixture. This mount-namespace fixture
+	 * intentionally compiles the production manager without that test-only
+	 * helper so warning-clean production scoping is also exercised here.
+	 */
 	assert(swapz_primary_mapper_identity_is_swapz("swapz-selected", "") == 1);
 	assert(swapz_primary_mapper_identity_is_swapz("unrelated", "SWAPZ-owned") == 1);
 	assert(swapz_primary_mapper_identity_is_swapz("unrelated", "CRYPT-other") == 0);
