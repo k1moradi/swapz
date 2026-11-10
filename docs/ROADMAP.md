@@ -62,9 +62,11 @@ current-source acceptance tests.
    workloads.
 5. Rework normal prepare/start/stop and test teardown to preserve the backing
    signature and enable reversible swapoff/swapon without reboot. After test
-   PASS present an explicit keep-swapz or ordinary-swapon decision; keep any
-   crash-safe *session ownership* state separate from obsolete swap-header
-   restoration, without inventing persistent swapz partition metadata.
+   PASS present an explicit keep-swapz or ordinary-swapon decision. Mutable
+   session ownership/manifest state is same-boot volatile state under `/run`;
+   it must not require a persistent recovery filesystem or a separate physical
+   parent. Keep persistent qualification/build evidence separate from runtime
+   mapping/ownership state and never invent persistent swapz partition metadata.
 6. Replace synthetic SWZ001 fixture assumptions; measure RAM overhead,
    payload-only lower I/O and cold READ latency, and gate on full byte-exact
    loaded, fault-injection, concurrency, GC, and real-partition header
