@@ -2508,7 +2508,7 @@ class BootVerifierTests(unittest.TestCase):
         self.assertTrue((self.report / f"report-{BOOT_B}.dm-status.txt").is_file())
         self.assertTrue((self.report / f"report-{BOOT_B}.kernel-errors.log").is_file())
 
-    def test_read_only_plan_exit_two_is_accepted_for_persistence_proof(self) -> None:
+    def test_read_only_plan_exit_two_is_accepted_for_observation(self) -> None:
         self.write_proc_swaps(active=False)
         arm = self.run_verifier("arm")
         self.assertEqual(arm.returncode, 0, arm.stderr)
@@ -2520,22 +2520,17 @@ class BootVerifierTests(unittest.TestCase):
         env["MOCK_PLAN_STATUS"] = "1"
         result = self.run_verifier("arm", env=env)
         self.assertEqual(result.returncode, 1)
-        self.assertIn("cannot query read-only recovery storage plan", result.stderr)
+        self.assertIn("cannot query read-only primary plan", result.stderr)
 
-    def test_missing_plan_persistence_proof_blocks_arm(self) -> None:
+    def test_malformed_plan_schema_blocks_arm(self) -> None:
         self.write_proc_swaps(active=False)
         env = self.env.copy()
         env["MOCK_PLAN_BODY"] = (
-            '{"schema":"swapz-primary-plan-v1","status":"BLOCKED",'
-            '"recovery_preflight_read":true,'
-            '"recovery_filesystem_supported":true,'
-            '"recovery_directly_not_target":true,'
-            '"recovery_source_chain_checked":true,'
-            '"recovery_same_physical_disk_as_target":true}'
+            '{"schema":"unexpected-primary-plan","status":"BLOCKED"}'
         )
         result = self.run_verifier("arm", env=env)
         self.assertEqual(result.returncode, 1)
-        self.assertIn("cannot prove recovery and boot evidence", result.stderr)
+        self.assertIn("read-only primary plan is malformed", result.stderr)
 
     def test_raw_fstab_alias_blocks_preflight_without_swap_commands(self) -> None:
         self.arm_then_reboot()
@@ -3304,7 +3299,7 @@ class BootVerifierTests(unittest.TestCase):
         rejected = self.run_verifier("arm", env=env)
         self.assertEqual(rejected.returncode, 1, rejected.stderr)
         self.assertIn("COLD_BOOT_HARNESS=BLOCKED", rejected.stderr)
-        self.assertIn("cannot query read-only recovery storage plan", rejected.stderr)
+        self.assertIn("cannot query read-only primary plan", rejected.stderr)
         self.assertFalse((self.report / "armed.env").exists())
         self.assert_activation_revoked()
         # A staged arm record from an interrupted write has no authority.
@@ -3315,24 +3310,22 @@ class BootVerifierTests(unittest.TestCase):
         self.assertIn("cold-boot harness is not securely armed", unarmed.stderr)
         self.assert_activation_revoked()
 
-    def test_recovery_storage_unavailable_blocks_without_fallback(self) -> None:
+    def test_missing_prior_runtime_state_does_not_block_preflight(self) -> None:
         self.arm_then_reboot()
-        self.recovery.rename(self.root / "disconnected-recovery")
-        blocked = self.run_verifier("preflight")
-        self.assertEqual(blocked.returncode, 1, blocked.stderr)
-        self.assertIn("PRIMARY_BOOT_PREFLIGHT=BLOCKED", blocked.stderr)
-        self.assertIn("primary recovery directory is unavailable", blocked.stderr)
-        self.assert_activation_revoked()
+        self.recovery.rename(self.root / "discarded-prior-runtime-state")
+        admitted = self.run_verifier("preflight")
+        self.assertEqual(admitted.returncode, 0, admitted.stderr)
+        self.assertIn("PRIMARY_BOOT_PREFLIGHT=PASS", admitted.stdout)
         self.assertFalse((self.dev / "disk" / "by-partuuid" / OTHER_PARTUUID).is_symlink())
 
-    def test_missing_recovery_storage_never_authorizes_observed_pass(self) -> None:
+    def test_missing_active_runtime_state_never_authorizes_observed_pass(self) -> None:
         self.arm_then_reboot()
-        self.recovery.rename(self.root / "disconnected-recovery")
+        self.recovery.rename(self.root / "missing-active-runtime-state")
         observed = self.run_verifier("observe")
         self.assertEqual(observed.returncode, 1, observed.stderr)
         report = (self.report / "latest.env").read_text(encoding="utf-8")
         self.assertIn("status=FAIL\n", report)
-        self.assertIn("recovery_storage_unavailable", report)
+        self.assertIn("runtime_state_unavailable", report)
         self.assert_activation_revoked()
 
     def test_incomplete_package_journal_blocks_preflight_and_acceptance(self) -> None:
