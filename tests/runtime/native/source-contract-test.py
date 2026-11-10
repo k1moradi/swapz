@@ -1947,6 +1947,7 @@ dmsetup() {
         submit = body("swapz_submit_inflight_write")
         discard = body("swapz_discard_dead_segment")
         validator = body("swapz_validate_linux_swap_header")
+        layout_builder = body("swapz_configure_linux_swap_layout")
         fail_at = body("swapz_fail_at")
         fail = body("swapz_fail")
         process = body("swapz_process")
@@ -1961,6 +1962,7 @@ dmsetup() {
         self.assertIn("swapz_allow_physical_backing", ctr)
         compact_ctr = re.sub(r"\s+", " ", ctr)
         compact_validator = re.sub(r"\s+", " ", validator)
+        compact_layout_builder = re.sub(r"\s+", " ", layout_builder)
         self.assertIn(
             "swapz_validate_linux_swap_header( ctx, device_bytes, "
             "&swap_magic_present)", compact_ctr)
@@ -1990,6 +1992,14 @@ dmsetup() {
                       compact_validator)
         self.assertNotIn("swapz_linux_swap_header_valid", validator)
         self.assertNotIn("swapz_sb_valid", validator)
+        self.assertIn("bitmap_zalloc(raw_segments, GFP_KERNEL)",
+                      compact_layout_builder)
+        self.assertIn("__set_bit(raw_segment, bad_segments)",
+                      compact_layout_builder)
+        self.assertIn("test_bit(raw_segment, bad_segments)",
+                      compact_layout_builder)
+        self.assertNotIn("swapz_linux_swap_segment_has_bad_page(",
+                         layout_builder)
         primary_start = (ROOT / "src/userspace/swapz-primary.c").read_text()
         primary_start_body = primary_start.split(
             "static int swapz_primary_start_prepared(void)", 1)[1].split(
