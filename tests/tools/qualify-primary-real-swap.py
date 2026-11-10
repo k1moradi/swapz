@@ -47,7 +47,8 @@ else:
 SELECTOR = Path("/etc/swapz/primary-target")
 # PARTUUID= (9 bytes), up to 64 ASCII characters, and optional CRLF.
 SELECTOR_MAX_BYTES = len("PARTUUID=") + 64 + 2
-RECOVERY_BASE = Path("/var/lib/swapz/physical-recovery")
+RUNTIME_STATE_BASE = Path("/run/swapz")
+QUALIFICATION_EVIDENCE_BASE = Path("/var/lib/swapz/physical-recovery")
 CGROUP_ROOT = Path("/sys/fs/cgroup")
 AUTHORIZATION_SNAPSHOT = ROOT / "docs/handoff/production-readiness.json"
 ACCEPTANCE_MANIFEST = ROOT / "docs/production-acceptance.json"
@@ -1834,7 +1835,7 @@ def parse_manifest(text: str) -> dict:
 
 
 def read_state() -> dict | None:
-    path = RECOVERY_BASE / "primary-state.json"
+    path = RUNTIME_STATE_BASE / "primary-state.json"
     info = _lstat_optional(path, "primary state file")
     if info is None:
         return None
@@ -1853,7 +1854,7 @@ def read_state() -> dict | None:
 
 
 def read_manifest(run_id: str) -> dict:
-    path = RECOVERY_BASE / f"primary-manifest-{run_id}.txt"
+    path = RUNTIME_STATE_BASE / f"primary-manifest-{run_id}.txt"
     try:
         info = path.lstat()
         if not stat.S_ISREG(info.st_mode) or info.st_uid != 0 or \
@@ -2170,12 +2171,11 @@ def parse_lsblk_topology(text: str) -> list[dict]:
 
 
 def require_plan_storage_separation(plan: dict) -> None:
-    for key in (
-        "root_same_physical_disk_as_target",
-        "recovery_same_physical_disk_as_target",
-    ):
-        if plan.get(key) is not False:
-            raise Blocked(f"primary plan does not prove {key}=false")
+    # The root/target relationship remains a physical safety boundary. Mutable
+    # lifecycle state is tmpfs under /run/swapz and has no physical parent.
+    if plan.get("root_same_physical_disk_as_target") is not False:
+        raise Blocked(
+            "primary plan does not prove root_same_physical_disk_as_target=false")
 
 
 def require_clean_mapper_ownership(plan: dict) -> None:
@@ -2714,7 +2714,7 @@ def _validate_precycle_state(
     state = read_state()
     if state is not None and state.get("stage") != "COMPLETE":
         raise Blocked(f"unresolved primary state {state.get('stage')}")
-    marker = RECOVERY_BASE / f"partition-{partuuid}.active"
+    marker = RUNTIME_STATE_BASE / f"partition-{partuuid}.active"
     if _path_present(marker, "primary partition ownership marker"):
         raise Blocked("selected partition already has an active ownership marker")
     if _dm_identity() is not None:
@@ -4080,9 +4080,9 @@ def _post_stop_verify(manifest: dict, active: dict, baseline_identity: set[tuple
         raise QualificationFailure("transaction-owned dm_swapz module remains loaded after stop")
     state = read_state()
     if state is None or state.get("run_id") != manifest["run_id"] or state.get("stage") != "COMPLETE":
-        raise QualificationFailure("durable primary state is not COMPLETE after stop")
+        raise QualificationFailure("same-boot primary state is not COMPLETE after stop")
     if _path_present(
-            RECOVERY_BASE / f"partition-{partuuid}.active",
+            RUNTIME_STATE_BASE / f"partition-{partuuid}.active",
             "primary partition ownership marker"):
         raise QualificationFailure("partition ownership marker remains after COMPLETE")
 
@@ -4139,9 +4139,9 @@ def _verify_completed_cleanup(manifest: dict, baseline_identity: set[tuple], par
         raise QualificationFailure("transaction-owned dm_swapz module remains after cleanup")
     state = read_state()
     if state is None or state.get("run_id") != manifest["run_id"] or state.get("stage") != "COMPLETE":
-        raise QualificationFailure("durable primary state is not COMPLETE after cleanup")
+        raise QualificationFailure("same-boot primary state is not COMPLETE after cleanup")
     if _path_present(
-            RECOVERY_BASE / f"partition-{partuuid}.active",
+            RUNTIME_STATE_BASE / f"partition-{partuuid}.active",
             "primary partition ownership marker", QualificationFailure):
         raise QualificationFailure("partition ownership marker remains after cleanup")
 
@@ -4153,7 +4153,7 @@ def _reconcile_primary_cleanup(swapzctl: Path, manifest: dict,
     state = read_state()
     if state is None or state.get("run_id") != manifest["run_id"]:
         raise QualificationFailure(
-            "durable state cannot be reconciled automatically")
+            "same-boot state cannot be reconciled automatically")
     stage = state.get("stage")
     cleanup = None
     if stage == "ACTIVE":
@@ -4605,7 +4605,7 @@ def _execute_admitted(
         _reject_relevant_kernel_errors([])
     
         evidence = PersistentEvidence(
-            RECOVERY_BASE,
+            QUALIFICATION_EVIDENCE_BASE,
             os.urandom(16).hex(),
             {
                 "source_sha": arguments.validated_source,
@@ -4643,8 +4643,7 @@ def _execute_admitted(
                 error_type=Blocked)
         raise
 
-    # First-cycle freshness also excludes the immediately preceding durable
-    # COMPLETE transaction, not only IDs observed later in this campaign.
+    # First-cycle freshness also excludes the immediately preceding same-boot\n    # COMPLETE transaction, not only IDs observed later in this campaign.
     run_ids: set[str] = (
         {baseline_state["run_id"]} if baseline_state is not None else set())
     swap_uuids: set[str] = set()
