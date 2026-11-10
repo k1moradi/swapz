@@ -49,6 +49,9 @@ struct swapz_primary_manifest {
 	char module_sha256[SWAPZ_PRIMARY_SHA256_LENGTH + 1U];
 	char qualification_report_sha256[SWAPZ_PRIMARY_SHA256_LENGTH + 1U];
 	char original_header_sha256[SWAPZ_PRIMARY_SHA256_LENGTH + 1U];
+	/* Clean 4KiB backing blocks after the immutable header, partial tail,
+	 * and complete 1MiB segments containing Linux-listed bad pages are removed. */
+	uint32_t backing_physical_blocks;
 	struct swapz_primary_target target;
 };
 
