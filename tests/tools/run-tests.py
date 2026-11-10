@@ -3607,7 +3607,7 @@ def _first_native_make_failure_details(output, target_name, source_directory):
     except OSError:
         return details
     source_failures = list(re.finditer(
-        r"(?m)^(?:[^\r\n]{1,350}[/\\])?"
+        r"(?m)^(?:FAIL: |[^\r\n]{1,350}[/\\])?"
         + re.escape(executable)
         + r"[.]c:([1-9][0-9]{0,5})(?: failed |: | expression=)",
         native_output[:native_failures[-1].start()]))
