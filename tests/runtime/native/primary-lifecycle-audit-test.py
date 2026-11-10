@@ -1893,7 +1893,11 @@ int swapz_primary_qualification_import_serialized(const char *report_path);
                     # Use the ordinary bounded package watchdog; the injected
                     # SIGKILL checkpoint keeps its separate finite deadline.
                     installed = package.invoke("install")
-                    self.assertEqual(installed.returncode, 0, installed.stderr)
+                    self.assertEqual(
+                        installed.returncode, 0,
+                        "phase=crash-audit-setup-install "
+                        f"action={action} checkpoint={phase} "
+                        f"exit={installed.returncode}\n{installed.stderr}")
                 self._crash_and_reacquire(package, action, phase)
 
     def test_blocked_start_reports_explicit_package_recovery_phase(self):

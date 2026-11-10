@@ -2806,8 +2806,11 @@ expectations (bounded phase/ownership/status markers, short values and fixed
 failure categories). Source-matched package crash subtests additionally
 report only the finite install/uninstall action and durable checkpoint phase,
 and name subprocess.TimeoutExpired by class without showing its command.
-The SIGKILL lifecycle audit may bound its setup install to 30 seconds under
-earlier full-suite host load. Its isolated committed-install recovery case
+The SIGKILL lifecycle audit must run its setup install through the supported
+ordinary package invocation watchdog, without an unsupported per-call timeout
+argument. A setup refusal must identify the crash-audit setup phase, finite
+install/uninstall action, intended checkpoint and original child exit before
+the private stderr. Its isolated committed-install recovery case
 may allow up to 90 seconds for the durable crash checkpoint on slow USB-root
 hosts; it must still prove SIGKILL, lock reacquisition, recovered exact
 package bytes and clean reentry. The general package operation watchdog
