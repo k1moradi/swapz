@@ -217,11 +217,11 @@ package_lock_named_identity="$(stat -c '%d:%i' -- "$package_lock" 2>/dev/null ||
 [[ "$package_lock_descriptor_identity" == "$package_lock_named_identity" ]] ||
   blocked "package lock path changed while locked"
 
-primary_recovery_base="/var/lib/swapz/physical-recovery"
-primary_state="$primary_recovery_base/primary-state.json"
+primary_runtime_state_base="/run/swapz"
+primary_state="$primary_runtime_state_base/primary-state.json"
 if [[ -n "$test_root" ]]; then
-  primary_recovery_base="$sandbox/var/lib/swapz/physical-recovery"
-  primary_state="$primary_recovery_base/primary-state.json"
+  primary_runtime_state_base="$sandbox/run/swapz"
+  primary_state="$primary_runtime_state_base/primary-state.json"
 fi
 
 src="$srcbase/swapz-$version"
@@ -481,12 +481,12 @@ swapz_mapper_present() {
   return 1
 }
 
-assert_no_primary_recovery_authority() {
+assert_no_primary_runtime_authority() {
   local operation="$1"
   [[ ! -e "$primary_state" && ! -L "$primary_state" ]] ||
-    blocked "primary recovery state exists; preserve it during package $operation"
-  if compgen -G "$primary_recovery_base/partition-*.active" >/dev/null; then
-    blocked "a primary partition ownership marker exists; preserve the recovery path during package $operation"
+    blocked "primary runtime state exists; preserve it during package $operation"
+  if compgen -G "$primary_runtime_state_base/partition-*.active" >/dev/null; then
+    blocked "a primary partition ownership marker exists; preserve runtime state during package $operation"
   fi
 }
 
@@ -1774,7 +1774,7 @@ PY
   assert_single_kernel_dkms_scope
   swapz_module_loaded && blocked "recovery blocked by loaded swapz module"
   swapz_mapper_present && blocked "recovery blocked by active swapz mapping"
-  assert_no_primary_recovery_authority recovery
+  assert_no_primary_runtime_authority recovery
 
   # Test-only fault injection never runs in production. The original I/O
   # exception stays on stderr; neither a failed fsync nor rename clears state.
@@ -1911,7 +1911,7 @@ if [[ "$action" == uninstall ]]; then
     exit 1
   fi
   swapz_mapper_present && blocked "active swapz mapping; refusing package removal"
-  assert_no_primary_recovery_authority removal
+  assert_no_primary_runtime_authority removal
   # A passive .swap unit without [Install] is "static": systemctl reports
   # is-enabled exit 0 for it, although it has no enabled activation link.
   # Inspect both the state and the return code, and fail closed on errors.
@@ -2329,7 +2329,7 @@ fi
 
 swapz_module_loaded && blocked "loaded module; refusing package upgrade"
 swapz_mapper_present && blocked "active swapz mapping; refusing package upgrade"
-assert_no_primary_recovery_authority upgrade
+assert_no_primary_runtime_authority upgrade
 
 ensure_transaction_parent
 transaction_dir="$(mktemp -d "$transaction_parent/swapz-package.XXXXXXXX")"
