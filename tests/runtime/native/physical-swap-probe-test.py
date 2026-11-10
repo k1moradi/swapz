@@ -288,9 +288,9 @@ class PhysicalSwapProbeTests(unittest.TestCase):
                 probe._read_algorithm_ram_development_evidence(
                     canonical, expected_uid, head, source, nonce)
 
-    def test_arm64_direct_development_probe_stops_before_device_admission(self):
+    def test_unsupported_arch_direct_probe_stops_before_device_admission(self):
         with mock.patch.object(probe, "_require_development_linux_abi"), \
-             mock.patch.object(probe.platform, "machine", return_value="aarch64"), \
+             mock.patch.object(probe.platform, "machine", return_value="riscv64"), \
              mock.patch.object(probe, "_require_physical_host") as host, \
              mock.patch.object(probe, "_git") as source, \
              mock.patch.object(probe, "inspect_target") as target:
@@ -300,6 +300,15 @@ class PhysicalSwapProbeTests(unittest.TestCase):
         host.assert_not_called()
         source.assert_not_called()
         target.assert_not_called()
+
+    def test_big_endian_development_probe_is_rejected(self):
+        with mock.patch.object(probe.platform, "system", return_value="Linux"), \
+             mock.patch.object(probe.platform, "machine", return_value="aarch64"), \
+             mock.patch.object(probe.struct, "calcsize", return_value=8), \
+             mock.patch.object(probe.os, "sysconf", return_value=4096), \
+             mock.patch.object(probe.sys, "byteorder", "big"):
+            with self.assertRaisesRegex(probe.ProbeError, "little-endian"):
+                probe._require_development_linux_abi()
 
     def test_development_architecture_gate_requires_4k_64bit_native_linux(self):
         for machine in ("x86_64", "aarch64"):
@@ -2520,7 +2529,7 @@ class PhysicalSwapProbeTests(unittest.TestCase):
                 (root / "test_results.json").write_text(json.dumps(
                     report(source, duration=3,
                            host=dict(local_host, id_sha256="2" * 64))))
-                with self.assertRaisesRegex(probe.ProbeError, "this x86_64 host"):
+                with self.assertRaisesRegex(probe.ProbeError, "this qualified host"):
                     probe.current_source_evidence()
 
     def test_merge_after_qualified_source_blocks_physical_admission(self):

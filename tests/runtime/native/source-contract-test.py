@@ -2094,6 +2094,29 @@ dmsetup() {
                          result.stdout + "\\n" + result.stderr)
         self.assertIn("OK", result.stderr)
 
+    def test_partition_architecture_gate_executes_supported_and_rejected_configs(self):
+        import subprocess
+        import tempfile
+        gate = body("swapz_physical_backing_arch_supported")
+        for defines, expected in ((["CONFIG_X86_64"], 1),
+                                  (["CONFIG_ARM64"], 1),
+                                  (["CONFIG_ARM64", "CONFIG_CPU_BIG_ENDIAN"], 0),
+                                  (["CONFIG_ARM"], 0), ([], 0)):
+            with self.subTest(defines=defines), tempfile.TemporaryDirectory() as temp:
+                program = ("#include <stdbool.h>\n"
+                           "static bool swapz_physical_backing_arch_supported(void) {\n" +
+                           gate + "\n}\n") + (
+                    "\nint main(void) { return "
+                    f"swapz_physical_backing_arch_supported() != {expected}; }}\n")
+                binary = str(Path(temp) / "architecture")
+                compiled = subprocess.run(
+                    ["cc", "-std=c11", "-Wall", "-Wextra", "-Werror",
+                     *["-D" + name for name in defines], "-x", "c", "-",
+                     "-o", binary], input=program, text=True,
+                    capture_output=True, timeout=30)
+                self.assertEqual(compiled.returncode, 0, compiled.stderr)
+                self.assertEqual(subprocess.run([binary], timeout=10).returncode, 0)
+
     def test_physical_backing_is_opt_in_and_linux_swap_header_guarded(self):
         ctr = body("swapz_ctr")
         lower = body("swapz_lower")
@@ -2122,12 +2145,13 @@ dmsetup() {
         self.assertIn("token_character < 'a' || token_character > 'f'", ctr)
         self.assertIn("if (!is_nullb && !bdev_is_partition", ctr)
         arch_gate = body("swapz_physical_backing_arch_supported")
-        self.assertIn("#if defined(CONFIG_X86_64)", arch_gate)
-        self.assertNotIn("CONFIG_ARM64", arch_gate)
+        self.assertIn("defined(CONFIG_X86_64)", arch_gate)
+        self.assertIn("CONFIG_ARM64", arch_gate)
+        self.assertIn("CONFIG_CPU_BIG_ENDIAN", arch_gate)
         self.assertIn("return true", arch_gate)
         self.assertIn("return false", arch_gate)
         self.assertIn("swapz_physical_backing_arch_supported()", ctr)
-        self.assertIn("Physical backing requires qualified x86_64", ctr)
+        self.assertIn("Physical backing requires supported little-endian x86_64 or ARM64", ctr)
         self.assertIn("swapz_allow_physical_backing", ctr)
         compact_ctr = re.sub(r"\s+", " ", ctr)
         compact_validator = re.sub(r"\s+", " ", validator)

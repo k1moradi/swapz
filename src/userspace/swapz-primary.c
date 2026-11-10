@@ -8179,11 +8179,9 @@ static int swapz_primary_qualification_host_parse(
 		return -1;
 	if (!strcmp(architecture, "x86_64"))
 		return 0;
-#ifdef SWAPZ_PRIMARY_OWNED_NULLBLK_TEST
-	/* An ARM64 report is accepted only by the private RAM rehearsal. */
+	/* Platform approval does not relax the caller's live host digest binding. */
 	if (!strcmp(architecture, "aarch64"))
 		return 0;
-#endif
 	return -1;
 }
 
@@ -8494,7 +8492,7 @@ static int swapz_primary_running_kernel_matches_qualification(
 	}
 	if (uname(&system) < 0)
 		return -1;
-	#if defined(SWAPZ_PRIMARY_OWNED_NULLBLK_TEST) && defined(__aarch64__)
+#if defined(__aarch64__) && !defined(__AARCH64EB__)
 	if (strcmp(system.sysname, "Linux") || strcmp(system.machine, "aarch64")) {
 		errno = ENOTSUP;
 		return -1;
@@ -8533,7 +8531,11 @@ static int swapz_primary_live_host_identity_sha256(char digest[65])
 	unsigned char identity[sizeof(prefix) + 32U];
 #else
 	static const unsigned char prefix[] = "swapz-host-v2";
+#if defined(__aarch64__) && !defined(__AARCH64EB__)
+	static const char required_architecture[] = "aarch64";
+#else
 	static const char required_architecture[] = "x86_64";
+#endif
 	unsigned char identity[sizeof(prefix) + 36U + 32U];
 #endif
 	char machine_id[64];

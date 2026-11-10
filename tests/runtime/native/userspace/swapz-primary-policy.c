@@ -2819,6 +2819,28 @@ static void test_primary_qualification_report_parser(void)
 	assert(!strcmp(qualification.module_sha256, module_sha));
 	assert(!strcmp(qualification.oracle_sha256, oracle_sha));
 	assert(swapz_primary_valid_sha256(qualification.report_sha256));
+	/* ARM64 reports retain the same exact host/source/artifact binding. */
+	{
+		char arm_report[4096];
+		const char *architecture = strstr(json, "x86_64");
+		size_t prefix;
+
+		assert(architecture);
+		prefix = (size_t)(architecture - json);
+		assert((size_t)length + 2U <= sizeof(arm_report));
+		memcpy(arm_report, json, prefix);
+		memcpy(arm_report + prefix, "aarch64", 7U);
+		memcpy(arm_report + prefix + 7U, architecture + 6U,
+		       strlen(architecture + 6U) + 1U);
+		assert(swapz_primary_qualification_parse_json(
+			(const unsigned char *)arm_report, (size_t)length + 1U,
+			source, host_sha, &qualification) == 0);
+		assert_primary_qualification_report_refused(
+			arm_report, (size_t)length + 1U, source, legacy_host_sha);
+		memcpy(arm_report + prefix, "riscv64", 7U);
+		assert_primary_qualification_report_refused(
+			arm_report, (size_t)length + 1U, source, host_sha);
+	}
 	assert(swapz_primary_qualification_artifacts_match(
 		&qualification, formatter_sha, module_sha, oracle_sha));
 	assert(!swapz_primary_qualification_artifacts_match(

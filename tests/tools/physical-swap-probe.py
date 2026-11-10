@@ -842,7 +842,7 @@ def _report_is_owner_pass(report, host_identity):
         and re.fullmatch(r"[0-9a-f]{40}", report["source_sha"])
         and _has_five_passing_stages(report)
         and report.get("host_identity") == host_identity
-        and host_identity.get("architecture") == "x86_64"
+        and host_identity.get("architecture") in ("x86_64", "aarch64")
         and _report_artifact_digests(report) is not None
     )
 
@@ -979,8 +979,7 @@ def _require_development_canonical_main(local_head, code_source_sha):
 
 
 def current_source_evidence():
-    if platform.machine() != "x86_64":
-        raise ProbeError("physical swap smoke is currently limited to x86_64")
+    _require_development_linux_abi()
     _require_physical_host()
     branch = _git("symbolic-ref", "--quiet", "--short", "HEAD")
     if branch != "main":
@@ -1011,7 +1010,7 @@ def current_source_evidence():
     host_identity = live_host_identity()
     if not _report_is_owner_pass(report, host_identity):
         raise ProbeError(
-            "current report is not a five-stage PASS from this x86_64 host")
+            "current report is not a five-stage PASS from this qualified host")
     _check_post_qualification_paths(source, head)
 
     artifact_digests = _report_artifact_digests(report)
@@ -1049,7 +1048,7 @@ def current_source_evidence():
         distinct_reports.add(report_digest)
     if not latest_source_reports:
         raise ProbeError(
-            "no complete owner x86_64 PASS report for the latest qualified source")
+            "no complete owner PASS report for the latest qualified source")
     helper_sha256 = hashlib.sha256(Path(__file__).read_bytes()).hexdigest()
     return {
         "source_sha": source,
@@ -1197,9 +1196,10 @@ def _require_development_linux_abi():
     if platform.system() != "Linux" or platform.machine() not in (
             "x86_64", "aarch64"):
         raise ProbeError("physical development smoke requires Linux x86_64 or aarch64")
-    if struct.calcsize("P") != 8 or os.sysconf("SC_PAGE_SIZE") != PAGE_BYTES:
+    if (struct.calcsize("P") != 8 or sys.byteorder != "little" or
+            os.sysconf("SC_PAGE_SIZE") != PAGE_BYTES):
         raise ProbeError(
-            "physical development smoke requires 64-bit Linux with 4096-byte pages")
+            "physical development smoke requires little-endian 64-bit Linux with 4096-byte pages")
 
 
 def current_development_evidence(nonce, algorithm_ram_evidence=None,
@@ -1208,9 +1208,8 @@ def current_development_evidence(nonce, algorithm_ram_evidence=None,
     _require_development_linux_abi()
     # Direct invocation must obey the same real-partition restriction as the
     # selector and kernel, before obtaining ownership or draining native swap.
-    if platform.machine() != "x86_64":
-        raise ProbeError("kernel partition backing currently requires x86_64; "
-                         "ARM64 supports RAM/null_blk qualification only")
+    if platform.machine() not in ("x86_64", "aarch64"):
+        raise ProbeError("kernel partition backing requires x86_64 or ARM64")
     _require_physical_host(allow_virtual=virtual_device_only)
     if os.geteuid() != 0:
         raise ProbeError("development physical smoke evidence requires root wrapper")
@@ -4589,7 +4588,7 @@ def plan(device_arg, confirm_arg, review_path=None):
     try:
         evidence = current_source_evidence()
         evidence_message = (
-            "bare-metal latest-source owner x86_64 PASS accepted; "
+            "bare-metal latest-source owner PASS accepted; "
             f"matching artifact reports={evidence['pass_reports']} "
             f"(latest={evidence['latest_source_reports']}, "
             f"earlier={evidence['prior_matching_reports']})")

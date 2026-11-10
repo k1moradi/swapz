@@ -199,12 +199,13 @@ MODULE_PARM_DESC(physical_ram_metadata_qualified,
 static bool swapz_physical_backing_arch_supported(void)
 {
 	/*
-	 * Physical production qualification is currently x86_64-only.
-	 * ARM64 remains covered by RAM/null_blk qualification, but the kernel
-	 * must fail closed independently of userspace until separate bare-metal
-	 * physical qualification is explicitly approved.
+	 * Owner-approved x86_64/ARM64 partition support uses the same 4KiB
+	 * payload-only layout. Architecture support is not qualification: the
+	 * immutable loaded-RAM token, partition/header and ownership gates below
+	 * remain mandatory. Big-endian kernels have not been qualified.
 	 */
-#if defined(CONFIG_X86_64)
+#if (defined(CONFIG_X86_64) || defined(CONFIG_ARM64)) && \
+	!defined(CONFIG_CPU_BIG_ENDIAN)
 	return true;
 #else
 	return false;
@@ -9337,7 +9338,7 @@ static int swapz_ctr(struct dm_target *ti, unsigned int argc, char **argv)
 		}
 	} else {
 		if (!swapz_physical_backing_arch_supported()) {
-			ti->error = "Physical backing requires qualified x86_64";
+			ti->error = "Physical backing requires supported little-endian x86_64 or ARM64";
 			error = -EOPNOTSUPP;
 			goto fail;
 		}

@@ -53,6 +53,15 @@ class AlgorithmPhysicalTest(unittest.TestCase):
                 with self.assertRaisesRegex(ValueError, "physical trial requires"):
                     subject._require_development_linux_abi()
 
+    def test_big_endian_partition_trial_is_rejected(self):
+        with mock.patch.object(subject.platform, "system", return_value="Linux"), \
+             mock.patch.object(subject.platform, "machine", return_value="aarch64"), \
+             mock.patch.object(subject.struct, "calcsize", return_value=8), \
+             mock.patch.object(subject.os, "sysconf", return_value=4096), \
+             mock.patch.object(subject.sys, "byteorder", "big"):
+            with self.assertRaisesRegex(ValueError, "little-endian"):
+                subject._require_development_linux_abi()
+
     def test_requires_exactly_one_swap_partition(self):
         self.assertEqual(len(subject._eligible_partitions(
             {"blockdevices":[self.device]})), 1)
@@ -192,10 +201,10 @@ class AlgorithmPhysicalTest(unittest.TestCase):
         recovery.assert_called_once()
         device_discovery.assert_not_called()
 
-    def test_arm64_recovers_pending_trial_but_refuses_new_partition_trial(self):
+    def test_unsupported_arch_recovers_pending_trial_but_refuses_new_partition_trial(self):
         with mock.patch.object(subject.os, "geteuid", return_value=1000), \
              mock.patch.object(subject, "_require_development_linux_abi"), \
-             mock.patch.object(subject.platform, "machine", return_value="aarch64"), \
+             mock.patch.object(subject.platform, "machine", return_value="riscv64"), \
              mock.patch.object(subject, "_require_bare_metal_host", return_value=True), \
              mock.patch.object(subject, "_recover_pending_algorithm_trial") as recovery, \
              mock.patch.object(subject.subprocess, "run") as discovery, \

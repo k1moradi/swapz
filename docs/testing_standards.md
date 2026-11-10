@@ -14,15 +14,21 @@ temporary fixture self-cleaning; do not relax production persistence checks.
 
 ## Real-partition architecture preflight
 
-The kernel currently admits real-partition backing only on x86_64. Both the
-unprivileged algorithm selector and the privileged development probe must
-reject other architectures before offering consent, claiming a partition or
-draining native swap. The selector must still run pending same-boot cleanup
-before rejecting a new trial. A verified ARM64 VM and five passing RAM stages
-do not override this kernel restriction; ARM64 RAM/null_blk qualification
-remains supported. Rootless regressions must cover both entry points and prove
-that ARM64 rejection precedes device discovery/admission. Keep the general
-64-bit/4KiB ABI check separate from this narrower partition-support policy.
+The owner-approved partition architectures are little-endian x86_64 and ARM64
+with 4096-byte kernel pages. Execute the actual kernel architecture gate in
+native controls for x86_64, ARM64, big-endian ARM64 and unsupported/unknown
+configurations; only the two supported little-endian controls may pass.
+The unprivileged selector and privileged probe must reject unknown architectures
+before device admission or swap drain. Pending same-boot cleanup remains
+available before the selector refuses a new trial. Production report parsing
+must accept ARM64 only with unchanged exact expected host/source/artifact
+binding, reject an OS-only/foreign host digest, and reject unknown ISA names.
+The production running-kernel and hardware-identity checks use the native
+architecture while retaining kernel-release and trusted DMI UUID plus machine-id
+binding. Private ARM64 null_blk machine identity must not become production
+authority. VM development evidence remains explicitly virtual-only and cannot
+qualify physical media. Architecture approval alone grants no partition
+ownership, loaded-RAM token, physical acceptance or default-swap readiness.
 
 ## Post-PASS keep-active same-boot ownership
 
