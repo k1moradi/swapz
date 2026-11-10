@@ -12262,6 +12262,8 @@ static int swapz_primary_prepare_metadata(
 	int original_header_digest_available = 0;
 	int module_loaded = 0;
 	int mapper_present = 0;
+	int original_swap_active = 0;
+	int original_swap_priority = 0;
 	int recovery_fd = -1;
 	int lock_fd = -1;
 	int claimed = 0;
@@ -12590,11 +12592,23 @@ static int swapz_primary_prepare_metadata(
 			}
 		}
 	}
+	failure_phase = "final-original-swap-policy";
+	if (swapz_primary_original_swap_policy_snapshot(
+		    original_swap_size_kib, &original_swap_active,
+		    &original_swap_priority) < 0)
+		goto out;
+	if (original_swap_priority > 32767) {
+		errno = EINVAL;
+		goto out;
+	}
 	failure_phase = "run-id-construction";
 	if (swapz_primary_run_id_generate(run_id) < 0)
 		goto out;
 	manifest.target = target;
 	manifest.backing_physical_blocks = (uint32_t)backing_physical_blocks;
+	manifest.original_swap_active = original_swap_active;
+	manifest.original_swap_priority =
+		original_swap_active ? original_swap_priority : 0;
 	memcpy(manifest.run_id, run_id, sizeof(manifest.run_id));
 	memcpy(manifest.source_sha, qualification.source_sha,
 	       sizeof(manifest.source_sha));
