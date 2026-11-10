@@ -9371,45 +9371,51 @@ static int swapz_ctr(struct dm_target *ti, unsigned int argc, char **argv)
 			(u64)ctx->segment_count *
 			sizeof(*ctx->segment_backing_pages);
 	ctx->read_payload_cache_ram_bytes = swapz_read_payload_cache_ram_bytes();
-	ctx->gc_scores = kvcalloc(ctx->segment_count,
+	/*
+	 * These capacity-sized authority indexes are fully initialized by the
+	 * authority enable functions below. Allocate without an eager zero pass so
+	 * large swap devices do not write the same RAM twice during construction.
+	 * Sidecars with no authority initializer remain zero-allocated separately.
+	 */
+	ctx->gc_scores = kvmalloc_array(ctx->segment_count,
 				  sizeof(*ctx->gc_scores), GFP_KERNEL);
-	ctx->gc_io_scores = kvcalloc(ctx->segment_count,
+	ctx->gc_io_scores = kvmalloc_array(ctx->segment_count,
 				     sizeof(*ctx->gc_io_scores), GFP_KERNEL);
-	ctx->gc_min_live_blocks = kvcalloc(ctx->segment_count,
+	ctx->gc_min_live_blocks = kvmalloc_array(ctx->segment_count,
 					  sizeof(*ctx->gc_min_live_blocks),
 					  GFP_KERNEL);
 	ctx->gc_segment_evictions = kvcalloc(ctx->segment_count,
 					    sizeof(*ctx->gc_segment_evictions),
 					    GFP_KERNEL);
-	ctx->segment_mapped_pages = kvcalloc(ctx->segment_count,
+	ctx->segment_mapped_pages = kvmalloc_array(ctx->segment_count,
 					    sizeof(*ctx->segment_mapped_pages),
 					    GFP_KERNEL);
-	ctx->segment_program_counts = kvcalloc(ctx->segment_count,
+	ctx->segment_program_counts = kvmalloc_array(ctx->segment_count,
 					      sizeof(*ctx->segment_program_counts),
 					      GFP_KERNEL);
-	ctx->segment_first_page = kvcalloc(ctx->segment_count,
+	ctx->segment_first_page = kvmalloc_array(ctx->segment_count,
 					   sizeof(*ctx->segment_first_page),
 					   GFP_KERNEL);
-	ctx->segment_last_page = kvcalloc(ctx->segment_count,
+	ctx->segment_last_page = kvmalloc_array(ctx->segment_count,
 					  sizeof(*ctx->segment_last_page),
 					  GFP_KERNEL);
-	ctx->page_prev_in_segment = kvcalloc(logical,
+	ctx->page_prev_in_segment = kvmalloc_array(logical,
 					     sizeof(*ctx->page_prev_in_segment),
 					     GFP_KERNEL);
-	ctx->page_next_in_segment = kvcalloc(logical,
+	ctx->page_next_in_segment = kvmalloc_array(logical,
 					     sizeof(*ctx->page_next_in_segment),
 					     GFP_KERNEL);
 	ctx->segment_trimmed = kvcalloc(ctx->segment_count,
 					sizeof(*ctx->segment_trimmed), GFP_KERNEL);
-	ctx->segment_roles = kvcalloc(ctx->segment_count,
+	ctx->segment_roles = kvmalloc_array(ctx->segment_count,
 				     sizeof(*ctx->segment_roles), GFP_KERNEL);
-	ctx->maps = kvcalloc(logical, sizeof(*ctx->maps), GFP_KERNEL);
-	ctx->live_records = kvcalloc(physical, sizeof(*ctx->live_records), GFP_KERNEL);
-	ctx->extent_classes = kvcalloc(physical, sizeof(*ctx->extent_classes), GFP_KERNEL);
-	ctx->extent_sequence_delta = kvcalloc(physical,
+	ctx->maps = kvmalloc_array(logical, sizeof(*ctx->maps), GFP_KERNEL);
+	ctx->live_records = kvmalloc_array(physical, sizeof(*ctx->live_records), GFP_KERNEL);
+	ctx->extent_classes = kvmalloc_array(physical, sizeof(*ctx->extent_classes), GFP_KERNEL);
+	ctx->extent_sequence_delta = kvmalloc_array(physical,
 						      sizeof(*ctx->extent_sequence_delta),
 						      GFP_KERNEL);
-	ctx->segment_sequence_base = kvcalloc(
+	ctx->segment_sequence_base = kvmalloc_array(
 		ctx->segment_count, sizeof(*ctx->segment_sequence_base), GFP_KERNEL);
 	if (!ctx->maps || !ctx->live_records || !ctx->extent_classes ||
 	    !ctx->extent_sequence_delta || !ctx->segment_sequence_base ||
