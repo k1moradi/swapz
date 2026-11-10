@@ -4593,6 +4593,18 @@ def run_stage(title, command, result, *, parse_bench=False,
                   f"(exit {inventory_failure['exit_code']})", flush=True)
         print(f"        Failed during: {record['failed_phase']}", flush=True)
         print(f"        Reason: {record['diagnostic']}", flush=True)
+        if (record["failed_phase"] == "adjacent READ coalescing A/B evidence"
+                and record["diagnostic"].startswith(
+                    "merge-on arm executed no sequential READ coalescing; ")):
+            print("        Merge-on round evidence (kernel counters; "
+                  "all five paired rounds):", flush=True)
+            for measured_line in read_coalesce_failure_rounds(
+                    read_coalesce_sessions):
+                print(measured_line, flush=True)
+            print("        Interpretation: gap skips reject noncontiguous "
+                  "required READ ranges.", flush=True)
+            print("        Safe next step: retain the failed gate; compare "
+                  "placement and cache geometry.", flush=True)
         if (record["failed_phase"] == "owned RAM primary lifecycle prepare"
                 and record["diagnostic"].endswith(
                     "; mount_cause=process-root-device-mismatch; "
@@ -6204,6 +6216,49 @@ def parse_read_coalesce_ab(output):
                 current["status"] = "PASS"
                 current = None
     return sessions
+
+
+def read_coalesce_failure_rounds(sessions):
+    """Format only bounded measured merge-on counters for a failed A/B gate.
+
+    The fields are source-controlled nonnegative counters. Do not print raw
+    workload rows, device names, report JSON, or successful-run chatter.
+    """
+    lines = []
+    fields = (
+        "parallel_read_coalesced_pairs",
+        "parallel_read_pairs",
+        "parallel_read_adjacent_extent_pairs",
+        "parallel_read_coalesce_skip_gap",
+        "parallel_read_coalesce_skip_cached",
+        "parallel_read_coalesce_skip_noncontig_slot",
+        "parallel_read_adjacent_chain_3plus",
+        "parallel_read_coalesce_skip_other",
+    )
+    for index, session in enumerate(sessions[:10], 1):
+        if not isinstance(session, dict) or session.get("read_coalesce") != 1:
+            continue
+        swapz = session.get("swapz")
+        passes = swapz.get("passes") if isinstance(swapz, dict) else None
+        for mode, label in (("sequential", "seq"), ("seeded_random", "rand")):
+            phase = passes.get(mode) if isinstance(passes, dict) else None
+            kernel = (phase.get("kernel_read_path")
+                      if isinstance(phase, dict) else None)
+            if not isinstance(kernel, dict) or any(
+                    type(kernel.get(field)) is not int or
+                    not 0 <= kernel[field] <= 1000000000
+                    for field in fields):
+                lines.append(f"        round={index} {label}: counters=unavailable")
+                continue
+            (merged, parallel, adjacent, gap, cached, noncontig,
+             chains3, other) = (kernel[field] for field in fields)
+            lines.append(
+                f"        round={index} {label}: merged={merged} "
+                f"parallel={parallel} adjacent={adjacent} gap={gap} "
+                f"cached={cached} noncontig={noncontig}")
+            lines.append(
+                f"        round={index} {label}: chain3={chains3} other={other}")
+    return lines
 
 
 def read_coalesce_ab_verdict(sessions):
