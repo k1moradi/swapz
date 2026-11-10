@@ -139,7 +139,10 @@ only the allocated lower data region, excluding the protected first page and
 unused tail for physical backing while retaining zero-based null_blk.
 Native userspace policy coverage must verify that raw `/proc/swaps` Size
 matching is unchanged by 1..4095 trailing device bytes, because Linux reports
-whole usable swap pages and excludes the SWAPSPACE2 header page.
+whole usable swap pages and excludes the SWAPSPACE2 header page. Source
+qualification must also prove BLKGETSIZE64 target inspection preserves the
+exact byte count without rejecting a non-4096-aligned tail; later geometry
+helpers alone floor that identity to complete pages.
 The native source contract must reject restoring prefix-only `nullb` disk
 identification: the kernel constructor requires a decimal-only suffix,
 in addition to the harness's independently verified driver/device identity.

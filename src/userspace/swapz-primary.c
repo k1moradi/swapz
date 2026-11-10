@@ -1569,7 +1569,6 @@ int swapz_primary_target_inspect(const char *partuuid,
 	    opened.st_rdev != alias_before.st_rdev ||
 	    ioctl(fd, BLKGETSIZE64, &bytes) < 0 ||
 	    bytes < SWAPZ_PRIMARY_BLOCK_BYTES ||
-	    bytes % SWAPZ_PRIMARY_BLOCK_BYTES ||
 	    stat(path, &alias_after) < 0 || !S_ISBLK(alias_after.st_mode) ||
 	    alias_after.st_rdev != opened.st_rdev ||
 	    swapz_primary_sysfs_partuuid_matches(

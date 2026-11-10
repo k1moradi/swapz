@@ -353,6 +353,11 @@ class SwapzProductionSourceQualification(unittest.TestCase):
         self.assertIn(
             "swapz_primary_target_inspect(expected_partuuid, target)",
             preflight)
+        inspect = source_body("swapz_primary_target_inspect", primary)
+        self.assertIn("ioctl(fd, BLKGETSIZE64, &bytes)", inspect)
+        self.assertIn("bytes < SWAPZ_PRIMARY_BLOCK_BYTES", inspect)
+        self.assertNotIn("bytes % SWAPZ_PRIMARY_BLOCK_BYTES", inspect)
+        self.assertIn("inspected.device_bytes = bytes", inspect)
         self.assertIn("target.partuuid, &target", prepare)
 
         existing_mapper = source_body(
