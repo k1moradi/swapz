@@ -227,6 +227,9 @@ _Static_assert(SWAPZ_BLOCK_BYTES % 512U == 0U,
 #define SWAPZ_PRIMARY_MOUNTINFO_BUFFER_BYTES (1024U * 1024U)
 #define SWAPZ_PRIMARY_DM_MAPPERS_MAX 512U
 #define SWAPZ_PRIMARY_SWAP_ROWS_MAX 32U
+#define SWAPZ_PRIMARY_MEMINFO_BUFFER_BYTES 16384U
+#define SWAPZ_PRIMARY_SWAPOFF_MIN_AVAILABLE_KIB (1024ULL * 1024ULL)
+#define SWAPZ_PRIMARY_SWAPOFF_MARGIN_KIB (512ULL * 1024ULL)
 #define SWAPZ_PRIMARY_STATE_RECORD_MAX 4096U
 #define SWAPZ_PRIMARY_HASH_FILE_MAX_BYTES (64ULL * 1024ULL * 1024ULL)
 #define SWAPZ_PRIMARY_ROOT_PARENT_SCOPE_RECORD_NAME \
@@ -3392,6 +3395,72 @@ static int swapz_primary_read_swap_inventory(
 #endif
 }
 
+static int swapz_primary_parse_memavailable_kib(
+	const char *text, uint64_t *available_kib)
+{
+	static const char label[] = "MemAvailable:";
+	const char *line = text;
+	uint64_t parsed_value = 0;
+	int found = 0;
+
+	if (!text || !available_kib) {
+		errno = EINVAL;
+		return -1;
+	}
+	while (*line) {
+		const char *line_end = strchr(line, '\n');
+		const char *cursor;
+		char number[32];
+		size_t line_length =
+			line_end ? (size_t)(line_end - line) : strlen(line);
+		size_t digits = 0;
+
+		if (line_length < sizeof(label) - 1U ||
+		    memcmp(line, label, sizeof(label) - 1U)) {
+			line = line_end ? line_end + 1 : line + line_length;
+			continue;
+		}
+		if (found) {
+			errno = EINVAL;
+			return -1;
+		}
+		cursor = line + sizeof(label) - 1U;
+		while (cursor < line + line_length &&
+		       (*cursor == ' ' || *cursor == '\t'))
+			++cursor;
+		while (cursor < line + line_length &&
+		       *cursor >= '0' && *cursor <= '9') {
+			if (digits + 1U >= sizeof(number)) {
+				errno = EOVERFLOW;
+				return -1;
+			}
+			number[digits++] = *cursor++;
+		}
+		if (!digits) {
+			errno = EINVAL;
+			return -1;
+		}
+		number[digits] = '\0';
+		while (cursor < line + line_length &&
+		       (*cursor == ' ' || *cursor == '\t'))
+			++cursor;
+		if ((size_t)(line + line_length - cursor) != 2U ||
+		    cursor[0] != 'k' || cursor[1] != 'B' ||
+		    swapz_primary_parse_u64(number, &parsed_value) < 0) {
+			errno = EINVAL;
+			return -1;
+		}
+		found = 1;
+		line = line_end ? line_end + 1 : line + line_length;
+	}
+	if (!found) {
+		errno = ENODATA;
+		return -1;
+	}
+	*available_kib = parsed_value;
+	return 0;
+}
+
 /* The inventory-kind synthetic helper is exercised only by the rootless
  * policy fixture. Production validates types while resolving device IDs. */
 #ifdef SWAPZ_PRIMARY_ROOTLESS_TEST
@@ -3442,8 +3511,69 @@ static int swapz_primary_swap_inventory_target_is_quiescent(
 #endif
 
 #ifndef SWAPZ_PRIMARY_ROOTLESS_TEST
+static int swapz_primary_read_memavailable_kib(uint64_t *available_kib)
+{
+	char buffer[SWAPZ_PRIMARY_MEMINFO_BUFFER_BYTES];
+	size_t used = 0;
+	int fd;
+
+	if (!available_kib) {
+		errno = EINVAL;
+		return -1;
+	}
+	fd = open("/proc/meminfo", O_RDONLY | O_CLOEXEC | O_NOFOLLOW);
+	if (fd < 0)
+		return -1;
+	while (used + 1U < sizeof(buffer)) {
+		ssize_t count = read(fd, buffer + used, sizeof(buffer) - used - 1U);
+
+		if (count < 0 && errno == EINTR)
+			continue;
+		if (count < 0) {
+			int saved_errno = errno;
+
+			(void)close(fd);
+			errno = saved_errno;
+			return -1;
+		}
+		if (!count)
+			break;
+		used += (size_t)count;
+	}
+	if (close(fd) < 0)
+		return -1;
+	if (used + 1U == sizeof(buffer)) {
+		errno = EOVERFLOW;
+		return -1;
+	}
+	buffer[used] = '\0';
+	return swapz_primary_parse_memavailable_kib(buffer, available_kib);
+}
+
+static int swapz_primary_swapoff_headroom_sufficient(uint64_t used_kib)
+{
+	uint64_t available_kib;
+	uint64_t required_kib;
+
+	if (used_kib > UINT64_MAX - SWAPZ_PRIMARY_SWAPOFF_MARGIN_KIB) {
+		errno = EOVERFLOW;
+		return -1;
+	}
+	required_kib = used_kib + SWAPZ_PRIMARY_SWAPOFF_MARGIN_KIB;
+	if (required_kib < SWAPZ_PRIMARY_SWAPOFF_MIN_AVAILABLE_KIB)
+		required_kib = SWAPZ_PRIMARY_SWAPOFF_MIN_AVAILABLE_KIB;
+	if (swapz_primary_read_memavailable_kib(&available_kib) < 0)
+		return -1;
+	if (available_kib < required_kib) {
+		errno = ENOMEM;
+		return -1;
+	}
+	return 0;
+}
+
 static int swapz_primary_original_swap_policy_snapshot(
-	uint64_t target_size_kib, int *active, int *priority)
+	uint64_t target_size_kib, int *active, int *priority,
+	uint64_t *used_kib)
 {
 	struct swapz_primary_swap_entry entries[SWAPZ_PRIMARY_SWAP_ROWS_MAX];
 	struct stat info;
@@ -3460,6 +3590,8 @@ static int swapz_primary_original_swap_policy_snapshot(
 		*active = 0;
 	if (priority)
 		*priority = 0;
+	if (used_kib)
+		*used_kib = 0;
 	if (swapz_primary_read_swap_inventory(
 		    entries, SWAPZ_PRIMARY_SWAP_ROWS_MAX, &count) < 0)
 		return -1;
@@ -3498,6 +3630,8 @@ static int swapz_primary_original_swap_policy_snapshot(
 			*active = 1;
 		if (priority)
 			*priority = entries[index].priority;
+		if (used_kib)
+			*used_kib = entries[index].used_kib;
 	}
 	return 0;
 }
@@ -3511,7 +3645,7 @@ static int swapz_primary_original_swap_policy_admissible(
 	 * START's swapoff syscall is the authoritative migration boundary.
 	 */
 	return swapz_primary_original_swap_policy_snapshot(
-		target_size_kib, NULL, NULL);
+		target_size_kib, NULL, NULL, NULL);
 }
 #endif
 
@@ -10791,6 +10925,7 @@ static int swapz_primary_transition_original_swap(
 {
 	char target_path[64];
 	uint64_t target_size_kib = 0;
+	uint64_t current_used_kib = 0;
 	int target_fd = -1;
 	int current_active = 0;
 	int current_priority = 0;
@@ -10809,7 +10944,8 @@ static int swapz_primary_transition_original_swap(
 	if (swapz_primary_original_swap_size_from_manifest(
 		    manifest, &target_size_kib) < 0 ||
 	    swapz_primary_original_swap_policy_snapshot(
-		    target_size_kib, &current_active, &current_priority) < 0)
+		    target_size_kib, &current_active, &current_priority,
+		    &current_used_kib) < 0)
 		return -1;
 
 	if (!manifest->original_swap_active) {
@@ -10828,6 +10964,13 @@ static int swapz_primary_transition_original_swap(
 			errno = ESTALE;
 			return -1;
 		}
+		/*
+		 * Used swap pages are valid input. Prove conservative RAM headroom
+		 * immediately before the exact-device swapoff and let Linux migrate
+		 * those pages; never require the ordinary swap partition to be empty.
+		 */
+		if (swapz_primary_swapoff_headroom_sufficient(current_used_kib) < 0)
+			return -1;
 	} else if (current_active) {
 		/* RECOVER/STOP are idempotent if ordinary swap is already restored. */
 		if (!swapz_primary_swap_priority_policy_matches(
@@ -10861,7 +11004,7 @@ static int swapz_primary_transition_original_swap(
 	}
 
 	if (swapz_primary_original_swap_policy_snapshot(
-		    target_size_kib, &current_active, &current_priority) < 0)
+		    target_size_kib, &current_active, &current_priority, NULL) < 0)
 		goto out;
 	if ((!activate && current_active) ||
 	    (activate && (!current_active ||
@@ -12761,7 +12904,7 @@ static int swapz_primary_prepare_metadata(
 	failure_phase = "final-original-swap-policy";
 	if (swapz_primary_original_swap_policy_snapshot(
 		    original_swap_size_kib, &original_swap_active,
-		    &original_swap_priority) < 0)
+		    &original_swap_priority, NULL) < 0)
 		goto out;
 	if (original_swap_priority > 32767) {
 		errno = EINVAL;
