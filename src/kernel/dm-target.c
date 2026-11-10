@@ -2172,10 +2172,31 @@ static void swapz_end_accepted_lower_idle(struct swapz_dm *ctx, u64 now_ns)
 	atomic64_set(&ctx->accepted_work_lower_idle_wake_ns, 0);
 }
 
-/* All lower data offsets include the immutable SWAPSPACE2 header page.
- * Promote before addition so a future larger backing geometry cannot wrap a
- * u32 data-block index into physical block zero. Bounds are validated by
- * each caller before this pure address conversion.
+/*
+ * Lower data I/O is intentionally segment-contained. Besides preserving the
+ * allocator/GC ownership boundary, this invariant lets physical SWAPSPACE2
+ * backing skip a whole contaminated 1MiB segment without ever splitting an
+ * extent or a submitted lower request across a discontinuity.
+ */
+static inline bool swapz_backing_range_valid(const struct swapz_dm *ctx,
+					      swapz_u32 data_block,
+					      swapz_u16 blocks)
+{
+	swapz_u32 last_block;
+
+	if (!ctx || !blocks || data_block >= ctx->physical_blocks ||
+	    blocks > ctx->physical_blocks - data_block)
+		return false;
+	last_block = data_block + blocks - 1U;
+	return data_block / SWAPZ_SEGMENT_BLOCKS ==
+	       last_block / SWAPZ_SEGMENT_BLOCKS;
+}
+
+/* All lower data offsets currently include the immutable SWAPSPACE2 header
+ * page. Bounds and one-segment containment are validated before this pure
+ * address conversion. The conversion remains centralized so a RAM-only
+ * clean-segment map can replace the contiguous offset without touching I/O
+ * ownership or extent geometry.
  */
 static inline sector_t swapz_backing_data_sector(const struct swapz_dm *ctx,
 						  swapz_u32 data_block)
@@ -2204,10 +2225,9 @@ static int swapz_submit_inflight_write(struct swapz_dm *ctx,
 	int error;
 
 	if (!inflight || inflight != swapz_inflight_tail_slot(ctx) ||
-	    inflight->active || !inflight->run.blocks ||
-	    inflight->run.start_block >= ctx->physical_blocks ||
-	    inflight->run.blocks >
-		ctx->physical_blocks - inflight->run.start_block) {
+	    inflight->active ||
+	    !swapz_backing_range_valid(ctx, inflight->run.start_block,
+				       inflight->run.blocks)) {
 		swapz_fail_at(ctx, -EINVAL, "write", "internal",
 			      "async-submit-validate");
 		return -EINVAL;
@@ -2514,8 +2534,7 @@ static noinline int swapz_lower(struct swapz_dm *ctx, enum req_op op,
 	bool lane_run = false;
 	int error;
 
-	if (!blocks || block >= ctx->physical_blocks ||
-	    blocks > ctx->physical_blocks - block) {
+	if (!swapz_backing_range_valid(ctx, block, blocks)) {
 		swapz_fail_at(ctx, -ERANGE,
 			      op == REQ_OP_READ ? "read" : "write",
 			      swapz_failure_category(-ERANGE),
@@ -2808,6 +2827,9 @@ static int swapz_discard_dead_segment(void *opaque, swapz_u32 segment)
 		ctx->segment_discards_unsupported++;
 		return 0;
 	}
+	if (!swapz_backing_range_valid(
+		    ctx, segment * SWAPZ_SEGMENT_BLOCKS, SWAPZ_SEGMENT_BLOCKS))
+		return -EUCLEAN;
 	start_sector = swapz_backing_data_sector(
 		ctx, segment * SWAPZ_SEGMENT_BLOCKS);
 	ctx->segment_discards_issued++;
@@ -2853,8 +2875,7 @@ static int swapz_parallel_lower_read(void *opaque, swapz_u32 block,
 	u64 start_ns, elapsed_ns;
 	int error;
 
-	if (!blocks || block >= ctx->physical_blocks ||
-	    blocks > ctx->physical_blocks - block)
+	if (!swapz_backing_range_valid(ctx, block, blocks))
 		return -ERANGE;
 	region.bdev = ctx->backing->bdev;
 	region.sector = swapz_backing_data_sector(ctx, block);
@@ -2925,7 +2946,9 @@ static int swapz_submit_read_slot_range(struct swapz_read_slot *slot,
 	if (!blocks || first_block >= slot->extent_blocks ||
 	    blocks > slot->extent_blocks - first_block ||
 	    slot->start_block >= ctx->physical_blocks ||
-	    slot->extent_blocks > ctx->physical_blocks - slot->start_block)
+	    slot->extent_blocks > ctx->physical_blocks - slot->start_block ||
+	    !swapz_backing_range_valid(ctx, slot->start_block + first_block,
+				       blocks))
 		return -EINVAL;
 	/* Form the scratch offset only after the extent/block bounds check. */
 	req.mem.ptr.vma = slot->engine.read_scratch +
