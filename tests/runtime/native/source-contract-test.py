@@ -8579,6 +8579,24 @@ class CapacityMemoryAccountingContracts(unittest.TestCase):
         with self.assertRaises(OverflowError):
             checked_length(1 << 32, 16, (1 << 32) - 1)
 
+
+    def test_sparse_swap_segment_map_is_in_ram_footprint(self):
+        dm_target = (ROOT / "src/kernel/dm-target.c").read_text()
+
+        self.assertIn(
+            "ctx->segment_backing_pages = kvcalloc(",
+            dm_target)
+        self.assertIn(
+            "clean_segments, sizeof(*ctx->segment_backing_pages), GFP_KERNEL",
+            dm_target)
+        self.assertIn(
+            "if (ctx->segment_backing_pages)\n"
+            "\t\tctx->authority_metadata_ram_bytes +=\n"
+            "\t\t\t(u64)ctx->segment_count *\n"
+            "\t\t\tsizeof(*ctx->segment_backing_pages);",
+            dm_target)
+        self.assertIn("kvfree(ctx->segment_backing_pages);", dm_target)
+
     def test_ram_trace_rejects_forged_clock_and_hidden_teardown_leaks(self):
         """Offline negative fixtures never qualify a real loaded host."""
         import copy
