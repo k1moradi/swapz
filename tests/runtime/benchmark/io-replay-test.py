@@ -687,7 +687,7 @@ class PairReplayContract(unittest.TestCase):
         fields = module.KERNEL_READ_FIELDS
         before = {field: 0 for field in fields}
         before.update({
-            "read_meta_reqs": 10,
+            "read_meta_reqs": 0,
             "read_payload_reqs": 4,
             "read_payload_blocks": 5,
             "lower_read_wall_ns": 3000,
@@ -710,7 +710,7 @@ class PairReplayContract(unittest.TestCase):
         })
         after = dict(before)
         after.update({
-            "read_meta_reqs": 1034,
+            "read_meta_reqs": 0,
             "read_payload_reqs": 516,
             "read_payload_blocks": 517,
             "lower_read_wall_ns": 90000000,
@@ -729,7 +729,7 @@ class PairReplayContract(unittest.TestCase):
             "read_meta_copy_bytes": 207200,
             "read_full_extent_reqs": 321,
             "read_full_cache_hits": 201,
-            "read_two_block_skips": 200,
+            "read_two_block_skips": 190,
             "parallel_read_pairs": 8,
             "parallel_read_same_extent_pairs": 3,
             "parallel_read_async_batches": 2,
@@ -757,7 +757,7 @@ class PairReplayContract(unittest.TestCase):
             self.assertEqual(module.kernel_read_snapshot(
                 Path("/dev/mapper/owned"), {"dm_uuid": "SWAPZ-TEST"}), before)
         measured = module.kernel_read_delta(before, after)
-        self.assertEqual(measured["read_meta_reqs"], 1024)
+        self.assertEqual(measured["read_meta_reqs"], 0)
         self.assertEqual(measured["read_payload_reqs"], 512)
         self.assertEqual(measured["read_payload_blocks"], 512)
         self.assertEqual(measured["read_copy_wall_ns"], 100000)
@@ -774,7 +774,7 @@ class PairReplayContract(unittest.TestCase):
         self.assertEqual(measured["read_meta_copy_bytes"], 207200)
         self.assertEqual(measured["read_full_extent_reqs"], 320)
         self.assertEqual(measured["read_full_cache_hits"], 200)
-        self.assertEqual(measured["read_two_block_skips"], 200)
+        self.assertEqual(measured["read_two_block_skips"], 190)
         self.assertEqual(measured["parallel_read_pairs"], 8)
         self.assertEqual(measured["parallel_read_same_extent_pairs"], 3)
         self.assertEqual(measured["parallel_read_async_batches"], 2)
@@ -795,12 +795,17 @@ class PairReplayContract(unittest.TestCase):
         self.assertEqual(measured["parallel_read_coalesce_skip_gap"], 5)
         self.assertEqual(measured["parallel_read_coalesce_skip_other"], 0)
         self.assertEqual(measured["read_worker_cpu_ns"], 100000)
-        # A high reuse rate may make metadata requests fewer than payload
-        # requests; this is valid as long as lower payload blocks match.
+        # Payload reads are valid with zero physical metadata requests:
+        # descriptor authority is RAM-only even when full extents are read.
+        # Independent legacy metadata telemetry must not bound payload reads.
         self.assertEqual(module.kernel_read_delta(
-            before, dict(after, read_meta_reqs=11,
-                         read_full_extent_reqs=1,
-                         read_two_block_skips=0))["read_meta_reqs"], 1)
+            before, dict(after, read_meta_reqs=1))["read_meta_reqs"], 1)
+        # A real classification overcount remains a failure even when the
+        # legacy metadata counter is artificially larger than payload reads.
+        with self.assertRaisesRegex(ValueError, "full_extent=.*payload_reqs="):
+            module.kernel_read_delta(
+                before, dict(after, read_meta_reqs=5000,
+                             read_two_block_skips=400))
         with self.assertRaisesRegex(ValueError, "reset"):
             module.kernel_read_delta(after, before)
         with self.assertRaisesRegex(ValueError, "inconsistent"):

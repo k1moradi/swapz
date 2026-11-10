@@ -1154,11 +1154,19 @@ def kernel_read_delta(before, after):
         if after[field] < before[field]:
             raise ValueError("swapz read gauge regressed during measurement")
         counters[field] = after[field]
-    # Cache reuse can legitimately reduce metadata requests below payload
-    # requests. Only counted payload block quantities must remain consistent.
+    # Payload-only extents keep descriptors in RAM. read_meta_reqs is a
+    # legacy counter and may remain zero while physical payload READs occur.
+    # Full-extent READs and two-block single-block READs are disjoint subsets
+    # of actual payload requests, never of metadata requests.
+    classified_payload_requests = (counters["read_full_extent_reqs"] +
+                                   counters["read_two_block_skips"])
+    if classified_payload_requests > counters["read_payload_reqs"]:
+        raise ValueError(
+            "inconsistent swapz read request accounting: "
+            f"full_extent={counters['read_full_extent_reqs']} "
+            f"two_block_skips={counters['read_two_block_skips']} "
+            f"payload_reqs={counters['read_payload_reqs']}")
     if (counters["read_payload_blocks"] < counters["read_payload_reqs"] or
-            counters["read_full_extent_reqs"] +
-            counters["read_two_block_skips"] > counters["read_meta_reqs"] or
             counters["read_full_cache_hits"] > counters["read_meta_cache_hits"] or
             counters["read_meta_set_hits"] > counters["read_meta_set_lookups"] or
             counters["read_meta_set_probes"] < counters["read_meta_set_lookups"] or
