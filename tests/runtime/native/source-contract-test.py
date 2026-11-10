@@ -188,26 +188,21 @@ class SwapzProductionSourceQualification(unittest.TestCase):
             "swapz_primary_transition_original_swap", PRIMARY)
         prepare = source_body("swapz_primary_prepare_metadata", PRIMARY)
 
-        # Used pages are legitimate while ordinary swap is active. PREPARE
-        # records the policy; START's swapoff is the authoritative migration
-        # boundary. Do not require an artificially empty target beforehand.
-        self.assertIn(
-            "(require_zero_used && entries[index].used_kib != 0U)",
-            policy)
-        self.assertIn("target_size_kib, 0, NULL, NULL", admissible)
-        self.assertNotIn("target_size_kib, 1, NULL, NULL", admissible)
+        # Used pages are legitimate while ordinary swap is active. Production
+        # policy identity never gates on /proc/swaps Used; START's swapoff is
+        # the authoritative migration boundary.
+        self.assertNotIn("require_zero_used", policy)
+        self.assertNotIn("used_kib != 0U", policy)
+        self.assertIn("target_size_kib, NULL, NULL", admissible)
         self.assertEqual(
             prepare.count(
                 "swapz_primary_original_swap_policy_admissible("), 3)
         self.assertIn(
-            "original_swap_size_kib, 0, &original_swap_active,",
+            "original_swap_size_kib, &original_swap_active,",
             prepare)
-        self.assertNotIn(
-            "original_swap_size_kib, 1, &original_swap_active,",
-            prepare)
+        self.assertNotIn("used_kib != 0U", prepare)
         self.assertIn(
-            "target_size_kib, 0,\n"
-            "\t\t    &current_active, &current_priority",
+            "target_size_kib, &current_active, &current_priority",
             transition)
         self.assertIn("syscall(SYS_swapoff, target_path)", transition)
         self.assertLess(
