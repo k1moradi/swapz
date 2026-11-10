@@ -61,9 +61,11 @@ to use the unchanged header's declared swap size, computed before the first
 check, rather than a retired argument-free geometry assumption.
 In native `test-userspace` Make recipes, shell exit-code capture and later
 diagnostics must escape dollar signs as `$?` and `$script_exit_status`.
-A regression must check this spelling so Make cannot substitute its own
-automatic `$?` prerequisite list or strip shell variables, masking the
-original failed late-race script and its exit code.
+A regression must check both the captured status and its later shell
+expansion so Make cannot substitute its own automatic `$?` prerequisite list
+or strip shell variables, masking the original failed late-race script and
+its exit code. Keep explanatory Makefile comments outside continued shell
+recipe blocks to preserve the `else`/`fi` command structure.
 
 The allocation/free source inventory must separately enumerate the sparse
 backing-segment map allocated by the Linux swap layout helper, in addition to

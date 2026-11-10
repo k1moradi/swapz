@@ -197,6 +197,8 @@ test-lower-io: $(OUT)/flush-ordering $(OUT)/lower-write-aggregation $(OUT)/windo
 test-concurrency: $(OUT)/preparation-slots $(OUT)/preparation-codec-result $(OUT)/preparation-publication-lifetime
 	@set -e; "$(OUT)/preparation-slots"; "$(OUT)/preparation-codec-result"; "$(OUT)/preparation-publication-lifetime"
 
+# GNU Make requires doubled dollars for shell exit status/variables.
+# Keep a late-race script failure's exact shell exit status for attribution.
 test-userspace: $(OUT)/swapzctl-status $(OUT)/swapz-primary-policy $(OUT)/swapz-primary-mount-namespace
 	@set -e; \
 	  for native_test in swapzctl-status swapz-primary-policy swapz-primary-mount-namespace; do \
@@ -208,11 +210,10 @@ test-userspace: $(OUT)/swapzctl-status $(OUT)/swapz-primary-policy $(OUT)/swapz-
 	  done
 	@set -e; \
 	  if python3 -B "$(NATIVE)/userspace/swapz-primary-late-race-test.py"; then :; else \
-	    # GNU Make requires doubled dollars for shell exit status/variables. \
-	    script_exit_status=$?; \
+	    script_exit_status=$$?; \
 	    printf 'FAIL: native test-userspace script=%s exit=%s\n' \
-	      'swapz-primary-late-race-test.py' "$script_exit_status" >&2; \
-	    exit "$script_exit_status"; \
+	      'swapz-primary-late-race-test.py' "$$script_exit_status" >&2; \
+	    exit "$$script_exit_status"; \
 	  fi
 
 test-replay-helper: $(OUT)/io-replay-native

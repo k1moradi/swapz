@@ -20,8 +20,8 @@ class PublicMakeContract(unittest.TestCase):
         suites = (ROOT / "tests/suites/Makefile").read_text()
         recipe = suites.split("test-userspace:", 1)[1].split(
             "\ntest-replay-helper:", 1)[0]
-        self.assertIn("script_exit_status=$?;", recipe)
-        self.assertIn('"$script_exit_status"', recipe)
+        self.assertIn("script_exit_status=$$?;", recipe)
+        self.assertIn('"$$script_exit_status"', recipe)
         self.assertNotIn("script_exit_status=$?;", recipe)
 
     def test_build_provenance_skips_report_only_commits(self):
