@@ -1675,12 +1675,12 @@ class PhysicalSwapProbeTests(unittest.TestCase):
                         probe, "inspect_target_identity_for_recovery",
                         return_value={"device": state["device"], "major": 8,
                                       "minor": 4, "size_bytes": state["size_bytes"],
-                                      "partuuid": state["partuuid"]}), \
+                                      "partuuid": state["partuuid"]}) as inspected, \
                     mock.patch.object(probe, "_run", side_effect=run), \
                     mock.patch.object(probe, "_holder_names", return_value=[]), \
                     mock.patch.object(probe, "_mountinfo_has_device",
                                       return_value=False), \
-                    mock.patch.object(probe, "_verify_target_identity") as verified, \
+                    mock.patch.object(probe, "_verify_target_identity"), \
                     mock.patch.object(probe, "_read_block0",
                                       return_value=header), \
                     mock.patch.object(probe, "_write_block0") as write_header, \
@@ -1690,7 +1690,10 @@ class PhysicalSwapProbeTests(unittest.TestCase):
                     state_dir, state["device_arg"], state["device_arg"])
 
         self.assertEqual(recovered["stage"], "COMPLETE")
-        verified.assert_called()
+        inspected.assert_called_once()
+        self.assertEqual(inspected.call_args.args[0]["run_id"], state["run_id"])
+        self.assertEqual(inspected.call_args.args[1:],
+                         (state["device_arg"], state["device_arg"]))
         write_header.assert_not_called()
         self.assertFalse(any(call[0] == "swapon" for call in commands))
     def test_legacy_journal_is_refused_before_device_access(self):
@@ -3530,6 +3533,26 @@ class PhysicalSwapProbeTests(unittest.TestCase):
                     return_value=("c" * 40 if source_drift == "remote"
                                   else evidence["head"])),
                 mock.patch.object(probe, "inspect_target", return_value=target),
+                # Simulate the qualified real-swap lifecycle without touching a
+                # host partition. The direct-I/O oracle remains exercised by
+                # the run; its separate Linux pageout oracle is mocked here.
+                mock.patch.object(probe, "_development_swap_inventory_plan",
+                                  return_value=(None, [])),
+                mock.patch.object(probe, "_require_shared_root_development_plan"),
+                mock.patch.object(probe, "_run_algorithm_live_swap_oracle",
+                                  return_value={
+                                      "status": "PASS",
+                                      "verified_pages": 2048,
+                                      "verified_bytes": 2048 * probe.PAGE_BYTES,
+                                      "mapper_used_kib_after_pageout": 8192,
+                                      "lower_write_bytes": probe.PAGE_BYTES,
+                                      "lower_read_bytes": probe.PAGE_BYTES,
+                                      "byte_mismatches": 0,
+                                      "oracle_sha256": evidence["artifact_digests"][
+                                          "oracle_sha256"],
+                                  }),
+                mock.patch.object(probe, "_operator_keep_swapz_active_after_pass",
+                                  return_value=False),
                 mock.patch.object(probe, "_artifact_digests",
                                   side_effect=artifact_digests),
                 mock.patch.object(
@@ -3588,7 +3611,8 @@ class PhysicalSwapProbeTests(unittest.TestCase):
                         target["device_arg"], target["device_arg"],
                         None if development_only else state_directory,
                         None if development_only else "/reviewed/review.json",
-                        development_only=development_only)
+                        development_only=development_only,
+                        algorithm_real_swap=development_only)
 
                 if teardown_not_complete:
                     with self.assertRaises(probe.ProbeError) as rejected:
