@@ -2278,7 +2278,7 @@ def compile_and_run(
         "swapz_primary_mountinfo_rw_options_valid",
         "swapz_primary_mountinfo_optional_valid",
         "swapz_primary_mount_identifier_compare",
-        "swapz_primary_parse_swaps", "swapz_primary_swap_inventory_target_is_quiescent",
+        "swapz_primary_parse_swaps",
         "swapz_primary_parse_mountinfo",
     )
     parser_source = '\n\n'.join(production_function(source, helper) for helper in helpers)
