@@ -10,6 +10,7 @@
 #include <string.h>
 
 #define DEVICE_BYTES (16ULL * 1024ULL * 1024ULL * 1024ULL)
+#define SEGMENT_PAGES 256U
 
 static void put_u32_le(unsigned char *bytes, unsigned int value)
 {
@@ -90,7 +91,7 @@ int main(void)
 	 */
 	build_linux_swap_header(header);
 	put_u32_le(header + SWAPZ_LINUX_SWAP_LAST_PAGE_OFFSET,
-		   full_last_page - SWAPZ_SEGMENT_BLOCKS);
+		   full_last_page - SEGMENT_PAGES);
 	if (!swapz_linux_swap_header_parse(header, DEVICE_BYTES, &layout) ||
 	    layout.last_page != full_last_page - SWAPZ_SEGMENT_BLOCKS ||
 	    swapz_linux_swap_header_valid(header, DEVICE_BYTES)) {
