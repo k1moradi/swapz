@@ -3443,8 +3443,7 @@ static int swapz_primary_swap_inventory_target_is_quiescent(
 
 #ifndef SWAPZ_PRIMARY_ROOTLESS_TEST
 static int swapz_primary_original_swap_policy_snapshot(
-	uint64_t target_size_kib, int require_zero_used,
-	int *active, int *priority)
+	uint64_t target_size_kib, int *active, int *priority)
 {
 	struct swapz_primary_swap_entry entries[SWAPZ_PRIMARY_SWAP_ROWS_MAX];
 	struct stat info;
@@ -3453,7 +3452,6 @@ static int swapz_primary_original_swap_policy_snapshot(
 	unsigned int target_entries = 0;
 
 	if (!target_size_kib ||
-	    (require_zero_used != 0 && require_zero_used != 1) ||
 	    !swapz_primary_target_valid(&swapz_primary_selected_target)) {
 		errno = ENODEV;
 		return -1;
@@ -3492,8 +3490,7 @@ static int swapz_primary_original_swap_policy_snapshot(
 			continue;
 		++target_entries;
 		if (target_entries > 1U ||
-		    entries[index].size_kib != target_size_kib ||
-		    (require_zero_used && entries[index].used_kib != 0U)) {
+		    entries[index].size_kib != target_size_kib) {
 			errno = EBUSY;
 			return -1;
 		}
@@ -3514,7 +3511,7 @@ static int swapz_primary_original_swap_policy_admissible(
 	 * START's swapoff syscall is the authoritative migration boundary.
 	 */
 	return swapz_primary_original_swap_policy_snapshot(
-		target_size_kib, 0, NULL, NULL);
+		target_size_kib, NULL, NULL);
 }
 #endif
 
@@ -10812,8 +10809,7 @@ static int swapz_primary_transition_original_swap(
 	if (swapz_primary_original_swap_size_from_manifest(
 		    manifest, &target_size_kib) < 0 ||
 	    swapz_primary_original_swap_policy_snapshot(
-		    target_size_kib, 0,
-		    &current_active, &current_priority) < 0)
+		    target_size_kib, &current_active, &current_priority) < 0)
 		return -1;
 
 	if (!manifest->original_swap_active) {
@@ -10865,7 +10861,7 @@ static int swapz_primary_transition_original_swap(
 	}
 
 	if (swapz_primary_original_swap_policy_snapshot(
-		    target_size_kib, 0, &current_active, &current_priority) < 0)
+		    target_size_kib, &current_active, &current_priority) < 0)
 		goto out;
 	if ((!activate && current_active) ||
 	    (activate && (!current_active ||
@@ -12764,7 +12760,7 @@ static int swapz_primary_prepare_metadata(
 	}
 	failure_phase = "final-original-swap-policy";
 	if (swapz_primary_original_swap_policy_snapshot(
-		    original_swap_size_kib, 0, &original_swap_active,
+		    original_swap_size_kib, &original_swap_active,
 		    &original_swap_priority) < 0)
 		goto out;
 	if (original_swap_priority > 32767) {
