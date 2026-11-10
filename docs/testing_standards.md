@@ -3261,7 +3261,8 @@ not accidentally compute from an earlier poison sentinel.
 
 The authority policy now enforces worst-case RAW forward progress instead of
 merely documenting it. Its reusable contract takes usable physical blocks
-(after the SWZ header and 1MiB rounding), keeps the GC reserve at
+(after excluding the immutable Linux-swap first page and applying 1MiB segment
+rounding), keeps the GC reserve at
 `max(ceil(logical_pages / 8), 512)` blocks, and independently requires one
 256-block foreground COW segment. A candidate is admissible only when
 `logical_pages + 256 <= floor((physical_blocks - gc_reserve_blocks) / 256) *
@@ -3981,7 +3982,8 @@ partition major:minor/bytes, removable parent major:minor/model/transport,
 sole-partition topology and source-chain exclusions must all still match the
 scheduler's pinned admission record. Fixtures, reports and root storage may not
 reside on that parent disk. Raw replay requires no holder and starts at byte
-4096 so it cannot overwrite the SWZ header. Swapz replay requires exactly the
+4096 so it cannot overwrite the immutable `SWAPSPACE2` first page. Swapz
+replay requires exactly the
 expected fresh mapper holder/UUID/table and zero initial logical/physical WRITE,
 GC-victim, window and failed counters. Block replay refuses any active swap or
 mount identity; actual-swap qualification is performed only by the separate
@@ -7844,45 +7846,45 @@ minor zero, different PARTUUIDs, and capacity/alignment boundaries so tests do
 not encode the active owner's current partition as a production assumption.
 The direct-C fixture must compile the plan in a mode that refuses all host
 block-device and `/proc/swaps` reads; test the identity and signature parsers
-with synthetic major:minor values and bytes. Host admission must hash the exact
-4096-byte block-zero image and compare it with the transaction's manifest-bound
-digest before any destructive transition; the selected partition need not have
-contained a Linux swap signature before provisioning.
-The plan must also check the fixed recovery base's root-owned 0700 path, an
-allowlisted persistent filesystem, direct filesystem-device separation from
-the runtime-selected target, and absence of that target's PARTUUID marker.
-Separate recovery-source and
-target-source gates must resolve each device through `/sys/dev/block`, match
-the recorded major:minor, prove a direct physical partition with a physical
-parent device, and reject holders, stacked slaves, virtual devices and the
-selected swap partition in the recovery chain. Keep Btrfs excluded from production and physical admission until
-multi-device backing can be enumerated and checked. In the exclusively
-compiled private owned-RAM null_blk rehearsal, Btrfs recovery may be
-admitted only after reading the mounted filesystem's authoritative kernel
-FS_INFO and DEV_INFO records: exactly one member with device ID 1, matching
-filesystem IDs, an opened non-symlink /dev block node, and a matching
-/sys/fs/btrfs/<filesystem-id>/devices member resolved against /sys/dev/block.
-Recheck the filesystem and member identity before passing the real partition
-major:minor through the existing physical sysfs parent-chain validation.
-When the source being checked is the root mount, mountinfo's superblock
-major:minor is not a substitute for the root directory's `st_dev`: Btrfs
-subvolumes may report different virtual device numbers. Pin an open descriptor
-for `/` and one for the recovery directory, require Btrfs `f_type` on both,
-and compare their authoritative FS_INFO FSIDs plus the one-device/max-id
-proof. Repeat the check on both descriptors before accepting the backing
-member. For non-root recovery-source checks, retain the exact filesystem-device
-match. This Btrfs root-source resolution remains available only in private
-owned-RAM qualification; it cannot enable production or physical Btrfs
-admission.
-Any missing, changing or multidevice identity must remain BLOCKED; this
-private relaxation does not apply to production or physical qualification. Report whether recovery
-storage shares the target's physical disk; that is a relevant failure-domain
-limitation even when it is a different partition. Rootless tests must use
-synthetic sysfs trees and cover malformed device numbers, target identity,
-missing physical identity and nonempty holder or slave directories without
-reading host block devices. Parse mountinfo strictly, identify the unique `/`
-mount, verify its physical source chain excludes the selected swap partition,
-and reject any mount whose major:minor is that partition. Rootless mountinfo
+with synthetic major:minor values and bytes. Host admission must require an
+already formatted ordinary Linux swap partition, parse its valid
+`SWAPSPACE2` geometry, hash the exact 4096-byte block-zero image and compare
+that image with the transaction's manifest-bound digest before any mutating
+transition. No provisioning step may manufacture or repair a raw swap header.
+
+The plan must treat mutable lifecycle ownership as same-boot state under
+root-owned `/run/swapz`. If that directory exists, require mode 0700,
+root ownership, no symlink substitution and a tmpfs backing filesystem. On
+first use, the read-only plan may accept an absent `/run/swapz` only after
+proving the fixed `/run` parent is root-owned, not group/world writable and
+tmpfs; the plan must not create the directory. A mutating owner may then create
+only that fixed 0700 runtime directory. Because tmpfs has no physical backing
+parent, runtime state must never require or report a separate recovery disk as
+an admission condition.
+
+Persistent signed qualification evidence may remain under
+`/var/lib/swapz/physical-recovery`, but that directory is evidence storage,
+not lifecycle ownership, swap metadata, a header backup or a recovery image.
+It may reside on the same physical disk as the selected swap partition without
+weakening swapz isolation because it is never consulted to reconstruct mappings
+or restore the raw partition. Existing legacy `recovery_*` plan field names
+are compatibility output only and must not regain physical-parent authority.
+
+The selected target and root-source gates must still resolve device identity
+through `/sys/dev/block`, match recorded major:minor values, reject unsafe
+holders/stacking and prove that the root filesystem does not depend on the
+selected swap partition. When the source being checked is the root mount,
+mountinfo's superblock major:minor is not a substitute for the root directory's
+`st_dev`: Btrfs subvolumes may report different virtual device numbers. The
+private owned-RAM null_blk rehearsal may keep its isolated Btrfs source-chain
+fixture, but that test-only relaxation cannot enable production or physical
+Btrfs admission. Any missing, changing or multidevice identity remains BLOCKED.
+Rootless tests must use synthetic sysfs trees and cover malformed device
+numbers, target identity, missing physical identity and nonempty holder or
+slave directories without reading host block devices. Parse mountinfo strictly,
+identify the unique `/` mount, verify its physical source chain excludes the
+selected swap partition, and reject any mount whose major:minor is that
+partition. Rootless mountinfo
 tests must include escaped mountpoints, special non-path filesystem roots,
 malformed device fields and duplicate root entries. The plan must also inspect
 `/sys/module` and `/sys/block/dm-*`, failing closed on unreadable or malformed
@@ -7898,9 +7900,12 @@ at the selected priority and with zero KiB used; this partial observation must
 never be reported as complete device admission.
 The package regression must prove that units are installed disabled and that
 package install/uninstall does not start or stop system swap. Assert executable
-systemd directives and generated dependencies, not descriptive unit comments;
-the mapper unit must require the persistent physical-recovery mount before its
-preflight/recovery/prepare chain. The package-owned
+systemd directives and generated dependencies, not descriptive unit comments.
+The mapper unit may require the persistent qualification-evidence location
+before its preflight/prepare chain because the signed report is read there;
+that mount is not mutable lifecycle ownership or a swap-recovery dependency.
+Systemd `RuntimeDirectory=swapz` supplies the volatile `/run/swapz` ownership
+directory. The package-owned
 file set and SHA-256 manifest must include the cold-boot verifier executable
 (mode 0755) and verifier service (mode 0644); uninstall must reject modified
 copies and remove only exact owned copies. Installation must substitute the
@@ -7911,7 +7916,7 @@ raw-alias, identity, artifact, geometry, service and kernel-log cases without
 reading or changing host swap state. The cross-boot preflight authorization is
 one-use volatile authority: every observation, including PASS, FAIL, INCOMPLETE
 and an unexpected persistence abort, must revoke it without touching active
-swap or durable recovery ownership. Unlink and runtime-directory sync must
+swap or same-boot lifecycle ownership. Unlink and runtime-directory sync must
 complete before PASS is persisted or announced. A revocation failure must
 produce a non-PASS, nonzero result with the failed token-lifecycle phase and
 original command exit status, retain earlier observation evidence, and never
@@ -8110,35 +8115,42 @@ mapper swap that shadows the vendor unit, prove the
 unguarded effective unit has no blocking condition, then prove the real
 generator's early drop-in restores the passive lifecycle refusals and makes
 the same indirect job fail its condition. No service start or real swap action
-is permitted. A persistent active-ownership marker is also required before the
+is permitted. A same-boot active-ownership marker is required before the
 provisioning path can be enabled.
-The native lock primitive must open the same permanent
-`partition-<selected-partuuid>.lock` inode under
-`/var/lib/swapz/physical-recovery`, reject symlinks and unsafe ownership or
-modes, acquire a nonblocking exclusive `flock`, and fsync the recovery-base
-directory. It must never unlink or replace that inode. Until lifecycle commands
-actually acquire and hold this lock for their full operation, the primitive's
-presence alone does not satisfy the manager's shared-lock requirement.
-Direct-C run-ID policy coverage must reject the all-zero ownership ID and
-accept nonzero 32-hex IDs with leading or trailing zero digits, consistently
-with the OS-random generator.
+
+The native lock primitive must open the same
+`partition-<selected-partuuid>.lock` inode under `/run/swapz`, reject
+symlinks and unsafe ownership or modes, acquire a nonblocking exclusive
+`flock`, and fsync the runtime-state directory. It must not unlink or replace
+that inode during the boot. Until lifecycle commands actually acquire and hold
+this lock for their full operation, the primitive's presence alone does not
+satisfy the manager's shared-lock requirement. Reboot intentionally removes
+the tmpfs lock and all other mapping authority; no cross-boot recovery lock is
+required. Direct-C run-ID policy coverage must reject the all-zero ownership ID
+and accept nonzero 32-hex IDs with leading or trailing zero digits,
+consistently with the OS-random generator.
 
 Before the first device mutation, consume a fresh lowercase 32-hex run ID with
-an `O_EXCL` record and create the matching active PARTUUID marker. Each record
-must be root-owned mode 0600, fsynced, and followed by a recovery-directory
-fsync. A partial or uncertain claim stays consumed and blocks future starts.
-Only checked recovery after a durable COMPLETE state may release the active
-marker; consumed records remain permanently present.
+an `O_EXCL` record and create the matching active PARTUUID marker under
+`/run/swapz`. Each record must be root-owned mode 0600, fsynced, and followed
+by a runtime-directory fsync. A partial or uncertain claim stays consumed for
+the current boot and blocks another owner until checked same-boot reconciliation.
+Only verified teardown after a COMPLETE lifecycle state may release the active
+marker; reboot discards these volatile records and cannot recover swapz
+mappings.
+
 Mutable lifecycle state must use a root-owned 0600 temporary file, bounded
-record size, file fsync, identity-checked atomic rename and recovery-directory
+record size, file fsync, identity-checked atomic rename and runtime-directory
 fsync. Reject symlink or non-regular replacement targets, and fail closed if
-the durability step is uncertain. Rootless direct-C tests must update an
-existing record and preserve it when a symlink target is presented. The
-stable boot state is `/var/lib/swapz/physical-recovery/primary-state.json`,
-on the already-validated recovery filesystem. Package removal must refuse
-while this file or the active ownership marker exists, including dangling
-symlinks at either path; both remain preserved until an explicit completed
-recovery. The rootless package test must cover these refusal cases.
+the ordering step is uncertain. Rootless direct-C tests must update an existing
+record and preserve it when a symlink target is presented. The same-boot state
+is `/run/swapz/primary-state.json`; it is deliberately not stable across
+reboot. Package removal or upgrade must refuse while this state file or an
+active ownership marker exists, including dangling symlinks at either path,
+so package mutation cannot race a live owner. Persistent
+`primary-qualification.json` evidence under `/var/lib/swapz/physical-recovery`
+is separate and does not become runtime ownership. The rootless package test
+must cover these refusal cases.
 
 Package admission must treat every current-kernel `dm-swapz.ko` candidate
 (uncompressed or compressed) as package state even when the userspace/source
@@ -8153,9 +8165,9 @@ root-owned mode-0700 directory outside shared temporary directories; errors or
 signals during the pre-mutation backup phase remove only that staging data,
 while failures after mutation enter the full version-owned rollback path.
 
-Recovery must refuse while any `swapoff` process runs in a swapoff stage, even
-when the kernel still lists the device, and an unreadable `/proc` entry fails
-closed. Rootless suites for this procedure run with privileged commands refused
+Same-boot lifecycle reconciliation/teardown must refuse while any `swapoff`
+process runs in a swapoff stage, even when the kernel still lists the device,
+and an unreadable `/proc` entry fails closed. Rootless suites for this procedure run with privileged commands refused
 (for example through a `sudo` stub that exits nonzero). The physical-swap-probe
 suite simulates its physical run with mocks, so it must pass under that stub
 and must never be run unguarded on the PC.
