@@ -6044,6 +6044,45 @@ class ReportContract(unittest.TestCase):
         self.assertIn("ID | Name", output)
         self.assertNotIn("START_LOADED_PRIMARY_NULLBLK_NEGATIVE=", output)
 
+        # The complete negative-recovery prefix is still valid if a later
+        # raw-read owned pair fails. Do not relabel that failure as an
+        # earlier negative-recovery authentication failure.
+        complete_negative_index = next(
+            index for index, line in enumerate(full_log.splitlines())
+            if line.startswith("PASS_LOADED_PRIMARY_NULLBLK_NEGATIVE_RECOVERY="))
+        completed_prefix = [
+            line for line in full_log.splitlines()[:complete_negative_index + 1]
+            if not line.startswith("PASS_LOADED_RAW_READ_FANOUT=")]
+        raw_failure = ("BLOCKED: raw-read fanout profile=entropy "
+                       "child_exit=2 cause=BLOCKED: owned RAM replay refused")
+        partial_log = ("\\n".join(completed_prefix + [
+            "START_LOADED_RAW_READ_FANOUT", raw_failure]) + "\\n")
+        partial_correctness = runner.parse_loaded_correctness(partial_log)
+        self.assertEqual(partial_correctness["overall"], "INCOMPLETE")
+        self.assertEqual(len(runner.authenticated_primary_negative_refusal_indices(
+            partial_log.splitlines(), partial_correctness, 2,
+            allow_completed_prefix=True)), 11)
+        code, stage, output = run_synthetic(partial_log, child_exit=2)
+        self.assertEqual(code, 2)
+        self.assertEqual(stage["status"], "BLOCKED")
+        self.assertEqual(stage["failed_phase"],
+                         "owned RAM raw-read fanout verification")
+        self.assertIn("raw-read fanout profile=entropy", stage["diagnostic"])
+        self.assertNotIn("negative recovery", stage["diagnostic"])
+        self.assertIn("Raw read fanout verification", output)
+
+        # An incomplete or invalid negative prefix cannot be authenticated
+        # simply because the later raw-read START marker was observed.
+        broken_partial = partial_log.replace(
+            "BLOCKED: primary-swap start failed: Interrupted system call",
+            "BLOCKED: primary-swap start failed: Operation not permitted", 1)
+        code, stage, _ = run_synthetic(broken_partial, child_exit=2)
+        self.assertEqual(code, 2)
+        self.assertEqual(stage["status"], "FAIL")
+        self.assertEqual(stage["failed_phase"],
+                         "owned RAM primary lifecycle negative recovery")
+        self.assertIn("failed authentication", stage["diagnostic"])
+
         original_block = ("BLOCKED: primary-swap start failed: "
                           "Interrupted system call")
         # Authentication failures are FAIL; independent explicit FAIL/BLOCKED

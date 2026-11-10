@@ -2605,6 +2605,8 @@ def failure_context(output, *, loaded=True, default_phase=None,
             elif line.startswith("PASS_LOADED_SHARED_BENCHMARK_PLAN"):
                 shared_plan_step = None
                 phase = "shared fixture preparation complete"
+            elif line.startswith("START_LOADED_RAW_READ_FANOUT"):
+                phase = "owned RAM raw-read fanout verification"
             elif line.startswith("START_OWNED_RAM_REGIME="):
                 label = line.partition("=")[2]
                 if label in MODEL_ORDER:
@@ -3035,19 +3037,19 @@ def expected_primary_negative_refusal(line, case):
 
 
 def authenticated_primary_negative_refusal_indices(
-        lines, loaded_correctness, observed_exit_code):
+        lines, loaded_correctness, observed_exit_code, *,
+        allow_completed_prefix=False):
     """Return exact expected-refusal indices, or None if evidence is invalid.
 
-    All thirteen named cases, every required case-specific refusal, the
-    completion marker, loaded terminal marker and integer-zero child exit are
-    required. Loaded-correctness completeness is evaluated separately by the
-    caller: a valid refusal matrix may authenticate its own BLOCKED lines even
-    when another loaded gate is incomplete, but that stage still cannot PASS.
-    Any missing, duplicate, malformed or unrelated refusal disables the
-    exemption.
+    A successful loaded run requires all thirteen ordered cases, exact
+    case-specific refusals, the recovery and terminal markers, and exit zero.
+    When a later raw-read phase fails nonzero, the completed recovery prefix
+    may still authenticate those earlier refusals. That never qualifies the
+    loaded stage or exempts the later BLOCKED/FAIL. Any malformed or missing
+    refusal still fails authentication.
     """
-    if (observed_exit_code != 0 or
-            not isinstance(loaded_correctness, dict)):
+    if (not isinstance(loaded_correctness, dict) or
+            (observed_exit_code != 0 and not allow_completed_prefix)):
         return None
     ordered_cases = tuple(PRIMARY_NEGATIVE_CASE_REFUSALS)
     expected_refusal_count = sum(
@@ -3059,6 +3061,7 @@ def authenticated_primary_negative_refusal_indices(
     current_case_refusal_seen = False
     recovery_complete = False
     loaded_complete = False
+    later_raw_read_started = False
 
     def prior_case_complete():
         return (current_case is None or
@@ -3086,6 +3089,8 @@ def authenticated_primary_negative_refusal_indices(
             if not recovery_complete or loaded_complete:
                 return None
             loaded_complete = True
+        elif line == "START_LOADED_RAW_READ_FANOUT" and recovery_complete:
+            later_raw_read_started = True
         elif line.startswith("BLOCKED:") and current_case is not None:
             if (current_case_refusal_seen or
                     not expected_primary_negative_refusal(line, current_case)):
@@ -3093,8 +3098,16 @@ def authenticated_primary_negative_refusal_indices(
             permitted.add(line_number)
             current_case_refusal_seen = True
 
-    if (not recovery_complete or not loaded_complete or
+    if (not recovery_complete or
             len(permitted) != expected_refusal_count):
+        return None
+    if observed_exit_code == 0:
+        if not loaded_complete:
+            return None
+    elif not (allow_completed_prefix and later_raw_read_started and
+              not loaded_complete):
+        # A failed or interrupted negative-recovery matrix still cannot
+        # borrow expected BLOCKED lines from a partially observed run.
         return None
     return frozenset(permitted)
 
@@ -4310,7 +4323,8 @@ def run_stage(title, command, result, *, parse_bench=False,
           loaded_correctness.get("overall") == "PASS")))
     negative_refusal_indices = (
         authenticated_primary_negative_refusal_indices(
-            loaded_lines, loaded_correctness, observed_exit_code)
+            loaded_lines, loaded_correctness, observed_exit_code,
+            allow_completed_prefix=observed_exit_code != 0)
         if negative_refusal_contract_required else frozenset())
     negative_refusal_auth_failure = (
         negative_refusal_contract_required and

@@ -319,7 +319,25 @@ for content in entropy balanced; do
         fi
     else
         rc=$?
-        tail -n 12 "$raw_plan/run.log"
+        # The private pair transcript includes teardown lines after the
+        # original failure. Find the first failure, not just the last lines.
+        raw_failure_reason="no-source-diagnostic"
+        raw_failure_kind=FAIL
+        if [[ -f "$raw_plan/run.log" && ! -L "$raw_plan/run.log" ]]; then
+            raw_failure_line="$(LC_ALL=C grep -m 1 -E \
+                '^(BLOCKED: |FAIL: |(AssertionError|OSError|RuntimeError|ValueError|PermissionError):)' \
+                "$raw_plan/run.log")" || raw_failure_line=""
+            if [[ -n "$raw_failure_line" ]]; then
+                raw_failure_reason="$raw_failure_line"
+                [[ "$raw_failure_line" == BLOCKED:* ]] &&
+                    raw_failure_kind=BLOCKED
+            fi
+            tail -n 12 "$raw_plan/run.log"
+        fi
+        # This source-controlled, bounded failure marker is sanitized by the
+        # parent reporter. Never mark a failed pair or this phase as PASS.
+        printf '%s: raw-read fanout profile=%s child_exit=%d cause=%.110s\n' \
+            "$raw_failure_kind" "$content" "$rc" "$raw_failure_reason" >&2
         exit "$rc"
     fi
 done
