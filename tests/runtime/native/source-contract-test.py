@@ -40,7 +40,7 @@ MANDATORY_ROOTLESS_PYTHON_SUITES = (
 
 
 def _raw_body(symbol: str) -> str:
-    match = re.search(r"static\s+(?:int|void|bool|u64|unsigned\s+long|enum\s+hrtimer_restart|const\s+u8\s*\*)\s*" + re.escape(symbol) +
+    match = re.search(r"static\s+(?:noinline\s+)?(?:int|void|bool|u64|unsigned\s+long|enum\s+hrtimer_restart|const\s+u8\s*\*)\s*" + re.escape(symbol) +
                       r"\s*\([^;]*?\)\s*\{", DM, re.S)
     if not match:
         raise AssertionError(f"Missing production symbol {symbol}")
