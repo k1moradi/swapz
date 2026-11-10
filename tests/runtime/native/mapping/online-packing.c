@@ -784,15 +784,27 @@ static int test_full_extent_corruption_rejected(void)
 static int test_torn_extent_quarantined_without_authority(void)
 {
 	struct swapz_compressed_page pages[16];
+	swapz_u8 planned_classes[SWAPZ_MAX_RECORDS];
+	swapz_u8 planned_takes[SWAPZ_MAX_RECORDS];
+	swapz_u8 planned_extents = 0;
 	swapz_u8 committed = 0;
 
 	CHECK(setup() == 0);
 	prepare(pages, 16, 0, 0);
+	CHECK(plan_default(pages, 16, planned_classes, planned_takes,
+			   &planned_extents) == 0);
+	CHECK(planned_extents && planned_takes[0]);
 	disk.fail_write_on_call = 1;
 	CHECK(write_window_sequential(pages, 16, &committed) == -EIO);
 	CHECK(committed == 0);
-	CHECK(authority.abandoned_blocks >= 2);
+	/* With payload-only packing the failed first extent may occupy just
+	 * one block. Quarantine its exact reservation, whether the lower I/O
+	 * wrote zero blocks or returned a torn multi-block completion. */
+	CHECK(authority.abandoned_blocks == planned_classes[0]);
 	CHECK(authority.next_block == authority.abandoned_blocks);
+	CHECK(engine.submitted_blocks == planned_classes[0]);
+	CHECK(disk.write_calls == 1);
+	CHECK(disk.write_blocks == (planned_classes[0] > 1U ? 1U : 0U));
 	CHECK(engine.submitted_blocks > engine.completed_blocks);
 	CHECK(disk.write_blocks == engine.completed_blocks);
 	CHECK(!maps[0].valid && !maps[15].valid);
