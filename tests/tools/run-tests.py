@@ -3358,6 +3358,37 @@ def first_unittest_failure_details(output):
     # Only derive assertion specifics from a recognized first error.
     # Raw expected/actual payloads remain in the existing private log.
     if exception and exception.group(1) == "AssertionError":
+        if (first_header.group(3) == "PhysicalSwapProbeTests" and
+                first_header.group(2) ==
+                "test_algorithm_pageout_oracle_unit_contracts"):
+            # The outer source-bound test can report a nested Python oracle
+            # failure. Accept only exact known methods and integer comparisons;
+            # never relay the nested stderr, paths or assertion payload.
+            nested = re.search(
+                r"(?m)^AssertionError: Nested pageout oracle failure: "
+                r"test=(test_[A-Za-z0-9_]{1,96}|unavailable) "
+                r"kind=(FAIL|ERROR|unavailable)"
+                r"(?: observed=([0-9]{1,3}) expected=([0-9]{1,3}))?"
+                r"(?:; private log retained)?$", traceback)
+            known_methods = {
+                "test_page_patterns_cover_entire_pages_and_differ",
+                "test_byte_exact_verification_and_corruption_detection",
+                "test_invalid_inputs_fail_before_allocating",
+                "test_positive_protocol_does_not_claim_unobserved_device_io",
+                "test_madvise_refusal_cannot_print_success",
+            }
+            if nested and nested.group(1) in known_methods:
+                details.append(
+                    f"Nested pageout oracle: test={nested.group(1)} "
+                    f"kind={nested.group(2)}")
+                if nested.group(3) is not None:
+                    details.append(
+                        f"Nested assertion: observed {nested.group(3)}; "
+                        f"expected {nested.group(4)}")
+            else:
+                details.append(
+                    "Nested pageout oracle: cause unavailable; "
+                    "private failure log retained")
         if first_header.group(3) == "PhysicalSwapProbeTests":
             # Reveal only fixed internal restoration states, not arbitrary
             # values from a failed assertion or a physical-device identity.
