@@ -10310,6 +10310,11 @@ def write_failure_diagnostic(result, git_notice):
                     key: kernel.get(key)
                     for key in KERNEL_READ_FIELDS
                 } if isinstance(kernel, dict) else {}
+                host_cpu = phase.get("host_cpu")
+                passes[mode]["host_cpu"] = {
+                    key: host_cpu.get(key)
+                    for key in HOST_CPU_FIELDS
+                } if isinstance(host_cpu, dict) else {}
             sessions.append({
                 "round": index,
                 "read_coalesce": row.get("read_coalesce"),
@@ -10322,8 +10327,28 @@ def write_failure_diagnostic(result, git_notice):
             })
         return sessions
 
+    physical_trial = result.get("algorithm_real_swap") or {}
+    if not isinstance(physical_trial, dict):
+        physical_trial = {}
+    physical_qualification = result.get("physical_qualification") or {}
+    if not isinstance(physical_qualification, dict):
+        physical_qualification = {}
+    host_identity = result.get("host_identity") or {}
+    if not isinstance(host_identity, dict):
+        host_identity = {}
+
     diagnostic = {
         "schema": "swapz-private-qualification-failure-v1",
+        "architecture": host_identity.get("architecture"),
+        "kernel_release": result.get("kernel_release"),
+        "physical_trial": {
+            "overall": physical_trial.get("overall"),
+            "reason": physical_trial.get("reason"),
+        },
+        "physical_qualification": {
+            "overall": physical_qualification.get("overall"),
+            "reason": physical_qualification.get("reason"),
+        },
         "source_sha": result.get("source_sha"),
         "tested_commit_sha": result.get("tested_commit_sha"),
         "overall": result.get("overall"),
