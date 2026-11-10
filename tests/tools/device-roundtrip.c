@@ -973,10 +973,33 @@ int main(int argc, char **argv)
 	unsigned int i, phase, count = 0, round = 0, gc_rounds = 0;
 	unsigned int page_index = 0;
 	int maximum_capacity_mode = 0;
+	int oracle_argc = argc;
 	uint64_t expected_device_bytes = UINT64_C(16) * 1024 * 1024;
 	int open_flags = O_RDWR | O_CLOEXEC | O_DIRECT | O_SYNC | O_NOFOLLOW;
 
-	if (argc != 2 && argc != 3 && argc != 5 && argc != 4) {
+	/* The physical helper supplies its independently verified full logical
+	 * mapper size on every oracle invocation. Never substitute the 16MiB
+	 * null_blk fixture size for an ordinary SWAPSPACE2-backed mapper. */
+	if ((argc == 5 && !strcmp(argv[2], "--expect-dm-uuid")) || argc == 6) {
+		char *end = NULL;
+		const char *size_text = argv[argc - 1];
+		unsigned long long parsed_size;
+
+		errno = 0;
+		parsed_size = strtoull(size_text, &end, 10);
+		if (!size_text[0] || size_text[0] < '0' || size_text[0] > '9' ||
+		    errno || !end || *end ||
+		    parsed_size < (uint64_t)NPAGES * PAGE ||
+		    parsed_size % PAGE) {
+			fprintf(stderr, "FAIL invalid physical mapper size\n");
+			return 2;
+		}
+		expected_device_bytes = (uint64_t)parsed_size;
+		oracle_argc--;
+	}
+
+	if (oracle_argc != 2 && oracle_argc != 3 &&
+	    oracle_argc != 4 && oracle_argc != 5) {
 		fprintf(stderr,
 		"Usage: device-roundtrip /dev/mapper/swapz-demo-<owned-id> "
 		"[private series mode | --maximum-capacity-boundary SWAPZ-TEST-<owned-id> "
@@ -988,7 +1011,7 @@ int main(int argc, char **argv)
 		fprintf(stderr, "FAIL refusing non-owned mapper path\n");
 		return 2;
 	}
-	if (argc == 3) {
+	if (oracle_argc == 3) {
 		if (!strcmp(argv[2], "--id72-churn")) {
 			churn_mode = 1;
 			open_flags &= ~O_SYNC;
@@ -997,8 +1020,12 @@ int main(int argc, char **argv)
 			return 2;
 		}
 	}
-	if (argc == 4) {
+	if (oracle_argc == 4) {
 		if (!strcmp(argv[2], "--expect-dm-uuid")) {
+			if (argc != 5) {
+				fprintf(stderr, "FAIL missing physical mapper size\n");
+				return 2;
+			}
 			if (!valid_physical_dm_uuid(argv[3])) {
 				fprintf(stderr, "FAIL invalid physical DM UUID\n");
 				return 2;
@@ -1034,7 +1061,7 @@ int main(int argc, char **argv)
 			open_flags &= ~O_SYNC;
 		}
 	}
-	if (argc == 5) {
+	if (oracle_argc == 5) {
 		if (!strcmp(argv[2], "--write-series"))
 			write_series = 1;
 		else if (!strcmp(argv[2], "--parallel-write-series")) {

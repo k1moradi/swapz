@@ -2801,7 +2801,9 @@ def _expected_physical_oracle_stdout(options):
 
 def _run_positive_oracle_phase(oracle, mapper, state, target, state_dir,
                                results, phase, options=()):
-    command = [oracle, mapper, *options]
+    # Exact full-capacity geometry is independently authenticated by the
+    # owned-mapper/table verification, and must also bind every C oracle run.
+    command = [oracle, mapper, *options, str(target["swapz_logical_bytes"])]
     entry = {
         "phase": phase,
         "argv": [str(value) for value in command],
@@ -2895,8 +2897,27 @@ def _run_positive_oracle_phase(oracle, mapper, state, target, state_dir,
         and "trace_error" not in entry
     )
     entry["status"] = "PASS" if passed else "FAIL"
+    if not passed:
+        # The complete bounded stdout/stderr and kernel/lower-I/O snapshots
+        # are already retained in the root-only durable results. Publish
+        # path-free failure attribution automatically in the regular log.
+        entry["failure_kind"] = (
+            "opened_mapper_size_mismatch"
+            if entry["stderr"] ==
+            "FAIL opened owned DM block target has unexpected size\n"
+            else "opened_mapper_uuid_mismatch"
+            if entry["stderr"] ==
+            "FAIL opened DM UUID missing or not the expected identity\n"
+            else "oracle_or_mapper_evidence_incomplete")
     _save_results(state_dir, results)
     if not passed:
+        print(
+            "PHYSICAL_ORACLE_FAILURE_EVIDENCE="
+            f"phase:{phase} exit:{entry['return_code']} "
+            f"kind:{entry['failure_kind']} "
+            f"mapper_healthy:{_swapz_status_healthy(after_status, target['swapz_logical_sectors'])} "
+            f"post_identity:{entry.get('post_oracle_identity', 'UNKNOWN')}",
+            flush=True)
         failure_detail = entry.get("oracle_output_error") or (
             "operation=device_roundtrip phase=oracle_execution "
             f"original_exit={entry['return_code']!r} "
@@ -3881,7 +3902,8 @@ def _final_physical_oracle_evidence_error(results, state, target,
             return f"phase_{index}_nonobject"
         # argv is persisted as JSON strings, while artifact snapshots may be
         # pathlib.Path objects. Compare the canonical serialized arguments.
-        expected_argv = [str(value) for value in (oracle, mapper, *options)]
+        expected_argv = [str(value) for value in (
+            oracle, mapper, *options, target["swapz_logical_bytes"])]
         if (entry.get("phase") != phase or
                 entry.get("argv") != expected_argv):
             return f"phase_{index}_identity_or_arguments_mismatch"
@@ -4553,6 +4575,21 @@ def run_probe(device_arg, confirm_arg, state_dir_arg, review_path,
                 "final_recovery_state expected='COMPLETE' "
                 f"observed={state.get('stage')!r}")
         if failure is not None:
+            # This summary follows the owned recovery attempt, not just the
+            # first oracle failure. Unknown checks cannot appear as PASS.
+            recovery_fields = (
+                "original_header_matches_final",
+                "restored_swap_verified",
+                "mapper_removal_succeeded",
+                "module_cleanup_succeeded",
+            )
+            recovery_facts = " ".join(
+                f"{field}:{'PASS' if results.get(field) is True else 'FAIL' if results.get(field) is False else 'UNKNOWN'}"
+                for field in recovery_fields)
+            print(
+                "PHYSICAL_RECOVERY_EVIDENCE="
+                f"state:{state.get('stage') if state.get('stage') in ('COMPLETE', 'RECOVERY_REQUIRED', 'PRE_DESTRUCTIVE_FAILED') else 'UNKNOWN'} "
+                + recovery_facts, flush=True)
             print(f"PHYSICAL_RESULTS={state_dir / RESULTS_NAME}", file=sys.stderr)
             if (state.get("stage") == "RECOVERY_REQUIRED" or
                     results.get("recovery_state_durability") == "UNCERTAIN"):

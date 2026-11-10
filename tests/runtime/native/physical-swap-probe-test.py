@@ -4172,9 +4172,13 @@ class PhysicalSwapProbeTests(unittest.TestCase):
                         event[1][0] == "/reviewed/device-roundtrip"]
         self.assertEqual(len(oracle_calls), 1)
         self.assertEqual(oracle_calls[0][2:],
-                         ("--expect-dm-uuid", complete["dm_uuid"]))
+                         ("--expect-dm-uuid", complete["dm_uuid"],
+                          str(target["swapz_logical_bytes"])))
         self.assertEqual([phase["status"] for phase in
                           results["physical_oracle_phases"]], ["PASS"])
+        self.assertTrue(all(
+            phase["argv"][-1] == str(target["swapz_logical_bytes"])
+            for phase in results["physical_oracle_phases"]))
         self.assertEqual(results["oracle_suite"], "PASS")
         self.assertEqual(complete["stage"], "COMPLETE")
         self.assertEqual(results["final_recovery_state"], "COMPLETE")
@@ -4693,17 +4697,18 @@ class PhysicalSwapProbeTests(unittest.TestCase):
         oracle_commands = [command for command in commands
                            if command[0] == oracle]
         self.assertEqual(oracle_commands, [
-            (oracle, mapper, "--expect-dm-uuid", state["dm_uuid"]),
-            (oracle, mapper, "--delta64-write-series", "128", "1"),
-            (oracle, mapper, "--delta64-verify-series", "128", "1"),
-            (oracle, mapper, "--segmented-write-series", "128", "5"),
-            (oracle, mapper, "--segmented-verify-series", "128", "5"),
-            (oracle, mapper, "--verify-series", "128", "5"),
-            (oracle, mapper, "--write-series", "128", "6"),
-            (oracle, mapper, "--segmented-verify-series", "128", "6"),
-            (oracle, mapper, "--thp-write-series", "128", "7"),
-            (oracle, mapper, "--thp-verify-series", "128", "7"),
-            (oracle, mapper, "--verify-series", "128", "7"),
+            (oracle, mapper, "--expect-dm-uuid", state["dm_uuid"],
+             str(target["swapz_logical_bytes"])),
+            (oracle, mapper, "--delta64-write-series", "128", "1", str(target["swapz_logical_bytes"])),
+            (oracle, mapper, "--delta64-verify-series", "128", "1", str(target["swapz_logical_bytes"])),
+            (oracle, mapper, "--segmented-write-series", "128", "5", str(target["swapz_logical_bytes"])),
+            (oracle, mapper, "--segmented-verify-series", "128", "5", str(target["swapz_logical_bytes"])),
+            (oracle, mapper, "--verify-series", "128", "5", str(target["swapz_logical_bytes"])),
+            (oracle, mapper, "--write-series", "128", "6", str(target["swapz_logical_bytes"])),
+            (oracle, mapper, "--segmented-verify-series", "128", "6", str(target["swapz_logical_bytes"])),
+            (oracle, mapper, "--thp-write-series", "128", "7", str(target["swapz_logical_bytes"])),
+            (oracle, mapper, "--thp-verify-series", "128", "7", str(target["swapz_logical_bytes"])),
+            (oracle, mapper, "--verify-series", "128", "7", str(target["swapz_logical_bytes"])),
         ])
         phases = state["_test_results"]["physical_oracle_phases"]
         self.assertEqual([entry["status"] for entry in phases], ["PASS"] * 11)
