@@ -164,7 +164,7 @@ class SwapzProductionSourceQualification(unittest.TestCase):
                     f"{relative_path}")
 
     def test_rootless_swap_inventory_helper_stays_out_of_production_fixture(self):
-        helper = "swapz_primary_swap_inventory_target_is_quiescent("
+        helper = "swapz_primary_swap_inventory_target_is_admissible("
         policy = (
             ROOT / "tests/runtime/native/userspace/swapz-primary-policy.c"
         ).read_text(encoding="utf-8")
@@ -193,7 +193,7 @@ class SwapzProductionSourceQualification(unittest.TestCase):
         # the authoritative migration boundary.
         self.assertNotIn("require_zero_used", policy)
         self.assertNotIn("used_kib != 0U", policy)
-        self.assertIn("target_size_kib, NULL, NULL", admissible)
+        self.assertIn("target_size_kib, NULL, NULL, NULL", admissible)
         self.assertEqual(
             prepare.count(
                 "swapz_primary_original_swap_policy_admissible("), 3)
@@ -201,13 +201,20 @@ class SwapzProductionSourceQualification(unittest.TestCase):
             "original_swap_size_kib, &original_swap_active,",
             prepare)
         self.assertNotIn("used_kib != 0U", prepare)
+        self.assertIn("&current_used_kib", transition)
         self.assertIn(
-            "target_size_kib, &current_active, &current_priority",
+            "swapz_primary_swapoff_headroom_sufficient(current_used_kib)",
             transition)
         self.assertIn("syscall(SYS_swapoff, target_path)", transition)
         self.assertLess(
-            transition.index("swapz_primary_original_swap_policy_snapshot("),
+            transition.index(
+                "swapz_primary_swapoff_headroom_sufficient(current_used_kib)"),
             transition.index("syscall(SYS_swapoff, target_path)"))
+        headroom = source_body(
+            "swapz_primary_swapoff_headroom_sufficient", PRIMARY)
+        self.assertIn("SWAPZ_PRIMARY_SWAPOFF_MARGIN_KIB", headroom)
+        self.assertIn("SWAPZ_PRIMARY_SWAPOFF_MIN_AVAILABLE_KIB", headroom)
+        self.assertIn("errno = ENOMEM", headroom)
 
     def test_late_race_raw_swap_transition_seam_is_single_and_ordered(self):
         fixture = (
