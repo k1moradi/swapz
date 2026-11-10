@@ -3543,8 +3543,14 @@ def first_nullblk_fixture_failure_details(output):
 
 
 
-def first_native_lower_io_failure_details(output):
+def _first_native_make_failure_details(output, target_name, source_directory):
     """Explain an authenticated native Make target failure, without child text."""
+    allowed_targets = {
+        "test-lower-io": "io",
+        "test-userspace": "userspace",
+    }
+    if allowed_targets.get(target_name) != source_directory:
+        return []
     rootless_markers = list(re.finditer(r"(?m)^FAIL: rootless phase=", output))
     if not rootless_markers:
         return []
@@ -3552,7 +3558,7 @@ def first_native_lower_io_failure_details(output):
     terminal_line = output[terminal_marker.start():].splitlines()[0]
     if not re.fullmatch(
             r"FAIL: rootless phase=Makefile native and metadata "
-            r"subtest=test-lower-io test=unavailable "
+            r"subtest=" + re.escape(target_name) + r" test=unavailable "
             r"exit=2 reason=nonzero_exit "
             r"phase_s=[0-9]+ stage_s=[0-9]+ "
             r"line=(?:[0-9]+|unavailable) "
@@ -3565,8 +3571,8 @@ def first_native_lower_io_failure_details(output):
     native_output = output[max(0, terminal_marker.start() - 32768):
                            terminal_marker.start()]
     native_failures = list(re.finditer(
-        r"(?m)^FAIL: native test-lower-io "
-        r"binary=([a-z][a-z0-9-]{1,63}) exit=([1-9][0-9]{0,2})$",
+        r"(?m)^FAIL: native " + re.escape(target_name) +
+        r" binary=([a-z][a-z0-9-]{1,63}) exit=([1-9][0-9]{0,2})$",
         native_output))
     if not native_failures:
         return []
@@ -3575,7 +3581,8 @@ def first_native_lower_io_failure_details(output):
         makefile = (ROOT / "tests/suites/Makefile").read_text(encoding="utf-8")
     except OSError:
         return []
-    target = re.search(r"(?m)^test-lower-io: (.+)$", makefile)
+    target = re.search(
+        r"(?m)^" + re.escape(target_name) + r": (.+)$", makefile)
     if target is None:
         return []
     # The binary must be a literal prerequisite of this target, and the
@@ -3585,14 +3592,15 @@ def first_native_lower_io_failure_details(output):
         return []
     make_error = re.search(
         r"(?m)^make(?:\[[0-9]+\])?: \*\*\* "
-        r"\[Makefile:[0-9]+: test-lower-io\] Error "
+        r"\[Makefile:[0-9]+: " + re.escape(target_name) + r"\] Error "
         + re.escape(native_exit) + r"$",
         native_output)
     if make_error is None:
         return []
     details = [
         f"First failing native test: {executable} (exit={native_exit})"]
-    source = ROOT / "tests/runtime/native/io" / (executable + ".c")
+    source = (ROOT / "tests/runtime/native" / source_directory /
+              (executable + ".c"))
     # Only display a source-controlled .c basename and source line.
     try:
         source_line_count = len(source.read_text(encoding="utf-8").splitlines())
@@ -3610,6 +3618,14 @@ def first_native_lower_io_failure_details(output):
                 f"Native assertion location: {executable}.c:{line_number}")
     return details
 
+
+def first_native_lower_io_failure_details(output):
+    return _first_native_make_failure_details(output, "test-lower-io", "io")
+
+
+def first_native_userspace_failure_details(output):
+    return _first_native_make_failure_details(
+        output, "test-userspace", "userspace")
 
 def first_compiler_failure_location(output):
     """Locate a native compiler error without printing host paths or source."""
@@ -4447,10 +4463,12 @@ def run_stage(title, command, result, *, parse_bench=False,
                 default_phase=None if parse_bench else title,
                 child_exit_code=observed_exit_code)
         if title == "Native and rootless contracts":
-            native_lower_io_details = first_native_lower_io_failure_details(output)
-            if native_lower_io_details:
+            native_make_details = first_native_lower_io_failure_details(output)
+            if not native_make_details:
+                native_make_details = first_native_userspace_failure_details(output)
+            if native_make_details:
                 record["diagnostic"] += "; " + "; ".join(
-                    native_lower_io_details)
+                    native_make_details)
     result["stages"].append(record)
     if predictor_evidence is not None:
         result.setdefault("evidence", {})["predictor"] = predictor_evidence
@@ -4545,6 +4563,8 @@ def run_stage(title, command, result, *, parse_bench=False,
             details = first_nullblk_fixture_failure_details(output)
         if not details and title == "Native and rootless contracts":
             details = first_native_lower_io_failure_details(output)
+        if not details and title == "Native and rootless contracts":
+            details = first_native_userspace_failure_details(output)
         if not details:
             details = first_compiler_failure_location(output)
         for detail in details:
