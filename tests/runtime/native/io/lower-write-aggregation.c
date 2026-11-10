@@ -687,10 +687,9 @@ static int test_padding_option_measures_exact_request_byte_tradeoff(void)
 	CHECK(e.bulk_padding_blocks == 0 && validate_prefix(4) == 0);
 
 	/*
-	 * The former aligned policy made this non-tied [1,2] geometry split
-	 * around an internal hole, and bulk mode 2 could explicitly write that
-	 * padding. Canonical packed placement removes the hole, so both modes
-	 * must now produce the same one-request, no-padding result.
+	 * With serialized lower metadata retired, these four payloads total
+	 * 8146 bytes and fit one 8KiB extent. Both bulk modes must therefore
+	 * produce the same one-request, two-block, no-padding result.
 	 */
 	CHECK(setup() == 0);
 	committed = 0;
@@ -704,7 +703,7 @@ static int test_padding_option_measures_exact_request_byte_tradeoff(void)
 	canonical_calls = run_calls;
 	canonical_bytes = lower_written_bytes;
 	CHECK(canonical_calls == 1 &&
-	      canonical_bytes == 3U * SWAPZ_BLOCK_BYTES);
+	      canonical_bytes == 2U * SWAPZ_BLOCK_BYTES);
 	CHECK(e.bulk_padding_blocks == 0);
 	CHECK(a.alignment_hole_blocks_foreground == 0);
 	CHECK(e.run_splits_by_hole == 0);
@@ -741,14 +740,14 @@ static int test_packed_placement_removes_internal_hole(void)
 	CHECK(swapz_engine_write_window_batched(&e, pages, 4, &committed) == 0);
 	CHECK(committed == 4 && validate_prefix(4) == 0);
 	CHECK(run_calls == 1);
-	CHECK(lower_written_bytes == 3U * SWAPZ_BLOCK_BYTES);
+	CHECK(lower_written_bytes == 2U * SWAPZ_BLOCK_BYTES);
 	CHECK(a.alignment_hole_blocks_foreground == 0);
 	CHECK(a.segment_tail_waste_blocks_foreground == 0);
 	CHECK(e.run_splits_by_hole == 0);
-	CHECK(maps[0].start_block == 0);
-	CHECK(maps[1].start_block == 1);
-	CHECK(maps[2].start_block == 1);
-	CHECK(maps[3].start_block == 1);
+	CHECK(maps[0].start_block == 0 && maps[0].extent_blocks == 2);
+	CHECK(maps[1].start_block == 0 && maps[1].extent_blocks == 2);
+	CHECK(maps[2].start_block == 0 && maps[2].extent_blocks == 2);
+	CHECK(maps[3].start_block == 0 && maps[3].extent_blocks == 2);
 	return 0;
 }
 
