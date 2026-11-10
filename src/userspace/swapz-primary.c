@@ -5508,7 +5508,8 @@ static int swapz_primary_recovery_preflight(
 		errno = ENODEV;
 		return -1;
 	}
-	recovery_fd = swapz_primary_runtime_state_base_open(0);
+	recovery_fd = swapz_primary_recovery_base_open(
+		SWAPZ_PRIMARY_RUNTIME_STATE_BASE, 0);
 	if (recovery_fd < 0)
 		return -1;
 	if (fstat(recovery_fd, &directory_info) < 0 ||
@@ -11976,6 +11977,9 @@ static int swapz_primary_qualification_import(const char *source_path)
 		errno = EPERM;
 		goto out;
 	}
+	recovery_fd = swapz_primary_runtime_state_base_open(0);
+	if (recovery_fd < 0)
+		goto out;
 	if (swapz_primary_recovery_preflight(
 		    &directory_safe, &persistent_filesystem, &filesystem_major,
 		    &filesystem_minor, &directly_not_target, &source_chain_checked,
@@ -11985,9 +11989,6 @@ static int swapz_primary_qualification_import(const char *source_path)
 		errno = EPERM;
 		goto out;
 	}
-	recovery_fd = swapz_primary_runtime_state_base_open(0);
-	if (recovery_fd < 0)
-		goto out;
 	lock_fd = swapz_primary_partition_lock_at(
 		recovery_fd, SWAPZ_PRIMARY_PARTUUID, 0);
 	if (lock_fd < 0)
