@@ -112,13 +112,28 @@ int main(void)
 	put_u32_le(header + SWAPZ_LINUX_SWAP_BAD_PAGES_OFFSET, 2U);
 	put_u32_le(header + SWAPZ_LINUX_SWAP_BAD_PAGE_LIST_OFFSET +
 		   sizeof(unsigned int), 257U);
-	if (swapz_linux_swap_header_parse(header, DEVICE_BYTES, &layout)) {
-		fprintf(stderr, "FAIL: duplicate Linux bad pages accepted\n");
+	if (!swapz_linux_swap_header_parse(header, DEVICE_BYTES, &layout) ||
+	    layout.bad_pages != 2U ||
+	    swapz_linux_swap_clean_segment_count(
+		    header, &layout, SEGMENT_PAGES) !=
+		    full_last_page / SEGMENT_PAGES - 1U) {
+		fprintf(stderr,
+			"FAIL: duplicate Linux bad-page entries changed clean segments\n");
 		++failures;
 	}
 
-	/* Start the optional-UUID check with a valid header, not the rejected
-	 * duplicate-bad-page fixture left by the preceding negative case. */
+	/* A larger block device may carry an intentionally smaller declared
+	 * SWAPSPACE2 area; the 32-bit header field limits the area, not the disk. */
+	build_linux_swap_header(header);
+	if (!swapz_linux_swap_header_parse(
+		    header, DEVICE_BYTES + (16ULL * 1024ULL * 1024ULL * 1024ULL),
+		    &layout) ||
+	    layout.last_page != full_last_page) {
+		fprintf(stderr, "FAIL: rejected bounded swap area on larger device\n");
+		++failures;
+	}
+
+	/* Start the optional-UUID check with a conventional valid header. */
 	build_linux_swap_header(header);
 	/* Linux swap UUID is optional; PARTUUID and exact geometry bind backing. */
 	memset(header + SWAPZ_LINUX_SWAP_UUID_OFFSET, 0,
