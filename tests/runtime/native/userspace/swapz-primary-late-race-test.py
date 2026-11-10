@@ -1279,10 +1279,14 @@ static int fixture_mkswap(void)
 static int fixture_original_swap_transition(
     const struct swapz_primary_manifest *manifest, int activate, int *changed)
 {
-    assert(manifest != NULL);
-    assert(activate == 0);
-    assert(changed != NULL);
+    assert(manifest != NULL && changed != NULL);
+    assert(activate == 0 && !manifest->original_swap_active);
+    /* STARTING must be durable before the rootless transition boundary. */
+    assert(starting_state_writes == 1U);
+    assert(raw_swap_transition_calls == 0U);
+    assert(raw_swap_policy_checks == 0U);
     ++raw_swap_transition_calls;
+    ++raw_swap_policy_checks;
     *changed = 0;
     return 0;
 }
@@ -1313,23 +1317,6 @@ static int fixture_owner_release(void)
     return 0;
 }
 
-/* The fixture manifest represents an ordinary swap partition that was
- * already inactive at PREPARE. Preserve production's newly added lifecycle
- * call and its position after the durable STARTING marker without invoking
- * swapoff(2) or claiming this rootless race fixture exercises real swapoff.
- */
-static int fixture_transition_original_swap(
-    const struct swapz_primary_manifest *manifest, int activate,
-    int *changed_by_call)
-{
-    assert(manifest != NULL && changed_by_call != NULL);
-    assert(activate == 0 && !manifest->original_swap_active);
-    assert(starting_state_writes == 1U);
-    assert(raw_swap_policy_checks == 0U);
-    ++raw_swap_policy_checks;
-    *changed_by_call = 0;
-    return 0;
-}
 
 static int fixture_hashes(char *control, char *module, char *oracle)
 {
@@ -1359,8 +1346,6 @@ static int fixture_hashes(char *control, char *module, char *oracle)
 #define swapz_primary_exact_read(...) 0
 #define swapz_primary_backing_header_matches_manifest(...) 0
 #define swapz_primary_state_write_at(a,b,state,owner) fixture_state_write(state)
-#define swapz_primary_transition_original_swap(manifest,activate,changed) \
-    fixture_transition_original_swap(manifest,activate,changed)
 #define swapz_primary_module_load_intent_write_at(...) fixture_intent()
 #define swapz_primary_load_qualified_module(loaded) fixture_load_module(loaded)
 #define swapz_primary_module_load_mark_loaded_at(...) 0
