@@ -694,10 +694,10 @@ fail() { printf 'FAIL: %s\n' "$*" >&2; exit 1; }
         owner_claim = prepare.index("swapz_primary_claim_partition_owner_at(")
         # Every early refusal must precede durable claim or target mutation.
         for phase in (
-            "recovery-directory-safety",
-            "recovery-filesystem-persistence",
-            "recovery-target-device-separation",
-            "recovery-physical-parent-identity",
+            "runtime-state-directory-safety",
+            "runtime-state-filesystem",
+            "runtime-state-scope-compatibility",
+            "runtime-state-source-chain-compatibility",
             "prior-active-marker",
             "qualification-source-identity",
             "qualified-artifact-identity",
@@ -729,12 +729,12 @@ fail() { printf 'FAIL: %s\n' "$*" >&2; exit 1; }
         for phase, helper in (
             ("qualification-report-read", "swapz_primary_read_qualification_report"),
             ("qualified-artifact-hash-readback", "swapz_primary_live_artifact_hashes"),
-            ("raw-target-swap-inventory", "swapz_primary_original_swap_is_quiescent"),
+            ("raw-target-swap-inventory", "swapz_primary_original_swap_policy_admissible"),
             ("cross-namespace-mount-inventory", "swapz_primary_read_mount_facts"),
-            ("repeated-raw-target-swap-inventory", "swapz_primary_original_swap_is_quiescent"),
+            ("repeated-raw-target-swap-inventory", "swapz_primary_original_swap_policy_admissible"),
             ("repeated-cross-namespace-mount-inventory", "swapz_primary_read_mount_facts"),
             ("physical-parent-swap-inventory", "swapz_primary_swap_device_active"),
-            ("final-raw-target-swap-inventory", "swapz_primary_original_swap_is_quiescent"),
+            ("final-raw-target-swap-inventory", "swapz_primary_original_swap_policy_admissible"),
         ):
             with self.subTest(phase=phase):
                 index = prepare.index('failure_phase = "' + phase + '";')

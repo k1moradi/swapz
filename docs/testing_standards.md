@@ -56,6 +56,11 @@ selected-filesystem swapfiles. The retired
 `swapz_primary_original_swap_is_quiescent` symbol must not be called by
 native production-inclusion fixtures: an active selected swap may have Used>0,
 and START, not PREPARE, owns the swapoff migration boundary.
+The rootless primary null_blk lifecycle qualifier must bind the four
+pre-claim runtime-state safety, filesystem, scope, and source-chain refusal
+phases to their current `runtime-state-*` names, and preserve pre-claim
+`EPERM` checks. Its three raw-swap inventory gate probes must assert the
+current admissibility helper, not the retired quiescence API.
 The lifecycle audit must require all three PREPARE raw-swap inventory checks
 to use the unchanged header's declared swap size, computed before the first
 check, rather than a retired argument-free geometry assumption.
