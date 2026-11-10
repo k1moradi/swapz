@@ -8984,9 +8984,11 @@ must include the committed fallback `src/kernel/swapz-build-info.h`; otherwise
 they do not model the source inputs of the real checkout.
 
 The primary qualification reader accepts only the root-owned
-`/var/lib/swapz/physical-recovery/primary-qualification.json` report. It must
-be a stable, single-link regular file with no group/world write permission and
-at most 64 MiB. The C parser requires schema `swapz-test-results-v1`, matching
+persistent qualification report. Qualification evidence is distinct from
+same-boot lifecycle ownership under `/run/swapz`; it is not recovery state,
+swapz extent metadata, or a reason to provision a separate recovery device.
+The report must be a stable, single-link regular file with no group/world write
+permission and at most 64 MiB. The C parser requires schema `swapz-test-results-v1`, matching
 source and tested-commit SHAs, overall PASS, the RAM-backed qualification
 scope, the same live x86_64 hardware-bound host digest, all five named stages with PASS and
 exit code zero, and AVAILABLE SHA-256 values for the formatter, module and
@@ -9023,13 +9025,15 @@ for-byte with the current x86_64 Linux `uname -r`. A missing, malformed,
 duplicated or stale kernel release is BLOCKED and requires fresh exact-kernel
 qualification. Before reading or replacing qualification state, production
 and privileged qualification builds must acquire the shared global package/
-mutation lock; the import then acquires the partition recovery lock, preserving
-the global-before-partition order. It accepts only a stable, non-writable regular
-input report that matches the running build source, this x86_64 host identity, all
-five passing stages and the live three-artifact hashes. It requires the
-validated persistent recovery directory, the partition lock, no active owner
-marker and no unfinished primary state. It durably stores the exact report
-bytes at the fixed path; a replaced report is preserved under a SHA-256 name.
+mutation lock; the import then acquires the partition lifecycle lock from the
+volatile runtime-state directory, preserving the global-before-partition order.
+It accepts only a stable, non-writable regular input report that matches the
+running build source, this x86_64 host identity, all five passing stages and the
+live three-artifact hashes. It requires safe volatile runtime ownership state,
+the partition lock, no active owner marker and no unfinished primary state,
+while the qualification report bytes themselves are stored separately on
+persistent root-owned storage. Replaced qualification evidence may be archived
+under its SHA-256 name; no raw swap-header backup or recovery image is created.
 This command does not prepare the partition, load the module, create a mapper
 or enable swap. Rootless tests must exercise atomic store, repeat store,
 prior-report preservation and refusal while an active marker exists.
