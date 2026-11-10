@@ -506,7 +506,9 @@ class PublicMakeContract(unittest.TestCase):
                       testing)
         self.assertIn("safely bounded physical-host recovery and swap checks",
                       testing)
-        self.assertIn("An original-header backup is optional", coding)
+        self.assertIn("Never repartition, run mkswap on, or rewrite its header",
+                      " ".join(coding.split()))
+        self.assertNotIn("An original-header backup is optional", coding)
         self.assertNotIn("isolated VM coverage must", testing)
         self.assertNotIn("VM gates", testing)
         self.assertNotIn("must bind the exact partition identity, original-header backup",
@@ -1284,7 +1286,7 @@ class PublicMakeContract(unittest.TestCase):
                 "PASS_ID36_RESOURCE_PRESSURE=memory_high_events:8 memory_peak_bytes:734003200 cpu_some_usec:250000 cpu_workers:8 pressure_mib:576 oom:0 oom_kill:0",
                 "PASS_LOADED_PRIMARY_NULLBLK_LIFECYCLE=run_id:0123456789abcdef0123456789abcdef partuuid:7fb9401d-04 device:8:4 prepare:READY start:ACTIVE swapon:true stop:COMPLETE recovery_required:false",
                 "PASS_LOADED_PRIMARY_NULLBLK_INTERRUPTION=start-starting",
-                "PASS_LOADED_PRIMARY_NULLBLK_INTERRUPTION=start-header-written",
+                "PASS_LOADED_PRIMARY_NULLBLK_INTERRUPTION=start-header-verified",
                 "PASS_LOADED_PRIMARY_NULLBLK_INTERRUPTION=start-module-inserted",
                 "PASS_LOADED_PRIMARY_NULLBLK_INTERRUPTION=start-module-loaded",
                 "PASS_LOADED_PRIMARY_NULLBLK_INTERRUPTION=start-mapper-inactive",

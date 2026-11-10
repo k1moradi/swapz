@@ -27,6 +27,12 @@ missing or substituted, cleanup fails closed and must not unload an unproven
 module. Reboot removes the volatile ownership record and kernel mapper state;
 no swapz metadata or recovery image is written to the backing partition.
 
+The isolated Make-interface loaded fixture must model the immutable backing
+header by reporting `start-header-verified`, never the retired
+`start-header-written` phase. Its documentation/source contract must reject
+optional raw-partition header backups; neither synthetic recovery fixtures nor
+real lifecycle paths may write the original swap header.
+
 ## New P0 ordinary swap and RAM-metadata acceptance gate
 
 Real device/VM backing must already be SWAPSPACE2. Assert byte-exact backing
