@@ -2032,12 +2032,14 @@ int swapz_engine_read_page(struct swapz_engine *engine, swapz_u32 logical_page,
 {
 	struct swapz_map observed;
 	const swapz_u8 *stored;
+	swapz_u8 *read_scratch;
 	swapz_u32 extent_bytes, payload_first, payload_last;
 	swapz_u32 start, last, count, block;
 	swapz_u8 cached_mask, coalesced_mask, reusable_mask, validated_mask;
-	swapz_u8 remaining_coalesced, lru_commit_mask;
+	swapz_u8 remaining_coalesced, lru_commit_mask, full_extent_mask;
 	int error;
 	int cached_extent, cached_block_zero, cached_full, lru_cached_block_zero;
+	int single_block_read_mode;
 	int extent_lru_slot, block_zero_lru_slot;
 
 	if (!engine || !engine->authority || !engine->authority->maps ||
@@ -2076,6 +2078,10 @@ int swapz_engine_read_page(struct swapz_engine *engine, swapz_u32 logical_page,
 	if (observed.payload_length > payload_capacity)
 		return -ENOSPC;
 
+	read_scratch = read_scratch;
+	single_block_read_mode = engine->max_read_blocks_per_record == 1U;
+	full_extent_mask = (swapz_u8)((1U << observed.extent_blocks) - 1U);
+
 	/*
 	 * RAM mapping state is the only descriptor authority. Cached bytes are
 	 * merely immutable extent data and are accepted only after the current
@@ -2088,14 +2094,14 @@ int swapz_engine_read_page(struct swapz_engine *engine, swapz_u32 logical_page,
 		engine->read_cached_extent_blocks == observed.extent_blocks;
 	coalesced_mask = cached_extent ? engine->read_coalesced_block_mask : 0;
 	cached_mask = cached_extent ? engine->read_cached_block_mask : 0;
-	if (engine->max_read_blocks_per_record == 1U)
+	if (single_block_read_mode)
 		cached_mask &= coalesced_mask;
 	cached_block_zero = !!(cached_mask & 1U);
-	cached_full = engine->max_read_blocks_per_record != 1U &&
-		cached_mask == (swapz_u8)((1U << observed.extent_blocks) - 1U) &&
+	cached_full = !single_block_read_mode &&
+		cached_mask == full_extent_mask &&
 		!coalesced_mask;
 
-	extent_lru_slot = engine->max_read_blocks_per_record != 1U ?
+	extent_lru_slot = !single_block_read_mode ?
 		swapz_read_extent_lru_lookup(engine, observed.start_block,
 					     observed.extent_blocks) : -1;
 	if (extent_lru_slot >= 0) {
@@ -2106,7 +2112,7 @@ int swapz_engine_read_page(struct swapz_engine *engine, swapz_u32 logical_page,
 
 		for (block = 0; block < observed.extent_blocks; ++block)
 			if (copy_mask & (1U << block))
-				memcpy(engine->read_scratch +
+				memcpy(read_scratch +
 				       (size_t)block * SWAPZ_BLOCK_BYTES,
 				       engine->read_extent_cache +
 				       (size_t)extent_lru_slot * SWAPZ_MAX_EXTENT_BYTES +
@@ -2116,13 +2122,13 @@ int swapz_engine_read_page(struct swapz_engine *engine, swapz_u32 logical_page,
 		coalesced_mask &= (swapz_u8)~extent_mask;
 		cached_block_zero = !!(cached_mask & 1U);
 		cached_full = cached_mask ==
-			(swapz_u8)((1U << observed.extent_blocks) - 1U) &&
+			full_extent_mask &&
 			!coalesced_mask;
 	}
 
 	block_zero_lru_slot = -1;
 	lru_cached_block_zero = 0;
-	if (engine->max_read_blocks_per_record != 1U &&
+	if (!single_block_read_mode &&
 	    payload_first == 0U && !(cached_mask & 1U) &&
 	    engine->read_metadata_cache) {
 		block_zero_lru_slot = swapz_read_metadata_lru_lookup(
@@ -2133,7 +2139,7 @@ int swapz_engine_read_page(struct swapz_engine *engine, swapz_u32 logical_page,
 
 			if (copied_payload_bytes > observed.payload_length)
 				copied_payload_bytes = observed.payload_length;
-			memcpy(engine->read_scratch,
+			memcpy(read_scratch,
 			       engine->read_metadata_cache +
 			       (size_t)block_zero_lru_slot * SWAPZ_BLOCK_BYTES,
 			       SWAPZ_BLOCK_BYTES);
@@ -2160,7 +2166,7 @@ int swapz_engine_read_page(struct swapz_engine *engine, swapz_u32 logical_page,
 			return -EUCLEAN;
 		error = engine->io.read_blocks(
 			engine->io.opaque, observed.start_block + start, count,
-			engine->read_scratch + start * SWAPZ_BLOCK_BYTES);
+			read_scratch + start * SWAPZ_BLOCK_BYTES);
 		if (error)
 			return error;
 		engine->physical_read_blocks += count;
@@ -2171,12 +2177,12 @@ int swapz_engine_read_page(struct swapz_engine *engine, swapz_u32 logical_page,
 			engine->read_full_extent_requests++;
 		else if (observed.extent_blocks == 2U && count == 1U)
 			engine->read_two_block_skips++;
-		if (engine->max_read_blocks_per_record != 1U)
+		if (!single_block_read_mode)
 			for (block = start; block < start + count; ++block)
 				cached_mask |= (swapz_u8)(1U << block);
 	}
 
-	stored = engine->read_scratch + observed.payload_offset;
+	stored = read_scratch + observed.payload_offset;
 	error = swapz_read_authoritative_payload(
 		engine->authority, logical_page, &observed, stored, &stored);
 	if (error)
@@ -2189,7 +2195,7 @@ int swapz_engine_read_page(struct swapz_engine *engine, swapz_u32 logical_page,
 		(swapz_u8)payload_first,
 		(swapz_u8)(payload_last - payload_first + 1U));
 	remaining_coalesced = coalesced_mask & (swapz_u8)~validated_mask;
-	reusable_mask = engine->max_read_blocks_per_record == 1U ?
+	reusable_mask = single_block_read_mode ?
 		0U : cached_mask;
 	engine->read_cached_start_block = observed.start_block;
 	engine->read_cached_extent_blocks = observed.extent_blocks;
@@ -2197,7 +2203,7 @@ int swapz_engine_read_page(struct swapz_engine *engine, swapz_u32 logical_page,
 	engine->read_coalesced_block_mask =
 		remaining_coalesced & reusable_mask;
 	engine->read_cached_full = reusable_mask ==
-		(swapz_u8)((1U << observed.extent_blocks) - 1U) &&
+		full_extent_mask &&
 		!engine->read_coalesced_block_mask;
 	engine->read_cache_valid = reusable_mask != 0U;
 
@@ -2214,11 +2220,11 @@ int swapz_engine_read_page(struct swapz_engine *engine, swapz_u32 logical_page,
 	if ((lru_commit_mask & 1U) && engine->read_metadata_cache)
 		swapz_read_metadata_lru_commit(
 			engine, observed.start_block, observed.extent_blocks,
-			block_zero_lru_slot, engine->read_scratch);
+			block_zero_lru_slot, read_scratch);
 	if (engine->read_extent_cache &&
 	    observed.extent_blocks > 1U && lru_commit_mask)
 		swapz_read_extent_lru_commit(
 			engine, observed.start_block, observed.extent_blocks,
-			extent_lru_slot, lru_commit_mask, engine->read_scratch);
+			extent_lru_slot, lru_commit_mask, read_scratch);
 	return 0;
 }
