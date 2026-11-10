@@ -124,6 +124,14 @@ def main() -> None:
             obsolete_recovery_gate not in primary,
             f"Obsolete physical recovery-disk gate remains: {obsolete_recovery_gate}")
 
+    runtime_preflight = primary.split(
+        "static int swapz_primary_recovery_preflight(", 1)[1].split(
+        "\nstatic int swapz_primary_mutation_lock_at(", 1)[0]
+    require(
+        "swapz_primary_runtime_state_base_open" not in runtime_preflight and
+        "SWAPZ_PRIMARY_RUNTIME_STATE_BASE" in runtime_preflight,
+        "Read-only runtime-state preflight must inspect without creating /run state")
+
     # DM property consumers must see the allocated lower data range, not
     # the reserved SWAPSPACE2 header or discarded segment-alignment tail.
     iterator = target.split("static int swapz_iterate_devices(", 1)[1].split(
