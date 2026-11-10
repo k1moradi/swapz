@@ -3447,7 +3447,6 @@ static int swapz_primary_original_swap_policy_snapshot(
 	int *active, int *priority)
 {
 	struct swapz_primary_swap_entry entries[SWAPZ_PRIMARY_SWAP_ROWS_MAX];
-	dev_t resolved_devices[SWAPZ_PRIMARY_SWAP_ROWS_MAX] = {0};
 	struct stat info;
 	size_t count = 0;
 	size_t index;
@@ -3468,26 +3467,28 @@ static int swapz_primary_original_swap_policy_snapshot(
 		return -1;
 
 	for (index = 0; index < count; ++index) {
+		dev_t resolved_device;
+
 		if (stat(entries[index].path, &info) < 0)
 			return -1;
 		if (!strcmp(entries[index].type, "partition") &&
 		    S_ISBLK(info.st_mode)) {
-			resolved_devices[index] = info.st_rdev;
+			resolved_device = info.st_rdev;
 		} else if (!strcmp(entries[index].type, "file") &&
 			   S_ISREG(info.st_mode)) {
-			resolved_devices[index] = info.st_dev;
+			resolved_device = info.st_dev;
 		} else {
 			errno = EINVAL;
 			return -1;
 		}
 		if (!strcmp(entries[index].type, "file")) {
-			if (resolved_devices[index] == SWAPZ_PRIMARY_TARGET_DEVICE) {
+			if (resolved_device == SWAPZ_PRIMARY_TARGET_DEVICE) {
 				errno = EBUSY;
 				return -1;
 			}
 			continue;
 		}
-		if (resolved_devices[index] != SWAPZ_PRIMARY_TARGET_DEVICE)
+		if (resolved_device != SWAPZ_PRIMARY_TARGET_DEVICE)
 			continue;
 		++target_entries;
 		if (target_entries > 1U ||
