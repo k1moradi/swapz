@@ -198,57 +198,6 @@
 },
 "write_saturation_sessions": []
 },
-"evidence": {
-"gc_scan_scale": {
-"rows": [
-{
-"incremental_select_ns": 6496,
-"legacy_dead_probe_ns": 679464,
-"legacy_score_scan_ns": 10928545,
-"logical_pages": 262144,
-"mapped_dead_probe_ns": 3149,
-"relocation_list_ns": 2404,
-"relocation_scan_ns": 1555243,
-"segments": 1024,
-"victim_records": 256
-},
-{
-"incremental_select_ns": 21277,
-"legacy_dead_probe_ns": 2526288,
-"legacy_score_scan_ns": 43807770,
-"logical_pages": 1048576,
-"mapped_dead_probe_ns": 11867,
-"relocation_list_ns": 3017,
-"relocation_scan_ns": 5975117,
-"segments": 4096,
-"victim_records": 256
-},
-{
-"incremental_select_ns": 83604,
-"legacy_dead_probe_ns": 9385463,
-"legacy_score_scan_ns": 159133889,
-"logical_pages": 4194304,
-"mapped_dead_probe_ns": 45988,
-"relocation_list_ns": 3113,
-"relocation_scan_ns": 22153858,
-"segments": 16384,
-"victim_records": 256
-},
-{
-"incremental_select_ns": 485785,
-"legacy_dead_probe_ns": 43486027,
-"legacy_score_scan_ns": 967746997,
-"logical_pages": 27080192,
-"mapped_dead_probe_ns": 179429,
-"relocation_list_ns": 3066,
-"relocation_scan_ns": 139225422,
-"segments": 105782,
-"victim_records": 256
-}
-],
-"scope": "OFFLINE_NATIVE_GC_SCALE_ONLY"
-}
-},
 "host_identity": {
 "architecture": "x86_64",
 "id_sha256": "842640974d84d453bd4ecc703ada37fac79ae78383400a8ce4cf22f9b46de3b4",
@@ -259,32 +208,21 @@
 "qualification": "RAM_BACKED_NULL_BLK_ONLY",
 "qualification_tier": "ALGORITHM_PHYSICAL_PENDING",
 "qualified_artifacts": {
-"formatter_sha256": "b7cd780a2e479427db69744e7e9eb762f4bbf6e46b4165515a2c4e2aa9033588",
-"module_sha256": "d1092677e4b74482f88a508a74b42e9d24d31dc2ca1cf005ee8c562c0873b55f",
-"oracle_sha256": "871d809976361bcd2d30b91bd4f661da8c712c16e4f5fa584696140261b57f26",
-"status": "AVAILABLE"
+"reason": "build stage did not pass",
+"status": "UNAVAILABLE"
 },
 "schema": "swapz-test-results-v1",
-"source_sha": "6b334ffc4ed2050260cb87ea58f0e20839455efc",
+"source_sha": "a463223fcb55eb7c17f38c36ee0cd782473ce5a0",
 "stages": [
 {
-"elapsed_s": 14.085,
-"exit_code": 0,
-"name": "Build module and helpers",
-"status": "PASS"
-},
-{
-"diagnostic": "Rootless child failed; child_exit=2 reason=nonzero_exit subtest=unavailable test=unavailable log=build/tests/rootless-failure.1NGX92YA/diagnostic.log",
-"elapsed_s": 36.152,
+"diagnostic": "Native build error: ?swapz_primary_physical_blocks? defined but not used [-Werror=unused-function]",
+"elapsed_s": 14.019,
 "exit_code": 2,
-"failed_phase": "Makefile native and metadata",
-"name": "Native and rootless contracts",
-"signals": [
-"PASS",
-"FAIL"
-],
+"failed_phase": "Build module and helpers",
+"name": "Build module and helpers",
+"signals": [],
 "status": "FAIL"
 }
 ],
-"tested_commit_sha": "6b334ffc4ed2050260cb87ea58f0e20839455efc"
+"tested_commit_sha": "a463223fcb55eb7c17f38c36ee0cd782473ce5a0"
 }
