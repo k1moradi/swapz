@@ -980,7 +980,7 @@ int main(void)
         # PREPARE still checks the raw target repeatedly without mutation and
         # binds the final activation/priority policy snapshot into the manifest.
         raw_swap_gate = (
-            "swapz_primary_original_swap_is_quiescent(original_swap_size_kib)")
+            "swapz_primary_original_swap_policy_admissible(original_swap_size_kib)")
         self.assertEqual(prepare.count(raw_swap_gate), 3)
         self.assertIn("swapz_primary_original_swap_policy_snapshot(", prepare)
         self.assertIn("manifest.original_swap_active", prepare)

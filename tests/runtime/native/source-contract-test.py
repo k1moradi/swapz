@@ -1915,7 +1915,10 @@ dmsetup() {
         self.assertIn("read_full_extent_cache_hits", header)
         self.assertIn("engine->read_full_extent_requests++", engine)
         self.assertIn("engine->read_full_extent_cache_hits++", engine)
-        self.assertIn("engine->max_read_blocks_per_record != 1", engine)
+        self.assertIn(
+            "single_block_read_mode = engine->max_read_blocks_per_record == 1U",
+            engine_read)
+        self.assertIn("if (!single_block_read_mode)", engine_read)
         self.assertIn("engine->read_metadata_cache_hits++", engine)
         self.assertIn("engine->read_metadata_lru_hits++", engine)
         self.assertIn("swapz_read_metadata_lru_lookup(", engine)
@@ -2907,14 +2910,14 @@ int main(void) {
         payload_read = read.index("engine->io.read_blocks",
                                   read.index("if (last >= start)"))
         residency_gate = read.index(
-            "if (engine->max_read_blocks_per_record != 1U)", payload_read)
+            "if (!single_block_read_mode)", payload_read)
         self.assertLess(payload_read, residency_gate)
         self.assertIn("cached_mask |= (swapz_u8)(1U << block)",
                       read[residency_gate:residency_gate + 300])
         self.assertLess(residency_gate,
                         read.index("cached_mask |=", residency_gate))
         # The one-block policy must not promote raw lower bytes into cache.
-        self.assertIn("reusable_mask = engine->max_read_blocks_per_record == 1U ?",
+        self.assertIn("reusable_mask = single_block_read_mode ?",
                       read)
         self.assertIn("0U : cached_mask", read)
         self.assertIn("engine->read_cached_block_mask = reusable_mask", read)

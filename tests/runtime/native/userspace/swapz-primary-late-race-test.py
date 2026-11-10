@@ -1148,7 +1148,8 @@ static int fixture_target_checked_open(const char *device_path,
     assert(!strcmp(device_path, expected_path));
     assert(!strcmp(uuid_path, expected_path));
     assert(!strcmp(partuuid_path, expected_path));
-    assert(flags == (O_RDWR | O_EXCL));
+    /* Raw-target proof stays read-only even when holding O_EXCL. */
+    assert(flags == (O_RDONLY | O_EXCL));
     if (scenario == FIXTURE_HOLDER_INITIAL)
         return fixture_admission_error(EBUSY);
     return 99;
@@ -2196,7 +2197,7 @@ static void fixture_check_target_and_header(int race)
     errno = 0;
     fd = swapz_primary_open_target_checked_paths_mode(
         target_path, fixture_alias_path, partuuid_alias_path,
-        O_RDWR | O_EXCL);
+        O_RDONLY | O_EXCL);
     observed_errno = errno;
     if (race == 1) {
         /* An opened substitute cannot inherit the previously named identity. */

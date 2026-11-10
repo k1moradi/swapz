@@ -203,6 +203,17 @@ reject `O_RDWR | O_EXCL` with `EINVAL`, and run mismatch/alias tests with
 allowed read-only flags so flag validation cannot mask an identity failure.
 A NULL required alias-path negative control must also pass a valid read-only
 flag, demonstrating that the missing path—not flag rejection—causes `EINVAL`.
+Production-extracted late-race C fixtures must also simulate the raw-target
+exclusive claim with `O_RDONLY | O_EXCL` (including alias-race controls), not
+an obsolete writable mode. This keeps the fixture's race assertion reachable
+without weakening the raw-device read-only policy.
+
+Source contracts for the single-block READ policy must follow the cached
+`single_block_read_mode` decision through successful lower reads and cache
+residency publication; production must still prevent raw lower bytes from
+becoming reusable cache entries in that mode. Primary lifecycle source audits
+must count the three `swapz_primary_original_swap_policy_admissible()` checks
+in PREPARE, rather than a removed quiescence helper.
 
 A 20-byte authoritative RAM logical map (including compressed CRC32C)
 replaces the prior 16-byte map and increases the dedicated-card source
