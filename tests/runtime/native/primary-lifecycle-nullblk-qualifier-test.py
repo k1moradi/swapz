@@ -161,7 +161,7 @@ class PrimaryLifecycleNullblkQualifierContract(unittest.TestCase):
     def test_all_native_interruption_and_negative_cases_are_declared(self):
         for phase in (
             "start-starting",
-            "start-header-written",
+            "start-header-verified",
             "start-module-inserted",
             "start-module-loaded",
             "start-mapper-inactive",
@@ -265,7 +265,7 @@ class PrimaryLifecycleNullblkQualifierContract(unittest.TestCase):
             control.chmod(0o700)
             module_path = fixture / "absent-module"
             setup = "\n".join((
-                f"RECOVERY_BASE={shlex.quote(str(recovery))}",
+                f"RUNTIME_STATE_BASE={shlex.quote(str(recovery))}",
                 f"CONTROL={shlex.quote(str(control))}",
                 f"MODULE_PATH={shlex.quote(str(module_path))}",
                 f"RUN_ID={'a' * 32}",
@@ -495,7 +495,7 @@ fail() { printf 'FAIL: %s\n' "$*" >&2; exit 1; }
             "#ifdef SWAPZ_PRIMARY_OWNED_NULLBLK_TEST\n"
             "\t/* Resolve Btrfs virtual st_dev", source)
         magic = source[
-            source.index("static int swapz_primary_persistent_fs_magic("):
+            source.index("static int swapz_primary_runtime_state_fs_magic("):
             source.index("static int swapz_primary_path_format(")]
         self.assertIn("case BTRFS_SUPER_MAGIC:", magic)
         self.assertNotIn(
@@ -595,7 +595,7 @@ fail() { printf 'FAIL: %s\n' "$*" >&2; exit 1; }
         verifier = self.script[start:end]
         self.assertIn(
             '''expected_table="$(sed -n 's/^dm_table=//p' '''
-            '''"$RECOVERY_BASE/primary-manifest-$RUN_ID.txt")"''',
+            '''"$RUNTIME_STATE_BASE/primary-manifest-$RUN_ID.txt")"''',
             verifier)
         self.assertIn(
             '[[ -n "$expected_table" && "$mapper_table" == "$expected_table" ]]',
@@ -3637,7 +3637,7 @@ CONTROL=/private-mock-only
                 "PARTITION_NODE_DEVNO": "",
                 "DMNAME": "swapz-primary",
                 "RUN_ID": "",
-                "RECOVERY_BASE": fixture / "missing-recovery",
+                "RUNTIME_STATE_BASE": fixture / "missing-recovery",
                 "CONTROL": fixture / "missing-control",
                 "SWAPS_ID_BEFORE": "unchanged",
                 "OWN_NULL": "1",
@@ -3933,7 +3933,7 @@ fi
                     "FAKE_DEV": devices,
                     "DMNAME": "swapz-primary",
                     "RUN_ID": "d" * 32,
-                    "RECOVERY_BASE": fixture / "private-evidence",
+                    "RUNTIME_STATE_BASE": fixture / "private-evidence",
                     "OWN_NULL": "1",
                     "QUARANTINE": "0",
                     "MAPPER_ABSENCE_CALLS": "0",
@@ -4178,7 +4178,7 @@ exit 0
                     "FAKE_DEV": devices,
                     "DMNAME": "swapz-primary",
                     "RUN_ID": "b" * 32,
-                    "RECOVERY_BASE": fixture / "private-evidence",
+                    "RUNTIME_STATE_BASE": fixture / "private-evidence",
                     "CONTROL": control,
                     "SWAPS_ID_BEFORE": "unchanged",
                     "ACTION_LOG": actions,

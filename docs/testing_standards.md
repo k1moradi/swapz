@@ -64,6 +64,14 @@ Shared-root source contracts must require topology validation before exposing
 the scope fingerprint and fingerprint availability before reading the owner's
 scope record. Volatile lifecycle state has no recovery-disk separation phase;
 do not require retired persistent-recovery markers in prepare or plan.
+Extracted owned-nullblk lifecycle fixtures must bind `RUNTIME_STATE_BASE` to
+their private state tree, use the `start-header-verified` interruption phase,
+and inspect the runtime filesystem helper. Stale ownership must still retain
+quarantine and forbid power-off/removal; evidence-directory bindings cannot
+substitute for the runtime state being checked.
+The parser-only translation-unit fixture must also compile with fatal
+implicit-declaration warnings: manifest priority parsing shares the production
+priority helper and needs its declaration before the manifest parser.
 The external-start-gate permission negative control must explicitly set its
 nonprivate directory to mode 0755 after creation. An inherited restrictive
 umask must not convert that negative fixture into an admitted private gate
