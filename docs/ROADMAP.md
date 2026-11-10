@@ -120,7 +120,7 @@ The primary manager reads one protected PARTUUID selector from
 `/etc/swapz/primary-target`; source code must not pin a path, device number or
 partition capacity. It records the discovered partition identity and geometry
 in each transaction manifest and rechecks the PARTUUID, descriptor, parent,
-root-device and recovery-device relationships before preparation. Selecting a
+root-device relationships before preparation; volatile runtime state has no physical parent. Selecting a
 different goal drive is a configuration and authorization update, not a source
 constant edit. Package cleanup protects every active PARTUUID ownership marker,
 and packaged units no longer name a historical device or UUID. The installed
