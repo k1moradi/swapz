@@ -125,7 +125,10 @@ partition; one positive control must instead bind
 `original_swap_active=1` with an automatic negative Linux priority, simulate
 exactly one successful deactivation, and continue through mapper activation.
 That active ordinary-swap control is not an error case: START is required to
-disable normal swap when needed. An early selector/mount/target denial after
+disable normal swap when needed. The positive control must include nonzero
+`Used` pages so qualification proves PREPARE does not require an artificially
+empty partition and that deactivation, not a pre-swapoff zero-used gate, owns
+the migration boundary. An early selector/mount/target denial after
 STARTING may leave the transition count at zero. A successful module/mapper
 activation requires the transition to have run exactly once. Refusals after
 that transition must expect `swap=OBSERVED`; refusals before it must retain
