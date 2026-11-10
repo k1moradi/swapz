@@ -38,6 +38,14 @@ def main() -> None:
             "Compressed payload CRC must remain authoritative volatile RAM state")
     require("_Static_assert(sizeof(struct swapz_map) == 20" in authority,
             "Capacity accounting requires the 20-byte RAM mapping record")
+    require("static u64 swapz_authority_metadata_ram_bytes(" in target and
+            "sizeof(struct swapz_map) + 2U * sizeof(swapz_u32)" in target and
+            "sizeof(swapz_u16) + 2U * sizeof(swapz_u8)" in target and
+            "8U * sizeof(swapz_u32) + sizeof(swapz_u16) +" in target,
+            "Production must expose the exact geometry-scaled RAM authority footprint")
+    require("authority_metadata_ram=%llu" in target and
+            "read_payload_cache_ram=%llu" in target,
+            "Runtime status must expose cached authority and payload-cache RAM bytes")
     require("swapz_linux_swap_header_valid(block, device_bytes)" in target,
             "Ordinary SWAPSPACE2 validation must remain the physical header contract")
 
