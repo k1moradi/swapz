@@ -6254,8 +6254,10 @@ def read_coalesce_failure_rounds(sessions):
              chains3, other) = (kernel[field] for field in fields)
             lines.append(
                 f"        round={index} {label}: merged={merged} "
-                f"parallel={parallel} adjacent={adjacent} gap={gap} "
-                f"cached={cached} noncontig={noncontig}")
+                f"parallel={parallel} adjacent={adjacent}")
+            lines.append(
+                f"        round={index} {label}: gap={gap} cached={cached} "
+                f"noncontig={noncontig}")
             lines.append(
                 f"        round={index} {label}: chain3={chains3} other={other}")
     return lines
