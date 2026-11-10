@@ -341,6 +341,8 @@ classify_rootless_private_make_failure() {
   local traceback_seen=0
   local compile_assertion_seen=0
   local compiler_error_seen=0
+  local userspace_native_test=
+  local userspace_runtime_exit=
   rootless_classified_reason=nonzero_exit
   rootless_classified_subtest=unavailable
   rootless_classified_test=unavailable
@@ -360,6 +362,12 @@ classify_rootless_private_make_failure() {
       compile_assertion_seen=1
     elif (( compile_assertion_seen )) && [[ $line == *': error:'* ]]; then
       compiler_error_seen=1
+    elif [[ $line =~ ^FAIL:[[:space:]]native[[:space:]]test-userspace[[:space:]]binary=(swapzctl-status|swapz-primary-policy|swapz-primary-mount-namespace)[[:space:]]exit=([0-9]+)$ ]]; then
+      userspace_native_test=${BASH_REMATCH[1]}
+      userspace_runtime_exit=${BASH_REMATCH[2]}
+    elif [[ $line =~ ^FAIL:[[:space:]]native[[:space:]]test-userspace[[:space:]]script=(swapz-primary-late-race-test[.]py)[[:space:]]exit=([0-9]+)$ ]]; then
+      userspace_native_test=${BASH_REMATCH[1]}
+      userspace_runtime_exit=${BASH_REMATCH[2]}
     elif [[ $line =~ $make_error_regex ]]; then
       if [[ $line =~ $make_nested_target_regex ]]; then
         make_recipe_line=${BASH_REMATCH[2]}
@@ -389,6 +397,13 @@ classify_rootless_private_make_failure() {
             rootless_classified_reason=native_compile
             rootless_classified_subtest=compile
             rootless_classified_test=swapz-primary-late-race-test.py
+          elif [[ $make_target == test-userspace &&
+                  -n $userspace_native_test &&
+                  $userspace_runtime_exit =~ ^[0-9]+$ ]]; then
+            # Authenticate only source-controlled fixed child names emitted by
+            # the test-userspace recipe. Child diagnostics remain in the private log.
+            rootless_classified_reason=nonzero_exit
+            rootless_classified_test=$userspace_native_test
           fi
         fi
       fi
