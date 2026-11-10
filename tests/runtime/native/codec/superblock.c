@@ -114,6 +114,8 @@ int main(void)
 		   sizeof(unsigned int), 257U);
 	if (!swapz_linux_swap_header_parse(header, DEVICE_BYTES, &layout) ||
 	    layout.bad_pages != 2U ||
+	    swapz_linux_swap_bad_page(header, &layout, 1U) != 257U ||
+	    swapz_linux_swap_header_valid(header, DEVICE_BYTES) ||
 	    swapz_linux_swap_clean_segment_count(
 		    header, &layout, SEGMENT_PAGES) !=
 		    full_last_page / SEGMENT_PAGES - 1U) {

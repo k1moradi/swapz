@@ -44,9 +44,12 @@ real lifecycle paths may write the original swap header.
 
 The standalone SWAPSPACE2 native header test must compare smaller-area
 geometry against its own 256-page segment constant, without importing the
-kernel allocator header. Restore a valid Linux swap header after rejecting a
-duplicate bad-page list so the cleared-UUID acceptance test independently
-checks optional UUID behavior, not stale malformed fixture state.
+kernel allocator header. Linux v1 permits duplicate bad-page entries: parse
+them without rewriting the header, preserve the listed entry count, and count
+each contaminated clean-allocation segment only once. The narrow no-bad-pages
+validation helper must still reject such a layout. Restore a fresh valid swap
+header after the duplicate-list case so the cleared-UUID acceptance test
+independently verifies optional UUID behavior.
 
 ### Failed compressed read must never publish caller bytes
 
