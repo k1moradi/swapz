@@ -3359,8 +3359,10 @@ def recover_pending_algorithm_trial():
 def inspect_target_identity_for_recovery(state, device_arg, confirm_arg):
     if device_arg != confirm_arg or device_arg != state.get("device_arg"):
         raise ProbeError("recovery requires the exact originally confirmed device path")
-    # The confirmed swap-filesystem UUID link may have vanished after
-    # formatting. Resolve only the previously saved canonical block path.
+    # Legacy pre-migration journals may have replaced the raw swap header,
+    # making their old by-UUID alias disappear. Current trials never format the
+    # backing partition; resolve recovery identity from the saved canonical
+    # block path instead of treating a missing legacy alias as authorization.
     device = state.get("device")
     if not isinstance(device, str) or not device.startswith("/dev/"):
         raise ProbeError("recovery state lacks a canonical block device")
