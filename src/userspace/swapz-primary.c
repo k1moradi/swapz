@@ -3435,7 +3435,8 @@ static int swapz_primary_swap_inventory_target_is_quiescent(
 
 #ifndef SWAPZ_PRIMARY_ROOTLESS_TEST
 static int swapz_primary_original_swap_policy_snapshot(
-	uint64_t target_size_kib, int *active, int *priority)
+	uint64_t target_size_kib, int require_zero_used,
+	int *active, int *priority)
 {
 	struct swapz_primary_swap_entry entries[SWAPZ_PRIMARY_SWAP_ROWS_MAX];
 	dev_t resolved_devices[SWAPZ_PRIMARY_SWAP_ROWS_MAX] = {0};
@@ -3443,8 +3444,10 @@ static int swapz_primary_original_swap_policy_snapshot(
 	struct stat info;
 	size_t count = 0;
 	size_t index;
+	unsigned int target_entries = 0;
 
 	if (!target_size_kib ||
+	    (require_zero_used != 0 && require_zero_used != 1) ||
 	    !swapz_primary_target_valid(&swapz_primary_selected_target)) {
 		errno = ENODEV;
 		return -1;
@@ -3456,10 +3459,7 @@ static int swapz_primary_original_swap_policy_snapshot(
 	if (swapz_primary_read_swap_inventory(
 		    entries, SWAPZ_PRIMARY_SWAP_ROWS_MAX, &count) < 0)
 		return -1;
-	/*
-	 * Resolve every entry so aliases of the selected partition cannot hide
-	 * behind another pathname. PREPARE records activation policy only.
-	 */
+
 	for (index = 0; index < count; ++index) {
 		if (stat(entries[index].path, &info) < 0)
 			return -1;
@@ -3474,20 +3474,26 @@ static int swapz_primary_original_swap_policy_snapshot(
 			errno = EINVAL;
 			return -1;
 		}
-	}
-	if (swapz_primary_swap_inventory_target_is_quiescent(
-		    entries, resolved_devices, resolved_is_block, count,
-		    SWAPZ_PRIMARY_TARGET_DEVICE, target_size_kib) < 0)
-		return -1;
-	for (index = 0; index < count; ++index) {
-		if (!resolved_is_block[index] ||
-		    resolved_devices[index] != SWAPZ_PRIMARY_TARGET_DEVICE)
+		if (!strcmp(entries[index].type, "file")) {
+			if (resolved_devices[index] == SWAPZ_PRIMARY_TARGET_DEVICE) {
+				errno = EBUSY;
+				return -1;
+			}
 			continue;
+		}
+		if (resolved_devices[index] != SWAPZ_PRIMARY_TARGET_DEVICE)
+			continue;
+		++target_entries;
+		if (target_entries > 1U ||
+		    entries[index].size_kib != target_size_kib ||
+		    (require_zero_used && entries[index].used_kib != 0U)) {
+			errno = EBUSY;
+			return -1;
+		}
 		if (active)
 			*active = 1;
 		if (priority)
 			*priority = entries[index].priority;
-		break;
 	}
 	return 0;
 }
@@ -3496,7 +3502,7 @@ static int swapz_primary_original_swap_is_quiescent(
 	uint64_t target_size_kib)
 {
 	return swapz_primary_original_swap_policy_snapshot(
-		target_size_kib, NULL, NULL);
+		target_size_kib, 1, NULL, NULL);
 }
 #endif
 
@@ -12598,7 +12604,7 @@ static int swapz_primary_prepare_metadata(
 	}
 	failure_phase = "final-original-swap-policy";
 	if (swapz_primary_original_swap_policy_snapshot(
-		    original_swap_size_kib, &original_swap_active,
+		    original_swap_size_kib, 1, &original_swap_active,
 		    &original_swap_priority) < 0)
 		goto out;
 	if (original_swap_priority > 32767) {
