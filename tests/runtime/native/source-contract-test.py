@@ -1253,7 +1253,7 @@ static swapz_u16 swapz_probe_set(
         self.assertEqual(source_body("swapz_probe_set", source).strip(),
                          "return (swapz_u16)(block & 127U);")
 
-    def test_swz_capacity_policy_keeps_authorization_header_version(self):
+    def test_legacy_serialized_fixture_has_no_physical_format_version(self):
         legacy_format_name = "SWZ" + "3"
         text_suffixes = {".c", ".h", ".md", ".py", ".sh", ".yml", ".yaml"}
         paths = [ROOT / "Makefile", ROOT / "dkms.conf"]
