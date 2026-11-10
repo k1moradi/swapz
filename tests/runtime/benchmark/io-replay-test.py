@@ -675,6 +675,56 @@ class PairReplayContract(unittest.TestCase):
             reports[0].write_text(json.dumps(wrong))
             self.run_cmd("compare", "--reports", *reports, success=False)
 
+    def test_packed_read_population_order_and_id36_lanes_rootless(self):
+        import importlib.util
+        import threading
+
+        spec = importlib.util.spec_from_file_location("swapz_io_replay", SCRIPT)
+        replay = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(replay)
+        chunks = [bytes([value + 1]) * PAGE for value in range(32)]
+        caller = threading.get_ident()
+
+        for allocation_bounded in (False, True):
+            with self.subTest(allocation_bounded=allocation_bounded), \
+                    tempfile.TemporaryDirectory() as directory:
+                path = Path(directory) / "packed.bin"
+                with path.open("w+b") as backing:
+                    backing.truncate(1024 * PAGE)
+                    writes = []
+                    original_full_write = replay.full_write
+
+                    def record_write(fd, page, payload):
+                        writes.append((page, threading.get_ident()))
+                        original_full_write(fd, page, payload)
+
+                    with mock.patch.object(
+                            replay, "full_write", side_effect=record_write):
+                        measured = replay.measure_packed_swapin(
+                            backing.fileno(), path,
+                            {"test_regular_file": str(path)},
+                            chunks, 1024, 32,
+                            allocation_bounded=allocation_bounded)
+
+                self.assertEqual(len(writes), 1024)
+                self.assertCountEqual([page for page, _ in writes], range(1024))
+                if allocation_bounded:
+                    self.assertEqual(len({thread_id for _, thread_id in writes}), 32)
+                else:
+                    self.assertEqual([page for page, _ in writes], list(range(1024)))
+                    self.assertEqual({thread_id for _, thread_id in writes}, {caller})
+                self.assertEqual(
+                    measured["passes"]["sequential"]["verified_pages"], 1024)
+                self.assertEqual(
+                    measured["passes"]["seeded_random"]["verified_pages"],
+                    1024)
+                self.assertEqual(
+                    measured["passes"]["sequential"]["verified_image_sha256"],
+                    measured["logical_image_sha256"])
+                self.assertEqual(
+                    measured["passes"]["seeded_random"]["verified_image_sha256"],
+                    measured["logical_image_sha256"])
+
     def test_timed_swapz_read_counters_fail_closed_and_skip_rootless(self):
         import importlib.util
         from unittest.mock import patch

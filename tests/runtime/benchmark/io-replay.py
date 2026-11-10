@@ -1767,7 +1767,7 @@ def kernel_write_delta(before, after):
 
 def measure_packed_swapin(fd, path, identity, chunks, logical_pages, qd,
                           pool=None, allocation_bounded=False):
-    """Verify real 4MiB sequential/random reads after concurrent packed writes."""
+    """Verify 4MiB sequential/random reads after packed write-set population."""
     if logical_pages != 1024 or qd != 32:
         raise ValueError("packed read requires 4MiB logical and QD32")
     # Allocate buffers and start worker threads BEFORE any timed read.
@@ -1845,20 +1845,21 @@ def measure_packed_swapin(fd, path, identity, chunks, logical_pages, qd,
             ]
 
         before = packed_closes(path, identity)
-        for base in range(0, logical_pages, qd):
-            if allocation_bounded:
+        if allocation_bounded:
+            for base in range(0, logical_pages, qd):
                 run_persistent_wave(PACKED_WRITE, None, base)
-            else:
-                jobs = [pool.submit(full_write, fd, page,
-                                    chunks[page % len(chunks)])
-                        for page in range(base, base + qd)]
-                for job in jobs:
-                    job.result()
+        else:
+            # The ID63 sequential-read A/B needs reproducible physical placement:
+            # populate logical pages in order before measuring parallel reads.
+            # This setup is outside the timed read scope; QD32 reads below stay
+            # unchanged. ID36 retains its allocation-bounded persistent lanes.
+            for page in range(logical_pages):
+                full_write(fd, page, chunks[page % len(chunks)])
         os.fsync(fd)
         after = packed_closes(path, identity)
         packed_delta = after - before if before is not None else None
         if packed_delta is not None and packed_delta <= 0:
-            raise ValueError("no packed close during concurrent read-set population")
+            raise ValueError("no packed close during read-set population")
 
         # Do not construct a temporary 4MiB bytes object while ID36 is above
         # memory.high. Streaming produces the identical oracle digest.
