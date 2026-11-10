@@ -5,9 +5,10 @@ This is not part of make test and produces no performance qualification.
 The campaign-plan action is read-only and can only report admission readiness;
 it never substitutes for paired physical workloads. Before any correctness-smoke
 write the helper requires an explicitly repeated stable device path, an
-unused active swap partition, a latest-source owner PASS and identical
-qualified-artifact evidence, plus a verbal review record bound to source,
-helper and device.
+preformatted ordinary Linux SWAPSPACE2 partition, a latest-source owner PASS
+and identical qualified-artifact evidence, plus a verbal review record bound
+to source, helper and device. Live pages on the selected swap are migrated by
+the owned swapoff transition after a bounded RAM-headroom check.
 """
 import argparse
 from datetime import datetime, timezone
@@ -58,10 +59,11 @@ VERBAL_APPROVAL_TEXT = (
     "Approved for one bounded physical swap-partition correctness round-trip only, "
     "provided the exact qualified artifacts remain unchanged, the current "
     "helper-policy commit passes its non-privileged CI, the selected partition "
-    "passes every read-only identity/safety check, recovery state is durably "
-    "stored on persistent media, and the helper restores and verifies the "
-    "original swap partition before completion. Any mismatch, unexpected state, "
-    "or recovery uncertainty voids this approval and requires the run to stop."
+    "passes every read-only identity/safety check, its SWAPSPACE2 header remains "
+    "byte-exact and immutable, and same-boot root-owned runtime state tracks the "
+    "owned mapper transition. Only the mapper may be formatted. Any mismatch, "
+    "unexpected state, or ownership uncertainty voids this approval and requires "
+    "the run to stop."
 )
 MAX_RECORDED_OUTPUT_CHARS = 4096
 DEVELOPMENT_SWAPOFF_MIN_AVAILABLE_KIB = 1024 * 1024
@@ -105,10 +107,13 @@ QUALIFICATION_STAGE_NAMES = (
     "Owned RAM smoke + mixed/QD pilot",
 )
 BLKGETSIZE64 = 0x80081272  # Linux 64-bit x86_64/aarch64 _IOR(0x12, 114, size_t).
+# Historical pre-migration journals may still exist here and remain readable
+# only for explicit recovery. New trials never use this path for admission,
+# runtime ownership, swap metadata or a header backup.
 RECOVERY_BASE = Path("/var/lib/swapz/physical-recovery")
-# New development/algorithm trials keep ownership state in tmpfs. If the
-# machine reboots, mapper/module state is gone and the unchanged SWAPSPACE2
-# partition needs no raw-header recovery.
+# Every current physical trial keeps ownership state in same-boot /run state.
+# If the machine reboots, mapper/module state is gone and the unchanged
+# SWAPSPACE2 partition needs no raw-header recovery.
 ALGORITHM_RUNTIME_BASE = Path("/run/swapz/algorithm-physical")
 PERSISTENT_RECOVERY_FILESYSTEMS = frozenset({
     "ext2", "ext3", "ext4", "xfs", "btrfs", "f2fs",
@@ -741,8 +746,8 @@ def inspect_target(device_arg, confirm_arg, *, allow_used_swap=False,
             "selected explicit swap priority exceeds Linux's supported range")
     if active is not None and not 0 <= active["used_kib"] <= active["size_kib"]:
         raise ProbeError("selected swap usage is outside its capacity")
-    if active is not None and active["used_kib"] != 0 and not allow_used_swap:
-        raise ProbeError("selected swap partition is in use; require zero used KiB")
+    # Live pages are not an admission failure. The owned transition performs
+    # a bounded RAM-headroom check immediately before swapoff.
     header = _read_block0(device, {
         "major": major, "minor": minor, "size_bytes": size_bytes,
     })
@@ -1442,7 +1447,7 @@ def _require_shared_root_development_plan(target, evidence):
 
 
 def _snapshot_reviewed_artifacts(state_dir, expected_digests):
-    """Pin reviewed binary bytes under the root-owned recovery directory.
+    """Pin reviewed binary bytes under the root-owned trial state directory.
 
     Source files are not trusted after review. Every executable/insmod input
     comes from this private snapshot, which is verified before swapoff.
@@ -1605,79 +1610,48 @@ def _algorithm_runtime_base():
     return base
 
 
-def _recovery_base(target=None):
-    """Return legacy persistent state or new same-boot development state."""
-    if isinstance(target, dict) and target.get("development_only") is True:
-        return _algorithm_runtime_base()
+def _legacy_recovery_base():
+    """Validate persistent pre-migration journals for explicit recovery only."""
     base = RECOVERY_BASE
     for directory in (base, *base.parents):
         try:
             info = directory.lstat()
         except OSError as exc:
-            raise ProbeError("recovery base or a parent is missing") from exc
+            raise ProbeError("legacy recovery base or a parent is missing") from exc
         if not stat.S_ISDIR(info.st_mode) or info.st_uid != 0 or (
                 info.st_mode & (stat.S_IWGRP | stat.S_IWOTH)):
-            raise ProbeError("recovery path must have root-controlled directory parents")
+            raise ProbeError(
+                "legacy recovery path must have root-controlled directory parents")
     if stat.S_IMODE(base.stat().st_mode) != 0o700:
-        raise ProbeError("operator must pre-provision recovery base as root-only 0700")
+        raise ProbeError(
+            "legacy recovery base must be pre-provisioned root-only 0700")
     filesystem = _run([
         "findmnt", "--first-only", "--noheadings", "--output", "FSTYPE",
         "--target", str(base),
     ]).stdout.strip()
     if filesystem not in PERSISTENT_RECOVERY_FILESYSTEMS:
-        raise ProbeError("recovery base has unverified or nonpersistent filesystem")
-    source = _run([
-        "findmnt", "--first-only", "--noheadings", "--output", "SOURCE",
-        "--target", str(base),
-    ]).stdout.strip()
-    source_device = source.split("[", 1)[0]
-    if not source_device.startswith("/dev/") or re.match(
-            r"^/dev/(?:loop|ram|zram|nullb)", source_device):
-        raise ProbeError("recovery filesystem has no verified persistent block source")
-    ancestry = _run([
-        "lsblk", "--inverse", "--raw", "--noheadings",
-        "--output", "MAJ:MIN,TYPE,NAME", source_device,
-    ]).stdout.splitlines()
-    devices = [line.split() for line in ancestry if line.strip()]
-    if not devices or any(len(row) != 3 or not re.fullmatch(
-            r"[0-9]+:[0-9]+", row[0]) or row[1] in {
-            "loop", "ram", "zram"} or re.match(
-            r"^(?:loop|ram|zram|nullb)", row[2]) for row in devices) or (
-            not any(row[1] == "disk" for row in devices)):
-        raise ProbeError("recovery backing chain is volatile or unverifiable")
-    if target is not None:
-        # Bare-metal recovery must remain on another physical disk. A verified
-        # VM-only development run may use a sibling guest partition because it
-        # makes no physical-failure claim, but never the target partition.
-        target_parent = target.get("parent_major_minor")
-        if (not isinstance(target_parent, str) or
-                re.fullmatch(r"(0|[1-9][0-9]*):(0|[1-9][0-9]*)",
-                             target_parent) is None):
-            raise ProbeError("target physical parent identity is unavailable")
-        physical_disk_parents = {
-            row[0] for row in devices if row[1] == "disk"
-        }
-        if len(physical_disk_parents) != 1:
-            raise ProbeError("recovery physical parent identity is ambiguous")
-        recovery_devices = {row[0] for row in devices}
-        target_device = f"{target['major']}:{target['minor']}"
-        if target_device in recovery_devices:
-            raise ProbeError(
-                "recovery storage resolves through the selected swap partition")
-        if target.get("virtual_device_only") is not True and (
-                target_parent in recovery_devices or
-                target_parent in physical_disk_parents):
-            raise ProbeError(
-                "recovery storage is on the selected swap physical parent")
+        raise ProbeError(
+            "legacy recovery base has unverified or nonpersistent filesystem")
     return base
+
+
+def _recovery_base(target=None):
+    """Return same-boot runtime ownership for every current physical trial."""
+    del target
+    return _algorithm_runtime_base()
 
 
 def _recovery_run_directory(state_dir, run_id=None):
     directory = Path(state_dir)
     if directory.parent == ALGORITHM_RUNTIME_BASE:
         base = _algorithm_runtime_base()
+    elif directory.parent == RECOVERY_BASE:
+        # Read/reconcile an explicitly named historical pre-migration journal.
+        # Never route a new trial here.
+        base = _legacy_recovery_base()
     else:
-        base = _recovery_base()
+        raise ProbeError(
+            "state run directory must use current /run state or legacy recovery")
     if not directory.is_absolute() or directory.parent != base:
         raise ProbeError("state run directory must be a direct child of its fixed base")
     if run_id is not None:
@@ -1689,20 +1663,19 @@ def _recovery_run_directory(state_dir, run_id=None):
 
 
 def _select_run_directory(state_dir, run_id, development_only):
-    """Use a fresh root-only tmpfs child for an unreviewed development trial."""
-    if development_only:
-        if state_dir is not None:
-            raise ProbeError(
-                "development-only mode chooses its own fresh runtime directory")
-        _algorithm_runtime_base()
-        state_dir = ALGORITHM_RUNTIME_BASE / f"swapz-physical-{run_id}"
-    elif state_dir is None:
-        raise ProbeError("qualified run requires an explicit recovery directory")
-    return _recovery_run_directory(state_dir, run_id)
+    """Use one derived root-only same-boot directory for every current trial."""
+    del development_only
+    base = _algorithm_runtime_base()
+    expected = base / f"swapz-physical-{run_id}"
+    if state_dir is not None and Path(state_dir) != expected:
+        raise ProbeError(
+            "current trial state is fixed under /run; persistent recovery "
+            "directories are legacy-only")
+    return _recovery_run_directory(expected, run_id)
 
 
 def _partition_lock(partuuid, base=None):
-    """Lock one partition for the lifetime of the same-boot/legacy state."""
+    """Lock one partition for the lifetime of current or explicit legacy state."""
     if base is None:
         base = _recovery_base()
     else:
@@ -2631,8 +2604,8 @@ def _development_swap_inventory_plan(target):
     return target_row, swapfiles
 
 
-def _require_development_swapoff_headroom(target_row):
-    """Require RAM only for pages owned by the selected swap partition."""
+def _require_selected_swapoff_headroom(target_row):
+    """Require RAM headroom for live pages on only the selected swap partition."""
     used_kib = target_row["used_kib"] if target_row is not None else 0
     if not used_kib:
         return
@@ -2666,7 +2639,7 @@ def _quiesce_development_swap_inventory(state, target, state_dir):
         _validate_saved_swapfile(saved)
         if not _swapfile_identity_matches(saved, current):
             raise ProbeError("unrelated swapfile identity changed before swapoff")
-    _require_development_swapoff_headroom(target_row)
+    _require_selected_swapoff_headroom(target_row)
 
     if target_row is not None:
         _verify_target_identity(target)
@@ -3346,7 +3319,7 @@ def recover_pending_algorithm_trial():
                 state.get("development_only") is not True or
                 state.get("algorithm_real_swap") is not True or
                 state.get("ownership_phase") !=
-                    RECOVERY_OWNERSHIP_PHASE or marker != {
+                    RUNTIME_OWNERSHIP_PHASE or marker != {
                     "run_id": run_id, "partuuid": partuuid,
                     "major": state.get("major"), "minor": state.get("minor")
                 }):
@@ -4042,8 +4015,8 @@ def run_probe(device_arg, confirm_arg, state_dir_arg, review_path,
         }
     else:
         review = validate_review(review_path, evidence, target)
-    # The helper owns the dev run ID. Development trials use root-only /run
-    # state; qualified legacy runs retain their explicit persistent directory.
+    # The helper/review owns the run ID. Every current trial uses root-only
+    # same-boot /run state; persistent directories are legacy recovery only.
     state_dir_arg = _select_run_directory(
         state_dir_arg, review["run_id"], development_only)
     _check_review_unconsumed(target, review["run_id"])
@@ -4190,12 +4163,12 @@ def run_probe(device_arg, confirm_arg, state_dir_arg, review_path,
                 elif current_swap is not None:
                     raise ProbeError(
                         "selected partition became active swap after preflight")
-            elif current_swap is None or current_swap["used_kib"] != 0 or (
+            elif current_swap is None or (
                     current_swap["size_kib"] != target["swap_size_kib"]) or (
                     current_swap["priority"] != target["swap_priority"]):
                 raise ProbeError("selected swap state changed after preflight")
             if _read_block0(target["device"], target) != target["header"]:
-                raise ProbeError("original block zero changed after backup")
+                raise ProbeError("original block zero changed after admission snapshot")
             live_before_swapoff = _artifact_digests()
             if live_before_swapoff != evidence["artifact_digests"]:
                 raise ProbeError(
@@ -4216,6 +4189,7 @@ def run_probe(device_arg, confirm_arg, state_dir_arg, review_path,
             if development_only and algorithm_real_swap:
                 _quiesce_development_swap_inventory(state, target, state_dir)
             elif not development_only:
+                _require_selected_swapoff_headroom(current_swap)
                 _run(["swapoff", "--", target["device"]], timeout=120)
                 if _active_swap_for(target["major"], target["minor"]) is not None:
                     raise ProbeError("swapoff returned but partition is still active")
@@ -4628,9 +4602,9 @@ def plan(device_arg, confirm_arg, review_path=None):
     try:
         _recovery_base(target)
         recovery_message = (
-            "persistent recovery filesystem verified; selected swap excluded")
+            "same-boot runtime ownership verified; no recovery device required")
     except ProbeError as exc:
-        recovery_message = f"recovery storage: BLOCKED ({exc})"
+        recovery_message = f"runtime ownership: BLOCKED ({exc})"
     evidence = None
     try:
         evidence = current_source_evidence()
@@ -5067,10 +5041,8 @@ def main(argv=None):
         parser.error("--confirm-device is required")
     if args.action == "campaign-plan" and (not args.partuuid or not args.source_sha):
         parser.error("campaign-plan requires --partuuid and --source-sha")
-    if args.action == "run" and not args.state_dir and not args.development_only:
-        parser.error("run requires --state-dir")
-    if args.action == "run" and args.development_only and args.state_dir:
-        parser.error("--development-only chooses its own fresh runtime directory")
+    if args.action == "run" and args.state_dir:
+        parser.error("run state is selected automatically under /run")
     if args.action == "run" and not args.development_only and not args.review_record:
         parser.error("qualified run requires --review-record")
     if args.action == "run" and args.development_only and args.review_record:
