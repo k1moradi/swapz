@@ -3444,7 +3444,6 @@ static int swapz_primary_original_swap_policy_snapshot(
 {
 	struct swapz_primary_swap_entry entries[SWAPZ_PRIMARY_SWAP_ROWS_MAX];
 	dev_t resolved_devices[SWAPZ_PRIMARY_SWAP_ROWS_MAX] = {0};
-	unsigned char resolved_is_block[SWAPZ_PRIMARY_SWAP_ROWS_MAX] = {0};
 	struct stat info;
 	size_t count = 0;
 	size_t index;
@@ -3470,7 +3469,6 @@ static int swapz_primary_original_swap_policy_snapshot(
 		if (!strcmp(entries[index].type, "partition") &&
 		    S_ISBLK(info.st_mode)) {
 			resolved_devices[index] = info.st_rdev;
-			resolved_is_block[index] = 1U;
 		} else if (!strcmp(entries[index].type, "file") &&
 			   S_ISREG(info.st_mode)) {
 			resolved_devices[index] = info.st_dev;

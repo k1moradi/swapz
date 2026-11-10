@@ -444,6 +444,11 @@ before validation rather than reading an arbitrarily large malformed record.
 No telemetry, token, or stale mapper snapshot grants creation authority.
 
 
+Recovery's original-swap policy snapshot must validate each inventory path's
+observed file type before using its resolved device identity, size or priority;
+do not retain an unused device-kind sidecar when the type checks already
+establish that information.
+
 ### Physical backing format and legacy formatter retirement
 
 Production has no raw-partition swapz formatter. A real backing device is an
