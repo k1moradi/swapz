@@ -136,9 +136,10 @@ int swapz_append_encoded(struct swapz_builder *builder,
 		       swapz_u32 logical_page, swapz_u32 generation,
 		       const void *payload, swapz_u16 length,
 		       swapz_u8 encoding);
-/* Internal production fast path: skip only the duplicate-logical scan after
- * the caller has proved window-wide uniqueness. Payload validation and CRC32C
- * remain codec-owned and happen before any record mutation. */
+/* Legacy serialized-fixture fast path: skip only the duplicate-logical scan
+ * after the fixture caller has proved window-wide uniqueness. Production
+ * kernel publication uses swapz_ram_extent_* below and never serializes these
+ * descriptors. Payload validation and CRC32C remain codec-owned. */
 int swapz_append_encoded_unique(struct swapz_builder *builder,
 		       swapz_u32 logical_page, swapz_u32 generation,
 		       const void *payload, swapz_u16 length,
@@ -147,9 +148,10 @@ int swapz_append_prehashed_encoded(struct swapz_builder *builder,
 		       swapz_u32 logical_page, swapz_u32 generation,
 		       const void *payload, swapz_u16 length,
 		       swapz_u32 payload_crc32c, swapz_u8 encoding);
-/* Internal production fast path: the caller has already proved this logical
- * page is unique across the builder's immutable batch. All other validation,
- * capacity checks and payload writes remain identical to the generic append. */
+/* Legacy serialized-fixture fast path: the caller has already proved this
+ * logical page unique across the fixture builder's immutable batch. Production
+ * kernel publication uses swapz_ram_extent_* below; all other legacy fixture
+ * validation, capacity checks and payload writes match the generic append. */
 int swapz_append_prehashed_encoded_unique(struct swapz_builder *builder,
 		       swapz_u32 logical_page, swapz_u32 generation,
 		       const void *payload, swapz_u16 length,
@@ -176,8 +178,10 @@ int swapz_attach_extent_metadata(
 int swapz_validate_metadata_crc(const void *bytes, swapz_u32 bytes_total);
 int swapz_validate(const void *bytes, swapz_u32 bytes_total);
 /*
- * Reads/verifies ONLY metadata (block zero contains at most 1040 metadata
- * bytes). The caller may then fetch just the target record's payload blocks.
+ * Legacy serialized-fixture API: reads/verifies only the fixture extent's
+ * metadata prefix (its extent-relative block zero contains at most 1040
+ * metadata bytes). This is never the physical SWAPSPACE2 header page and is
+ * never used by the production kernel read path.
  */
 int swapz_peek(const void *bytes, swapz_u32 bytes_total, swapz_u8 index,
 	     struct swapz_decoded *out);
