@@ -567,10 +567,10 @@ class LiveSwapSupervisorTests(unittest.TestCase):
         self.assertFalse(supervisor.LIVE_SWAP_EXECUTION_ENABLED)
         ops = FakeOps()
         with mock.patch.object(supervisor.os, "geteuid", return_value=0):
-            with self.assertRaisesRegex(supervisor.LiveSwapError, "disabled"):
+            with self.assertRaisesRegex(supervisor.LiveSwapError, "retired"):
                 supervisor.run_trial("/unused", "/unused",
                                      confirm="LIVE-SWAP-TRIAL", ops=ops)
-            with self.assertRaisesRegex(supervisor.LiveSwapError, "disabled"):
+            with self.assertRaisesRegex(supervisor.LiveSwapError, "retired"):
                 supervisor.recover_cli("/unused",
                                        confirm="RESTORE-ORIGINAL-SWAP", ops=ops)
         with mock.patch.object(supervisor, "LIVE_SWAP_EXECUTION_ENABLED", True):
@@ -1948,7 +1948,8 @@ class LiveSwapSupervisorTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory:
             base = Path(directory)
             (base / f"consumed-{RUN_ID}.json").write_text("{}\n")
-            with mock.patch.object(supervisor.PHYSICAL, "_recovery_base",
+            # Current one-use review claims live in the same-boot runtime base.
+            with mock.patch.object(supervisor.PHYSICAL, "_runtime_state_base",
                                    return_value=base):
                 with self.assertRaisesRegex(
                         supervisor.PHYSICAL.ProbeError, "consumed"):
@@ -2526,6 +2527,12 @@ class LiveSwapSupervisorTests(unittest.TestCase):
                     supervisor, "_assert_recovery_ownership", return_value=True))
                 stack.enter_context(mock.patch.object(
                     supervisor, "_release_marker"))
+                # Historical SWZ-header classification is synthetic here;
+                # production physical-swap code intentionally lacks this API.
+                stack.enter_context(mock.patch.object(
+                    supervisor.PHYSICAL, "swapz_header_valid",
+                    side_effect=lambda header, _size: header == ops.formatted,
+                    create=True))
                 try:
                     outcome = supervisor.recover_state(
                         state_dir, ops=ops)["status"]
