@@ -1031,21 +1031,18 @@ class PrimaryRealSwapContracts(unittest.TestCase):
                 [unresolved], (8, 1), (8, 0))
 
     def test_plan_storage_separation_requires_explicit_false_current_keys(self):
-        canonical = {
-            "root_same_physical_disk_as_target": False,
-            "recovery_same_physical_disk_as_target": False,
-        }
+        # Mutable recovery state resides on tmpfs; physical separation applies
+        # to the root and selected target, not an obsolete recovery-disk key.
+        canonical = {"root_same_physical_disk_as_target": False}
         qualify.require_plan_storage_separation(canonical)
-        for key in canonical:
-            with self.subTest(key=key):
+        for invalid_value in (True, None, 0):
+            with self.subTest(invalid_value=invalid_value):
                 mutant = dict(canonical)
-                mutant[key] = True
+                mutant["root_same_physical_disk_as_target"] = invalid_value
                 with self.assertRaises(qualify.Blocked):
                     qualify.require_plan_storage_separation(mutant)
-                missing = dict(canonical)
-                del missing[key]
-                with self.assertRaises(qualify.Blocked):
-                    qualify.require_plan_storage_separation(missing)
+        with self.assertRaises(qualify.Blocked):
+            qualify.require_plan_storage_separation({})
 
     def test_authorized_parent_requires_exact_sole_partition_topology(self):
         target = {"pkname": "sda"}

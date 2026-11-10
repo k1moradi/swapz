@@ -1640,7 +1640,12 @@ grant authority. This narrowly scoped admission exception does not alter any
 frozen production-acceptance manifest or qualify the target. Runtime ownership
 must be root-owned volatile state under `/run/swapz`; persistent qualification
 evidence is not swap recovery storage and its physical parent is not an
-admission fact. No unresolved
+admission fact.
+The rootless real-swap qualification storage-separation fixture must require
+an explicit boolean `root_same_physical_disk_as_target=false` (reject missing,
+true, null, and numeric zero); it must not require the obsolete
+`recovery_same_physical_disk_as_target=false` key because lifecycle recovery
+is tmpfs-backed rather than a separate physical recovery device. No unresolved
 primary transaction, mapper, module, or raw swap alias resolving to either the
 selected partition or its physical parent disk; any unresolvable active
 block-swap identity is BLOCKED; at least 1 GiB `MemAvailable`; readable kernel
