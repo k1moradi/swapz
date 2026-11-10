@@ -2614,26 +2614,26 @@ exec "{flock_binary}" "$@"
         transactions = self.uninstall_transactions()
         self.assertEqual(len(transactions), 1)
 
-    def test_upgrade_refuses_primary_recovery_authority(self):
+    def test_upgrade_refuses_primary_runtime_authority(self):
         self.assertEqual(self.invoke("install").returncode, 0)
         old_binary = (self.prefix / "sbin/swapzctl").read_bytes()
         old_module = self.installed_module.read_bytes()
 
         self.module.write_bytes(b"replacement-qualified-module\n")
         self.write_report()
-        recovery = self.home / "var/lib/swapz/physical-recovery"
-        recovery.mkdir(parents=True)
+        runtime_state = self.home / "run/swapz"
+        runtime_state.mkdir(parents=True)
 
-        state = recovery / "primary-state.json"
-        state.write_text('{"schema":"synthetic-recovery"}\n')
+        state = runtime_state / "primary-state.json"
+        state.write_text('{"schema":"synthetic-runtime-state"}\n')
         result = self.invoke("install")
         self.assertNotEqual(result.returncode, 0)
-        self.assertIn("primary recovery state exists", result.stderr)
+        self.assertIn("primary runtime state exists", result.stderr)
         self.assertEqual((self.prefix / "sbin/swapzctl").read_bytes(), old_binary)
         self.assertEqual(self.installed_module.read_bytes(), old_module)
         state.unlink()
 
-        marker = recovery / "partition-f13428f6-01.active"
+        marker = runtime_state / "partition-f13428f6-01.active"
         marker.write_text("synthetic ownership marker\n")
         result = self.invoke("install")
         self.assertNotEqual(result.returncode, 0)
@@ -2944,7 +2944,7 @@ exec "{flock_binary}" "$@"
             self.assertIn("rollback incomplete", failed.stderr)
             self.assertNotIn(str(self.home), failed.stderr)
             # The CLI is removed before the unwritable helper directory makes
-            # rm fail, so retained recovery state remains deactivated.
+            # rm fail, so retained package rollback state remains deactivated.
             self.assertFalse((self.prefix / "sbin/swapzctl").exists())
             transactions = self.uninstall_transactions()
             self.assertEqual(len(transactions), 1)
