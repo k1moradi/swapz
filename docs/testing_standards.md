@@ -35,6 +35,24 @@ production tmpfs state and reject block-backed filesystems, ramfs and overlay.
 The shared Linux swap header validator's two-page format minimum must agree
 in kernel and userspace fixtures. Format parsing does not waive the separate
 three-physical-segment target capacity gate.
+The standalone swap-header parser fixture must use its local segment-page
+geometry consistently in both inputs and expected layouts; it must compile
+without the authority allocator's private segment constants.
+Each independent header mutation must start from a fresh valid header; the
+optional-UUID positive case must not inherit an invalid bad-page list.
+Physical-admission source coverage must require both Linux swap layout parsing
+and checked clean-segment configuration, including declared-area and bad-page
+handling; the retired contiguous-only validator is not the admission API.
+The geometry-only primary capacity helper is synthetic-fixture support only;
+production userspace builds must compile without it and use header-derived
+clean segments. Only rootless native policy fixtures retain its explicit
+test-build scope; owned-nullblk manifests bind header-derived geometry.
+Do not suppress unused-function warnings.
+Production-only runtime-parent inspection must likewise be omitted when its
+preflight caller is replaced by the rootless or owned-nullblk test seam.
+Swap-inventory fixtures must provide the selected swap area's explicit size
+to quiescence checks while retaining filesystem-device alias rejection for
+unrelated versus selected-filesystem swapfiles.
 
 The isolated Make-interface loaded fixture must model the immutable backing
 header by reporting `start-header-verified`, never the retired

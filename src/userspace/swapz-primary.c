@@ -3549,7 +3549,7 @@ static int swapz_primary_runtime_state_base_open(uid_t expected_owner)
 		SWAPZ_PRIMARY_RUNTIME_STATE_BASE, expected_owner);
 }
 
-#ifndef SWAPZ_PRIMARY_OWNED_NULLBLK_TEST
+#if !defined(SWAPZ_PRIMARY_OWNED_NULLBLK_TEST) && !defined(SWAPZ_PRIMARY_ROOTLESS_TEST)
 static int swapz_primary_runtime_state_parent_open(void)
 {
 	struct stat before;
