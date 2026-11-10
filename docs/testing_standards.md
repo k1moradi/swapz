@@ -201,6 +201,8 @@ The rootless primary-policy opener fixture must likewise use `O_RDONLY | O_EXCL`
 for an exclusive raw-target identity claim and `O_RDONLY` for observation,
 reject `O_RDWR | O_EXCL` with `EINVAL`, and run mismatch/alias tests with
 allowed read-only flags so flag validation cannot mask an identity failure.
+A NULL required alias-path negative control must also pass a valid read-only
+flag, demonstrating that the missing path—not flag rejection—causes `EINVAL`.
 
 A 20-byte authoritative RAM logical map (including compressed CRC32C)
 replaces the prior 16-byte map and increases the dedicated-card source

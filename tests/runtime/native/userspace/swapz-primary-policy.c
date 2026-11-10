@@ -2202,7 +2202,7 @@ static void test_exclusive_target_open_paths(void)
 	/* Production identity claims never open the raw partition writable. */
 	errno = 0;
 	assert(swapz_primary_open_target_checked_paths_mode(
-		target, uuid_path, partuuid_path, O_RDONLY | O_EXCL) < 0);
+		target, uuid_path, partuuid_path, O_RDWR | O_EXCL) < 0);
 	assert(errno == EINVAL);
 	fd = swapz_primary_open_target_checked_paths_mode(
 		target, uuid_path, partuuid_path, O_RDONLY | O_EXCL);
@@ -2266,7 +2266,7 @@ static void test_exclusive_target_open_paths(void)
 		target, uuid_path, partuuid_path, O_RDONLY | O_EXCL) < 0);
 	assert(errno == ENODEV);
 	assert(swapz_primary_open_target_checked_paths_mode(
-		target, uuid_path, NULL, O_RDWR | O_EXCL) < 0);
+		target, uuid_path, NULL, O_RDONLY | O_EXCL) < 0);
 	assert(errno == EINVAL);
 	assert(unlink(partuuid_path) == 0);
 	assert(unlink(substituted) == 0);
