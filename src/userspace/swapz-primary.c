@@ -312,6 +312,8 @@ static const char *const swapz_primary_stage_names[] = {
 static int swapz_primary_valid_run_id(const char *run_id);
 static int swapz_primary_valid_sha256(const char *digest);
 static uint64_t swapz_primary_maximum_logical_pages(uint64_t physical_blocks);
+static uint64_t swapz_primary_manifest_physical_blocks(
+	const struct swapz_primary_manifest *manifest);
 static uint64_t swapz_primary_swap_size_kib(uint64_t device_bytes);
 static uint64_t swapz_primary_linux_swap_size_kib(uint64_t logical_pages);
 static int swapz_primary_parse_u64(const char *text, uint64_t *value);
@@ -1808,6 +1810,7 @@ static int swapz_primary_manifest_valid(
 		       manifest->qualification_report_sha256) &&
 	       swapz_primary_valid_sha256(
 		       manifest->original_header_sha256) &&
+	       swapz_primary_manifest_physical_blocks(manifest) &&
 	       swapz_primary_target_valid(&manifest->target);
 }
 
@@ -1830,6 +1833,47 @@ static uint64_t swapz_primary_physical_blocks(uint64_t device_bytes)
 		return 0;
 	return usable_blocks;
 }
+static uint64_t swapz_primary_physical_blocks_from_header(
+	const unsigned char header[SWAPZ_PRIMARY_BLOCK_BYTES],
+	uint64_t device_bytes)
+{
+	struct swapz_linux_swap_layout layout;
+	uint64_t clean_segments;
+	uint64_t clean_blocks;
+
+	if (!header ||
+	    !swapz_linux_swap_header_parse(header, device_bytes, &layout))
+		return 0;
+	clean_segments = swapz_linux_swap_clean_segment_count(
+		header, &layout, SWAPZ_PRIMARY_SEGMENT_BLOCKS);
+	if (!clean_segments)
+		return 0;
+	clean_blocks = clean_segments * SWAPZ_PRIMARY_SEGMENT_BLOCKS;
+	if (clean_blocks > UINT32_MAX ||
+	    clean_blocks > (uint64_t)SIZE_MAX / sizeof(swapz_u16))
+		return 0;
+	return clean_blocks;
+}
+
+static uint64_t swapz_primary_manifest_physical_blocks(
+	const struct swapz_primary_manifest *manifest)
+{
+	if (!manifest)
+		return 0;
+	if (manifest->backing_physical_blocks >=
+			3U * SWAPZ_PRIMARY_SEGMENT_BLOCKS &&
+	    !(manifest->backing_physical_blocks % SWAPZ_PRIMARY_SEGMENT_BLOCKS))
+		return manifest->backing_physical_blocks;
+#ifdef SWAPZ_PRIMARY_ROOTLESS_TEST
+	/* Rootless unit fixtures created before a live header exists retain the
+	 * deterministic contiguous synthetic geometry. Production never falls
+	 * back from the manifest-bound header-derived value. */
+	if (!manifest->backing_physical_blocks)
+		return swapz_primary_physical_blocks(manifest->target.device_bytes);
+#endif
+	return 0;
+}
+
 
 static int swapz_primary_mapper_layout(
 	const struct swapz_primary_manifest *manifest, char mapper_name[64],
@@ -1844,7 +1888,7 @@ static int swapz_primary_mapper_layout(
 		return -1;
 	}
 	logical_pages = swapz_primary_maximum_logical_pages(
-		swapz_primary_physical_blocks(manifest->target.device_bytes));
+		swapz_primary_manifest_physical_blocks(manifest));
 	if (!logical_pages ||
 	    logical_pages > UINT64_MAX / SWAPZ_PRIMARY_SECTORS_PER_PAGE) {
 		errno = EOVERFLOW;
@@ -2127,7 +2171,7 @@ int swapz_primary_manifest_format(
 		return -1;
 	logical_pages = logical_sectors / SWAPZ_PRIMARY_SECTORS_PER_PAGE;
 	length = snprintf(record, capacity,
-			  "schema=swapz-primary-manifest-v2\n"
+			  "schema=swapz-primary-manifest-v3\n"
 			  "run_id=%s\n"
 			  "source_sha=%s\n"
 			  "swapzctl_sha256=%s\n"
@@ -2137,6 +2181,7 @@ int swapz_primary_manifest_format(
 			  "device_minor=%u\n"
 			  "partuuid=%s\n"
 			  "device_bytes=%llu\n"
+			  "backing_physical_blocks=%u\n"
 			  "original_header_sha256=%s\n"
 			  "logical_pages=%llu\n"
 			  "logical_sectors=%llu\n"
@@ -2150,6 +2195,7 @@ int swapz_primary_manifest_format(
 			  manifest->target.device_minor,
 			  manifest->target.partuuid,
 			  (unsigned long long)manifest->target.device_bytes,
+			  manifest->backing_physical_blocks,
 			  manifest->original_header_sha256,
 			  (unsigned long long)logical_pages,
 			  (unsigned long long)logical_sectors, mapper_name, mapper_uuid,
@@ -2172,6 +2218,7 @@ int swapz_primary_manifest_parse(const char *record, size_t length,
 	char device_major[32];
 	char device_minor[32];
 	char device_bytes[32];
+	char backing_physical_blocks[32];
 	const char *cursor = record;
 	const char *end;
 	uint64_t logical_pages;
@@ -2189,7 +2236,7 @@ int swapz_primary_manifest_parse(const char *record, size_t length,
 		return -1;
 	end = record + length;
 	if (swapz_primary_manifest_expect_line(&cursor, end, "schema",
-					      "swapz-primary-manifest-v2") < 0 ||
+					      "swapz-primary-manifest-v3") < 0 ||
 	    swapz_primary_manifest_take_line(&cursor, end, "run_id",
 					     parsed.run_id,
 					     sizeof(parsed.run_id)) < 0 ||
@@ -2229,13 +2276,20 @@ int swapz_primary_manifest_parse(const char *record, size_t length,
 					     sizeof(device_bytes)) < 0 ||
 	    swapz_primary_parse_u64(device_bytes, &parsed.target.device_bytes) < 0 ||
 	    swapz_primary_manifest_take_line(
+		    &cursor, end, "backing_physical_blocks",
+		    backing_physical_blocks,
+		    sizeof(backing_physical_blocks)) < 0 ||
+	    swapz_primary_parse_u64(backing_physical_blocks, &parsed_number) < 0 ||
+	    parsed_number > UINT32_MAX ||
+	    !(parsed.backing_physical_blocks = (uint32_t)parsed_number) ||
+	    swapz_primary_manifest_take_line(
 		    &cursor, end, "original_header_sha256",
 		    parsed.original_header_sha256,
 		    sizeof(parsed.original_header_sha256)) < 0 ||
 	    !swapz_primary_manifest_valid(&parsed))
 		return -1;
 	logical_pages = swapz_primary_maximum_logical_pages(
-		swapz_primary_physical_blocks(parsed.target.device_bytes));
+		swapz_primary_manifest_physical_blocks(&parsed));
 	if (!logical_pages ||
 	    logical_pages > UINT64_MAX / SWAPZ_PRIMARY_SECTORS_PER_PAGE)
 		return -1;
@@ -9762,6 +9816,7 @@ static int swapz_primary_manifest_equal(
 		       right->qualification_report_sha256) &&
 	       !strcmp(left->original_header_sha256,
 		       right->original_header_sha256) &&
+	       left->backing_physical_blocks == right->backing_physical_blocks &&
 	       !memcmp(&left->target, &right->target,
 		       sizeof(left->target));
 }
@@ -12064,6 +12119,7 @@ static int swapz_primary_prepare_metadata(
 	char rechecked_root_scope_sha256[65] = {0};
 	char run_id[SWAPZ_PRIMARY_RUN_ID_LENGTH + 1U] = {0};
 	uint64_t device_bytes = 0;
+	uint64_t backing_physical_blocks = 0;
 	dev_t target_parent = 0;
 	dev_t root_parent = 0;
 	int directory_safe = 0;
@@ -12177,6 +12233,13 @@ static int swapz_primary_prepare_metadata(
 	if (!original_header_digest_available) {
 		failure_phase = "original-header-identity-proof";
 		errno = EPERM;
+		goto out;
+	}
+	backing_physical_blocks = swapz_primary_physical_blocks_from_header(
+		original_header, device_bytes);
+	if (!backing_physical_blocks || backing_physical_blocks > UINT32_MAX) {
+		failure_phase = "swapspace2-clean-segment-geometry";
+		errno = EINVAL;
 		goto out;
 	}
 	if (swapz_primary_sha256(original_header, sizeof(original_header),
@@ -12401,6 +12464,7 @@ static int swapz_primary_prepare_metadata(
 	if (swapz_primary_run_id_generate(run_id) < 0)
 		goto out;
 	manifest.target = target;
+	manifest.backing_physical_blocks = (uint32_t)backing_physical_blocks;
 	memcpy(manifest.run_id, run_id, sizeof(manifest.run_id));
 	memcpy(manifest.source_sha, qualification.source_sha,
 	       sizeof(manifest.source_sha));
@@ -12451,7 +12515,7 @@ static int swapz_primary_prepare_metadata(
 		memcpy(prepared_source_sha, manifest.source_sha,
 		       sizeof(manifest.source_sha));
 		*prepared_logical_pages = swapz_primary_maximum_logical_pages(
-			SWAPZ_PRIMARY_PHYSICAL_BLOCKS);
+			manifest.backing_physical_blocks);
 	}
 	if (result < 0 && claimed)
 		fprintf(stderr,
@@ -13514,6 +13578,7 @@ static int swapz_primary_read_only_plan(void)
 	struct swapz_primary_swap_entry swaps[SWAPZ_PRIMARY_SWAP_ROWS_MAX];
 	struct swapz_primary_swap_entry *target_swap = NULL;
 	struct swapz_primary_target target = {0};
+	unsigned char target_header[SWAPZ_PRIMARY_BLOCK_BYTES] = {0};
 	char configured_partuuid[SWAPZ_PRIMARY_PARTUUID_LENGTH + 1U] = {0};
 	uint64_t logical_pages = 0;
 	uint64_t logical_bytes = 0;
@@ -13601,10 +13666,10 @@ static int swapz_primary_read_only_plan(void)
 		swapz_primary_target_preflight(
 			configured_partuuid, &target, &target_device_bytes,
 			&original_swap_header,
-			&original_header_digest_available, NULL) == 0;
+			&original_header_digest_available, target_header) == 0;
 	if (target_device_preflight) {
-		physical_blocks =
-			swapz_primary_physical_blocks(target.device_bytes);
+		physical_blocks = swapz_primary_physical_blocks_from_header(
+			target_header, target.device_bytes);
 		logical_pages =
 			swapz_primary_maximum_logical_pages(physical_blocks);
 		if (logical_pages && logical_pages <= UINT32_MAX &&
