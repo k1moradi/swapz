@@ -3634,6 +3634,58 @@ class ReportContract(unittest.TestCase):
             runner.lz4_acceleration_verdict(changed)["overall"],
             "PASS_LZ4_ACCELERATION_AB")
 
+    def test_failure_diagnostic_collects_read_rounds_privately(self):
+        fast_sessions = runner.parse_read_coalesce_ab(synthetic_log())
+        serial_sessions = runner.parse_sd_read_coalesce_ab(synthetic_log())
+        self.assertEqual(len(fast_sessions), 10)
+        self.assertEqual(len(serial_sessions), 10)
+        source_sha = "a" * 40
+        result = {
+            "overall": "FAIL",
+            "source_sha": source_sha,
+            "tested_commit_sha": source_sha,
+            "host_identity": {"private_host": "NEVER_EXPORT"},
+            "stages": [{
+                "name": "Owned RAM smoke + mixed/QD pilot",
+                "status": "FAIL",
+                "failed_phase": "adjacent READ coalescing A/B evidence",
+                "diagnostic": "merge-on arm executed no sequential READ coalescing",
+            }],
+            "benchmarks": {
+                "read_coalesce_ab_sessions": fast_sessions,
+                "sd_read_coalesce_ab_sessions": serial_sessions,
+                "read_coalesce_ab": {"overall": "INCOMPLETE"},
+                "sd_read_coalesce_ab": {"overall": "PASS"},
+            },
+        }
+        with tempfile.TemporaryDirectory(
+                prefix="report-private-failure-",
+                dir=ROOT / "build/tests") as sandbox:
+            original_root = runner.ROOT
+            runner.ROOT = Path(sandbox)
+            try:
+                filename = runner.write_failure_diagnostic(
+                    result, "GIT_SYNC_FAILED: phase=push "
+                    "reason=remote_advanced")
+                self.assertIsNotNone(filename)
+                path = runner.ROOT / filename
+                self.assertTrue(path.is_file())
+                self.assertEqual(path.stat().st_mode & 0o777, 0o600)
+                saved = json.loads(path.read_text())
+                self.assertEqual(saved["tested_commit_sha"], source_sha)
+                self.assertEqual(len(saved["fast_sessions"]), 10)
+                self.assertEqual(len(saved["serial_sessions"]), 10)
+                self.assertEqual(saved["fast_sessions"][1]["read_coalesce"], 1)
+                kernel = saved["fast_sessions"][1]["passes"]["sequential"][
+                    "kernel_read_path"]
+                self.assertIn("parallel_read_coalesce_skip_gap", kernel)
+                self.assertNotIn("NEVER_EXPORT", path.read_text())
+                self.assertNotIn("host_identity", saved)
+                self.assertIsNone(runner.write_failure_diagnostic(
+                    {**result, "overall": "PASS"}, "SYNCED_GIT"))
+            finally:
+                runner.ROOT = original_root
+
     def test_missing_sequential_coalescing_reports_measured_counters(self):
         # The real Lubuntu failure can have adjacent/parallel candidates
         # while one merge-on round coalesces nothing. Keep the mandatory
@@ -7679,6 +7731,31 @@ class ReportContract(unittest.TestCase):
                 self.assertEqual(runner.git_sha(), source_sha)
             finally:
                 runner.ROOT, runner.REPORT = old_root, old_report
+
+    def test_git_publication_failure_causes_are_fixed_and_private(self):
+        cases = (
+            (b"Authentication failed for 'https://SECRET@github.com/'",
+             "credentials_or_repository_access"),
+            (b"fatal: Permission denied (publickey).",
+             "credentials_or_repository_access"),
+            (b"remote: GH006: Protected branch update failed for refs/heads/main",
+             "remote_permission_or_policy"),
+            (b"! [rejected] main -> main (non-fast-forward)",
+             "remote_advanced"),
+            (b"fatal: Could not resolve host: github.com",
+             "network_or_transport"),
+            (b"unknown SECRET Git failure", "git_command_failed"),
+        )
+        for stderr, reason in cases:
+            with self.subTest(reason=reason):
+                failure = subprocess.CompletedProcess(
+                    ["push", "origin"], 1, b"", stderr)
+                classified = runner.git_publication_failure_reason(failure)
+                self.assertEqual(classified, reason)
+                self.assertNotIn("SECRET", classified)
+        self.assertEqual(
+            runner.git_publication_failure_reason(None),
+            "git_command_unavailable_or_timed_out")
 
     def test_publisher_preserves_configured_git_credentials(self):
         source = (ROOT / "tests/tools/run-tests.py").read_text()
