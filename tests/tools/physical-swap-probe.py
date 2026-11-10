@@ -1202,6 +1202,24 @@ def _require_development_linux_abi():
             "physical development smoke requires little-endian 64-bit Linux with 4096-byte pages")
 
 
+def _development_dirty_worktree_kinds():
+    """Classify a failed clean-worktree gate without disclosing private paths.
+
+    This helper is used only after Git has already reported a dirty checkout.
+    Neither generated reports nor untracked files may bypass source admission.
+    """
+    kinds = []
+    if _git("status", "--porcelain", "--untracked-files=no", "--",
+            ".", ":(exclude)test_results.json"):
+        kinds.append("tracked_source")
+    if _git("status", "--porcelain", "--untracked-files=no", "--",
+            "test_results.json"):
+        kinds.append("generated_report")
+    if _git("ls-files", "--others", "--exclude-standard"):
+        kinds.append("untracked")
+    return ",".join(kinds) or "unclassified"
+
+
 def current_development_evidence(nonce, algorithm_ram_evidence=None,
                                  virtual_device_only=False):
     """Admit current make-test RAM evidence or run the standalone fast_test path."""
@@ -1221,7 +1239,9 @@ def current_development_evidence(nonce, algorithm_ram_evidence=None,
     if branch != "main":
         raise ProbeError("physical development smoke is restricted to main")
     if _git("status", "--porcelain"):
-        raise ProbeError("worktree changes block physical development smoke")
+        raise ProbeError(
+            "worktree changes block physical development smoke: "
+            "kind=" + _development_dirty_worktree_kinds())
     head = _git("rev-parse", "HEAD")
     if head != _git("rev-parse", "origin/main"):
         raise ProbeError("local and origin/main must match before development smoke")

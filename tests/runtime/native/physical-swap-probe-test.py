@@ -2056,6 +2056,33 @@ class PhysicalSwapProbeTests(unittest.TestCase):
         self.assertEqual(args[5:], ["status", "--porcelain"])
         self.assertEqual(run.call_args.kwargs["cwd"], probe.ROOT)
 
+    def test_dirty_development_worktree_classifies_without_exposing_paths(self):
+        # Diagnostics never allow admission or print source/report contents.
+        source_query = ("status", "--porcelain", "--untracked-files=no",
+                        "--", ".", ":(exclude)test_results.json")
+        report_query = ("status", "--porcelain", "--untracked-files=no",
+                        "--", "test_results.json")
+        untracked_query = ("ls-files", "--others", "--exclude-standard")
+        for changed_source, changed_report, untracked, expected in (
+                (True, False, False, "tracked_source"),
+                (False, True, False, "generated_report"),
+                (False, False, True, "untracked"),
+                (True, True, True, "tracked_source,generated_report,untracked"),
+                (False, False, False, "unclassified")):
+            with self.subTest(expected=expected):
+                outputs = {
+                    source_query: " M private/source.c" if changed_source else "",
+                    report_query: " M test_results.json" if changed_report else "",
+                    untracked_query: "private/untracked" if untracked else "",
+                }
+                with mock.patch.object(
+                        probe, "_git",
+                        side_effect=lambda *arguments: outputs[arguments]) as git:
+                    self.assertEqual(
+                        probe._development_dirty_worktree_kinds(), expected)
+                self.assertEqual(git.call_count, 3)
+                self.assertNotIn("private", expected)
+
     def test_physical_host_gate_rejects_vm_container_and_unknown(self):
         with mock.patch.object(probe.shutil, "which",
                                return_value="/usr/bin/systemd-detect-virt"), \
