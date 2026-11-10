@@ -2397,7 +2397,7 @@ static int swapz_primary_open_target_checked_paths_mode(
 	int fd;
 
 	if (!device_path || !uuid_path || !partuuid_path ||
-	    (open_flags != (O_RDWR | O_EXCL) && open_flags != O_RDONLY) ||
+	    (open_flags != (O_RDONLY | O_EXCL) && open_flags != O_RDONLY) ||
 	    !swapz_primary_target_valid(&swapz_primary_selected_target)) {
 		errno = EINVAL;
 		return -1;
@@ -2595,8 +2595,11 @@ int swapz_primary_target_open_exclusive(
 		errno = ENAMETOOLONG;
 		return -1;
 	}
+	/* Keep the raw-partition ownership/header proof incapable of userspace
+	 * writes. O_EXCL supplies the block-device claim; the Device Mapper target
+	 * owns authorized post-header data writes after this proof descriptor closes. */
 	return swapz_primary_open_target_checked_partuuid_paths_mode(
-		partuuid_path, partuuid_path, partuuid_path, O_RDWR | O_EXCL);
+		partuuid_path, partuuid_path, partuuid_path, O_RDONLY | O_EXCL);
 #endif
 }
 

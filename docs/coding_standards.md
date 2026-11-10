@@ -483,7 +483,11 @@ protected selector and opened target identity at the last safe boundary before
 `swapoff` and mapper creation. The original first 4096 bytes are an immutable
 integrity witness and must byte-match the admitted image throughout the
 transaction. A mismatch is a hard failure requiring read-only inspection, not a
-reason to repair or reformat the partition.
+reason to repair or reformat the partition. Userspace descriptors used only to
+claim and revalidate the raw target must remain read-only, including the
+exclusive claim (`O_RDONLY | O_EXCL`); never grant raw-write descriptor
+capability merely for ownership or header verification. Authorized post-header
+writes belong to the Device Mapper lower-device path after admission.
 
 The Device Mapper target owns only the aligned data range after the protected
 first page. `iterate_devices`, WRITE, READ, DISCARD and GC must use that same

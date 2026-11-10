@@ -692,6 +692,18 @@ class SwapzProductionSourceQualification(unittest.TestCase):
         self.assertIn("Raw backing partitions are never formatted by swapzctl.", SWAPZCTL)
         self.assertIn("Only the new virtual mapper may receive mkswap.", SWAPZCTL)
 
+    def test_primary_raw_target_exclusive_descriptor_is_read_only(self):
+        checked_open = source_body(
+            "swapz_primary_open_target_checked_paths_mode", PRIMARY)
+        exclusive_open = source_body(
+            "swapz_primary_target_open_exclusive", PRIMARY)
+        self.assertIn("open_flags != (O_RDONLY | O_EXCL)", checked_open)
+        self.assertNotIn("O_RDWR | O_EXCL", checked_open)
+        self.assertNotIn("O_WRONLY", checked_open)
+        self.assertIn("O_RDONLY | O_EXCL", exclusive_open)
+        self.assertNotIn("O_RDWR | O_EXCL", exclusive_open)
+        self.assertNotIn("O_WRONLY", exclusive_open)
+
     def test_lane_gap_observation_only_and_single_owner(self):
         header = (ROOT / "src/kernel/lane-gap.h").read_text()
         engine_header = (ROOT / "src/kernel/engine.h").read_text()

@@ -194,6 +194,9 @@ and no raw-header write on every successful or failed path. Only the virtual
 mapper may receive mkswap. The public raw-device format operation does not exist; any legacy
 `swapzctl format` invocation must be rejected before a raw-device open.
 Deleted formatter-success fixtures must not be recreated as acceptance tests.
+The primary-manager source contract must additionally prove that its exclusive
+raw-target identity/header descriptor is `O_RDONLY | O_EXCL`, never `O_RDWR`
+or `O_WRONLY`; userspace raw-write capability is not an ownership primitive.
 
 A 20-byte authoritative RAM logical map (including compressed CRC32C)
 replaces the prior 16-byte map and increases the dedicated-card source

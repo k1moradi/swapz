@@ -118,7 +118,7 @@ int swapz_primary_manifest_read_at(
 	int recovery_fd, int lock_fd, const char *run_id,
 	const char *partuuid, uid_t expected_owner,
 	struct swapz_primary_manifest *manifest);
-/* Open the manifest-bound target through its stable PARTUUID after formatting. */
+/* Exclusively pin the manifest-bound raw target read-only through its stable\n * PARTUUID. This descriptor is for identity/header proof, never formatting. */
 int swapz_primary_target_open_exclusive(
 	const struct swapz_primary_manifest *manifest);
 /* Hash a stable, private regular-file descriptor with bounded allocation. */
