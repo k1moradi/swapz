@@ -75,6 +75,13 @@ def main() -> None:
         "swapz_primary_run_mkswap(mkswap_fd, mapper_fd)" in primary and
         "swapz_primary_run_mkswap(mkswap_fd, target_fd)" not in primary,
         "mkswap must remain mapper-only and must never target the raw SWAPSPACE2 fd")
+    physical_probe = (ROOT / "tests/tools/physical-swap-probe.py").read_text(
+        encoding="utf-8")
+    require(
+        '_run(["mkswap", "--", mapper], timeout=30)' in physical_probe and
+        '_run(["mkswap", "--", target[' not in physical_probe and
+        'SWAP_SIGNATURE = b"SWAPSPACE2"' in physical_probe,
+        "Physical test must format only the owned mapper and require SWAPSPACE2")
 
     # A null or invalid asynchronous write slot must be rejected before
     # its lower-image pointer is read while building the dm_io request.
@@ -107,6 +114,11 @@ def main() -> None:
         "if (!is_nullb && !bdev_is_partition(ctx->backing->bdev)) {" in
             disk_classification,
         "Real SWAPSPACE2 backing must be a partition, not a whole disk")
+    # Native Linux swap headers live at the kernel base-page boundary. A
+    # 4KiB payload-only mapper must never qualify on a different PAGE_SIZE.
+    require("#if PAGE_SIZE != SWAPZ_BLOCK_BYTES" in target and
+            '#error "swapz requires 4KiB PAGE_SIZE"' in target,
+            "Kernel must reject non-4KiB native swap-page geometry at build time")
     require("module_param_named(physical_ram_metadata_qualified" in target,
             "Physical RAM qualification must be an immutable module-load token")
     require("if (!is_nullb && !swapz_physical_ram_metadata_qualified) {" in
