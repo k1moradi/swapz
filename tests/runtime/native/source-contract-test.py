@@ -2748,6 +2748,15 @@ int main(void) {
         self.assertIn('"$READ_PROBE" "/dev/mapper/$DMNAME" "$read_fault_seed_page"', deploy)
         self.assertIn('"PASS_LOADED_SYNTHETIC_READ_FAULT=page:$read_fault_seed_page', deploy)
         self.assertIn('READ_FAULT_SEED calls:$read_fault_seed_calls', deploy)
+        # A premature READ must still fail the test, with bounded telemetry
+        # attributed automatically by the top-level qualification reporter.
+        self.assertIn(
+            'fail "READ-fault fired before verification READ; '
+            'calls=$read_fault_seed_calls inj=$read_fault_seed_injected '
+            'fail=$read_fault_seed_failed logical=$read_fault_seed_logical '
+            'sub=$read_fault_seed_submitted phys=$read_fault_seed_physical '
+            'lower=$read_fault_seed_lower_reqs:$read_fault_seed_lower_sectors"',
+            deploy)
         self.assertIn('logical:$read_fault_seed_logical', deploy)
         self.assertIn('submitted:$read_fault_seed_submitted', deploy)
         self.assertIn('physical:$read_fault_seed_physical', deploy)

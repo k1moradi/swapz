@@ -1427,7 +1427,10 @@ if (( read_fault_seed_calls != 0 || read_fault_seed_injected != 0 ||
       read_fault_seed_failed != 0 )); then
     note "READ_FAULT_SEED calls:$read_fault_seed_calls injected:$read_fault_seed_injected failed:$read_fault_seed_failed logical:$read_fault_seed_logical"
     note "READ_FAULT_SEED submitted:$read_fault_seed_submitted physical:$read_fault_seed_physical lower:req$read_fault_seed_lower_reqs sectors:$read_fault_seed_lower_sectors"
-    fail "READ-fault fired before the verification READ"
+    # Keep the same fail-closed boundary, but surface its immutable numeric
+    # snapshot in the ordinary make-test failure summary. The stage reporter
+    # strips private paths and retains at most 155 diagnostic characters.
+    fail "READ-fault fired before verification READ; calls=$read_fault_seed_calls inj=$read_fault_seed_injected fail=$read_fault_seed_failed logical=$read_fault_seed_logical sub=$read_fault_seed_submitted phys=$read_fault_seed_physical lower=$read_fault_seed_lower_reqs:$read_fault_seed_lower_sectors"
 fi
 read_fault_submitted_before="$(status_u64 "$read_fault_seeded" read_submitted_reqs)" ||
     fail "READ-fault status lacks submitted-read count"
