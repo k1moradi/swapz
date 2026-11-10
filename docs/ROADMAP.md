@@ -47,10 +47,11 @@ current-source acceptance tests.
    `SWAPSPACE2` header, guard the first physical page from every lower
    WRITE/DISCARD/GC path, and retain exclusive `swapoff`/mapper ownership.
    Do not make header backup/restore or raw `mkswap` part of normal lifecycle.
-2. Introduce bounded, preallocated RAM-owned extent/record metadata for
+2. Keep bounded, preallocated RAM-owned extent/record metadata for
    generation, sequence, CRC, encoding, payload offset and length. Specify
    per-record/extent memory limits, allocation failure, cancellation and
-   publication atomicity before removing on-media metadata.
+   publication atomicity, and keep production on-media metadata disabled.
+   Legacy serialized metadata remains fixture-only compatibility.
 3. Migrate the compressed builder, synchronous/batched writes, asynchronous
    completion and GC relocation together. Persist only payload blocks in
    4/8/16KiB data extents; publish RAM authority only after fully confirmed
