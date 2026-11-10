@@ -81,7 +81,7 @@ static inline int swapz_linux_swap_header_parse(
 	unsigned int raw_version;
 	unsigned int index;
 
-	if (!block || complete_pages < 2U || complete_pages > 0xffffffffULL)
+	if (!block || complete_pages < 2U)
 		return 0;
 	for (index = 0; index < SWAPZ_LINUX_SWAP_MAGIC_BYTES; ++index)
 		if (block[SWAPZ_SUPERBLOCK_BYTES -
@@ -111,14 +111,15 @@ static inline int swapz_linux_swap_header_parse(
 	for (index = 0; index < parsed.bad_pages; ++index) {
 		unsigned int bad_page =
 			swapz_linux_swap_bad_page(block, &parsed, index);
-		unsigned int previous;
 
+		/*
+		 * Match Linux swapon semantics: duplicate listed pages are not a
+		 * header-format error. Linux still charges every list entry from
+		 * si->pages; swapz separately deduplicates contaminated segments
+		 * when constructing its lower-data map.
+		 */
 		if (!bad_page || bad_page > parsed.last_page)
 			return 0;
-		for (previous = 0; previous < index; ++previous)
-			if (swapz_linux_swap_bad_page(
-				    block, &parsed, previous) == bad_page)
-				return 0;
 	}
 	if (layout)
 		*layout = parsed;
