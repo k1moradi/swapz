@@ -182,8 +182,8 @@ finish_rootless_private_stderr_capture() {
 classify_rootless_private_unittest_failure() {
   local diagnostic_path=$1
   local line
-  local detailed_header_regex="^(FAIL|ERROR): (test_[A-Za-z0-9_]{1,96}) \\(__main__\\.(PackageLifecycle|PrimaryRealSwapContracts|SourceAdmissionPeerOwnership|GeneratorPublicationTest|PrimaryLifecycleBehaviorTest|PrimaryLifecycleSourceGuardTest|PackageCrashToPrimaryAdmissionTest|PrimaryOwnerReleaseDurabilityTest)\\.(test_[A-Za-z0-9_]{1,96})\\)"
-  local progress_regex="^[[:space:]]*(test_[A-Za-z0-9_]{1,96}) \\(__main__\\.(PackageLifecycle|PrimaryRealSwapContracts|SourceAdmissionPeerOwnership|PrimaryLifecycleBehaviorTest|PrimaryLifecycleSourceGuardTest|PackageCrashToPrimaryAdmissionTest|PrimaryOwnerReleaseDurabilityTest)\\.(test_[A-Za-z0-9_]{1,96})\\)( \\([^[:cntrl:]]{1,512}\\))? \\.\\.\\. (FAIL|ERROR)$"
+  local detailed_header_regex="^(FAIL|ERROR): (test_[A-Za-z0-9_]{1,96}) \\(__main__\\.(PackageLifecycle|PrimaryRealSwapContracts|SourceAdmissionPeerOwnership|GeneratorPublicationTest|PrimaryLifecycleBehaviorTest|PrimaryLifecycleSourceGuardTest|PackageCrashToPrimaryAdmissionTest|PrimaryOwnerReleaseDurabilityTest|SwapzProductionSourceQualification|CapacityMemoryAccountingContracts)\\.(test_[A-Za-z0-9_]{1,96})\\)"
+  local progress_regex="^[[:space:]]*(test_[A-Za-z0-9_]{1,96}) \\(__main__\\.(PackageLifecycle|PrimaryRealSwapContracts|SourceAdmissionPeerOwnership|PrimaryLifecycleBehaviorTest|PrimaryLifecycleSourceGuardTest|PackageCrashToPrimaryAdmissionTest|PrimaryOwnerReleaseDurabilityTest|SwapzProductionSourceQualification|CapacityMemoryAccountingContracts)\\.(test_[A-Za-z0-9_]{1,96})\\)( \\([^[:cntrl:]]{1,512}\\))? \\.\\.\\. (FAIL|ERROR)$"
   local simple_phase_context_regex="^ \\(phase='([a-z0-9_-]{1,64})'\\)$"
   # Other generator subtest keys identify a failed method, never public data.
   local generator_progress_regex="^[[:space:]]*(test_[A-Za-z0-9_]{1,96}) \\(__main__\\.GeneratorPublicationTest\\.(test_[A-Za-z0-9_]{1,96})\\)( \\([^[:cntrl:]]{1,192}\\))? \\.\\.\\. (FAIL|ERROR)$"
@@ -216,6 +216,8 @@ classify_rootless_private_unittest_failure() {
   # Only the active source-controlled suite can authenticate a failure.
   # Expected negative tests may relay stderr from a different unittest class.
   case $rootless_phase in
+    'tests/runtime/native/source-contract-test.py')
+      expected_unittest_classes='SwapzProductionSourceQualification:CapacityMemoryAccountingContracts' ;;
     'tests/runtime/native/package-dkms-test.py')
       expected_unittest_classes=PackageLifecycle ;;
     'tests/runtime/native/primary-lifecycle-audit-test.py')
@@ -416,7 +418,7 @@ report_rootless_failure() {
     *) cleanup_disposition=not_independently_verified ;;
   esac
   case $failed_unittest_class in
-    PackageLifecycle|PrimaryRealSwapContracts|SourceAdmissionPeerOwnership|GeneratorPublicationTest|PrimaryLifecycleBehaviorTest|PrimaryLifecycleSourceGuardTest|PackageCrashToPrimaryAdmissionTest|PrimaryOwnerReleaseDurabilityTest|unavailable) ;;
+    PackageLifecycle|PrimaryRealSwapContracts|SourceAdmissionPeerOwnership|GeneratorPublicationTest|PrimaryLifecycleBehaviorTest|PrimaryLifecycleSourceGuardTest|PackageCrashToPrimaryAdmissionTest|PrimaryOwnerReleaseDurabilityTest|SwapzProductionSourceQualification|CapacityMemoryAccountingContracts|unavailable) ;;
     *) failed_unittest_class=unavailable ;;
   esac
   # ERR is inherited by command substitutions under -E. Their eventual
@@ -504,14 +506,14 @@ report_rootless_failure() {
                if (target_class != "unavailable") {
                  pattern = "^" target_kind ": " target_test " \\(__main__\\." target_class "\\." target_test "\\)"
                } else {
-                 pattern = "^" target_kind ": " target_test " \\(__main__\\.(PackageLifecycle|PrimaryRealSwapContracts|SourceAdmissionPeerOwnership|GeneratorPublicationTest|PrimaryLifecycleBehaviorTest|PrimaryLifecycleSourceGuardTest|PackageCrashToPrimaryAdmissionTest|PrimaryOwnerReleaseDurabilityTest)\\." target_test "\\)"
+                 pattern = "^" target_kind ": " target_test " \\(__main__\\.(PackageLifecycle|PrimaryRealSwapContracts|SourceAdmissionPeerOwnership|GeneratorPublicationTest|PrimaryLifecycleBehaviorTest|PrimaryLifecycleSourceGuardTest|PackageCrashToPrimaryAdmissionTest|PrimaryOwnerReleaseDurabilityTest|SwapzProductionSourceQualification|CapacityMemoryAccountingContracts)\\." target_test "\\)"
                }
                if (text !~ pattern) return 0
                if (target_subtest != "unavailable" &&
                    text !~ "\\(phase=\047" target_subtest "\047\\)$") return 0
                return 1
              }
-             return text ~ /^(FAIL|ERROR): test_[A-Za-z0-9_]+ \(__main__\.(PackageLifecycle|PrimaryRealSwapContracts|SourceAdmissionPeerOwnership|GeneratorPublicationTest|PrimaryLifecycleBehaviorTest|PrimaryLifecycleSourceGuardTest|PackageCrashToPrimaryAdmissionTest|PrimaryOwnerReleaseDurabilityTest)\.test_[A-Za-z0-9_]+\)/
+             return text ~ /^(FAIL|ERROR): test_[A-Za-z0-9_]+ \(__main__\.(PackageLifecycle|PrimaryRealSwapContracts|SourceAdmissionPeerOwnership|GeneratorPublicationTest|PrimaryLifecycleBehaviorTest|PrimaryLifecycleSourceGuardTest|PackageCrashToPrimaryAdmissionTest|PrimaryOwnerReleaseDurabilityTest|SwapzProductionSourceQualification|CapacityMemoryAccountingContracts)\.test_[A-Za-z0-9_]+\)/
            }
            function target_ends(text) {
              if (compile_mode) {
@@ -820,7 +822,16 @@ if (( rootless_parallel_jobs == 2 )); then
   rootless_parallel_run_group initial
   rootless_parallel_collect 0
 else
-  python3 -B tests/runtime/native/source-contract-test.py -v
+  begin_rootless_private_stderr_capture
+  rootless_source_contract_command_line=$LINENO
+  if python3 -B tests/runtime/native/source-contract-test.py -v \
+      2>&"$rootless_capture_input_fd"; then
+    rootless_source_contract_exit_code=0
+  else
+    rootless_source_contract_exit_code=$?
+  fi
+  finish_and_report_rootless_unittest \
+    "$rootless_source_contract_exit_code" "$rootless_source_contract_command_line"
 fi
 rootless_phase='tests/runtime/native/userspace/swapzctl-active-swap-provenance-test.py'
 rootless_begin_phase
