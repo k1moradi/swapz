@@ -2691,6 +2691,24 @@ override the checkout preflight only in its copied synthetic runner, because
 that fixture deliberately edits tracked fake sources to check dirty build
 provenance. This exemption must never reach the real `make test` command.
 
+When the optional development physical swap trial follows five passing RAM
+stages, check the canonical remote source against the exact nonce-bound
+RAM evidence **before asking for device consent**. Reuse the root helper's
+report-only Git ancestry validation rather than comparing HEAD alone:
+an authenticated report-only advance is allowed, but a new source commit,
+an unstable remote, mismatched local tracking ref, or unverifiable evidence
+must refuse the trial. Print an explicit finite, path-free
+`PHYSICAL_ALGORITHM_REAL_SWAP=BLOCKED reason=... phase=before_consent`
+marker plus a safe source-sync and exact-source rerun step. Never prompt the
+owner to authorize swap mutation for a source already known to be invalid.
+The authoritative privileged helper must independently re-validate canonical
+source and all physical admission state just before any new swapoff, mapper
+operation or device write. This early check is fail-only diagnostics, not
+a waiver of the late protection; do not change the successful trial's
+protocol or turn a virtual device into physical qualification. Rootless
+controls must prove a concurrent source advance blocks before consent
+and that report-only advances still reach the authoritative later gate.
+
 The fast READ coalescing A/B gate retains every mandatory same-source merge-on
 round, not just the earliest failure. On a zero-merge sequential round,
 `make test` must automatically print bounded per-round sequential and

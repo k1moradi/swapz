@@ -155,6 +155,74 @@ class AlgorithmPhysicalTest(unittest.TestCase):
             with self.assertRaisesRegex(ValueError, "malformed"):
                 subject._algorithm_ram_evidence_arguments()
 
+    def test_preconsent_canonical_drift_reuses_probe_source_gate(self):
+        """The authoritative remote comparison must happen before consent."""
+        expected_head = "a" * 40
+        qualified_source = "a" * 40
+        probe = mock.Mock()
+        probe._git.side_effect = lambda *args: (
+            "main" if args[0] == "symbolic-ref" else
+            "" if args[0] == "status" else expected_head)
+        probe._development_code_source_sha.return_value = qualified_source
+        probe._require_development_canonical_main.side_effect = RuntimeError(
+            "canonical main contains changed source after qualification")
+        specification = SimpleNamespace(loader=mock.Mock())
+        arguments = [
+            "--algorithm-ram-evidence",
+            str(subject.ROOT / "build/tests/algorithm-ram-evidence.json"),
+            "--algorithm-ram-nonce", "f" * 32,
+        ]
+        with mock.patch.object(
+                subject.importlib.util, "spec_from_file_location",
+                return_value=specification), \
+             mock.patch.object(subject.importlib.util, "module_from_spec",
+                               return_value=probe):
+            self.assertEqual(
+                subject._canonical_source_preflight(arguments),
+                "canonical_source_advanced")
+            probe._read_algorithm_ram_development_evidence.assert_called_once_with(
+                Path(arguments[1]), subject.os.getuid(), expected_head,
+                qualified_source, "f" * 32)
+            probe._require_development_canonical_main.assert_called_once_with(
+                expected_head, qualified_source)
+            probe._require_development_canonical_main.side_effect = None
+            self.assertIsNone(subject._canonical_source_preflight(arguments))
+            probe._git.side_effect = lambda *args: (
+                "main" if args[0] == "symbolic-ref" else
+                " M tests/source.c" if args[0] == "status" else expected_head)
+            self.assertEqual(
+                subject._canonical_source_preflight(arguments),
+                "local_checkout_changed")
+
+    def test_canonical_drift_blocks_before_prompt_or_new_privileged_run(self):
+        candidate = {
+            "path": "/dev/sda1", "parent": "/dev/sda",
+            "partuuid": "example-01", "size_bytes": 128 * 1024 * 1024,
+            "selector": "/dev/disk/by-partuuid/example-01",
+        }
+        with mock.patch.dict(subject.os.environ, {
+                    "SWAPZ_ALGORITHM_RAM_EVIDENCE": str(
+                        subject.ROOT / "build/tests/algorithm-ram-evidence.json"),
+                    "SWAPZ_ALGORITHM_RAM_NONCE": "f" * 32}), \
+             mock.patch.object(subject.sys.stdin, "isatty", return_value=True), \
+             mock.patch.object(subject.sys.stdout, "isatty", return_value=True), \
+             mock.patch.object(subject, "_require_read_only_preflight",
+                               return_value=candidate), \
+             mock.patch.object(subject, "_canonical_source_preflight",
+                               return_value="canonical_source_advanced") as verify, \
+             mock.patch("builtins.input") as consent, \
+             mock.patch.object(subject.subprocess, "run") as privileged, \
+             mock.patch("builtins.print") as printer:
+            self.assertEqual(subject.main(), 2)
+        verify.assert_called_once()
+        consent.assert_not_called()
+        privileged.assert_not_called()
+        output = " ".join(str(call) for call in printer.call_args_list)
+        self.assertIn("reason=canonical_source_advanced", output)
+        self.assertIn("phase=before_consent", output)
+        self.assertIn("new trial NOT RUN", output)
+        self.assertIn("rerun make test", output)
+
     def test_virtualization_gate_reports_vm_without_device_discovery(self):
         with mock.patch.object(subject.shutil, "which",
                                return_value="/usr/bin/systemd-detect-virt"), \

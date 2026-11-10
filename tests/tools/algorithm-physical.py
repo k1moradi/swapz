@@ -4,6 +4,7 @@
 The unprivileged selector never writes devices. Only the already-hardened,
 source-bound private probe receives the exact confirmed USB swap partition.
 """
+import importlib.util
 import json
 import os
 from pathlib import Path
@@ -301,6 +302,47 @@ def _algorithm_ram_evidence_arguments() -> list[str]:
             "--algorithm-ram-nonce", nonce]
 
 
+def _canonical_source_preflight(algorithm_ram_evidence: list[str]) -> str | None:
+    """Authenticate this RAM-qualified source before asking for swap consent.
+
+    The privileged probe repeats this exact check before any device mutation.
+    This early, unprivileged refusal avoids a misleading consent prompt when
+    canonical main advanced during the lengthy five-stage RAM qualification.
+    """
+    if not algorithm_ram_evidence:
+        # The direct standalone path has no make-test evidence to reuse;
+        # the root-owned probe still owns mandatory source admission.
+        return None
+    try:
+        specification = importlib.util.spec_from_file_location(
+            "physical_swap_source_preconsent",
+            ROOT / "tests/tools/physical-swap-probe.py")
+        if specification is None or specification.loader is None:
+            return "canonical_source_verification_unavailable"
+        probe = importlib.util.module_from_spec(specification)
+        specification.loader.exec_module(probe)
+        if (probe._git("symbolic-ref", "--quiet", "--short", "HEAD") != "main" or
+                probe._git("status", "--porcelain")):
+            return "local_checkout_changed"
+        head = probe._git("rev-parse", "HEAD")
+        if head != probe._git("rev-parse", "origin/main"):
+            return "local_checkout_changed"
+        source = probe._development_code_source_sha(head)
+        probe._read_algorithm_ram_development_evidence(
+            Path(algorithm_ram_evidence[1]), os.getuid(), head,
+            source, algorithm_ram_evidence[3])
+        probe._require_development_canonical_main(head, source)
+    except (OSError, RuntimeError, TypeError, ValueError, AttributeError) as error:
+        # Child Git failures may contain remote URLs or authentication output.
+        # Only publish an exact, source-defined classification, never str(error).
+        if str(error) == "canonical main contains changed source after qualification":
+            return "canonical_source_advanced"
+        if str(error) == "canonical main advanced during source verification":
+            return "canonical_source_raced"
+        return "canonical_source_verification_unavailable"
+    return None
+
+
 def main() -> int:
     if not sys.stdin.isatty() or not sys.stdout.isatty():
         print("PHYSICAL_ALGORITHM_REAL_SWAP=NOT_RUN reason=noninteractive")
@@ -347,6 +389,19 @@ def main() -> int:
         algorithm_ram_evidence = _algorithm_ram_evidence_arguments()
     except ValueError as error:
         print("PHYSICAL_ALGORITHM_REAL_SWAP=BLOCKED " + str(error))
+        return 2
+    source_refusal = _canonical_source_preflight(algorithm_ram_evidence)
+    if source_refusal is not None:
+        print("PHYSICAL_ALGORITHM_REAL_SWAP=BLOCKED "
+              f"reason={source_refusal} phase=before_consent")
+        print("  Source admission: RAM-qualified source no longer has "
+              "verified canonical-main binding; new trial NOT RUN.")
+        if source_refusal == "canonical_source_advanced":
+            print("  Next: synchronize main and rerun make test to qualify "
+                  "the newer source before requesting physical consent.")
+        else:
+            print("  Next: restore verifiable local/canonical Git source "
+                  "identity, then rerun exact-source make test.")
         return 2
     print("  After confirmation, the privileged helper records root-only "
           "same-boot ownership in /run, checks memory headroom, and calls "
