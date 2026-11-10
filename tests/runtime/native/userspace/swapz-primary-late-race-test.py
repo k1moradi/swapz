@@ -262,6 +262,7 @@ static const char *const scenario_names[] = {
 };
 static enum fixture_scenario scenario;
 static int late;
+static int fixture_raw_swap_active;
 static unsigned int admission_reads;
 static unsigned int prewrite_reads;
 static unsigned int mapper_mutations;
@@ -949,7 +950,7 @@ static int fixture_swap_inventory(struct swapz_primary_swap_entry *entries,
         "Filename Type Size Used Priority\n"
         "/swapfile file 8192 1 -2\n";
     const char *text = header;
-    if ((!late && scenario == FIXTURE_SWAPS_INITIAL) ||
+    if ((scenario == FIXTURE_SWAPS_INITIAL && fixture_raw_swap_active) ||
         (late && (scenario == FIXTURE_SELECTED_SWAPFILE ||
                   scenario == FIXTURE_PARENT_SWAPFILE ||
                   scenario == FIXTURE_SWAP_STAT_EACCES)))
@@ -1064,6 +1065,10 @@ static int fixture_manifest(struct swapz_primary_manifest *manifest)
     manifest->target = selected_target;
     strcpy(manifest->source_sha, SWAPZ_BUILD_SOURCE_SHA);
     strcpy(manifest->run_id, "0123456789abcdef0123456789abcdef");
+    manifest->original_swap_active =
+        scenario == FIXTURE_SWAPS_INITIAL ? 1 : 0;
+    manifest->original_swap_priority =
+        manifest->original_swap_active ? -2 : 0;
     return 0;
 }
 static int fixture_report(struct swapz_primary_qualification *qualification)
@@ -1280,14 +1285,24 @@ static int fixture_original_swap_transition(
     const struct swapz_primary_manifest *manifest, int activate, int *changed)
 {
     assert(manifest != NULL && changed != NULL);
-    assert(activate == 0 && !manifest->original_swap_active);
+    assert(activate == 0);
     /* STARTING must be durable before the rootless transition boundary. */
     assert(starting_state_writes == 1U);
     assert(raw_swap_transition_calls == 0U);
     assert(raw_swap_policy_checks == 0U);
     ++raw_swap_transition_calls;
     ++raw_swap_policy_checks;
-    *changed = 0;
+    if (manifest->original_swap_active) {
+        assert(scenario == FIXTURE_SWAPS_INITIAL);
+        assert(manifest->original_swap_priority == -2);
+        assert(fixture_raw_swap_active);
+        fixture_raw_swap_active = 0;
+        *changed = 1;
+    } else {
+        assert(manifest->original_swap_priority == 0);
+        assert(!fixture_raw_swap_active);
+        *changed = 0;
+    }
     return 0;
 }
 static int fixture_swapon(int *activated)
@@ -1431,6 +1446,7 @@ static int check_case(enum fixture_scenario candidate)
     fixture_selector_reads = fixture_selector_aba_windows = 0U;
     fixture_geometry_last_use_checks = fixture_target_identity_last_use_checks = 0U;
     fixture_selector_during_target_revalidation_checks = 0U;
+    fixture_raw_swap_active = candidate == FIXTURE_SWAPS_INITIAL;
     fixture_prepare_selector(candidate);
     fixture_reset_mount_inventory();
     if (candidate == FIXTURE_FOREIGN_SELECTED_INITIAL)
@@ -1495,7 +1511,8 @@ static int check_case(enum fixture_scenario candidate)
         candidate == FIXTURE_UNRELATED_SIBLING ||
         candidate == FIXTURE_UNRELATED_SWAPFILE ||
         candidate == FIXTURE_WRONG_MOUNT_DEVICE ||
-        candidate == FIXTURE_DISAPPEARED_PID;
+        candidate == FIXTURE_DISAPPEARED_PID ||
+        candidate == FIXTURE_SWAPS_INITIAL;
     switch (candidate) {
     case FIXTURE_SELECTED_MOUNT:
     case FIXTURE_PARENT_MOUNT:
@@ -1508,7 +1525,6 @@ static int check_case(enum fixture_scenario candidate)
     case FIXTURE_SELECTED_SWAP_PARTITION:
     case FIXTURE_HOLDER_LATE:
     case FIXTURE_DM_INITIAL:
-    case FIXTURE_SWAPS_INITIAL:
     case FIXTURE_HOLDER_INITIAL:
         expected_error = EBUSY;
         break;
@@ -1692,7 +1708,7 @@ static int check_case(enum fixture_scenario candidate)
     }
     if (expected_safe) {
         if (result != 0 || admission_reads != 3U || prewrite_reads != 1U ||
-            raw_swap_transition_calls != 1U ||
+            raw_swap_transition_calls != 1U || fixture_raw_swap_active ||
             mapper_mutations != 1U || mkswap_calls != 1U ||
             swapon_calls != 1U || module_loads != 1U ||
             starting_state_writes != 1U || active_state_writes != 1U ||
@@ -1729,9 +1745,6 @@ static int check_case(enum fixture_scenario candidate)
             break;
         case FIXTURE_DM_INITIAL:
             phase = "module-mapper-inventory";
-            break;
-        case FIXTURE_SWAPS_INITIAL:
-            phase = "target-swap-inventory";
             break;
         case FIXTURE_HOLDER_INITIAL:
         case FIXTURE_WRONG_TARGET_OPEN:
@@ -1785,14 +1798,19 @@ static int check_case(enum fixture_scenario candidate)
                    sizeof(framing_marker) - 1U);
             expected_diagnostic_length = sizeof(framing_marker) - 1U;
         }
-        /* Every refusal case here follows READY state and manifest proof. */
+        /* Refusals after the raw-swap transition have observed its state;
+         * earlier refusals must not claim that boundary was reached.
+         */
+        const char *expected_swap_observation =
+            raw_swap_transition_calls ? "OBSERVED" : "UNOBSERVED";
         expected_length = snprintf(
             expected_diagnostic + expected_diagnostic_length,
             sizeof(expected_diagnostic) - expected_diagnostic_length,
             "PRIMARY_START=FAILED phase=%s errno=%d error=%s "
             "original_errno=%d persistence_boundary=none "
-            "durable=OBSERVED mapper=UNOBSERVED swap=UNOBSERVED\n",
-            phase, expected_error, strerror(expected_error), expected_error);
+            "durable=OBSERVED mapper=UNOBSERVED swap=%s\n",
+            phase, expected_error, strerror(expected_error), expected_error,
+            expected_swap_observation);
 
         assert(expected_length > 0 &&
                (size_t)expected_length <
@@ -1820,11 +1838,13 @@ static int check_case(enum fixture_scenario candidate)
                 "PRIMARY_START=ADMISSION_DETAIL phase=%s expected=%s "
                 "observed=%s errno=%d original_errno=%d "
                 "persistence_boundary=none durable=OBSERVED "
-                "mapper=UNOBSERVED swap=UNOBSERVED retained_state=%s "
+                "mapper=UNOBSERVED swap=%s retained_state=%s "
                 "target_unchanged=true\n",
                 phase, expected_class,
                 observed_class, expected_error, expected_error,
-                late ? "STARTING_PENDING_RECOVERY_UPDATE" : "READY");
+                expected_swap_observation,
+                starting_state_writes ?
+                    "STARTING_PENDING_RECOVERY_UPDATE" : "READY");
 
             assert(detail_length > 0 &&
                    (size_t)detail_length <
@@ -1855,9 +1875,8 @@ static int check_case(enum fixture_scenario candidate)
                namespace_identity_initial_inode ==
                    namespace_identity_late_inode))) ||
             writes || module_loads ||
-            starting_state_writes != (unsigned int)late ||
             active_state_writes != 0U ||
-            recovery_marks != (unsigned int)late ||
+            recovery_marks != starting_state_writes ||
             owner_release_calls != 0U ||
             ((candidate == FIXTURE_DM_INITIAL ||
               candidate == FIXTURE_SWAPS_INITIAL ||

@@ -118,13 +118,19 @@ ignoring the free nor silently weakening the constructor audit is acceptable.
 
 ### Rootless primary-start transition contract
 
-The source-extracted late-race fixture must supply exactly one inert original
-swap transition adapter. It checks the durable STARTING marker and exact
-previously-inactive swap state without issuing host `swapoff`, `swapon`,
-`mkswap`, or raw-partition writes. An early selector/mount/target denial after
-STARTING is allowed to leave its transition count at zero. A successful
-module/mapper activation requires the transition to have run exactly once.
-The actual syscall/reconciliation ownership path remains independently tested.
+The source-extracted late-race fixture must supply exactly one original-swap
+transition adapter without issuing host `swapoff`, `swapon`, `mkswap`, or
+raw-partition writes. Most cases model an already-inactive ordinary swap
+partition; one positive control must instead bind
+`original_swap_active=1` with an automatic negative Linux priority, simulate
+exactly one successful deactivation, and continue through mapper activation.
+That active ordinary-swap control is not an error case: START is required to
+disable normal swap when needed. An early selector/mount/target denial after
+STARTING may leave the transition count at zero. A successful module/mapper
+activation requires the transition to have run exactly once. Refusals after
+that transition must expect `swap=OBSERVED`; refusals before it must retain
+`swap=UNOBSERVED`. The actual syscall/reconciliation ownership path remains
+independently tested.
 
 ## New P0 ordinary swap and RAM-metadata acceptance gate
 
