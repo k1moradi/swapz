@@ -1918,6 +1918,7 @@ static int swapz_configure_linux_swap_layout(
 	swapz_u32 clean_index = 0;
 	swapz_u32 raw_segment;
 	swapz_u32 bad_index;
+	swapz_u32 first_contaminated_bad_index;
 	int error = 0;
 
 	if (!ctx || !block || !layout)
@@ -1931,6 +1932,7 @@ static int swapz_configure_linux_swap_layout(
 	 * the incomplete tail cannot contaminate a complete 1MiB swapz segment, so
 	 * first prove whether a sparse translation is needed at all.
 	 */
+	first_contaminated_bad_index = layout->bad_pages;
 	for (bad_index = 0; bad_index < layout->bad_pages; ++bad_index) {
 		const swapz_u32 bad_page =
 			swapz_linux_swap_bad_page(block, layout, bad_index);
@@ -1939,11 +1941,11 @@ static int swapz_configure_linux_swap_layout(
 			return -EUCLEAN;
 		raw_segment = (bad_page - 1U) / SWAPZ_SEGMENT_BLOCKS;
 		if (raw_segment < raw_segments) {
-			contaminated_segments = 1U;
+			first_contaminated_bad_index = bad_index;
 			break;
 		}
 	}
-	if (!contaminated_segments) {
+	if (first_contaminated_bad_index == layout->bad_pages) {
 		ctx->backing_last_page = layout->last_page;
 		ctx->backing_bad_pages = layout->bad_pages;
 		ctx->backing_skipped_segments = 0;
@@ -1960,8 +1962,12 @@ static int swapz_configure_linux_swap_layout(
 	bad_segments = bitmap_zalloc(raw_segments, GFP_KERNEL);
 	if (!bad_segments)
 		return -ENOMEM;
-	contaminated_segments = 0;
-	for (bad_index = 0; bad_index < layout->bad_pages; ++bad_index) {
+	/*
+	 * Entries before first_contaminated_bad_index were already validated and
+	 * proven to lie only in the incomplete tail, so do not decode them twice.
+	 */
+	for (bad_index = first_contaminated_bad_index;
+	     bad_index < layout->bad_pages; ++bad_index) {
 		const swapz_u32 bad_page =
 			swapz_linux_swap_bad_page(block, layout, bad_index);
 
