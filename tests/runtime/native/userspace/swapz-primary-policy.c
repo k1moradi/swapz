@@ -4,6 +4,7 @@
 	"5832d55be0de0c8ee1dba91f8e61962b9b74cba7d393e937db96bf16d1a925d5"
 #define TEST_PARTUUID "7fb9401d-04"
 #define TEST_DEVICE_BYTES (16ULL * 1024ULL * 1024ULL * 1024ULL)
+#define TEST_SWAP_SIZE_KIB 16777212ULL
 #define main swapzctl_program_main
 #include "../../../../src/userspace/swapz-primary.c"
 #undef main
@@ -855,7 +856,7 @@ static void test_swap_inventory_parser(void)
 	assert(count == 1U);
 	assert(!strcmp(rows[0].path, "/dev/sda4"));
 	assert(!strcmp(rows[0].type, "partition"));
-	assert(rows[0].size_kib == SWAPZ_PRIMARY_SWAP_SIZE_KIB);
+	assert(rows[0].size_kib == TEST_SWAP_SIZE_KIB);
 	assert(rows[0].used_kib == 0ULL);
 	assert(rows[0].priority == -1);
 	assert(swapz_primary_parse_swaps(
@@ -904,37 +905,37 @@ static void test_selected_target_swap_quiescence(void)
 	rows[0].used_kib = 123U;
 	assert(swapz_primary_swap_inventory_target_is_quiescent(
 		rows, devices, is_block, 1U, makedev(8, 4),
-		SWAPZ_PRIMARY_SWAP_SIZE_KIB) == 0);
+		TEST_SWAP_SIZE_KIB) == 0);
 	devices[0] = makedev(8, 4);
 	errno = 0;
 	assert(swapz_primary_swap_inventory_target_is_quiescent(
 		rows, devices, is_block, 1U, makedev(8, 4),
-		SWAPZ_PRIMARY_SWAP_SIZE_KIB) < 0);
+		TEST_SWAP_SIZE_KIB) < 0);
 	assert(errno == EBUSY);
 	devices[0] = 0;
 
 	strcpy(rows[1].path, "/dev/target-alias");
 	strcpy(rows[1].type, "partition");
-	rows[1].size_kib = SWAPZ_PRIMARY_SWAP_SIZE_KIB;
+	rows[1].size_kib = TEST_SWAP_SIZE_KIB;
 	rows[1].used_kib = 0U;
 	devices[1] = makedev(8, 4);
 	is_block[1] = 1U;
 	assert(swapz_primary_swap_inventory_target_is_quiescent(
 		rows, devices, is_block, 2U, makedev(8, 4),
-		SWAPZ_PRIMARY_SWAP_SIZE_KIB) == 0);
+		TEST_SWAP_SIZE_KIB) == 0);
 
 	rows[1].used_kib = 1U;
 	errno = 0;
 	assert(swapz_primary_swap_inventory_target_is_quiescent(
 		rows, devices, is_block, 2U, makedev(8, 4),
-		SWAPZ_PRIMARY_SWAP_SIZE_KIB) < 0);
+		TEST_SWAP_SIZE_KIB) < 0);
 	assert(errno == EBUSY);
 	rows[1].used_kib = 0U;
 	--rows[1].size_kib;
 	errno = 0;
 	assert(swapz_primary_swap_inventory_target_is_quiescent(
 		rows, devices, is_block, 2U, makedev(8, 4),
-		SWAPZ_PRIMARY_SWAP_SIZE_KIB) < 0);
+		TEST_SWAP_SIZE_KIB) < 0);
 	assert(errno == EBUSY);
 	++rows[1].size_kib;
 
@@ -945,7 +946,7 @@ static void test_selected_target_swap_quiescence(void)
 	errno = 0;
 	assert(swapz_primary_swap_inventory_target_is_quiescent(
 		rows, devices, is_block, 3U, makedev(8, 4),
-		SWAPZ_PRIMARY_SWAP_SIZE_KIB) < 0);
+		TEST_SWAP_SIZE_KIB) < 0);
 	assert(errno == EBUSY);
 }
 
@@ -1223,7 +1224,11 @@ static void test_target_config_and_dynamic_geometry(void)
 	       SWAPZ_PRIMARY_ORIGINAL_HEADER_SHA256,
 	       sizeof(manifest.original_header_sha256));
 	manifest.target = swapz_primary_selected_target;
+	manifest.backing_physical_blocks = (uint32_t)
+		swapz_primary_physical_blocks(manifest.target.device_bytes);
 	manifest.target = alternate;
+	manifest.backing_physical_blocks = (uint32_t)
+		swapz_primary_physical_blocks(manifest.target.device_bytes);
 	assert(swapz_primary_mapper_layout(&manifest, mapper_name, mapper_uuid,
 					  table, &logical_sectors) == 0);
 	assert(strstr(table, "swapz 259:18 ") != NULL);
@@ -1236,6 +1241,8 @@ static void test_target_config_and_dynamic_geometry(void)
 	assert(swapz_primary_manifest_parse(record, (size_t)length, &parsed) == 0);
 	assert(!memcmp(&manifest, &parsed, sizeof(manifest)));
 	manifest.target = zero_minor;
+	manifest.backing_physical_blocks = (uint32_t)
+		swapz_primary_physical_blocks(manifest.target.device_bytes);
 	assert(swapz_primary_manifest_format(
 		&manifest, record, sizeof(record)) > 0);
 	length = (int)strlen(record);
@@ -1564,6 +1571,8 @@ static void test_primary_manifest(int recovery_fd, int lock_fd,
 	       SWAPZ_PRIMARY_ORIGINAL_HEADER_SHA256,
 	       sizeof(manifest.original_header_sha256));
 	manifest.target = swapz_primary_selected_target;
+	manifest.backing_physical_blocks = (uint32_t)
+		swapz_primary_physical_blocks(manifest.target.device_bytes);
 	length = swapz_primary_manifest_format(&manifest, record,
 					      sizeof(record));
 	assert(length > 0);
@@ -1647,6 +1656,8 @@ static void test_primary_transaction_manifest_integrity(
 	       SWAPZ_PRIMARY_ORIGINAL_HEADER_SHA256,
 	       sizeof(manifest.original_header_sha256));
 	manifest.target = swapz_primary_selected_target;
+	manifest.backing_physical_blocks = (uint32_t)
+		swapz_primary_physical_blocks(manifest.target.device_bytes);
 
 	assert(swapz_primary_manifest_write_at(
 		recovery_fd, lock_fd, &manifest, geteuid()) == 0);
@@ -1691,6 +1702,8 @@ static void test_primary_module_load_record(
 	       SWAPZ_PRIMARY_ORIGINAL_HEADER_SHA256,
 	       sizeof(manifest.original_header_sha256));
 	manifest.target = swapz_primary_selected_target;
+	manifest.backing_physical_blocks = (uint32_t)
+		swapz_primary_physical_blocks(manifest.target.device_bytes);
 
 	assert(swapz_primary_manifest_write_at(
 		recovery_fd, lock_fd, &manifest, geteuid()) == 0);
@@ -1756,6 +1769,8 @@ static void test_primary_dm_table(void)
 	       SWAPZ_PRIMARY_ORIGINAL_HEADER_SHA256,
 	       sizeof(manifest.original_header_sha256));
 	manifest.target = swapz_primary_selected_target;
+	manifest.backing_physical_blocks = (uint32_t)
+		swapz_primary_physical_blocks(manifest.target.device_bytes);
 	assert(swapz_primary_mapper_layout(&manifest, mapper_name, mapper_uuid,
 					 table, &logical_sectors) == 0);
 	assert(!strcmp(mapper_name, "swapz-primary"));
@@ -1991,6 +2006,8 @@ static void test_backing_header_digest_recognition(void)
 	       SWAPZ_PRIMARY_SHA256_LENGTH);
 	manifest.qualification_report_sha256[SWAPZ_PRIMARY_SHA256_LENGTH] = '\0';
 	manifest.target = swapz_primary_selected_target;
+	manifest.backing_physical_blocks = (uint32_t)
+		swapz_primary_physical_blocks(manifest.target.device_bytes);
 	assert(swapz_primary_sha256(
 		header, sizeof(header), manifest.original_header_sha256) == 0);
 
@@ -3255,7 +3272,7 @@ static void test_primary_preparation_refusal_helpers(void)
 	errno = 0;
 	assert(swapz_primary_swap_inventory_target_is_quiescent(
 		entries, resolved_devices, resolved_is_block, 2U,
-		target_device, SWAPZ_PRIMARY_SWAP_SIZE_KIB) < 0);
+		target_device, TEST_SWAP_SIZE_KIB) < 0);
 	assert(errno == EBUSY);
 	assert(!memcmp(entries, original_entries, sizeof(entries)));
 	assert(resolved_devices[0] == makedev(259U, 1U));
@@ -3502,17 +3519,41 @@ int main(void)
 	assert(!swapz_primary_page_limit_fits(30465536ULL, 27080193ULL));
 	assert(!swapz_primary_page_limit_fits(30465536ULL, 27080448ULL));
 	assert(27080192ULL * SWAPZ_PRIMARY_BLOCK_BYTES == 110920466432ULL);
-	assert(swapz_primary_swap_size_kib(124787884032ULL) == 121863164ULL);
-	/* /proc/swaps is page-granular. Sub-page partition tails must not
-	 * change the expected raw-swap Size field or make admission impossible. */
-	assert(swapz_primary_swap_size_kib(124787884032ULL + 511ULL) ==
-	       121863164ULL);
-	assert(swapz_primary_swap_size_kib(124787884032ULL + 1024ULL) ==
-	       121863164ULL);
-	assert(swapz_primary_swap_size_kib(124787884032ULL + 4095ULL) ==
-	       121863164ULL);
+	{
+		static const unsigned char swap_magic[] = "SWAPSPACE2";
+		unsigned char raw_swap_header[SWAPZ_PRIMARY_BLOCK_BYTES] = {0};
+		const uint64_t raw_device_bytes = 124787884032ULL;
+		const uint32_t raw_last_page =
+			(uint32_t)(raw_device_bytes / SWAPZ_PRIMARY_BLOCK_BYTES - 1ULL);
+
+		test_put_u32_le(raw_swap_header,
+				SWAPZ_LINUX_SWAP_VERSION_OFFSET, 1U);
+		test_put_u32_le(raw_swap_header,
+				SWAPZ_LINUX_SWAP_LAST_PAGE_OFFSET, raw_last_page);
+		test_put_u32_le(raw_swap_header,
+				SWAPZ_LINUX_SWAP_BAD_PAGES_OFFSET, 0U);
+		memcpy(raw_swap_header + sizeof(raw_swap_header) -
+		       sizeof(swap_magic) + 1U,
+		       swap_magic, sizeof(swap_magic) - 1U);
+		assert(swapz_primary_swap_size_kib_from_header(
+			       raw_swap_header, raw_device_bytes) == 121863164ULL);
+		/* The SWAPSPACE2 declaration, not a sub-page partition tail,
+		 * determines Linux's /proc/swaps Size value. */
+		assert(swapz_primary_swap_size_kib_from_header(
+			       raw_swap_header, raw_device_bytes + 4095ULL) ==
+		       121863164ULL);
+		test_put_u32_le(raw_swap_header,
+				SWAPZ_LINUX_SWAP_BAD_PAGES_OFFSET, 2U);
+		test_put_u32_le(raw_swap_header,
+				SWAPZ_LINUX_SWAP_BAD_PAGE_LIST_OFFSET, 257U);
+		test_put_u32_le(raw_swap_header,
+				SWAPZ_LINUX_SWAP_BAD_PAGE_LIST_OFFSET +
+					sizeof(uint32_t), 513U);
+		assert(swapz_primary_swap_size_kib_from_header(
+			       raw_swap_header, raw_device_bytes) == 121863156ULL);
+	}
 	assert(swapz_primary_linux_swap_size_kib(27080192ULL) == 108320764ULL);
-	assert(swapz_primary_swap_size_kib(124787884032ULL) !=
+	assert(121863164ULL !=
 	       swapz_primary_linux_swap_size_kib(27080192ULL));
 	assert(swapz_primary_linux_swap_size_kib(0ULL) == 0ULL);
 	assert(swapz_primary_linux_swap_size_kib(UINT64_MAX) == 0ULL);
