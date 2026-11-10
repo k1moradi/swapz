@@ -186,9 +186,9 @@ static inline unsigned int swapz_linux_swap_clean_segment_count(
 }
 
 /*
- * Transitional admission wrapper. The parser above understands the ordinary
- * Linux format fully, but physical swapz admission remains fail-closed until
- * both kernel and userspace consume smaller declared areas and bad-page lists.
+ * Strict contiguous-layout helper retained for mapper/test fixtures that need
+ * the historical full-device shape. Physical backing admission uses the full
+ * parser plus the RAM clean-segment map and must not call this stricter helper.
  */
 static inline int swapz_linux_swap_header_valid(
 	const unsigned char *block, unsigned long long device_bytes)
