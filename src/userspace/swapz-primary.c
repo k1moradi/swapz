@@ -41,6 +41,8 @@
 /* Linux swapon(2) ABI policy bit. libc commonly exposes only
  * SWAP_FLAG_DISCARD, so keep the released-cluster selector local. */
 #define SWAPZ_PRIMARY_SWAP_FLAG_DISCARD_PAGES 0x40000
+#define SWAPZ_PRIMARY_SWAP_FLAG_PREFER 0x8000
+#define SWAPZ_PRIMARY_SWAP_FLAG_PRIORITY_MASK 0x7fff
 
 /* NS_GET_MNTNS_ID is available since Linux 6.11, including on systems
  * whose userspace headers predate its declaration. Keep the namespace fd
@@ -10728,6 +10730,154 @@ static int swapz_primary_proc_fd_path(int fd, char *path, size_t capacity)
 	return swapz_primary_path_format(
 		path, capacity, "/proc/self/fd/%d", fd);
 }
+
+static int swapz_primary_swap_priority_policy_matches(
+	int expected_priority, int observed_priority)
+{
+	if (expected_priority >= 0)
+		return observed_priority == expected_priority;
+	return observed_priority < 0;
+}
+
+static int swapz_primary_original_swap_size_from_manifest(
+	const struct swapz_primary_manifest *manifest, uint64_t *size_kib)
+{
+	unsigned char header[SWAPZ_PRIMARY_BLOCK_BYTES] = {0};
+	uint64_t observed_size_kib;
+	int target_fd = -1;
+	int result = -1;
+	int saved_errno = EIO;
+
+	if (!swapz_primary_manifest_valid(manifest) || !size_kib) {
+		errno = EINVAL;
+		return -1;
+	}
+	swapz_primary_selected_target = manifest->target;
+	target_fd = swapz_primary_target_open_readonly();
+	if (target_fd < 0 ||
+	    swapz_primary_exact_read(target_fd, header, sizeof(header)) < 0 ||
+	    swapz_primary_backing_header_matches_manifest(header, manifest) < 0)
+		goto out;
+	observed_size_kib = swapz_primary_swap_size_kib_from_header(
+		header, manifest->target.device_bytes);
+	if (!observed_size_kib) {
+		errno = EINVAL;
+		goto out;
+	}
+	*size_kib = observed_size_kib;
+	result = 0;
+out:
+	saved_errno = result == 0 ? 0 : (errno ? errno : EIO);
+	if (target_fd >= 0 && close(target_fd) < 0 && result == 0) {
+		result = -1;
+		saved_errno = errno;
+	}
+	memset(header, 0, sizeof(header));
+	if (result < 0)
+		errno = saved_errno;
+	return result;
+}
+
+static int swapz_primary_transition_original_swap(
+	const struct swapz_primary_manifest *manifest, int activate,
+	int *changed_by_call)
+{
+	char target_path[64];
+	uint64_t target_size_kib = 0;
+	int target_fd = -1;
+	int current_active = 0;
+	int current_priority = 0;
+	int syscall_errno = 0;
+	long syscall_result;
+	int result = -1;
+	int saved_errno = EIO;
+	int swap_flags = 0;
+
+	if (!swapz_primary_manifest_valid(manifest) ||
+	    (activate != 0 && activate != 1) || !changed_by_call) {
+		errno = EINVAL;
+		return -1;
+	}
+	*changed_by_call = 0;
+	if (swapz_primary_original_swap_size_from_manifest(
+		    manifest, &target_size_kib) < 0 ||
+	    swapz_primary_original_swap_policy_snapshot(
+		    target_size_kib, activate ? 0 : 1,
+		    &current_active, &current_priority) < 0)
+		return -1;
+
+	if (!manifest->original_swap_active) {
+		if (current_active) {
+			errno = EBUSY;
+			return -1;
+		}
+		return 0;
+	}
+
+	if (!activate) {
+		/* START must disable exactly the policy PREPARE observed. */
+		if (!current_active ||
+		    !swapz_primary_swap_priority_policy_matches(
+			    manifest->original_swap_priority, current_priority)) {
+			errno = ESTALE;
+			return -1;
+		}
+	} else if (current_active) {
+		/* RECOVER/STOP are idempotent if ordinary swap is already restored. */
+		if (!swapz_primary_swap_priority_policy_matches(
+			    manifest->original_swap_priority, current_priority)) {
+			errno = ESTALE;
+			return -1;
+		}
+		return 0;
+	}
+
+	swapz_primary_selected_target = manifest->target;
+	target_fd = swapz_primary_target_open_readonly();
+	if (target_fd < 0 ||
+	    swapz_primary_proc_fd_path(
+		    target_fd, target_path, sizeof(target_path)) < 0)
+		goto out;
+	if (activate && manifest->original_swap_priority >= 0)
+		swap_flags = SWAPZ_PRIMARY_SWAP_FLAG_PREFER |
+			(manifest->original_swap_priority &
+			 SWAPZ_PRIMARY_SWAP_FLAG_PRIORITY_MASK);
+
+	errno = 0;
+	syscall_result = activate ?
+		syscall(SYS_swapon, target_path, swap_flags) :
+		syscall(SYS_swapoff, target_path);
+	if (syscall_result < 0)
+		syscall_errno = errno ? errno : EIO;
+	if (syscall_result < 0 && syscall_errno != EINTR) {
+		errno = syscall_errno;
+		goto out;
+	}
+
+	if (swapz_primary_original_swap_policy_snapshot(
+		    target_size_kib, 0, &current_active, &current_priority) < 0)
+		goto out;
+	if ((!activate && current_active) ||
+	    (activate && (!current_active ||
+	     !swapz_primary_swap_priority_policy_matches(
+		     manifest->original_swap_priority, current_priority)))) {
+		errno = syscall_errno ? syscall_errno : EBUSY;
+		goto out;
+	}
+
+	*changed_by_call = 1;
+	result = 0;
+out:
+	saved_errno = result == 0 ? 0 : (errno ? errno : EIO);
+	if (target_fd >= 0 && close(target_fd) < 0 && result == 0) {
+		result = -1;
+		saved_errno = errno;
+	}
+	if (result < 0)
+		errno = saved_errno;
+	return result;
+}
+
 
 static int swapz_primary_mkswap_open(void)
 {
