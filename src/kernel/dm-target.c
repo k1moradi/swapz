@@ -8919,6 +8919,8 @@ static u64 swapz_authority_metadata_ram_bytes(
 	 *   logical page: map + exact segment prev/next links,
 	 *   physical block: liveness + extent class + sequence delta,
 	 *   segment: GC/accounting/role/sequence sidecars.
+	 * A sparse Linux-swap bad-page translation map is conditional and added
+	 * by the constructor after this common geometry-scaled total.
 	 * Keep this formula beside the allocations and cache the result once.
 	 */
 	return (u64)logical_pages *
@@ -9288,6 +9290,10 @@ static int swapz_ctr(struct dm_target *ti, unsigned int argc, char **argv)
 	ctx->segment_count = physical / SWAPZ_SEGMENT_BLOCKS;
 	ctx->authority_metadata_ram_bytes = swapz_authority_metadata_ram_bytes(
 		ctx->logical_pages, ctx->physical_blocks, ctx->segment_count);
+	if (ctx->segment_backing_pages)
+		ctx->authority_metadata_ram_bytes +=
+			(u64)ctx->segment_count *
+			sizeof(*ctx->segment_backing_pages);
 	ctx->read_payload_cache_ram_bytes = swapz_read_payload_cache_ram_bytes();
 	ctx->gc_scores = kvcalloc(ctx->segment_count,
 				  sizeof(*ctx->gc_scores), GFP_KERNEL);
