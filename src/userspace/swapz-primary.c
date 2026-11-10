@@ -85,7 +85,7 @@ static void swapz_primary_selected_target_clear(void)
 #error "owned-null_blk lifecycle test requires private mutation lock directory"
 #endif
 #define SWAPZ_PRIMARY_CONFIG_BASE SWAPZ_PRIMARY_TEST_CONFIG_BASE
-#define SWAPZ_PRIMARY_RECOVERY_BASE SWAPZ_PRIMARY_TEST_RECOVERY_BASE
+#define SWAPZ_PRIMARY_RUNTIME_STATE_BASE SWAPZ_PRIMARY_TEST_RECOVERY_BASE
 #define SWAPZ_PRIMARY_QUALIFICATION_BASE SWAPZ_PRIMARY_TEST_RECOVERY_BASE
 #define SWAPZ_PRIMARY_QUALIFICATION_REPORT \
 	SWAPZ_PRIMARY_TEST_QUALIFICATION_REPORT
@@ -97,7 +97,8 @@ static void swapz_primary_selected_target_clear(void)
 #error "physical lifecycle qualification requires installed qualified control path"
 #endif
 #define SWAPZ_PRIMARY_CONFIG_BASE "/etc/swapz"
-#define SWAPZ_PRIMARY_RECOVERY_BASE "/var/lib/swapz/physical-recovery"
+#define SWAPZ_PRIMARY_RUNTIME_STATE_BASE \
+	SWAPZ_PRIMARY_EXECUTION_RUNTIME_DIRECTORY
 #define SWAPZ_PRIMARY_QUALIFICATION_BASE "/var/lib/swapz/physical-recovery"
 #define SWAPZ_PRIMARY_QUALIFICATION_REPORT \
 	"/var/lib/swapz/physical-recovery/primary-qualification.json"
@@ -112,7 +113,8 @@ static void (*swapz_primary_rootless_selector_before_revalidation)(void);
 #else
 #define SWAPZ_PRIMARY_CONFIG_BASE "/etc/swapz"
 #endif
-#define SWAPZ_PRIMARY_RECOVERY_BASE "/var/lib/swapz/physical-recovery"
+#define SWAPZ_PRIMARY_RUNTIME_STATE_BASE \
+	SWAPZ_PRIMARY_EXECUTION_RUNTIME_DIRECTORY
 #define SWAPZ_PRIMARY_QUALIFICATION_BASE "/var/lib/swapz/physical-recovery"
 #define SWAPZ_PRIMARY_QUALIFICATION_REPORT \
 	"/var/lib/swapz/physical-recovery/primary-qualification.json"
@@ -3469,21 +3471,45 @@ static int swapz_primary_recovery_base_open(const char *path,
 	return fd;
 }
 
-static int swapz_primary_persistent_fs_magic(long type)
+static int swapz_primary_runtime_state_base_open(uid_t expected_owner)
 {
+#ifndef SWAPZ_PRIMARY_OWNED_NULLBLK_TEST
+	if (expected_owner != 0) {
+		errno = EPERM;
+		return -1;
+	}
+	/*
+	 * /run is root-owned and volatile. mkdir() cannot replace an existing
+	 * object; swapz_primary_recovery_base_open() then rejects symlinks,
+	 * foreign ownership, writable parent components or an unsafe mode.
+	 */
+	if (mkdir(SWAPZ_PRIMARY_RUNTIME_STATE_BASE, 0700) < 0 &&
+	    errno != EEXIST)
+		return -1;
+#endif
+	return swapz_primary_recovery_base_open(
+		SWAPZ_PRIMARY_RUNTIME_STATE_BASE, expected_owner);
+}
+
+static int swapz_primary_runtime_state_fs_magic(long type)
+{
+#ifdef SWAPZ_PRIMARY_OWNED_NULLBLK_TEST
+	/*
+	 * The owned-nullblk rehearsal isolates this path under its root-only test
+	 * tree. Production runtime ownership never uses a block-backed filesystem.
+	 */
 	switch ((unsigned long)type) {
 	case EXT2_SUPER_MAGIC:
 	case XFS_SUPER_MAGIC:
 	case F2FS_SUPER_MAGIC:
-		return 1;
-#ifdef SWAPZ_PRIMARY_OWNED_NULLBLK_TEST
-	/* Btrfs is eligible only in the private RAM-backed rehearsal. */
 	case BTRFS_SUPER_MAGIC:
 		return 1;
-#endif
 	default:
 		return 0;
 	}
+#else
+	return (unsigned long)type == TMPFS_MAGIC;
+#endif
 }
 
 static int swapz_primary_path_format(char *path, size_t capacity,
@@ -5172,8 +5198,7 @@ static int swapz_primary_owned_nullblk_btrfs_partition(
 
 	if (!partition_device || major(filesystem_device) != 0U)
 		return 0;
-	recovery_fd = swapz_primary_recovery_base_open(
-		SWAPZ_PRIMARY_RECOVERY_BASE, 0);
+	recovery_fd = swapz_primary_runtime_state_base_open(0);
 	if (recovery_fd < 0)
 		return 0;
 	if (fstat(recovery_fd, &directory_info) < 0 ||
@@ -5456,8 +5481,10 @@ static int swapz_primary_recovery_preflight(
 	struct statfs filesystem_info;
 	struct stat marker_info;
 	char marker_name[96];
+#ifdef SWAPZ_PRIMARY_OWNED_NULLBLK_TEST
 	dev_t source_device;
 	dev_t source_parent_device = 0;
+#endif
 	int recovery_fd;
 	int marker_result;
 
@@ -5481,8 +5508,7 @@ static int swapz_primary_recovery_preflight(
 		errno = ENODEV;
 		return -1;
 	}
-	recovery_fd = swapz_primary_recovery_base_open(
-		SWAPZ_PRIMARY_RECOVERY_BASE, 0);
+	recovery_fd = swapz_primary_runtime_state_base_open(0);
 	if (recovery_fd < 0)
 		return -1;
 	if (fstat(recovery_fd, &directory_info) < 0 ||
@@ -5495,9 +5521,10 @@ static int swapz_primary_recovery_preflight(
 	}
 	*directory_safe = 1;
 	*persistent_filesystem =
-		swapz_primary_persistent_fs_magic(filesystem_info.f_type);
+		swapz_primary_runtime_state_fs_magic(filesystem_info.f_type);
 	*filesystem_major = major(directory_info.st_dev);
 	*filesystem_minor = minor(directory_info.st_dev);
+#ifdef SWAPZ_PRIMARY_OWNED_NULLBLK_TEST
 	*directly_not_target =
 		(*filesystem_major != 0U || *filesystem_minor != 0U) &&
 		!(*filesystem_major == swapz_primary_selected_target.device_major &&
@@ -5511,6 +5538,15 @@ static int swapz_primary_recovery_preflight(
 		*physical_parent_major = major(source_parent_device);
 		*physical_parent_minor = minor(source_parent_device);
 	}
+#else
+	/*
+	 * Production runtime state is tmpfs and therefore has no physical backing
+	 * parent to compare against the swap target. These legacy plan booleans
+	 * remain true for ABI continuity while the parent identity stays 0:0.
+	 */
+	*directly_not_target = *persistent_filesystem;
+	*source_chain_checked = *persistent_filesystem;
+#endif
 	if (snprintf(marker_name, sizeof(marker_name), "partition-%s.active",
 		     SWAPZ_PRIMARY_PARTUUID) < 0 ||
 	    strlen(marker_name) >= sizeof(marker_name)) {
@@ -6947,22 +6983,11 @@ static int swapz_primary_shared_root_scope_record_matches(
 	       !memcmp(record, expected, (size_t)expected_length);
 }
 
-/* The exception covers root/target sharing only; recovery stays independent. */
+/* The exception binds only the exact root/target physical-parent relationship. */
 static int swapz_primary_shared_root_parent_relationship_valid(
 	dev_t target_parent, dev_t root_parent)
 {
 	if (!target_parent || target_parent != root_parent) {
-		errno = EPERM;
-		return 0;
-	}
-	return 1;
-}
-
-static int swapz_primary_recovery_parent_separation_valid(
-	dev_t target_parent, dev_t recovery_parent)
-{
-	if (!target_parent || !recovery_parent ||
-	    target_parent == recovery_parent) {
 		errno = EPERM;
 		return 0;
 	}
@@ -7456,8 +7481,7 @@ int swapz_primary_partition_lock_acquire(const char *partuuid)
 	if (swapz_primary_target_inspect(partuuid, &target) < 0)
 		return -1;
 	swapz_primary_selected_target = target;
-	recovery_fd = swapz_primary_recovery_base_open(
-		SWAPZ_PRIMARY_RECOVERY_BASE, expected_owner);
+	recovery_fd = swapz_primary_runtime_state_base_open(expected_owner);
 	if (recovery_fd < 0)
 		return -1;
 	lock_fd = swapz_primary_partition_lock_at(
@@ -9233,8 +9257,8 @@ static int swapz_primary_shared_root_scope_collect(
 
 static int swapz_primary_shared_root_scope_record_live(
 	const struct swapz_primary_target *target, dev_t root_device,
-	dev_t target_parent, dev_t root_parent, dev_t recovery_parent,
-	int target_fd, char scope_sha256[65])
+	dev_t target_parent, dev_t root_parent, int target_fd,
+	char scope_sha256[65])
 {
 	struct swapz_primary_shared_root_scope scope = {0};
 	struct stat directory_info;
@@ -9256,9 +9280,6 @@ static int swapz_primary_shared_root_scope_record_live(
 	    swapz_primary_shared_root_scope_sha256(&scope, scope_digest) < 0)
 		goto out;
 	memcpy(scope_sha256, scope_digest, sizeof(scope_digest));
-	if (!swapz_primary_recovery_parent_separation_valid(
-		    target_parent, recovery_parent))
-		goto out;
 	directory_fd = open(SWAPZ_PRIMARY_CONFIG_BASE,
 			    O_RDONLY | O_DIRECTORY | O_NOFOLLOW | O_CLOEXEC);
 	if (directory_fd < 0)
@@ -11964,8 +11985,7 @@ static int swapz_primary_qualification_import(const char *source_path)
 		errno = EPERM;
 		goto out;
 	}
-	recovery_fd = swapz_primary_recovery_base_open(
-		SWAPZ_PRIMARY_RECOVERY_BASE, 0);
+	recovery_fd = swapz_primary_runtime_state_base_open(0);
 	if (recovery_fd < 0)
 		goto out;
 	lock_fd = swapz_primary_partition_lock_at(
@@ -12077,8 +12097,7 @@ static int swapz_primary_prepare_metadata(
 	if (swapz_primary_configured_target(&target) < 0)
 		goto out;
 	failure_phase = "recovery-directory-open";
-	recovery_fd = swapz_primary_recovery_base_open(
-		SWAPZ_PRIMARY_RECOVERY_BASE, 0);
+	recovery_fd = swapz_primary_runtime_state_base_open(0);
 	if (recovery_fd < 0)
 		goto out;
 	failure_phase = "partition-lock-and-prior-claim";
@@ -12173,14 +12192,6 @@ static int swapz_primary_prepare_metadata(
 		errno = EPERM;
 		goto out;
 	}
-	if (target_parent == makedev(recovery_parent_major,
-				      recovery_parent_minor)) {
-		failure_phase = "target-recovery-parent-separation";
-		failure_expected = "separate-physical-recovery-parent";
-		failure_observed = "same-physical-parent";
-		errno = EPERM;
-		goto out;
-	}
 	failure_phase = "cross-namespace-mount-inventory";
 	if (swapz_primary_read_mount_facts(&mount_facts, target_parent) < 0)
 		goto out;
@@ -12202,7 +12213,6 @@ static int swapz_primary_prepare_metadata(
 		if (swapz_primary_shared_root_scope_record_live(
 			    &target, mount_facts.root_device, target_parent,
 			    root_parent,
-			    makedev(recovery_parent_major, recovery_parent_minor),
 			    -1, shared_root_scope_sha256) < 0) {
 			failure_expected = "exact-host-root-target-parent-layout-record";
 			failure_observed = "missing-mismatched-or-unverifiable";
@@ -12215,14 +12225,6 @@ static int swapz_primary_prepare_metadata(
 	failure_phase = "repeated-target-physical-parent-identity";
 	if (!swapz_primary_recovery_source_chain(
 		    "/sys", SWAPZ_PRIMARY_TARGET_DEVICE, 0, &target_parent)) {
-		errno = EPERM;
-		goto out;
-	}
-	if (target_parent == makedev(recovery_parent_major,
-				      recovery_parent_minor)) {
-		failure_phase = "repeated-target-recovery-parent-separation";
-		failure_expected = "separate-physical-recovery-parent";
-		failure_observed = "same-physical-parent";
 		errno = EPERM;
 		goto out;
 	}
@@ -12251,7 +12253,6 @@ static int swapz_primary_prepare_metadata(
 		if (swapz_primary_shared_root_scope_record_live(
 			    &target, mount_facts.root_device, target_parent,
 			    root_parent,
-			    makedev(recovery_parent_major, recovery_parent_minor),
 			    -1, rechecked_root_scope_sha256) < 0) {
 			failure_expected = "unchanged-authorized-root-parent-scope";
 			failure_observed = "missing-mismatched-or-changed";
@@ -12366,8 +12367,6 @@ static int swapz_primary_prepare_metadata(
 			if (swapz_primary_shared_root_scope_record_live(
 				    &verified_target, verified_mount_facts.root_device,
 				    verified_target_parent, verified_root_parent,
-				    makedev(verified_recovery_parent_major,
-					    verified_recovery_parent_minor),
 				    -1, rechecked_root_scope_sha256) < 0) {
 				failure_expected =
 					"unchanged-authorized-root-parent-scope";
@@ -12661,8 +12660,7 @@ static int swapz_primary_start_prepared(void)
 		&selector_admission, &failure_observed) < 0)
 		goto out;
 	failure_expected = NULL;
-	recovery_fd = swapz_primary_recovery_base_open(
-		SWAPZ_PRIMARY_RECOVERY_BASE, 0);
+	recovery_fd = swapz_primary_runtime_state_base_open(0);
 	if (recovery_fd < 0)
 		goto out;
 	lock_fd = swapz_primary_partition_lock_at(
@@ -12722,14 +12720,6 @@ static int swapz_primary_start_prepared(void)
 		errno = EPERM;
 		goto out;
 	}
-	if (target_parent == makedev(recovery_parent_major,
-				      recovery_parent_minor)) {
-		failure_phase = "target-recovery-parent-separation";
-		failure_expected = "separate-physical-recovery-parent";
-		failure_observed = "same-physical-parent";
-		errno = EPERM;
-		goto out;
-	}
 	failure_phase = "cross-namespace-mount-inventory";
 	if (swapz_primary_read_mount_facts(&mount_facts, target_parent) < 0 ||
 	    mount_facts.target_mounted) {
@@ -12749,7 +12739,6 @@ static int swapz_primary_start_prepared(void)
 		if (swapz_primary_shared_root_scope_record_live(
 			    &target, mount_facts.root_device, target_parent,
 			    root_parent,
-			    makedev(recovery_parent_major, recovery_parent_minor),
 			    -1, shared_root_scope_sha256) < 0) {
 			failure_expected = "exact-host-root-target-parent-layout-record";
 			failure_observed = "missing-mismatched-or-unverifiable";
@@ -12862,9 +12851,7 @@ static int swapz_primary_start_prepared(void)
 			failure_phase = "prewrite-shared-root-parent-authorization";
 			if (swapz_primary_shared_root_scope_record_live(
 				    &target, prewrite_mount_facts.root_device,
-				    prewrite_target_parent, prewrite_root_parent,
-				    makedev(recovery_parent_major,
-					    recovery_parent_minor), target_fd,
+				    prewrite_target_parent, prewrite_root_parent, target_fd,
 				    rechecked_root_scope_sha256) < 0) {
 				failure_expected =
 					"exact-opened-target-and-unchanged-root-scope";
@@ -13150,8 +13137,7 @@ static int swapz_primary_stop_active(void)
 	}
 	if (swapz_primary_configured_target(&target) < 0)
 		goto out;
-	recovery_fd = swapz_primary_recovery_base_open(
-		SWAPZ_PRIMARY_RECOVERY_BASE, 0);
+	recovery_fd = swapz_primary_runtime_state_base_open(0);
 	if (recovery_fd < 0)
 		goto out;
 	lock_fd = swapz_primary_partition_lock_at(
@@ -13335,8 +13321,7 @@ static int swapz_primary_recover(void)
 	}
 	if (swapz_primary_configured_target(&target) < 0)
 		goto out;
-	recovery_fd = swapz_primary_recovery_base_open(
-		SWAPZ_PRIMARY_RECOVERY_BASE, 0);
+	recovery_fd = swapz_primary_runtime_state_base_open(0);
 	if (recovery_fd < 0)
 		goto out;
 	lock_fd = swapz_primary_partition_lock_at(
@@ -13675,9 +13660,7 @@ static int swapz_primary_read_only_plan(void)
 			scope_record_result =
 				swapz_primary_shared_root_scope_record_live(
 					&target, mount_facts.root_device,
-					target_physical_parent, root_physical_parent,
-					makedev(recovery_physical_parent_major,
-						recovery_physical_parent_minor), -1,
+					target_physical_parent, root_physical_parent, -1,
 					shared_root_scope_sha256);
 			if (scope_record_result < 0)
 				scope_errno = errno ? errno : ENODATA;
@@ -13686,14 +13669,9 @@ static int swapz_primary_read_only_plan(void)
 			shared_root_parent_exception_status = "valid";
 		} else {
 			shared_root_parent_exception_errno = scope_errno;
-			if (recovery_same_physical_disk &&
-			    swapz_primary_valid_sha256(shared_root_scope_sha256))
-				shared_root_parent_exception_status =
-					"blocked_recovery_same_parent";
-			else
-				shared_root_parent_exception_status =
-					scope_errno == ENOENT ? "missing" :
-					"invalid_or_unverifiable";
+			shared_root_parent_exception_status =
+				scope_errno == ENOENT ? "missing" :
+				"invalid_or_unverifiable";
 		}
 #endif
 	} else if (!root_mount_source_chain_checked) {
