@@ -4,6 +4,18 @@
 
 **Three-tier test policy:** `make fast_test` is development-only and never qualifies or publishes `test_results.json`; `make test` runs the algorithm/RAM path and returns INCOMPLETE (nonzero) until physical source/run/target admission is qualified; `make test_full` retains all rootless DKMS/systemd integration and RAM qualification. Both privileged tiers report BLOCKED (nonzero) if noninteractive privilege is unavailable. RAM/integration PASS cannot certify physical storage or cold-boot production acceptance. Private scripts and CI jobs are implementation details, not operator interfaces.
 
+## Real-partition architecture preflight
+
+The kernel currently admits real-partition backing only on x86_64. Both the
+unprivileged algorithm selector and the privileged development probe must
+reject other architectures before offering consent, claiming a partition or
+draining native swap. The selector must still run pending same-boot cleanup
+before rejecting a new trial. A verified ARM64 VM and five passing RAM stages
+do not override this kernel restriction; ARM64 RAM/null_blk qualification
+remains supported. Rootless regressions must cover both entry points and prove
+that ARM64 rejection precedes device discovery/admission. Keep the general
+64-bit/4KiB ABI check separate from this narrower partition-support policy.
+
 ## Post-PASS keep-active same-boot ownership
 
 After the real-swap oracle passes, the interactive development trial must ask

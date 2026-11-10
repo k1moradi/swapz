@@ -246,6 +246,11 @@ def _require_read_only_preflight() -> dict | None:
     _require_development_linux_abi()
     virtual_device_only = _require_bare_metal_host(allow_virtual=True)
     _recover_pending_algorithm_trial()
+    # Mirror the kernel's real-partition gate before consent or swapoff.
+    # Pending cleanup above remains available on unsupported architectures.
+    if platform.machine() != "x86_64":
+        raise ValueError("kernel partition backing currently requires x86_64; "
+                         "ARM64 supports RAM/null_blk qualification only")
     if Path("/sys/module/dm_swapz").exists():
         raise ValueError("dm_swapz is already loaded; foreign module ownership")
     try:

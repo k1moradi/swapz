@@ -192,6 +192,20 @@ class AlgorithmPhysicalTest(unittest.TestCase):
         recovery.assert_called_once()
         device_discovery.assert_not_called()
 
+    def test_arm64_recovers_pending_trial_but_refuses_new_partition_trial(self):
+        with mock.patch.object(subject.os, "geteuid", return_value=1000), \
+             mock.patch.object(subject, "_require_development_linux_abi"), \
+             mock.patch.object(subject.platform, "machine", return_value="aarch64"), \
+             mock.patch.object(subject, "_require_bare_metal_host", return_value=True), \
+             mock.patch.object(subject, "_recover_pending_algorithm_trial") as recovery, \
+             mock.patch.object(subject.subprocess, "run") as discovery, \
+             mock.patch("builtins.input") as consent:
+            with self.assertRaisesRegex(ValueError, "kernel.*x86_64"):
+                subject._require_read_only_preflight()
+        recovery.assert_called_once()
+        discovery.assert_not_called()
+        consent.assert_not_called()
+
     def test_auto_recovery_is_one_fixed_root_command(self):
         with mock.patch.object(subject.shutil, "which",
                                return_value="/usr/bin/sudo"), \

@@ -288,6 +288,19 @@ class PhysicalSwapProbeTests(unittest.TestCase):
                 probe._read_algorithm_ram_development_evidence(
                     canonical, expected_uid, head, source, nonce)
 
+    def test_arm64_direct_development_probe_stops_before_device_admission(self):
+        with mock.patch.object(probe, "_require_development_linux_abi"), \
+             mock.patch.object(probe.platform, "machine", return_value="aarch64"), \
+             mock.patch.object(probe, "_require_physical_host") as host, \
+             mock.patch.object(probe, "_git") as source, \
+             mock.patch.object(probe, "inspect_target") as target:
+            with self.assertRaisesRegex(probe.ProbeError, "kernel.*x86_64"):
+                probe.current_development_evidence("1" * 32,
+                                                   virtual_device_only=True)
+        host.assert_not_called()
+        source.assert_not_called()
+        target.assert_not_called()
+
     def test_development_architecture_gate_requires_4k_64bit_native_linux(self):
         for machine in ("x86_64", "aarch64"):
             with self.subTest(machine=machine), \

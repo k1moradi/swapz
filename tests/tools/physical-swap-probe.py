@@ -1206,6 +1206,11 @@ def current_development_evidence(nonce, algorithm_ram_evidence=None,
                                  virtual_device_only=False):
     """Admit current make-test RAM evidence or run the standalone fast_test path."""
     _require_development_linux_abi()
+    # Direct invocation must obey the same real-partition restriction as the
+    # selector and kernel, before obtaining ownership or draining native swap.
+    if platform.machine() != "x86_64":
+        raise ProbeError("kernel partition backing currently requires x86_64; "
+                         "ARM64 supports RAM/null_blk qualification only")
     _require_physical_host(allow_virtual=virtual_device_only)
     if os.geteuid() != 0:
         raise ProbeError("development physical smoke evidence requires root wrapper")
