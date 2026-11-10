@@ -4,6 +4,14 @@
 
 **Three-tier test policy:** `make fast_test` is development-only and never qualifies or publishes `test_results.json`; `make test` runs the algorithm/RAM path and returns INCOMPLETE (nonzero) until physical source/run/target admission is qualified; `make test_full` retains all rootless DKMS/systemd integration and RAM qualification. Both privileged tiers report BLOCKED (nonzero) if noninteractive privilege is unavailable. RAM/integration PASS cannot certify physical storage or cold-boot production acceptance. Private scripts and CI jobs are implementation details, not operator interfaces.
 
+## Boot-verifier fixture storage
+
+Rootless boot-verifier fixtures must model their synthetic persistent report
+directory independently of the host's temporary filesystem. Override only the
+exact report-directory filesystem-type query, retain real permission and
+ownership checks, and prove that both tmpfs and ramfs prevent arming. Keep the
+temporary fixture self-cleaning; do not relax production persistence checks.
+
 ## Real-partition architecture preflight
 
 The kernel currently admits real-partition backing only on x86_64. Both the

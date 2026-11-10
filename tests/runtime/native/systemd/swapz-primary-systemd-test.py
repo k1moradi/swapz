@@ -1535,6 +1535,25 @@ class BootVerifierTests(unittest.TestCase):
         self.report.chmod(0o700)
         self.recovery.chmod(0o700)
         self.package_transactions.chmod(0o700)
+        # The synthetic /var/lib evidence store models persistent storage even
+        # when TemporaryDirectory uses the host's tmpfs-backed /tmp. Keep real
+        # stat for permissions/ownership and every other filesystem query.
+        write_executable(
+            self.bin / "stat",
+            "#!/bin/sh\n"
+            'if [ "$#" -eq 5 ] && [ "$1" = "-f" ] && [ "$2" = "-c" ] && '
+            '[ "$3" = "%T" ] && [ "$4" = "--" ] && '
+            '[ "$5" = "$SWAPZ_PRIMARY_TEST_REPORT_BASE" ]; then\n'
+            '    printf "%s\\n" "${MOCK_REPORT_FSTYPE:-ext4}"\n'
+            '    exit 0\n'
+            'fi\n'
+            'if [ -n "${MOCK_OTHER_OWNER_UID:-}" ] && [ "$2" = "%u" ] && '
+            '[ "$4" = "$SWAPZ_PRIMARY_TEST_REPORT_BASE/armed.env" ]; then\n'
+            '    printf "%s\\n" "$MOCK_OTHER_OWNER_UID"\n'
+            '    exit 0\n'
+            'fi\n'
+            'exec /usr/bin/stat "$@"\n',
+        )
         (self.proc / "sys" / "kernel" / "random").mkdir(parents=True)
         # Model a readable running-kernel hibernation state with no resume
         # target configured. Individual tests override these files when they
@@ -2540,6 +2559,18 @@ class BootVerifierTests(unittest.TestCase):
         self.assertTrue((self.report / f"report-{BOOT_B}.dm-status.txt").is_file())
         self.assertTrue((self.report / f"report-{BOOT_B}.kernel-errors.log").is_file())
 
+    def test_volatile_report_filesystem_blocks_arm(self) -> None:
+        self.write_proc_swaps(active=False)
+        for filesystem in ("tmpfs", "ramfs"):
+            with self.subTest(filesystem=filesystem):
+                env = self.env.copy()
+                env["MOCK_REPORT_FSTYPE"] = filesystem
+                result = self.run_verifier("arm", env=env)
+                self.assertNotEqual(result.returncode, 0)
+                self.assertIn("boot evidence directory is on volatile storage",
+                              result.stderr)
+                self.assertFalse((self.report / "armed.env").exists())
+
     def test_read_only_plan_exit_two_is_accepted_for_observation(self) -> None:
         self.write_proc_swaps(active=False)
         arm = self.run_verifier("arm")
@@ -3143,19 +3174,8 @@ class BootVerifierTests(unittest.TestCase):
                 arm_file.chmod(0o600)
 
     def test_wrong_owner_arm_file_is_rejected_without_root_privileges(self) -> None:
-        # Override only the arm-record UID query. The rest of the system's
-        # stat operations use the real tool, so this is a narrow rootless fault.
+        # The shared stat fixture overrides only the arm-record UID query.
         self.arm_then_reboot()
-        write_executable(
-            self.bin / "stat",
-            "#!/bin/sh\n"
-            'if [ "$2" = "%u" ] && '
-            '[ "$4" = "$SWAPZ_PRIMARY_TEST_REPORT_BASE/armed.env" ]; then\n'
-            '    printf "%s\\n" "$MOCK_OTHER_OWNER_UID"\n'
-            '    exit 0\n'
-            'fi\n'
-            'exec /usr/bin/stat "$@"\n',
-        )
         env = self.env.copy()
         env["MOCK_OTHER_OWNER_UID"] = str(os.getuid() + 1)
         preflight = self.run_verifier("preflight", env=env)
