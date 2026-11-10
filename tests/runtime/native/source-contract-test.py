@@ -319,7 +319,7 @@ class SwapzProductionSourceQualification(unittest.TestCase):
             "#define SWAPZ_PRIMARY_TEST_INTERRUPT_AFTER(phase) do { } while (0)",
             primary)
         for phase in (
-                "start-starting", "start-header-written",
+                "start-starting", "start-header-verified",
                 "start-module-inserted", "start-module-loaded",
                 "start-mapper-resumed", "start-mkswap", "start-swapon"):
             self.assertIn(
@@ -384,7 +384,7 @@ class SwapzProductionSourceQualification(unittest.TestCase):
         rehearsal = (
             ROOT / "tests/tools/qualify-primary-lifecycle-nullblk.sh").read_text()
         for phase in (
-                "start-starting", "start-header-written",
+                "start-starting", "start-header-verified",
                 "start-module-inserted", "start-module-loaded",
                 "start-mapper-inactive", "start-mapper-resumed",
                 "start-mkswap", "start-swapon",
@@ -2006,11 +2006,28 @@ dmsetup() {
         self.assertIn("!memcmp(block + SWAPZ_SUPERBLOCK_BYTES -",
                       compact_validator)
         self.assertIn("region.sector = 0", validator)
-        self.assertIn("ctx->data_start_block + block", lower)
-        self.assertIn("ctx->data_start_block + block", parallel)
-        self.assertIn("ctx->data_start_block +", async_read)
-        self.assertIn("ctx->data_start_block + inflight->run.start_block", submit)
-        self.assertIn("ctx->data_start_block * SWAPZ_SECTORS", discard)
+        compact_dm = re.sub(r"\s+", " ", DM)
+        compact_lower = re.sub(r"\s+", " ", lower)
+        compact_parallel = re.sub(r"\s+", " ", parallel)
+        compact_async_read = re.sub(r"\s+", " ", async_read)
+        compact_submit = re.sub(r"\s+", " ", submit)
+        compact_discard = re.sub(r"\s+", " ", discard)
+        self.assertIn(
+            "return ((sector_t)ctx->data_start_block + data_block) * "
+            "SWAPZ_SECTORS", compact_dm)
+        self.assertIn("swapz_backing_data_sector(ctx, block)", compact_lower)
+        self.assertIn("swapz_backing_data_sector(ctx, block)", compact_parallel)
+        self.assertIn(
+            "swapz_backing_data_sector(ctx, slot->start_block + first_block)",
+            compact_async_read)
+        self.assertIn(
+            "swapz_backing_data_sector(ctx, inflight->run.start_block)",
+            compact_submit)
+        self.assertIn(
+            "swapz_backing_data_sector( ctx, segment * SWAPZ_SEGMENT_BLOCKS)",
+            compact_discard)
+        self.assertNotIn("ctx->data_start_block + block", lower)
+        self.assertNotIn("ctx->data_start_block + block", parallel)
         # Per-WRITE authority capacity exhaustion is filtered by the generic
         # failure wrapper. Any errno reaching fail_at is terminal, including
         # a device-originated ENOSPC.
@@ -7337,7 +7354,11 @@ int main(void)
             "engine->read_validated_payload_crc32c = observed.payload_crc32c", read)
         self.assertIn("ctx->engine.read_validated_payload_crc32c", gc_relocate)
         self.assertIn("start_probe = ctx->authority.next_segment_probe", gc_choose)
-        self.assertIn("(start_probe + scan) % ctx->segment_count", gc_choose)
+        self.assertIn("segment = start_probe % ctx->segment_count", gc_choose)
+        self.assertIn(
+            "segment = segment + 1U == ctx->segment_count", gc_choose)
+        self.assertNotIn(
+            "(start_probe + scan) % ctx->segment_count", gc_choose)
         self.assertNotIn("next_segment_probe = (victim + 1U)", gc_commit)
         self.assertIn("swapz_window_uniform_compressed", gc_sort)
 
