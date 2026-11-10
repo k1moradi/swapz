@@ -346,7 +346,8 @@ int swapz_gc_advance_rotation_destination(struct swapz_authority *authority,
 int swapz_gc_commit_rotation(struct swapz_authority *authority, swapz_u32 victim);
 
 struct swapz_authority_geometry {
-	/* Caller-provided data blocks after the SWZ header and segment rounding. */
+	/* Caller-provided data blocks after protected Linux swap page zero and
+	 * segment rounding. Production has no swapz on-media header. */
 	swapz_u32 usable_physical_blocks;
 	/* GC reserve at maximum_logical_pages; never includes foreground headroom. */
 	swapz_u32 gc_reserve_blocks;
@@ -492,9 +493,10 @@ int swapz_prevalidate_discard_range(struct swapz_authority *authority,
 /* Serialized explicit logical discard: invalidate and advance generation. */
 int swapz_discard_page(struct swapz_authority *authority, swapz_u32 logical_page);
 /*
- * Fast path after swapz_peek() has validated metadata in worker-owned scratch.
- * Rechecks current authority/sequence and verifies the payload CRC without
- * re-running the metadata parser over the same block-zero bytes.
+ * Legacy userspace-fixture compatibility after swapz_peek() validates a
+ * serialized synthetic extent. Production kernel compressed READs use
+ * swapz_read_authoritative_payload() from volatile RAM mapping authority and
+ * never parse lower-media swapz metadata.
  */
 int swapz_read_authoritative_peeked_payload(
 				  const struct swapz_authority *authority,
