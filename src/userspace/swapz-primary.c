@@ -3187,6 +3187,17 @@ static int swapz_primary_parse_priority(const char *text, int *priority)
 	return 0;
 }
 
+static int swapz_primary_swap_priority_restorable(int priority)
+{
+	/*
+	 * Linux's implicit/default priority is reported as -1. Explicit
+	 * util-linux priorities occupy 0..32767 and can be reproduced exactly
+	 * by the development lifecycle after swapoff. More-negative automatic
+	 * priorities cannot be requested exactly, so fail closed on them.
+	 */
+	return priority >= -1 && priority <= 32767;
+}
+
 static int swapz_primary_parse_dev_number(const char *text, dev_t *device)
 {
 	const char *colon;
@@ -13840,7 +13851,9 @@ static int swapz_primary_read_only_plan(void)
 					target_swap_size_kib_expected &&
 				!strcmp(target_swap->type, "partition");
 			target_swap_zero_used = target_swap->used_kib == 0ULL;
-			target_swap_priority_ok = target_swap->priority == -1;
+			target_swap_priority_ok =
+				swapz_primary_swap_priority_restorable(
+					target_swap->priority);
 		}
 	}
 
