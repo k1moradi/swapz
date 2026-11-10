@@ -8373,6 +8373,12 @@ and an unreadable `/proc` entry fails closed. Rootless suites for this procedure
 (for example through a `sudo` stub that exits nonzero). The physical-swap-probe
 suite simulates its physical run with mocks, so it must pass under that stub
 and must never be run unguarded on the PC.
+The synthetic recovery fixture must persist identical, strictly typed geometry
+bindings (`swapz_logical_sectors`, `swapz_linux_swap_kib` and
+`swapz_physical_blocks`) in saved state and results. Independent negative
+controls must corrupt each results geometry value and prove refusal before
+target inspection, mapper inspection, or block-zero writes; stale fixture
+records are not evidence of an unsafe recovery implementation.
 
 The supervisor's qualified-source and artifact pins must follow the latest
 owner x86_64 five-stage PASS report, including the tested oracle binary hash.
