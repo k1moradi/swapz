@@ -119,7 +119,6 @@ static swapz_u8 swapz_fit_count(const struct swapz_compressed_page *pages,
 				swapz_u32 *read_blocks)
 {
 	swapz_u32 payload_start = (swapz_u32)blocks << SWAPZ_BLOCK_SHIFT;
-	swapz_u32 remaining = payload_start;
 	swapz_u8 included = 0;
 	swapz_u8 index;
 
@@ -135,7 +134,9 @@ static swapz_u8 swapz_fit_count(const struct swapz_compressed_page *pages,
 			for (earlier = start; earlier < index; ++earlier)
 				if (page->logical_page == pages[earlier].logical_page)
 					return included;
-		if (remaining < page->length)
+		/* payload_start is also the exact remaining byte capacity because
+		 * payloads are packed contiguously from the end of the extent. */
+		if (payload_start < page->length)
 			break;
 		offset = payload_start - page->length;
 		first = offset >> SWAPZ_BLOCK_SHIFT;
@@ -143,7 +144,6 @@ static swapz_u8 swapz_fit_count(const struct swapz_compressed_page *pages,
 		record_reads = last - first + 1U;
 		if (max_read_blocks && record_reads > max_read_blocks)
 			break;
-		remaining -= page->length;
 		*read_blocks += record_reads;
 		payload_start = offset;
 		included++;
