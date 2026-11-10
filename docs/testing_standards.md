@@ -101,7 +101,10 @@ real lifecycle paths may write the original swap header.
 
 The standalone SWAPSPACE2 native header test must compare smaller-area
 geometry against its own 256-page segment constant, without importing the
-kernel allocator header. Linux v1 permits duplicate bad-page entries: parse
+kernel allocator header. Its comments and assertions must describe smaller
+declared areas and bad-page lists as supported inputs to the production
+clean-segment translation, not as deferred or conservatively unsupported
+physical-layout work. Linux v1 permits duplicate bad-page entries: parse
 them without rewriting the header, preserve the listed entry count, and count
 each contaminated clean-allocation segment only once. Reject a listed bad-page
 count greater than the header-declared data-page count, even when all entries

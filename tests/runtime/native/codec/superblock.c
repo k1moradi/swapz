@@ -86,8 +86,9 @@ int main(void)
 	}
 
 	/*
-	 * The parser understands Linux layouts that swapz admission still treats
-	 * conservatively until clean-segment remapping is wired end to end.
+	 * A smaller declared Linux swap area is valid input. Production admission
+	 * derives only its complete clean 1MiB segments and never allocates from
+	 * the header page or incomplete tail.
 	 */
 	build_linux_swap_header(header);
 	put_u32_le(header + SWAPZ_LINUX_SWAP_LAST_PAGE_OFFSET,
