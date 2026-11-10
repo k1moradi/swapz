@@ -100,12 +100,11 @@ static uint8_t fit_records(const struct record *records, uint8_t count,
 		if (r->raw || payload_start < r->length)
 			break;
 		offset = payload_start - r->length;
-		if (offset < sizeof(struct swapz_header) +
-			     ((uint32_t)take + 1U) * sizeof(struct swapz_record))
-			break;
 		first = offset / SWAPZ_BLOCK_BYTES;
 		last = (payload_start - 1U) / SWAPZ_BLOCK_BYTES;
-		reads += last - first + 1U + (first ? 1U : 0U);
+		/* Production metadata is RAM-only, so cold-read cost is exactly
+		 * the payload blocks touched by this record. */
+		reads += last - first + 1U;
 		payload_start = offset;
 		take++;
 	}
@@ -235,7 +234,7 @@ static void map_extent(struct study *s, const struct record *records,
 		m->payload_length = r->length;
 		m->valid = 1;
 		m->raw = 0;
-		m->cold_blocks = (uint8_t)(last - first + 1U + (first ? 1U : 0U));
+		m->cold_blocks = (uint8_t)(last - first + 1U);
 		m->payload_first = (uint8_t)first;
 		payload_start = offset;
 	}
@@ -297,7 +296,7 @@ static void update_current(struct study *s, const struct record *window, uint8_t
 
 static uint64_t sequential_requests(const struct study *s)
 {
-	uint32_t logical, previous_extent = 0;
+	uint32_t logical;
 	uint64_t requests = 0;
 
 	for (logical = 0; logical < LOGICAL_PAGES; ++logical) {
@@ -305,17 +304,10 @@ static uint64_t sequential_requests(const struct study *s)
 
 		if (!m->valid)
 			continue;
-		if (m->raw) {
-			requests++;
-		} else {
-			/* One payload-range request; add metadata block zero only when
-			 * this extent was not the immediately preceding logical page and
-			 * the payload range itself does not already include block zero. */
-			requests++;
-			if (m->extent_id != previous_extent && m->payload_first)
-				requests++;
-		}
-		previous_extent = m->extent_id;
+		/* This offline oracle models one selective payload-range request per
+		 * logical read. Production may coalesce/cache those requests, but
+		 * RAM metadata never adds a separate lower-media metadata read. */
+		requests++;
 	}
 	return requests;
 }
