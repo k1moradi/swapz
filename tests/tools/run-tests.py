@@ -12,6 +12,7 @@ import stat
 import statistics
 import subprocess
 import sys
+import tempfile
 import textwrap
 import time
 
@@ -9925,6 +9926,38 @@ def _publication_retry_sleep(seconds):
     time.sleep(seconds)
 
 
+def git_publication_failure_reason(completed):
+    """Classify a failed Git operation without exposing remote or credential text."""
+    if completed is None:
+        return "git_command_unavailable_or_timed_out"
+    if completed.returncode == 0:
+        return "none"
+    # Git's stderr can contain credential helpers, remote URLs and host paths.
+    # Recognize only fixed causes; never copy remote-controlled text to a report.
+    output = (completed.stderr + completed.stdout)[:16384].lower()
+    if any(marker in output for marker in (
+            b"authentication failed", b"could not read username",
+            b"could not read password", b"permission denied (publickey)",
+            b"terminal prompts disabled", b"invalid username or password",
+            b"repository not found")):
+        return "credentials_or_repository_access"
+    if any(marker in output for marker in (
+            b"protected branch", b"pre-receive hook declined",
+            b"permission to ", b"not allowed to push", b"gh006",
+            b"403 forbidden")):
+        return "remote_permission_or_policy"
+    if any(marker in output for marker in (
+            b"non-fast-forward", b"fetch first", b"stale info",
+            b"updates were rejected", b"failed to push some refs")):
+        return "remote_advanced"
+    if any(marker in output for marker in (
+            b"could not resolve host", b"network is unreachable",
+            b"connection timed out", b"connection reset",
+            b"could not connect to server", b"tls handshake")):
+        return "network_or_transport"
+    return "git_command_failed"
+
+
 def publish(source_sha):
     """Publish the canonical report with bounded nonforce retry.
 
@@ -10086,11 +10119,22 @@ def publish(source_sha):
     concurrent_parent = None
 
     if push is None or push.returncode:
+        last_failure_phase = "push"
+        last_failure_reason = git_publication_failure_reason(push)
+        # Repeating an authenticated permission refusal cannot advance main.
+        # Preserve the local report without waiting through useless retries.
+        if last_failure_reason in (
+                "credentials_or_repository_access",
+                "remote_permission_or_policy"):
+            return (f"GIT_SYNC_FAILED: phase=push reason={last_failure_reason}; "
+                    "report remains local; inspect Git authentication or branch policy")
         report_sha = None
         for attempt in range(5):
             _publication_retry_sleep(1 << attempt)
             fetch = run("fetch", "--no-tags", "origin", "main", timeout=60)
             if fetch is None or fetch.returncode:
+                last_failure_phase = "fetch"
+                last_failure_reason = git_publication_failure_reason(fetch)
                 continue
             remote_head = run("rev-parse", "FETCH_HEAD")
             if remote_head is None or remote_head.returncode:
@@ -10120,7 +10164,8 @@ def publish(source_sha):
                        not path.lower().endswith(b".md")
                        for path in changed_paths):
                     preserve_canonical = True
-                remote_blob = run("show", f"{remote_sha}:{GIT_RESULT}")
+                remote_blob = run("show", f"{remote_sha}:{GIT_RESULT}",
+                                  timeout=60)
                 if remote_blob is not None and not remote_blob.returncode:
                     try:
                         remote_json = json.loads(
@@ -10174,9 +10219,16 @@ def publish(source_sha):
                 if remote_sha != head_sha:
                     concurrent_parent = remote_sha
                 break
+            last_failure_phase = "push"
+            last_failure_reason = git_publication_failure_reason(retry)
+            if last_failure_reason in (
+                    "credentials_or_repository_access",
+                    "remote_permission_or_policy"):
+                break
         if report_sha is None:
-            return ("GIT_SYNC_FAILED: report publication failed after bounded "
-                    "noninteractive push/fetch retries")
+            return (f"GIT_SYNC_FAILED: phase={last_failure_phase} "
+                    f"reason={last_failure_reason}; bounded noninteractive "
+                    "push/fetch retries exhausted; report remains local")
 
     if preserve_canonical:
         # Keep the local report intact for the original host; it is not the
@@ -10219,6 +10271,99 @@ def publish(source_sha):
 
     return (f"SYNCED_GIT: https://github.com/{REPO}/blob/main/{GIT_RESULT} "
             f"(report {report_sha[:12]}; tested {source_sha[:12]})")
+
+def write_failure_diagnostic(result, git_notice):
+    """Retain a private, shareable failure summary without raw host identifiers.
+
+    This is never an admission input or a Git publication artifact. It captures
+    the measured coalescing rounds automatically even when report push fails.
+    """
+    if (result.get("overall") not in ("FAIL", "BLOCKED") and
+            not git_notice.startswith("GIT_SYNC_FAILED")):
+        return None
+    benchmarks = result.get("benchmarks") or {}
+    if not isinstance(benchmarks, dict):
+        benchmarks = {}
+
+    def collect_sessions(name):
+        sessions = []
+        for index, row in enumerate(benchmarks.get(name, [])[:10], 1):
+            if not isinstance(row, dict):
+                continue
+            arm = row.get("swapz") or {}
+            if not isinstance(arm, dict):
+                arm = {}
+            passes = {}
+            for mode in ("sequential", "seeded_random"):
+                phase = (arm.get("passes") or {}).get(mode) or {}
+                if not isinstance(phase, dict):
+                    phase = {}
+                kernel = phase.get("kernel_read_path") or {}
+                passes[mode] = {
+                    key: phase.get(key)
+                    for key in (
+                        "logical_bytes", "verified_pages",
+                        "useful_read_mbps", "read_p99_ms",
+                        "lower_read_bytes", "lower_read_requests")
+                }
+                passes[mode]["kernel_read_path"] = {
+                    key: kernel.get(key)
+                    for key in KERNEL_READ_FIELDS
+                } if isinstance(kernel, dict) else {}
+            sessions.append({
+                "round": index,
+                "read_coalesce": row.get("read_coalesce"),
+                "status": row.get("status"),
+                "order": row.get("order"),
+                "device_model": row.get("device_model"),
+                "source_sha": arm.get("source_sha"),
+                "packed_close_delta": arm.get("packed_close_delta"),
+                "passes": passes,
+            })
+        return sessions
+
+    diagnostic = {
+        "schema": "swapz-private-qualification-failure-v1",
+        "source_sha": result.get("source_sha"),
+        "tested_commit_sha": result.get("tested_commit_sha"),
+        "overall": result.get("overall"),
+        "git_result": git_notice if git_notice.startswith(
+            "GIT_SYNC_FAILED") else "not_a_publication_failure",
+        "stages": [{
+            "name": stage.get("name"),
+            "status": stage.get("status"),
+            "failed_phase": stage.get("failed_phase"),
+            "reason": stage.get("diagnostic"),
+        } for stage in result.get("stages", []) if isinstance(stage, dict) and
+            stage.get("status") in ("FAIL", "BLOCKED")],
+        "fast_verdict": benchmarks.get("read_coalesce_ab"),
+        "fast_sessions": collect_sessions("read_coalesce_ab_sessions"),
+        "serial_verdict": benchmarks.get("sd_read_coalesce_ab"),
+        "serial_sessions": collect_sessions("sd_read_coalesce_ab_sessions"),
+    }
+    path = None
+    try:
+        directory = ROOT / "build/tests"
+        directory.mkdir(parents=True, exist_ok=True)
+        if directory.is_symlink():
+            return None
+        descriptor, filename = tempfile.mkstemp(
+            prefix="swapz-qualification-failure-", suffix=".json",
+            dir=directory)
+        path = Path(filename)
+        with os.fdopen(descriptor, "w", encoding="utf-8") as output:
+            json.dump(diagnostic, output, indent=2, sort_keys=True,
+                      allow_nan=False)
+            output.write("\n")
+        return path.relative_to(ROOT).as_posix()
+    except (OSError, TypeError, ValueError):
+        if path is not None:
+            try:
+                path.unlink(missing_ok=True)
+            except OSError:
+                pass
+        return None
+
 
 def _validate_host_identity_metadata(metadata):
     if (not stat.S_ISREG(metadata.st_mode) or metadata.st_uid != 0 or
@@ -10708,6 +10853,10 @@ def main():
     print(f"  Tested Git commit: {result['tested_commit_sha']}", flush=True)
     notice = publish(result["tested_commit_sha"])
     print(f"  Git result: {notice}", flush=True)
+    diagnostic_path = write_failure_diagnostic(result, notice)
+    if diagnostic_path is not None:
+        print(f"  Private failure diagnostics: {diagnostic_path} "
+              "(mode 0600; upload for review)", flush=True)
     print("  History plots: " + refresh_history(result["host_identity"]), flush=True)
     return exit_code
 
