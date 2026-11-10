@@ -729,6 +729,10 @@ struct swapz_dm {
 	swapz_u8 *segment_trimmed; /* successful whole-segment DISCARD since write */
 	swapz_u8 *segment_roles; /* 1=foreground, 0=free GC reserve */
 	swapz_u32 segment_count;
+	/* Cached constructor-time byte counts. These are payload capacities of
+	 * preallocated RAM state, not allocator/vmalloc bookkeeping overhead. */
+	u64 authority_metadata_ram_bytes;
+	u64 read_payload_cache_ram_bytes;
 	swapz_u8 gc_cost_policy; /* 0=record count; 1=payload bytes; 2=I/O */
 	u64 gc_selected_io_cost;
 	u64 gc_no_headroom_skips;
@@ -8822,6 +8826,33 @@ static void swapz_dtr(struct dm_target *ti)
 	ti->private = NULL;
 }
 
+static u64 swapz_authority_metadata_ram_bytes(
+	swapz_u32 logical_pages, swapz_u32 physical_blocks,
+	swapz_u32 segment_count)
+{
+	/*
+	 * Production geometry-scaled authority/index state:
+	 *   logical page: map + exact segment prev/next links,
+	 *   physical block: liveness + extent class + sequence delta,
+	 *   segment: GC/accounting/role/sequence sidecars.
+	 * Keep this formula beside the allocations and cache the result once.
+	 */
+	return (u64)logical_pages *
+			(sizeof(struct swapz_map) + 2U * sizeof(swapz_u32)) +
+	       (u64)physical_blocks *
+			(sizeof(swapz_u16) + 2U * sizeof(swapz_u8)) +
+	       (u64)segment_count *
+			(8U * sizeof(swapz_u32) + sizeof(swapz_u16) +
+			 2U * sizeof(swapz_u8));
+}
+
+static u64 swapz_read_payload_cache_ram_bytes(void)
+{
+	/* Lower payload residency only; no swapz authority is reconstructed here. */
+	return (u64)SWAPZ_READ_METADATA_CACHE_ENTRIES * SWAPZ_BLOCK_BYTES +
+	       (u64)SWAPZ_READ_EXTENT_CACHE_ENTRIES * SWAPZ_MAX_EXTENT_BYTES;
+}
+
 static int swapz_ctr(struct dm_target *ti, unsigned int argc, char **argv)
 {
 	struct swapz_dm *ctx;
@@ -9164,6 +9195,9 @@ static int swapz_ctr(struct dm_target *ti, unsigned int argc, char **argv)
 	ctx->logical_pages = logical;
 	ctx->physical_blocks = physical;
 	ctx->segment_count = physical / SWAPZ_SEGMENT_BLOCKS;
+	ctx->authority_metadata_ram_bytes = swapz_authority_metadata_ram_bytes(
+		ctx->logical_pages, ctx->physical_blocks, ctx->segment_count);
+	ctx->read_payload_cache_ram_bytes = swapz_read_payload_cache_ram_bytes();
 	ctx->gc_scores = kvcalloc(ctx->segment_count,
 				  sizeof(*ctx->gc_scores), GFP_KERNEL);
 	ctx->gc_io_scores = kvcalloc(ctx->segment_count,
@@ -9474,10 +9508,12 @@ static int swapz_ctr(struct dm_target *ti, unsigned int argc, char **argv)
 	if (error)
 		goto fail;
 	WRITE_ONCE(ctx->accepting, true);
-	DMINFO("swapz alpha %s logical_pages=%u physical_blocks=%u data_start=%u physical=%u window=%u read_cap=%u LIVE GC EXPERIMENTAL",
+	DMINFO("swapz alpha %s logical_pages=%u physical_blocks=%u data_start=%u physical=%u window=%u read_cap=%u authority_metadata_ram=%llu read_payload_cache_ram=%llu LIVE GC EXPERIMENTAL",
 	       SWAPZ_ALPHA_VERSION, ctx->logical_pages, ctx->physical_blocks,
 	       ctx->data_start_block, ctx->physical_backing ? 1U : 0U,
-	       ctx->max_window, (unsigned int)budget);
+	       ctx->max_window, (unsigned int)budget,
+	       ctx->authority_metadata_ram_bytes,
+	       ctx->read_payload_cache_ram_bytes);
 	return 0;
 fail:
 	swapz_free(ctx);
@@ -9601,7 +9637,8 @@ static void swapz_status(struct dm_target *ti, status_type_t type,
 			   "lz4_attempts=%llu lz4_accepted_bytes=%llu lz4_size_le256=%llu "
 			   "lz4_size_257_1024=%llu lz4_size_1025_2048=%llu lz4_size_2049_3072=%llu "
 			   "lz4_size_3073_3568=%llu lz4_raw_fallback=%llu windows=%llu "
-			   "reordered=%llu cursor=%u",
+			   "reordered=%llu cursor=%u authority_metadata_ram=%llu "
+			   "read_payload_cache_ram=%llu",
 		       SWAPZ_ALPHA_VERSION,
 		       ctx->logical_write_bytes,
 		       ctx->logical_read_bytes,
@@ -9625,7 +9662,9 @@ static void swapz_status(struct dm_target *ti, status_type_t type,
 		       ctx->lz4_size_bins[5] + prep->lz4_size_bins[5] + submitter->lz4_size_bins[5],
 		       ctx->windows,
 		       ctx->reordered_records,
-		       ctx->authority.next_block);
+		       ctx->authority.next_block,
+		       ctx->authority_metadata_ram_bytes,
+		       ctx->read_payload_cache_ram_bytes);
 		DMEMIT(
 			   " reserve=%u gc_reserve_segments_initial=%u "
 			   "gc_reserve_segments_current=%u gc_destination_advances=%llu "
