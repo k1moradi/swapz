@@ -45,6 +45,11 @@ geometry rejection or infer physical qualification from this native test.
 
 ## New P0 ordinary swap and RAM-metadata acceptance gate
 
+The packed-placement fixture with lengths 2000/2073/2073/2000 must require
+two one-block payload extents, two authoritative references per extent,
+byte-exact readback and one two-block lower submission with no internal holes.
+Serialized-descriptor overhead must not inflate this RAM-only geometry.
+
 The exact packing planner must retain one cached `payload_start` cursor,
 using it both to check remaining extent capacity and to position accepted
 payloads. Its source contract rejects redundant per-candidate `remaining`

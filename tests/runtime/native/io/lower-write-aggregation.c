@@ -756,6 +756,7 @@ static int test_packed_placement_removes_internal_hole(void)
 	CHECK(maps[1].start_block == 0 && maps[1].extent_blocks == 1);
 	CHECK(maps[2].start_block == 1 && maps[2].extent_blocks == 1);
 	CHECK(maps[3].start_block == 1 && maps[3].extent_blocks == 1);
+	CHECK(live[0] == 2 && live[1] == 2);
 	return 0;
 }
 
