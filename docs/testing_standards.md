@@ -37,6 +37,9 @@ three-physical-segment target capacity gate.
 The standalone swap-header parser fixture must use its local segment-page
 geometry consistently in both inputs and expected layouts; it must compile
 without the authority allocator's private segment constants.
+The loaded-report synthetic lifecycle evidence must name the read-only
+`start-header-verified` phase, never a `start-header-written` phase. Keep all
+18 interruption cases intact so malformed lifecycle evidence remains fail-closed.
 Each independent header mutation must start from a fresh valid header; the
 optional-UUID positive case must not inherit an invalid bad-page list.
 Physical-admission source coverage must require both Linux swap layout parsing

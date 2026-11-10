@@ -1749,7 +1749,7 @@ def synthetic_log():
            "PASS_ID36_RESOURCE_PRESSURE=memory_high_events:8 memory_peak_bytes:734003200 cpu_some_usec:250000 cpu_workers:8 pressure_mib:576 oom:0 oom_kill:0",
            "PASS_LOADED_PRIMARY_NULLBLK_LIFECYCLE=run_id:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa partuuid:01234567-89abcdef device:251:1 prepare:READY start:ACTIVE swapon:true stop:COMPLETE recovery_required:false",
            "PASS_LOADED_PRIMARY_NULLBLK_INTERRUPTION=start-starting",
-           "PASS_LOADED_PRIMARY_NULLBLK_INTERRUPTION=start-header-written",
+           "PASS_LOADED_PRIMARY_NULLBLK_INTERRUPTION=start-header-verified",
            "PASS_LOADED_PRIMARY_NULLBLK_INTERRUPTION=start-module-inserted",
            "PASS_LOADED_PRIMARY_NULLBLK_INTERRUPTION=start-module-loaded",
            "PASS_LOADED_PRIMARY_NULLBLK_INTERRUPTION=start-mapper-inactive",
