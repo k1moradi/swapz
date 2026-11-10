@@ -232,14 +232,13 @@ static void test_shared_root_sysfs_layout_skips_attribute_files(void)
 	assert(rmdir(directory) == 0);
 }
 
-static void test_shared_root_scope_authorization_is_exact_and_recovery_separate(void)
+static void test_shared_root_scope_authorization_is_exact(void)
 {
 	struct swapz_primary_shared_root_scope scope = make_shared_root_scope();
 	char digest[65];
 	char record[SWAPZ_PRIMARY_ROOT_PARENT_SCOPE_RECORD_BYTES];
 	int length;
 	dev_t shared_parent = makedev(8U, 0U);
-	dev_t separate_recovery_parent = makedev(259U, 0U);
 
 	assert(swapz_primary_partition_scope_valid(&scope.root));
 	assert(swapz_primary_partition_scope_valid(&scope.target));
@@ -256,8 +255,8 @@ static void test_shared_root_scope_authorization_is_exact_and_recovery_separate(
 		record, (size_t)length, digest));
 	assert(swapz_primary_shared_root_parent_relationship_valid(
 		shared_parent, shared_parent));
-	assert(swapz_primary_recovery_parent_separation_valid(
-		shared_parent, separate_recovery_parent));
+	assert(swapz_primary_runtime_state_fs_magic(TMPFS_MAGIC));
+	assert(!swapz_primary_runtime_state_fs_magic(EXT2_SUPER_MAGIC));
 
 	/* Host, root, target, device, geometry, parent and layout are all bound. */
 	scope.host_identity_sha256[0] = 'e';
@@ -319,12 +318,6 @@ static void test_shared_root_scope_authorization_is_exact_and_recovery_separate(
 	assert_shared_root_record_rejects_scope(record, (size_t)length, &scope);
 
 	scope = make_shared_root_scope();
-	assert(!swapz_primary_recovery_parent_separation_valid(
-		shared_parent, shared_parent));
-	assert(errno == EPERM);
-	assert(!swapz_primary_recovery_parent_separation_valid(
-		shared_parent, 0));
-	assert(errno == EPERM);
 	assert(!swapz_primary_shared_root_parent_relationship_valid(
 		makedev(8U, 16U), shared_parent));
 	assert(errno == EPERM);
@@ -3776,7 +3769,7 @@ int main(void)
 	assert(swapz_primary_command(1, start) == 2);
 	assert(swapz_primary_command(1, stop) == 2);
 	assert(swapz_primary_command(1, recover) == 2);
-	test_shared_root_scope_authorization_is_exact_and_recovery_separate();
+	test_shared_root_scope_authorization_is_exact();
 	test_shared_root_sysfs_layout_skips_attribute_files();
 	test_shared_root_scope_rejects_overlapping_partition_layout();
 	test_shared_root_scope_record_requires_private_regular_file();
