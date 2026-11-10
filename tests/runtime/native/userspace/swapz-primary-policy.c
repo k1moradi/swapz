@@ -927,7 +927,7 @@ static void test_swap_inventory_parser(void)
 		rows, 0U, &count) < 0);
 }
 
-static void test_selected_target_swap_quiescence(void)
+static void test_selected_target_swap_admission(void)
 {
 	struct swapz_primary_swap_entry rows[3] = {0};
 	dev_t devices[3] = {0};
@@ -937,12 +937,12 @@ static void test_selected_target_swap_quiescence(void)
 	strcpy(rows[0].type, "file");
 	rows[0].size_kib = 524284U;
 	rows[0].used_kib = 123U;
-	assert(swapz_primary_swap_inventory_target_is_quiescent(
+	assert(swapz_primary_swap_inventory_target_is_admissible(
 		rows, devices, is_block, 1U, makedev(8, 4),
 		TEST_SWAP_SIZE_KIB) == 0);
 	devices[0] = makedev(8, 4);
 	errno = 0;
-	assert(swapz_primary_swap_inventory_target_is_quiescent(
+	assert(swapz_primary_swap_inventory_target_is_admissible(
 		rows, devices, is_block, 1U, makedev(8, 4),
 		TEST_SWAP_SIZE_KIB) < 0);
 	assert(errno == EBUSY);
@@ -954,20 +954,19 @@ static void test_selected_target_swap_quiescence(void)
 	rows[1].used_kib = 0U;
 	devices[1] = makedev(8, 4);
 	is_block[1] = 1U;
-	assert(swapz_primary_swap_inventory_target_is_quiescent(
+	assert(swapz_primary_swap_inventory_target_is_admissible(
 		rows, devices, is_block, 2U, makedev(8, 4),
 		TEST_SWAP_SIZE_KIB) == 0);
 
+	/* Used pages are ordinary active-swap state. START owns migration. */
 	rows[1].used_kib = 1U;
-	errno = 0;
-	assert(swapz_primary_swap_inventory_target_is_quiescent(
+	assert(swapz_primary_swap_inventory_target_is_admissible(
 		rows, devices, is_block, 2U, makedev(8, 4),
-		TEST_SWAP_SIZE_KIB) < 0);
-	assert(errno == EBUSY);
+		TEST_SWAP_SIZE_KIB) == 0);
 	rows[1].used_kib = 0U;
 	--rows[1].size_kib;
 	errno = 0;
-	assert(swapz_primary_swap_inventory_target_is_quiescent(
+	assert(swapz_primary_swap_inventory_target_is_admissible(
 		rows, devices, is_block, 2U, makedev(8, 4),
 		TEST_SWAP_SIZE_KIB) < 0);
 	assert(errno == EBUSY);
@@ -978,7 +977,7 @@ static void test_selected_target_swap_quiescence(void)
 	devices[2] = devices[1];
 	is_block[2] = 1U;
 	errno = 0;
-	assert(swapz_primary_swap_inventory_target_is_quiescent(
+	assert(swapz_primary_swap_inventory_target_is_admissible(
 		rows, devices, is_block, 3U, makedev(8, 4),
 		TEST_SWAP_SIZE_KIB) < 0);
 	assert(errno == EBUSY);
@@ -3380,7 +3379,7 @@ static void test_primary_preparation_refusal_helpers(void)
 	resolved_devices[1] = target_device;
 	memcpy(original_entries, entries, sizeof(entries));
 	errno = 0;
-	assert(swapz_primary_swap_inventory_target_is_quiescent(
+	assert(swapz_primary_swap_inventory_target_is_admissible(
 		entries, resolved_devices, resolved_is_block, 2U,
 		target_device, TEST_SWAP_SIZE_KIB) < 0);
 	assert(errno == EBUSY);
@@ -3684,7 +3683,7 @@ int main(void)
 	test_recovery_required_state_builder();
 	test_primary_swap_transition_adapter();
 	test_swap_inventory_parser();
-	test_selected_target_swap_quiescence();
+	test_selected_target_swap_admission();
 	test_target_identity_and_header_policy();
 	test_target_config_and_dynamic_geometry();
 	test_selector_rejects_replaced_file_and_directory();
