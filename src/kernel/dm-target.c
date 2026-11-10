@@ -699,6 +699,13 @@ struct swapz_dm {
 	swapz_u32 *segment_sequence_base;
 	swapz_u32 physical_blocks;
 	swapz_u32 data_start_block;
+	/* Header-declared Linux swap geometry. segment_backing_pages exists only
+	 * when one or more complete 1MiB segments are skipped for bad pages. */
+	swapz_u32 backing_last_page;
+	swapz_u32 backing_bad_pages;
+	swapz_u32 backing_layout_blocks;
+	swapz_u32 backing_skipped_segments;
+	swapz_u32 *segment_backing_pages;
 	bool physical_backing;
 	u64 backing_device_bytes;
 	swapz_u32 logical_pages;
@@ -1899,6 +1906,50 @@ static int swapz_dm_io(struct dm_io_request *req,
 #define SWAPZ_DM_IO_MERGE_UNSUPPORTED(error_name) do { } while (0)
 #endif
 
+static int swapz_configure_linux_swap_layout(
+	struct swapz_dm *ctx, const u8 *block,
+	const struct swapz_linux_swap_layout *layout)
+{
+	swapz_u32 raw_segments;
+	swapz_u32 clean_segments;
+	swapz_u32 clean_index = 0;
+	swapz_u32 raw_segment;
+
+	if (!ctx || !block || !layout)
+		return -EINVAL;
+	raw_segments = layout->last_page / SWAPZ_SEGMENT_BLOCKS;
+	clean_segments = swapz_linux_swap_clean_segment_count(
+		block, layout, SWAPZ_SEGMENT_BLOCKS);
+	if (!clean_segments || clean_segments > raw_segments)
+		return -EINVAL;
+	ctx->backing_last_page = layout->last_page;
+	ctx->backing_bad_pages = layout->bad_pages;
+	ctx->backing_skipped_segments = raw_segments - clean_segments;
+	ctx->backing_layout_blocks = clean_segments * SWAPZ_SEGMENT_BLOCKS;
+
+	/*
+	 * Preserve the common contiguous case at zero translation cost. A sparse
+	 * map is needed only when a Linux bad page contaminates a complete swapz
+	 * segment; bad pages in the already-unused partial tail need no entry.
+	 */
+	if (!ctx->backing_skipped_segments)
+		return 0;
+	ctx->segment_backing_pages = kvcalloc(
+		clean_segments, sizeof(*ctx->segment_backing_pages), GFP_KERNEL);
+	if (!ctx->segment_backing_pages)
+		return -ENOMEM;
+	for (raw_segment = 0; raw_segment < raw_segments; ++raw_segment) {
+		if (swapz_linux_swap_segment_has_bad_page(
+			    block, layout, SWAPZ_SEGMENT_BLOCKS, raw_segment))
+			continue;
+		if (clean_index >= clean_segments)
+			return -EUCLEAN;
+		ctx->segment_backing_pages[clean_index++] =
+			1U + raw_segment * SWAPZ_SEGMENT_BLOCKS;
+	}
+	return clean_index == clean_segments ? 0 : -EUCLEAN;
+}
+
 static int swapz_validate_linux_swap_header(struct swapz_dm *ctx,
 					   u64 device_bytes,
 					   bool *swap_magic_present)
@@ -1917,6 +1968,7 @@ static int swapz_validate_linux_swap_header(struct swapz_dm *ctx,
 		},
 		.client = ctx->io_client,
 	};
+	struct swapz_linux_swap_layout layout;
 	unsigned long error_bits = 0;
 	u8 *block;
 	int error;
@@ -1943,12 +1995,14 @@ static int swapz_validate_linux_swap_header(struct swapz_dm *ctx,
 	 * rehearsal, uses the same ordinary Linux swap contract. SWZ001 is not
 	 * an authorization format and is never accepted by the data path.
 	 */
-	if (!error && !swapz_linux_swap_header_valid(block, device_bytes))
+	if (!error &&
+	    !swapz_linux_swap_header_parse(block, device_bytes, &layout))
 		error = -EPERM;
+	if (!error)
+		error = swapz_configure_linux_swap_layout(ctx, block, &layout);
 	kfree(block);
 	return error;
 }
-
 
 static void swapz_invalidate_read_caches(struct swapz_dm *ctx)
 {
@@ -2192,15 +2246,21 @@ static inline bool swapz_backing_range_valid(const struct swapz_dm *ctx,
 	       last_block / SWAPZ_SEGMENT_BLOCKS;
 }
 
-/* All lower data offsets currently include the immutable SWAPSPACE2 header
- * page. Bounds and one-segment containment are validated before this pure
- * address conversion. The conversion remains centralized so a RAM-only
- * clean-segment map can replace the contiguous offset without touching I/O
- * ownership or extent geometry.
+/* Bounds and one-segment containment are validated before this pure address
+ * conversion. Ordinary contiguous backing adds the immutable SWAPSPACE2
+ * header page. A bad-page layout instead maps the compact swapz segment to
+ * its clean raw Linux-swap segment; the mapping is immutable after ctor.
  */
 static inline sector_t swapz_backing_data_sector(const struct swapz_dm *ctx,
 						  swapz_u32 data_block)
 {
+	if (ctx->segment_backing_pages) {
+		swapz_u32 segment = data_block / SWAPZ_SEGMENT_BLOCKS;
+		swapz_u32 offset = data_block % SWAPZ_SEGMENT_BLOCKS;
+
+		return ((sector_t)ctx->segment_backing_pages[segment] + offset) *
+		       SWAPZ_SECTORS;
+	}
 	return ((sector_t)ctx->data_start_block + data_block) * SWAPZ_SECTORS;
 }
 
@@ -8799,6 +8859,7 @@ static void swapz_free(struct swapz_dm *ctx)
 	kvfree(ctx->extent_classes);
 	kvfree(ctx->extent_sequence_delta);
 	kvfree(ctx->segment_sequence_base);
+	kvfree(ctx->segment_backing_pages);
 	vfree(ctx->batch_bytes);
 	vfree(ctx->gc_bytes_store);
 	kvfree(ctx->gc_scores);
@@ -9194,8 +9255,15 @@ static int swapz_ctr(struct dm_target *ti, unsigned int argc, char **argv)
 		error = -EINVAL;
 		goto fail;
 	}
-	physical = total_blocks - ctx->data_start_block;
-	physical = div_u64(physical, SWAPZ_SEGMENT_BLOCKS) * SWAPZ_SEGMENT_BLOCKS;
+	if (ctx->physical_backing) {
+		/* Header parsing already removed the protected page, partial tail,
+		 * and every complete segment contaminated by a Linux bad page. */
+		physical = ctx->backing_layout_blocks;
+	} else {
+		physical = total_blocks - ctx->data_start_block;
+		physical = div_u64(physical, SWAPZ_SEGMENT_BLOCKS) *
+			   SWAPZ_SEGMENT_BLOCKS;
+	}
 	if (!logical || logical > U32_MAX || physical > U32_MAX ||
 	    physical < 3U * SWAPZ_SEGMENT_BLOCKS) {
 		ti->error = "swapz requires at least three 1MiB physical segments";
@@ -9531,11 +9599,12 @@ static int swapz_ctr(struct dm_target *ti, unsigned int argc, char **argv)
 	if (error)
 		goto fail;
 	WRITE_ONCE(ctx->accepting, true);
-	DMINFO("swapz alpha %s logical_pages=%u physical_blocks=%u data_start=%u physical=%u window=%u read_cap=%u authority_metadata_ram=%llu read_payload_cache_ram=%llu LIVE GC EXPERIMENTAL",
+	DMINFO("swapz alpha %s logical_pages=%u physical_blocks=%u data_start=%u physical=%u swap_last_page=%u swap_bad_pages=%u skipped_segments=%u window=%u read_cap=%u authority_metadata_ram=%llu read_payload_cache_ram=%llu LIVE GC EXPERIMENTAL",
 	       SWAPZ_ALPHA_VERSION, ctx->logical_pages, ctx->physical_blocks,
 	       ctx->data_start_block, ctx->physical_backing ? 1U : 0U,
-	       ctx->max_window, (unsigned int)budget,
-	       ctx->authority_metadata_ram_bytes,
+	       ctx->backing_last_page, ctx->backing_bad_pages,
+	       ctx->backing_skipped_segments, ctx->max_window,
+	       (unsigned int)budget, ctx->authority_metadata_ram_bytes,
 	       ctx->read_payload_cache_ram_bytes);
 	return 0;
 fail:
@@ -9549,10 +9618,17 @@ static int swapz_iterate_devices(struct dm_target *ti,
 {
 	struct swapz_dm *ctx = ti->private;
 
-	/* Report the allocated lower data region, never the protected backing
-	 * swap header or the unallocated segment tail. Null_blk without a
-	 * reserved header continues to report a zero-based range.
+	/*
+	 * Report the exact allocated contiguous range when no holes exist.
+	 * With Linux bad-page holes, report the conservative declared data span:
+	 * device-mapper dependency accounting may include unused/bad pages, while
+	 * actual swapz I/O is restricted to the clean segment map.
 	 */
+	if (ctx->segment_backing_pages)
+		return fn(ti, ctx->backing,
+			  (sector_t)ctx->data_start_block * SWAPZ_SECTORS,
+			  (sector_t)ctx->backing_last_page * SWAPZ_SECTORS,
+			  data);
 	return fn(ti, ctx->backing, swapz_backing_data_sector(ctx, 0),
 		  (sector_t)ctx->physical_blocks * SWAPZ_SECTORS, data);
 }
