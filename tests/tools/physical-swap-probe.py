@@ -356,7 +356,7 @@ def _require_root_not_on_target(major, minor, *, allow_shared_parent=False):
         raise ProbeError("selected partition contains or backs the root filesystem")
     # A different partition on the root disk is not dedicated development
     # media. Apply this inside the root-owned writer too, not just in the
-    # unprivileged algorithm selector, before opening recovery or swapping off.
+    # unprivileged algorithm selector, before claiming runtime ownership or swapping off.
     shared_parent = _physical_parent_identity(major, minor) in identities
     if shared_parent and not allow_shared_parent:
         raise ProbeError(
@@ -2318,7 +2318,7 @@ def _final_observations(results, state_dir, state, target):
             and state.get("swap_was_active") is False
             and row is None)
     # A historical failed inventory read remains disqualifying evidence for the
-    # run, even when a later recovery retry can finally verify safe cleanup.
+    # run, even when a later lifecycle retry can finally verify safe cleanup.
     results["restored_swap_verified"] = (
         "final_swap_error" not in results and current_restored_swap_verified)
 
@@ -3073,7 +3073,7 @@ def recover(state_dir, device_arg, confirm_arg, lock_held=False,
             "safe_next_step=inspect_records_read_only") from exc
     # Normal mode restores an originally active, zero-use swap partition.
     # The distinct development-only physical data-path smoke is admitted only
-    # when the card was already inactive and recovery must leave it inactive.
+    # when the card was already inactive and cleanup must leave it inactive.
     swap_was_active = state.get("swap_was_active")
     development_only = state.get("development_only") is True
     if swap_was_active is False:
@@ -3329,7 +3329,7 @@ def inspect_target_identity_for_recovery(state, device_arg, confirm_arg):
         raise ProbeError("recovery requires the exact originally confirmed device path")
     # Legacy pre-migration journals may have replaced the raw swap header,
     # making their old by-UUID alias disappear. Current trials never format the
-    # backing partition; resolve recovery identity from the saved canonical
+    # backing partition; resolve reconciliation identity from the saved canonical
     # block path instead of treating a missing legacy alias as authorization.
     device = state.get("device")
     if not isinstance(device, str) or not device.startswith("/dev/"):
@@ -4190,7 +4190,7 @@ def run_probe(device_arg, confirm_arg, state_dir_arg, review_path,
             if Path("/sys/module/dm_swapz").exists():
                 raise ProbeError("module appeared before helper-owned insertion")
             # Persist uncertainty before insmod can succeed. Pending is NEVER
-            # treated as permission to unload a module during recovery.
+            # treated as permission to unload a module during lifecycle reconciliation.
             state["module_ownership"] = "MODULE_PENDING"
             state["stage"] = "MODULE_PENDING"
             _save_state(state_dir, state)
@@ -4536,7 +4536,7 @@ def run_probe(device_arg, confirm_arg, state_dir_arg, review_path,
             if execution_failure:
                 raise ProbeFailure(str(failure)) from failure
             raise ProbeError(str(failure)) from failure
-        # Persist the final PASS only after verified recovery and the exact
+        # Persist the final PASS only after verified cleanup and the exact
         # durable oracle/source/target evidence agree.
         results["oracle_suite"] = "PASS"
         _save_results(state_dir, results)
@@ -5082,7 +5082,7 @@ def main(argv=None):
         print(f"PHYSICAL_RECOVERY=COMPLETE stage={state['stage']}")
         return 0
     # Reject before run_probe can claim a device or call swapoff. Read-only
-    # plan/recovery paths remain available even during codec migration.
+    # plan and explicit reconciliation paths remain available during codec migration.
     _require_ram_only_metadata_for_physical_run()
 
     def handle_sigterm(signum, frame):
