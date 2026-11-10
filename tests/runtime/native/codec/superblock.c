@@ -19,6 +19,14 @@ static void put_u32_le(unsigned char *bytes, unsigned int value)
 	bytes[3] = (unsigned char)(value >> 24);
 }
 
+static void put_u32_be(unsigned char *bytes, unsigned int value)
+{
+	bytes[0] = (unsigned char)(value >> 24);
+	bytes[1] = (unsigned char)(value >> 16);
+	bytes[2] = (unsigned char)(value >> 8);
+	bytes[3] = (unsigned char)value;
+}
+
 static void build_linux_swap_header(unsigned char header[SWAPZ_SUPERBLOCK_BYTES])
 {
 	unsigned int index;
@@ -41,6 +49,9 @@ int main(void)
 {
 	unsigned char header[SWAPZ_SUPERBLOCK_BYTES];
 	unsigned char original[SWAPZ_SUPERBLOCK_BYTES];
+	struct swapz_linux_swap_layout layout;
+	const unsigned int full_last_page =
+		(unsigned int)(DEVICE_BYTES / SWAPZ_SUPERBLOCK_BYTES - 1ULL);
 	int failures = 0;
 
 	build_linux_swap_header(header);
@@ -54,6 +65,57 @@ int main(void)
 		++failures;
 	}
 
+	if (!swapz_linux_swap_header_parse(header, DEVICE_BYTES, &layout) ||
+	    layout.last_page != full_last_page || layout.bad_pages ||
+	    layout.byte_swapped) {
+		fprintf(stderr, "FAIL: ordinary swap layout parser mismatch\n");
+		++failures;
+	}
+
+	/* Linux accepts a v1 header whose integer fields need byte swapping. */
+	build_linux_swap_header(header);
+	put_u32_be(header + SWAPZ_LINUX_SWAP_VERSION_OFFSET, 1U);
+	put_u32_be(header + SWAPZ_LINUX_SWAP_LAST_PAGE_OFFSET, full_last_page);
+	put_u32_be(header + SWAPZ_LINUX_SWAP_BAD_PAGES_OFFSET, 0U);
+	if (!swapz_linux_swap_header_valid(header, DEVICE_BYTES) ||
+	    !swapz_linux_swap_header_parse(header, DEVICE_BYTES, &layout) ||
+	    !layout.byte_swapped || layout.last_page != full_last_page) {
+		fprintf(stderr, "FAIL: rejected byte-swapped ordinary Linux swap header\n");
+		++failures;
+	}
+
+	/*
+	 * The parser understands Linux layouts that swapz admission still treats
+	 * conservatively until clean-segment remapping is wired end to end.
+	 */
+	build_linux_swap_header(header);
+	put_u32_le(header + SWAPZ_LINUX_SWAP_LAST_PAGE_OFFSET,
+		   full_last_page - SWAPZ_SEGMENT_BLOCKS);
+	if (!swapz_linux_swap_header_parse(header, DEVICE_BYTES, &layout) ||
+	    layout.last_page != full_last_page - SWAPZ_SEGMENT_BLOCKS ||
+	    swapz_linux_swap_header_valid(header, DEVICE_BYTES)) {
+		fprintf(stderr, "FAIL: smaller declared Linux swap area parsing\n");
+		++failures;
+	}
+
+	build_linux_swap_header(header);
+	put_u32_le(header + SWAPZ_LINUX_SWAP_BAD_PAGES_OFFSET, 1U);
+	put_u32_le(header + SWAPZ_LINUX_SWAP_BAD_PAGE_LIST_OFFSET, 257U);
+	if (!swapz_linux_swap_header_parse(header, DEVICE_BYTES, &layout) ||
+	    layout.bad_pages != 1U ||
+	    swapz_linux_swap_bad_page(header, &layout, 0U) != 257U ||
+	    swapz_linux_swap_header_valid(header, DEVICE_BYTES)) {
+		fprintf(stderr, "FAIL: Linux bad-page list parsing\n");
+		++failures;
+	}
+	put_u32_le(header + SWAPZ_LINUX_SWAP_BAD_PAGES_OFFSET, 2U);
+	put_u32_le(header + SWAPZ_LINUX_SWAP_BAD_PAGE_LIST_OFFSET +
+		   sizeof(unsigned int), 257U);
+	if (swapz_linux_swap_header_parse(header, DEVICE_BYTES, &layout)) {
+		fprintf(stderr, "FAIL: duplicate Linux bad pages accepted\n");
+		++failures;
+	}
+
 	/* Linux swap UUID is optional; PARTUUID and exact geometry bind backing. */
 	memset(header + SWAPZ_LINUX_SWAP_UUID_OFFSET, 0,
 	       SWAPZ_LINUX_SWAP_UUID_BYTES);
@@ -64,11 +126,6 @@ int main(void)
 
 	build_linux_swap_header(header);
 	put_u32_le(header + SWAPZ_LINUX_SWAP_VERSION_OFFSET, 2U);
-	if (swapz_linux_swap_header_valid(header, DEVICE_BYTES))
-		++failures;
-
-	build_linux_swap_header(header);
-	put_u32_le(header + SWAPZ_LINUX_SWAP_BAD_PAGES_OFFSET, 1U);
 	if (swapz_linux_swap_header_valid(header, DEVICE_BYTES))
 		++failures;
 
