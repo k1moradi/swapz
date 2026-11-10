@@ -3192,7 +3192,13 @@ class PhysicalSwapProbeTests(unittest.TestCase):
             nonlocal identity_verifications
             identity_verifications += 1
             events.append(("verify", identity_verifications))
-            if identity_failure_at == identity_verifications:
+            # The post-map, pre-oracle identity check must remain testable
+            # without relying on a swapoff-dependent call count. Inactive
+            # development backing skips the swapoff identity check.
+            before_first_oracle = (
+                identity_failure_at == "before_first_oracle" and
+                state["stage"] == "MAPPED" and oracle_invocations == 0)
+            if identity_failure_at == identity_verifications or before_first_oracle:
                 raise probe.ProbeError(
                     f"injected identity change at boundary {identity_verifications}")
 
@@ -4145,7 +4151,7 @@ class PhysicalSwapProbeTests(unittest.TestCase):
                          "DEVELOPMENT_ONLY_NOT_PHYSICAL_QUALIFICATION")
 
         events, zero_phase, target = self.simulate_physical_run(
-            development_only=True, identity_failure_at=6)
+            development_only=True, identity_failure_at="before_first_oracle")
         results = zero_phase["_test_results"]
         oracle_calls = [event[1] for event in events if
                         event[0] == "command" and
