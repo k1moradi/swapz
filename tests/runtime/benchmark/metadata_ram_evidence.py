@@ -132,11 +132,14 @@ def _checked_sum(first: int, second: int, limit: int) -> int | None:
 
 def capacity_index_estimate(
         logical_pages: Any, physical_blocks: Any, *,
+        sparse_segment_translation: bool = False,
         size_t_max: int = SIZE_T_MAX) -> dict[str, int] | None:
     """Predict current capacity-index payload/page-rounded bytes only.
 
-    This mirrors the 17 source-derived capacity-scaled arrays. It is an
-    allocation-length model, not constructor-success or host-RAM evidence.
+    This mirrors the 17 common source-derived capacity-scaled arrays. Physical
+    SWAPSPACE2 layouts with bad-page holes add one clean-segment translation
+    array; callers must request that conditional allocation explicitly. It is
+    an allocation-length model, not constructor-success or host-RAM evidence.
     """
     if (
             type(logical_pages) is not int or
@@ -144,6 +147,7 @@ def capacity_index_estimate(
             type(physical_blocks) is not int or
             not 0 < physical_blocks <= MAX_UINT32 or
             physical_blocks % SEGMENT_BLOCKS or
+            type(sparse_segment_translation) is not bool or
             type(size_t_max) is not int or
             not 0 < size_t_max <= MAX_UINT64):
         return None
@@ -177,6 +181,26 @@ def capacity_index_estimate(
             if page_rounded_bytes is None:
                 return None
             array_count += 1
+    if sparse_segment_translation:
+        allocation_bytes = _checked_product(
+            dimensions["segments"], 4, size_t_max)
+        if allocation_bytes is None:
+            return None
+        payload_bytes = _checked_sum(
+            payload_bytes, allocation_bytes, MAX_UINT64)
+        rounding_input = _checked_sum(
+            allocation_bytes, BLOCK_BYTES - 1, MAX_UINT64)
+        if payload_bytes is None or rounding_input is None:
+            return None
+        rounded_bytes = _checked_product(
+            rounding_input // BLOCK_BYTES, BLOCK_BYTES, MAX_UINT64)
+        if rounded_bytes is None:
+            return None
+        page_rounded_bytes = _checked_sum(
+            page_rounded_bytes, rounded_bytes, MAX_UINT64)
+        if page_rounded_bytes is None:
+            return None
+        array_count += 1
     return {
         "array_count": array_count,
         "payload_bytes": payload_bytes,
