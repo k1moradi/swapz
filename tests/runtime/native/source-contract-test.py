@@ -2111,7 +2111,12 @@ dmsetup() {
         self.assertIn('disk_name, "nullb", 5', ctr)
         # Synthetic configfs disks have an owned nullb-swapz-<16hex> name;
         # arbitrary nullb-prefixed disks must still take physical admission.
-        self.assertIn('!strncmp(disk_suffix, "-swapz-", 6)', ctr)
+        self.assertIn(
+            'owned_prefix_length = sizeof("-swapz-") - 1U', ctr)
+        self.assertIn(
+            '!strncmp(disk_suffix, "-swapz-", owned_prefix_length)', ctr)
+        self.assertIn(
+            "owned_token = disk_suffix + owned_prefix_length", ctr)
         self.assertIn("token_index < 16", ctr)
         self.assertIn("owned_token[16] != '\\0'", ctr)
         self.assertIn("token_character < 'a' || token_character > 'f'", ctr)

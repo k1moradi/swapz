@@ -9207,8 +9207,11 @@ static int swapz_ctr(struct dm_target *ti, unsigned int argc, char **argv)
 		 * real-partition/SWAPSPACE2 admission. The privileged harness also
 		 * verifies actual null_blk driver, configfs and block identity.
 		 */
-		if (!strncmp(disk_suffix, "-swapz-", 6)) {
-			const char *owned_token = disk_suffix + 6;
+		/* The token begins exactly after the full "-swapz-" delimiter. */
+		const size_t owned_prefix_length = sizeof("-swapz-") - 1U;
+
+		if (!strncmp(disk_suffix, "-swapz-", owned_prefix_length)) {
+			const char *owned_token = disk_suffix + owned_prefix_length;
 			unsigned int token_index;
 
 			for (token_index = 0; token_index < 16; ++token_index) {

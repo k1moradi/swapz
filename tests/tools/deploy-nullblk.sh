@@ -78,7 +78,9 @@ swapz_dm_constructor_kernel_reason() {
             kernel_reason=""
     fi
     if [[ -n "$kernel_reason" ]]; then
-        # Keep one bounded kernel line in the qualification failure reason.
+        # Drop the unrelated DM table/device prefix so the original kernel
+        # refusal remains visible in the bounded make-test failure summary.
+        kernel_reason="${kernel_reason##*swapz: }"
         printf '%.350s' "$kernel_reason"
     else
         printf '%s' 'kernel-refusal-unavailable'
