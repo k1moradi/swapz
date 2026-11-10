@@ -1258,11 +1258,14 @@ belong in the ROADMAP decision table and Git history.
 - **Zero elision:** scan the complete 4KiB page byte-exactly. Portable wide
   loads use `memcpy`; do not overread, allocate or cast an unaligned byte
   buffer to a wider pointer.
-- **Metadata residency:** the 512-entry metadata cache remains bounded and holds
-  validated metadata only, never payload authority. Mutation fences invalidate
-  residency before authority changes. Set lookups cache the active epoch locally
-  and avoid redundant engine field traversal. Extent geometry calculations and
-  fitting use constant block-shift powers (`SWAPZ_BLOCK_SHIFT`) rather than integer division.
+- **First-data-block residency:** the legacy-named 512-entry
+  `read_metadata_cache` remains a bounded RAM cache of validated first 4KiB
+  lower extent-data blocks. It is payload residency, never descriptor or mapping
+  authority: generation, CRC, offset/length, sequence, allocator and GC metadata
+  remain in bounded RAM authority. Mutation fences invalidate payload residency
+  before authority changes. Set lookups cache the active epoch locally and avoid
+  redundant engine field traversal. Extent geometry calculations and fitting use
+  constant block-shift powers (`SWAPZ_BLOCK_SHIFT`) rather than integer division.
 - **Small-batch I/O:** four-record batches detach through K=1 only when queued
   preparation work can overlap; without that overlap, dispatch synchronously,
   preserving all FUA/verification and publication fences. Keep the first three
@@ -1452,7 +1455,7 @@ priming and BIO ownership transfer; the bounded candidate may inspect shared
 cache metadata to derive exact missing ranges, but it must not copy cached
 blocks into slot scratch. Noncontiguous or gapped missing ranges remain
 ineligible. Standalone same-extent slot grouping is retired;
-ordinary `swapz_read()` already reuses the shared extent/metadata caches.
+ordinary `swapz_read()` already reuses the shared extent/first-data-block payload caches.
 For a successful ID63 pair, lower-I/O/decode telemetry is committed before upper
 BIO completion, but shared LRU cache absorption must occur only after every
 successful upper BIO has been completed so cache memcpy is off the completion
@@ -1963,20 +1966,21 @@ unclaimed heads and releases prepared slots as it reaches completed tail
 entries. Separate LZ4 scratch/work memory remains mandatory for concurrent
 compression.
 
-### Idempotent metadata-cache invalidation
+### Idempotent first-data-block-cache invalidation
 
-`read_metadata_lru_clock == 0` is the canonical empty metadata-LRU state.
-A mutation fence must always invalidate the one-entry read cache, but it may
-skip clearing the 512-slot metadata validity array when the clock already
-proves a previous invalidation emptied it. The first invalidation after any
-metadata insertion must still clear all valid slots and reset the clock.
+`read_metadata_lru_clock == 0` is the canonical empty state of the
+legacy-named first-data-block payload cache. A mutation fence must always
+invalidate the one-entry read cache, but it may skip clearing the 512-slot
+payload-residency directory when the clock already proves a previous
+invalidation emptied it. The first invalidation after any first-block payload
+insertion must still invalidate all tags and reset the clock.
 
-This optimization does not weaken physical-reuse safety or make cached
-metadata survive a write, discard, GC mutation or barrier. It only makes
+This optimization does not weaken physical-reuse safety or make cached payload
+bytes survive a write, discard, GC mutation or barrier. It only makes
 back-to-back invalidation calls idempotent in cost as well as semantics.
 Range invalidation (`swapz_engine_invalidate_read_range`) must similarly return
-before computing segment bitmasks when both extent-LRU and metadata-LRU clocks
-are already zero.
+before computing segment bitmasks when both extent-LRU and legacy-named
+first-data-block-cache clocks are already zero.
 Extent-LRU lookups (`swapz_read_extent_lru_lookup`) must likewise check
 `read_extent_lru_clock` and `read_extent_segment_mask` before scanning the
 16-entry residency array.
@@ -2014,8 +2018,10 @@ Singular worker-local queues (`list_is_singular(local)`) return immediately
 before slot preparation, and `swapz_merge_read_slot()` clears private slot
 `read_cache_valid` residency after absorption so subsequent write range
 invalidations skip overlap checks on idle read slots.
-Passive metadata-cache probes in `swapz_engine_prime_read_slot()` and
-`swapz_engine_required_read_range_cached()` check `read_metadata_segment_mask`
+Passive first-data-block payload-cache probes in
+`swapz_engine_prime_read_slot()` and
+`swapz_engine_required_read_range_cached()` check the legacy-named
+`read_metadata_segment_mask`
 before probing set tags, and `swapz_read_extent_lru_commit()` reuses the
 already-resolved `extent_lru_slot` from `swapz_engine_read_page()`.
 `swapz_read_extent_lru_lookup()` also rejects 1-block extents in O(1) because
@@ -2736,18 +2742,18 @@ costs without assuming a wider ISA or changing predictor policy.
 
 ## Validated-read and publication CPU fast paths
 
-A metadata cache hit may skip full SWZ metadata validation only when the bytes
-were published to that cache after a successful authoritative read and are not
-still marked as provisional coalesced input. Descriptor-only lookup does not
-weaken read validation: compare the cached on-media sequence with the compact
-extent-sequence index for the authoritative start block before any payload
-lower read, then retain the existing logical-page, generation, payload
-bounds/encoding, authority and payload-CRC checks. The observed mapping still
-has to match current authority. Cold
-metadata and unvalidated coalesced seed bytes always use the full validator.
-When a validated extent-LRU block replaces provisional scratch, clear the
-corresponding provisional bit. Cache refresh and slot priming copy only blocks
-that are not already resident.
+A hit in the legacy-named `read_metadata_cache` may satisfy first-block
+payload residency only when those bytes were published after a successful
+lower read and are not still marked as provisional coalesced input. It never
+supplies a descriptor, mapping, sequence or integrity authority and therefore
+cannot bypass RAM-authority validation. Before planning or consuming payload
+bytes, use the current RAM mapping plus its generation, extent sequence,
+payload offset/length, encoding and CRC authority; after lower I/O, recheck the
+current mapping and payload CRC before upper completion. Cold and provisional
+coalesced bytes follow the same RAM-authority validation. When a validated
+extent-LRU block replaces provisional scratch, clear the corresponding
+provisional bit. Cache refresh and slot priming copy only blocks that are not
+already resident.
 
 The generic bounded planner must remain defensive against duplicate logical
 pages. A private caller may bypass the inner duplicate search only immediately

@@ -253,8 +253,9 @@ qualification/negative storage-admission limits use
 [/dev/sda4 trial](live-swap-trial-recovery.md) is historical evidence only:
 it authorizes neither the first dedicated-card host nor the
 [separately scoped second Lubuntu host](AGENT_CONTEXT.md#separate-lubuntu-host-scope-for-devsda4).
-The latter remains blocked for mutation until its independent recovery-storage
-and all other admission gates are proven.
+The latter remains blocked for mutation until its independent host-scope
+record and all other admission gates are proven. No separate recovery storage
+or recovery device is required.
 
 ## Documentation
 

@@ -372,6 +372,11 @@ static unsigned long long swapz_segment_range_mask(swapz_u32 start_block,
 	return mask;
 }
 
+/*
+ * The read_metadata_* symbol and telemetry names predate payload-only extents.
+ * This is a bounded first-data-block payload cache only; descriptor, mapping,
+ * generation, CRC, sequence, allocator and GC authority remain in RAM state.
+ */
 static void swapz_read_metadata_advance_epoch(struct swapz_engine *engine)
 {
 	engine->read_metadata_epoch++;
@@ -475,14 +480,14 @@ static void swapz_read_metadata_lru_commit(struct swapz_engine *engine,
 					swapz_u32 start_block,
 					swapz_u8 extent_blocks,
 					int hit_slot,
-					const swapz_u8 *metadata)
+					const swapz_u8 *first_block_bytes)
 {
 	swapz_u32 oldest_age = ~(swapz_u32)0;
 	swapz_u32 epoch;
 	swapz_u16 primary, set, base, way, choice, slot = 0;
 	int have_slot = 0, have_invalid = 0;
 
-	if (!engine->read_metadata_cache || !metadata)
+	if (!engine->read_metadata_cache || !first_block_bytes)
 		return;
 	if (!engine->read_metadata_epoch)
 		swapz_read_metadata_advance_epoch(engine);
@@ -542,7 +547,7 @@ static void swapz_read_metadata_lru_commit(struct swapz_engine *engine,
 		return;
 	if (hit_slot < 0)
 		memcpy(engine->read_metadata_cache + (size_t)slot * SWAPZ_BLOCK_BYTES,
-		       metadata, SWAPZ_BLOCK_BYTES);
+		       first_block_bytes, SWAPZ_BLOCK_BYTES);
 	engine->read_metadata_tags[slot].start_block = start_block;
 	engine->read_metadata_tags[slot].extent_blocks = extent_blocks;
 	engine->read_metadata_tags[slot].age = engine->read_metadata_lru_clock;

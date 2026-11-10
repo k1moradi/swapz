@@ -69,6 +69,12 @@ static void swapz_primary_selected_target_clear(void)
 #define SWAPZ_PRIMARY_EXECUTION_RECORD_BYTES 512U
 #define SWAPZ_PRIMARY_VISIBLE_TASKS_MAX 4194304U
 #define SWAPZ_PRIMARY_MOUNTINFO_TOTAL_BYTES (64U * 1024U * 1024U)
+/*
+ * The historical /var/lib/swapz/physical-recovery path name is retained for
+ * qualification-evidence compatibility only. It is never lifecycle ownership,
+ * swapz data-path metadata, a raw-header backup, or a recovery image. Mutable
+ * lifecycle ownership is boot-scoped RAM state under /run/swapz.
+ */
 #if defined(SWAPZ_PRIMARY_OWNED_NULLBLK_TEST) && \
 	defined(SWAPZ_PRIMARY_PHYSICAL_QUALIFICATION_TEST)
 #error "primary lifecycle test modes are mutually exclusive"
@@ -5757,6 +5763,11 @@ static int swapz_primary_root_source_chain(
 		sysfs_root, root_device, target_device, physical_parent_device);
 }
 
+/*
+ * Legacy recovery_* argument names are compatibility surface. Production
+ * inspects the volatile /run/swapz ownership directory and requires tmpfs; it
+ * performs no persistent recovery-device or physical-parent admission.
+ */
 static int swapz_primary_recovery_preflight(
 	int *directory_safe, int *persistent_filesystem,
 	unsigned int *filesystem_major, unsigned int *filesystem_minor,
@@ -12525,6 +12536,7 @@ out:
 #endif
 }
 
+/* This prepares volatile lifecycle/ownership state, never on-media swapz metadata. */
 static int swapz_primary_prepare_metadata(
 	char *prepared_run_id, char *prepared_source_sha,
 	uint64_t *prepared_logical_pages)

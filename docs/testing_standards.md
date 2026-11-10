@@ -1880,15 +1880,15 @@ teardown without accumulating an unbounded sample log. An interruption while
 starting that sampler must signal and join the sampler thread before the
 interruption is propagated.
 
-Once recovery-storage admission is proven and before `prepare`, the helper
-must durably create a root-owned 0600 attempt record under the validated
-recovery base with a fail-closed
+Once persistent qualification-evidence storage is admitted and before
+`prepare`, the helper must durably create a root-owned 0600 attempt record
+under that validated evidence base with a fail-closed
 `FAIL/qualification_interrupted_or_incomplete` sentinel. The helper updates
 that record before a cycle mutates state and after the cycle returns to durable
 COMPLETE, then atomically fsyncs and read-verifies terminal PASS/FAIL/BLOCKED.
 A crash or kill therefore leaves persistent non-PASS evidence without adding
 evidence-I/O failure points inside the live lifecycle. Pre-admission BLOCKED
-outcomes must not write to unverified recovery storage; Agent 10's official
+outcomes must not write to unverified evidence storage; Agent 10's official
 runner integration must persist those runner-level dispositions.
 
 A `PRIMARY_START=ACTIVE` message is insufficient. The helper independently
@@ -4671,7 +4671,7 @@ counters themselves do not establish a performance gain.
   restore a helper workqueue merely to satisfy historical telemetry.
 - **ID60 same-extent grouping:** refuted and retired. Do not keep a dedicated
   loaded A/B after the code path is removed; ordinary reads already use the
-  shared extent/metadata caches.
+  shared extent/first-data-block payload caches.
 - **ID63 adjacent READ coalescing:** production keeps `read_coalesce=1` by
   default. Retain five matched fast rounds and five matched serial-depth rounds.
   The idle SSE2 matrix showed a fast sequential throughput loss despite request
@@ -5427,12 +5427,13 @@ queued totals may never be smaller than their corresponding nonempty counts.
 Write-only QD1 remains producer-free and lower-byte/read-tail gates remain hard.
 All publication/completion/fail-closed invariants are unchanged.
 
-Idempotent metadata-cache invalidation qualification must preserve the existing
-explicit-invalidation and post-write miss tests. Source coverage requires the
-512-slot validity clear to remain present but guarded by a nonzero metadata-LRU
-clock, with the clock reset inside that guarded block. Native coverage must call
-the mutation fence twice before a reread and still require a lower metadata
-read, proving repeated invalidation changes no observable authority behavior.
+Idempotent first-data-block payload-cache invalidation qualification must
+preserve the existing explicit-invalidation and post-write miss tests. Source
+coverage requires the 512-slot tag invalidation to remain guarded by a nonzero
+legacy-named `read_metadata_lru_clock`, with the clock reset by that invalidation
+path. Native coverage must call the mutation fence twice before a reread and
+still require the expected lower payload-block read, proving repeated
+invalidation changes no observable authority behavior.
 A direct production-C regression must also populate validated read residency,
 perform a non-overlapping one-record planned write, and require the original
 page to reread without another lower request. An append-only overwrite may
@@ -8574,8 +8575,8 @@ failure cleanup must use only the manager's normal recovery command; if
 recovery, mapper/module cleanup, host swap identity, or owned-device identity
 cannot be proved, quarantine the RAM device and evidence instead of forcing
 removal. This private credential is never an owner qualification and must never
-be imported into production recovery storage. If initial metadata preparation
-refuses, capture the read-only `primary plan` output before cleanup even when
+be imported into production qualification-evidence storage. If initial
+lifecycle preparation refuses, capture the read-only `primary plan` output before cleanup even when
 the command exits with its expected BLOCKED status, so the exact failed target,
 recovery, mount, swap or artifact gate remains visible in the owner report.
 A validated preclaim preparation refusal (including report-import and global

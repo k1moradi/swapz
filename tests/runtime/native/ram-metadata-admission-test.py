@@ -18,6 +18,7 @@ def require(condition: bool, message: str) -> None:
 def main() -> None:
     codec = (ROOT / "src/kernel/codec.h").read_text(encoding="utf-8")
     authority = (ROOT / "src/kernel/authority.h").read_text(encoding="utf-8")
+    authority_source = (ROOT / "src/kernel/authority.c").read_text(encoding="utf-8")
     target = (ROOT / "src/kernel/dm-target.c").read_text(encoding="utf-8")
     primary = (ROOT / "src/userspace/swapz-primary.c").read_text(encoding="utf-8")
     declarations = re.findall(
@@ -36,6 +37,22 @@ def main() -> None:
             "engine page semantics before copying compressed payloads")
     require("swapz_u32 payload_crc32c;" in authority,
             "Compressed payload CRC must remain authoritative volatile RAM state")
+    finish = authority_source.split("int swapz_finish(", 1)[1].split(
+        "\nint swapz_finish_raw(", 1)[0]
+    kernel_guard = finish.index("#ifdef __KERNEL__")
+    legacy_validator = finish.index("swapz_validate_metadata_crc")
+    require(
+        kernel_guard < legacy_validator and
+        "if (!data_only) {" in finish[kernel_guard:legacy_validator] and
+        "error = -EUCLEAN;" in finish[kernel_guard:legacy_validator],
+        "Kernel publication must reject legacy serialized extent metadata before "
+        "the userspace-fixture validator can run")
+    require(
+        "swapz_read_authoritative_payload(" in engine and
+        "swapz_peek(" not in engine and
+        "swapz_lookup_validated" not in engine,
+        "Production engine reads must use RAM descriptors, never serialized "
+        "lower-media metadata lookup")
     require("_Static_assert(sizeof(struct swapz_map) == 20" in authority,
             "Capacity accounting requires the 20-byte RAM mapping record")
     require("static u64 swapz_authority_metadata_ram_bytes(" in target and
@@ -54,6 +71,10 @@ def main() -> None:
         "swapz_backing_range_valid(ctx, block, blocks)" in target and
         "ctx->segment_backing_pages" in target,
         "Lower I/O must remain segment-contained for sparse clean-segment mapping")
+    require(
+        "swapz_primary_run_mkswap(mkswap_fd, mapper_fd)" in primary and
+        "swapz_primary_run_mkswap(mkswap_fd, target_fd)" not in primary,
+        "mkswap must remain mapper-only and must never target the raw SWAPSPACE2 fd")
 
     # A null or invalid asynchronous write slot must be rejected before
     # its lower-image pointer is read while building the dm_io request.
@@ -112,9 +133,10 @@ def main() -> None:
         "\tSWAPZ_PRIMARY_EXECUTION_RUNTIME_DIRECTORY" in primary,
         "Production lifecycle state must stay under the /run runtime directory")
     require(
-        "#define SWAPZ_PRIMARY_QUALIFICATION_BASE "
-        "\"/var/lib/swapz/physical-recovery\"" in primary,
-        "Persistent qualification evidence must remain separate from runtime state")
+        "report_fd = swapz_primary_recovery_base_open(\n"
+        "\t\tSWAPZ_PRIMARY_QUALIFICATION_BASE, 0);" in primary,
+        "Persistent qualification evidence must use a descriptor separate from "
+        "volatile runtime state without pinning a legacy recovery-path name")
     require(
         "return (unsigned long)type == TMPFS_MAGIC;" in primary,
         "Production lifecycle state must require a RAM-backed tmpfs filesystem")
