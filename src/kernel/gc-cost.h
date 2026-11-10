@@ -60,17 +60,17 @@ static inline swapz_u32 swapz_gc_estimated_io_cost_with_bytes(
 }
 
 /*
- * Conservative host I/O-cost estimate for a single authoritative record.
- * A GC move MUST issue a selective lower read of the source before writing
- * the destination. A packed SWZ extent may take more than one block to
- * fetch the metadata and record payload. The actual read path and read
- * cache/budget decide the completed count, so this is a selection
- * heuristic, NOT a measured or guaranteed bound on physical IO.
+ * Conservative host I/O-cost estimate for one authoritative RAM mapping.
+ * A GC move MUST issue a selective lower read of the source payload before
+ * writing the destination. A packed swapz payload may span more than one
+ * lower block; no serialized metadata block is read. The actual read path
+ * and payload cache/budget decide the completed count, so this is a
+ * selection heuristic, NOT a measured or guaranteed bound on physical I/O.
  *
- * Raw: 1 lower 4KiB read + a 4KiB copy; compressed: one or two lower
- * payload-block reads plus payload-only write cost.
- * Explicitly penalizing PER-RECORD reads corrects the 3 tiny records
- * versus 1 large record counterexample found by loaded alpha.4 tests.
+ * Raw: one lower 4KiB read + a 4KiB copy; compressed: one or two lower
+ * payload-block reads plus payload-only write cost. Explicitly penalizing
+ * PER-MAPPING reads corrects the three-tiny-payloads versus one-large-payload
+ * counterexample found by loaded alpha.4 tests.
  */
 static inline swapz_u32 swapz_gc_estimated_io_cost(const struct swapz_map *m)
 {
