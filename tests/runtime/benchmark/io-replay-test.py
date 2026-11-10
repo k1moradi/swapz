@@ -812,8 +812,18 @@ class PairReplayContract(unittest.TestCase):
             module.kernel_read_delta(before, dict(after, read_payload_blocks=200))
         with self.assertRaisesRegex(ValueError, "inconsistent"):
             module.kernel_read_delta(before, dict(after, read_full_extent_reqs=1100))
-        with self.assertRaisesRegex(ValueError, "inconsistent"):
-            module.kernel_read_delta(before, dict(after, read_full_cache_hits=500))
+        # A full-extent cache hit may serve a packed payload that does not
+        # start in block zero; it need not be a metadata-cache hit.
+        self.assertEqual(
+            module.kernel_read_delta(
+                before, dict(after, read_full_cache_hits=500))[
+                    "read_full_cache_hits"], 499)
+        with self.assertRaisesRegex(
+                ValueError, "payload_blocks_below_requests.*read_payload_blocks="):
+            module.kernel_read_delta(before, dict(after, read_payload_blocks=200))
+        with self.assertRaisesRegex(
+                ValueError, "set_probes_exceed_eight_per_lookup"):
+            module.kernel_read_delta(before, dict(after, read_meta_set_probes=9000))
         with self.assertRaisesRegex(ValueError, "inconsistent"):
             module.kernel_read_delta(before, dict(after, read_two_block_skips=850))
         with self.assertRaisesRegex(ValueError, "inconsistent"):

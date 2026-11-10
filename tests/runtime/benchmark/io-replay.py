@@ -1166,16 +1166,38 @@ def kernel_read_delta(before, after):
             f"full_extent={counters['read_full_extent_reqs']} "
             f"two_block_skips={counters['read_two_block_skips']} "
             f"payload_reqs={counters['read_payload_reqs']}")
-    if (counters["read_payload_blocks"] < counters["read_payload_reqs"] or
-            counters["read_full_cache_hits"] > counters["read_meta_cache_hits"] or
-            counters["read_meta_set_hits"] > counters["read_meta_set_lookups"] or
-            counters["read_meta_set_probes"] < counters["read_meta_set_lookups"] or
-            counters["read_meta_set_probes"] >
-            8 * counters["read_meta_set_lookups"] or
-            counters["read_meta_primary_hits"] + counters["read_meta_secondary_hits"] !=
-            counters["read_meta_set_hits"] or
-            counters["read_meta_lru_hits"] > counters["read_meta_set_hits"]):
-        raise ValueError("inconsistent swapz read request accounting")
+    # Full-extent cache hits do not imply metadata-cache hits: the latter
+    # counts only reads whose requested payload begins in block zero. Packed
+    # payloads beginning later can reuse full cached extents independently.
+    # Preserve the independent counter invariants, and name the first failing
+    # bound with its observed values for automated failure attribution.
+    read_request_checks = (
+        ("payload_blocks_below_requests",
+         counters["read_payload_blocks"] < counters["read_payload_reqs"],
+         "read_payload_blocks", "read_payload_reqs"),
+        ("set_hits_exceed_lookups",
+         counters["read_meta_set_hits"] > counters["read_meta_set_lookups"],
+         "read_meta_set_hits", "read_meta_set_lookups"),
+        ("set_probes_below_lookups",
+         counters["read_meta_set_probes"] < counters["read_meta_set_lookups"],
+         "read_meta_set_probes", "read_meta_set_lookups"),
+        ("set_probes_exceed_eight_per_lookup",
+         counters["read_meta_set_probes"] > 8 * counters["read_meta_set_lookups"],
+         "read_meta_set_probes", "read_meta_set_lookups"),
+        ("primary_secondary_hits_mismatch",
+         counters["read_meta_primary_hits"] +
+         counters["read_meta_secondary_hits"] != counters["read_meta_set_hits"],
+         "read_meta_primary_hits", "read_meta_secondary_hits"),
+        ("lru_hits_exceed_set_hits",
+         counters["read_meta_lru_hits"] > counters["read_meta_set_hits"],
+         "read_meta_lru_hits", "read_meta_set_hits"),
+    )
+    for reason, failed, first_field, second_field in read_request_checks:
+        if failed:
+            raise ValueError(
+                "inconsistent swapz read request accounting: "
+                f"{reason} {first_field}={counters[first_field]} "
+                f"{second_field}={counters[second_field]}")
     # Primary hits inspect 1..4 tags, secondary hits 5..8, misses exactly 8.
     primary = counters["read_meta_primary_hits"]
     secondary = counters["read_meta_secondary_hits"]
