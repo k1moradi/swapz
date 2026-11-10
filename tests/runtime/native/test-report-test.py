@@ -3697,6 +3697,29 @@ class ReportContract(unittest.TestCase):
                               saved["fast_sessions"][1]["passes"]["sequential"])
                 self.assertNotIn("NEVER_EXPORT", path.read_text())
                 self.assertNotIn("host_identity", saved)
+                # A physical admission refusal can leave all five RAM stages
+                # PASS while the overall result remains INCOMPLETE.
+                incomplete = {
+                    **result,
+                    "overall": "INCOMPLETE",
+                    "stages": [
+                        {"name": name, "status": "PASS"}
+                        for name in runner.OFFICIAL_STAGE_NAMES
+                    ],
+                    "algorithm_real_swap": {
+                        "overall": "NOT_RUN",
+                        "reason": "physical_trial_declined_or_blocked",
+                    },
+                }
+                incomplete_path = runner.write_failure_diagnostic(
+                    incomplete, "ARCHIVED_GIT: history-only")
+                self.assertIsNotNone(incomplete_path)
+                incomplete_saved = json.loads(
+                    (runner.ROOT / incomplete_path).read_text())
+                self.assertEqual(incomplete_saved["overall"], "INCOMPLETE")
+                self.assertEqual(incomplete_saved["stages"], [])
+                self.assertEqual(
+                    incomplete_saved["physical_trial"]["overall"], "NOT_RUN")
                 self.assertIsNone(runner.write_failure_diagnostic(
                     {**result, "overall": "PASS"}, "SYNCED_GIT"))
             finally:
