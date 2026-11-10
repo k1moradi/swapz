@@ -76,8 +76,10 @@ positively identified dedicated SD card. A separate owner-authorized Lubuntu
 host may select only its independently identified `/dev/sda4` partition after
 the exact root-owned host-scope record and all runtime identity gates described
 in `docs/AGENT_CONTEXT.md` pass. This exception never authorizes the parent
-disk or sibling partitions and never relaxes target/recovery physical-parent
-separation. A scope record alone does not qualify or enable production swap.
+disk or sibling partitions. No separate recovery device or physical-parent
+separation is required: the backing SWAPSPACE2 header is immutable and
+runtime ownership is same-boot RAM state. A scope record alone does not
+qualify or enable production swap.
 Never mutate unrelated storage or intentionally reboot, crash, or panic the
 host. No VM or fallback swap is required. Keep the documentation working set
 within the project's 64K-token budget.
