@@ -7995,6 +7995,9 @@ It may reside on the same physical disk as the selected swap partition without
 weakening swapz isolation because it is never consulted to reconstruct mappings
 or restore the raw partition. Existing legacy `recovery_*` plan field names
 are compatibility output only and must not regain physical-parent authority.
+Internal helpers and PREPARE failure phases must use `runtime-state`
+terminology; do not describe the tmpfs ownership store as recovery storage,
+a persistent recovery filesystem, or a recovery-device admission dependency.
 
 The selected target and root-source gates must still resolve device identity
 through `/sys/dev/block`, match recorded major:minor values, reject unsafe

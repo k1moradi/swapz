@@ -483,7 +483,7 @@ fail() { printf 'FAIL: %s\n' "$*" >&2; exit 1; }
         root_chain_begin = source.index(
             "static int swapz_primary_root_source_chain(")
         root_chain_end = source.index(
-            "static int swapz_primary_recovery_preflight(", root_chain_begin)
+            "static int swapz_primary_runtime_state_preflight(", root_chain_begin)
         root_chain = source[root_chain_begin:root_chain_end]
         self.assertIn("swapz_primary_owned_nullblk_btrfs_partition(",
                       root_chain)

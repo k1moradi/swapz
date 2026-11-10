@@ -5764,11 +5764,11 @@ static int swapz_primary_root_source_chain(
 }
 
 /*
- * Legacy recovery_* argument names are compatibility surface. Production
+ * Legacy recovery_* output names are compatibility surface. Production
  * inspects the volatile /run/swapz ownership directory and requires tmpfs; it
  * performs no persistent recovery-device or physical-parent admission.
  */
-static int swapz_primary_recovery_preflight(
+static int swapz_primary_runtime_state_preflight(
 	int *directory_safe, int *persistent_filesystem,
 	unsigned int *filesystem_major, unsigned int *filesystem_minor,
 	int *directly_not_target, int *source_chain_checked,
@@ -12484,7 +12484,7 @@ static int swapz_primary_qualification_import(const char *source_path)
 	recovery_fd = swapz_primary_runtime_state_base_open(0);
 	if (recovery_fd < 0)
 		goto out;
-	if (swapz_primary_recovery_preflight(
+	if (swapz_primary_runtime_state_preflight(
 		    &directory_safe, &persistent_filesystem, &filesystem_major,
 		    &filesystem_minor, &directly_not_target, &source_chain_checked,
 		    &parent_major, &parent_minor, &active_marker_clear) < 0 ||
@@ -12606,7 +12606,7 @@ static int swapz_primary_prepare_metadata(
 	failure_phase = "configured-target-identity";
 	if (swapz_primary_configured_target(&target) < 0)
 		goto out;
-	failure_phase = "recovery-directory-open";
+	failure_phase = "runtime-state-directory-open";
 	recovery_fd = swapz_primary_runtime_state_base_open(0);
 	if (recovery_fd < 0)
 		goto out;
@@ -12619,32 +12619,32 @@ static int swapz_primary_prepare_metadata(
 	if (swapz_primary_reconcile_metadata_claim_at(
 		    recovery_fd, lock_fd, 0) < 0)
 		goto out;
-	if (swapz_primary_recovery_preflight(
+	if (swapz_primary_runtime_state_preflight(
 		    &directory_safe, &persistent_filesystem,
 		    &recovery_filesystem_major, &recovery_filesystem_minor,
 		    &recovery_directly_not_target, &recovery_source_chain_checked,
 		    &recovery_parent_major, &recovery_parent_minor,
 		    &active_marker_clear) < 0) {
-		failure_phase = "recovery-storage-inspection";
+		failure_phase = "runtime-state-inspection";
 		goto out;
 	}
 	if (!directory_safe) {
-		failure_phase = "recovery-directory-safety";
+		failure_phase = "runtime-state-directory-safety";
 		errno = EPERM;
 		goto out;
 	}
 	if (!persistent_filesystem) {
-		failure_phase = "recovery-filesystem-persistence";
+		failure_phase = "runtime-state-filesystem";
 		errno = EPERM;
 		goto out;
 	}
 	if (!recovery_directly_not_target) {
-		failure_phase = "recovery-target-device-separation";
+		failure_phase = "runtime-state-scope-compatibility";
 		errno = EPERM;
 		goto out;
 	}
 	if (!recovery_source_chain_checked) {
-		failure_phase = "recovery-physical-parent-identity";
+		failure_phase = "runtime-state-source-chain-compatibility";
 		errno = EPERM;
 		goto out;
 	}
@@ -12851,7 +12851,7 @@ static int swapz_primary_prepare_metadata(
 			    "/sys", verified_mount_facts.root_device,
 			    SWAPZ_PRIMARY_TARGET_DEVICE, &verified_root_parent) ||
 		    verified_root_parent != root_parent ||
-		    swapz_primary_recovery_preflight(
+		    swapz_primary_runtime_state_preflight(
 			    &verified_directory_safe,
 			    &verified_persistent_filesystem,
 			    &verified_recovery_fs_major,
@@ -12974,7 +12974,7 @@ static int swapz_primary_prepare_metadata(
 	if (recovery_fd >= 0 && close(recovery_fd) < 0 && result == 0) {
 		result = -1;
 		saved_errno = errno;
-		failure_phase = "recovery-directory-close";
+		failure_phase = "runtime-state-directory-close";
 	}
 	memset(original_header, 0, sizeof(original_header));
 	memset(verified_current_header, 0, sizeof(verified_current_header));
@@ -13236,7 +13236,7 @@ static int swapz_primary_start_prepared(void)
 		errno = EPERM;
 		goto out;
 	}
-	if (swapz_primary_recovery_preflight(
+	if (swapz_primary_runtime_state_preflight(
 		    &recovery_directory_safe, &recovery_persistent_filesystem,
 		    &recovery_filesystem_major, &recovery_filesystem_minor,
 		    &recovery_directly_not_target, &recovery_source_chain_checked,
@@ -14280,7 +14280,7 @@ static int swapz_primary_read_only_plan(void)
 	}
 	swaps_valid = swapz_primary_read_swap_inventory(
 		swaps, SWAPZ_PRIMARY_SWAP_ROWS_MAX, &swap_count) == 0;
-	recovery_preflight_read = swapz_primary_recovery_preflight(
+	recovery_preflight_read = swapz_primary_runtime_state_preflight(
 		&recovery_directory_safe, &recovery_persistent_filesystem,
 		&recovery_filesystem_major, &recovery_filesystem_minor,
 		&recovery_directly_not_target, &recovery_source_chain_checked,

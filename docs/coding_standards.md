@@ -737,6 +737,12 @@ authority/codec headers are direct inputs to the `swapzctl` build and must be
 declared as incremental-build prerequisites, so a capacity-policy change cannot
 leave a stale manager binary.
 
+Internal lifecycle preflight helpers and operator diagnostics must describe
+the boot-scoped `/run/swapz` store as runtime state, not recovery storage.
+Legacy `recovery_*` read-only plan keys may remain only for output
+compatibility and must never acquire persistent-filesystem or physical-parent
+admission meaning.
+
 Do not require a backup or restoration image for historical swap payloads or
 the Linux swap header. The target must already contain a valid `SWAPSPACE2`
 header, and that exact 4096-byte header remains immutable throughout swapz use.

@@ -281,12 +281,12 @@ class SwapzProductionSourceQualification(unittest.TestCase):
         mutation = source_body("swapz_primary_run_mutating_action", primary)
         for phase in (
                 "identity-admission", "configured-target-identity",
-                "recovery-directory-open", "partition-lock-and-prior-claim",
-                "prior-claim-reconciliation", "recovery-storage-inspection",
-                "recovery-directory-safety",
-                "recovery-filesystem-persistence",
-                "recovery-target-device-separation",
-                "recovery-physical-parent-identity", "prior-active-marker",
+                "runtime-state-directory-open", "partition-lock-and-prior-claim",
+                "prior-claim-reconciliation", "runtime-state-inspection",
+                "runtime-state-directory-safety",
+                "runtime-state-filesystem",
+                "runtime-state-scope-compatibility",
+                "runtime-state-source-chain-compatibility", "prior-active-marker",
                 "qualification-report-read", "qualification-source-identity",
                 "qualified-artifact-hash-readback",
                 "qualified-artifact-identity", "target-header-inspection",
@@ -314,12 +314,20 @@ class SwapzProductionSourceQualification(unittest.TestCase):
                 "final-physical-parent-swap-inventory",
                 "run-id-construction", "partition-owner-claim",
                 "manifest-write", "manifest-readback",
-                "partition-lock-close", "recovery-directory-close"):
+                "partition-lock-close", "runtime-state-directory-close"):
             with self.subTest(phase=phase):
                 self.assertIn(f'failure_phase = "{phase}"', prepare)
         self.assertNotIn(
             'failure_phase = "repeated-target-recovery-parent-separation"',
             prepare)
+        for obsolete_phase in (
+                "recovery-directory-open", "recovery-storage-inspection",
+                "recovery-directory-safety", "recovery-filesystem-persistence",
+                "recovery-target-device-separation",
+                "recovery-physical-parent-identity",
+                "recovery-directory-close"):
+            self.assertNotIn(
+                f'failure_phase = "{obsolete_phase}"', prepare)
         self.assertIn(
             '"PRIMARY_PREPARE=FAILED phase=%s errno=%d error=%s "',
             prepare)
