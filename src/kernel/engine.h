@@ -36,9 +36,9 @@ struct swapz_io {
 	int (*write_extent)(void *opaque, swapz_u32 start_block, swapz_u8 blocks,
 			     const swapz_u8 *bytes, swapz_u8 *completed_blocks);
 	/* Optional single synchronous lower write for a 1..64-block
-	 * concatenation of individually valid SWZ extents and raw blocks.
-	 * The authority publishes NONE before this callback has returned
-	 * full confirmed completion. See swapz_batch_pause()/resume(). */
+	 * concatenation of independently valid payload-only compressed extents
+	 * and raw blocks. The authority publishes NONE before this callback has
+	 * returned full confirmed completion. See swapz_batch_pause()/resume(). */
 	int (*write_run)(void *opaque, swapz_u32 start_block, swapz_u16 blocks,
 			 const swapz_u8 *bytes, swapz_u16 *completed_blocks);
 	/*
@@ -150,9 +150,10 @@ struct swapz_engine {
 	 */
 	int verify_after_write;
 	/*
-	 * 0 = byte-minimal planner; 1..3 = physical 4KiB read blocks per
-	 * compressed record, including uncached metadata block zero.
-	 * This is a planning policy, not a hardware latency guarantee.
+	 * 0 = byte-minimal planner; 1..3 = physical 4KiB payload blocks per
+	 * compressed record, including an uncached first extent-data block when
+	 * the selected payload overlaps it. This is a planning policy, not a
+	 * hardware latency guarantee.
 	 */
 	swapz_u8 max_read_blocks_per_record;
 	swapz_u32 write_verify_read_blocks;
@@ -162,8 +163,9 @@ struct swapz_engine {
 	 * batched aggregation preserves a definitive nonzero lower errno. */
 	swapz_u32 completed_blocks;
 	swapz_u32 physical_read_blocks;
-	/* Successful targeted compressed reads: header block zero and additional
-	 * payload callbacks/blocks. Diagnostics do not own I/O or mappings. */
+	/* Legacy counter name: successful first extent-data-block requests.
+	 * Production lower media has no swapz header/descriptor block; this is
+	 * payload data residency only. Diagnostics do not own I/O or mappings. */
 	swapz_u32 read_metadata_requests;
 	swapz_u32 read_payload_requests;
 	swapz_u32 read_payload_blocks;
@@ -184,13 +186,14 @@ struct swapz_engine {
 	 * GC relocation may reuse this exact CRC instead of hashing again. */
 	swapz_u32 read_validated_payload_crc32c;
 	/*
-	 * Owner-preallocated metadata-only cache. Capacity remains 512 immutable
-	 * SWZ block-zero images in 128 sets x 4 ways. Each key has two distinct
-	 * set choices: primary hits touch four tags at most; secondary lookup
-	 * and replacement inspect at most eight. Payload blocks are never cached
-	 * here. Replacement uses the oldest of the two sets' eligible ways.
+	 * Legacy member name: owner-preallocated first extent-data-block cache.
+	 * Capacity remains 512 immutable 4KiB payload blocks in 128 sets x 4
+	 * ways. It is a lower-data residency optimization, never swapz metadata
+	 * authority. Each key has two distinct set choices: primary hits touch
+	 * four tags at most; secondary lookup/replacement inspect at most eight.
+	 * Replacement uses the oldest of the two sets' eligible ways.
 	 */
-	swapz_u8 *read_metadata_cache; /* entries * 4096 bytes */
+	swapz_u8 *read_metadata_cache; /* entries * 4096 payload bytes */
 	/*
 	 * Four 16-byte tags make one 64-byte set. Align the directory so one
 	 * four-way lookup/replacement is contained in one Core-2 cache line.
@@ -226,8 +229,8 @@ struct swapz_engine {
 	/* Lower callbacks, not block-queue requests; byte deltas are independent. */
 	swapz_u32 read_full_extent_requests;
 	swapz_u32 read_full_extent_cache_hits;
-	/* Cold two-block records proven wholly inside metadata block zero;
-	 * avoiding a speculative second block does not skip CRC validation. */
+	/* Cold two-block records proven wholly inside the first extent-data
+	 * block; avoiding a speculative second block does not skip CRC validation. */
 	swapz_u32 read_two_block_skips;
 };
 
@@ -250,7 +253,7 @@ int swapz_engine_plan_bounded(const struct swapz_compressed_page *pages,
 			     swapz_u8 *classes, swapz_u8 *records_per_extent,
 			     swapz_u8 *extent_count);
 /* Largest lower uniform-payload threshold that can add one more record to a
- * 4/8/16KiB SWZ extent. Zero means no useful lower cliff within 64 records. */
+ * 4/8/16KiB payload-only extent. Zero means no useful lower cliff within 64 records. */
 swapz_u16 swapz_engine_next_uniform_pack_limit(swapz_u16 length);
 /*
  * Optional batched physically adjacent extent/raw writer. Stages multiple
