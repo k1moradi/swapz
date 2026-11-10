@@ -2078,7 +2078,7 @@ int swapz_engine_read_page(struct swapz_engine *engine, swapz_u32 logical_page,
 	if (observed.payload_length > payload_capacity)
 		return -ENOSPC;
 
-	read_scratch = read_scratch;
+	read_scratch = engine->read_scratch;
 	single_block_read_mode = engine->max_read_blocks_per_record == 1U;
 	full_extent_mask = (swapz_u8)((1U << observed.extent_blocks) - 1U);
 
