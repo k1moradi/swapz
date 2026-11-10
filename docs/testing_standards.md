@@ -37,9 +37,6 @@ three-physical-segment target capacity gate.
 The standalone swap-header parser fixture must use its local segment-page
 geometry consistently in both inputs and expected layouts; it must compile
 without the authority allocator's private segment constants.
-The loaded-report synthetic lifecycle evidence must name the read-only
-`start-header-verified` phase, never a `start-header-written` phase. Keep all
-18 interruption cases intact so malformed lifecycle evidence remains fail-closed.
 Each independent header mutation must start from a fresh valid header; the
 optional-UUID positive case must not inherit an invalid bad-page list.
 Physical-admission source coverage must require both Linux swap layout parsing
@@ -118,6 +115,16 @@ a constructor error. The sparse temporary bitmap has independent
 constructor inventory strict; enforce the conditional allocation and both
 paired frees independently, including the explicit RAM budget. Neither
 ignoring the free nor silently weakening the constructor audit is acceptable.
+
+### Rootless primary-start transition contract
+
+The source-extracted late-race fixture must supply exactly one inert original
+swap transition adapter. It checks the durable STARTING marker and exact
+previously-inactive swap state without issuing host `swapoff`, `swapon`,
+`mkswap`, or raw-partition writes. An early selector/mount/target denial after
+STARTING is allowed to leave its transition count at zero. A successful
+module/mapper activation requires the transition to have run exactly once.
+The actual syscall/reconciliation ownership path remains independently tested.
 
 ## New P0 ordinary swap and RAM-metadata acceptance gate
 

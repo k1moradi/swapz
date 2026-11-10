@@ -1451,9 +1451,13 @@ static int check_case(enum fixture_scenario candidate)
     errno = 0;
     result = swapz_primary_start_prepared();
     result_errno = errno;
-    /* Once STARTING is written, production must reach the guarded ordinary
-     * swap transition before any subsequent module/mapper mutation. */
-    assert(raw_swap_policy_checks == starting_state_writes);
+    /* A last-use admission failure may occur after durable STARTING but
+     * before the raw-swap transition. It is safe to refuse without swapping
+     * off. The transition itself proves its STARTING and once-only order.
+     */
+    assert(raw_swap_policy_checks <= starting_state_writes);
+    assert(raw_swap_transition_calls == raw_swap_policy_checks);
+    assert(module_loads == 0U || raw_swap_transition_calls == 1U);
     assert(fflush(stderr) == 0);
     assert(dup2(saved_stderr, STDERR_FILENO) == STDERR_FILENO);
     assert(close(saved_stderr) == 0);
