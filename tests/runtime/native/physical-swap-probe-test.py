@@ -4418,14 +4418,14 @@ class PhysicalSwapProbeTests(unittest.TestCase):
             with self.assertRaisesRegex(
                     probe.ProbeError,
                     "insufficient host memory headroom.*target swapoff"):
-                probe._require_development_swapoff_headroom(target_row)
+                probe._require_selected_swapoff_headroom(target_row)
 
         # Empty/inactive target swap needs no migration and no meminfo read.
         with mock.patch.object(
                 probe.Path, "read_text",
                 side_effect=AssertionError("unexpected meminfo read")):
-            probe._require_development_swapoff_headroom({"used_kib": 0})
-            probe._require_development_swapoff_headroom(None)
+            probe._require_selected_swapoff_headroom({"used_kib": 0})
+            probe._require_selected_swapoff_headroom(None)
 
     def test_algorithm_real_swap_quiesces_only_target_and_preserves_swapfile(self):
         target = {"device": "/dev/sdb1", "major": 8, "minor": 17}
@@ -4452,7 +4452,7 @@ class PhysicalSwapProbeTests(unittest.TestCase):
                 probe, "_development_swap_inventory_plan",
                 return_value=(target_row, [current])), \
                 mock.patch.object(
-                    probe, "_require_development_swapoff_headroom") as headroom, \
+                    probe, "_require_selected_swapoff_headroom") as headroom, \
                 mock.patch.object(probe, "_verify_target_identity"), \
                 mock.patch.object(probe, "_active_swap_for",
                                   return_value=None), \
