@@ -199,32 +199,32 @@
 "write_saturation_sessions": []
 },
 "host_identity": {
-"architecture": "aarch64",
-"id_sha256": "dd024d27733212e1605241c3e1ee17bc3f0532e4a3324886ab4b9809bf777af8",
+"architecture": "x86_64",
+"id_sha256": "842640974d84d453bd4ecc703ada37fac79ae78383400a8ce4cf22f9b46de3b4",
 "schema": "swapz-host-v1"
 },
-"kernel_release": "7.0.0-43-generic",
+"kernel_release": "7.0.0-42-generic",
 "overall": "FAIL",
 "qualification": "RAM_BACKED_NULL_BLK_ONLY",
 "qualification_tier": "ALGORITHM_PHYSICAL_PENDING",
 "qualified_artifacts": {
-"formatter_sha256": "9c1bb84bb18b8cae15f27c6ec18e79fa8c683a71e831624707ab22c027d6ae04",
-"module_sha256": "9ff6cb977fa521799a0f9d926d96426885a04e751c1a6921b8d561964814369e",
-"oracle_sha256": "429ff40c94125cb8e8309537c17a32db28bf9a176567b8f0587bd8f5ae5e6c5b",
+"formatter_sha256": "7444aad0041f7d8b2e712378478f2ebcc188d98ce88dba8e18616e6e707a27b7",
+"module_sha256": "aa7b2c0d235001559fa64cdd46886a35126478426ac0f306cf6d4e9a66a29cbf",
+"oracle_sha256": "871d809976361bcd2d30b91bd4f661da8c712c16e4f5fa584696140261b57f26",
 "status": "AVAILABLE"
 },
 "schema": "swapz-test-results-v1",
 "source_sha": "c9b63d8c60bd55ea0191dc4a359a54074fc19ef6",
 "stages": [
 {
-"elapsed_s": 2.371,
+"elapsed_s": 18.266,
 "exit_code": 0,
 "name": "Build module and helpers",
 "status": "PASS"
 },
 {
-"diagnostic": "Rootless child failed; child_exit=2 reason=nonzero_exit subtest=unavailable test=unavailable log=build/tests/rootless-failure.nf523Ubg/diagnostic.log",
-"elapsed_s": 1.014,
+"diagnostic": "Rootless child failed; child_exit=2 reason=nonzero_exit subtest=unavailable test=unavailable log=build/tests/rootless-failure.8qKbg9LI/diagnostic.log",
+"elapsed_s": 10.058,
 "exit_code": 2,
 "failed_phase": "Makefile native and metadata",
 "name": "Native and rootless contracts",
