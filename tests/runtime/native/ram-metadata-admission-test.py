@@ -98,6 +98,32 @@ def main() -> None:
         loader_scope,
         "Qualified primary loading must set and verify the runtime token")
 
+    # Mutable lifecycle ownership is same-boot RAM state. Persistent storage
+    # may retain signed qualification evidence, but it must not become a
+    # physical-parent admission dependency or swapz on-partition metadata.
+    require(
+        "#define SWAPZ_PRIMARY_RUNTIME_STATE_BASE \\\n"
+        "\tSWAPZ_PRIMARY_EXECUTION_RUNTIME_DIRECTORY" in primary,
+        "Production lifecycle state must stay under the /run runtime directory")
+    require(
+        "#define SWAPZ_PRIMARY_QUALIFICATION_BASE "
+        "\"/var/lib/swapz/physical-recovery\"" in primary,
+        "Persistent qualification evidence must remain separate from runtime state")
+    require(
+        "return (unsigned long)type == TMPFS_MAGIC;" in primary,
+        "Production lifecycle state must require a RAM-backed tmpfs filesystem")
+    require(
+        "int state_fd, int lock_fd, int report_fd" in primary,
+        "Qualification import must keep state and persistent evidence descriptors separate")
+    for obsolete_recovery_gate in (
+        "separate-physical-recovery-parent",
+        "target-recovery-parent-separation",
+        "swapz_primary_recovery_parent_separation_valid",
+    ):
+        require(
+            obsolete_recovery_gate not in primary,
+            f"Obsolete physical recovery-disk gate remains: {obsolete_recovery_gate}")
+
     # DM property consumers must see the allocated lower data range, not
     # the reserved SWAPSPACE2 header or discarded segment-alignment tail.
     iterator = target.split("static int swapz_iterate_devices(", 1)[1].split(
