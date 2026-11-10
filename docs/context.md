@@ -30,7 +30,10 @@ rejected pilots and deferred research are catalogued in the
 ordinary `SWAPSPACE2` swap partitions, not swapz-formatted disks. The
 unaltered first 4096-byte backing page is never an SWZ extent. After verified
 `swapoff` and exclusive admission, swapz may write data-area payload blocks
-only; it must not change the partition signature, UUID or table. The newly
+only; it must not change the partition signature, UUID or table. An active
+ordinary swap partition may contain live pages before START; PREPARE must not
+require `/proc/swaps Used=0`, and the kernel `swapoff` syscall is the
+authoritative migration boundary before exclusive mapper mutation. The newly
 created virtual mapper alone may receive `mkswap`. All logical mappings,
 extent descriptors, offsets, lengths, sequence/generation fields, CRCs and
 allocator/GC authority must live in bounded RAM, with explicit lifetime and
