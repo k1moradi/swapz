@@ -3334,11 +3334,20 @@ int main(int argc, char **argv)
             })
             self.assertNotIn(machine.lower(), report_path.read_bytes())
 
-        # Production's host parser and DMI digest remain distinct.
-        self.assertIn("#ifdef SWAPZ_PRIMARY_OWNED_NULLBLK_TEST\n"
-                      "\t/* An ARM64 report", self.primary)
+        # Both admitted native architectures use the same production
+        # DMI/machine-id host binding; private RAM identity remains test-only.
+        self.assertIn(
+            "#if defined(SWAPZ_PRIMARY_OWNED_NULLBLK_TEST) && "
+            "defined(__aarch64__)", self.primary)
+        self.assertIn("#if defined(__aarch64__) && !defined(__AARCH64EB__)",
+                      self.primary)
         self.assertIn('strcmp(system.machine, "x86_64")', self.primary)
+        self.assertIn('strcmp(system.machine, "aarch64")', self.primary)
         self.assertIn('static const unsigned char prefix[] = "swapz-host-v2";',
+                      self.primary)
+        self.assertIn('static const char required_architecture[] = "aarch64";',
+                      self.primary)
+        self.assertIn('static const char required_architecture[] = "x86_64";',
                       self.primary)
 
     def test_rootless_prepare_refusal_keeps_blocked_and_fail_distinct(self):

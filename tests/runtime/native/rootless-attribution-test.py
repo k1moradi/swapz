@@ -24,6 +24,7 @@ PRIMARY_PHASE = "tests/runtime/native/primary-real-swap-test.py"
 OWNERSHIP_PHASE = "tests/runtime/native/primary-real-swap-parent-ownership-test.py"
 GENERATOR_PHASE = "tests/runtime/native/systemd/swapz-primary-generator-transaction-test.py"
 LIFECYCLE_PHASE = "tests/runtime/native/primary-lifecycle-audit-test.py"
+QUALIFIER_PHASE = "tests/runtime/native/primary-lifecycle-nullblk-qualifier-test.py"
 PRIVATE_SENTINEL = "PRIVATE_ONLY_TRACEBACK_PAYLOAD"
 GENERATOR_SUBTEST_SENTINEL = "PRIVATE_GENERATOR_SUBTEST_PAYLOAD"
 LATER_TEARDOWN_SENTINEL = "LATER_TEARDOWN_PRIVATE_PAYLOAD"
@@ -35,7 +36,7 @@ FIXTURE = r'''
 python3() {
   [[ $# == 3 && $1 == -B && $3 == -v ]] || return 89
   case "$2" in
-    tests/runtime/native/package-dkms-test.py|tests/runtime/native/primary-real-swap-test.py|tests/runtime/native/primary-real-swap-parent-ownership-test.py|tests/runtime/native/systemd/swapz-primary-generator-transaction-test.py|tests/runtime/native/primary-lifecycle-audit-test.py) ;;
+    tests/runtime/native/package-dkms-test.py|tests/runtime/native/primary-real-swap-test.py|tests/runtime/native/primary-real-swap-parent-ownership-test.py|tests/runtime/native/systemd/swapz-primary-generator-transaction-test.py|tests/runtime/native/primary-lifecycle-audit-test.py|tests/runtime/native/primary-lifecycle-nullblk-qualifier-test.py) ;;
     *) return 89 ;;
   esac
   printf 'SYNTHETIC_STDOUT\n'
@@ -121,6 +122,15 @@ PY
         "FAIL: test_expected (__main__.PackageLifecycle.test_expected)" \
         'AssertionError: PRIVATE_ONLY_TRACEBACK_PAYLOAD' >&2
       return 39 ;;
+    qualifier_failure)
+      printf '%s\n' \
+        "test_arm64_private_ram_host_identity_without_dmi (__main__.PrimaryLifecycleNullblkQualifierContract.test_arm64_private_ram_host_identity_without_dmi) ... FAIL" \
+        '======================================================================' \
+        "FAIL: test_arm64_private_ram_host_identity_without_dmi (__main__.PrimaryLifecycleNullblkQualifierContract.test_arm64_private_ram_host_identity_without_dmi)" \
+        'Traceback (most recent call last):' \
+        'AssertionError: PRIVATE_ONLY_TRACEBACK_PAYLOAD' \
+        '======================================================================' >&2
+      return 37 ;;
     primary_ordered)
       printf '%s\n' \
         "FAIL: test_oracle_first (__main__.PrimaryRealSwapContracts.test_oracle_first)" \
@@ -429,6 +439,10 @@ class RootlessAttribution(unittest.TestCase):
             "rootless_phase='tests/runtime/native/primary-lifecycle-nullblk-qualifier-test.py'",
             lifecycle_begin)
         cls.lifecycle_stage = source[lifecycle_begin:lifecycle_end]
+        qualifier_begin = lifecycle_end
+        qualifier_end = source.index(
+            f"rootless_phase='{PRIMARY_PHASE}'", qualifier_begin)
+        cls.qualifier_stage = source[qualifier_begin:qualifier_end]
         generator_begin = source.index(f"rootless_phase='{GENERATOR_PHASE}'")
         # The integration tier wraps package/systemd scripts in an if block.
         # Isolated failure-attribution fixtures extract only the child recipe,
@@ -446,6 +460,7 @@ class RootlessAttribution(unittest.TestCase):
         assert source.count(f"python3 -B {GENERATOR_PHASE} -v") == 1
         assert source.count(f"python3 -B {LIFECYCLE_PHASE} -v") == 1
         assert cls.lifecycle_stage.count(f"python3 -B {LIFECYCLE_PHASE} -v") == 1
+        assert cls.qualifier_stage.count(f"python3 -B {QUALIFIER_PHASE} -v") == 1
         assert cls.generator_stage.count(
             f"python3 -B {GENERATOR_PHASE} -v") == 1
         assert cls.primary_stage.count(
@@ -499,7 +514,8 @@ class RootlessAttribution(unittest.TestCase):
                PRIMARY_PHASE: self.primary_stage,
                OWNERSHIP_PHASE: self.ownership_stage,
                GENERATOR_PHASE: self.generator_stage,
-               LIFECYCLE_PHASE: self.lifecycle_stage}[stage]
+               LIFECYCLE_PHASE: self.lifecycle_stage,
+               QUALIFIER_PHASE: self.qualifier_stage}[stage]
             + "printf 'AFTER_PACKAGE\\n'\n"
         )
         environment = dict(os.environ)
@@ -976,6 +992,26 @@ exec "$SWAPZ_REAL_RM" "$@"
         result = self.invoke("pass", stage=LIFECYCLE_PHASE)
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assert_pass_stdout(result, LIFECYCLE_PHASE, "SYNTHETIC_STDOUT\nAFTER_PACKAGE\n")
+        self.assertEqual(result.stderr, "SYNTHETIC_STDERR\n")
+        self.assertEqual(list(self.root.glob("build/tests/rootless-failure.*")), [])
+
+    def test_qualifier_failure_reports_sanitized_first_method(self):
+        result = self.invoke("qualifier_failure", stage=QUALIFIER_PHASE)
+        log = self.assert_report(
+            result, status=37, reason="unittest_assertion",
+            test="test_arm64_private_ram_host_identity_without_dmi",
+            stage=QUALIFIER_PHASE)
+        self.assertIn(PRIVATE_SENTINEL, log.read_text())
+        self.assertNotIn("AFTER_PACKAGE", result.stdout)
+        self.assertNotIn(PRIVATE_SENTINEL, "\n".join(
+            line for line in result.stderr.splitlines()
+            if line.startswith(("FAIL: rootless ", "Reason: "))))
+
+    def test_qualifier_pass_preserves_streams_and_removes_capture(self):
+        result = self.invoke("pass", stage=QUALIFIER_PHASE)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assert_pass_stdout(
+            result, QUALIFIER_PHASE, "SYNTHETIC_STDOUT\nAFTER_PACKAGE\n")
         self.assertEqual(result.stderr, "SYNTHETIC_STDERR\n")
         self.assertEqual(list(self.root.glob("build/tests/rootless-failure.*")), [])
 

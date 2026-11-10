@@ -182,8 +182,8 @@ finish_rootless_private_stderr_capture() {
 classify_rootless_private_unittest_failure() {
   local diagnostic_path=$1
   local line
-  local detailed_header_regex="^(FAIL|ERROR): (test_[A-Za-z0-9_]{1,96}) \\(__main__\\.(PackageLifecycle|PrimaryRealSwapContracts|SourceAdmissionPeerOwnership|GeneratorPublicationTest|PrimaryLifecycleBehaviorTest|PrimaryLifecycleSourceGuardTest|PackageCrashToPrimaryAdmissionTest|PrimaryOwnerReleaseDurabilityTest|SwapzProductionSourceQualification|CapacityMemoryAccountingContracts)\\.(test_[A-Za-z0-9_]{1,96})\\)"
-  local progress_regex="^[[:space:]]*(test_[A-Za-z0-9_]{1,96}) \\(__main__\\.(PackageLifecycle|PrimaryRealSwapContracts|SourceAdmissionPeerOwnership|PrimaryLifecycleBehaviorTest|PrimaryLifecycleSourceGuardTest|PackageCrashToPrimaryAdmissionTest|PrimaryOwnerReleaseDurabilityTest|SwapzProductionSourceQualification|CapacityMemoryAccountingContracts)\\.(test_[A-Za-z0-9_]{1,96})\\)( \\([^[:cntrl:]]{1,512}\\))? \\.\\.\\. (FAIL|ERROR)$"
+  local detailed_header_regex="^(FAIL|ERROR): (test_[A-Za-z0-9_]{1,96}) \\(__main__\\.(PackageLifecycle|PrimaryRealSwapContracts|SourceAdmissionPeerOwnership|GeneratorPublicationTest|PrimaryLifecycleBehaviorTest|PrimaryLifecycleSourceGuardTest|PackageCrashToPrimaryAdmissionTest|PrimaryOwnerReleaseDurabilityTest|PrimaryLifecycleNullblkQualifierContract|SwapzProductionSourceQualification|CapacityMemoryAccountingContracts)\\.(test_[A-Za-z0-9_]{1,96})\\)"
+  local progress_regex="^[[:space:]]*(test_[A-Za-z0-9_]{1,96}) \\(__main__\\.(PackageLifecycle|PrimaryRealSwapContracts|SourceAdmissionPeerOwnership|PrimaryLifecycleBehaviorTest|PrimaryLifecycleSourceGuardTest|PackageCrashToPrimaryAdmissionTest|PrimaryOwnerReleaseDurabilityTest|PrimaryLifecycleNullblkQualifierContract|SwapzProductionSourceQualification|CapacityMemoryAccountingContracts)\\.(test_[A-Za-z0-9_]{1,96})\\)( \\([^[:cntrl:]]{1,512}\\))? \\.\\.\\. (FAIL|ERROR)$"
   local simple_phase_context_regex="^ \\(phase='([a-z0-9_-]{1,64})'\\)$"
   # Other generator subtest keys identify a failed method, never public data.
   local generator_progress_regex="^[[:space:]]*(test_[A-Za-z0-9_]{1,96}) \\(__main__\\.GeneratorPublicationTest\\.(test_[A-Za-z0-9_]{1,96})\\)( \\([^[:cntrl:]]{1,192}\\))? \\.\\.\\. (FAIL|ERROR)$"
@@ -223,6 +223,8 @@ classify_rootless_private_unittest_failure() {
     'tests/runtime/native/primary-lifecycle-audit-test.py')
       # This suite registers four source-controlled unittest classes.
       expected_unittest_classes='PrimaryLifecycleBehaviorTest:PrimaryLifecycleSourceGuardTest:PackageCrashToPrimaryAdmissionTest:PrimaryOwnerReleaseDurabilityTest' ;;
+    'tests/runtime/native/primary-lifecycle-nullblk-qualifier-test.py')
+      expected_unittest_classes=PrimaryLifecycleNullblkQualifierContract ;;
     'tests/runtime/native/primary-real-swap-test.py')
       expected_unittest_classes=PrimaryRealSwapContracts ;;
     'tests/runtime/native/primary-real-swap-parent-ownership-test.py')
@@ -433,7 +435,7 @@ report_rootless_failure() {
     *) cleanup_disposition=not_independently_verified ;;
   esac
   case $failed_unittest_class in
-    PackageLifecycle|PrimaryRealSwapContracts|SourceAdmissionPeerOwnership|GeneratorPublicationTest|PrimaryLifecycleBehaviorTest|PrimaryLifecycleSourceGuardTest|PackageCrashToPrimaryAdmissionTest|PrimaryOwnerReleaseDurabilityTest|SwapzProductionSourceQualification|CapacityMemoryAccountingContracts|unavailable) ;;
+    PackageLifecycle|PrimaryRealSwapContracts|SourceAdmissionPeerOwnership|GeneratorPublicationTest|PrimaryLifecycleBehaviorTest|PrimaryLifecycleSourceGuardTest|PackageCrashToPrimaryAdmissionTest|PrimaryOwnerReleaseDurabilityTest|PrimaryLifecycleNullblkQualifierContract|SwapzProductionSourceQualification|CapacityMemoryAccountingContracts|unavailable) ;;
     *) failed_unittest_class=unavailable ;;
   esac
   # ERR is inherited by command substitutions under -E. Their eventual
@@ -521,14 +523,14 @@ report_rootless_failure() {
                if (target_class != "unavailable") {
                  pattern = "^" target_kind ": " target_test " \\(__main__\\." target_class "\\." target_test "\\)"
                } else {
-                 pattern = "^" target_kind ": " target_test " \\(__main__\\.(PackageLifecycle|PrimaryRealSwapContracts|SourceAdmissionPeerOwnership|GeneratorPublicationTest|PrimaryLifecycleBehaviorTest|PrimaryLifecycleSourceGuardTest|PackageCrashToPrimaryAdmissionTest|PrimaryOwnerReleaseDurabilityTest|SwapzProductionSourceQualification|CapacityMemoryAccountingContracts)\\." target_test "\\)"
+                 pattern = "^" target_kind ": " target_test " \\(__main__\\.(PackageLifecycle|PrimaryRealSwapContracts|SourceAdmissionPeerOwnership|GeneratorPublicationTest|PrimaryLifecycleBehaviorTest|PrimaryLifecycleSourceGuardTest|PackageCrashToPrimaryAdmissionTest|PrimaryOwnerReleaseDurabilityTest|PrimaryLifecycleNullblkQualifierContract|SwapzProductionSourceQualification|CapacityMemoryAccountingContracts)\\." target_test "\\)"
                }
                if (text !~ pattern) return 0
                if (target_subtest != "unavailable" &&
                    text !~ "\\(phase=\047" target_subtest "\047\\)$") return 0
                return 1
              }
-             return text ~ /^(FAIL|ERROR): test_[A-Za-z0-9_]+ \(__main__\.(PackageLifecycle|PrimaryRealSwapContracts|SourceAdmissionPeerOwnership|GeneratorPublicationTest|PrimaryLifecycleBehaviorTest|PrimaryLifecycleSourceGuardTest|PackageCrashToPrimaryAdmissionTest|PrimaryOwnerReleaseDurabilityTest|SwapzProductionSourceQualification|CapacityMemoryAccountingContracts)\.test_[A-Za-z0-9_]+\)/
+             return text ~ /^(FAIL|ERROR): test_[A-Za-z0-9_]+ \(__main__\.(PackageLifecycle|PrimaryRealSwapContracts|SourceAdmissionPeerOwnership|GeneratorPublicationTest|PrimaryLifecycleBehaviorTest|PrimaryLifecycleSourceGuardTest|PackageCrashToPrimaryAdmissionTest|PrimaryOwnerReleaseDurabilityTest|PrimaryLifecycleNullblkQualifierContract|SwapzProductionSourceQualification|CapacityMemoryAccountingContracts)\.test_[A-Za-z0-9_]+\)/
            }
            function target_ends(text) {
              if (compile_mode) {
@@ -879,7 +881,16 @@ fi
 finish_and_report_rootless_unittest "$rootless_audit_exit_code" "$rootless_audit_command_line"
 rootless_phase='tests/runtime/native/primary-lifecycle-nullblk-qualifier-test.py'
 rootless_begin_phase
-python3 -B tests/runtime/native/primary-lifecycle-nullblk-qualifier-test.py -v
+# Attribute the first source-controlled failure, retaining the private traceback.
+begin_rootless_private_stderr_capture
+rootless_qualifier_command_line=$LINENO
+if python3 -B tests/runtime/native/primary-lifecycle-nullblk-qualifier-test.py -v \
+    2>&"$rootless_capture_input_fd"; then
+  rootless_qualifier_exit_code=0
+else
+  rootless_qualifier_exit_code=$?
+fi
+finish_and_report_rootless_unittest "$rootless_qualifier_exit_code" "$rootless_qualifier_command_line"
 rootless_phase='tests/runtime/native/primary-real-swap-test.py'
 rootless_begin_phase
 begin_rootless_private_stderr_capture
