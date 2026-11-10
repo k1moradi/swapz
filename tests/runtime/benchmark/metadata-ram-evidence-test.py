@@ -92,6 +92,12 @@ class SyntheticRamEvidenceTest(unittest.TestCase):
             ram.capacity_index_estimate(27_080_192, 30_465_536),
             {"array_count": 17, "payload_bytes": 884_391_736,
              "page_rounded_bytes": 884_436_992})
+        self.assertEqual(
+            ram.capacity_index_estimate(
+                27_080_192, 30_465_536,
+                sparse_segment_translation=True),
+            {"array_count": 18, "payload_bytes": 884_867_760,
+             "page_rounded_bytes": 884_916_224})
         policy_path = Path(__file__).resolve().parents[3] / (
             "docs/production-acceptance.json")
         policy = json.loads(policy_path.read_text(encoding="utf-8"))
