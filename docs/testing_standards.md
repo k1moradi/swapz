@@ -295,6 +295,13 @@ unchanged by 1..4095 trailing device bytes outside that declared page geometry. 
 qualification must also prove BLKGETSIZE64 target inspection preserves the
 exact byte count without rejecting a non-4096-aligned tail; later geometry
 helpers alone floor that identity to complete pages.
+The physical real-swap qualification capacity helper, RAM-index estimator,
+sustained replay geometry oracle, and post-boot maximum logical-sector verifier
+must likewise use only complete pages for allocation while keeping the
+unfloored target byte count for identity. Native and rootless regressions cover
+1, 2048 and 4095 trailing device bytes, plus rejection of malformed values,
+fewer than two complete pages and impossible authority capacity. This does not
+weaken the independent SWAPSPACE2 header/bad-page layout admission gates.
 The native source contract must reject restoring prefix-only `nullb` disk
 identification: the kernel constructor requires a decimal-only suffix,
 in addition to the harness's independently verified driver/device identity.

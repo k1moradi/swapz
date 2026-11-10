@@ -2818,9 +2818,18 @@ class PrimaryRealSwapContracts(unittest.TestCase):
         self.assertEqual(geometry["gc_reserve_blocks"], 3_385_024)
         self.assertNotEqual(geometry["logical_pages"], 27_080_448)
 
+        # Subpage device tails do not contribute to the Linux swap data area.
+        for trailing_bytes in (1, 2048, 4095):
+            with self.subTest(trailing_bytes=trailing_bytes):
+                self.assertEqual(
+                    qualify.maximum_primary_geometry(
+                        124_787_884_032 + trailing_bytes), geometry)
         for invalid_bytes in (
                 0,
-                qualify.PAGE_BYTES + 1,
+                True,
+                4096,
+                8191,
+                8192.0,
                 (qualify.UINT32_MAX + 2) * qualify.PAGE_BYTES):
             with self.subTest(invalid_bytes=invalid_bytes), \
                     self.assertRaises(qualify.Blocked):

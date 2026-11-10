@@ -426,6 +426,38 @@ class UnitContractTests(unittest.TestCase):
             self.assertEqual(result.returncode, 0, result.stderr)
 
 
+class BootCapacityGeometryTests(unittest.TestCase):
+    def test_boot_verifier_floors_only_trailing_subpage_bytes(self) -> None:
+        source = read_text(BOOT_VERIFY)
+        function_start = "maximum_logical_sectors()\n{\n"
+        function_end = "\n}\n\ncanonical_status_error()"
+        self.assertEqual(source.count(function_start), 1)
+        self.assertIn(function_end, source)
+        function_body = source.split(function_start, 1)[1].split(
+            function_end, 1)[0]
+        script = (
+            function_start + function_body + "\n}\n" +
+            'maximum_logical_sectors "$1"\n')
+
+        def evaluate(size_bytes: object) -> subprocess.CompletedProcess[str]:
+            return subprocess.run(
+                ["sh", "-c", script, "swapz-geometry-test", str(size_bytes)],
+                check=False, text=True, capture_output=True,
+                timeout=FIXTURE_SUBPROCESS_TIMEOUT_SECONDS)
+
+        aligned = evaluate(TARGET_BYTES)
+        self.assertEqual(aligned.returncode, 0, aligned.stderr)
+        self.assertEqual(aligned.stdout.strip(), "216641536")
+        for trailing_bytes in (1, 2048, 4095):
+            with self.subTest(trailing_bytes=trailing_bytes):
+                result = evaluate(TARGET_BYTES + trailing_bytes)
+                self.assertEqual(result.returncode, 0, result.stderr)
+                self.assertEqual(result.stdout, aligned.stdout)
+        for invalid_bytes in (0, 4096, 8191, -1, "not-an-integer"):
+            with self.subTest(invalid_bytes=invalid_bytes):
+                self.assertNotEqual(evaluate(invalid_bytes).returncode, 0)
+
+
 class UnitSandboxContractTests(unittest.TestCase):
     """Static parser regression for sandbox and ownership-sensitive unit drift."""
 

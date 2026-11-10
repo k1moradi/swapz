@@ -219,7 +219,6 @@ def maximum_logical_pages_for_partition(
     if (
             type(partition_bytes) is not int or partition_bytes <= 0 or
             partition_bytes > MAX_UINT64 or
-            partition_bytes % BLOCK_BYTES or
             type(size_t_max) is not int or
             size_t_max <= 0 or size_t_max > MAX_UINT64):
         return None

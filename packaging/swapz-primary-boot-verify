@@ -1092,7 +1092,7 @@ maximum_logical_sectors()
 	device_bytes=$1
 	printf '%s\n' "$device_bytes" | grep -Eq '^[1-9][0-9]*$' || return 1
 	[ "${#device_bytes}" -le 18 ] || return 1
-	[ $((device_bytes % 4096)) -eq 0 ] || return 1
+	# Retain exact device-byte identity; only complete pages enter capacity.
 	blocks=$((device_bytes / 4096))
 	[ "$blocks" -gt 1 ] || return 1
 	physical_blocks=$((((blocks - 1) / 256) * 256))

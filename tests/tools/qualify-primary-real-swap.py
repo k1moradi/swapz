@@ -1740,8 +1740,9 @@ def require_expected_swap_priority(expected: SwapRow, unrelated: list[SwapRow]) 
 def maximum_primary_geometry(device_bytes: int) -> dict[str, int]:
     """Derive the allocation-free production capacity from backing bytes."""
     if not isinstance(device_bytes, int) or isinstance(device_bytes, bool) or \
-            device_bytes < PAGE_BYTES or device_bytes % PAGE_BYTES:
+            device_bytes // PAGE_BYTES < 2:
         raise Blocked("primary backing geometry is invalid")
+    # Exact partition size remains bound to identity; allocation uses whole pages.
     blocks = device_bytes // PAGE_BYTES
     physical_blocks = ((blocks - 1) // SEGMENT_BLOCKS) * SEGMENT_BLOCKS
     if physical_blocks == 0 or physical_blocks > UINT32_MAX:

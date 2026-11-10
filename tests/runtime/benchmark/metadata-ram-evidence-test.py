@@ -88,6 +88,16 @@ class SyntheticRamEvidenceTest(unittest.TestCase):
         self.assertEqual(
             ram.maximum_logical_pages_for_partition(partition_bytes),
             27_080_192)
+        # BLKGETSIZE64 keeps the exact byte size; allocation counts complete pages.
+        for trailing_bytes in (1, 2048, 4095):
+            with self.subTest(trailing_bytes=trailing_bytes):
+                self.assertEqual(
+                    ram.maximum_logical_pages_for_partition(
+                        partition_bytes + trailing_bytes), 27_080_192)
+        for invalid_bytes in (None, True, 0, 4096, 8191, 8192.0, 1 << 64):
+            with self.subTest(invalid_bytes=invalid_bytes):
+                self.assertIsNone(
+                    ram.maximum_logical_pages_for_partition(invalid_bytes))
         self.assertEqual(
             ram.capacity_index_estimate(27_080_192, 30_465_536),
             {"array_count": 17, "payload_bytes": 884_391_736,
