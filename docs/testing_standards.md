@@ -2678,6 +2678,21 @@ override the checkout preflight only in its copied synthetic runner, because
 that fixture deliberately edits tracked fake sources to check dirty build
 provenance. This exemption must never reach the real `make test` command.
 
+The fast READ coalescing A/B gate retains every mandatory same-source merge-on
+round, not just the earliest failure. On a zero-merge sequential round,
+`make test` must automatically print bounded per-round sequential and
+seeded-random kernel counters for successful merges, parallel batches,
+executed adjacent pairs, gap/cache/noncontiguous-slot skips, and 3+-extent
+candidate chains. Those counters are source-bound aggregate measurements,
+not raw storage geometry or device paths. A positive gap-skip count means
+the required missing READ ranges could not be merged into an exact contiguous
+span; it does not identify whether placement or cache residency caused that
+geometry. Keep zero-extra-block and every-round execution gates strict:
+skipped candidates or successes from other rounds never become a PASS.
+Rootless regressions exercise the official failed-stage console, verify its
+first-cause output and guard private data. The owner must not need separate
+JSON extraction commands to see the failed rounds.
+
 ### Native/rootless fail-only subprocess attribution
 
 The private `tests/tools/test-rootless.sh` runner must keep the exact registered
