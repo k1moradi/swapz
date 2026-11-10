@@ -886,19 +886,25 @@ Final preclaim identity revalidation and physical-parent swap inventory must
 retain separate phase labels so stale identity is not reported as a swap-state
 failure.
 
-The shared transaction admission check must read the run's immutable 4096-byte
-block-zero backup when the transaction records one and verify its recorded
-SHA-256 before mapper creation or removal. The selected target may contain a
-filesystem, an old swap header or arbitrary disposable contents; do not require
-a pre-existing Linux swap signature. Missing or altered rollback bytes block
-an operation whenever that transaction's recovery plan requires the backup.
+Physical admission requires an already formatted ordinary Linux `SWAPSPACE2`
+partition selected through the protected PARTUUID lifecycle. Capture the first
+4096 bytes only as an immutable read-only integrity witness; it is not rollback
+material and must never authorize a raw-header rewrite. Revalidate the exact
+bytes before mapper creation. During stop/recovery, remove only positively
+run-owned mapper state when otherwise safe, but reactivate the raw partition
+only when its block-zero image still byte-matches the admitted witness and its
+ordinary swap identity remains valid. A mismatch blocks raw `swapon` and
+requires read-only inspection; it is never repaired, reformatted or restored
+from saved bytes. Filesystems, arbitrary disposable devices and non-swap block
+targets are not valid current physical backing.
 
 ## MM, folio and zswap semantic boundary
 
 Read [context.md](context.md) for the kernel reclaim/BIO/zswap semantics and
 [ROADMAP.md](ROADMAP.md) for the staged collaboration blueprint. Keep the
 independently reconstructible 4KiB logical page as swapz's authority unit:
-a folio, process, VMA or allocator object is not an SWZ record/extent identity.
+a folio, process, VMA or allocator object is not a compressed-payload/extent
+identity.
 
 Packing locality may only break ties among **already accepted**, authority-
 safe layouts. Folio identity belongs to the WRITE-side owned BIO lifetime:
@@ -1536,15 +1542,17 @@ rescues and packing-cliff crossings. For every router threshold, also feed the
 classifier-routed delta64 lengths through the same planner and report routed
 blocks/extents saved; ungated transform opportunity alone is not routing
 evidence. The production transform unit is exactly one independent 4KiB logical page.
-Never carry delta state across sibling records or an extent: doing so would
-couple authority and force unrelated blocks into selective reads. SWZ records
-encode LZ4 versus delta64+LZ4 explicitly without enlarging the 16-byte record.
-The volatile mapping may pack the encoding into unused record-index bits, but
-every metadata read must cross-check it. CRC covers the stored compressed
-payload. Reads LZ4-decompress first and apply the selected inverse only for a
-delta64 record. GC relocates the stored payload and preserves its encoding
-without decode/re-encode. Raw fallback and zero elision remain separate
-representations.
+Never carry delta state across sibling payloads or an extent: doing so would
+couple authority and force unrelated blocks into selective reads. Production
+encoding authority lives in volatile RAM: the mapping packs LZ4 versus
+delta64+LZ4 versus DELTA64_SHUF8 into the existing record-index flag bits, with
+no serialized record added to lower media. The RAM payload CRC covers the
+stored compressed bytes. Reads LZ4-decompress first and apply the selected
+inverse only for a delta64 encoding. GC relocates the stored payload and
+preserves its RAM-authoritative encoding without decode/re-encode. Any legacy
+16-byte serialized record remains userspace-fixture compatibility only and
+must not define production layout or admission. Raw fallback and zero elision
+remain separate representations.
 
 ### Retired in-flight-zero shrink guard
 
