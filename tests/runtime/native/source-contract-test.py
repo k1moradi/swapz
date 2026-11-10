@@ -231,15 +231,15 @@ class SwapzProductionSourceQualification(unittest.TestCase):
             prepare.index('"PRIMARY_PREPARE=FAILED'),
             prepare.index("errno = saved_errno"))
 
-    def test_shared_root_fingerprint_is_readable_before_recovery_gate(self):
+    def test_shared_root_fingerprint_is_independent_of_recovery_parent(self):
         scope = source_body(
             "swapz_primary_shared_root_scope_record_live", PRIMARY)
         plan = source_body("swapz_primary_read_only_plan", PRIMARY)
-        self.assertLess(
-            scope.index("memcpy(scope_sha256, scope_digest"),
-            scope.index("swapz_primary_recovery_parent_separation_valid"))
+        self.assertIn("memcpy(scope_sha256, scope_digest", scope)
+        self.assertNotIn("swapz_primary_recovery_parent_separation_valid",
+                         PRIMARY)
         self.assertIn("shared_root_parent_scope_fingerprint", plan)
-        self.assertIn("blocked_recovery_same_parent", plan)
+        self.assertNotIn("blocked_recovery_same_parent", plan)
 
     def test_shared_root_host_binding_includes_physical_machine_identity(self):
         host_identity = source_body(
