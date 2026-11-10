@@ -551,6 +551,10 @@ class RootlessAttribution(unittest.TestCase):
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertEqual(
             result.stdout,
+            # The extracted real runner emits its initial progress record.
+            # Match it exactly, then require the sanitized classifier line.
+            "ROOTLESS_PHASE_PROGRESS state=START index=0 elapsed_s=0 "
+            "label=rootless initialization\n"
             "unittest_assertion|"
             f"{method}|SwapzProductionSourceQualification|unavailable\n",
         )

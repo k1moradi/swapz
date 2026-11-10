@@ -2722,6 +2722,10 @@ assertions remain part of the general rootless attribution contract.
 Shell snippets that extract and invoke the classifier must initialize
 `rootless_phase` to the registered suite matching their synthetic unittest
 class; this preserves the active-suite binding under `set -u`.
+A direct classifier fixture extracting the real rootless runner must account
+for its single source-controlled initial `ROOTLESS_PHASE_PROGRESS` stdout
+record, then match the sanitized unittest identity exactly; neither output
+may include private exception bytes, paths, or an invented first failure.
 Synthetic marker mutations must preserve token boundaries; changing `test=`
 must not also alter the suffix of `subtest=` or invalidate the marker grammar.
 These regressions do not substitute for the loaded checks in either public
