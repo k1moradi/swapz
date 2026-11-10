@@ -50,8 +50,12 @@ Do not suppress unused-function warnings.
 Production-only runtime-parent inspection must likewise be omitted when its
 preflight caller is replaced by the rootless or owned-nullblk test seam.
 Swap-inventory fixtures must provide the selected swap area's explicit size
-to quiescence checks while retaining filesystem-device alias rejection for
-unrelated versus selected-filesystem swapfiles.
+to the current production `swapz_primary_original_swap_policy_admissible`
+check, retaining filesystem-device alias rejection for unrelated versus
+selected-filesystem swapfiles. The retired
+`swapz_primary_original_swap_is_quiescent` symbol must not be called by
+native production-inclusion fixtures: an active selected swap may have Used>0,
+and START, not PREPARE, owns the swapoff migration boundary.
 The lifecycle audit must require all three PREPARE raw-swap inventory checks
 to use the unchanged header's declared swap size, computed before the first
 check, rather than a retired argument-free geometry assumption.

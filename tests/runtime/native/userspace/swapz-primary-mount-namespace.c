@@ -2052,7 +2052,7 @@ static void test_active_swapfile_gate(void)
 	/* Unrelated host swapfiles remain permitted. */
 	fixture_regular_swap_device = makedev(259U, 9U);
 	errno = 0;
-	if (swapz_primary_original_swap_is_quiescent(selected_swap_kib) < 0) {
+	if (swapz_primary_original_swap_policy_admissible(selected_swap_kib) < 0) {
 		fprintf(stderr,
 			"FAIL: unrelated regular swapfile was rejected: errno=%d\n",
 			errno);
@@ -2073,7 +2073,7 @@ static void test_active_swapfile_gate(void)
 	 */
 	fixture_regular_swap_device = makedev(8U, 1U);
 	errno = 0;
-	if (swapz_primary_original_swap_is_quiescent(selected_swap_kib) == 0) {
+	if (swapz_primary_original_swap_policy_admissible(selected_swap_kib) == 0) {
 		fprintf(stderr,
 			"FAIL: active swapfile on selected filesystem was admitted\n");
 		++fixture_failures;
