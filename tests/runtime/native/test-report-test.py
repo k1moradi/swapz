@@ -3634,6 +3634,28 @@ class ReportContract(unittest.TestCase):
             runner.lz4_acceleration_verdict(changed)["overall"],
             "PASS_LZ4_ACCELERATION_AB")
 
+    def test_missing_sequential_coalescing_reports_measured_counters(self):
+        # The real Lubuntu failure can have adjacent/parallel candidates
+        # while one merge-on round coalesces nothing. Keep the mandatory
+        # failure gate and retain its measured attribution in the report.
+        sessions = runner.parse_read_coalesce_ab(synthetic_log())
+        failing_index = next(
+            index for index, session in enumerate(sessions)
+            if session["read_coalesce"] == 1)
+        kernel = sessions[failing_index]["swapz"]["passes"][
+            "sequential"]["kernel_read_path"]
+        kernel["parallel_read_coalesced_pairs"] = 0
+        kernel["parallel_read_coalesced_reqs_saved"] = 0
+        kernel["parallel_read_coalesced_blocks"] = 0
+        kernel["parallel_read_coalesce_skip_gap"] = 29
+        verdict = runner.read_coalesce_ab_verdict(sessions)
+        self.assertEqual(verdict["overall"], "INCOMPLETE")
+        self.assertIn("merge-on arm executed no sequential READ coalescing",
+                      verdict["reason"])
+        self.assertIn(f"round={failing_index + 1}", verdict["reason"])
+        self.assertIn("gap=29", verdict["reason"])
+        self.assertIn("adjacent=", verdict["reason"])
+
     def test_immutable_inputs_and_alternating_arm_order(self):
         sessions = runner.parse_sessions(synthetic_log())
         self.assertEqual(len(sessions), 14)

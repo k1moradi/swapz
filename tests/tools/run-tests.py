@@ -6232,8 +6232,22 @@ def read_coalesce_ab_verdict(sessions):
                         "reason": "merge-off arm executed adjacent-range READ coalescing"}
         if row["read_coalesce"] and not arm["passes"]["sequential"][
                 "kernel_read_path"]["parallel_read_coalesced_pairs"]:
-            return {"overall": "INCOMPLETE",
-                    "reason": "merge-on arm executed no sequential READ coalescing"}
+            # The source-bound per-round gate remains mandatory. Emit
+            # path-free measured counters here so a failed make test does
+            # not require an operator to manually mine its report JSON.
+            sequential = arm["passes"]["sequential"]["kernel_read_path"]
+            return {
+                "overall": "INCOMPLETE",
+                "reason": (
+                    "merge-on arm executed no sequential READ coalescing; "
+                    f"round={index + 1} "
+                    f"parallel={sequential['parallel_read_pairs']} "
+                    f"adjacent={sequential['parallel_read_adjacent_extent_pairs']} "
+                    f"gap={sequential['parallel_read_coalesce_skip_gap']} "
+                    f"cached={sequential['parallel_read_coalesce_skip_cached']} "
+                    f"noncontig={sequential['parallel_read_coalesce_skip_noncontig_slot']}"
+                ),
+            }
         if row["read_coalesce"] and any(
                 arm["passes"][mode]["kernel_read_path"][
                     "parallel_read_coalesce_skip_other"]
