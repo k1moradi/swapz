@@ -8373,6 +8373,13 @@ and an unreadable `/proc` entry fails closed. Rootless suites for this procedure
 (for example through a `sudo` stub that exits nonzero). The physical-swap-probe
 suite simulates its physical run with mocks, so it must pass under that stub
 and must never be run unguarded on the PC.
+The recovery-order tests must mock live target identity and Device Mapper
+inventory without touching a host block path, but must retain actual header
+read-before-swapon and no-raw-write assertions. The development simulator must
+bind its private exact run directory to the current runtime-state and algorithm
+base helpers, not the removed persistent `_recovery_base` API. Missing-activity
+and pending-recovery controls must still assert no premature runtime or legacy
+state access. Preserve the executable bit of the physical-swap test script.
 The synthetic recovery fixture must persist identical, strictly typed geometry
 bindings (`swapz_logical_sectors`, `swapz_linux_swap_kib` and
 `swapz_physical_blocks`) in saved state and results. Independent negative

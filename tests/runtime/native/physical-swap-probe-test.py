@@ -135,7 +135,7 @@ class PhysicalSwapProbeTests(unittest.TestCase):
         # New algorithm trials must not inspect/provision persistent recovery
         # storage merely to determine that no same-boot trial is pending.
         with mock.patch.object(
-                probe, "_recovery_base",
+                probe, "_legacy_recovery_base",
                 side_effect=AssertionError("persistent recovery consulted")), \
              mock.patch.object(probe.os, "geteuid", return_value=0), \
              mock.patch.object(probe, "recover") as restore:
@@ -1615,7 +1615,7 @@ class PhysicalSwapProbeTests(unittest.TestCase):
                 events.append(("run", tuple(args)))
                 if args[:2] == ["dmsetup", "info"]:
                     return subprocess.CompletedProcess(
-                        args, 0, stdout=state["dm_uuid"] + "\n", stderr="")
+                        args, 0, stdout="No devices found\n", stderr="")
                 return subprocess.CompletedProcess(args, 0, stdout="", stderr="")
 
             def read_header(_device, _target):
@@ -1632,6 +1632,7 @@ class PhysicalSwapProbeTests(unittest.TestCase):
                     mock.patch.object(probe, "_holder_names", return_value=[]), \
                     mock.patch.object(probe, "_mountinfo_has_device",
                                       return_value=False), \
+                    mock.patch.object(probe, "_verify_target_identity") as verified, \
                     mock.patch.object(probe, "_read_block0",
                                       side_effect=read_header), \
                     mock.patch.object(probe, "_write_block0") as write_header, \
@@ -1641,6 +1642,7 @@ class PhysicalSwapProbeTests(unittest.TestCase):
                     state_dir, state["device_arg"], state["device_arg"])
 
         self.assertEqual(recovered["stage"], "COMPLETE")
+        verified.assert_called()
         write_header.assert_not_called()
         header_read = next(i for i, event in enumerate(events)
                            if event[0] == "header-read")
@@ -1662,7 +1664,11 @@ class PhysicalSwapProbeTests(unittest.TestCase):
             def run(args, **kwargs):
                 del kwargs
                 commands.append(tuple(args))
-                return subprocess.CompletedProcess(args, 0, stdout="", stderr="")
+                return subprocess.CompletedProcess(
+                    args, 0,
+                    stdout=("No devices found\n" if args[:2] == ["dmsetup", "info"]
+                            else ""),
+                    stderr="")
 
             with mock.patch.object(probe, "_validate_state_dir"), \
                     mock.patch.object(
@@ -1674,6 +1680,7 @@ class PhysicalSwapProbeTests(unittest.TestCase):
                     mock.patch.object(probe, "_holder_names", return_value=[]), \
                     mock.patch.object(probe, "_mountinfo_has_device",
                                       return_value=False), \
+                    mock.patch.object(probe, "_verify_target_identity") as verified, \
                     mock.patch.object(probe, "_read_block0",
                                       return_value=header), \
                     mock.patch.object(probe, "_write_block0") as write_header, \
@@ -1683,6 +1690,7 @@ class PhysicalSwapProbeTests(unittest.TestCase):
                     state_dir, state["device_arg"], state["device_arg"])
 
         self.assertEqual(recovered["stage"], "COMPLETE")
+        verified.assert_called()
         write_header.assert_not_called()
         self.assertFalse(any(call[0] == "swapon" for call in commands))
     def test_legacy_journal_is_refused_before_device_access(self):
@@ -3477,10 +3485,9 @@ class PhysicalSwapProbeTests(unittest.TestCase):
             return actual_save_state(_state_dir, saved_state)
 
         def prepare_fake_state(*_args):
-            state_dir = Path(directory)
-            actual_save_state(state_dir, state)
-            self.assertFalse((state_dir / "block0.bin").exists())
-            return state, state_dir
+            actual_save_state(state_directory, state)
+            self.assertFalse((state_directory / "block0.bin").exists())
+            return state, state_directory
 
         actual_save_results = probe._save_results
         attempted_recovery_results = []
@@ -3497,9 +3504,14 @@ class PhysicalSwapProbeTests(unittest.TestCase):
         # Otherwise, an approval-replay failure can mask a mapper-identity bug.
         # ExitStack avoids Python's limit on statically nested with-blocks.
         with tempfile.TemporaryDirectory() as directory:
+            runtime_base = Path(directory)
+            state_directory = runtime_base / f"swapz-physical-{review['run_id']}"
+            state_directory.mkdir(mode=0o700)
             patches = (
-                mock.patch.object(probe, "_recovery_base",
-                                  return_value=Path(directory)),
+                mock.patch.object(probe, "_algorithm_runtime_base",
+                                  return_value=runtime_base),
+                mock.patch.object(probe, "_runtime_state_base",
+                                  return_value=runtime_base),
                 mock.patch.object(probe.os, "geteuid", return_value=0),
                 mock.patch.object(probe, "current_source_evidence",
                                   return_value=evidence),
@@ -3574,7 +3586,7 @@ class PhysicalSwapProbeTests(unittest.TestCase):
                 def execute():
                     probe.run_probe(
                         target["device_arg"], target["device_arg"],
-                        None if development_only else directory,
+                        None if development_only else state_directory,
                         None if development_only else "/reviewed/review.json",
                         development_only=development_only)
 
@@ -3590,7 +3602,7 @@ class PhysicalSwapProbeTests(unittest.TestCase):
                         "ownership_marker_action=not_attempted")
                     # Read the durable failure record, not a synthetic PASS.
                     state["_test_results"] = json.loads(
-                        (Path(directory) / probe.RESULTS_NAME).read_text())
+                        (state_directory / probe.RESULTS_NAME).read_text())
                 elif teardown_oracle_metadata is not None:
                     # The reusable simulator must return enough state for the
                     # outer subtest to diagnose every forged-evidence case.
@@ -3624,14 +3636,14 @@ class PhysicalSwapProbeTests(unittest.TestCase):
                         artifact_drift_before_mutation or recovery_failure or
                         recovery_record_substitution is not None):
                     state["_test_results"] = json.loads(
-                        (Path(directory) / probe.RESULTS_NAME).read_text())
+                        (state_directory / probe.RESULTS_NAME).read_text())
                 if ((recovery_failure or teardown_not_complete) and
                         not recovery_state_save_failure):
                     # Recovery reopens the durable state and may rebind its
                     # local dictionary. Observe that committed record rather
                     # than the simulator's pre-recovery in-memory alias.
                     saved_state = json.loads(
-                        (Path(directory) / probe.STATE_NAME).read_text())
+                        (state_directory / probe.STATE_NAME).read_text())
                     for key in ("stage", "stage_before_recovery",
                                 "recovery_error"):
                         if key in saved_state:
@@ -3641,7 +3653,7 @@ class PhysicalSwapProbeTests(unittest.TestCase):
                     # restoration/evidence validation; the teardown snapshot
                     # predates that decision and cannot be used as final proof.
                     state["_test_results"] = json.loads(
-                        (Path(directory) / probe.RESULTS_NAME).read_text())
+                        (state_directory / probe.RESULTS_NAME).read_text())
                 state["_test_observed_header"] = observed_block_zero
                 state["_test_owner_marker"] = os.path.isfile(
                     Path(directory) / f"partition-{target['partuuid']}.active")
@@ -4341,7 +4353,7 @@ class PhysicalSwapProbeTests(unittest.TestCase):
                                   return_value=evidence), \
                 mock.patch.object(probe, "inspect_target",
                                   return_value=target), \
-                mock.patch.object(probe, "_recovery_base") as recovery, \
+                mock.patch.object(probe, "_runtime_state_base") as recovery, \
                 mock.patch.object(probe, "_write_block0") as write:
             with self.assertRaisesRegex(
                     probe.ProbeError,
@@ -4365,7 +4377,7 @@ class PhysicalSwapProbeTests(unittest.TestCase):
                                   return_value=development_evidence), \
                 mock.patch.object(probe, "inspect_target",
                                   return_value=target), \
-                mock.patch.object(probe, "_recovery_base") as recovery, \
+                mock.patch.object(probe, "_runtime_state_base") as recovery, \
                 mock.patch.object(probe, "_write_block0") as write:
             with self.assertRaisesRegex(
                     probe.ProbeError,
@@ -6338,7 +6350,7 @@ class PhysicalSwapProbeTests(unittest.TestCase):
                                           return_value=evidence), \
                         mock.patch.object(probe, "inspect_target",
                                           return_value=target), \
-                        mock.patch.object(probe, "_recovery_base",
+                        mock.patch.object(probe, "_algorithm_runtime_base",
                                           return_value=Path(directory)), \
                         mock.patch.object(probe, "_artifact_digests",
                                           return_value=evidence["artifact_digests"]), \
@@ -6358,7 +6370,8 @@ class PhysicalSwapProbeTests(unittest.TestCase):
                     with self.assertRaisesRegex(probe.ProbeError, expected):
                         probe.run_probe(
                             target["device_arg"], target["device_arg"],
-                            directory, "/reviewed/review.json")
+                            Path(directory) / f"swapz-physical-{review['run_id']}",
+                            "/reviewed/review.json")
                 burn.assert_not_called()
                 write.assert_not_called()
 
