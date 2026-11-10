@@ -39,18 +39,15 @@ static inline swapz_u32 swapz_gc_live_byte_cost(const struct swapz_map *m)
 static inline swapz_u32 swapz_gc_estimated_io_cost_with_bytes(
 	const struct swapz_map *m, swapz_u32 bytes)
 {
-	swapz_u32 first_block, last_block, reads;
+	swapz_u32 extent_bytes, first_block, last_block, reads;
 
 	if (!bytes || !m || !swapz_gc_valid_extent_blocks(m->extent_blocks))
 		return 0;
 	if (m->raw)
 		return m->extent_blocks == 1 ? bytes + SWAPZ_BLOCK_BYTES : 0;
-	if (!m->payload_length ||
-	    m->payload_offset >=
-		(swapz_u32)m->extent_blocks * SWAPZ_BLOCK_BYTES ||
-	    m->payload_length >
-		(swapz_u32)m->extent_blocks * SWAPZ_BLOCK_BYTES -
-		m->payload_offset)
+	extent_bytes = (swapz_u32)m->extent_blocks * SWAPZ_BLOCK_BYTES;
+	if (!m->payload_length || m->payload_offset >= extent_bytes ||
+	    m->payload_length > extent_bytes - m->payload_offset)
 		return 0;
 	first_block = m->payload_offset >> SWAPZ_BLOCK_SHIFT;
 	last_block = ((swapz_u32)m->payload_offset +
@@ -86,7 +83,7 @@ static inline swapz_u32 swapz_gc_estimated_io_cost(const struct swapz_map *m)
  * destination, no packing heuristic can produce useful reclaim.
  *
  * This is a necessary condition, NOT a promise that a candidate with
- * less data fits after 4/8/16KiB extent/header fragmentation.
+ * less data fits after 4/8/16KiB extent packing fragmentation.
  */
 static inline int swapz_gc_has_possible_headroom(swapz_u32 live_bytes)
 {
