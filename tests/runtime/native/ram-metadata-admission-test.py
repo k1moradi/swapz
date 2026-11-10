@@ -46,8 +46,14 @@ def main() -> None:
     require("authority_metadata_ram=%llu" in target and
             "read_payload_cache_ram=%llu" in target,
             "Runtime status must expose cached authority and payload-cache RAM bytes")
-    require("swapz_linux_swap_header_valid(block, device_bytes)" in target,
-            "Ordinary SWAPSPACE2 validation must remain the physical header contract")
+    require(
+        "swapz_linux_swap_header_parse(block, device_bytes, &layout)" in target and
+        "swapz_configure_linux_swap_layout(ctx, block, &layout)" in target,
+        "Physical backing must parse the full ordinary SWAPSPACE2 layout into RAM")
+    require(
+        "swapz_backing_range_valid(ctx, block, blocks)" in target and
+        "ctx->segment_backing_pages" in target,
+        "Lower I/O must remain segment-contained for sparse clean-segment mapping")
 
     # A null or invalid asynchronous write slot must be rejected before
     # its lower-image pointer is read while building the dm_io request.
