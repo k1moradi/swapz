@@ -26,6 +26,7 @@ probe = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(probe)
 
 REAL_RECOVERY_BASE = probe._recovery_base
+REAL_LEGACY_RECOVERY_BASE = probe._legacy_recovery_base
 REAL_ALGORITHM_RUNTIME_BASE = probe._algorithm_runtime_base
 REAL_PARTITION_LOCK = probe._partition_lock
 REAL_PATH_READ_TEXT = Path.read_text
@@ -1173,17 +1174,22 @@ class PhysicalSwapProbeTests(unittest.TestCase):
                 inspect.assert_not_called()
                 command.assert_not_called()
 
-    def test_development_run_directory_uses_its_fresh_run_id(self):
+    def test_current_run_directory_is_same_boot_for_dev_and_qualified(self):
         run_id = "abcdef0123456789abcdef0123456789"
         expected = self.recovery_base / f"swapz-physical-{run_id}"
-        self.assertEqual(
-            probe._select_run_directory(None, run_id, True), expected)
+        for development_only in (True, False):
+            with self.subTest(development_only=development_only):
+                self.assertEqual(
+                    probe._select_run_directory(
+                        None, run_id, development_only), expected)
+                self.assertEqual(
+                    probe._select_run_directory(
+                        expected, run_id, development_only), expected)
         with self.assertRaisesRegex(
-                probe.ProbeError, "chooses its own fresh runtime directory"):
-            probe._select_run_directory(expected, run_id, True)
-        with mock.patch.object(probe, "RECOVERY_BASE", self.recovery_base):
-            self.assertEqual(
-                probe._select_run_directory(expected, run_id, False), expected)
+                probe.ProbeError, "fixed under /run"):
+            probe._select_run_directory(
+                probe.RECOVERY_BASE / f"swapz-physical-{run_id}",
+                run_id, False)
 
     def test_development_final_observations_require_inactive_target(self):
         run_id = "fedcba9876543210fedcba9876543210"
@@ -2031,10 +2037,11 @@ class PhysicalSwapProbeTests(unittest.TestCase):
             "Approved for one bounded physical swap-partition correctness round-trip only, "
             "provided the exact qualified artifacts remain unchanged, the current "
             "helper-policy commit passes its non-privileged CI, the selected partition "
-            "passes every read-only identity/safety check, recovery state is durably "
-            "stored on persistent media, and the helper restores and verifies the "
-            "original swap partition before completion. Any mismatch, unexpected state, "
-            "or recovery uncertainty voids this approval and requires the run to stop.")
+            "passes every read-only identity/safety check, its SWAPSPACE2 header remains "
+            "byte-exact and immutable, and same-boot root-owned runtime state tracks the "
+            "owned mapper transition. Only the mapper may be formatted. Any mismatch, "
+            "unexpected state, or ownership uncertainty voids this approval and requires "
+            "the run to stop.")
 
     def test_kernel_evidence_keeps_only_bounded_swapz_messages(self):
         output = "unrelated kernel detail\n" + "\n".join(
@@ -2870,7 +2877,20 @@ class PhysicalSwapProbeTests(unittest.TestCase):
         evidence["prior_matching_reports"] = 1
         return target, evidence
 
-    def test_refuses_volatile_recovery_state_before_ownership(self):
+    def test_current_trial_uses_runtime_state_without_recovery_parent(self):
+        target = {"major": 8, "minor": 4, "parent_major_minor": "8:0"}
+        with mock.patch.object(
+                probe, "_algorithm_runtime_base",
+                return_value=self.recovery_base), \
+             mock.patch.object(
+                 probe, "_legacy_recovery_base",
+                 side_effect=AssertionError(
+                     "current admission consulted persistent recovery")):
+            self.assertEqual(REAL_RECOVERY_BASE(target), self.recovery_base)
+            target["parent_major_minor"] = "259:0"
+            self.assertEqual(REAL_RECOVERY_BASE(target), self.recovery_base)
+
+    def test_legacy_recovery_base_is_explicit_and_persistent_only(self):
         if not Path("/dev/shm").is_dir():
             self.skipTest("no known tmpfs location available")
         with tempfile.TemporaryDirectory(dir="/dev/shm") as directory:
@@ -2882,8 +2902,6 @@ class PhysicalSwapProbeTests(unittest.TestCase):
                 info = original_lstat(path)
                 fields = list(info)
                 fields[4] = 0
-                # Treat the sticky tmpfs parent as a trusted directory only
-                # for this isolated filesystem-type negative control.
                 if path != base:
                     fields[0] = stat.S_IFDIR | 0o755
                 return os.stat_result(fields)
@@ -2891,162 +2909,15 @@ class PhysicalSwapProbeTests(unittest.TestCase):
             def fake_run(args, **kwargs):
                 del kwargs
                 self.assertEqual(args[0], "findmnt")
-                return subprocess.CompletedProcess(args, 0,
-                    stdout="tmpfs\n", stderr="")
+                return subprocess.CompletedProcess(
+                    args, 0, stdout="tmpfs\n", stderr="")
 
-            with mock.patch.object(probe, "_recovery_base",
-                                   REAL_RECOVERY_BASE), \
-                    mock.patch.object(probe, "RECOVERY_BASE", base), \
-                    mock.patch.object(probe.Path, "lstat",
-                                      fake_lstat), \
+            with mock.patch.object(probe, "RECOVERY_BASE", base), \
+                    mock.patch.object(probe.Path, "lstat", fake_lstat), \
                     mock.patch.object(probe, "_run", side_effect=fake_run):
-                with self.assertRaisesRegex(probe.ProbeError,
-                                            "nonpersistent|unverified"):
-                    probe._recovery_base()
-
-    def test_refuses_untrusted_parent_before_creating_state(self):
-        with tempfile.TemporaryDirectory() as directory:
-            base = Path(directory) / "untrusted"
-            base.mkdir(mode=0o700)
-            base.chmod(0o777)
-            original_lstat = probe.Path.lstat
-
-            def fake_lstat(path):
-                info = original_lstat(path)
-                fields = list(info)
-                fields[4] = 0
-                if path != base:
-                    fields[0] = stat.S_IFDIR | 0o755
-                return os.stat_result(fields)
-
-            with mock.patch.object(probe, "_recovery_base",
-                                   REAL_RECOVERY_BASE), \
-                    mock.patch.object(probe, "RECOVERY_BASE", base), \
-                    mock.patch.object(probe.Path, "lstat", fake_lstat):
-                with self.assertRaisesRegex(probe.ProbeError,
-                                            "root-controlled"):
-                    probe._recovery_base()
-
-    def test_missing_or_unverifiable_recovery_base_is_rejected(self):
-        with tempfile.TemporaryDirectory() as directory:
-            root = Path(directory)
-            missing = root / "missing"
-            with mock.patch.object(probe, "_recovery_base", REAL_RECOVERY_BASE), \
-                    mock.patch.object(probe, "RECOVERY_BASE", missing):
-                with self.assertRaisesRegex(probe.ProbeError, "missing"):
-                    probe._recovery_base()
-
-            base = root / "base"
-            base.mkdir(mode=0o700)
-            def root_owned_lstat(path):
-                info = os.lstat(path)
-                fields = list(info)
-                fields[4] = 0
-                if path != base:
-                    fields[0] = stat.S_IFDIR | 0o755
-                return os.stat_result(fields)
-
-            def run(command, **kwargs):
-                del kwargs
-                if command[:5] == [
-                        "findmnt", "--first-only", "--noheadings",
-                        "--output", "FSTYPE"]:
-                    return subprocess.CompletedProcess(
-                        command, 0, stdout="ext4\n", stderr="")
-                if command[:5] == [
-                        "findmnt", "--first-only", "--noheadings",
-                        "--output", "SOURCE"]:
-                    return subprocess.CompletedProcess(
-                        command, 0, stdout="overlay\n", stderr="")
-                raise AssertionError(command)
-
-            with mock.patch.object(probe, "_recovery_base", REAL_RECOVERY_BASE), \
-                    mock.patch.object(probe, "RECOVERY_BASE", base), \
-                    mock.patch.object(probe.Path, "lstat",
-                                      root_owned_lstat), \
-                    mock.patch.object(probe, "_run", side_effect=run):
                 with self.assertRaisesRegex(
-                        probe.ProbeError, "verified persistent block source"):
-                    probe._recovery_base()
-
-    def test_recovery_parent_must_differ_from_target_physical_disk(self):
-        # /dev/sda3 may mount / while /dev/sda4 is swap. Different
-        # partition identifiers do not establish independent durable recovery.
-        with tempfile.TemporaryDirectory() as directory:
-            base = Path(directory) / "recovery"
-            base.mkdir(mode=0o700)
-            original_lstat = probe.Path.lstat
-
-            def owned_lstat(path):
-                info = original_lstat(path)
-                fields = list(info)
-                fields[4] = 0
-                if path != base:
-                    fields[0] = stat.S_IFDIR | 0o755
-                return os.stat_result(fields)
-
-            calls = []
-
-            def read_only_observation(command, **kwargs):
-                del kwargs
-                calls.append(command)
-                if command[:5] == [
-                        "findmnt", "--first-only", "--noheadings",
-                        "--output", "FSTYPE"]:
-                    return subprocess.CompletedProcess(
-                        command, 0, stdout="ext4\n", stderr="")
-                if command[:5] == [
-                        "findmnt", "--first-only", "--noheadings",
-                        "--output", "SOURCE"]:
-                    return subprocess.CompletedProcess(
-                        command, 0, stdout="/dev/sda3\n", stderr="")
-                if command[0] == "lsblk":
-                    return subprocess.CompletedProcess(
-                        command, 0, stdout=(
-                            "8:3 part sda3\n"
-                            "8:0 disk sda\n"), stderr="")
-                self.fail(f"unexpected recovery preflight command: {command}")
-
-            with mock.patch.object(probe, "_recovery_base",
-                                   REAL_RECOVERY_BASE), \
-                 mock.patch.object(probe, "RECOVERY_BASE", base), \
-                 mock.patch.object(probe.Path, "lstat", owned_lstat), \
-                 mock.patch.object(probe, "_run",
-                                   side_effect=read_only_observation):
-                target = {"major": 8, "minor": 4,
-                          "parent_major_minor": "8:0"}
-                with self.assertRaisesRegex(
-                        probe.ProbeError, "selected swap physical parent"):
-                    probe._recovery_base(target)
-                self.assertEqual(len(calls), 3)
-
-                # The refusal is a property of the parent identity, not of
-                # the target's swap-use count or its partition number.
-                target["minor"] = 9
-                with self.assertRaisesRegex(
-                        probe.ProbeError, "selected swap physical parent"):
-                    probe._recovery_base(target)
-
-                target["parent_major_minor"] = "259:0"
-                self.assertEqual(probe._recovery_base(target), base)
-
-                # VM-only evidence may keep the durable journal on a sibling
-                # guest partition of the same virtual disk, but never on the
-                # selected swap partition itself.
-                target["parent_major_minor"] = "8:0"
-                target["virtual_device_only"] = True
-                self.assertEqual(probe._recovery_base(target), base)
-                target["minor"] = 3
-                with self.assertRaisesRegex(
-                        probe.ProbeError, "selected swap partition"):
-                    probe._recovery_base(target)
-                target["minor"] = 9
-                target["virtual_device_only"] = False
-
-                del target["parent_major_minor"]
-                with self.assertRaisesRegex(
-                        probe.ProbeError, "target physical parent"):
-                    probe._recovery_base(target)
+                        probe.ProbeError, "legacy recovery base.*nonpersistent"):
+                    REAL_LEGACY_RECOVERY_BASE()
 
     def test_parent_entry_fsync_failure_prevents_state_admission(self):
         target, evidence = self.physical_preparation_fixture()
@@ -4541,7 +4412,7 @@ class PhysicalSwapProbeTests(unittest.TestCase):
         target_row = {"used_kib": 128 * 1024}
         enough = "MemAvailable:        2097152 kB\n"
         with mock.patch.object(probe.Path, "read_text", return_value=enough):
-            probe._require_development_swapoff_headroom(target_row)
+            probe._require_selected_swapoff_headroom(target_row)
         low = "MemAvailable:         900000 kB\n"
         with mock.patch.object(probe.Path, "read_text", return_value=low):
             with self.assertRaisesRegex(
@@ -5023,7 +4894,7 @@ class PhysicalSwapProbeTests(unittest.TestCase):
                          "card_identity_sha256":
                              target["card_identity_sha256"],
                          "swap_was_active": target["swap_was_active"],
-                         "ownership_phase": probe.RECOVERY_OWNERSHIP_PHASE}
+                         "ownership_phase": probe.RUNTIME_OWNERSHIP_PHASE}
                 prepare = mock.Mock(
                     return_value=(state, state_dir),
                     side_effect=(probe.ProbeError("injected prepare failure")
@@ -5514,9 +5385,9 @@ class PhysicalSwapProbeTests(unittest.TestCase):
                     "/dev/disk/by-partuuid/deadcafe-01",
                     allow_inactive_swap=True)
 
-    def test_selected_swap_usage_blocks_smoke_preflight(self):
-        # This smoke requires an active but *unused* original swap; the
-        # performance campaign instead requires an inactive selected card.
+    def test_selected_swap_usage_is_observed_not_an_admission_blocker(self):
+        # Live pages are migrated by the owned swapoff transition after the
+        # current RAM-headroom gate; preflight must not require Used == 0.
         device_arg = "/dev/disk/by-uuid/deadbeef-01"
         size_bytes = 64 << 20
         row = {"type": "part", "fstype": "swap", "uuid": "deadbeef-01",
@@ -5551,9 +5422,8 @@ class PhysicalSwapProbeTests(unittest.TestCase):
                                   return_value=header), \
                 mock.patch.object(probe, "_campaign_card_identity",
                                   return_value=card):
-            with self.assertRaisesRegex(
-                    probe.ProbeError, "require zero used KiB"):
-                probe.inspect_target(device_arg, device_arg)
+            target = probe.inspect_target(device_arg, device_arg)
+            self.assertEqual(target["swap_used_kib"], 128)
             active["used_kib"] = 0
             active["priority"] = -2
             target = probe.inspect_target(device_arg, device_arg)
