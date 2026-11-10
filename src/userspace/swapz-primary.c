@@ -86,6 +86,7 @@ static void swapz_primary_selected_target_clear(void)
 #endif
 #define SWAPZ_PRIMARY_CONFIG_BASE SWAPZ_PRIMARY_TEST_CONFIG_BASE
 #define SWAPZ_PRIMARY_RECOVERY_BASE SWAPZ_PRIMARY_TEST_RECOVERY_BASE
+#define SWAPZ_PRIMARY_QUALIFICATION_BASE SWAPZ_PRIMARY_TEST_RECOVERY_BASE
 #define SWAPZ_PRIMARY_QUALIFICATION_REPORT \
 	SWAPZ_PRIMARY_TEST_QUALIFICATION_REPORT
 #define SWAPZ_PRIMARY_MUTATION_LOCK_DIRECTORY \
@@ -97,6 +98,7 @@ static void swapz_primary_selected_target_clear(void)
 #endif
 #define SWAPZ_PRIMARY_CONFIG_BASE "/etc/swapz"
 #define SWAPZ_PRIMARY_RECOVERY_BASE "/var/lib/swapz/physical-recovery"
+#define SWAPZ_PRIMARY_QUALIFICATION_BASE "/var/lib/swapz/physical-recovery"
 #define SWAPZ_PRIMARY_QUALIFICATION_REPORT \
 	"/var/lib/swapz/physical-recovery/primary-qualification.json"
 #define SWAPZ_PRIMARY_MUTATION_LOCK_DIRECTORY "/run/lock/swapz"
@@ -111,6 +113,7 @@ static void (*swapz_primary_rootless_selector_before_revalidation)(void);
 #define SWAPZ_PRIMARY_CONFIG_BASE "/etc/swapz"
 #endif
 #define SWAPZ_PRIMARY_RECOVERY_BASE "/var/lib/swapz/physical-recovery"
+#define SWAPZ_PRIMARY_QUALIFICATION_BASE "/var/lib/swapz/physical-recovery"
 #define SWAPZ_PRIMARY_QUALIFICATION_REPORT \
 	"/var/lib/swapz/physical-recovery/primary-qualification.json"
 #define SWAPZ_PRIMARY_MUTATION_LOCK_DIRECTORY "/run/lock/swapz"
@@ -11786,8 +11789,8 @@ static int swapz_primary_write_report_at(
 }
 
 static int swapz_primary_qualification_report_store_at(
-	int recovery_fd, int lock_fd, const unsigned char *bytes, size_t length,
-	const char *digest, uid_t expected_owner)
+	int state_fd, int lock_fd, int report_fd, const unsigned char *bytes,
+	size_t length, const char *digest, uid_t expected_owner)
 {
 	struct stat marker;
 	struct swapz_primary_state state;
@@ -11804,10 +11807,10 @@ static int swapz_primary_qualification_report_store_at(
 	size_t state_length = 0;
 	int name_length;
 
-	if (recovery_fd < 0 || lock_fd < 0 || !bytes || !length ||
+	if (state_fd < 0 || lock_fd < 0 || report_fd < 0 || !bytes || !length ||
 	    !swapz_primary_valid_sha256(digest) ||
 	    !swapz_primary_partuuid_valid(SWAPZ_PRIMARY_PARTUUID) ||
-	    !swapz_primary_state_lock_valid(recovery_fd, lock_fd,
+	    !swapz_primary_state_lock_valid(state_fd, lock_fd,
 					    expected_owner))
 		return -1;
 	name_length = snprintf(active_name, sizeof(active_name),
@@ -11816,7 +11819,7 @@ static int swapz_primary_qualification_report_store_at(
 		errno = EOVERFLOW;
 		return -1;
 	}
-	if (fstatat(recovery_fd, active_name, &marker,
+	if (fstatat(state_fd, active_name, &marker,
 		    AT_SYMLINK_NOFOLLOW) == 0) {
 		errno = EBUSY;
 		return -1;
@@ -11824,7 +11827,7 @@ static int swapz_primary_qualification_report_store_at(
 	if (errno != ENOENT)
 		return -1;
 	if (swapz_primary_record_read_at(
-		    recovery_fd, "primary-state.json", expected_owner,
+		    state_fd, "primary-state.json", expected_owner,
 		    state_record, sizeof(state_record), &state_length, NULL) == 0) {
 		if (swapz_primary_state_parse(state_record, state_length, &state) < 0 ||
 		    state.stage != SWAPZ_PRIMARY_STAGE_COMPLETE) {
@@ -11840,7 +11843,7 @@ static int swapz_primary_qualification_report_store_at(
 		return -1;
 	}
 	if (swapz_primary_read_report_at(
-		    recovery_fd, "primary-qualification.json", expected_owner,
+		    report_fd, "primary-qualification.json", expected_owner,
 		    &old_bytes, &old_length, old_digest) == 0) {
 		if (old_length == length && !strcmp(old_digest, digest) &&
 		    !memcmp(old_bytes, bytes, length)) {
@@ -11855,7 +11858,7 @@ static int swapz_primary_qualification_report_store_at(
 			return -1;
 		}
 		if (swapz_primary_read_report_at(
-			    recovery_fd, archive_name, expected_owner,
+			    report_fd, archive_name, expected_owner,
 			    &archived_bytes, &archived_length, archive_digest) == 0) {
 			int identical = archived_length == old_length &&
 				!strcmp(archive_digest, old_digest) &&
@@ -11869,7 +11872,7 @@ static int swapz_primary_qualification_report_store_at(
 			}
 		} else if (errno == ENOENT) {
 			if (swapz_primary_write_report_at(
-				    recovery_fd, archive_name, old_digest, old_bytes,
+				    report_fd, archive_name, old_digest, old_bytes,
 				    old_length, expected_owner, 0) < 0) {
 				free(old_bytes);
 				return -1;
@@ -11883,7 +11886,7 @@ static int swapz_primary_qualification_report_store_at(
 		return -1;
 	}
 	return swapz_primary_write_report_at(
-		recovery_fd, "primary-qualification.json", digest, bytes,
+		report_fd, "primary-qualification.json", digest, bytes,
 		length, expected_owner, 1);
 }
 
@@ -11914,6 +11917,7 @@ static int swapz_primary_qualification_import(const char *source_path)
 	size_t length = 0;
 	int input_fd = -1;
 	int recovery_fd = -1;
+	int report_fd = -1;
 	int lock_fd = -1;
 	int result = -1;
 
@@ -11968,8 +11972,12 @@ static int swapz_primary_qualification_import(const char *source_path)
 		recovery_fd, SWAPZ_PRIMARY_PARTUUID, 0);
 	if (lock_fd < 0)
 		goto out;
+	report_fd = swapz_primary_recovery_base_open(
+		SWAPZ_PRIMARY_QUALIFICATION_BASE, 0);
+	if (report_fd < 0)
+		goto out;
 	if (swapz_primary_qualification_report_store_at(
-		    recovery_fd, lock_fd, bytes, length,
+		    recovery_fd, lock_fd, report_fd, bytes, length,
 		    qualification.report_sha256, 0) < 0)
 		goto out;
 	result = 0;
@@ -11983,6 +11991,10 @@ out:
 			saved_errno = errno;
 		}
 		if (lock_fd >= 0 && close(lock_fd) < 0 && result == 0) {
+			result = -1;
+			saved_errno = errno;
+		}
+		if (report_fd >= 0 && close(report_fd) < 0 && result == 0) {
 			result = -1;
 			saved_errno = errno;
 		}
