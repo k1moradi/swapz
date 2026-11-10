@@ -14,6 +14,16 @@
 #define SWAPZ_LINUX_SWAP_BAD_PAGES_OFFSET 1032U
 #define SWAPZ_LINUX_SWAP_UUID_OFFSET 1036U
 #define SWAPZ_LINUX_SWAP_UUID_BYTES 16U
+#define SWAPZ_LINUX_SWAP_BAD_PAGE_LIST_OFFSET 1536U
+#define SWAPZ_LINUX_SWAP_MAX_BAD_PAGES \
+	((SWAPZ_SUPERBLOCK_BYTES - SWAPZ_LINUX_SWAP_MAGIC_BYTES - \
+	  SWAPZ_LINUX_SWAP_BAD_PAGE_LIST_OFFSET) / sizeof(unsigned int))
+
+struct swapz_linux_swap_layout {
+	unsigned int last_page;
+	unsigned int bad_pages;
+	unsigned char byte_swapped;
+};
 
 static inline unsigned int swapz_sb_get_u32(const unsigned char *bytes)
 {
@@ -23,39 +33,114 @@ static inline unsigned int swapz_sb_get_u32(const unsigned char *bytes)
 	       ((unsigned int)bytes[3] << 24);
 }
 
-static inline int swapz_linux_swap_header_valid(
-	const unsigned char *block, unsigned long long device_bytes)
+static inline unsigned int swapz_sb_bswap_u32(unsigned int value)
+{
+	return ((value & 0x000000ffU) << 24) |
+	       ((value & 0x0000ff00U) << 8) |
+	       ((value & 0x00ff0000U) >> 8) |
+	       ((value & 0xff000000U) >> 24);
+}
+
+static inline unsigned int swapz_sb_decode_u32(const unsigned char *bytes,
+					       unsigned char byte_swapped)
+{
+	unsigned int value = swapz_sb_get_u32(bytes);
+
+	return byte_swapped ? swapz_sb_bswap_u32(value) : value;
+}
+
+static inline unsigned int swapz_linux_swap_bad_page(
+	const unsigned char *block, const struct swapz_linux_swap_layout *layout,
+	unsigned int index)
+{
+	if (!block || !layout || index >= layout->bad_pages)
+		return 0;
+	return swapz_sb_decode_u32(
+		block + SWAPZ_LINUX_SWAP_BAD_PAGE_LIST_OFFSET +
+			(size_t)index * sizeof(unsigned int),
+		layout->byte_swapped);
+}
+
+/*
+ * Parse the Linux v1 SWAPSPACE2 header without imposing swapz's allocator
+ * geometry. Linux permits a declared area smaller than the block device,
+ * optional bad-page entries, and the historical byte-swapped v1 encoding.
+ * Callers decide which clean pages/segments are usable; this function never
+ * modifies the header.
+ */
+static inline int swapz_linux_swap_header_parse(
+	const unsigned char *block, unsigned long long device_bytes,
+	struct swapz_linux_swap_layout *layout)
 {
 	static const unsigned char magic[SWAPZ_LINUX_SWAP_MAGIC_BYTES] = {
 		'S', 'W', 'A', 'P', 'S', 'P', 'A', 'C', 'E', '2'
 	};
-	const unsigned long long pages =
+	const unsigned long long complete_pages =
 		device_bytes / SWAPZ_SUPERBLOCK_BYTES;
-	unsigned int last_page;
+	struct swapz_linux_swap_layout parsed;
+	unsigned int raw_version;
 	unsigned int index;
 
-	if (!block || pages < 3U || pages > 0xffffffffULL ||
-	    swapz_sb_get_u32(block + SWAPZ_LINUX_SWAP_VERSION_OFFSET) != 1U ||
-	    swapz_sb_get_u32(block + SWAPZ_LINUX_SWAP_BAD_PAGES_OFFSET) != 0U)
+	if (!block || complete_pages < 2U || complete_pages > 0xffffffffULL)
 		return 0;
-
-	last_page = swapz_sb_get_u32(
-		block + SWAPZ_LINUX_SWAP_LAST_PAGE_OFFSET);
-	/*
-	 * SWAPSPACE2 describes whole PAGE_SIZE pages. A block device may have an
-	 * unusable sub-page byte tail; require last_page to cover every complete
-	 * page and leave that tail outside swapz's lower-I/O range.
-	 */
-	if ((unsigned long long)last_page != pages - 1U)
-		return 0;
-
 	for (index = 0; index < SWAPZ_LINUX_SWAP_MAGIC_BYTES; ++index)
 		if (block[SWAPZ_SUPERBLOCK_BYTES -
 			  SWAPZ_LINUX_SWAP_MAGIC_BYTES + index] != magic[index])
 			return 0;
 
-	/* A cleared Linux swap UUID is valid; PARTUUID binds physical identity. */
+	raw_version = swapz_sb_get_u32(
+		block + SWAPZ_LINUX_SWAP_VERSION_OFFSET);
+	if (raw_version == 1U)
+		parsed.byte_swapped = 0U;
+	else if (swapz_sb_bswap_u32(raw_version) == 1U)
+		parsed.byte_swapped = 1U;
+	else
+		return 0;
+
+	parsed.last_page = swapz_sb_decode_u32(
+		block + SWAPZ_LINUX_SWAP_LAST_PAGE_OFFSET,
+		parsed.byte_swapped);
+	parsed.bad_pages = swapz_sb_decode_u32(
+		block + SWAPZ_LINUX_SWAP_BAD_PAGES_OFFSET,
+		parsed.byte_swapped);
+	if (!parsed.last_page ||
+	    (unsigned long long)parsed.last_page >= complete_pages ||
+	    parsed.bad_pages > SWAPZ_LINUX_SWAP_MAX_BAD_PAGES)
+		return 0;
+
+	for (index = 0; index < parsed.bad_pages; ++index) {
+		unsigned int bad_page =
+			swapz_linux_swap_bad_page(block, &parsed, index);
+		unsigned int previous;
+
+		if (!bad_page || bad_page > parsed.last_page)
+			return 0;
+		for (previous = 0; previous < index; ++previous)
+			if (swapz_linux_swap_bad_page(
+				    block, &parsed, previous) == bad_page)
+				return 0;
+	}
+	if (layout)
+		*layout = parsed;
 	return 1;
+}
+
+/*
+ * Transitional admission wrapper. The parser above understands the ordinary
+ * Linux format fully, but physical swapz admission remains fail-closed until
+ * both kernel and userspace consume smaller declared areas and bad-page lists.
+ */
+static inline int swapz_linux_swap_header_valid(
+	const unsigned char *block, unsigned long long device_bytes)
+{
+	struct swapz_linux_swap_layout layout;
+	const unsigned long long complete_pages =
+		device_bytes / SWAPZ_SUPERBLOCK_BYTES;
+
+	if (!swapz_linux_swap_header_parse(block, device_bytes, &layout))
+		return 0;
+	return !layout.bad_pages &&
+	       (unsigned long long)layout.last_page == complete_pages - 1U;
 }
 
 #endif
