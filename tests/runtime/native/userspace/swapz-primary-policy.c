@@ -1612,6 +1612,44 @@ static void test_primary_manifest(int recovery_fd, int lock_fd,
 	assert(length > 0);
 	assert(swapz_primary_manifest_parse(record, (size_t)length, &parsed) == 0);
 	assert(!memcmp(&manifest, &parsed, sizeof(manifest)));
+
+	/* Manifest v4 binds volatile raw-swap activation policy. Negative values
+	 * are automatic Linux priority policy; nonnegative values are explicit. */
+	manifest.original_swap_active = 1;
+	manifest.original_swap_priority = -7;
+	assert(swapz_primary_manifest_format(
+		&manifest, damaged, sizeof(damaged)) > 0);
+	assert(swapz_primary_manifest_parse(
+		damaged, strlen(damaged), &parsed) == 0);
+	assert(parsed.original_swap_active == 1);
+	assert(parsed.original_swap_priority == -7);
+	manifest.original_swap_priority = 12;
+	assert(swapz_primary_manifest_format(
+		&manifest, damaged, sizeof(damaged)) > 0);
+	assert(swapz_primary_manifest_parse(
+		damaged, strlen(damaged), &parsed) == 0);
+	assert(parsed.original_swap_priority == 12);
+	manifest.original_swap_priority = 32768;
+	assert(swapz_primary_manifest_format(
+		&manifest, damaged, sizeof(damaged)) < 0);
+	manifest.original_swap_active = 0;
+	manifest.original_swap_priority = -1;
+	assert(swapz_primary_manifest_format(
+		&manifest, damaged, sizeof(damaged)) < 0);
+	manifest.original_swap_priority = 0;
+
+	/* Editing lifecycle policy without regenerating a canonical record is
+	 * rejected independently of device-geometry tamper coverage below. */
+	memcpy(damaged, record, (size_t)length + 1U);
+	field = strstr(damaged, "original_swap_priority=0\n");
+	assert(field);
+	field += strlen("original_swap_priority=");
+	*field = '1';
+	memset(&parsed, 0xa5, sizeof(parsed));
+	assert(swapz_primary_manifest_parse(
+		damaged, (size_t)length, &parsed) < 0);
+	assert(((const unsigned char *)&parsed)[0] == 0xa5U);
+
 	manifest.source_sha[0] = 'A';
 	assert(swapz_primary_manifest_format(&manifest, damaged,
 					     sizeof(damaged)) < 0);

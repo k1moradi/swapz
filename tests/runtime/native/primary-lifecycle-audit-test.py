@@ -13,6 +13,7 @@ import os
 import tempfile
 from dataclasses import dataclass, field
 from enum import Enum, auto
+from functools import lru_cache
 from pathlib import Path
 import re
 import subprocess
@@ -33,12 +34,14 @@ _C_NON_CODE = re.compile(
     re.DOTALL)
 
 
+@lru_cache(maxsize=4)
 def _c_code_only(source: str) -> str:
     # Keep character offsets and line numbers stable for source-order checks.
     return _C_NON_CODE.sub(
         lambda match: re.sub(r'[^\n]', ' ', match.group(0)), source)
 
 
+@lru_cache(maxsize=1024)
 def c_function_body(source: str, symbol: str, *, code_only: bool = True) -> str:
     """Return one executable C body, optionally preserving literals/comments."""
     parsed_source = _c_code_only(source)
@@ -89,11 +92,9 @@ def c_primary_function_names(source: str) -> tuple[str, ...]:
 def c_function_calls(source: str, symbol: str,
                      available: set[str]) -> set[str]:
     body = c_function_body(source, symbol)
-    return {
-        candidate for candidate in available
-        if candidate != symbol and
-        re.search(r"\b" + re.escape(candidate) + r"\s*\(", body)
-    }
+    # Scan executable calls once instead of searching every candidate name.
+    called = set(re.findall(r"\b(swapz_primary_[A-Za-z0-9_]+)\s*\(", body))
+    return (called & available) - {symbol}
 
 
 def c_function_reaches(source: str, start: str, target: str,
@@ -883,18 +884,33 @@ int main(void)
             source, "swapz_primary_read_mount_facts", code_only=False)
         self.assertIn("/proc/self/mountinfo", current_mounts_raw)
 
+        # Build executable call references once. Reverse reachability retains
+        # the transitive scanner guard, including cycles, without repeated C
+        # parsing or searching the full function inventory at every edge.
+        direct_callers = {symbol: set() for symbol in functions}
+        for caller in functions:
+            for callee in c_function_calls(source, caller, functions):
+                direct_callers[callee].add(caller)
+
+        def callers_reaching(targets: set[str]) -> set[str]:
+            reached = set(targets)
+            pending = list(targets)
+            while pending:
+                for caller in direct_callers[pending.pop()]:
+                    if caller not in reached:
+                        reached.add(caller)
+                        pending.append(caller)
+            return reached
+
         namespace_helpers = {
             symbol for symbol in functions
             if "ns/mnt" in c_function_body(
                 source, symbol, code_only=False)
         }
+        namespace_callers = callers_reaching(namespace_helpers)
         classified_scanners = tuple(
             scanner for scanner in scanners
-            if "ns/mnt" in c_function_body(
-                source, scanner, code_only=False) or
-            any(c_function_reaches(
-                source, scanner, helper, functions)
-                for helper in namespace_helpers))
+            if scanner in namespace_callers)
         self.assertTrue(
             classified_scanners,
             "PID scanner does not classify vanished mount namespaces")
@@ -902,16 +918,14 @@ int main(void)
         prepare = c_function_body(source, "swapz_primary_prepare_metadata")
         start = c_function_body(source, "swapz_primary_start_prepared")
 
+        scanner_callers = callers_reaching(set(classified_scanners))
+
         def text_reaches_scanner(text: str) -> bool:
-            for symbol in functions:
-                if not re.search(
-                        r"\b" + re.escape(symbol) + r"\s*\(", text):
-                    continue
-                if any(c_function_reaches(
-                        source, symbol, scanner, functions)
-                       for scanner in classified_scanners):
-                    return True
-            return False
+            # The source slices are already masked against comments and
+            # literals, so diagnostics cannot forge a mount scanner call.
+            mentioned = set(re.findall(
+                r"\b(swapz_primary_[A-Za-z0-9_]+)\s*\(", text))
+            return not mentioned.isdisjoint(scanner_callers)
 
         self.assertTrue(
             text_reaches_scanner(prepare),
