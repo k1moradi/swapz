@@ -54,6 +54,15 @@ Swap-inventory fixtures must provide the selected swap area's explicit size
 to quiescence checks while retaining filesystem-device alias rejection for
 unrelated versus selected-filesystem swapfiles.
 
+The allocation/free source inventory must separately enumerate the sparse
+backing-segment map allocated by the Linux swap layout helper, in addition to
+direct constructor allocations. Its single `kvcalloc` site must match one
+`kvfree` in teardown and remain included in geometry-scaled RAM accounting.
+Shared-root source contracts must require topology validation before exposing
+the scope fingerprint and fingerprint availability before reading the owner's
+scope record. Volatile lifecycle state has no recovery-disk separation phase;
+do not require retired persistent-recovery markers in prepare or plan.
+
 The isolated Make-interface loaded fixture must model the immutable backing
 header by reporting `start-header-verified`, never the retired
 `start-header-written` phase. Its documentation/source contract must reject

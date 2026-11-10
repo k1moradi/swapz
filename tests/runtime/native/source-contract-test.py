@@ -231,15 +231,18 @@ class SwapzProductionSourceQualification(unittest.TestCase):
             prepare.index('"PRIMARY_PREPARE=FAILED'),
             prepare.index("errno = saved_errno"))
 
-    def test_shared_root_fingerprint_is_readable_before_recovery_gate(self):
+    def test_shared_root_fingerprint_is_readable_before_scope_record_gate(self):
         scope = source_body(
             "swapz_primary_shared_root_scope_record_live", PRIMARY)
         plan = source_body("swapz_primary_read_only_plan", PRIMARY)
         self.assertLess(
             scope.index("memcpy(scope_sha256, scope_digest"),
-            scope.index("swapz_primary_recovery_parent_separation_valid"))
+            scope.index("swapz_primary_shared_root_scope_record_read_at"))
+        self.assertLess(
+            scope.index("swapz_primary_shared_root_parent_relationship_valid"),
+            scope.index("memcpy(scope_sha256, scope_digest"))
         self.assertIn("shared_root_parent_scope_fingerprint", plan)
-        self.assertIn("blocked_recovery_same_parent", plan)
+        self.assertNotIn("blocked_recovery_same_parent", plan)
 
     def test_shared_root_host_binding_includes_physical_machine_identity(self):
         host_identity = source_body(
@@ -7980,6 +7983,7 @@ class CapacityMemoryAccountingContracts(unittest.TestCase):
         ("ctx->submitter_lanes", "kvfree"),
         ("ctx->preparation_pages", "vfree"),
         ("ctx->maps", "kvfree"),
+        ("ctx->segment_backing_pages", "kvfree"),
         ("ctx->live_records", "kvfree"),
         ("ctx->extent_classes", "kvfree"),
         ("ctx->extent_sequence_delta", "kvfree"),
@@ -8116,6 +8120,14 @@ class CapacityMemoryAccountingContracts(unittest.TestCase):
             len(direct_allocator_calls), 47,
             "constructor contains an unaccounted direct allocator call")
 
+        # Sparse backing translation is allocated by the header-layout
+        # helper, outside the constructor's direct allocation inventory.
+        layout = body("swapz_configure_linux_swap_layout")
+        helper_allocations = Counter(allocation_pattern.findall(layout))
+        self.assertEqual(helper_allocations, Counter({
+            ("ctx->segment_backing_pages", "kvcalloc"): 1,
+        }))
+
         free_pattern = re.compile(
             r"\b(kfree|kvfree|vfree)\s*\(\s*"
             r"([A-Za-z0-9_>.\-\[\]]+)\s*\)")
@@ -8123,7 +8135,9 @@ class CapacityMemoryAccountingContracts(unittest.TestCase):
             (expression, allocator)
             for allocator, expression in free_pattern.findall(destruction))
         self.assertEqual(observed_frees, Counter(self.DIRECT_FREES))
-        self.assertEqual(sum(observed_frees.values()), 47)
+        self.assertEqual(sum(observed_frees.values()),
+                         sum(observed_allocations.values()) +
+                         sum(helper_allocations.values()))
 
         # Allocation families outside the inventoried direct heap/vmalloc set
         # must not appear silently; each would need explicit accounting first.
