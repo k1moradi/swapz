@@ -33,6 +33,22 @@ loaded, fault-injection, lifecycle and real-partition tests qualify this path.
 Earlier permissions to format/repartition even the dedicated SD card
 are superseded; only post-swapoff swap *data* may be overwritten.
 
+## ARM64 qualification boundary
+
+The ARM64 VM completed all five RAM stages of `make test` at source
+`88d8d84fcb51`, then full RAM/integration qualification at clean source
+`40e55fdca6e1` (`make test_full`, exit 0; report `ff440ffbeaed`). These are
+historical source-bound results, not admission for a later source revision.
+Real-partition backing remains intentionally x86_64-only in the kernel and
+production qualification/host checks. The algorithm selector and privileged
+probe now reject unsupported partition trials before new ownership or native
+swap drain; pending same-boot cleanup remains available. An ARM64 port must
+separately qualify architecture, host identity, exclusive partition admission,
+unchanged SWAPSPACE2 header, real swap integrity, capacity/GC and lifecycle.
+Do not remove a platform gate or reuse a null_blk test seam to obtain a trial.
+The dedicated-card and separate Lubuntu authorizations below do not transfer
+to the VM.
+
 ## Current production mission
 
 The project goal is to make swapz production-ready for ordinary
