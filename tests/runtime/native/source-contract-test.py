@@ -179,6 +179,41 @@ class SwapzProductionSourceQualification(unittest.TestCase):
         self.assertGreaterEqual(policy.count(helper), 2)
         self.assertNotIn(helper, mount_namespace)
 
+    def test_active_original_swap_may_have_used_pages_before_swapoff(self):
+        policy = source_body(
+            "swapz_primary_original_swap_policy_snapshot", PRIMARY)
+        admissible = source_body(
+            "swapz_primary_original_swap_policy_admissible", PRIMARY)
+        transition = source_body(
+            "swapz_primary_transition_original_swap", PRIMARY)
+        prepare = source_body("swapz_primary_prepare_metadata", PRIMARY)
+
+        # Used pages are legitimate while ordinary swap is active. PREPARE
+        # records the policy; START's swapoff is the authoritative migration
+        # boundary. Do not require an artificially empty target beforehand.
+        self.assertIn(
+            "(require_zero_used && entries[index].used_kib != 0U)",
+            policy)
+        self.assertIn("target_size_kib, 0, NULL, NULL", admissible)
+        self.assertNotIn("target_size_kib, 1, NULL, NULL", admissible)
+        self.assertEqual(
+            prepare.count(
+                "swapz_primary_original_swap_policy_admissible("), 3)
+        self.assertIn(
+            "original_swap_size_kib, 0, &original_swap_active,",
+            prepare)
+        self.assertNotIn(
+            "original_swap_size_kib, 1, &original_swap_active,",
+            prepare)
+        self.assertIn(
+            "target_size_kib, 0,\n"
+            "\t\t    &current_active, &current_priority",
+            transition)
+        self.assertIn("syscall(SYS_swapoff, target_path)", transition)
+        self.assertLess(
+            transition.index("swapz_primary_original_swap_policy_snapshot("),
+            transition.index("syscall(SYS_swapoff, target_path)"))
+
     def test_late_race_raw_swap_transition_seam_is_single_and_ordered(self):
         fixture = (
             ROOT /
