@@ -45,6 +45,12 @@ geometry rejection or infer physical qualification from this native test.
 
 ## New P0 ordinary swap and RAM-metadata acceptance gate
 
+The exact packing planner must retain one cached `payload_start` cursor,
+using it both to check remaining extent capacity and to position accepted
+payloads. Its source contract rejects redundant per-candidate `remaining`
+state, preserving single-update hot-loop geometry without changing 4/8/16KiB
+packing or the read-cost policy.
+
 Native compressed READ tests must prove that an undersized output buffer
 returns -ENOSPC before lower I/O, without modifying caller data, even when
 lower READ injection would fail. An adequately sized retry must still read

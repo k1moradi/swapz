@@ -7210,7 +7210,11 @@ int main(void)
             boundary_recompute,
             planner.index("if (prefer_large_ties &&"))
         fit = source_body("swapz_fit_count", engine)
-        self.assertIn("swapz_u32 remaining = payload_start", fit)
+        # The packing cursor already tracks remaining payload capacity.
+        self.assertIn("swapz_u32 payload_start =", fit)
+        self.assertIn("if (payload_start < page->length)", fit)
+        self.assertIn("payload_start = offset", fit)
+        self.assertNotIn("swapz_u32 remaining = payload_start", fit)
         self.assertIn("record_reads = last - first + 1U", fit)
         self.assertNotIn("sizeof(struct swapz_header)", fit)
         self.assertNotIn("sizeof(struct swapz_record)", fit)
