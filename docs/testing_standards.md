@@ -1293,6 +1293,11 @@ passes on a successful late-race case—initial admission, the pre-swapoff
 revalidation, and the later pre-mapper revalidation—with exactly one late
 pre-mapper pass after fixture injection. A missing transition seam, implicit
 declaration, or stale two-pass expectation is a harness failure.
+The three exclusive-open identity negative controls (wrong device number,
+wrong geometry and stale PARTUUID) must activate their synthetic fault at the
+post-raw-swapoff interrupt seam, after pre-swapoff admission but before the
+production target exclusive-open reinspection. A later module-intent injection
+would test prewrite revalidation instead and misattribute the refusal phase.
 
 Keep a negative control that removes final pre-mapper revalidation and
 demonstrates one intercepted no-op raw-swap transition boundary followed by one

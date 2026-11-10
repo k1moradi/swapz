@@ -164,7 +164,7 @@ HARNESS = r'''
 #define SWAPZ_BUILD_SOURCE_CLEAN 1
 #define SWAPZ_BUILD_SOURCE_SHA "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
 #define SWAPZ_PRIMARY_TARGET_DEVICE makedev(8U, 1U)
-#define SWAPZ_PRIMARY_TEST_INTERRUPT_AFTER(phase) ((void)(phase))
+#define SWAPZ_PRIMARY_TEST_INTERRUPT_AFTER(phase) fixture_interrupt_after(phase)
 #define FIXTURE_DIAGNOSTIC_BYTES 2048U
 
 struct swapz_primary_mount_facts {
@@ -300,6 +300,22 @@ static struct stat fixture_initial_selector_info;
 static struct stat fixture_initial_config_info;
 static struct swapz_primary_target selected_target;
 static struct swapz_primary_target swapz_primary_selected_target;
+
+/*
+ * These three faults belong after the successful pre-swapoff identity check
+ * but before the production exclusive-open reinspection. Other late faults
+ * are still injected by the module-intent boundary.
+ */
+static void fixture_interrupt_after(const char *phase)
+{
+    if (!strcmp(phase, "start-raw-swapoff") &&
+        (scenario == FIXTURE_WRONG_TARGET_OPEN ||
+         scenario == FIXTURE_WRONG_TARGET_GEOMETRY ||
+         scenario == FIXTURE_STALE_PARTUUID)) {
+        assert(raw_swap_transition_calls == 1U && !late);
+        late = 1;
+    }
+}
 
 static int fixture_admission_error(int error)
 {
