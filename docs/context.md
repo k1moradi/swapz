@@ -104,7 +104,7 @@ Application object(s) -> VMA(s) -> base pages within folio(s)
                                       |
                            swapz logical 4KiB page
                                       |
-                        SWZ record in physical extent
+                 compressed/RAW payload in 4/8/16KiB extent
 ```
 
 ## 2. Which memory is reclaimed, and when?
@@ -239,26 +239,28 @@ either upstream implementation.
 - [v7.0 block-backed folio BIO construction](https://github.com/torvalds/linux/blob/v7.0/mm/page_io.c)
 - [newer upstream multi-folio swap I/O](https://github.com/torvalds/linux/blob/c339f4010dea8b0d754f84ace70cd1b089878ef8/mm/page_io.c)
 
-Swapz records independent 4KiB logical pages and maps them to its own 4/8/16KiB
-physical SWZ extents. Compressed extents contain a header (magic, extent
-blocks, record count, sequence, metadata CRC32C) and one or more record
-descriptors: logical page, generation, payload offset/length and payload
-CRC32C. A payload is LZ4, plain delta64 followed by LZ4, or
+Swapz records independent 4KiB logical pages and maps them to 4/8/16KiB
+physical extents in the ordinary swap partition's protected post-header data
+area. Production compressed extents are **payload-only**: backing media contains
+compressed bytes plus deterministic zero padding, never a swapz magic header,
+record table, generation, sequence, CRC table or other swapz metadata.
+Logical-page identity, generation, extent start/class, record position,
+payload offset/length, encoding and payload CRC32C are authoritative volatile
+RAM state. A compressed payload is LZ4, plain delta64 followed by LZ4, or
 `DELTA64_SHUF8`: whole-page delta64, then eight 512-byte byte planes, then
 LZ4. Current default-on rescue writes the shuffled encoding when adopted;
-plain delta64 remains decodable. Payload-length bits 15/14 encode delta64
-and shuffle respectively; shuffle without delta64 is rejected. The transform
-and shuffle use the existing scratch pages and one kernel SIMD section.
-RAW fallback holds one whole 4KiB logical page in one physical block with
-its mapping/integrity authority in RAM. A **SWZ record** is independently
-decodable; a **physical extent** may hold multiple records; an **I/O run** may
-concatenate several extents/RAW blocks. None represents a guaranteed language
-object or whole folio.
+plain delta64 remains decodable. The transform and shuffle use the existing
+scratch pages and one kernel SIMD section. RAW fallback holds one whole 4KiB
+logical page in one physical block with its mapping/integrity authority in
+RAM. A **compressed logical-page payload** is independently decodable using
+its RAM descriptor; a **physical extent** may hold multiple payloads; an
+**I/O run** may concatenate several extents/RAW blocks. None represents a
+guaranteed language object or whole folio.
 
 Up to eight private READ slots can overlap independent lower misses for
 compressed records or authoritative one-block RAW pages. RAW reads verify the
-volatile authority's CRC before upper completion and bypass SWZ header decoding
-and cache prime/seed/absorb. Adjacent compressed-range coalescing is a separate
+volatile authority's CRC before upper completion and bypass compressed-payload
+decode and compressed read-cache handling. Adjacent compressed-range coalescing is a separate
 mechanism; RAW admission does not turn RAW bytes into an SWZ extent. One ordered
 worker still owns dependency checks, mapping publication and upper completion.
 
@@ -302,7 +304,7 @@ the ordered worker for publication and acknowledgement.
 Source anchors:
 - [Linux v7.0 swap write submission](https://github.com/torvalds/linux/blob/v7.0/mm/page_io.c)
 - [swapz DM admission and page validation](../src/kernel/dm-target.c)
-- [SWZ compressed extent and record layout](../src/kernel/codec.h)
+- [payload-only packing and read path](../src/kernel/engine.c)
 - [volatile mapping authority](../src/kernel/authority.h)
 - [immutable write runs](../src/kernel/engine.h)
 - [preparation state transitions](../src/kernel/preparation-slots.h)
@@ -390,7 +392,7 @@ different choices:
 - **RAW bypass:** accept the already reconstructed full 4KiB bytes, avoid
   another LZ4/delta64 pass and use existing RAW authority/CRC/generation paths.
   This saves CPU but generally consumes more lower-device bytes than a
-  successfully recompressed SWZ record.
+  successfully recompressed swapz payload.
 - **Direct compressed handoff:** change the upstream interface to transfer
   actual zswap compressed data and its compressor/encoding, length, integrity
   and lifetime ownership. This can avoid both the zswap decompress step and
