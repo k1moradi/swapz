@@ -272,6 +272,7 @@ static unsigned int recovery_marks;
 static unsigned int owner_release_calls;
 static unsigned int starting_state_writes;
 static unsigned int active_state_writes;
+static unsigned int raw_swap_policy_checks;
 static unsigned int active_inventory_reads;
 static unsigned int mount_conflict_observations;
 static unsigned int late_mount_conflict_observations;
@@ -1297,6 +1298,25 @@ static int fixture_owner_release(void)
     ++owner_release_calls;
     return 0;
 }
+
+/* The fixture manifest represents an ordinary swap partition that was
+ * already inactive at PREPARE. Preserve production's newly added lifecycle
+ * call and its position after the durable STARTING marker without invoking
+ * swapoff(2) or claiming this rootless race fixture exercises real swapoff.
+ */
+static int fixture_transition_original_swap(
+    const struct swapz_primary_manifest *manifest, int activate,
+    int *changed_by_call)
+{
+    assert(manifest != NULL && changed_by_call != NULL);
+    assert(activate == 0 && !manifest->original_swap_active);
+    assert(starting_state_writes == 1U);
+    assert(raw_swap_policy_checks == 0U);
+    ++raw_swap_policy_checks;
+    *changed_by_call = 0;
+    return 0;
+}
+
 static int fixture_hashes(char *control, char *module, char *oracle)
 {
     control[0] = module[0] = oracle[0] = '\0';
@@ -1325,6 +1345,8 @@ static int fixture_hashes(char *control, char *module, char *oracle)
 #define swapz_primary_exact_read(...) 0
 #define swapz_primary_backing_header_matches_manifest(...) 0
 #define swapz_primary_state_write_at(a,b,state,owner) fixture_state_write(state)
+#define swapz_primary_transition_original_swap(manifest,activate,changed) \
+    fixture_transition_original_swap(manifest,activate,changed)
 #define swapz_primary_module_load_intent_write_at(...) fixture_intent()
 #define swapz_primary_load_qualified_module(loaded) fixture_load_module(loaded)
 #define swapz_primary_module_load_mark_loaded_at(...) 0
@@ -1416,6 +1438,7 @@ static int check_case(enum fixture_scenario candidate)
     mapper_mutations = mkswap_calls = swapon_calls = 0U;
     module_loads = recovery_marks = owner_release_calls = 0U;
     starting_state_writes = active_state_writes = 0U;
+    raw_swap_policy_checks = 0U;
     diagnostic_stream = tmpfile();
     assert(diagnostic_stream != NULL);
     assert(fflush(stderr) == 0);
@@ -1425,6 +1448,9 @@ static int check_case(enum fixture_scenario candidate)
     errno = 0;
     result = swapz_primary_start_prepared();
     result_errno = errno;
+    /* Once STARTING is written, production must reach the guarded ordinary
+     * swap transition before any subsequent module/mapper mutation. */
+    assert(raw_swap_policy_checks == starting_state_writes);
     assert(fflush(stderr) == 0);
     assert(dup2(saved_stderr, STDERR_FILENO) == STDERR_FILENO);
     assert(close(saved_stderr) == 0);
