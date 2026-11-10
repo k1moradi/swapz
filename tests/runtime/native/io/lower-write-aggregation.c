@@ -1458,13 +1458,15 @@ static int test_explicit_read_cap_keeps_bulk_run_and_avoids_4block_extents(void)
 	/* With mapping metadata resident in RAM, a ~2KiB payload can span at
 	 * most two lower blocks. A two-block cap is therefore identical to the
 	 * unbounded planner here; use the one-block cold-read budget to exercise
-	 * the selective packing path without reintroducing metadata I/O. */
+	 * the selective packing path without reintroducing metadata I/O. Two
+	 * records may still share one 4KiB extent when their payloads fit: the
+	 * cap constrains each selective read, not records-per-extent. */
 	CHECK(swapz_engine_write_window_batched_read_cap(&e, pages, 16,
 						      &committed, 1) == 0);
 	CHECK(committed == 16);
 	for (i = 0; i < 16; ++i)
 		CHECK(maps[i].extent_blocks == 1);
-	CHECK(lower_written_bytes == 16ULL * SWAPZ_BLOCK_BYTES);
+	CHECK(lower_written_bytes == 11ULL * SWAPZ_BLOCK_BYTES);
 	CHECK(!e.bulk_padding_blocks);
 	CHECK(run_calls < e.bulk_extents);
 	CHECK(run_calls <= unbounded_calls + 1);
