@@ -1147,6 +1147,23 @@ static int test_adjacent_distinct_extent_coalescing(void)
 			SWAPZ_SEGMENT_BLOCKS + 1U, 1, 0, 1,
 			scratch_coalesced, 2U * SWAPZ_MAX_BLOCKS) == -EINVAL);
 	CHECK(disk.read_calls == 0);
+	/* Combined scratch must be independent of all private output buffers.
+	 * Identical private buffers would also overwrite an earlier seed.
+	 * Both invalid calls must be refused before the lower callback. */
+	CHECK(swapz_engine_coalesce_read_pair(
+			&first, &second,
+			maps[0].start_block, 1, 0, 1,
+			maps[1].start_block, 1, 0, 1,
+			first.read_scratch, 2U) == -EINVAL);
+	second.read_scratch = first.read_scratch;
+	CHECK(swapz_engine_coalesce_read_pair(
+			&first, &second,
+			maps[0].start_block, 1, 0, 1,
+			maps[1].start_block, 1, 0, 1,
+			scratch_coalesced, 2U * SWAPZ_MAX_BLOCKS) == -EINVAL);
+	second.read_scratch = scratch_read_second;
+	CHECK(disk.read_calls == 0);
+	CHECK(!first.read_cache_valid && !second.read_cache_valid);
 	disk.read_blocks = 0;
 	CHECK(swapz_engine_coalesce_read_pair(
 			&first, &second,

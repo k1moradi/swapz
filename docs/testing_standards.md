@@ -82,8 +82,10 @@ extent); do not submit speculative lower I/O for invalid maps.
 
 The coalesced READ-chain preflight must validate each complete extent against
 physical capacity, segment boundaries and legal 4/8/16KiB classes before
-submitting any lower callback. Negative native tests must observe zero
-lower requests for invalid inputs.
+submitting any lower callback. It must also reject overlap between combined
+lower READ scratch and any private 16KiB read buffer, or between two private
+read buffers; neither alias form may reach memcpy or lower I/O. Negative
+native tests must observe zero lower requests for invalid inputs.
 
 Compressed engine reads must reject a caller payload buffer smaller than the
 RAM-authoritative record length with `-ENOSPC` before read-cache probes,

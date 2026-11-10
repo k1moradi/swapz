@@ -1130,6 +1130,21 @@ int swapz_engine_seed_read_range(struct swapz_engine *engine,
 		engine->read_scratch + (size_t)first_block * SWAPZ_BLOCK_BYTES);
 }
 
+/* Shared lower READ scratch and each private 16KiB read buffer are
+ * distinct ownership domains. Form address differences rather than pointer
+ * ends, which can overflow; unrelated C pointers cannot be compared directly.
+ */
+static int swapz_read_buffers_overlap(const void *first, size_t first_bytes,
+				      const void *second, size_t second_bytes)
+{
+	const unsigned long first_address = (unsigned long)first;
+	const unsigned long second_address = (unsigned long)second;
+
+	if (first_address >= second_address)
+		return first_address - second_address < second_bytes;
+	return second_address - first_address < first_bytes;
+}
+
 int swapz_engine_coalesce_read_chain(
 				    struct swapz_engine *const *engines,
 				    const swapz_u32 *start_blocks,
@@ -1171,10 +1186,21 @@ int swapz_engine_coalesce_read_chain(
 			return -EINVAL;
 		if (index && engine->authority != engines[0]->authority)
 			return -EINVAL;
+		/* Never let a combined lower READ overwrite a private output
+		 * buffer or let one slot's seed overwrite another slot's data.
+		 * Check all aliases before the single lower callback starts. */
+		if (swapz_read_buffers_overlap(
+			    scratch, (size_t)scratch_blocks * SWAPZ_BLOCK_BYTES,
+			    engine->read_scratch, SWAPZ_MAX_EXTENT_BYTES))
+			return -EINVAL;
 		for (earlier = 0; earlier < index; ++earlier)
 			if (engine == engines[earlier] ||
 			    (start_blocks[index] == start_blocks[earlier] &&
-			     extent_blocks[index] == extent_blocks[earlier]))
+			     extent_blocks[index] == extent_blocks[earlier]) ||
+			    swapz_read_buffers_overlap(
+				    engine->read_scratch, SWAPZ_MAX_EXTENT_BYTES,
+				    engines[earlier]->read_scratch,
+				    SWAPZ_MAX_EXTENT_BYTES))
 				return -EINVAL;
 		physical_starts[index] = start_blocks[index] + first_blocks[index];
 		if (physical_starts[index] > ~(swapz_u32)0 - blocks[index])
