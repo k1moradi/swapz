@@ -8,6 +8,7 @@ import importlib.util
 import json
 import os
 from pathlib import Path
+import re
 import shutil
 import subprocess
 import sys
@@ -343,7 +344,34 @@ class PhysicalSwapProbeTests(unittest.TestCase):
         completed = subprocess.run(
             command, cwd=ROOT, check=False, capture_output=True,
             text=True, timeout=20)
-        self.assertEqual(completed.returncode, 0, completed.stderr[-2000:])
+        if completed.returncode:
+            # Nested unittest stderr is private and may contain host paths.
+            # Promote only an exact source-controlled test and numeric mismatch.
+            failure = re.search(
+                r"(?m)^(FAIL|ERROR): (test_[A-Za-z0-9_]{1,96}) "
+                r"\\(__main__\\.AlgorithmPageoutOracleTest\\.\\2\\)$",
+                completed.stderr)
+            known_tests = {
+                "test_page_patterns_cover_entire_pages_and_differ",
+                "test_byte_exact_verification_and_corruption_detection",
+                "test_invalid_inputs_fail_before_allocating",
+                "test_positive_protocol_does_not_claim_unobserved_device_io",
+                "test_madvise_refusal_cannot_print_success",
+            }
+            if failure and failure.group(2) in known_tests:
+                detail = ""
+                if failure.group(1) == "FAIL":
+                    numbers = re.search(
+                        r"(?m)^AssertionError: ([0-9]{1,3}) != "
+                        r"([0-9]{1,3})$", completed.stderr)
+                    if numbers:
+                        detail = (f" observed={numbers.group(1)}"
+                                  f" expected={numbers.group(2)}")
+                self.fail(
+                    f"Nested pageout oracle failure: test={failure.group(2)} "
+                    f"kind={failure.group(1)}{detail}")
+            self.fail("Nested pageout oracle failure: test=unavailable "
+                      "kind=unavailable; private log retained")
 
     def test_real_swap_removal_requires_normal_swapoff_and_inactive_proof(self):
         mapper = "/dev/mapper/swapz-demo-physical-1234567890abcdef"
