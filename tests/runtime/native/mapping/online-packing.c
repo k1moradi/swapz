@@ -1275,10 +1275,19 @@ static int test_mapping_length_mismatch_stops_before_payload_io(void)
 	CHECK(committed == 7 && maps[6].valid);
 	original = maps[6].payload_length;
 	CHECK(original == 2072);
-	maps[6].payload_length = original - 1;
+	/* An absent authoritative RAM length is structurally invalid and must
+	 * not submit a lower READ or accept cached bytes. */
+	maps[6].payload_length = 0;
 	disk.read_blocks = 0;
 	CHECK(swapz_engine_read_page(&engine, 6, output,
-				   sizeof(output), &length) == -EUCLEAN);
+				   sizeof(output), &length) == -ESTALE);
+	CHECK(length == 0 && disk.read_blocks == 0);
+	/* A nonzero but truncated RAM length is in range, so only the
+	 * independent payload CRC can reject it after reading media. */
+	maps[6].payload_length = original - 1;
+	length = 91;
+	CHECK(swapz_engine_read_page(&engine, 6, output,
+				   sizeof(output), &length) == -EBADMSG);
 	CHECK(length == 0 && disk.read_blocks == 1);
 	/* Restore the accurate authoritative length. The physical payload
 	 * was never modified; reading it must still succeed byte-for-byte. */
