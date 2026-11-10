@@ -104,14 +104,20 @@ def omit_final_revalidation(function: str) -> str:
 
 
 def restore_independent_selector_reread(function: str) -> str:
-    """Negative control: regress the final pinned-FD content proof to a pathname reread."""
-    original = (
-        "swapz_primary_selector_admission_read_partuuid(\n"
-        "\t\t    &selector_admission, prewrite_partuuid)")
-    if function.count(original) != 1:
-        raise AssertionError("Expected one pinned selector-content read")
-    return function.replace(
-        original, "swapz_primary_target_config_read(prewrite_partuuid)")
+    """Negative control: weaken both pinned-FD selector checks to pathname rereads."""
+    # The pre-swapoff guard now catches the first ABA mismatch. To prove
+    # that repeated independent path reads are unsafe, weaken both guards
+    # in this test-only mutant; production retains both pinned-FD checks.
+    for variable in ("preswap_partuuid", "prewrite_partuuid"):
+        indentation = "\t\t\t" if variable == "preswap_partuuid" else "\t\t"
+        original = (
+            "swapz_primary_selector_admission_read_partuuid(\n"
+            f"{indentation}    &selector_admission, {variable})")
+        if function.count(original) != 1:
+            raise AssertionError(f"Expected one pinned {variable} selector read")
+        function = function.replace(
+            original, f"swapz_primary_target_config_read({variable})")
+    return function
 
 
 def omit_post_target_selector_recheck(function: str) -> str:
@@ -1100,9 +1106,10 @@ static int fixture_target_inspect(const char *partuuid,
     if (strcmp(partuuid, selected_target.partuuid))
         return fixture_admission_error(EINVAL);
     *target = selected_target;
-    if (scenario == FIXTURE_WRONG_TARGET_OPEN)
+    /* These last-use faults must remain absent during preswap admission. */
+    if (scenario == FIXTURE_WRONG_TARGET_OPEN && late)
         target->device_minor = 2U;
-    if (scenario == FIXTURE_WRONG_TARGET_GEOMETRY)
+    if (scenario == FIXTURE_WRONG_TARGET_GEOMETRY && late)
         target->device_bytes += 4096U;
     if (scenario == FIXTURE_TARGET_GEOMETRY_CHANGED_AFTER_ADMISSION && late) {
         ++fixture_geometry_last_use_checks;
@@ -1122,7 +1129,7 @@ static int fixture_target_inspect(const char *partuuid,
             post_snapshot_injected = 1;
         }
     }
-    if (scenario == FIXTURE_STALE_PARTUUID)
+    if (scenario == FIXTURE_STALE_PARTUUID && late)
         strcpy(target->partuuid, "f13428f6-02");
     return 0;
 }
@@ -1611,6 +1618,7 @@ static int check_case(enum fixture_scenario candidate)
             candidate == FIXTURE_SELECTOR_REPLACED_DURING_TARGET_REVALIDATION;
         const char *expected_phase = geometry_drift || target_restored ?
             "phase=prewrite-target-identity" :
+            selector_aba ? "phase=preswap-protected-selector-identity" :
             "phase=prewrite-protected-selector-identity";
         const char *expected_mismatch = geometry_drift ?
             "observed=target-geometry-changed" :
@@ -1643,7 +1651,7 @@ static int check_case(enum fixture_scenario candidate)
                 post_snapshot_injected == 1 && fixture_selector_reads >= 1U;
         int refusal = result < 0 && result_errno == ESTALE &&
             race_evidence &&
-            raw_swap_transition_calls == 1U &&
+            raw_swap_transition_calls == (selector_aba ? 0U : 1U) &&
             mapper_mutations == 0U && mkswap_calls == 0U &&
             swapon_calls == 0U && module_loads == 0U && starting_state_writes == 1U &&
             active_state_writes == 0U && recovery_marks == 1U &&
@@ -2516,9 +2524,9 @@ def main() -> int:
                 "observed=stale-selection-reached-mutation" not in
                     selector_aba_mutant.stderr or
                 "mutations=3" not in selector_aba_mutant.stderr or
-                "selector_reads=2 selector_aba=2" not in
+                "selector_reads=3 selector_aba=3" not in
                     selector_aba_mutant.stderr):
-            print("FAIL: independent final selector reread did not expose cross-read ABA",
+            print("FAIL: independent selector rereads did not expose cross-read ABA",
                   file=sys.stderr)
             print(selector_aba_mutant.stdout + selector_aba_mutant.stderr,
                   file=sys.stderr, end="")
