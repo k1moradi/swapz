@@ -1924,7 +1924,10 @@ static int swapz_configure_linux_swap_layout(
 	if (!ctx || !block || !layout)
 		return -EINVAL;
 	raw_segments = layout->last_page / SWAPZ_SEGMENT_BLOCKS;
-	if (!raw_segments)
+	/* Reject undersized ordinary swap before allocating any sparse bitmap.
+	 * Production requires at least three complete clean 1MiB segments.
+	 */
+	if (raw_segments < 3U)
 		return -EINVAL;
 
 	/*
@@ -1985,6 +1988,13 @@ static int swapz_configure_linux_swap_layout(
 		goto out;
 	}
 	clean_segments = raw_segments - contaminated_segments;
+	/* Reject the unusable sparse layout before allocating its translation
+	 * map. The bitmap is still freed on this admission failure.
+	 */
+	if (clean_segments < 3U) {
+		error = -EINVAL;
+		goto out;
+	}
 
 	ctx->segment_backing_pages = kvcalloc(
 		clean_segments, sizeof(*ctx->segment_backing_pages), GFP_KERNEL);
