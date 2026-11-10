@@ -114,9 +114,9 @@ static inline swapz_u8 swapz_map_pack_record_index(swapz_u8 index,
 struct swapz_tx_record {
 	swapz_u32 logical_page;
 	swapz_u32 generation;
-	/* Transitional production authority: once bound, these compressed
-	 * descriptor fields are immutable RAM transaction state. The legacy
-	 * codec may still mirror them on synthetic media until the next slice. */
+	/* Compressed descriptor authority is immutable RAM transaction state once
+	 * bound. Legacy serialized fixtures are userspace-test compatibility only
+	 * and are never a production lower-media format. */
 	swapz_u32 payload_crc32c;
 	swapz_u16 payload_offset;
 	swapz_u16 payload_length;
@@ -130,8 +130,9 @@ struct swapz_tx {
 	swapz_u32 sequence;
 	swapz_u8 extent_blocks;
 	swapz_u8 count;
-	/* Explicit representation authority. Zero keeps the legacy synthetic
-	 * codec; one means lower media contains payload bytes/zero padding only. */
+	/* Explicit representation authority. Production requires one: lower media
+	 * contains payload bytes and deterministic zero padding only. Zero is
+	 * reserved for userspace-only legacy fixture compatibility. */
 	swapz_u8 compressed_data_only;
 	swapz_u8 reserved;
 	struct swapz_tx_record records[SWAPZ_MAX_RECORDS];
