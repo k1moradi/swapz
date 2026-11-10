@@ -267,9 +267,12 @@ worker still owns dependency checks, mapping publication and upper completion.
 Volatile swapz RAM state includes per-BIO admission descriptors, a bounded
 64-slot preparation reservoir (stable RAW snapshots, optional compressed
 payloads, atomic states and references), logical-page-to-extent mapping
-authority/generations, physical segment and GC accounting, immutable lower-run
-buffers/transaction snapshots, and read/metadata caches. That metadata is
-swapz authority, not a directory of RAM objects.
+authority/generations, physical segment and GC accounting, and immutable lower-run
+buffers/transaction snapshots. Separate read-data residency caches may retain
+validated lower payload blocks; the legacy-named `read_metadata_cache` is one
+such payload cache and is not metadata authority. The mapping/generation/CRC/
+offset/length/sequence/GC state is volatile swapz authority, not a directory
+reconstructed from lower media.
 
 Because that mapping, generation and segment authority exists only in RAM
 and swapz has no persistent reconstruction mechanism, it does not survive a
