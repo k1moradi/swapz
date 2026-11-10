@@ -2673,7 +2673,10 @@ A later source change after preflight must still fail the publication/physical
 source-identity checks. Tests must prove this fast refusal, nested inner
 failure attribution, privacy, first-cause ordering and unchanged gates.
 No troubleshooting fix is complete merely because a separate direct command
-reveals the cause.
+reveals the cause. The isolated Make-interface incremental-build fixture may
+override the checkout preflight only in its copied synthetic runner, because
+that fixture deliberately edits tracked fake sources to check dirty build
+provenance. This exemption must never reach the real `make test` command.
 
 ### Native/rootless fail-only subprocess attribution
 

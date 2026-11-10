@@ -571,6 +571,9 @@ class NativeTimingContract(unittest.TestCase):
                             runner, "make_invocation",
                             return_value=(["make"], "fixture")), \
                         mock.patch.object(
+                            runner, "tracked_source_checkout_preflight",
+                            return_value=None), \
+                        mock.patch.object(
                             runner, "run_stage", side_effect=synthetic_stage), \
                         mock.patch.object(
                             runner, "qualification_artifact_digests",
@@ -4832,6 +4835,9 @@ class ReportContract(unittest.TestCase):
                      mock.patch.object(
                          runner, "make_invocation",
                          return_value=(["make"], "fixture")), \
+                     mock.patch.object(
+                         runner, "tracked_source_checkout_preflight",
+                         return_value=None), \
                      mock.patch.object(
                          runner, "run_stage",
                          side_effect=stage_runner(first_exit)), \

@@ -749,6 +749,9 @@ class PublicMakeContract(unittest.TestCase):
                 "    return {\"schema\": \"swapz-host-v1\", "
                 "\"architecture\": \"fixture\", "
                 "\"id_sha256\": \"a\" * 64}\n\n"
+                "def tracked_source_checkout_preflight():\n"
+                "    # Synthetic dirty-build provenance must still be exercised.\n"
+                "    return None\n\n"
                 "def refresh_history(host_identity):\n"
                 "    return \"NOT UPDATED: isolated Make-interface fixture\"\n")
             runner_path.write_text(runner_source.replace(
