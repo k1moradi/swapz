@@ -8297,14 +8297,15 @@ The metadata-only `primary prepare` command and the prepared-start coordinator
 remain behind the global disabled lifecycle gate until the complete coordinator
 is qualified. Its production
 path must reject any non-root, dirty-source, stale qualification, artifact
-mismatch, recovery-filesystem failure, target identity/header drift, nonzero
+mismatch, unsafe runtime-state ownership, target identity/header drift, nonzero
 selected-target swap use, duplicate or ambiguous selected-target swap aliases,
 mount/root dependency, loaded module or existing mapper. Unrelated swap entries
 may remain active and must never be modified by metadata preparation. It must
-repeat the exact swap and block-zero checks immediately before claiming. After claim, focused rootless lifecycle tests must verify durable
-consumed/`READY`/active ordering, manifest readback, optional-backup behavior,
-and recovery from interruption after each metadata publication, including the
-atomic `READY` close and owner-marker release. Where platform behavior is
+repeat the exact swap and block-zero checks immediately before claiming. After claim, focused rootless lifecycle tests must verify same-boot
+consumed/`READY`/active ordering, manifest readback, interruption handling
+after each ownership publication, and the atomic `READY` close and
+owner-marker release. Runtime ownership is volatile RAM-backed state; it is not
+a swap-partition recovery image and must not require another physical disk. Where platform behavior is
 needed, use deterministic fault injection on an owned RAM-backed `null_blk`
 target; no such test may open or write a host block device. The rootless build
 must keep the command unavailable and prove no host path or lifecycle side
@@ -8321,13 +8322,13 @@ partition node's `rdev` to match the partition sysfs device number before
 `blkid` or `mkswap`. Verify its PARTUUID against the partition's sysfs uevent,
 trigger udev's add event only for that exact sysfs partition path, and require
 udev to publish the by-PARTUUID block-device alias with that same partition
-major:minor. Before any physical-
-backing mapper admission, the fixture must preserve the manager-written SWZ
-authorization header at block zero and the source contract must prove that the
-kernel accepts the header-backed nullblk path without weakening the ordinary
-physical-backing opt-in or superblock validation. A fixture that overwrites the
-SWZ header with generic swap metadata before mapper construction is invalid
-because it no longer rehearses the production lifecycle authorization boundary.
+major:minor. Before any physical-backing mapper admission, the fixture must initialize its
+owned synthetic partition once as ordinary Linux swap, validate its
+`SWAPSPACE2` first page and hash that exact 4096-byte page. Mapper construction
+must then accept that unchanged Linux swap header only through the normal
+physical-backing opt-in and qualification gates. The mapper uses the data area
+after the protected first page; the raw synthetic partition must not be
+reformatted, cleared, or given a swapz-specific authorization header.
 Some host persistent-
 storage rule sets deliberately exclude `nullb*`; when the normal rules do not
 publish the link, install one temporary udev rule matching only the verified
@@ -8364,18 +8365,19 @@ owned fixture; quarantine the device or rule only if that rollback becomes
 unprovable or fails. The refusal can never be promoted to PASS. Initialize only
 that RAM partition using the portable plain `mkswap <partition>` form; do not
 pass `--no-discard`, which is not an `mkswap` option.
-The primary-lifecycle fixture has a valid SWAPZ header before creating its
-mapper. `dm_swapz` must recognize that header on the owned null_blk, require
-`allow_physical_backing=1`, and reserve physical block zero exactly as it does
-for other header-backed storage. This keeps mapper `mkswap` writes out of the
-transaction identity header; an invalid header with SWAPZ magic must fail
-closed, while an unformatted null_blk remains in the full-device test mode.
-With the opt-in disabled, the ordinary null_blk constructor must not probe
-block zero or change lower-device I/O counters.
-The start/stop rehearsal therefore verifies both exact Linux swap activation
-and preservation of the backing header. The owned-null_blk harness independently
-hashes the exact lower-device block zero after successful start and again after
-normal stop, and requires byte identity before publishing lifecycle PASS.
+The primary-lifecycle fixture has a valid ordinary `SWAPSPACE2` header before
+creating its mapper. `dm_swapz` must validate that unchanged header on the
+owned null_blk partition, require `allow_physical_backing=1` plus the loaded
+RAM-metadata qualification token, and reserve physical block zero. Only the
+virtual mapper receives `mkswap`; invalid or unformatted physical-partition
+headers fail closed, while the isolated whole-device null_blk test mode remains
+a separate synthetic path. With the physical opt-in disabled, constructor
+refusal must not change lower-device I/O counters.
+The start/stop rehearsal therefore verifies exact Linux swap activation and
+byte-exact preservation of the original backing `SWAPSPACE2` page. The
+owned-null_blk harness independently hashes lower block zero before admission,
+after successful start, and again after normal stop, and requires identity
+before publishing lifecycle PASS.
 
 Compile a noninstalled exact-source
 `swapzctl` under a root-owned private prefix, and generate a private
