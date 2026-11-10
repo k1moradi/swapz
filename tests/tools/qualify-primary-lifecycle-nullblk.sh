@@ -82,13 +82,12 @@ verify_prepare_failure_diagnostic() {
 			target-header-inspection|target-geometry-identity|\
 			original-header-identity-proof|original-header-digest|\
 			raw-target-swap-inventory|target-physical-parent-identity|\
-			target-recovery-parent-separation|cross-namespace-mount-inventory|\
+			cross-namespace-mount-inventory|\
 			target-mounted-in-visible-namespace|root-device-parent-identity|\
 			shared-root-parent-authorization-record|\
 			repeated-raw-target-swap-inventory|\
 			repeated-target-physical-parent-identity|\
-			repeated-target-recovery-parent-separation|\
-			repeated-cross-namespace-mount-inventory|\
+						repeated-cross-namespace-mount-inventory|\
 			repeated-target-mounted-in-visible-namespace|\
 			repeated-root-device-parent-identity|repeated-root-parent-identity|\
 			repeated-shared-root-parent-authorization|\
@@ -439,7 +438,7 @@ owned_nullblk_mapper_identity_unchanged() {
 	observed_table="$(dmsetup table "$DMNAME" 2>/dev/null)" ||
 		observed_table="$(dmsetup table --inactive "$DMNAME" 2>/dev/null)" ||
 		return 1
-	expected_table="$(sed -n 's/^dm_table=//p' "$RECOVERY_BASE/primary-manifest-$RUN_ID.txt" 2>/dev/null)" ||
+	expected_table="$(sed -n 's/^dm_table=//p' "$RUNTIME_STATE_BASE/primary-manifest-$RUN_ID.txt" 2>/dev/null)" ||
 		return 1
 	[[ -n "$expected_table" && "$observed_table" == "$expected_table" &&
 	   "$observed_table" == "0 "*" swapz $PART_DEVNO "* ]]
@@ -503,11 +502,11 @@ TOKEN="$(od -An -N8 -tx1 /dev/urandom | tr -d ' \n')"
 	fail "cannot generate lifecycle ownership token"
 TEST_BASE="/var/lib/swapz-primary-owned-nullblk-test-$TOKEN"
 CONFIG_BASE="$TEST_BASE/config"
-RECOVERY_BASE="$TEST_BASE/recovery"
+RUNTIME_STATE_BASE="$TEST_BASE/runtime-state"
 MUTATION_LOCK_BASE="$TEST_BASE/mutation-lock"
 PREFIX="$TEST_BASE/prefix"
 CONTROL="$PREFIX/sbin/swapzctl"
-REPORT="$RECOVERY_BASE/qualification.json"
+REPORT="$RUNTIME_STATE_BASE/qualification.json"
 EVIDENCE_BASE="$TEST_BASE/evidence"
 FAULT_FIXTURE="tests/tools/primary-lifecycle-fault-shim.c"
 CONFIGFS=/sys/kernel/config/nullb
@@ -550,7 +549,7 @@ SWAPS_ID_BEFORE="$(swapz_swap_inventory_identity /proc/swaps)" ||
 	blocked "cannot snapshot host swap identity"
 
 state_stage() {
-	local state="$RECOVERY_BASE/primary-state.json"
+	local state="$RUNTIME_STATE_BASE/primary-state.json"
 	[[ -f "$state" && ! -L "$state" ]] || return 0
 	python3 - "$state" <<'PY'
 import json
@@ -568,7 +567,7 @@ assert_lifecycle_state() {
 	local run_id="$1"
 	local expected_stage="$2"
 	local expected_previous="$3"
-	python3 - "$RECOVERY_BASE/primary-state.json" \
+	python3 - "$RUNTIME_STATE_BASE/primary-state.json" \
 		"$run_id" "$expected_stage" "$expected_previous" <<'PY'
 import json
 import sys
@@ -652,7 +651,7 @@ assert_exact_owned_mapper() {
 		fail "interrupted mapper table is not bound to the owned partition"
 	# Reject extra target rows, altered geometry and silently changed target
 	# parameters, not just a matching first four fields.
-	expected_table="$(sed -n 's/^dm_table=//p' "$RECOVERY_BASE/primary-manifest-$RUN_ID.txt")" ||
+	expected_table="$(sed -n 's/^dm_table=//p' "$RUNTIME_STATE_BASE/primary-manifest-$RUN_ID.txt")" ||
 		fail "cannot read the run-bound durable mapper table"
 	[[ -n "$expected_table" && "$mapper_table" == "$expected_table" ]] ||
 		fail "mapper table differs from the exact run-bound durable manifest"
@@ -719,7 +718,7 @@ assert_unrelated_host_swap_identity() {
 
 assert_owned_transaction_records() {
 	local expect_active="$1"
-	python3 - "$RECOVERY_BASE" "$RUN_ID" "$PARTUUID" "$PART_DEVNO" "$expect_active" <<'PY'
+	python3 - "$RUNTIME_STATE_BASE" "$RUN_ID" "$PARTUUID" "$PART_DEVNO" "$expect_active" <<'PY'
 import json
 import os
 from pathlib import Path
@@ -852,7 +851,7 @@ assert_interruption_kernel_facts() {
 	assert_unrelated_host_swap_identity "$phase"
 
 	if [[ "$phase" == start-starting ]]; then
-		[[ ! -e "$RECOVERY_BASE/primary-module-load-$RUN_ID.json" ]] ||
+		[[ ! -e "$RUNTIME_STATE_BASE/primary-module-load-$RUN_ID.json" ]] ||
 			fail "STARTING interruption unexpectedly published module WAL"
 	else
 		local expected_wal_phase=LOADED
@@ -860,18 +859,18 @@ assert_interruption_kernel_facts() {
 		      "$phase" == start-module-inserted ]]; then
 			expected_wal_phase=INTENT
 		fi
-		[[ -f "$RECOVERY_BASE/primary-module-load-$RUN_ID.json" ]] &&
+		[[ -f "$RUNTIME_STATE_BASE/primary-module-load-$RUN_ID.json" ]] &&
 			grep -Fq "\"run_id\":\"$RUN_ID\"" \
-				"$RECOVERY_BASE/primary-module-load-$RUN_ID.json" &&
+				"$RUNTIME_STATE_BASE/primary-module-load-$RUN_ID.json" &&
 			grep -Fq "\"phase\":\"$expected_wal_phase\"" \
-				"$RECOVERY_BASE/primary-module-load-$RUN_ID.json" ||
+				"$RUNTIME_STATE_BASE/primary-module-load-$RUN_ID.json" ||
 			fail "interruption does not retain exact $expected_wal_phase module WAL"
 	fi
 }
 
 capture_interruption_evidence() {
 	local phase="$1"
-	python3 - "$RECOVERY_BASE" "$EVIDENCE_BASE" "$RUN_ID" "$PARTUUID" "$phase" <<'PY'
+	python3 - "$RUNTIME_STATE_BASE" "$EVIDENCE_BASE" "$RUN_ID" "$PARTUUID" "$phase" <<'PY'
 import hashlib
 import os
 import stat
@@ -997,7 +996,7 @@ recover_interruption_run() {
 		fail "recovery after $phase reported unexpected module ownership"
 	assert_lifecycle_state "$RUN_ID" COMPLETE "$expected_previous" ||
 		fail "recovery after $phase did not preserve origin in COMPLETE"
-	[[ ! -e "$RECOVERY_BASE/partition-$PARTUUID.active" ]] ||
+	[[ ! -e "$RUNTIME_STATE_BASE/partition-$PARTUUID.active" ]] ||
 		fail "recovery after $phase left active owner marker"
 	assert_owned_transaction_records 0 ||
 		fail "recovery after $phase lost consumed or released ownership incorrectly"
@@ -1017,7 +1016,7 @@ assert_repeat_recovery_is_safe() {
 	local expected_previous="$2"
 	local before_state after_state before_swaps after_swaps output rc
 
-	before_state="$(sha256sum "$RECOVERY_BASE/primary-state.json" | awk '{print $1}')" ||
+	before_state="$(sha256sum "$RUNTIME_STATE_BASE/primary-state.json" | awk '{print $1}')" ||
 		fail "cannot hash COMPLETE state before repeated recovery"
 	before_swaps="$(swapz_swap_inventory_identity /proc/swaps)" ||
 		fail "cannot snapshot swaps before repeated recovery"
@@ -1041,7 +1040,7 @@ assert_repeat_recovery_is_safe() {
 			observed_wrapper=present
 		fail "repeated recovery after $phase expected=COMPLETE-admission-refusal-with-structured-diagnostic observed_diagnostic=$observed_diagnostic observed_wrapper=$observed_wrapper child_exit=$rc"
 	fi
-	after_state="$(sha256sum "$RECOVERY_BASE/primary-state.json" | awk '{print $1}')" ||
+	after_state="$(sha256sum "$RUNTIME_STATE_BASE/primary-state.json" | awk '{print $1}')" ||
 		fail "cannot hash COMPLETE state after repeated recovery"
 	after_swaps="$(swapz_swap_inventory_identity /proc/swaps)" ||
 		fail "cannot snapshot swaps after repeated recovery"
@@ -1315,7 +1314,7 @@ run_failed_fsync_case() {
 	printf '%s\n' "$output"
 	assert_lifecycle_state "$RUN_ID" STARTING null ||
 		fail "fsync failure did not retain the renamed STARTING record"
-	[[ -f "$RECOVERY_BASE/partition-$PARTUUID.active" ]] ||
+	[[ -f "$RUNTIME_STATE_BASE/partition-$PARTUUID.active" ]] ||
 		fail "fsync failure lost transaction ownership marker"
 	assert_interruption_kernel_facts start-starting
 	recover_interruption_run "state-dir-fsync" STARTING false false false
@@ -1324,7 +1323,7 @@ run_failed_fsync_case() {
 preserve_state_file() {
 	local tag="$1"
 	local backup="$EVIDENCE_BASE/primary-state-$tag.bin"
-	python3 - "$RECOVERY_BASE/primary-state.json" "$backup" <<'PY'
+	python3 - "$RUNTIME_STATE_BASE/primary-state.json" "$backup" <<'PY'
 import os
 import sys
 
@@ -1352,7 +1351,7 @@ PY
 
 restore_state_file() {
 	local backup="$1"
-	python3 - "$backup" "$RECOVERY_BASE/primary-state.json" <<'PY'
+	python3 - "$backup" "$RUNTIME_STATE_BASE/primary-state.json" <<'PY'
 import os
 import sys
 
@@ -1385,9 +1384,9 @@ expect_recovery_refusal_preserves_kernel() {
 	local phase="$2"
 	local output rc before_state after_state before_claim after_claim
 	local contract expected_errno expected_error
-	local state_file="$RECOVERY_BASE/primary-state.json"
-	local active_claim="$RECOVERY_BASE/partition-$PARTUUID.active"
-	local consumed_claim="$RECOVERY_BASE/consumed-$RUN_ID.json"
+	local state_file="$RUNTIME_STATE_BASE/primary-state.json"
+	local active_claim="$RUNTIME_STATE_BASE/partition-$PARTUUID.active"
+	local consumed_claim="$RUNTIME_STATE_BASE/consumed-$RUN_ID.json"
 
 	contract="$(primary_recovery_refusal_contract "$case_name")" ||
 		fail "$case_name lacks a recovery-refusal contract"
@@ -1431,7 +1430,7 @@ run_stale_run_id_case() {
 	before_hash="$(sha256sum "$backup" | awk '{print $1}')"
 	alternate=ffffffffffffffffffffffffffffffff
 	[[ "$RUN_ID" != "$alternate" ]] || alternate=eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee
-	python3 - "$RECOVERY_BASE/primary-state.json" "$RUN_ID" "$alternate" <<'PY'
+	python3 - "$RUNTIME_STATE_BASE/primary-state.json" "$RUN_ID" "$alternate" <<'PY'
 import os
 import sys
 
@@ -1468,7 +1467,7 @@ finally:
 PY
 	expect_recovery_refusal_preserves_kernel stale-run-id start-starting
 	restore_state_file "$backup" || fail "cannot restore exact stale-run-id state"
-	after_hash="$(sha256sum "$RECOVERY_BASE/primary-state.json" | awk '{print $1}')"
+	after_hash="$(sha256sum "$RUNTIME_STATE_BASE/primary-state.json" | awk '{print $1}')"
 	[[ "$after_hash" == "$before_hash" ]] ||
 		fail "stale-run-id state restoration was not byte-exact"
 	recover_interruption_run "stale-run-id" STARTING false false false
@@ -1482,9 +1481,9 @@ run_lost_state_provenance_case() {
 	note "START_LOADED_PRIMARY_NULLBLK_NEGATIVE=lost-state-provenance run_id:$RUN_ID"
 	backup="$(preserve_state_file lost-state-provenance)" ||
 		fail "cannot preserve state for lost provenance case"
-	state_path="$RECOVERY_BASE/primary-state.json"
+	state_path="$RUNTIME_STATE_BASE/primary-state.json"
 	rm -- "$state_path" || fail "cannot hide state provenance for negative case"
-	python3 - "$RECOVERY_BASE" <<'PY'
+	python3 - "$RUNTIME_STATE_BASE" <<'PY'
 import os
 import sys
 
@@ -1602,11 +1601,11 @@ cleanup() {
 		note "QUARANTINED_PRIMARY_NULLBLK_LIFECYCLE=host_swap_identity_changed"
 	fi
 
-	if [[ -d "$RECOVERY_BASE" && ! -L "$RECOVERY_BASE" ]]; then
+	if [[ -d "$RUNTIME_STATE_BASE" && ! -L "$RUNTIME_STATE_BASE" ]]; then
 		# An earlier recovery attempt may have completed after the initial
 		# stage snapshot. Judge teardown only from the final durable record.
 		stage="$(state_stage 2>/dev/null)"
-		local state_file="$RECOVERY_BASE/primary-state.json"
+		local state_file="$RUNTIME_STATE_BASE/primary-state.json"
 		local marker_path
 		if [[ -e "$state_file" || -L "$state_file" ]]; then
 			if [[ "$stage" != COMPLETE || ! "$RUN_ID" =~ ^[0-9a-f]{32}$ ]] ||
@@ -1691,13 +1690,13 @@ PY
 				QUARANTINE=1
 				note "QUARANTINED_PRIMARY_NULLBLK_LIFECYCLE=noncanonical_consumed_owner_record"
 			fi
-		elif compgen -G "$RECOVERY_BASE/consumed-*.json" >/dev/null ||
-		     compgen -G "$RECOVERY_BASE/primary-manifest-*.txt" >/dev/null ||
-		     compgen -G "$RECOVERY_BASE/primary-module-load-*.json" >/dev/null; then
+		elif compgen -G "$RUNTIME_STATE_BASE/consumed-*.json" >/dev/null ||
+		     compgen -G "$RUNTIME_STATE_BASE/primary-manifest-*.txt" >/dev/null ||
+		     compgen -G "$RUNTIME_STATE_BASE/primary-module-load-*.json" >/dev/null; then
 			QUARANTINE=1
 			note "QUARANTINED_PRIMARY_NULLBLK_LIFECYCLE=lost_state_provenance"
 		fi
-		for marker_path in "$RECOVERY_BASE"/partition-*.active; do
+		for marker_path in "$RUNTIME_STATE_BASE"/partition-*.active; do
 			if [[ -e "$marker_path" || -L "$marker_path" ]]; then
 				QUARANTINE=1
 				note "QUARANTINED_PRIMARY_NULLBLK_LIFECYCLE=unresolved_owner_record"
@@ -1813,7 +1812,7 @@ trap cleanup EXIT
 trap 'exit 130' HUP INT TERM
 
 note "START_LOADED_PRIMARY_NULLBLK_LIFECYCLE=setup"
-install -d -m 0700 "$TEST_BASE" "$CONFIG_BASE" "$RECOVERY_BASE" \
+install -d -m 0700 "$TEST_BASE" "$CONFIG_BASE" "$RUNTIME_STATE_BASE" \
 	"$MUTATION_LOCK_BASE" "$EVIDENCE_BASE" "$PREFIX" "$PREFIX/sbin" \
 	"$PREFIX/libexec" "$PREFIX/libexec/swapz"
 TEST_BASE_CREATED=1
@@ -1824,7 +1823,7 @@ cc -std=c11 -O2 -g -Wall -Wextra -Werror \
 	"-DSWAPZ_VERSION=\"$VERSION\"" \
 	-DSWAPZ_PRIMARY_OWNED_NULLBLK_TEST=1 \
 	"-DSWAPZ_PRIMARY_TEST_CONFIG_BASE=\"$CONFIG_BASE\"" \
-	"-DSWAPZ_PRIMARY_TEST_RECOVERY_BASE=\"$RECOVERY_BASE\"" \
+	"-DSWAPZ_PRIMARY_TEST_RUNTIME_STATE_BASE=\"$RUNTIME_STATE_BASE\"" \
 	"-DSWAPZ_PRIMARY_TEST_MUTATION_LOCK_DIRECTORY=\"$MUTATION_LOCK_BASE\"" \
 	"-DSWAPZ_PRIMARY_TEST_QUALIFICATION_REPORT=\"$REPORT\"" \
 	src/userspace/swapzctl.c src/userspace/swapz-primary.c "$FAULT_FIXTURE" \
@@ -2202,8 +2201,8 @@ RUN_ID="$(printf '%s\n' "$prepare_output" |
 	sed -n 's/^PRIMARY_PREPARE=READY run_id=\([0-9a-f]\{32\}\).*/\1/p')"
 [[ "$RUN_ID" =~ ^[0-9a-f]{32}$ ]] ||
 	fail "prepare did not emit one valid run ID"
-[[ -f "$RECOVERY_BASE/consumed-$RUN_ID.json" &&
-   -f "$RECOVERY_BASE/primary-manifest-$RUN_ID.txt" ]] ||
+[[ -f "$RUNTIME_STATE_BASE/consumed-$RUN_ID.json" &&
+   -f "$RUNTIME_STATE_BASE/primary-manifest-$RUN_ID.txt" ]] ||
 	fail "prepare did not persist consumed provenance and immutable manifest"
 
 note "START_LOADED_PRIMARY_NULLBLK_LIFECYCLE=start"
@@ -2217,10 +2216,10 @@ start_run="$(printf '%s\n' "$start_output" |
 [[ "$start_run" == "$RUN_ID" ]] || fail "start run ID differs from prepared run"
 grep -Fq 'swapon=true' <<< "$start_output" ||
 	fail "start did not report native swap activation"
-[[ -f "$RECOVERY_BASE/primary-module-load-$RUN_ID.json" ]] ||
+[[ -f "$RUNTIME_STATE_BASE/primary-module-load-$RUN_ID.json" ]] ||
 	fail "module-load WAL is missing after start"
-grep -Fq "\"run_id\":\"$RUN_ID\"" "$RECOVERY_BASE/primary-module-load-$RUN_ID.json" &&
-	grep -Fq '"phase":"LOADED"' "$RECOVERY_BASE/primary-module-load-$RUN_ID.json" ||
+grep -Fq "\"run_id\":\"$RUN_ID\"" "$RUNTIME_STATE_BASE/primary-module-load-$RUN_ID.json" &&
+	grep -Fq '"phase":"LOADED"' "$RUNTIME_STATE_BASE/primary-module-load-$RUN_ID.json" ||
 	fail "module-load WAL does not prove the exact loaded run"
 
 mapper_uuid="$(dmsetup info -c --noheadings -o uuid "$DMNAME" 2>/dev/null | tr -d '[:space:]')" ||
@@ -2271,12 +2270,12 @@ stop_run="$(printf '%s\n' "$stop_output" |
 [[ ! -d /sys/module/dm_swapz ]] || fail "stop left dm_swapz loaded"
 mapper_absence_proven ||
 	fail "stop left swapz-primary mapper present"
-[[ ! -e "$RECOVERY_BASE/partition-$PARTUUID.active" ]] ||
+[[ ! -e "$RUNTIME_STATE_BASE/partition-$PARTUUID.active" ]] ||
 	fail "stop left the active owner marker"
-[[ -f "$RECOVERY_BASE/consumed-$RUN_ID.json" ]] ||
+[[ -f "$RUNTIME_STATE_BASE/consumed-$RUN_ID.json" ]] ||
 	fail "stop removed permanent consumed provenance"
 
-if ! python3 - "$RECOVERY_BASE/primary-state.json" "$RUN_ID" <<'PY'
+if ! python3 - "$RUNTIME_STATE_BASE/primary-state.json" "$RUN_ID" <<'PY'
 import json
 import sys
 state = json.load(open(sys.argv[1], "r", encoding="utf-8"))
