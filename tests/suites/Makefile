@@ -200,10 +200,10 @@ test-concurrency: $(OUT)/preparation-slots $(OUT)/preparation-codec-result $(OUT
 test-userspace: $(OUT)/swapzctl-status $(OUT)/swapz-primary-policy $(OUT)/swapz-primary-mount-namespace
 	@set -e; \
 	  for native_test in swapzctl-status swapz-primary-policy swapz-primary-mount-namespace; do \
-	    if "$(OUT)/$native_test"; then :; else \
-	      native_exit_status=$?; \
-	      printf 'FAIL: native test-userspace binary=%s exit=%s\n' "$native_test" "$native_exit_status" >&2; \
-	      exit "$native_exit_status"; \
+	    if "$(OUT)/$$native_test"; then :; else \
+	      native_exit_status=$$?; \
+	      printf 'FAIL: native test-userspace binary=%s exit=%s\n' "$$native_test" "$$native_exit_status" >&2; \
+	      exit "$$native_exit_status"; \
 	    fi; \
 	  done
 	@python3 -B "$(NATIVE)/userspace/swapz-primary-late-race-test.py"
