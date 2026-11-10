@@ -4563,7 +4563,11 @@ when one measurement includes both operations. The console must not use
 
 ## Evidence levels
 
-Source contracts show structure, not loaded semantics. Native C shows portable product logic, not Device Mapper runtime. W=1/W=2 shows compilation, not correctness. Owned RAM-backed loaded tests show real kernel BIO behavior on the test host, not physical-media benefit. Behavior on a particular real device requires physical evidence from that device. The current dedicated SD-card target already has standing owner authorization under AGENT_CONTEXT; no additional per-run reviewer/owner permission upgrades a lower evidence level into physical evidence.
+The rootless summary labels its source-inspection phase "Source code and safety
+checks"; this is display-only and does not change source-phase identifiers,
+execution, qualification or failure attribution. Source contracts show
+structure, not loaded semantics. Native C shows portable product logic, not
+Device Mapper runtime. W=1/W=2 shows compilation, not correctness. Owned RAM-backed loaded tests show real kernel BIO behavior on the test host, not physical-media benefit. Behavior on a particular real device requires physical evidence from that device. The current dedicated SD-card target already has standing owner authorization under AGENT_CONTEXT; no additional per-run reviewer/owner permission upgrades a lower evidence level into physical evidence.
 
 ### Optimization-round history artifacts
 

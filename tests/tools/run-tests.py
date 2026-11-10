@@ -3704,7 +3704,7 @@ def rootless_phase_progress(line, allowed_names):
 ROOTLESS_SUITE_DISPLAY_NAMES = {
     "rootless initialization": "Rootless initialization",
     "tests/Makefile native and metadata": "Native build and metadata",
-    "tests/runtime/native/source-contract-test.py": "Source contracts",
+    "tests/runtime/native/source-contract-test.py": "Source code and safety checks",
     "tests/runtime/native/userspace/swapzctl-active-swap-provenance-test.py": "swapzctl swap provenance",
     "tests/runtime/native/tmp-cleanup-test.py": "Temporary-file cleanup",
     "tests/runtime/native/resource-admission-test.py": "Resource admission",

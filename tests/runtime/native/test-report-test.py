@@ -609,8 +609,8 @@ class NativeTimingContract(unittest.TestCase):
             text)
         self.assertRegex(
             text,
-            r"(?m)^\s*3 \| Source contracts\s+\| FAIL\s+\| +[0-9.]+s$")
-        self.assertEqual(text.count("Source contracts"), 1)
+            r"(?m)^\s*3 \| Source code and safety checks\s+\| FAIL\s+\| +[0-9.]+s$")
+        self.assertEqual(text.count("Source code and safety checks"), 1)
         self.assertNotIn("/private/secret", text)
         self.assertNotIn("Start   ", text)
         self.assertNotIn("Test    ", text)
