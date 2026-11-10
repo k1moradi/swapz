@@ -2631,31 +2631,34 @@ def _development_swap_inventory_plan(target):
     return target_row, swapfiles
 
 
-def _require_development_swapoff_headroom(target_row, swapfiles):
-    total_used_kib = target_row["used_kib"] if target_row is not None else 0
-    total_used_kib += sum(record["used_kib"] for record in swapfiles)
+def _require_development_swapoff_headroom(target_row):
+    """Require RAM only for pages owned by the selected swap partition."""
+    used_kib = target_row["used_kib"] if target_row is not None else 0
+    if not used_kib:
+        return
     try:
         contents = Path("/proc/meminfo").read_text(encoding="ascii")
     except (OSError, UnicodeError) as exc:
         raise ProbeError("cannot prove host memory headroom before swapoff") from exc
-    match = re.search(r"(?m)^MemAvailable:\s+(\d+) kB$", contents)
+    match = re.search(r"(?m)^MemAvailable:\\s+(\\d+) kB$", contents)
     if match is None:
         raise ProbeError("cannot parse MemAvailable before swapoff")
     available_kib = int(match.group(1))
     required_kib = max(
         DEVELOPMENT_SWAPOFF_MIN_AVAILABLE_KIB,
-        total_used_kib + DEVELOPMENT_SWAPOFF_MARGIN_KIB,
+        used_kib + DEVELOPMENT_SWAPOFF_MARGIN_KIB,
     )
     if available_kib < required_kib:
         raise ProbeError(
-            "insufficient host memory headroom for bounded swapoff; "
+            "insufficient host memory headroom for bounded target swapoff; "
             f"available_kib={available_kib} required_kib={required_kib}")
 
-
 def _quiesce_development_swap_inventory(state, target, state_dir):
-    """Temporarily quiesce the exact target and saved swapfiles before formatting."""
+    """Deactivate only the selected raw swap; preserve unrelated swapfiles."""
     target_row, current_swapfiles = _development_swap_inventory_plan(target)
     saved_swapfiles = state.get("unrelated_swapfiles")
+    if state.get("unrelated_swapfiles_deactivated_by_run") is not False:
+        raise ProbeError("new trial lacks unrelated-swap preservation ownership")
     if (not isinstance(saved_swapfiles, list) or
             len(saved_swapfiles) != len(current_swapfiles)):
         raise ProbeError("unrelated swapfile inventory changed before swapoff")
@@ -2663,7 +2666,7 @@ def _quiesce_development_swap_inventory(state, target, state_dir):
         _validate_saved_swapfile(saved)
         if not _swapfile_identity_matches(saved, current):
             raise ProbeError("unrelated swapfile identity changed before swapoff")
-    _require_development_swapoff_headroom(target_row, current_swapfiles)
+    _require_development_swapoff_headroom(target_row)
 
     if target_row is not None:
         _verify_target_identity(target)
@@ -2671,26 +2674,34 @@ def _quiesce_development_swap_inventory(state, target, state_dir):
         if _active_swap_for(target["major"], target["minor"]) is not None:
             raise ProbeError("swapoff returned but selected partition remains active")
 
+    # The trial owns no unrelated swapfile transition. Recheck that each saved
+    # inode is still active with the same size/priority after target swapoff.
     for saved in saved_swapfiles:
-        current = _active_swapfile_for(saved)
-        if current is None:
-            raise ProbeError("saved unrelated swapfile became inactive before owned swapoff")
-        _run(["swapoff", "--", saved["path"]], timeout=120)
-        if _active_swapfile_for(saved) is not None:
-            raise ProbeError("swapoff returned but unrelated swapfile remains active")
+        active = _active_swapfile_for(saved)
+        if (active is None or active["size_kib"] != saved["size_kib"] or
+                active["priority"] != saved["priority"]):
+            raise ProbeError("unrelated swapfile changed during target swapoff")
 
-    require_development_formatter_inventory_clear()
     state["stage"] = "SWAP_OFF"
     _save_state(state_dir, state)
 
-
 def _restore_development_swapfiles(state):
-    """Restore only the exact unrelated swapfiles saved by this run."""
+    """Restore legacy helper-owned swapfiles; verify new trials preserved them."""
     saved_swapfiles = state.get("unrelated_swapfiles")
     if saved_swapfiles is None:
         return True
     if not isinstance(saved_swapfiles, list):
         raise ProbeError("saved unrelated swapfile inventory is malformed")
+    deactivated_by_run = state.get("unrelated_swapfiles_deactivated_by_run")
+    if deactivated_by_run is False:
+        if not _development_swapfiles_restored(state):
+            raise ProbeError(
+                "unrelated swapfile changed although this run never owned it")
+        return True
+    if deactivated_by_run not in {None, True}:
+        raise ProbeError("unrelated swapfile ownership state is malformed")
+    # Missing ownership is historical compatibility: older same-boot helpers
+    # did temporarily deactivate these exact saved swapfiles.
     for saved in saved_swapfiles:
         _validate_saved_swapfile(saved)
         active = _active_swapfile_for(saved)
@@ -2703,9 +2714,8 @@ def _restore_development_swapfiles(state):
             active = _active_swapfile_for(saved)
         if (active is None or active["size_kib"] != saved["size_kib"] or
                 active["priority"] != saved["priority"]):
-            raise ProbeError("unrelated swapfile was not restored exactly")
+            raise ProbeError("legacy helper-owned swapfile was not restored exactly")
     return True
-
 
 def _development_swapfiles_restored(state):
     saved_swapfiles = state.get("unrelated_swapfiles")
@@ -2989,8 +2999,14 @@ def _recovery_state_identity_matches(expected, observed):
             observed.get("raw_header_preservation_required") is not True):
         return False
     if "unrelated_swapfiles" in expected or "unrelated_swapfiles" in observed:
-        return expected.get("unrelated_swapfiles") == observed.get(
-            "unrelated_swapfiles")
+        if expected.get("unrelated_swapfiles") != observed.get(
+                "unrelated_swapfiles"):
+            return False
+    if ("unrelated_swapfiles_deactivated_by_run" in expected or
+            "unrelated_swapfiles_deactivated_by_run" in observed):
+        if (expected.get("unrelated_swapfiles_deactivated_by_run") is not
+                observed.get("unrelated_swapfiles_deactivated_by_run")):
+            return False
     return True
 
 
@@ -3021,6 +3037,14 @@ def _require_recovery_results_binding(state, results):
                 "unrelated_swapfiles; safe_next_step=inspect_records_read_only")
         for swapfile in state.get("unrelated_swapfiles", []):
             _validate_saved_swapfile(swapfile)
+    if ("unrelated_swapfiles_deactivated_by_run" in state or
+            "unrelated_swapfiles_deactivated_by_run" in results):
+        if (state.get("unrelated_swapfiles_deactivated_by_run") is not
+                results.get("unrelated_swapfiles_deactivated_by_run")):
+            raise ProbeError(
+                "saved physical results/state binding mismatch: "
+                "unrelated_swapfiles_deactivated_by_run; "
+                "safe_next_step=inspect_records_read_only")
     result_stage = results.get("final_recovery_state")
     ownership_phase = state["ownership_phase"]
     if (type(state.get("major")) is not int or
@@ -3449,6 +3473,10 @@ def _prepare_state(target, state_dir, evidence, review):
         "swap_size_kib": target.get("swap_size_kib"),
         "swap_used_kib": target.get("swap_used_kib"),
         "unrelated_swapfiles": target.get("unrelated_swapfiles", []),
+        # Current ordinary-swap trials never deactivate unrelated swapfiles.
+        # False is durable ownership evidence; absent means a legacy helper
+        # version that may have owned their temporary deactivation.
+        "unrelated_swapfiles_deactivated_by_run": False,
         "development_only": evidence.get("development_only") is True,
         **({"virtual_device_only": True}
            if evidence.get("virtual_device_only") is True else {}),
@@ -4088,6 +4116,7 @@ def run_probe(device_arg, confirm_arg, state_dir_arg, review_path,
                 "priority": target["swap_priority"],
             } if target["swap_was_active"] else None),
             "unrelated_swapfiles": target.get("unrelated_swapfiles", []),
+            "unrelated_swapfiles_deactivated_by_run": False,
             "development_test_evidence": evidence.get("development_evidence"),
             "qualification_evidence": ({
                 "latest_source_reports": evidence["latest_source_reports"],
