@@ -42,10 +42,10 @@ if [ "${SWAPZ_PRIMARY_SYSTEMD_TESTING:-0}" = 1 ]; then
 	package_transaction_parent=${SWAPZ_PRIMARY_TEST_PACKAGE_TRANSACTIONS:?missing test package transaction root}
 fi
 
-recovery_base=/var/lib/swapz/physical-recovery
+state_base=/run/swapz
 runtime_base=/run/swapz
 if [ "${SWAPZ_PRIMARY_SYSTEMD_TESTING:-0}" = 1 ]; then
-	recovery_base=${SWAPZ_PRIMARY_TEST_RECOVERY_BASE:?missing test recovery base}
+	state_base=${SWAPZ_PRIMARY_TEST_RECOVERY_BASE:?missing test runtime-state base}
 	runtime_base=$report_base/runtime
 fi
 arm_file=$report_base/armed.env
@@ -913,7 +913,7 @@ active_transaction_run_id()
 {
 	# This is an observer-only consistency check. The manager performs full
 	# transaction parsing and enforces immutable ownership at every mutation.
-	state=$recovery_base/primary-state.json
+	state=$state_base/primary-state.json
 	valid_primary_record "$state" || return 1
 	state_record=$(cat -- "$state") || return 1
 	run_id=$(printf '%s\n' "$state_record" | sed -nE \
@@ -925,8 +925,8 @@ active_transaction_run_id()
 	minor=${target_major_minor#*:}
 	expected_claim=$(printf '{"major":%s,"minor":%s,"partuuid":"%s","run_id":"%s"}' \
 		"$major" "$minor" "$selected_partuuid" "$run_id")
-	for record in "$recovery_base/partition-$selected_partuuid.active" \
-		"$recovery_base/consumed-$run_id.json"; do
+	for record in "$state_base/partition-$selected_partuuid.active" \
+		"$state_base/consumed-$run_id.json"; do
 		valid_primary_record "$record" || return 1
 		[ "$(cat -- "$record")" = "$expected_claim" ] || return 1
 	done
@@ -944,33 +944,28 @@ hibernation_resume_guard()
 
 verify_persistent_report_storage()
 {
-	# The manager already proves that its recovery filesystem is persistent and
-	# belongs to a different physical disk from the selected SD card. Keep the
-	# boot evidence on that *same filesystem* rather than trusting a pathname
-	# that might itself be a mount over the disposable card or a tmpfs.
-	# Rootless fixtures also prove directory availability and filesystem identity.
-	[ -d "$recovery_base" ] && [ ! -L "$recovery_base" ] ||
-		fail "primary recovery directory is unavailable or symlinked; restore qualified recovery storage"
-	report_filesystem=$(stat -c '%d' -- "$report_base") ||
-		fail "cannot identify report filesystem"
-	recovery_filesystem=$(stat -c '%d' -- "$recovery_base") ||
-		fail "cannot identify recovery filesystem"
-	[ "$report_filesystem" = "$recovery_filesystem" ] ||
-		fail "boot evidence is not on the qualified recovery filesystem"
+	# Qualification and cold-boot evidence are deliberately persistent; mutable
+	# lifecycle ownership is not. The secure report directory is under /var/lib
+	# in production and must not itself resolve to a volatile RAM filesystem.
+	report_filesystem_type=$(stat -f -c '%T' -- "$report_base") ||
+		fail "cannot identify report filesystem type"
+	case "$report_filesystem_type" in
+	tmpfs|ramfs)
+		fail "boot evidence directory is on volatile storage"
+		;;
+	esac
 
-	# primary plan is deliberately a read-only BLOCKED report today, so its
-	# documented success path exits 2 after emitting complete JSON. Accept
-	# only that bounded status (or a future ordinary success status 0) and
-	# still require the exact persistence proof from the payload.
+	# Keep PLAN observational only. It may return the current blocked status,
+	# but persistence no longer depends on any recovery-device relationship.
 	plan_status=0
 	plan=$("$swapzctl" primary plan) || plan_status=$?
 	case "$plan_status" in
 	0|2) ;;
-	*) fail "cannot query read-only recovery storage plan" ;;
+	*) fail "cannot query read-only primary plan" ;;
 	esac
 	case "$plan" in
-	*'"schema":"swapz-primary-plan-v1"'*'"recovery_preflight_read":true'*'"recovery_filesystem_supported":true'*'"recovery_directly_not_target":true'*'"recovery_source_chain_checked":true'*'"recovery_same_physical_disk_as_target":false'*) ;;
-	*) fail "read-only plan cannot prove recovery and boot evidence are persistent and outside the selected SD card" ;;
+	*'"schema":"swapz-primary-plan-v1"'*) ;;
+	*) fail "read-only primary plan is malformed" ;;
 	esac
 }
 
@@ -1270,12 +1265,10 @@ observe_boot()
 	fi
 
 	if [ "$observation_expected" -eq 1 ]; then
-		# Missing recovery storage is not an invitation to select a new disk.
-		if [ ! -d "$recovery_base" ] || [ -L "$recovery_base" ]; then
-			append_failure recovery_storage_unavailable
-		elif [ "$(stat -c '%d' -- "$recovery_base" 2>/dev/null)" != \
-		       "$(stat -c '%d' -- "$report_base" 2>/dev/null)" ]; then
-			append_failure recovery_filesystem_mismatch
+		# Active ownership is same-boot state and must live in the volatile
+		# runtime directory. Persistent evidence is intentionally separate.
+		if [ ! -d "$state_base" ] || [ -L "$state_base" ]; then
+			append_failure runtime_state_unavailable
 		fi
 		# Do not mistake a forged post-boot report for an authorized start.
 		# The observer validates the claimed token only after its canonical
