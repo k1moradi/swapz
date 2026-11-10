@@ -1191,6 +1191,43 @@ class PhysicalSwapProbeTests(unittest.TestCase):
                 probe.RECOVERY_BASE / f"swapz-physical-{run_id}",
                 run_id, False)
 
+    def test_current_runtime_state_requires_tmpfs(self):
+        with tempfile.TemporaryDirectory() as directory:
+            run_root = Path(directory) / "run"
+            parent = run_root / "swapz"
+            base = parent / "algorithm-physical"
+            base.mkdir(parents=True, mode=0o700)
+            parent.chmod(0o700)
+            run_root.chmod(0o755)
+            original_lstat = probe.Path.lstat
+
+            def root_owned_lstat(path):
+                info = original_lstat(path)
+                fields = list(info)
+                fields[4] = 0
+                fields[0] = (
+                    stat.S_IFDIR | (0o755 if path == run_root else 0o700))
+                return os.stat_result(fields)
+
+            def filesystem(kind):
+                return subprocess.CompletedProcess(
+                    [], 0, stdout=f"{kind}\n", stderr="")
+
+            with mock.patch.object(probe, "ALGORITHM_RUNTIME_BASE", base), \
+                    mock.patch.object(probe.Path, "lstat",
+                                      side_effect=root_owned_lstat), \
+                    mock.patch.object(probe, "_run",
+                                      return_value=filesystem("tmpfs")):
+                self.assertEqual(REAL_ALGORITHM_RUNTIME_BASE(), base)
+            with mock.patch.object(probe, "ALGORITHM_RUNTIME_BASE", base), \
+                    mock.patch.object(probe.Path, "lstat",
+                                      side_effect=root_owned_lstat), \
+                    mock.patch.object(probe, "_run",
+                                      return_value=filesystem("ext4")):
+                with self.assertRaisesRegex(
+                        probe.ProbeError, "must be backed by tmpfs"):
+                    REAL_ALGORITHM_RUNTIME_BASE()
+
     def test_development_final_observations_require_inactive_target(self):
         run_id = "fedcba9876543210fedcba9876543210"
         header = b"H" * probe.PAGE_BYTES
