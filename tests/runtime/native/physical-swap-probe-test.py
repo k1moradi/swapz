@@ -349,7 +349,7 @@ class PhysicalSwapProbeTests(unittest.TestCase):
             # Promote only an exact source-controlled test and numeric mismatch.
             failure = re.search(
                 r"(?m)^(FAIL|ERROR): (test_[A-Za-z0-9_]{1,96}) "
-                r"\\(__main__\\.AlgorithmPageoutOracleTest\\.\\2\\)$",
+                r"\(__main__\.AlgorithmPageoutOracleTest\.\2\)$",
                 completed.stderr)
             known_tests = {
                 "test_page_patterns_cover_entire_pages_and_differ",
