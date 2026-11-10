@@ -1391,6 +1391,14 @@ class PhysicalSwapProbeTests(unittest.TestCase):
         header[-1] ^= 1
         self.assertFalse(probe.swap_signature_valid(bytes(header)))
 
+    def test_swap_geometry_rejects_more_bad_pages_than_declared_pages(self):
+        device_bytes = 16 * 1024 * 1024
+        header = build_swap_header(
+            device_bytes, last_page=3, bad_pages=(1, 1, 1, 1))
+        with self.assertRaisesRegex(
+                probe.ProbeError, "bad-page count"):
+            probe._swapz_backing_geometry(header, device_bytes)
+
     def test_swap_inventory_requires_exact_header_and_numeric_fields(self):
         valid = (
             "Filename Type Size Used Priority\n"
