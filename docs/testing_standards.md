@@ -4116,6 +4116,15 @@ while another host task owns the card. The private implementation is
 \`tests/runtime/benchmark/{sustained-replay.py,anonymous-swap.py,qualification.py,physical-campaign-evidence.py}\`.
 The campaign-evidence helper is read-only with respect to devices and does not
 schedule workloads; it snapshots and seals scheduler-produced evidence.
+The sustained raw-device replay must independently validate the immutable
+Linux v1 SWAPSPACE2 header (including byte-swapped v1 version, declared last
+page and exact device-byte geometry) before opening a raw WRITE path. The
+kernel can map valid sparse bad-page layouts, but the current raw benchmark
+uses one contiguous PAGE-offset span. Until that benchmark implements an
+equivalent clean-segment translation, it must fail closed for a shorter
+declared area or any bad-page entries, never write through those gaps, and
+never treat the trailing SWAPSPACE2 signature alone as admission.
+Rootless adversarial fixtures must prove these refusals and header preservation.
 Rootless contracts for these helpers live in the already-executed
 \`io-replay-test.py\`, so this addition does not create another official runner.
 

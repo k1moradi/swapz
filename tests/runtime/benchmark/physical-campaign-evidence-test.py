@@ -106,24 +106,57 @@ def inspect(rows, before=None, after=None, decisions=None,
 
 class AdversarialPhysicalCampaign(unittest.TestCase):
     def test_sustained_replay_requires_and_hashes_exact_swapspace2_header(self):
+        device_bytes = 8193 * SUSTAINED.PAGE + 2048
         header = bytearray(SUSTAINED.PAGE)
+        header[1024:1028] = (1).to_bytes(4, "little")
+        header[1028:1032] = (8192).to_bytes(4, "little")
         header[-len(SUSTAINED.SWAP_SIGNATURE):] = SUSTAINED.SWAP_SIGNATURE
         header = bytes(header)
         expected = hashlib.sha256(header).hexdigest()
         self.assertEqual(
-            SUSTAINED.validate_swapspace2_header(header), expected)
+            SUSTAINED.validate_swapspace2_header(header, device_bytes),
+            expected)
 
         changed = bytearray(header)
         changed[0] = 1
         self.assertNotEqual(
-            SUSTAINED.validate_swapspace2_header(bytes(changed)), expected)
+            SUSTAINED.validate_swapspace2_header(bytes(changed), device_bytes),
+            expected)
+
+        byte_swapped = bytearray(header)
+        byte_swapped[1024:1028] = (1).to_bytes(4, "big")
+        byte_swapped[1028:1032] = (8192).to_bytes(4, "big")
+        self.assertEqual(
+            SUSTAINED.validate_swapspace2_header(
+                bytes(byte_swapped), device_bytes),
+            hashlib.sha256(byte_swapped).hexdigest())
 
         invalid = bytearray(header)
         invalid[-1] ^= 1
         with self.assertRaisesRegex(ValueError, "ordinary SWAPSPACE2"):
-            SUSTAINED.validate_swapspace2_header(bytes(invalid))
+            SUSTAINED.validate_swapspace2_header(bytes(invalid), device_bytes)
         with self.assertRaisesRegex(ValueError, "incomplete"):
-            SUSTAINED.validate_swapspace2_header(header[:-1])
+            SUSTAINED.validate_swapspace2_header(header[:-1], device_bytes)
+        for bad_device_size in (None, True, 0, 4096, 8191, 8192.0, 1 << 64):
+            with self.subTest(bad_device_size=bad_device_size), \
+                    self.assertRaisesRegex(ValueError, "geometry"):
+                SUSTAINED.validate_swapspace2_header(
+                    header, bad_device_size)
+
+        for field, offset, value in (
+                ("version", 1024, 2),
+                ("last_page", 1028, 0),
+                ("last_page", 1028, 8193),
+                ("last_page", 1028, 8191),
+                ("bad_pages", 1032, 1),
+        ):
+            with self.subTest(field=field, value=value):
+                invalid_header = bytearray(header)
+                invalid_header[offset:offset + 4] = value.to_bytes(4, "little")
+                with self.assertRaisesRegex(
+                        ValueError, "version|declared area|contiguous"):
+                    SUSTAINED.validate_swapspace2_header(
+                        bytes(invalid_header), device_bytes)
 
         source = (HERE / "sustained-replay.py").read_text(encoding="utf-8")
         self.assertIn(

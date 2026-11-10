@@ -51,16 +51,41 @@ def interrupt_benchmark(signum, _frame) -> None:
     raise BenchmarkInterrupted(f"interrupted by signal {signum}")
 
 
-def validate_swapspace2_header(header: bytes) -> str:
-    """Return the exact block-zero digest for an ordinary Linux swap header."""
+def validate_swapspace2_header(header: bytes, device_bytes: int) -> str:
+    """Validate a full-area Linux v1 swap header before raw physical replay.
+
+    The kernel supports sparse Linux swap layouts, but this raw benchmark's
+    contiguous offset arithmetic cannot skip declared bad-page segments.
+    Refuse that layout instead of silently comparing different physical areas.
+    """
     if type(header) is not bytes or len(header) != PAGE:
         raise ValueError("physical target SWAPSPACE2 header read is incomplete")
     if header[-len(SWAP_SIGNATURE):] != SWAP_SIGNATURE:
         raise ValueError("physical target lacks an ordinary SWAPSPACE2 header")
+    if (type(device_bytes) is not int or
+            device_bytes < 2 * PAGE or device_bytes > (1 << 64) - 1):
+        raise ValueError("physical target swap geometry is invalid")
+
+    version_bytes = header[1024:1028]
+    if version_bytes == (1).to_bytes(4, "little"):
+        byte_order = "little"
+    elif version_bytes == (1).to_bytes(4, "big"):
+        byte_order = "big"
+    else:
+        raise ValueError("physical target Linux swap v1 version is invalid")
+    last_page = int.from_bytes(header[1028:1032], byte_order)
+    bad_pages = int.from_bytes(header[1032:1036], byte_order)
+    complete_pages = device_bytes // PAGE
+    if not 0 < last_page < complete_pages:
+        raise ValueError("physical target Linux swap declared area is invalid")
+    if last_page != complete_pages - 1 or bad_pages:
+        raise ValueError(
+            "physical raw replay requires contiguous full-area SWAPSPACE2")
     return hashlib.sha256(header).hexdigest()
 
 
-def physical_swap_header_sha256(path: Path, expected_device: str) -> str:
+def physical_swap_header_sha256(
+        path: Path, expected_device: str, expected_device_bytes: int) -> str:
     """Read block zero through a descriptor pinned to the expected partition."""
     descriptor = os.open(path, os.O_RDONLY | os.O_CLOEXEC)
     try:
@@ -71,7 +96,7 @@ def physical_swap_header_sha256(path: Path, expected_device: str) -> str:
         header = os.pread(descriptor, PAGE, 0)
     finally:
         os.close(descriptor)
-    return validate_swapspace2_header(header)
+    return validate_swapspace2_header(header, expected_device_bytes)
 
 
 def splitmix64(value: int) -> int:
@@ -393,7 +418,7 @@ def check_physical(args, logical_pages: int):
     if int((lower_sys / "size").read_text()) * 512 != args.expected_device_bytes:
         raise ValueError("selected partition byte size changed")
     raw_swap_header_sha256 = physical_swap_header_sha256(
-        alias, args.expected_lower_dev)
+        alias, args.expected_lower_dev, args.expected_device_bytes)
     parent = lower_sys.parent
     if (parent / "dev").read_text().strip() != args.expected_parent_dev:
         raise ValueError("removable parent major:minor changed")
@@ -1183,7 +1208,8 @@ def run(args):
                     Path("/dev/disk/by-partuuid") /
                     identity["physical_partuuid"]).resolve(strict=True)
                 raw_swap_header_after_sha256 = physical_swap_header_sha256(
-                    lower_alias, identity["lower_major_minor"])
+                    lower_alias, identity["lower_major_minor"],
+                    identity["physical_device_bytes"])
                 if (raw_swap_header_after_sha256 !=
                         identity["raw_swap_header_sha256"]):
                     raise ValueError(
