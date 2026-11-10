@@ -197,6 +197,10 @@ Deleted formatter-success fixtures must not be recreated as acceptance tests.
 The primary-manager source contract must additionally prove that its exclusive
 raw-target identity/header descriptor is `O_RDONLY | O_EXCL`, never `O_RDWR`
 or `O_WRONLY`; userspace raw-write capability is not an ownership primitive.
+The rootless primary-policy opener fixture must likewise use `O_RDONLY | O_EXCL`
+for an exclusive raw-target identity claim and `O_RDONLY` for observation,
+reject `O_RDWR | O_EXCL` with `EINVAL`, and run mismatch/alias tests with
+allowed read-only flags so flag validation cannot mask an identity failure.
 
 A 20-byte authoritative RAM logical map (including compressed CRC32C)
 replaces the prior 16-byte map and increases the dedicated-card source
