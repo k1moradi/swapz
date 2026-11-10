@@ -745,10 +745,11 @@ int swapz_lookup(const void *bytes, swapz_u32 bytes_total, swapz_u8 index,
 }
 
 /*
- * The migration builder is deliberately independent of the legacy in-band
+ * The production builder is deliberately independent of the legacy in-band
  * codec. All descriptor bytes live in caller-owned RAM; only packed payload
- * bytes and zero padding can enter a lower write. This primitive must NOT
- * disable SWAPZ_CODEC_METADATA_ON_MEDIA until every live engine path migrates.
+ * bytes and zero padding can enter a lower write. SWAPZ_CODEC_METADATA_ON_MEDIA
+ * must remain zero: serialized extent metadata is fixture-only compatibility,
+ * never a production lower-image format.
  */
 static int swapz_ram_extent_begin_checked(
 	struct swapz_ram_extent *builder, void *bytes, swapz_u32 bytes_total,
