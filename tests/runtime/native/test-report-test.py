@@ -465,6 +465,78 @@ class NativeTimingContract(unittest.TestCase):
                 {**new_report, "overall": "PASS"}, source),
             "physical_admission_not_qualified")
 
+    def test_tracked_source_preflight_blocks_uncommitted_tests(self):
+        """The generated report can change; source edits must block early."""
+        with tempfile.TemporaryDirectory(
+                prefix="source-preflight-", dir=ROOT / "build/tests") as name:
+            checkout = Path(name)
+            def git(*args):
+                return subprocess.run(
+                    ["git", *args], cwd=checkout, check=True,
+                    capture_output=True, timeout=12)
+            git("init", "--quiet", "--initial-branch=main",
+                "--object-format=sha1")
+            git("config", "user.name", "test-report CI")
+            git("config", "user.email", "test@example.invalid")
+            (checkout / "source.c").write_text("int source(void) { return 1; }\n")
+            (checkout / runner.GIT_RESULT).write_text('{"overall":"NOT_RUN"}\n')
+            git("add", "source.c", runner.GIT_RESULT)
+            git("commit", "--quiet", "-m", "Test source")
+            previous_root = runner.ROOT
+            runner.ROOT = checkout
+            try:
+                self.assertIsNone(runner.tracked_source_checkout_preflight())
+                (checkout / runner.GIT_RESULT).write_text('{"overall":"FAIL"}\n')
+                self.assertIsNone(runner.tracked_source_checkout_preflight())
+                (checkout / "source.c").write_text("modified source\n")
+                refusal = runner.tracked_source_checkout_preflight()
+                self.assertEqual(refusal["reason"], "uncommitted_tracked_source")
+                self.assertEqual(refusal["changed_paths"], ["source.c"])
+                git("add", "source.c")
+                self.assertEqual(
+                    runner.tracked_source_checkout_preflight()["changed_paths"],
+                    ["source.c"])
+            finally:
+                runner.ROOT = previous_root
+
+    def test_source_preflight_refusal_skips_every_expensive_stage(self):
+        preflight = {
+            "reason": "uncommitted_tracked_source",
+            "changed_paths": ["tests/runtime/native/algorithm-pageout-oracle-test.py"],
+            "total_changed_paths": 1,
+        }
+        written = []
+        with mock.patch.object(
+                runner.argparse.ArgumentParser, "parse_args",
+                return_value=mock.Mock(kdir="/unused", tier="full")), \
+             mock.patch.object(runner, "report_host_identity",
+                               return_value={"status": "UNAVAILABLE"}), \
+             mock.patch.object(runner, "git_sha", return_value="a" * 40), \
+             mock.patch.object(runner, "make_invocation",
+                               return_value=(["make"], "fixture")), \
+             mock.patch.object(runner, "tracked_source_checkout_preflight",
+                               return_value=preflight), \
+             mock.patch.object(runner, "run_stage") as run_stage, \
+             mock.patch.object(runner, "write_report",
+                               side_effect=lambda report: written.append(
+                                   json.loads(json.dumps(report)))), \
+             mock.patch.object(runner, "print_bench"), \
+             mock.patch.object(runner, "publish",
+                               return_value="SKIPPED_GIT_SYNC: tracked source/index is not clean"), \
+             mock.patch.object(runner, "write_failure_diagnostic",
+                               return_value=None), \
+             mock.patch.object(runner, "refresh_history",
+                               return_value="NOT UPDATED: fixture"), \
+             contextlib.redirect_stdout(io.StringIO()) as output:
+            self.assertEqual(runner.main(), 2)
+        run_stage.assert_not_called()
+        self.assertEqual(written[0]["overall"], "BLOCKED")
+        self.assertEqual(written[0]["stages"], [])
+        self.assertEqual(written[0]["checkout_preflight"], preflight)
+        self.assertIn("qualification stages not started", output.getvalue())
+        self.assertIn("algorithm-pageout-oracle-test.py", output.getvalue())
+        self.assertIn("NOT RUN", output.getvalue())
+
     def test_tier_routing_cannot_promote_ram_only_to_physical_pass(self):
         from unittest import mock
 
@@ -5102,6 +5174,57 @@ class ReportContract(unittest.TestCase):
                 self.assertNotIn("/PRIVATE/", console.getvalue())
                 self.assertNotIn("PRIVATE_SUBPROCESS_COMMAND",
                                  console.getvalue())
+
+    def test_nested_pageout_oracle_failure_is_printed_without_private_stderr(self):
+        method = "test_algorithm_pageout_oracle_unit_contracts"
+        nested_test = "test_madvise_refusal_cannot_print_success"
+        transcript = (
+            f"{method} (__main__.PhysicalSwapProbeTests.{method}) ... FAIL\n"
+            "======================================================================\n"
+            f"FAIL: {method} (__main__.PhysicalSwapProbeTests.{method})\n"
+            "Traceback (most recent call last):\n"
+            f'  File "/PRIVATE/host/physical-swap-probe-test.py", line 346, '
+            f'in {method}\n'
+            f"AssertionError: Nested pageout oracle failure: "
+            f"test={nested_test} kind=FAIL observed=0 expected=1\n"
+            "----------------------------------------------------------------------\n"
+            "Ran 124 tests in 2s\n"
+            "FAILED (failures=1)\n"
+            "FAIL: rootless phase=physical-swap-probe-test.py "
+            "subtest=unavailable test=unavailable exit=1 reason=nonzero_exit "
+            "phase_s=2 stage_s=200 line=754 "
+            "log=build/tests/rootless-failure.ABC12345/diagnostic.log\n"
+        )
+        expected = [
+            f"First failing unittest: {method}",
+            "Location: physical-swap-probe-test.py:346",
+            "Exception: AssertionError",
+            f"Nested pageout oracle: test={nested_test} kind=FAIL",
+            "Nested assertion: observed 0; expected 1",
+        ]
+        self.assertEqual(
+            runner.first_unittest_failure_details(transcript), expected)
+        from types import SimpleNamespace
+        with mock.patch.object(
+                runner.subprocess, "run", return_value=SimpleNamespace(
+                    stdout=transcript, returncode=1)), \
+             mock.patch.object(runner, "retain_direct_rootless_first_failure"), \
+             contextlib.redirect_stdout(io.StringIO()) as console:
+            self.assertEqual(runner.run_stage(
+                "Native and rootless contracts", ["synthetic"],
+                {"stages": []}), 1)
+        for item in expected:
+            self.assertIn(item, console.getvalue())
+        self.assertNotIn("/PRIVATE/host", console.getvalue())
+
+        hostile = transcript.replace(
+            f"test={nested_test}",
+            "test=private_device_token")
+        details = runner.first_unittest_failure_details(hostile)
+        self.assertNotIn("private_device_token", " ".join(details))
+        self.assertIn(
+            "Nested pageout oracle: cause unavailable; private failure log retained",
+            details)
 
     def test_physical_probe_reports_first_cause_after_bounded_trailer(self):
         from types import SimpleNamespace
