@@ -212,11 +212,11 @@
 "status": "UNAVAILABLE"
 },
 "schema": "swapz-test-results-v1",
-"source_sha": "ef6c4562ce3cf4b73f209efe8c8decc8b0188c76",
+"source_sha": "69e8e0b08d5423c8cf30d7e6a0628ecaf41683cc",
 "stages": [
 {
-"diagnostic": "Native build error: ?swapz_primary_swap_inventory_target_is_quiescent? defined but not used [-Werror=unused-function]",
-"elapsed_s": 13.15,
+"diagnostic": "Native build error: variable ?resolved_is_block? set but not used [-Werror=unused-but-set-variable]",
+"elapsed_s": 10.216,
 "exit_code": 2,
 "failed_phase": "Build module and helpers",
 "name": "Build module and helpers",
@@ -224,5 +224,5 @@
 "status": "FAIL"
 }
 ],
-"tested_commit_sha": "ef6c4562ce3cf4b73f209efe8c8decc8b0188c76"
+"tested_commit_sha": "69e8e0b08d5423c8cf30d7e6a0628ecaf41683cc"
 }
