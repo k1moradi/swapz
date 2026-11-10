@@ -57,7 +57,7 @@ static inline unsigned int swapz_linux_swap_bad_page(
 		return 0;
 	return swapz_sb_decode_u32(
 		block + SWAPZ_LINUX_SWAP_BAD_PAGE_LIST_OFFSET +
-			(size_t)index * sizeof(unsigned int),
+			index * sizeof(unsigned int),
 		layout->byte_swapped);
 }
 
