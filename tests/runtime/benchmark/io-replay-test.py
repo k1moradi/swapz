@@ -4069,7 +4069,9 @@ class PairReplayContract(unittest.TestCase):
             "maximum_logical_pages_for_partition"]
         self.assertEqual(maximum_pages(target_bytes), 256)
         self.assertEqual(maximum_pages(124787884032), 27080192)
-        self.assertIsNone(maximum_pages(target_bytes + 1))
+        # Floor only the allocation geometry; retain exact byte identity.
+        self.assertEqual(maximum_pages(target_bytes + 1), 256)
+        self.assertEqual(maximum_pages(target_bytes + 4095), 256)
         near_u32_partition_bytes = (0xffffff00 + 1) * 4096
         self.assertIsNone(maximum_pages(
             near_u32_partition_bytes, size_t_max=0xffffffff))

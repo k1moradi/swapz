@@ -8836,7 +8836,9 @@ class CapacityMemoryAccountingContracts(unittest.TestCase):
             leaf_pte_pages, page_bytes, model["MAX_UINT64"])
         self.assertEqual(leaf_pte_pages, 434)
         self.assertEqual(leaf_pte_bytes, 1777664)
-        self.assertIsNone(maximum(partition_bytes + 1))
+        # A trailing partial page changes device identity, not usable segments.
+        self.assertEqual(maximum(partition_bytes + 1), logical)
+        self.assertEqual(maximum(partition_bytes + page_bytes - 1), logical)
         exactly_three_data_segments = (
             (3 * segment_blocks + 1) * page_bytes)
         self.assertEqual(

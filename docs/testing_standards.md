@@ -300,7 +300,10 @@ sustained replay geometry oracle, and post-boot maximum logical-sector verifier
 must likewise use only complete pages for allocation while keeping the
 unfloored target byte count for identity. Native and rootless regressions cover
 1, 2048 and 4095 trailing device bytes, plus rejection of malformed values,
-fewer than two complete pages and impossible authority capacity. This does not
+fewer than two complete pages and impossible authority capacity. The source-contract
+capacity oracle and nested identical-replay regression must assert that a
+partial trailing page preserves the same logical capacity rather than
+expecting the old alignment refusal. This does not
 weaken the independent SWAPSPACE2 header/bad-page layout admission gates.
 The native source contract must reject restoring prefix-only `nullb` disk
 identification: the kernel constructor requires a decimal-only suffix,
