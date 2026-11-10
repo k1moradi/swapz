@@ -2023,22 +2023,9 @@ static void test_shared_root_parent_relationship_gates(void)
 	expect_parent_relationship("unresolved root parent",
 				   swapz_primary_shared_root_parent_relationship_valid,
 				   shared_parent, 0, 0, "unresolved identity");
-	/* Recovery must remain on a different physical parent even in this scope. */
-	expect_parent_relationship("shared recovery parent refused",
-				   swapz_primary_recovery_parent_separation_valid,
-				   shared_parent, shared_parent, 0,
-				   "device ancestry/recovery");
-	expect_parent_relationship("unresolved recovery target parent",
-				   swapz_primary_recovery_parent_separation_valid,
-				   0, makedev(259U, 0U), 0,
-				   "unresolved identity");
-	expect_parent_relationship("unresolved recovery parent",
-				   swapz_primary_recovery_parent_separation_valid,
-				   shared_parent, 0, 0, "unresolved identity");
-	expect_parent_relationship("independent recovery parent accepted",
-				   swapz_primary_recovery_parent_separation_valid,
-				   shared_parent, makedev(259U, 0U), 1,
-				   "device ancestry/recovery");
+	/* Volatile lifecycle filesystem admission is covered by the primary
+	 * policy fixture; no independent recovery block device is selected. */
+
 }
 
 static int fixture_remove_entry(const char *path, const struct stat *info,

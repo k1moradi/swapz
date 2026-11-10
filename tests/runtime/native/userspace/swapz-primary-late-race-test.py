@@ -1308,7 +1308,7 @@ static int fixture_hashes(char *control, char *module, char *oracle)
 #define swapz_primary_valid_source_sha(...) 1
 #define swapz_primary_configured_target(target) fixture_target(target)
 #define swapz_primary_target_config_read(partuuid) fixture_selector_read(partuuid)
-#define swapz_primary_recovery_base_open(...) 3
+#define swapz_primary_runtime_state_base_open(...) 3
 #define swapz_primary_partition_lock_at(...) 4
 #define swapz_primary_record_read_at(r, n, o, b, c, length, x) fixture_record_read(length)
 #define swapz_primary_state_parse(r, length, state) fixture_state_parse(state)

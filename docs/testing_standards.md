@@ -27,6 +27,15 @@ missing or substituted, cleanup fails closed and must not unload an unproven
 module. Reboot removes the volatile ownership record and kernel mapper state;
 no swapz metadata or recovery image is written to the backing partition.
 
+The direct-C qualification-report store fixture must pass separate lifecycle
+and evidence directory descriptors. Verify replacement and archival in the
+evidence directory, absence of report files in lifecycle state, and refusal
+while the lifecycle directory contains an active ownership marker. Native lifecycle filesystem policy must admit
+production tmpfs state and reject block-backed filesystems, ramfs and overlay.
+The shared Linux swap header validator's two-page format minimum must agree
+in kernel and userspace fixtures. Format parsing does not waive the separate
+three-physical-segment target capacity gate.
+
 The isolated Make-interface loaded fixture must model the immutable backing
 header by reporting `start-header-verified`, never the retired
 `start-header-written` phase. Its documentation/source contract must reject

@@ -1291,13 +1291,12 @@ static void test_primary_linux_swap_header(void)
 	memcpy(header + sizeof(header) - sizeof(magic) + 1U,
 	       magic, sizeof(magic) - 1U);
 	assert(swapz_primary_linux_swap_header_valid(header, logical_pages));
-	/* Reject a syntactically correct but unusably small mapper; the kernel
-	 * validates at least three pages for the same SWAPSPACE2 geometry.
-	 */
+	/* Format parsing needs one header and one usable page. The target's
+	 * separate capacity admission requires at least three physical segments. */
 	test_put_u32_le(header, 1028U, 0U);
 	assert(!swapz_primary_linux_swap_header_valid(header, 1U));
 	test_put_u32_le(header, 1028U, 1U);
-	assert(!swapz_primary_linux_swap_header_valid(header, 2U));
+	assert(swapz_primary_linux_swap_header_valid(header, 2U));
 	test_put_u32_le(header, 1028U, (uint32_t)(logical_pages - 1U));
 	assert(!swapz_primary_linux_swap_header_valid(header, 0U));
 	assert(!swapz_primary_linux_swap_header_valid(header,
@@ -2212,15 +2211,15 @@ static void test_sha256_regular_fd(void)
 	assert(unlink(path) == 0);
 }
 
-static void test_recovery_filesystem_policy(void)
+static void test_runtime_state_filesystem_policy(void)
 {
-	assert(swapz_primary_persistent_fs_magic(EXT2_SUPER_MAGIC));
-	assert(swapz_primary_persistent_fs_magic(XFS_SUPER_MAGIC));
-	assert(swapz_primary_persistent_fs_magic(F2FS_SUPER_MAGIC));
-	assert(!swapz_primary_persistent_fs_magic(BTRFS_SUPER_MAGIC));
-	assert(!swapz_primary_persistent_fs_magic(TMPFS_MAGIC));
-	assert(!swapz_primary_persistent_fs_magic(RAMFS_MAGIC));
-	assert(!swapz_primary_persistent_fs_magic(OVERLAYFS_SUPER_MAGIC));
+	assert(!swapz_primary_runtime_state_fs_magic(EXT2_SUPER_MAGIC));
+	assert(!swapz_primary_runtime_state_fs_magic(XFS_SUPER_MAGIC));
+	assert(!swapz_primary_runtime_state_fs_magic(F2FS_SUPER_MAGIC));
+	assert(!swapz_primary_runtime_state_fs_magic(BTRFS_SUPER_MAGIC));
+	assert(swapz_primary_runtime_state_fs_magic(TMPFS_MAGIC));
+	assert(!swapz_primary_runtime_state_fs_magic(RAMFS_MAGIC));
+	assert(!swapz_primary_runtime_state_fs_magic(OVERLAYFS_SUPER_MAGIC));
 }
 
 static void test_path_join(char *path, size_t capacity, const char *parent,
@@ -2859,6 +2858,7 @@ static void test_primary_qualification_report_store(void)
 	char actual[128];
 	struct stat info;
 	int directory_fd = -1;
+	int report_fd = -1;
 	int lock_fd = -1;
 	int file_fd = -1;
 	ssize_t count;
@@ -2871,6 +2871,10 @@ static void test_primary_qualification_report_store(void)
 	directory_fd = open(directory_template,
 			    O_RDONLY | O_DIRECTORY | O_CLOEXEC | O_NOFOLLOW);
 	assert(directory_fd >= 0);
+	assert(mkdirat(directory_fd, "evidence", 0700) == 0);
+	report_fd = openat(directory_fd, "evidence",
+		O_RDONLY | O_DIRECTORY | O_CLOEXEC | O_NOFOLLOW);
+	assert(report_fd >= 0);
 	lock_fd = swapz_primary_partition_lock_at(
 		directory_fd, "7fb9401d-04", getuid());
 	assert(lock_fd >= 0);
@@ -2879,9 +2883,9 @@ static void test_primary_qualification_report_store(void)
 	assert(swapz_primary_sha256(second, sizeof(second) - 1U,
 				    second_digest) == 0);
 	assert(swapz_primary_qualification_report_store_at(
-		directory_fd, lock_fd, first, sizeof(first) - 1U,
+		directory_fd, lock_fd, report_fd, first, sizeof(first) - 1U,
 		first_digest, getuid()) == 0);
-	file_fd = openat(directory_fd, fixed_name,
+	file_fd = openat(report_fd, fixed_name,
 			 O_RDONLY | O_CLOEXEC | O_NOFOLLOW);
 	assert(file_fd >= 0);
 	assert(fstat(file_fd, &info) == 0 && info.st_size == sizeof(first) - 1U);
@@ -2893,16 +2897,16 @@ static void test_primary_qualification_report_store(void)
 	assert(snprintf(archive_name, sizeof(archive_name),
 			 "primary-qualification-%s.json", first_digest) > 0);
 	assert(swapz_primary_qualification_report_store_at(
-		directory_fd, lock_fd, second, sizeof(second) - 1U,
+		directory_fd, lock_fd, report_fd, second, sizeof(second) - 1U,
 		second_digest, getuid()) == 0);
-	file_fd = openat(directory_fd, archive_name,
+	file_fd = openat(report_fd, archive_name,
 			 O_RDONLY | O_CLOEXEC | O_NOFOLLOW);
 	assert(file_fd >= 0);
 	count = pread(file_fd, actual, sizeof(actual), 0);
 	assert(count == (ssize_t)(sizeof(first) - 1U));
 	assert(!memcmp(actual, first, sizeof(first) - 1U));
 	assert(close(file_fd) == 0);
-	file_fd = openat(directory_fd, fixed_name,
+	file_fd = openat(report_fd, fixed_name,
 			 O_RDONLY | O_CLOEXEC | O_NOFOLLOW);
 	assert(file_fd >= 0);
 	count = pread(file_fd, actual, sizeof(actual), 0);
@@ -2911,7 +2915,7 @@ static void test_primary_qualification_report_store(void)
 	assert(close(file_fd) == 0);
 	file_fd = -1;
 	assert(swapz_primary_qualification_report_store_at(
-		directory_fd, lock_fd, second, sizeof(second) - 1U,
+		directory_fd, lock_fd, report_fd, second, sizeof(second) - 1U,
 		second_digest, getuid()) == 0);
 	file_fd = openat(directory_fd, active_name,
 			 O_WRONLY | O_CREAT | O_EXCL | O_CLOEXEC | O_NOFOLLOW, 0600);
@@ -2919,14 +2923,18 @@ static void test_primary_qualification_report_store(void)
 	assert(close(file_fd) == 0);
 	file_fd = -1;
 	assert(swapz_primary_qualification_report_store_at(
-		directory_fd, lock_fd, first, sizeof(first) - 1U,
+		directory_fd, lock_fd, report_fd, first, sizeof(first) - 1U,
 		first_digest, getuid()) < 0);
 	assert(errno == EBUSY);
 	assert(unlinkat(directory_fd, active_name, 0) == 0);
 	assert(close(lock_fd) == 0);
 	lock_fd = -1;
-	assert(unlinkat(directory_fd, fixed_name, 0) == 0);
-	assert(unlinkat(directory_fd, archive_name, 0) == 0);
+	assert(fstatat(directory_fd, fixed_name, &info, AT_SYMLINK_NOFOLLOW) < 0);
+	assert(errno == ENOENT);
+	assert(unlinkat(report_fd, fixed_name, 0) == 0);
+	assert(unlinkat(report_fd, archive_name, 0) == 0);
+	assert(close(report_fd) == 0);
+	assert(unlinkat(directory_fd, "evidence", AT_REMOVEDIR) == 0);
 	assert(unlinkat(directory_fd, "partition-7fb9401d-04.lock", 0) == 0);
 	assert(close(directory_fd) == 0);
 	directory_fd = -1;
@@ -3544,7 +3552,7 @@ int main(void)
 	test_exact_block_read_helper();
 	test_sha256_helper();
 	test_sha256_regular_fd();
-	test_recovery_filesystem_policy();
+	test_runtime_state_filesystem_policy();
 	test_recovery_source_chain();
 	test_mountinfo_parser();
 	test_module_mapper_identity_policy();
