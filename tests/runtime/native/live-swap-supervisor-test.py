@@ -2421,7 +2421,7 @@ class LiveSwapSupervisorTests(unittest.TestCase):
                  "stage": "RECOVERY_REQUIRED",
                  "recovery_previous_stage": "SWZ_FORMATTED"}
         with mock.patch.object(supervisor.PHYSICAL, "swapz_header_valid",
-                               return_value=False):
+                               return_value=False, create=True):
             with self.assertRaisesRegex(supervisor.LiveSwapError, "ambiguous"):
                 supervisor._recognized_current_header(b"?" * 4096, state)
 
@@ -2475,7 +2475,8 @@ class LiveSwapSupervisorTests(unittest.TestCase):
                     supervisor, "_release_marker"))
                 stack.enter_context(mock.patch.object(
                     supervisor.PHYSICAL, "swapz_header_valid",
-                    side_effect=lambda header, _size: header == ops.formatted))
+                    side_effect=lambda header, _size: header == ops.formatted,
+                    create=True))
                 result = supervisor.recover_state(state_dir, ops=ops)
             self.assertEqual(result["status"], "COMPLETE")
             self.assertTrue(ops.original_active)
@@ -2737,7 +2738,7 @@ class LiveSwapSupervisorTests(unittest.TestCase):
             "recovery_previous_stage": "TRIAL_STOPPING",
         }
         with mock.patch.object(supervisor.PHYSICAL, "swapz_header_valid",
-                               return_value=True):
+                               return_value=True, create=True):
             with self.assertRaisesRegex(supervisor.LiveSwapError,
                                         "provenance is ambiguous"):
                 supervisor._recognized_current_header(header, state)
@@ -2944,9 +2945,13 @@ class LiveSwapSupervisorTests(unittest.TestCase):
             stack.enter_context(mock.patch.object(
                 supervisor, "_read_recovery_file",
                 side_effect=lambda path, **_kw: Path(path).read_bytes()))
+            # The retired live-swap fixture supplies its historical SWZ
+            # classifier only inside the rootless mock; the production
+            # physical probe intentionally no longer exposes this helper.
             stack.enter_context(mock.patch.object(
                 supervisor.PHYSICAL, "swapz_header_valid",
-                side_effect=lambda data, _size: data == formatted))
+                side_effect=lambda data, _size: data == formatted,
+                create=True))
             result = supervisor.run_trial(
                 "/synthetic/approval.json", state_dir,
                 confirm="LIVE-SWAP-TRIAL", ops=ops,
