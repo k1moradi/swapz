@@ -7935,7 +7935,11 @@ mountinfo's superblock major:minor is not a substitute for the root directory's
 `st_dev`: Btrfs subvolumes may report different virtual device numbers. The
 private owned-RAM null_blk rehearsal may keep its isolated Btrfs source-chain
 fixture, but that test-only relaxation cannot enable production or physical
-Btrfs admission. Any missing, changing or multidevice identity remains BLOCKED.
+Btrfs admission. Its block-backed private runtime directory may exercise
+source-chain identity as a test fixture, but tests must not require a
+target/recovery-parent separation phase or compare the swap target against a
+fictional production recovery-device parent; production runtime ownership is
+tmpfs-only. Any missing, changing or multidevice identity remains BLOCKED.
 Rootless tests must use synthetic sysfs trees and cover malformed device
 numbers, target identity, missing physical identity and nonempty holder or
 slave directories without reading host block devices. Parse mountinfo strictly,

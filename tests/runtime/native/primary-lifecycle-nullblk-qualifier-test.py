@@ -704,11 +704,9 @@ fail() { printf 'FAIL: %s\n' "$*" >&2; exit 1; }
             "target-geometry-identity",
             "original-header-identity-proof",
             "target-physical-parent-identity",
-            "target-recovery-parent-separation",
             "target-mounted-in-visible-namespace",
             "root-device-parent-identity",
             "repeated-target-physical-parent-identity",
-            "repeated-target-recovery-parent-separation",
             "repeated-target-mounted-in-visible-namespace",
             "repeated-root-device-parent-identity",
         ):
@@ -759,14 +757,16 @@ fail() { printf 'FAIL: %s\n' "$*" >&2; exit 1; }
         self.assertIn("target_parent == root_parent", prepare)
         self.assertGreaterEqual(
             prepare.count("swapz_primary_shared_root_scope_record_live("), 3)
-        self.assertIn("target_parent == makedev(recovery_parent_major", prepare)
+        self.assertNotIn('failure_phase = "target-recovery-parent-separation"', prepare)
+        self.assertNotIn('failure_phase = "repeated-target-recovery-parent-separation"',
+                         prepare)
         self.assertIn("failure_expected = \"exact-host-root-target-parent-layout-record\"",
                       prepare)
         self.assertIn("failure_observed = \"missing-mismatched-or-unverifiable\"",
                       prepare)
         self.assertIn("repeated-shared-root-parent-authorization", prepare)
         self.assertIn("final-shared-root-parent-authorization", prepare)
-        self.assertIn("target_parent == makedev(recovery_parent_major", start)
+        self.assertNotIn("target_parent == makedev(recovery_parent_major", start)
         self.assertGreaterEqual(
             start.count("swapz_primary_shared_root_scope_record_live("), 2)
         prewrite = start.index('failure_phase = "prewrite-shared-root-parent-authorization";')
