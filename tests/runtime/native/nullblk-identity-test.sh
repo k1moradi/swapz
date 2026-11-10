@@ -170,6 +170,7 @@ PY
 cp -- "$ROOT/tests/tools/nullblk-identity.sh" "$TOOLS/nullblk-identity.sh"
 cat > "$TOOLS/clear-tmp-before-memory-check.sh" <<'SH'
 # Test-only replacement: never touch /tmp or real completion proofs.
+swapz_recover_abandoned_ram_resources() { return 0; }
 swapz_clear_tmp_before_memory_check() {
     # Marker only; no real completed-session scratch is ever removed.
     printf 'called\n' > "$SWAPZ_FIXTURE_ROOT/completed-cleanup-probe"

@@ -1,5 +1,34 @@
 # Testing Standards
 
+## Automatic abandoned benchmark resource recovery
+
+The benchmark producer records a separate root-only creation proof before
+replay, while its successful device/mapper/module creation flags are live.
+Bind the boot, creator PID/start time, source, pinned session identity, original
+swap inventory (excluding volatile Used), exact RAM configfs and block-object
+identities, mapper UUID/table/dependencies, and the module this session loaded.
+This proof grants cleanup authority only; it is never a qualification PASS.
+Legacy PID/source-only records must not acquire authority retroactively.
+
+The existing make-test memory-preflight cleanup first recovers abandoned
+sessions with complete verified proofs. Skip live creators; reject reused PIDs,
+changed boot/identity, malformed or linked records, foreign holders, mounts,
+active swap, open process references and busy mappers. Serialize recoverers and
+revalidate adjacent to every nonforce mutation. Remove only the owned mapper
+and RAM devices, then unload only that session's unchanged module when unused.
+Never infer process ownership from fuser output or signal inferred holders.
+Partial cleanup must remain safely retryable from the original creation proof.
+
+Normal teardown removes its unchanged proof only after releasing all owned
+resources. Recovery retains failed-run logs and never manufactures completion
+or PASS markers. The existing descriptor-pinned scratch deletion and retention
+rules remain separate: failed, incomplete, uncertain or quarantined evidence
+stays protected. Focused tests must cover legacy refusal, active/PID-reused
+creators, substitution, foreign users, interrupted poweroff, retry, and private
+record symlink/hardlink/mode/content changes. Loaded qualification must also
+exercise real producer registration, ordinary teardown and abandoned recovery
+on newly created owned RAM devices, with native swap identity unchanged.
+
 **Immutable naming policy (read before every prompt):** The project is `swapz`; the kernel module is `dm-swapz.ko` (loaded as `dm_swapz`); the Device Mapper target is exactly `swapz`; and the module alias is `dm-swapz`. Never put implementation-generation numbers in product, module, target, source-path, report, workflow, helper, or schema names. `SWAPSPACE2` is the only physical backing partition format. `SWZ` names the internal 4/8/16KiB extent-packing design; production extents contain only payload and zero padding, with all descriptors in RAM. Legacy serialized codecs are isolated test fixtures, **not** a partition format or permission to persist swapz metadata. Do not invent a new format identity.
 
 **Three-tier test policy:** `make fast_test` is development-only and never qualifies or publishes `test_results.json`; `make test` runs the algorithm/RAM path and returns INCOMPLETE (nonzero) until physical source/run/target admission is qualified; `make test_full` retains all rootless DKMS/systemd integration and RAM qualification. Both privileged tiers report BLOCKED (nonzero) if noninteractive privilege is unavailable. RAM/integration PASS cannot certify physical storage or cold-boot production acceptance. Private scripts and CI jobs are implementation details, not operator interfaces.
@@ -441,7 +470,7 @@ overrides fail closed. A single-core host automatically uses serial execution.
 The native Make compilation jobserver remains independent of this setting.
 Only three adjacent, source-declared groups execute concurrently: source
 contracts with swapzctl provenance, production-readiness with direct rootless
-evidence, and the 18 read-only Bash syntax checks. No unsafe task becomes
+evidence, and the 19 read-only Bash syntax checks. No unsafe task becomes
 parallel just to fill idle cores. All other rootless suites, privileged
 lifecycle operations, and hardware-dependent loaded/RAM/physical performance
 benchmarks remain serial and resource-isolated; the test sequence, requirements

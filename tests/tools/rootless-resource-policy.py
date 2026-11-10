@@ -69,6 +69,8 @@ SERIAL_PHASES = {
         ("native-artifacts", "Builds/relinks shared native objects and generated metadata"),
     "tests/runtime/native/tmp-cleanup-test.py":
         ("process-cleanup", "Exercises background children and cleanup ownership"),
+    "tests/runtime/native/owned-ram-resources-test.py":
+        ("process-cleanup", "Models RAM recovery ownership with private files; no real devices"),
     "tests/runtime/native/resource-admission-test.py":
         ("process-cleanup", "Exercises admission process and resource lifetimes"),
     "tests/runtime/native/resource-pressure-cleanup-ownership-test.py":
@@ -119,6 +121,7 @@ SYNTAX_SCRIPTS = (
     "packaging/sign-module.sh",
     "tests/tools/deploy-nullblk.sh",
     "tests/tools/qualify-primary-lifecycle-nullblk.sh",
+    "tests/tools/qualify-owned-ram-recovery.sh",
     "tests/tools/loaded-preflight.sh",
     "tests/tools/swap-inventory.sh",
     "tests/tools/quiet-lower-io.sh",

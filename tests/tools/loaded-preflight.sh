@@ -251,6 +251,13 @@ PY
         refuse BLOCKED null_blk_configfs unavailable "phase=orphan_scan resource_kind=null_blk expected_proof=canonical_retained_count observed_proof=malformed original_errno_or_exit=unavailable retained_state_action=retain_all_null_blk safe_next_action=inspect_read_only"
 }
 
+if swapz_recover_abandoned_ram_resources; then
+    :
+else
+    resource_recovery_status=$?
+    refuse BLOCKED owned_ram_resource_recovery unavailable "helper_status=$resource_recovery_status; original_errno_or_exit=$resource_recovery_status; check producer creation proofs; retain failed evidence"
+fi
+
 if [[ ! -d /sys/module/dm_swapz ]]; then
     # Do not interpret retained names as ownership. The later deployment helper
     # creates and uses a separate target under its same-process OWN_NULL claim.

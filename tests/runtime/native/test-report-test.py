@@ -41,8 +41,8 @@ class RootlessResourceInventoryContract(unittest.TestCase):
             "bash syntax " + Path(path).name
             for path in resource_policy.SYNTAX_SCRIPTS
         }
-        self.assertEqual(len(claims), 55)
-        self.assertEqual(len(claims) - len(resource_policy.FULL_ONLY_PHASES), 52)
+        self.assertEqual(len(claims), 57)
+        self.assertEqual(len(claims) - len(resource_policy.FULL_ONLY_PHASES), 54)
         self.assertTrue(all(
             claims[phase].classification == "serial"
             for phase in resource_policy.FULL_ONLY_PHASES))
@@ -154,9 +154,11 @@ class RootlessParallelPilotContract(unittest.TestCase):
         source = (ROOT / "tests/tools/test-rootless.sh").read_text(
             encoding="utf-8")
         for group, expected_count in (("initial", 2), ("readiness", 2),
-                                      ("syntax", 18)):
+                                      ("syntax", 19)):
             tasks = parallel_runner.validated_group(group, source)
             self.assertEqual(len(tasks), expected_count)
+            if group == "syntax":
+                self.assertIn(f"syntax) rootless_parallel_size={expected_count} ;;", source)
         with self.assertRaisesRegex(ValueError, "unreviewed"):
             parallel_runner.validated_group("unknown", source)
         self.assertIn("case ${SWAPZ_ROOTLESS_JOBS:-auto} in", source)
@@ -311,7 +313,8 @@ class RootlessParallelPilotContract(unittest.TestCase):
             with self.assertRaisesRegex(ValueError, "invalid bounded"):
                 parallel_runner.execute_group(directory, tasks, jobs=0)
             with self.assertRaisesRegex(ValueError, "invalid bounded"):
-                parallel_runner.execute_group(directory, tasks, jobs=19)
+                parallel_runner.execute_group(
+                    directory, tasks, jobs=len(resource_policy.SYNTAX_SCRIPTS) + 1)
 
 
     def test_zero_exit_with_live_descendant_fails_closed(self):

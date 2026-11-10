@@ -272,6 +272,16 @@ on drift. The handoff readiness snapshot is observational and may lag this
 policy file; its historical `NOT_FROZEN` field does not override the canonical
 frozen manifest.
 
+## Interrupted RAM benchmark cleanup
+
+The make-test preflight automatically recovers abandoned benchmark resources
+only from complete root-only producer creation proofs. It preserves live
+creators and legacy artifacts without transferable ownership, removes only
+the proven mapper and RAM devices, and unloads only the unchanged module the
+session inserted when unused. Failed-run logs stay protected by the separate
+scratch retention policy. Never infer holder ownership or kill processes to
+make teardown pass. See the testing standard and ROADMAP ID184.
+
 ## Main synchronization contract
 
 **Standing owner directive: `main` is the ONLY permitted development and

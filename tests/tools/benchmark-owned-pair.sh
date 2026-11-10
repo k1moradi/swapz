@@ -281,6 +281,9 @@ COUNT=0
 READY_COUNT=0
 OWN_MODULE=0
 OWN_DM=0
+RESOURCE_PROOF_CREATED=0
+RESOURCE_PROOF_ID=
+RESOURCE_PROOF_SHA=
 QUARANTINE=0
 DMNAME=""
 DMUUID=""
@@ -408,6 +411,8 @@ printf 'pid=%s\nsource_sha=%s\n' "$$" "$VALIDATED_SOURCE" \
     > "$SESSION/.swapz-benchmark-owner"
 exec > >(tee -a "$SESSION/session.log") 2>&1
 SWAPS="$(cat /proc/swaps)"
+printf '%s\n' "$SWAPS" > "$SESSION/.swapz-benchmark-swaps"
+chmod 0600 "$SESSION/.swapz-benchmark-swaps"
 SWAPS_ID="$(printf '%s
 ' "$SWAPS" |
     swapz_swap_inventory_identity /dev/stdin)" ||
@@ -464,15 +469,8 @@ cleanup() {
             note 'QUARANTINED: owned DM UUID changed before teardown'
         else
             open_before_remove="$(dm_open_count)" || open_before_remove=unknown
-            if [[ "$open_before_remove" =~ ^[0-9]+$ ]] && (( open_before_remove != 0 )) && command -v fuser >/dev/null 2>&1; then
-                fuser -k -TERM "/dev/mapper/$DMNAME" >/dev/null 2>&1 || true
-                settle_udev
-                if [[ "$(dm_open_count 2>/dev/null)" =~ ^[0-9]+$ ]] && (( $(dm_open_count 2>/dev/null) != 0 )); then
-                    fuser -k -KILL "/dev/mapper/$DMNAME" >/dev/null 2>&1 || true
-                    settle_udev
-                fi
-                open_before_remove="$(dm_open_count)" || open_before_remove=unknown
-            fi
+            # A block-node reference does not prove process ownership.
+            # Never signal inferred holders; normal removal may wait or fail.
             settle_udev
             if timeout --signal=TERM --kill-after=2s 10s                     dmsetup remove --retry "$DMNAME"; then
                 OWN_DM=0
@@ -532,7 +530,12 @@ cleanup() {
         fi
     fi
     if (( OWN_MODULE && !OWN_DM && !QUARANTINE )); then
-        rmmod dm_swapz || { QUARANTINE=1; note 'QUARANTINED: swapz module busy'; }
+        if rmmod dm_swapz; then
+            OWN_MODULE=0
+        else
+            QUARANTINE=1
+            note 'QUARANTINED: swapz module busy'
+        fi
     fi
     end_swaps="$(cat /proc/swaps)"
     note "HOST_SWAPS_AFTER:"
@@ -541,12 +544,22 @@ cleanup() {
 ' "$end_swaps" |
             swapz_swap_inventory_identity /dev/stdin)" ||
        [[ "$current_id" != "$SWAPS_ID" ]]; then
-        result=1
+        (( result != 0 )) || result=1
         QUARANTINE=1
         note 'FAIL: system swap identity changed'
     fi
+    if (( RESOURCE_PROOF_CREATED && !QUARANTINE && !OWN_DM && !OWN_MODULE )); then
+        if [[ ! -L $SESSION/.swapz-benchmark-resources &&
+              $(stat -Lc '%d:%i:%u:%a:%h' "$SESSION/.swapz-benchmark-resources") == "$RESOURCE_PROOF_ID" &&
+              $(sha256sum "$SESSION/.swapz-benchmark-resources") == "$RESOURCE_PROOF_SHA" ]]; then
+            rm -- "$SESSION/.swapz-benchmark-resources" || QUARANTINE=1
+        else
+            QUARANTINE=1
+            note 'QUARANTINED: RAM resource proof changed before finalization'
+        fi
+    fi
     if (( QUARANTINE )); then
-        result=1
+        (( result != 0 )) || result=1
         note 'BLOCKED: retain all remaining resources for read-only investigation'
     elif (( result == 0 )); then
         note 'PASS: isolated pair and ordinary teardown'
@@ -804,6 +817,19 @@ dm_sysfs="$(readlink -f "/sys/dev/block/$DMDEV")"
 DMKNAME="${dm_sysfs##*/}"
 [[ "$DMKNAME" =~ ^dm-[0-9]+$ ]] ||
     fail 'owned DM kernel identity is ambiguous'
+# Persist exact creation proofs while this process still owns the creation
+# flags, before replay can be interrupted. Legacy PID/source-only records
+# never acquire this authority retroactively.
+(( OWN_DM && COUNT == 2 && READY_COUNT == 2 )) || fail 'RAM creation proof incomplete'
+python3 -I -B tests/tools/owned-ram-resources.py record \
+    "$SESSION" "$$" "$SOURCE" "$DMNAME" "$DMUUID" "$OWN_MODULE" \
+    "$(modinfo -F swapz_build_source_sha "$MODULE")" \
+    "${NAMES[@]}" || fail 'cannot persist owned RAM creation proof'
+RESOURCE_PROOF_ID="$(stat -Lc '%d:%i:%u:%a:%h' "$SESSION/.swapz-benchmark-resources")" ||
+    fail 'cannot pin owned RAM resource proof'
+RESOURCE_PROOF_CREATED=1
+RESOURCE_PROOF_SHA="$(sha256sum "$SESSION/.swapz-benchmark-resources")" ||
+    fail 'cannot bind owned RAM resource proof bytes'
 pair_timing_boundary setup
 FIXTURE_PATH="$SESSION/fixture.bin"
 if [[ -n $SHARED_PLAN ]]; then

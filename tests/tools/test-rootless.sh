@@ -685,7 +685,7 @@ rootless_parallel_run_group() {
   ) || report_rootless_failure 2 "$LINENO" parallel_worker_setup
   case $group in
     initial|readiness) rootless_parallel_size=2 ;;
-    syntax) rootless_parallel_size=18 ;;
+    syntax) rootless_parallel_size=19 ;;
     *) report_rootless_failure 2 "$LINENO" parallel_worker_setup ;;
   esac
   if python3 -B tests/tools/rootless-parallel.py \
@@ -869,6 +869,9 @@ fi
 rootless_phase='tests/runtime/native/tmp-cleanup-test.py'
 rootless_begin_phase
 python3 -B tests/runtime/native/tmp-cleanup-test.py -v
+rootless_phase='tests/runtime/native/owned-ram-resources-test.py'
+rootless_begin_phase
+python3 -B tests/runtime/native/owned-ram-resources-test.py -v
 rootless_phase='tests/runtime/native/resource-admission-test.py'
 rootless_begin_phase
 python3 -B tests/runtime/native/resource-admission-test.py -v
@@ -1052,6 +1055,7 @@ for script in tests/tools/test-rootless.sh tests/tools/test-loaded.sh \
   tests/tools/qualify-logical-open-balance.sh packaging/package-dkms.sh \
   packaging/swapz-primary-boot-verify packaging/sign-module.sh \
   tests/tools/deploy-nullblk.sh tests/tools/qualify-primary-lifecycle-nullblk.sh \
+  tests/tools/qualify-owned-ram-recovery.sh \
   tests/tools/loaded-preflight.sh tests/tools/swap-inventory.sh \
   tests/tools/quiet-lower-io.sh \
   tests/tools/benchmark-owned-pair.sh tests/tools/benchmark-striped-owned.sh \

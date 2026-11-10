@@ -22,6 +22,7 @@ SWAPZCTL = (ROOT / "src/userspace/swapzctl.c").read_text()
 PACKAGE_DKMS = (ROOT / "packaging/package-dkms.sh").read_text()
 MANDATORY_ROOTLESS_PYTHON_SUITES = (
     "tests/runtime/native/source-contract-test.py",
+    "tests/runtime/native/owned-ram-resources-test.py",
     "tests/runtime/native/userspace/swapzctl-active-swap-provenance-test.py",
     "tests/runtime/native/primary-lifecycle-audit-test.py",
     "tests/runtime/native/primary-lifecycle-nullblk-qualifier-test.py",

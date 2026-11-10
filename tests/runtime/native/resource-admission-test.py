@@ -1556,7 +1556,8 @@ wait "$parent"
     def test_cleanup_helper_error_is_propagated_without_touching_tmp(self):
         # Override timeout and id inside an isolated process. The original
         # wrapper is never allowed to invoke its /tmp cleaner.
-        wrapper = shell_function(CLEANUP_WRAPPER, "swapz_clear_tmp_before_memory_check")
+        wrapper = (shell_function(CLEANUP_WRAPPER, "swapz_recover_abandoned_ram_resources")
+                   + shell_function(CLEANUP_WRAPPER, "swapz_clear_tmp_before_memory_check"))
         script = wrapper + '''
 id() { printf '0\n'; }
 timeout() { return 7; }
@@ -1564,8 +1565,23 @@ swapz_clear_tmp_before_memory_check
 '''
         result = self.run_shell(script)
         self.assertEqual(result.returncode, 1)
-        self.assertIn("BLOCKED: cannot safely remove verified completed", result.stderr)
+        self.assertIn("BLOCKED: abandoned RAM resource recovery remains unverified", result.stderr)
         self.assertNotIn(str(self.root), result.stderr)
+        # Resource recovery can succeed while the separate scratch cleaner
+        # refuses. Both errors remain visible without running either helper.
+        script = wrapper + '''
+id() { printf '0\\n'; }
+timeout() {
+    case "$*" in
+        *owned-ram-resources.py*) return 0 ;;
+        *) return 7 ;;
+    esac
+}
+swapz_clear_tmp_before_memory_check
+'''
+        result = self.run_shell(script)
+        self.assertEqual(result.returncode, 1)
+        self.assertIn("BLOCKED: cannot safely remove verified completed", result.stderr)
         preflight = PREFLIGHT.read_text(encoding="utf-8")
         self.assertIn("if swapz_clear_tmp_before_memory_check; then", preflight)
         self.assertIn("cleanup_status=$?", preflight)

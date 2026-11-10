@@ -191,6 +191,9 @@ run_privileged_bounded 240 tests/tools/deploy-nullblk.sh \
 printf '%s\n' 'START_LOADED_OWNED_NULLBLK_SMOKE'
 run_privileged_bounded 600 tests/tools/deploy-nullblk.sh --validated-source "$tested_source"
 printf '%s\n' 'PASS_LOADED_OWNED_NULLBLK_SMOKE'
+printf '%s\n' 'START_LOADED_OWNED_RAM_RECOVERY'
+run_privileged_bounded 150 tests/tools/qualify-owned-ram-recovery.sh \
+	--validated-source "$tested_source"
 printf '%s\n' 'START_LOADED_PRIMARY_NULLBLK_LIFECYCLE'
 # The qualifier can issue up to 144 independently bounded 90-second primary
 # lifecycle commands across normal start/stop, eighteen process-death phases,
