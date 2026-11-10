@@ -1118,7 +1118,12 @@ bounded diagnostic, not an assertion abort or a truncated comparison. Expected
 `durable=OBSERVED` reflects the validated READY state and manifest, whether the
 conflict is found during initial admission or the final recheck.
 Keep a negative control that removes final revalidation and demonstrates
-intercepted mutations. Evidence created **after** the last successful
+one intercepted module load, mapper creation, mapper-only `mkswap` and
+`swapon`. Match those actual counter fields; a removed raw-header-write
+counter must not make the negative control fail its own evidence check.
+The post-target selector negative control must remove exactly one executable
+guard, independently of the surrounding explanatory comment's wording.
+Evidence created **after** the last successful
 read-only snapshot, including a new mount, swap activation or now-unreadable
 PID inventory, is an explicit **UNPROVEN** exclusion interval: do not relabel
 it as a prevented mutation or as loaded kernel safety. Closing #94 requires

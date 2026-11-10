@@ -117,22 +117,18 @@ def restore_independent_selector_reread(function: str) -> str:
 def omit_post_target_selector_recheck(function: str) -> str:
     """Negative control: recreate the pre-fix target-inspection race window."""
     block = (
-        '\t/*\n'
-        '\t * Target revalidation performs fresh pathname/sysfs inspection after the\n'
-        '\t * earlier selector proof. Recheck the admitted selector identity once more\n'
-        '\t * so a replacement during that inspection cannot become the last live\n'
-        '\t * authorization state before block-zero mutation. This remains a snapshot,\n'
-        '\t * not an atomic exclusion mechanism.\n'
-        '\t */\n'
         '\tfailure_phase = "prewrite-protected-selector-identity";\n'
         '\tfailure_expected = "unchanged-admitted-selector-directory-and-file";\n'
         '\tif (swapz_primary_selector_admission_still_live(\n'
         '\t\t&selector_admission, &failure_observed) < 0)\n'
         '\t\tgoto out;\n')
-    if function.count(block) != 1:
+    next_phase = '\tfailure_phase = "prewrite-selector-descriptor-close";'
+    if function.count(block + next_phase) != 1:
         raise AssertionError("Expected one post-target selector identity recheck")
     return function.replace(
-        block, '(void)0; /* negative-control post-target selector omission */\n')
+        block + next_phase,
+        '(void)0; /* negative-control post-target selector omission */\n' +
+        next_phase)
 
 
 # The fixture never calls any privileged system operation. Production start
@@ -2451,7 +2447,7 @@ def main() -> int:
             return 1
         print(production.stdout, end="")
         mutant = compile_and_run(source, workdir, mutant=True)
-        expected_mutations = "header_write=0 mapper=1 mkswap=1 swapon=1"
+        expected_mutations = "module_load=1 mapper=1 mkswap=1 swapon=1"
         if mutant.returncode != 1 or expected_mutations not in mutant.stderr:
             print("FAIL: omission of final recheck did not expose all intercepted mutations",
                   file=sys.stderr)
