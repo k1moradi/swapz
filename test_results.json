@@ -249,46 +249,46 @@
 "gc_scan_scale": {
 "rows": [
 {
-"incremental_select_ns": 1042,
-"legacy_dead_probe_ns": 113002,
-"legacy_score_scan_ns": 943807,
+"incremental_select_ns": 667,
+"legacy_dead_probe_ns": 77584,
+"legacy_score_scan_ns": 621961,
 "logical_pages": 262144,
-"mapped_dead_probe_ns": 1041,
-"relocation_list_ns": 584,
-"relocation_scan_ns": 127543,
+"mapped_dead_probe_ns": 666,
+"relocation_list_ns": 500,
+"relocation_scan_ns": 89626,
 "segments": 1024,
 "victim_records": 256
 },
 {
-"incremental_select_ns": 4500,
-"legacy_dead_probe_ns": 452215,
-"legacy_score_scan_ns": 3886522,
+"incremental_select_ns": 3041,
+"legacy_dead_probe_ns": 389835,
+"legacy_score_scan_ns": 2569508,
 "logical_pages": 1048576,
-"mapped_dead_probe_ns": 2500,
-"relocation_list_ns": 1084,
-"relocation_scan_ns": 585009,
+"mapped_dead_probe_ns": 2208,
+"relocation_list_ns": 625,
+"relocation_scan_ns": 464585,
 "segments": 4096,
 "victim_records": 256
 },
 {
-"incremental_select_ns": 17250,
-"legacy_dead_probe_ns": 1836364,
-"legacy_score_scan_ns": 18708059,
+"incremental_select_ns": 11209,
+"legacy_dead_probe_ns": 1348296,
+"legacy_score_scan_ns": 12909958,
 "logical_pages": 4194304,
-"mapped_dead_probe_ns": 11625,
-"relocation_list_ns": 666,
-"relocation_scan_ns": 2316580,
+"mapped_dead_probe_ns": 8834,
+"relocation_list_ns": 875,
+"relocation_scan_ns": 1601339,
 "segments": 16384,
 "victim_records": 256
 },
 {
-"incremental_select_ns": 97585,
-"legacy_dead_probe_ns": 12028907,
-"legacy_score_scan_ns": 109337012,
+"incremental_select_ns": 71584,
+"legacy_dead_probe_ns": 9112072,
+"legacy_score_scan_ns": 98417454,
 "logical_pages": 27080192,
-"mapped_dead_probe_ns": 55376,
-"relocation_list_ns": 1042,
-"relocation_scan_ns": 14822661,
+"mapped_dead_probe_ns": 58292,
+"relocation_list_ns": 917,
+"relocation_scan_ns": 11047412,
 "segments": 105782,
 "victim_records": 256
 }
@@ -298,12 +298,12 @@
 "predictor": {
 "backend_benchmarks": [
 {
-"inverse_ns_per_page": 208,
+"inverse_ns_per_page": 162,
 "name": "scalar",
-"transform_ns_per_page": 185
+"transform_ns_per_page": 153
 },
 {
-"inverse_ns_per_page": 126,
+"inverse_ns_per_page": 87,
 "name": "neon",
 "transform_ns_per_page": 76
 }
@@ -315,9 +315,9 @@
 "candidate": "delta64",
 "early_abort_pages": 223,
 "eligible_pages": 512,
-"ns_per_page": 54,
+"ns_per_page": 35,
 "sample_pairs": 32,
-"scalar_ns_per_page": 54,
+"scalar_ns_per_page": 35,
 "stage1_min_score": 2,
 "stage1_pairs": 8
 },
@@ -332,7 +332,7 @@
 "planner_blocks": 383,
 "planner_extents": 267,
 "raw_pages": 192,
-"wall_ns_per_page": 2375
+"wall_ns_per_page": 2107
 },
 {
 "acceleration": 2,
@@ -340,7 +340,7 @@
 "planner_blocks": 383,
 "planner_extents": 267,
 "raw_pages": 192,
-"wall_ns_per_page": 2685
+"wall_ns_per_page": 1950
 },
 {
 "acceleration": 3,
@@ -348,7 +348,7 @@
 "planner_blocks": 383,
 "planner_extents": 266,
 "raw_pages": 192,
-"wall_ns_per_page": 2392
+"wall_ns_per_page": 1849
 },
 {
 "acceleration": 4,
@@ -356,7 +356,7 @@
 "planner_blocks": 384,
 "planner_extents": 273,
 "raw_pages": 192,
-"wall_ns_per_page": 2218
+"wall_ns_per_page": 1763
 }
 ],
 "negative_pages": 256,
@@ -373,9 +373,9 @@
 "extents_saved": 38,
 "general_threshold": 24,
 "lz4_rescues": 192,
-"modeled_wall_ns_per_page": 1879,
-"modeled_wall_ns_total": 1082624,
-"ns_per_saved_block": 19684,
+"modeled_wall_ns_per_page": 1480,
+"modeled_wall_ns_total": 852992,
+"ns_per_saved_block": 15508,
 "packing_adoptions": 0,
 "packing_eligible_pages": 51,
 "packing_threshold": 16,
@@ -440,14 +440,14 @@
 }
 ],
 "negative_useful": 0,
-"ns_per_saved_block": 20310,
+"ns_per_saved_block": 16010,
 "routed_baseline_blocks": 257,
 "routed_baseline_extents": 182,
 "routed_blocks_saved": 60,
 "routed_candidate_blocks": 197,
 "routed_candidate_extents": 124,
-"routed_cpu_ns_per_page": 2115,
-"routed_cpu_ns_total": 1218617,
+"routed_cpu_ns_per_page": 1667,
+"routed_cpu_ns_total": 960638,
 "routed_extents_saved": 58,
 "structured_calls": 279,
 "structured_eligible": 320,
@@ -495,14 +495,14 @@
 }
 ],
 "negative_useful": 0,
-"ns_per_saved_block": 20371,
+"ns_per_saved_block": 16056,
 "routed_baseline_blocks": 257,
 "routed_baseline_extents": 182,
 "routed_blocks_saved": 58,
 "routed_candidate_blocks": 199,
 "routed_candidate_extents": 132,
-"routed_cpu_ns_per_page": 2051,
-"routed_cpu_ns_total": 1181528,
+"routed_cpu_ns_per_page": 1616,
+"routed_cpu_ns_total": 931280,
 "routed_extents_saved": 50,
 "structured_calls": 272,
 "structured_eligible": 320,
@@ -550,14 +550,14 @@
 }
 ],
 "negative_useful": 0,
-"ns_per_saved_block": 19684,
+"ns_per_saved_block": 15508,
 "routed_baseline_blocks": 257,
 "routed_baseline_extents": 182,
 "routed_blocks_saved": 55,
 "routed_candidate_blocks": 202,
 "routed_candidate_extents": 144,
-"routed_cpu_ns_per_page": 1879,
-"routed_cpu_ns_total": 1082624,
+"routed_cpu_ns_per_page": 1480,
+"routed_cpu_ns_total": 852992,
 "routed_extents_saved": 38,
 "structured_calls": 256,
 "structured_eligible": 320,
@@ -605,14 +605,14 @@
 }
 ],
 "negative_useful": 0,
-"ns_per_saved_block": 19684,
+"ns_per_saved_block": 15508,
 "routed_baseline_blocks": 257,
 "routed_baseline_extents": 182,
 "routed_blocks_saved": 55,
 "routed_candidate_blocks": 202,
 "routed_candidate_extents": 144,
-"routed_cpu_ns_per_page": 1879,
-"routed_cpu_ns_total": 1082624,
+"routed_cpu_ns_per_page": 1480,
+"routed_cpu_ns_total": 852992,
 "routed_extents_saved": 38,
 "structured_calls": 256,
 "structured_eligible": 320,
@@ -660,14 +660,14 @@
 }
 ],
 "negative_useful": 0,
-"ns_per_saved_block": 19684,
+"ns_per_saved_block": 15508,
 "routed_baseline_blocks": 257,
 "routed_baseline_extents": 182,
 "routed_blocks_saved": 55,
 "routed_candidate_blocks": 202,
 "routed_candidate_extents": 144,
-"routed_cpu_ns_per_page": 1879,
-"routed_cpu_ns_total": 1082624,
+"routed_cpu_ns_per_page": 1480,
+"routed_cpu_ns_total": 852992,
 "routed_extents_saved": 38,
 "structured_calls": 256,
 "structured_eligible": 320,
@@ -684,15 +684,15 @@
 "candidate_extents": 93,
 "cliff_2024": 160,
 "inverse_backend": "neon",
-"inverse_ns_per_page": 126,
+"inverse_ns_per_page": 87,
 "name": "delta64",
 "planner_blocks_saved": 68,
 "planner_extents_saved": 89,
 "raw_rescued": 128,
 "saved_payload_bytes": 284772,
-"scalar_inverse_ns_per_page": 208,
-"scalar_transform_ns_per_page": 185,
-"second_lz4_ns_per_page": 4045,
+"scalar_inverse_ns_per_page": 162,
+"scalar_transform_ns_per_page": 153,
+"second_lz4_ns_per_page": 3186,
 "transform_backend": "neon",
 "transform_ns_per_page": 76
 }
@@ -709,75 +709,75 @@
 "qualification": "RAM_BACKED_NULL_BLK_ONLY",
 "qualification_tier": "ALGORITHM_PHYSICAL_PENDING",
 "qualified_artifacts": {
-"formatter_sha256": "18de67b6bd7bc0306767603b89df9059154f1fc15b24084197c9d5414e554587",
-"module_sha256": "01349f3009196696e2bf553e578f6aaf5eb4472d99c76bddc5809686d0bc41b0",
+"formatter_sha256": "f86dad5e5bb4ec068b573d2576f12d59896c255bd63eb3927b78080c66a6a7a7",
+"module_sha256": "d93f53a045c9a2faca8a5d75d4dea8c42802f00873bd27046004c1a1f308610e",
 "oracle_sha256": "429ff40c94125cb8e8309537c17a32db28bf9a176567b8f0587bd8f5ae5e6c5b",
 "status": "AVAILABLE"
 },
 "schema": "swapz-test-results-v1",
-"source_sha": "8e0eae3eca83b00a0d506b3885f7b3f2531dfa5b",
+"source_sha": "889153d558241468bf09186dd6917908a886376f",
 "stages": [
 {
-"elapsed_s": 3.141,
+"elapsed_s": 2.556,
 "exit_code": 0,
 "name": "Build module and helpers",
 "status": "PASS"
 },
 {
-"diagnostic": "Rootless child failed; child_exit=1 reason=nonzero_exit subtest=unavailable test=unavailable log=build/tests/rootless-failure.JPmH8yVG/diagnostic.log",
-"elapsed_s": 106.123,
+"diagnostic": "Rootless child failed; child_exit=1 reason=nonzero_exit subtest=unavailable test=unavailable log=build/tests/rootless-failure.dbNit7Il/diagnostic.log",
+"elapsed_s": 85.086,
 "exit_code": 1,
 "failed_phase": "physical-swap-probe-test.py",
 "name": "Native and rootless contracts",
 "primary_lifecycle_case_elapsed_ms": [
 {
 "class": "PackageCrashToPrimaryAdmissionTest",
-"elapsed_ms": 161,
+"elapsed_ms": 117,
 "method": "test_all_refusing_coordinator_fake_cannot_satisfy_contract"
 },
 {
 "class": "PackageCrashToPrimaryAdmissionTest",
-"elapsed_ms": 600,
+"elapsed_ms": 418,
 "method": "test_blocked_start_reports_explicit_package_recovery_phase"
 },
 {
 "class": "PackageCrashToPrimaryAdmissionTest",
-"elapsed_ms": 21,
+"elapsed_ms": 16,
 "method": "test_clean_and_empty_directory_admit_and_cleanup"
 },
 {
 "class": "PackageCrashToPrimaryAdmissionTest",
-"elapsed_ms": 1690,
+"elapsed_ms": 1186,
 "method": "test_committed_journal_then_verified_package_recovery_allows_reentry"
 },
 {
 "class": "PackageCrashToPrimaryAdmissionTest",
-"elapsed_ms": 19,
+"elapsed_ms": 13,
 "method": "test_crash_checkpoint_timeout_override_is_finite"
 },
 {
 "class": "PackageCrashToPrimaryAdmissionTest",
-"elapsed_ms": 39,
+"elapsed_ms": 29,
 "method": "test_directory_substitution_during_named_recheck_fails_closed"
 },
 {
 "class": "PackageCrashToPrimaryAdmissionTest",
-"elapsed_ms": 637,
+"elapsed_ms": 415,
 "method": "test_malformed_and_substituted_package_journals_fail_closed"
 },
 {
 "class": "PackageCrashToPrimaryAdmissionTest",
-"elapsed_ms": 5022,
+"elapsed_ms": 3360,
 "method": "test_real_sigkill_phases_block_both_commands_not_cleanup"
 },
 {
 "class": "PackageCrashToPrimaryAdmissionTest",
-"elapsed_ms": 56,
+"elapsed_ms": 36,
 "method": "test_sanitized_fixture_covers_clean_blocked_and_cleanup_paths"
 },
 {
 "class": "PackageCrashToPrimaryAdmissionTest",
-"elapsed_ms": 767,
+"elapsed_ms": 489,
 "method": "test_unsafe_coordinator_bypass_mutant_is_observably_rejected"
 },
 {
@@ -912,12 +912,12 @@
 },
 {
 "class": "PrimaryLifecycleSourceGuardTest",
-"elapsed_ms": 3145,
+"elapsed_ms": 2548,
 "method": "test_cross_namespace_mount_scan_revalidates_before_first_mutation"
 },
 {
 "class": "PrimaryLifecycleSourceGuardTest",
-"elapsed_ms": 63,
+"elapsed_ms": 49,
 "method": "test_durable_package_transactions_gate_prepare_and_start"
 },
 {
@@ -927,22 +927,22 @@
 },
 {
 "class": "PrimaryLifecycleSourceGuardTest",
-"elapsed_ms": 198,
+"elapsed_ms": 136,
 "method": "test_execution_gate_is_boot_scoped_pending_live_lifecycle_evidence"
 },
 {
 "class": "PrimaryLifecycleSourceGuardTest",
-"elapsed_ms": 16,
+"elapsed_ms": 13,
 "method": "test_native_swap_operations_are_transaction_ordered"
 },
 {
 "class": "PrimaryLifecycleSourceGuardTest",
-"elapsed_ms": 35,
+"elapsed_ms": 24,
 "method": "test_owned_nullblk_btrfs_root_matches_recovery_across_dev_numbers"
 },
 {
 "class": "PrimaryLifecycleSourceGuardTest",
-"elapsed_ms": 39,
+"elapsed_ms": 27,
 "method": "test_package_and_primary_share_global_mutation_lock_identity"
 },
 {
@@ -952,12 +952,12 @@
 },
 {
 "class": "PrimaryLifecycleSourceGuardTest",
-"elapsed_ms": 41,
+"elapsed_ms": 32,
 "method": "test_qualification_import_serializes_before_partition_state"
 },
 {
 "class": "PrimaryLifecycleSourceGuardTest",
-"elapsed_ms": 925,
+"elapsed_ms": 680,
 "method": "test_recovery_persists_fail_closed_interruption_order"
 },
 {
@@ -967,12 +967,12 @@
 },
 {
 "class": "PrimaryLifecycleSourceGuardTest",
-"elapsed_ms": 5,
+"elapsed_ms": 4,
 "method": "test_source_guard_ignores_comments_and_string_literals"
 },
 {
 "class": "PrimaryOwnerReleaseDurabilityTest",
-"elapsed_ms": 2,
+"elapsed_ms": 1,
 "method": "test_failed_owner_release_fsync_stays_blocked_across_fresh_recovery"
 },
 {
@@ -995,5 +995,5 @@
 "status": "FAIL"
 }
 ],
-"tested_commit_sha": "8e0eae3eca83b00a0d506b3885f7b3f2531dfa5b"
+"tested_commit_sha": "889153d558241468bf09186dd6917908a886376f"
 }
