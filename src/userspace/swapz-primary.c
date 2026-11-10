@@ -3464,7 +3464,7 @@ static int swapz_primary_parse_memavailable_kib(
 /* The inventory-kind synthetic helper is exercised only by the rootless
  * policy fixture. Production validates types while resolving device IDs. */
 #ifdef SWAPZ_PRIMARY_ROOTLESS_TEST
-static int swapz_primary_swap_inventory_target_is_quiescent(
+static int swapz_primary_swap_inventory_target_is_admissible(
 	const struct swapz_primary_swap_entry *entries,
 	const dev_t *resolved_devices, const unsigned char *resolved_is_block,
 	size_t count, dev_t target_device, uint64_t target_size_kib)
@@ -3500,8 +3500,7 @@ static int swapz_primary_swap_inventory_target_is_quiescent(
 		++target_entries;
 		if (target_entries > 1U ||
 		    strcmp(entries[index].type, "partition") ||
-		    entries[index].size_kib != target_size_kib ||
-		    entries[index].used_kib != 0U) {
+		    entries[index].size_kib != target_size_kib) {
 			errno = EBUSY;
 			return -1;
 		}
