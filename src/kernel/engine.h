@@ -376,7 +376,7 @@ int swapz_engine_coalesce_read_pair(
 				    swapz_u8 first1, swapz_u8 blocks1,
 				    swapz_u8 *scratch,
 				    swapz_u8 scratch_blocks);
-/* Targeted read: metadata 4KiB plus only the required payload 4KiB blocks. */
+/* Targeted READ: RAM descriptors locate only the required lower payload blocks. */
 int swapz_engine_read_page(struct swapz_engine *engine, swapz_u32 logical_page,
 			  swapz_u8 *payload, swapz_u16 payload_capacity,
 			  swapz_u16 *payload_length);

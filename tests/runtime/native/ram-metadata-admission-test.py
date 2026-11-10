@@ -26,6 +26,12 @@ def main() -> None:
     )
     require(declarations == ["0"],
             "Production kernel compressed extents must keep metadata off media")
+    engine_header = (ROOT / "src/kernel/engine.h").read_text(encoding="utf-8")
+    require(
+        "Targeted READ: RAM descriptors locate only the required lower "
+        "payload blocks." in engine_header and
+        "metadata 4KiB plus" not in engine_header,
+        "Targeted READ comments must not imply an on-media metadata block")
     engine = (ROOT / "src/kernel/engine.c").read_text(encoding="utf-8")
     append = engine.split("static int swapz_append_page(", 1)[1].split(
         "\nstatic int swapz_page_valid(", 1)[0]
