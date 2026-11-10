@@ -379,7 +379,8 @@ class PhysicalSwapProbeTests(unittest.TestCase):
                                return_value="/dev/mapper/owned"), \
              mock.patch.object(probe, "block_identity") as identify, \
              mock.patch.object(probe, "_run") as command:
-            with self.assertRaisesRegex(probe.ProbeError, "invalid recovery scope"):
+            with self.assertRaisesRegex(
+                    probe.ProbeError, "invalid runtime ownership scope"):
                 probe._prepare_owned_mapper_removal(
                     {"algorithm_real_swap": True, "development_only": False}, {})
         identify.assert_not_called()
@@ -1218,13 +1219,13 @@ class PhysicalSwapProbeTests(unittest.TestCase):
 
             with mock.patch.object(probe, "ALGORITHM_RUNTIME_BASE", base), \
                     mock.patch.object(probe.Path, "lstat",
-                                      side_effect=root_owned_lstat), \
+                                      new=root_owned_lstat), \
                     mock.patch.object(probe, "_run",
                                       return_value=filesystem("tmpfs")):
                 self.assertEqual(REAL_ALGORITHM_RUNTIME_BASE(), base)
             with mock.patch.object(probe, "ALGORITHM_RUNTIME_BASE", base), \
                     mock.patch.object(probe.Path, "lstat",
-                                      side_effect=root_owned_lstat), \
+                                      new=root_owned_lstat), \
                     mock.patch.object(probe, "_run",
                                       return_value=filesystem("ext4")):
                 with self.assertRaisesRegex(
@@ -2742,14 +2743,16 @@ class PhysicalSwapProbeTests(unittest.TestCase):
     def test_keep_swapz_active_requires_exact_verified_swap_ownership(self):
         # Rootless evidence only: no block device, mapper or module is touched.
         mapper = "/dev/mapper/swapz-demo-physical-test"
-        original_header = b"S" * probe.PAGE_BYTES
+        device_bytes = 8 * 1024 * 1024
+        original_header = build_swap_header(device_bytes)
         state = {"module_ownership": "MODULE_OWNED"}
         target = {
             "device": "/dev/synthetic", "header": original_header,
-            "major": 8, "minor": 4,
-            "size_bytes": 8 * 1024 * 1024,
+            "major": 8, "minor": 4, "size_bytes": device_bytes,
+            **probe._swapz_backing_geometry(original_header, device_bytes),
         }
-        active_mapper = {"priority": 32767, "size_kib": 1024}
+        active_mapper = {
+            "priority": 32767, "size_kib": target["swapz_linux_swap_kib"]}
 
         def verify(*, header=None, raw_swap=None, owned_mapper=None,
                    mapper_swap=None, module_owned=True, module_present=True):
@@ -2788,7 +2791,11 @@ class PhysicalSwapProbeTests(unittest.TestCase):
                 ("wrong mapper", {"owned_mapper": "/dev/mapper/foreign"},
                  "owned swapz mapper changed"),
                 ("wrong mapper priority",
-                 {"mapper_swap": {"priority": 1}}, "mapper priority changed"),
+                 {"mapper_swap": {"priority": 1}}, "size or priority changed"),
+                ("wrong mapper size",
+                 {"mapper_swap": {**active_mapper,
+                                  "size_kib": active_mapper["size_kib"] - 4}},
+                 "size or priority changed"),
                 ("unowned module", {"module_owned": False},
                  "dm_swapz module is unavailable"),
                 ("missing module", {"module_present": False},
@@ -3195,10 +3202,14 @@ class PhysicalSwapProbeTests(unittest.TestCase):
             # The post-map, pre-oracle identity check must remain testable
             # without relying on a swapoff-dependent call count. Inactive
             # development backing skips the swapoff identity check.
+            before_mapper_create = (
+                identity_failure_at == "before_mapper_create" and
+                state["stage"] == "MODULE_OWNED")
             before_first_oracle = (
                 identity_failure_at == "before_first_oracle" and
                 state["stage"] == "MAPPED" and oracle_invocations == 0)
-            if identity_failure_at == identity_verifications or before_first_oracle:
+            if (identity_failure_at == identity_verifications or
+                    before_mapper_create or before_first_oracle):
                 raise probe.ProbeError(
                     f"injected identity change at boundary {identity_verifications}")
 
@@ -3696,7 +3707,7 @@ class PhysicalSwapProbeTests(unittest.TestCase):
                                    if recovery_record_substitution == "state"
                                    else probe.RESULTS_NAME)
                     state["_test_substituted_record"] = json.loads(
-                        (Path(directory) / record_name).read_text())
+                        (state_directory / record_name).read_text())
         return events, state, target
 
     def test_raw_header_writer_is_permanently_disabled(self):
@@ -4732,9 +4743,8 @@ class PhysicalSwapProbeTests(unittest.TestCase):
     def test_identity_changes_at_late_boundaries_stop_before_next_action(self):
         cases = (
             (2, "swapoff"),
-            (4, "/reviewed/swapzctl"),
-            (5, "dmsetup-create"),
-            (6, "/reviewed/device-roundtrip"),
+            ("before_mapper_create", "dmsetup-create"),
+            ("before_first_oracle", "/reviewed/device-roundtrip"),
         )
         for boundary, forbidden in cases:
             with self.subTest(boundary=boundary):
@@ -4914,7 +4924,9 @@ class PhysicalSwapProbeTests(unittest.TestCase):
 
         for phase, run_id in (("prepare", "0" * 32), ("snapshot", "1" * 32)):
             with self.subTest(phase=phase):
-                state_dir = self.recovery_base / f"attempt-{phase}"
+                # New trials use the exact root-only same-boot run-id directory.
+                # A differently named recovery directory is legacy-only.
+                state_dir = self.recovery_base / f"swapz-physical-{run_id}"
                 state_dir.mkdir(mode=0o700)
                 review = {"reviewer": probe.VERBAL_REVIEWER,
                           "run_id": run_id, "approval_mode": "verbal"}
