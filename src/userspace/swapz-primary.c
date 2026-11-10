@@ -2513,33 +2513,17 @@ static int swapz_primary_original_swap_signature(
 }
 
 
-static uint32_t swapz_primary_read_u32_le(const unsigned char *bytes)
-{
-	return (uint32_t)bytes[0] |
-	       ((uint32_t)bytes[1] << 8) |
-	       ((uint32_t)bytes[2] << 16) |
-	       ((uint32_t)bytes[3] << 24);
-}
-
 int swapz_primary_linux_swap_header_valid(
 	const unsigned char header[SWAPZ_PRIMARY_BLOCK_BYTES],
 	uint64_t logical_pages)
 {
-	static const unsigned char magic[] = "SWAPSPACE2";
-	/* The swap UUID may be intentionally clear; PARTUUID binds the target. */
-	if (!header || logical_pages < 3U || logical_pages > UINT32_MAX ||
-	    swapz_primary_read_u32_le(
-		header + SWAPZ_PRIMARY_SWAP_VERSION_OFFSET) != 1U ||
-	    swapz_primary_read_u32_le(
-		header + SWAPZ_PRIMARY_SWAP_LAST_PAGE_OFFSET) !=
-		(uint32_t)(logical_pages - 1U) ||
-	    swapz_primary_read_u32_le(
-		header + SWAPZ_PRIMARY_SWAP_BAD_PAGES_OFFSET) != 0U ||
-	    memcmp(header + SWAPZ_PRIMARY_BLOCK_BYTES -
-		   SWAPZ_PRIMARY_SWAP_MAGIC_BYTES,
-		   magic, sizeof(magic) - 1U))
+	/* Keep mapper validation identical to physical-backing validation. The
+	 * mapper page count is already bounded to u32, so conversion to bytes
+	 * cannot overflow and the shared validator remains the single authority. */
+	if (logical_pages > UINT32_MAX)
 		return 0;
-	return 1;
+	return swapz_linux_swap_header_valid(
+		header, logical_pages * SWAPZ_PRIMARY_BLOCK_BYTES);
 }
 
 static int swapz_primary_exact_read(int fd, unsigned char *buffer,
