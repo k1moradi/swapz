@@ -523,19 +523,22 @@ merge independent assertion/failure boundaries or omit ASan/UBSan/TSan
 qualification for speed.
 The native/rootless stage records separate native Make and remaining-contract
 wall times as optional observational evidence, not qualification PASS gates.
-The official `make test` and `make test_full` terminals present all
-qualification results using `ID | Name | Verdict | Time` tables: rootless
-suites, loaded benchmark families, the five top-level stage summaries, and
-the optional development-only physical algorithm trial. Top-level stages
-appear together after the execution sequence, with explicit `NOT RUN` rows
-for stages skipped after a failure. The physical trial remains separately
+The official `make test` and `make test_full` terminals present one
+unified, globally numbered `ID | Suite | Name | Verdict | Time` progress
+table for rootless suites, loaded benchmark families, five top-level stages,
+and the optional development-only physical algorithm trial. Its header
+appears once; there are no separate rootless/loaded/stage progress tables.
+Top-level stages appear together after execution, with explicit `NOT RUN`
+rows for stages skipped after a failure. Detailed benchmark measurement
+tables and interpretations remain separate from this verdict table. The physical trial remains separately
 authorized, and its status cannot be interpreted as production physical
 acceptance. Original protected admission observations and failure-only
 diagnostics remain readable outside the table; they are not test verdicts.
 The internal ID36 pressure gate is shown as "Low-memory + heavy-CPU stress
 test" in the progress table; its internal ID, timing marker, evidence schema,
 and required qualification conditions remain unchanged.
-Rootless progress uses the same four columns. Every source-defined
+Rootless and loaded progress share the same five columns and continuous IDs.
+Every source-defined
 suite has a unique, short, descriptive display name rather than a repository
 path; the exact path stays in authenticated progress markers, private
 diagnostics and report evidence for debugging. Human-readable acronyms
@@ -544,7 +547,7 @@ each `RUNNING` row in place to `PASS` with carriage return, yielding one
 visible row per test. Redirected logs emit only one terminal row per suite,
 without control sequences. An unfinished suite gets a single `FAIL` row for
 nonzero exit or `INCOMPLETE` if its completion marker is missing after zero
-exit. Loaded qualification uses the same four-column table, displaying each
+exit. Loaded qualification uses the unified progress table, displaying each
 source-controlled phase or benchmark family once, with a short descriptive
 name instead of hundreds of internal START/PASS and per-pair markers. Live
 terminals rewrite the active RUNNING row; redirected logs only print completed
@@ -6006,7 +6009,12 @@ autodetection change.
 Publication failures classify only fixed, path-free authentication, remote
 policy, non-fast-forward and transport categories. A known noninteractive
 credential or remote-policy refusal stops useless retries; transient failures
-retain the bounded retry policy. Raw Git stderr and credential helper output
+retain the bounded retry policy. After an HTTPS authentication refusal only,
+the publisher may retry once using the existing GitHub CLI
+`gh auth git-credential` helper scoped to that invocation, without changing
+the owner's saved Git configuration or exposing any token. If this too fails,
+the original authentication cause takes precedence, the report stays local
+and the console names the owner-side noninteractive credential setup action. Raw Git stderr and credential helper output
 must never appear in the public report or console. A failed qualification, or a
 failed report push after successful qualification, automatically retains a
 private mode-0600 `build/tests/swapz-qualification-failure-*.json` snapshot
