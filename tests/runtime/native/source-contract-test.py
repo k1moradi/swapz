@@ -1858,6 +1858,8 @@ dmsetup() {
         self.assertIn("engine->read_payload_requests++", engine)
         self.assertIn("engine->read_payload_blocks += count", engine)
         engine_read = source_body("swapz_engine_read_page", engine)
+        self.assertIn("read_scratch = engine->read_scratch;", engine_read)
+        self.assertNotIn("read_scratch = read_scratch;", engine_read)
         self.assertLess(engine_read.index("error = engine->io.read_blocks("),
                         engine_read.index("engine->read_payload_requests++"))
         self.assertIn("read_meta_reqs=%u read_payload_reqs=%u", status)
