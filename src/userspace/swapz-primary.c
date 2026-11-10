@@ -3566,14 +3566,18 @@ static int swapz_primary_runtime_state_parent_open(void)
 		  O_RDONLY | O_DIRECTORY | O_NOFOLLOW | O_CLOEXEC);
 	if (fd < 0)
 		return -1;
-	if (fstat(fd, &opened) < 0 ||
-	    !S_ISDIR(opened.st_mode) || opened.st_dev != before.st_dev ||
-	    opened.st_ino != before.st_ino || opened.st_uid != 0 ||
-	    (opened.st_mode & (S_IWGRP | S_IWOTH))) {
-		int saved_errno = errno ? errno : EPERM;
+	if (fstat(fd, &opened) < 0) {
+		int saved_errno = errno;
 
 		close(fd);
 		errno = saved_errno;
+		return -1;
+	}
+	if (!S_ISDIR(opened.st_mode) || opened.st_dev != before.st_dev ||
+	    opened.st_ino != before.st_ino || opened.st_uid != 0 ||
+	    (opened.st_mode & (S_IWGRP | S_IWOTH))) {
+		close(fd);
+		errno = EPERM;
 		return -1;
 	}
 	return fd;
