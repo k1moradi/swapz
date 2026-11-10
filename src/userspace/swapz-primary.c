@@ -61,6 +61,7 @@ static void swapz_primary_selected_target_clear(void)
 #define SWAPZ_PRIMARY_PACKAGE_TRANSACTION_DIRECTORY \
 	"/var/lib/swapz-package-transactions"
 #define SWAPZ_PRIMARY_EXECUTION_RUNTIME_DIRECTORY "/run/swapz"
+#define SWAPZ_PRIMARY_EXECUTION_RUNTIME_PARENT "/run"
 #define SWAPZ_PRIMARY_EXECUTION_RECORD_NAME "primary-execution.env"
 #define SWAPZ_PRIMARY_BOOT_ID_LENGTH 36U
 #define SWAPZ_PRIMARY_EXECUTION_RECORD_BYTES 512U
@@ -3550,6 +3551,37 @@ static int swapz_primary_runtime_state_base_open(uid_t expected_owner)
 		SWAPZ_PRIMARY_RUNTIME_STATE_BASE, expected_owner);
 }
 
+#ifndef SWAPZ_PRIMARY_OWNED_NULLBLK_TEST
+static int swapz_primary_runtime_state_parent_open(void)
+{
+	struct stat before;
+	struct stat opened;
+	int fd;
+
+	if (lstat(SWAPZ_PRIMARY_EXECUTION_RUNTIME_PARENT, &before) < 0 ||
+	    !S_ISDIR(before.st_mode) || before.st_uid != 0 ||
+	    (before.st_mode & (S_IWGRP | S_IWOTH))) {
+		errno = EPERM;
+		return -1;
+	}
+	fd = open(SWAPZ_PRIMARY_EXECUTION_RUNTIME_PARENT,
+		  O_RDONLY | O_DIRECTORY | O_NOFOLLOW | O_CLOEXEC);
+	if (fd < 0)
+		return -1;
+	if (fstat(fd, &opened) < 0 ||
+	    !S_ISDIR(opened.st_mode) || opened.st_dev != before.st_dev ||
+	    opened.st_ino != before.st_ino || opened.st_uid != 0 ||
+	    (opened.st_mode & (S_IWGRP | S_IWOTH))) {
+		int saved_errno = errno ? errno : EPERM;
+
+		close(fd);
+		errno = saved_errno;
+		return -1;
+	}
+	return fd;
+}
+#endif
+
 static int swapz_primary_runtime_state_fs_magic(long type)
 {
 #ifdef SWAPZ_PRIMARY_OWNED_NULLBLK_TEST
@@ -5546,6 +5578,10 @@ static int swapz_primary_recovery_preflight(
 #endif
 	int recovery_fd;
 	int marker_result;
+#ifndef SWAPZ_PRIMARY_OWNED_NULLBLK_TEST
+	int runtime_state_missing = 0;
+	struct stat runtime_state_path;
+#endif
 
 	if (!directory_safe || !persistent_filesystem || !filesystem_major ||
 	    !filesystem_minor || !directly_not_target || !source_chain_checked ||
@@ -5567,8 +5603,20 @@ static int swapz_primary_recovery_preflight(
 		errno = ENODEV;
 		return -1;
 	}
+#ifndef SWAPZ_PRIMARY_OWNED_NULLBLK_TEST
+	if (lstat(SWAPZ_PRIMARY_RUNTIME_STATE_BASE, &runtime_state_path) < 0) {
+		if (errno != ENOENT)
+			return -1;
+		runtime_state_missing = 1;
+		recovery_fd = swapz_primary_runtime_state_parent_open();
+	} else {
+		recovery_fd = swapz_primary_recovery_base_open(
+			SWAPZ_PRIMARY_RUNTIME_STATE_BASE, 0);
+	}
+#else
 	recovery_fd = swapz_primary_recovery_base_open(
 		SWAPZ_PRIMARY_RUNTIME_STATE_BASE, 0);
+#endif
 	if (recovery_fd < 0)
 		return -1;
 	if (fstat(recovery_fd, &directory_info) < 0 ||
@@ -5607,17 +5655,25 @@ static int swapz_primary_recovery_preflight(
 	*directly_not_target = *persistent_filesystem;
 	*source_chain_checked = *persistent_filesystem;
 #endif
-	if (snprintf(marker_name, sizeof(marker_name), "partition-%s.active",
-		     SWAPZ_PRIMARY_PARTUUID) < 0 ||
-	    strlen(marker_name) >= sizeof(marker_name)) {
-		close(recovery_fd);
-		errno = EOVERFLOW;
-		return -1;
-	}
-	marker_result = fstatat(recovery_fd, marker_name, &marker_info,
-				AT_SYMLINK_NOFOLLOW);
-	if (marker_result < 0 && errno == ENOENT)
+#ifndef SWAPZ_PRIMARY_OWNED_NULLBLK_TEST
+	if (runtime_state_missing) {
+		/* No state directory means no ownership marker can exist yet. */
 		*active_marker_clear = 1;
+	} else
+#endif
+	{
+		if (snprintf(marker_name, sizeof(marker_name), "partition-%s.active",
+			     SWAPZ_PRIMARY_PARTUUID) < 0 ||
+		    strlen(marker_name) >= sizeof(marker_name)) {
+			close(recovery_fd);
+			errno = EOVERFLOW;
+			return -1;
+		}
+		marker_result = fstatat(recovery_fd, marker_name, &marker_info,
+					AT_SYMLINK_NOFOLLOW);
+		if (marker_result < 0 && errno == ENOENT)
+			*active_marker_clear = 1;
+	}
 	if (close(recovery_fd) < 0)
 		return -1;
 	return 0;
