@@ -5244,8 +5244,13 @@ class ReportContract(unittest.TestCase):
                 {"stages": []}), 2)
         for detail in expected:
             self.assertIn("        " + detail, console.getvalue())
+            self.assertIn(detail, result["stages"][-1]["diagnostic"])
         self.assertNotIn("PRIVATE_EXPRESSION", console.getvalue())
         self.assertNotIn("/PRIVATE/host", console.getvalue())
+        self.assertNotIn("PRIVATE_EXPRESSION",
+                         result["stages"][-1]["diagnostic"])
+        self.assertNotIn("/PRIVATE/host",
+                         result["stages"][-1]["diagnostic"])
 
         for malicious in (
             transcript.replace("binary=lower-write-aggregation",
