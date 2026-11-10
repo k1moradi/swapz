@@ -431,24 +431,31 @@ and qualification gate is authorized by Phase 1. Phase 2 must independently
 prove per-worker isolated outputs/first-error attribution, bounded resource
 admission, cancellation/reaping and teardown before allowing any overlap.
 
-Phase 2 implements a narrowly approved **opt-in two-worker rootless pilot**:
-`SWAPZ_ROOTLESS_JOBS=2 make test` (or `make test_full`). The unset/default
-`SWAPZ_ROOTLESS_JOBS=1` remains exactly sequential; other values fail
-closed. The native Make compilation jobserver remains independent of this
-setting. Only three adjacent, source-declared groups execute concurrently:
-source contracts with swapzctl provenance, production-readiness with direct
-rootless evidence, and the 18 read-only Bash syntax checks. All other
-rootless suites, all privileged lifecycle operations, and all loaded/RAM
-performance benchmarks remain serial; the test sequence, requirements and
-number of cases are unchanged.
+Phase 2 enables **automatic CPU-aware rootless scheduling by default**:
+plain `make test` (or `make test_full`) detects available CPU affinity and
+cgroup CPU quotas, using as many workers as there are admitted independent
+tasks and available CPUs, without requiring `SWAPZ_ROOTLESS_JOBS`. The optional
+`SWAPZ_ROOTLESS_JOBS=1` remains a serial diagnostic fallback, and
+`SWAPZ_ROOTLESS_JOBS=2` preserves the earlier pilot behavior; unknown
+overrides fail closed. A single-core host automatically uses serial execution.
+The native Make compilation jobserver remains independent of this setting.
+Only three adjacent, source-declared groups execute concurrently: source
+contracts with swapzctl provenance, production-readiness with direct rootless
+evidence, and the 18 read-only Bash syntax checks. No unsafe task becomes
+parallel just to fill idle cores. All other rootless suites, privileged
+lifecycle operations, and hardware-dependent loaded/RAM/physical performance
+benchmarks remain serial and resource-isolated; the test sequence, requirements
+and number of cases are unchanged.
 
-The private `tests/tools/rootless-parallel.py` coordinator validates the
+The private `tests/tools/rootless-parallel.py` coordinator selects a CPU-aware
+worker budget and validates the
 complete Phase 1 inventory and pairwise resources before executing only its
 hardcoded commands. Each worker has an independent process session and
 mode-0600 stdout/stderr/status files in a newly owned mode-0700 directory;
 worker stdin is disabled. Nested Python processes inherit a no-bytecode-write
 environment so two workers never mutate the shared Python cache. It dispatches
-at most two workers, stops *new* dispatch after a failure, lets started tests
+up to the CPU budget (and never more than the admitted group size), stops
+*new* dispatch after a failure, lets started tests
 finish their own cleanup, and
 kills/reaps a worker on its 900-second individual timeout. A worker that exits
 zero while a descendant remains in its process group is instead marked failed
@@ -461,11 +468,12 @@ per-worker elapsed times; it keeps only a bounded private failure diagnostic
 and cleans up completed scratch.
 An unexpected failure or signal also runs the owned scratch cleanup before
 the standard rootless reporter disables traps, without replacing the first
-failure status. The top-level console explicitly announces the opt-in rootless
-worker mode while continuing to identify loaded qualification as sequential. The pilot must not reinterpret elapsed-time
+failure status. The top-level console announces CPU-aware rootless scheduling while keeping
+loaded and hardware-dependent benchmark qualification sequential. The pilot must not reinterpret elapsed-time
 markers as PASS evidence, nor mix shell output from independent workers.
 `tests/runtime/native/test-report-test.py` tests exact group approval,
-two-worker overlap, private output permissions, stop-dispatch on failure and
+multi-worker overlap, single-core fallback, affinity/quota budgets,
+private output permissions, stop-dispatch on failure and
 bounded timeout/reaping using synthetic unprivileged processes.
 The test fixture asserts inherited bytecode suppression with a simple
 Python statement so its one-line synthetic worker remains valid source.

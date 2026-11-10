@@ -10476,11 +10476,16 @@ def main():
     print("swapz: full test and benchmark qualification"
           if tier == "full" else
           "swapz: algorithm RAM qualification; physical admission pending")
-    if os.environ.get("SWAPZ_ROOTLESS_JOBS") == "2":
+    rootless_override = os.environ.get("SWAPZ_ROOTLESS_JOBS", "auto")
+    if rootless_override == "1":
+        print(f"  Rootless serial diagnostic mode; "
+              f"loaded qualification stays sequential; {parallelism}")
+    elif rootless_override == "2":
         print(f"  Audited rootless groups use 2 workers; "
               f"loaded qualification stays sequential; {parallelism}")
     else:
-        print(f"  Tests are sequential; {parallelism}")
+        print(f"  Audited rootless groups automatically use available CPUs; "
+              f"hardware benchmarks stay sequential; {parallelism}")
     stages = [
         ("Build module and helpers", [*make_cmd, f"KDIR={args.kdir}"]),
         ("Native and rootless contracts",

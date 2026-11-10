@@ -159,7 +159,7 @@ class RootlessParallelPilotContract(unittest.TestCase):
             self.assertEqual(len(tasks), expected_count)
         with self.assertRaisesRegex(ValueError, "unreviewed"):
             parallel_runner.validated_group("unknown", source)
-        self.assertIn("case ${SWAPZ_ROOTLESS_JOBS:-1} in", source)
+        self.assertIn("case ${SWAPZ_ROOTLESS_JOBS:-auto} in", source)
         self.assertIn("rootless_parallel_collect", source)
         self.assertIn('rootless_parallel_run_group initial', source)
         self.assertIn('rootless_parallel_run_group readiness', source)
@@ -168,10 +168,67 @@ class RootlessParallelPilotContract(unittest.TestCase):
         self.assertIn('rootless_parallel_cleanup || :', source)
         reporter = (ROOT / "tests/tools/run-tests.py").read_text(
             encoding="utf-8")
-        self.assertIn('Audited rootless groups use 2 workers', reporter)
+        self.assertIn('Audited rootless groups automatically use available CPUs', reporter)
         self.assertIn('loaded qualification stays sequential', reporter)
         self.assertIn('python3 -B tests/runtime/native/source-contract-test.py -v',
                       source)
+
+    def test_automatic_cpu_budget_observes_affinity_quota_and_single_core(self):
+        with mock.patch.object(parallel_runner.os, "sched_getaffinity",
+                               return_value=set(range(8)), create=True):
+            with mock.patch.object(parallel_runner, "_cpu_quota_limit",
+                                   return_value=3):
+                self.assertEqual(parallel_runner.automatic_worker_count(), 3)
+            with mock.patch.object(parallel_runner, "_cpu_quota_limit",
+                                   return_value=1):
+                self.assertEqual(parallel_runner.automatic_worker_count(), 1)
+            with mock.patch.object(parallel_runner, "_cpu_quota_limit",
+                                   return_value=None):
+                self.assertEqual(parallel_runner.automatic_worker_count(), 8)
+        with mock.patch.object(parallel_runner.os, "sched_getaffinity",
+                               side_effect=OSError, create=True):
+            with mock.patch.object(parallel_runner.os, "cpu_count",
+                                   return_value=4):
+                with mock.patch.object(parallel_runner, "_cpu_quota_limit",
+                                       return_value=None):
+                    self.assertEqual(parallel_runner.automatic_worker_count(), 4)
+
+    def test_four_independent_workers_can_overlap_with_private_outputs(self):
+        with tempfile.TemporaryDirectory(prefix="swapz-auto-parallel-") as name:
+            directory = Path(name)
+            source = (
+                "import pathlib,sys,time; "
+                "root=pathlib.Path(sys.argv[1]); "
+                "(root/('ready-'+sys.argv[2])).write_text('ready'); "
+                "deadline=time.monotonic()+5; "
+                "exec('while len(list(root.glob(\"ready-*\"))) < 4 and "
+                "time.monotonic()<deadline: time.sleep(0.01)'); "
+                "sys.exit(0 if len(list(root.glob(\"ready-*\")))==4 else 36)"
+            )
+            tasks = tuple(
+                (f"isolated-{index}", (sys.executable, "-B", "-c", source,
+                                       str(directory), str(index)))
+                for index in range(4))
+            self.assertEqual(parallel_runner.execute_group(
+                directory, tasks, jobs=4, timeout_seconds=7,
+                poll_seconds=0.01), 0)
+            for index in range(4):
+                self.assertEqual((directory / f"worker-{index}.result")
+                                 .read_text().split()[0], "0")
+                for suffix in ("stdout", "stderr", "result"):
+                    self.assertEqual(
+                        (directory / f"worker-{index}.{suffix}").stat().st_mode
+                        & 0o777, 0o600)
+
+    def test_single_worker_fallback_keeps_original_test_sequence(self):
+        with tempfile.TemporaryDirectory(prefix="swapz-serial-fallback-") as name:
+            directory = Path(name)
+            tasks = (
+                ("first", (sys.executable, "-B", "-c", "pass")),
+                ("second", (sys.executable, "-B", "-c", "pass")),
+            )
+            self.assertEqual(parallel_runner.execute_group(
+                directory, tasks, jobs=1, timeout_seconds=5), 0)
 
     def test_two_workers_execute_simultaneously_with_private_outputs(self):
         with tempfile.TemporaryDirectory(prefix="swapz-parallel-pilot-") as name:
@@ -252,7 +309,9 @@ class RootlessParallelPilotContract(unittest.TestCase):
             self.assertEqual(
                 (directory / "worker-1.result").read_text().split()[0], "0")
             with self.assertRaisesRegex(ValueError, "invalid bounded"):
-                parallel_runner.execute_group(directory, tasks, jobs=3)
+                parallel_runner.execute_group(directory, tasks, jobs=0)
+            with self.assertRaisesRegex(ValueError, "invalid bounded"):
+                parallel_runner.execute_group(directory, tasks, jobs=19)
 
 
     def test_zero_exit_with_live_descendant_fails_closed(self):

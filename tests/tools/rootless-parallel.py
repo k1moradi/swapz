@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Private bounded executor for specifically reviewed, adjacent rootless phases.
+"""Private CPU-aware executor for reviewed, independent rootless phases.
 
 The parent Bash harness remains the sole progress/verdict publisher. Workers
 own separate process groups and private regular output files; no worker emits
@@ -49,6 +49,44 @@ GROUPS = {
 
 MAX_WORKER_SECONDS = 900
 POLL_INTERVAL_SECONDS = 0.02
+
+
+def _cpu_quota_limit():
+    """Read cgroup quota without mutating hardware or global test state."""
+    try:
+        cpu_max = Path("/sys/fs/cgroup/cpu.max").read_text(
+            encoding="ascii").split()
+    except (OSError, UnicodeError):
+        cpu_max = ()
+    if len(cpu_max) == 2 and cpu_max[0] != "max":
+        try:
+            quota, period = map(int, cpu_max)
+            if quota > 0 and period > 0:
+                return max(1, (quota + period - 1) // period)
+        except ValueError:
+            pass
+    try:
+        quota = int(Path("/sys/fs/cgroup/cpu/cpu.cfs_quota_us").read_text(
+            encoding="ascii").strip())
+        period = int(Path("/sys/fs/cgroup/cpu/cpu.cfs_period_us").read_text(
+            encoding="ascii").strip())
+        if quota > 0 and period > 0:
+            return max(1, (quota + period - 1) // period)
+    except (OSError, UnicodeError, ValueError):
+        pass
+    return None
+
+
+def automatic_worker_count():
+    """Fill available CPUs without running unreviewed or hardware-dependent jobs."""
+    try:
+        available = len(os.sched_getaffinity(0))
+    except (AttributeError, OSError):
+        available = os.cpu_count() or 1
+    quota_limit = _cpu_quota_limit()
+    if quota_limit is not None:
+        available = min(available, quota_limit)
+    return min(max(1, available), max(len(tasks) for tasks in GROUPS.values()))
 
 
 def validated_group(group_name, harness_source):
@@ -117,7 +155,8 @@ def execute_group(directory, tasks, *, jobs, timeout_seconds=MAX_WORKER_SECONDS,
     active workers get their normal cleanup window unless their bound expires.
     Duration records describe *per-worker elapsed* seconds, not the group wall.
     """
-    if jobs != 2 or timeout_seconds <= 0 or poll_seconds <= 0:
+    if (not 1 <= jobs <= max(len(group) for group in GROUPS.values()) or
+            timeout_seconds <= 0 or poll_seconds <= 0):
         raise ValueError("invalid bounded rootless worker configuration")
     directory = Path(directory)
     if directory.is_symlink() or not directory.is_dir():
@@ -206,11 +245,14 @@ def _handle_interruption(number, _frame):
 
 
 def main():
+    if sys.argv[1:] == ["--available-jobs"]:
+        print(automatic_worker_count())
+        return 0
     signal.signal(signal.SIGINT, _handle_interruption)
     signal.signal(signal.SIGTERM, _handle_interruption)
     parser = argparse.ArgumentParser()
     parser.add_argument("--group", choices=tuple(GROUPS), required=True)
-    parser.add_argument("--jobs", choices=(2,), type=int, required=True)
+    parser.add_argument("--jobs", type=int, required=True)
     parser.add_argument("--output-directory", type=Path, required=True)
     args = parser.parse_args()
     try:

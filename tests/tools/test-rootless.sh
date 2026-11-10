@@ -785,12 +785,21 @@ trap 'rootless_unexpected_error "$?" "$LINENO"' ERR
 trap 'rootless_exit_fallback "$?"' EXIT
 trap 'report_rootless_failure 143 unavailable received_TERM' TERM
 trap 'report_rootless_failure 130 unavailable received_INT' INT
-# Only 1 (unchanged) or 2 (opt-in) workers are supported in this pilot.
-# The global build's -j setting remains a separate GNU Make jobserver policy.
-case ${SWAPZ_ROOTLESS_JOBS:-1} in
-  1|2) rootless_parallel_jobs=${SWAPZ_ROOTLESS_JOBS:-1} ;;
-  *) printf '%s\n' 'BLOCKED: rootless worker count must be 1 or 2' >&2; exit 2 ;;
+# Automatically use host CPUs only for resource-audited rootless groups.
+# Compilation and hardware-dependent benchmarks retain their own policies.
+# Explicit 1 is a serial diagnostic fallback; 2 keeps pilot compatibility.
+case ${SWAPZ_ROOTLESS_JOBS:-auto} in
+  auto)
+    rootless_parallel_jobs=$(
+      python3 -B tests/tools/rootless-parallel.py --available-jobs
+    ) || { printf '%s\n' 'BLOCKED: automatic rootless CPU detection failed' >&2; exit 2; }
+    ;;
+  1|2) rootless_parallel_jobs=${SWAPZ_ROOTLESS_JOBS} ;;
+  *) printf '%s\n' 'BLOCKED: unsupported rootless worker override' >&2; exit 2 ;;
 esac
+[[ $rootless_parallel_jobs =~ ^[1-9][0-9]*$ ]] &&
+  (( rootless_parallel_jobs <= 18 )) ||
+  { printf '%s\n' 'BLOCKED: invalid automatic rootless worker count' >&2; exit 2; }
 export PYTHONPYCACHEPREFIX="$ROOT/build/python-cache"
 mkdir -p build/python-cache
 # The inherited GNU Make jobserver may run native evidence-producing targets
@@ -835,7 +844,7 @@ rootless_native_make_elapsed_seconds=$((SECONDS - rootless_phase_started_seconds
 rootless_contracts_started_seconds=$SECONDS
 rootless_phase='tests/runtime/native/source-contract-test.py'
 rootless_begin_phase
-if (( rootless_parallel_jobs == 2 )); then
+if (( rootless_parallel_jobs > 1 )); then
   rootless_parallel_run_group initial
   rootless_parallel_collect 0
 else
@@ -852,7 +861,7 @@ else
 fi
 rootless_phase='tests/runtime/native/userspace/swapzctl-active-swap-provenance-test.py'
 rootless_begin_phase
-if (( rootless_parallel_jobs == 2 )); then
+if (( rootless_parallel_jobs > 1 )); then
   rootless_parallel_collect 1
 else
   python3 -B tests/runtime/native/userspace/swapzctl-active-swap-provenance-test.py -v
@@ -930,7 +939,7 @@ rootless_begin_phase
 python3 -B tests/runtime/native/test-report-test.py -v
 rootless_phase='tests/runtime/native/production-readiness-test.py'
 rootless_begin_phase
-if (( rootless_parallel_jobs == 2 )); then
+if (( rootless_parallel_jobs > 1 )); then
   rootless_parallel_run_group readiness
   rootless_parallel_collect 0
 else
@@ -938,7 +947,7 @@ else
 fi
 rootless_phase='tests/runtime/native/rootless-direct-evidence-test.py'
 rootless_begin_phase
-if (( rootless_parallel_jobs == 2 )); then
+if (( rootless_parallel_jobs > 1 )); then
   rootless_parallel_collect 1
 else
   python3 -B tests/runtime/native/rootless-direct-evidence-test.py -v
@@ -1052,7 +1061,7 @@ for script in tests/tools/test-rootless.sh tests/tools/test-loaded.sh \
   tests/runtime/native/swap-inventory-test.sh; do
   rootless_phase="bash syntax ${script##*/}"
   rootless_begin_phase
-  if (( rootless_parallel_jobs == 2 )); then
+  if (( rootless_parallel_jobs > 1 )); then
     if (( rootless_parallel_syntax_index == 0 )); then
       rootless_parallel_run_group syntax
     fi
