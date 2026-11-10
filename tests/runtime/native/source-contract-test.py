@@ -215,6 +215,10 @@ class SwapzProductionSourceQualification(unittest.TestCase):
         self.assertIn("SWAPZ_PRIMARY_SWAPOFF_MARGIN_KIB", headroom)
         self.assertIn("SWAPZ_PRIMARY_SWAPOFF_MIN_AVAILABLE_KIB", headroom)
         self.assertIn("errno = ENOMEM", headroom)
+        self.assertIn("if (!used_kib)\n\t\treturn 0;", headroom)
+        self.assertLess(
+            headroom.index("if (!used_kib)"),
+            headroom.index("swapz_primary_read_memavailable_kib("))
 
     def test_late_race_raw_swap_transition_seam_is_single_and_ordered(self):
         fixture = (
