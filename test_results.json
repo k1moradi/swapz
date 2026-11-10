@@ -208,21 +208,31 @@
 "qualification": "RAM_BACKED_NULL_BLK_ONLY",
 "qualification_tier": "ALGORITHM_PHYSICAL_PENDING",
 "qualified_artifacts": {
-"reason": "build stage did not pass",
-"status": "UNAVAILABLE"
+"formatter_sha256": "ec38259725a5ec8831b2a8f97b3be7a9fbbc69702c85131889c2416acc1c8ab1",
+"module_sha256": "8dc76d33af3d7a88e62b9a40109168fbe56641e30387968e3d5fac0e74d1444f",
+"oracle_sha256": "871d809976361bcd2d30b91bd4f661da8c712c16e4f5fa584696140261b57f26",
+"status": "AVAILABLE"
 },
 "schema": "swapz-test-results-v1",
-"source_sha": "a463223fcb55eb7c17f38c36ee0cd782473ce5a0",
+"source_sha": "7cb2240411cb3183876a1960dbf53819f9689138",
 "stages": [
 {
-"diagnostic": "Native build error: ?swapz_primary_physical_blocks? defined but not used [-Werror=unused-function]",
-"elapsed_s": 14.019,
-"exit_code": 2,
-"failed_phase": "Build module and helpers",
+"elapsed_s": 13.155,
+"exit_code": 0,
 "name": "Build module and helpers",
-"signals": [],
+"status": "PASS"
+},
+{
+"diagnostic": "Rootless child failed; child_exit=2 reason=nonzero_exit subtest=unavailable test=unavailable log=build/tests/rootless-failure.sdwqEvzp/diagnostic.log",
+"elapsed_s": 8.661,
+"exit_code": 2,
+"failed_phase": "Makefile native and metadata",
+"name": "Native and rootless contracts",
+"signals": [
+"FAIL"
+],
 "status": "FAIL"
 }
 ],
-"tested_commit_sha": "a463223fcb55eb7c17f38c36ee0cd782473ce5a0"
+"tested_commit_sha": "7cb2240411cb3183876a1960dbf53819f9689138"
 }
