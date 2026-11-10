@@ -7,16 +7,15 @@
 ## Post-PASS keep-active same-boot ownership
 
 After the real-swap oracle passes, the interactive development trial must ask
-whether to keep swapz active or return to ordinary swap. A keep request may
-succeed only when the test mapper's logical capacity is at least the original
-partition capacity, then after revalidating the unchanged SWAPSPACE2 header,
-inactive raw partition, exact mapper name/UUID/table/lower device, active
-mapper swap priority, and loaded owned module. The current bounded physical
-test mapper is only 16 MiB, while eligible physical target partitions are
-at least 64 MiB. Until a separately qualified full-capacity mapper exists,
-the keep-active question must not be offered: print a clear unavailability
-reason and restore ordinary swap on successful cleanup. The helper then records `KEPT_ACTIVE` only
-in root-owned `/run` state and retains the exact active partition marker.
+whether to keep swapz active or return to ordinary swap. The **oracle workload**
+remains deliberately bounded, but the mapper itself must use the full logical
+capacity admitted by the unchanged SWAPSPACE2 header, clean 1MiB backing
+segments and the production GC/COW reserve formula. Never use a fixed small test
+mapper as the post-PASS service device. Before honoring a keep request,
+revalidate the unchanged SWAPSPACE2 header, inactive raw partition, exact mapper
+name/UUID/table/lower device, mapper Linux-swap size/priority, and loaded owned
+module. The helper records `KEPT_ACTIVE` only in root-owned `/run` state and
+retains the exact active partition marker.
 
 A later cleanup process may inherit module ownership only while that exact
 verified mapper still exists: the live Device Mapper target pins the
