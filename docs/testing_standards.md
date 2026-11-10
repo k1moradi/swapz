@@ -7,16 +7,15 @@
 ## Post-PASS keep-active same-boot ownership
 
 After the real-swap oracle passes, the interactive development trial must ask
-whether to keep swapz active or return to ordinary swap. A keep request may
-succeed only when the test mapper's logical capacity is at least the original
-partition capacity, then after revalidating the unchanged SWAPSPACE2 header,
-inactive raw partition, exact mapper name/UUID/table/lower device, active
-mapper swap priority, and loaded owned module. The current bounded physical
-test mapper is only 16 MiB, while eligible physical target partitions are
-at least 64 MiB. Until a separately qualified full-capacity mapper exists,
-the keep-active question must not be offered: print a clear unavailability
-reason and restore ordinary swap on successful cleanup. The helper then records `KEPT_ACTIVE` only
-in root-owned `/run` state and retains the exact active partition marker.
+whether to keep swapz active or return to ordinary swap. The **oracle workload**
+remains deliberately bounded, but the mapper itself must use the full logical
+capacity admitted by the unchanged SWAPSPACE2 header, clean 1MiB backing
+segments and the production GC/COW reserve formula. Never use a fixed small test
+mapper as the post-PASS service device. Before honoring a keep request,
+revalidate the unchanged SWAPSPACE2 header, inactive raw partition, exact mapper
+name/UUID/table/lower device, mapper Linux-swap size/priority, and loaded owned
+module. The helper records `KEPT_ACTIVE` only in root-owned `/run` state and
+retains the exact active partition marker.
 
 A later cleanup process may inherit module ownership only while that exact
 verified mapper still exists: the live Device Mapper target pins the
@@ -1013,8 +1012,9 @@ or swapon operation, its diagnostics must report those mutation hooks as
 boundary, selected/parent/sibling case, observed errno, and remaining
 reader-only proof limitation.
 
-Check the production same-parent and independent recovery-parent relationship
-gates for changed, identical, and unresolved identities on either side. The
+Check production target/root-parent topology gates for changed, identical and
+unresolved identities. Runtime ownership lives on tmpfs and therefore has no
+recovery-device ancestry or independent recovery-parent gate. The
 reader supplied an out-of-date parent argument may return a clean snapshot:
 this is a positive *reader-only* negative control, not physical admission;
 callers must independently re-resolve ancestry, compare against the original,
@@ -1531,21 +1531,22 @@ target write. Missing, malformed, stale or ambiguous authorization remains BLOCK
 never emit raw host, serial/WWN or record fields in refusal diagnostics. The
 read-only plan may show only the non-secret SHA-256 scope fingerprint needed
 for an administrator to provision the exact root-owned record; it does not
-grant authority and must remain BLOCKED when recovery separation fails. This
-narrowly scoped admission exception does not alter any frozen
-production-acceptance manifest or qualify the target. The recovery store must
-still be persistent and on a different physical parent:
-`recovery_same_physical_disk_as_target=false` remains absolute. No unresolved
+grant authority. This narrowly scoped admission exception does not alter any
+frozen production-acceptance manifest or qualify the target. Runtime ownership
+must be root-owned volatile state under `/run/swapz`; persistent qualification
+evidence is not swap recovery storage and its physical parent is not an
+admission fact. No unresolved
 primary transaction, mapper, module, or raw swap alias resolving to either the
 selected partition or its physical parent disk; any unresolvable active
 block-swap identity is BLOCKED; at least 1 GiB `MemAvailable`; readable kernel
 diagnostics; and working cgroup-v2 memory, swap, PSI, OOM, and zswap controls.
-A missing storage-separation fact is BLOCKED, not equivalent to false.
 
 Rootless shared-root authorization controls must reject absent or malformed
 records; wrong host, root partition, target PARTUUID/partition number/device
 number/geometry, parent identity or partition-table layout; replaced devices;
-overlapping or out-of-parent partitions; and target/recovery-parent equality.
+and overlapping or out-of-parent partitions. They must separately prove that
+runtime ownership is confined to the expected root-owned volatile state
+location rather than inventing a recovery-device parent relationship.
 A production scope-layout regression must also model ordinary sysfs parent
 entries such as regular uevent attributes and symlinks: classify each entry
 without following links before probing its partition attribute, skip only

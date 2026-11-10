@@ -107,10 +107,11 @@ The shared-root parent gate remains closed by default and can pass only with
 the exact root-owned host-scope record and fresh descriptor-bound topology
 checks described in [AGENT_CONTEXT.md](AGENT_CONTEXT.md). This record is an
 admission exception only: it does not change frozen production acceptance or
-qualify/activate swapz. Target/recovery-parent separation stays absolute. The
-currently observed recovery directory is on the same parent as this `/dev/sda4`
-target, so target mutation remains blocked until independent persistent
-recovery storage is available. The record and rootless policy tests must land
+qualify/activate swapz. Runtime lifecycle ownership is volatile state under
+`/run/swapz` and has no physical backing parent, so no recovery-parent
+separation gate exists. Persistent qualification/build evidence is independent
+of runtime ownership and must never become a prerequisite for protecting or
+restoring the raw swap header. The record and rootless policy tests must land
 before any physical admission work; they do not authorize a live swap trial.
 
 The primary manager reads one protected PARTUUID selector from

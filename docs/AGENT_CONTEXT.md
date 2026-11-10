@@ -88,8 +88,9 @@ provenance, and rejects active/configured raw-swap aliases by resolved block
 identity, including unresolved block-device entries and second mapper
 activators. The verifier never enables, removes, or deactivates swap.
 Arming requires a stable removable-reader serial or WWN and a persistent
-report filesystem shared with the manager's qualified recovery storage,
-physically separate from the SD card. On the next boot, the verifier checks
+qualification-evidence filesystem. That evidence store is not lifecycle
+ownership or swap recovery metadata and does not need a physical-parent
+separation relationship with the swap partition. On the next boot, the verifier checks
 armed identity again, exact run-bound mapper UUID, ACTIVE transaction state and
 matching durable owner markers, full DM table/geometry, the primary mapper's
 `/proc/swaps` entry at priority -1 (unrelated host swapfile entries are
