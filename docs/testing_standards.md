@@ -45,6 +45,11 @@ geometry rejection or infer physical qualification from this native test.
 
 ## New P0 ordinary swap and RAM-metadata acceptance gate
 
+Native compressed READ tests must prove that an undersized output buffer
+returns -ENOSPC before lower I/O, without modifying caller data, even when
+lower READ injection would fail. An adequately sized retry must still read
+and CRC-validate the authoritative RAM-mapped payload.
+
 For a fully completed batched lower WRITE, replay-failure fault injection must
 modify a *RAM-described compressed payload byte* in the unpublished staging
 image after lower completion, not extent byte zero (now deterministic padding).

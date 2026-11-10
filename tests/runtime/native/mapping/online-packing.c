@@ -1331,6 +1331,18 @@ static int test_mapping_length_mismatch_rejects_without_publishing(void)
 	/* Restore the accurate authoritative length. The physical payload
 	 * was never modified; reading it must still succeed byte-for-byte. */
 	maps[6].payload_length = original;
+	/* Reject too-small output using RAM metadata without a lower READ,
+	 * even when that READ would fail; do not touch caller-owned data. */
+	disk.read_blocks = 0;
+	disk.fail_reads = 1;
+	memset(output, 0xa5, sizeof(output));
+	length = 91;
+	CHECK(swapz_engine_read_page(&engine, 6, output,
+				   original - 1U, &length) == -ENOSPC);
+	CHECK(length == 0 && disk.read_blocks == 0);
+	CHECK(output[0] == 0xa5 && output[sizeof(output) - 1U] == 0xa5);
+	CHECK(engine.read_validated_payload_crc32c == 0);
+	disk.fail_reads = 0;
 	CHECK(swapz_engine_read_page(&engine, 6, output,
 				   sizeof(output), &length) == 0);
 	CHECK(length == original && !memcmp(output, originals[6], length));
