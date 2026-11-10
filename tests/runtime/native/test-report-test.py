@@ -3827,13 +3827,17 @@ class ReportContract(unittest.TestCase):
             f"round={failing_index + 1} seq: gap=29",
             "\n".join(rounds))
         self.assertTrue(all(len(line) <= 96 for line in rounds))
-        self.assertFalse(runner.read_coalesce_failure_rounds([{
+        invalid = runner.read_coalesce_failure_rounds([{
             "read_coalesce": 1, "swapz": {"passes": {
                 "sequential": {"kernel_read_path": {
                     "parallel_read_pairs": "/private/SECRET"}},
                 "seeded_random": {"kernel_read_path": {}},
             }},
-        }])[0].endswith("SECRET"))
+        }])
+        self.assertEqual(invalid, [
+            "        round=1 seq: counters=unavailable",
+            "        round=1 rand: counters=unavailable",
+        ])
 
     def test_coalesce_failure_prints_all_measured_rounds_not_just_first(self):
         lines = synthetic_log().splitlines()

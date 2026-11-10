@@ -2690,8 +2690,10 @@ span; it does not identify whether placement or cache residency caused that
 geometry. Keep zero-extra-block and every-round execution gates strict:
 skipped candidates or successes from other rounds never become a PASS.
 Rootless regressions exercise the official failed-stage console, verify its
-first-cause output and guard private data. The owner must not need separate
-JSON extraction commands to see the failed rounds.
+first-cause output and guard private data. Malformed or non-integer counters are printed
+as `counters=unavailable`, never interpolated from raw child fields.
+The owner must not need separate JSON extraction commands to see the
+failed rounds.
 
 ### Native/rootless fail-only subprocess attribution
 
