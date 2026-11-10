@@ -5234,14 +5234,14 @@ class ReportContract(unittest.TestCase):
         self.assertEqual(
             runner.first_native_lower_io_failure_details(transcript), expected)
         console = io.StringIO()
+        result = {"stages": []}
         with patch.object(runner.subprocess, "run",
                           return_value=SimpleNamespace(
                               stdout=transcript, returncode=2)), \
                 patch.object(runner, "retain_direct_rootless_first_failure"), \
                 contextlib.redirect_stdout(console):
             self.assertEqual(runner.run_stage(
-                "Native and rootless contracts", ["synthetic"],
-                {"stages": []}), 2)
+                "Native and rootless contracts", ["synthetic"], result), 2)
         for detail in expected:
             self.assertIn("        " + detail, console.getvalue())
             self.assertIn(detail, result["stages"][-1]["diagnostic"])
