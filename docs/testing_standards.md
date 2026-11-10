@@ -281,6 +281,13 @@ creating the Device Mapper target; source contracts must not require or
 authorize obsolete raw-partition header writes.
 Contradictory historical formatter requirements below are superseded.
 
+The native repository-policy regression must keep current operator-facing
+documentation aligned with this architecture. Live README evidence text must
+describe byte-exact **header preservation**, never header recovery, and must
+not reintroduce a separate or independent recovery-storage device as a
+physical-admission requirement. Historical documents may retain rejected
+recovery narratives only when they are explicitly marked non-current.
+
 ## Official interface
 
 The root checkout exposes three test tiers:

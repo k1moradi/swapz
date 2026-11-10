@@ -369,6 +369,13 @@ class SyntheticRepositoryPolicy(unittest.TestCase):
         self.assertIn("invalid pushed first-parent range",
                       self.audit(base=self.git("rev-parse", "HEAD")).stderr)
 
+    def test_live_documentation_preserves_ordinary_swap_contract(self):
+        readme = (ROOT / "docs/README.md").read_text()
+        self.assertNotIn("byte comparisons and header recovery", readme)
+        self.assertNotIn("independent recovery-storage", readme)
+        self.assertIn("byte comparisons and header preservation", readme)
+        self.assertIn("No separate recovery storage or recovery device is required.", readme)
+
     def test_aggregation_is_race_safe_and_rejects_skipped_jobs(self):
         workflow = WORKFLOW.read_text()
         enforcement = ("python3 -B tests/runtime/native/repository-policy-test.py "
