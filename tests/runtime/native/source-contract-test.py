@@ -1946,6 +1946,7 @@ dmsetup() {
         async_read = body("swapz_submit_read_slot_range")
         submit = body("swapz_submit_inflight_write")
         discard = body("swapz_discard_dead_segment")
+        iterate_devices = body("swapz_iterate_devices")
         validator = body("swapz_validate_linux_swap_header")
         layout_builder = body("swapz_configure_linux_swap_layout")
         fail_at = body("swapz_fail_at")
@@ -2032,6 +2033,13 @@ dmsetup() {
         compact_async_read = re.sub(r"\s+", " ", async_read)
         compact_submit = re.sub(r"\s+", " ", submit)
         compact_discard = re.sub(r"\s+", " ", discard)
+        compact_iterate = re.sub(r"\s+", " ", iterate_devices)
+        self.assertIn("if (ctx->segment_backing_pages)", compact_iterate)
+        self.assertIn("(sector_t)ctx->backing_last_page * SWAPZ_SECTORS",
+                      compact_iterate)
+        self.assertIn("swapz_backing_data_sector(ctx, 0)", compact_iterate)
+        self.assertIn("(sector_t)ctx->physical_blocks * SWAPZ_SECTORS",
+                      compact_iterate)
         self.assertIn(
             "return ((sector_t)ctx->data_start_block + data_block) * "
             "SWAPZ_SECTORS", compact_dm)

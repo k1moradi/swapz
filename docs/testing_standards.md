@@ -176,12 +176,14 @@ The 16 GiB native capacity fixture must account for the expanded 20-byte
 volatile mapping record and current per-segment indexes: expected
 index bytes are 121739228, not the historical 16-byte-map total. Count
 all allocated sidecars and page-rounded memory separately.
-A source contract must also verify Device Mapper iterate_devices describes
-only the allocated lower data region, excluding the protected first page and
-unused tail for physical backing while retaining zero-based null_blk.
-Native userspace policy coverage must verify that raw `/proc/swaps` Size
-matching is unchanged by 1..4095 trailing device bytes, because Linux reports
-whole usable swap pages and excludes the SWAPSPACE2 header page. Source
+A source contract must also verify Device Mapper `iterate_devices` excludes the
+protected first page and unused tail for contiguous physical backing while
+retaining zero-based null_blk. With Linux bad-page holes, the dependency span
+may conservatively cover the declared data area; actual READ/WRITE/DISCARD must
+still translate only through the RAM clean-segment map and never touch a bad
+segment. Native userspace policy coverage must verify raw `/proc/swaps` Size
+comes from the immutable Linux swap layout (`last_page - bad_pages`) and is
+unchanged by 1..4095 trailing device bytes outside that declared page geometry. Source
 qualification must also prove BLKGETSIZE64 target inspection preserves the
 exact byte count without rejecting a non-4096-aligned tail; later geometry
 helpers alone floor that identity to complete pages.
