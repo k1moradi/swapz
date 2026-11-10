@@ -3502,6 +3502,14 @@ int main(void)
 	assert(!swapz_primary_page_limit_fits(30465536ULL, 27080448ULL));
 	assert(27080192ULL * SWAPZ_PRIMARY_BLOCK_BYTES == 110920466432ULL);
 	assert(swapz_primary_swap_size_kib(124787884032ULL) == 121863164ULL);
+	/* /proc/swaps is page-granular. Sub-page partition tails must not
+	 * change the expected raw-swap Size field or make admission impossible. */
+	assert(swapz_primary_swap_size_kib(124787884032ULL + 511ULL) ==
+	       121863164ULL);
+	assert(swapz_primary_swap_size_kib(124787884032ULL + 1024ULL) ==
+	       121863164ULL);
+	assert(swapz_primary_swap_size_kib(124787884032ULL + 4095ULL) ==
+	       121863164ULL);
 	assert(swapz_primary_linux_swap_size_kib(27080192ULL) == 108320764ULL);
 	assert(swapz_primary_swap_size_kib(124787884032ULL) !=
 	       swapz_primary_linux_swap_size_kib(27080192ULL));

@@ -7502,9 +7502,18 @@ static uint64_t swapz_primary_maximum_logical_pages(uint64_t physical_blocks)
  */
 static uint64_t swapz_primary_swap_size_kib(uint64_t device_bytes)
 {
-	if (device_bytes < SWAPZ_PRIMARY_BLOCK_BYTES || device_bytes % 1024ULL)
+	const uint64_t complete_pages =
+		device_bytes / SWAPZ_PRIMARY_BLOCK_BYTES;
+
+	/*
+	 * /proc/swaps reports Linux swap's usable whole pages, excluding the
+	 * header page. A valid block device may have an unusable sub-page tail;
+	 * never count those bytes when matching the active raw partition.
+	 */
+	if (!complete_pages)
 		return 0;
-	return device_bytes / 1024ULL - SWAPZ_PRIMARY_BLOCK_BYTES / 1024ULL;
+	return (complete_pages - 1ULL) *
+	       (SWAPZ_PRIMARY_BLOCK_BYTES / 1024ULL);
 }
 
 static uint64_t swapz_primary_linux_swap_size_kib(uint64_t logical_pages)

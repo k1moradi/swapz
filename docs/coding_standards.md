@@ -18,7 +18,10 @@ created virtual Device Mapper mapper alone may receive mkswap.
 Device Mapper iterate_devices must describe only the allocated lower data
 range: start at the reserved-page offset and report exactly the aligned
 physical-block count, excluding the header and unused device tail. A
-header-free null_blk still starts at zero. The constructor must not treat an
+header-free null_blk still starts at zero. Raw-swap inventory matching must
+derive the expected `/proc/swaps` Size from complete 4096-byte swap pages
+minus the protected header page; a sub-page device tail is neither reported
+as swap capacity nor grounds for rejecting the exact partition. The constructor must not treat an
 arbitrary disk beginning with `nullb` as synthetic: require the complete
 `nullb<decimal-index>` disk name. The privileged harness independently
 verifies null_blk driver/device identity.

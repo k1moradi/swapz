@@ -137,6 +137,9 @@ all allocated sidecars and page-rounded memory separately.
 A source contract must also verify Device Mapper iterate_devices describes
 only the allocated lower data region, excluding the protected first page and
 unused tail for physical backing while retaining zero-based null_blk.
+Native userspace policy coverage must verify that raw `/proc/swaps` Size
+matching is unchanged by 1..4095 trailing device bytes, because Linux reports
+whole usable swap pages and excludes the SWAPSPACE2 header page.
 The native source contract must reject restoring prefix-only `nullb` disk
 identification: the kernel constructor requires a decimal-only suffix,
 in addition to the harness's independently verified driver/device identity.
