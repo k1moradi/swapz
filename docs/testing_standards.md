@@ -3315,11 +3315,13 @@ keep a live mapping in every otherwise permitted GC destination before asserting
 that only the paused foreground and still-live victim remain, so `-ENOSPC`
 proves the guards rather than relying on a rejected three-segment geometry.
 
-The `/8` reserve change updates the admitted-capacity policy, not the serialized
-SWZ records or authorization-header layout. `SWAPZ_SUPERBLOCK_VERSION` remains
-1; no on-media capacity capability or format-version field is added. A maximum
-capacity claim must therefore identify the source that implements the reserve
-policy. Do not bump the superblock version for this policy-only change.
+The `/8` reserve change updates admitted-capacity policy only. It does not
+change the ordinary Linux `SWAPSPACE2` header or the production payload-only
+lower representation, and it introduces no swapz on-media capability or format
+version. `SWAPZ_SUPERBLOCK_VERSION` is relevant only to isolated legacy
+userspace codec fixtures; it is not a physical-backing format version or
+admission token. A maximum-capacity claim must identify the source implementing
+the reserve policy.
 
 Source contracts validate behavior that requires the Linux Device Mapper target itself, including BIO ownership, queue/drain ordering, null_blk-only admission, lower-I/O accounting and current report/build contracts. They must accept stronger release/acquire terminal-failure publication in place of an earlier unpaired READ_ONCE spelling, including by providing an acquire-load shim when compiling extracted production C bodies; literal spelling checks must not reject a stronger synchronized implementation. Source-string assertions are secondary to executable production-C coverage. Assertions over emitted calls must preserve argument identity and order without requiring punctuation after a final argument; when a status stream is split across bounded emissions, inspect the reconstructed format/argument stream or the specific call that owns the argument.
 
@@ -6738,25 +6740,27 @@ payload bytes, boundary lengths around 8-byte/CRC lanes and production packing
 cliffs, the maximum accepted payload, deliberately unaligned extent/payload
 addresses, and every stored encoding. These cases supplement, rather than
 replace, the full-page structured/entropy predictor corpus and independent
-scalar/SIMD transform/shuffle oracles. A metadata-CRC-only descriptor lookup
-must reject zero generation and payload offsets inside the metadata envelope,
-even when the forged payload checksum also matches; callers retain responsibility
-for full descriptor order and mapping identity.
+scalar/SIMD transform/shuffle oracles. Legacy userspace codec fixtures may continue to exercise their serialized
+header/record parser, including metadata CRC, descriptor bounds, unaligned
+serialization and malformed legacy envelopes. Those tests are compatibility
+coverage only: they do not describe or qualify the production lower-media
+representation.
 
-Distinguish the stored-byte *envelope* oracle from a complete compressed page
-roundtrip: arbitrary record payload bytes verify descriptors, CRC, bounds and
-unaligned serialization but are not themselves valid LZ4 streams. The native
-predictor qualification must additionally compress real pages under each
-LZ4/DELTA64/DELTA64_SHUF8 representation, persist them through the exact
-production SWZ codec, verify the stored CRC/encoding/length, decompress LZ4,
-invert the selected transform, and compare all 4096 original bytes. Require
-nonzero successes and genuine no-fit controls for every encoding. Keep all
-compression, transform, decompression and extent buffers non-overlapping.
+Production predictor/representation qualification must instead compress real
+4KiB pages under each LZ4/DELTA64/DELTA64_SHUF8 representation, build the exact
+payload-only 4/8/16KiB lower image, bind encoding/offset/length/generation and
+payload CRC in volatile RAM transaction authority, publish only after definitive
+lower completion, read through the RAM mapping, verify the payload CRC,
+decompress/invert the selected transform, and compare all 4096 original bytes.
+Require nonzero successes and genuine no-fit controls for every encoding. Keep
+all compression, transform, decompression and extent buffers non-overlapping.
 
 The delta64 transform unit is one 4KiB logical page, never a whole packed
-extent. Direct production-C coverage must prove ordinary LZ4 and delta64 records
-share the unchanged 16-byte SWZ record size, decode the encoding bit exactly,
-reject reserved header flags, and preserve payload CRC validation.
+extent. Direct production-C coverage must prove LZ4, DELTA64 and
+DELTA64_SHUF8 are encoded in RAM authority without serialized record/header
+bytes, reject invalid RAM encoding/offset/length combinations, and preserve
+payload CRC validation. Any unchanged 16-byte SWZ record/header tests remain
+explicitly legacy userspace-fixture tests only.
 
 Both write owners must bypass rescue when the read-only, default-on
 `delta64_rescue` module parameter is loaded as 0. Snapshot it at construction
@@ -7003,118 +7007,72 @@ diagnostic strings may be parsed only as legacy evidence and must never be a
 requirement for current source.
 
 A physical ordinary-swap development trial is reached only after the exact
-current source completes the RAM/loaded qualification stages and the private
-handoff supplies source/artifact-bound evidence. The privileged helper may set
-the immutable physical RAM-metadata qualification token only after validating
-that evidence. Noninteractive qualification never discovers, prompts for or
-writes a physical device.
+current source completes the five RAM/loaded `make test` stages and the
+private handoff supplies source/artifact-bound evidence. The privileged helper
+may set the immutable `physical_ram_metadata_qualified=1` module token only
+after validating that evidence. Noninteractive qualification never discovers,
+prompts for, or writes a physical device.
 
 #### Development-only ordinary-SWAPSPACE2 trial
 
 The development trial accepts only an already formatted ordinary Linux
-`SWAPSPACE2` partition selected by stable PARTUUID identity. Its raw header,
-UUID and partition table are immutable. No current path may clear or replace
-block zero, publish `SWAPZ001`, run `mkswap` on the raw partition, or use
-saved bytes as permission to repair/reformat it. Before mutation, revalidate the
-exact partition, geometry, parent topology, active-swap inventory, memory
-headroom, mapper/module ownership and current-source artifacts. Use ordinary
-`swapoff` only for the explicitly selected target; never use `swapoff -a`.
-After swapoff, prove the raw partition inactive and byte-compare block zero with
-the preflight digest before mapper creation.
+`SWAPSPACE2` partition selected by stable PARTUUID identity. Its first 4096
+bytes, swap UUID and partition table are immutable. No current path may clear
+or replace block zero, publish `SWAPZ001`, run `mkswap` on the raw
+partition, admit a filesystem/arbitrary block target, or use saved bytes as
+permission to repair/reformat it. Legacy SWZ-header parsing exists solely for
+historical interrupted pre-migration journals and must remain unreachable from
+new-run mutation.
+
+Before mutation, revalidate the exact partition, geometry, physical parent,
+holders/slaves topology, active-swap inventory, memory headroom,
+mapper/module ownership and current-source artifacts. Use ordinary `swapoff`
+only for the explicitly selected target and any separately recorded exact
+swapfiles required by the transaction; never use `swapoff -a`. After
+`swapoff`, prove the raw partition inactive and byte-compare its first 4096
+bytes with the preflight witness before mapper creation.
 
 The Device Mapper target reserves physical block zero and exposes only the
-aligned post-header data region. All swapz mapping, extent/record descriptors,
-generation/sequence, CRC, payload offset/length, allocator and GC authority
-remain bounded RAM state. The lower data region contains payload bytes and
-deterministic zero padding only. The newly created mapper alone may receive
-`mkswap`. On successful completion, preserve the user's same-boot choice:
-keep the verified swapz mapper active or stop it and reactivate the unchanged
-ordinary swap partition at its recorded priority. No reboot is required.
-
-The production-readiness evaluator must also bind the CURRENT release-host
-platform to the owner qualification: x86_64, 4096-byte pages, and an exact
-well-formed `kernel_release` matching the owner `make test_full` RAM report. A kernel
-upgrade or platform mismatch makes the release BLOCKED until fresh owner
-qualification and downstream exact-source evidence are regenerated.
-
-The primary manager's PARTUUID direct-C tests must reject all-hyphen,
-leading/trailing-hyphen and consecutive-hyphen values, require at least eight
-hexadecimal digits, preserve GPT-style hyphenated values, and prove canonical
-lowercase normalization. This is a Codex-owned integration requirement; the
-standalone formatter tests do not authorize edits to primary-manager source.
-
-The standalone CLI requires the complete partition/PARTUUID/geometry/removable-
-parent identity bundle documented in coding_standards.md. Linux may omit a
-`slaves/` directory on a physical partition sysfs node; the formatter treats
-only that absent partition-level directory as empty after rechecking that the
-partition sysfs object still exists. Errors other than `ENOENT`, a present but
-unreadable/non-directory entry, and any nonempty `holders/` or `slaves/`
-directory still fail closed. Parent `holders/` and `slaves/` directories remain
-mandatory and must be empty. Partition `holders/` remains mandatory; partition
-`slaves/` must be empty when present. The older private
-physical-swap correctness probe remains historical machinery; do not relax the
-standalone formatter or repurpose that helper for production lifecycle
-activation merely to preserve its former formatter argument list.
-
-A physical ordinary-swap development trial is reached only through the
-interactive algorithm-tier handoff after the exact current source completes
-the five RAM/loaded `make test` stages. The handoff supplies a private,
-nonce-bound evidence record containing the tested source and artifact digests;
-the privileged helper must validate that record before it can set the kernel's
-immutable `physical_ram_metadata_qualified=1` module token. Noninteractive
-qualification never discovers, prompts for, or writes a physical device.
-
-#### Development-only ordinary-SWAPSPACE2 trial
-
-The development trial accepts only an already formatted ordinary Linux
-`SWAPSPACE2` partition selected by stable PARTUUID identity. The raw partition
-header, UUID and partition table are immutable. No current path may clear block
-zero, publish `SWAPZ001`, run `mkswap` on the raw partition, or use a saved
-header as permission to repair/reformat it. Legacy SWZ-header parsing in the
-private helper exists solely to recognize historical interrupted
-pre-migration journals and must stay unreachable from new-run mutation.
-
-Before mutation, revalidate the exact partition, geometry, parent topology,
-active-swap inventory, memory headroom, mapper/module ownership and
-current-source artifacts. Use ordinary `swapoff` only for the explicitly
-selected target and any separately recorded, exact swapfiles required by the
-development transaction; never use `swapoff -a`. After `swapoff`, prove the
-raw partition is inactive and byte-compare its first 4096 bytes with the
-preflight image before creating the mapper.
-
-The Device Mapper target reserves physical block zero and exposes only the
-aligned post-header data region. All swapz mapping, extent/record descriptors,
-generation/sequence, CRC, payload offset/length, allocator and GC authority
-remain bounded volatile RAM state. Lower storage contains compressed/RAW
-payload bytes plus deterministic zero padding only. Preserve 4/8/16KiB
+aligned post-header data region. All swapz mapping, extent/payload descriptors,
+generation/sequence, CRC, payload offset/length/encoding, allocator and GC
+authority remain bounded volatile RAM state. Lower storage contains compressed
+or RAW payload bytes plus deterministic zero padding only. Preserve 4/8/16KiB
 packing, overwrite ordering, DISCARD, GC, short/error I/O handling and
 byte-exact readback.
 
-Only the newly created run-owned mapper may receive `mkswap`; activate that
-mapper with `swapon` for the bounded real anonymous-page round trip. A
-successful trial must ask the operator whether to keep the verified swapz
-mapper active or return to ordinary Linux swap. Choosing restore removes only
-run-owned mapper/module state and reactivates the unchanged raw partition at
-its recorded priority. No reboot is part of either transition.
+Only the newly created, positively identified run-owned mapper may receive
+`mkswap`; activate that mapper with `swapon` for the bounded real
+anonymous-page round trip. A successful trial must ask the operator whether to
+keep the verified swapz mapper active or return to ordinary Linux swap.
+Choosing restore removes only run-owned mapper/module state and reactivates the
+unchanged raw partition at its recorded priority. If block zero no longer
+matches the admitted witness, cleanup may remove proven run-owned state but
+must not rewrite the raw header or reactivate that partition. No reboot is part
+of either transition.
 
 Durable state for crash-safe session ownership may record target identity,
 source/artifact identity, original swap activation/priority, mapper ownership
 and teardown progress. It is lifecycle state, not swapz extent metadata and
-must never become a new on-partition format. New-run recovery must treat a
-changed block-zero image as a hard failure requiring read-only inspection; it
-must not rewrite block zero. Historical pre-migration recovery compatibility
-must remain explicitly separated and may not be generalized into the normal
-lifecycle.
+must never become a new on-partition format. Native/rootless coverage must
+prove new runs cannot reach raw-header writers or legacy SWZ formatters, mapper
+`mkswap` targets the exact run-owned DM device, physical offsets exclude
+block zero and the unused tail, and failures before/after swapoff, mapper
+creation, activation, I/O and teardown preserve ownership and fail closed.
+Loaded RAM qualification must exercise payload-only WRITE/READ, overwrite,
+DISCARD, GC, corruption/short-I/O rejection, concurrency and target recreation
+before a physical handoff is admitted.
 
-Native/rootless coverage must prove that new runs cannot reach any raw-header
-writer or legacy SWZ formatter, that mapper `mkswap` targets the exact
-run-owned DM device, that physical offsets exclude block zero and unused tail,
-and that failures before/after swapoff, mapper creation, activation, I/O and
-teardown preserve ownership and fail closed. Loaded RAM qualification must
-exercise payload-only compressed WRITE/READ, overwrite, DISCARD, GC,
-corruption/short-I/O rejection, concurrency and target recreation before a
-physical development handoff is admitted. Physical development evidence is
-not production qualification or physical-media endurance evidence.
+The production-readiness evaluator must bind the current release-host platform
+to owner qualification: x86_64, 4096-byte pages, and an exact well-formed
+`kernel_release` matching the owner `make test_full` RAM report. A kernel
+upgrade or platform mismatch blocks release until fresh owner qualification and
+downstream exact-source evidence are regenerated. Primary-manager PARTUUID
+direct-C tests must reject all-hyphen, leading/trailing-hyphen and
+consecutive-hyphen values, require at least eight hexadecimal digits, preserve
+GPT-style hyphenated values, and prove canonical lowercase normalization.
+Historical formatter tests do not authorize formatter behavior in the current
+physical lifecycle. Physical development evidence is not production
+qualification or physical-media endurance evidence.
 
 ### Alpha.29 work-conserving dispatcher qualification
 
