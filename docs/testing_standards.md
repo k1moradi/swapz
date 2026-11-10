@@ -7896,7 +7896,10 @@ explicit in every review and result.
 
 The historical `tests/tools/live-swap-supervisor.py` mutating CLI remains
 permanently disabled for the retired host; its rootless worker fixtures are
-not permission to run or recover real swap. A synthetic pressure PASS must
+not permission to run or recover real swap. Its real Linux adapter must also
+have no raw block-zero write bridge: even a future accidental execution-flag
+change must fail before any header clear/restore operation. Synthetic legacy
+state-machine fixtures may model historical stages only in memory. A synthetic pressure PASS must
 bind the validated qualified source, HEAD and one lowercase run ID through
 the parent state and exactly one duplicate-free child JSON report. Require
 the frozen page count and corresponding 4KiB byte count, zero mismatches,

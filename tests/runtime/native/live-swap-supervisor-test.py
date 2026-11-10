@@ -558,6 +558,10 @@ class LiveSwapSupervisorTests(unittest.TestCase):
             ops.command(["blockdev", "--setro", "/dev/sda4"])
         with self.assertRaises(supervisor.LiveSwapError):
             ops.command(["blkid", "--update", "all"])
+        with self.assertRaisesRegex(
+                supervisor.LiveSwapError,
+                "raw swap-header mutation is permanently disabled"):
+            ops.write_header({}, b"", None)
 
     def test_execution_requires_root_and_exact_confirmation(self):
         self.assertFalse(supervisor.LIVE_SWAP_EXECUTION_ENABLED)

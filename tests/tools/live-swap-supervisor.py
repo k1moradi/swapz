@@ -587,9 +587,11 @@ class LinuxOps:
     def read_header(self, target):
         return PHYSICAL._read_block0(target["device"], target)
 
-    def write_header(self, target, data, expected_current):
-        PHYSICAL._write_block0(target["device"], data, target,
-                               expected_current=expected_current)
+    def write_header(self, _target, _data, _expected_current):
+        # The historical state-machine model still calls this synthetic seam,
+        # but the real Linux adapter must never regain raw block-zero mutation.
+        raise LiveSwapError(
+            "historical raw swap-header mutation is permanently disabled")
 
     def inspect_target(self):
         target = PHYSICAL.inspect_target(
