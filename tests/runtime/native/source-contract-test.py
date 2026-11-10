@@ -8257,8 +8257,12 @@ class CapacityMemoryAccountingContracts(unittest.TestCase):
         observed_allocations = Counter(
             allocation_pattern.findall(constructor))
         expected_allocations = Counter(self.FIXED_ALLOCATIONS)
+        # Authority-owned initializers cover these 15 unzeroed arrays.
+        # The two remaining sidecars still require allocator zeroing.
         expected_allocations.update(
-            (f"ctx->{name}", "kvcalloc") for name in self.INDEX_ORDER)
+            (f"ctx->{name}",
+             "kvcalloc" if name in ("gc_segment_evictions", "segment_trimmed")
+             else "kvmalloc_array") for name in self.INDEX_ORDER)
         self.assertEqual(
             observed_allocations, expected_allocations,
             "constructor direct allocation inventory changed; update the "

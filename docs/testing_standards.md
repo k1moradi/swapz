@@ -71,6 +71,11 @@ The allocation/free source inventory must separately enumerate the sparse
 backing-segment map allocated by the Linux swap layout helper, in addition to
 direct constructor allocations. Its single `kvcalloc` site must match one
 `kvfree` in teardown and remain included in geometry-scaled RAM accounting.
+The exact 17 capacity-index allocation sites use `kvmalloc_array` for the 15
+authority-initialized arrays and `kvcalloc` for only
+`gc_segment_evictions` and `segment_trimmed`. Keep the separate tests
+proving initialization before use, allocation count, ownership and frees;
+the optimization deliberately avoids redundant memory zeroing.
 Shared-root source contracts must require topology validation before exposing
 the scope fingerprint and fingerprint availability before reading the owner's
 scope record. Volatile lifecycle state has no recovery-disk separation phase;
