@@ -33,6 +33,25 @@ REAL_PATH_IS_FILE = Path.is_file
 REAL_PATH_EXISTS = Path.exists
 
 
+def build_swap_header(device_bytes, *, bad_pages=(), byteorder="little",
+                      last_page=None):
+    header = bytearray(probe.PAGE_BYTES)
+    complete_pages = device_bytes // probe.PAGE_BYTES
+    if last_page is None:
+        last_page = complete_pages - 1
+    header[probe.SWAP_VERSION_OFFSET:probe.SWAP_VERSION_OFFSET + 4] = (
+        1).to_bytes(4, byteorder)
+    header[probe.SWAP_LAST_PAGE_OFFSET:probe.SWAP_LAST_PAGE_OFFSET + 4] = (
+        last_page).to_bytes(4, byteorder)
+    header[probe.SWAP_BAD_PAGES_OFFSET:probe.SWAP_BAD_PAGES_OFFSET + 4] = (
+        len(bad_pages)).to_bytes(4, byteorder)
+    for index, page in enumerate(bad_pages):
+        offset = probe.SWAP_BAD_PAGE_LIST_OFFSET + index * 4
+        header[offset:offset + 4] = int(page).to_bytes(4, byteorder)
+    header[-len(probe.SWAP_SIGNATURE):] = probe.SWAP_SIGNATURE
+    return bytes(header)
+
+
 class PhysicalSwapProbeTests(unittest.TestCase):
     def setUp(self):
         # Recover-state tests use a private synthetic base, never the host's
@@ -429,16 +448,19 @@ class PhysicalSwapProbeTests(unittest.TestCase):
 
     def make_recovery_state(self, state_dir):
         state_dir.mkdir(mode=0o700)
-        header = bytearray(probe.PAGE_BYTES)
-        header[-len(probe.SWAP_SIGNATURE):] = probe.SWAP_SIGNATURE
-        header = bytes(header)
+        device_bytes = 16 * 1024 * 1024 * 1024
+        header = build_swap_header(device_bytes)
+        geometry = probe._swapz_backing_geometry(header, device_bytes)
         token = "1234567890abcdef"
         state = {
             "device_arg": "/dev/disk/by-uuid/test-swap",
             "device": "/dev/sda4",
             "major": 8,
             "minor": 4,
-            "size_bytes": 16 * 1024 * 1024 * 1024,
+            "size_bytes": device_bytes,
+            "swapz_logical_sectors": geometry["swapz_logical_sectors"],
+            "swapz_linux_swap_kib": geometry["swapz_linux_swap_kib"],
+            "swapz_physical_blocks": geometry["swapz_physical_blocks"],
             "partuuid": "deadbeef-04",
             "stage": "ORACLE_PASS",
             "header_sha256": hashlib.sha256(header).hexdigest(),
@@ -446,7 +468,7 @@ class PhysicalSwapProbeTests(unittest.TestCase):
             "swap_was_active": True,
             "swap_priority": -1,
             "module_ownership": "NOT_STARTED",
-            "swap_size_kib": (16 * 1024 * 1024 * 1024) // 1024 - 4,
+            "swap_size_kib": geometry["raw_linux_swap_kib"],
             "run_id": "0123456789abcdef0123456789abcdef",
             "module_loaded_by_us": False,
             "dm_name": f"swapz-demo-physical-{token}",
@@ -1653,10 +1675,7 @@ class PhysicalSwapProbeTests(unittest.TestCase):
              "recovery_original_swap_size_kib expected=within_saved_device "
              "observed=exceeds_saved_device"),
             ("priority_above_restorable_range", "swap_priority", 32768,
-             "recovery_original_swap_priority expected=-1..32767 "
-             "observed=out_of_range"),
-            ("priority_below_restorable_range", "swap_priority", -2,
-             "recovery_original_swap_priority expected=-1..32767 "
+             "recovery_original_swap_priority expected=negative_auto_or_0..32767 "
              "observed=out_of_range"),
         )
         for case, field, value, diagnostic in cases:
@@ -2521,30 +2540,19 @@ class PhysicalSwapProbeTests(unittest.TestCase):
         with mock.patch("builtins.input", side_effect=EOFError):
             self.assertFalse(probe._operator_keep_swapz_active_after_pass())
 
-    def test_bounded_test_mapper_cannot_replace_normal_swap_capacity(self):
-        # The existing 16 MiB physical trial must not strand a machine with
-        # only 16 MiB of available swap after its original 64 GiB is disabled.
-        self.assertEqual(probe.LOGICAL_MAPPER_BYTES, 16 * 1024 * 1024)
-        self.assertFalse(probe._keep_active_capacity_supported(
-            {"size_bytes": 64 * 1024 * 1024 * 1024}))
-        self.assertFalse(probe._keep_active_capacity_supported(
-            {"size_bytes": 64 * 1024 * 1024}))
-        for invalid in (None, False, "16777216", 0, -1):
+    def test_full_capacity_mapper_geometry_allows_post_pass_retention(self):
+        device_bytes = 64 * 1024 * 1024 * 1024
+        header = build_swap_header(device_bytes)
+        geometry = probe._swapz_backing_geometry(header, device_bytes)
+        self.assertGreater(geometry["swapz_logical_bytes"], 16 * 1024 * 1024)
+        self.assertLess(geometry["swapz_logical_bytes"], device_bytes)
+        self.assertTrue(probe._keep_active_capacity_supported(geometry))
+        for invalid in (None, False, "1", 0, -1):
             with self.subTest(invalid=invalid):
-                self.assertFalse(probe._keep_active_capacity_supported(
-                    {"size_bytes": invalid}))
-        self.assertTrue(probe._keep_active_capacity_supported(
-            {"size_bytes": 8 * 1024 * 1024}))
-        with mock.patch.object(
-                probe, "_verify_target_identity") as verify:
-            with self.assertRaisesRegex(
-                    probe.ProbeError, "cannot retain.*capacity"):
-                probe._verify_kept_swapz_active(
-                    {"module_ownership": "MODULE_OWNED"},
-                    {"size_bytes": 64 * 1024 * 1024},
-                    "/dev/mapper/synthetic")
-            verify.assert_not_called()
-        # Consent is never requested on an undersized mapper.
+                self.assertFalse(probe._keep_active_capacity_supported({
+                    "swapz_logical_sectors": invalid,
+                    "swapz_linux_swap_kib": 1,
+                }))
         run_source = SCRIPT.read_text()
         self.assertIn(
             "if (_keep_active_capacity_supported(target) and\n"
@@ -2553,14 +2561,19 @@ class PhysicalSwapProbeTests(unittest.TestCase):
 
     def test_keep_active_verification_requires_exact_owned_swap(self):
         # Purely mocked: these checks must never activate a host swap device.
+        device_bytes = 64 * 1024 * 1024
+        header = build_swap_header(device_bytes)
         target = {
-            "device": "/dev/synthetic-part", "header": b"h" * probe.PAGE_BYTES,
-            "major": 8, "minor": 17,
-            "size_bytes": 8 * 1024 * 1024,
+            "device": "/dev/synthetic-part", "header": header,
+            "major": 8, "minor": 17, "size_bytes": device_bytes,
+            **probe._swapz_backing_geometry(header, device_bytes),
         }
         state = {"module_ownership": "MODULE_OWNED"}
         mapper = "/dev/mapper/owned-swapz"
-        healthy = {"priority": 32767, "used_kib": 0, "size_kib": 16384}
+        healthy = {
+            "priority": 32767, "used_kib": 0,
+            "size_kib": target["swapz_linux_swap_kib"],
+        }
         with mock.patch.object(probe, "_verify_target_identity") as verify, \
              mock.patch.object(probe, "_read_block0",
                                return_value=target["header"]) as header, \
@@ -2592,7 +2605,10 @@ class PhysicalSwapProbeTests(unittest.TestCase):
              "not active swap"),
             ("mapper priority replaced", {"mapper_swap": {**healthy,
                                                            "priority": -1}},
-             "priority changed"),
+             "size or priority changed"),
+            ("mapper size replaced", {"mapper_swap": {**healthy,
+                                                       "size_kib": healthy["size_kib"] - 4}},
+             "size or priority changed"),
             ("unowned module", {"module_ownership": "NOT_STARTED"},
              "module is unavailable"),
             ("module absent", {"module_loaded": False},
@@ -2727,13 +2743,14 @@ class PhysicalSwapProbeTests(unittest.TestCase):
 
     def reviewed_device_fixture(self):
         """Build an immutable synthetic state to mutate verbal review fields."""
-        header = bytearray(probe.PAGE_BYTES)
-        header[-len(probe.SWAP_SIGNATURE):] = probe.SWAP_SIGNATURE
+        size_bytes = 16 * 1024 * 1024 * 1024
+        header = build_swap_header(size_bytes)
         target = {
             "major": 8, "minor": 4, "partuuid": "deadbeef-04",
-            "size_bytes": 16 * 1024 * 1024 * 1024,
+            "size_bytes": size_bytes,
             "device_arg": "/dev/disk/by-uuid/test-swap",
-            "header": bytes(header),
+            "header": header,
+            **probe._swapz_backing_geometry(header, size_bytes),
         }
         evidence = {
             "source_sha": "a" * 40,
@@ -2819,7 +2836,7 @@ class PhysicalSwapProbeTests(unittest.TestCase):
             "card_identity_sha256": "a" * 64,
             "swap_was_active": True,
             "swap_path": target["device_arg"], "swap_priority": -1,
-            "swap_size_kib": target["size_bytes"] // 1024,
+            "swap_size_kib": target["raw_linux_swap_kib"],
             "swap_used_kib": 0,
         })
         evidence["pass_reports"] = 2
@@ -3161,6 +3178,9 @@ class PhysicalSwapProbeTests(unittest.TestCase):
             "major": target["major"], "minor": target["minor"],
             "device_arg": target["device_arg"],
             "device": target["device"], "size_bytes": target["size_bytes"],
+            "swapz_logical_sectors": target["swapz_logical_sectors"],
+            "swapz_linux_swap_kib": target["swapz_linux_swap_kib"],
+            "swapz_physical_blocks": target["swapz_physical_blocks"],
             "parent_major_minor": target["parent_major_minor"],
             "parent_model": target["parent_model"],
             "parent_transport": target["parent_transport"],
@@ -3287,7 +3307,7 @@ class PhysicalSwapProbeTests(unittest.TestCase):
                     table = table[:-1] + ("1" if table[-1] != "1" else "0")
                 output = table + "\n"
             elif command[:2] == ["dmsetup", "status"]:
-                output = f"0 {probe.LOGICAL_SECTORS} swapz failed=0 error=0\n"
+                output = f"0 {target["swapz_logical_sectors"]} swapz failed=0 error=0\n"
             else:
                 output = ""
             return subprocess.CompletedProcess(command, 0,
@@ -3303,7 +3323,7 @@ class PhysicalSwapProbeTests(unittest.TestCase):
             if value.endswith("/dm/uuid"):
                 return state["dm_uuid"] + "\n"
             if value.endswith("/size"):
-                return str(probe.LOGICAL_SECTORS - (8 if fault == "size" else 0)) + "\n"
+                return str(target["swapz_logical_sectors"] - (8 if fault == "size" else 0)) + "\n"
             if value.endswith("/slaves/synthetic/dev"):
                 return f"{target['major']}:{target['minor'] + (1 if fault == 'lower' else 0)}\n"
             if value.endswith("/stat"):
@@ -5415,7 +5435,7 @@ class PhysicalSwapProbeTests(unittest.TestCase):
              mock.patch.object(probe, "_active_swap_for",
                                return_value=None), \
              mock.patch.object(probe, "_read_block0",
-                               return_value=b"x" * probe.PAGE_BYTES), \
+                               return_value=build_swap_header(size_bytes)), \
              mock.patch.object(probe, "swap_signature_valid",
                                return_value=True), \
              mock.patch.object(probe, "_campaign_card_identity",
@@ -5443,6 +5463,12 @@ class PhysicalSwapProbeTests(unittest.TestCase):
             [], 0, stdout=json.dumps({"blockdevices": [row]}), stderr="")
         active = {"path": device_arg, "kind": "partition", "size_kib": 65532,
                   "used_kib": 128, "priority": -1}
+        header = build_swap_header(size_bytes)
+        card = {
+            "model": "synthetic", "transport": "usb",
+            "parent_size_bytes": size_bytes, "parent_removable": True,
+            "sha256": "a" * 64,
+        }
         with mock.patch.object(probe.Path, "resolve",
                                return_value=Path("/dev/synthetic-part")), \
                 mock.patch.object(probe.Path, "is_file", return_value=True), \
@@ -5458,15 +5484,22 @@ class PhysicalSwapProbeTests(unittest.TestCase):
                 mock.patch.object(probe, "_partition_identity",
                                   return_value=("deadbeef-01", size_bytes)), \
                 mock.patch.object(probe, "_active_swap_for",
-                                  return_value=active):
+                                  return_value=active), \
+                mock.patch.object(probe, "_read_block0",
+                                  return_value=header), \
+                mock.patch.object(probe, "_campaign_card_identity",
+                                  return_value=card):
             with self.assertRaisesRegex(
                     probe.ProbeError, "require zero used KiB"):
                 probe.inspect_target(device_arg, device_arg)
             active["used_kib"] = 0
             active["priority"] = -2
-            with self.assertRaisesRegex(
-                    probe.ProbeError, "priority cannot be restored exactly"):
-                probe.inspect_target(device_arg, device_arg)
+            target = probe.inspect_target(device_arg, device_arg)
+            self.assertEqual(target["swap_priority"], -2)
+            self.assertTrue(probe._swap_priority_restored(-2, -7))
+            self.assertFalse(probe._swap_priority_restored(-2, 0))
+            self.assertTrue(probe._swap_priority_restored(12, 12))
+            self.assertFalse(probe._swap_priority_restored(12, 11))
             active["priority"] = -1
             active["size_kib"] = size_bytes // 1024 + 1
             with self.assertRaisesRegex(
@@ -5580,15 +5613,16 @@ class PhysicalSwapProbeTests(unittest.TestCase):
         self.assertIn(("recover",), events)
 
     def test_dm_status_health_cannot_be_fabricated_from_missing_or_clipped_trace(self):
-        healthy = ("0 " + str(probe.LOGICAL_SECTORS) +
+        logical_sectors = 65536
+        healthy = ("0 " + str(logical_sectors) +
                    " swapz some_counter=1 failed=0 error=0\n")
         def record(contents):
             return {"return_code": 0, "stdout": contents, "stderr": "",
                     "timed_out": False,
                     "stdout_truncated": False, "stderr_truncated": False}
-        self.assertTrue(probe._swapz_status_healthy(record(healthy)))
+        self.assertTrue(probe._swapz_status_healthy(record(healthy), logical_sectors))
         for contents in (
-                "", "0 " + str(probe.LOGICAL_SECTORS) + " swapz\n",
+                "", "0 " + str(logical_sectors) + " swapz\n",
                 healthy.replace("failed=0", "failed=1"),
                 healthy.replace("error=0", "error=-5"),
                 healthy + healthy,
@@ -5596,16 +5630,17 @@ class PhysicalSwapProbeTests(unittest.TestCase):
                 healthy.replace("failed=0", "failed=0 failed=0"),
         ):
             with self.subTest(contents=contents):
-                self.assertFalse(probe._swapz_status_healthy(record(contents)))
+                self.assertFalse(probe._swapz_status_healthy(record(contents), logical_sectors))
         self.assertFalse(probe._swapz_status_healthy({
-            **record(healthy), "stdout_truncated": True}))
+            **record(healthy), "stdout_truncated": True}, logical_sectors))
         with mock.patch.object(probe, "_run",
             return_value=subprocess.CompletedProcess(
                 [], 0, stdout=healthy + "x" * probe.MAX_STATUS_OUTPUT_CHARS,
                 stderr="")):
             truncated = probe._captured_command(["dmsetup", "status", "owned"])
         self.assertTrue(truncated["stdout_truncated"])
-        self.assertFalse(probe._swapz_status_healthy(truncated))
+        self.assertFalse(probe._swapz_status_healthy(
+            truncated, logical_sectors))
 
     def test_serialized_available_lower_gate_cannot_hide_missing_counters(self):
         events, state, _ = self.simulate_physical_run(

@@ -241,6 +241,8 @@ class SwapzProductionSourceQualification(unittest.TestCase):
         self.assertLess(
             scope.index("swapz_primary_shared_root_parent_relationship_valid"),
             scope.index("memcpy(scope_sha256, scope_digest"))
+        self.assertNotIn("swapz_primary_recovery_parent_separation_valid",
+                         PRIMARY)
         self.assertIn("shared_root_parent_scope_fingerprint", plan)
         self.assertNotIn("blocked_recovery_same_parent", plan)
 
@@ -7983,11 +7985,13 @@ class CapacityMemoryAccountingContracts(unittest.TestCase):
         ("ctx->submitter_lanes", "kvfree"),
         ("ctx->preparation_pages", "vfree"),
         ("ctx->maps", "kvfree"),
-        ("ctx->segment_backing_pages", "kvfree"),
         ("ctx->live_records", "kvfree"),
         ("ctx->extent_classes", "kvfree"),
         ("ctx->extent_sequence_delta", "kvfree"),
         ("ctx->segment_sequence_base", "kvfree"),
+        # Sparse Linux swap layout is allocated by the header validator,
+        # outside the 47 directly inventoried constructor allocations.
+        ("ctx->segment_backing_pages", "kvfree"),
         ("ctx->batch_bytes", "vfree"),
         ("ctx->gc_bytes_store", "vfree"),
         ("ctx->gc_scores", "kvfree"),
@@ -8138,6 +8142,7 @@ class CapacityMemoryAccountingContracts(unittest.TestCase):
         self.assertEqual(sum(observed_frees.values()),
                          sum(observed_allocations.values()) +
                          sum(helper_allocations.values()))
+        self.assertEqual(sum(observed_frees.values()), 48)
 
         # Allocation families outside the inventoried direct heap/vmalloc set
         # must not appear silently; each would need explicit accounting first.
@@ -8623,6 +8628,21 @@ class CapacityMemoryAccountingContracts(unittest.TestCase):
 
     def test_sparse_swap_segment_map_is_in_ram_footprint(self):
         dm_target = (ROOT / "src/kernel/dm-target.c").read_text()
+        sparse_layout = body("swapz_configure_linux_swap_layout")
+        destructor = body("swapz_free")
+        constructor = body("swapz_ctr")
+
+        # The optional sparse map is allocated outside the main constructor
+        # block. Keep it separately inventoried rather than deleting its free
+        # or weakening the exact 47-site constructor allocation audit.
+        self.assertEqual(sparse_layout.count(
+            "ctx->segment_backing_pages = kvcalloc("), 1)
+        self.assertEqual(sparse_layout.count("bitmap_zalloc("), 1)
+        self.assertEqual(sparse_layout.count("bitmap_free(bad_segments);"), 1)
+        self.assertIn("if (!ctx->segment_backing_pages)", sparse_layout)
+        self.assertEqual(destructor.count(
+            "kvfree(ctx->segment_backing_pages);"), 1)
+        self.assertIn("swapz_free(ctx);", constructor)
 
         self.assertIn(
             "ctx->segment_backing_pages = kvcalloc(",

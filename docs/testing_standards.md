@@ -83,8 +83,8 @@ them without rewriting the header, preserve the listed entry count, and count
 each contaminated clean-allocation segment only once. Reject a listed bad-page
 count greater than the header-declared data-page count, even when all entries
 repeat the same valid page: the declared usable swap count must never underflow.
-The narrow no-bad-pages validation helper must still reject such a layout. Restore a fresh valid swap
-header after the duplicate-list case so the cleared-UUID acceptance test
+The narrow no-bad-pages validation helper must still reject such a layout.
+Restore a fresh valid swap header after the duplicate-list case so the cleared-UUID acceptance test
 independently verifies optional UUID behavior.
 
 ### Failed compressed read must never publish caller bytes
@@ -96,6 +96,18 @@ reported payload length to zero and leave every caller output byte unchanged.
 Restoring the original authoritative length must still yield byte-exact
 readback. Never turn an in-bounds CRC mismatch into an imaginary pre-I/O
 geometry rejection or infer physical qualification from this native test.
+
+### Sparse Linux swap layout allocation ownership
+
+Constructor accounting must distinguish its 47 direct heap/vmalloc allocation
+sites from the conditional `segment_backing_pages` allocation inside
+`swapz_configure_linux_swap_layout`. The target destructor owns and frees
+all 48 possible pointers, including a partially populated sparse map on
+a constructor error. The sparse temporary bitmap has independent
+`bitmap_zalloc`/`bitmap_free` ownership in that helper. Keep the 47-site
+constructor inventory strict; enforce the conditional allocation and both
+paired frees independently, including the explicit RAM budget. Neither
+ignoring the free nor silently weakening the constructor audit is acceptable.
 
 ## New P0 ordinary swap and RAM-metadata acceptance gate
 

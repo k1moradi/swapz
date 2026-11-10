@@ -3190,12 +3190,12 @@ static int swapz_primary_parse_priority(const char *text, int *priority)
 static int swapz_primary_swap_priority_restorable(int priority)
 {
 	/*
-	 * Linux's implicit/default priority is reported as -1. Explicit
-	 * util-linux priorities occupy 0..32767 and can be reproduced exactly
-	 * by the development lifecycle after swapoff. More-negative automatic
-	 * priorities cannot be requested exactly, so fail closed on them.
+	 * Explicit util-linux priorities occupy 0..32767 and can be reproduced
+	 * exactly. Negative values are kernel-assigned low-priority policy; a
+	 * later plain swapon may choose a different negative number, so admission
+	 * must preserve the policy class rather than reject ordinary swap.
 	 */
-	return priority >= -1 && priority <= 32767;
+	return priority <= 32767;
 }
 
 static int swapz_primary_parse_dev_number(const char *text, dev_t *device)
