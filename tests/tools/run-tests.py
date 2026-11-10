@@ -3811,10 +3811,42 @@ def print_progress_table_header():
           f"{'-' * 10}-+-{'-' * 8}", flush=True)
 
 
-def print_stage_results(configured_stages, completed_stages):
+class QualificationProgressTable:
+    """Single stream of source-controlled results with globally unique IDs."""
+
+    def __init__(self):
+        self.next_index = 0
+        print("  Unified qualification results (tests and benchmark phases):",
+              flush=True)
+        print(f"    {'ID':>2} | {'Suite':<8} | "
+              f"{'Name':<{ROOTLESS_NAME_WIDTH}} | "
+              f"{'Verdict':<10} | {'Time':>8}", flush=True)
+        print(f"    {'-' * 2}-+-{'-' * 8}-+-"
+              f"{'-' * ROOTLESS_NAME_WIDTH}-+-{'-' * 10}-+-"
+              f"{'-' * 8}", flush=True)
+
+    def row(self, suite, name, verdict, duration):
+        return (f"    {self.next_index + 1:>2} | {suite:<8} | "
+                f"{name:<{ROOTLESS_NAME_WIDTH}} | "
+                f"{verdict:<10} | {duration:>8}")
+
+    def running(self, suite, name):
+        if sys.stdout.isatty():
+            sys.stdout.write("\r" + self.row(suite, name, "RUNNING", "-"))
+            sys.stdout.flush()
+
+    def complete(self, suite, name, verdict, duration, *, overwrite=False):
+        sys.stdout.write(("\r" if overwrite else "") +
+                         self.row(suite, name, verdict, duration) + "\n")
+        sys.stdout.flush()
+        self.next_index += 1
+
+
+def print_stage_results(configured_stages, completed_stages, progress_table=None):
     """Show all five stages, including explicit NOT RUN rows after failure."""
-    print("  Qualification stage results:", flush=True)
-    print_progress_table_header()
+    if progress_table is None:
+        print("  Qualification stage results:", flush=True)
+        print_progress_table_header()
     for index, (name, _) in enumerate(configured_stages):
         record = (completed_stages[index]
                   if index < len(completed_stages) else None)
@@ -3823,17 +3855,25 @@ def print_stage_results(configured_stages, completed_stages):
         else:
             verdict = record.get("status", "INCOMPLETE")
             duration = f"{record['elapsed_s']:.2f}s"
-        print(progress_table_row(index, name, verdict, duration),
-              flush=True)
+        if progress_table is None:
+            print(progress_table_row(index, name, verdict, duration),
+                  flush=True)
+        else:
+            progress_table.complete("Stage", name, verdict, duration)
 
 
-def print_physical_trial_result(verdict, duration):
+def print_physical_trial_result(verdict, duration, progress_table=None):
     """Display the optional physical trial without changing its admission."""
-    print("  Optional physical algorithm trial:", flush=True)
-    print_progress_table_header()
-    print(progress_table_row(
-        0, "Authorized physical swap trial (dev)", verdict, duration),
-        flush=True)
+    if progress_table is None:
+        print("  Optional physical algorithm trial:", flush=True)
+        print_progress_table_header()
+        print(progress_table_row(
+            0, "Authorized physical swap trial (dev)", verdict, duration),
+            flush=True)
+    else:
+        progress_table.complete(
+            "Physical", "Authorized physical swap trial (dev)",
+            verdict, duration)
 
 
 LOADED_MAPPER_INVENTORY_SOURCE_PATTERN = re.compile(
@@ -4096,7 +4136,7 @@ def loaded_timing_phase(line):
 
 
 def run_stage(title, command, result, *, parse_bench=False,
-              stream_rootless_progress=False):
+              stream_rootless_progress=False, progress_table=None):
     start = time.monotonic()
     loaded_timing_phases = []
     loaded_current_phase = "preflight"
@@ -4109,6 +4149,26 @@ def run_stage(title, command, result, *, parse_bench=False,
     rootless_active_phase = None
     rootless_active_started = start
     rootless_is_tty = False
+
+    def emit_progress_row(suite, phase_index, phase, verdict, duration,
+                          *, overwrite=False):
+        """Render only authenticated phase labels with official global IDs."""
+        if progress_table is not None:
+            name = (LOADED_PHASE_DISPLAY_NAMES[phase] if suite == "Loaded"
+                    else rootless_suite_display_name(phase))
+            if verdict == "RUNNING":
+                progress_table.running(suite, name)
+            else:
+                progress_table.complete(
+                    suite, name, verdict, duration, overwrite=overwrite)
+            return
+        row = (loaded_phase_table_row(phase_index, phase, verdict, duration)
+               if suite == "Loaded" else
+               rootless_suite_table_row(phase_index, phase, verdict, duration))
+        sys.stdout.write(("\r" if overwrite else "") + row +
+                         ("" if verdict == "RUNNING" else "\n"))
+        sys.stdout.flush()
+
     try:
         child_env = os.environ.copy()
         tested_source = result.get("tested_commit_sha")
@@ -4119,18 +4179,16 @@ def run_stage(title, command, result, *, parse_bench=False,
             child_env["SWAPZ_SIGN_NONINTERACTIVE"] = "1"
         if parse_bench or stream_rootless_progress:
             if parse_bench:
-                print("       loaded qualification progress:")
                 loaded_is_tty = sys.stdout.isatty()
                 loaded_phase_open = True
-            else:
-                print("       Rootless suite results:", flush=True)
-            print_progress_table_header()
+            if progress_table is None:
+                print("       loaded qualification progress:"
+                      if parse_bench else "       Rootless suite results:",
+                      flush=True)
+                print_progress_table_header()
             if loaded_is_tty:
-                sys.stdout.write(
-                    "\r" + loaded_phase_table_row(
-                        loaded_phase_index, loaded_current_phase,
-                        "RUNNING", "-"))
-                sys.stdout.flush()
+                emit_progress_row("Loaded", loaded_phase_index,
+                                  loaded_current_phase, "RUNNING", "-")
             rootless_allowed_names = (
                 rootless_phase_names() if stream_rootless_progress
                 else frozenset())
@@ -4156,19 +4214,14 @@ def run_stage(title, command, result, *, parse_bench=False,
                             rootless_active_phase = name
                             rootless_active_started = time.monotonic()
                             if rootless_is_tty:
-                                sys.stdout.write(
-                                    "\r" + rootless_suite_table_row(
-                                        index, name, "RUNNING", "-"))
-                                sys.stdout.flush()
+                                emit_progress_row(
+                                    "Rootless", index, name, "RUNNING", "-")
                         elif (state == "PASS" and
                               index == rootless_next_index and
                               name == rootless_active_phase):
-                            sys.stdout.write(
-                                ("\r" if rootless_is_tty else "") +
-                                rootless_suite_table_row(
-                                    index, name, "PASS", f"{seconds}s") +
-                                "\n")
-                            sys.stdout.flush()
+                            emit_progress_row(
+                                "Rootless", index, name, "PASS",
+                                f"{seconds}s", overwrite=rootless_is_tty)
                             rootless_next_index += 1
                             rootless_active_phase = None
                 if parse_bench:
@@ -4204,21 +4257,19 @@ def run_stage(title, command, result, *, parse_bench=False,
                             "elapsed_s": duration})
                         verdict = loaded_phase_problem or (
                             "PASS" if loaded_phase_passed else "DONE")
-                        sys.stdout.write(
-                            ("\r" if loaded_is_tty else "") +
-                            loaded_phase_table_row(
-                                loaded_phase_index, loaded_current_phase,
-                                verdict, f"{duration:.3f}s") + "\n")
+                        emit_progress_row(
+                            "Loaded", loaded_phase_index, loaded_current_phase,
+                            verdict, f"{duration:.3f}s",
+                            overwrite=loaded_is_tty)
                         loaded_phase_index += 1
                         loaded_current_phase = next_phase
                         loaded_current_phase_started = boundary
                         loaded_phase_passed = False
                         loaded_phase_problem = None
                         if loaded_is_tty:
-                            sys.stdout.write(
-                                "\r" + loaded_phase_table_row(
-                                    loaded_phase_index, loaded_current_phase,
-                                    "RUNNING", "-"))
+                            emit_progress_row(
+                                "Loaded", loaded_phase_index,
+                                loaded_current_phase, "RUNNING", "-")
                         sys.stdout.flush()
             rc = proc.wait()
             proc.stdout.close()
@@ -4231,12 +4282,10 @@ def run_stage(title, command, result, *, parse_bench=False,
                 verdict = loaded_phase_problem or (
                     "FAIL" if rc else
                     "PASS" if loaded_phase_passed else "DONE")
-                sys.stdout.write(
-                    ("\r" if loaded_is_tty else "") +
-                    loaded_phase_table_row(
-                        loaded_phase_index, loaded_current_phase,
-                        verdict, f"{duration:.3f}s") + "\n")
-                sys.stdout.flush()
+                emit_progress_row(
+                    "Loaded", loaded_phase_index, loaded_current_phase,
+                    verdict, f"{duration:.3f}s",
+                    overwrite=loaded_is_tty)
                 loaded_phase_open = False
             output = "".join(chunks)
         else:
@@ -4250,22 +4299,16 @@ def run_stage(title, command, result, *, parse_bench=False,
         output, rc = type(exc).__name__, 127
     if parse_bench and loaded_phase_open:
         duration = round(time.monotonic() - loaded_current_phase_started, 3)
-        sys.stdout.write(
-            ("\r" if loaded_is_tty else "") +
-            loaded_phase_table_row(
-                loaded_phase_index, loaded_current_phase,
-                "FAIL", f"{duration:.3f}s") + "\n")
-        sys.stdout.flush()
+        emit_progress_row(
+            "Loaded", loaded_phase_index, loaded_current_phase,
+            "FAIL", f"{duration:.3f}s", overwrite=loaded_is_tty)
     if stream_rootless_progress and rootless_active_phase is not None:
         # No authenticated completion: finalize the active row, not a PASS.
         elapsed_s = max(0.0, time.monotonic() - rootless_active_started)
-        sys.stdout.write(
-            ("\r" if rootless_is_tty else "") +
-            rootless_suite_table_row(
-                rootless_next_index, rootless_active_phase,
-                "FAIL" if rc else "INCOMPLETE", f"{elapsed_s:.1f}s") +
-            "\n")
-        sys.stdout.flush()
+        emit_progress_row(
+            "Rootless", rootless_next_index, rootless_active_phase,
+            "FAIL" if rc else "INCOMPLETE", f"{elapsed_s:.1f}s",
+            overwrite=rootless_is_tty)
     observed_exit_code = rc
     if title == "Native and rootless contracts" and rc != 0:
         retain_direct_rootless_first_failure(output, rc)
@@ -4630,6 +4673,14 @@ def run_stage(title, command, result, *, parse_bench=False,
             details = first_compiler_failure_location(output)
         for detail in details:
             print(f"        {detail}", flush=True)
+        if not details:
+            print("        Source-bound location: unavailable; inspect "
+                  "retained private failure evidence", flush=True)
+        if record["failed_phase"] not in (
+                "adjacent READ coalescing A/B evidence",
+                "owned RAM primary lifecycle prepare"):
+            print("        Safe next step: fix the first reported gate, "
+                  "then rerun make test on clean main", flush=True)
     return rc
 
 
@@ -10050,6 +10101,25 @@ def git_publication_failure_reason(completed):
     return "git_command_failed"
 
 
+def git_push_with_credential_fallback(run, origin_url, report_sha):
+    """Try existing gh HTTPS authentication without persisting a token.
+
+    Do not change configured credential helpers or output arbitrary Git stderr.
+    If gh is unavailable or unauthenticated, preserve the original refusal.
+    """
+    destination = f"{report_sha}:refs/heads/main"
+    initial = run("push", "origin", destination, timeout=60)
+    if (not origin_url.startswith("https://github.com/") or
+            git_publication_failure_reason(initial) !=
+            "credentials_or_repository_access"):
+        return initial
+    recovered = run("-c", "credential.helper=",
+                    "-c", "credential.helper=!gh auth git-credential",
+                    "push", "origin", destination, timeout=60)
+    return (recovered if recovered is not None and
+            recovered.returncode == 0 else initial)
+
+
 def publish(source_sha):
     """Publish the canonical report with bounded nonforce retry.
 
@@ -10207,7 +10277,7 @@ def publish(source_sha):
         else build_report_commit(head_sha))
     if error:
         return error
-    push = run("push", "origin", f"{report_sha}:refs/heads/main", timeout=60)
+    push = git_push_with_credential_fallback(run, url, report_sha)
     concurrent_parent = None
 
     if push is None or push.returncode:
@@ -10304,8 +10374,7 @@ def publish(source_sha):
                 else build_report_commit(remote_sha))
             if error:
                 return error
-            retry = run("push", "origin",
-                        f"{retry_sha}:refs/heads/main", timeout=60)
+            retry = git_push_with_credential_fallback(run, url, retry_sha)
             if retry is not None and not retry.returncode:
                 report_sha = retry_sha
                 if remote_sha != head_sha:
@@ -10810,6 +10879,7 @@ def main():
     else:
         print("  Rootless: automatic CPU-aware groups; hardware benchmarks sequential.")
         print(f"  {parallelism}")
+    progress_table = QualificationProgressTable()
     stages = [
         ("Build module and helpers", [*make_cmd, f"KDIR={args.kdir}"]),
         ("Native and rootless contracts",
@@ -10845,11 +10915,12 @@ def main():
         for i, (title, command) in enumerate(stages):
             code = run_stage(
                 title, command, result, parse_bench=(i == 4),
-                stream_rootless_progress=(i == 1))
+                stream_rootless_progress=(i == 1),
+                progress_table=progress_table)
             if code:
                 exit_code = code
                 break
-    print_stage_results(stages, result["stages"])
+    print_stage_results(stages, result["stages"], progress_table)
     if result["stages"] and result["stages"][0].get("status") == "PASS":
         # Record the bytes left by the complete qualification sequence. Physical
         # smoke later requires this report identity, the signed review identity,
@@ -10957,7 +11028,7 @@ def main():
                     "overall": "PASS_DEVELOPMENT_ONLY",
                     "reason": "source_built_bounded_swap_roundtrip",
                 }
-                print_physical_trial_result("PASS", physical_duration)
+                print_physical_trial_result("PASS", physical_duration, progress_table)
             elif physical_exit in (1, 3):
                 result["algorithm_real_swap"] = {
                     "overall": ("RECOVERY_REQUIRED" if physical_exit == 3
@@ -10966,7 +11037,7 @@ def main():
                 }
                 result["overall"] = "FAIL"
                 exit_code = physical_exit
-                print_physical_trial_result("FAIL", physical_duration)
+                print_physical_trial_result("FAIL", physical_duration, progress_table)
                 print("  Physical trial cleanup: inspect root-owned same-boot "
                       "state before another test")
             else:
@@ -10974,11 +11045,11 @@ def main():
                     "overall": "NOT_RUN",
                     "reason": "physical_trial_declined_or_blocked",
                 }
-                print_physical_trial_result("NOT RUN", physical_duration)
+                print_physical_trial_result("NOT RUN", physical_duration, progress_table)
                 print("  Physical trial admission: device unchanged or "
                       "safely refused")
         else:
-            print_physical_trial_result("NOT RUN", "-")
+            print_physical_trial_result("NOT RUN", "-", progress_table)
             print("  Physical qualification: source/run/target admission "
                   "protocol is not yet qualified")
         if not exit_code:
@@ -11040,6 +11111,20 @@ def main():
     print(f"  Tested Git commit: {result['tested_commit_sha']}", flush=True)
     notice = publish(result["tested_commit_sha"])
     print(f"  Git result: {notice}", flush=True)
+    if notice.startswith(
+            "GIT_SYNC_FAILED: phase=push reason=credentials_or_repository_access"):
+        print("  Upload recovery: no noninteractive GitHub write "
+              "credential was accepted", flush=True)
+        print("        HTTPS: gh auth login --git-protocol https",
+              flush=True)
+        print("        Then: gh auth setup-git; rerun make test on clean main",
+              flush=True)
+        print("        Local report retained; no upload was confirmed",
+              flush=True)
+    elif notice.startswith(
+            "GIT_SYNC_FAILED: phase=push reason=remote_permission_or_policy"):
+        print("  Upload recovery: resolve main-branch write permission "
+              "or branch policy before rerunning make test", flush=True)
     diagnostic_path = write_failure_diagnostic(result, notice)
     if diagnostic_path is not None:
         print(f"  Private failure diagnostics: {diagnostic_path} "
