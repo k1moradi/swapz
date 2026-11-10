@@ -1607,6 +1607,13 @@ def _algorithm_runtime_base():
                 stat.S_IMODE(info.st_mode) != 0o700):
             raise ProbeError(
                 "runtime state directory must be root-owned mode 0700")
+    filesystem = _run([
+        "findmnt", "--first-only", "--noheadings", "--output", "FSTYPE",
+        "--target", str(base),
+    ]).stdout.strip()
+    if filesystem != "tmpfs":
+        raise ProbeError(
+            "runtime state directory must be backed by tmpfs")
     return base
 
 
