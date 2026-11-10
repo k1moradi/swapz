@@ -1610,13 +1610,13 @@ def _legacy_recovery_base():
     return base
 
 
-def _recovery_base(target=None):
+def _runtime_state_base(target=None):
     """Return same-boot runtime ownership for every current physical trial."""
     del target
     return _algorithm_runtime_base()
 
 
-def _recovery_run_directory(state_dir, run_id=None):
+def _state_run_directory(state_dir, run_id=None):
     directory = Path(state_dir)
     if directory.parent == ALGORITHM_RUNTIME_BASE:
         base = _algorithm_runtime_base()
@@ -1646,13 +1646,13 @@ def _select_run_directory(state_dir, run_id, development_only):
         raise ProbeError(
             "current trial state is fixed under /run; persistent recovery "
             "directories are legacy-only")
-    return _recovery_run_directory(expected, run_id)
+    return _state_run_directory(expected, run_id)
 
 
 def _partition_lock(partuuid, base=None):
     """Lock one partition for the lifetime of current or explicit legacy state."""
     if base is None:
-        base = _recovery_base()
+        base = _runtime_state_base()
     else:
         base = Path(base)
     name = f"partition-{partuuid}.lock"
@@ -1691,18 +1691,18 @@ def _review_consumption_record(target, run_id):
 
 
 def _check_review_unconsumed(target, run_id):
-    base = _recovery_base(target)
+    base = _runtime_state_base(target)
     if (base / f"consumed-{run_id}.json").exists() or (
             base / f"partition-{target['partuuid']}.active").exists():
-        raise ProbeError("review consumed or partition recovery outstanding")
+        raise ProbeError("review consumed or partition runtime ownership outstanding")
 
 
 def _burn_review(target, run_id):
     """Permanently consume one approved run before any preparation can fail."""
-    base = _recovery_base(target)
+    base = _runtime_state_base(target)
     record = _review_consumption_record(target, run_id)
     if (base / f"partition-{target['partuuid']}.active").exists():
-        raise ProbeError("partition recovery is already outstanding")
+        raise ProbeError("partition runtime ownership is already outstanding")
     try:
         _durable_exclusive_record(base / f"consumed-{run_id}.json", record)
     except FileExistsError as exc:
@@ -1710,8 +1710,8 @@ def _burn_review(target, run_id):
 
 
 def _consume_review(target, run_id, *, preburned=False):
-    """Claim partition recovery exactly once, including for direct callers."""
-    base = _recovery_base(target)
+    """Claim partition runtime ownership exactly once, including for direct callers."""
+    base = _runtime_state_base(target)
     record = _review_consumption_record(target, run_id)
     active_path = base / f"partition-{target['partuuid']}.active"
     used_path = base / f"consumed-{run_id}.json"
@@ -1749,7 +1749,7 @@ def _release_partition_ownership(state):
             "restoration_stage expected='COMPLETE' "
             f"observed={observed_stage!r}; "
             "ownership_marker_action=not_attempted")
-    base = _recovery_base(state)
+    base = _runtime_state_base(state)
     active_path = base / f"partition-{state['partuuid']}.active"
     try:
         marker = _load_unique_json(active_path.read_bytes())
@@ -1790,7 +1790,7 @@ def _release_partition_ownership(state):
 
 
 def _validate_state_dir(state_dir):
-    state_dir = _recovery_run_directory(state_dir)
+    state_dir = _state_run_directory(state_dir)
     try:
         info = state_dir.lstat()
     except OSError as exc:
@@ -2333,10 +2333,10 @@ def _final_observations(results, state_dir, state, target):
 
     results["final_module_present"] = Path("/sys/module/dm_swapz").exists()
     current_module_cleanup = results["final_module_present"] is False
-    active = _recovery_base(target) / f"partition-{state['partuuid']}.active"
+    active = _runtime_state_base(target) / f"partition-{state['partuuid']}.active"
     active_marker_present = active.exists()
     results["active_partition_marker_present"] = active_marker_present
-    consumed = _recovery_base(target) / f"consumed-{state['run_id']}.json"
+    consumed = _runtime_state_base(target) / f"consumed-{state['run_id']}.json"
     run_claim_consumed = consumed.is_file()
     results["run_claim_consumed"] = run_claim_consumed
     results["approval_consumed"] = (
@@ -3056,7 +3056,7 @@ def recover(state_dir, device_arg, confirm_arg, lock_held=False,
         raise ProbeError(
             "legacy pre-migration recovery journal requires read-only manual "
             "recovery; automatic block-zero restoration is disabled")
-    _recovery_run_directory(state_dir, state["run_id"])
+    _state_run_directory(state_dir, state["run_id"])
     if device_arg != confirm_arg or device_arg != state.get("device_arg"):
         raise ProbeError(
             "recovery requires the exact originally confirmed device path; "
@@ -3137,7 +3137,7 @@ def recover(state_dir, device_arg, confirm_arg, lock_held=False,
     lock_fd = None if lock_held else _partition_lock(
         state["partuuid"], base=state_dir.parent)
     try:
-        base = _recovery_base(state)
+        base = _runtime_state_base(state)
         try:
             marker = _load_unique_json(
                 (base / f"partition-{state['partuuid']}.active").read_bytes())
@@ -3151,7 +3151,7 @@ def recover(state_dir, device_arg, confirm_arg, lock_held=False,
             state, device_arg, confirm_arg)
         target["development_only"] = development_only
         target["algorithm_real_swap"] = state.get("algorithm_real_swap") is True
-        _recovery_base(target)
+        _runtime_state_base(target)
         module_present = Path("/sys/module/dm_swapz").exists()
         if module_present and state["module_ownership"] != "MODULE_OWNED":
             raise ProbeError(
@@ -3284,7 +3284,7 @@ def recover_pending_algorithm_trial():
                 not isinstance(partuuid, str) or
                 marker_path.name != f"partition-{partuuid}.active"):
             raise ValueError("marker identity invalid")
-        state_dir = _recovery_run_directory(
+        state_dir = _state_run_directory(
             base / f"swapz-physical-{run_id}", run_id)
         _validate_state_dir(state_dir)
         state = _load_unique_json((state_dir / STATE_NAME).read_bytes())
@@ -3392,7 +3392,7 @@ def inspect_target_identity_for_recovery(state, device_arg, confirm_arg):
 def _prepare_state(target, state_dir, evidence, review):
     """Create the ownership record; block zero is identity-only and immutable."""
     dm_name, dm_uuid = _allocate_dm_identity()
-    state_dir = _recovery_run_directory(state_dir, review["run_id"])
+    state_dir = _state_run_directory(state_dir, review["run_id"])
     if state_dir.exists() or state_dir.is_symlink():
         raise ProbeError("one-use state run directory already exists")
     _verify_target_identity(target)
@@ -3976,7 +3976,7 @@ def run_probe(device_arg, confirm_arg, state_dir_arg, review_path,
     target["device_arg"] = device_arg
     target["development_only"] = development_only
     target["algorithm_real_swap"] = algorithm_real_swap
-    _recovery_base(target)
+    _runtime_state_base(target)
     live_artifact_digests = _artifact_digests()
     if live_artifact_digests != evidence["artifact_digests"]:
         raise ProbeError("current build artifacts differ from admitted evidence")
@@ -4575,11 +4575,11 @@ def plan(device_arg, confirm_arg, review_path=None):
     diagnostics = _kernel_swapz_messages(_utc_timestamp())
     _require_kernel_diagnostics(diagnostics, "preflight_kernel_diagnostics")
     try:
-        _recovery_base(target)
-        recovery_message = (
+        _runtime_state_base(target)
+        runtime_state_message = (
             "same-boot runtime ownership verified; no recovery device required")
     except ProbeError as exc:
-        recovery_message = f"runtime ownership: BLOCKED ({exc})"
+        runtime_state_message = f"runtime ownership: BLOCKED ({exc})"
     evidence = None
     try:
         evidence = current_source_evidence()
@@ -4623,7 +4623,7 @@ def plan(device_arg, confirm_arg, review_path=None):
     print(f"DEVICE_PREFLIGHT=PASS major_minor={target['major']}:{target['minor']} "
           f"partuuid={target['partuuid']} bytes={target['size_bytes']} "
           f"used_kib={target['swap_used_kib']}")
-    print(f"RECOVERY_GATE={recovery_message}")
+    print(f"RECOVERY_GATE={runtime_state_message}")
     print("MODULE_MAPPER_GATE=PASS module=absent "
           f"other_mapper_count={dm_inventory['other_mapper_count']} "
           f"other_mapper_sha256={dm_inventory['other_mapper_sha256']}")
