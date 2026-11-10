@@ -29,7 +29,10 @@ arbitrary disk beginning with `nullb` as synthetic: require the complete
 `nullb<decimal-index>` disk name. The privileged harness independently
 verifies null_blk driver/device identity.
 Switch between ordinary swap and swapz with verified swapoff/swapon,
-without reboot. After a successful trial, obtain the owner's choice:
+without reboot. An active selected partition may have nonzero `Used`; PREPARE
+records that ordinary-swap policy instead of requiring an artificially empty
+partition, and START lets the kernel `swapoff` migrate live pages before any
+exclusive mapper mutation. After a successful trial, obtain the owner's choice:
 keep swapz active or return to ordinary Linux swap.
 
 All swapz-specific record and extent descriptors, offsets, lengths,
