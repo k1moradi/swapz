@@ -2686,7 +2686,14 @@ A later source change after preflight must still fail the publication/physical
 source-identity checks. Tests must prove this fast refusal, nested inner
 failure attribution, privacy, first-cause ordering and unchanged gates.
 No troubleshooting fix is complete merely because a separate direct command
-reveals the cause. The isolated Make-interface incremental-build fixture may
+reveals the cause. Synthetic unified rootless-stream fixtures must provide an
+explicit finite source-controlled phase allowlist for their synthetic markers
+and verify PASS and first-failure rows, the original exit, and a single header.
+Keep a separate test for parsing actual declared source phases; a change in
+source lookup must not silently remove rows from a synthetic display contract.
+Synthetic test assertion failures must include bounded fixture-only captured
+output so the cause is available in the official first-error report.
+The isolated Make-interface incremental-build fixture may
 override the checkout preflight only in its copied synthetic runner, because
 that fixture deliberately edits tracked fake sources to check dirty build
 provenance. This exemption must never reach the real `make test` command.

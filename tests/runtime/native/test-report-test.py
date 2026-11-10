@@ -661,9 +661,17 @@ class NativeTimingContract(unittest.TestCase):
             "label=tests/Makefile native and metadata\n")
         result = {"stages": [], "benchmarks": {}}
         captured = io.StringIO()
+        # This fixture tests the stream and original failure handling. The
+        # independently tested source inventory must not affect its markers.
+        declared_phases = frozenset({
+            "rootless initialization", "tests/Makefile native and metadata",
+        })
         with mock.patch.object(
                 runner.subprocess, "Popen",
                 return_value=FakeStreamingProcess(transcript, returncode=1)), \
+                mock.patch.object(
+                    runner, "rootless_phase_names",
+                    return_value=declared_phases), \
                 mock.patch.object(
                     runner, "retain_direct_rootless_first_failure"), \
                 contextlib.redirect_stdout(captured):
@@ -674,8 +682,10 @@ class NativeTimingContract(unittest.TestCase):
                     stream_rootless_progress=True, progress_table=table), 0)
         output = captured.getvalue()
         self.assertEqual(output.count("ID | Suite"), 1)
-        self.assertEqual(output.count("Rootless initialization"), 1)
-        self.assertEqual(output.count("Native build and metadata"), 1)
+        self.assertEqual(output.count("Rootless initialization"), 1,
+                         f"Source-controlled synthetic progress: {output!r}")
+        self.assertEqual(output.count("Native build and metadata"), 1,
+                         f"Source-controlled synthetic progress: {output!r}")
         self.assertRegex(
             output, r"(?m)^\s*2 \| Rootless \|.*\| FAIL\s+\|")
         self.assertNotIn("\r", output)
