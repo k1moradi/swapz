@@ -934,8 +934,17 @@ int main(void)
         # STARTING must be durable before the first device mutation, but the
         # host/selector snapshot authorizing that mutation must be fresh.
         starting_write = start.index("swapz_primary_state_write_at(")
-        starting_interrupt = start.index(
-            'SWAPZ_PRIMARY_TEST_INTERRUPT_AFTER("start-starting")')
+        # c_function_body() masks quoted arguments to prevent diagnostics
+        # from satisfying executable-call checks. Confirm the executable
+        # macro call first, then inspect its phase argument in aligned raw C.
+        starting_interrupt = start.index("SWAPZ_PRIMARY_TEST_INTERRUPT_AFTER(")
+        start_raw = c_function_body(
+            source, "swapz_primary_start_prepared", code_only=False)
+        self.assertTrue(
+            start_raw.startswith(
+                'SWAPZ_PRIMARY_TEST_INTERRUPT_AFTER("start-starting")',
+                starting_interrupt),
+            "STARTING interruption must retain its original phase")
         raw_swapoff = start.index("swapz_primary_transition_original_swap(")
         target_open = start.index("swapz_primary_target_open_exclusive(")
         mapper_create = start.index("swapz_primary_dm_create_mapper(")
