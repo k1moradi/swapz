@@ -361,9 +361,14 @@ class PhysicalSwapProbeTests(unittest.TestCase):
             if failure and failure.group(2) in known_tests:
                 detail = ""
                 if failure.group(1) == "FAIL":
+                    # Bind the comparison to the selected first nested
+                    # failure block, never a later test's assertion.
+                    failure_block = completed.stderr[failure.end():].split(
+                        "======================================================================",
+                        1)[0][:8192]
                     numbers = re.search(
                         r"(?m)^AssertionError: ([0-9]{1,3}) != "
-                        r"([0-9]{1,3})$", completed.stderr)
+                        r"([0-9]{1,3})$", failure_block)
                     if numbers:
                         detail = (f" observed={numbers.group(1)}"
                                   f" expected={numbers.group(2)}")
