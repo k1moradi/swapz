@@ -7167,6 +7167,10 @@ well-formed `kernel_release` matching the owner `make test_full` RAM report. A k
 upgrade or platform mismatch makes the release BLOCKED until fresh owner
 qualification and downstream exact-source evidence are regenerated.
 
+The primary manager's rootless swap-inventory parser tests must cover the
+signed priority endpoints INT_MIN/INT_MAX, reject malformed or overflowing
+tokens, and preserve the observed output on failure before any raw swapoff.
+
 The primary manager's PARTUUID direct-C tests must reject all-hyphen,
 leading/trailing-hyphen and consecutive-hyphen values, require at least eight
 hexadecimal digits, preserve GPT-style hyphenated values, and prove canonical

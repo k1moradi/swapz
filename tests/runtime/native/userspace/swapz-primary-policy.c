@@ -846,8 +846,36 @@ static void test_primary_swap_transition_adapter(void)
 
 static void test_swap_inventory_parser(void)
 {
+	static const char *const invalid_priorities[] = {
+		"", "-", "+1", "--1", "1x", "2147483648",
+		"-2147483649", "18446744073709551616",
+		"-18446744073709551616",
+	};
 	struct swapz_primary_swap_entry rows[4];
 	size_t count = 0;
+	size_t index;
+	int priority;
+
+	/* Preserve the original raw swap priority policy. Invalid inventory
+	 * must not modify the output used by later lifecycle admission. */
+	priority = 99;
+	assert(swapz_primary_parse_priority("2147483647", &priority) == 0);
+	assert(priority == INT_MAX);
+	assert(swapz_primary_parse_priority("-2147483648", &priority) == 0);
+	assert(priority == INT_MIN);
+	assert(swapz_primary_parse_priority("0", &priority) == 0);
+	assert(priority == 0);
+	assert(swapz_primary_parse_priority("-0", &priority) == 0);
+	assert(priority == 0);
+	for (index = 0; index < sizeof(invalid_priorities) /
+			   sizeof(invalid_priorities[0]); ++index) {
+		priority = 99;
+		assert(swapz_primary_parse_priority(
+			invalid_priorities[index], &priority) < 0);
+		assert(priority == 99);
+	}
+	assert(swapz_primary_parse_priority(NULL, &priority) < 0);
+	assert(swapz_primary_parse_priority("1", NULL) < 0);
 
 	assert(swapz_primary_parse_swaps(
 		"Filename Type Size Used Priority\n"
