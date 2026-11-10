@@ -42,6 +42,12 @@ header by reporting `start-header-verified`, never the retired
 optional raw-partition header backups; neither synthetic recovery fixtures nor
 real lifecycle paths may write the original swap header.
 
+The standalone SWAPSPACE2 native header test must compare smaller-area
+geometry against its own 256-page segment constant, without importing the
+kernel allocator header. Restore a valid Linux swap header after rejecting a
+duplicate bad-page list so the cleared-UUID acceptance test independently
+checks optional UUID behavior, not stale malformed fixture state.
+
 ### Failed compressed read must never publish caller bytes
 
 The native payload-only mapping regression must distinguish malformed RAM

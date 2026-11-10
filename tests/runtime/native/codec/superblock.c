@@ -93,7 +93,7 @@ int main(void)
 	put_u32_le(header + SWAPZ_LINUX_SWAP_LAST_PAGE_OFFSET,
 		   full_last_page - SEGMENT_PAGES);
 	if (!swapz_linux_swap_header_parse(header, DEVICE_BYTES, &layout) ||
-	    layout.last_page != full_last_page - SWAPZ_SEGMENT_BLOCKS ||
+	    layout.last_page != full_last_page - SEGMENT_PAGES ||
 	    swapz_linux_swap_header_valid(header, DEVICE_BYTES)) {
 		fprintf(stderr, "FAIL: smaller declared Linux swap area parsing\n");
 		++failures;
@@ -117,6 +117,9 @@ int main(void)
 		++failures;
 	}
 
+	/* Start the optional-UUID check with a valid header, not the rejected
+	 * duplicate-bad-page fixture left by the preceding negative case. */
+	build_linux_swap_header(header);
 	/* Linux swap UUID is optional; PARTUUID and exact geometry bind backing. */
 	memset(header + SWAPZ_LINUX_SWAP_UUID_OFFSET, 0,
 	       SWAPZ_LINUX_SWAP_UUID_BYTES);
