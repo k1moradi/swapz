@@ -141,7 +141,8 @@ lower requests, unchanged output and a successful exact-size retry.
 
 Under an explicit one-block cold-read budget, native packed-read regressions
 must verify one lower payload-block read per logical request, no inherited
-serialized-metadata cache hits, and byte-exact CRC-validated readback after
+hits from the legacy metadata-named payload-block cache, and byte-exact
+CRC-validated readback after
 overwrite and mutation fences. A separate zero/unlimited-budget scenario
 covers legitimate extent and block-zero data reuse.
 
@@ -2651,14 +2652,16 @@ Only an exact physical-probe rootless failure marker and a matching
 PhysicalSwapProbeTests class may use that wider window; unrelated phases
 retain the conservative 2-KiB limit. Two allowlisted restoration-state
 constants may appear as explicit observed/expected values; arbitrary assertion
-operands remain private. Synthetic recovery fixtures must populate the same
-immutable run_id in both the state and results records, without weakening the
-real recovery binding validator. Rootless physical-recovery simulation must
-report the durably reread state after cleanup, not a stale pre-recovery
-dictionary alias; the negative interrupted-fsync fixture must not invent a
-successful persistence claim. The source-contract guard checks that the
-physical probe is absent from executable make-test commands, without
-forbidding its filename in observational diagnostics.
+operands remain private. These clauses describe the retired
+`physical-swap-probe.py` compatibility fixture only: its synthetic historical
+state/results records must use the same immutable run_id, and its old
+restoration simulation must reread the fixture state after cleanup rather than
+a stale dictionary alias. The interrupted-fsync negative fixture must not
+invent persistence. None of this historical probe state authorizes current
+lifecycle recovery, raw-header backup/restore or persistent swapz metadata.
+The source-contract guard checks that the physical probe is absent from
+executable make-test commands, without forbidding its filename in
+observational diagnostics.
 Comparisons of two exact fixed sanitized markers (for example, a withheld
 unittest identity versus a private-exception omission marker) show both
 observed and expected fixed states without exposing arbitrary child text.
