@@ -3644,7 +3644,15 @@ class ReportContract(unittest.TestCase):
             "overall": "FAIL",
             "source_sha": source_sha,
             "tested_commit_sha": source_sha,
-            "host_identity": {"private_host": "NEVER_EXPORT"},
+            "host_identity": {
+                "architecture": "fixture-architecture",
+                "private_host": "NEVER_EXPORT",
+            },
+            "kernel_release": "fixture-kernel",
+            "algorithm_real_swap": {
+                "overall": "FAIL",
+                "reason": "physical_oracle_or_cleanup_failure",
+            },
             "stages": [{
                 "name": "Owned RAM smoke + mixed/QD pilot",
                 "status": "FAIL",
@@ -3673,12 +3681,17 @@ class ReportContract(unittest.TestCase):
                 self.assertEqual(path.stat().st_mode & 0o777, 0o600)
                 saved = json.loads(path.read_text())
                 self.assertEqual(saved["tested_commit_sha"], source_sha)
+                self.assertEqual(saved["architecture"], "fixture-architecture")
+                self.assertEqual(saved["kernel_release"], "fixture-kernel")
+                self.assertEqual(saved["physical_trial"]["overall"], "FAIL")
                 self.assertEqual(len(saved["fast_sessions"]), 10)
                 self.assertEqual(len(saved["serial_sessions"]), 10)
                 self.assertEqual(saved["fast_sessions"][1]["read_coalesce"], 1)
                 kernel = saved["fast_sessions"][1]["passes"]["sequential"][
                     "kernel_read_path"]
                 self.assertIn("parallel_read_coalesce_skip_gap", kernel)
+                self.assertIn("host_cpu",
+                              saved["fast_sessions"][1]["passes"]["sequential"])
                 self.assertNotIn("NEVER_EXPORT", path.read_text())
                 self.assertNotIn("host_identity", saved)
                 self.assertIsNone(runner.write_failure_diagnostic(
