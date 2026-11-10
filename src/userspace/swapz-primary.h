@@ -52,6 +52,10 @@ struct swapz_primary_manifest {
 	/* Clean 4KiB backing blocks after the immutable header, partial tail,
 	 * and complete 1MiB segments containing Linux-listed bad pages are removed. */
 	uint32_t backing_physical_blocks;
+	/* Volatile lifecycle policy captured before START mutates raw swap.
+	 * Negative priorities represent Linux automatic low-priority policy. */
+	int original_swap_active;
+	int original_swap_priority;
 	struct swapz_primary_target target;
 };
 
