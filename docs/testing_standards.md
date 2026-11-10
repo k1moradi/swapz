@@ -67,8 +67,8 @@ them without rewriting the header, preserve the listed entry count, and count
 each contaminated clean-allocation segment only once. Reject a listed bad-page
 count greater than the header-declared data-page count, even when all entries
 repeat the same valid page: the declared usable swap count must never underflow.
-The narrow no-bad-pages validation helper must still reject such a layout. Restore a fresh valid swap
-header after the duplicate-list case so the cleared-UUID acceptance test
+The narrow no-bad-pages validation helper must still reject such a layout.
+Restore a fresh valid swap header after the duplicate-list case so the cleared-UUID acceptance test
 independently verifies optional UUID behavior.
 
 ### Failed compressed read must never publish caller bytes
