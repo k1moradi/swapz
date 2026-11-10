@@ -218,10 +218,6 @@ _Static_assert(SWAPZ_BLOCK_BYTES % 512U == 0U,
 #define SWAPZ_PRIMARY_TARGET_DEVICE \
 	makedev(swapz_primary_selected_target.device_major, \
 		swapz_primary_selected_target.device_minor)
-#define SWAPZ_PRIMARY_PHYSICAL_BLOCKS \
-	((SWAPZ_PRIMARY_DEVICE_BYTES >= SWAPZ_PRIMARY_BLOCK_BYTES) ? \
-	 (((SWAPZ_PRIMARY_DEVICE_BYTES / SWAPZ_PRIMARY_BLOCK_BYTES - 1ULL) / \
-	   SWAPZ_PRIMARY_SEGMENT_BLOCKS) * SWAPZ_PRIMARY_SEGMENT_BLOCKS) : 0ULL)
 #define SWAPZ_PRIMARY_PLAN_BUFFER_BYTES 16384U
 /* Keep ordinary mount reads on stack; grow only for unusually large hosts.
  * Both the per-table and 64 MiB aggregate read budgets remain bounded. */
@@ -1817,6 +1813,7 @@ static int swapz_primary_manifest_valid(
 	       swapz_primary_target_valid(&manifest->target);
 }
 
+#ifdef SWAPZ_PRIMARY_ROOTLESS_TEST
 static uint64_t swapz_primary_physical_blocks(uint64_t device_bytes)
 {
 	uint64_t blocks;
@@ -1836,6 +1833,7 @@ static uint64_t swapz_primary_physical_blocks(uint64_t device_bytes)
 		return 0;
 	return usable_blocks;
 }
+#endif
 static uint64_t swapz_primary_physical_blocks_from_header(
 	const unsigned char header[SWAPZ_PRIMARY_BLOCK_BYTES],
 	uint64_t device_bytes)
