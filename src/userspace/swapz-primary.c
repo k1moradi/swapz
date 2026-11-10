@@ -5797,6 +5797,7 @@ static int swapz_primary_runtime_state_preflight(
 	dev_t source_parent_device = 0;
 #endif
 	int recovery_fd;
+	int marker_length;
 	int marker_result;
 #ifndef SWAPZ_PRIMARY_OWNED_NULLBLK_TEST
 	int runtime_state_missing = 0;
@@ -5882,9 +5883,11 @@ static int swapz_primary_runtime_state_preflight(
 	} else
 #endif
 	{
-		if (snprintf(marker_name, sizeof(marker_name), "partition-%s.active",
-			     SWAPZ_PRIMARY_PARTUUID) < 0 ||
-		    strlen(marker_name) >= sizeof(marker_name)) {
+		marker_length = snprintf(
+			marker_name, sizeof(marker_name), "partition-%s.active",
+			SWAPZ_PRIMARY_PARTUUID);
+		if (marker_length < 0 ||
+		    (size_t)marker_length >= sizeof(marker_name)) {
 			close(recovery_fd);
 			errno = EOVERFLOW;
 			return -1;

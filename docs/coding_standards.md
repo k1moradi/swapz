@@ -508,6 +508,11 @@ template for new lifecycle code. New tests must prove those legacy writers are
 unreachable from current physical admission rather than preserving their former
 formatter interfaces.
 
+Runtime-state ownership names derived from a PARTUUID must check the signed
+`snprintf()` return value directly before using the path. A post-format
+`strlen()` check is not a truncation check because `snprintf()` always
+terminates a nonzero-capacity destination.
+
 The primary manager and all physical-admission helpers must use the same
 structural PARTUUID grammar: 8..64 characters, at least eight hexadecimal digits,
 single internal hyphens only, no leading/trailing/consecutive hyphen, ASCII

@@ -79,7 +79,10 @@ the optimization deliberately avoids redundant memory zeroing.
 Shared-root source contracts must require topology validation before exposing
 the scope fingerprint and fingerprint availability before reading the owner's
 scope record. Volatile lifecycle state has no recovery-disk separation phase;
-do not require retired persistent-recovery markers in prepare or plan.
+do not require retired persistent-recovery markers in prepare or plan. Its
+PARTUUID-derived active-marker name must reject `snprintf()` truncation from
+the formatter return value; a `strlen()` check of the terminated destination
+must not substitute for that bound.
 Extracted owned-nullblk lifecycle fixtures must bind `RUNTIME_STATE_BASE` to
 their private state tree, use the `start-header-verified` interruption phase,
 and inspect the runtime filesystem helper. Stale ownership must still retain

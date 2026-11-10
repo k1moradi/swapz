@@ -338,6 +338,14 @@ class SwapzProductionSourceQualification(unittest.TestCase):
             prepare.index('"PRIMARY_PREPARE=FAILED'),
             prepare.index("errno = saved_errno"))
 
+    def test_runtime_state_marker_name_rejects_snprintf_truncation(self):
+        preflight = source_body("swapz_primary_runtime_state_preflight", PRIMARY)
+        self.assertIn("marker_length = snprintf(", preflight)
+        self.assertIn(
+            "(size_t)marker_length >= sizeof(marker_name)", preflight)
+        self.assertNotIn(
+            "strlen(marker_name) >= sizeof(marker_name)", preflight)
+
     def test_shared_root_fingerprint_is_readable_before_scope_record_gate(self):
         scope = source_body(
             "swapz_primary_shared_root_scope_record_live", PRIMARY)
