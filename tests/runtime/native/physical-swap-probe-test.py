@@ -2562,7 +2562,8 @@ class PhysicalSwapProbeTests(unittest.TestCase):
             '["swapoff", "--", target["device"]]', quiesce_body)
         self.assertNotIn('["swapoff", "--", saved["path"]]', quiesce_body)
         self.assertNotIn(
-            "require_development_formatter_inventory_clear()", quiesce_body)
+            "require_development_formatter_inventory_clear", script)
+        self.assertNotIn("formatter_inventory", script)
         self.assertIn(
             'state.get("unrelated_swapfiles_deactivated_by_run") is not False',
             quiesce_body)
@@ -3493,8 +3494,6 @@ class PhysicalSwapProbeTests(unittest.TestCase):
                                   return_value=evidence),
                 mock.patch.object(probe, "current_development_evidence",
                                   return_value=evidence),
-                mock.patch.object(probe,
-                                  "require_development_formatter_inventory_clear"),
                 mock.patch.object(probe.secrets, "token_hex",
                                   return_value=review["run_id"]),
                 mock.patch.object(probe, "_git", side_effect=checked_git),
@@ -4345,8 +4344,6 @@ class PhysicalSwapProbeTests(unittest.TestCase):
             "scope": probe.DEVELOPMENT_SCOPE,
         }
         with mock.patch.object(probe.os, "geteuid", return_value=0), \
-                mock.patch.object(
-                    probe, "require_development_formatter_inventory_clear"), \
                 mock.patch.object(probe, "current_development_evidence",
                                   return_value=development_evidence), \
                 mock.patch.object(probe, "inspect_target",
@@ -4373,8 +4370,6 @@ class PhysicalSwapProbeTests(unittest.TestCase):
         changed_artifacts = dict(evidence["artifact_digests"])
         changed_artifacts["oracle_sha256"] = "f" * 64
         with mock.patch.object(probe.os, "geteuid", return_value=0), \
-                mock.patch.object(
-                    probe, "require_development_formatter_inventory_clear"), \
                 mock.patch.object(
                     probe, "current_development_evidence",
                     return_value=evidence) as development, \
@@ -4550,63 +4545,18 @@ class PhysicalSwapProbeTests(unittest.TestCase):
         command.assert_called_once_with(
             ["swapon", "--", "/swapfile"], timeout=60)
 
-    def test_development_active_inventory_blocks_before_test_or_header_write(self):
-        rows = (
-            "/swapfile file 524284 478600 -1\n",
-            "/dev/foreign-swap partition 262140 0 -2\n",
-        )
-        for row in rows:
-            with self.subTest(row_kind=row.split()[1]):
-                contents = "Filename Type Size Used Priority\n" + row
-
-                def read_inventory(path, *args, **kwargs):
-                    del args, kwargs
-                    if str(path) != "/proc/swaps":
-                        self.fail(f"unexpected read before inventory refusal: {path}")
-                    return contents
-
-                with mock.patch.object(probe.os, "geteuid", return_value=0), \
-                        mock.patch.object(
-                            probe.Path, "read_text", autospec=True,
-                            side_effect=read_inventory), \
-                        mock.patch.object(
-                            probe, "current_development_evidence") as evidence, \
-                        mock.patch.object(probe, "inspect_target") as inspect, \
-                        mock.patch.object(probe, "_write_block0") as write:
-                    with self.assertRaisesRegex(
-                            probe.ProbeError,
-                            "phase=preflight .*formatter_inventory .*"
-                            "active_rows count=1 header_mutation=not_attempted"):
-                        probe.run_probe(
-                            "/dev/disk/by-uuid/test-swap",
-                            "/dev/disk/by-uuid/test-swap", None, None,
-                            development_only=True)
-                evidence.assert_not_called()
-                inspect.assert_not_called()
-                write.assert_not_called()
-
-    def test_development_formatter_inventory_fails_closed_without_a_full_table(self):
-        with mock.patch.object(
-                probe.Path, "read_text",
-                return_value="Filename Type Size Used Priority\n"):
-            self.assertIsNone(
-                probe.require_development_formatter_inventory_clear())
-
-        with mock.patch.object(
-                probe.Path, "read_text", return_value="Filename Type\n"):
-            with self.assertRaisesRegex(
-                    probe.ProbeError,
-                    "expected=complete_table observed=malformed"):
-                probe.require_development_formatter_inventory_clear()
-
-        with mock.patch.object(
-                probe.Path, "read_text",
-                side_effect=PermissionError(13, "inventory unavailable")):
-            with self.assertRaisesRegex(
-                    probe.ProbeError,
-                    "expected=readable_complete_table observed=errno_13 "
-                    "header_mutation=not_attempted"):
-                probe.require_development_formatter_inventory_clear()
+    def test_development_preflight_has_no_global_swap_inventory_gate(self):
+        script = SCRIPT.read_text()
+        run_start = script.index("def run_probe(")
+        run_end = script.index("\ndef plan(", run_start)
+        run = script[run_start:run_end]
+        self.assertNotIn(
+            "require_development_formatter_inventory_clear", script)
+        self.assertNotIn("formatter_inventory", script)
+        self.assertNotIn("swapoff -a", run)
+        self.assertIn(
+            "Current trials are scoped to the selected ordinary swap partition",
+            run)
 
     def test_formatter_and_oracle_use_exact_reviewed_identity_arguments(self):
         events, state, target = self.simulate_physical_run()
@@ -5461,6 +5411,10 @@ class PhysicalSwapProbeTests(unittest.TestCase):
                                   return_value=card):
             target = probe.inspect_target(device_arg, device_arg)
             self.assertEqual(target["swap_used_kib"], 128)
+            active["used_kib"] = active["size_kib"] + 1
+            with self.assertRaisesRegex(
+                    probe.ProbeError, "usage is outside its capacity"):
+                probe.inspect_target(device_arg, device_arg)
             active["used_kib"] = 0
             active["priority"] = -2
             target = probe.inspect_target(device_arg, device_arg)

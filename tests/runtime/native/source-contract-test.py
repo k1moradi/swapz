@@ -2215,7 +2215,8 @@ dmsetup() {
         self.assertNotIn(
             '["swapoff", "--", saved["path"]]', quiesce)
         self.assertNotIn(
-            "require_development_formatter_inventory_clear()", quiesce)
+            "require_development_formatter_inventory_clear", physical_probe)
+        self.assertNotIn("formatter_inventory", physical_probe)
         self.assertIn(
             'state.get("unrelated_swapfiles_deactivated_by_run") is not False',
             quiesce)

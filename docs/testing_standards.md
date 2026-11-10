@@ -7209,6 +7209,17 @@ headroom, mapper/module ownership and current-source artifacts. Use ordinary
 After swapoff, prove the raw partition inactive and byte-compare block zero with
 the preflight digest before mapper creation.
 
+Current trial admission is scoped to the selected ordinary swap partition, not
+to an obsolete formatter-wide host state. Never require the global
+`/proc/swaps` inventory to be empty merely because other Linux swap is active.
+A selected partition with nonzero `Used` remains admissible after exact
+header/geometry/identity checks; immediately before its owned `swapoff`, require
+bounded `MemAvailable` headroom for those live pages. Unrelated swapfiles remain
+active and identity-checked, and `swapoff -a` is forbidden. Source/native
+contracts must reject any return of the retired
+`require_development_formatter_inventory_clear` / `formatter_inventory`
+admission gate.
+
 The Device Mapper target reserves physical block zero and exposes only the
 aligned post-header data region. All swapz mapping, extent/record descriptors,
 generation/sequence, CRC, payload offset/length, allocator and GC authority
