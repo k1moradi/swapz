@@ -12992,7 +12992,7 @@ static int swapz_primary_start_prepared(void)
 	int mapper_created_by_call = 0;
 	int mapper_resumed_by_call = 0;
 	int swap_activated_by_call = 0;
-	int target_swap_active;
+	int raw_swap_deactivated_by_call = 0;
 	int shared_root_parent_required = 0;
 	const char *failure_expected = NULL;
 	const char *failure_observed = NULL;
@@ -13132,25 +13132,6 @@ static int swapz_primary_start_prepared(void)
 			goto out;
 		}
 	}
-	failure_phase = "target-swap-inventory";
-	target_swap_active =
-		swapz_primary_swap_device_active(SWAPZ_PRIMARY_TARGET_DEVICE);
-	if (target_swap_active != 0) {
-		if (target_swap_active > 0)
-			errno = EBUSY;
-		goto out;
-	}
-	failure_phase = "target-exclusive-open";
-	target_fd = swapz_primary_target_open_exclusive(&manifest);
-	if (target_fd < 0 ||
-	    swapz_primary_exact_read(
-		    target_fd, observed_header, sizeof(observed_header)) < 0 ||
-	    swapz_primary_backing_header_matches_manifest(
-		    observed_header, &manifest) < 0) {
-		if (!errno)
-			errno = ESTALE;
-		goto out;
-	}
 	starting_state = state;
 	starting_state.stage = SWAPZ_PRIMARY_STAGE_STARTING;
 	failure_phase = "state-starting";
@@ -13163,6 +13144,24 @@ static int swapz_primary_start_prepared(void)
 	durable_observation = "OBSERVED";
 	persistence_boundary = "none";
 	SWAPZ_PRIMARY_TEST_INTERRUPT_AFTER("start-starting");
+	failure_phase = "raw-swapoff";
+	swap_observation = "UNCERTAIN";
+	if (swapz_primary_transition_original_swap(
+		    &manifest, 0, &raw_swap_deactivated_by_call) < 0)
+		goto out;
+	swap_observation = "OBSERVED";
+	SWAPZ_PRIMARY_TEST_INTERRUPT_AFTER("start-raw-swapoff");
+	failure_phase = "target-exclusive-open";
+	target_fd = swapz_primary_target_open_exclusive(&manifest);
+	if (target_fd < 0 ||
+	    swapz_primary_exact_read(
+		    target_fd, observed_header, sizeof(observed_header)) < 0 ||
+	    swapz_primary_backing_header_matches_manifest(
+		    observed_header, &manifest) < 0) {
+		if (!errno)
+			errno = ESTALE;
+		goto out;
+	}
 	failure_phase = "module-load-intent";
 	if (swapz_primary_module_load_intent_write_at(
 		    recovery_fd, lock_fd, &manifest, 0) < 0)
@@ -13431,7 +13430,8 @@ out:
 	memset(prewrite_partuuid, 0, sizeof(prewrite_partuuid));
 	if (result == 0)
 		printf("PRIMARY_START=ACTIVE run_id=%s mapper=/dev/mapper/swapz-primary "
-		       "swapon=true\n", state.run_id);
+		       "raw_swapoff=%s swapon=true\n", state.run_id,
+		       raw_swap_deactivated_by_call ? "true" : "false");
 	if (result < 0)
 		errno = saved_errno;
 	return result;
