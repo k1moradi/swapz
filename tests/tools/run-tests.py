@@ -4446,6 +4446,11 @@ def run_stage(title, command, result, *, parse_bench=False,
                 output, loaded=parse_bench,
                 default_phase=None if parse_bench else title,
                 child_exit_code=observed_exit_code)
+        if title == "Native and rootless contracts":
+            native_lower_io_details = first_native_lower_io_failure_details(output)
+            if native_lower_io_details:
+                record["diagnostic"] += "; " + "; ".join(
+                    native_lower_io_details)
     result["stages"].append(record)
     if predictor_evidence is not None:
         result.setdefault("evidence", {})["predictor"] = predictor_evidence
