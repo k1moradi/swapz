@@ -1295,12 +1295,13 @@ static int test_private_read_telemetry_merge_preserves_cache_state(void)
 	return 0;
 }
 
-static int test_mapping_length_mismatch_stops_before_payload_io(void)
+static int test_mapping_length_mismatch_rejects_without_publishing(void)
 {
 	struct swapz_compressed_page pages[7];
 	swapz_u8 output[3568], committed = 0;
 	swapz_u16 length = 91;
 	swapz_u16 original;
+	swapz_u32 index;
 
 	CHECK(setup() == 0);
 	prepare(pages, 7, 0, 0);
@@ -1308,6 +1309,7 @@ static int test_mapping_length_mismatch_stops_before_payload_io(void)
 	CHECK(committed == 7 && maps[6].valid);
 	original = maps[6].payload_length;
 	CHECK(original == 2072);
+	memset(output, 0xa5, sizeof(output));
 	/* An absent authoritative RAM length is structurally invalid and must
 	 * not submit a lower READ or accept cached bytes. */
 	maps[6].payload_length = 0;
@@ -1315,6 +1317,8 @@ static int test_mapping_length_mismatch_stops_before_payload_io(void)
 	CHECK(swapz_engine_read_page(&engine, 6, output,
 				   sizeof(output), &length) == -ESTALE);
 	CHECK(length == 0 && disk.read_blocks == 0);
+	for (index = 0; index < sizeof(output); ++index)
+		CHECK(output[index] == 0xa5);
 	/* A nonzero but truncated RAM length is in range, so only the
 	 * independent payload CRC can reject it after reading media. */
 	maps[6].payload_length = original - 1;
@@ -1322,6 +1326,8 @@ static int test_mapping_length_mismatch_stops_before_payload_io(void)
 	CHECK(swapz_engine_read_page(&engine, 6, output,
 				   sizeof(output), &length) == -EBADMSG);
 	CHECK(length == 0 && disk.read_blocks == 1);
+	for (index = 0; index < sizeof(output); ++index)
+		CHECK(output[index] == 0xa5);
 	/* Restore the accurate authoritative length. The physical payload
 	 * was never modified; reading it must still succeed byte-for-byte. */
 	maps[6].payload_length = original;
@@ -1485,7 +1491,7 @@ int main(void)
 	CHECK(test_read_budget_tradeoff_on_uniform_2072() == 0); completed++;
 	CHECK(test_ram_read_range_preflight_and_block_zero_skip() == 0); completed++;
 	CHECK(test_adjacent_distinct_extent_coalescing() == 0); completed++;
-	CHECK(test_mapping_length_mismatch_stops_before_payload_io() == 0); completed++;
+	CHECK(test_mapping_length_mismatch_rejects_without_publishing() == 0); completed++;
 	CHECK(test_private_read_telemetry_merge_preserves_cache_state() == 0); completed++;
 	CHECK(test_staged_padding_counter_saturates() == 0); completed++;
 	CHECK(test_staged_padding_survives_mixed_run_failures() == 0); completed++;
