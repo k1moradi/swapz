@@ -4820,7 +4820,11 @@ int main(void)
         scale = (ROOT / "tests/runtime/native/gc/scan-scaling.c").read_text()
         suites = (ROOT / "tests/suites/Makefile").read_text()
         runner = (ROOT / "tests/tools/run-tests.py").read_text()
-        self.assertIn('print("       loaded qualification progress:")', runner)
+        # The reporter now uses one globally numbered table for all phases.
+        self.assertIn("class QualificationProgressTable:", runner)
+        self.assertIn("progress_table = QualificationProgressTable()", runner)
+        self.assertIn('emit_progress_row("Loaded",', runner)
+        self.assertIn('progress_table=progress_table', runner)
         self.assertIn("subprocess.Popen(", runner)
         self.assertIn(
             "def loaded_progress_line(line, *, negative_case=None):", runner)

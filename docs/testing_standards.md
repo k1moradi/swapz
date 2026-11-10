@@ -530,7 +530,12 @@ and the optional development-only physical algorithm trial. Its header
 appears once; there are no separate rootless/loaded/stage progress tables.
 Top-level stages appear together after execution, with explicit `NOT RUN`
 rows for stages skipped after a failure. Detailed benchmark measurement
-tables and interpretations remain separate from this verdict table. The physical trial remains separately
+tables and interpretations remain separate from this verdict table.
+The source-contract regression must assert the unified table producer and
+authenticated loaded-progress emitter rather than a retired printed
+loaded-suite heading. Synthetic official-run mocks must accept the optional
+observational progress-table argument and still preserve the first exit code
+on report-write failure. The physical trial remains separately
 authorized, and its status cannot be interpreted as production physical
 acceptance. Original protected admission observations and failure-only
 diagnostics remain readable outside the table; they are not test verdicts.

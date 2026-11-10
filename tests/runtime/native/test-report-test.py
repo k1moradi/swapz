@@ -4914,7 +4914,9 @@ class ReportContract(unittest.TestCase):
 
         def stage_runner(first_exit):
             def run(title, command, result, *, parse_bench=False,
-                    stream_rootless_progress=False):
+                    stream_rootless_progress=False, progress_table=None):
+                # Observational display does not affect qualification fixture.
+                del progress_table
                 del command
                 if first_exit and not result["stages"]:
                     result["stages"].append({
