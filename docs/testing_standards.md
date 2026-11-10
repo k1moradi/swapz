@@ -53,6 +53,9 @@ preflight caller is replaced by the rootless or owned-nullblk test seam.
 Swap-inventory fixtures must provide the selected swap area's explicit size
 to quiescence checks while retaining filesystem-device alias rejection for
 unrelated versus selected-filesystem swapfiles.
+The lifecycle audit must require all three PREPARE raw-swap inventory checks
+to use the unchanged header's declared swap size, computed before the first
+check, rather than a retired argument-free geometry assumption.
 
 The allocation/free source inventory must separately enumerate the sparse
 backing-segment map allocated by the Linux swap layout helper, in addition to

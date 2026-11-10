@@ -956,7 +956,12 @@ int main(void)
             self.assertIn("swapz_primary_recovery_source_chain(", body)
             self.assertIn("swapz_primary_root_source_chain(", body)
             self.assertIn("swapz_primary_read_module_mapper_inventory(", body)
-        self.assertIn("swapz_primary_original_swap_is_quiescent()", prepare)
+        raw_swap_gate = (
+            "swapz_primary_original_swap_is_quiescent(original_swap_size_kib)")
+        self.assertEqual(prepare.count(raw_swap_gate), 3)
+        self.assertLess(
+            prepare.index("swapz_primary_swap_size_kib_from_header("),
+            prepare.index(raw_swap_gate))
         self.assertIn("swapz_primary_swap_device_active(", start)
 
     def assert_lifecycle_failure_epilogues(self, source: str):
