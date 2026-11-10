@@ -879,9 +879,6 @@ int main(void)
         functions = set(c_primary_function_names(source))
         scanners = cross_namespace_mount_scanners(source)
 
-        # Root identity remains a current-namespace fact. Cross-PID scanning
-        # may be integrated or wrapped, but it must never replace the self-root
-        # evidence read from the current namespace.
         current_mounts_raw = c_function_body(
             source, "swapz_primary_read_mount_facts", code_only=False)
         self.assertIn("/proc/self/mountinfo", current_mounts_raw)
@@ -902,15 +899,8 @@ int main(void)
             classified_scanners,
             "PID scanner does not classify vanished mount namespaces")
 
-        # A scanner or one of its wrappers must be used in initial metadata
-        # admission, but the critical requirement is a fresh call after the
-        # exact target descriptor is opened and before mapper creation.
-        # Ordinary swap headers are immutable: there is no raw-header write
-        # boundary. This permits wrappers without pinning a scanner name.
         prepare = c_function_body(source, "swapz_primary_prepare_metadata")
         start = c_function_body(source, "swapz_primary_start_prepared")
-        target_open_body = c_function_body(
-            source, "swapz_primary_target_open_exclusive")
 
         def text_reaches_scanner(text: str) -> bool:
             for symbol in functions:
@@ -927,42 +917,63 @@ int main(void)
             text_reaches_scanner(prepare),
             "prepare admission does not reach the cross-PID mount scanner")
 
+        # STARTING must be durable before the first device mutation, but the
+        # host/selector snapshot authorizing that mutation must be fresh.
+        starting_write = start.index("swapz_primary_state_write_at(")
+        starting_interrupt = start.index(
+            'SWAPZ_PRIMARY_TEST_INTERRUPT_AFTER("start-starting")')
+        raw_swapoff = start.index("swapz_primary_transition_original_swap(")
         target_open = start.index("swapz_primary_target_open_exclusive(")
-        target_open_complete = start.index(";", target_open) + 1
         mapper_create = start.index("swapz_primary_dm_create_mapper(")
-        self.assertLess(target_open_complete, mapper_create)
+        self.assertLess(starting_write, starting_interrupt)
+        self.assertLess(starting_interrupt, raw_swapoff)
+        self.assertLess(raw_swapoff, target_open)
+        self.assertLess(target_open, mapper_create)
         self.assertNotIn("swapz_primary_write_header_checked_fd(", start)
-        final_window = start[target_open_complete:mapper_create]
-        revalidated_in_start = text_reaches_scanner(final_window)
 
-        opened_target_call = target_open_body.find(
-            "swapz_primary_open_target_checked_partuuid_paths_mode(")
-        revalidated_in_target_open = False
-        if opened_target_call >= 0:
-            opened_target_complete = target_open_body.find(
-                ";", opened_target_call)
-            if opened_target_complete >= 0:
-                revalidated_in_target_open = text_reaches_scanner(
-                    target_open_body[opened_target_complete + 1:])
-
+        preswap_window = start[starting_interrupt:raw_swapoff]
         self.assertTrue(
-            revalidated_in_start or revalidated_in_target_open,
-            "cross-PID mount inventory is not revalidated after opening "
-            "the selected target and before mapper creation")
+            text_reaches_scanner(preswap_window),
+            "cross-PID mount inventory is not freshly revalidated after "
+            "durable STARTING and before raw swapoff")
+        for required in (
+                "swapz_primary_recovery_source_chain(",
+                "swapz_primary_root_source_chain(",
+                "swapz_primary_selector_admission_still_live(",
+                "swapz_primary_selector_admission_read_partuuid(",
+                "swapz_primary_target_revalidate("):
+            self.assertIn(required, preswap_window)
 
-        # The mount scanner supplements rather than replaces independent
-        # active-swap, DM and holder/topology gates.
-        for body in (prepare, start):
-            self.assertIn("swapz_primary_recovery_source_chain(", body)
-            self.assertIn("swapz_primary_root_source_chain(", body)
-            self.assertIn("swapz_primary_read_module_mapper_inventory(", body)
+        # The post-swapoff exclusive backing decision gets another fresh
+        # namespace/topology scan before mapper creation. Raw swapoff cannot
+        # substitute for mapper-time admission.
+        post_swapoff_window = start[target_open:mapper_create]
+        self.assertTrue(
+            text_reaches_scanner(post_swapoff_window),
+            "cross-PID mount inventory is not revalidated after raw swapoff "
+            "and before mapper creation")
+        self.assertIn("swapz_primary_swap_device_active(", post_swapoff_window)
+
+        # PREPARE still checks the raw target repeatedly without mutation and
+        # binds the final activation/priority policy snapshot into the manifest.
         raw_swap_gate = (
             "swapz_primary_original_swap_is_quiescent(original_swap_size_kib)")
         self.assertEqual(prepare.count(raw_swap_gate), 3)
-        self.assertLess(
-            prepare.index("swapz_primary_swap_size_kib_from_header("),
-            prepare.index(raw_swap_gate))
-        self.assertIn("swapz_primary_swap_device_active(", start)
+        self.assertIn("swapz_primary_original_swap_policy_snapshot(", prepare)
+        self.assertIn("manifest.original_swap_active", prepare)
+        self.assertIn("manifest.original_swap_priority", prepare)
+
+        # START owns swapoff; STOP and RECOVER own restoration. All of these
+        # transitions are based on the volatile manifest, never raw header data.
+        self.assertRegex(
+            start,
+            r"swapz_primary_transition_original_swap\s*\(\s*&manifest,\s*0,")
+        for function_name in (
+                "swapz_primary_stop_active", "swapz_primary_recover"):
+            body = c_function_body(source, function_name)
+            self.assertRegex(
+                body,
+                r"swapz_primary_transition_original_swap\s*\(\s*&manifest,\s*1,")
 
     def assert_lifecycle_failure_epilogues(self, source: str):
         """Trace the single fail-closed errno helper from all three epilogues."""
