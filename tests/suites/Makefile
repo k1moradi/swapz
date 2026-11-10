@@ -208,6 +208,7 @@ test-userspace: $(OUT)/swapzctl-status $(OUT)/swapz-primary-policy $(OUT)/swapz-
 	  done
 	@set -e; \
 	  if python3 -B "$(NATIVE)/userspace/swapz-primary-late-race-test.py"; then :; else \
+	    # GNU Make requires doubled dollars for shell exit status/variables. \
 	    script_exit_status=$?; \
 	    printf 'FAIL: native test-userspace script=%s exit=%s\n' \
 	      'swapz-primary-late-race-test.py' "$script_exit_status" >&2; \
