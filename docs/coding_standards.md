@@ -17,8 +17,10 @@ area after the protected 4096-byte first page may be used. The newly
 created virtual Device Mapper mapper alone may receive mkswap.
 Device Mapper iterate_devices must describe only the allocated lower data
 range: start at the reserved-page offset and report exactly the aligned
-physical-block count, excluding the header and unused device tail. A
-header-free null_blk still starts at zero. BLKGETSIZE64 target inspection
+physical-block count, excluding the header and unused device tail. For a
+SWAPSPACE2 bad-page layout, report each contiguous run of clean segments
+separately; never include the bad-page gaps in the advertised lower intervals.
+A header-free null_blk still starts at zero. BLKGETSIZE64 target inspection
 must retain the exact byte identity but must not require 4096-byte divisibility;
 the complete-page floor is applied only when deriving usable swapz geometry.
 Raw-swap inventory matching must derive the expected `/proc/swaps` Size from

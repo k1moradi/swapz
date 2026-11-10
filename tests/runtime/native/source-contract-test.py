@@ -2166,8 +2166,13 @@ dmsetup() {
         compact_discard = re.sub(r"\s+", " ", discard)
         compact_iterate = re.sub(r"\s+", " ", iterate_devices)
         self.assertIn("if (ctx->segment_backing_pages)", compact_iterate)
-        self.assertIn("(sector_t)ctx->backing_last_page * SWAPZ_SECTORS",
+        # Sparse backing must expose only contiguous clean-segment runs.
+        self.assertIn("while (segment < ctx->segment_count)", compact_iterate)
+        self.assertIn("ctx->segment_backing_pages[segment - 1U]",
                       compact_iterate)
+        self.assertIn("(sector_t)(segment - start_segment) * "
+                      "sectors_per_segment", compact_iterate)
+        self.assertNotIn("ctx->backing_last_page", compact_iterate)
         self.assertIn("swapz_backing_data_sector(ctx, 0)", compact_iterate)
         self.assertIn("(sector_t)ctx->physical_blocks * SWAPZ_SECTORS",
                       compact_iterate)

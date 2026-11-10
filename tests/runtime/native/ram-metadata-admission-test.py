@@ -179,6 +179,11 @@ def main() -> None:
             "iterate_devices must report data-start and data-length separately")
     require("(ctx->data_start_block + ctx->physical_blocks)" not in iterator,
             "iterate_devices must exclude the protected swap header")
+    require("ctx->backing_last_page" not in iterator and
+            "while (segment < ctx->segment_count)" in iterator and
+            "ctx->segment_backing_pages[segment - 1U]" in iterator and
+            "(sector_t)(segment - start_segment) *" in iterator,
+            "Sparse iterate_devices must report only contiguous clean runs")
 
     # Every submitted lower data I/O must widen the protected-page offset
     # before adding a data block. A cast after u32 addition could silently

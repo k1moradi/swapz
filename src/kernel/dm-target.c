@@ -9708,15 +9708,37 @@ static int swapz_iterate_devices(struct dm_target *ti,
 
 	/*
 	 * Report the exact allocated contiguous range when no holes exist.
-	 * With Linux bad-page holes, report the conservative declared data span:
-	 * device-mapper dependency accounting may include unused/bad pages, while
-	 * actual swapz I/O is restricted to the clean segment map.
+	 * With Linux bad-page holes, report each contiguous clean run instead
+	 * of claiming the excluded sectors as lower-device dependencies. Neither
+	 * the reserved first page nor the incomplete tail belongs to any run.
 	 */
-	if (ctx->segment_backing_pages)
-		return fn(ti, ctx->backing,
-			  (sector_t)ctx->data_start_block * SWAPZ_SECTORS,
-			  (sector_t)ctx->backing_last_page * SWAPZ_SECTORS,
-			  data);
+	if (ctx->segment_backing_pages) {
+		const sector_t sectors_per_segment =
+			(sector_t)SWAPZ_SEGMENT_BLOCKS * SWAPZ_SECTORS;
+		swapz_u32 segment = 0;
+
+		while (segment < ctx->segment_count) {
+			const swapz_u32 start_segment = segment;
+			const sector_t start_sector =
+				(sector_t)ctx->segment_backing_pages[start_segment] *
+				SWAPZ_SECTORS;
+			int error;
+
+			++segment;
+			while (segment < ctx->segment_count &&
+			       (sector_t)ctx->segment_backing_pages[segment] ==
+				(sector_t)ctx->segment_backing_pages[segment - 1U] +
+				SWAPZ_SEGMENT_BLOCKS)
+				++segment;
+			error = fn(ti, ctx->backing, start_sector,
+				   (sector_t)(segment - start_segment) *
+				   sectors_per_segment, data);
+			if (error)
+				return error;
+		}
+		return 0;
+	}
+
 	return fn(ti, ctx->backing, swapz_backing_data_sector(ctx, 0),
 		  (sector_t)ctx->physical_blocks * SWAPZ_SECTORS, data);
 }

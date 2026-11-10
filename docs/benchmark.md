@@ -33,6 +33,10 @@ swapz Device Mapper device may receive `mkswap`. A successful trial must
 offer the owner a keep-swapz/restore-ordinary choice instead of implicitly
 tearing down swapz. A failed or interrupted trial must fail closed on
 uncertain device ownership, without raw-header rewriting.
+For Linux swap headers listing bad pages, verify that Device Mapper reports
+only the allocated clean-segment runs, excluding bad-page holes, the immutable
+first page, and unallocated tail. Include sparse-layout cases in source and
+loaded qualification; synthetic checks alone do not prove lower-I/O safety.
 
 The new data-only 4/8/16KiB extents must carry compressed payload bytes only;
 all descriptors, offsets, generations, CRCs, mapping and GC state reside in
