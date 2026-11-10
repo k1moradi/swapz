@@ -59,6 +59,13 @@ partition format or production data path. Preserve 4/8/16KiB packing, readback
 integrity, ordering, concurrency and fail-closed semantics. Physical and
 production acceptance still require the current-source qualification gates.
 
+RAM-authoritative compressed READ validation must prove the mapped extent
+begins inside the physical allocation, fits entirely within its remaining
+blocks, and does not cross a 256-block segment. Check this before payload
+CRC and keep the borrowed output pointer cleared on every error. Use
+subtraction-based bounds to avoid overflow; a matching observed RAM
+descriptor does not independently prove legal physical placement.
+
 Earlier permissions to format/repartition even the dedicated SD card
 are superseded; only post-swapoff swap *data* may be overwritten.
 The RAM extent builder must revalidate 4/8/16KiB extent geometry and bounded

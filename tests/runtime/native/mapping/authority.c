@@ -537,6 +537,38 @@ static int test_full_publish_and_authoritative_reads(void)
 				CHECK(payload == NULL);
 				maps[index] = saved;
 			}
+			/*
+			 * A matching observed RAM map is not evidence of a valid lower
+			 * placement. Reject out-of-device and cross-segment extents
+			 * before any payload CRC is attempted.
+			 */
+			{
+				const struct swapz_map saved = maps[index];
+				const swapz_u32 invalid_start_blocks[] = {
+					authority.physical_blocks,
+					authority.physical_blocks - 1U,
+					SWAPZ_SEGMENT_BLOCKS - 1U,
+				};
+				size_t invalid_index;
+
+				for (invalid_index = 0;
+				     invalid_index < sizeof(invalid_start_blocks) /
+						     sizeof(invalid_start_blocks[0]);
+				     ++invalid_index) {
+					struct swapz_map invalid = saved;
+
+					invalid.start_block =
+						invalid_start_blocks[invalid_index];
+					maps[index] = invalid;
+					payload = extent;
+					CHECK(swapz_read_authoritative_payload(
+						      &authority, index, &invalid,
+						      extent + saved.payload_offset,
+						      &payload) == -EUCLEAN);
+					CHECK(payload == NULL);
+					maps[index] = saved;
+				}
+			}
 		}
 	}
 	CHECK(swapz_finish(&authority, &tx, extent, 16384, 4, 0) == -ESTALE);

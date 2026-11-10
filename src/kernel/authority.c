@@ -3226,8 +3226,8 @@ int swapz_read_authoritative_payload(const struct swapz_authority *a,
 		return error;
 	/*
 	 * Check volatile descriptor geometry before hashing caller-provided
-	 * readback. A corrupted offset/length must never turn CRC verification
-	 * into a read beyond the selected 4/8/16KiB extent.
+	 * readback. Corrupted physical placement, segment containment or payload
+	 * offsets/lengths must fail before any caller-provided bytes are hashed.
 	 */
 	{
 		const swapz_u32 extent_bytes =
@@ -3236,6 +3236,11 @@ int swapz_read_authoritative_payload(const struct swapz_authority *a,
 		if ((current_map->extent_blocks != 1U &&
 		     current_map->extent_blocks != 2U &&
 		     current_map->extent_blocks != 4U) ||
+		    current_map->start_block >= a->physical_blocks ||
+		    current_map->extent_blocks >
+			    a->physical_blocks - current_map->start_block ||
+		    current_map->start_block % SWAPZ_SEGMENT_BLOCKS >
+			    SWAPZ_SEGMENT_BLOCKS - current_map->extent_blocks ||
 		    !current_map->payload_length ||
 		    current_map->payload_length > SWAPZ_MAX_COMPRESSED ||
 		    current_map->payload_offset >= extent_bytes ||

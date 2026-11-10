@@ -117,8 +117,13 @@ geometry (zero length: `-ESTALE`, no lower read) from a forged but in-bounds
 length (CRC mismatch: `-EBADMSG`, bounded lower read). Both errors reset the
 reported payload length to zero and leave every caller output byte unchanged.
 Restoring the original authoritative length must still yield byte-exact
-readback. Never turn an in-bounds CRC mismatch into an imaginary pre-I/O
-geometry rejection or infer physical qualification from this native test.
+readback. A matching forged observed/current RAM map must additionally
+reject a start block at physical capacity, a multi-block extent past the
+physical end, and a four-block extent crossing a 256-block segment boundary.
+Each negative must return -EUCLEAN and clear the payload pointer before
+CRC, with the original map restored after the probe. Never turn an
+in-bounds CRC mismatch into an imaginary pre-I/O geometry rejection or
+infer physical qualification from this native test.
 
 ### Sparse Linux swap layout allocation ownership
 
