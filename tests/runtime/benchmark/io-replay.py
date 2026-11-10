@@ -1614,7 +1614,8 @@ def kernel_write_delta(before, after):
             counters["delta64_payload_bytes_saved"]):
         raise ValueError("inconsistent swapz delta64 rescue accounting")
     # RAW baseline is 4096 bytes, accepted LZ4 baseline <=3568. Savings
-    # count encoded payload bytes, before extent metadata/padding or GC.
+    # count encoded payload bytes before lower-block zero padding or GC. Extent
+    # descriptors are RAM authority and never contribute lower-media bytes.
     for kind, minimum, maximum in (("raw", 528, 4095), ("lz4", 1, 3567)):
         if not (counters[f"delta64_{kind}_rescues"] * minimum <=
                 counters[f"delta64_{kind}_payload_bytes_saved"] <=
