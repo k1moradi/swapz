@@ -1353,7 +1353,7 @@ static int fixture_hashes(char *control, char *module, char *oracle)
 #define swapz_primary_read_qualification_report(q) fixture_report(q)
 #define swapz_primary_live_artifact_hashes(a,b,c,d,e) fixture_hashes(a,b,c)
 #define swapz_primary_qualification_artifacts_match(...) 1
-#define swapz_primary_recovery_preflight(a,b,c,d,e,f,g,h,i) fixture_recovery(a,b,c,d,e,f,g,h,i)
+#define swapz_primary_runtime_state_preflight(a,b,c,d,e,f,g,h,i) fixture_recovery(a,b,c,d,e,f,g,h,i)
 #define swapz_primary_recovery_source_chain(a,b,c,d) fixture_source_chain(a,b,c,d)
 #define swapz_primary_root_source_chain(a,b,c,d) fixture_source_chain(a,b,c,d)
 #define swapz_primary_read_mount_facts(facts, parent) fixture_read_mount_facts(facts,parent)
