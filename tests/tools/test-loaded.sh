@@ -329,8 +329,9 @@ for content in entropy balanced; do
                 "$raw_plan/run.log")" || raw_failure_line=""
             if [[ -n "$raw_failure_line" ]]; then
                 raw_failure_reason="$raw_failure_line"
-                [[ "$raw_failure_line" == BLOCKED:* ]] &&
+                if [[ "$raw_failure_line" == BLOCKED:* ]]; then
                     raw_failure_kind=BLOCKED
+                fi
             fi
             tail -n 12 "$raw_plan/run.log"
         fi

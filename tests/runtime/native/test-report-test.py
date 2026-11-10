@@ -6055,8 +6055,8 @@ class ReportContract(unittest.TestCase):
             if not line.startswith("PASS_LOADED_RAW_READ_FANOUT=")]
         raw_failure = ("BLOCKED: raw-read fanout profile=entropy "
                        "child_exit=2 cause=BLOCKED: owned RAM replay refused")
-        partial_log = ("\\n".join(completed_prefix + [
-            "START_LOADED_RAW_READ_FANOUT", raw_failure]) + "\\n")
+        partial_log = ("\n".join(completed_prefix + [
+            "START_LOADED_RAW_READ_FANOUT", raw_failure]) + "\n")
         partial_correctness = runner.parse_loaded_correctness(partial_log)
         self.assertEqual(partial_correctness["overall"], "INCOMPLETE")
         self.assertEqual(len(runner.authenticated_primary_negative_refusal_indices(
