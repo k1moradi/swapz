@@ -2452,8 +2452,9 @@ static int swapz_primary_optional_uuid_matches_fd(
 		if (!swapz_primary_target_valid(&swapz_primary_selected_target) ||
 		    swapz_primary_exact_read(fd, header, sizeof(header)) < 0)
 			return -1;
-		if (!swapz_linux_swap_header_valid(
-			    header, swapz_primary_selected_target.device_bytes)) {
+		if (!swapz_linux_swap_header_parse(
+			    header, swapz_primary_selected_target.device_bytes,
+			    NULL)) {
 			memset(header, 0, sizeof(header));
 			errno = ENODEV;
 			return -1;
@@ -2569,7 +2570,7 @@ static int swapz_primary_original_swap_signature(
 	const unsigned char block[SWAPZ_PRIMARY_BLOCK_BYTES],
 	uint64_t device_bytes)
 {
-	return swapz_linux_swap_header_valid(block, device_bytes);
+	return swapz_linux_swap_header_parse(block, device_bytes, NULL);
 }
 
 
@@ -10150,8 +10151,11 @@ static int swapz_primary_backing_header_matches_manifest(
 		errno = EINVAL;
 		return -1;
 	}
-	if (!swapz_linux_swap_header_valid(
-		    header, manifest->target.device_bytes)) {
+	if (!swapz_linux_swap_header_parse(
+		    header, manifest->target.device_bytes, NULL) ||
+	    swapz_primary_physical_blocks_from_header(
+		    header, manifest->target.device_bytes) !=
+		    manifest->backing_physical_blocks) {
 		errno = EPERM;
 		return -1;
 	}
