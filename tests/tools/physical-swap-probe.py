@@ -2167,7 +2167,7 @@ def _require_kernel_diagnostics(record, context):
         raise ProbeError(f"{context}: {error}")
 
 
-def _swapz_status_healthy(captured):
+def _swapz_status_healthy(captured, expected_logical_sectors):
     """Require a complete, unique terminal-health pair from the exact DM status."""
     if (not isinstance(captured, dict) or captured.get("return_code") != 0
             or captured.get("timed_out") is not False
@@ -2178,7 +2178,9 @@ def _swapz_status_healthy(captured):
     if len(lines) != 1:
         return False
     fields = lines[0].split()
-    if fields[:3] != ["0", str(LOGICAL_SECTORS), "swapz"]:
+    if (type(expected_logical_sectors) is not int or
+            expected_logical_sectors <= 0 or
+            fields[:3] != ["0", str(expected_logical_sectors), "swapz"]):
         return False
     for key in ("failed", "error"):
         matches = [field for field in fields if field.startswith(f"{key}=")]
@@ -2729,7 +2731,10 @@ def _validate_owned_mapper_identity(state):
 
 
 def _expected_dm_table(target):
-    return (f"0 {LOGICAL_SECTORS} swapz {target['device']} "
+    logical_sectors = target.get("swapz_logical_sectors")
+    if type(logical_sectors) is not int or logical_sectors <= 0:
+        raise ProbeError("target lacks valid full-capacity swapz geometry")
+    return (f"0 {logical_sectors} swapz {target['device']} "
             "0 64 0 2 0 1 0 0")
 
 
@@ -2753,10 +2758,12 @@ def _verify_owned_mapper(state, target):
         raise ProbeError("mapper node does not match DM's kernel identity")
     sysfs = Path(f"/sys/dev/block/{dm_major}:{dm_minor}")
     try:
-        if (sysfs / "dm/name").read_text().strip() != name or (
+        logical_sectors = target.get("swapz_logical_sectors")
+        if (type(logical_sectors) is not int or logical_sectors <= 0 or
+                (sysfs / "dm/name").read_text().strip() != name or (
                 sysfs / "dm/uuid").read_text().strip() != expected_uuid or (
-                sysfs / "size").read_text().strip() != str(LOGICAL_SECTORS):
-            raise ProbeError("mapper sysfs identity or 16 MiB size differs")
+                sysfs / "size").read_text().strip() != str(logical_sectors)):
+            raise ProbeError("mapper sysfs identity or full swapz size differs")
         slaves = list((sysfs / "slaves").iterdir())
         if len(slaves) != 1 or (
                 slaves[0] / "dev").read_text().strip() != (
@@ -2834,7 +2841,7 @@ def _run_positive_oracle_phase(oracle, mapper, state, target, state_dir,
         ["dmsetup", "status", state["dm_name"]])
     entry["block_stats_before"] = _block_stat_snapshot(target)
     before_status = entry["dmsetup_status_before"]
-    if (not _swapz_status_healthy(before_status) or
+    if (not _swapz_status_healthy(before_status, target["swapz_logical_sectors"]) or
             entry["block_stats_before"].get("available") is not True):
         entry["status"] = "BLOCKED_BEFORE_ORACLE"
         entry["pre_oracle_status_error"] = (
@@ -2891,7 +2898,7 @@ def _run_positive_oracle_phase(oracle, mapper, state, target, state_dir,
         entry["return_code"] == 0
         and "oracle_output_error" not in entry
         and entry.get("post_oracle_identity") == "PASS"
-        and _swapz_status_healthy(after_status)
+        and _swapz_status_healthy(after_status, target["swapz_logical_sectors"])
         and entry["lower_io_delta"] is not None
         and "trace_error" not in entry
     )
@@ -3640,15 +3647,12 @@ def _run_algorithm_live_swap_oracle(mapper, state, target, state_dir):
 
 
 def _keep_active_capacity_supported(target):
-    """Never replace ordinary swap capacity with a smaller test-only mapper.
-
-    The development mapper is fixed at 16 MiB. This bound is deliberately
-    separate from a future full-capacity, independently qualified service.
-    A missing or malformed target size cannot authorize retention.
-    """
-    device_bytes = target.get("size_bytes")
-    return (type(device_bytes) is int and device_bytes > PAGE_BYTES and
-            LOGICAL_MAPPER_BYTES >= device_bytes)
+    """Require full header-derived swapz mapper geometry before retention."""
+    logical_sectors = target.get("swapz_logical_sectors")
+    linux_swap_kib = target.get("swapz_linux_swap_kib")
+    return (type(logical_sectors) is int and
+            logical_sectors > SECTORS_PER_PAGE and
+            type(linux_swap_kib) is int and linux_swap_kib > 0)
 
 
 def _operator_keep_swapz_active_after_pass():
@@ -3665,9 +3669,7 @@ def _operator_keep_swapz_active_after_pass():
 def _verify_kept_swapz_active(state, target, mapper):
     """Verify the exact successful development mapper before leaving it active."""
     if not _keep_active_capacity_supported(target):
-        raise ProbeError(
-            "bounded 16 MiB development mapper cannot retain the original "
-            "swap partition's capacity")
+        raise ProbeError("full-capacity swapz mapper geometry is unavailable")
     _verify_target_identity(target)
     if _read_block0(target["device"], target) != target["header"]:
         raise ProbeError("ordinary SWAPSPACE2 header changed before keep-active")
@@ -3679,8 +3681,10 @@ def _verify_kept_swapz_active(state, target, mapper):
     active = _active_swap_for(*mapper_device)
     if active is None:
         raise ProbeError("owned swapz mapper is not active swap after successful test")
-    if active["priority"] != 32767:
-        raise ProbeError("owned swapz mapper priority changed before keep-active")
+    if (active["priority"] != 32767 or
+            active["size_kib"] != target["swapz_linux_swap_kib"]):
+        raise ProbeError(
+            "owned swapz mapper size or priority changed before keep-active")
     if (state.get("module_ownership") != "MODULE_OWNED" or
             not Path("/sys/module/dm_swapz").is_dir()):
         raise ProbeError("owned dm_swapz module is unavailable before keep-active")
@@ -3853,8 +3857,12 @@ def _final_physical_oracle_evidence_error(results, state, target,
                 or entry.get("stderr") != "" or
                 "trace_error" in entry or "oracle_output_error" in entry):
             return f"phase_{index}_invalid_comparison_output"
-        if (not _swapz_status_healthy(entry.get("dmsetup_status_before")) or
-                not _swapz_status_healthy(entry.get("dmsetup_status_after"))):
+        if (not _swapz_status_healthy(
+                    entry.get("dmsetup_status_before"),
+                    target["swapz_logical_sectors"]) or
+                not _swapz_status_healthy(
+                    entry.get("dmsetup_status_after"),
+                    target["swapz_logical_sectors"])):
             return f"phase_{index}_invalid_mapper_health"
         before_stats = entry.get("block_stats_before")
         after_stats = entry.get("block_stats_after")
@@ -4281,7 +4289,7 @@ def run_probe(device_arg, confirm_arg, state_dir_arg, review_path,
                 if not _keep_active_capacity_supported(target):
                     print(
                         "PHYSICAL_SWAPZ_KEEP_ACTIVE=UNAVAILABLE "
-                        "reason=bounded_16MiB_mapper_smaller_than_original_swap; "
+                        "reason=full_capacity_mapper_geometry_unavailable; "
                         "restoring_ordinary_swap")
                 results["operator_choice"] = "RESTORE_ORDINARY_SWAP"
                 _save_results(state_dir, results)
