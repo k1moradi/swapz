@@ -1938,6 +1938,20 @@ class PhysicalSwapProbeTests(unittest.TestCase):
         self.assertTrue(probe._recovery_state_identity_matches(
             historical, dict(historical)))
 
+        current = dict(original)
+        current["unrelated_swapfiles_deactivated_by_run"] = False
+        self.assertTrue(probe._recovery_state_identity_matches(
+            current, dict(current)))
+        for altered in (True, None, 0, 1, "false"):
+            observed = dict(current)
+            observed["unrelated_swapfiles_deactivated_by_run"] = altered
+            self.assertFalse(probe._recovery_state_identity_matches(
+                current, observed))
+        observed = dict(current)
+        del observed["unrelated_swapfiles_deactivated_by_run"]
+        self.assertFalse(probe._recovery_state_identity_matches(
+            current, observed))
+
     def test_git_evidence_runs_as_the_sudo_operator(self):
         completed = subprocess.CompletedProcess([], 0, stdout="ok\n", stderr="")
         with mock.patch.object(probe.os, "geteuid", return_value=0), \
@@ -4602,6 +4616,14 @@ class PhysicalSwapProbeTests(unittest.TestCase):
                 mock.patch.object(probe, "_run") as command:
             self.assertTrue(probe._restore_development_swapfiles(state))
         command.assert_not_called()
+
+        malformed = {
+            "unrelated_swapfiles": [],
+            "unrelated_swapfiles_deactivated_by_run": 1,
+        }
+        with self.assertRaisesRegex(
+                probe.ProbeError, "ownership state is malformed"):
+            probe._restore_development_swapfiles(malformed)
 
     def test_legacy_algorithm_trial_restores_helper_owned_swapfile(self):
         saved = {
