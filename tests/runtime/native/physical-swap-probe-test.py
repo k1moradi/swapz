@@ -448,16 +448,19 @@ class PhysicalSwapProbeTests(unittest.TestCase):
 
     def make_recovery_state(self, state_dir):
         state_dir.mkdir(mode=0o700)
-        header = bytearray(probe.PAGE_BYTES)
-        header[-len(probe.SWAP_SIGNATURE):] = probe.SWAP_SIGNATURE
-        header = bytes(header)
+        device_bytes = 16 * 1024 * 1024 * 1024
+        header = build_swap_header(device_bytes)
+        geometry = probe._swapz_backing_geometry(header, device_bytes)
         token = "1234567890abcdef"
         state = {
             "device_arg": "/dev/disk/by-uuid/test-swap",
             "device": "/dev/sda4",
             "major": 8,
             "minor": 4,
-            "size_bytes": 16 * 1024 * 1024 * 1024,
+            "size_bytes": device_bytes,
+            "swapz_logical_sectors": geometry["swapz_logical_sectors"],
+            "swapz_linux_swap_kib": geometry["swapz_linux_swap_kib"],
+            "swapz_physical_blocks": geometry["swapz_physical_blocks"],
             "partuuid": "deadbeef-04",
             "stage": "ORACLE_PASS",
             "header_sha256": hashlib.sha256(header).hexdigest(),
@@ -465,7 +468,7 @@ class PhysicalSwapProbeTests(unittest.TestCase):
             "swap_was_active": True,
             "swap_priority": -1,
             "module_ownership": "NOT_STARTED",
-            "swap_size_kib": (16 * 1024 * 1024 * 1024) // 1024 - 4,
+            "swap_size_kib": geometry["raw_linux_swap_kib"],
             "run_id": "0123456789abcdef0123456789abcdef",
             "module_loaded_by_us": False,
             "dm_name": f"swapz-demo-physical-{token}",
@@ -1672,10 +1675,7 @@ class PhysicalSwapProbeTests(unittest.TestCase):
              "recovery_original_swap_size_kib expected=within_saved_device "
              "observed=exceeds_saved_device"),
             ("priority_above_restorable_range", "swap_priority", 32768,
-             "recovery_original_swap_priority expected=-1..32767 "
-             "observed=out_of_range"),
-            ("priority_below_restorable_range", "swap_priority", -2,
-             "recovery_original_swap_priority expected=-1..32767 "
+             "recovery_original_swap_priority expected=negative_auto_or_0..32767 "
              "observed=out_of_range"),
         )
         for case, field, value, diagnostic in cases:
@@ -5463,6 +5463,12 @@ class PhysicalSwapProbeTests(unittest.TestCase):
             [], 0, stdout=json.dumps({"blockdevices": [row]}), stderr="")
         active = {"path": device_arg, "kind": "partition", "size_kib": 65532,
                   "used_kib": 128, "priority": -1}
+        header = build_swap_header(size_bytes)
+        card = {
+            "model": "synthetic", "transport": "usb",
+            "parent_size_bytes": size_bytes, "parent_removable": True,
+            "sha256": "a" * 64,
+        }
         with mock.patch.object(probe.Path, "resolve",
                                return_value=Path("/dev/synthetic-part")), \
                 mock.patch.object(probe.Path, "is_file", return_value=True), \
@@ -5478,15 +5484,22 @@ class PhysicalSwapProbeTests(unittest.TestCase):
                 mock.patch.object(probe, "_partition_identity",
                                   return_value=("deadbeef-01", size_bytes)), \
                 mock.patch.object(probe, "_active_swap_for",
-                                  return_value=active):
+                                  return_value=active), \
+                mock.patch.object(probe, "_read_block0",
+                                  return_value=header), \
+                mock.patch.object(probe, "_campaign_card_identity",
+                                  return_value=card):
             with self.assertRaisesRegex(
                     probe.ProbeError, "require zero used KiB"):
                 probe.inspect_target(device_arg, device_arg)
             active["used_kib"] = 0
             active["priority"] = -2
-            with self.assertRaisesRegex(
-                    probe.ProbeError, "priority cannot be restored exactly"):
-                probe.inspect_target(device_arg, device_arg)
+            target = probe.inspect_target(device_arg, device_arg)
+            self.assertEqual(target["swap_priority"], -2)
+            self.assertTrue(probe._swap_priority_restored(-2, -7))
+            self.assertFalse(probe._swap_priority_restored(-2, 0))
+            self.assertTrue(probe._swap_priority_restored(12, 12))
+            self.assertFalse(probe._swap_priority_restored(12, 11))
             active["priority"] = -1
             active["size_kib"] = size_bytes // 1024 + 1
             with self.assertRaisesRegex(
