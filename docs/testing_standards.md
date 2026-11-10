@@ -533,7 +533,8 @@ rows for stages skipped after a failure. Detailed benchmark measurement
 tables and interpretations remain separate from this verdict table.
 The source-contract regression must assert the unified table producer and
 authenticated loaded-progress emitter rather than a retired printed
-loaded-suite heading. Synthetic official-run mocks must accept the optional
+loaded-suite heading. Fixed-width suite cells include the delimiter space
+after the eight-column padded suite label; tests must assert that alignment. Synthetic official-run mocks must accept the optional
 observational progress-table argument and still preserve the first exit code
 on report-write failure. The physical trial remains separately
 authorized, and its status cannot be interpreted as production physical
