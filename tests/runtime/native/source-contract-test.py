@@ -8224,30 +8224,32 @@ class CapacityMemoryAccountingContracts(unittest.TestCase):
         for name in authority_initialized:
             self.assertRegex(
                 constructor,
-                rf"ctx->{name}\\s*=\\s*kvmalloc_array\\(",
+                rf"ctx->{name}\s*=\s*kvmalloc_array\(",
                 f"{name} must avoid redundant allocator zeroing")
             self.assertNotRegex(
                 constructor,
-                rf"ctx->{name}\\s*=\\s*kvcalloc\\(")
+                rf"ctx->{name}\s*=\s*kvcalloc\(")
 
         # These sidecars are consumed directly and have no authority-owned
         # full initializer, so they retain zero-allocation semantics.
         for name in ("gc_segment_evictions", "segment_trimmed"):
             self.assertRegex(
                 constructor,
-                rf"ctx->{name}\\s*=\\s*kvcalloc\\(")
+                rf"ctx->{name}\s*=\s*kvcalloc\(")
 
         self.assertIn(
             "memset(maps, 0, (size_t)logical_pages * sizeof(*maps));",
             AUTH)
-        self.assertIn(
-            "memset(live_records, 0,\n"
-            "       (size_t)physical_blocks * sizeof(*live_records));",
-            AUTH)
-        self.assertIn(
-            "memset(extent_classes, 0,\n"
-            "       (size_t)physical_blocks * sizeof(*extent_classes));",
-            AUTH)
+        self.assertRegex(
+            AUTH,
+            r"memset\(live_records,\s*0,\s*"
+            r"\(size_t\)physical_blocks\s*\*\s*"
+            r"sizeof\(\*live_records\)\);")
+        self.assertRegex(
+            AUTH,
+            r"memset\(extent_classes,\s*0,\s*"
+            r"\(size_t\)physical_blocks\s*\*\s*"
+            r"sizeof\(\*extent_classes\)\);")
         self.assertIn("memset(sequence_delta, 0,", AUTH)
         self.assertIn("memset(segment_sequence_base, 0,", AUTH)
         self.assertIn("roles[i] = i < foreground ? 1 : 0;", AUTH)
