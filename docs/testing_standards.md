@@ -171,6 +171,12 @@ physical qualification. Exact-source `make test` must pass the loaded
 algorithm/RAM stages before any evidence-validating loader may set the token;
 real-SWAPSPACE2 payload/CRC/read/GC and header-preservation evidence remain
 separate physical qualification.
+Backing-header source contracts must distinguish the physical partition from the
+fresh mapper: physical admission parses the full ordinary Linux swap v1 layout
+and derives a bounded RAM clean-segment map, while the mapper created by swapz
+must retain the strict contiguous `SWAPSPACE2` validator after `mkswap`. Tests
+must not require the old strict backing validator once bad-page/tail geometry is
+represented only in RAM.
 Native recovery recognition must accept only the original byte-identical
 SWAPSPACE2 header, rejecting a synthetic SWZ replacement. Cross-namespace
 mount admission must be rechecked after exclusive target open and before

@@ -1984,8 +1984,11 @@ dmsetup() {
         self.assertIn("ctx->data_start_block = 0", ctr)
         self.assertIn("ctx->data_start_block = 1U", ctr)
         self.assertIn("flush_fail_nth || write_fail_nth", ctr)
-        self.assertIn("swapz_linux_swap_header_valid(block, device_bytes)",
-                      validator)
+        self.assertIn("swapz_linux_swap_header_parse(block, device_bytes, &layout)",
+                      compact_validator)
+        self.assertIn("swapz_configure_linux_swap_layout(ctx, block, &layout)",
+                      compact_validator)
+        self.assertNotIn("swapz_linux_swap_header_valid", validator)
         self.assertNotIn("swapz_sb_valid", validator)
         primary_start = (ROOT / "src/userspace/swapz-primary.c").read_text()
         primary_start_body = primary_start.split(
