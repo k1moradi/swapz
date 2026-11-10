@@ -1167,13 +1167,16 @@ int main(void)
         self.assertEqual(
             ordinary.get("SWAPZ_PRIMARY_CONFIG_BASE"), '"/etc/swapz"')
         self.assertEqual(
-            ordinary.get("SWAPZ_PRIMARY_RECOVERY_BASE"),
-            '"/var/lib/swapz/physical-recovery"')
+            ordinary.get("SWAPZ_PRIMARY_RUNTIME_STATE_BASE"),
+            "SWAPZ_PRIMARY_EXECUTION_RUNTIME_DIRECTORY")
+        self.assertEqual(
+            ordinary.get("SWAPZ_PRIMARY_EXECUTION_RUNTIME_DIRECTORY"),
+            '"/run/swapz"')
 
         owned_definitions = (
             "SWAPZ_PRIMARY_OWNED_NULLBLK_TEST=1",
             'SWAPZ_PRIMARY_TEST_CONFIG_BASE="/var/tmp/swapz-primary-owned-nullblk/config"',
-            'SWAPZ_PRIMARY_TEST_RECOVERY_BASE="/var/tmp/swapz-primary-owned-nullblk/recovery"',
+            'SWAPZ_PRIMARY_TEST_RUNTIME_STATE_BASE="/var/tmp/swapz-primary-owned-nullblk/runtime-state"',
             'SWAPZ_PRIMARY_TEST_MUTATION_LOCK_DIRECTORY="/var/tmp/swapz-primary-owned-nullblk/mutation-lock"',
             'SWAPZ_PRIMARY_TEST_QUALIFICATION_REPORT="/var/tmp/swapz-primary-owned-nullblk/recovery/qualification.json"',
         )
@@ -1183,11 +1186,11 @@ int main(void)
             owned.get("SWAPZ_PRIMARY_CONFIG_BASE"),
             "SWAPZ_PRIMARY_TEST_CONFIG_BASE")
         self.assertEqual(
-            owned.get("SWAPZ_PRIMARY_RECOVERY_BASE"),
-            "SWAPZ_PRIMARY_TEST_RECOVERY_BASE")
+            owned.get("SWAPZ_PRIMARY_RUNTIME_STATE_BASE"),
+            "SWAPZ_PRIMARY_TEST_RUNTIME_STATE_BASE")
         for required in (
                 "SWAPZ_PRIMARY_TEST_CONFIG_BASE",
-                "SWAPZ_PRIMARY_TEST_RECOVERY_BASE",
+                "SWAPZ_PRIMARY_TEST_RUNTIME_STATE_BASE",
                 "SWAPZ_PRIMARY_TEST_MUTATION_LOCK_DIRECTORY",
                 "SWAPZ_PRIMARY_TEST_QUALIFICATION_REPORT"):
             missing = tuple(
@@ -1327,10 +1330,10 @@ int main(void)
             'package_lock="/run/lock/swapz/package.lock"', package)
         self.assertLess(
             package.index("flock -n 9"),
-            package.index('primary_recovery_base="/var/lib/swapz/physical-recovery"'))
+            package.index('primary_runtime_state_base="/run/swapz"'))
         self.assertLess(
             package.index("flock -n 9"),
-            package.index("assert_no_primary_recovery_authority upgrade"))
+            package.index("assert_no_primary_runtime_authority upgrade"))
         self.assertLess(
             lifecycle.index("swapz_primary_mutation_lock()"),
             lifecycle.index("swapz_primary_prepare_metadata("))
