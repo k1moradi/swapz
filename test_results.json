@@ -249,46 +249,46 @@
 "gc_scan_scale": {
 "rows": [
 {
-"incremental_select_ns": 626,
-"legacy_dead_probe_ns": 75441,
-"legacy_score_scan_ns": 574689,
+"incremental_select_ns": 667,
+"legacy_dead_probe_ns": 75920,
+"legacy_score_scan_ns": 580028,
 "logical_pages": 262144,
 "mapped_dead_probe_ns": 625,
-"relocation_list_ns": 375,
-"relocation_scan_ns": 89155,
+"relocation_list_ns": 417,
+"relocation_scan_ns": 94671,
 "segments": 1024,
 "victim_records": 256
 },
 {
-"incremental_select_ns": 2543,
-"legacy_dead_probe_ns": 303600,
-"legacy_score_scan_ns": 2294253,
+"incremental_select_ns": 2750,
+"legacy_dead_probe_ns": 289431,
+"legacy_score_scan_ns": 2269691,
 "logical_pages": 1048576,
-"mapped_dead_probe_ns": 2084,
-"relocation_list_ns": 542,
-"relocation_scan_ns": 350698,
+"mapped_dead_probe_ns": 1125,
+"relocation_list_ns": 583,
+"relocation_scan_ns": 364476,
 "segments": 4096,
 "victim_records": 256
 },
 {
-"incremental_select_ns": 10004,
-"legacy_dead_probe_ns": 1199685,
-"legacy_score_scan_ns": 9226486,
+"incremental_select_ns": 9876,
+"legacy_dead_probe_ns": 1149929,
+"legacy_score_scan_ns": 8933841,
 "logical_pages": 4194304,
-"mapped_dead_probe_ns": 8002,
-"relocation_list_ns": 709,
-"relocation_scan_ns": 1409088,
+"mapped_dead_probe_ns": 4167,
+"relocation_list_ns": 583,
+"relocation_scan_ns": 1392108,
 "segments": 16384,
 "victim_records": 256
 },
 {
-"incremental_select_ns": 62228,
-"legacy_dead_probe_ns": 7262842,
-"legacy_score_scan_ns": 56854577,
+"incremental_select_ns": 60295,
+"legacy_dead_probe_ns": 6975165,
+"legacy_score_scan_ns": 75571095,
 "logical_pages": 27080192,
-"mapped_dead_probe_ns": 47432,
-"relocation_list_ns": 542,
-"relocation_scan_ns": 8689560,
+"mapped_dead_probe_ns": 23377,
+"relocation_list_ns": 709,
+"relocation_scan_ns": 8630161,
 "segments": 105782,
 "victim_records": 256
 }
@@ -298,14 +298,14 @@
 "predictor": {
 "backend_benchmarks": [
 {
-"inverse_ns_per_page": 153,
+"inverse_ns_per_page": 139,
 "name": "scalar",
-"transform_ns_per_page": 150
+"transform_ns_per_page": 131
 },
 {
-"inverse_ns_per_page": 90,
+"inverse_ns_per_page": 83,
 "name": "neon",
-"transform_ns_per_page": 92
+"transform_ns_per_page": 69
 }
 ],
 "classifier": {
@@ -315,9 +315,9 @@
 "candidate": "delta64",
 "early_abort_pages": 223,
 "eligible_pages": 512,
-"ns_per_page": 47,
+"ns_per_page": 27,
 "sample_pairs": 32,
-"scalar_ns_per_page": 47,
+"scalar_ns_per_page": 27,
 "stage1_min_score": 2,
 "stage1_pairs": 8
 },
@@ -332,7 +332,7 @@
 "planner_blocks": 383,
 "planner_extents": 267,
 "raw_pages": 192,
-"wall_ns_per_page": 1991
+"wall_ns_per_page": 1842
 },
 {
 "acceleration": 2,
@@ -340,7 +340,7 @@
 "planner_blocks": 383,
 "planner_extents": 267,
 "raw_pages": 192,
-"wall_ns_per_page": 1895
+"wall_ns_per_page": 1709
 },
 {
 "acceleration": 3,
@@ -348,7 +348,7 @@
 "planner_blocks": 383,
 "planner_extents": 266,
 "raw_pages": 192,
-"wall_ns_per_page": 1755
+"wall_ns_per_page": 1645
 },
 {
 "acceleration": 4,
@@ -356,7 +356,7 @@
 "planner_blocks": 384,
 "planner_extents": 273,
 "raw_pages": 192,
-"wall_ns_per_page": 1706
+"wall_ns_per_page": 1625
 }
 ],
 "negative_pages": 256,
@@ -373,9 +373,9 @@
 "extents_saved": 38,
 "general_threshold": 24,
 "lz4_rescues": 192,
-"modeled_wall_ns_per_page": 1419,
-"modeled_wall_ns_total": 817408,
-"ns_per_saved_block": 14861,
+"modeled_wall_ns_per_page": 1299,
+"modeled_wall_ns_total": 748288,
+"ns_per_saved_block": 13605,
 "packing_adoptions": 0,
 "packing_eligible_pages": 51,
 "packing_threshold": 16,
@@ -440,14 +440,14 @@
 }
 ],
 "negative_useful": 0,
-"ns_per_saved_block": 15327,
+"ns_per_saved_block": 14049,
 "routed_baseline_blocks": 257,
 "routed_baseline_extents": 182,
 "routed_blocks_saved": 60,
 "routed_candidate_blocks": 197,
 "routed_candidate_extents": 124,
-"routed_cpu_ns_per_page": 1596,
-"routed_cpu_ns_total": 919675,
+"routed_cpu_ns_per_page": 1463,
+"routed_cpu_ns_total": 842965,
 "routed_extents_saved": 58,
 "structured_calls": 279,
 "structured_eligible": 320,
@@ -495,14 +495,14 @@
 }
 ],
 "negative_useful": 0,
-"ns_per_saved_block": 15375,
+"ns_per_saved_block": 14088,
 "routed_baseline_blocks": 257,
 "routed_baseline_extents": 182,
 "routed_blocks_saved": 58,
 "routed_candidate_blocks": 199,
 "routed_candidate_extents": 132,
-"routed_cpu_ns_per_page": 1548,
-"routed_cpu_ns_total": 891784,
+"routed_cpu_ns_per_page": 1418,
+"routed_cpu_ns_total": 817144,
 "routed_extents_saved": 50,
 "structured_calls": 272,
 "structured_eligible": 320,
@@ -550,14 +550,14 @@
 }
 ],
 "negative_useful": 0,
-"ns_per_saved_block": 14861,
+"ns_per_saved_block": 13605,
 "routed_baseline_blocks": 257,
 "routed_baseline_extents": 182,
 "routed_blocks_saved": 55,
 "routed_candidate_blocks": 202,
 "routed_candidate_extents": 144,
-"routed_cpu_ns_per_page": 1419,
-"routed_cpu_ns_total": 817408,
+"routed_cpu_ns_per_page": 1299,
+"routed_cpu_ns_total": 748288,
 "routed_extents_saved": 38,
 "structured_calls": 256,
 "structured_eligible": 320,
@@ -605,14 +605,14 @@
 }
 ],
 "negative_useful": 0,
-"ns_per_saved_block": 14861,
+"ns_per_saved_block": 13605,
 "routed_baseline_blocks": 257,
 "routed_baseline_extents": 182,
 "routed_blocks_saved": 55,
 "routed_candidate_blocks": 202,
 "routed_candidate_extents": 144,
-"routed_cpu_ns_per_page": 1419,
-"routed_cpu_ns_total": 817408,
+"routed_cpu_ns_per_page": 1299,
+"routed_cpu_ns_total": 748288,
 "routed_extents_saved": 38,
 "structured_calls": 256,
 "structured_eligible": 320,
@@ -660,14 +660,14 @@
 }
 ],
 "negative_useful": 0,
-"ns_per_saved_block": 14861,
+"ns_per_saved_block": 13605,
 "routed_baseline_blocks": 257,
 "routed_baseline_extents": 182,
 "routed_blocks_saved": 55,
 "routed_candidate_blocks": 202,
 "routed_candidate_extents": 144,
-"routed_cpu_ns_per_page": 1419,
-"routed_cpu_ns_total": 817408,
+"routed_cpu_ns_per_page": 1299,
+"routed_cpu_ns_total": 748288,
 "routed_extents_saved": 38,
 "structured_calls": 256,
 "structured_eligible": 320,
@@ -684,17 +684,17 @@
 "candidate_extents": 93,
 "cliff_2024": 160,
 "inverse_backend": "neon",
-"inverse_ns_per_page": 90,
+"inverse_ns_per_page": 83,
 "name": "delta64",
 "planner_blocks_saved": 68,
 "planner_extents_saved": 89,
 "raw_rescued": 128,
 "saved_payload_bytes": 284772,
-"scalar_inverse_ns_per_page": 153,
-"scalar_transform_ns_per_page": 150,
-"second_lz4_ns_per_page": 3007,
+"scalar_inverse_ns_per_page": 139,
+"scalar_transform_ns_per_page": 131,
+"second_lz4_ns_per_page": 2800,
 "transform_backend": "neon",
-"transform_ns_per_page": 92
+"transform_ns_per_page": 69
 }
 ]
 }
@@ -709,23 +709,23 @@
 "qualification": "RAM_BACKED_NULL_BLK_ONLY",
 "qualification_tier": "ALGORITHM_PHYSICAL_PENDING",
 "qualified_artifacts": {
-"formatter_sha256": "91e158c4788b31a3f2dce6e58f53cbd16c9e9e9e7017e3815a0639fce7b8176a",
-"module_sha256": "b999d7988405554f65318fdfddbc48ab58286156e1e4abbdbcf2d9f6b495eb1f",
+"formatter_sha256": "28ce96894d56d80f05724b8cd71fc3fe954cae64023c018d16aa3962a0cc3170",
+"module_sha256": "2383c5e211ef0d5ca82ab356d23f941e45b4163bfb36a1bdf87ef48f89815812",
 "oracle_sha256": "429ff40c94125cb8e8309537c17a32db28bf9a176567b8f0587bd8f5ae5e6c5b",
 "status": "AVAILABLE"
 },
 "schema": "swapz-test-results-v1",
-"source_sha": "7e05e995b8a57ac3e62a5cad99b6c9d6442e5885",
+"source_sha": "9da84eee51338420edb78244d88da25690a4bb90",
 "stages": [
 {
-"elapsed_s": 2.609,
+"elapsed_s": 2.067,
 "exit_code": 0,
 "name": "Build module and helpers",
 "status": "PASS"
 },
 {
-"diagnostic": "Rootless child failed; child_exit=2 reason=nonzero_exit subtest=test-lower-io test=unavailable log=build/tests/rootless-failure.vb6uwSGx/diagnostic.log",
-"elapsed_s": 3.546,
+"diagnostic": "Rootless child failed; child_exit=2 reason=nonzero_exit subtest=test-userspace test=unavailable log=build/tests/rootless-failure.g7Hu7Cld/diagnostic.log",
+"elapsed_s": 1.543,
 "exit_code": 2,
 "failed_phase": "Makefile native and metadata",
 "name": "Native and rootless contracts",
@@ -736,5 +736,5 @@
 "status": "FAIL"
 }
 ],
-"tested_commit_sha": "7e05e995b8a57ac3e62a5cad99b6c9d6442e5885"
+"tested_commit_sha": "9da84eee51338420edb78244d88da25690a4bb90"
 }
