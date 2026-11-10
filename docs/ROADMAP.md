@@ -31,8 +31,10 @@ Retain the documented physical identity, corruption/error, concurrency, GC,
 RAM-budget, and byte-exact SWAPSPACE2 header-preservation gates. An expected
 algorithm-tier INCOMPLETE report is not physical acceptance by itself.
 
-Review partition identity and swapoff admission, all lower physical offsets
-including DISCARD, metadata-cache lifetimes, corrupted/partial I/O,
+Review partition identity and swapoff admission, including active ordinary
+swap with nonzero `Used` pages: PREPARE records policy and START's kernel
+`swapoff` owns live-page migration before mapper mutation. Review all lower
+physical offsets including DISCARD, metadata-cache lifetimes, corrupted/partial I/O,
 overwrite, GC, ordering, simultaneous callbacks, suspend/drain, shutdown
 and crash recovery, and test-mode transitions in both directions. Quantify
 the changed RAM/metadata budget and maximum incompressible capacity. Add
