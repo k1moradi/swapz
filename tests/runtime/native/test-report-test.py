@@ -8694,6 +8694,42 @@ class ProductionReadinessEvidenceTest(unittest.TestCase):
                     verdict["evidence_statuses"][evidence_name], "BLOCKED")
                 self.assertNotEqual(verdict["release_verdict"], "PASS")
 
+    def test_authorized_target_accepts_partial_page_device_tail(self):
+        # BLKGETSIZE64 identity is byte-exact; only geometry floors to 4KiB.
+        device_bytes = 124787884032 + 4095
+        target = {"partuuid": "f13428f6-01", "device_bytes": device_bytes}
+        self.assertEqual(
+            runner._readiness_target_key(target),
+            (target["partuuid"], device_bytes))
+        for invalid_bytes in (0, 4096, 4097, 8191, -1, True, 8192.0):
+            with self.subTest(invalid_bytes=invalid_bytes):
+                self.assertIsNone(runner._readiness_target_key({
+                    **target, "device_bytes": invalid_bytes}))
+
+        snapshot = self.passing_snapshot()
+        evidence = snapshot["release_evidence"]
+        names = (
+            "authorized_target_identity", "real_linux_swap",
+            "maximum_capacity_and_ram", "sustained_physical_performance",
+            "lifecycle_deployment_state", "cold_boot_harness",
+            "owner_observed_reboot",
+        )
+        for name in names:
+            evidence[name]["target"]["device_bytes"] = device_bytes
+        verdict = runner.evaluate_production_readiness(
+            snapshot, self.SOURCE_SHA)
+        self.assertEqual(
+            verdict["evidence_statuses"]["authorized_target_identity"], "PASS")
+        self.assertEqual(verdict["DEPLOYMENT_PRODUCTION_READY"], "PASS")
+
+        # Exact identity still rejects a one-byte mismatch between witnesses.
+        evidence["lifecycle_deployment_state"]["target"]["device_bytes"] -= 1
+        verdict = runner.evaluate_production_readiness(
+            snapshot, self.SOURCE_SHA)
+        self.assertEqual(
+            verdict["evidence_statuses"]["lifecycle_deployment_state"],
+            "BLOCKED")
+
     def test_ready_for_owner_reboot_does_not_forge_reboot_observation(self):
         snapshot = self.passing_snapshot()
         reboot = snapshot["release_evidence"]["owner_observed_reboot"]

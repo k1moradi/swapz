@@ -194,8 +194,7 @@ def _readiness_target_key(target):
             "--" in partuuid or
             len(partuuid.replace("-", "")) < 8 or
             type(device_bytes) is not int or
-            device_bytes <= LOGICAL_BLOCK_BYTES or
-            device_bytes % LOGICAL_BLOCK_BYTES):
+            device_bytes // LOGICAL_BLOCK_BYTES < 2):
         return None
     return partuuid, device_bytes
 

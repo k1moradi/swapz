@@ -314,9 +314,9 @@ def maximum_logical_sectors(device_bytes: Any) -> int | None:
     """Mirror the production boot/manager admission rule without device I/O."""
     if (
             type(device_bytes) is not int or device_bytes <= 4096 or
-            device_bytes > RAM_TRACE_VALIDATOR["MAX_UINT64"] or
-            device_bytes % 4096):
+            device_bytes > RAM_TRACE_VALIDATOR["MAX_UINT64"]):
         return None
+    # Preserve exact device-byte identity; only full pages enter swap geometry.
     blocks = device_bytes // 4096
     physical_blocks = ((blocks - 1) // 256) * 256
     if physical_blocks <= 0 or physical_blocks > 0xFFFFFFFF:

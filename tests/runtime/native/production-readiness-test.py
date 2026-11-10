@@ -1574,6 +1574,23 @@ class ProductionReadinessEvaluatorTest(unittest.TestCase):
             "canonical authorized target identity is invalid" in blocker
             for blocker in result["code_blockers"]))
 
+    def test_cold_boot_capacity_ignores_subpage_device_tail(self):
+        # The partition's exact bytes remain bound; only complete swap pages
+        # contribute to usable physical geometry and mapper capacity.
+        aligned_bytes = TARGET["size_bytes"]
+        expected_sectors = EVALUATOR.maximum_logical_sectors(aligned_bytes)
+        self.assertIsNotNone(expected_sectors)
+        for trailing_bytes in (1, 2048, 4095):
+            with self.subTest(trailing_bytes=trailing_bytes):
+                self.assertEqual(
+                    EVALUATOR.maximum_logical_sectors(
+                        aligned_bytes + trailing_bytes),
+                    expected_sectors)
+        for invalid_bytes in (None, True, 4096, 8191, -1, 8192.0, 1 << 64):
+            with self.subTest(invalid_bytes=invalid_bytes):
+                self.assertIsNone(
+                    EVALUATOR.maximum_logical_sectors(invalid_bytes))
+
     def test_full_capacity_peak_ram_must_fit_frozen_limit(self):
         report = owner_report()
         policy = acceptance_policy()
