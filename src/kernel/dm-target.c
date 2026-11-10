@@ -1914,6 +1914,7 @@ static int swapz_configure_linux_swap_layout(
 	unsigned long *bad_segments = NULL;
 	swapz_u32 raw_segments;
 	swapz_u32 clean_segments;
+	swapz_u32 contaminated_segments = 0;
 	swapz_u32 clean_index = 0;
 	swapz_u32 raw_segment;
 	swapz_u32 bad_index;
@@ -1922,27 +1923,44 @@ static int swapz_configure_linux_swap_layout(
 	if (!ctx || !block || !layout)
 		return -EINVAL;
 	raw_segments = layout->last_page / SWAPZ_SEGMENT_BLOCKS;
-	clean_segments = swapz_linux_swap_clean_segment_count(
-		block, layout, SWAPZ_SEGMENT_BLOCKS);
-	if (!clean_segments || clean_segments > raw_segments)
+	if (!raw_segments)
 		return -EINVAL;
-	ctx->backing_last_page = layout->last_page;
-	ctx->backing_bad_pages = layout->bad_pages;
-	ctx->backing_skipped_segments = raw_segments - clean_segments;
-	ctx->backing_layout_blocks = clean_segments * SWAPZ_SEGMENT_BLOCKS;
 
 	/*
-	 * Preserve the common contiguous case at zero translation cost. For a
-	 * sparse layout, mark each contaminated raw segment once, then build the
-	 * clean translation in one linear pass. The Linux bad-page list is small
-	 * but a large swap area may contain many thousands of segments, so avoid
-	 * rescanning every bad-page entry for every segment.
+	 * Keep the ordinary contiguous case allocation-free. A Linux bad page in
+	 * the incomplete tail cannot contaminate a complete 1MiB swapz segment, so
+	 * first prove whether a sparse translation is needed at all.
 	 */
-	if (!ctx->backing_skipped_segments)
+	for (bad_index = 0; bad_index < layout->bad_pages; ++bad_index) {
+		const swapz_u32 bad_page =
+			swapz_linux_swap_bad_page(block, layout, bad_index);
+
+		if (!bad_page)
+			return -EUCLEAN;
+		raw_segment = (bad_page - 1U) / SWAPZ_SEGMENT_BLOCKS;
+		if (raw_segment < raw_segments) {
+			contaminated_segments = 1U;
+			break;
+		}
+	}
+	if (!contaminated_segments) {
+		ctx->backing_last_page = layout->last_page;
+		ctx->backing_bad_pages = layout->bad_pages;
+		ctx->backing_skipped_segments = 0;
+		ctx->backing_layout_blocks =
+			raw_segments * SWAPZ_SEGMENT_BLOCKS;
 		return 0;
+	}
+
+	/*
+	 * Mark each contaminated raw segment once, then build the clean translation
+	 * in one linear pass. This avoids the older duplicate scan of the bad-page
+	 * list while preserving O(1) lower-I/O address translation after ctor.
+	 */
 	bad_segments = bitmap_zalloc(raw_segments, GFP_KERNEL);
 	if (!bad_segments)
 		return -ENOMEM;
+	contaminated_segments = 0;
 	for (bad_index = 0; bad_index < layout->bad_pages; ++bad_index) {
 		const swapz_u32 bad_page =
 			swapz_linux_swap_bad_page(block, layout, bad_index);
@@ -1952,9 +1970,15 @@ static int swapz_configure_linux_swap_layout(
 			goto out;
 		}
 		raw_segment = (bad_page - 1U) / SWAPZ_SEGMENT_BLOCKS;
-		if (raw_segment < raw_segments)
-			__set_bit(raw_segment, bad_segments);
+		if (raw_segment < raw_segments &&
+		    !test_and_set_bit(raw_segment, bad_segments))
+			contaminated_segments++;
 	}
+	if (!contaminated_segments || contaminated_segments >= raw_segments) {
+		error = -EINVAL;
+		goto out;
+	}
+	clean_segments = raw_segments - contaminated_segments;
 
 	ctx->segment_backing_pages = kvcalloc(
 		clean_segments, sizeof(*ctx->segment_backing_pages), GFP_KERNEL);
@@ -1972,8 +1996,15 @@ static int swapz_configure_linux_swap_layout(
 		ctx->segment_backing_pages[clean_index++] =
 			1U + raw_segment * SWAPZ_SEGMENT_BLOCKS;
 	}
-	if (clean_index != clean_segments)
+	if (clean_index != clean_segments) {
 		error = -EUCLEAN;
+		goto out;
+	}
+
+	ctx->backing_last_page = layout->last_page;
+	ctx->backing_bad_pages = layout->bad_pages;
+	ctx->backing_skipped_segments = contaminated_segments;
+	ctx->backing_layout_blocks = clean_segments * SWAPZ_SEGMENT_BLOCKS;
 out:
 	bitmap_free(bad_segments);
 	return error;
