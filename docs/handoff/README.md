@@ -13,10 +13,13 @@ must be checked against the source being evaluated.
 
 - **First dedicated-card host /dev/sda1:** [dedicated-card identity and standing scope](../AGENT_CONTEXT.md#current-production-mission); pathname alone is not identity.
 - **Second Lubuntu host /dev/sda4:** [separate host scope](../AGENT_CONTEXT.md#separate-lubuntu-host-scope-for-devsda4)
-  is conditional; recovery storage currently shares the target's parent and
-  **blocks mutation**. The [retired host record](old-host-physical-and-live-swap-evidence.md)
-  and [one-use trial](../live-swap-trial-recovery.md) are historical, not its
-  scope record or evidence of admission.
+  is conditional on the current host-scope and live identity gates. A separate
+  recovery disk or recovery-parent separation is **not** an admission
+  requirement: the raw SWAPSPACE2 header is immutable and current ownership is
+  same-boot state under /run. The
+  [retired host record](old-host-physical-and-live-swap-evidence.md) and older
+  [one-use trial history](../live-swap-trial-recovery.md) are not scope records
+  or evidence of current admission.
 - **Secure Boot:** [MOK enrollment and module signing](../compile.md#secure-boot-module-signing); a valid signature is not kernel-load evidence.
 - **Development-only card smoke:** [strict admission](../testing_standards.md#development-only-card-backed-data-path-smoke) and [triage](../README.md#diagnose-the-first-record); `make fast_test` is not qualifying `make test` or real swap.
 - **Primary mount namespaces (issue #94):** the early [non-leader task scan change](https://github.com/k1moradi/swapz/commit/7c7bc9743580d7592315be00bdc8eaf7b019a1d2) and [follow-up rootless coverage](https://github.com/k1moradi/swapz/commit/650b9249dd96b70dfbbab28047625b4acdd62181) are historical waypoints, not the current proof boundary. The [canonical contract](../testing_standards.md#primary-cross-namespace-mount-admission-evidence-issue-94) now records pinned-namespace coverage plus explicit `UNPROVEN` post-selector and post-final-snapshot mutation controls. Neither rootless result establishes owner `make test`, loaded kernel-side exclusion or physical admission.
@@ -33,15 +36,16 @@ must be checked against the source being evaluated.
 pre-captured stderr; direct failures begin attribution-only but may be enriched
 by the official reporter; see [first-error triage](../README.md#diagnose-the-first-record)) and
 `build/history/<architecture>-<host-digest>/` do not sync through Git.
-Root-owned `/var/lib/swapz/physical-recovery/` retains
-`swapz-physical-<run_id>/{state.json,results.json}`,
-`primary-state.json`, `primary-real-swap-<attempt_id>.json` and
-`primary-qualification.json`; boot evidence lives at
-`/var/lib/swapz/boot-acceptance/`. These are durable, **not** disposable
-temp records. For `PHYSICAL_RESULTS=`, `results.json` may contain
-`physical_oracle_phases[]`; setup/recovery failures may instead rely on
-`state.json` and `final_recovery_state` without numeric `errno`.
-The root `test_results.json` is sanitized public evidence, not this private record.
+Current mutable primary/physical-trial ownership lives under root-controlled
+`/run/swapz/` and is deliberately same-boot state. The compatibility path
+`/var/lib/swapz/physical-recovery/` may retain signed qualification evidence
+and explicitly historical pre-migration journals, but it is not current
+runtime ownership, swap metadata, a header backup or a recovery image and must
+not impose physical-parent separation. Boot evidence lives separately under
+`/var/lib/swapz/boot-acceptance/`. For current `PHYSICAL_RESULTS=`, the
+same-boot `results.json` may contain `physical_oracle_phases[]`; lifecycle
+failure records may use `final_recovery_state` as a compatibility field name.
+The root `test_results.json` is sanitized public evidence, not private runtime state.
 
 [Runtime health](systemd-runtime-health.md) is supplementary;
 [host-history](host-history.json) feeds descriptive local plots only.
