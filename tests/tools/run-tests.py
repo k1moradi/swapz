@@ -10484,8 +10484,8 @@ def main():
         print(f"  Audited rootless groups use 2 workers; "
               f"loaded qualification stays sequential; {parallelism}")
     else:
-        print(f"  Audited rootless groups automatically use available CPUs; "
-              f"hardware benchmarks stay sequential; {parallelism}")
+        print("  Rootless: automatic CPU-aware groups; hardware benchmarks sequential.")
+        print(f"  {parallelism}")
     stages = [
         ("Build module and helpers", [*make_cmd, f"KDIR={args.kdir}"]),
         ("Native and rootless contracts",

@@ -168,7 +168,7 @@ class RootlessParallelPilotContract(unittest.TestCase):
         self.assertIn('rootless_parallel_cleanup || :', source)
         reporter = (ROOT / "tests/tools/run-tests.py").read_text(
             encoding="utf-8")
-        self.assertIn('Audited rootless groups automatically use available CPUs', reporter)
+        self.assertIn('Rootless: automatic CPU-aware groups; hardware benchmarks sequential.', reporter)
         self.assertIn('loaded qualification stays sequential', reporter)
         self.assertIn('python3 -B tests/runtime/native/source-contract-test.py -v',
                       source)
