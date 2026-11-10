@@ -318,6 +318,8 @@ static uint64_t swapz_primary_swap_size_kib_from_header(
 	uint64_t device_bytes);
 static uint64_t swapz_primary_linux_swap_size_kib(uint64_t logical_pages);
 static int swapz_primary_parse_u64(const char *text, uint64_t *value);
+/* Parse signed Linux swap priorities, including kernel-assigned negatives. */
+static int swapz_primary_parse_priority(const char *text, int *priority);
 static int swapz_primary_sha256(const unsigned char *bytes, size_t length,
 				char digest[65]);
 static int swapz_primary_reconcile_metadata_claim_at(
