@@ -10658,7 +10658,7 @@ def tracked_source_checkout_preflight():
         if files is None or files.returncode:
             return {"reason": "tracked_source_inspection_unavailable",
                     "changed_paths": []}
-        for raw_path in files.stdout.split(b"\\0"):
+        for raw_path in files.stdout.split(b"\0"):
             if not raw_path:
                 continue
             try:
