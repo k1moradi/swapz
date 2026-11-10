@@ -2640,7 +2640,7 @@ def _require_development_swapoff_headroom(target_row):
         contents = Path("/proc/meminfo").read_text(encoding="ascii")
     except (OSError, UnicodeError) as exc:
         raise ProbeError("cannot prove host memory headroom before swapoff") from exc
-    match = re.search(r"(?m)^MemAvailable:\\s+(\\d+) kB$", contents)
+    match = re.search(r"(?m)^MemAvailable:\s+(\d+) kB$", contents)
     if match is None:
         raise ProbeError("cannot parse MemAvailable before swapoff")
     available_kib = int(match.group(1))
