@@ -4165,8 +4165,10 @@ def run_stage(title, command, result, *, parse_bench=False,
         row = (loaded_phase_table_row(phase_index, phase, verdict, duration)
                if suite == "Loaded" else
                rootless_suite_table_row(phase_index, phase, verdict, duration))
-        sys.stdout.write(("\r" if overwrite else "") + row +
-                         ("" if verdict == "RUNNING" else "\n"))
+        # A legacy direct-stage TTY test still expects its active row to
+        # begin with CR; the unified production table owns the same behavior.
+        sys.stdout.write(("\r" if overwrite or verdict == "RUNNING" else "") +
+                         row + ("" if verdict == "RUNNING" else "\n"))
         sys.stdout.flush()
 
     try:
