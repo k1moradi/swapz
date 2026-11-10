@@ -647,8 +647,7 @@ class NativeTimingContract(unittest.TestCase):
             [int(re.match(r"^\s+([0-9]+)", row).group(1)) for row in rows],
             list(range(1, 9)))
         self.assertIn("Rootless | Native build and metadata", output)
-        self.assertIn("Loaded   |".replace("   |", "  |") +
-                      " SD mixed workloads", output)
+        self.assertIn("Loaded  | SD mixed workloads", output)
         self.assertIn("Physical | Authorized physical swap trial (dev)", output)
         self.assertEqual(output.count("NOT RUN"), 5)
 
