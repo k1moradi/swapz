@@ -26,6 +26,7 @@ def import_helper(filename):
 
 EVIDENCE = import_helper("physical-campaign-evidence.py")
 QUALIFICATION = import_helper("qualification.py")
+SUSTAINED = import_helper("sustained-replay.py")
 RAM_FIXTURES = import_helper("metadata-ram-evidence-test.py")
 READINESS = runpy.run_path(str(
     HERE.parents[1] / "tools" / "evaluate-production-readiness.py"))
@@ -104,6 +105,32 @@ def inspect(rows, before=None, after=None, decisions=None,
 
 
 class AdversarialPhysicalCampaign(unittest.TestCase):
+    def test_sustained_replay_requires_and_hashes_exact_swapspace2_header(self):
+        header = bytearray(SUSTAINED.PAGE)
+        header[-len(SUSTAINED.SWAP_SIGNATURE):] = SUSTAINED.SWAP_SIGNATURE
+        header = bytes(header)
+        expected = hashlib.sha256(header).hexdigest()
+        self.assertEqual(
+            SUSTAINED.validate_swapspace2_header(header), expected)
+
+        changed = bytearray(header)
+        changed[0] = 1
+        self.assertNotEqual(
+            SUSTAINED.validate_swapspace2_header(bytes(changed)), expected)
+
+        invalid = bytearray(header)
+        invalid[-1] ^= 1
+        with self.assertRaisesRegex(ValueError, "ordinary SWAPSPACE2"):
+            SUSTAINED.validate_swapspace2_header(bytes(invalid))
+        with self.assertRaisesRegex(ValueError, "incomplete"):
+            SUSTAINED.validate_swapspace2_header(header[:-1])
+
+        source = (HERE / "sustained-replay.py").read_text(encoding="utf-8")
+        self.assertIn(
+            "raw SWAPSPACE2 header changed during physical replay", source)
+        self.assertIn(
+            '"raw_swap_header_sha256": raw_swap_header_sha256', source)
+
     def test_positive_timing_does_not_replace_real_physical_evidence(self):
         rows = [pair(index, 1100 + 500 * index) for index in range(1, 6)]
         self.assertEqual(inspect(rows)[0]["status"], "PASS")

@@ -31,6 +31,7 @@ from pathlib import Path
 from evidence_io import write_new_json
 
 PAGE = 4096
+SWAP_SIGNATURE = b"SWAPSPACE2"
 SCHEMA = "swapz-sustained-replay-v1"
 REPLAY = runpy.run_path(str(Path(__file__).with_name("io-replay.py")))
 QUALIFICATION = runpy.run_path(
@@ -48,6 +49,29 @@ def interrupt_benchmark(signum, _frame) -> None:
     signal.signal(signal.SIGINT, signal.SIG_IGN)
     signal.signal(signal.SIGTERM, signal.SIG_IGN)
     raise BenchmarkInterrupted(f"interrupted by signal {signum}")
+
+
+def validate_swapspace2_header(header: bytes) -> str:
+    """Return the exact block-zero digest for an ordinary Linux swap header."""
+    if type(header) is not bytes or len(header) != PAGE:
+        raise ValueError("physical target SWAPSPACE2 header read is incomplete")
+    if header[-len(SWAP_SIGNATURE):] != SWAP_SIGNATURE:
+        raise ValueError("physical target lacks an ordinary SWAPSPACE2 header")
+    return hashlib.sha256(header).hexdigest()
+
+
+def physical_swap_header_sha256(path: Path, expected_device: str) -> str:
+    """Read block zero through a descriptor pinned to the expected partition."""
+    descriptor = os.open(path, os.O_RDONLY | os.O_CLOEXEC)
+    try:
+        info = os.fstat(descriptor)
+        if (not stat.S_ISBLK(info.st_mode) or
+                dev_text(info.st_rdev) != expected_device):
+            raise ValueError("physical SWAPSPACE2 descriptor identity changed")
+        header = os.pread(descriptor, PAGE, 0)
+    finally:
+        os.close(descriptor)
+    return validate_swapspace2_header(header)
 
 
 def splitmix64(value: int) -> int:
@@ -368,6 +392,8 @@ def check_physical(args, logical_pages: int):
         raise ValueError("selected target is not a partition")
     if int((lower_sys / "size").read_text()) * 512 != args.expected_device_bytes:
         raise ValueError("selected partition byte size changed")
+    raw_swap_header_sha256 = physical_swap_header_sha256(
+        alias, args.expected_lower_dev)
     parent = lower_sys.parent
     if (parent / "dev").read_text().strip() != args.expected_parent_dev:
         raise ValueError("removable parent major:minor changed")
@@ -433,6 +459,7 @@ def check_physical(args, logical_pages: int):
         "lower_major_minor": args.expected_lower_dev, "physical_partuuid": physical_partuuid,
         "physical_device_bytes": args.expected_device_bytes, "parent_major_minor": args.expected_parent_dev,
         "parent_model": model, "parent_transport": transport, "dm_uuid": dm_uuid,
+        "raw_swap_header_sha256": raw_swap_header_sha256,
         "swapz_config": config if args.candidate == "swapz" else None,
     }
 
@@ -1150,6 +1177,17 @@ def run(args):
                 fill_chunks, churn_chunks, writes_per_lane)
             if oracle["mismatches"]:
                 raise ValueError("final byte oracle failed")
+            raw_swap_header_after_sha256 = None
+            if physical:
+                lower_alias = (
+                    Path("/dev/disk/by-partuuid") /
+                    identity["physical_partuuid"]).resolve(strict=True)
+                raw_swap_header_after_sha256 = physical_swap_header_sha256(
+                    lower_alias, identity["lower_major_minor"])
+                if (raw_swap_header_after_sha256 !=
+                        identity["raw_swap_header_sha256"]):
+                    raise ValueError(
+                        "raw SWAPSPACE2 header changed during physical replay")
             gc = status_delta(
                 status_before, status_after, end - start)
             if identity.get("dm_uuid") and not \
@@ -1293,6 +1331,11 @@ def run(args):
                     "not live physical-segment utilization"),
                 "max_no_progress_seconds": measured_max_no_progress_seconds,
                 "oracle": oracle,
+                "raw_swap_header": ({
+                    "before_sha256": identity["raw_swap_header_sha256"],
+                    "after_sha256": raw_swap_header_after_sha256,
+                    "preserved": True,
+                } if physical else None),
                 "claim_boundary": QUALIFICATION["CONTRACT"]["claim_boundary"],
             }
             args._partial_report = report

@@ -408,7 +408,12 @@ evidence, not a t-test.
 
 For physical block service the raw arm uses the same selected partition with a
 4096-byte data offset so the ordinary SWAPSPACE2 header remains untouched. It
-requires no holder, mount or active-swap alias. The swapz arm requires a fresh
+requires no holder, mount or active-swap alias. Before either physical arm can
+run, the replay helper opens the selected partition read-only, revalidates its
+expected major:minor identity, requires the exact 4096-byte block-zero image to
+end in `SWAPSPACE2`, and records its SHA-256. After the final byte oracle it
+re-reads the same header through the pinned partition identity and refuses PASS
+unless the full 4096 bytes are byte-for-byte unchanged. The swapz arm requires a fresh
 empty mapper whose sole holder/slave relationship is the same partition. Both
 arms use the exact manager maximum logical capacity, fixture hashes, content
 profiles, queue geometry and deterministic operation recipe. Independent
