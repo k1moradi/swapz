@@ -10389,6 +10389,7 @@ def write_failure_diagnostic(result, git_notice):
         "overall": result.get("overall"),
         "git_result": git_notice if git_notice.startswith(
             "GIT_SYNC_FAILED") else "not_a_publication_failure",
+        "checkout_preflight": result.get("checkout_preflight"),
         "stages": [{
             "name": stage.get("name"),
             "status": stage.get("status"),
@@ -10634,6 +10635,53 @@ def goal_scorecard(result):
             "guard_floor_pct": product_goals.GUARD_FLOOR_PCT, "rows": rows}
 
 
+def tracked_source_checkout_preflight():
+    """Reject uncommitted tracked source before any expensive qualification.
+
+    Report only bounded, validated repository-relative names. Never execute
+    external diff drivers, fetch credentials or touch untracked work.
+    The generated canonical JSON report is intentionally not source.
+    """
+    branch = git_result(["symbolic-ref", "--quiet", "--short", "HEAD"])
+    if branch is None or branch.returncode or branch.stdout.strip() != b"main":
+        return {"reason": "checkout_not_on_main", "changed_paths": []}
+
+    changed_paths = []
+    seen = set()
+    for cached in (False, True):
+        command = ["diff", "--no-ext-diff", "--no-textconv"]
+        if cached:
+            command.append("--cached")
+        command.extend((
+            "--name-only", "-z", "--", ".", f":(exclude){GIT_RESULT}"))
+        files = git_result(command)
+        if files is None or files.returncode:
+            return {"reason": "tracked_source_inspection_unavailable",
+                    "changed_paths": []}
+        for raw_path in files.stdout.split(b"\\0"):
+            if not raw_path:
+                continue
+            try:
+                name = raw_path.decode("utf-8")
+            except UnicodeDecodeError:
+                return {"reason": "nonstandard_tracked_source_path",
+                        "changed_paths": []}
+            if (re.fullmatch(
+                    r"(?:[A-Za-z0-9._+-]{1,96}/){0,6}"
+                    r"[A-Za-z0-9._+-]{1,96}", name) is None or
+                    any(part in (".", "..") for part in name.split("/"))):
+                return {"reason": "nonstandard_tracked_source_path",
+                        "changed_paths": []}
+            if name not in seen:
+                seen.add(name)
+                changed_paths.append(name)
+    if changed_paths:
+        return {"reason": "uncommitted_tracked_source",
+                "changed_paths": changed_paths[:8],
+                "total_changed_paths": len(changed_paths)}
+    return None
+
+
 def qualification_overall(exit_code, stages):
     """Require the complete ordered owner matrix and integer-zero exits."""
     if any(stage.get("status") == "FAIL" for stage in stages):
@@ -10716,14 +10764,34 @@ def main():
                                  f"KDIR={args.kdir}", "W=2", "all"]),
         ("Owned RAM smoke + mixed/QD pilot", ["bash", "tests/tools/test-loaded.sh"])
     ]
+    checkout_preflight = tracked_source_checkout_preflight()
     exit_code = 0
-    for i, (title, command) in enumerate(stages):
-        code = run_stage(
-            title, command, result, parse_bench=(i == 4),
-            stream_rootless_progress=(i == 1))
-        if code:
-            exit_code = code
-            break
+    if checkout_preflight is not None:
+        # A dirty nested unittest can fail while the production source is
+        # unchanged. Refuse the long run before collecting misleading evidence.
+        result["checkout_preflight"] = checkout_preflight
+        print("  BLOCKED: tracked source/index preflight failed; "
+              "qualification stages not started", flush=True)
+        print(f"  Checkout cause: {checkout_preflight['reason']}", flush=True)
+        for changed_path in checkout_preflight.get("changed_paths", []):
+            print(f"        Modified tracked source: {changed_path}", flush=True)
+        remaining = (
+            checkout_preflight.get("total_changed_paths", 0) -
+            len(checkout_preflight.get("changed_paths", [])))
+        if remaining > 0:
+            print(f"        Additional modified paths withheld: {remaining}",
+                  flush=True)
+        print("  Next: reconcile unpublished edits on main without discarding "
+              "them, then rerun make test", flush=True)
+        exit_code = 2
+    else:
+        for i, (title, command) in enumerate(stages):
+            code = run_stage(
+                title, command, result, parse_bench=(i == 4),
+                stream_rootless_progress=(i == 1))
+            if code:
+                exit_code = code
+                break
     print_stage_results(stages, result["stages"])
     if result["stages"] and result["stages"][0].get("status") == "PASS":
         # Record the bytes left by the complete qualification sequence. Physical
@@ -10735,7 +10803,9 @@ def main():
             "status": "UNAVAILABLE",
             "reason": "build stage did not pass",
         }
-    result["overall"] = qualification_overall(exit_code, result["stages"])
+    result["overall"] = (
+        "BLOCKED" if checkout_preflight is not None
+        else qualification_overall(exit_code, result["stages"]))
     if not exit_code:
         benchmark = result["benchmarks"]["verdicts"]
         if benchmark.get("overall") == "PASS_BOUNDED_RAM_MATRIX" and \
