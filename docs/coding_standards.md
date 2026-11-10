@@ -624,9 +624,9 @@ historical physical-swap probe's older formatter invocation is retained only as
 historical correctness machinery and is not a production activation path.
 
 For the private owned-RAM `null_blk` rehearsal only, a Btrfs root source must
-be identified by opening `/` and the recovery directory and matching their
-kernel-reported Btrfs FSIDs, each with a single device (`num_devices == 1` and
-`max_id == 1`). Do not require the mountinfo root superblock `major:minor` to
+be identified by opening `/` and the private runtime-state directory and
+matching their kernel-reported Btrfs FSIDs, each with a single device
+(`num_devices == 1` and `max_id == 1`). Do not require the mountinfo root superblock `major:minor` to
 equal a Btrfs subvolume directory's `st_dev`; Linux may report different
 virtual device numbers for the same filesystem. Recheck both pinned filesystem
 identities and the sole member before mapping it through the physical sysfs
@@ -705,9 +705,10 @@ refuse an existing active marker and must never silently retire a pending
 
 `swapzctl primary prepare` may establish durable transaction metadata only.
 Before claiming a run, require a clean synchronized main, accepted exact-source
-owner qualification and live artifact hashes, persistent lifecycle storage, no
-conflicting swapz module/mapper/transaction, and an identity-checked configured
-target selected by the protected PARTUUID configuration. Resolve its current
+owner qualification and live artifact hashes, root-owned volatile lifecycle
+state under `/run/swapz`, no conflicting swapz module/mapper/transaction, and
+an identity-checked configured target selected by the protected PARTUUID
+configuration. Resolve its current
 partition and parent identity at runtime; do not compile a device pathname,
 major:minor or capacity into the manager. The opened partition and parent must
 match the owner-authorized target recorded in AGENT_CONTEXT.
@@ -722,10 +723,11 @@ authority/codec headers are direct inputs to the `swapzctl` build and must be
 declared as incremental-build prerequisites, so a capacity-policy change cannot
 leave a stale manager binary.
 
-Do not require preservation of historical card contents or an old Linux-swap
-header on this disposable target. If an active swapz/ordinary-swap entry exists,
-its identity and usage must be understood and safely drained before a destructive
-transition. Recheck the target, parent, swap inventory and current block-zero
+Do not require a backup or restoration image for historical swap payloads or
+the Linux swap header. The target must already contain a valid `SWAPSPACE2`
+header, and that exact 4096-byte header remains immutable throughout swapz use.
+If an active swapz/ordinary-swap entry exists, its identity and usage must be
+understood and safely drained before a data-area transition. Recheck the target, parent, swap inventory and current block-zero
 state immediately before the transaction claim.
 
 After those checks, generate a fresh OS-random run ID, durably publish the
