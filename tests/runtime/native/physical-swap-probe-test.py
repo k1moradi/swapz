@@ -3110,7 +3110,8 @@ class PhysicalSwapProbeTests(unittest.TestCase):
                     ("swap_size_kib", None),
                     ("swap_priority", None),
                     ("swap_used_kib", None),
-                    ("unrelated_swapfiles", [])):
+                    ("unrelated_swapfiles", []),
+                    ("unrelated_swapfiles_deactivated_by_run", False)):
                 self.assertEqual(manifest[key], expected, key)
             self.assertEqual((manifest["major"], manifest["minor"]),
                              (target["major"], target["minor"]))
@@ -3178,6 +3179,7 @@ class PhysicalSwapProbeTests(unittest.TestCase):
             "stage": "PREPARED", "module_ownership": "NOT_STARTED",
             "ownership_phase": probe.RUNTIME_OWNERSHIP_PHASE,
             "raw_header_preservation_required": True,
+            "unrelated_swapfiles_deactivated_by_run": False,
         }
         review = {
             "reviewer": None if development_only else probe.VERBAL_REVIEWER,
