@@ -4689,9 +4689,6 @@ class PhysicalSwapProbeTests(unittest.TestCase):
             for command in commands))
         self.assertNotIn(("write0",), events)
         self.assertEqual(state["_test_observed_header"], target["header"])
-        self.assertIn(("/reviewed/device-roundtrip",
-                       f"/dev/mapper/{state['dm_name']}",
-                       "--expect-dm-uuid", state["dm_uuid"]), commands)
         oracle = "/reviewed/device-roundtrip"
         mapper = f"/dev/mapper/{state['dm_name']}"
         oracle_commands = [command for command in commands
