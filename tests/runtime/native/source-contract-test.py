@@ -2189,6 +2189,29 @@ dmsetup() {
         self.assertGreaterEqual(process.count("op == REQ_OP_READ && error == -ENOSPC"),
                                 2)
 
+    def test_physical_trial_swaps_off_only_selected_partition(self):
+        physical_probe = (
+            ROOT / "tests/tools/physical-swap-probe.py"
+        ).read_text()
+        quiesce_start = physical_probe.index(
+            "def _quiesce_development_swap_inventory(")
+        quiesce_end = physical_probe.index("\ndef ", quiesce_start + 5)
+        quiesce = physical_probe[quiesce_start:quiesce_end]
+        self.assertIn(
+            '["swapoff", "--", target["device"]]', quiesce)
+        self.assertNotIn(
+            '["swapoff", "--", saved["path"]]', quiesce)
+        self.assertNotIn(
+            "require_development_formatter_inventory_clear()", quiesce)
+        self.assertIn(
+            'state.get("unrelated_swapfiles_deactivated_by_run") is not False',
+            quiesce)
+        prepare_start = physical_probe.index("def _prepare_state(")
+        prepare_end = physical_probe.index("\ndef ", prepare_start + 5)
+        prepare = physical_probe[prepare_start:prepare_end]
+        self.assertIn(
+            '"unrelated_swapfiles_deactivated_by_run": False', prepare)
+
     def test_real_swapz_not_memory_smoke(self):
         for snippet in ("dm_register_target(&swapz_target)",
                         "LZ4_compress_fast(", "LZ4_decompress_safe(",
