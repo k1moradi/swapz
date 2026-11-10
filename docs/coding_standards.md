@@ -66,6 +66,12 @@ More than half of ongoing development engineering time should concern production
 
 ## Source and naming
 
+Rootless-only static policy helpers must be compiled only in their test
+configuration. Production must not retain unreferenced internal helpers or
+suppress `-Wunused-function`; keep type and device-identity verification in
+the production admission path rather than relying on test fixtures.
+
+
 Active product C/C++ and headers live under `src/`; test-only code lives under `tests/`; maintained project documentation lives under `docs/`; packaging code lives under `packaging/`. The sole root-level Markdown exception is `AGENTS.md`, which is repository-control metadata intentionally rooted for coding-agent discovery and is not product documentation. Do not create any other root Markdown or recreate parallel `kernel/`, `userspace/`, `tools/`, legacy source trees, alternate research modules or historical models.
 
 Use `swapz_` / `SWAPZ_` for implementation identifiers and `swapz` for the product/candidate. The Device Mapper target is exactly `swapz`; the module alias is `dm-swapz`. SWZ may name the internal packing and legacy codec only. The real backing partition remains SWAPSPACE2; no on-disk swapz metadata is permitted in the completed design.

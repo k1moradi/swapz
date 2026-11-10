@@ -3392,6 +3392,9 @@ static int swapz_primary_read_swap_inventory(
 #endif
 }
 
+/* The inventory-kind synthetic helper is exercised only by the rootless
+ * policy fixture. Production validates types while resolving device IDs. */
+#ifdef SWAPZ_PRIMARY_ROOTLESS_TEST
 static int swapz_primary_swap_inventory_target_is_quiescent(
 	const struct swapz_primary_swap_entry *entries,
 	const dev_t *resolved_devices, const unsigned char *resolved_is_block,
@@ -3436,6 +3439,7 @@ static int swapz_primary_swap_inventory_target_is_quiescent(
 	}
 	return 0;
 }
+#endif
 
 #ifndef SWAPZ_PRIMARY_ROOTLESS_TEST
 static int swapz_primary_original_swap_policy_snapshot(
