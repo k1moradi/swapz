@@ -132,6 +132,23 @@ class SwapzProductionSourceQualification(unittest.TestCase):
         self.assertIn("make_args=(make --output-sync=target)", runner)
         self.assertIn('"${make_args[@]}" -C tests test', runner)
 
+    def test_rootless_native_userspace_failures_are_attributed(self):
+        suites = (ROOT / "tests/suites/Makefile").read_text(encoding="utf-8")
+        runner = (ROOT / "tests/tools/test-rootless.sh").read_text(
+            encoding="utf-8")
+        self.assertIn(
+            "FAIL: native test-userspace binary=%s exit=%s", suites)
+        self.assertIn(
+            "FAIL: native test-userspace script=%s exit=%s", suites)
+        for fixed_name in (
+                "swapzctl-status", "swapz-primary-policy",
+                "swapz-primary-mount-namespace",
+                "swapz-primary-late-race-test.py"):
+            with self.subTest(fixed_name=fixed_name):
+                self.assertIn(fixed_name, runner)
+        self.assertIn("userspace_native_test=", runner)
+        self.assertIn("rootless_classified_test=$userspace_native_test", runner)
+
     def test_rootless_runner_registers_every_mandatory_python_suite_once(self):
         runner = (ROOT / "tests/tools/test-rootless.sh").read_text(
             encoding="utf-8")
