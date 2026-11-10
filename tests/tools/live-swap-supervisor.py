@@ -101,8 +101,10 @@ LIVE_NAME_PREFIX = "swapz-live-"
 LIVE_UUID_PREFIX = "SWAPZ-LIVE-"
 RECOVERY_BASE = Path("/var/lib/swapz/physical-recovery")
 PRESSURE_CGROUP_ROOT = Path("/sys/fs/cgroup")
-# Retained only for read-only plan output and synthetic policy tests. Do not
-# re-enable this helper: its device and approval model are historical.
+# Retained only for read-only plan output and synthetic policy tests. The
+# historical mutation body below predates the immutable-SWAPSPACE2 design and
+# is intentionally unreachable. Do not re-enable it or copy its formatter/
+# restoration mechanics into current lifecycle code.
 LIVE_SWAP_EXECUTION_ENABLED = False
 POST_QUALIFICATION_PATHS = {
     "docs/ROADMAP.md",
@@ -124,11 +126,11 @@ GH_RUN_LIST_ARGS = (
     "--limit", "40", "--json", "headSha,name,conclusion,status",
 )
 PLANNED_MUTATION_TRACE = (
-    "persist and fsync one-use recovery state and artifact snapshots",
+    "record same-boot ownership and qualified artifact identity",
     "swapoff only the exact original /dev/sda4 swap entry",
-    "clear and format only the identity-checked original partition",
+    "verify the original SWAPSPACE2 first page remains byte-identical",
     "load only the snapshotted qualified dm_swapz module",
-    "create one exact maximum-capacity helper-owned mapper over /dev/sda4",
+    "create one exact maximum-capacity helper-owned mapper over the data area of /dev/sda4",
     "initialize Linux swap on the verified mapper only",
     "activate only the maximum-capacity mapper as the sole swap area; discard disabled",
     "run one cgroup-limited, byte-verified swap-pressure child inside the trial",
@@ -136,9 +138,9 @@ PLANNED_MUTATION_TRACE = (
     "swapoff only the helper mapper after RAM drain-capacity checks",
     "remove only the exact mapper without force",
     "unload only a same-process-owned module with zero references",
-    "restore and reread the exact original 4096-byte header",
-    "reactivate /dev/sda4 with its saved priority and verify restoration",
-    "durably complete recovery and release the active marker",
+    "verify the original SWAPSPACE2 first page remains byte-identical",
+    "reactivate /dev/sda4 with its saved priority and verify normal swap",
+    "release same-boot ownership state",
 )
 LIVE_APPROVAL_TEXT = (
     "Approved by the owner for one supervised experimental Linux swap trial "
@@ -2664,7 +2666,7 @@ def _activate_trial(state_dir, state, results, target, snapshots, ops,
         ops.read_header(target)).hexdigest()
     if state["physical_header_after_map_sha256"] != \
             state["formatted_header_sha256"]:
-        raise LiveSwapError("mapper creation changed the physical SWZ header")
+        raise LiveSwapError("historical mapper path changed protected physical block zero")
     state["dmsetup_status_before_mkswap"] = _status_snapshot(ops, state)
     _transition(state_dir, state, "MAPPED", results)
     _check_stop(ops)
@@ -2676,7 +2678,7 @@ def _activate_trial(state_dir, state, results, target, snapshots, ops,
     ops.verify_mapper_swap_signature(state, mapper)
     if hashlib.sha256(ops.read_header(target)).hexdigest() != \
             state["formatted_header_sha256"]:
-        raise LiveSwapError("mkswap changed physical block-zero SWZ authorization")
+        raise LiveSwapError("historical mapper mkswap changed protected physical block zero")
     _transition(state_dir, state, "MAPPED_SWAP_READY", results)
     _check_stop(ops)
 
@@ -3030,7 +3032,7 @@ def run_trial(approval_path, state_dir, *, confirm, ops=None,
     global _STOP_REQUESTED
     if not LIVE_SWAP_EXECUTION_ENABLED:
         raise LiveSwapError(
-            "live-swap mutations are disabled pending owner authorization")
+            "historical live-swap mutation path is retired; use the ordinary-SWAPSPACE2 lifecycle")
     ops = ops or LinuxOps()
     if os.geteuid() != 0:
         raise LiveSwapError("run requires root; no automatic privilege escalation")
@@ -3200,7 +3202,7 @@ def run_trial(approval_path, state_dir, *, confirm, ops=None,
 def recover_cli(state_dir, *, confirm, ops=None):
     if not LIVE_SWAP_EXECUTION_ENABLED:
         raise LiveSwapError(
-            "live-swap recovery CLI is disabled pending independent safety review")
+            "historical header-restoration CLI is retired; current lifecycle never rewrites raw swap headers")
     if os.geteuid() != 0:
         raise LiveSwapError("recover requires root; no automatic privilege escalation")
     if confirm != "RESTORE-ORIGINAL-SWAP":
