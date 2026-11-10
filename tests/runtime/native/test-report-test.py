@@ -3821,6 +3821,65 @@ class ReportContract(unittest.TestCase):
         self.assertIn(f"round={failing_index + 1}", verdict["reason"])
         self.assertIn("gap=29", verdict["reason"])
         self.assertIn("adjacent=", verdict["reason"])
+        rounds = runner.read_coalesce_failure_rounds(sessions)
+        self.assertEqual(len(rounds), 30)
+        self.assertIn(
+            f"round={failing_index + 1} seq: gap=29",
+            "\n".join(rounds))
+        self.assertTrue(all(len(line) <= 96 for line in rounds))
+        self.assertFalse(runner.read_coalesce_failure_rounds([{
+            "read_coalesce": 1, "swapz": {"passes": {
+                "sequential": {"kernel_read_path": {
+                    "parallel_read_pairs": "/private/SECRET"}},
+                "seeded_random": {"kernel_read_path": {}},
+            }},
+        }])[0].endswith("SECRET"))
+
+    def test_coalesce_failure_prints_all_measured_rounds_not_just_first(self):
+        lines = synthetic_log().splitlines()
+        in_fast_on_arm = False
+        modified = False
+        for index, line in enumerate(lines):
+            if line == "START_READ_COALESCE_AB=1" and not modified:
+                in_fast_on_arm = True
+            elif in_fast_on_arm and line.startswith("{"):
+                evidence = json.loads(line)
+                if evidence.get("candidate") != "swapz":
+                    continue
+                sequential = evidence["packed_read"]["passes"][
+                    "sequential"]["kernel_read_path"]
+                sequential["parallel_read_coalesced_pairs"] = 0
+                sequential["parallel_read_coalesced_reqs_saved"] = 0
+                sequential["parallel_read_coalesced_blocks"] = 0
+                sequential["parallel_read_coalesce_skip_gap"] = 30
+                lines[index] = json.dumps(evidence, separators=(",", ":"))
+                modified = True
+                break
+        self.assertTrue(modified)
+        transcript = "\n".join(lines) + "\n"
+        report = {"stages": [], "benchmarks": {"sessions": [],
+                 "verdicts": {}}}
+        fake_process = FakeStreamingProcess(transcript)
+        with mock.patch.object(
+                runner.subprocess, "Popen", return_value=fake_process), \
+             contextlib.redirect_stdout(io.StringIO()) as console:
+            self.assertEqual(
+                runner.run_stage(
+                    "Owned RAM smoke + mixed/QD pilot", ["unused"],
+                    report, parse_bench=True), 1)
+        stage = report["stages"][-1]
+        self.assertEqual(
+            stage["failed_phase"], "adjacent READ coalescing A/B evidence")
+        shown = console.getvalue()
+        self.assertIn("Merge-on round evidence (kernel counters;", shown)
+        self.assertIn("seq: gap=30", shown)
+        self.assertIn("noncontig=", shown)
+        self.assertIn("rand: chain3=", shown)
+        self.assertIn("Safe next step: retain the failed gate", shown)
+        self.assertEqual(
+            stage["diagnostic"],
+            report["benchmarks"]["read_coalesce_ab"]["reason"])
+        self.assertNotIn("/private/", shown)
 
     def test_immutable_inputs_and_alternating_arm_order(self):
         sessions = runner.parse_sessions(synthetic_log())
