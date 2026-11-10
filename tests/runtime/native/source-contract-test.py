@@ -2068,6 +2068,17 @@ dmsetup() {
             '-f $SHARED_PLAN/fixture.json && ! -L $SHARED_PLAN/fixture.json',
             striped_pair)
 
+    def test_physical_benchmark_entrypoints_keep_executable_mode(self):
+        # Invoked directly by qualification tooling as well as by Python.
+        # Catch accidental Git-mode loss before the physical campaign.
+        for relative_path in (
+                "tests/runtime/benchmark/physical-campaign-evidence-test.py",
+                "tests/runtime/benchmark/sustained-replay.py"):
+            with self.subTest(entrypoint=relative_path):
+                entrypoint = ROOT / relative_path
+                self.assertTrue(entrypoint.is_file())
+                self.assertTrue(entrypoint.stat().st_mode & 0o111)
+
     def test_identical_off_swapz_replay_contract(self):
         # Rootless regular files exercise the immutable plan and full-image
         # oracle. They do NOT claim a loaded swapz module test.

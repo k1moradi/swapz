@@ -4128,6 +4128,9 @@ equivalent clean-segment translation, it must fail closed for a shorter
 declared area or any bad-page entries, never write through those gaps, and
 never treat the trailing SWAPSPACE2 signature alone as admission.
 Rootless adversarial fixtures must prove these refusals and header preservation.
+The physical-campaign evidence test and sustained-replay entrypoints remain
+Git-tracked executable files (mode 100755); the rootless source-contract suite
+must detect accidental executable-bit loss before running physical benchmarks.
 Rootless contracts for these helpers live in the already-executed
 \`io-replay-test.py\`, so this addition does not create another official runner.
 
