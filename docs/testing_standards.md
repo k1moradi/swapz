@@ -5915,6 +5915,18 @@ bare origins). The GitHub repository and current report/provenance schema use
 repositories is a deliberate report-schema migration, not a fixture-side
 autodetection change.
 
+Publication failures classify only fixed, path-free authentication, remote
+policy, non-fast-forward and transport categories. A known noninteractive
+credential or remote-policy refusal stops useless retries; transient failures
+retain the bounded retry policy. Raw Git stderr and credential helper output
+must never appear in the public report or console. A failed qualification, or a
+failed report push after successful qualification, automatically retains a
+private mode-0600 `build/tests/swapz-qualification-failure-*.json` snapshot
+containing the tested source, safe failed stage/physical verdict, and bounded
+per-round READ coalescing counters. The console prints only its repository-
+relative path; the snapshot is never admitted as qualification evidence or
+committed to Git. Failure to write it cannot replace the first test failure.
+
 ### Generated report versus tracked source cleanliness
 
 `test_results.json` is the one generated overwriteable evidence file and is
