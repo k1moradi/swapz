@@ -230,7 +230,7 @@ def _swapz_backing_geometry(header, device_bytes):
     last_page = field(SWAP_LAST_PAGE_OFFSET)
     bad_pages = field(SWAP_BAD_PAGES_OFFSET)
     if (last_page <= 0 or last_page >= complete_pages or
-            bad_pages > SWAP_BAD_PAGE_LIST_MAX):
+            bad_pages > SWAP_BAD_PAGE_LIST_MAX or bad_pages > last_page):
         raise ProbeError("invalid Linux swap declared area or bad-page count")
 
     raw_segments = last_page // SWAPZ_SEGMENT_PAGES
