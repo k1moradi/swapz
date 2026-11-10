@@ -6662,15 +6662,18 @@ wider backend requires same-host results before any inverse-policy promotion,
 and official qualification on a host lacking that ISA does not qualify its
 runtime path.
 
-### Core-2 two-choice metadata cache and copy avoidance
+### Core-2 two-choice first-data-block cache and copy avoidance
 
-The metadata cache keeps exactly 512 immutable SWZ block-zero images, but its
-directory is 128 sets by four ways. Each tag is exactly 16 bytes and each
-four-way set starts on a 64-byte boundary. Each key has two distinct hashed
-set choices. Search primary first and inspect secondary only after a primary
-miss: at most two tag lines/eight tags. A 512-entry fallback scan or separate
-direct front is not permitted. Replacement chooses an invalid way before the
-oldest tag across the two candidate sets. Complete invalidation before authority mutation remains
+The legacy-named `read_metadata_cache` is not metadata and never reconstructs
+swapz authority from media. It keeps exactly 512 immutable first 4KiB
+extent-data payload blocks; mapping, generation, CRC, offset/length, sequence
+and GC authority remain bounded RAM state elsewhere. Its directory is 128 sets
+by four ways. Each tag is exactly 16 bytes and each four-way set starts on a
+64-byte boundary. Each key has two distinct hashed set choices. Search primary
+first and inspect secondary only after a primary miss: at most two tag
+lines/eight tags. A 512-entry fallback scan or separate direct front is not
+permitted. Replacement chooses an invalid way before the oldest tag across the
+two candidate sets. Complete invalidation before authority mutation remains
 mandatory, but normal mutation invalidation advances a directory epoch rather
 than clearing 512 validity entries. Epoch wrap may clear the directory before
 starting a new nonzero epoch.
