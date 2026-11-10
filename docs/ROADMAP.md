@@ -486,9 +486,9 @@ outweighs the extra physical service time **on each target device class**.
 Do not assume that the answer is identical for fast NVMe, SATA and SD/slow
 backing. Do not infer origin from `REQ_SWAP`, a PID/current task, folio
 drop-behind, a zswap presence check, or a failed `zswap_store()`.
-Object-aware extents, direct interpretation of zswap bytes as SWZ LZ4,
-additional producer lanes/buffers and an SWZ format extension are not part
-of the initial feature.
+Object-aware extents, direct interpretation of zswap bytes as swapz LZ4,
+additional producer lanes/buffers and any new persistent swapz format or
+on-partition metadata are not part of the feature.
 
 ### Phase A — establish an explicit and testable origin contract
 
@@ -514,7 +514,8 @@ of the initial feature.
 **A exit gate:** source/native contract fixtures can manufacture ordinary,
 reject/unknown and verified zswap-writeback origins and prove correct routing
 through a split/clone-equivalent path; ambiguous origin never triggers
-compression bypass. No change to authority or on-media format.
+compression bypass. No change to RAM authority, the payload-only lower
+representation, or the ordinary `SWAPSPACE2` partition contract.
 
 ### Phase B — first no-recompression representation candidate
 
@@ -580,13 +581,15 @@ and qualify only through the authorized supported test scope.
 The ideal later pipeline could hand off the **already compressed** zswap
 payload, avoiding both zswap decompression and swapz recompression. This is
 *not* the same feature as Phase B RAW bypass. Before any implementation,
-specify compressor/encoding compatibility (zswap need not use SWZ LZ4),
+specify compressor/encoding compatibility (zswap need not use swapz LZ4),
 bounded payload size, integrity/CRC, ownership and release handshake,
-crash/recovery/format semantics, read-side decoding and GC relocation.
-Do not reinterpret opaque zswap payload bytes as ordinary SWZ records.
-A new SWZ representation/format requires its own independent justification,
-compatibility rules and measured admission gate. If interoperability is not
-worth the complexity, retain the Phase B/C outcome.
+read-side decoding and GC relocation. Do not reinterpret opaque zswap payload
+bytes as an existing swapz payload encoding. Any additional encoding must keep
+its descriptor authority in bounded volatile RAM and store payload bytes only;
+it must not introduce a new partition format, raw-header mutation or persistent
+swapz metadata. Require independent compatibility and measured admission
+evidence. If interoperability is not worth the complexity, retain the Phase
+B/C outcome.
 
 
 ### Phase E — folio locality (ID113: measured cohort correlation)
