@@ -3434,8 +3434,8 @@ static int swapz_primary_swap_inventory_target_is_quiescent(
 }
 
 #ifndef SWAPZ_PRIMARY_ROOTLESS_TEST
-static int swapz_primary_original_swap_is_quiescent(
-	uint64_t target_size_kib)
+static int swapz_primary_original_swap_policy_snapshot(
+	uint64_t target_size_kib, int *active, int *priority)
 {
 	struct swapz_primary_swap_entry entries[SWAPZ_PRIMARY_SWAP_ROWS_MAX];
 	dev_t resolved_devices[SWAPZ_PRIMARY_SWAP_ROWS_MAX] = {0};
@@ -3449,13 +3449,16 @@ static int swapz_primary_original_swap_is_quiescent(
 		errno = ENODEV;
 		return -1;
 	}
+	if (active)
+		*active = 0;
+	if (priority)
+		*priority = 0;
 	if (swapz_primary_read_swap_inventory(
 		    entries, SWAPZ_PRIMARY_SWAP_ROWS_MAX, &count) < 0)
 		return -1;
 	/*
-	 * Metadata preparation never changes swap state. Resolve every entry so
-	 * aliases of the selected partition cannot hide behind another pathname,
-	 * but leave unrelated swap areas untouched.
+	 * Resolve every entry so aliases of the selected partition cannot hide
+	 * behind another pathname. PREPARE records activation policy only.
 	 */
 	for (index = 0; index < count; ++index) {
 		if (stat(entries[index].path, &info) < 0)
@@ -3472,9 +3475,28 @@ static int swapz_primary_original_swap_is_quiescent(
 			return -1;
 		}
 	}
-	return swapz_primary_swap_inventory_target_is_quiescent(
-		entries, resolved_devices, resolved_is_block, count,
-		SWAPZ_PRIMARY_TARGET_DEVICE, target_size_kib);
+	if (swapz_primary_swap_inventory_target_is_quiescent(
+		    entries, resolved_devices, resolved_is_block, count,
+		    SWAPZ_PRIMARY_TARGET_DEVICE, target_size_kib) < 0)
+		return -1;
+	for (index = 0; index < count; ++index) {
+		if (!resolved_is_block[index] ||
+		    resolved_devices[index] != SWAPZ_PRIMARY_TARGET_DEVICE)
+			continue;
+		if (active)
+			*active = 1;
+		if (priority)
+			*priority = entries[index].priority;
+		break;
+	}
+	return 0;
+}
+
+static int swapz_primary_original_swap_is_quiescent(
+	uint64_t target_size_kib)
+{
+	return swapz_primary_original_swap_policy_snapshot(
+		target_size_kib, NULL, NULL);
 }
 #endif
 
