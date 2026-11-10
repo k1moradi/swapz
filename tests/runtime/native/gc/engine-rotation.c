@@ -109,18 +109,32 @@ static int lower_write_run(void *opaque, swapz_u32 start, swapz_u16 blocks,
 	       (size_t)blocks * SWAPZ_BLOCK_BYTES);
 	lower_writes += blocks;
 	*completed = blocks;
-	/* Corrupt only the replay image after the lower copy is complete. The
-	 * last paused transaction then fails authority validation after all older
-	 * extents in the same lower run have already replayed successfully. */
+	/* Corrupt only the last payload in the RAM replay image, after
+	 * lower completion. Byte zero is now deterministic padding, not an
+	 * on-media descriptor, and corrupting it cannot invalidate a record. */
 	if (corrupt_replay_tail) {
+		const struct swapz_tx_record *record;
+		const struct swapz_tx *tail_transaction;
 		swapz_u32 tail;
 
 		if (a.batch_pending < 2U)
 			return -EUCLEAN;
-		tail = bulk_txs[a.batch_pending - 1U].start_block - start;
-		if (tail >= blocks)
+		tail_transaction = &bulk_txs[a.batch_pending - 1U];
+		tail = tail_transaction->start_block - start;
+		record = &tail_transaction->records[0];
+		if (tail >= blocks ||
+		    tail_transaction->extent_blocks > blocks - tail ||
+		    !record->compressed_metadata_bound ||
+		    record->payload_offset >=
+			    (swapz_u32)tail_transaction->extent_blocks *
+				    SWAPZ_BLOCK_BYTES ||
+		    !record->payload_length ||
+		    record->payload_length >
+			    (swapz_u32)tail_transaction->extent_blocks *
+				    SWAPZ_BLOCK_BYTES - record->payload_offset)
 			return -EUCLEAN;
-		bulk_scratch[(size_t)tail * SWAPZ_BLOCK_BYTES] ^= 1U;
+		bulk_scratch[(size_t)tail * SWAPZ_BLOCK_BYTES +
+			     record->payload_offset] ^= 1U;
 		corrupt_replay_tail = 0;
 	}
 	return 0;
@@ -591,7 +605,7 @@ static int test_late_replay_failure_reports_committed_prefix(void)
 	 * lower run. Corrupt only the last replay image so all earlier extents are
 	 * authoritative before the tail validation failure is observed. */
 	corrupt_replay_tail = 1;
-	CHECK(swapz_engine_write_window_batched(&e, pages, 5, &committed) == -EUCLEAN);
+	CHECK(swapz_engine_write_window_batched(&e, pages, 5, &committed) == -EBADMSG);
 	CHECK(committed == 4);
 	CHECK(lower_writes == 5 && e.completed_blocks == 5);
 	CHECK(!a.in_flight && !a.batch_pending && a.abandoned_blocks == 1);
@@ -740,7 +754,7 @@ static int test_gc_publication_prefix_is_not_republished(void)
 	 * extent published. The exact prefix remains authoritative. */
 	corrupt_replay_tail = 1;
 	CHECK(swapz_engine_write_window_batched(&e, pages, 5,
-						 &committed) == -EUCLEAN);
+						 &committed) == -EBADMSG);
 	CHECK(committed == 4 && a.gc_allocation &&
 	      a.gc_destination == 2U && a.open_segment == 2U);
 	for (index = 0; index < 4; ++index)

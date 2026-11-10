@@ -35,6 +35,14 @@ real lifecycle paths may write the original swap header.
 
 ## New P0 ordinary swap and RAM-metadata acceptance gate
 
+For a fully completed batched lower WRITE, replay-failure fault injection must
+modify a *RAM-described compressed payload byte* in the unpublished staging
+image after lower completion, not extent byte zero (now deterministic padding).
+The payload CRC must reject the tail with `-EBADMSG` while retaining earlier
+published mappings and the exact committed-prefix count. No serialized
+on-media metadata can be consulted to manufacture a descriptor-integrity
+failure. GC relocation and foreground replay both exercise this path.
+
 Real device/VM backing must already be SWAPSPACE2. Assert byte-exact backing
 first-page preservation, no raw-partition mkswap, no SWAPZ001 publication,
 and no raw-header write on every successful or failed path. Only the virtual
