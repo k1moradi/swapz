@@ -7241,11 +7241,16 @@ pre-migration journals and must stay unreachable from new-run mutation.
 
 Before mutation, revalidate the exact partition, geometry, parent topology,
 active-swap inventory, memory headroom, mapper/module ownership and
-current-source artifacts. Use ordinary `swapoff` only for the explicitly
-selected target and any separately recorded, exact swapfiles required by the
-development transaction; never use `swapoff -a`. After `swapoff`, prove the
-raw partition is inactive and byte-compare its first 4096 bytes with the
-preflight image before creating the mapper.
+current-source artifacts. Use ordinary `swapoff` only for the explicitly selected raw
+partition; never use `swapoff -a` and never deactivate unrelated swapfiles for
+a swapz trial. Unrelated regular swapfiles may remain active when their saved
+inode, size and priority identity is stable; the run must not claim ownership
+of their activation state. The RAM-headroom calculation therefore covers only
+live pages on the selected raw partition that Linux must migrate during its
+exact-device `swapoff`. After `swapoff`, prove the raw partition is inactive,
+prove admitted unrelated swapfiles remained active and unchanged, and
+byte-compare the raw partition's first 4096 bytes with the preflight image
+before creating the mapper.
 
 The Device Mapper target reserves physical block zero and exposes only the
 aligned post-header data region. All swapz mapping, extent/record descriptors,
