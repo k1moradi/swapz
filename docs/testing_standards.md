@@ -1208,10 +1208,22 @@ read errors or a full buffer without confirmed EOF as a fixture failure with a
 bounded diagnostic, not an assertion abort or a truncated comparison. Expected
 `durable=OBSERVED` reflects the validated READY state and manifest, whether the
 conflict is found during initial admission or the final recheck.
-Keep a negative control that removes final revalidation and demonstrates
-one intercepted module load, mapper creation, mapper-only `mkswap` and
-`swapon`. Match those actual counter fields; a removed raw-header-write
-counter must not make the negative control fail its own evidence check.
+The late-race coordinator fixture models the raw backing as already inactive
+when it reaches START: it must intercept
+`swapz_primary_transition_original_swap()` as an explicit no-op lifecycle
+boundary before the exclusive target open. This fixture does **not** prove an
+active raw-swap `swapoff`; the separate pre-swapoff revalidation and lifecycle
+tests own that destructive transition. Current START performs three mount-fact
+passes on a successful late-race case—initial admission, the pre-swapoff
+revalidation, and the later pre-mapper revalidation—with exactly one late
+pre-mapper pass after fixture injection. A missing transition seam, implicit
+declaration, or stale two-pass expectation is a harness failure.
+
+Keep a negative control that removes final pre-mapper revalidation and
+demonstrates one intercepted no-op raw-swap transition boundary followed by one
+module load, mapper creation, mapper-only `mkswap` and `swapon`. Match those
+actual counter fields; a removed raw-header-write counter must not make the
+negative control fail its own evidence check.
 The post-target selector negative control must remove exactly one executable
 guard, independently of the surrounding explanatory comment's wording.
 Evidence created **after** the last successful

@@ -267,6 +267,7 @@ static unsigned int prewrite_reads;
 static unsigned int mapper_mutations;
 static unsigned int mkswap_calls;
 static unsigned int swapon_calls;
+static unsigned int raw_swap_transition_calls;
 static unsigned int module_loads;
 static unsigned int recovery_marks;
 static unsigned int owner_release_calls;
@@ -1158,8 +1159,11 @@ static int fixture_target_checked_open(const char *device_path,
 #undef swapz_primary_manifest_valid
 static int fixture_intent(void)
 {
-    /* All initial admissions happened before the environment changes. */
-    if (admission_reads != 1U)
+    /*
+     * Initial admission plus the new pre-swapoff revalidation have completed
+     * before this later mapper-boundary race is injected.
+     */
+    if (admission_reads != 2U)
         abort();
     late = 1;
     fixture_apply_late_inventory();
@@ -1272,6 +1276,16 @@ static int fixture_mkswap(void)
     ++mkswap_calls;
     return 0;
 }
+static int fixture_original_swap_transition(
+    const struct swapz_primary_manifest *manifest, int activate, int *changed)
+{
+    assert(manifest != NULL);
+    assert(activate == 0);
+    assert(changed != NULL);
+    ++raw_swap_transition_calls;
+    *changed = 0;
+    return 0;
+}
 static int fixture_swapon(int *activated)
 {
     ++swapon_calls;
@@ -1352,6 +1366,8 @@ static int fixture_hashes(char *control, char *module, char *oracle)
 #define swapz_primary_module_load_mark_loaded_at(...) 0
 #define swapz_primary_dm_create_mapper(a,b,c,d,e,f,g) fixture_mapper_create(e,f,g)
 #define swapz_primary_format_mapper_swap(...) fixture_mkswap()
+#define swapz_primary_transition_original_swap(a,b,c) \
+    fixture_original_swap_transition(a,b,c)
 #define swapz_primary_activate_mapper_swap(a,b,c,d,e) fixture_swapon(e)
 #define swapz_primary_state_require_recovery_at(a,b,c,d) \
 	((void)(a), (void)(b), (void)(c), (void)(d), ++recovery_marks, 0)
@@ -1394,6 +1410,7 @@ static int swapz_primary_shared_root_scope_record_live(
 #define swapz_primary_target_inspect(partuuid,target) \
     fixture_target_inspect(partuuid,target)
 @@START_FUNCTION@@
+#undef swapz_primary_transition_original_swap
 #undef swapz_primary_target_inspect
 #undef SWAPZ_PRIMARY_CONFIG_BASE
 #undef swapz_primary_target_config_read
@@ -1436,6 +1453,7 @@ static int check_case(enum fixture_scenario candidate)
             "36 25 259:9 / / rw - ext4 /dev/other rw\n"
             "37 36 8:1 / /mnt/selected rw - ext4 /dev/sda1 rw\n");
     mapper_mutations = mkswap_calls = swapon_calls = 0U;
+    raw_swap_transition_calls = 0U;
     module_loads = recovery_marks = owner_release_calls = 0U;
     starting_state_writes = active_state_writes = 0U;
     raw_swap_policy_checks = 0U;
@@ -1620,6 +1638,7 @@ static int check_case(enum fixture_scenario candidate)
                 post_snapshot_injected == 1 && fixture_selector_reads >= 1U;
         int refusal = result < 0 && result_errno == ESTALE &&
             race_evidence &&
+            raw_swap_transition_calls == 1U &&
             mapper_mutations == 0U && mkswap_calls == 0U &&
             swapon_calls == 0U && module_loads == 0U && starting_state_writes == 1U &&
             active_state_writes == 0U && recovery_marks == 1U &&
@@ -1658,8 +1677,9 @@ static int check_case(enum fixture_scenario candidate)
         /* The injected mount/swap is detected by a diagnostic production
          * reread, but no atomic kernel exclusion is established by this test. */
         if (result != 0 || !post_snapshot_injected ||
-            admission_reads != 2U || prewrite_reads != 1U ||
+            admission_reads != 3U || prewrite_reads != 1U ||
             active_inventory_reads != 4U || writes != 3U ||
+            raw_swap_transition_calls != 1U ||
             module_loads != 1U ||
             starting_state_writes != 1U || active_state_writes != 1U ||
             recovery_marks != 0U || owner_release_calls != 0U ||
@@ -1682,7 +1702,8 @@ static int check_case(enum fixture_scenario candidate)
         return 0;
     }
     if (expected_safe) {
-        if (result != 0 || admission_reads != 2U || prewrite_reads != 1U ||
+        if (result != 0 || admission_reads != 3U || prewrite_reads != 1U ||
+            raw_swap_transition_calls != 1U ||
             mapper_mutations != 1U || mkswap_calls != 1U ||
             swapon_calls != 1U || module_loads != 1U ||
             starting_state_writes != 1U || active_state_writes != 1U ||
@@ -1691,10 +1712,11 @@ static int check_case(enum fixture_scenario candidate)
             late_mount_conflict_observations != 0U ||
             diagnostic_length != 0U) {
             fprintf(stderr, "FAIL: %s: safe result=%d initial+late=%u "
-                    "late=%u module_load=%u mapper=%u mkswap=%u swapon=%u\n",
+                    "late=%u raw_transition=%u module_load=%u mapper=%u "
+                    "mkswap=%u swapon=%u\n",
                     scenario_names[candidate], result, admission_reads,
-                    prewrite_reads, module_loads, mapper_mutations,
-                    mkswap_calls, swapon_calls);
+                    prewrite_reads, raw_swap_transition_calls, module_loads,
+                    mapper_mutations, mkswap_calls, swapon_calls);
             return 1;
         }
     } else {
@@ -1860,10 +1882,11 @@ static int check_case(enum fixture_scenario candidate)
               candidate == FIXTURE_FOREIGN_SELECTED_INITIAL) ?
                  prewrite_reads != 0U : prewrite_reads != 1U)) {
             fprintf(stderr, "FAIL: %s: refusal result=%d errno=%d expected=%d "
-                    "initial+late=%u late=%u module_load=%u mapper=%u mkswap=%u swapon=%u\n",
+                    "initial+late=%u late=%u raw_transition=%u module_load=%u "
+                    "mapper=%u mkswap=%u swapon=%u\n",
                     scenario_names[candidate], result, result_errno, expected_error,
-                    admission_reads, prewrite_reads, module_loads,
-                    mapper_mutations, mkswap_calls, swapon_calls);
+                    admission_reads, prewrite_reads, raw_swap_transition_calls,
+                    module_loads, mapper_mutations, mkswap_calls, swapon_calls);
             fprintf(stderr,
                     "FAIL: redacted diagnostic bytes=%zu mount_conflicts=%u "
                     "late_mount_conflicts=%u namespace_reads=%u/%u\n",
