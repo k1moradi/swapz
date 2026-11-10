@@ -10282,7 +10282,7 @@ def write_failure_diagnostic(result, git_notice):
     This is never an admission input or a Git publication artifact. It captures
     the measured coalescing rounds automatically even when report push fails.
     """
-    if (result.get("overall") not in ("FAIL", "BLOCKED") and
+    if (result.get("overall") not in ("FAIL", "BLOCKED", "INCOMPLETE") and
             not git_notice.startswith("GIT_SYNC_FAILED")):
         return None
     benchmarks = result.get("benchmarks") or {}
