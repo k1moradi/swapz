@@ -43,6 +43,22 @@ rewrite published history. If direct-main publication is denied or a tool
 only supports branch/PR workflows, **stop publication, preserve the work,
 and report BLOCKED**. Do not silently switch workflows.
 
+## Mandatory self-diagnosing `make test` workflow
+
+Every failure that requires the owner to run an additional diagnostic command
+or manually extract a traceback is also a test-harness reporting defect.
+Fix that reporting gap **alongside the original bug**, and add rootless
+regression coverage before calling the issue resolved. The official `make test`
+console must automatically show the source-bound first failure, bounded
+actionable details, and safe next step. Retain richer evidence automatically
+in private mode-0600 files and print their repository-relative paths; do not
+require the owner to discover or extract the data. Never print arbitrary child
+stderr, credentials, absolute host paths, identities or raw device details.
+Preserve fail-closed qualification, first-cause precedence and original exits.
+Block dirty tracked source before expensive qualification, naming only safe
+tracked repository-relative paths; leave all unpublished owner edits untouched.
+See `docs/testing_standards.md` for the detailed reporting contract.
+
 ## Mandatory ordinary Linux swap partition design (2026-11-09)
 
 Real backing must be an existing, valid SWAPSPACE2 Linux swap partition.
