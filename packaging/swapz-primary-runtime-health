@@ -29,7 +29,7 @@ proc_root=/proc
 sys_root=/sys
 dev_root=/dev
 etc_root=/etc
-recovery_base=/var/lib/swapz/physical-recovery
+runtime_state_base=/run/swapz
 poll_seconds=60
 max_polls=0
 stall_poll_threshold=5
@@ -43,7 +43,7 @@ if [ "${SWAPZ_PRIMARY_SYSTEMD_TESTING:-0}" = 1 ]; then
 	sys_root=${SWAPZ_PRIMARY_TEST_SYS_ROOT:?missing test sys root}
 	dev_root=${SWAPZ_PRIMARY_TEST_DEV_ROOT:?missing test dev root}
 	etc_root=${SWAPZ_PRIMARY_TEST_ETC_ROOT:?missing test etc root}
-	recovery_base=${SWAPZ_PRIMARY_TEST_RECOVERY_BASE:?missing test recovery base}
+	runtime_state_base=${SWAPZ_PRIMARY_TEST_RECOVERY_BASE:?missing test runtime-state base}
 	PATH=${SWAPZ_PRIMARY_TEST_PATH:?missing test executable path}
 	export PATH
 	poll_seconds=${SWAPZ_PRIMARY_TEST_POLL_SECONDS:-0}
@@ -265,12 +265,12 @@ json_unsigned_field()
 
 active_run_id()
 {
-	state=$recovery_base/primary-state.json
+	state=$runtime_state_base/primary-state.json
 	run_id=$(json_string_field run_id "$state") || return 1
 	stage=$(json_string_field stage "$state") || return 1
 	printf '%s\n' "$run_id" | grep -Eq '^[0-9a-f]{32}$' || return 1
 	[ "$stage" = ACTIVE ] || return 1
-	claim=$recovery_base/partition-$selected_partuuid.active
+	claim=$runtime_state_base/partition-$selected_partuuid.active
 	claim_run_id=$(json_string_field run_id "$claim") || return 1
 	claim_partuuid=$(json_string_field partuuid "$claim") || return 1
 	claim_major=$(json_unsigned_field major "$claim") || return 1
