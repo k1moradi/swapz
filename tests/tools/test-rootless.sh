@@ -964,9 +964,9 @@ rootless_begin_phase
 cc -std=c11 -O2 -g -Wall -Wextra -Werror -fsyntax-only \
   -DSWAPZ_PRIMARY_OWNED_NULLBLK_TEST=1 \
   '-DSWAPZ_PRIMARY_TEST_CONFIG_BASE="/var/tmp/swapz-primary-owned-nullblk/config"' \
-  '-DSWAPZ_PRIMARY_TEST_RECOVERY_BASE="/var/tmp/swapz-primary-owned-nullblk/recovery"' \
+  '-DSWAPZ_PRIMARY_TEST_RUNTIME_STATE_BASE="/var/tmp/swapz-primary-owned-nullblk/runtime-state"' \
   '-DSWAPZ_PRIMARY_TEST_MUTATION_LOCK_DIRECTORY="/var/tmp/swapz-primary-owned-nullblk/mutation-lock"' \
-  '-DSWAPZ_PRIMARY_TEST_QUALIFICATION_REPORT="/var/tmp/swapz-primary-owned-nullblk/recovery/qualification.json"' \
+  '-DSWAPZ_PRIMARY_TEST_QUALIFICATION_REPORT="/var/tmp/swapz-primary-owned-nullblk/runtime-state/qualification.json"' \
   src/userspace/swapz-primary.c
 rootless_phase='C syntax: physical lifecycle seam'
 rootless_begin_phase
@@ -989,9 +989,9 @@ if cc -std=c11 -O2 -g -Wall -Wextra -Werror -fsyntax-only \
      -DSWAPZ_PRIMARY_OWNED_NULLBLK_TEST=1 \
      '-DSWAPZ_PRIMARY_PHYSICAL_QUALIFIED_CONTROL="/usr/local/sbin/swapzctl"' \
      '-DSWAPZ_PRIMARY_TEST_CONFIG_BASE="/var/tmp/swapz-primary-owned-nullblk/config"' \
-     '-DSWAPZ_PRIMARY_TEST_RECOVERY_BASE="/var/tmp/swapz-primary-owned-nullblk/recovery"' \
+     '-DSWAPZ_PRIMARY_TEST_RUNTIME_STATE_BASE="/var/tmp/swapz-primary-owned-nullblk/runtime-state"' \
      '-DSWAPZ_PRIMARY_TEST_MUTATION_LOCK_DIRECTORY="/var/tmp/swapz-primary-owned-nullblk/mutation-lock"' \
-     '-DSWAPZ_PRIMARY_TEST_QUALIFICATION_REPORT="/var/tmp/swapz-primary-owned-nullblk/recovery/qualification.json"' \
+     '-DSWAPZ_PRIMARY_TEST_QUALIFICATION_REPORT="/var/tmp/swapz-primary-owned-nullblk/runtime-state/qualification.json"' \
      src/userspace/swapz-primary.c >/dev/null 2>&1; then
   printf '%s\n' 'FAIL: physical and null_blk lifecycle seams compiled together' >&2
   exit 1
