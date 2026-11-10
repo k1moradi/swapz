@@ -626,7 +626,7 @@ BLOCKED, distinct from source-provenance failure and the still-missing
 independent physical-card/reader proof.
 
 Primary userspace mapper sizing must exactly match kernel authority admission.
-After SWZ-header removal and 1MiB segment rounding, keep
+For payload-only SWAPSPACE2 data-region mapping and 1MiB segment rounding, keep
 `max(ceil(logical_pages / 8), 512)` GC-reserve blocks plus one independent
 256-block foreground COW segment. Use division-first reserve arithmetic to avoid
 overflow, reject misaligned or undersized physical geometry, and never publish
@@ -2783,13 +2783,17 @@ packed-payload end relation only while offsets/lengths remain 16-bit decoded
 values, positive length and maximum compressed-length checks remain intact,
 and exact adjacency to `previous_end` is still required.
 
-Publication may authenticate an immutable SWZ extent's header and descriptor
-bytes once with `swapz_validate_metadata_crc()`, then fold descriptor
-adjacency and transaction identity into the existing `swapz_finish()` Phase 1
-walk. Public `swapz_validate()` remains the complete standalone validator and
-must retain duplicate-logical detection. Publication may omit that quadratic
-duplicate scan only because every decoded logical/generation pair is compared
+In isolated legacy serialized-codec fixtures only, publication may authenticate
+synthetic SWZ extent header and descriptor bytes with
+`swapz_validate_metadata_crc()`, then fold descriptor adjacency and transaction
+identity into the existing `swapz_finish()` Phase 1 walk. Public
+`swapz_validate()` remains the complete standalone fixture validator and must
+retain duplicate-logical detection. Those fixtures may omit the quadratic
+duplicate scan only when every decoded logical/generation pair is compared
 positionally with the already-authenticated, duplicate-free transaction.
+Production publication instead uses RAM-owned descriptors and may publish them
+only after required lower I/O succeeds; it must neither read nor write a
+serialized SWZ header or record table in the backing partition.
 
 The batched engine may reuse its one window-wide uniqueness proof through
 `swapz_stage_batch_unique()` and the unique prehashed codec append. The stage
@@ -2903,13 +2907,13 @@ first drains an older window that exhausts capacity, the uncommitted writes
 fail while the READ continues against committed authority.
 
 Non-`null_blk` backing is disabled by default. When explicitly enabled it
-requires a valid unchanged SWAPSPACE2 header in reserved block 0.
-During the P0 metadata migration, physical backing additionally fails closed
-in the DM constructor while SWZ compressed extent headers/descriptors are
-written in-band. A valid swap header is never permission to publish legacy
-extent metadata onto a real partition. Removing the constructor interlock
-requires matching native, loaded and physical-data qualification of RAM-only
-CRC, sequence, descriptor, read and GC ownership.
+requires a valid unchanged SWAPSPACE2 header in reserved block 0 and the
+exact-source loaded RAM-metadata qualification token. The production kernel
+writes payload bytes and deterministic zero padding only within the
+header-excluded data region; the token never authorizes SWZ headers or record
+tables on physical media. This replaced the old in-band-format constructor
+interlock, not the requirement for matching native, loaded and physical
+qualification of RAM-only CRC, sequence, descriptor, READ and GC ownership.
 All mapping data and segment discard ranges start after that reserved block.
 Fault-injection knobs are forbidden on physical backing. Upper WRITE completion accounting distinguishes
 successful BIO acknowledgments from BIO errors; a terminally failed target
