@@ -1810,6 +1810,11 @@ static int swapz_primary_manifest_valid(
 	       swapz_primary_valid_sha256(
 		       manifest->original_header_sha256) &&
 	       swapz_primary_manifest_physical_blocks(manifest) &&
+	       (manifest->original_swap_active == 0 ||
+		manifest->original_swap_active == 1) &&
+	       manifest->original_swap_priority <= 32767 &&
+	       (manifest->original_swap_active ||
+		manifest->original_swap_priority == 0) &&
 	       swapz_primary_target_valid(&manifest->target);
 }
 
@@ -2172,7 +2177,7 @@ int swapz_primary_manifest_format(
 		return -1;
 	logical_pages = logical_sectors / SWAPZ_PRIMARY_SECTORS_PER_PAGE;
 	length = snprintf(record, capacity,
-			  "schema=swapz-primary-manifest-v3\n"
+			  "schema=swapz-primary-manifest-v4\n"
 			  "run_id=%s\n"
 			  "source_sha=%s\n"
 			  "swapzctl_sha256=%s\n"
@@ -2183,6 +2188,8 @@ int swapz_primary_manifest_format(
 			  "partuuid=%s\n"
 			  "device_bytes=%llu\n"
 			  "backing_physical_blocks=%u\n"
+			  "original_swap_active=%d\n"
+			  "original_swap_priority=%d\n"
 			  "original_header_sha256=%s\n"
 			  "logical_pages=%llu\n"
 			  "logical_sectors=%llu\n"
@@ -2197,6 +2204,8 @@ int swapz_primary_manifest_format(
 			  manifest->target.partuuid,
 			  (unsigned long long)manifest->target.device_bytes,
 			  manifest->backing_physical_blocks,
+			  manifest->original_swap_active,
+			  manifest->original_swap_priority,
 			  manifest->original_header_sha256,
 			  (unsigned long long)logical_pages,
 			  (unsigned long long)logical_sectors, mapper_name, mapper_uuid,
@@ -2220,6 +2229,8 @@ int swapz_primary_manifest_parse(const char *record, size_t length,
 	char device_minor[32];
 	char device_bytes[32];
 	char backing_physical_blocks[32];
+	char original_swap_active[8];
+	char original_swap_priority[32];
 	const char *cursor = record;
 	const char *end;
 	uint64_t logical_pages;
@@ -2237,7 +2248,7 @@ int swapz_primary_manifest_parse(const char *record, size_t length,
 		return -1;
 	end = record + length;
 	if (swapz_primary_manifest_expect_line(&cursor, end, "schema",
-					      "swapz-primary-manifest-v3") < 0 ||
+					      "swapz-primary-manifest-v4") < 0 ||
 	    swapz_primary_manifest_take_line(&cursor, end, "run_id",
 					     parsed.run_id,
 					     sizeof(parsed.run_id)) < 0 ||
@@ -2283,6 +2294,17 @@ int swapz_primary_manifest_parse(const char *record, size_t length,
 	    swapz_primary_parse_u64(backing_physical_blocks, &parsed_number) < 0 ||
 	    parsed_number > UINT32_MAX ||
 	    !(parsed.backing_physical_blocks = (uint32_t)parsed_number) ||
+	    swapz_primary_manifest_take_line(
+		    &cursor, end, "original_swap_active",
+		    original_swap_active, sizeof(original_swap_active)) < 0 ||
+	    swapz_primary_parse_u64(original_swap_active, &parsed_number) < 0 ||
+	    parsed_number > 1U ||
+	    (parsed.original_swap_active = (int)parsed_number) < 0 ||
+	    swapz_primary_manifest_take_line(
+		    &cursor, end, "original_swap_priority",
+		    original_swap_priority, sizeof(original_swap_priority)) < 0 ||
+	    swapz_primary_parse_priority(
+		    original_swap_priority, &parsed.original_swap_priority) < 0 ||
 	    swapz_primary_manifest_take_line(
 		    &cursor, end, "original_header_sha256",
 		    parsed.original_header_sha256,
@@ -9894,6 +9916,8 @@ static int swapz_primary_manifest_equal(
 	       !strcmp(left->original_header_sha256,
 		       right->original_header_sha256) &&
 	       left->backing_physical_blocks == right->backing_physical_blocks &&
+	       left->original_swap_active == right->original_swap_active &&
+	       left->original_swap_priority == right->original_swap_priority &&
 	       !memcmp(&left->target, &right->target,
 		       sizeof(left->target));
 }
