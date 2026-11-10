@@ -146,6 +146,22 @@ class SwapzProductionSourceQualification(unittest.TestCase):
                     f"mandatory rootless suite must run exactly once: "
                     f"{relative_path}")
 
+    def test_rootless_swap_inventory_helper_stays_out_of_production_fixture(self):
+        helper = "swapz_primary_swap_inventory_target_is_quiescent("
+        policy = (
+            ROOT / "tests/runtime/native/userspace/swapz-primary-policy.c"
+        ).read_text(encoding="utf-8")
+        mount_namespace = (
+            ROOT /
+            "tests/runtime/native/userspace/swapz-primary-mount-namespace.c"
+        ).read_text(encoding="utf-8")
+
+        # The policy fixture defines SWAPZ_PRIMARY_ROOTLESS_TEST and owns this
+        # synthetic helper's coverage. The mount-namespace fixture intentionally
+        # compiles production scope and must not depend on the test-only symbol.
+        self.assertGreaterEqual(policy.count(helper), 2)
+        self.assertNotIn(helper, mount_namespace)
+
     def test_package_and_primary_share_global_mutation_lock(self):
         mutation = source_body("swapz_primary_run_mutating_action", PRIMARY)
         command = source_body("swapz_primary_command", PRIMARY)
