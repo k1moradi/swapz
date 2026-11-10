@@ -465,9 +465,10 @@ int swapz_batch_resume(struct swapz_authority *authority, const struct swapz_tx 
 /* Cancel an abandoned physical region; old mappings remain authoritative. */
 int swapz_abort(struct swapz_authority *authority, const struct swapz_tx *tx);
 /*
- * Raw 4KiB page (LZ4 fallback) occupies a whole aligned block and has no
- * SWZ descriptor. The caller must stage exactly one record / one block and
- * only call finish_raw after the WHOLE lower write completes.
+ * Raw 4KiB fallback occupies one whole aligned block and has no serialized
+ * lower-media descriptor. Its identity, generation and CRC remain volatile
+ * RAM authority. The caller must stage exactly one record / one block and
+ * call finish_raw only after the WHOLE lower write completes.
  */
 int swapz_finish_raw(struct swapz_authority *authority, const struct swapz_tx *tx,
 		   const void *raw_page, swapz_u8 completed_blocks, int io_error);
