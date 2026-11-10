@@ -687,9 +687,11 @@ static int test_padding_option_measures_exact_request_byte_tradeoff(void)
 	CHECK(e.bulk_padding_blocks == 0 && validate_prefix(4) == 0);
 
 	/*
-	 * With serialized lower metadata retired, these four payloads total
-	 * 8146 bytes and fit one 8KiB extent. Both bulk modes must therefore
-	 * produce the same one-request, two-block, no-padding result.
+	 * With serialized lower metadata retired, the four payloads total
+	 * 8146 bytes. The planner prefers two adjacent 4KiB extents:
+	 * they cost four cold payload READ blocks versus five for one 8KiB
+	 * extent (one record would straddle the block boundary). The lower
+	 * aggregator still emits one two-block WRITE with no padding.
 	 */
 	CHECK(setup() == 0);
 	committed = 0;
@@ -704,6 +706,7 @@ static int test_padding_option_measures_exact_request_byte_tradeoff(void)
 	canonical_bytes = lower_written_bytes;
 	CHECK(canonical_calls == 1 &&
 	      canonical_bytes == 2U * SWAPZ_BLOCK_BYTES);
+	CHECK(e.bulk_extents == 2);
 	CHECK(e.bulk_padding_blocks == 0);
 	CHECK(a.alignment_hole_blocks_foreground == 0);
 	CHECK(e.run_splits_by_hole == 0);
@@ -744,10 +747,15 @@ static int test_packed_placement_removes_internal_hole(void)
 	CHECK(a.alignment_hole_blocks_foreground == 0);
 	CHECK(a.segment_tail_waste_blocks_foreground == 0);
 	CHECK(e.run_splits_by_hole == 0);
-	CHECK(maps[0].start_block == 0 && maps[0].extent_blocks == 2);
-	CHECK(maps[1].start_block == 0 && maps[1].extent_blocks == 2);
-	CHECK(maps[2].start_block == 0 && maps[2].extent_blocks == 2);
-	CHECK(maps[3].start_block == 0 && maps[3].extent_blocks == 2);
+	/* Two 4KiB extents minimize cold READs, but remain one contiguous
+	 * lower WRITE. Guard both mapping and I/O geometry: raw block totals
+	 * alone would miss an unnecessary extra per-page READ.
+	 */
+	CHECK(e.bulk_extents == 2);
+	CHECK(maps[0].start_block == 0 && maps[0].extent_blocks == 1);
+	CHECK(maps[1].start_block == 0 && maps[1].extent_blocks == 1);
+	CHECK(maps[2].start_block == 1 && maps[2].extent_blocks == 1);
+	CHECK(maps[3].start_block == 1 && maps[3].extent_blocks == 1);
 	return 0;
 }
 
