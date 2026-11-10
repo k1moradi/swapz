@@ -12764,7 +12764,7 @@ static int swapz_primary_prepare_metadata(
 	}
 	failure_phase = "final-original-swap-policy";
 	if (swapz_primary_original_swap_policy_snapshot(
-		    original_swap_size_kib, 1, &original_swap_active,
+		    original_swap_size_kib, 0, &original_swap_active,
 		    &original_swap_priority) < 0)
 		goto out;
 	if (original_swap_priority > 32767) {
