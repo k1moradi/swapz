@@ -1334,6 +1334,8 @@ static void test_primary_run_id_generation(void)
 	char generated[SWAPZ_PRIMARY_RUN_ID_LENGTH + 1U];
 
 	assert(!swapz_primary_valid_run_id(all_zero));
+	assert(swapz_primary_valid_run_id("00000000000000000000000000000001"));
+	assert(swapz_primary_valid_run_id("10000000000000000000000000000000"));
 	assert(!swapz_primary_valid_run_id(uppercase));
 	assert(!swapz_primary_valid_run_id("short"));
 	memset(unterminated, 'a', sizeof(unterminated));

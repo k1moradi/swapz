@@ -630,6 +630,9 @@ physical backing.
 The primary manager's per-transaction run ID is crash/session ownership
 metadata only. Generate it from the system random source as lowercase 32-hex;
 do not derive it from timestamps, process IDs or caller-selected identifiers.
+Both generation and validation must reject the all-zero ID; zero digits within
+a nonzero ID remain valid. The direct-C policy regression must cover both ends
+of that boundary so parsed ownership records obey the generator's invariant.
 Bind the durable manifest to the **currently verified configured target
 geometry**, PARTUUID, source/artifact identity and the SHA-256 digest of the
 unchanged 4096-byte SWAPSPACE2 header. The digest is an integrity witness, not

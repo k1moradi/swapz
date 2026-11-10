@@ -5876,6 +5876,7 @@ static int swapz_primary_partition_lock_at(int recovery_fd,
 static int swapz_primary_valid_run_id(const char *run_id)
 {
 	size_t i;
+	int nonzero = 0;
 
 	if (!run_id ||
 	    strnlen(run_id, SWAPZ_PRIMARY_RUN_ID_LENGTH + 1U) !=
@@ -5885,8 +5886,9 @@ static int swapz_primary_valid_run_id(const char *run_id)
 		if (!((run_id[i] >= '0' && run_id[i] <= '9') ||
 		      (run_id[i] >= 'a' && run_id[i] <= 'f')))
 			return 0;
+		nonzero |= run_id[i] != '0';
 	}
-	return 1;
+	return nonzero;
 }
 
 static int swapz_primary_write_record_at(int recovery_fd, const char *name,

@@ -8071,6 +8071,10 @@ modes, acquire a nonblocking exclusive `flock`, and fsync the recovery-base
 directory. It must never unlink or replace that inode. Until lifecycle commands
 actually acquire and hold this lock for their full operation, the primitive's
 presence alone does not satisfy the manager's shared-lock requirement.
+Direct-C run-ID policy coverage must reject the all-zero ownership ID and
+accept nonzero 32-hex IDs with leading or trailing zero digits, consistently
+with the OS-random generator.
+
 Before the first device mutation, consume a fresh lowercase 32-hex run ID with
 an `O_EXCL` record and create the matching active PARTUUID marker. Each record
 must be root-owned mode 0600, fsynced, and followed by a recovery-directory
