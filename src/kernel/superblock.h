@@ -125,6 +125,66 @@ static inline int swapz_linux_swap_header_parse(
 	return 1;
 }
 
+static inline int swapz_linux_swap_segment_has_bad_page(
+	const unsigned char *block, const struct swapz_linux_swap_layout *layout,
+	unsigned int segment_pages, unsigned int raw_segment)
+{
+	unsigned int index;
+
+	if (!block || !layout || !segment_pages)
+		return 1;
+	for (index = 0; index < layout->bad_pages; ++index) {
+		unsigned int bad_page =
+			swapz_linux_swap_bad_page(block, layout, index);
+
+		if (bad_page &&
+		    (bad_page - 1U) / segment_pages == raw_segment)
+			return 1;
+	}
+	return 0;
+}
+
+static inline unsigned int swapz_linux_swap_clean_segment_count(
+	const unsigned char *block, const struct swapz_linux_swap_layout *layout,
+	unsigned int segment_pages)
+{
+	unsigned int full_segments;
+	unsigned int contaminated = 0;
+	unsigned int index;
+
+	if (!block || !layout || !segment_pages)
+		return 0;
+	full_segments = layout->last_page / segment_pages;
+	for (index = 0; index < layout->bad_pages; ++index) {
+		unsigned int bad_page =
+			swapz_linux_swap_bad_page(block, layout, index);
+		unsigned int raw_segment;
+		unsigned int previous;
+		int already_counted = 0;
+
+		if (!bad_page)
+			return 0;
+		raw_segment = (bad_page - 1U) / segment_pages;
+		/* A bad page in the incomplete data tail costs no usable segment. */
+		if (raw_segment >= full_segments)
+			continue;
+		for (previous = 0; previous < index; ++previous) {
+			unsigned int earlier =
+				swapz_linux_swap_bad_page(block, layout, previous);
+
+			if (earlier &&
+			    (earlier - 1U) / segment_pages == raw_segment) {
+				already_counted = 1;
+				break;
+			}
+		}
+		if (!already_counted)
+			contaminated++;
+	}
+	return contaminated <= full_segments ?
+		full_segments - contaminated : 0;
+}
+
 /*
  * Transitional admission wrapper. The parser above understands the ordinary
  * Linux format fully, but physical swapz admission remains fail-closed until
