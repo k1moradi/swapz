@@ -674,7 +674,7 @@ class NativeTimingContract(unittest.TestCase):
                     stream_rootless_progress=True, progress_table=table), 0)
         output = captured.getvalue()
         self.assertEqual(output.count("ID | Suite"), 1)
-        self.assertEqual(output.count("rootless initialization"), 1)
+        self.assertEqual(output.count("Rootless initialization"), 1)
         self.assertEqual(output.count("Native build and metadata"), 1)
         self.assertRegex(
             output, r"(?m)^\s*2 \| Rootless \|.*\| FAIL\s+\|")
@@ -8067,7 +8067,8 @@ class ReportContract(unittest.TestCase):
         self.assertEqual(len(commands), 2)
         self.assertEqual(commands[0][:2], ("push", "origin"))
         self.assertEqual(commands[1][:2], ("-c", "credential.helper="))
-        self.assertIn("!gh auth git-credential", commands[1])
+        self.assertIn("credential.helper=!gh auth git-credential",
+                      commands[1])
         cli_authenticated = False
         commands.clear()
         result = runner.git_push_with_credential_fallback(

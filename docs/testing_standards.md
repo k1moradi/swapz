@@ -534,7 +534,10 @@ tables and interpretations remain separate from this verdict table.
 The source-contract regression must assert the unified table producer and
 authenticated loaded-progress emitter rather than a retired printed
 loaded-suite heading. Fixed-width suite cells include the delimiter space
-after the eight-column padded suite label; tests must assert that alignment. Synthetic official-run mocks must accept the optional
+after the eight-column padded suite label; tests must assert that alignment.
+The rootless fixture asserts the source-controlled display-name capitalization,
+and the authentication fixture checks the complete Git credential-helper
+argument without inspecting or revealing credential data. Synthetic official-run mocks must accept the optional
 observational progress-table argument and still preserve the first exit code
 on report-write failure. The physical trial remains separately
 authorized, and its status cannot be interpreted as production physical
