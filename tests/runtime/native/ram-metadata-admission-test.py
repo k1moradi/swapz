@@ -138,6 +138,16 @@ def main() -> None:
         "SWAPZ_PRIMARY_RUNTIME_STATE_BASE" in runtime_preflight,
         "Read-only runtime-state preflight must inspect without creating /run state")
 
+    require(
+        "runtime_state_missing = 1;" in runtime_preflight and
+        "swapz_primary_runtime_state_parent_open()" in runtime_preflight and
+        "No state directory means no ownership marker can exist yet." in
+        runtime_preflight,
+        "First-use plan must safely admit an absent /run/swapz without creating it")
+    require(
+        "#define SWAPZ_PRIMARY_EXECUTION_RUNTIME_PARENT \"/run\"" in primary,
+        "Runtime-state parent identity must stay fixed at /run")
+
     # DM property consumers must see the allocated lower data range, not
     # the reserved SWAPSPACE2 header or discarded segment-alignment tail.
     iterator = target.split("static int swapz_iterate_devices(", 1)[1].split(
