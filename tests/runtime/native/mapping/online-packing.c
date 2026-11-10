@@ -781,6 +781,39 @@ static int test_full_extent_corruption_rejected(void)
 	return 0;
 }
 
+/* An insufficient caller buffer is an admission failure, not a reason to
+ * read backing data or perturb validated read-cache state. */
+static int test_insufficient_read_capacity_skips_lower_io(void)
+{
+	struct swapz_compressed_page pages[7];
+	swapz_u8 output[2072], committed = 0;
+	swapz_u16 length = 91;
+	swapz_u32 reads_before, requests_before;
+
+	CHECK(setup() == 0);
+	prepare(pages, 7, 0, 0);
+	CHECK(write_window_sequential(pages, 7, &committed) == 0);
+	CHECK(committed == 7 && maps[6].payload_length == sizeof(output));
+	swapz_engine_invalidate_read_cache(&engine);
+	reads_before = disk.read_blocks;
+	requests_before = engine.read_payload_requests;
+	memset(output, 0x5a, sizeof(output));
+	CHECK(swapz_engine_read_page(&engine, 6, output,
+				    sizeof(output) - 1U, &length) == -ENOSPC);
+	CHECK(length == 0);
+	CHECK(disk.read_blocks == reads_before);
+	CHECK(engine.read_payload_requests == requests_before);
+	CHECK(!engine.read_cache_valid);
+	CHECK(output[0] == 0x5a && output[sizeof(output) - 1U] == 0x5a);
+
+	CHECK(swapz_engine_read_page(&engine, 6, output,
+				    sizeof(output), &length) == 0);
+	CHECK(length == sizeof(output));
+	CHECK(!memcmp(output, originals[6], length));
+	CHECK(disk.read_blocks > reads_before);
+	return 0;
+}
+
 static int test_torn_extent_quarantined_without_authority(void)
 {
 	struct swapz_compressed_page pages[16];
@@ -1444,6 +1477,7 @@ int main(void)
 	CHECK(test_extent_lru_reuses_eight_interleaved_extents() == 0); completed++;
 	CHECK(test_prime_absorb_preserves_shared_read_residency() == 0); completed++;
 	CHECK(test_full_extent_corruption_rejected() == 0); completed++;
+	CHECK(test_insufficient_read_capacity_skips_lower_io() == 0); completed++;
 	CHECK(test_torn_extent_quarantined_without_authority() == 0); completed++;
 	CHECK(test_failure_second_extent_reports_prefix() == 0); completed++;
 	CHECK(test_overwrite_old_mapping_survives_failure() == 0); completed++;

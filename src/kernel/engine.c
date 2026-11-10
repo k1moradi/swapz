@@ -2044,6 +2044,10 @@ int swapz_engine_read_page(struct swapz_engine *engine, swapz_u32 logical_page,
 	     payload_last - payload_first + 1U >
 			engine->max_read_blocks_per_record))
 		return -EUCLEAN;
+	/* A short caller buffer cannot consume a validated compressed page.
+	 * Reject before cache probes, lower I/O or CRC work. */
+	if (observed.payload_length > payload_capacity)
+		return -ENOSPC;
 
 	/*
 	 * RAM mapping state is the only descriptor authority. Cached bytes are
@@ -2150,8 +2154,6 @@ int swapz_engine_read_page(struct swapz_engine *engine, swapz_u32 logical_page,
 		engine->authority, logical_page, &observed, stored, &stored);
 	if (error)
 		return error;
-	if (observed.payload_length > payload_capacity)
-		return -ENOSPC;
 	memcpy(payload, stored, observed.payload_length);
 	*payload_length = observed.payload_length;
 	engine->read_validated_payload_crc32c = observed.payload_crc32c;

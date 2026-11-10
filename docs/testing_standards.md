@@ -62,6 +62,11 @@ physical capacity, segment boundaries and legal 4/8/16KiB classes before
 submitting any lower callback. Negative native tests must observe zero
 lower requests for invalid inputs.
 
+Compressed engine reads must reject a caller payload buffer smaller than the
+RAM-authoritative record length with `-ENOSPC` before read-cache probes,
+lower READ submissions or CRC validation. Native regression must verify zero
+lower requests, unchanged output and a successful exact-size retry.
+
 Under an explicit one-block cold-read budget, native packed-read regressions
 must verify one lower payload-block read per logical request, no inherited
 serialized-metadata cache hits, and byte-exact CRC-validated readback after
