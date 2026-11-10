@@ -2,7 +2,7 @@
 /*
  * dm-swapz - EXPERIMENTAL swapz volatile Device Mapper swap target.
  *
- * Uses SWZ 4/8/16KiB extents, 4KiB logical pages, LZ4 and bounded
+ * Uses payload-only swapz 4/8/16KiB extents, 4KiB logical pages, LZ4 and bounded
  * size-aware write windows. Write publication stays on one serialized
  * WQ_MEM_RECLAIM owner; bounded private read slots may overlap up to eight
  * independent compressed or RAW lower READs without publishing authority.
