@@ -192,6 +192,7 @@ class SwapzProductionSourceQualification(unittest.TestCase):
                 "qualified-artifact-hash-readback",
                 "qualified-artifact-identity", "target-header-inspection",
                 "target-geometry-identity", "original-header-identity-proof",
+                "swapspace2-clean-segment-geometry",
                 "original-header-digest", "raw-target-swap-inventory",
                 "target-physical-parent-identity",
                 "cross-namespace-mount-inventory",
@@ -200,20 +201,26 @@ class SwapzProductionSourceQualification(unittest.TestCase):
                 "shared-root-parent-authorization-record",
                 "repeated-raw-target-swap-inventory",
                 "repeated-target-physical-parent-identity",
-                "repeated-target-recovery-parent-separation",
                 "repeated-cross-namespace-mount-inventory",
                 "repeated-target-mounted-in-visible-namespace",
                 "repeated-root-device-parent-identity",
                 "repeated-root-parent-identity",
                 "repeated-shared-root-parent-authorization",
-                "final-root-parent-identity-revalidation",
-                "final-shared-root-parent-authorization",
                 "physical-parent-swap-inventory", "module-mapper-inventory",
                 "unexpected-module-or-mapper-present",
-                "final-raw-target-swap-inventory", "partition-owner-claim",
-                "manifest-write", "manifest-readback"):
+                "final-raw-target-swap-inventory",
+                "final-preclaim-identity-revalidation",
+                "final-root-parent-identity-revalidation",
+                "final-shared-root-parent-authorization",
+                "final-physical-parent-swap-inventory",
+                "run-id-construction", "partition-owner-claim",
+                "manifest-write", "manifest-readback",
+                "partition-lock-close", "recovery-directory-close"):
             with self.subTest(phase=phase):
                 self.assertIn(f'failure_phase = "{phase}"', prepare)
+        self.assertNotIn(
+            'failure_phase = "repeated-target-recovery-parent-separation"',
+            prepare)
         self.assertIn(
             '"PRIMARY_PREPARE=FAILED phase=%s errno=%d error=%s "',
             prepare)
