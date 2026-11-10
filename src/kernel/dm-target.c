@@ -15,6 +15,7 @@
  */
 #define DM_MSG_PREFIX "swapz"
 #include <linux/bio.h>
+#include <linux/bitmap.h>
 #include <linux/blkdev.h>
 #include <linux/cache.h>
 #include <linux/device-mapper.h>
@@ -1910,10 +1911,13 @@ static int swapz_configure_linux_swap_layout(
 	struct swapz_dm *ctx, const u8 *block,
 	const struct swapz_linux_swap_layout *layout)
 {
+	unsigned long *bad_segments = NULL;
 	swapz_u32 raw_segments;
 	swapz_u32 clean_segments;
 	swapz_u32 clean_index = 0;
 	swapz_u32 raw_segment;
+	swapz_u32 bad_index;
+	int error = 0;
 
 	if (!ctx || !block || !layout)
 		return -EINVAL;
@@ -1928,26 +1932,51 @@ static int swapz_configure_linux_swap_layout(
 	ctx->backing_layout_blocks = clean_segments * SWAPZ_SEGMENT_BLOCKS;
 
 	/*
-	 * Preserve the common contiguous case at zero translation cost. A sparse
-	 * map is needed only when a Linux bad page contaminates a complete swapz
-	 * segment; bad pages in the already-unused partial tail need no entry.
+	 * Preserve the common contiguous case at zero translation cost. For a
+	 * sparse layout, mark each contaminated raw segment once, then build the
+	 * clean translation in one linear pass. The Linux bad-page list is small
+	 * but a large swap area may contain many thousands of segments, so avoid
+	 * rescanning every bad-page entry for every segment.
 	 */
 	if (!ctx->backing_skipped_segments)
 		return 0;
+	bad_segments = bitmap_zalloc(raw_segments, GFP_KERNEL);
+	if (!bad_segments)
+		return -ENOMEM;
+	for (bad_index = 0; bad_index < layout->bad_pages; ++bad_index) {
+		const swapz_u32 bad_page =
+			swapz_linux_swap_bad_page(block, layout, bad_index);
+
+		if (!bad_page) {
+			error = -EUCLEAN;
+			goto out;
+		}
+		raw_segment = (bad_page - 1U) / SWAPZ_SEGMENT_BLOCKS;
+		if (raw_segment < raw_segments)
+			__set_bit(raw_segment, bad_segments);
+	}
+
 	ctx->segment_backing_pages = kvcalloc(
 		clean_segments, sizeof(*ctx->segment_backing_pages), GFP_KERNEL);
-	if (!ctx->segment_backing_pages)
-		return -ENOMEM;
+	if (!ctx->segment_backing_pages) {
+		error = -ENOMEM;
+		goto out;
+	}
 	for (raw_segment = 0; raw_segment < raw_segments; ++raw_segment) {
-		if (swapz_linux_swap_segment_has_bad_page(
-			    block, layout, SWAPZ_SEGMENT_BLOCKS, raw_segment))
+		if (test_bit(raw_segment, bad_segments))
 			continue;
-		if (clean_index >= clean_segments)
-			return -EUCLEAN;
+		if (clean_index >= clean_segments) {
+			error = -EUCLEAN;
+			goto out;
+		}
 		ctx->segment_backing_pages[clean_index++] =
 			1U + raw_segment * SWAPZ_SEGMENT_BLOCKS;
 	}
-	return clean_index == clean_segments ? 0 : -EUCLEAN;
+	if (clean_index != clean_segments)
+		error = -EUCLEAN;
+out:
+	bitmap_free(bad_segments);
+	return error;
 }
 
 static int swapz_validate_linux_swap_header(struct swapz_dm *ctx,
