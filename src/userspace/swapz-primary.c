@@ -3554,6 +3554,10 @@ static int swapz_primary_swapoff_headroom_sufficient(uint64_t used_kib)
 	uint64_t available_kib;
 	uint64_t required_kib;
 
+	/* Empty active swap has no resident pages to migrate. Do not reject a
+	 * low-memory host or read /proc/meminfo when swapoff needs no headroom. */
+	if (!used_kib)
+		return 0;
 	if (used_kib > UINT64_MAX - SWAPZ_PRIMARY_SWAPOFF_MARGIN_KIB) {
 		errno = EOVERFLOW;
 		return -1;
