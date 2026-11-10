@@ -716,7 +716,7 @@ struct swapz_dm {
 	swapz_u8 gc_used[SWAPZ_MAX_RECORDS];
 	swapz_u8 gc_count;
 	u8 *gc_bytes_store;
-	swapz_u32 *gc_scores;  /* authoritative payload+descriptor bytes */
+	swapz_u32 *gc_scores;  /* authoritative live compressed payload bytes */
 	swapz_u32 *gc_io_scores; /* conservative read+write cost per victim */
 	swapz_u16 *gc_min_live_blocks; /* proven per-survivor block bound */
 	swapz_u32 *gc_segment_evictions; /* successful committed victim rotations */
