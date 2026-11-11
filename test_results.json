@@ -1,4 +1,8 @@
 {
+"algorithm_real_swap": {
+"overall": "NOT_RUN",
+"reason": "physical_trial_declined_or_blocked"
+},
 "benchmarks": {
 "delta64_prepare": {
 "overall": "NOT_RUN",
@@ -10,12 +14,330 @@
 "reason": "retired; production delta64+DELTA64_SHUF8+LZ4 is fixed on"
 },
 "delta64_rescue_sessions": [],
+"goal_scorecard": {
+"overall": "UNAVAILABLE",
+"rows": [
+{
+"bound": "device-bound",
+"label": "Serial mixed",
+"lower_write_bytes_saved_pct": null,
+"lower_write_requests_saved_pct": null,
+"qd": null,
+"service_floor_pct": 0.0,
+"status": "UNAVAILABLE",
+"target": "sd_emulated",
+"workload": "mixed QD32",
+"write_gain_pct": null
+},
+{
+"bound": "device-bound",
+"label": "Fast mixed",
+"lower_write_bytes_saved_pct": null,
+"lower_write_requests_saved_pct": null,
+"qd": null,
+"service_floor_pct": 0.0,
+"status": "UNAVAILABLE",
+"target": "ssd_emulated",
+"workload": "mixed QD32",
+"write_gain_pct": null
+},
+{
+"bound": "device-bound",
+"label": "SD card mixed",
+"lower_write_bytes_saved_pct": null,
+"lower_write_requests_saved_pct": null,
+"qd": null,
+"service_floor_pct": 0.0,
+"status": "UNAVAILABLE",
+"target": "sd_card",
+"workload": "mixed QD32",
+"write_gain_pct": null
+},
+{
+"bound": "device-bound",
+"label": "SATA mixed",
+"lower_write_bytes_saved_pct": null,
+"lower_write_requests_saved_pct": null,
+"qd": null,
+"service_floor_pct": 0.0,
+"status": "UNAVAILABLE",
+"target": "sata_ssd",
+"workload": "mixed QD32",
+"write_gain_pct": null
+},
+{
+"bound": "host-bound",
+"label": "NVMe4 mixed",
+"lower_write_bytes_saved_pct": null,
+"lower_write_requests_saved_pct": null,
+"qd": null,
+"service_floor_pct": -5.0,
+"status": "UNAVAILABLE",
+"target": "nvme_gen4",
+"workload": "mixed QD32",
+"write_gain_pct": null
+},
+{
+"bound": "host-bound",
+"label": "NVMe5 mixed",
+"lower_write_bytes_saved_pct": null,
+"lower_write_requests_saved_pct": null,
+"qd": null,
+"service_floor_pct": -5.0,
+"status": "UNAVAILABLE",
+"target": "nvme_gen5",
+"workload": "mixed QD32",
+"write_gain_pct": null
+},
+{
+"bound": "latency-bound",
+"label": "Serial QD1",
+"lower_write_bytes_saved_pct": null,
+"lower_write_requests_saved_pct": null,
+"qd": 1,
+"service_floor_pct": -5.0,
+"status": "UNAVAILABLE",
+"target": "sd_emulated",
+"workload": "persistent WRITE",
+"write_gain_pct": null
+},
+{
+"bound": "device-bound",
+"label": "Serial QD4",
+"lower_write_bytes_saved_pct": null,
+"lower_write_requests_saved_pct": null,
+"qd": 4,
+"service_floor_pct": 0.0,
+"status": "UNAVAILABLE",
+"target": "sd_emulated",
+"workload": "persistent WRITE",
+"write_gain_pct": null
+},
+{
+"bound": "device-bound",
+"label": "Serial QD8",
+"lower_write_bytes_saved_pct": null,
+"lower_write_requests_saved_pct": null,
+"qd": 8,
+"service_floor_pct": 0.0,
+"status": "UNAVAILABLE",
+"target": "sd_emulated",
+"workload": "persistent WRITE",
+"write_gain_pct": null
+},
+{
+"bound": "device-bound",
+"label": "Serial QD32",
+"lower_write_bytes_saved_pct": null,
+"lower_write_requests_saved_pct": null,
+"qd": 32,
+"service_floor_pct": 0.0,
+"status": "UNAVAILABLE",
+"target": "sd_emulated",
+"workload": "persistent WRITE",
+"write_gain_pct": null
+},
+{
+"bound": "latency-bound",
+"label": "Fast QD1",
+"lower_write_bytes_saved_pct": null,
+"lower_write_requests_saved_pct": null,
+"qd": 1,
+"service_floor_pct": -5.0,
+"status": "UNAVAILABLE",
+"target": "ssd_emulated",
+"workload": "persistent WRITE",
+"write_gain_pct": null
+},
+{
+"bound": "latency-bound",
+"label": "Fast QD4",
+"lower_write_bytes_saved_pct": null,
+"lower_write_requests_saved_pct": null,
+"qd": 4,
+"service_floor_pct": -5.0,
+"status": "UNAVAILABLE",
+"target": "ssd_emulated",
+"workload": "persistent WRITE",
+"write_gain_pct": null
+},
+{
+"bound": "device-bound",
+"label": "Fast QD8",
+"lower_write_bytes_saved_pct": null,
+"lower_write_requests_saved_pct": null,
+"qd": 8,
+"service_floor_pct": 0.0,
+"status": "UNAVAILABLE",
+"target": "ssd_emulated",
+"workload": "persistent WRITE",
+"write_gain_pct": null
+},
+{
+"bound": "device-bound",
+"label": "Fast QD32",
+"lower_write_bytes_saved_pct": null,
+"lower_write_requests_saved_pct": null,
+"qd": 32,
+"service_floor_pct": 0.0,
+"status": "UNAVAILABLE",
+"target": "ssd_emulated",
+"workload": "persistent WRITE",
+"write_gain_pct": null
+}
+]
+},
 "k1_read_bypass": {
 "overall": "NOT_RUN",
 "reason": "refuted and retired"
 },
 "k1_read_bypass_sessions": [],
-"lane_gap_attribution": [],
+"lane_gap_attribution": [
+{
+"deferred_ack_p99_bin_bound": "<=1ms",
+"envelope": "SATA",
+"foreign_gap_ms": 0.0,
+"foreign_runs": 0,
+"gap_per_run_us": 58.761401529636714,
+"host_busy_pct": 46.51162790697674,
+"owner_read_ms": 6.509087,
+"owner_reads": 1499,
+"part_shares": {
+"lane_gap_admitted_unowned_ns": 11.217020069462619,
+"lane_gap_completion_wake_ns": 4.418635586054282,
+"lane_gap_no_work_ns": 26.929072761535267,
+"lane_gap_publication_ns": 25.118073989660296,
+"lane_gap_seal_ns": 8.99365268618957,
+"lane_gap_staged_held_ns": 23.32354490709797
+},
+"runs": 1046,
+"successor_admitted_distribution": [
+511,
+4,
+9,
+35,
+341,
+146
+],
+"successor_owned_distribution": [
+538,
+4,
+12,
+37,
+328,
+127
+],
+"unpaired_runs": 1
+},
+{
+"deferred_ack_p99_bin_bound": "<=256us",
+"envelope": "NVMe4",
+"foreign_gap_ms": 0.0,
+"foreign_runs": 0,
+"gap_per_run_us": 51.89353840924541,
+"host_busy_pct": 58.51063829787234,
+"owner_read_ms": 8.40458,
+"owner_reads": 2015,
+"part_shares": {
+"lane_gap_admitted_unowned_ns": 11.54481744674276,
+"lane_gap_completion_wake_ns": 4.652300548127117,
+"lane_gap_no_work_ns": 14.697174226975573,
+"lane_gap_publication_ns": 23.44371441321552,
+"lane_gap_seal_ns": 8.231771120068219,
+"lane_gap_staged_held_ns": 37.43022224487081
+},
+"runs": 1471,
+"successor_admitted_distribution": [
+538,
+201,
+206,
+71,
+423,
+32
+],
+"successor_owned_distribution": [
+683,
+172,
+145,
+189,
+280,
+2
+],
+"unpaired_runs": 1
+},
+{
+"deferred_ack_p99_bin_bound": "<=256us",
+"envelope": "NVMe5",
+"foreign_gap_ms": 0.0,
+"foreign_runs": 0,
+"gap_per_run_us": 54.11683181225554,
+"host_busy_pct": 60.46511627906976,
+"owner_read_ms": 9.732068,
+"owner_reads": 2703,
+"part_shares": {
+"lane_gap_admitted_unowned_ns": 12.143717742360979,
+"lane_gap_completion_wake_ns": 5.6663633487931495,
+"lane_gap_no_work_ns": 13.452223580206136,
+"lane_gap_publication_ns": 21.864725528644023,
+"lane_gap_seal_ns": 7.527385941999551,
+"lane_gap_staged_held_ns": 39.34558385799616
+},
+"runs": 1534,
+"successor_admitted_distribution": [
+597,
+269,
+136,
+87,
+437,
+8
+],
+"successor_owned_distribution": [
+881,
+168,
+142,
+281,
+61,
+1
+],
+"unpaired_runs": 1
+},
+{
+"deferred_ack_p99_bin_bound": "<=1ms",
+"envelope": "fast mixed",
+"foreign_gap_ms": 0.0,
+"foreign_runs": 0,
+"gap_per_run_us": 147.0294342419895,
+"host_busy_pct": 71.37096774193549,
+"owner_read_ms": 10.419709,
+"owner_reads": 2171,
+"part_shares": {
+"lane_gap_admitted_unowned_ns": 4.314022470318271,
+"lane_gap_completion_wake_ns": 2.1346786419726347,
+"lane_gap_no_work_ns": 54.23891363889383,
+"lane_gap_publication_ns": 8.35894465764568,
+"lane_gap_seal_ns": 2.906782212966938,
+"lane_gap_staged_held_ns": 28.046658378202654
+},
+"runs": 2091,
+"successor_admitted_distribution": [
+587,
+279,
+307,
+385,
+495,
+38
+],
+"successor_owned_distribution": [
+1136,
+115,
+230,
+356,
+246,
+8
+],
+"unpaired_runs": 1
+}
+],
 "loaded_correctness": {
 "alignment_hole_blocks_foreground": 0,
 "alignment_hole_blocks_gc": 0,
