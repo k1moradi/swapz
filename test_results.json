@@ -254,46 +254,46 @@
 "gc_scan_scale": {
 "rows": [
 {
-"incremental_select_ns": 993,
-"legacy_dead_probe_ns": 126042,
-"legacy_score_scan_ns": 1165801,
+"incremental_select_ns": 6378,
+"legacy_dead_probe_ns": 863123,
+"legacy_score_scan_ns": 8013233,
 "logical_pages": 262144,
-"mapped_dead_probe_ns": 760,
-"relocation_list_ns": 570,
-"relocation_scan_ns": 366324,
+"mapped_dead_probe_ns": 3838,
+"relocation_list_ns": 2351,
+"relocation_scan_ns": 1712100,
 "segments": 1024,
 "victim_records": 256
 },
 {
-"incremental_select_ns": 3407,
-"legacy_dead_probe_ns": 513003,
-"legacy_score_scan_ns": 4674197,
+"incremental_select_ns": 25064,
+"legacy_dead_probe_ns": 3430191,
+"legacy_score_scan_ns": 32096939,
 "logical_pages": 1048576,
-"mapped_dead_probe_ns": 2045,
-"relocation_list_ns": 845,
-"relocation_scan_ns": 1720070,
+"mapped_dead_probe_ns": 13235,
+"relocation_list_ns": 2579,
+"relocation_scan_ns": 6897286,
 "segments": 4096,
 "victim_records": 256
 },
 {
-"incremental_select_ns": 13862,
-"legacy_dead_probe_ns": 1938171,
-"legacy_score_scan_ns": 18577832,
+"incremental_select_ns": 52908,
+"legacy_dead_probe_ns": 6855510,
+"legacy_score_scan_ns": 109524507,
 "logical_pages": 4194304,
-"mapped_dead_probe_ns": 7270,
-"relocation_list_ns": 734,
-"relocation_scan_ns": 6905505,
+"mapped_dead_probe_ns": 26483,
+"relocation_list_ns": 1852,
+"relocation_scan_ns": 17339259,
 "segments": 16384,
 "victim_records": 256
 },
 {
-"incremental_select_ns": 89892,
-"legacy_dead_probe_ns": 12888337,
-"legacy_score_scan_ns": 126075688,
+"incremental_select_ns": 361234,
+"legacy_dead_probe_ns": 43118466,
+"legacy_score_scan_ns": 704974802,
 "logical_pages": 27080192,
-"mapped_dead_probe_ns": 48684,
-"relocation_list_ns": 887,
-"relocation_scan_ns": 43191448,
+"mapped_dead_probe_ns": 173262,
+"relocation_list_ns": 2231,
+"relocation_scan_ns": 125971486,
 "segments": 105782,
 "victim_records": 256
 }
@@ -303,24 +303,14 @@
 "predictor": {
 "backend_benchmarks": [
 {
-"inverse_ns_per_page": 184,
+"inverse_ns_per_page": 1942,
 "name": "scalar",
-"transform_ns_per_page": 246
+"transform_ns_per_page": 2131
 },
 {
-"inverse_ns_per_page": 273,
+"inverse_ns_per_page": 1395,
 "name": "sse2",
-"transform_ns_per_page": 175
-},
-{
-"inverse_ns_per_page": 125,
-"name": "avx2",
-"transform_ns_per_page": 80
-},
-{
-"inverse_ns_per_page": 86,
-"name": "avx512",
-"transform_ns_per_page": 71
+"transform_ns_per_page": 1171
 }
 ],
 "classifier": {
@@ -330,9 +320,9 @@
 "candidate": "delta64",
 "early_abort_pages": 223,
 "eligible_pages": 512,
-"ns_per_page": 76,
+"ns_per_page": 846,
 "sample_pairs": 32,
-"scalar_ns_per_page": 76,
+"scalar_ns_per_page": 846,
 "stage1_min_score": 2,
 "stage1_pairs": 8
 },
@@ -347,7 +337,7 @@
 "planner_blocks": 383,
 "planner_extents": 267,
 "raw_pages": 192,
-"wall_ns_per_page": 2399
+"wall_ns_per_page": 12181
 },
 {
 "acceleration": 2,
@@ -355,7 +345,7 @@
 "planner_blocks": 383,
 "planner_extents": 267,
 "raw_pages": 192,
-"wall_ns_per_page": 2227
+"wall_ns_per_page": 11400
 },
 {
 "acceleration": 3,
@@ -363,7 +353,7 @@
 "planner_blocks": 383,
 "planner_extents": 266,
 "raw_pages": 192,
-"wall_ns_per_page": 2125
+"wall_ns_per_page": 10969
 },
 {
 "acceleration": 4,
@@ -371,7 +361,7 @@
 "planner_blocks": 384,
 "planner_extents": 273,
 "raw_pages": 192,
-"wall_ns_per_page": 2095
+"wall_ns_per_page": 10738
 }
 ],
 "negative_pages": 256,
@@ -388,9 +378,9 @@
 "extents_saved": 38,
 "general_threshold": 24,
 "lz4_rescues": 192,
-"modeled_wall_ns_per_page": 1647,
-"modeled_wall_ns_total": 948736,
-"ns_per_saved_block": 17249,
+"modeled_wall_ns_per_page": 6986,
+"modeled_wall_ns_total": 4024320,
+"ns_per_saved_block": 73169,
 "packing_adoptions": 0,
 "packing_eligible_pages": 51,
 "packing_threshold": 16,
@@ -415,29 +405,29 @@
 "pages": 576,
 "pairs": [
 {
-"baseline_ns_per_page": 182,
+"baseline_ns_per_page": 1248,
 "order": "baseline_first",
-"unrolled_ns_per_page": 175
+"unrolled_ns_per_page": 1183
 },
 {
-"baseline_ns_per_page": 182,
+"baseline_ns_per_page": 1242,
 "order": "unrolled_first",
-"unrolled_ns_per_page": 177
+"unrolled_ns_per_page": 1164
 },
 {
-"baseline_ns_per_page": 183,
+"baseline_ns_per_page": 1212,
 "order": "baseline_first",
-"unrolled_ns_per_page": 175
+"unrolled_ns_per_page": 1132
 },
 {
-"baseline_ns_per_page": 183,
+"baseline_ns_per_page": 1030,
 "order": "unrolled_first",
-"unrolled_ns_per_page": 176
+"unrolled_ns_per_page": 976
 },
 {
-"baseline_ns_per_page": 183,
+"baseline_ns_per_page": 977,
 "order": "baseline_first",
-"unrolled_ns_per_page": 175
+"unrolled_ns_per_page": 815
 }
 ],
 "repeats_per_arm": 64,
@@ -486,14 +476,14 @@
 }
 ],
 "negative_useful": 0,
-"ns_per_saved_block": 17766,
+"ns_per_saved_block": 74787,
 "routed_baseline_blocks": 257,
 "routed_baseline_extents": 182,
 "routed_blocks_saved": 60,
 "routed_candidate_blocks": 197,
 "routed_candidate_extents": 124,
-"routed_cpu_ns_per_page": 1850,
-"routed_cpu_ns_total": 1066018,
+"routed_cpu_ns_per_page": 7790,
+"routed_cpu_ns_total": 4487244,
 "routed_extents_saved": 58,
 "structured_calls": 279,
 "structured_eligible": 320,
@@ -541,14 +531,14 @@
 }
 ],
 "negative_useful": 0,
-"ns_per_saved_block": 17828,
+"ns_per_saved_block": 75189,
 "routed_baseline_blocks": 257,
 "routed_baseline_extents": 182,
 "routed_blocks_saved": 58,
 "routed_candidate_blocks": 199,
 "routed_candidate_extents": 132,
-"routed_cpu_ns_per_page": 1795,
-"routed_cpu_ns_total": 1034032,
+"routed_cpu_ns_per_page": 7571,
+"routed_cpu_ns_total": 4360992,
 "routed_extents_saved": 50,
 "structured_calls": 272,
 "structured_eligible": 320,
@@ -596,14 +586,14 @@
 }
 ],
 "negative_useful": 0,
-"ns_per_saved_block": 17249,
+"ns_per_saved_block": 73169,
 "routed_baseline_blocks": 257,
 "routed_baseline_extents": 182,
 "routed_blocks_saved": 55,
 "routed_candidate_blocks": 202,
 "routed_candidate_extents": 144,
-"routed_cpu_ns_per_page": 1647,
-"routed_cpu_ns_total": 948736,
+"routed_cpu_ns_per_page": 6986,
+"routed_cpu_ns_total": 4024320,
 "routed_extents_saved": 38,
 "structured_calls": 256,
 "structured_eligible": 320,
@@ -651,14 +641,14 @@
 }
 ],
 "negative_useful": 0,
-"ns_per_saved_block": 17249,
+"ns_per_saved_block": 73169,
 "routed_baseline_blocks": 257,
 "routed_baseline_extents": 182,
 "routed_blocks_saved": 55,
 "routed_candidate_blocks": 202,
 "routed_candidate_extents": 144,
-"routed_cpu_ns_per_page": 1647,
-"routed_cpu_ns_total": 948736,
+"routed_cpu_ns_per_page": 6986,
+"routed_cpu_ns_total": 4024320,
 "routed_extents_saved": 38,
 "structured_calls": 256,
 "structured_eligible": 320,
@@ -706,14 +696,14 @@
 }
 ],
 "negative_useful": 0,
-"ns_per_saved_block": 17249,
+"ns_per_saved_block": 73169,
 "routed_baseline_blocks": 257,
 "routed_baseline_extents": 182,
 "routed_blocks_saved": 55,
 "routed_candidate_blocks": 202,
 "routed_candidate_extents": 144,
-"routed_cpu_ns_per_page": 1647,
-"routed_cpu_ns_total": 948736,
+"routed_cpu_ns_per_page": 6986,
+"routed_cpu_ns_total": 4024320,
 "routed_extents_saved": 38,
 "structured_calls": 256,
 "structured_eligible": 320,
@@ -729,109 +719,109 @@
 "candidate_blocks": 189,
 "candidate_extents": 93,
 "cliff_2024": 160,
-"inverse_backend": "avx512",
-"inverse_ns_per_page": 86,
+"inverse_backend": "sse2",
+"inverse_ns_per_page": 1395,
 "name": "delta64",
 "planner_blocks_saved": 68,
 "planner_extents_saved": 89,
 "raw_rescued": 128,
 "saved_payload_bytes": 284772,
-"scalar_inverse_ns_per_page": 184,
-"scalar_transform_ns_per_page": 246,
-"second_lz4_ns_per_page": 3483,
-"transform_backend": "avx512",
-"transform_ns_per_page": 71
+"scalar_inverse_ns_per_page": 1942,
+"scalar_transform_ns_per_page": 2131,
+"second_lz4_ns_per_page": 12857,
+"transform_backend": "sse2",
+"transform_ns_per_page": 1171
 }
 ]
 }
 },
 "host_identity": {
 "architecture": "x86_64",
-"id_sha256": "9b3ace55fe27b06f167a31ab8ccc26189a6f04725ab995678f441e2088dd423a",
+"id_sha256": "842640974d84d453bd4ecc703ada37fac79ae78383400a8ce4cf22f9b46de3b4",
 "schema": "swapz-host-v1"
 },
-"kernel_release": "7.0.0-43-generic",
+"kernel_release": "7.0.0-42-generic",
 "overall": "FAIL",
 "qualification": "RAM_BACKED_NULL_BLK_ONLY",
 "qualification_tier": "ALGORITHM_PHYSICAL_PENDING",
 "qualified_artifacts": {
 "formatter_sha256": "8b9e668724084c13087cc2af9d14839f5086a11d28c8c39870d679bd15230073",
-"module_sha256": "87db199fcd150c2e4ae5cb81920fc626ac45149b43606a7e80bb35b7a919227e",
+"module_sha256": "253bec60f75279f4bc9a420a83909de26f0808d39cac70785df1776c4101a1ff",
 "oracle_sha256": "94ecfb7a26c47d251deb883927538f23bf0ccef8e33a46f98c09bc201734cf15",
 "status": "AVAILABLE"
 },
 "schema": "swapz-test-results-v1",
 "source_sha": "4487ece6b02b4f4468b3d653696dce6ddbed9fae",
 "source_sync": {
-"head_sha": "4487ece6b02b4f4468b3d653696dce6ddbed9fae",
-"reason": "already_current",
-"remote_sha": "4487ece6b02b4f4468b3d653696dce6ddbed9fae",
+"head_sha": "13bde359396d9b9f86bd039693b1fa2768512cf2",
+"reason": "fast_forwarded",
+"remote_sha": "13bde359396d9b9f86bd039693b1fa2768512cf2",
 "source_changed": false,
 "source_sha": "4487ece6b02b4f4468b3d653696dce6ddbed9fae",
 "status": "PASS"
 },
 "stages": [
 {
-"elapsed_s": 3.586,
+"elapsed_s": 13.792,
 "exit_code": 0,
 "name": "Build module and helpers",
 "status": "PASS"
 },
 {
-"diagnostic": "Rootless child failed; child_exit=1 reason=nonzero_exit subtest=unavailable test=unavailable log=build/tests/rootless-failure.ZkJwcWn5/diagnostic.log",
-"elapsed_s": 184.157,
+"diagnostic": "Rootless child failed; child_exit=1 reason=nonzero_exit subtest=unavailable test=unavailable log=build/tests/rootless-failure.7Pe2YzUe/diagnostic.log",
+"elapsed_s": 489.009,
 "exit_code": 1,
 "failed_phase": "physical-swap-probe-test.py",
 "name": "Native and rootless contracts",
 "primary_lifecycle_case_elapsed_ms": [
 {
 "class": "PackageCrashToPrimaryAdmissionTest",
-"elapsed_ms": 161,
+"elapsed_ms": 735,
 "method": "test_all_refusing_coordinator_fake_cannot_satisfy_contract"
 },
 {
 "class": "PackageCrashToPrimaryAdmissionTest",
-"elapsed_ms": 2932,
+"elapsed_ms": 3975,
 "method": "test_blocked_start_reports_explicit_package_recovery_phase"
 },
 {
 "class": "PackageCrashToPrimaryAdmissionTest",
-"elapsed_ms": 26,
+"elapsed_ms": 135,
 "method": "test_clean_and_empty_directory_admit_and_cleanup"
 },
 {
 "class": "PackageCrashToPrimaryAdmissionTest",
-"elapsed_ms": 6182,
+"elapsed_ms": 9957,
 "method": "test_committed_journal_then_verified_package_recovery_allows_reentry"
 },
 {
 "class": "PackageCrashToPrimaryAdmissionTest",
-"elapsed_ms": 26,
+"elapsed_ms": 100,
 "method": "test_crash_checkpoint_timeout_override_is_finite"
 },
 {
 "class": "PackageCrashToPrimaryAdmissionTest",
-"elapsed_ms": 44,
+"elapsed_ms": 186,
 "method": "test_directory_substitution_during_named_recheck_fails_closed"
 },
 {
 "class": "PackageCrashToPrimaryAdmissionTest",
-"elapsed_ms": 3091,
+"elapsed_ms": 4040,
 "method": "test_malformed_and_substituted_package_journals_fail_closed"
 },
 {
 "class": "PackageCrashToPrimaryAdmissionTest",
-"elapsed_ms": 38202,
+"elapsed_ms": 34720,
 "method": "test_real_sigkill_phases_block_both_commands_not_cleanup"
 },
 {
 "class": "PackageCrashToPrimaryAdmissionTest",
-"elapsed_ms": 79,
+"elapsed_ms": 232,
 "method": "test_sanitized_fixture_covers_clean_blocked_and_cleanup_paths"
 },
 {
 "class": "PackageCrashToPrimaryAdmissionTest",
-"elapsed_ms": 3196,
+"elapsed_ms": 4654,
 "method": "test_unsafe_coordinator_bypass_mutant_is_observably_rejected"
 },
 {
@@ -966,52 +956,52 @@
 },
 {
 "class": "PrimaryLifecycleSourceGuardTest",
-"elapsed_ms": 1709,
+"elapsed_ms": 6817,
 "method": "test_cross_namespace_mount_scan_revalidates_before_first_mutation"
 },
 {
 "class": "PrimaryLifecycleSourceGuardTest",
-"elapsed_ms": 57,
+"elapsed_ms": 491,
 "method": "test_durable_package_transactions_gate_prepare_and_start"
 },
 {
 "class": "PrimaryLifecycleSourceGuardTest",
-"elapsed_ms": 0,
+"elapsed_ms": 1,
 "method": "test_execution_gate_cannot_enable_without_native_swap_operations"
 },
 {
 "class": "PrimaryLifecycleSourceGuardTest",
-"elapsed_ms": 200,
+"elapsed_ms": 861,
 "method": "test_execution_gate_is_boot_scoped_pending_live_lifecycle_evidence"
 },
 {
 "class": "PrimaryLifecycleSourceGuardTest",
-"elapsed_ms": 19,
+"elapsed_ms": 100,
 "method": "test_native_swap_operations_are_transaction_ordered"
 },
 {
 "class": "PrimaryLifecycleSourceGuardTest",
-"elapsed_ms": 39,
+"elapsed_ms": 153,
 "method": "test_owned_nullblk_btrfs_root_matches_recovery_across_dev_numbers"
 },
 {
 "class": "PrimaryLifecycleSourceGuardTest",
-"elapsed_ms": 41,
+"elapsed_ms": 189,
 "method": "test_package_and_primary_share_global_mutation_lock_identity"
 },
 {
 "class": "PrimaryLifecycleSourceGuardTest",
-"elapsed_ms": 2,
+"elapsed_ms": 23,
 "method": "test_public_swapzctl_primary_dispatch_reaches_admission_interface"
 },
 {
 "class": "PrimaryLifecycleSourceGuardTest",
-"elapsed_ms": 34,
+"elapsed_ms": 172,
 "method": "test_qualification_import_serializes_before_partition_state"
 },
 {
 "class": "PrimaryLifecycleSourceGuardTest",
-"elapsed_ms": 664,
+"elapsed_ms": 2841,
 "method": "test_recovery_persists_fail_closed_interruption_order"
 },
 {
@@ -1021,17 +1011,17 @@
 },
 {
 "class": "PrimaryLifecycleSourceGuardTest",
-"elapsed_ms": 4,
+"elapsed_ms": 21,
 "method": "test_source_guard_ignores_comments_and_string_literals"
 },
 {
 "class": "PrimaryOwnerReleaseDurabilityTest",
-"elapsed_ms": 2,
+"elapsed_ms": 10,
 "method": "test_failed_owner_release_fsync_stays_blocked_across_fresh_recovery"
 },
 {
 "class": "PrimaryOwnerReleaseDurabilityTest",
-"elapsed_ms": 0,
+"elapsed_ms": 3,
 "method": "test_stop_and_recover_propagate_owner_release_failure"
 }
 ],
