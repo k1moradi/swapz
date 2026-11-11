@@ -4417,11 +4417,29 @@ class ReportContract(unittest.TestCase):
             with self.subTest(phase=phase):
                 self.assert_official_physical_debug(workload_phase=phase)
 
+    @staticmethod
+    def pressure_observation_fixture():
+        fields = (
+            "mem_available_mib", "cgroup_memory_bytes", "cgroup_swap_bytes",
+            "swapz_logical_write_total", "swapz_physical_write_total",
+            "swapz_logical_read_total", "swapz_physical_read_total",
+            "swapz_write_submitted_total", "swapz_upper_write_completed_ok",
+            "swapz_failed", "swapz_error",
+            "lower_read_sectors_total", "lower_write_sectors_total")
+        return {**dict.fromkeys(fields), "window_usec": 5_000_000,
+                "stalled_usec": 4_500_000, "limit_usec": 4_250_000,
+                "workload_phase": "fill", "mem_available_mib": 12000,
+                "swapz_error": -5}
+
+    def test_official_algorithm_tier_retains_first_pressure_snapshot(self):
+        self.assert_official_physical_debug(
+            workload_phase="anonymous_workload", pressure=True)
+
     def test_official_physical_log_failure_cannot_replace_original_exit(self):
         self.assert_official_physical_debug(log_failure=True)
 
     def assert_official_physical_debug(self, *, readback=False, workload_phase=None,
-                                      log_failure=False):
+                                      log_failure=False, pressure=False):
         source_sha = "a" * 40
         report_snapshots = []
         private_output = mock.Mock(return_value="build/tests/physical-fixture.private.log")
@@ -4448,6 +4466,9 @@ class ReportContract(unittest.TestCase):
                 "reason": ("controls_unavailable" if workload_phase == "anonymous_preflight"
                            else "lower_read"), "original_errno": None,
             }
+        if pressure:
+            error_context.update(reason="memory_pressure",
+                                 pressure=self.pressure_observation_fixture())
         physical_exit = 2 if workload_phase == "anonymous_preflight" else 3
 
         class OperatorConsole(io.StringIO):
@@ -4542,6 +4563,12 @@ class ReportContract(unittest.TestCase):
         self.assertIn(f"{'check' if workload_phase else 'gate'}={error_context['gate']}", console)
         if readback:
             self.assertIn("lower_read_bytes=0", console)
+        if pressure:
+            self.assertIn("stalled_usec=4500000", console)
+            self.assertIn("limit_usec=4250000", console)
+            self.assertIn("mem_available_mib=12000", console)
+            self.assertIn("lower_read_sectors_total=unavailable", console)
+            self.assertIn("totals, not attributed deltas", console)
         if not workload_phase:
             self.assertIn("zswap_enabled=YES", console)
         self.assertNotIn("NEVER_EXPORT", console)
@@ -4755,6 +4782,31 @@ class ReportContract(unittest.TestCase):
                 self.assertIsNone(runner.parse_algorithm_pageout_diagnostic(
                     prefix + json.dumps({**report, **fields})))
         self.assertIsNone(runner.parse_algorithm_pageout_diagnostic(marker + "\n" + marker))
+
+    def test_pressure_observation_rejects_malformed_or_private_fields(self):
+        pressure = self.pressure_observation_fixture()
+        report = {"schema": "swapz-algorithm-workload-diagnostic-v1",
+                  "phase": "anonymous_workload", "gate": "bounded_primary_workload",
+                  "reason": "memory_pressure", "original_errno": None,
+                  "pressure": pressure}
+        prefix = "PHYSICAL_ALGORITHM_DEBUG="
+        marker = lambda value: prefix + json.dumps(value, separators=(",", ":"))
+        self.assertEqual(runner.parse_algorithm_pageout_diagnostic(marker(report)), report)
+        # Every numeric observation remains uint64-or-null, except signed errno.
+        for key in pressure.keys() - {"workload_phase"}:
+            for value in (True, "private/path", -4096, 1 << 64):
+                with self.subTest(key=key, value=value):
+                    self.assertIsNone(runner.parse_algorithm_pageout_diagnostic(
+                        marker({**report, "pressure": {**pressure, key: value}})))
+        for fields in ({"window_usec": None}, {"window_usec": 0},
+                       {"stalled_usec": 4_250_000}, {"limit_usec": None},
+                       {"workload_phase": []}, {"private_path": "NEVER_EXPORT"}):
+            with self.subTest(fields=fields):
+                self.assertIsNone(runner.parse_algorithm_pageout_diagnostic(
+                    marker({**report, "pressure": {**pressure, **fields}})))
+        for fields in ({"pressure": []}, {"pressure": {}}, {"reason": "lower_read"},
+                       {"phase": "anonymous_preflight", "reason": "controls_unavailable"}):
+            self.assertIsNone(runner.parse_algorithm_pageout_diagnostic(marker({**report, **fields})))
 
     def test_failure_diagnostic_collects_read_rounds_privately(self):
         fast_sessions = runner.parse_read_coalesce_ab(synthetic_log())

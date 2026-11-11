@@ -2899,6 +2899,20 @@ first pressure failure, secondary cleanup failure, and independently observed
 final mapper/module/cgroup and ordinary-swap recovery states separate. Missing
 numeric observations remain unknown rather than being reconstructed from the
 threshold. Rootless regression must exercise that exact first/secondary pair.
+At the first PSI refusal, snapshot the actual rolling window, stalled and
+limit microseconds, workload phase, host MemAvailable, dedicated cgroup
+memory/swap bytes, exact-owned swapz READ/WRITE/submission/completion totals
+and selected-partition sector totals before terminating children. Optional
+read failures remain null and must not replace the original pressure stop.
+These are diagnostic totals, not attributed traffic deltas or success proof.
+Preserve the snapshot through bounded exception-cause traversal, persist the
+finite first-workload diagnostic in the run results before normal recovery,
+and retain it in the existing private failure log if results publication fails.
+The public reporter must accept only the exact optional numeric/enum schema,
+reject private/extra/malformed fields, print the numeric window and headroom,
+and preserve the 1024-byte marker bound. Cover successful and unavailable
+observations, a later child-termination timeout, durable retention through
+normal recovery, and the actual official reporter path in rootless tests.
 
 Development real-swap teardown must await pending udev work once after the
 exact owned mapper is proved inactive, before attempting normal DM removal.

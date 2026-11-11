@@ -161,6 +161,14 @@ class PsiStallWindow:
         return stalled_usec > (
             PSI_STOP_FRACTION * elapsed_seconds * 1_000_000)
 
+    def observation(self) -> dict[str, int]:
+        """Describe the last decision without changing its samples or threshold."""
+        oldest_time, oldest_total = self._samples[0]
+        elapsed_seconds = self._last_observed_time - oldest_time
+        return {"window_usec": int(elapsed_seconds * 1_000_000),
+                "stalled_usec": self._last_observed_total - oldest_total,
+                "limit_usec": int(PSI_STOP_FRACTION * elapsed_seconds * 1_000_000)}
+
 
 def _unique_json_object(pairs):
     result = {}
@@ -3447,6 +3455,49 @@ def _wait_for_round_release(cgroup: Path, mapper_device: tuple[int, int],
     raise QualificationFailure("swap slots did not return to baseline within the bounded release timeout")
 
 
+def _workload_pressure_failure(window: PsiStallWindow, cgroup: Path,
+                               status_reader: Callable[[], dict[str, int]],
+                               lower_device: tuple[int, int], phase: str) -> QualificationFailure:
+    """Capture bounded context before child cleanup changes the first PSI stop."""
+    observation = {**window.observation(), "workload_phase": phase}
+    readers = {
+        "mem_available_mib": _mem_available_mib,
+        "cgroup_memory_bytes": lambda: _read_uint(cgroup / "memory.current"),
+        "cgroup_swap_bytes": lambda: _read_uint(cgroup / "memory.swap.current"),
+    }
+    for name, reader in readers.items():
+        try:
+            observation[name] = reader()
+        except Exception:
+            observation[name] = None
+    status_fields = {
+        "swapz_logical_write_total": "logical_write",
+        "swapz_physical_write_total": "physical_write",
+        "swapz_logical_read_total": "logical_read",
+        "swapz_physical_read_total": "physical_read",
+        "swapz_write_submitted_total": "write_submitted",
+        "swapz_upper_write_completed_ok": "upper_write_completed_ok",
+        "swapz_failed": "failed", "swapz_error": "error",
+    }
+    try:
+        status = status_reader()
+    except Exception:
+        status = {}
+    for name, key in status_fields.items():
+        observation[name] = status.get(key)
+    try:
+        lower = read_block_stats(lower_device)
+        observation["lower_read_sectors_total"] = lower.read_sectors
+        observation["lower_write_sectors_total"] = lower.write_sectors
+    except Exception:
+        observation["lower_read_sectors_total"] = None
+        observation["lower_write_sectors_total"] = None
+    failure = QualificationFailure(
+        "sustained cgroup memory PSI exceeded safe stop threshold")
+    failure.pressure_observation = observation
+    return failure
+
+
 def _run_workload(manifest: dict, active: dict, oracle_path: Path,
                   workload_mib: int, resident_mib: int, swap_limit_mib: int,
                   timeout_seconds: int,
@@ -3480,6 +3531,7 @@ def _run_workload(manifest: dict, active: dict, oracle_path: Path,
     active_processes: list[subprocess.Popen] = []
     guard_processes: list[subprocess.Popen] | None = None
     guard_allow_worker_exit = False
+    workload_phase = "waiting"
 
     def guard() -> None:
         if telemetry_check is not None:
@@ -3497,13 +3549,16 @@ def _run_workload(manifest: dict, active: dict, oracle_path: Path,
                 f"host MemAvailable crossed {MIN_AVAILABLE_MIB} MiB early-stop threshold")
         current_psi_total = _psi_total(cgroup / "memory.pressure")
         if psi_window.observe(time.monotonic(), current_psi_total):
-            raise QualificationFailure(
-                "sustained cgroup memory PSI exceeded safe stop threshold")
+            raise _workload_pressure_failure(
+                psi_window, cgroup, sample_status,
+                (manifest["device_major_int"], manifest["device_minor_int"]),
+                workload_phase)
 
     oracle_python = _trusted_executable_path(
         sys.executable, "running Python interpreter")
     try:
         for round_index in range(1, REUSE_ROUNDS + 1):
+            workload_phase = "waiting"
             _write_control(cgroup / "memory.max", str(resident_mib * MIB), admitted=True)
             swaps_before = read_swap_rows()
             expected_before = _row_for_device(swaps_before, active["mapper_device"])
@@ -3584,6 +3639,7 @@ def _run_workload(manifest: dict, active: dict, oracle_path: Path,
                     (manifest["device_major_int"], manifest["device_minor_int"]))
                 vm_before = read_vmstat()
 
+                workload_phase = "fill"
                 for process in round_processes:
                     if process.stdin is None:
                         raise QualificationFailure("oracle command pipe is unavailable")
@@ -3643,6 +3699,7 @@ def _run_workload(manifest: dict, active: dict, oracle_path: Path,
                 # From this point the live set may shrink, but no foreign PID
                 # may enter the dedicated cgroup.
                 guard_allow_worker_exit = True
+                workload_phase = "verify"
                 for process in round_processes:
                     if process.stdin is None:
                         raise QualificationFailure("oracle command pipe is unavailable")
@@ -3756,6 +3813,7 @@ def _run_workload(manifest: dict, active: dict, oracle_path: Path,
 
             if round_result is None:
                 raise QualificationFailure("real-swap round ended without evidence")
+            workload_phase = "release"
             release = _wait_for_round_release(
                 cgroup, active["mapper_device"], expected_before.used_kib,
                 time.monotonic() + min(timeout_seconds, 30), guard)
@@ -3768,8 +3826,9 @@ def _run_workload(manifest: dict, active: dict, oracle_path: Path,
         require_no_cgroup_oom_events(events_before, events_after)
         psi_after = _psi_total(cgroup / "memory.pressure")
         if psi_window.observe(time.monotonic(), psi_after):
-            raise QualificationFailure(
-                "sustained cgroup memory PSI exceeded safe stop threshold")
+            raise _workload_pressure_failure(
+                psi_window, cgroup, sample_status,
+                (manifest["device_major_int"], manifest["device_minor_int"]), "final")
         return {
             "concurrent_workers": CONCURRENT_ORACLE_PROCESSES,
             "reuse_rounds": len(rounds),

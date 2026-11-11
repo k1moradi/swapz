@@ -3758,8 +3758,42 @@ def _emit_algorithm_workload_failure(error, phase="anonymous_workload"):
                    else reasons.get(first_cause, "producer_refused")),
         "original_errno": (int(original_errno) if original_errno.isdecimal() else None),
     }
+    # Child cleanup wraps the first refusal. Follow only a bounded causal chain,
+    # and copy numeric observations rather than arbitrary exception attributes.
+    current = error
+    seen = set()
+    while (record["reason"] == "memory_pressure" and
+           isinstance(current, BaseException) and id(current) not in seen and
+           len(seen) < 16):
+        seen.add(id(current))
+        observation = getattr(current, "pressure_observation", None)
+        if isinstance(observation, dict):
+            fields = (
+                "window_usec", "stalled_usec", "limit_usec", "mem_available_mib",
+                "cgroup_memory_bytes", "cgroup_swap_bytes",
+                "swapz_logical_write_total", "swapz_physical_write_total",
+                "swapz_logical_read_total", "swapz_physical_read_total",
+                "swapz_write_submitted_total", "swapz_upper_write_completed_ok",
+                "swapz_failed", "swapz_error",
+                "lower_read_sectors_total", "lower_write_sectors_total")
+            pressure = {key: observation.get(key) for key in fields}
+            for key, value in pressure.items():
+                lower, upper = (-4095, 4095) if key == "swapz_error" else (0, MAX_BLOCK_COUNTER)
+                if type(value) is not int or not lower <= value <= upper:
+                    pressure[key] = None
+            pressure["workload_phase"] = observation.get("workload_phase")
+            if (pressure["workload_phase"] in ("waiting", "fill", "verify", "release", "final")
+                    and all(pressure[key] is not None for key in
+                            ("window_usec", "stalled_usec", "limit_usec"))
+                    and pressure["window_usec"] > 0
+                    and pressure["stalled_usec"] > pressure["limit_usec"]):
+                record["pressure"] = pressure
+            break
+        cause = getattr(current, "__cause__", None)
+        current = cause if isinstance(cause, BaseException) else getattr(current, "__context__", None)
     print("PHYSICAL_ALGORITHM_DEBUG=" + json.dumps(
         record, sort_keys=True, separators=(",", ":")), file=sys.stderr, flush=True)
+    return record
 
 
 def _algorithm_real_swap_summary(result, policy, oracle_sha256):
@@ -3902,8 +3936,10 @@ def _run_algorithm_live_swap_oracle(mapper, state, target, state_dir):
     except (workload.Blocked, workload.QualificationFailure) as exc:
         # Keep the producer's first failure and cleanup disposition in private
         # evidence. Never infer success from an advisory reclaim or child exit.
-        _emit_algorithm_workload_failure(exc)
-        raise ProbeError("bounded anonymous swap workload refused: " + _bounded_text(exc)) from exc
+        diagnostic = _emit_algorithm_workload_failure(exc)
+        failure = ProbeError("bounded anonymous swap workload refused: " + _bounded_text(exc))
+        failure.workload_diagnostic = diagnostic
+        raise failure from exc
     try:
         return _algorithm_real_swap_summary(result, policy, oracle_sha256)
     except ProbeError as exc:
@@ -4582,6 +4618,19 @@ def run_probe(device_arg, confirm_arg, state_dir_arg, review_path,
         except BaseException as exc:
             failure = exc
             execution_failure = destructive_execution_started
+            diagnostic = getattr(exc, "workload_diagnostic", None)
+            if algorithm_real_swap and isinstance(diagnostic, dict):
+                results["first_workload_failure"] = diagnostic
+                try:
+                    # Persist before normal recovery reloads the durable record.
+                    _save_results(state_dir, results)
+                except (OSError, ProbeError) as results_exc:
+                    print(
+                        "PHYSICAL_RESULTS_DURABILITY=UNCERTAIN "
+                        f"first_errno={_errno_text(exc)} "
+                        f"results_errno={_errno_text(results_exc)} "
+                        "safe_next_step=inspect_private_first_workload_failure",
+                        file=sys.stderr)
         if partition_claim_attempted:
             try:
                 state = _remove_test_objects(state, state_dir)

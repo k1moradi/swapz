@@ -3978,7 +3978,10 @@ def parse_algorithm_pageout_diagnostic(error_output):
     if not isinstance(diagnostic, dict):
         return None
     if diagnostic.get("schema") == "swapz-algorithm-workload-diagnostic-v1":
-        if set(diagnostic) != {"schema", "phase", "gate", "reason", "original_errno"}:
+        fields = {"schema", "phase", "gate", "reason", "original_errno"}
+        if "pressure" in diagnostic:
+            fields.add("pressure")
+        if set(diagnostic) != fields:
             return None
         if any(not isinstance(diagnostic[key], str) for key in ("phase", "gate", "reason")):
             return None
@@ -3995,6 +3998,31 @@ def parse_algorithm_pageout_diagnostic(error_output):
                 diagnostic["reason"] not in reasons or
                 (value is not None and (type(value) is not int or not 1 <= value <= 4095))):
             return None
+        if "pressure" in diagnostic:
+            pressure = diagnostic["pressure"]
+            pressure_fields = {
+                "window_usec", "stalled_usec", "limit_usec", "mem_available_mib",
+                "cgroup_memory_bytes", "cgroup_swap_bytes", "workload_phase",
+                "swapz_logical_write_total", "swapz_physical_write_total",
+                "swapz_logical_read_total", "swapz_physical_read_total",
+                "swapz_write_submitted_total", "swapz_upper_write_completed_ok",
+                "swapz_failed", "swapz_error",
+                "lower_read_sectors_total", "lower_write_sectors_total"}
+            if (diagnostic["reason"] != "memory_pressure" or
+                    diagnostic["phase"] != "anonymous_workload" or
+                    not isinstance(pressure, dict) or set(pressure) != pressure_fields or
+                    pressure["workload_phase"] not in ("waiting", "fill", "verify", "release", "final")):
+                return None
+            for key in pressure_fields - {"workload_phase"}:
+                value = pressure[key]
+                lower, upper = (-4095, 4095) if key == "swapz_error" else (0, (1 << 64) - 1)
+                if value is not None and (type(value) is not int or not lower <= value <= upper):
+                    return None
+            if (any(pressure[key] is None for key in
+                    ("window_usec", "stalled_usec", "limit_usec")) or
+                    pressure["window_usec"] <= 0 or
+                    pressure["stalled_usec"] <= pressure["limit_usec"]):
+                return None
         return diagnostic
     readback = diagnostic.get("phase") == "anonymous_pagein"
     fields = {
@@ -4041,6 +4069,22 @@ def print_algorithm_workload_diagnostic(diagnostic):
           f"reason={diagnostic['reason']} "
           f"original_errno={original_errno if original_errno is not None else 'unavailable'}",
           flush=True)
+    pressure = diagnostic.get("pressure")
+    if pressure is not None:
+        def observed(key):
+            value = pressure[key]
+            return "unavailable" if value is None else str(value)
+        print("        Pressure stop: " + " ".join(
+            f"{key}={observed(key)}" for key in (
+                "workload_phase", "window_usec", "stalled_usec", "limit_usec",
+                "mem_available_mib", "cgroup_memory_bytes", "cgroup_swap_bytes")), flush=True)
+        print("        I/O snapshots (totals, not attributed deltas): " + " ".join(
+            f"{key}={observed(key)}" for key in (
+                "swapz_logical_write_total", "swapz_physical_write_total",
+                "swapz_logical_read_total", "swapz_physical_read_total",
+                "swapz_write_submitted_total", "swapz_upper_write_completed_ok",
+                "swapz_failed", "swapz_error",
+                "lower_read_sectors_total", "lower_write_sectors_total")), flush=True)
     print("        Next: inspect retained private workload evidence after "
           "normal owned recovery; do not weaken swap I/O proof", flush=True)
 

@@ -3056,10 +3056,47 @@ class PrimaryRealSwapContracts(unittest.TestCase):
             self.assertFalse(
                 window.observe(float(second), (second - 10) * 900_000))
         self.assertTrue(window.observe(15.0, 4_500_000))
+        self.assertEqual(window.observation(), {
+            "window_usec": 5_000_000, "stalled_usec": 4_500_000,
+            "limit_usec": 4_250_000})
 
         with self.assertRaisesRegex(
                 qualify.QualificationFailure, "PSI total regressed"):
             window.observe(16.0, 4_499_999)
+
+    def test_pressure_snapshot_preserves_first_stop_when_optional_reads_fail(self):
+        window = qualify.PsiStallWindow(0.0, 0)
+        self.assertTrue(window.observe(5.0, 4_500_000))
+        status = {"logical_write": 4096, "physical_write": 8192,
+                  "logical_read": 0, "physical_read": 0, "failed": 0,
+                  "error": -5, "write_submitted": 8192, "upper_write_completed_ok": 1}
+        with mock.patch.object(qualify, "_mem_available_mib", return_value=12000), \
+                mock.patch.object(qualify, "_read_uint", side_effect=[1024, 2048]), \
+                mock.patch.object(qualify, "read_block_stats",
+                                  return_value=qualify.BlockStats(17, 29)) as lower:
+            failure = qualify._workload_pressure_failure(
+                window, Path("/private/cgroup"), lambda: status, (8, 4), "fill")
+        self.assertEqual(str(failure),
+                         "sustained cgroup memory PSI exceeded safe stop threshold")
+        observed = failure.pressure_observation
+        self.assertEqual(observed["stalled_usec"], 4_500_000)
+        self.assertEqual(observed["mem_available_mib"], 12000)
+        self.assertEqual(observed["cgroup_memory_bytes"], 1024)
+        self.assertEqual(observed["cgroup_swap_bytes"], 2048)
+        self.assertEqual(observed["swapz_physical_write_total"], 8192)
+        self.assertEqual(observed["swapz_error"], -5)
+        self.assertEqual(observed["lower_write_sectors_total"], 29)
+        lower.assert_called_once_with((8, 4))
+        unavailable = mock.Mock(side_effect=OSError(errno.EACCES, "private read failed"))
+        with mock.patch.object(qualify, "_mem_available_mib", unavailable), \
+                mock.patch.object(qualify, "_read_uint", unavailable), \
+                mock.patch.object(qualify, "read_block_stats", unavailable):
+            failed_reads = qualify._workload_pressure_failure(
+                window, Path("/private/cgroup"), unavailable, (8, 4), "verify")
+        self.assertEqual(str(failed_reads), str(failure))
+        for key, value in failed_reads.pressure_observation.items():
+            if key not in {"window_usec", "stalled_usec", "limit_usec", "workload_phase"}:
+                self.assertIsNone(value, key)
 
     def positive_evidence(self):
         return dict(

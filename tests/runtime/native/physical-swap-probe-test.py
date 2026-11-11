@@ -650,15 +650,55 @@ class PhysicalSwapProbeTests(unittest.TestCase):
 
     def test_algorithm_memory_pressure_remains_first_cause_after_child_cleanup_timeout(self):
         stderr = io.StringIO()
+        original = RuntimeError("sustained cgroup memory PSI exceeded safe stop threshold")
+        original.pressure_observation = {
+            "window_usec": 5_000_000, "stalled_usec": 4_500_000,
+            "limit_usec": 4_250_000, "workload_phase": "fill",
+            "mem_available_mib": 12000, "swapz_error": -5,
+            "private_path": "/private/KEEP_PRIVATE"}
+        wrapped = RuntimeError(str(original) +
+            "; cleanup also failed: oracle /private/path timed out after 5 seconds")
+        wrapped.__cause__ = original
         with mock.patch.object(probe.sys, "stderr", stderr):
-            probe._emit_algorithm_workload_failure(RuntimeError(
-                "sustained cgroup memory PSI exceeded safe stop threshold; "
-                "cleanup also failed: oracle /private/path timed out after 5 seconds"))
+            probe._emit_algorithm_workload_failure(wrapped)
         record = json.loads(stderr.getvalue().split("=", 1)[1])
         self.assertEqual(record["reason"], "memory_pressure")
         self.assertEqual(record["phase"], "anonymous_workload")
         self.assertIsNone(record["original_errno"])
+        self.assertEqual(record["pressure"]["stalled_usec"], 4_500_000)
+        self.assertEqual(record["pressure"]["mem_available_mib"], 12000)
+        self.assertEqual(record["pressure"]["swapz_error"], -5)
+        self.assertIsNone(record["pressure"]["lower_read_sectors_total"])
         self.assertNotIn("private", stderr.getvalue())
+
+    def test_workload_refusal_is_durable_across_normal_recovery(self):
+        failure = probe.ProbeError("bounded anonymous swap workload refused: injected PSI stop")
+        failure.workload_diagnostic = {
+            "schema": "swapz-algorithm-workload-diagnostic-v1",
+            "phase": "anonymous_workload", "gate": "bounded_primary_workload",
+            "reason": "memory_pressure", "original_errno": None}
+        _events, state, _target = self.simulate_physical_run(
+            development_only=True, workload_failure=failure)
+        self.assertEqual(state["stage"], "COMPLETE")
+        self.assertEqual(state["_test_results"]["first_workload_failure"],
+                         failure.workload_diagnostic)
+        self.assertIn("injected PSI stop", state["_test_first_failure"])
+        self.assertFalse(state["_test_owner_marker"])
+        self.assertTrue(state["_test_consumed_claim"])
+
+    def test_workload_results_write_failure_cannot_replace_first_refusal(self):
+        failure = probe.ProbeError("bounded anonymous swap workload refused: injected PSI stop")
+        failure.workload_diagnostic = {"reason": "memory_pressure"}
+        stderr = io.StringIO()
+        with mock.patch.object(probe.sys, "stderr", stderr):
+            _events, state, _target = self.simulate_physical_run(
+                development_only=True, workload_failure=failure,
+                workload_results_save_failure=True)
+        self.assertIn("injected PSI stop", state["_test_first_failure"])
+        self.assertIn("PHYSICAL_RESULTS_DURABILITY=UNCERTAIN", stderr.getvalue())
+        self.assertIn("results_errno=5", stderr.getvalue())
+        self.assertEqual(state["stage"], "COMPLETE")
+        self.assertFalse(state["_test_owner_marker"])
 
     def test_real_swap_rechecks_mapper_after_pin_before_mkswap(self):
         mapper = "/dev/mapper/swapz-demo-physical-1234567890abcdef"
@@ -3536,7 +3576,9 @@ class PhysicalSwapProbeTests(unittest.TestCase):
                               oracle_evidence_fault=None,
                               recovery_state_save_failure=False,
                               recovery_results_save_failure=False,
-                              recovery_record_substitution=None):
+                              recovery_record_substitution=None,
+                              workload_failure=None,
+                              workload_results_save_failure=False):
         """Use actual helper checks with only device/command interfaces mocked."""
         target, evidence = self.physical_preparation_fixture()
         if development_only:
@@ -3951,6 +3993,10 @@ class PhysicalSwapProbeTests(unittest.TestCase):
         attempted_recovery_results = []
 
         def record_results_save(saved_state_dir, saved_results):
+            nonlocal workload_results_save_failure
+            if workload_results_save_failure and "first_workload_failure" in saved_results:
+                workload_results_save_failure = False
+                raise OSError(errno.EIO, "injected first workload results failure")
             if (recovery_results_save_failure and
                     saved_results.get("final_recovery_state") ==
                     "RECOVERY_REQUIRED"):
@@ -3998,6 +4044,7 @@ class PhysicalSwapProbeTests(unittest.TestCase):
                 mock.patch.object(probe, "_algorithm_real_swap_workload",
                                   return_value=self.algorithm_workload_fixture()[:2]),
                 mock.patch.object(probe, "_run_algorithm_live_swap_oracle",
+                                  side_effect=workload_failure,
                                   return_value=probe._algorithm_real_swap_summary(
                                       self.algorithm_workload_fixture()[2],
                                       self.algorithm_workload_fixture()[1],
@@ -4098,6 +4145,7 @@ class PhysicalSwapProbeTests(unittest.TestCase):
                         source_drift is not None or helper_sha_mismatch or \
                         artifact_drift_before_mutation or recovery_failure or \
                         recovery_record_substitution is not None or \
+                        workload_failure is not None or \
                         oracle_evidence_fault is not None:
                     with self.assertRaisesRegex(
                             probe.ProbeError,
