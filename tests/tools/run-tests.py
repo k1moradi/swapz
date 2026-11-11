@@ -10986,6 +10986,90 @@ def sync_main_after_test():
             "report_snapshot": snapshot}
 
 
+def pretrial_report_blob_sha():
+    """Fingerprint our published checkpoint before a report-only fast-forward."""
+    if REPORT != ROOT / GIT_RESULT:
+        return None
+    completed = _sync_git_runner()(
+        "hash-object", "--no-filters", "--", str(REPORT))
+    if completed is None or completed.returncode:
+        return None
+    value = completed.stdout.decode("ascii", "replace").strip()
+    return value if re.fullmatch(r"[0-9a-f]{40}", value) else None
+
+
+def archived_pretrial_checkpoint_refusal(notice, source_sha, report_blob_sha):
+    """Authenticate our immutable archived report, not merely its Git notice.
+
+    A different host may already own canonical test_results.json. This gate
+    admits only the exact pretrial blob published by this host in a reachable
+    report-only commit followed by its checked canonical restoration. The
+    existing current-source and physical-device gates still run afterward.
+    """
+    pattern = (r"ARCHIVED_GIT: https://github[.]com/" + re.escape(REPO) +
+               r"/blob/(?P<archive>[0-9a-f]{40})/" + re.escape(GIT_RESULT) +
+               r" \(report_commit=(?P=archive); "
+               r"main_commit=(?P<restoration>[0-9a-f]{40}); "
+               r"tested=(?P<source>[0-9a-f]{40}); "
+               r"canonical test_results[.]json unchanged\)")
+    receipt = re.fullmatch(pattern, notice) if isinstance(notice, str) else None
+    if (receipt is None or
+            not isinstance(source_sha, str) or
+            receipt.group("source") != source_sha or
+            not isinstance(report_blob_sha, str) or
+            re.fullmatch(r"[0-9a-f]{40}", report_blob_sha) is None):
+        return "invalid_archive_receipt"
+
+    run = _sync_git_runner()
+    current_head = _git_head(run, "HEAD")
+    tracking_head = _git_head(run, "refs/remotes/origin/main")
+    if (current_head is None or current_head != tracking_head or
+            git_sha() != source_sha or
+            tracked_source_checkout_preflight() is not None):
+        return "source_or_main_not_aligned"
+
+    archived_sha = receipt.group("archive")
+    restoration_sha = receipt.group("restoration")
+    archive_parent = _git_head(run, f"{archived_sha}^")
+    if (archive_parent is None or
+            _git_head(run, f"{restoration_sha}^") != archived_sha or
+            _is_git_ancestor(run, restoration_sha, current_head) is not True or
+            _is_git_ancestor(run, source_sha, archived_sha) is not True):
+        return "archive_not_in_canonical_history"
+
+    archived_blob = _git_head(run, f"{archived_sha}:{GIT_RESULT}")
+    restored_tree = _git_head(run, f"{restoration_sha}^{{tree}}")
+    original_tree = _git_head(run, f"{archive_parent}^{{tree}}")
+    if (archived_blob != report_blob_sha or
+            restored_tree is None or restored_tree != original_tree):
+        return "archive_blob_or_restoration_mismatch"
+
+    # Reject merged, fabricated, or source-changing report receipts, even if
+    # their notice names an existing Git object.
+    archive_parents = run("rev-list", "--parents", "-n", "1", archived_sha)
+    restore_parents = run("rev-list", "--parents", "-n", "1", restoration_sha)
+    archive_paths = run(
+        "diff-tree", "--no-commit-id", "--name-only", "-r",
+        archive_parent, archived_sha, "--")
+    archive_message = run("show", "-s", "--format=%B", archived_sha)
+    restore_message = run("show", "-s", "--format=%B", restoration_sha)
+    if any(value is None or value.returncode for value in (
+            archive_parents, restore_parents, archive_paths,
+            archive_message, restore_message)):
+        return "archive_metadata_unavailable"
+    subject = f"test: latest run for {source_sha[:12]} [skip ci]".encode()
+    if (archive_parents.stdout.split() != [
+            archived_sha.encode(), archive_parent.encode()] or
+            restore_parents.stdout.split() != [
+            restoration_sha.encode(), archived_sha.encode()] or
+            archive_paths.stdout.splitlines() != [GIT_RESULT.encode()] or
+            archive_message.stdout.rstrip(b"\n") != subject or
+            restore_message.stdout.rstrip(b"\n") != (
+                subject + b"\n\nswapz-canonical-restore: true")):
+        return "archive_metadata_invalid"
+    return None
+
+
 def public_main_sync_record(sync_result):
     """Keep only bounded, nonprivate synchronization facts in test JSON."""
     fields = ("status", "reason", "source_sha", "head_sha", "remote_sha",
@@ -12309,7 +12393,13 @@ def _run_qualification(args, sync_result):
                 # admission while checkpoint publication is unconfirmed.
                 pretrial_notice = "GIT_SYNC_FAILED: phase=pretrial-checkpoint"
             print(f"  Pretrial RAM checkpoint: {pretrial_notice}", flush=True)
-            if pretrial_notice.startswith("SYNCED_GIT"):
+            archived_checkpoint = pretrial_notice.startswith("ARCHIVED_GIT: ")
+            # Local report bytes are replaced by canonical main during the
+            # fast-forward; pin this run's archive blob before reconciliation.
+            archived_report_blob = (
+                pretrial_report_blob_sha() if archived_checkpoint else None)
+            if (pretrial_notice.startswith("SYNCED_GIT") or
+                    archived_checkpoint):
                 try:
                     pretrial_main_sync = sync_main_after_test()
                 except Exception:
@@ -12319,7 +12409,17 @@ def _run_qualification(args, sync_result):
                     }
                 pretrial_checkpoint_published = (
                     pretrial_main_sync.get("status") == "PASS")
-                if not pretrial_checkpoint_published:
+                if pretrial_checkpoint_published and archived_checkpoint:
+                    archive_refusal = archived_pretrial_checkpoint_refusal(
+                        pretrial_notice, result["tested_commit_sha"],
+                        archived_report_blob)
+                    pretrial_checkpoint_published = archive_refusal is None
+                    if archive_refusal is not None:
+                        print(
+                            "  Pretrial archive verification: BLOCKED "
+                            f"reason={archive_refusal}; no physical admission",
+                            flush=True)
+                if pretrial_main_sync.get("status") != "PASS":
                     print(
                         "  Pretrial main synchronization: BLOCKED "
                         f"reason={pretrial_main_sync.get('reason', 'unavailable')}",

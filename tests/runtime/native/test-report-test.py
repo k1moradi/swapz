@@ -4487,11 +4487,14 @@ class ReportContract(unittest.TestCase):
                     "overall": "NOT_RUN"}
             return 0
 
-        for checkpoint_notice, interrupted in (
-                ("SYNCED_GIT: fixture", True),
+        for checkpoint_notice, interrupted, valid_archive in (
+                ("SYNCED_GIT: fixture", True, None),
+                ("ARCHIVED_GIT: fixture", True, True),
+                ("ARCHIVED_GIT: fixture", False, False),
                 ("GIT_SYNC_FAILED: phase=push reason=network_or_transport",
-                 False)):
-            with self.subTest(interrupted=interrupted):
+                 False, None)):
+            with self.subTest(notice=checkpoint_notice,
+                              valid_archive=valid_archive):
                 events = []
                 reports = []
 
@@ -4551,6 +4554,12 @@ class ReportContract(unittest.TestCase):
                                       side_effect=save_report),
                     mock.patch.object(runner, "publish",
                                       side_effect=publish_report),
+                    mock.patch.object(runner, "pretrial_report_blob_sha",
+                                      return_value="b" * 40),
+                    mock.patch.object(
+                        runner, "archived_pretrial_checkpoint_refusal",
+                        return_value=(None if valid_archive
+                                      else "invalid_archive_receipt")),
                     mock.patch.object(runner, "print_bench"),
                     mock.patch.object(runner, "write_failure_diagnostic",
                                       return_value=None),
@@ -4589,6 +4598,8 @@ class ReportContract(unittest.TestCase):
                     self.assertEqual(events,
                                      ["write", "publish", "physical"])
                     self.assertEqual(len(reports), 1)
+                    if valid_archive:
+                        self.assertIn("ARCHIVED_GIT", console)
                 else:
                     self.assertEqual(events,
                                      ["write", "publish", "write", "publish"])
@@ -8970,6 +8981,42 @@ class ReportContract(unittest.TestCase):
                 self.assertEqual(
                     git("rev-parse", "HEAD", cwd=checkout).stdout.strip(),
                     source_sha)
+
+                # Before reconciliation this working file is this host's
+                # checkpoint. Afterward it becomes the other host's canonical
+                # report; its immutable published blob must remain provable.
+                pretrial_blob = runner.pretrial_report_blob_sha()
+                self.assertRegex(pretrial_blob, r"^[0-9a-f]{40}$")
+                with mock.patch.object(
+                        runner, "_remote_origin_url",
+                        return_value="git@github.com:k1moradi/swapz.git"):
+                    synchronized = runner.sync_main_after_test()
+                self.assertEqual(synchronized["status"], "PASS")
+                self.assertEqual(
+                    git("rev-parse", "HEAD", cwd=checkout).stdout.strip(),
+                    remote_head)
+                self.assertIsNone(runner.archived_pretrial_checkpoint_refusal(
+                    second_notice, source_sha, pretrial_blob))
+                self.assertEqual(
+                    runner.archived_pretrial_checkpoint_refusal(
+                        second_notice, source_sha, "f" * 40),
+                    "archive_blob_or_restoration_mismatch")
+                self.assertEqual(
+                    runner.archived_pretrial_checkpoint_refusal(
+                        second_notice, "e" * 40, pretrial_blob),
+                    "invalid_archive_receipt")
+                self.assertEqual(
+                    runner.archived_pretrial_checkpoint_refusal(
+                        second_notice.replace(
+                            f"main_commit={remote_head}",
+                            f"main_commit={archived_sha}"),
+                        source_sha, pretrial_blob),
+                    "archive_not_in_canonical_history")
+                self.assertEqual(
+                    runner.archived_pretrial_checkpoint_refusal(
+                        "ARCHIVED_GIT: history-only", source_sha,
+                        pretrial_blob),
+                    "invalid_archive_receipt")
             finally:
                 runner.ROOT, runner.REPORT = old_root, old_report
 
