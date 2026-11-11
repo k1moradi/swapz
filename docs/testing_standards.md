@@ -4928,12 +4928,12 @@ counters themselves do not establish a performance gain.
   shared extent/first-data-block payload caches.
 - **ID63 adjacent READ coalescing:** production keeps `read_coalesce=1` by
   default. Retain five matched fast rounds and five matched serial-depth rounds.
-  For the ordinary packed-read workload, populate logical pages serially in
-  ascending order before the timed sequential and seeded-random QD32 reads so
-  the fixed fixture presents reproducible neighboring extents to the existing
-  coalescing gate. This setup is outside the measured READ scope and does not
-  relax the required observed-merge evidence. The separate allocation-bounded
-  ID36 path retains its QD32 persistent write/read lanes.
+  For the ordinary packed-read workload, populate logical pages in ascending
+  QD32 vectored-write waves before the timed sequential and seeded-random QD32
+  reads. This gives the fixed fixture reproducible packed placement while
+  retaining multi-page input. Setup is outside the measured READ scope and
+  does not relax the required observed-merge evidence. The separate
+  allocation-bounded ID36 path retains its QD32 persistent write/read lanes.
   The idle SSE2 matrix showed a fast sequential throughput loss despite request
   reduction, while serial-depth service remained strongly positive. The next
   exact-source run therefore qualifies the cached-head fast reject before any

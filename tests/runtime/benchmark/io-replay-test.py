@@ -692,27 +692,51 @@ class PairReplayContract(unittest.TestCase):
                 with path.open("w+b") as backing:
                     backing.truncate(1024 * PAGE)
                     writes = []
-                    original_full_write = replay.full_write
+                    if allocation_bounded:
+                        original_full_write = replay.full_write
 
-                    def record_write(fd, page, payload):
-                        writes.append((page, threading.get_ident()))
-                        original_full_write(fd, page, payload)
+                        def record_lane_write(fd, page, payload):
+                            writes.append((page, threading.get_ident()))
+                            original_full_write(fd, page, payload)
 
-                    with mock.patch.object(
-                            replay, "full_write", side_effect=record_write):
-                        measured = replay.measure_packed_swapin(
-                            backing.fileno(), path,
-                            {"test_regular_file": str(path)},
-                            chunks, 1024, 32,
-                            allocation_bounded=allocation_bounded)
+                        with mock.patch.object(
+                                replay, "full_write",
+                                side_effect=record_lane_write):
+                            measured = replay.measure_packed_swapin(
+                                backing.fileno(), path,
+                                {"test_regular_file": str(path)},
+                                chunks, 1024, 32, allocation_bounded=True)
+                    else:
+                        original_pwritev = replay.os.pwritev
 
-                self.assertEqual(len(writes), 1024)
-                self.assertCountEqual([page for page, _ in writes], range(1024))
+                        def record_ordered_wave(fd, iov, offset):
+                            writes.append((offset, len(iov),
+                                           tuple(map(len, iov)),
+                                           threading.get_ident()))
+                            return original_pwritev(fd, iov, offset)
+
+                        with mock.patch.object(
+                                replay.os, "pwritev",
+                                side_effect=record_ordered_wave):
+                            measured = replay.measure_packed_swapin(
+                                backing.fileno(), path,
+                                {"test_regular_file": str(path)},
+                                chunks, 1024, 32, allocation_bounded=False)
+
                 if allocation_bounded:
+                    self.assertEqual(len(writes), 1024)
+                    self.assertCountEqual([page for page, _ in writes], range(1024))
                     self.assertEqual(len({thread_id for _, thread_id in writes}), 32)
                 else:
-                    self.assertEqual([page for page, _ in writes], list(range(1024)))
-                    self.assertEqual({thread_id for _, thread_id in writes}, {caller})
+                    self.assertEqual(len(writes), 32)
+                    self.assertEqual(
+                        [offset for offset, _, _, _ in writes],
+                        [base * PAGE for base in range(0, 1024, 32)])
+                    self.assertTrue(all(
+                        count == 32 and lengths == (PAGE,) * 32
+                        for _, count, lengths, _ in writes))
+                    self.assertEqual(
+                        {thread_id for _, _, _, thread_id in writes}, {caller})
                 self.assertEqual(
                     measured["passes"]["sequential"]["verified_pages"], 1024)
                 self.assertEqual(

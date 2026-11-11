@@ -1849,12 +1849,17 @@ def measure_packed_swapin(fd, path, identity, chunks, logical_pages, qd,
             for base in range(0, logical_pages, qd):
                 run_persistent_wave(PACKED_WRITE, None, base)
         else:
-            # The ID63 sequential-read A/B needs reproducible physical placement:
-            # populate logical pages in order before measuring parallel reads.
-            # This setup is outside the timed read scope; QD32 reads below stay
-            # unchanged. ID36 retains its allocation-bounded persistent lanes.
-            for page in range(logical_pages):
-                full_write(fd, page, chunks[page % len(chunks)])
+            # The ID63 sequential-read A/B needs reproducible packed placement.
+            # Submit each ascending QD32 page wave as one vectored write so its
+            # page order is fixed while the kernel still sees packed input.
+            # This setup is outside the timed read scope; ID36 keeps its
+            # allocation-bounded persistent write/read lanes.
+            for base in range(0, logical_pages, qd):
+                write_iov = [chunks[page % len(chunks)]
+                             for page in range(base, base + qd)]
+                written = os.pwritev(fd, write_iov, base * PAGE)
+                if written != qd * PAGE:
+                    raise OSError("short packed read-set write wave")
         os.fsync(fd)
         after = packed_closes(path, identity)
         packed_delta = after - before if before is not None else None
