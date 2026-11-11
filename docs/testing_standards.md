@@ -2757,6 +2757,26 @@ that fixture deliberately edits tracked fake sources to check dirty build
 provenance. This exemption must never reach the real `make test` command.
 
 When the optional development physical swap trial follows five passing RAM
+stages, its root-owned anonymous-pageout oracle must automatically collect
+bounded read-only host reclaim evidence from `/proc/vmstat` and
+`/sys/module/zswap/parameters/enabled` at the first missing backing-I/O
+proof. Record the independent exact-mapper Used KiB and lower WRITE bytes,
+the first missing gate (`mapper_usage` or `lower_write`), zswap enablement
+when available, and only the host-global deltas for `pswpout`, `pswpin`,
+`zswpout`, and `zswpwb`. Missing kernel counters remain null/unknown;
+host-global counters are diagnostic context and never sufficient to certify
+mapper backing. The official `make test` captures privileged stderr in an
+auto-deleting private temporary file, promotes only one strictly parsed,
+bounded, identity-free `PHYSICAL_ALGORITHM_DEBUG` record into the public
+`algorithm_real_swap.diagnostic` JSON field, prints the authenticated first
+failure and a safe next step, and preserves the original exit and recovery
+outcome. Untrusted stdout/stderr, paths, hardware IDs or arbitrary helper
+JSON must never enter the published report. Rootless tests must reject
+duplicates, malformed/oversized records, unknown fields, invalid counters
+and fake successful backing. This diagnostic path must never change swap
+admission, force additional swap, or replace the actual recovered-state checks.
+
+When the optional development physical swap trial follows five passing RAM
 stages, check the canonical remote source against the exact nonce-bound
 RAM evidence **before asking for device consent**. Reuse the root helper's
 report-only Git ancestry validation rather than comparing HEAD alone:

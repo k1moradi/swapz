@@ -4223,6 +4223,143 @@ class ReportContract(unittest.TestCase):
             runner.lz4_acceleration_verdict(changed)["overall"],
             "PASS_LZ4_ACCELERATION_AB")
 
+    def test_official_algorithm_tier_promotes_only_verified_physical_debug(self):
+        """Exercise the real make-test runner boundary without device access."""
+        source_sha = "a" * 40
+        report_snapshots = []
+        error_context = {
+            "schema": "swapz-algorithm-pageout-diagnostic-v1",
+            "phase": "anonymous_pageout",
+            "gate": "mapper_usage",
+            "mapper_used_kib": 0,
+            "lower_write_bytes": 0,
+            "zswap_enabled": "YES",
+            "host_global_vmstat_delta": {
+                "pswpout": 1, "pswpin": None, "zswpout": 1, "zswpwb": None},
+        }
+
+        class OperatorConsole(io.StringIO):
+            def isatty(self):
+                return True
+
+        def synthetic_stage(title, command, result, **_options):
+            result["stages"].append({
+                "name": title, "status": "PASS",
+                "elapsed_s": 0.0, "exit_code": 0,
+            })
+            return 0
+
+        def simulated_physical_probe(command, **options):
+            self.assertEqual(Path(command[-1]).name, "algorithm-physical.py")
+            self.assertIsNone(options.get("stdout"))
+            error_stream = options["stderr"]
+            # A privileged helper's raw identity-bearing stderr is private.
+            error_stream.write("private_root_identity=NEVER_EXPORT\n")
+            error_stream.write("PHYSICAL_ALGORITHM_DEBUG=" +
+                               json.dumps(error_context) + "\n")
+            return subprocess.CompletedProcess(command, 3)
+
+        with mock.patch.object(
+                runner, "report_host_identity",
+                return_value={"status": "AVAILABLE"}), \
+             mock.patch.object(runner, "git_sha", return_value=source_sha), \
+             mock.patch.object(runner, "make_invocation",
+                               return_value=(["make"], "fixture")), \
+             mock.patch.object(runner, "tracked_source_checkout_preflight",
+                               return_value=None), \
+             mock.patch.object(runner, "run_stage",
+                               side_effect=synthetic_stage), \
+             mock.patch.object(runner, "qualification_artifact_digests",
+                               return_value={"status": "AVAILABLE"}), \
+             mock.patch.object(runner, "owner_qualification_artifacts_available",
+                               return_value=True), \
+             mock.patch.object(runner, "required_benchmark_gates_pass",
+                               return_value=True), \
+             mock.patch.object(runner, "official_pass_binding_refusal",
+                               return_value=None), \
+             mock.patch.object(runner, "lane_gap_attribution_rows",
+                               return_value=[]), \
+             mock.patch.object(runner, "goal_scorecard",
+                               return_value={"overall": "UNAVAILABLE"}), \
+             mock.patch.object(runner, "write_algorithm_ram_development_evidence",
+                               return_value=(ROOT / "build/tests/nonexistent-private-fixture",
+                                             "a" * 32)), \
+             mock.patch.object(runner.subprocess, "run",
+                               side_effect=simulated_physical_probe), \
+             mock.patch.object(runner, "write_report",
+                               side_effect=lambda report: report_snapshots.append(
+                                   json.loads(json.dumps(report)))), \
+             mock.patch.object(runner, "print_bench"), \
+             mock.patch.object(runner, "publish", return_value="fixture"), \
+             mock.patch.object(runner, "write_failure_diagnostic",
+                               return_value=None), \
+             mock.patch.object(runner, "refresh_history",
+                               return_value="NOT UPDATED: fixture"), \
+             mock.patch.object(runner.sys, "stdin",
+                               mock.Mock(isatty=lambda: True)), \
+             mocked_main_sync(source_sha), \
+             contextlib.redirect_stdout(OperatorConsole()) as output:
+            self.assertEqual(runner._run_qualification(
+                mock.Mock(kdir="/unused", tier="algorithm"),
+                {"status": "PASS", "reason": "fixture",
+                 "source_sha": source_sha, "head_sha": source_sha}), 3)
+            console = output.getvalue()
+
+        self.assertEqual(report_snapshots[0]["overall"], "FAIL")
+        self.assertEqual(report_snapshots[0]["algorithm_real_swap"][
+            "diagnostic"], error_context)
+        self.assertIn("gate=mapper_usage", console)
+        self.assertIn("zswap_enabled=YES", console)
+        self.assertNotIn("NEVER_EXPORT", console)
+        self.assertIn("Physical trial cleanup:", console)
+        self.assertIn("Overall qualification: FAIL", console)
+
+    def test_physical_pageout_debug_is_source_validated_and_redacted(self):
+        report = {
+            "schema": "swapz-algorithm-pageout-diagnostic-v1",
+            "phase": "anonymous_pageout",
+            "gate": "lower_write",
+            "mapper_used_kib": 8192,
+            "lower_write_bytes": 0,
+            "zswap_enabled": "YES",
+            "host_global_vmstat_delta": {
+                "pswpout": 8, "pswpin": 0, "zswpout": 8, "zswpwb": None},
+        }
+        prefix = "PHYSICAL_ALGORITHM_DEBUG="
+        marker = prefix + json.dumps(report, separators=(",", ":"))
+        private_path = "/PRIVATE/HOST/KEEP_PRIVATE"
+        self.assertEqual(runner.parse_algorithm_pageout_diagnostic(
+            private_path + "\n" + marker), report)
+        self.assertNotIn(private_path, json.dumps(
+            runner.parse_algorithm_pageout_diagnostic(
+                private_path + "\n" + marker)))
+        invalid = [
+            marker + "\n" + marker,
+            prefix + '{"schema":"a","schema":"b"}',
+            prefix + '{"schema":"wrong"}',
+            prefix + json.dumps({**report, "gate": "mapper_usage"}),
+            prefix + json.dumps({**report, "mapper_used_kib": True}),
+            prefix + json.dumps({**report, "lower_write_bytes": -1}),
+            prefix + json.dumps({**report, "zswap_enabled": private_path}),
+            prefix + json.dumps({**report,
+                                 "host_global_vmstat_delta": {
+                                     **report["host_global_vmstat_delta"],
+                                     "private_path": private_path}}),
+            prefix + json.dumps({**report, "secret": private_path}),
+            "random stderr without an authenticated marker",
+            "X" * 32769 + "\n" + marker,
+        ]
+        for output in invalid:
+            with self.subTest(output=output[:70]):
+                self.assertIsNone(
+                    runner.parse_algorithm_pageout_diagnostic(output))
+        missing_swap = {
+            **report, "gate": "mapper_usage", "mapper_used_kib": 0,
+            "lower_write_bytes": 4096,
+        }
+        self.assertEqual(runner.parse_algorithm_pageout_diagnostic(
+            prefix + json.dumps(missing_swap)), missing_swap)
+
     def test_failure_diagnostic_collects_read_rounds_privately(self):
         fast_sessions = runner.parse_read_coalesce_ab(synthetic_log())
         serial_sessions = runner.parse_sd_read_coalesce_ab(synthetic_log())
@@ -7778,6 +7915,9 @@ class ReportContract(unittest.TestCase):
                                        cwd=sandbox).stdout.strip()
                     self.assertEqual(first_head, first_remote)
                     self.assertNotEqual(source_sha, first_head)
+                    self.assertIn(
+                        f"/blob/{first_head}/{runner.GIT_RESULT}", first)
+                    self.assertIn(f"report_commit={first_head}", first)
                     self.assertEqual(git("status", "--porcelain",
                                          cwd=checkout).stdout, "")
                     self.assertEqual(
@@ -7793,6 +7933,9 @@ class ReportContract(unittest.TestCase):
                     second_head = git("rev-parse", "HEAD",
                                       cwd=checkout).stdout.strip()
                     self.assertNotEqual(first_head, second_head)
+                    self.assertIn(
+                        f"/blob/{second_head}/{runner.GIT_RESULT}", second)
+                    self.assertIn(f"report_commit={second_head}", second)
                     self.assertEqual(
                         git("--git-dir", str(origin), "rev-parse",
                             "refs/heads/main", cwd=sandbox).stdout.strip(),
@@ -7961,6 +8104,10 @@ class ReportContract(unittest.TestCase):
                     archived_head = git(
                         "--git-dir", str(origin), "rev-parse",
                         f"{remote_head}^", cwd=sandbox).stdout.strip()
+                    self.assertIn(
+                        f"/blob/{archived_head}/{runner.GIT_RESULT}", notice)
+                    self.assertIn(f"report_commit={archived_head}", notice)
+                    self.assertIn(f"main_commit={remote_head}", notice)
                     self.assertEqual(
                         git("--git-dir", str(origin), "rev-parse",
                             f"{archived_head}^", cwd=sandbox).stdout.strip(),

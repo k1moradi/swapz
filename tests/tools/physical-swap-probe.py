@@ -3572,6 +3572,57 @@ def _algorithm_pageout_oracle_snapshot(state_dir, source_sha):
     return snapshot, hashlib.sha256(payload).hexdigest()
 
 
+def _algorithm_pageout_host_snapshot():
+    """Sample bounded read-only host reclaim evidence; never infer ownership.
+
+    /proc/vmstat is host-global, so its deltas explain possible reclaim
+    behavior but cannot replace exact mapper usage and lower-device I/O.
+    """
+    counters = {}
+    try:
+        with Path("/proc/vmstat").open("r", encoding="ascii") as stream:
+            vmstat = stream.read(32769)
+        if len(vmstat) <= 32768:
+            for name in ("pswpout", "pswpin", "zswpout", "zswpwb"):
+                match = re.search(rf"(?m)^{name} ([0-9]+)$", vmstat)
+                if match is not None:
+                    value = int(match.group(1))
+                    if value <= MAX_BLOCK_COUNTER:
+                        counters[name] = value
+    except (OSError, UnicodeError, ValueError):
+        pass
+    try:
+        with Path("/sys/module/zswap/parameters/enabled").open(
+                "r", encoding="ascii") as stream:
+            setting = stream.read(8).strip()
+        enabled = {"Y": "YES", "N": "NO"}.get(setting, "UNKNOWN")
+    except (OSError, UnicodeError, ValueError):
+        enabled = "UNKNOWN"
+    return {"zswap_enabled": enabled, "host_vmstat": counters}
+
+
+def _algorithm_pageout_debug_record(mapper_used_kib, lower_write_bytes,
+                                    before, after):
+    """Produce a fixed-schema, identity-free, source-bound failure observation."""
+    deltas = {}
+    for name in ("pswpout", "pswpin", "zswpout", "zswpwb"):
+        initial = before["host_vmstat"].get(name)
+        current = after["host_vmstat"].get(name)
+        deltas[name] = (
+            current - initial if initial is not None and current is not None
+            and current >= initial else None)
+    return {
+        "schema": "swapz-algorithm-pageout-diagnostic-v1",
+        "phase": "anonymous_pageout",
+        "gate": ("mapper_usage" if mapper_used_kib <= 0
+                 else "lower_write"),
+        "mapper_used_kib": mapper_used_kib,
+        "lower_write_bytes": lower_write_bytes,
+        "zswap_enabled": after["zswap_enabled"],
+        "host_global_vmstat_delta": deltas,
+    }
+
+
 def _require_algorithm_pageout_backing(mapper_used_kib, lower_write_bytes):
     """Fail with the first missing proof, retaining safe numeric evidence.
 
@@ -3632,6 +3683,7 @@ def _run_algorithm_live_swap_oracle(mapper, state, target, state_dir):
     if lower_before.get("available") is not True:
         raise ProbeError("cannot sample physical I/O before anonymous pageout")
 
+    host_before_pageout = _algorithm_pageout_host_snapshot()
     worker = None
     try:
         worker = subprocess.Popen(
@@ -3666,8 +3718,19 @@ def _run_algorithm_live_swap_oracle(mapper, state, target, state_dir):
         lower_after_pageout = _block_stat_snapshot(target)
         pageout_delta = _lower_io_delta(
             lower_before, lower_after_pageout)
-        _require_algorithm_pageout_backing(
-            used_swap_kib, pageout_delta["lower_write_bytes"])
+        try:
+            _require_algorithm_pageout_backing(
+                used_swap_kib, pageout_delta["lower_write_bytes"])
+        except ProbeError:
+            # Diagnose only the first failed backing proof, before normal
+            # cleanup mutates the live mapper and lower-I/O observations.
+            context = _algorithm_pageout_debug_record(
+                used_swap_kib, pageout_delta["lower_write_bytes"],
+                host_before_pageout, _algorithm_pageout_host_snapshot())
+            print("PHYSICAL_ALGORITHM_DEBUG=" + json.dumps(
+                context, sort_keys=True, separators=(",", ":")),
+                file=sys.stderr, flush=True)
+            raise
 
         if worker.stdin is None:
             raise ProbeError("real-swap oracle command pipe is unavailable")

@@ -3936,6 +3936,60 @@ def print_stage_results(configured_stages, completed_stages, progress_table=None
             progress_table.complete("Stage", name, verdict, duration)
 
 
+def parse_algorithm_pageout_diagnostic(error_output):
+    """Accept only one bounded, source-defined physical failure observation.
+
+    The root probe owns live-device observations. Never copy arbitrary stderr
+    (which may contain host paths or identifiers) into the public JSON report.
+    """
+    prefix = "PHYSICAL_ALGORITHM_DEBUG="
+    if not isinstance(error_output, str) or len(error_output) > 32768:
+        return None
+    records = [line[len(prefix):] for line in error_output.splitlines()
+               if line.startswith(prefix)]
+    if len(records) != 1 or len(records[0]) > 1024:
+        return None
+
+    def unique_fields(pairs):
+        result = {}
+        for name, value in pairs:
+            if name in result:
+                raise ValueError("duplicate diagnostic field")
+            result[name] = value
+        return result
+
+    try:
+        diagnostic = json.loads(records[0], object_pairs_hook=unique_fields)
+    except (ValueError, UnicodeError, TypeError):
+        return None
+    if not isinstance(diagnostic, dict) or set(diagnostic) != {
+            "schema", "phase", "gate", "mapper_used_kib",
+            "lower_write_bytes", "zswap_enabled", "host_global_vmstat_delta"}:
+        return None
+    if (diagnostic["schema"] != "swapz-algorithm-pageout-diagnostic-v1"
+            or diagnostic["phase"] != "anonymous_pageout"
+            or diagnostic["zswap_enabled"] not in ("YES", "NO", "UNKNOWN")):
+        return None
+    for name in ("mapper_used_kib", "lower_write_bytes"):
+        value = diagnostic[name]
+        if type(value) is not int or not 0 <= value <= (1 << 64) - 1:
+            return None
+    expected_gate = ("mapper_usage" if diagnostic["mapper_used_kib"] == 0
+                     else "lower_write"
+                     if diagnostic["lower_write_bytes"] == 0 else None)
+    if diagnostic["gate"] != expected_gate or expected_gate is None:
+        return None
+    counters = diagnostic["host_global_vmstat_delta"]
+    if not isinstance(counters, dict) or set(counters) != {
+            "pswpout", "pswpin", "zswpout", "zswpwb"}:
+        return None
+    if any(value is not None and (
+            type(value) is not int or not 0 <= value <= (1 << 64) - 1)
+            for value in counters.values()):
+        return None
+    return diagnostic
+
+
 def print_physical_trial_result(verdict, duration, progress_table=None):
     """Display the optional physical trial without changing its admission."""
     if progress_table is None:
@@ -11063,11 +11117,21 @@ def publish(source_sha):
                     "push/fetch retries exhausted; report remains local")
 
     if preserve_canonical:
-        # Keep the local report intact for the original host; it is not the
-        # restored canonical file. A later owner sync may refresh this checkout.
-        return (f"ARCHIVED_GIT: https://github.com/{REPO}/commits/main "
-                f"(report history {report_sha[:12]}; "
-                f"canonical test_results.json unchanged; tested {source_sha[:12]})")
+        # The final main commit restores the previous canonical report. Link
+        # the intermediate report-only parent so delayed host evidence is
+        # readable by its immutable full commit ID, not the current main file.
+        archived = run("rev-parse", f"{report_sha}^")
+        archived_sha = (archived.stdout.decode("ascii", "replace").strip()
+                        if archived is not None and not archived.returncode
+                        else "")
+        if not re.fullmatch(r"[0-9a-f]{40}", archived_sha):
+            return (f"ARCHIVED_GIT: https://github.com/{REPO}/commit/{report_sha} "
+                    f"(main_commit={report_sha}; archived_report_commit=unavailable; "
+                    f"tested={source_sha}; canonical test_results.json unchanged)")
+        return (f"ARCHIVED_GIT: https://github.com/{REPO}/blob/"
+                f"{archived_sha}/{GIT_RESULT} "
+                f"(report_commit={archived_sha}; main_commit={report_sha}; "
+                f"tested={source_sha}; canonical test_results.json unchanged)")
 
     if concurrent_parent is not None:
         head_now = run("rev-parse", "HEAD")
@@ -11084,25 +11148,28 @@ def publish(source_sha):
             refresh = run("reset", "--hard", report_sha, timeout=30)
             if refresh is not None and not refresh.returncode:
                 return (f"SYNCED_GIT_AFTER_ADVANCE: "
-                        f"https://github.com/{REPO}/blob/main/{GIT_RESULT} "
-                        f"(report {report_sha[:12]}; tested {source_sha[:12]}; "
+                        f"https://github.com/{REPO}/blob/{report_sha}/{GIT_RESULT} "
+                        f"(report_commit={report_sha}; tested={source_sha}; "
                         f"preserved main {concurrent_parent[:12]})")
-        return (f"SYNCED_GIT_REMOTE: https://github.com/{REPO}/blob/main/"
-                f"{GIT_RESULT} (report {report_sha[:12]}; tested "
-                f"{source_sha[:12]}; local refresh skipped after concurrent "
-                "main advance)")
+        return (f"SYNCED_GIT_REMOTE: https://github.com/{REPO}/blob/"
+                f"{report_sha}/{GIT_RESULT} "
+                f"(report_commit={report_sha}; tested={source_sha}; "
+                "local refresh skipped after concurrent main advance)")
 
     local_ref = run("update-ref", "refs/heads/main", report_sha, head_sha)
     if local_ref is None or local_ref.returncode:
-        return (f"SYNCED_GIT_REMOTE: https://github.com/{REPO}/blob/main/"
-                f"{GIT_RESULT} (local main refresh failed)")
+        return (f"SYNCED_GIT_REMOTE: https://github.com/{REPO}/blob/"
+                f"{report_sha}/{GIT_RESULT} "
+                f"(report_commit={report_sha}; local main refresh failed)")
     index = run("read-tree", report_sha)
     if index is None or index.returncode:
-        return (f"SYNCED_GIT_REMOTE: https://github.com/{REPO}/blob/main/"
-                f"{GIT_RESULT} (local index refresh failed)")
+        return (f"SYNCED_GIT_REMOTE: https://github.com/{REPO}/blob/"
+                f"{report_sha}/{GIT_RESULT} "
+                f"(report_commit={report_sha}; local index refresh failed)")
 
-    return (f"SYNCED_GIT: https://github.com/{REPO}/blob/main/{GIT_RESULT} "
-            f"(report {report_sha[:12]}; tested {source_sha[:12]})")
+    return (f"SYNCED_GIT: https://github.com/{REPO}/blob/"
+            f"{report_sha}/{GIT_RESULT} "
+            f"(report_commit={report_sha}; tested={source_sha})")
 
 def write_failure_diagnostic(result, git_notice, post_test_sync=None):
     """Retain a private, shareable failure summary without raw host identifiers.
@@ -11179,6 +11246,7 @@ def write_failure_diagnostic(result, git_notice, post_test_sync=None):
         "physical_trial": {
             "overall": physical_trial.get("overall"),
             "reason": physical_trial.get("reason"),
+            "diagnostic": physical_trial.get("diagnostic"),
         },
         "physical_qualification": {
             "overall": physical_qualification.get("overall"),
@@ -11767,17 +11835,29 @@ def _run_qualification(args, sync_result):
                   "algorithm trial admission", flush=True)
             physical_started = time.monotonic()
             evidence_path = None
+            physical_diagnostic = None
             try:
                 evidence_path, evidence_nonce = (
                     write_algorithm_ram_development_evidence(result))
                 physical_env = os.environ.copy()
                 physical_env["SWAPZ_ALGORITHM_RAM_EVIDENCE"] = str(evidence_path)
                 physical_env["SWAPZ_ALGORITHM_RAM_NONCE"] = evidence_nonce
-                physical_trial = subprocess.run(
-                    [sys.executable, "-B",
-                     str(ROOT / "tests/tools/algorithm-physical.py")],
-                    cwd=ROOT, check=False, env=physical_env)
-                physical_exit = physical_trial.returncode
+                # Keep stdin/stdout attached to the operator TTY for consent.
+                # Capture only stderr in a private, self-deleting file, then
+                # promote one strictly validated source-owned diagnostic.
+                # No child stderr or privileged host identifiers reach Git.
+                with tempfile.TemporaryFile(mode="w+t",
+                                            encoding="utf-8") as error_stream:
+                    physical_trial = subprocess.run(
+                        [sys.executable, "-B",
+                         str(ROOT / "tests/tools/algorithm-physical.py")],
+                        cwd=ROOT, check=False, env=physical_env,
+                        stderr=error_stream)
+                    physical_exit = physical_trial.returncode
+                    if physical_exit != 0:
+                        error_stream.seek(0)
+                        physical_diagnostic = parse_algorithm_pageout_diagnostic(
+                            error_stream.read(32769))
             except (OSError, subprocess.SubprocessError, ValueError):
                 print("PHYSICAL_ALGORITHM_REAL_SWAP=BLOCKED "
                       "reason=algorithm_ram_evidence_unavailable", flush=True)
@@ -11804,6 +11884,35 @@ def _run_qualification(args, sync_result):
                 result["overall"] = "FAIL"
                 exit_code = physical_exit
                 print_physical_trial_result("FAIL", physical_duration, progress_table)
+                if physical_diagnostic is not None:
+                    result["algorithm_real_swap"]["diagnostic"] = physical_diagnostic
+                    print(
+                        "  Physical first failure: phase=anonymous_pageout "
+                        f"gate={physical_diagnostic['gate']} "
+                        f"mapper_used_kib={physical_diagnostic['mapper_used_kib']} "
+                        f"lower_write_bytes={physical_diagnostic['lower_write_bytes']} "
+                        f"zswap_enabled={physical_diagnostic['zswap_enabled']}",
+                        flush=True)
+                    print(
+                        "        Host-global vmstat deltas (context, not "
+                        "device attribution): " +
+                        " ".join(
+                            f"{key}={value if value is not None else 'NA'}"
+                            for key, value in physical_diagnostic[
+                                "host_global_vmstat_delta"].items()),
+                        flush=True)
+                    print(
+                        "        Next: check the missing proof before rerunning; "
+                        "do not weaken real-swap I/O admission", flush=True)
+                else:
+                    print(
+                        "  Physical first failure: authenticated pageout "
+                        "counters unavailable; private owner state retained",
+                        flush=True)
+                    print(
+                        "        Next: inspect existing root-owned same-boot "
+                        "physical results; do not rerun before recovery",
+                        flush=True)
                 print("  Physical trial cleanup: inspect root-owned same-boot "
                       "state before another test")
             else:

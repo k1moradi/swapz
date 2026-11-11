@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 import hashlib
+import io
 from concurrent.futures import ThreadPoolExecutor
 from contextlib import ExitStack
 import errno
@@ -397,6 +398,48 @@ class PhysicalSwapProbeTests(unittest.TestCase):
                 self.assertIn(
                     f"observed_lower_write_bytes={lower_write_bytes}", message)
         probe._require_algorithm_pageout_backing(8192, 4096)
+
+    def test_algorithm_pageout_diagnostic_samples_only_read_only_host_counters(self):
+        # Probe no target, perform no block I/O and retain no host identities.
+        snapshots = {
+            "/proc/vmstat": "pswpout 120\npswpin 50\nzswpout 30\nzswpwb 4\n",
+            "/sys/module/zswap/parameters/enabled": "Y\n",
+        }
+
+        def read_only_source(path, *_args, **_kwargs):
+            return io.StringIO(snapshots[str(path)])
+
+        with mock.patch.object(probe.Path, "open", new=read_only_source):
+            before = probe._algorithm_pageout_host_snapshot()
+        self.assertEqual(before["zswap_enabled"], "YES")
+        self.assertEqual(before["host_vmstat"]["pswpout"], 120)
+        snapshots["/proc/vmstat"] = (
+            "pswpout 128\npswpin 51\nzswpout 33\nzswpwb 4\n")
+        with mock.patch.object(probe.Path, "open", new=read_only_source):
+            after = probe._algorithm_pageout_host_snapshot()
+        record = probe._algorithm_pageout_debug_record(8192, 0, before, after)
+        self.assertEqual(record["gate"], "lower_write")
+        self.assertEqual(record["mapper_used_kib"], 8192)
+        self.assertEqual(record["lower_write_bytes"], 0)
+        self.assertEqual(record["host_global_vmstat_delta"], {
+            "pswpout": 8, "pswpin": 1, "zswpout": 3, "zswpwb": 0})
+        self.assertNotIn("device", str(record))
+        self.assertNotIn("serial", str(record))
+
+    def test_algorithm_pageout_missing_optional_host_counters_is_not_success(self):
+        with mock.patch.object(
+                probe.Path, "open", side_effect=OSError(13, "refused")):
+            sample = probe._algorithm_pageout_host_snapshot()
+        self.assertEqual(sample, {
+            "zswap_enabled": "UNKNOWN", "host_vmstat": {}})
+        diagnostic = probe._algorithm_pageout_debug_record(
+            0, 0, sample, sample)
+        self.assertEqual(diagnostic["gate"], "mapper_usage")
+        self.assertTrue(all(value is None for value in diagnostic[
+            "host_global_vmstat_delta"].values()))
+        with self.assertRaisesRegex(
+                probe.ProbeError, "gate=mapper_usage"):
+            probe._require_algorithm_pageout_backing(0, 0)
 
     def test_real_swap_removal_requires_normal_swapoff_and_inactive_proof(self):
         mapper = "/dev/mapper/swapz-demo-physical-1234567890abcdef"
