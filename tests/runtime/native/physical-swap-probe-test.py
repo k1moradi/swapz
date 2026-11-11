@@ -2152,6 +2152,76 @@ class PhysicalSwapProbeTests(unittest.TestCase):
         self.assertEqual(args[5:], ["status", "--porcelain"])
         self.assertEqual(run.call_args.kwargs["cwd"], probe.ROOT)
 
+    def test_untracked_preconsent_inventory_is_private_and_fail_closed(self):
+        """Exercise the actual unprivileged helper in the official rootless suite."""
+        script = ROOT / "tools/algorithm-physical.py"
+        specification = importlib.util.spec_from_file_location(
+            "physical_source_inventory_fixture", script)
+        self.assertIsNotNone(specification)
+        self.assertIsNotNone(specification.loader)
+        subject = importlib.util.module_from_spec(specification)
+        specification.loader.exec_module(subject)
+        with tempfile.TemporaryDirectory() as directory:
+            checkout = Path(directory)
+            private_directory = checkout / "build/tests"
+            private_directory.mkdir(parents=True)
+            private_name = "private/owner\nfilename.txt"
+            names = [private_name] + [
+                f"private/other-{index}" for index in range(68)]
+            fake_probe = mock.Mock()
+            fake_probe._git_result.return_value = SimpleNamespace(
+                stdout="\0".join(names) + "\0")
+            output = io.StringIO()
+            with mock.patch.object(subject, "ROOT", checkout), \
+                    mock.patch("sys.stdout", output):
+                subject._emit_private_untracked_checkout_inventory(fake_probe)
+            files = list(private_directory.glob(
+                "source-untracked-*.private.json"))
+            self.assertEqual(len(files), 1)
+            self.assertEqual(stat.S_IMODE(files[0].stat().st_mode), 0o600)
+            record = json.loads(files[0].read_text())
+            self.assertEqual(record["schema"],
+                             "swapz-private-untracked-inventory-v1")
+            self.assertEqual(record["total_count"], len(names))
+            self.assertEqual(record["paths"], names[:64])
+            self.assertTrue(record["truncated"])
+            self.assertIn("owner-only mode 0600", output.getvalue())
+            self.assertNotIn(private_name, output.getvalue())
+            fake_probe._git_result.assert_called_once_with(
+                "ls-files", "--others", "--exclude-standard", "-z")
+            fake_probe._git_result.return_value = SimpleNamespace(
+                stdout="malformed without NUL")
+            output = io.StringIO()
+            with mock.patch.object(subject, "ROOT", checkout), \
+                    mock.patch("sys.stdout", output):
+                subject._emit_private_untracked_checkout_inventory(fake_probe)
+            self.assertIn("inventory unavailable", output.getvalue())
+            self.assertEqual(len(list(private_directory.glob(
+                "source-untracked-*.private.json"))), 1)
+
+        # Git provenance remains denied even when the private inventory works.
+        fake_probe._git.side_effect = lambda *arguments: (
+            "main" if arguments[0] == "symbolic-ref" else
+            "?? private/owner" if arguments[0] == "status" else "a" * 40)
+        fake_probe._development_dirty_worktree_kinds.return_value = "untracked"
+        fake_specification = SimpleNamespace(loader=mock.Mock())
+        with mock.patch.object(
+                subject.importlib.util, "spec_from_file_location",
+                return_value=fake_specification), \
+                mock.patch.object(
+                    subject.importlib.util, "module_from_spec",
+                    return_value=fake_probe), \
+                mock.patch.object(
+                    subject, "_emit_private_untracked_checkout_inventory"
+                    ) as inventory:
+            self.assertEqual(subject._canonical_source_preflight(
+                ["--algorithm-ram-evidence", "/private/evidence",
+                 "--algorithm-ram-nonce", "a" * 32]),
+                "local_checkout_changed_kind_untracked")
+            inventory.assert_called_once_with(fake_probe)
+            fake_probe._read_algorithm_ram_development_evidence.assert_not_called()
+            fake_probe._require_development_canonical_main.assert_not_called()
+
     def test_dirty_development_worktree_classifies_without_exposing_paths(self):
         # Diagnostics never allow admission or print source/report contents.
         source_query = ("status", "--porcelain", "--untracked-files=no",
