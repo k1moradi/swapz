@@ -321,12 +321,17 @@ def _canonical_source_preflight(algorithm_ram_evidence: list[str]) -> str | None
             return "canonical_source_verification_unavailable"
         probe = importlib.util.module_from_spec(specification)
         specification.loader.exec_module(probe)
-        if (probe._git("symbolic-ref", "--quiet", "--short", "HEAD") != "main" or
-                probe._git("status", "--porcelain")):
-            return "local_checkout_changed"
+        if probe._git("symbolic-ref", "--quiet", "--short", "HEAD") != "main":
+            return "local_checkout_not_main"
+        if probe._git("status", "--porcelain"):
+            # Reuse the authoritative helper's finite, identity-free audit.
+            # A generated report or untracked file is not code, but the
+            # physical mutation gate still requires the whole tree clean.
+            kinds = probe._development_dirty_worktree_kinds()
+            return "local_checkout_changed_kind_" + kinds.replace(",", "_")
         head = probe._git("rev-parse", "HEAD")
         if head != probe._git("rev-parse", "origin/main"):
-            return "local_checkout_changed"
+            return "local_tracking_main_mismatch"
         source = probe._development_code_source_sha(head)
         probe._read_algorithm_ram_development_evidence(
             Path(algorithm_ram_evidence[1]), os.getuid(), head,
@@ -399,6 +404,13 @@ def main() -> int:
         if source_refusal == "canonical_source_advanced":
             print("  Next: synchronize main and rerun make test to qualify "
                   "the newer source before requesting physical consent.")
+        elif source_refusal.startswith("local_checkout_changed_kind_"):
+            print("  Next: inspect the reported checkout change class "
+                  "read-only; preserve owner edits and the generated report. "
+                  "Reconcile it on main before a new exact-source test.")
+        elif source_refusal == "local_tracking_main_mismatch":
+            print("  Next: reconcile local main and origin/main without "
+                  "rewriting evidence, then rerun exact-source make test.")
         else:
             print("  Next: restore verifiable local/canonical Git source "
                   "identity, then rerun exact-source make test.")

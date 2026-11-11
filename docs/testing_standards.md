@@ -2756,6 +2756,28 @@ override the checkout preflight only in its copied synthetic runner, because
 that fixture deliberately edits tracked fake sources to check dirty build
 provenance. This exemption must never reach the real `make test` command.
 
+The ordinary loaded RAM preflight must distinguish the exact
+`swapz-demo-physical-` development mapper name/UUID shape from its own
+`swapz-demo-` RAM-test mapping. A matching name and UUID are read-only
+classification evidence, **not** creation authority. Emit
+`physical_trial_mapper_present` with a safe next step to inspect root-owned
+same-boot physical state; retain the mapper/module and never auto-remove,
+`swapoff`, reformat or adopt a physical mapper from the RAM preflight.
+Malformed tokens and mismatched UUIDs remain fail-closed stale-token refusals.
+Rootless regressions execute the exact admission branch with synthetic
+`dmsetup` output for the valid physical shape, forged/malformed physical
+shapes and valid RAM mapping, and prove zero real device operations.
+
+The pre-consent Git gate must classify a dirty local checkout using the
+existing physical helper's bounded source-owned classification
+(`tracked_source`, `generated_report`, `untracked`) rather than returning
+an undifferentiated `local_checkout_changed`. Report local branch and
+tracking-ref mismatches as separate finite reasons before any consent or
+physical action. These diagnostics cannot exempt a generated report from
+physical admission or change the privileged helper's independent late gate;
+print no arbitrary Git output, host paths or repository identities.
+Rootless tests cover the finite reasons and maintain consent refusal.
+
 When the optional development physical swap trial follows five passing RAM
 stages, its root-owned anonymous-pageout oracle must automatically collect
 bounded read-only host reclaim evidence from `/proc/vmstat` and

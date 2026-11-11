@@ -404,6 +404,24 @@ fi
 owned_map="${swapz_maps[0]}"
 listed_mapper_devno="${swapz_map_devnos[0]}"
 case "$owned_map" in
+    swapz-demo-physical-*)
+        # A development physical-trial mapper uses a different exact token
+        # namespace. Its name/UUID alone cannot grant the RAM harness cleanup
+        # authority, even if it was left behind by a failed earlier trial.
+        physical_token="${owned_map#swapz-demo-physical-}"
+        is_hex16 "$physical_token" ||
+            refuse BLOCKED stale_run_token unavailable "physical-trial-shaped mapper token is malformed; no cleanup attempted"
+        if physical_uuid="$(dmsetup info -c --noheadings -o uuid "$owned_map" 2>/dev/null |
+            tr -d '[:space:]')"; then
+            :
+        else
+            uuid_status=$?
+            refuse BLOCKED mapper_uuid unavailable "phase=physical_mapper_uuid_snapshot resource_kind=mapper expected_proof=readable_uuid observed_proof=probe_failed original_errno_or_exit=$uuid_status retained_state_action=retain_unproven_resources safe_next_action=inspect_read_only"
+        fi
+        [[ "$physical_uuid" == "SWAPZ-TEST-PHYSICAL-$physical_token" ]] ||
+            refuse BLOCKED stale_run_token unavailable "physical-trial-shaped mapper UUID is unverified; no cleanup attempted"
+        refuse BLOCKED physical_trial_mapper_present unavailable "phase=preexisting_mapper resource_kind=physical_trial_mapper expected_proof=root_owned_same_boot_recovery_state observed_proof=name_and_uuid_only retained_state_action=retain_mapper_and_module safe_next_action=inspect_physical_trial_owner_state_read_only; RAM test must not remove this mapper"
+        ;;
     swapz-demo-*) token="${owned_map#swapz-demo-}" ;;
     *) refuse BLOCKED stale_run_token unavailable "mapping name is not harness-owned; no cleanup attempted" ;;
 esac

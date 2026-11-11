@@ -3,6 +3,7 @@
 import importlib.util
 import io
 import stat
+import subprocess
 from types import SimpleNamespace
 from pathlib import Path
 import unittest
@@ -141,6 +142,52 @@ class AlgorithmPhysicalTest(unittest.TestCase):
         self.assertTrue(any("selection_declined" in str(call)
                             for call in output.call_args_list))
 
+    def test_loaded_preflight_recognizes_physical_shape_without_cleanup(self):
+        # Execute the exact bash admission fragment with fake dmsetup output.
+        # No host devices, module commands or privileged cleanup are executed.
+        preflight = (SCRIPT.parent / "loaded-preflight.sh").read_text(
+            encoding="utf-8")
+        separator = "\n"
+        self.assertEqual(preflight.count('case "$owned_map" in' + separator), 1)
+        token_function = ("is_hex16() {" + separator +
+                          preflight.split("is_hex16() {" + separator, 1)[1].split(
+                              "is_kernel_release() {", 1)[0])
+        mapper_admission = ('case "$owned_map" in' + separator +
+                            preflight.split('case "$owned_map" in' + separator, 1)[1].split(
+                                "assert_not_mounted() {", 1)[0])
+        mocked_shell = (
+            token_function + separator +
+            'refuse() { printf "BLOCKED_CHECK=%s\\n" "$2"; exit 1; }' + separator +
+            'dmsetup() { printf "%s\\n" "$mock_uuid"; }' + separator +
+            'owned_map="$1"; mock_uuid="$2"' + separator +
+            mapper_admission + separator + 'printf "RAM_MAPPER_ADMITTED\\n"' + separator)
+        run_token = "a" * 16
+        cases = (
+            (f"swapz-demo-physical-{run_token}",
+             f"SWAPZ-TEST-PHYSICAL-{run_token}",
+             1, "BLOCKED_CHECK=physical_trial_mapper_present"),
+            (f"swapz-demo-physical-{run_token}",
+             "SWAPZ-TEST-PHYSICAL-" + "b" * 16,
+             1, "BLOCKED_CHECK=stale_run_token"),
+            ("swapz-demo-physical-malformed",
+             f"SWAPZ-TEST-PHYSICAL-{run_token}",
+             1, "BLOCKED_CHECK=stale_run_token"),
+            (f"swapz-demo-{run_token}",
+             f"SWAPZ-TEST-{run_token}",
+             0, "RAM_MAPPER_ADMITTED"),
+        )
+        for name, uuid, expected_exit, expected_message in cases:
+            with self.subTest(expected_message=expected_message):
+                completed = subprocess.run(
+                    ["bash", "--noprofile", "--norc", "-c", mocked_shell,
+                     "fixture", name, uuid],
+                    text=True, capture_output=True, check=False, timeout=10)
+                self.assertEqual(completed.returncode, expected_exit,
+                                 completed.stderr)
+                self.assertIn(expected_message, completed.stdout)
+                self.assertNotIn(run_token, completed.stdout)
+                self.assertNotIn("/dev/", completed.stdout)
+
     def test_make_test_evidence_is_forwarded_only_as_exact_private_pair(self):
         expected = str(subject.ROOT / "build/tests/algorithm-ram-evidence.json")
         with mock.patch.dict(subject.os.environ, {
@@ -190,9 +237,32 @@ class AlgorithmPhysicalTest(unittest.TestCase):
             probe._git.side_effect = lambda *args: (
                 "main" if args[0] == "symbolic-ref" else
                 " M tests/source.c" if args[0] == "status" else expected_head)
+            probe._development_dirty_worktree_kinds.return_value = "tracked_source"
             self.assertEqual(
                 subject._canonical_source_preflight(arguments),
-                "local_checkout_changed")
+                "local_checkout_changed_kind_tracked_source")
+            probe._development_dirty_worktree_kinds.return_value = (
+                "tracked_source,generated_report,untracked")
+            self.assertEqual(
+                subject._canonical_source_preflight(arguments),
+                "local_checkout_changed_kind_tracked_source_generated_report_untracked")
+            probe._development_dirty_worktree_kinds.return_value = "generated_report"
+            self.assertEqual(
+                subject._canonical_source_preflight(arguments),
+                "local_checkout_changed_kind_generated_report")
+            probe._git.side_effect = lambda *args: (
+                "main" if args[0] == "symbolic-ref" else
+                "" if args[0] == "status" else
+                "b" * 40 if args[:2] == ("rev-parse", "origin/main")
+                else expected_head)
+            self.assertEqual(
+                subject._canonical_source_preflight(arguments),
+                "local_tracking_main_mismatch")
+            probe._git.side_effect = lambda *args: (
+                "other-branch" if args[0] == "symbolic-ref" else expected_head)
+            self.assertEqual(
+                subject._canonical_source_preflight(arguments),
+                "local_checkout_not_main")
 
     def test_canonical_drift_blocks_before_prompt_or_new_privileged_run(self):
         candidate = {
@@ -200,28 +270,33 @@ class AlgorithmPhysicalTest(unittest.TestCase):
             "partuuid": "example-01", "size_bytes": 128 * 1024 * 1024,
             "selector": "/dev/disk/by-partuuid/example-01",
         }
-        with mock.patch.dict(subject.os.environ, {
-                    "SWAPZ_ALGORITHM_RAM_EVIDENCE": str(
-                        subject.ROOT / "build/tests/algorithm-ram-evidence.json"),
-                    "SWAPZ_ALGORITHM_RAM_NONCE": "f" * 32}), \
-             mock.patch.object(subject.sys.stdin, "isatty", return_value=True), \
-             mock.patch.object(subject.sys.stdout, "isatty", return_value=True), \
-             mock.patch.object(subject, "_require_read_only_preflight",
-                               return_value=candidate), \
-             mock.patch.object(subject, "_canonical_source_preflight",
-                               return_value="canonical_source_advanced") as verify, \
-             mock.patch("builtins.input") as consent, \
-             mock.patch.object(subject.subprocess, "run") as privileged, \
-             mock.patch("builtins.print") as printer:
-            self.assertEqual(subject.main(), 2)
-        verify.assert_called_once()
-        consent.assert_not_called()
-        privileged.assert_not_called()
-        output = " ".join(str(call) for call in printer.call_args_list)
-        self.assertIn("reason=canonical_source_advanced", output)
-        self.assertIn("phase=before_consent", output)
-        self.assertIn("new trial NOT RUN", output)
-        self.assertIn("rerun make test", output)
+        for reason, next_step in (
+                ("canonical_source_advanced", "rerun make test"),
+                ("local_checkout_changed_kind_generated_report",
+                 "generated report"),
+                ("local_tracking_main_mismatch", "reconcile local main")):
+            with self.subTest(reason=reason), mock.patch.dict(subject.os.environ, {
+                        "SWAPZ_ALGORITHM_RAM_EVIDENCE": str(
+                            subject.ROOT / "build/tests/algorithm-ram-evidence.json"),
+                        "SWAPZ_ALGORITHM_RAM_NONCE": "f" * 32}), \
+                 mock.patch.object(subject.sys.stdin, "isatty", return_value=True), \
+                 mock.patch.object(subject.sys.stdout, "isatty", return_value=True), \
+                 mock.patch.object(subject, "_require_read_only_preflight",
+                                   return_value=candidate), \
+                 mock.patch.object(subject, "_canonical_source_preflight",
+                                   return_value=reason) as verify, \
+                 mock.patch("builtins.input") as consent, \
+                 mock.patch.object(subject.subprocess, "run") as privileged, \
+                 mock.patch("builtins.print") as printer:
+                self.assertEqual(subject.main(), 2)
+                verify.assert_called_once()
+                consent.assert_not_called()
+                privileged.assert_not_called()
+                output = " ".join(str(call) for call in printer.call_args_list)
+                self.assertIn(f"reason={reason}", output)
+                self.assertIn("phase=before_consent", output)
+                self.assertIn("new trial NOT RUN", output)
+                self.assertIn(next_step, output)
 
     def test_virtualization_gate_reports_vm_without_device_discovery(self):
         with mock.patch.object(subject.shutil, "which",
