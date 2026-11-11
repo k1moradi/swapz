@@ -2773,6 +2773,21 @@ Rootless regressions execute the exact admission branch with synthetic
 `dmsetup` output for the valid physical shape, forged/malformed physical
 shapes and valid RAM mapping, and prove zero real device operations.
 
+When the pre-consent physical Git gate detects untracked files, the
+unprivileged helper must automatically enumerate them read-only with Git's
+NUL-delimited `ls-files --others --exclude-standard -z` and retain a bounded
+inventory of at most 64 names, the total count, and a truncation flag in a
+new owner-only 0600 private JSON file under the Git-ignored `build/tests`
+directory. Stdout may reveal only that fixed relative private-file location
+and the count, never any untracked path contents. The canonical GitHub
+`test_results.json` may retain only the finite classification
+`local_checkout_changed_kind_untracked`, not private names or raw Git output.
+A malformed, oversized, unreadable, or unsafe inventory directory must
+produce a finite diagnostic-unavailable message, without bypassing admission
+or changing the `NOT_RUN` verdict. Rootless regressions verify exact NUL
+handling (including newline-bearing filenames), 0600 permissions, 64-entry
+truncation, privacy, and fail-closed classification.
+
 The pre-consent Git gate must classify a dirty local checkout using the
 existing physical helper's bounded source-owned classification
 (`tracked_source`, `generated_report`, `untracked`) rather than returning

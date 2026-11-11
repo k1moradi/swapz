@@ -1,8 +1,11 @@
 #!/usr/bin/env python3
 """Rootless device-discovery and consent contracts (never writes swap)."""
+import contextlib
 import importlib.util
 import io
+import json
 import stat
+import tempfile
 import subprocess
 from types import SimpleNamespace
 from pathlib import Path
@@ -202,6 +205,47 @@ class AlgorithmPhysicalTest(unittest.TestCase):
             with self.assertRaisesRegex(ValueError, "malformed"):
                 subject._algorithm_ram_evidence_arguments()
 
+    def test_untracked_inventory_is_owner_only_and_never_changes_admission(self):
+        # Exact paths are retained locally, not printed or sent to GitHub.
+        with tempfile.TemporaryDirectory() as directory:
+            temporary_root = Path(directory)
+            private_directory = temporary_root / "build/tests"
+            private_directory.mkdir(parents=True)
+            private_name = "private/owner file\nwith newline.txt"
+            untracked_names = [private_name] + [
+                f"owner-file-{index}" for index in range(68)]
+            probe = mock.Mock()
+            probe._git_result.return_value = SimpleNamespace(
+                stdout="\0".join(untracked_names) + "\0")
+            console = io.StringIO()
+            with mock.patch.object(subject, "ROOT", temporary_root), \
+                    contextlib.redirect_stdout(console):
+                subject._emit_private_untracked_checkout_inventory(probe)
+            inventory_files = list(private_directory.glob(
+                "source-untracked-*.private.json"))
+            self.assertEqual(len(inventory_files), 1)
+            self.assertEqual(inventory_files[0].stat().st_mode & 0o777, 0o600)
+            record = json.loads(inventory_files[0].read_text())
+            self.assertEqual(record["schema"],
+                             "swapz-private-untracked-inventory-v1")
+            self.assertEqual(record["total_count"], len(untracked_names))
+            self.assertEqual(record["paths"], untracked_names[:64])
+            self.assertTrue(record["truncated"])
+            self.assertIn("owner-only mode 0600", console.getvalue())
+            self.assertNotIn("private/owner", console.getvalue())
+            self.assertNotIn(private_name, console.getvalue())
+            probe._git_result.assert_called_once_with(
+                "ls-files", "--others", "--exclude-standard", "-z")
+            # An invalid inventory cannot manufacture a new source PASS.
+            probe._git_result.return_value = SimpleNamespace(stdout="invalid")
+            missing_console = io.StringIO()
+            with mock.patch.object(subject, "ROOT", temporary_root), \
+                    contextlib.redirect_stdout(missing_console):
+                subject._emit_private_untracked_checkout_inventory(probe)
+            self.assertIn("inventory unavailable", missing_console.getvalue())
+            self.assertEqual(len(list(private_directory.glob(
+                "source-untracked-*.private.json"))), 1)
+
     def test_preconsent_canonical_drift_reuses_probe_source_gate(self):
         """The authoritative remote comparison must happen before consent."""
         expected_head = "a" * 40
@@ -263,6 +307,17 @@ class AlgorithmPhysicalTest(unittest.TestCase):
             self.assertEqual(
                 subject._canonical_source_preflight(arguments),
                 "local_checkout_not_main")
+            probe._git.side_effect = lambda *args: (
+                "main" if args[0] == "symbolic-ref" else
+                "?? private-file" if args[0] == "status" else expected_head)
+            probe._development_dirty_worktree_kinds.return_value = "untracked"
+            with mock.patch.object(
+                    subject, "_emit_private_untracked_checkout_inventory"
+                    ) as inventory:
+                self.assertEqual(
+                    subject._canonical_source_preflight(arguments),
+                    "local_checkout_changed_kind_untracked")
+                inventory.assert_called_once_with(probe)
 
     def test_canonical_drift_blocks_before_prompt_or_new_privileged_run(self):
         candidate = {

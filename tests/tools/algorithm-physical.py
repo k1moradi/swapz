@@ -15,6 +15,7 @@ import stat
 import struct
 import subprocess
 import sys
+import tempfile
 
 ROOT = Path(__file__).resolve().parents[2]
 PARTUUID_PATTERN = re.compile(r"[A-Za-z0-9][A-Za-z0-9-]{0,71}")
@@ -302,6 +303,49 @@ def _algorithm_ram_evidence_arguments() -> list[str]:
             "--algorithm-ram-nonce", nonce]
 
 
+def _emit_private_untracked_checkout_inventory(probe) -> None:
+    """Retain exact Git-untracked names for the owner, never for GitHub.
+
+    Only source-defined counts and a fixed relative private log location are
+    printed. The inventory grants no cleanup or physical admission authority.
+    """
+    try:
+        # NUL delimiters are essential: Git filenames can contain newlines.
+        raw_names = probe._git_result(
+            "ls-files", "--others", "--exclude-standard", "-z").stdout
+        if (not isinstance(raw_names, str) or
+                len(raw_names) > 65536 or not raw_names.endswith("\0")):
+            raise ValueError("untracked inventory is missing or oversized")
+        untracked_names = raw_names[:-1].split("\0")
+        if (not 1 <= len(untracked_names) <= 1024 or
+                any(not name for name in untracked_names)):
+            raise ValueError("untracked inventory is malformed")
+        private_directory = ROOT / "build/tests"
+        if private_directory.is_symlink() or not private_directory.is_dir():
+            raise ValueError("private build directory is unavailable")
+        # tempfile creates a new 0600 file. build/ is Git-ignored, so this
+        # diagnostic does not itself alter the source admission verdict.
+        with tempfile.NamedTemporaryFile(
+                mode="w", encoding="utf-8", dir=private_directory,
+                prefix="source-untracked-", suffix=".private.json",
+                delete=False) as diagnostic_file:
+            json.dump({
+                "schema": "swapz-private-untracked-inventory-v1",
+                "total_count": len(untracked_names),
+                "paths": untracked_names[:64],
+                "truncated": len(untracked_names) > 64,
+            }, diagnostic_file, ensure_ascii=True, sort_keys=True)
+            diagnostic_file.write("\n")
+            filename = Path(diagnostic_file.name).name
+        print("  Untracked checkout inventory: "
+              f"build/tests/{filename} (owner-only mode 0600; "
+              f"total={len(untracked_names)})")
+    except (OSError, RuntimeError, TypeError, ValueError, UnicodeError):
+        # Missing diagnostics never turn a refused physical gate into PASS.
+        print("  Untracked checkout inventory unavailable; inspect read-only "
+              "with git ls-files --others --exclude-standard")
+
+
 def _canonical_source_preflight(algorithm_ram_evidence: list[str]) -> str | None:
     """Authenticate this RAM-qualified source before asking for swap consent.
 
@@ -328,6 +372,8 @@ def _canonical_source_preflight(algorithm_ram_evidence: list[str]) -> str | None
             # A generated report or untracked file is not code, but the
             # physical mutation gate still requires the whole tree clean.
             kinds = probe._development_dirty_worktree_kinds()
+            if "untracked" in kinds.split(","):
+                _emit_private_untracked_checkout_inventory(probe)
             return "local_checkout_changed_kind_" + kinds.replace(",", "_")
         head = probe._git("rev-parse", "HEAD")
         if head != probe._git("rev-parse", "origin/main"):
