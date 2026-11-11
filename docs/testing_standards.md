@@ -2867,6 +2867,19 @@ a missing fixture-only benchmark key.
 This diagnostic path must never change swap admission, force additional swap,
 or replace the actual recovered-state checks.
 
+The physical helper must additionally expose a fixed, identity-free lifecycle
+phase diagnostic when an admitted run fails outside the authenticated
+anonymous-workload marker, including physical setup, opened-DM oracle,
+anonymous swap setup, and post-oracle validation. Emit it after owned
+recovery has been attempted without changing the first cause, state, swap
+restoration, or privileged exit code. A workload failure that already
+emitted a validated marker must retain exactly one marker. The official
+runner must reject duplicated, malformed, unknown, and identity-bearing
+lifecycle records before publishing, and must not mislabel missing
+diagnostics as a proven pageout-counter failure. Synthetic rootless tests
+must verify finite phase classification, single-marker binding and strict
+private-data redaction; absence of a validated marker stays FAIL.
+
 The shared-root-parent development trial must sample its exact selected
 partition's Linux block counters, not the whole root disk: unrelated root
 reads and writes cannot establish target activity. Keep the default dedicated

@@ -637,6 +637,40 @@ class PhysicalSwapProbeTests(unittest.TestCase):
         workload.preflight_workload_environment.assert_called_once_with(384, 128, 384)
         mutation.assert_not_called()
 
+    def test_algorithm_phase_failure_record_is_finite_and_private(self):
+        """Physical phases are not interchangeable with pageout proof."""
+        cases = (
+            ([], False, False, "physical_setup"),
+            ([{"status": "FAIL", "phase": "/private/KEEP_PRIVATE"}],
+             False, False, "opened_dm_oracle"),
+            ([{"status": "PASS"}], True, False, "anonymous_swap_oracle"),
+            ([{"status": "PASS"}], True, True, "post_oracle_validation"),
+        )
+        for phases, started, completed, expected in cases:
+            with self.subTest(expected=expected):
+                record = probe._algorithm_physical_phase_failure_record(
+                    {"physical_oracle_phases": phases,
+                     "private_host_path": "/private/KEEP_PRIVATE"},
+                    anonymous_started=started, anonymous_completed=completed)
+                self.assertEqual(record, {
+                    "schema": "swapz-algorithm-lifecycle-diagnostic-v1",
+                    "phase": expected, "gate": "physical_execution",
+                    "reason": "phase_refused"})
+                self.assertNotIn("KEEP_PRIVATE", json.dumps(record))
+
+    def test_algorithm_summary_failure_retains_single_emitted_diagnostic(self):
+        _workload, policy, result = self.algorithm_workload_fixture()
+        result["rounds"] = []
+        stderr = io.StringIO()
+        with mock.patch.object(probe.sys, "stderr", stderr), \
+                self.assertRaises(probe.ProbeError) as rejected:
+            probe._algorithm_real_swap_summary(result, policy, "a" * 64)
+        markers = [line for line in stderr.getvalue().splitlines()
+                   if line.startswith("PHYSICAL_ALGORITHM_DEBUG=")]
+        self.assertEqual(len(markers), 1)
+        self.assertEqual(rejected.exception.workload_diagnostic,
+                         json.loads(markers[0].split("=", 1)[1]))
+
     def test_algorithm_workload_failure_marker_redacts_private_producer_details(self):
         stderr = io.StringIO()
         with mock.patch.object(probe.sys, "stderr", stderr):

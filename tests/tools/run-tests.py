@@ -3977,6 +3977,15 @@ def parse_algorithm_pageout_diagnostic(error_output):
         return None
     if not isinstance(diagnostic, dict):
         return None
+    if diagnostic.get("schema") == "swapz-algorithm-lifecycle-diagnostic-v1":
+        if (set(diagnostic) != {"schema", "phase", "gate", "reason"} or
+                diagnostic["phase"] not in {
+                    "physical_setup", "opened_dm_oracle",
+                    "anonymous_swap_oracle", "post_oracle_validation"} or
+                diagnostic["gate"] != "physical_execution" or
+                diagnostic["reason"] != "phase_refused"):
+            return None
+        return diagnostic
     if diagnostic.get("schema") == "swapz-algorithm-workload-diagnostic-v1":
         fields = {"schema", "phase", "gate", "reason", "original_errno"}
         if "pressure" in diagnostic:
@@ -4060,6 +4069,15 @@ def parse_algorithm_pageout_diagnostic(error_output):
             for value in counters.values()):
         return None
     return diagnostic
+
+
+def print_algorithm_lifecycle_failure_diagnostic(diagnostic):
+    """Show a validated phase without printing privileged stderr."""
+    print("  Physical first failure: "
+          f"phase={diagnostic['phase']} gate={diagnostic['gate']} "
+          f"reason={diagnostic['reason']}", flush=True)
+    print("        Next: inspect the retained private first failure and "
+          "same-boot recovery state; do not rerun until verified", flush=True)
 
 
 def print_algorithm_workload_diagnostic(diagnostic):
@@ -12072,6 +12090,9 @@ def _run_qualification(args, sync_result):
                     result["algorithm_real_swap"]["diagnostic"] = physical_diagnostic
                     if physical_diagnostic.get("schema") == "swapz-algorithm-workload-diagnostic-v1":
                         print_algorithm_workload_diagnostic(physical_diagnostic)
+                    elif physical_diagnostic.get("schema") == "swapz-algorithm-lifecycle-diagnostic-v1":
+                        print_algorithm_lifecycle_failure_diagnostic(
+                            physical_diagnostic)
                     else:
                         readback_detail = (
                             f"lower_read_bytes={physical_diagnostic['lower_read_bytes']} "
@@ -12097,8 +12118,8 @@ def _run_qualification(args, sync_result):
                             "do not weaken real-swap I/O admission", flush=True)
                 else:
                     print(
-                        "  Physical first failure: authenticated pageout "
-                        "counters unavailable; private owner state retained",
+                        "  Physical first failure: no authenticated phase "
+                        "diagnostic; private owner state retained",
                         flush=True)
                     print(
                         "        Next: inspect existing root-owned same-boot "

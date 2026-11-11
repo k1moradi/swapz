@@ -3938,6 +3938,27 @@ def _algorithm_real_swap_summary(result, policy, oracle_sha256):
     }
 
 
+def _algorithm_physical_phase_failure_record(results, *,
+                                            anonymous_started,
+                                            anonymous_completed):
+    """Report only a fixed phase, never private paths, errors or target IDs."""
+    direct_phases = results.get("physical_oracle_phases")
+    direct_oracle_refused = (
+        isinstance(direct_phases, list) and any(
+            isinstance(phase, dict) and phase.get("status") != "PASS"
+            for phase in direct_phases))
+    phase = (
+        "opened_dm_oracle" if direct_oracle_refused else
+        "post_oracle_validation" if anonymous_completed else
+        "anonymous_swap_oracle" if anonymous_started else
+        "physical_setup")
+    return {
+        "schema": "swapz-algorithm-lifecycle-diagnostic-v1",
+        "phase": phase, "gate": "physical_execution",
+        "reason": "phase_refused",
+    }
+
+
 def _run_algorithm_live_swap_oracle(mapper, state, target, state_dir):
     """Prove Linux anonymous pageout/pagein through the exact owned mapper.
 
@@ -4008,7 +4029,9 @@ def _run_algorithm_live_swap_oracle(mapper, state, target, state_dir):
     try:
         return _algorithm_real_swap_summary(result, policy, oracle_sha256)
     except ProbeError as exc:
-        _emit_algorithm_workload_failure(exc)
+        # Preserve the already-emitted first-workload marker across recovery,
+        # avoiding a second marker that would invalidate strict parsing.
+        exc.workload_diagnostic = _emit_algorithm_workload_failure(exc)
         raise
 
 
@@ -4469,6 +4492,8 @@ def run_probe(device_arg, confirm_arg, state_dir_arg, review_path,
         execution_failure = False
         destructive_execution_started = False
         partition_claim_attempted = False
+        anonymous_oracle_started = False
+        anonymous_oracle_completed = False
         try:
             artifacts = _snapshot_reviewed_artifacts(
                 state_dir, evidence["artifact_digests"])
@@ -4630,8 +4655,10 @@ def run_probe(device_arg, confirm_arg, state_dir_arg, review_path,
                     oracle, mapper, state, target, state_dir, results,
                     phase_name, options)
             if algorithm_real_swap:
+                anonymous_oracle_started = True
                 results["algorithm_live_swap"] = _run_algorithm_live_swap_oracle(
                     mapper, state, target, state_dir)
+                anonymous_oracle_completed = True
                 results["linux_swap_activation_tested"] = True
                 _save_results(state_dir, results)
             state["stage"] = "ORACLE_PASS"
@@ -4911,6 +4938,17 @@ def run_probe(device_arg, confirm_arg, state_dir_arg, review_path,
             failure = ProbeError(
                 "final_recovery_state expected='COMPLETE' "
                 f"observed={state.get('stage')!r}")
+        if (failure is not None and algorithm_real_swap and
+                not isinstance(results.get("first_workload_failure"), dict)):
+            # A failure before the anonymous producer has no pageout counter
+            # diagnostic. Promote only the bounded execution phase after
+            # recovery; never publish arbitrary privileged stderr or device IDs.
+            print("PHYSICAL_ALGORITHM_DEBUG=" + json.dumps(
+                _algorithm_physical_phase_failure_record(
+                    results, anonymous_started=anonymous_oracle_started,
+                    anonymous_completed=anonymous_oracle_completed),
+                sort_keys=True, separators=(",", ":")),
+                file=sys.stderr, flush=True)
         if failure is not None:
             # This summary follows the owned recovery attempt, not just the
             # first oracle failure. Unknown checks cannot appear as PASS.

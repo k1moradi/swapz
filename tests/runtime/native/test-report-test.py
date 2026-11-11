@@ -4704,6 +4704,36 @@ class ReportContract(unittest.TestCase):
         self.assertNotIn("NEVER_EXPORT", console)
         self.assertIn("Tested Git commit:", console)
 
+    def test_physical_lifecycle_failure_marker_is_strict_and_printable(self):
+        """Report the exact safe phase when no pageout proof was emitted."""
+        record = {
+            "schema": "swapz-algorithm-lifecycle-diagnostic-v1",
+            "phase": "anonymous_swap_oracle",
+            "gate": "physical_execution", "reason": "phase_refused"}
+        prefix = "PHYSICAL_ALGORITHM_DEBUG="
+        marker = prefix + json.dumps(record, separators=(",", ":"))
+        self.assertEqual(runner.parse_algorithm_pageout_diagnostic(
+            "/private/KEEP_PRIVATE\n" + marker), record)
+        output = io.StringIO()
+        with contextlib.redirect_stdout(output):
+            runner.print_algorithm_lifecycle_failure_diagnostic(record)
+        self.assertIn("phase=anonymous_swap_oracle", output.getvalue())
+        self.assertNotIn("KEEP_PRIVATE", output.getvalue())
+        for altered in (
+                {**record, "phase": "/private/KEEP_PRIVATE"},
+                {**record, "gate": "private"},
+                {**record, "reason": "unknown"},
+                {**record, "extra": "/private/KEEP_PRIVATE"},
+                {**record, "phase": True},
+        ):
+            with self.subTest(altered=altered):
+                self.assertIsNone(runner.parse_algorithm_pageout_diagnostic(
+                    prefix + json.dumps(altered)))
+        self.assertIsNone(runner.parse_algorithm_pageout_diagnostic(
+            marker + "\n" + marker))
+        self.assertIsNone(runner.parse_algorithm_pageout_diagnostic(
+            "untrusted private failure without a validated marker"))
+
     def test_physical_pageout_debug_is_source_validated_and_redacted(self):
         report = {
             "schema": "swapz-algorithm-pageout-diagnostic-v1",
