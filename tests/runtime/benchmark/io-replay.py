@@ -1848,19 +1848,22 @@ def measure_packed_swapin(fd, path, identity, chunks, logical_pages, qd,
         if allocation_bounded:
             for base in range(0, logical_pages, qd):
                 run_persistent_wave(PACKED_WRITE, None, base)
+            os.fsync(fd)
         else:
             # The ID63 sequential-read A/B needs reproducible packed placement.
-            # Submit each ascending QD32 page wave as one vectored write so its
-            # page order is fixed while the kernel still sees packed input.
-            # This setup is outside the timed read scope; ID36 keeps its
-            # allocation-bounded persistent write/read lanes.
-            for base in range(0, logical_pages, qd):
+            # Six ascending medium pages fit the existing four-block pack-ready
+            # geometry. Sync each group outside the timed read scope so the
+            # mapper commits it before the next logical group is admitted.
+            # ID36 keeps its allocation-bounded persistent write/read lanes.
+            write_group_pages = 6
+            for base in range(0, logical_pages, write_group_pages):
+                page_end = min(base + write_group_pages, logical_pages)
                 write_iov = [chunks[page % len(chunks)]
-                             for page in range(base, base + qd)]
+                             for page in range(base, page_end)]
                 written = os.pwritev(fd, write_iov, base * PAGE)
-                if written != qd * PAGE:
-                    raise OSError("short packed read-set write wave")
-        os.fsync(fd)
+                if written != (page_end - base) * PAGE:
+                    raise OSError("short packed read-set write group")
+                os.fsync(fd)
         after = packed_closes(path, identity)
         packed_delta = after - before if before is not None else None
         if packed_delta is not None and packed_delta <= 0:

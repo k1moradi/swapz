@@ -452,6 +452,7 @@ for read_coalesce in "${confirmation_modes[@]}"; do
     arguments=(--run-owned-ram-pair --profile medium --retain-ms 2 --unpaced
                --lower-mbps 80 --hw-queue-depth 64 --completion-nsec 150000
                --read-coalesce "$read_coalesce"
+               --invalidate-cache-on-write-admit 1
                --shared-plan "$shared_plan")
     if (( index % 2 )); then
         arguments+=(--swapz-first)

@@ -692,6 +692,7 @@ class PairReplayContract(unittest.TestCase):
                 with path.open("w+b") as backing:
                     backing.truncate(1024 * PAGE)
                     writes = []
+                    syncs = []
                     if allocation_bounded:
                         original_full_write = replay.full_write
 
@@ -708,6 +709,7 @@ class PairReplayContract(unittest.TestCase):
                                 chunks, 1024, 32, allocation_bounded=True)
                     else:
                         original_pwritev = replay.os.pwritev
+                        original_fsync = replay.os.fsync
 
                         def record_ordered_wave(fd, iov, offset):
                             writes.append((offset, len(iov),
@@ -715,9 +717,16 @@ class PairReplayContract(unittest.TestCase):
                                            threading.get_ident()))
                             return original_pwritev(fd, iov, offset)
 
+                        def record_group_sync(fd):
+                            syncs.append(threading.get_ident())
+                            return original_fsync(fd)
+
                         with mock.patch.object(
                                 replay.os, "pwritev",
-                                side_effect=record_ordered_wave):
+                                side_effect=record_ordered_wave), \
+                                mock.patch.object(
+                                    replay.os, "fsync",
+                                    side_effect=record_group_sync):
                             measured = replay.measure_packed_swapin(
                                 backing.fileno(), path,
                                 {"test_regular_file": str(path)},
@@ -728,13 +737,16 @@ class PairReplayContract(unittest.TestCase):
                     self.assertCountEqual([page for page, _ in writes], range(1024))
                     self.assertEqual(len({thread_id for _, thread_id in writes}), 32)
                 else:
-                    self.assertEqual(len(writes), 32)
+                    self.assertEqual(len(writes), 171)
                     self.assertEqual(
                         [offset for offset, _, _, _ in writes],
-                        [base * PAGE for base in range(0, 1024, 32)])
+                        [base * PAGE for base in range(0, 1024, 6)])
                     self.assertTrue(all(
-                        count == 32 and lengths == (PAGE,) * 32
-                        for _, count, lengths, _ in writes))
+                        count == (6 if index < 170 else 4) and
+                        lengths == (PAGE,) * count
+                        for index, (_, count, lengths, _) in enumerate(writes)))
+                    self.assertEqual(len(syncs), len(writes))
+                    self.assertEqual(set(syncs), {caller})
                     self.assertEqual(
                         {thread_id for _, _, _, thread_id in writes}, {caller})
                 self.assertEqual(
@@ -748,6 +760,16 @@ class PairReplayContract(unittest.TestCase):
                 self.assertEqual(
                     measured["passes"]["seeded_random"]["verified_image_sha256"],
                     measured["logical_image_sha256"])
+
+    def test_id63_read_coalescing_uses_same_cold_cache_setup_in_both_arms(self):
+        loaded = (ROOT / "tests/tools/test-loaded.sh").read_text(
+            encoding="utf-8")
+        start = loaded.index("# ID63 adjacent distinct-extent confirmation")
+        end = loaded.index("# ID63 depth-one adjacent coalescing confirmation", start)
+        fast_ab = loaded[start:end]
+        self.assertIn("--invalidate-cache-on-write-admit 1", fast_ab)
+        self.assertEqual(fast_ab.count("--invalidate-cache-on-write-admit 1"), 1)
+        self.assertIn('--read-coalesce "$read_coalesce"', fast_ab)
 
     def test_timed_swapz_read_counters_fail_closed_and_skip_rootless(self):
         import importlib.util

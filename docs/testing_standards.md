@@ -6887,6 +6887,15 @@ cap evidence is sufficient to fix the maximum coalesced span at eight blocks:
 8 materially improves serial sequential service versus 4 on all three hosts,
 while fast-model comparisons do not establish a smaller cap as better. The
 runtime cap selector and routine 2/4/8 sweep are retired.
+
+The timed packed-read evidence uses a deterministic, ascending six-page
+population group followed by `fsync`, outside the read timer. This matches the
+existing six-record/four-block pack-ready geometry and lets each group commit
+before the next logical range is submitted. Both fast-model ID63 arms enable
+the same write-admission read-cache invalidation, so stale prefill/mixed-read
+cache entries do not stand in for lower READ traffic. The sequential and
+seeded-random byte oracles remain unchanged, and every merge-on sequential
+round must still record at least one successful adjacent lower READ merge.
 Rootless source/build contracts assert that retired production selectors and
 their routine loaded markers are absent, while fixed compatibility telemetry
 continues to report the selected production values. The private benchmark
