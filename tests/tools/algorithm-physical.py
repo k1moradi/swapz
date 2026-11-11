@@ -471,8 +471,13 @@ def main() -> int:
           "ordinary swapoff on active swap before using its data area.")
     print("  The original Linux swap header remains unchanged; "
           "only the temporary mapper may be formatted")
+    # A no-newline input() prompt can disappear from line-oriented SSH logs.
+    # Publish the exact Yes/No question before waiting for operator input.
+    print(f"  Run bounded swapz Linux swap trial on {selected['path']} "
+          f"(PARTUUID {selected['partuuid']})? [y/N]", flush=True)
+    print("  Enter y/yes to authorize; n/no or Enter declines:", flush=True)
     try:
-        confirmed = input("Run bounded swapz Linux swap trial on this partition? [y/N] ")
+        confirmed = input()
     except EOFError:
         confirmed = ""
     if confirmed.lower() not in {"y", "yes"}:

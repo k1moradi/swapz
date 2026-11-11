@@ -2812,6 +2812,18 @@ expanded marker remains untrusted and must not reach stdout or publication.
 Rootless tests must verify the exact official report path, the first
 pre-consent refusal, and private stderr non-disclosure.
 
+The unprivileged physical consent question must be printed as a separate
+newline-terminated, flushed stdout line **before** waiting for input, and
+name the exact selected partition path, PARTUUID and `[y/N]` default.
+Print a separate flushed instruction explaining that `y`/`yes` authorizes
+the attempt and Enter/`n`/`no` declines; never rely on a non-newline
+`input(prompt)` as the only visible question in line-oriented SSH or test
+logs. An empty response, EOF, or unrecognized response must remain a
+non-authorizing `NOT_RUN`; the original source, ownership and privileged
+admission gates still run independently before any physical mutation.
+Rootless tests must inspect the flushed question *before* a mocked input
+returns and prove no privileged helper starts without explicit `yes`.
+
 When interactive algorithm-tier `make test` completes all five RAM stages,
 the runner must atomically write and publish a source-bound
 `overall=INCOMPLETE` RAM checkpoint to canonical `test_results.json`

@@ -447,6 +447,78 @@ class AlgorithmPhysicalTest(unittest.TestCase):
             command.assert_not_called()
             self.assertTrue(any("declined" in str(args) for args in printer.call_args_list))
 
+    def test_confirmation_question_is_visible_and_flushed_before_input(self):
+        """A line-oriented SSH log must show the exact target and safe default."""
+        candidate = {
+            "path": "/dev/sda4", "parent": "/dev/sda",
+            "partuuid": "7fb9401d-04", "size_bytes": 16 * 1024 ** 3,
+            "selector": "/dev/disk/by-partuuid/7fb9401d-04",
+            "parent_has_other_partitions": True,
+        }
+        question = (
+            "  Run bounded swapz Linux swap trial on /dev/sda4 "
+            "(PARTUUID 7fb9401d-04)? [y/N]\n")
+        instructions = (
+            "  Enter y/yes to authorize; n/no or Enter declines:\n")
+
+        class OperatorTerminal(io.StringIO):
+            def __init__(self):
+                super().__init__()
+                self.flushed_output = []
+
+            def isatty(self):
+                return True
+
+            def flush(self):
+                self.flushed_output.append(self.getvalue())
+                super().flush()
+
+        for answer, approved in (("", False), ("n", False),
+                                 ("no", False), ("yes", True)):
+            with self.subTest(answer=answer):
+                terminal = OperatorTerminal()
+
+                def read_answer():
+                    # The complete question must reach a line-based observer
+                    # before input() is invoked, not after the response.
+                    self.assertTrue(terminal.flushed_output)
+                    self.assertIn(
+                        question + instructions,
+                        terminal.flushed_output[-1])
+                    self.assertTrue(
+                        terminal.flushed_output[-1].endswith(instructions))
+                    return answer
+
+                with mock.patch.object(
+                        subject.sys, "stdout", terminal), \
+                     mock.patch.object(
+                         subject.sys.stdin, "isatty", return_value=True), \
+                     mock.patch.object(
+                         subject, "_require_read_only_preflight",
+                         return_value=candidate), \
+                     mock.patch.object(
+                         subject, "_algorithm_ram_evidence_arguments",
+                         return_value=[]), \
+                     mock.patch.object(
+                         subject, "_canonical_source_preflight",
+                         return_value=None), \
+                     mock.patch("builtins.input",
+                                side_effect=read_answer) as consent, \
+                     mock.patch.object(
+                         subject.shutil, "which",
+                         return_value="/usr/bin/sudo"), \
+                     mock.patch.object(
+                         subject.subprocess, "run",
+                         return_value=SimpleNamespace(returncode=0)) as privileged:
+                    self.assertEqual(subject.main(), 0 if approved else 2)
+                consent.assert_called_once_with()
+                self.assertEqual(privileged.call_count, int(approved))
+                self.assertEqual(terminal.getvalue().count(question), 1)
+                if not approved:
+                    self.assertIn(
+                        "PHYSICAL_ALGORITHM_REAL_SWAP=NOT_RUN reason=declined",
+                        terminal.getvalue())
+
     def test_approved_trial_invokes_one_fixed_privileged_command(self):
         candidate = {
             "path": "/dev/sda1", "parent": "/dev/sda",
