@@ -2855,6 +2855,18 @@ a missing fixture-only benchmark key.
 This diagnostic path must never change swap admission, force additional swap,
 or replace the actual recovered-state checks.
 
+Development real-swap teardown must await pending udev work once after the
+exact owned mapper is proved inactive, before attempting normal DM removal.
+Use bounded `udevadm settle`; never retry or force a busy removal. A failed
+or unavailable settlement retains the mapper with its original exit/errno
+and a bounded cleanup-phase diagnostic. After the wait, independently recheck
+the complete mapper identity, device number and inactive swap inventory;
+settlement itself is not ownership or absence proof. Rootless controls must
+cover successful ordering, failed settlement, changed name/UUID or device,
+reactivated swap, and the existing failed-swapoff hard stop. Real loaded
+execution must separately establish whether this resolves a host's EBUSY;
+a passing rootless control is not evidence of its kernel cause.
+
 The same bounded diagnostic channel must retain a missing physical READ proof
 after anonymous-page byte verification. Name `phase=anonymous_pagein` and
 `gate=lower_read`; include positive observed mapper Used KiB and lower WRITE

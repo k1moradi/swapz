@@ -3521,6 +3521,34 @@ def _prepare_owned_mapper_removal(state, target):
         _run(["swapoff", "--", mapper], timeout=120)
         if _active_swap_for(*mapper_device) is not None:
             raise ProbeError("owned mapper remains active after swapoff")
+    # mkswap/swapon/swapoff can enqueue udev probes which briefly open the
+    # mapper. Wait for queued work once, never retry or force DM removal.
+    try:
+        settled = _run(["udevadm", "settle", "--timeout=10"],
+                       timeout=15, check=False)
+    except ProbeError as exc:
+        raise ProbeError(
+            "phase=mapper_cleanup check=udev_settle expected=completed "
+            f"original_errno={_errno_text(exc.__cause__)} "
+            "observed=command_unavailable_or_timeout "
+            "retained_resource=owned_mapper "
+            "safe_next_step=inspect_owner_state_read_only") from exc
+    if settled.returncode != 0:
+        raise ProbeError(
+            "phase=mapper_cleanup check=udev_settle expected=exit_0 "
+            f"original_exit={settled.returncode} "
+            "retained_resource=owned_mapper "
+            "safe_next_step=inspect_owner_state_read_only")
+    # Settlement grants no ownership. Re-prove the exact mapping and swap
+    # inactivity after waiting, immediately before the caller's removal.
+    if (_verify_owned_mapper(state, target) != mapper or
+            block_identity(mapper) != mapper_device or
+            _active_swap_for(*mapper_device) is not None):
+        raise ProbeError(
+            "phase=mapper_cleanup check=post_udev_identity "
+            "expected=exact_owned_inactive_mapper observed=changed "
+            "retained_resource=owned_mapper "
+            "safe_next_step=inspect_owner_state_read_only")
 
 
 def _algorithm_pageout_event(worker, expected_prefix):

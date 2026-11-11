@@ -450,12 +450,68 @@ class PhysicalSwapProbeTests(unittest.TestCase):
              mock.patch.object(probe, "block_identity",
                                return_value=(253, 12)), \
              mock.patch.object(probe, "_active_swap_for",
-                               side_effect=[active, None]) as inventory, \
-             mock.patch.object(probe, "_run") as command:
+                               side_effect=[active, None, None]) as inventory, \
+             mock.patch.object(probe, "_run", return_value=
+                               subprocess.CompletedProcess([], 0)) as command:
             probe._prepare_owned_mapper_removal(state, {})
-        self.assertEqual(inventory.call_count, 2)
-        command.assert_called_once_with(
-            ["swapoff", "--", mapper], timeout=120)
+        self.assertEqual(inventory.call_count, 3)
+        self.assertEqual(command.call_args_list, [
+            mock.call(["swapoff", "--", mapper], timeout=120),
+            mock.call(["udevadm", "settle", "--timeout=10"],
+                      timeout=15, check=False)])
+
+    def test_real_swap_teardown_reproves_identity_after_udev_settlement(self):
+        mapper = "/dev/mapper/swapz-demo-physical-1234567890abcdef"
+        state = {"algorithm_real_swap": True, "development_only": True}
+        for refusal in (None, "udev", "mapper", "device", "active"):
+            with self.subTest(refusal=refusal), ExitStack() as stack:
+                events = []
+                def verify(*_):
+                    events.append("verify")
+                    return "/dev/mapper/substituted" if refusal == "mapper" and \
+                        "settle" in events else mapper
+                def identify(_):
+                    return (253, 13) if refusal == "device" and \
+                        "settle" in events else (253, 12)
+                def inventory(*_):
+                    events.append("inventory")
+                    return {"used_kib": 0} if refusal == "active" and \
+                        "settle" in events else None
+                def command(argv, **options):
+                    self.assertEqual(argv, ["udevadm", "settle", "--timeout=10"])
+                    self.assertEqual(options, {"timeout": 15, "check": False})
+                    events.append("settle")
+                    return subprocess.CompletedProcess(argv, 1 if refusal == "udev" else 0)
+                stack.enter_context(mock.patch.object(probe, "_verify_owned_mapper", side_effect=verify))
+                stack.enter_context(mock.patch.object(probe, "block_identity", side_effect=identify))
+                stack.enter_context(mock.patch.object(probe, "_active_swap_for", side_effect=inventory))
+                stack.enter_context(mock.patch.object(probe, "_run", side_effect=command))
+                if refusal is None:
+                    probe._prepare_owned_mapper_removal(state, {})
+                    self.assertEqual(events, ["verify", "inventory", "settle", "verify", "inventory"])
+                else:
+                    with self.assertRaisesRegex(probe.ProbeError, "phase=mapper_cleanup"):
+                        probe._prepare_owned_mapper_removal(state, {})
+                    self.assertEqual(events.count("settle"), 1)
+
+    def test_real_swap_udev_command_refusal_preserves_errno_and_stops_revalidation(self):
+        mapper = "/dev/mapper/swapz-demo-physical-1234567890abcdef"
+        def refused(*_args, **_options):
+            try:
+                raise PermissionError(errno.EACCES, "private-path-not-for-output")
+            except OSError as error:
+                raise probe.ProbeError("private command detail") from error
+        with mock.patch.object(probe, "_verify_owned_mapper", return_value=mapper) as verify, \
+                mock.patch.object(probe, "block_identity", return_value=(253, 12)), \
+                mock.patch.object(probe, "_active_swap_for", return_value=None), \
+                mock.patch.object(probe, "_run", side_effect=refused):
+            with self.assertRaises(probe.ProbeError) as failure:
+                probe._prepare_owned_mapper_removal(
+                    {"algorithm_real_swap": True, "development_only": True}, {})
+        self.assertIn("phase=mapper_cleanup check=udev_settle", str(failure.exception))
+        self.assertIn("original_errno=13", str(failure.exception))
+        self.assertNotIn("private", str(failure.exception))
+        verify.assert_called_once()
 
     def test_real_swap_failed_swapoff_never_certifies_mapper_removal(self):
         mapper = "/dev/mapper/swapz-demo-physical-1234567890abcdef"
