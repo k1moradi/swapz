@@ -3602,7 +3602,7 @@ def _algorithm_pageout_host_snapshot():
 
 
 def _algorithm_pageout_debug_record(mapper_used_kib, lower_write_bytes,
-                                    before, after):
+                                    before, after, *, lower_read_bytes=None):
     """Produce a fixed-schema, identity-free, source-bound failure observation."""
     deltas = {}
     for name in ("pswpout", "pswpin", "zswpout", "zswpwb"):
@@ -3611,7 +3611,7 @@ def _algorithm_pageout_debug_record(mapper_used_kib, lower_write_bytes,
         deltas[name] = (
             current - initial if initial is not None and current is not None
             and current >= initial else None)
-    return {
+    record = {
         "schema": "swapz-algorithm-pageout-diagnostic-v1",
         "phase": "anonymous_pageout",
         "gate": ("mapper_usage" if mapper_used_kib <= 0
@@ -3621,6 +3621,10 @@ def _algorithm_pageout_debug_record(mapper_used_kib, lower_write_bytes,
         "zswap_enabled": after["zswap_enabled"],
         "host_global_vmstat_delta": deltas,
     }
+    if lower_read_bytes is not None:
+        record.update(phase="anonymous_pagein", gate="lower_read",
+                      lower_read_bytes=lower_read_bytes)
+    return record
 
 
 def _require_algorithm_pageout_backing(mapper_used_kib, lower_write_bytes):
@@ -3732,6 +3736,7 @@ def _run_algorithm_live_swap_oracle(mapper, state, target, state_dir):
                 file=sys.stderr, flush=True)
             raise
 
+        host_before_readback = _algorithm_pageout_host_snapshot()
         if worker.stdin is None:
             raise ProbeError("real-swap oracle command pipe is unavailable")
         worker.stdin.write("VERIFY\n")
@@ -3752,7 +3757,21 @@ def _run_algorithm_live_swap_oracle(mapper, state, target, state_dir):
         readback_delta = _lower_io_delta(
             lower_after_pageout, _block_stat_snapshot(target))
         if readback_delta["lower_read_bytes"] <= 0:
-            raise ProbeError("anonymous-page verification did not prove lower reads")
+            # A byte-exact swap-cache hit is not a proved physical swap-in.
+            # Preserve this first missing proof before lifecycle cleanup.
+            context = _algorithm_pageout_debug_record(
+                used_swap_kib, pageout_delta["lower_write_bytes"],
+                host_before_readback, _algorithm_pageout_host_snapshot(),
+                lower_read_bytes=readback_delta["lower_read_bytes"])
+            print("PHYSICAL_ALGORITHM_DEBUG=" + json.dumps(
+                context, sort_keys=True, separators=(",", ":")),
+                file=sys.stderr, flush=True)
+            raise ProbeError(
+                "anonymous_pagein=UNPROVEN gate=lower_read "
+                "expected_lower_read_bytes=positive "
+                f"observed_lower_read_bytes={readback_delta['lower_read_bytes']} "
+                f"observed_lower_write_bytes={pageout_delta['lower_write_bytes']} "
+                f"observed_mapper_used_kib={used_swap_kib}")
         return {
             "status": "PASS",
             "oracle_sha256": oracle_sha256,

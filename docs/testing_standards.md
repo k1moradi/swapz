@@ -2855,6 +2855,19 @@ a missing fixture-only benchmark key.
 This diagnostic path must never change swap admission, force additional swap,
 or replace the actual recovered-state checks.
 
+The same bounded diagnostic channel must retain a missing physical READ proof
+after anonymous-page byte verification. Name `phase=anonymous_pagein` and
+`gate=lower_read`; include positive observed mapper Used KiB and lower WRITE
+bytes, zero observed lower READ bytes, and the bounded host-vmstat deltas for
+the readback interval. A swap-cache hit or byte-exact worker response cannot
+substitute for lower READ I/O. Accept this phase only with its exact field set
+and consistent numeric evidence; reject duplicate, private, malformed,
+negative, boolean, overflow or success-looking records. The real official
+runner regression must prove this first cause survives exit 3 and a later
+cleanup failure, without exposing privileged stderr. Preserve the original
+failure and normal recovery state; neither this diagnostic nor an earlier
+RAM PASS can promote the development trial to production qualification.
+
 When the optional development physical swap trial follows five passing RAM
 stages, check the canonical remote source against the exact nonce-bound
 RAM evidence **before asking for device consent**. Reuse the root helper's

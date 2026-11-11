@@ -527,6 +527,58 @@ class PhysicalSwapProbeTests(unittest.TestCase):
         self.assertEqual(verify.call_count, 2)
         command.assert_not_called()
 
+    def test_real_swap_readback_reports_missing_lower_read_without_false_pass(self):
+        mapper = "/dev/mapper/swapz-demo-physical-1234567890abcdef"
+        host = {"zswap_enabled": "NO", "host_vmstat": {
+            "pswpout": 2048, "pswpin": 0, "zswpout": 0, "zswpwb": 0}}
+        ready = {"pages": 2048, "bytes": 8388608,
+                 "expected_sha256": "b" * 64}
+        verified = {**ready, "mismatches": 0, "actual_sha256": "b" * 64}
+        for lower_read_bytes in (0, 4096):
+            with self.subTest(lower_read_bytes=lower_read_bytes), ExitStack() as stack:
+                worker = SimpleNamespace(
+                    stdin=io.StringIO(), stdout=io.StringIO(),
+                    wait=mock.Mock(return_value=0), poll=mock.Mock(return_value=0))
+                stderr = io.StringIO()
+                for name, value in (
+                    ("_verify_owned_mapper", mapper),
+                    ("block_identity", (253, 12)),
+                    ("_algorithm_pageout_oracle_snapshot", (Path("/private/oracle"), "a" * 64)),
+                    ("_block_stat_snapshot", {"available": True}),
+                    ("_algorithm_pageout_host_snapshot", host),
+                    ("_run", None),
+                ):
+                    stack.enter_context(mock.patch.object(probe, name, return_value=value))
+                stack.enter_context(mock.patch.object(
+                    probe, "_active_swap_for", side_effect=[
+                        None, {"used_kib": 0}, {"used_kib": 8192}]))
+                stack.enter_context(mock.patch.object(
+                    probe, "_lower_io_delta", side_effect=[
+                        {"lower_write_bytes": 8388608}, {"lower_read_bytes": lower_read_bytes}]))
+                stack.enter_context(mock.patch.object(
+                    probe, "_algorithm_pageout_event", side_effect=[ready, verified]))
+                stack.enter_context(mock.patch.object(probe.subprocess, "Popen", return_value=worker))
+                stack.enter_context(mock.patch.object(
+                    probe.Path, "read_text", return_value="MemAvailable: 8000000 kB\n"))
+                stack.enter_context(mock.patch.object(probe.sys, "stderr", stderr))
+                if lower_read_bytes:
+                    result = probe._run_algorithm_live_swap_oracle(
+                        mapper, {"source_sha": "a" * 40, "run_id": "1" * 32}, {}, Path("/private"))
+                    self.assertEqual(result["lower_read_bytes"], lower_read_bytes)
+                    self.assertEqual(result["status"], "PASS")
+                    self.assertEqual(stderr.getvalue(), "")
+                else:
+                    with self.assertRaisesRegex(probe.ProbeError,
+                                                "anonymous_pagein=UNPROVEN gate=lower_read"):
+                        probe._run_algorithm_live_swap_oracle(
+                            mapper, {"source_sha": "a" * 40, "run_id": "1" * 32}, {}, Path("/private"))
+                    record = json.loads(stderr.getvalue().split("=", 1)[1])
+                    self.assertEqual(record["phase"], "anonymous_pagein")
+                    self.assertEqual(record["lower_read_bytes"], 0)
+                    self.assertEqual(record["lower_write_bytes"], 8388608)
+                    self.assertEqual(record["host_global_vmstat_delta"]["pswpin"], 0)
+                worker.wait.assert_called()
+
     def test_algorithm_physical_single_confirmation_unit_contracts(self):
         command = [sys.executable, "-B",
                    str(ROOT / "runtime/native/algorithm-physical-test.py"),

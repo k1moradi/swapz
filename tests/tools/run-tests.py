@@ -3975,21 +3975,33 @@ def parse_algorithm_pageout_diagnostic(error_output):
         diagnostic = json.loads(records[0], object_pairs_hook=unique_fields)
     except (ValueError, UnicodeError, TypeError):
         return None
-    if not isinstance(diagnostic, dict) or set(diagnostic) != {
+    if not isinstance(diagnostic, dict):
+        return None
+    readback = diagnostic.get("phase") == "anonymous_pagein"
+    fields = {
             "schema", "phase", "gate", "mapper_used_kib",
-            "lower_write_bytes", "zswap_enabled", "host_global_vmstat_delta"}:
+            "lower_write_bytes", "zswap_enabled", "host_global_vmstat_delta"}
+    if readback:
+        fields.add("lower_read_bytes")
+    if set(diagnostic) != fields:
         return None
     if (diagnostic["schema"] != "swapz-algorithm-pageout-diagnostic-v1"
-            or diagnostic["phase"] != "anonymous_pageout"
+            or diagnostic["phase"] not in ("anonymous_pageout", "anonymous_pagein")
             or diagnostic["zswap_enabled"] not in ("YES", "NO", "UNKNOWN")):
         return None
-    for name in ("mapper_used_kib", "lower_write_bytes"):
+    for name in (("mapper_used_kib", "lower_write_bytes", "lower_read_bytes")
+                 if readback else ("mapper_used_kib", "lower_write_bytes")):
         value = diagnostic[name]
         if type(value) is not int or not 0 <= value <= (1 << 64) - 1:
             return None
-    expected_gate = ("mapper_usage" if diagnostic["mapper_used_kib"] == 0
-                     else "lower_write"
-                     if diagnostic["lower_write_bytes"] == 0 else None)
+    if readback:
+        expected_gate = ("lower_read" if diagnostic["mapper_used_kib"] > 0 and
+                         diagnostic["lower_write_bytes"] > 0 and
+                         diagnostic["lower_read_bytes"] == 0 else None)
+    else:
+        expected_gate = ("mapper_usage" if diagnostic["mapper_used_kib"] == 0
+                         else "lower_write"
+                         if diagnostic["lower_write_bytes"] == 0 else None)
     if diagnostic["gate"] != expected_gate or expected_gate is None:
         return None
     counters = diagnostic["host_global_vmstat_delta"]
@@ -11969,11 +11981,15 @@ def _run_qualification(args, sync_result):
                 print_physical_trial_result("FAIL", physical_duration, progress_table)
                 if physical_diagnostic is not None:
                     result["algorithm_real_swap"]["diagnostic"] = physical_diagnostic
+                    readback_detail = (
+                        f"lower_read_bytes={physical_diagnostic['lower_read_bytes']} "
+                        if physical_diagnostic["phase"] == "anonymous_pagein" else "")
                     print(
-                        "  Physical first failure: phase=anonymous_pageout "
+                        f"  Physical first failure: phase={physical_diagnostic['phase']} "
                         f"gate={physical_diagnostic['gate']} "
                         f"mapper_used_kib={physical_diagnostic['mapper_used_kib']} "
                         f"lower_write_bytes={physical_diagnostic['lower_write_bytes']} "
+                        f"{readback_detail}"
                         f"zswap_enabled={physical_diagnostic['zswap_enabled']}",
                         flush=True)
                     print(

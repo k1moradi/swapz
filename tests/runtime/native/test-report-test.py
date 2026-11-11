@@ -4407,6 +4407,12 @@ class ReportContract(unittest.TestCase):
 
     def test_official_algorithm_tier_promotes_only_verified_physical_debug(self):
         """Exercise the real make-test runner boundary without device access."""
+        self.assert_official_physical_debug(readback=False)
+
+    def test_official_algorithm_tier_retains_missing_physical_read_evidence(self):
+        self.assert_official_physical_debug(readback=True)
+
+    def assert_official_physical_debug(self, *, readback):
         source_sha = "a" * 40
         report_snapshots = []
         error_context = {
@@ -4419,6 +4425,10 @@ class ReportContract(unittest.TestCase):
             "host_global_vmstat_delta": {
                 "pswpout": 1, "pswpin": None, "zswpout": 1, "zswpwb": None},
         }
+        if readback:
+            error_context.update(phase="anonymous_pagein", gate="lower_read",
+                                 mapper_used_kib=8192, lower_write_bytes=8388608,
+                                 lower_read_bytes=0)
 
         class OperatorConsole(io.StringIO):
             def isatty(self):
@@ -4499,7 +4509,10 @@ class ReportContract(unittest.TestCase):
         self.assertEqual(report_snapshots[1]["overall"], "FAIL")
         self.assertEqual(report_snapshots[1]["algorithm_real_swap"][
             "diagnostic"], error_context)
-        self.assertIn("gate=mapper_usage", console)
+        self.assertIn(f"phase={error_context['phase']}", console)
+        self.assertIn(f"gate={error_context['gate']}", console)
+        if readback:
+            self.assertIn("lower_read_bytes=0", console)
         self.assertIn("zswap_enabled=YES", console)
         self.assertNotIn("NEVER_EXPORT", console)
         self.assertIn("Physical trial cleanup:", console)
@@ -4678,6 +4691,20 @@ class ReportContract(unittest.TestCase):
         }
         self.assertEqual(runner.parse_algorithm_pageout_diagnostic(
             prefix + json.dumps(missing_swap)), missing_swap)
+
+        readback = {**report, "phase": "anonymous_pagein", "gate": "lower_read",
+                    "lower_write_bytes": 8388608, "lower_read_bytes": 0}
+        self.assertEqual(runner.parse_algorithm_pageout_diagnostic(
+            prefix + json.dumps(readback)), readback)
+        for fields in (
+                {"lower_read_bytes": 1}, {"lower_read_bytes": -1},
+                {"lower_read_bytes": True}, {"lower_read_bytes": 1 << 64},
+                {"lower_write_bytes": 0}, {"mapper_used_kib": 0},
+                {"gate": "lower_write"}, {"phase": "private_phase"},
+                {"private_path": private_path}):
+            with self.subTest(readback_fields=fields):
+                self.assertIsNone(runner.parse_algorithm_pageout_diagnostic(
+                    prefix + json.dumps({**readback, **fields})))
 
     def test_failure_diagnostic_collects_read_rounds_privately(self):
         fast_sessions = runner.parse_read_coalesce_ab(synthetic_log())
