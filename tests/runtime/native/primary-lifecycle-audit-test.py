@@ -19,6 +19,7 @@ import re
 import subprocess
 import time
 import unittest
+from unittest import mock
 
 ROOT = Path(__file__).resolve().parents[3]
 PRIMARY_SOURCE = ROOT / "src/userspace/swapz-primary.c"
@@ -1835,12 +1836,14 @@ int swapz_primary_qualification_import_serialized(const char *report_path);
 
     def _crash_and_reacquire(
             self, package, action, phase, extra=None, *,
-            checkpoint_timeout_seconds=None):
-        crash_options = (
-            {} if checkpoint_timeout_seconds is None
-            else {"checkpoint_timeout_seconds": checkpoint_timeout_seconds})
+            checkpoint_timeout_seconds=90):
+        # Host disk latency and concurrent rootless work can delay even early
+        # package fsync checkpoints. Use the existing finite fixture maximum
+        # for this cross-component SIGKILL admission rehearsal, not only for
+        # the final committed checkpoint. Every safety assertion stays exact.
         transaction = package.kill_at_durable_phase(
-            action, phase, extra, **crash_options)
+            action, phase, extra,
+            checkpoint_timeout_seconds=checkpoint_timeout_seconds)
         self.assertTrue(transaction.is_dir())
         self.assertEqual(json.loads((transaction / "state.json").read_text())[
             "phase"], phase)
@@ -1880,6 +1883,9 @@ int swapz_primary_qualification_import_serialized(const char *report_path);
             package, executable=self.sanitized_executable)
 
     def test_real_sigkill_phases_block_both_commands_not_cleanup(self):
+        # All checkpoints use the bounded 90-second wait in
+        # _crash_and_reacquire: a busy or slow test host must not become a
+        # false lifecycle failure after the fixture's shorter 30-second default.
         for action, phase, install_first in (
                 ("install", "source-created", False),
                 ("install", "module-promoted", False),
@@ -1902,7 +1908,8 @@ int swapz_primary_qualification_import_serialized(const char *report_path);
 
     def test_blocked_start_reports_explicit_package_recovery_phase(self):
         package = self._package_fixture()
-        package.kill_at_durable_phase("install", "module-promoted")
+        package.kill_at_durable_phase(
+            "install", "module-promoted", checkpoint_timeout_seconds=90)
         result, calls = self._primary(package, "start")
         self.assertEqual(result.returncode, 2, result)
         self.assertEqual(set(calls.values()), {0}, result)
@@ -2009,6 +2016,21 @@ int swapz_primary_qualification_import_serialized(const char *report_path);
                     package.kill_at_durable_phase(
                         "install", "committed",
                         checkpoint_timeout_seconds=timeout_seconds)
+        # Assert the real cross-component path forwards its finite deadline
+        # before it could acquire locks or perform any package mutation.
+        for options, expected in (({}, 90),
+                                  ({"checkpoint_timeout_seconds": 30}, 30)):
+            with self.subTest(expected_checkpoint_seconds=expected), \
+                    mock.patch.object(
+                        package, "kill_at_durable_phase",
+                        side_effect=RuntimeError("watchdog-contract-only")) as checkpoint:
+                with self.assertRaisesRegex(
+                        RuntimeError, "watchdog-contract-only"):
+                    self._crash_and_reacquire(
+                        package, "install", "module-promoted", **options)
+                checkpoint.assert_called_once_with(
+                    "install", "module-promoted", None,
+                    checkpoint_timeout_seconds=expected)
 
     def test_committed_journal_then_verified_package_recovery_allows_reentry(self):
         package = self._package_fixture()

@@ -3296,6 +3296,18 @@ control/module snapshots needed to reconcile an interrupted primary lifecycle.
 The rootless package suite must exercise both durable-state and ownership-marker
 refusals and prove the installed bytes remain unchanged.
 
+The cross-component package SIGKILL-to-primary admission rehearsal must wait
+up to the existing finite 90-second fixture maximum at **each** durable package
+checkpoint (including `module-promoted`), not merely at `committed`.
+The package fixture's shorter 30-second default can misclassify slow-storage
+or competing rootless-worker delays as a lifecycle regression before the
+checkpoint is reached. Expiry still FAILs; it cannot establish retained
+transaction state, recover ownership, or turn an absent checkpoint into PASS.
+The test must still verify the exact durable phase, untrappable SIGKILL,
+reacquirable package lock, denial of both primary `prepare` and `start`,
+and permission only for `stop`/`recover`. Its rootless contract checks the
+90-second default and finite overrides without invoking real device actions.
+
 The package admission suite must replace a pinned transaction directory with a
 different directory on the same mount between descriptor and named-path
 revalidation; compare inode, device, owner, type and mount identity and require
