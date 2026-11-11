@@ -73,6 +73,15 @@ fetch redaction, lock contention, source re-execution, jobserver-FD transfer,
 and post-test reconciliation using private local bare remotes. They must never
 contact or mutate the canonical GitHub repository.
 
+Make-interface tests that execute the official runner in a synthetic checkout
+must include a tracked `test_results.json` and an isolated local bare `origin`.
+If that checkout needs the canonical-origin guard, its test-only Git shim may
+report the canonical URL for origin inspection while leaving fetch and push
+operations connected to the local bare remote. Do not disable the production
+sync guard or let the fixture contact GitHub. Synthetic loaded evidence must
+bind to the newest non-report source commit, since a successful prior fixture
+invocation may publish a report-only commit before the next incremental run.
+
 ## Boot-verifier fixture storage
 
 Rootless boot-verifier fixtures must model their synthetic persistent report

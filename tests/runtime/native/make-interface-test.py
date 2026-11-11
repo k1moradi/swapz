@@ -677,12 +677,18 @@ class PublicMakeContract(unittest.TestCase):
         build_tests = ROOT / "build/tests"
         build_tests.mkdir(parents=True, exist_ok=True)
         with tempfile.TemporaryDirectory(prefix="make-incremental-",
-                                         dir=build_tests) as directory:
+                                         dir=build_tests) as directory, \
+                tempfile.TemporaryDirectory(prefix="make-incremental-origin-",
+                                             dir=build_tests) as origin_directory:
             fixture = pathlib.Path(directory)
+            origin = pathlib.Path(origin_directory) / "origin.git"
             for part in ("src/kernel", "src/userspace", "tests/tools",
                          "packaging", "fake-headers"):
                 (fixture / part).mkdir(parents=True, exist_ok=True)
 
+            (fixture / ".gitignore").write_text("/build/\n")
+            (fixture / "test_results.json").write_text(
+                '{"overall":"NOT_RUN"}\n')
             (fixture / "Makefile").write_text(MAKE)
             # The separate signing-hook regression exercises the real helper
             # with hermetic command mocks. Keep this Makefile fixture inert so
@@ -1542,7 +1548,8 @@ class PublicMakeContract(unittest.TestCase):
             records.append(
                 "PASS_LOADED_TEST_EXECUTION: synthetic loaded gate completed")
             script = ("#!/bin/bash\nset -eu\n"
-                      "source_sha=$(git rev-parse --verify HEAD)\n"
+                      "source_sha=$(git log -1 --format=%H HEAD -- . "
+                      "':(exclude)test_results.json')\n"
                       "test \"$(tail -n 1 build/order.log)\" = 'kbuild:2'\n"
                       "printf 'loaded\\n' >> build/order.log\n"
                       "printf '%s\\n' "
@@ -1560,15 +1567,18 @@ class PublicMakeContract(unittest.TestCase):
                     ["git", *arguments], cwd=fixture, check=True,
                     capture_output=True, text=True, timeout=5)
 
-            # Give the copied Makefile and reporter one real, isolated source
-            # identity. This synthetic main has no remote, so publication is
-            # inert while the canonical-main gate is still exercised.
+            # Give the copied Makefile and reporter an isolated main and bare
+            # remote. The sync guard requires the canonical origin identity,
+            # while fetches and report publication must remain local.
             fixture_git("init", "--initial-branch=main")
             fixture_git("config", "user.name", "swapz incremental fixture")
             fixture_git("config", "user.email",
                         "swapz-incremental-fixture@example.invalid")
+            fixture_git("init", "--bare", "--initial-branch=main", str(origin))
             fixture_git("add", ".")
             fixture_git("commit", "-m", "fixture: tracked incremental source")
+            fixture_git("remote", "add", "origin", str(origin))
+            fixture_git("push", "--quiet", "origin", "main:main")
             runner_contract.ROOT = fixture
             fixture_source_sha = runner_contract.git_sha()
             self.assertRegex(fixture_source_sha, r"^[0-9a-f]{40}$")
@@ -1580,6 +1590,21 @@ class PublicMakeContract(unittest.TestCase):
             env.pop("MAKEFLAGS", None)
             env.pop("MFLAGS", None)
             env.pop("W", None)
+            real_git = shutil.which("git")
+            self.assertIsNotNone(real_git, "git executable unavailable")
+            fixture_bin = fixture / "build/fixture-bin"
+            fixture_bin.mkdir(parents=True)
+            git_wrapper = fixture_bin / "git"
+            git_wrapper.write_text(
+                "#!/usr/bin/env python3\n"
+                "import os, sys\n"
+                "if sys.argv[1:3] == ['remote', 'get-url'] and "
+                "'origin' in sys.argv[3:]:\n"
+                "    print('https://github.com/k1moradi/swapz.git')\n"
+                "    raise SystemExit(0)\n"
+                f"os.execv({real_git!r}, [{real_git!r}, *sys.argv[1:]])\n")
+            git_wrapper.chmod(0o700)
+            env["PATH"] = str(fixture_bin) + os.pathsep + env.get("PATH", "")
             sign_calls = fixture / "build/sign-module.calls"
             env["SWAPZ_SIGNING_TEST_LOG"] = str(sign_calls)
             make_invocations = []
