@@ -2773,8 +2773,11 @@ failure and a safe next step, and preserves the original exit and recovery
 outcome. Untrusted stdout/stderr, paths, hardware IDs or arbitrary helper
 JSON must never enter the published report. Rootless tests must reject
 duplicates, malformed/oversized records, unknown fields, invalid counters
-and fake successful backing. This diagnostic path must never change swap
-admission, force additional swap, or replace the actual recovered-state checks.
+and fake successful backing. Keep the official-run test fixture below the
+Python compiler's static nested-context limit by combining independent mock
+contexts; a regression must reach the reporter rather than fail at import.
+This diagnostic path must never change swap admission, force additional swap,
+or replace the actual recovered-state checks.
 
 When the optional development physical swap trial follows five passing RAM
 stages, check the canonical remote source against the exact nonce-bound

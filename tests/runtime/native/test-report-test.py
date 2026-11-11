@@ -4289,12 +4289,13 @@ class ReportContract(unittest.TestCase):
              mock.patch.object(runner, "write_report",
                                side_effect=lambda report: report_snapshots.append(
                                    json.loads(json.dumps(report)))), \
-             mock.patch.object(runner, "print_bench"), \
-             mock.patch.object(runner, "publish", return_value="fixture"), \
-             mock.patch.object(runner, "write_failure_diagnostic",
-                               return_value=None), \
-             mock.patch.object(runner, "refresh_history",
-                               return_value="NOT UPDATED: fixture"), \
+             mock.patch.multiple(
+                 runner,
+                 print_bench=mock.Mock(),
+                 publish=mock.Mock(return_value="fixture"),
+                 write_failure_diagnostic=mock.Mock(return_value=None),
+                 refresh_history=mock.Mock(
+                     return_value="NOT UPDATED: fixture")), \
              mock.patch.object(runner.sys, "stdin",
                                mock.Mock(isatty=lambda: True)), \
              mocked_main_sync(source_sha), \
