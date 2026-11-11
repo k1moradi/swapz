@@ -572,6 +572,26 @@ merge independent assertion/failure boundaries or omit ASan/UBSan/TSan
 qualification for speed.
 The native/rootless stage records separate native Make and remaining-contract
 wall times as optional observational evidence, not qualification PASS gates.
+A normal `make test` saves a bounded, private, owner-only, atomic
+development checkpoint after each successful rootless or W=1/W=2 stage.
+`make test RESUME=1` is an explicit **development-only** opt-in that always
+rebuilds source artifacts, rechecks current-main and tracked-source cleanliness,
+then reuses only a contiguous PASS prefix of those stages if the exact tested
+source SHA, stable host identity, running kernel, KDIR, rootless worker override
+and all three rebuilt artifact hashes match. Corrupt, stale, linked, incorrectly
+permissioned or absent checkpoints force a fresh stage; an ordinary fresh run
+invalidates old success before starting any stages. Checkpoints live only under
+`build/tests/make-test-resume/` at mode 0700/0600 and are never Git evidence.
+A reused rootless suite is rendered as REUSED in the unified table and its
+top-level stage is REUSED, never PASS. Every loaded-device session begins again
+at its privileged preflight; a progress row or partial loaded phase is not
+safe to replay or skip. A resume invocation is always INCOMPLETE (nonzero),
+even if all stages finish, and cannot create physical-development admission
+evidence or turn into a qualifying PASS. `make test_full` does not accept
+`RESUME=1`. No old log or existing public report is retrospectively
+convertible into a private checkpoint. Synthetic regression covers successful
+reuse, exact-context drift, file identity/privacy rejection, one-table progress,
+unqualified verdict and fresh loaded execution.
 Print the optional rootless timing breakdown once after **all** verdict rows
 (including the development-only physical trial row when present), never
 between rootless and loaded progress rows. Retain the breakdown in the

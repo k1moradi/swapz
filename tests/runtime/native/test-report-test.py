@@ -1052,6 +1052,184 @@ class NativeTimingContract(unittest.TestCase):
             "native make=0s; remaining contracts=0s", output)
         self.assertNotIn("\r", output)
 
+    def test_development_resume_private_checkpoint_rejects_unsafe_reuse(self):
+        """Owner-only cache never creates a qualification evidence source."""
+        source = "a" * 40
+        context = {"source_sha": source, "kernel_release": "synthetic",
+                   "artifacts": {"status": "AVAILABLE"}}
+        previous_root = runner.ROOT
+        with tempfile.TemporaryDirectory(prefix="make-resume-") as directory:
+            try:
+                runner.ROOT = Path(directory)
+                rootless = {
+                    "name": runner.DEVELOPMENT_RESUME_STAGES[0],
+                    "status": "PASS", "exit_code": 0, "elapsed_s": 3.25,
+                    "substage_elapsed_s": {
+                        "native_make_s": 1, "remaining_contracts_s": 2},
+                }
+                warning = {
+                    "name": runner.DEVELOPMENT_RESUME_STAGES[1],
+                    "status": "PASS", "exit_code": 0, "elapsed_s": 1.0,
+                }
+                self.assertTrue(runner.write_development_resume_checkpoint(
+                    context, [rootless, warning]))
+                saved = runner.ROOT / "build/tests/make-test-resume/state.json"
+                self.assertEqual(
+                    stat.S_IMODE(saved.parent.stat().st_mode), 0o700)
+                self.assertEqual(stat.S_IMODE(saved.stat().st_mode), 0o600)
+                self.assertEqual(
+                    runner.read_development_resume_checkpoint(context),
+                    [rootless, warning])
+                for changed_context in (
+                        {**context, "source_sha": "b" * 40},
+                        {**context, "kernel_release": "other"},
+                        {**context, "artifacts": {"status": "UNAVAILABLE"}}):
+                    self.assertIsNone(
+                        runner.read_development_resume_checkpoint(
+                            changed_context))
+                self.assertIsNone(runner.validated_development_resume_stages(
+                    [warning]))
+                self.assertIsNone(runner.validated_development_resume_stages(
+                    [{**rootless, "exit_code": 1}]))
+                self.assertIsNone(runner.validated_development_resume_stages(
+                    [{**rootless, "elapsed_s": float("nan")}]))
+                self.assertIsNone(runner.validated_development_resume_stages(
+                    [{**rootless, "phase_elapsed_s": [
+                        {"name": "../unsafe\nmarker", "elapsed_s": 1}]}]))
+                saved.chmod(0o644)
+                self.assertIsNone(
+                    runner.read_development_resume_checkpoint(context))
+                saved.chmod(0o600)
+                saved.write_text('{"schema":"duplicate","schema":"unsafe"}')
+                self.assertIsNone(
+                    runner.read_development_resume_checkpoint(context))
+                saved.unlink()
+                external = runner.ROOT / "external-state"
+                external.write_text("do not follow")
+                saved.symlink_to(external)
+                self.assertIsNone(
+                    runner.read_development_resume_checkpoint(context))
+                self.assertTrue(runner.write_development_resume_checkpoint(
+                    context, [rootless]))
+                self.assertEqual(external.read_text(), "do not follow")
+                runner.reset_development_resume_checkpoint()
+                self.assertIsNone(
+                    runner.read_development_resume_checkpoint(context))
+            finally:
+                runner.ROOT = previous_root
+
+    def test_development_resume_skips_only_passed_rootless_warning_stages(self):
+        """Loaded work is fresh and a resumed run stays unqualified."""
+        source = "a" * 40
+        context = {"source_sha": source, "kernel_release": "synthetic"}
+        available = {
+            "status": "AVAILABLE",
+            "formatter_sha256": "b" * 64,
+            "module_sha256": "c" * 64,
+            "oracle_sha256": "d" * 64,
+        }
+        sync_result = {"status": "PASS", "reason": "fixture",
+                       "head_sha": source, "source_sha": source}
+        stages_run = []
+        reports = []
+        loaded_success = False
+
+        def stage_runner(title, command, result, *, parse_bench=False,
+                         stream_rootless_progress=False, progress_table=None,
+                         retain_private_failure_output=False):
+            del command, stream_rootless_progress, progress_table
+            del retain_private_failure_output
+            stages_run.append(title)
+            failed = parse_bench and not loaded_success
+            result["stages"].append({
+                "name": title, "status": "FAIL" if failed else "PASS",
+                "elapsed_s": 1.0, "exit_code": 1 if failed else 0,
+            })
+            if parse_bench and not failed:
+                result["benchmarks"]["verdicts"] = {
+                    "overall": "PASS_BOUNDED_RAM_MATRIX"}
+                result["benchmarks"]["write_saturation"] = {
+                    "overall": "PASS_WRITE_SATURATION_EVIDENCE"}
+            return 1 if failed else 0
+
+        def remember_report(report):
+            reports.append(json.loads(json.dumps(report)))
+
+        previous_root = runner.ROOT
+        with tempfile.TemporaryDirectory(prefix="make-resume-run-") as directory:
+            try:
+                runner.ROOT = Path(directory)
+                args = mock.Mock(tier="algorithm", kdir="/synthetic-kdir")
+                with mock.patch.object(runner, "git_sha",
+                                       return_value=source), \
+                        mock.patch.object(runner, "report_host_identity",
+                                          return_value={"schema": "swapz-host-v1",
+                                                        "status": "UNAVAILABLE"}), \
+                        mock.patch.object(runner, "make_invocation",
+                                          return_value=(["make"], "synthetic")), \
+                        mock.patch.object(
+                            runner, "tracked_source_checkout_preflight",
+                            return_value=None), \
+                        mock.patch.object(
+                            runner, "source_checkout_stability",
+                            return_value={"stable": True}), \
+                        mock.patch.object(
+                            runner, "development_resume_context",
+                            return_value=context), \
+                        mock.patch.object(runner, "run_stage",
+                                          side_effect=stage_runner), \
+                        mock.patch.object(
+                            runner, "qualification_artifact_digests",
+                            return_value=available), \
+                        mock.patch.object(runner, "lane_gap_attribution_rows",
+                                          return_value=[]), \
+                        mock.patch.object(runner, "goal_scorecard",
+                                          return_value={}), \
+                        mock.patch.object(runner, "write_report",
+                                          side_effect=remember_report), \
+                        mock.patch.object(runner, "print_bench"), \
+                        mock.patch.object(runner, "publish",
+                                          return_value="SKIPPED"), \
+                        mock.patch.object(
+                            runner, "sync_main_after_test",
+                            return_value={"status": "PASS"}), \
+                        mock.patch.object(
+                            runner, "write_failure_diagnostic",
+                            return_value=None), \
+                        mock.patch.object(runner, "refresh_history",
+                                          return_value="NOT UPDATED"):
+                    with mock.patch.dict(os.environ, {"RESUME": ""}), \
+                            contextlib.redirect_stdout(io.StringIO()):
+                        self.assertEqual(
+                            runner._run_qualification(args, sync_result), 1)
+                    self.assertEqual(stages_run, list(runner.OFFICIAL_STAGE_NAMES))
+                    stages_run.clear()
+                    loaded_success = True
+                    with mock.patch.dict(os.environ, {"RESUME": "1"}), \
+                            contextlib.redirect_stdout(io.StringIO()) as output:
+                        self.assertEqual(
+                            runner._run_qualification(args, sync_result), 2)
+
+                self.assertEqual(
+                    stages_run, [runner.OFFICIAL_STAGE_NAMES[0],
+                                 runner.OFFICIAL_STAGE_NAMES[4]])
+                resumed = reports[-1]
+                self.assertEqual(resumed["overall"], "INCOMPLETE")
+                self.assertEqual(
+                    [stage["status"] for stage in resumed["stages"]],
+                    ["PASS", "REUSED", "REUSED", "REUSED", "PASS"])
+                self.assertEqual(
+                    resumed["development_resume"]["reused_stages"],
+                    list(runner.DEVELOPMENT_RESUME_STAGES))
+                self.assertNotIn("algorithm_real_swap", resumed)
+                stdout = output.getvalue()
+                self.assertIn("Cached rootless contracts (dev)", stdout)
+                self.assertIn("REUSED", stdout)
+                self.assertEqual(stdout.count("ID | Suite"), 1)
+                self.assertIn("INCOMPLETE / not a fresh qualification", stdout)
+            finally:
+                runner.ROOT = previous_root
+
     def test_unified_rootless_failure_keeps_original_exit_and_one_header(self):
         transcript = (
             "ROOTLESS_PHASE_PROGRESS state=START index=0 elapsed_s=0 "

@@ -75,8 +75,12 @@ install:
 uninstall:
 	@sudo bash packaging/package-dkms.sh uninstall "$(PREFIX)"
 
-# Algorithm-only source/native/owned-RAM tests. The physical admission parent
-# cannot yet authenticate run/target identity; this tier remains INCOMPLETE
+# Algorithm-only source/native/owned-RAM tests. RESUME=1 optionally reuses only
+# source/host/artifact-matched private rootless/W=1/W=2 development checkpoints;
+# the build and every loaded/privileged test run fresh. Resumed runs cannot PASS.
+# RESUME=1 does not retroactively checkpoint an older running or failed session.
+# The physical admission parent cannot yet authenticate run/target identity;
+# this tier remains INCOMPLETE
 # after RAM success, never a false production/physical PASS.
 # The + preserves GNU Make jobserver FDs for parallel compilation.
 test:

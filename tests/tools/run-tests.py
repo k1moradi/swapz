@@ -11736,11 +11736,254 @@ def required_benchmark_gates_pass(benchmarks):
     )
 
 
+# Development-only reuse is intentionally narrower than qualification: only
+# the three completed rootless/kernel-warning stages can be reused. Privileged
+# loaded sessions are always recreated from the safety preflight.
+DEVELOPMENT_RESUME_SCHEMA = "swapz-make-test-development-resume-v1"
+DEVELOPMENT_RESUME_MAX_BYTES = 65536
+DEVELOPMENT_RESUME_STAGES = OFFICIAL_STAGE_NAMES[1:4]
+
+
+def development_resume_directory(*, create=False):
+    """Admit only a private owned directory, never a path substitution."""
+    parent = ROOT / "build/tests"
+    try:
+        if create:
+            parent.mkdir(parents=True, exist_ok=True)
+        for path in (ROOT / "build", parent):
+            metadata = path.lstat()
+            if (not stat.S_ISDIR(metadata.st_mode) or
+                    metadata.st_uid != os.geteuid()):
+                return None
+        directory = parent / "make-test-resume"
+        if create:
+            directory.mkdir(mode=0o700, exist_ok=True)
+        metadata = directory.lstat()
+        if (not stat.S_ISDIR(metadata.st_mode) or
+                metadata.st_uid != os.geteuid() or
+                stat.S_IMODE(metadata.st_mode) != 0o700):
+            return None
+        return directory
+    except OSError:
+        return None
+
+
+def development_resume_context(result, kdir):
+    """Bind cached work to the exact source, host, kernel and rebuilt bytes."""
+    host = result.get("host_identity", {})
+    source_sha = result.get("tested_commit_sha")
+    artifacts = qualification_artifact_digests()
+    if (not isinstance(host, dict) or
+            not _valid_sha256(host.get("id_sha256")) or
+            not isinstance(source_sha, str) or
+            re.fullmatch(r"[0-9a-f]{40}", source_sha) is None or
+            not owner_qualification_artifacts_available(artifacts) or
+            not isinstance(kdir, str) or not kdir or len(kdir) > 4096):
+        return None
+    return {
+        "source_sha": source_sha,
+        "host_sha256": host["id_sha256"],
+        "architecture": host.get("architecture"),
+        "kernel_release": result.get("kernel_release"),
+        "kdir": kdir,
+        "rootless_jobs": os.environ.get("SWAPZ_ROOTLESS_JOBS", "auto"),
+        "artifacts": artifacts,
+    }
+
+
+def validated_development_resume_stages(stages):
+    """Reject forged, out-of-order or unbounded checkpoint phase records."""
+    if not isinstance(stages, list) or len(stages) > len(DEVELOPMENT_RESUME_STAGES):
+        return None
+    valid = []
+    allowed_names = rootless_phase_names()
+    for index, stage in enumerate(stages):
+        if (not isinstance(stage, dict) or
+                stage.get("name") != DEVELOPMENT_RESUME_STAGES[index] or
+                stage.get("status") != "PASS" or
+                type(stage.get("exit_code")) is not int or
+                stage["exit_code"] != 0 or
+                type(stage.get("elapsed_s")) not in (int, float) or
+                not math.isfinite(stage["elapsed_s"]) or
+                not 0 <= stage["elapsed_s"] <= 100000000):
+            return None
+        allowed = {"name", "status", "exit_code", "elapsed_s"}
+        if index == 0:
+            allowed.update(("phase_elapsed_s", "substage_elapsed_s"))
+            timings = stage.get("substage_elapsed_s")
+            if timings is not None and (
+                    not isinstance(timings, dict) or
+                    set(timings) != {"native_make_s", "remaining_contracts_s"} or
+                    any(type(value) is not int or not 0 <= value <= 100000000
+                        for value in timings.values())):
+                return None
+            phases = stage.get("phase_elapsed_s")
+            if phases is not None:
+                if not isinstance(phases, list) or len(phases) > 128:
+                    return None
+                seen = set()
+                for phase in phases:
+                    if (not isinstance(phase, dict) or
+                            set(phase) != {"name", "elapsed_s"} or
+                            not isinstance(phase["name"], str) or
+                            not rootless_phase_name_allowed(
+                                phase["name"], allowed_names) or
+                            phase["name"] in seen or
+                            type(phase["elapsed_s"]) is not int or
+                            not 0 <= phase["elapsed_s"] <= 100000000):
+                        return None
+                    seen.add(phase["name"])
+        if set(stage) - allowed:
+            return None
+        valid.append(stage)
+    return valid
+
+
+def read_development_resume_checkpoint(context):
+    """Read a bounded owner-only checkpoint. Any mismatch runs fresh."""
+    if context is None:
+        return None
+    directory = development_resume_directory()
+    if directory is None:
+        return None
+    descriptor = -1
+    try:
+        descriptor = os.open(
+            directory / "state.json",
+            os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK | os.O_CLOEXEC)
+        before = os.fstat(descriptor)
+        if (not stat.S_ISREG(before.st_mode) or
+                before.st_uid != os.geteuid() or before.st_nlink != 1 or
+                stat.S_IMODE(before.st_mode) != 0o600 or
+                not 0 < before.st_size <= DEVELOPMENT_RESUME_MAX_BYTES):
+            return None
+        payload = os.read(descriptor, before.st_size + 1)
+        after = os.fstat(descriptor)
+        if (len(payload) != before.st_size or
+                (before.st_ino, before.st_dev, before.st_size,
+                 before.st_mtime_ns, before.st_ctime_ns) !=
+                (after.st_ino, after.st_dev, after.st_size,
+                 after.st_mtime_ns, after.st_ctime_ns)):
+            return None
+
+        def unique_object(pairs):
+            value = {}
+            for key, entry in pairs:
+                if key in value:
+                    raise ValueError("duplicate checkpoint field")
+                value[key] = entry
+            return value
+
+        saved = json.loads(payload.decode("utf-8"),
+                           object_pairs_hook=unique_object)
+        if (not isinstance(saved, dict) or
+                set(saved) != {"schema", "context", "stages"} or
+                saved["schema"] != DEVELOPMENT_RESUME_SCHEMA or
+                saved["context"] != context):
+            return None
+        return validated_development_resume_stages(saved["stages"])
+    except (OSError, ValueError, TypeError, UnicodeError):
+        return None
+    finally:
+        if descriptor >= 0:
+            os.close(descriptor)
+
+
+def write_development_resume_checkpoint(context, stages):
+    """Durably save only PASS stage evidence; never publish it to Git."""
+    if context is None or validated_development_resume_stages(stages) is None:
+        return False
+    directory = development_resume_directory(create=True)
+    if directory is None:
+        return False
+    payload = (json.dumps({
+        "schema": DEVELOPMENT_RESUME_SCHEMA, "context": context,
+        "stages": stages,
+    }, sort_keys=True, separators=(",", ":"), allow_nan=False) + "\n").encode(
+        "utf-8")
+    if len(payload) > DEVELOPMENT_RESUME_MAX_BYTES:
+        return False
+    descriptor = -1
+    temporary = None
+    try:
+        descriptor, temporary = tempfile.mkstemp(prefix=".state-", dir=directory)
+        with os.fdopen(descriptor, "wb") as output:
+            descriptor = -1
+            output.write(payload)
+            output.flush()
+            os.fsync(output.fileno())
+        os.replace(temporary, directory / "state.json")
+        directory_descriptor = os.open(
+            directory, os.O_RDONLY | os.O_DIRECTORY | os.O_CLOEXEC)
+        try:
+            os.fsync(directory_descriptor)
+        finally:
+            os.close(directory_descriptor)
+        return True
+    except OSError:
+        return False
+    finally:
+        if descriptor >= 0:
+            os.close(descriptor)
+        if temporary is not None:
+            try:
+                os.unlink(temporary)
+            except FileNotFoundError:
+                pass
+            except OSError:
+                pass
+
+
+def reset_development_resume_checkpoint():
+    """A new fresh run invalidates an older PASS before it executes tests."""
+    directory = development_resume_directory()
+    if directory is None:
+        return
+    try:
+        (directory / "state.json").unlink(missing_ok=True)
+    except OSError:
+        pass
+
+
+def development_resume_stage_record(stage):
+    """Never copy uncontrolled output or raw host identifiers to a cache."""
+    record = {key: stage[key] for key in (
+        "name", "status", "exit_code", "elapsed_s")}
+    if stage["name"] == DEVELOPMENT_RESUME_STAGES[0]:
+        for key in ("phase_elapsed_s", "substage_elapsed_s"):
+            if key in stage:
+                record[key] = stage[key]
+    return record
+
+
+def display_development_resume_rootless(stage, progress_table):
+    """Keep cached suites in the same unified progress table, not stdout notes."""
+    phases = stage.get("phase_elapsed_s") or []
+    if not phases:
+        progress_table.complete(
+            "Rootless", "Cached rootless contracts (dev)", "REUSED",
+            f"{stage['elapsed_s']:.1f}s")
+    else:
+        for phase in phases:
+            progress_table.complete(
+                "Rootless", rootless_suite_display_name(phase["name"]),
+                "REUSED", f"{phase['elapsed_s']}s")
+
+
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--kdir", required=True)
     parser.add_argument("--tier", choices=("algorithm", "full"), default="full")
     args = parser.parse_args()
+    resume_value = os.environ.get("RESUME", "")
+    if resume_value not in ("", "0", "1"):
+        print("  BLOCKED: RESUME accepts only 1 for development-only reuse",
+              flush=True)
+        return 2
+    if resume_value == "1" and args.tier != "algorithm":
+        print("  BLOCKED: development resume is available only for make test",
+              flush=True)
+        return 2
     lock_fd, expected_source, lock_error = acquire_make_test_lock()
     if lock_error is not None:
         print("  BLOCKED: phase=main-sync-lock "
@@ -11777,6 +12020,7 @@ def main():
 def _run_qualification(args, sync_result):
     # Isolated historical report mocks supply only kdir.
     tier = args.tier if isinstance(getattr(args, "tier", None), str) else "full"
+    resume_requested = os.environ.get("RESUME") == "1" and tier == "algorithm"
     result = {
         "schema": "swapz-test-results-v1",
         "host_identity": report_host_identity(),
@@ -11809,6 +12053,14 @@ def _run_qualification(args, sync_result):
     print("swapz: full test and benchmark qualification"
           if tier == "full" else
           "swapz: algorithm RAM qualification; physical admission pending")
+    if resume_requested:
+        result["development_resume"] = {
+            "status": "DEVELOPMENT_ONLY", "reused_stages": [],
+            "checkpoint": "NOT_AVAILABLE",
+        }
+        print("  Development resume requested: only matching completed "
+              "rootless/kernel-warning stages may be reused; loaded device "
+              "work is always fresh", flush=True)
     print("  Main synchronization: "
           f"{sync_result.get('status', 'BLOCKED')} "
           f"reason={sync_result.get('reason', 'unavailable')} "
@@ -11849,6 +12101,13 @@ def _run_qualification(args, sync_result):
     if checkout_preflight is None:
         checkout_preflight = tracked_source_checkout_preflight()
     exit_code = 0
+    # A normal invocation must not inherit earlier success after new failures.
+    # Only the explicit development mode may read a prior private checkpoint.
+    if checkout_preflight is None and not resume_requested:
+        reset_development_resume_checkpoint()
+    checkpoint_context = None
+    cached_stages = []
+    checkpoint_stages = []
     if checkout_preflight is not None:
         # A dirty nested unittest can fail while the production source is
         # unchanged. Refuse the long run before collecting misleading evidence.
@@ -11893,11 +12152,35 @@ def _run_qualification(args, sync_result):
                 result["source_stability"] = stability
                 exit_code = 2
                 break
-            code = run_stage(
-                title, command, result, parse_bench=(i == 4),
-                stream_rootless_progress=(i == 1),
-                progress_table=progress_table,
-                retain_private_failure_output=(i == 4))
+            if i == 1:
+                # Build/provenance checks always run on the current checkout.
+                checkpoint_context = development_resume_context(
+                    result, args.kdir)
+                if resume_requested:
+                    cached_stages = (
+                        read_development_resume_checkpoint(checkpoint_context)
+                        or [])
+                    result["development_resume"]["checkpoint"] = (
+                        "MATCHED" if cached_stages else "NOT_AVAILABLE")
+            reused_stage = (
+                resume_requested and 1 <= i <= len(cached_stages) and i <= 3)
+            if reused_stage:
+                saved_stage = cached_stages[i - 1]
+                cached_record = dict(saved_stage)
+                cached_record["status"] = "REUSED"
+                cached_record["development_cache"] = "PASS_IN_PRIOR_RUN"
+                result["stages"].append(cached_record)
+                if i == 1:
+                    display_development_resume_rootless(
+                        saved_stage, progress_table)
+                result["development_resume"]["reused_stages"].append(title)
+                code = 0
+            else:
+                code = run_stage(
+                    title, command, result, parse_bench=(i == 4),
+                    stream_rootless_progress=(i == 1),
+                    progress_table=progress_table,
+                    retain_private_failure_output=(i == 4))
             if code:
                 exit_code = code
                 break
@@ -11911,6 +12194,23 @@ def _run_qualification(args, sync_result):
                 result["source_stability"] = stability
                 exit_code = 2
                 break
+            if 1 <= i <= 3 and len(checkpoint_stages) == i - 1:
+                # The native rootless stage may create the oracle binary
+                # absent just after build; establish the key after that PASS.
+                if checkpoint_context is None and not reused_stage:
+                    checkpoint_context = development_resume_context(
+                        result, args.kdir)
+                passed = (saved_stage if reused_stage else
+                          development_resume_stage_record(result["stages"][-1]))
+                if passed["status"] == "PASS":
+                    checkpoint_stages.append(passed)
+                    # This is a private best-effort development accelerator,
+                    # never permission to bypass a qualification gate.
+                    if not write_development_resume_checkpoint(
+                            checkpoint_context, checkpoint_stages):
+                        if resume_requested:
+                            result["development_resume"]["checkpoint"] = (
+                                "WRITE_UNAVAILABLE")
     print_stage_results(stages, result["stages"], progress_table)
     if result["stages"] and result["stages"][0].get("status") == "PASS":
         # Record the bytes left by the complete qualification sequence. Physical
@@ -11976,6 +12276,11 @@ def _run_qualification(args, sync_result):
     if not exit_code and not owner_qualification_artifacts_available(
             result["qualified_artifacts"]):
         # Preserve passed stages; missing artifacts do not qualify source.
+        result["overall"] = "INCOMPLETE"
+        exit_code = 2
+    if resume_requested and not exit_code and result["overall"] == "PASS":
+        # Even when every stage actually ran, an opted-in development session
+        # cannot publish a fresh qualification PASS or authorize a physical trial.
         result["overall"] = "INCOMPLETE"
         exit_code = 2
     if not exit_code and result["overall"] == "PASS" and tier == "algorithm":
@@ -12186,6 +12491,10 @@ def _run_qualification(args, sync_result):
         exit_code = 2
     # Both official tiers have now finished printing all verdict rows,
     # including the optional development-only physical trial when applicable.
+    if resume_requested:
+        reused_count = len(result["development_resume"]["reused_stages"])
+        print(f"  Development resume: {reused_count} prior stage(s) reused; "
+              "INCOMPLETE / not a fresh qualification", flush=True)
     print_rootless_timing_summary(result["stages"])
     result["benchmarks"]["lane_gap_attribution"] = lane_gap_attribution_rows(
         result["benchmarks"])
