@@ -589,7 +589,9 @@ safe to replay or skip. A resume invocation is always INCOMPLETE (nonzero),
 even if all stages finish, and cannot create physical-development admission
 evidence or turn into a qualifying PASS. `make test_full` does not accept
 `RESUME=1`. No old log or existing public report is retrospectively
-convertible into a private checkpoint. Synthetic regression covers successful
+convertible into a private checkpoint. The parent runner strips its RESUME
+selector from test children and nested synthetic reporter invocations.
+Synthetic regression covers successful
 reuse, exact-context drift, file identity/privacy rejection, one-table progress,
 unqualified verdict and fresh loaded execution.
 Print the optional rootless timing breakdown once after **all** verdict rows

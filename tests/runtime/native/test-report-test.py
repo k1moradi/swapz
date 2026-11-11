@@ -1052,6 +1052,17 @@ class NativeTimingContract(unittest.TestCase):
             "native make=0s; remaining contracts=0s", output)
         self.assertNotIn("\r", output)
 
+    def test_development_resume_option_is_not_inherited_by_stage_children(self):
+        result = {"stages": [], "benchmarks": {}}
+        with mock.patch.dict(os.environ, {"RESUME": "1"}), \
+                mock.patch.object(
+                    runner.subprocess, "run",
+                    return_value=mock.Mock(returncode=0, stdout="")) as run:
+            self.assertEqual(
+                runner.run_stage("synthetic", ["unused"], result), 0)
+        self.assertNotIn("RESUME", run.call_args.kwargs["env"])
+        self.assertEqual(result["stages"][0]["status"], "PASS")
+
     def test_development_resume_private_checkpoint_rejects_unsafe_reuse(self):
         """Owner-only cache never creates a qualification evidence source."""
         source = "a" * 40

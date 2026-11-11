@@ -100,6 +100,17 @@ Exactly six commands are public:
   INCOMPLETE until physical source/run/target admission is qualified.
 - `make test_full`: the prior full rootless integration plus RAM benchmark
   suite; PASS does not certify physical or boot acceptance.
+
+An ordinary `make test` persists private owner-only completed rootless and
+kernel-warning checkpoints after the build. `make test RESUME=1` may reuse
+only same-source, same-host, same-kernel, same-KDIR and same-rebuilt-artifact
+PASS checkpoints, then reruns the loaded stage from its privileged preflight.
+The parent strips its resume selector from child test environments, so nested
+test fixtures cannot inherit this shortcut. This opt-in is **development-only**:
+reused stages display REUSED, the complete run returns INCOMPLETE/nonzero and
+never authorizes a physical qualification. A previous run without checkpoints
+cannot be resumed from console rows. Use plain `make test` for fresh evidence;
+`make test_full` does not accept the resume selector.
 - `make fast_test`: development-only decision loop: build the working tree,
   run native/replay contract checks and the selected owned-null_blk scenarios
   (three paired repeats per scenario by default), and print compact raw/swapz,

@@ -4462,6 +4462,9 @@ def run_stage(title, command, result, *, parse_bench=False,
 
     try:
         child_env = os.environ.copy()
+        # This invocation's development reuse option belongs to the parent
+        # runner only; nested fixture runners must start with fresh defaults.
+        child_env.pop("RESUME", None)
         tested_source = result.get("tested_commit_sha")
         if isinstance(tested_source, str) and re.fullmatch(
                 r"[0-9a-f]{40}", tested_source):
