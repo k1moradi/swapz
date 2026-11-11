@@ -560,6 +560,94 @@ class PhysicalSwapProbeTests(unittest.TestCase):
         identify.assert_not_called()
         command.assert_not_called()
 
+    def algorithm_workload_fixture(self):
+        policy = json.loads((ROOT.parent / "docs/production-acceptance.json").read_text())["primary_real_swap"]
+        policy = {**policy, "reuse_rounds": 2, "concurrent_workers": 2}
+        traffic = policy["minimum_swap_traffic_mib"] * 1024 * 1024
+        pages = policy["workload_mib"] * 1024 * 1024 // probe.PAGE_BYTES
+        counters = {
+            "mapper_used_delta_kib": traffic // 1024,
+            "swapz_logical_write_delta": traffic,
+            "swapz_physical_write_delta": traffic,
+            "swapz_logical_read_delta": traffic,
+            "swapz_physical_read_delta": traffic,
+            "lower_write_bytes_delta": traffic,
+            "lower_read_bytes_delta": traffic,
+            "lower_write_sector_delta": traffic // 512,
+            "lower_read_sector_delta": traffic // 512,
+            "pswpout_delta": traffic // probe.PAGE_BYTES,
+            "pswpin_delta": traffic // probe.PAGE_BYTES,
+        }
+        rounds = [{
+            **counters, "round": index, "concurrent_workers": 2,
+            "mapper_used_start_kib": 0, "mapper_used_released_kib": 0,
+            "release_swap_current_bytes": 0, "oom_delta": 0, "oom_kill_delta": 0,
+            "cgroup_swap_current_bytes_after_fill": traffic,
+            "cgroup_swap_peak_bytes": traffic,
+            "aggregate_verified": {"verified_pages": pages,
+                                   "verified_bytes": pages * probe.PAGE_BYTES,
+                                   "mismatches": 0, "digest": "a" * 64,
+                                   "expected_digest": "a" * 64},
+        } for index in (1, 2)]
+        result = {**{key: 2 * value for key, value in counters.items()},
+                  "reuse_rounds": 2, "concurrent_workers": 2,
+                  "slot_reuse_proven": True, "rounds": rounds,
+                  "cgroup_swap_peak_bytes": traffic,
+                  "oom_delta": 0, "oom_kill_delta": 0}
+        workload = SimpleNamespace(
+            Blocked=RuntimeError, QualificationFailure=ValueError,
+            pin_real_swap_oracle=mock.Mock(return_value=(Path("/private/oracle"), "a" * 64)),
+            parse_status=mock.Mock(return_value={"failed": 0, "error": 0}),
+            _run_workload=mock.Mock(return_value=result))
+        return workload, policy, result
+
+    def test_algorithm_workload_uses_only_commit_bound_source_and_policy(self):
+        def committed(*args):
+            relative = args[1].split(":", 1)[1]
+            return subprocess.CompletedProcess(
+                [], 0, stdout=(probe.ROOT / relative).read_text())
+        with mock.patch.object(probe, "_git_result", side_effect=committed):
+            workload, policy = probe._algorithm_real_swap_workload("a" * 40)
+        self.assertEqual(policy["workload_mib"], 384)
+        self.assertEqual(policy["minimum_swap_traffic_mib"], 128)
+        self.assertEqual(workload.REUSE_ROUNDS, policy["reuse_rounds"])
+        self.assertNotIn("swapz_algorithm_primary_workload", sys.modules)
+        with mock.patch.object(probe, "_git_result", return_value=
+                               subprocess.CompletedProcess([], 0, stdout="changed")):
+            with self.assertRaisesRegex(probe.ProbeError, "differs from admitted source"):
+                probe._algorithm_real_swap_workload("a" * 40)
+        calls = 0
+        def changed_policy(*args):
+            nonlocal calls
+            calls += 1
+            if calls == 2:
+                return subprocess.CompletedProcess([], 0, stdout="wrong policy")
+            return committed(*args)
+        with mock.patch.object(probe, "_git_result", side_effect=changed_policy):
+            with self.assertRaisesRegex(probe.ProbeError, "policy is not source-matched"):
+                probe._algorithm_real_swap_workload("a" * 40)
+
+    def test_algorithm_workload_preflight_stops_without_mapper_mutation(self):
+        workload, policy, _result = self.algorithm_workload_fixture()
+        workload.preflight_workload_environment = mock.Mock(side_effect=RuntimeError("refused"))
+        with mock.patch.object(probe, "_algorithm_real_swap_workload", return_value=(workload, policy)), \
+                mock.patch.object(probe, "_run") as mutation:
+            with self.assertRaisesRegex(probe.ProbeError, "phase=anonymous_preflight"):
+                probe._algorithm_real_swap_workload_preflight("a" * 40)
+        workload.preflight_workload_environment.assert_called_once_with(384, 128, 384)
+        mutation.assert_not_called()
+
+    def test_algorithm_workload_failure_marker_redacts_private_producer_details(self):
+        stderr = io.StringIO()
+        with mock.patch.object(probe.sys, "stderr", stderr):
+            probe._emit_algorithm_workload_failure(RuntimeError(
+                "backing partition counters show no lower READ activity; "
+                "cleanup also failed: /private/KEEP_PRIVATE"))
+        record = json.loads(stderr.getvalue().split("=", 1)[1])
+        self.assertEqual(record["reason"], "lower_read")
+        self.assertIsNone(record["original_errno"])
+        self.assertNotIn("KEEP_PRIVATE", stderr.getvalue())
+
     def test_real_swap_rechecks_mapper_after_pin_before_mkswap(self):
         mapper = "/dev/mapper/swapz-demo-physical-1234567890abcdef"
         with mock.patch.object(
@@ -569,12 +657,10 @@ class PhysicalSwapProbeTests(unittest.TestCase):
                                return_value=(253, 12)), \
              mock.patch.object(probe, "_active_swap_for",
                                return_value=None), \
-             mock.patch.object(
-                 probe, "_algorithm_pageout_oracle_snapshot",
-                 return_value=(Path("/private/algorithm-oracle.py"),
-                               "a" * 64)), \
-             mock.patch.object(probe.Path, "read_text",
-                               return_value="MemAvailable: 8000000 kB\n"), \
+             mock.patch.object(probe, "_algorithm_real_swap_workload",
+                               return_value=self.algorithm_workload_fixture()[:2]), \
+             mock.patch.object(probe, "_git_result",
+                               return_value=subprocess.CompletedProcess([], 0, stdout="oracle")), \
              mock.patch.object(probe, "_run") as command:
             with self.assertRaisesRegex(
                     probe.ProbeError, "changed before real-swap formatting"):
@@ -585,55 +671,56 @@ class PhysicalSwapProbeTests(unittest.TestCase):
 
     def test_real_swap_readback_reports_missing_lower_read_without_false_pass(self):
         mapper = "/dev/mapper/swapz-demo-physical-1234567890abcdef"
-        host = {"zswap_enabled": "NO", "host_vmstat": {
-            "pswpout": 2048, "pswpin": 0, "zswpout": 0, "zswpwb": 0}}
-        ready = {"pages": 2048, "bytes": 8388608,
-                 "expected_sha256": "b" * 64}
-        verified = {**ready, "mismatches": 0, "actual_sha256": "b" * 64}
-        for lower_read_bytes in (0, 4096):
-            with self.subTest(lower_read_bytes=lower_read_bytes), ExitStack() as stack:
-                worker = SimpleNamespace(
-                    stdin=io.StringIO(), stdout=io.StringIO(),
-                    wait=mock.Mock(return_value=0), poll=mock.Mock(return_value=0))
-                stderr = io.StringIO()
+        for lower_read_missing in (False, True):
+            with self.subTest(lower_read_missing=lower_read_missing), ExitStack() as stack:
+                workload, policy, result = self.algorithm_workload_fixture()
+                if lower_read_missing:
+                    result["rounds"][0]["lower_read_bytes_delta"] = 0
                 for name, value in (
                     ("_verify_owned_mapper", mapper),
                     ("block_identity", (253, 12)),
-                    ("_algorithm_pageout_oracle_snapshot", (Path("/private/oracle"), "a" * 64)),
-                    ("_block_stat_snapshot", {"available": True}),
-                    ("_algorithm_pageout_host_snapshot", host),
-                    ("_run", None),
+                    ("_algorithm_real_swap_workload", (workload, policy)),
+                    ("_run", subprocess.CompletedProcess([], 0, stdout="status")),
+                    ("_git_result", subprocess.CompletedProcess([], 0, stdout="oracle")),
                 ):
                     stack.enter_context(mock.patch.object(probe, name, return_value=value))
                 stack.enter_context(mock.patch.object(
-                    probe, "_active_swap_for", side_effect=[
-                        None, {"used_kib": 0}, {"used_kib": 8192}]))
-                stack.enter_context(mock.patch.object(
-                    probe, "_lower_io_delta", side_effect=[
-                        {"lower_write_bytes": 8388608}, {"lower_read_bytes": lower_read_bytes}]))
-                stack.enter_context(mock.patch.object(
-                    probe, "_algorithm_pageout_event", side_effect=[ready, verified]))
-                stack.enter_context(mock.patch.object(probe.subprocess, "Popen", return_value=worker))
-                stack.enter_context(mock.patch.object(
-                    probe.Path, "read_text", return_value="MemAvailable: 8000000 kB\n"))
-                stack.enter_context(mock.patch.object(probe.sys, "stderr", stderr))
-                if lower_read_bytes:
-                    result = probe._run_algorithm_live_swap_oracle(
-                        mapper, {"source_sha": "a" * 40, "run_id": "1" * 32}, {}, Path("/private"))
-                    self.assertEqual(result["lower_read_bytes"], lower_read_bytes)
-                    self.assertEqual(result["status"], "PASS")
-                    self.assertEqual(stderr.getvalue(), "")
+                    probe, "_active_swap_for", side_effect=[None, {"used_kib": 0}]))
+                state = {"source_sha": "a" * 40, "run_id": "1" * 32, "dm_name": "owned"}
+                target = {"major": 8, "minor": 4}
+                if lower_read_missing:
+                    with self.assertRaisesRegex(probe.ProbeError, "UNPROVEN"):
+                        probe._run_algorithm_live_swap_oracle(mapper, state, target, Path("/private"))
                 else:
-                    with self.assertRaisesRegex(probe.ProbeError,
-                                                "anonymous_pagein=UNPROVEN gate=lower_read"):
-                        probe._run_algorithm_live_swap_oracle(
-                            mapper, {"source_sha": "a" * 40, "run_id": "1" * 32}, {}, Path("/private"))
-                    record = json.loads(stderr.getvalue().split("=", 1)[1])
-                    self.assertEqual(record["phase"], "anonymous_pagein")
-                    self.assertEqual(record["lower_read_bytes"], 0)
-                    self.assertEqual(record["lower_write_bytes"], 8388608)
-                    self.assertEqual(record["host_global_vmstat_delta"]["pswpin"], 0)
-                worker.wait.assert_called()
+                    observed = probe._run_algorithm_live_swap_oracle(mapper, state, target, Path("/private"))
+                    self.assertEqual(observed["verified_pages"], 196608)
+                    self.assertEqual(observed["lower_read_bytes"], result["lower_read_bytes_delta"])
+                    self.assertEqual(observed["status"], "PASS")
+                args, options = workload._run_workload.call_args
+                self.assertEqual(args[3:], (384, 128, 384, 240))
+                self.assertEqual(args[1], {"mapper_device": (253, 12)})
+                options["telemetry_check"]()
+                self.assertEqual(options["status_reader"](), {"failed": 0, "error": 0})
+                workload.parse_status.assert_called_once_with("status")
+
+    def test_algorithm_workload_summary_rejects_incomplete_or_zero_traffic_evidence(self):
+        for field, value in (("lower_read_bytes_delta", 0), ("pswpin_delta", 0),
+                             ("lower_write_bytes_delta", 0), ("oom_delta", 1),
+                             ("cgroup_swap_current_bytes_after_fill", 1),
+                             ("mapper_used_delta_kib", True), ("concurrent_workers", 1),
+                             ("mapper_used_released_kib", 1)):
+            with self.subTest(field=field):
+                _workload, policy, result = self.algorithm_workload_fixture()
+                result["rounds"][0][field] = value
+                with self.assertRaises(probe.ProbeError):
+                    probe._algorithm_real_swap_summary(result, policy, "a" * 64)
+        for field, value in (("rounds", []), ("slot_reuse_proven", False),
+                             ("lower_read_bytes_delta", 0)):
+            with self.subTest(aggregate=field):
+                _workload, policy, result = self.algorithm_workload_fixture()
+                result[field] = value
+                with self.assertRaises(probe.ProbeError):
+                    probe._algorithm_real_swap_summary(result, policy, "a" * 64)
 
     def test_algorithm_physical_single_confirmation_unit_contracts(self):
         command = [sys.executable, "-B",
@@ -3895,18 +3982,14 @@ class PhysicalSwapProbeTests(unittest.TestCase):
                 mock.patch.object(probe, "_development_swap_inventory_plan",
                                   return_value=(None, [])),
                 mock.patch.object(probe, "_require_shared_root_development_plan"),
+                mock.patch.object(probe, "_algorithm_real_swap_workload_preflight"),
+                mock.patch.object(probe, "_algorithm_real_swap_workload",
+                                  return_value=self.algorithm_workload_fixture()[:2]),
                 mock.patch.object(probe, "_run_algorithm_live_swap_oracle",
-                                  return_value={
-                                      "status": "PASS",
-                                      "verified_pages": 2048,
-                                      "verified_bytes": 2048 * probe.PAGE_BYTES,
-                                      "mapper_used_kib_after_pageout": 8192,
-                                      "lower_write_bytes": probe.PAGE_BYTES,
-                                      "lower_read_bytes": probe.PAGE_BYTES,
-                                      "byte_mismatches": 0,
-                                      "oracle_sha256": evidence["artifact_digests"][
-                                          "oracle_sha256"],
-                                  }),
+                                  return_value=probe._algorithm_real_swap_summary(
+                                      self.algorithm_workload_fixture()[2],
+                                      self.algorithm_workload_fixture()[1],
+                                      evidence["artifact_digests"]["oracle_sha256"])),
                 mock.patch.object(probe, "_operator_keep_swapz_active_after_pass",
                                   return_value=False),
                 mock.patch.object(probe, "_artifact_digests",

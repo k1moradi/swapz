@@ -2855,6 +2855,42 @@ a missing fixture-only benchmark key.
 This diagnostic path must never change swap admission, force additional swap,
 or replace the actual recovered-state checks.
 
+The development real-swap trial must reuse the existing primary anonymous
+workload rather than treat a small advisory MADV_PAGEOUT as physical swap-in
+proof. Bind the primary workload and oracle bytes and frozen acceptance
+manifest to the admitted source commit before executing them. Check bounded
+cgroup capability before ownership or raw swapoff, and retain the frozen
+384 MiB workload, 128 MiB resident cap, 384 MiB swap cap, scoped zswap refusal,
+host-memory/PSI/OOM guards, two concurrent workers and repeated slot-reuse
+rounds. The private caller supplies only an exact-owned mapper status reader
+and identity guard; the normal primary caller keeps its existing reader.
+Neither callback confers source, target or deployment authority.
+
+Require each complete round's independently matching cgroup charge and
+mapper use, at least the frozen 128 MiB swap traffic, positive kernel,
+swapz and backing READ/WRITE observations, full byte verification, zero OOM
+and normal worker release. Revalidate the complete workload record and its
+derived summary before durable success; a top-level PASS, incomplete rounds,
+zero-traffic result or substituted reader cannot qualify it. Two slot-reuse
+rounds in one development mapper are not the two fresh primary lifecycle
+cycles required for production acceptance. Rootless controls cover committed
+source/policy mismatch, refused preflight, exact-mapper reader failure with
+owned cleanup, valid complete producer evidence and malformed/zero-traffic
+records. Keep all development-only labels and the separate production gate.
+Promote only the finite source-owned workload refusal class, phase and actual
+numeric errno through the existing private diagnostic channel. Missing errno
+stays unavailable; never copy arbitrary producer exception text or a private
+path into public reports. Preserve preflight refusal as NOT_RUN/exit 2 and
+execution or recovery failure as its original nonzero outcome. Actual-runner
+rootless controls must cover both branches, redaction, malformed field types,
+duplicate records and first-cause precedence over later cleanup.
+Retain the bounded captured physical-helper stderr with the existing private
+stage-output writer, bound to the tested source and fixed physical stage
+title; print only its repository-relative mode-0600 path. This also preserves
+pre-ownership cgroup refusal/cleanup details which have no transaction results
+file yet. The private-log write cannot replace the helper's original exit or
+copy raw stderr into the console or canonical JSON report.
+
 Development real-swap teardown must await pending udev work once after the
 exact owned mapper is proved inactive, before attempting normal DM removal.
 Use bounded `udevadm settle`; never retry or force a busy removal. A failed

@@ -4412,9 +4412,21 @@ class ReportContract(unittest.TestCase):
     def test_official_algorithm_tier_retains_missing_physical_read_evidence(self):
         self.assert_official_physical_debug(readback=True)
 
-    def assert_official_physical_debug(self, *, readback):
+    def test_official_algorithm_tier_preserves_bounded_workload_refusal(self):
+        for phase in ("anonymous_preflight", "anonymous_workload"):
+            with self.subTest(phase=phase):
+                self.assert_official_physical_debug(workload_phase=phase)
+
+    def test_official_physical_log_failure_cannot_replace_original_exit(self):
+        self.assert_official_physical_debug(log_failure=True)
+
+    def assert_official_physical_debug(self, *, readback=False, workload_phase=None,
+                                      log_failure=False):
         source_sha = "a" * 40
         report_snapshots = []
+        private_output = mock.Mock(return_value="build/tests/physical-fixture.private.log")
+        if log_failure:
+            private_output.side_effect = OSError("private log creation failed")
         error_context = {
             "schema": "swapz-algorithm-pageout-diagnostic-v1",
             "phase": "anonymous_pageout",
@@ -4429,6 +4441,14 @@ class ReportContract(unittest.TestCase):
             error_context.update(phase="anonymous_pagein", gate="lower_read",
                                  mapper_used_kib=8192, lower_write_bytes=8388608,
                                  lower_read_bytes=0)
+        if workload_phase:
+            error_context = {
+                "schema": "swapz-algorithm-workload-diagnostic-v1",
+                "phase": workload_phase, "gate": "bounded_primary_workload",
+                "reason": ("controls_unavailable" if workload_phase == "anonymous_preflight"
+                           else "lower_read"), "original_errno": None,
+            }
+        physical_exit = 2 if workload_phase == "anonymous_preflight" else 3
 
         class OperatorConsole(io.StringIO):
             def isatty(self):
@@ -4454,7 +4474,7 @@ class ReportContract(unittest.TestCase):
             error_stream.write("private_root_identity=NEVER_EXPORT\n")
             error_stream.write("PHYSICAL_ALGORITHM_DEBUG=" +
                                json.dumps(error_context) + "\n")
-            return subprocess.CompletedProcess(command, 3)
+            return subprocess.CompletedProcess(command, physical_exit)
 
         with mock.patch.object(
                 runner, "report_host_identity",
@@ -4491,6 +4511,7 @@ class ReportContract(unittest.TestCase):
                  print_bench=mock.Mock(),
                  publish=mock.Mock(return_value="SYNCED_GIT: fixture"),
                  write_failure_diagnostic=mock.Mock(return_value=None),
+                 retain_private_stage_output=private_output,
                  refresh_history=mock.Mock(
                      return_value="NOT UPDATED: fixture")), \
              mock.patch.object(runner.sys, "stdin",
@@ -4500,23 +4521,33 @@ class ReportContract(unittest.TestCase):
             self.assertEqual(runner._run_qualification(
                 mock.Mock(kdir="/unused", tier="algorithm"),
                 {"status": "PASS", "reason": "fixture",
-                 "source_sha": source_sha, "head_sha": source_sha}), 3)
+                 "source_sha": source_sha, "head_sha": source_sha}), physical_exit)
             console = output.getvalue()
 
         self.assertEqual(len(report_snapshots), 2)
+        private_output.assert_called_once()
+        self.assertIn("NEVER_EXPORT", private_output.call_args.args[0])
+        self.assertEqual(private_output.call_args.args[1:],
+                         (source_sha, "Authorized physical swap trial (dev)"))
+        self.assertIn("Physical private failure diagnostics: " +
+                      ("UNAVAILABLE" if log_failure else "build/tests/physical-fixture.private.log"),
+                      console)
         self.assertEqual(report_snapshots[0]["overall"], "INCOMPLETE")
         self.assertNotIn("algorithm_real_swap", report_snapshots[0])
-        self.assertEqual(report_snapshots[1]["overall"], "FAIL")
+        expected_overall = "INCOMPLETE" if physical_exit == 2 else "FAIL"
+        self.assertEqual(report_snapshots[1]["overall"], expected_overall)
         self.assertEqual(report_snapshots[1]["algorithm_real_swap"][
             "diagnostic"], error_context)
         self.assertIn(f"phase={error_context['phase']}", console)
-        self.assertIn(f"gate={error_context['gate']}", console)
+        self.assertIn(f"{'check' if workload_phase else 'gate'}={error_context['gate']}", console)
         if readback:
             self.assertIn("lower_read_bytes=0", console)
-        self.assertIn("zswap_enabled=YES", console)
+        if not workload_phase:
+            self.assertIn("zswap_enabled=YES", console)
         self.assertNotIn("NEVER_EXPORT", console)
-        self.assertIn("Physical trial cleanup:", console)
-        self.assertIn("Overall qualification: FAIL", console)
+        if physical_exit == 3:
+            self.assertIn("Physical trial cleanup:", console)
+        self.assertIn(f"Overall qualification: {expected_overall}", console)
 
     def test_source_admission_diagnostic_rejects_untrusted_privileged_output(self):
         prefix = "PHYSICAL_ALGORITHM_SOURCE_ADMISSION="
@@ -4705,6 +4736,22 @@ class ReportContract(unittest.TestCase):
             with self.subTest(readback_fields=fields):
                 self.assertIsNone(runner.parse_algorithm_pageout_diagnostic(
                     prefix + json.dumps({**readback, **fields})))
+
+    def test_bounded_workload_refusal_rejects_private_or_malformed_fields(self):
+        report = {"schema": "swapz-algorithm-workload-diagnostic-v1",
+                  "phase": "anonymous_workload", "gate": "bounded_primary_workload",
+                  "reason": "lower_read", "original_errno": None}
+        prefix = "PHYSICAL_ALGORITHM_DEBUG="
+        marker = prefix + json.dumps(report)
+        self.assertEqual(runner.parse_algorithm_pageout_diagnostic(marker), report)
+        for fields in ({"phase": []}, {"gate": {}}, {"reason": []},
+                       {"reason": "private/path"}, {"original_errno": True},
+                       {"original_errno": -1}, {"original_errno": 4096},
+                       {"phase": "anonymous_preflight"}, {"extra": "private"}):
+            with self.subTest(fields=fields):
+                self.assertIsNone(runner.parse_algorithm_pageout_diagnostic(
+                    prefix + json.dumps({**report, **fields})))
+        self.assertIsNone(runner.parse_algorithm_pageout_diagnostic(marker + "\n" + marker))
 
     def test_failure_diagnostic_collects_read_rounds_privately(self):
         fast_sessions = runner.parse_read_coalesce_ab(synthetic_log())

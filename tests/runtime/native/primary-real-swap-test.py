@@ -3909,6 +3909,52 @@ class PrimaryRealSwapContracts(unittest.TestCase):
             self.assertTrue(all(pipe.closed for pipe in
                                 (child.stdin, child.stdout, child.stderr)))
 
+    def test_private_workload_status_reader_keeps_exact_mapper_authority(self):
+        with tempfile.TemporaryDirectory() as directory:
+            cgroup = Path(directory)
+            workers = []
+            def spawn(argv, **_options):
+                worker = mock.Mock(pid=501 + len(workers))
+                worker.seed = argv[argv.index("--seed") + 1]
+                worker.stdin, worker.stdout, worker.stderr = (
+                    io.StringIO(), io.StringIO(), io.StringIO())
+                workers.append(worker)
+                return worker
+            def waiting(worker, prefix, *_args):
+                self.assertEqual(prefix, "ORACLE_WAITING=")
+                return {"pid": worker.pid, "seed": worker.seed,
+                        "pages": 192 * qualify.MIB // qualify.PAGE_BYTES,
+                        "bytes": 192 * qualify.MIB}
+            expected = qualify.SwapRow(
+                "/dev/dm-1", "partition", 512000, 0, 5, (252, 1))
+            status_reader = mock.Mock(side_effect=qualify.QualificationFailure(
+                "owned development mapper identity changed"))
+            with contextlib.ExitStack() as stack:
+                for name, value in (
+                    ("_cgroup_create", cgroup),
+                    ("_memory_events", {"oom": 0, "oom_kill": 0}),
+                    ("_psi_total", 0), ("_write_control", None),
+                    ("read_swap_rows", [expected]),
+                    ("require_oracle_worker_cgroup_ownership", None),
+                ):
+                    stack.enter_context(mock.patch.object(qualify, name, return_value=value))
+                stack.enter_context(mock.patch.object(qualify.subprocess, "Popen", side_effect=spawn))
+                stack.enter_context(mock.patch.object(qualify, "_oracle_event", side_effect=waiting))
+                terminate = stack.enter_context(mock.patch.object(qualify, "_terminate_child"))
+                remove = stack.enter_context(mock.patch.object(qualify, "_remove_cgroup"))
+                default_status = stack.enter_context(mock.patch.object(qualify, "read_status"))
+                with self.assertRaisesRegex(qualify.QualificationFailure,
+                                            "development mapper identity changed"):
+                    qualify._run_workload(
+                        {"run_id": "a" * 32}, {"mapper_device": (252, 1)},
+                        ORACLE, 384, 128, 384, 240, status_reader=status_reader)
+            status_reader.assert_called_once_with()
+            default_status.assert_not_called()
+            self.assertEqual(terminate.call_count, 2)
+            remove.assert_called_once_with(cgroup)
+            self.assertTrue(all(pipe.closed for worker in workers for pipe in
+                                (worker.stdin, worker.stdout, worker.stderr)))
+
     def test_worker_pipe_cleanup_failure_retains_outer_cleanup_ownership(self):
         with tempfile.TemporaryDirectory() as directory:
             cgroup = Path(directory)

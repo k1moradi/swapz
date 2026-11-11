@@ -15,6 +15,7 @@ from datetime import datetime, timezone
 import errno
 import fcntl
 import hashlib
+import importlib.util
 import json
 import os
 import platform
@@ -3675,6 +3676,168 @@ def _require_algorithm_pageout_backing(mapper_used_kib, lower_write_bytes):
             f"observed_mapper_used_kib={mapper_used_kib}")
 
 
+def _algorithm_real_swap_workload(source_sha):
+    """Reuse the exact committed primary workload, never a second reclaim model."""
+    relative = "tests/tools/qualify-primary-real-swap.py"
+    path = ROOT / relative
+    try:
+        payload = path.read_bytes()
+        committed = _git_result("show", f"{source_sha}:{relative}").stdout.encode("utf-8")
+    except (OSError, UnicodeError) as exc:
+        raise ProbeError("bounded real-swap workload source is unreadable") from exc
+    if not payload or payload != committed or len(payload) > 512 * 1024:
+        raise ProbeError("bounded real-swap workload differs from admitted source")
+    specification = importlib.util.spec_from_file_location(
+        "swapz_algorithm_primary_workload", path)
+    workload = importlib.util.module_from_spec(specification)
+    # Dataclass initialization resolves its module through sys.modules. Execute
+    # the bytes just compared, rather than reopening a mutable source pathname.
+    previous = sys.modules.get(specification.name)
+    sys.modules[specification.name] = workload
+    try:
+        exec(compile(payload, str(path), "exec"), workload.__dict__)
+    finally:
+        if previous is None:
+            del sys.modules[specification.name]
+        else:
+            sys.modules[specification.name] = previous
+    policy_relative = "docs/production-acceptance.json"
+    policy_bytes = _git_result(
+        "show", f"{source_sha}:{policy_relative}").stdout.encode("utf-8")
+    try:
+        policy, _digest = workload._verify_acceptance_manifest_snapshot(
+            cycles=workload.DEFAULT_CYCLES,
+            workload_mib=workload.DEFAULT_WORKLOAD_MIB,
+            resident_mib=workload.DEFAULT_RESIDENT_MIB,
+            swap_limit_mib=workload.DEFAULT_SWAP_LIMIT_MIB,
+            timeout_seconds=workload.DEFAULT_TIMEOUT_SECONDS,
+            expected_sha256=hashlib.sha256(policy_bytes).hexdigest())
+    except (workload.Blocked, workload.QualificationFailure) as exc:
+        raise ProbeError("bounded real-swap frozen policy is not source-matched") from exc
+    return workload, {**policy["primary_real_swap"],
+                      "reuse_rounds": workload.REUSE_ROUNDS,
+                      "concurrent_workers": workload.CONCURRENT_ORACLE_PROCESSES}
+
+
+def _algorithm_real_swap_workload_preflight(source_sha):
+    workload, policy = _algorithm_real_swap_workload(source_sha)
+    try:
+        workload.preflight_workload_environment(
+            policy["workload_mib"], policy["resident_mib"], policy["swap_limit_mib"])
+    except (workload.Blocked, workload.QualificationFailure) as exc:
+        _emit_algorithm_workload_failure(exc, "anonymous_preflight")
+        raise ProbeError(
+            "phase=anonymous_preflight expected=bounded_cgroup_controls "
+            "observed=unavailable_or_unsafe "
+            f"original_errno={_errno_text(exc)} "
+            "retained_resource=possible_owned_cgroup "
+            "safe_next_step=inspect_private_cgroup_admission_evidence; "
+            + _bounded_text(exc)) from exc
+
+
+def _emit_algorithm_workload_failure(error, phase="anonymous_workload"):
+    """Expose only finite producer refusal classes, never private exception text."""
+    reasons = {
+        "swapz target counters stay below required swap-in READ activity": "swapz_read",
+        "backing partition counters show no lower READ activity": "lower_read",
+        "kernel vmstat shows no swap-in during byte verification": "kernel_swapin",
+        "swapz target counters stay below required swap-out WRITE activity": "swapz_write",
+        "backing partition counters show no lower WRITE activity": "lower_write",
+        "kernel vmstat shows no swap-out during admitted workload": "kernel_swapout",
+        "concurrent fill completed without independently proven swapz swap-out": "swapout_attribution",
+        "real-swap byte oracle reported corruption or incomplete verification": "byte_oracle",
+        "cgroup OOM counters changed during admitted real-swap workload": "cgroup_oom",
+    }
+    first_cause = str(error).split("; cleanup also failed:", 1)[0]
+    original_errno = _errno_text(error)
+    record = {
+        "schema": "swapz-algorithm-workload-diagnostic-v1", "phase": phase,
+        "gate": "bounded_primary_workload",
+        "reason": ("controls_unavailable" if phase == "anonymous_preflight"
+                   else reasons.get(first_cause, "producer_refused")),
+        "original_errno": (int(original_errno) if original_errno.isdecimal() else None),
+    }
+    print("PHYSICAL_ALGORITHM_DEBUG=" + json.dumps(
+        record, sort_keys=True, separators=(",", ":")), file=sys.stderr, flush=True)
+
+
+def _algorithm_real_swap_summary(result, policy, oracle_sha256):
+    """Recheck the existing producer's full evidence before durable PASS."""
+    rounds = result.get("rounds") if isinstance(result, dict) else None
+    expected_rounds = policy["reuse_rounds"]
+    expected_pages = policy["workload_mib"] * 1024 * 1024 // PAGE_BYTES
+    minimum_bytes = policy["minimum_swap_traffic_mib"] * 1024 * 1024
+    counters = ("mapper_used_delta_kib", "swapz_logical_write_delta",
+                "swapz_physical_write_delta", "swapz_logical_read_delta",
+                "swapz_physical_read_delta", "lower_write_bytes_delta",
+                "lower_read_bytes_delta", "lower_write_sector_delta",
+                "lower_read_sector_delta", "pswpout_delta", "pswpin_delta")
+    if (not isinstance(rounds, list) or len(rounds) != expected_rounds or
+            type(result.get("reuse_rounds")) is not int or
+            result.get("reuse_rounds") != expected_rounds or
+            result.get("concurrent_workers") != policy["concurrent_workers"] or
+            result.get("slot_reuse_proven") is not True):
+        raise ProbeError("anonymous_swap=UNPROVEN gate=complete_reuse_rounds")
+    for index, row in enumerate(rounds, 1):
+        if not isinstance(row, dict):
+            raise ProbeError("anonymous_swap=UNPROVEN gate=round_evidence")
+        verified = row.get("aggregate_verified")
+        integer_fields = counters + ("round", "mapper_used_start_kib",
+                                    "release_swap_current_bytes", "mapper_used_released_kib",
+                                    "oom_delta", "oom_kill_delta", "concurrent_workers")
+        if (any(type(row.get(key)) is not int for key in integer_fields) or
+                row.get("round") != index or
+                row.get("concurrent_workers") != policy["concurrent_workers"] or
+                row.get("mapper_used_start_kib") != 0 or
+                row.get("release_swap_current_bytes") != 0 or
+                row.get("mapper_used_released_kib") != 0 or
+                any(type(row.get(key)) is not int or not 0 < row[key] <= MAX_BLOCK_COUNTER
+                    for key in counters) or
+                row.get("oom_delta") != 0 or row.get("oom_kill_delta") != 0 or
+                not isinstance(verified, dict) or
+                any(type(verified.get(key)) is not int
+                    for key in ("verified_pages", "verified_bytes", "mismatches")) or
+                verified.get("verified_pages") != expected_pages or
+                verified.get("verified_bytes") != expected_pages * PAGE_BYTES or
+                verified.get("mismatches") != 0 or
+                not isinstance(verified.get("digest"), str) or
+                re.fullmatch(r"[0-9a-f]{64}", verified["digest"]) is None or
+                verified.get("expected_digest") != verified["digest"]):
+            raise ProbeError("anonymous_swap=UNPROVEN gate=round_integrity_and_io")
+        charge = row.get("cgroup_swap_current_bytes_after_fill")
+        peak = row.get("cgroup_swap_peak_bytes")
+        if (type(charge) is not int or type(peak) is not int or
+                charge < minimum_bytes or peak < charge or
+                peak > policy["swap_limit_mib"] * 1024 * 1024 or
+                row["mapper_used_delta_kib"] * 1024 != charge or
+                row["swapz_logical_write_delta"] < minimum_bytes or
+                row["swapz_logical_read_delta"] < minimum_bytes or
+                row["lower_write_sector_delta"] * 512 != row["lower_write_bytes_delta"] or
+                row["lower_read_sector_delta"] * 512 != row["lower_read_bytes_delta"] or
+                row["lower_write_bytes_delta"] < row["swapz_physical_write_delta"] or
+                row["lower_read_bytes_delta"] < row["swapz_physical_read_delta"]):
+            raise ProbeError("anonymous_swap=UNPROVEN gate=independent_traffic")
+    if (any(type(result.get(key)) is not int for key in
+            ("concurrent_workers", "oom_delta", "oom_kill_delta")) or
+            any(type(result.get(key)) is not int or
+            result.get(key) != sum(row[key] for row in rounds)
+            for key in counters) or result.get("oom_delta") != 0 or
+            result.get("oom_kill_delta") != 0 or
+            result.get("cgroup_swap_peak_bytes") != max(
+                row["cgroup_swap_peak_bytes"] for row in rounds)):
+        raise ProbeError("anonymous_swap=UNPROVEN gate=aggregate_evidence")
+    return {
+        "status": "PASS", "oracle_sha256": oracle_sha256,
+        "verified_pages": expected_pages * expected_rounds,
+        "verified_bytes": expected_pages * expected_rounds * PAGE_BYTES,
+        "byte_mismatches": 0,
+        "mapper_used_kib_after_pageout": max(row["mapper_used_delta_kib"] for row in rounds),
+        "lower_write_bytes": result["lower_write_bytes_delta"],
+        "lower_read_bytes": result["lower_read_bytes_delta"],
+        "workload": result,
+    }
+
+
 def _run_algorithm_live_swap_oracle(mapper, state, target, state_dir):
     """Prove Linux anonymous pageout/pagein through the exact owned mapper.
 
@@ -3687,16 +3850,17 @@ def _run_algorithm_live_swap_oracle(mapper, state, target, state_dir):
     mapper_device = block_identity(mapper)
     if _active_swap_for(*mapper_device) is not None:
         raise ProbeError("owned mapper unexpectedly active before real-swap setup")
+    workload, policy = _algorithm_real_swap_workload(state["source_sha"])
+    relative = "tests/tools/primary-real-swap-oracle.py"
+    oracle_source = ROOT / relative
+    expected_oracle = _git_result(
+        "show", f"{state['source_sha']}:{relative}").stdout.encode("utf-8")
     try:
-        meminfo = Path("/proc/meminfo").read_text(encoding="ascii")
-        match = re.search(r"(?m)^MemAvailable:\s+(\d+) kB$", meminfo)
-    except (OSError, UnicodeError) as exc:
-        raise ProbeError("cannot prove safe host memory headroom") from exc
-    if not match or int(match.group(1)) < 512 * 1024:
-        raise ProbeError("insufficient host memory headroom for bounded real swap")
+        private_oracle, oracle_sha256 = workload.pin_real_swap_oracle(
+            oracle_source, state_dir, hashlib.sha256(expected_oracle).hexdigest())
+    except (workload.Blocked, workload.QualificationFailure) as exc:
+        raise ProbeError("bounded real-swap oracle is not source-matched") from exc
 
-    private_oracle, oracle_sha256 = _algorithm_pageout_oracle_snapshot(
-        state_dir, state["source_sha"])
     # Oracle pinning may take time. Recheck the exact owned DM identity
     # immediately before mkswap touches the mapper's visible block zero.
     if (_verify_owned_mapper(state, target) != mapper or
@@ -3711,121 +3875,39 @@ def _run_algorithm_live_swap_oracle(mapper, state, target, state_dir):
     active = _active_swap_for(*mapper_device)
     if active is None or active["used_kib"] != 0:
         raise ProbeError("run-owned swap mapper activation is unproven")
-    lower_before = _block_stat_snapshot(target)
-    if lower_before.get("available") is not True:
-        raise ProbeError("cannot sample physical I/O before anonymous pageout")
 
-    host_before_pageout = _algorithm_pageout_host_snapshot()
-    worker = None
+    def guard_mapper():
+        if (_verify_owned_mapper(state, target) != mapper or
+                block_identity(mapper) != mapper_device):
+            raise ProbeError("run-owned mapper identity changed during anonymous swap")
+
+    def read_owned_status():
+        guard_mapper()
+        return workload.parse_status(_run([
+            "dmsetup", "status", state["dm_name"]], timeout=10).stdout)
+
     try:
-        worker = subprocess.Popen(
-            [sys.executable, "-I", "-B", str(private_oracle),
-             "--seed", state["run_id"]],
-            stdin=subprocess.PIPE, stdout=subprocess.PIPE,
-            stderr=subprocess.DEVNULL, text=True, bufsize=1,
-            start_new_session=True)
-        expected_pages = 2048
-        expected_bytes = expected_pages * PAGE_BYTES
-        ready = _algorithm_pageout_event(worker, "ALGORITHM_PAGEOUT_READY=")
-        if (set(ready) != {"pages", "bytes", "expected_sha256"} or
-                ready["pages"] != expected_pages or
-                ready["bytes"] != expected_bytes or
-                not isinstance(ready["expected_sha256"], str) or
-                re.fullmatch(r"[0-9a-f]{64}", ready["expected_sha256"]) is None):
-            raise ProbeError("real-swap pageout oracle readiness is invalid")
-
-        deadline = time.monotonic() + 10.0
-        used_swap_kib = 0
-        while time.monotonic() < deadline:
-            if _verify_owned_mapper(state, target) != mapper or (
-                    block_identity(mapper) != mapper_device):
-                raise ProbeError("run-owned mapper identity changed during pageout")
-            observed = _active_swap_for(*mapper_device)
-            if observed is None:
-                raise ProbeError("owned mapper lost swap activation during pageout")
-            used_swap_kib = observed["used_kib"]
-            if used_swap_kib > 0:
-                break
-            time.sleep(0.05)
-        lower_after_pageout = _block_stat_snapshot(target)
-        pageout_delta = _lower_io_delta(
-            lower_before, lower_after_pageout)
-        try:
-            _require_algorithm_pageout_backing(
-                used_swap_kib, pageout_delta["lower_write_bytes"])
-        except ProbeError:
-            # Diagnose only the first failed backing proof, before normal
-            # cleanup mutates the live mapper and lower-I/O observations.
-            context = _algorithm_pageout_debug_record(
-                used_swap_kib, pageout_delta["lower_write_bytes"],
-                host_before_pageout, _algorithm_pageout_host_snapshot())
-            print("PHYSICAL_ALGORITHM_DEBUG=" + json.dumps(
-                context, sort_keys=True, separators=(",", ":")),
-                file=sys.stderr, flush=True)
-            raise
-
-        host_before_readback = _algorithm_pageout_host_snapshot()
-        if worker.stdin is None:
-            raise ProbeError("real-swap oracle command pipe is unavailable")
-        worker.stdin.write("VERIFY\n")
-        worker.stdin.flush()
-        verified = _algorithm_pageout_event(
-            worker, "ALGORITHM_PAGEOUT_VERIFIED=")
-        if (set(verified) != {
-                "pages", "bytes", "mismatches", "actual_sha256",
-                "expected_sha256"} or
-                verified["pages"] != expected_pages or
-                verified["bytes"] != expected_bytes or
-                verified["mismatches"] != 0 or
-                verified["actual_sha256"] != ready["expected_sha256"] or
-                verified["expected_sha256"] != ready["expected_sha256"]):
-            raise ProbeError("real-swap anonymous-page readback is not byte-exact")
-        if worker.wait(timeout=30) != 0:
-            raise ProbeError("real-swap oracle terminated unsuccessfully")
-        readback_delta = _lower_io_delta(
-            lower_after_pageout, _block_stat_snapshot(target))
-        if readback_delta["lower_read_bytes"] <= 0:
-            # A byte-exact swap-cache hit is not a proved physical swap-in.
-            # Preserve this first missing proof before lifecycle cleanup.
-            context = _algorithm_pageout_debug_record(
-                used_swap_kib, pageout_delta["lower_write_bytes"],
-                host_before_readback, _algorithm_pageout_host_snapshot(),
-                lower_read_bytes=readback_delta["lower_read_bytes"])
-            print("PHYSICAL_ALGORITHM_DEBUG=" + json.dumps(
-                context, sort_keys=True, separators=(",", ":")),
-                file=sys.stderr, flush=True)
-            raise ProbeError(
-                "anonymous_pagein=UNPROVEN gate=lower_read "
-                "expected_lower_read_bytes=positive "
-                f"observed_lower_read_bytes={readback_delta['lower_read_bytes']} "
-                f"observed_lower_write_bytes={pageout_delta['lower_write_bytes']} "
-                f"observed_mapper_used_kib={used_swap_kib}")
-        return {
-            "status": "PASS",
-            "oracle_sha256": oracle_sha256,
-            "verified_pages": expected_pages,
-            "verified_bytes": expected_bytes,
-            "byte_mismatches": 0,
-            "mapper_used_kib_after_pageout": used_swap_kib,
-            "lower_write_bytes": pageout_delta["lower_write_bytes"],
-            "lower_read_bytes": readback_delta["lower_read_bytes"],
-        }
-    except (OSError, subprocess.TimeoutExpired) as exc:
-        raise ProbeError(
-            "bounded anonymous swap oracle failed to execute or finish") from exc
-    finally:
-        if worker is not None:
-            if worker.poll() is None:
-                try:
-                    worker.kill()
-                except ProcessLookupError:
-                    # A worker may exit between poll() and kill().
-                    pass
-            worker.wait(timeout=15)
-            if worker.stdin is not None:
-                worker.stdin.close()
-            if worker.stdout is not None:
-                worker.stdout.close()
+        # Reuse the frozen 384/128/384 MiB cgroup workload, its scoped zswap
+        # refusal, independent counters, byte oracle and normal child cleanup.
+        # An advisory MADV_PAGEOUT or swap-cache hit is not physical evidence.
+        result = workload._run_workload(
+            {"run_id": state["run_id"], "device_major_int": target["major"],
+             "device_minor_int": target["minor"]},
+            {"mapper_device": mapper_device}, private_oracle,
+            policy["workload_mib"], policy["resident_mib"],
+            policy["swap_limit_mib"], policy["timeout_seconds"],
+            telemetry_check=guard_mapper, status_reader=read_owned_status)
+        guard_mapper()
+    except (workload.Blocked, workload.QualificationFailure) as exc:
+        # Keep the producer's first failure and cleanup disposition in private
+        # evidence. Never infer success from an advisory reclaim or child exit.
+        _emit_algorithm_workload_failure(exc)
+        raise ProbeError("bounded anonymous swap workload refused: " + _bounded_text(exc)) from exc
+    try:
+        return _algorithm_real_swap_summary(result, policy, oracle_sha256)
+    except ProbeError as exc:
+        _emit_algorithm_workload_failure(exc)
+        raise
 
 
 def _keep_active_capacity_supported(target):
@@ -3960,9 +4042,15 @@ def _final_physical_oracle_evidence_error(results, state, target,
                 any(type(record.get(key)) is not int or record[key] <= 0
                     for key in required) or
                 record["verified_bytes"] != record["verified_pages"] * PAGE_BYTES or
-                record["verified_pages"] != 2048 or
                 not isinstance(record.get("oracle_sha256"), str) or
                 re.fullmatch(r"[0-9a-f]{64}", record["oracle_sha256"]) is None):
+            return "algorithm_real_swap_evidence_missing_or_invalid"
+        try:
+            _workload, policy = _algorithm_real_swap_workload(evidence["source_sha"])
+            if record != _algorithm_real_swap_summary(
+                    record.get("workload"), policy, record["oracle_sha256"]):
+                return "algorithm_real_swap_evidence_missing_or_invalid"
+        except (ProbeError, KeyError, TypeError, ValueError):
             return "algorithm_real_swap_evidence_missing_or_invalid"
     saved_bindings = {
         "device_arg": target["device_arg"],
@@ -4157,6 +4245,9 @@ def run_probe(device_arg, confirm_arg, state_dir_arg, review_path,
         raise ProbeError("current build artifacts differ from admitted evidence")
     if development_only and algorithm_real_swap:
         _require_shared_root_development_plan(target, evidence)
+        # Refuse missing cgroup controls while ordinary swap is still active,
+        # before creating ownership state or draining the selected partition.
+        _algorithm_real_swap_workload_preflight(evidence["source_sha"])
     if development_only:
         review = {
             "reviewer": None,

@@ -3450,7 +3450,12 @@ def _wait_for_round_release(cgroup: Path, mapper_device: tuple[int, int],
 def _run_workload(manifest: dict, active: dict, oracle_path: Path,
                   workload_mib: int, resident_mib: int, swap_limit_mib: int,
                   timeout_seconds: int,
-                  telemetry_check: Callable[[], None] | None = None) -> dict:
+                  telemetry_check: Callable[[], None] | None = None,
+                  *, status_reader: Callable[[], dict[str, int]] | None = None) -> dict:
+    # The private development trial has its own run-bound mapper name. Its
+    # caller must verify that exact mapping whenever sampling its status;
+    # ordinary primary qualification retains its existing status reader.
+    sample_status = read_status if status_reader is None else status_reader
     worker_memory_mib = split_concurrent_workload_mib(workload_mib)
     token = os.urandom(8).hex()
     cgroup = _cgroup_create(token, resident_mib, swap_limit_mib, admitted=True)
@@ -3574,7 +3579,7 @@ def _run_workload(manifest: dict, active: dict, oracle_path: Path,
                     waiting, worker_memory_mib, "pages", "bytes", "readiness")
                 require_oracle_worker_cgroup_ownership(cgroup, round_processes)
 
-                fill_status_before = read_status()
+                fill_status_before = sample_status()
                 lower_before = read_block_stats(
                     (manifest["device_major_int"], manifest["device_minor_int"]))
                 vm_before = read_vmstat()
@@ -3602,7 +3607,7 @@ def _run_workload(manifest: dict, active: dict, oracle_path: Path,
                 if swap_peak < swap_current:
                     raise QualificationFailure(
                         "cgroup swap peak is below current swap usage")
-                fill_status_after = read_status()
+                fill_status_after = sample_status()
                 lower_after_fill = read_block_stats(
                     (manifest["device_major_int"], manifest["device_minor_int"]))
                 vm_after_fill = read_vmstat()
@@ -3623,7 +3628,7 @@ def _run_workload(manifest: dict, active: dict, oracle_path: Path,
                         "exact mapper usage and dedicated-cgroup swap charge differ; "
                         "traffic attribution or mapper ownership is ambiguous")
 
-                verify_status_before = read_status()
+                verify_status_before = sample_status()
                 lower_before_verify = read_block_stats(
                     (manifest["device_major_int"], manifest["device_minor_int"]))
                 vm_before_verify = read_vmstat()
@@ -3664,7 +3669,7 @@ def _run_workload(manifest: dict, active: dict, oracle_path: Path,
                 guard_allow_worker_exit = False
                 require_oracle_worker_cgroup_ownership(cgroup, [])
                 verified = aggregate_oracle_verification(verified_records)
-                verify_status_after = read_status()
+                verify_status_after = sample_status()
                 lower_after_verify = read_block_stats(
                     (manifest["device_major_int"], manifest["device_minor_int"]))
                 vm_after_verify = read_vmstat()

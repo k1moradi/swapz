@@ -3977,6 +3977,25 @@ def parse_algorithm_pageout_diagnostic(error_output):
         return None
     if not isinstance(diagnostic, dict):
         return None
+    if diagnostic.get("schema") == "swapz-algorithm-workload-diagnostic-v1":
+        if set(diagnostic) != {"schema", "phase", "gate", "reason", "original_errno"}:
+            return None
+        if any(not isinstance(diagnostic[key], str) for key in ("phase", "gate", "reason")):
+            return None
+        reasons = {
+            "swapz_read", "lower_read", "kernel_swapin", "swapz_write",
+            "lower_write", "kernel_swapout", "swapout_attribution",
+            "byte_oracle", "cgroup_oom", "producer_refused"}
+        if diagnostic["phase"] == "anonymous_preflight":
+            reasons = {"controls_unavailable"}
+        elif diagnostic["phase"] != "anonymous_workload":
+            return None
+        value = diagnostic["original_errno"]
+        if (diagnostic["gate"] != "bounded_primary_workload" or
+                diagnostic["reason"] not in reasons or
+                (value is not None and (type(value) is not int or not 1 <= value <= 4095))):
+            return None
+        return diagnostic
     readback = diagnostic.get("phase") == "anonymous_pagein"
     fields = {
             "schema", "phase", "gate", "mapper_used_kib",
@@ -4013,6 +4032,17 @@ def parse_algorithm_pageout_diagnostic(error_output):
             for value in counters.values()):
         return None
     return diagnostic
+
+
+def print_algorithm_workload_diagnostic(diagnostic):
+    original_errno = diagnostic["original_errno"]
+    print("  Physical first refusal: "
+          f"phase={diagnostic['phase']} check={diagnostic['gate']} "
+          f"reason={diagnostic['reason']} "
+          f"original_errno={original_errno if original_errno is not None else 'unavailable'}",
+          flush=True)
+    print("        Next: inspect retained private workload evidence after "
+          "normal owned recovery; do not weaken swap I/O proof", flush=True)
 
 
 def parse_algorithm_source_admission_diagnostic(error_output):
@@ -11924,6 +11954,7 @@ def _run_qualification(args, sync_result):
             evidence_path = None
             physical_diagnostic = None
             physical_source_admission = None
+            physical_private_log = None
             try:
                 evidence_path, evidence_nonce = (
                     write_algorithm_ram_development_evidence(result))
@@ -11947,6 +11978,14 @@ def _run_qualification(args, sync_result):
                         # Promote only strictly validated source-owned failure
                         # records; leave every other child stderr byte private.
                         physical_error_output = error_stream.read(32769)
+                        try:
+                            physical_private_log = retain_private_stage_output(
+                                physical_error_output, result["tested_commit_sha"],
+                                "Authorized physical swap trial (dev)")
+                        except Exception:
+                            # Evidence retention is secondary to the helper's
+                            # original result and independently parsed refusal.
+                            physical_private_log = None
                         physical_diagnostic = parse_algorithm_pageout_diagnostic(
                             physical_error_output)
                         if physical_exit == 2:
@@ -11964,6 +12003,12 @@ def _run_qualification(args, sync_result):
                     except OSError:
                         pass
             physical_duration = f"{max(0.0, time.monotonic() - physical_started):.2f}s"
+            if physical_private_log is not None:
+                print("  Physical private failure diagnostics: "
+                      f"{physical_private_log} (mode 0600)", flush=True)
+            elif physical_exit:
+                print("  Physical private failure diagnostics: UNAVAILABLE; "
+                      f"original_exit={physical_exit}", flush=True)
             if physical_exit == 0:
                 result["algorithm_real_swap"] = {
                     "overall": "PASS_DEVELOPMENT_ONLY",
@@ -11981,28 +12026,31 @@ def _run_qualification(args, sync_result):
                 print_physical_trial_result("FAIL", physical_duration, progress_table)
                 if physical_diagnostic is not None:
                     result["algorithm_real_swap"]["diagnostic"] = physical_diagnostic
-                    readback_detail = (
-                        f"lower_read_bytes={physical_diagnostic['lower_read_bytes']} "
-                        if physical_diagnostic["phase"] == "anonymous_pagein" else "")
-                    print(
-                        f"  Physical first failure: phase={physical_diagnostic['phase']} "
-                        f"gate={physical_diagnostic['gate']} "
-                        f"mapper_used_kib={physical_diagnostic['mapper_used_kib']} "
-                        f"lower_write_bytes={physical_diagnostic['lower_write_bytes']} "
-                        f"{readback_detail}"
-                        f"zswap_enabled={physical_diagnostic['zswap_enabled']}",
-                        flush=True)
-                    print(
-                        "        Host-global vmstat deltas (context, not "
-                        "device attribution): " +
-                        " ".join(
-                            f"{key}={value if value is not None else 'NA'}"
-                            for key, value in physical_diagnostic[
-                                "host_global_vmstat_delta"].items()),
-                        flush=True)
-                    print(
-                        "        Next: check the missing proof before rerunning; "
-                        "do not weaken real-swap I/O admission", flush=True)
+                    if physical_diagnostic.get("schema") == "swapz-algorithm-workload-diagnostic-v1":
+                        print_algorithm_workload_diagnostic(physical_diagnostic)
+                    else:
+                        readback_detail = (
+                            f"lower_read_bytes={physical_diagnostic['lower_read_bytes']} "
+                            if physical_diagnostic["phase"] == "anonymous_pagein" else "")
+                        print(
+                            f"  Physical first failure: phase={physical_diagnostic['phase']} "
+                            f"gate={physical_diagnostic['gate']} "
+                            f"mapper_used_kib={physical_diagnostic['mapper_used_kib']} "
+                            f"lower_write_bytes={physical_diagnostic['lower_write_bytes']} "
+                            f"{readback_detail}"
+                            f"zswap_enabled={physical_diagnostic['zswap_enabled']}",
+                            flush=True)
+                        print(
+                            "        Host-global vmstat deltas (context, not "
+                            "device attribution): " +
+                            " ".join(
+                                f"{key}={value if value is not None else 'NA'}"
+                                for key, value in physical_diagnostic[
+                                    "host_global_vmstat_delta"].items()),
+                            flush=True)
+                        print(
+                            "        Next: check the missing proof before rerunning; "
+                            "do not weaken real-swap I/O admission", flush=True)
                 else:
                     print(
                         "  Physical first failure: authenticated pageout "
@@ -12029,6 +12077,13 @@ def _run_qualification(args, sync_result):
                         "phase=before_consent "
                         f"reason={physical_source_admission['reason']}",
                         flush=True)
+                elif (physical_diagnostic is not None and
+                      physical_diagnostic.get("schema") == "swapz-algorithm-workload-diagnostic-v1" and
+                      physical_diagnostic.get("phase") == "anonymous_preflight"):
+                    result["algorithm_real_swap"]["reason"] = "bounded_workload_preflight_refused"
+                    result["algorithm_real_swap"]["diagnostic"] = physical_diagnostic
+                    if physical_diagnostic.get("schema") == "swapz-algorithm-workload-diagnostic-v1":
+                        print_algorithm_workload_diagnostic(physical_diagnostic)
                 print_physical_trial_result("NOT RUN", physical_duration, progress_table)
                 print("  Physical trial admission: device unchanged or "
                       "safely refused")
