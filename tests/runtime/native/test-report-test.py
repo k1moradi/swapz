@@ -1167,10 +1167,11 @@ class NativeTimingContract(unittest.TestCase):
         def remember_report(report):
             reports.append(json.loads(json.dumps(report)))
 
-        previous_root = runner.ROOT
+        previous_root, previous_report = runner.ROOT, runner.REPORT
         with tempfile.TemporaryDirectory(prefix="make-resume-run-") as directory:
             try:
                 runner.ROOT = Path(directory)
+                runner.REPORT = runner.ROOT / runner.GIT_RESULT
                 args = mock.Mock(tier="algorithm", kdir="/synthetic-kdir")
                 with mock.patch.object(runner, "git_sha",
                                        return_value=source), \
@@ -1240,7 +1241,7 @@ class NativeTimingContract(unittest.TestCase):
                 self.assertEqual(stdout.count("ID | Suite"), 1)
                 self.assertIn("INCOMPLETE / not a fresh qualification", stdout)
             finally:
-                runner.ROOT = previous_root
+                runner.ROOT, runner.REPORT = previous_root, previous_report
 
     def test_unified_rootless_failure_keeps_original_exit_and_one_header(self):
         transcript = (
