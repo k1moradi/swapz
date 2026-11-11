@@ -593,8 +593,8 @@ convertible into a private checkpoint. The parent runner strips its RESUME
 selector from test children and nested synthetic reporter invocations.
 Synthetic regression covers successful
 reuse, exact-context drift, file identity/privacy rejection, one-table progress,
-including isolated report-root fixtures and explicit private-directory and
-state-file permission checks,
+including isolated report-root fixtures, complete synthetic benchmark
+fields and explicit private-directory and state-file permission checks,
 unqualified verdict and fresh loaded execution.
 Print the optional rootless timing breakdown once after **all** verdict rows
 (including the development-only physical trial row when present), never

@@ -1162,6 +1162,8 @@ class NativeTimingContract(unittest.TestCase):
                     "overall": "PASS_BOUNDED_RAM_MATRIX"}
                 result["benchmarks"]["write_saturation"] = {
                     "overall": "PASS_WRITE_SATURATION_EVIDENCE"}
+                result["benchmarks"]["delta64_prepare"] = {
+                    "overall": "NOT_RUN"}
             return 1 if failed else 0
 
         def remember_report(report):
