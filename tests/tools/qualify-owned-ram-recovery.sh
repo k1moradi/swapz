@@ -8,6 +8,7 @@ python3 -I -B - "$ROOT" "$2" <<'PY'
 import importlib.util
 import os
 from pathlib import Path
+import re
 import signal
 import subprocess
 import sys
@@ -18,6 +19,31 @@ spec = importlib.util.spec_from_file_location("resources", root / "tests/tools/o
 resources = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(resources)
 check = resources.require
+
+def recovery_failure_marker(stderr):
+    """Forward only fixed recovery categories from the private helper output."""
+    lines = stderr.decode("utf-8", "replace").splitlines()
+    for line in lines[:16]:
+        match = re.fullmatch(
+            r"BLOCKED: owned RAM resource proof or cleanup incomplete "
+            r"class=(OSError|PermissionError|FileNotFoundError|"
+            r"ProcessLookupError|BlockingIOError|InterruptedError|"
+            r"ValueError|KeyError|TypeError|IndexError|"
+            r"TimeoutExpired|SubprocessError) errno=(unavailable|[0-9]{1,3}); "
+            r"retain evidence", line)
+        if match:
+            return ("BLOCKED: owned RAM recovery helper "
+                    f"class={match.group(1)} errno={match.group(2)}; "
+                    "retain evidence")
+        match = re.fullmatch(
+            r"BLOCKED: owned RAM resource recovery reason=([a-z0-9-]{1,64}); "
+            r"retain evidence", line)
+        if match:
+            return ("BLOCKED: owned RAM recovery helper "
+                    f"reason={match.group(1)}; retain evidence")
+    return ("BLOCKED: owned RAM recovery helper returned an unclassified "
+            "refusal; retain evidence")
+
 backend = resources.Linux()
 check(backend.module() is None, "recovery-control-needs-idle-host")
 swaps_before = resources.swap_identity(Path("/proc/swaps").read_bytes())
@@ -71,8 +97,11 @@ try:
                                    capture_output=True, timeout=35)
         if recovered.returncode == 0:
             break
-        check(time.monotonic() < deadline and any(token in recovered.stderr for token in
-              (b"device-process-reference", b"mapper-changed-or-busy")), "abandoned-recovery-refused")
+        retryable = any(token in recovered.stderr for token in
+                        (b"device-process-reference", b"mapper-changed-or-busy"))
+        if not retryable or time.monotonic() >= deadline:
+            print(recovery_failure_marker(recovered.stderr), file=sys.stderr)
+            check(False, "abandoned-recovery-refused")
         time.sleep(0.1)
     check(backend.mapper(claim["mapper"]["name"], claim["mapper"]["uuid"]) is None and
           all(backend.device(d["name"]) is None for d in claim["devices"]) and

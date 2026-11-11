@@ -1,10 +1,12 @@
 #!/usr/bin/env python3
 """Creation-proof recovery controls; no real devices or privileged operations."""
 import copy
+import errno
 import importlib.util
 import json
 import os
 from pathlib import Path
+import re
 import tempfile
 import subprocess
 import unittest
@@ -63,6 +65,97 @@ class Backend:
 
 
 class OwnedRamResourceTests(unittest.TestCase):
+    def test_mountinfo_einval_is_ignored_only_for_zombie_task(self):
+        task = Path("/proc/123/task/456")
+        for state, should_ignore in (("Z", True), ("R", False)):
+            with self.subTest(state=state):
+                def read_text(path, *args, **kwargs):
+                    if path.name == "mountinfo":
+                        raise OSError(errno.EINVAL, "Invalid argument")
+                    if path.name == "stat":
+                        return (f"456 (fixture task) {state} " +
+                                " ".join(["0"] * 18 + ["1"]))
+                    raise AssertionError("unexpected proc file")
+
+                with mock.patch.object(Path, "read_text", new=read_text):
+                    if should_ignore:
+                        self.assertEqual(subject.task_mountinfo_lines(task), [])
+                    else:
+                        with self.assertRaises(OSError) as raised:
+                            subject.task_mountinfo_lines(task)
+                        self.assertEqual(raised.exception.errno, errno.EINVAL)
+
+    def test_mountinfo_einval_requires_matching_well_formed_task_stat(self):
+        task = Path("/proc/123/task/456")
+        for stat_record in (
+                "457 (fixture task) Z 1 456 0",
+                "456 (fixture task) ? 1 456 0",
+                "456 (fixture task) Z",
+                "456 (fixture task) Z " + " ".join(["0"] * 18 + ["bad"]),
+                "malformed"):
+            with self.subTest(stat_record=stat_record):
+                def read_text(path, *args, **kwargs):
+                    if path.name == "mountinfo":
+                        raise OSError(errno.EINVAL, "Invalid argument")
+                    if path.name == "stat":
+                        return stat_record
+                    raise AssertionError("unexpected proc file")
+
+                with mock.patch.object(Path, "read_text", new=read_text):
+                    with self.assertRaises(subject.Refused) as raised:
+                        subject.task_mountinfo_lines(task)
+                    self.assertEqual(raised.exception.errno, errno.EINVAL)
+
+    def test_mountinfo_einval_preserves_original_when_task_stat_is_unreadable(self):
+        task = Path("/proc/123/task/456")
+
+        def read_text(path, *args, **kwargs):
+            if path.name == "mountinfo":
+                raise OSError(errno.EINVAL, "Invalid argument")
+            raise OSError(errno.EACCES, "Permission denied")
+
+        with mock.patch.object(Path, "read_text", new=read_text):
+            with self.assertRaises(OSError) as raised:
+                subject.task_mountinfo_lines(task)
+        self.assertEqual(raised.exception.errno, errno.EINVAL)
+
+    def test_mountinfo_einval_tolerates_a_task_that_disappeared(self):
+        task = Path("/proc/123/task/456")
+
+        def read_text(path, *args, **kwargs):
+            if path.name == "mountinfo":
+                raise OSError(errno.EINVAL, "Invalid argument")
+            raise FileNotFoundError(errno.ENOENT, "No such file or directory")
+
+        with mock.patch.object(Path, "read_text", new=read_text):
+            self.assertEqual(subject.task_mountinfo_lines(task), [])
+
+    def test_mountinfo_non_einval_is_preserved_without_task_stat_read(self):
+        task = Path("/proc/123/task/456")
+
+        def read_text(path, *args, **kwargs):
+            if path.name == "mountinfo":
+                raise OSError(errno.EACCES, "Permission denied")
+            raise AssertionError("task stat must not mask the mountinfo error")
+
+        with mock.patch.object(Path, "read_text", new=read_text):
+            with self.assertRaises(OSError) as raised:
+                subject.task_mountinfo_lines(task)
+        self.assertEqual(raised.exception.errno, errno.EACCES)
+
+    def test_mountinfo_uses_normal_live_task_rows(self):
+        task = Path("/proc/123/task/456")
+        expected = "1 2 0:1 / /proc rw - proc proc rw\n"
+
+        def read_text(path, *args, **kwargs):
+            if path.name == "mountinfo":
+                return expected
+            raise AssertionError("task stat is unnecessary after a valid read")
+
+        with mock.patch.object(Path, "read_text", new=read_text):
+            self.assertEqual(
+                subject.task_mountinfo_lines(task), expected.splitlines())
+
     def test_loaded_preflight_recovers_before_module_ownership_refusal(self):
         tools = SCRIPT.parent
         preflight = (tools / "loaded-preflight.sh").read_text()
@@ -174,6 +267,28 @@ cat() { printf 'Filename Type Size Used Priority\\n'; }
         before = b"Filename Type Size Used Priority\n/dev/safe partition 100 0 -1\n"
         self.assertEqual(subject.swap_identity(before), subject.swap_identity(before.replace(b"100 0", b"100 50")))
         self.assertNotEqual(subject.swap_identity(before), subject.swap_identity(before.replace(b"-1", b"1")))
+
+    def test_recovery_wrapper_forwards_only_sanitized_helper_failures(self):
+        wrapper = SCRIPT.parent / "qualify-owned-ram-recovery.sh"
+        source = wrapper.read_text()
+        start = source.index("def recovery_failure_marker(stderr):")
+        end = source.index("\nbackend = resources.Linux()", start)
+        namespace = {"re": re}
+        exec(source[start:end], namespace)
+
+        marker = (
+            b"BLOCKED: owned RAM resource proof or cleanup incomplete "
+            b"class=OSError errno=22; retain evidence\n"
+            b"Traceback at /private/host/path\n")
+        self.assertEqual(
+            namespace["recovery_failure_marker"](marker),
+            "BLOCKED: owned RAM recovery helper class=OSError errno=22; "
+            "retain evidence")
+        self.assertEqual(
+            namespace["recovery_failure_marker"](
+                b"untrusted path=/private/host/path\n"),
+            "BLOCKED: owned RAM recovery helper returned an unclassified "
+            "refusal; retain evidence")
 
     def test_private_record_symlink_hardlink_modes_and_changed_reads(self):
         with tempfile.TemporaryDirectory() as root:

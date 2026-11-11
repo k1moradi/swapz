@@ -2524,6 +2524,97 @@ def synthetic_log():
 
 
 class ReportContract(unittest.TestCase):
+    def test_loaded_failure_console_retains_bounded_private_child_output(self):
+        source_sha = "a" * 40
+        private_path = "/home/private-host/owned-ram-trace.py"
+        transcript = (
+            "PASS_LOADED_OWNED_NULLBLK_SMOKE=fixture\n"
+            "START_LOADED_OWNED_RAM_RECOVERY\n"
+            "BLOCKED: owned RAM recovery helper class=OSError errno=22; "
+            "retain evidence\n"
+            "Traceback (most recent call last):\n"
+            f'  File "{private_path}", line 17, in unused\n'
+            "OSError: [Errno 22] Invalid argument\n")
+
+        class FakeChild:
+            def __init__(self, *_args, **_kwargs):
+                self.stdout = io.StringIO(transcript)
+
+            @staticmethod
+            def wait():
+                return 1
+
+        previous_root = runner.ROOT
+        try:
+            with tempfile.TemporaryDirectory(prefix="loaded-report-") as name:
+                runner.ROOT = Path(name)
+                report = {
+                    "tested_commit_sha": source_sha,
+                    "stages": [],
+                    "benchmarks": {},
+                }
+                console = io.StringIO()
+                with mock.patch.object(
+                        runner.subprocess, "Popen", FakeChild), \
+                        contextlib.redirect_stdout(console):
+                    exit_status = runner.run_stage(
+                        "Owned RAM smoke + mixed/QD pilot", ["fixture"],
+                        report, parse_bench=True,
+                        retain_private_failure_output=True)
+
+                self.assertEqual(exit_status, 1)
+                self.assertEqual(len(report["stages"]), 1)
+                stage = report["stages"][0]
+                self.assertEqual(stage["status"], "BLOCKED")
+                self.assertEqual(
+                    stage["failed_phase"],
+                    "owned RAM interrupted-resource recovery")
+                public_text = console.getvalue() + json.dumps(report)
+                self.assertNotIn(private_path, public_text)
+                self.assertNotIn("Traceback", public_text)
+                self.assertIn("Private stage log (mode 0600): ",
+                              console.getvalue())
+                match = re.search(
+                    r"Private stage log \(mode 0600\): "
+                    r"(build/tests/stage-failure-[A-Za-z0-9_-]+"
+                    r"[.]private[.]log)", console.getvalue())
+                self.assertIsNotNone(match, console.getvalue())
+                retained_path = Path(name) / match.group(1)
+                self.assertEqual(retained_path.stat().st_mode & 0o777, 0o600)
+                retained = retained_path.read_text(encoding="utf-8")
+                self.assertIn(f"source_sha={source_sha}", retained)
+                self.assertIn(private_path, retained)
+                self.assertIn("Traceback", retained)
+                self.assertLessEqual(
+                    retained_path.stat().st_size,
+                    runner.MAX_PRIVATE_STAGE_OUTPUT_BYTES)
+        finally:
+            runner.ROOT = previous_root
+
+    def test_private_stage_output_truncation_keeps_both_ends_within_bound(self):
+        source_sha = "b" * 40
+        original_root = runner.ROOT
+        try:
+            with tempfile.TemporaryDirectory(prefix="stage-log-") as name:
+                runner.ROOT = Path(name)
+                output = ("first-cause\n" +
+                          "x" * (runner.MAX_PRIVATE_STAGE_OUTPUT_BYTES + 4096) +
+                          "\nlast-context")
+                relative = runner.retain_private_stage_output(
+                    output, source_sha, "Owned RAM smoke")
+                self.assertIsNotNone(relative)
+                path = runner.ROOT / relative
+                self.assertEqual(path.stat().st_mode & 0o777, 0o600)
+                self.assertLessEqual(
+                    path.stat().st_size,
+                    runner.MAX_PRIVATE_STAGE_OUTPUT_BYTES)
+                retained = path.read_text(encoding="utf-8")
+                self.assertIn("first-cause", retained)
+                self.assertIn("child output truncated", retained)
+                self.assertIn("last-context", retained)
+        finally:
+            runner.ROOT = original_root
+
     def test_constructor_failure_cleanup_evidence_is_mandatory(self):
         marker = "PASS_LOADED_CONSTRUCTOR_FAILURE_CLEANUP=stages:8 lower_io_delta:0"
         output = synthetic_log()
@@ -5274,9 +5365,11 @@ class ReportContract(unittest.TestCase):
 
         def stage_runner(first_exit):
             def run(title, command, result, *, parse_bench=False,
-                    stream_rootless_progress=False, progress_table=None):
+                    stream_rootless_progress=False, progress_table=None,
+                    retain_private_failure_output=False):
                 # Observational display does not affect qualification fixture.
                 del progress_table
+                del retain_private_failure_output
                 del command
                 if first_exit and not result["stages"]:
                     result["stages"].append({

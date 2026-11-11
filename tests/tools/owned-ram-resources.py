@@ -5,6 +5,7 @@ This never adopts legacy PID/name-only sessions, formats storage, kills holders,
 or deletes scratch evidence. Qualification success is a separate protocol.
 """
 import argparse
+import errno
 import fcntl
 import hashlib
 import json
@@ -89,6 +90,40 @@ def process_start(pid):
     fields = record.rsplit(") ", 1)[1].split()
     require(len(fields) >= 20 and fields[19].isdecimal(), "process-identity")
     return int(fields[19])
+
+
+def task_mountinfo_lines(task):
+    """Read task mounts, tolerating procfs EINVAL only for a zombie task.
+
+    Linux can return EINVAL for /proc/<pid>/task/<tid>/mountinfo after a task
+    exits but before its proc entry is reaped. Such a zombie has already
+    released its open files and cannot hold a mount; a still-live task remains
+    an exclusion uncertainty and must keep recovery blocked.
+    """
+    try:
+        return (task / "mountinfo").read_text().splitlines()
+    except OSError as error:
+        if error.errno != errno.EINVAL:
+            raise
+        try:
+            stat_record = (task / "stat").read_text()
+        except FileNotFoundError:
+            return []
+        except OSError:
+            raise error from None
+        fields = stat_record.rsplit(") ", 1)
+        tail = fields[1].split() if len(fields) == 2 else []
+        task_identifier = (fields[0].split(" ", 1)[0]
+                           if fields else "")
+        if (task_identifier != task.name or " (" not in fields[0] or
+                len(tail) < 20 or len(tail[0]) != 1 or
+                not tail[0].isalpha() or not tail[19].isdecimal()):
+            failure = Refused("task-stat-malformed")
+            failure.errno = error.errno
+            raise failure from error
+        if tail[0] == "Z":
+            return []
+        raise
 
 
 def unique_object(pairs):
@@ -276,7 +311,7 @@ class Linux:
                         require(not (stat.S_ISBLK(value.st_mode) and
                                 f"{os.major(value.st_rdev)}:{os.minor(value.st_rdev)}" in wanted),
                                 "device-process-reference")
-                    for line in (task / "mountinfo").read_text().splitlines():
+                    for line in task_mountinfo_lines(task):
                         fields = line.split()
                         require(len(fields) >= 10 and fields[2] not in wanted,
                                 "device-mount-reference")

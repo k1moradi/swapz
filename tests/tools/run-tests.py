@@ -2523,6 +2523,77 @@ def retain_direct_rootless_first_failure(output, child_exit_code):
                 pass
 
 
+MAX_PRIVATE_STAGE_OUTPUT_BYTES = 1024 * 1024
+
+
+def retain_private_stage_output(output, source_sha, stage_title):
+    """Retain bounded child output privately without affecting its exit status."""
+    if (not isinstance(source_sha, str) or
+            not re.fullmatch(r"[0-9a-f]{40}", source_sha)):
+        return None
+    build_directory = ROOT / "build"
+    tests_directory = build_directory / "tests"
+    try:
+        try:
+            build_directory.mkdir(mode=0o700)
+        except FileExistsError:
+            pass
+        build_metadata = build_directory.lstat()
+        if (not stat.S_ISDIR(build_metadata.st_mode) or
+                build_metadata.st_uid != os.geteuid()):
+            return None
+        try:
+            tests_directory.mkdir(mode=0o700)
+        except FileExistsError:
+            pass
+        tests_metadata = tests_directory.lstat()
+        if (not stat.S_ISDIR(tests_metadata.st_mode) or
+                tests_metadata.st_uid != os.geteuid()):
+            return None
+
+        header = (f"source_sha={source_sha}\nstage={stage_title}\n"
+                  "private_child_output_begin\n").encode("ascii")
+        body = output.encode("utf-8", "replace")
+        budget = max(0, MAX_PRIVATE_STAGE_OUTPUT_BYTES - len(header))
+        if len(body) > budget:
+            marker = b"\n[child output truncated; retained prefix and suffix]\n"
+            prefix_size = min(128 * 1024, max(0, budget - len(marker)) // 2)
+            suffix_size = max(0, budget - len(marker) - prefix_size)
+            body = body[:prefix_size] + marker + (
+                body[-suffix_size:] if suffix_size else b"")
+
+        descriptor, filename = tempfile.mkstemp(
+            prefix="stage-failure-", suffix=".private.log",
+            dir=tests_directory)
+        try:
+            os.fchmod(descriptor, 0o600)
+            with os.fdopen(descriptor, "wb") as private_log:
+                private_log.write(header)
+                private_log.write(body)
+                private_log.flush()
+                os.fsync(private_log.fileno())
+        except OSError:
+            try:
+                os.close(descriptor)
+            except OSError:
+                pass
+            # Keep a partial file only when its created identity is still
+            # private and unambiguous; never replace the stage's first error.
+            try:
+                metadata = os.stat(filename, follow_symlinks=False)
+                if (stat.S_ISREG(metadata.st_mode) and
+                        metadata.st_uid == os.geteuid() and
+                        stat.S_IMODE(metadata.st_mode) == 0o600 and
+                        metadata.st_nlink == 1):
+                    return Path(filename).relative_to(ROOT).as_posix()
+            except OSError:
+                pass
+            return None
+        return Path(filename).relative_to(ROOT).as_posix()
+    except OSError:
+        return None
+
+
 def failure_context(output, *, loaded=True, default_phase=None,
                     child_exit_code=None):
     """Return a sanitized failure phase/reason without leaking host details.
@@ -2546,6 +2617,8 @@ def failure_context(output, *, loaded=True, default_phase=None,
                 phase = "owned RAM GC full-destination roll-forward recovery"
             elif line.startswith("START_LOADED_OWNED_NULLBLK_SMOKE"):
                 phase = "owned RAM kernel smoke"
+            elif line.startswith("START_LOADED_OWNED_RAM_RECOVERY"):
+                phase = "owned RAM interrupted-resource recovery"
             elif line.startswith("START_LOADED_COMPOUND_BIO"):
                 phase = "owned RAM compound/segmented BIO observation"
             elif line.startswith("START_LOADED_LIVE_GC"):
@@ -4137,7 +4210,8 @@ def loaded_timing_phase(line):
 
 
 def run_stage(title, command, result, *, parse_bench=False,
-              stream_rootless_progress=False, progress_table=None):
+              stream_rootless_progress=False, progress_table=None,
+              retain_private_failure_output=False):
     start = time.monotonic()
     loaded_timing_phases = []
     loaded_current_phase = "preflight"
@@ -4453,6 +4527,15 @@ def run_stage(title, command, result, *, parse_bench=False,
               else "BLOCKED" if blocked_marker else "FAIL")
     record = {"name": title, "status": status, "elapsed_s":
               round(time.monotonic() - start, 3), "exit_code": rc}
+    if rc and retain_private_failure_output:
+        private_log = retain_private_stage_output(
+            output, result.get("tested_commit_sha"), title)
+        if private_log is None:
+            print("        Private stage output unavailable; original stage "
+                  "failure retained", flush=True)
+        else:
+            print("        Private stage log (mode 0600): " + private_log,
+                  flush=True)
     if title == "Native and rootless contracts":
         rootless_timing = parse_rootless_timing(output)
         if rootless_timing is not None and (
@@ -11588,7 +11671,8 @@ def _run_qualification(args, sync_result):
             code = run_stage(
                 title, command, result, parse_bench=(i == 4),
                 stream_rootless_progress=(i == 1),
-                progress_table=progress_table)
+                progress_table=progress_table,
+                retain_private_failure_output=(i == 4))
             if code:
                 exit_code = code
                 break

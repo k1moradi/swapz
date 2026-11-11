@@ -2724,6 +2724,15 @@ physical-trial verdict, and publication refusal details without re-running
 any device test. Their 0600 paths must be printed; they must never qualify
 the source or be uploaded to Git without the owner's explicit decision.
 
+For an official loaded-stage failure, retain the stage's bounded merged child
+output automatically in a mode-0600 file under `build/tests/`, bound to the
+tested source SHA and fixed stage name. The console must print only its
+repository-relative path and mode; never copy the child transcript or its
+private path into `test_results.json`. Keep the original stage exit and first
+failure authoritative if evidence allocation or fsync fails. Loaded phase
+attribution must recognize `START_LOADED_OWNED_RAM_RECOVERY` as interrupted
+owned-RAM recovery, rather than inheriting the preceding shared fixture phase.
+
 Before compiling or running privileged qualification, inspect both index and
 worktree for modified **tracked** source on local `main`, excluding only the
 generated `test_results.json`. A dirty or unverifiable source blocks the
@@ -6624,7 +6633,18 @@ descriptor, or mappings is activity uncertainty and blocks cleanup. Do not
 treat EACCES as process exit or as proof that the process is unrelated; until
 those references are readable enough to exclude the inspected session
 identities, deletion authority is unproved and the safe action is read-only
-review. Native rootless tests independent of procfs visibility
+review. In the owned-RAM recovery helper's task-specific
+`/proc/<pid>/task/<tid>/mountinfo` scan, an `EINVAL` read may be treated as a
+vanished mount view only after the same task's
+`/proc/<pid>/task/<tid>/stat` is read successfully, its parsed task ID matches
+`<tid>`, contains the numeric start-time field, and its state is exactly `Z`.
+A malformed, truncated or inaccessible stat record,
+an identity mismatch, any non-zombie task, or any other mountinfo errno remains
+a refusal with the original error preserved. This narrow procfs case does not
+apply to the production primary manager's mount inventory or malformed
+mountinfo parsing. Rootless regressions must prove zombie `EINVAL` is skipped,
+live-task `EINVAL` and non-`EINVAL` errors remain failures, and malformed or
+substituted task-stat evidence is rejected. Native rootless tests independent of procfs visibility
 must substitute a deterministic, explicitly named process inventory only within
 the test interpreter, never through the production cleaner's environment or
 command-line. Register each real live FD or mmap fixture holder so its actual
