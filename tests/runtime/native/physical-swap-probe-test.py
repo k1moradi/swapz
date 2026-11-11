@@ -690,15 +690,38 @@ class PhysicalSwapProbeTests(unittest.TestCase):
         self.assertEqual(default["reason"], "phase_refused")
 
     def test_algorithm_summary_failure_retains_single_emitted_diagnostic(self):
-        _workload, policy, result = self.algorithm_workload_fixture()
+        workload, policy, result = self.algorithm_workload_fixture()
         result["rounds"] = []
+        mapper = "/dev/mapper/swapz-demo-physical-1234567890abcdef"
         stderr = io.StringIO()
-        with mock.patch.object(probe.sys, "stderr", stderr), \
-                self.assertRaises(probe.ProbeError) as rejected:
-            probe._algorithm_real_swap_summary(result, policy, "a" * 64)
+        # The summary validates evidence; the live-oracle wrapper emits the
+        # one authenticated diagnostic before its caller recovers the mapper.
+        with ExitStack() as stack:
+            stack.enter_context(mock.patch.object(probe.sys, "stderr", stderr))
+            for name, value in (
+                    ("_verify_owned_mapper", mapper),
+                    ("block_identity", (253, 12)),
+                    ("_algorithm_real_swap_workload", (workload, policy)),
+                    ("_git_result", subprocess.CompletedProcess(
+                        [], 0, stdout="oracle")),
+                    ("_run", subprocess.CompletedProcess(
+                        [], 0, stdout="status"))):
+                stack.enter_context(mock.patch.object(
+                    probe, name, return_value=value))
+            stack.enter_context(mock.patch.object(
+                probe, "_active_swap_for",
+                side_effect=[None, {"used_kib": 0}]))
+            with self.assertRaisesRegex(
+                    probe.ProbeError, "complete_reuse_rounds") as rejected:
+                probe._run_algorithm_live_swap_oracle(
+                    mapper,
+                    {"source_sha": "a" * 40, "run_id": "1" * 32,
+                     "dm_name": "owned"},
+                    {"major": 8, "minor": 4}, Path("/private"))
         markers = [line for line in stderr.getvalue().splitlines()
                    if line.startswith("PHYSICAL_ALGORITHM_DEBUG=")]
         self.assertEqual(len(markers), 1)
+        self.assertEqual(workload._run_workload.call_count, 1)
         self.assertEqual(rejected.exception.workload_diagnostic,
                          json.loads(markers[0].split("=", 1)[1]))
 
