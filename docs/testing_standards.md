@@ -2812,6 +2812,22 @@ expanded marker remains untrusted and must not reach stdout or publication.
 Rootless tests must verify the exact official report path, the first
 pre-consent refusal, and private stderr non-disclosure.
 
+When interactive algorithm-tier `make test` completes all five RAM stages,
+the runner must atomically write and publish a source-bound
+`overall=INCOMPLETE` RAM checkpoint to canonical `test_results.json`
+**before** invoking the optional physical helper or requesting consent.
+A disconnected terminal or lost host during subsequent physical admission
+must not erase already completed RAM evidence. Confirm a nonforce Git report
+push and reconcile local/canonical `main` before entering physical admission;
+a failed report write, push, archive-only publication or main reconciliation
+must skip the physical helper and retain `NOT_RUN`. A report-only main advance
+is accepted by the existing exact-source physical admission gate, but a source
+advance or changed ownership is not. After the optional trial returns,
+publish the final result normally, retaining physical diagnostic/failure
+precedence; the early checkpoint never certifies physical PASS. Rootless
+regressions must prove publication precedes a simulated terminal loss and
+that publication refusal prevents any physical helper invocation.
+
 When the optional development physical swap trial follows five passing RAM
 stages, its root-owned anonymous-pageout oracle must automatically collect
 bounded read-only host reclaim evidence from `/proc/vmstat` and

@@ -11876,7 +11876,36 @@ def _run_qualification(args, sync_result):
             "overall": "NOT_RUN",
             "reason": "physical_source_admission_protocol_not_qualified",
         }
-        if sys.stdin.isatty() and sys.stdout.isatty():
+        # Publish the five-stage RAM result before any interactive physical
+        # trial. An interrupted terminal or host must not erase completed
+        # source-bound RAM evidence. This checkpoint is never physical PASS.
+        interactive_physical_trial = sys.stdin.isatty() and sys.stdout.isatty()
+        pretrial_checkpoint_published = False
+        if interactive_physical_trial:
+            try:
+                write_report(result)
+                pretrial_notice = publish(result["tested_commit_sha"])
+            except Exception:
+                # The terminal path retries reporting; never enter physical
+                # admission while checkpoint publication is unconfirmed.
+                pretrial_notice = "GIT_SYNC_FAILED: phase=pretrial-checkpoint"
+            print(f"  Pretrial RAM checkpoint: {pretrial_notice}", flush=True)
+            if pretrial_notice.startswith("SYNCED_GIT"):
+                try:
+                    pretrial_main_sync = sync_main_after_test()
+                except Exception:
+                    pretrial_main_sync = {
+                        "status": "BLOCKED",
+                        "reason": "pretrial_main_sync_unavailable",
+                    }
+                pretrial_checkpoint_published = (
+                    pretrial_main_sync.get("status") == "PASS")
+                if not pretrial_checkpoint_published:
+                    print(
+                        "  Pretrial main synchronization: BLOCKED "
+                        f"reason={pretrial_main_sync.get('reason', 'unavailable')}",
+                        flush=True)
+        if pretrial_checkpoint_published:
             print("  RAM qualification passed; checking optional physical "
                   "algorithm trial admission", flush=True)
             physical_started = time.monotonic()
@@ -11987,6 +12016,16 @@ def _run_qualification(args, sync_result):
                 print_physical_trial_result("NOT RUN", physical_duration, progress_table)
                 print("  Physical trial admission: device unchanged or "
                       "safely refused")
+        elif interactive_physical_trial:
+            # A successful local RAM run is not permission to start physical
+            # work without a canonical source-bound report checkpoint.
+            result["algorithm_real_swap"] = {
+                "overall": "NOT_RUN",
+                "reason": "pretrial_ram_checkpoint_unconfirmed",
+            }
+            print("  Physical trial: NOT RUN; RAM checkpoint unconfirmed",
+                  flush=True)
+            print_physical_trial_result("NOT RUN", "-", progress_table)
         else:
             print_physical_trial_result("NOT RUN", "-", progress_table)
             print("  Physical qualification: source/run/target admission "

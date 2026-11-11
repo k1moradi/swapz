@@ -4276,6 +4276,135 @@ class ReportContract(unittest.TestCase):
             runner.lz4_acceleration_verdict(changed)["overall"],
             "PASS_LZ4_ACCELERATION_AB")
 
+    def test_interactive_algorithm_checkpoint_precedes_physical_and_blocks_unpublished(self):
+        """A lost terminal cannot erase already published RAM qualification."""
+        source_sha = "a" * 40
+
+        class OperatorConsole(io.StringIO):
+            def isatty(self):
+                return True
+
+        def stage_pass(title, command, report, **options):
+            report["stages"].append({
+                "name": title, "status": "PASS",
+                "elapsed_s": 0.0, "exit_code": 0,
+            })
+            if options.get("parse_bench"):
+                report["benchmarks"]["delta64_prepare"] = {
+                    "overall": "NOT_RUN"}
+            return 0
+
+        for checkpoint_notice, interrupted in (
+                ("SYNCED_GIT: fixture", True),
+                ("GIT_SYNC_FAILED: phase=push reason=network_or_transport",
+                 False)):
+            with self.subTest(interrupted=interrupted):
+                events = []
+                reports = []
+
+                def save_report(report):
+                    events.append("write")
+                    reports.append(json.loads(json.dumps(report)))
+
+                def publish_report(tested_source):
+                    self.assertEqual(tested_source, source_sha)
+                    events.append("publish")
+                    return checkpoint_notice
+
+                def physical_probe(command, **options):
+                    self.assertEqual(Path(command[-1]).name,
+                                     "algorithm-physical.py")
+                    events.append("physical")
+                    # Simulate an SSH terminal interruption before the helper
+                    # can produce a physical outcome or the final report.
+                    raise KeyboardInterrupt
+
+                patches = (
+                    mock.patch.object(
+                        runner, "report_host_identity",
+                        return_value={"status": "AVAILABLE"}),
+                    mock.patch.object(runner, "git_sha",
+                                      return_value=source_sha),
+                    mock.patch.object(
+                        runner, "make_invocation",
+                        return_value=(["make"], "fixture")),
+                    mock.patch.object(
+                        runner, "tracked_source_checkout_preflight",
+                        return_value=None),
+                    mock.patch.object(runner, "run_stage",
+                                      side_effect=stage_pass),
+                    mock.patch.object(
+                        runner, "qualification_artifact_digests",
+                        return_value={"status": "AVAILABLE"}),
+                    mock.patch.object(
+                        runner, "owner_qualification_artifacts_available",
+                        return_value=True),
+                    mock.patch.object(
+                        runner, "required_benchmark_gates_pass",
+                        return_value=True),
+                    mock.patch.object(runner, "lane_gap_attribution_rows",
+                                      return_value=[]),
+                    mock.patch.object(
+                        runner, "goal_scorecard",
+                        return_value={"overall": "UNAVAILABLE"}),
+                    mock.patch.object(
+                        runner, "write_algorithm_ram_development_evidence",
+                        return_value=(
+                            ROOT / "build/tests/nonexistent-private-fixture",
+                            "a" * 32)),
+                    mock.patch.object(
+                        runner.subprocess, "run", side_effect=physical_probe),
+                    mock.patch.object(runner, "write_report",
+                                      side_effect=save_report),
+                    mock.patch.object(runner, "publish",
+                                      side_effect=publish_report),
+                    mock.patch.object(runner, "print_bench"),
+                    mock.patch.object(runner, "write_failure_diagnostic",
+                                      return_value=None),
+                    mock.patch.object(
+                        runner, "refresh_history",
+                        return_value="NOT UPDATED: fixture"),
+                    mock.patch.object(
+                        runner.sys, "stdin",
+                        mock.Mock(isatty=lambda: True)),
+                )
+                with contextlib.ExitStack() as stack:
+                    for patch in patches:
+                        stack.enter_context(patch)
+                    stack.enter_context(mocked_main_sync(source_sha))
+                    output = stack.enter_context(
+                        contextlib.redirect_stdout(OperatorConsole()))
+                    if interrupted:
+                        with self.assertRaises(KeyboardInterrupt):
+                            runner._run_qualification(
+                                mock.Mock(kdir="/unused", tier="algorithm"),
+                                {"status": "PASS", "reason": "fixture",
+                                 "source_sha": source_sha,
+                                 "head_sha": source_sha})
+                    else:
+                        self.assertEqual(runner._run_qualification(
+                            mock.Mock(kdir="/unused", tier="algorithm"),
+                            {"status": "PASS", "reason": "fixture",
+                             "source_sha": source_sha,
+                             "head_sha": source_sha}), 2)
+                    console = output.getvalue()
+
+                self.assertEqual(reports[0]["overall"], "INCOMPLETE")
+                self.assertEqual(len(reports[0]["stages"]), 5)
+                self.assertNotIn("algorithm_real_swap", reports[0])
+                if interrupted:
+                    self.assertEqual(events,
+                                     ["write", "publish", "physical"])
+                    self.assertEqual(len(reports), 1)
+                else:
+                    self.assertEqual(events,
+                                     ["write", "publish", "write", "publish"])
+                    self.assertEqual(reports[1]["algorithm_real_swap"], {
+                        "overall": "NOT_RUN",
+                        "reason": "pretrial_ram_checkpoint_unconfirmed",
+                    })
+                    self.assertIn("Physical trial: NOT RUN", console)
+
     def test_official_algorithm_tier_promotes_only_verified_physical_debug(self):
         """Exercise the real make-test runner boundary without device access."""
         source_sha = "a" * 40
@@ -4350,7 +4479,7 @@ class ReportContract(unittest.TestCase):
              mock.patch.multiple(
                  runner,
                  print_bench=mock.Mock(),
-                 publish=mock.Mock(return_value="fixture"),
+                 publish=mock.Mock(return_value="SYNCED_GIT: fixture"),
                  write_failure_diagnostic=mock.Mock(return_value=None),
                  refresh_history=mock.Mock(
                      return_value="NOT UPDATED: fixture")), \
@@ -4364,8 +4493,11 @@ class ReportContract(unittest.TestCase):
                  "source_sha": source_sha, "head_sha": source_sha}), 3)
             console = output.getvalue()
 
-        self.assertEqual(report_snapshots[0]["overall"], "FAIL")
-        self.assertEqual(report_snapshots[0]["algorithm_real_swap"][
+        self.assertEqual(len(report_snapshots), 2)
+        self.assertEqual(report_snapshots[0]["overall"], "INCOMPLETE")
+        self.assertNotIn("algorithm_real_swap", report_snapshots[0])
+        self.assertEqual(report_snapshots[1]["overall"], "FAIL")
+        self.assertEqual(report_snapshots[1]["algorithm_real_swap"][
             "diagnostic"], error_context)
         self.assertIn("gate=mapper_usage", console)
         self.assertIn("zswap_enabled=YES", console)
@@ -4464,7 +4596,7 @@ class ReportContract(unittest.TestCase):
             mock.patch.multiple(
                 runner,
                 print_bench=mock.Mock(),
-                publish=mock.Mock(return_value="fixture"),
+                publish=mock.Mock(return_value="SYNCED_GIT: fixture"),
                 write_failure_diagnostic=mock.Mock(return_value=None),
                 refresh_history=mock.Mock(return_value="NOT UPDATED: fixture")),
             mock.patch.object(runner.sys, "stdin",
@@ -4481,9 +4613,11 @@ class ReportContract(unittest.TestCase):
                 {"status": "PASS", "reason": "fixture",
                  "source_sha": source_sha, "head_sha": source_sha}), 2)
             console = output.getvalue()
-        self.assertEqual(len(reports), 1)
+        self.assertEqual(len(reports), 2)
         self.assertEqual(reports[0]["overall"], "INCOMPLETE")
-        self.assertEqual(reports[0]["algorithm_real_swap"], {
+        self.assertNotIn("algorithm_real_swap", reports[0])
+        self.assertEqual(reports[1]["overall"], "INCOMPLETE")
+        self.assertEqual(reports[1]["algorithm_real_swap"], {
             "overall": "NOT_RUN",
             "reason": "canonical_source_advanced",
             "diagnostic": {
@@ -4492,7 +4626,7 @@ class ReportContract(unittest.TestCase):
                 "reason": "canonical_source_advanced",
             },
         })
-        self.assertEqual([stage["status"] for stage in reports[0]["stages"]],
+        self.assertEqual([stage["status"] for stage in reports[1]["stages"]],
                          ["PASS"] * 5)
         self.assertIn("phase=before_consent reason=canonical_source_advanced",
                       console)
