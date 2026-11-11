@@ -33,6 +33,46 @@ on newly created owned RAM devices, with native swap identity unchanged.
 
 **Three-tier test policy:** `make fast_test` is development-only and never qualifies or publishes `test_results.json`; `make test` runs the algorithm/RAM path and returns INCOMPLETE (nonzero) until physical source/run/target admission is qualified; `make test_full` retains all rootless DKMS/systemd integration and RAM qualification. Both privileged tiers report BLOCKED (nonzero) if noninteractive privilege is unavailable. RAM/integration PASS cannot certify physical storage or cold-boot production acceptance. Private scripts and CI jobs are implementation details, not operator interfaces.
 
+## Official test main synchronization
+
+`make test` and `make test_full` serialize within one checkout using a private
+lock in its Git directory. Before any qualification stage, the runner requires
+the canonical `main` checkout, a clean tracked source/index, and exactly one
+canonical fetch and push URL for `k1moradi/swapz`. It performs a bounded,
+noninteractive fetch and advances local `main` only with a checked
+fast-forward. A local-only commit, divergence, remote-path collision with an
+untracked file, ambiguous remote, failed fetch, or changed tracked source
+blocks all stages; the runner never resets source, checks out another branch,
+pushes source commits, or runs tests against a dirty checkout.
+
+The generated `test_results.json` is the only tracked-path exception. Before
+replacing a dirty copy, the runner preserves its staged and working bytes in a
+mode-0700 directory under `.git`, with mode-0600 files and durable directory
+entries, then restores only that report path. Other unpublished edits remain
+untouched. If the pretest fast-forward changes the non-report source identity,
+the runner restarts the same Make goal once so the root Makefile and runner are
+both parsed from the synchronized source. It carries the lock and GNU Make
+jobserver descriptors through that restart. A second source advance blocks
+before the first stage; report-only commits do not cause a restart.
+
+The runner rechecks the tested HEAD, source identity and tracked-source
+cleanliness before and after each stage. Source drift stops later stages and
+cannot be reported as a qualified run. After report publication, a second
+bounded fetch may fast-forward local `main` if the remote is a descendant and
+no local source or untracked-path conflict exists. It preserves a dirty test
+report before replacing it. Local-ahead/diverged state, failed authentication,
+or uncertain ancestry remains visible as a synchronization failure; existing
+report publication may publish only its report-only commit. These checks keep
+local and remote refs aligned when a safe fast-forward is possible without
+overwriting concurrent source work.
+
+Rootless regressions must exercise an unchanged checkout, source and
+report-only advances, staged and unstaged report preservation, dirty-source
+refusal, local-ahead and divergent histories, untracked collisions, failed
+fetch redaction, lock contention, source re-execution, jobserver-FD transfer,
+and post-test reconciliation using private local bare remotes. They must never
+contact or mutate the canonical GitHub repository.
+
 ## Boot-verifier fixture storage
 
 Rootless boot-verifier fixtures must model their synthetic persistent report

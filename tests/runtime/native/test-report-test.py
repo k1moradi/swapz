@@ -24,6 +24,29 @@ runner = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(runner)
 
 
+@contextlib.contextmanager
+def mocked_main_sync(source_sha):
+    patcher = mock.patch.multiple(
+        runner,
+        acquire_make_test_lock=mock.DEFAULT,
+        sync_main_before_test=mock.DEFAULT,
+        sync_main_after_test=mock.DEFAULT,
+        source_checkout_stability=mock.DEFAULT)
+    replacements = patcher.start()
+    replacements["acquire_make_test_lock"].return_value = (None, None, None)
+    replacements["sync_main_before_test"].return_value = {
+        "status": "PASS", "reason": "fixture",
+        "source_sha": source_sha, "head_sha": source_sha}
+    replacements["sync_main_after_test"].return_value = {
+        "status": "PASS", "reason": "fixture"}
+    replacements["source_checkout_stability"].return_value = {
+        "stable": True, "reason": "fixture"}
+    try:
+        yield
+    finally:
+        patcher.stop()
+
+
 policy_spec = importlib.util.spec_from_file_location(
     "swapz_rootless_resource_policy",
     ROOT / "tests/tools/rootless-resource-policy.py")
@@ -429,6 +452,329 @@ class RootlessParallelPilotContract(unittest.TestCase):
                 worker.wait(timeout=5)
 
 
+class MainSynchronizationContract(unittest.TestCase):
+    """Exercise test-time main synchronization with isolated local Git remotes."""
+
+    def setUp(self):
+        self.sandbox = Path(tempfile.mkdtemp(
+            prefix="main-sync-", dir=ROOT / "build/tests"))
+        self.origin = self.sandbox / "origin.git"
+        self.checkout = self.sandbox / "checkout"
+        self._git(self.sandbox, "init", "--quiet", "--bare",
+                  "--object-format=sha1", str(self.origin))
+        self._git(self.sandbox, "init", "--quiet", "--initial-branch=main",
+                  "--object-format=sha1", str(self.checkout))
+        self._git(self.checkout, "config", "user.name", "main sync test")
+        self._git(self.checkout, "config", "user.email", "test@example.invalid")
+        (self.checkout / "source.c").write_text(
+            "int source(void) { return 1; }\n", encoding="utf-8")
+        (self.checkout / runner.GIT_RESULT).write_text(
+            '{"overall":"NOT_RUN"}\n', encoding="utf-8")
+        self._git(self.checkout, "add", "source.c", runner.GIT_RESULT)
+        self._git(self.checkout, "commit", "--quiet", "-m", "initial source")
+        self._git(self.checkout, "remote", "add", "origin", str(self.origin))
+        self._git(self.checkout, "push", "--quiet", "origin", "main:main")
+
+        self.old_root, self.old_report = runner.ROOT, runner.REPORT
+        runner.ROOT = self.checkout
+        runner.REPORT = self.checkout / runner.GIT_RESULT
+        self.remote_patch = mock.patch.object(
+            runner, "_remote_origin_url",
+            return_value="https://github.com/k1moradi/swapz.git")
+        self.remote_patch.start()
+
+    def tearDown(self):
+        self.remote_patch.stop()
+        runner.ROOT, runner.REPORT = self.old_root, self.old_report
+        import shutil
+        shutil.rmtree(self.sandbox)
+
+    @staticmethod
+    def _git(cwd, *args):
+        return subprocess.run(
+            ["git", *args], cwd=cwd, check=True, capture_output=True,
+            text=True, timeout=15)
+
+    def _advance_remote(self, *, source=False, report=False, extra_file=None):
+        writer = self.sandbox / "writer"
+        self._git(self.sandbox, "clone", "--quiet", "--branch", "main",
+                  str(self.origin), str(writer))
+        self._git(writer, "config", "user.name", "remote writer")
+        self._git(writer, "config", "user.email", "test@example.invalid")
+        if source:
+            (writer / "source.c").write_text(
+                "int source(void) { return 2; }\n", encoding="utf-8")
+        if report:
+            (writer / runner.GIT_RESULT).write_text(
+                '{"overall":"INCOMPLETE","writer":"remote"}\n',
+                encoding="utf-8")
+        if extra_file is not None:
+            (writer / extra_file).write_text("remote file\n", encoding="utf-8")
+        self._git(writer, "add", ".")
+        message = "remote advance"
+        if report and not source and extra_file is None:
+            message = f"test: latest run for {runner.git_sha()[:12]} [skip ci]"
+        self._git(writer, "commit", "--quiet", "-m", message)
+        self._git(writer, "push", "--quiet", "origin", "main:main")
+        return self._git(writer, "rev-parse", "HEAD").stdout.strip()
+
+    def test_pretest_fast_forward_preserves_staged_and_worktree_report(self):
+        report = self.checkout / runner.GIT_RESULT
+        report.write_text('{"overall":"STAGED"}\n', encoding="utf-8")
+        self._git(self.checkout, "add", runner.GIT_RESULT)
+        report.write_text('{"overall":"WORKTREE"}\n', encoding="utf-8")
+        expected_remote = self._advance_remote(source=True)
+
+        result = runner.sync_main_before_test()
+
+        self.assertEqual(result["status"], "PASS")
+        self.assertEqual(result["reason"], "fast_forwarded")
+        self.assertTrue(result["source_changed"])
+        self.assertEqual(result["head_sha"], expected_remote)
+        self.assertEqual(runner.git_sha(), result["source_sha"])
+        self.assertEqual(report.read_text(encoding="utf-8"),
+                         '{"overall":"NOT_RUN"}\n')
+        snapshot = self.checkout / result["report_snapshot"]
+        self.assertEqual(snapshot.stat().st_mode & 0o777, 0o700)
+        self.assertEqual((snapshot / "index.json").stat().st_mode & 0o777,
+                         0o600)
+        self.assertEqual((snapshot / "worktree.json").stat().st_mode & 0o777,
+                         0o600)
+        self.assertEqual((snapshot / "index.json").read_text(),
+                         '{"overall":"STAGED"}\n')
+        self.assertEqual((snapshot / "worktree.json").read_text(),
+                         '{"overall":"WORKTREE"}\n')
+        self.assertIsNone(runner.tracked_source_checkout_preflight())
+
+    def test_report_only_remote_advance_does_not_request_make_reexec(self):
+        expected_remote = self._advance_remote(report=True)
+
+        result = runner.sync_main_before_test()
+
+        self.assertEqual(result["status"], "PASS")
+        self.assertEqual(result["head_sha"], expected_remote)
+        self.assertFalse(result["source_changed"])
+        self.assertEqual(runner.git_sha(), result["source_sha"])
+
+    def test_uncommitted_source_blocks_and_dirty_report_is_preserved(self):
+        source = self.checkout / "source.c"
+        source.write_text("unpublished source edit\n", encoding="utf-8")
+        report = self.checkout / runner.GIT_RESULT
+        report.write_text('{"overall":"LOCAL"}\n', encoding="utf-8")
+
+        result = runner.sync_main_before_test()
+
+        self.assertEqual(result["status"], "BLOCKED")
+        self.assertEqual(result["reason"], "uncommitted_tracked_source")
+        self.assertEqual(source.read_text(encoding="utf-8"),
+                         "unpublished source edit\n")
+        snapshot = self.checkout / result["report_snapshot"]
+        self.assertEqual((snapshot / "worktree.json").read_text(),
+                         '{"overall":"LOCAL"}\n')
+
+    def test_untracked_path_collision_blocks_without_replacing_local_file(self):
+        local_file = self.checkout / "new-source.c"
+        local_file.write_text("local untracked bytes\n", encoding="utf-8")
+        old_head = self._git(self.checkout, "rev-parse", "HEAD").stdout.strip()
+        expected_remote = self._advance_remote(extra_file="new-source.c")
+
+        result = runner.sync_main_before_test()
+
+        self.assertEqual(result["status"], "BLOCKED")
+        self.assertEqual(result["reason"],
+                         "untracked_paths_overlap_remote_changes")
+        self.assertEqual(result["collision_count"], 1)
+        self.assertEqual(local_file.read_text(encoding="utf-8"),
+                         "local untracked bytes\n")
+        self.assertEqual(self._git(self.checkout, "rev-parse", "HEAD")
+                         .stdout.strip(), old_head)
+        self.assertNotEqual(old_head, expected_remote)
+
+    def test_local_ahead_and_diverged_main_are_not_rewritten(self):
+        local_file = self.checkout / "local.c"
+        local_file.write_text("local commit\n", encoding="utf-8")
+        self._git(self.checkout, "add", "local.c")
+        self._git(self.checkout, "commit", "--quiet", "-m", "local commit")
+        local_head = self._git(self.checkout, "rev-parse", "HEAD").stdout.strip()
+
+        result = runner.sync_main_before_test()
+
+        self.assertEqual(result["status"], "BLOCKED")
+        self.assertEqual(result["reason"], "local_main_ahead_of_remote")
+        self.assertEqual(self._git(self.checkout, "rev-parse", "HEAD")
+                         .stdout.strip(), local_head)
+
+    def test_diverged_main_blocks_without_resetting_either_history(self):
+        local_file = self.checkout / "local.c"
+        local_file.write_text("local commit\n", encoding="utf-8")
+        self._git(self.checkout, "add", "local.c")
+        self._git(self.checkout, "commit", "--quiet", "-m", "local commit")
+        local_head = self._git(self.checkout, "rev-parse", "HEAD").stdout.strip()
+        remote_head = self._advance_remote(source=True)
+
+        result = runner.sync_main_before_test()
+
+        self.assertEqual(result["status"], "BLOCKED")
+        self.assertEqual(result["reason"], "local_main_diverged_from_remote")
+        self.assertEqual(self._git(self.checkout, "rev-parse", "HEAD")
+                         .stdout.strip(), local_head)
+        self.assertNotEqual(local_head, remote_head)
+
+    def test_second_source_advance_after_reexec_is_blocked(self):
+        expected_source = runner.git_sha()
+        remote_head = self._advance_remote(source=True)
+
+        result = runner.sync_main_before_test(expected_source)
+
+        self.assertEqual(result["status"], "BLOCKED")
+        self.assertEqual(result["reason"],
+                         "source_advanced_again_before_test_start")
+        self.assertEqual(result["head_sha"], remote_head)
+        self.assertEqual(self._git(self.checkout, "rev-parse", "HEAD")
+                         .stdout.strip(), remote_head)
+
+    def test_fetch_authentication_failure_is_bounded_and_redacted(self):
+        private_message = b"Authentication failed SECRET private/path"
+        failed_fetch = subprocess.CompletedProcess(
+            ["git", "fetch"], 1, b"", private_message)
+        with mock.patch.object(
+                runner, "git_command_with_credential_fallback",
+                return_value=failed_fetch):
+            result = runner.sync_main_before_test()
+
+        self.assertEqual(result["status"], "BLOCKED")
+        self.assertEqual(result["reason"],
+                         "fetch_credentials_or_repository_access")
+        self.assertNotIn("SECRET", str(result))
+        self.assertNotIn("private/path", str(result))
+
+    def test_posttest_sync_fast_forwards_and_preserves_new_report(self):
+        report = self.checkout / runner.GIT_RESULT
+        report.write_text('{"overall":"TEST RUN"}\n', encoding="utf-8")
+        expected_remote = self._advance_remote(source=True)
+
+        result = runner.sync_main_after_test()
+
+        self.assertEqual(result["status"], "PASS")
+        self.assertEqual(result["reason"], "fast_forwarded")
+        self.assertEqual(result["head_sha"], expected_remote)
+        snapshot = self.checkout / result["report_snapshot"]
+        self.assertEqual((snapshot / "worktree.json").read_text(),
+                         '{"overall":"TEST RUN"}\n')
+        self.assertEqual(report.read_text(encoding="utf-8"),
+                         '{"overall":"NOT_RUN"}\n')
+
+    def test_main_test_lock_is_exclusive_and_mode_private(self):
+        first_fd, expected, error = runner.acquire_make_test_lock()
+        self.assertIsNone(expected)
+        self.assertIsNone(error)
+        try:
+            self.assertEqual(os.fstat(first_fd).st_mode & 0o777, 0o600)
+            second_fd, _, second_error = runner.acquire_make_test_lock()
+            self.assertIsNone(second_fd)
+            self.assertEqual(second_error, "another_official_test_is_running")
+        finally:
+            os.close(first_fd)
+        third_fd, _, third_error = runner.acquire_make_test_lock()
+        self.assertIsNone(third_error)
+        os.close(third_fd)
+
+    def test_make_jobserver_pipe_descriptors_are_preserved(self):
+        read_fd, write_fd = os.pipe()
+        previous_flags = (os.get_inheritable(read_fd),
+                          os.get_inheritable(write_fd))
+        try:
+            os.set_inheritable(read_fd, False)
+            os.set_inheritable(write_fd, False)
+            with mock.patch.dict(os.environ, {
+                    "MAKEFLAGS": f"--jobserver-auth={read_fd},{write_fd}"}):
+                changed = runner.preserve_make_jobserver_fds()
+            self.assertEqual(changed, [(read_fd, False), (write_fd, False)])
+            self.assertTrue(os.get_inheritable(read_fd))
+            self.assertTrue(os.get_inheritable(write_fd))
+        finally:
+            os.set_inheritable(read_fd, previous_flags[0])
+            os.set_inheritable(write_fd, previous_flags[1])
+            os.close(read_fd)
+            os.close(write_fd)
+
+    def test_reexec_passes_lock_and_jobserver_through_process_exec(self):
+        read_fd, write_fd = os.pipe()
+        try:
+            fake_make = self.sandbox / "fake-make"
+            result_path = self.sandbox / "reexec.json"
+            child_path = self.sandbox / "reexec-child.py"
+            fake_make.write_text(
+                "#!/usr/bin/python3\n"
+                "import fcntl, json, os, stat, sys\n"
+                "lock=int(os.environ['SWAPZ_MAKE_TEST_LOCK_FD'])\n"
+                "read_fd, write_fd=map(int, os.environ['TEST_JOBSERVER'].split(','))\n"
+                "lock_stat=os.fstat(lock)\n"
+                "assert stat.S_ISREG(lock_stat.st_mode)\n"
+                "assert lock_stat.st_mode & 0o777 == 0o600\n"
+                "fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)\n"
+                "os.fstat(read_fd); os.fstat(write_fd)\n"
+                "assert os.environ['SWAPZ_MAKE_TEST_SYNC_REEXEC'] == '1'\n"
+                "assert os.environ['SWAPZ_MAKE_TEST_EXPECTED_SOURCE'] == 'a' * 40\n"
+                "assert sys.argv[1:] == ['--no-print-directory', 'test', 'KDIR=/test-kernel']\n"
+                "open(os.environ['TEST_RESULT'], 'w').write('pass')\n",
+                encoding="utf-8")
+            fake_make.chmod(0o755)
+            child_path.write_text(
+                "import fcntl, importlib.util, os\n"
+                "from types import SimpleNamespace\n"
+                f"spec=importlib.util.spec_from_file_location('runner', {str(ROOT / 'tests/tools/run-tests.py')!r})\n"
+                "runner=importlib.util.module_from_spec(spec); spec.loader.exec_module(runner)\n"
+                "fd=os.open(os.environ['TEST_LOCK'], os.O_RDWR | os.O_CREAT, 0o600)\n"
+                "fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)\n"
+                "reason=runner.reexecute_make_after_source_sync(\n"
+                "SimpleNamespace(tier='algorithm', kdir='/test-kernel'), fd, 'a' * 40)\n"
+                "raise SystemExit(88 if reason is None else 89)\n",
+                encoding="utf-8")
+            lock_path = self.sandbox / "reexec.lock"
+            environment = os.environ.copy()
+            environment.update({
+                "MAKE": str(fake_make),
+                "MAKEFLAGS": f"--jobserver-auth={read_fd},{write_fd}",
+                "TEST_JOBSERVER": f"{read_fd},{write_fd}",
+                "TEST_LOCK": str(lock_path),
+                "TEST_RESULT": str(result_path),
+                "SWAPZ_MAKE_TEST_REEXEC": "",
+                "SWAPZ_MAKE_TEST_LOCK_FD": "",
+                "SWAPZ_MAKE_TEST_EXPECTED_SOURCE": "",
+            })
+            completed = subprocess.run(
+                [sys.executable, str(child_path)], env=environment,
+                pass_fds=(read_fd, write_fd), capture_output=True,
+                text=True, timeout=15, check=False)
+            self.assertEqual(completed.returncode, 0,
+                             completed.stderr or completed.stdout)
+            self.assertEqual(result_path.read_text(encoding="utf-8"), "pass")
+        finally:
+            os.close(read_fd)
+            os.close(write_fd)
+
+    def test_reexec_failure_preserves_lock_and_make_context(self):
+        lock_fd, _, error = runner.acquire_make_test_lock()
+        self.assertIsNone(error)
+        try:
+            with mock.patch.object(runner, "preserve_make_jobserver_fds",
+                                   return_value=[]), \
+                    mock.patch.object(runner.os, "execvpe",
+                                      side_effect=OSError("exec failure")) as run:
+                reason = runner.reexecute_make_after_source_sync(
+                    mock.Mock(tier="algorithm", kdir="/test-kernel"),
+                    lock_fd, "a" * 40)
+            self.assertEqual(reason, "make_reexec_failed")
+            self.assertEqual(run.call_args.args[0], "make")
+            self.assertEqual(run.call_args.args[1][2], "test")
+            self.assertIn("KDIR=/test-kernel", run.call_args.args[1])
+            self.assertEqual(run.call_args.args[2][runner.MAIN_SYNC_REEXEC], "1")
+            self.assertEqual(os.get_inheritable(lock_fd), False)
+        finally:
+            os.close(lock_fd)
+
+
 class NativeTimingContract(unittest.TestCase):
     def test_algorithm_scope_cannot_replace_same_source_full_evidence(self):
         source = "a" * 40
@@ -515,6 +861,7 @@ class NativeTimingContract(unittest.TestCase):
              mock.patch.object(runner, "git_sha", return_value="a" * 40), \
              mock.patch.object(runner, "make_invocation",
                                return_value=(["make"], "fixture")), \
+             mocked_main_sync("a" * 40), \
              mock.patch.object(runner, "tracked_source_checkout_preflight",
                                return_value=preflight), \
              mock.patch.object(runner, "run_stage") as run_stage, \
@@ -571,6 +918,7 @@ class NativeTimingContract(unittest.TestCase):
                         mock.patch.object(
                             runner, "make_invocation",
                             return_value=(["make"], "fixture")), \
+                        mocked_main_sync(source_sha), \
                         mock.patch.object(
                             runner, "tracked_source_checkout_preflight",
                             return_value=None), \
@@ -2898,8 +3246,10 @@ class ReportContract(unittest.TestCase):
                 marker.unlink()
                 self.assertIn("stable host identity unavailable", runner.refresh_history({}))
                 self.assertFalse(marker.exists())
-        main = (ROOT / "tests/tools/run-tests.py").read_text().split("def main():", 1)[1]
-        self.assertLess(main.index("notice = publish("), main.index("refresh_history("))
+        qualification = (ROOT / "tests/tools/run-tests.py").read_text().split(
+            "def _run_qualification(args, sync_result):", 1)[1]
+        self.assertLess(qualification.index("notice = publish("),
+                        qualification.index("refresh_history("))
 
     def test_vm_history_lines_break_at_workload_changes_and_missing_reports(self):
         spec = importlib.util.spec_from_file_location(
@@ -4970,6 +5320,7 @@ class ReportContract(unittest.TestCase):
                      mock.patch.object(
                          runner, "make_invocation",
                          return_value=(["make"], "fixture")), \
+                     mocked_main_sync(source_sha), \
                      mock.patch.object(
                          runner, "tracked_source_checkout_preflight",
                          return_value=None), \

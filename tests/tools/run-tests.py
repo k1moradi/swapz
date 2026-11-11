@@ -2,6 +2,7 @@
 """Private make test runner: one bounded, replace-in-place, sanitized report."""
 import argparse
 import ast
+import fcntl
 import hashlib
 import json
 import math
@@ -10110,16 +10111,601 @@ def git_push_with_credential_fallback(run, origin_url, report_sha):
     If gh is unavailable or unauthenticated, preserve the original refusal.
     """
     destination = f"{report_sha}:refs/heads/main"
-    initial = run("push", "origin", destination, timeout=60)
+    return git_command_with_credential_fallback(
+        run, origin_url, ("push", "origin", destination), timeout=60)
+
+
+def git_command_with_credential_fallback(run, origin_url, command, timeout=60):
+    """Run one bounded Git operation, retaining configured auth first."""
+    initial = run(*command, timeout=timeout)
     if (not origin_url.startswith("https://github.com/") or
             git_publication_failure_reason(initial) !=
             "credentials_or_repository_access"):
         return initial
     recovered = run("-c", "credential.helper=",
                     "-c", "credential.helper=!gh auth git-credential",
-                    "push", "origin", destination, timeout=60)
+                    *command, timeout=timeout)
     return (recovered if recovered is not None and
             recovered.returncode == 0 else initial)
+
+
+MAIN_SYNC_LOCK = "swapz-make-test.lock"
+MAIN_SYNC_REEXEC = "SWAPZ_MAKE_TEST_SYNC_REEXEC"
+MAIN_SYNC_LOCK_FD = "SWAPZ_MAKE_TEST_LOCK_FD"
+MAIN_SYNC_EXPECTED_SOURCE = "SWAPZ_MAKE_TEST_EXPECTED_SOURCE"
+
+
+def _sync_git_environment():
+    env = os.environ.copy()
+    env["GIT_TERMINAL_PROMPT"] = "0"
+    if not env.get("GIT_SSH_COMMAND"):
+        env["GIT_SSH_COMMAND"] = "ssh -o BatchMode=yes -o ConnectTimeout=8"
+    return env
+
+
+def _sync_git_runner():
+    env = _sync_git_environment()
+
+    def run(*args, timeout=15):
+        return git_result(list(args), env=env, timeout=timeout)
+
+    return run
+
+
+def _repository_git_directory(run):
+    result = run("rev-parse", "--absolute-git-dir")
+    if result is None or result.returncode:
+        return None
+    try:
+        directory = Path(os.fsdecode(result.stdout).strip())
+        info = directory.lstat()
+    except (OSError, ValueError):
+        return None
+    if (not stat.S_ISDIR(info.st_mode) or info.st_uid != os.geteuid()):
+        return None
+    return directory
+
+
+def _main_sync_lock_path(run):
+    git_directory = _repository_git_directory(run)
+    if git_directory is None:
+        return None
+    return git_directory / MAIN_SYNC_LOCK
+
+
+def acquire_make_test_lock():
+    """Serialize local official test runs and validate a one-time re-exec FD."""
+    run = _sync_git_runner()
+    lock_path = _main_sync_lock_path(run)
+    if lock_path is None:
+        return None, None, "repository_lock_path_unavailable"
+
+    reexec_marker = os.environ.get(MAIN_SYNC_REEXEC)
+    if reexec_marker is not None:
+        expected_source = os.environ.get(MAIN_SYNC_EXPECTED_SOURCE, "")
+        raw_fd = os.environ.get(MAIN_SYNC_LOCK_FD, "")
+        if (reexec_marker != "1" or
+                re.fullmatch(r"[0-9a-f]{40}", expected_source) is None or
+                not raw_fd.isdecimal()):
+            return None, None, "invalid_internal_sync_reexec_binding"
+        lock_fd = int(raw_fd)
+        try:
+            opened = os.fstat(lock_fd)
+            current = lock_path.lstat()
+            if (not stat.S_ISREG(opened.st_mode) or
+                    not stat.S_ISREG(current.st_mode) or
+                    opened.st_dev != current.st_dev or
+                    opened.st_ino != current.st_ino or
+                    opened.st_uid != os.geteuid() or
+                    opened.st_nlink != 1 or
+                    opened.st_mode & 0o077):
+                return None, None, "internal_sync_lock_identity_changed"
+            fcntl.flock(lock_fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            os.set_inheritable(lock_fd, False)
+        except OSError:
+            return None, None, "internal_sync_lock_unavailable"
+        return lock_fd, expected_source, None
+
+    try:
+        lock_fd = os.open(
+            lock_path,
+            os.O_RDWR | os.O_CREAT | os.O_CLOEXEC | os.O_NOFOLLOW,
+            0o600)
+        opened = os.fstat(lock_fd)
+        if (not stat.S_ISREG(opened.st_mode) or
+                opened.st_uid != os.geteuid() or opened.st_nlink != 1):
+            os.close(lock_fd)
+            return None, None, "main_sync_lock_identity_invalid"
+        os.fchmod(lock_fd, 0o600)
+        fcntl.flock(lock_fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        return lock_fd, None, None
+    except BlockingIOError:
+        try:
+            os.close(lock_fd)
+        except (OSError, UnboundLocalError):
+            pass
+        return None, None, "another_official_test_is_running"
+    except OSError:
+        try:
+            os.close(lock_fd)
+        except (OSError, UnboundLocalError):
+            pass
+        return None, None, "main_sync_lock_unavailable"
+
+
+def _canonical_swapz_origin(url):
+    return re.fullmatch(
+        r"(?:git@github[.]com:|ssh://git@github[.]com/|"
+        r"https://github[.]com/)k1moradi/swapz(?:[.]git)?", url) is not None
+
+
+def _remote_origin_url(run, *, push=False):
+    command = ["remote", "get-url", "--all"]
+    if push:
+        command.append("--push")
+    command.append("origin")
+    result = run(*command)
+    if result is None or result.returncode:
+        return None
+    try:
+        urls = [line.decode("utf-8", "strict")
+                for line in result.stdout.splitlines() if line]
+    except UnicodeDecodeError:
+        return None
+    if len(urls) != 1 or not _canonical_swapz_origin(urls[0]):
+        return None
+    return urls[0]
+
+
+def _private_report_snapshot(run):
+    """Preserve both staged and working report bytes before a fast-forward."""
+    tracked = run("ls-files", "--error-unmatch", "--", GIT_RESULT)
+    staged = run("diff", "--cached", "--quiet", "--", GIT_RESULT)
+    working = run("diff", "--quiet", "--", GIT_RESULT)
+    if (tracked is None or tracked.returncode or staged is None or
+            staged.returncode not in (0, 1) or working is None or
+            working.returncode not in (0, 1)):
+        return None, "report_state_unavailable"
+    if staged.returncode == 0 and working.returncode == 0:
+        return None, None
+
+    git_directory = _repository_git_directory(run)
+    if git_directory is None:
+        return None, "private_snapshot_directory_unavailable"
+    snapshot_root = git_directory / "swapz-test-report-snapshots"
+    snapshot_directory = None
+    snapshot_relative = None
+    try:
+        snapshot_root.mkdir(mode=0o700, exist_ok=True)
+        root_info = snapshot_root.lstat()
+        if (not stat.S_ISDIR(root_info.st_mode) or
+                root_info.st_uid != os.geteuid() or
+                root_info.st_mode & 0o077):
+            return None, "private_snapshot_directory_unsafe"
+        os.chmod(snapshot_root, 0o700)
+        snapshot_directory = Path(tempfile.mkdtemp(
+            prefix="report-", dir=snapshot_root))
+        os.chmod(snapshot_directory, 0o700)
+        snapshot_relative = snapshot_directory.relative_to(ROOT).as_posix()
+        files = {}
+
+        def save(name, contents):
+            path = snapshot_directory / name
+            fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL |
+                         os.O_NOFOLLOW, 0o600)
+            try:
+                view = memoryview(contents)
+                while view:
+                    count = os.write(fd, view)
+                    if count <= 0:
+                        raise OSError("short private report snapshot write")
+                    view = view[count:]
+                os.fsync(fd)
+            finally:
+                os.close(fd)
+            files[name] = hashlib.sha256(contents).hexdigest()
+
+        if staged.returncode:
+            index_report = run("show", f":{GIT_RESULT}")
+            if index_report is None:
+                return snapshot_relative, "staged_report_snapshot_unavailable"
+            if index_report.returncode == 0:
+                save("index.json", index_report.stdout)
+                index_state = "saved"
+            elif index_report.returncode == 128:
+                index_state = "absent"
+            else:
+                return snapshot_relative, "staged_report_snapshot_unavailable"
+        else:
+            index_state = "unchanged"
+
+        try:
+            report_info = REPORT.lstat()
+        except FileNotFoundError:
+            report_state = "absent"
+        except OSError:
+            return snapshot_relative, "working_report_snapshot_unavailable"
+        else:
+            if (not stat.S_ISREG(report_info.st_mode) or
+                    report_info.st_uid != os.geteuid() or
+                    report_info.st_nlink != 1 or
+                    report_info.st_size < 0 or
+                    report_info.st_size > 128 * 1024 * 1024):
+                return snapshot_relative, "working_report_identity_unsafe"
+            descriptor = os.open(
+                REPORT, os.O_RDONLY | os.O_CLOEXEC | os.O_NOFOLLOW |
+                os.O_NONBLOCK)
+            try:
+                opened = os.fstat(descriptor)
+                if (not stat.S_ISREG(opened.st_mode) or
+                        opened.st_dev != report_info.st_dev or
+                        opened.st_ino != report_info.st_ino or
+                        opened.st_uid != os.geteuid() or opened.st_nlink != 1):
+                    return snapshot_relative, "working_report_identity_changed"
+                contents = bytearray()
+                while len(contents) <= report_info.st_size:
+                    chunk = os.read(
+                        descriptor,
+                        min(1024 * 1024,
+                            report_info.st_size + 1 - len(contents)))
+                    if not chunk:
+                        break
+                    contents.extend(chunk)
+                after = os.fstat(descriptor)
+                if (after.st_dev != opened.st_dev or
+                        after.st_ino != opened.st_ino or
+                        after.st_size != opened.st_size or
+                        after.st_mtime_ns != opened.st_mtime_ns or
+                        after.st_ctime_ns != opened.st_ctime_ns or
+                        len(contents) != report_info.st_size):
+                    return snapshot_relative, "working_report_changed_during_snapshot"
+            finally:
+                os.close(descriptor)
+            save("worktree.json", bytes(contents))
+            report_state = "saved"
+
+        metadata = {
+            "schema": "swapz-test-report-snapshot-v1",
+            "head": git_sha(),
+            "index_state": index_state,
+            "worktree_state": report_state,
+            "sha256": files,
+        }
+        save("snapshot.json", (json.dumps(metadata, sort_keys=True) + "\n")
+             .encode("utf-8"))
+        directory_fd = os.open(snapshot_directory, os.O_RDONLY | os.O_DIRECTORY)
+        try:
+            os.fsync(directory_fd)
+        finally:
+            os.close(directory_fd)
+        parent_fd = os.open(snapshot_root, os.O_RDONLY | os.O_DIRECTORY)
+        try:
+            os.fsync(parent_fd)
+        finally:
+            os.close(parent_fd)
+        return snapshot_relative, None
+    except (OSError, ValueError, UnicodeError):
+        return snapshot_relative, "private_report_snapshot_failed"
+
+
+def _prepare_report_for_fast_forward(run):
+    snapshot, error = _private_report_snapshot(run)
+    if error or snapshot is None:
+        return snapshot, error
+    restore = run("restore", "--source=HEAD", "--staged", "--worktree",
+                  "--", GIT_RESULT)
+    if restore is None or restore.returncode:
+        return snapshot, "report_restore_after_snapshot_failed"
+    return snapshot, None
+
+
+def _git_head(run, reference):
+    result = run("rev-parse", "--verify", reference)
+    if result is None or result.returncode:
+        return None
+    value = result.stdout.decode("ascii", "replace").strip()
+    return value if re.fullmatch(r"[0-9a-f]{40}", value) else None
+
+
+def _is_git_ancestor(run, older, newer):
+    result = run("merge-base", "--is-ancestor", older, newer)
+    if result is None or result.returncode not in (0, 1):
+        return None
+    return result.returncode == 0
+
+
+def _untracked_fast_forward_collisions(run, local_head, remote_head):
+    untracked = run("ls-files", "--others", "--exclude-standard", "-z")
+    changed = run("diff", "--name-only", "-z", local_head, remote_head)
+    if (untracked is None or untracked.returncode or changed is None or
+            changed.returncode):
+        return None
+    local_paths = [path for path in untracked.stdout.split(b"\0") if path]
+    remote_paths = [path for path in changed.stdout.split(b"\0") if path]
+    collisions = 0
+    for local_path in local_paths:
+        for remote_path in remote_paths:
+            if (local_path == remote_path or
+                    local_path.startswith(remote_path + b"/") or
+                    remote_path.startswith(local_path + b"/")):
+                collisions += 1
+                break
+    return collisions
+
+
+def sync_main_before_test(expected_source_sha=None):
+    """Fast-forward clean main before tests, refusing ambiguous local state."""
+    run = _sync_git_runner()
+    top = run("rev-parse", "--show-toplevel")
+    if (top is None or top.returncode or
+            Path(os.fsdecode(top.stdout).strip()).resolve() != ROOT):
+        return {"status": "BLOCKED", "reason": "not_the_repository_root"}
+    snapshot, snapshot_error = _prepare_report_for_fast_forward(run)
+    if snapshot_error:
+        result = {"status": "BLOCKED", "reason": snapshot_error}
+        if snapshot is not None:
+            result["report_snapshot"] = snapshot
+        return result
+
+    def blocked(reason, **evidence):
+        result = {"status": "BLOCKED", "reason": reason}
+        if snapshot is not None:
+            result["report_snapshot"] = snapshot
+        result.update(evidence)
+        return result
+
+    branch = run("symbolic-ref", "--quiet", "--short", "HEAD")
+    if branch is None or branch.returncode or branch.stdout.strip() != b"main":
+        return blocked("checkout_not_on_main")
+    source_preflight = tracked_source_checkout_preflight()
+    if source_preflight is not None:
+        return blocked(
+            source_preflight["reason"],
+            changed_paths=source_preflight.get("changed_paths", []),
+            total_changed_paths=source_preflight.get("total_changed_paths", 0))
+
+    fetch_url = _remote_origin_url(run)
+    push_url = _remote_origin_url(run, push=True)
+    if fetch_url is None or push_url is None:
+        return blocked("origin_not_canonical")
+    source_before = git_sha()
+    if re.fullmatch(r"[0-9a-f]{40}", source_before) is None:
+        return blocked("source_sha_unavailable")
+
+    fetch = git_command_with_credential_fallback(
+        run, fetch_url,
+        ("fetch", "--no-tags", "origin",
+         "refs/heads/main:refs/remotes/origin/main"), timeout=60)
+    if fetch is None or fetch.returncode:
+        return blocked("fetch_" + git_publication_failure_reason(fetch),
+                       source_sha=source_before)
+
+    local_head = _git_head(run, "HEAD")
+    remote_head = _git_head(run, "refs/remotes/origin/main")
+    if local_head is None or remote_head is None:
+        return blocked("main_head_unavailable", source_sha=source_before)
+
+    local_is_ancestor = _is_git_ancestor(run, local_head, remote_head)
+    if local_is_ancestor is None:
+        return blocked("ancestry_check_failed", source_sha=source_before)
+    if not local_is_ancestor:
+        remote_is_ancestor = _is_git_ancestor(run, remote_head, local_head)
+        reason = ("local_main_ahead_of_remote" if remote_is_ancestor
+                  else "local_main_diverged_from_remote")
+        return blocked(reason, source_sha=source_before,
+                       head_sha=local_head, remote_sha=remote_head)
+
+    if local_head != remote_head:
+        collisions = _untracked_fast_forward_collisions(
+            run, local_head, remote_head)
+        if collisions is None:
+            return blocked("untracked_collision_check_failed",
+                           source_sha=source_before)
+        if collisions:
+            return blocked("untracked_paths_overlap_remote_changes",
+                           collision_count=collisions,
+                           source_sha=source_before)
+        # The report's exact worktree and index bytes are already preserved in
+        # .git before this checked fast-forward. No other local path is reset.
+        merge = run("merge", "--ff-only", "--no-edit", remote_head,
+                    timeout=60)
+        if merge is None or merge.returncode:
+            return blocked("fast_forward_failed", source_sha=source_before)
+
+    final_head = _git_head(run, "HEAD")
+    final_remote = _git_head(run, "refs/remotes/origin/main")
+    source_after = git_sha()
+    if (final_head is None or final_remote is None or
+            final_head != final_remote):
+        return blocked("main_not_aligned_after_fetch",
+                       source_sha=source_after, head_sha=final_head,
+                       remote_sha=final_remote)
+    postflight = tracked_source_checkout_preflight()
+    if postflight is not None:
+        return blocked(postflight["reason"],
+                       changed_paths=postflight.get("changed_paths", []),
+                       total_changed_paths=postflight.get(
+                           "total_changed_paths", 0),
+                       source_sha=source_after, head_sha=final_head)
+    if re.fullmatch(r"[0-9a-f]{40}", source_after) is None:
+        return blocked("source_sha_unavailable_after_sync",
+                       head_sha=final_head)
+    if (expected_source_sha is not None and
+            source_after != expected_source_sha):
+        return blocked("source_advanced_again_before_test_start",
+                       source_sha=source_after, head_sha=final_head,
+                       remote_sha=final_remote)
+    return {"status": "PASS", "reason":
+            "fast_forwarded" if final_head != local_head else "already_current",
+            "source_sha": source_after,
+            "head_sha": final_head,
+            "remote_sha": final_remote,
+            "source_changed": source_after != source_before,
+            "report_snapshot": snapshot}
+
+
+def preserve_make_jobserver_fds():
+    """Keep pipe-based GNU Make jobserver descriptors across one re-exec."""
+    flags = []
+    match = re.search(
+        r"(?:^|\s)--jobserver-(?:auth|fds)=(\d+),(\d+)(?:\s|$)",
+        os.environ.get("MAKEFLAGS", ""))
+    if match is None:
+        return flags
+    for raw_fd in match.groups():
+        fd = int(raw_fd)
+        try:
+            previous = os.get_inheritable(fd)
+            flags.append((fd, previous))
+            os.set_inheritable(fd, True)
+        except OSError:
+            for changed_fd, was_inheritable in flags:
+                try:
+                    os.set_inheritable(changed_fd, was_inheritable)
+                except OSError:
+                    pass
+            return None
+    return flags
+
+
+def reexecute_make_after_source_sync(args, lock_fd, source_sha):
+    """Reparse the root Makefile once when sync changes executable source."""
+    if os.environ.get(MAIN_SYNC_REEXEC) is not None:
+        return "source_changed_after_sync_reexec"
+    make_program = os.environ.get("MAKE", "make").strip()
+    if (not make_program or any(character.isspace() for character in make_program)
+            or make_program.startswith("-")):
+        return "make_executable_unavailable"
+    previous_lock_inheritable = os.get_inheritable(lock_fd)
+    jobserver_flags = preserve_make_jobserver_fds()
+    if jobserver_flags is None:
+        return "make_jobserver_descriptor_unavailable"
+    env = os.environ.copy()
+    env[MAIN_SYNC_REEXEC] = "1"
+    env[MAIN_SYNC_LOCK_FD] = str(lock_fd)
+    env[MAIN_SYNC_EXPECTED_SOURCE] = source_sha
+    target = "test" if args.tier == "algorithm" else "test_full"
+    argv = [make_program, "--no-print-directory", target,
+            f"KDIR={args.kdir}"]
+    try:
+        os.set_inheritable(lock_fd, True)
+        os.execvpe(make_program, argv, env)
+    except OSError:
+        os.set_inheritable(lock_fd, previous_lock_inheritable)
+        for fd, was_inheritable in jobserver_flags:
+            try:
+                os.set_inheritable(fd, was_inheritable)
+            except OSError:
+                pass
+        return "make_reexec_failed"
+    return "make_reexec_returned"
+
+
+def source_checkout_stability(expected_head, expected_source_sha):
+    head = _git_head(_sync_git_runner(), "HEAD")
+    source_sha = git_sha()
+    if head != expected_head:
+        return {"stable": False, "reason": "head_changed_during_test",
+                "head_sha": head, "source_sha": source_sha}
+    if source_sha != expected_source_sha:
+        return {"stable": False, "reason": "source_sha_changed_during_test",
+                "head_sha": head, "source_sha": source_sha}
+    dirty = tracked_source_checkout_preflight()
+    if dirty is not None:
+        return {"stable": False, "reason": dirty["reason"],
+                "changed_paths": dirty.get("changed_paths", []),
+                "total_changed_paths": dirty.get("total_changed_paths", 0),
+                "head_sha": head, "source_sha": source_sha}
+    return {"stable": True, "reason": "unchanged",
+            "head_sha": head, "source_sha": source_sha}
+
+
+def sync_main_after_test():
+    """Fast-forward a clean tested checkout after report publication."""
+    run = _sync_git_runner()
+    branch = run("symbolic-ref", "--quiet", "--short", "HEAD")
+    if branch is None or branch.returncode or branch.stdout.strip() != b"main":
+        return {"status": "BLOCKED", "reason": "checkout_not_on_main"}
+    fetch_url = _remote_origin_url(run)
+    push_url = _remote_origin_url(run, push=True)
+    if fetch_url is None or push_url is None:
+        return {"status": "BLOCKED", "reason": "origin_not_canonical"}
+    fetch = git_command_with_credential_fallback(
+        run, fetch_url,
+        ("fetch", "--no-tags", "origin",
+         "refs/heads/main:refs/remotes/origin/main"), timeout=60)
+    if fetch is None or fetch.returncode:
+        return {"status": "BLOCKED", "reason":
+                "fetch_" + git_publication_failure_reason(fetch)}
+    preflight = tracked_source_checkout_preflight()
+    if preflight is not None:
+        return {"status": "BLOCKED", "reason": preflight["reason"],
+                "changed_paths": preflight.get("changed_paths", []),
+                "total_changed_paths": preflight.get("total_changed_paths", 0)}
+    local_head = _git_head(run, "HEAD")
+    remote_head = _git_head(run, "refs/remotes/origin/main")
+    if local_head is None or remote_head is None:
+        return {"status": "BLOCKED", "reason": "main_head_unavailable"}
+    if local_head == remote_head:
+        return {"status": "PASS", "reason": "already_aligned",
+                "head_sha": local_head, "remote_sha": remote_head}
+    local_is_ancestor = _is_git_ancestor(run, local_head, remote_head)
+    if local_is_ancestor is None:
+        return {"status": "BLOCKED", "reason": "ancestry_check_failed"}
+    if not local_is_ancestor:
+        remote_is_ancestor = _is_git_ancestor(run, remote_head, local_head)
+        return {"status": "BLOCKED", "reason":
+                "local_main_ahead_of_remote" if remote_is_ancestor else
+                "local_main_diverged_from_remote",
+                "head_sha": local_head, "remote_sha": remote_head}
+    collisions = _untracked_fast_forward_collisions(
+        run, local_head, remote_head)
+    if collisions is None:
+        return {"status": "BLOCKED",
+                "reason": "untracked_collision_check_failed"}
+    if collisions:
+        return {"status": "BLOCKED",
+                "reason": "untracked_paths_overlap_remote_changes",
+                "collision_count": collisions}
+    snapshot, error = _prepare_report_for_fast_forward(run)
+    if error:
+        result = {"status": "BLOCKED", "reason": error}
+        if snapshot is not None:
+            result["report_snapshot"] = snapshot
+        return result
+    merge = run("merge", "--ff-only", "--no-edit", remote_head,
+                timeout=60)
+    if merge is None or merge.returncode:
+        return {"status": "BLOCKED", "reason": "fast_forward_failed",
+                "report_snapshot": snapshot}
+    final_head = _git_head(run, "HEAD")
+    final_remote = _git_head(run, "refs/remotes/origin/main")
+    if final_head is None or final_head != final_remote:
+        return {"status": "BLOCKED", "reason": "main_not_aligned_after_fetch",
+                "head_sha": final_head, "remote_sha": final_remote,
+                "report_snapshot": snapshot}
+    return {"status": "PASS", "reason": "fast_forwarded",
+            "head_sha": final_head, "remote_sha": final_remote,
+            "report_snapshot": snapshot}
+
+
+def public_main_sync_record(sync_result):
+    """Keep only bounded, nonprivate synchronization facts in test JSON."""
+    fields = ("status", "reason", "source_sha", "head_sha", "remote_sha",
+              "source_changed", "collision_count", "total_changed_paths",
+              "changed_paths")
+    return {key: sync_result[key] for key in fields if key in sync_result}
+
+
+def _blocked_sync_result(reason, expected_source=None, observed_source=None,
+                         **extra):
+    result = {"status": "BLOCKED", "reason": reason}
+    if expected_source is not None:
+        result["expected_source_sha"] = expected_source
+    if observed_source is not None:
+        result["source_sha"] = observed_source
+    result.update(extra)
+    return result
 
 
 def publish(source_sha):
@@ -10435,14 +11021,17 @@ def publish(source_sha):
     return (f"SYNCED_GIT: https://github.com/{REPO}/blob/main/{GIT_RESULT} "
             f"(report {report_sha[:12]}; tested {source_sha[:12]})")
 
-def write_failure_diagnostic(result, git_notice):
+def write_failure_diagnostic(result, git_notice, post_test_sync=None):
     """Retain a private, shareable failure summary without raw host identifiers.
 
     This is never an admission input or a Git publication artifact. It captures
     the measured coalescing rounds automatically even when report push fails.
     """
+    post_test_failed = (isinstance(post_test_sync, dict) and
+                        post_test_sync.get("status") != "PASS")
     if (result.get("overall") not in ("FAIL", "BLOCKED", "INCOMPLETE") and
-            not git_notice.startswith("GIT_SYNC_FAILED")):
+            not git_notice.startswith("GIT_SYNC_FAILED") and
+            not post_test_failed):
         return None
     benchmarks = result.get("benchmarks") or {}
     if not isinstance(benchmarks, dict):
@@ -10517,6 +11106,9 @@ def write_failure_diagnostic(result, git_notice):
         "overall": result.get("overall"),
         "git_result": git_notice if git_notice.startswith(
             "GIT_SYNC_FAILED") else "not_a_publication_failure",
+        "post_test_main_sync": (
+            public_main_sync_record(post_test_sync)
+            if isinstance(post_test_sync, dict) else None),
         "checkout_preflight": result.get("checkout_preflight"),
         "stages": [{
             "name": stage.get("name"),
@@ -10841,6 +11433,40 @@ def main():
     parser.add_argument("--kdir", required=True)
     parser.add_argument("--tier", choices=("algorithm", "full"), default="full")
     args = parser.parse_args()
+    lock_fd, expected_source, lock_error = acquire_make_test_lock()
+    if lock_error is not None:
+        print("  BLOCKED: phase=main-sync-lock "
+              f"reason={lock_error}; no qualification stage started",
+              flush=True)
+        return 2
+    try:
+        sync_result = sync_main_before_test(expected_source)
+        if sync_result.get("status") == "PASS":
+            if (expected_source is not None and
+                    sync_result.get("source_sha") != expected_source):
+                sync_result = _blocked_sync_result(
+                    "source_advanced_again_before_test_start",
+                    expected_source,
+                    sync_result.get("source_sha"))
+            elif sync_result.get("source_changed"):
+                report_snapshot = sync_result.get("report_snapshot")
+                print("  Main source advanced before qualification; "
+                      "restarting the same make goal once", flush=True)
+                if report_snapshot:
+                    print("  Preserved prior report: "
+                          f"{report_snapshot} (mode 0600)", flush=True)
+                reason = reexecute_make_after_source_sync(
+                    args, lock_fd, sync_result.get("source_sha", ""))
+                sync_result = _blocked_sync_result(
+                    reason, observed_source=sync_result.get("source_sha"),
+                    report_snapshot=report_snapshot)
+        return _run_qualification(args, sync_result)
+    finally:
+        if lock_fd is not None:
+            os.close(lock_fd)
+
+
+def _run_qualification(args, sync_result):
     # Isolated historical report mocks supply only kdir.
     tier = args.tier if isinstance(getattr(args, "tier", None), str) else "full"
     result = {
@@ -10853,6 +11479,7 @@ def main():
         "qualification_tier": (
             "ALGORITHM_PHYSICAL_PENDING" if tier == "algorithm"
             else "FULL_INTEGRATION_RAM_ONLY"),
+        "source_sync": public_main_sync_record(sync_result),
         "stages": [],
         "benchmarks": {"sessions": [], "verdicts": {"overall": "NOT_RUN"},
                        "loaded_correctness": {"overall": "NOT_RUN"},
@@ -10868,9 +11495,20 @@ def main():
         "overall": "INCOMPLETE"
     }
     make_cmd, parallelism = make_invocation()
+    sync_source = sync_result.get("source_sha")
+    if not isinstance(sync_source, str):
+        sync_source = "unavailable"
     print("swapz: full test and benchmark qualification"
           if tier == "full" else
           "swapz: algorithm RAM qualification; physical admission pending")
+    print("  Main synchronization: "
+          f"{sync_result.get('status', 'BLOCKED')} "
+          f"reason={sync_result.get('reason', 'unavailable')} "
+          f"source={sync_source[:12]}",
+          flush=True)
+    if sync_result.get("report_snapshot"):
+        print("  Preserved prior report: "
+              f"{sync_result['report_snapshot']} (mode 0600)", flush=True)
     rootless_override = os.environ.get("SWAPZ_ROOTLESS_JOBS", "auto")
     if rootless_override == "1":
         print(f"  Rootless serial diagnostic mode; "
@@ -10893,15 +11531,32 @@ def main():
                                  f"KDIR={args.kdir}", "W=2", "all"]),
         ("Owned RAM smoke + mixed/QD pilot", ["bash", "tests/tools/test-loaded.sh"])
     ]
-    checkout_preflight = tracked_source_checkout_preflight()
+    checkout_preflight = (
+        None if sync_result.get("status") == "PASS" else
+        {"reason": "main_sync_" +
+         str(sync_result.get("reason", "unavailable")),
+         "changed_paths": sync_result.get("changed_paths", []),
+         "total_changed_paths": sync_result.get(
+             "total_changed_paths", len(sync_result.get("changed_paths", [])))})
+    if checkout_preflight is None:
+        checkout_preflight = tracked_source_checkout_preflight()
     exit_code = 0
     if checkout_preflight is not None:
         # A dirty nested unittest can fail while the production source is
         # unchanged. Refuse the long run before collecting misleading evidence.
         result["checkout_preflight"] = checkout_preflight
-        print("  BLOCKED: tracked source/index preflight failed; "
-              "qualification stages not started", flush=True)
-        print(f"  Checkout cause: {checkout_preflight['reason']}", flush=True)
+        if sync_result.get("status") != "PASS":
+            print("  BLOCKED: pretest main synchronization failed; "
+                  "qualification stages not started", flush=True)
+            print("        phase=pretest-main-sync expected=clean-aligned-main "
+                  f"observed={sync_result.get('reason', 'unavailable')}",
+                  flush=True)
+            print("  Next: resolve the reported Git state without discarding "
+                  "local work, then rerun make test", flush=True)
+        else:
+            print("  BLOCKED: tracked source/index preflight failed; "
+                  "qualification stages not started", flush=True)
+            print(f"  Checkout cause: {checkout_preflight['reason']}", flush=True)
         for changed_path in checkout_preflight.get("changed_paths", []):
             print(f"        Modified tracked source: {changed_path}", flush=True)
         remaining = (
@@ -10914,13 +11569,38 @@ def main():
               "them, then rerun make test", flush=True)
         exit_code = 2
     else:
+        expected_head = sync_result.get("head_sha")
+        expected_source = sync_result.get("source_sha")
         for i, (title, command) in enumerate(stages):
+            stability = source_checkout_stability(
+                expected_head, expected_source)
+            if not stability.get("stable"):
+                checkout_preflight = {
+                    "reason": "source_changed_before_stage",
+                    "source_stability": stability.get("reason", "unknown"),
+                    "changed_paths": stability.get("changed_paths", []),
+                    "total_changed_paths": stability.get(
+                        "total_changed_paths",
+                        len(stability.get("changed_paths", []))) }
+                result["source_stability"] = stability
+                exit_code = 2
+                break
             code = run_stage(
                 title, command, result, parse_bench=(i == 4),
                 stream_rootless_progress=(i == 1),
                 progress_table=progress_table)
             if code:
                 exit_code = code
+                break
+            stability = source_checkout_stability(
+                expected_head, expected_source)
+            if not stability.get("stable"):
+                if result["stages"]:
+                    result["stages"][-1].update(
+                        status="BLOCKED", exit_code=2,
+                        source_stability=stability.get("reason", "unknown"))
+                result["source_stability"] = stability
+                exit_code = 2
                 break
     print_stage_results(stages, result["stages"], progress_table)
     if result["stages"] and result["stages"][0].get("status") == "PASS":
@@ -11113,6 +11793,14 @@ def main():
     print(f"  Tested Git commit: {result['tested_commit_sha']}", flush=True)
     notice = publish(result["tested_commit_sha"])
     print(f"  Git result: {notice}", flush=True)
+    post_test_sync = sync_main_after_test()
+    print("  Post-test main synchronization: "
+          f"{post_test_sync.get('status', 'BLOCKED')} "
+          f"reason={post_test_sync.get('reason', 'unavailable')}",
+          flush=True)
+    if post_test_sync.get("report_snapshot"):
+        print("  Preserved replaced report: "
+              f"{post_test_sync['report_snapshot']} (mode 0600)", flush=True)
     if notice.startswith(
             "GIT_SYNC_FAILED: phase=push reason=credentials_or_repository_access"):
         print("  Upload recovery: no noninteractive GitHub write "
@@ -11127,11 +11815,17 @@ def main():
             "GIT_SYNC_FAILED: phase=push reason=remote_permission_or_policy"):
         print("  Upload recovery: resolve main-branch write permission "
               "or branch policy before rerunning make test", flush=True)
-    diagnostic_path = write_failure_diagnostic(result, notice)
+    diagnostic_path = write_failure_diagnostic(
+        result, notice, post_test_sync)
     if diagnostic_path is not None:
         print(f"  Private failure diagnostics: {diagnostic_path} "
               "(mode 0600; upload for review)", flush=True)
     print("  History plots: " + refresh_history(result["host_identity"]), flush=True)
+    if post_test_sync.get("status") != "PASS" and not exit_code:
+        print("  Qualification result is source-bound, but main refs could not "
+              "be reconciled; safely inspect the reported sync reason",
+              flush=True)
+        return 2
     return exit_code
 
 

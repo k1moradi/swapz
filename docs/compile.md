@@ -382,6 +382,16 @@ The standalone memory-only kernel smoke module and retired C++ model are intenti
 
 ## Report publication
 
+Before running source-bound stages, `make test` and `make test_full` acquire a
+checkout-local lock, verify the canonical `main` remote, fetch without prompts,
+and fast-forward only a clean local main. If the fetched non-report source
+changes after the invoking Make parsed its files, the runner restarts the same
+Make goal once with the lock and jobserver descriptors preserved. A second
+source advance, local-only commit, divergence, changed tracked source, or
+untracked path collision blocks the stages. Dirty `test_results.json` bytes
+are preserved privately under `.git` before that single generated report path
+is restored for the fast-forward.
+
 The test runner keeps `test_results.json` unchanged until qualification
 work stops. It then replaces that file and attempts a report-only `[skip ci]`,
 non-force commit directly to `main`. If a push fails after `origin/main`
@@ -393,9 +403,11 @@ source, not the concurrent descendant; the latter is not qualified.
 
 After a successful remote push, the runner refreshes local `main` and the index
 when safe. After a concurrent advance it may also refresh the otherwise-clean
-checkout to the published descendant; otherwise it reports remote-only
-synchronization. Reconcile and verify local and remote `main` before starting
-new work.
+checkout to the published descendant. After report publication it performs a
+bounded fetch and checked fast-forward when local `main` is a clean ancestor;
+it never rewrites or pushes a source commit. Otherwise it reports the exact
+synchronization refusal and retains the local evidence. Verify local and remote
+`main` before starting new work.
 
 
 Because the root `test_results.json` is generated evidence, its local
