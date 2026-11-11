@@ -4003,6 +4003,42 @@ def parse_algorithm_pageout_diagnostic(error_output):
     return diagnostic
 
 
+def parse_algorithm_source_admission_diagnostic(error_output):
+    """Promote one private, finite pre-consent refusal without host identities.
+
+    Only the source-controlled algorithm-physical.py marker is admissible;
+    arbitrary child stderr and unrecognized reasons must remain private.
+    """
+    prefix = "PHYSICAL_ALGORITHM_SOURCE_ADMISSION="
+    if not isinstance(error_output, str) or len(error_output) > 32768:
+        return None
+    matches = [line[len(prefix):] for line in error_output.splitlines()
+               if line.startswith(prefix)]
+    if len(matches) != 1 or len(matches[0]) > 127:
+        return None
+    reason = matches[0]
+    canonical_reasons = {
+        "canonical_source_advanced", "canonical_source_raced",
+        "canonical_source_verification_unavailable",
+        "local_checkout_not_main", "local_tracking_main_mismatch",
+    }
+    dirty_kinds = {
+        "tracked_source", "generated_report", "untracked", "unclassified",
+        "tracked_source_generated_report", "tracked_source_untracked",
+        "generated_report_untracked",
+        "tracked_source_generated_report_untracked",
+    }
+    if (reason not in canonical_reasons and
+            not (reason.startswith("local_checkout_changed_kind_") and
+                 reason[len("local_checkout_changed_kind_"):] in dirty_kinds)):
+        return None
+    return {
+        "schema": "swapz-algorithm-source-admission-v1",
+        "phase": "before_consent",
+        "reason": reason,
+    }
+
+
 def print_physical_trial_result(verdict, duration, progress_table=None):
     """Display the optional physical trial without changing its admission."""
     if progress_table is None:
@@ -11846,6 +11882,7 @@ def _run_qualification(args, sync_result):
             physical_started = time.monotonic()
             evidence_path = None
             physical_diagnostic = None
+            physical_source_admission = None
             try:
                 evidence_path, evidence_nonce = (
                     write_algorithm_ram_development_evidence(result))
@@ -11866,8 +11903,15 @@ def _run_qualification(args, sync_result):
                     physical_exit = physical_trial.returncode
                     if physical_exit != 0:
                         error_stream.seek(0)
+                        # Promote only strictly validated source-owned failure
+                        # records; leave every other child stderr byte private.
+                        physical_error_output = error_stream.read(32769)
                         physical_diagnostic = parse_algorithm_pageout_diagnostic(
-                            error_stream.read(32769))
+                            physical_error_output)
+                        if physical_exit == 2:
+                            physical_source_admission = (
+                                parse_algorithm_source_admission_diagnostic(
+                                    physical_error_output))
             except (OSError, subprocess.SubprocessError, ValueError):
                 print("PHYSICAL_ALGORITHM_REAL_SWAP=BLOCKED "
                       "reason=algorithm_ram_evidence_unavailable", flush=True)
@@ -11930,6 +11974,16 @@ def _run_qualification(args, sync_result):
                     "overall": "NOT_RUN",
                     "reason": "physical_trial_declined_or_blocked",
                 }
+                if physical_source_admission is not None:
+                    result["algorithm_real_swap"]["reason"] = (
+                        physical_source_admission["reason"])
+                    result["algorithm_real_swap"]["diagnostic"] = (
+                        physical_source_admission)
+                    print(
+                        "  Physical admission first refusal: "
+                        "phase=before_consent "
+                        f"reason={physical_source_admission['reason']}",
+                        flush=True)
                 print_physical_trial_result("NOT RUN", physical_duration, progress_table)
                 print("  Physical trial admission: device unchanged or "
                       "safely refused")

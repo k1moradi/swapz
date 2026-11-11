@@ -294,6 +294,8 @@ class AlgorithmPhysicalTest(unittest.TestCase):
                 privileged.assert_not_called()
                 output = " ".join(str(call) for call in printer.call_args_list)
                 self.assertIn(f"reason={reason}", output)
+                self.assertIn(
+                    f"PHYSICAL_ALGORITHM_SOURCE_ADMISSION={reason}", output)
                 self.assertIn("phase=before_consent", output)
                 self.assertIn("new trial NOT RUN", output)
                 self.assertIn(next_step, output)

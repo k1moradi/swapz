@@ -4373,6 +4373,132 @@ class ReportContract(unittest.TestCase):
         self.assertIn("Physical trial cleanup:", console)
         self.assertIn("Overall qualification: FAIL", console)
 
+    def test_source_admission_diagnostic_rejects_untrusted_privileged_output(self):
+        prefix = "PHYSICAL_ALGORITHM_SOURCE_ADMISSION="
+        reason = "canonical_source_advanced"
+        expected = {
+            "schema": "swapz-algorithm-source-admission-v1",
+            "phase": "before_consent",
+            "reason": reason,
+        }
+        self.assertEqual(runner.parse_algorithm_source_admission_diagnostic(
+            "private_host=NEVER_EXPORT\n" + prefix + reason), expected)
+        for accepted in (
+                "canonical_source_raced", "local_checkout_not_main",
+                "local_tracking_main_mismatch",
+                "canonical_source_verification_unavailable",
+                "local_checkout_changed_kind_generated_report",
+                "local_checkout_changed_kind_tracked_source_generated_report_untracked"):
+            with self.subTest(accepted=accepted):
+                self.assertEqual(
+                    runner.parse_algorithm_source_admission_diagnostic(
+                        prefix + accepted)["reason"], accepted)
+        for invalid in (
+                prefix + reason + "\n" + prefix + reason,
+                prefix + reason + "\n" + prefix + "no_sudo",
+                prefix + "canonical_source_advanced /private/path",
+                prefix + "local_checkout_changed_kind_private_path",
+                prefix + "local_checkout_changed_kind_tracked_source_unclassified",
+                prefix + "", prefix + "unknown", "no source-owned marker",
+                "P" * 32769 + "\n" + prefix + reason):
+            with self.subTest(invalid=invalid[:85]):
+                self.assertIsNone(
+                    runner.parse_algorithm_source_admission_diagnostic(invalid))
+
+    def test_official_algorithm_tier_publishes_source_admission_refusal(self):
+        """A blocked physical pre-consent run retains its cause in JSON."""
+        source_sha = "a" * 40
+        reports = []
+
+        class OperatorConsole(io.StringIO):
+            def isatty(self):
+                return True
+
+        def stage_pass(title, command, report, **options):
+            report["stages"].append({
+                "name": title, "status": "PASS",
+                "elapsed_s": 0.0, "exit_code": 0,
+            })
+            if options.get("parse_bench"):
+                report["benchmarks"]["delta64_prepare"] = {
+                    "overall": "NOT_RUN"}
+            return 0
+
+        def early_refusal(command, **options):
+            self.assertEqual(Path(command[-1]).name, "algorithm-physical.py")
+            self.assertIsNone(options.get("stdout"))
+            self.assertIsNotNone(options.get("stderr"))
+            options["stderr"].write("private_host=NEVER_EXPORT\n")
+            options["stderr"].write(
+                "PHYSICAL_ALGORITHM_SOURCE_ADMISSION=canonical_source_advanced\n")
+            return subprocess.CompletedProcess(command, 2)
+
+        patches = (
+            mock.patch.object(runner, "report_host_identity",
+                              return_value={"status": "AVAILABLE"}),
+            mock.patch.object(runner, "git_sha", return_value=source_sha),
+            mock.patch.object(runner, "make_invocation",
+                              return_value=(["make"], "fixture")),
+            mock.patch.object(runner, "tracked_source_checkout_preflight",
+                              return_value=None),
+            mock.patch.object(runner, "run_stage", side_effect=stage_pass),
+            mock.patch.object(runner, "qualification_artifact_digests",
+                              return_value={"status": "AVAILABLE"}),
+            mock.patch.object(runner, "owner_qualification_artifacts_available",
+                              return_value=True),
+            mock.patch.object(runner, "required_benchmark_gates_pass",
+                              return_value=True),
+            mock.patch.object(runner, "lane_gap_attribution_rows",
+                              return_value=[]),
+            mock.patch.object(runner, "goal_scorecard",
+                              return_value={"overall": "UNAVAILABLE"}),
+            mock.patch.object(runner, "write_algorithm_ram_development_evidence",
+                              return_value=(
+                                  ROOT / "build/tests/nonexistent-private-fixture",
+                                  "a" * 32)),
+            mock.patch.object(runner.subprocess, "run",
+                              side_effect=early_refusal),
+            mock.patch.object(runner, "write_report",
+                              side_effect=lambda report: reports.append(
+                                  json.loads(json.dumps(report)))),
+            mock.patch.multiple(
+                runner,
+                print_bench=mock.Mock(),
+                publish=mock.Mock(return_value="fixture"),
+                write_failure_diagnostic=mock.Mock(return_value=None),
+                refresh_history=mock.Mock(return_value="NOT UPDATED: fixture")),
+            mock.patch.object(runner.sys, "stdin",
+                              mock.Mock(isatty=lambda: True)),
+        )
+        with contextlib.ExitStack() as stack:
+            for patch in patches:
+                stack.enter_context(patch)
+            stack.enter_context(mocked_main_sync(source_sha))
+            output = stack.enter_context(
+                contextlib.redirect_stdout(OperatorConsole()))
+            self.assertEqual(runner._run_qualification(
+                mock.Mock(kdir="/unused", tier="algorithm"),
+                {"status": "PASS", "reason": "fixture",
+                 "source_sha": source_sha, "head_sha": source_sha}), 2)
+            console = output.getvalue()
+        self.assertEqual(len(reports), 1)
+        self.assertEqual(reports[0]["overall"], "INCOMPLETE")
+        self.assertEqual(reports[0]["algorithm_real_swap"], {
+            "overall": "NOT_RUN",
+            "reason": "canonical_source_advanced",
+            "diagnostic": {
+                "schema": "swapz-algorithm-source-admission-v1",
+                "phase": "before_consent",
+                "reason": "canonical_source_advanced",
+            },
+        })
+        self.assertEqual([stage["status"] for stage in reports[0]["stages"]],
+                         ["PASS"] * 5)
+        self.assertIn("phase=before_consent reason=canonical_source_advanced",
+                      console)
+        self.assertNotIn("NEVER_EXPORT", console)
+        self.assertIn("Tested Git commit:", console)
+
     def test_physical_pageout_debug_is_source_validated_and_redacted(self):
         report = {
             "schema": "swapz-algorithm-pageout-diagnostic-v1",

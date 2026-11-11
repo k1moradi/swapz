@@ -402,7 +402,15 @@ authenticated successful upload includes the full 40-character report commit
 ID and a permanent `/blob/<report-commit>/test_results.json` link.
 When concurrent publication archives a delayed host result while preserving
 a stronger canonical report, the link names the intermediate archive commit,
-not the restored `main` file. Upload failure names a safe Git failure
+not the restored `main` file. For every received `make test` transcript,
+first read the full `Tested Git commit` SHA, then use the full
+`report_commit` SHA from `SYNCED_GIT` or `ARCHIVED_GIT` to retrieve that
+exact revision of `test_results.json`. Validate that the retrieved report's
+`source_sha` and `tested_commit_sha` match the tested source. A
+`main/test_results.json` permalink is not historical evidence for a
+different source or an archived run. Successful archival is publication, not
+a failed upload, and must not overwrite a newer canonical report.
+Upload failure names a safe Git failure
 category and retains the local report without claiming GitHub publication.
 Private raw diagnostics never enter `test_results.json`; only strictly
 validated bounded source-owned failure counters may be included with their

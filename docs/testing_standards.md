@@ -2782,6 +2782,17 @@ physical action. These diagnostics cannot exempt a generated report from
 physical admission or change the privileged helper's independent late gate;
 print no arbitrary Git output, host paths or repository identities.
 Rootless tests cover the finite reasons and maintain consent refusal.
+The child must send its already-classified first source-refusal reason over
+the private, captured stderr channel as one fixed
+`PHYSICAL_ALGORITHM_SOURCE_ADMISSION` marker. The official runner may promote
+only one exactly validated finite marker into
+`algorithm_real_swap.reason` and the identity-free
+`algorithm_real_swap.diagnostic` object of the *same* source-bound
+`test_results.json`. Retain `overall=NOT_RUN`, exit 2, and all original
+recovery and consent gates; an absent, duplicate, malformed or privately
+expanded marker remains untrusted and must not reach stdout or publication.
+Rootless tests must verify the exact official report path, the first
+pre-consent refusal, and private stderr non-disclosure.
 
 When the optional development physical swap trial follows five passing RAM
 stages, its root-owned anonymous-pageout oracle must automatically collect

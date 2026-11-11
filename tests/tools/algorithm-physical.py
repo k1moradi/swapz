@@ -397,6 +397,11 @@ def main() -> int:
         return 2
     source_refusal = _canonical_source_preflight(algorithm_ram_evidence)
     if source_refusal is not None:
+        # The official runner captures stderr privately while leaving stdout
+        # attached to the operator TTY. Send only this source-defined refusal
+        # over that channel for inclusion in the published JSON report.
+        print("PHYSICAL_ALGORITHM_SOURCE_ADMISSION=" + source_refusal,
+              file=sys.stderr, flush=True)
         print("PHYSICAL_ALGORITHM_REAL_SWAP=BLOCKED "
               f"reason={source_refusal} phase=before_consent")
         print("  Source admission: RAM-qualified source no longer has "
