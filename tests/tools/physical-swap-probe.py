@@ -3940,23 +3940,47 @@ def _algorithm_real_swap_summary(result, policy, oracle_sha256):
 
 def _algorithm_physical_phase_failure_record(results, *,
                                             anonymous_started,
-                                            anonymous_completed):
+                                            anonymous_completed,
+                                            activation_failure=None):
     """Report only a fixed phase, never private paths, errors or target IDs."""
     direct_phases = results.get("physical_oracle_phases")
     direct_oracle_refused = (
         isinstance(direct_phases, list) and any(
             isinstance(phase, dict) and phase.get("status") != "PASS"
             for phase in direct_phases))
+    activation_reasons = {
+        "mapper_entry_missing", "initial_swap_usage_nonzero",
+        "swap_usage_unavailable",
+    }
     phase = (
         "opened_dm_oracle" if direct_oracle_refused else
+        "anonymous_swap_activation" if activation_failure in activation_reasons else
         "post_oracle_validation" if anonymous_completed else
         "anonymous_swap_oracle" if anonymous_started else
         "physical_setup")
     return {
         "schema": "swapz-algorithm-lifecycle-diagnostic-v1",
         "phase": phase, "gate": "physical_execution",
-        "reason": "phase_refused",
+        "reason": (activation_failure if phase == "anonymous_swap_activation"
+                   else "phase_refused"),
     }
+
+
+def _require_run_owned_swap_activation(active):
+    """Keep zero-initial-use isolation; preserve its exact refusal class."""
+    if active is None:
+        reason = "mapper_entry_missing"
+    elif (not isinstance(active, dict) or
+          type(active.get("used_kib")) is not int or
+          active["used_kib"] < 0):
+        reason = "swap_usage_unavailable"
+    elif active["used_kib"] != 0:
+        reason = "initial_swap_usage_nonzero"
+    else:
+        return
+    refusal = ProbeError("run-owned swap mapper activation is unproven")
+    refusal.algorithm_activation_reason = reason
+    raise refusal
 
 
 def _run_algorithm_live_swap_oracle(mapper, state, target, state_dir):
@@ -3994,8 +4018,7 @@ def _run_algorithm_live_swap_oracle(mapper, state, target, state_dir):
     # A failure after swapon must always retain the normal swapoff path.
     _run(["swapon", "--priority", "32767", "--", mapper], timeout=30)
     active = _active_swap_for(*mapper_device)
-    if active is None or active["used_kib"] != 0:
-        raise ProbeError("run-owned swap mapper activation is unproven")
+    _require_run_owned_swap_activation(active)
 
     def guard_mapper():
         if (_verify_owned_mapper(state, target) != mapper or
@@ -4946,7 +4969,9 @@ def run_probe(device_arg, confirm_arg, state_dir_arg, review_path,
             print("PHYSICAL_ALGORITHM_DEBUG=" + json.dumps(
                 _algorithm_physical_phase_failure_record(
                     results, anonymous_started=anonymous_oracle_started,
-                    anonymous_completed=anonymous_oracle_completed),
+                    anonymous_completed=anonymous_oracle_completed,
+                    activation_failure=getattr(
+                        failure, "algorithm_activation_reason", None)),
                 sort_keys=True, separators=(",", ":")),
                 file=sys.stderr, flush=True)
         if failure is not None:

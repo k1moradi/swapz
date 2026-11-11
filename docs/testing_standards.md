@@ -2880,6 +2880,17 @@ diagnostics as a proven pageout-counter failure. Synthetic rootless tests
 must verify finite phase classification, single-marker binding and strict
 private-data redaction; absence of a validated marker stays FAIL.
 
+For an owned swap mapper immediately after `swapon`, the development trial
+must distinguish absence from the active swap inventory, nonzero initial swap
+usage, and invalid usage observations. Preserve the exact-identity and
+zero-initial-use admission checks: background host swap must not be credited
+to the test workload, and a nonzero used value must never silently become a
+qualified baseline. Attach only one of three fixed source-defined failure
+reason codes to the post-recovery lifecycle diagnostic, without revealing
+device paths, host IDs or raw privileged stderr. Tests must prove the original
+refusal remains fail-closed and both maker and parser agree on the finite
+reason vocabulary.
+
 The shared-root-parent development trial must sample its exact selected
 partition's Linux block counters, not the whole root disk: unrelated root
 reads and writes cannot establish target activity. Keep the default dedicated

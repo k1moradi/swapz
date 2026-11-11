@@ -4704,6 +4704,38 @@ class ReportContract(unittest.TestCase):
         self.assertNotIn("NEVER_EXPORT", console)
         self.assertIn("Tested Git commit:", console)
 
+    def test_swap_activation_failure_diagnostic_is_source_bound(self):
+        """Distinguish missing swap entry from nonzero use, not private data."""
+        marker_prefix = "PHYSICAL_ALGORITHM_DEBUG="
+        for reason in ("mapper_entry_missing", "initial_swap_usage_nonzero",
+                       "swap_usage_unavailable"):
+            with self.subTest(reason=reason):
+                record = {
+                    "schema": "swapz-algorithm-lifecycle-diagnostic-v1",
+                    "phase": "anonymous_swap_activation",
+                    "gate": "physical_execution", "reason": reason}
+                serialized = marker_prefix + json.dumps(record)
+                self.assertEqual(
+                    runner.parse_algorithm_pageout_diagnostic(serialized),
+                    record)
+                printed = io.StringIO()
+                with contextlib.redirect_stdout(printed):
+                    runner.print_algorithm_lifecycle_failure_diagnostic(record)
+                self.assertIn(f"reason={reason}", printed.getvalue())
+        record = {
+            "schema": "swapz-algorithm-lifecycle-diagnostic-v1",
+            "phase": "anonymous_swap_activation",
+            "gate": "physical_execution",
+            "reason": "initial_swap_usage_nonzero"}
+        for changed in (
+                {**record, "phase": "anonymous_swap_oracle"},
+                {**record, "reason": "phase_refused"},
+                {**record, "reason": "/private/KEEP_PRIVATE"},
+                {**record, "reason": True},
+                {**record, "reason": ["initial_swap_usage_nonzero"]}):
+            self.assertIsNone(runner.parse_algorithm_pageout_diagnostic(
+                marker_prefix + json.dumps(changed)))
+
     def test_physical_lifecycle_failure_marker_is_strict_and_printable(self):
         """Report the exact safe phase when no pageout proof was emitted."""
         record = {

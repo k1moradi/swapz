@@ -658,6 +658,37 @@ class PhysicalSwapProbeTests(unittest.TestCase):
                     "reason": "phase_refused"})
                 self.assertNotIn("KEEP_PRIVATE", json.dumps(record))
 
+    def test_owned_swap_activation_refusal_identifies_exact_branch(self):
+        """Do not misclassify a used mapper as missing or authorize traffic."""
+        for active, reason in (
+                (None, "mapper_entry_missing"),
+                ({"used_kib": 4096}, "initial_swap_usage_nonzero"),
+                ({"used_kib": True}, "swap_usage_unavailable"),
+                ({"used_kib": None}, "swap_usage_unavailable"),
+                ({"used_kib": -1}, "swap_usage_unavailable")):
+            with self.subTest(active=active):
+                with self.assertRaisesRegex(
+                        probe.ProbeError,
+                        "run-owned swap mapper activation is unproven") as failure:
+                    probe._require_run_owned_swap_activation(active)
+                self.assertEqual(
+                    failure.exception.algorithm_activation_reason, reason)
+                record = probe._algorithm_physical_phase_failure_record(
+                    {"physical_oracle_phases": [{"status": "PASS"}]},
+                    anonymous_started=True, anonymous_completed=False,
+                    activation_failure=reason)
+                self.assertEqual(record["phase"], "anonymous_swap_activation")
+                self.assertEqual(record["reason"], reason)
+        self.assertIsNone(probe._require_run_owned_swap_activation(
+            {"used_kib": 0}))
+        # Untrusted or absent hints must not acquire a new public reason.
+        default = probe._algorithm_physical_phase_failure_record(
+            {"physical_oracle_phases": [{"status": "PASS"}]},
+            anonymous_started=True, anonymous_completed=False,
+            activation_failure="/private/KEEP_PRIVATE")
+        self.assertEqual(default["phase"], "anonymous_swap_oracle")
+        self.assertEqual(default["reason"], "phase_refused")
+
     def test_algorithm_summary_failure_retains_single_emitted_diagnostic(self):
         _workload, policy, result = self.algorithm_workload_fixture()
         result["rounds"] = []

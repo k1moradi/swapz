@@ -3983,9 +3983,14 @@ def parse_algorithm_pageout_diagnostic(error_output):
                     "schema", "phase", "gate", "reason")) or
                 diagnostic["phase"] not in {
                     "physical_setup", "opened_dm_oracle",
-                    "anonymous_swap_oracle", "post_oracle_validation"} or
+                    "anonymous_swap_activation", "anonymous_swap_oracle",
+                    "post_oracle_validation"} or
                 diagnostic["gate"] != "physical_execution" or
-                diagnostic["reason"] != "phase_refused"):
+                (diagnostic["reason"] not in {
+                    "mapper_entry_missing", "initial_swap_usage_nonzero",
+                    "swap_usage_unavailable"}
+                 if diagnostic["phase"] == "anonymous_swap_activation"
+                 else diagnostic["reason"] != "phase_refused")):
             return None
         return diagnostic
     if diagnostic.get("schema") == "swapz-algorithm-workload-diagnostic-v1":
