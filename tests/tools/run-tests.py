@@ -3936,6 +3936,19 @@ def print_stage_results(configured_stages, completed_stages, progress_table=None
             progress_table.complete("Stage", name, verdict, duration)
 
 
+def print_rootless_timing_summary(completed_stages):
+    """Keep optional timing evidence outside the live qualification table."""
+    for stage in completed_stages:
+        if stage.get("name") != "Native and rootless contracts":
+            continue
+        timing = stage.get("substage_elapsed_s")
+        if timing is not None:
+            print("  Rootless stage timing (observational only): "
+                  f"native make={timing['native_make_s']}s; "
+                  f"remaining contracts={timing['remaining_contracts_s']}s",
+                  flush=True)
+
+
 def parse_algorithm_pageout_diagnostic(error_output):
     """Accept only one bounded, source-defined physical failure observation.
 
@@ -4763,11 +4776,8 @@ def run_stage(title, command, result, *, parse_bench=False,
         result["benchmarks"]["storage_envelope_sessions"] = (
             storage_envelope_sessions)
         result["benchmarks"]["storage_envelopes"] = storage_envelope_diagnostic
-    if "substage_elapsed_s" in record:
-        timing = record["substage_elapsed_s"]
-        print(f"        native make: {timing['native_make_s']}s; "
-              f"remaining contracts: {timing['remaining_contracts_s']}s",
-              flush=True)
+    # Observational rootless timing is printed after the complete progress
+    # table, not between the last rootless and first loaded result rows.
     if rc and "diagnostic" in record:
         if "mapper_inventory_failure" in record:
             inventory_failure = record["mapper_inventory_failure"]
@@ -11938,6 +11948,9 @@ def _run_qualification(args, sync_result):
             print(f"  Qualification refusal: phase=report-binding reason={refusal}")
     if not exit_code and result["overall"] != "PASS":
         exit_code = 2
+    # Both official tiers have now finished printing all verdict rows,
+    # including the optional development-only physical trial when applicable.
+    print_rootless_timing_summary(result["stages"])
     result["benchmarks"]["lane_gap_attribution"] = lane_gap_attribution_rows(
         result["benchmarks"])
     result["benchmarks"]["goal_scorecard"] = goal_scorecard(result)

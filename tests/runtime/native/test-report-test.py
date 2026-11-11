@@ -999,6 +999,59 @@ class NativeTimingContract(unittest.TestCase):
         self.assertIn("Physical | Authorized physical swap trial (dev)", output)
         self.assertEqual(output.count("NOT RUN"), 5)
 
+    def test_rootless_substage_timing_does_not_interrupt_unified_rows(self):
+        """Keep rootless -> loaded rows adjacent; print timing only afterward."""
+        transcript = (
+            "ROOTLESS_PHASE_PROGRESS state=START index=0 elapsed_s=0 "
+            "label=rootless initialization\n"
+            "ROOTLESS_PHASE_PROGRESS state=PASS index=0 elapsed_s=0 "
+            "label=rootless initialization\n"
+            "ROOTLESS_TIMING native_make_s=0 remaining_contracts_s=0\n")
+        result = {"stages": [], "benchmarks": {}}
+        captured = io.StringIO()
+        with mock.patch.object(
+                runner.subprocess, "Popen",
+                return_value=FakeStreamingProcess(transcript)), \
+                mock.patch.object(
+                    runner, "rootless_phase_names",
+                    return_value=frozenset({"rootless initialization"})), \
+                mock.patch.object(
+                    runner, "parse_predictor_evidence", return_value={}), \
+                mock.patch.object(
+                    runner, "parse_gc_scan_scale_evidence", return_value={}), \
+                mock.patch.object(
+                    runner, "parse_extent_geometry_evidence", return_value={}), \
+                contextlib.redirect_stdout(captured):
+            progress_table = runner.QualificationProgressTable()
+            self.assertEqual(runner.run_stage(
+                "Native and rootless contracts", ["unused"], result,
+                stream_rootless_progress=True,
+                progress_table=progress_table), 0)
+            progress_table.complete(
+                "Loaded", "Loaded host preflight", "DONE", "0.231s")
+            runner.print_stage_results(
+                [(name, ["unused"]) for name in runner.OFFICIAL_STAGE_NAMES],
+                result["stages"], progress_table)
+            runner.print_rootless_timing_summary(result["stages"])
+
+        output = captured.getvalue()
+        self.assertEqual(result["stages"][0]["substage_elapsed_s"], {
+            "native_make_s": 0, "remaining_contracts_s": 0})
+        self.assertEqual(output.count("ID | Suite"), 1)
+        self.assertRegex(
+            output,
+            r"(?m)^\s*1 \| Rootless \| Rootless initialization\s+\| "
+            r"PASS\s+\|\s+0s\n"
+            r"\s*2 \| Loaded\s+\| Loaded host preflight\s+\| "
+            r"DONE\s+\|\s+0[.]231s$")
+        self.assertEqual(output.count("Rootless stage timing"), 1)
+        self.assertLess(
+            output.index("  7 | Stage"),
+            output.index("  Rootless stage timing (observational only):"))
+        self.assertIn(
+            "native make=0s; remaining contracts=0s", output)
+        self.assertNotIn("\r", output)
+
     def test_unified_rootless_failure_keeps_original_exit_and_one_header(self):
         transcript = (
             "ROOTLESS_PHASE_PROGRESS state=START index=0 elapsed_s=0 "

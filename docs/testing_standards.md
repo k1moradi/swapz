@@ -572,6 +572,11 @@ merge independent assertion/failure boundaries or omit ASan/UBSan/TSan
 qualification for speed.
 The native/rootless stage records separate native Make and remaining-contract
 wall times as optional observational evidence, not qualification PASS gates.
+Print the optional rootless timing breakdown once after **all** verdict rows
+(including the development-only physical trial row when present), never
+between rootless and loaded progress rows. Retain the breakdown in the
+canonical report even when stdout cannot be published, and regression-test
+contiguous rows using an authenticated synthetic rootless timing marker.
 The official `make test` and `make test_full` terminals present one
 unified, globally numbered `ID | Suite | Name | Verdict | Time` progress
 table for rootless suites, loaded benchmark families, five top-level stages,
