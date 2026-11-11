@@ -2776,6 +2776,10 @@ duplicates, malformed/oversized records, unknown fields, invalid counters
 and fake successful backing. Keep the official-run test fixture below the
 Python compiler's static nested-context limit by combining independent mock
 contexts; a regression must reach the reporter rather than fail at import.
+Synthetic five-PASS stage fixtures must still seed each required benchmark
+verdict read by the official runner (as NOT_RUN when no telemetry is supplied),
+so a rootless test exercises the physical-report branch rather than failing on
+a missing fixture-only benchmark key.
 This diagnostic path must never change swap admission, force additional swap,
 or replace the actual recovered-state checks.
 

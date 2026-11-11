@@ -4242,11 +4242,16 @@ class ReportContract(unittest.TestCase):
             def isatty(self):
                 return True
 
-        def synthetic_stage(title, command, result, **_options):
+        def synthetic_stage(title, command, result, **options):
             result["stages"].append({
                 "name": title, "status": "PASS",
                 "elapsed_s": 0.0, "exit_code": 0,
             })
+            if options.get("parse_bench"):
+                # The official runner reads this verdict even when all fake
+                # loaded-stage telemetry is deliberately omitted.
+                result["benchmarks"]["delta64_prepare"] = {
+                    "overall": "NOT_RUN"}
             return 0
 
         def simulated_physical_probe(command, **options):
