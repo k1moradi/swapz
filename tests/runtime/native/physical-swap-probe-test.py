@@ -2199,6 +2199,22 @@ class PhysicalSwapProbeTests(unittest.TestCase):
             self.assertEqual(len(list(private_directory.glob(
                 "source-untracked-*.private.json"))), 1)
 
+            # An attacker-substituted output directory is not writable proof.
+            # A symlink must not redirect the private inventory elsewhere.
+            retained_directory = checkout / "build/retained-tests"
+            private_directory.rename(retained_directory)
+            private_directory.symlink_to(
+                retained_directory, target_is_directory=True)
+            fake_probe._git_result.return_value = SimpleNamespace(
+                stdout="private/owner.txt\0")
+            output = io.StringIO()
+            with mock.patch.object(subject, "ROOT", checkout), \
+                    mock.patch("sys.stdout", output):
+                subject._emit_private_untracked_checkout_inventory(fake_probe)
+            self.assertIn("inventory unavailable", output.getvalue())
+            self.assertEqual(len(list(retained_directory.glob(
+                "source-untracked-*.private.json"))), 1)
+
         # Git provenance remains denied even when the private inventory works.
         fake_probe._git.side_effect = lambda *arguments: (
             "main" if arguments[0] == "symbolic-ref" else

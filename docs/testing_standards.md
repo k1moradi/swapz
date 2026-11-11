@@ -2784,9 +2784,12 @@ and the count, never any untracked path contents. The canonical GitHub
 `local_checkout_changed_kind_untracked`, not private names or raw Git output.
 A malformed, oversized, unreadable, or unsafe inventory directory must
 produce a finite diagnostic-unavailable message, without bypassing admission
-or changing the `NOT_RUN` verdict. Rootless regressions verify exact NUL
-handling (including newline-bearing filenames), 0600 permissions, 64-entry
-truncation, privacy, and fail-closed classification.
+or changing the `NOT_RUN` verdict. In particular, a symlink substitution
+of `build/tests` must not create private inventories in its replacement
+destination; previously retained evidence remains untouched. The registered
+physical-swap-probe rootless suite must verify exact NUL handling (including
+newline-bearing filenames), 0600 permissions, 64-entry truncation, privacy,
+symlinked-directory refusal, and fail-closed classification.
 
 The pre-consent Git gate must classify a dirty local checkout using the
 existing physical helper's bounded source-owned classification
