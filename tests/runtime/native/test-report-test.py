@@ -4725,6 +4725,8 @@ class ReportContract(unittest.TestCase):
                 {**record, "reason": "unknown"},
                 {**record, "extra": "/private/KEEP_PRIVATE"},
                 {**record, "phase": True},
+                {**record, "phase": ["/private/KEEP_PRIVATE"]},
+                {**record, "gate": {"private": True}},
         ):
             with self.subTest(altered=altered):
                 self.assertIsNone(runner.parse_algorithm_pageout_diagnostic(

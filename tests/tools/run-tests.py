@@ -3979,6 +3979,8 @@ def parse_algorithm_pageout_diagnostic(error_output):
         return None
     if diagnostic.get("schema") == "swapz-algorithm-lifecycle-diagnostic-v1":
         if (set(diagnostic) != {"schema", "phase", "gate", "reason"} or
+                any(type(diagnostic[key]) is not str for key in (
+                    "schema", "phase", "gate", "reason")) or
                 diagnostic["phase"] not in {
                     "physical_setup", "opened_dm_oracle",
                     "anonymous_swap_oracle", "post_oracle_validation"} or
