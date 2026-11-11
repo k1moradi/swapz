@@ -2550,6 +2550,50 @@ class PhysicalSwapProbeTests(unittest.TestCase):
         target["virtual_device_only"] = False
         self.assertEqual(probe._lower_io_major_minor(target), "259:0")
 
+    def test_shared_root_trial_samples_partition_not_busy_root_parent(self):
+        target = {"major": 8, "minor": 4, "parent_major_minor": "8:0",
+                  "root_same_physical_parent": True}
+        values = [0] * probe.MIN_BLOCK_STAT_FIELDS
+        reads = []
+        def read_stat(path, *_args, **_kwargs):
+            reads.append(str(path))
+            if str(path) == "/sys/dev/block/8:0/stat":
+                values[0] += 1
+                values[2] += 8
+                values[4] += 1
+                values[6] += 8
+            return " ".join(map(str, values))
+        with mock.patch.object(probe.Path, "read_text", read_stat):
+            before = probe._block_stat_snapshot(target)
+            after = probe._block_stat_snapshot(target)
+        self.assertEqual(reads, ["/sys/dev/block/8:4/stat"] * 2)
+        self.assertEqual(before["device_major_minor"], "8:4")
+        self.assertTrue(all(value == 0 for value in probe._lower_io_delta(before, after).values()))
+        for fields in ({"major": True}, {"minor": None}, {"major": -1}):
+            with self.subTest(fields=fields):
+                self.assertIsNone(probe._lower_io_major_minor({**target, **fields}))
+
+    def test_initial_block_oracle_requires_positive_lower_reads_and_writes(self):
+        _events, state, _target = self.simulate_physical_run(zero_lower_activity=True)
+        phase = state["_test_results"]["physical_oracle_phases"][0]
+        self.assertEqual(phase["status"], "FAIL")
+        self.assertEqual(phase["failure_kind"], "unproven_lower_read_write")
+        self.assertEqual(state["stage"], "COMPLETE")
+
+    def test_shared_root_trial_final_gate_rechecks_partition_counter_binding(self):
+        _events, state, target = self.simulate_physical_run(
+            development_only=True, shared_root=True)
+        self.assertEqual(state["_test_results"]["oracle_suite"], "PASS")
+        self.assertEqual(state["_test_results"]["lower_io_source"],
+                         f"/sys/dev/block/{target['major']}:{target['minor']}/stat")
+        self.assertIn("partition", state["_test_results"]["lower_io_claim_boundary"])
+        for fault in ("zero_lower_activity", "shared_parent_counter_substitution"):
+            with self.subTest(fault=fault):
+                _events, failed, _target = self.simulate_physical_run(
+                    development_only=True, shared_root=True,
+                    teardown_oracle_metadata=fault)
+                self.assertTrue(failed["_test_final_evidence_rejected"])
+
     def test_vm_host_requires_explicit_virtual_lane(self):
         def status(args, **_kwargs):
             if args[-1] == "--vm":
@@ -3578,9 +3622,11 @@ class PhysicalSwapProbeTests(unittest.TestCase):
                               recovery_results_save_failure=False,
                               recovery_record_substitution=None,
                               workload_failure=None,
-                              workload_results_save_failure=False):
+                              workload_results_save_failure=False,
+                              shared_root=False, zero_lower_activity=False):
         """Use actual helper checks with only device/command interfaces mocked."""
         target, evidence = self.physical_preparation_fixture()
+        target["root_same_physical_parent"] = shared_root
         if development_only:
             target.update({
                 "swap_was_active": False,
@@ -3786,7 +3832,12 @@ class PhysicalSwapProbeTests(unittest.TestCase):
                 counter_reads += 1
                 if counter_reads == missing_lower_after_at:
                     return "0 0 0\n"  # Missing required kernel counters.
-                return " ".join(["0"] * probe.MIN_BLOCK_STAT_FIELDS) + "\n"
+                values = [0] * probe.MIN_BLOCK_STAT_FIELDS
+                if not zero_lower_activity:
+                    # Positive synthetic I/O, not a claim about host storage.
+                    for index, amount in ((0, 1), (2, 8), (4, 1), (6, 8)):
+                        values[index] = counter_reads * amount
+                return " ".join(map(str, values)) + "\n"
             return REAL_PATH_READ_TEXT(path, *args, **kwargs)
 
         def is_file(path):
@@ -3956,6 +4007,17 @@ class PhysicalSwapProbeTests(unittest.TestCase):
                         **saved_results[field],
                         "device_major_minor": "8:99",
                     }
+            elif teardown_oracle_metadata == "zero_lower_activity":
+                phase = saved_results["physical_oracle_phases"][0]
+                phase["block_stats_after"] = dict(phase["block_stats_before"])
+                phase["lower_io_delta"] = probe._lower_io_delta(
+                    phase["block_stats_before"], phase["block_stats_after"])
+            elif teardown_oracle_metadata == "shared_parent_counter_substitution":
+                parent = target["parent_major_minor"]
+                saved_results["lower_io_source"] = f"/sys/dev/block/{parent}/stat"
+                for record in (saved_results, *saved_results["physical_oracle_phases"]):
+                    for key in ("block_stats_before", "block_stats_after"):
+                        record[key] = {**record[key], "device_major_minor": parent}
             saved_state["_test_results"] = saved_results
             probe._save_results(saved_state_dir, saved_results)
             return saved_state
@@ -4140,6 +4202,7 @@ class PhysicalSwapProbeTests(unittest.TestCase):
                 elif fault or identity_failure_at is not None or \
                         oracle_failure_at is not None or \
                         missing_lower_after_at is not None or \
+                        zero_lower_activity or \
                         truncated_oracle_at is not None or \
                         teardown_missing_gate or teardown_fabricated_lower or \
                         source_drift is not None or helper_sha_mismatch or \

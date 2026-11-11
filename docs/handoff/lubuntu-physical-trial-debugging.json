@@ -7,6 +7,13 @@
   "ram_stages": "5/5 PASS",
   "production_qualification": "NOT_PROVEN",
   "deployment_qualification": "NOT_PROVEN",
+  "historical_lower_io_attribution_review": {
+    "observed_counter_device": "shared_root_physical_parent",
+    "scope": "The retained historical block-oracle deltas below include sibling root I/O and cannot be attributed solely to the selected swap partition.",
+    "disposition": "PARENT_TOTALS_OBSERVATIONAL_ONLY_NOT_TARGET_ATTRIBUTED",
+    "raw_records_modified": false,
+    "future_development_requirement": "Selected-partition counters with positive initial roundtrip READ/WRITE bytes and requests; production parent-media qualification remains separate."
+  },
   "notes": [
     "The checkout-untracked blocker was the preserved zero-byte file named 100644; source-admission checks were unchanged.",
     "Standalone trials used the existing fresh nonce-bound fast_test admission; no deleted make-test RAM token was reconstructed.",

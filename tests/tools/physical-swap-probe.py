@@ -84,6 +84,10 @@ VIRTUAL_LOWER_IO_CLAIM_BOUNDARY = (
     "guest partition bytes and requests are virtual-device I/O only; "
     "they are not physical-media, NAND-wear or endurance measurements"
 )
+SHARED_ROOT_LOWER_IO_CLAIM_BOUNDARY = (
+    "selected-partition bytes and requests exclude sibling root traffic; "
+    "development-only evidence, not parent-media performance or endurance qualification"
+)
 KERNEL_FATAL_PATTERN = re.compile(
     r"\b(?:BUG|Oops|panic|WARNING|error|failed|failure|drain invariant|"
     r"corrupt(?:ion|ed)?)\b", re.IGNORECASE)
@@ -1960,8 +1964,9 @@ LOWER_COUNTER_FIELDS = (
 
 
 def _lower_io_major_minor(target):
-    """Use exact partition counters in VM mode to exclude guest-root traffic."""
-    if target.get("virtual_device_only") is True:
+    """Exclude sibling root I/O from shared-parent development observations."""
+    if (target.get("virtual_device_only") is True or
+            target.get("root_same_physical_parent") is True):
         major = target.get("major")
         minor = target.get("minor")
         if type(major) is int and major >= 0 and type(minor) is int and minor >= 0:
@@ -1969,6 +1974,14 @@ def _lower_io_major_minor(target):
         return None
     parent = target.get("parent_major_minor")
     return parent if isinstance(parent, str) else None
+
+
+def _lower_io_claim_boundary(target):
+    if target.get("virtual_device_only") is True:
+        return VIRTUAL_LOWER_IO_CLAIM_BOUNDARY
+    if target.get("root_same_physical_parent") is True:
+        return SHARED_ROOT_LOWER_IO_CLAIM_BOUNDARY
+    return LOWER_IO_CLAIM_BOUNDARY
 
 
 def _block_stat_snapshot(target):
@@ -2800,6 +2813,13 @@ def _expected_physical_oracle_stdout(options):
             f"count=128 round={round_number}\n")
 
 
+def _positive_lower_roundtrip_io(delta):
+    return isinstance(delta, dict) and all(
+        type(delta.get(key)) is int and delta[key] > 0 for key in (
+            "lower_read_bytes", "lower_read_requests",
+            "lower_write_bytes", "lower_write_requests"))
+
+
 def _run_positive_oracle_phase(oracle, mapper, state, target, state_dir,
                                results, phase, options=()):
     # Exact full-capacity geometry is independently authenticated by the
@@ -2881,6 +2901,17 @@ def _run_positive_oracle_phase(oracle, mapper, state, target, state_dir,
             "oracle_or_status_trace expected=complete observed=truncated")
 
     expected_stdout = _expected_physical_oracle_stdout(options)
+    if phase == "byte-exact-opened-dm" and not _positive_lower_roundtrip_io(entry["lower_io_delta"]):
+        delta = entry["lower_io_delta"] or {}
+        entry["lower_io_activity_error"] = (
+            "operation=device_roundtrip phase=lower_io_attribution "
+            f"original_exit={entry['return_code']} "
+            "expected=positive_selected_lower_read_write_bytes_and_requests "
+            "observed=missing_activity " + " ".join(
+                f"{key}={delta.get(key, 'unavailable')}" for key in (
+                    "lower_read_bytes", "lower_read_requests",
+                    "lower_write_bytes", "lower_write_requests")) +
+            " safe_next_step=inspect_bound_counter_snapshots")
     if (expected_stdout is None or entry["stdout"] != expected_stdout
             or entry["stderr"] != "" or entry["timed_out"] is not False):
         entry["oracle_output_error"] = (
@@ -2895,6 +2926,7 @@ def _run_positive_oracle_phase(oracle, mapper, state, target, state_dir,
         and entry.get("post_oracle_identity") == "PASS"
         and _swapz_status_healthy(after_status, target["swapz_logical_sectors"])
         and entry["lower_io_delta"] is not None
+        and "lower_io_activity_error" not in entry
         and "trace_error" not in entry
     )
     entry["status"] = "PASS" if passed else "FAIL"
@@ -2903,6 +2935,7 @@ def _run_positive_oracle_phase(oracle, mapper, state, target, state_dir,
         # are already retained in the root-only durable results. Publish
         # path-free failure attribution automatically in the regular log.
         entry["failure_kind"] = (
+            "unproven_lower_read_write" if "lower_io_activity_error" in entry else
             "opened_mapper_size_mismatch"
             if entry["stderr"] ==
             "FAIL opened owned DM block target has unexpected size\n"
@@ -2919,7 +2952,7 @@ def _run_positive_oracle_phase(oracle, mapper, state, target, state_dir,
             f"mapper_healthy:{_swapz_status_healthy(after_status, target['swapz_logical_sectors'])} "
             f"post_identity:{entry.get('post_oracle_identity', 'UNKNOWN')}",
             flush=True)
-        failure_detail = entry.get("oracle_output_error") or (
+        failure_detail = entry.get("oracle_output_error") or entry.get("lower_io_activity_error") or (
             "operation=device_roundtrip phase=oracle_execution "
             f"original_exit={entry['return_code']!r} "
             "expected=healthy_mapper_verified_identity_and_complete_evidence "
@@ -4127,16 +4160,16 @@ def _final_physical_oracle_evidence_error(results, state, target,
     for field, expected in saved_bindings.items():
         if state.get(field) != expected:
             return f"saved_{field}_mismatch"
-    expected_lower_parent = target["parent_major_minor"]
+    expected_lower_device = _lower_io_major_minor(target)
     expected_lower_source = (
-        f"/sys/dev/block/{expected_lower_parent}/stat")
+        f"/sys/dev/block/{expected_lower_device}/stat")
     if results.get("lower_io_source") != expected_lower_source:
         return "lower_io_source_mismatch"
     for field in ("block_stats_before", "block_stats_after"):
         snapshot = results.get(field)
         if (not isinstance(snapshot, dict) or
-                snapshot.get("device_major_minor") != expected_lower_parent):
-            return f"{field}_parent_mismatch"
+                snapshot.get("device_major_minor") != expected_lower_device):
+            return f"{field}_lower_device_mismatch"
     try:
         if not _mapper_inventory_unchanged(
                 results.get("dm_inventory_before"),
@@ -4182,15 +4215,17 @@ def _final_physical_oracle_evidence_error(results, state, target,
         after_stats = entry.get("block_stats_after")
         if (not isinstance(before_stats, dict) or
                 not isinstance(after_stats, dict) or
-                before_stats.get("device_major_minor") != expected_lower_parent or
-                after_stats.get("device_major_minor") != expected_lower_parent):
-            return f"phase_{index}_lower_parent_mismatch"
+                before_stats.get("device_major_minor") != expected_lower_device or
+                after_stats.get("device_major_minor") != expected_lower_device):
+            return f"phase_{index}_lower_device_mismatch"
         try:
             lower_io_delta = _lower_io_delta(before_stats, after_stats)
         except ProbeError:
             return f"phase_{index}_invalid_lower_counters"
         if entry.get("lower_io_delta") != lower_io_delta:
             return f"phase_{index}_contradictory_lower_counters"
+        if phase == "byte-exact-opened-dm" and not _positive_lower_roundtrip_io(lower_io_delta):
+            return f"phase_{index}_missing_lower_read_write_activity"
     if results.get("final_block0_sha256") != expected_header_sha256:
         return "restored_header_sha256_mismatch"
     if (results.get("final_mapper_present") is not False or
@@ -4391,9 +4426,7 @@ def run_probe(device_arg, confirm_arg, state_dir_arg, review_path,
             "block_stats_before": preflight_block_stats,
             "lower_io_source": (
                 f"/sys/dev/block/{_lower_io_major_minor(target)}/stat"),
-            "lower_io_claim_boundary": (
-                VIRTUAL_LOWER_IO_CLAIM_BOUNDARY
-                if virtual_device_only else LOWER_IO_CLAIM_BOUNDARY),
+            "lower_io_claim_boundary": _lower_io_claim_boundary(target),
             "physical_oracle_phases": [],
             "final_recovery_state": "PREPARED",
         }
@@ -4961,9 +4994,9 @@ def plan(device_arg, confirm_arg, review_path=None):
     print("KERNEL_DIAGNOSTICS_GATE=PASS source="
           f"{diagnostics.get('source')} time_filtered=true complete=true")
     print("LOWER_IO_GATE=PASS source="
-          f"/sys/dev/block/{target['parent_major_minor']}/stat "
+          f"/sys/dev/block/{_lower_io_major_minor(target)}/stat "
           f"fields={len(lower_preflight['values'])} sector_bytes=512")
-    print(f"LOWER_IO_CLAIM_BOUNDARY={LOWER_IO_CLAIM_BOUNDARY}")
+    print(f"LOWER_IO_CLAIM_BOUNDARY={_lower_io_claim_boundary(target)}")
     print(f"SOURCE_GATE={evidence_message}")
     if evidence is not None:
         print(f"QUALIFIED_SOURCE_SHA={evidence['source_sha']}")

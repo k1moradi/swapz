@@ -2855,6 +2855,22 @@ a missing fixture-only benchmark key.
 This diagnostic path must never change swap admission, force additional swap,
 or replace the actual recovered-state checks.
 
+The shared-root-parent development trial must sample its exact selected
+partition's Linux block counters, not the whole root disk: unrelated root
+reads and writes cannot establish target activity. Keep the default dedicated
+physical-parent and explicit guest-partition accounting lanes distinct, reject
+missing or malformed selected identity without falling back to parent totals,
+and bind final phase/result revalidation to the same selected counter source.
+Label shared-root partition observations as development evidence; they cannot
+replace the frozen parent-media production campaign or prove performance or
+endurance. The initial byte-exact opened-DM roundtrip requires positive lower
+READ and WRITE bytes and requests, checked both immediately and from the final
+saved raw snapshots. Zero/reset/unavailable or substituted counters must stop
+the suite even when the C oracle prints PASS. Rootless regressions must cover a
+busy root parent with an idle target, valid shared-root completion, zero lower
+activity, and a forged consistent zero-delta final record. Historical parent
+totals remain retained but must not be relabeled as target-attributed traffic.
+
 The development real-swap trial must reuse the existing primary anonymous
 workload rather than treat a small advisory MADV_PAGEOUT as physical swap-in
 proof. Bind the primary workload and oracle bytes and frozen acceptance
