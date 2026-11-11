@@ -7566,7 +7566,14 @@ aligned post-header data region. All swapz mapping, extent/record descriptors,
 generation/sequence, CRC, payload offset/length, allocator and GC authority
 remain bounded RAM state. The lower data region contains payload bytes and
 deterministic zero padding only. The newly created mapper alone may receive
-`mkswap`. On successful completion, preserve the user's same-boot choice:
+`mkswap`. The bounded anonymous-pageout oracle must independently prove
+positive exact-mapper Used KiB and positive lower WRITE bytes. When either
+proof is missing, the official failure must name the first missing gate and
+report bounded numeric observations for both counters; an advisory
+`MADV_PAGEOUT` return or zswap-retained page is not lower-device evidence.
+Rootless negative controls must keep both refusals distinct without altering
+the positive proof or allowing a physical qualification PASS.
+On successful completion, preserve the user's same-boot choice:
 keep the verified swapz mapper active or stop it and reactivate the unchanged
 ordinary swap partition at its recorded priority. No reboot is required.
 

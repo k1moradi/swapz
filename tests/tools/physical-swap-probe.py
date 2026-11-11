@@ -3572,6 +3572,26 @@ def _algorithm_pageout_oracle_snapshot(state_dir, source_sha):
     return snapshot, hashlib.sha256(payload).hexdigest()
 
 
+def _require_algorithm_pageout_backing(mapper_used_kib, lower_write_bytes):
+    """Fail with the first missing proof, retaining safe numeric evidence.
+
+    MADV_PAGEOUT is a reclaim request, not proof that swap reached the lower
+    device: the kernel can retain anonymous pages in RAM (including zswap).
+    """
+    if mapper_used_kib <= 0:
+        raise ProbeError(
+            "anonymous_pageout=UNPROVEN gate=mapper_usage "
+            "expected_mapper_used_kib=positive "
+            f"observed_mapper_used_kib={mapper_used_kib} "
+            f"observed_lower_write_bytes={lower_write_bytes}")
+    if lower_write_bytes <= 0:
+        raise ProbeError(
+            "anonymous_pageout=UNPROVEN gate=lower_write "
+            "expected_lower_write_bytes=positive "
+            f"observed_lower_write_bytes={lower_write_bytes} "
+            f"observed_mapper_used_kib={mapper_used_kib}")
+
+
 def _run_algorithm_live_swap_oracle(mapper, state, target, state_dir):
     """Prove Linux anonymous pageout/pagein through the exact owned mapper.
 
@@ -3646,9 +3666,8 @@ def _run_algorithm_live_swap_oracle(mapper, state, target, state_dir):
         lower_after_pageout = _block_stat_snapshot(target)
         pageout_delta = _lower_io_delta(
             lower_before, lower_after_pageout)
-        if used_swap_kib <= 0 or pageout_delta["lower_write_bytes"] <= 0:
-            raise ProbeError(
-                "anonymous pageout did not prove exact mapper use and backing writes")
+        _require_algorithm_pageout_backing(
+            used_swap_kib, pageout_delta["lower_write_bytes"])
 
         if worker.stdin is None:
             raise ProbeError("real-swap oracle command pipe is unavailable")

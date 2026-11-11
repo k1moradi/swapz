@@ -378,6 +378,26 @@ class PhysicalSwapProbeTests(unittest.TestCase):
             self.fail("Nested pageout oracle failure: test=unavailable "
                       "kind=unavailable; private log retained")
 
+    def test_algorithm_pageout_reports_the_first_missing_backing_proof(self):
+        # No block I/O is issued. Neither an advisory MADV_PAGEOUT nor mapper
+        # swap usage alone may be reported as proven lower-device I/O.
+        for used_kib, lower_write_bytes, failed_gate in (
+                (0, 0, "mapper_usage"),
+                (0, 4096, "mapper_usage"),
+                (8192, 0, "lower_write")):
+            with self.subTest(used_kib=used_kib,
+                              lower_write_bytes=lower_write_bytes):
+                with self.assertRaises(probe.ProbeError) as refusal:
+                    probe._require_algorithm_pageout_backing(
+                        used_kib, lower_write_bytes)
+                message = str(refusal.exception)
+                self.assertIn("anonymous_pageout=UNPROVEN", message)
+                self.assertIn(f"gate={failed_gate}", message)
+                self.assertIn(f"observed_mapper_used_kib={used_kib}", message)
+                self.assertIn(
+                    f"observed_lower_write_bytes={lower_write_bytes}", message)
+        probe._require_algorithm_pageout_backing(8192, 4096)
+
     def test_real_swap_removal_requires_normal_swapoff_and_inactive_proof(self):
         mapper = "/dev/mapper/swapz-demo-physical-1234567890abcdef"
         state = {"algorithm_real_swap": True, "development_only": True}
