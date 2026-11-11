@@ -47,11 +47,14 @@ SHA and no modified or untracked inputs in the checked kernel, userspace,
 Makefile and packaging paths. Unknown source history yields `unknown` and 0.
 A copied mock inside ignored `build/` has no clean provenance merely by
 inheritance; a test that needs source-bound qualification must create its own
-tracked fixture checkout. The Make-interface incremental fixture uses a
-non-main nested repository so its copied Makefile and reporter bind the same
-synthetic SHA without publishing. The report's `source_sha` and
-`tested_commit_sha` remain the official runner's
-exact tested-source identifiers, not the SHA of its report-publication commit.
+tracked fixture checkout. The Make-interface incremental fixture uses an
+isolated synthetic `main` checkout, a tracked `test_results.json`, and a local
+bare `origin`. A fixture-only Git shim reports the canonical origin identity
+while keeping fetch and report publication on that bare remote. The loaded
+mock binds evidence to the latest non-report source commit because earlier
+fixture invocations can publish report-only commits. The report's
+`source_sha` and `tested_commit_sha` remain the official runner's exact
+tested-source identifiers, not the SHA of its report-publication commit.
 
 [`src/kernel/VERSION`](../src/kernel/VERSION) is the release-metadata source. Kbuild generates the version header; DKMS and userspace resolve the same value.
 
