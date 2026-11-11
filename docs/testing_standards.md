@@ -2870,6 +2870,15 @@ the suite even when the C oracle prints PASS. Rootless regressions must cover a
 busy root parent with an idle target, valid shared-root completion, zero lower
 activity, and a forged consistent zero-delta final record. Historical parent
 totals remain retained but must not be relabeled as target-attributed traffic.
+New trials must bind the chosen counter major:minor in both the ownership state
+and results. Recovery rehydrates that exact partition-or-parent observer after
+fresh device/PARTUUID/geometry/parent verification; it must not silently change
+counter source when the original admission-only shared-root flags are absent.
+Reject changed, missing-on-one-side or malformed counter bindings before
+cleanup mutation. Journals predating this binding keep their original observer;
+do not rewrite old evidence to adopt the new accounting lane. Rootless tests
+must cover actual state preparation and recovery-target reconstruction, both
+new and legacy records, substituted sources and immutable binding checks.
 
 The development real-swap trial must reuse the existing primary anonymous
 workload rather than treat a small advisory MADV_PAGEOUT as physical swap-in

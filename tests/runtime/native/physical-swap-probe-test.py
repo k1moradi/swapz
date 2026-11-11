@@ -2345,6 +2345,60 @@ class PhysicalSwapProbeTests(unittest.TestCase):
                 probe.inspect_target_identity_for_recovery(
                     state, state["device_arg"], state["device_arg"])
 
+    def test_recovery_preserves_bound_counter_source_without_root_admission_flags(self):
+        state = {"device_arg": "/dev/disk/by-partuuid/deadbeef-03",
+                 "device": "/dev/nvme0n1p3", "major": 259, "minor": 3,
+                 "size_bytes": 1024 * 1024 * 1024, "partuuid": "deadbeef-03",
+                 "parent_major_minor": "259:0", "lower_io_major_minor": "259:3"}
+        result = subprocess.CompletedProcess([], 0, stdout=str(state["size_bytes"]))
+        with mock.patch.object(probe, "block_identity", return_value=(259, 3)), \
+                mock.patch.object(probe, "_partition_identity",
+                                  return_value=("deadbeef-03", state["size_bytes"])), \
+                mock.patch.object(probe, "_physical_parent_identity", return_value="259:0"), \
+                mock.patch.object(probe, "_run", return_value=result):
+            target = probe.inspect_target_identity_for_recovery(
+                state, state["device_arg"], state["device_arg"])
+            self.assertEqual(probe._lower_io_major_minor(target), "259:3")
+            # Old journals retain their original parent accounting, not the
+            # new trial's selected-partition evidence policy.
+            legacy = {key: value for key, value in state.items() if key != "lower_io_major_minor"}
+            old_target = probe.inspect_target_identity_for_recovery(
+                legacy, state["device_arg"], state["device_arg"])
+            self.assertEqual(probe._lower_io_major_minor(old_target), "259:0")
+            for value in (None, True, "259:9", "/private/KEEP_PRIVATE"):
+                with self.subTest(value=value), self.assertRaisesRegex(
+                        probe.ProbeError, "recovery_lower_counter_identity"):
+                    probe.inspect_target_identity_for_recovery(
+                        {**state, "lower_io_major_minor": value},
+                        state["device_arg"], state["device_arg"])
+
+    def test_counter_binding_is_immutable_and_matches_recovery_results(self):
+        with tempfile.TemporaryDirectory() as directory:
+            state_dir = Path(directory) / "run"
+            state, _header = self.make_recovery_state(state_dir)
+            results = json.loads((state_dir / probe.RESULTS_NAME).read_text())
+        counter = f"{state['major']}:{state['minor']}"
+        state["lower_io_major_minor"] = counter
+        results.update(lower_io_major_minor=counter,
+                       lower_io_source=f"/sys/dev/block/{counter}/stat")
+        probe._require_recovery_results_binding(state, results)
+        self.assertTrue(probe._recovery_state_identity_matches(state, dict(state)))
+        for value in (None, True, state["parent_major_minor"], "8:99"):
+            with self.subTest(value=value):
+                changed = {**state, "lower_io_major_minor": value}
+                self.assertFalse(probe._recovery_state_identity_matches(state, changed))
+                with self.assertRaisesRegex(probe.ProbeError, "lower_counter_identity"):
+                    probe._require_recovery_results_binding(changed, results)
+        missing = {key: value for key, value in state.items() if key != "lower_io_major_minor"}
+        self.assertFalse(probe._recovery_state_identity_matches(state, missing))
+        with self.assertRaisesRegex(probe.ProbeError, "lower_counter_identity"):
+            probe._require_recovery_results_binding(missing, results)
+        for changed_results in (
+                {key: value for key, value in results.items() if key != "lower_io_major_minor"},
+                {**results, "lower_io_source": f"/sys/dev/block/{state['parent_major_minor']}/stat"}):
+            with self.assertRaisesRegex(probe.ProbeError, "lower_counter_identity"):
+                probe._require_recovery_results_binding(state, changed_results)
+
     def test_new_raw_header_preservation_claim_is_immutable(self):
         # Historical journals lack the flag on both sides. Once a new run
         # records it, later recovery snapshots may not remove or weaken it.
@@ -3540,6 +3594,7 @@ class PhysicalSwapProbeTests(unittest.TestCase):
     def test_development_manifest_binds_source_helper_and_original_header(self):
         target, evidence = self.physical_preparation_fixture()
         target.update({
+            "root_same_physical_parent": True,
             "swap_was_active": False,
             "swap_path": None,
             "swap_size_kib": None,
@@ -3569,6 +3624,7 @@ class PhysicalSwapProbeTests(unittest.TestCase):
             self.assertEqual(manifest, state)
             for key, expected in (
                     ("source_sha", evidence["source_sha"]),
+                    ("lower_io_major_minor", f"{target['major']}:{target['minor']}"),
                     ("helper_git_sha", evidence["head"]),
                     ("helper_sha256", evidence["helper_sha256"]),
                     ("run_id", review["run_id"]),

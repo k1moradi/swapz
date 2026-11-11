@@ -1965,6 +1965,14 @@ LOWER_COUNTER_FIELDS = (
 
 def _lower_io_major_minor(target):
     """Exclude sibling root I/O from shared-parent development observations."""
+    if "lower_io_major_minor" in target:
+        # Recovery reconstructs device identity without rerunning admission.
+        # Its recorded observer may name only this partition or its parent.
+        recorded = target["lower_io_major_minor"]
+        return recorded if (type(recorded) is str and
+            re.fullmatch(r"[0-9]+:[0-9]+", recorded) is not None and recorded in (
+            f"{target.get('major')}:{target.get('minor')}",
+            target.get("parent_major_minor"))) else None
     if (target.get("virtual_device_only") is True or
             target.get("root_same_physical_parent") is True):
         major = target.get("major")
@@ -3017,6 +3025,11 @@ def _recovery_state_identity_matches(expected, observed):
             expected[field] == observed[field]
             for field, _ in RECOVERY_RECORD_BINDINGS):
         return False
+    if "lower_io_major_minor" in expected or "lower_io_major_minor" in observed:
+        if (type(expected.get("lower_io_major_minor")) is not str or
+                expected.get("lower_io_major_minor") != observed.get("lower_io_major_minor") or
+                _lower_io_major_minor(expected) is None):
+            return False
     # A new SWAPSPACE2 trial cannot downgrade its permanent no-header-write
     # claim by deleting/changing the field in a later recovery state record.
     # Two absent fields identify historical pre-migration journals only.
@@ -3046,6 +3059,15 @@ def _require_recovery_results_binding(state, results):
     """Refuse stale or cross-run results before touching recovery resources."""
     if not isinstance(results, dict):
         raise ProbeError("saved physical results record is not an object")
+    if "lower_io_major_minor" in state or "lower_io_major_minor" in results:
+        counter = _lower_io_major_minor(state)
+        if (type(state.get("lower_io_major_minor")) is not str or
+                type(results.get("lower_io_major_minor")) is not str or
+                counter is None or counter != results.get("lower_io_major_minor") or
+                results.get("lower_io_source") != f"/sys/dev/block/{counter}/stat"):
+            raise ProbeError(
+                "saved physical results/state binding mismatch: lower_counter_identity; "
+                "safe_next_step=inspect_records_read_only")
     if state.get("virtual_device_only") is True and (
             results.get("virtual_device_only") is not True or
             results.get("evidence_class") !=
@@ -3438,6 +3460,14 @@ def inspect_target_identity_for_recovery(state, device_arg, confirm_arg):
         raise ProbeError(
             f"recovery_parent_major_minor "
             f"expected={state['parent_major_minor']!r} observed={parent!r}")
+    counter_binding = {}
+    if "lower_io_major_minor" in state:
+        counter = _lower_io_major_minor({**state, "parent_major_minor": parent})
+        if counter is None:
+            raise ProbeError(
+                "recovery_lower_counter_identity expected=bound_partition_or_parent "
+                "observed=invalid safe_next_step=inspect_records_read_only")
+        counter_binding["lower_io_major_minor"] = counter
     card_identity = None
     if state.get("card_identity_sha256") is not None:
         card_identity = _campaign_card_identity(device, parent)
@@ -3451,6 +3481,7 @@ def inspect_target_identity_for_recovery(state, device_arg, confirm_arg):
         "major": major,
         "minor": minor,
         "parent_major_minor": parent,
+        **counter_binding,
         **({"virtual_device_only": True}
            if state.get("virtual_device_only") is True else {}),
         **({
@@ -3491,6 +3522,7 @@ def _prepare_state(target, state_dir, evidence, review):
         "major": target["major"],
         "minor": target["minor"],
         "parent_major_minor": target.get("parent_major_minor"),
+        "lower_io_major_minor": _lower_io_major_minor(target),
         "parent_model": target.get("parent_model"),
         "parent_transport": target.get("parent_transport"),
         "parent_size_bytes": target.get("parent_size_bytes"),
@@ -4426,6 +4458,8 @@ def run_probe(device_arg, confirm_arg, state_dir_arg, review_path,
             "block_stats_before": preflight_block_stats,
             "lower_io_source": (
                 f"/sys/dev/block/{_lower_io_major_minor(target)}/stat"),
+            **({"lower_io_major_minor": state["lower_io_major_minor"]}
+               if "lower_io_major_minor" in state else {}),
             "lower_io_claim_boundary": _lower_io_claim_boundary(target),
             "physical_oracle_phases": [],
             "final_recovery_state": "PREPARED",
