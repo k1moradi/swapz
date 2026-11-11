@@ -3985,7 +3985,7 @@ def parse_algorithm_pageout_diagnostic(error_output):
         reasons = {
             "swapz_read", "lower_read", "kernel_swapin", "swapz_write",
             "lower_write", "kernel_swapout", "swapout_attribution",
-            "byte_oracle", "cgroup_oom", "producer_refused"}
+            "byte_oracle", "cgroup_oom", "memory_pressure", "producer_refused"}
         if diagnostic["phase"] == "anonymous_preflight":
             reasons = {"controls_unavailable"}
         elif diagnostic["phase"] != "anonymous_workload":

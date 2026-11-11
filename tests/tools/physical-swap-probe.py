@@ -3747,6 +3747,7 @@ def _emit_algorithm_workload_failure(error, phase="anonymous_workload"):
         "concurrent fill completed without independently proven swapz swap-out": "swapout_attribution",
         "real-swap byte oracle reported corruption or incomplete verification": "byte_oracle",
         "cgroup OOM counters changed during admitted real-swap workload": "cgroup_oom",
+        "sustained cgroup memory PSI exceeded safe stop threshold": "memory_pressure",
     }
     first_cause = str(error).split("; cleanup also failed:", 1)[0]
     original_errno = _errno_text(error)

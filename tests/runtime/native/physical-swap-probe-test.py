@@ -648,6 +648,18 @@ class PhysicalSwapProbeTests(unittest.TestCase):
         self.assertIsNone(record["original_errno"])
         self.assertNotIn("KEEP_PRIVATE", stderr.getvalue())
 
+    def test_algorithm_memory_pressure_remains_first_cause_after_child_cleanup_timeout(self):
+        stderr = io.StringIO()
+        with mock.patch.object(probe.sys, "stderr", stderr):
+            probe._emit_algorithm_workload_failure(RuntimeError(
+                "sustained cgroup memory PSI exceeded safe stop threshold; "
+                "cleanup also failed: oracle /private/path timed out after 5 seconds"))
+        record = json.loads(stderr.getvalue().split("=", 1)[1])
+        self.assertEqual(record["reason"], "memory_pressure")
+        self.assertEqual(record["phase"], "anonymous_workload")
+        self.assertIsNone(record["original_errno"])
+        self.assertNotIn("private", stderr.getvalue())
+
     def test_real_swap_rechecks_mapper_after_pin_before_mkswap(self):
         mapper = "/dev/mapper/swapz-demo-physical-1234567890abcdef"
         with mock.patch.object(

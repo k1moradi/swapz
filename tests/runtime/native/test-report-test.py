@@ -4744,6 +4744,9 @@ class ReportContract(unittest.TestCase):
         prefix = "PHYSICAL_ALGORITHM_DEBUG="
         marker = prefix + json.dumps(report)
         self.assertEqual(runner.parse_algorithm_pageout_diagnostic(marker), report)
+        pressure = {**report, "reason": "memory_pressure"}
+        self.assertEqual(runner.parse_algorithm_pageout_diagnostic(
+            prefix + json.dumps(pressure)), pressure)
         for fields in ({"phase": []}, {"gate": {}}, {"reason": []},
                        {"reason": "private/path"}, {"original_errno": True},
                        {"original_errno": -1}, {"original_errno": 4096},

@@ -2890,6 +2890,15 @@ title; print only its repository-relative mode-0600 path. This also preserves
 pre-ownership cgroup refusal/cleanup details which have no transaction results
 file yet. The private-log write cannot replace the helper's original exit or
 copy raw stderr into the console or canonical JSON report.
+An actual sustained workload-cgroup PSI refusal must retain the finite
+`memory_pressure` reason even if child termination subsequently times out.
+This is a failed bounded workload, not a kernel-corruption finding or a
+production PASS. Do not raise the existing 85-percent/five-second PSI guard,
+child-termination deadlines or frozen workload limits to hide it. Keep the
+first pressure failure, secondary cleanup failure, and independently observed
+final mapper/module/cgroup and ordinary-swap recovery states separate. Missing
+numeric observations remain unknown rather than being reconstructed from the
+threshold. Rootless regression must exercise that exact first/secondary pair.
 
 Development real-swap teardown must await pending udev work once after the
 exact owned mapper is proved inactive, before attempting normal DM removal.
