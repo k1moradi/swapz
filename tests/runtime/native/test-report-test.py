@@ -4647,11 +4647,15 @@ class ReportContract(unittest.TestCase):
         self.assert_official_physical_debug(
             workload_phase="anonymous_workload", pressure=True)
 
+    def test_official_algorithm_tier_promotes_activation_refusal_on_exit_two(self):
+        self.assert_official_physical_debug(activation_refusal=True)
+
     def test_official_physical_log_failure_cannot_replace_original_exit(self):
         self.assert_official_physical_debug(log_failure=True)
 
     def assert_official_physical_debug(self, *, readback=False, workload_phase=None,
-                                      log_failure=False, pressure=False):
+                                      log_failure=False, pressure=False,
+                                      activation_refusal=False):
         source_sha = "a" * 40
         report_snapshots = []
         private_output = mock.Mock(return_value="build/tests/physical-fixture.private.log")
@@ -4667,6 +4671,18 @@ class ReportContract(unittest.TestCase):
             "host_global_vmstat_delta": {
                 "pswpout": 1, "pswpin": None, "zswpout": 1, "zswpwb": None},
         }
+        if activation_refusal:
+            error_context = {
+                "schema": "swapz-algorithm-lifecycle-diagnostic-v1",
+                "phase": "anonymous_swap_activation",
+                "gate": "physical_execution",
+                "reason": "initial_swap_usage_nonzero",
+                "activation": {
+                    "mapper_used_kib": 512,
+                    "mem_available_mib": 2616,
+                    "memory_psi_some_avg10_milli_pct": 170,
+                },
+            }
         if readback:
             error_context.update(phase="anonymous_pagein", gate="lower_read",
                                  mapper_used_kib=8192, lower_write_bytes=8388608,
@@ -4681,7 +4697,8 @@ class ReportContract(unittest.TestCase):
         if pressure:
             error_context.update(reason="memory_pressure",
                                  pressure=self.pressure_observation_fixture())
-        physical_exit = 2 if workload_phase == "anonymous_preflight" else 3
+        physical_exit = (2 if workload_phase == "anonymous_preflight" or
+                         activation_refusal else 3)
 
         class OperatorConsole(io.StringIO):
             def isatty(self):
@@ -4781,7 +4798,12 @@ class ReportContract(unittest.TestCase):
             self.assertIn("mem_available_mib=12000", console)
             self.assertIn("lower_read_sectors_total=unavailable", console)
             self.assertIn("totals, not attributed deltas", console)
-        if not workload_phase:
+        if activation_refusal:
+            self.assertIn("mapper_used_kib=512", console)
+            self.assertIn("mem_available_mib=2616", console)
+            self.assertIn("memory_psi_some_avg10_milli_pct=170", console)
+            self.assertNotIn("device unchanged or safely refused", console)
+        elif not workload_phase:
             self.assertIn("zswap_enabled=YES", console)
         self.assertNotIn("NEVER_EXPORT", console)
         if physical_exit == 3:
