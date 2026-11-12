@@ -1943,6 +1943,8 @@ class PublicMakeContract(unittest.TestCase):
                 "--lower-mbps 10 --hw-queue-depth 1 --completion-nsec 1000000"),
             2)
         self.assertIn("for qd in 1 4 8 32", loaded)
+        self.assertIn("--write-qd-variants", loaded)
+        self.assertIn('START_LOADED_SHARED_BENCHMARK_PLAN=write-plans', loaded)
         self.assertIn("$qd == 4 || $qd == 8 || $qd == 32", loaded)
         self.assertIn("--write-only-qd", loaded)
         self.assertIn("--sustained-write", loaded)

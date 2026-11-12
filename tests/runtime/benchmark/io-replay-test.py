@@ -678,6 +678,80 @@ class PairReplayContract(unittest.TestCase):
                 "reason=invalid replay input accepted")
         return run
 
+    def test_write_qd_batch_matches_individual_immutable_plans(self):
+        # The batch is orchestration only. Every per-QD canonical manifest
+        # and trace must match a separately seeded legacy prepare process.
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            fixture = root / "fixture.bin"
+            fixture.write_bytes(b"".join(
+                bytes([value + 1]) * PAGE for value in range(8)))
+            common = (
+                "--fixture", fixture, "--logical-pages", 128,
+                "--writer-pages", 64, "--reader-start", 64,
+                "--reader-pages", 64, "--read-pct", 0,
+                "--warmup-ops", 32, "--measure-ops", 64,
+                "--iops", 0, "--sustained-write",
+            )
+            independent = root / "independent"
+            independent.mkdir()
+            batch = root / "batch"
+            batch.mkdir()
+            for qd in (1, 4, 8, 32):
+                self.run_cmd(
+                    "prepare", *common, "--qd", qd, "--output-dir",
+                    independent / f"plan-write-qd{qd}")
+            response = self.run_cmd(
+                "prepare", *common, "--output-dir", batch,
+                "--write-qd-variants")
+            emitted = tuple(json.loads(line) for line in
+                            response.stdout.splitlines())
+            self.assertEqual(tuple(item["qd"] for item in emitted),
+                             (1, 4, 8, 32))
+            for qd in (1, 4, 8, 32):
+                for filename in ("trace.jsonl", "manifest.json"):
+                    with self.subTest(qd=qd, file=filename):
+                        relative = Path(f"plan-write-qd{qd}") / filename
+                        self.assertEqual(
+                            (batch / relative).read_bytes(),
+                            (independent / relative).read_bytes())
+            # A pre-existing member must block before creating any other
+            # variant, including when the occupant is an ordinary directory.
+            refused = root / "refused"
+            refused.mkdir()
+            (refused / "plan-write-qd4").mkdir()
+            self.run_cmd(
+                "prepare", *common, "--output-dir", refused,
+                "--write-qd-variants", success=False)
+            self.assertFalse((refused / "plan-write-qd1").exists())
+            refused_link = root / "refused-link"
+            refused_link.mkdir()
+            (refused_link / "plan-write-qd8").symlink_to(
+                batch / "plan-write-qd8", target_is_directory=True)
+            self.run_cmd(
+                "prepare", *common, "--output-dir", refused_link,
+                "--write-qd-variants", success=False)
+            self.assertFalse((refused_link / "plan-write-qd1").exists())
+            for invalid in (
+                    ("--read-pct", 25), ("--iops", 100), ("--qd", 4),
+                    ("--measure-ops", 65), ("--reader-start", 32),
+                    ("--reader-pages", 31)):
+                with self.subTest(invalid=invalid):
+                    bad = root / ("bad-" + str(invalid[0][2:]))
+                    bad.mkdir()
+                    # Use explicit last-value overriding only options that
+                    # are otherwise present in the common argument tuple.
+                    changed = list(common)
+                    option = invalid[0]
+                    if option in changed:
+                        changed[changed.index(option) + 1] = invalid[1]
+                    else:
+                        changed.extend(invalid)
+                    self.run_cmd(
+                        "prepare", *changed, "--output-dir", bad,
+                        "--write-qd-variants", success=False)
+                    self.assertFalse((bad / "plan-write-qd1").exists())
+
     def test_four_mib_verified_fixed_volume_read_rootless(self):
         # Identical direct replay path and oracle, but WITHOUT any real
         # Device Mapper loaded or claims about kernel packed extents.

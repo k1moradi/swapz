@@ -6574,6 +6574,19 @@ async mixed off/swapz comparison and one positive-delta64 write-only off/swapz
 comparison. These rows are directional bottleneck evidence and do not replace
 the matched fast-model qualification intervals.
 
+The four sustained-WRITE qualification plans (QD1, QD4, QD8 and QD32)
+may be generated in one private Python interpreter rather than four separate
+process launches. The batch must call the unchanged per-variant deterministic
+`prepare()` logic with a freshly reset seed for each QD, preserving all four
+independent, byte-identical canonical JSONL traces, full manifests and SHA
+oracles. Reject incompatible paced, non-WRITE or invalid QD32 geometry
+before creating output; refuse to replace any existing variant directory.
+Keep the original fixed source-order plan outputs and loaded phase marker,
+individual off/swapz replay, admission, final drain, watchdog and evidence
+checks unchanged. Rootless tests must compare each batch-produced manifest
+and trace byte-for-byte against the independent single-plan commands and
+exercise pre-existing-output and invalid-geometry failures.
+
 The shared-plan fixture snapshot should classify explicitly all-RAW content
 inside the same private-memory-protected copy process, from its snapshotted
 regular-file metadata. This replaces only the redundant per-pair Python

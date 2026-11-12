@@ -264,6 +264,42 @@ def prepare(args):
     print(json.dumps({"manifest": str(out / "manifest.json"), **manifest}, sort_keys=True))
 
 
+def prepare_write_qd_variants(args):
+    """Generate the four unchanged sustained-QD plans in one interpreter.
+
+    Each call to prepare() resets its own deterministic RNG and writes a
+    separately hashed trace and manifest. No replay or device state is shared.
+    """
+    if (not args.sustained_write or args.read_pct != 0 or args.iops != 0 or
+            args.mixed_lanes or args.stripe_partitionable or
+            args.layout != "disjoint" or args.qd != 8):
+        raise ValueError("write-QD batch requires the fixed unpaced sustained-write inputs")
+    # QD32 is the strictest geometry in the group. Reject it before creating
+    # any output rather than leaving a partly generated cohort behind.
+    if (args.warmup_ops < 0 or args.warmup_ops % 32 or
+            args.measure_ops < 1 or args.measure_ops % 32 or
+            args.writer_pages < 32 or args.writer_pages % 32 or
+            args.writer_pages > args.logical_pages or
+            args.reader_pages < 32 or args.reader_start < args.writer_pages or
+            args.reader_start + args.reader_pages > args.logical_pages):
+        raise ValueError("write-QD batch geometry must accommodate QD32")
+    root = Path(args.output_dir)
+    if not root.is_dir() or root.is_symlink():
+        raise ValueError("write-QD batch requires an existing ordinary output directory")
+    variants = tuple(
+        (qd, root / f"plan-write-qd{qd}") for qd in (1, 4, 8, 32))
+    if any(path.exists() or path.is_symlink() for _, path in variants):
+        raise ValueError("refusing to overwrite a write-QD plan variant")
+    for qd, path in variants:
+        # Never carry RNG, event maps, verification state or writable plans
+        # between variants. Retain exactly the old independent QD1/4/8/32
+        # prepare() semantics and source-order output markers.
+        variant = argparse.Namespace(**vars(args))
+        variant.qd = qd
+        variant.output_dir = str(path)
+        prepare(variant)
+
+
 def check_plan(trace_path, manifest, fixture_pages):
     data = Path(trace_path).read_bytes()
     if sha(data) != manifest["trace_sha256"]:
@@ -2575,6 +2611,8 @@ def main():
     prep.add_argument("--iops", type=int, default=5000)
     prep.add_argument("--sustained-write", action="store_true",
                       help="write-only persistent lane workers without per-wave barriers")
+    prep.add_argument("--write-qd-variants", action="store_true",
+                      help=argparse.SUPPRESS)
     prep.add_argument("--mixed-lanes", choices=("waves", "persistent"),
                       help="private matched mixed traces with lane-owned writes and disjoint reads")
     prep.add_argument("--stripe-partitionable", action="store_true",
@@ -2612,7 +2650,10 @@ def main():
             private_memory.protect_private_memory()
             os.environ["SWAPZ_PRIVATE_FIXTURE"] = "1"
         if args.command == "prepare":
-            prepare(args)
+            if args.write_qd_variants:
+                prepare_write_qd_variants(args)
+            else:
+                prepare(args)
         elif args.command == "run":
             replay(args)
         else:

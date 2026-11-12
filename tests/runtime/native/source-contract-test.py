@@ -1552,8 +1552,9 @@ dmsetup() {
         loaded = (ROOT / "tests/tools/test-loaded.sh").read_text()
         pair = (ROOT / "tests/tools/benchmark-owned-pair.sh").read_text()
         reporter = (ROOT / "tests/tools/run-tests.py").read_text()
-        for qd in ("1", "4", "8", "32"):
-            self.assertIn("for qd in 1 4 8 32", loaded)
+        self.assertIn("for qd in 1 4 8 32", loaded)
+        self.assertIn("--write-qd-variants", loaded)
+        self.assertIn('--output-dir "$shared_plan" --write-qd-variants', loaded)
         self.assertIn("--read-pct 0", loaded)
         self.assertIn("--write-only-qd", loaded)
         self.assertIn("--sustained-write", loaded)
@@ -7724,6 +7725,26 @@ int main(void)
         self.assertIn(
             "def test_native_binary_plan_has_exact_bytes_and_rejects_corruption",
             tests)
+
+    def test_write_qd_variants_preserve_separate_plan_hashes(self):
+        replay = (ROOT / "tests/runtime/benchmark/io-replay.py").read_text()
+        loaded = (ROOT / "tests/tools/test-loaded.sh").read_text()
+        fixtures = (ROOT / "tests/runtime/benchmark/io-replay-test.py").read_text()
+        for token in (
+                "def prepare_write_qd_variants(args):",
+                'for qd, path in variants:',
+                'variant = argparse.Namespace(**vars(args))',
+                'variant.qd = qd',
+                'variant.output_dir = str(path)',
+                'prepare(variant)'):
+            self.assertIn(token, replay)
+        self.assertIn('(1, 4, 8, 32)', replay)
+        self.assertIn('--write-qd-variants', loaded)
+        self.assertIn('--warmup-ops 256 --measure-ops 4096 --iops 0 --sustained-write',
+                      loaded)
+        self.assertIn(
+            "def test_write_qd_batch_matches_individual_immutable_plans",
+            fixtures)
 
     def test_native_replay_latencies_use_fixed_binary_result_records(self):
         replay = (ROOT / "tests/runtime/benchmark/io-replay.py").read_text()

@@ -265,14 +265,15 @@ python3 -B tests/runtime/benchmark/io-replay.py prepare \
 # logical volume. Persistent lane-owned workers sustain offered QD without
 # per-I/O Future dispatch or an artificial barrier between completed writes.
 printf '%s\n' 'START_LOADED_SHARED_BENCHMARK_PLAN=write-plans'
-for qd in 1 4 8 32; do
-    python3 -B tests/runtime/benchmark/io-replay.py prepare \
-        --fixture "$shared_plan/fixture.bin" \
-        --output-dir "$shared_plan/plan-write-qd$qd" \
-        --logical-pages 1024 --writer-pages 256 --reader-start 512 \
-        --reader-pages 256 --qd "$qd" --read-pct 0 \
-        --warmup-ops 256 --measure-ops 4096 --iops 0 --sustained-write
-done
+# Generate the four separately hashed, immutable QD1/4/8/32 plans using
+# one Python startup. Each variant still resets its own deterministic RNG;
+# the subsequent off/swapz arms retain independent validation and replay.
+python3 -B tests/runtime/benchmark/io-replay.py prepare \
+    --fixture "$shared_plan/fixture.bin" \
+    --output-dir "$shared_plan" --write-qd-variants \
+    --logical-pages 1024 --writer-pages 256 --reader-start 512 \
+    --reader-pages 256 --read-pct 0 \
+    --warmup-ops 256 --measure-ops 4096 --iops 0 --sustained-write
 
 # Assert the representative fixture remains in the measured ~2KiB class.
 printf '%s\n' 'START_LOADED_SHARED_BENCHMARK_PLAN=verify'
