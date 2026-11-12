@@ -1140,6 +1140,8 @@ class NativeTimingContract(unittest.TestCase):
             "module_sha256": "c" * 64,
             "oracle_sha256": "d" * 64,
         }
+        # Rootless native Make may rebuild an already-present oracle binary.
+        rebuilt_oracle_digest = {"sha256": available["oracle_sha256"]}
         sync_result = {"status": "PASS", "reason": "fixture",
                        "head_sha": source, "source_sha": source}
         stages_run = []
@@ -1152,6 +1154,8 @@ class NativeTimingContract(unittest.TestCase):
             del command, stream_rootless_progress, progress_table
             del retain_private_failure_output
             stages_run.append(title)
+            if title == runner.DEVELOPMENT_RESUME_STAGES[0]:
+                rebuilt_oracle_digest["sha256"] = "e" * 64
             failed = parse_bench and not loaded_success
             result["stages"].append({
                 "name": title, "status": "FAIL" if failed else "PASS",
@@ -1190,7 +1194,11 @@ class NativeTimingContract(unittest.TestCase):
                             return_value={"stable": True}), \
                         mock.patch.object(
                             runner, "development_resume_context",
-                            return_value=context), \
+                            side_effect=lambda _result, _kdir: {
+                                **context, "artifacts": {
+                                    **available,
+                                    "oracle_sha256": rebuilt_oracle_digest["sha256"]},
+                            }), \
                         mock.patch.object(runner, "run_stage",
                                           side_effect=stage_runner), \
                         mock.patch.object(

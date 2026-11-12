@@ -12319,7 +12319,10 @@ def _run_qualification(args, sync_result):
             if 1 <= i <= 3 and len(checkpoint_stages) == i - 1:
                 # The native rootless stage may create the oracle binary
                 # absent just after build; establish the key after that PASS.
-                if checkpoint_context is None and not reused_stage:
+                # It can also rebuild an existing oracle, so record the final
+                # artifact digest instead of the pre-native-Make identity.
+                if (checkpoint_context is None or
+                        (i == 1 and not reused_stage)):
                     checkpoint_context = development_resume_context(
                         result, args.kdir)
                 passed = (saved_stage if reused_stage else
