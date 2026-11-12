@@ -32,6 +32,41 @@ rootless_parallel_elapsed_seconds=
 rootless_parallel_directory=
 rootless_parallel_size=0
 rootless_parallel_runner_exit_code=0
+rootless_reused_current_phase=0
+rootless_resume_suites=${SWAPZ_ROOTLESS_RESUME_SUITES:-}
+rootless_resume_formatter_sha256=${SWAPZ_ROOTLESS_RESUME_FORMATTER_SHA256:-}
+rootless_resume_module_sha256=${SWAPZ_ROOTLESS_RESUME_MODULE_SHA256:-}
+rootless_resume_oracle_sha256=${SWAPZ_ROOTLESS_RESUME_ORACLE_SHA256:-}
+# Development reuse is parent-only: nested harnesses do not inherit selectors.
+unset SWAPZ_ROOTLESS_RESUME_SUITES SWAPZ_ROOTLESS_RESUME_FORMATTER_SHA256
+unset SWAPZ_ROOTLESS_RESUME_MODULE_SHA256 SWAPZ_ROOTLESS_RESUME_ORACLE_SHA256
+
+rootless_should_run_suite() {
+  local formatter_digest module_digest oracle_digest
+  case ",$rootless_resume_suites," in
+    *",$rootless_phase,"*) ;;
+    *) return 0 ;;
+  esac
+  case $rootless_phase in
+    tests/runtime/native/primary-lifecycle-audit-test.py|\
+    tests/runtime/native/primary-real-swap-test.py|\
+    tests/runtime/native/test-report-test.py) ;;
+    *) return 0 ;;
+  esac
+  [[ $rootless_resume_formatter_sha256 =~ ^[0-9a-f]{64}$ &&
+     $rootless_resume_module_sha256 =~ ^[0-9a-f]{64}$ &&
+     $rootless_resume_oracle_sha256 =~ ^[0-9a-f]{64}$ ]] || return 0
+  formatter_digest=$(sha256sum build/userspace/swapzctl) || return 0
+  module_digest=$(sha256sum build/kernel/experimental/dm-swapz.ko) || return 0
+  oracle_digest=$(sha256sum build/tests/device-roundtrip) || return 0
+  if [[ ${formatter_digest%% *} == "$rootless_resume_formatter_sha256" &&
+        ${module_digest%% *} == "$rootless_resume_module_sha256" &&
+        ${oracle_digest%% *} == "$rootless_resume_oracle_sha256" ]]; then
+    rootless_reused_current_phase=1
+    return 1
+  fi
+  return 0
+}
 # Stream only these source-controlled labels. The reporter filters them before
 # displaying progress; completed times are not qualification evidence.
 printf 'ROOTLESS_PHASE_PROGRESS state=START index=%d elapsed_s=0 label=%s\n' \
@@ -46,8 +81,14 @@ rootless_begin_phase() {
   fi
   rootless_timing_names+=("$rootless_timed_phase")
   rootless_timing_seconds+=("$phase_elapsed_seconds")
-  printf 'ROOTLESS_PHASE_PROGRESS state=PASS index=%d elapsed_s=%d label=%s\n' \
-    "$rootless_timing_index" "$phase_elapsed_seconds" "$rootless_timed_phase"
+  if (( rootless_reused_current_phase )); then
+    printf 'ROOTLESS_PHASE_PROGRESS state=REUSED index=%d elapsed_s=0 label=%s\n' \
+      "$rootless_timing_index" "$rootless_timed_phase"
+    rootless_reused_current_phase=0
+  else
+    printf 'ROOTLESS_PHASE_PROGRESS state=PASS index=%d elapsed_s=%d label=%s\n' \
+      "$rootless_timing_index" "$phase_elapsed_seconds" "$rootless_timed_phase"
+  fi
   rootless_timing_index=$((rootless_timing_index + 1))
   rootless_timed_phase=$rootless_phase
   rootless_phase_started_seconds=$phase_boundary_seconds
@@ -881,6 +922,7 @@ rootless_begin_phase
 python3 -B tests/runtime/native/resource-pressure-cleanup-ownership-test.py -v
 rootless_phase='tests/runtime/native/primary-lifecycle-audit-test.py'
 rootless_begin_phase
+if rootless_should_run_suite; then
 # Preserve the first failure across multiple unittest classes. Any traceback
 # and subtest payload remain confined to the mode-0600 private capture.
 begin_rootless_private_stderr_capture
@@ -892,6 +934,7 @@ else
   rootless_audit_exit_code=$?
 fi
 finish_and_report_rootless_unittest "$rootless_audit_exit_code" "$rootless_audit_command_line"
+fi
 rootless_phase='tests/runtime/native/primary-lifecycle-nullblk-qualifier-test.py'
 rootless_begin_phase
 # Attribute the first source-controlled failure, retaining the private traceback.
@@ -906,6 +949,7 @@ fi
 finish_and_report_rootless_unittest "$rootless_qualifier_exit_code" "$rootless_qualifier_command_line"
 rootless_phase='tests/runtime/native/primary-real-swap-test.py'
 rootless_begin_phase
+if rootless_should_run_suite; then
 begin_rootless_private_stderr_capture
 rootless_primary_command_line=$LINENO
 if python3 -B tests/runtime/native/primary-real-swap-test.py -v \
@@ -915,6 +959,7 @@ else
   rootless_primary_exit_code=$?
 fi
 finish_and_report_rootless_unittest "$rootless_primary_exit_code" "$rootless_primary_command_line"
+fi
 rootless_phase='tests/runtime/native/primary-real-swap-parent-ownership-test.py'
 rootless_begin_phase
 begin_rootless_private_stderr_capture
@@ -940,7 +985,9 @@ rootless_begin_phase
 python3 -B tests/runtime/native/make-interface-test.py -v
 rootless_phase='tests/runtime/native/test-report-test.py'
 rootless_begin_phase
+if rootless_should_run_suite; then
 python3 -B tests/runtime/native/test-report-test.py -v
+fi
 rootless_phase='tests/runtime/native/production-readiness-test.py'
 rootless_begin_phase
 if (( rootless_parallel_jobs > 1 )); then

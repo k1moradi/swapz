@@ -3792,7 +3792,7 @@ def rootless_phase_name_allowed(name, allowed_names):
 
 
 ROOTLESS_PROGRESS_PATTERN = re.compile(
-    r"ROOTLESS_PHASE_PROGRESS state=(START|PASS) "
+    r"ROOTLESS_PHASE_PROGRESS state=(START|PASS|REUSED) "
     r"index=(0|[1-9][0-9]{0,2}) "
     r"elapsed_s=(0|[1-9][0-9]{0,7}) "
     r"label=([A-Za-z0-9_./ :+-]{1,128})")
@@ -4515,7 +4515,8 @@ def loaded_timing_phase(line):
 
 def run_stage(title, command, result, *, parse_bench=False,
               stream_rootless_progress=False, progress_table=None,
-              retain_private_failure_output=False):
+              retain_private_failure_output=False,
+              rootless_resume_suites=(), rootless_suite_completed=None):
     start = time.monotonic()
     loaded_timing_phases = []
     loaded_current_phase = "preflight"
@@ -4528,6 +4529,8 @@ def run_stage(title, command, result, *, parse_bench=False,
     rootless_active_phase = None
     rootless_active_started = start
     rootless_is_tty = False
+    rootless_reused_suites = []
+    rootless_unexpected_reuse = False
 
     def emit_progress_row(suite, phase_index, phase, verdict, duration,
                           *, overwrite=False):
@@ -4561,6 +4564,14 @@ def run_stage(title, command, result, *, parse_bench=False,
             child_env["SWAPZ_TESTED_SOURCE_SHA"] = tested_source
         if title == "Build module and helpers":
             child_env["SWAPZ_SIGN_NONINTERACTIVE"] = "1"
+        if stream_rootless_progress and rootless_resume_suites:
+            artifacts = qualification_artifact_digests()
+            if owner_qualification_artifacts_available(artifacts):
+                child_env["SWAPZ_ROOTLESS_RESUME_SUITES"] = ",".join(
+                    rootless_resume_suites)
+                for key in ("formatter_sha256", "module_sha256", "oracle_sha256"):
+                    child_env["SWAPZ_ROOTLESS_RESUME_" + key.upper()] = (
+                        artifacts[key])
         if parse_bench or stream_rootless_progress:
             if parse_bench:
                 loaded_is_tty = sys.stdout.isatty()
@@ -4600,11 +4611,19 @@ def run_stage(title, command, result, *, parse_bench=False,
                             if rootless_is_tty:
                                 emit_progress_row(
                                     "Rootless", index, name, "RUNNING", "-")
-                        elif (state == "PASS" and
+                        elif (state in ("PASS", "REUSED") and
                               index == rootless_next_index and
                               name == rootless_active_phase):
+                            if state == "REUSED":
+                                if name not in rootless_resume_suites:
+                                    rootless_unexpected_reuse = True
+                                else:
+                                    rootless_reused_suites.append(name)
+                            elif (rootless_suite_completed is not None and
+                                  name in DEVELOPMENT_RESUME_ROOTLESS_SUITES):
+                                rootless_suite_completed(name)
                             emit_progress_row(
-                                "Rootless", index, name, "PASS",
+                                "Rootless", index, name, state,
                                 f"{seconds}s", overwrite=rootless_is_tty)
                             rootless_next_index += 1
                             rootless_active_phase = None
@@ -4807,6 +4826,8 @@ def run_stage(title, command, result, *, parse_bench=False,
                        "PASS_DIRECTIONAL_STORAGE_ENVELOPES"))
     if marker_failure:
         rc = 1
+    if rootless_unexpected_reuse and rc == 0:
+        rc = 2
     secure_boot_signing_blocked = (
         title == "Build module and helpers" and any(
             line.startswith("BLOCKED: Secure Boot module signing:")
@@ -4832,8 +4853,12 @@ def run_stage(title, command, result, *, parse_bench=False,
               "FAIL" if (explicit_primary_failure or explicit_loaded_failure or
                          negative_refusal_auth_failure)
               else "BLOCKED" if blocked_marker else "FAIL")
+    if rootless_reused_suites and rc == 0:
+        status = "REUSED"
     record = {"name": title, "status": status, "elapsed_s":
               round(time.monotonic() - start, 3), "exit_code": rc}
+    if rootless_reused_suites:
+        record["reused_rootless_suites"] = rootless_reused_suites
     if rc and retain_private_failure_output:
         private_log = retain_private_stage_output(
             output, result.get("tested_commit_sha"), title)
@@ -11924,6 +11949,25 @@ def required_benchmark_gates_pass(benchmarks):
 DEVELOPMENT_RESUME_SCHEMA = "swapz-make-test-development-resume-v1"
 DEVELOPMENT_RESUME_MAX_BYTES = 65536
 DEVELOPMENT_RESUME_STAGES = OFFICIAL_STAGE_NAMES[1:4]
+# Only these isolated, serial rootless fixtures may reuse a prior PASS.
+# Native Make, concurrent fixture groups and privileged checks always rerun.
+DEVELOPMENT_RESUME_ROOTLESS_SUITES = (
+    "tests/runtime/native/primary-lifecycle-audit-test.py",
+    "tests/runtime/native/primary-real-swap-test.py",
+    "tests/runtime/native/test-report-test.py",
+)
+
+
+def validated_development_resume_suites(suites):
+    """Require a reviewed, ordered, duplicate-free subset."""
+    if (not isinstance(suites, list) or
+            len(suites) > len(DEVELOPMENT_RESUME_ROOTLESS_SUITES) or
+            any(type(name) is not str for name in suites)):
+        return None
+    return (suites if suites == [
+        name for name in DEVELOPMENT_RESUME_ROOTLESS_SUITES
+        if name in suites] else None)
+
 
 
 def development_resume_directory(*, create=False):
@@ -12021,7 +12065,7 @@ def validated_development_resume_stages(stages):
     return valid
 
 
-def read_development_resume_checkpoint(context):
+def read_development_resume_checkpoint(context, *, suites=False):
     """Read a bounded owner-only checkpoint. Any mismatch runs fresh."""
     if context is None:
         return None
@@ -12031,7 +12075,7 @@ def read_development_resume_checkpoint(context):
     descriptor = -1
     try:
         descriptor = os.open(
-            directory / "state.json",
+            directory / ("suites.json" if suites else "state.json"),
             os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK | os.O_CLOEXEC)
         before = os.fstat(descriptor)
         if (not stat.S_ISREG(before.st_mode) or
@@ -12058,12 +12102,15 @@ def read_development_resume_checkpoint(context):
 
         saved = json.loads(payload.decode("utf-8"),
                            object_pairs_hook=unique_object)
+        field = "suites" if suites else "stages"
+        schema = (DEVELOPMENT_RESUME_SCHEMA + "-suites" if suites
+                  else DEVELOPMENT_RESUME_SCHEMA)
         if (not isinstance(saved, dict) or
-                set(saved) != {"schema", "context", "stages"} or
-                saved["schema"] != DEVELOPMENT_RESUME_SCHEMA or
-                saved["context"] != context):
+                set(saved) != {"schema", "context", field} or
+                saved["schema"] != schema or saved["context"] != context):
             return None
-        return validated_development_resume_stages(saved["stages"])
+        return (validated_development_resume_suites(saved[field]) if suites
+                else validated_development_resume_stages(saved[field]))
     except (OSError, ValueError, TypeError, UnicodeError):
         return None
     finally:
@@ -12071,16 +12118,20 @@ def read_development_resume_checkpoint(context):
             os.close(descriptor)
 
 
-def write_development_resume_checkpoint(context, stages):
-    """Durably save only PASS stage evidence; never publish it to Git."""
-    if context is None or validated_development_resume_stages(stages) is None:
+def write_development_resume_checkpoint(context, stages, *, suites=False):
+    """Durably save reviewed PASS evidence; never publish it to Git."""
+    validated = (validated_development_resume_suites(stages) if suites
+                 else validated_development_resume_stages(stages))
+    if context is None or validated is None:
         return False
     directory = development_resume_directory(create=True)
     if directory is None:
         return False
+    field = "suites" if suites else "stages"
+    schema = (DEVELOPMENT_RESUME_SCHEMA + "-suites" if suites
+              else DEVELOPMENT_RESUME_SCHEMA)
     payload = (json.dumps({
-        "schema": DEVELOPMENT_RESUME_SCHEMA, "context": context,
-        "stages": stages,
+        "schema": schema, "context": context, field: stages,
     }, sort_keys=True, separators=(",", ":"), allow_nan=False) + "\n").encode(
         "utf-8")
     if len(payload) > DEVELOPMENT_RESUME_MAX_BYTES:
@@ -12094,7 +12145,7 @@ def write_development_resume_checkpoint(context, stages):
             output.write(payload)
             output.flush()
             os.fsync(output.fileno())
-        os.replace(temporary, directory / "state.json")
+        os.replace(temporary, directory / ("suites.json" if suites else "state.json"))
         directory_descriptor = os.open(
             directory, os.O_RDONLY | os.O_DIRECTORY | os.O_CLOEXEC)
         try:
@@ -12122,7 +12173,8 @@ def reset_development_resume_checkpoint():
     if directory is None:
         return
     try:
-        (directory / "state.json").unlink(missing_ok=True)
+        for filename in ("state.json", "suites.json"):
+            (directory / filename).unlink(missing_ok=True)
     except OSError:
         pass
 
@@ -12290,6 +12342,26 @@ def _run_qualification(args, sync_result):
     checkpoint_context = None
     cached_stages = []
     checkpoint_stages = []
+    rootless_cached_suites = []
+    rootless_recorded_suites = []
+    rootless_cache_context = None
+
+    def record_completed_rootless_suite(name):
+        nonlocal rootless_cache_context, rootless_recorded_suites
+        # A native test may rebuild an existing artifact; rebind only a
+        # newly observed PASS, never old PASS records, to its new identity.
+        current_context = development_resume_context(result, args.kdir)
+        if current_context is None:
+            return
+        if current_context != rootless_cache_context:
+            rootless_cache_context = current_context
+            rootless_recorded_suites = []
+        if name not in rootless_recorded_suites:
+            rootless_recorded_suites = [
+                candidate for candidate in DEVELOPMENT_RESUME_ROOTLESS_SUITES
+                if candidate == name or candidate in rootless_recorded_suites]
+            write_development_resume_checkpoint(
+                current_context, rootless_recorded_suites, suites=True)
     if checkout_preflight is not None:
         # A dirty nested unittest can fail while the production source is
         # unchanged. Refuse the long run before collecting misleading evidence.
@@ -12338,10 +12410,15 @@ def _run_qualification(args, sync_result):
                 # Build/provenance checks always run on the current checkout.
                 checkpoint_context = development_resume_context(
                     result, args.kdir)
+                rootless_cache_context = checkpoint_context
                 if resume_requested:
                     cached_stages = (
                         read_development_resume_checkpoint(checkpoint_context)
                         or [])
+                    rootless_cached_suites = (
+                        read_development_resume_checkpoint(
+                            checkpoint_context, suites=True) or [])
+                    rootless_recorded_suites = list(rootless_cached_suites)
                     result["development_resume"]["checkpoint"] = (
                         "MATCHED" if cached_stages else "NOT_AVAILABLE")
             reused_stage = (
@@ -12358,11 +12435,18 @@ def _run_qualification(args, sync_result):
                 result["development_resume"]["reused_stages"].append(title)
                 code = 0
             else:
+                rootless_options = (
+                    {"rootless_resume_suites": rootless_cached_suites,
+                     "rootless_suite_completed": record_completed_rootless_suite}
+                    if i == 1 and tier == "algorithm" else {})
                 code = run_stage(
                     title, command, result, parse_bench=(i == 4),
                     stream_rootless_progress=(i == 1),
                     progress_table=progress_table,
-                    retain_private_failure_output=(i == 4))
+                    retain_private_failure_output=(i == 4), **rootless_options)
+                if i == 1 and resume_requested and result["stages"]:
+                    result["development_resume"]["reused_rootless_suites"] = (
+                        result["stages"][-1].get("reused_rootless_suites", []))
             if code:
                 exit_code = code
                 break

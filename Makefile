@@ -77,6 +77,8 @@ uninstall:
 
 # Algorithm-only source/native/owned-RAM tests. RESUME=1 optionally reuses only
 # source/host/artifact-matched private rootless/W=1/W=2 development checkpoints;
+# selected isolated rootless suites also checkpoint independently after PASS;
+# native Make, kernel warnings and loaded-device work remain fail-closed;
 # the build and every loaded/privileged test run fresh. Resumed runs cannot PASS.
 # RESUME=1 is parent-only; nested harnesses never inherit development reuse.
 # Older runs without private checkpoints cannot be resumed from stdout.

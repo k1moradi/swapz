@@ -1156,6 +1156,45 @@ class NativeTimingContract(unittest.TestCase):
             finally:
                 runner.ROOT = previous_root
 
+    def test_development_resume_rootless_suites_are_private_and_allowlisted(self):
+        context = {"source_sha": "a" * 40,
+                   "artifacts": {"status": "AVAILABLE"}}
+        candidates = list(runner.DEVELOPMENT_RESUME_ROOTLESS_SUITES)
+        previous_root = runner.ROOT
+        with tempfile.TemporaryDirectory(prefix="make-resume-suites-") as directory:
+            try:
+                runner.ROOT = Path(directory)
+                self.assertTrue(runner.write_development_resume_checkpoint(
+                    context, candidates[:2], suites=True))
+                state = runner.ROOT / "build/tests/make-test-resume/suites.json"
+                self.assertEqual(stat.S_IMODE(state.stat().st_mode), 0o600)
+                self.assertEqual(
+                    runner.read_development_resume_checkpoint(
+                        context, suites=True), candidates[:2])
+                for invalid in (candidates[::-1],
+                                [candidates[0], candidates[0]],
+                                ["tests/tools/test-loaded.sh"]):
+                    self.assertIsNone(
+                        runner.validated_development_resume_suites(invalid))
+                state.chmod(0o644)
+                self.assertIsNone(
+                    runner.read_development_resume_checkpoint(
+                        context, suites=True))
+                state.chmod(0o600)
+                self.assertIsNone(
+                    runner.read_development_resume_checkpoint(
+                        {**context, "source_sha": "b" * 40}, suites=True))
+                self.assertEqual(
+                    runner.rootless_phase_progress(
+                        "ROOTLESS_PHASE_PROGRESS state=REUSED index=1 "
+                        "elapsed_s=0 label=" + candidates[0],
+                        frozenset(candidates)),
+                    ("REUSED", 1, 0, candidates[0]))
+                runner.reset_development_resume_checkpoint()
+                self.assertFalse(state.exists())
+            finally:
+                runner.ROOT = previous_root
+
     def test_development_resume_skips_only_passed_rootless_warning_stages(self):
         """Loaded work is fresh and a resumed run stays unqualified."""
         source = "a" * 40
@@ -1176,7 +1215,9 @@ class NativeTimingContract(unittest.TestCase):
 
         def stage_runner(title, command, result, *, parse_bench=False,
                          stream_rootless_progress=False, progress_table=None,
-                         retain_private_failure_output=False):
+                         retain_private_failure_output=False,
+                         **rootless_options):
+            del rootless_options
             del command, stream_rootless_progress, progress_table
             del retain_private_failure_output
             stages_run.append(title)
@@ -6501,7 +6542,9 @@ class ReportContract(unittest.TestCase):
         def stage_runner(first_exit):
             def run(title, command, result, *, parse_bench=False,
                     stream_rootless_progress=False, progress_table=None,
-                    retain_private_failure_output=False):
+                    retain_private_failure_output=False,
+                    **rootless_options):
+                del rootless_options
                 # Observational display does not affect qualification fixture.
                 del progress_table
                 del retain_private_failure_output

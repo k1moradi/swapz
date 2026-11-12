@@ -596,6 +596,14 @@ evidence or turn into a qualifying PASS. `make test_full` does not accept
 `RESUME=1`. No old log or existing public report is retrospectively
 convertible into a private checkpoint. The parent runner strips its RESUME
 selector from test children and nested synthetic reporter invocations.
+A partial rootless-stage run may also save independently completed primary
+lifecycle audit, primary real-swap and report-contract suites. Development
+resume reuses only these reviewed serial fixtures, after verifying source,
+host, kernel, KDIR, worker policy and all three rebuilt artifact digests;
+the rootless native Make and all other suites run fresh. Each resumed suite and
+the containing rootless stage report REUSED, not PASS, and the overall run stays
+INCOMPLETE. Private suite checkpoints are atomically written beside stage
+checkpoints, with the same owner-only file identity and permissions.
 Synthetic regression covers successful
 reuse, exact-context drift, file identity/privacy rejection, one-table progress,
 including isolated report-root fixtures, complete synthetic benchmark
