@@ -6555,6 +6555,16 @@ async mixed off/swapz comparison and one positive-delta64 write-only off/swapz
 comparison. These rows are directional bottleneck evidence and do not replace
 the matched fast-model qualification intervals.
 
+Owned-null_blk benchmark setup should read the existing fixed configfs
+attributes and complete /proc/swaps snapshots with Bash's in-process
+single-file substitution (`$(< path)`) rather than starting a fresh
+`cat` for each attribute. This is an orchestration-only cost reduction:
+preserve both the pre-power and post-power exact storage-model validation,
+configfs index/major:minor proof, full swap-inventory snapshots before and
+after, mandatory device identity/holder checks, and all existing fail-closed
+cleanup/quarantine behavior. Do not skip a read, hide an unreadable source,
+or cache state that must be revalidated before a mutation.
+
 The four modern service envelopes must use the test-only native-C replay
 engine for both raw/off and swapz arms. Python remains the safety/orchestration
 authority: it validates the immutable trace, opens and positively identifies the

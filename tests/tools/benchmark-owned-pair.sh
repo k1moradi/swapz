@@ -391,7 +391,7 @@ done
 [[ $(id -u) == 0 ]] || fail "root required for isolated RAM devices"
 [[ "$VALIDATED_SOURCE" =~ ^[0-9a-f]{40}$ ]] ||
     fail "unprivileged parent did not provide a validated source revision"
-version="$(cat src/kernel/VERSION)"
+version="$(< src/kernel/VERSION)"
 [[ "$version" =~ ^3[.]0[.]0-alpha[.][0-9]+$ ]] ||
     fail "malformed canonical swapz version"
 grep -Fxq "#define SWAPZ_ALPHA_VERSION \"$version\"" build/kernel/experimental/swapz-version.h ||
@@ -412,7 +412,7 @@ PAIR_TIMING_START_MS="$(pair_elapsed_clock_ms)" || PAIR_TIMING_START_MS=
 printf 'pid=%s\nsource_sha=%s\n' "$$" "$VALIDATED_SOURCE" \
     > "$SESSION/.swapz-benchmark-owner"
 exec > >(tee -a "$SESSION/session.log") 2>&1
-SWAPS="$(cat /proc/swaps)"
+SWAPS="$(< /proc/swaps)"
 printf '%s\n' "$SWAPS" > "$SESSION/.swapz-benchmark-swaps"
 chmod 0600 "$SESSION/.swapz-benchmark-swaps"
 SWAPS_ID="$(printf '%s
@@ -539,7 +539,7 @@ cleanup() {
             note 'QUARANTINED: swapz module busy'
         fi
     fi
-    end_swaps="$(cat /proc/swaps)"
+    end_swaps="$(< /proc/swaps)"
     note "HOST_SWAPS_AFTER:"
     note "$end_swaps"
     if ! current_id="$(printf '%s

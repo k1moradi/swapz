@@ -7675,6 +7675,9 @@ int main(void)
         for attribute in ("memory_backed", "power", "index"):
             self.assertIn('$(< "$config/' + attribute + '")', pair)
         self.assertIn('$(< "/sys/block/$disk/dev")', pair)
+        self.assertIn('version="$(< src/kernel/VERSION)"', pair)
+        self.assertIn('SWAPS="$(< /proc/swaps)"', pair)
+        self.assertIn('end_swaps="$(< /proc/swaps)"', pair)
 
     def test_fixed_owned_storage_models_use_native_replay(self):
         pair = (ROOT / "tests/tools/benchmark-owned-pair.sh").read_text()
