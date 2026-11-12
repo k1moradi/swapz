@@ -1895,6 +1895,38 @@ class PairReplayContract(unittest.TestCase):
                     f"phase=pair-compare scenario={mode} candidate=off/swapz "
                     "invariant=identical-logical-input")
 
+                # The fixed 10/80 MiB/s profiles now use native workers too.
+                # Prove both engines preserve this exact immutable replay and
+                # byte-exact final state. Timing/CPU metrics are intentionally
+                # NOT compared across different scheduling engines.
+                for candidate, native_result in zip(("off", "swapz"), reports):
+                    device = root / f"swapz-replay-threaded-{candidate}.bin"
+                    with device.open("wb") as handle:
+                        handle.truncate(64 * PAGE)
+                    threaded_result = root / f"threaded-{candidate}.json"
+                    self.run_cmd(
+                        "run", "--fixture", fixture,
+                        "--trace", plan / "trace.jsonl",
+                        "--manifest", plan / "manifest.json",
+                        "--device", device, "--candidate", candidate,
+                        "--source-sha", "rootless-no-module",
+                        "--regular-file-test", "--result", threaded_result,
+                        scenario=f"{mode}-threaded")
+                    native_record = json.loads(native_result.read_text())
+                    threaded_record = json.loads(threaded_result.read_text())
+                    self.assertEqual(threaded_record["replay_engine"],
+                                     "python-threaded")
+                    for field in (
+                            "source_sha", "fixture_sha256", "trace_sha256",
+                            "write_payload_stream_sha256", "prefill_sha256",
+                            "expected_post_sha256", "verified_post_sha256",
+                            "warmup_ops", "measure_ops", "read_ops",
+                            "write_ops", "replay_mode"):
+                        self.assertEqual(
+                            native_record[field], threaded_record[field],
+                            f"phase=cross-engine-oracle mode={mode} "
+                            f"candidate={candidate} field={field}")
+
     def test_mixed_lanes_isolate_barrier_and_reject_cross_lane_mutations(self):
         import runpy
         replay = runpy.run_path(str(SCRIPT))

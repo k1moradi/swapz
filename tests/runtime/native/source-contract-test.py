@@ -7661,6 +7661,20 @@ int main(void)
         self.assertIn("PASS_LZ4_ACCELERATION_AB", runner)
         self.assertIn('matched_value_pairs(\n            sessions, "lz4_acceleration", 1, 4)', runner)
 
+    def test_fixed_owned_storage_models_use_native_replay(self):
+        pair = (ROOT / "tests/tools/benchmark-owned-pair.sh").read_text()
+        model_cases = pair.split(
+            'case "$LOWER_MBPS:$COMPLETION_NSEC:$SUBMIT_QUEUES:$HW_QUEUE_DEPTH" in',
+            1)[1].split("\nesac", 1)[0]
+        self.assertRegex(
+            model_cases,
+            r"10:1000000:1:1\|80:150000:1:64\|100:500000:1:4")
+        self.assertRegex(model_cases, r"12000:14000:4:64\)\s+NATIVE_REPLAY=1")
+        self.assertIn(
+            "if (( NATIVE_REPLAY )) && [[ ! -x build/tests/native/io-replay-native ]];",
+            pair)
+        self.assertIn('REPLAY_ARGS+=(--native-replay)', pair)
+
     def test_modern_storage_envelopes_use_native_replay_helper(self):
         pair = (ROOT / "tests/tools/benchmark-owned-pair.sh").read_text()
         replay = (ROOT / "tests/runtime/benchmark/io-replay.py").read_text()

@@ -6566,11 +6566,19 @@ timed interval. The helper is an internal test binary under `build/tests/`;
 it creates no new public test command.
 
 Modern-envelope report parsing must require `replay_engine=native-c` for both
-arms and reject silent fallback to Python. The historical 10/80 MiB/s
-qualification remains on the existing Python replay so its matched baseline is
-not changed by this harness experiment. Rootless qualification must exercise
-both native mixed-wave and native persistent-write modes on regular files and
-prove the same immutable-plan/final-image contract. Native replay changes
+arms and reject silent fallback to Python. The fixed 10/80 MiB/s models now
+also use native-C replay for both arms of every loaded benchmark pair: mixed
+QD waves, the RAW/adjacent-READ controls and the persistent write-only lanes.
+The replay-engine switch changes the measurement baseline, not the immutable
+trace, artificial lower-device parameters, arm ordering, safety admission or
+byte-exact oracle. Never pool or directly compare Python-threaded and native-C
+historical performance measurements as a single cohort or claim the engine
+switch is a product performance gain. Missing native helper is BLOCKED before
+new device ownership; no silent Python fallback is allowed.
+Rootless qualification must exercise native mixed-wave and persistent-write
+modes on regular files and cross-check the same fixture, plan, measured
+operation counts and byte-exact final-image digest against Python replay.
+Do not require throughput or tail-latency equality across replay engines. Native replay changes
 submission overhead only; the envelopes remain synthetic `null_blk` evidence
 and never become physical-media saturation claims. Rootless Make-interface fixtures that synthesize these
 rows must emit the same marker on both raw/off and swapz arms; otherwise the

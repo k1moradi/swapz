@@ -154,9 +154,11 @@ if [[ $# -ge 3 && ${@: -2:1} == --lower-mbps &&
     LOWER_MBPS="${!#}"
     set -- "${@:1:$(( $# - 2 ))}"
 fi
+# All fixed unpaced RAM models use the already available native worker engine.
+# This changes the measurement engine, not trace geometry, arm order, device
+# admission or the byte-exact replay oracle. Never fall back to Python silently.
 case "$LOWER_MBPS:$COMPLETION_NSEC:$SUBMIT_QUEUES:$HW_QUEUE_DEPTH" in
-    10:1000000:1:1|80:150000:1:64) ;;
-    100:500000:1:4|500:100000:1:32|6500:25000:4:64|12000:14000:4:64)
+    10:1000000:1:1|80:150000:1:64|100:500000:1:4|500:100000:1:32|6500:25000:4:64|12000:14000:4:64)
         NATIVE_REPLAY=1
         ;;
     *) echo 'BLOCKED: unsupported owned-RAM storage service envelope' >&2; exit 2 ;;

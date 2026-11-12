@@ -347,6 +347,15 @@ A barrier-isolation experiment must give its wave control the identical trace,
 payload stream and final image; changing ownership and barriers together does
 not isolate barrier cost.
 
+The unpaced loaded owned-RAM qualification uses the same pre-created native-C
+replay workers for both off and swapz, on the fixed 10/80 MiB/s models as well
+as the modern storage envelopes. Python retains exact device/FD admission,
+source and trace provenance, timed counter snapshots and the final image
+oracle. Preserve identical QD, warmup/measured operation counts, logical
+trace, arm ordering and native worker scheduling mode; fail closed if the
+native helper is absent. The old Python-threaded samples are a separate
+measurement cohort, not a comparable product throughput baseline.
+
 Development benchmark consumers must honor the `make fast_test` machine-readable
 `performance_validity.performance_usable` flag before comparing useful service.
 Host-noise screening uses quiet pre/post counter deltas, timed steal and raw
