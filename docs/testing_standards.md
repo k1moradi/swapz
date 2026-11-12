@@ -589,11 +589,12 @@ merge independent assertion/failure boundaries or omit ASan/UBSan/TSan
 qualification for speed.
 The native/rootless stage records separate native Make and remaining-contract
 wall times as optional observational evidence, not qualification PASS gates.
-Two independent shared-object native test targets, test-mapping and test-gc,
-may additionally record private per-target PASS checkpoints during ordinary
-algorithm `make test`. On `make test RESUME=1`, GNU Make still builds and
-validates every prerequisite before the target recipe; the development-only
-helper then verifies the exact source/host/kernel/KDIR/worker/root-artifact
+The output-independent shared-object native test-mapping target may
+additionally record a private PASS checkpoint during ordinary algorithm
+`make test`. test-gc must always execute because its scan-scaling output is
+required qualification evidence. On `make test RESUME=1`, GNU Make still
+builds and validates every mapping prerequisite before the target recipe; the
+development-only helper then verifies the exact source/host/kernel/KDIR/worker/root-artifact
 context, the native compiler-configuration stamp and every expected native
 executable's regular-file SHA-256, executable mode and file identity.
 Changed, linked or missing binaries, dirty source, invalid private file
@@ -601,11 +602,11 @@ permissions or failed children force the entire target to execute freshly.
 Synthetic regression must create real executable fixture scripts (with valid
 line endings) and confirm that a prior matching PASS skips execution, while
 changed bytes execute and propagate the first failing binary's exit status.
-The targets retain original within-suite binary order and working directory
-(inherited from tests/suites), and do not cache individual binary results. Mapping and GC checkpoints have independent
-owner-only atomic files so parallel Make recipes cannot overwrite each
-other. Reused native targets print a bounded marker, are rendered REUSED by
-the rootless stage, cannot feed a fresh PASS checkpoint and never qualify
+The mapping target retains original within-suite binary order and working
+directory (inherited from tests/suites), and does not cache individual binary
+results. Its owner-only atomic checkpoint is independent of all rootless
+fixture checkpoints. Reused mapping prints a bounded marker, is rendered
+REUSED by the rootless stage, cannot feed a fresh PASS checkpoint and never qualifies
 physical or loaded device evidence. Full-tier and direct CI native testing
 never consume those development checkpoints.
 A normal `make test` saves a bounded, private, owner-only, atomic

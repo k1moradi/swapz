@@ -1287,47 +1287,47 @@ class NativeTimingContract(unittest.TestCase):
                             runner, "development_resume_context",
                             return_value=synthetic_context):
                     binaries = [str(native.NATIVE / name)
-                                for name in native.SUITES["gc"]]
+                                for name in native.SUITES["mapping"]]
                     # The helper must not silently change a native program's
                     # former tests/suites cwd, even in a direct noncache run.
                     with mock.patch.object(
                             native.subprocess, "run",
                             return_value=subprocess.CompletedProcess([], 0)) as executed:
                         self.assertEqual(native.run_native_suite(
-                            "gc", binaries, mode=None), 0)
+                            "mapping", binaries, mode=None), 0)
                         self.assertEqual(executed.call_count, len(binaries))
                         for call in executed.call_args_list:
                             self.assertNotIn("cwd", call.kwargs)
                     self.assertEqual(native.run_native_suite(
-                        "gc", binaries, mode="record",
+                        "mapping", binaries, mode="record",
                         tested_source=expected_source, kdir="/synthetic",
                         runner=runner), 0)
                     context = native.current_native_context(
-                        "gc", expected_source, "/synthetic", runner)
+                        "mapping", expected_source, "/synthetic", runner)
                     self.assertEqual(
                         runner.read_development_resume_checkpoint(
-                            context, native_suite="gc"), ["gc"])
+                            context, native_suite="mapping"), ["mapping"])
                     with mock.patch.object(native.subprocess, "run",
                                            side_effect=AssertionError(
                                                "verified PASS must skip execution")):
                         self.assertEqual(native.run_native_suite(
-                            "gc", binaries, mode="resume",
+                            "mapping", binaries, mode="resume",
                             tested_source=expected_source, kdir="/synthetic",
                             runner=runner), 0)
-                    changed = native.NATIVE / native.SUITES["gc"][0]
+                    changed = native.NATIVE / native.SUITES["mapping"][0]
                     changed.write_bytes(b"#!/bin/sh\nexit 17\n")
                     changed.chmod(0o755)
                     with contextlib.redirect_stderr(io.StringIO()) as error:
                         self.assertEqual(native.run_native_suite(
-                            "gc", binaries, mode="resume",
+                            "mapping", binaries, mode="resume",
                             tested_source=expected_source, kdir="/synthetic",
                             runner=runner), 17)
-                    self.assertIn("binary=gc-forbidden-victim exit=17",
+                    self.assertIn("binary=zero-write-elision exit=17",
                                   error.getvalue())
                     changed.unlink()
-                    changed.symlink_to(native.NATIVE / native.SUITES["gc"][1])
+                    changed.symlink_to(native.NATIVE / native.SUITES["mapping"][1])
                     self.assertIsNone(native.current_native_context(
-                        "gc", expected_source, "/synthetic", runner))
+                        "mapping", expected_source, "/synthetic", runner))
             finally:
                 native.ROOT, native.NATIVE = previous_root, previous_native
                 runner.ROOT = previous_runner_root

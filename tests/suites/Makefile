@@ -178,7 +178,7 @@ test-predictor: $(OUT)/predictor-qualification test-anon-page-analyzer
 	  fi
 
 # All shared native objects and target binaries remain explicit Make
-# prerequisites. Only their test execution may resume after byte-exact checks.
+# prerequisites. Only mapping test execution may resume after byte-exact checks.
 test-mapping: $(OUT)/zero-write-elision $(OUT)/mapping-authority $(OUT)/authority-throughput $(OUT)/transaction-publication $(OUT)/write-verification $(OUT)/dead-segment-reclamation $(OUT)/raw-discard $(OUT)/online-packing $(OUT)/randomized-authority
 	@python3 -B "$(ROOT)/tests/tools/native-resume.py" mapping \
 	  $(OUT)/zero-write-elision $(OUT)/mapping-authority $(OUT)/authority-throughput \
@@ -186,11 +186,9 @@ test-mapping: $(OUT)/zero-write-elision $(OUT)/mapping-authority $(OUT)/authorit
 	  $(OUT)/dead-segment-reclamation $(OUT)/raw-discard \
 	  $(OUT)/online-packing $(OUT)/randomized-authority
 
+# GC scan-scaling emits required native qualification evidence: always run.
 test-gc: $(OUT)/gc-forbidden-victim $(OUT)/gc-cost-accounting $(OUT)/gc-recovery-policy $(OUT)/gc-scan-scaling $(OUT)/gc-rotation $(OUT)/gc-engine-rotation $(OUT)/gc-high-occupancy
-	@python3 -B "$(ROOT)/tests/tools/native-resume.py" gc \
-	  $(OUT)/gc-forbidden-victim $(OUT)/gc-cost-accounting \
-	  $(OUT)/gc-recovery-policy $(OUT)/gc-scan-scaling $(OUT)/gc-rotation \
-	  $(OUT)/gc-engine-rotation $(OUT)/gc-high-occupancy
+	@set -e; "$(OUT)/gc-forbidden-victim"; "$(OUT)/gc-cost-accounting"; "$(OUT)/gc-recovery-policy"; "$(OUT)/gc-scan-scaling"; "$(OUT)/gc-rotation"; "$(OUT)/gc-engine-rotation"; "$(OUT)/gc-high-occupancy"
 
 # Keep the original failed executable's status, not a later Make exit.
 test-lower-io: $(OUT)/flush-ordering $(OUT)/lower-write-aggregation $(OUT)/window-policy $(OUT)/preparation-slots $(OUT)/preparation-codec-result $(OUT)/preparation-publication-lifetime $(OUT)/lane-gap

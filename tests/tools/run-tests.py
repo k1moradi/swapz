@@ -12044,7 +12044,8 @@ DEVELOPMENT_RESUME_STAGES = OFFICIAL_STAGE_NAMES[1:4]
 # Only shared-object-built, output-independent native targets with a complete
 # executable digest inventory may skip *execution* after Make has rebuilt all
 # prerequisites. Each target has its own private file for parallel Make jobs.
-DEVELOPMENT_RESUME_NATIVE_SUITES = ("mapping", "gc")
+# GC must execute: its scan-scaling output is required parent evidence.
+DEVELOPMENT_RESUME_NATIVE_SUITES = ("mapping",)
 DEVELOPMENT_RESUME_ROOTLESS_SUITES = (
     "tests/runtime/native/primary-lifecycle-audit-test.py",
     "tests/runtime/native/primary-lifecycle-nullblk-qualifier-test.py",
@@ -12294,8 +12295,7 @@ def reset_development_resume_checkpoint():
     if directory is None:
         return
     try:
-        for filename in ("state.json", "suites.json", "native-mapping.json",
-                         "native-gc.json"):
+        for filename in ("state.json", "suites.json", "native-mapping.json"):
             (directory / filename).unlink(missing_ok=True)
     except OSError:
         pass

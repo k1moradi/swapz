@@ -22,10 +22,6 @@ SUITES = {
         "transaction-publication", "write-verification",
         "dead-segment-reclamation", "raw-discard", "online-packing",
         "randomized-authority"),
-    "gc": (
-        "gc-forbidden-victim", "gc-cost-accounting", "gc-recovery-policy",
-        "gc-scan-scaling", "gc-rotation", "gc-engine-rotation",
-        "gc-high-occupancy"),
 }
 MAX_NATIVE_FILE_BYTES = 512 * 1024 * 1024
 
