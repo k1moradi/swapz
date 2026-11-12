@@ -390,7 +390,7 @@ classify_rootless_private_make_failure() {
   local traceback_line_regex='^[[:space:]]*File "([^"]*/)?swapz-primary-late-race-test[.]py", line [0-9]+, in (compile_and_run|main|<module>)$'
   local make_error_regex='^make(\[[0-9]+\])?: \*\*\* \[[^]]+\] Error [0-9]+$'
   # Authenticate a nested target against the source-controlled recipe line.
-  local make_nested_target_regex='^make(\[[0-9]+\])?: \*\*\* \[Makefile:([0-9]+): (test-(codec|predictor|mapping|gc|lower-io|userspace|replay-helper|anon-page-analyzer))\] Error [0-9]+$'
+  local make_nested_target_regex='^make(\[[0-9]+\])?: \*\*\* \[Makefile:([0-9]+): (test-(codec|predictor|mapping|gc|lower-io|userspace|replay-helper|anon-page-analyzer))\] Error ([0-9]+)$'
   local make_recipe_line
   local make_target
   local traceback_seen=0
@@ -398,6 +398,8 @@ classify_rootless_private_make_failure() {
   local compiler_error_seen=0
   local userspace_native_test=
   local userspace_runtime_exit=
+  local mapping_native_test=
+  local mapping_runtime_exit=
   rootless_classified_reason=nonzero_exit
   rootless_classified_subtest=unavailable
   rootless_classified_test=unavailable
@@ -417,6 +419,10 @@ classify_rootless_private_make_failure() {
       compile_assertion_seen=1
     elif (( compile_assertion_seen )) && [[ $line == *': error:'* ]]; then
       compiler_error_seen=1
+    elif [[ -z $mapping_native_test &&
+            $line =~ ^FAIL:[[:space:]]native[[:space:]]test-mapping[[:space:]]binary=([a-z0-9-]{1,64})[[:space:]]exit=([0-9]{1,3})$ ]]; then
+      mapping_native_test=${BASH_REMATCH[1]}
+      mapping_runtime_exit=${BASH_REMATCH[2]}
     elif [[ $line =~ ^FAIL:[[:space:]]native[[:space:]]test-userspace[[:space:]]binary=(swapzctl-status|swapz-primary-policy|swapz-primary-mount-namespace)[[:space:]]exit=([0-9]+)$ ]]; then
       userspace_native_test=${BASH_REMATCH[1]}
       userspace_runtime_exit=${BASH_REMATCH[2]}
@@ -452,6 +458,21 @@ classify_rootless_private_make_failure() {
             rootless_classified_reason=native_compile
             rootless_classified_subtest=compile
             rootless_classified_test=swapz-primary-late-race-test.py
+          elif [[ $make_target == test-mapping &&
+                  -n $mapping_native_test &&
+                  $mapping_runtime_exit == "${BASH_REMATCH[5]}" ]] &&
+               LC_ALL=C awk -v program="$mapping_native_test" '
+                 /^test-mapping: / {
+                   for (i = 1; i <= NF; i++)
+                     if ($i == "$(OUT)/" program) found = 1
+                   exit found ? 0 : 1
+                 }
+                 END { if (!found) exit 1 }
+               ' "$ROOT/tests/suites/Makefile" >/dev/null 2>&1; then
+            # Both the nested Make target and this executable are proven by
+            # unchanged source-controlled prerequisites. The raw child
+            # assertion remains only in the private failure transcript.
+            rootless_classified_test=$mapping_native_test
           elif [[ $make_target == test-userspace &&
                   -n $userspace_native_test &&
                   $userspace_runtime_exit =~ ^[0-9]+$ ]]; then

@@ -602,6 +602,10 @@ permissions or failed children force the entire target to execute freshly.
 Synthetic regression must create real executable fixture scripts (with valid
 line endings) and confirm that a prior matching PASS skips execution, while
 changed bytes execute and propagate the first failing binary's exit status.
+The ordinary rootless failure relay must authenticate the mapping executable
+against its source-controlled Make prerequisite and the matching nested Make
+exit before naming it on the operator console. Arbitrary child stderr and
+unreviewed executable names remain private.
 The mapping target retains original within-suite binary order and working
 directory (inherited from tests/suites), and does not cache individual binary
 results. Its owner-only atomic checkpoint is independent of all rootless

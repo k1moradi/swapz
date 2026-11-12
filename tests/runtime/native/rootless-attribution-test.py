@@ -335,6 +335,18 @@ case "$SWAPZ_RELAY_SCENARIO" in
       printf '\n' >&2
     fi
     exit 2 ;;
+  native_mapping_binary)
+    printf '%s\n' \
+      'FAIL: native test-mapping binary=zero-write-elision exit=7' \
+      "make[1]: *** [Makefile:${SWAPZ_TEST_MAPPING_RECIPE_LINE}: test-mapping] Error 7" \
+      "make: *** [Makefile:${SWAPZ_TEST_NATIVE_RECIPE_LINE}: test-native] Error 2" >&2
+    exit 2 ;;
+  native_mapping_forged)
+    printf '%s\n' \
+      'FAIL: native test-mapping binary=private-host-name exit=7' \
+      "make[1]: *** [Makefile:${SWAPZ_TEST_MAPPING_RECIPE_LINE}: test-mapping] Error 7" \
+      "make: *** [Makefile:${SWAPZ_TEST_NATIVE_RECIPE_LINE}: test-native] Error 2" >&2
+    exit 2 ;;
   native_assertion)
     printf '%s\n' \
       'FAIL: test_expected (__main__.PreviouslyPassing.test_expected)' \
@@ -678,6 +690,27 @@ class RootlessAttribution(unittest.TestCase):
         self.assertIn("test=unavailable", marker)
         self.assertNotIn(LATE_RACE_TEST, marker)
 
+
+    def test_make_native_mapping_failure_reports_owned_binary_only(self):
+        result = self.invoke("native_mapping_binary", stage=MAKE_PHASE)
+        log = self.assert_report(
+            result, status=2, reason="nonzero_exit", subtest="test-mapping",
+            test="zero-write-elision", stage=MAKE_PHASE)
+        self.assertIn("binary=zero-write-elision exit=7", log.read_text())
+        marker = next(line for line in result.stderr.splitlines()
+                      if line.startswith("FAIL: rootless "))
+        self.assertIn("test=zero-write-elision", marker)
+        self.assertNotIn(PRIVATE_SENTINEL, marker)
+
+    def test_make_native_mapping_rejects_unowned_binary_marker(self):
+        result = self.invoke("native_mapping_forged", stage=MAKE_PHASE)
+        log = self.assert_report(
+            result, status=2, reason="nonzero_exit", subtest="test-mapping",
+            test="unavailable", stage=MAKE_PHASE)
+        self.assertIn("private-host-name", log.read_text())
+        marker = next(line for line in result.stderr.splitlines()
+                      if line.startswith("FAIL: rootless "))
+        self.assertNotIn("private-host-name", marker)
 
     def test_make_native_assertion_identifies_first_target_not_later_cleanup(self):
         result = self.invoke("native_assertion", stage=MAKE_PHASE)
