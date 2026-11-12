@@ -685,7 +685,18 @@ elapsed milliseconds for setup, fixture, replay, verification and ownership-
 safe teardown. The optional `benchmarks.owned_pair_phase_timings` report
 field stores only complete, ordered five-phase pairs and their execution
 indices. Raw-read fanout pairs keep their full output in private logs while
-relaying only fixed, bounded timing lines to the parent reporter. The
+relaying only fixed, bounded timing lines to the parent reporter. A successful
+child exit does not imply its asynchronous session-log tee has drained to the
+parent. Before consuming each RAW/packed-read fanout transcript, the parent
+waits up to five seconds for the source-controlled successful teardown marker
+and final EVIDENCE line. Missing terminal output is FAIL, never an implicit
+PASS. Failure retains both private mode-0600 transcripts and reports only the
+bounded profile and gate; complete logs stay private. The existing two fixed
+profiles each require exactly one off and one swapz result, both exact 1024-page
+and byte-identical image oracles, plus strictly positive swapz asynchronous
+READ batches and lower READ requests. Missing, duplicate or malformed records
+must be attributed before the product comparison; rootless regressions cover
+delayed fanout, incomplete output and negative oracles. The
 optional `benchmarks.owned_pair_timing_coverage` reports the number of
 complete pairs and observed timing records, with COLLECTED, NOT_RECORDED
 or REJECTED status; an interrupted session may remain unrecorded. The helper

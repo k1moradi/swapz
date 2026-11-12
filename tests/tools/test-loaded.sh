@@ -217,6 +217,13 @@ umask 077
 printf '%s\n' 'START_LOADED_SHARED_BENCHMARK_PLAN=allocation'
 mkdir -p "$ROOT/build/tests"
 shared_plan="$(mktemp -d "$ROOT/build/tests/benchmark-plan.XXXXXXXX")"
+# Preserve source-bound private pair transcripts only when the fanout gate fails.
+retain_raw_read_fanout_logs=0
+retain_raw_read_fanout_failure() {
+    retain_raw_read_fanout_logs=1
+    printf '  Private raw-read fanout logs: %s/raw-read-{entropy,balanced}/run.log (mode 0600)\n' \
+        "${shared_plan#"$ROOT"/}" >&2
+}
 cleanup_shared_plan() {
     # Remove only exactly named files from this freshly allocated directory.
     [[ $shared_plan == "$ROOT/build/tests/benchmark-plan."* &&
@@ -234,8 +241,10 @@ cleanup_shared_plan() {
         rm -f -- "$shared_plan/raw-read-$content/fixture.bin" \
             "$shared_plan/raw-read-$content/fixture.json" \
             "$shared_plan/raw-read-$content/plan/trace.jsonl" \
-            "$shared_plan/raw-read-$content/plan/manifest.json" \
-            "$shared_plan/raw-read-$content/run.log"
+            "$shared_plan/raw-read-$content/plan/manifest.json"
+        if (( ! retain_raw_read_fanout_logs )); then
+            rm -f -- "$shared_plan/raw-read-$content/run.log"
+        fi
         rmdir -- "$shared_plan/raw-read-$content/plan" \
             "$shared_plan/raw-read-$content" 2>/dev/null || true
     done
@@ -294,6 +303,20 @@ printf '%s\n' 'PASS_LOADED_SHARED_BENCHMARK_PLAN'
 # workload; the former positive-fixture off/on benchmark is retired.
 # Exercise the RAW-aware slots on cold reads as a correctness gate, separate
 # from the fixed medium performance matrix. The balanced case also decodes SWZ.
+wait_for_owned_pair_capture() {
+    local captured_log=$1 attempt
+    # The child's Bash process substitution can outlive the shell's successful
+    # exit. The final EVIDENCE line follows the teardown PASS in the same pipe.
+    for (( attempt=0; attempt<50; ++attempt )); do
+        if [[ -f $captured_log && ! -L $captured_log ]] &&
+           LC_ALL=C grep -Fxq 'PASS: isolated pair and ordinary teardown' "$captured_log" &&
+           LC_ALL=C grep -q '^EVIDENCE=' "$captured_log"; then
+            return 0
+        fi
+        sleep 0.1
+    done
+    return 1
+}
 printf '%s\n' 'START_LOADED_RAW_READ_FANOUT'
 for content in entropy balanced; do
     raw_plan="$shared_plan/raw-read-$content"
@@ -313,6 +336,12 @@ for content in entropy balanced; do
         --profile medium --retain-ms 2 --unpaced --lower-mbps 80 \
         --hw-queue-depth 64 --completion-nsec 150000 --async-prepare \
         --shared-plan "$raw_plan" >"$raw_plan/run.log" 2>&1; then
+        if ! wait_for_owned_pair_capture "$raw_plan/run.log"; then
+            printf 'FAIL: raw-read fanout profile=%s gate=output_capture reason=incomplete_terminal_transcript\n' \
+                "$content" >&2
+            retain_raw_read_fanout_failure
+            exit 1
+        fi
         # Preserve the private full transcript. Forward only bounded,
         # source-defined timing records to the parent qualification reporter.
         # No device identity, fixture path or child diagnostic is relayed.
@@ -343,37 +372,70 @@ for content in entropy balanced; do
         # parent reporter. Never mark a failed pair or this phase as PASS.
         printf '%s: raw-read fanout profile=%s child_exit=%d cause=%.110s\n' \
             "$raw_failure_kind" "$content" "$rc" "$raw_failure_reason" >&2
+        retain_raw_read_fanout_failure
         exit "$rc"
     fi
 done
-python3 -B - "$shared_plan/raw-read-entropy/run.log" \
+if ! python3 -B - "$shared_plan/raw-read-entropy/run.log" \
     "$shared_plan/raw-read-balanced/run.log" <<'PYRAW'
 import json
 import sys
 from pathlib import Path
+
+def refuse(profile, gate, detail=""):
+    raise SystemExit(
+        f"FAIL: raw-read fanout profile={profile} gate={gate}{detail}")
+
 pages = batches = requests = 0
-for path in sys.argv[1:]:
+for profile, path in zip(("entropy", "balanced"), sys.argv[1:]):
     arms = {}
-    for line in Path(path).read_text().splitlines():
-        if not line.startswith('{'):
+    try:
+        lines = Path(path).read_text(encoding="utf-8").splitlines()
+    except (OSError, UnicodeError):
+        refuse(profile, "private_transcript_unreadable")
+    for line in lines:
+        if not line.startswith("{"):
             continue
-        record = json.loads(line)
-        if record.get('candidate') in ('off', 'swapz'):
-            arms[record['candidate']] = record
-    assert set(arms) == {'off', 'swapz'}
-    for arm in arms.values():
-        assert arm['verdict'] == 'PASS' and arm['verified_pages'] == 1024
-        assert arm['expected_post_sha256'] == arm['verified_post_sha256']
-    actual = arms['swapz']
-    async_batches = actual['kernel_read_path']['parallel_read_async_batches']
-    lower_requests = actual['lower_io']['lower_read_requests']
-    assert async_batches > 0 and lower_requests > 0
-    pages += actual['verified_pages']
+        try:
+            record = json.loads(line)
+        except json.JSONDecodeError:
+            refuse(profile, "invalid_json_record")
+        if not isinstance(record, dict):
+            refuse(profile, "invalid_json_record")
+        candidate = record.get("candidate")
+        if candidate in ("off", "swapz"):
+            if candidate in arms:
+                refuse(profile, "duplicate_candidate", f" candidate={candidate}")
+            arms[candidate] = record
+    missing = [name for name in ("off", "swapz") if name not in arms]
+    if missing:
+        refuse(profile, "missing_candidate", " missing=" + ",".join(missing))
+    for candidate, arm in arms.items():
+        if (arm.get("verdict") != "PASS" or
+                type(arm.get("verified_pages")) is not int or
+                arm["verified_pages"] != 1024 or
+                not isinstance(arm.get("expected_post_sha256"), str) or
+                arm.get("expected_post_sha256") != arm.get("verified_post_sha256")):
+            refuse(profile, "byte_oracle", f" candidate={candidate}")
+    actual = arms["swapz"]
+    try:
+        async_batches = actual["kernel_read_path"]["parallel_read_async_batches"]
+        lower_requests = actual["lower_io"]["lower_read_requests"]
+    except (KeyError, TypeError):
+        refuse(profile, "fanout_evidence_missing")
+    if (type(async_batches) is not int or async_batches <= 0 or
+            type(lower_requests) is not int or lower_requests <= 0):
+        refuse(profile, "fanout_evidence_missing")
+    pages += actual["verified_pages"]
     batches += async_batches
     requests += lower_requests
 print(f'PASS_LOADED_RAW_READ_FANOUT=profiles:2 verified_pages:{pages} '
       f'async_batches:{batches} lower_read_reqs:{requests}')
 PYRAW
+then
+    retain_raw_read_fanout_failure
+    exit 1
+fi
 
 # Two representative delay-modeled RAM-backed environments provide paired
 # write/read evidence. Slow remains a bounded directional control. Fast runs

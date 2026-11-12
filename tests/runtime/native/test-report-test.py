@@ -3071,6 +3071,108 @@ class ReportContract(unittest.TestCase):
                 self.assertEqual(verdict["overall"], "INCOMPLETE")
                 self.assertIn("malformed loaded correctness", verdict["reason"])
 
+    def test_raw_read_fanout_capture_requires_drained_terminal_output(self):
+        loaded = (ROOT / "tests/tools/test-loaded.sh").read_text()
+        prefix = "wait_for_owned_pair_capture() {"
+        self.assertIn(prefix, loaded)
+        function = prefix + loaded.split(prefix, 1)[1].split("\n}\n", 1)[0] + "\n}\n"
+        self.assertIn('if ! wait_for_owned_pair_capture "$raw_plan/run.log"; then',
+                      loaded)
+        self.assertIn('if (( ! retain_raw_read_fanout_logs )); then', loaded)
+        self.assertIn('retain_raw_read_fanout_failure', loaded)
+
+        def invoke(path, *, instant=False):
+            # Override only the observational poll sleep for negative cases.
+            script = function + ("sleep() { :; }\n" if instant else "")
+            script += 'wait_for_owned_pair_capture "$1"\n'
+            return subprocess.run(
+                ["bash", "-c", script, "fanout-capture", str(path)],
+                text=True, capture_output=True, timeout=8)
+
+        with tempfile.TemporaryDirectory() as directory:
+            log = Path(directory) / "run.log"
+            log.write_text("PASS: isolated pair and ordinary teardown\n")
+            self.assertNotEqual(invoke(log, instant=True).returncode, 0)
+            log.write_text("EVIDENCE=private\n")
+            self.assertNotEqual(invoke(log, instant=True).returncode, 0)
+            log.write_text(
+                "PASS: isolated pair and ordinary teardown\nEVIDENCE=private\n")
+            self.assertEqual(invoke(log, instant=True).returncode, 0)
+            log.write_text("PASS: isolated pair and ordinary teardown\n")
+            script = function + 'wait_for_owned_pair_capture "$1"\n'
+            waiting = subprocess.Popen(
+                ["bash", "-c", script, "fanout-capture", str(log)],
+                stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+            try:
+                time.sleep(0.2)
+                log.write_text(
+                    "PASS: isolated pair and ordinary teardown\nEVIDENCE=private\n")
+                self.assertEqual(waiting.communicate(timeout=8)[0], b"")
+                self.assertEqual(waiting.returncode, 0)
+            finally:
+                if waiting.poll() is None:
+                    waiting.kill()
+                    waiting.communicate()
+
+    def test_raw_read_fanout_records_refuse_missing_duplicate_and_bad_oracle(self):
+        loaded = (ROOT / "tests/tools/test-loaded.sh").read_text()
+        match = re.search(r"<<'PYRAW'\n(.*?)\nPYRAW\n", loaded, re.DOTALL)
+        self.assertIsNotNone(match)
+        validator = match.group(1)
+        digest = "a" * 64
+        off = {"candidate": "off", "verdict": "PASS",
+               "verified_pages": 1024, "expected_post_sha256": digest,
+               "verified_post_sha256": digest}
+        swapz = {**off, "candidate": "swapz",
+                 "kernel_read_path": {"parallel_read_async_batches": 4},
+                 "lower_io": {"lower_read_requests": 10}}
+        terminal = "PASS: isolated pair and ordinary teardown\nEVIDENCE=private\n"
+
+        def transcript(*records):
+            return "".join(json.dumps(record) + "\n" for record in records) + terminal
+
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            entropy, balanced = root / "entropy.log", root / "balanced.log"
+            entropy.write_text(transcript(off, swapz))
+            def check_balanced(log_text):
+                balanced.write_text(log_text)
+                return subprocess.run(
+                    [sys.executable, "-B", "-c", validator,
+                     str(entropy), str(balanced)],
+                    capture_output=True, text=True, timeout=5)
+
+            valid = check_balanced(transcript(off, swapz))
+            self.assertEqual(valid.returncode, 0, valid.stderr)
+            self.assertIn(
+                "PASS_LOADED_RAW_READ_FANOUT=profiles:2 verified_pages:2048 "
+                "async_batches:8 lower_read_reqs:20", valid.stdout)
+            invalid_cases = (
+                ("missing_candidate missing=swapz", transcript(off)),
+                ("missing_candidate missing=off", transcript(swapz)),
+                ("duplicate_candidate candidate=swapz", transcript(off, swapz, swapz)),
+                ("invalid_json_record", transcript(off) + "{not-json\n"),
+                ("byte_oracle candidate=off",
+                 transcript({**off, "verified_post_sha256": "b" * 64}, swapz)),
+                ("byte_oracle candidate=swapz",
+                 transcript(off, {**swapz, "verified_pages": 1023})),
+                ("fanout_evidence_missing",
+                 transcript(off, {**swapz, "kernel_read_path":
+                                  {"parallel_read_async_batches": 0}})),
+                ("fanout_evidence_missing",
+                 transcript(off, {**swapz, "lower_io":
+                                  {"lower_read_requests": True}})),
+            )
+            for reason, content in invalid_cases:
+                with self.subTest(reason=reason):
+                    failure = check_balanced(content)
+                    self.assertEqual(failure.returncode, 1, failure)
+                    self.assertIn(
+                        "FAIL: raw-read fanout profile=balanced gate=" + reason,
+                        failure.stderr)
+                    self.assertNotIn("Traceback", failure.stderr)
+                    self.assertNotIn("private", failure.stderr)
+
     def test_raw_read_fanout_evidence_is_mandatory(self):
         marker = ("PASS_LOADED_RAW_READ_FANOUT=profiles:2 verified_pages:2048 "
                   "async_batches:64 lower_read_reqs:512")
