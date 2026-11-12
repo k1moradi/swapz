@@ -1209,7 +1209,7 @@ class NativeTimingContract(unittest.TestCase):
         for suite, programs in native.SUITES.items():
             section = make_source.split("test-" + suite + ":", 1)[1].split(
                 "\ntest-", 1)[0]
-            self.assertIn("native-resume.py\" " " + suite, section)
+            self.assertIn('native-resume.py" ' + suite, section)
             for binary in programs:
                 self.assertIn("$(OUT)/" + binary, section)
 
@@ -1256,7 +1256,6 @@ class NativeTimingContract(unittest.TestCase):
             "swapz_native_resume_evidence", native_path)
         native = importlib.util.module_from_spec(native_spec)
         native_spec.loader.exec_module(native)
-        from types import SimpleNamespace
         with tempfile.TemporaryDirectory(prefix="native-byte-resume-") as folder:
             root = Path(folder)
             previous_root, previous_native = native.ROOT, native.NATIVE
@@ -1269,21 +1268,21 @@ class NativeTimingContract(unittest.TestCase):
                 for suite in native.SUITES:
                     for name in native.SUITES[suite]:
                         binary = native.NATIVE / name
-                        binary.write_bytes(b"#!/bin/sh\\nexit 0\\n")
+                        binary.write_bytes(b"#!/bin/sh\nexit 0\n")
                         binary.chmod(0o755)
                 (native.NATIVE / "native-compiler-configuration").write_text(
-                    "compiler=synthetic\\n")
+                    "compiler=synthetic\n")
                 expected_source = "a" * 40
                 synthetic_context = {"source_sha": expected_source,
                                      "host_sha256": "b" * 64}
                 with mock.patch.object(
-                        runner, "git_sha", return_value=expected_source), \\
+                        runner, "git_sha", return_value=expected_source), \
                         mock.patch.object(
                             runner, "tracked_source_checkout_preflight",
-                            return_value=None), \\
+                            return_value=None), \
                         mock.patch.object(
                             runner, "report_host_identity",
-                            return_value={"id_sha256": "b" * 64}), \\
+                            return_value={"id_sha256": "b" * 64}), \
                         mock.patch.object(
                             runner, "development_resume_context",
                             return_value=synthetic_context):
@@ -1306,7 +1305,7 @@ class NativeTimingContract(unittest.TestCase):
                             tested_source=expected_source, kdir="/synthetic",
                             runner=runner), 0)
                     changed = native.NATIVE / native.SUITES["gc"][0]
-                    changed.write_bytes(b"#!/bin/sh\\nexit 17\\n")
+                    changed.write_bytes(b"#!/bin/sh\nexit 17\n")
                     changed.chmod(0o755)
                     with contextlib.redirect_stderr(io.StringIO()) as error:
                         self.assertEqual(native.run_native_suite(

@@ -598,6 +598,9 @@ context, the native compiler-configuration stamp and every expected native
 executable's regular-file SHA-256, executable mode and file identity.
 Changed, linked or missing binaries, dirty source, invalid private file
 permissions or failed children force the entire target to execute freshly.
+Synthetic regression must create real executable fixture scripts (with valid
+line endings) and confirm that a prior matching PASS skips execution, while
+changed bytes execute and propagate the first failing binary's exit status.
 The targets retain original within-suite binary order and do not cache
 individual binary results. Mapping and GC checkpoints have independent
 owner-only atomic files so parallel Make recipes cannot overwrite each
