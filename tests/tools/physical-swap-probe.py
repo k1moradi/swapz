@@ -137,6 +137,20 @@ class RecoveryRequiredError(ProbeError):
     """Recovery or ownership is incomplete/uncertain and must stay non-PASS."""
 
 
+def _privileged_algorithm_source_admission_marker(error, arguments):
+    """Expose only an exact source-drift refusal, never privileged stderr."""
+    if (type(error) is not ProbeError or not arguments or
+            arguments[0] != "run" or
+            "--development-only" not in arguments or
+            "--algorithm-real-swap" not in arguments):
+        return None
+    if str(error) == "canonical main contains changed source after qualification":
+        # Both source checks precede swapoff and physical-data mutation.
+        return ("PHYSICAL_ALGORITHM_SOURCE_ADMISSION="
+                "privileged_canonical_source_advanced")
+    return None
+
+
 def _terminal_error_status(error):
     if isinstance(error, RecoveryRequiredError):
         return "RECOVERY_REQUIRED", 3
@@ -5613,5 +5627,11 @@ if __name__ == "__main__":
         raise SystemExit(main())
     except ProbeError as exc:
         status, exit_code = _terminal_error_status(exc)
+        # The official parent promotes only this finite refusal marker.
+        # Preserve every other privileged exception in its private stderr.
+        source_marker = _privileged_algorithm_source_admission_marker(
+            exc, sys.argv[1:])
+        if source_marker is not None:
+            print(source_marker, file=sys.stderr, flush=True)
         print(f"{status}: {exc}", file=sys.stderr)
         raise SystemExit(exit_code)
