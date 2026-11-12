@@ -67,6 +67,23 @@ def verified_native_sha256(path, *, executable):
         os.close(descriptor)
 
 
+def owned_native_executable(path):
+    """Do not run a linked, foreign or substituted native executable."""
+    try:
+        for directory in (ROOT / "build", ROOT / "build/tests", NATIVE):
+            metadata = directory.lstat()
+            if (not stat.S_ISDIR(metadata.st_mode) or
+                    metadata.st_uid != os.geteuid()):
+                return False
+        metadata = path.lstat()
+        return (stat.S_ISREG(metadata.st_mode) and
+                metadata.st_uid == os.geteuid() and
+                metadata.st_nlink == 1 and
+                metadata.st_mode & 0o111 != 0)
+    except OSError:
+        return False
+
+
 def current_native_context(suite, tested_source, kdir, runner):
     """Bind source/host + Make-built executable bytes and compiler stamp."""
     if (re.fullmatch(r"[0-9a-f]{40}", tested_source or "") is None or
@@ -117,16 +134,25 @@ def run_native_suite(suite, executables, *, mode=None,
                      "RESUME"):
         child_env.pop(variable, None)
     for binary in executables:
+        if not owned_native_executable(Path(binary)):
+            print(f"FAIL: native test-{suite} binary={Path(binary).name} "
+                  "reason=untrusted_executable", file=sys.stderr, flush=True)
+            return 126
         try:
             # Preserve the tests/suites working directory of the original
             # Make recipes. The wrapper owns only process execution, not cwd.
             completed = subprocess.run(
                 [binary], env=child_env, check=False)
             exit_code = completed.returncode
-        except OSError:
+        except OSError as error:
+            # Shell-compatible exit classes without exporting an arbitrary
+            # host path or exception string to the operator.
+            failure_exit = (127 if isinstance(error, FileNotFoundError) else
+                            126 if isinstance(error, PermissionError) else 1)
             print(f"FAIL: native test-{suite} binary={Path(binary).name} "
-                  "reason=execution_unavailable", file=sys.stderr, flush=True)
-            return 1
+                  f"reason=execution_unavailable exit={failure_exit}",
+                  file=sys.stderr, flush=True)
+            return failure_exit
         if exit_code:
             public_exit = 128 - exit_code if exit_code < 0 else exit_code
             print(f"FAIL: native test-{suite} binary={Path(binary).name} "

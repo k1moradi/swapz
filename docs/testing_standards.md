@@ -597,8 +597,10 @@ builds and validates every mapping prerequisite before the target recipe; the
 development-only helper then verifies the exact source/host/kernel/KDIR/worker/root-artifact
 context, the native compiler-configuration stamp and every expected native
 executable's regular-file SHA-256, executable mode and file identity.
-Changed, linked or missing binaries, dirty source, invalid private file
-permissions or failed children force the entire target to execute freshly.
+Changed binaries or source drift force the entire target to execute freshly;
+linked, foreign, missing or substituted executables refuse before execution.
+Invalid private checkpoint permissions disable reuse, and a failed native child
+retains a bounded binary name and its original exit class.
 Synthetic regression must create real executable fixture scripts (with valid
 line endings) and confirm that a prior matching PASS skips execution, while
 changed bytes execute and propagate the first failing binary's exit status.

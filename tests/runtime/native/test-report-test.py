@@ -1328,6 +1328,12 @@ class NativeTimingContract(unittest.TestCase):
                     changed.symlink_to(native.NATIVE / native.SUITES["mapping"][1])
                     self.assertIsNone(native.current_native_context(
                         "mapping", expected_source, "/synthetic", runner))
+                    with contextlib.redirect_stderr(io.StringIO()) as error:
+                        self.assertEqual(native.run_native_suite(
+                            "mapping", binaries, mode="resume",
+                            tested_source=expected_source, kdir="/synthetic",
+                            runner=runner), 126)
+                    self.assertIn("reason=untrusted_executable", error.getvalue())
             finally:
                 native.ROOT, native.NATIVE = previous_root, previous_native
                 runner.ROOT = previous_runner_root
