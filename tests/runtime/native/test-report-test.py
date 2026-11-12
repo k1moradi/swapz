@@ -4820,6 +4820,13 @@ class ReportContract(unittest.TestCase):
         }
         self.assertEqual(runner.parse_algorithm_source_admission_diagnostic(
             "private_host=NEVER_EXPORT\n" + prefix + reason), expected)
+        self.assertEqual(
+            runner.parse_algorithm_source_admission_diagnostic(
+                "private_host=NEVER_EXPORT\n" + prefix +
+                "privileged_canonical_source_advanced"),
+            {"schema": "swapz-algorithm-source-admission-v1",
+             "phase": "before_device_mutation",
+             "reason": "canonical_source_advanced"})
         for accepted in (
                 "canonical_source_raced", "local_checkout_not_main",
                 "local_tracking_main_mismatch",
@@ -4843,7 +4850,7 @@ class ReportContract(unittest.TestCase):
                     runner.parse_algorithm_source_admission_diagnostic(invalid))
 
     def test_official_algorithm_tier_publishes_source_admission_refusal(self):
-        """A blocked physical pre-consent run retains its cause in JSON."""
+        """A blocked privileged source gate retains its cause in JSON."""
         source_sha = "a" * 40
         reports = []
 
@@ -4867,7 +4874,8 @@ class ReportContract(unittest.TestCase):
             self.assertIsNotNone(options.get("stderr"))
             options["stderr"].write("private_host=NEVER_EXPORT\n")
             options["stderr"].write(
-                "PHYSICAL_ALGORITHM_SOURCE_ADMISSION=canonical_source_advanced\n")
+                "PHYSICAL_ALGORITHM_SOURCE_ADMISSION="
+                "privileged_canonical_source_advanced\n")
             return subprocess.CompletedProcess(command, 2)
 
         patches = (
@@ -4927,14 +4935,15 @@ class ReportContract(unittest.TestCase):
             "reason": "canonical_source_advanced",
             "diagnostic": {
                 "schema": "swapz-algorithm-source-admission-v1",
-                "phase": "before_consent",
+                "phase": "before_device_mutation",
                 "reason": "canonical_source_advanced",
             },
         })
         self.assertEqual([stage["status"] for stage in reports[1]["stages"]],
                          ["PASS"] * 5)
-        self.assertIn("phase=before_consent reason=canonical_source_advanced",
-                      console)
+        self.assertIn(
+            "phase=before_device_mutation reason=canonical_source_advanced",
+            console)
         self.assertNotIn("NEVER_EXPORT", console)
         self.assertIn("Tested Git commit:", console)
 
