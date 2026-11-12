@@ -1432,12 +1432,29 @@ def _require_shared_root_development_plan(target, evidence):
         "shared_root_parent_exception_required",
         "swap_inventory_read",
         "target_swap_size_ok",
-        "target_swap_zero_used",
+        # Current occupancy is migrated by the existing headroom-checked
+        # owned swapoff transition, never treated as already inactive.
         "target_swap_priority_ok",
     )
-    if any(plan.get(field) is not True for field in required_true):
+    failed_gate = next((field for field in required_true
+                        if plan.get(field) is not True), None)
+    if failed_gate is not None:
+        observed = ("missing" if failed_gate not in plan else
+                    "false" if plan[failed_gate] is False else "invalid")
+        # Only source-defined gate names and bounded classes cross the
+        # privileged stderr boundary; arbitrary plan values stay private.
+        print("PHYSICAL_ALGORITHM_DEBUG=" + json.dumps({
+            "schema": "swapz-algorithm-lifecycle-diagnostic-v1",
+            "phase": "physical_setup", "gate": "physical_execution",
+            "reason": "phase_refused",
+            "admission": {"check": failed_gate, "observed": observed,
+                          "original_exit": result.returncode},
+        }, sort_keys=True, separators=(",", ":")), file=sys.stderr, flush=True)
         raise ProbeError(
-            "shared-root authorization plan did not satisfy every required gate")
+            "shared-root authorization plan did not satisfy every required gate; "
+            f"phase=shared_root_plan failed_check={failed_gate} "
+            f"expected=true observed={observed} original_exit={result.returncode} "
+            "mutation=not_started safe_next_step=inspect_primary_plan_read_only")
     if (plan.get("dm_swapz_module_loaded") is not False or
             plan.get("shared_root_parent_exception_status") != "valid"):
         raise ProbeError("shared-root host authorization is not valid")

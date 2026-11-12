@@ -247,11 +247,18 @@ class PhysicalSwapProbeTests(unittest.TestCase):
                     returncode=2, stdout=json.dumps(plan), stderr="")):
             probe._require_shared_root_development_plan(target, evidence)
 
+        # Live raw swap is drained by the existing headroom-checked owned
+        # transition; current occupancy is not an authorization failure.
+        occupied = {**plan, "target_swap_zero_used": False}
+        with mock.patch.object(probe, "_run", return_value=SimpleNamespace(
+                returncode=2, stdout=json.dumps(occupied), stderr="")):
+            probe._require_shared_root_development_plan(target, evidence)
+
         rejected = (
             ({"shared_root_parent_exception_status": "missing"},
              "shared-root host authorization"),
             ({"target_device_minor": 5}, "does not bind"),
-            ({"target_swap_zero_used": False}, "every required gate"),
+            ({"target_not_mounted": False}, "every required gate"),
         )
         for mutation, diagnostic in rejected:
             with self.subTest(mutation=mutation):
@@ -263,6 +270,24 @@ class PhysicalSwapProbeTests(unittest.TestCase):
                     with self.assertRaisesRegex(probe.ProbeError, diagnostic):
                         probe._require_shared_root_development_plan(
                             target, evidence)
+
+        for observed, value in (("false", False), ("invalid", "/private/NEVER_EXPORT"),
+                                ("missing", None)):
+            invalid = {**plan, "target_not_mounted": False}
+            invalid["control_build_source_clean"] = value
+            if observed == "missing":
+                del invalid["control_build_source_clean"]
+            output = io.StringIO()
+            with mock.patch.object(probe, "_run", return_value=SimpleNamespace(
+                    returncode=2, stdout=json.dumps(invalid), stderr="")), \
+                    mock.patch("sys.stderr", output):
+                with self.assertRaisesRegex(probe.ProbeError, "failed_check=control_build_source_clean"):
+                    probe._require_shared_root_development_plan(target, evidence)
+            marker = json.loads(output.getvalue().split("=", 1)[1])
+            self.assertEqual(marker["admission"], {
+                "check": "control_build_source_clean", "observed": observed,
+                "original_exit": 2})
+            self.assertNotIn("NEVER_EXPORT", output.getvalue())
 
     def test_make_test_ram_evidence_reuses_exact_pass_without_fast_test(self):
         import pwd

@@ -4676,12 +4676,15 @@ class ReportContract(unittest.TestCase):
     def test_official_algorithm_tier_promotes_activation_refusal_on_exit_two(self):
         self.assert_official_physical_debug(activation_refusal=True)
 
+    def test_official_algorithm_tier_promotes_shared_root_refusal_on_exit_two(self):
+        self.assert_official_physical_debug(shared_root_refusal=True)
+
     def test_official_physical_log_failure_cannot_replace_original_exit(self):
         self.assert_official_physical_debug(log_failure=True)
 
     def assert_official_physical_debug(self, *, readback=False, workload_phase=None,
                                       log_failure=False, pressure=False,
-                                      activation_refusal=False):
+                                      activation_refusal=False, shared_root_refusal=False):
         source_sha = "a" * 40
         report_snapshots = []
         private_output = mock.Mock(return_value="build/tests/physical-fixture.private.log")
@@ -4709,6 +4712,13 @@ class ReportContract(unittest.TestCase):
                     "memory_psi_some_avg10_milli_pct": 170,
                 },
             }
+        if shared_root_refusal:
+            error_context = {
+                "schema": "swapz-algorithm-lifecycle-diagnostic-v1",
+                "phase": "physical_setup", "gate": "physical_execution",
+                "reason": "phase_refused", "admission": {
+                    "check": "target_not_mounted", "observed": "false",
+                    "original_exit": 2}}
         if readback:
             error_context.update(phase="anonymous_pagein", gate="lower_read",
                                  mapper_used_kib=8192, lower_write_bytes=8388608,
@@ -4724,7 +4734,7 @@ class ReportContract(unittest.TestCase):
             error_context.update(reason="memory_pressure",
                                  pressure=self.pressure_observation_fixture())
         physical_exit = (2 if workload_phase == "anonymous_preflight" or
-                         activation_refusal else 3)
+                         activation_refusal or shared_root_refusal else 3)
 
         class OperatorConsole(io.StringIO):
             def isatty(self):
@@ -4829,6 +4839,10 @@ class ReportContract(unittest.TestCase):
             self.assertIn("mem_available_mib=2616", console)
             self.assertIn("memory_psi_some_avg10_milli_pct=170", console)
             self.assertNotIn("device unchanged or safely refused", console)
+        elif shared_root_refusal:
+            self.assertIn("failed_check=target_not_mounted", console)
+            self.assertIn("original_exit=2 mutation=not_started", console)
+            self.assertNotIn("authenticated_diagnostic reason=unavailable", console)
         elif not workload_phase:
             self.assertIn("zswap_enabled=YES", console)
         self.assertNotIn("NEVER_EXPORT", console)
@@ -4972,6 +4986,32 @@ class ReportContract(unittest.TestCase):
             console)
         self.assertNotIn("NEVER_EXPORT", console)
         self.assertIn("Tested Git commit:", console)
+
+    def test_shared_root_admission_diagnostic_is_bounded_and_actionable(self):
+        record = {"schema": "swapz-algorithm-lifecycle-diagnostic-v1",
+                  "phase": "physical_setup", "gate": "physical_execution",
+                  "reason": "phase_refused", "admission": {
+                      "check": "target_not_mounted", "observed": "false",
+                      "original_exit": 2}}
+        def parse(value):
+            return runner.parse_algorithm_pageout_diagnostic(
+                "PHYSICAL_ALGORITHM_DEBUG=" + json.dumps(value))
+        self.assertEqual(parse(record), record)
+        output = io.StringIO()
+        with contextlib.redirect_stdout(output):
+            runner.print_algorithm_lifecycle_failure_diagnostic(record)
+        for expected in ("failed_check=target_not_mounted", "expected=true",
+                         "observed=false", "original_exit=2", "mutation=not_started",
+                         "safe_next_action=inspect_primary_plan_read_only"):
+            self.assertIn(expected, output.getvalue())
+        for field, value in (("check", "/private/NEVER_EXPORT"),
+                             ("observed", "NEVER_EXPORT"), ("original_exit", True),
+                             ("original_exit", 1), ("extra", "NEVER_EXPORT")):
+            with self.subTest(field=field, value=value):
+                self.assertIsNone(parse({**record, "admission": {
+                    **record["admission"], field: value}}))
+        self.assertIsNone(parse({**record, "phase": "anonymous_swap_activation"}))
+        self.assertIsNone(parse({**record, "admission": []}))
 
     def test_swap_activation_failure_diagnostic_is_source_bound(self):
         """Distinguish missing swap entry from nonzero use, not private data."""

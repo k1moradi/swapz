@@ -3981,6 +3981,8 @@ def parse_algorithm_pageout_diagnostic(error_output):
         expected_fields = {"schema", "phase", "gate", "reason"}
         if "activation" in diagnostic:
             expected_fields.add("activation")
+        if "admission" in diagnostic:
+            expected_fields.add("admission")
         if (set(diagnostic) != expected_fields or
                 any(type(diagnostic[key]) is not str for key in (
                     "schema", "phase", "gate", "reason")) or
@@ -3995,6 +3997,26 @@ def parse_algorithm_pageout_diagnostic(error_output):
                  if diagnostic["phase"] == "anonymous_swap_activation"
                  else diagnostic["reason"] != "phase_refused")):
             return None
+        if "admission" in diagnostic:
+            admission = diagnostic["admission"]
+            checks = {
+                "control_build_source_clean", "target_config_read",
+                "target_device_preflight", "original_swap_signature",
+                "target_device_chain_checked", "module_mapper_inventory_read",
+                "swapz_mapper_absent", "mount_inventory_read", "target_not_mounted",
+                "root_mount_source_chain_checked", "root_same_physical_disk_as_target",
+                "shared_root_parent_exception_required", "swap_inventory_read",
+                "target_swap_size_ok", "target_swap_priority_ok"}
+            if (diagnostic["phase"] != "physical_setup" or
+                    "activation" in diagnostic or not isinstance(admission, dict) or
+                    set(admission) != {"check", "observed", "original_exit"} or
+                    type(admission["check"]) is not str or
+                    admission["check"] not in checks or
+                    type(admission["observed"]) is not str or
+                    admission["observed"] not in {"missing", "false", "invalid"} or
+                    type(admission["original_exit"]) is not int or
+                    admission["original_exit"] not in (0, 2)):
+                return None
         if "activation" in diagnostic:
             activation = diagnostic["activation"]
             if (diagnostic["phase"] != "anonymous_swap_activation" or
@@ -4108,6 +4130,13 @@ def print_algorithm_lifecycle_failure_diagnostic(diagnostic):
     print("  Physical first failure: "
           f"phase={diagnostic['phase']} gate={diagnostic['gate']} "
           f"reason={diagnostic['reason']}", flush=True)
+    admission = diagnostic.get("admission")
+    if admission is not None:
+        print("        Shared-root admission: "
+              f"failed_check={admission['check']} expected=true "
+              f"observed={admission['observed']} "
+              f"original_exit={admission['original_exit']} mutation=not_started "
+              "safe_next_action=inspect_primary_plan_read_only", flush=True)
     activation = diagnostic.get("activation")
     if activation is not None:
         def observed(name):

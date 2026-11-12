@@ -7915,7 +7915,20 @@ to an obsolete formatter-wide host state. Never require the global
 `/proc/swaps` inventory to be empty merely because other Linux swap is active.
 A selected partition with nonzero `Used` remains admissible after exact
 header/geometry/identity checks; immediately before its owned `swapoff`, require
-bounded `MemAvailable` headroom for those live pages. Unrelated swapfiles remain
+bounded `MemAvailable` headroom for those live pages. The shared-root development
+plan must not reintroduce a zero-used prerequisite before this existing owned
+transition. Rootless coverage must admit an otherwise valid occupied target
+while still rejecting mounted targets and missing identity/ownership gates;
+headroom refusal and failed swapoff must retain their no-mutation guarantees.
+Shared-root plan refusals must identify the first source-defined failed gate,
+expected boolean proof, bounded observed class, original plan exit and safe
+read-only next action without printing arbitrary plan values. Carry that bounded
+admission observation through the existing privileged lifecycle marker and
+actual official report parser/printer; reject unknown gate names, fields,
+phases, observed classes and boolean exit values. Preserve exit 2 and the
+NOT RUN disposition, and never equate this pre-mutation refusal with recovery
+of a trial that actually changed the device.
+Unrelated swapfiles remain
 active and identity-checked, and `swapoff -a` is forbidden. Source/native
 contracts must reject any return of the retired
 `require_development_formatter_inventory_clear` / `formatter_inventory`
