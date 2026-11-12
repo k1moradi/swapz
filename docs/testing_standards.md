@@ -4813,6 +4813,20 @@ JSON value types exactly; Python bool/int or float/int equality must never make
 mistyped metadata acceptable. Truncated, extra or changed records and any
 workload-metadata mismatch are failures, not qualification.
 
+The synthetic fixture's measured liblz4 path may reuse one owned
+4096-byte input buffer and one 3568-byte compression-output buffer within
+each sequential generation or on-disk verification pass, avoiding two fresh
+ctypes allocations per page. Direct single-page callers retain independent
+buffers. Every input byte must be replaced before compression; only the
+returned liblz4 length is authoritative, never uninitialized or stale output
+bytes. The persisted fixture verifier must allocate its *own* buffer pair and
+still reread every page, compare every deterministic recipe byte, reconstruct
+the measured histogram, and authenticate the complete manifest. Do not
+share buffers across threads or the generation/verification boundary.
+Rootless tests must compare actual liblz4 lengths across every synthetic
+profile, assert original fixture/manifest parity, verify two buffer
+allocations per pass, and prove a short page is rejected before compression.
+
 The permanent rootless regression for this contract is
 `tests/runtime/benchmark/anon-page-fixture-test.py`, registered in
 `tests/Makefile` and invoked by the existing official rootless test stage.

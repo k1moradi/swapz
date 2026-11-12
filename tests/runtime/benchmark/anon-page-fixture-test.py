@@ -223,6 +223,46 @@ class PersistedManifestRegression(unittest.TestCase):
         with self.fixture_path.open("rb") as fixture_file:
             self.assertEqual(fixture_file.read(MAX_TEST_BYTES + 1), self.payload)
 
+    def test_reused_lz4_buffers_are_pass_local_and_byte_equivalent(self) -> None:
+        # Verify the exact native compressor's result across changing page
+        # profiles, including RAW, without relying on a mocked compressor.
+        reusable = (fixture.ctypes.create_string_buffer(fixture.PAGE),
+                    fixture.ctypes.create_string_buffer(fixture.CAP))
+        for index, profile in enumerate(fixture.PROFILES):
+            with self.subTest(profile=profile):
+                page = fixture.page_bytes(0x51A0A9, index, profile)
+                independent = fixture.measure(self.compress, page)
+                reused = fixture.measure(self.compress, page, reusable)
+                self.assertEqual(reused, independent)
+
+        # Generation and independent on-disk verification each allocate just
+        # one input/output pair regardless of page count, rather than two per
+        # record. This never skips the original page/manifest comparisons.
+        original_allocator = fixture.ctypes.create_string_buffer
+        with mock.patch.object(
+                fixture.ctypes, "create_string_buffer",
+                wraps=original_allocator) as allocations:
+            payload, manifest = fixture.generate(
+                0x51A0A9, TEST_PAGES, ALL_PROFILE_WEIGHTS, self.compress)
+        self.assertEqual(allocations.call_count, 2)
+        self.assertEqual(payload, self.payload)
+        self.assertTrue(fixture.exact_json_value(manifest, self.manifest))
+
+        with mock.patch.object(
+                fixture.ctypes, "create_string_buffer",
+                wraps=original_allocator) as allocations:
+            fixture.verify_fixture(self.fixture_path, self.manifest,
+                                   self.compress)
+        self.assertEqual(allocations.call_count, 2)
+
+        # An invalid input size is rejected before touching either borrowed
+        # buffer or issuing a native liblz4 call.
+        with self.assertRaisesRegex(
+                ValueError, "expected_size=4096 observed_size=4095"):
+            fixture.measure(
+                lambda *_: self.fail("liblz4 called for short page"),
+                bytes(fixture.PAGE - 1), reusable)
+
     def test_legacy_default_seed_byte_digests(self) -> None:
         # Byte hashes deliberately ignore liblz4 version-specific size buckets.
         expected = {

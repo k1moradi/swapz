@@ -2065,6 +2065,22 @@ dmsetup() {
         self.assertGreater(info["lz4_accepted_payload_bytes"], 0)
         self.assertGreater(info["raw_pages"], 0)
 
+    def test_anon_page_lz4_buffers_are_reused_only_within_each_pass(self):
+        generator = (
+            ROOT / "tests/runtime/benchmark/anon-page-fixture.py").read_text()
+        tests = (
+            ROOT / "tests/runtime/benchmark/anon-page-fixture-test.py").read_text()
+        self.assertIn("def measure(compress, page, buffers=None):", generator)
+        self.assertIn("ctypes.memmove(source, page, PAGE)", generator)
+        self.assertEqual(
+            generator.count("buffers = (ctypes.create_string_buffer(PAGE),"),
+            2)
+        self.assertIn("measure(compress, page, buffers)", generator)
+        self.assertIn("measure(compress, observed, buffers)", generator)
+        self.assertIn(
+            "def test_reused_lz4_buffers_are_pass_local_and_byte_equivalent",
+            tests)
+
     def test_representative_fixture_never_crosses_unprotected_copy_process(self):
         owned_pair = (ROOT / "tests/tools/benchmark-owned-pair.sh").read_text()
         striped_pair = (ROOT / "tests/tools/benchmark-striped-owned.sh").read_text()

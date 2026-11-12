@@ -191,13 +191,21 @@ def lz4_compressor():
     return compress
 
 
-def measure(compress, page):
+def measure(compress, page, buffers=None):
     if len(page) != PAGE:
         raise ValueError(
             f"phase=measure expected_size={PAGE} observed_size={len(page)} "
             "cause=page-size-mismatch")
-    source = ctypes.create_string_buffer(page, PAGE)
-    output = ctypes.create_string_buffer(CAP)
+    if buffers is None:
+        # Preserve standalone caller semantics: each call owns its C buffers.
+        source = ctypes.create_string_buffer(page, PAGE)
+        output = ctypes.create_string_buffer(CAP)
+    else:
+        # Generate/verify each own one pair of buffers for their entire pass.
+        # No global or cross-thread sharing; every input byte is overwritten
+        # before calling liblz4. Only the returned size is ever inspected.
+        source, output = buffers
+        ctypes.memmove(source, page, PAGE)
     size = compress(source, output, PAGE, CAP, 1)
     if not 0 <= size <= CAP:
         raise RuntimeError("invalid liblz4 result")
@@ -269,11 +277,15 @@ def generate(seed, count, weights, compress):
     names = schedule(seed, count, weights)
     payload = bytearray()
     measurement = new_measurement()
+    # Buffer ownership is scoped to this generation; avoid two zero-filled
+    # ctypes allocations for every measured page without changing its bytes.
+    buffers = (ctypes.create_string_buffer(PAGE),
+               ctypes.create_string_buffer(CAP))
     for index, name in enumerate(names):
         page = page_bytes(seed, index, name)
         if len(page) != PAGE:
             raise RuntimeError("fixture output is not exactly 4096 bytes")
-        record_measurement(measurement, name, measure(compress, page))
+        record_measurement(measurement, name, measure(compress, page, buffers))
         payload.extend(page)
     result = build_manifest(
         seed, count, weights, measurement, hashlib.sha256(payload).hexdigest())
@@ -312,6 +324,10 @@ def verify_fixture(path, manifest, compress=None):
 
     observed_digest = hashlib.sha256()
     measurement = new_measurement()
+    # Independent readback/measurement owns separate buffers; do not reuse
+    # generation memory or weaken the persisted byte-exact page oracle.
+    buffers = (ctypes.create_string_buffer(PAGE),
+               ctypes.create_string_buffer(CAP))
     with path.open("rb") as fixture:
         for index, profile in enumerate(names):
             observed = fixture.read(PAGE)
@@ -327,7 +343,7 @@ def verify_fixture(path, manifest, compress=None):
                     f"{hashlib.sha256(observed).hexdigest()} cause=page-hash-mismatch")
             observed_digest.update(observed)
             record_measurement(
-                measurement, profile, measure(compress, observed))
+                measurement, profile, measure(compress, observed, buffers))
         if fixture.read(1):
             raise ValueError(
                 f"phase=verify record={len(names)} expected_size=0 "
