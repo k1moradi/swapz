@@ -715,7 +715,21 @@ must be attributed before the product comparison; rootless regressions cover
 delayed fanout, incomplete output and negative oracles. The
 optional `benchmarks.owned_pair_timing_coverage` reports the number of
 complete pairs and observed timing records, with COLLECTED, NOT_RECORDED
-or REJECTED status; an interrupted session may remain unrecorded. The helper
+or REJECTED status; an interrupted session may remain unrecorded. At
+the terminal report boundary, the runner may derive a strictly observational
+owned-pair cost summary from this already validated field and COLLECTED
+coverage, without adding a report schema requirement. Display only complete,
+source-ordered five-phase pairs; bound the count to 160, reject malformed
+durations and indices, and never infer a missing teardown or a missing pair.
+Rank the five fixed phase names by aggregate elapsed milliseconds, retaining
+original phase order for ties, and show aggregate seconds/share, median pair
+seconds and nearest-rank 95th percentile (ceil(0.95 * complete_pairs) - 1).
+An empty/rejected/malformed source prints no summary. This cost attribution
+is **not** the whole loaded stage, a device throughput result, a test gate or
+a substitute for independently paired source-matched host measurements.
+No host identity, device path, raw child output or untrusted label may be
+printed. Rootless tests must prove exact totals, sorted order, p95, partial
+capture, zero-duration safety and malformed-source silence. The helper
 never shares resources between pairs, never changes the official benchmark
 workload, and timing-read or display failures do not alter verdicts.
 Each owned benchmark mapper still undergoes independent UUID and backing

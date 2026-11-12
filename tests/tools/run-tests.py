@@ -3936,6 +3936,75 @@ def print_stage_results(configured_stages, completed_stages, progress_table=None
             progress_table.complete("Stage", name, verdict, duration)
 
 
+def owned_pair_phase_time_summary(benchmarks):
+    """Aggregate only source-validated complete pair timing records.
+
+    Results are observational and contain no names, host paths, device
+    identities or per-session evidence. Partial pairs are never invented.
+    """
+    if not isinstance(benchmarks, dict):
+        return None
+    coverage = benchmarks.get("owned_pair_timing_coverage")
+    pairs = benchmarks.get("owned_pair_phase_timings")
+    if (not isinstance(coverage, dict) or
+            coverage.get("status") != "COLLECTED" or
+            not isinstance(pairs, list) or not 0 < len(pairs) <= 160 or
+            type(coverage.get("complete_pairs")) is not int or
+            coverage["complete_pairs"] != len(pairs)):
+        return None
+    phases = ("setup", "fixture", "replay", "verification", "teardown")
+    elapsed_by_phase = {phase: [] for phase in phases}
+    for index, pair in enumerate(pairs):
+        if (not isinstance(pair, dict) or
+                type(pair.get("pair_index")) is not int or
+                pair["pair_index"] != index):
+            return None
+        records = pair.get("phase_elapsed_ms")
+        if not isinstance(records, list) or len(records) != len(phases):
+            return None
+        for phase, record in zip(phases, records):
+            if (not isinstance(record, dict) or
+                    record.get("phase") != phase or
+                    type(record.get("elapsed_ms")) is not int or
+                    not 0 <= record["elapsed_ms"] <= 99_999_999):
+                return None
+            elapsed_by_phase[phase].append(record["elapsed_ms"])
+    summary = []
+    for phase in phases:
+        ordered = sorted(elapsed_by_phase[phase])
+        count = len(ordered)
+        summary.append({
+            "phase": phase,
+            "total_ms": sum(ordered),
+            "median_ms": (ordered[(count - 1) // 2] +
+                          ordered[count // 2]) / 2,
+            "p95_ms": ordered[math.ceil(count * .95) - 1],
+        })
+    # Largest aggregate cost first; ties retain the source-owned phase order.
+    summary.sort(key=lambda record: -record["total_ms"])
+    return {"complete_pairs": len(pairs),
+            "recorded_total_ms": sum(x["total_ms"] for x in summary),
+            "phases": summary}
+
+
+def print_owned_pair_phase_time_summary(benchmarks):
+    """Print compact, bounded runtime attribution outside verdict rows."""
+    summary = owned_pair_phase_time_summary(benchmarks)
+    if summary is None:
+        return
+    total = summary["recorded_total_ms"]
+    print("  Owned RAM benchmark pair timing (observational; "
+          f"{summary['complete_pairs']} completed pairs only):", flush=True)
+    for record in summary["phases"]:
+        fraction = (record["total_ms"] * 100 / total) if total else 0.0
+        print(f"    {record['phase']:<12} "
+              f"total={record['total_ms'] / 1000:.2f}s "
+              f"share={fraction:5.1f}% "
+              f"median={record['median_ms'] / 1000:.3f}s "
+              f"p95={record['p95_ms'] / 1000:.3f}s",
+              flush=True)
+
+
 def print_rootless_timing_summary(completed_stages):
     """Keep optional timing evidence outside the live qualification table."""
     for stage in completed_stages:
@@ -12838,6 +12907,7 @@ def _run_qualification(args, sync_result):
         print(f"  Development resume: {reused_count} prior stage(s) reused; "
               "INCOMPLETE / not a fresh qualification", flush=True)
     print_rootless_timing_summary(result["stages"])
+    print_owned_pair_phase_time_summary(result["benchmarks"])
     result["benchmarks"]["lane_gap_attribution"] = lane_gap_attribution_rows(
         result["benchmarks"])
     result["benchmarks"]["goal_scorecard"] = goal_scorecard(result)

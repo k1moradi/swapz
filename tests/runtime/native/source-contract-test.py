@@ -1449,6 +1449,21 @@ static swapz_u16 swapz_probe_set(
             "[`src/kernel/VERSION`](../src/kernel/VERSION)", README)
         self.assertIn("single source of truth", README)
 
+    def test_owned_pair_cost_summary_is_observational_and_source_bounded(self):
+        runner = (ROOT / "tests/tools/run-tests.py").read_text()
+        tests = (ROOT / "tests/runtime/native/test-report-test.py").read_text()
+        self.assertIn("def owned_pair_phase_time_summary(benchmarks):", runner)
+        self.assertIn("def print_owned_pair_phase_time_summary(benchmarks):", runner)
+        self.assertIn(
+            'print_owned_pair_phase_time_summary(result["benchmarks"])', runner)
+        self.assertIn('coverage.get("status") != "COLLECTED"', runner)
+        self.assertIn('not 0 < len(pairs) <= 160', runner)
+        self.assertIn('summary.sort(key=lambda record: -record["total_ms"])',
+                      runner)
+        self.assertIn(
+            "def test_owned_pair_timing_summary_ranks_cost_without_changing_verdicts",
+            tests)
+
     def test_owned_pair_mapper_status_snapshot_preserves_all_policy_gates(self):
         """Hermetically exercise the exact policy guard with a mocked dmsetup."""
         import os

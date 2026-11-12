@@ -1596,6 +1596,94 @@ class NativeTimingContract(unittest.TestCase):
                 self.assertIsNone(
                     runner.parse_owned_pair_phase_timings(malformed))
 
+    def test_owned_pair_timing_summary_ranks_cost_without_changing_verdicts(self):
+        phases = ("setup", "fixture", "replay", "verification", "teardown")
+        first = (120, 45, 12000, 30, 190)
+        second = (200, 55, 30000, 70, 210)
+        output = "".join(
+            f"OWNED_PAIR_PHASE_TIMING phase={phase} elapsed_ms={duration}\n"
+            for durations in (first, second)
+            for phase, duration in zip(phases, durations))
+        pair_records = runner.parse_owned_pair_phase_timings(output)
+        benchmarks = {
+            "owned_pair_phase_timings": pair_records,
+            "owned_pair_timing_coverage": {
+                "status": "COLLECTED", "complete_pairs": 2,
+                "observed_records": 10,
+            },
+        }
+        summary = runner.owned_pair_phase_time_summary(benchmarks)
+        self.assertEqual(summary["complete_pairs"], 2)
+        self.assertEqual(summary["recorded_total_ms"], 42920)
+        self.assertEqual(
+            [phase["phase"] for phase in summary["phases"]],
+            ["replay", "teardown", "setup", "fixture", "verification"])
+        self.assertEqual(summary["phases"][0], {
+            "phase": "replay", "total_ms": 42000,
+            "median_ms": 21000, "p95_ms": 30000,
+        })
+        buffer = io.StringIO()
+        with contextlib.redirect_stdout(buffer):
+            runner.print_owned_pair_phase_time_summary(benchmarks)
+        displayed = buffer.getvalue()
+        self.assertIn("2 completed pairs only", displayed)
+        self.assertIn("replay       total=42.00s share= 97.9%", displayed)
+        self.assertIn("median=21.000s p95=30.000s", displayed)
+        self.assertEqual(displayed.count("total="), 5)
+        self.assertEqual(len(pair_records), 2)
+
+        # A later interrupted pair is excluded rather than invented.
+        partial = runner.parse_owned_pair_phase_timings(
+            output + "OWNED_PAIR_PHASE_TIMING phase=setup elapsed_ms=10\n")
+        self.assertEqual(partial, pair_records)
+        self.assertEqual(
+            runner.owned_pair_phase_time_summary(benchmarks), summary)
+
+        for changed in (
+            {"owned_pair_phase_timings": pair_records,
+             "owned_pair_timing_coverage": {"status": "REJECTED",
+                                          "complete_pairs": 2}},
+            {"owned_pair_phase_timings": pair_records,
+             "owned_pair_timing_coverage": {"status": "COLLECTED",
+                                          "complete_pairs": 3}},
+            {"owned_pair_phase_timings": pair_records,
+             "owned_pair_timing_coverage": {"status": "COLLECTED",
+                                          "complete_pairs": True}},
+            {"owned_pair_phase_timings": [],
+             "owned_pair_timing_coverage": {"status": "COLLECTED",
+                                          "complete_pairs": 0}},
+            {"owned_pair_phase_timings": [
+                {**pair_records[0], "pair_index": 7}, pair_records[1]],
+             "owned_pair_timing_coverage": {"status": "COLLECTED",
+                                          "complete_pairs": 2}},
+            {"owned_pair_phase_timings": [
+                {**pair_records[0], "phase_elapsed_ms": [
+                    {"phase": "setup", "elapsed_ms": True},
+                    *pair_records[0]["phase_elapsed_ms"][1:]]},
+                pair_records[1]],
+             "owned_pair_timing_coverage": {"status": "COLLECTED",
+                                          "complete_pairs": 2}},
+        ):
+            with self.subTest(changed=changed):
+                self.assertIsNone(
+                    runner.owned_pair_phase_time_summary(changed))
+                buffer = io.StringIO()
+                with contextlib.redirect_stdout(buffer):
+                    runner.print_owned_pair_phase_time_summary(changed)
+                self.assertEqual(buffer.getvalue(), "")
+
+        zero = {
+            "owned_pair_phase_timings": [{
+                "pair_index": 0, "phase_elapsed_ms": [
+                    {"phase": phase, "elapsed_ms": 0} for phase in phases]}],
+            "owned_pair_timing_coverage": {
+                "status": "COLLECTED", "complete_pairs": 1},
+        }
+        buffer = io.StringIO()
+        with contextlib.redirect_stdout(buffer):
+            runner.print_owned_pair_phase_time_summary(zero)
+        self.assertEqual(buffer.getvalue().count("share=  0.0%"), 5)
+
     def test_loaded_mapper_inventory_failure_preserves_source_category(self):
         for source, status in (("dmsetup", 2), ("record_parser", 2)):
             observation = (f"LOADED_MAPPER_INVENTORY_SOURCE={source} "
