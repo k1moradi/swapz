@@ -624,31 +624,33 @@ create_owned_ram() {
     echo "$QUEUE_MODE" > "$config/queue_mode" || fail 'owned RAM rejected queue mode'
     echo "$SUBMIT_QUEUES" > "$config/submit_queues" || fail 'owned RAM rejected submission queue count'
     echo "$HW_QUEUE_DEPTH" > "$config/hw_queue_depth" || fail 'owned RAM rejected hardware queue depth'
-    [[ $(cat "$config/mbps") == "$LOWER_MBPS" &&
-       $(cat "$config/completion_nsec") == "$COMPLETION_NSEC" &&
-       $(cat "$config/irqmode") == "$IRQMODE" &&
-       $(cat "$config/queue_mode") == "$QUEUE_MODE" &&
-       $(cat "$config/submit_queues") == "$SUBMIT_QUEUES" &&
-       $(cat "$config/hw_queue_depth") == "$HW_QUEUE_DEPTH" ]] ||
+    # Bash's $(< file) keeps sysfs verification in this shell instead of
+    # starting a separate cat process for every attribute in each RAM pair.
+    [[ $(< "$config/mbps") == "$LOWER_MBPS" &&
+       $(< "$config/completion_nsec") == "$COMPLETION_NSEC" &&
+       $(< "$config/irqmode") == "$IRQMODE" &&
+       $(< "$config/queue_mode") == "$QUEUE_MODE" &&
+       $(< "$config/submit_queues") == "$SUBMIT_QUEUES" &&
+       $(< "$config/hw_queue_depth") == "$HW_QUEUE_DEPTH" ]] ||
         fail 'owned RAM storage-model settings differ from request'
     echo 1 > "$config/power"
-    [[ $(cat "$config/memory_backed") == 1 && $(cat "$config/power") == 1 ]] ||
+    [[ $(< "$config/memory_backed") == 1 && $(< "$config/power") == 1 ]] ||
         fail 'RAM backing is not active'
-    [[ $(cat "$config/mbps") == "$LOWER_MBPS" &&
-       $(cat "$config/completion_nsec") == "$COMPLETION_NSEC" &&
-       $(cat "$config/irqmode") == "$IRQMODE" &&
-       $(cat "$config/queue_mode") == "$QUEUE_MODE" &&
-       $(cat "$config/submit_queues") == "$SUBMIT_QUEUES" &&
-       $(cat "$config/hw_queue_depth") == "$HW_QUEUE_DEPTH" ]] ||
+    [[ $(< "$config/mbps") == "$LOWER_MBPS" &&
+       $(< "$config/completion_nsec") == "$COMPLETION_NSEC" &&
+       $(< "$config/irqmode") == "$IRQMODE" &&
+       $(< "$config/queue_mode") == "$QUEUE_MODE" &&
+       $(< "$config/submit_queues") == "$SUBMIT_QUEUES" &&
+       $(< "$config/hw_queue_depth") == "$HW_QUEUE_DEPTH" ]] ||
         fail 'owned RAM powered model settings mismatch'
-    index="$(cat "$config/index")"
+    index="$(< "$config/index")"
     [[ $index =~ ^(0|[1-9][0-9]*)$ ]] || fail 'configfs index invalid'
     for (( n=0; n<50; ++n )); do
         disk="$(swapz_resolve_owned_disk "$name" "$index" /sys/block)" && break
         sleep 0.1
     done
     [[ -n $disk ]] || fail 'owned disk absent or ambiguous'
-    dev="$(cat "/sys/block/$disk/dev")"
+    dev="$(< "/sys/block/$disk/dev")"
     [[ $dev == "$NULL_MAJOR:$index" &&
        $(readlink -f "/sys/dev/block/$dev") == "$(readlink -f "/sys/block/$disk")" ]] ||
         fail 'RAM registered driver/index identity mismatch'

@@ -7661,6 +7661,21 @@ int main(void)
         self.assertIn("PASS_LZ4_ACCELERATION_AB", runner)
         self.assertIn('matched_value_pairs(\n            sessions, "lz4_acceleration", 1, 4)', runner)
 
+    def test_owned_ram_config_reads_keep_full_verified_model(self):
+        pair = (ROOT / "tests/tools/benchmark-owned-pair.sh").read_text()
+        # Keep the original two-phase sysfs validation, but avoid spawning a
+        # cat subprocess for every exact model attribute in every owned pair.
+        for attribute in (
+                "mbps", "completion_nsec", "irqmode", "queue_mode",
+                "submit_queues", "hw_queue_depth"):
+            self.assertEqual(
+                pair.count('$(< "$config/' + attribute + '")'), 2,
+                f"missing pre/post-power exact model check: {attribute}")
+            self.assertNotIn('$(cat "$config/' + attribute + '")', pair)
+        for attribute in ("memory_backed", "power", "index"):
+            self.assertIn('$(< "$config/' + attribute + '")', pair)
+        self.assertIn('$(< "/sys/block/$disk/dev")', pair)
+
     def test_fixed_owned_storage_models_use_native_replay(self):
         pair = (ROOT / "tests/tools/benchmark-owned-pair.sh").read_text()
         model_cases = pair.split(
