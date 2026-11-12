@@ -236,8 +236,15 @@ def prepare(args):
             h.update(struct.pack("<QII", e["seq"], e["page"], e["fixture"]))
             h.update(pages[e["fixture"]])
     opportunity = workload_opportunity(events, pages, args.logical_pages)
-    prefill_hash = sha(b"".join(pages[i % fixture_pages] for i in range(args.logical_pages)))
-    post_hash = sha(b"".join(pages[i] for i in latest))
+    # Stream the exact canonical concatenation without allocating two
+    # transient logical-image-sized byte strings for every prepared plan.
+    prefill_digest = hashlib.sha256()
+    post_digest = hashlib.sha256()
+    for page, fixture_index in enumerate(latest):
+        prefill_digest.update(pages[page % fixture_pages])
+        post_digest.update(pages[fixture_index])
+    prefill_hash = prefill_digest.hexdigest()
+    post_hash = post_digest.hexdigest()
     trace_bytes = "".join(json.dumps(e, sort_keys=True, separators=(",", ":")) + "\n"
                           for e in events).encode()
     (out / "trace.jsonl").write_bytes(trace_bytes)
@@ -2094,13 +2101,14 @@ def replay(args):
                     fixture_index = prefill_fixture_index(mf, page, count)
                     full_write(fd, page, chunks[fixture_index])
                 os.fsync(fd)
+                prefill_digest = hashlib.sha256()
                 for page in range(mf["logical_pages"]):
                     fixture_index = prefill_fixture_index(mf, page, count)
                     full_read(fd, page, scratch, chunks[fixture_index], read_iov)
-                prefill_digest = hashlib.sha256()
-                for page in range(mf["logical_pages"]):
-                    prefill_digest.update(
-                        chunks[prefill_fixture_index(mf, page, count)])
+                    # Hash each proven-equal expected page while the readback
+                    # buffer is still live. No independent oracle check or
+                    # 4096-byte read is skipped, including on a mismatch.
+                    prefill_digest.update(chunks[fixture_index])
                 if prefill_digest.hexdigest() != mf["prefill_sha256"]:
                     raise ValueError("prefill image digest mismatches shared trace")
             finally:

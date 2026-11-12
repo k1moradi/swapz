@@ -1616,6 +1616,84 @@ class PairReplayContract(unittest.TestCase):
                 module.kernel_write_snapshot(
                     Path("/dev/mapper/owned"), {"dm_uuid": "SWAPZ-TEST"})
 
+    def test_streamed_plan_hashes_match_canonical_images_and_prefill_gate(self):
+        # Legacy concatenation is a test-only oracle. Preparation must hash
+        # the exact same bytes without allocating a logical-image-sized blob.
+        for fixture_pages in (1, 7, 16):
+            with self.subTest(fixture_pages=fixture_pages), \
+                    tempfile.TemporaryDirectory() as directory:
+                root = Path(directory)
+                fixture = root / "fixture.bin"
+                page_payloads = [
+                    bytes([page + 1]) * PAGE if page % 2 == 0
+                    else bytes((page * 29 + byte) % 256 for byte in range(PAGE))
+                    for page in range(fixture_pages)
+                ]
+                fixture.write_bytes(b"".join(page_payloads))
+                plan = root / "plan"
+                self.run_cmd(
+                    "prepare", "--fixture", fixture, "--output-dir", plan,
+                    "--qd", 4, "--logical-pages", 64, "--writer-pages", 16,
+                    "--reader-start", 32, "--reader-pages", 16,
+                    "--warmup-ops", 8, "--measure-ops", 32,
+                    "--read-pct", 50, "--iops", 0)
+                manifest = json.loads((plan / "manifest.json").read_text())
+                events = [
+                    json.loads(line) for line in
+                    (plan / "trace.jsonl").read_text().splitlines()
+                ]
+                latest = [page % fixture_pages for page in range(64)]
+                for event in events:
+                    if event["op"] == "W":
+                        latest[event["page"]] = event["fixture"]
+                legacy_prefill = hashlib.sha256(b"".join(
+                    page_payloads[page % fixture_pages]
+                    for page in range(64))).hexdigest()
+                legacy_post = hashlib.sha256(b"".join(
+                    page_payloads[fixture_index]
+                    for fixture_index in latest)).hexdigest()
+                self.assertEqual(manifest["prefill_sha256"], legacy_prefill)
+                self.assertEqual(manifest["expected_post_sha256"], legacy_post)
+
+                device = root / f"swapz-replay-streamed-{fixture_pages}.bin"
+                with device.open("wb") as handle:
+                    handle.truncate(64 * PAGE)
+                result = root / "result.json"
+                self.run_cmd(
+                    "run", "--fixture", fixture,
+                    "--trace", plan / "trace.jsonl",
+                    "--manifest", plan / "manifest.json",
+                    "--device", device, "--candidate", "off",
+                    "--source-sha", "rootless-no-module",
+                    "--regular-file-test", "--result", result)
+                report = json.loads(result.read_text())
+                self.assertEqual(report["prefill_sha256"], legacy_prefill)
+                self.assertEqual(report["verified_post_sha256"], legacy_post)
+                self.assertEqual(report["verdict"], "PASS")
+
+                # A forged prefill digest must still fail before any
+                # measured replay or result publication.
+                malformed = dict(manifest, prefill_sha256="0" * 64)
+                altered_manifest = plan / "altered-manifest.json"
+                altered_manifest.write_text(json.dumps(malformed))
+                blocked_device = root / "swapz-replay-prefill-blocked.bin"
+                with blocked_device.open("wb") as handle:
+                    handle.truncate(64 * PAGE)
+                forbidden = root / "forbidden-result.json"
+                rejected = self.run_cmd(
+                    "run", "--fixture", fixture,
+                    "--trace", plan / "trace.jsonl",
+                    "--manifest", altered_manifest,
+                    "--device", blocked_device, "--candidate", "off",
+                    "--source-sha", "rootless-no-module",
+                    "--regular-file-test", "--result", forbidden,
+                    success=False)
+                self.assertIn(
+                    "prefill image digest mismatches shared trace",
+                    rejected.stderr)
+                self.assertNotIn("BENCH_IO_PHASE=off:mixed", rejected.stderr)
+                self.assertFalse(forbidden.exists())
+
     def test_pair_exact_bytes_and_ordered_wave_oracle(self):
         for layout in ("disjoint", "same-region"):
             with self.subTest(layout=layout), tempfile.TemporaryDirectory() as temp:

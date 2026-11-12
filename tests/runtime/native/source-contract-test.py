@@ -7780,6 +7780,28 @@ int main(void)
             "def test_write_qd_batch_matches_individual_immutable_plans",
             fixtures)
 
+    def test_plan_image_hashes_stream_and_prefill_readback_stays_exact(self):
+        replay = (ROOT / "tests/runtime/benchmark/io-replay.py").read_text()
+        tests = (ROOT / "tests/runtime/benchmark/io-replay-test.py").read_text()
+        self.assertIn(
+            "for page, fixture_index in enumerate(latest):", replay)
+        self.assertIn(
+            "prefill_digest.update(pages[page % fixture_pages])", replay)
+        self.assertIn("post_digest.update(pages[fixture_index])", replay)
+        self.assertNotIn('prefill_hash = sha(b"".join(', replay)
+        self.assertNotIn('post_hash = sha(b"".join(', replay)
+        prefill = replay.split("def replay(args):", 1)[1].split(
+            'if prefill_digest.hexdigest() != mf["prefill_sha256"]:', 1)[0]
+        self.assertIn("os.fsync(fd)", prefill)
+        self.assertEqual(
+            prefill.count('for page in range(mf["logical_pages"]):'), 2)
+        self.assertLess(
+            prefill.index("full_read(fd, page, scratch, chunks[fixture_index], read_iov)"),
+            prefill.index("prefill_digest.update(chunks[fixture_index])"))
+        self.assertIn(
+            "def test_streamed_plan_hashes_match_canonical_images_and_prefill_gate",
+            tests)
+
     def test_latency_reporting_reuses_one_sort_per_operation_class(self):
         replay = (ROOT / "tests/runtime/benchmark/io-replay.py").read_text()
         fixtures = (ROOT / "tests/runtime/benchmark/io-replay-test.py").read_text()

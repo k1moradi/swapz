@@ -6681,6 +6681,22 @@ The native-wave guard's source contract must match a real source-line
 boundary rather than a literal backslash-n sequence. This assertion is
 observational only and cannot alter the chosen replay engine or oracle.
 
+Immutable-plan construction must stream canonical SHA-256 for the
+complete logical prefill and post-trace images from the original ordered
+4096-byte fixture pages, without allocating one concatenated multi-megabyte
+byte string for each digest. The hash input order, total bytes, trace,
+manifest and final-map semantics must match the previous concatenation
+exactly. During each replay arm's independent prefill, retain every logical
+4096-byte `pwrite`, required `fsync`, and full 4096-byte `preadv` plus
+byte comparison. Compute the prefill SHA-256 incrementally only after each
+successful readback, using its already selected expected fixture page;
+do not perform a redundant third pass over the same prefill mapping.
+Never substitute a digest check for the page readback, relax short-read
+rejection, or bypass the prefill SHA admission gate before measured replay.
+Rootless cases must compare streamed digests with independent whole-image
+reference bytes across multiple fixture sizes and reject a forged prefill
+digest before measured I/O or result publication.
+
 The per-arm post-measurement report must preserve the historical
 floor-index p50/p95/p99 definitions (for `n` values, sorted element
 `min(n - 1, int((n - 1) * fraction))`, fractions 0.50/0.95/0.99).
