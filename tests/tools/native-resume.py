@@ -122,8 +122,10 @@ def run_native_suite(suite, executables, *, mode=None,
         child_env.pop(variable, None)
     for binary in executables:
         try:
+            # Preserve the tests/suites working directory of the original
+            # Make recipes. The wrapper owns only process execution, not cwd.
             completed = subprocess.run(
-                [binary], cwd=ROOT, env=child_env, check=False)
+                [binary], env=child_env, check=False)
             exit_code = completed.returncode
         except OSError:
             print(f"FAIL: native test-{suite} binary={Path(binary).name} "

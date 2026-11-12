@@ -1288,6 +1288,16 @@ class NativeTimingContract(unittest.TestCase):
                             return_value=synthetic_context):
                     binaries = [str(native.NATIVE / name)
                                 for name in native.SUITES["gc"]]
+                    # The helper must not silently change a native program's
+                    # former tests/suites cwd, even in a direct noncache run.
+                    with mock.patch.object(
+                            native.subprocess, "run",
+                            return_value=subprocess.CompletedProcess([], 0)) as executed:
+                        self.assertEqual(native.run_native_suite(
+                            "gc", binaries, mode=None), 0)
+                        self.assertEqual(executed.call_count, len(binaries))
+                        for call in executed.call_args_list:
+                            self.assertNotIn("cwd", call.kwargs)
                     self.assertEqual(native.run_native_suite(
                         "gc", binaries, mode="record",
                         tested_source=expected_source, kdir="/synthetic",

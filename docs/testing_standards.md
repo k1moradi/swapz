@@ -601,8 +601,8 @@ permissions or failed children force the entire target to execute freshly.
 Synthetic regression must create real executable fixture scripts (with valid
 line endings) and confirm that a prior matching PASS skips execution, while
 changed bytes execute and propagate the first failing binary's exit status.
-The targets retain original within-suite binary order and do not cache
-individual binary results. Mapping and GC checkpoints have independent
+The targets retain original within-suite binary order and working directory
+(inherited from tests/suites), and do not cache individual binary results. Mapping and GC checkpoints have independent
 owner-only atomic files so parallel Make recipes cannot overwrite each
 other. Reused native targets print a bounded marker, are rendered REUSED by
 the rootless stage, cannot feed a fresh PASS checkpoint and never qualify
