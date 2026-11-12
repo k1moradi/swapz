@@ -2044,10 +2044,44 @@ class PairReplayContract(unittest.TestCase):
                                              f"phase=binary-plan case={label}")
                             self.assertIn("READY\n", result.stdout)
                             self.assertIn("DONE ", result.stdout)
+                            # A successful native helper must also serialize
+                            # exactly one binary latency without extra bytes.
+                            result_fd.seek(0)
+                            encoded_latency = result_fd.read()
+                            self.assertEqual(len(encoded_latency), 16)
+                            operation, padding, elapsed = struct.unpack(
+                                "<c7sQ", encoded_latency)
+                            self.assertEqual(operation, b"W")
+                            self.assertEqual(padding, bytes(7))
+                            self.assertGreater(elapsed, 0)
                         else:
                             self.assertNotEqual(result.returncode, 0,
                                                 f"phase=binary-plan case={label}")
                             self.assertNotIn("READY", result.stdout)
+
+    def test_native_latency_result_binary_decoder_rejects_corruption(self):
+        import runpy
+        parse = runpy.run_path(str(SCRIPT))["decode_native_latencies"]
+        write = struct.pack("<c7sQ", b"W", bytes(7), 123)
+        read = struct.pack("<c7sQ", b"R", bytes(7), 456)
+        self.assertEqual(parse(write + read, 2),
+                         {"W": [123], "R": [456]})
+        bad_results = (
+            ("truncated", (write + read)[:-1], 2),
+            ("trailing", write + read + bytes(1), 2),
+            ("missing", write, 2),
+            ("invalid-op", struct.pack("<c7sQ", b"X", bytes(7), 123), 1),
+            ("nonzero-padding", struct.pack(
+                "<c7sQ", b"W", bytes([1]) + bytes(6), 123), 1),
+            ("zero-latency", struct.pack("<c7sQ", b"R", bytes(7), 0), 1),
+            ("invalid-count", write, True),
+            ("empty-count", write, 0),
+        )
+        for label, data, count in bad_results:
+            with self.subTest(case=label):
+                with self.assertRaisesRegex(
+                        ValueError, r"native replay (latency|emitted malformed latency)"):
+                    parse(data, count)
 
     def test_native_binary_plan_does_not_coerce_boolean_page_fields(self):
         self.require_native_tool("io-replay-native", "binary-types")

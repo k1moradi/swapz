@@ -7725,6 +7725,23 @@ int main(void)
             "def test_native_binary_plan_has_exact_bytes_and_rejects_corruption",
             tests)
 
+    def test_native_replay_latencies_use_fixed_binary_result_records(self):
+        replay = (ROOT / "tests/runtime/benchmark/io-replay.py").read_text()
+        helper = (ROOT / "tests/runtime/benchmark/io-replay-native.c").read_text()
+        tests = (ROOT / "tests/runtime/benchmark/io-replay-test.py").read_text()
+        self.assertIn('record = struct.Struct("<c7sQ")', replay)
+        self.assertIn('decode_native_latencies(result.read(), manifest["measure_ops"])',
+                      replay)
+        self.assertIn("sizeof(struct replay_latency) == 16", helper)
+        self.assertIn("static int write_results(", helper)
+        self.assertIn("pwrite(ctx->result_fd, next, chunk, offset)", helper)
+        self.assertIn("result_stat.st_size != 0", helper)
+        self.assertNotIn('fprintf(stream, "%c %" PRIu64', helper)
+        self.assertIn(
+            "def test_native_latency_result_binary_decoder_rejects_corruption",
+            tests)
+        self.assertIn("self.assertEqual(len(encoded_latency), 16)", tests)
+
     def test_modern_storage_envelopes_use_native_replay_helper(self):
         pair = (ROOT / "tests/tools/benchmark-owned-pair.sh").read_text()
         replay = (ROOT / "tests/runtime/benchmark/io-replay.py").read_text()

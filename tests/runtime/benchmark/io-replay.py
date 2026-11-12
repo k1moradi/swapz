@@ -953,6 +953,21 @@ def wait_for_external_start_gate(ready_file, start_file):
     raise ValueError("external start gate timed out")
 
 
+def decode_native_latencies(data, expected_count):
+    """Validate the exact fixed-layout, post-measurement native result bytes."""
+    record = struct.Struct("<c7sQ")
+    if (type(expected_count) is not int or expected_count <= 0 or
+            len(data) != expected_count * record.size):
+        raise ValueError("native replay latency result byte count mismatch")
+    samples = {"W": [], "R": []}
+    for operation, reserved, elapsed in record.iter_unpack(data):
+        if (operation not in (b"W", b"R") or
+                reserved != b"\x00" * 7 or elapsed <= 0):
+            raise ValueError("native replay emitted malformed latency sample")
+        samples[operation.decode("ascii")].append(elapsed)
+    return samples
+
+
 def run_native_replay(fd, fixture_fd, trace, manifest, path, identity,
                       ready_file=None, start_file=None):
     """Run the exact validated trace through pre-created native worker lanes.
@@ -1059,17 +1074,9 @@ def run_native_replay(fd, fixture_fd, trace, manifest, path, identity,
                 raise ValueError("native replay emitted invalid timing counters")
 
             result.seek(0)
-            samples = {"W": [], "R": []}
-            for raw in result.read().decode("ascii").splitlines():
-                parts = raw.split()
-                if len(parts) != 2 or parts[0] not in samples:
-                    raise ValueError("native replay emitted malformed latency sample")
-                elapsed = int(parts[1])
-                if elapsed <= 0:
-                    raise ValueError("native replay emitted nonpositive latency")
-                samples[parts[0]].append(elapsed)
-            if len(samples["W"]) + len(samples["R"]) != manifest["measure_ops"]:
-                raise ValueError("native replay latency count mismatches measured work")
+            # Parse only after the helper has exited and the measured clock
+            # has stopped; no latency or workload opportunity is discarded.
+            samples = decode_native_latencies(result.read(), manifest["measure_ops"])
             return {
                 "samples": samples,
                 "seconds": wall_ns / 1e9,

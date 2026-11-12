@@ -47,10 +47,18 @@ _Static_assert(offsetof(struct replay_event, page) == 0 &&
 	       offsetof(struct replay_event, reserved) == 11,
 	       "native plan event layout does not match the Python producer");
 
+/* Fixed 16-byte little-endian latency record, zero-padded from calloc. */
 struct replay_latency {
 	char op;
+	uint8_t reserved[7];
 	uint64_t ns;
 };
+
+_Static_assert(sizeof(struct replay_latency) == 16 &&
+	       offsetof(struct replay_latency, op) == 0 &&
+	       offsetof(struct replay_latency, reserved) == 1 &&
+	       offsetof(struct replay_latency, ns) == 8,
+	       "native latency result layout does not match Python consumer");
 
 enum replay_mode {
 	REPLAY_WAVES = 0,
@@ -307,43 +315,45 @@ static int load_plan(int plan_fd, struct replay_context *ctx)
 
 static int write_results(const struct replay_context *ctx)
 {
-	FILE *stream;
-	int duplicate_fd;
+	struct stat result_stat;
+	const uint8_t *next = (const uint8_t *)ctx->latencies;
+	size_t bytes;
 	size_t index;
+	off_t offset = 0;
 
-	duplicate_fd = dup(ctx->result_fd);
-	if (duplicate_fd < 0)
+	if (ctx->measure_ops > SIZE_MAX / sizeof(*ctx->latencies))
+		return EOVERFLOW;
+	bytes = ctx->measure_ops * sizeof(*ctx->latencies);
+	if (fstat(ctx->result_fd, &result_stat) != 0)
 		return errno;
-	stream = fdopen(duplicate_fd, "w");
-	if (!stream) {
-		int error = errno;
-
-		close(duplicate_fd);
-		return error;
-	}
+	/* Python created this private, initially empty regular result file. */
+	if (!S_ISREG(result_stat.st_mode) || result_stat.st_size != 0)
+		return EINVAL;
 	for (index = 0; index < ctx->measure_ops; ++index) {
 		const struct replay_latency *latency = &ctx->latencies[index];
+		static const uint8_t zero_padding[7];
 
-		if ((latency->op != 'R' && latency->op != 'W') || !latency->ns) {
-			fclose(stream);
+		if ((latency->op != 'R' && latency->op != 'W') ||
+		    !latency->ns ||
+		    memcmp(latency->reserved, zero_padding,
+			   sizeof(zero_padding)) != 0)
 			return EINVAL;
-		}
-		if (fprintf(stream, "%c %" PRIu64 "\n", latency->op,
-			    latency->ns) < 0) {
-			int error = errno ? errno : EIO;
-
-			fclose(stream);
-			return error;
-		}
 	}
-	if (fflush(stream) != 0) {
-		int error = errno;
+	/* Serialization occurs after the measured DONE boundary. One bounded
+	 * contiguous write path replaces per-operation fprintf formatting.
+	 */
+	while (bytes) {
+		const size_t chunk = bytes > 1048576U ? 1048576U : bytes;
+		ssize_t written = pwrite(ctx->result_fd, next, chunk, offset);
 
-		fclose(stream);
-		return error;
+		if (written < 0 && errno == EINTR)
+			continue;
+		if (written <= 0)
+			return written == 0 ? EIO : errno;
+		next += (size_t)written;
+		bytes -= (size_t)written;
+		offset += (off_t)written;
 	}
-	if (fclose(stream) != 0)
-		return errno;
 	return 0;
 }
 

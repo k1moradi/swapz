@@ -6627,6 +6627,20 @@ Rootless tests must prove a valid one-event handoff as well as missing/extra
 bytes and every corrupted record-field category. No silent text-plan fallback
 or relaxation of benchmark qualification is permitted.
 
+The native-to-Python post-measurement latency result uses 16 bytes per
+measured operation: one ASCII `W` or `R` byte, seven zero reserved bytes,
+and one little-endian uint64 nanosecond duration. The C helper verifies every
+completed latency before writing this contiguous fixed-layout result; the
+Python owner checks the exact byte count, operation tags, zero padding and
+strictly positive durations before accepting or publishing any benchmark
+report. The binary results replace per-operation text formatting/parsing
+**only after the measured interval**; neither a measured timestamp nor a
+logical operation may be omitted. Preserve independent per-arm read/write
+percentiles, worker error precedence, final `fsync`, source-bound workload
+hashes, and full post-image oracle. Rootless tests cover exact native output
+and rejection of truncated, trailing, invalid-tag, nonzero-padding, zero-time
+and wrong-count records. No text-result fallback is allowed.
+
 Modern-envelope report parsing must require `replay_engine=native-c` for both
 arms and reject silent fallback to Python. The fixed 10/80 MiB/s models now
 also use native-C replay for both arms of every loaded benchmark pair: mixed
