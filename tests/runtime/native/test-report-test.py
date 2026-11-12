@@ -179,11 +179,13 @@ class RootlessParallelPilotContract(unittest.TestCase):
         source = (ROOT / "tests/tools/test-rootless.sh").read_text(
             encoding="utf-8")
         for group, expected_count in (("initial", 2), ("readiness", 2),
-                                      ("syntax", 19)):
+                                      ("syntax", 19), ("identity", 3)):
             tasks = parallel_runner.validated_group(group, source)
             self.assertEqual(len(tasks), expected_count)
-            if group == "syntax":
-                self.assertIn(f"syntax) rootless_parallel_size={expected_count} ;;", source)
+            if group in ("syntax", "identity"):
+                self.assertIn(
+                    f"{group}) rootless_parallel_size={expected_count} ;;",
+                    source)
         with self.assertRaisesRegex(ValueError, "unreviewed"):
             parallel_runner.validated_group("unknown", source)
         self.assertIn("case ${SWAPZ_ROOTLESS_JOBS:-auto} in", source)
@@ -191,6 +193,7 @@ class RootlessParallelPilotContract(unittest.TestCase):
         self.assertIn('rootless_parallel_run_group initial', source)
         self.assertIn('rootless_parallel_run_group readiness', source)
         self.assertIn('rootless_parallel_run_group syntax', source)
+        self.assertIn('rootless_parallel_run_group identity', source)
         self.assertIn('bash -n "$script"', source)
         self.assertIn('rootless_parallel_cleanup || :', source)
         reporter = (ROOT / "tests/tools/run-tests.py").read_text(
@@ -199,6 +202,29 @@ class RootlessParallelPilotContract(unittest.TestCase):
         self.assertIn('loaded qualification stays sequential', reporter)
         self.assertIn('python3 -B tests/runtime/native/source-contract-test.py -v',
                       source)
+
+    def test_identity_group_uses_only_independent_fixture_scripts(self):
+        harness = (ROOT / "tests/tools/test-rootless.sh").read_text(
+            encoding="utf-8")
+        tasks = parallel_runner.validated_group("identity", harness)
+        self.assertEqual(
+            tuple(label for label, _ in tasks),
+            ("tests/runtime/native/nullblk-identity-test.sh",
+             "tests/runtime/native/quiet-lower-io-test.sh",
+             "tests/runtime/native/swap-inventory-test.sh"))
+        claims = resource_policy.audit_harness(harness)
+        for index, (label, command) in enumerate(tasks):
+            self.assertEqual(command, ("bash", label))
+            self.assertEqual(claims[label].classification, "private-fixtures")
+            self.assertEqual(
+                claims[label].writes, frozenset({f"private:{label}"}))
+            for other, _ in tasks[:index]:
+                self.assertEqual(
+                    resource_policy.potential_conflicts(label, other, claims),
+                    ())
+        for index, label in enumerate(label for label, _ in tasks):
+            self.assertIn(f"rootless_parallel_collect {index}", harness)
+            self.assertIn(f"bash {label}", harness)
 
     def test_automatic_cpu_budget_observes_affinity_quota_and_single_core(self):
         with mock.patch.object(parallel_runner.os, "sched_getaffinity",

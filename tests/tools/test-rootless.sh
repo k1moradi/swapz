@@ -686,6 +686,7 @@ rootless_parallel_run_group() {
   case $group in
     initial|readiness) rootless_parallel_size=2 ;;
     syntax) rootless_parallel_size=19 ;;
+    identity) rootless_parallel_size=3 ;;
     *) report_rootless_failure 2 "$LINENO" parallel_worker_setup ;;
   esac
   if python3 -B tests/tools/rootless-parallel.py \
@@ -1075,15 +1076,30 @@ for script in tests/tools/test-rootless.sh tests/tools/test-loaded.sh \
     bash -n "$script"
   fi
 done
+# Run only these three reviewed, private-fixture identity contracts in parallel.
+# The parent still replays each complete transcript in the original phase order.
 rootless_phase='tests/runtime/native/nullblk-identity-test.sh'
 rootless_begin_phase
-bash tests/runtime/native/nullblk-identity-test.sh
+if (( rootless_parallel_jobs > 1 )); then
+  rootless_parallel_run_group identity
+  rootless_parallel_collect 0
+else
+  bash tests/runtime/native/nullblk-identity-test.sh
+fi
 rootless_phase='tests/runtime/native/quiet-lower-io-test.sh'
 rootless_begin_phase
-bash tests/runtime/native/quiet-lower-io-test.sh
+if (( rootless_parallel_jobs > 1 )); then
+  rootless_parallel_collect 1
+else
+  bash tests/runtime/native/quiet-lower-io-test.sh
+fi
 rootless_phase='tests/runtime/native/swap-inventory-test.sh'
 rootless_begin_phase
-bash tests/runtime/native/swap-inventory-test.sh
+if (( rootless_parallel_jobs > 1 )); then
+  rootless_parallel_collect 2
+else
+  bash tests/runtime/native/swap-inventory-test.sh
+fi
 rootless_phase='x86_64 native SIMD disassembly contracts'
 rootless_begin_phase
 if [[ "$(uname -m)" == "x86_64" ]]; then

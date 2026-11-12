@@ -45,6 +45,16 @@ GROUPS = {
         (f"bash syntax {Path(path).name}", ("bash", "-n", path))
         for path in resource_policy.SYNTAX_SCRIPTS
     ),
+    # Each fixture owns an unrelated, freshly mktemp-allocated directory.
+    # None loads a module, mutates a host device or writes shared build output.
+    "identity": (
+        ("tests/runtime/native/nullblk-identity-test.sh",
+         ("bash", "tests/runtime/native/nullblk-identity-test.sh")),
+        ("tests/runtime/native/quiet-lower-io-test.sh",
+         ("bash", "tests/runtime/native/quiet-lower-io-test.sh")),
+        ("tests/runtime/native/swap-inventory-test.sh",
+         ("bash", "tests/runtime/native/swap-inventory-test.sh")),
+    ),
 }
 
 MAX_WORKER_SECONDS = 900

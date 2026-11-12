@@ -517,10 +517,15 @@ tasks and available CPUs, without requiring `SWAPZ_ROOTLESS_JOBS`. The optional
 `SWAPZ_ROOTLESS_JOBS=2` preserves the earlier pilot behavior; unknown
 overrides fail closed. A single-core host automatically uses serial execution.
 The native Make compilation jobserver remains independent of this setting.
-Only three adjacent, source-declared groups execute concurrently: source
+Only four adjacent, source-declared groups execute concurrently: source
 contracts with swapzctl provenance, production-readiness with direct rootless
-evidence, and the 19 read-only Bash syntax checks. No unsafe task becomes
-parallel just to fill idle cores. All other rootless suites, privileged
+evidence, the 19 read-only Bash syntax checks, and the three independently
+owned, rootless identity fixtures (nullblk name, quiet lower I/O and swap
+inventory). Every identity script uses a unique mktemp-owned scratch directory
+and fake /sys, /proc and DM state; no real module/device or shared build output
+is mutated. Resource inventory and pairwise conflict checks remain mandatory,
+and the parent reports each phase in source order with individual durations.
+No unsafe task becomes parallel just to fill idle cores. All other rootless suites, privileged
 lifecycle operations, and hardware-dependent loaded/RAM/physical performance
 benchmarks remain serial and resource-isolated; the test sequence, requirements
 and number of cases are unchanged.

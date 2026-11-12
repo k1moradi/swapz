@@ -142,8 +142,10 @@ FULL_ONLY_PHASES = frozenset({
 })
 
 
-# Only the exact adjacent candidate groups in rootless-parallel.py are
-# authorized for the opt-in two-worker pilot. All other suites stay serial.
+# Only the exact adjacent, resource-audited groups in rootless-parallel.py
+# are authorized for CPU-aware execution. The three identity fixtures create
+# disjoint mktemp directories and only simulate /sys, /proc and DM commands.
+# All process-lifecycle, package and hardware-dependent suites stay serial.
 ROOTLESS_PARALLEL_EXECUTION_ENABLED = True
 
 
