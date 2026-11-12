@@ -12027,6 +12027,8 @@ DEVELOPMENT_RESUME_ROOTLESS_SUITES = (
     "tests/runtime/native/primary-real-swap-parent-ownership-test.py",
     "tests/runtime/native/primary-real-swap-oracle-terminal-test.py",
     "tests/runtime/native/test-report-test.py",
+    "tests/runtime/native/physical-swap-probe-test.py",
+    "tests/runtime/native/live-swap-supervisor-test.py",
 )
 
 

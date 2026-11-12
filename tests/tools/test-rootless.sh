@@ -53,7 +53,9 @@ rootless_should_run_suite() {
     tests/runtime/native/primary-real-swap-test.py|\
     tests/runtime/native/primary-real-swap-parent-ownership-test.py|\
     tests/runtime/native/primary-real-swap-oracle-terminal-test.py|\
-    tests/runtime/native/test-report-test.py) ;;
+    tests/runtime/native/test-report-test.py|\
+    tests/runtime/native/physical-swap-probe-test.py|\
+    tests/runtime/native/live-swap-supervisor-test.py) ;;
     *) return 0 ;;
   esac
   [[ $rootless_resume_formatter_sha256 =~ ^[0-9a-f]{64}$ &&
@@ -1054,10 +1056,14 @@ finish_and_report_rootless_unittest "$rootless_generator_exit_code" "$rootless_g
 fi
 rootless_phase='tests/runtime/native/physical-swap-probe-test.py'
 rootless_begin_phase
+if rootless_should_run_suite; then
 python3 -B tests/runtime/native/physical-swap-probe-test.py -v
+fi
 rootless_phase='tests/runtime/native/live-swap-supervisor-test.py'
 rootless_begin_phase
+if rootless_should_run_suite; then
 python3 -B tests/runtime/native/live-swap-supervisor-test.py -v
+fi
 # Compile the noninstalled lifecycle rehearsal branch on every rootless/CI
 # architecture. Private paths are deliberately nonexistent; this is syntax and
 # warning qualification only and cannot mutate a device.

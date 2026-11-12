@@ -598,9 +598,11 @@ convertible into a private checkpoint. The parent runner strips its RESUME
 selector from test children and nested synthetic reporter invocations.
 A partial rootless-stage run may also save independently completed primary
 lifecycle audit, owned-null_blk lifecycle qualifier, primary real-swap
-contracts, parent-ownership contracts, terminal-oracle contracts and
-report-contract suites. These six reviewed serial fixtures use isolated
+contracts, parent-ownership contracts, terminal-oracle contracts,
+report-contracts, synthetic physical-admission and simulated live-swap
+supervisor suites. These eight reviewed serial fixtures use isolated
 rootless temporary state and do not provision or mutate loaded devices.
+The last two exercise mocks rather than admitting any real physical target.
 Development resume reuses only these fixtures, after verifying source,
 host, kernel, KDIR, worker policy and all three rebuilt artifact digests;
 the rootless native Make and all other suites run fresh. Each resumed suite and
@@ -610,8 +612,8 @@ checkpoints, with the same owner-only file identity and permissions.
 The per-suite guard refuses full-tier execution and missing, linked or
 content-drifted artifact paths, even if a substituted file has matching bytes.
 Synthetic rootless regression exercises ordinary reuse, fingerprint drift,
-linked and missing artifacts, the exact reviewed phase inventory, and the
-forbidden native/full-tier boundaries.
+linked and missing artifacts, the exact eight-suite phase inventory, and
+the forbidden native/full-tier boundaries.
 Synthetic regression covers successful
 reuse, exact-context drift, file identity/privacy rejection, one-table progress,
 including isolated report-root fixtures, complete synthetic benchmark

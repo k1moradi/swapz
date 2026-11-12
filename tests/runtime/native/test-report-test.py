@@ -1200,6 +1200,10 @@ class NativeTimingContract(unittest.TestCase):
         source = (ROOT / "tests/tools/test-rootless.sh").read_text(
             encoding="utf-8")
         suites = runner.DEVELOPMENT_RESUME_ROOTLESS_SUITES
+        self.assertEqual(len(suites), 8)
+        self.assertEqual(suites[-2:], (
+            "tests/runtime/native/physical-swap-probe-test.py",
+            "tests/runtime/native/live-swap-supervisor-test.py"))
         guard = source.split("rootless_should_run_suite() {", 1)[1].split(
             "\n}\n", 1)[0]
         self.assertEqual(len(suites), len(set(suites)))
@@ -1260,6 +1264,9 @@ class NativeTimingContract(unittest.TestCase):
                 return result.stdout.strip()
 
             self.assertEqual(run_guard(), "REUSED")
+            for suite in runner.DEVELOPMENT_RESUME_ROOTLESS_SUITES:
+                with self.subTest(suite=suite):
+                    self.assertEqual(run_guard(suite=suite), "REUSED")
             self.assertEqual(run_guard(oracle_sha="0" * 64), "RUN")
             self.assertEqual(run_guard(integration=1), "RUN")
             self.assertEqual(
