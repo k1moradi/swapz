@@ -76,9 +76,17 @@ class AlgorithmPhysicalTest(unittest.TestCase):
                     {**self.device["children"][0], **mutation}]}
                 self.assertEqual(subject._eligible_partitions(
                     {"blockdevices":[changed]}), [])
+        for transport, disk_path in (
+                ("sata", "/dev/sda"), ("nvme", "/dev/nvme0n1"),
+                (None, "/dev/sdb")):
+            with self.subTest(transport=transport):
+                fixed_disk = {**self.device, "path": disk_path,
+                              "tran": transport}
+                matched = subject._eligible_partitions(
+                    {"blockdevices": [fixed_disk]})
+                self.assertEqual(len(matched), 1)
+                self.assertEqual(matched[0]["parent_transport"], transport)
         nvme = {**self.device, "path": "/dev/nvme0n1", "tran": "nvme"}
-        self.assertEqual(subject._eligible_partitions(
-            {"blockdevices": [nvme]}), [])
         cleared_uuid = {**self.device, "children": [
             {**self.device["children"][0], "uuid": None}]}
         self.assertEqual(len(subject._eligible_partitions(
@@ -105,7 +113,7 @@ class AlgorithmPhysicalTest(unittest.TestCase):
             self.assertIs(subject._select_swap_partition([first, second]),
                           second)
         response.assert_called_once()
-        self.assertTrue(any("Identifiable USB swap partitions" in str(call)
+        self.assertTrue(any("Identifiable Swap partitions" in str(call)
                             for call in output.call_args_list))
         for answer in ("", "0", "3", "yes", "-1", " 2", "２"):
             with self.subTest(answer=answer), \
@@ -582,7 +590,7 @@ class AlgorithmPhysicalTest(unittest.TestCase):
         self.assertTrue(candidates[0]["parent_has_other_partitions"])
 
     def test_shared_root_disk_discovers_only_swap_partition(self):
-        disk = {"path": "/dev/sda", "type": "disk", "tran": "usb",
+        disk = {"path": "/dev/sda", "type": "disk", "tran": "sata",
                 "children": [
                     {"path": "/dev/sda1", "type": "part", "fstype": "vfat",
                      "mountpoints": ["/boot/efi"]},
@@ -597,6 +605,7 @@ class AlgorithmPhysicalTest(unittest.TestCase):
         self.assertEqual(len(candidates), 1)
         self.assertEqual(candidates[0]["path"], "/dev/sda4")
         self.assertEqual(candidates[0]["parent"], "/dev/sda")
+        self.assertEqual(candidates[0]["parent_transport"], "sata")
         self.assertTrue(candidates[0]["parent_has_other_partitions"])
         self.assertTrue(candidates[0]["lsblk_active_swap"])
 

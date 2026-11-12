@@ -6228,6 +6228,17 @@ class PhysicalSwapProbeTests(unittest.TestCase):
             self.assertEqual(target["partuuid"], "deadbeef-01")
             self.assertIsNone(target["uuid"])
             self.assertFalse(target["swap_was_active"])
+            # Media transport/removability are retained as authenticated
+            # parent identity, not a device-type admission restriction.
+            for transport in ("sata", "nvme"):
+                with self.subTest(transport=transport):
+                    card["transport"] = transport
+                    card["parent_removable"] = False
+                    internal_target = probe.inspect_target(
+                        selector, selector, allow_inactive_swap=True)
+                    self.assertEqual(internal_target["parent_transport"],
+                                     transport)
+                    self.assertFalse(internal_target["parent_removable"])
             with self.assertRaisesRegex(
                     probe.ProbeError, "PARTUUID selector does not match"):
                 probe.inspect_target(

@@ -744,14 +744,10 @@ def inspect_target(device_arg, confirm_arg, *,
     if active is not None and active["size_kib"] != geometry["raw_linux_swap_kib"]:
         raise ProbeError(
             "active Linux swap size does not match the immutable SWAPSPACE2 header")
+    # A valid swap partition can reside on removable or fixed SATA/NVMe media.
+    # The complete observed parent identity remains pinned for later checks;
+    # transport/removability do not authorize or refuse a partition.
     card_identity = _campaign_card_identity(device, parent_major_minor)
-    if not virtual_device_only and (
-            card_identity["transport"] != "usb" or
-            card_identity["parent_removable"] is not True):
-        raise ProbeError(
-            "physical_parent expected=removable_usb "
-            f"observed=transport_{card_identity['transport']!r},"
-            f"removable_{card_identity['parent_removable']!r}")
     return {
         "device": device,
         "major": major,

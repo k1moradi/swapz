@@ -468,6 +468,18 @@ arbitrary physical device or weaken ownership, byte-exact readback, or safe
 teardown gates. Complete the audited physical admission protocol before any
 algorithm production PASS is enabled.
 
+Physical development-test selection is not restricted by a swap partition's
+parent transport or removable flag: internal SATA/NVMe and removable media
+are eligible for discovery. This does not authorize arbitrary block writes.
+The read-only selector still requires an exact swap partition and PARTUUID;
+the privileged helper independently verifies its immutable SWAPSPACE2
+signature, whole-partition geometry, parent identity fingerprint, absence
+of mounts/holders, live swap inventory, available RAM before swapoff and
+same-boot recovery. A swap partition sharing the root disk additionally
+requires the existing protected host-scope authorization. Explicit owner
+consent and canonical source admission remain mandatory. Development
+evidence never constitutes physical production acceptance.
+
 The isolated Make-interface fixture must use a temporary `main` checkout with
 no remote and a deterministic synthetic host identity. This exercises report
 binding without relying on CI host metadata or enabling publication; it must

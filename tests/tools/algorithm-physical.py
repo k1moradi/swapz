@@ -2,7 +2,7 @@
 """Single-consent physical algorithm trial, after all five RAM stages pass.
 
 The unprivileged selector never writes devices. Only the already-hardened,
-source-bound private probe receives the exact confirmed USB swap partition.
+source-bound private probe receives the exact confirmed swap partition.
 """
 import importlib.util
 import json
@@ -24,7 +24,7 @@ UUID_PATTERN = re.compile(r"[a-fA-F0-9][a-fA-F0-9-]{7,71}")
 
 def _eligible_partitions(lsblk_output: dict, *,
                          virtual_device_only=False) -> list[dict]:
-    """Classify exact swap partitions; bare metal remains USB-only."""
+    """Classify exact swap partitions regardless of parent transport."""
     disks = lsblk_output.get("blockdevices")
     if not isinstance(disks, list):
         raise ValueError("lsblk did not report canonical block devices")
@@ -32,17 +32,13 @@ def _eligible_partitions(lsblk_output: dict, *,
     for disk in disks:
         if not isinstance(disk, dict) or disk.get("type") != "disk":
             continue
+        # Parent transport is diagnostic identity, not a swap-partition
+        # eligibility filter. An internal SATA/NVMe swap is also discoverable.
         transport = disk.get("tran")
-        if virtual_device_only:
-            if (not isinstance(transport, str) or
-                    re.fullmatch(r"[A-Za-z0-9_.-]{1,32}", transport) is None):
-                continue
-        elif transport != "usb":
-            continue
         children = disk.get("children")
-        # Discovery is read-only. A shared-root USB disk may contain one
+        # Discovery is read-only. A shared-root disk may contain one
         # authorized swap partition without authorizing any sibling partition
-        # or allowing the current private physical writer to use that disk.
+        # or allowing the private writer to use the parent disk.
         if (not isinstance(children, list) or not children or
                 any(not isinstance(partition, dict) for partition in children)):
             continue
@@ -95,11 +91,11 @@ def _select_swap_partition(candidates: list[dict]) -> dict | None:
     for key in ("path", "partuuid"):
         identities = [candidate[key].lower() for candidate in candidates]
         if len(set(identities)) != len(identities):
-            raise ValueError("duplicate USB swap partition identity")
+            raise ValueError("duplicate swap partition identity")
     if len(candidates) == 1:
         return candidates[0]
     label = ("VM swap partitions" if candidates[0].get("virtual_device_only")
-             else "USB swap partitions")
+             else "Swap partitions")
     print(f"Identifiable {label} (selection is not authorization):")
     for number, candidate in enumerate(candidates, start=1):
         print(f"  {number}. {candidate['path']}  Parent: {candidate['parent']}  "
@@ -264,7 +260,7 @@ def _require_read_only_preflight() -> dict | None:
         raise ValueError("swap inventory header is malformed")
     # JSON children[] is absent unless NAME is selected or --tree is used.
     # PATH is the identity-bearing column here; preserve it and request the
-    # hierarchy explicitly so USB partition children cannot disappear.
+    # hierarchy explicitly so partition children cannot disappear.
     block_info = subprocess.run([
         "lsblk", "--json", "--tree", "--bytes", "--output",
         "PATH,TYPE,FSTYPE,UUID,PARTUUID,SIZE,TRAN,MOUNTPOINTS"],
