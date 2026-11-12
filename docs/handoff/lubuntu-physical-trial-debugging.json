@@ -222,9 +222,74 @@
       "results_sha256": "f7451a0d71a20bd2c94d77de38af49ac6330325b69898fe8cedfaac47603523c",
       "kernel_warning_error_observed": false,
       "production_qualification": "NOT_PROVEN"
+    },
+    {
+      "run_id": "e32fd281d20aa1805301aa98bf5ee540",
+      "source_sha": "c42ef31307311a67db8dea22eb20d33a75541067",
+      "started_at": "2026-11-12T12:06:39Z",
+      "ended_at": "2026-11-12T12:07:45Z",
+      "scope": "DEVELOPMENT_ONLY_SHARED_ROOT_SELECTED_PARTITION",
+      "artifact_sha256": {
+        "formatter_sha256": "c737456417a6e5c5397c37b89e04b5f7ee9227d11ffc480c4f92ead78093c93c",
+        "module_sha256": "5daece9091fd7c2b1f5e2c8891523819e8d9429690349aa46e240856282f4bd4",
+        "oracle_sha256": "94ecfb7a26c47d251deb883927538f23bf0ccef8e33a46f98c09bc201734cf15"
+      },
+      "block_oracle": {
+        "status": "PASS",
+        "pages": 128,
+        "exit": 0,
+        "counter_major_minor": "8:4",
+        "lower_read_bytes": 1044480,
+        "lower_write_bytes": 749568,
+        "lower_read_requests": 255,
+        "lower_write_requests": 183
+      },
+      "anonymous_workload": {
+        "status": "FAIL",
+        "first_failure": {
+          "gate": "bounded_primary_workload",
+          "original_errno": null,
+          "phase": "anonymous_workload",
+          "pressure": {
+            "cgroup_io_full_usec": 20749266,
+            "cgroup_io_some_usec": 20866510,
+            "cgroup_memory_bytes": 134197248,
+            "cgroup_memory_max_events": 504,
+            "cgroup_swap_bytes": 155934720,
+            "limit_usec": 4262469,
+            "lower_read_sectors_total": 55656,
+            "lower_write_sectors_total": 753808,
+            "mem_available_mib": 11740,
+            "stalled_usec": 4273509,
+            "swapz_error": 0,
+            "swapz_failed": 0,
+            "swapz_logical_read_total": 5541888,
+            "swapz_logical_write_total": 148254720,
+            "swapz_physical_read_total": 2424832,
+            "swapz_physical_write_total": 138645504,
+            "swapz_upper_write_completed_ok": 36195,
+            "swapz_write_submitted_total": 138907648,
+            "window_usec": 5014670,
+            "workload_phase": "fill"
+          },
+          "reason": "memory_pressure",
+          "schema": "swapz-algorithm-workload-diagnostic-v1"
+        },
+        "full_byte_verification": "NOT_COMPLETED"
+      },
+      "recovery": {
+        "final_recovery_state": "COMPLETE",
+        "original_header_matches_final": true,
+        "restored_swap_verified": true,
+        "mapper_removal_succeeded": true,
+        "module_cleanup_succeeded": true,
+        "active_partition_marker_present": false
+      },
+      "results_sha256": "c8438ab8f590aace9824914187149e9f172bb7cc65515fb45f2c1388bcd0704f",
+      "production_qualification": "NOT_PROVEN"
     }
   ],
-  "next_required_proof": "Diagnose sustained cgroup reclaim/I/O stall at the unchanged PSI threshold before another bounded anonymous-swap attempt; no current real-swap or deployment qualification.",
-  "latest_physical_tested_source_sha": "7345074d1f38403b8ac75c3db6d73d0daa3d40bb",
+  "next_required_proof": "Diagnose reclaim blocked on I/O using retained fresh-cgroup I/O PSI totals and memory-limit events; preserve the unchanged workload and safety threshold, and require completed anonymous byte verification before deployment.",
+  "latest_physical_tested_source_sha": "c42ef31307311a67db8dea22eb20d33a75541067",
   "latest_physical_trial_result": "DEVELOPMENT_BLOCK_ORACLE_PASS_ANONYMOUS_PSI_STOP_RECOVERY_COMPLETE"
 }
