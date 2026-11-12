@@ -4,6 +4,7 @@
 #include <inttypes.h>
 #include <pthread.h>
 #include <signal.h>
+#include <stddef.h>
 #include <stdatomic.h>
 #include <stdbool.h>
 #include <stdint.h>
@@ -20,6 +21,12 @@
 
 #define SWAPZ_REPLAY_PAGE_BYTES 4096U
 #define SWAPZ_REPLAY_MAX_QD 32U
+#define SWAPZ_REPLAY_PLAN_HEADER_BYTES 16U
+
+/* The producer serializes this private ABI explicitly in little-endian. */
+#if __BYTE_ORDER__ != __ORDER_LITTLE_ENDIAN__
+#error "native replay plan requires a little-endian target"
+#endif
 
 struct replay_event {
 	uint32_t page;
@@ -27,7 +34,18 @@ struct replay_event {
 	uint8_t lane;
 	uint8_t phase;
 	char op;
+	uint8_t reserved;
 };
+
+_Static_assert(sizeof(struct replay_event) == 12,
+	       "native plan event must occupy exactly 12 bytes");
+_Static_assert(offsetof(struct replay_event, page) == 0 &&
+	       offsetof(struct replay_event, fixture) == 4 &&
+	       offsetof(struct replay_event, lane) == 8 &&
+	       offsetof(struct replay_event, phase) == 9 &&
+	       offsetof(struct replay_event, op) == 10 &&
+	       offsetof(struct replay_event, reserved) == 11,
+	       "native plan event layout does not match the Python producer");
 
 struct replay_latency {
 	char op;
@@ -216,58 +234,75 @@ static bool parse_u64(const char *text, uint64_t *value)
 	return true;
 }
 
+/* The Python parent validated the canonical JSONL trace and its hashes.
+ * Use a fixed binary, regular-file FD only to avoid re-parsing ASCII in C.
+ * All records are validated again before starting worker threads.
+ */
+static int read_plan_bytes(int plan_fd, void *destination, size_t bytes,
+			   off_t offset)
+{
+	uint8_t *next = destination;
+
+	while (bytes) {
+		const size_t chunk = bytes > 1048576U ? 1048576U : bytes;
+		ssize_t received = pread(plan_fd, next, chunk, offset);
+
+		if (received < 0 && errno == EINTR)
+			continue;
+		if (received <= 0)
+			return received == 0 ? EINVAL : errno;
+		next += (size_t)received;
+		bytes -= (size_t)received;
+		offset += (off_t)received;
+	}
+	return 0;
+}
+
 static int load_plan(int plan_fd, struct replay_context *ctx)
 {
-	FILE *stream = NULL;
-	char *line = NULL;
-	size_t capacity = 0;
-	size_t index = 0;
-	int duplicate_fd;
-	int error = 0;
+	struct stat plan_stat;
+	uint8_t header[SWAPZ_REPLAY_PLAN_HEADER_BYTES];
+	uint64_t event_count;
+	size_t expected_bytes;
+	size_t index;
+	int error;
 
-	duplicate_fd = dup(plan_fd);
-	if (duplicate_fd < 0)
+	if (ctx->event_count >
+	    (SIZE_MAX - SWAPZ_REPLAY_PLAN_HEADER_BYTES) /
+	    sizeof(*ctx->events))
+		return EOVERFLOW;
+	expected_bytes = SWAPZ_REPLAY_PLAN_HEADER_BYTES +
+		ctx->event_count * sizeof(*ctx->events);
+	if (fstat(plan_fd, &plan_stat) != 0)
 		return errno;
-	stream = fdopen(duplicate_fd, "r");
-	if (!stream) {
-		error = errno;
-		close(duplicate_fd);
+	if (!S_ISREG(plan_stat.st_mode) || plan_stat.st_size < 0 ||
+	    (uint64_t)plan_stat.st_size != (uint64_t)expected_bytes)
+		return EINVAL;
+	error = read_plan_bytes(plan_fd, header, sizeof(header), 0);
+	if (error)
 		return error;
-	}
-	while (getline(&line, &capacity, stream) >= 0) {
-		struct replay_event *event;
-		unsigned int page, fixture, phase, lane;
-		char op, extra;
-		int fields;
+	if (memcmp(header, "SWZPLAN", 8) != 0)
+		return EINVAL;
+	memcpy(&event_count, header + 8, sizeof(event_count));
+	if (event_count != ctx->event_count)
+		return EINVAL;
+	error = read_plan_bytes(plan_fd, ctx->events,
+				ctx->event_count * sizeof(*ctx->events),
+				(off_t)sizeof(header));
+	if (error)
+		return error;
+	for (index = 0; index < ctx->event_count; ++index) {
+		const struct replay_event *event = &ctx->events[index];
 
-		if (index >= ctx->event_count) {
-			error = EOVERFLOW;
-			break;
-		}
-		fields = sscanf(line, " %c %u %u %u %u %c",
-				&op, &page, &fixture, &phase, &lane, &extra);
-		if (fields != 5 || (op != 'R' && op != 'W') ||
-		    phase > 1U || lane >= ctx->qd ||
-		    lane != index % ctx->qd ||
-		    phase != (index < ctx->warmup_ops ? 0U : 1U) ||
-		    fixture >= ctx->fixture_pages) {
-			error = EINVAL;
-			break;
-		}
-		event = &ctx->events[index++];
-		event->op = op;
-		event->page = page;
-		event->fixture = fixture;
-		event->phase = (uint8_t)phase;
-		event->lane = (uint8_t)lane;
+		if ((event->op != 'R' && event->op != 'W') ||
+		    event->reserved != 0 ||
+		    event->phase != (index < ctx->warmup_ops ? 0U : 1U) ||
+		    event->lane >= ctx->qd ||
+		    event->lane != (uint8_t)(index % ctx->qd) ||
+		    event->fixture >= ctx->fixture_pages)
+			return EINVAL;
 	}
-	if (!error && ferror(stream))
-		error = errno ? errno : EIO;
-	if (!error && index != ctx->event_count)
-		error = EINVAL;
-	free(line);
-	fclose(stream);
-	return error;
+	return 0;
 }
 
 static int write_results(const struct replay_context *ctx)

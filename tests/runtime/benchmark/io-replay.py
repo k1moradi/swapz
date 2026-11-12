@@ -976,14 +976,35 @@ def run_native_replay(fd, fixture_fd, trace, manifest, path, identity,
 
     with tempfile.TemporaryFile(mode="w+b") as plan, \
             tempfile.TemporaryFile(mode="w+b") as result:
-        for seq, item in enumerate(trace):
+        # Explicit little-endian 16-byte header and 12-byte records match
+        # io-replay-native.c. The canonical JSONL/manifest were validated
+        # above; no text formatting or per-event Python write syscall is
+        # needed in the private native helper handoff.
+        event_record = struct.Struct("<IIBBBB")
+        header_bytes = 16
+        plan_bytes = bytearray(header_bytes + len(trace) * event_record.size)
+        struct.pack_into("<8sQ", plan_bytes, 0, b"SWZPLAN", len(trace))
+        for sequence, item in enumerate(trace):
             phase = 0 if item["phase"] == "warmup" else 1
-            lane = item.get("lane", seq % manifest["qd"])
-            plan.write(
-                f"{item['op']} {item['page']} {item['fixture']} "
-                f"{phase} {lane}\n".encode("ascii"))
+            lane = item.get("lane", sequence % manifest["qd"])
+            # The old ASCII parser rejected JSON bools such as True where an
+            # integer page, fixture or lane was required. Packing must not
+            # silently reinterpret those values as 1.
+            if (type(item["page"]) is not int or
+                    type(item["fixture"]) is not int or
+                    type(lane) is not int or
+                    not 0 <= item["page"] <= 0xffffffff or
+                    not 0 <= item["fixture"] <= 0xffffffff or
+                    not 0 <= lane < manifest["qd"]):
+                raise ValueError("native replay event has invalid integer fields")
+            event_record.pack_into(
+                plan_bytes, header_bytes + sequence * event_record.size,
+                item["page"], item["fixture"], lane, phase,
+                ord(item["op"]), 0)
+        plan.write(plan_bytes)
         plan.flush()
         plan.seek(0)
+        del plan_bytes
         proc = subprocess.Popen(
             [str(NATIVE_REPLAY_HELPER), str(fd), str(fixture_fd),
              str(plan.fileno()), str(result.fileno()), str(manifest["qd"]),

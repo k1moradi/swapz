@@ -7705,6 +7705,26 @@ int main(void)
             pair)
         self.assertIn('REPLAY_ARGS+=(--native-replay)', pair)
 
+    def test_native_replay_uses_verified_fixed_binary_plan_layout(self):
+        replay = (ROOT / "tests/runtime/benchmark/io-replay.py").read_text()
+        native = (ROOT / "tests/runtime/benchmark/io-replay-native.c").read_text()
+        tests = (ROOT / "tests/runtime/benchmark/io-replay-test.py").read_text()
+        self.assertIn('struct.Struct("<IIBBBB")', replay)
+        self.assertIn('struct.pack_into("<8sQ", plan_bytes, 0, b"SWZPLAN",', replay)
+        self.assertIn("del plan_bytes", replay)
+        self.assertIn("type(item[\"page\"]) is not int", replay)
+        self.assertIn("type(item[\"fixture\"]) is not int", replay)
+        self.assertIn("type(lane) is not int", replay)
+        self.assertIn("static int read_plan_bytes(", native)
+        self.assertIn("static int load_plan(", native)
+        self.assertIn('_Static_assert(sizeof(struct replay_event) == 12,', native)
+        self.assertIn("plan_stat.st_size < 0", native)
+        self.assertIn("event->reserved != 0", native)
+        self.assertNotIn("sscanf(line,", native)
+        self.assertIn(
+            "def test_native_binary_plan_has_exact_bytes_and_rejects_corruption",
+            tests)
+
     def test_modern_storage_envelopes_use_native_replay_helper(self):
         pair = (ROOT / "tests/tools/benchmark-owned-pair.sh").read_text()
         replay = (ROOT / "tests/runtime/benchmark/io-replay.py").read_text()

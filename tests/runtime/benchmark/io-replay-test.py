@@ -13,6 +13,7 @@ import json
 import os
 import random
 import subprocess
+import struct
 import sys
 import tempfile
 import time
@@ -1995,6 +1996,74 @@ class PairReplayContract(unittest.TestCase):
                             native_record[field], threaded_record[field],
                             f"phase=cross-engine-oracle mode={mode} "
                             f"candidate={candidate} field={field}")
+
+    def test_native_binary_plan_has_exact_bytes_and_rejects_corruption(self):
+        native = self.require_native_tool("io-replay-native", "binary-plan")
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            fixture_path = root / "fixture.bin"
+            device_path = root / "swapz-replay-binary-device.bin"
+            fixture_path.write_bytes(bytes([71]) * PAGE)
+            device_path.write_bytes(bytes(PAGE))
+            header = struct.pack("<8sQ", b"SWZPLAN", 1)
+            event = struct.pack("<IIBBBB", 0, 0, 0, 1, ord("W"), 0)
+            valid = header + event
+            cases = (
+                ("valid", valid, True),
+                ("short", valid[:-1], False),
+                ("trailing", valid + b"\0", False),
+                ("magic", b"BADPLAN\0" + valid[8:], False),
+                ("count", struct.pack("<8sQ", b"SWZPLAN", 2) + event, False),
+                ("lane", header + struct.pack("<IIBBBB", 0, 0, 1, 1, ord("W"), 0), False),
+                ("phase", header + struct.pack("<IIBBBB", 0, 0, 0, 0, ord("W"), 0), False),
+                ("fixture", header + struct.pack("<IIBBBB", 0, 1, 0, 1, ord("W"), 0), False),
+                ("operation", header + struct.pack("<IIBBBB", 0, 0, 0, 1, ord("X"), 0), False),
+                ("reserved", header + struct.pack("<IIBBBB", 0, 0, 0, 1, ord("W"), 1), False),
+            )
+            with fixture_path.open("rb") as fixture_fd, \
+                    device_path.open("r+b") as device_fd:
+                for label, encoded, expected_success in cases:
+                    with self.subTest(case=label), \
+                            tempfile.TemporaryFile() as plan_fd, \
+                            tempfile.TemporaryFile() as result_fd:
+                        plan_fd.write(encoded)
+                        plan_fd.flush()
+                        plan_fd.seek(0)
+                        command = [
+                            str(native), str(device_fd.fileno()),
+                            str(fixture_fd.fileno()), str(plan_fd.fileno()),
+                            str(result_fd.fileno()), "1", "0", "1", "waves",
+                        ]
+                        result = subprocess.run(
+                            command, input="GO\n", capture_output=True,
+                            text=True, timeout=5,
+                            pass_fds=(device_fd.fileno(), fixture_fd.fileno(),
+                                      plan_fd.fileno(), result_fd.fileno()))
+                        if expected_success:
+                            self.assertEqual(result.returncode, 0,
+                                             f"phase=binary-plan case={label}")
+                            self.assertIn("READY\n", result.stdout)
+                            self.assertIn("DONE ", result.stdout)
+                        else:
+                            self.assertNotEqual(result.returncode, 0,
+                                                f"phase=binary-plan case={label}")
+                            self.assertNotIn("READY", result.stdout)
+
+    def test_native_binary_plan_does_not_coerce_boolean_page_fields(self):
+        self.require_native_tool("io-replay-native", "binary-types")
+        import runpy
+        native_replay = runpy.run_path(str(SCRIPT))["run_native_replay"]
+        manifest = {"iops": 0, "replay_mode": "qd-waves", "qd": 1,
+                    "warmup_ops": 0, "measure_ops": 1}
+        event = {"phase": "measure", "page": 0, "fixture": 0,
+                 "lane": 0, "op": "W"}
+        for field in ("page", "fixture", "lane"):
+            with self.subTest(field=field):
+                changed = {**event, field: True}
+                with self.assertRaisesRegex(
+                        ValueError, "native replay event has invalid integer fields"):
+                    native_replay(-1, -1, [changed], manifest,
+                                  Path("/not/a/device"), {})
 
     def test_mixed_lanes_isolate_barrier_and_reject_cross_lane_mutations(self):
         import runpy

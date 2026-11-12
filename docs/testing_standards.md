@@ -6590,6 +6590,24 @@ startup, trace staging and latency-result serialization remain outside the
 timed interval. The helper is an internal test binary under `build/tests/`;
 it creates no new public test command.
 
+The internal Python-to-native replay plan handoff uses one fixed, bounded
+little-endian binary layout, solely to remove redundant text formatting and
+`sscanf` work from every loaded pair. It has a 16-byte header (eight-byte
+`SWZPLAN` magic including its trailing NUL, then a uint64 operation count)
+and exactly 12 bytes per event (uint32 logical page, uint32 fixture index,
+uint8 lane, uint8 warmup/measure phase, uint8 ASCII W/R operation, uint8 zero
+reserved). The canonical hashed JSONL trace and manifest remain the public
+source of workload truth; Python validates them and the exact WRITE payload
+stream before handing already-validated bytes and owned descriptors to the
+native helper. C must reject a nonregular plan descriptor, wrong magic/count
+or exact length, nonzero reserved byte, invalid operation, phase, lane or
+fixture index before creating replay threads. Keep the helper's existing
+parent-death protection, measured start gate, persistent/wave scheduling,
+final drain, independent target admission and post-image oracle unchanged.
+Rootless tests must prove a valid one-event handoff as well as missing/extra
+bytes and every corrupted record-field category. No silent text-plan fallback
+or relaxation of benchmark qualification is permitted.
+
 Modern-envelope report parsing must require `replay_engine=native-c` for both
 arms and reject silent fallback to Python. The fixed 10/80 MiB/s models now
 also use native-C replay for both arms of every loaded benchmark pair: mixed
