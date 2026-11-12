@@ -287,9 +287,79 @@
       },
       "results_sha256": "c8438ab8f590aace9824914187149e9f172bb7cc65515fb45f2c1388bcd0704f",
       "production_qualification": "NOT_PROVEN"
+    },
+    {
+      "run_id": "91a97634fe835cead724f427e3a5f8cf",
+      "source_sha": "eb5c865ef83eb433c579afe4dd73d36569e315f1",
+      "started_at": "2026-11-12T23:21:27Z",
+      "ended_at": "2026-11-12T23:24:30Z",
+      "scope": "DEVELOPMENT_ONLY_SHARED_ROOT_SELECTED_PARTITION",
+      "artifact_sha256": {
+        "formatter_sha256": "37588882841d31a722a6d65a9e818dbf033189f8e0b22985db71d8f9344e68af",
+        "module_sha256": "9de8ed2f74195846f556315ef43c9ed431373d3855c51046ef4aa86e21c1fb28",
+        "oracle_sha256": "94ecfb7a26c47d251deb883927538f23bf0ccef8e33a46f98c09bc201734cf15"
+      },
+      "block_oracle": {
+        "status": "PASS",
+        "pages": 128,
+        "exit": 0,
+        "counter_major_minor": "8:4",
+        "lower_read_bytes": 1015808,
+        "lower_write_bytes": 749568,
+        "lower_read_requests": 248,
+        "lower_write_requests": 183
+      },
+      "anonymous_workload": {
+        "status": "FAIL",
+        "first_failure": {
+          "gate": "bounded_primary_workload",
+          "original_errno": null,
+          "phase": "anonymous_workload",
+          "pressure": {
+            "cgroup_io_full_usec": 1101408,
+            "cgroup_io_some_usec": 1101408,
+            "cgroup_memory_bytes": 134217728,
+            "cgroup_memory_max_events": 62,
+            "cgroup_swap_bytes": 29143040,
+            "limit_usec": 4286456,
+            "lower_read_sectors_total": 61552,
+            "lower_write_sectors_total": 792720,
+            "mem_available_mib": 12207,
+            "stalled_usec": 4329167,
+            "swapz_commit_nonio_wall_ns": 111388106,
+            "swapz_error": 0,
+            "swapz_failed": 0,
+            "swapz_logical_read_total": 3969024,
+            "swapz_logical_write_total": 21671936,
+            "swapz_lower_write_service_ewma_ns": 67360285,
+            "swapz_lower_write_wall_ns": 24651229576,
+            "swapz_ordered_worker_wall_ns": 26316250074,
+            "swapz_physical_read_total": 1777664,
+            "swapz_physical_write_total": 11530240,
+            "swapz_prep_wait_wall_ns": 0,
+            "swapz_upper_write_completed_ok": 5227,
+            "swapz_write_submitted_total": 11710464,
+            "window_usec": 5042890,
+            "workload_phase": "fill"
+          },
+          "reason": "memory_pressure",
+          "schema": "swapz-algorithm-workload-diagnostic-v1"
+        },
+        "full_byte_verification": "NOT_COMPLETED"
+      },
+      "recovery": {
+        "final_recovery_state": "COMPLETE",
+        "original_header_matches_final": true,
+        "restored_swap_verified": true,
+        "mapper_removal_succeeded": true,
+        "module_cleanup_succeeded": true,
+        "active_partition_marker_present": false
+      },
+      "results_sha256": "a7803c8ed3e48681c4c8567bb52d5ef550a113991a264955770fbf4d2174c275",
+      "production_qualification": "NOT_PROVEN"
     }
   ],
-  "next_required_proof": "Diagnose reclaim blocked on I/O using retained fresh-cgroup I/O PSI totals and memory-limit events; preserve the unchanged workload and safety threshold, and require completed anonymous byte verification before deployment.",
-  "latest_physical_tested_source_sha": "c42ef31307311a67db8dea22eb20d33a75541067",
+  "next_required_proof": "Investigate lower-I/O service delay: first-stop lower-WRITE wall totals dominate preparation/non-I/O work, but cumulative counters overlap and do not identify media versus shared-parent contention. No threshold relaxation or repeat without a specific new diagnostic hypothesis.",
+  "latest_physical_tested_source_sha": "eb5c865ef83eb433c579afe4dd73d36569e315f1",
   "latest_physical_trial_result": "DEVELOPMENT_BLOCK_ORACLE_PASS_ANONYMOUS_PSI_STOP_RECOVERY_COMPLETE"
 }
