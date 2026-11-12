@@ -12603,9 +12603,28 @@ def _run_qualification(args, sync_result):
                     result["algorithm_real_swap"]["diagnostic"] = physical_diagnostic
                     if physical_diagnostic.get("schema") == "swapz-algorithm-workload-diagnostic-v1":
                         print_algorithm_workload_diagnostic(physical_diagnostic)
+                elif (physical_diagnostic is not None and
+                      physical_diagnostic.get("schema") ==
+                      "swapz-algorithm-lifecycle-diagnostic-v1"):
+                    # A refusal exits 2, not 1/3. Retain its authenticated
+                    # phase and bounded activation snapshot for make test.
+                    result["algorithm_real_swap"]["reason"] = (
+                        physical_diagnostic["reason"])
+                    result["algorithm_real_swap"]["diagnostic"] = physical_diagnostic
+                    print_algorithm_lifecycle_failure_diagnostic(
+                        physical_diagnostic)
+                else:
+                    # Exit 2 alone cannot prove that no physical mutation
+                    # happened or that normal recovery completed.
+                    print(
+                        "  Physical first refusal: phase=privileged_trial "
+                        "gate=authenticated_diagnostic reason=unavailable "
+                        f"original_exit={physical_exit} "
+                        "recovery_state=unverified", flush=True)
                 print_physical_trial_result("NOT RUN", physical_duration, progress_table)
-                print("  Physical trial admission: device unchanged or "
-                      "safely refused")
+                print("  Physical trial disposition: NOT QUALIFIED; "
+                      "verify same-boot recovery before another trial",
+                      flush=True)
         elif interactive_physical_trial:
             # A successful local RAM run is not permission to start physical
             # work without a canonical source-bound report checkpoint.
