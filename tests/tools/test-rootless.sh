@@ -56,6 +56,13 @@ rootless_should_run_suite() {
   [[ $rootless_resume_formatter_sha256 =~ ^[0-9a-f]{64}$ &&
      $rootless_resume_module_sha256 =~ ^[0-9a-f]{64}$ &&
      $rootless_resume_oracle_sha256 =~ ^[0-9a-f]{64}$ ]] || return 0
+  # Explicit development-only eligibility; never follow substituted outputs.
+  (( rootless_full_integration == 0 )) || return 0
+  [[ -f build/userspace/swapzctl && ! -L build/userspace/swapzctl &&
+     -f build/kernel/experimental/dm-swapz.ko &&
+     ! -L build/kernel/experimental/dm-swapz.ko &&
+     -f build/tests/device-roundtrip && ! -L build/tests/device-roundtrip ]] ||
+    return 0
   formatter_digest=$(sha256sum build/userspace/swapzctl) || return 0
   module_digest=$(sha256sum build/kernel/experimental/dm-swapz.ko) || return 0
   oracle_digest=$(sha256sum build/tests/device-roundtrip) || return 0

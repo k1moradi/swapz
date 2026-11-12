@@ -604,6 +604,10 @@ the rootless native Make and all other suites run fresh. Each resumed suite and
 the containing rootless stage report REUSED, not PASS, and the overall run stays
 INCOMPLETE. Private suite checkpoints are atomically written beside stage
 checkpoints, with the same owner-only file identity and permissions.
+The per-suite guard refuses full-tier execution and missing, linked or
+content-drifted artifact paths, even if a substituted file has matching bytes.
+Synthetic rootless regression exercises ordinary reuse, fingerprint drift,
+linked and missing artifacts, and the forbidden native/full-tier boundaries.
 Synthetic regression covers successful
 reuse, exact-context drift, file identity/privacy rejection, one-table progress,
 including isolated report-root fixtures, complete synthetic benchmark

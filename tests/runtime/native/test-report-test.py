@@ -1195,6 +1195,62 @@ class NativeTimingContract(unittest.TestCase):
             finally:
                 runner.ROOT = previous_root
 
+    def test_development_resume_rootless_suite_guard_never_follows_links(self):
+        """A cached suite cannot bypass missing, changed or linked artifacts."""
+        source = (ROOT / "tests/tools/test-rootless.sh").read_text(
+            encoding="utf-8")
+        beginning = source.index("rootless_should_run_suite() {")
+        guard = source[beginning:].split("\n}\n", 1)[0] + "\n}\n"
+        artifact_names = (
+            "build/userspace/swapzctl",
+            "build/kernel/experimental/dm-swapz.ko",
+            "build/tests/device-roundtrip",
+        )
+        with tempfile.TemporaryDirectory(prefix="rootless-suite-guard-") as directory:
+            root = Path(directory)
+            expected_hashes = []
+            for index, name in enumerate(artifact_names):
+                artifact = root / name
+                artifact.parent.mkdir(parents=True, exist_ok=True)
+                content = f"fixed-artifact-{index}".encode("ascii")
+                artifact.write_bytes(content)
+                expected_hashes.append(hashlib.sha256(content).hexdigest())
+
+            def run_guard(*, suite="tests/runtime/native/test-report-test.py",
+                          integration=0, oracle_sha=None):
+                hashes = list(expected_hashes)
+                if oracle_sha is not None:
+                    hashes[2] = oracle_sha
+                environment = "\n".join((
+                    f"rootless_phase='{suite}'",
+                    f"rootless_resume_suites='{suite}'",
+                    f"rootless_full_integration={integration}",
+                    "rootless_reused_current_phase=0",
+                    f"rootless_resume_formatter_sha256={hashes[0]}",
+                    f"rootless_resume_module_sha256={hashes[1]}",
+                    f"rootless_resume_oracle_sha256={hashes[2]}",
+                ))
+                command = (guard + "\n" + environment +
+                           "\nif rootless_should_run_suite; then "
+                           "printf 'RUN\\n'; else printf 'REUSED\\n'; fi\n")
+                result = subprocess.run(
+                    ["bash", "-c", command], cwd=root, text=True,
+                    capture_output=True, timeout=5, check=False)
+                self.assertEqual(result.returncode, 0, result.stderr)
+                return result.stdout.strip()
+
+            self.assertEqual(run_guard(), "REUSED")
+            self.assertEqual(run_guard(oracle_sha="0" * 64), "RUN")
+            self.assertEqual(run_guard(integration=1), "RUN")
+            self.assertEqual(
+                run_guard(suite="tests/Makefile native and metadata"), "RUN")
+            original = root / artifact_names[1]
+            original.rename(original.with_name("owned-module"))
+            original.symlink_to("owned-module")
+            self.assertEqual(run_guard(), "RUN")
+            original.unlink()
+            self.assertEqual(run_guard(), "RUN")
+
     def test_development_resume_skips_only_passed_rootless_warning_stages(self):
         """Loaded work is fresh and a resumed run stays unqualified."""
         source = "a" * 40
