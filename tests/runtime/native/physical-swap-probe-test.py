@@ -88,6 +88,28 @@ class PhysicalSwapProbeTests(unittest.TestCase):
             patch.start()
             self.addCleanup(patch.stop)
 
+    def test_privileged_source_refusal_marker_is_exact_and_identity_free(self):
+        arguments = ["run", "--development-only", "--algorithm-real-swap"]
+        error = probe.ProbeError(
+            "canonical main contains changed source after qualification")
+        marker = probe._privileged_algorithm_source_admission_marker(
+            error, arguments)
+        self.assertEqual(
+            marker,
+            "PHYSICAL_ALGORITHM_SOURCE_ADMISSION="
+            "privileged_canonical_source_advanced")
+        for arguments_without_gate in (
+                ["plan", "--development-only", "--algorithm-real-swap"],
+                ["run", "--development-only"],
+                ["run", "--algorithm-real-swap"],
+                []):
+            self.assertIsNone(
+                probe._privileged_algorithm_source_admission_marker(
+                    error, arguments_without_gate))
+        self.assertIsNone(
+            probe._privileged_algorithm_source_admission_marker(
+                probe.ProbeError("private path or other gate"), arguments))
+
     def test_privileged_probe_refuses_partition_on_root_physical_parent(self):
         """A sibling root partition is not safe even when directly invoked."""
         def run(command, **_kwargs):
