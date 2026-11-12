@@ -7746,6 +7746,21 @@ int main(void)
             "def test_write_qd_batch_matches_individual_immutable_plans",
             fixtures)
 
+    def test_native_replay_skips_threaded_wave_allocation_and_reuses_read_iov(self):
+        replay = (ROOT / "tests/runtime/benchmark/io-replay.py").read_text()
+        fixtures = (ROOT / "tests/runtime/benchmark/io-replay-test.py").read_text()
+        self.assertIn(
+            "replay_waves = None\\n            if not args.native_replay:",
+            replay)
+        self.assertIn("for wave in replay_waves:", replay)
+        self.assertIn("read_iov = [scratch]", replay)
+        self.assertEqual(
+            replay.count("full_read(fd, page, scratch, chunks["),
+            2)
+        self.assertIn(
+            "def test_replay_page_oracle_reuses_iovec_without_weaker_readback",
+            fixtures)
+
     def test_native_replay_latencies_use_fixed_binary_result_records(self):
         replay = (ROOT / "tests/runtime/benchmark/io-replay.py").read_text()
         helper = (ROOT / "tests/runtime/benchmark/io-replay-native.c").read_text()

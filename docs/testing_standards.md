@@ -6651,6 +6651,19 @@ Rootless tests must prove a valid one-event handoff as well as missing/extra
 bytes and every corrupted record-field category. No silent text-plan fallback
 or relaxation of benchmark qualification is permitted.
 
+The unpaced native replay must not allocate Python QD wave sublists that
+its pre-created C worker lanes never consume. Only the Python-threaded
+development fallback constructs those waves, without changing their order,
+phase barriers or operation count. Prefill readback and the final full-image
+oracle must retain the same independent page-by-page 4096-byte `preadv`
+operations and complete byte comparisons, but reuse a single, caller-owned
+one-element memoryview iovec per live scratch buffer instead of allocating a
+new list for every page. Keep the view alive until both I/O and comparison
+finish, release it before closing the mmap, and still reject short or
+mismatched reads. The ID36 pressure path must not gain extra proportional
+heap allocations. Rootless coverage must verify correct repeated page
+readback, one iovec identity, and mismatched-oracle rejection.
+
 The native-to-Python post-measurement latency result uses 16 bytes per
 measured operation: one ASCII `W` or `R` byte, seven zero reserved bytes,
 and one little-endian uint64 nanosecond duration. The C helper verifies every

@@ -940,8 +940,11 @@ def full_write(fd, page, buf):
         raise OSError("short lower write")
 
 
-def full_read(fd, page, buf, expected):
-    n = os.preadv(fd, [buf], page * PAGE)
+def full_read(fd, page, buf, expected, read_iov):
+    # The caller owns the live mmap-backed view and its one-element iovec.
+    # Reuse that list for every 4KiB oracle read instead of allocating one
+    # Python list per page; the exact preadv operation remains unchanged.
+    n = os.preadv(fd, read_iov, page * PAGE)
     if n != PAGE or buf != expected:
         raise OSError("short or mismatched logical page read")
 
@@ -2074,13 +2077,14 @@ def replay(args):
             bufmap = mmap.mmap(-1, PAGE)
             scratch = memoryview(bufmap)
             try:
+                read_iov = [scratch]
                 for page in range(mf["logical_pages"]):
                     fixture_index = prefill_fixture_index(mf, page, count)
                     full_write(fd, page, chunks[fixture_index])
                 os.fsync(fd)
                 for page in range(mf["logical_pages"]):
                     fixture_index = prefill_fixture_index(mf, page, count)
-                    full_read(fd, page, scratch, chunks[fixture_index])
+                    full_read(fd, page, scratch, chunks[fixture_index], read_iov)
                 prefill_digest = hashlib.sha256()
                 for page in range(mf["logical_pages"]):
                     prefill_digest.update(
@@ -2098,8 +2102,13 @@ def replay(args):
             # Persistent WRITE or mixed workloads use fixed lane workers:
             # one Future per lane, never one Future per timed I/O.
             replay_mode = mf.get("replay_mode", "qd-waves")
-            replay_waves = [trace[i:i + mf["qd"]]
-                            for i in range(0, len(trace), mf["qd"])]
+            # Native workers consume the validated contiguous event plan.
+            # Python QD-wave lists are only needed by the threaded fallback;
+            # do not construct thousands of unused sublists per native arm.
+            replay_waves = None
+            if not args.native_replay:
+                replay_waves = [trace[i:i + mf["qd"]]
+                                for i in range(0, len(trace), mf["qd"])]
             native_elapsed_s = None
             pool = None
             if not args.native_replay:
@@ -2326,8 +2335,9 @@ def replay(args):
                 buffer = mmap.mmap(-1, PAGE)
                 scratch = memoryview(buffer)
                 try:
+                    read_iov = [scratch]
                     for page, fi in enumerate(final_map):
-                        full_read(fd, page, scratch, chunks[fi])
+                        full_read(fd, page, scratch, chunks[fi], read_iov)
                         post_hash.update(scratch)
                 finally:
                     scratch.release()

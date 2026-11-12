@@ -29,6 +29,38 @@ SCRIPT = Path(__file__).with_name("io-replay.py")
 
 
 class PairReplayContract(unittest.TestCase):
+    def test_replay_page_oracle_reuses_iovec_without_weaker_readback(self):
+        # The same live one-element iovec must service every exact 4096B
+        # prefill and final-image read; oracle and short-read failures remain.
+        import mmap
+        import runpy
+
+        read_page = runpy.run_path(str(SCRIPT))["full_read"]
+        expected_first = b"A" * PAGE
+        expected_second = b"B" * PAGE
+        with tempfile.TemporaryFile(mode="w+b") as target:
+            target.write(expected_first + expected_second)
+            target.flush()
+            with mmap.mmap(-1, PAGE) as read_buffer:
+                view = memoryview(read_buffer)
+                read_iov = [view]
+                try:
+                    original_preadv = os.preadv
+                    with mock.patch.object(os, "preadv", wraps=original_preadv) as reads:
+                        read_page(target.fileno(), 0, view,
+                                  expected_first, read_iov)
+                        read_page(target.fileno(), 1, view,
+                                  expected_second, read_iov)
+                        self.assertEqual(reads.call_count, 2)
+                        for call in reads.call_args_list:
+                            self.assertIs(call.args[1], read_iov)
+                        with self.assertRaisesRegex(
+                                OSError, "short or mismatched logical page read"):
+                            read_page(target.fileno(), 0, view,
+                                      expected_second, read_iov)
+                finally:
+                    view.release()
+
     def test_representative_fixture_requires_fail_closed_memory_protection(self):
         with tempfile.TemporaryDirectory() as directory:
             path = Path(directory) / "fixture.bin"
