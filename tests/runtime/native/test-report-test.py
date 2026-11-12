@@ -4862,6 +4862,98 @@ class ReportContract(unittest.TestCase):
                     })
                     self.assertIn("Physical trial: NOT RUN", console)
 
+    def test_pretrial_evidence_source_advance_reports_precise_preselector_refusal(self):
+        """A source race cannot start the physical selector or imply recovery."""
+        source_sha = "a" * 40
+
+        class OperatorConsole(io.StringIO):
+            def isatty(self):
+                return True
+
+        def pass_stage(title, command, result, **options):
+            del command
+            result["stages"].append({
+                "name": title, "status": "PASS", "exit_code": 0,
+                "elapsed_s": 0.0})
+            if options.get("parse_bench"):
+                result["benchmarks"]["delta64_prepare"] = {
+                    "overall": "NOT_RUN"}
+            return 0
+
+        for injected, reason in (
+                ("algorithm RAM evidence source changed after qualification",
+                 "source_advanced_after_ram"),
+                ("private /home/operator/source error",
+                 "algorithm_ram_evidence_unavailable")):
+            with self.subTest(reason=reason):
+                reports = []
+                with contextlib.ExitStack() as stack:
+                    stack.enter_context(mock.patch.object(
+                        runner, "report_host_identity",
+                        return_value={"status": "AVAILABLE"}))
+                    stack.enter_context(mock.patch.object(
+                        runner, "git_sha", return_value=source_sha))
+                    stack.enter_context(mock.patch.object(
+                        runner, "make_invocation",
+                        return_value=(["make"], "fixture")))
+                    stack.enter_context(mock.patch.object(
+                        runner, "tracked_source_checkout_preflight",
+                        return_value=None))
+                    stack.enter_context(mock.patch.object(
+                        runner, "run_stage", side_effect=pass_stage))
+                    stack.enter_context(mock.patch.object(
+                        runner, "qualification_artifact_digests",
+                        return_value={"status": "AVAILABLE"}))
+                    stack.enter_context(mock.patch.object(
+                        runner, "owner_qualification_artifacts_available",
+                        return_value=True))
+                    stack.enter_context(mock.patch.object(
+                        runner, "required_benchmark_gates_pass",
+                        return_value=True))
+                    stack.enter_context(mock.patch.object(
+                        runner, "lane_gap_attribution_rows", return_value=[]))
+                    stack.enter_context(mock.patch.object(
+                        runner, "goal_scorecard",
+                        return_value={"overall": "UNAVAILABLE"}))
+                    stack.enter_context(mock.patch.object(
+                        runner, "write_algorithm_ram_development_evidence",
+                        side_effect=ValueError(injected)))
+                    stack.enter_context(mock.patch.object(
+                        runner, "write_report", side_effect=lambda report:
+                        reports.append(json.loads(json.dumps(report)))))
+                    stack.enter_context(mock.patch.multiple(
+                        runner,
+                        print_bench=mock.Mock(),
+                        publish=mock.Mock(return_value="SYNCED_GIT: fixture"),
+                        write_failure_diagnostic=mock.Mock(return_value=None),
+                        refresh_history=mock.Mock(
+                            return_value="NOT UPDATED: fixture")))
+                    physical_selector = stack.enter_context(
+                        mock.patch.object(runner.subprocess, "run"))
+                    stack.enter_context(mock.patch.object(
+                        runner.sys, "stdin",
+                        mock.Mock(isatty=lambda: True)))
+                    stack.enter_context(mocked_main_sync(source_sha))
+                    console = stack.enter_context(
+                        contextlib.redirect_stdout(OperatorConsole()))
+                    self.assertEqual(runner._run_qualification(
+                        mock.Mock(kdir="/unused", tier="algorithm"),
+                        {"status": "PASS", "reason": "fixture",
+                         "source_sha": source_sha, "head_sha": source_sha}), 2)
+                physical_selector.assert_not_called()
+                self.assertEqual(len(reports), 2)
+                self.assertEqual([stage["status"] for stage in reports[1]["stages"]],
+                                 ["PASS"] * 5)
+                self.assertEqual(reports[1]["algorithm_real_swap"], {
+                    "overall": "NOT_RUN", "reason": reason})
+                self.assertIn("phase=before_physical_selector gate=ram_evidence "
+                              f"reason={reason} mutation=not_started",
+                              console.getvalue())
+                self.assertIn("selector not invoked by this run",
+                              console.getvalue())
+                self.assertNotIn("/home/operator/", console.getvalue())
+                self.assertNotIn("recovery_state=unverified", console.getvalue())
+
     def test_official_algorithm_tier_promotes_only_verified_physical_debug(self):
         """Exercise the real make-test runner boundary without device access."""
         self.assert_official_physical_debug(readback=False)

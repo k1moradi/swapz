@@ -2912,7 +2912,13 @@ push and reconcile local/canonical `main` before entering physical admission;
 a failed report write, push, archive-only publication or main reconciliation
 must skip the physical helper and retain `NOT_RUN`. A report-only main advance
 is accepted by the existing exact-source physical admission gate, but a source
-advance or changed ownership is not. After the optional trial returns,
+advance or changed ownership is not. If a source change prevents the private
+RAM-evidence writer from completing, the official console must report
+`source_advanced_after_ram` at `before_physical_selector`, with no selector
+invocation, no implied device mutation, and no recovery-state claim. Unexpected
+evidence errors remain identity-free and fail closed. Once the physical selector
+has started, a missing authenticated diagnostic must retain the existing
+unverified-recovery caution. After the optional trial returns,
 publish the final result normally, retaining physical diagnostic/failure
 precedence; the early checkpoint never certifies physical PASS. Rootless
 regressions must prove publication precedes a simulated terminal loss and

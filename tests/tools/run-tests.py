@@ -12617,6 +12617,10 @@ def _run_qualification(args, sync_result):
             physical_diagnostic = None
             physical_source_admission = None
             physical_private_log = None
+            # A failed evidence write cannot start the physical selector.
+            # Once the selector is called, its exit alone cannot prove cleanup.
+            physical_selector_started = False
+            pretrial_evidence_refusal = None
             try:
                 evidence_path, evidence_nonce = (
                     write_algorithm_ram_development_evidence(result))
@@ -12629,6 +12633,7 @@ def _run_qualification(args, sync_result):
                 # No child stderr or privileged host identifiers reach Git.
                 with tempfile.TemporaryFile(mode="w+t",
                                             encoding="utf-8") as error_stream:
+                    physical_selector_started = True
                     physical_trial = subprocess.run(
                         [sys.executable, "-B",
                          str(ROOT / "tests/tools/algorithm-physical.py")],
@@ -12654,9 +12659,23 @@ def _run_qualification(args, sync_result):
                             physical_source_admission = (
                                 parse_algorithm_source_admission_diagnostic(
                                     physical_error_output))
-            except (OSError, subprocess.SubprocessError, ValueError):
-                print("PHYSICAL_ALGORITHM_REAL_SWAP=BLOCKED "
-                      "reason=algorithm_ram_evidence_unavailable", flush=True)
+            except (OSError, subprocess.SubprocessError, ValueError) as error:
+                if not physical_selector_started:
+                    # Only this exact source-defined error is eligible for
+                    # attribution. Never echo arbitrary exception text, paths,
+                    # Git output, host identifiers, or privileged stderr.
+                    pretrial_evidence_refusal = (
+                        "source_advanced_after_ram"
+                        if isinstance(error, ValueError) and str(error) ==
+                        "algorithm RAM evidence source changed after qualification"
+                        else "algorithm_ram_evidence_unavailable")
+                    print("PHYSICAL_ALGORITHM_REAL_SWAP=BLOCKED "
+                          f"reason={pretrial_evidence_refusal} "
+                          "phase=before_physical_selector", flush=True)
+                else:
+                    print("PHYSICAL_ALGORITHM_REAL_SWAP=BLOCKED "
+                          "reason=physical_selector_execution_unavailable",
+                          flush=True)
                 physical_exit = 2
             finally:
                 if evidence_path is not None:
@@ -12668,6 +12687,9 @@ def _run_qualification(args, sync_result):
             if physical_private_log is not None:
                 print("  Physical private failure diagnostics: "
                       f"{physical_private_log} (mode 0600)", flush=True)
+            elif pretrial_evidence_refusal is not None:
+                print("  Physical private failure diagnostics: NOT_APPLICABLE; "
+                      "selector not invoked", flush=True)
             elif physical_exit:
                 print("  Physical private failure diagnostics: UNAVAILABLE; "
                       f"original_exit={physical_exit}", flush=True)
@@ -12733,7 +12755,15 @@ def _run_qualification(args, sync_result):
                     "overall": "NOT_RUN",
                     "reason": "physical_trial_declined_or_blocked",
                 }
-                if physical_source_admission is not None:
+                if pretrial_evidence_refusal is not None:
+                    result["algorithm_real_swap"]["reason"] = (
+                        pretrial_evidence_refusal)
+                    print(
+                        "  Physical admission first refusal: "
+                        "phase=before_physical_selector gate=ram_evidence "
+                        f"reason={pretrial_evidence_refusal} "
+                        "mutation=not_started", flush=True)
+                elif physical_source_admission is not None:
                     result["algorithm_real_swap"]["reason"] = (
                         physical_source_admission["reason"])
                     result["algorithm_real_swap"]["diagnostic"] = (
@@ -12769,9 +12799,13 @@ def _run_qualification(args, sync_result):
                         f"original_exit={physical_exit} "
                         "recovery_state=unverified", flush=True)
                 print_physical_trial_result("NOT RUN", physical_duration, progress_table)
-                print("  Physical trial disposition: NOT QUALIFIED; "
-                      "verify same-boot recovery before another trial",
-                      flush=True)
+                if pretrial_evidence_refusal is not None:
+                    print("  Physical trial disposition: NOT QUALIFIED; "
+                          "selector not invoked by this run", flush=True)
+                else:
+                    print("  Physical trial disposition: NOT QUALIFIED; "
+                          "verify same-boot recovery before another trial",
+                          flush=True)
         elif interactive_physical_trial:
             # A successful local RAM run is not permission to start physical
             # work without a canonical source-bound report checkpoint.
