@@ -370,42 +370,56 @@ def check_plan(trace_path, manifest, fixture_pages):
         raise ValueError("invalid persistent-write manifest")
     latest = [prefill_fixture_index(manifest, i, fixture_pages)
               for i in range(manifest["logical_pages"])]
-    for first in range(0, total, manifest["qd"]):
-        wave = rows[first:first + manifest["qd"]]
-        if len(set(row["page"] for row in wave)) != len(wave):
-            raise ValueError("two in-flight operations touch the same logical page")
-        for pos, row in enumerate(wave):
-            seq = first + pos
-            phase = "warmup" if seq < manifest["warmup_ops"] else "measure"
-            if row["seq"] != seq or row["wave"] != first // manifest["qd"] or row["phase"] != phase:
+    queue_depth = manifest["qd"]
+    warmup_operations = manifest["warmup_ops"]
+    writer_pages = manifest["writer_pages"]
+    reader_start = manifest["reader_start"]
+    reader_end = reader_start + manifest["reader_pages"]
+    logical_pages = len(latest)
+    wave_pages = set()
+    for first in range(0, total, queue_depth):
+        # Check the entire wave for overlapping pages before applying any
+        # WRITE. This also keeps duplicate-page rejection ahead of per-event
+        # validation, preserving the original fail-closed error precedence.
+        wave_pages.clear()
+        for sequence in range(first, first + queue_depth):
+            page = rows[sequence]["page"]
+            if page in wave_pages:
+                raise ValueError("two in-flight operations touch the same logical page")
+            wave_pages.add(page)
+        wave_index = first // queue_depth
+        for position in range(queue_depth):
+            sequence = first + position
+            row = rows[sequence]
+            phase = "warmup" if sequence < warmup_operations else "measure"
+            if (row["seq"] != sequence or row["wave"] != wave_index or
+                    row["phase"] != phase):
                 raise ValueError("operation ordering/phase mismatch")
-            page, fi = row["page"], row["fixture"]
-            if not 0 <= page < len(latest) or not 0 <= fi < fixture_pages:
+            page, fixture_index = row["page"], row["fixture"]
+            if not 0 <= page < logical_pages or not 0 <= fixture_index < fixture_pages:
                 raise ValueError("out-of-range page / fixture index")
             if replay_mode == "persistent-write" and (
-                    row.get("lane") != pos or row["op"] != "W" or
-                    page % manifest["qd"] != pos):
+                    row.get("lane") != position or row["op"] != "W" or
+                    page % queue_depth != position):
                 raise ValueError("persistent-write lane ownership/order mismatch")
-            if lane_mixed and (row.get("lane") != pos or
-                               (row["op"] == "W" and page % manifest["qd"] != pos)):
+            if lane_mixed and (row.get("lane") != position or
+                               (row["op"] == "W" and page % queue_depth != position)):
                 raise ValueError("mixed-lane ownership/order mismatch")
-            if stripe_partitionable and page % manifest["qd"] != pos:
+            if stripe_partitionable and page % queue_depth != position:
                 raise ValueError("stripe-partitionable page escaped its lane")
             if row["op"] == "W":
-                if page >= manifest["writer_pages"]:
+                if page >= writer_pages:
                     raise ValueError("write escaped allowed logical region")
+                # All in-flight pages are distinct, so an in-wave READ cannot
+                # see this update. The separate final-map pass is unnecessary.
+                latest[page] = fixture_index
             elif row["op"] == "R":
-                if not manifest["reader_start"] <= page < (
-                    manifest["reader_start"] + manifest["reader_pages"]
-                ):
+                if not reader_start <= page < reader_end:
                     raise ValueError("read escaped allowed logical region")
-                if fi != latest[page]:
+                if fixture_index != latest[page]:
                     raise ValueError("read expectation violates latest-generation oracle")
             else:
                 raise ValueError("unsupported operation")
-        for row in wave:
-            if row["op"] == "W":
-                latest[row["page"]] = row["fixture"]
     return rows, latest
 
 

@@ -1780,6 +1780,73 @@ class PairReplayContract(unittest.TestCase):
                 self.assertNotIn("BENCH_IO_PHASE=off:mixed", rejected.stderr)
                 self.assertFalse(forbidden.exists())
 
+    def test_wave_validation_keeps_duplicate_gate_and_latest_generation(self):
+        import runpy
+
+        validate = runpy.run_path(str(SCRIPT))["check_plan"]
+        manifest = {
+            "warmup_ops": 2, "measure_ops": 6, "qd": 2,
+            "logical_pages": 6, "writer_pages": 2,
+            "reader_start": 0, "reader_pages": 6,
+            "layout": "same-region", "read_pct": 50, "iops": 0,
+            "replay_mode": "qd-waves",
+        }
+        operations = (
+            ("W", 0, 1), ("R", 3, 3),  # Warmup applies W0.
+            ("R", 0, 1), ("W", 1, 2),  # Next wave sees W0.
+            ("W", 0, 0), ("R", 1, 2),  # Next wave sees W1.
+            ("R", 0, 0), ("R", 1, 2),  # Final wave sees W0 and W1.
+        )
+        rows = [
+            {
+                "seq": sequence,
+                "wave": sequence // manifest["qd"],
+                "phase": "warmup" if sequence < manifest["warmup_ops"] else "measure",
+                "op": operation, "page": page, "fixture": fixture_index,
+            }
+            for sequence, (operation, page, fixture_index)
+            in enumerate(operations)
+        ]
+        with tempfile.TemporaryDirectory() as directory:
+            trace = Path(directory) / "trace.jsonl"
+
+            def validate_rows(candidate):
+                serialized = "".join(
+                    json.dumps(row, sort_keys=True, separators=(",", ":")) + "\n"
+                    for row in candidate).encode("utf-8")
+                trace.write_bytes(serialized)
+                bound_manifest = {
+                    **manifest, "trace_sha256": hashlib.sha256(serialized).hexdigest()
+                }
+                return validate(trace, bound_manifest, 6)
+
+            decoded, final_map = validate_rows(rows)
+            self.assertEqual(decoded, rows)
+            self.assertEqual(final_map, [0, 2, 2, 3, 4, 5])
+
+            # The duplicate-page gate must run BEFORE phase/index validation,
+            # just as before; an invalid second record cannot sneak through.
+            duplicate = copy.deepcopy(rows)
+            duplicate[1]["page"] = duplicate[0]["page"]
+            duplicate[1]["phase"] = "measure"
+            with self.assertRaisesRegex(ValueError, "two in-flight operations"):
+                validate_rows(duplicate)
+
+            stale_read = copy.deepcopy(rows)
+            stale_read[2]["fixture"] = 0
+            with self.assertRaisesRegex(ValueError, "latest-generation oracle"):
+                validate_rows(stale_read)
+
+            bad_phase = copy.deepcopy(rows)
+            bad_phase[2]["phase"] = "warmup"
+            with self.assertRaisesRegex(ValueError, "ordering/phase mismatch"):
+                validate_rows(bad_phase)
+
+            bad_page = copy.deepcopy(rows)
+            bad_page[6]["page"] = 6
+            with self.assertRaisesRegex(ValueError, "out-of-range page"):
+                validate_rows(bad_page)
+
     def test_pair_exact_bytes_and_ordered_wave_oracle(self):
         for layout in ("disjoint", "same-region"):
             with self.subTest(layout=layout), tempfile.TemporaryDirectory() as temp:

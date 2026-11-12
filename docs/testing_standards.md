@@ -6683,6 +6683,22 @@ startup, trace staging and latency-result serialization remain outside the
 timed interval. The helper is an internal test binary under `build/tests/`;
 it creates no new public test command.
 
+Canonical trace validation runs independently inside every replay arm,
+even for an immutable plan prepared once for a matched pair. It may reuse a
+single in-flight logical-page set across QD waves and index the validated
+rows directly, rather than allocating a set and list slice per wave.
+All page-duplicate checks for a wave must complete **before** applying any
+WRITE or checking its individual phase/geometry; maintain this error
+precedence for malformed traces. Only after distinct-page ownership is
+proven may the latest-generation map update inline with validated WRITE
+records: no in-wave READ can then observe another in-wave WRITE to the
+same page. Retain the canonical trace SHA, precise phase/order checks,
+region and stripe-lane restrictions, previous-wave READ oracle and final
+image map; do not share mutable validation state between off and swapz
+processes. Rootless tests must confirm multiple-wave generations, exact
+post-map parity, duplicate-before-phase rejection, stale READ rejection
+and out-of-range/phase failures.
+
 The internal Python-to-native replay plan handoff uses one fixed, bounded
 little-endian binary layout, solely to remove redundant text formatting and
 `sscanf` work from every loaded pair. It has a 16-byte header (eight-byte

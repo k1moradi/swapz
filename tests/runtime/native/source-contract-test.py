@@ -7807,6 +7807,25 @@ int main(void)
             "def test_write_qd_batch_matches_individual_immutable_plans",
             fixtures)
 
+    def test_wave_plan_validation_reuses_page_set_and_preserves_oracle(self):
+        replay = (ROOT / "tests/runtime/benchmark/io-replay.py").read_text()
+        fixtures = (ROOT / "tests/runtime/benchmark/io-replay-test.py").read_text()
+        validator = replay.split("def check_plan(", 1)[1].split(
+            "\ndef resolve_owned_nullblk(", 1)[0]
+        self.assertIn("wave_pages = set()", validator)
+        self.assertIn("wave_pages.clear()", validator)
+        self.assertIn("for sequence in range(first, first + queue_depth):",
+                      validator)
+        self.assertIn("if page in wave_pages:", validator)
+        self.assertIn("for position in range(queue_depth):", validator)
+        self.assertIn("latest[page] = fixture_index", validator)
+        self.assertNotIn("wave = rows[first:first +", validator)
+        self.assertLess(validator.index("if page in wave_pages:"),
+                        validator.index("latest[page] = fixture_index"))
+        self.assertIn(
+            "def test_wave_validation_keeps_duplicate_gate_and_latest_generation",
+            fixtures)
+
     def test_plan_image_hashes_stream_and_prefill_readback_stays_exact(self):
         replay = (ROOT / "tests/runtime/benchmark/io-replay.py").read_text()
         tests = (ROOT / "tests/runtime/benchmark/io-replay-test.py").read_text()
