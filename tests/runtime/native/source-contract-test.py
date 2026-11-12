@@ -7760,6 +7760,28 @@ int main(void)
             "def test_native_binary_plan_has_exact_bytes_and_rejects_corruption",
             tests)
 
+    def test_loaded_mixed_and_pressure_plans_keep_independent_hashes(self):
+        replay = (ROOT / "tests/runtime/benchmark/io-replay.py").read_text()
+        loaded = (ROOT / "tests/tools/test-loaded.sh").read_text()
+        fixtures = (ROOT / "tests/runtime/benchmark/io-replay-test.py").read_text()
+        for token in (
+                "def prepare_loaded_plan_variants(args):",
+                'variants = (\n        (root / "plan", 1024, 16384),',
+                '(root / "plan-id36", 128, 2048)',
+                'variant = argparse.Namespace(**vars(args))',
+                'variant.warmup_ops = warmup_ops',
+                'variant.measure_ops = measure_ops',
+                'prepare(variant)'):
+            self.assertIn(token, replay)
+        self.assertIn("--loaded-plan-variants", loaded)
+        self.assertIn(
+            '--fixture "$shared_plan/fixture.bin" --output-dir "$shared_plan"',
+            loaded)
+        self.assertNotIn('--output-dir "$shared_plan/plan-id36"', loaded)
+        self.assertIn(
+            "def test_loaded_qd32_batch_matches_both_independent_immutable_plans",
+            fixtures)
+
     def test_write_qd_variants_preserve_separate_plan_hashes(self):
         replay = (ROOT / "tests/runtime/benchmark/io-replay.py").read_text()
         loaded = (ROOT / "tests/tools/test-loaded.sh").read_text()

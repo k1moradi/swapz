@@ -307,6 +307,40 @@ def prepare_write_qd_variants(args):
         prepare(variant)
 
 
+def prepare_loaded_plan_variants(args):
+    """Prepare both existing QD32 loaded traces in one bounded interpreter.
+
+    The full mixed plan and the shorter ID36 pressure plan each retain a
+    fresh RNG, independent trace/manifest digests, and separate output files.
+    Neither replay arm, device admission nor watchdog shares process state.
+    """
+    if (args.write_qd_variants or args.sustained_write or args.mixed_lanes or
+            args.stripe_partitionable or args.layout != "disjoint" or
+            args.qd != 32 or args.read_pct != 25 or args.iops != 0 or
+            args.logical_pages != 1024 or args.writer_pages != 256 or
+            args.reader_start != 512 or args.reader_pages != 256 or
+            args.warmup_ops != 1024 or args.measure_ops != 16384 or
+            args.seed != 0x51A0A9):
+        raise ValueError("loaded-plan batch requires the fixed QD32 mixed inputs")
+    root = Path(args.output_dir)
+    if not root.is_dir() or root.is_symlink():
+        raise ValueError("loaded-plan batch requires an ordinary output directory")
+    variants = (
+        (root / "plan", 1024, 16384),
+        (root / "plan-id36", 128, 2048),
+    )
+    # Reject ALL collisions, including symlinks, before creating either
+    # variant; never reuse a plan or silently accept partial preparation.
+    if any(path.exists() or path.is_symlink() for path, _, _ in variants):
+        raise ValueError("refusing to overwrite a loaded-plan variant")
+    for path, warmup_ops, measure_ops in variants:
+        variant = argparse.Namespace(**vars(args))
+        variant.output_dir = str(path)
+        variant.warmup_ops = warmup_ops
+        variant.measure_ops = measure_ops
+        prepare(variant)
+
+
 def check_plan(trace_path, manifest, fixture_pages):
     data = Path(trace_path).read_bytes()
     if sha(data) != manifest["trace_sha256"]:
@@ -2643,6 +2677,8 @@ def main():
                       help="write-only persistent lane workers without per-wave barriers")
     prep.add_argument("--write-qd-variants", action="store_true",
                       help=argparse.SUPPRESS)
+    prep.add_argument("--loaded-plan-variants", action="store_true",
+                      help=argparse.SUPPRESS)
     prep.add_argument("--mixed-lanes", choices=("waves", "persistent"),
                       help="private matched mixed traces with lane-owned writes and disjoint reads")
     prep.add_argument("--stripe-partitionable", action="store_true",
@@ -2680,7 +2716,9 @@ def main():
             private_memory.protect_private_memory()
             os.environ["SWAPZ_PRIVATE_FIXTURE"] = "1"
         if args.command == "prepare":
-            if args.write_qd_variants:
+            if args.loaded_plan_variants:
+                prepare_loaded_plan_variants(args)
+            elif args.write_qd_variants:
                 prepare_write_qd_variants(args)
             else:
                 prepare(args)

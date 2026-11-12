@@ -738,6 +738,92 @@ class PairReplayContract(unittest.TestCase):
                 "reason=invalid replay input accepted")
         return run
 
+    def test_loaded_qd32_batch_matches_both_independent_immutable_plans(self):
+        # Both members retain their own RNG and manifest. The batch merely
+        # saves a Python startup, never sharing device/replay state.
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            fixture = root / "fixture.bin"
+            fixture.write_bytes(b"".join(
+                bytes([index + 1]) * PAGE for index in range(8)))
+            common = (
+                "--fixture", fixture, "--logical-pages", 1024,
+                "--writer-pages", 256, "--reader-start", 512,
+                "--reader-pages", 256, "--qd", 32, "--read-pct", 25,
+                "--iops", 0, "--seed", "0x51a0a9",
+            )
+            independent = root / "independent"
+            independent.mkdir()
+            batch = root / "batch"
+            batch.mkdir()
+            for name, warmup, measure in (
+                    ("plan", 1024, 16384), ("plan-id36", 128, 2048)):
+                self.run_cmd(
+                    "prepare", *common, "--warmup-ops", warmup,
+                    "--measure-ops", measure,
+                    "--output-dir", independent / name)
+            prepared = self.run_cmd(
+                "prepare", *common, "--warmup-ops", 1024,
+                "--measure-ops", 16384, "--output-dir", batch,
+                "--loaded-plan-variants")
+            emitted = tuple(json.loads(line) for line in
+                            prepared.stdout.splitlines())
+            self.assertEqual(
+                tuple((entry["warmup_ops"], entry["measure_ops"])
+                      for entry in emitted),
+                ((1024, 16384), (128, 2048)))
+            for name in ("plan", "plan-id36"):
+                for filename in ("trace.jsonl", "manifest.json"):
+                    with self.subTest(name=name, filename=filename):
+                        relative = Path(name) / filename
+                        self.assertEqual(
+                            (batch / relative).read_bytes(),
+                            (independent / relative).read_bytes())
+
+            for blocked_member in ("plan", "plan-id36"):
+                with self.subTest(blocked_member=blocked_member):
+                    refused = root / ("refused-" + blocked_member)
+                    refused.mkdir()
+                    (refused / blocked_member).symlink_to(
+                        batch / blocked_member, target_is_directory=True)
+                    self.run_cmd(
+                        "prepare", *common, "--warmup-ops", 1024,
+                        "--measure-ops", 16384, "--output-dir", refused,
+                        "--loaded-plan-variants", success=False)
+                    other = "plan-id36" if blocked_member == "plan" else "plan"
+                    self.assertFalse((refused / other).exists())
+
+            for option, value in (
+                    ("--qd", 16), ("--read-pct", 0), ("--iops", 10),
+                    ("--warmup-ops", 128), ("--measure-ops", 2048),
+                    ("--seed", "0x51a0aa")):
+                with self.subTest(option=option):
+                    refused = root / ("bad-" + option[2:])
+                    refused.mkdir()
+                    changed = list(common)
+                    if option in changed:
+                        changed[changed.index(option) + 1] = value
+                    else:
+                        changed.extend((option, value))
+                    if option != "--warmup-ops":
+                        changed.extend(("--warmup-ops", 1024))
+                    if option != "--measure-ops":
+                        changed.extend(("--measure-ops", 16384))
+                    self.run_cmd(
+                        "prepare", *changed, "--output-dir", refused,
+                        "--loaded-plan-variants", success=False)
+                    self.assertFalse((refused / "plan").exists())
+                    self.assertFalse((refused / "plan-id36").exists())
+            mutually_exclusive = root / "mutually-exclusive"
+            mutually_exclusive.mkdir()
+            self.run_cmd(
+                "prepare", *common, "--warmup-ops", 1024,
+                "--measure-ops", 16384,
+                "--output-dir", mutually_exclusive,
+                "--loaded-plan-variants", "--write-qd-variants",
+                success=False)
+            self.assertFalse((mutually_exclusive / "plan").exists())
+
     def test_write_qd_batch_matches_individual_immutable_plans(self):
         # The batch is orchestration only. Every per-QD canonical manifest
         # and trace must match a separately seeded legacy prepare process.

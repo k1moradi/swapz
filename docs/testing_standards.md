@@ -6605,6 +6605,21 @@ checks unchanged. Rootless tests must compare each batch-produced manifest
 and trace byte-for-byte against the independent single-plan commands and
 exercise pre-existing-output and invalid-geometry failures.
 
+The main mixed-QD32 loaded benchmark plan and its shorter ID36
+forward-progress plan may be prepared in one private Python interpreter.
+This is **preparation-only**: invoke the unchanged deterministic `prepare()`
+once for each separately named `plan` and `plan-id36` output, resetting the
+seed and maintaining the exact original 1024/16384 and 128/2048 warmup/measure
+counts, immutable trace bytes, independent manifests, source hashes and
+full oracle checks. Only accept the fixed unpaced QD32 mixed layout and
+standard seed/regions; reject incompatible options or a pre-existing plan
+path (including symlinks) **before** creating either output. Do not batch
+RAW/off or swapz replay processes, combine their device admission, weaken
+their per-arm watchdogs, or suppress loaded packed-read qualification.
+Rootless tests must compare both outputs byte-for-byte with separately
+prepared plans and prove invalid geometry, conflicting batch modes and
+pre-existing paths fail closed without partial output.
+
 The shared-plan fixture snapshot should classify explicitly all-RAW content
 inside the same private-memory-protected copy process, from its snapshotted
 regular-file metadata. This replaces only the redundant per-pair Python

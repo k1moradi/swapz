@@ -256,20 +256,17 @@ python3 -B tests/runtime/benchmark/anon-page-fixture.py \
     --output-prefix "$shared_plan/fixture" --pages 128 \
     --seed 0x51a0a9 --weights medium=100
 printf '%s\n' 'START_LOADED_SHARED_BENCHMARK_PLAN=trace'
+# Prepare both immutable QD32 plans in one interpreter. Each still resets
+# its own seed and emits its own hashed trace/manifest; no arm shares replay
+# processes, device admission, snapshots, timeout, or final image oracle.
+# ID36 remains a short forward-progress/correctness gate, not a throughput
+# benchmark. Packed byte-exact reads remain enabled in that separate arm.
 python3 -B tests/runtime/benchmark/io-replay.py prepare \
-    --fixture "$shared_plan/fixture.bin" --output-dir "$shared_plan/plan" \
+    --fixture "$shared_plan/fixture.bin" --output-dir "$shared_plan" \
+    --loaded-plan-variants \
     --logical-pages 1024 --writer-pages 256 --reader-start 512 \
     --reader-pages 256 --qd 32 --read-pct 25 \
     --warmup-ops 1024 --measure-ops 16384 --iops 0
-# ID36 is a forward-progress/correctness gate, not a throughput benchmark.
-# Keep the same QD32 mixed geometry and immutable fixture, but shorten the
-# measured trace so CPU/memory contention cannot turn a fixed replay timeout
-# into the qualification result. Packed byte-exact reads remain enabled.
-python3 -B tests/runtime/benchmark/io-replay.py prepare \
-    --fixture "$shared_plan/fixture.bin" --output-dir "$shared_plan/plan-id36" \
-    --logical-pages 1024 --writer-pages 256 --reader-start 512 \
-    --reader-pages 256 --qd 32 --read-pct 25 \
-    --warmup-ops 128 --measure-ops 2048 --iops 0
 # Four immutable unpaced write-only plans reuse the identical fixture and
 # logical volume. Persistent lane-owned workers sustain offered QD without
 # per-I/O Future dispatch or an artificial barrier between completed writes.
