@@ -262,6 +262,7 @@ class AlgorithmPhysicalTest(unittest.TestCase):
         probe._git.side_effect = lambda *args: (
             "main" if args[0] == "symbolic-ref" else
             "" if args[0] == "status" else expected_head)
+        probe._has_non_report_worktree_changes.return_value = False
         probe._development_code_source_sha.return_value = qualified_source
         probe._require_development_canonical_main.side_effect = RuntimeError(
             "canonical main contains changed source after qualification")
@@ -289,6 +290,7 @@ class AlgorithmPhysicalTest(unittest.TestCase):
             probe._git.side_effect = lambda *args: (
                 "main" if args[0] == "symbolic-ref" else
                 " M tests/source.c" if args[0] == "status" else expected_head)
+            probe._has_non_report_worktree_changes.return_value = True
             probe._development_dirty_worktree_kinds.return_value = "tracked_source"
             self.assertEqual(
                 subject._canonical_source_preflight(arguments),
@@ -298,10 +300,10 @@ class AlgorithmPhysicalTest(unittest.TestCase):
             self.assertEqual(
                 subject._canonical_source_preflight(arguments),
                 "local_checkout_changed_kind_tracked_source_generated_report_untracked")
+            # The generated report does not block source admission by itself.
+            probe._has_non_report_worktree_changes.return_value = False
             probe._development_dirty_worktree_kinds.return_value = "generated_report"
-            self.assertEqual(
-                subject._canonical_source_preflight(arguments),
-                "local_checkout_changed_kind_generated_report")
+            self.assertIsNone(subject._canonical_source_preflight(arguments))
             probe._git.side_effect = lambda *args: (
                 "main" if args[0] == "symbolic-ref" else
                 "" if args[0] == "status" else
@@ -318,6 +320,7 @@ class AlgorithmPhysicalTest(unittest.TestCase):
             probe._git.side_effect = lambda *args: (
                 "main" if args[0] == "symbolic-ref" else
                 "?? private-file" if args[0] == "status" else expected_head)
+            probe._has_non_report_worktree_changes.return_value = True
             probe._development_dirty_worktree_kinds.return_value = "untracked"
             with mock.patch.object(
                     subject, "_emit_private_untracked_checkout_inventory"

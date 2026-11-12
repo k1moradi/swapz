@@ -6539,6 +6539,16 @@ committed to Git. Failure to write it cannot replace the first test failure.
 
 ### Generated report versus tracked source cleanliness
 
+The read-only physical preflight and the private development/official physical
+source gates exclude only the root `test_results.json` from Git worktree
+cleanliness, including staged and unstaged modifications. This exact exclusion
+is repeated immediately before any physical execution. Other tracked, staged
+or untracked changes still block. The generated report is never authoritative
+physical evidence merely because it was exempted from source cleanliness:
+the official evidence path validates report content, host/source identity and
+committed qualification history separately; the development path uses its
+independent nonce-bound fast-test or RAM evidence.
+
 `test_results.json` is the one generated overwriteable evidence file and is
 not tested source. The unprivileged loaded-test parent excludes only that exact
 root path from its tracked/staged source-cleanliness check before crossing the

@@ -363,10 +363,10 @@ def _canonical_source_preflight(algorithm_ram_evidence: list[str]) -> str | None
         specification.loader.exec_module(probe)
         if probe._git("symbolic-ref", "--quiet", "--short", "HEAD") != "main":
             return "local_checkout_not_main"
-        if probe._git("status", "--porcelain"):
+        if probe._has_non_report_worktree_changes():
             # Reuse the authoritative helper's finite, identity-free audit.
-            # A generated report or untracked file is not code, but the
-            # physical mutation gate still requires the whole tree clean.
+            # Only the generated root test report is exempt. Other untracked
+            # files and source changes still block the physical mutation gate.
             kinds = probe._development_dirty_worktree_kinds()
             if "untracked" in kinds.split(","):
                 _emit_private_untracked_checkout_inventory(probe)

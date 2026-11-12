@@ -999,8 +999,8 @@ def current_source_evidence():
     branch = _git("symbolic-ref", "--quiet", "--short", "HEAD")
     if branch != "main":
         raise ProbeError("physical smoke is restricted to main")
-    if _git("status", "--porcelain"):
-        raise ProbeError("worktree changes block physical smoke")
+    if _has_non_report_worktree_changes():
+        raise ProbeError("non-report worktree changes block physical smoke")
     head = _git("rev-parse", "HEAD")
     if head != _git("rev-parse", "origin/main"):
         raise ProbeError("local main must be synchronized with origin/main")
@@ -1217,6 +1217,18 @@ def _require_development_linux_abi():
             "physical development smoke requires little-endian 64-bit Linux with 4096-byte pages")
 
 
+def _has_non_report_worktree_changes():
+    """Test exact checkout cleanliness, excluding only the root generated report.
+
+    Include staged, unstaged and untracked paths. This is a source-admission
+    check, not a report-authentication check: official PASS reports still
+    undergo their own independent evidence validation.
+    """
+    return bool(_git(
+        "status", "--porcelain", "--untracked-files=all", "--",
+        ".", ":(top,exclude)test_results.json"))
+
+
 def _development_dirty_worktree_kinds():
     """Classify a failed clean-worktree gate without disclosing private paths.
 
@@ -1253,9 +1265,9 @@ def current_development_evidence(nonce, algorithm_ram_evidence=None,
     branch = _git("symbolic-ref", "--quiet", "--short", "HEAD")
     if branch != "main":
         raise ProbeError("physical development smoke is restricted to main")
-    if _git("status", "--porcelain"):
+    if _has_non_report_worktree_changes():
         raise ProbeError(
-            "worktree changes block physical development smoke: "
+            "non-report worktree changes block physical development smoke: "
             "kind=" + _development_dirty_worktree_kinds())
     head = _git("rev-parse", "HEAD")
     if head != _git("rev-parse", "origin/main"):
@@ -4605,7 +4617,7 @@ def run_probe(device_arg, confirm_arg, state_dir_arg, review_path,
                     evidence["helper_sha256"] or \
                     _git("rev-parse", "HEAD") != evidence["head"] or \
                     _git("rev-parse", "origin/main") != evidence["head"] or \
-                    _git("status", "--porcelain"):
+                    _has_non_report_worktree_changes():
                 raise ProbeError(
                     "main or the bound helper changed before physical execution")
             if development_only:

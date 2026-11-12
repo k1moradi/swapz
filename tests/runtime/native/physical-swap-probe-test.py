@@ -2709,6 +2709,7 @@ class PhysicalSwapProbeTests(unittest.TestCase):
         fake_probe._git.side_effect = lambda *arguments: (
             "main" if arguments[0] == "symbolic-ref" else
             "?? private/owner" if arguments[0] == "status" else "a" * 40)
+        fake_probe._has_non_report_worktree_changes.return_value = True
         fake_probe._development_dirty_worktree_kinds.return_value = "untracked"
         fake_specification = SimpleNamespace(loader=mock.Mock())
         with mock.patch.object(
@@ -2727,6 +2728,48 @@ class PhysicalSwapProbeTests(unittest.TestCase):
             inventory.assert_called_once_with(fake_probe)
             fake_probe._read_algorithm_ram_development_evidence.assert_not_called()
             fake_probe._require_development_canonical_main.assert_not_called()
+
+    def test_generated_report_does_not_dirty_physical_source_checkout(self):
+        # Exercise the real Git pathspec: only the root report is excluded,
+        # including when staged. Nested names and all other changes still fail.
+        with tempfile.TemporaryDirectory() as directory:
+            checkout = Path(directory)
+
+            def git(*arguments):
+                result = subprocess.run(
+                    ["git", "-C", str(checkout), *arguments],
+                    capture_output=True, text=True, check=False, timeout=10)
+                self.assertEqual(result.returncode, 0, result.stderr)
+                return result.stdout.strip()
+
+            git("init", "-q", "-b", "main")
+            git("config", "user.name", "Swapz Fixture")
+            git("config", "user.email", "fixture@example.invalid")
+            (checkout / "src").mkdir()
+            source = checkout / "src" / "test_results.json"
+            source.write_text("source bytes\n")
+            report = checkout / "test_results.json"
+            report.write_text('{"status":"old"}\n')
+            git("add", ".")
+            git("commit", "-q", "-m", "baseline")
+            with mock.patch.object(probe, "ROOT", checkout):
+                self.assertFalse(probe._has_non_report_worktree_changes())
+                report.write_text('{"status":"new"}\n')
+                self.assertFalse(probe._has_non_report_worktree_changes())
+                git("add", "test_results.json")
+                self.assertFalse(probe._has_non_report_worktree_changes())
+                source.write_text("different source bytes\n")
+                self.assertTrue(probe._has_non_report_worktree_changes())
+                source.write_text("source bytes\n")
+                self.assertFalse(probe._has_non_report_worktree_changes())
+                (checkout / "private-note.txt").write_text("not admitted\n")
+                self.assertTrue(probe._has_non_report_worktree_changes())
+                (checkout / "private-note.txt").unlink()
+                self.assertFalse(probe._has_non_report_worktree_changes())
+                source.write_text("staged source bytes\n")
+                git("add", "src/test_results.json")
+                source.write_text("source bytes\n")
+                self.assertTrue(probe._has_non_report_worktree_changes())
 
     def test_dirty_development_worktree_classifies_without_exposing_paths(self):
         # Diagnostics never allow admission or print source/report contents.
