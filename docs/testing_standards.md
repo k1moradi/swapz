@@ -2864,20 +2864,27 @@ admission gates still run independently before any physical mutation.
 Rootless tests must inspect the flushed question *before* a mocked input
 returns and prove no privileged helper starts without explicit `yes`.
 
-An archived same-source pretrial checkpoint may also authorize the
-*next* independent physical admission gates, but only when its source-defined
-`ARCHIVED_GIT` receipt matches the exact blob fingerprint captured before
-local main synchronization; the report-only archive and its single-parent
-canonical-restoration child must both be authenticated in the fetched
-current-main ancestry. Require an unchanged source SHA and clean aligned
-checkout, a report-only archive diff, canonical-restoration original-tree
-identity and exact expected commit messages. An archive notice alone, an
-unreachable or modified blob, an unavailable fetch, or a newer source
-revision never grants physical admission. Existing swap ownership, consent,
-source provenance and header safety remain independent gates. Rootless
-tests must exercise a competing same-source publisher with a private bare
-remote plus forged receipt/blob/source/restoration failures. `RESUME=1`
-continues to prohibit physical admission regardless of archive status.
+An archived source-bound pretrial checkpoint may authenticate its own
+publication before the *next* independent physical admission gates, but only
+when its source-defined `ARCHIVED_GIT` receipt matches the exact blob
+fingerprint captured before local main synchronization; the report-only
+archive and its single-parent canonical-restoration child must both be
+authenticated in fetched current-main ancestry. Require clean aligned main,
+a report-only archive diff, canonical-restoration original-tree identity,
+and exact expected commit messages. The archive-authentication step must
+not compare current source SHA with the earlier tested source: later source
+commits cannot retroactively invalidate an immutable published report.
+An archive notice alone, an unreachable or modified blob, or unavailable
+Git history never authenticates the checkpoint. **Authentication does not
+qualify newer source for physical use.** Privileged physical admission
+independently binds the current source, the exact completed RAM evidence
+and build artifact digests before device mutation; a newer source or
+changed artifact still blocks. Swap ownership, consent, scope and header
+safety remain separate gates. Rootless tests must exercise a competing
+same-source publisher with a private bare remote, forged receipt/blob/
+source/restoration failures, and a later source commit that preserves archive
+authentication but not physical source qualification. `RESUME=1` continues
+to prohibit physical admission regardless of archive status.
 
 When interactive algorithm-tier `make test` completes all five RAM stages,
 the runner must atomically write and publish a source-bound

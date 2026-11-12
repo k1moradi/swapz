@@ -11092,9 +11092,11 @@ def archived_pretrial_checkpoint_refusal(notice, source_sha, report_blob_sha):
     """Authenticate our immutable archived report, not merely its Git notice.
 
     A different host may already own canonical test_results.json. This gate
-    admits only the exact pretrial blob published by this host in a reachable
-    report-only commit followed by its checked canonical restoration. The
-    existing current-source and physical-device gates still run afterward.
+    authenticates only the exact pretrial blob published by this host in a
+    reachable report-only commit followed by its checked canonical restoration.
+    It does not decide whether newer source is qualified for physical use:
+    the privileged physical helper independently binds the RAM evidence to
+    current source and build artifacts before any device mutation.
     """
     pattern = (r"ARCHIVED_GIT: https://github[.]com/" + re.escape(REPO) +
                r"/blob/(?P<archive>[0-9a-f]{40})/" + re.escape(GIT_RESULT) +
@@ -11113,10 +11115,13 @@ def archived_pretrial_checkpoint_refusal(notice, source_sha, report_blob_sha):
     run = _sync_git_runner()
     current_head = _git_head(run, "HEAD")
     tracking_head = _git_head(run, "refs/remotes/origin/main")
-    if (current_head is None or current_head != tracking_head or
-            git_sha() != source_sha or
-            tracked_source_checkout_preflight() is not None):
-        return "source_or_main_not_aligned"
+    # Source identity belongs to the independent privileged physical gate.
+    # Report-only publication and later source commits cannot invalidate the
+    # authenticity of an already published immutable RAM checkpoint.
+    if current_head is None or current_head != tracking_head:
+        return "main_not_aligned"
+    if tracked_source_checkout_preflight() is not None:
+        return "tracked_source_dirty"
 
     archived_sha = receipt.group("archive")
     restoration_sha = receipt.group("restoration")

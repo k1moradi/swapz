@@ -9299,6 +9299,45 @@ class ReportContract(unittest.TestCase):
                         "ARCHIVED_GIT: history-only", source_sha,
                         pretrial_blob),
                     "invalid_archive_receipt")
+
+                # Archive authentication is not a second physical source gate.
+                # A later code commit cannot rewrite or invalidate this
+                # already-verified immutable checkpoint. The privileged
+                # physical path separately refuses stale source/artifacts.
+                (checkout / "source.c").write_text("new source after archive\n")
+                git("add", "source.c", cwd=checkout)
+                git("commit", "-m", "Source advanced after archive", cwd=checkout)
+                newer_source = git(
+                    "rev-parse", "HEAD", cwd=checkout).stdout.strip()
+                self.assertNotEqual(newer_source, source_sha)
+                git("--git-dir", str(origin), "fetch", "--no-tags",
+                    str(checkout), "main:refs/heads/main", cwd=sandbox)
+                git("fetch", "--no-tags", "origin", cwd=checkout)
+                self.assertEqual(runner.git_sha(), newer_source)
+                self.assertIsNone(runner.archived_pretrial_checkpoint_refusal(
+                    second_notice, source_sha, pretrial_blob))
+                self.assertEqual(
+                    runner.archived_pretrial_checkpoint_refusal(
+                        second_notice, source_sha, "f" * 40),
+                    "archive_blob_or_restoration_mismatch")
+
+                # Checkout and tracking-main alignment, and clean tracked
+                # source, still fail closed without inspecting private paths.
+                git("update-ref", "refs/remotes/origin/main",
+                    remote_head, cwd=checkout)
+                self.assertEqual(
+                    runner.archived_pretrial_checkpoint_refusal(
+                        second_notice, source_sha, pretrial_blob),
+                    "main_not_aligned")
+                git("fetch", "--no-tags", "origin", cwd=checkout)
+                (checkout / "source.c").write_text("uncommitted source\n")
+                self.assertEqual(
+                    runner.archived_pretrial_checkpoint_refusal(
+                        second_notice, source_sha, pretrial_blob),
+                    "tracked_source_dirty")
+                git("restore", "--", "source.c", cwd=checkout)
+                self.assertIsNone(runner.archived_pretrial_checkpoint_refusal(
+                    second_notice, source_sha, pretrial_blob))
             finally:
                 runner.ROOT, runner.REPORT = old_root, old_report
 
