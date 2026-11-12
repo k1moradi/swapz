@@ -7661,6 +7661,18 @@ int main(void)
         self.assertIn("PASS_LZ4_ACCELERATION_AB", runner)
         self.assertIn('matched_value_pairs(\n            sessions, "lz4_acceleration", 1, 4)', runner)
 
+    def test_owned_ram_fixture_copy_reports_raw_class_in_one_process(self):
+        pair = (ROOT / "tests/tools/benchmark-owned-pair.sh").read_text()
+        helper = (ROOT / "tests/runtime/benchmark/private_memory.py").read_text()
+        self.assertIn("--report-all-raw", pair)
+        self.assertIn('case "$fixture_class" in', pair)
+        self.assertIn("ALL_RAW_FIXTURE=0) ;;", pair)
+        self.assertIn("ALL_RAW_FIXTURE=1)", pair)
+        self.assertIn("PACKED_READ_OMITTED=all_raw_fixture", pair)
+        self.assertNotIn("PYRAW", pair)
+        self.assertIn('fixture_is_all_raw(args.destination)', helper)
+        self.assertIn("type(raw_pages) is int and raw_pages == pages", helper)
+
     def test_owned_ram_config_reads_keep_full_verified_model(self):
         pair = (ROOT / "tests/tools/benchmark-owned-pair.sh").read_text()
         # Keep the original two-phase sysfs validation, but avoid spawning a

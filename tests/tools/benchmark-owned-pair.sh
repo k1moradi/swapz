@@ -861,29 +861,28 @@ if [[ -n $SHARED_PLAN ]]; then
     # generic copy process read representative bytes outside the privacy gate.
     private_copy_args=()
     (( PRIVATE_FIXTURE )) && private_copy_args+=(--private)
-    python3 -B tests/runtime/benchmark/private_memory.py copy-fixture \
+    # The copy helper already loads the fixture's privacy metadata. Ask it
+    # to classify the snapshotted manifest too, avoiding a second interpreter.
+    fixture_class="$(python3 -B tests/runtime/benchmark/private_memory.py copy-fixture \
         --source "$SHARED_PLAN/fixture.bin" \
-        --destination "$SESSION/fixture.bin" "${private_copy_args[@]}"
+        --destination "$SESSION/fixture.bin" \
+        --report-all-raw "${private_copy_args[@]}")" ||
+        fail 'fixture snapshot or content classification failed'
+    case "$fixture_class" in
+        ALL_RAW_FIXTURE=0) ;;
+        ALL_RAW_FIXTURE=1)
+            # All-RAW pages have no packed representation to qualify; the
+            # complete image and mixed trace still receive their exact oracle.
+            PACKED_READ=0
+            note 'PACKED_READ_OMITTED=all_raw_fixture'
+            ;;
+        *) fail 'fixture copy emitted invalid content classification' ;;
+    esac
     FIXTURE_PATH="$SESSION/fixture.bin"
     (( PRIVATE_FIXTURE )) && export SWAPZ_PRIVATE_FIXTURE=1
     cp -- "$plan_dir/trace.jsonl" "$SESSION/plan/trace.jsonl"
     cp -- "$plan_dir/manifest.json" "$SESSION/plan/manifest.json"
     note 'IMMUTABLE_PLAN_REUSED=1'
-    # An all-RAW development fixture has no compressed pack to populate.
-    # The mixed replay still verifies the complete image. Official medium and
-    # delta-positive fixtures retain their required packed-read qualification.
-    if python3 -B - "$SESSION/fixture.json" <<'PYRAW'
-import json
-import sys
-from pathlib import Path
-fixture = json.loads(Path(sys.argv[1]).read_text())
-sys.exit(0 if fixture.get("pages", 0) > 0 and
-         fixture.get("raw_pages") == fixture["pages"] else 1)
-PYRAW
-    then
-        PACKED_READ=0
-        note 'PACKED_READ_OMITTED=all_raw_fixture'
-    fi
 else
 if [[ $PROFILE == medium ]]; then
     python3 -B tests/runtime/benchmark/anon-page-fixture.py \

@@ -122,6 +122,75 @@ class PairReplayContract(unittest.TestCase):
                 private_memory.copy_fixture(source, destination)
             self.assertFalse(destination.exists())
 
+    def test_copy_fixture_classifies_only_snapshotted_all_raw_metadata(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            source = root / "shared" / "fixture.bin"
+            destination = root / "snapshot" / "fixture.bin"
+            source.parent.mkdir()
+            destination.parent.mkdir()
+            source.write_bytes(b"x" * PAGE)
+            scenarios = (
+                ({"pages": 4, "raw_pages": 4}, "ALL_RAW_FIXTURE=1"),
+                ({"pages": 4, "raw_pages": 2}, "ALL_RAW_FIXTURE=0"),
+                ({"pages": 4, "raw_pages": True}, "ALL_RAW_FIXTURE=0"),
+                ({"pages": 0, "raw_pages": 0}, "ALL_RAW_FIXTURE=0"),
+                ({"pages": 4}, "ALL_RAW_FIXTURE=0"),
+            )
+            for metadata, expected in scenarios:
+                with self.subTest(metadata=metadata):
+                    destination.unlink(missing_ok=True)
+                    (source.parent / "fixture.json").write_text(
+                        json.dumps(metadata))
+                    (destination.parent / "fixture.json").write_text(
+                        json.dumps(metadata))
+                    captured = io.StringIO()
+                    with contextlib.redirect_stdout(captured):
+                        self.assertEqual(private_memory.main([
+                            "copy-fixture", "--source", str(source),
+                            "--destination", str(destination),
+                            "--report-all-raw"]), 0)
+                    self.assertEqual(captured.getvalue().strip(), expected)
+                    self.assertEqual(destination.read_bytes(), source.read_bytes())
+            destination.unlink()
+            (destination.parent / "fixture.json").unlink()
+            captured = io.StringIO()
+            with contextlib.redirect_stdout(captured):
+                self.assertEqual(private_memory.main([
+                    "copy-fixture", "--source", str(source),
+                    "--destination", str(destination),
+                    "--report-all-raw"]), 0)
+            self.assertEqual(captured.getvalue().strip(), "ALL_RAW_FIXTURE=0")
+
+            destination.unlink()
+            (destination.parent / "fixture.json").write_text("invalid json")
+            with self.assertRaisesRegex(ValueError, "privacy metadata"):
+                private_memory.main([
+                    "copy-fixture", "--source", str(source),
+                    "--destination", str(destination),
+                    "--report-all-raw"])
+            # Duplicate JSON keys must fail closed rather than accepting
+            # the last occurrence and potentially skipping packed reads.
+            destination.unlink(missing_ok=True)
+            (destination.parent / "fixture.json").write_text(
+                '{"pages":4,"pages":5,"raw_pages":5}')
+            with self.assertRaisesRegex(ValueError, "privacy metadata"):
+                private_memory.main([
+                    "copy-fixture", "--source", str(source),
+                    "--destination", str(destination),
+                    "--report-all-raw"])
+            # Malformed metadata cannot silently suppress packed reads.
+            destination.unlink(missing_ok=True)
+            target = destination.parent / "metadata-target.json"
+            target.write_text(json.dumps({"pages": 4, "raw_pages": 4}))
+            (destination.parent / "fixture.json").unlink()
+            (destination.parent / "fixture.json").symlink_to(target)
+            with self.assertRaisesRegex(ValueError, "privacy metadata"):
+                private_memory.main([
+                    "copy-fixture", "--source", str(source),
+                    "--destination", str(destination),
+                    "--report-all-raw"])
+
     def test_representative_memory_protection_success_path(self):
         libc = mock.Mock()
         libc.prctl.return_value = 0

@@ -14,8 +14,18 @@ import sys
 from pathlib import Path
 
 
-def fixture_is_representative(fixture_path):
-    """Read nonsensitive fixture metadata before opening sample content."""
+def unique_metadata_keys(pairs):
+    """Reject ambiguous JSON object keys before trusting fixture classes."""
+    metadata = {}
+    for key, value in pairs:
+        if key in metadata:
+            raise ValueError("duplicate fixture privacy metadata key")
+        metadata[key] = value
+    return metadata
+
+
+def read_fixture_metadata(fixture_path):
+    """Read stable, bounded nonsensitive metadata without following links."""
     metadata_path = Path(fixture_path).parent / "fixture.json"
     # Open once: an lstat/read_text pair can follow a substituted symlink.
     flags = (os.O_RDONLY | os.O_NONBLOCK | os.O_NOFOLLOW |
@@ -27,7 +37,9 @@ def fixture_is_representative(fixture_path):
                 raise ValueError("fixture privacy metadata must be a regular file")
             if before.st_size > 1024 * 1024:
                 raise ValueError("invalid fixture privacy metadata")
-            metadata = json.loads(metadata_file.read(1024 * 1024 + 1))
+            metadata = json.loads(
+                metadata_file.read(1024 * 1024 + 1),
+                object_pairs_hook=unique_metadata_keys)
             after = os.fstat(metadata_file.fileno())
             if (before.st_dev, before.st_ino, before.st_size,
                     before.st_mtime_ns, before.st_ctime_ns) != (
@@ -35,14 +47,31 @@ def fixture_is_representative(fixture_path):
                     after.st_mtime_ns, after.st_ctime_ns):
                 raise ValueError("fixture privacy metadata changed while reading")
     except FileNotFoundError:
-        return False
+        return None
     except (OSError, ValueError) as exc:
         if isinstance(exc, ValueError) and "regular file" in str(exc):
             raise
         raise ValueError("invalid fixture privacy metadata") from exc
     if not isinstance(metadata, dict):
         raise ValueError("invalid fixture privacy metadata")
-    return metadata.get("content_profile") == "representative"
+    return metadata
+
+
+def fixture_is_representative(fixture_path):
+    """Classify representative bytes before opening any source fixture."""
+    metadata = read_fixture_metadata(fixture_path)
+    return metadata is not None and metadata.get("content_profile") == "representative"
+
+
+def fixture_is_all_raw(fixture_path):
+    """Conservatively omit packed reads only for explicitly all-RAW fixtures."""
+    metadata = read_fixture_metadata(fixture_path)
+    if metadata is None:
+        return False
+    pages = metadata.get("pages")
+    raw_pages = metadata.get("raw_pages")
+    return (type(pages) is int and pages > 0 and
+            type(raw_pages) is int and raw_pages == pages)
 
 
 def protect_private_memory():
@@ -144,9 +173,17 @@ def main(argv=None):
     copy_parser.add_argument(
         "--private", action="store_true",
         help="force protection from the already-classified representative cohort")
+    copy_parser.add_argument(
+        "--report-all-raw", action="store_true",
+        help="emit an exact fixture content-class marker after a successful copy")
     args = parser.parse_args(argv)
     if args.command == "copy-fixture":
         copy_fixture(args.source, args.destination, args.private)
+        if args.report_all_raw:
+            # Use the snapshotted destination metadata, not mutable source
+            # metadata, to match what the replay will actually consume.
+            print("ALL_RAW_FIXTURE=" +
+                  ("1" if fixture_is_all_raw(args.destination) else "0"))
         return 0
     raise AssertionError(args.command)
 

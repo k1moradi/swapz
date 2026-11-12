@@ -6555,6 +6555,16 @@ async mixed off/swapz comparison and one positive-delta64 write-only off/swapz
 comparison. These rows are directional bottleneck evidence and do not replace
 the matched fast-model qualification intervals.
 
+The shared-plan fixture snapshot should classify explicitly all-RAW content
+inside the same private-memory-protected copy process, from its snapshotted
+regular-file metadata. This replaces only the redundant per-pair Python
+interpreter launch; it must not infer RAW from filenames or content weights.
+Missing, nonpositive, malformed, linked or ambiguous metadata cannot suppress
+the required packed-read oracle; the classification must be exact and reported
+only after a successful snapshot. The shell caller accepts only canonical
+`ALL_RAW_FIXTURE=0|1` records and fails closed on any other stdout. Keep
+byte-exact mixed replay and final-image verification for all fixtures.
+
 Owned-null_blk benchmark setup should read the existing fixed configfs
 attributes and complete /proc/swaps snapshots with Bash's in-process
 single-file substitution (`$(< path)`) rather than starting a fresh
