@@ -1195,6 +1195,134 @@ class NativeTimingContract(unittest.TestCase):
             finally:
                 runner.ROOT = previous_root
 
+    def test_development_resume_native_suites_match_make_and_private_state(self):
+        """Private, separate native PASS keys cannot override source or modes."""
+        native_path = ROOT / "tests/tools/native-resume.py"
+        native_spec = importlib.util.spec_from_file_location(
+            "swapz_native_resume_contract", native_path)
+        native = importlib.util.module_from_spec(native_spec)
+        native_spec.loader.exec_module(native)
+        make_source = (ROOT / "tests/suites/Makefile").read_text(
+            encoding="utf-8")
+        self.assertEqual(
+            tuple(native.SUITES), runner.DEVELOPMENT_RESUME_NATIVE_SUITES)
+        for suite, programs in native.SUITES.items():
+            section = make_source.split("test-" + suite + ":", 1)[1].split(
+                "\ntest-", 1)[0]
+            self.assertIn("native-resume.py\" " " + suite, section)
+            for binary in programs:
+                self.assertIn("$(OUT)/" + binary, section)
+
+        original_root = runner.ROOT
+        with tempfile.TemporaryDirectory(prefix="native-private-resume-") as folder:
+            try:
+                runner.ROOT = Path(folder)
+                context = {"source_sha": "a" * 40,
+                           "executables_sha256": {"only": "b" * 64}}
+                for suite in native.SUITES:
+                    self.assertTrue(runner.write_development_resume_checkpoint(
+                        context, [suite], native_suite=suite))
+                    checkpoint = runner.ROOT / (
+                        "build/tests/make-test-resume/native-" + suite + ".json")
+                    self.assertEqual(
+                        stat.S_IMODE(checkpoint.stat().st_mode), 0o600)
+                    self.assertEqual(
+                        runner.read_development_resume_checkpoint(
+                            context, native_suite=suite), [suite])
+                    self.assertIsNone(
+                        runner.read_development_resume_checkpoint(
+                            {**context, "source_sha": "c" * 40},
+                            native_suite=suite))
+                    checkpoint.chmod(0o644)
+                    self.assertIsNone(
+                        runner.read_development_resume_checkpoint(
+                            context, native_suite=suite))
+                    checkpoint.chmod(0o600)
+                self.assertFalse(runner.write_development_resume_checkpoint(
+                    context, ["mapping"], native_suite="../mapping"))
+                self.assertIsNone(runner.read_development_resume_checkpoint(
+                    context, native_suite="../mapping"))
+                runner.reset_development_resume_checkpoint()
+                self.assertFalse(
+                    list((runner.ROOT /
+                          "build/tests/make-test-resume").glob("native-*.json")))
+            finally:
+                runner.ROOT = original_root
+
+    def test_development_resume_native_suite_invalidates_on_binary_drift(self):
+        """Rebuilt binaries, malformed native files and failed tests run fresh."""
+        native_path = ROOT / "tests/tools/native-resume.py"
+        native_spec = importlib.util.spec_from_file_location(
+            "swapz_native_resume_evidence", native_path)
+        native = importlib.util.module_from_spec(native_spec)
+        native_spec.loader.exec_module(native)
+        from types import SimpleNamespace
+        with tempfile.TemporaryDirectory(prefix="native-byte-resume-") as folder:
+            root = Path(folder)
+            previous_root, previous_native = native.ROOT, native.NATIVE
+            previous_runner_root = runner.ROOT
+            try:
+                native.ROOT = root
+                native.NATIVE = root / "build/tests/native"
+                runner.ROOT = root
+                native.NATIVE.mkdir(parents=True)
+                for suite in native.SUITES:
+                    for name in native.SUITES[suite]:
+                        binary = native.NATIVE / name
+                        binary.write_bytes(b"#!/bin/sh\\nexit 0\\n")
+                        binary.chmod(0o755)
+                (native.NATIVE / "native-compiler-configuration").write_text(
+                    "compiler=synthetic\\n")
+                expected_source = "a" * 40
+                synthetic_context = {"source_sha": expected_source,
+                                     "host_sha256": "b" * 64}
+                with mock.patch.object(
+                        runner, "git_sha", return_value=expected_source), \\
+                        mock.patch.object(
+                            runner, "tracked_source_checkout_preflight",
+                            return_value=None), \\
+                        mock.patch.object(
+                            runner, "report_host_identity",
+                            return_value={"id_sha256": "b" * 64}), \\
+                        mock.patch.object(
+                            runner, "development_resume_context",
+                            return_value=synthetic_context):
+                    binaries = [str(native.NATIVE / name)
+                                for name in native.SUITES["gc"]]
+                    self.assertEqual(native.run_native_suite(
+                        "gc", binaries, mode="record",
+                        tested_source=expected_source, kdir="/synthetic",
+                        runner=runner), 0)
+                    context = native.current_native_context(
+                        "gc", expected_source, "/synthetic", runner)
+                    self.assertEqual(
+                        runner.read_development_resume_checkpoint(
+                            context, native_suite="gc"), ["gc"])
+                    with mock.patch.object(native.subprocess, "run",
+                                           side_effect=AssertionError(
+                                               "verified PASS must skip execution")):
+                        self.assertEqual(native.run_native_suite(
+                            "gc", binaries, mode="resume",
+                            tested_source=expected_source, kdir="/synthetic",
+                            runner=runner), 0)
+                    changed = native.NATIVE / native.SUITES["gc"][0]
+                    changed.write_bytes(b"#!/bin/sh\\nexit 17\\n")
+                    changed.chmod(0o755)
+                    with contextlib.redirect_stderr(io.StringIO()) as error:
+                        self.assertEqual(native.run_native_suite(
+                            "gc", binaries, mode="resume",
+                            tested_source=expected_source, kdir="/synthetic",
+                            runner=runner), 17)
+                    self.assertIn("binary=gc-forbidden-victim exit=17",
+                                  error.getvalue())
+                    changed.unlink()
+                    changed.symlink_to(native.NATIVE / native.SUITES["gc"][1])
+                    self.assertIsNone(native.current_native_context(
+                        "gc", expected_source, "/synthetic", runner))
+            finally:
+                native.ROOT, native.NATIVE = previous_root, previous_native
+                runner.ROOT = previous_runner_root
+
     def test_development_resume_rootless_suite_allowlist_matches_harness(self):
         """Each individually skipped suite must be a reviewed serial fixture."""
         source = (ROOT / "tests/tools/test-rootless.sh").read_text(

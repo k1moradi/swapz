@@ -4585,7 +4585,8 @@ def loaded_timing_phase(line):
 def run_stage(title, command, result, *, parse_bench=False,
               stream_rootless_progress=False, progress_table=None,
               retain_private_failure_output=False,
-              rootless_resume_suites=(), rootless_suite_completed=None):
+              rootless_resume_suites=(), rootless_suite_completed=None,
+              native_cache_mode=None, native_cache_kdir=None):
     start = time.monotonic()
     loaded_timing_phases = []
     loaded_current_phase = "preflight"
@@ -4599,6 +4600,7 @@ def run_stage(title, command, result, *, parse_bench=False,
     rootless_active_started = start
     rootless_is_tty = False
     rootless_reused_suites = []
+    native_reused_suites = []
     rootless_unexpected_reuse = False
 
     def emit_progress_row(suite, phase_index, phase, verdict, duration,
@@ -4633,6 +4635,11 @@ def run_stage(title, command, result, *, parse_bench=False,
             child_env["SWAPZ_TESTED_SOURCE_SHA"] = tested_source
         if title == "Build module and helpers":
             child_env["SWAPZ_SIGN_NONINTERACTIVE"] = "1"
+        if (stream_rootless_progress and
+                native_cache_mode in ("record", "resume") and
+                isinstance(native_cache_kdir, str) and native_cache_kdir):
+            child_env["SWAPZ_NATIVE_CACHE_MODE"] = native_cache_mode
+            child_env["SWAPZ_NATIVE_CACHE_KDIR"] = native_cache_kdir
         if stream_rootless_progress and rootless_resume_suites:
             artifacts = qualification_artifact_digests()
             if owner_qualification_artifacts_available(artifacts):
@@ -4669,6 +4676,13 @@ def run_stage(title, command, result, *, parse_bench=False,
             for line in proc.stdout:
                 chunks.append(line)
                 if stream_rootless_progress:
+                    for native_suite in DEVELOPMENT_RESUME_NATIVE_SUITES:
+                        marker = (
+                            "ROOTLESS_NATIVE_RESUME suite=" + native_suite +
+                            " state=REUSED\n")
+                        if (native_cache_mode == "resume" and line == marker and
+                                native_suite not in native_reused_suites):
+                            native_reused_suites.append(native_suite)
                     event = rootless_phase_progress(line, rootless_allowed_names)
                     if event is not None:
                         state, index, seconds, name = event
@@ -4691,8 +4705,13 @@ def run_stage(title, command, result, *, parse_bench=False,
                             elif (rootless_suite_completed is not None and
                                   name in DEVELOPMENT_RESUME_ROOTLESS_SUITES):
                                 rootless_suite_completed(name)
+                            effective_state = (
+                                "REUSED" if name ==
+                                "tests/Makefile native and metadata" and
+                                native_reused_suites and state == "PASS"
+                                else state)
                             emit_progress_row(
-                                "Rootless", index, name, state,
+                                "Rootless", index, name, effective_state,
                                 f"{seconds}s", overwrite=rootless_is_tty)
                             rootless_next_index += 1
                             rootless_active_phase = None
@@ -4922,12 +4941,14 @@ def run_stage(title, command, result, *, parse_bench=False,
               "FAIL" if (explicit_primary_failure or explicit_loaded_failure or
                          negative_refusal_auth_failure)
               else "BLOCKED" if blocked_marker else "FAIL")
-    if rootless_reused_suites and rc == 0:
+    if (rootless_reused_suites or native_reused_suites) and rc == 0:
         status = "REUSED"
     record = {"name": title, "status": status, "elapsed_s":
               round(time.monotonic() - start, 3), "exit_code": rc}
     if rootless_reused_suites:
         record["reused_rootless_suites"] = rootless_reused_suites
+    if native_reused_suites:
+        record["reused_native_suites"] = native_reused_suites
     if rc and retain_private_failure_output:
         private_log = retain_private_stage_output(
             output, result.get("tested_commit_sha"), title)
@@ -12020,6 +12041,10 @@ DEVELOPMENT_RESUME_MAX_BYTES = 65536
 DEVELOPMENT_RESUME_STAGES = OFFICIAL_STAGE_NAMES[1:4]
 # Only these isolated, serial rootless fixtures may reuse a prior PASS.
 # Native Make, concurrent fixture groups and privileged checks always rerun.
+# Only shared-object-built, output-independent native targets with a complete
+# executable digest inventory may skip *execution* after Make has rebuilt all
+# prerequisites. Each target has its own private file for parallel Make jobs.
+DEVELOPMENT_RESUME_NATIVE_SUITES = ("mapping", "gc")
 DEVELOPMENT_RESUME_ROOTLESS_SUITES = (
     "tests/runtime/native/primary-lifecycle-audit-test.py",
     "tests/runtime/native/primary-lifecycle-nullblk-qualifier-test.py",
@@ -12139,17 +12164,22 @@ def validated_development_resume_stages(stages):
     return valid
 
 
-def read_development_resume_checkpoint(context, *, suites=False):
+def read_development_resume_checkpoint(context, *, suites=False,
+                                       native_suite=None):
     """Read a bounded owner-only checkpoint. Any mismatch runs fresh."""
-    if context is None:
+    if (context is None or
+            (native_suite is not None and (
+                suites or native_suite not in DEVELOPMENT_RESUME_NATIVE_SUITES))):
         return None
     directory = development_resume_directory()
     if directory is None:
         return None
     descriptor = -1
     try:
+        filename = ("native-" + native_suite + ".json" if native_suite
+                    else "suites.json" if suites else "state.json")
         descriptor = os.open(
-            directory / ("suites.json" if suites else "state.json"),
+            directory / filename,
             os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK | os.O_CLOEXEC)
         before = os.fstat(descriptor)
         if (not stat.S_ISREG(before.st_mode) or
@@ -12176,13 +12206,18 @@ def read_development_resume_checkpoint(context, *, suites=False):
 
         saved = json.loads(payload.decode("utf-8"),
                            object_pairs_hook=unique_object)
-        field = "suites" if suites else "stages"
-        schema = (DEVELOPMENT_RESUME_SCHEMA + "-suites" if suites
+        field = ("native_suites" if native_suite else
+                 "suites" if suites else "stages")
+        schema = (DEVELOPMENT_RESUME_SCHEMA + "-native" if native_suite else
+                  DEVELOPMENT_RESUME_SCHEMA + "-suites" if suites
                   else DEVELOPMENT_RESUME_SCHEMA)
         if (not isinstance(saved, dict) or
                 set(saved) != {"schema", "context", field} or
                 saved["schema"] != schema or saved["context"] != context):
             return None
+        if native_suite:
+            return ([native_suite] if type(saved[field]) is list and
+                    saved[field] == [native_suite] else None)
         return (validated_development_resume_suites(saved[field]) if suites
                 else validated_development_resume_stages(saved[field]))
     except (OSError, ValueError, TypeError, UnicodeError):
@@ -12192,17 +12227,27 @@ def read_development_resume_checkpoint(context, *, suites=False):
             os.close(descriptor)
 
 
-def write_development_resume_checkpoint(context, stages, *, suites=False):
+def write_development_resume_checkpoint(context, stages, *, suites=False,
+                                        native_suite=None):
     """Durably save reviewed PASS evidence; never publish it to Git."""
-    validated = (validated_development_resume_suites(stages) if suites
-                 else validated_development_resume_stages(stages))
+    if native_suite is not None and (
+            suites or native_suite not in DEVELOPMENT_RESUME_NATIVE_SUITES):
+        return False
+    validated = (
+        [native_suite] if native_suite and type(stages) is list and
+        stages == [native_suite] else
+        validated_development_resume_suites(stages) if suites else
+        validated_development_resume_stages(stages) if native_suite is None
+        else None)
     if context is None or validated is None:
         return False
     directory = development_resume_directory(create=True)
     if directory is None:
         return False
-    field = "suites" if suites else "stages"
-    schema = (DEVELOPMENT_RESUME_SCHEMA + "-suites" if suites
+    field = ("native_suites" if native_suite else
+             "suites" if suites else "stages")
+    schema = (DEVELOPMENT_RESUME_SCHEMA + "-native" if native_suite else
+              DEVELOPMENT_RESUME_SCHEMA + "-suites" if suites
               else DEVELOPMENT_RESUME_SCHEMA)
     payload = (json.dumps({
         "schema": schema, "context": context, field: stages,
@@ -12219,7 +12264,9 @@ def write_development_resume_checkpoint(context, stages, *, suites=False):
             output.write(payload)
             output.flush()
             os.fsync(output.fileno())
-        os.replace(temporary, directory / ("suites.json" if suites else "state.json"))
+        filename = ("native-" + native_suite + ".json" if native_suite
+                    else "suites.json" if suites else "state.json")
+        os.replace(temporary, directory / filename)
         directory_descriptor = os.open(
             directory, os.O_RDONLY | os.O_DIRECTORY | os.O_CLOEXEC)
         try:
@@ -12247,7 +12294,8 @@ def reset_development_resume_checkpoint():
     if directory is None:
         return
     try:
-        for filename in ("state.json", "suites.json"):
+        for filename in ("state.json", "suites.json", "native-mapping.json",
+                         "native-gc.json"):
             (directory / filename).unlink(missing_ok=True)
     except OSError:
         pass
@@ -12511,7 +12559,10 @@ def _run_qualification(args, sync_result):
             else:
                 rootless_options = (
                     {"rootless_resume_suites": rootless_cached_suites,
-                     "rootless_suite_completed": record_completed_rootless_suite}
+                     "rootless_suite_completed": record_completed_rootless_suite,
+                     "native_cache_mode": (
+                         "resume" if resume_requested else "record"),
+                     "native_cache_kdir": args.kdir}
                     if i == 1 and tier == "algorithm" else {})
                 code = run_stage(
                     title, command, result, parse_bench=(i == 4),
@@ -12521,6 +12572,8 @@ def _run_qualification(args, sync_result):
                 if i == 1 and resume_requested and result["stages"]:
                     result["development_resume"]["reused_rootless_suites"] = (
                         result["stages"][-1].get("reused_rootless_suites", []))
+                    result["development_resume"]["reused_native_suites"] = (
+                        result["stages"][-1].get("reused_native_suites", []))
             if code:
                 exit_code = code
                 break

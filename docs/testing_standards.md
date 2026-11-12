@@ -589,6 +589,22 @@ merge independent assertion/failure boundaries or omit ASan/UBSan/TSan
 qualification for speed.
 The native/rootless stage records separate native Make and remaining-contract
 wall times as optional observational evidence, not qualification PASS gates.
+Two independent shared-object native test targets, test-mapping and test-gc,
+may additionally record private per-target PASS checkpoints during ordinary
+algorithm `make test`. On `make test RESUME=1`, GNU Make still builds and
+validates every prerequisite before the target recipe; the development-only
+helper then verifies the exact source/host/kernel/KDIR/worker/root-artifact
+context, the native compiler-configuration stamp and every expected native
+executable's regular-file SHA-256, executable mode and file identity.
+Changed, linked or missing binaries, dirty source, invalid private file
+permissions or failed children force the entire target to execute freshly.
+The targets retain original within-suite binary order and do not cache
+individual binary results. Mapping and GC checkpoints have independent
+owner-only atomic files so parallel Make recipes cannot overwrite each
+other. Reused native targets print a bounded marker, are rendered REUSED by
+the rootless stage, cannot feed a fresh PASS checkpoint and never qualify
+physical or loaded device evidence. Full-tier and direct CI native testing
+never consume those development checkpoints.
 A normal `make test` saves a bounded, private, owner-only, atomic
 development checkpoint after each successful rootless or W=1/W=2 stage.
 `make test RESUME=1` is an explicit **development-only** opt-in that always
