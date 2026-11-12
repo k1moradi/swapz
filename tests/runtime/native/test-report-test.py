@@ -4940,6 +4940,54 @@ class ReportContract(unittest.TestCase):
             self.assertIsNone(runner.parse_algorithm_pageout_diagnostic(
                 marker_prefix + json.dumps(changed)))
 
+    def test_activation_snapshot_is_authenticated_and_identity_free(self):
+        """Only bounded numeric observations from the exact activation gate."""
+        record = {
+            "schema": "swapz-algorithm-lifecycle-diagnostic-v1",
+            "phase": "anonymous_swap_activation",
+            "gate": "physical_execution",
+            "reason": "initial_swap_usage_nonzero",
+            "activation": {
+                "mapper_used_kib": 512,
+                "mem_available_mib": 2616,
+                "memory_psi_some_avg10_milli_pct": 170,
+            },
+        }
+        prefix = "PHYSICAL_ALGORITHM_DEBUG="
+        self.assertEqual(runner.parse_algorithm_pageout_diagnostic(
+            prefix + json.dumps(record)), record)
+        output = io.StringIO()
+        with contextlib.redirect_stdout(output):
+            runner.print_algorithm_lifecycle_failure_diagnostic(record)
+        self.assertIn("mapper_used_kib=512", output.getvalue())
+        self.assertIn("mem_available_mib=2616", output.getvalue())
+        self.assertIn("memory_psi_some_avg10_milli_pct=170",
+                      output.getvalue())
+        self.assertNotIn("NEVER_EXPORT", output.getvalue())
+
+        for modified in (
+                {**record, "reason": "mapper_entry_missing"},
+                {**record, "phase": "physical_setup"},
+                {**record, "activation": {**record["activation"],
+                                           "mapper_used_kib": 0}},
+                {**record, "activation": {**record["activation"],
+                                           "mapper_used_kib": -1}},
+                {**record, "activation": {**record["activation"],
+                                           "mapper_used_kib": True}},
+                {**record, "activation": {**record["activation"],
+                                           "mem_available_mib": "/private/NEVER_EXPORT"}},
+                {**record, "activation": {**record["activation"],
+                                           "memory_psi_some_avg10_milli_pct": 100001}},
+                {**record, "activation": {**record["activation"],
+                                           "host_path": "/private/NEVER_EXPORT"}},
+                {**record, "activation": None},
+        ):
+            with self.subTest(modified=modified):
+                self.assertIsNone(runner.parse_algorithm_pageout_diagnostic(
+                    prefix + json.dumps(modified)))
+        self.assertIsNone(runner.parse_algorithm_pageout_diagnostic(
+            prefix + json.dumps(record) + "\n" + prefix + json.dumps(record)))
+
     def test_physical_lifecycle_failure_marker_is_strict_and_printable(self):
         """Report the exact safe phase when no pageout proof was emitted."""
         record = {

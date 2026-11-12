@@ -3978,7 +3978,10 @@ def parse_algorithm_pageout_diagnostic(error_output):
     if not isinstance(diagnostic, dict):
         return None
     if diagnostic.get("schema") == "swapz-algorithm-lifecycle-diagnostic-v1":
-        if (set(diagnostic) != {"schema", "phase", "gate", "reason"} or
+        expected_fields = {"schema", "phase", "gate", "reason"}
+        if "activation" in diagnostic:
+            expected_fields.add("activation")
+        if (set(diagnostic) != expected_fields or
                 any(type(diagnostic[key]) is not str for key in (
                     "schema", "phase", "gate", "reason")) or
                 diagnostic["phase"] not in {
@@ -3992,6 +3995,28 @@ def parse_algorithm_pageout_diagnostic(error_output):
                  if diagnostic["phase"] == "anonymous_swap_activation"
                  else diagnostic["reason"] != "phase_refused")):
             return None
+        if "activation" in diagnostic:
+            activation = diagnostic["activation"]
+            if (diagnostic["phase"] != "anonymous_swap_activation" or
+                    not isinstance(activation, dict) or
+                    set(activation) != {
+                        "mapper_used_kib", "mem_available_mib",
+                        "memory_psi_some_avg10_milli_pct"}):
+                return None
+            for name, upper in (
+                    ("mapper_used_kib", (1 << 64) - 1),
+                    ("mem_available_mib", (1 << 64) - 1),
+                    ("memory_psi_some_avg10_milli_pct", 100000)):
+                value = activation[name]
+                if value is not None and (
+                        type(value) is not int or not 0 <= value <= upper):
+                    return None
+            used_kib = activation["mapper_used_kib"]
+            if ((diagnostic["reason"] == "initial_swap_usage_nonzero" and
+                 (used_kib is None or used_kib == 0)) or
+                    (diagnostic["reason"] != "initial_swap_usage_nonzero" and
+                     used_kib is not None)):
+                return None
         return diagnostic
     if diagnostic.get("schema") == "swapz-algorithm-workload-diagnostic-v1":
         fields = {"schema", "phase", "gate", "reason", "original_errno"}
@@ -4083,8 +4108,18 @@ def print_algorithm_lifecycle_failure_diagnostic(diagnostic):
     print("  Physical first failure: "
           f"phase={diagnostic['phase']} gate={diagnostic['gate']} "
           f"reason={diagnostic['reason']}", flush=True)
-    print("        Next: inspect the retained private first failure and "
-          "same-boot recovery state; do not rerun until verified", flush=True)
+    activation = diagnostic.get("activation")
+    if activation is not None:
+        def observed(name):
+            value = activation[name]
+            return "unavailable" if value is None else str(value)
+        print("        Activation snapshot (read-only; no workload attribution): "
+              + " ".join(
+                  f"{name}={observed(name)}" for name in (
+                      "mapper_used_kib", "mem_available_mib",
+                      "memory_psi_some_avg10_milli_pct")), flush=True)
+    print("        Next: compare with the automatic recovery evidence above; "
+          "investigate first cause before another physical trial", flush=True)
 
 
 def print_algorithm_workload_diagnostic(diagnostic):
@@ -12540,8 +12575,9 @@ def _run_qualification(args, sync_result):
                         "        Next: inspect existing root-owned same-boot "
                         "physical results; do not rerun before recovery",
                         flush=True)
-                print("  Physical trial cleanup: inspect root-owned same-boot "
-                      "state before another test")
+                print("  Physical trial cleanup: automatic recovery verification "
+                      "is reported above; RECOVERY_REQUIRED or UNKNOWN "
+                      "blocks further physical trials", flush=True)
             else:
                 result["algorithm_real_swap"] = {
                     "overall": "NOT_RUN",

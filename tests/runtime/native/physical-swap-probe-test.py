@@ -689,6 +689,52 @@ class PhysicalSwapProbeTests(unittest.TestCase):
         self.assertEqual(default["phase"], "anonymous_swap_oracle")
         self.assertEqual(default["reason"], "phase_refused")
 
+    def test_algorithm_activation_snapshot_is_read_only_and_failure_only(self):
+        """Never turn background swap into a qualifying oracle baseline."""
+        def proc_text(path, *, encoding):
+            self.assertEqual(encoding, "ascii")
+            if str(path) == "/proc/meminfo":
+                return "MemAvailable:    2679384 kB\nprivate=NEVER_EXPORT\n"
+            if str(path) == "/proc/pressure/memory":
+                return "some avg10=0.17 avg60=0.00 avg300=0.00 total=10\n"
+            self.fail("unexpected activation diagnostic read")
+
+        with mock.patch.object(probe.Path, "read_text",
+                               autospec=True, side_effect=proc_text) as read:
+            self.assertIsNone(probe._require_run_owned_swap_activation(
+                {"used_kib": 0}))
+            read.assert_not_called()
+            with self.assertRaises(probe.ProbeError) as caught:
+                probe._require_run_owned_swap_activation(
+                    {"used_kib": 512})
+        self.assertEqual(caught.exception.algorithm_activation_reason,
+                         "initial_swap_usage_nonzero")
+        observation = caught.exception.algorithm_activation_observation
+        self.assertEqual(observation, {
+            "mapper_used_kib": 512,
+            "mem_available_mib": 2616,
+            "memory_psi_some_avg10_milli_pct": 170,
+        })
+        self.assertNotIn("NEVER_EXPORT", json.dumps(observation))
+        record = probe._algorithm_physical_phase_failure_record(
+            {"physical_oracle_phases": [{"status": "PASS"}]},
+            anonymous_started=True, anonymous_completed=False,
+            activation_failure=caught.exception.algorithm_activation_reason,
+            activation_observation=observation)
+        self.assertEqual(record["activation"], observation)
+
+        # A missing procfs sensor must never override the first refusal
+        # or fabricate a zero-pressure observation.
+        with mock.patch.object(probe.Path, "read_text",
+                               side_effect=OSError("NEVER_EXPORT")):
+            with self.assertRaises(probe.ProbeError) as unavailable:
+                probe._require_run_owned_swap_activation({"used_kib": 64})
+        self.assertEqual(unavailable.exception.algorithm_activation_observation, {
+            "mapper_used_kib": 64,
+            "mem_available_mib": None,
+            "memory_psi_some_avg10_milli_pct": None,
+        })
+
     def test_algorithm_summary_failure_retains_single_emitted_diagnostic(self):
         workload, policy, result = self.algorithm_workload_fixture()
         result["rounds"] = []

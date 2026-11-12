@@ -3941,7 +3941,8 @@ def _algorithm_real_swap_summary(result, policy, oracle_sha256):
 def _algorithm_physical_phase_failure_record(results, *,
                                             anonymous_started,
                                             anonymous_completed,
-                                            activation_failure=None):
+                                            activation_failure=None,
+                                            activation_observation=None):
     """Report only a fixed phase, never private paths, errors or target IDs."""
     direct_phases = results.get("physical_oracle_phases")
     direct_oracle_refused = (
@@ -3958,12 +3959,55 @@ def _algorithm_physical_phase_failure_record(results, *,
         "post_oracle_validation" if anonymous_completed else
         "anonymous_swap_oracle" if anonymous_started else
         "physical_setup")
-    return {
+    record = {
         "schema": "swapz-algorithm-lifecycle-diagnostic-v1",
         "phase": phase, "gate": "physical_execution",
         "reason": (activation_failure if phase == "anonymous_swap_activation"
                    else "phase_refused"),
     }
+    if (phase == "anonymous_swap_activation" and
+            isinstance(activation_observation, dict)):
+        record["activation"] = activation_observation
+    return record
+
+
+def _algorithm_activation_host_observation(active):
+    """Failure-only, read-only and identity-free swap activation context.
+
+    Kernel memory-pressure and swap accounting are observational, never
+    attribution of writes or permission to relax zero-initial-use admission.
+    Missing or malformed host files remain unavailable, not an invented zero.
+    """
+    used_kib = active.get("used_kib") if isinstance(active, dict) else None
+    observation = {
+        "mapper_used_kib": (
+            used_kib if type(used_kib) is int and
+            0 <= used_kib <= (1 << 64) - 1 else None),
+        "mem_available_mib": None,
+        "memory_psi_some_avg10_milli_pct": None,
+    }
+    try:
+        memory = Path("/proc/meminfo").read_text(encoding="ascii")
+        available = re.search(
+            r"(?m)^MemAvailable:[ \t]+([0-9]{1,20}) kB$", memory)
+        if available is not None:
+            available_kib = int(available.group(1))
+            if 0 <= available_kib <= (1 << 64) - 1:
+                observation["mem_available_mib"] = available_kib // 1024
+    except (OSError, ValueError, UnicodeError):
+        pass
+    try:
+        pressure = Path("/proc/pressure/memory").read_text(encoding="ascii")
+        some = re.search(
+            r"(?m)^some avg10=([0-9]{1,3})[.]([0-9]{2})(?: |$)",
+            pressure)
+        if some is not None:
+            milli_pct = int(some.group(1)) * 1000 + int(some.group(2)) * 10
+            if 0 <= milli_pct <= 100000:
+                observation["memory_psi_some_avg10_milli_pct"] = milli_pct
+    except (OSError, ValueError, UnicodeError):
+        pass
+    return observation
 
 
 def _require_run_owned_swap_activation(active):
@@ -3980,6 +4024,8 @@ def _require_run_owned_swap_activation(active):
         return
     refusal = ProbeError("run-owned swap mapper activation is unproven")
     refusal.algorithm_activation_reason = reason
+    refusal.algorithm_activation_observation = (
+        _algorithm_activation_host_observation(active))
     raise refusal
 
 
@@ -4971,7 +5017,9 @@ def run_probe(device_arg, confirm_arg, state_dir_arg, review_path,
                     results, anonymous_started=anonymous_oracle_started,
                     anonymous_completed=anonymous_oracle_completed,
                     activation_failure=getattr(
-                        failure, "algorithm_activation_reason", None)),
+                        failure, "algorithm_activation_reason", None),
+                    activation_observation=getattr(
+                        failure, "algorithm_activation_observation", None)),
                 sort_keys=True, separators=(",", ":")),
                 file=sys.stderr, flush=True)
         if failure is not None:

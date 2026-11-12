@@ -2919,6 +2919,20 @@ diagnostics as a proven pageout-counter failure. Synthetic rootless tests
 must verify finite phase classification, single-marker binding and strict
 private-data redaction; absence of a validated marker stays FAIL.
 
+On an activation refusal, the physical helper automatically samples the
+exact owned-mapper Used KiB alongside bounded, read-only MemAvailable and
+memory-PSI some/avg10 observations. These identity-free values are attached
+to the *single* validated lifecycle diagnostic only on failure, retained
+in the official source-bound report and printed by `make test`; missing
+procfs sensors remain unavailable, never zero. Rootless regressions cover
+no reads on success, missing sensors, forged/oversized/identity-bearing
+fields and parser consistency. Existing recovery already verifies the
+backing SWAPSPACE2 header, restored swap and owned mapper/module removal
+and emits `PHYSICAL_RECOVERY_EVIDENCE` automatically. Do not require the
+operator to rerun read-only shell commands when that evidence is COMPLETE
+with all PASS fields. Never automatically retry, suppress pressure stops,
+switch swap devices, or disable the zero-use gate.
+
 For an owned swap mapper immediately after `swapon`, the development trial
 must distinguish absence from the active swap inventory, nonzero initial swap
 usage, and invalid usage observations. Preserve the exact-identity and
