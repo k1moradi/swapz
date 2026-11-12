@@ -6618,7 +6618,10 @@ RAW/off or swapz replay processes, combine their device admission, weaken
 their per-arm watchdogs, or suppress loaded packed-read qualification.
 Rootless tests must compare both outputs byte-for-byte with separately
 prepared plans and prove invalid geometry, conflicting batch modes and
-pre-existing paths fail closed without partial output.
+pre-existing paths fail closed without partial output. The existing ID36
+source contract must inspect the batched producer's `plan-id36` entry and
+its exact 128/2048 operation counts, rather than require the retired
+standalone `--output-dir .../plan-id36` command line.
 
 The shared-plan fixture snapshot should classify explicitly all-RAW content
 inside the same private-memory-protected copy process, from its snapshotted

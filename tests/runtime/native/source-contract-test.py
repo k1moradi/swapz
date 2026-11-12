@@ -6894,7 +6894,12 @@ int main(void)
         self.assertIn("image_hash.update(", replay)
         self.assertIn("jobs = [pool.submit(read_one, page, slot)", replay)
         self.assertIn('plan_dir="$SHARED_PLAN/plan-id36"', benchmark)
-        self.assertIn('--output-dir "$shared_plan/plan-id36"', loaded)
+        # The ID36 manifest remains distinct even though both plans now
+        # share a single preparation interpreter and fixture provenance.
+        self.assertIn("def prepare_loaded_plan_variants(args):", replay)
+        self.assertIn('(root / "plan-id36", 128, 2048)', replay)
+        self.assertIn('--loaded-plan-variants', loaded)
+        self.assertIn('--output-dir "$shared_plan"', loaded)
         self.assertNotIn("swapon", pressure)
         self.assertNotIn("allow_physical_backing", pressure)
         self.assertIn("mmap.mmap(", helper)
