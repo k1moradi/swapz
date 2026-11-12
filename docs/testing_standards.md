@@ -2949,6 +2949,17 @@ device paths, host IDs or raw privileged stderr. Tests must prove the original
 refusal remains fail-closed and both maker and parser agree on the finite
 reason vocabulary.
 
+A first cgroup memory-PSI stop must retain optional I/O PSI `some`/`full`
+and `memory.events max` totals before child cleanup removes the fresh cgroup.
+Label these cumulative fresh-cgroup totals, never rolling-window deltas or
+proof of a particular kernel/storage cause. Missing or malformed optional
+reads remain unavailable and cannot replace the first pressure refusal.
+The physical helper and official reporter accept only bounded integer/null
+values for these three fields; reject partial or unknown extensions, boolean
+counters and private strings. Keep historical records without the extension
+readable. The single diagnostic marker remains bounded to 1536 bytes, while
+workload geometry, timeout and PSI safety threshold remain unchanged.
+
 The shared-root-parent development trial must sample its exact selected
 partition's Linux block counters, not the whole root disk: unrelated root
 reads and writes cannot establish target activity. Keep the default dedicated

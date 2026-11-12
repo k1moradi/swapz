@@ -3867,6 +3867,7 @@ def _emit_algorithm_workload_failure(error, phase="anonymous_workload"):
             fields = (
                 "window_usec", "stalled_usec", "limit_usec", "mem_available_mib",
                 "cgroup_memory_bytes", "cgroup_swap_bytes",
+                "cgroup_io_some_usec", "cgroup_io_full_usec", "cgroup_memory_max_events",
                 "swapz_logical_write_total", "swapz_physical_write_total",
                 "swapz_logical_read_total", "swapz_physical_read_total",
                 "swapz_write_submitted_total", "swapz_upper_write_completed_ok",

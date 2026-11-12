@@ -3464,6 +3464,12 @@ def _workload_pressure_failure(window: PsiStallWindow, cgroup: Path,
         "mem_available_mib": _mem_available_mib,
         "cgroup_memory_bytes": lambda: _read_uint(cgroup / "memory.current"),
         "cgroup_swap_bytes": lambda: _read_uint(cgroup / "memory.swap.current"),
+        # Fresh run-owned cgroup totals: observational only, not rolling
+        # window deltas and never an alternative pressure admission rule.
+        "cgroup_io_some_usec": lambda: _psi_total(cgroup / "io.pressure"),
+        "cgroup_io_full_usec": lambda: _psi_total(cgroup / "io.pressure", "full"),
+        "cgroup_memory_max_events": lambda: _memory_events(
+            cgroup / "memory.events").get("max"),
     }
     for name, reader in readers.items():
         try:

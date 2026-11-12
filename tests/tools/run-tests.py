@@ -3960,7 +3960,7 @@ def parse_algorithm_pageout_diagnostic(error_output):
         return None
     records = [line[len(prefix):] for line in error_output.splitlines()
                if line.startswith(prefix)]
-    if len(records) != 1 or len(records[0]) > 1024:
+    if len(records) != 1 or len(records[0]) > 1536:
         return None
 
     def unique_fields(pairs):
@@ -4071,6 +4071,10 @@ def parse_algorithm_pageout_diagnostic(error_output):
                 "swapz_write_submitted_total", "swapz_upper_write_completed_ok",
                 "swapz_failed", "swapz_error",
                 "lower_read_sectors_total", "lower_write_sectors_total"}
+            stall_fields = {"cgroup_io_some_usec", "cgroup_io_full_usec",
+                            "cgroup_memory_max_events"}
+            if isinstance(pressure, dict) and set(pressure) == pressure_fields | stall_fields:
+                pressure_fields |= stall_fields
             if (diagnostic["reason"] != "memory_pressure" or
                     diagnostic["phase"] != "anonymous_workload" or
                     not isinstance(pressure, dict) or set(pressure) != pressure_fields or
@@ -4167,6 +4171,11 @@ def print_algorithm_workload_diagnostic(diagnostic):
             f"{key}={observed(key)}" for key in (
                 "workload_phase", "window_usec", "stalled_usec", "limit_usec",
                 "mem_available_mib", "cgroup_memory_bytes", "cgroup_swap_bytes")), flush=True)
+        if "cgroup_io_some_usec" in pressure:
+            print("        Cgroup stall context (fresh-cgroup totals, not window deltas): "
+                  + " ".join(f"{key}={observed(key)}" for key in (
+                      "cgroup_io_some_usec", "cgroup_io_full_usec",
+                      "cgroup_memory_max_events")), flush=True)
         print("        I/O snapshots (totals, not attributed deltas): " + " ".join(
             f"{key}={observed(key)}" for key in (
                 "swapz_logical_write_total", "swapz_physical_write_total",

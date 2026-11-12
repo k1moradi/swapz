@@ -836,6 +836,8 @@ class PhysicalSwapProbeTests(unittest.TestCase):
             "window_usec": 5_000_000, "stalled_usec": 4_500_000,
             "limit_usec": 4_250_000, "workload_phase": "fill",
             "mem_available_mib": 12000, "swapz_error": -5,
+            "cgroup_io_some_usec": 700, "cgroup_io_full_usec": True,
+            "cgroup_memory_max_events": "/private/KEEP_PRIVATE",
             "private_path": "/private/KEEP_PRIVATE"}
         wrapped = RuntimeError(str(original) +
             "; cleanup also failed: oracle /private/path timed out after 5 seconds")
@@ -849,6 +851,9 @@ class PhysicalSwapProbeTests(unittest.TestCase):
         self.assertEqual(record["pressure"]["stalled_usec"], 4_500_000)
         self.assertEqual(record["pressure"]["mem_available_mib"], 12000)
         self.assertEqual(record["pressure"]["swapz_error"], -5)
+        self.assertEqual(record["pressure"]["cgroup_io_some_usec"], 700)
+        self.assertIsNone(record["pressure"]["cgroup_io_full_usec"])
+        self.assertIsNone(record["pressure"]["cgroup_memory_max_events"])
         self.assertIsNone(record["pressure"]["lower_read_sectors_total"])
         self.assertNotIn("private", stderr.getvalue())
 

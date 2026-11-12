@@ -4667,6 +4667,8 @@ class ReportContract(unittest.TestCase):
         return {**dict.fromkeys(fields), "window_usec": 5_000_000,
                 "stalled_usec": 4_500_000, "limit_usec": 4_250_000,
                 "workload_phase": "fill", "mem_available_mib": 12000,
+                "cgroup_io_some_usec": 700, "cgroup_io_full_usec": 500,
+                "cgroup_memory_max_events": 17,
                 "swapz_error": -5}
 
     def test_official_algorithm_tier_retains_first_pressure_snapshot(self):
@@ -4834,6 +4836,8 @@ class ReportContract(unittest.TestCase):
             self.assertIn("mem_available_mib=12000", console)
             self.assertIn("lower_read_sectors_total=unavailable", console)
             self.assertIn("totals, not attributed deltas", console)
+            self.assertIn("cgroup_io_some_usec=700", console)
+            self.assertIn("cgroup_memory_max_events=17", console)
         if activation_refusal:
             self.assertIn("mapper_used_kib=512", console)
             self.assertIn("mem_available_mib=2616", console)
@@ -5213,6 +5217,14 @@ class ReportContract(unittest.TestCase):
         prefix = "PHYSICAL_ALGORITHM_DEBUG="
         marker = lambda value: prefix + json.dumps(value, separators=(",", ":"))
         self.assertEqual(runner.parse_algorithm_pageout_diagnostic(marker(report)), report)
+        optional = {"cgroup_io_some_usec", "cgroup_io_full_usec", "cgroup_memory_max_events"}
+        legacy = {key: value for key, value in pressure.items() if key not in optional}
+        historical = {**report, "pressure": legacy}
+        self.assertEqual(runner.parse_algorithm_pageout_diagnostic(marker(historical)), historical)
+        for missing in optional:
+            partial = {key: value for key, value in pressure.items() if key != missing}
+            self.assertIsNone(runner.parse_algorithm_pageout_diagnostic(
+                marker({**report, "pressure": partial})))
         # Every numeric observation remains uint64-or-null, except signed errno.
         for key in pressure.keys() - {"workload_phase"}:
             for value in (True, "private/path", -4096, 1 << 64):

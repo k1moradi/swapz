@@ -3072,6 +3072,8 @@ class PrimaryRealSwapContracts(unittest.TestCase):
                   "error": -5, "write_submitted": 8192, "upper_write_completed_ok": 1}
         with mock.patch.object(qualify, "_mem_available_mib", return_value=12000), \
                 mock.patch.object(qualify, "_read_uint", side_effect=[1024, 2048]), \
+                mock.patch.object(qualify, "_psi_total", side_effect=[700, 500]), \
+                mock.patch.object(qualify, "_memory_events", return_value={"max": 17}), \
                 mock.patch.object(qualify, "read_block_stats",
                                   return_value=qualify.BlockStats(17, 29)) as lower:
             failure = qualify._workload_pressure_failure(
@@ -3083,6 +3085,9 @@ class PrimaryRealSwapContracts(unittest.TestCase):
         self.assertEqual(observed["mem_available_mib"], 12000)
         self.assertEqual(observed["cgroup_memory_bytes"], 1024)
         self.assertEqual(observed["cgroup_swap_bytes"], 2048)
+        self.assertEqual(observed["cgroup_io_some_usec"], 700)
+        self.assertEqual(observed["cgroup_io_full_usec"], 500)
+        self.assertEqual(observed["cgroup_memory_max_events"], 17)
         self.assertEqual(observed["swapz_physical_write_total"], 8192)
         self.assertEqual(observed["swapz_error"], -5)
         self.assertEqual(observed["lower_write_sectors_total"], 29)
