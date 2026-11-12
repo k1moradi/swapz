@@ -230,11 +230,14 @@ cleanup_shared_plan() {
        -d $shared_plan && ! -L $shared_plan ]] || return
     rm -f -- "$shared_plan/fixture.bin" "$shared_plan/fixture.json" \
         "$shared_plan/plan/trace.jsonl" "$shared_plan/plan/manifest.json" \
-        "$shared_plan/plan-id36/trace.jsonl" "$shared_plan/plan-id36/manifest.json"
+        "$shared_plan/plan/native-plan.bin" \
+        "$shared_plan/plan-id36/trace.jsonl" "$shared_plan/plan-id36/manifest.json" \
+        "$shared_plan/plan-id36/native-plan.bin"
     rmdir -- "$shared_plan/plan-id36" 2>/dev/null || true
     for qd in 1 4 8 32; do
         rm -f -- "$shared_plan/plan-write-qd$qd/trace.jsonl" \
-            "$shared_plan/plan-write-qd$qd/manifest.json"
+            "$shared_plan/plan-write-qd$qd/manifest.json" \
+            "$shared_plan/plan-write-qd$qd/native-plan.bin"
         rmdir -- "$shared_plan/plan-write-qd$qd" 2>/dev/null || true
     done
     for content in entropy balanced; do
@@ -263,7 +266,7 @@ printf '%s\n' 'START_LOADED_SHARED_BENCHMARK_PLAN=trace'
 # benchmark. Packed byte-exact reads remain enabled in that separate arm.
 python3 -B tests/runtime/benchmark/io-replay.py prepare \
     --fixture "$shared_plan/fixture.bin" --output-dir "$shared_plan" \
-    --loaded-plan-variants \
+    --loaded-plan-variants --cache-native-plan \
     --logical-pages 1024 --writer-pages 256 --reader-start 512 \
     --reader-pages 256 --qd 32 --read-pct 25 \
     --warmup-ops 1024 --measure-ops 16384 --iops 0
@@ -276,7 +279,7 @@ printf '%s\n' 'START_LOADED_SHARED_BENCHMARK_PLAN=write-plans'
 # the subsequent off/swapz arms retain independent validation and replay.
 python3 -B tests/runtime/benchmark/io-replay.py prepare \
     --fixture "$shared_plan/fixture.bin" \
-    --output-dir "$shared_plan" --write-qd-variants \
+    --output-dir "$shared_plan" --write-qd-variants --cache-native-plan \
     --logical-pages 1024 --writer-pages 256 --reader-start 512 \
     --reader-pages 256 --read-pct 0 \
     --warmup-ops 256 --measure-ops 4096 --iops 0 --sustained-write

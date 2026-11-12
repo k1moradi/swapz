@@ -7750,8 +7750,8 @@ int main(void)
         native = (ROOT / "tests/runtime/benchmark/io-replay-native.c").read_text()
         tests = (ROOT / "tests/runtime/benchmark/io-replay-test.py").read_text()
         self.assertIn('struct.Struct("<IIBBBB")', replay)
-        self.assertIn('struct.pack_into("<8sQ", plan_bytes, 0, b"SWZPLAN",', replay)
-        self.assertIn("del plan_bytes", replay)
+        self.assertIn('struct.pack_into("<8sQ", encoded, 0, b"SWZPLAN",', replay)
+        self.assertIn("del encoded_plan", replay)
         self.assertIn("type(item[\"page\"]) is not int", replay)
         self.assertIn("type(item[\"fixture\"]) is not int", replay)
         self.assertIn("type(lane) is not int", replay)
@@ -7764,6 +7764,33 @@ int main(void)
         self.assertIn(
             "def test_native_binary_plan_has_exact_bytes_and_rejects_corruption",
             tests)
+
+    def test_cached_native_plan_preserves_per_arm_trace_authentication(self):
+        replay = (ROOT / "tests/runtime/benchmark/io-replay.py").read_text()
+        loaded = (ROOT / "tests/tools/test-loaded.sh").read_text()
+        pair = (ROOT / "tests/tools/benchmark-owned-pair.sh").read_text()
+        fixtures = (ROOT / "tests/runtime/benchmark/io-replay-test.py").read_text()
+        self.assertIn("def encode_native_plan(trace, manifest):", replay)
+        self.assertIn("def open_verified_native_plan(trace_path, manifest, trace):",
+                      replay)
+        self.assertIn('manifest["native_plan_sha256"] = sha(encoded_plan)', replay)
+        self.assertIn('cached_path = Path(trace_path).with_name("native-plan.bin")',
+                      replay)
+        self.assertIn("os.O_RDONLY | os.O_CLOEXEC | os.O_NOFOLLOW", replay)
+        self.assertIn("metadata.st_nlink != 1", replay)
+        self.assertIn("record.iter_unpack(memoryview(encoded)[16:])", replay)
+        self.assertIn("cached native plan differs from validated trace", replay)
+        self.assertIn('if "native_plan_sha256" in manifest:', replay)
+        self.assertIn("open_verified_native_plan(trace_path, manifest, trace)",
+                      replay)
+        self.assertIn("encode_native_plan(trace, manifest)", replay)
+        self.assertIn("--loaded-plan-variants --cache-native-plan", loaded)
+        self.assertIn('"$shared_plan/plan/native-plan.bin"', loaded)
+        self.assertIn('"$shared_plan/plan-id36/native-plan.bin"', loaded)
+        self.assertIn('cp -- "$plan_dir/native-plan.bin"', pair)
+        self.assertIn(
+            "def test_native_plan_cache_matches_legacy_and_rejects_substitutions",
+            fixtures)
 
     def test_loaded_mixed_and_pressure_plans_keep_independent_hashes(self):
         replay = (ROOT / "tests/runtime/benchmark/io-replay.py").read_text()

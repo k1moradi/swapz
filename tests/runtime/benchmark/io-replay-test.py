@@ -861,6 +861,30 @@ class PairReplayContract(unittest.TestCase):
                         self.assertEqual(
                             (batch / relative).read_bytes(),
                             (independent / relative).read_bytes())
+            # The loaded sustained-write caller opts in to a cached native
+            # plan for all QD variants. Every one must be bound to its own
+            # independently validated canonical JSONL trace.
+            import runpy
+            replay_module = runpy.run_path(str(SCRIPT))
+            cached_batch = root / "cached"
+            cached_batch.mkdir()
+            self.run_cmd(
+                "prepare", *common, "--output-dir", cached_batch,
+                "--write-qd-variants", "--cache-native-plan")
+            for qd in (1, 4, 8, 32):
+                with self.subTest(cached_native_qd=qd):
+                    member = cached_batch / f"plan-write-qd{qd}"
+                    member_manifest = json.loads(
+                        (member / "manifest.json").read_text())
+                    trace_path = member / "trace.jsonl"
+                    events, _ = replay_module["check_plan"](
+                        trace_path, member_manifest, 8)
+                    with replay_module["open_verified_native_plan"](
+                            trace_path, member_manifest, events) as verified:
+                        self.assertEqual(
+                            verified.read(16),
+                            struct.pack("<8sQ", b"SWZPLAN", len(events)))
+
             # A pre-existing member must block before creating any other
             # variant, including when the occupant is an ordinary directory.
             refused = root / "refused"
@@ -2361,6 +2385,114 @@ class PairReplayContract(unittest.TestCase):
                             native_record[field], threaded_record[field],
                             f"phase=cross-engine-oracle mode={mode} "
                             f"candidate={candidate} field={field}")
+
+    def test_native_plan_cache_matches_legacy_and_rejects_substitutions(self):
+        import runpy
+
+        native = self.require_native_tool("io-replay-native", "cached-plan")
+        self.assertTrue(native.is_file())
+        replay_module = runpy.run_path(str(SCRIPT))
+        open_cache = replay_module["open_verified_native_plan"]
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            fixture = root / "fixture.bin"
+            fixture.write_bytes(b"".join(
+                bytes([index + 1]) * PAGE for index in range(8)))
+            common = (
+                "--fixture", fixture, "--qd", 4, "--logical-pages", 64,
+                "--writer-pages", 16, "--reader-start", 32,
+                "--reader-pages", 16, "--warmup-ops", 8,
+                "--measure-ops", 32, "--read-pct", 50, "--iops", 0,
+            )
+            legacy = root / "legacy"
+            cached = root / "cached"
+            self.run_cmd("prepare", *common, "--output-dir", legacy)
+            self.run_cmd("prepare", *common, "--output-dir", cached,
+                         "--cache-native-plan")
+            self.assertFalse((legacy / "native-plan.bin").exists())
+            self.assertEqual(
+                (legacy / "trace.jsonl").read_bytes(),
+                (cached / "trace.jsonl").read_bytes())
+            legacy_manifest = json.loads(
+                (legacy / "manifest.json").read_text())
+            cached_manifest = json.loads(
+                (cached / "manifest.json").read_text())
+            bound_sha = cached_manifest.pop("native_plan_sha256")
+            self.assertEqual(cached_manifest, legacy_manifest)
+            cached_manifest["native_plan_sha256"] = bound_sha
+            sidecar = cached / "native-plan.bin"
+            original_sidecar = sidecar.read_bytes()
+            self.assertEqual(hashlib.sha256(original_sidecar).hexdigest(),
+                             bound_sha)
+            rows = [json.loads(line) for line in
+                    (cached / "trace.jsonl").read_text().splitlines()]
+            self.assertEqual(len(original_sidecar), 16 + len(rows) * 12)
+            with open_cache(cached / "trace.jsonl",
+                            cached_manifest, rows) as verified:
+                self.assertEqual(verified.read(), original_sidecar)
+
+            for name, plan in (("legacy", legacy), ("cached", cached)):
+                with self.subTest(plan=name):
+                    device = root / f"swapz-replay-cache-{name}.bin"
+                    with device.open("wb") as stream:
+                        stream.truncate(64 * PAGE)
+                    result = root / f"{name}-report.json"
+                    self.run_cmd(
+                        "run", "--fixture", fixture,
+                        "--trace", plan / "trace.jsonl",
+                        "--manifest", plan / "manifest.json",
+                        "--device", device, "--candidate", "off",
+                        "--source-sha", "rootless-no-module",
+                        "--regular-file-test", "--native-replay",
+                        "--result", result)
+                    report = json.loads(result.read_text())
+                    self.assertEqual(report["verified_post_sha256"],
+                                     legacy_manifest["expected_post_sha256"])
+                    self.assertEqual(report["replay_engine"], "native-c")
+
+            # Reject altered bytes with the original digest, and reject a
+            # different record even when its digest has been substituted.
+            modified = bytearray(original_sidecar)
+            modified[16] ^= 1
+            sidecar.write_bytes(modified)
+            with self.assertRaisesRegex(ValueError, "digest or byte count"):
+                open_cache(cached / "trace.jsonl", cached_manifest, rows)
+            blocked_device = root / "swapz-replay-cache-blocked.bin"
+            with blocked_device.open("wb") as stream:
+                stream.truncate(64 * PAGE)
+            denied_report = root / "cache-corruption-report.json"
+            rejected = self.run_cmd(
+                "run", "--fixture", fixture,
+                "--trace", cached / "trace.jsonl",
+                "--manifest", cached / "manifest.json",
+                "--device", blocked_device, "--candidate", "off",
+                "--source-sha", "rootless-no-module",
+                "--regular-file-test", "--native-replay",
+                "--result", denied_report, success=False)
+            self.assertIn("cached native plan digest", rejected.stderr)
+            self.assertFalse(denied_report.exists())
+            with self.assertRaisesRegex(ValueError, "differs from validated trace"):
+                open_cache(cached / "trace.jsonl", {
+                    **cached_manifest,
+                    "native_plan_sha256": hashlib.sha256(modified).hexdigest(),
+                }, rows)
+            sidecar.write_bytes(original_sidecar[:-1])
+            with self.assertRaisesRegex(ValueError, "immutable regular file"):
+                open_cache(cached / "trace.jsonl", cached_manifest, rows)
+            sidecar.unlink()
+            sidecar.symlink_to(legacy / "trace.jsonl")
+            with self.assertRaisesRegex(ValueError, "cannot be opened"):
+                open_cache(cached / "trace.jsonl", cached_manifest, rows)
+            sidecar.unlink()
+            with self.assertRaisesRegex(ValueError, "cannot be opened"):
+                open_cache(cached / "trace.jsonl", cached_manifest, rows)
+
+            refused = root / "paced"
+            self.run_cmd(
+                "prepare", *common, "--iops", 100,
+                "--output-dir", refused, "--cache-native-plan",
+                success=False)
+            self.assertFalse(refused.exists())
 
     def test_native_binary_plan_has_exact_bytes_and_rejects_corruption(self):
         native = self.require_native_tool("io-replay-native", "binary-plan")

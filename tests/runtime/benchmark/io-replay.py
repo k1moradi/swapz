@@ -8,6 +8,7 @@ Both arms consume the identical fixture and ordered logical I/O trace.
 """
 import argparse
 import concurrent.futures
+import contextlib
 import enum
 import gc
 import hashlib
@@ -160,6 +161,8 @@ def prepare(args):
         raise ValueError("disjoint regions must not overlap")
     if args.iops < 0:
         raise ValueError("rate must be >=0")
+    if getattr(args, "cache_native_plan", False) and args.iops != 0:
+        raise ValueError("cached native plan requires an unpaced trace")
     if args.sustained_write and (args.read_pct != 0 or args.iops != 0):
         raise ValueError("sustained-write requires unpaced write-only input")
     if args.sustained_write and args.writer_pages % args.qd:
@@ -267,6 +270,12 @@ def prepare(args):
                     "fixed-seed persistent lane-owned writes, deterministic complete 4KiB pages"
                     if args.sustained_write else
                     "fixed-seed independent-QD-waves, deterministic complete 4KiB pages")}
+    if getattr(args, "cache_native_plan", False):
+        # An optional cache is derived from the same canonical event array.
+        # Every replay arm revalidates JSONL and verifies these exact records.
+        encoded_plan = encode_native_plan(events, manifest)
+        manifest["native_plan_sha256"] = sha(encoded_plan)
+        (out / "native-plan.bin").write_bytes(encoded_plan)
     (out / "manifest.json").write_text(json.dumps(manifest, indent=2, sort_keys=True) + "\n")
     print(json.dumps({"manifest": str(out / "manifest.json"), **manifest}, sort_keys=True))
 
@@ -1074,8 +1083,94 @@ def decode_native_latencies(data, expected_count):
     return samples
 
 
+def encode_native_plan(trace, manifest):
+    """Encode the checked private C worker ABI without interpreting payloads."""
+    # Explicit little-endian 16-byte header and 12-byte records match
+    # io-replay-native.c. The canonical JSONL/manifest were validated
+    # above; no text formatting or per-event Python write syscall is
+    # needed in the private native helper handoff.
+    record = struct.Struct("<IIBBBB")
+    header_bytes = 16
+    encoded = bytearray(header_bytes + len(trace) * record.size)
+    struct.pack_into("<8sQ", encoded, 0, b"SWZPLAN", len(trace))
+    for sequence, item in enumerate(trace):
+        phase = 0 if item["phase"] == "warmup" else 1
+        lane = item.get("lane", sequence % manifest["qd"])
+        # The old ASCII parser rejected JSON bools such as True where an
+        # integer page, fixture or lane was required. Packing must not
+        # silently reinterpret those values as 1.
+        if (type(item["page"]) is not int or
+                type(item["fixture"]) is not int or
+                type(lane) is not int or
+                not 0 <= item["page"] <= 0xffffffff or
+                not 0 <= item["fixture"] <= 0xffffffff or
+                not 0 <= lane < manifest["qd"]):
+            raise ValueError("native replay event has invalid integer fields")
+        record.pack_into(
+            encoded, header_bytes + sequence * record.size,
+            item["page"], item["fixture"], lane, phase,
+            ord(item["op"]), 0)
+    return encoded
+
+
+def open_verified_native_plan(trace_path, manifest, trace):
+    """Independently authenticate a cached native plan for one replay arm.
+
+    The source JSONL has already passed check_plan(). A rewritten digest
+    cannot authorize a different plan: every binary event must equal the
+    validated source. The resulting file descriptor is owned by this arm.
+    """
+    cached_path = Path(trace_path).with_name("native-plan.bin")
+    expected_size = 16 + len(trace) * struct.calcsize("<IIBBBB")
+    expected_digest = manifest["native_plan_sha256"]
+    if (not isinstance(expected_digest, str) or
+            re.fullmatch(r"[0-9a-f]{64}", expected_digest) is None):
+        raise ValueError("cached native plan digest is invalid")
+    try:
+        descriptor = os.open(
+            cached_path, os.O_RDONLY | os.O_CLOEXEC | os.O_NOFOLLOW)
+    except OSError as error:
+        raise ValueError(
+            f"cached native plan cannot be opened (errno={error.errno})") from None
+    try:
+        plan = os.fdopen(descriptor, "rb")
+    except BaseException:
+        os.close(descriptor)
+        raise
+    try:
+        metadata = os.fstat(plan.fileno())
+        if (not stat.S_ISREG(metadata.st_mode) or
+                metadata.st_nlink != 1 or
+                metadata.st_mode & 0o022 or
+                metadata.st_size != expected_size):
+            raise ValueError("cached native plan is not an immutable regular file")
+        encoded = plan.read(expected_size + 1)
+        if len(encoded) != expected_size or sha(encoded) != expected_digest:
+            raise ValueError("cached native plan digest or byte count differs")
+        magic, count = struct.unpack_from("<8sQ", encoded)
+        if magic != b"SWZPLAN\x00" or count != len(trace):
+            raise ValueError("cached native plan header differs from validated trace")
+        record = struct.Struct("<IIBBBB")
+        for sequence, fields in enumerate(
+                record.iter_unpack(memoryview(encoded)[16:])):
+            item = trace[sequence]
+            lane = item.get("lane", sequence % manifest["qd"])
+            if (type(item["page"]) is not int or
+                    type(item["fixture"]) is not int or
+                    type(lane) is not int or
+                    fields != (item["page"], item["fixture"], lane,
+                               0 if item["phase"] == "warmup" else 1,
+                               ord(item["op"]), 0)):
+                raise ValueError("cached native plan differs from validated trace")
+        plan.seek(0)
+        return plan
+    except BaseException:
+        plan.close()
+        raise
+
+
 def run_native_replay(fd, fixture_fd, trace, manifest, path, identity,
-                      ready_file=None, start_file=None):
+                      ready_file=None, start_file=None, trace_path=None):
     """Run the exact validated trace through pre-created native worker lanes.
 
     Python keeps ownership/safety checks, provenance, counters and the final
@@ -1095,37 +1190,24 @@ def run_native_replay(fd, fixture_fd, trace, manifest, path, identity,
                            "lane-mixed-waves"):
         raise ValueError("unsupported native replay mode")
 
-    with tempfile.TemporaryFile(mode="w+b") as plan, \
-            tempfile.TemporaryFile(mode="w+b") as result:
-        # Explicit little-endian 16-byte header and 12-byte records match
-        # io-replay-native.c. The canonical JSONL/manifest were validated
-        # above; no text formatting or per-event Python write syscall is
-        # needed in the private native helper handoff.
-        event_record = struct.Struct("<IIBBBB")
-        header_bytes = 16
-        plan_bytes = bytearray(header_bytes + len(trace) * event_record.size)
-        struct.pack_into("<8sQ", plan_bytes, 0, b"SWZPLAN", len(trace))
-        for sequence, item in enumerate(trace):
-            phase = 0 if item["phase"] == "warmup" else 1
-            lane = item.get("lane", sequence % manifest["qd"])
-            # The old ASCII parser rejected JSON bools such as True where an
-            # integer page, fixture or lane was required. Packing must not
-            # silently reinterpret those values as 1.
-            if (type(item["page"]) is not int or
-                    type(item["fixture"]) is not int or
-                    type(lane) is not int or
-                    not 0 <= item["page"] <= 0xffffffff or
-                    not 0 <= item["fixture"] <= 0xffffffff or
-                    not 0 <= lane < manifest["qd"]):
-                raise ValueError("native replay event has invalid integer fields")
-            event_record.pack_into(
-                plan_bytes, header_bytes + sequence * event_record.size,
-                item["page"], item["fixture"], lane, phase,
-                ord(item["op"]), 0)
-        plan.write(plan_bytes)
-        plan.flush()
-        plan.seek(0)
-        del plan_bytes
+    with contextlib.ExitStack() as owned_files:
+        result = owned_files.enter_context(tempfile.TemporaryFile(mode="w+b"))
+        if "native_plan_sha256" in manifest:
+            if trace_path is None:
+                raise ValueError("cached native plan needs its canonical trace path")
+            # No per-arm binary serialization: validate and reuse the
+            # separately snapshotted, immutable precomputed plan.
+            plan = owned_files.enter_context(
+                open_verified_native_plan(trace_path, manifest, trace))
+        else:
+            # Legacy, paced and direct rootless plans retain the original
+            # isolated per-arm staging behavior.
+            plan = owned_files.enter_context(tempfile.TemporaryFile(mode="w+b"))
+            encoded_plan = encode_native_plan(trace, manifest)
+            plan.write(encoded_plan)
+            plan.flush()
+            plan.seek(0)
+            del encoded_plan
         proc = subprocess.Popen(
             [str(NATIVE_REPLAY_HELPER), str(fd), str(fixture_fd),
              str(plan.fileno()), str(result.fileno()), str(manifest["qd"]),
@@ -2185,7 +2267,8 @@ def replay(args):
                 if args.native_replay:
                     native = run_native_replay(
                         fd, source.fileno(), trace, mf, path, identity,
-                        args.stripe_ready_file, args.stripe_start_file)
+                        args.stripe_ready_file, args.stripe_start_file,
+                        args.trace)
                     samples = native["samples"]
                     measured_start_ns = native["measured_start_ns"]
                     measured_end_ns = native["measured_end_ns"]
@@ -2690,6 +2773,8 @@ def main():
     prep.add_argument("--sustained-write", action="store_true",
                       help="write-only persistent lane workers without per-wave barriers")
     prep.add_argument("--write-qd-variants", action="store_true",
+                      help=argparse.SUPPRESS)
+    prep.add_argument("--cache-native-plan", action="store_true",
                       help=argparse.SUPPRESS)
     prep.add_argument("--loaded-plan-variants", action="store_true",
                       help=argparse.SUPPRESS)

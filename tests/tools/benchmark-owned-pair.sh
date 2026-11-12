@@ -893,6 +893,15 @@ if [[ -n $SHARED_PLAN ]]; then
     (( PRIVATE_FIXTURE )) && export SWAPZ_PRIVATE_FIXTURE=1
     cp -- "$plan_dir/trace.jsonl" "$SESSION/plan/trace.jsonl"
     cp -- "$plan_dir/manifest.json" "$SESSION/plan/manifest.json"
+    # Cache is optional for legacy and other plans. Never follow a linked
+    # cache or allow a substituted nonregular artifact into the owned session.
+    # Each arm still validates JSONL, the SHA-bound binary and every event.
+    if [[ -e $plan_dir/native-plan.bin || -L $plan_dir/native-plan.bin ]]; then
+        [[ -f $plan_dir/native-plan.bin && ! -L $plan_dir/native-plan.bin ]] ||
+            fail 'shared native plan cache is unsafe'
+        cp -- "$plan_dir/native-plan.bin" "$SESSION/plan/native-plan.bin" ||
+            fail 'cannot snapshot shared native plan cache'
+    fi
     note 'IMMUTABLE_PLAN_REUSED=1'
 else
 if [[ $PROFILE == medium ]]; then

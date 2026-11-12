@@ -6727,6 +6727,28 @@ Rootless tests must prove a valid one-event handoff as well as missing/extra
 bytes and every corrupted record-field category. No silent text-plan fallback
 or relaxation of benchmark qualification is permitted.
 
+The loaded harness opts in for its fixed mixed-QD32, ID36 and
+sustained-WRITE QD1/4/8/32 plans. Small rootless regression plans may
+explicitly opt in too. The 16-byte-header/12-byte-record native plan
+cache is generated once alongside each canonical JSONL and
+manifest. Preparation must emit an exact
+SHA-256 binding for the native plan in its independent manifest; the shell
+snapshots a regular, nonlinked cache into each arm's private session and
+cleans all six source cache files on normal harness cleanup. Cached bytes are
+never an alternate workload authority: each arm must still separately hash
+and semantically validate its full JSONL trace, independently validate the
+fixture, verify the binary file is a single-link, nonwritable-to-others
+regular file opened without following symlinks, check exact length, magic
+and digest, and compare every binary event byte-field to the validated
+source trace before dispatching the native helper. A missing, truncated,
+substituted, symlinked or mismatched cache is a hard failure, not an
+implicit fallback. Without an explicit cache digest, keep the existing
+private per-arm binary staging path unchanged, including rootless and
+legacy tests. No cache changes device admission, measured timing boundaries,
+per-arm watchdogs, final fsync, output or full readback oracle. Regression
+must prove identical native results with and without cache and rejection
+of altered bytes even when an attacker replaces the digest in the manifest.
+
 The unpaced native replay must not allocate Python QD wave sublists that
 its pre-created C worker lanes never consume. Only the Python-threaded
 development fallback constructs those waves, without changing their order,
