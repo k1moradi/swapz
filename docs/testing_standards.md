@@ -6614,6 +6614,13 @@ async mixed off/swapz comparison and one positive-delta64 write-only off/swapz
 comparison. These rows are directional bottleneck evidence and do not replace
 the matched fast-model qualification intervals.
 
+The optional cached native replay plan must be created exclusively as an
+owner-only regular file with deterministic mode 0600, irrespective of the
+operator's umask. The per-arm no-follow reader must continue rejecting
+linked, group/world-writable, wrong-size, wrongly hashed or byte-different
+plans; rootless validation must exercise an explicitly permissive umask
+without changing the test process's own umask.
+
 The four sustained-WRITE qualification plans (QD1, QD4, QD8 and QD32)
 may be generated in one private Python interpreter rather than four separate
 process launches. The batch must call the unchanged per-variant deterministic

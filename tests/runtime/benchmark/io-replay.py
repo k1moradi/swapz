@@ -275,7 +275,17 @@ def prepare(args):
         # Every replay arm revalidates JSONL and verifies these exact records.
         encoded_plan = encode_native_plan(events, manifest)
         manifest["native_plan_sha256"] = sha(encoded_plan)
-        (out / "native-plan.bin").write_bytes(encoded_plan)
+        # Path.write_bytes() inherits the caller umask and can make this
+        # immutable cache group/world-writable. The reader rightly refuses
+        # such files, so create privately and exclusively from the start.
+        descriptor = os.open(
+            out / "native-plan.bin",
+            os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_CLOEXEC |
+            os.O_NOFOLLOW, 0o600)
+        with os.fdopen(descriptor, "wb") as cached_plan:
+            # A restrictive umask must not make the owner-only cache unreadable.
+            os.fchmod(cached_plan.fileno(), 0o600)
+            cached_plan.write(encoded_plan)
     (out / "manifest.json").write_text(json.dumps(manifest, indent=2, sort_keys=True) + "\n")
     print(json.dumps({"manifest": str(out / "manifest.json"), **manifest}, sort_keys=True))
 

@@ -2427,6 +2427,30 @@ class PairReplayContract(unittest.TestCase):
             rows = [json.loads(line) for line in
                     (cached / "trace.jsonl").read_text().splitlines()]
             self.assertEqual(len(original_sidecar), 16 + len(rows) * 12)
+            self.assertEqual(sidecar.stat().st_mode & 0o777, 0o600)
+            # Run the real producer in a child with a permissive umask, not
+            # by mutating the shared Python test process's global umask.
+            permissive = root / "permissive"
+            prepared = subprocess.run(
+                ["sh", "-c", 'umask 000; exec "$@"', "native-cache-mode",
+                 sys.executable, "-B", str(SCRIPT), "prepare",
+                 *(str(value) for value in common),
+                 "--output-dir", str(permissive), "--cache-native-plan"],
+                capture_output=True, text=True, check=False)
+            self.assertEqual(prepared.returncode, 0, prepared.stderr)
+            permissive_sidecar = permissive / "native-plan.bin"
+            self.assertEqual(permissive_sidecar.stat().st_mode & 0o777,
+                             0o600)
+            permissive_manifest = json.loads(
+                (permissive / "manifest.json").read_text())
+            with open_cache(permissive / "trace.jsonl",
+                            permissive_manifest, rows) as verified:
+                self.assertEqual(verified.read(), original_sidecar)
+            # The existing reader's group-write refusal remains mandatory.
+            permissive_sidecar.chmod(0o660)
+            with self.assertRaisesRegex(ValueError, "immutable regular file"):
+                open_cache(permissive / "trace.jsonl",
+                           permissive_manifest, rows)
             with open_cache(cached / "trace.jsonl",
                             cached_manifest, rows) as verified:
                 self.assertEqual(verified.read(), original_sidecar)
