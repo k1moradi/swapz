@@ -98,6 +98,19 @@ def workload_opportunity(events, pages, logical_pages, prefill_indices=None):
         resident[payload] = resident.get(payload, 0) + 1
     measured_writes = same_filled = same_page = resident_dup = 0
     measured_payloads = set()
+    # This is immutable, content-addressed fixture data. A WRITE may select
+    # the same 4KiB payload thousands of times, but its nonzero repeated-word
+    # property cannot change. Cache lazily to retain rejection precedence for
+    # unused malformed fixture pages and bound memory by unique page values.
+    same_filled_by_payload = {}
+
+    def is_nonzero_same_filled(payload):
+        result = same_filled_by_payload.get(payload)
+        if result is None:
+            result = nonzero_same_filled_page(payload)
+            same_filled_by_payload[payload] = result
+        return result
+
     for event in events:
         if event["op"] != "W":
             continue
@@ -106,7 +119,7 @@ def workload_opportunity(events, pages, logical_pages, prefill_indices=None):
         if event["phase"] == "measure":
             measured_writes += 1
             measured_payloads.add(new)
-            same_filled += int(nonzero_same_filled_page(new))
+            same_filled += int(is_nonzero_same_filled(new))
             same_page += int(old == new)
             resident_dup += int(
                 resident.get(new, 0) - (1 if old == new else 0) > 0)
@@ -127,7 +140,7 @@ def workload_opportunity(events, pages, logical_pages, prefill_indices=None):
         "final_live_duplicate_pages":
             sum(count for count in resident.values() if count > 1),
         "final_live_nonzero_same_filled_pages":
-            sum(1 for payload in live if nonzero_same_filled_page(payload)),
+            sum(is_nonzero_same_filled(payload) for payload in live),
     }
 
 

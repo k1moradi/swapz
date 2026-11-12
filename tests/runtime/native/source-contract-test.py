@@ -7865,6 +7865,24 @@ int main(void)
             "def test_write_qd_batch_matches_individual_immutable_plans",
             fixtures)
 
+    def test_immutable_fixture_opportunity_reuses_content_classification(self):
+        replay = (ROOT / "tests/runtime/benchmark/io-replay.py").read_text()
+        fixtures = (ROOT / "tests/runtime/benchmark/io-replay-test.py").read_text()
+        function = replay.split("def workload_opportunity(", 1)[1].split(
+            "\ndef prefill_fixture_index(", 1)[0]
+        self.assertIn("same_filled_by_payload = {}", function)
+        self.assertIn("result = same_filled_by_payload.get(payload)", function)
+        self.assertIn("if result is None:", function)
+        self.assertIn("result = nonzero_same_filled_page(payload)", function)
+        self.assertIn("same_filled_by_payload[payload] = result", function)
+        self.assertIn("is_nonzero_same_filled(new)", function)
+        self.assertIn(
+            "sum(is_nonzero_same_filled(payload) for payload in live)",
+            function)
+        self.assertIn(
+            "def test_workload_opportunity_classifies_each_distinct_payload_once",
+            fixtures)
+
     def test_wave_plan_validation_reuses_page_set_and_preserves_oracle(self):
         replay = (ROOT / "tests/runtime/benchmark/io-replay.py").read_text()
         fixtures = (ROOT / "tests/runtime/benchmark/io-replay-test.py").read_text()

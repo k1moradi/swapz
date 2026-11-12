@@ -6752,6 +6752,21 @@ startup, trace staging and latency-result serialization remain outside the
 timed interval. The helper is an internal test binary under `build/tests/`;
 it creates no new public test command.
 
+Offline workload-opportunity attribution is immutable-fixture preparation
+only, not measured replay or a claim about kernel byte savings. It may
+classify a distinct fixture payload once per preparation call for the
+nonzero repeated-64-bit-word property and reuse that content-addressed
+result across measured WRITEs and final resident-page accounting. Cache
+entries are keyed by complete 4096-byte payload values, not fixture-slot
+identity: equal bytes in different slots share a result; false classifications
+are cached as rigorously as true ones. Classification must remain lazy, so
+unused malformed fixture pages do not change earlier failure precedence.
+The complete existing counters, generation accounting, original trace and
+manifest bytes, per-arm admission, and final byte-exact oracle are unchanged.
+No caching may persist between arms, preparations, or processes. Rootless
+tests must cover repeated same-value writes, equal-but-distinct payloads,
+RAW/zero/mixed classification, final-map counts, and unused invalid slots.
+
 Canonical trace validation runs independently inside every replay arm,
 even for an immutable plan prepared once for a matched pair. It may reuse a
 single in-flight logical-page set across QD waves and index the validated

@@ -2193,6 +2193,56 @@ class PairReplayContract(unittest.TestCase):
         self.assertEqual(evidence["final_live_nonzero_same_filled_pages"], 2)
         self.assertIn("NOT_KERNEL_SAVINGS", evidence["scope"])
 
+    def test_workload_opportunity_classifies_each_distinct_payload_once(self):
+        import importlib.util
+
+        spec = importlib.util.spec_from_file_location(
+            "swapz_replay_cached_opportunity", SCRIPT)
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+        repeated = b"A" * PAGE
+        equal_but_distinct = bytes(bytearray(repeated))
+        self.assertIsNot(repeated, equal_but_distinct)
+        pages = [repeated, equal_but_distinct,
+                 bytes(PAGE), bytes(range(256)) * 16]
+        operations = [
+            {"op": "W", "phase": "warmup", "page": 0, "fixture": 2}
+        ]
+        operations.extend(
+            {"op": "W", "phase": "measure", "page": index % 64,
+             "fixture": (index // 64 + index) % len(pages)}
+            for index in range(4096)
+        )
+        with mock.patch.object(
+                module, "nonzero_same_filled_page",
+                wraps=module.nonzero_same_filled_page) as classification:
+            evidence = module.workload_opportunity(operations, pages, 64)
+
+        # Identical bytes have one content property even when separate
+        # fixture slots contain distinct Python bytes objects.
+        self.assertEqual(classification.call_count, 3)
+        self.assertEqual(evidence["measured_write_ops"], 4096)
+        self.assertEqual(
+            evidence["nonzero_same_filled_write_ops"],
+            sum(operation["fixture"] in (0, 1)
+                for operation in operations if operation["phase"] == "measure"))
+        latest = [pages[index % len(pages)] for index in range(64)]
+        for operation in operations:
+            latest[operation["page"]] = pages[operation["fixture"]]
+        self.assertEqual(
+            evidence["final_live_nonzero_same_filled_pages"],
+            sum(page == repeated for page in latest))
+
+        # The optimization must not newly inspect an unused invalid fixture
+        # slot or move its size error ahead of the original active oracle.
+        with mock.patch.object(
+                module, "nonzero_same_filled_page",
+                wraps=module.nonzero_same_filled_page) as classification:
+            unused = module.workload_opportunity(
+                [], [repeated, b"short"], 1, prefill_indices=[0])
+        self.assertEqual(classification.call_count, 1)
+        self.assertEqual(unused["final_live_nonzero_same_filled_pages"], 1)
+
     def test_throughput_invalid_times_counts_and_lower_sectors_fail_closed(self):
         import importlib.util
         spec = importlib.util.spec_from_file_location("swapz_replay_rates", SCRIPT)
