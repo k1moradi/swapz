@@ -4150,10 +4150,10 @@ def print_algorithm_workload_diagnostic(diagnostic):
 
 
 def parse_algorithm_source_admission_diagnostic(error_output):
-    """Promote one private, finite pre-consent refusal without host identities.
+    """Promote one finite source-owned refusal without host identities.
 
-    Only the source-controlled algorithm-physical.py marker is admissible;
-    arbitrary child stderr and unrecognized reasons must remain private.
+    The unprivileged selector and privileged probe emit distinct, enumerated
+    markers. Arbitrary child stderr and unrecognized reasons remain private.
     """
     prefix = "PHYSICAL_ALGORITHM_SOURCE_ADMISSION="
     if not isinstance(error_output, str) or len(error_output) > 32768:
@@ -4163,6 +4163,12 @@ def parse_algorithm_source_admission_diagnostic(error_output):
     if len(matches) != 1 or len(matches[0]) > 127:
         return None
     reason = matches[0]
+    if reason == "privileged_canonical_source_advanced":
+        return {
+            "schema": "swapz-algorithm-source-admission-v1",
+            "phase": "before_device_mutation",
+            "reason": "canonical_source_advanced",
+        }
     canonical_reasons = {
         "canonical_source_advanced", "canonical_source_raced",
         "canonical_source_verification_unavailable",
@@ -12593,7 +12599,7 @@ def _run_qualification(args, sync_result):
                         physical_source_admission)
                     print(
                         "  Physical admission first refusal: "
-                        "phase=before_consent "
+                        f"phase={physical_source_admission['phase']} "
                         f"reason={physical_source_admission['reason']}",
                         flush=True)
                 elif (physical_diagnostic is not None and
