@@ -6664,6 +6664,10 @@ mismatched reads. The ID36 pressure path must not gain extra proportional
 heap allocations. Rootless coverage must verify correct repeated page
 readback, one iovec identity, and mismatched-oracle rejection.
 
+The native-wave guard's source contract must match a real source-line
+boundary rather than a literal backslash-n sequence. This assertion is
+observational only and cannot alter the chosen replay engine or oracle.
+
 The native-to-Python post-measurement latency result uses 16 bytes per
 measured operation: one ASCII `W` or `R` byte, seven zero reserved bytes,
 and one little-endian uint64 nanosecond duration. The C helper verifies every

@@ -7750,7 +7750,7 @@ int main(void)
         replay = (ROOT / "tests/runtime/benchmark/io-replay.py").read_text()
         fixtures = (ROOT / "tests/runtime/benchmark/io-replay-test.py").read_text()
         self.assertIn(
-            "replay_waves = None\\n            if not args.native_replay:",
+            "replay_waves = None\n            if not args.native_replay:",
             replay)
         self.assertIn("for wave in replay_waves:", replay)
         self.assertIn("read_iov = [scratch]", replay)
