@@ -333,6 +333,17 @@ dm_open_count() {
     [[ "$opens" =~ ^[0-9]+$ ]] || return 1
     printf '%s\n' "$opens"
 }
+owned_ram_poll_sleep() {
+    local attempt=$1
+    # Probe transient udev/configfs transitions at 10ms first. Every loop
+    # retains its entire original 100ms retry budget after these ten probes,
+    # so a slow host cannot lose time to finish device registration/removal.
+    if (( attempt < 10 )); then
+        sleep 0.01
+    else
+        sleep 0.1
+    fi
+}
 wait_for_retired_dm_holder_release() {
     local attempt i holder holder_name
     local retired_holder unexpected_holder
@@ -341,7 +352,7 @@ wait_for_retired_dm_holder_release() {
     # After the exact owned mapper has been removed, only its own former
     # dm-X holder is allowed to linger transiently. Any different holder is
     # new/foreign ownership and must quarantine immediately.
-    for (( attempt=0; attempt<30; ++attempt )); do
+    for (( attempt=0; attempt<40; ++attempt )); do
         retired_holder=0
         unexpected_holder=0
         for (( i=0; i<READY_COUNT; ++i )); do
@@ -361,7 +372,7 @@ wait_for_retired_dm_holder_release() {
         (( unexpected_holder )) && return 2
         (( retired_holder == 0 )) && return 0
         settle_udev
-        sleep 0.1
+        owned_ram_poll_sleep "$attempt"
     done
     return 1
 }
@@ -370,15 +381,15 @@ remove_owned_ram_config() {
 
     echo 0 > "${CONFIGS[i]}/power" || return 1
     settle_udev
-    for (( attempt=0; attempt<30; ++attempt )); do
+    for (( attempt=0; attempt<40; ++attempt )); do
         [[ ! -e /sys/block/${DISKS[i]} ]] && break
-        sleep 0.1
+        owned_ram_poll_sleep "$attempt"
         settle_udev
     done
     [[ ! -e /sys/block/${DISKS[i]} ]] || return 2
-    for (( attempt=0; attempt<30; ++attempt )); do
+    for (( attempt=0; attempt<40; ++attempt )); do
         rmdir "${CONFIGS[i]}" 2>/dev/null && return 0
-        sleep 0.1
+        owned_ram_poll_sleep "$attempt"
         settle_udev
     done
     return 3
@@ -645,9 +656,9 @@ create_owned_ram() {
         fail 'owned RAM powered model settings mismatch'
     index="$(< "$config/index")"
     [[ $index =~ ^(0|[1-9][0-9]*)$ ]] || fail 'configfs index invalid'
-    for (( n=0; n<50; ++n )); do
+    for (( n=0; n<60; ++n )); do
         disk="$(swapz_resolve_owned_disk "$name" "$index" /sys/block)" && break
-        sleep 0.1
+        owned_ram_poll_sleep "$n"
     done
     [[ -n $disk ]] || fail 'owned disk absent or ambiguous'
     dev="$(< "/sys/block/$disk/dev")"
@@ -655,9 +666,9 @@ create_owned_ram() {
        $(readlink -f "/sys/dev/block/$dev") == "$(readlink -f "/sys/block/$disk")" ]] ||
         fail 'RAM registered driver/index identity mismatch'
     lower="/dev/$disk"
-    for (( n=0; n<50; ++n )); do
+    for (( n=0; n<60; ++n )); do
         [[ -b $lower ]] && break
-        sleep 0.1
+        owned_ram_poll_sleep "$n"
     done
     [[ -b $lower && $(devno "$lower") == "$dev" &&
        $(blockdev --getsize64 "$lower") == 67108864 ]] ||
@@ -811,9 +822,9 @@ check_owned_dm_status "(^|[[:space:]])parallel_reads_enabled=$expected_parallel(
 fi
 dmsetup deps -o devname "$DMNAME" | grep -Fq "${DISKS[1]}" ||
     fail 'owned DM backing dependency mismatch'
-for (( n=0; n<50; ++n )); do
+for (( n=0; n<60; ++n )); do
     [[ -b /dev/mapper/$DMNAME ]] && break
-    sleep 0.1
+    owned_ram_poll_sleep "$n"
 done
 [[ -b /dev/mapper/$DMNAME ]] || fail 'owned DM block node missing'
 DMDEV="$(devno "/dev/mapper/$DMNAME")"

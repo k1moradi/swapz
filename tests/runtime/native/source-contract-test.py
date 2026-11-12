@@ -8,6 +8,7 @@ or the standalone memory-only research smoke instead of the real DM target.
 from collections import Counter
 from pathlib import Path
 import re
+import subprocess
 import unittest
 
 ROOT = Path(__file__).resolve().parents[3]
@@ -7082,6 +7083,39 @@ int main(void)
         self.assertIn("owned RAM block device did not settle after power-off", pair)
         self.assertIn("settle_udev", pair)
         self.assertNotIn('dmsetup remove --force', pair)
+
+    def test_owned_ram_adaptive_poll_keeps_full_retry_budget(self):
+        pair = (ROOT / "tests/tools/benchmark-owned-pair.sh").read_text()
+        self.assertEqual(
+            pair.count('owned_ram_poll_sleep "$attempt"'), 3)
+        self.assertEqual(pair.count('owned_ram_poll_sleep "$n"'), 3)
+        self.assertEqual(
+            pair.count("for (( attempt=0; attempt<40; ++attempt )); do"), 3)
+        self.assertEqual(
+            pair.count("for (( n=0; n<60; ++n )); do"), 3)
+        self.assertIn("settle_udev", pair)
+        self.assertIn("unexpected_holder=1", pair)
+        self.assertIn("return 2\n", pair)
+
+        # Run only the extracted helper, with a mocked sleep function. Never
+        # source the privileged harness or mutate actual host storage.
+        start = pair.index("owned_ram_poll_sleep() {")
+        end = pair.index("\n}\n", start) + 2
+        helper = pair[start:end]
+        for attempts, old_slow_probes in ((40, 30), (60, 50)):
+            with self.subTest(attempts=attempts):
+                shell = "\n".join((
+                    helper,
+                    "sleep() { printf '%s\\n' \"$1\"; }",
+                    f"for (( attempt=0; attempt<{attempts}; ++attempt )); do",
+                    'owned_ram_poll_sleep "$attempt"',
+                    "done",
+                ))
+                output = subprocess.run(
+                    ["bash", "-c", shell], check=True, capture_output=True,
+                    text=True, timeout=5).stdout.splitlines()
+                self.assertEqual(output[:10], ["0.01"] * 10)
+                self.assertEqual(output[10:], ["0.1"] * old_slow_probes)
 
     def test_loaded_maximum_capacity_boundary_probe_is_owned_and_bounded(self):
         loaded = (ROOT / "tests/tools/test-loaded.sh").read_text()

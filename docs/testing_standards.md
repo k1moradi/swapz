@@ -6608,6 +6608,19 @@ only after a successful snapshot. The shell caller accepts only canonical
 `ALL_RAW_FIXTURE=0|1` records and fails closed on any other stdout. Keep
 byte-exact mixed replay and final-image verification for all fixtures.
 
+Owned-null_blk readiness/cleanup may probe udev, configfs and DM nodes
+more frequently during the first 100 ms to avoid unnecessarily waiting a
+whole 100 ms for an already-present device. Each setup loop must retain at
+least the original fifty 100-ms retry opportunities after ten early 10-ms
+probes; each cleanup/holder-release loop must retain at least the original
+thirty 100-ms retries after its ten early probes. Keep immediate readiness
+checks, all `udevadm settle` calls, exact device/index/major:minor/node
+validation, foreign-holder quarantine, and per-pair watchdogs intact.
+No quicker poll may shorten the original slow-host admission/removal window.
+Rootless source qualification must exercise the exact fast/slow poll schedule
+with a mocked sleep command, verifying the six loops and their full budgets
+without touching a device.
+
 Owned-null_blk benchmark setup should read the existing fixed configfs
 attributes and complete /proc/swaps snapshots with Bash's in-process
 single-file substitution (`$(< path)`) rather than starting a fresh
