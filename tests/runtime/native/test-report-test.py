@@ -1195,6 +1195,26 @@ class NativeTimingContract(unittest.TestCase):
             finally:
                 runner.ROOT = previous_root
 
+    def test_development_resume_rootless_suite_allowlist_matches_harness(self):
+        """Each individually skipped suite must be a reviewed serial fixture."""
+        source = (ROOT / "tests/tools/test-rootless.sh").read_text(
+            encoding="utf-8")
+        suites = runner.DEVELOPMENT_RESUME_ROOTLESS_SUITES
+        guard = source.split("rootless_should_run_suite() {", 1)[1].split(
+            "\n}\n", 1)[0]
+        self.assertEqual(len(suites), len(set(suites)))
+        self.assertTrue(set(suites).issubset(runner.rootless_phase_names()))
+        self.assertEqual(
+            source.count("if rootless_should_run_suite; then"), len(suites))
+        for suite in suites:
+            with self.subTest(suite=suite):
+                label = f"rootless_phase='{suite}'"
+                self.assertEqual(source.count(label), 1)
+                self.assertEqual(guard.count(suite), 1)
+                self.assertIn(
+                    label + "\nrootless_begin_phase\n"
+                    "if rootless_should_run_suite; then", source)
+
     def test_development_resume_rootless_suite_guard_never_follows_links(self):
         """A cached suite cannot bypass missing, changed or linked artifacts."""
         source = (ROOT / "tests/tools/test-rootless.sh").read_text(

@@ -11953,7 +11953,10 @@ DEVELOPMENT_RESUME_STAGES = OFFICIAL_STAGE_NAMES[1:4]
 # Native Make, concurrent fixture groups and privileged checks always rerun.
 DEVELOPMENT_RESUME_ROOTLESS_SUITES = (
     "tests/runtime/native/primary-lifecycle-audit-test.py",
+    "tests/runtime/native/primary-lifecycle-nullblk-qualifier-test.py",
     "tests/runtime/native/primary-real-swap-test.py",
+    "tests/runtime/native/primary-real-swap-parent-ownership-test.py",
+    "tests/runtime/native/primary-real-swap-oracle-terminal-test.py",
     "tests/runtime/native/test-report-test.py",
 )
 

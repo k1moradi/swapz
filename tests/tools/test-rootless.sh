@@ -49,7 +49,10 @@ rootless_should_run_suite() {
   esac
   case $rootless_phase in
     tests/runtime/native/primary-lifecycle-audit-test.py|\
+    tests/runtime/native/primary-lifecycle-nullblk-qualifier-test.py|\
     tests/runtime/native/primary-real-swap-test.py|\
+    tests/runtime/native/primary-real-swap-parent-ownership-test.py|\
+    tests/runtime/native/primary-real-swap-oracle-terminal-test.py|\
     tests/runtime/native/test-report-test.py) ;;
     *) return 0 ;;
   esac
@@ -944,6 +947,7 @@ finish_and_report_rootless_unittest "$rootless_audit_exit_code" "$rootless_audit
 fi
 rootless_phase='tests/runtime/native/primary-lifecycle-nullblk-qualifier-test.py'
 rootless_begin_phase
+if rootless_should_run_suite; then
 # Attribute the first source-controlled failure, retaining the private traceback.
 begin_rootless_private_stderr_capture
 rootless_qualifier_command_line=$LINENO
@@ -954,6 +958,7 @@ else
   rootless_qualifier_exit_code=$?
 fi
 finish_and_report_rootless_unittest "$rootless_qualifier_exit_code" "$rootless_qualifier_command_line"
+fi
 rootless_phase='tests/runtime/native/primary-real-swap-test.py'
 rootless_begin_phase
 if rootless_should_run_suite; then
@@ -969,6 +974,7 @@ finish_and_report_rootless_unittest "$rootless_primary_exit_code" "$rootless_pri
 fi
 rootless_phase='tests/runtime/native/primary-real-swap-parent-ownership-test.py'
 rootless_begin_phase
+if rootless_should_run_suite; then
 begin_rootless_private_stderr_capture
 rootless_ownership_command_line=$LINENO
 if python3 -B tests/runtime/native/primary-real-swap-parent-ownership-test.py -v \
@@ -978,9 +984,12 @@ else
   rootless_ownership_exit_code=$?
 fi
 finish_and_report_rootless_unittest "$rootless_ownership_exit_code" "$rootless_ownership_command_line"
+fi
 rootless_phase='tests/runtime/native/primary-real-swap-oracle-terminal-test.py'
 rootless_begin_phase
+if rootless_should_run_suite; then
 python3 -B tests/runtime/native/primary-real-swap-oracle-terminal-test.py -v
+fi
 rootless_phase='tests/runtime/benchmark/metadata-ram-evidence-test.py'
 rootless_begin_phase
 python3 -B tests/runtime/benchmark/metadata-ram-evidence-test.py -v
