@@ -7746,6 +7746,22 @@ int main(void)
             "def test_write_qd_batch_matches_individual_immutable_plans",
             fixtures)
 
+    def test_latency_reporting_reuses_one_sort_per_operation_class(self):
+        replay = (ROOT / "tests/runtime/benchmark/io-replay.py").read_text()
+        fixtures = (ROOT / "tests/runtime/benchmark/io-replay-test.py").read_text()
+        self.assertIn("def latency_percentiles(values):", replay)
+        self.assertIn("ordered_values = sorted(values)", replay)
+        self.assertIn(
+            'read_p50_ns, read_p95_ns, read_p99_ns = latency_percentiles(samples["R"])',
+            replay)
+        self.assertIn(
+            'write_p50_ns, write_p95_ns, write_p99_ns = latency_percentiles(samples["W"])',
+            replay)
+        self.assertNotIn("def percentile(values, fraction):", replay)
+        self.assertIn(
+            "def test_latency_percentiles_match_legacy_floor_index_with_one_sort",
+            fixtures)
+
     def test_native_replay_skips_threaded_wave_allocation_and_reuses_read_iov(self):
         replay = (ROOT / "tests/runtime/benchmark/io-replay.py").read_text()
         fixtures = (ROOT / "tests/runtime/benchmark/io-replay-test.py").read_text()

@@ -6668,6 +6668,18 @@ The native-wave guard's source contract must match a real source-line
 boundary rather than a literal backslash-n sequence. This assertion is
 observational only and cannot alter the chosen replay engine or oracle.
 
+The per-arm post-measurement report must preserve the historical
+floor-index p50/p95/p99 definitions (for `n` values, sorted element
+`min(n - 1, int((n - 1) * fraction))`, fractions 0.50/0.95/0.99).
+Sort READ and WRITE measured durations once each and reuse that immutable
+order for all three statistics rather than sorting three times per class.
+Missing READ or WRITE samples continue to report three `null` percentiles;
+retain all original nanosecond values, event counts, and percentile fields.
+No sorting or reporting work may enter the timed I/O interval. Rootless
+regression must compare exact legacy results over empty, short, tied,
+large, and mixed-value samples, preserve the source arrays and prove the
+bounded one-sort-per-nonempty-class behavior.
+
 The native-to-Python post-measurement latency result uses 16 bytes per
 measured operation: one ASCII `W` or `R` byte, seven zero reserved bytes,
 and one little-endian uint64 nanosecond duration. The C helper verifies every

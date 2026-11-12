@@ -29,6 +29,34 @@ SCRIPT = Path(__file__).with_name("io-replay.py")
 
 
 class PairReplayContract(unittest.TestCase):
+    def test_latency_percentiles_match_legacy_floor_index_with_one_sort(self):
+        import runpy
+
+        percentiles = runpy.run_path(str(SCRIPT))["latency_percentiles"]
+        random_values = random.Random(0x51A0A9)
+        for sample_count in (0, 1, 2, 3, 4, 5, 10, 17, 100, 101,
+                             4096, 16384):
+            with self.subTest(count=sample_count):
+                values = [
+                    random_values.choice((1, 100, 101, 999, 1000000000))
+                    if sample_index % 3 == 0 else
+                    random_values.randrange(1, 1 << 55)
+                    for sample_index in range(sample_count)
+                ]
+                original_values = values.copy()
+                ordered = sorted(values)
+                expected = tuple(
+                    (ordered[min(len(ordered) - 1,
+                                 int((len(ordered) - 1) * fraction))]
+                     if ordered else None)
+                    for fraction in (.50, .95, .99)
+                )
+                with mock.patch("builtins.sorted", wraps=sorted) as sort_call:
+                    actual = percentiles(values)
+                self.assertEqual(actual, expected)
+                self.assertEqual(values, original_values)
+                self.assertEqual(sort_call.call_count, int(bool(values)))
+
     def test_replay_page_oracle_reuses_iovec_without_weaker_readback(self):
         # The same live one-element iovec must service every exact 4096B
         # prefill and final-image read; oracle and short-read failures remain.

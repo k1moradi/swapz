@@ -992,6 +992,18 @@ def wait_for_external_start_gate(ready_file, start_file):
     raise ValueError("external start gate timed out")
 
 
+def latency_percentiles(values):
+    """Compute the existing floor-index p50/p95/p99 from one sorted snapshot."""
+    if not values:
+        return None, None, None
+    ordered_values = sorted(values)
+    last_index = len(ordered_values) - 1
+    return tuple(
+        ordered_values[min(last_index, int(last_index * fraction))]
+        for fraction in (.50, .95, .99)
+    )
+
+
 def decode_native_latencies(data, expected_count):
     """Validate the exact fixed-layout, post-measurement native result bytes."""
     record = struct.Struct("<c7sQ")
@@ -2365,11 +2377,11 @@ def replay(args):
         raise ValueError("no measured waves were replayed")
     seconds = (native_elapsed_s if native_elapsed_s is not None else
                (measured_end_ns - measured_start_ns) / 1e9)
-    def percentile(values, fraction):
-        if not values:
-            return None
-        vals = sorted(values)
-        return vals[min(len(vals) - 1, int((len(vals) - 1) * fraction))]
+    # Report generation is outside the timed I/O interval. Retain the
+    # historical floor-index percentile definition, but sort each measured
+    # operation class once rather than three times for p50/p95/p99.
+    read_p50_ns, read_p95_ns, read_p99_ns = latency_percentiles(samples["R"])
+    write_p50_ns, write_p95_ns, write_p99_ns = latency_percentiles(samples["W"])
     report = {
         "candidate": args.candidate, "source_sha": args.source_sha,
         "device_identity": identity, "fixture_sha256": fixture_hash,
@@ -2419,12 +2431,12 @@ def replay(args):
         "kernel_read_path": kernel_read_delta(kernel_read_before, kernel_read_after),
         "lower_inflight": lower_inflight,
         "lower_io": iostat_delta(before, after), "verdict": "PASS",
-        "read_p50_ns": percentile(samples["R"], .50),
-        "read_p95_ns": percentile(samples["R"], .95),
-        "read_p99_ns": percentile(samples["R"], .99),
-        "write_p50_ns": percentile(samples["W"], .50),
-        "write_p95_ns": percentile(samples["W"], .95),
-        "write_p99_ns": percentile(samples["W"], .99),
+        "read_p50_ns": read_p50_ns,
+        "read_p95_ns": read_p95_ns,
+        "read_p99_ns": read_p99_ns,
+        "write_p50_ns": write_p50_ns,
+        "write_p95_ns": write_p95_ns,
+        "write_p99_ns": write_p99_ns,
     }
     report["throughput_mbps"] = measured_throughput(
         report, require_lower=bool(identity.get("owned_disk"))
