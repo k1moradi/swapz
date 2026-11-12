@@ -4669,6 +4669,9 @@ class ReportContract(unittest.TestCase):
                 "workload_phase": "fill", "mem_available_mib": 12000,
                 "cgroup_io_some_usec": 700, "cgroup_io_full_usec": 500,
                 "cgroup_memory_max_events": 17,
+                "swapz_lower_write_wall_ns": 900, "swapz_ordered_worker_wall_ns": 1000,
+                "swapz_prep_wait_wall_ns": 40, "swapz_commit_nonio_wall_ns": 30,
+                "swapz_lower_write_service_ewma_ns": 80,
                 "swapz_error": -5}
 
     def test_official_algorithm_tier_retains_first_pressure_snapshot(self):
@@ -4837,6 +4840,8 @@ class ReportContract(unittest.TestCase):
             self.assertIn("lower_read_sectors_total=unavailable", console)
             self.assertIn("totals, not attributed deltas", console)
             self.assertIn("cgroup_io_some_usec=700", console)
+            self.assertIn("swapz_lower_write_wall_ns=900", console)
+            self.assertIn("cumulative/overlapping ns", console)
             self.assertIn("cgroup_memory_max_events=17", console)
         if activation_refusal:
             self.assertIn("mapper_used_kib=512", console)
@@ -5218,10 +5223,20 @@ class ReportContract(unittest.TestCase):
         marker = lambda value: prefix + json.dumps(value, separators=(",", ":"))
         self.assertEqual(runner.parse_algorithm_pageout_diagnostic(marker(report)), report)
         optional = {"cgroup_io_some_usec", "cgroup_io_full_usec", "cgroup_memory_max_events"}
-        legacy = {key: value for key, value in pressure.items() if key not in optional}
+        timing = {"swapz_lower_write_wall_ns", "swapz_ordered_worker_wall_ns",
+                  "swapz_prep_wait_wall_ns", "swapz_commit_nonio_wall_ns",
+                  "swapz_lower_write_service_ewma_ns"}
+        previous = {key: value for key, value in pressure.items() if key not in timing}
+        self.assertIsNotNone(runner.parse_algorithm_pageout_diagnostic(
+            marker({**report, "pressure": previous})))
+        legacy = {key: value for key, value in pressure.items() if key not in optional | timing}
+        maximum = {key: (value if key in {"workload_phase", "swapz_error", "limit_usec"}
+                         else (1 << 64) - 1) for key, value in pressure.items()}
+        self.assertIsNotNone(runner.parse_algorithm_pageout_diagnostic(
+            marker({**report, "pressure": maximum})))
         historical = {**report, "pressure": legacy}
         self.assertEqual(runner.parse_algorithm_pageout_diagnostic(marker(historical)), historical)
-        for missing in optional:
+        for missing in optional | timing:
             partial = {key: value for key, value in pressure.items() if key != missing}
             self.assertIsNone(runner.parse_algorithm_pageout_diagnostic(
                 marker({**report, "pressure": partial})))

@@ -3069,7 +3069,10 @@ class PrimaryRealSwapContracts(unittest.TestCase):
         self.assertTrue(window.observe(5.0, 4_500_000))
         status = {"logical_write": 4096, "physical_write": 8192,
                   "logical_read": 0, "physical_read": 0, "failed": 0,
-                  "error": -5, "write_submitted": 8192, "upper_write_completed_ok": 1}
+                  "error": -5, "write_submitted": 8192, "upper_write_completed_ok": 1,
+                  "lower_write_wall_ns": 900, "ordered_worker_wall_ns": 1000,
+                  "prep_wait_wall_ns": 40, "window_commit_nonio_wall_ns": 30,
+                  "lower_write_service_ewma_ns": 80}
         with mock.patch.object(qualify, "_mem_available_mib", return_value=12000), \
                 mock.patch.object(qualify, "_read_uint", side_effect=[1024, 2048]), \
                 mock.patch.object(qualify, "_psi_total", side_effect=[700, 500]), \
@@ -3089,6 +3092,8 @@ class PrimaryRealSwapContracts(unittest.TestCase):
         self.assertEqual(observed["cgroup_io_full_usec"], 500)
         self.assertEqual(observed["cgroup_memory_max_events"], 17)
         self.assertEqual(observed["swapz_physical_write_total"], 8192)
+        self.assertEqual(observed["swapz_lower_write_wall_ns"], 900)
+        self.assertEqual(observed["swapz_lower_write_service_ewma_ns"], 80)
         self.assertEqual(observed["swapz_error"], -5)
         self.assertEqual(observed["lower_write_sectors_total"], 29)
         lower.assert_called_once_with((8, 4))

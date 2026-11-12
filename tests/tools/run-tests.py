@@ -4073,6 +4073,11 @@ def parse_algorithm_pageout_diagnostic(error_output):
                 "lower_read_sectors_total", "lower_write_sectors_total"}
             stall_fields = {"cgroup_io_some_usec", "cgroup_io_full_usec",
                             "cgroup_memory_max_events"}
+            timing_fields = {"swapz_lower_write_wall_ns", "swapz_ordered_worker_wall_ns",
+                             "swapz_prep_wait_wall_ns", "swapz_commit_nonio_wall_ns",
+                             "swapz_lower_write_service_ewma_ns"}
+            if isinstance(pressure, dict) and set(pressure) == pressure_fields | stall_fields | timing_fields:
+                pressure_fields |= timing_fields
             if isinstance(pressure, dict) and set(pressure) == pressure_fields | stall_fields:
                 pressure_fields |= stall_fields
             if (diagnostic["reason"] != "memory_pressure" or
@@ -4176,6 +4181,12 @@ def print_algorithm_workload_diagnostic(diagnostic):
                   + " ".join(f"{key}={observed(key)}" for key in (
                       "cgroup_io_some_usec", "cgroup_io_full_usec",
                       "cgroup_memory_max_events")), flush=True)
+        if "swapz_lower_write_wall_ns" in pressure:
+            print("        Target timing (cumulative/overlapping ns; service is EWMA): "
+                  + " ".join(f"{key}={observed(key)}" for key in (
+                      "swapz_lower_write_wall_ns", "swapz_ordered_worker_wall_ns",
+                      "swapz_prep_wait_wall_ns", "swapz_commit_nonio_wall_ns",
+                      "swapz_lower_write_service_ewma_ns")), flush=True)
         print("        I/O snapshots (totals, not attributed deltas): " + " ".join(
             f"{key}={observed(key)}" for key in (
                 "swapz_logical_write_total", "swapz_physical_write_total",

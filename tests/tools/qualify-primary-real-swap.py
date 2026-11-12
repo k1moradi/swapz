@@ -3484,6 +3484,11 @@ def _workload_pressure_failure(window: PsiStallWindow, cgroup: Path,
         "swapz_write_submitted_total": "write_submitted",
         "swapz_upper_write_completed_ok": "upper_write_completed_ok",
         "swapz_failed": "failed", "swapz_error": "error",
+        "swapz_lower_write_wall_ns": "lower_write_wall_ns",
+        "swapz_ordered_worker_wall_ns": "ordered_worker_wall_ns",
+        "swapz_prep_wait_wall_ns": "prep_wait_wall_ns",
+        "swapz_commit_nonio_wall_ns": "window_commit_nonio_wall_ns",
+        "swapz_lower_write_service_ewma_ns": "lower_write_service_ewma_ns",
     }
     try:
         status = status_reader()

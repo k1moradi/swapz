@@ -2959,6 +2959,14 @@ values for these three fields; reject partial or unknown extensions, boolean
 counters and private strings. Keep historical records without the extension
 readable. The single diagnostic marker remains bounded to 1536 bytes, while
 workload geometry, timeout and PSI safety threshold remain unchanged.
+The same first-stop record must retain existing target lower-WRITE wall,
+ordered-worker wall, preparation-wait wall, non-I/O commit wall and lower-WRITE
+service-EWMA counters when available. Label cumulative nanoseconds and EWMA
+explicitly; these may overlap and must not be summed as exclusive CPU time or
+relabeled as fill-only deltas. Preserve both older diagnostic field sets,
+require a complete new timing extension and uint64/null values, and test the
+largest numeric record against the marker bound. Optional read failure cannot
+replace the original PSI stop or alter its safety threshold.
 
 The shared-root-parent development trial must sample its exact selected
 partition's Linux block counters, not the whole root disk: unrelated root

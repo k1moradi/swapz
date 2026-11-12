@@ -837,6 +837,7 @@ class PhysicalSwapProbeTests(unittest.TestCase):
             "limit_usec": 4_250_000, "workload_phase": "fill",
             "mem_available_mib": 12000, "swapz_error": -5,
             "cgroup_io_some_usec": 700, "cgroup_io_full_usec": True,
+            "swapz_lower_write_wall_ns": 900, "swapz_prep_wait_wall_ns": True,
             "cgroup_memory_max_events": "/private/KEEP_PRIVATE",
             "private_path": "/private/KEEP_PRIVATE"}
         wrapped = RuntimeError(str(original) +
@@ -852,6 +853,8 @@ class PhysicalSwapProbeTests(unittest.TestCase):
         self.assertEqual(record["pressure"]["mem_available_mib"], 12000)
         self.assertEqual(record["pressure"]["swapz_error"], -5)
         self.assertEqual(record["pressure"]["cgroup_io_some_usec"], 700)
+        self.assertEqual(record["pressure"]["swapz_lower_write_wall_ns"], 900)
+        self.assertIsNone(record["pressure"]["swapz_prep_wait_wall_ns"])
         self.assertIsNone(record["pressure"]["cgroup_io_full_usec"])
         self.assertIsNone(record["pressure"]["cgroup_memory_max_events"])
         self.assertIsNone(record["pressure"]["lower_read_sectors_total"])
