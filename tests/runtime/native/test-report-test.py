@@ -1573,9 +1573,12 @@ class NativeTimingContract(unittest.TestCase):
                                     for name in native.SUITES[suite]]
                         # The helper must not silently change a native program's
                         # former tests/suites cwd, even in a direct noncache run.
+                        observed_native_descriptors = []
+
                         def check_descriptor_during_launch(command, **kwargs):
                             self.assertNotIn("cwd", kwargs)
                             descriptor, = kwargs["pass_fds"]
+                            observed_native_descriptors.append(descriptor)
                             self.assertEqual(
                                 kwargs["executable"],
                                 f"/proc/self/fd/{descriptor}")
@@ -1591,6 +1594,12 @@ class NativeTimingContract(unittest.TestCase):
                             self.assertEqual(native.run_native_suite(
                                 suite, binaries, mode=None), 0)
                             self.assertEqual(executed.call_count, len(binaries))
+                        # Descriptor ownership returns to the parent after
+                        # every child; no verified FD may remain open.
+                        self.assertTrue(observed_native_descriptors)
+                        for descriptor in set(observed_native_descriptors):
+                            with self.assertRaises(OSError):
+                                os.fstat(descriptor)
                         self.assertEqual(native.run_native_suite(
                             suite, binaries, mode="record",
                             tested_source=expected_source, kdir="/synthetic",

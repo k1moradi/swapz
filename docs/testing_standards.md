@@ -619,7 +619,9 @@ execution uses the verified, owned regular-file descriptor through Linux
 directory, so replacing a checked pathname cannot launch substituted code.
 The descriptor is closed by the parent after each child finishes. A synthetic
 path-replacement regression must prove the pinned original inode executes
-instead of the newly written substitute.
+instead of the newly written substitute. Separate launch-time assertions
+inspect the open FD, and post-return assertions confirm that the parent
+closed every owned descriptor without leaking an open native executable.
 Invalid private checkpoint permissions disable reuse, and a failed native child
 retains a bounded binary name and its original exit class.
 Synthetic regression must create real executable fixture scripts (with valid
