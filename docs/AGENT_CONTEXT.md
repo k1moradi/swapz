@@ -30,6 +30,25 @@ packing, readback integrity, ordering, concurrency and fail-closed semantics.
 Physical and production acceptance remain blocked until current-source
 loaded, fault-injection, lifecycle and real-partition tests qualify this path.
 
+## Real-swap memory-pressure measurement (do not revert)
+
+The two concurrent anonymous-pageout oracles intentionally allocate more
+memory (384 MiB) than the dedicated 128 MiB `memory.max` cgroup allows.
+That isolated group is expected to reclaim even if the machine has plenty of
+unused RAM. Linux PSI `some` indicates at least ONE oracle is blocked,
+which may coexist with ongoing successful swap writes from the other oracle.
+Do **not** treat 85% cgroup PSI `some` as an all-worker stall or confuse it
+with host RAM percentage (e.g. a reported 27% host utilization).
+
+The rolling five-second 85% whole-workload stop therefore samples dedicated
+cgroup `memory.pressure full total=`, meaning ALL non-idle cgroup tasks are
+simultaneously stalled. Cgroup PSI `some` remains separately recorded as
+performance evidence. The independent 1 GiB host `MemAvailable` floor,
+cgroup OOM/swap bounds, fixed workload/timeout, source/device admission and
+recovery checks are unchanged. Never substitute host-global RAM occupancy
+or relax these limits to force a physical PASS. See kernel PSI documentation
+and the source-bound FULL-versus-SOME rootless regression.
+
 Earlier permissions to format/repartition even the dedicated SD card
 are superseded; only post-swapoff swap *data* may be overwritten.
 

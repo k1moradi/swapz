@@ -3048,6 +3048,7 @@ class PrimaryRealSwapContracts(unittest.TestCase):
                 qualify._mem_available_mib()
 
     def test_sustained_psi_window_detects_late_high_stall_period(self):
+        self.assertEqual(qualify.PSI_STOP_KIND, "full")
         window = qualify.PsiStallWindow(0.0, 0)
         # Ten quiet seconds must not dilute a later five-second high-stall
         # interval below the stop threshold.
@@ -3064,6 +3065,30 @@ class PrimaryRealSwapContracts(unittest.TestCase):
         with self.assertRaisesRegex(
                 qualify.QualificationFailure, "PSI total regressed"):
             window.observe(16.0, 4_499_999)
+
+    def test_cgroup_some_pressure_is_not_whole_workload_stall(self):
+        """One delayed worker is not a deadlock when the other makes progress.
+
+        The host can have plenty of free RAM: these pressure counters belong
+        to the deliberately 128 MiB-limited test cgroup, not the whole host.
+        Linux PSI SOME and FULL have different accounting semantics.
+        """
+        with tempfile.TemporaryDirectory() as directory:
+            pressure = Path(directory) / "memory.pressure"
+            pressure.write_text(
+                "some avg10=90.00 avg60=0.00 avg300=0.00 total=4500000\n"
+                "full avg10=5.00 avg60=0.00 avg300=0.00 total=250000\n",
+                encoding="ascii")
+            self.assertEqual(qualify._psi_total(pressure, "some"), 4_500_000)
+            self.assertEqual(qualify._psi_total(pressure, "full"), 250_000)
+
+            # A 90%-SOME / 5%-FULL interval must not trip the strict
+            # 85%-FULL whole-workload stop; a 90%-FULL interval must.
+            window = qualify.PsiStallWindow(0.0, 0)
+            self.assertFalse(window.observe(
+                5.0, qualify._psi_total(pressure, qualify.PSI_STOP_KIND)))
+            self.assertTrue(qualify.PsiStallWindow(0.0, 0).observe(
+                5.0, 4_500_000))
 
     def test_pressure_snapshot_preserves_first_stop_when_optional_reads_fail(self):
         window = qualify.PsiStallWindow(0.0, 0)
@@ -3083,7 +3108,7 @@ class PrimaryRealSwapContracts(unittest.TestCase):
             failure = qualify._workload_pressure_failure(
                 window, Path("/private/cgroup"), lambda: status, (8, 4), "fill")
         self.assertEqual(str(failure),
-                         "sustained cgroup memory PSI exceeded safe stop threshold")
+                         "sustained cgroup memory PSI full exceeded safe stop threshold")
         observed = failure.pressure_observation
         self.assertEqual(observed["stalled_usec"], 4_500_000)
         self.assertEqual(observed["mem_available_mib"], 12000)
@@ -3990,7 +4015,7 @@ class PrimaryRealSwapContracts(unittest.TestCase):
             with mock.patch.object(qualify, "_cgroup_create", return_value=cgroup), \
                     mock.patch.object(qualify, "_memory_events",
                                       return_value={"oom": 0, "oom_kill": 0}), \
-                    mock.patch.object(qualify, "_psi_total", return_value=0), \
+                    mock.patch.object(qualify, "_psi_total", return_value=0) as psi_reader, \
                     mock.patch.object(qualify, "_write_control"), \
                     mock.patch.object(qualify, "read_swap_rows", return_value=[expected]), \
                     mock.patch.object(qualify.subprocess, "Popen", return_value=child), \
@@ -4003,6 +4028,11 @@ class PrimaryRealSwapContracts(unittest.TestCase):
                     qualify._run_workload(
                         {"run_id": "a" * 32}, {"mapper_device": (252, 1)},
                         ORACLE, 384, 128, 384, 60)
+            # Directly assert the production workload reads both rows, and
+            # NEVER passes the "some" total into the FULL stall window.
+            self.assertEqual(psi_reader.call_args_list, [
+                mock.call(cgroup / "memory.pressure", "some"),
+                mock.call(cgroup / "memory.pressure", "full")])
             self.assertIsInstance(caught.exception.__cause__, OSError)
             self.assertEqual(str(caught.exception.__cause__),
                              "synthetic migration refusal")

@@ -2233,8 +2233,23 @@ OOM counters must remain unchanged, including at the final post-release sample;
 counter regressions cannot qualify as zero OOM events.
 OOM, cgroup swap and PSI telemetry begin before FILL; guard checks enforce the
 1 GiB host MemAvailable floor and stop when any rolling interval of at least
-five seconds has cgroup memory PSI "some" above 85%. Earlier quiet time must
-not dilute a later sustained-stall stop condition. Kernel/cgroup evidence is parsed
+five seconds has dedicated-cgroup memory PSI **"full"** above 85%. Earlier quiet
+time must not dilute a later sustained-stall stop condition. This is a deliberate
+correction from the former "some" stop: two concurrent oracle processes must
+reclaim under an artificially small 128 MiB cgroup memory.max while testing
+384 MiB of anonymous pages. Cgroup PSI "some" only means **at least one** task
+is delayed, even while the other makes measurable swap progress; using it as
+a whole-workload no-progress stop wrongly rejected a productive workload.
+"full" instead measures wall time when **all non-idle tasks** in that isolated
+cgroup are simultaneously stalled. Neither PSI percentage measures host RAM
+occupancy (27% host RAM used is not a contradiction). Never replace the FULL
+stop with host RAM utilization, host-global PSI, or cgroup SOME; separately
+retain host MemAvailable, cgroup OOM/swap, deadline, source and recovery gates.
+Retain cgroup SOME as performance telemetry, and report FULL independently
+using cgroup_memory_pressure_full_usec in completed workload evidence. New
+rootless tests must prove high SOME/low FULL does not trip the whole-workload
+stop, high FULL still does, and the actual workload samples FULL before FILL.
+Kernel/cgroup evidence is parsed
 fail-closed: MemAvailable must retain its canonical kB unit, PSI has one
 monotonic numeric total, swapz byte counters are nonnegative, and failed= is
 boolean. A failed dmsetup-info query is never mapper-absence evidence by

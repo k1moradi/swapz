@@ -4255,7 +4255,8 @@ def print_algorithm_workload_diagnostic(diagnostic):
         def observed(key):
             value = pressure[key]
             return "unavailable" if value is None else str(value)
-        print("        Pressure stop: " + " ".join(
+        print("        Pressure stop (dedicated-cgroup PSI FULL stall-time; "
+              "NOT host RAM utilization): " + " ".join(
             f"{key}={observed(key)}" for key in (
                 "workload_phase", "window_usec", "stalled_usec", "limit_usec",
                 "mem_available_mib", "cgroup_memory_bytes", "cgroup_swap_bytes")), flush=True)

@@ -98,7 +98,23 @@ MAX_PHYSICAL_SOURCE_BYTES = 16 * 1024 * 1024
 SOURCE_ADMISSION_TIMEOUT_SECONDS = 45
 MAX_ORACLE_RECORD_BYTES = 4096
 MAX_ORACLE_MISMATCH_SAMPLES = 16
-# A sustained memory stall is a safety stop, not an integrity oracle.
+# A sustained workload-wide memory stall is a safety stop, not an integrity
+# oracle and NOT a measure of the host's percentage of RAM in use.
+#
+# The two anonymous-memory oracles run in a dedicated memory.max=128 MiB cgroup
+# while exercising 384 MiB of pages. The cgroup deliberately reclaims despite
+# ample free host RAM. Its memory.pressure "some" grows whenever EITHER worker
+# waits for reclaim, even when the other worker is completing real swap I/O.
+# Treating 85% "some" as a complete workload stall was a false attribution.
+#
+# Linux PSI "full" means ALL non-idle tasks in this cgroup are simultaneously
+# stalled. It is the correct signal for this 5-second *whole-workload* stop.
+# Do NOT replace it with RAM-used percentage, host PSI, or a cgroup "some"
+# counter: those answer different questions. Keep cgroup "some" as independent
+# performance evidence and retain the host MemAvailable floor, cgroup OOM,
+# swap-usage limits, bounded timeouts and exact byte/traffic acceptance.
+# See Linux Documentation/accounting/psi.rst (SOME versus FULL).
+PSI_STOP_KIND = "full"
 PSI_STOP_FRACTION = 0.85
 PSI_STOP_GRACE_SECONDS = 5
 PSI_STOP_SAMPLE_INTERVAL_SECONDS = 0.05
@@ -129,7 +145,13 @@ class TargetProofFailed(Blocked):
 
 
 class PsiStallWindow:
-    """Bounded rolling detector for sustained cgroup memory-pressure stalls."""
+    """Detect sustained cgroup PSI *full* stalls, not host RAM utilization.
+
+    Caller must pass the monotonic microsecond total from the dedicated
+    cgroup's memory.pressure full row. In a two-worker cgroup, 'some' means
+    at least one worker stalled; it cannot establish that ALL work stopped.
+    This rolling fraction measures stalled wall time, not occupied memory.
+    """
 
     def __init__(self, monotonic_seconds: float, total_usec: int):
         self._samples: deque[tuple[float, int]] = deque(
@@ -2112,6 +2134,13 @@ def require_no_cgroup_oom_events(
 
 
 def _psi_total(path: Path, kind: str = "some") -> int:
+    """Read the cumulative PSI microseconds for exactly one kind and scope.
+
+    /proc/pressure/memory measures host-wide delays; a dedicated cgroup's
+    memory.pressure measures delays due to that cgroup's own reclaim limit.
+    'some' means any task is stalled; 'full' means all non-idle tasks are
+    stalled. Neither is RAM occupancy, and neither is an instantaneous rate.
+    """
     observed: int | None = None
     try:
         for line in path.read_text(encoding="ascii").splitlines():
@@ -3598,7 +3627,7 @@ def _workload_pressure_failure(window: PsiStallWindow, cgroup: Path,
         observation["lower_read_sectors_total"] = None
         observation["lower_write_sectors_total"] = None
     failure = QualificationFailure(
-        "sustained cgroup memory PSI exceeded safe stop threshold")
+        "sustained cgroup memory PSI full exceeded safe stop threshold")
     failure.pressure_observation = observation
     return failure
 
@@ -3623,7 +3652,12 @@ def _run_workload(manifest: dict, active: dict, oracle_path: Path,
         if any(events_before[key] != 0 for key in ("oom", "oom_kill")):
             raise QualificationFailure(
                 "fresh dedicated oracle cgroup already recorded OOM events")
-        psi_before = _psi_total(cgroup / "memory.pressure")
+        # Preserve the prior "some" metric as performance evidence, but
+        # use "full" for the workload-wide stop. With two worker processes,
+        # "some" may approach 100% while useful swap I/O is still advancing.
+        pressure_path = cgroup / "memory.pressure"
+        psi_some_before = _psi_total(pressure_path, "some")
+        psi_before = _psi_total(pressure_path, PSI_STOP_KIND)
     except BaseException as original_error:
         try:
             _remove_cgroup(cgroup)
@@ -3670,7 +3704,9 @@ def _run_workload(manifest: dict, active: dict, oracle_path: Path,
         if _mem_available_mib() < MIN_AVAILABLE_MIB:
             raise QualificationFailure(
                 f"host MemAvailable crossed {MIN_AVAILABLE_MIB} MiB early-stop threshold")
-        current_psi_total = _psi_total(cgroup / "memory.pressure")
+        # FULL is a *stall-time* threshold for all workers, not a substitute
+        # for the separate /proc/meminfo MemAvailable host-safety guard.
+        current_psi_total = _psi_total(pressure_path, PSI_STOP_KIND)
         observed_time = time.monotonic()
         stopped = psi_window.observe(observed_time, current_psi_total)
         capture_progress(observed_time, force=stopped)
@@ -3952,7 +3988,8 @@ def _run_workload(manifest: dict, active: dict, oracle_path: Path,
         events_after = _memory_events(cgroup / "memory.events")
         # Do not trust a previously clean guard observation as terminal proof.
         require_no_cgroup_oom_events(events_before, events_after)
-        psi_after = _psi_total(cgroup / "memory.pressure")
+        psi_some_after = _psi_total(pressure_path, "some")
+        psi_after = _psi_total(pressure_path, PSI_STOP_KIND)
         observed_time = time.monotonic()
         stopped = psi_window.observe(observed_time, psi_after)
         capture_progress(observed_time, force=stopped)
@@ -3970,7 +4007,10 @@ def _run_workload(manifest: dict, active: dict, oracle_path: Path,
             "rounds": rounds,
             "cgroup_swap_peak_bytes": max(
                 int(result["cgroup_swap_peak_bytes"]) for result in rounds),
-            "cgroup_memory_pressure_some_usec": psi_after - psi_before,
+            # These are distinct PSI states. Preserve the historical "some"
+            # performance metric; FULL now owns the safety-stop decision.
+            "cgroup_memory_pressure_some_usec": psi_some_after - psi_some_before,
+            "cgroup_memory_pressure_full_usec": psi_after - psi_before,
             "mapper_used_delta_kib": sum(
                 int(result["mapper_used_delta_kib"]) for result in rounds),
             "swapz_logical_write_delta": sum(

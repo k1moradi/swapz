@@ -831,7 +831,7 @@ class PhysicalSwapProbeTests(unittest.TestCase):
 
     def test_algorithm_memory_pressure_remains_first_cause_after_child_cleanup_timeout(self):
         stderr = io.StringIO()
-        original = RuntimeError("sustained cgroup memory PSI exceeded safe stop threshold")
+        original = RuntimeError("sustained cgroup memory PSI full exceeded safe stop threshold")
         original.pressure_observation = {
             "window_usec": 5_000_000, "stalled_usec": 4_500_000,
             "limit_usec": 4_250_000, "workload_phase": "fill",
