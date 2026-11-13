@@ -1573,23 +1573,24 @@ class NativeTimingContract(unittest.TestCase):
                                     for name in native.SUITES[suite]]
                         # The helper must not silently change a native program's
                         # former tests/suites cwd, even in a direct noncache run.
+                        def check_descriptor_during_launch(command, **kwargs):
+                            self.assertNotIn("cwd", kwargs)
+                            descriptor, = kwargs["pass_fds"]
+                            self.assertEqual(
+                                kwargs["executable"],
+                                f"/proc/self/fd/{descriptor}")
+                            # A successful launch closes the parent's copy;
+                            # inspect ownership while the descriptor is open.
+                            self.assertEqual(
+                                os.fstat(descriptor).st_uid, os.geteuid())
+                            return subprocess.CompletedProcess(command, 0)
+
                         with mock.patch.object(
                                 native.subprocess, "run",
-                                return_value=subprocess.CompletedProcess([], 0)) as executed:
+                                side_effect=check_descriptor_during_launch) as executed:
                             self.assertEqual(native.run_native_suite(
                                 suite, binaries, mode=None), 0)
                             self.assertEqual(executed.call_count, len(binaries))
-                            for call in executed.call_args_list:
-                                self.assertNotIn("cwd", call.kwargs)
-                                self.assertEqual(
-                                    call.kwargs["pass_fds"].__len__(), 1)
-                                descriptor, = call.kwargs["pass_fds"]
-                                self.assertEqual(
-                                    call.kwargs["executable"],
-                                    f"/proc/self/fd/{descriptor}")
-                                self.assertEqual(
-                                    os.fstat(descriptor).st_uid,
-                                    os.geteuid())
                         self.assertEqual(native.run_native_suite(
                             suite, binaries, mode="record",
                             tested_source=expected_source, kdir="/synthetic",
