@@ -469,9 +469,10 @@ def main() -> int:
           "only the temporary mapper may be formatted")
     # A no-newline input() prompt can disappear from line-oriented SSH logs.
     # Publish the exact Yes/No question before waiting for operator input.
+    # A single flushed, default-No question is the complete development
+    # trial authorization; no separate verbal or chat approval is required.
     print(f"  Run bounded swapz Linux swap trial on {selected['path']} "
           f"(PARTUUID {selected['partuuid']})? [y/N]", flush=True)
-    print("  Enter y/yes to authorize; n/no or Enter declines:", flush=True)
     try:
         confirmed = input()
     except EOFError:

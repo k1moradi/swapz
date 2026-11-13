@@ -469,8 +469,6 @@ class AlgorithmPhysicalTest(unittest.TestCase):
         question = (
             "  Run bounded swapz Linux swap trial on /dev/sda4 "
             "(PARTUUID 7fb9401d-04)? [y/N]\n")
-        instructions = (
-            "  Enter y/yes to authorize; n/no or Enter declines:\n")
 
         class OperatorTerminal(io.StringIO):
             def __init__(self):
@@ -485,7 +483,8 @@ class AlgorithmPhysicalTest(unittest.TestCase):
                 super().flush()
 
         for answer, approved in (("", False), ("n", False),
-                                 ("no", False), ("yes", True)):
+                                 ("no", False), ("maybe", False),
+                                 ("y", True), ("yes", True)):
             with self.subTest(answer=answer):
                 terminal = OperatorTerminal()
 
@@ -494,10 +493,9 @@ class AlgorithmPhysicalTest(unittest.TestCase):
                     # before input() is invoked, not after the response.
                     self.assertTrue(terminal.flushed_output)
                     self.assertIn(
-                        question + instructions,
-                        terminal.flushed_output[-1])
+                        question, terminal.flushed_output[-1])
                     self.assertTrue(
-                        terminal.flushed_output[-1].endswith(instructions))
+                        terminal.flushed_output[-1].endswith(question))
                     return answer
 
                 with mock.patch.object(
@@ -525,6 +523,9 @@ class AlgorithmPhysicalTest(unittest.TestCase):
                 consent.assert_called_once_with()
                 self.assertEqual(privileged.call_count, int(approved))
                 self.assertEqual(terminal.getvalue().count(question), 1)
+                self.assertEqual(terminal.getvalue().count("[y/N]"), 1)
+                self.assertNotIn("Enter y/yes to authorize",
+                                 terminal.getvalue())
                 if not approved:
                     self.assertIn(
                         "PHYSICAL_ALGORITHM_REAL_SWAP=NOT_RUN reason=declined",

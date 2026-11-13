@@ -2973,17 +2973,21 @@ expanded marker remains untrusted and must not reach stdout or publication.
 Rootless tests must verify the exact official report path, the first
 pre-consent refusal, and private stderr non-disclosure.
 
-The unprivileged physical consent question must be printed as a separate
-newline-terminated, flushed stdout line **before** waiting for input, and
-name the exact selected partition path, PARTUUID and `[y/N]` default.
-Print a separate flushed instruction explaining that `y`/`yes` authorizes
-the attempt and Enter/`n`/`no` declines; never rely on a non-newline
-`input(prompt)` as the only visible question in line-oriented SSH or test
-logs. An empty response, EOF, or unrecognized response must remain a
-non-authorizing `NOT_RUN`; the original source, ownership and privileged
-admission gates still run independently before any physical mutation.
-Rootless tests must inspect the flushed question *before* a mocked input
-returns and prove no privileged helper starts without explicit `yes`.
+The development-only unprivileged physical authorization is exactly **one**
+newline-terminated, flushed stdout Yes/No question **before** waiting for
+input. It must name the exact selected partition path and PARTUUID, with
+`[y/N]` as the default. The question itself is sufficient: no second
+instruction, separate verbal/chat permission, review record, or extra
+confirmation step is required for this bounded development trial. Do not
+rely on an unflushed `input(prompt)` question that can disappear from
+line-oriented SSH logs. Only `y`/`yes` (case-insensitive) authorizes one
+attempt. Enter, `n`/`no`, EOF, or any unrecognized response declines and
+must remain non-authorizing `NOT_RUN`. This terminal approval never waives
+source, device, ownership, memory-pressure, recovery or other independent
+privileged admission gates; production-only review/qualification rules
+remain separate. Rootless tests must inspect the one flushed question
+*before* mocked input returns and prove no privileged helper starts
+without explicit `y`/`yes`.
 
 An archived source-bound pretrial checkpoint may authenticate its own
 publication before the *next* independent physical admission gates, but only
