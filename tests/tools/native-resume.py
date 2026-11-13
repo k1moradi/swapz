@@ -71,21 +71,34 @@ def verified_native_sha256(path, *, executable):
         os.close(descriptor)
 
 
-def owned_native_executable(path):
-    """Do not run a linked, foreign or substituted native executable."""
+def open_owned_native_executable(path):
+    """Pin the owned native inode before executing it; never follow links.
+
+    The caller owns the returned descriptor and must close it. Executing
+    /proc/self/fd/<descriptor> with pass_fds prevents a pathname swap between
+    the ownership check and exec from launching a different binary.
+    """
+    descriptor = -1
     try:
         for directory in (ROOT / "build", ROOT / "build/tests", NATIVE):
             metadata = directory.lstat()
             if (not stat.S_ISDIR(metadata.st_mode) or
                     metadata.st_uid != os.geteuid()):
-                return False
-        metadata = path.lstat()
-        return (stat.S_ISREG(metadata.st_mode) and
-                metadata.st_uid == os.geteuid() and
-                metadata.st_nlink == 1 and
-                metadata.st_mode & 0o111 != 0)
+                return -1
+        descriptor = os.open(
+            path, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK | os.O_CLOEXEC)
+        metadata = os.fstat(descriptor)
+        if (not stat.S_ISREG(metadata.st_mode) or
+                metadata.st_uid != os.geteuid() or
+                metadata.st_nlink != 1 or
+                metadata.st_mode & 0o111 == 0):
+            os.close(descriptor)
+            return -1
+        return descriptor
     except OSError:
-        return False
+        if descriptor >= 0:
+            os.close(descriptor)
+        return -1
 
 
 def current_native_context(suite, tested_source, kdir, runner):
@@ -138,25 +151,32 @@ def run_native_suite(suite, executables, *, mode=None,
                      "RESUME"):
         child_env.pop(variable, None)
     for binary in executables:
-        if not owned_native_executable(Path(binary)):
+        descriptor = open_owned_native_executable(Path(binary))
+        if descriptor < 0:
             print(f"FAIL: native test-{suite} binary={Path(binary).name} "
                   "reason=untrusted_executable", file=sys.stderr, flush=True)
             return 126
         try:
-            # Preserve the tests/suites working directory of the original
-            # Make recipes. The wrapper owns only process execution, not cwd.
-            completed = subprocess.run(
-                [binary], env=child_env, check=False)
-            exit_code = completed.returncode
-        except OSError as error:
-            # Shell-compatible exit classes without exporting an arbitrary
-            # host path or exception string to the operator.
-            failure_exit = (127 if isinstance(error, FileNotFoundError) else
-                            126 if isinstance(error, PermissionError) else 1)
-            print(f"FAIL: native test-{suite} binary={Path(binary).name} "
-                  f"reason=execution_unavailable exit={failure_exit}",
-                  file=sys.stderr, flush=True)
-            return failure_exit
+            try:
+                # Preserve the tests/suites cwd and original argv[0]. Run
+                # the checked inode, not a pathname that could be replaced
+                # between the ownership check and subprocess execution.
+                completed = subprocess.run(
+                    [binary], executable=f"/proc/self/fd/{descriptor}",
+                    pass_fds=(descriptor,), env=child_env, check=False)
+                exit_code = completed.returncode
+            except OSError as error:
+                # Shell-compatible exit classes without exporting an
+                # arbitrary host path or exception to the operator.
+                failure_exit = (
+                    127 if isinstance(error, FileNotFoundError) else
+                    126 if isinstance(error, PermissionError) else 1)
+                print(f"FAIL: native test-{suite} binary={Path(binary).name} "
+                      f"reason=execution_unavailable exit={failure_exit}",
+                      file=sys.stderr, flush=True)
+                return failure_exit
+        finally:
+            os.close(descriptor)
         if exit_code:
             public_exit = 128 - exit_code if exit_code < 0 else exit_code
             print(f"FAIL: native test-{suite} binary={Path(binary).name} "

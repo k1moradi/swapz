@@ -613,7 +613,13 @@ development-only helper then verifies the exact source/host/kernel/KDIR/worker/r
 context, the native compiler-configuration stamp and every expected native
 executable's regular-file SHA-256, executable mode and file identity.
 Changed binaries or source drift force the entire target to execute freshly;
-linked, foreign, missing or substituted executables refuse before execution.
+linked, foreign and missing executables refuse before execution. Native
+execution uses the verified, owned regular-file descriptor through Linux
+/proc/self/fd with pass_fds, retaining the original argv[0] and working
+directory, so replacing a checked pathname cannot launch substituted code.
+The descriptor is closed by the parent after each child finishes. A synthetic
+path-replacement regression must prove the pinned original inode executes
+instead of the newly written substitute.
 Invalid private checkpoint permissions disable reuse, and a failed native child
 retains a bounded binary name and its original exit class.
 Synthetic regression must create real executable fixture scripts (with valid

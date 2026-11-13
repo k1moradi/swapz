@@ -1480,6 +1480,57 @@ class NativeTimingContract(unittest.TestCase):
             finally:
                 runner.ROOT = original_root
 
+    def test_native_resume_executes_verified_inode_after_path_replacement(self):
+        """A replacement between validation and exec cannot run the substitute."""
+        native_path = ROOT / "tests/tools/native-resume.py"
+        native_spec = importlib.util.spec_from_file_location(
+            "swapz_native_resume_inode", native_path)
+        native = importlib.util.module_from_spec(native_spec)
+        native_spec.loader.exec_module(native)
+        with tempfile.TemporaryDirectory(prefix="native-inode-resume-") as folder:
+            root = Path(folder)
+            previous_root, previous_native = native.ROOT, native.NATIVE
+            original_run = subprocess.run
+            try:
+                native.ROOT = root
+                native.NATIVE = root / "build/tests/native"
+                native.NATIVE.mkdir(parents=True)
+                suite = "mapping"
+                binaries = []
+                for name in native.SUITES[suite]:
+                    binary = native.NATIVE / name
+                    binary.write_bytes(b"#!/bin/sh\nexit 0\n")
+                    binary.chmod(0o755)
+                    binaries.append(str(binary))
+                target = Path(binaries[0])
+                original_inode = target.stat().st_ino
+                executed_pinned_file = []
+
+                def replace_before_exec(command, **kwargs):
+                    if not executed_pinned_file:
+                        target.rename(target.with_name("owned-original"))
+                        target.write_bytes(b"#!/bin/sh\nexit 17\n")
+                        target.chmod(0o755)
+                        descriptor, = kwargs["pass_fds"]
+                        self.assertEqual(
+                            kwargs["executable"],
+                            f"/proc/self/fd/{descriptor}")
+                        self.assertEqual(
+                            os.fstat(descriptor).st_ino, original_inode)
+                        self.assertNotIn("cwd", kwargs)
+                        executed_pinned_file.append(True)
+                    return original_run(command, **kwargs)
+
+                with mock.patch.object(native.subprocess, "run",
+                                       side_effect=replace_before_exec):
+                    self.assertEqual(
+                        native.run_native_suite(suite, binaries, mode=None), 0)
+                self.assertEqual(executed_pinned_file, [True])
+                self.assertEqual(
+                    target.read_bytes(), b"#!/bin/sh\nexit 17\n")
+            finally:
+                native.ROOT, native.NATIVE = previous_root, previous_native
+
     def test_development_resume_native_suite_invalidates_on_binary_drift(self):
         """Rebuilt binaries, malformed native files and failed tests run fresh."""
         native_path = ROOT / "tests/tools/native-resume.py"
@@ -1530,6 +1581,15 @@ class NativeTimingContract(unittest.TestCase):
                             self.assertEqual(executed.call_count, len(binaries))
                             for call in executed.call_args_list:
                                 self.assertNotIn("cwd", call.kwargs)
+                                self.assertEqual(
+                                    call.kwargs["pass_fds"].__len__(), 1)
+                                descriptor, = call.kwargs["pass_fds"]
+                                self.assertEqual(
+                                    call.kwargs["executable"],
+                                    f"/proc/self/fd/{descriptor}")
+                                self.assertEqual(
+                                    os.fstat(descriptor).st_uid,
+                                    os.geteuid())
                         self.assertEqual(native.run_native_suite(
                             suite, binaries, mode="record",
                             tested_source=expected_source, kdir="/synthetic",
