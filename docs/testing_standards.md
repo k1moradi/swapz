@@ -676,9 +676,14 @@ the rootless native Make and all other suites run fresh. Each resumed suite and
 the containing rootless stage report REUSED, not PASS, and the overall run stays
 INCOMPLETE. Private suite checkpoints are atomically written beside stage
 checkpoints, with the same owner-only file identity and permissions.
-An interruption regression must exercise a rootless stage that records one
-completed eligible suite before failing, prove that no full-stage PASS was
-cached, and then resume with exactly that suite reused while a later fresh
+A suite completion checkpoint must recheck the exact tested HEAD, source
+SHA and tracked checkout cleanliness before recording PASS, because a
+transient source edit inside the rootless stage can otherwise persist
+an invalid checkpoint even when the stage subsequently rejects the run.
+An interruption regression must first refuse a synthetic PASS during
+transient checkout drift, then exercise a clean rootless stage that records
+one completed eligible suite before failing, prove that no full-stage PASS
+was cached, and resume with exactly that suite reused while a later fresh
 PASS extends the owner-only suite checkpoint. The completed run remains
 INCOMPLETE and cannot publish physical qualification. Its synthetic loaded
 stage must retain the ordinary report's retired delta64-prepare diagnostic

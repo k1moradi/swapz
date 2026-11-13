@@ -1673,6 +1673,7 @@ class NativeTimingContract(unittest.TestCase):
         captured_reports = []
         rootless_invocations = []
         interrupted = True
+        checkout_drift = {"inject": True, "active": False}
 
         def interrupted_stage(title, command, result, *,
                               parse_bench=False,
@@ -1695,7 +1696,13 @@ class NativeTimingContract(unittest.TestCase):
                 completed = options["rootless_suite_completed"]
                 if interrupted:
                     self.assertEqual(rootless_invocations[-1], ())
-                    completed(first_suite)
+                    # The first interruption observes a PASS while the
+                    # source is transiently dirty. It must not save it.
+                    checkout_drift["active"] = checkout_drift["inject"]
+                    try:
+                        completed(first_suite)
+                    finally:
+                        checkout_drift["active"] = False
                     rootless_failed = True
                 else:
                     self.assertEqual(rootless_invocations[-1],
@@ -1738,7 +1745,7 @@ class NativeTimingContract(unittest.TestCase):
                     ("make_invocation", lambda: (["make"], "synthetic")),
                     ("tracked_source_checkout_preflight", lambda: None),
                     ("source_checkout_stability", lambda *_args: {
-                        "stable": True}),
+                        "stable": not checkout_drift["active"]}),
                     ("development_resume_context",
                      lambda _result, _kdir: checkpoint_context),
                     ("run_stage", interrupted_stage),
@@ -1762,7 +1769,21 @@ class NativeTimingContract(unittest.TestCase):
                             contextlib.redirect_stdout(io.StringIO()):
                         self.assertEqual(
                             runner._run_qualification(args, main_sync), 1)
-                    # The failed stage is not promoted to a stage-level PASS.
+                    # Dirty source at the suite boundary refuses even a
+                    # private suite checkpoint, despite a passing marker.
+                    self.assertIsNone(
+                        runner.read_development_resume_checkpoint(
+                            checkpoint_context))
+                    self.assertIsNone(
+                        runner.read_development_resume_checkpoint(
+                            checkpoint_context, suites=True))
+                    checkout_drift["inject"] = False
+                    with mock.patch.dict(os.environ, {"RESUME": ""}), \
+                            contextlib.redirect_stdout(io.StringIO()):
+                        self.assertEqual(
+                            runner._run_qualification(args, main_sync), 1)
+                    # A clean passing suite is independently resumable;
+                    # its failed containing stage never becomes a PASS.
                     self.assertIsNone(
                         runner.read_development_resume_checkpoint(
                             checkpoint_context))
@@ -1776,7 +1797,7 @@ class NativeTimingContract(unittest.TestCase):
                             runner._run_qualification(args, main_sync), 2)
 
                 self.assertEqual(rootless_invocations,
-                                 [(), (first_suite,)])
+                                 [(), (), (first_suite,)])
                 self.assertEqual(
                     runner.read_development_resume_checkpoint(
                         checkpoint_context, suites=True),

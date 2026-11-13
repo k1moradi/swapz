@@ -12558,6 +12558,13 @@ def _run_qualification(args, sync_result):
 
     def record_completed_rootless_suite(name):
         nonlocal rootless_cache_context, rootless_recorded_suites
+        # A suite PASS observed during an uncommitted source edit is not
+        # evidence for the original tested commit, even if the edit is
+        # reverted before the containing rootless stage exits.
+        if not source_checkout_stability(
+                sync_result.get("head_sha"),
+                sync_result.get("source_sha")).get("stable"):
+            return
         # A native test may rebuild an existing artifact; rebind only a
         # newly observed PASS, never old PASS records, to its new identity.
         current_context = development_resume_context(result, args.kdir)
