@@ -7,6 +7,9 @@ umask 022
 
 transaction_active=0
 transaction_dir=""
+diagnostics_dir=""
+dkms_build_log=""
+dkms_build_command_output=""
 # Describes the attempted transition, including journal-write failures.
 transaction_phase="preflight"
 # Updated only after the state-file replacement and transaction-directory fsync
@@ -122,6 +125,12 @@ if [[ -n "$test_root" ]]; then
   [[ "$kernel_release" =~ ^[A-Za-z0-9._+-]+$ ]] || blocked "invalid test kernel release"
   package_lock="$sandbox/package.lock"
   transaction_parent="$sandbox/transactions"
+  diagnostics_dir="$transaction_parent/diagnostics"
+  dkms_build_log="${SWAPZ_TEST_DKMS_BUILD_LOG:-$sandbox/dkms-build/make.log}"
+  dkms_build_log="$(realpath -m -- "$dkms_build_log")"
+  case "$dkms_build_log" in "$sandbox"/*) ;; *)
+    blocked "test DKMS build log outside package sandbox" ;;
+  esac
 else
   [[ $(id -u) == 0 ]] || blocked "root required"
   [[ "$prefix" == /usr/local ]] || blocked "production prefix must be /usr/local"
@@ -135,6 +144,8 @@ else
   kernel_release="$(uname -r)"
   package_lock="/run/lock/swapz/package.lock"
   transaction_parent="/var/lib/swapz-package-transactions"
+  diagnostics_dir="$transaction_parent/diagnostics"
+  dkms_build_log="/var/lib/dkms/swapz/$version/build/make.log"
   dkms_bin="$(command -v dkms 2>/dev/null || true)"
   depmod_bin="$(command -v depmod 2>/dev/null || true)"
   systemctl_bin="$(command -v systemctl 2>/dev/null || true)"
@@ -873,6 +884,72 @@ for path in sorted(paths, key=lambda candidate: len(candidate.parts), reverse=Tr
     finally:
         os.close(descriptor)
 PY
+}
+
+# DKMS removes its failed build tree during transaction rollback. Preserve a
+# bounded private copy first so the original compiler failure remains
+# diagnosable without exposing child output or host paths on the console.
+append_bounded_private_log() {
+  local source_path="$1" expected_owner="$2" source_owner source_links
+  local source_size maximum_size=262144 half_size=131072
+  if [[ ! -f "$source_path" || -L "$source_path" ]]; then
+    printf '[log unavailable]\n'
+    return 0
+  fi
+  IFS=: read -r source_owner source_links source_size < <(
+    stat -c '%u:%h:%s' -- "$source_path") || return 1
+  [[ "$source_owner" == "$expected_owner" && "$source_links" == 1 &&
+     "$source_size" =~ ^[0-9]+$ ]] || return 1
+  if (( source_size <= maximum_size )); then
+    cat -- "$source_path"
+  else
+    head -c "$half_size" -- "$source_path"
+    printf '\n[log truncated: first and last 128 KiB retained]\n'
+    tail -c "$half_size" -- "$source_path"
+  fi
+}
+
+retain_dkms_build_diagnostic() {
+  local diagnostic_file="$diagnostics_dir/dkms-build.latest.log"
+  local temporary_file="" expected_owner="$expected_installed_owner"
+  local existing_owner existing_mode existing_links capture_status=0
+  if [[ -n "$test_root" ]]; then
+    expected_owner="$(id -u)"
+    install -d -m0700 "$diagnostics_dir" 2>/dev/null ||
+      installed_directory_metadata "$diagnostics_dir" 700 || return 1
+  else
+    install -d -o 0 -g 0 -m0700 "$diagnostics_dir" 2>/dev/null ||
+      installed_directory_metadata "$diagnostics_dir" 700 || return 1
+  fi
+  installed_directory_metadata "$diagnostics_dir" 700 || return 1
+  if [[ -e "$diagnostic_file" || -L "$diagnostic_file" ]]; then
+    [[ -f "$diagnostic_file" && ! -L "$diagnostic_file" ]] || return 1
+    IFS=: read -r existing_owner existing_mode existing_links < <(
+      stat -c '%u:%a:%h' -- "$diagnostic_file") || return 1
+    [[ "$existing_owner" == "$expected_owner" &&
+       "$existing_mode" == 600 && "$existing_links" == 1 ]] || return 1
+  fi
+  temporary_file="$(mktemp "$diagnostics_dir/.dkms-build.XXXXXXXX")" ||
+    return 1
+  chmod 0600 "$temporary_file" || return 1
+  {
+    printf 'SWAPZ_PACKAGE_DKMS_BUILD_DIAGNOSTIC_V1\n'
+    printf '%s\n' '--- DKMS command output (bounded) ---'
+    append_bounded_private_log "$dkms_build_command_output" \
+      "$expected_owner" || capture_status=$?
+    if (( capture_status == 0 )); then
+      printf '%s\n' '--- DKMS compiler log (bounded) ---'
+      append_bounded_private_log "$dkms_build_log" \
+        "$expected_owner" || capture_status=$?
+    fi
+  } > "$temporary_file" || capture_status=$?
+  if (( capture_status != 0 )); then
+    rm -f -- "$temporary_file" || true
+    return 1
+  fi
+  chmod 0600 "$temporary_file" || return 1
+  mv -f -- "$temporary_file" "$diagnostic_file" || return 1
+  durable_package_paths "$diagnostic_file" || return 1
 }
 
 # Transaction state stops being recovery authority only after the verified final
@@ -2686,7 +2763,25 @@ persist_transaction_state dkms-added
 install_test_checkpoint dkms-added
 
 persist_transaction_state building-dkms
-"$dkms_bin" build -m swapz -v "$version" -k "$kernel_release"
+dkms_build_command_output="$(mktemp "$transaction_dir/dkms-build-command.XXXXXXXX")"
+chmod 0600 "$dkms_build_command_output"
+dkms_build_status=0
+if "$dkms_bin" build -m swapz -v "$version" -k "$kernel_release" \
+     >"$dkms_build_command_output" 2>&1; then
+  :
+else
+  dkms_build_status=$?
+fi
+if (( dkms_build_status != 0 )); then
+  if retain_dkms_build_diagnostic; then
+    printf 'SWAPZ_PACKAGE_DIAGNOSTIC phase=building-dkms check=module_build expected=success observed=failed command_status=%s log=package-diagnostics/dkms-build.latest.log retained=private next=inspect_private_dkms_log_before_retry\n' \
+      "$dkms_build_status" >&2
+  else
+    printf 'SWAPZ_PACKAGE_DIAGNOSTIC phase=building-dkms check=module_build expected=success observed=failed command_status=%s log=unavailable retained=no next=resolve_private_diagnostic_capture_before_retry\n' \
+      "$dkms_build_status" >&2
+  fi
+  rollback "$dkms_build_status" "command failed during building-dkms"
+fi
 persist_transaction_state dkms-built
 install_test_checkpoint dkms-built
 

@@ -10296,6 +10296,21 @@ umask. This keeps the suite hermetic without weakening production admission:
 the installer must continue rejecting group/world-writable inputs and
 destinations.
 
+The DKMS invocation must account for DKMS prepending
+`KERNELRELEASE=<release>` to its configured `MAKE` command. Because swapz's
+`src/kernel/Makefile` uses that variable to distinguish its staging wrapper
+from the Kbuild declarations, the configured command must clear the injected
+assignment after DKMS's prefix, then build the exact staged path declared by
+`BUILT_MODULE_LOCATION`. The rootless package regression must execute this
+prefixed command against a fake kernel-header tree and verify both generated
+headers and the collected module path. If a DKMS build fails, capture its
+bounded command output and `make.log` before rollback removes the build tree;
+retain the combined evidence in a private mode-0700 directory with a
+mode-0600 file, and emit only a bounded phase/status marker and relative
+evidence name to the console. The regression must verify the original DKMS
+exit status, rollback, private evidence mode and content, and absence of raw
+fixture paths in public output.
+
 Production `make install` is admission-only and must not depend on the root
 `all` build target. It may consume only the already-qualified `swapzctl`,
 round-trip oracle and normal module bytes. Admission requires the exact

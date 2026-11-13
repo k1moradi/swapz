@@ -156,7 +156,14 @@ class PackageLifecycle(unittest.TestCase):
         headers = kernel_tree / "build"
         headers.mkdir(mode=0o755)
         headers.chmod(0o755)
-        (headers / "Makefile").write_text("all:\n\t@:\n")
+        (headers / "Makefile").write_text(
+            ".PHONY: all modules clean\n"
+            "all:\n\t@:\n"
+            "modules:\n"
+            "\t@test -f \"$(M)/swapz-version.h\"\n"
+            "\t@test -f \"$(M)/swapz-build-info.h\"\n"
+            "\t@printf 'synthetic-dkms-module\\n' > \"$(M)/dm-swapz.ko\"\n"
+            "clean:\n\t@rm -f \"$(M)/dm-swapz.ko\"\n")
         self.headers_makefile = headers / "Makefile"
         self.installed_module = (
             self.home / "lib/modules" / self.kernel_release /
@@ -191,6 +198,7 @@ class PackageLifecycle(unittest.TestCase):
 
         self.dkms_state = self.home / "dkms.state"
         self.dkms_log = self.home / "dkms.log"
+        self.dkms_build_log = self.home / "dkms-build" / "build" / "make.log"
         self.fail_marker = self.home / "fail.once"
         self.tamper_marker = self.home / "tamper.once"
         self.depmod_fail_marker = self.home / "depmod-fail.once"
@@ -215,6 +223,8 @@ class PackageLifecycle(unittest.TestCase):
             SWAPZ_TEST_KERNEL_RELEASE=self.kernel_release,
             SWAPZ_DKMS_STATE=str(self.dkms_state),
             SWAPZ_DKMS_LOG=str(self.dkms_log),
+            SWAPZ_TEST_DKMS_BUILD_LOG=str(self.dkms_build_log),
+            SWAPZ_FAKE_DKMS_BUILD_DIAGNOSTIC="0",
             SWAPZ_DKMS_FAIL_MARKER=str(self.fail_marker),
             SWAPZ_DEPMOD_TAMPER_MARKER=str(self.tamper_marker),
             SWAPZ_DEPMOD_FAIL_MARKER=str(self.depmod_fail_marker),
@@ -304,6 +314,21 @@ cmd=$1
 printf '%s\n' "$cmd" >> "$SWAPZ_DKMS_LOG"
 if [[ "$cmd" == "$SWAPZ_FAKE_FAIL_AT" && ! -e "$SWAPZ_DKMS_FAIL_MARKER" ]]; then
   : > "$SWAPZ_DKMS_FAIL_MARKER"
+  if [[ "$cmd" == build && "$SWAPZ_FAKE_DKMS_BUILD_DIAGNOSTIC" != 0 ]]; then
+    mkdir -p "$(dirname "$SWAPZ_TEST_DKMS_BUILD_LOG")"
+    if [[ "$SWAPZ_FAKE_DKMS_BUILD_DIAGNOSTIC" == oversized ]]; then
+      python3 - "$SWAPZ_TEST_DKMS_BUILD_LOG" <<'PY'
+from pathlib import Path
+import sys
+Path(sys.argv[1]).write_bytes(
+    b"FIRST_COMPILER_FAILURE\n" + b"x" * 300000 +
+    b"\nLAST_COMPILER_FAILURE\n")
+PY
+    else
+      printf 'make: *** No targets. Stop.\n' > "$SWAPZ_TEST_DKMS_BUILD_LOG"
+    fi
+    printf 'synthetic dkms build command failure\n' >&2
+  fi
   exit 44
 fi
 if [[ "$cmd" == remove && "$SWAPZ_FAKE_REMOVE_SLEEP" != 0 &&
@@ -1945,9 +1970,45 @@ exec "{flock_binary}" "$@"
 
     def test_partial_failure_and_digest_tamper_roll_back(self):
         result = self.invoke(
-            "install", {"SWAPZ_FAKE_FAIL_AT": "build"})
-        self.assertNotEqual(result.returncode, 0)
+            "install", {
+                "SWAPZ_FAKE_FAIL_AT": "build",
+                "SWAPZ_FAKE_DKMS_BUILD_DIAGNOSTIC": "1",
+            })
+        self.assertEqual(result.returncode, 44, result.stderr)
+        self.assertIn(
+            "SWAPZ_PACKAGE_DIAGNOSTIC phase=building-dkms "
+            "check=module_build expected=success observed=failed "
+            "command_status=44 log=package-diagnostics/"
+            "dkms-build.latest.log retained=private",
+            result.stderr)
+        self.assertNotIn(str(self.home), result.stderr)
         self.assertIn("rollback", result.stderr)
+        diagnostic = (
+            self.home / "transactions/diagnostics/dkms-build.latest.log")
+        self.assertEqual(
+            stat.S_IMODE(diagnostic.parent.stat().st_mode), 0o700)
+        self.assertTrue(diagnostic.is_file())
+        self.assertEqual(stat.S_IMODE(diagnostic.stat().st_mode), 0o600)
+        self.assertLessEqual(diagnostic.stat().st_size, 524_500)
+        diagnostic_text = diagnostic.read_text()
+        self.assertIn("synthetic dkms build command failure", diagnostic_text)
+        self.assertIn("make: *** No targets. Stop.", diagnostic_text)
+        self.assert_absent()
+        self.fail_marker.unlink(missing_ok=True)
+
+        oversized = self.invoke(
+            "install", {
+                "SWAPZ_FAKE_FAIL_AT": "build",
+                "SWAPZ_FAKE_DKMS_BUILD_DIAGNOSTIC": "oversized",
+            })
+        self.assertEqual(oversized.returncode, 44, oversized.stderr)
+        self.assertNotIn(str(self.home), oversized.stderr)
+        bounded_log = diagnostic.read_bytes()
+        self.assertLessEqual(len(bounded_log), 524_500)
+        self.assertIn(b"FIRST_COMPILER_FAILURE", bounded_log)
+        self.assertIn(b"LAST_COMPILER_FAILURE", bounded_log)
+        self.assertIn(b"log truncated", bounded_log)
+        self.assertEqual(stat.S_IMODE(diagnostic.stat().st_mode), 0o600)
         self.assert_absent()
         self.fail_marker.unlink(missing_ok=True)
 
@@ -4112,6 +4173,46 @@ exec "{flock_binary}" "$@"
         recovered = self.invoke("recover")
         self.assertEqual(recovered.returncode, 0, recovered.stderr)
         self.assert_installed_exact()
+
+    def test_dkms_make_command_uses_staging_wrapper(self):
+        output = subprocess.run(
+            ["bash", "-c",
+             'kernelver="$1"; source ./dkms.conf; '
+             'printf "%s\\n%s\\n%s\\n" "${MAKE[0]}" "$CLEAN" '
+             '"${BUILT_MODULE_LOCATION[0]}"',
+             "_", self.kernel_release],
+            cwd=self.repo_root, capture_output=True, text=True, check=True)
+        make_command, clean_command, module_location = output.stdout.splitlines()
+        expected_kdir = (
+            f"/lib/modules/{self.kernel_release}/build")
+        fixture_kdir = str(
+            self.home / "lib/modules" / self.kernel_release / "build")
+        make_command = make_command.replace(
+            f"KDIR={expected_kdir}", f"KDIR={fixture_kdir}")
+        clean_command = clean_command.replace(
+            f"KDIR={expected_kdir}", f"KDIR={fixture_kdir}")
+        self.assertIn("KERNELRELEASE=", make_command)
+        self.assertIn("KERNELRELEASE=", clean_command)
+        self.assertEqual(module_location, "build/kernel/experimental")
+
+        # DKMS prepends its kernel release assignment to MAKE[0]. Running this
+        # exact command verifies the later blank assignment selects swapz's
+        # staging wrapper and emits the path DKMS is configured to collect.
+        dkms_make_command = make_command.replace(
+            "make ",
+            f"make -j4 KERNELRELEASE={self.kernel_release} ", 1)
+        built = subprocess.run(
+            ["bash", "-c", dkms_make_command], cwd=self.repo_root,
+            env=self.env, capture_output=True, text=True)
+        self.assertEqual(built.returncode, 0, built.stdout + built.stderr)
+        module = self.repo_root / module_location / "dm-swapz.ko"
+        self.assertEqual(module.read_text(), "synthetic-dkms-module\n")
+
+        cleaned = subprocess.run(
+            ["bash", "-c", clean_command], cwd=self.repo_root,
+            env=self.env, capture_output=True, text=True)
+        self.assertEqual(cleaned.returncode, 0, cleaned.stdout + cleaned.stderr)
+        self.assertFalse(module.exists())
 
     def test_dkms_config_tracks_changed_canonical_version(self):
         other = self.home / "synthetic-release"
