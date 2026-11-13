@@ -515,7 +515,7 @@ class MainSynchronizationContract(unittest.TestCase):
                 try:
                     fields = Path(f"/proc/{pid}/stat").read_text().rsplit(") ", 1)[1].split()
                     return fields[19] == start and fields[0] != "Z"
-                except FileNotFoundError:
+                except (FileNotFoundError, ProcessLookupError):
                     return False
             unrelated = subprocess.Popen(
                 [sys.executable, "-c", child], start_new_session=True,
@@ -524,6 +524,13 @@ class MainSynchronizationContract(unittest.TestCase):
                 self.assertIsNone(runner.git_result(["fixture"], timeout=0.5, env=env))
                 self.assertIsNone(unrelated.poll(), "Git cleanup touched an unrelated fixture")
                 pid, start = json.loads(marker.read_text())
+                # procfs may open the task's stat file before task exit and
+                # return ESRCH from read, rather than ENOENT from open.
+                with mock.patch.object(Path, "read_text", side_effect=ProcessLookupError()):
+                    self.assertFalse(live(pid, start))
+                with mock.patch.object(Path, "read_text", side_effect=PermissionError()):
+                    with self.assertRaises(PermissionError):
+                        live(pid, start)
                 deadline = time.monotonic() + 2
                 while live(pid, start) and time.monotonic() < deadline:
                     time.sleep(0.02)

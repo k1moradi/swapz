@@ -11679,3 +11679,8 @@ and private stderr; cleanup failure cannot turn it into PASS or hide a test
 failure. Rootless regression coverage must reproduce a timed-out fake Git
 with a retained child, verify the child stops, and preserve ordinary byte
 stdin/stdout/stderr and nonzero-exit behavior. No real remote is contacted.
+The child-liveness fixture must recognize both ENOENT while opening procfs
+and ESRCH while reading a task that exits during inspection. Inject the
+read-time ESRCH deterministically and retain permission-error propagation;
+inaccessible process evidence is not proof of exit. The actual retained-child
+and unrelated-process assertions remain mandatory.
