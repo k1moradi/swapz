@@ -3444,12 +3444,23 @@ def aggregate_oracle_verification(records: list[dict]) -> dict:
     }
 
 
-def evaluate_reuse_rounds(rounds: list[dict]) -> dict:
+def evaluate_reuse_rounds(rounds: list[dict], *,
+                          expected_mapper_baseline_kib: int = 0) -> dict:
+    """Prove oracle slot reuse without counting a pre-existing host baseline.
+
+    The official primary path retains the default ZERO requirement. The
+    development mapper can have a few foreign pages immediately after
+    high-priority swapon, but every round must begin and finish at the SAME
+    explicitly authenticated baseline with zero charged cgroup swap.
+    """
     if len(rounds) < REUSE_ROUNDS:
         raise QualificationFailure("real-swap qualification did not complete repeated slot-reuse rounds")
     baseline_used_kib = int(rounds[0].get("mapper_used_start_kib", -1))
-    if baseline_used_kib != 0:
-        raise QualificationFailure("slot-reuse proof did not start from a fresh zero-use mapper")
+    if (type(expected_mapper_baseline_kib) is not int or
+            expected_mapper_baseline_kib < 0 or
+            baseline_used_kib != expected_mapper_baseline_kib):
+        raise QualificationFailure(
+            "slot-reuse proof did not start from authenticated mapper baseline")
     for result in rounds:
         if int(result.get("concurrent_workers", 0)) < CONCURRENT_ORACLE_PROCESSES:
             raise QualificationFailure("real-swap round lacked concurrent test-process activity")
@@ -3648,11 +3659,20 @@ def _run_workload(manifest: dict, active: dict, oracle_path: Path,
                   workload_mib: int, resident_mib: int, swap_limit_mib: int,
                   timeout_seconds: int,
                   telemetry_check: Callable[[], None] | None = None,
-                  *, status_reader: Callable[[], dict[str, int]] | None = None) -> dict:
+                  *, status_reader: Callable[[], dict[str, int]] | None = None,
+                  expected_mapper_baseline_kib: int = 0) -> dict:
     # The private development trial has its own run-bound mapper name. Its
     # caller must verify that exact mapping whenever sampling its status;
     # ordinary primary qualification retains its existing status reader.
     sample_status = read_status if status_reader is None else status_reader
+    # This baseline is supplied ONLY by the private caller that positively
+    # authenticated the owned mapper. Default zero is mandatory elsewhere.
+    # Do not silently reset it from later swap inventory: foreign pages
+    # arriving after activation must fail, not become test attribution.
+    if (type(expected_mapper_baseline_kib) is not int or
+            expected_mapper_baseline_kib < 0 or
+            expected_mapper_baseline_kib % (PAGE_BYTES // 1024) != 0):
+        raise QualificationFailure("invalid expected mapper baseline")
     worker_memory_mib = split_concurrent_workload_mib(workload_mib)
     token = os.urandom(8).hex()
     cgroup = _cgroup_create(token, resident_mib, swap_limit_mib, admitted=True)
@@ -3743,10 +3763,12 @@ def _run_workload(manifest: dict, active: dict, oracle_path: Path,
             expected_before = _row_for_device(swaps_before, active["mapper_device"])
             if expected_before is None:
                 raise QualificationFailure("expected mapper vanished before real-swap round")
-            if expected_before.used_kib != 0:
+            # The dedicated cgroup starts/ends each round with no swap
+            # charge. Mapper Used KiB may include a small, immutable host
+            # baseline; never let new foreign pages enter this accounting.
+            if expected_before.used_kib != expected_mapper_baseline_kib:
                 raise QualificationFailure(
-                    "exact mapper has nonzero use before dedicated round; unrelated pages may depend on it")
-
+                    "exact mapper use drifted from pre-oracle baseline")
             round_processes: list[subprocess.Popen[str]] = []
             worker_seeds: list[str] = []
             round_result: dict | None = None
@@ -3812,6 +3834,12 @@ def _run_workload(manifest: dict, active: dict, oracle_path: Path,
                 require_oracle_worker_geometry(
                     waiting, worker_memory_mib, "pages", "bytes", "readiness")
                 require_oracle_worker_cgroup_ownership(cgroup, round_processes)
+                # The fresh cgroup (and each prior complete release) must
+                # start FILL with zero charged swap even if the mapper holds
+                # a few explicitly tracked, unrelated host pages.
+                if _read_uint(cgroup / "memory.swap.current") != 0:
+                    raise QualificationFailure(
+                        "dedicated oracle cgroup has swap charge before round")
 
                 fill_status_before = sample_status()
                 lower_before = read_block_stats(
@@ -3999,7 +4027,8 @@ def _run_workload(manifest: dict, active: dict, oracle_path: Path,
             round_result.update(release)
             rounds.append(round_result)
 
-        reuse = evaluate_reuse_rounds(rounds)
+        reuse = evaluate_reuse_rounds(
+            rounds, expected_mapper_baseline_kib=expected_mapper_baseline_kib)
         events_after = _memory_events(cgroup / "memory.events")
         # Do not trust a previously clean guard observation as terminal proof.
         require_no_cgroup_oom_events(events_before, events_after)

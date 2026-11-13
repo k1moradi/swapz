@@ -30,6 +30,23 @@ packing, readback integrity, ordering, concurrency and fail-closed semantics.
 Physical and production acceptance remain blocked until current-source
 loaded, fault-injection, lifecycle and real-partition tests qualify this path.
 
+## Development real-device activation baseline (do not revert)
+
+The development helper enables a temporary owned mapper with swap priority
+32767, while unrelated Linux processes continue running. They may assign a
+few host swap pages to this new device BEFORE the dedicated cgroup oracle
+starts. Treating any positive /proc/swaps Used KiB as swapz corruption made
+the real-device correctness test intermittently impossible on a healthy host.
+Only this explicitly bounded development path may pin 0..64 KiB of
+page-aligned preexisting host use. Those pages never count as oracle traffic:
+both test rounds MUST begin/end at exactly the pinned baseline with ZERO
+dedicated-cgroup swap charge, and each in-round increment of mapper Used
+bytes MUST equal dedicated-cgroup memory.swap.current. Any baseline drift,
+oversized/malformed usage, OOM, missing I/O, oracle mismatch or unsafe cleanup
+still fails closed. The official primary production zero-use baseline stays
+unchanged. Do not substitute a moving baseline, remove the equality check,
+or alter global host swap priorities.
+
 ## Real-swap memory-pressure measurement (do not revert)
 
 The two concurrent anonymous-pageout oracles intentionally allocate more

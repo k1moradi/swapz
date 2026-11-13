@@ -710,6 +710,7 @@ class PhysicalSwapProbeTests(unittest.TestCase):
         for active, reason in (
                 (None, "mapper_entry_missing"),
                 ({"used_kib": 4096}, "initial_swap_usage_nonzero"),
+                ({"used_kib": 66}, "initial_swap_usage_nonzero"),
                 ({"used_kib": True}, "swap_usage_unavailable"),
                 ({"used_kib": None}, "swap_usage_unavailable"),
                 ({"used_kib": -1}, "swap_usage_unavailable")):
@@ -726,8 +727,12 @@ class PhysicalSwapProbeTests(unittest.TestCase):
                     activation_failure=reason)
                 self.assertEqual(record["phase"], "anonymous_swap_activation")
                 self.assertEqual(record["reason"], reason)
-        self.assertIsNone(probe._require_run_owned_swap_activation(
-            {"used_kib": 0}))
+        self.assertEqual(probe._require_run_owned_swap_activation(
+            {"used_kib": 0}), 0)
+        self.assertEqual(probe._require_run_owned_swap_activation(
+            {"used_kib": 12}), 12)
+        self.assertEqual(probe._require_run_owned_swap_activation(
+            {"used_kib": 64}), 64)
         # Untrusted or absent hints must not acquire a new public reason.
         default = probe._algorithm_physical_phase_failure_record(
             {"physical_oracle_phases": [{"status": "PASS"}]},
@@ -748,8 +753,8 @@ class PhysicalSwapProbeTests(unittest.TestCase):
 
         with mock.patch.object(probe.Path, "read_text",
                                autospec=True, side_effect=proc_text) as read:
-            self.assertIsNone(probe._require_run_owned_swap_activation(
-                {"used_kib": 0}))
+            self.assertEqual(probe._require_run_owned_swap_activation(
+                {"used_kib": 0}), 0)
             read.assert_not_called()
             with self.assertRaises(probe.ProbeError) as caught:
                 probe._require_run_owned_swap_activation(
@@ -775,12 +780,34 @@ class PhysicalSwapProbeTests(unittest.TestCase):
         with mock.patch.object(probe.Path, "read_text",
                                side_effect=OSError("NEVER_EXPORT")):
             with self.assertRaises(probe.ProbeError) as unavailable:
-                probe._require_run_owned_swap_activation({"used_kib": 64})
+                probe._require_run_owned_swap_activation({"used_kib": 128})
         self.assertEqual(unavailable.exception.algorithm_activation_observation, {
-            "mapper_used_kib": 64,
+            "mapper_used_kib": 128,
             "mem_available_mib": None,
             "memory_psi_some_avg10_milli_pct": None,
         })
+
+    def test_algorithm_summary_preserves_bounded_foreign_mapper_baseline(self):
+        workload, policy, result = self.algorithm_workload_fixture()
+        for round_result in result["rounds"]:
+            round_result["mapper_used_start_kib"] = 12
+            round_result["mapper_used_released_kib"] = 12
+        self.assertEqual(
+            probe._algorithm_real_swap_summary(
+                result, policy, "a" * 64, expected_mapper_baseline_kib=12)["status"],
+            "PASS")
+        # The default (production-style) interpretation remains zero-only.
+        with self.assertRaisesRegex(probe.ProbeError, "round_integrity_and_io"):
+            probe._algorithm_real_swap_summary(result, policy, "a" * 64)
+        for field, bad_value in (("mapper_used_start_kib", 16),
+                                 ("mapper_used_released_kib", 0)):
+            with self.subTest(field=field):
+                original = result["rounds"][1][field]
+                result["rounds"][1][field] = bad_value
+                with self.assertRaisesRegex(probe.ProbeError, "round_integrity_and_io"):
+                    probe._algorithm_real_swap_summary(
+                        result, policy, "a" * 64, expected_mapper_baseline_kib=12)
+                result["rounds"][1][field] = original
 
     def test_algorithm_summary_failure_retains_single_emitted_diagnostic(self):
         workload, policy, result = self.algorithm_workload_fixture()
@@ -817,6 +844,36 @@ class PhysicalSwapProbeTests(unittest.TestCase):
         self.assertEqual(workload._run_workload.call_count, 1)
         self.assertEqual(rejected.exception.workload_diagnostic,
                          json.loads(markers[0].split("=", 1)[1]))
+
+    def test_algorithm_live_oracle_pins_activation_baseline(self):
+        mapper = "/dev/mapper/swapz-demo-physical-1234567890abcdef"
+        workload, policy, result = self.algorithm_workload_fixture()
+        for round_result in result["rounds"]:
+            round_result["mapper_used_start_kib"] = 12
+            round_result["mapper_used_released_kib"] = 12
+        with ExitStack() as stack:
+            for name, value in (
+                    ("_verify_owned_mapper", mapper),
+                    ("block_identity", (253, 12)),
+                    ("_algorithm_real_swap_workload", (workload, policy)),
+                    ("_git_result", subprocess.CompletedProcess(
+                        [], 0, stdout="oracle")),
+                    ("_run", subprocess.CompletedProcess(
+                        [], 0, stdout="status"))):
+                stack.enter_context(mock.patch.object(
+                    probe, name, return_value=value))
+            stack.enter_context(mock.patch.object(
+                probe, "_active_swap_for",
+                side_effect=[None, {"used_kib": 12}]))
+            accepted = probe._run_algorithm_live_swap_oracle(
+                mapper,
+                {"source_sha": "a" * 40, "run_id": "1" * 32,
+                 "dm_name": "owned"},
+                {"major": 8, "minor": 4}, Path("/private"))
+        self.assertEqual(accepted["status"], "PASS")
+        self.assertEqual(
+            workload._run_workload.call_args.kwargs["expected_mapper_baseline_kib"],
+            12)
 
     def test_algorithm_workload_failure_marker_redacts_private_producer_details(self):
         stderr = io.StringIO()

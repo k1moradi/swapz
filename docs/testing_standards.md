@@ -2166,11 +2166,21 @@ and two complete allocate/swap-out/swap-in/byte-verify/release rounds. Every
 worker's readiness, fill, and verification page/byte counts must match its
 assigned memory, with worker PID/seed identity and fill-to-verification digest
 continuity; aggregate totals cannot compensate for an incomplete worker.
-The first round must return both dedicated-cgroup swap charge and exact mapper Used KiB to
-the fresh zero-use baseline before the second allocation; only then is repeated
-swap-slot reuse proven. While a round is resident under pressure, exact mapper
-Used bytes must equal the dedicated cgroup's swap charge. Any difference is
-BLOCKED because traffic attribution or mapper ownership is ambiguous.
+For official primary qualification the first round must return both dedicated-
+cgroup swap charge and exact mapper Used KiB to the fresh ZERO-use baseline
+before the second allocation; only then is repeated swap-slot reuse proven.
+The bounded **development-only physical trial** may instead pin at most 64 KiB
+(16 pages) of pre-existing, page-aligned unrelated host swap immediately after
+swapon. Linux can legitimately allocate those pages to a highest-priority
+mapper before our isolated oracle has started. They are never oracle evidence.
+Every round must start at exactly that original pinned mapper baseline with
+zero cgroup swap charge, then return to the identical mapper baseline and zero
+cgroup charge after the oracle exits. During each round, the *increase* in exact
+mapper Used bytes must equal the isolated cgroup swap charge. Foreign additions,
+releases or mismatched accounting fail closed. No silent baseline refresh, no
+initially busy production mapper, and no relaxation of traffic, byte, pressure,
+source/identity or recovery gates. This supports real swapping on a live host
+without falsely attributing the preexisting pages to the test.
 The byte oracle expands the run/worker/round seed into position-distinct 4 KiB
 pages; swap-in checks every byte, counts every corrupt page and byte, and caps
 only the diagnostic samples. Rootless regression must corrupt multiple bytes
@@ -3125,18 +3135,20 @@ backing SWAPSPACE2 header, restored swap and owned mapper/module removal
 and emits `PHYSICAL_RECOVERY_EVIDENCE` automatically. Do not require the
 operator to rerun read-only shell commands when that evidence is COMPLETE
 with all PASS fields. Never automatically retry, suppress pressure stops,
-switch swap devices, or disable the zero-use gate.
+switch swap devices, or disable the official production zero-use gate.
 
 For an owned swap mapper immediately after `swapon`, the development trial
-must distinguish absence from the active swap inventory, nonzero initial swap
-usage, and invalid usage observations. Preserve the exact-identity and
-zero-initial-use admission checks: background host swap must not be credited
-to the test workload, and a nonzero used value must never silently become a
-qualified baseline. Attach only one of three fixed source-defined failure
-reason codes to the post-recovery lifecycle diagnostic, without revealing
-device paths, host IDs or raw privileged stderr. Tests must prove the original
-refusal remains fail-closed and both maker and parser agree on the finite
-reason vocabulary.
+must distinguish absence from the active swap inventory, EXCESSIVE or
+misaligned initial swap usage, and invalid usage observations. Preserve exact
+mapper identity; only the private development path permits a bounded 0..64 KiB
+pre-oracle baseline, which must be explicitly threaded into every workload
+round and checked against separately charged cgroup bytes. If nonzero usage
+exceeds 64 KiB or is not page-aligned, retain the finite
+initial_swap_usage_nonzero refusal. It is never a qualified oracle allocation.
+Do not change the independent production zero-use admission. The three fixed
+source-defined failure reasons remain stable and identity-free after recovery;
+test the permitted 12 KiB real-host case, oversized background usage, baseline
+drift, full release, mismatched accounting, and the unchanged public parser.
 
 A first cgroup memory-PSI stop must retain optional I/O PSI `some`/`full`
 and `memory.events max` totals before child cleanup removes the fresh cgroup.

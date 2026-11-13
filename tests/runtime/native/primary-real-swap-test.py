@@ -4313,6 +4313,27 @@ class PrimaryRealSwapContracts(unittest.TestCase):
             },
         ]
         self.assertTrue(qualify.evaluate_reuse_rounds(rounds)["slot_reuse_proven"])
+        # A physical development mapper may acquire a few foreign pages
+        # between high-priority swapon and isolated oracle admission. The
+        # bytes are not charged to the oracle and must survive both rounds.
+        with_foreign_baseline = [
+            dict(row, mapper_used_start_kib=12, mapper_used_released_kib=12)
+            for row in rounds]
+        self.assertTrue(qualify.evaluate_reuse_rounds(
+            with_foreign_baseline,
+            expected_mapper_baseline_kib=12)["slot_reuse_proven"])
+        with self.assertRaisesRegex(qualify.QualificationFailure,
+                                    "authenticated mapper baseline"):
+            qualify.evaluate_reuse_rounds(with_foreign_baseline)
+        for changed in (
+                [dict(with_foreign_baseline[0], mapper_used_released_kib=0),
+                 with_foreign_baseline[1]],
+                [with_foreign_baseline[0],
+                 dict(with_foreign_baseline[1], mapper_used_start_kib=16)]):
+            with self.subTest(changed=changed), self.assertRaises(
+                    qualify.QualificationFailure):
+                qualify.evaluate_reuse_rounds(
+                    changed, expected_mapper_baseline_kib=12)
         for mutant in (
             [dict(rounds[0], concurrent_workers=1), rounds[1]],
             [dict(rounds[0], mapper_used_released_kib=4), rounds[1]],

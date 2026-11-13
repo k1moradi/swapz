@@ -73,6 +73,15 @@ DEVELOPMENT_SWAPOFF_MARGIN_KIB = 512 * 1024
 # Negative values are kernel-assigned low-priority policy; restore those with
 # plain swapon and verify negative semantics rather than an incidental number.
 LINUX_SWAP_PRIORITY_MAX = 32767
+# The development trial activates the isolated mapper at the highest swap
+# priority while unrelated host processes remain active. Linux may assign a
+# few host pages immediately after swapon, before our cgroup workers exist.
+# A literal zero-use check would therefore reject correct real-media tests.
+# Permit at most 16 preexisting 4KiB pages (64KiB), never count them toward
+# cgroup traffic, and require the EXACT baseline to persist at each round
+# boundary. This opt-in private physical-test allowance does NOT change
+# primary production qualification or permit arbitrary background swapping.
+MAX_DEVELOPMENT_INITIAL_MAPPER_USED_KIB = 64
 # The swapz DM status ABI contains many named counters. Preserve a bounded
 # complete status line rather than certifying a clipped prefix as healthy.
 MAX_STATUS_OUTPUT_CHARS = 32768
@@ -3913,8 +3922,13 @@ def _emit_algorithm_workload_failure(error, phase="anonymous_workload"):
     return record
 
 
-def _algorithm_real_swap_summary(result, policy, oracle_sha256):
-    """Recheck the existing producer's full evidence before durable PASS."""
+def _algorithm_real_swap_summary(result, policy, oracle_sha256, *,
+                                 expected_mapper_baseline_kib=0):
+    """Recheck source-bound oracle evidence against the fixed host baseline.
+
+    Only the bounded private development trial supplies a nonzero baseline.
+    Fresh, ordinary primary qualifications still require the default zero.
+    """
     rounds = result.get("rounds") if isinstance(result, dict) else None
     expected_rounds = policy["reuse_rounds"]
     expected_pages = policy["workload_mib"] * 1024 * 1024 // PAGE_BYTES
@@ -3930,6 +3944,11 @@ def _algorithm_real_swap_summary(result, policy, oracle_sha256):
             result.get("concurrent_workers") != policy["concurrent_workers"] or
             result.get("slot_reuse_proven") is not True):
         raise ProbeError("anonymous_swap=UNPROVEN gate=complete_reuse_rounds")
+    if (type(expected_mapper_baseline_kib) is not int or
+            not 0 <= expected_mapper_baseline_kib <=
+            MAX_DEVELOPMENT_INITIAL_MAPPER_USED_KIB or
+            expected_mapper_baseline_kib % (PAGE_BYTES // 1024) != 0):
+        raise ProbeError("anonymous_swap=UNPROVEN gate=initial_foreign_baseline")
     for index, row in enumerate(rounds, 1):
         if not isinstance(row, dict):
             raise ProbeError("anonymous_swap=UNPROVEN gate=round_evidence")
@@ -3940,9 +3959,9 @@ def _algorithm_real_swap_summary(result, policy, oracle_sha256):
         if (any(type(row.get(key)) is not int for key in integer_fields) or
                 row.get("round") != index or
                 row.get("concurrent_workers") != policy["concurrent_workers"] or
-                row.get("mapper_used_start_kib") != 0 or
+                row.get("mapper_used_start_kib") != expected_mapper_baseline_kib or
                 row.get("release_swap_current_bytes") != 0 or
-                row.get("mapper_used_released_kib") != 0 or
+                row.get("mapper_used_released_kib") != expected_mapper_baseline_kib or
                 any(type(row.get(key)) is not int or not 0 < row[key] <= MAX_BLOCK_COUNTER
                     for key in counters) or
                 row.get("oom_delta") != 0 or row.get("oom_kill_delta") != 0 or
@@ -4063,17 +4082,27 @@ def _algorithm_activation_host_observation(active):
 
 
 def _require_run_owned_swap_activation(active):
-    """Keep zero-initial-use isolation; preserve its exact refusal class."""
+    """Authenticate a tightly bounded pre-oracle host baseline.
+
+    The highest-priority mapper is available to *all* host processes after
+    swapon. A few foreign pages can arrive before the isolated oracles start.
+    Reject unbounded, malformed, or non-page-aligned usage. A permitted
+    baseline is never oracle evidence: the workload must prove that each
+    cgroup swap charge exactly equals the incremental mapper use, that all
+    charged slots are released, and that the foreign baseline never drifts.
+    The separate official primary verifier still requires a zero-use mapper.
+    """
     if active is None:
         reason = "mapper_entry_missing"
     elif (not isinstance(active, dict) or
           type(active.get("used_kib")) is not int or
           active["used_kib"] < 0):
         reason = "swap_usage_unavailable"
-    elif active["used_kib"] != 0:
+    elif (active["used_kib"] > MAX_DEVELOPMENT_INITIAL_MAPPER_USED_KIB or
+          active["used_kib"] % (PAGE_BYTES // 1024) != 0):
         reason = "initial_swap_usage_nonzero"
     else:
-        return
+        return active["used_kib"]
     refusal = ProbeError("run-owned swap mapper activation is unproven")
     refusal.algorithm_activation_reason = reason
     refusal.algorithm_activation_observation = (
@@ -4116,7 +4145,10 @@ def _run_algorithm_live_swap_oracle(mapper, state, target, state_dir):
     # A failure after swapon must always retain the normal swapoff path.
     _run(["swapon", "--priority", "32767", "--", mapper], timeout=30)
     active = _active_swap_for(*mapper_device)
-    _require_run_owned_swap_activation(active)
+    # A host can allocate a few pages in this highest-priority device as
+    # soon as swapon returns. Pin their exact count for the isolated oracle;
+    # neither those pages nor their I/O may count as oracle traffic.
+    initial_mapper_used_kib = _require_run_owned_swap_activation(active)
 
     def guard_mapper():
         if (_verify_owned_mapper(state, target) != mapper or
@@ -4138,7 +4170,8 @@ def _run_algorithm_live_swap_oracle(mapper, state, target, state_dir):
             {"mapper_device": mapper_device}, private_oracle,
             policy["workload_mib"], policy["resident_mib"],
             policy["swap_limit_mib"], policy["timeout_seconds"],
-            telemetry_check=guard_mapper, status_reader=read_owned_status)
+            telemetry_check=guard_mapper, status_reader=read_owned_status,
+            expected_mapper_baseline_kib=initial_mapper_used_kib)
         guard_mapper()
     except (workload.Blocked, workload.QualificationFailure) as exc:
         # Keep the producer's first failure and cleanup disposition in private
@@ -4148,7 +4181,9 @@ def _run_algorithm_live_swap_oracle(mapper, state, target, state_dir):
         failure.workload_diagnostic = diagnostic
         raise failure from exc
     try:
-        return _algorithm_real_swap_summary(result, policy, oracle_sha256)
+        return _algorithm_real_swap_summary(
+            result, policy, oracle_sha256,
+            expected_mapper_baseline_kib=initial_mapper_used_kib)
     except ProbeError as exc:
         # Preserve the already-emitted first-workload marker across recovery,
         # avoiding a second marker that would invalidate strict parsing.
