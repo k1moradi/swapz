@@ -6876,6 +6876,18 @@ linked, group/world-writable, wrong-size, wrongly hashed or byte-different
 plans; rootless validation must exercise an explicitly permissive umask
 without changing the test process's own umask.
 
+The optional native plan encoder may cache only its fixed, already
+validated queue depth, 12-byte record size and bound pack method per
+encoding call. Page/fixture integer type and unsigned-range checks, lane
+ownership bounds, and the canonical 16-byte header and per-event 12-byte
+little-endian record format must remain identical. No plan acceptance can
+be inferred from an encoder optimization: each replay arm still
+independently opens and authenticates the stored plan against the checked
+JSONL trace. Rootless parity tests must compare exact header/record bytes
+against the original `struct.pack` ABI for empty, short and full
+QD1/QD4/QD8/QD32 workloads and refuse boolean, negative, overflowing
+and out-of-range index/lane fields.
+
 The four sustained-WRITE qualification plans (QD1, QD4, QD8 and QD32)
 may be generated in one private Python interpreter rather than four separate
 process launches. The batch must call the unchanged per-variant deterministic

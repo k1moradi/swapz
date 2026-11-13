@@ -1255,24 +1255,30 @@ def encode_native_plan(trace, manifest):
     # needed in the private native helper handoff.
     record = struct.Struct("<IIBBBB")
     header_bytes = 16
-    encoded = bytearray(header_bytes + len(trace) * record.size)
+    record_bytes = record.size
+    # Empty plans historically require no queue-depth lookup.
+    queue_depth = manifest["qd"] if trace else None
+    encoded = bytearray(header_bytes + len(trace) * record_bytes)
     struct.pack_into("<8sQ", encoded, 0, b"SWZPLAN", len(trace))
+    pack_record = record.pack_into
     for sequence, item in enumerate(trace):
         phase = 0 if item["phase"] == "warmup" else 1
-        lane = item.get("lane", sequence % manifest["qd"])
+        lane = item.get("lane", sequence % queue_depth)
+        logical_page = item["page"]
+        fixture_index = item["fixture"]
         # The old ASCII parser rejected JSON bools such as True where an
         # integer page, fixture or lane was required. Packing must not
         # silently reinterpret those values as 1.
-        if (type(item["page"]) is not int or
-                type(item["fixture"]) is not int or
+        if (type(logical_page) is not int or
+                type(fixture_index) is not int or
                 type(lane) is not int or
-                not 0 <= item["page"] <= 0xffffffff or
-                not 0 <= item["fixture"] <= 0xffffffff or
-                not 0 <= lane < manifest["qd"]):
+                not 0 <= logical_page <= 0xffffffff or
+                not 0 <= fixture_index <= 0xffffffff or
+                not 0 <= lane < queue_depth):
             raise ValueError("native replay event has invalid integer fields")
-        record.pack_into(
-            encoded, header_bytes + sequence * record.size,
-            item["page"], item["fixture"], lane, phase,
+        pack_record(
+            encoded, header_bytes + sequence * record_bytes,
+            logical_page, fixture_index, lane, phase,
             ord(item["op"]), 0)
     return encoded
 

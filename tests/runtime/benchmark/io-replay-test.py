@@ -3087,6 +3087,56 @@ class PairReplayContract(unittest.TestCase):
                             f"phase=cross-engine-oracle mode={mode} "
                             f"candidate={candidate} field={field}")
 
+    def test_native_plan_cached_geometry_matches_reference_binary_bytes(self):
+        import runpy
+
+        encoder = runpy.run_path(str(SCRIPT))["encode_native_plan"]
+        for queue_depth, total in ((1, 0), (1, 1), (4, 37),
+                                   (8, 256), (32, 17408)):
+            with self.subTest(queue_depth=queue_depth, total=total):
+                rows = []
+                expected_records = bytearray()
+                for sequence in range(total):
+                    logical_page = (sequence * 13) % 1024
+                    fixture_index = (sequence * 17) % 32
+                    lane = sequence % queue_depth
+                    operation = "R" if sequence % 4 == 0 else "W"
+                    phase = "warmup" if sequence < 1024 else "measure"
+                    event = {
+                        "page": logical_page, "fixture": fixture_index,
+                        "op": operation, "phase": phase,
+                    }
+                    if sequence % 3:
+                        event["lane"] = lane
+                    rows.append(event)
+                    expected_records.extend(struct.pack(
+                        "<IIBBBB", logical_page, fixture_index, lane,
+                        0 if phase == "warmup" else 1,
+                        ord(operation), 0))
+                expected = (struct.pack("<8sQ", b"SWZPLAN", len(rows)) +
+                            expected_records)
+                actual = encoder(rows, {"qd": queue_depth})
+                self.assertEqual(actual, expected)
+                self.assertEqual(hashlib.sha256(actual).digest(),
+                                 hashlib.sha256(expected).digest())
+
+        # Historical empty-plan encoding does not inspect queue geometry.
+        self.assertEqual(encoder([], {}), struct.pack("<8sQ", b"SWZPLAN", 0))
+
+        valid = {"page": 0, "fixture": 1, "lane": 0,
+                 "phase": "measure", "op": "W"}
+        invalid = (
+            ("page", True), ("page", -1), ("page", 0x100000000),
+            ("fixture", True), ("fixture", -1),
+            ("fixture", 0x100000000), ("lane", True),
+            ("lane", -1), ("lane", 4),
+        )
+        for field, bad_value in invalid:
+            with self.subTest(field=field, value=bad_value):
+                with self.assertRaisesRegex(
+                        ValueError, "native replay event has invalid integer fields"):
+                    encoder([{**valid, field: bad_value}], {"qd": 4})
+
     def test_native_plan_cache_matches_legacy_and_rejects_substitutions(self):
         import runpy
 

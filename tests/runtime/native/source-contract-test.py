@@ -7895,6 +7895,21 @@ int main(void)
         pair = (ROOT / "tests/tools/benchmark-owned-pair.sh").read_text()
         fixtures = (ROOT / "tests/runtime/benchmark/io-replay-test.py").read_text()
         self.assertIn("def encode_native_plan(trace, manifest):", replay)
+        encoder = replay.split("def encode_native_plan(trace, manifest):", 1)[1].split(
+            "\ndef open_verified_native_plan(", 1)[0]
+        # Cached, validated geometry is local to this encoding call; keep
+        # one type/range gate per record and the original exact 12-byte ABI.
+        self.assertEqual(encoder.count('manifest["qd"]'), 1)
+        self.assertEqual(encoder.count("record.size"), 1)
+        self.assertIn("queue_depth = manifest[\"qd\"]", encoder)
+        self.assertIn("record_bytes = record.size", encoder)
+        self.assertIn("pack_record = record.pack_into", encoder)
+        self.assertIn("logical_page = item[\"page\"]", encoder)
+        self.assertIn("fixture_index = item[\"fixture\"]", encoder)
+        self.assertIn("type(logical_page) is not int", encoder)
+        self.assertIn("type(fixture_index) is not int", encoder)
+        self.assertIn("type(lane) is not int", encoder)
+        self.assertIn("pack_record(\n", encoder)
         self.assertIn("def open_verified_native_plan(trace_path, manifest, trace):",
                       replay)
         self.assertIn('manifest["native_plan_sha256"] = sha(encoded_plan)', replay)
@@ -7914,6 +7929,9 @@ int main(void)
         self.assertIn('cp -- "$plan_dir/native-plan.bin"', pair)
         self.assertIn(
             "def test_native_plan_cache_matches_legacy_and_rejects_substitutions",
+            fixtures)
+        self.assertIn(
+            "def test_native_plan_cached_geometry_matches_reference_binary_bytes",
             fixtures)
 
     def test_loaded_mixed_and_pressure_plans_keep_independent_hashes(self):
