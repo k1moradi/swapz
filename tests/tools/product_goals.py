@@ -965,6 +965,59 @@ def _ci_retain_log(record, destination, diagnostic):
                 output.write(line + "\n")
 
 
+def _ci_rootless_success_timing_summary(record, harness_source):
+    """Return five slowest trusted rootless phases; never report child text.
+
+    The suite is already successful. Only numeric durations and phase labels
+    derived from the tested source are publishable; everything else stays
+    in the CI-only temporary capture. This is observational, not a PASS gate.
+    """
+    import re
+
+    allowed_labels = set(re.findall(
+        r"(?m)^rootless_phase='([^'\r\n]{1,120})'$", harness_source))
+    # The Bash syntax loop derives its labels from literal, source-controlled
+    # relative filenames. Do not admit arbitrary child-provided identifiers.
+    syntax_block = harness_source.split("for script in ", 1)
+    if len(syntax_block) == 2:
+        source_paths = syntax_block[1].split("; do", 1)[0]
+        allowed_labels.update(
+            "bash syntax " + path.rsplit("/", 1)[-1]
+            for path in re.findall(
+                r"(?:tests|packaging)/[A-Za-z0-9_.-]+"
+                r"(?:/[A-Za-z0-9_.-]+)*", source_paths))
+    if not allowed_labels:
+        return ()
+
+    pattern = re.compile(
+        r"ROOTLESS_PHASE_TIMING index=(0|[1-9][0-9]{0,2}) "
+        r"elapsed_s=(0|[1-9][0-9]{0,5}) label=(.+)")
+    timings = []
+    completed = False
+    record.seek(0)
+    for line in _ci_record_lines(record):
+        line = line.rstrip("\r\n")
+        if line == ("PASS: rootless C tests, source contracts, Make policy "
+                    "and owned-device preflights"):
+            completed = True
+        if not line.startswith("ROOTLESS_PHASE_TIMING "):
+            continue
+        if completed:
+            return ()
+        match = pattern.fullmatch(line)
+        if match is None:
+            return ()
+        index, elapsed = int(match.group(1)), int(match.group(2))
+        label = match.group(3)
+        if (index != len(timings) or index >= 128 or
+                elapsed > 86400 or label not in allowed_labels):
+            return ()
+        timings.append((index, elapsed, label))
+    if not completed or not timings:
+        return ()
+    return tuple(sorted(timings, key=lambda entry: (-entry[1], entry[0]))[:5])
+
+
 def _ci_run(argv):
     """Run one rootless CI command, printing only actionable failures."""
     import argparse
@@ -1019,6 +1072,20 @@ def _ci_run(argv):
                     "\n").encode())
                 return_code = 127
         if return_code == 0:
+            if arguments.suite == "native-rootless":
+                # Success output is otherwise private. Publish ONLY a small
+                # source-verified timing ranking to identify bottlenecks.
+                # A missing/invalid diagnostic must not change the test PASS.
+                try:
+                    harness = (root / "tests/tools/test-rootless.sh").read_text(
+                        encoding="utf-8")
+                    timings = _ci_rootless_success_timing_summary(record, harness)
+                except (OSError, UnicodeError):
+                    timings = ()
+                for rank, (index, seconds, label) in enumerate(timings, 1):
+                    print(
+                        f"SWAPZ_CI_ROOTLESS_SLOW_PHASE rank={rank} "
+                        f"index={index} elapsed_s={seconds} label={label}")
             return 0
         record.seek(0)
         result = diagnose_ci_failure(

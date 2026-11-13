@@ -3798,8 +3798,22 @@ still reported, while `log=unavailable` and the numeric diagnostic errno
 describe that secondary evidence failure. All promoted fields use the existing
 bounded sanitization and allowlisted rootless-marker syntax; do not promote
 private local log contents, command strings, credentials, output payload bytes,
-or unvalidated paths. Passing commands emit no extra transcript, retain no log
-and incur no new subprocesses.
+or unvalidated paths. Passing commands emit no arbitrary child transcript, retain no log
+and incur no new subprocesses. The successful **native-rootless CI suite
+only** may publish up to five `SWAPZ_CI_ROOTLESS_SLOW_PHASE` observational
+records, ranked by its existing rootless per-phase `elapsed_s` seconds
+(descending, source-order ties). Each label must be authenticated against
+the tested `test-rootless.sh` literal phase list or its source-declared
+Bash-syntax input basenames; indices must be contiguous and durations
+bounded, followed by the exact terminal rootless PASS marker. Malformed,
+duplicated, out-of-order, missing-terminal, or child-injected timing
+metadata suppresses the **entire** summary without changing the original
+test result. Never promote raw child stdout/stderr, private log paths,
+host identities, arbitrary labels or a timing measurement as a qualification
+PASS. Keep the existing first-failure cause and failure-only log retention.
+The synthetic CI diagnostic suite must prove an allowlisted top-five ranking,
+ties, dynamic Bash-syntax labels and refusal of malformed/forged records;
+official `make test` reporting and qualification gates are unchanged.
 
 The Make-interface synthetic CI attribution fixtures must use canonical
 fully-qualified Python unittest failure headings to authenticate a test

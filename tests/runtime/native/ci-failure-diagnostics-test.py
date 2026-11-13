@@ -387,5 +387,131 @@ exec sleep 30
         self.assertEqual(shell_signal["category"], "UNKNOWN_FAILURE")
         self.assertIn("indistinguishable", shell_signal["reason"])
 
+class RootlessSuccessTimingSummary(unittest.TestCase):
+    """A successful CI job may reveal only its source-bound slow phases."""
+
+    @classmethod
+    def setUpClass(cls):
+        cls.diagnostics = load_module(
+            "rootless_success_timing_summary", PRODUCT_GOALS)
+        cls.harness = (ROOT / "tests/tools/test-rootless.sh").read_text(
+            encoding="utf-8")
+
+    @staticmethod
+    def capture(phases, completed=True):
+        import io
+
+        lines = ["PRIVATE_SENTINEL never expose this", "irrelevant child output"]
+        lines.extend(
+            f"ROOTLESS_PHASE_TIMING index={index} elapsed_s={seconds} label={label}"
+            for index, (seconds, label) in enumerate(phases))
+        if completed:
+            lines.append(
+                "PASS: rootless C tests, source contracts, Make policy "
+                "and owned-device preflights")
+        return io.BytesIO(("\n".join(lines) + "\n").encode())
+
+    def test_only_top_five_source_verified_timings_are_published(self):
+        phases = [
+            (4, "rootless initialization"),
+            (27, "tests/Makefile native and metadata"),
+            (8, "tests/runtime/native/source-contract-test.py"),
+            (61, "tests/runtime/native/primary-real-swap-test.py"),
+            (1, "bash syntax test-rootless.sh"),
+            (61, "tests/runtime/native/production-readiness-test.py"),
+            (0, "static source/interface contract assertions"),
+        ]
+        summary = self.diagnostics._ci_rootless_success_timing_summary(
+            self.capture(phases), self.harness)
+        self.assertEqual(summary, (
+            (3, 61, "tests/runtime/native/primary-real-swap-test.py"),
+            (5, 61, "tests/runtime/native/production-readiness-test.py"),
+            (1, 27, "tests/Makefile native and metadata"),
+            (2, 8, "tests/runtime/native/source-contract-test.py"),
+            (0, 4, "rootless initialization"),
+        ))
+        self.assertNotIn("PRIVATE_SENTINEL", repr(summary))
+        self.assertEqual(self.diagnostics._ci_rootless_success_timing_summary(
+            self.capture(phases, completed=False), self.harness), ())
+
+    def test_ci_runner_emits_only_trusted_success_summary(self):
+        import contextlib
+        import io
+        import os
+        import subprocess
+        from unittest import mock
+
+        phases = [
+            (7, "rootless initialization"),
+            (23, "tests/Makefile native and metadata"),
+            (31, "tests/runtime/native/primary-real-swap-test.py"),
+        ]
+        payload = self.capture(phases).getvalue()
+        commit_sha = "a" * 40
+
+        def fake_run(command, **kwargs):
+            if command == ["git", "rev-parse", "HEAD"]:
+                return subprocess.CompletedProcess(
+                    command, 0, stdout=commit_sha + "\n")
+            kwargs["stdout"].write(payload)
+            return subprocess.CompletedProcess(command, 0)
+
+        for suite in ("native-rootless", "source-contract"):
+            with self.subTest(suite=suite):
+                output = io.StringIO()
+                with mock.patch.dict(
+                        os.environ, {"GITHUB_SHA": commit_sha}, clear=False), \
+                     mock.patch("subprocess.run", side_effect=fake_run), \
+                     contextlib.redirect_stdout(output):
+                    status = self.diagnostics._ci_run([
+                        "--suite", suite, "--", "python3", "-B",
+                        "tests/tools/test-rootless.sh"])
+                self.assertEqual(status, 0)
+                self.assertNotIn("PRIVATE_SENTINEL", output.getvalue())
+                if suite == "native-rootless":
+                    self.assertEqual(
+                        output.getvalue().splitlines(), [
+                            "SWAPZ_CI_ROOTLESS_SLOW_PHASE rank=1 index=2 "
+                            "elapsed_s=31 "
+                            "label=tests/runtime/native/primary-real-swap-test.py",
+                            "SWAPZ_CI_ROOTLESS_SLOW_PHASE rank=2 index=1 "
+                            "elapsed_s=23 label=tests/Makefile native and metadata",
+                            "SWAPZ_CI_ROOTLESS_SLOW_PHASE rank=3 index=0 "
+                            "elapsed_s=7 label=rootless initialization",
+                        ])
+                else:
+                    self.assertEqual(output.getvalue(), "")
+
+    def test_untrusted_or_incomplete_success_timing_records_are_ignored(self):
+        import io
+
+        baseline = [
+            (1, "rootless initialization"),
+            (2, "tests/Makefile native and metadata"),
+        ]
+        good = self.capture(baseline).getvalue()
+        tampered = (
+            good.replace(b"index=1", b"index=5"),
+            good.replace(b"elapsed_s=2", b"elapsed_s=999999"),
+            good.replace(b"label=tests/Makefile native and metadata",
+                         b"label=/tmp/PRIVATE_SENTINEL"),
+            good.replace(b"index=1", b"index=0"),
+            good.replace(b"elapsed_s=1", b"elapsed_s=-1"),
+            good.replace(b"label=rootless initialization",
+                         b"label=rootless initialization\x1b[31m"),
+            good.replace(
+                b"PASS: rootless C tests, source contracts, Make policy "
+                b"and owned-device preflights", b"NO AUTHENTICATED PASS"),
+            good + b"ROOTLESS_PHASE_TIMING index=2 elapsed_s=999 "
+                   b"label=rootless initialization\n",
+        )
+        for index, data in enumerate(tampered):
+            with self.subTest(case=index):
+                result = self.diagnostics._ci_rootless_success_timing_summary(
+                    io.BytesIO(data), self.harness)
+                self.assertEqual(result, ())
+                self.assertNotIn("PRIVATE_SENTINEL", repr(result))
+
+
 if __name__ == "__main__":
     unittest.main()
