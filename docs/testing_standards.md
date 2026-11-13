@@ -2250,8 +2250,21 @@ occupancy (27% host RAM used is not a contradiction). Never replace the FULL
 stop with host RAM utilization, host-global PSI, or cgroup SOME; separately
 retain host MemAvailable, cgroup OOM/swap, deadline, source and recovery gates.
 Retain cgroup SOME as performance telemetry, and report FULL independently
-using cgroup_memory_pressure_full_usec in completed workload evidence. New
-rootless tests must prove high SOME/low FULL does not trip the whole-workload
+using cgroup_memory_pressure_full_usec in completed workload evidence.
+The swapz ordered kernel worker operates OUTSIDE the limited oracle cgroup:
+high cgroup FULL and positive physical WRITE progress can occur together.
+FULL proves the oracles' simultaneous reclaim stalls, NOT a complete
+kernel/device deadlock. Never waive the fixed PSI stop based on progress.
+For a stopped trial, retain matched-sampling-window deltas for existing
+ordered-worker time plus lower-WRITE service, non-I/O commit and preparation
+wait nanosecond counters: swapz_lower_write_wall_delta_ns,
+swapz_commit_nonio_wall_delta_ns, swapz_prep_wait_wall_delta_ns.
+Missing or regressed samples become unavailable, never fabricated values.
+These worker wall times can overlap, include preemption, and must not be
+summed as exclusive CPU time or used to bypass any gate. Keep producer,
+finite privileged relay and official report parser matched, with rootless
+snapshot, reset, missing-value and malformed-input regressions.
+New rootless tests must prove high SOME/low FULL does not trip the whole-workload
 stop, high FULL still does, and the actual workload samples FULL before FILL.
 Kernel/cgroup evidence is parsed
 fail-closed: MemAvailable must retain its canonical kB unit, PSI has one

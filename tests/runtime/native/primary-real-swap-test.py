@@ -3150,6 +3150,17 @@ class PrimaryRealSwapContracts(unittest.TestCase):
         self.assertEqual(deltas["swapz_physical_write_delta"], 100)
         self.assertIsNone(deltas["swapz_write_submitted_delta"])
         self.assertEqual(deltas["lower_write_requests_delta"], 100)
+        for field in ("swapz_lower_write_wall_delta_ns",
+                      "swapz_commit_nonio_wall_delta_ns",
+                      "swapz_prep_wait_wall_delta_ns"):
+            self.assertEqual(deltas[field], 100)
+        # A regressing cumulative counter must not become a negative
+        # or wrapped service-duration delta.
+        reset = dict(newer, swapz_lower_write_wall_ns=0)
+        initial = {name: 10 for name in counters}
+        self.assertIsNone(qualify._pressure_progress_deltas(
+            deque([(0.5, initial), (4.5, reset)]),
+            window)["swapz_lower_write_wall_delta_ns"])
         self.assertTrue(all(
             value is None for value in qualify._pressure_progress_deltas(
                 deque([(4.5, newer)]), window).values()))
@@ -3157,7 +3168,9 @@ class PrimaryRealSwapContracts(unittest.TestCase):
     def test_pressure_progress_snapshot_counts_exact_lower_requests(self):
         status = {
             "physical_write": 8192, "write_submitted": 12288,
-            "upper_write_completed_ok": 3, "ordered_worker_wall_ns": 500}
+            "upper_write_completed_ok": 3, "ordered_worker_wall_ns": 500,
+            "lower_write_wall_ns": 200, "window_commit_nonio_wall_ns": 120,
+            "prep_wait_wall_ns": 30}
         disk_stat = "1 0 16 10 7 0 64 80 0 0 0 0 0 0 0 0 0"
         with mock.patch.object(
                 qualify, "_psi_total", side_effect=[100, 40, 60]) as pressure, \
@@ -3172,6 +3185,9 @@ class PrimaryRealSwapContracts(unittest.TestCase):
         self.assertEqual(observation["swapz_upper_write_completed_ok"], 3)
         self.assertEqual(observation["lower_write_requests_total"], 7)
         self.assertEqual(observation["lower_write_sectors_total"], 64)
+        self.assertEqual(observation["swapz_lower_write_wall_ns"], 200)
+        self.assertEqual(observation["swapz_commit_nonio_wall_ns"], 120)
+        self.assertEqual(observation["swapz_prep_wait_wall_ns"], 30)
         self.assertEqual(pressure.call_count, 3)
         stat_read.assert_called_once()
 

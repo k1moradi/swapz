@@ -6320,6 +6320,9 @@ class ReportContract(unittest.TestCase):
             "swapz_physical_write_delta": 8192,
             "swapz_write_submitted_delta": 8192,
             "swapz_write_completed_delta": 2, "swapz_worker_wall_delta_ns": 200,
+            "swapz_lower_write_wall_delta_ns": 125,
+            "swapz_commit_nonio_wall_delta_ns": 50,
+            "swapz_prep_wait_wall_delta_ns": None,
             "lower_write_sectors_delta": 16, "lower_write_requests_delta": 2,
             "workload_elapsed_usec": 12000000, "phase_elapsed_usec": 5000000,
             "round_index": 1}
@@ -6327,6 +6330,9 @@ class ReportContract(unittest.TestCase):
         self.assertEqual(runner.parse_algorithm_pageout_diagnostic(marker(extended)), extended)
         for changed in ({"round_index": True},
                         {"cgroup_cpu_some_delta_usec": "/private"},
+                        {"swapz_lower_write_wall_delta_ns": True},
+                        {"swapz_commit_nonio_wall_delta_ns": -1},
+                        {"swapz_prep_wait_wall_delta_ns": "/private"},
                         {"progress_window_usec": -1}):
             self.assertIsNone(runner.parse_algorithm_pageout_diagnostic(
                 marker({**extended, "pressure": {**extended["pressure"], **changed}})))

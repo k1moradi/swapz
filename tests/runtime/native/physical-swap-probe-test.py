@@ -847,6 +847,9 @@ class PhysicalSwapProbeTests(unittest.TestCase):
             "swapz_write_submitted_delta": 8192,
             "swapz_write_completed_delta": 1,
             "swapz_worker_wall_delta_ns": 200,
+            "swapz_lower_write_wall_delta_ns": 125,
+            "swapz_commit_nonio_wall_delta_ns": 50,
+            "swapz_prep_wait_wall_delta_ns": True,
             "lower_write_sectors_delta": 8,
             "lower_write_requests_delta": 2,
             "workload_elapsed_usec": 12345678,
@@ -871,6 +874,9 @@ class PhysicalSwapProbeTests(unittest.TestCase):
         self.assertIsNone(record["pressure"]["cgroup_io_full_usec"])
         self.assertIsNone(record["pressure"]["cgroup_memory_max_events"])
         self.assertIsNone(record["pressure"]["cgroup_cpu_some_delta_usec"])
+        self.assertEqual(record["pressure"]["swapz_lower_write_wall_delta_ns"], 125)
+        self.assertEqual(record["pressure"]["swapz_commit_nonio_wall_delta_ns"], 50)
+        self.assertIsNone(record["pressure"]["swapz_prep_wait_wall_delta_ns"])
         self.assertEqual(record["pressure"]["progress_window_usec"], 4_000_000)
         self.assertEqual(record["pressure"]["lower_write_requests_delta"], 2)
         self.assertEqual(record["pressure"]["phase_elapsed_usec"], 5123456)

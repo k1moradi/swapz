@@ -43,7 +43,12 @@ with host RAM percentage (e.g. a reported 27% host utilization).
 The rolling five-second 85% whole-workload stop therefore samples dedicated
 cgroup `memory.pressure full total=`, meaning ALL non-idle cgroup tasks are
 simultaneously stalled. Cgroup PSI `some` remains separately recorded as
-performance evidence. The independent 1 GiB host `MemAvailable` floor,
+performance evidence. The ordered swapz kernel worker runs OUTSIDE the
+oracle cgroup: positive lower-device WRITE progress can coexist with cgroup
+FULL. Do not call this a total device hang or use writes to waive the stop.
+For attribution, compare the new same-window lower-WRITE service, non-I/O
+commit and preparation-wait deltas; these are overlapping wall durations,
+not additive CPU time. The independent 1 GiB host `MemAvailable` floor,
 cgroup OOM/swap bounds, fixed workload/timeout, source/device admission and
 recovery checks are unchanged. Never substitute host-global RAM occupancy
 or relax these limits to force a physical PASS. See kernel PSI documentation

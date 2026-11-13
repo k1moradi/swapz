@@ -3489,6 +3489,12 @@ def _wait_for_round_release(cgroup: Path, mapper_device: tuple[int, int],
 
 # Keep these counters and their units explicit: snapshots are cumulative, while
 # diagnostic deltas span only the observed part of the memory PSI stop window.
+# The swapz kernel worker executes OUTSIDE the 128 MiB-limited oracle cgroup:
+# FULL PSI measures simultaneous oracle reclaim stalls, not inactivity of
+# the lower-device worker. Real I/O can continue while FULL is high.
+# These additional wall-time counters are sampled over the SAME short window.
+# Their intervals may overlap and include preemption. Do NOT sum them or
+# interpret them as exclusive CPU time, or use them to waive a PSI stop.
 PRESSURE_PROGRESS_COUNTERS = (
     ("cgroup_io_some_usec", "cgroup_io_some_delta_usec"),
     ("cgroup_io_full_usec", "cgroup_io_full_delta_usec"),
@@ -3497,6 +3503,9 @@ PRESSURE_PROGRESS_COUNTERS = (
     ("swapz_write_submitted_total", "swapz_write_submitted_delta"),
     ("swapz_upper_write_completed_ok", "swapz_write_completed_delta"),
     ("swapz_ordered_worker_wall_ns", "swapz_worker_wall_delta_ns"),
+    ("swapz_lower_write_wall_ns", "swapz_lower_write_wall_delta_ns"),
+    ("swapz_commit_nonio_wall_ns", "swapz_commit_nonio_wall_delta_ns"),
+    ("swapz_prep_wait_wall_ns", "swapz_prep_wait_wall_delta_ns"),
     ("lower_write_sectors_total", "lower_write_sectors_delta"),
     ("lower_write_requests_total", "lower_write_requests_delta"),
 )
@@ -3522,7 +3531,10 @@ def _pressure_progress_snapshot(cgroup: Path,
                 ("swapz_physical_write_total", "physical_write"),
                 ("swapz_write_submitted_total", "write_submitted"),
                 ("swapz_upper_write_completed_ok", "upper_write_completed_ok"),
-                ("swapz_ordered_worker_wall_ns", "ordered_worker_wall_ns")):
+                ("swapz_ordered_worker_wall_ns", "ordered_worker_wall_ns"),
+                ("swapz_lower_write_wall_ns", "lower_write_wall_ns"),
+                ("swapz_commit_nonio_wall_ns", "window_commit_nonio_wall_ns"),
+                ("swapz_prep_wait_wall_ns", "prep_wait_wall_ns")):
             value = status.get(key)
             if type(value) is int and value >= 0:
                 observed[field] = value
@@ -3704,8 +3716,11 @@ def _run_workload(manifest: dict, active: dict, oracle_path: Path,
         if _mem_available_mib() < MIN_AVAILABLE_MIB:
             raise QualificationFailure(
                 f"host MemAvailable crossed {MIN_AVAILABLE_MIB} MiB early-stop threshold")
-        # FULL is a *stall-time* threshold for all workers, not a substitute
-        # for the separate /proc/meminfo MemAvailable host-safety guard.
+        # FULL is a *stall-time* threshold for oracle tasks in this
+        # cgroup, not host RAM occupancy or proof that the out-of-cgroup
+        # swapz kernel worker stopped. Never use observed physical progress
+        # to waive the frozen 85%/5-second stop. The /proc/meminfo
+        # MemAvailable host-safety guard is independently enforced.
         current_psi_total = _psi_total(pressure_path, PSI_STOP_KIND)
         observed_time = time.monotonic()
         stopped = psi_window.observe(observed_time, current_psi_total)

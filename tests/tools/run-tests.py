@@ -4151,6 +4151,9 @@ def parse_algorithm_pageout_diagnostic(error_output):
                 "cgroup_io_full_delta_usec", "cgroup_cpu_some_delta_usec",
                 "swapz_physical_write_delta", "swapz_write_submitted_delta",
                 "swapz_write_completed_delta", "swapz_worker_wall_delta_ns",
+                "swapz_lower_write_wall_delta_ns",
+                "swapz_commit_nonio_wall_delta_ns",
+                "swapz_prep_wait_wall_delta_ns",
                 "lower_write_sectors_delta", "lower_write_requests_delta",
                 "workload_elapsed_usec", "phase_elapsed_usec", "round_index"}
             if isinstance(pressure, dict):
@@ -4281,6 +4284,9 @@ def print_algorithm_workload_diagnostic(diagnostic):
                       "swapz_physical_write_delta",
                       "swapz_write_submitted_delta", "swapz_write_completed_delta",
                       "swapz_worker_wall_delta_ns",
+                      "swapz_lower_write_wall_delta_ns",
+                      "swapz_commit_nonio_wall_delta_ns",
+                      "swapz_prep_wait_wall_delta_ns",
                       "lower_write_sectors_delta", "lower_write_requests_delta")),
                   flush=True)
         print("        I/O snapshots (totals, not attributed deltas): " + " ".join(

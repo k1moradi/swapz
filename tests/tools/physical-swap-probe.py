@@ -3888,6 +3888,9 @@ def _emit_algorithm_workload_failure(error, phase="anonymous_workload"):
                 "cgroup_io_full_delta_usec", "cgroup_cpu_some_delta_usec",
                 "swapz_physical_write_delta", "swapz_write_submitted_delta",
                 "swapz_write_completed_delta", "swapz_worker_wall_delta_ns",
+                "swapz_lower_write_wall_delta_ns",
+                "swapz_commit_nonio_wall_delta_ns",
+                "swapz_prep_wait_wall_delta_ns",
                 "lower_write_sectors_delta", "lower_write_requests_delta",
                 "workload_elapsed_usec", "phase_elapsed_usec", "round_index")
             pressure = {key: observation.get(key) for key in fields}
