@@ -1617,6 +1617,32 @@ class NativeTimingContract(unittest.TestCase):
                                 tested_source=expected_source, kdir="/synthetic",
                                 runner=runner), 0)
                         changed = native.NATIVE / native.SUITES[suite][0]
+
+                        def mutate_during_cache_read(_context, *,
+                                                     native_suite):
+                            self.assertEqual(native_suite, suite)
+                            # The first digest matched the old PASS; mutate
+                            # the executable as that PASS is read.
+                            changed.write_bytes(b"#!/bin/sh\nexit 19\n")
+                            changed.chmod(0o755)
+                            return [suite]
+
+                        fresh_output = io.StringIO()
+                        with mock.patch.object(
+                                runner, "read_development_resume_checkpoint",
+                                side_effect=mutate_during_cache_read), \
+                                contextlib.redirect_stdout(fresh_output), \
+                                contextlib.redirect_stderr(io.StringIO()) as error:
+                            self.assertEqual(native.run_native_suite(
+                                suite, binaries, mode="resume",
+                                tested_source=expected_source,
+                                kdir="/synthetic", runner=runner), 19)
+                        self.assertNotIn(
+                            "ROOTLESS_NATIVE_RESUME", fresh_output.getvalue())
+                        self.assertIn(
+                            f"binary={native.SUITES[suite][0]} exit=19",
+                            error.getvalue())
+
                         changed.write_bytes(b"#!/bin/sh\nexit 17\n")
                         changed.chmod(0o755)
                         with contextlib.redirect_stderr(io.StringIO()) as error:

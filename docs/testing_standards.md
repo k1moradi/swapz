@@ -612,6 +612,10 @@ recipe; the
 development-only helper then verifies the exact source/host/kernel/KDIR/worker/root-artifact
 context, the native compiler-configuration stamp and every expected native
 executable's regular-file SHA-256, executable mode and file identity.
+After reading a matching private PASS checkpoint, the native helper must
+revalidate that context before skipping execution. A synthetic mutation
+during checkpoint reading must run the changed binary freshly, propagate its
+failure, and emit no REUSED marker.
 Changed binaries or source drift force the entire target to execute freshly;
 linked, foreign and missing executables refuse before execution. Native
 execution uses the verified, owned regular-file descriptor through Linux

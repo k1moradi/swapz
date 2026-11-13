@@ -138,8 +138,13 @@ def run_native_suite(suite, executables, *, mode=None,
     if mode in ("record", "resume") and runner is not None:
         context = current_native_context(suite, tested_source, kdir, runner)
     if mode == "resume" and context is not None:
-        if runner.read_development_resume_checkpoint(
-                context, native_suite=suite) == [suite]:
+        if (runner.read_development_resume_checkpoint(
+                context, native_suite=suite) == [suite] and
+                # Revalidate after opening the checkpoint: a concurrent
+                # rebuild must not change the executable bytes while the
+                # PASS record is being consulted and still be skipped.
+                context == current_native_context(
+                    suite, tested_source, kdir, runner)):
             # Only this source-controlled marker is accepted by the parent.
             print("ROOTLESS_NATIVE_RESUME suite=" + suite + " state=REUSED",
                   flush=True)
