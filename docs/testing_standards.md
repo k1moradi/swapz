@@ -3290,7 +3290,11 @@ pre-readiness BLOCKED refusal and exited-worker ownership exception.
 
 For sustained PSI failure, retain best-effort one-second samples of exact-mapper
 WRITE submission/completion/physical-byte progress, lower-device sector and
-request progress, and dedicated-cgroup CPU and I/O PSI totals. Publish only
+request progress, and dedicated-cgroup CPU and I/O PSI totals.
+Each optional snapshot also includes terminal mapper failed/error indicators:
+an unreadable mapper must yield `None` for both, never a synthetic zero.
+The rootless optional-reader regression must assert the complete key inventory
+and both unknown indicators, preserving fail-closed PSI exception checks. Publish only
 nonnegative deltas across the available samples inside the same rolling memory
 PSI window, with the actual measurement span, and label cumulative status
 separately. Include current round and monotonic workload/phase elapsed time

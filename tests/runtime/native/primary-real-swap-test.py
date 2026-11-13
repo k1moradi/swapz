@@ -3247,8 +3247,14 @@ class PrimaryRealSwapContracts(unittest.TestCase):
                  qualify.Path, "read_text", side_effect=OSError("no sysfs")):
             sample = qualify._pressure_progress_snapshot(
                 cgroup, qualify.read_status, (8, 4))
-        self.assertEqual(set(sample),
-                         {field for field, _ in qualify.PRESSURE_PROGRESS_COUNTERS})
+        self.assertEqual(
+            set(sample),
+            {field for field, _ in qualify.PRESSURE_PROGRESS_COUNTERS} |
+            {"swapz_failed", "swapz_error"})
+        # Missing optional reads must not be interpreted as zero terminal
+        # errors or as proof of continuing owned I/O during a PSI stall.
+        self.assertIsNone(sample["swapz_failed"])
+        self.assertIsNone(sample["swapz_error"])
         self.assertTrue(all(value is None for value in sample.values()))
 
     def positive_evidence(self):
