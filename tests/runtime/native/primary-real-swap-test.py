@@ -4078,11 +4078,16 @@ class PrimaryRealSwapContracts(unittest.TestCase):
                 "/dev/dm-1", "partition", 512000, 0, 5, (252, 1))
             status_reader = mock.Mock(side_effect=qualify.QualificationFailure(
                 "owned development mapper identity changed"))
+            # The pre-FILL cgroup swap-charge gate is independent of status
+            # identity. Model zero owned swap charge explicitly so this test
+            # reaches the requested source-bound mapper-status failure; the
+            # fixture is not evidence that a real workload passed.
             with contextlib.ExitStack() as stack:
                 for name, value in (
                     ("_cgroup_create", cgroup),
                     ("_memory_events", {"oom": 0, "oom_kill": 0}),
-                    ("_psi_total", 0), ("_write_control", None),
+                    ("_psi_total", 0), ("_read_uint", 0),
+                    ("_write_control", None),
                     ("read_swap_rows", [expected]),
                     ("require_oracle_worker_cgroup_ownership", None),
                 ):
