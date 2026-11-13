@@ -1363,6 +1363,52 @@ class NativeTimingContract(unittest.TestCase):
             finally:
                 runner.ROOT = previous_root
 
+    def test_development_resume_context_tracks_native_make_jobs(self):
+        """Native job scheduling changes must invalidate private PASS states."""
+        report = {
+            "tested_commit_sha": "a" * 40,
+            "host_identity": {
+                "id_sha256": "b" * 64, "architecture": "x86_64"},
+            "kernel_release": "synthetic",
+        }
+        artifacts = {
+            "status": "AVAILABLE",
+            "formatter_sha256": "c" * 64,
+            "module_sha256": "d" * 64,
+            "oracle_sha256": "e" * 64,
+        }
+        suite = runner.DEVELOPMENT_RESUME_ROOTLESS_SUITES[0]
+        prior_root = runner.ROOT
+        with tempfile.TemporaryDirectory(
+                prefix="make-resume-native-jobs-") as directory:
+            try:
+                runner.ROOT = Path(directory)
+                with mock.patch.object(
+                        runner, "qualification_artifact_digests",
+                        return_value=artifacts):
+                    with mock.patch.dict(
+                            os.environ, {"SWAPZ_TEST_JOBS": "2"}):
+                        two_workers = runner.development_resume_context(
+                            report, "/synthetic-kdir")
+                        self.assertEqual(two_workers["native_make_jobs"], "2")
+                        self.assertTrue(
+                            runner.write_development_resume_checkpoint(
+                                two_workers, [suite], suites=True))
+                    with mock.patch.dict(
+                            os.environ, {"SWAPZ_TEST_JOBS": "4"}):
+                        four_workers = runner.development_resume_context(
+                            report, "/synthetic-kdir")
+                        self.assertEqual(four_workers["native_make_jobs"], "4")
+                        self.assertIsNone(
+                            runner.read_development_resume_checkpoint(
+                                four_workers, suites=True))
+                    self.assertNotEqual(two_workers, four_workers)
+                    self.assertEqual(
+                        runner.read_development_resume_checkpoint(
+                            two_workers, suites=True), [suite])
+            finally:
+                runner.ROOT = prior_root
+
     def test_development_resume_native_selectors_are_scoped_to_make(self):
         """Only the native Make stage may see the parent cache selector."""
         source = (ROOT / "tests/tools/test-rootless.sh").read_text(

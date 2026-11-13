@@ -661,8 +661,12 @@ development checkpoint after each successful rootless or W=1/W=2 stage.
 `make test RESUME=1` is an explicit **development-only** opt-in that always
 rebuilds source artifacts, rechecks current-main and tracked-source cleanliness,
 then reuses only a contiguous PASS prefix of those stages if the exact tested
-source SHA, stable host identity, running kernel, KDIR, rootless worker override
-and all three rebuilt artifact hashes match. Corrupt, stale, linked, incorrectly
+source SHA, stable host identity, running kernel, KDIR, rootless worker
+override, native Make job count (or inherited jobserver), and all three
+rebuilt artifact hashes match. Changing the native Make worker count
+invalidates prior private PASS checkpoints even if all artifacts are
+byte-identical; a synthetic regression must confirm both refusal under the
+new worker count and continued readability under the original count. Corrupt, stale, linked, incorrectly
 permissioned or absent checkpoints force a fresh stage; an ordinary fresh run
 invalidates old success before starting any stages. Checkpoints live only under
 `build/tests/make-test-resume/` at mode 0700/0600 and are never Git evidence.

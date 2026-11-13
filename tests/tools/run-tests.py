@@ -12207,6 +12207,9 @@ def development_resume_context(result, kdir):
         "kernel_release": result.get("kernel_release"),
         "kdir": kdir,
         "rootless_jobs": os.environ.get("SWAPZ_ROOTLESS_JOBS", "auto"),
+        # The native Make worker count changes concurrent test execution.
+        # Missing means the caller's inherited GNU Make jobserver is used.
+        "native_make_jobs": os.environ.get("SWAPZ_TEST_JOBS", "jobserver"),
         "artifacts": artifacts,
     }
 
