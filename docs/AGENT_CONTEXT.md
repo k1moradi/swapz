@@ -47,6 +47,19 @@ still fails closed. The official primary production zero-use baseline stays
 unchanged. Do not substitute a moving baseline, remove the equality check,
 or alter global host swap priorities.
 
+## Canonical source drift during real-device development trial
+
+A canonical-main commit touching only documentation, unexecuted benchmark
+preparation, native unit regression tests or report-runner bookkeeping MUST
+NOT cancel a pinned physical correctness trial when the compiled module and
+trusted physical sources are unchanged. Check the fetched descendant's
+NUL-delimited net changed paths against the explicit benign allowlist.
+Changes to C/C++/headers, module or formatter build inputs, privileged
+physical scripts, the byte oracle, frozen workload/policy or unknown paths
+still refuse. Keep the exact local source/artifact hashes, immutable physical
+header, device identity, ownership, and recovery checks at every use point.
+Never change local HEAD/origin/main while a device is admitted.
+
 ## Real-swap memory-pressure measurement (do not revert)
 
 The two concurrent anonymous-pageout oracles intentionally allocate more

@@ -2173,6 +2173,16 @@ continuity; aggregate totals cannot compensate for an incomplete worker.
 For official primary qualification the first round must return both dedicated-
 cgroup swap charge and exact mapper Used KiB to the fresh ZERO-use baseline
 before the second allocation; only then is repeated swap-slot reuse proven.
+For development-only physical trials, a canonical-main advance containing
+only unexecuted documentation, native unit tests, benchmark-generation or
+test-report runner changes must not cancel an already source-pinned physical
+device run. The privileged comparator still fetches and verifies canonical
+ancestry and checks a NUL-delimited changed-path inventory against an explicit
+allowlist. Changed C/C++/headers, module build inputs, the formatter, privileged
+physical helper, oracle, frozen workload/acceptance policy, and unknown paths
+remain blocking. This never changes the local checkout, verified binary
+digests, device identity checks or recovery ownership.
+
 The bounded **development-only physical trial** may instead pin at most 64 KiB
 (16 pages) of pre-existing, page-aligned unrelated host swap immediately after
 swapon. Linux can legitimately allocate those pages to a highest-priority

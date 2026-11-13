@@ -1447,6 +1447,25 @@ class PhysicalSwapProbeTests(unittest.TestCase):
                         probe.ProbeError, "non-report-only change"):
                     probe._development_code_source_sha(git("rev-parse", "HEAD"))
 
+    def test_development_remote_unrelated_file_allowlist(self):
+        for path in (
+                "test_results.json", "docs/testing_standards.md",
+                "tests/runtime/benchmark/io-replay.py",
+                "tests/runtime/native/source-contract-test.py",
+                "tests/tools/run-tests.py", ".github/workflows/test.yml"):
+            with self.subTest(path=path):
+                self.assertTrue(probe._development_unrelated_canonical_path(path))
+        for path in (
+                "", "kernel/dm-swapz.c", "kernel/dm-swapz.h",
+                "tests/runtime/benchmark/device-test.c",
+                "tests/tools/qualify-primary-real-swap.py",
+                "tests/tools/primary-real-swap-oracle.py",
+                "tests/tools/physical-swap-probe.py",
+                "docs/production-acceptance.json", "Makefile",
+                "new-source-unclassified"):
+            with self.subTest(path=path):
+                self.assertFalse(probe._development_unrelated_canonical_path(path))
+
     def test_development_remote_report_only_advance_never_moves_local_main(self):
         """Fetched report-only commits cannot authorize modified source."""
         with tempfile.TemporaryDirectory() as directory:
@@ -1497,6 +1516,27 @@ class PhysicalSwapProbeTests(unittest.TestCase):
                 (checkout / "source.txt").read_text(encoding="utf-8"),
                 "qualified source\n")
 
+            run_git("switch", "-q", "report-publisher")
+            # Only unrelated documentation and source-bound unit regressions
+            # changed; the compiled module and physical helper remain pinned.
+            (checkout / "docs").mkdir()
+            (checkout / "docs" / "notes.md").write_text(
+                "unrelated documentation\n", encoding="utf-8")
+            (checkout / "tests/runtime/native").mkdir(parents=True)
+            (checkout / "tests/runtime/native" / "new-test.py").write_text(
+                "pass\n", encoding="utf-8")
+            run_git("add", ".")
+            run_git("commit", "-q", "-m", "docs: unrelated test update")
+            benign_head = run_git("rev-parse", "HEAD")
+            run_git("push", "-q", canonical, "HEAD:refs/heads/main")
+            run_git("switch", "-q", "main")
+            with mock.patch.object(probe, "ROOT", checkout), \
+                    mock.patch.object(
+                        probe, "CANONICAL_MAIN_REMOTE", str(canonical)), \
+                    mock.patch.object(
+                        probe, "_remote_main_sha", return_value=benign_head):
+                probe._require_development_canonical_main(source, source)
+            self.assertEqual(run_git("rev-parse", "HEAD"), source)
             run_git("switch", "-q", "report-publisher")
             (checkout / "source.txt").write_text(
                 "changed source\n", encoding="utf-8")

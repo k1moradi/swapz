@@ -969,12 +969,43 @@ def _development_code_source_sha(head):
     return source
 
 
-def _require_development_canonical_main(local_head, code_source_sha):
-    """Permit only proven report-only canonical-main advances.
+def _development_unrelated_canonical_path(path):
+    """Allow only non-executed paths to advance during a pinned device trial.
 
-    Do not change main, origin/main, or the worktree. Fetch canonical Git
-    objects and authenticate every intervening commit before admitting the
-    unchanged code source. A malformed, changed, or racing remote fails closed.
+    An allowlist rather than a C-only denylist matters: the kernel module,
+    its build inputs, privileged physical helpers, real-swap workload/oracle
+    and frozen acceptance manifest can change without touching a .c file.
+    All unknown files, source headers and assembly fail closed.
+    """
+    if (not path or "\x00" in path or
+            path.endswith((".c", ".h", ".cc", ".cpp", ".hpp", ".S", ".s"))):
+        return False
+    if path == "test_results.json":
+        return True
+    if path.startswith("docs/"):
+        return path != "docs/production-acceptance.json"
+    if path.startswith(".github/"):
+        return True
+    if path.startswith("tests/runtime/benchmark/"):
+        return True
+    if path.startswith("tests/runtime/native/") and path.endswith("-test.py"):
+        return True
+    return path in {
+        "tests/tools/run-tests.py",
+        "tests/tools/native-resume.py",
+        "tests/tools/benchmark-owned-pair.sh",
+        "tests/tools/benchmark-striped-owned.sh",
+    }
+
+
+def _require_development_canonical_main(local_head, code_source_sha):
+    """Permit pinned-artifact canonical main advances in unrelated files.
+
+    Do not change main, origin/main, or the worktree. Fetch the canonical
+    descendant and compare its net changed files to a narrow non-executed
+    allowlist. The local build/module/oracle digests, privileged helper bytes,
+    device identity, and frozen policy are separately pinned at their use
+    sites. A changed, malformed or racing safety-sensitive input still fails.
     """
     canonical_head = _remote_main_sha()
     if canonical_head == local_head:
@@ -998,7 +1029,16 @@ def _require_development_canonical_main(local_head, code_source_sha):
     if _git_result("merge-base", "--is-ancestor", local_head,
                    canonical_head, check=False).returncode:
         raise ProbeError("canonical main is not a descendant of local main")
-    if _development_code_source_sha(canonical_head) != code_source_sha:
+    if _development_code_source_sha(local_head) != code_source_sha:
+        raise ProbeError("canonical main contains changed source after qualification")
+    # -z preserves newline-bearing paths; --no-renames detects any changed
+    # sensitive source even if Git would otherwise classify it as a rename.
+    # The net change in executed inputs matters, not benign commit subjects.
+    changed = _git("diff", "--no-renames", "--name-only", "-z",
+                   local_head, canonical_head, "--")
+    if changed and (not changed.endswith("\x00") or
+                    any(not _development_unrelated_canonical_path(path)
+                        for path in changed[:-1].split("\x00"))):
         raise ProbeError("canonical main contains changed source after qualification")
 
 
