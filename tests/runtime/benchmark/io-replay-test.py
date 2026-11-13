@@ -29,6 +29,92 @@ SCRIPT = Path(__file__).with_name("io-replay.py")
 
 
 class PairReplayContract(unittest.TestCase):
+    def test_dm_status_counters_single_scan_matches_legacy_field_regexes(self):
+        import importlib.util
+        import re
+
+        spec = importlib.util.spec_from_file_location(
+            "swapz_status_counter_parity", SCRIPT)
+        replay = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(replay)
+        for direction, fields, snapshot in (
+                ("read", replay.KERNEL_READ_FIELDS, replay.kernel_read_snapshot),
+                ("write", replay.KERNEL_WRITE_FIELDS, replay.kernel_write_snapshot)):
+            with self.subTest(direction=direction):
+                self.assertTrue(fields)
+                self.assertEqual(len(set(fields)), len(fields))
+                for field in fields:
+                    self.assertRegex(field, r"^[a-z_][a-z0-9_]*$")
+                values = {
+                    field: index * 13 + 7 for index, field in enumerate(fields)
+                }
+                tokens = [
+                    f"{field}={values[field]}" for field in fields
+                ]
+                random.Random(0x51A0A9).shuffle(tokens)
+                first = fields[0]
+                last = fields[-1]
+                # Invalid early tokens and unrelated/prefixed names cannot
+                # supply an authenticated counter; the first VALID exact
+                # token wins even when a later duplicate carries another value.
+                status = (
+                    "0 8192 swapz extra=garbled " +
+                    f"{first}=not_a_number {last}=-17 " +
+                    f"prefix_{first}=9999 " +
+                    "\t\n".join(tokens) +
+                    f" {first}=9999 {last}=17tail")
+                legacy = {}
+                for field in fields:
+                    match = re.search(
+                        r"(?:^|\s)" + field + r"=(\d+)(?:\s|$)", status)
+                    self.assertIsNotNone(match, field)
+                    legacy[field] = int(match.group(1))
+                self.assertEqual(legacy, values)
+                sample = subprocess.CompletedProcess(
+                    ["dmsetup"], 0, stdout=status)
+                with mock.patch.object(replay.subprocess, "run",
+                                       return_value=sample) as run:
+                    observed = snapshot(
+                        Path("/dev/mapper/synthetic"),
+                        {"dm_uuid": "SWAPZ-SYNTHETIC"})
+                    self.assertEqual(observed, values)
+                    self.assertEqual(tuple(observed), tuple(fields))
+                    run.assert_called_once()
+
+                for missing in ((first,), (first, last), (last,)):
+                    with self.subTest(missing=missing):
+                        reduced = "0 8192 swapz " + " ".join(
+                            f"{field}={values[field]}"
+                            for field in fields if field not in missing)
+                        fake = subprocess.CompletedProcess(
+                            ["dmsetup"], 0, stdout=reduced)
+                        with mock.patch.object(replay.subprocess, "run",
+                                               return_value=fake):
+                            with self.assertRaisesRegex(
+                                    ValueError,
+                                    "owned swapz " + direction +
+                                    " telemetry missing " + missing[0]):
+                                snapshot(
+                                    Path("/dev/mapper/synthetic"),
+                                    {"dm_uuid": "SWAPZ-SYNTHETIC"})
+                with mock.patch.object(
+                        replay.subprocess, "run",
+                        return_value=subprocess.CompletedProcess(
+                            ["dmsetup"], 1, stdout=status)):
+                    with self.assertRaisesRegex(
+                            ValueError,
+                            "owned swapz " + direction + " telemetry unavailable"):
+                        snapshot(Path("/dev/mapper/synthetic"),
+                                 {"dm_uuid": "SWAPZ-SYNTHETIC"})
+                # No dmsetup command for rootless/linear arms.
+                with mock.patch.object(replay.subprocess, "run") as run:
+                    self.assertIsNone(snapshot(
+                        Path("/tmp/unused"), {"dm_uuid": None}))
+                    self.assertIsNone(snapshot(
+                        Path("/tmp/unused"),
+                        {"dm_uuid": "SWAPZ-SYNTHETIC", "dm_target": "linear"}))
+                    run.assert_not_called()
+
     def test_latency_percentiles_match_legacy_floor_index_with_one_sort(self):
         import runpy
 

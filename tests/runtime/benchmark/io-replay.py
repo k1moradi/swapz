@@ -1420,6 +1420,33 @@ KERNEL_READ_GAUGE_FIELDS = (
     "parallel_read_adjacent_chain_blocks_max",
     "read_coalesce_max_blocks")
 KERNEL_READ_FIELDS = KERNEL_READ_COUNTER_FIELDS + KERNEL_READ_GAUGE_FIELDS
+KERNEL_READ_FIELD_NAMES = frozenset(KERNEL_READ_FIELDS)
+# One non-consuming trailing boundary lets adjacent status tokens be read
+# without rescanning the complete dmsetup status for every counter.
+KERNEL_STATUS_COUNTER_TOKEN = re.compile(
+    r"(?:^|\s)([a-z_][a-z0-9_]*)=(\d+)(?=\s|$)")
+
+
+def parse_kernel_status_counters(status_text, required_fields, required_names,
+                                 direction):
+    """Parse only exact integer tokens; preserve first-valid-match semantics.
+
+    Keep the required field order for both the returned map and first missing
+    counter report. Unknown status attributes never supply counter evidence.
+    """
+    observed = {}
+    required_count = len(required_names)
+    for token in KERNEL_STATUS_COUNTER_TOKEN.finditer(status_text):
+        field_name = token.group(1)
+        if field_name in required_names and field_name not in observed:
+            observed[field_name] = int(token.group(2))
+            if len(observed) == required_count:
+                break
+    for field_name in required_fields:
+        if field_name not in observed:
+            raise ValueError(
+                "owned swapz " + direction + " telemetry missing " + field_name)
+    return {field_name: observed[field_name] for field_name in required_fields}
 
 
 def kernel_read_snapshot(path, identity):
@@ -1429,14 +1456,8 @@ def kernel_read_snapshot(path, identity):
                             capture_output=True, check=False, timeout=8)
     if status.returncode:
         raise ValueError("owned swapz read telemetry unavailable")
-    counters = {}
-    for field in KERNEL_READ_FIELDS:
-        match = re.search(r"(?:^|\s)" + field + r"=(\d+)(?:\s|$)",
-                          status.stdout)
-        if not match:
-            raise ValueError("owned swapz read telemetry missing " + field)
-        counters[field] = int(match.group(1))
-    return counters
+    return parse_kernel_status_counters(
+        status.stdout, KERNEL_READ_FIELDS, KERNEL_READ_FIELD_NAMES, "read")
 
 
 def kernel_read_delta(before, after):
@@ -1766,6 +1787,7 @@ KERNEL_WRITE_GAUGE_FIELDS = (
     "lower_write_service_ewma_ns", "lower_write_block_service_ewma_ns",
     "ordered_lz4_page_ewma_ns")
 KERNEL_WRITE_FIELDS = KERNEL_WRITE_COUNTER_FIELDS + KERNEL_WRITE_GAUGE_FIELDS
+KERNEL_WRITE_FIELD_NAMES = frozenset(KERNEL_WRITE_FIELDS)
 WRITE_WAIT_BINS = ("write_wait_le1ms", "write_wait_1to4ms",
                    "write_wait_gt4ms")
 
@@ -1790,14 +1812,8 @@ def kernel_write_snapshot(path, identity):
                             capture_output=True, check=False, timeout=8)
     if status.returncode:
         raise ValueError("owned swapz write telemetry unavailable")
-    counters = {}
-    for field in KERNEL_WRITE_FIELDS:
-        match = re.search(r"(?:^|\s)" + field + r"=(\d+)(?:\s|$)",
-                          status.stdout)
-        if not match:
-            raise ValueError("owned swapz write telemetry missing " + field)
-        counters[field] = int(match.group(1))
-    return counters
+    return parse_kernel_status_counters(
+        status.stdout, KERNEL_WRITE_FIELDS, KERNEL_WRITE_FIELD_NAMES, "write")
 
 
 def kernel_write_delta(before, after):

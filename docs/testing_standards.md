@@ -7041,6 +7041,22 @@ The native-wave guard's source contract must match a real source-line
 boundary rather than a literal backslash-n sequence. This assertion is
 observational only and cannot alter the chosen replay engine or oracle.
 
+During each replay arm's pre/post timing boundary, parse the large
+swapz `dmsetup status` READ/WRITE telemetry in one linear
+token scan rather than searching the entire status once per field.
+Maintain the original strict token grammar: exact ASCII field names,
+unsigned Unicode-decimal digits, whitespace or string boundaries,
+first **valid** occurrence of a duplicated field, and no prefix or
+partial-token matches. All required counters and gauges still have to
+appear; the first missing field must be named in the same source-order
+fail-closed error, and a failed `dmsetup` command still aborts. Cache the
+fixed READ/WRITE required-name sets, but keep each snapshot independent
+on both sides of the measured interval and never share status between
+OFF/swapz arms. Rootless tests must compare the old per-field regex
+oracle against the one-pass parser for every READ/WRITE counter, shuffled
+status order, malformed predecessors, duplicated names, missing first/
+last fields, and unavailable/rootless/linear status.
+
 Native 4KiB prefill is a separate **development-only opt-in**
 (`--native-prefill` requires `--native-replay`), never an automatic loaded
 qualification shortcut. The default Python prefill and full `preadv` byte

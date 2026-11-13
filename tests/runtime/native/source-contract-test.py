@@ -8176,6 +8176,30 @@ int main(void)
                 self.assertIn("BLOCKED: native prefill requires", blocked.stderr)
                 self.assertNotIn("ADMITTED", blocked.stdout)
 
+    def test_benchmark_dm_status_counters_use_one_exact_token_scan(self):
+        replay = (ROOT / "tests/runtime/benchmark/io-replay.py").read_text()
+        tests = (ROOT / "tests/runtime/benchmark/io-replay-test.py").read_text()
+        self.assertIn("KERNEL_READ_FIELD_NAMES = frozenset(KERNEL_READ_FIELDS)",
+                      replay)
+        self.assertIn("KERNEL_WRITE_FIELD_NAMES = frozenset(KERNEL_WRITE_FIELDS)",
+                      replay)
+        parser = replay.split("def parse_kernel_status_counters(", 1)[1].split(
+            "\ndef kernel_read_snapshot(", 1)[0]
+        self.assertIn("KERNEL_STATUS_COUNTER_TOKEN.finditer(status_text)", parser)
+        self.assertIn("field_name in required_names", parser)
+        self.assertIn("field_name not in observed", parser)
+        self.assertIn("for field_name in required_fields:", parser)
+        for direction, next_name in (
+                ("read", "kernel_read_delta"), ("write", "kernel_write_delta")):
+            snapshot = replay.split(
+                f"def kernel_{direction}_snapshot(", 1)[1].split(
+                    f"\ndef {next_name}(", 1)[0]
+            self.assertIn("return parse_kernel_status_counters(", snapshot)
+            self.assertNotIn("re.search(", snapshot)
+        self.assertIn(
+            "def test_dm_status_counters_single_scan_matches_legacy_field_regexes",
+            tests)
+
     def test_native_replay_skips_threaded_wave_allocation_and_reuses_read_iov(self):
         replay = (ROOT / "tests/runtime/benchmark/io-replay.py").read_text()
         fixtures = (ROOT / "tests/runtime/benchmark/io-replay-test.py").read_text()
