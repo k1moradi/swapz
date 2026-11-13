@@ -510,9 +510,11 @@ preserving the loop's grammar, proving rejection by the exact path allowlist
 rather than by a malformed shell construct. Shared Make/native
 artifacts, fixed disassembly paths, reporting/history fixtures, diagnostic
 relays, general process/descendant cleanup, and package/systemd simulations
-remain serial pending explicit isolation evidence. The three narrowly
+remain serial pending explicit isolation evidence. The two narrowly
 reviewed resource simulations below have independent temporary roots,
-explicit child ownership and source-controlled command identities. A private-workspace classification
+explicit child ownership and source-controlled command identities.
+The ID36 cleanup-ownership suite deliberately reparents a live grandchild
+and must remain serial under the worker process-group cleanup policy. A private-workspace classification
 is a provisional source audit, not a proof against future shared-state edits:
 re-audit when a test's subprocesses, output paths or ownership behavior change.
 Native build remains a mandatory predecessor of every candidate.
@@ -532,9 +534,8 @@ tasks and available CPUs, without requiring `SWAPZ_ROOTLESS_JOBS`. The optional
 overrides fail closed. A single-core host automatically uses serial execution.
 The native Make compilation jobserver remains independent of this setting.
 Only five adjacent, source-declared groups execute concurrently: source
-contracts with swapzctl provenance, three independent synthetic resource
-simulations (owned-RAM resources, resource admission and ID36 cleanup
-ownership), production-readiness with direct rootless evidence, the 19
+contracts with swapzctl provenance, two independent synthetic resource
+simulations (owned-RAM resources and resource admission), production-readiness with direct rootless evidence, the 19
 read-only Bash syntax checks, and the three independently owned, rootless
 identity fixtures (nullblk name, quiet lower I/O and swap inventory). Every identity script uses a unique mktemp-owned scratch directory
 and fake /sys, /proc and DM state; no real module/device or shared build output
@@ -543,8 +544,9 @@ and the parent reports each phase in source order with individual durations.
 No unsafe task becomes parallel just to fill idle cores. Each resource
 simulation operates in its own temporary directory, launches only
 self-owned/reaped child processes and cannot mutate real cgroups, hardware,
-or shared native build output; the preceding /tmp-cleanup fixture and later
-primary-lifecycle process/descendant suites remain serial. All other rootless
+or shared native build output; the preceding /tmp-cleanup fixture, following
+ID36 orphan/cleanup suite and later primary-lifecycle process/descendant
+suites remain serial. All other rootless
 suites, privileged lifecycle operations, and hardware-dependent
 loaded/RAM/physical performance benchmarks remain serial and
 resource-isolated; the test sequence, requirements
@@ -576,7 +578,7 @@ independent compilation budget on separate bounded-width lines, while keeping
 loaded and hardware-dependent benchmark qualification sequential. The pilot must not reinterpret elapsed-time
 markers as PASS evidence, nor mix shell output from independent workers.
 `tests/runtime/native/test-report-test.py` tests exact group approval,
-including the three source-audited resource commands and a synthetic
+including the two source-audited resource commands and a synthetic
 conflicting-resource refusal, multi-worker overlap, single-core fallback,
 affinity/quota budgets,
 private output permissions, stop-dispatch on failure and

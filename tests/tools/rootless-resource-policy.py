@@ -43,15 +43,13 @@ PRIVATE_FIXTURE_PHASES = {
         "Frozen policy checks and isolated synthetic report fixtures",
     "tests/runtime/native/rootless-direct-evidence-test.py":
         "Reporter ROOT redirected to a fresh private diagnostic fixture",
-    # Source-reviewed contiguous process simulations: every worker owns its
-    # own temporary workspace and process children. They never operate a
-    # real cgroup, block device, shared native build or global /tmp cleanup.
+    # Source-reviewed contiguous resource simulations: each worker owns its
+    # temporary workspace and children. Never execute real cgroups, block
+    # devices, shared native builds or global /tmp cleanup.
     "tests/runtime/native/owned-ram-resources-test.py":
         "Owned RAM identity and cleanup simulations in per-test temporary roots",
     "tests/runtime/native/resource-admission-test.py":
         "Only synthetic cgroup/proc inputs in a private per-test workspace",
-    "tests/runtime/native/resource-pressure-cleanup-ownership-test.py":
-        "Private cleanup fixtures and explicitly reaped owned/foreign child PIDs",
     "tests/runtime/native/nullblk-identity-test.sh":
         "Fresh build/tests/nullblk-name.XXXXXXXX fixture, not a real null_blk",
     "tests/runtime/native/quiet-lower-io-test.sh":
@@ -78,6 +76,8 @@ SERIAL_PHASES = {
         ("native-artifacts", "Builds/relinks shared native objects and generated metadata"),
     "tests/runtime/native/tmp-cleanup-test.py":
         ("process-cleanup", "Exercises background children and cleanup ownership"),
+    "tests/runtime/native/resource-pressure-cleanup-ownership-test.py":
+        ("process-cleanup", "Deliberately reparents a live grandchild; remain serial"),
     "tests/runtime/native/primary-lifecycle-audit-test.py":
         ("process-cleanup", "Compiles and kills package transactions; uses private stderr relay"),
     "tests/runtime/native/primary-lifecycle-nullblk-qualifier-test.py":
@@ -148,8 +148,9 @@ FULL_ONLY_PHASES = frozenset({
 # Only the exact adjacent, resource-audited groups in rootless-parallel.py
 # are authorized for CPU-aware execution. The three identity fixtures create
 # disjoint mktemp directories and only simulate /sys, /proc and DM commands.
-# The three reviewed resource-fixture suites use independent temporary roots
-# and own/reap their process children; every other process-lifecycle, package
+# Only the two reviewed resource-fixture suites use independent temporary
+# roots with reaped children; ID36's deliberate live orphan and every other
+# process-lifecycle, package
 # and hardware-dependent suite remains serial.
 ROOTLESS_PARALLEL_EXECUTION_ENABLED = True
 

@@ -178,7 +178,7 @@ class RootlessParallelPilotContract(unittest.TestCase):
     def test_only_source_reviewed_adjacent_nonconflicting_groups(self):
         source = (ROOT / "tests/tools/test-rootless.sh").read_text(
             encoding="utf-8")
-        for group, expected_count in (("initial", 2), ("resources", 3),
+        for group, expected_count in (("initial", 2), ("resources", 2),
                                       ("readiness", 2), ("syntax", 19),
                                       ("identity", 3)):
             tasks = parallel_runner.validated_group(group, source)
@@ -228,14 +228,13 @@ class RootlessParallelPilotContract(unittest.TestCase):
             self.assertIn(f"rootless_parallel_collect {index}", harness)
             self.assertIn(f"bash {label}", harness)
 
-    def test_resource_simulations_are_three_independent_private_workers(self):
+    def test_resource_simulations_are_two_independent_private_workers(self):
         harness = (ROOT / "tests/tools/test-rootless.sh").read_text(
             encoding="utf-8")
         tasks = parallel_runner.validated_group("resources", harness)
         expected_labels = (
             "tests/runtime/native/owned-ram-resources-test.py",
             "tests/runtime/native/resource-admission-test.py",
-            "tests/runtime/native/resource-pressure-cleanup-ownership-test.py",
         )
         self.assertEqual(tuple(label for label, _ in tasks), expected_labels)
         claims = resource_policy.audit_harness(harness)
@@ -260,12 +259,16 @@ class RootlessParallelPilotContract(unittest.TestCase):
         for serial in (
                 "tests/runtime/native/tmp-cleanup-test.py",
                 "tests/runtime/native/primary-lifecycle-audit-test.py",
+                "tests/runtime/native/resource-pressure-cleanup-ownership-test.py",
                 "tests/runtime/benchmark/io-replay-test.py",
         ):
             if serial in claims:
                 self.assertEqual(claims[serial].classification, "serial")
         self.assertIn("rootless_parallel_run_group resources", harness)
-        with mock.patch.object(resource_policy, "potential_conflicts",
+        # The coordinator loads its own private resource-policy module.
+        # Patch that exact instance, not this reporter's independent import.
+        with mock.patch.object(parallel_runner.resource_policy,
+                               "potential_conflicts",
                                return_value=("synthetic-shared-resource",)):
             with self.assertRaisesRegex(ValueError, "conflicting"):
                 parallel_runner.validated_group("resources", harness)

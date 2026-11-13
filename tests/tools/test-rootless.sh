@@ -772,7 +772,7 @@ rootless_parallel_run_group() {
     initial|readiness) rootless_parallel_size=2 ;;
     syntax) rootless_parallel_size=19 ;;
     identity) rootless_parallel_size=3 ;;
-    resources) rootless_parallel_size=3 ;;
+    resources) rootless_parallel_size=2 ;;
     *) report_rootless_failure 2 "$LINENO" parallel_worker_setup ;;
   esac
   if python3 -B tests/tools/rootless-parallel.py \
@@ -975,11 +975,9 @@ else
 fi
 rootless_phase='tests/runtime/native/resource-pressure-cleanup-ownership-test.py'
 rootless_begin_phase
-if (( rootless_parallel_jobs > 1 )); then
-  rootless_parallel_collect 2
-else
-  python3 -B tests/runtime/native/resource-pressure-cleanup-ownership-test.py -v
-fi
+# This test intentionally reparents a live grandchild. It cannot satisfy the
+# worker coordinator's independent descendant-free process-group proof.
+python3 -B tests/runtime/native/resource-pressure-cleanup-ownership-test.py -v
 rootless_phase='tests/runtime/native/primary-lifecycle-audit-test.py'
 rootless_begin_phase
 if rootless_should_run_suite; then
