@@ -8039,8 +8039,15 @@ int main(void)
         prefill = replay.split("def replay(args):", 1)[1].split(
             'if prefill_digest.hexdigest() != mf["prefill_sha256"]:', 1)[0]
         self.assertIn("os.fsync(fd)", prefill)
+        # Native opt-in hashes the checked expected pages once; the
+        # unchanged Python fallback still performs one WRITE and one READ
+        # pass, with a live reusable preadv iovec on every READ.
         self.assertEqual(
-            prefill.count("for page in range(logical_pages):"), 2)
+            prefill.count("for page in range(logical_pages):"), 3)
+        python_fallback = prefill.split(
+            "else:\n                bufmap = mmap.mmap(-1, PAGE)", 1)[1]
+        self.assertEqual(
+            python_fallback.count("for page in range(logical_pages):"), 2)
         self.assertIn('logical_pages = mf["logical_pages"]', prefill)
         self.assertIn(
             'prefill_stride = mf.get("prefill_fixture_stride", 1)', prefill)

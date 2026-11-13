@@ -7030,6 +7030,10 @@ striped maps, complete device bytes and hashes, refuse forged digest and
 readonly/invalid descriptors, and confirm no measured replay or report
 publication after a failed prefill. Do not enable native prefill by default
 until current-source loaded and slow-host equivalence has been demonstrated.
+The source contract must recognize three source-level prefill page loops:
+one Python SHA loop after successful native byte comparisons, and the two
+unchanged default Python WRITE and verified READ loops. Explicitly inspect
+the fallback branch rather than mistake the opt-in digest loop for extra I/O.
 
 A replay arm's prefill must retain independent opened-device admission,
 all 4096-byte positional writes, final prefill fsync, all positional readback
