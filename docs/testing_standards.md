@@ -3343,7 +3343,12 @@ privately. The official native-stage diagnostic binds unittest identity to the f
 rootless marker: when that marker carries an allowlisted test name, that name
 wins over earlier suite output and later teardown; when it carries
 `test=unavailable`, earlier transcript `FAIL:`/`ERROR:` lines must not be
-guessed as the cause. A directly invoked, unwrapped unittest may still use its
+guessed as the cause. The terminal-oracle suite also uses the fail-only stderr relay. Only
+authenticated `TerminalEvidenceContracts` unittest names and failure kinds
+may appear on the console; arbitrary traceback content stays private.
+Synthetic attribution must cover both the real-class first error and a
+foreign-class forged failure.
+A directly invoked, unwrapped unittest may still use its
 first detailed failure block. A generic rootless
 `reason=nonzero_exit` for `test-report-test.py` does not authenticate an
 assertion even if earlier stderr includes that phase name or an apparent

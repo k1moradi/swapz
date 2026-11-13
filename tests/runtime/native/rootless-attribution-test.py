@@ -22,6 +22,7 @@ LATE_RACE_TEST = "swapz-primary-late-race-test.py"
 PACKAGE_PHASE = "tests/runtime/native/package-dkms-test.py"
 PRIMARY_PHASE = "tests/runtime/native/primary-real-swap-test.py"
 OWNERSHIP_PHASE = "tests/runtime/native/primary-real-swap-parent-ownership-test.py"
+TERMINAL_PHASE = "tests/runtime/native/primary-real-swap-oracle-terminal-test.py"
 GENERATOR_PHASE = "tests/runtime/native/systemd/swapz-primary-generator-transaction-test.py"
 LIFECYCLE_PHASE = "tests/runtime/native/primary-lifecycle-audit-test.py"
 QUALIFIER_PHASE = "tests/runtime/native/primary-lifecycle-nullblk-qualifier-test.py"
@@ -36,7 +37,7 @@ FIXTURE = r'''
 python3() {
   [[ $# == 3 && $1 == -B && $3 == -v ]] || return 89
   case "$2" in
-    tests/runtime/native/package-dkms-test.py|tests/runtime/native/primary-real-swap-test.py|tests/runtime/native/primary-real-swap-parent-ownership-test.py|tests/runtime/native/systemd/swapz-primary-generator-transaction-test.py|tests/runtime/native/primary-lifecycle-audit-test.py|tests/runtime/native/primary-lifecycle-nullblk-qualifier-test.py) ;;
+    tests/runtime/native/package-dkms-test.py|tests/runtime/native/primary-real-swap-test.py|tests/runtime/native/primary-real-swap-parent-ownership-test.py|tests/runtime/native/primary-real-swap-oracle-terminal-test.py|tests/runtime/native/systemd/swapz-primary-generator-transaction-test.py|tests/runtime/native/primary-lifecycle-audit-test.py|tests/runtime/native/primary-lifecycle-nullblk-qualifier-test.py) ;;
     *) return 89 ;;
   esac
   printf 'SYNTHETIC_STDOUT\n'
@@ -140,6 +141,23 @@ PY
         "ERROR: test_teardown (__main__.PrimaryRealSwapContracts.test_teardown)" \
         'OSError: later teardown failure must not replace the first assertion' >&2
       return 37 ;;
+    terminal_oracle_error)
+      printf '%s\n' \
+        "test_readiness_guard_allows_only_exited_worker_for_blocked_classification (__main__.TerminalEvidenceContracts.test_readiness_guard_allows_only_exited_worker_for_blocked_classification) ... ERROR" \
+        '======================================================================' \
+        "ERROR: test_readiness_guard_allows_only_exited_worker_for_blocked_classification (__main__.TerminalEvidenceContracts.test_readiness_guard_allows_only_exited_worker_for_blocked_classification)" \
+        'Traceback (most recent call last):' \
+        'KeyError: PRIVATE_ONLY_TRACEBACK_PAYLOAD' \
+        '======================================================================' >&2
+      return 37 ;;
+    terminal_oracle_foreign)
+      printf '%s\n' \
+        "test_group (__main__.SourceAdmissionPeerOwnership.test_group) ... ERROR" \
+        '======================================================================' \
+        "ERROR: test_group (__main__.SourceAdmissionPeerOwnership.test_group)" \
+        'PermissionError: [Errno 9] PRIVATE_ONLY_TRACEBACK_PAYLOAD' \
+        '======================================================================' >&2
+      return 38 ;;
     ownership_errno)
       printf '%s\n' \
         "test_group (__main__.SourceAdmissionPeerOwnership.test_group) ... ERROR" \
@@ -446,6 +464,13 @@ class RootlessAttribution(unittest.TestCase):
             "rootless_phase='tests/runtime/native/primary-real-swap-oracle-terminal-test.py'",
             primary_end)
         cls.ownership_stage = source[primary_end:ownership_end]
+        terminal_begin = ownership_end
+        terminal_end = source.index(
+            "rootless_phase='tests/runtime/benchmark/metadata-ram-evidence-test.py'",
+            terminal_begin)
+        cls.terminal_stage = source[terminal_begin:terminal_end]
+        assert cls.terminal_stage.count(
+            f"python3 -B {TERMINAL_PHASE} -v") == 1
         lifecycle_begin = source.index(f"rootless_phase='{LIFECYCLE_PHASE}'")
         lifecycle_end = source.index(
             "rootless_phase='tests/runtime/native/primary-lifecycle-nullblk-qualifier-test.py'",
@@ -525,6 +550,7 @@ class RootlessAttribution(unittest.TestCase):
                PACKAGE_PHASE: self.package_stage,
                PRIMARY_PHASE: self.primary_stage,
                OWNERSHIP_PHASE: self.ownership_stage,
+               TERMINAL_PHASE: self.terminal_stage,
                GENERATOR_PHASE: self.generator_stage,
                LIFECYCLE_PHASE: self.lifecycle_stage,
                QUALIFIER_PHASE: self.qualifier_stage}[stage]
@@ -1075,6 +1101,24 @@ exec "$SWAPZ_REAL_RM" "$@"
         self.assertIn("PermissionError: [Errno 13] " + PRIVATE_SENTINEL,
                       log.read_text())
         self.assertIn("AssertionError: later cleanup failed", log.read_text())
+
+    def test_terminal_oracle_reports_first_source_bound_error(self):
+        result = self.invoke("terminal_oracle_error", stage=TERMINAL_PHASE)
+        log = self.assert_report(
+            result, status=37, reason="unittest_error",
+            test="test_readiness_guard_allows_only_exited_worker_for_blocked_classification",
+            stage=TERMINAL_PHASE)
+        self.assertIn(PRIVATE_SENTINEL, log.read_text())
+        self.assertIn("unittest_kind=ERROR", log.read_text())
+        self.assertNotIn(PRIVATE_SENTINEL, result.stderr.split("FAIL: rootless ")[-1])
+
+    def test_terminal_oracle_rejects_foreign_class(self):
+        result = self.invoke("terminal_oracle_foreign", stage=TERMINAL_PHASE)
+        log = self.assert_report(
+            result, status=38, reason="nonzero_exit",
+            test="unavailable", stage=TERMINAL_PHASE)
+        self.assertIn(PRIVATE_SENTINEL, log.read_text())
+        self.assertNotIn("test_group", result.stderr)
 
     def test_ownership_errno_preserves_boundary_and_private_traceback(self):
         result = self.invoke("ownership_errno", stage=OWNERSHIP_PHASE)

@@ -244,8 +244,8 @@ finish_rootless_private_stderr_capture() {
 classify_rootless_private_unittest_failure() {
   local diagnostic_path=$1
   local line
-  local detailed_header_regex="^(FAIL|ERROR): (test_[A-Za-z0-9_]{1,96}) \\(__main__\\.(PackageLifecycle|PrimaryRealSwapContracts|SourceAdmissionPeerOwnership|GeneratorPublicationTest|PrimaryLifecycleBehaviorTest|PrimaryLifecycleSourceGuardTest|PackageCrashToPrimaryAdmissionTest|PrimaryOwnerReleaseDurabilityTest|PrimaryLifecycleNullblkQualifierContract|SwapzProductionSourceQualification|CapacityMemoryAccountingContracts)\\.(test_[A-Za-z0-9_]{1,96})\\)"
-  local progress_regex="^[[:space:]]*(test_[A-Za-z0-9_]{1,96}) \\(__main__\\.(PackageLifecycle|PrimaryRealSwapContracts|SourceAdmissionPeerOwnership|PrimaryLifecycleBehaviorTest|PrimaryLifecycleSourceGuardTest|PackageCrashToPrimaryAdmissionTest|PrimaryOwnerReleaseDurabilityTest|PrimaryLifecycleNullblkQualifierContract|SwapzProductionSourceQualification|CapacityMemoryAccountingContracts)\\.(test_[A-Za-z0-9_]{1,96})\\)( \\([^[:cntrl:]]{1,512}\\))? \\.\\.\\. (FAIL|ERROR)$"
+  local detailed_header_regex="^(FAIL|ERROR): (test_[A-Za-z0-9_]{1,96}) \\(__main__\\.(PackageLifecycle|PrimaryRealSwapContracts|SourceAdmissionPeerOwnership|TerminalEvidenceContracts|GeneratorPublicationTest|PrimaryLifecycleBehaviorTest|PrimaryLifecycleSourceGuardTest|PackageCrashToPrimaryAdmissionTest|PrimaryOwnerReleaseDurabilityTest|PrimaryLifecycleNullblkQualifierContract|SwapzProductionSourceQualification|CapacityMemoryAccountingContracts)\\.(test_[A-Za-z0-9_]{1,96})\\)"
+  local progress_regex="^[[:space:]]*(test_[A-Za-z0-9_]{1,96}) \\(__main__\\.(PackageLifecycle|PrimaryRealSwapContracts|SourceAdmissionPeerOwnership|TerminalEvidenceContracts|PrimaryLifecycleBehaviorTest|PrimaryLifecycleSourceGuardTest|PackageCrashToPrimaryAdmissionTest|PrimaryOwnerReleaseDurabilityTest|PrimaryLifecycleNullblkQualifierContract|SwapzProductionSourceQualification|CapacityMemoryAccountingContracts)\\.(test_[A-Za-z0-9_]{1,96})\\)( \\([^[:cntrl:]]{1,512}\\))? \\.\\.\\. (FAIL|ERROR)$"
   local simple_phase_context_regex="^ \\(phase='([a-z0-9_-]{1,64})'\\)$"
   # Other generator subtest keys identify a failed method, never public data.
   local generator_progress_regex="^[[:space:]]*(test_[A-Za-z0-9_]{1,96}) \\(__main__\\.GeneratorPublicationTest\\.(test_[A-Za-z0-9_]{1,96})\\)( \\([^[:cntrl:]]{1,192}\\))? \\.\\.\\. (FAIL|ERROR)$"
@@ -291,6 +291,8 @@ classify_rootless_private_unittest_failure() {
       expected_unittest_classes=PrimaryRealSwapContracts ;;
     'tests/runtime/native/primary-real-swap-parent-ownership-test.py')
       expected_unittest_classes=SourceAdmissionPeerOwnership ;;
+    'tests/runtime/native/primary-real-swap-oracle-terminal-test.py')
+      expected_unittest_classes=TerminalEvidenceContracts ;;
     'tests/runtime/native/systemd/swapz-primary-generator-transaction-test.py')
       expected_unittest_classes=GeneratorPublicationTest ;;
     *) return 0 ;;
@@ -518,7 +520,7 @@ report_rootless_failure() {
     *) cleanup_disposition=not_independently_verified ;;
   esac
   case $failed_unittest_class in
-    PackageLifecycle|PrimaryRealSwapContracts|SourceAdmissionPeerOwnership|GeneratorPublicationTest|PrimaryLifecycleBehaviorTest|PrimaryLifecycleSourceGuardTest|PackageCrashToPrimaryAdmissionTest|PrimaryOwnerReleaseDurabilityTest|PrimaryLifecycleNullblkQualifierContract|SwapzProductionSourceQualification|CapacityMemoryAccountingContracts|unavailable) ;;
+    PackageLifecycle|PrimaryRealSwapContracts|SourceAdmissionPeerOwnership|TerminalEvidenceContracts|GeneratorPublicationTest|PrimaryLifecycleBehaviorTest|PrimaryLifecycleSourceGuardTest|PackageCrashToPrimaryAdmissionTest|PrimaryOwnerReleaseDurabilityTest|PrimaryLifecycleNullblkQualifierContract|SwapzProductionSourceQualification|CapacityMemoryAccountingContracts|unavailable) ;;
     *) failed_unittest_class=unavailable ;;
   esac
   # ERR is inherited by command substitutions under -E. Their eventual
@@ -606,14 +608,14 @@ report_rootless_failure() {
                if (target_class != "unavailable") {
                  pattern = "^" target_kind ": " target_test " \\(__main__\\." target_class "\\." target_test "\\)"
                } else {
-                 pattern = "^" target_kind ": " target_test " \\(__main__\\.(PackageLifecycle|PrimaryRealSwapContracts|SourceAdmissionPeerOwnership|GeneratorPublicationTest|PrimaryLifecycleBehaviorTest|PrimaryLifecycleSourceGuardTest|PackageCrashToPrimaryAdmissionTest|PrimaryOwnerReleaseDurabilityTest|PrimaryLifecycleNullblkQualifierContract|SwapzProductionSourceQualification|CapacityMemoryAccountingContracts)\\." target_test "\\)"
+                 pattern = "^" target_kind ": " target_test " \\(__main__\\.(PackageLifecycle|PrimaryRealSwapContracts|SourceAdmissionPeerOwnership|TerminalEvidenceContracts|GeneratorPublicationTest|PrimaryLifecycleBehaviorTest|PrimaryLifecycleSourceGuardTest|PackageCrashToPrimaryAdmissionTest|PrimaryOwnerReleaseDurabilityTest|PrimaryLifecycleNullblkQualifierContract|SwapzProductionSourceQualification|CapacityMemoryAccountingContracts)\\." target_test "\\)"
                }
                if (text !~ pattern) return 0
                if (target_subtest != "unavailable" &&
                    text !~ "\\(phase=\047" target_subtest "\047\\)$") return 0
                return 1
              }
-             return text ~ /^(FAIL|ERROR): test_[A-Za-z0-9_]+ \(__main__\.(PackageLifecycle|PrimaryRealSwapContracts|SourceAdmissionPeerOwnership|GeneratorPublicationTest|PrimaryLifecycleBehaviorTest|PrimaryLifecycleSourceGuardTest|PackageCrashToPrimaryAdmissionTest|PrimaryOwnerReleaseDurabilityTest|PrimaryLifecycleNullblkQualifierContract|SwapzProductionSourceQualification|CapacityMemoryAccountingContracts)\.test_[A-Za-z0-9_]+\)/
+             return text ~ /^(FAIL|ERROR): test_[A-Za-z0-9_]+ \(__main__\.(PackageLifecycle|PrimaryRealSwapContracts|SourceAdmissionPeerOwnership|TerminalEvidenceContracts|GeneratorPublicationTest|PrimaryLifecycleBehaviorTest|PrimaryLifecycleSourceGuardTest|PackageCrashToPrimaryAdmissionTest|PrimaryOwnerReleaseDurabilityTest|PrimaryLifecycleNullblkQualifierContract|SwapzProductionSourceQualification|CapacityMemoryAccountingContracts)\.test_[A-Za-z0-9_]+\)/
            }
            function target_ends(text) {
              if (compile_mode) {
@@ -1022,7 +1024,16 @@ fi
 rootless_phase='tests/runtime/native/primary-real-swap-oracle-terminal-test.py'
 rootless_begin_phase
 if rootless_should_run_suite; then
-python3 -B tests/runtime/native/primary-real-swap-oracle-terminal-test.py -v
+# Retain untrusted stderr privately; report only authenticated method names.
+begin_rootless_private_stderr_capture
+rootless_terminal_command_line=$LINENO
+if python3 -B tests/runtime/native/primary-real-swap-oracle-terminal-test.py -v \
+    2>&"$rootless_capture_input_fd"; then
+  rootless_terminal_exit_code=0
+else
+  rootless_terminal_exit_code=$?
+fi
+finish_and_report_rootless_unittest "$rootless_terminal_exit_code" "$rootless_terminal_command_line"
 fi
 rootless_phase='tests/runtime/benchmark/metadata-ram-evidence-test.py'
 rootless_begin_phase
