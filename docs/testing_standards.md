@@ -699,8 +699,11 @@ progress markers in merged stdout/stderr are observational: a child can
 print the same text and must not create a reusable PASS. The nonce is
 stripped before child tests, and the parent does not retain its proof line
 in a report. Synthetic regression covers genuine, missing, forged,
-out-of-phase and delayed proofs. The shell emits no proof during REUSED
-phases or standalone rootless CI where no token is issued.
+out-of-phase and delayed proofs. Its incomplete stream must still fail
+the containing native/rootless stage because predictor, GC-scaling and
+extent evidence are absent, even if one suite-local proof is genuine.
+The shell emits no proof during REUSED phases or standalone rootless CI
+where no token is issued.
 A suite completion checkpoint must recheck the exact tested HEAD, source
 SHA and tracked checkout cleanliness before recording PASS, because a
 transient source edit inside the rootless stage can otherwise persist

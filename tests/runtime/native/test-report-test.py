@@ -2169,11 +2169,15 @@ class NativeTimingContract(unittest.TestCase):
                         mock.patch.object(
                             runner.secrets, "token_hex", return_value=token), \
                         contextlib.redirect_stdout(io.StringIO()):
+                    # This intentionally incomplete stage lacks mandatory
+                    # predictor/GC/extent evidence. A suite-local PASS may
+                    # be cached, but must never qualify the whole stage.
                     self.assertEqual(runner.run_stage(
                         "Native and rootless contracts", ["unused"], report,
                         stream_rootless_progress=True,
-                        rootless_suite_completed=recorded_suites.append), 0)
+                        rootless_suite_completed=recorded_suites.append), 1)
                 self.assertEqual(recorded_suites, expected)
+                self.assertEqual(report["stages"][-1]["status"], "FAIL")
                 self.assertNotIn(token, json.dumps(report))
 
     def test_rootless_progress_rejects_unsafe_and_invalid_records(self):
