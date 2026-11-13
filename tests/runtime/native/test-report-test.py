@@ -1412,54 +1412,55 @@ class NativeTimingContract(unittest.TestCase):
                         mock.patch.object(
                             runner, "development_resume_context",
                             return_value=synthetic_context):
-                    binaries = [str(native.NATIVE / name)
-                                for name in native.SUITES["mapping"]]
-                    # The helper must not silently change a native program's
-                    # former tests/suites cwd, even in a direct noncache run.
-                    with mock.patch.object(
-                            native.subprocess, "run",
-                            return_value=subprocess.CompletedProcess([], 0)) as executed:
+                    for suite in native.SUITES:
+                        binaries = [str(native.NATIVE / name)
+                                    for name in native.SUITES[suite]]
+                        # The helper must not silently change a native program's
+                        # former tests/suites cwd, even in a direct noncache run.
+                        with mock.patch.object(
+                                native.subprocess, "run",
+                                return_value=subprocess.CompletedProcess([], 0)) as executed:
+                            self.assertEqual(native.run_native_suite(
+                                suite, binaries, mode=None), 0)
+                            self.assertEqual(executed.call_count, len(binaries))
+                            for call in executed.call_args_list:
+                                self.assertNotIn("cwd", call.kwargs)
                         self.assertEqual(native.run_native_suite(
-                            "mapping", binaries, mode=None), 0)
-                        self.assertEqual(executed.call_count, len(binaries))
-                        for call in executed.call_args_list:
-                            self.assertNotIn("cwd", call.kwargs)
-                    self.assertEqual(native.run_native_suite(
-                        "mapping", binaries, mode="record",
-                        tested_source=expected_source, kdir="/synthetic",
-                        runner=runner), 0)
-                    context = native.current_native_context(
-                        "mapping", expected_source, "/synthetic", runner)
-                    self.assertEqual(
-                        runner.read_development_resume_checkpoint(
-                            context, native_suite="mapping"), ["mapping"])
-                    with mock.patch.object(native.subprocess, "run",
-                                           side_effect=AssertionError(
-                                               "verified PASS must skip execution")):
-                        self.assertEqual(native.run_native_suite(
-                            "mapping", binaries, mode="resume",
+                            suite, binaries, mode="record",
                             tested_source=expected_source, kdir="/synthetic",
                             runner=runner), 0)
-                    changed = native.NATIVE / native.SUITES["mapping"][0]
-                    changed.write_bytes(b"#!/bin/sh\nexit 17\n")
-                    changed.chmod(0o755)
-                    with contextlib.redirect_stderr(io.StringIO()) as error:
-                        self.assertEqual(native.run_native_suite(
-                            "mapping", binaries, mode="resume",
-                            tested_source=expected_source, kdir="/synthetic",
-                            runner=runner), 17)
-                    self.assertIn("binary=zero-write-elision exit=17",
-                                  error.getvalue())
-                    changed.unlink()
-                    changed.symlink_to(native.NATIVE / native.SUITES["mapping"][1])
-                    self.assertIsNone(native.current_native_context(
-                        "mapping", expected_source, "/synthetic", runner))
-                    with contextlib.redirect_stderr(io.StringIO()) as error:
-                        self.assertEqual(native.run_native_suite(
-                            "mapping", binaries, mode="resume",
-                            tested_source=expected_source, kdir="/synthetic",
-                            runner=runner), 126)
-                    self.assertIn("reason=untrusted_executable", error.getvalue())
+                        context = native.current_native_context(
+                            suite, expected_source, "/synthetic", runner)
+                        self.assertEqual(
+                            runner.read_development_resume_checkpoint(
+                                context, native_suite=suite), [suite])
+                        with mock.patch.object(native.subprocess, "run",
+                                               side_effect=AssertionError(
+                                                   "verified PASS must skip execution")):
+                            self.assertEqual(native.run_native_suite(
+                                suite, binaries, mode="resume",
+                                tested_source=expected_source, kdir="/synthetic",
+                                runner=runner), 0)
+                        changed = native.NATIVE / native.SUITES[suite][0]
+                        changed.write_bytes(b"#!/bin/sh\nexit 17\n")
+                        changed.chmod(0o755)
+                        with contextlib.redirect_stderr(io.StringIO()) as error:
+                            self.assertEqual(native.run_native_suite(
+                                suite, binaries, mode="resume",
+                                tested_source=expected_source, kdir="/synthetic",
+                                runner=runner), 17)
+                        self.assertIn(f"binary={native.SUITES[suite][0]} exit=17",
+                                      error.getvalue())
+                        changed.unlink()
+                        changed.symlink_to(native.NATIVE / native.SUITES[suite][1])
+                        self.assertIsNone(native.current_native_context(
+                            suite, expected_source, "/synthetic", runner))
+                        with contextlib.redirect_stderr(io.StringIO()) as error:
+                            self.assertEqual(native.run_native_suite(
+                                suite, binaries, mode="resume",
+                                tested_source=expected_source, kdir="/synthetic",
+                                runner=runner), 126)
+                        self.assertIn("reason=untrusted_executable", error.getvalue())
             finally:
                 native.ROOT, native.NATIVE = previous_root, previous_native
                 runner.ROOT = previous_runner_root
@@ -7772,8 +7773,8 @@ class ReportContract(unittest.TestCase):
             for detail in runner.first_unittest_failure_details(untrusted)))
 
     def test_native_lower_io_make_recipe_preserves_shell_variables(self):
-        # Execute the real Makefile recipe against disposable fake binaries,
-        # not the native kernel fixtures or any real block device.
+        # Exercise the direct/sanitizer Make recipe using disposable fake
+        # binaries, not native kernel fixtures or a real block device.
         import subprocess
 
         test_programs = (
@@ -7805,12 +7806,15 @@ class ReportContract(unittest.TestCase):
                     f"exit {return_code}\n",
                     encoding="ascii")
                 executable.chmod(0o700)
+            direct_environment = os.environ.copy()
+            direct_environment.pop("SWAPZ_NATIVE_CACHE_MODE", None)
+            direct_environment.pop("SWAPZ_NATIVE_CACHE_KDIR", None)
             result = subprocess.run(
                 ["make", "--no-print-directory", "-s",
                  "-f", str(ROOT / "tests/suites/Makefile"),
                  "test-lower-io", f"OUT={output}"],
                 cwd=ROOT / "tests/suites", capture_output=True, text=True,
-                check=False, timeout=10)
+                env=direct_environment, check=False, timeout=10)
             # Make itself exits 2, but the failure marker preserves the
             # original binary's exit 7 and prevents later programs running.
             self.assertEqual(result.returncode, 2, result.stderr)

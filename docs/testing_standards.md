@@ -589,11 +589,14 @@ merge independent assertion/failure boundaries or omit ASan/UBSan/TSan
 qualification for speed.
 The native/rootless stage records separate native Make and remaining-contract
 wall times as optional observational evidence, not qualification PASS gates.
-The output-independent shared-object native test-mapping target may
+The output-independent shared-object native test-mapping and test-lower-io
+targets may
 additionally record a private PASS checkpoint during ordinary algorithm
-`make test`. test-gc must always execute because its scan-scaling output is
+`make test`. Both eligible suites retain their independent executable tests.
+test-gc must always execute because its scan-scaling output is
 required qualification evidence. On `make test RESUME=1`, GNU Make still
-builds and validates every mapping prerequisite before the target recipe; the
+builds and validates every eligible native prerequisite before each target
+recipe; the
 development-only helper then verifies the exact source/host/kernel/KDIR/worker/root-artifact
 context, the native compiler-configuration stamp and every expected native
 executable's regular-file SHA-256, executable mode and file identity.
@@ -604,7 +607,8 @@ retains a bounded binary name and its original exit class.
 Synthetic regression must create real executable fixture scripts (with valid
 line endings) and confirm that a prior matching PASS skips execution, while
 changed bytes execute and propagate the first failing binary's exit status.
-The ordinary rootless failure relay must authenticate the mapping executable
+The ordinary rootless failure relay must authenticate the mapping or lower-I/O
+executable
 against its source-controlled Make prerequisite and the matching nested Make
 exit before naming it on the operator console. Arbitrary child stderr and
 unreviewed executable names remain private.
@@ -615,11 +619,13 @@ also removes inherited native and suite-resume selectors before adding its
 own reviewed values. The full integration tier never forwards an inherited
 native cache selector, even when explicitly supplied by the caller. A
 synthetic test covers both tier modes and nonrootless child hygiene.
-The mapping target retains original within-suite binary order and working
-directory (inherited from tests/suites), and does not cache individual binary
-results. Its owner-only atomic checkpoint is independent of all rootless
-fixture checkpoints. Reused mapping prints a bounded marker, is rendered
-REUSED by the rootless stage, cannot feed a fresh PASS checkpoint and never qualifies
+Both eligible native targets retain original within-suite binary order and
+working directory (inherited from tests/suites), and do not cache individual
+binary results. Each has its own owner-only atomic checkpoint, independent
+of every other checkpoint. The lower-I/O direct and sanitizer CI recipe
+remains unchanged when the development selector is absent. Reused native
+tests print bounded markers, are rendered REUSED by the rootless stage,
+cannot feed a fresh PASS checkpoint and never qualify
 physical or loaded device evidence. Full-tier and direct CI native testing
 never consume those development checkpoints.
 A normal `make test` saves a bounded, private, owner-only, atomic
@@ -3449,9 +3455,10 @@ native recipe emits a fixed `FAIL: native test-lower-io binary=... exit=...`
 marker. The official `make test` reporter authenticates it against the
 source target's prerequisites, its nested Make error and the final rootless
 phase before printing the executable and a source-bounded .c assertion
-location when present. The recipe uses Make-escaped `$$native_test`,
+location when present. The direct/sanitizer fallback recipe uses Make-escaped `$$native_test`,
 `$$native_exit_status` and `$$?` so its loop variables and original status
-reach the shell unchanged. A rootless regression runs the real recipe with
+reach the shell unchanged. The algorithm-tier native checkpoint wrapper
+retains the same binary order, working directory, failure marker and exit. A rootless regression runs the real recipe with
 disposable fake executables, verifies first-failure stop/order and original
 status, and catches lost Make dollar-sign escaping. Arbitrary C assertion operands, host paths and
 device data remain private. Keep nullblk-identity-test.sh executable in Git.

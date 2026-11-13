@@ -178,7 +178,7 @@ test-predictor: $(OUT)/predictor-qualification test-anon-page-analyzer
 	  fi
 
 # All shared native objects and target binaries remain explicit Make
-# prerequisites. Only mapping test execution may resume after byte-exact checks.
+# prerequisites. Only output-independent native execution may resume after byte-exact checks.
 test-mapping: $(OUT)/zero-write-elision $(OUT)/mapping-authority $(OUT)/authority-throughput $(OUT)/transaction-publication $(OUT)/write-verification $(OUT)/dead-segment-reclamation $(OUT)/raw-discard $(OUT)/online-packing $(OUT)/randomized-authority
 	@python3 -B "$(ROOT)/tests/tools/native-resume.py" mapping \
 	  $(OUT)/zero-write-elision $(OUT)/mapping-authority $(OUT)/authority-throughput \
@@ -191,15 +191,25 @@ test-gc: $(OUT)/gc-forbidden-victim $(OUT)/gc-cost-accounting $(OUT)/gc-recovery
 	@set -e; "$(OUT)/gc-forbidden-victim"; "$(OUT)/gc-cost-accounting"; "$(OUT)/gc-recovery-policy"; "$(OUT)/gc-scan-scaling"; "$(OUT)/gc-rotation"; "$(OUT)/gc-engine-rotation"; "$(OUT)/gc-high-occupancy"
 
 # Keep the original failed executable's status, not a later Make exit.
+# Direct/sanitizer CI retains the original recipe; only official algorithm
+# qualification supplies the selector for the private development checkpoint.
 test-lower-io: $(OUT)/flush-ordering $(OUT)/lower-write-aggregation $(OUT)/window-policy $(OUT)/preparation-slots $(OUT)/preparation-codec-result $(OUT)/preparation-publication-lifetime $(OUT)/lane-gap
-	@set -e; \
+	@if [ "$${SWAPZ_NATIVE_CACHE_MODE:-}" = record ] || \
+	    [ "$${SWAPZ_NATIVE_CACHE_MODE:-}" = resume ]; then \
+	  python3 -B "$(ROOT)/tests/tools/native-resume.py" lower-io \
+	    $(OUT)/flush-ordering $(OUT)/lower-write-aggregation $(OUT)/window-policy \
+	    $(OUT)/preparation-slots $(OUT)/preparation-codec-result \
+	    $(OUT)/preparation-publication-lifetime $(OUT)/lane-gap; \
+	else \
+	  set -e; \
 	  for native_test in flush-ordering lower-write-aggregation window-policy preparation-slots preparation-codec-result preparation-publication-lifetime lane-gap; do \
 	    if "$(OUT)/$$native_test"; then :; else \
 	      native_exit_status=$$?; \
 	      printf 'FAIL: native test-lower-io binary=%s exit=%s\n' "$$native_test" "$$native_exit_status" >&2; \
 	      exit "$$native_exit_status"; \
 	    fi; \
-	  done
+	  done; \
+	fi
 
 test-concurrency: $(OUT)/preparation-slots $(OUT)/preparation-codec-result $(OUT)/preparation-publication-lifetime
 	@set -e; "$(OUT)/preparation-slots"; "$(OUT)/preparation-codec-result"; "$(OUT)/preparation-publication-lifetime"

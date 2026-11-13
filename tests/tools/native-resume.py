@@ -22,6 +22,10 @@ SUITES = {
         "transaction-publication", "write-verification",
         "dead-segment-reclamation", "raw-discard", "online-packing",
         "randomized-authority"),
+    "lower-io": (
+        "flush-ordering", "lower-write-aggregation", "window-policy",
+        "preparation-slots", "preparation-codec-result",
+        "preparation-publication-lifetime", "lane-gap"),
 }
 MAX_NATIVE_FILE_BYTES = 512 * 1024 * 1024
 
