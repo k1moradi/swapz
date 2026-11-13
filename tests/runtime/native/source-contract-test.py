@@ -7120,6 +7120,59 @@ int main(void)
         self.assertIn("settle_udev", pair)
         self.assertNotIn('dmsetup remove --force', pair)
 
+    def test_owned_pair_cleanup_reads_remain_quiet_and_fail_closed(self):
+        import tempfile
+
+        pair = (ROOT / "tests/tools/benchmark-owned-pair.sh").read_text()
+        for attribute in ("index", "power", "memory_backed"):
+            fast_read = '$(< "${CONFIGS[i]}/' + attribute + '")'
+            self.assertIn(fast_read, pair)
+            self.assertNotIn('$(cat "${CONFIGS[i]}/' + attribute, pair)
+        self.assertIn('$(< "/sys/block/${DISKS[i]}/dev")', pair)
+        self.assertIn('$(readlink -f "/sys/dev/block/${DEVS[i]}")', pair)
+        self.assertIn('$(devno "${LOWERS[i]}" 2>/dev/null)', pair)
+        self.assertIn('QUARANTINED: backing identity/holders changed', pair)
+        self.assertIn(']] 2>/dev/null; then', pair)
+
+        # This is a standalone Bash semantics test; never source the
+        # privileged cleanup handler or interact with actual block nodes.
+        # Redirect the condition itself: $(< file 2>/dev/null) is NOT
+        # equivalent to $(< file) and can silently return an empty value.
+        shell = """
+            set -u
+            fixture=$1
+            if [[ $(< "$fixture/index") != 7 ||
+                  $(< "$fixture/power") != 1 ||
+                  $(< "$fixture/memory_backed") != 1 ||
+                  $(< "$fixture/dev") != 8:1 ]] 2>/dev/null; then
+                printf '%s\\n' QUARANTINED
+            else
+                printf '%s\\n' OWNED
+            fi
+        """
+        with tempfile.TemporaryDirectory() as directory:
+            fixture = Path(directory)
+            for name, value in (
+                    ("index", "7\n"), ("power", "1\n"),
+                    ("memory_backed", "1\n"), ("dev", "8:1\n")):
+                (fixture / name).write_text(value)
+
+            def evaluate():
+                return subprocess.run(
+                    ["bash", "-c", shell, "bash", str(fixture)],
+                    capture_output=True, text=True, check=True, timeout=5)
+
+            accepted = evaluate()
+            self.assertEqual(accepted.stdout, "OWNED\n")
+            self.assertEqual(accepted.stderr, "")
+            (fixture / "index").write_text("8\n")
+            self.assertEqual(evaluate().stdout, "QUARANTINED\n")
+            (fixture / "index").write_text("7\n")
+            (fixture / "power").unlink()
+            absent = evaluate()
+            self.assertEqual(absent.stdout, "QUARANTINED\n")
+            self.assertEqual(absent.stderr, "")
+
     def test_owned_ram_adaptive_poll_keeps_full_retry_budget(self):
         pair = (ROOT / "tests/tools/benchmark-owned-pair.sh").read_text()
         self.assertEqual(

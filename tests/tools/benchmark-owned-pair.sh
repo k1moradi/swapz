@@ -509,17 +509,21 @@ cleanup() {
         note 'QUARANTINED: partially initialized RAM identity'
     elif (( COUNT == 2 && !OWN_DM && !QUARANTINE )); then
         for (( i=0; i<2; ++i )); do
+            # Bash's in-process single-file substitution avoids four
+            # child cat processes for every owned-disk teardown check.
+            # Suppress lookup diagnostics at the enclosing condition, not
+            # inside $(< path): doing so would disable Bash's fast read.
             if [[ ! ${NAMES[i]} =~ ^nullb-swapz-[a-f0-9]{16}$ ||
                   ${CONFIGS[i]} != "$CFGBASE/${NAMES[i]}" ||
-                  $(cat "${CONFIGS[i]}/index" 2>/dev/null) != "${INDEXES[i]}" ||
-                  $(cat "${CONFIGS[i]}/power" 2>/dev/null) != 1 ||
-                  $(cat "${CONFIGS[i]}/memory_backed" 2>/dev/null) != 1 ||
-                  $(cat "/sys/block/${DISKS[i]}/dev" 2>/dev/null) != "${DEVS[i]}" ||
+                  $(< "${CONFIGS[i]}/index") != "${INDEXES[i]}" ||
+                  $(< "${CONFIGS[i]}/power") != 1 ||
+                  $(< "${CONFIGS[i]}/memory_backed") != 1 ||
+                  $(< "/sys/block/${DISKS[i]}/dev") != "${DEVS[i]}" ||
                   $(readlink -f "/sys/dev/block/${DEVS[i]}") != "$(readlink -f "/sys/block/${DISKS[i]}")" ||
                   $(devno "${LOWERS[i]}" 2>/dev/null) != "${DEVS[i]}" ||
                   ! -d /sys/block/${DISKS[i]}/holders ||
                   -n $(ls -A "/sys/block/${DISKS[i]}/holders" 2>/dev/null) ||
-                  -n $(findmnt -rn -S "${LOWERS[i]}" 2>/dev/null) ]]; then
+                  -n $(findmnt -rn -S "${LOWERS[i]}" 2>/dev/null) ]] 2>/dev/null; then
                 valid=0
             fi
         done

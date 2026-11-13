@@ -6853,6 +6853,17 @@ the proof still validates the actual node major:minor against the owned DM
 UUID/name after udev settles, before any owned I/O. This update does not
 relax fault injection, status, holder or teardown qualifications.
 
+The owned-pair teardown must re-read every backing null_blk configfs
+index, power state, memory-backed mode and block major:minor before removing
+either owned config. Use Bash's in-process `$(< path)` substitutions instead
+of four child `cat` commands per device. Bash redirects are subtle:
+put `2>/dev/null` on the complete identity test, **not inside**
+`$(< path)`, which could suppress the fast read and return empty. The
+surrounding predicate must continue to quarantine on absent or mismatched
+files and retain all original holders, mount, mapper and sysfs symlink
+checks. Rootless regressions must exercise matching, mismatched and
+missing synthetic files, with no unsanitized stderr or physical mutations.
+
 Owned-null_blk benchmark setup should read the existing fixed configfs
 attributes and complete /proc/swaps snapshots with Bash's in-process
 single-file substitution (`$(< path)`) rather than starting a fresh
