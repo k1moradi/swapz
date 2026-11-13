@@ -508,6 +508,12 @@ class TerminalEvidenceContracts(unittest.TestCase):
             process.stdin = mock.Mock()
         launched_processes = []
         ownership_exit_flags = []
+        # The real admitted manifest always supplies the validated backing
+        # device identity. Do not let a shortened synthetic manifest hide
+        # a telemetry read failure before testing the readiness policy.
+        progress_snapshot = mock.Mock(return_value={
+            "cgroup_io_some_usec": None, "lower_write_sectors_total": None,
+        })
 
         def launch_process(_arguments, **_kwargs):
             process = processes[len(launched_processes)]
@@ -536,6 +542,7 @@ class TerminalEvidenceContracts(unittest.TestCase):
                     _read_uint=mock.Mock(return_value=0),
                     _mem_available_mib=mock.Mock(
                         return_value=qualify.MIN_AVAILABLE_MIB),
+                    _pressure_progress_snapshot=progress_snapshot,
                     require_no_cgroup_oom_events=mock.Mock(),
                     require_oracle_worker_cgroup_ownership=mock.Mock(
                         side_effect=ownership_check),
@@ -551,7 +558,11 @@ class TerminalEvidenceContracts(unittest.TestCase):
                 with self.assertRaisesRegex(
                         qualify.Blocked, "synthetic structured pre-readiness refusal"):
                     qualify._run_workload(
-                        {"run_id": "terminal-contract-run"},
+                        {
+                            "run_id": "terminal-contract-run",
+                            "device_major_int": 1,
+                            "device_minor_int": 2,
+                        },
                         {"mapper_device": (1, 2)},
                         ORACLE,
                         workload_mib=128,
@@ -561,6 +572,8 @@ class TerminalEvidenceContracts(unittest.TestCase):
                     )
         self.assertTrue(ownership_exit_flags)
         self.assertTrue(ownership_exit_flags[0])
+        self.assertEqual(progress_snapshot.call_count, 1)
+        self.assertEqual(progress_snapshot.call_args.args[2], (1, 2))
 
     def test_parent_stall_and_killed_child_have_no_terminal_evidence(self):
         read_descriptor, write_descriptor = os.pipe()

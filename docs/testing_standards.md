@@ -3149,6 +3149,13 @@ limit microseconds, workload phase, host MemAvailable, dedicated cgroup
 memory/swap bytes, exact-owned swapz READ/WRITE/submission/completion totals
 and selected-partition sector totals before terminating children. Optional
 read failures remain null and must not replace the original pressure stop.
+A readiness-guard rootless fixture must provide the already validated
+integer backing identity `device_major_int`/`device_minor_int` alongside
+`mapper_device`. Mock the optional progress sampler separately and verify
+it receives that exact identity; do not bypass the real guard or silently
+treat missing synthetic identity as a valid admission. Preserve the
+pre-readiness BLOCKED refusal and exited-worker ownership exception.
+
 For sustained PSI failure, retain best-effort one-second samples of exact-mapper
 WRITE submission/completion/physical-byte progress, lower-device sector and
 request progress, and dedicated-cgroup CPU and I/O PSI totals. Publish only
