@@ -7870,17 +7870,26 @@ int main(void)
         fixtures = (ROOT / "tests/runtime/benchmark/io-replay-test.py").read_text()
         function = replay.split("def workload_opportunity(", 1)[1].split(
             "\ndef prefill_fixture_index(", 1)[0]
-        self.assertIn("same_filled_by_payload = {}", function)
-        self.assertIn("result = same_filled_by_payload.get(payload)", function)
-        self.assertIn("if result is None:", function)
-        self.assertIn("result = nonzero_same_filled_page(payload)", function)
-        self.assertIn("same_filled_by_payload[payload] = result", function)
-        self.assertIn("is_nonzero_same_filled(new)", function)
+        self.assertIn("content_id_by_payload = {}", function)
+        self.assertIn("content_id_by_fixture_index = [None] * len(pages)",
+                      function)
+        self.assertIn("content_id = content_id_by_payload.get(payload)",
+                      function)
+        self.assertIn("resident_counts.append(0)", function)
+        self.assertIn("same_filled_by_content_id.append(None)", function)
+        self.assertIn("def is_nonzero_same_filled(content_id):", function)
         self.assertIn(
-            "sum(is_nonzero_same_filled(payload) for payload in live)",
+            "result = nonzero_same_filled_page(payload_by_content_id[content_id])",
             function)
+        self.assertIn("if result is None:", function)
+        self.assertIn("measured_content_ids.add(new_content_id)", function)
+        self.assertIn("resident_counts[new_content_id] += 1", function)
+        self.assertNotIn("resident.get(new, 0)", function)
         self.assertIn(
             "def test_workload_opportunity_classifies_each_distinct_payload_once",
+            fixtures)
+        self.assertIn(
+            "def test_workload_opportunity_content_ids_preserve_byte_oracle",
             fixtures)
 
     def test_wave_plan_validation_reuses_page_set_and_preserves_oracle(self):

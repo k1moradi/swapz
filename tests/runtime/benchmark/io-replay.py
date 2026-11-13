@@ -92,55 +92,74 @@ def workload_opportunity(events, pages, logical_pages, prefill_indices=None):
             any(type(index) is not int or not 0 <= index < len(pages)
                 for index in prefill_indices)):
         raise ValueError("invalid opportunity prefill map")
-    live = [pages[index] for index in prefill_indices]
-    resident = {}
-    for payload in live:
-        resident[payload] = resident.get(payload, 0) + 1
-    measured_writes = same_filled = same_page = resident_dup = 0
-    measured_payloads = set()
-    # This is immutable, content-addressed fixture data. A WRITE may select
-    # the same 4KiB payload thousands of times, but its nonzero repeated-word
-    # property cannot change. Cache lazily to retain rejection precedence for
-    # unused malformed fixture pages and bound memory by unique page values.
-    same_filled_by_payload = {}
 
-    def is_nonzero_same_filled(payload):
-        result = same_filled_by_payload.get(payload)
+    # Resolve fixture slots lazily to canonical content IDs. Equal 4KiB bytes
+    # in different slots share one ID. Repeated trace events then update only
+    # integer-indexed residency state, never rehash the payload on each WRITE.
+    # All state belongs to this preparation call; no replay arm shares it.
+    content_id_by_payload = {}
+    payload_by_content_id = []
+    resident_counts = []
+    same_filled_by_content_id = []
+    content_id_by_fixture_index = [None] * len(pages)
+
+    def content_id_for_fixture(fixture_index):
+        content_id = content_id_by_fixture_index[fixture_index]
+        if content_id is None:
+            payload = pages[fixture_index]
+            content_id = content_id_by_payload.get(payload)
+            if content_id is None:
+                content_id = len(payload_by_content_id)
+                content_id_by_payload[payload] = content_id
+                payload_by_content_id.append(payload)
+                resident_counts.append(0)
+                same_filled_by_content_id.append(None)
+            content_id_by_fixture_index[fixture_index] = content_id
+        return content_id
+
+    live = [content_id_for_fixture(index) for index in prefill_indices]
+    for content_id in live:
+        resident_counts[content_id] += 1
+
+    def is_nonzero_same_filled(content_id):
+        result = same_filled_by_content_id[content_id]
         if result is None:
-            result = nonzero_same_filled_page(payload)
-            same_filled_by_payload[payload] = result
+            result = nonzero_same_filled_page(payload_by_content_id[content_id])
+            same_filled_by_content_id[content_id] = result
         return result
 
+    measured_writes = same_filled = same_page = resident_dup = 0
+    measured_content_ids = set()
     for event in events:
         if event["op"] != "W":
             continue
-        old = live[event["page"]]
-        new = pages[event["fixture"]]
+        old_content_id = live[event["page"]]
+        new_content_id = content_id_for_fixture(event["fixture"])
+        same_content = old_content_id == new_content_id
         if event["phase"] == "measure":
             measured_writes += 1
-            measured_payloads.add(new)
-            same_filled += int(is_nonzero_same_filled(new))
-            same_page += int(old == new)
+            measured_content_ids.add(new_content_id)
+            same_filled += int(is_nonzero_same_filled(new_content_id))
+            same_page += int(same_content)
             resident_dup += int(
-                resident.get(new, 0) - (1 if old == new else 0) > 0)
-        if old != new:
-            resident[old] -= 1
-            if not resident[old]:
-                del resident[old]
-            resident[new] = resident.get(new, 0) + 1
-            live[event["page"]] = new
+                resident_counts[new_content_id] - int(same_content) > 0)
+        if not same_content:
+            resident_counts[old_content_id] -= 1
+            resident_counts[new_content_id] += 1
+            live[event["page"]] = new_content_id
     return {
         "scope": "TRACE_FIXTURE_OPPORTUNITY_ONLY_NOT_KERNEL_SAVINGS",
         "measured_write_ops": measured_writes,
-        "measured_unique_write_payloads": len(measured_payloads),
+        "measured_unique_write_payloads": len(measured_content_ids),
         "nonzero_same_filled_write_ops": same_filled,
         "same_page_rewrite_ops": same_page,
         "resident_duplicate_write_ops": resident_dup,
-        "final_live_unique_payloads": len(resident),
+        "final_live_unique_payloads":
+            sum(1 for count in resident_counts if count > 0),
         "final_live_duplicate_pages":
-            sum(count for count in resident.values() if count > 1),
+            sum(count for count in resident_counts if count > 1),
         "final_live_nonzero_same_filled_pages":
-            sum(is_nonzero_same_filled(payload) for payload in live),
+            sum(is_nonzero_same_filled(content_id) for content_id in live),
     }
 
 

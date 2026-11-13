@@ -6779,19 +6779,24 @@ timed interval. The helper is an internal test binary under `build/tests/`;
 it creates no new public test command.
 
 Offline workload-opportunity attribution is immutable-fixture preparation
-only, not measured replay or a claim about kernel byte savings. It may
-classify a distinct fixture payload once per preparation call for the
-nonzero repeated-64-bit-word property and reuse that content-addressed
-result across measured WRITEs and final resident-page accounting. Cache
-entries are keyed by complete 4096-byte payload values, not fixture-slot
-identity: equal bytes in different slots share a result; false classifications
-are cached as rigorously as true ones. Classification must remain lazy, so
-unused malformed fixture pages do not change earlier failure precedence.
-The complete existing counters, generation accounting, original trace and
-manifest bytes, per-arm admission, and final byte-exact oracle are unchanged.
-No caching may persist between arms, preparations, or processes. Rootless
-tests must cover repeated same-value writes, equal-but-distinct payloads,
-RAW/zero/mixed classification, final-map counts, and unused invalid slots.
+only, not measured replay or a claim about kernel byte savings. It must
+canonicalize a fixture slot lazily to an integer content ID based on complete
+4096-byte equality, with equal bytes in different slots sharing one ID.
+Keep resident counts, measured distinct payloads, same-page rewrites and
+duplicate-resident counts in bounded integer-indexed structures; do not
+rehash full payload bytes for each repeated WRITE. The nonzero
+repeated-64-bit-word property must be classified only once per distinct
+content ID, caching both true and false results. Classification must remain
+lazy, so unused malformed fixture pages do not change earlier failure
+precedence. Every prepared plan has its own content IDs, never shared with
+replay arms or other preparations. The complete original counters,
+warmup-versus-measured accounting, trace, manifest, per-arm admission, and
+final byte-exact oracle remain unchanged. Rootless tests must compare every
+counter with an independent full-byte reference over thousands of
+interleaved warmup/measured WRITEs, equal-but-distinct payloads, RAW/zero/
+mixed pages and non-default prefill mapping; bound full-payload hash calls
+to distinct fixture slots rather than event count. Preserve invalid active
+page rejection and do not inspect unused malformed slots.
 
 Canonical trace validation runs independently inside every replay arm,
 even for an immutable plan prepared once for a matched pair. It may reuse a

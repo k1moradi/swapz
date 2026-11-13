@@ -2243,6 +2243,110 @@ class PairReplayContract(unittest.TestCase):
         self.assertEqual(classification.call_count, 1)
         self.assertEqual(unused["final_live_nonzero_same_filled_pages"], 1)
 
+    def test_workload_opportunity_content_ids_preserve_byte_oracle(self):
+        import runpy
+
+        opportunity = runpy.run_path(str(SCRIPT))["workload_opportunity"]
+        repeated_a = b"A" * PAGE
+        repeated_a_copy = bytes(bytearray(repeated_a))
+        self.assertIsNot(repeated_a, repeated_a_copy)
+        pages = [
+            repeated_a, repeated_a_copy, bytes(PAGE),
+            bytes(range(256)) * 16, b"B" * PAGE,
+            bytes((index * 71 + 19) % 256 for index in range(PAGE)),
+        ]
+        logical_pages = 64
+        prefill = [(index * 5 + 1) % len(pages)
+                   for index in range(logical_pages)]
+        generator = random.Random(0x51A0A9)
+        events = [
+            {"op": "W" if index % 5 else "R",
+             "phase": "warmup" if index < 256 else "measure",
+             "page": generator.randrange(logical_pages),
+             "fixture": generator.randrange(len(pages))}
+            for index in range(8192)
+        ]
+
+        # Intentionally independent slow reference: count resident full-byte
+        # values exactly as before, with no class IDs or cached indices.
+        def reference():
+            live = [pages[index] for index in prefill]
+            resident = {}
+            for payload in live:
+                resident[payload] = resident.get(payload, 0) + 1
+            measured_writes = same_filled = same_page = resident_dup = 0
+            measured_payloads = set()
+            for event in events:
+                if event["op"] != "W":
+                    continue
+                old_payload = live[event["page"]]
+                new_payload = pages[event["fixture"]]
+                if event["phase"] == "measure":
+                    measured_writes += 1
+                    measured_payloads.add(new_payload)
+                    same_filled += int(
+                        len(new_payload) == PAGE and
+                        new_payload[:8] != bytes(8) and
+                        new_payload[:8] * (PAGE // 8) == new_payload)
+                    same_page += int(old_payload == new_payload)
+                    resident_dup += int(
+                        resident.get(new_payload, 0) -
+                        int(old_payload == new_payload) > 0)
+                if old_payload != new_payload:
+                    resident[old_payload] -= 1
+                    if not resident[old_payload]:
+                        del resident[old_payload]
+                    resident[new_payload] = resident.get(new_payload, 0) + 1
+                    live[event["page"]] = new_payload
+            return {
+                "scope": "TRACE_FIXTURE_OPPORTUNITY_ONLY_NOT_KERNEL_SAVINGS",
+                "measured_write_ops": measured_writes,
+                "measured_unique_write_payloads": len(measured_payloads),
+                "nonzero_same_filled_write_ops": same_filled,
+                "same_page_rewrite_ops": same_page,
+                "resident_duplicate_write_ops": resident_dup,
+                "final_live_unique_payloads": len(resident),
+                "final_live_duplicate_pages":
+                    sum(count for count in resident.values() if count > 1),
+                "final_live_nonzero_same_filled_pages":
+                    sum(page[:8] != bytes(8) and
+                        page[:8] * (PAGE // 8) == page for page in live),
+            }
+
+        expected = reference()
+        self.assertEqual(
+            opportunity(events, pages, logical_pages, prefill), expected)
+        self.assertEqual(
+            opportunity(events, pages, logical_pages,
+                        list(prefill)), expected)
+
+        # Force the hot WRITE path to repeat fixture slots many times, and
+        # count full-byte hashes. Once a slot is resolved, no full-page hash
+        # may be needed on subsequent writes, including equal-content slots.
+        hash_calls = [0]
+
+        class CountedPage(bytes):
+            def __hash__(self):
+                hash_calls[0] += 1
+                return super().__hash__()
+
+        counted_pages = [CountedPage(page) for page in pages]
+        result = opportunity(events, counted_pages, logical_pages, prefill)
+        self.assertEqual(result, expected)
+        self.assertLessEqual(hash_calls[0], 4 * len(counted_pages))
+
+        # Unused malformed fixture slots must remain unevaluated. An active
+        # invalid 4KiB classification still fails with the original reason.
+        self.assertEqual(
+            opportunity([], [repeated_a, b"short"], 1, [0])[
+                "final_live_nonzero_same_filled_pages"], 1)
+        with self.assertRaisesRegex(
+                ValueError, "opportunity analysis requires complete pages"):
+            opportunity(
+                [{"op": "W", "phase": "measure",
+                  "page": 0, "fixture": 1}],
+                [repeated_a, b"short"], 1, [0])
+
     def test_throughput_invalid_times_counts_and_lower_sectors_fail_closed(self):
         import importlib.util
         spec = importlib.util.spec_from_file_location("swapz_replay_rates", SCRIPT)
