@@ -7985,6 +7985,35 @@ int main(void)
             "def test_workload_opportunity_content_ids_preserve_byte_oracle",
             fixtures)
 
+    def test_preparation_fixture_single_pass_keeps_replay_rehash(self):
+        replay = (ROOT / "tests/runtime/benchmark/io-replay.py").read_text()
+        tests = (ROOT / "tests/runtime/benchmark/io-replay-test.py").read_text()
+        loader = replay.split("def read_preparation_fixture_pages(", 1)[1].split(
+            "\ndef choose_slot(", 1)[0]
+        generator = replay.split("def prepare(args):", 1)[1].split(
+            "\ndef prepare_write_qd_variants(", 1)[0]
+        replay_arm = replay.split("def replay(args):", 1)[1]
+        self.assertIn("path = Path(path).resolve(strict=True)", loader)
+        self.assertIn("page = stream.read(PAGE)", loader)
+        self.assertIn("if len(page) != PAGE:", loader)
+        self.assertIn("if stream.read(1):", loader)
+        self.assertIn("digest.update(page)", loader)
+        self.assertIn("return pages, digest.hexdigest()", loader)
+        self.assertIn(
+            "pages, fixture_hash = read_preparation_fixture_pages(args.fixture)",
+            generator)
+        self.assertIn("fixture_pages = len(pages)", generator)
+        self.assertNotIn('with open(args.fixture, "rb")', generator)
+        # Each replay arm still rehashes the on-disk bytes independently;
+        # preparation's in-memory pages are never shared with either arm.
+        self.assertIn("fixture_info(args.fixture)", replay_arm)
+        self.assertIn(
+            "def test_preparation_fixture_single_pass_hash_matches_exact_bytes",
+            tests)
+        self.assertIn(
+            "def test_preparation_wave_fusion_keeps_legacy_trace_bytes_and_oracles",
+            tests)
+
     def test_preparation_wave_fusion_preserves_legacy_canonical_hashes(self):
         replay = (ROOT / "tests/runtime/benchmark/io-replay.py").read_text()
         fixtures = (ROOT / "tests/runtime/benchmark/io-replay-test.py").read_text()

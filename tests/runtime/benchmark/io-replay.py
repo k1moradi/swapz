@@ -65,6 +65,33 @@ def fixture_info(path):
     return path.stat().st_size // PAGE, digest_file(path)
 
 
+def read_preparation_fixture_pages(path):
+    """Read and hash the immutable 4KiB fixture pages in a single pass.
+
+    This only replaces preparation's redundant source read. Every replay arm
+    still independently authenticates the on-disk fixture with fixture_info().
+    """
+    path = Path(path).resolve(strict=True)
+    fixture_size = path.stat().st_size
+    if fixture_size % PAGE or not fixture_size:
+        raise ValueError("fixture must contain full 4096B pages")
+    page_count = fixture_size // PAGE
+    pages = []
+    digest = hashlib.sha256()
+    with open(path, "rb") as stream:
+        for _ in range(page_count):
+            page = stream.read(PAGE)
+            if len(page) != PAGE:
+                raise ValueError("fixture changed during preparation")
+            pages.append(page)
+            digest.update(page)
+        # Reject growth after the initial geometry check rather than
+        # silently hashing an incomplete or unaligned on-disk fixture.
+        if stream.read(1):
+            raise ValueError("fixture changed during preparation")
+    return pages, digest.hexdigest()
+
+
 def choose_slot(rng, start, count, used):
     if count <= len(used):
         raise ValueError("more simultaneous operations than available unique slots")
@@ -223,7 +250,8 @@ def prefill_fixture_index(manifest, page, fixture_pages):
 
 
 def prepare(args):
-    fixture_pages, fixture_hash = fixture_info(args.fixture)
+    pages, fixture_hash = read_preparation_fixture_pages(args.fixture)
+    fixture_pages = len(pages)
     if args.qd < 1 or args.qd > 32 or args.measure_ops < 1:
         raise ValueError("QD must be 1..32 and measure_ops positive")
     if args.warmup_ops < 0 or args.measure_ops % args.qd or args.warmup_ops % args.qd:
@@ -320,9 +348,8 @@ def prepare(args):
             # list and its second traversal without changing trace bytes.
             if kind == "W":
                 latest[slot] = fi
-    # No file extension or fake compression class decides the bytes.
-    with open(args.fixture, "rb") as stream:
-        pages = [stream.read(PAGE) for _ in range(fixture_pages)]
+    # The full-page fixture bytes and SHA-256 were acquired together before
+    # constructing the plan. Do not re-read potentially changed source bytes.
     h = hashlib.sha256()
     for e in events:
         if e["op"] == "W":

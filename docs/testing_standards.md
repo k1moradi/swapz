@@ -6979,6 +6979,22 @@ mixed pages and non-default prefill mapping; bound full-payload hash calls
 to distinct fixture slots rather than event count. Preserve invalid active
 page rejection and do not inspect unused malformed slots.
 
+During immutable trace preparation, read each fixture page once and
+update its SHA-256 in the same page loop. This avoids hashing the entire
+source and then opening it again to populate the fixture-page array.
+Preserve strict resolved-path and complete-4096B geometry checks; require
+an exact page read for the original file size and reject unexpected EOF or
+extra bytes after the final page (source changed during preparation).
+The digest must describe precisely the bytes used to construct the trace,
+WRITE payload stream and final-image oracle, with no source-index array
+or duplicate full-file allocation. Do not reuse the preparation snapshot
+as replay authority: **each independent replay arm must still rehash
+the current on-disk fixture** and reject mutations. Rootless regressions
+must prove one full read per preparation source, byte/hash equivalence to
+the old two-pass fixture source, and fail-closed truncation/growth and
+invalid-page geometry. Keep all pinned legacy trace, payload and postimage
+SHA-256 fixtures unchanged.
+
 Immutable trace preparation may append each generated operation
 directly to the canonical event array and update its last-written fixture
 mapping without building a transient list per QD wave. This is valid only

@@ -2213,6 +2213,53 @@ class PairReplayContract(unittest.TestCase):
                                      rejected.stderr)
                     self.assertFalse(forbidden.exists())
 
+    def test_preparation_fixture_single_pass_hash_matches_exact_bytes(self):
+        import runpy
+
+        replay = runpy.run_path(str(SCRIPT))
+        load = replay["read_preparation_fixture_pages"]
+        with tempfile.TemporaryDirectory() as directory:
+            fixture = Path(directory) / "fixture.bin"
+            payload = b"".join(
+                bytes(((index * 19 + position) % 256) for position in range(PAGE))
+                for index in range(7))
+            fixture.write_bytes(payload)
+            real_open = open
+            reads = []
+
+            def capture_open(candidate, mode="r", *args, **kwargs):
+                if Path(candidate) == fixture and mode == "rb":
+                    reads.append(candidate)
+                return real_open(candidate, mode, *args, **kwargs)
+
+            with mock.patch("builtins.open", side_effect=capture_open):
+                pages, digest = load(fixture)
+            self.assertEqual(len(reads), 1)
+            self.assertEqual(b"".join(pages), payload)
+            self.assertEqual(len(pages), 7)
+            self.assertEqual(digest, hashlib.sha256(payload).hexdigest())
+            self.assertEqual(replay["fixture_info"](fixture),
+                             (7, digest))
+
+            # A concurrently altered source must not combine the digest
+            # of one version with pages of another. Truncation and growth
+            # after stat are rejected before publishing a trace/manifest.
+            for mutated in (payload[:-1], payload + b"X"):
+                with self.subTest(length=len(mutated)):
+                    with mock.patch(
+                            "builtins.open",
+                            side_effect=lambda candidate, mode="r":
+                            io.BytesIO(mutated)):
+                        with self.assertRaisesRegex(
+                                ValueError, "fixture changed during preparation"):
+                            load(fixture)
+            for malformed in (b"", b"X" * (PAGE - 1)):
+                with self.subTest(malformed=len(malformed)):
+                    fixture.write_bytes(malformed)
+                    with self.assertRaisesRegex(
+                            ValueError, "fixture must contain full 4096B pages"):
+                        load(fixture)
+
     def test_preparation_wave_fusion_keeps_legacy_trace_bytes_and_oracles(self):
         import runpy
 
