@@ -103,6 +103,9 @@ PSI_STOP_FRACTION = 0.85
 PSI_STOP_GRACE_SECONDS = 5
 PSI_STOP_SAMPLE_INTERVAL_SECONDS = 0.05
 PSI_STOP_MAX_SAMPLES = 256
+# Best-effort diagnostic snapshots, never a workload admission condition.
+PRESSURE_PROGRESS_SAMPLE_SECONDS = 1.0
+PRESSURE_PROGRESS_MAX_SAMPLES = 16
 CYCLE_TELEMETRY_INTERVAL_SECONDS = 0.1
 CYCLE_TELEMETRY_THREAD_TIMEOUT_SECONDS = 5
 TRUSTED_EXTERNAL_COMMANDS = frozenset(("cc", "dmsetup", "lsblk", "dmesg"))
@@ -3455,11 +3458,102 @@ def _wait_for_round_release(cgroup: Path, mapper_device: tuple[int, int],
     raise QualificationFailure("swap slots did not return to baseline within the bounded release timeout")
 
 
+# Keep these counters and their units explicit: snapshots are cumulative, while
+# diagnostic deltas span only the observed part of the memory PSI stop window.
+PRESSURE_PROGRESS_COUNTERS = (
+    ("cgroup_io_some_usec", "cgroup_io_some_delta_usec"),
+    ("cgroup_io_full_usec", "cgroup_io_full_delta_usec"),
+    ("cgroup_cpu_some_usec", "cgroup_cpu_some_delta_usec"),
+    ("swapz_physical_write_total", "swapz_physical_write_delta"),
+    ("swapz_write_submitted_total", "swapz_write_submitted_delta"),
+    ("swapz_upper_write_completed_ok", "swapz_write_completed_delta"),
+    ("swapz_ordered_worker_wall_ns", "swapz_worker_wall_delta_ns"),
+    ("lower_write_sectors_total", "lower_write_sectors_delta"),
+    ("lower_write_requests_total", "lower_write_requests_delta"),
+)
+
+
+def _pressure_progress_snapshot(cgroup: Path,
+                                status_reader: Callable[[], dict[str, int]],
+                                lower_device: tuple[int, int]) -> dict[str, int | None]:
+    """Best-effort, bounded telemetry; never turn an optional read into a stop."""
+    observed: dict[str, int | None] = {
+        field: None for field, _ in PRESSURE_PROGRESS_COUNTERS}
+    for field, path, kind in (
+            ("cgroup_io_some_usec", cgroup / "io.pressure", "some"),
+            ("cgroup_io_full_usec", cgroup / "io.pressure", "full"),
+            ("cgroup_cpu_some_usec", cgroup / "cpu.pressure", "some")):
+        try:
+            observed[field] = _psi_total(path, kind)
+        except Exception:
+            pass
+    try:
+        status = status_reader()
+        for field, key in (
+                ("swapz_physical_write_total", "physical_write"),
+                ("swapz_write_submitted_total", "write_submitted"),
+                ("swapz_upper_write_completed_ok", "upper_write_completed_ok"),
+                ("swapz_ordered_worker_wall_ns", "ordered_worker_wall_ns")):
+            value = status.get(key)
+            if type(value) is int and value >= 0:
+                observed[field] = value
+    except Exception:
+        pass
+    try:
+        numbers = [int(value) for value in Path(
+            f"/sys/dev/block/{lower_device[0]}:{lower_device[1]}/stat"
+        ).read_text(encoding="ascii").split()]
+        if len(numbers) >= 7 and all(value >= 0 for value in numbers):
+            observed["lower_write_sectors_total"] = numbers[6]
+            observed["lower_write_requests_total"] = numbers[4]
+    except (OSError, ValueError):
+        pass
+    return observed
+
+
+def _pressure_progress_deltas(samples: deque, window: PsiStallWindow) -> dict:
+    """Never present differently timed cumulative counters as PSI-window deltas."""
+    deltas = {"progress_window_usec": None,
+              **{delta: None for _, delta in PRESSURE_PROGRESS_COUNTERS}}
+    if len(samples) < 2:
+        return deltas
+    window_start = window._samples[0][0]
+    eligible = next((sample for sample in samples
+                     if sample[0] >= window_start), None)
+    if eligible is None or samples[-1][0] <= eligible[0]:
+        return deltas
+    start_time, before = eligible
+    end_time, after = samples[-1]
+    deltas["progress_window_usec"] = int((end_time - start_time) * 1_000_000)
+    for counter, name in PRESSURE_PROGRESS_COUNTERS:
+        initial, final = before[counter], after[counter]
+        if (type(initial) is int and type(final) is int and
+                0 <= initial <= final):
+            deltas[name] = final - initial
+    return deltas
+
+
 def _workload_pressure_failure(window: PsiStallWindow, cgroup: Path,
                                status_reader: Callable[[], dict[str, int]],
-                               lower_device: tuple[int, int], phase: str) -> QualificationFailure:
+                               lower_device: tuple[int, int], phase: str,
+                               *, progress_samples: deque | None = None,
+                               observed_time: float | None = None,
+                               workload_started: float | None = None,
+                               phase_started: float | None = None,
+                               round_index: int | None = None) -> QualificationFailure:
     """Capture bounded context before child cleanup changes the first PSI stop."""
     observation = {**window.observation(), "workload_phase": phase}
+    if progress_samples is not None:
+        observation.update(_pressure_progress_deltas(progress_samples, window))
+        observation["workload_elapsed_usec"] = (
+            int((observed_time - workload_started) * 1_000_000)
+            if observed_time is not None and workload_started is not None
+            else None)
+        observation["phase_elapsed_usec"] = (
+            int((observed_time - phase_started) * 1_000_000)
+            if observed_time is not None and phase_started is not None
+            else None)
+        observation["round_index"] = round_index
     readers = {
         "mem_available_mib": _mem_available_mib,
         "cgroup_memory_bytes": lambda: _read_uint(cgroup / "memory.current"),
@@ -3537,12 +3631,30 @@ def _run_workload(manifest: dict, active: dict, oracle_path: Path,
             _raise_cleanup_errors(
                 original_error, [f"initial telemetry cgroup: {cleanup_error}"])
         raise
-    psi_window = PsiStallWindow(time.monotonic(), psi_before)
+    workload_started = time.monotonic()
+    psi_window = PsiStallWindow(workload_started, psi_before)
+    progress_samples: deque = deque(maxlen=PRESSURE_PROGRESS_MAX_SAMPLES)
     rounds: list[dict] = []
     active_processes: list[subprocess.Popen] = []
     guard_processes: list[subprocess.Popen] | None = None
     guard_allow_worker_exit = False
     workload_phase = "waiting"
+    phase_started = workload_started
+    round_index = 0
+
+    def start_phase(name: str) -> None:
+        nonlocal workload_phase, phase_started
+        workload_phase = name
+        phase_started = time.monotonic()
+
+    def capture_progress(observed_time: float, *, force: bool = False) -> None:
+        if (force or not progress_samples or
+                observed_time - progress_samples[-1][0] >=
+                PRESSURE_PROGRESS_SAMPLE_SECONDS):
+            progress_samples.append((
+                observed_time, _pressure_progress_snapshot(
+                    cgroup, sample_status,
+                    (manifest["device_major_int"], manifest["device_minor_int"]))))
 
     def guard() -> None:
         if telemetry_check is not None:
@@ -3559,17 +3671,22 @@ def _run_workload(manifest: dict, active: dict, oracle_path: Path,
             raise QualificationFailure(
                 f"host MemAvailable crossed {MIN_AVAILABLE_MIB} MiB early-stop threshold")
         current_psi_total = _psi_total(cgroup / "memory.pressure")
-        if psi_window.observe(time.monotonic(), current_psi_total):
+        observed_time = time.monotonic()
+        stopped = psi_window.observe(observed_time, current_psi_total)
+        capture_progress(observed_time, force=stopped)
+        if stopped:
             raise _workload_pressure_failure(
                 psi_window, cgroup, sample_status,
                 (manifest["device_major_int"], manifest["device_minor_int"]),
-                workload_phase)
+                workload_phase, progress_samples=progress_samples,
+                observed_time=observed_time, workload_started=workload_started,
+                phase_started=phase_started, round_index=round_index)
 
     oracle_python = _trusted_executable_path(
         sys.executable, "running Python interpreter")
     try:
         for round_index in range(1, REUSE_ROUNDS + 1):
-            workload_phase = "waiting"
+            start_phase("waiting")
             _write_control(cgroup / "memory.max", str(resident_mib * MIB), admitted=True)
             swaps_before = read_swap_rows()
             expected_before = _row_for_device(swaps_before, active["mapper_device"])
@@ -3650,7 +3767,7 @@ def _run_workload(manifest: dict, active: dict, oracle_path: Path,
                     (manifest["device_major_int"], manifest["device_minor_int"]))
                 vm_before = read_vmstat()
 
-                workload_phase = "fill"
+                start_phase("fill")
                 for process in round_processes:
                     if process.stdin is None:
                         raise QualificationFailure("oracle command pipe is unavailable")
@@ -3710,7 +3827,7 @@ def _run_workload(manifest: dict, active: dict, oracle_path: Path,
                 # From this point the live set may shrink, but no foreign PID
                 # may enter the dedicated cgroup.
                 guard_allow_worker_exit = True
-                workload_phase = "verify"
+                start_phase("verify")
                 for process in round_processes:
                     if process.stdin is None:
                         raise QualificationFailure("oracle command pipe is unavailable")
@@ -3824,7 +3941,7 @@ def _run_workload(manifest: dict, active: dict, oracle_path: Path,
 
             if round_result is None:
                 raise QualificationFailure("real-swap round ended without evidence")
-            workload_phase = "release"
+            start_phase("release")
             release = _wait_for_round_release(
                 cgroup, active["mapper_device"], expected_before.used_kib,
                 time.monotonic() + min(timeout_seconds, 30), guard)
@@ -3836,10 +3953,16 @@ def _run_workload(manifest: dict, active: dict, oracle_path: Path,
         # Do not trust a previously clean guard observation as terminal proof.
         require_no_cgroup_oom_events(events_before, events_after)
         psi_after = _psi_total(cgroup / "memory.pressure")
-        if psi_window.observe(time.monotonic(), psi_after):
+        observed_time = time.monotonic()
+        stopped = psi_window.observe(observed_time, psi_after)
+        capture_progress(observed_time, force=stopped)
+        if stopped:
             raise _workload_pressure_failure(
                 psi_window, cgroup, sample_status,
-                (manifest["device_major_int"], manifest["device_minor_int"]), "final")
+                (manifest["device_major_int"], manifest["device_minor_int"]), "final",
+                progress_samples=progress_samples, observed_time=observed_time,
+                workload_started=workload_started, phase_started=phase_started,
+                round_index=round_index)
         return {
             "concurrent_workers": CONCURRENT_ORACLE_PROCESSES,
             "reuse_rounds": len(rounds),

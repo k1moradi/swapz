@@ -4030,7 +4030,7 @@ def parse_algorithm_pageout_diagnostic(error_output):
         return None
     records = [line[len(prefix):] for line in error_output.splitlines()
                if line.startswith(prefix)]
-    if len(records) != 1 or len(records[0]) > 1536:
+    if len(records) != 1 or len(records[0]) > 2048:
         return None
 
     def unique_fields(pairs):
@@ -4146,10 +4146,23 @@ def parse_algorithm_pageout_diagnostic(error_output):
             timing_fields = {"swapz_lower_write_wall_ns", "swapz_ordered_worker_wall_ns",
                              "swapz_prep_wait_wall_ns", "swapz_commit_nonio_wall_ns",
                              "swapz_lower_write_service_ewma_ns"}
-            if isinstance(pressure, dict) and set(pressure) == pressure_fields | stall_fields | timing_fields:
-                pressure_fields |= timing_fields
-            if isinstance(pressure, dict) and set(pressure) == pressure_fields | stall_fields:
-                pressure_fields |= stall_fields
+            progress_fields = {
+                "progress_window_usec", "cgroup_io_some_delta_usec",
+                "cgroup_io_full_delta_usec", "cgroup_cpu_some_delta_usec",
+                "swapz_physical_write_delta", "swapz_write_submitted_delta",
+                "swapz_write_completed_delta", "swapz_worker_wall_delta_ns",
+                "lower_write_sectors_delta", "lower_write_requests_delta",
+                "workload_elapsed_usec", "phase_elapsed_usec", "round_index"}
+            if isinstance(pressure, dict):
+                optional_fields = set(pressure) - pressure_fields
+                if progress_fields <= optional_fields:
+                    pressure_fields |= progress_fields
+                    optional_fields -= progress_fields
+                if timing_fields <= optional_fields:
+                    pressure_fields |= timing_fields
+                    optional_fields -= timing_fields
+                if stall_fields <= optional_fields:
+                    pressure_fields |= stall_fields
             if (diagnostic["reason"] != "memory_pressure" or
                     diagnostic["phase"] != "anonymous_workload" or
                     not isinstance(pressure, dict) or set(pressure) != pressure_fields or
@@ -4257,6 +4270,18 @@ def print_algorithm_workload_diagnostic(diagnostic):
                       "swapz_lower_write_wall_ns", "swapz_ordered_worker_wall_ns",
                       "swapz_prep_wait_wall_ns", "swapz_commit_nonio_wall_ns",
                       "swapz_lower_write_service_ewma_ns")), flush=True)
+        if "progress_window_usec" in pressure:
+            print("        Progress sampling (best-effort window deltas; ns/us as labeled): "
+                  + " ".join(f"{key}={observed(key)}" for key in (
+                      "progress_window_usec", "round_index",
+                      "workload_elapsed_usec", "phase_elapsed_usec",
+                      "cgroup_io_some_delta_usec", "cgroup_io_full_delta_usec",
+                      "cgroup_cpu_some_delta_usec",
+                      "swapz_physical_write_delta",
+                      "swapz_write_submitted_delta", "swapz_write_completed_delta",
+                      "swapz_worker_wall_delta_ns",
+                      "lower_write_sectors_delta", "lower_write_requests_delta")),
+                  flush=True)
         print("        I/O snapshots (totals, not attributed deltas): " + " ".join(
             f"{key}={observed(key)}" for key in (
                 "swapz_logical_write_total", "swapz_physical_write_total",

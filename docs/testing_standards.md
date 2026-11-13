@@ -3136,6 +3136,15 @@ limit microseconds, workload phase, host MemAvailable, dedicated cgroup
 memory/swap bytes, exact-owned swapz READ/WRITE/submission/completion totals
 and selected-partition sector totals before terminating children. Optional
 read failures remain null and must not replace the original pressure stop.
+For sustained PSI failure, retain best-effort one-second samples of exact-mapper
+WRITE submission/completion/physical-byte progress, lower-device sector and
+request progress, and dedicated-cgroup CPU and I/O PSI totals. Publish only
+nonnegative deltas across the available samples inside the same rolling memory
+PSI window, with the actual measurement span, and label cumulative status
+separately. Include current round and monotonic workload/phase elapsed time
+to distinguish delayed setup from a stalled fill. Optional sampling failures
+must remain null and must never change the original workload stop or cleanup.
+The public diagnostic remains an exact finite allowlist, not arbitrary stderr.
 These are diagnostic totals, not attributed traffic deltas or success proof.
 Preserve the snapshot through bounded exception-cause traversal, persist the
 finite first-workload diagnostic in the run results before normal recovery,

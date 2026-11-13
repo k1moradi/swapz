@@ -5834,6 +5834,27 @@ class ReportContract(unittest.TestCase):
         prefix = "PHYSICAL_ALGORITHM_DEBUG="
         marker = lambda value: prefix + json.dumps(value, separators=(",", ":"))
         self.assertEqual(runner.parse_algorithm_pageout_diagnostic(marker(report)), report)
+        progress = {
+            "progress_window_usec": 4_000_000,
+            "cgroup_io_some_delta_usec": 100, "cgroup_io_full_delta_usec": 50,
+            "cgroup_cpu_some_delta_usec": None,
+            "swapz_physical_write_delta": 8192,
+            "swapz_write_submitted_delta": 8192,
+            "swapz_write_completed_delta": 2, "swapz_worker_wall_delta_ns": 200,
+            "lower_write_sectors_delta": 16, "lower_write_requests_delta": 2,
+            "workload_elapsed_usec": 12000000, "phase_elapsed_usec": 5000000,
+            "round_index": 1}
+        extended = {**report, "pressure": {**pressure, **progress}}
+        self.assertEqual(runner.parse_algorithm_pageout_diagnostic(marker(extended)), extended)
+        for changed in ({"round_index": True},
+                        {"cgroup_cpu_some_delta_usec": "/private"},
+                        {"progress_window_usec": -1}):
+            self.assertIsNone(runner.parse_algorithm_pageout_diagnostic(
+                marker({**extended, "pressure": {**extended["pressure"], **changed}})))
+        removed = dict(extended["pressure"])
+        del removed["lower_write_requests_delta"]
+        self.assertIsNone(runner.parse_algorithm_pageout_diagnostic(
+            marker({**report, "pressure": removed})))
         optional = {"cgroup_io_some_usec", "cgroup_io_full_usec", "cgroup_memory_max_events"}
         timing = {"swapz_lower_write_wall_ns", "swapz_ordered_worker_wall_ns",
                   "swapz_prep_wait_wall_ns", "swapz_commit_nonio_wall_ns",

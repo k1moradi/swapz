@@ -3108,6 +3108,40 @@ class PrimaryRealSwapContracts(unittest.TestCase):
             if key not in {"window_usec", "stalled_usec", "limit_usec", "workload_phase"}:
                 self.assertIsNone(value, key)
 
+    def test_pressure_progress_deltas_use_only_same_window_samples(self):
+        window = qualify.PsiStallWindow(0.0, 0)
+        self.assertTrue(window.observe(5.0, 4_500_000))
+        counters = dict.fromkeys(
+            (name for name, _ in qualify.PRESSURE_PROGRESS_COUNTERS), 0)
+        newer = {name: 100 for name in counters}
+        newer["swapz_write_submitted_total"] = None
+        snapshots = collections.deque([
+            (-1.0, {name: 1000 for name in counters}),
+            (0.5, counters),
+            (4.5, newer)], maxlen=16)
+        deltas = qualify._pressure_progress_deltas(snapshots, window)
+        self.assertEqual(deltas["progress_window_usec"], 4_000_000)
+        self.assertEqual(deltas["swapz_physical_write_delta"], 100)
+        self.assertIsNone(deltas["swapz_write_submitted_delta"])
+        self.assertEqual(deltas["lower_write_requests_delta"], 100)
+        self.assertTrue(all(
+            value is None for value in qualify._pressure_progress_deltas(
+                collections.deque([(4.5, newer)]), window).values()))
+
+    def test_pressure_progress_optional_reader_failure_is_not_a_stop(self):
+        cgroup = Path("/synthetic/cgroup")
+        with mock.patch.object(
+                qualify, "_psi_total", side_effect=OSError("read unavailable")), \\
+             mock.patch.object(
+                 qualify, "read_status", side_effect=RuntimeError("no mapper")), \\
+             mock.patch.object(
+                 qualify.Path, "read_text", side_effect=OSError("no sysfs")):
+            sample = qualify._pressure_progress_snapshot(
+                cgroup, qualify.read_status, (8, 4))
+        self.assertEqual(set(sample),
+                         {field for field, _ in qualify.PRESSURE_PROGRESS_COUNTERS})
+        self.assertTrue(all(value is None for value in sample.values()))
+
     def positive_evidence(self):
         return dict(
             cgroup_swap_bytes=32 * qualify.MIB,

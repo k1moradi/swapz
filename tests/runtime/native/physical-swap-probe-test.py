@@ -839,6 +839,19 @@ class PhysicalSwapProbeTests(unittest.TestCase):
             "cgroup_io_some_usec": 700, "cgroup_io_full_usec": True,
             "swapz_lower_write_wall_ns": 900, "swapz_prep_wait_wall_ns": True,
             "cgroup_memory_max_events": "/private/KEEP_PRIVATE",
+            "progress_window_usec": 4_000_000,
+            "cgroup_io_some_delta_usec": 100,
+            "cgroup_io_full_delta_usec": 50,
+            "cgroup_cpu_some_delta_usec": True,
+            "swapz_physical_write_delta": 4096,
+            "swapz_write_submitted_delta": 8192,
+            "swapz_write_completed_delta": 1,
+            "swapz_worker_wall_delta_ns": 200,
+            "lower_write_sectors_delta": 8,
+            "lower_write_requests_delta": 2,
+            "workload_elapsed_usec": 12345678,
+            "phase_elapsed_usec": 5123456,
+            "round_index": 1,
             "private_path": "/private/KEEP_PRIVATE"}
         wrapped = RuntimeError(str(original) +
             "; cleanup also failed: oracle /private/path timed out after 5 seconds")
@@ -857,6 +870,10 @@ class PhysicalSwapProbeTests(unittest.TestCase):
         self.assertIsNone(record["pressure"]["swapz_prep_wait_wall_ns"])
         self.assertIsNone(record["pressure"]["cgroup_io_full_usec"])
         self.assertIsNone(record["pressure"]["cgroup_memory_max_events"])
+        self.assertIsNone(record["pressure"]["cgroup_cpu_some_delta_usec"])
+        self.assertEqual(record["pressure"]["progress_window_usec"], 4_000_000)
+        self.assertEqual(record["pressure"]["lower_write_requests_delta"], 2)
+        self.assertEqual(record["pressure"]["phase_elapsed_usec"], 5123456)
         self.assertIsNone(record["pressure"]["lower_read_sectors_total"])
         self.assertNotIn("private", stderr.getvalue())
 

@@ -3883,7 +3883,13 @@ def _emit_algorithm_workload_failure(error, phase="anonymous_workload"):
                 "swapz_logical_read_total", "swapz_physical_read_total",
                 "swapz_write_submitted_total", "swapz_upper_write_completed_ok",
                 "swapz_failed", "swapz_error",
-                "lower_read_sectors_total", "lower_write_sectors_total")
+                "lower_read_sectors_total", "lower_write_sectors_total",
+                "progress_window_usec", "cgroup_io_some_delta_usec",
+                "cgroup_io_full_delta_usec", "cgroup_cpu_some_delta_usec",
+                "swapz_physical_write_delta", "swapz_write_submitted_delta",
+                "swapz_write_completed_delta", "swapz_worker_wall_delta_ns",
+                "lower_write_sectors_delta", "lower_write_requests_delta",
+                "workload_elapsed_usec", "phase_elapsed_usec", "round_index")
             pressure = {key: observation.get(key) for key in fields}
             for key, value in pressure.items():
                 lower, upper = (-4095, 4095) if key == "swapz_error" else (0, MAX_BLOCK_COUNTER)
