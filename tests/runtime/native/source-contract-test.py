@@ -7346,8 +7346,8 @@ int main(void)
         self.assertIn('swapz_verify_owned_dm_node() {', deploy)
         self.assertIn('stat -Lc \'%t:%T\' "$mapper_node"', deploy)
         self.assertIn('sysfs_device="/sys/dev/block/$node_dev/dm"', deploy)
-        self.assertIn('"$(cat "$sysfs_device/uuid")" == "$UUID"', deploy)
-        self.assertIn('"$(cat "$sysfs_device/name")" == "$DMNAME"', deploy)
+        self.assertIn('"$(< "$sysfs_device/uuid")" == "$UUID"', deploy)
+        self.assertIn('"$(< "$sysfs_device/name")" == "$DMNAME"', deploy)
         self.assertGreaterEqual(deploy.count('swapz_verify_owned_dm_node\n'), 7)
         self.assertLess(deploy.index('swapz_verify_owned_dm_node\n',
                                      deploy.index('START_LOADED_RETAINED_WRITE_FAULT')),

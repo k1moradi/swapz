@@ -6794,6 +6794,13 @@ between teardown phases. Rootless source contracts must mock the polling
 helper for the full 60-probe schedule and verify all three call sites and
 source admission checks without executing any privileged operation.
 
+The retained synthetic WRITE/FLUSH fault source contract must assert the
+same in-shell UUID/name comparisons at the DM node proof gate. Its previous
+textual `cat` assertion is not a requirement to spawn a subprocess:
+the proof still validates the actual node major:minor against the owned DM
+UUID/name after udev settles, before any owned I/O. This update does not
+relax fault injection, status, holder or teardown qualifications.
+
 Owned-null_blk benchmark setup should read the existing fixed configfs
 attributes and complete /proc/swaps snapshots with Bash's in-process
 single-file substitution (`$(< path)`) rather than starting a fresh
