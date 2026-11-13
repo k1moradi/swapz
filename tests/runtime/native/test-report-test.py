@@ -1258,6 +1258,69 @@ class NativeTimingContract(unittest.TestCase):
             finally:
                 runner.ROOT = previous_root
 
+    def test_development_resume_native_selectors_are_scoped_to_make(self):
+        """Only the native Make stage may see the parent cache selector."""
+        source = (ROOT / "tests/tools/test-rootless.sh").read_text(
+            encoding="utf-8")
+        capture = source.split(
+            "rootless_resume_oracle_sha256=", 1)[1].split(
+            "\nrootless_should_run_suite() {", 1)[0]
+        capture = "rootless_resume_oracle_sha256=" + capture
+        self.assertIn(
+            'SWAPZ_NATIVE_CACHE_MODE="${rootless_native_cache_mode:-}"',
+            source)
+        self.assertIn(
+            'SWAPZ_NATIVE_CACHE_KDIR="${rootless_native_cache_kdir:-}"',
+            source)
+        self.assertIn(
+            "unset SWAPZ_NATIVE_CACHE_MODE SWAPZ_NATIVE_CACHE_KDIR", capture)
+        fixture_environment = {
+            **os.environ,
+            "SWAPZ_NATIVE_CACHE_MODE": "resume",
+            "SWAPZ_NATIVE_CACHE_KDIR": "/synthetic-kdir",
+        }
+        for integration, expected_mode, expected_kdir in (
+                (0, "resume", "/synthetic-kdir"),
+                (1, "", "")):
+            command = (
+                f"rootless_full_integration={integration}\n"
+                + capture + "\n"
+                + "printf '%s|%s|%s|%s\\n' "
+                + '"$rootless_native_cache_mode" "$rootless_native_cache_kdir" '
+                + '"${SWAPZ_NATIVE_CACHE_MODE-unset}" '
+                + '"${SWAPZ_NATIVE_CACHE_KDIR-unset}"')
+            process = subprocess.run(
+                ["bash", "-eu", "-c", command], capture_output=True,
+                text=True, env=fixture_environment, timeout=5, check=False)
+            self.assertEqual(process.returncode, 0, process.stderr)
+            self.assertEqual(process.stdout.strip(),
+                             f"{expected_mode}|{expected_kdir}|unset|unset")
+
+        # Arbitrarily exported values cannot inject native or rootless replay
+        # into any nonrootless stage, including the full qualification tier.
+        private_selectors = {
+            "RESUME": "1",
+            "SWAPZ_NATIVE_CACHE_MODE": "resume",
+            "SWAPZ_NATIVE_CACHE_KDIR": "/synthetic-kdir",
+            "SWAPZ_ROOTLESS_RESUME_SUITES": "tests/runtime/native/test-report-test.py",
+            "SWAPZ_ROOTLESS_RESUME_FORMATTER_SHA256": "a" * 64,
+            "SWAPZ_ROOTLESS_RESUME_MODULE_SHA256": "b" * 64,
+            "SWAPZ_ROOTLESS_RESUME_ORACLE_SHA256": "c" * 64,
+        }
+        with mock.patch.dict(os.environ, private_selectors), \
+                mock.patch.object(
+                    runner.subprocess, "run",
+                    return_value=subprocess.CompletedProcess(
+                        args=["synthetic"], returncode=0,
+                        stdout="")) as launched, \
+                contextlib.redirect_stdout(io.StringIO()):
+            self.assertEqual(runner.run_stage(
+                "Kernel warnings W=1", ["synthetic"],
+                {"stages": []}), 0)
+        child_environment = launched.call_args.kwargs["env"]
+        for selector in private_selectors:
+            self.assertNotIn(selector, child_environment)
+
     def test_development_resume_native_suites_match_make_and_private_state(self):
         """Private, separate native PASS keys cannot override source or modes."""
         native_path = ROOT / "tests/tools/native-resume.py"

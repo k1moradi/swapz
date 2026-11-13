@@ -37,9 +37,18 @@ rootless_resume_suites=${SWAPZ_ROOTLESS_RESUME_SUITES:-}
 rootless_resume_formatter_sha256=${SWAPZ_ROOTLESS_RESUME_FORMATTER_SHA256:-}
 rootless_resume_module_sha256=${SWAPZ_ROOTLESS_RESUME_MODULE_SHA256:-}
 rootless_resume_oracle_sha256=${SWAPZ_ROOTLESS_RESUME_ORACLE_SHA256:-}
+# Native caches are eligible only on algorithm-tier runs. Retain selectors in
+# Bash locals for this stage's Make invocation, never in fixture environments.
+rootless_native_cache_mode=
+rootless_native_cache_kdir=
+if (( rootless_full_integration == 0 )); then
+  rootless_native_cache_mode=${SWAPZ_NATIVE_CACHE_MODE:-}
+  rootless_native_cache_kdir=${SWAPZ_NATIVE_CACHE_KDIR:-}
+fi
 # Development reuse is parent-only: nested harnesses do not inherit selectors.
 unset SWAPZ_ROOTLESS_RESUME_SUITES SWAPZ_ROOTLESS_RESUME_FORMATTER_SHA256
 unset SWAPZ_ROOTLESS_RESUME_MODULE_SHA256 SWAPZ_ROOTLESS_RESUME_ORACLE_SHA256
+unset SWAPZ_NATIVE_CACHE_MODE SWAPZ_NATIVE_CACHE_KDIR
 
 rootless_should_run_suite() {
   local formatter_digest module_digest oracle_digest
@@ -891,7 +900,9 @@ rootless_begin_phase
 # Preserve stdout and stderr relay while privately retaining a failed compile.
 begin_rootless_private_stderr_capture
 rootless_make_command_line=$LINENO
-if "${make_args[@]}" -C tests test 2>&"$rootless_capture_input_fd"; then
+if SWAPZ_NATIVE_CACHE_MODE="${rootless_native_cache_mode:-}" \
+   SWAPZ_NATIVE_CACHE_KDIR="${rootless_native_cache_kdir:-}" \
+   "${make_args[@]}" -C tests test 2>&"$rootless_capture_input_fd"; then
   rootless_make_exit_code=0
 else
   rootless_make_exit_code=$?

@@ -608,6 +608,13 @@ The ordinary rootless failure relay must authenticate the mapping executable
 against its source-controlled Make prerequisite and the matching nested Make
 exit before naming it on the operator console. Arbitrary child stderr and
 unreviewed executable names remain private.
+The rootless harness retains native cache selectors only in unexported Bash
+locals and passes them exclusively to its native Make command; all other
+rootless contract fixtures receive a scrubbed environment. The parent runner
+also removes inherited native and suite-resume selectors before adding its
+own reviewed values. The full integration tier never forwards an inherited
+native cache selector, even when explicitly supplied by the caller. A
+synthetic test covers both tier modes and nonrootless child hygiene.
 The mapping target retains original within-suite binary order and working
 directory (inherited from tests/suites), and does not cache individual binary
 results. Its owner-only atomic checkpoint is independent of all rootless
