@@ -1653,6 +1653,146 @@ class NativeTimingContract(unittest.TestCase):
             original.unlink()
             self.assertEqual(run_guard(), "RUN")
 
+    def test_development_resume_preserves_completed_suite_after_rootless_failure(self):
+        """An interrupted native/rootless stage caches only completed suites."""
+        source_sha = "a" * 40
+        first_suite, next_suite = runner.DEVELOPMENT_RESUME_ROOTLESS_SUITES[:2]
+        checkpoint_context = {
+            "source_sha": source_sha,
+            "kernel_release": "synthetic",
+            "artifacts": {"oracle_sha256": "d" * 64},
+        }
+        available = {
+            "status": "AVAILABLE",
+            "formatter_sha256": "b" * 64,
+            "module_sha256": "c" * 64,
+            "oracle_sha256": "d" * 64,
+        }
+        main_sync = {"status": "PASS", "reason": "fixture",
+                     "head_sha": source_sha, "source_sha": source_sha}
+        captured_reports = []
+        rootless_invocations = []
+        interrupted = True
+
+        def interrupted_stage(title, command, result, *,
+                              parse_bench=False,
+                              stream_rootless_progress=False,
+                              progress_table=None,
+                              retain_private_failure_output=False,
+                              **options):
+            del command, progress_table, retain_private_failure_output
+            rootless_failed = False
+            reused_suites = []
+            if title == runner.DEVELOPMENT_RESUME_STAGES[0]:
+                self.assertTrue(stream_rootless_progress)
+                self.assertEqual(
+                    options["native_cache_mode"],
+                    "record" if interrupted else "resume")
+                self.assertEqual(options["native_cache_kdir"],
+                                 "/synthetic-kdir")
+                rootless_invocations.append(
+                    tuple(options["rootless_resume_suites"]))
+                completed = options["rootless_suite_completed"]
+                if interrupted:
+                    self.assertEqual(rootless_invocations[-1], ())
+                    completed(first_suite)
+                    rootless_failed = True
+                else:
+                    self.assertEqual(rootless_invocations[-1],
+                                     (first_suite,))
+                    # This fresh PASS must extend the existing private
+                    # subset; the previously reused suite is not rerun.
+                    completed(next_suite)
+                    reused_suites = [first_suite]
+            stage_status = ("FAIL" if rootless_failed else
+                            "REUSED" if reused_suites else "PASS")
+            result["stages"].append({
+                "name": title,
+                "status": stage_status,
+                "elapsed_s": 0.1,
+                "exit_code": 1 if rootless_failed else 0,
+                **({"reused_rootless_suites": reused_suites}
+                   if reused_suites else {}),
+            })
+            if parse_bench:
+                result["benchmarks"]["verdicts"] = {
+                    "overall": "PASS_BOUNDED_RAM_MATRIX"}
+                result["benchmarks"]["write_saturation"] = {
+                    "overall": "PASS_WRITE_SATURATION_EVIDENCE"}
+            return 1 if rootless_failed else 0
+
+        previous_root, previous_report = runner.ROOT, runner.REPORT
+        with tempfile.TemporaryDirectory(
+                prefix="make-resume-interruption-") as directory:
+            try:
+                runner.ROOT = Path(directory)
+                runner.REPORT = runner.ROOT / runner.GIT_RESULT
+                args = mock.Mock(tier="algorithm", kdir="/synthetic-kdir")
+                substitutions = (
+                    ("git_sha", lambda: source_sha),
+                    ("report_host_identity", lambda: {"status": "UNAVAILABLE"}),
+                    ("make_invocation", lambda: (["make"], "synthetic")),
+                    ("tracked_source_checkout_preflight", lambda: None),
+                    ("source_checkout_stability", lambda *_args: {
+                        "stable": True}),
+                    ("development_resume_context",
+                     lambda _result, _kdir: checkpoint_context),
+                    ("run_stage", interrupted_stage),
+                    ("qualification_artifact_digests", lambda: available),
+                    ("lane_gap_attribution_rows", lambda *_args: []),
+                    ("goal_scorecard", lambda *_args: {}),
+                    ("write_report", lambda report: captured_reports.append(
+                        json.loads(json.dumps(report)))),
+                    ("print_bench", lambda *_args: None),
+                    ("publish", lambda *_args: "SKIPPED"),
+                    ("sync_main_after_test",
+                     lambda: {"status": "PASS"}),
+                    ("write_failure_diagnostic", lambda *_args: None),
+                    ("refresh_history", lambda *_args: "NOT UPDATED"),
+                )
+                with contextlib.ExitStack() as patches:
+                    for name, replacement in substitutions:
+                        patches.enter_context(
+                            mock.patch.object(runner, name, replacement))
+                    with mock.patch.dict(os.environ, {"RESUME": ""}), \
+                            contextlib.redirect_stdout(io.StringIO()):
+                        self.assertEqual(
+                            runner._run_qualification(args, main_sync), 1)
+                    # The failed stage is not promoted to a stage-level PASS.
+                    self.assertIsNone(
+                        runner.read_development_resume_checkpoint(
+                            checkpoint_context))
+                    self.assertEqual(
+                        runner.read_development_resume_checkpoint(
+                            checkpoint_context, suites=True), [first_suite])
+                    interrupted = False
+                    with mock.patch.dict(os.environ, {"RESUME": "1"}), \
+                            contextlib.redirect_stdout(io.StringIO()):
+                        self.assertEqual(
+                            runner._run_qualification(args, main_sync), 2)
+
+                self.assertEqual(rootless_invocations,
+                                 [(), (first_suite,)])
+                self.assertEqual(
+                    runner.read_development_resume_checkpoint(
+                        checkpoint_context, suites=True),
+                    [first_suite, next_suite])
+                self.assertIsNone(
+                    runner.read_development_resume_checkpoint(
+                        checkpoint_context))
+                resumed = captured_reports[-1]
+                self.assertEqual(resumed["overall"], "INCOMPLETE")
+                self.assertEqual(
+                    [stage["status"] for stage in resumed["stages"]],
+                    ["PASS", "REUSED", "PASS", "PASS", "PASS"])
+                self.assertEqual(
+                    resumed["development_resume"]["reused_rootless_suites"],
+                    [first_suite])
+                self.assertEqual(
+                    resumed["development_resume"]["reused_stages"], [])
+            finally:
+                runner.ROOT, runner.REPORT = previous_root, previous_report
+
     def test_development_resume_skips_only_passed_rootless_warning_stages(self):
         """Loaded work is fresh and a resumed run stays unqualified."""
         source = "a" * 40
