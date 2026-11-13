@@ -224,27 +224,28 @@ def prepare(args):
     # The two mixed-lane modes generate identical trace bytes: only execution
     # barriers differ. Each lane owns a WRITE stripe; READs use an immutable,
     # disjoint region, so cross-lane progress cannot alter any byte oracle.
+    # These geometry divisions are invariant across all QD waves. Every
+    # writer/reader stripe uses the same validated number of page choices.
+    writer_lane_choices = args.writer_pages // args.qd
+    reader_lane_choices = args.reader_pages // args.qd
     for first in range(0, total, args.qd):
         used = set()
-        wave = []
         for pos in range(args.qd):
             if args.sustained_write:
-                slot = pos + args.qd * rng.randrange(
-                    args.writer_pages // args.qd)
+                slot = pos + args.qd * rng.randrange(writer_lane_choices)
                 fi = rng.randrange(fixture_pages)
                 kind = "W"
             else:
                 write = rng.randrange(100) >= args.read_pct
                 if write:
-                    slot = (pos + args.qd * rng.randrange(args.writer_pages // args.qd)
+                    slot = (pos + args.qd * rng.randrange(writer_lane_choices)
                             if args.mixed_lanes else
                             choose_slot(rng, 0, args.writer_pages, used))
                     fi = rng.randrange(fixture_pages)
                     kind = "W"
                 else:
                     if args.stripe_partitionable:
-                        slot = (args.reader_start + pos + args.qd * rng.randrange(
-                            args.reader_pages // args.qd))
+                        slot = (args.reader_start + pos + args.qd * rng.randrange(reader_lane_choices))
                     else:
                         slot = choose_slot(rng, args.reader_start,
                                            args.reader_pages, used)
@@ -257,11 +258,14 @@ def prepare(args):
                      "page": slot, "fixture": fi}
             if args.sustained_write or args.mixed_lanes:
                 event["lane"] = pos
-            wave.append(event)
-        events.extend(wave)
-        for item in wave:
-            if item["op"] == "W":
-                latest[item["page"]] = item["fixture"]
+            events.append(event)
+            # All lanes choose distinct pages within a wave: choose_slot()
+            # consults used for shared regions, and persistent lanes have
+            # disjoint QD stripes. Thus this WRITE cannot affect the fixture
+            # selected for any later in-wave READ. Avoid an intermediate wave
+            # list and its second traversal without changing trace bytes.
+            if kind == "W":
+                latest[slot] = fi
     # No file extension or fake compression class decides the bytes.
     with open(args.fixture, "rb") as stream:
         pages = [stream.read(PAGE) for _ in range(fixture_pages)]

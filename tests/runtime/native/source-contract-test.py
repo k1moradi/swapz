@@ -7932,6 +7932,28 @@ int main(void)
             "def test_workload_opportunity_content_ids_preserve_byte_oracle",
             fixtures)
 
+    def test_preparation_wave_fusion_preserves_legacy_canonical_hashes(self):
+        replay = (ROOT / "tests/runtime/benchmark/io-replay.py").read_text()
+        fixtures = (ROOT / "tests/runtime/benchmark/io-replay-test.py").read_text()
+        generator = replay.split("def prepare(args):", 1)[1].split(
+            "\ndef prepare_write_qd_variants(", 1)[0]
+        self.assertIn("writer_lane_choices = args.writer_pages // args.qd",
+                      generator)
+        self.assertIn("reader_lane_choices = args.reader_pages // args.qd",
+                      generator)
+        self.assertIn("used.add(slot)", generator)
+        self.assertIn("events.append(event)", generator)
+        self.assertIn('if kind == "W":\n                latest[slot] = fi',
+                      generator)
+        self.assertLess(generator.index("used.add(slot)"),
+                        generator.index("latest[slot] = fi"))
+        self.assertNotIn("wave = []", generator)
+        self.assertNotIn("events.extend(wave)", generator)
+        self.assertNotIn("for item in wave:", generator)
+        self.assertIn(
+            "def test_preparation_wave_fusion_keeps_legacy_trace_bytes_and_oracles",
+            fixtures)
+
     def test_wave_plan_validation_reuses_page_set_and_preserves_oracle(self):
         replay = (ROOT / "tests/runtime/benchmark/io-replay.py").read_text()
         fixtures = (ROOT / "tests/runtime/benchmark/io-replay-test.py").read_text()
