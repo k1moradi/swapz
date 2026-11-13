@@ -120,6 +120,18 @@ swapz_read_session_boot_id() {
 # still updating /dev/mapper. Before ANY owned I/O, prove that the actual
 # block node's major:minor resolves to this phase's exact DM UUID and name.
 # Checking dmsetup's name alone does not authenticate the path opened by dd.
+swapz_owned_node_poll_sleep() {
+    local attempt=$1
+    # A fast 10ms probe avoids the fixed 100ms startup penalty. Retain all
+    # fifty original 100ms attempts after the first ten, including on slow
+    # hosts where udev/configfs publication genuinely takes longer.
+    if (( attempt <= 10 )); then
+        sleep 0.01
+    else
+        sleep 0.1
+    fi
+}
+
 swapz_verify_owned_dm_node() {
     local mapper_node="/dev/mapper/$DMNAME"
     local node_hex node_major node_minor node_dev
@@ -140,8 +152,8 @@ swapz_verify_owned_dm_node() {
     printf -v node_dev '%d:%d' "0x$node_major" "0x$node_minor"
     sysfs_device="/sys/dev/block/$node_dev/dm"
     [[ -r "$sysfs_device/uuid" && -r "$sysfs_device/name" &&
-       "$(cat "$sysfs_device/uuid")" == "$UUID" &&
-       "$(cat "$sysfs_device/name")" == "$DMNAME" ]] ||
+       "$(< "$sysfs_device/uuid")" == "$UUID" &&
+       "$(< "$sysfs_device/name")" == "$DMNAME" ]] ||
         fail "owned DM node points to a different mapping: $DMNAME"
 }
 
@@ -151,7 +163,7 @@ for cmd in insmod rmmod modprobe dmsetup modinfo blockdev readlink \
 	command -v "$cmd" >/dev/null || fail "missing required tool $cmd"
 done
 [[ $(id -u) == 0 ]] || fail "sudo is required for isolated module loading"
-version="$(cat src/kernel/VERSION)"
+version="$(< src/kernel/VERSION)"
 [[ "$version" =~ ^3[.]0[.]0-alpha[.][0-9]+$ ]] ||
     fail "malformed canonical swapz version"
 grep -Fxq "#define SWAPZ_ALPHA_VERSION \"$version\"" build/kernel/experimental/swapz-version.h ||
@@ -187,7 +199,7 @@ SOURCE_HEAD="$VALIDATED_SOURCE"
 note "SOURCE_HEAD=$SOURCE_HEAD"
 note "RUNNING_KERNEL=$(uname -r)"
 note "MODULE_SHA256=$(sha256sum "$MODULE")"
-SWAPS_BEFORE="$(cat /proc/swaps)"
+SWAPS_BEFORE="$(< /proc/swaps)"
 SWAPS_ID_BEFORE="$(printf '%s
 ' "$SWAPS_BEFORE" |
     swapz_swap_inventory_identity /dev/stdin)" ||
@@ -257,7 +269,7 @@ cleanup() {
 	fi
 	note "HOST_SWAPS_AFTER:"
 	local swaps_after
-	swaps_after="$(cat /proc/swaps)"
+	swaps_after="$(< /proc/swaps)"
 	printf '%s\n' "$swaps_after"
 	if ! current_id="$(printf '%s
 ' "$swaps_after" |
@@ -390,27 +402,27 @@ echo 1 > "$CONFIG/submit_queues"
 echo 1 > "$CONFIG/hw_queue_depth"
 echo 2 > "$CONFIG/irqmode"
 echo 14000 > "$CONFIG/completion_nsec"
-[[ "$(cat "$CONFIG/queue_mode")" == 2 &&
-   "$(cat "$CONFIG/submit_queues")" == 1 &&
-   "$(cat "$CONFIG/hw_queue_depth")" == 1 &&
-   "$(cat "$CONFIG/irqmode")" == 2 &&
-   "$(cat "$CONFIG/completion_nsec")" == 14000 ]] ||
+[[ "$(< "$CONFIG/queue_mode")" == 2 &&
+   "$(< "$CONFIG/submit_queues")" == 1 &&
+   "$(< "$CONFIG/hw_queue_depth")" == 1 &&
+   "$(< "$CONFIG/irqmode")" == 2 &&
+   "$(< "$CONFIG/completion_nsec")" == 14000 ]] ||
     fail "owned RAM serial queue geometry rejected"
 echo 1 > "$CONFIG/power"
-[[ "$(cat "$CONFIG/memory_backed")" == 1 &&
-   "$(cat "$CONFIG/discard")" == 1 &&
-   "$(cat "$CONFIG/power")" == 1 ]] ||
+[[ "$(< "$CONFIG/memory_backed")" == 1 &&
+   "$(< "$CONFIG/discard")" == 1 &&
+   "$(< "$CONFIG/power")" == 1 ]] ||
 	fail "RAM backing/discard not active"
-INDEX="$(cat "$CONFIG/index")"
+INDEX="$(< "$CONFIG/index")"
 [[ "$INDEX" =~ ^(0|[1-9][0-9]*)$ ]] || fail "invalid configfs index"
 # New null_blk names the block disk after configfs; old kernels use nullbN.
 # Only a disk with EXACT expected name or index is permitted.
-for i in {1..50}; do
+for i in {1..60}; do
     DISK="$(swapz_resolve_owned_disk "$CONFIGNAME" "$INDEX" "/sys/block")" && break
-    sleep 0.1
+    swapz_owned_node_poll_sleep "$i"
 done
 [[ -n "$DISK" ]] || fail "owned configfs disk missing or ambiguous: $CONFIG index=$INDEX"
-DEVNO="$(cat "/sys/block/$DISK/dev")"
+DEVNO="$(< "/sys/block/$DISK/dev")"
 [[ "$DEVNO" =~ ^[0-9]+:[0-9]+$ ]] || fail "invalid device identity"
 MAJOR="$(printf '%s' "$DEVNO" | cut -d: -f1)"
 MINOR="$(printf '%s' "$DEVNO" | cut -d: -f2)"
@@ -420,9 +432,9 @@ NULL_MAJOR="$(awk '/^Block devices:/{b=1;next} b && $2=="nullb"{print $1;exit}' 
 [[ "$(readlink -f "/sys/dev/block/$DEVNO")" == "$(readlink -f "/sys/block/$DISK")" ]] ||
     fail "sysfs major:minor points elsewhere"
 LOWER="/dev/$DISK"
-for i in {1..50}; do
+for i in {1..60}; do
     [[ -b "$LOWER" ]] && break
-    sleep 0.1
+    swapz_owned_node_poll_sleep "$i"
 done
 [[ -b "$LOWER" ]] ||
     fail "udev node $LOWER missing (configfs=$CONFIG dev=$DEVNO); refusing alternate disk"
@@ -453,7 +465,7 @@ modprobe lz4_compress || fail "kernel LZ4 compressor unavailable"
 # accounting, workqueue/module reference, or other resource that blocks unload.
 if (( ! MAX_BOUNDARY_PROBE && ! GC_RECOVERY_FAULT_PROBE )); then
 	note "START_LOADED_CONSTRUCTOR_FAILURE_CLEANUP"
-	constructor_lower_before="$(cat "/sys/block/$DISK/stat")" ||
+	constructor_lower_before="$(< "/sys/block/$DISK/stat")" ||
 		fail "cannot read lower statistics before constructor failure matrix"
 	for constructor_stage in {1..8}; do
 		UUID="SWAPZ-TEST-$TOKEN-ctor-$constructor_stage"
@@ -486,7 +498,7 @@ if (( ! MAX_BOUNDARY_PROBE && ! GC_RECOVERY_FAULT_PROBE )); then
 			fail "constructor failure stage $constructor_stage was not injected exactly once"
 		[[ -z "$(ls -A "/sys/block/$DISK/holders" 2>/dev/null)" ]] ||
 			fail "constructor failure stage $constructor_stage left a lower holder"
-		constructor_lower_after="$(cat "/sys/block/$DISK/stat")" ||
+		constructor_lower_after="$(< "/sys/block/$DISK/stat")" ||
 			fail "cannot read lower statistics after constructor failure stage $constructor_stage"
 		[[ "$constructor_lower_after" == "$constructor_lower_before" ]] ||
 			fail "constructor failure stage $constructor_stage issued lower I/O"
@@ -513,7 +525,7 @@ if (( MAX_BOUNDARY_PROBE )); then
 	[[ "$EXPECTED_LOWER_BYTES" == 17178820608 ]] ||
 		fail "maximum-boundary null_blk lower geometry mismatch"
 	note "START_LOADED_MAXIMUM_CAPACITY=logical_pages:$MAX_LOGICAL_PAGES"
-	lower_stats_before="$(cat "/sys/block/$DISK/stat")" ||
+	lower_stats_before="$(< "/sys/block/$DISK/stat")" ||
 		fail "cannot read capacity-probe lower statistics before create"
 	# Capture the failure's own kernel-log window before creating the mapper.
 	capacity_create_since_epoch="$(date +%s)"
@@ -559,7 +571,7 @@ if (( MAX_BOUNDARY_PROBE )); then
 		[[ "$(status_u64 "$capacity_status" "$key")" == 0 ]] ||
 			fail "maximum-capacity constructor issued writes or lower I/O: $key"
 	done
-	lower_stats_after="$(cat "/sys/block/$DISK/stat")" ||
+	lower_stats_after="$(< "/sys/block/$DISK/stat")" ||
 		fail "cannot read capacity-probe lower statistics after create"
 	[[ "$lower_stats_after" == "$lower_stats_before" ]] ||
 		fail "maximum-capacity constructor changed lower I/O counters"
@@ -596,7 +608,7 @@ if (( MAX_BOUNDARY_PROBE )); then
 	}
 	capacity_status_before_io="$(dmsetup status "$DMNAME")" ||
 		fail "cannot snapshot maximum-capacity status before boundary I/O"
-	capacity_lower_before_io="$(cat "/sys/block/$DISK/stat")" ||
+	capacity_lower_before_io="$(< "/sys/block/$DISK/stat")" ||
 		fail "cannot snapshot maximum-capacity lower before boundary I/O"
 	verify_maximum_capacity_mapping
 	timeout --signal=TERM --kill-after=5s 30s \
@@ -605,7 +617,7 @@ if (( MAX_BOUNDARY_PROBE )); then
 	verify_maximum_capacity_mapping
 	capacity_status_after_io="$(dmsetup status "$DMNAME")" ||
 		fail "cannot snapshot maximum-capacity status after boundary I/O"
-	capacity_lower_after_io="$(cat "/sys/block/$DISK/stat")" ||
+	capacity_lower_after_io="$(< "/sys/block/$DISK/stat")" ||
 		fail "cannot snapshot maximum-capacity lower after boundary I/O"
 	read -r -a capacity_lower_before_fields <<< "$capacity_lower_before_io"
 	read -r -a capacity_lower_after_fields <<< "$capacity_lower_after_io"
@@ -755,9 +767,9 @@ dmsetup table "$DMNAME" | grep -Eq '^0 32768 swapz ' ||
 	fail "DM table unexpected"
 dmsetup deps -o devname "$DMNAME" | grep -Fq "$DISK" ||
 	fail "DM dependency does not match owned RAM lower"
-for i in {1..50}; do
+for i in {1..60}; do
 	[[ -b "/dev/mapper/$DMNAME" ]] && break
-	sleep 0.1
+	swapz_owned_node_poll_sleep "$i"
 done
 [[ -b "/dev/mapper/$DMNAME" ]] || fail "test-only DM device node absent"
 # The target status and independent backing counters are not atomic.

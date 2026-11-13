@@ -6773,6 +6773,20 @@ Rootless source qualification must exercise the exact fast/slow poll schedule
 with a mocked sleep command, verifying the six loops and their full budgets
 without touching a device.
 
+The loaded owned-RAM correctness/GC helper (`deploy-nullblk.sh`)
+must apply the same fast-read and readiness discipline as the owned-pair
+harness. Its three independent configfs-disk, lower-block-node and DM-node
+polling loops retain the original fifty 100-ms retries **after** ten early
+10-ms probes; do not shorten slow-host admission. In-shell `$(< path)` reads
+replace separate `cat` processes for fixed configfs attributes, the
+canonical version, device-identity/stat snapshots and full before/after
+`/proc/swaps` text. Preserve every original exact geometry check,
+major:minor/sysfs and opened-node proof, udev settle, mount/holder/swap
+checks and foreign-resource quarantine; avoid caching mutable identities
+between teardown phases. Rootless source contracts must mock the polling
+helper for the full 60-probe schedule and verify all three call sites and
+source admission checks without executing any privileged operation.
+
 Owned-null_blk benchmark setup should read the existing fixed configfs
 attributes and complete /proc/swaps snapshots with Bash's in-process
 single-file substitution (`$(< path)`) rather than starting a fresh

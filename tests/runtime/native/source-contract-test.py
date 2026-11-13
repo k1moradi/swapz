@@ -7153,6 +7153,46 @@ int main(void)
                 self.assertEqual(output[:10], ["0.01"] * 10)
                 self.assertEqual(output[10:], ["0.1"] * old_slow_probes)
 
+    def test_deploy_owned_nullblk_reads_and_fast_poll_preserve_admission(self):
+        deploy = (ROOT / "tests/tools/deploy-nullblk.sh").read_text()
+        self.assertEqual(deploy.count("for i in {1..60}; do"), 3)
+        self.assertEqual(
+            deploy.count('swapz_owned_node_poll_sleep "$i"'), 3)
+        self.assertIn('$(< "$sysfs_device/uuid")', deploy)
+        self.assertIn('$(< "$sysfs_device/name")', deploy)
+        self.assertIn('version="$(< src/kernel/VERSION)"', deploy)
+        self.assertIn('SWAPS_BEFORE="$(< /proc/swaps)"', deploy)
+        self.assertIn('swaps_after="$(< /proc/swaps)"', deploy)
+        for attribute in (
+                "queue_mode", "submit_queues", "hw_queue_depth", "irqmode",
+                "completion_nsec", "memory_backed", "discard", "power", "index"):
+            self.assertIn('$(< "$CONFIG/' + attribute + '")', deploy)
+            self.assertNotIn('$(cat "$CONFIG/' + attribute + '")', deploy)
+        self.assertIn('$(< "/sys/block/$DISK/dev")', deploy)
+        self.assertIn('[[ "$NODEDEV" == "$DEVNO" ]]', deploy)
+        self.assertIn('swapz_verify_owned_dm_node', deploy)
+        self.assertIn('udevadm settle --timeout=10', deploy)
+        self.assertIn('QUARANTINED: lower identity/holders changed', deploy)
+
+        # Evaluate the original function under a mocked sleep, not by
+        # sourcing this privileged script or touching actual block devices.
+        start = deploy.index("swapz_owned_node_poll_sleep() {")
+        end = deploy.index("\n}\n", start) + 2
+        helper = deploy[start:end]
+        shell = "\n".join((
+            helper,
+            "sleep() { printf '%s\\n' \"$1\"; }",
+            "for i in {1..60}; do",
+            'swapz_owned_node_poll_sleep "$i"',
+            "done",
+        ))
+        result = subprocess.run(
+            ["bash", "-c", shell], check=True,
+            capture_output=True, text=True, timeout=5)
+        output = result.stdout.splitlines()
+        self.assertEqual(output[:10], ["0.01"] * 10)
+        self.assertEqual(output[10:], ["0.1"] * 50)
+
     def test_loaded_maximum_capacity_boundary_probe_is_owned_and_bounded(self):
         loaded = (ROOT / "tests/tools/test-loaded.sh").read_text()
         deploy = (ROOT / "tests/tools/deploy-nullblk.sh").read_text()
