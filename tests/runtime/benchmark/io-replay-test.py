@@ -1804,6 +1804,97 @@ class PairReplayContract(unittest.TestCase):
                 self.assertNotIn("BENCH_IO_PHASE=off:mixed", rejected.stderr)
                 self.assertFalse(forbidden.exists())
 
+    def test_prefill_mapping_cached_per_arm_preserves_all_page_oracles(self):
+        # READs and WRITEs must use the same validated stride/offset while
+        # avoiding a per-page manifest lookup or extra indices allocation.
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            fixture_pages = [
+                bytes((index * 17 + offset) % 256 for offset in range(PAGE))
+                for index in range(7)
+            ]
+            fixture = root / "fixture.bin"
+            fixture.write_bytes(b"".join(fixture_pages))
+            plan = root / "plan"
+            self.run_cmd(
+                "prepare", "--fixture", fixture, "--output-dir", plan,
+                "--qd", 4, "--logical-pages", 64, "--writer-pages", 16,
+                "--reader-start", 32, "--reader-pages", 16,
+                "--warmup-ops", 8, "--measure-ops", 32,
+                "--read-pct", 0, "--iops", 0)
+            original_manifest = json.loads(
+                (plan / "manifest.json").read_text())
+            events = [
+                json.loads(line) for line in
+                (plan / "trace.jsonl").read_text().splitlines()
+            ]
+            for stride, offset in ((1, 0), (2, 1), (17, 3), (33, 32)):
+                with self.subTest(stride=stride, offset=offset):
+                    initial = [
+                        (page * stride + offset) % len(fixture_pages)
+                        for page in range(64)
+                    ]
+                    final = initial.copy()
+                    for event in events:
+                        self.assertEqual(event["op"], "W")
+                        final[event["page"]] = event["fixture"]
+                    prefill_hash = hashlib.sha256(b"".join(
+                        fixture_pages[index] for index in initial)).hexdigest()
+                    final_hash = hashlib.sha256(b"".join(
+                        fixture_pages[index] for index in final)).hexdigest()
+                    manifest = dict(
+                        original_manifest,
+                        prefill_fixture_stride=stride,
+                        prefill_fixture_offset=offset,
+                        prefill_sha256=prefill_hash,
+                        expected_post_sha256=final_hash,
+                    )
+                    custom_manifest = root / f"manifest-{stride}.json"
+                    custom_manifest.write_text(json.dumps(manifest))
+                    device = root / f"swapz-replay-stride-{stride}.bin"
+                    with device.open("wb") as handle:
+                        handle.truncate(64 * PAGE)
+                    result = root / f"result-{stride}.json"
+                    self.run_cmd(
+                        "run", "--fixture", fixture,
+                        "--trace", plan / "trace.jsonl",
+                        "--manifest", custom_manifest,
+                        "--device", device, "--candidate", "off",
+                        "--source-sha", "rootless-no-module",
+                        "--regular-file-test", "--result", result)
+                    report = json.loads(result.read_text())
+                    self.assertEqual(report["verdict"], "PASS")
+                    self.assertEqual(report["prefill_sha256"], prefill_hash)
+                    self.assertEqual(report["verified_post_sha256"], final_hash)
+                    self.assertEqual(
+                        hashlib.sha256(device.read_bytes()).hexdigest(),
+                        final_hash)
+
+            for invalid_stride, invalid_offset in ((2, 2), (0, 0), ("2", 1)):
+                with self.subTest(invalid=(invalid_stride, invalid_offset)):
+                    invalid = dict(
+                        original_manifest,
+                        prefill_fixture_stride=invalid_stride,
+                        prefill_fixture_offset=invalid_offset,
+                    )
+                    invalid_file = root / "invalid-manifest.json"
+                    invalid_file.write_text(json.dumps(invalid))
+                    forbidden = root / "forbidden-result.json"
+                    rejected = self.run_cmd(
+                        "run", "--fixture", fixture,
+                        "--trace", plan / "trace.jsonl",
+                        "--manifest", invalid_file,
+                        "--device", root / "swapz-replay-stride-1.bin",
+                        "--candidate", "off",
+                        "--source-sha", "rootless-no-module",
+                        "--regular-file-test", "--result", forbidden,
+                        success=False)
+                    self.assertIn("invalid striped prefill mapping",
+                                  rejected.stderr)
+                    self.assertNotIn("BENCH_IO_PHASE=off:prefill",
+                                     rejected.stderr)
+                    self.assertFalse(forbidden.exists())
+
     def test_preparation_wave_fusion_keeps_legacy_trace_bytes_and_oracles(self):
         import runpy
 

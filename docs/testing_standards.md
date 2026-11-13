@@ -7001,6 +7001,19 @@ The native-wave guard's source contract must match a real source-line
 boundary rather than a literal backslash-n sequence. This assertion is
 observational only and cannot alter the chosen replay engine or oracle.
 
+A replay arm's prefill must retain independent opened-device admission,
+all 4096-byte positional writes, final prefill fsync, all positional readback
+and byte-by-byte comparison, and the same canonical prefill SHA. Following
+`check_plan`'s mandatory per-page prefill mapping validation, cache the
+immutable fixture stride, offset and logical-page count once inside that arm.
+Both WRITE and verified READ loops compute the identical
+`(page * stride + offset) % fixture_pages` mapping without redundant
+per-page manifest lookups or a new index-array allocation. The default and
+striped mappings must remain bit-for-bit equivalent, including large stride
+and offset values, and malformed mapping geometry must fail before prefill
+I/O or result publication. Rootless tests should compare exact initial/final
+image hashes, full device bytes, and the unchanged invalid-geometry gate.
+
 Immutable-plan construction must stream canonical SHA-256 for the
 complete logical prefill and post-trace images from the original ordered
 4096-byte fixture pages, without allocating one concatenated multi-megabyte

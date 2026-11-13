@@ -8040,12 +8040,25 @@ int main(void)
             'if prefill_digest.hexdigest() != mf["prefill_sha256"]:', 1)[0]
         self.assertIn("os.fsync(fd)", prefill)
         self.assertEqual(
-            prefill.count('for page in range(mf["logical_pages"]):'), 2)
+            prefill.count("for page in range(logical_pages):"), 2)
+        self.assertIn('logical_pages = mf["logical_pages"]', prefill)
+        self.assertIn(
+            'prefill_stride = mf.get("prefill_fixture_stride", 1)', prefill)
+        self.assertIn(
+            'prefill_offset = mf.get("prefill_fixture_offset", 0)', prefill)
+        self.assertEqual(
+            prefill.count(
+                "fixture_index = (page * prefill_stride + prefill_offset) % count"),
+            2)
+        self.assertNotIn("prefill_fixture_index(mf, page, count)", prefill)
         self.assertLess(
             prefill.index("full_read(fd, page, scratch, chunks[fixture_index], read_iov)"),
             prefill.index("prefill_digest.update(chunks[fixture_index])"))
         self.assertIn(
             "def test_streamed_plan_hashes_match_canonical_images_and_prefill_gate",
+            tests)
+        self.assertIn(
+            "def test_prefill_mapping_cached_per_arm_preserves_all_page_oracles",
             tests)
 
     def test_latency_reporting_reuses_one_sort_per_operation_class(self):

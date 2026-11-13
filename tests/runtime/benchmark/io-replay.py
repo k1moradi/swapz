@@ -2273,13 +2273,19 @@ def replay(args):
             scratch = memoryview(bufmap)
             try:
                 read_iov = [scratch]
-                for page in range(mf["logical_pages"]):
-                    fixture_index = prefill_fixture_index(mf, page, count)
+                # check_plan() already validated this immutable prefill
+                # geometry for every logical page. Cache it on the stack
+                # instead of revalidating two manifest lookups per 4KiB I/O.
+                prefill_stride = mf.get("prefill_fixture_stride", 1)
+                prefill_offset = mf.get("prefill_fixture_offset", 0)
+                logical_pages = mf["logical_pages"]
+                for page in range(logical_pages):
+                    fixture_index = (page * prefill_stride + prefill_offset) % count
                     full_write(fd, page, chunks[fixture_index])
                 os.fsync(fd)
                 prefill_digest = hashlib.sha256()
-                for page in range(mf["logical_pages"]):
-                    fixture_index = prefill_fixture_index(mf, page, count)
+                for page in range(logical_pages):
+                    fixture_index = (page * prefill_stride + prefill_offset) % count
                     full_read(fd, page, scratch, chunks[fixture_index], read_iov)
                     # Hash each proven-equal expected page while the readback
                     # buffer is still live. No independent oracle check or
