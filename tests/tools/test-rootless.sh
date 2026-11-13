@@ -772,6 +772,7 @@ rootless_parallel_run_group() {
     initial|readiness) rootless_parallel_size=2 ;;
     syntax) rootless_parallel_size=19 ;;
     identity) rootless_parallel_size=3 ;;
+    resources) rootless_parallel_size=3 ;;
     *) report_rootless_failure 2 "$LINENO" parallel_worker_setup ;;
   esac
   if python3 -B tests/tools/rootless-parallel.py \
@@ -959,13 +960,26 @@ rootless_begin_phase
 python3 -B tests/runtime/native/tmp-cleanup-test.py -v
 rootless_phase='tests/runtime/native/owned-ram-resources-test.py'
 rootless_begin_phase
-python3 -B tests/runtime/native/owned-ram-resources-test.py -v
+if (( rootless_parallel_jobs > 1 )); then
+  rootless_parallel_run_group resources
+  rootless_parallel_collect 0
+else
+  python3 -B tests/runtime/native/owned-ram-resources-test.py -v
+fi
 rootless_phase='tests/runtime/native/resource-admission-test.py'
 rootless_begin_phase
-python3 -B tests/runtime/native/resource-admission-test.py -v
+if (( rootless_parallel_jobs > 1 )); then
+  rootless_parallel_collect 1
+else
+  python3 -B tests/runtime/native/resource-admission-test.py -v
+fi
 rootless_phase='tests/runtime/native/resource-pressure-cleanup-ownership-test.py'
 rootless_begin_phase
-python3 -B tests/runtime/native/resource-pressure-cleanup-ownership-test.py -v
+if (( rootless_parallel_jobs > 1 )); then
+  rootless_parallel_collect 2
+else
+  python3 -B tests/runtime/native/resource-pressure-cleanup-ownership-test.py -v
+fi
 rootless_phase='tests/runtime/native/primary-lifecycle-audit-test.py'
 rootless_begin_phase
 if rootless_should_run_suite; then

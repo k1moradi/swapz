@@ -34,6 +34,19 @@ GROUPS = {
           "tests/runtime/native/userspace/swapzctl-active-swap-provenance-test.py",
           "-v")),
     ),
+    # These three adjacent, independently owned synthetic resource suites
+    # use distinct TemporaryDirectory roots; all child processes are reaped
+    # within their worker group. The coordinator retains bounded lifetimes,
+    # source-order results and the original serial one-CPU fallback.
+    "resources": (
+        ("tests/runtime/native/owned-ram-resources-test.py",
+         ("python3", "-B", "tests/runtime/native/owned-ram-resources-test.py", "-v")),
+        ("tests/runtime/native/resource-admission-test.py",
+         ("python3", "-B", "tests/runtime/native/resource-admission-test.py", "-v")),
+        ("tests/runtime/native/resource-pressure-cleanup-ownership-test.py",
+         ("python3", "-B",
+          "tests/runtime/native/resource-pressure-cleanup-ownership-test.py", "-v")),
+    ),
     "readiness": (
         ("tests/runtime/native/production-readiness-test.py",
          ("python3", "-B", "tests/runtime/native/production-readiness-test.py", "-v")),

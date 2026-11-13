@@ -178,11 +178,12 @@ class RootlessParallelPilotContract(unittest.TestCase):
     def test_only_source_reviewed_adjacent_nonconflicting_groups(self):
         source = (ROOT / "tests/tools/test-rootless.sh").read_text(
             encoding="utf-8")
-        for group, expected_count in (("initial", 2), ("readiness", 2),
-                                      ("syntax", 19), ("identity", 3)):
+        for group, expected_count in (("initial", 2), ("resources", 3),
+                                      ("readiness", 2), ("syntax", 19),
+                                      ("identity", 3)):
             tasks = parallel_runner.validated_group(group, source)
             self.assertEqual(len(tasks), expected_count)
-            if group in ("syntax", "identity"):
+            if group in ("syntax", "identity", "resources"):
                 self.assertIn(
                     f"{group}) rootless_parallel_size={expected_count} ;;",
                     source)
@@ -191,6 +192,7 @@ class RootlessParallelPilotContract(unittest.TestCase):
         self.assertIn("case ${SWAPZ_ROOTLESS_JOBS:-auto} in", source)
         self.assertIn("rootless_parallel_collect", source)
         self.assertIn('rootless_parallel_run_group initial', source)
+        self.assertIn('rootless_parallel_run_group resources', source)
         self.assertIn('rootless_parallel_run_group readiness', source)
         self.assertIn('rootless_parallel_run_group syntax', source)
         self.assertIn('rootless_parallel_run_group identity', source)
@@ -225,6 +227,48 @@ class RootlessParallelPilotContract(unittest.TestCase):
         for index, label in enumerate(label for label, _ in tasks):
             self.assertIn(f"rootless_parallel_collect {index}", harness)
             self.assertIn(f"bash {label}", harness)
+
+    def test_resource_simulations_are_three_independent_private_workers(self):
+        harness = (ROOT / "tests/tools/test-rootless.sh").read_text(
+            encoding="utf-8")
+        tasks = parallel_runner.validated_group("resources", harness)
+        expected_labels = (
+            "tests/runtime/native/owned-ram-resources-test.py",
+            "tests/runtime/native/resource-admission-test.py",
+            "tests/runtime/native/resource-pressure-cleanup-ownership-test.py",
+        )
+        self.assertEqual(tuple(label for label, _ in tasks), expected_labels)
+        claims = resource_policy.audit_harness(harness)
+        for index, (label, command) in enumerate(tasks):
+            with self.subTest(label=label):
+                self.assertEqual(command, ("python3", "-B", label, "-v"))
+                self.assertEqual(claims[label].classification, "private-fixtures")
+                self.assertEqual(
+                    claims[label].writes, frozenset({f"private:{label}"}))
+                self.assertIn("tempfile.TemporaryDirectory",
+                              (ROOT / label).read_text(encoding="utf-8"))
+                self.assertIn(f"rootless_parallel_collect {index}", harness)
+                self.assertIn(f"python3 -B {label} -v", harness)
+                for earlier, _ in tasks[:index]:
+                    self.assertEqual(
+                        resource_policy.potential_conflicts(
+                            label, earlier, claims), ())
+
+        # The preceding process cleanup and following primary lifecycle
+        # suites never enter a worker group. Disjointness is exact allowlist,
+        # not a license to parallelize arbitrary process/descendant tests.
+        for serial in (
+                "tests/runtime/native/tmp-cleanup-test.py",
+                "tests/runtime/native/primary-lifecycle-audit-test.py",
+                "tests/runtime/benchmark/io-replay-test.py",
+        ):
+            if serial in claims:
+                self.assertEqual(claims[serial].classification, "serial")
+        self.assertIn("rootless_parallel_run_group resources", harness)
+        with mock.patch.object(resource_policy, "potential_conflicts",
+                               return_value=("synthetic-shared-resource",)):
+            with self.assertRaisesRegex(ValueError, "conflicting"):
+                parallel_runner.validated_group("resources", harness)
 
     def test_automatic_cpu_budget_observes_affinity_quota_and_single_core(self):
         with mock.patch.object(parallel_runner.os, "sched_getaffinity",
