@@ -8056,11 +8056,19 @@ int main(void)
         self.assertEqual(
             prefill.count(
                 "fixture_index = (page * prefill_stride + prefill_offset) % count"),
+            3)
+        self.assertEqual(
+            python_fallback.count(
+                "fixture_index = (page * prefill_stride + prefill_offset) % count"),
             2)
         self.assertNotIn("prefill_fixture_index(mf, page, count)", prefill)
         self.assertLess(
-            prefill.index("full_read(fd, page, scratch, chunks[fixture_index], read_iov)"),
+            prefill.index("run_native_prefill("),
             prefill.index("prefill_digest.update(chunks[fixture_index])"))
+        self.assertLess(
+            python_fallback.index(
+                "full_read(fd, page, scratch, chunks[fixture_index], read_iov)"),
+            python_fallback.index("prefill_digest.update(chunks[fixture_index])"))
         self.assertIn(
             "def test_streamed_plan_hashes_match_canonical_images_and_prefill_gate",
             tests)

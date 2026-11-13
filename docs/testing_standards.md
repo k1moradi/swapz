@@ -7034,6 +7034,10 @@ The source contract must recognize three source-level prefill page loops:
 one Python SHA loop after successful native byte comparisons, and the two
 unchanged default Python WRITE and verified READ loops. Explicitly inspect
 the fallback branch rather than mistake the opt-in digest loop for extra I/O.
+The source-level mapping expression likewise appears three times overall
+but twice in the default fallback; native digest ordering is checked after
+successful helper return, while Python read-before-hash ordering is checked
+solely within the fallback branch.
 
 A replay arm's prefill must retain independent opened-device admission,
 all 4096-byte positional writes, final prefill fsync, all positional readback
