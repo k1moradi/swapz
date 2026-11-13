@@ -8176,6 +8176,33 @@ int main(void)
                 self.assertIn("BLOCKED: native prefill requires", blocked.stderr)
                 self.assertNotIn("ADMITTED", blocked.stdout)
 
+    def test_canonical_trace_batch_decode_keeps_strict_fallback(self):
+        replay = (ROOT / "tests/runtime/benchmark/io-replay.py").read_text()
+        tests = (ROOT / "tests/runtime/benchmark/io-replay-test.py").read_text()
+        decoder = replay.split("def decode_trace_rows(", 1)[1].split(
+            "\ndef prefill_fixture_index(", 1)[0]
+        check = replay.split("def check_plan(", 1)[1].split(
+            "\ndef resolve_owned_nullblk(", 1)[0]
+        self.assertIn("CANONICAL_TRACE_LINE.fullmatch(line)", decoder)
+        self.assertIn('lines = data.split(b"\\n")', decoder)
+        self.assertIn('if lines[-1] == b"":', decoder)
+        self.assertIn('json.loads(b"[" + b",".join(lines) + b"]")', decoder)
+        self.assertIn(
+            "return [json.loads(line) for line in data.splitlines()]", decoder)
+        self.assertIn("rows = decode_trace_rows(data)", check)
+        self.assertLess(
+            check.index('if sha(data) != manifest["trace_sha256"]'),
+            check.index("rows = decode_trace_rows(data)"))
+        self.assertLess(
+            check.index("rows = decode_trace_rows(data)"),
+            check.index("wave_pages.clear()"))
+        self.assertIn(
+            "def test_checked_trace_batch_decoder_matches_per_line_json",
+            tests)
+        self.assertIn(
+            "def test_preparation_wave_fusion_keeps_legacy_trace_bytes_and_oracles",
+            tests)
+
     def test_canonical_trace_fast_encoding_keeps_legacy_byte_oracle(self):
         replay = (ROOT / "tests/runtime/benchmark/io-replay.py").read_text()
         tests = (ROOT / "tests/runtime/benchmark/io-replay-test.py").read_text()

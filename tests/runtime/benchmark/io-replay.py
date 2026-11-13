@@ -184,6 +184,34 @@ def encode_canonical_trace(events):
     return "".join(lines).encode("ascii")
 
 
+# A fast path for locally generated canonical trace lines only. Anything
+# else uses the original independent per-line JSON decoder to retain its
+# precise acceptance and error behavior for noncanonical / hostile traces.
+CANONICAL_TRACE_UNSIGNED_INTEGER = rb"(?:0|[1-9][0-9]*)"
+CANONICAL_TRACE_LINE = re.compile(
+    rb'\{"fixture":' + CANONICAL_TRACE_UNSIGNED_INTEGER +
+    rb',(?:"lane":' + CANONICAL_TRACE_UNSIGNED_INTEGER + rb',)?' +
+    rb'"op":"[RW]","page":' + CANONICAL_TRACE_UNSIGNED_INTEGER +
+    rb',"phase":"(?:warmup|measure)","seq":' +
+    CANONICAL_TRACE_UNSIGNED_INTEGER + rb',"wave":' +
+    CANONICAL_TRACE_UNSIGNED_INTEGER + rb'\}')
+
+
+def decode_trace_rows(data):
+    """Batch-decode only proven canonical JSONL; never relax trace admission."""
+    # A canonical writer always finishes every complete event with LF.
+    # CRLF, missing trailing LF and all other separators deliberately take
+    # the original splitlines() path, including its error precedence.
+    lines = data.split(b"\n")
+    if lines[-1] == b"":
+        lines.pop()
+        if all(CANONICAL_TRACE_LINE.fullmatch(line) for line in lines):
+            # One C JSON decoder invocation instead of one per 4KiB event.
+            # The exact per-line grammar prevents joining JSON fragments.
+            return json.loads(b"[" + b",".join(lines) + b"]")
+    return [json.loads(line) for line in data.splitlines()]
+
+
 def prefill_fixture_index(manifest, page, fixture_pages):
     """Resolve the deterministic initial fixture page for one logical page."""
     stride = manifest.get("prefill_fixture_stride", 1)
@@ -422,7 +450,7 @@ def check_plan(trace_path, manifest, fixture_pages):
     data = Path(trace_path).read_bytes()
     if sha(data) != manifest["trace_sha256"]:
         raise ValueError("trace bytes differ from canonical plan manifest")
-    rows = [json.loads(line) for line in data.splitlines()]
+    rows = decode_trace_rows(data)
     total = manifest["warmup_ops"] + manifest["measure_ops"]
     if len(rows) != total or total % manifest["qd"]:
         raise ValueError("missing/extra logical operations")

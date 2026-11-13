@@ -29,6 +29,76 @@ SCRIPT = Path(__file__).with_name("io-replay.py")
 
 
 class PairReplayContract(unittest.TestCase):
+    def test_checked_trace_batch_decoder_matches_per_line_json(self):
+        import runpy
+
+        replay = runpy.run_path(str(SCRIPT))
+        encode = replay["encode_canonical_trace"]
+        decode = replay["decode_trace_rows"]
+
+        for count in (0, 1, 7, 32, 17408):
+            with self.subTest(canonical_count=count):
+                rows = []
+                for sequence in range(count):
+                    event = {
+                        "wave": sequence // 32,
+                        "phase": "warmup" if sequence < 1024 else "measure",
+                        "op": "R" if sequence % 3 else "W",
+                        "fixture": sequence % 19,
+                        "seq": sequence,
+                        "page": (sequence * 7) % 1024,
+                    }
+                    if sequence % 2:
+                        event["lane"] = sequence % 32
+                    rows.append(event)
+                trace = encode(rows)
+                with mock.patch.object(json, "loads", wraps=json.loads) as loads:
+                    self.assertEqual(decode(trace), rows)
+                    self.assertEqual(loads.call_count, 1)
+                    self.assertEqual(loads.call_args.args[0][:1], b"[")
+                    self.assertEqual(loads.call_args.args[0][-1:], b"]")
+                legacy = [json.loads(line) for line in trace.splitlines()]
+                self.assertEqual(decode(trace), legacy)
+
+        row = {
+            "fixture": 0, "op": "W", "page": 0,
+            "phase": "measure", "seq": 0, "wave": 0,
+        }
+        canonical = encode([row]).rstrip(b"\n")
+        untrusted_cases = (
+            b"", canonical, canonical + b"\n\n",
+            b" " + canonical + b"\n",
+            canonical + b"\r\n",
+            b"\xef\xbb\xbf" + canonical + b"\n",
+            canonical.replace(b'"fixture":0', b'"fixture":00'),
+            canonical.replace(b'"op":"W"', b'"op":"INVALID"'),
+            canonical.replace(b'"page":0', b'"page":-1'),
+            canonical.replace(b'"seq":0', b'"seq":"0"'),
+            canonical.replace(b'"page":0', b'"page":0,"extra":2'),
+            canonical.replace(b'"fixture":0', b'"fixture":0,"fixture":1'),
+            canonical.replace(b'"op":"W"', b'"op":"W\\nNOT_A_JSON_LINE"'),
+            canonical.replace(b'"op":"W"', b'"op":"W\nNOT_A_JSON_LINE"'),
+            canonical + b"\n{",
+            b"null\n", b"[]\n", b"\xff\n",
+        )
+        for index, trace in enumerate(untrusted_cases):
+            with self.subTest(noncanonical=index):
+                def legacy():
+                    return [json.loads(line) for line in trace.splitlines()]
+
+                try:
+                    expected = legacy()
+                except (ValueError, UnicodeDecodeError) as error:
+                    with self.assertRaises(type(error)):
+                        decode(trace)
+                else:
+                    self.assertEqual(decode(trace), expected)
+                if trace in (canonical, canonical + b"\r\n",
+                             b" " + canonical + b"\n"):
+                    with mock.patch.object(json, "loads", wraps=json.loads) as loads:
+                        decode(trace)
+                        self.assertEqual(loads.call_args.args[0], trace.splitlines()[0])
+
     def test_generated_jsonl_fast_encoder_is_exact_canonical_json(self):
         import runpy
 

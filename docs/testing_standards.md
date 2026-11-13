@@ -6995,6 +6995,24 @@ insertion order and both lane shapes. Keep the seven pinned legacy trace,
 post-image and WRITE-payload hashes, all measured I/O, and per-arm
 validation unchanged.
 
+For the ordinary large generated JSONL trace, validation may decode
+the rows in one Python JSON/C-decoder call **only** after each source line
+matches the complete fixed canonical ASCII event grammar (including
+optional lane), with exactly one LF line terminator per event. CRLF,
+unterminated lines and every other noncanonical line, additional/reordered field,
+malformed value, empty line or unsupported encoding must instead take
+the unchanged independent `json.loads(line)` fallback. This preserves
+legacy acceptance, error behavior and first-cause attribution for
+untrusted/forged manifest inputs. In both paths, compare the raw trace
+SHA-256 with its manifest **before** decoding; retain every distinct-wave
+page, fixture generation, lane/phase/sequence and byte oracle check per
+arm. Rootless regressions must compare original per-line JSON output with
+batch parsing for empty, short and loaded-sized (17,408-operation) plans,
+and malformed/noncanonical inputs including duplicate keys, Unicode,
+line boundaries and extra fields. The optimization must never allow
+fragments of separately malformed JSON lines to combine into one
+accepted event.
+
 Canonical trace validation runs independently inside every replay arm,
 even for an immutable plan prepared once for a matched pair. It may reuse a
 single in-flight logical-page set across QD waves and index the validated
