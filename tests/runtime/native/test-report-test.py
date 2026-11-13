@@ -1189,6 +1189,64 @@ class NativeTimingContract(unittest.TestCase):
             "native make=0s; remaining contracts=0s", output)
         self.assertNotIn("\r", output)
 
+    def test_native_resume_marker_requires_active_make_phase(self):
+        """Later fixture output must not mislabel the native stage as reused."""
+        native_phase = "tests/Makefile native and metadata"
+        later_phase = "tests/runtime/native/source-contract-test.py"
+        resume_marker = (
+            "ROOTLESS_NATIVE_RESUME suite=mapping state=REUSED\n")
+        progress = (
+            "ROOTLESS_PHASE_PROGRESS state=START index=0 elapsed_s=0 "
+            "label=rootless initialization\n"
+            "ROOTLESS_PHASE_PROGRESS state=PASS index=0 elapsed_s=0 "
+            "label=rootless initialization\n"
+            f"ROOTLESS_PHASE_PROGRESS state=START index=1 elapsed_s=0 "
+            f"label={native_phase}\n")
+        end_make = (
+            f"ROOTLESS_PHASE_PROGRESS state=PASS index=1 elapsed_s=0 "
+            f"label={native_phase}\n"
+            f"ROOTLESS_PHASE_PROGRESS state=START index=2 elapsed_s=0 "
+            f"label={later_phase}\n")
+        finish = (
+            f"ROOTLESS_PHASE_PROGRESS state=PASS index=2 elapsed_s=0 "
+            f"label={later_phase}\n")
+        for marker_in_make in (False, True):
+            with self.subTest(marker_in_make=marker_in_make):
+                transcript = (
+                    progress + (resume_marker if marker_in_make else "") +
+                    end_make + ("" if marker_in_make else resume_marker) +
+                    finish)
+                result = {"stages": [], "benchmarks": {}}
+                with mock.patch.object(
+                        runner.subprocess, "Popen",
+                        return_value=FakeStreamingProcess(transcript)), \
+                        mock.patch.object(
+                            runner, "rootless_phase_names",
+                            return_value=frozenset({
+                                "rootless initialization", native_phase,
+                                later_phase})), \
+                        mock.patch.object(
+                            runner, "parse_predictor_evidence",
+                            return_value={}), \
+                        mock.patch.object(
+                            runner, "parse_gc_scan_scale_evidence",
+                            return_value={}), \
+                        mock.patch.object(
+                            runner, "parse_extent_geometry_evidence",
+                            return_value={}), \
+                        contextlib.redirect_stdout(io.StringIO()):
+                    self.assertEqual(
+                        runner.run_stage(
+                            "Native and rootless contracts", ["unused"],
+                            result, stream_rootless_progress=True,
+                            native_cache_mode="resume"), 0)
+                self.assertEqual(
+                    result["stages"][0].get("reused_native_suites", []),
+                    ["mapping"] if marker_in_make else [])
+                self.assertEqual(
+                    result["stages"][0]["status"],
+                    "REUSED" if marker_in_make else "PASS")
+
     def test_development_resume_option_is_not_inherited_by_stage_children(self):
         result = {"stages": [], "benchmarks": {}}
         with mock.patch.dict(os.environ, {"RESUME": "1"}), \

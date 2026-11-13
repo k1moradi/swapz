@@ -4713,6 +4713,8 @@ def run_stage(title, command, result, *, parse_bench=False,
                             "ROOTLESS_NATIVE_RESUME suite=" + native_suite +
                             " state=REUSED\n")
                         if (native_cache_mode == "resume" and line == marker and
+                                rootless_active_phase ==
+                                "tests/Makefile native and metadata" and
                                 native_suite not in native_reused_suites):
                             native_reused_suites.append(native_suite)
                     event = rootless_phase_progress(line, rootless_allowed_names)

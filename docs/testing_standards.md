@@ -636,8 +636,12 @@ working directory (inherited from tests/suites), and do not cache individual
 binary results. Each has its own owner-only atomic checkpoint, independent
 of every other checkpoint. The lower-I/O direct and sanitizer CI recipe
 remains unchanged when the development selector is absent. Reused native
-tests print bounded markers, are rendered REUSED by the rootless stage,
-cannot feed a fresh PASS checkpoint and never qualify
+tests print bounded markers, are rendered REUSED by the rootless stage
+only when the marker arrives during the active source-controlled native
+Make phase; the same text from a later rootless suite must be ignored.
+A regression exercises both marker positions without qualifying either as
+physical evidence. Reused native tests cannot feed a fresh PASS checkpoint
+and never qualify
 physical or loaded device evidence. Full-tier and direct CI native testing
 never consume those development checkpoints.
 A normal `make test` saves a bounded, private, owner-only, atomic
