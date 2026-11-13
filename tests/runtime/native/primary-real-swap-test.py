@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Rootless contracts for the private primary real-swap qualification helper."""
 
+from collections import deque
 from dataclasses import replace
 from types import SimpleNamespace
 import builtins
@@ -3115,7 +3116,7 @@ class PrimaryRealSwapContracts(unittest.TestCase):
             (name for name, _ in qualify.PRESSURE_PROGRESS_COUNTERS), 0)
         newer = {name: 100 for name in counters}
         newer["swapz_write_submitted_total"] = None
-        snapshots = collections.deque([
+        snapshots = deque([
             (-1.0, {name: 1000 for name in counters}),
             (0.5, counters),
             (4.5, newer)], maxlen=16)
@@ -3126,14 +3127,14 @@ class PrimaryRealSwapContracts(unittest.TestCase):
         self.assertEqual(deltas["lower_write_requests_delta"], 100)
         self.assertTrue(all(
             value is None for value in qualify._pressure_progress_deltas(
-                collections.deque([(4.5, newer)]), window).values()))
+                deque([(4.5, newer)]), window).values()))
 
     def test_pressure_progress_optional_reader_failure_is_not_a_stop(self):
         cgroup = Path("/synthetic/cgroup")
         with mock.patch.object(
-                qualify, "_psi_total", side_effect=OSError("read unavailable")), \\
+                qualify, "_psi_total", side_effect=OSError("read unavailable")), \
              mock.patch.object(
-                 qualify, "read_status", side_effect=RuntimeError("no mapper")), \\
+                 qualify, "read_status", side_effect=RuntimeError("no mapper")), \
              mock.patch.object(
                  qualify.Path, "read_text", side_effect=OSError("no sysfs")):
             sample = qualify._pressure_progress_snapshot(
