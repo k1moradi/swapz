@@ -12223,12 +12223,38 @@ def development_resume_directory(*, create=False):
         return None
 
 
+def development_native_make_jobs():
+    """Fingerprint effective native Make concurrency without ephemeral FDs."""
+    explicit_jobs = os.environ.get("SWAPZ_TEST_JOBS")
+    if explicit_jobs:
+        return explicit_jobs
+    makeflags = os.environ.get("MAKEFLAGS", "")
+    # GNU Make exports -jN alongside an ephemeral FIFO path or jobserver FD
+    # pair. Only the effective parallel count belongs in a reusable key.
+    job_counts = re.findall(r"(?:^|\s)-j([0-9]*)(?=\s|$)", makeflags)
+    if job_counts:
+        # Multiple conflicting flags, zero and unbounded numeric values
+        # cannot establish a reliable reusable scheduling identity.
+        if len(set(job_counts)) != 1:
+            return None
+        count = job_counts[0]
+        if count and (len(count) > 8 or int(count) == 0):
+            return None
+        return "inherited:" + (str(int(count)) if count else "unlimited")
+    if "--jobserver-auth=" in makeflags or "--jobserver-fds=" in makeflags:
+        # An opaque jobserver with no recoverable -j count runs fresh.
+        return None
+    return "serial"
+
+
 def development_resume_context(result, kdir):
     """Bind cached work to the exact source, host, kernel and rebuilt bytes."""
     host = result.get("host_identity", {})
     source_sha = result.get("tested_commit_sha")
     artifacts = qualification_artifact_digests()
-    if (not isinstance(host, dict) or
+    native_make_jobs = development_native_make_jobs()
+    if (native_make_jobs is None or
+            not isinstance(host, dict) or
             not _valid_sha256(host.get("id_sha256")) or
             not isinstance(source_sha, str) or
             re.fullmatch(r"[0-9a-f]{40}", source_sha) is None or
@@ -12242,9 +12268,9 @@ def development_resume_context(result, kdir):
         "kernel_release": result.get("kernel_release"),
         "kdir": kdir,
         "rootless_jobs": os.environ.get("SWAPZ_ROOTLESS_JOBS", "auto"),
-        # The native Make worker count changes concurrent test execution.
-        # Missing means the caller's inherited GNU Make jobserver is used.
-        "native_make_jobs": os.environ.get("SWAPZ_TEST_JOBS", "jobserver"),
+        # The effective count survives jobserver FD/FIFO path changes, but
+        # a different inherited -jN invalidates the prior private PASS.
+        "native_make_jobs": native_make_jobs,
         "artifacts": artifacts,
     }
 

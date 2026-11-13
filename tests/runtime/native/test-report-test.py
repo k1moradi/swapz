@@ -1406,6 +1406,52 @@ class NativeTimingContract(unittest.TestCase):
                     self.assertEqual(
                         runner.read_development_resume_checkpoint(
                             two_workers, suites=True), [suite])
+
+                    # GNU Make -jN is inherited through MAKEFLAGS, not
+                    # SWAPZ_TEST_JOBS. The ephemeral FIFO name does not
+                    # change the actual concurrency or checkpoint identity.
+                    with mock.patch.dict(os.environ, {
+                            "SWAPZ_TEST_JOBS": "",
+                            "MAKEFLAGS": " -j2 --jobserver-auth=fifo:/tmp/GMfifo-one"}):
+                        inherited_two = runner.development_resume_context(
+                            report, "/synthetic-kdir")
+                    with mock.patch.dict(os.environ, {
+                            "SWAPZ_TEST_JOBS": "",
+                            "MAKEFLAGS": " -j4 --jobserver-auth=fifo:/tmp/GMfifo-two"}):
+                        inherited_four = runner.development_resume_context(
+                            report, "/synthetic-kdir")
+                    with mock.patch.dict(os.environ, {
+                            "SWAPZ_TEST_JOBS": "",
+                            "MAKEFLAGS": " -j2 --jobserver-auth=fifo:/tmp/GMfifo-three"}):
+                        stable_two = runner.development_resume_context(
+                            report, "/synthetic-kdir")
+                    self.assertEqual(
+                        inherited_two["native_make_jobs"], "inherited:2")
+                    self.assertEqual(
+                        inherited_four["native_make_jobs"], "inherited:4")
+                    self.assertEqual(inherited_two, stable_two)
+                    self.assertNotEqual(inherited_two, inherited_four)
+                    self.assertTrue(
+                        runner.write_development_resume_checkpoint(
+                            inherited_two, [suite], suites=True))
+                    self.assertIsNone(
+                        runner.read_development_resume_checkpoint(
+                            inherited_four, suites=True))
+                    self.assertEqual(
+                        runner.read_development_resume_checkpoint(
+                            stable_two, suites=True), [suite])
+                    with mock.patch.dict(os.environ, {
+                            "SWAPZ_TEST_JOBS": "",
+                            "MAKEFLAGS": " --jobserver-auth=3,4"}):
+                        self.assertIsNone(runner.development_resume_context(
+                            report, "/synthetic-kdir"))
+                    with mock.patch.dict(os.environ, {
+                            "SWAPZ_TEST_JOBS": "",
+                            "MAKEFLAGS": " -j --no-print-directory"}):
+                        self.assertEqual(
+                            runner.development_resume_context(
+                                report, "/synthetic-kdir")["native_make_jobs"],
+                            "inherited:unlimited")
             finally:
                 runner.ROOT = prior_root
 
