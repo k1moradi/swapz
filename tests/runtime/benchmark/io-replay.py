@@ -2627,6 +2627,11 @@ def replay(args):
         "write_payload_stream_sha256": mf["write_payload_stream_sha256"],
         "workload_opportunity": mf["workload_opportunity"],
         "prefill_sha256": mf["prefill_sha256"],
+        # Observational only: includes opened-target admission, all prefill
+        # writes, fsync, byte-exact readback and prefill digest admission.
+        # Never feed this untimed value into measured throughput/latency.
+        "prefill_engine": "native-c-opt-in" if args.native_prefill else "python",
+        "prefill_wall_s": round(max(0., t_prefill_done - t_phase_start), 6),
         "expected_post_sha256": mf["expected_post_sha256"],
         "verified_post_sha256": post_hash.hexdigest(),
         "qd": mf["qd"], "layout": mf["layout"],
@@ -2695,7 +2700,7 @@ def compare(args):
         raise ValueError("exactly one off and one swapz result required")
     immutable = ("fixture_sha256", "trace_sha256", "write_payload_stream_sha256",
                  "workload_opportunity", "prefill_sha256",
-                 "expected_post_sha256", "manifest_sha256",
+                 "prefill_engine", "expected_post_sha256", "manifest_sha256",
                  "qd", "layout", "replay_mode", "replay_engine", "seed",
                  "iops_requested", "warmup_ops",
                  "measure_ops", "read_ops", "write_ops", "verified_pages",
@@ -2750,7 +2755,8 @@ def compare(args):
               "workload_opportunity": first.get("workload_opportunity"),
               "read_ops": first["read_ops"], "write_ops": first["write_ops"],
               "results": [{k: entry.get(k) for k in
-                           ("candidate", "source_sha", "achieved_iops", "lower_io")}
+                           ("candidate", "source_sha", "achieved_iops", "lower_io",
+                            "prefill_engine", "prefill_wall_s")}
                           for entry in normalized]}
     throughput = [measured_throughput(entry, require_lower=loaded)
                   for entry in normalized]

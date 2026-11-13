@@ -1860,6 +1860,12 @@ class PairReplayContract(unittest.TestCase):
                             "--result", result, *opts)
                         report = json.loads(result.read_text())
                         self.assertEqual(report["verdict"], "PASS")
+                        self.assertEqual(
+                            report["prefill_engine"],
+                            "native-c-opt-in" if native_prefill else "python")
+                        self.assertIsInstance(report["prefill_wall_s"], float)
+                        self.assertGreaterEqual(report["prefill_wall_s"], 0.0)
+                        self.assertLess(report["prefill_wall_s"], 600.0)
                         self.assertEqual(report["prefill_sha256"], before_digest)
                         self.assertEqual(report["verified_post_sha256"], after_digest)
                         self.assertEqual(
@@ -2208,6 +2214,10 @@ class PairReplayContract(unittest.TestCase):
                 self.assertEqual(result["trace_sha256"], manifest["trace_sha256"])
                 self.assertEqual(result["workload_opportunity"], opportunity)
                 self.assertEqual(len(result["results"]), 2)
+                for candidate_result in result["results"]:
+                    self.assertEqual(candidate_result["prefill_engine"], "python")
+                    self.assertIsInstance(candidate_result["prefill_wall_s"], float)
+                    self.assertGreaterEqual(candidate_result["prefill_wall_s"], 0.0)
                 self.assertEqual(result["performance_qualification"],
                                  "ROOTLESS_NOT_DEVICE_EVIDENCE")
                 self.assertTrue(all(
@@ -2223,10 +2233,23 @@ class PairReplayContract(unittest.TestCase):
                     self.assertEqual(record["verified_pages"], 64)
                     self.assertEqual(record["verdict"], "PASS")
                     self.assertEqual(record["workload_opportunity"], opportunity)
+                    self.assertEqual(record["prefill_engine"], "python")
+                    self.assertIsInstance(record["prefill_wall_s"], float)
+                    self.assertGreaterEqual(record["prefill_wall_s"], 0.0)
                     rates = record["throughput_mbps"]
                     self.assertGreater(rates["logical_total_mbps"], 0)
                     self.assertIsNone(rates["lower_write_mbps"])
                     self.assertIsNone(rates["write_input_per_lower_byte"])
+                # A pair must never compare different prefill engines even
+                # when its trace and final-image hashes happen to match.
+                original_off = reports[0].read_text()
+                wrong_engine = json.loads(original_off)
+                wrong_engine["prefill_engine"] = "native-c-opt-in"
+                reports[0].write_text(json.dumps(wrong_engine) + "\n")
+                rejected = self.run_cmd(
+                    "compare", "--reports", *reports, success=False)
+                self.assertIn("mismatch in prefill_engine", rejected.stderr)
+                reports[0].write_text(original_off)
                 # Fail-closed: altered trace provenance makes pair invalid.
                 tampered = json.loads(reports[0].read_text())
                 tampered["write_payload_stream_sha256"] = "0" * 64

@@ -8120,6 +8120,62 @@ int main(void)
             "def test_opt_in_native_prefill_matches_python_and_rejects_bad_descriptors",
             tests)
 
+    def test_owned_pair_prefill_opt_in_is_bounded_and_symmetric(self):
+        pair = (ROOT / "tests/tools/benchmark-owned-pair.sh").read_text()
+        replay = (ROOT / "tests/runtime/benchmark/io-replay.py").read_text()
+        loaded = (ROOT / "tests/tools/test-loaded.sh").read_text()
+        tests = (ROOT / "tests/runtime/benchmark/io-replay-test.py").read_text()
+        self.assertIn("NATIVE_PREFILL=0", pair)
+        self.assertIn('''${!#} == --native-prefill''', pair)
+        self.assertIn("NATIVE_PREFILL=1", pair)
+        self.assertIn("REPLAY_ARGS+=(--native-prefill)", pair)
+        self.assertEqual(pair.count("REPLAY_ARGS+=(--native-prefill)"), 1)
+        self.assertIn('"PREFILL_ENGINE=native-c-opt-in"', pair.replace("'", '"'))
+        self.assertIn('"PREFILL_ENGINE=python-default"', pair.replace("'", '"'))
+        self.assertNotIn("--native-prefill", loaded)
+        self.assertLess(pair.index("if (( NATIVE_PREFILL )) &&"),
+                        pair.index('ROOT="$(cd --'))
+        self.assertIn('"prefill_wall_s": round(', replay)
+        self.assertIn('"prefill_engine": "native-c-opt-in"', replay)
+        self.assertIn('"prefill_engine",', replay.split(
+            "def compare(args):", 1)[1])
+        self.assertIn('report["prefill_wall_s"]', tests)
+        self.assertIn('report["prefill_engine"]', tests)
+
+        # Extract and execute only the pure selector gate. Never source or
+        # execute privileged code, or let a synthetic test create block nodes.
+        guard = "if (( NATIVE_PREFILL )) &&" + pair.split(
+            "if (( NATIVE_PREFILL )) &&", 1)[1].split("\nROOT=", 1)[0]
+        options = {
+            "NATIVE_PREFILL": 1, "RATE_MODE": "unpaced",
+            "PROFILE": "medium", "IOPS": 0, "NATIVE_REPLAY": 1,
+            "RESOURCE_PRESSURE_SHORT": 0, "LINEAR_CALIBRATION": 0,
+        }
+
+        def check_guard(values):
+            assignments = " ".join(
+                f"{key}={value}" for key, value in values.items())
+            return subprocess.run(
+                ["bash", "-c",
+                 assignments + "\n" + guard + "\necho ADMITTED\n"],
+                capture_output=True, text=True, timeout=5)
+
+        accepted = check_guard(options)
+        self.assertEqual(accepted.returncode, 0, accepted.stderr)
+        self.assertEqual(accepted.stdout, "ADMITTED\n")
+        default = check_guard({**options, "NATIVE_PREFILL": 0,
+                               "RATE_MODE": "paced"})
+        self.assertEqual(default.returncode, 0, default.stderr)
+        for name, invalid in (
+                ("RATE_MODE", "paced"), ("PROFILE", "default"),
+                ("IOPS", 100), ("NATIVE_REPLAY", 0),
+                ("RESOURCE_PRESSURE_SHORT", 1), ("LINEAR_CALIBRATION", 1)):
+            with self.subTest(name=name):
+                blocked = check_guard({**options, name: invalid})
+                self.assertEqual(blocked.returncode, 2)
+                self.assertIn("BLOCKED: native prefill requires", blocked.stderr)
+                self.assertNotIn("ADMITTED", blocked.stdout)
+
     def test_native_replay_skips_threaded_wave_allocation_and_reuses_read_iov(self):
         replay = (ROOT / "tests/runtime/benchmark/io-replay.py").read_text()
         fixtures = (ROOT / "tests/runtime/benchmark/io-replay-test.py").read_text()

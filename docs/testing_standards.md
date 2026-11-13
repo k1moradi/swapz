@@ -7045,6 +7045,23 @@ striped maps, complete device bytes and hashes, refuse forged digest and
 readonly/invalid descriptors, and confirm no measured replay or report
 publication after a failed prefill. Do not enable native prefill by default
 until current-source loaded and slow-host equivalence has been demonstrated.
+For a manual **owned-RAM-only development comparison**, the paired helper may
+consume an explicit final `--native-prefill` suffix. Its admission must happen
+before any privileged work and require a native-replay-capable ordinary,
+unpaced medium profile; reject paced, non-native, ID36 resource-pressure and
+linear-calibration modes. Both off/swapz arms must receive the identical
+opt-in through the common replay argument vector. Never add this suffix
+implicitly to `test-loaded.sh` or the official `make test` matrix.
+Each arm must report `prefill_engine` and `prefill_wall_s` (monotonic elapsed
+seconds from the prefill marker through authenticated target open, full
+ordered WRITE/fsync/byte readback and SHA admission). This includes process
+startup for the native path, but **excludes** all timed replay work and is
+not throughput or promotion evidence. Pair comparison must reject mixed
+prefill engines without requiring the two observed wall times to be equal.
+Rootless tests must exercise the option's entire pure admission gate with
+an accepted unpaced/native selection and explicit refusals for each
+incompatible option, as well as per-arm report fields and unchanged
+canonical prefill/final hashes.
 The source contract must recognize three source-level prefill page loops:
 one Python SHA loop after successful native byte comparisons, and the two
 unchanged default Python WRITE and verified READ loops. Explicitly inspect

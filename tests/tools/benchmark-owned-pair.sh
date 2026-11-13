@@ -49,7 +49,14 @@ QUEUE_MODE=2
 SUBMIT_QUEUES=1
 HW_QUEUE_DEPTH=0
 NATIVE_REPLAY=0
+NATIVE_PREFILL=0
 REPLAY_SWAPZ_FIRST=0
+# This final suffix is a development-only, explicit native-prefill experiment.
+# It must never become an implicit part of ordinary loaded qualification.
+if [[ $# -gt 1 && ${!#} == --native-prefill ]]; then
+    NATIVE_PREFILL=1
+    set -- "${@:1:$(( $# - 1 ))}"
+fi
 # The final internal suffix controls safe replay order only.
 if [[ $# -gt 1 && ${!#} == --swapz-first ]]; then
     REPLAY_SWAPZ_FIRST=1
@@ -268,6 +275,13 @@ if (( LINEAR_CALIBRATION )) &&
    [[ $RATE_MODE != unpaced || $PROFILE != medium ||
       $RESOURCE_PRESSURE_SHORT != 0 ]]; then
     echo 'BLOCKED: linear calibration cannot substitute for product qualification' >&2
+    exit 2
+fi
+if (( NATIVE_PREFILL )) &&
+   [[ $RATE_MODE != unpaced || $PROFILE != medium ||
+      $IOPS != 0 || $NATIVE_REPLAY != 1 ||
+      $RESOURCE_PRESSURE_SHORT != 0 || $LINEAR_CALIBRATION != 0 ]]; then
+    echo 'BLOCKED: native prefill requires ordinary unpaced owned medium native replay' >&2
     exit 2
 fi
 ROOT="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/../.." && pwd -P)"
@@ -965,6 +979,12 @@ if (( NATIVE_REPLAY )); then
     note 'REPLAY_ENGINE=native-c'
 else
     note 'REPLAY_ENGINE=python-threaded'
+fi
+if (( NATIVE_PREFILL )); then
+    REPLAY_ARGS+=(--native-prefill)
+    note 'PREFILL_ENGINE=native-c-opt-in'
+else
+    note 'PREFILL_ENGINE=python-default'
 fi
 REPLAY_TIMEOUT=120s
 if (( RESOURCE_PRESSURE_SHORT )); then
