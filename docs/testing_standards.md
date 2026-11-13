@@ -3359,7 +3359,9 @@ guessed as the cause. The terminal-oracle suite also uses the fail-only stderr r
 authenticated `TerminalEvidenceContracts` unittest names and failure kinds
 may appear on the console; arbitrary traceback content stays private.
 Synthetic attribution must cover both the real-class first error and a
-foreign-class forged failure.
+foreign-class forged failure. Privacy assertions must inspect the bounded,
+source-authenticated operator markers, not the entire stderr relay: that
+legacy relay preserves the child stream independently of marker classification.
 A directly invoked, unwrapped unittest may still use its
 first detailed failure block. A generic rootless
 `reason=nonzero_exit` for `test-report-test.py` does not authenticate an

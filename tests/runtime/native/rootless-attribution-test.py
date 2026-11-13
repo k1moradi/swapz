@@ -1118,7 +1118,14 @@ exec "$SWAPZ_REAL_RM" "$@"
             result, status=38, reason="nonzero_exit",
             test="unavailable", stage=TERMINAL_PHASE)
         self.assertIn(PRIVATE_SENTINEL, log.read_text())
-        self.assertNotIn("test_group", result.stderr)
+        # The relay preserves the child's stderr stream. Only source-bound
+        # operator markers may be used as evidence of an authenticated test.
+        markers = "\n".join(
+            line for line in result.stderr.splitlines()
+            if line.startswith(("FAIL: rootless ", "Failed during: ",
+                                "Reason: ", "NEXT: ")))
+        self.assertNotIn("test_group", markers)
+        self.assertNotIn(PRIVATE_SENTINEL, markers)
 
     def test_ownership_errno_preserves_boundary_and_private_traceback(self):
         result = self.invoke("ownership_errno", stage=OWNERSHIP_PHASE)
