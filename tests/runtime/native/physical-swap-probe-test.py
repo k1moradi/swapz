@@ -874,6 +874,9 @@ class PhysicalSwapProbeTests(unittest.TestCase):
         self.assertEqual(
             workload._run_workload.call_args.kwargs["expected_mapper_baseline_kib"],
             12)
+        self.assertIs(
+            workload._run_workload.call_args.kwargs["development_progress_aware_psi"],
+            True)
 
     def test_algorithm_workload_failure_marker_redacts_private_producer_details(self):
         stderr = io.StringIO()

@@ -3134,6 +3134,45 @@ class PrimaryRealSwapContracts(unittest.TestCase):
             if key not in {"window_usec", "stalled_usec", "limit_usec", "workload_phase"}:
                 self.assertIsNone(value, key)
 
+    def test_development_pressure_requires_same_window_owned_io(self):
+        self.assertEqual(qualify.PSI_STOP_FRACTION, 0.85)
+        stall = qualify.PsiStallWindow(0.0, 0)
+        self.assertTrue(stall.observe(5.0, 4_500_000))
+        old = {name: 0 for name, _ in qualify.PRESSURE_PROGRESS_COUNTERS}
+        old.update(swapz_failed=0, swapz_error=0)
+        latest = dict(old, swapz_upper_write_completed_ok=600,
+                      swapz_physical_write_total=1_200_000,
+                      lower_write_sectors_total=1000,
+                      swapz_logical_read_total=1_000_000,
+                      swapz_physical_read_total=150_000,
+                      lower_read_sectors_total=100)
+        window = deque([(0.5, old), (4.5, latest)])
+        self.assertTrue(qualify._development_pressure_has_owned_progress(
+            window, stall, "fill"))
+        self.assertTrue(qualify._development_pressure_has_owned_progress(
+            window, stall, "verify"))
+        self.assertFalse(qualify._development_pressure_has_owned_progress(
+            window, stall, "release"))
+        for field in ("swapz_upper_write_completed_ok",
+                      "swapz_physical_write_total", "lower_write_sectors_total",
+                      "swapz_logical_read_total", "swapz_physical_read_total",
+                      "lower_read_sectors_total", "swapz_failed", "swapz_error"):
+            with self.subTest(field=field):
+                missing = dict(latest, **{field: None})
+                phase = "verify" if field in (
+                    "swapz_logical_read_total", "swapz_physical_read_total",
+                    "lower_read_sectors_total") else "fill"
+                self.assertFalse(qualify._development_pressure_has_owned_progress(
+                    deque([(0.5, old), (4.5, missing)]), stall, phase))
+        self.assertFalse(qualify._development_pressure_has_owned_progress(
+            deque([(3.5, old), (4.5, latest)]), stall, "fill"))
+        for field, value in (("swapz_failed", 1), ("swapz_error", -5),
+                             ("swapz_physical_write_total", -1)):
+            with self.subTest(field=field):
+                bad = dict(latest, **{field: value})
+                self.assertFalse(qualify._development_pressure_has_owned_progress(
+                    deque([(0.5, old), (4.5, bad)]), stall, "fill"))
+
     def test_pressure_progress_deltas_use_only_same_window_samples(self):
         window = qualify.PsiStallWindow(0.0, 0)
         self.assertTrue(window.observe(5.0, 4_500_000))
@@ -3167,7 +3206,9 @@ class PrimaryRealSwapContracts(unittest.TestCase):
 
     def test_pressure_progress_snapshot_counts_exact_lower_requests(self):
         status = {
-            "physical_write": 8192, "write_submitted": 12288,
+            "physical_write": 8192, "physical_read": 512,
+            "logical_read": 1024, "failed": 0, "error": 0,
+            "write_submitted": 12288,
             "upper_write_completed_ok": 3, "ordered_worker_wall_ns": 500,
             "lower_write_wall_ns": 200, "window_commit_nonio_wall_ns": 120,
             "prep_wait_wall_ns": 30}
@@ -3185,6 +3226,11 @@ class PrimaryRealSwapContracts(unittest.TestCase):
         self.assertEqual(observation["swapz_upper_write_completed_ok"], 3)
         self.assertEqual(observation["lower_write_requests_total"], 7)
         self.assertEqual(observation["lower_write_sectors_total"], 64)
+        self.assertEqual(observation["lower_read_sectors_total"], 16)
+        self.assertEqual(observation["swapz_physical_read_total"], 512)
+        self.assertEqual(observation["swapz_logical_read_total"], 1024)
+        self.assertEqual(observation["swapz_failed"], 0)
+        self.assertEqual(observation["swapz_error"], 0)
         self.assertEqual(observation["swapz_lower_write_wall_ns"], 200)
         self.assertEqual(observation["swapz_commit_nonio_wall_ns"], 120)
         self.assertEqual(observation["swapz_prep_wait_wall_ns"], 30)

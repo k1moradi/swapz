@@ -119,6 +119,16 @@ PSI_STOP_FRACTION = 0.85
 PSI_STOP_GRACE_SECONDS = 5
 PSI_STOP_SAMPLE_INTERVAL_SECONDS = 0.05
 PSI_STOP_MAX_SAMPLES = 256
+# The private real-device correctness smoke is NOT official qualification.
+# Linux PSI FULL can stay high while the independent swapz worker makes real
+# progress outside the oracle cgroup. On this explicitly selected development
+# path, the frozen 85%/5s PSI trigger requires PROVEN continuing swapz-owned
+# physical progress, or the trial stops. Missing/insufficient samples fail
+# closed. Official production keeps its unconditional 85%/5s PSI stop.
+# The existing 240s timeout, 1 GiB host RAM floor, cgroup OOM/swap limits,
+# byte oracle, device ownership, and full restoration are unchanged.
+DEVELOPMENT_PSI_PROGRESS_MIN_WINDOW_USEC = 3_000_000
+DEVELOPMENT_PSI_PROGRESS_MIN_PAGES = 64
 # Best-effort diagnostic snapshots, never a workload admission condition.
 PRESSURE_PROGRESS_SAMPLE_SECONDS = 1.0
 PRESSURE_PROGRESS_MAX_SAMPLES = 16
@@ -3511,6 +3521,8 @@ PRESSURE_PROGRESS_COUNTERS = (
     ("cgroup_io_full_usec", "cgroup_io_full_delta_usec"),
     ("cgroup_cpu_some_usec", "cgroup_cpu_some_delta_usec"),
     ("swapz_physical_write_total", "swapz_physical_write_delta"),
+    ("swapz_physical_read_total", "swapz_physical_read_delta"),
+    ("swapz_logical_read_total", "swapz_logical_read_delta"),
     ("swapz_write_submitted_total", "swapz_write_submitted_delta"),
     ("swapz_upper_write_completed_ok", "swapz_write_completed_delta"),
     ("swapz_ordered_worker_wall_ns", "swapz_worker_wall_delta_ns"),
@@ -3519,6 +3531,7 @@ PRESSURE_PROGRESS_COUNTERS = (
     ("swapz_prep_wait_wall_ns", "swapz_prep_wait_wall_delta_ns"),
     ("lower_write_sectors_total", "lower_write_sectors_delta"),
     ("lower_write_requests_total", "lower_write_requests_delta"),
+    ("lower_read_sectors_total", "lower_read_sectors_delta"),
 )
 
 
@@ -3528,6 +3541,10 @@ def _pressure_progress_snapshot(cgroup: Path,
     """Best-effort, bounded telemetry; never turn an optional read into a stop."""
     observed: dict[str, int | None] = {
         field: None for field, _ in PRESSURE_PROGRESS_COUNTERS}
+    # Unlike cumulative progress counters, these terminal failure states
+    # must be exactly ZERO in the latest sample before any PSI exception.
+    observed["swapz_failed"] = None
+    observed["swapz_error"] = None
     for field, path, kind in (
             ("cgroup_io_some_usec", cgroup / "io.pressure", "some"),
             ("cgroup_io_full_usec", cgroup / "io.pressure", "full"),
@@ -3540,6 +3557,8 @@ def _pressure_progress_snapshot(cgroup: Path,
         status = status_reader()
         for field, key in (
                 ("swapz_physical_write_total", "physical_write"),
+                ("swapz_physical_read_total", "physical_read"),
+                ("swapz_logical_read_total", "logical_read"),
                 ("swapz_write_submitted_total", "write_submitted"),
                 ("swapz_upper_write_completed_ok", "upper_write_completed_ok"),
                 ("swapz_ordered_worker_wall_ns", "ordered_worker_wall_ns"),
@@ -3548,6 +3567,11 @@ def _pressure_progress_snapshot(cgroup: Path,
                 ("swapz_prep_wait_wall_ns", "prep_wait_wall_ns")):
             value = status.get(key)
             if type(value) is int and value >= 0:
+                observed[field] = value
+        for field, key in (("swapz_failed", "failed"),
+                           ("swapz_error", "error")):
+            value = status.get(key)
+            if type(value) is int:
                 observed[field] = value
     except Exception:
         pass
@@ -3558,6 +3582,7 @@ def _pressure_progress_snapshot(cgroup: Path,
         if len(numbers) >= 7 and all(value >= 0 for value in numbers):
             observed["lower_write_sectors_total"] = numbers[6]
             observed["lower_write_requests_total"] = numbers[4]
+            observed["lower_read_sectors_total"] = numbers[2]
     except (OSError, ValueError):
         pass
     return observed
@@ -3583,6 +3608,45 @@ def _pressure_progress_deltas(samples: deque, window: PsiStallWindow) -> dict:
                 0 <= initial <= final):
             deltas[name] = final - initial
     return deltas
+
+
+def _development_pressure_has_owned_progress(
+        samples: deque, window: PsiStallWindow, phase: str) -> bool:
+    """Permit high PSI in the DEV smoke only with independently proven I/O.
+
+    Two oracle processes are stalled under a deliberately small memory.max,
+    while the swapz kernel worker is outside their cgroup. Only successful
+    module operations plus real module physical bytes and device sectors
+    count as continuing progress. Incomplete, regressing, stale or foreign
+    observations are NOT an exception to the original PSI trigger.
+    """
+    deltas = _pressure_progress_deltas(samples, window)
+    if (deltas["progress_window_usec"] is None or
+            deltas["progress_window_usec"] <
+            DEVELOPMENT_PSI_PROGRESS_MIN_WINDOW_USEC or
+            not samples or
+            type(samples[-1][1].get("swapz_failed")) is not int or
+            samples[-1][1]["swapz_failed"] != 0 or
+            type(samples[-1][1].get("swapz_error")) is not int or
+            samples[-1][1]["swapz_error"] != 0):
+        return False
+    if phase == "fill":
+        completed = deltas["swapz_write_completed_delta"]
+        physical = deltas["swapz_physical_write_delta"]
+        lower = deltas["lower_write_sectors_delta"]
+        return (type(completed) is int and
+                completed >= DEVELOPMENT_PSI_PROGRESS_MIN_PAGES and
+                type(physical) is int and physical > 0 and
+                type(lower) is int and lower > 0)
+    if phase == "verify":
+        logical = deltas["swapz_logical_read_delta"]
+        physical = deltas["swapz_physical_read_delta"]
+        lower = deltas["lower_read_sectors_delta"]
+        return (type(logical) is int and
+                logical >= DEVELOPMENT_PSI_PROGRESS_MIN_PAGES * PAGE_BYTES and
+                type(physical) is int and physical > 0 and
+                type(lower) is int and lower > 0)
+    return False
 
 
 def _workload_pressure_failure(window: PsiStallWindow, cgroup: Path,
@@ -3660,7 +3724,8 @@ def _run_workload(manifest: dict, active: dict, oracle_path: Path,
                   timeout_seconds: int,
                   telemetry_check: Callable[[], None] | None = None,
                   *, status_reader: Callable[[], dict[str, int]] | None = None,
-                  expected_mapper_baseline_kib: int = 0) -> dict:
+                  expected_mapper_baseline_kib: int = 0,
+                  development_progress_aware_psi: bool = False) -> dict:
     # The private development trial has its own run-bound mapper name. Its
     # caller must verify that exact mapping whenever sampling its status;
     # ordinary primary qualification retains its existing status reader.
@@ -3673,6 +3738,8 @@ def _run_workload(manifest: dict, active: dict, oracle_path: Path,
             expected_mapper_baseline_kib < 0 or
             expected_mapper_baseline_kib % (PAGE_BYTES // 1024) != 0):
         raise QualificationFailure("invalid expected mapper baseline")
+    if type(development_progress_aware_psi) is not bool:
+        raise QualificationFailure("invalid development-only PSI mode")
     worker_memory_mib = split_concurrent_workload_mib(workload_mib)
     token = os.urandom(8).hex()
     cgroup = _cgroup_create(token, resident_mib, swap_limit_mib, admitted=True)
@@ -3736,16 +3803,21 @@ def _run_workload(manifest: dict, active: dict, oracle_path: Path,
         if _mem_available_mib() < MIN_AVAILABLE_MIB:
             raise QualificationFailure(
                 f"host MemAvailable crossed {MIN_AVAILABLE_MIB} MiB early-stop threshold")
-        # FULL is a *stall-time* threshold for oracle tasks in this
-        # cgroup, not host RAM occupancy or proof that the out-of-cgroup
-        # swapz kernel worker stopped. Never use observed physical progress
-        # to waive the frozen 85%/5-second stop. The /proc/meminfo
-        # MemAvailable host-safety guard is independently enforced.
+        # FULL PSI measures stalled tasks INSIDE the cgroup, not physical
+        # kernel-worker inactivity. Official runs always stop at 85%/5s.
+        # Only the caller-selected dev correctness trial can proceed while
+        # positive, same-window SWAPZ-OWNED I/O is independently proven.
+        # Low host RAM, cgroup OOM, failed operations and loss of ownership
+        # remain independent immediate aborts.
         current_psi_total = _psi_total(pressure_path, PSI_STOP_KIND)
         observed_time = time.monotonic()
         stopped = psi_window.observe(observed_time, current_psi_total)
-        capture_progress(observed_time, force=stopped)
-        if stopped:
+        capture_progress(observed_time, force=stopped and
+                         not development_progress_aware_psi)
+        if (stopped and not (
+                development_progress_aware_psi and
+                _development_pressure_has_owned_progress(
+                    progress_samples, psi_window, workload_phase))):
             raise _workload_pressure_failure(
                 psi_window, cgroup, sample_status,
                 (manifest["device_major_int"], manifest["device_minor_int"]),
@@ -4037,7 +4109,10 @@ def _run_workload(manifest: dict, active: dict, oracle_path: Path,
         observed_time = time.monotonic()
         stopped = psi_window.observe(observed_time, psi_after)
         capture_progress(observed_time, force=stopped)
-        if stopped:
+        if (stopped and not (
+                development_progress_aware_psi and
+                _development_pressure_has_owned_progress(
+                    progress_samples, psi_window, "verify"))):
             raise _workload_pressure_failure(
                 psi_window, cgroup, sample_status,
                 (manifest["device_major_int"], manifest["device_minor_int"]), "final",

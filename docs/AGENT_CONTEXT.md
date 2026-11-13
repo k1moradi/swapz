@@ -60,6 +60,24 @@ still refuse. Keep the exact local source/artifact hashes, immutable physical
 header, device identity, ownership, and recovery checks at every use point.
 Never change local HEAD/origin/main while a device is admitted.
 
+## Development real-device progress-aware pressure safeguard
+
+The dedicated two-process cgroup is memory.max=128 MiB for 384 MiB of
+anonymous pages; sustained PSI FULL means the oracles are stalled, but swapz
+ordered kernel I/O runs OUTSIDE their cgroup. The real Inspiron run on
+5203bfe3 proved 6,782 WRITE completions and 27.9 million physical bytes
+in the same five-second window that exceeded 85% FULL. The unconditional
+stop therefore repeatedly prevented byte-exact pagein/reuse testing.
+ONLY the bounded development physical smoke may treat the existing 85%/5s
+PSI threshold as a demand for proven device progress instead of an immediate
+stop. Both failed/error status values must be zero and source-owned physical
+I/O must advance within >=3 seconds of matched samples; unknown or absent
+measurements still stop. Official production qualification keeps the
+unconditional 85% PSI stop. Host MemAvailable >=1 GiB, cgroup OOM/swap
+bounds, source/module/mapper ownership, 240s deadline, byte-verified pagein,
+slot reuse, and cleanup/recovery protections remain enforced. NEVER use
+host CPU/RAM utilization to dismiss the separate cgroup PSI pressure.
+
 ## Real-swap memory-pressure measurement (do not revert)
 
 The two concurrent anonymous-pageout oracles intentionally allocate more

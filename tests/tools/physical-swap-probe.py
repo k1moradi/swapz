@@ -4203,6 +4203,10 @@ def _run_algorithm_live_swap_oracle(mapper, state, target, state_dir):
     try:
         # Reuse the frozen 384/128/384 MiB cgroup workload, its scoped zswap
         # refusal, independent counters, byte oracle and normal child cleanup.
+        # Private correctness smoke only: high FULL PSI requires continued
+        # verified I/O to the actual mapper, rather than treating the cgroup
+        # oracle's stalls as proof that the out-of-cgroup worker is idle.
+        # The official primary qualification retains its hard PSI stop.
         # An advisory MADV_PAGEOUT or swap-cache hit is not physical evidence.
         result = workload._run_workload(
             {"run_id": state["run_id"], "device_major_int": target["major"],
@@ -4211,7 +4215,8 @@ def _run_algorithm_live_swap_oracle(mapper, state, target, state_dir):
             policy["workload_mib"], policy["resident_mib"],
             policy["swap_limit_mib"], policy["timeout_seconds"],
             telemetry_check=guard_mapper, status_reader=read_owned_status,
-            expected_mapper_baseline_kib=initial_mapper_used_kib)
+            expected_mapper_baseline_kib=initial_mapper_used_kib,
+            development_progress_aware_psi=True)
         guard_mapper()
     except (workload.Blocked, workload.QualificationFailure) as exc:
         # Keep the producer's first failure and cleanup disposition in private

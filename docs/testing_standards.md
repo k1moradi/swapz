@@ -2299,6 +2299,18 @@ finite privileged relay and official report parser matched, with rootless
 snapshot, reset, missing-value and malformed-input regressions.
 New rootless tests must prove high SOME/low FULL does not trip the whole-workload
 stop, high FULL still does, and the actual workload samples FULL before FILL.
+The *development-only physical correctness smoke* retains the 85%-FULL/5s
+trigger, but permits a bounded continuation only with >=3 seconds of matched
+samples and independently proven swapz-owned progress during the same PSI
+window. FILL needs >=64 completed swapz writes plus positive swapz physical
+WRITE bytes and lower-device WRITE sectors; VERIFY needs >=256 KiB swapz
+logical READs, positive swapz physical READ bytes and lower READ sectors.
+The most recent swapz failed/error fields must both be exactly zero. Unknown,
+regressed, unowned or insufficient metrics still trigger the original stop.
+The official production qualification retains an *unconditional* PSI stop.
+All other host-memory, cgroup OOM, swap bounds, source/device identity,
+timeout, byte verification, release and automatic recovery gates are unchanged.
+Never claim this development proof constitutes production stress admission.
 Kernel/cgroup evidence is parsed
 fail-closed: MemAvailable must retain its canonical kB unit, PSI has one
 monotonic numeric total, swapz byte counters are nonnegative, and failed= is
