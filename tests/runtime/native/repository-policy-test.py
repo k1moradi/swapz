@@ -306,6 +306,25 @@ class SyntheticRepositoryPolicy(unittest.TestCase):
         result = self.audit()
         self.assertEqual(result.returncode, 0, result.stderr)
 
+    def test_dkms_configuration_requires_compile_standard(self):
+        self.write("dkms.conf", 'MAKE[0]="make KERNELRELEASE="\n')
+        self.write("docs/testing_standards.md",
+                   "# Rules\nOriginal invariant.\nPackage test rule.\n")
+        self.commit("DKMS configuration with unrelated test standard")
+        result = self.audit()
+        self.assertNotEqual(result.returncode, 0)
+        for expected in ("path='dkms.conf'", "docs/compile.md",
+                         "first_error=missing applicable"):
+            self.assertIn(expected, result.stderr)
+
+    def test_compile_standard_is_applicable_to_dkms_configuration(self):
+        self.write("dkms.conf", 'MAKE[0]="make KERNELRELEASE="\n')
+        self.write("docs/compile.md",
+                   "# Rules\nOriginal invariant.\nDKMS wrapper rule.\n")
+        self.commit("DKMS configuration and compile standard")
+        result = self.audit()
+        self.assertEqual(result.returncode, 0, result.stderr)
+
     def test_compile_standard_is_applicable_to_compile_workflow(self):
         self.write(".github/workflows/product-codec.yml", "name: synthetic\n")
         self.write("docs/compile.md", "# Rules\nOriginal invariant.\nCI compile rule.\n")

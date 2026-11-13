@@ -10311,6 +10311,12 @@ evidence name to the console. The regression must verify the original DKMS
 exit status, rollback, private evidence mode and content, and absence of raw
 fixture paths in public output.
 
+The synthetic repository-policy regression must also cover the special
+`dkms.conf` applicability mapping: a testing-standard-only change must not
+satisfy its compile-standard requirement, while a meaningful `docs/compile.md`
+change must. Keep this check fail-closed; do not broaden the policy mapping to
+make an unrelated standard qualify DKMS build configuration.
+
 Production `make install` is admission-only and must not depend on the root
 `all` build target. It may consume only the already-qualified `swapzctl`,
 round-trip oracle and normal module bytes. Admission requires the exact

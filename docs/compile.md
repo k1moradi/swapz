@@ -318,6 +318,14 @@ qualified image, so rollback cannot leave a second module candidate behind.
 The qualified module digest, the retained package copy, and the module selected
 for a later checked load therefore identify the same bytes.
 
+DKMS prepends `KERNELRELEASE=<release>` to its configured `MAKE` and `CLEAN`
+commands. The swapz `src/kernel/Makefile` uses that variable to select between
+its outer staging wrapper and Kbuild declarations, so `dkms.conf` must clear
+the injected assignment after DKMS's prefix. This makes the staging wrapper
+prepare the exact provenance header and module path declared by
+`BUILT_MODULE_LOCATION` before invoking Kbuild. Do not remove the reset or
+replace the staged build path with a direct Kbuild invocation.
+
 Install/upgrade is serialized and transactional. An identical verified install
 is a no-op. A non-identical upgrade refuses a loaded swapz module or existing
 swapz mapper, stages replacement files before mutation and durably journals
