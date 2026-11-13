@@ -37,6 +37,12 @@ rootless_resume_suites=${SWAPZ_ROOTLESS_RESUME_SUITES:-}
 rootless_resume_formatter_sha256=${SWAPZ_ROOTLESS_RESUME_FORMATTER_SHA256:-}
 rootless_resume_module_sha256=${SWAPZ_ROOTLESS_RESUME_MODULE_SHA256:-}
 rootless_resume_oracle_sha256=${SWAPZ_ROOTLESS_RESUME_ORACLE_SHA256:-}
+# Keep the parent-generated ephemeral proof in this shell only, never
+# exported to child tests that can print arbitrary stdout/stderr.
+rootless_checkpoint_token=${SWAPZ_ROOTLESS_CHECKPOINT_TOKEN:-}
+if [[ ! $rootless_checkpoint_token =~ ^[0-9a-f]{32}$ ]]; then
+  rootless_checkpoint_token=
+fi
 # Native caches are eligible only on algorithm-tier runs. Retain selectors in
 # Bash locals for this stage's Make invocation, never in fixture environments.
 rootless_native_cache_mode=
@@ -49,6 +55,7 @@ fi
 unset SWAPZ_ROOTLESS_RESUME_SUITES SWAPZ_ROOTLESS_RESUME_FORMATTER_SHA256
 unset SWAPZ_ROOTLESS_RESUME_MODULE_SHA256 SWAPZ_ROOTLESS_RESUME_ORACLE_SHA256
 unset SWAPZ_NATIVE_CACHE_MODE SWAPZ_NATIVE_CACHE_KDIR
+unset SWAPZ_ROOTLESS_CHECKPOINT_TOKEN
 
 rootless_should_run_suite() {
   local formatter_digest module_digest oracle_digest
@@ -88,6 +95,14 @@ rootless_should_run_suite() {
   fi
   return 0
 }
+# The parent records private PASS only after this additional source-controlled
+# completion proof. Progress labels remain observational.
+rootless_report_checkpoint_pass() {
+  if [[ -n $rootless_checkpoint_token ]]; then
+    printf 'ROOTLESS_CHECKPOINT_PASS token=%s index=%d label=%s\n' \
+      "$rootless_checkpoint_token" "$rootless_timing_index" "$rootless_timed_phase"
+  fi
+}
 # Stream only these source-controlled labels. The reporter filters them before
 # displaying progress; completed times are not qualification evidence.
 printf 'ROOTLESS_PHASE_PROGRESS state=START index=%d elapsed_s=0 label=%s\n' \
@@ -109,6 +124,7 @@ rootless_begin_phase() {
   else
     printf 'ROOTLESS_PHASE_PROGRESS state=PASS index=%d elapsed_s=%d label=%s\n' \
       "$rootless_timing_index" "$phase_elapsed_seconds" "$rootless_timed_phase"
+    rootless_report_checkpoint_pass
   fi
   rootless_timing_index=$((rootless_timing_index + 1))
   rootless_timed_phase=$rootless_phase
@@ -1291,6 +1307,7 @@ printf 'ROOTLESS_PHASE_PROGRESS state=PASS index=%d elapsed_s=%d label=%s\n' \
   "$rootless_timing_index" \
   "$((rootless_timing_finished_seconds - rootless_phase_started_seconds))" \
   "$rootless_phase"
+rootless_report_checkpoint_pass
 for phase_index in "${!rootless_timing_names[@]}"; do
   printf 'ROOTLESS_PHASE_TIMING index=%d elapsed_s=%d label=%s\n' \
     "$phase_index" "${rootless_timing_seconds[phase_index]}" \

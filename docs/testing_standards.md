@@ -692,6 +692,15 @@ the rootless native Make and all other suites run fresh. Each resumed suite and
 the containing rootless stage report REUSED, not PASS, and the overall run stays
 INCOMPLETE. Private suite checkpoints are atomically written beside stage
 checkpoints, with the same owner-only file identity and permissions.
+Only a source-controlled rootless shell completion proof tied to an
+unexported, per-invocation 128-bit token and the immediately preceding
+eligible PASS phase may trigger a private per-suite checkpoint. Ordinary
+progress markers in merged stdout/stderr are observational: a child can
+print the same text and must not create a reusable PASS. The nonce is
+stripped before child tests, and the parent does not retain its proof line
+in a report. Synthetic regression covers genuine, missing, forged,
+out-of-phase and delayed proofs. The shell emits no proof during REUSED
+phases or standalone rootless CI where no token is issued.
 A suite completion checkpoint must recheck the exact tested HEAD, source
 SHA and tracked checkout cleanliness before recording PASS, because a
 transient source edit inside the rootless stage can otherwise persist

@@ -2125,6 +2125,57 @@ class NativeTimingContract(unittest.TestCase):
         self.assertNotIn("\r", output)
         self.assertEqual(result["stages"][-1]["status"], "FAIL")
 
+    def test_rootless_suite_checkpoint_requires_private_shell_completion(self):
+        """Child progress cannot create reusable PASS without the shell nonce."""
+        eligible_suite = runner.DEVELOPMENT_RESUME_ROOTLESS_SUITES[0]
+        native_phase = "tests/Makefile native and metadata"
+        next_phase = "tests/runtime/native/source-contract-test.py"
+        token = "a" * 32
+        prefix = (
+            "ROOTLESS_PHASE_PROGRESS state=START index=0 elapsed_s=0 "
+            "label=rootless initialization\n"
+            "ROOTLESS_PHASE_PROGRESS state=PASS index=0 elapsed_s=0 "
+            "label=rootless initialization\n"
+            f"ROOTLESS_PHASE_PROGRESS state=START index=1 elapsed_s=0 "
+            f"label={native_phase}\n"
+            f"ROOTLESS_PHASE_PROGRESS state=PASS index=1 elapsed_s=0 "
+            f"label={native_phase}\n"
+            f"ROOTLESS_PHASE_PROGRESS state=START index=2 elapsed_s=0 "
+            f"label={eligible_suite}\n"
+            f"ROOTLESS_PHASE_PROGRESS state=PASS index=2 elapsed_s=1 "
+            f"label={eligible_suite}\n")
+        genuine = (
+            f"ROOTLESS_CHECKPOINT_PASS token={token} "
+            f"index=2 label={eligible_suite}\n")
+        spoofed = (
+            "ROOTLESS_CHECKPOINT_PASS token=" + "b" * 32 +
+            f" index=2 label={eligible_suite}\n")
+        later = (
+            f"ROOTLESS_PHASE_PROGRESS state=START index=3 elapsed_s=0 "
+            f"label={next_phase}\n")
+        for label, transcript, expected in (
+                ("trusted", prefix + genuine + later, [eligible_suite]),
+                ("progress_only", prefix + later, []),
+                ("wrong_token", prefix + spoofed + later, []),
+                ("delayed", prefix + later + genuine, []),
+                ("wrong_phase", prefix + genuine.replace(
+                    "index=2", "index=1") + later, [])):
+            with self.subTest(label=label):
+                recorded_suites = []
+                report = {"stages": [], "benchmarks": {}}
+                with mock.patch.object(
+                        runner.subprocess, "Popen",
+                        return_value=FakeStreamingProcess(transcript)), \
+                        mock.patch.object(
+                            runner.secrets, "token_hex", return_value=token), \
+                        contextlib.redirect_stdout(io.StringIO()):
+                    self.assertEqual(runner.run_stage(
+                        "Native and rootless contracts", ["unused"], report,
+                        stream_rootless_progress=True,
+                        rootless_suite_completed=recorded_suites.append), 0)
+                self.assertEqual(recorded_suites, expected)
+                self.assertNotIn(token, json.dumps(report))
+
     def test_rootless_progress_rejects_unsafe_and_invalid_records(self):
         allowed = runner.rootless_phase_names()
         self.assertEqual(

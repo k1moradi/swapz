@@ -8,6 +8,7 @@ import json
 import math
 import os
 import re
+import secrets
 import signal
 from pathlib import Path
 import stat
@@ -3797,6 +3798,12 @@ ROOTLESS_PROGRESS_PATTERN = re.compile(
     r"index=(0|[1-9][0-9]{0,2}) "
     r"elapsed_s=(0|[1-9][0-9]{0,7}) "
     r"label=([A-Za-z0-9_./ :+-]{1,128})")
+# Ordinary progress is observational. Only a matching per-invocation marker
+# from the rootless shell is allowed to create a persistent PASS checkpoint.
+ROOTLESS_CHECKPOINT_PASS_PATTERN = re.compile(
+    r"ROOTLESS_CHECKPOINT_PASS token=([0-9a-f]{32}) "
+    r"index=(0|[1-9][0-9]{0,2}) "
+    r"label=([A-Za-z0-9_./ :+-]{1,128})")
 
 
 def rootless_phase_progress(line, allowed_names):
@@ -4658,6 +4665,8 @@ def run_stage(title, command, result, *, parse_bench=False,
     rootless_reused_suites = []
     native_reused_suites = []
     rootless_unexpected_reuse = False
+    rootless_checkpoint_token = None
+    rootless_pending_checkpoint = None
 
     def emit_progress_row(suite, phase_index, phase, verdict, duration,
                           *, overwrite=False):
@@ -4689,7 +4698,8 @@ def run_stage(title, command, result, *, parse_bench=False,
                 "SWAPZ_ROOTLESS_RESUME_SUITES",
                 "SWAPZ_ROOTLESS_RESUME_FORMATTER_SHA256",
                 "SWAPZ_ROOTLESS_RESUME_MODULE_SHA256",
-                "SWAPZ_ROOTLESS_RESUME_ORACLE_SHA256"):
+                "SWAPZ_ROOTLESS_RESUME_ORACLE_SHA256",
+                "SWAPZ_ROOTLESS_CHECKPOINT_TOKEN"):
             child_env.pop(selector, None)
         tested_source = result.get("tested_commit_sha")
         if isinstance(tested_source, str) and re.fullmatch(
@@ -4702,6 +4712,12 @@ def run_stage(title, command, result, *, parse_bench=False,
                 isinstance(native_cache_kdir, str) and native_cache_kdir):
             child_env["SWAPZ_NATIVE_CACHE_MODE"] = native_cache_mode
             child_env["SWAPZ_NATIVE_CACHE_KDIR"] = native_cache_kdir
+        if stream_rootless_progress and rootless_suite_completed is not None:
+            # An unexported Bash local retains this token, while each test
+            # command inherits an environment with the selector removed.
+            rootless_checkpoint_token = secrets.token_hex(16)
+            child_env["SWAPZ_ROOTLESS_CHECKPOINT_TOKEN"] = (
+                rootless_checkpoint_token)
         if stream_rootless_progress and rootless_resume_suites:
             artifacts = qualification_artifact_digests()
             if owner_qualification_artifacts_available(artifacts):
@@ -4736,6 +4752,20 @@ def run_stage(title, command, result, *, parse_bench=False,
             negative_case = None
             assert proc.stdout is not None
             for line in proc.stdout:
+                if (stream_rootless_progress and rootless_checkpoint_token and
+                        line.startswith("ROOTLESS_CHECKPOINT_PASS ")):
+                    marker = ROOTLESS_CHECKPOINT_PASS_PATTERN.fullmatch(
+                        line.rstrip("\n"))
+                    if (marker is not None and
+                            marker.group(1) == rootless_checkpoint_token and
+                            rootless_pending_checkpoint ==
+                            (int(marker.group(2)), marker.group(3))):
+                        # Do not retain the ephemeral token in public reports
+                        # or diagnostics. This authenticates the shell's
+                        # completed suite boundary, not arbitrary child text.
+                        rootless_pending_checkpoint = None
+                        rootless_suite_completed(marker.group(3))
+                        continue
                 chunks.append(line)
                 if stream_rootless_progress:
                     for native_suite in DEVELOPMENT_RESUME_NATIVE_SUITES:
@@ -4753,6 +4783,9 @@ def run_stage(title, command, result, *, parse_bench=False,
                         if (state == "START" and seconds == 0 and
                                 index == rootless_next_index and
                                 rootless_active_phase is None):
+                            # A delayed marker from a previous phase is not
+                            # eligible once the next phase begins.
+                            rootless_pending_checkpoint = None
                             rootless_active_phase = name
                             rootless_active_started = time.monotonic()
                             if rootless_is_tty:
@@ -4766,9 +4799,11 @@ def run_stage(title, command, result, *, parse_bench=False,
                                     rootless_unexpected_reuse = True
                                 else:
                                     rootless_reused_suites.append(name)
-                            elif (rootless_suite_completed is not None and
+                            elif (rootless_checkpoint_token is not None and
                                   name in DEVELOPMENT_RESUME_ROOTLESS_SUITES):
-                                rootless_suite_completed(name)
+                                # PASS progress does not, by itself, authorize
+                                # a resumable checkpoint on a merged stream.
+                                rootless_pending_checkpoint = (index, name)
                             effective_state = (
                                 "REUSED" if name ==
                                 "tests/Makefile native and metadata" and
