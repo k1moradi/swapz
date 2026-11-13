@@ -7009,6 +7009,28 @@ The native-wave guard's source contract must match a real source-line
 boundary rather than a literal backslash-n sequence. This assertion is
 observational only and cannot alter the chosen replay engine or oracle.
 
+Native 4KiB prefill is a separate **development-only opt-in**
+(`--native-prefill` requires `--native-replay`), never an automatic loaded
+qualification shortcut. The default Python prefill and full `preadv` byte
+oracle must remain unchanged. Only after the same canonical fixture/trace
+hash, plan and opened-device admission may the owner inherit its already
+verified device/fixture FDs into the native helper. A distinct, parent-death
+protected, private-memory-guarded child performs precisely one ordered 4KiB
+positional WRITE per logical page, one fsync, then precisely one aligned
+4KiB positional READ and full memcmp per logical page, using the already
+validated stride/offset mapping. It must reject short I/O, byte mismatch,
+bad descriptor identity/geometry, private protection failure and extra or
+missing completion bytes. The parent must reap it with a bounded timeout
+**before** any timed worker starts; a successful C completion marker never
+replaces independent Python prefill SHA admission or the later full-image
+post-replay oracle. Retain the same separate arm ownership and watchdog
+boundaries, and never print arbitrary helper stderr or private fixture data.
+Rootless parity tests must compare Python/native prefill with default and
+striped maps, complete device bytes and hashes, refuse forged digest and
+readonly/invalid descriptors, and confirm no measured replay or report
+publication after a failed prefill. Do not enable native prefill by default
+until current-source loaded and slow-host equivalence has been demonstrated.
+
 A replay arm's prefill must retain independent opened-device admission,
 all 4096-byte positional writes, final prefill fsync, all positional readback
 and byte-by-byte comparison, and the same canonical prefill SHA. Following

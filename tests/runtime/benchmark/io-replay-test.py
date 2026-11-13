@@ -1804,6 +1804,129 @@ class PairReplayContract(unittest.TestCase):
                 self.assertNotIn("BENCH_IO_PHASE=off:mixed", rejected.stderr)
                 self.assertFalse(forbidden.exists())
 
+    def test_opt_in_native_prefill_matches_python_and_rejects_bad_descriptors(self):
+        native = self.require_native_tool("io-replay-native", "prefill-oracle")
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            pages = [bytes((index * 17 + position) % 256
+                           for position in range(PAGE))
+                     for index in range(7)]
+            fixture = root / "fixture.bin"
+            fixture.write_bytes(b"".join(pages))
+            plan = root / "plan"
+            self.run_cmd(
+                "prepare", "--fixture", fixture, "--output-dir", plan,
+                "--qd", 4, "--logical-pages", 64, "--writer-pages", 16,
+                "--reader-start", 32, "--reader-pages", 16,
+                "--warmup-ops", 8, "--measure-ops", 32,
+                "--read-pct", 0, "--iops", 0)
+            original_manifest = json.loads((plan / "manifest.json").read_text())
+            rows = [json.loads(line) for line in
+                    (plan / "trace.jsonl").read_text().splitlines()]
+            for stride, offset in ((1, 0), (2, 1), (17, 3)):
+                with self.subTest(stride=stride, offset=offset):
+                    initial = [(page * stride + offset) % len(pages)
+                               for page in range(64)]
+                    final = initial.copy()
+                    for row in rows:
+                        final[row["page"]] = row["fixture"]
+                    before_digest = hashlib.sha256(b"".join(
+                        pages[index] for index in initial)).hexdigest()
+                    after_digest = hashlib.sha256(b"".join(
+                        pages[index] for index in final)).hexdigest()
+                    manifest = dict(
+                        original_manifest,
+                        prefill_fixture_stride=stride,
+                        prefill_fixture_offset=offset,
+                        prefill_sha256=before_digest,
+                        expected_post_sha256=after_digest)
+                    manifest_path = root / f"manifest-{stride}.json"
+                    manifest_path.write_text(json.dumps(manifest))
+                    reports = []
+                    for native_prefill in (False, True):
+                        label = "native" if native_prefill else "python"
+                        target = root / f"swapz-replay-prefill-{stride}-{label}.bin"
+                        with target.open("wb") as handle:
+                            handle.truncate(64 * PAGE)
+                        result = root / f"result-{stride}-{label}.json"
+                        opts = ("--native-prefill",) if native_prefill else ()
+                        self.run_cmd(
+                            "run", "--fixture", fixture,
+                            "--trace", plan / "trace.jsonl",
+                            "--manifest", manifest_path,
+                            "--device", target, "--candidate", "off",
+                            "--source-sha", "rootless-no-module",
+                            "--regular-file-test", "--native-replay",
+                            "--result", result, *opts)
+                        report = json.loads(result.read_text())
+                        self.assertEqual(report["verdict"], "PASS")
+                        self.assertEqual(report["prefill_sha256"], before_digest)
+                        self.assertEqual(report["verified_post_sha256"], after_digest)
+                        self.assertEqual(
+                            hashlib.sha256(target.read_bytes()).hexdigest(),
+                            after_digest)
+                        reports.append(report)
+                    for field in (
+                            "fixture_sha256", "trace_sha256",
+                            "write_payload_stream_sha256", "prefill_sha256",
+                            "expected_post_sha256", "verified_post_sha256",
+                            "write_ops", "read_ops"):
+                        self.assertEqual(reports[0][field], reports[1][field])
+
+            target = root / "swapz-replay-prefill-1-native.bin"
+            forbidden = root / "forbidden-result.json"
+            rejected = self.run_cmd(
+                "run", "--fixture", fixture,
+                "--trace", plan / "trace.jsonl",
+                "--manifest", plan / "manifest.json",
+                "--device", target, "--candidate", "off",
+                "--source-sha", "rootless-no-module",
+                "--regular-file-test", "--native-prefill",
+                "--result", forbidden, success=False)
+            self.assertIn("native prefill requires native replay", rejected.stderr)
+            self.assertFalse(forbidden.exists())
+
+            # A forged digest is still refused after all full-page native
+            # comparisons and before entering the measured native worker.
+            malformed = dict(original_manifest, prefill_sha256="0" * 64)
+            malformed_manifest = root / "malformed-native-prefill.json"
+            malformed_manifest.write_text(json.dumps(malformed))
+            blocked_device = root / "swapz-replay-prefill-blocked.bin"
+            with blocked_device.open("wb") as handle:
+                handle.truncate(64 * PAGE)
+            bad_digest = self.run_cmd(
+                "run", "--fixture", fixture,
+                "--trace", plan / "trace.jsonl",
+                "--manifest", malformed_manifest,
+                "--device", blocked_device, "--candidate", "off",
+                "--source-sha", "rootless-no-module",
+                "--regular-file-test", "--native-replay", "--native-prefill",
+                "--result", forbidden, success=False)
+            self.assertIn("prefill image digest mismatches shared trace",
+                          bad_digest.stderr)
+            self.assertNotIn("BENCH_IO_PHASE=off:mixed", bad_digest.stderr)
+            self.assertFalse(forbidden.exists())
+
+            # Invoke the exact low-level helper on a read-only regular file:
+            # an opened descriptor cannot be silently promoted to writable.
+            with fixture.open("rb") as source, target.open("rb") as readonly:
+                command = [
+                    str(native), "prefill", str(readonly.fileno()),
+                    str(source.fileno()), "64", "1", "0",
+                ]
+                failed = subprocess.run(
+                    command, pass_fds=(readonly.fileno(), source.fileno()),
+                    capture_output=True, text=True, timeout=10)
+                self.assertNotEqual(failed.returncode, 0)
+                self.assertIn("short prefill WRITE", failed.stderr)
+                self.assertNotIn("PREFILL_VERIFIED", failed.stdout)
+                bad_geometry = subprocess.run(
+                    command[:-2] + ["0", "0"],
+                    pass_fds=(readonly.fileno(), source.fileno()),
+                    capture_output=True, text=True, timeout=10)
+                self.assertNotEqual(bad_geometry.returncode, 0)
+                self.assertNotIn("PREFILL_VERIFIED", bad_geometry.stdout)
+
     def test_prefill_mapping_cached_per_arm_preserves_all_page_oracles(self):
         # READs and WRITEs must use the same validated stride/offset while
         # avoiding a per-page manifest lookup or extra indices allocation.

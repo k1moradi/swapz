@@ -8077,6 +8077,34 @@ int main(void)
             "def test_latency_percentiles_match_legacy_floor_index_with_one_sort",
             fixtures)
 
+    def test_opt_in_native_prefill_preserves_checked_python_fallback(self):
+        native = (ROOT / "tests/runtime/benchmark/io-replay-native.c").read_text()
+        replay = (ROOT / "tests/runtime/benchmark/io-replay.py").read_text()
+        tests = (ROOT / "tests/runtime/benchmark/io-replay-test.py").read_text()
+        self.assertIn('argc == 7 && strcmp(argv[1], "prefill") == 0', native)
+        self.assertIn("static int run_native_prefill(", native)
+        self.assertIn("retry_pwrite(device_fd, expected,", native)
+        self.assertIn("fsync(device_fd)", native)
+        self.assertIn("retry_pread(device_fd, read_page,", native)
+        self.assertIn("memcmp(read_page, expected, SWAPZ_REPLAY_PAGE_BYTES)", native)
+        self.assertIn('puts("PREFILL_VERIFIED")', native)
+        self.assertIn("PR_SET_PDEATHSIG", native)
+        self.assertIn("mlockall(MCL_CURRENT | MCL_FUTURE)", native)
+        self.assertIn('run.add_argument("--native-prefill"', replay)
+        self.assertIn("if args.native_prefill and not args.native_replay:", replay)
+        self.assertIn("if args.native_prefill:", replay)
+        self.assertIn("run_native_prefill(", replay)
+        self.assertIn("completed.stdout != \"PREFILL_VERIFIED\\n\"", replay)
+        self.assertIn("os.fsync(fd)", replay)
+        self.assertIn("full_read(fd, page, scratch, chunks[fixture_index], read_iov)",
+                      replay)
+        self.assertIn(
+            "if prefill_digest.hexdigest() != mf[\"prefill_sha256\"]:",
+            replay)
+        self.assertIn(
+            "def test_opt_in_native_prefill_matches_python_and_rejects_bad_descriptors",
+            tests)
+
     def test_native_replay_skips_threaded_wave_allocation_and_reuses_read_iov(self):
         replay = (ROOT / "tests/runtime/benchmark/io-replay.py").read_text()
         fixtures = (ROOT / "tests/runtime/benchmark/io-replay-test.py").read_text()

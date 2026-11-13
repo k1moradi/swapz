@@ -357,6 +357,146 @@ static int write_results(const struct replay_context *ctx)
 	return 0;
 }
 
+/*
+ * Optional, untimed prefill. The Python owner has independently authenticated
+ * the trace, fixture, opened target and requested mapping before inheritance.
+ * Keep the exact single-page pwrite/fsync/pread + byte oracle ordering; this
+ * mode never starts measured workers or returns success on a short I/O.
+ */
+static int run_native_prefill(int argc, char **argv)
+{
+	struct stat fixture_stat, device_stat;
+	uint64_t values[5];
+	uint64_t logical_pages, stride, offset, fixture_pages;
+	const uint8_t *fixture = MAP_FAILED;
+	uint8_t *read_page = NULL;
+	const char *failure = "arguments";
+	const char *private_fixture = getenv("SWAPZ_PRIVATE_FIXTURE");
+	size_t index;
+	int device_fd, fixture_fd;
+	int error = 0;
+
+	if (argc != 7 || strcmp(argv[1], "prefill") != 0)
+		return 2;
+	for (index = 2; index < 7; ++index) {
+		if (!parse_u64(argv[index], &values[index - 2])) {
+			error = EINVAL;
+			goto out;
+		}
+	}
+	if (values[0] > INT32_MAX || values[1] > INT32_MAX ||
+	    !values[2] || values[2] > INT64_MAX / SWAPZ_REPLAY_PAGE_BYTES ||
+	    !values[3] || values[4] >= values[3] ||
+	    (values[2] - 1) > (UINT64_MAX - values[4]) / values[3]) {
+		error = EINVAL;
+		goto out;
+	}
+	device_fd = (int)values[0];
+	fixture_fd = (int)values[1];
+	logical_pages = values[2];
+	stride = values[3];
+	offset = values[4];
+
+	failure = "parent death protection";
+	if (prctl(PR_SET_PDEATHSIG, SIGTERM) != 0 || getppid() == 1) {
+		error = errno ? errno : EPROTO;
+		goto out;
+	}
+	if (private_fixture && strcmp(private_fixture, "1") == 0) {
+		const struct rlimit zero_core = { .rlim_cur = 0, .rlim_max = 0 };
+
+		failure = "private memory protection";
+		if (setrlimit(RLIMIT_CORE, &zero_core) != 0 ||
+		    prctl(PR_SET_DUMPABLE, 0, 0L, 0L, 0L) != 0 ||
+		    mlockall(MCL_CURRENT | MCL_FUTURE) != 0) {
+			error = errno;
+			goto out;
+		}
+	}
+	failure = "opened descriptor admission";
+	if (fstat(fixture_fd, &fixture_stat) != 0 ||
+	    fstat(device_fd, &device_stat) != 0) {
+		error = errno;
+		goto out;
+	}
+	if (!S_ISREG(fixture_stat.st_mode) || fixture_stat.st_size <= 0 ||
+	    fixture_stat.st_size % SWAPZ_REPLAY_PAGE_BYTES ||
+	    (!S_ISBLK(device_stat.st_mode) && !S_ISREG(device_stat.st_mode)) ||
+	    (S_ISREG(device_stat.st_mode) &&
+	     ((device_stat.st_dev == fixture_stat.st_dev &&
+	       device_stat.st_ino == fixture_stat.st_ino) ||
+	      device_stat.st_size < 0 ||
+	      (uint64_t)device_stat.st_size <
+		      logical_pages * SWAPZ_REPLAY_PAGE_BYTES))) {
+		error = EINVAL;
+		goto out;
+	}
+	fixture_pages = (uint64_t)fixture_stat.st_size / SWAPZ_REPLAY_PAGE_BYTES;
+	fixture = mmap(NULL, (size_t)fixture_stat.st_size, PROT_READ,
+		       MAP_PRIVATE, fixture_fd, 0);
+	if (fixture == MAP_FAILED) {
+		error = errno;
+		goto out;
+	}
+	failure = "prefill buffer allocation";
+	error = posix_memalign((void **)&read_page, SWAPZ_REPLAY_PAGE_BYTES,
+			       SWAPZ_REPLAY_PAGE_BYTES);
+	if (error)
+		goto out;
+
+	for (uint64_t page = 0; page < logical_pages; ++page) {
+		const uint64_t fixture_index = (page * stride + offset) % fixture_pages;
+		const uint8_t *expected = fixture +
+			(size_t)fixture_index * SWAPZ_REPLAY_PAGE_BYTES;
+		const off_t page_offset = (off_t)(page * SWAPZ_REPLAY_PAGE_BYTES);
+		ssize_t bytes;
+
+		failure = "short prefill WRITE";
+		bytes = retry_pwrite(device_fd, expected, SWAPZ_REPLAY_PAGE_BYTES,
+				     page_offset);
+		if (bytes != SWAPZ_REPLAY_PAGE_BYTES) {
+			error = bytes < 0 ? errno : EIO;
+			goto out;
+		}
+	}
+	failure = "prefill fsync";
+	if (fsync(device_fd) != 0) {
+		error = errno;
+		goto out;
+	}
+	for (uint64_t page = 0; page < logical_pages; ++page) {
+		const uint64_t fixture_index = (page * stride + offset) % fixture_pages;
+		const uint8_t *expected = fixture +
+			(size_t)fixture_index * SWAPZ_REPLAY_PAGE_BYTES;
+		const off_t page_offset = (off_t)(page * SWAPZ_REPLAY_PAGE_BYTES);
+		ssize_t bytes;
+
+		failure = "short prefill READ";
+		bytes = retry_pread(device_fd, read_page, SWAPZ_REPLAY_PAGE_BYTES,
+				    page_offset);
+		if (bytes != SWAPZ_REPLAY_PAGE_BYTES) {
+			error = bytes < 0 ? errno : EIO;
+			goto out;
+		}
+		failure = "prefill byte oracle";
+		if (memcmp(read_page, expected, SWAPZ_REPLAY_PAGE_BYTES) != 0) {
+			error = EIO;
+			goto out;
+		}
+	}
+out:
+	free(read_page);
+	if (fixture != MAP_FAILED)
+		munmap((void *)fixture, (size_t)fixture_stat.st_size);
+	if (error) {
+		dprintf(STDERR_FILENO, "io-replay-native: %s: %s\n",
+			failure, strerror(error));
+		return 2;
+	}
+	puts("PREFILL_VERIFIED");
+	return 0;
+}
+
 int main(int argc, char **argv)
 {
 	struct replay_context ctx = {0};
@@ -375,6 +515,8 @@ int main(int argc, char **argv)
 	const char *private_fixture = getenv("SWAPZ_PRIVATE_FIXTURE");
 
 	setvbuf(stdout, NULL, _IOLBF, 0);
+	if (argc == 7 && strcmp(argv[1], "prefill") == 0)
+		return run_native_prefill(argc, argv);
 	if (argc != 9) {
 		fprintf(stderr,
 			"usage: %s DEVICE_FD FIXTURE_FD PLAN_FD RESULT_FD QD "

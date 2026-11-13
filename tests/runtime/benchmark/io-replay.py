@@ -1059,6 +1059,42 @@ def full_read(fd, page, buf, expected, read_iov):
         raise OSError("short or mismatched logical page read")
 
 
+def run_native_prefill(device_fd, fixture_fd, logical_pages,
+                       fixture_stride, fixture_offset):
+    """Opt-in untimed 4KiB native prefill and independent byte oracle.
+
+    The parent already authenticated the canonical trace, fixture and opened
+    target. It owns both inherited descriptors and reaps this child before
+    the separate measured replay starts.
+    """
+    if not NATIVE_REPLAY_HELPER.is_file() or not os.access(
+            NATIVE_REPLAY_HELPER, os.X_OK):
+        raise ValueError("native prefill helper is missing")
+    try:
+        completed = subprocess.run(
+            [str(NATIVE_REPLAY_HELPER), "prefill", str(device_fd),
+             str(fixture_fd), str(logical_pages),
+             str(fixture_stride), str(fixture_offset)],
+            pass_fds=(device_fd, fixture_fd),
+            capture_output=True, text=True, check=False, timeout=600)
+    except subprocess.TimeoutExpired as error:
+        raise ValueError("native prefill exceeded bounded watchdog") from error
+    if completed.returncode or completed.stdout != "PREFILL_VERIFIED\n":
+        # Never relay untrusted subprocess output or raw device/path details.
+        # Only fixed error categories from this audited helper may appear.
+        categories = ("arguments", "parent death protection",
+                      "private memory protection", "opened descriptor admission",
+                      "prefill buffer allocation", "short prefill WRITE", "prefill fsync",
+                      "short prefill READ", "prefill byte oracle")
+        category = next(
+            (name for name in categories
+             if completed.stderr.startswith("io-replay-native: " + name + ":")),
+            "unexpected helper result")
+        raise ValueError(
+            "native prefill failed before measured replay "
+            f"(category={category}, exit={completed.returncode})")
+
+
 def process_cpu():
     """Replay process+threads CPU, excluding dm kernel worker threads."""
     ru = resource.getrusage(resource.RUSAGE_SELF)
@@ -2220,6 +2256,8 @@ def measure_packed_swapin(fd, path, identity, chunks, logical_pages, qd,
 
 
 def replay(args):
+    if args.native_prefill and not args.native_replay:
+        raise ValueError("native prefill requires native replay")
     if bool(args.stripe_ready_file) != bool(args.stripe_start_file):
         raise ValueError("incomplete private striped start gate")
     if args.stripe_ready_file and not args.native_replay:
@@ -2229,6 +2267,8 @@ def replay(args):
     mf = safe_load(args.manifest)
     if mf.get("schema") != SCHEMA or mf.get("page_bytes") != PAGE:
         raise ValueError("unsupported trace schema")
+    if args.native_prefill and mf["iops"] != 0:
+        raise ValueError("native prefill requires unpaced replay")
     count, fixture_hash = fixture_info(args.fixture)
     if fixture_hash != mf["fixture_sha256"] or count != mf["fixture_pages"]:
         raise ValueError("fixture differs from exact shared workload manifest")
@@ -2269,33 +2309,40 @@ def replay(args):
                     opened.st_dev, opened.st_ino
                 ) != (current.st_dev, current.st_ino):
                     raise ValueError("opened rootless fixture differs from preflight")
-            bufmap = mmap.mmap(-1, PAGE)
-            scratch = memoryview(bufmap)
-            try:
-                read_iov = [scratch]
-                # check_plan() already validated this immutable prefill
-                # geometry for every logical page. Cache it on the stack
-                # instead of revalidating two manifest lookups per 4KiB I/O.
-                prefill_stride = mf.get("prefill_fixture_stride", 1)
-                prefill_offset = mf.get("prefill_fixture_offset", 0)
-                logical_pages = mf["logical_pages"]
+            # Canonical validation completed before opening the target.
+            # Both paths retain the same ordered page writes, fsync, full
+            # readback byte oracle, and prefill digest admission.
+            prefill_stride = mf.get("prefill_fixture_stride", 1)
+            prefill_offset = mf.get("prefill_fixture_offset", 0)
+            logical_pages = mf["logical_pages"]
+            prefill_digest = hashlib.sha256()
+            if args.native_prefill:
+                run_native_prefill(
+                    fd, source.fileno(), logical_pages,
+                    prefill_stride, prefill_offset)
                 for page in range(logical_pages):
                     fixture_index = (page * prefill_stride + prefill_offset) % count
-                    full_write(fd, page, chunks[fixture_index])
-                os.fsync(fd)
-                prefill_digest = hashlib.sha256()
-                for page in range(logical_pages):
-                    fixture_index = (page * prefill_stride + prefill_offset) % count
-                    full_read(fd, page, scratch, chunks[fixture_index], read_iov)
-                    # Hash each proven-equal expected page while the readback
-                    # buffer is still live. No independent oracle check or
-                    # 4096-byte read is skipped, including on a mismatch.
                     prefill_digest.update(chunks[fixture_index])
-                if prefill_digest.hexdigest() != mf["prefill_sha256"]:
-                    raise ValueError("prefill image digest mismatches shared trace")
-            finally:
-                scratch.release()
-                bufmap.close()
+            else:
+                bufmap = mmap.mmap(-1, PAGE)
+                scratch = memoryview(bufmap)
+                try:
+                    read_iov = [scratch]
+                    for page in range(logical_pages):
+                        fixture_index = (page * prefill_stride + prefill_offset) % count
+                        full_write(fd, page, chunks[fixture_index])
+                    os.fsync(fd)
+                    for page in range(logical_pages):
+                        fixture_index = (page * prefill_stride + prefill_offset) % count
+                        full_read(fd, page, scratch, chunks[fixture_index], read_iov)
+                        # Hash each proven-equal expected page while the
+                        # readback buffer is live. No full read is skipped.
+                        prefill_digest.update(chunks[fixture_index])
+                finally:
+                    scratch.release()
+                    bufmap.close()
+            if prefill_digest.hexdigest() != mf["prefill_sha256"]:
+                raise ValueError("prefill image digest mismatches shared trace")
 
             t_prefill_done = time.monotonic()
             print(f"BENCH_IO_PHASE={args.candidate}:mixed", file=sys.stderr, flush=True)
@@ -2848,6 +2895,8 @@ def main():
                      help=argparse.SUPPRESS)
     run.add_argument("--native-replay", action="store_true",
                      help="private pre-created native worker replay for modern envelopes")
+    run.add_argument("--native-prefill", action="store_true",
+                     help=argparse.SUPPRESS)
     run.add_argument("--owned-nullblk-name")
     run.add_argument("--expected-dev")
     run.add_argument("--expected-lower-dev")
