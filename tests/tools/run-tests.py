@@ -4490,15 +4490,38 @@ def parse_rootless_phase_timings(output):
         r"elapsed_s=(0|[1-9][0-9]{0,7}) "
         r"label=([A-Za-z0-9_./ :+-]{1,128})")
     timings = []
+    seen_labels = set()
     for line in records:
         match = pattern.fullmatch(line)
         if match is None or int(match.group(1)) != len(timings):
             return None
         label = match.group(3)
-        if not rootless_phase_name_allowed(label, allowed_names):
+        if (label in seen_labels or
+                not rootless_phase_name_allowed(label, allowed_names)):
             return None
+        seen_labels.add(label)
         timings.append({"name": label, "elapsed_s": int(match.group(2))})
     return timings
+
+
+def rootless_phase_timings_fit_stage(timings, stage_elapsed_seconds):
+    """Bound optional worker timings without equating CPU time to wall time.
+
+    Rootless worker groups may run in parallel, so the sum of durations is
+    *not* the stage elapsed time. A worker cannot outlive its stage, and
+    no more than 18 rootless workers may be concurrently scheduled.
+    """
+    if (not timings or type(stage_elapsed_seconds) not in (int, float) or
+            not math.isfinite(stage_elapsed_seconds) or
+            stage_elapsed_seconds < 0):
+        return False
+    # The script uses integer Bash SECONDS, while the stage uses monotonic
+    # fractional seconds; two seconds covers boundary/rounding differences.
+    worker_budget_seconds = stage_elapsed_seconds + 2
+    return (all(phase["elapsed_s"] <= worker_budget_seconds
+                for phase in timings) and
+            sum(phase["elapsed_s"] for phase in timings)
+            <= worker_budget_seconds * 18)
 
 
 # Only literal, source-controlled phase labels enter the report. Approximate
@@ -4998,9 +5021,8 @@ def run_stage(title, command, result, *, parse_bench=False,
                 sum(rootless_timing.values()) <= record["elapsed_s"] + 2):
             record["substage_elapsed_s"] = rootless_timing
             rootless_phases = parse_rootless_phase_timings(output)
-            if rootless_phases is not None and (
-                    sum(phase["elapsed_s"] for phase in rootless_phases)
-                    <= record["elapsed_s"] + 2):
+            if rootless_phases is not None and rootless_phase_timings_fit_stage(
+                    rootless_phases, record["elapsed_s"]):
                 record["phase_elapsed_s"] = rootless_phases
         # This suite may be skipped after an earlier failure. Only report
         # case coverage when the harness actually started its audit phase.

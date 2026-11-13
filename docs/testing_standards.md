@@ -771,7 +771,15 @@ as one non-PASS row.
 A bounded per-suite rootless breakdown uses Bash's built-in SECONDS and
 source-controlled phase labels; the loaded reporter attributes wall time from
 existing streamed markers to preflight, lifecycle, fixture preparation,
-individual matched benchmark families, ID36 and terminal cleanup. Both
+individual matched benchmark families, ID36 and terminal cleanup. For
+CPU-aware rootless groups, worker elapsed times overlap: their **sum may
+exceed stage wall time** and must not cause valid suite timings to disappear.
+Retain only unique, sequentially indexed, source-allowlisted labels with
+each worker's duration no greater than its stage wall time plus two seconds
+for Bash SECONDS rounding, and bound the entire sum by the existing maximum
+18 concurrent rootless workers times that same wall budget. Reject malformed,
+repeated or private labels, implausibly long workers and unbounded aggregate
+durations; never reinterpret summed worker time as stage wall time. Both
 breakdowns are optional observational report fields, never new qualification
 gates, session scheduling changes, or substitutes for per-I/O latency.
 Each visible owned-RAM benchmark pair also records bounded monotonic-uptime

@@ -2095,6 +2095,55 @@ class NativeTimingContract(unittest.TestCase):
             valid.replace("index=2 elapsed_s=34", "index=2 elapsed_s=-1")))
         self.assertIsNone(runner.parse_rootless_phase_timings(
             valid.replace("source-contract-test.py", "/private/secret")))
+        self.assertIsNone(runner.parse_rootless_phase_timings(
+            valid + "ROOTLESS_PHASE_TIMING index=4 elapsed_s=1 "
+            "label=tests/runtime/native/source-contract-test.py\n"))
+
+    def test_overlapped_rootless_phase_timings_are_bounded_but_retained(self):
+        # Valid per-worker wall times overlap; their sum may exceed the stage
+        # elapsed wall time without indicating a forged or misattributed run.
+        phases = [
+            {"name": "rootless initialization", "elapsed_s": 0},
+            {"name": "tests/Makefile native and metadata", "elapsed_s": 2},
+            {"name": "tests/runtime/native/source-contract-test.py",
+             "elapsed_s": 8},
+            {"name":
+             "tests/runtime/native/userspace/swapzctl-active-swap-provenance-test.py",
+             "elapsed_s": 8},
+        ]
+        self.assertGreater(sum(p["elapsed_s"] for p in phases), 10)
+        self.assertTrue(runner.rootless_phase_timings_fit_stage(phases, 10))
+        self.assertFalse(runner.rootless_phase_timings_fit_stage(
+            phases[:2] + [{**phases[2], "elapsed_s": 13}], 10))
+        self.assertFalse(runner.rootless_phase_timings_fit_stage(
+            [phases[2]] * 30, 10))
+        self.assertFalse(runner.rootless_phase_timings_fit_stage([], 10))
+        self.assertFalse(runner.rootless_phase_timings_fit_stage(phases, -1))
+        self.assertFalse(runner.rootless_phase_timings_fit_stage(
+            phases, float("nan")))
+
+        transcript = (
+            "ROOTLESS_TIMING native_make_s=2 remaining_contracts_s=8\n"
+            + "".join(
+                f"ROOTLESS_PHASE_TIMING index={index} "
+                f"elapsed_s={phase['elapsed_s']} label={phase['name']}\n"
+                for index, phase in enumerate(phases))
+        )
+        result = {"stages": [], "benchmarks": {}}
+        clock = iter((0.0, 10.0))
+        with mock.patch.object(
+                runner.subprocess, "Popen",
+                return_value=FakeStreamingProcess(transcript)), \
+                mock.patch.object(runner.time, "monotonic",
+                                  side_effect=lambda: next(clock, 10.0)), \
+                contextlib.redirect_stdout(io.StringIO()):
+            runner.run_stage("Native and rootless contracts", ["unused"],
+                             result, stream_rootless_progress=True)
+        stage = result["stages"][-1]
+        self.assertEqual(stage["elapsed_s"], 10)
+        self.assertEqual(stage["phase_elapsed_s"], phases)
+        self.assertEqual(stage["substage_elapsed_s"],
+                         {"native_make_s": 2, "remaining_contracts_s": 8})
 
     def test_owned_pair_phase_timings_are_ordered_and_never_gates(self):
         records = (
