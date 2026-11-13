@@ -6976,11 +6976,14 @@ because shared-region slot selection checks a per-wave used-page set and
 persistent lanes use distinct QD stripes: no READ in the same wave can
 target a preceding WRITE's page. Preserve every random-number draw,
 source-order JSONL field/byte, phase, lane, per-wave uniqueness and
-final-image oracle; cache only the validated per-lane writer/reader
-choice counts outside the generation loop. The two mixed-lane execution
-modes must still produce identical traces. Rootless preparation coverage
-must bind exact legacy trace SHA-256, final-image SHA-256 and WRITE-payload
-stream SHA-256 across QD1, QD8, same-region, sustained QD32,
+final-image oracle; cache the validated per-lane writer/reader
+choice counts outside the generation loop. Reuse one per-wave used-page
+set by clearing it before every wave; never retain page ownership across
+waves. Resolve immutable phase and wave index once per wave rather than
+per operation. The two mixed-lane execution modes must still produce
+identical traces. Rootless preparation coverage must bind exact legacy
+trace SHA-256, final-image SHA-256 and WRITE-payload stream SHA-256
+across QD1, QD4, QD8, same-region, sustained QD32,
 mixed waves/persistent, and stripe-partitionable profiles, then
 independently revalidate every generated trace and final map.
 

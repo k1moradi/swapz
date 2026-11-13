@@ -277,8 +277,13 @@ def prepare(args):
     # writer/reader stripe uses the same validated number of page choices.
     writer_lane_choices = args.writer_pages // args.qd
     reader_lane_choices = args.reader_pages // args.qd
+    # Reuse the per-wave page membership buffer instead of allocating a
+    # fresh set on every QD batch. clear() retains no prior-wave authority.
+    used = set()
     for first in range(0, total, args.qd):
-        used = set()
+        used.clear()
+        wave_phase = "warmup" if first < args.warmup_ops else "measure"
+        wave_index = first // args.qd
         for pos in range(args.qd):
             if args.sustained_write:
                 slot = pos + args.qd * rng.randrange(writer_lane_choices)
@@ -302,8 +307,8 @@ def prepare(args):
                     kind = "R"
             used.add(slot)
             event = {"seq": first + pos,
-                     "phase": "warmup" if first < args.warmup_ops else "measure",
-                     "wave": first // args.qd, "op": kind,
+                     "phase": wave_phase,
+                     "wave": wave_index, "op": kind,
                      "page": slot, "fixture": fi}
             if args.sustained_write or args.mixed_lanes:
                 event["lane"] = pos

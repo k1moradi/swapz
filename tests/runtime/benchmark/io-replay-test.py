@@ -2224,6 +2224,10 @@ class PairReplayContract(unittest.TestCase):
                 "dce35e09f190cbc37608a7ddcdb83e9964a7ea671ad47b0eb33311ee14ee5015",
                 "18e8f2273b55a9d42748664f6e0fe3de9a9a134676eb846a51268a4aaecae546",
                 "a6ef1dfa27517f553c30c640440751609a15b10ddbbd162532b29fa2b5cc3141")),
+            ("disjoint-qd4", 4, 25, "disjoint", (), (
+                "7d5a67ffb3a1f3cbec2a162898302086dbd3c01fb26c747816b2dca51b477f96",
+                "4faaed32aa96db718f260c9e17c4e0441713f0dba3f4a656e2d9c7889f5b04c7",
+                "04d93ffea1bc1725a1b0bda2dd3633d42926cac2eaaf8d57bdfda7457609aa5a")),
             ("disjoint-qd8", 8, 25, "disjoint", (), (
                 "8d6653fb3b22d97f943a6a89bb4803fe531585b0eddfdbea06ca668a911097ac",
                 "b0cdfec1cdebd44c91ce64287f1607bb349ac149281f66713565ddd2814be5f4",

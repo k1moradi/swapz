@@ -7994,6 +7994,17 @@ int main(void)
                       generator)
         self.assertIn("reader_lane_choices = args.reader_pages // args.qd",
                       generator)
+        # Exactly one local set is reused across independent waves. Clear
+        # must precede the source-order admissions for each fresh wave.
+        self.assertEqual(generator.count("used = set()"), 1)
+        self.assertEqual(generator.count("used.clear()"), 1)
+        self.assertLess(generator.index("used.clear()"),
+                        generator.index("for pos in range(args.qd):"))
+        self.assertIn('wave_phase = "warmup" if first < args.warmup_ops else "measure"',
+                      generator)
+        self.assertIn("wave_index = first // args.qd", generator)
+        self.assertIn('"phase": wave_phase', generator)
+        self.assertIn('"wave": wave_index', generator)
         self.assertIn("used.add(slot)", generator)
         self.assertIn("events.append(event)", generator)
         self.assertIn('if kind == "W":\n                latest[slot] = fi',
