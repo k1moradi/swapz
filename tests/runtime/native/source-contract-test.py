@@ -8176,6 +8176,29 @@ int main(void)
                 self.assertIn("BLOCKED: native prefill requires", blocked.stderr)
                 self.assertNotIn("ADMITTED", blocked.stdout)
 
+    def test_canonical_trace_fast_encoding_keeps_legacy_byte_oracle(self):
+        replay = (ROOT / "tests/runtime/benchmark/io-replay.py").read_text()
+        tests = (ROOT / "tests/runtime/benchmark/io-replay-test.py").read_text()
+        encoder = replay.split("def encode_canonical_trace(", 1)[1].split(
+            "\ndef prefill_fixture_index(", 1)[0]
+        prepare = replay.split("def prepare(args):", 1)[1].split(
+            "\ndef prepare_write_qd_variants(", 1)[0]
+        self.assertIn('if "lane" in event else ""', encoder)
+        self.assertIn('f\'{{"fixture":{event["fixture"]}{lane_field},\'', encoder)
+        self.assertIn('"op":"{event["op"]}"', encoder)
+        self.assertIn('"phase":"{event["phase"]}"', encoder)
+        self.assertIn('return "".join(lines).encode("ascii")', encoder)
+        self.assertIn("trace_bytes = encode_canonical_trace(events)", prepare)
+        self.assertIn('manifest = {"schema": SCHEMA', prepare)
+        self.assertIn('"trace_sha256": sha(trace_bytes)', prepare)
+        self.assertNotIn('json.dumps(e, sort_keys=True, separators=', prepare)
+        self.assertIn(
+            "def test_generated_jsonl_fast_encoder_is_exact_canonical_json",
+            tests)
+        self.assertIn(
+            "def test_preparation_wave_fusion_keeps_legacy_trace_bytes_and_oracles",
+            tests)
+
     def test_benchmark_dm_status_counters_use_one_exact_token_scan(self):
         replay = (ROOT / "tests/runtime/benchmark/io-replay.py").read_text()
         tests = (ROOT / "tests/runtime/benchmark/io-replay-test.py").read_text()

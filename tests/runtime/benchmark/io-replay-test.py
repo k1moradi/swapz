@@ -29,6 +29,39 @@ SCRIPT = Path(__file__).with_name("io-replay.py")
 
 
 class PairReplayContract(unittest.TestCase):
+    def test_generated_jsonl_fast_encoder_is_exact_canonical_json(self):
+        import runpy
+
+        encoder = runpy.run_path(str(SCRIPT))["encode_canonical_trace"]
+        for operation_count in (0, 1, 7, 64, 4096):
+            with self.subTest(operation_count=operation_count):
+                events = []
+                for sequence in range(operation_count):
+                    # Deliberately insert keys out of order. Only the known
+                    # generated ASCII enums and integer indices are legal.
+                    event = {
+                        "wave": sequence // 32,
+                        "seq": sequence,
+                        "page": (sequence * 13) % 1024,
+                        "phase": "warmup" if sequence < 64 else "measure",
+                        "op": "R" if sequence % 4 == 0 else "W",
+                        "fixture": (sequence * 17) % 19,
+                    }
+                    if sequence % 3:
+                        event["lane"] = sequence % 32
+                    events.append(event)
+                legacy = "".join(
+                    json.dumps(event, sort_keys=True, separators=(",", ":")) +
+                    "\n" for event in events).encode()
+                accelerated = encoder(events)
+                self.assertEqual(accelerated, legacy)
+                self.assertEqual(
+                    hashlib.sha256(accelerated).digest(),
+                    hashlib.sha256(legacy).digest())
+                self.assertEqual(
+                    [json.loads(line) for line in accelerated.splitlines()],
+                    events)
+
     def test_dm_status_counters_single_scan_matches_legacy_field_regexes(self):
         import importlib.util
         import re

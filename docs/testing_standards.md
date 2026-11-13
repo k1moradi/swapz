@@ -6968,6 +6968,21 @@ stream SHA-256 across QD1, QD8, same-region, sustained QD32,
 mixed waves/persistent, and stripe-partitionable profiles, then
 independently revalidate every generated trace and final map.
 
+The trace writer may serialize locally generated, fixed-schema event
+records through an ASCII-only canonical encoder instead of invoking a
+general-purpose `json.dumps` for every operation. This is allowed solely
+for the known W/R and warmup/measure string enums and integer fixture,
+page, sequence, wave and optional lane fields; it is not an encoder for
+untrusted JSON. Preserve `sort_keys=True`, compact separators, the
+optional lane's sorted position, **every** final newline, the complete
+canonical byte stream and its SHA-256. Independent rootless tests must
+compare the fast output byte-for-byte against the original
+`json.dumps(sort_keys=True, separators=(",", ":"))` oracle for empty,
+short and multi-thousand-event sequences with shuffled input field
+insertion order and both lane shapes. Keep the seven pinned legacy trace,
+post-image and WRITE-payload hashes, all measured I/O, and per-arm
+validation unchanged.
+
 Canonical trace validation runs independently inside every replay arm,
 even for an immutable plan prepared once for a matched pair. It may reuse a
 single in-flight logical-page set across QD waves and index the validated

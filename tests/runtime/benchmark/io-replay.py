@@ -163,6 +163,27 @@ def workload_opportunity(events, pages, logical_pages, prefill_indices=None):
     }
 
 
+def encode_canonical_trace(events):
+    """Encode only locally generated fixed-schema events in canonical JSONL.
+
+    All string values are fixed ASCII enums (W/R, warmup/measure); the other
+    values are nonnegative integer indices. No arbitrary user text is accepted
+    here. Preserve json.dumps(sort_keys=True, separators=(',', ':')) exactly,
+    including the optional alphabetically sorted lane field and final newline.
+    """
+    lines = []
+    append_line = lines.append
+    for event in events:
+        lane_field = (f',"lane":{event["lane"]}'
+                      if "lane" in event else "")
+        append_line(
+            f'{{"fixture":{event["fixture"]}{lane_field},'
+            f'"op":"{event["op"]}","page":{event["page"]},'
+            f'"phase":"{event["phase"]}","seq":{event["seq"]},'
+            f'"wave":{event["wave"]}}}\n')
+    return "".join(lines).encode("ascii")
+
+
 def prefill_fixture_index(manifest, page, fixture_pages):
     """Resolve the deterministic initial fixture page for one logical page."""
     stride = manifest.get("prefill_fixture_stride", 1)
@@ -284,8 +305,9 @@ def prepare(args):
         post_digest.update(pages[fixture_index])
     prefill_hash = prefill_digest.hexdigest()
     post_hash = post_digest.hexdigest()
-    trace_bytes = "".join(json.dumps(e, sort_keys=True, separators=(",", ":")) + "\n"
-                          for e in events).encode()
+    # Fixed ASCII schema: avoid a general JSON encoder call for every
+    # operation while preserving the exact canonical trace byte digest.
+    trace_bytes = encode_canonical_trace(events)
     (out / "trace.jsonl").write_bytes(trace_bytes)
     manifest = {"schema": SCHEMA, "page_bytes": PAGE,
                 "logical_pages": args.logical_pages, "writer_pages": args.writer_pages,
