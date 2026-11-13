@@ -11667,3 +11667,15 @@ FAIL or promote a stale PASS; preserve the original failure phase and the
 frozen source/target/workload/pair/measurement requirements.
 These are rootless verdict-logic controls only, never physical acceptance
 evidence.
+
+### Git transport timeout ownership
+
+Official Git synchronization/publication commands must run in a fresh private
+process session. A timeout or interrupted invocation must terminate only that
+invocation's process group, including SSH/credential children, and bound pipe
+drain/reaping. Never signal the qualification runner's group or discover
+cleanup authority from executable names. Preserve the first timeout/refusal
+and private stderr; cleanup failure cannot turn it into PASS or hide a test
+failure. Rootless regression coverage must reproduce a timed-out fake Git
+with a retained child, verify the child stops, and preserve ordinary byte
+stdin/stdout/stderr and nonzero-exit behavior. No real remote is contacted.

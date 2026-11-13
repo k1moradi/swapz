@@ -8,6 +8,7 @@ import json
 import math
 import os
 import re
+import signal
 from pathlib import Path
 import stat
 import statistics
@@ -10541,12 +10542,43 @@ def print_bench(result, *, detailed=False):
 
 def git_result(command, *, data=None, timeout=15, env=None):
     """Run noninteractive Git plumbing without exposing remote/credential stderr."""
+    process = None
+    completed = False
     try:
-        return subprocess.run(["git", *command], input=data, cwd=ROOT,
-                              capture_output=True, check=False, timeout=timeout,
-                              env=env)
+        # Git may spawn SSH/credential children. Its private session makes
+        # timeout cleanup specific to this invocation, never the test runner.
+        process = subprocess.Popen(
+            ["git", *command], cwd=ROOT, env=env, start_new_session=True,
+            stdin=subprocess.PIPE if data is not None else subprocess.DEVNULL,
+            stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+        stdout, stderr = process.communicate(input=data, timeout=timeout)
+        completed = True
+        return subprocess.CompletedProcess(process.args, process.returncode, stdout, stderr)
     except (OSError, subprocess.TimeoutExpired):
         return None
+    finally:
+        if process is not None and not completed:
+            # Match subprocess.run's timeout kill, including this invocation's
+            # descendants. A secondary cleanup error cannot mask the first exit.
+            try:
+                os.killpg(process.pid, signal.SIGKILL)
+            except OSError:
+                pass
+            try:
+                process.communicate(timeout=1)
+            except (OSError, subprocess.TimeoutExpired):
+                # A detached child may retain a pipe; never wait indefinitely
+                # or search for processes by name to manufacture cleanup.
+                for stream in (process.stdin, process.stdout, process.stderr):
+                    if stream is not None:
+                        try:
+                            stream.close()
+                        except OSError:
+                            pass
+                try:
+                    process.wait(timeout=1)
+                except (OSError, subprocess.TimeoutExpired):
+                    pass
 
 
 def stronger_published_qualification_scope(existing_report, new_report):

@@ -480,6 +480,62 @@ class RootlessParallelPilotContract(unittest.TestCase):
 
 
 class MainSynchronizationContract(unittest.TestCase):
+    def test_git_result_preserves_byte_streams_and_nonzero_exit(self):
+        with tempfile.TemporaryDirectory() as directory:
+            fake_git = Path(directory) / "git"
+            fake_git.write_text(
+                f"#!{sys.executable}\nimport sys\n"
+                "sys.stdout.buffer.write(sys.stdin.buffer.read())\n"
+                "sys.stderr.buffer.write(b'private-diagnostic')\n"
+                "sys.exit(7)\n", encoding="utf-8")
+            fake_git.chmod(0o700)
+            env = {**os.environ, "PATH": directory + os.pathsep + os.environ.get("PATH", "")}
+            result = runner.git_result(["fixture"], data=b"input\x00bytes", timeout=5, env=env)
+            self.assertEqual(result.returncode, 7)
+            self.assertEqual(result.stdout, b"input\x00bytes")
+            self.assertEqual(result.stderr, b"private-diagnostic")
+
+    def test_git_timeout_does_not_leave_owned_transport_child(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            marker = root / "transport.json"
+            fake_git = root / "git"
+            child = "import time; time.sleep(60)"
+            fake_git.write_text(
+                f"#!{sys.executable}\n"
+                "import json,os,subprocess,sys,time\n"
+                f"p=subprocess.Popen([sys.executable,'-c',{child!r}], "
+                "stdin=subprocess.DEVNULL)\n"
+                "st=open('/proc/'+str(p.pid)+'/stat').read().rsplit(') ',1)[1].split()[19]\n"
+                f"open({str(marker)!r},'w').write(json.dumps([p.pid,st]))\n"
+                "time.sleep(60)\n", encoding="utf-8")
+            fake_git.chmod(0o700)
+            env = {**os.environ, "PATH": str(root) + os.pathsep + os.environ.get("PATH", "")}
+            def live(pid, start):
+                try:
+                    fields = Path(f"/proc/{pid}/stat").read_text().rsplit(") ", 1)[1].split()
+                    return fields[19] == start and fields[0] != "Z"
+                except FileNotFoundError:
+                    return False
+            unrelated = subprocess.Popen(
+                [sys.executable, "-c", child], start_new_session=True,
+                stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            try:
+                self.assertIsNone(runner.git_result(["fixture"], timeout=0.5, env=env))
+                self.assertIsNone(unrelated.poll(), "Git cleanup touched an unrelated fixture")
+                pid, start = json.loads(marker.read_text())
+                deadline = time.monotonic() + 2
+                while live(pid, start) and time.monotonic() < deadline:
+                    time.sleep(0.02)
+                self.assertFalse(live(pid, start), "owned Git transport survived timeout")
+            finally:
+                if marker.exists():
+                    pid, start = json.loads(marker.read_text())
+                    if live(pid, start):
+                        os.kill(pid, signal.SIGKILL)
+                unrelated.terminate()
+                unrelated.wait(timeout=5)
+
     """Exercise test-time main synchronization with isolated local Git remotes."""
 
     def setUp(self):
