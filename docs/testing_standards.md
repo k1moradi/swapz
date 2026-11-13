@@ -680,7 +680,11 @@ An interruption regression must exercise a rootless stage that records one
 completed eligible suite before failing, prove that no full-stage PASS was
 cached, and then resume with exactly that suite reused while a later fresh
 PASS extends the owner-only suite checkpoint. The completed run remains
-INCOMPLETE and cannot publish physical qualification.
+INCOMPLETE and cannot publish physical qualification. Its synthetic loaded
+stage must retain the ordinary report's retired delta64-prepare diagnostic
+field, even though that diagnostic is NOT_RUN, so the interruption contract
+reaches the final qualification verdict rather than failing on missing
+fixture metadata.
 The per-suite guard refuses full-tier execution and missing, linked or
 content-drifted artifact paths, even if a substituted file has matching bytes.
 Synthetic rootless regression exercises ordinary reuse, fingerprint drift,

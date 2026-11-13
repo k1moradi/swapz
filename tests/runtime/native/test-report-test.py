@@ -1719,6 +1719,10 @@ class NativeTimingContract(unittest.TestCase):
                     "overall": "PASS_BOUNDED_RAM_MATRIX"}
                 result["benchmarks"]["write_saturation"] = {
                     "overall": "PASS_WRITE_SATURATION_EVIDENCE"}
+                # Match the loaded benchmark structure of the ordinary
+                # stage fixture; this retired diagnostic is still inspected.
+                result["benchmarks"]["delta64_prepare"] = {
+                    "overall": "NOT_RUN"}
             return 1 if rootless_failed else 0
 
         previous_root, previous_report = runner.ROOT, runner.REPORT
