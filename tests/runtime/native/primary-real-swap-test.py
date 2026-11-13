@@ -3129,6 +3129,27 @@ class PrimaryRealSwapContracts(unittest.TestCase):
             value is None for value in qualify._pressure_progress_deltas(
                 deque([(4.5, newer)]), window).values()))
 
+    def test_pressure_progress_snapshot_counts_exact_lower_requests(self):
+        status = {
+            "physical_write": 8192, "write_submitted": 12288,
+            "upper_write_completed_ok": 3, "ordered_worker_wall_ns": 500}
+        disk_stat = "1 0 16 10 7 0 64 80 0 0 0 0 0 0 0 0 0"
+        with mock.patch.object(
+                qualify, "_psi_total", side_effect=[100, 40, 60]) as pressure, \
+             mock.patch.object(
+                 qualify.Path, "read_text", return_value=disk_stat) as stat_read:
+            observation = qualify._pressure_progress_snapshot(
+                Path("/synthetic/cgroup"), lambda: status, (8, 4))
+        self.assertEqual(observation["cgroup_io_some_usec"], 100)
+        self.assertEqual(observation["cgroup_io_full_usec"], 40)
+        self.assertEqual(observation["cgroup_cpu_some_usec"], 60)
+        self.assertEqual(observation["swapz_write_submitted_total"], 12288)
+        self.assertEqual(observation["swapz_upper_write_completed_ok"], 3)
+        self.assertEqual(observation["lower_write_requests_total"], 7)
+        self.assertEqual(observation["lower_write_sectors_total"], 64)
+        self.assertEqual(pressure.call_count, 3)
+        stat_read.assert_called_once()
+
     def test_pressure_progress_optional_reader_failure_is_not_a_stop(self):
         cgroup = Path("/synthetic/cgroup")
         with mock.patch.object(

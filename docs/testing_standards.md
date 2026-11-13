@@ -3151,7 +3151,11 @@ PSI window, with the actual measurement span, and label cumulative status
 separately. Include current round and monotonic workload/phase elapsed time
 to distinguish delayed setup from a stalled fill. Optional sampling failures
 must remain null and must never change the original workload stop or cleanup.
-The public diagnostic remains an exact finite allowlist, not arbitrary stderr.
+The lower device progress uses Linux block-stat field five (zero-based index 4)
+for completed WRITE requests and field seven (index 6) for WRITE sectors,
+with an explicitly measured progress window. Missing fields are unavailable,
+never synthetic zero traffic. The public diagnostic remains an exact finite
+allowlist, not arbitrary stderr.
 These are diagnostic totals, not attributed traffic deltas or success proof.
 Preserve the snapshot through bounded exception-cause traversal, persist the
 finite first-workload diagnostic in the run results before normal recovery,
