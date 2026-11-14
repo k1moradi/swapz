@@ -178,7 +178,7 @@ class RootlessParallelPilotContract(unittest.TestCase):
     def test_only_source_reviewed_adjacent_nonconflicting_groups(self):
         source = (ROOT / "tests/tools/test-rootless.sh").read_text(
             encoding="utf-8")
-        for group, expected_count in (("initial", 2), ("resources", 2),
+        for group, expected_count in (("initial", 5), ("resources", 2),
                                       ("readiness", 2), ("syntax", 19),
                                       ("identity", 3)):
             tasks = parallel_runner.validated_group(group, source)
@@ -195,7 +195,7 @@ class RootlessParallelPilotContract(unittest.TestCase):
         self.assertIn('rootless_parallel_run_group resources', source)
         self.assertIn('rootless_parallel_run_group readiness', source)
         self.assertIn('rootless_parallel_run_group syntax', source)
-        self.assertIn('rootless_parallel_run_group identity', source)
+        self.assertNotIn('rootless_parallel_run_group identity', source)
         self.assertIn('bash -n "$script"', source)
         self.assertIn('rootless_parallel_cleanup || :', source)
         reporter = (ROOT / "tests/tools/run-tests.py").read_text(
@@ -205,10 +205,31 @@ class RootlessParallelPilotContract(unittest.TestCase):
         self.assertIn('python3 -B tests/runtime/native/source-contract-test.py -v',
                       source)
 
+    def test_initial_worker_group_preserves_private_resource_isolation(self):
+        harness = (ROOT / "tests/tools/test-rootless.sh").read_text(
+            encoding="utf-8")
+        tasks = parallel_runner.validated_group("initial", harness)
+        claims = resource_policy.audit_harness(harness)
+        self.assertEqual(len(tasks), 5)
+        self.assertEqual(tasks[2:], parallel_runner.GROUPS["identity"])
+        for index, (label, _) in enumerate(tasks):
+            for previous_label, _ in tasks[:index]:
+                self.assertEqual(
+                    resource_policy.potential_conflicts(
+                        label, previous_label, claims), ())
+        self.assertLess(
+            harness.index("rootless_phase='tests/Makefile native and metadata'"),
+            harness.index("rootless_phase='tests/runtime/native/source-contract-test.py'"))
+        self.assertLess(
+            harness.index("rootless_phase='tests/runtime/native/swap-inventory-test.sh'"),
+            harness.index("rootless_phase='tests/runtime/native/tmp-cleanup-test.py'"))
+
     def test_identity_group_uses_only_independent_fixture_scripts(self):
         harness = (ROOT / "tests/tools/test-rootless.sh").read_text(
             encoding="utf-8")
         tasks = parallel_runner.validated_group("identity", harness)
+        initial = parallel_runner.validated_group("initial", harness)
+        self.assertEqual(tuple(initial[2:]), tasks)
         self.assertEqual(
             tuple(label for label, _ in tasks),
             ("tests/runtime/native/nullblk-identity-test.sh",
@@ -224,7 +245,7 @@ class RootlessParallelPilotContract(unittest.TestCase):
                 self.assertEqual(
                     resource_policy.potential_conflicts(label, other, claims),
                     ())
-        for index, label in enumerate(label for label, _ in tasks):
+        for index, label in enumerate((label for label, _ in tasks), start=2):
             self.assertIn(f"rootless_parallel_collect {index}", harness)
             self.assertIn(f"bash {label}", harness)
 

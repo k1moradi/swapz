@@ -3418,7 +3418,16 @@ events, report JSON and timeout ownership remain unchanged.
 ### Native/rootless fail-only subprocess attribution
 
 The private `tests/tools/test-rootless.sh` runner must keep the exact registered
-suite invocations and their sequential order, including package transactions.
+suite invocations and their source-controlled deterministic order, including
+package transactions. Immediately after native Make, the audited initial
+parallel group may overlap source-contract and provenance tests with three
+independent mock-only fixtures (null_blk identity, quiet lower I/O and swap
+inventory). Each worker has a disjoint private scratch path, process group
+and bounded lifetime. The parent collects all five results in their fixed
+source order before running cleanup and lifecycle suites. A one-CPU host runs
+the same five checks sequentially. Failure remains first-error, nonzero and
+fail-closed. This overlap never activates swap or devices, changes test
+coverage, or parallelizes hardware benchmarks.
 Each unexpected child failure is attributed to its source-controlled suite
 pathname or static shell-check phase, with the **original** numeric exit status,
 a phase elapsed wall-clock count, total rootless-stage elapsed wall-clock count,

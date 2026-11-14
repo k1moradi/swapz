@@ -785,7 +785,8 @@ rootless_parallel_run_group() {
     mktemp -d "$ROOT/build/tests/rootless-parallel.XXXXXXXX"
   ) || report_rootless_failure 2 "$LINENO" parallel_worker_setup
   case $group in
-    initial|readiness) rootless_parallel_size=2 ;;
+    initial) rootless_parallel_size=5 ;;
+    readiness) rootless_parallel_size=2 ;;
     syntax) rootless_parallel_size=19 ;;
     identity) rootless_parallel_size=3 ;;
     resources) rootless_parallel_size=2 ;;
@@ -970,6 +971,29 @@ if (( rootless_parallel_jobs > 1 )); then
   rootless_parallel_collect 1
 else
   python3 -B tests/runtime/native/userspace/swapzctl-active-swap-provenance-test.py -v
+fi
+# Overlap the three independently owned mock fixtures with source contracts.
+# Collect them in source order before cleanup and lifecycle suites.
+rootless_phase='tests/runtime/native/nullblk-identity-test.sh'
+rootless_begin_phase
+if (( rootless_parallel_jobs > 1 )); then
+  rootless_parallel_collect 2
+else
+  bash tests/runtime/native/nullblk-identity-test.sh
+fi
+rootless_phase='tests/runtime/native/quiet-lower-io-test.sh'
+rootless_begin_phase
+if (( rootless_parallel_jobs > 1 )); then
+  rootless_parallel_collect 3
+else
+  bash tests/runtime/native/quiet-lower-io-test.sh
+fi
+rootless_phase='tests/runtime/native/swap-inventory-test.sh'
+rootless_begin_phase
+if (( rootless_parallel_jobs > 1 )); then
+  rootless_parallel_collect 4
+else
+  bash tests/runtime/native/swap-inventory-test.sh
 fi
 rootless_phase='tests/runtime/native/tmp-cleanup-test.py'
 rootless_begin_phase
@@ -1216,30 +1240,6 @@ for script in tests/tools/test-rootless.sh tests/tools/test-loaded.sh \
     bash -n "$script"
   fi
 done
-# Run only these three reviewed, private-fixture identity contracts in parallel.
-# The parent still replays each complete transcript in the original phase order.
-rootless_phase='tests/runtime/native/nullblk-identity-test.sh'
-rootless_begin_phase
-if (( rootless_parallel_jobs > 1 )); then
-  rootless_parallel_run_group identity
-  rootless_parallel_collect 0
-else
-  bash tests/runtime/native/nullblk-identity-test.sh
-fi
-rootless_phase='tests/runtime/native/quiet-lower-io-test.sh'
-rootless_begin_phase
-if (( rootless_parallel_jobs > 1 )); then
-  rootless_parallel_collect 1
-else
-  bash tests/runtime/native/quiet-lower-io-test.sh
-fi
-rootless_phase='tests/runtime/native/swap-inventory-test.sh'
-rootless_begin_phase
-if (( rootless_parallel_jobs > 1 )); then
-  rootless_parallel_collect 2
-else
-  bash tests/runtime/native/swap-inventory-test.sh
-fi
 rootless_phase='x86_64 native SIMD disassembly contracts'
 rootless_begin_phase
 if [[ "$(uname -m)" == "x86_64" ]]; then

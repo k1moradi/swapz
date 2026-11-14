@@ -25,6 +25,17 @@ policy_spec.loader.exec_module(resource_policy)
 
 # Source-controlled commands only. Arbitrary shell strings and command
 # arguments from the environment must never be accepted as worker jobs.
+# Each identity fixture owns a distinct mktemp scratch directory;
+# none modifies real devices or shared native artifacts.
+IDENTITY_TASKS = (
+    ("tests/runtime/native/nullblk-identity-test.sh",
+     ("bash", "tests/runtime/native/nullblk-identity-test.sh")),
+    ("tests/runtime/native/quiet-lower-io-test.sh",
+     ("bash", "tests/runtime/native/quiet-lower-io-test.sh")),
+    ("tests/runtime/native/swap-inventory-test.sh",
+     ("bash", "tests/runtime/native/swap-inventory-test.sh")),
+)
+
 GROUPS = {
     "initial": (
         ("tests/runtime/native/source-contract-test.py",
@@ -33,6 +44,7 @@ GROUPS = {
          ("python3", "-B",
           "tests/runtime/native/userspace/swapzctl-active-swap-provenance-test.py",
           "-v")),
+        *IDENTITY_TASKS,
     ),
     # These two adjacent, independently owned synthetic resource suites
     # use distinct TemporaryDirectory roots; all child processes are reaped
@@ -56,16 +68,9 @@ GROUPS = {
         (f"bash syntax {Path(path).name}", ("bash", "-n", path))
         for path in resource_policy.SYNTAX_SCRIPTS
     ),
-    # Each fixture owns an unrelated, freshly mktemp-allocated directory.
-    # None loads a module, mutates a host device or writes shared build output.
-    "identity": (
-        ("tests/runtime/native/nullblk-identity-test.sh",
-         ("bash", "tests/runtime/native/nullblk-identity-test.sh")),
-        ("tests/runtime/native/quiet-lower-io-test.sh",
-         ("bash", "tests/runtime/native/quiet-lower-io-test.sh")),
-        ("tests/runtime/native/swap-inventory-test.sh",
-         ("bash", "tests/runtime/native/swap-inventory-test.sh")),
-    ),
+    # Keep the isolated identity group auditable independently of the
+    # combined initial group used by the official rootless harness.
+    "identity": IDENTITY_TASKS,
 }
 
 MAX_WORKER_SECONDS = 900
