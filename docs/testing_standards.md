@@ -32,6 +32,9 @@ prerequisites and execution loop, using the existing warning-clean shared
 compile rule. A failed watch fixture must stop the suite with its binary name,
 exit status and source-bound first assertion. This CI integration does not
 link watch into the public swapzctl executable or authorize new CLI flags.
+The `test_native_userspace_make_recipe_preserves_failing_binary` rootless
+regression must stub every native test executable in this loop, including
+`swapzctl-watch`, and assert that a selected failure prevents later execution.
 
 These new files are **staged and unlinked**: this stand-alone native PASS is
 not a released `swapzctl stats --watch` feature and not a loaded- or physical-

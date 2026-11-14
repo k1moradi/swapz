@@ -8544,7 +8544,7 @@ class ReportContract(unittest.TestCase):
         import subprocess
 
         test_programs = (
-            "swapzctl-status", "swapz-primary-policy",
+            "swapzctl-status", "swapzctl-watch", "swapz-primary-policy",
             "swapz-primary-mount-namespace",
         )
         with tempfile.TemporaryDirectory() as temporary_directory:
@@ -8575,6 +8575,7 @@ class ReportContract(unittest.TestCase):
             self.assertEqual(result.returncode, 2, result.stderr)
             self.assertEqual(result.stdout.splitlines(), [
                 "invoked swapzctl-status",
+                "invoked swapzctl-watch",
                 "invoked swapz-primary-policy",
             ])
             self.assertIn(
