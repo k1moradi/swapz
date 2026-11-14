@@ -91,6 +91,39 @@ owns sampler equivalence/identity assertions; Agent 2 adds end-to-end
 hostile-input, formatting and signal tests. None should widen the primary
 manager or physical admission authority to make a watch test pass.
 
+### Coordinator checkpoint: original sampler input boundary
+
+The current validated `status_ready_report` includes **swapz target records
+only**. A report with one `swapz` target does not prove the complete
+Device Mapper table consists of exactly one target: unrelated adjacent
+non-swapz targets can still exist on the same mapper. The watch sampler
+rejects `target_count != 1` and `target_index != 0`. The CLI adapter
+must retain the **full wire-validated DM target count** from the selected
+`DM_TABLE_STATUS` observation and reject mixed/multi-target mappings.
+Never synthesize `target_count=1` from the count of swapz-only report
+rows. Do not confuse a single selected target with a single-target table.
+
+Similarly, the current ready target retains DM `event_number` but does
+not provide a separately sourced `table_generation`. Before setting the
+sampler's `validated=1`, the integration must define and prove where
+`table_generation` comes from. Reusing the event number as a purported
+independent generation or assigning a default zero is not sufficient
+evidence of mapper incarnation. Treat unavailable generation provenance
+as an unavailable watch sample; keep existing one-shot observations usable.
+
+A full snapshot must also pin the **optional DM UUID's presence and exact
+bytes** (added by Agent 4), and preserve both same-sample counter
+stability and cross-sample mapper identity. No watch sampling callback may
+use a raw unmatched INFO string, an independently acquired one-target
+assumption, a stale report allocation, or a fabricated zero for any
+missing read/request/GC counter.
+
+The seven additional read/request/GC INFO keys have since been added to
+`src/userspace/swapzctl.c` as *optional* legacy-compatible fields.
+`watch_counters_valid` is a separate stronger condition and must be
+required by the future reader callback; the ordinary `status` view does
+not promote partial telemetry to rates.
+
 ## 3. Retained trial recovery security gates — Agent 3
 
 The audit in `swapzctl-trial-ownership-audit.md` identifies these
@@ -114,7 +147,7 @@ that original owner and must never accept arbitrary mapper paths.
 
 ## 4. Rootless integration and evidence contract — Agent 6 + Agent 2
 
-- `tests/suites/Makefile test-userspace` must run the 20-case
+- `tests/suites/Makefile test-userspace` must run the current **23-case**
   `swapzctl-trial-ownership-test.py` model after the existing C and primary
   late-race regressions, preserving the original failure code and fixed script
   identity. `make-interface-test.py` guards registration and Make-escaped
@@ -133,6 +166,25 @@ that original owner and must never accept arbitrary mapper paths.
   commit** as source/test changes. Publish only non-force expected-head
   fast-forwards on `main`; never overwrite other agents' work, create
   branches/PRs, or arm systemd while tests run.
+
+### Agent 6 reconciliation notes
+
+- Agent 1's C collector now parses seven additional optional INFO keys,
+  including read, request and GC telemetry. This is **not** the complete
+  public watch adapter. Its paired-INFO status remains observational.
+- Agent 4's sampler now validates optional DM UUID presence/value. Its
+  complete-table target cardinality and generation provenance still require
+  integration proofs above.
+- Agent 2 has added CLI-option, staged-watch refusal and CI-reporter
+  regressions. Retained-trial coverage is now 23 cases; mocked PASS is
+  not proof of the private helper's live-disk recovery correctness.
+- The current work is not entitled to public lifecycle admission: the
+  `COMPLETE` retained-marker gap, path-vs-fd journal substitution, actual
+  boot-ID evidence, and module/mapper continuity remain unresolved.
+
+These observations are anchored in `main` at
+`4d1ddfabdbb6b8d051bed37b3e2ffcad1c2f2370` and must be rechecked when Agent 1 or Agent 4 changes the
+collector, sampler or build linkage.
 
 ## 5. Release decision matrix
 
