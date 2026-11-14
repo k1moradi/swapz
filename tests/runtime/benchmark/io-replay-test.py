@@ -381,23 +381,22 @@ class PairReplayContract(unittest.TestCase):
             destination = root / "snapshot.bin"
             payload = bytes(range(256)) * (PAGE * 3 // 256 + 1)
             source.write_bytes(payload)
-            kernel_copy = getattr(private_memory.os, "copy_file_range", None)
-            if kernel_copy is None:
-                self.skipTest("copy_file_range unavailable on this Python host")
-
             copied_once = False
 
             def partial_then_cross_mount(source_fd, destination_fd, length):
                 nonlocal copied_once
                 if not copied_once:
                     copied_once = True
-                    copied = kernel_copy(source_fd, destination_fd, PAGE)
-                    self.assertEqual(copied, PAGE)
-                    return copied
+                    # Model the syscall's file-offset semantics without
+                    # depending on this CI filesystem supporting it.
+                    page_bytes = os.read(source_fd, PAGE)
+                    self.assertEqual(len(page_bytes), PAGE)
+                    self.assertEqual(os.write(destination_fd, page_bytes), PAGE)
+                    return PAGE
                 raise OSError(errno.EXDEV, "cross-filesystem snapshot fixture")
 
             with mock.patch.object(private_memory.os, "copy_file_range",
-                                   side_effect=partial_then_cross_mount):
+                                   create=True, side_effect=partial_then_cross_mount):
                 self.assertFalse(private_memory.copy_fixture(source, destination))
             self.assertTrue(copied_once)
             self.assertEqual(destination.read_bytes(), payload)
@@ -405,14 +404,14 @@ class PairReplayContract(unittest.TestCase):
 
             destination.unlink()
             with mock.patch.object(private_memory.os, "copy_file_range",
-                                   side_effect=OSError(errno.EIO, "I/O error")):
+                                   create=True, side_effect=OSError(errno.EIO, "I/O error")):
                 with self.assertRaises(OSError) as failure:
                     private_memory.copy_fixture(source, destination)
                 self.assertEqual(failure.exception.errno, errno.EIO)
             self.assertFalse(destination.exists())
 
             with mock.patch.object(private_memory.os, "copy_file_range",
-                                   return_value=0):
+                                   create=True, return_value=0):
                 with self.assertRaisesRegex(ValueError, "changed while copying"):
                     private_memory.copy_fixture(source, destination)
             self.assertFalse(destination.exists())

@@ -2811,8 +2811,10 @@ incomplete destination. A zero-length copy before the expected source size
 is exhausted refuses the snapshot. The unchanged source identity/length
 checks, destination `fsync`, private-memory protection and exact replay
 hash validation remain mandatory; this is only an untimed snapshot optimization.
-Rootless regression must exercise a partial kernel copy followed by a
-cross-filesystem fallback, fatal I/O and premature zero-length results.
+Rootless regression must use an exact descriptor-offset syscall model to
+exercise a partial kernel copy followed by a cross-filesystem fallback, fatal
+I/O and premature zero-length results even when the CI filesystem does not
+support the native syscall.
 Rootless tests must prove that a pre-existing snapshot path survives O_EXCL
 failure after the privacy hook has run, without depending on the CI host's
 actual RLIMIT_MEMLOCK; they must also prove that explicit private classification
