@@ -4037,7 +4037,7 @@ def parse_algorithm_pageout_diagnostic(error_output):
         return None
     records = [line[len(prefix):] for line in error_output.splitlines()
                if line.startswith(prefix)]
-    if len(records) != 1 or len(records[0]) > 2048:
+    if len(records) != 1 or len(records[0]) > 3072:
         return None
 
     def unique_fields(pairs):

@@ -6501,6 +6501,20 @@ class ReportContract(unittest.TestCase):
                                                     **mutation}}
                 self.assertIsNone(
                     runner.parse_algorithm_pageout_diagnostic(marker(invalid)))
+        # All fields at legal uint64 magnitude must still fit the finite
+        # first-failure marker; adding optional liveness must not silently
+        # demote a genuine PSI refusal into an unrecognized private result.
+        maximum_observed = {**report, "pressure": {**pressure, **progress,
+                                                  **liveness}}
+        for field in maximum_observed["pressure"]:
+            if field not in ("workload_phase", "swapz_error", "window_usec",
+                             "stalled_usec", "limit_usec"):
+                maximum_observed["pressure"][field] = (1 << 64) - 1
+        self.assertLessEqual(len(marker(maximum_observed)) - len(prefix), 3072)
+        self.assertEqual(runner.parse_algorithm_pageout_diagnostic(
+            marker(maximum_observed)), maximum_observed)
+        self.assertIsNone(runner.parse_algorithm_pageout_diagnostic(
+            marker(maximum_observed) + " " * 3100))
         missing_liveness = {**observed["pressure"]}
         missing_liveness.pop("backing_inflight_requests")
         self.assertIsNone(runner.parse_algorithm_pageout_diagnostic(

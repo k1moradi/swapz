@@ -3203,7 +3203,8 @@ reads remain unavailable and cannot replace the first pressure refusal.
 The physical helper and official reporter accept only bounded integer/null
 values for these three fields; reject partial or unknown extensions, boolean
 counters and private strings. Keep historical records without the extension
-readable. The single diagnostic marker remains bounded to 1536 bytes, while
+readable. The single diagnostic marker remains bounded to 3072 bytes (including the
+full optional numeric liveness/progress snapshot), while
 workload geometry, timeout and PSI safety threshold remain unchanged.
 The same first-stop record must retain existing target lower-WRITE wall,
 ordered-worker wall, preparation-wait wall, non-I/O commit wall and lower-WRITE
