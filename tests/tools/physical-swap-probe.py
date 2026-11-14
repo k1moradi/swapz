@@ -5045,7 +5045,9 @@ def run_probe(device_arg, confirm_arg, state_dir_arg, review_path,
             results["final_recovery_state"] = "ORACLE_PASS"
             _save_results(state_dir, results)
             if development_only and algorithm_real_swap:
-                if (_keep_active_capacity_supported(target) and
+                # A paired measurement must end at its original raw-swap
+                # baseline. Do not offer to retain a mapper after comparing.
+                if (not compare_raw and _keep_active_capacity_supported(target) and
                         _operator_keep_swapz_active_after_pass()):
                     active_mapper_swap = _verify_kept_swapz_active(
                         state, target, mapper)
@@ -5077,7 +5079,7 @@ def run_probe(device_arg, confirm_arg, state_dir_arg, review_path,
                         "tests/tools/physical-swap-probe.py recover-pending")
                     print(f"PHYSICAL_RESULTS={state_dir / RESULTS_NAME}")
                     return
-                if not _keep_active_capacity_supported(target):
+                if not compare_raw and not _keep_active_capacity_supported(target):
                     print(
                         "PHYSICAL_SWAPZ_KEEP_ACTIVE=UNAVAILABLE "
                         "reason=full_capacity_mapper_geometry_unavailable; "
