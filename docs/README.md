@@ -120,8 +120,8 @@ documents exact supported commands and exit codes, build versus
 qualification-gated installation, read-only systemd inspection, Linux
 swap versus lifetime compression accounting, and the source-bound
 acceptance matrix. The [Agent 6 integration and security review](handoff/swapzctl-agent6-integration-security-review.md)
-records the remaining watch counter-validation and development-trial
-ownership blockers. The primary mapper service is the **sole**
+records the remaining watch adapter generation/identity and
+counter-completeness gates, plus development-trial ownership blockers. The primary mapper service is the **sole**
 `swapon`/`swapoff` owner; its `.swap` unit is passive and
 non-activating. Package installation leaves units disabled and does
 not authorize physical activation. See

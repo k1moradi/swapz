@@ -194,10 +194,12 @@ is the architecture decision for the current multi-agent work. The independent
 **staged, not linked into the public executable**. Do not advertise or
 invoke `stats NAME --watch SECONDS` until Agent 1 and Agent 4 integrate
 it with the existing fully validated two-INFO/final-LIST collector.
-The public collector must first parse each required logical/lower/GC
-READ/WRITE byte and request counter canonically, prove same-mapper
-identity and table geometry across samples, reject counter resets and
-unavailable/failed target state, and define/test bounded SIGINT/SIGTERM,
+The public collector now parses seven additional read/request/GC INFO
+fields as optional inputs for one-shot views. A future watch adapter
+must require all 13 sampler counters from fully matched, canonical
+observations, prove same-mapper identity and table geometry across
+samples, reject counter resets and unavailable/failed target state,
+and define/test bounded SIGINT/SIGTERM,
 EPIPE, human and JSON-stream behavior. The watch sampler now additionally
 checks the optional DM UUID's **presence and exact bytes** across samples:
 a UUID appearing, disappearing or changing rejects the interval, as do
@@ -219,7 +221,7 @@ swap or PSI counters cannot substitute for device-specific deltas.
 The independent sampler tests alone do not qualify a released
 `--watch` flag.
 
-The 20-case retained-trial ownership rootless fixture is included in the
+The 26-case retained-trial ownership rootless fixture is included in the
 native userspace test suite. Its simulated journal and failure-boundary
 results are **not** same-boot physical-host ownership proof. Any future
 public development stop/recover request remains blocked on verified
