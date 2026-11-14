@@ -3893,10 +3893,23 @@ def print_progress_table_header():
           f"{'-' * 10}-+-{'-' * 8}", flush=True)
 
 
+def disable_terminal_focus_reporting():
+    """Prevent xterm focus notifications from being echoed into result rows."""
+    # Focus mode 1004 sends ESC [ I / ESC [ O to the terminal input side.
+    # With canonical-mode input echo, these can appear as ^[[I / ^[[O in a
+    # long-running qualification table. Disable only on interactive terminals;
+    # do not enable it again after reporting because the previous state is
+    # unknown and doing so would reintroduce stray input during the shell.
+    if sys.stdin.isatty() and sys.stdout.isatty():
+        sys.stdout.write("\x1b[?1004l")
+        sys.stdout.flush()
+
+
 class QualificationProgressTable:
     """Single stream of source-controlled results with globally unique IDs."""
 
     def __init__(self):
+        disable_terminal_focus_reporting()
         self.next_index = 0
         print("  Unified qualification results (tests and benchmark phases):",
               flush=True)
