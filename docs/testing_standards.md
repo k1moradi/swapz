@@ -1,5 +1,24 @@
 # Testing Standards
 
+## swapzctl rootless observability qualification (2026-11-14)
+
+The native `swapzctl-status.c` fixture includes the production C status parser
+and exercises both its existing bounded Device Mapper two-INFO/final-LIST
+validation and the newer read-only operator views. Every new command must
+withhold numeric stdout until the full snapshot validates, preserve the
+first kernel errno, show an unverified owner as unverified, and produce
+well-formed empty, single- and multi-device JSON without mapped-path
+inference. The Linux swap inventory reader is independently unit tested with
+synthetic procfs text: canonical KiB-to-bytes bounds, zero/negative/overflow,
+missing newline, malformed headers, incorrect field counts, invalid swap
+type, used-greater-than-size and malformed priority. It may inspect the
+ordinary `/dev/null` character-device fixture to prove that a non-block
+pathname does not inherit a swapz Device Mapper identity; the regression
+must never issue swapon, swapoff or mutate a block device. These tests are
+rootless *parsing* evidence, not current-host swap ownership or true
+physical-media qualification. Do not treat `not_observed` as authenticated
+inactivity if a kernel-retained pathname is hidden by an overmount.
+
 ## Automatic abandoned benchmark resource recovery
 
 The benchmark producer records a separate root-only creation proof before

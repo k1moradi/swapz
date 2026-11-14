@@ -2205,6 +2205,9 @@ static void test_swapz_observation_views(void)
 			.ratio = { .logical_write_bytes = 16384,
 				   .physical_write_bytes = 8192,
 				   .compressed_pages = 4,
+				   .compressed_logical_bytes = 16384,
+				   .compressed_extent_bytes = 8192,
+				   .overall_physical_bytes = 8192,
 				   .compressed_extent_ratio_exact = 1 }
 		},
 		{
@@ -2295,6 +2298,72 @@ static void test_swapz_observation_views(void)
 	close(saved_stdout);
 }
 
+
+/* Read-only procfs inventory parser: synthetic regular/character fixtures only. */
+static void test_swapz_linux_swap_inventory_parser(void)
+{
+	const struct {
+		const char *inventory;
+		int valid;
+	} cases[] = {
+		{ "Filename\tType\tSize\tUsed\tPriority\n", 1 },
+		{ "Filename\tType\tSize\tUsed\tPriority\n"
+		  "/dev/null partition 1024 512 -1\n", 1 },
+		{ "Filename\tType\tSize\tUsed\tPriority\n"
+		  "/dev/null file 1024 0 1\n", 1 },
+		{ "Filename\tType\tSize\tUsed\tPriority\n"
+		  "/dev/null partition 1 2 -1\n", 0 },
+		{ "Filename\tType\tSize\tUsed\tPriority\n"
+		  "/dev/null partition 18014398509481984 0 -1\n", 0 },
+		{ "Filename\tType\tSize\tUsed\tPriority\n"
+		  "/dev/null partition -1 0 -1\n", 0 },
+		{ "Filename\tType\tSize\tUsed\tPriority\n"
+		  "/dev/null unknown 1024 1 -1\n", 0 },
+		{ "Filename\tType\tSize\tUsed\tPriority\n"
+		  "/dev/null partition 1024 1 invalid\n", 0 },
+		{ "Filename\tType\tSize\tUsed\tPriority\n"
+		  "/dev/null partition 1024 1 9999999999999999999999999\n", 0 },
+		{ "Filename\tType\tSize\tUsed\tPriority\n"
+		  "/dev/null partition 1024 1 1 extra\n", 0 },
+		{ "Filename\tType\tSize\tUsed\tPriority\n"
+		  "/dev/null partition 1024 1 -1", 0 },
+		{ "Broken header\n", 0 },
+		{ "", 0 }
+	};
+	struct status_ready_target target = {
+		.name = "swapz-observation",
+		.device_id = makedev(253, 9),
+		.sector_length = 8192
+	};
+	const struct status_ready_report report = {
+		.targets = &target, .count = 1, .capacity = 1
+	};
+	size_t index;
+	unsigned long long bytes = 777;
+
+	assert(swapz_parse_swap_kib("0", &bytes) == 0 && bytes == 0);
+	assert(swapz_parse_swap_kib("1", &bytes) == 0 && bytes == 1024);
+	assert(swapz_parse_swap_kib("18446744073709551615", &bytes) < 0);
+	assert(swapz_parse_swap_kib("01", &bytes) < 0);
+	assert(swapz_parse_swap_kib("-1", &bytes) < 0);
+
+	for (index = 0; index < sizeof(cases) / sizeof(cases[0]); ++index) {
+		struct swapz_linux_swap observation = { .state = "not_observed" };
+		FILE *inventory = tmpfile();
+		int parsed;
+
+		assert(inventory);
+		assert(fputs(cases[index].inventory, inventory) >= 0);
+		rewind(inventory);
+		parsed = swapz_read_linux_swap(inventory, &report, &observation);
+		assert((parsed == 0) == cases[index].valid);
+		/* /dev/null is a character device, never the fake mapper. */
+		assert(!observation.has_usage);
+		assert(!strcmp(observation.state, "not_observed"));
+		assert(fclose(inventory) == 0);
+	}
+}
+
 static void test_status_is_read_only(void)
 {
 	unsigned char *reply = NULL;
@@ -2353,6 +2422,7 @@ int main(void)
 	test_production_dm_query_error_precedence();
 	test_status_is_read_only();
 	test_swapz_observation_views();
+	test_swapz_linux_swap_inventory_parser();
 	puts("PASS: swapzctl status compression-ratio accounting");
 	return 0;
 }
