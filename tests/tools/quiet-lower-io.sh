@@ -34,7 +34,7 @@ swapz_quiet_observe_dmsetup() {
 swapz_quiet_parse_status() {
     local status_text="$1" token key value required_field
     local -n parsed_values="$2"
-    local expected_field_count=479
+    local expected_field_count=484
     local token_index=0
     local -a fields=()
     local -A seen_fields=()
@@ -60,7 +60,7 @@ swapz_quiet_parse_status() {
         return 1
     }
     read -r -a fields <<< "$status_text"
-    # Current production INFO has three DM header fields plus 476 complete
+    # Current production INFO has three DM header fields plus 481 complete
     # key/value fields, including a literal numeric compatibility token.
     # Schema drift blocks qualification until this oracle and its
     # source-derived rootless fixture are updated together.
@@ -136,6 +136,8 @@ swapz_quiet_parse_status() {
             read_submitted read_submitted_reqs flush_calls flush_ok flush_err \
             window_records read_payload_reqs prep_ready_current prep_slots_in_use \
             submitter_prepare_active delta64_adopted failed error completion_active \
+            lower_write_inflight lower_write_age_ms ordered_worker_running \
+            ordered_worker_queued ordered_queue_pending \
             upper_write_completed_ok upper_write_completed_err endio_write_forced_err; do
         [[ -n ${seen_fields[$required_field]+present} ]] || {
             SWAPZ_QUIET_PARSE_REASON="missing-status-field:$required_field"
@@ -236,7 +238,8 @@ swapz_capture_quiescent_io() {
         physical_write_reqs physical_read physical_read_reqs
         upper_write_completed_ok upper_write_completed_err endio_write_forced_err)
     local -a active_status_fields=(prep_ready_current prep_slots_in_use
-        submitter_prepare_active completion_active)
+        submitter_prepare_active completion_active lower_write_inflight
+        ordered_worker_running ordered_worker_queued ordered_queue_pending)
 
     SWAPZ_QUIET_STATUS=""
     SWAPZ_QUIET_LOWER=()

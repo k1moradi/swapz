@@ -4565,7 +4565,16 @@ tokens and signed Bash arithmetic bounds before comparison; reject malformed,
 duplicate, noncanonical or overflowing fields and reject regressions/wraps in
 the tracked cumulative attribution counters within a pair and across retries.
 Equal samples are not quiescent while block-stat `in_flight` or target
-preparation/completion ownership remains nonzero. Shorter 11/15-field block-stat
+preparation/completion ownership remains nonzero. The five read-only INFO
+liveness fields `lower_write_inflight`, `lower_write_age_ms`,
+`ordered_worker_running`, `ordered_worker_queued`, and `ordered_queue_pending`
+are mandatory schema tokens (484 total INFO words, including three DM header
+words). The four in-flight/running/queued indicators are active ownership:
+a stable nonzero value must refuse quiescence and name the active field.
+`lower_write_age_ms` is a duration, not an active-work proof by itself; it
+must be parsed canonically but is not a standalone quiescence veto. Rootless
+fixtures must exercise each active field and a transient lower-write owner
+that drains on retry, without relaxing the exact-count or failure gates. Shorter 11/15-field block-stat
 layouts omit optional discard/flush evidence and are UNAVAILABLE, not zero lower
 I/O. Bound every `dmsetup` identity/status observation with a finite timeout.
 A failed or timed-out command/read, incomplete status, missing prerequisite,

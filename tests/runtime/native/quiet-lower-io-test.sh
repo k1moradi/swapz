@@ -42,7 +42,12 @@ print("0 32768 swapz " + " ".join(tokens))
 PY
 )" || fail 'cannot construct production status fixture'
 LONG_FIELD="$(printf '%065d' 0 | tr '0' 'a')"
-[[ $(wc -w <<< "$EXPECTED_STATUS") == 479 &&
+[[ $(wc -w <<< "$EXPECTED_STATUS") == 484 &&
+   $EXPECTED_STATUS == *' lower_write_inflight=0 '* &&
+   $EXPECTED_STATUS == *' lower_write_age_ms=0 '* &&
+   $EXPECTED_STATUS == *' ordered_worker_running=0 '* &&
+   $EXPECTED_STATUS == *' ordered_worker_queued=0 '* &&
+   $EXPECTED_STATUS == *' ordered_queue_pending=0 '* &&
    $EXPECTED_STATUS == *' gc_pages=0 '* &&
    $EXPECTED_STATUS == *' prep_slots_in_use=0 '* &&
    $EXPECTED_STATUS == *' submitter_prepare_active=0 '* &&
@@ -79,7 +84,7 @@ timeout() {
 # This function deliberately accepts *only* read-only observational dmsetup
 # requests. A new control-path command is a test failure, never real I/O.
 dmsetup() {
-    local calls physical_read=0 status_text
+    local calls physical_read=0 status_text active_field=
     if [[ $1 == info && $# == 8 && $2 == -c && $3 == --noheadings &&
             $4 == --separator && $5 == : && $6 == -o &&
             $7 == uuid,major,minor,events && $8 == owned-test-mapper ]]; then
@@ -149,6 +154,23 @@ dmsetup() {
         status_text="${status_text/completion_active=0/completion_active=1}"
     elif [[ $mode == target_active_once && $calls -le 2 ]]; then
         status_text="${status_text/completion_active=0/completion_active=1}"
+    fi
+    # Production worker and lower-write liveness are gauges, not completed
+    # counters. A quiet sample with any active owner must not pass admission.
+    case $mode in
+        lower_write_inflight_active|lower_write_inflight_once)
+            active_field=lower_write_inflight ;;
+        ordered_worker_running_active)
+            active_field=ordered_worker_running ;;
+        ordered_worker_queued_active)
+            active_field=ordered_worker_queued ;;
+        ordered_queue_pending_active)
+            active_field=ordered_queue_pending ;;
+        lower_write_age_observation)
+            status_text="${status_text/lower_write_age_ms=0/lower_write_age_ms=7}" ;;
+    esac
+    if [[ -n $active_field && ( $mode != lower_write_inflight_once || $calls -le 2 ) ]]; then
+        status_text="${status_text/${active_field}=0/${active_field}=1}"
     fi
     case $mode in
         truncated_status) status_text="${status_text% endio_write_forced_err=0}" ;;
@@ -248,6 +270,16 @@ reset_case lower_inflight_once
 expect_success 2 17
 reset_case target_active
 expect_unavailable attempt-budget exhausted:active-target-work initial+final 3 "" active_field=completion_active
+reset_case lower_write_inflight_once
+expect_success 2 17
+for active_field in lower_write_inflight ordered_worker_running \
+        ordered_worker_queued ordered_queue_pending; do
+    reset_case "${active_field}_active"
+    expect_unavailable attempt-budget exhausted:active-target-work \
+        initial+final 3 "" "active_field=$active_field"
+done
+reset_case lower_write_age_observation
+expect_success 1 17
 reset_case lower_inflight
 printf '%s\n' '3 0 24 0 0 0 0 0 1 0 0 0 0 0 0 0 0' > "$STAT"
 expect_unavailable attempt-budget exhausted:lower-io-in-flight initial+final
@@ -269,9 +301,9 @@ expect_unavailable final-lower lower-counter-width-changed initial+final
 reset_case width_change_later
 expect_unavailable initial-lower lower-counter-width-changed initial
 reset_case truncated_status
-expect_unavailable initial-status incomplete-status none 3 'field-count:expected=479:actual=478'
+expect_unavailable initial-status incomplete-status none 3 'field-count:expected=484:actual=483'
 reset_case partial_status
-expect_unavailable initial-status incomplete-status none 3 'field-count:expected=479:actual=6'
+expect_unavailable initial-status incomplete-status none 3 'field-count:expected=484:actual=6'
 reset_case internal_truncated_status
 expect_unavailable initial-status incomplete-status none
 reset_case duplicate_status
