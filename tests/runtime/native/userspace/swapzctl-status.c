@@ -219,8 +219,9 @@ static void build_watch_info_fixture(char *output, size_t capacity,
 	size_t index;
 	int rendered;
 
-	assert(output && capacity && omitted_field < 8U &&
-	       replaced_field < 8U);
+	assert(output && capacity &&
+	       (omitted_field == SIZE_MAX || omitted_field < 7U) &&
+	       (replaced_field == SIZE_MAX || replaced_field < 7U));
 	rendered = snprintf(output, capacity, "%s", legacy);
 	assert(rendered > 0 && (size_t)rendered < capacity);
 	used_length = (size_t)rendered;

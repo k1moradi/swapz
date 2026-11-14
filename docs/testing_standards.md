@@ -137,7 +137,9 @@ The seven optional INFO keys (`logical_read`, `physical_read`,
 Only a complete valid set may set `watch_counters_valid`; omitting any
 one must preserve legacy STATUS_READY display but make watch invalid.
 Duplicate, empty, signed, noncanonical, overflow and suffixed values must
-fail closed with source-specific diagnostics. GC read bytes/requests and
+fail closed with source-specific diagnostics. The synthetic fixture's
+`SIZE_MAX` sentinel denotes an unmodified/retained optional field and must
+not be mistaken for an out-of-range input index. GC read bytes/requests and
 GC write requests exceeding the relevant total lower I/O must retry,
 not publish a complete watch-ready snapshot. These synthetic strings
 never imply a qualified public watch sampler or live-device rates.
