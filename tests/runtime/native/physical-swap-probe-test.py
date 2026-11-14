@@ -906,6 +906,11 @@ class PhysicalSwapProbeTests(unittest.TestCase):
             "backing_inflight_requests": 2,
             "cgroup_memory_max_events": "/private/KEEP_PRIVATE",
             "progress_window_usec": 4_000_000,
+            "swapz_recent_progress_window_usec": 3_500_000,
+            "swapz_recent_write_completed_delta": 0,
+            "swapz_recent_physical_write_delta": 0,
+            "swapz_recent_lower_write_sectors_delta": 0,
+            "progress_sample_age_usec": 500_000,
             "cgroup_io_some_delta_usec": 100,
             "cgroup_io_full_delta_usec": 50,
             "cgroup_cpu_some_delta_usec": True,
@@ -950,6 +955,11 @@ class PhysicalSwapProbeTests(unittest.TestCase):
         self.assertEqual(record["pressure"]["swapz_commit_nonio_wall_delta_ns"], 50)
         self.assertIsNone(record["pressure"]["swapz_prep_wait_wall_delta_ns"])
         self.assertEqual(record["pressure"]["progress_window_usec"], 4_000_000)
+        self.assertEqual(record["pressure"]["swapz_recent_progress_window_usec"],
+                         3_500_000)
+        self.assertEqual(record["pressure"]["swapz_recent_physical_write_delta"], 0)
+        self.assertEqual(record["pressure"]["swapz_recent_lower_write_sectors_delta"], 0)
+        self.assertEqual(record["pressure"]["progress_sample_age_usec"], 500_000)
         self.assertEqual(record["pressure"]["lower_write_requests_delta"], 2)
         self.assertEqual(record["pressure"]["phase_elapsed_usec"], 5123456)
         self.assertIsNone(record["pressure"]["lower_read_sectors_total"])

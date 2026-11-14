@@ -3826,19 +3826,23 @@ def _workload_pressure_failure(window: PsiStallWindow, cgroup: Path,
             if observed_time is not None and phase_started is not None
             else None)
         observation["round_index"] = round_index
+        # Report last-sample age for both swapz and raw: whole-window I/O
+        # progress alone cannot establish a fresh development gate sample.
+        if progress_samples:
+            sampled_at, last_sample = progress_samples[-1]
+            observation["progress_sample_age_usec"] = (
+                int((observed_time - sampled_at) * 1_000_000)
+                if observed_time is not None and observed_time >= sampled_at
+                else None)
         # The raw workload has no dmsetup status counters. Preserve only
         # read-only selected-partition/cgroup/Linux observations from the
-        # most recent bounded sample, including its actual age.
+        # most recent bounded sample.
         if progress_samples and "raw_swap_used_kib" in progress_samples[-1][1]:
             sampled_at, last_sample = progress_samples[-1]
             for key in ("raw_swap_used_kib", "raw_swap_used_after_kib",
                         "raw_cgroup_swap_bytes", "raw_pswpout_total",
                         "raw_pswpin_total"):
                 observation[key] = last_sample.get(key)
-            observation["progress_sample_age_usec"] = (
-                int((observed_time - sampled_at) * 1_000_000)
-                if observed_time is not None and observed_time >= sampled_at
-                else None)
             observation["raw_swap_baseline_used_kib"] = (
                 raw_swap_baseline_used_kib)
             observed_used = last_sample.get("raw_swap_used_kib")
@@ -3861,6 +3865,26 @@ def _workload_pressure_failure(window: PsiStallWindow, cgroup: Path,
                      "raw_recent_lower_write_sectors_delta"),
                     ("lower_read_sectors_delta",
                      "raw_recent_lower_read_sectors_delta")):
+                observation[name] = recent[original]
+        elif progress_samples:
+            # Only these bounded deltas feed the swapz development exception.
+            # The original window deltas may include now-stale lower I/O.
+            recent = _recent_pressure_progress_deltas(
+                progress_samples, window)
+            for original, name in (
+                    ("progress_window_usec", "swapz_recent_progress_window_usec"),
+                    ("swapz_write_completed_delta",
+                     "swapz_recent_write_completed_delta"),
+                    ("swapz_physical_write_delta",
+                     "swapz_recent_physical_write_delta"),
+                    ("lower_write_sectors_delta",
+                     "swapz_recent_lower_write_sectors_delta"),
+                    ("swapz_logical_read_delta",
+                     "swapz_recent_logical_read_delta"),
+                    ("swapz_physical_read_delta",
+                     "swapz_recent_physical_read_delta"),
+                    ("lower_read_sectors_delta",
+                     "swapz_recent_lower_read_sectors_delta")):
                 observation[name] = recent[original]
     readers = {
         "mem_available_mib": _mem_available_mib,

@@ -3177,6 +3177,54 @@ class PrimaryRealSwapContracts(unittest.TestCase):
             if key not in {"window_usec", "stalled_usec", "limit_usec", "workload_phase"}:
                 self.assertIsNone(value, key)
 
+    def test_swapz_psi_failure_distinguishes_historical_from_recent_progress(self):
+        # The Lubuntu post-reboot trial reported 262144 module bytes and
+        # 512 backing sectors across the PSI window. Both can be historical:
+        # the development exception considers only the latest ~4 seconds.
+        window = qualify.PsiStallWindow(0.0, 0)
+        self.assertTrue(window.observe(5.0, 4_900_000))
+        before = {name: 0 for name, _ in qualify.PRESSURE_PROGRESS_COUNTERS}
+        before.update(swapz_failed=0, swapz_error=0,
+                      swapz_upper_write_completed_ok=44_032)
+        completed = dict(before, swapz_physical_write_total=262_144,
+                         lower_write_sectors_total=512)
+        samples = deque([(0.0, before)] + [
+            (sample_time, completed) for sample_time in
+            (1.0, 2.0, 3.0, 4.0, 4.5)])
+        self.assertFalse(qualify._development_pressure_has_owned_progress(
+            samples, window, "fill"))
+        with mock.patch.object(qualify, "_mem_available_mib", return_value=12000), \
+                mock.patch.object(qualify, "_read_uint", return_value=1024), \
+                mock.patch.object(qualify, "_psi_total", return_value=0), \
+                mock.patch.object(qualify, "_memory_events",
+                                  return_value={"max": 0}), \
+                mock.patch.object(qualify, "_backing_inflight_requests",
+                                  return_value=1), \
+                mock.patch.object(qualify, "read_block_stats",
+                                  return_value=qualify.BlockStats(0, 512)):
+            failure = qualify._workload_pressure_failure(
+                window, Path("/private/cgroup"), lambda: {}, (8, 4),
+                "fill", progress_samples=samples, observed_time=5.0,
+                workload_started=0.0, phase_started=0.0, round_index=1)
+        observation = failure.pressure_observation
+        self.assertEqual(observation["progress_window_usec"], 4_500_000)
+        self.assertEqual(observation["swapz_physical_write_delta"], 262_144)
+        self.assertEqual(observation["lower_write_sectors_delta"], 512)
+        self.assertEqual(observation["swapz_recent_progress_window_usec"],
+                         3_500_000)
+        self.assertEqual(observation["swapz_recent_write_completed_delta"], 0)
+        self.assertEqual(observation["swapz_recent_physical_write_delta"], 0)
+        self.assertEqual(observation["swapz_recent_lower_write_sectors_delta"], 0)
+        self.assertEqual(observation["progress_sample_age_usec"], 500_000)
+
+        # If the latest actual progress window contains both completed owned
+        # module bytes and backing sectors, the existing gate permits it.
+        latest = dict(completed, swapz_physical_write_total=266_240,
+                      lower_write_sectors_total=520)
+        samples[-1] = (4.5, latest)
+        self.assertTrue(qualify._development_pressure_has_owned_progress(
+            samples, window, "fill"))
+
     def test_development_pressure_requires_same_window_owned_io(self):
         self.assertEqual(qualify.PSI_STOP_FRACTION, 0.85)
         stall = qualify.PsiStallWindow(0.0, 0)

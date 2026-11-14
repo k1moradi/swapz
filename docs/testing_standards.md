@@ -119,6 +119,11 @@ cgroup OOM and swap bounds, exact two-round byte-oracle/attribution checks,
 device ownership, and restoration stay unchanged. The official production
 qualification retains its unconditional 85%/5s PSI stop.
 
+A development smoke PSI failure reports both its full PSI-window counters and
+separately the recent gate-window swapz WRITE/READ deltas and last sample age.
+Whole-window activity can be positive even when no qualifying recent I/O
+remains; diagnostic fields must not change the admission decision.
+
 ## Development-only paired raw Linux swap versus swapz physical comparison
 
 The optional operator-facing command `python3 -B tests/tools/algorithm-physical.py
