@@ -898,6 +898,11 @@ class PhysicalSwapProbeTests(unittest.TestCase):
             "mem_available_mib": 12000, "swapz_error": -5,
             "cgroup_io_some_usec": 700, "cgroup_io_full_usec": True,
             "swapz_lower_write_wall_ns": 900, "swapz_prep_wait_wall_ns": True,
+            "swapz_lower_write_inflight": 1, "swapz_lower_write_age_ms": 4300,
+            "swapz_ordered_worker_running": 1,
+            "swapz_ordered_worker_queued": False,
+            "swapz_ordered_queue_pending": 1,
+            "backing_inflight_requests": 2,
             "cgroup_memory_max_events": "/private/KEEP_PRIVATE",
             "progress_window_usec": 4_000_000,
             "cgroup_io_some_delta_usec": 100,
@@ -930,6 +935,12 @@ class PhysicalSwapProbeTests(unittest.TestCase):
         self.assertEqual(record["pressure"]["swapz_error"], -5)
         self.assertEqual(record["pressure"]["cgroup_io_some_usec"], 700)
         self.assertEqual(record["pressure"]["swapz_lower_write_wall_ns"], 900)
+        self.assertEqual(record["pressure"]["swapz_lower_write_inflight"], 1)
+        self.assertEqual(record["pressure"]["swapz_lower_write_age_ms"], 4300)
+        self.assertEqual(record["pressure"]["swapz_ordered_worker_running"], 1)
+        self.assertIsNone(record["pressure"]["swapz_ordered_worker_queued"])
+        self.assertEqual(record["pressure"]["swapz_ordered_queue_pending"], 1)
+        self.assertEqual(record["pressure"]["backing_inflight_requests"], 2)
         self.assertIsNone(record["pressure"]["swapz_prep_wait_wall_ns"])
         self.assertIsNone(record["pressure"]["cgroup_io_full_usec"])
         self.assertIsNone(record["pressure"]["cgroup_memory_max_events"])

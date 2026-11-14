@@ -2995,6 +2995,22 @@ class PrimaryRealSwapContracts(unittest.TestCase):
                     qualify.QualificationFailure):
                 qualify.parse_status(malformed)
 
+    def test_status_parses_diagnostic_liveness_tokens_without_changing_core_gates(self):
+        status = qualify.parse_status(
+            "0 8192 swapz logical_write=4096 logical_read=0 "
+            "physical_write=2048 physical_read=0 failed=0 error=0 "
+            "lower_write_inflight=1 lower_write_age_ms=6432 "
+            "ordered_worker_running=1 ordered_worker_queued=0 "
+            "ordered_queue_pending=1")
+        self.assertEqual(status["lower_write_age_ms"], 6432)
+        self.assertEqual(status["lower_write_inflight"], 1)
+        self.assertEqual(status["ordered_worker_running"], 1)
+        with self.assertRaises(qualify.QualificationFailure):
+            qualify.parse_status(
+                "0 8192 swapz logical_write=4096 logical_read=0 "
+                "physical_write=2048 physical_read=0 failed=1 error=-5 "
+                "lower_write_inflight=1 lower_write_inflight=0")
+
     def test_vmstat_requires_both_kernel_swap_counters(self):
         with mock.patch.object(
                 Path, "read_text",
@@ -3090,6 +3106,20 @@ class PrimaryRealSwapContracts(unittest.TestCase):
             self.assertTrue(qualify.PsiStallWindow(0.0, 0).observe(
                 5.0, 4_500_000))
 
+    def test_backing_inflight_requests_is_optional_and_strict(self):
+        with mock.patch.object(
+                Path, "read_text",
+                return_value="10 0 32 4 20 0 64 7 3 8 9"):
+            self.assertEqual(qualify._backing_inflight_requests((8, 4)), 3)
+        for invalid in ("1 2 3 4 5 6 7 8", "1 2 3 4 5 6 7 8 -1",
+                        "1 2 3 4 5 6 7 8 wrong"):
+            with self.subTest(invalid=invalid), mock.patch.object(
+                    Path, "read_text", return_value=invalid):
+                self.assertIsNone(qualify._backing_inflight_requests((8, 4)))
+        with mock.patch.object(
+                Path, "read_text", side_effect=OSError(errno.EACCES, "denied")):
+            self.assertIsNone(qualify._backing_inflight_requests((8, 4)))
+
     def test_pressure_snapshot_preserves_first_stop_when_optional_reads_fail(self):
         window = qualify.PsiStallWindow(0.0, 0)
         self.assertTrue(window.observe(5.0, 4_500_000))
@@ -3098,13 +3128,18 @@ class PrimaryRealSwapContracts(unittest.TestCase):
                   "error": -5, "write_submitted": 8192, "upper_write_completed_ok": 1,
                   "lower_write_wall_ns": 900, "ordered_worker_wall_ns": 1000,
                   "prep_wait_wall_ns": 40, "window_commit_nonio_wall_ns": 30,
-                  "lower_write_service_ewma_ns": 80}
+                  "lower_write_service_ewma_ns": 80,
+                  "lower_write_inflight": 1, "lower_write_age_ms": 4200,
+                  "ordered_worker_running": 1, "ordered_worker_queued": 0,
+                  "ordered_queue_pending": 1}
         with mock.patch.object(qualify, "_mem_available_mib", return_value=12000), \
                 mock.patch.object(qualify, "_read_uint", side_effect=[1024, 2048]), \
                 mock.patch.object(qualify, "_psi_total", side_effect=[700, 500]), \
                 mock.patch.object(qualify, "_memory_events", return_value={"max": 17}), \
                 mock.patch.object(qualify, "read_block_stats",
-                                  return_value=qualify.BlockStats(17, 29)) as lower:
+                                  return_value=qualify.BlockStats(17, 29)) as lower, \
+                mock.patch.object(qualify, "_backing_inflight_requests",
+                                  return_value=3):
             failure = qualify._workload_pressure_failure(
                 window, Path("/private/cgroup"), lambda: status, (8, 4), "fill")
         self.assertEqual(str(failure),
@@ -3120,13 +3155,21 @@ class PrimaryRealSwapContracts(unittest.TestCase):
         self.assertEqual(observed["swapz_physical_write_total"], 8192)
         self.assertEqual(observed["swapz_lower_write_wall_ns"], 900)
         self.assertEqual(observed["swapz_lower_write_service_ewma_ns"], 80)
+        self.assertEqual(observed["swapz_lower_write_inflight"], 1)
+        self.assertEqual(observed["swapz_lower_write_age_ms"], 4200)
+        self.assertEqual(observed["swapz_ordered_worker_running"], 1)
+        self.assertEqual(observed["swapz_ordered_worker_queued"], 0)
+        self.assertEqual(observed["swapz_ordered_queue_pending"], 1)
+        self.assertEqual(observed["backing_inflight_requests"], 3)
         self.assertEqual(observed["swapz_error"], -5)
         self.assertEqual(observed["lower_write_sectors_total"], 29)
         lower.assert_called_once_with((8, 4))
         unavailable = mock.Mock(side_effect=OSError(errno.EACCES, "private read failed"))
         with mock.patch.object(qualify, "_mem_available_mib", unavailable), \
                 mock.patch.object(qualify, "_read_uint", unavailable), \
-                mock.patch.object(qualify, "read_block_stats", unavailable):
+                mock.patch.object(qualify, "read_block_stats", unavailable), \
+                mock.patch.object(
+                    qualify, "_backing_inflight_requests", unavailable):
             failed_reads = qualify._workload_pressure_failure(
                 window, Path("/private/cgroup"), unavailable, (8, 4), "verify")
         self.assertEqual(str(failed_reads), str(failure))

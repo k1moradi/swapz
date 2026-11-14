@@ -568,6 +568,9 @@ struct swapz_dm {
 	/* Each producer lane owns input/predictor/LZ4 scratch and diagnostics.
 	 * The ordered worker remains the sole planner/publisher/ACK owner. */
 	atomic_t lower_write_active;
+	/* Diagnostic only: zero outside synchronous lower-WRITE dm_io(). Read
+	 * atomically by dmsetup status without taking ordered_owner. */
+	atomic64_t sync_lower_write_started_ns;
 	atomic_t preparation_workers_active;
 	atomic_t preparation_workers_active_max;
 	/*
@@ -2749,6 +2752,10 @@ static noinline int swapz_lower(struct swapz_dm *ctx, enum req_op op,
 	if (op == REQ_OP_WRITE) {
 		unsigned long irq_flags;
 
+		/* Publish the beginning of the potentially blocking dm_io()
+		 * before issuing it; completion-only wall counters cannot expose
+		 * a WRITE that is still waiting on a slow lower device. */
+		atomic64_set(&ctx->sync_lower_write_started_ns, section_start);
 		spin_lock_irqsave(&ctx->queue_lock, irq_flags);
 		atomic_set(&ctx->lower_write_active, 1);
 		ctx->prep_lower_write_samples++;
@@ -2763,6 +2770,7 @@ static noinline int swapz_lower(struct swapz_dm *ctx, enum req_op op,
 	if (op == REQ_OP_WRITE) {
 		unsigned long irq_flags;
 
+		atomic64_set(&ctx->sync_lower_write_started_ns, 0);
 		spin_lock_irqsave(&ctx->queue_lock, irq_flags);
 		ctx->prep_lower_write_end_queued += ctx->preparation_queued;
 		if (ctx->preparation_queued)
@@ -9169,6 +9177,7 @@ static int swapz_ctr(struct dm_target *ti, unsigned int argc, char **argv)
 	/* Epoch zero is reserved as "not sampled"; first measurement epoch is 1. */
 	atomic64_set(&ctx->lane_profile_epoch, 1);
 	atomic_set(&ctx->lower_write_active, 0);
+	atomic64_set(&ctx->sync_lower_write_started_ns, 0);
 	atomic_set(&ctx->preparation_workers_active, 0);
 	atomic_set(&ctx->preparation_workers_active_max, 0);
 	atomic_set(&ctx->preparation_tail_credit, 0);
@@ -9914,6 +9923,46 @@ static void swapz_status(struct dm_target *ti, status_type_t type,
 		       ctx->authority.next_block,
 		       ctx->authority_metadata_ram_bytes,
 		       ctx->read_payload_cache_ram_bytes);
+		/*
+		 * Bounded, advisory liveness snapshot for a physical PSI refusal.
+		 * No ordered_owner acquisition, no I/O, and no failure/timeout policy
+		 * change. An executing workqueue callback may be sleeping rather than
+		 * CPU-runnable; report running/queued, never infer task state.
+		 * Synchronous and detached asynchronous WRITEs have distinct start
+		 * clocks. A completed callback awaiting publication is not lower I/O.
+		 */
+		{
+			u64 now_ns = ktime_get_ns();
+			u64 started_ns =
+				(u64)atomic64_read(&ctx->sync_lower_write_started_ns);
+			u64 async_started_ns = 0;
+			u64 lower_write_age_ms = 0;
+			unsigned int worker_state = work_busy(&ctx->worker.work);
+			unsigned long queue_flags;
+			bool queued_incoming;
+
+			if (READ_ONCE(ctx->inflight_write.active) &&
+			    !completion_done(&ctx->inflight_write.lower_done))
+				async_started_ns =
+					READ_ONCE(ctx->inflight_write.lower_start_ns);
+			if (async_started_ns &&
+			    (!started_ns || async_started_ns < started_ns))
+				started_ns = async_started_ns;
+			if (started_ns && now_ns >= started_ns)
+				lower_write_age_ms =
+					div_u64(now_ns - started_ns, NSEC_PER_MSEC);
+			spin_lock_irqsave(&ctx->queue_lock, queue_flags);
+			queued_incoming = !list_empty(&ctx->incoming);
+			spin_unlock_irqrestore(&ctx->queue_lock, queue_flags);
+			DMEMIT(" lower_write_inflight=%u lower_write_age_ms=%llu "
+			       "ordered_worker_running=%u ordered_worker_queued=%u "
+			       "ordered_queue_pending=%u",
+			       started_ns != 0, lower_write_age_ms,
+			       !!(worker_state & WORK_BUSY_RUNNING),
+			       !!(worker_state & WORK_BUSY_PENDING) ||
+				       delayed_work_pending(&ctx->worker),
+			       queued_incoming);
+		}
 		DMEMIT(
 			   " reserve=%u gc_reserve_segments_initial=%u "
 			   "gc_reserve_segments_current=%u gc_destination_advances=%llu "

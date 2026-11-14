@@ -3649,6 +3649,23 @@ def _development_pressure_has_owned_progress(
     return False
 
 
+def _backing_inflight_requests(lower_device: tuple[int, int]) -> int | None:
+    """Best-effort sysfs stat field 9, captured before owned mapper recovery.
+
+    This is a whole-parent instantaneous observation, not proof of swapz
+    attribution or the kernel worker's runnable/sleeping task state.
+    """
+    try:
+        fields = Path(
+            f"/sys/dev/block/{lower_device[0]}:{lower_device[1]}/stat"
+        ).read_text(encoding="ascii").split()
+        if len(fields) < 9 or not all(field.isdecimal() for field in fields):
+            return None
+        return int(fields[8])
+    except (OSError, ValueError):
+        return None
+
+
 def _workload_pressure_failure(window: PsiStallWindow, cgroup: Path,
                                status_reader: Callable[[], dict[str, int]],
                                lower_device: tuple[int, int], phase: str,
@@ -3680,6 +3697,8 @@ def _workload_pressure_failure(window: PsiStallWindow, cgroup: Path,
         "cgroup_io_full_usec": lambda: _psi_total(cgroup / "io.pressure", "full"),
         "cgroup_memory_max_events": lambda: _memory_events(
             cgroup / "memory.events").get("max"),
+        "backing_inflight_requests": lambda: _backing_inflight_requests(
+            lower_device),
     }
     for name, reader in readers.items():
         try:
@@ -3699,6 +3718,11 @@ def _workload_pressure_failure(window: PsiStallWindow, cgroup: Path,
         "swapz_prep_wait_wall_ns": "prep_wait_wall_ns",
         "swapz_commit_nonio_wall_ns": "window_commit_nonio_wall_ns",
         "swapz_lower_write_service_ewma_ns": "lower_write_service_ewma_ns",
+        "swapz_lower_write_inflight": "lower_write_inflight",
+        "swapz_lower_write_age_ms": "lower_write_age_ms",
+        "swapz_ordered_worker_running": "ordered_worker_running",
+        "swapz_ordered_worker_queued": "ordered_worker_queued",
+        "swapz_ordered_queue_pending": "ordered_queue_pending",
     }
     try:
         status = status_reader()
