@@ -95,6 +95,25 @@ remain guarded against duplicate definitions when a generated header supplies
 both. The Make-interface regression must inspect the generated value, not only
 the fallback header.
 
+### swapzctl read-only identity and error-path output (2026-11-14)
+
+The observer must percent-encode all unsafe Device Mapper mapper-name and
+UUID bytes as uppercase `%HH` sequences for terminal/JSON display, including
+literal percent signs, quotes, path separators, controls and non-ASCII bytes.
+Encoding must be reversible; distinct validated binary identities must never
+collapse to the same display key. Successful snapshots may expose a bounded
+DM_LIST_DEVICES UUID and event number only after the final full inventory
+agrees. They are observed mapper identity, not authenticated ownership or
+backing-device proof. A selected mapper that contains multiple swapz targets
+is ambiguous and cannot be silently reduced to one target.
+
+No observation command may publish a loaded-module banner or numeric stdout
+before both INFO reads, complete target validation, final LIST identity and
+required output prechecks succeed. Error paths preserve the first bounded
+field/errno diagnostic; failed observation does not imply safe lifecycle
+recovery. Mapper capacity derived from complete target geometry is a logical
+Device Mapper extent, not a claim about backing partition geometry.
+
 ### swapzctl status compression accounting
 
 `swapzctl status` is a read-only Device Mapper observer. It may enumerate

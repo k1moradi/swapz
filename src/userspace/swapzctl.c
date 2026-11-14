@@ -37,6 +37,9 @@
 #define SWAPZ_STATUS_MAX_TARGETS 4096U
 #define SWAPZ_STATUS_MAX_RESULTS 65536U
 #define SWAPZ_STATUS_SNAPSHOT_RETRIES 8U
+/* Percent-escape each unsafe name byte without losing the exact DM identity. */
+#define SWAPZ_DM_ESCAPED_NAME_CAPACITY (DM_NAME_LEN * 3U + 1U)
+#define SWAPZ_DM_ESCAPED_UUID_CAPACITY (DM_UUID_LEN * 3U + 1U)
 
 static void usage(FILE *out)
 {
@@ -154,8 +157,12 @@ struct status_ready_target {
 	char name[DM_NAME_LEN];
 	unsigned int target_index;
 	uint64_t device_id;
+	uint32_t event_number;
 	uint64_t sector_start;
 	uint64_t sector_length;
+	uint64_t mapper_sector_end;
+	char dm_uuid[DM_UUID_LEN];
+	int has_dm_uuid;
 	struct swapz_ratio_status ratio;
 };
 
@@ -1130,33 +1137,46 @@ static int read_dm_status_observation(
 	return parse_result;
 }
 
-static void status_safe_mapping_name(const char *name,
-				     char safe_name[DM_NAME_LEN + 1U])
+/*
+ * Display a reversible, ASCII/JSON-safe identity. No original path separator,
+ * control character, quote, backslash or non-ASCII byte reaches the terminal.
+ * The caller allocates at least 3 * maximum_length + 1 output bytes.
+ */
+static void status_escape_identity(const char *identity, size_t maximum_length,
+				   char *escaped)
 {
-	size_t index;
-	size_t length = strnlen(name, DM_NAME_LEN);
+	static const char digits[] = "0123456789ABCDEF";
+	size_t input_index;
+	size_t output_index = 0;
+	const size_t length = strnlen(identity, maximum_length);
 
-	/* Escape path punctuation and control bytes rather than echoing paths. */
-	if (!length || length >= DM_NAME_LEN) {
-		memcpy(safe_name, "<unverified>", sizeof("<unverified>"));
+	if (!length || length >= maximum_length) {
+		memcpy(escaped, "<unverified>", sizeof("<unverified>"));
 		return;
 	}
-	if (memchr(name, '/', length) || memchr(name, '\\', length)) {
-		memcpy(safe_name, "<redacted>", sizeof("<redacted>"));
-		return;
-	}
-	for (index = 0; index < length; ++index) {
-		char character = name[index];
+	for (input_index = 0; input_index < length; ++input_index) {
+		const unsigned char character = (unsigned char)identity[input_index];
+		const int safe = (character >= 'a' && character <= 'z') ||
+				 (character >= 'A' && character <= 'Z') ||
+				 (character >= '0' && character <= '9') ||
+				 character == '_' || character == '-' ||
+				 character == '.' || character == '+';
 
-		safe_name[index] =
-			(character >= 'a' && character <= 'z') ||
-			(character >= 'A' && character <= 'Z') ||
-			(character >= '0' && character <= '9') ||
-			character == '_' || character == '-' ||
-			character == '.' || character == '+' ?
-			character : '_';
+		if (safe) {
+			escaped[output_index++] = (char)character;
+		} else {
+			escaped[output_index++] = '%';
+			escaped[output_index++] = digits[character >> 4];
+			escaped[output_index++] = digits[character & 0x0f];
+		}
 	}
-	safe_name[length] = '\0';
+	escaped[output_index] = '\0';
+}
+
+static void status_safe_mapping_name(const char *name,
+				     char safe_name[SWAPZ_DM_ESCAPED_NAME_CAPACITY])
+{
+	status_escape_identity(name, DM_NAME_LEN, safe_name);
 }
 
 static void report_swapz_target(const char *name, unsigned int target_index,
@@ -1165,7 +1185,7 @@ static void report_swapz_target(const char *name, unsigned int target_index,
 	char gc_text[64];
 	char lower_write_delta_text[64];
 	char compressed_logical_text[64];
-	char safe_name[DM_NAME_LEN + 1U];
+	char safe_name[SWAPZ_DM_ESCAPED_NAME_CAPACITY];
 	unsigned long long total_pages;
 	unsigned long long lower_write_delta;
 	const char *lower_write_delta_label;
@@ -1244,7 +1264,7 @@ static int status_report_problem(const char *state, const char *name,
 				 unsigned int generation,
 				 const struct status_problem *problem)
 {
-	char safe_name[DM_NAME_LEN + 1U];
+	char safe_name[SWAPZ_DM_ESCAPED_NAME_CAPACITY];
 
 	status_safe_mapping_name(name, safe_name);
 	if (target_index == UINT_MAX)
@@ -1272,7 +1292,7 @@ static int status_report_problem(const char *state, const char *name,
 static int status_report_ioctl_failure(const char *name, uint64_t device_id,
 				       unsigned int generation, int error_number)
 {
-	char safe_name[DM_NAME_LEN + 1U];
+	char safe_name[SWAPZ_DM_ESCAPED_NAME_CAPACITY];
 
 	status_safe_mapping_name(name, safe_name);
 	fprintf(stderr,
@@ -1361,7 +1381,8 @@ static int status_observations_equal(
 
 static int status_append_ready_target(
 	struct status_ready_report *report, const char *name,
-	unsigned int target_index, const struct swapz_target_snapshot *source)
+	unsigned int target_index, const struct swapz_target_snapshot *source,
+	uint64_t mapper_sector_end)
 {
 	struct status_ready_target *grown;
 	size_t capacity;
@@ -1380,8 +1401,11 @@ static int status_append_ready_target(
 		report->targets = grown;
 		report->capacity = capacity;
 	}
+	memset(&report->targets[report->count], 0,
+	       sizeof(report->targets[report->count]));
 	memcpy(report->targets[report->count].name, name, strlen(name) + 1U);
 	report->targets[report->count].target_index = target_index;
+	report->targets[report->count].mapper_sector_end = mapper_sector_end;
 	report->targets[report->count].device_id = source->device_id;
 	report->targets[report->count].sector_start = source->sector_start;
 	report->targets[report->count].sector_length = source->length;
@@ -1466,6 +1490,7 @@ static int report_device_status_with_reader(
 		struct status_problem problem = { 0 };
 		unsigned int problem_target = 0;
 		unsigned int target;
+		uint64_t mapper_sector_end = 0;
 		int result;
 
 		result = read_observation(context, name, expected_device, &first,
@@ -1525,11 +1550,20 @@ static int report_device_status_with_reader(
 				goto retry;
 			}
 		}
+		/* A mapper's total extent includes validated non-swapz targets. */
+		for (target = 0; target < first.target_count; ++target) {
+			const struct swapz_target_snapshot *entry = &first.targets[target];
+			const uint64_t sector_end = entry->sector_start + entry->length;
+
+			if (sector_end > mapper_sector_end)
+				mapper_sector_end = sector_end;
+		}
 		for (target = 0; target < first.target_count; ++target) {
 			const struct swapz_target_snapshot *entry = &first.targets[target];
 
 			if (entry->is_swapz &&
-			    status_append_ready_target(report, name, target, entry) < 0) {
+			    status_append_ready_target(report, name, target, entry,
+						       mapper_sector_end) < 0) {
 				struct status_problem allocation_problem = {
 					.field = "validated status results",
 					.expected = "bounded output inventory allocation",
@@ -1617,6 +1651,8 @@ static int status_collect_targets_with_readers(
 	while (current_offset < first_header.data_size) {
 		struct dm_list_record record;
 		const size_t remaining = first_header.data_size - current_offset;
+		const size_t first_ready_index = report->count;
+		size_t ready_index;
 
 		if (status_parse_name_list_record(first_buffer + current_offset,
 						  remaining, &record, &problem) < 0) {
@@ -1626,6 +1662,20 @@ static int status_collect_targets_with_readers(
 		if (read_device(context, record.name, record.device_id,
 				record.event_number, report) < 0)
 			goto out;
+		/*
+		 * Bind first-LIST UUID/event metadata only to this completed device
+		 * observation. The final LIST must agree before it can be printed.
+		 */
+		for (ready_index = first_ready_index; ready_index < report->count;
+		     ++ready_index) {
+			struct status_ready_target *ready = &report->targets[ready_index];
+
+			ready->event_number = record.event_number;
+			if (record.uuid) {
+				memcpy(ready->dm_uuid, record.uuid, strlen(record.uuid) + 1U);
+				ready->has_dm_uuid = 1;
+			}
+		}
 		current_offset += record.record_size;
 	}
 	if (read_list(context, &second_buffer, &second_buffer_size) < 0) {
@@ -1824,6 +1874,12 @@ static int swapz_print_view(const struct status_ready_report *report,
 			swapz_view_name(view));
 		return 1;
 	}
+	if (selected_name && matches != 1U) {
+		fprintf(stderr,
+			"swapzctl %s: BLOCKED: exact mapper name has multiple swapz targets; explicit target selection is not supported\n",
+			swapz_view_name(view));
+		return 1;
+	}
 	if (report->count) {
 		linux_swaps = calloc(report->count, sizeof(*linux_swaps));
 		if (!linux_swaps) {
@@ -1843,7 +1899,7 @@ static int swapz_print_view(const struct status_ready_report *report,
 	}
 	for (index = 0; index < report->count; ++index) {
 		const struct status_ready_target *target = &report->targets[index];
-		char safe_name[DM_NAME_LEN + 1U];
+		char safe_name[SWAPZ_DM_ESCAPED_NAME_CAPACITY];
 		unsigned long long capacity = 0;
 		unsigned int device_major;
 		unsigned int device_minor;
@@ -1958,9 +2014,12 @@ static int status_targets(enum swapz_view view, const char *selected_name, int j
 		perror("swapzctl status: close /dev/mapper/control");
 		result = 1;
 	}
-	/* No numeric output until both INFO reads and the final inventory agree. */
-	if (!result)
+	/* No stdout, including the legacy banner, until all DM reads agree. */
+	if (!result) {
+		if (view == SWAPZ_VIEW_STATUS && !json)
+			puts("dm-swapz: loaded (experimental)");
 		result = swapz_print_view(&report, view, selected_name, json);
+	}
 	free(report.targets);
 	return result;
 }
@@ -2031,11 +2090,8 @@ int main(int argc, char **argv)
 			}
 		}
 		if (stat("/sys/module/dm_swapz", &info) == 0 &&
-		    S_ISDIR(info.st_mode)) {
-			if (view == SWAPZ_VIEW_STATUS && !json)
-				puts("dm-swapz: loaded (experimental)");
+		    S_ISDIR(info.st_mode))
 			return status_targets(view, selected_name, json);
-		}
 		if (view == SWAPZ_VIEW_STATUS && !json) {
 			puts("dm-swapz: not loaded (experimental)");
 			return 0;
