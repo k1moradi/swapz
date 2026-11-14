@@ -122,6 +122,27 @@ when the original Make failure line is independently verified. Raw child
 unittest headers remain private; without the Make proof or valid final
 rootless marker, CI must retain `UNKNOWN_FAILURE`.
 
+### Complete DM-table cardinality and identity barriers for a future watch adapter
+
+The `swapzctl-status.c` native fixture must exercise stable one-target,
+stable mixed swapz/non-swapz targets in either order, and two-swapz
+tables using actual DM_TABLE_STATUS byte records and the production
+two-read collector. A validated read-only status may deliberately report
+one swapz target even when the complete table has **two** targets and the
+swapz target index is zero: this filtered count must never be reused
+as `swapz_watch_snapshot.target_count`. The future watch adapter must
+preserve and verify complete-table cardinality and a separately established
+`table_generation` provenance before setting `validated=1` or emitting
+intervals; current read-only status success is not a watch qualification.
+
+The same rootless fixture must reject changed mapper name or major:minor,
+event generation, target count, foreign target type/INFO/geometry, changing
+swapz counters, and conversion of a non-swapz target to swapz across the
+two INFO observations. No failed pair may publish stdout or retain partial
+ready targets; the bounded diagnostic identifies only the authenticated
+failed field, not untrusted target parameters. The existing final LIST
+tests separately cover changes to mapper UUID, device, name and order.
+No privileged mapper, swap, or physical-media operation is permitted.
 ### Native userspace first-failure reporting
 
 The native-rootless CI reporter must accept only the producer-authenticated

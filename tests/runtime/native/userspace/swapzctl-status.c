@@ -2864,6 +2864,232 @@ static void test_swapz_public_option_dispatch(void)
 	}
 }
 
+
+/*
+ * The public observer filters non-swapz DM targets from its ready report.
+ * A single ready target is therefore not proof that the complete DM table has
+ * exactly one target: the future watch adapter must retain the full count.
+ * Exercise actual INFO parsing and two-read identity binding, not a guessed
+ * mapping constructed from already-filtered reporting structures.
+ */
+enum swapz_test_mixed_table_change {
+	SWAPZ_TEST_MIXED_STABLE,
+	SWAPZ_TEST_MIXED_NAME_CHANGE,
+	SWAPZ_TEST_MIXED_DEVICE_CHANGE,
+	SWAPZ_TEST_MIXED_EVENT_CHANGE,
+	SWAPZ_TEST_MIXED_TARGET_COUNT_CHANGE,
+	SWAPZ_TEST_MIXED_TARGET_TYPE_CHANGE,
+	SWAPZ_TEST_MIXED_TARGET_STATUS_CHANGE,
+	SWAPZ_TEST_MIXED_TARGET_GEOMETRY_CHANGE,
+	SWAPZ_TEST_MIXED_SWAPZ_COUNTER_CHANGE,
+	SWAPZ_TEST_MIXED_SECOND_SWAPZ_CHANGE
+};
+
+struct swapz_test_mixed_table_fixture {
+	struct status_ready_report report;
+	enum swapz_test_mixed_table_change change;
+	unsigned int full_target_count;
+	unsigned int swapz_target_index;
+	int two_swapz_targets;
+	unsigned int read_calls;
+};
+
+static int swapz_test_read_mixed_table(void *context, const char *name,
+				      uint64_t expected_device,
+				      struct dm_status_observation *observation,
+				      struct status_problem *problem,
+				      unsigned int *problem_target)
+{
+	struct swapz_test_mixed_table_fixture *fixture = context;
+	const int second_read = (fixture->read_calls++ & 1U) != 0U;
+	const char *types[2] = { "linear", "linear" };
+	const char *statuses[2] = { "non-swapz-private", "non-swapz-private" };
+	unsigned int count = fixture->full_target_count;
+	unsigned char *buffer = malloc(2048U);
+	struct dm_ioctl header;
+	size_t reply_size;
+	int result;
+
+	assert(buffer && count >= 1U && count <= 2U);
+	assert(fixture->swapz_target_index < count);
+	types[fixture->swapz_target_index] = "swapz";
+	statuses[fixture->swapz_target_index] = fixture_valid_status;
+	if (fixture->two_swapz_targets) {
+		assert(count == 2U);
+		types[1U - fixture->swapz_target_index] = "swapz";
+		statuses[1U - fixture->swapz_target_index] = fixture_valid_status;
+	}
+	if (second_read) {
+		switch (fixture->change) {
+		case SWAPZ_TEST_MIXED_TARGET_COUNT_CHANGE:
+			count = 1U;
+			break;
+		case SWAPZ_TEST_MIXED_TARGET_TYPE_CHANGE:
+			types[1] = "crypt";
+			break;
+		case SWAPZ_TEST_MIXED_TARGET_STATUS_CHANGE:
+			statuses[1] = "modified-non-swapz-private";
+			break;
+		case SWAPZ_TEST_MIXED_SWAPZ_COUNTER_CHANGE:
+			statuses[fixture->swapz_target_index] =
+				"logical_write=8192 physical_write=8192 gc_write=0 "
+				"compressed=2 raw=0 zero_elided=0 bulk_mode=1 "
+				"bulk_padding=0 failed=0 error=0";
+			break;
+		case SWAPZ_TEST_MIXED_SECOND_SWAPZ_CHANGE:
+			types[1] = "swapz";
+			statuses[1] = fixture_valid_status;
+			break;
+		default:
+			break;
+		}
+	}
+	reply_size = make_dm_multi_fixture(buffer, 2048U, types, statuses,
+					   NULL, count, expected_device);
+	memcpy(&header, buffer, sizeof(header));
+	header.event_nr = 7U;
+	if (second_read) {
+		struct dm_target_spec specification;
+
+		switch (fixture->change) {
+		case SWAPZ_TEST_MIXED_NAME_CHANGE:
+			memset(header.name, 0, sizeof(header.name));
+			memcpy(header.name, "replacement", sizeof("replacement"));
+			break;
+		case SWAPZ_TEST_MIXED_DEVICE_CHANGE:
+			header.dev = expected_device + 1U;
+			break;
+		case SWAPZ_TEST_MIXED_EVENT_CHANGE:
+			++header.event_nr;
+			break;
+		case SWAPZ_TEST_MIXED_TARGET_GEOMETRY_CHANGE:
+			memcpy(&specification, buffer + sizeof(header),
+			       sizeof(specification));
+			++specification.length;
+			memcpy(buffer + sizeof(header), &specification,
+			       sizeof(specification));
+			break;
+		default:
+			break;
+		}
+	}
+	memcpy(buffer, &header, sizeof(header));
+	memset(observation, 0, sizeof(*observation));
+	observation->reply = buffer;
+	result = parse_dm_status_observation(buffer, reply_size, name,
+					     expected_device, observation,
+					     problem, problem_target);
+	/* A changed generation must not be accepted after LIST enumeration. */
+	return status_bind_list_generation(result, observation, 7U, problem,
+					   problem_target);
+}
+
+static int swapz_test_collect_mixed_table(void *context)
+{
+	struct swapz_test_mixed_table_fixture *fixture = context;
+
+	return report_device_status_with_reader(
+		fixture, swapz_test_read_mixed_table, "fixture", 1U,
+		&fixture->report);
+}
+
+static void test_swapz_mixed_full_table_identity_guards(void)
+{
+	static const struct {
+		const char *name;
+		enum swapz_test_mixed_table_change change;
+		unsigned int full_target_count;
+		unsigned int swapz_target_index;
+		int two_swapz_targets;
+		unsigned int ready_count;
+		const char *failure_field;
+	} cases[] = {
+		{ "single-target", SWAPZ_TEST_MIXED_STABLE, 1, 0, 0, 1, NULL },
+		{ "swapz-then-linear", SWAPZ_TEST_MIXED_STABLE, 2, 0, 0, 1, NULL },
+		{ "linear-then-swapz", SWAPZ_TEST_MIXED_STABLE, 2, 1, 0, 1, NULL },
+		{ "two-swapz", SWAPZ_TEST_MIXED_STABLE, 2, 0, 1, 2, NULL },
+		{ "mapper-name-reuse", SWAPZ_TEST_MIXED_NAME_CHANGE, 2, 0, 0, 0,
+		  "dm_ioctl.name" },
+		{ "mapper-device-reuse", SWAPZ_TEST_MIXED_DEVICE_CHANGE, 2, 0, 0, 0,
+		  "dm_ioctl.dev" },
+		{ "mapper-generation-change", SWAPZ_TEST_MIXED_EVENT_CHANGE, 2, 0, 0, 0,
+		  "dm_ioctl.event_nr" },
+		{ "table-target-removed", SWAPZ_TEST_MIXED_TARGET_COUNT_CHANGE,
+		  2, 0, 0, 0, "dm_ioctl.target_count" },
+		{ "foreign-target-type-changed", SWAPZ_TEST_MIXED_TARGET_TYPE_CHANGE,
+		  2, 0, 0, 0, "dm_target_spec.target_type" },
+		{ "foreign-target-status-changed", SWAPZ_TEST_MIXED_TARGET_STATUS_CHANGE,
+		  2, 0, 0, 0, "dm_target_spec.params" },
+		{ "foreign-target-geometry-changed",
+		  SWAPZ_TEST_MIXED_TARGET_GEOMETRY_CHANGE, 2, 0, 0, 0,
+		  "dm_target_spec.sector_start/length" },
+		{ "swapz-counters-changed", SWAPZ_TEST_MIXED_SWAPZ_COUNTER_CHANGE,
+		  2, 0, 0, 0, "dm_target_spec.params" },
+		{ "foreign-target-converted-to-swapz",
+		  SWAPZ_TEST_MIXED_SECOND_SWAPZ_CHANGE, 2, 0, 0, 0,
+		  "dm_target_spec.target_type" }
+	};
+	size_t index;
+
+	for (index = 0; index < sizeof(cases) / sizeof(cases[0]); ++index) {
+		struct swapz_test_mixed_table_fixture fixture = {
+			.change = cases[index].change,
+			.full_target_count = cases[index].full_target_count,
+			.swapz_target_index = cases[index].swapz_target_index,
+			.two_swapz_targets = cases[index].two_swapz_targets
+		};
+		char output[64];
+		char diagnostic[1024];
+		int result = swapz_test_capture_output(
+			swapz_test_collect_mixed_table, &fixture,
+			output, sizeof(output), diagnostic, sizeof(diagnostic));
+
+		if (cases[index].failure_field) {
+			/* Full-table identity drift invalidates the entire snapshot. */
+			if (result == 0 || fixture.report.count != 0U ||
+			    output[0] || !strstr(diagnostic, cases[index].failure_field) ||
+			    strstr(diagnostic, "non-swapz-private") ||
+			    strstr(diagnostic, fixture_valid_status)) {
+				fprintf(stderr,
+					"FAIL: full-table drift case=%s result=%d staged=%zu reads=%u\n",
+					cases[index].name, result, fixture.report.count,
+					fixture.read_calls);
+				abort();
+			}
+		} else {
+			const unsigned int expected_target_count =
+				cases[index].full_target_count;
+
+			if (result || diagnostic[0] || output[0] ||
+			    fixture.read_calls != 2U ||
+			    fixture.report.count != cases[index].ready_count ||
+			    fixture.report.targets[0].target_index !=
+			    cases[index].swapz_target_index ||
+			    fixture.report.targets[0].mapper_sector_end !=
+			    (uint64_t)expected_target_count * 1024ULL) {
+				fprintf(stderr,
+					"FAIL: stable full-table case=%s result=%d staged=%zu reads=%u\n",
+					cases[index].name, result, fixture.report.count,
+					fixture.read_calls);
+				abort();
+			}
+			if (fixture.two_swapz_targets)
+				assert(fixture.report.targets[1].target_index == 1U);
+			/*
+			 * Crucial watch-admission negative control: for the mixed
+			 * swapz+linear table, ready_count=1 and index=0 despite the
+			 * complete table containing two targets. Neither that
+			 * filtered count nor a stable INFO pair proves watch safety.
+			 */
+			if (expected_target_count == 2U &&
+			    !fixture.two_swapz_targets)
+				assert(fixture.report.count == 1U &&
+				       expected_target_count != fixture.report.count);
+		}
+		free(fixture.report.targets);
+	}
+}
+
 static void test_status_is_read_only(void)
 {
 	unsigned char *reply = NULL;
@@ -2929,6 +3155,7 @@ int main(void)
 	test_swapz_command_specific_help();
 	test_swapz_human_option_views();
 	test_swapz_public_option_dispatch();
+	test_swapz_mixed_full_table_identity_guards();
 	puts("PASS: swapzctl status compression-ratio accounting");
 	return 0;
 }
