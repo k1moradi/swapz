@@ -3438,6 +3438,12 @@ receive this special attribution. Keep the raw helper output confined to the
 existing mode-0600 private log; the public summary must not include host
 paths, tokens, device identities or state-file contents. This is diagnostic
 triage, not a new authorization for recovery, mapper removal or swapoff.
+The rootless reporter regression also executes the actual source-controlled
+Bash `refuse()` function and the physical-trial refusal argument in isolation,
+with no preflight, privileges or device I/O. Assert the complete stderr marker
+including appended default fields (currently `original_errno_or_exit`) is
+identical to the reporting allowlist, so a self-referential mocked marker cannot
+pass while the real host diagnostic falls through to the truncated fallback.
 The rootless reporter regression runs with a mocked child, not privileged
 preflight, and must be syntax-valid before it can support a CI PASS claim.
 

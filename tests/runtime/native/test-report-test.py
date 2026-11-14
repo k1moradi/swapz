@@ -3976,7 +3976,26 @@ class ReportContract(unittest.TestCase):
 
     def test_retained_physical_trial_preflight_stays_blocked_with_safe_guidance(self):
         marker = runner.PHYSICAL_TRIAL_PREFLIGHT_MARKER
-        phase, reason = runner.failure_context(marker + "\n")
+        # Exercise the real source-controlled Bash refuse() producer with its
+        # physical-trial invocation, not a marker copied from the reporter.
+        # This synthetic call exits before any privileged preflight operation.
+        helper = (ROOT / "tests/tools/loaded-preflight.sh").read_text(
+            encoding="utf-8")
+        refuse_function = re.search(r"(?ms)^refuse\(\) \{\n.*?^\}\n", helper)
+        physical_invocation = re.search(
+            r'(?m)^[ \t]*refuse BLOCKED physical_trial_mapper_present '
+            r'unavailable "([^"\n]*)"$', helper)
+        self.assertIsNotNone(refuse_function)
+        self.assertIsNotNone(physical_invocation)
+        actual_refusal = subprocess.run(
+            ["bash", "-c", refuse_function.group(0) +
+             '\nrefuse BLOCKED physical_trial_mapper_present unavailable "$1"',
+             "rootless-preflight-fixture", physical_invocation.group(1)],
+            capture_output=True, text=True, check=False, timeout=5)
+        self.assertEqual(actual_refusal.returncode, 1)
+        self.assertEqual(actual_refusal.stdout, "")
+        self.assertEqual(actual_refusal.stderr.strip(), marker)
+        phase, reason = runner.failure_context(actual_refusal.stderr)
         self.assertEqual(phase, runner.PHYSICAL_TRIAL_PREFLIGHT_PHASE)
         self.assertEqual(reason, runner.PHYSICAL_TRIAL_PREFLIGHT_REASON)
         self.assertNotIn("expected_proof=", reason)

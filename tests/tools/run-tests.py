@@ -2606,7 +2606,8 @@ PHYSICAL_TRIAL_PREFLIGHT_MARKER = (
     "observed_proof=name_and_uuid_only "
     "retained_state_action=retain_mapper_and_module "
     "safe_next_action=inspect_physical_trial_owner_state_read_only; "
-    "RAM test must not remove this mapper")
+    "RAM test must not remove this mapper; "
+    "original_errno_or_exit=unavailable")
 PHYSICAL_TRIAL_PREFLIGHT_PHASE = "preflight / retained physical-trial mapper"
 PHYSICAL_TRIAL_PREFLIGHT_REASON = (
     "BLOCKED: physical_trial_mapper_present; mapper name and UUID match, "
