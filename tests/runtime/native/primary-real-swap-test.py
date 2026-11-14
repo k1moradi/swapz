@@ -3276,6 +3276,56 @@ class PrimaryRealSwapContracts(unittest.TestCase):
                 deque([(0.5, baseline), (4.67, no_read)]), stall,
                 "verify"), missing)
 
+    def test_development_swapz_fill_accepts_lower_progress_before_upper_ack(self):
+        # Lubuntu's 2026-11-14 real swapz trial had 10,905 successful
+        # upper WRITEs already, but no new upper ACK in the recent 3.16s.
+        # Both the module's physical bytes and the selected partition's
+        # independently sampled sectors advanced by 159,744 bytes.
+        stall = qualify.PsiStallWindow(0.0, 0)
+        self.assertTrue(stall.observe(5.06, 4_975_283))
+        baseline = {name: 0 for name, _ in qualify.PRESSURE_PROGRESS_COUNTERS}
+        baseline.update(swapz_failed=0, swapz_error=0,
+                        swapz_upper_write_completed_ok=10_905,
+                        swapz_physical_write_total=35_405_440,
+                        lower_write_sectors_total=2_075_048)
+        after = dict(baseline, swapz_physical_write_total=35_565_184,
+                     lower_write_sectors_total=2_075_360)
+        samples = deque([(1.0, baseline), (4.25, after)])
+        self.assertTrue(qualify._development_pressure_has_owned_progress(
+            samples, stall, "fill"))
+
+        # Lower activity by itself is not enough: require prior successful
+        # upper pages and positive *new* owned module and partition I/O.
+        missing_or_stalled = (
+            {"swapz_upper_write_completed_ok": None},
+            {"swapz_upper_write_completed_ok": 0},
+            {"swapz_physical_write_total": baseline["swapz_physical_write_total"]},
+            {"lower_write_sectors_total": baseline["lower_write_sectors_total"]},
+            {"swapz_failed": 1}, {"swapz_error": -5})
+        for changes in missing_or_stalled:
+            with self.subTest(changes=changes):
+                bad = dict(after, **changes)
+                self.assertFalse(
+                    qualify._development_pressure_has_owned_progress(
+                        deque([(1.0, baseline), (4.25, bad)]),
+                        stall, "fill"))
+        # A regressing upper completion count must never be accepted.
+        regressed = dict(after, swapz_upper_write_completed_ok=10_904)
+        self.assertFalse(qualify._development_pressure_has_owned_progress(
+            deque([(1.0, baseline), (4.25, regressed)]),
+            stall, "fill"))
+
+        # Future run with a 4+ second I/O freeze: the historical 159,744B
+        # does not count after it has left the latest progress window.
+        history = deque([(0.0, baseline), (1.0, after)] +
+                        [(float(second), after) for second in range(2, 7)])
+        later_stall = qualify.PsiStallWindow(0.0, 0)
+        self.assertTrue(later_stall.observe(6.5, 6_000_000))
+        self.assertFalse(qualify._development_pressure_has_owned_progress(
+            history, later_stall, "fill"))
+        self.assertFalse(qualify._development_pressure_has_owned_progress(
+            deque([(0.0, baseline), (3.0, after)]), stall, "fill"))
+
     def test_pressure_progress_deltas_use_only_same_window_samples(self):
         window = qualify.PsiStallWindow(0.0, 0)
         self.assertTrue(window.observe(5.0, 4_500_000))

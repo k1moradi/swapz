@@ -104,9 +104,12 @@ continue while **recent, independently attributable progress** is proven.
 On the swapz-only development path, require at least three seconds of
 recent observations over approximately the last four seconds, a progress
 sample no more than 1.25 seconds old, and healthy swapz status. For fill,
-at least one successful upper WRITE completion, positive swapz physical
-WRITE bytes, and positive sectors on the exact selected lower partition
-prove progress. For verify, require at least one page of logical reads,
+require previously successful upper WRITE completions and valid, nonregressing
+upper completion counters, plus positive *recent* swapz physical WRITE bytes
+and positive *recent* sectors on the exact selected lower partition. A packed
+lower WRITE may complete without an upper-page acknowledgement in the same
+sample window; lower progress still counts, but historical progress or a
+merely in-flight request never does. For verify, require at least one page of logical reads,
 positive swapz physical READ bytes, and positive lower READ sectors.
 Do not impose the old 64-page throughput floor on slow devices. A stalled
 kernel worker, historical progress followed by no recent I/O, missing

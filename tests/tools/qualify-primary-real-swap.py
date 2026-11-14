@@ -3705,9 +3705,10 @@ def _development_pressure_has_owned_progress(
     while the swapz kernel worker is outside their cgroup. Only successful
     module operations plus real module physical bytes and device sectors
     count as continuing progress. Do not impose an arbitrary 64-page
-    throughput floor on slow swap media: one completed upper page, positive
-    owned module physical bytes and actual lower sectors over the most recent
-    bounded observation window prove progress, not eventual oracle success.
+    throughput floor on slow swap media: prior successful upper page writes,
+    plus fresh owned module physical bytes AND actual lower partition sectors,
+    prove continuing WRITE-path activity even when a packed batch has not yet
+    completed another upper page. This is not proof of oracle success.
     Incomplete, regressing, stale or foreign observations are NOT an exception
     to the original PSI trigger.
     """
@@ -3725,9 +3726,19 @@ def _development_pressure_has_owned_progress(
         return False
     if phase == "fill":
         completed = deltas["swapz_write_completed_delta"]
+        prior_completed = samples[-1][1].get(
+            "swapz_upper_write_completed_ok")
         physical = deltas["swapz_physical_write_delta"]
         lower = deltas["lower_write_sectors_delta"]
-        return (type(completed) is int and completed > 0 and
+        # A packed lower WRITE can commit physical bytes and sectors before
+        # the corresponding batch acknowledges any upper pages. Requiring a
+        # fresh upper completion falsely labels this verified I/O as a stall.
+        # Demand previous successful upper writes, valid non-regressing upper
+        # counters, and new matched module/lower progress instead. Historical
+        # counters alone, stuck in-flight requests and worker-running flags
+        # are never sufficient to waive the dev-only FULL-PSI stop.
+        return (type(completed) is int and completed >= 0 and
+                type(prior_completed) is int and prior_completed > 0 and
                 type(physical) is int and physical > 0 and
                 type(lower) is int and lower > 0)
     if phase == "verify":
