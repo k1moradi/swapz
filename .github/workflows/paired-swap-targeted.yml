@@ -25,7 +25,7 @@ jobs:
           ):
               ast.parse(Path(name).read_text(encoding="utf-8"), filename=name)
           PY
-      - name: Test raw evidence and PSI contracts
-        run: python3 -B tests/runtime/native/primary-real-swap-test.py -k raw_comparison -v
-      - name: Test guarded raw activation and block statistics
-        run: python3 -B tests/runtime/native/physical-swap-probe-test.py -k paired -v
+      - name: Complete real-swap helper rootless contracts
+        run: python3 -B tests/runtime/native/primary-real-swap-test.py
+      - name: Complete physical probe rootless contracts
+        run: python3 -B tests/runtime/native/physical-swap-probe-test.py
