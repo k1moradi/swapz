@@ -3960,6 +3960,13 @@ def _emit_algorithm_workload_failure(error, phase="anonymous_workload"):
                 "raw_recent_pswpout_delta", "raw_recent_pswpin_delta",
                 "raw_recent_lower_write_sectors_delta",
                 "raw_recent_lower_read_sectors_delta",
+                "swapz_recent_progress_window_usec",
+                "swapz_recent_write_completed_delta",
+                "swapz_recent_physical_write_delta",
+                "swapz_recent_lower_write_sectors_delta",
+                "swapz_recent_logical_read_delta",
+                "swapz_recent_physical_read_delta",
+                "swapz_recent_lower_read_sectors_delta",
                 "progress_sample_age_usec",
                 "workload_elapsed_usec", "phase_elapsed_usec", "round_index")
             pressure = {key: observation.get(key) for key in fields}
