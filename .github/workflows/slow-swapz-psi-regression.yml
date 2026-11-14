@@ -1,0 +1,29 @@
+name: Slow swapz progress-aware PSI regression
+on:
+  push:
+    branches: [ci/slow-swapz-psi-progress-20261114]
+permissions:
+  contents: read
+jobs:
+  rootless:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Parse changed Python
+        run: |
+          python3 -B - <<'PY'
+          import ast
+          from pathlib import Path
+          for path in ("tests/tools/qualify-primary-real-swap.py",
+                       "tests/runtime/native/primary-real-swap-test.py"):
+              ast.parse(Path(path).read_text(encoding="utf-8"), filename=path)
+          PY
+      - name: Real anonymous swap and pressure oracle regressions
+        run: python3 -B tests/runtime/native/primary-real-swap-test.py
+      - name: Physical ownership and recovery regressions
+        run: python3 -B tests/runtime/native/physical-swap-probe-test.py
+      - name: Patch whitespace
+        run: git diff --check b5239ad570d4533b66d8797b86609d41f17d2a69 HEAD
