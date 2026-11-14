@@ -1,0 +1,31 @@
+name: Independent paired block-stat sampler regression
+on:
+  push:
+    branches: [ci/independent-paired-io-sampler-20261114]
+permissions:
+  contents: read
+jobs:
+  paired-sampler:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Parse modified Python files
+        run: |
+          python3 -B - <<'PY'
+          import ast
+          from pathlib import Path
+          for path in (
+              "tests/tools/physical-swap-probe.py",
+              "tests/runtime/native/physical-swap-probe-test.py",
+          ):
+              ast.parse(Path(path).read_text(encoding="utf-8"), filename=path)
+          PY
+      - name: Physical probe recovery and sampler contracts
+        run: python3 -B tests/runtime/native/physical-swap-probe-test.py
+      - name: Raw swap workload contracts
+        run: python3 -B tests/runtime/native/primary-real-swap-test.py
+      - name: Patch whitespace
+        run: git diff --check a755a96714d88edc4792b2e50618b80c7ce7a472 HEAD
