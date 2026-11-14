@@ -1,0 +1,35 @@
+name: Raw-swap PSI diagnostics targeted validation
+on:
+  push:
+    branches: [ci/raw-swap-psi-20261114]
+permissions:
+  contents: read
+jobs:
+  raw-psi-contracts:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 7
+    steps:
+      - uses: actions/checkout@v4
+      - name: Compile selected Python modules
+        run: |
+          python3 -B - <<'PY'
+          import ast
+          from pathlib import Path
+          for name in (
+              "tests/tools/algorithm-physical.py",
+              "tests/tools/physical-swap-probe.py",
+              "tests/tools/qualify-primary-real-swap.py",
+              "tests/runtime/native/algorithm-physical-test.py",
+              "tests/runtime/native/physical-swap-probe-test.py",
+              "tests/runtime/native/primary-real-swap-test.py",
+          ):
+              ast.parse(Path(name).read_text(encoding="utf-8"), filename=name)
+          PY
+      - name: Raw selector rootless tests
+        run: python3 -B tests/runtime/native/algorithm-physical-test.py
+      - name: Real-swap rootless tests
+        run: python3 -B tests/runtime/native/primary-real-swap-test.py
+      - name: Physical probe rootless tests
+        run: python3 -B tests/runtime/native/physical-swap-probe-test.py
+      - name: Patch whitespace
+        run: git diff --check 314b9d68010b5a474debf9ffa2a231e9d211042b HEAD
