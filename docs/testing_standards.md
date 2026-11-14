@@ -1,5 +1,15 @@
 # Testing Standards
 
+## Agent 3 completed-journal and provenance regression (2026-11-14)
+
+The integrated, rootless swapzctl-trial-ownership-test.py exercises an
+already-COMPLETE journal with a retained owner marker through the original
+private helper, refusing without privileged command execution. Interrupted
+delegation retains ownership. Bound source/helper hashes, physical header,
+mapper identity, parent and PARTUUID must match across results/state.
+This is not a completed ownership-recovery implementation and does not
+permit a public lifecycle command or live physical execution.
+
 ## Retained trial recovery durability regression (2026-11-14)
 
 The standalone `swapzctl-trial-ownership-test.py` additionally exercises

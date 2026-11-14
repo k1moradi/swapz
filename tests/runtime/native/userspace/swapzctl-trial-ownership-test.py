@@ -23,6 +23,7 @@ SPEC = importlib.util.spec_from_file_location("swapz_trial_helper", SOURCE)
 assert SPEC is not None and SPEC.loader is not None
 helper = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(helper)
+ORIGINAL_RECOVER = helper.recover
 
 
 class TrialOwnershipTest(unittest.TestCase):
@@ -350,6 +351,59 @@ class TrialOwnershipTest(unittest.TestCase):
                 returncode=0, stdout=f"{name} {uuid}\n{name} {uuid}\n")):
             with self.assertRaises(helper.ProbeError):
                 helper._mapper_exists({"dm_name": name, "dm_uuid": uuid})
+
+
+    def test_complete_with_retained_marker_blocks_without_side_effects(self):
+        # After durable COMPLETE but before marker unlink, never retry swapoff.
+        self.state["stage"] = "COMPLETE"
+        self.state["raw_header_preservation_required"] = True
+        self.save_state()
+        with (mock.patch.object(helper, "recover", side_effect=ORIGINAL_RECOVER),
+              mock.patch.object(helper, "_run", side_effect=AssertionError(
+                  "unexpected privileged command"))):
+            with self.assertRaisesRegex(helper.RecoveryRequiredError,
+                                        "already COMPLETE"):
+                self.invoke()
+        self.assertTrue(self.marker.exists())
+
+    def test_interrupted_recovery_retains_owner_marker(self):
+        self.recover.side_effect = InterruptedError(4, "injected EINTR")
+        with self.assertRaises(helper.RecoveryRequiredError):
+            self.invoke()
+        self.recover.assert_called_once()
+        self.assertTrue(self.marker.exists())
+
+    def test_stale_results_provenance_is_not_accepted(self):
+        saved_state = {name: "fixture" for name, _ in
+                       helper.RECOVERY_RECORD_BINDINGS}
+        saved_state.update({
+            "run_id": "d" * 32,
+            "source_sha": "a" * 40,
+            "helper_git_sha": "b" * 40,
+            "helper_sha256": "c" * 64,
+            "major": 8, "minor": 4,
+            "development_only": True,
+            "ownership_phase": helper.RUNTIME_OWNERSHIP_PHASE,
+            "stage": "ORACLE_PASS",
+        })
+        saved_results = {result_name: saved_state[state_name]
+                         for state_name, result_name in
+                         helper.RECOVERY_RECORD_BINDINGS}
+        saved_results.update({
+            "major_minor": "8:4",
+            "development_only": True,
+            "final_recovery_state": "ORACLE_PASS",
+        })
+        helper._require_recovery_results_binding(saved_state, saved_results)
+        for key in ("source_commit_sha", "helper_git_sha", "helper_sha256",
+                    "original_header_sha256", "dm_name", "dm_uuid",
+                    "parent_major_minor", "partuuid"):
+            with self.subTest(field=key):
+                mutated_results = dict(saved_results)
+                mutated_results[key] = "different-owner"
+                with self.assertRaises(helper.ProbeError):
+                    helper._require_recovery_results_binding(
+                        saved_state, mutated_results)
 
 
 if __name__ == "__main__":

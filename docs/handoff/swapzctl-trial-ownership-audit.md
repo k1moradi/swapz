@@ -112,3 +112,22 @@ reader may interpret marker absence in this window as authorization.
 No automatic `swapzctl` delegation is justified by these tests. The existing
 private helper's own recovery is still the sole conditional recovery path,
 and physical/loaded qualification remains separate.
+
+## Agent 3 follow-up: completed-stage and provenance checks (2026-11-14)
+
+The integrated rootless fixture now exercises the original helper through
+recover_pending_algorithm_trial() when the saved state is COMPLETE but an
+active owner marker is retained. This must return RecoveryRequiredError
+without a privileged operation. A simulated interrupted delegate must also
+preserve the marker. Source/helper hashes, header fingerprint, mapper
+name/UUID and parent/partition identity are cross-checked between the
+saved state and results; the fixture asserts mismatch refusal.
+
+This is **fail-closed regression evidence, not a fix for the recovery gap**.
+Recovery at COMPLETE still needs an independently reviewed, same-boot
+read-only verification under the original partition lock, followed by
+conditional marker release only when original swap policy, mapper/module
+absence, immutable header and exact partition/parent identity all hold.
+Do not replay swapoff, remove a mapper or unload a module from COMPLETE.
+A cross-file consistency match does not authenticate the executable or
+current kernel module against the recorded hashes.
