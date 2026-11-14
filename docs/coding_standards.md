@@ -172,6 +172,26 @@ is mandatory until independently attributable forward progress is verified.
 forward progress and ownership; `diagnose` preserves the first source-bound
 failure and offers only nonmutating next steps.
 
+### swapzctl full-table cardinality and generation provenance (2026-11-14)
+
+The completed status report must retain `dm_ioctl.target_count` from the
+**entire** validated `DM_TABLE_STATUS` reply for each swapz result, including
+adjacent non-swapz targets; neither the filtered ready-result count nor a
+single selected mapper-name match is sufficient. The two INFO reads must
+agree on the full target count and ordered target identities before the
+result is retained. The future watch adapter must reject any selected
+mapper for which this full count is not exactly one with target index zero.
+
+The validated `dm_ioctl.event_nr` observed in INFO and LIST is a Device
+Mapper event counter, **not** separately sourced table-generation evidence
+and not an unforgeable mapper-incarnation token. The current two-INFO and
+final-LIST collector provides no independent `table_generation` field.
+Until a separate source with a documented provenance and stability contract
+is validated, generation information is **unavailable for watch**: a watch
+adapter must not alias `event_nr`, invent a zero/constant, or set a
+`swapz_watch_snapshot.validated` flag. Existing one-shot observational
+views remain allowed without changing their output or lifecycle authority.
+
 ### swapzctl staged watch INFO counters (2026-11-14)
 
 The existing validated two-INFO plus final-LIST collector retains the

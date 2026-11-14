@@ -171,7 +171,10 @@ struct dm_status_observation {
 struct status_ready_target {
 	char name[DM_NAME_LEN];
 	unsigned int target_index;
+	/* Entire DM_TABLE_STATUS table, including non-swapz target types. */
+	uint32_t dm_table_target_count;
 	uint64_t device_id;
+	/* DM event number is not an independent table-generation proof. */
 	uint32_t event_number;
 	uint64_t sector_start;
 	uint64_t sector_length;
@@ -1503,12 +1506,19 @@ static int status_observations_equal(
 
 static int status_append_ready_target(
 	struct status_ready_report *report, const char *name,
-	unsigned int target_index, const struct swapz_target_snapshot *source,
-	uint64_t mapper_sector_end)
+	unsigned int target_index, uint32_t dm_table_target_count,
+	const struct swapz_target_snapshot *source, uint64_t mapper_sector_end)
 {
 	struct status_ready_target *grown;
 	size_t capacity;
 
+	/* Never turn a filtered swapz target count into full table cardinality. */
+	if (!dm_table_target_count ||
+	    dm_table_target_count > SWAPZ_STATUS_MAX_TARGETS ||
+	    target_index >= dm_table_target_count) {
+		errno = EPROTO;
+		return -1;
+	}
 	if (report->count == SWAPZ_STATUS_MAX_RESULTS) {
 		errno = EOVERFLOW;
 		return -1;
@@ -1527,6 +1537,7 @@ static int status_append_ready_target(
 	       sizeof(report->targets[report->count]));
 	memcpy(report->targets[report->count].name, name, strlen(name) + 1U);
 	report->targets[report->count].target_index = target_index;
+	report->targets[report->count].dm_table_target_count = dm_table_target_count;
 	report->targets[report->count].mapper_sector_end = mapper_sector_end;
 	report->targets[report->count].device_id = source->device_id;
 	report->targets[report->count].sector_start = source->sector_start;
@@ -1699,7 +1710,8 @@ static int report_device_status_with_reader(
 						 &second.targets[target].ratio))
 				stable_entry.ratio.watch_counters_valid = 0;
 			if (entry->is_swapz &&
-			    status_append_ready_target(report, name, target, &stable_entry,
+			    status_append_ready_target(report, name, target,
+						       first.target_count, &stable_entry,
 						       mapper_sector_end) < 0) {
 				struct status_problem allocation_problem = {
 					.field = "validated status results",
