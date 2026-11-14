@@ -45,7 +45,13 @@ bytes MUST equal dedicated-cgroup memory.swap.current. Any baseline drift,
 oversized/malformed usage, OOM, missing I/O, oracle mismatch or unsafe cleanup
 still fails closed. The official primary production zero-use baseline stays
 unchanged. Do not substitute a moving baseline, remove the equality check,
-or alter global host swap priorities.
+or alter global host swap priorities. The two independent accounting
+readers can race at FILL completion; when they disagree, the development
+oracle may recheck for at most three seconds under existing guards and only
+accept two identical, byte-exact matching pairs against the original pinned
+baseline. Persistent discrepancies BLOCK with integer-only initial/current
+counts and signed gap in the automatic failure marker. This is not a swap
+charge tolerance or permission for foreign host pages.
 
 ## Canonical source drift during real-device development trial
 

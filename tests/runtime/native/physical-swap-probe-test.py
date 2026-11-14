@@ -890,6 +890,44 @@ class PhysicalSwapProbeTests(unittest.TestCase):
         self.assertIsNone(record["original_errno"])
         self.assertNotIn("KEEP_PRIVATE", stderr.getvalue())
 
+    def test_algorithm_swap_attribution_failure_reports_bounded_numbers(self):
+        original = RuntimeError(
+            "exact mapper usage and dedicated-cgroup swap charge differ; "
+            "traffic attribution or mapper ownership is ambiguous")
+        original.attribution_observation = {
+            "round_index": 1, "expected_baseline_used_kib": 12,
+            "initial_cgroup_swap_bytes": 134_217_728,
+            "initial_mapper_used_kib": 131_088,
+            "cgroup_swap_bytes": 134_217_728,
+            "mapper_used_kib": 131_088, "mapper_used_delta_kib": 131_076,
+            "gap_bytes": 4096, "recheck_samples": 60,
+            "recheck_elapsed_usec": 3_000_000,
+            "private_path": "/private/DO_NOT_PRINT"}
+        wrapped = RuntimeError(
+            str(original) + "; cleanup also failed: /private/DO_NOT_PRINT")
+        wrapped.__cause__ = original
+        stderr = io.StringIO()
+        with mock.patch.object(probe.sys, "stderr", stderr):
+            probe._emit_algorithm_workload_failure(wrapped)
+        record = json.loads(stderr.getvalue().split("=", 1)[1])
+        self.assertEqual(record["reason"], "swap_attribution")
+        self.assertEqual(record["attribution"]["gap_bytes"], 4096)
+        self.assertEqual(record["attribution"]["recheck_samples"], 60)
+        self.assertEqual(record["attribution"]["cgroup_swap_bytes"],
+                         134_217_728)
+        self.assertNotIn("private", stderr.getvalue())
+        self.assertNotIn("private_path", record["attribution"])
+
+        # Booleans and arbitrary producer strings are never numeric evidence.
+        original.attribution_observation.update(
+            gap_bytes=True, recheck_samples="/private/DO_NOT_PRINT")
+        stderr = io.StringIO()
+        with mock.patch.object(probe.sys, "stderr", stderr):
+            probe._emit_algorithm_workload_failure(wrapped)
+        record = json.loads(stderr.getvalue().split("=", 1)[1])
+        self.assertNotIn("attribution", record)
+        self.assertNotIn("private", stderr.getvalue())
+
     def test_algorithm_memory_pressure_remains_first_cause_after_child_cleanup_timeout(self):
         stderr = io.StringIO()
         original = RuntimeError("sustained cgroup memory PSI full exceeded safe stop threshold")

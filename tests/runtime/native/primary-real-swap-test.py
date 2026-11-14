@@ -4582,6 +4582,100 @@ class PrimaryRealSwapContracts(unittest.TestCase):
                     qualify.QualificationFailure, "OOM counters changed"):
                 qualify._run_workload({}, {}, Path(directory), 384, 128, 384, 240)
 
+    def test_exact_swap_charge_recheck_needs_two_identical_matches(self):
+        # A one-page non-atomic sample mismatch cannot qualify. Require
+        # two consecutive identical, exact observed attribution pairs.
+        baseline_kib = 12
+        charge_bytes = 128 * qualify.MIB
+        expected_used_kib = baseline_kib + charge_bytes // 1024
+        mapper_device = (253, 4)
+        clock = [0.0]
+
+        def elapsed_clock():
+            clock[0] += 0.05
+            return clock[0]
+
+        row = SimpleNamespace(device=mapper_device, used_kib=expected_used_kib)
+        guard = mock.Mock()
+        with contextlib.ExitStack() as stack:
+            stack.enter_context(mock.patch.object(
+                qualify.time, "monotonic", side_effect=elapsed_clock))
+            stack.enter_context(mock.patch.object(qualify.time, "sleep"))
+            stack.enter_context(mock.patch.object(
+                qualify, "_read_uint", side_effect=[charge_bytes, charge_bytes]))
+            stack.enter_context(mock.patch.object(
+                qualify, "read_swap_rows", side_effect=[[row], [row]]))
+            observed_charge, observed_delta = (
+                qualify._confirm_exact_swap_attribution(
+                    Path("/synthetic/cgroup"), mapper_device,
+                    baseline_kib, charge_bytes,
+                    expected_used_kib + 4, 10.0, guard, 1))
+        self.assertEqual(observed_charge, charge_bytes)
+        self.assertEqual(observed_delta * 1024, charge_bytes)
+        self.assertEqual(guard.call_count, 2)
+
+    def test_exact_swap_charge_recheck_rejects_persistent_foreign_usage(self):
+        baseline_kib = 12
+        charge_bytes = 128 * qualify.MIB
+        expected_used_kib = baseline_kib + charge_bytes // 1024
+        mapper_device = (253, 4)
+        for extra_pages in (-1, 1):
+            with self.subTest(extra_pages=extra_pages):
+                clock = [0.0]
+
+                def elapsed_clock():
+                    clock[0] += 0.05
+                    return clock[0]
+
+                foreign_used_kib = expected_used_kib + extra_pages * 4
+                row = SimpleNamespace(
+                    device=mapper_device, used_kib=foreign_used_kib)
+                with contextlib.ExitStack() as stack:
+                    stack.enter_context(mock.patch.object(
+                        qualify.time, "monotonic", side_effect=elapsed_clock))
+                    stack.enter_context(mock.patch.object(qualify.time, "sleep"))
+                    stack.enter_context(mock.patch.object(
+                        qualify, "_read_uint", return_value=charge_bytes))
+                    stack.enter_context(mock.patch.object(
+                        qualify, "read_swap_rows", return_value=[row]))
+                    with self.assertRaises(qualify.Blocked) as refused:
+                        qualify._confirm_exact_swap_attribution(
+                            Path("/synthetic/cgroup"), mapper_device,
+                            baseline_kib, charge_bytes,
+                            foreign_used_kib, 0.6, mock.Mock(), 2)
+                evidence = refused.exception.attribution_observation
+                self.assertEqual(evidence["gap_bytes"], extra_pages * 4096)
+                self.assertEqual(evidence["round_index"], 2)
+                self.assertEqual(evidence["initial_cgroup_swap_bytes"],
+                                 charge_bytes)
+                self.assertGreater(evidence["recheck_samples"], 0)
+
+    def test_exact_swap_charge_recheck_preserves_guard_and_owner_errors(self):
+        mapper_device = (253, 4)
+        baseline_kib = 12
+        charge_bytes = 128 * qualify.MIB
+        mapper_used_kib = baseline_kib + charge_bytes // 1024 + 4
+        with mock.patch.object(qualify.time, "sleep"):
+            with self.assertRaisesRegex(qualify.Blocked, "guard refused"):
+                qualify._confirm_exact_swap_attribution(
+                    Path("/synthetic/cgroup"), mapper_device,
+                    baseline_kib, charge_bytes, mapper_used_kib,
+                    time.monotonic() + 1,
+                    mock.Mock(side_effect=qualify.Blocked("guard refused")),
+                    1)
+        with contextlib.ExitStack() as stack:
+            stack.enter_context(mock.patch.object(qualify.time, "sleep"))
+            stack.enter_context(mock.patch.object(
+                qualify, "_read_uint", return_value=charge_bytes))
+            stack.enter_context(mock.patch.object(
+                qualify, "read_swap_rows", return_value=[]))
+            with self.assertRaisesRegex(
+                    qualify.QualificationFailure, "mapper vanished"):
+                qualify._confirm_exact_swap_attribution(
+                    Path("/synthetic/cgroup"), mapper_device,
+                    baseline_kib, charge_bytes, mapper_used_kib,
+                    time.monotonic() + 1, mock.Mock(), 1)
+
     def test_slot_reuse_requires_full_release_then_second_concurrent_allocation(self):
         rounds = [
             {

@@ -3903,6 +3903,7 @@ def _emit_algorithm_workload_failure(error, phase="anonymous_workload"):
         "real-swap byte oracle reported corruption or incomplete verification": "byte_oracle",
         "cgroup OOM counters changed during admitted real-swap workload": "cgroup_oom",
         "sustained cgroup memory PSI full exceeded safe stop threshold": "memory_pressure",
+        "exact mapper usage and dedicated-cgroup swap charge differ; traffic attribution or mapper ownership is ambiguous": "swap_attribution",
         "raw swap did not reach the required real-swap floor": "raw_swap_floor",
         "raw swap workload encountered cgroup OOM": "cgroup_oom",
         "raw swap lacked independent backing I/O and Linux swap evidence": "raw_io",
@@ -3921,12 +3922,33 @@ def _emit_algorithm_workload_failure(error, phase="anonymous_workload"):
     # and copy numeric observations rather than arbitrary exception attributes.
     current = error
     seen = set()
-    while (record["reason"] == "memory_pressure" and
+    while (record["reason"] in ("memory_pressure", "swap_attribution") and
            isinstance(current, BaseException) and id(current) not in seen and
            len(seen) < 16):
         seen.add(id(current))
+        if record["reason"] == "swap_attribution":
+            attribution = getattr(current, "attribution_observation", None)
+            if isinstance(attribution, dict):
+                fields = (
+                    "round_index", "expected_baseline_used_kib",
+                    "initial_cgroup_swap_bytes", "initial_mapper_used_kib",
+                    "cgroup_swap_bytes", "mapper_used_kib",
+                    "mapper_used_delta_kib", "gap_bytes",
+                    "recheck_samples", "recheck_elapsed_usec")
+                bounded = {}
+                for key in fields:
+                    value = attribution.get(key)
+                    lower = (-MAX_BLOCK_COUNTER if key == "gap_bytes" else 0)
+                    bounded[key] = (
+                        value if type(value) is int and
+                        lower <= value <= MAX_BLOCK_COUNTER else None)
+                if all(bounded[key] is not None for key in (
+                        "expected_baseline_used_kib",
+                        "cgroup_swap_bytes", "mapper_used_kib", "gap_bytes")):
+                    record["attribution"] = bounded
+                break
         observation = getattr(current, "pressure_observation", None)
-        if isinstance(observation, dict):
+        if isinstance(observation, dict) and record["reason"] == "memory_pressure":
             fields = (
                 "window_usec", "stalled_usec", "limit_usec", "mem_available_mib",
                 "cgroup_memory_bytes", "cgroup_swap_bytes",

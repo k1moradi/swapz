@@ -138,6 +138,10 @@ DEVELOPMENT_PSI_PROGRESS_MIN_PAGES = 64
 # Best-effort diagnostic snapshots, never a workload admission condition.
 PRESSURE_PROGRESS_SAMPLE_SECONDS = 1.0
 PRESSURE_PROGRESS_MAX_SAMPLES = 16
+# /proc/swaps and memory.swap.current are independently sampled. After the
+# oracle has stopped its fill, permit bounded resampling, never a difference
+# tolerance or a moving host-swap baseline.
+SWAP_ATTRIBUTION_RECHECK_SECONDS = 3.0
 CYCLE_TELEMETRY_INTERVAL_SECONDS = 0.1
 CYCLE_TELEMETRY_THREAD_TIMEOUT_SECONDS = 5
 TRUSTED_EXTERNAL_COMMANDS = frozenset(("cc", "dmsetup", "lsblk", "dmesg"))
@@ -3548,6 +3552,74 @@ def _wait_for_round_release(cgroup: Path, mapper_device: tuple[int, int],
     raise QualificationFailure("swap slots did not return to baseline within the bounded release timeout")
 
 
+def _confirm_exact_swap_attribution(
+        cgroup: Path, mapper_device: tuple[int, int],
+        expected_baseline_used_kib: int, swap_current_bytes: int,
+        mapper_used_kib: int, deadline: float,
+        guard: Callable[[], None], round_index: int) -> tuple[int, int]:
+    """Retry non-atomic swap accounting, never relax exact attribution.
+
+    Called only for a mismatch after the two FILL workers report completion.
+    Two consecutive *identical* matching snapshots must be observed. A stable
+    foreign-page increment or a persistent charge discrepancy still refuses.
+    The guarded wait cannot run past either the oracle deadline or its own
+    short attribution bound.
+    """
+    if mapper_used_kib < expected_baseline_used_kib:
+        raise QualificationFailure("mapper swap usage fell below the round baseline")
+    if (mapper_used_kib - expected_baseline_used_kib) * 1024 == swap_current_bytes:
+        return swap_current_bytes, mapper_used_kib - expected_baseline_used_kib
+
+    recheck_started = time.monotonic()
+    recheck_deadline = min(
+        deadline, recheck_started + SWAP_ATTRIBUTION_RECHECK_SECONDS)
+    initial_swap_current = swap_current_bytes
+    initial_mapper_used = mapper_used_kib
+    previous_matching_pair = None
+    samples = 0
+    while time.monotonic() < recheck_deadline:
+        guard()
+        time.sleep(min(0.05, max(0.0, recheck_deadline - time.monotonic())))
+        # Neither read is atomic with the other. Require two unchanged,
+        # exact matching snapshots; never round or accept an error margin.
+        swap_current_bytes = _read_uint(cgroup / "memory.swap.current")
+        row = _row_for_device(read_swap_rows(), mapper_device)
+        if row is None:
+            raise QualificationFailure("expected mapper vanished during swap-out")
+        mapper_used_kib = row.used_kib
+        if mapper_used_kib < expected_baseline_used_kib:
+            raise QualificationFailure("mapper swap usage fell below the round baseline")
+        samples += 1
+        matching_pair = (swap_current_bytes, mapper_used_kib)
+        if ((mapper_used_kib - expected_baseline_used_kib) * 1024 ==
+                swap_current_bytes):
+            if matching_pair == previous_matching_pair:
+                return (swap_current_bytes,
+                        mapper_used_kib - expected_baseline_used_kib)
+            previous_matching_pair = matching_pair
+        else:
+            previous_matching_pair = None
+
+    failure = Blocked(
+        "exact mapper usage and dedicated-cgroup swap charge differ; "
+        "traffic attribution or mapper ownership is ambiguous")
+    failure.attribution_observation = {
+        "round_index": round_index,
+        "expected_baseline_used_kib": expected_baseline_used_kib,
+        "initial_cgroup_swap_bytes": initial_swap_current,
+        "initial_mapper_used_kib": initial_mapper_used,
+        "cgroup_swap_bytes": swap_current_bytes,
+        "mapper_used_kib": mapper_used_kib,
+        "mapper_used_delta_kib": mapper_used_kib - expected_baseline_used_kib,
+        "gap_bytes": ((mapper_used_kib - expected_baseline_used_kib) * 1024 -
+                      swap_current_bytes),
+        "recheck_samples": samples,
+        "recheck_elapsed_usec": int(
+            (time.monotonic() - recheck_started) * 1_000_000),
+    }
+    raise failure
+
+
 # Keep these counters and their units explicit: snapshots are cumulative, while
 # diagnostic deltas span only the observed part of the memory PSI stop window.
 # The swapz kernel worker executes OUTSIDE the 128 MiB-limited oracle cgroup:
@@ -4209,15 +4281,34 @@ def _run_workload(manifest: dict, active: dict, oracle_path: Path,
                     raise QualificationFailure("expected mapper vanished during swap-out")
                 mapper_used_delta = expected_after_fill.used_kib - expected_before.used_kib
                 min_swap_bytes = MIN_TRAFFIC_MIB * MIB
-                if swap_current < min_swap_bytes or mapper_used_delta <= 0:
-                    raise QualificationFailure(
-                        "concurrent fill completed without independently proven swapz swap-out")
-
                 mapper_used_bytes = mapper_used_delta * 1024
                 if mapper_used_bytes != swap_current:
-                    raise Blocked(
-                        "exact mapper usage and dedicated-cgroup swap charge differ; "
-                        "traffic attribution or mapper ownership is ambiguous")
+                    # Both counters are individually valid but were sampled
+                    # at different times. Retry exact equality briefly while
+                    # the FILL oracles are stopped; never accept a tolerance.
+                    swap_current, mapper_used_delta = (
+                        _confirm_exact_swap_attribution(
+                            cgroup, active["mapper_device"],
+                            expected_before.used_kib, swap_current,
+                            expected_after_fill.used_kib, deadline, guard,
+                            round_index))
+                    swap_peak = _read_uint(cgroup / "memory.swap.peak")
+                    if swap_peak < swap_current:
+                        raise QualificationFailure(
+                            "cgroup swap peak is below current swap usage")
+                    # Any activity during the bounded recheck must also be
+                    # represented by the final I/O evidence. Preserve the
+                    # initial pre-FILL baselines and immutable host baseline.
+                    fill_status_after = sample_status()
+                    lower_after_fill = read_block_stats(
+                        (manifest["device_major_int"],
+                         manifest["device_minor_int"]))
+                    vm_after_fill = read_vmstat()
+
+                if swap_current < min_swap_bytes or mapper_used_delta <= 0:
+                    raise QualificationFailure(
+                        "concurrent fill completed without independently "
+                        "proven swapz swap-out")
 
                 verify_status_before = sample_status()
                 lower_before_verify = read_block_stats(

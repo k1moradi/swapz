@@ -129,6 +129,19 @@ qualifying recent I/O remains, or the gate window can contain earlier real
 completions that do not fall inside the five-second PSI interval. Diagnostic
 fields do not change the admission decision.
 
+After the real-swap FILL workers have reported completion, the dedicated
+cgroup's swap charge and the mapper's `/proc/swaps` Used KiB are measured by
+separate kernel interfaces and are not an atomic snapshot. The development
+oracle may retry a mismatched pair for at most three seconds, under the
+existing ownership/PSI/OOM/headroom guards and original oracle deadline.
+It accepts only TWO consecutive unchanged, byte-exact matching snapshots
+against the originally pinned mapper baseline. It never accepts a one-page
+tolerance, a moving baseline, or persistent foreign swap usage. A persistent
+mismatch is still a BLOCKED trial, with bounded integer-only initial/current
+charges, mapper usage, signed gap and recheck counts printed automatically in
+`PHYSICAL_ALGORITHM_DEBUG.attribution` before normal recovery. Production
+qualification and its accounting proof remain unchanged.
+
 ## Development-only paired raw Linux swap versus swapz physical comparison
 
 The optional operator-facing command `python3 -B tests/tools/algorithm-physical.py
