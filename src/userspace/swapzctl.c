@@ -1523,8 +1523,12 @@ static int report_device_status_with_reader(
 					  &problem, &problem_target);
 		if (result < 0) {
 			int saved_errno = errno;
-			int target_state = result == -2 ?
-				first.targets[problem_target].ratio_state : STATUS_BLOCKED;
+			int target_state = STATUS_BLOCKED;
+
+			/* Even a faulty reader must not turn an error into an OOB read. */
+			if (result == -2 && first.targets &&
+			    problem_target < first.target_count)
+				target_state = first.targets[problem_target].ratio_state;
 
 			status_free_observation(&first);
 			if (problem.field)
@@ -1545,8 +1549,11 @@ static int report_device_status_with_reader(
 					  &problem, &problem_target);
 		if (result < 0) {
 			int saved_errno = errno;
-			int target_state = result == -2 ?
-				second.targets[problem_target].ratio_state : STATUS_BLOCKED;
+			int target_state = STATUS_BLOCKED;
+
+			if (result == -2 && second.targets &&
+			    problem_target < second.target_count)
+				target_state = second.targets[problem_target].ratio_state;
 
 			status_free_observation(&first);
 			status_free_observation(&second);

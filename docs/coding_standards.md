@@ -183,6 +183,14 @@ reports raw integers without headings. No-flag status formatting and existing
 JSON schema-version-one semantics remain unchanged. These options do not
 weaken complete Device Mapper validation or grant lifecycle ownership.
 
+### swapzctl snapshot reader error-index bounds (2026-11-14)
+
+The observational status reporter must check both the target pointer and
+`problem_target < target_count` before consulting a failed INFO reader's
+per-target ratio state. An invalid, unallocated or mapping-wide problem index
+is a bounded BLOCKED diagnosis, never an out-of-bounds array access. Preserve
+the originating errno and avoid printing any partially validated stdout.
+
 ### swapzctl read-only identity and error-path output (2026-11-14)
 
 The observer must percent-encode all unsafe Device Mapper mapper-name and
