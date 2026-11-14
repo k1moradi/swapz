@@ -110,14 +110,18 @@ sampled advisory Linux swap inventory and **reversible percent-byte-encoded
 mapper names** (`name_encoding: percent_bytes`). These identifiers describe
 observed DM objects but never authenticate lifecycle ownership. Empty
 list/status output is not proof that the
-retained Lubuntu development mapper is drained or owned. Proposed
-`stats --watch`, `--bytes` and `--no-headers` are **not shipped**.
+retained Lubuntu development mapper is drained or owned. The human
+`--bytes` option and `list --no-headers` **are shipped**; `--json` cannot
+be combined with either. `stats NAME --watch SECONDS` remains
+**staged and unavailable** in the public CLI.
 
 The [swapzctl operator guide](handoff/swapzctl-operator-guide.md)
 documents exact supported commands and exit codes, build versus
 qualification-gated installation, read-only systemd inspection, Linux
 swap versus lifetime compression accounting, and the source-bound
-acceptance matrix. The primary mapper service is the **sole**
+acceptance matrix. The [Agent 6 integration and security review](handoff/swapzctl-agent6-integration-security-review.md)
+records the remaining watch counter-validation and development-trial
+ownership blockers. The primary mapper service is the **sole**
 `swapon`/`swapoff` owner; its `.swap` unit is passive and
 non-activating. Package installation leaves units disabled and does
 not authorize physical activation. See

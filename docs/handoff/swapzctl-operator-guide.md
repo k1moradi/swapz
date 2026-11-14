@@ -181,10 +181,42 @@ For a verified name, also use swapzctl inspect NAME, swapzctl health NAME or swa
 
 The existing **swapzctl primary plan**, **primary qualification-import REPORT**, **primary prepare**, **primary start**, **primary stop**, and **primary recover** delegate to the qualification- and ownership-gated swapz-primary manager. Only a newly created, inactive virtual mapper may be formatted. A stop requires Linux swapoff to drain live pages before exact-owned mapper removal; ENOMEM, an unidentified holder, mismatched backing/header or uncertain state retains recovery responsibility and prohibits removal.
 
-The retained Lubuntu development mapper needs the original private helper's authenticated journal and verified cleanup path. Until this has been audited and qualified, swapzctl can report its runtime state but **cannot safely manage its lifecycle**. A development mapper matching a prefix is never automatically adopted.
+The retained Lubuntu development mapper belongs to the original private helper's authenticated, same-boot journal and conditional `recover-pending` path. An ownership audit exists, but its unresolved P0 security hazards **still block** new public `swapzctl` development-mapper stop/recover delegation; `swapzctl` can currently only observe that trial. A matching mapper prefix is never automatically adopted. Consult the [Agent 3 audit](swapzctl-trial-ownership-audit.md) and [Agent 6 review](swapzctl-agent6-integration-security-review.md) before designing any new lifecycle authority.
 
 The systemd primary mapper service must remain the sole stop/swapoff owner. Its .swap unit is a passive representation, not an independent activator. Cold-boot service arming and source/host/target physical qualification are separate gates and cannot be inferred from CLI success.
 
+
+## Integration gates (source-bound, not host acceptance)
+
+The [Agent 6 integration and security review](swapzctl-agent6-integration-security-review.md)
+is the architecture decision for the current multi-agent work. The independent
+`src/userspace/swapzctl-watch.c/.h` sampler and its rootless tests are
+**staged, not linked into the public executable**. Do not advertise or
+invoke `stats NAME --watch SECONDS` until Agent 1 and Agent 4 integrate
+it with the existing fully validated two-INFO/final-LIST collector.
+The public collector must first parse each required logical/lower/GC
+READ/WRITE byte and request counter canonically, prove same-mapper
+identity and table geometry across samples, reject counter resets and
+unavailable/failed target state, and define/test bounded SIGINT/SIGTERM,
+EPIPE, human and JSON-stream behavior. Host-wide swap or PSI counters
+cannot substitute for device-specific deltas. The independent sampler
+tests alone do not qualify a released `--watch` flag.
+
+The 20-case retained-trial ownership rootless fixture is included in the
+native userspace test suite. Its simulated journal and failure-boundary
+results are **not** same-boot physical-host ownership proof. Any future
+public development stop/recover request remains blocked on verified
+journal/marker provenance, `COMPLETE` marker reconciliation, authenticated
+mapper/loaded-module identity, safe completed Linux swap drain and
+interruption/reboot handling. The private helper's conditional recovery
+remains the only currently defined owner-mediated path; no systemd unit
+may automatically adopt the development trial.
+
+A green CI result must be bound to the **exact current source SHA**,
+and every required CI job must complete successfully. Even a complete
+rootless PASS cannot authorize raw swap mutation, active-page teardown,
+boot arming, or recovery of RAM-only compressed mappings. Physical
+and production qualification are separate release gates.
 
 ## Read-only systemd and deployment-state checks
 
