@@ -199,6 +199,18 @@ error status without fabricated counters or backing-device I/O.
 
 ### Read-only swapzctl observability (2026-11-14)
 
+Command-specific help (`swapzctl help <command>` and supported `<command>
+--help`) is strictly side-effect free, including for `primary`. It must not
+open a mapper, inspect a raw backing partition, infer journal ownership or
+invoke any primary lifecycle command. Unsupported help topics reject with
+a bounded diagnostic and nonzero status; help for read-only commands explains
+that Linux swap usage is an independent advisory observation, cannot prove a
+safe swapoff/drain, and does not make cumulative representation counters into
+live rates. Help must advertise only supported flags and selectors; unsupported
+`stats --watch`, `--bytes` and `--no-headers` remain future work until
+implemented and tested.
+
+
 The public \`swapzctl status\`, \`list\`, \`inspect <mapper>\`,
 \`stats <mapper>\`, \`health <mapper>\` and \`diagnose <mapper>\`
 must remain observation-only. They use the same fully validated bounded

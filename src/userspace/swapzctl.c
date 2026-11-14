@@ -53,6 +53,44 @@ static void usage(FILE *out)
 	fputs("Only the new virtual mapper may receive mkswap.\n", out);
 }
 
+/* Help is intentionally side-effect-free, including for primary lifecycle. */
+static int swapz_command_usage(FILE *out, const char *command)
+{
+	if (!strcmp(command, "status") || !strcmp(command, "list")) {
+		fprintf(out, "Usage: swapzctl %s [--json]\n", command);
+		fputs("  Observe all validated swapz Device Mapper targets.\n", out);
+	} else if (!strcmp(command, "inspect") ||
+		   !strcmp(command, "stats") ||
+		   !strcmp(command, "health") ||
+		   !strcmp(command, "diagnose")) {
+		fprintf(out, "Usage: swapzctl %s <mapper-name> [--json]\n", command);
+		fputs("  Select an exact mapper name; no prefix matching or ownership adoption.\n",
+		      out);
+	} else if (!strcmp(command, "primary")) {
+		fputs("Usage: swapzctl primary plan|qualification-import <report>|"
+		      "prepare|start|stop|recover\n", out);
+		fputs("  Delegates to the existing qualification- and ownership-gated "
+		      "primary manager.\n", out);
+		fputs("  This does not grant control over a development-trial mapper.\n", out);
+		return 0;
+	} else if (!strcmp(command, "version")) {
+		fputs("Usage: swapzctl version\n", out);
+		return 0;
+	} else {
+		return -1;
+	}
+	fputs("  Device Mapper snapshots are observational, not atomic.\n", out);
+	fputs("  Linux swap size/usage/priority comes from an independently read "
+	      "/proc/swaps inventory.\n", out);
+	fputs("  An absent active-swap observation does not prove a mapper is "
+	      "inactive or safely drained.\n", out);
+	fputs("  Compression counters are cumulative, not current occupation or live rates.\n",
+	      out);
+	fputs("  Mapping and lifecycle ownership are unverified by these read-only commands.\n",
+	      out);
+	return 0;
+}
+
 struct swapz_ratio_status {
 	unsigned long long logical_write_bytes;
 	unsigned long long physical_write_bytes;
@@ -1939,6 +1977,15 @@ int main(int argc, char **argv)
 		usage(stdout);
 		return 0;
 	}
+	if (argc == 3 && !strcmp(argv[1], "help")) {
+		if (swapz_command_usage(stdout, argv[2]) == 0)
+			return 0;
+		fprintf(stderr, "BLOCKED: unsupported help topic; no action attempted\n");
+		return 2;
+	}
+	if (argc == 3 && !strcmp(argv[2], "--help") &&
+	    swapz_command_usage(stdout, argv[1]) == 0)
+		return 0;
 	if (argc == 2 &&
 	    (!strcmp(argv[1], "version") || !strcmp(argv[1], "--version"))) {
 		printf("swapzctl %s (EXPERIMENTAL)\n", SWAPZ_VERSION);

@@ -2364,6 +2364,41 @@ static void test_swapz_linux_swap_inventory_parser(void)
 	}
 }
 
+
+static void test_swapz_command_specific_help(void)
+{
+	char *list_help[] = { "swapzctl", "help", "list", NULL };
+	char *inspect_help[] = { "swapzctl", "inspect", "--help", NULL };
+	char *primary_help[] = { "swapzctl", "help", "primary", NULL };
+	char *bad_help[] = { "swapzctl", "help", "not-a-command", NULL };
+	FILE *capture = tmpfile();
+	int saved_stdout = dup(STDOUT_FILENO);
+	char output[2048] = { 0 };
+	size_t bytes;
+
+	assert(capture && saved_stdout >= 0);
+	fflush(stdout);
+	assert(dup2(fileno(capture), STDOUT_FILENO) >= 0);
+	assert(swapzctl_program_main(3, list_help) == 0);
+	assert(swapzctl_program_main(3, inspect_help) == 0);
+	assert(swapzctl_program_main(3, primary_help) == 0);
+	fflush(stdout);
+	assert(dup2(saved_stdout, STDOUT_FILENO) >= 0);
+	rewind(capture);
+	bytes = fread(output, 1, sizeof(output) - 1U, capture);
+	output[bytes] = '\0';
+	assert(strstr(output, "Usage: swapzctl list [--json]"));
+	assert(strstr(output, "Usage: swapzctl inspect <mapper-name> [--json]"));
+	assert(strstr(output, "Usage: swapzctl primary plan"));
+	assert(strstr(output, "not prove a mapper is inactive"));
+	assert(strstr(output, "ownership are unverified"));
+	assert(swapz_command_usage(capture, "not-a-command") < 0);
+	/* Unknown topics fail without running a primary lifecycle command. */
+	assert(swapzctl_program_main(3, bad_help) == 2);
+	close(saved_stdout);
+	fclose(capture);
+}
+
 static void test_status_is_read_only(void)
 {
 	unsigned char *reply = NULL;
@@ -2423,6 +2458,7 @@ int main(void)
 	test_status_is_read_only();
 	test_swapz_observation_views();
 	test_swapz_linux_swap_inventory_parser();
+	test_swapz_command_specific_help();
 	puts("PASS: swapzctl status compression-ratio accounting");
 	return 0;
 }
