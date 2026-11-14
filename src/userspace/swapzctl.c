@@ -1645,15 +1645,7 @@ static int swapz_read_linux_swap(FILE *inventory,
 	size_t index;
 
 	if (!fgets(line, sizeof(line), inventory) ||
-	    strcmp(line, "Filename\t\t\t\tType\t\tSize\t\tUsed\t\tPriority\n") == 0) {
-		/*
-		 * The second branch is intentionally false for standard procfs
-		 * headers: the header text is not a trusted identity proof.
-		 */
-		if (ferror(inventory) || feof(inventory))
-			return -1;
-	}
-	if (strncmp(line, "Filename", 8))
+	    !strchr(line, '\n') || strncmp(line, "Filename", 8))
 		return -1;
 	while (fgets(line, sizeof(line), inventory)) {
 		char *fields[6] = { 0 };
@@ -2001,9 +1993,14 @@ int main(int argc, char **argv)
 			puts("dm-swapz: not loaded (experimental)");
 			return 0;
 		}
-		if (view == SWAPZ_VIEW_LIST)
-			return json ? (puts("{\"schema_version\":1,\"command\":\"list\",\"devices\":[]}"), 0) :
-				(puts("swapz targets: none"), 0);
+		if (view == SWAPZ_VIEW_LIST || (view == SWAPZ_VIEW_STATUS && json)) {
+			if (json)
+				printf("{\"schema_version\":1,\"command\":\"%s\",\"devices\":[]}\\n",
+				       swapz_view_name(view));
+			else
+				puts("swapz targets: none");
+			return 0;
+		}
 		fprintf(stderr, "swapzctl %s: UNAVAILABLE: dm-swapz not loaded\n",
 			swapz_view_name(view));
 		return 1;
