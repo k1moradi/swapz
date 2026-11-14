@@ -4218,9 +4218,18 @@ class _PairedBlockIoSampler:
         worker = threading.Thread(
             target=self._sample_independently,
             name="swapz-paired-block-stat", daemon=True)
-        worker.start()
+        # A signal may interrupt thread startup before __enter__ returns;
+        # in that case __exit__ would not run, so explicitly stop and join.
         self._sampler_thread = worker
         self._sampler_stopped = False
+        try:
+            worker.start()
+        except BaseException:
+            self._sampler_stop.set()
+            if worker.is_alive():
+                worker.join(timeout=2.0)
+            self._sampler_stopped = not worker.is_alive()
+            raise
         return self
 
     def _sample_independently(self):

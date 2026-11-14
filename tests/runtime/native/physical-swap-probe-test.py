@@ -7486,6 +7486,41 @@ class PhysicalSwapProbeTests(unittest.TestCase):
                 with monitor:
                     pass
 
+    def test_independent_sampler_startup_signal_joins_worker(self):
+        target = {"major": 8, "minor": 4, "parent_major_minor": "8:0",
+                  "root_same_physical_parent": False}
+        stat_line = "1 0 2 3 4 0 5 6 7 8 9 0 0 0 0 0 0"
+        with mock.patch.object(probe.Path, "read_text",
+                               return_value=stat_line), \
+                mock.patch.object(probe.threading, "Thread") as thread:
+            worker = thread.return_value
+            worker.start.side_effect = KeyboardInterrupt()
+            worker.is_alive.side_effect = [True, False]
+            sampler = probe._PairedBlockIoSampler(target)
+            with self.assertRaises(KeyboardInterrupt):
+                sampler.__enter__()
+            worker.join.assert_called_once_with(timeout=2.0)
+            self.assertTrue(sampler._sampler_stopped)
+
+    def test_unjoined_sampler_cannot_report_clean_shutdown(self):
+        target = {"major": 8, "minor": 4, "parent_major_minor": "8:0",
+                  "root_same_physical_parent": False}
+        stat_line = "1 0 2 3 4 0 5 6 7 8 9 0 0 0 0 0 0"
+        with mock.patch.object(probe.Path, "read_text",
+                               return_value=stat_line), \
+                mock.patch.object(probe.threading, "Thread") as thread:
+            worker = thread.return_value
+            worker.is_alive.return_value = True
+            sampler = probe._PairedBlockIoSampler(target)
+            with self.assertRaisesRegex(
+                    probe.ProbeError, "did not terminate before recovery"):
+                with sampler:
+                    pass
+            report = sampler.report()
+            worker.join.assert_called_once_with(timeout=2.0)
+        self.assertFalse(report["sampler_thread_stopped"])
+        self.assertEqual(report["samples"], [])
+
     def test_independent_sampler_worker_failure_is_fail_closed(self):
         target = {"major": 8, "minor": 4, "parent_major_minor": "8:0",
                   "root_same_physical_parent": False}
