@@ -3499,7 +3499,10 @@ def recover_pending_algorithm_trial():
                     device_arg.startswith("/dev/disk/by-partuuid/") else
                     "/dev/disk/by-uuid/") + Path(device_arg).name):
             raise ValueError("original confirmed device selector invalid")
-    except (OSError, ValueError, KeyError, TypeError) as exc:
+    except (ProbeError, OSError, ValueError, KeyError, TypeError) as exc:
+        # A validation refusal is a pending ownership conflict, not an
+        # exceptional authorization to bypass the original recovery owner.
+        # This block runs before recover() or any privileged cleanup action.
         raise RecoveryRequiredError(
             "pending recovery journal is ambiguous; inspect read-only") from exc
     try:

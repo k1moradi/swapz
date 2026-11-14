@@ -57,7 +57,7 @@ class PublicMakeContract(unittest.TestCase):
                       'swapzctl-trial-ownership-test.py" -q')
         self.assertEqual(recipe.count(invocation), 1)
         self.assertIn("'swapzctl-trial-ownership-test.py' "
-                      '"$script_exit_status"', recipe)
+                      '"$$script_exit_status"', recipe)
         self.assertIn("if " + invocation + "; then :; else", recipe)
 
 

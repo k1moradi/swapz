@@ -14,6 +14,12 @@ retention is not a new ownership grant. The rootless `tests/suites/Makefile test
 this fixture once after the native test binaries and primary late-race
 regression, with a nonzero exit retaining the original script name and
 exit status.
+Both direct `_state_run_directory` and `_validate_state_dir` ownership
+refusals that raise `ProbeError` before the actual recovery delegation
+must be translated by `recover_pending_algorithm_trial()` into
+`RecoveryRequiredError` without calling `recover()`. Keep the exact
+active owner marker and run record, and exercise this via the mocked
+rootless test (never by touching the real Lubuntu mapper).
 GNU Make's script recipes must double the dollar in shell-status and
 shell-variable references (`$$?`, `$$script_exit_status`); a plain `$?` is
 Make's automatic prerequisite variable, not the failing child exit code.

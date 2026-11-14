@@ -235,12 +235,19 @@ class TrialOwnershipTest(unittest.TestCase):
         self.recover.assert_not_called()
 
     def test_unverifiable_state_directory_never_delegates(self):
-        with mock.patch.object(helper, "_validate_state_dir",
-                               side_effect=helper.ProbeError(
-                                   "state directory identity drift")):
-            with self.assertRaises(helper.RecoveryRequiredError):
-                self.invoke()
-        self.recover.assert_not_called()
+        # Pre-delegate ProbeError from either path-validation layer must be
+        # surfaced as a recovery-required refusal with the marker retained.
+        for function_name in ("_state_run_directory", "_validate_state_dir"):
+            with self.subTest(function=function_name):
+                with mock.patch.object(helper, function_name,
+                                       side_effect=helper.ProbeError(
+                                           "state directory identity drift")):
+                    with self.assertRaisesRegex(
+                            helper.RecoveryRequiredError,
+                            "pending recovery journal is ambiguous"):
+                        self.invoke()
+                self.recover.assert_not_called()
+                self.assertTrue(self.marker.exists())
 
     def test_state_record_fsync_failure_preserves_previous_record(self):
         previous = (self.state_dir / "state.json").read_bytes()
