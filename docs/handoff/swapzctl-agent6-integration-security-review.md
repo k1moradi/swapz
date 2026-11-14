@@ -49,8 +49,8 @@ The isolated `src/userspace/swapzctl-watch.c/.h` sampler has bounded
 monotonic intervals and rootless regression coverage. The public CLI currently
 does not link or invoke it. The kernel INFO formatter in
 `src/kernel/dm-target.c::swapz_status` exposes the relevant cumulative
-fields, but the validated public collector currently retains only a narrower
-write/ratio subset. **Do not link a sampler fed by unverified defaults.**
+fields, and the validated public collector now retains the seven additional
+optional read, request and GC fields, but no public watch adapter exists. **Do not link a sampler fed by unverified defaults.**
 
 | Sampler counter | Kernel INFO key |
 | --- | --- |
@@ -93,23 +93,24 @@ manager or physical admission authority to make a watch test pass.
 
 ### Coordinator checkpoint: original sampler input boundary
 
-The current validated `status_ready_report` includes **swapz target records
-only**. A report with one `swapz` target does not prove the complete
-Device Mapper table consists of exactly one target: unrelated adjacent
-non-swapz targets can still exist on the same mapper. The watch sampler
-rejects `target_count != 1` and `target_index != 0`. The CLI adapter
-must retain the **full wire-validated DM target count** from the selected
-`DM_TABLE_STATUS` observation and reject mixed/multi-target mappings.
-Never synthesize `target_count=1` from the count of swapz-only report
-rows. Do not confuse a single selected target with a single-target table.
+Agent 1 now retains **the full wire-validated DM target count** in each
+`status_ready_target`, even though `status_ready_report` exposes swapz
+records only. Agent 2 tests mixed tables and paired-INFO identity changes.
+A report with one swapz record is **not** proof of a one-target table:
+non-swapz targets may exist beside it. The future CLI adapter must carry
+the saved `dm_table_target_count` into the sampler's `target_count` and
+reject mixed/multi-target mappings; never derive it from `report.count`.
+The sampler already rejects `target_count != 1` or `target_index != 0`.
 
-Similarly, the current ready target retains DM `event_number` but does
-not provide a separately sourced `table_generation`. Before setting the
-sampler's `validated=1`, the integration must define and prove where
-`table_generation` comes from. Reusing the event number as a purported
-independent generation or assigning a default zero is not sufficient
-evidence of mapper incarnation. Treat unavailable generation provenance
-as an unavailable watch sample; keep existing one-shot observations usable.
+The collector retains DM `event_number`, **not** a separately proven table
+`generation` or mapper-incarnation identity. Agent 4 now rejects
+`table_generation == 0`; this is only an input guard, **not** evidence that
+a valid independent generation can be obtained. Before setting the
+sampler's `validated=1`, the integration must independently define and prove
+its generation source or revise that identity contract through a separately
+reviewed fail-closed design. Do **not** synthesize a nonzero generation,
+copy `dm_ioctl.event_nr` while calling it independent, or silently allow an
+unproven generation. Unavailable provenance blocks watch, not one-shot status.
 
 A full snapshot must also pin the **optional DM UUID's presence and exact
 bytes** (added by Agent 4), and preserve both same-sample counter
@@ -147,7 +148,7 @@ that original owner and must never accept arbitrary mapper paths.
 
 ## 4. Rootless integration and evidence contract — Agent 6 + Agent 2
 
-- `tests/suites/Makefile test-userspace` must run the current **23-case**
+- `tests/suites/Makefile test-userspace` must run the current **26-case**
   `swapzctl-trial-ownership-test.py` model after the existing C and primary
   late-race regressions, preserving the original failure code and fixed script
   identity. `make-interface-test.py` guards registration and Make-escaped
@@ -172,26 +173,33 @@ that original owner and must never accept arbitrary mapper paths.
 - Agent 1's C collector now parses seven additional optional INFO keys,
   including read, request and GC telemetry. This is **not** the complete
   public watch adapter. Its paired-INFO status remains observational.
-- Agent 4's sampler now validates optional DM UUID presence/value. Its
-  complete-table target cardinality and generation provenance still require
-  integration proofs above.
-- Agent 2 has added CLI-option, staged-watch refusal and CI-reporter
-  regressions. Retained-trial coverage is now 23 cases; mocked PASS is
-  not proof of the private helper's live-disk recovery correctness.
+- Agent 4's sampler validates optional DM UUID presence/value, full-table
+  cardinality (`target_count == 1`), target index zero, and a **nonzero**
+  `table_generation`. Agent 1's ready record now retains the validated full
+  table count, but no public adapter exists and **generation provenance
+  remains unproven**.
+- Agent 2 added CLI-option, staged-watch refusal, CI-reporter and mixed
+  DM-table identity regressions. Agent 3 expanded the integrated retained-
+  trial ownership model to **26 cases**, including marker release failures.
+  Mocked PASS cannot prove the private helper's live-disk recovery correctness.
 - The current work is not entitled to public lifecycle admission: the
   `COMPLETE` retained-marker gap, path-vs-fd journal substitution, actual
   boot-ID evidence, and module/mapper continuity remain unresolved.
 
-These observations are anchored in `main` at
-`4d1ddfabdbb6b8d051bed37b3e2ffcad1c2f2370` and must be rechecked when Agent 1 or Agent 4 changes the
-collector, sampler or build linkage.
+These observations were rechecked against `main` at
+`be8d0f856ee003e155c70d8734fc321f13e51a33` (2026-11-14). At this source commit, all five reported GitHub
+Actions workflows passed, including native-rootless, ARM64/x86-64 C,
+systemd/package, static-contract, and rootless physical-evidence checks.
+This is a **source-bound rootless CI result**, not a loaded-host or physical
+swap qualification. Recheck the exact new head after every code or docs
+change; the check history does not qualify subsequent commits.
 
 ## 5. Release decision matrix
 
 | Deliverable | Current architectural decision | Promotion gate |
 | --- | --- | --- |
 | List/status/inspect/stats/health/diagnose, JSON | Read-only permitted, with unverified ownership and unknown liveness | Exact-head rootless CI and documented limits |
-| `--bytes` and `list --no-headers` | Implemented human views | Dedicated option regressions and exact-head CI |
+| `--bytes` and `list --no-headers` | Implemented human views | Dedicated option regressions are present; preserve them across future exact-head CI |
 | `stats NAME --watch SECONDS` | **STAGED / NOT PUBLIC** | All counters/identity parsed, end-to-end signal/JSON/rootless qualification |
 | Private retained-trial `recover-pending` | Existing **conditional** helper only | Own exact journal/host gates; refuse uncertainty |
 | New public development-trial stop/recover | **BLOCKED** | All P0 security gates above, independent review and source-bound live/physical qualification |
