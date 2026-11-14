@@ -1739,8 +1739,9 @@ static int swapz_parse_swap_priority(const char *token, long *priority)
 	if (parse_unsigned_decimal(digits, limit, &end, &magnitude) < 0 ||
 	    *end != '\0' || (negative && !magnitude))
 		return -1;
+	/* Both bounded magnitudes fit long; -32768 is not LONG_MIN. */
 	if (negative)
-		*priority = magnitude == limit ? LONG_MIN : -(long)magnitude;
+		*priority = -(long)magnitude;
 	else
 		*priority = (long)magnitude;
 	return 0;

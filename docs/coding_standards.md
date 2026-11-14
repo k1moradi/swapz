@@ -134,7 +134,8 @@ the fallback header.
 The read-only /proc/swaps parser requires the exact five-column header and
 canonical signed priorities in the supported -32768..32767 range,
 rejecting duplicate, missing, signed-zero, leading-zero, overflowing or
-surplus fields. It always validates the
+surplus fields. The negative lower bound is represented as the ordinary
+integer -32768 on every ABI; it must never be substituted with LONG_MIN. It always validates the
 independently sampled inventory before reporting observed usage and treats a
 path that cannot be re-resolved to the matching block-special dev_t as
 not_observed or unknown, never as lifecycle permission. A successful
