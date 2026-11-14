@@ -45,6 +45,11 @@ physical-media qualification. Do not treat `not_observed` as authenticated
 inactivity if a kernel-retained pathname is hidden by an overmount.
 
 
+The signed-priority test must validate both syntax and the parsed long
+value at -32768, -1, 0 and 32767. A parser that accepts the minimum canonical
+priority but accidentally returns LONG_MIN is a regression, even when an
+unmatched procfs pathname leaves the advisory swap inventory unobserved.
+
 The JSON observation fixture must deserialize empty, single-device and
 multi-device output using an independent Python standard-library JSON parser,
 not substring matching alone. Mapper identity must survive punctuation,

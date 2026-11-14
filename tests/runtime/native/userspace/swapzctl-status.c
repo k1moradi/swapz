@@ -2461,6 +2461,43 @@ static void test_swapz_json_identity_and_document_framing(void)
 }
 
 /* Injected FILE* procfs inventory; no real swap or block-device operation. */
+
+/* Priority text must have its exact Linux signed numeric value, not just parse. */
+static void test_swapz_linux_swap_priority_exact_values(void)
+{
+	const struct {
+		const char *token;
+		long expected;
+		int valid;
+	} cases[] = {
+		{ "-32768", -32768L, 1 },
+		{ "-1", -1L, 1 },
+		{ "0", 0L, 1 },
+		{ "32767", 32767L, 1 },
+		{ "-32769", 0L, 0 },
+		{ "32768", 0L, 0 },
+		{ "-0", 0L, 0 },
+		{ "+1", 0L, 0 },
+		{ "01", 0L, 0 }
+	};
+	size_t index;
+
+	for (index = 0; index < sizeof(cases) / sizeof(cases[0]); ++index) {
+		long value = LONG_MAX;
+		int parsed = swapz_parse_swap_priority(cases[index].token, &value) == 0;
+
+		if (parsed != cases[index].valid ||
+		    (parsed && value != cases[index].expected)) {
+			fprintf(stderr,
+				"FAIL: priority token case=%zu expected_valid=%d "
+				"actual_valid=%d expected=%ld actual=%ld\n",
+				index, cases[index].valid, parsed,
+				cases[index].expected, value);
+			abort();
+		}
+	}
+}
+
 static void test_swapz_linux_swap_inventory_adversarial_records(void)
 {
 	const struct {
@@ -2652,6 +2689,7 @@ int main(void)
 	test_status_is_read_only();
 	test_swapz_observation_views();
 	test_swapz_linux_swap_inventory_parser();
+	test_swapz_linux_swap_priority_exact_values();
 	test_swapz_linux_swap_inventory_adversarial_records();
 	test_swapz_json_identity_and_document_framing();
 	test_swapz_command_specific_help();
