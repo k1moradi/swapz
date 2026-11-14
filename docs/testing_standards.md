@@ -1,5 +1,19 @@
 # Testing Standards
 
+## Retained development-trial ownership fixture (2026-11-14)
+
+`python3 -B tests/runtime/native/userspace/swapzctl-trial-ownership-test.py -v`
+is a rootless adversarial regression importing the private physical trial
+helper. It injects disposable run records, mocks the privileged `recover`,
+`swapoff`/udev and Device Mapper observations, and checks zero/multiple/
+ambiguous markers, symlink substitution, journal identity drift, immutable
+source/mapper binding, ENOMEM, incomplete swapoff and post-settle mapper
+replacement. This fixture does not execute Linux swap commands, touch a real
+block device, or grant `swapzctl` lifecycle authority. A passing result is
+parsing/transition evidence only; same-boot device custody, loaded/physical
+qualification and cross-process delegation require independent review.
+See `docs/handoff/swapzctl-trial-ownership-audit.md`.
+
 ## swapzctl rootless observability qualification (2026-11-14)
 
 The side-effect-free command-help regression invokes the public C dispatcher
