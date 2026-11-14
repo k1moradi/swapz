@@ -2372,11 +2372,13 @@ static void test_swapz_command_specific_help(void)
 	char *primary_help[] = { "swapzctl", "help", "primary", NULL };
 	char *bad_help[] = { "swapzctl", "help", "not-a-command", NULL };
 	FILE *capture = tmpfile();
+	FILE *error_capture = tmpfile();
 	int saved_stdout = dup(STDOUT_FILENO);
+	int saved_stderr = dup(STDERR_FILENO);
 	char output[2048] = { 0 };
 	size_t bytes;
 
-	assert(capture && saved_stdout >= 0);
+	assert(capture && error_capture && saved_stdout >= 0 && saved_stderr >= 0);
 	fflush(stdout);
 	assert(dup2(fileno(capture), STDOUT_FILENO) >= 0);
 	assert(swapzctl_program_main(3, list_help) == 0);
@@ -2394,8 +2396,20 @@ static void test_swapz_command_specific_help(void)
 	assert(strstr(output, "ownership are unverified"));
 	assert(swapz_command_usage(capture, "not-a-command") < 0);
 	/* Unknown topics fail without running a primary lifecycle command. */
+	fflush(stderr);
+	assert(dup2(fileno(error_capture), STDERR_FILENO) >= 0);
 	assert(swapzctl_program_main(3, bad_help) == 2);
+	fflush(stderr);
+	assert(dup2(saved_stderr, STDERR_FILENO) >= 0);
+	rewind(error_capture);
+	memset(output, 0, sizeof(output));
+	bytes = fread(output, 1, sizeof(output) - 1U, error_capture);
+	output[bytes] = '\0';
+	assert(strstr(output, "BLOCKED: unsupported help topic"));
+	assert(!strstr(output, "dev/sd"));
+	close(saved_stderr);
 	close(saved_stdout);
+	fclose(error_capture);
 	fclose(capture);
 }
 

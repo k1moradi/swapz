@@ -2,6 +2,17 @@
 
 ## swapzctl rootless observability qualification (2026-11-14)
 
+The side-effect-free command-help regression invokes the public C dispatcher
+without a loaded module or privileged device: generic and command-specific
+help must succeed, unknown topics must return nonzero, and their fail-only
+diagnostics must be captured/asserted rather than leaking expected-error
+stderr into the success console. Any commit modifying this rootless test
+must update this testing standard **in the same commit**; changes to
+swapzctl production source also require a matching coding standard. When
+both files change, both applicable canonical standards are co-changed
+in the same atomic direct-main Git tree commit.
+
+
 The native `swapzctl-status.c` fixture includes the production C status parser
 and exercises both its existing bounded Device Mapper two-INFO/final-LIST
 validation and the newer read-only operator views. Every new command must
