@@ -161,7 +161,17 @@ swap-out/in counters and selected partition I/O in approximately the
 most recent four seconds, with at least three seconds of observation.
 Historical I/O followed by a quiet stall is not continuing progress.
 The original cgroup/host/timeout limits and ordinary swapz admission are
-unchanged. These block-stat observations are not per-request WRITE latency.
+unchanged. Paired RAW and swapz device-stat timelines are now gathered by a
+dedicated 250ms read-only sampler thread rather than the workload guard. This
+prevents a blocked guard/identity query from suppressing device-stat samples.
+Samples remain opportunistic under host scheduling pressure; actual monotonic
+timestamps, bounded last-256 storage, thread-stop status and failure flag
+appear in root-owned results. Each phase signals its thread to stop and attempts a bounded two-second
+join before phase transition or recovery. An otherwise successful
+paired trial refuses failed or unjoined monitoring; a workload failure remains
+the primary error. A delayed, unjoined thread can finish a read later, but
+cannot mutate swap, invoke subprocesses, or perform recovery. These block-stat observations
+are not per-request WRITE latency.
 
 ## Real-partition architecture preflight
 
