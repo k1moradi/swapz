@@ -130,6 +130,10 @@ PSI_STOP_MAX_SAMPLES = 256
 # The existing 240s timeout, 1 GiB host RAM floor, cgroup OOM/swap limits,
 # byte oracle, device ownership, and full restoration are unchanged.
 DEVELOPMENT_PSI_PROGRESS_MIN_WINDOW_USEC = 3_000_000
+# Development-only maximum observation interval without a completed owned
+# lower I/O. A submitted/in-flight WRITE never counts as completion.
+# The official PSI safety stop and 240-second workload deadline are unchanged.
+DEVELOPMENT_SWAPZ_MAX_NO_PROGRESS_SECONDS = 10.0
 DEVELOPMENT_PSI_PROGRESS_MIN_PAGES = 64
 # Best-effort diagnostic snapshots, never a workload admission condition.
 PRESSURE_PROGRESS_SAMPLE_SECONDS = 1.0
@@ -3649,13 +3653,16 @@ def _pressure_progress_snapshot(cgroup: Path,
     return observed
 
 
-def _pressure_progress_deltas(samples: deque, window: PsiStallWindow) -> dict:
-    """Never present differently timed cumulative counters as PSI-window deltas."""
+def _pressure_progress_deltas(
+        samples: deque, window: PsiStallWindow, *,
+        earliest_sample_time: float | None = None) -> dict:
+    """Report paired sample deltas from the requested bounded time interval."""
     deltas = {"progress_window_usec": None,
               **{delta: None for _, delta in PRESSURE_PROGRESS_COUNTERS}}
     if len(samples) < 2:
         return deltas
-    window_start = window._samples[0][0]
+    window_start = (window._samples[0][0] if earliest_sample_time is None
+                    else earliest_sample_time)
     eligible = next((sample for sample in samples
                      if sample[0] >= window_start), None)
     if eligible is None or samples[-1][0] <= eligible[0]:
@@ -3697,6 +3704,21 @@ def _raw_recent_pressure_progress_deltas(
     return _recent_pressure_progress_deltas(samples, window)
 
 
+def _development_swapz_progress_deltas(
+        samples: deque, window: PsiStallWindow) -> dict:
+    """Allow a completed owned I/O within 10s on slow development media.
+
+    Unlike the five-second PSI window, this is a bounded no-completion
+    interval. It never counts an in-flight operation as successful I/O.
+    """
+    if not samples:
+        return _pressure_progress_deltas(samples, window)
+    return _pressure_progress_deltas(
+        samples, window,
+        earliest_sample_time=(
+            samples[-1][0] - DEVELOPMENT_SWAPZ_MAX_NO_PROGRESS_SECONDS))
+
+
 def _development_pressure_has_owned_progress(
         samples: deque, window: PsiStallWindow, phase: str) -> bool:
     """Permit high PSI in the DEV smoke only with independently proven I/O.
@@ -3712,7 +3734,7 @@ def _development_pressure_has_owned_progress(
     Incomplete, regressing, stale or foreign observations are NOT an exception
     to the original PSI trigger.
     """
-    deltas = _recent_pressure_progress_deltas(samples, window)
+    deltas = _development_swapz_progress_deltas(samples, window)
     if (deltas["progress_window_usec"] is None or
             deltas["progress_window_usec"] <
             DEVELOPMENT_PSI_PROGRESS_MIN_WINDOW_USEC or
@@ -3868,8 +3890,8 @@ def _workload_pressure_failure(window: PsiStallWindow, cgroup: Path,
                 observation[name] = recent[original]
         elif progress_samples:
             # Only these bounded deltas feed the swapz development exception.
-            # The original window deltas may include now-stale lower I/O.
-            recent = _recent_pressure_progress_deltas(
+            # The original PSI-window deltas use a different cutoff.
+            recent = _development_swapz_progress_deltas(
                 progress_samples, window)
             for original, name in (
                     ("progress_window_usec", "swapz_recent_progress_window_usec"),

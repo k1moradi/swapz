@@ -102,8 +102,11 @@ official modes, but only the separately authorized development smoke may
 continue while **recent, independently attributable progress** is proven.
 
 On the swapz-only development path, require at least three seconds of
-recent observations over approximately the last four seconds, a progress
-sample no more than 1.25 seconds old, and healthy swapz status. For fill,
+matched observations within the last ten seconds, a progress sample no
+more than 1.25 seconds old, and healthy swapz status. This development-only
+ten-second no-completion bound accommodates slow lower WRITEs without counting
+outstanding I/O as completed progress. The raw comparison retains its original
+approximately four-second recent window. For fill,
 require previously successful upper WRITE completions and valid, nonregressing
 upper completion counters, plus positive *recent* swapz physical WRITE bytes
 and positive *recent* sectors on the exact selected lower partition. A packed
@@ -120,9 +123,11 @@ device ownership, and restoration stay unchanged. The official production
 qualification retains its unconditional 85%/5s PSI stop.
 
 A development smoke PSI failure reports both its full PSI-window counters and
-separately the recent gate-window swapz WRITE/READ deltas and last sample age.
-Whole-window activity can be positive even when no qualifying recent I/O
-remains; diagnostic fields must not change the admission decision.
+separately the actual ten-second development gate-window swapz WRITE/READ deltas
+and last sample age. Whole-window activity can be positive even when no
+qualifying recent I/O remains, or the gate window can contain earlier real
+completions that do not fall inside the five-second PSI interval. Diagnostic
+fields do not change the admission decision.
 
 ## Development-only paired raw Linux swap versus swapz physical comparison
 

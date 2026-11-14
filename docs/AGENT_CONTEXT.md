@@ -71,8 +71,9 @@ stop therefore repeatedly prevented byte-exact pagein/reuse testing.
 ONLY the bounded development physical smoke may treat the existing 85%/5s
 PSI threshold as a demand for proven device progress instead of an immediate
 stop. Both failed/error status values must be zero and source-owned physical
-I/O must advance within >=3 seconds of matched samples; unknown or absent
-measurements still stop. Official production qualification keeps the
+I/O must advance within at least three seconds of matched samples and no
+more than ten seconds since the last proven physical completion; a merely
+in-flight WRITE is not progress. Unknown or absent measurements still stop. Official production qualification keeps the
 unconditional 85% PSI stop. Host MemAvailable >=1 GiB, cgroup OOM/swap
 bounds, source/module/mapper ownership, 240s deadline, byte-verified pagein,
 slot reuse, and cleanup/recovery protections remain enforced. NEVER use

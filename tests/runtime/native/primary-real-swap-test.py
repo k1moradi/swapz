@@ -3178,9 +3178,8 @@ class PrimaryRealSwapContracts(unittest.TestCase):
                 self.assertIsNone(value, key)
 
     def test_swapz_psi_failure_distinguishes_historical_from_recent_progress(self):
-        # The Lubuntu post-reboot trial reported 262144 module bytes and
-        # 512 backing sectors across the PSI window. Both can be historical:
-        # the development exception considers only the latest ~4 seconds.
+        # The 10s dev-only bound lets a genuine lower I/O pause exceed the
+        # five-second PSI window, but never treats in-flight I/O as progress.
         window = qualify.PsiStallWindow(0.0, 0)
         self.assertTrue(window.observe(5.0, 4_900_000))
         before = {name: 0 for name, _ in qualify.PRESSURE_PROGRESS_COUNTERS}
@@ -3191,17 +3190,22 @@ class PrimaryRealSwapContracts(unittest.TestCase):
         samples = deque([(0.0, before)] + [
             (sample_time, completed) for sample_time in
             (1.0, 2.0, 3.0, 4.0, 4.5)])
-        self.assertFalse(qualify._development_pressure_has_owned_progress(
+        self.assertTrue(qualify._development_pressure_has_owned_progress(
             samples, window, "fill"))
-        with mock.patch.object(qualify, "_mem_available_mib", return_value=12000), \
-                mock.patch.object(qualify, "_read_uint", return_value=1024), \
-                mock.patch.object(qualify, "_psi_total", return_value=0), \
-                mock.patch.object(qualify, "_memory_events",
-                                  return_value={"max": 0}), \
-                mock.patch.object(qualify, "_backing_inflight_requests",
-                                  return_value=1), \
-                mock.patch.object(qualify, "read_block_stats",
-                                  return_value=qualify.BlockStats(0, 512)):
+        with contextlib.ExitStack() as stack:
+            stack.enter_context(mock.patch.object(
+                qualify, "_mem_available_mib", return_value=12000))
+            stack.enter_context(mock.patch.object(
+                qualify, "_read_uint", return_value=1024))
+            stack.enter_context(mock.patch.object(
+                qualify, "_psi_total", return_value=0))
+            stack.enter_context(mock.patch.object(
+                qualify, "_memory_events", return_value={"max": 0}))
+            stack.enter_context(mock.patch.object(
+                qualify, "_backing_inflight_requests", return_value=1))
+            stack.enter_context(mock.patch.object(
+                qualify, "read_block_stats",
+                return_value=qualify.BlockStats(0, 512)))
             failure = qualify._workload_pressure_failure(
                 window, Path("/private/cgroup"), lambda: {}, (8, 4),
                 "fill", progress_samples=samples, observed_time=5.0,
@@ -3211,19 +3215,29 @@ class PrimaryRealSwapContracts(unittest.TestCase):
         self.assertEqual(observation["swapz_physical_write_delta"], 262_144)
         self.assertEqual(observation["lower_write_sectors_delta"], 512)
         self.assertEqual(observation["swapz_recent_progress_window_usec"],
-                         3_500_000)
+                         4_500_000)
         self.assertEqual(observation["swapz_recent_write_completed_delta"], 0)
-        self.assertEqual(observation["swapz_recent_physical_write_delta"], 0)
-        self.assertEqual(observation["swapz_recent_lower_write_sectors_delta"], 0)
+        self.assertEqual(observation["swapz_recent_physical_write_delta"],
+                         262_144)
+        self.assertEqual(observation["swapz_recent_lower_write_sectors_delta"],
+                         512)
         self.assertEqual(observation["progress_sample_age_usec"], 500_000)
 
-        # If the latest actual progress window contains both completed owned
-        # module bytes and backing sectors, the existing gate permits it.
+        # Once the last real completion is outside the 10s lookback,
+        # no amount of queued or in-flight work waives the PSI stop.
+        later_window = qualify.PsiStallWindow(0.0, 0)
+        self.assertTrue(later_window.observe(13.0, 12_800_000))
+        later_samples = deque([(0.0, before)] + [
+            (float(second), completed) for second in range(1, 14)])
+        self.assertFalse(qualify._development_pressure_has_owned_progress(
+            later_samples, later_window, "fill"))
+
+        # Fresh, independently matched module/partition writes still count.
         latest = dict(completed, swapz_physical_write_total=266_240,
                       lower_write_sectors_total=520)
-        samples[-1] = (4.5, latest)
+        later_samples[-1] = (13.0, latest)
         self.assertTrue(qualify._development_pressure_has_owned_progress(
-            samples, window, "fill"))
+            later_samples, later_window, "fill"))
 
     def test_development_pressure_requires_same_window_owned_io(self):
         self.assertEqual(qualify.PSI_STOP_FRACTION, 0.85)
@@ -3294,11 +3308,20 @@ class PrimaryRealSwapContracts(unittest.TestCase):
                 deque([(0.5, baseline), (4.67, no_progress)]), stall,
                 "fill"), missing)
 
-        # Historical successful I/O cannot waive an extended quiet stall.
+        # Completed I/O tolerates a bounded 5-second gap on slow backing.
         earlier = deque([(0.0, baseline), (1.0, slow)] +
-                        [(float(second), slow) for second in range(2, 6)])
+                        [(float(second), slow) for second in range(2, 7)])
+        short_stall = qualify.PsiStallWindow(0.0, 0)
+        self.assertTrue(short_stall.observe(6.0, 5_900_000))
+        self.assertTrue(qualify._development_pressure_has_owned_progress(
+            earlier, short_stall, "fill"))
+        # Past ten seconds without owned completions is still a refusal.
+        extended = deque([(0.0, baseline), (1.0, slow)] +
+                         [(float(second), slow) for second in range(2, 14)])
+        long_stall = qualify.PsiStallWindow(0.0, 0)
+        self.assertTrue(long_stall.observe(13.0, 12_800_000))
         self.assertFalse(qualify._development_pressure_has_owned_progress(
-            earlier, stall, "fill"))
+            extended, long_stall, "fill"))
         # An old final sample also fails closed even with aggregate progress.
         self.assertFalse(qualify._development_pressure_has_owned_progress(
             deque([(0.5, baseline), (3.5, slow)]), stall, "fill"))
@@ -3363,14 +3386,20 @@ class PrimaryRealSwapContracts(unittest.TestCase):
             deque([(1.0, baseline), (4.25, regressed)]),
             stall, "fill"))
 
-        # Future run with a 4+ second I/O freeze: the historical 159,744B
-        # does not count after it has left the latest progress window.
+        # A 5-second lower WRITE delay is tolerated, but a greater-than-10s
+        # completion gap must not inherit previously proven physical bytes.
         history = deque([(0.0, baseline), (1.0, after)] +
                         [(float(second), after) for second in range(2, 7)])
         later_stall = qualify.PsiStallWindow(0.0, 0)
         self.assertTrue(later_stall.observe(6.5, 6_000_000))
-        self.assertFalse(qualify._development_pressure_has_owned_progress(
+        self.assertTrue(qualify._development_pressure_has_owned_progress(
             history, later_stall, "fill"))
+        long_history = deque([(0.0, baseline), (1.0, after)] +
+                             [(float(second), after) for second in range(2, 14)])
+        expired_stall = qualify.PsiStallWindow(0.0, 0)
+        self.assertTrue(expired_stall.observe(13.0, 12_800_000))
+        self.assertFalse(qualify._development_pressure_has_owned_progress(
+            long_history, expired_stall, "fill"))
         self.assertFalse(qualify._development_pressure_has_owned_progress(
             deque([(0.0, baseline), (3.0, after)]), stall, "fill"))
 
