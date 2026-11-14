@@ -2192,6 +2192,109 @@ static void test_production_dm_query_error_precedence(void)
 	fake_dm_ioctl_error = 0;
 }
 
+
+/* Pure read-only view regression: no block devices, swapon, or elevated rights. */
+static void test_swapz_observation_views(void)
+{
+	struct status_ready_target targets[2] = {
+		{
+			.name = "swapz-demo-physical-fixture",
+			.target_index = 0,
+			.device_id = makedev(253, 7),
+			.sector_length = 8192,
+			.ratio = { .logical_write_bytes = 16384,
+				   .physical_write_bytes = 8192,
+				   .compressed_pages = 4,
+				   .compressed_extent_ratio_exact = 1 }
+		},
+		{
+			.name = "swapz-other-fixture",
+			.target_index = 1,
+			.device_id = makedev(253, 8),
+			.sector_start = 8192,
+			.sector_length = 16384
+		}
+	};
+	struct status_ready_report report = {
+		.targets = targets, .count = 2, .capacity = 2
+	};
+	FILE *capture = tmpfile();
+	int saved_stdout = dup(STDOUT_FILENO);
+	char output[8192] = { 0 };
+	size_t bytes;
+	unsigned long long capacity = 0;
+
+	assert(capture && saved_stdout >= 0);
+	assert(swapz_target_capacity_bytes(&targets[0], &capacity) == 0);
+	assert(capacity == 4194304ULL);
+	assert(swapz_target_capacity_bytes(&targets[1], &capacity) == 0);
+	assert(capacity == 8388608ULL);
+	assert(!strcmp(swapz_view_name(SWAPZ_VIEW_DIAGNOSE), "diagnose"));
+
+	fflush(stdout);
+	assert(dup2(fileno(capture), STDOUT_FILENO) >= 0);
+	assert(swapz_print_view(&report, SWAPZ_VIEW_LIST, NULL, 1) == 0);
+	fflush(stdout);
+	assert(dup2(saved_stdout, STDOUT_FILENO) >= 0);
+	rewind(capture);
+	bytes = fread(output, 1, sizeof(output) - 1U, capture);
+	output[bytes] = '\0';
+	assert(strstr(output, "\"schema_version\":1"));
+	assert(strstr(output, "\"command\":\"list\""));
+	assert(strstr(output, "\"dm_major\":253,\"dm_minor\":7"));
+	assert(strstr(output, "\"logical_capacity_bytes\":4194304"));
+	assert(strstr(output, "\"compressed_extent_bytes_exact\":true"));
+	assert(strstr(output, "},{\"name\":\"swapz-other-fixture\""));
+	assert(strstr(output, "\"logical_capacity_bytes\":8388608"));
+	assert(strstr(output, "\"ownership\":\"unverified\""));
+	assert(strstr(output, "}]}\n"));
+	assert(!strstr(output, "[,"));
+
+	assert(ftruncate(fileno(capture), 0) == 0);
+	rewind(capture);
+	fflush(stdout);
+	assert(dup2(fileno(capture), STDOUT_FILENO) >= 0);
+	assert(swapz_print_view(&report, SWAPZ_VIEW_INSPECT,
+				"swapz-demo-physical-fixture", 0) == 0);
+	fflush(stdout);
+	assert(dup2(saved_stdout, STDOUT_FILENO) >= 0);
+	rewind(capture);
+	memset(output, 0, sizeof(output));
+	bytes = fread(output, 1, sizeof(output) - 1U, capture);
+	output[bytes] = '\0';
+	assert(strstr(output, "device 253:7"));
+	assert(strstr(output, "capacity=4194304 bytes"));
+	assert(strstr(output, "Ownership: unverified"));
+	assert(!strstr(output, "swapz-other-fixture"));
+
+	/* Unknown names and oversized sector geometry fail without output. */
+	assert(ftruncate(fileno(capture), 0) == 0);
+	rewind(capture);
+	fflush(stdout);
+	assert(dup2(fileno(capture), STDOUT_FILENO) >= 0);
+	assert(swapz_print_view(&report, SWAPZ_VIEW_STATS, "missing", 1) != 0);
+	fflush(stdout);
+	assert(dup2(saved_stdout, STDOUT_FILENO) >= 0);
+	rewind(capture);
+	assert(fread(output, 1, 1, capture) == 0);
+
+	targets[0].sector_length = UINT64_MAX;
+	assert(swapz_target_capacity_bytes(&targets[0], &capacity) < 0);
+	assert(ftruncate(fileno(capture), 0) == 0);
+	rewind(capture);
+	fflush(stdout);
+	assert(dup2(fileno(capture), STDOUT_FILENO) >= 0);
+	assert(swapz_print_view(&report, SWAPZ_VIEW_HEALTH,
+				"swapz-demo-physical-fixture", 1) != 0);
+	fflush(stdout);
+	assert(dup2(saved_stdout, STDOUT_FILENO) >= 0);
+	rewind(capture);
+	assert(fread(output, 1, 1, capture) == 0);
+
+	fclose(capture);
+	close(saved_stdout);
+}
+
 static void test_status_is_read_only(void)
 {
 	unsigned char *reply = NULL;
@@ -2249,6 +2352,7 @@ int main(void)
 	test_status_info_errno_precedence();
 	test_production_dm_query_error_precedence();
 	test_status_is_read_only();
+	test_swapz_observation_views();
 	puts("PASS: swapzctl status compression-ratio accounting");
 	return 0;
 }
