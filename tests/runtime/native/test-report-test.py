@@ -2246,6 +2246,12 @@ class NativeTimingContract(unittest.TestCase):
                 ("trusted", prefix + genuine + later, [eligible_suite]),
                 ("progress_only", prefix + later, []),
                 ("wrong_token", prefix + spoofed + later, []),
+                ("tab_separator", prefix + genuine.replace(
+                    " token=", "\ttoken=", 1) + later, []),
+                ("joined_keyword", prefix + genuine.replace(
+                    " token=", "token=", 1) + later, []),
+                ("bare_keyword", prefix + "ROOTLESS_CHECKPOINT_PASS\n" +
+                 later, []),
                 ("delayed", prefix + later + genuine, []),
                 ("wrong_phase", prefix + genuine.replace(
                     "index=2", "index=1") + later, [])):
@@ -2276,7 +2282,7 @@ class NativeTimingContract(unittest.TestCase):
                 # delivered to evidence parsers or later diagnostics.
                 parsed_predictor.assert_called_once()
                 self.assertNotIn(
-                    "ROOTLESS_CHECKPOINT_PASS ",
+                    "ROOTLESS_CHECKPOINT_PASS",
                     parsed_predictor.call_args.args[0])
 
     def test_rootless_progress_rejects_unsafe_and_invalid_records(self):

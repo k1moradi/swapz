@@ -4781,7 +4781,7 @@ def run_stage(title, command, result, *, parse_bench=False,
             assert proc.stdout is not None
             for line in proc.stdout:
                 if (stream_rootless_progress and
-                        line.startswith("ROOTLESS_CHECKPOINT_PASS ")):
+                        line.startswith("ROOTLESS_CHECKPOINT_PASS")):
                     if rootless_checkpoint_token is not None:
                         marker = ROOTLESS_CHECKPOINT_PASS_PATTERN.fullmatch(
                             line.rstrip("\n"))
@@ -4794,9 +4794,10 @@ def run_stage(title, command, result, *, parse_bench=False,
                             rootless_pending_checkpoint = None
                             rootless_suite_completed(marker.group(3))
                     # These are private proof records, never test evidence.
-                    # Discard forged, malformed and delayed markers too:
-                    # an invalid nonce must not reach reports, parsers or
-                    # failure diagnostics through the merged child stream.
+                    # Discard forged, malformed and delayed markers too,
+                    # including wrong separators and truncated keywords.
+                    # A private protocol prefix cannot enter reports,
+                    # parsers or failure diagnostics through child output.
                     continue
                 chunks.append(line)
                 if stream_rootless_progress:

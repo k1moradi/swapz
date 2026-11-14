@@ -788,8 +788,11 @@ stripped before child tests. The parent strips all private checkpoint-proof
 lines from its merged output before evidence parsing or failure diagnostics,
 including malformed, foreign-token, out-of-phase and delayed lines; only a
 matching proof may update the private checkpoint, and no proof text belongs
-in the report. Synthetic regression inspects parser input and covers genuine,
-missing, forged, out-of-phase and delayed proofs. Its incomplete stream must still fail
+in the report. The reserved proof prefix is filtered even with a tab instead
+of the canonical space, a joined keyword or a missing separator: malformed
+proofs must not pass through to parsers or diagnostics. Synthetic regression
+inspects parser input and covers genuine, missing, forged, malformed-separator,
+out-of-phase and delayed proofs. Its incomplete stream must still fail
 the containing native/rootless stage because predictor, GC-scaling and
 extent evidence are absent, even if one suite-local proof is genuine.
 The shell emits no proof during REUSED phases or standalone rootless CI
