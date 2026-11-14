@@ -198,9 +198,26 @@ The public collector must first parse each required logical/lower/GC
 READ/WRITE byte and request counter canonically, prove same-mapper
 identity and table geometry across samples, reject counter resets and
 unavailable/failed target state, and define/test bounded SIGINT/SIGTERM,
-EPIPE, human and JSON-stream behavior. Host-wide swap or PSI counters
-cannot substitute for device-specific deltas. The independent sampler
-tests alone do not qualify a released `--watch` flag.
+EPIPE, human and JSON-stream behavior. The watch sampler now additionally
+checks the optional DM UUID's **presence and exact bytes** across samples:
+a UUID appearing, disappearing or changing rejects the interval, as do
+malformed or unterminated UUIDs. Two snapshots without a UUID may be
+accepted by the sampler, but a missing UUID is never invented or treated
+as lifecycle ownership evidence.
+
+The public adapter must derive the **complete wire-validated DM table
+target count**, not the number of filtered swapz target rows, and must
+reject mixed or multi-target tables rather than assuming one target.
+It must also establish independent provenance for `table_generation`;
+neither a default zero nor relabeling `dm_event_number` as a second
+generation is sufficient. Missing generation evidence makes watch
+sampling unavailable without breaking the existing one-shot views.
+The new read/request/GC counters are optional for those one-shot views:
+only a **complete, stable, canonically parsed** set can be marked
+`watch_counters_valid` and supplied to the watch callback. Host-wide
+swap or PSI counters cannot substitute for device-specific deltas.
+The independent sampler tests alone do not qualify a released
+`--watch` flag.
 
 The 20-case retained-trial ownership rootless fixture is included in the
 native userspace test suite. Its simulated journal and failure-boundary
