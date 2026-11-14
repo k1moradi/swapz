@@ -2214,6 +2214,10 @@ class NativeTimingContract(unittest.TestCase):
                         return_value=FakeStreamingProcess(transcript)), \
                         mock.patch.object(
                             runner.secrets, "token_hex", return_value=token), \
+                        mock.patch.object(
+                            runner, "parse_predictor_evidence",
+                            wraps=runner.parse_predictor_evidence
+                        ) as parsed_predictor, \
                         contextlib.redirect_stdout(io.StringIO()):
                     # This intentionally incomplete stage lacks mandatory
                     # predictor/GC/extent evidence. A suite-local PASS may
@@ -2225,6 +2229,12 @@ class NativeTimingContract(unittest.TestCase):
                 self.assertEqual(recorded_suites, expected)
                 self.assertEqual(report["stages"][-1]["status"], "FAIL")
                 self.assertNotIn(token, json.dumps(report))
+                # Rejected private proofs must never survive in raw output
+                # delivered to evidence parsers or later diagnostics.
+                parsed_predictor.assert_called_once()
+                self.assertNotIn(
+                    "ROOTLESS_CHECKPOINT_PASS ",
+                    parsed_predictor.call_args.args[0])
 
     def test_rootless_progress_rejects_unsafe_and_invalid_records(self):
         allowed = runner.rootless_phase_names()

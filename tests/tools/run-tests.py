@@ -4752,20 +4752,24 @@ def run_stage(title, command, result, *, parse_bench=False,
             negative_case = None
             assert proc.stdout is not None
             for line in proc.stdout:
-                if (stream_rootless_progress and rootless_checkpoint_token and
+                if (stream_rootless_progress and
                         line.startswith("ROOTLESS_CHECKPOINT_PASS ")):
-                    marker = ROOTLESS_CHECKPOINT_PASS_PATTERN.fullmatch(
-                        line.rstrip("\n"))
-                    if (marker is not None and
-                            marker.group(1) == rootless_checkpoint_token and
-                            rootless_pending_checkpoint ==
-                            (int(marker.group(2)), marker.group(3))):
-                        # Do not retain the ephemeral token in public reports
-                        # or diagnostics. This authenticates the shell's
-                        # completed suite boundary, not arbitrary child text.
-                        rootless_pending_checkpoint = None
-                        rootless_suite_completed(marker.group(3))
-                        continue
+                    if rootless_checkpoint_token is not None:
+                        marker = ROOTLESS_CHECKPOINT_PASS_PATTERN.fullmatch(
+                            line.rstrip("\n"))
+                        if (marker is not None and
+                                marker.group(1) == rootless_checkpoint_token and
+                                rootless_pending_checkpoint ==
+                                (int(marker.group(2)), marker.group(3))):
+                            # Only the shell's matching completed-suite
+                            # boundary can authorize a development checkpoint.
+                            rootless_pending_checkpoint = None
+                            rootless_suite_completed(marker.group(3))
+                    # These are private proof records, never test evidence.
+                    # Discard forged, malformed and delayed markers too:
+                    # an invalid nonce must not reach reports, parsers or
+                    # failure diagnostics through the merged child stream.
+                    continue
                 chunks.append(line)
                 if stream_rootless_progress:
                     for native_suite in DEVELOPMENT_RESUME_NATIVE_SUITES:

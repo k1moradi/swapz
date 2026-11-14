@@ -701,9 +701,12 @@ unexported, per-invocation 128-bit token and the immediately preceding
 eligible PASS phase may trigger a private per-suite checkpoint. Ordinary
 progress markers in merged stdout/stderr are observational: a child can
 print the same text and must not create a reusable PASS. The nonce is
-stripped before child tests, and the parent does not retain its proof line
-in a report. Synthetic regression covers genuine, missing, forged,
-out-of-phase and delayed proofs. Its incomplete stream must still fail
+stripped before child tests. The parent strips all private checkpoint-proof
+lines from its merged output before evidence parsing or failure diagnostics,
+including malformed, foreign-token, out-of-phase and delayed lines; only a
+matching proof may update the private checkpoint, and no proof text belongs
+in the report. Synthetic regression inspects parser input and covers genuine,
+missing, forged, out-of-phase and delayed proofs. Its incomplete stream must still fail
 the containing native/rootless stage because predictor, GC-scaling and
 extent evidence are absent, even if one suite-local proof is genuine.
 The shell emits no proof during REUSED phases or standalone rootless CI
