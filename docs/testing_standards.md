@@ -695,6 +695,18 @@ bounded timeout/reaping using synthetic unprivileged processes.
 The test fixture asserts inherited bytecode suppression with a simple
 Python statement so its one-line synthetic worker remains valid source.
 
+The two independent Ubuntu 24.04 native regression CI jobs may skip
+their prerequisite `apt-get update/install` transactions **only when**
+`dpkg-query` confirms both `build-essential` and `liblz4-dev` are in
+`install ok installed` state and `cc`, `c++`, and `make` are all
+discoverable. Otherwise they must run the unchanged two-package
+update/install command under the original fail-only CI runner; missing
+toolchain evidence is never a skip or successful test. This reduces CI
+setup/network latency on preprovisioned GitHub runners without changing
+source tests, build targets, versions explicitly pinned by the project,
+physical benchmarks, or qualification evidence. The static Make contract
+tests must check the exact guard and fallback in both jobs.
+
 The native production-C suite may compile the unchanged production sources
 once into shared, compiler-configuration-bound objects, then link the existing
 independent test executables. Shared object reuse must track included headers,

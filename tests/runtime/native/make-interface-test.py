@@ -14,6 +14,29 @@ ROOT = pathlib.Path(__file__).resolve().parents[3]
 MAKE = (ROOT / "Makefile").read_text()
 
 class PublicMakeContract(unittest.TestCase):
+    def test_ci_native_prerequisites_require_installed_toolchain(self):
+        # Native CI may avoid apt/network work only on an already provisioned
+        # runner. Both independent jobs must still install missing packages
+        # through the original fail-only CI command wrapper.
+        workflow = (ROOT / ".github/workflows/project-goals.yml").read_text(
+            encoding="utf-8")
+        self.assertEqual(workflow.count(
+            "ci-run --suite apt-prerequisites -- bash -c"), 2)
+        self.assertEqual(workflow.count(
+            "dpkg-query -s build-essential liblz4-dev"), 2)
+        self.assertEqual(workflow.count(
+            'grep -c "^Status: install ok installed$"'), 2)
+        self.assertEqual(workflow.count(
+            'command -v cc >/dev/null 2>&1'), 2)
+        self.assertEqual(workflow.count(
+            'command -v c++ >/dev/null 2>&1'), 2)
+        self.assertEqual(workflow.count(
+            'command -v make >/dev/null 2>&1'), 2)
+        self.assertEqual(workflow.count("sudo apt-get update -qq &&"), 2)
+        self.assertEqual(workflow.count(
+            "sudo DEBIAN_FRONTEND=noninteractive apt-get install -y -qq "
+            "build-essential liblz4-dev"), 2)
+
     def test_native_userspace_script_failure_preserves_shell_exit(self):
         # Make expands single dollars before launching the recipe shell.
         # A future script failure must retain its real status and script name.

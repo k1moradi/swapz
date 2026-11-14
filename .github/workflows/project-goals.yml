@@ -29,7 +29,18 @@ jobs:
         run: mkdir -p build/tests/native build/tests/model build/python-cache
       - name: Install native prerequisites on GitHub-hosted runner
         run: |
-          python3 -B tests/tools/product_goals.py ci-run --suite apt-prerequisites -- bash -c 'sudo apt-get update -qq && sudo DEBIAN_FRONTEND=noninteractive apt-get install -y -qq build-essential liblz4-dev'
+          python3 -B tests/tools/product_goals.py ci-run --suite apt-prerequisites -- bash -c '
+            # Verify both installed package records and the required executables.
+            # Preinstalled runner packages need no network transaction.
+            if command -v cc >/dev/null 2>&1 &&
+               command -v c++ >/dev/null 2>&1 &&
+               command -v make >/dev/null 2>&1 &&
+               [ "$(dpkg-query -s build-essential liblz4-dev 2>/dev/null | grep -c "^Status: install ok installed$")" = 2 ]; then
+              exit 0
+            fi
+            sudo apt-get update -qq &&
+            sudo DEBIAN_FRONTEND=noninteractive apt-get install -y -qq build-essential liblz4-dev
+          '
       - name: Build and execute production C/C++ tests
         run: |
           python3 -B tests/tools/product_goals.py ci-run --suite native-rootless -- bash tests/tools/test-rootless.sh
@@ -71,7 +82,18 @@ jobs:
         run: mkdir -p build/tests/native build/tests/model build/python-cache
       - name: Install native prerequisites on GitHub-hosted runner
         run: |
-          python3 -B tests/tools/product_goals.py ci-run --suite apt-prerequisites -- bash -c 'sudo apt-get update -qq && sudo DEBIAN_FRONTEND=noninteractive apt-get install -y -qq build-essential liblz4-dev'
+          python3 -B tests/tools/product_goals.py ci-run --suite apt-prerequisites -- bash -c '
+            # Verify both installed package records and the required executables.
+            # Preinstalled runner packages need no network transaction.
+            if command -v cc >/dev/null 2>&1 &&
+               command -v c++ >/dev/null 2>&1 &&
+               command -v make >/dev/null 2>&1 &&
+               [ "$(dpkg-query -s build-essential liblz4-dev 2>/dev/null | grep -c "^Status: install ok installed$")" = 2 ]; then
+              exit 0
+            fi
+            sudo apt-get update -qq &&
+            sudo DEBIAN_FRONTEND=noninteractive apt-get install -y -qq build-essential liblz4-dev
+          '
       - name: Run synthetic CI diagnostics and Make interface regression
         run: python3 -B tests/tools/product_goals.py ci-run --suite make-interface -- python3 -B tests/runtime/native/make-interface-test.py -v
       - name: Run standalone CI failure-attribution regression
