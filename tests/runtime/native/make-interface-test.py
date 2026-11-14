@@ -47,6 +47,20 @@ class PublicMakeContract(unittest.TestCase):
         self.assertIn('"$$script_exit_status"', recipe)
         self.assertNotIn("script_exit_status=$?;", recipe)
 
+    def test_trial_ownership_fixture_runs_in_native_userspace(self):
+        # CI must execute the private-helper mock fixture, not merely compile
+        # it or list it in an unexecuted documentation handoff.
+        suites = (ROOT / "tests/suites/Makefile").read_text()
+        recipe = suites.split("test-userspace:", 1)[1].split(
+            "\ntest-replay-helper:", 1)[0]
+        invocation = ('python3 -B "$(NATIVE)/userspace/'
+                      'swapzctl-trial-ownership-test.py" -q')
+        self.assertEqual(recipe.count(invocation), 1)
+        self.assertIn("'swapzctl-trial-ownership-test.py' "
+                      '"$script_exit_status"', recipe)
+        self.assertIn("if " + invocation + "; then :; else", recipe)
+
+
     def test_build_provenance_skips_report_only_commits(self):
         self.assertIn(
             "git log -1 --format=%H HEAD -- . "

@@ -21,7 +21,7 @@ A valid mapper name, existing DM table, healthy INFO counters or active Linux sw
 | **swapzctl health NAME** | Validated kernel failed/error state | No independent I/O liveness proof |
 | **swapzctl diagnose NAME** | Read-only diagnosis and safe next step | No automated stop/recovery |
 
-The read-only commands accept **--json**. Name-selecting commands require an exact DM mapping name, not a raw block-device path or prefix. Command-specific help is side-effect-free. Proposed **--watch**, **--bytes** and **--no-headers** flags are **not supported yet**; do not use them in automation.
+The read-only commands accept **--json**. Name-selecting commands require an exact DM mapping name, not a raw block-device path or prefix. Command-specific help is side-effect-free. Human-readable views accept **--bytes** for exact decimal byte totals, and `list` additionally accepts **--no-headers** for scripting. These two human-view flags cannot be combined with **--json**. Continuous **--watch** sampling is not yet supported.
 
 Successful validated DM observations are read-only; some DM ioctl reads require CAP_SYS_ADMIN. An error suppresses the validated numeric report rather than escalating privileges or issuing a mutating ioctl. The existing snapshot logic bounds allocations, verifies Device Mapper wire records, compares two complete INFO observations and validates a final device list. This detects observed drift, but no combination of those ioctls is atomic across the whole host.
 
@@ -66,12 +66,14 @@ observation; a failed collection must not be converted into an empty array.
 missing. The name selector cannot contain `/` or be empty, and matching
 is exact, never prefix-based.
 
-Supported syntax is `status [--json]`, `list [--json]`,
-`inspect NAME [--json]`, `stats NAME [--json]`,
-`health NAME [--json]`, `diagnose NAME [--json]`,
+Supported syntax is `status [--json|--bytes]`,
+`list [--json|--bytes] [--no-headers]`,
+`inspect NAME [--json|--bytes]`, `stats NAME [--json|--bytes]`,
+`health NAME [--json|--bytes]`, `diagnose NAME [--json|--bytes]`,
 `help [COMMAND]`, `version` and the guarded
 `primary plan|qualification-import REPORT|prepare|start|stop|recover`
-family. `--watch`, `--bytes`, `--no-headers`, and automatic
+family. For `list`, `--no-headers` can be used alone or with
+`--bytes`, **never with `--json`**. `--watch` and automatic
 development-mapper stop/recovery are **PROPOSED, NOT SHIPPED**.
 
 
@@ -168,6 +170,7 @@ Typical read-only checks:
     swapzctl list
     swapzctl status
     swapzctl list --json
+    swapzctl list --bytes --no-headers
     swapon --show
     cat /proc/swaps
     dmsetup info

@@ -10,9 +10,12 @@ non-COMPLETE state, fail-closed marker retention/recreation errors, and duplicat
 DM name/UUID inventory rows. Use only temporary records and mocked kernel
 operations. In particular, a visible new state after a failed directory fsync
 is **not** a successful durable transition; an absent marker after failed
-retention is not a new ownership grant. This test is standalone, not yet
-integrated into `tests/suites/Makefile test-userspace`, and must not be
-presented as a passing CI test without direct execution evidence.
+retention is not a new ownership grant. The rootless `tests/suites/Makefile test-userspace` recipe must execute
+this fixture once after the native test binaries and primary late-race
+regression, with a nonzero exit retaining the original script name and
+exit status. The `make-interface-test.py` contract checks registration;
+an independently successful CI run establishes only execution of these
+mocked cases, not loaded/physical recovery qualification.
 
 ## Staged rootless swapzctl watch regression (2026-11-14)
 
@@ -56,7 +59,10 @@ replacement. This fixture does not execute Linux swap commands, touch a real
 block device, or grant `swapzctl` lifecycle authority. A passing result is
 parsing/transition evidence only; same-boot device custody, loaded/physical
 qualification and cross-process delegation require independent review.
-See `docs/handoff/swapzctl-trial-ownership-audit.md`.
+See `docs/handoff/swapzctl-trial-ownership-audit.md`. Direct-main
+integration must not authorize `swapzctl stop` or `recover` for a
+development mapper. An unverified owner marker, state directory, boot ID,
+module identity or Device Mapper incarnation remains a release blocker.
 
 ## swapzctl rootless observability qualification (2026-11-14)
 

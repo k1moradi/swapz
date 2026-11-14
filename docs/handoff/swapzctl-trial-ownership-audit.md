@@ -103,11 +103,11 @@ reader may interpret marker absence in this window as authorization.
    currently executing helper file or loaded module bytes against those
    records. The verified DM name/UUID/table is not an unforgeable mapper
    incarnation token.
-4. The standalone fixture is **not** invoked by `tests/suites/Makefile
-   test-userspace`; direct `python3 -B ... -v` execution is required.
-   Existing CI cannot be reported as having executed this new matrix.
-   An integration owner must wire it into supported rootless testing
-   without racing another agent's owned Makefile/test paths.
+4. The fixture was **initially standalone** and was not executed by the
+   older native CI runs. Its later integration into `tests/suites/Makefile
+   test-userspace` runs these mocked cases on subsequent exact-source CI;
+   historical results cannot be retroactively relabeled. The rootless
+   suite does not authenticate real owner journals or validate live swap.
 
 No automatic `swapzctl` delegation is justified by these tests. The existing
 private helper's own recovery is still the sole conditional recovery path,
