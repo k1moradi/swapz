@@ -30,6 +30,21 @@ rootless *parsing* evidence, not current-host swap ownership or true
 physical-media qualification. Do not treat `not_observed` as authenticated
 inactivity if a kernel-retained pathname is hidden by an overmount.
 
+
+The JSON observation fixture must deserialize empty, single-device and
+multi-device output using an independent Python standard-library JSON parser,
+not substring matching alone. Mapper identity must survive punctuation,
+quotes, backslashes, control bytes and valid UTF-8; distinct invalid byte
+sequences must never collapse onto the same JSON name. The expected child
+decoder failure is quiet, with a single bounded fail-only diagnostic emitted
+by the native regression.
+
+The synthetic Linux swap FILE* corpus must also cover the canonical signed
+priority interval [-32768, 32767], reject noncanonical and out-of-range
+priorities, malformed column headers, oversized records and KiB arithmetic
+overflow, and retain nonmatching character devices and swapfile entries as
+advisory observations rather than proof of inactivity.
+
 ## Automatic abandoned benchmark resource recovery
 
 The benchmark producer records a separate root-only creation proof before

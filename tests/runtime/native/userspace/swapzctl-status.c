@@ -8,6 +8,7 @@
 #include <assert.h>
 #include <stdarg.h>
 #include <stdio.h>
+#include <sys/wait.h>
 
 enum fake_dm_ioctl_behavior {
 	FAKE_DM_IOCTL_DISABLED,
@@ -2365,6 +2366,185 @@ static void test_swapz_linux_swap_inventory_parser(void)
 }
 
 
+
+/*
+ * Independent Python JSON decoder: complete syntax and identity checks, not
+ * substring matching. All mapper identities below are synthetic.
+ */
+static void test_swapz_json_identity_and_document_framing(void)
+{
+	const char *const names[] = {
+		"ordinary", "quote\"name", "back\\slash", "line\nbreak",
+		"utf8-\xc3\xa9", "invalid-\xff", "invalid-_", "slash/name"
+	};
+	struct status_ready_target targets[sizeof(names) / sizeof(names[0])] = { 0 };
+	struct status_ready_report report = {
+		.targets = targets, .capacity = sizeof(targets) / sizeof(targets[0])
+	};
+	const size_t device_counts[] = { 0U, 1U, sizeof(targets) / sizeof(targets[0]) };
+	const char *const decoder =
+		"import json,os,sys,urllib.parse\n"
+		"document=json.load(sys.stdin)\n"
+		"count=int(sys.argv[1])\n"
+		"assert document['schema_version']==1 and document['command']=='list'\n"
+		"devices=document['devices']\n"
+		"assert len(devices)==count\n"
+		"names=[device['name'] for device in devices]\n"
+		"assert all(name.isascii() for name in names)\n"
+		"decoded=[urllib.parse.unquote_to_bytes(name) for name in names]\n"
+		"assert decoded[:5]==[os.fsencode(name) for name in sys.argv[2:2+min(count,5)]]\n"
+		"assert len(set(decoded))==len(decoded)\n"
+		"assert all(device['ownership']=='unverified' for device in devices)\n";
+	size_t index;
+
+	for (index = 0; index < sizeof(targets) / sizeof(targets[0]); ++index) {
+		size_t name_length = strlen(names[index]);
+
+		assert(name_length < sizeof(targets[index].name));
+		memcpy(targets[index].name, names[index], name_length + 1U);
+		targets[index].device_id = makedev(253, (unsigned int)index + 1U);
+		targets[index].sector_length = 8192U;
+	}
+	for (index = 0; index < sizeof(device_counts) / sizeof(device_counts[0]);
+	     ++index) {
+		FILE *capture = tmpfile();
+		int saved_stdout = dup(STDOUT_FILENO);
+		char count_text[16];
+		pid_t decoder_pid;
+		int decoder_status = 0;
+		int printed;
+
+		assert(capture && saved_stdout >= 0);
+		report.count = device_counts[index];
+		assert(snprintf(count_text, sizeof(count_text), "%zu",
+				report.count) > 0);
+		fflush(stdout);
+		assert(dup2(fileno(capture), STDOUT_FILENO) >= 0);
+		printed = swapz_print_view(&report, SWAPZ_VIEW_LIST, NULL, 1);
+		fflush(stdout);
+		assert(dup2(saved_stdout, STDOUT_FILENO) >= 0);
+		close(saved_stdout);
+		assert(printed == 0);
+		rewind(capture);
+		decoder_pid = fork();
+		assert(decoder_pid >= 0);
+		if (decoder_pid == 0) {
+			int quiet_output = open("/dev/null", O_WRONLY | O_CLOEXEC);
+
+			if (quiet_output < 0 ||
+			    dup2(fileno(capture), STDIN_FILENO) < 0 ||
+			    dup2(quiet_output, STDOUT_FILENO) < 0 ||
+			    dup2(quiet_output, STDERR_FILENO) < 0)
+				_exit(127);
+			close(quiet_output);
+			execlp("python3", "python3", "-c", decoder, count_text,
+			       names[0], names[1], names[2], names[3], names[4],
+			       (char *)NULL);
+			_exit(127);
+		}
+		while (waitpid(decoder_pid, &decoder_status, 0) < 0) {
+			if (errno != EINTR) {
+				fprintf(stderr,
+					"FAIL: JSON decoder wait case=%zu errno=%d\n",
+					index, errno);
+				abort();
+			}
+		}
+		if (!WIFEXITED(decoder_status) || WEXITSTATUS(decoder_status) != 0) {
+			fprintf(stderr,
+				"FAIL: JSON parser/name identity case=%zu count=%zu status=%d\n",
+				index, report.count, decoder_status);
+			abort();
+		}
+		assert(fclose(capture) == 0);
+	}
+}
+
+/* Injected FILE* procfs inventory; no real swap or block-device operation. */
+static void test_swapz_linux_swap_inventory_adversarial_records(void)
+{
+	const struct {
+		const char *label;
+		const char *inventory;
+		int valid;
+	} cases[] = {
+		{ "minimum-priority", "Filename\tType\tSize\tUsed\tPriority\n"
+		  "/dev/null partition 1 0 -32768\n", 1 },
+		{ "maximum-priority", "Filename\tType\tSize\tUsed\tPriority\n"
+		  "/dev/null partition 1 0 32767\n", 1 },
+		{ "priority-plus", "Filename\tType\tSize\tUsed\tPriority\n"
+		  "/dev/null partition 1 0 +1\n", 0 },
+		{ "priority-leading-zero", "Filename\tType\tSize\tUsed\tPriority\n"
+		  "/dev/null partition 1 0 01\n", 0 },
+		{ "priority-negative-zero", "Filename\tType\tSize\tUsed\tPriority\n"
+		  "/dev/null partition 1 0 -0\n", 0 },
+		{ "priority-too-high", "Filename\tType\tSize\tUsed\tPriority\n"
+		  "/dev/null partition 1 0 32768\n", 0 },
+		{ "priority-too-low", "Filename\tType\tSize\tUsed\tPriority\n"
+		  "/dev/null partition 1 0 -32769\n", 0 },
+		{ "forged-header", "Filename\tWrong\tSize\tUsed\tPriority\n", 0 },
+		{ "forged-prefix", "FilenameOther\tType\tSize\tUsed\tPriority\n", 0 },
+		{ "missing-header-newline", "Filename\tType\tSize\tUsed\tPriority", 0 },
+		{ "empty-inventory", "Filename\tType\tSize\tUsed\tPriority\n", 1 },
+		{ "duplicate-character-not-mapper",
+		  "Filename\tType\tSize\tUsed\tPriority\n"
+		  "/dev/null partition 2 1 -1\n"
+		  "/dev/null partition 2 1 -1\n", 1 },
+		{ "relative-path", "Filename\tType\tSize\tUsed\tPriority\n"
+		  "relative-path partition 2 1 -1\n", 1 },
+		{ "swapfile", "Filename\tType\tSize\tUsed\tPriority\n"
+		  "/dev/null file 2 1 -1\n", 1 },
+		{ "maximum-safe-kib", "Filename\tType\tSize\tUsed\tPriority\n"
+		  "/dev/null partition 18014398509481983 0 -1\n", 1 },
+		{ "kib-overflow", "Filename\tType\tSize\tUsed\tPriority\n"
+		  "/dev/null partition 18014398509481984 0 -1\n", 0 }
+	};
+	struct status_ready_target target = {
+		.name = "fixture", .device_id = makedev(253, 9), .sector_length = 8192
+	};
+	const struct status_ready_report report = {
+		.targets = &target, .count = 1, .capacity = 1
+	};
+	size_t index;
+
+	for (index = 0; index < sizeof(cases) / sizeof(cases[0]); ++index) {
+		struct swapz_linux_swap observation = { .state = "not_observed" };
+		FILE *inventory = tmpfile();
+		int result;
+
+		assert(inventory);
+		assert(fputs(cases[index].inventory, inventory) >= 0);
+		rewind(inventory);
+		result = swapz_read_linux_swap(inventory, &report, &observation);
+		if ((result == 0) != cases[index].valid) {
+			fprintf(stderr,
+				"FAIL: procfs case=%s expected_valid=%d actual_valid=%d\n",
+				cases[index].label, cases[index].valid, result == 0);
+			abort();
+		}
+		assert(!observation.has_usage);
+		assert(!strcmp(observation.state, "not_observed"));
+		assert(fclose(inventory) == 0);
+	}
+	{
+		char long_record[4096 + 80];
+		struct swapz_linux_swap observation = { .state = "not_observed" };
+		FILE *inventory = tmpfile();
+
+		assert(inventory);
+		memset(long_record, 'x', sizeof(long_record));
+		long_record[0] = '/';
+		long_record[sizeof(long_record) - 2U] = '\n';
+		long_record[sizeof(long_record) - 1U] = '\0';
+		assert(fputs("Filename\tType\tSize\tUsed\tPriority\n", inventory) >= 0);
+		assert(fputs(long_record, inventory) >= 0);
+		rewind(inventory);
+		assert(swapz_read_linux_swap(inventory, &report, &observation) < 0);
+		assert(!observation.has_usage);
+		assert(fclose(inventory) == 0);
+	}
+}
+
 static void test_swapz_command_specific_help(void)
 {
 	char *list_help[] = { "swapzctl", "help", "list", NULL };
@@ -2472,6 +2652,8 @@ int main(void)
 	test_status_is_read_only();
 	test_swapz_observation_views();
 	test_swapz_linux_swap_inventory_parser();
+	test_swapz_linux_swap_inventory_adversarial_records();
+	test_swapz_json_identity_and_document_framing();
 	test_swapz_command_specific_help();
 	puts("PASS: swapzctl status compression-ratio accounting");
 	return 0;
