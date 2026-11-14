@@ -1730,13 +1730,12 @@ static int swapz_parse_swap_priority(const char *token, long *priority)
 	const char *digits = token;
 	const char *end;
 	unsigned long long magnitude;
-	unsigned long long limit = (unsigned long long)LONG_MAX;
+	/* Linux swap priorities are restricted to -32768..32767. */
 	const int negative = *token == '-';
+	const unsigned long long limit = negative ? 32768ULL : 32767ULL;
 
-	if (negative) {
+	if (negative)
 		++digits;
-		++limit; /* LONG_MIN has one additional representable magnitude. */
-	}
 	if (parse_unsigned_decimal(digits, limit, &end, &magnitude) < 0 ||
 	    *end != '\0' || (negative && !magnitude))
 		return -1;
