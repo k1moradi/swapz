@@ -70,14 +70,18 @@ module identity or Device Mapper incarnation remains a release blocker.
 
 The native-rootless CI reporter must accept only the producer-authenticated
 `swapzctl-status`, `swapzctl-watch`, `swapz-primary-policy` and
-`swapz-primary-mount-namespace` executable names under the
+`swapz-primary-mount-namespace` executable names, plus the
+`swapzctl-trial-ownership-test.py` script, under the
 `Makefile native and metadata` / `test-userspace` nonzero Make-exit-2
 envelope. It must preserve the binary name, first child exit, verified Make
 recipe failure category and retained private diagnostic location without
 exposing raw assertion operands. A forged phase, subtest, reason, exit or
 executable name must remain `UNKNOWN_FAILURE`, not borrow an earlier error.
 Keep these positive and adversarial cases in the hermetic
-`tests/runtime/native/ci-failure-diagnostics-test.py` suite.
+`tests/runtime/native/ci-failure-diagnostics-test.py` suite. The trial
+ownership fixture must retain a source-controlled script name and a private
+transcript when it fails; an unrecognized or forged filename, phase,
+subtest, reason or exit must remain `UNKNOWN_FAILURE`.
 
 
 The side-effect-free command-help regression invokes the public C dispatcher

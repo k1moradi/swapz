@@ -515,6 +515,7 @@ def diagnose_ci_failure(lines, exit_code, suite):
         r"subtest=(?P<subtest>[a-z0-9-]{1,64}|unavailable) "
         r"test=(?P<test>test_[A-Za-z0-9_]{1,96}|"
         r"swapz-primary-late-race-test[.]py|"
+        r"swapzctl-trial-ownership-test[.]py|"
         r"swapzctl-status|swapzctl-watch|swapz-primary-policy|"
         r"swapz-primary-mount-namespace|unavailable) "
         r"exit=(?P<exit>[0-9]{1,3}) "
@@ -579,9 +580,11 @@ def diagnose_ci_failure(lines, exit_code, suite):
         if rootless_match is not None and rootless_match.group("test") in (
                 "swapzctl-status", "swapzctl-watch",
                 "swapz-primary-policy",
-                "swapz-primary-mount-namespace"):
-            # The producer verifies these fixed binaries against its own
-            # test-userspace Make recipe. Reject cross-phase identity claims.
+                "swapz-primary-mount-namespace",
+                "swapzctl-trial-ownership-test.py"):
+            # The producer verifies these fixed binaries or the rootless
+            # ownership fixture against its test-userspace Make recipe.
+            # Reject cross-phase identity claims.
             if not (rootless_match.group("phase") ==
                     "Makefile native and metadata" and
                     rootless_match.group("subtest") == "test-userspace" and

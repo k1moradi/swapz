@@ -410,6 +410,53 @@ exec sleep 30
                                   rejected["first_error"])
                     self.assertNotIn(binary_name, rejected["test"])
 
+    def test_trial_ownership_fixture_failure_is_source_attributed(self):
+        # Producer must authenticate the actual test-userspace Make failure
+        # before the consumer accepts the fixed ownership-fixture filename.
+        makefile_lines = (ROOT / "tests/suites/Makefile").read_text(
+            encoding="utf-8").splitlines()
+        recipe_line = next(
+            line_number for line_number, line in enumerate(makefile_lines, 1)
+            if line.startswith("\t  if python3 -B \"$(NATIVE)/userspace/"
+                               "swapzctl-trial-ownership-test.py\""))
+        self.assertEqual(self.diagnostics._ci_make_recipe_owner(recipe_line),
+                         "test-userspace")
+        private_log = "build/tests/rootless-failure.Abc123xy/diagnostic.log"
+        marker = (
+            "FAIL: rootless phase=Makefile native and metadata "
+            "subtest=test-userspace test=swapzctl-trial-ownership-test.py "
+            "exit=2 reason=nonzero_exit phase_s=5 stage_s=5 "
+            "line=922 log=" + private_log)
+        lines = [
+            "FAIL: test_marker_substitution (__main__.TrialOwnershipTest)",
+            "FAIL: native test-userspace "
+            "script=swapzctl-trial-ownership-test.py exit=1",
+            f"make[1]: *** [Makefile:{recipe_line}: test-userspace] Error 2",
+            marker,
+        ]
+        validated = self.diagnostics.diagnose_ci_failure(
+            lines, 2, "native-rootless")
+        self.assertEqual(validated["category"], "RUNTIME_ASSERTION")
+        self.assertEqual(validated["test"],
+                         "swapzctl-trial-ownership-test.py")
+        self.assertEqual(validated["phase"], "Makefile native and metadata")
+        self.assertEqual(validated["rootless_private_log"], private_log)
+        self.assertNotIn("test_marker_substitution",
+                         json.dumps(validated))
+        for forged in (
+            marker.replace("subtest=test-userspace",
+                           "subtest=test-lower-io"),
+            marker.replace("test=swapzctl-trial-ownership-test.py",
+                           "test=private-script.py"),
+            marker.replace("reason=nonzero_exit",
+                           "reason=unittest_assertion"),
+            marker.replace("exit=2 reason=", "exit=1 reason="),
+        ):
+            with self.subTest(forged=forged):
+                result = self.diagnostics.diagnose_ci_failure(
+                    lines[:-1] + [forged], 2, "native-rootless")
+                self.assertEqual(result["category"], "UNKNOWN_FAILURE")
+
     def test_matched_errno_compiler_helper_and_signal_remain_distinct(self):
         marker = (
             "FAIL: rootless phase=package-dkms-test.py subtest=unavailable "
