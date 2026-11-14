@@ -193,6 +193,122 @@ static void test_ratio_snapshot_equality_covers_all_inputs(void)
 	assert(!ratio_status_equal(&first, &second));
 }
 
+
+/*
+ * The seven newer INFO counters are optional for the original read-only
+ * display, but all must be independently canonical before watch sampling.
+ * These are synthetic strings; they do not confer live-mapper provenance.
+ */
+static void build_watch_info_fixture(char *output, size_t capacity,
+				      size_t omitted_field, size_t replaced_field,
+				      const char *replacement_value)
+{
+	static const char *const keys[] = {
+		"logical_read", "physical_read", "physical_read_reqs",
+		"physical_write_reqs", "gc_read", "gc_read_reqs",
+		"gc_write_reqs"
+	};
+	static const char *const values[] = {
+		"4096", "8192", "5", "7", "4096", "2", "0"
+	};
+	static const char *const legacy =
+		"failed=0 error=0 logical_write=8192 physical_write=4096 "
+		"gc_write=0 compressed=2 raw=0 zero_elided=0 "
+		"bulk_mode=1 bulk_padding=0";
+	size_t used_length;
+	size_t index;
+	int rendered;
+
+	assert(output && capacity && omitted_field < 8U &&
+	       replaced_field < 8U);
+	rendered = snprintf(output, capacity, "%s", legacy);
+	assert(rendered > 0 && (size_t)rendered < capacity);
+	used_length = (size_t)rendered;
+	for (index = 0; index < sizeof(keys) / sizeof(keys[0]); ++index) {
+		if (index == omitted_field)
+			continue;
+		rendered = snprintf(output + used_length, capacity - used_length,
+				   " %s=%s", keys[index],
+				   index == replaced_field ? replacement_value :
+				   values[index]);
+		assert(rendered > 0 && (size_t)rendered < capacity - used_length);
+		used_length += (size_t)rendered;
+	}
+}
+
+static void test_optional_watch_info_counter_validation(void)
+{
+	static const struct {
+		size_t counter_index;
+		const char *invalid_value;
+		int expected_status;
+		const char *expected_field;
+	} adversarial[] = {
+		{ 0, "01", STATUS_BLOCKED, "logical_read" },
+		{ 1, "-1", STATUS_BLOCKED, "physical_read" },
+		{ 2, "+1", STATUS_BLOCKED, "physical_read_reqs" },
+		{ 3, "18446744073709551616", STATUS_BLOCKED,
+		  "physical_write_reqs" },
+		{ 4, "", STATUS_BLOCKED, "gc_read" },
+		{ 5, "2x", STATUS_BLOCKED, "gc_read_reqs" },
+		{ 6, "01", STATUS_BLOCKED, "gc_write_reqs" },
+		{ 4, "8193", STATUS_RETRY, "GC/lower read and request counters" },
+		{ 5, "6", STATUS_RETRY, "GC/lower read and request counters" },
+		{ 6, "8", STATUS_RETRY, "GC/lower read and request counters" }
+	};
+	struct swapz_ratio_status ratio;
+	struct status_problem problem = { 0 };
+	char status_text[1024];
+	size_t index;
+
+	build_watch_info_fixture(status_text, sizeof(status_text),
+				 SIZE_MAX, SIZE_MAX, NULL);
+	assert(parse_swapz_ratio_status_diagnostic(status_text, &ratio,
+						    &problem) == STATUS_READY);
+	assert(ratio.watch_counters_valid == 1);
+	assert(ratio.logical_read_bytes == 4096ULL);
+	assert(ratio.physical_read_bytes == 8192ULL);
+	assert(ratio.physical_read_requests == 5ULL);
+	assert(ratio.physical_write_requests == 7ULL);
+	assert(ratio.gc_read_bytes == 4096ULL);
+	assert(ratio.gc_read_requests == 2ULL);
+	assert(ratio.gc_write_requests == 0ULL);
+	assert(status_watch_counters_equal(&ratio, &ratio));
+
+	for (index = 0; index < 7U; ++index) {
+		struct swapz_ratio_status incomplete;
+
+		build_watch_info_fixture(status_text, sizeof(status_text),
+					 index, SIZE_MAX, NULL);
+		assert(parse_swapz_ratio_status_diagnostic(status_text, &incomplete,
+							    &problem) == STATUS_READY);
+		assert(!incomplete.watch_counters_valid);
+		assert(!status_watch_counters_equal(&ratio, &incomplete));
+	}
+	for (index = 0; index < sizeof(adversarial) / sizeof(adversarial[0]);
+	     ++index) {
+		build_watch_info_fixture(status_text, sizeof(status_text),
+					 SIZE_MAX, adversarial[index].counter_index,
+					 adversarial[index].invalid_value);
+		assert(parse_swapz_ratio_status_diagnostic(status_text, &ratio,
+							    &problem) ==
+		       adversarial[index].expected_status);
+		assert(problem.field &&
+		       !strcmp(problem.field, adversarial[index].expected_field));
+		assert(!ratio.watch_counters_valid ||
+		       adversarial[index].expected_status == STATUS_RETRY);
+	}
+	build_watch_info_fixture(status_text, sizeof(status_text),
+				 SIZE_MAX, SIZE_MAX, NULL);
+	assert(strlen(status_text) + sizeof(" logical_read=4096") <
+	       sizeof(status_text));
+	strcat(status_text, " logical_read=4096");
+	assert(parse_swapz_ratio_status_diagnostic(status_text, &ratio,
+						    &problem) == STATUS_BLOCKED);
+	assert(problem.field && !strcmp(problem.field, "logical_read"));
+	assert(problem.observed && strstr(problem.observed, "duplicate"));
+}
+
 static const char *const fixture_valid_status =
 	"logical_write=8192 physical_write=4096 gc_write=0 "
 	"compressed=2 raw=0 zero_elided=0 bulk_mode=1 bulk_padding=0 "
@@ -3066,7 +3182,9 @@ static void test_swapz_mixed_full_table_identity_guards(void)
 			    fixture.report.targets[0].target_index !=
 			    cases[index].swapz_target_index ||
 			    fixture.report.targets[0].mapper_sector_end !=
-			    (uint64_t)expected_target_count * 1024ULL) {
+			    (uint64_t)expected_target_count * 1024ULL ||
+			    fixture.report.targets[0].dm_table_target_count !=
+			    expected_target_count) {
 				fprintf(stderr,
 					"FAIL: stable full-table case=%s result=%d staged=%zu reads=%u\n",
 					cases[index].name, result, fixture.report.count,
@@ -3074,7 +3192,9 @@ static void test_swapz_mixed_full_table_identity_guards(void)
 				abort();
 			}
 			if (fixture.two_swapz_targets)
-				assert(fixture.report.targets[1].target_index == 1U);
+				assert(fixture.report.targets[1].target_index == 1U &&
+				       fixture.report.targets[1].dm_table_target_count ==
+				       expected_target_count);
 			/*
 			 * Crucial watch-admission negative control: for the mixed
 			 * swapz+linear table, ready_count=1 and index=0 despite the
@@ -3120,6 +3240,7 @@ int main(void)
 	test_missing_or_overflowing_fields_fail();
 	test_failed_target_refuses_ratio();
 	test_ratio_snapshot_equality_covers_all_inputs();
+	test_optional_watch_info_counter_validation();
 	test_unsigned_decimal_parser_bounds();
 	test_required_tokens_duplicates_and_canonical_numbers();
 	test_checked_counter_arithmetic();

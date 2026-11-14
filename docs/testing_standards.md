@@ -122,6 +122,25 @@ when the original Make failure line is independently verified. Raw child
 unittest headers remain private; without the Make proof or valid final
 rootless marker, CI must retain `UNKNOWN_FAILURE`.
 
+### Canonical watch INFO parsing and complete-table count retention
+
+Keep the existing rootless `swapzctl-status.c` fixture bound to the current
+`status_ready_target.dm_table_target_count` output from the full DM table,
+not a filtered swapz-only report count. Require exact values for stable
+one-target, mixed linear/swapz (both orders), and two-swapz fixtures;
+this information remains read-only observation rather than an independently
+authenticated table-generation or mapper-lifetime identity.
+
+The seven optional INFO keys (`logical_read`, `physical_read`,
+`physical_read_reqs`, `physical_write_reqs`, `gc_read`, `gc_read_reqs`,
+`gc_write_reqs`) must parse as canonical bounded unsigned integers.
+Only a complete valid set may set `watch_counters_valid`; omitting any
+one must preserve legacy STATUS_READY display but make watch invalid.
+Duplicate, empty, signed, noncanonical, overflow and suffixed values must
+fail closed with source-specific diagnostics. GC read bytes/requests and
+GC write requests exceeding the relevant total lower I/O must retry,
+not publish a complete watch-ready snapshot. These synthetic strings
+never imply a qualified public watch sampler or live-device rates.
 ### Complete DM-table cardinality and identity barriers for a future watch adapter
 
 The `swapzctl-status.c` native fixture must exercise stable one-target,
