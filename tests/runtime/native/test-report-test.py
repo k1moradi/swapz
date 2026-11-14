@@ -1107,6 +1107,28 @@ class NativeTimingContract(unittest.TestCase):
                     self.assertNotIn("physical_qualification",
                                      report_snapshots[0])
 
+    def test_interactive_qualification_table_disables_focus_reporting(self):
+        """xterm focus-in/out events must not echo as ^[[I/^[[O in rows."""
+        class InteractiveCapture(io.StringIO):
+            def isatty(self):
+                return True
+
+        interactive_output = InteractiveCapture()
+        with mock.patch.object(runner.sys, "stdin", InteractiveCapture()), \
+                mock.patch.object(runner.sys, "stdout", interactive_output):
+            runner.QualificationProgressTable()
+        self.assertTrue(interactive_output.getvalue().startswith(
+            "\x1b[?1004l  Unified qualification results"))
+        self.assertEqual(interactive_output.getvalue().count("\x1b[?1004l"), 1)
+
+        redirected_output = io.StringIO()
+        with mock.patch.object(runner.sys, "stdin", io.StringIO()), \
+                mock.patch.object(runner.sys, "stdout", redirected_output):
+            runner.QualificationProgressTable()
+        self.assertNotIn("\x1b", redirected_output.getvalue())
+        self.assertTrue(redirected_output.getvalue().startswith(
+            "  Unified qualification results"))
+
     def test_unified_progress_table_has_one_header_and_global_ids(self):
         captured = io.StringIO()
         stages = [(name, ["unused"]) for name in runner.OFFICIAL_STAGE_NAMES]
