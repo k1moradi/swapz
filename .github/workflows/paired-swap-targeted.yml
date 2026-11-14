@@ -1,0 +1,31 @@
+name: Paired swap targeted rootless verification
+on:
+  push:
+    branches:
+      - ci/paired-raw-swap-contracts-20261114
+permissions:
+  contents: read
+jobs:
+  raw-vs-swapz-contracts:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - name: Compile Python source
+        run: |
+          python3 -B - <<'PY'
+          import ast
+          from pathlib import Path
+          for name in (
+              "tests/tools/algorithm-physical.py",
+              "tests/tools/physical-swap-probe.py",
+              "tests/tools/qualify-primary-real-swap.py",
+              "tests/runtime/native/physical-swap-probe-test.py",
+              "tests/runtime/native/primary-real-swap-test.py",
+          ):
+              ast.parse(Path(name).read_text(encoding="utf-8"), filename=name)
+          PY
+      - name: Test raw evidence and PSI contracts
+        run: python3 -B tests/runtime/native/primary-real-swap-test.py -k raw_comparison -v
+      - name: Test guarded raw activation and block statistics
+        run: python3 -B tests/runtime/native/physical-swap-probe-test.py -k paired -v
