@@ -166,11 +166,11 @@ dedicated 250ms read-only sampler thread rather than the workload guard. This
 prevents a blocked guard/identity query from suppressing device-stat samples.
 Samples remain opportunistic under host scheduling pressure; actual monotonic
 timestamps, bounded last-256 storage, thread-stop status and failure flag
-appear in root-owned results. Both threads are explicitly stopped and joined
-before phase transition, any swapoff, or recovery. An otherwise successful
+appear in root-owned results. Each phase signals its thread to stop and attempts a bounded two-second
+join before phase transition or recovery. An otherwise successful
 paired trial refuses failed or unjoined monitoring; a workload failure remains
-the primary error. Threads only read /sys/dev/block/*/stat and never mutate
-swap, invoke subprocesses, or perform recovery. These block-stat observations
+the primary error. A delayed, unjoined thread can finish a read later, but
+cannot mutate swap, invoke subprocesses, or perform recovery. These block-stat observations
 are not per-request WRITE latency.
 
 ## Real-partition architecture preflight
