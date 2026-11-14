@@ -1,0 +1,33 @@
+name: PSI gate diagnostics rootless regression
+on:
+  push:
+    branches: [ci/psi-gate-diagnostics-20261114]
+permissions:
+  contents: read
+jobs:
+  diagnostics:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 12
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Parse changed Python sources
+        run: |
+          python3 -B - <<'PY'
+          import ast
+          from pathlib import Path
+          for path in (
+              "tests/tools/qualify-primary-real-swap.py",
+              "tests/tools/physical-swap-probe.py",
+              "tests/runtime/native/primary-real-swap-test.py",
+              "tests/runtime/native/physical-swap-probe-test.py",
+          ):
+              ast.parse(Path(path).read_text(encoding="utf-8"), filename=path)
+          PY
+      - name: Primary real-swap rootless tests
+        run: python3 -B tests/runtime/native/primary-real-swap-test.py
+      - name: Physical probe rootless tests
+        run: python3 -B tests/runtime/native/physical-swap-probe-test.py
+      - name: Patch whitespace check
+        run: git diff --check b9a0eb32138a189eaac1c22df2a29f5141de7fec HEAD
