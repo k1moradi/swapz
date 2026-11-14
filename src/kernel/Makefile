@@ -103,11 +103,31 @@ all:
 		printf '#define SWAPZ_ALPHA_VERSION "%s"\n' "$$version" > "$$header" || \
 			fail_stage "$$?" version-write; \
 	fi
-	@$(MAKE) -C "$(KDIR)" M="$(SWAPZ_STAGE)" modules || { \
-		status=$$?; rm -f "$(SWAPZ_STAGE)/dm-swapz.ko"; \
-		printf 'FAIL_KERNEL_BUILD phase=Kbuild exit=%s\n' "$$status" >&2; \
-		exit "$$status"; \
-	}
+# Prefer the exact header-recorded compiler, never an unverified substitute.
+# Explicit CC and unmatched/missing compiler identities remain Kbuild's choice.
+	@set -eu; \
+	  kernel_compiler=; \
+	  if test "$(origin CC)" = default && \
+	     test -f "$(KDIR)/include/config/auto.conf"; then \
+	    recorded_compiler="$$(sed -n 's/^CONFIG_CC_VERSION_TEXT=//p' "$(KDIR)/include/config/auto.conf")"; \
+	    compiler_program="$${recorded_compiler%% *}"; \
+	    case "$$compiler_program" in \
+	      ""|*[!a-zA-Z0-9_+.-]*) ;; \
+	      *) if command -v "$$compiler_program" >/dev/null 2>&1 && \
+	            test "$$("$$compiler_program" --version 2>/dev/null | sed -n '1p')" = "$$recorded_compiler"; then \
+	           kernel_compiler="$$compiler_program"; \
+	         fi ;; \
+	    esac; \
+	  fi; \
+	  if test -n "$$kernel_compiler"; then \
+	    $(MAKE) -C "$(KDIR)" M="$(SWAPZ_STAGE)" CC="$$kernel_compiler" modules; \
+	  else \
+	    $(MAKE) -C "$(KDIR)" M="$(SWAPZ_STAGE)" modules; \
+	  fi || { \
+	    status=$$?; rm -f "$(SWAPZ_STAGE)/dm-swapz.ko"; \
+	    printf 'FAIL_KERNEL_BUILD phase=Kbuild exit=%s\n' "$$status" >&2; \
+	    exit "$$status"; \
+	  }
 
 clean:
 	@if test -d "$(SWAPZ_STAGE)" && test -f "$(KDIR)/Makefile"; then \

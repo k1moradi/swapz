@@ -13,6 +13,21 @@ predictor objects; arm64 with kernel-mode NEON links the isolated NEON object.
 These are backends inside the same module, not alternate research modules. The
 Device Mapper target is exactly `swapz`; the module alias is `dm-swapz`.
 
+For external-module Kbuild, an installed kernel header's
+CONFIG_CC_VERSION_TEXT may name a compiler such as
+x86_64-linux-gnu-gcc even when the default compiler is gcc of the
+same version. The module Makefile now selects the exact recorded command
+only if it exists and its first --version line matches the header record.
+Explicit CC and missing/different compilers retain native Kbuild checks;
+this never changes the userspace compiler.
+
+A warning that pahole differs (for example kernel 131, local 0) means the
+host BTF tooling does not match the kernel's build environment. Install a
+compatible pahole via the distribution dwarves package if BTF is required;
+verify the actual version. Skipping module BTF because vmlinux is missing
+requires the matching unstripped kernel vmlinux, not just dwarves. Do not
+fake a vmlinux or disable checking to conceal a mismatch.
+
 Normal artifacts live only under `build/`:
 
 - `build/kernel/experimental/dm-swapz.ko`: normal current-kernel build eligible for owned-RAM qualification.

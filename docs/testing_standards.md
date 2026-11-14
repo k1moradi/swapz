@@ -1,5 +1,17 @@
 # Testing Standards
 
+## Kernel-header compiler identity regression (2026-11-14)
+
+When CC is GNU Make's built-in default, the external-module Kbuild wrapper
+may select the compiler named by selected KDIR's CONFIG_CC_VERSION_TEXT only
+after verifying an executable basename on PATH and an exact first-line
+--version match. Missing, mismatched, unsafe names and explicit CC must retain
+the existing Kbuild selection and diagnostics. The synthetic,
+rootless test_kernel_compiler_matches_selected_headers_without_overriding_cc
+exercises all five cases against the actual staged module Makefile and a
+fake kernel Makefile, without compiling/loading a module or touching swap.
+
+
 ## Retained trial owner-release negative-path regression (2026-11-14)
 
 The integrated `swapzctl-trial-ownership-test.py` tests that a

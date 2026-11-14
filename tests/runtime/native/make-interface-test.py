@@ -700,6 +700,58 @@ class PublicMakeContract(unittest.TestCase):
                 compiler_log.read_text(encoding="utf-8").strip(),
                 "rule-only Makefile change reused stale native output")
 
+    def test_kernel_compiler_matches_selected_headers_without_overriding_cc(self):
+        """The fake kernel Makefile inspects CC; it never builds/loads a module."""
+        import os
+        import tempfile
+
+        build_tests = ROOT / "build/tests"
+        build_tests.mkdir(parents=True, exist_ok=True)
+        with tempfile.TemporaryDirectory(prefix="kernel-cc-", dir=build_tests) as directory:
+            fixture = pathlib.Path(directory)
+            source = fixture / "src/kernel"
+            headers = fixture / "headers"
+            config = headers / "include/config/auto.conf"
+            fake_bin = fixture / "bin"
+            source.mkdir(parents=True)
+            config.parent.mkdir(parents=True)
+            fake_bin.mkdir()
+            (source / "Makefile").write_text((ROOT / "src/kernel/Makefile").read_text())
+            (source / "VERSION").write_text("3.0.0-alpha.29\n")
+            (source / "dm-target.c").write_text("/* rootless fixture */\n")
+            (source / "swapz-build-info.h").write_text("/* rootless fixture */\n")
+            (headers / "Makefile").write_text(
+                ".PHONY: modules\nmodules:\n"
+                "\t@printf '%s\\n' '$(CC)' > '$(M)/selected-cc.txt'\n"
+                "\t@touch '$(M)/dm-swapz.ko'\n")
+            compiler = fake_bin / "swapz-fixture-gcc"
+            compiler.write_text(
+                "#!/bin/sh\nprintf '%s\\n' 'swapz-fixture-gcc (fixture) 1.0'\n")
+            compiler.chmod(0o755)
+            environment = os.environ.copy()
+            environment.pop("CC", None)
+            environment["PATH"] = str(fake_bin) + os.pathsep + environment.get("PATH", "")
+            selected = fixture / "build/kernel/experimental/selected-cc.txt"
+            for label, recorded, explicit, expected in (
+                ("exact match", "swapz-fixture-gcc (fixture) 1.0", None,
+                 "swapz-fixture-gcc"),
+                ("version mismatch", "swapz-fixture-gcc (fixture) 2.0", None, "cc"),
+                ("missing compiler", "swapz-missing-gcc (fixture) 1.0", None, "cc"),
+                ("unsafe path", "../swapz-fixture-gcc (fixture) 1.0", None, "cc"),
+                ("explicit override", "swapz-fixture-gcc (fixture) 1.0",
+                 "swapz-manual-cc", "swapz-manual-cc"),
+            ):
+                with self.subTest(case=label):
+                    config.write_text("CONFIG_CC_VERSION_TEXT=" + recorded + "\n")
+                    command = ["make", "-C", str(source), "KDIR=" + str(headers)]
+                    if explicit is not None:
+                        command.append("CC=" + explicit)
+                    result = subprocess.run(command, cwd=fixture,
+                                            env=environment, capture_output=True,
+                                            text=True, timeout=10)
+                    self.assertEqual(result.returncode, 0, result.stderr)
+                    self.assertEqual(selected.read_text().strip(), expected)
+
     def test_parallel_build_is_incremental_and_test_stages_stay_ordered(self):
         """Run the REAL root/extent Makefiles using a fake, unprivileged Kbuild.
 
