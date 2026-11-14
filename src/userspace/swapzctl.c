@@ -11,6 +11,7 @@
 #include <linux/dm-ioctl.h>
 #include <linux/fs.h>
 #include <limits.h>
+#include <inttypes.h>
 #include <stddef.h>
 #include <stdint.h>
 #include <stdio.h>
@@ -39,7 +40,8 @@
 
 static void usage(FILE *out)
 {
-	fputs("Usage: swapzctl version | status | help\n", out);
+	fputs("Usage: swapzctl version | status [--json] | list [--json] | help [command]\n", out);
+	fputs("       swapzctl inspect|stats|health|diagnose <mapper-name> [--json]\n", out);
 	fputs("       swapzctl primary plan|qualification-import <report>|"
 	      "prepare|start|stop|recover\n", out);
 	fputs("status reports cumulative committed foreground compression ratios "
@@ -113,6 +115,9 @@ struct dm_status_observation {
 struct status_ready_target {
 	char name[DM_NAME_LEN];
 	unsigned int target_index;
+	uint64_t device_id;
+	uint64_t sector_start;
+	uint64_t sector_length;
 	struct swapz_ratio_status ratio;
 };
 
@@ -1318,7 +1323,7 @@ static int status_observations_equal(
 
 static int status_append_ready_target(
 	struct status_ready_report *report, const char *name,
-	unsigned int target_index, const struct swapz_ratio_status *ratio)
+	unsigned int target_index, const struct swapz_target_snapshot *source)
 {
 	struct status_ready_target *grown;
 	size_t capacity;
@@ -1339,7 +1344,10 @@ static int status_append_ready_target(
 	}
 	memcpy(report->targets[report->count].name, name, strlen(name) + 1U);
 	report->targets[report->count].target_index = target_index;
-	report->targets[report->count].ratio = *ratio;
+	report->targets[report->count].device_id = source->device_id;
+	report->targets[report->count].sector_start = source->sector_start;
+	report->targets[report->count].sector_length = source->length;
+	report->targets[report->count].ratio = source->ratio;
 	++report->count;
 	return 0;
 }
@@ -1483,7 +1491,7 @@ static int report_device_status_with_reader(
 			const struct swapz_target_snapshot *entry = &first.targets[target];
 
 			if (entry->is_swapz &&
-			    status_append_ready_target(report, name, target, &entry->ratio) < 0) {
+			    status_append_ready_target(report, name, target, entry) < 0) {
 				struct status_problem allocation_problem = {
 					.field = "validated status results",
 					.expected = "bounded output inventory allocation",
@@ -1600,13 +1608,157 @@ out:
 	return result;
 }
 
+
+/*
+ * A display view is not an ownership claim. All commands below share the
+ * validated INFO/inventory collector; none resolves a name into cleanup
+ * authority, opens raw backing, or issues a mutating Device Mapper ioctl.
+ */
+enum swapz_view {
+	SWAPZ_VIEW_STATUS,
+	SWAPZ_VIEW_LIST,
+	SWAPZ_VIEW_INSPECT,
+	SWAPZ_VIEW_STATS,
+	SWAPZ_VIEW_HEALTH,
+	SWAPZ_VIEW_DIAGNOSE
+};
+
+static const char *swapz_view_name(enum swapz_view view)
+{
+	switch (view) {
+	case SWAPZ_VIEW_STATUS: return "status";
+	case SWAPZ_VIEW_LIST: return "list";
+	case SWAPZ_VIEW_INSPECT: return "inspect";
+	case SWAPZ_VIEW_STATS: return "stats";
+	case SWAPZ_VIEW_HEALTH: return "health";
+	case SWAPZ_VIEW_DIAGNOSE: return "diagnose";
+	}
+	return "unknown";
+}
+
+static int swapz_target_capacity_bytes(const struct status_ready_target *target,
+				       unsigned long long *capacity)
+{
+	if (target->sector_length > ULLONG_MAX / 512ULL)
+		return -1;
+	*capacity = target->sector_length * 512ULL;
+	return 0;
+}
+
+static int swapz_print_view(const struct status_ready_report *report,
+			    enum swapz_view view, const char *selected_name,
+			    int json)
+{
+	size_t index;
+	size_t matches = 0;
+
+	/* Verify selection and capacity before any output, including a JSON prefix. */
+	for (index = 0; index < report->count; ++index) {
+		const struct status_ready_target *target = &report->targets[index];
+		unsigned long long capacity;
+
+		if (selected_name && strcmp(target->name, selected_name))
+			continue;
+		if (swapz_target_capacity_bytes(target, &capacity) < 0) {
+			fprintf(stderr, "swapzctl %s: BLOCKED: target capacity overflow\n",
+				swapz_view_name(view));
+			return 1;
+		}
+		++matches;
+	}
+	if (selected_name && !matches) {
+		fprintf(stderr,
+			"swapzctl %s: UNAVAILABLE: no validated swapz target with that exact mapper name; no control action attempted\n",
+			swapz_view_name(view));
+		return 1;
+	}
+	if (json) {
+		/* Mapping names are reduced to ASCII-safe, JSON-safe characters. */
+		printf("{\"schema_version\":1,\"command\":\"%s\",\"devices\":[",
+		       swapz_view_name(view));
+	} else if (view == SWAPZ_VIEW_LIST && matches) {
+		puts("MAPPER  TARGET  DM_DEV  CAPACITY_BYTES  HEALTH");
+	} else if (!matches) {
+		puts("swapz targets: none");
+	}
+	for (index = 0; index < report->count; ++index) {
+		const struct status_ready_target *target = &report->targets[index];
+		char safe_name[DM_NAME_LEN + 1U];
+		unsigned long long capacity;
+		unsigned int device_major;
+		unsigned int device_minor;
+
+		if (selected_name && strcmp(target->name, selected_name))
+			continue;
+		status_safe_mapping_name(target->name, safe_name);
+		(void)swapz_target_capacity_bytes(target, &capacity);
+		device_major = major((dev_t)target->device_id);
+		device_minor = minor((dev_t)target->device_id);
+		if (json) {
+			printf("%s{\"name\":\"%s\",\"target_index\":%u,"
+			       "\"dm_major\":%u,\"dm_minor\":%u,"
+			       "\"sector_start\":%" PRIu64 ",\"sector_length\":%" PRIu64 ","
+			       "\"logical_capacity_bytes\":%llu,\"kernel_health\":\"ok\","
+			       "\"ownership\":\"unverified\","
+			       "\"lifetime\":{\"logical_write_bytes\":%llu,"
+			       "\"physical_write_bytes\":%llu,\"gc_write_bytes\":%llu,"
+			       "\"compressed_pages\":%llu,\"raw_pages\":%llu,"
+			       "\"zero_elided_pages\":%llu,"
+			       "\"compressed_extent_bytes_exact\":%s}}",
+			       matches == 0 ? "" : ",", safe_name, target->target_index,
+			       device_major, device_minor, target->sector_start,
+			       target->sector_length, capacity,
+			       target->ratio.logical_write_bytes,
+			       target->ratio.physical_write_bytes,
+			       target->ratio.gc_write_bytes,
+			       target->ratio.compressed_pages,
+			       target->ratio.raw_pages,
+			       target->ratio.zero_elided_pages,
+			       target->ratio.compressed_extent_ratio_exact ?
+			       "true" : "false");
+		} else if (view == SWAPZ_VIEW_LIST) {
+			printf("%s  %u  %u:%u  %llu  OK\n", safe_name,
+			       target->target_index + 1U, device_major, device_minor, capacity);
+		} else if (view == SWAPZ_VIEW_HEALTH) {
+			printf("%s target %u: OK (kernel failed=0, error=0); "
+			       "Linux swap activity and ownership not verified\n",
+			       safe_name, target->target_index + 1U);
+		} else if (view == SWAPZ_VIEW_DIAGNOSE) {
+			printf("%s target %u: INFO counters and Device Mapper identity "
+			       "validated; no kernel failure reported\n",
+			       safe_name, target->target_index + 1U);
+			puts("  Live swap usage and lifecycle ownership have not been proved.");
+			puts("  Safe next step: check /proc/swaps and the original "
+			     "owner journal; use only the existing verified helper for cleanup.");
+			puts("  Never run force dmsetup remove, raw mkswap, or blind swapoff.");
+		} else {
+			if (view == SWAPZ_VIEW_INSPECT) {
+				printf("Device Mapper: %s target %u, device %u:%u\n",
+				       safe_name, target->target_index + 1U,
+				       device_major, device_minor);
+				printf("  Logical sectors: start=%" PRIu64 " length=%" PRIu64
+				       " (capacity=%llu bytes)\n",
+				       target->sector_start, target->sector_length, capacity);
+				puts("  Ownership: unverified (a mapper name is not an owner journal)");
+				puts("  Backing identity and Linux swap state: not verified by INFO");
+			}
+			report_swapz_target(target->name, target->target_index, &target->ratio);
+		}
+		/* Used for the JSON delimiter without trusting report array gaps. */
+		--matches;
+	}
+	if (json)
+		puts("]}");
+	return 0;
+}
+
 static int status_control_open_flags(void)
 {
 	/* Status uses only DM_LIST_DEVICES and DM_TABLE_STATUS, never a mutation. */
 	return O_RDONLY | O_CLOEXEC;
 }
 
-static int status_targets(void)
+static int status_targets(enum swapz_view view, const char *selected_name, int json)
 {
 	struct status_ready_report report = { 0 };
 	int fd;
@@ -1628,16 +1780,8 @@ static int status_targets(void)
 		result = 1;
 	}
 	/* No numeric output until both INFO reads and the final inventory agree. */
-	if (!result) {
-		size_t index;
-
-		if (!report.count)
-			puts("swapz targets: none");
-		for (index = 0; index < report.count; ++index)
-			report_swapz_target(report.targets[index].name,
-					    report.targets[index].target_index,
-					    &report.targets[index].ratio);
-	}
+	if (!result)
+		result = swapz_print_view(&report, view, selected_name, json);
 	free(report.targets);
 	return result;
 }
@@ -1659,15 +1803,63 @@ int main(int argc, char **argv)
 		printf("swapzctl %s (EXPERIMENTAL)\n", SWAPZ_VERSION);
 		return 0;
 	}
-	if (argc == 2 && !strcmp(argv[1], "status")) {
+	if (argc >= 2) {
+		enum swapz_view view;
+		const char *selected_name = NULL;
+		int json = 0;
+
+		if (!strcmp(argv[1], "status"))
+			view = SWAPZ_VIEW_STATUS;
+		else if (!strcmp(argv[1], "list"))
+			view = SWAPZ_VIEW_LIST;
+		else if (!strcmp(argv[1], "inspect"))
+			view = SWAPZ_VIEW_INSPECT;
+		else if (!strcmp(argv[1], "stats"))
+			view = SWAPZ_VIEW_STATS;
+		else if (!strcmp(argv[1], "health"))
+			view = SWAPZ_VIEW_HEALTH;
+		else if (!strcmp(argv[1], "diagnose"))
+			view = SWAPZ_VIEW_DIAGNOSE;
+		else
+			goto unsupported;
+
+		if (view == SWAPZ_VIEW_STATUS || view == SWAPZ_VIEW_LIST) {
+			if (argc == 3 && !strcmp(argv[2], "--json"))
+				json = 1;
+			else if (argc != 2)
+				goto unsupported;
+		} else {
+			if (argc < 3 || argc > 4)
+				goto unsupported;
+			selected_name = argv[2];
+			if (!selected_name[0] ||
+			    strnlen(selected_name, DM_NAME_LEN) >= DM_NAME_LEN ||
+			    strchr(selected_name, '/'))
+				goto unsupported;
+			if (argc == 4) {
+				if (strcmp(argv[3], "--json"))
+					goto unsupported;
+				json = 1;
+			}
+		}
 		if (stat("/sys/module/dm_swapz", &info) == 0 &&
 		    S_ISDIR(info.st_mode)) {
-			puts("dm-swapz: loaded (experimental)");
-			return status_targets();
+			if (view == SWAPZ_VIEW_STATUS && !json)
+				puts("dm-swapz: loaded (experimental)");
+			return status_targets(view, selected_name, json);
 		}
-		puts("dm-swapz: not loaded (experimental)");
-		return 0;
+		if (view == SWAPZ_VIEW_STATUS && !json) {
+			puts("dm-swapz: not loaded (experimental)");
+			return 0;
+		}
+		if (view == SWAPZ_VIEW_LIST)
+			return json ? (puts("{\"schema_version\":1,\"command\":\"list\",\"devices\":[]}"), 0) :
+				(puts("swapz targets: none"), 0);
+		fprintf(stderr, "swapzctl %s: UNAVAILABLE: dm-swapz not loaded\n",
+			swapz_view_name(view));
+		return 1;
 	}
+unsupported:
 	usage(stderr);
 	fputs("BLOCKED: unsupported command; no mapper or swap activation performed.\n",
 	      stderr);
