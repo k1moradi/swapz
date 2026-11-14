@@ -2630,6 +2630,240 @@ static void test_swapz_command_specific_help(void)
 	fclose(capture);
 }
 
+
+/*
+ * Public human option output is exercised without a loaded DM module.
+ * No device descriptor, activation command or physical swap path is opened.
+ */
+struct swapz_test_view_call {
+	const struct status_ready_report *report;
+	enum swapz_view view;
+	const char *selected_name;
+	struct swapz_view_options options;
+};
+
+struct swapz_test_cli_call {
+	int argc;
+	char **argv;
+};
+
+static int swapz_test_invoke_view(void *context)
+{
+	const struct swapz_test_view_call *call = context;
+
+	return swapz_print_view_with_options(call->report, call->view,
+					      call->selected_name, &call->options);
+}
+
+static int swapz_test_invoke_cli(void *context)
+{
+	const struct swapz_test_cli_call *call = context;
+
+	return swapzctl_program_main(call->argc, call->argv);
+}
+
+static void swapz_test_read_stream(FILE *stream, char *output, size_t capacity)
+{
+	size_t count;
+
+	assert(capacity >= 2U);
+	rewind(stream);
+	count = fread(output, 1, capacity - 1U, stream);
+	assert(!ferror(stream));
+	output[count] = '\0';
+	/* Truncation would conceal a diagnostics or formatting regression. */
+	assert(fgetc(stream) == EOF);
+}
+
+static int swapz_test_capture_output(int (*invoke)(void *), void *context,
+				     char *standard_output, size_t output_capacity,
+				     char *standard_error, size_t error_capacity)
+{
+	FILE *output_capture = tmpfile();
+	FILE *error_capture = tmpfile();
+	int saved_stdout = dup(STDOUT_FILENO);
+	int saved_stderr = dup(STDERR_FILENO);
+	int result;
+
+	assert(output_capture && error_capture && saved_stdout >= 0 &&
+	       saved_stderr >= 0);
+	assert(fflush(stdout) == 0 && fflush(stderr) == 0);
+	assert(dup2(fileno(output_capture), STDOUT_FILENO) >= 0);
+	assert(dup2(fileno(error_capture), STDERR_FILENO) >= 0);
+	result = invoke(context);
+	assert(fflush(stdout) == 0 && fflush(stderr) == 0);
+	assert(dup2(saved_stdout, STDOUT_FILENO) >= 0);
+	assert(dup2(saved_stderr, STDERR_FILENO) >= 0);
+	assert(close(saved_stdout) == 0 && close(saved_stderr) == 0);
+	swapz_test_read_stream(output_capture, standard_output, output_capacity);
+	swapz_test_read_stream(error_capture, standard_error, error_capacity);
+	assert(fclose(output_capture) == 0 && fclose(error_capture) == 0);
+	return result;
+}
+
+static void test_swapz_human_option_views(void)
+{
+	struct status_ready_target targets[2] = {
+		{
+			.name = "fixture-one", .device_id = makedev(253, 7),
+			.sector_length = 8192, .mapper_sector_end = 8192,
+			.ratio = {
+				.logical_write_bytes = 16384,
+				.physical_write_bytes = 12288,
+				.gc_write_bytes = 4096,
+				.compressed_pages = 4,
+				.compressed_logical_bytes = 16384,
+				.compressed_extent_bytes = 8192,
+				.overall_physical_bytes = 8192,
+				.compressed_extent_ratio_exact = 1
+			}
+		},
+		{
+			.name = "fixture-two", .device_id = makedev(253, 8),
+			.sector_length = 16384, .mapper_sector_end = 16384
+		}
+	};
+	struct status_ready_report report = {
+		.targets = targets, .count = 0, .capacity = 2
+	};
+	struct swapz_test_view_call call = {
+		.report = &report, .view = SWAPZ_VIEW_LIST,
+		.options = { .no_headers = 1 }
+	};
+	char output[8192];
+	char diagnostic[1024];
+	int result;
+
+	/* Headerless empty lists must write exactly zero bytes. */
+	result = swapz_test_capture_output(swapz_test_invoke_view, &call,
+					   output, sizeof(output),
+					   diagnostic, sizeof(diagnostic));
+	assert(result == 0 && !output[0] && !diagnostic[0]);
+	report.count = 2;
+	result = swapz_test_capture_output(swapz_test_invoke_view, &call,
+					   output, sizeof(output),
+					   diagnostic, sizeof(diagnostic));
+	assert(result == 0 && !diagnostic[0]);
+	assert(strstr(output, "fixture-one  1  253:7  4194304"));
+	assert(strstr(output, "fixture-two  1  253:8  8388608"));
+	assert(!strstr(output, "MAPPER  TARGET"));
+	assert(!strstr(output, "swapz targets: none"));
+	call.options.no_headers = 0;
+	result = swapz_test_capture_output(swapz_test_invoke_view, &call,
+					   output, sizeof(output),
+					   diagnostic, sizeof(diagnostic));
+	assert(result == 0 && !diagnostic[0]);
+	assert(strstr(output, "MAPPER  TARGET  DM_DEV  MAPPER_BYTES"));
+
+	/* Exact decimal byte formatting must not round the retained counters. */
+	call.view = SWAPZ_VIEW_INSPECT;
+	call.selected_name = "fixture-one";
+	call.options.raw_bytes = 1;
+	result = swapz_test_capture_output(swapz_test_invoke_view, &call,
+					   output, sizeof(output),
+					   diagnostic, sizeof(diagnostic));
+	assert(result == 0 && !diagnostic[0]);
+	assert(strstr(output, "capacity=4194304 bytes"));
+	assert(strstr(output, "Byte columns: exact decimal bytes"));
+	assert(strstr(output, "Overall") && strstr(output, "16384"));
+	assert(strstr(output, "SWZ extents") && strstr(output, "8192"));
+	assert(strstr(output, "GC lower WRITEs: 4096 bytes"));
+	assert(strstr(output, "Ownership: unverified"));
+	assert(!strstr(output, "fixture-two"));
+	call.options.raw_bytes = 0;
+	result = swapz_test_capture_output(swapz_test_invoke_view, &call,
+					   output, sizeof(output),
+					   diagnostic, sizeof(diagnostic));
+	assert(result == 0 && !diagnostic[0]);
+	assert(strstr(output, "16.00 KiB") && strstr(output, "8.00 KiB"));
+	assert(!strstr(output, "Byte columns: exact decimal bytes"));
+
+	/* Invalid selections must publish neither a list prefix nor counters. */
+	call.view = SWAPZ_VIEW_STATS;
+	call.selected_name = "fixture";
+	call.options.raw_bytes = 1;
+	result = swapz_test_capture_output(swapz_test_invoke_view, &call,
+					   output, sizeof(output),
+					   diagnostic, sizeof(diagnostic));
+	assert(result != 0 && !output[0]);
+	assert(strstr(diagnostic, "no validated swapz target"));
+	call.view = SWAPZ_VIEW_INSPECT;
+	call.selected_name = "fixture-one";
+	strcpy(targets[1].name, "fixture-one");
+	result = swapz_test_capture_output(swapz_test_invoke_view, &call,
+					   output, sizeof(output),
+					   diagnostic, sizeof(diagnostic));
+	assert(result != 0 && !output[0]);
+	assert(strstr(diagnostic, "multiple swapz targets"));
+	strcpy(targets[1].name, "fixture-two");
+	targets[0].sector_length = UINT64_MAX;
+	result = swapz_test_capture_output(swapz_test_invoke_view, &call,
+					   output, sizeof(output),
+					   diagnostic, sizeof(diagnostic));
+	assert(result != 0 && !output[0]);
+	assert(strstr(diagnostic, "target capacity overflow"));
+}
+
+static void test_swapz_public_option_dispatch(void)
+{
+	struct {
+		const char *label;
+		int argc;
+		char *argv[7];
+	} invalid[] = {
+		{ "list-json-bytes", 4,
+		  { "swapzctl", "list", "--json", "--bytes", NULL } },
+		{ "list-json-no-headers", 4,
+		  { "swapzctl", "list", "--json", "--no-headers", NULL } },
+		{ "list-duplicate-no-headers", 4,
+		  { "swapzctl", "list", "--no-headers", "--no-headers", NULL } },
+		{ "list-duplicate-bytes", 4,
+		  { "swapzctl", "list", "--bytes", "--bytes", NULL } },
+		{ "status-no-headers", 3,
+		  { "swapzctl", "status", "--no-headers", NULL } },
+		{ "inspect-no-headers", 4,
+		  { "swapzctl", "inspect", "fixture", "--no-headers", NULL } },
+		{ "health-json-bytes", 5,
+		  { "swapzctl", "health", "fixture", "--json", "--bytes", NULL } },
+		{ "unknown-option", 3,
+		  { "swapzctl", "list", "--unknown", NULL } },
+		{ "watch-separate", 5,
+		  { "swapzctl", "stats", "fixture", "--watch", "1", NULL } },
+		{ "watch-attached", 4,
+		  { "swapzctl", "stats", "fixture", "--watch=1", NULL } },
+		{ "watch-list", 4,
+		  { "swapzctl", "list", "--watch", "1", NULL } },
+		{ "selected-path", 4,
+		  { "swapzctl", "inspect", "fixture/other", "--bytes", NULL } },
+		{ "selected-empty", 4,
+		  { "swapzctl", "inspect", "", "--json", NULL } }
+	};
+	char output[2048];
+	char diagnostic[2048];
+	unsigned int ioctl_calls = fake_dm_ioctl_calls;
+	size_t index;
+
+	/* All invalid forms refuse before probing a module or touching a mapper. */
+	for (index = 0; index < sizeof(invalid) / sizeof(invalid[0]); ++index) {
+		struct swapz_test_cli_call call = {
+			.argc = invalid[index].argc,
+			.argv = invalid[index].argv
+		};
+		int result = swapz_test_capture_output(swapz_test_invoke_cli, &call,
+						       output, sizeof(output),
+						       diagnostic, sizeof(diagnostic));
+
+		if (result != 2 || output[0] ||
+		    !strstr(diagnostic, "BLOCKED: unsupported") ||
+		    !strstr(diagnostic, "no mapper or swap activation performed") ||
+		    fake_dm_ioctl_calls != ioctl_calls) {
+			fprintf(stderr, "FAIL: public CLI option case=%s exit=%d\n",
+				invalid[index].label, result);
+			abort();
+		}
+	}
+}
+
 static void test_status_is_read_only(void)
 {
 	unsigned char *reply = NULL;
@@ -2693,6 +2927,8 @@ int main(void)
 	test_swapz_linux_swap_inventory_adversarial_records();
 	test_swapz_json_identity_and_document_framing();
 	test_swapz_command_specific_help();
+	test_swapz_human_option_views();
+	test_swapz_public_option_dispatch();
 	puts("PASS: swapzctl status compression-ratio accounting");
 	return 0;
 }

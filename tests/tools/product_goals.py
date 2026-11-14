@@ -750,6 +750,14 @@ def diagnose_ci_failure(lines, exit_code, suite):
                     first_make_failure[1] == rootless_failure["subtest"]):
                 causal_error = first_make_failure[0]
                 category = _ci_failure_category(causal_error, contract_suite)
+                if (category is None and
+                        rootless_failure["subtest"] == "test-userspace" and
+                        rootless_failure["test"] ==
+                        "swapzctl-trial-ownership-test.py"):
+                    # The producer authenticated this fixed Python fixture,
+                    # and the Make target's actual failing recipe line was
+                    # verified. Do not borrow any untrusted child traceback.
+                    category = "RUNTIME_ASSERTION"
             else:
                 causal_error = None
                 category = None

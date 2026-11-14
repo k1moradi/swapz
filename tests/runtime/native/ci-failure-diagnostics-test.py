@@ -443,6 +443,11 @@ exec sleep 30
         self.assertEqual(validated["rootless_private_log"], private_log)
         self.assertNotIn("test_marker_substitution",
                          json.dumps(validated))
+        # A forged filename or missing authenticated Make line cannot turn a
+        # private child assertion into a public causal classification.
+        unverifiable = self.diagnostics.diagnose_ci_failure(
+            [lines[0], lines[1], marker], 2, "native-rootless")
+        self.assertEqual(unverifiable["category"], "UNKNOWN_FAILURE")
         for forged in (
             marker.replace("subtest=test-userspace",
                            "subtest=test-lower-io"),

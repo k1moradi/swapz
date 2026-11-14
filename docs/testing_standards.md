@@ -86,6 +86,28 @@ module identity or Device Mapper incarnation remains a release blocker.
 
 ## swapzctl rootless observability qualification (2026-11-14)
 
+### Public CLI flag and staged watch option regressions
+
+The rootless `swapzctl-status.c` fixture must execute the production CLI
+dispatcher for unsupported `--json`/`--bytes`/`--no-headers` combinations,
+repeated flags, unsupported commands, invalid exact mapper selectors and
+both `--watch 1` and `--watch=1` while the watch engine is unlinked.
+Every refused command must fail before any Device Mapper ioctl, emit no
+stdout, and produce a bounded `BLOCKED` diagnostic on captured stderr.
+The validated formatter is independently exercised with empty and multiple
+synthetic targets: headerless empty lists print nothing; headerless populated
+lists preserve mapper byte capacity and unverified ownership; `--bytes`
+prints exact decimal counters without changing ratios, while the original
+human format retains IEC units. Unknown or multiply targeted names and
+overflowing sector capacity must refuse before output. All fixtures are
+rootless and must not infer a real `/proc/swaps` device identity.
+
+An authenticated `swapzctl-trial-ownership-test.py` failure in the
+source-controlled `test-userspace` Make recipe is a runtime regression only
+when the original Make failure line is independently verified. Raw child
+unittest headers remain private; without the Make proof or valid final
+rootless marker, CI must retain `UNKNOWN_FAILURE`.
+
 ### Native userspace first-failure reporting
 
 The native-rootless CI reporter must accept only the producer-authenticated
