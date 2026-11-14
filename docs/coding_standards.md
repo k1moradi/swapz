@@ -95,6 +95,33 @@ remain guarded against duplicate definitions when a generated header supplies
 both. The Make-interface regression must inspect the generated value, not only
 the fallback header.
 
+### swapzctl operator views and JSON fields (2026-11-14)
+
+`list` displays a compact read-only row per validated swapz target, including
+the actual Device Mapper major:minor identity, logical mapper extent,
+advisory observed Linux swap size/used/free/priority, kernel status and
+explicitly unverified lifecycle ownership. Unknown mapper geometry or Linux
+inventory fields use a dash in human output and JSON null; they must not be
+interpreted as a safe inactive state. `inspect` reports the validated target
+geometry, the DM LIST/INFO event generation and any bounded UUID returned
+by LIST, with the UUID percent-encoded by byte. None verifies backing or
+owner identity.
+
+Schema version 1 JSON preserves `name` as a reversible percent-byte encoded
+string with `name_encoding=percent_bytes`; untrusted bytes are never
+silently replaced. `dm_uuid`, `mapper_logical_capacity_bytes` and unavailable
+Linux inventory fields are explicit nulls. `linux_swap.provenance` labels
+the independent /proc/swaps pathname-stat observation, not an authoritative
+lifecycle proof. Lifetime `overall_foreground_ratio` and
+`compressed_extent_ratio` are represented by exact integer logical/lower
+bytes, or null when not justified. Never compute a compressed-only ratio when
+staged bulk padding obscures its denominator; zero-elision can produce a
+nonzero logical numerator and zero lower denominator. `io_liveness=unknown`
+is mandatory until independently attributable forward progress is verified.
+`health` distinguishes kernel failed/error success from Linux swap activity,
+forward progress and ownership; `diagnose` preserves the first source-bound
+failure and offers only nonmutating next steps.
+
 ### swapzctl read-only identity and error-path output (2026-11-14)
 
 The observer must percent-encode all unsafe Device Mapper mapper-name and

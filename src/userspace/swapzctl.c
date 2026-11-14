@@ -1845,6 +1845,18 @@ static int swapz_target_capacity_bytes(const struct status_ready_target *target,
 	return 0;
 }
 
+/* Logical mapper size is derived from every validated target, not just swapz. */
+static int swapz_mapper_capacity_bytes(const struct status_ready_target *target,
+				       unsigned long long *capacity)
+{
+	if (!target->mapper_sector_end)
+		return 1; /* Not provided by a synthetic/older observation. */
+	if (target->mapper_sector_end > ULLONG_MAX / 512ULL)
+		return -1;
+	*capacity = target->mapper_sector_end * 512ULL;
+	return 0;
+}
+
 static int swapz_print_view(const struct status_ready_report *report,
 			    enum swapz_view view, const char *selected_name,
 			    int json)
@@ -1858,10 +1870,12 @@ static int swapz_print_view(const struct status_ready_report *report,
 	for (index = 0; index < report->count; ++index) {
 		const struct status_ready_target *target = &report->targets[index];
 		unsigned long long capacity = 0;
+		unsigned long long mapper_capacity = 0;
 
 		if (selected_name && strcmp(target->name, selected_name))
 			continue;
-		if (swapz_target_capacity_bytes(target, &capacity) < 0) {
+		if (swapz_target_capacity_bytes(target, &capacity) < 0 ||
+		    swapz_mapper_capacity_bytes(target, &mapper_capacity) < 0) {
 			fprintf(stderr, "swapzctl %s: BLOCKED: target capacity overflow\n",
 				swapz_view_name(view));
 			return 1;
@@ -1889,18 +1903,22 @@ static int swapz_print_view(const struct status_ready_report *report,
 		swapz_observe_linux_swaps(report, linux_swaps);
 	}
 	if (json) {
-		/* Mapping names are reduced to ASCII-safe, JSON-safe characters. */
+		/* Mapper and UUID bytes are reversible percent-escaped identities. */
 		printf("{\"schema_version\":1,\"command\":\"%s\",\"devices\":[",
 		       swapz_view_name(view));
 	} else if (view == SWAPZ_VIEW_LIST && matches) {
-		puts("MAPPER  TARGET  DM_DEV  CAPACITY_BYTES  HEALTH");
+		puts("MAPPER  TARGET  DM_DEV  MAPPER_BYTES  SWAP_SIZE  USED  FREE  PRIO  KERNEL  OWNER");
 	} else if (!matches) {
 		puts("swapz targets: none");
 	}
 	for (index = 0; index < report->count; ++index) {
 		const struct status_ready_target *target = &report->targets[index];
 		char safe_name[SWAPZ_DM_ESCAPED_NAME_CAPACITY];
+		char safe_uuid[SWAPZ_DM_ESCAPED_UUID_CAPACITY] = { 0 };
+		char mapper_capacity_text[32] = "-";
 		unsigned long long capacity = 0;
+		unsigned long long mapper_capacity = 0;
+		int mapper_capacity_result;
 		unsigned int device_major;
 		unsigned int device_minor;
 
@@ -1908,50 +1926,119 @@ static int swapz_print_view(const struct status_ready_report *report,
 			continue;
 		status_safe_mapping_name(target->name, safe_name);
 		(void)swapz_target_capacity_bytes(target, &capacity);
+		mapper_capacity_result =
+			swapz_mapper_capacity_bytes(target, &mapper_capacity);
+		if (mapper_capacity_result == 0)
+			(void)snprintf(mapper_capacity_text, sizeof(mapper_capacity_text),
+				       "%llu", mapper_capacity);
+		if (target->has_dm_uuid)
+			status_escape_identity(target->dm_uuid, DM_UUID_LEN, safe_uuid);
 		device_major = major((dev_t)target->device_id);
 		device_minor = minor((dev_t)target->device_id);
 		if (json) {
-			printf("%s{\"name\":\"%s\",\"target_index\":%u,"
-			       "\"dm_major\":%u,\"dm_minor\":%u,"
+			printf("%s{\"name\":\"%s\",\"name_encoding\":\"percent_bytes\","
+			       "\"target_index\":%u,\"dm_major\":%u,\"dm_minor\":%u,"
+			       "\"dm_event_number\":%u,"
 			       "\"sector_start\":%" PRIu64 ",\"sector_length\":%" PRIu64 ","
-			       "\"logical_capacity_bytes\":%llu,\"kernel_health\":\"ok\","
-			       "\"ownership\":\"unverified\","
+			       "\"logical_capacity_bytes\":%llu,"
+			       "\"mapper_logical_capacity_bytes\":",
+			       emitted ? "," : "", safe_name, target->target_index,
+			       device_major, device_minor, target->event_number,
+			       target->sector_start, target->sector_length, capacity);
+			if (mapper_capacity_result == 0)
+				printf("%llu", mapper_capacity);
+			else
+				fputs("null", stdout);
+			fputs(",\"dm_uuid\":", stdout);
+			if (target->has_dm_uuid)
+				printf("\"%s\"", safe_uuid);
+			else
+				fputs("null", stdout);
+			printf(",\"kernel_health\":\"ok\",\"io_liveness\":\"unknown\","
+			       "\"ownership\":\"unverified\",\"backing_identity\":null,"
 			       "\"lifetime\":{\"logical_write_bytes\":%llu,"
 			       "\"physical_write_bytes\":%llu,\"gc_write_bytes\":%llu,"
 			       "\"compressed_pages\":%llu,\"raw_pages\":%llu,"
 			       "\"zero_elided_pages\":%llu,"
+			       "\"bulk_mode\":%llu,\"bulk_padding_blocks\":%llu,"
+			       "\"foreground_lower_write_bytes\":%llu,"
 			       "\"compressed_extent_bytes_exact\":%s},"
-			       "\"linux_swap\":{\"state\":\"%s\",\"size_bytes\":",
-			       emitted ? "," : "", safe_name, target->target_index,
-			       device_major, device_minor, target->sector_start,
-			       target->sector_length, capacity,
+			       "\"overall_foreground_ratio\":",
 			       target->ratio.logical_write_bytes,
 			       target->ratio.physical_write_bytes,
 			       target->ratio.gc_write_bytes,
 			       target->ratio.compressed_pages,
 			       target->ratio.raw_pages,
 			       target->ratio.zero_elided_pages,
+			       target->ratio.bulk_mode,
+			       target->ratio.bulk_padding_blocks,
+			       target->ratio.overall_physical_bytes,
 			       target->ratio.compressed_extent_ratio_exact ?
-			       "true" : "false", linux_swaps[index].state);
+			       "true" : "false");
+			/* Raw integer numerator/denominator avoid invented precision. */
+			if (target->ratio.logical_write_bytes)
+				printf("{\"logical_bytes\":%llu,\"lower_write_bytes\":%llu}",
+				       target->ratio.logical_write_bytes,
+				       target->ratio.overall_physical_bytes);
+			else
+				fputs("null", stdout);
+			fputs(",\"compressed_extent_ratio\":", stdout);
+			if (target->ratio.compressed_pages &&
+			    target->ratio.compressed_extent_ratio_exact)
+				printf("{\"logical_bytes\":%llu,\"lower_write_bytes\":%llu}",
+				       target->ratio.compressed_logical_bytes,
+				       target->ratio.compressed_extent_bytes);
+			else
+				fputs("null", stdout);
+			printf(",\"linux_swap\":{\"state\":\"%s\","
+			       "\"provenance\":\"proc_swaps_path_stat_advisory\","
+			       "\"size_bytes\":", linux_swaps[index].state);
 			if (linux_swaps[index].has_usage)
-				printf("%llu,\"used_bytes\":%llu,\"priority\":%ld}}",
+				printf("%llu,\"used_bytes\":%llu,\"free_bytes\":%llu,"
+				       "\"priority\":%ld}}",
 				       linux_swaps[index].size_bytes,
+				       linux_swaps[index].used_bytes,
+				       linux_swaps[index].size_bytes -
 				       linux_swaps[index].used_bytes,
 				       linux_swaps[index].priority);
 			else
-				fputs("null,\"used_bytes\":null,\"priority\":null}}", stdout);
+				fputs("null,\"used_bytes\":null,\"free_bytes\":null,"
+				      "\"priority\":null}}", stdout);
 		} else if (view == SWAPZ_VIEW_LIST) {
-			printf("%s  %u  %u:%u  %llu  OK\n", safe_name,
-			       target->target_index + 1U, device_major, device_minor, capacity);
+			char swap_size_text[32] = "-";
+			char used_text[32] = "-";
+			char free_text[32] = "-";
+			char priority_text[32] = "-";
+
+			if (linux_swaps[index].has_usage) {
+				(void)snprintf(swap_size_text, sizeof(swap_size_text), "%llu",
+					       linux_swaps[index].size_bytes);
+				(void)snprintf(used_text, sizeof(used_text), "%llu",
+					       linux_swaps[index].used_bytes);
+				(void)snprintf(free_text, sizeof(free_text), "%llu",
+					       linux_swaps[index].size_bytes -
+					       linux_swaps[index].used_bytes);
+				(void)snprintf(priority_text, sizeof(priority_text), "%ld",
+					       linux_swaps[index].priority);
+			}
+			printf("%s  %u  %u:%u  %s  %s  %s  %s  %s  ok  unverified\n",
+			       safe_name, target->target_index + 1U, device_major,
+			       device_minor, mapper_capacity_text, swap_size_text,
+			       used_text, free_text, priority_text);
 		} else if (view == SWAPZ_VIEW_HEALTH) {
-			printf("%s target %u: OK (kernel failed=0, error=0); "
-			       "Linux swap activity and ownership not verified\n",
-			       safe_name, target->target_index + 1U);
+			printf("%s target %u: kernel status OK (failed=0, error=0); "
+			       "Linux swap=%s (advisory); I/O forward progress=unknown; "
+			       "ownership=unverified\n",
+			       safe_name, target->target_index + 1U,
+			       linux_swaps[index].state);
 		} else if (view == SWAPZ_VIEW_DIAGNOSE) {
 			printf("%s target %u: INFO counters and Device Mapper identity "
 			       "validated; no kernel failure reported\n",
 			       safe_name, target->target_index + 1U);
-			puts("  Live swap usage and lifecycle ownership have not been proved.");
+			printf("  Linux swap observation: %s (advisory; independently "
+			       "sampled via /proc/swaps).\n", linux_swaps[index].state);
+			puts("  I/O forward progress, backing identity and lifecycle "
+			     "ownership remain unknown.");
 			puts("  Safe next step: check /proc/swaps and the original "
 			     "owner journal; use only the existing verified helper for cleanup.");
 			puts("  Never run force dmsetup remove, raw mkswap, or blind swapoff.");
@@ -1963,12 +2050,25 @@ static int swapz_print_view(const struct status_ready_report *report,
 				printf("  Logical sectors: start=%" PRIu64 " length=%" PRIu64
 				       " (capacity=%llu bytes)\n",
 				       target->sector_start, target->sector_length, capacity);
-				puts("  Ownership: unverified (a mapper name is not an owner journal)");
-				puts("  Backing identity and Linux swap state: not verified by INFO");
+				printf("  DM event generation: %u (verified across LIST and INFO)\n",
+				       target->event_number);
+				if (target->has_dm_uuid)
+					printf("  DM UUID (percent-encoded bytes): %s\n", safe_uuid);
+				else
+					puts("  DM UUID: unknown (not provided by DM_LIST_DEVICES)");
+				if (mapper_capacity_result == 0)
+					printf("  Mapper logical extent: %llu bytes\n",
+					       mapper_capacity);
+				else
+					puts("  Mapper logical extent: unknown");
+				puts("  Ownership: unverified (a mapper name/DM UUID is not an owner journal)");
+				puts("  Backing identity: unknown (INFO does not authenticate backing)");
+				puts("  I/O forward progress: unknown (single stable snapshot only)");
 			}
 			report_swapz_target(target->name, target->target_index, &target->ratio);
 		}
-		if (!json && view != SWAPZ_VIEW_DIAGNOSE) {
+		if (!json && view != SWAPZ_VIEW_DIAGNOSE &&
+		    view != SWAPZ_VIEW_LIST) {
 			if (linux_swaps[index].has_usage)
 				printf("  Linux swap: active (advisory), size=%llu used=%llu free=%llu bytes, priority=%ld\n",
 				       linux_swaps[index].size_bytes,
@@ -2019,6 +2119,12 @@ static int status_targets(enum swapz_view view, const char *selected_name, int j
 		if (view == SWAPZ_VIEW_STATUS && !json)
 			puts("dm-swapz: loaded (experimental)");
 		result = swapz_print_view(&report, view, selected_name, json);
+	} else if (view == SWAPZ_VIEW_DIAGNOSE) {
+		/* The collector already printed the source-bound first error. */
+		fputs("swapzctl diagnose: safe next step: inspect Linux swap "
+		      "inventory and the original owner journal read-only; "
+		      "never force-remove or blindly swapoff an unverified mapper.\n",
+		      stderr);
 	}
 	free(report.targets);
 	return result;
@@ -2110,7 +2216,11 @@ int main(int argc, char **argv)
 	}
 unsupported:
 	usage(stderr);
-	fputs("BLOCKED: unsupported command; no mapper or swap activation performed.\n",
-	      stderr);
+	if (argc >= 3 && argv[argc - 1][0] == '-')
+		fputs("BLOCKED: unsupported option for command; "
+		      "no mapper or swap activation performed.\n", stderr);
+	else
+		fputs("BLOCKED: unsupported command or arguments; "
+		      "no mapper or swap activation performed.\n", stderr);
 	return 2;
 }
