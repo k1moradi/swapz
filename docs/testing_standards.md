@@ -1,5 +1,19 @@
 # Testing Standards
 
+## Retained trial recovery durability regression (2026-11-14)
+
+The standalone `swapzctl-trial-ownership-test.py` additionally exercises
+duplicate root-only marker/state JSON keys, hardlink/mode substitution,
+directory-authentication refusal, pre-rename fsync and rename error paths,
+post-rename directory fsync uncertainty, retained-marker protection for
+non-COMPLETE state, fail-closed marker retention/recreation errors, and duplicate
+DM name/UUID inventory rows. Use only temporary records and mocked kernel
+operations. In particular, a visible new state after a failed directory fsync
+is **not** a successful durable transition; an absent marker after failed
+retention is not a new ownership grant. This test is standalone, not yet
+integrated into `tests/suites/Makefile test-userspace`, and must not be
+presented as a passing CI test without direct execution evidence.
+
 ## Staged rootless swapzctl watch regression (2026-11-14)
 
 The independent `tests/runtime/native/userspace/swapzctl-watch-test.c` is

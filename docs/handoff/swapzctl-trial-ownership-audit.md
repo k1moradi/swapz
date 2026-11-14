@@ -67,3 +67,48 @@ Run from the repository root: `python3 -B tests/runtime/native/userspace/swapzct
 2. Define an anchored fd-based, no-symlink, non-following read-only journal accessor that cannot change ownership; keep state/results/marker validation atomic enough to return UNKNOWN on rename or concurrent writer.
 3. Resolve the `COMPLETE`+retained-marker interruption window and verify no early module unload/removal after swapoff failures, external activation or unexpected holders.
 4. Independent security review, CI/rootless adversarial evidence and exact-source loaded and physical qualification before Agent 1 or integration owner adds public lifecycle control.
+## Follow-up durability and custody review (source unchanged, 2026-11-14)
+
+The rootless Agent 3 fixture now also checks duplicate marker/state JSON keys,
+hardlinked or world-readable marker substitution, state-directory refusal,
+pre-replace file fsync/rename failures, post-replace directory fsync uncertainty,
+non-COMPLETE release refusal, and both owner-marker restoration outcomes after
+release-directory fsync failure. It verifies exact-identity duplicate DM
+inventory rejection. Each fake is scoped to a temporary directory; no real
+Device Mapper, Linux swap, or privileged operation is performed.
+
+**Verified source-level distinction:** `_save_state` performs file fsync
+before `os.replace`, then a directory fsync. A failing *pre-replace* sync
+must leave the old published record visible. A failing *post-replace* directory
+sync may leave the replacement visible, but that observation is not a durable
+commit and cannot authorize cleanup. `_release_partition_ownership`
+attempts re-creating the original marker after an uncertain directory sync;
+if recreation fails, it explicitly reports `owner_marker=uncertain`. No
+reader may interpret marker absence in this window as authorization.
+
+**Unresolved P0 issues in the private helper (no code change in this audit):**
+
+1. `recover()` refuses a journal whose saved `stage` is already `COMPLETE`.
+   A crash between `COMPLETE` publication and active-marker release leaves
+   an owned marker that `recover-pending` cannot reconcile automatically.
+   A dedicated *post-COMPLETE read-only verification and conditional marker
+   release* transaction is required; repeating mapper removal is not.
+2. `recover_pending_algorithm_trial()` observes marker metadata with
+   `lstat()`, then opens content through `read_bytes()` by path. The
+   underlying `recover()` also reopens saved records and mapper paths.
+   Those reads are not a pinned inode/mount transaction. Ownership remains
+   unproven under privileged concurrent rename/overmount substitution.
+3. Results/state bind recorded `helper_sha256` and module provenance
+   *to each other*; `recover()` does not independently authenticate the
+   currently executing helper file or loaded module bytes against those
+   records. The verified DM name/UUID/table is not an unforgeable mapper
+   incarnation token.
+4. The standalone fixture is **not** invoked by `tests/suites/Makefile
+   test-userspace`; direct `python3 -B ... -v` execution is required.
+   Existing CI cannot be reported as having executed this new matrix.
+   An integration owner must wire it into supported rootless testing
+   without racing another agent's owned Makefile/test paths.
+
+No automatic `swapzctl` delegation is justified by these tests. The existing
+private helper's own recovery is still the sole conditional recovery path,
+and physical/loaded qualification remains separate.
