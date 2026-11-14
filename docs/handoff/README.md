@@ -19,6 +19,14 @@ must be checked against the source being evaluated.
   [retained-trial ownership audit](swapzctl-trial-ownership-audit.md):
   read-only CLI syntax and private helper custody limits.
 
+## Compression-pressure design (proposed, not enabled)
+
+- [Pressure-aware RAW fallback](swapz-pressure-aware-raw-fallback-design.md):
+  distinguishes intrinsic no-fit from time-budget RAW, specifies bounded
+  CPU/IO scheduling experiments, and explicitly defers post-write RAW
+  recompression until independent benefit and authority safety are proven.
+  This design is not a new module mode or current-source qualification.
+
 ## Debugging navigation
 
 - **First dedicated-card host /dev/sda1:** [dedicated-card identity and standing scope](../AGENT_CONTEXT.md#current-production-mission); pathname alone is not identity.
