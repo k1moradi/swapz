@@ -17,6 +17,7 @@ import struct
 import stat
 from types import SimpleNamespace
 import tempfile
+import time
 import unittest
 from unittest import mock
 
@@ -7434,6 +7435,74 @@ class PhysicalSwapProbeTests(unittest.TestCase):
         self.assertEqual(report["metric_kind"],
                          "aggregate_sysfs_not_per_request_latency")
 
+
+    def test_independent_sampler_records_while_workload_guard_is_blocked(self):
+        # Simulate a guard unable to return for multiple sample periods.
+        # The monitoring thread must continue independently of the guard.
+        target = {"major": 8, "minor": 4, "parent_major_minor": "8:0",
+                  "root_same_physical_parent": False}
+        stat_line = "1 0 2 3 4 0 5 6 7 8 9 0 0 0 0 0 0"
+        with mock.patch.object(probe.Path, "read_text",
+                               return_value=stat_line):
+            monitor = probe._PairedBlockIoSampler(target)
+            with monitor:
+                # The workload's main thread does not invoke sample().
+                time.sleep(0.80)
+            report = monitor.report()
+        self.assertEqual(report["sampling_mode"], "independent_thread")
+        self.assertTrue(report["sampler_thread_stopped"])
+        self.assertFalse(report["sampler_failed"])
+        self.assertGreaterEqual(len(report["samples"]), 4)
+        self.assertIsNotNone(
+            report["samples"][-2]["devices"]["swap_partition"])
+        self.assertFalse(monitor._sampler_thread.is_alive())
+
+    def test_independent_sampler_stops_after_workload_failure(self):
+        target = {"major": 8, "minor": 4, "parent_major_minor": "8:0",
+                  "root_same_physical_parent": False}
+        stat_line = "1 0 2 3 4 0 5 6 7 8 9 0 0 0 0 0 0"
+        with mock.patch.object(probe.Path, "read_text",
+                               return_value=stat_line):
+            monitor = probe._PairedBlockIoSampler(target)
+            with self.assertRaisesRegex(
+                    probe.ProbeError, "synthetic workload refusal"):
+                with monitor:
+                    raise probe.ProbeError("synthetic workload refusal")
+            report = monitor.report()
+        self.assertTrue(report["sampler_thread_stopped"])
+        self.assertFalse(monitor._sampler_thread.is_alive())
+
+    def test_independent_sampler_cannot_be_reused_after_shutdown(self):
+        target = {"major": 8, "minor": 4, "parent_major_minor": "8:0",
+                  "root_same_physical_parent": False}
+        stat_line = "1 0 2 3 4 0 5 6 7 8 9 0 0 0 0 0 0"
+        with mock.patch.object(probe.Path, "read_text",
+                               return_value=stat_line):
+            monitor = probe._PairedBlockIoSampler(target)
+            with monitor:
+                pass
+            with self.assertRaisesRegex(
+                    probe.ProbeError, "cannot be reused"):
+                with monitor:
+                    pass
+
+    def test_independent_sampler_worker_failure_is_fail_closed(self):
+        target = {"major": 8, "minor": 4, "parent_major_minor": "8:0",
+                  "root_same_physical_parent": False}
+        stat_line = "1 0 2 3 4 0 5 6 7 8 9 0 0 0 0 0 0"
+        # Two entry sysfs samples succeed; an unexpected worker exception
+        # cannot mark an otherwise successful comparison as PASS.
+        with mock.patch.object(probe.Path, "read_text",
+                               side_effect=[stat_line, stat_line,
+                                            RuntimeError("internal read")]):
+            monitor = probe._PairedBlockIoSampler(target)
+            with self.assertRaisesRegex(
+                    probe.ProbeError, "stopped on read failure"):
+                with monitor:
+                    time.sleep(0.35)
+            report = monitor.report()
+        self.assertTrue(report["sampler_thread_stopped"])
+        self.assertTrue(report["sampler_failed"])
 
     def test_paired_sampler_retains_tail_after_long_raw_fill(self):
         # A 95-second fill previously consumed the first 256 observations

@@ -31,6 +31,7 @@ import struct
 import subprocess
 import sys
 import tempfile
+import threading
 import time
 
 
@@ -4203,6 +4204,59 @@ class _PairedBlockIoSampler:
         self.samples = deque(maxlen=256)
         self.samples_seen = 0
         self.previous_ns = 0
+        # The worker exclusively owns sampling while the paired phase runs.
+        # Guards continue to verify identity, but cannot pause this timeline.
+        self._sampler_stop = threading.Event()
+        self._sampler_thread = None
+        self._sampler_stopped = True
+        self._sampler_failed = False
+
+    def __enter__(self):
+        if self._sampler_thread is not None:
+            raise ProbeError("paired block sampler cannot be reused")
+        self.sample(force=True)
+        worker = threading.Thread(
+            target=self._sample_independently,
+            name="swapz-paired-block-stat", daemon=True)
+        worker.start()
+        self._sampler_thread = worker
+        self._sampler_stopped = False
+        return self
+
+    def _sample_independently(self):
+        # Only sysfs reads; never inspect/alter swap or invoke a subprocess.
+        # A daemon thread is an emergency backstop, not a cleanup strategy:
+        # the owning main thread explicitly stops and joins it.
+        while not self._sampler_stop.wait(0.25):
+            try:
+                self.sample()
+            except Exception:
+                # Preserve a bounded failure indicator, not privileged paths
+                # or exception strings from the monitor thread.
+                self._sampler_failed = True
+                self._sampler_stop.set()
+                return
+
+    def __exit__(self, error_type, error, traceback):
+        self._sampler_stop.set()
+        worker = self._sampler_thread
+        if worker is not None:
+            worker.join(timeout=2.0)
+            self._sampler_stopped = not worker.is_alive()
+        if self._sampler_stopped:
+            try:
+                self.sample(force=True)
+            except Exception:
+                self._sampler_failed = True
+        # Never hide a workload's primary failure. If telemetry itself
+        # broke on an otherwise successful run, refuse paired evidence.
+        if error_type is None:
+            if not self._sampler_stopped:
+                raise ProbeError(
+                    "paired block sampler did not terminate before recovery")
+            if self._sampler_failed:
+                raise ProbeError("paired block sampler stopped on read failure")
+        return False
 
     def sample(self, *, force=False):
         now_ns = time.monotonic_ns()
@@ -4236,14 +4290,23 @@ class _PairedBlockIoSampler:
         self.samples_seen += 1
 
     def report(self):
-        self.sample(force=True)
+        if self._sampler_thread is None:
+            # Preserve the original standalone sampler API for read-only
+            # diagnostics and rootless regression fixtures.
+            self.sample(force=True)
         return {
             "schema": "swapz-paired-block-stat-observations-v1",
             "metric_kind": "aggregate_sysfs_not_per_request_latency",
             "devices": dict(self.devices),
             "sampling_interval_ms": 250,
+            "sampling_mode": ("independent_thread" if
+                              self._sampler_thread is not None else "manual"),
+            "sampler_thread_stopped": self._sampler_stopped,
+            "sampler_failed": self._sampler_failed,
             "samples_dropped": max(0, self.samples_seen - 256),
-            "samples": list(self.samples),
+            # A worker still trapped in sysfs might mutate the deque.
+            # Never copy it before a verified thread join.
+            "samples": list(self.samples) if self._sampler_stopped else [],
         }
 
 
@@ -4310,10 +4373,10 @@ def _run_algorithm_raw_swap_comparison(state, target, state_dir, monitor):
                 workload._swap_identity(current_rows, device) !=
                 workload._swap_identity(rows, device)):
             raise ProbeError("paired raw swap inventory or identity changed")
-        monitor.sample()
+        # The independent read-only monitor runs across this entire phase.
+        # No sysfs sampling from the guard, which may itself be delayed.
 
     guard_raw(force=True)
-    monitor.sample(force=True)
     try:
         result = workload._run_workload(
             {"run_id": state["run_id"], "device_major_int": device[0],
@@ -4390,8 +4453,8 @@ def _run_algorithm_live_swap_oracle(mapper, state, target, state_dir,
         if (_verify_owned_mapper(state, target) != mapper or
                 block_identity(mapper) != mapper_device):
             raise ProbeError("run-owned mapper identity changed during anonymous swap")
-        if comparison_monitor is not None:
-            comparison_monitor.sample()
+        # The independent sampler runs on its own 250ms clock; a blocked
+        # mapper identity/status callback must not create a telemetry gap.
 
     def read_owned_status():
         guard_mapper()
@@ -4962,9 +5025,10 @@ def run_probe(device_arg, confirm_arg, state_dir_arg, review_path,
             if compare_raw:
                 raw_monitor = _PairedBlockIoSampler(target)
                 try:
-                    results["raw_swap_comparison"] = (
-                        _run_algorithm_raw_swap_comparison(
-                            state, target, state_dir, raw_monitor))
+                    with raw_monitor:
+                        results["raw_swap_comparison"] = (
+                            _run_algorithm_raw_swap_comparison(
+                                state, target, state_dir, raw_monitor))
                 finally:
                     results["raw_block_io"] = raw_monitor.report()
                     _save_results(state_dir, results)
@@ -5071,9 +5135,15 @@ def run_probe(device_arg, confirm_arg, state_dir_arg, review_path,
                 anonymous_oracle_started = True
                 swapz_monitor = _PairedBlockIoSampler(target) if compare_raw else None
                 try:
-                    results["algorithm_live_swap"] = _run_algorithm_live_swap_oracle(
-                        mapper, state, target, state_dir,
-                        comparison_monitor=swapz_monitor)
+                    if swapz_monitor is None:
+                        results["algorithm_live_swap"] = _run_algorithm_live_swap_oracle(
+                            mapper, state, target, state_dir)
+                    else:
+                        with swapz_monitor:
+                            results["algorithm_live_swap"] = (
+                                _run_algorithm_live_swap_oracle(
+                                    mapper, state, target, state_dir,
+                                    comparison_monitor=swapz_monitor))
                 finally:
                     if swapz_monitor is not None:
                         results["swapz_block_io"] = swapz_monitor.report()
