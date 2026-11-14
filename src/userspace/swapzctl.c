@@ -45,6 +45,8 @@ static void usage(FILE *out)
 {
 	fputs("Usage: swapzctl version | status [--json] | list [--json] | help [command]\n", out);
 	fputs("       swapzctl inspect|stats|health|diagnose <mapper-name> [--json]\n", out);
+	fputs("Human view flags: --bytes for exact decimal bytes; list also accepts\n", out);
+	fputs("  --no-headers. --json cannot be combined with these flags.\n", out);
 	fputs("       swapzctl primary plan|qualification-import <report>|"
 	      "prepare|start|stop|recover\n", out);
 	fputs("status reports cumulative committed foreground compression ratios "
@@ -62,6 +64,9 @@ static int swapz_command_usage(FILE *out, const char *command)
 	if (!strcmp(command, "status") || !strcmp(command, "list")) {
 		fprintf(out, "Usage: swapzctl %s [--json]\n", command);
 		fputs("  Observe all validated swapz Device Mapper targets.\n", out);
+		fputs("  Human view: --bytes prints exact decimal byte totals.\n", out);
+		if (!strcmp(command, "list"))
+			fputs("  --no-headers suppresses the heading and empty-list message.\n", out);
 	} else if (!strcmp(command, "inspect") ||
 		   !strcmp(command, "stats") ||
 		   !strcmp(command, "health") ||
@@ -69,6 +74,7 @@ static int swapz_command_usage(FILE *out, const char *command)
 		fprintf(out, "Usage: swapzctl %s <mapper-name> [--json]\n", command);
 		fputs("  Select an exact mapper name; no prefix matching or ownership adoption.\n",
 		      out);
+		fputs("  Human view: --bytes prints exact decimal byte totals.\n", out);
 	} else if (!strcmp(command, "primary")) {
 		fputs("Usage: swapzctl primary plan|qualification-import <report>|"
 		      "prepare|start|stop|recover\n", out);
@@ -569,15 +575,25 @@ static void format_page_count(unsigned long long count, char text[32])
 	text[output_position] = '\0';
 }
 
+/* The --bytes view changes formatting, never the validated measurements. */
+static void format_view_bytes(unsigned long long bytes, char *text,
+			      size_t text_size, int raw_bytes)
+{
+	if (raw_bytes)
+		(void)snprintf(text, text_size, "%llu", bytes);
+	else
+		format_bytes(bytes, text, text_size);
+}
+
 static void print_ratio(const char *label, unsigned long long logical_bytes,
-			unsigned long long physical_bytes)
+			unsigned long long physical_bytes, int raw_bytes)
 {
 	char logical_text[64];
 	char lower_text[64];
 	char ratio_text[64];
 
-	format_bytes(logical_bytes, logical_text, sizeof(logical_text));
-	format_bytes(physical_bytes, lower_text, sizeof(lower_text));
+	format_view_bytes(logical_bytes, logical_text, sizeof(logical_text), raw_bytes);
+	format_view_bytes(physical_bytes, lower_text, sizeof(lower_text), raw_bytes);
 	if (!logical_bytes)
 		(void)snprintf(ratio_text, sizeof(ratio_text), "n/a");
 	else if (!physical_bytes)
@@ -1179,8 +1195,9 @@ static void status_safe_mapping_name(const char *name,
 	status_escape_identity(name, DM_NAME_LEN, safe_name);
 }
 
-static void report_swapz_target(const char *name, unsigned int target_index,
-				const struct swapz_ratio_status *ratio)
+static void report_swapz_target_mode(const char *name, unsigned int target_index,
+				     const struct swapz_ratio_status *ratio,
+				     int raw_bytes)
 {
 	char gc_text[64];
 	char lower_write_delta_text[64];
@@ -1204,18 +1221,20 @@ static void report_swapz_target(const char *name, unsigned int target_index,
 	puts("  Health: OK (failed=0, error=0)");
 	puts("");
 	puts("  WRITE EFFICIENCY (cumulative foreground)");
+	if (raw_bytes)
+		puts("    Byte columns: exact decimal bytes");
 	printf("    %-20s %12s %12s %10s\n",
 	       "Category", "Logical", "Lower", "Ratio");
 	print_ratio("Overall", ratio->logical_write_bytes,
-		    ratio->overall_physical_bytes);
+		    ratio->overall_physical_bytes, raw_bytes);
 	if (!ratio->compressed_pages) {
-		print_ratio("SWZ extents", 0, 0);
+		print_ratio("SWZ extents", 0, 0, raw_bytes);
 	} else if (ratio->compressed_extent_ratio_exact) {
 		print_ratio("SWZ extents", ratio->compressed_logical_bytes,
-			    ratio->compressed_extent_bytes);
+			    ratio->compressed_extent_bytes, raw_bytes);
 	} else {
-		format_bytes(ratio->compressed_logical_bytes, compressed_logical_text,
-			     sizeof(compressed_logical_text));
+		format_view_bytes(ratio->compressed_logical_bytes, compressed_logical_text,
+				  sizeof(compressed_logical_text), raw_bytes);
 		printf("    %-20s %12s %12s %10s\n", "SWZ extents",
 		       compressed_logical_text, "n/a", "unavailable");
 		puts("    Note: nonzero staged padding ('bulk_padding') prevents an exact");
@@ -1231,8 +1250,8 @@ static void report_swapz_target(const char *name, unsigned int target_index,
 					    ratio->logical_write_bytes;
 			lower_write_delta_label = "Net WRITE overhead";
 		}
-		format_bytes(lower_write_delta, lower_write_delta_text,
-			     sizeof(lower_write_delta_text));
+		format_view_bytes(lower_write_delta, lower_write_delta_text,
+				  sizeof(lower_write_delta_text), raw_bytes);
 		printf("    %-20s %12s  (%.2Lf%% of logical)\n",
 		       lower_write_delta_label, lower_write_delta_text,
 		       100.0L * (long double)lower_write_delta /
@@ -1251,12 +1270,19 @@ static void report_swapz_target(const char *name, unsigned int target_index,
 	report_page_classification("Zero-elided", ratio->zero_elided_pages,
 				   total_pages);
 
-	format_bytes(ratio->gc_write_bytes, gc_text, sizeof(gc_text));
-	printf("\n  GC lower WRITEs: %s (excluded from ratios)\n", gc_text);
+	format_view_bytes(ratio->gc_write_bytes, gc_text, sizeof(gc_text), raw_bytes);
+	printf("\n  GC lower WRITEs: %s%s (excluded from ratios)\n", gc_text,
+	       raw_bytes ? " bytes" : "");
 	puts("  Note: counters are cumulative since target creation; not current swap usage.");
 	putchar('\n');
 }
 
+/* Preserve the original reporter for existing status fixtures. */
+static void report_swapz_target(const char *name, unsigned int target_index,
+				const struct swapz_ratio_status *ratio)
+{
+	report_swapz_target_mode(name, target_index, ratio, 0);
+}
 
 /* Do not include untrusted INFO text, device paths or unverified counters. */
 static int status_report_problem(const char *state, const char *name,
@@ -1855,6 +1881,12 @@ enum swapz_view {
 	SWAPZ_VIEW_DIAGNOSE
 };
 
+struct swapz_view_options {
+	int json;
+	int raw_bytes;
+	int no_headers;
+};
+
 static const char *swapz_view_name(enum swapz_view view)
 {
 	switch (view) {
@@ -1889,9 +1921,10 @@ static int swapz_mapper_capacity_bytes(const struct status_ready_target *target,
 	return 0;
 }
 
-static int swapz_print_view(const struct status_ready_report *report,
-			    enum swapz_view view, const char *selected_name,
-			    int json)
+static int swapz_print_view_with_options(const struct status_ready_report *report,
+					 enum swapz_view view,
+					 const char *selected_name,
+					 const struct swapz_view_options *options)
 {
 	struct swapz_linux_swap *linux_swaps = NULL;
 	size_t index;
@@ -1934,7 +1967,7 @@ static int swapz_print_view(const struct status_ready_report *report,
 		}
 		swapz_observe_linux_swaps(report, linux_swaps);
 	}
-	if (json) {
+	if (options->json) {
 		/* Mapper and UUID bytes are reversible percent-escaped identities. */
 		printf("{\"schema_version\":1,\"command\":\"%s\",\"devices\":[",
 		       swapz_view_name(view));
@@ -1942,9 +1975,9 @@ static int swapz_print_view(const struct status_ready_report *report,
 		/* Even the module banner must follow all pre-output validation. */
 		if (view == SWAPZ_VIEW_STATUS)
 			puts("dm-swapz: loaded (experimental)");
-		if (view == SWAPZ_VIEW_LIST && matches)
+		if (view == SWAPZ_VIEW_LIST && matches && !options->no_headers)
 			puts("MAPPER  TARGET  DM_DEV  MAPPER_BYTES  SWAP_SIZE  USED  FREE  PRIO  KERNEL  OWNER");
-		else if (!matches)
+		else if (!matches && !(view == SWAPZ_VIEW_LIST && options->no_headers))
 			puts("swapz targets: none");
 	}
 	for (index = 0; index < report->count; ++index) {
@@ -1971,7 +2004,7 @@ static int swapz_print_view(const struct status_ready_report *report,
 			status_escape_identity(target->dm_uuid, DM_UUID_LEN, safe_uuid);
 		device_major = major((dev_t)target->device_id);
 		device_minor = minor((dev_t)target->device_id);
-		if (json) {
+		if (options->json) {
 			printf("%s{\"name\":\"%s\",\"name_encoding\":\"percent_bytes\","
 			       "\"target_index\":%u,\"dm_major\":%u,\"dm_minor\":%u,"
 			       "\"dm_event_number\":%u,"
@@ -2101,9 +2134,14 @@ static int swapz_print_view(const struct status_ready_report *report,
 				puts("  Backing identity: unknown (INFO does not authenticate backing)");
 				puts("  I/O forward progress: unknown (single stable snapshot only)");
 			}
-			report_swapz_target(target->name, target->target_index, &target->ratio);
+			if (options->raw_bytes)
+				report_swapz_target_mode(target->name, target->target_index,
+							 &target->ratio, 1);
+			else
+				report_swapz_target(target->name, target->target_index,
+						    &target->ratio);
 		}
-		if (!json && view != SWAPZ_VIEW_DIAGNOSE &&
+		if (!options->json && view != SWAPZ_VIEW_DIAGNOSE &&
 		    view != SWAPZ_VIEW_LIST) {
 			if (linux_swaps[index].has_usage)
 				printf("  Linux swap: active (advisory), size=%llu used=%llu free=%llu bytes, priority=%ld\n",
@@ -2117,10 +2155,20 @@ static int swapz_print_view(const struct status_ready_report *report,
 		}
 		++emitted;
 	}
-	if (json)
+	if (options->json)
 		puts("]}");
 	free(linux_swaps);
 	return 0;
+}
+
+/* Retain the original four-argument internal test and default view API. */
+static int swapz_print_view(const struct status_ready_report *report,
+			    enum swapz_view view, const char *selected_name,
+			    int json)
+{
+	const struct swapz_view_options options = { .json = json };
+
+	return swapz_print_view_with_options(report, view, selected_name, &options);
 }
 
 static int status_control_open_flags(void)
@@ -2129,7 +2177,8 @@ static int status_control_open_flags(void)
 	return O_RDONLY | O_CLOEXEC;
 }
 
-static int status_targets(enum swapz_view view, const char *selected_name, int json)
+static int status_targets(enum swapz_view view, const char *selected_name,
+			  const struct swapz_view_options *options)
 {
 	struct status_ready_report report = { 0 };
 	int fd;
@@ -2152,7 +2201,12 @@ static int status_targets(enum swapz_view view, const char *selected_name, int j
 	}
 	/* No stdout, including the legacy banner, until all DM reads agree. */
 	if (!result) {
-		result = swapz_print_view(&report, view, selected_name, json);
+		if (options->raw_bytes || options->no_headers)
+			result = swapz_print_view_with_options(&report, view, selected_name,
+						       options);
+		else
+			result = swapz_print_view(&report, view, selected_name,
+						  options->json);
 	} else if (view == SWAPZ_VIEW_DIAGNOSE) {
 		/* The collector already printed the source-bound first error. */
 		fputs("swapzctl diagnose: safe next step: inspect Linux swap "
@@ -2193,7 +2247,9 @@ int main(int argc, char **argv)
 	if (argc >= 2) {
 		enum swapz_view view;
 		const char *selected_name = NULL;
-		int json = 0;
+		struct swapz_view_options options = { 0 };
+		int first_option_index = 2;
+		int argument_index;
 
 		if (!strcmp(argv[1], "status"))
 			view = SWAPZ_VIEW_STATUS;
@@ -2210,37 +2266,45 @@ int main(int argc, char **argv)
 		else
 			goto unsupported;
 
-		if (view == SWAPZ_VIEW_STATUS || view == SWAPZ_VIEW_LIST) {
-			if (argc == 3 && !strcmp(argv[2], "--json"))
-				json = 1;
-			else if (argc != 2)
-				goto unsupported;
-		} else {
-			if (argc < 3 || argc > 4)
+		if (view != SWAPZ_VIEW_STATUS && view != SWAPZ_VIEW_LIST) {
+			if (argc < 3)
 				goto unsupported;
 			selected_name = argv[2];
 			if (!selected_name[0] ||
 			    strnlen(selected_name, DM_NAME_LEN) >= DM_NAME_LEN ||
 			    strchr(selected_name, '/'))
 				goto unsupported;
-			if (argc == 4) {
-				if (strcmp(argv[3], "--json"))
-					goto unsupported;
-				json = 1;
-			}
+			first_option_index = 3;
 		}
+		for (argument_index = first_option_index; argument_index < argc;
+		     ++argument_index) {
+			const char *option = argv[argument_index];
+
+			if (!strcmp(option, "--json") && !options.json)
+				options.json = 1;
+			else if (!strcmp(option, "--bytes") && !options.raw_bytes)
+				options.raw_bytes = 1;
+			else if (!strcmp(option, "--no-headers") &&
+				 view == SWAPZ_VIEW_LIST && !options.no_headers)
+				options.no_headers = 1;
+			else
+				goto unsupported;
+		}
+		/* JSON is already exact and headerless; combinations are invalid. */
+		if (options.json && (options.raw_bytes || options.no_headers))
+			goto unsupported;
 		if (stat("/sys/module/dm_swapz", &info) == 0 &&
 		    S_ISDIR(info.st_mode))
-			return status_targets(view, selected_name, json);
-		if (view == SWAPZ_VIEW_STATUS && !json) {
+			return status_targets(view, selected_name, &options);
+		if (view == SWAPZ_VIEW_STATUS && !options.json) {
 			puts("dm-swapz: not loaded (experimental)");
 			return 0;
 		}
-		if (view == SWAPZ_VIEW_LIST || (view == SWAPZ_VIEW_STATUS && json)) {
-			if (json)
+		if (view == SWAPZ_VIEW_LIST || (view == SWAPZ_VIEW_STATUS && options.json)) {
+			if (options.json)
 				printf("{\"schema_version\":1,\"command\":\"%s\",\"devices\":[]}\n",
 				       swapz_view_name(view));
-			else
+			else if (!options.no_headers)
 				puts("swapz targets: none");
 			return 0;
 		}

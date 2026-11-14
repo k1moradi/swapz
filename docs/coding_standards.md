@@ -170,6 +170,19 @@ is mandatory until independently attributable forward progress is verified.
 forward progress and ownership; `diagnose` preserves the first source-bound
 failure and offers only nonmutating next steps.
 
+### swapzctl exact-byte and headerless human output (2026-11-14)
+
+Read-only human observation modes accept `--bytes`, which prints cumulative
+logical, lower, difference and garbage-collection byte totals as ungrouped
+exact decimal integers in place of rounded IEC display. Existing `list`
+byte columns and Linux advisory usage are already exact decimal integers.
+Only human `list` accepts `--no-headers`, suppressing the heading and
+printing nothing for a successful empty inventory. Flags may be reordered,
+but duplicates and combinations with `--json` are invalid. JSON already
+reports raw integers without headings. No-flag status formatting and existing
+JSON schema-version-one semantics remain unchanged. These options do not
+weaken complete Device Mapper validation or grant lifecycle ownership.
+
 ### swapzctl read-only identity and error-path output (2026-11-14)
 
 The observer must percent-encode all unsafe Device Mapper mapper-name and
