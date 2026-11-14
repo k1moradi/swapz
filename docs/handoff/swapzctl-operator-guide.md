@@ -25,6 +25,56 @@ The read-only commands accept **--json**. Name-selecting commands require an exa
 
 Successful validated DM observations are read-only; some DM ioctl reads require CAP_SYS_ADMIN. An error suppresses the validated numeric report rather than escalating privileges or issuing a mutating ioctl. The existing snapshot logic bounds allocations, verifies Device Mapper wire records, compares two complete INFO observations and validates a final device list. This detects observed drift, but no combination of those ioctls is atomic across the whole host.
 
+
+## Build, install and permissions
+
+Use the source-matched build-local executable after `make`:
+`./build/userspace/swapzctl help`. The root Make API builds the C11
+userspace utility alongside the kernel module and test tools; Kbuild headers,
+a C compiler and module-signing prerequisites are described in
+[compile.md](../compile.md). Building does not qualify a live device.
+`make install` only admits previously qualified artifacts; it does **not**
+rebuild, load the module, create a mapper, call swapon, enable systemd or
+authorize a physical trial. The installed primary units remain disabled.
+Do not install or arm services just to obtain a status report.
+
+Observational Device Mapper ioctls may require root or `CAP_SYS_ADMIN`.
+The CLI never elevates privileges: an EPERM/EACCES observation is
+`UNAVAILABLE`, not proof of an absent mapper. Operators with approved
+access can run read-only observations in their privileged shell, but must
+not grant a monitoring script lifecycle capabilities.
+
+### Return codes and empty/error distinctions
+
+These are the **current observation dispatcher** codes, not codes for
+`swapzctl primary` (which delegates to the separate manager):
+
+| Exit code | Meaning | Safe interpretation |
+| --- | --- | --- |
+| 0 | Help/version or successful validated observation, including allowed empty inventory | No lifecycle/health claim follows from success alone |
+| 1 | Invalid/missing exact target, absent module for named commands, invalid/failed snapshot, permission/read error | Reject the view; retain first error and investigate read-only |
+| 2 | Unsupported option, malformed invocation or unsupported help topic | Correct syntax; no mapper action attempted |
+
+When `dm_swapz` is not loaded, plain `status` returns zero and prints
+`dm-swapz: not loaded (experimental)`; plain `list` returns zero and
+prints `swapz targets: none`. Both `status --json` and `list --json`
+return `{"schema_version":1,"command":"...","devices":[]}` (with
+the appropriate command value). An **empty** inventory is not a failed
+observation; a failed collection must not be converted into an empty array.
+`inspect NAME`, `stats NAME`, `health NAME` or
+`diagnose NAME` return nonzero if the module or exact validated name is
+missing. The name selector cannot contain `/` or be empty, and matching
+is exact, never prefix-based.
+
+Supported syntax is `status [--json]`, `list [--json]`,
+`inspect NAME [--json]`, `stats NAME [--json]`,
+`health NAME [--json]`, `diagnose NAME [--json]`,
+`help [COMMAND]`, `version` and the guarded
+`primary plan|qualification-import REPORT|prepare|start|stop|recover`
+family. `--watch`, `--bytes`, `--no-headers`, and automatic
+development-mapper stop/recovery are **PROPOSED, NOT SHIPPED**.
+
+
 ## Machine-readable output
 
 The initial JSON response has a **schema_version** of **1**, a **command** string and a **devices** array. Per-device fields include display-sanitized **name**, zero-based **target_index**, **dm_major**, **dm_minor**, **sector_start**, **sector_length**, and exact integer **logical_capacity_bytes**. The **kernel_health** field is **ok** only after a complete healthy target snapshot; **ownership** remains **unverified**.
@@ -32,6 +82,77 @@ The initial JSON response has a **schema_version** of **1**, a **command** strin
 The **lifetime** object reports cumulative logical/lower write bytes, GC write bytes, compressed/RAW/zero page counts, and whether the compressed extent bytes are exact. GC must not be mixed silently with the foreground ratio. The **linux_swap** object contains a separately observed **state** (active, not_observed or unknown) and **size_bytes**, **used_bytes**, **priority**, with null for unavailable values. These values are advisory, not an atomic snapshot with the DM information. Name is currently sanitized for safe display and is not an identity-preserving representation for unusual mapper names.
 
 A current namespace lookup of a path found in the kernel swap table may fail after renaming or a mount over the path. Therefore **not_observed does not mean inactive or drained**. Linux swap capacity and usage are distinct from swapz lifetime compression. System-wide PSI and pagefault counters must not be mislabeled as device-specific rates.
+
+
+### Script consumption: versioned JSON is not lossless identity
+
+`--json` is currently a **schema-version-one preview**, not a complete
+stable/lossless device-identity interface. Successful output contains
+`schema_version`, `command` and `devices` (possibly empty).
+`target_index` is **zero-based** in JSON and one-based in human views;
+geometry is in 512-byte sectors; capacity and lifetime I/O values are
+exact integer **bytes**. Committed page class fields count 4096-byte pages.
+The `linux_swap` fields `size_bytes`, `used_bytes` and `priority`
+can be null; `linux_swap.state` is advisory and separately sampled.
+`kernel_health:"ok"` proves only the collected kernel target flags;
+`ownership:"unverified"` must not be promoted to verified by a script.
+The JSON `name` is **display-sanitized ASCII** and may lose distinguishing
+bytes. It must not be used as an authenticated lookup for mutation.
+
+For a diagnostic script, check the **process exit code before parsing**,
+parse only valid JSON, validate `schema_version == 1` and treat unknown
+fields/nulls as unknown evidence. Example (no automatic control):
+
+```sh
+./build/userspace/swapzctl list --json > /tmp/swapz-list-preview.json || exit 1
+python3 -m json.tool /tmp/swapz-list-preview.json >/dev/null || exit 1
+```
+
+This verifies JSON syntax only, not owner identity, liveness or a safe drain.
+
+## Read-only troubleshooting by evidence source
+
+First inspect without changing storage or service state:
+
+```sh
+./build/userspace/swapzctl status
+./build/userspace/swapzctl list --json
+swapon --show
+cat /proc/swaps
+lsblk -o NAME,MAJ:MIN,TYPE,SIZE,FSTYPE,UUID,PARTUUID
+dmsetup info -c
+```
+
+`blkid` can be used for read-only inspection **only after** the operator
+has separately established the exact intended device identity; its output
+does not authenticate swapz ownership. Given a verified exact **mapper
+name**, `swapzctl inspect NAME`, `stats NAME`, `health NAME`
+and `diagnose NAME` are additional read-only views.
+
+| Observation | Reports | Does not prove |
+| --- | --- | --- |
+| `status` ratio, page classes | Cumulative foreground logical-versus-lower WRITE accounting | Current swap occupancy, NAND wear, throughput |
+| `stats` and GC bytes | Lifetime lower WRITEs, GC accounted separately | Per-second rates, I/O forward progress |
+| `/proc/swaps`, `swapon --show` | Linux size/used/priority at one sampling time | Exact current mapper ownership or complete swapoff |
+| `health` | Validated target failed/error flags | No stalled I/O, or independently proven liveness |
+| PSI, vmstat, pswpin/pswpout | **Host-wide** memory/swap activity | Device-specific swapz I/O rate |
+
+A kernel-retained active swap may refer to a path that has since been
+renamed, overmounted, hidden or substituted. Re-resolving the pathname
+from `/proc/swaps` may identify a **different** object or no object.
+Thus `linux_swap.state=not_observed` or `unknown` can **never**
+prove inactive/drained. The DM, Linux swap and systemd observations are
+not atomic and no set of status snapshots substitutes for the original
+same-boot ownership journal and verified `swapoff` completion.
+
+For the retained development trial, preserve the original helper's
+private journal and use only its authenticated same-boot cleanup workflow
+after the independent ownership audit/qualification. Never adopt a mapper
+merely because it matches `swapz-demo-physical-*`. Do not call
+`swapzctl primary stop` on that development mapper. Do not run blind
+swapoff, force dmsetup remove, raw-partition mkswap, module unload/reload,
+automatic repair or reboot.
+
 
 ## Safe inspection
 
@@ -55,6 +176,65 @@ The existing **swapzctl primary plan**, **primary qualification-import REPORT**,
 The retained Lubuntu development mapper needs the original private helper's authenticated journal and verified cleanup path. Until this has been audited and qualified, swapzctl can report its runtime state but **cannot safely manage its lifecycle**. A development mapper matching a prefix is never automatically adopted.
 
 The systemd primary mapper service must remain the sole stop/swapoff owner. Its .swap unit is a passive representation, not an independent activator. Cold-boot service arming and source/host/target physical qualification are separate gates and cannot be inferred from CLI success.
+
+
+## Read-only systemd and deployment-state checks
+
+The `swapz-primary-mapper.service` owns **both** primary `swapon` and
+`swapoff` through the guarded primary manager, and refuses manual start/stop.
+The `swapz-primary.swap` unit is a **passive non-activator** with refused
+manual jobs and a false activation condition: do not enable, start or order
+it as a second swap owner. The runtime-health observer is independently
+read-only. An `active` monitor means process liveness only; inspect the
+most recent `SWAPZ_RUNTIME_HEALTH=` journal event:
+`DEGRADED` means incomplete telemetry and `FAIL` means a confirmed
+observer problem, **neither** of which triggers safe automatic cleanup.
+The boot verifier only records evidence for an owner-admitted, exact-source
+boot; installed units and a green CI run never imply boot readiness.
+
+The following commands read state without enabling or changing a unit:
+
+```sh
+systemctl show swapz-primary-mapper.service -p LoadState -p UnitFileState -p ActiveState -p SubState
+systemctl show swapz-primary.swap -p LoadState -p UnitFileState -p ActiveState -p SubState
+systemctl show swapz-primary-runtime-health.service -p LoadState -p UnitFileState -p ActiveState -p SubState
+systemctl show swapz-primary-boot-verify.service -p LoadState -p UnitFileState -p ActiveState -p SubState
+journalctl -u swapz-primary-runtime-health.service -n 30 --no-pager
+journalctl -u swapz-primary-mapper.service -n 30 --no-pager
+```
+
+Review/limit journal disclosure before sharing: don't publish host identities,
+private run IDs or journal contents. Unit inactivity, missing logs or a
+healthy-looking service cannot certify drained swap. Hibernation and
+suspend-then-hibernate are unsupported while swapz authority is volatile;
+see [systemd runtime-health notes](systemd-runtime-health.md).
+
+## Release-stage acceptance matrix
+
+| Gate | What can pass | What is still **not** proven |
+| --- | --- | --- |
+| Source/native-rootless | Exact-main C11 warnings, hostile DM/procfs/JSON and no-mutation regressions | Loaded device, real swap or physical safety |
+| Owned RAM/`null_blk` | Byte-exact loaded I/O, GC, teardown and fault handling actually exercised | Physical partition, real anonymous Linux swap |
+| Physical development | Host-bound partition admission, unchanged SWAPSPACE2 header and actual oracle scope | Full capacity, production qualification, cold boot |
+| Production primary | Fresh same-source/target qualification, exact owner journal and real swap lifecycle/physical protocol | Cold-boot acceptance and crash recovery |
+| Owner-observed cold boot | Durable verifier evidence from owner reboot on that exact source/host/target | Hibernation or reconstructing lost volatile mappings |
+
+The first host's dedicated SD-card authorization is **not** transferable to
+the separately authorized Lubuntu `/dev/sda4` host. Its shared-root-parent
+exception cannot reach the parent or sibling partitions, and neither host
+scope record is itself a physical qualification. All swapz authoritative
+mapping state lives in RAM; reboot or module reload cannot reconstruct it.
+
+Use `BLOCKED` for missing safe admission/owner proof,
+`UNAVAILABLE` for absent or unreliable observation,
+`DEGRADED` for incomplete runtime telemetry, and `FAIL`/`FAILED`
+for confirmed failure. Preserve the original errno (only when emitted),
+source SHA, safe state and first failed phase. Do not treat a failure
+category or a zero exit as authorization for automatic recovery.
+`make fast_test` is development-only; `make test` can remain
+INCOMPLETE after RAM success until physical admission; `make test_full`
+adds rootless integration but not automatic physical/boot PASS.
+
 
 ## Qualification confidence
 

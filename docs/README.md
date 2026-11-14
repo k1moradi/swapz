@@ -100,6 +100,28 @@ See [report publication](compile.md#report-publication).
 Loaded host CPU/PSI samples include background activity; see the
 [benchmark context](benchmark.md#cpu-and-host-load-context) before comparison.
 
+### swapzctl read-only administration
+
+The build-local `./build/userspace/swapzctl` ships `status`, `list`,
+`inspect NAME`, `stats NAME`, `health NAME` and
+`diagnose NAME` for **observation only**. The current
+`--json` schema version 1 exposes raw byte/page counters, a separately
+sampled advisory Linux swap inventory and **display-sanitized (not
+lossless) mapper names**. Empty list/status output is not proof that the
+retained Lubuntu development mapper is drained or owned. Proposed
+`stats --watch`, `--bytes` and `--no-headers` are **not shipped**.
+
+The [swapzctl operator guide](handoff/swapzctl-operator-guide.md)
+documents exact supported commands and exit codes, build versus
+qualification-gated installation, read-only systemd inspection, Linux
+swap versus lifetime compression accounting, and the source-bound
+acceptance matrix. The primary mapper service is the **sole**
+`swapon`/`swapoff` owner; its `.swap` unit is passive and
+non-activating. Package installation leaves units disabled and does
+not authorize physical activation. See
+[systemd runtime-health](handoff/systemd-runtime-health.md).
+
+
 ## Current evidence
 
 Use the generated evidence artifacts directly instead of copying volatile
