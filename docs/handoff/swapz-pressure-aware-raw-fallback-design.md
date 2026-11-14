@@ -7,6 +7,96 @@ public API, module parameter, device or lifecycle change.** Preserve
 preallocated 64 preparation slots, existing submitter/background lanes,
 and the strict published WRITE/READ completion rules.
 
+## Upstream zswap collaboration is the first classification priority
+
+**Code audit at `main` `c0a10f767d31bb07f02d22d4b2a9119d6500c7a6` (2026-11-14).** The canonical plan
+already exists in `docs/ROADMAP.md`, section "MM-aware storage blueprint:
+zswap collaboration and locality", with four separate milestones:
+
+| Stage | Current implementation | Evidence |
+| --- | --- | --- |
+| A: authenticated `ZSWAP_STORED_WRITEBACK` origin across mm/swap, BIO clone/split and DM | **Not implemented** | `src/kernel/dm-target.c` has no zswap origin reader or verified per-BIO tag; `REQ_ZSWAP_WRITEBACK` is illustrative, not an upstream flag |
+| B: bypass swapz LZ4/delta64 for selected proven-origin pages | **Not implemented** | Existing `preparation_force_raw`, `RAW_SELECTED`, 64-slot reservoir and publication paths are reusable but presently scheduling-only |
+| C: matched, device-sensitive zswap-on/off and bypass-on/off tests | **Not qualified** | Roadmap defines workload/counter/fault gates; no source-bound positive zswap writeback result |
+| D: hand off actual zswap-compressed payload to swapz without decompress/recompress | **Design only** | No codec/format/payload-lifetime/read-side integration |
+
+### Representation and ratio semantics — do not misclassify zswap pages
+
+A page stored in **zswap RAM** does not enter the swapz Device Mapper
+backing target and is **absent from swapz's committed foreground counters**.
+On later zswap eviction, Linux `zswap_writeback_entry()` reconstructs a
+normal 4 KiB swap-cache folio and issues ordinary backing swap I/O.
+The upper BIO contains the **decompressed original bytes**, not its prior
+LZ4/ZSTD/zswap payload and not an authenticated compression-origin tag.
+
+For that backing BIO, `swapz` counts a successful compressed payload as
+`compressed`, a full original page committed without compression as `raw`,
+and a proven all-zero representation as `zero_elided`. The number of
+zswap compression attempts, their RAM bytes and their codec do **not**
+contribute to the swapz cumulative write-ratio numerator or denominator.
+A zswap-stored-and-later-recompressed page counts only **once** as a committed
+swapz logical WRITE; it is not counted twice in the swapz ratio.
+
+A zswap-origin bit is **not proof of useful compression**. Current upstream
+zswap can retain full-size uncompressed pages under its writeback policy.
+The provenance design should carry authenticated semantic origin separately
+from optional proven **representation metadata** (compressed vs uncompressed,
+codec and encoded byte count); initial rejection is a distinct case and is
+not necessarily a bad compression result. Avoid treating zswap's name,
+`REQ_SWAP`, current task, PG_reclaim or drop-behind as a reliable origin.
+
+### Revised optimization ordering
+
+1. **First, measure** whether the high RAW fraction is predominantly
+   ordinary no-fit content, pressure-selected unfinished preparation or
+   genuine zswap writeback. Use read-only interval deltas and zswap's own
+   distinct system-level metrics. Kernel zswap statistics may span several
+   backing devices: do not attribute a global counter to a named mapper.
+   Never induce reclaim pressure on the owner's retained live mapper merely
+   to obtain a benchmark sample.
+2. **Then implement Stage A safely** in a separately reviewed kernel
+   patch/integration, with a provenance lifetime bound to every BIO through
+   split/clone; support ordinary and ambiguous fallback unchanged. Only
+   after this stage may swapz safely classify a known zswap writeback.
+3. **Stage B is a device-sensitive opt-in, not a universal RAW rule.**
+   A page that was compressed in zswap is usually still compressible after
+   Linux reconstructs it. If swapz could store it in one or two fewer
+   physical blocks, a blind RAW bypass saves CPU at the cost of durable
+   backing bytes, requests, cold-read work and wear. Compare marginal
+   compression time against conservative device service/packing and current
+   CPU pressure; retain normal compression when it is beneficial, and never
+   weaken reclaim completion deadlines.
+4. **Investigate Stage D as a distinct high-value experiment** only after
+   end-to-end provenance and decode/ownership feasibility are proven. A
+   direct compressed handoff avoids *both* zswap decompression and swapz
+   recompression, and can retain compression efficiency. It must carry
+   exact compressed length, codec and any dictionary/version dependencies,
+   integrity proof, buffer ownership/release, and read/GC decoding.
+   ZSTD/LZ4 are not interchangeable with swapz's existing LZ4/delta64
+   encodings; do not reinterpret compressed zswap bytes as a current SWZ
+   record. Revert to ordinary decompression/backing I/O when unavailable.
+5. **Only afterward** experiment with generic CPU-budgeted predictor
+   scheduling for the remaining untagged/ordinary workload. It must not
+   accidentally optimize the wrong population by mixing zswap-eviction,
+   naturally incompressible and pressure RAW pages in one ratio.
+
+For illustration, if the original 4096-byte page occupied 1024 bytes in
+zswap RAM and would occupy 1536 bytes after swapz recompression, committing
+it RAW writes a full 4096-byte logical block instead. Whether that is faster
+depends on the actual CPU and lower device. A hypothetical direct handoff
+could retain the 1024-byte payload (subject to packing/physical-block
+rounding and codec compatibility), but it is **not** implemented.
+
+**Promotion criteria:** proven provenance and split/clone persistence;
+bounded RAW snapshot and no producer-after-BIO lifetime; zero codec attempts
+on deliberately bypassed tagged pages; intact generation/CRC/ordered
+publication; byte-exact swap-in; FUA, overwrite, DISCARD, suspend, GC,
+ENOMEM and error-path correctness; matched useful WRITE/READ throughput,
+p95/p99, CPU/PSI and independently measured lower WRITE bytes and requests
+for zswap-enabled cohorts on each device class. No extra lifecycle authority
+or automatic manipulation of the currently active Lubuntu development
+mapper follows from this design.
+
 ## Problem statement and evidence limits
 
 Compression and the lower device have independent service capacities.
