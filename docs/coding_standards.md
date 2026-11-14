@@ -1,5 +1,39 @@
 # Coding Standards
 
+## Staged swapzctl watch/delta sampler (2026-11-14)
+
+The isolated `src/userspace/swapzctl-watch.c` and `.h` form a **staged, unlinked**
+read-only sampler for a future `stats NAME --watch SECONDS` command. This is
+not an implemented public CLI flag. Do not introduce an independent Device
+Mapper reader, a mutating ioctl or lifecycle authority to integrate it.
+A future caller must supply a fully validated two-INFO/final-LIST snapshot,
+prove the exact named mapper has precisely one swapz target, bind DM device,
+event, table generation, target index/count/type and sector geometry, and
+supply canonical cumulative kernel counters. No multi-target adoption or
+inference from `/proc/swaps`, host vmstat or PSI is permitted.
+
+Parse the watch interval as an exact canonical decimal number of seconds with
+up to nine fractional digits, between 1 ms and one hour, without exponent,
+locale, sign or partial parses. Use a monotonic **absolute** sleep deadline and
+actual `CLOCK_MONOTONIC` elapsed nanoseconds to compute rates. Preserve exact
+64-bit cumulative and interval-delta counters separately from floating-point
+per-second estimates; reject zero/backward clocks, missing snapshot, kernel
+failure, identity/generation drift, counter resets/wraps, invalid accounting
+and callback errors without emitting rates. In particular, logical read and
+write bytes, lower I/O bytes and requests, and GC read/write bytes and requests
+are distinct fields; foreground-write ratios never absorb GC writes.
+
+The worker is synchronous and owns no device descriptor or thread. Callbacks
+must be read-only and report failures through errno. The embedding caller
+owns signal handlers, which may set only a `volatile sig_atomic_t` stop flag;
+handlers may not log, allocate, close descriptors or invoke the sampler.
+Bound the worker's sample count and interrupted waits. The output callback
+must propagate closed-pipe failures (including EPIPE) and manage SIGPIPE
+policy safely; future JSON integration requires complete frame/record
+semantics, with no partial success output after rejected snapshots. The
+sampler's snapshot `validated` bit records independent observation checks,
+not a license to drain, stop, reformat, or recover any mapper.
+
 **Immutable naming policy (read before every prompt):** The project is `swapz`; the kernel module is `dm-swapz.ko` (loaded as `dm_swapz`); the Device Mapper target is exactly `swapz`; and the module alias is `dm-swapz`. Never put implementation-generation numbers in product, module, target, source-path, report, workflow, helper, or schema names. `SWAPSPACE2` is the only physical backing partition format. `SWZ` names the internal 4/8/16KiB extent-packing design; production extents contain only payload and zero padding, with all descriptors in RAM. Legacy serialized codecs are isolated test fixtures, **not** a partition format or permission to persist swapz metadata. Do not invent a new format identity.
 
 **Three-tier test policy:** `make fast_test` is development-only and never qualifies or publishes `test_results.json`; `make test` runs the algorithm/RAM path and returns INCOMPLETE (nonzero) until physical source/run/target admission is qualified; `make test_full` retains all rootless DKMS/systemd integration and RAM qualification. Both privileged tiers report BLOCKED (nonzero) if noninteractive privilege is unavailable. RAM/integration PASS cannot certify physical storage or cold-boot production acceptance. Private scripts and CI jobs are implementation details, not operator interfaces.

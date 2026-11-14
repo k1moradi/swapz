@@ -1,5 +1,26 @@
 # Testing Standards
 
+## Staged rootless swapzctl watch regression (2026-11-14)
+
+The independent `tests/runtime/native/userspace/swapzctl-watch-test.c` is
+built alongside the isolated `src/userspace/swapzctl-watch.c` as strict C11
+with `-Wall -Wextra -Werror -pedantic`; ASan/UBSan are used when available.
+Deterministic fake reader, clock, wait and output callbacks exercise canonical
+1/2-second sampling, actual delayed elapsed time, 64-bit high counter values,
+zero/backward clocks, counter wrap/reset, changed mapper name/dev/event/table
+identity or geometry, multi-target rejection, failed kernel, no module,
+read/clock/wait/output failures, EINTR, cancellation and output EPIPE. Failure
+reporting names a repository-relative test source and first failed invariant;
+no privileged storage operation is used.
+
+These new files are **staged and unlinked**: this stand-alone native PASS is
+not a released `swapzctl stats --watch` feature and not a loaded- or physical-
+media qualification. Before exposing the flag, the CLI owner must wire only
+the existing bounded validated Device Mapper collector, export all required
+INFO counter identities, add deterministic CLI/JSON/SIGINT/SIGTERM/SIGPIPE
+integration tests into the maintained native rootless test runner, and run
+source-bound CI. The six supported root Make targets are unchanged.
+
 ## Retained development-trial ownership fixture (2026-11-14)
 
 `python3 -B tests/runtime/native/userspace/swapzctl-trial-ownership-test.py -v`
