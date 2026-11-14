@@ -3584,9 +3584,9 @@ def _pressure_progress_snapshot(cgroup: Path,
     # must be exactly ZERO in the latest sample before any PSI exception.
     observed["swapz_failed"] = None
     observed["swapz_error"] = None
-    observed["raw_swap_used_kib"] = None
-    observed["raw_cgroup_swap_bytes"] = None
     if raw_linux_swap:
+        observed["raw_swap_used_kib"] = None
+        observed["raw_cgroup_swap_bytes"] = None
         try:
             row = _row_for_device(read_swap_rows(), lower_device)
             if row is not None:
