@@ -20,7 +20,7 @@ endif
 CPPFLAGS += -I$(KERNEL)
 
 .PHONY: test-all test-codec test-mapping test-gc test-lower-io test-concurrency test-predictor test-anon-page-analyzer test-userspace test-replay-helper clean
-PROGRAMS := io-replay-native codec-roundtrip ram-extent extent-geometry anon-page-analyzer zero-write-elision mapping-authority authority-throughput transaction-publication write-verification dead-segment-reclamation raw-discard online-packing randomized-authority gc-forbidden-victim gc-cost-accounting gc-recovery-policy gc-scan-scaling gc-rotation gc-engine-rotation gc-high-occupancy flush-ordering lower-write-aggregation window-policy preparation-slots preparation-codec-result preparation-publication-lifetime lane-gap superblock swapzctl-status swapz-primary-policy swapz-primary-mount-namespace
+PROGRAMS := io-replay-native codec-roundtrip ram-extent extent-geometry anon-page-analyzer zero-write-elision mapping-authority authority-throughput transaction-publication write-verification dead-segment-reclamation raw-discard online-packing randomized-authority gc-forbidden-victim gc-cost-accounting gc-recovery-policy gc-scan-scaling gc-rotation gc-engine-rotation gc-high-occupancy flush-ordering lower-write-aggregation window-policy preparation-slots preparation-codec-result preparation-publication-lifetime lane-gap superblock swapzctl-status swapzctl-watch swapz-primary-policy swapz-primary-mount-namespace
 
 io-replay-native_SRC := $(BENCHMARK)/io-replay-native.c
 io-replay-native_LDLIBS := -pthread
@@ -77,6 +77,8 @@ superblock_SRC := $(NATIVE)/codec/superblock.c
 superblock_HDR := $(KERNEL)/superblock.h
 swapzctl-status_SRC := $(NATIVE)/userspace/swapzctl-status.c $(USERSPACE)/swapz-primary.c
 swapzctl-status_HDR := $(USERSPACE)/swapzctl.c $(USERSPACE)/swapz-primary.h $(KERNEL)/superblock.h
+swapzctl-watch_SRC := $(NATIVE)/userspace/swapzctl-watch-test.c $(USERSPACE)/swapzctl-watch.c
+swapzctl-watch_HDR := $(USERSPACE)/swapzctl-watch.h
 swapz-primary-policy_SRC := $(NATIVE)/userspace/swapz-primary-policy.c
 swapz-primary-policy_HDR := $(USERSPACE)/swapz-primary.c $(USERSPACE)/swapz-primary.h
 swapz-primary-mount-namespace_SRC := $(NATIVE)/userspace/swapz-primary-mount-namespace.c
@@ -216,9 +218,9 @@ test-concurrency: $(OUT)/preparation-slots $(OUT)/preparation-codec-result $(OUT
 
 # GNU Make requires doubled dollars for shell exit status/variables.
 # Keep a late-race script failure's exact shell exit status for attribution.
-test-userspace: $(OUT)/swapzctl-status $(OUT)/swapz-primary-policy $(OUT)/swapz-primary-mount-namespace
+test-userspace: $(OUT)/swapzctl-status $(OUT)/swapzctl-watch $(OUT)/swapz-primary-policy $(OUT)/swapz-primary-mount-namespace
 	@set -e; \
-	  for native_test in swapzctl-status swapz-primary-policy swapz-primary-mount-namespace; do \
+	  for native_test in swapzctl-status swapzctl-watch swapz-primary-policy swapz-primary-mount-namespace; do \
 	    if "$(OUT)/$$native_test"; then :; else \
 	      native_exit_status=$$?; \
 	      printf 'FAIL: native test-userspace binary=%s exit=%s\n' "$$native_test" "$$native_exit_status" >&2; \

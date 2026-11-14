@@ -13,6 +13,12 @@ read/clock/wait/output failures, EINTR, cancellation and output EPIPE. Failure
 reporting names a repository-relative test source and first failed invariant;
 no privileged storage operation is used.
 
+Register the watch fixture in `tests/suites/Makefile`'s native `test-userspace`
+prerequisites and execution loop, using the existing warning-clean shared
+compile rule. A failed watch fixture must stop the suite with its binary name,
+exit status and source-bound first assertion. This CI integration does not
+link watch into the public swapzctl executable or authorize new CLI flags.
+
 These new files are **staged and unlinked**: this stand-alone native PASS is
 not a released `swapzctl stats --watch` feature and not a loaded- or physical-
 media qualification. Before exposing the flag, the CLI owner must wire only
