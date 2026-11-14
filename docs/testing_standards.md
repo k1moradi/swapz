@@ -2800,7 +2800,19 @@ snapshot so each replay can reestablish privacy before reading page bytes.
 Privacy metadata is opened once with O_NOFOLLOW/O_NONBLOCK and validated
 on its file descriptor; a substituted symlink or FIFO is rejected without
 following it or blocking. The protected snapshot source also opens nonblocking
-to reject a substituted FIFO before its regular-file check.
+to reject a substituted FIFO before its regular-file check. After all of
+these checks, a bounded Linux `copy_file_range` fast path may transfer
+fixture bytes between the *already pinned source and exclusively created
+destination descriptors* without allocating a Python payload buffer.
+Unsupported or cross-filesystem copies resume with the original read/write
+loop at the current descriptor offsets, even after a partial kernel copy.
+An unrelated I/O error still fails closed and removes only the newly created
+incomplete destination. A zero-length copy before the expected source size
+is exhausted refuses the snapshot. The unchanged source identity/length
+checks, destination `fsync`, private-memory protection and exact replay
+hash validation remain mandatory; this is only an untimed snapshot optimization.
+Rootless regression must exercise a partial kernel copy followed by a
+cross-filesystem fallback, fatal I/O and premature zero-length results.
 Rootless tests must prove that a pre-existing snapshot path survives O_EXCL
 failure after the privacy hook has run, without depending on the CI host's
 actual RLIMIT_MEMLOCK; they must also prove that explicit private classification

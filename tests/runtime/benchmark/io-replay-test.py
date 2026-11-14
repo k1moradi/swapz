@@ -372,6 +372,51 @@ class PairReplayContract(unittest.TestCase):
                 private_memory.copy_fixture(source, destination)
             self.assertFalse(destination.exists())
 
+    def test_fixture_snapshot_kernel_copy_fallback_preserves_bytes_and_failures(self):
+        # Cross-mount or unsupported-filesystem fallback must resume from the
+        # same live descriptors, not restart and duplicate already copied data.
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            source = root / "fixture.bin"
+            destination = root / "snapshot.bin"
+            payload = bytes(range(256)) * (PAGE * 3 // 256 + 1)
+            source.write_bytes(payload)
+            kernel_copy = getattr(private_memory.os, "copy_file_range", None)
+            if kernel_copy is None:
+                self.skipTest("copy_file_range unavailable on this Python host")
+
+            copied_once = False
+
+            def partial_then_cross_mount(source_fd, destination_fd, length):
+                nonlocal copied_once
+                if not copied_once:
+                    copied_once = True
+                    copied = kernel_copy(source_fd, destination_fd, PAGE)
+                    self.assertEqual(copied, PAGE)
+                    return copied
+                raise OSError(errno.EXDEV, "cross-filesystem snapshot fixture")
+
+            with mock.patch.object(private_memory.os, "copy_file_range",
+                                   side_effect=partial_then_cross_mount):
+                self.assertFalse(private_memory.copy_fixture(source, destination))
+            self.assertTrue(copied_once)
+            self.assertEqual(destination.read_bytes(), payload)
+            self.assertEqual(destination.stat().st_mode & 0o777, 0o600)
+
+            destination.unlink()
+            with mock.patch.object(private_memory.os, "copy_file_range",
+                                   side_effect=OSError(errno.EIO, "I/O error")):
+                with self.assertRaises(OSError) as failure:
+                    private_memory.copy_fixture(source, destination)
+                self.assertEqual(failure.exception.errno, errno.EIO)
+            self.assertFalse(destination.exists())
+
+            with mock.patch.object(private_memory.os, "copy_file_range",
+                                   return_value=0):
+                with self.assertRaisesRegex(ValueError, "changed while copying"):
+                    private_memory.copy_fixture(source, destination)
+            self.assertFalse(destination.exists())
+
     def test_copy_fixture_classifies_only_snapshotted_all_raw_metadata(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)

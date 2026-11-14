@@ -6,6 +6,7 @@ lifetime; all child processes accessing pages independently protect themselves.
 """
 import argparse
 import ctypes
+import errno
 import json
 import os
 import resource
@@ -126,8 +127,31 @@ def copy_fixture(source_path, destination_path, force_private=False):
         os.fchmod(destination_fd, 0o600)
 
         remaining = before.st_size
+        copy_chunk_bytes = 1024 * 1024
+        kernel_copy_available = hasattr(os, "copy_file_range")
         while remaining:
-            chunk = os.read(source_fd, min(1024 * 1024, remaining))
+            if kernel_copy_available:
+                try:
+                    # Both descriptors are already O_NOFOLLOW-checked regular
+                    # files. Kernel-side copying avoids private page buffers
+                    # and Python read/write handoffs for each owned snapshot.
+                    copied = os.copy_file_range(
+                        source_fd, destination_fd, min(copy_chunk_bytes, remaining))
+                except OSError as error:
+                    if error.errno not in (
+                            errno.EXDEV, errno.EINVAL, errno.ENOSYS,
+                            errno.EOPNOTSUPP):
+                        raise
+                    # Some filesystems or cross-mount destinations cannot
+                    # support copy_file_range. Continue from the *current FD
+                    # offsets*, including after a short successful copy.
+                    kernel_copy_available = False
+                    continue
+                if copied <= 0:
+                    raise ValueError("fixture snapshot source changed while copying")
+                remaining -= copied
+                continue
+            chunk = os.read(source_fd, min(copy_chunk_bytes, remaining))
             if not chunk:
                 raise ValueError("fixture snapshot source changed while copying")
             view = memoryview(chunk)
