@@ -1724,6 +1724,29 @@ static int swapz_parse_swap_kib(const char *token, unsigned long long *bytes)
 	return 0;
 }
 
+/* Linux priority is a canonical signed decimal, not a lenient strtol input. */
+static int swapz_parse_swap_priority(const char *token, long *priority)
+{
+	const char *digits = token;
+	const char *end;
+	unsigned long long magnitude;
+	unsigned long long limit = (unsigned long long)LONG_MAX;
+	const int negative = *token == '-';
+
+	if (negative) {
+		++digits;
+		++limit; /* LONG_MIN has one additional representable magnitude. */
+	}
+	if (parse_unsigned_decimal(digits, limit, &end, &magnitude) < 0 ||
+	    *end != '\0' || (negative && !magnitude))
+		return -1;
+	if (negative)
+		*priority = magnitude == limit ? LONG_MIN : -(long)magnitude;
+	else
+		*priority = (long)magnitude;
+	return 0;
+}
+
 static int swapz_read_linux_swap(FILE *inventory,
 				  const struct status_ready_report *report,
 				  struct swapz_linux_swap *observations)
@@ -1731,15 +1754,27 @@ static int swapz_read_linux_swap(FILE *inventory,
 	char line[4096];
 	size_t line_count = 0;
 	size_t index;
+	char *header_fields[6] = { 0 };
+	char *header_save = NULL;
+	char *header_cursor;
+	size_t header_count = 0;
 
-	if (!fgets(line, sizeof(line), inventory) ||
-	    !strchr(line, '\n') || strncmp(line, "Filename", 8))
+	if (!fgets(line, sizeof(line), inventory) || !strchr(line, '\n'))
+		return -1;
+	for (header_cursor = strtok_r(line, " \t\r\n", &header_save);
+	     header_cursor && header_count < 6U;
+	     header_cursor = strtok_r(NULL, " \t\r\n", &header_save))
+		header_fields[header_count++] = header_cursor;
+	if (header_count != 5U || strcmp(header_fields[0], "Filename") ||
+	    strcmp(header_fields[1], "Type") ||
+	    strcmp(header_fields[2], "Size") ||
+	    strcmp(header_fields[3], "Used") ||
+	    strcmp(header_fields[4], "Priority"))
 		return -1;
 	while (fgets(line, sizeof(line), inventory)) {
 		char *fields[6] = { 0 };
 		char *save = NULL;
 		char *cursor;
-		char *priority_end;
 		struct stat path_info;
 		unsigned long long size_bytes;
 		unsigned long long used_bytes;
@@ -1759,10 +1794,7 @@ static int swapz_read_linux_swap(FILE *inventory,
 		    swapz_parse_swap_kib(fields[3], &used_bytes) < 0 ||
 		    used_bytes > size_bytes)
 			return -1;
-		errno = 0;
-		priority = strtol(fields[4], &priority_end, 10);
-		if (errno == ERANGE || priority_end == fields[4] ||
-		    *priority_end != '\0')
+		if (swapz_parse_swap_priority(fields[4], &priority) < 0)
 			return -1;
 		/* Do not follow arbitrary non-absolute procfs fields. */
 		if (fields[0][0] != '/' || stat(fields[0], &path_info) < 0 ||
@@ -1906,10 +1938,14 @@ static int swapz_print_view(const struct status_ready_report *report,
 		/* Mapper and UUID bytes are reversible percent-escaped identities. */
 		printf("{\"schema_version\":1,\"command\":\"%s\",\"devices\":[",
 		       swapz_view_name(view));
-	} else if (view == SWAPZ_VIEW_LIST && matches) {
-		puts("MAPPER  TARGET  DM_DEV  MAPPER_BYTES  SWAP_SIZE  USED  FREE  PRIO  KERNEL  OWNER");
-	} else if (!matches) {
-		puts("swapz targets: none");
+	} else {
+		/* Even the module banner must follow all pre-output validation. */
+		if (view == SWAPZ_VIEW_STATUS)
+			puts("dm-swapz: loaded (experimental)");
+		if (view == SWAPZ_VIEW_LIST && matches)
+			puts("MAPPER  TARGET  DM_DEV  MAPPER_BYTES  SWAP_SIZE  USED  FREE  PRIO  KERNEL  OWNER");
+		else if (!matches)
+			puts("swapz targets: none");
 	}
 	for (index = 0; index < report->count; ++index) {
 		const struct status_ready_target *target = &report->targets[index];
@@ -2116,8 +2152,6 @@ static int status_targets(enum swapz_view view, const char *selected_name, int j
 	}
 	/* No stdout, including the legacy banner, until all DM reads agree. */
 	if (!result) {
-		if (view == SWAPZ_VIEW_STATUS && !json)
-			puts("dm-swapz: loaded (experimental)");
 		result = swapz_print_view(&report, view, selected_name, json);
 	} else if (view == SWAPZ_VIEW_DIAGNOSE) {
 		/* The collector already printed the source-bound first error. */

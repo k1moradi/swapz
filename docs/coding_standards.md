@@ -95,6 +95,18 @@ remain guarded against duplicate definitions when a generated header supplies
 both. The Make-interface regression must inspect the generated value, not only
 the fallback header.
 
+### swapzctl Linux inventory parsing and success-output gate (2026-11-14)
+
+The read-only /proc/swaps parser requires the exact five-column header and
+canonical signed priorities, rejecting duplicate, missing, signed-zero,
+leading-zero, overflowing or surplus fields. It always validates the
+independently sampled inventory before reporting observed usage and treats a
+path that cannot be re-resolved to the matching block-special dev_t as
+not_observed or unknown, never as lifecycle permission. A successful
+human-readable module banner belongs inside the post-validation view renderer,
+after mapper selection and sector-to-byte checks, so malformed or overflowing
+snapshots produce only bounded fail diagnostics.
+
 ### swapzctl operator views and JSON fields (2026-11-14)
 
 `list` displays a compact read-only row per validated swapz target, including
