@@ -106,8 +106,10 @@ The build-local `./build/userspace/swapzctl` ships `status`, `list`,
 `inspect NAME`, `stats NAME`, `health NAME` and
 `diagnose NAME` for **observation only**. The current
 `--json` schema version 1 exposes raw byte/page counters, a separately
-sampled advisory Linux swap inventory and **display-sanitized (not
-lossless) mapper names**. Empty list/status output is not proof that the
+sampled advisory Linux swap inventory and **reversible percent-byte-encoded
+mapper names** (`name_encoding: percent_bytes`). These identifiers describe
+observed DM objects but never authenticate lifecycle ownership. Empty
+list/status output is not proof that the
 retained Lubuntu development mapper is drained or owned. Proposed
 `stats --watch`, `--bytes` and `--no-headers` are **not shipped**.
 

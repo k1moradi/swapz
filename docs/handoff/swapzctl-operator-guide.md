@@ -14,7 +14,7 @@ A valid mapper name, existing DM table, healthy INFO counters or active Linux sw
 | --- | --- | --- |
 | **swapzctl help** and **swapzctl help inspect** | General or command-specific syntax | No device operation |
 | **swapzctl version** | Experimental executable version | Not a qualification statement |
-| **swapzctl list** | Target name, index, DM device, logical capacity, kernel health | Ownership is unverified |
+| **swapzctl list** | Reversible encoded name, target index, DM device, whole-mapper bytes and advisory swap usage/priority | Ownership is unverified |
 | **swapzctl status** | Cumulative foreground compression ratio and page classes, GC separately | Not current occupancy, rates or wear |
 | **swapzctl inspect NAME** | Exact mapping name, geometry and lifetime counters | Backing and journal not verified |
 | **swapzctl stats NAME** | One cumulative counter snapshot | Watch/rates not implemented |
@@ -77,17 +77,17 @@ development-mapper stop/recovery are **PROPOSED, NOT SHIPPED**.
 
 ## Machine-readable output
 
-The initial JSON response has a **schema_version** of **1**, a **command** string and a **devices** array. Per-device fields include display-sanitized **name**, zero-based **target_index**, **dm_major**, **dm_minor**, **sector_start**, **sector_length**, and exact integer **logical_capacity_bytes**. The **kernel_health** field is **ok** only after a complete healthy target snapshot; **ownership** remains **unverified**.
+The initial JSON response has a **schema_version** of **1**, a **command** string and a **devices** array. Per-device fields include **name** encoded reversibly as percent-escaped bytes (**name_encoding** = **percent_bytes**), zero-based **target_index**, **dm_major**, **dm_minor**, **dm_event_number**, **sector_start**, **sector_length**, target **logical_capacity_bytes**, and nullable whole-mapper **mapper_logical_capacity_bytes**. **dm_uuid** is percent-byte encoded when present, otherwise null; **backing_identity** remains null. **kernel_health** is **ok** only after a complete healthy target snapshot, **io_liveness** is **unknown**, and **ownership** remains **unverified**.
 
-The **lifetime** object reports cumulative logical/lower write bytes, GC write bytes, compressed/RAW/zero page counts, and whether the compressed extent bytes are exact. GC must not be mixed silently with the foreground ratio. The **linux_swap** object contains a separately observed **state** (active, not_observed or unknown) and **size_bytes**, **used_bytes**, **priority**, with null for unavailable values. These values are advisory, not an atomic snapshot with the DM information. Name is currently sanitized for safe display and is not an identity-preserving representation for unusual mapper names.
+The **lifetime** object reports cumulative logical/lower write bytes, GC write bytes, compressed/RAW/zero page counts, and whether the compressed extent bytes are exact. GC must not be mixed silently with the foreground ratio. The **linux_swap** object contains a separately observed **state** (active, not_observed or unknown) and **size_bytes**, **used_bytes**, **priority**, with null for unavailable values. These values are advisory, not an atomic snapshot with the DM information. The percent-byte encoding preserves unusual mapper-name bytes for read-only correlation; it does **not** establish ownership or permission to stop a device.
 
 A current namespace lookup of a path found in the kernel swap table may fail after renaming or a mount over the path. Therefore **not_observed does not mean inactive or drained**. Linux swap capacity and usage are distinct from swapz lifetime compression. System-wide PSI and pagefault counters must not be mislabeled as device-specific rates.
 
 
-### Script consumption: versioned JSON is not lossless identity
+### Script consumption: encoded identity is not lifecycle authority
 
-`--json` is currently a **schema-version-one preview**, not a complete
-stable/lossless device-identity interface. Successful output contains
+`--json` is currently a **schema-version-one preview**, not an authenticated
+lifecycle-identity interface. Successful output contains
 `schema_version`, `command` and `devices` (possibly empty).
 `target_index` is **zero-based** in JSON and one-based in human views;
 geometry is in 512-byte sectors; capacity and lifetime I/O values are
@@ -96,8 +96,13 @@ The `linux_swap` fields `size_bytes`, `used_bytes` and `priority`
 can be null; `linux_swap.state` is advisory and separately sampled.
 `kernel_health:"ok"` proves only the collected kernel target flags;
 `ownership:"unverified"` must not be promoted to verified by a script.
-The JSON `name` is **display-sanitized ASCII** and may lose distinguishing
-bytes. It must not be used as an authenticated lookup for mutation.
+The JSON `name` and available `dm_uuid` use **reversible percent-byte
+encoding**; the `name_encoding` field specifies `percent_bytes`. Decode
+to the exact original mapper-name bytes when correlating trusted read-only
+observations; never treat the encoded text as a literal shell selector, or
+its reversibility as proof of mapper/journal ownership. The whole-mapper
+capacity may be null; `io_liveness` remains `unknown` and
+`backing_identity` remains null.
 
 For a diagnostic script, check the **process exit code before parsing**,
 parse only valid JSON, validate `schema_version == 1` and treat unknown
