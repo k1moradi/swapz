@@ -4153,7 +4153,155 @@ def _require_run_owned_swap_activation(active):
     raise refusal
 
 
-def _run_algorithm_live_swap_oracle(mapper, state, target, state_dir):
+
+class _PairedBlockIoSampler:
+    """Advisory 250ms device-stat snapshots, not per-request latency.
+
+    Partition/parent counters overlap. Root sibling data is descriptive
+    evidence of competing work, never a swapz-owned request count.
+    """
+
+    def __init__(self, target):
+        self.devices = {
+            "swap_partition": f"{target['major']}:{target['minor']}",
+            "parent_disk": target["parent_major_minor"],
+        }
+        if target.get("root_same_physical_parent") is True:
+            try:
+                root = _run(["findmnt", "-n", "-o", "MAJ:MIN",
+                             "--target", "/"], timeout=10).stdout.strip()
+                if re.fullmatch(r"[0-9]+:[0-9]+", root):
+                    root_major, root_minor = map(int, root.split(":"))
+                    if (root != self.devices["swap_partition"] and
+                            _physical_parent_identity(root_major, root_minor) ==
+                            target["parent_major_minor"]):
+                        self.devices["root_partition"] = root
+            except (OSError, ValueError, ProbeError):
+                pass
+        self.samples = []
+        self.previous_ns = 0
+
+    def sample(self, *, force=False):
+        now_ns = time.monotonic_ns()
+        if (not force and self.previous_ns and
+                now_ns - self.previous_ns < 250_000_000):
+            return
+        self.previous_ns = now_ns
+        if len(self.samples) >= 256:
+            return
+        devices = {}
+        for name, identity in self.devices.items():
+            try:
+                fields = Path(f"/sys/dev/block/{identity}/stat").read_text(
+                    encoding="ascii").split()
+                if len(fields) < 11 or any(
+                        not field.isdecimal() for field in fields):
+                    raise ValueError("invalid block statistics")
+                values = [int(field) for field in fields]
+                devices[name] = {
+                    "read_requests": values[0],
+                    "read_sectors": values[2],
+                    "read_time_ms": values[3],
+                    "write_requests": values[4],
+                    "write_sectors": values[6],
+                    "write_time_ms": values[7],
+                    "inflight_requests": values[8],
+                    "io_time_ms": values[9],
+                    "weighted_io_time_ms": values[10],
+                }
+            except (OSError, ValueError):
+                devices[name] = None
+        self.samples.append({"monotonic_ns": now_ns, "devices": devices})
+
+    def report(self):
+        self.sample(force=True)
+        return {
+            "schema": "swapz-paired-block-stat-observations-v1",
+            "metric_kind": "aggregate_sysfs_not_per_request_latency",
+            "devices": dict(self.devices),
+            "sampling_interval_ms": 250,
+            "samples": list(self.samples),
+        }
+
+
+def _run_algorithm_raw_swap_comparison(state, target, state_dir, monitor):
+    """Run the source-pinned byte oracle on already-active ordinary swap.
+
+    No swapoff/swapon/mkswap/dmsetup or direct data-area writes are allowed
+    in this phase. A foreign swapfile of equal or higher priority is a refusal.
+    """
+    if target.get("swap_was_active") is not True:
+        raise ProbeError("paired comparison requires active original raw swap")
+    workload, policy = _algorithm_real_swap_workload(state["source_sha"])
+    device = (target["major"], target["minor"])
+    try:
+        rows = workload.read_swap_rows()
+        raw_row = workload._row_for_device(rows, device)
+        if raw_row is None or raw_row.type != "partition":
+            raise ProbeError("paired raw swap partition is no longer active")
+        workload.require_expected_swap_priority(
+            raw_row, [row for row in rows if row.device != device])
+    except (workload.Blocked, workload.QualificationFailure) as exc:
+        raise ProbeError("paired raw swap attribution cannot be proven") from exc
+    if (raw_row.used_kib != target["swap_used_kib"] or
+            raw_row.priority != target["swap_priority"]):
+        raise ProbeError("paired raw swap starting use or priority changed")
+    relative = "tests/tools/primary-real-swap-oracle.py"
+    committed = _git_result(
+        "show", f"{state['source_sha']}:{relative}").stdout.encode("utf-8")
+    # The normal swapz phase pins the same trusted oracle under state_dir.
+    # Keep a separate root-only file here; O_EXCL must remain enforced for
+    # both pins, and never reuse a mutable shared interpreter source file.
+    raw_oracle_dir = state_dir / "raw-compare"
+    raw_oracle_dir.mkdir(mode=0o700)
+    try:
+        oracle, oracle_sha256 = workload.pin_real_swap_oracle(
+            ROOT / relative, raw_oracle_dir,
+            hashlib.sha256(committed).hexdigest())
+    except (workload.Blocked, workload.QualificationFailure) as exc:
+        raise ProbeError("paired raw oracle is not source authenticated") from exc
+
+    def guard_raw():
+        _verify_target_identity(target)
+        if _read_block0(target["device"], target) != target["header"]:
+            raise ProbeError("paired raw swap header changed")
+        current_rows = workload.read_swap_rows()
+        current = workload._row_for_device(current_rows, device)
+        if (current is None or current.type != "partition" or
+                current.size_kib != raw_row.size_kib or
+                current.priority != raw_row.priority or
+                workload._swap_identity(current_rows, device) !=
+                workload._swap_identity(rows, device)):
+            raise ProbeError("paired raw swap inventory or identity changed")
+        monitor.sample()
+
+    monitor.sample(force=True)
+    try:
+        result = workload._run_workload(
+            {"run_id": state["run_id"], "device_major_int": device[0],
+             "device_minor_int": device[1]},
+            {"mapper_device": device}, oracle,
+            policy["workload_mib"], policy["resident_mib"],
+            policy["swap_limit_mib"], policy["timeout_seconds"],
+            telemetry_check=guard_raw,
+            expected_mapper_baseline_kib=raw_row.used_kib,
+            development_progress_aware_psi=True, raw_linux_swap=True)
+        guard_raw()
+    except (workload.Blocked, workload.QualificationFailure) as exc:
+        raise ProbeError(
+            "bounded ordinary Linux swap comparison failed: " +
+            _bounded_text(exc)) from exc
+    return {
+        "status": "PASS",
+        "mode": "raw_linux_swap",
+        "oracle_sha256": oracle_sha256,
+        "workload": result,
+        "initial_swap_used_kib": raw_row.used_kib,
+        "priority": raw_row.priority,
+    }
+
+def _run_algorithm_live_swap_oracle(mapper, state, target, state_dir,
+                                    comparison_monitor=None):
     """Prove Linux anonymous pageout/pagein through the exact owned mapper.
 
     The worker's READY event alone is not evidence. Require positive exact
@@ -4197,6 +4345,8 @@ def _run_algorithm_live_swap_oracle(mapper, state, target, state_dir):
         if (_verify_owned_mapper(state, target) != mapper or
                 block_identity(mapper) != mapper_device):
             raise ProbeError("run-owned mapper identity changed during anonymous swap")
+        if comparison_monitor is not None:
+            comparison_monitor.sample()
 
     def read_owned_status():
         guard_mapper()
@@ -4519,9 +4669,11 @@ def _final_physical_oracle_evidence_error(results, state, target,
 def run_probe(device_arg, confirm_arg, state_dir_arg, review_path,
               development_only=False, algorithm_real_swap=False,
               algorithm_ram_evidence=None, algorithm_ram_nonce=None,
-              virtual_device_only=False):
+              virtual_device_only=False, compare_raw=False):
     if algorithm_real_swap and not development_only:
         raise ProbeError("real-swap algorithm mode requires development-only admission")
+    if compare_raw and not (development_only and algorithm_real_swap):
+        raise ProbeError("paired comparison requires development real-swap admission")
     if virtual_device_only and not (development_only and algorithm_real_swap):
         raise ProbeError("virtual-only mode requires development real-swap admission")
     if os.geteuid() != 0:
@@ -4575,6 +4727,8 @@ def run_probe(device_arg, confirm_arg, state_dir_arg, review_path,
     if live_artifact_digests != evidence["artifact_digests"]:
         raise ProbeError("current build artifacts differ from admitted evidence")
     if development_only and algorithm_real_swap:
+        if compare_raw and target.get("swap_was_active") is not True:
+            raise ProbeError("paired comparison requires already-active ordinary swap")
         _require_shared_root_development_plan(target, evidence)
         # Refuse missing cgroup controls while ordinary swap is still active,
         # before creating ownership state or draining the selected partition.
@@ -4760,6 +4914,16 @@ def run_probe(device_arg, confirm_arg, state_dir_arg, review_path,
             # header evidence are synchronized before swapoff and post-header
             # data-area mutation. New runs never mutate block zero.
             _verify_target_identity(target)
+            if compare_raw:
+                raw_monitor = _PairedBlockIoSampler(target)
+                try:
+                    results["raw_swap_comparison"] = (
+                        _run_algorithm_raw_swap_comparison(
+                            state, target, state_dir, raw_monitor))
+                finally:
+                    results["raw_block_io"] = raw_monitor.report()
+                    _save_results(state_dir, results)
+                print("PHYSICAL_RAW_SWAP_BASELINE=PASS development_only", flush=True)
             if development_only and algorithm_real_swap:
                 _quiesce_development_swap_inventory(state, target, state_dir)
             elif not development_only:
@@ -4860,8 +5024,15 @@ def run_probe(device_arg, confirm_arg, state_dir_arg, review_path,
                     phase_name, options)
             if algorithm_real_swap:
                 anonymous_oracle_started = True
-                results["algorithm_live_swap"] = _run_algorithm_live_swap_oracle(
-                    mapper, state, target, state_dir)
+                swapz_monitor = _PairedBlockIoSampler(target) if compare_raw else None
+                try:
+                    results["algorithm_live_swap"] = _run_algorithm_live_swap_oracle(
+                        mapper, state, target, state_dir,
+                        comparison_monitor=swapz_monitor)
+                finally:
+                    if swapz_monitor is not None:
+                        results["swapz_block_io"] = swapz_monitor.report()
+                        _save_results(state_dir, results)
                 anonymous_oracle_completed = True
                 results["linux_swap_activation_tested"] = True
                 _save_results(state_dir, results)
@@ -4874,7 +5045,9 @@ def run_probe(device_arg, confirm_arg, state_dir_arg, review_path,
             results["final_recovery_state"] = "ORACLE_PASS"
             _save_results(state_dir, results)
             if development_only and algorithm_real_swap:
-                if (_keep_active_capacity_supported(target) and
+                # A paired measurement must end at its original raw-swap
+                # baseline. Do not offer to retain a mapper after comparing.
+                if (not compare_raw and _keep_active_capacity_supported(target) and
                         _operator_keep_swapz_active_after_pass()):
                     active_mapper_swap = _verify_kept_swapz_active(
                         state, target, mapper)
@@ -4906,7 +5079,7 @@ def run_probe(device_arg, confirm_arg, state_dir_arg, review_path,
                         "tests/tools/physical-swap-probe.py recover-pending")
                     print(f"PHYSICAL_RESULTS={state_dir / RESULTS_NAME}")
                     return
-                if not _keep_active_capacity_supported(target):
+                if not compare_raw and not _keep_active_capacity_supported(target):
                     print(
                         "PHYSICAL_SWAPZ_KEEP_ACTIVE=UNAVAILABLE "
                         "reason=full_capacity_mapper_geometry_unavailable; "
@@ -5122,6 +5295,16 @@ def run_probe(device_arg, confirm_arg, state_dir_arg, review_path,
                     failures.append(
                         "kernel_diagnostics expected=healthy observed="
                         + diagnostics_error)
+                if failure is None and compare_raw:
+                    raw_evidence = results.get("raw_swap_comparison")
+                    if (not isinstance(raw_evidence, dict) or
+                            raw_evidence.get("status") != "PASS" or
+                            raw_evidence.get("mode") != "raw_linux_swap" or
+                            not isinstance(raw_evidence.get("workload"), dict) or
+                            raw_evidence["workload"].get("slot_reuse_proven") is not True or
+                            not isinstance(results.get("raw_block_io"), dict) or
+                            not isinstance(results.get("swapz_block_io"), dict)):
+                        failures.append("paired raw/swapz workload evidence is incomplete")
                 if failure is None:
                     oracle_error = _final_physical_oracle_evidence_error(
                         results, state, target, evidence, review, phases,
@@ -5189,6 +5372,8 @@ def run_probe(device_arg, confirm_arg, state_dir_arg, review_path,
         if development_only:
             if algorithm_real_swap:
                 print("PHYSICAL_ALGORITHM_REAL_SWAP=PASS")
+            if compare_raw:
+                print("PHYSICAL_PAIRED_SWAP=PASS development_only_not_qualification")
             if virtual_device_only:
                 print("VIRTUAL_DEVICE_ONLY=PASS not_physical_qualification")
             print("PHYSICAL_DEVELOPMENT_SMOKE=PASS")
@@ -5649,6 +5834,8 @@ def main(argv=None):
     parser.add_argument(
         "--algorithm-real-swap", action="store_true",
         help="bounded real anonymous Linux swap round-trip; development-only")
+    parser.add_argument("--compare-raw", action="store_true",
+                        help="opt-in paired raw Linux swap baseline before swapz")
     parser.add_argument("--virtual-device-only", action="store_true",
                         help="development-only USB device in an authenticated VM")
     parser.add_argument("--algorithm-ram-evidence")
@@ -5671,6 +5858,9 @@ def main(argv=None):
     if args.algorithm_real_swap and (args.action != "run" or
                                      not args.development_only):
         parser.error("--algorithm-real-swap requires run --development-only")
+    if args.compare_raw and not (args.action == "run" and
+                                 args.development_only and args.algorithm_real_swap):
+        parser.error("--compare-raw requires run --development-only --algorithm-real-swap")
     if args.virtual_device_only and not (
             args.action == "run" and args.development_only and
             args.algorithm_real_swap):
@@ -5678,7 +5868,8 @@ def main(argv=None):
     if args.action == "recover-pending" and any((
             args.device, args.confirm_device, args.state_dir,
             args.review_record, args.partuuid, args.source_sha,
-            args.algorithm_ram_evidence, args.algorithm_ram_nonce)):
+            args.algorithm_ram_evidence, args.algorithm_ram_nonce,
+            args.compare_raw)):
         parser.error("recover-pending takes no target or evidence overrides")
     if bool(args.algorithm_ram_evidence) != bool(args.algorithm_ram_nonce):
         parser.error("algorithm RAM evidence path and nonce are paired")
@@ -5739,7 +5930,8 @@ def main(argv=None):
               algorithm_real_swap=args.algorithm_real_swap,
               algorithm_ram_evidence=args.algorithm_ram_evidence,
               algorithm_ram_nonce=args.algorithm_ram_nonce,
-              virtual_device_only=args.virtual_device_only)
+              virtual_device_only=args.virtual_device_only,
+              compare_raw=args.compare_raw)
     return 0
 
 

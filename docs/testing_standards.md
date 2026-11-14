@@ -90,6 +90,47 @@ exact report-directory filesystem-type query, retain real permission and
 ownership checks, and prove that both tmpfs and ramfs prevent arming. Keep the
 temporary fixture self-cleaning; do not relax production persistence checks.
 
+## Development-only paired raw Linux swap versus swapz physical comparison
+
+The optional operator-facing command `python3 -B tests/tools/algorithm-physical.py
+--compare-raw` reuses the existing one-consent physical-development transaction
+and the commit-pinned 384 MiB / 128 MiB resident / 384 MiB swap, two-process,
+two-reuse-round anonymous-memory byte oracle. It runs the RAW baseline while
+the originally selected SWAPSPACE2 partition is still active, then performs
+the existing authenticated swapoff / temporary mapper / mkswap-on-mapper-only /
+swapz workload / automatic raw-swap restoration sequence. No new device
+mutation path, global swapoff, raw-partition mkswap or auxiliary swapfile
+priority change is authorized. The default physical trial is unchanged.
+
+RAW comparison requires a presently active selected partition, exactly
+authenticated `/proc/swaps` device identity, matching pretrial Used/priority,
+and **strictly higher** priority than every unrelated active swap entry.
+A same-priority swapfile is an attribution refusal, not permission to switch
+or disable it. Each RAW fill must prove exact selected-partition Used KiB delta
+equals dedicated-cgroup `memory.swap.current`; both worker byte digests must
+match, Linux pswpout/pswpin and selected-partition READ/WRITE sectors must
+advance, OOM must remain zero, and both reuse rounds must release to the
+original fixed baseline. Neither swapz counters nor target status may be
+fabricated as RAW evidence. The explicit RAW progress-aware PSI exception may
+continue only with same-window Linux swap counters, selected-partition sectors,
+and exact cgroup/partition usage attribution; unknown or stalled progress stops
+and ordinary recovery runs. The production PSI rule is unchanged.
+
+Diagnostic block-stat samples (250 ms, at most 256) cover the selected swap
+partition, physical parent disk and, when positively discovered on the same
+parent, the root filesystem partition. Partitions and parent counters overlap:
+they are NOT separate additive I/O totals. Linux `/sys/dev/block/*/stat`
+write-time and completion fields provide interval aggregates, not true
+per-request service times or WRITE p99; record this limitation explicitly
+instead of manufacturing a tail-latency claim. The two phases are sequential
+and can experience different uncontrolled background load. A matching
+raw/swapz development PASS does not qualify production, establish an unbiased
+performance win, or prove an I/O stall cause. Keep failure-time observations
+in the existing root-owned run results and preserve the first refusal through
+verified recovery. Rootless regressions must cover RAW attribution, PSI
+no-progress, corrupted/missing bytes, competing swap, namespace ownership,
+and no new swapoff/mkswap path.
+
 ## Real-partition architecture preflight
 
 The owner-approved partition architectures are little-endian x86_64 and ARM64

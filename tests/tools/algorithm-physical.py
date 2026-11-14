@@ -390,7 +390,7 @@ def _canonical_source_preflight(algorithm_ram_evidence: list[str]) -> str | None
     return None
 
 
-def main() -> int:
+def main(*, compare_raw: bool = False) -> int:
     if not sys.stdin.isatty() or not sys.stdout.isatty():
         print("PHYSICAL_ALGORITHM_REAL_SWAP=NOT_RUN reason=noninteractive")
         return 2
@@ -420,6 +420,12 @@ def main() -> int:
     blockers = []
     if selected.get("other_active_partition_count", 0):
         blockers.append("unrelated_active_partition_not_supported")
+    if compare_raw and active_swap is None:
+        blockers.append("paired_raw_swap_requires_active_partition")
+    if compare_raw and active_swap is not None:
+        print("  Paired mode: exact raw Linux swap oracle before owned swapoff,")
+        print("  then the identical oracle on swapz; foreign swap traffic refuses.")
+        print("  Samples parent/partition/root device stats; no raw per-request p99.")
     if blockers:
         # A Yes/No answer must never bypass a missing privileged safety gate.
         print("PHYSICAL_ALGORITHM_REAL_SWAP=BLOCKED reason=" +
@@ -471,7 +477,8 @@ def main() -> int:
     # Publish the exact Yes/No question before waiting for operator input.
     # A single flushed, default-No question is the complete development
     # trial authorization; no separate verbal or chat approval is required.
-    print(f"  Run bounded swapz Linux swap trial on {selected['path']} "
+    trial_label = "paired raw/swapz Linux swap" if compare_raw else "swapz Linux swap"
+    print(f"  Run bounded {trial_label} trial on {selected['path']} "
           f"(PARTUUID {selected['partuuid']})? [y/N]", flush=True)
     try:
         confirmed = input()
@@ -492,6 +499,7 @@ def main() -> int:
         "run", "--device", selected["selector"],
         "--confirm-device", selected["selector"],
         "--development-only", "--algorithm-real-swap",
+        *(["--compare-raw"] if compare_raw else []),
         *(["--virtual-device-only"] if selected.get("virtual_device_only") else []),
         *algorithm_ram_evidence,
     ]
@@ -506,4 +514,7 @@ def main() -> int:
 
 
 if __name__ == "__main__":
-    raise SystemExit(main())
+    if sys.argv[1:] not in ([], ["--compare-raw"]):
+        print("usage: algorithm-physical.py [--compare-raw]", file=sys.stderr)
+        raise SystemExit(2)
+    raise SystemExit(main(compare_raw=sys.argv[1:] == ["--compare-raw"]))
