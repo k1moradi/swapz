@@ -3427,6 +3427,18 @@ override the checkout preflight only in its copied synthetic runner, because
 that fixture deliberately edits tracked fake sources to check dirty build
 provenance. This exemption must never reach the real `make test` command.
 
+The reporter for a genuine `physical_trial_mapper_present` failure must
+recognize only the original source-controlled full `LOADED_PREFLIGHT` marker,
+retain the nonzero BLOCKED status, and show the fixed rootless-testable source
+gate plus the read-only original-owner-journal next step in the official
+`make test` console. Do not truncate the expected proof into an ambiguous
+half-token or suggest an unrestricted cleanup. Malformed lookalikes, competing
+failure messages, and markers emitted after a loaded workload phase must not
+receive this special attribution. Keep the raw helper output confined to the
+existing mode-0600 private log; the public summary must not include host
+paths, tokens, device identities or state-file contents. This is diagnostic
+triage, not a new authorization for recovery, mapper removal or swapoff.
+
 The ordinary loaded RAM preflight must distinguish the exact
 `swapz-demo-physical-` development mapper name/UUID shape from its own
 `swapz-demo-` RAM-test mapping. A matching name and UUID are read-only

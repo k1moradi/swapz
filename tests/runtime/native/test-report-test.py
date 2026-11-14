@@ -3974,6 +3974,72 @@ class ReportContract(unittest.TestCase):
         finally:
             runner.ROOT = previous_root
 
+    def test_retained_physical_trial_preflight_stays_blocked_with_safe_guidance(self):
+        marker = runner.PHYSICAL_TRIAL_PREFLIGHT_MARKER
+        phase, reason = runner.failure_context(marker + "\n")
+        self.assertEqual(phase, runner.PHYSICAL_TRIAL_PREFLIGHT_PHASE)
+        self.assertEqual(reason, runner.PHYSICAL_TRIAL_PREFLIGHT_REASON)
+        self.assertNotIn("expected_proof=", reason)
+        self.assertNotIn("RAM test must not", reason)
+
+        # A modified proof, an extra refusal or a later named phase cannot
+        # impersonate the exact source-bound physical-trial admission failure.
+        hostile = (
+            marker.replace("name_and_uuid_only", "unverified"),
+            marker + "\nFAIL: another source failure",
+            "START_LOADED_OWNED_NULLBLK_SMOKE\n" + marker,
+            marker + " private=/home/secret",
+        )
+        for transcript in hostile:
+            with self.subTest(transcript=transcript[-45:]):
+                other_phase, _ = runner.failure_context(transcript + "\n")
+                self.assertNotEqual(
+                    other_phase, runner.PHYSICAL_TRIAL_PREFLIGHT_PHASE)
+
+        class FakeChild:
+            def __init__(self, *_args, **_kwargs):
+                self.stdout = io.StringIO(marker + "\n")
+
+            @staticmethod
+            def wait():
+                return 1
+
+        original_root = runner.ROOT
+        try:
+            with tempfile.TemporaryDirectory(prefix="physical-gate-report-") as name:
+                runner.ROOT = Path(name)
+                report = {
+                    "tested_commit_sha": "a" * 40,
+                    "stages": [],
+                    "benchmarks": {},
+                }
+                console = io.StringIO()
+                with mock.patch.object(
+                        runner.subprocess, "Popen", FakeChild), \\
+                        contextlib.redirect_stdout(console):
+                    exit_status = runner.run_stage(
+                        "Owned RAM smoke + mixed/QD pilot", ["fixture"],
+                        report, parse_bench=True,
+                        retain_private_failure_output=True)
+                self.assertEqual(exit_status, 1)
+                stage = report["stages"][0]
+                self.assertEqual(stage["status"], "BLOCKED")
+                self.assertEqual(stage["failed_phase"], phase)
+                self.assertEqual(stage["diagnostic"], reason)
+                public_output = console.getvalue()
+                self.assertIn("Source-bound gate: tests/tools/loaded-preflight.sh",
+                              public_output)
+                self.assertIn("original root-owned same-boot", public_output)
+                self.assertIn("never force-remove, swapoff", public_output)
+                self.assertNotIn("Safe next step: fix the first reported gate",
+                                 public_output)
+                self.assertNotIn("Source-bound location: unavailable",
+                                 public_output)
+                self.assertNotIn("expected_proof=", public_output)
+                self.assertIn("Private stage log (mode 0600): ", public_output)
+        finally:
+            runner.ROOT = original_root
+
     def test_private_stage_output_truncation_keeps_both_ends_within_bound(self):
         source_sha = "b" * 40
         original_root = runner.ROOT

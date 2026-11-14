@@ -2596,6 +2596,24 @@ def retain_private_stage_output(output, source_sha, stage_title):
         return None
 
 
+# Only this complete, fixed helper diagnostic is a recognized preflight
+# classification. A mapper name/UUID is not physical recovery ownership.
+PHYSICAL_TRIAL_PREFLIGHT_MARKER = (
+    "BLOCKED: LOADED_PREFLIGHT=BLOCKED "
+    "check=physical_trial_mapper_present errno=unavailable "
+    "remedy=phase=preexisting_mapper resource_kind=physical_trial_mapper "
+    "expected_proof=root_owned_same_boot_recovery_state "
+    "observed_proof=name_and_uuid_only "
+    "retained_state_action=retain_mapper_and_module "
+    "safe_next_action=inspect_physical_trial_owner_state_read_only; "
+    "RAM test must not remove this mapper")
+PHYSICAL_TRIAL_PREFLIGHT_PHASE = "preflight / retained physical-trial mapper"
+PHYSICAL_TRIAL_PREFLIGHT_REASON = (
+    "BLOCKED: physical_trial_mapper_present; mapper name and UUID match, "
+    "but same-boot root-owned recovery state is not proven; "
+    "mapper and module retained")
+
+
 def failure_context(output, *, loaded=True, default_phase=None,
                     child_exit_code=None):
     """Return a sanitized failure phase/reason without leaking host details.
@@ -2709,6 +2727,18 @@ def failure_context(output, *, loaded=True, default_phase=None,
 
     diagnostic_lines = (
         output_lines[diagnostic_start:] if loaded else output_lines)
+
+    # A previously retained physical-trial mapper is a host-state admission
+    # conflict, not a source assertion. Demand the exact, complete producer
+    # marker and no competing failure; malformed/spoofed variants fall back to
+    # the ordinary privacy-preserving failure classification.
+    if loaded and phase == "preflight / administrator authorization":
+        refusal_lines = [
+            line.strip() for line in diagnostic_lines
+            if line.strip().startswith(("BLOCKED:", "FAIL:", "ERROR:"))]
+        if refusal_lines == [PHYSICAL_TRIAL_PREFLIGHT_MARKER]:
+            return (PHYSICAL_TRIAL_PREFLIGHT_PHASE,
+                    PHYSICAL_TRIAL_PREFLIGHT_REASON)
 
     primary_lifecycle_command_failure = None
     primary_prepare_failure = None
@@ -5309,10 +5339,25 @@ def run_stage(title, command, result, *, parse_bench=False,
             details = first_compiler_failure_location(output)
         for detail in details:
             print(f"        {detail}", flush=True)
+        physical_trial_conflict = (
+            title == "Owned RAM smoke + mixed/QD pilot" and
+            record["failed_phase"] == PHYSICAL_TRIAL_PREFLIGHT_PHASE and
+            record["diagnostic"] == PHYSICAL_TRIAL_PREFLIGHT_REASON)
         if not details:
-            print("        Source-bound location: unavailable; inspect "
-                  "retained private failure evidence", flush=True)
-        if record["failed_phase"] not in (
+            if physical_trial_conflict:
+                print("        Source-bound gate: tests/tools/loaded-preflight.sh "
+                      "(physical_trial_mapper_present; host-state refusal)",
+                      flush=True)
+            else:
+                print("        Source-bound location: unavailable; inspect "
+                      "retained private failure evidence", flush=True)
+        if physical_trial_conflict:
+            print("        Safe next step: inspect the original root-owned "
+                  "same-boot physical-trial journal and active mapper read-only. "
+                  "Only the verified original owner may reconcile the trial; "
+                  "never force-remove, swapoff, unload its module, or reformat "
+                  "the backing partition.", flush=True)
+        elif record["failed_phase"] not in (
                 "adjacent READ coalescing A/B evidence",
                 "owned RAM primary lifecycle prepare"):
             print("        Safe next step: fix the first reported gate, "
