@@ -1651,6 +1651,7 @@ static int swapz_print_view(const struct status_ready_report *report,
 {
 	size_t index;
 	size_t matches = 0;
+	size_t emitted = 0;
 
 	/* Verify selection and capacity before any output, including a JSON prefix. */
 	for (index = 0; index < report->count; ++index) {
@@ -1705,7 +1706,7 @@ static int swapz_print_view(const struct status_ready_report *report,
 			       "\"compressed_pages\":%llu,\"raw_pages\":%llu,"
 			       "\"zero_elided_pages\":%llu,"
 			       "\"compressed_extent_bytes_exact\":%s}}",
-			       matches == 0 ? "" : ",", safe_name, target->target_index,
+			       emitted ? "," : "", safe_name, target->target_index,
 			       device_major, device_minor, target->sector_start,
 			       target->sector_length, capacity,
 			       target->ratio.logical_write_bytes,
@@ -1744,8 +1745,7 @@ static int swapz_print_view(const struct status_ready_report *report,
 			}
 			report_swapz_target(target->name, target->target_index, &target->ratio);
 		}
-		/* Used for the JSON delimiter without trusting report array gaps. */
-		--matches;
+		++emitted;
 	}
 	if (json)
 		puts("]}");
