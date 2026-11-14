@@ -4014,13 +4014,12 @@ class ReportContract(unittest.TestCase):
                     "benchmarks": {},
                 }
                 console = io.StringIO()
-                with mock.patch.object(
-                        runner.subprocess, "Popen", FakeChild), \\
-                        contextlib.redirect_stdout(console):
-                    exit_status = runner.run_stage(
-                        "Owned RAM smoke + mixed/QD pilot", ["fixture"],
-                        report, parse_bench=True,
-                        retain_private_failure_output=True)
+                with mock.patch.object(runner.subprocess, "Popen", FakeChild):
+                    with contextlib.redirect_stdout(console):
+                        exit_status = runner.run_stage(
+                            "Owned RAM smoke + mixed/QD pilot", ["fixture"],
+                            report, parse_bench=True,
+                            retain_private_failure_output=True)
                 self.assertEqual(exit_status, 1)
                 stage = report["stages"][0]
                 self.assertEqual(stage["status"], "BLOCKED")

@@ -3438,6 +3438,8 @@ receive this special attribution. Keep the raw helper output confined to the
 existing mode-0600 private log; the public summary must not include host
 paths, tokens, device identities or state-file contents. This is diagnostic
 triage, not a new authorization for recovery, mapper removal or swapoff.
+The rootless reporter regression runs with a mocked child, not privileged
+preflight, and must be syntax-valid before it can support a CI PASS claim.
 
 The ordinary loaded RAM preflight must distinguish the exact
 `swapz-demo-physical-` development mapper name/UUID shape from its own
