@@ -90,6 +90,32 @@ exact report-directory filesystem-type query, retain real permission and
 ownership checks, and prove that both tmpfs and ramfs prevent arming. Keep the
 temporary fixture self-cleaning; do not relax production persistence checks.
 
+## Swapz-only physical trial on slow swap devices
+
+`python3 -B tests/tools/algorithm-physical.py` runs swapz directly
+without requiring the ordinary Linux swap baseline to succeed first.
+The development-only real-anonymous-swap byte oracle deliberately induces
+pressure in a 128 MiB cgroup against a 384 MiB page workload; the host
+can retain ample free memory while that cgroup reports high memory PSI FULL.
+A PSI stop above 85% for five seconds still fires in both development and
+official modes, but only the separately authorized development smoke may
+continue while **recent, independently attributable progress** is proven.
+
+On the swapz-only development path, require at least three seconds of
+recent observations over approximately the last four seconds, a progress
+sample no more than 1.25 seconds old, and healthy swapz status. For fill,
+at least one successful upper WRITE completion, positive swapz physical
+WRITE bytes, and positive sectors on the exact selected lower partition
+prove progress. For verify, require at least one page of logical reads,
+positive swapz physical READ bytes, and positive lower READ sectors.
+Do not impose the old 64-page throughput floor on slow devices. A stalled
+kernel worker, historical progress followed by no recent I/O, missing
+status, missing lower-device progress, or a module terminal error still
+refuses. The frozen 240-second workload timeout, host MemAvailable floor,
+cgroup OOM and swap bounds, exact two-round byte-oracle/attribution checks,
+device ownership, and restoration stay unchanged. The official production
+qualification retains its unconditional 85%/5s PSI stop.
+
 ## Development-only paired raw Linux swap versus swapz physical comparison
 
 The optional operator-facing command `python3 -B tests/tools/algorithm-physical.py

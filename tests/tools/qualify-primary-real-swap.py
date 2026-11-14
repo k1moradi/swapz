@@ -123,8 +123,10 @@ PSI_STOP_MAX_SAMPLES = 256
 # Linux PSI FULL can stay high while the independent swapz worker makes real
 # progress outside the oracle cgroup. On this explicitly selected development
 # path, the frozen 85%/5s PSI trigger requires PROVEN continuing swapz-owned
-# physical progress, or the trial stops. Missing/insufficient samples fail
-# closed. Official production keeps its unconditional 85%/5s PSI stop.
+# physical progress, or the trial stops. This is not a minimum throughput
+# contract: even a few completed pages are valid when the selected backing
+# device is slow. Missing/stale samples fail closed. Official production
+# keeps its unconditional 85%/5s PSI stop.
 # The existing 240s timeout, 1 GiB host RAM floor, cgroup OOM/swap limits,
 # byte oracle, device ownership, and full restoration are unchanged.
 DEVELOPMENT_PSI_PROGRESS_MIN_WINDOW_USEC = 3_000_000
@@ -3670,9 +3672,9 @@ def _pressure_progress_deltas(samples: deque, window: PsiStallWindow) -> dict:
 
 
 
-def _raw_recent_pressure_progress_deltas(
+def _recent_pressure_progress_deltas(
         samples: deque, window: PsiStallWindow) -> dict:
-    """Check only the latest approximately four seconds of raw-swap I/O.
+    """Limit development I/O evidence to approximately the latest four seconds.
 
     Cumulative progress since the start of a long FULL-PSI window must not
     substitute for fresh progress. Keep one sample period of scheduling
@@ -3689,6 +3691,12 @@ def _raw_recent_pressure_progress_deltas(
     return _pressure_progress_deltas(recent_samples, window)
 
 
+def _raw_recent_pressure_progress_deltas(
+        samples: deque, window: PsiStallWindow) -> dict:
+    """Keep raw-swap's existing recent-progress window and diagnostic API."""
+    return _recent_pressure_progress_deltas(samples, window)
+
+
 def _development_pressure_has_owned_progress(
         samples: deque, window: PsiStallWindow, phase: str) -> bool:
     """Permit high PSI in the DEV smoke only with independently proven I/O.
@@ -3696,14 +3704,20 @@ def _development_pressure_has_owned_progress(
     Two oracle processes are stalled under a deliberately small memory.max,
     while the swapz kernel worker is outside their cgroup. Only successful
     module operations plus real module physical bytes and device sectors
-    count as continuing progress. Incomplete, regressing, stale or foreign
-    observations are NOT an exception to the original PSI trigger.
+    count as continuing progress. Do not impose an arbitrary 64-page
+    throughput floor on slow swap media: one completed upper page, positive
+    owned module physical bytes and actual lower sectors over the most recent
+    bounded observation window prove progress, not eventual oracle success.
+    Incomplete, regressing, stale or foreign observations are NOT an exception
+    to the original PSI trigger.
     """
-    deltas = _pressure_progress_deltas(samples, window)
+    deltas = _recent_pressure_progress_deltas(samples, window)
     if (deltas["progress_window_usec"] is None or
             deltas["progress_window_usec"] <
             DEVELOPMENT_PSI_PROGRESS_MIN_WINDOW_USEC or
             not samples or
+            not 0 <= window._last_observed_time - samples[-1][0] <=
+            PRESSURE_PROGRESS_SAMPLE_SECONDS * 1.25 or
             type(samples[-1][1].get("swapz_failed")) is not int or
             samples[-1][1]["swapz_failed"] != 0 or
             type(samples[-1][1].get("swapz_error")) is not int or
@@ -3713,16 +3727,14 @@ def _development_pressure_has_owned_progress(
         completed = deltas["swapz_write_completed_delta"]
         physical = deltas["swapz_physical_write_delta"]
         lower = deltas["lower_write_sectors_delta"]
-        return (type(completed) is int and
-                completed >= DEVELOPMENT_PSI_PROGRESS_MIN_PAGES and
+        return (type(completed) is int and completed > 0 and
                 type(physical) is int and physical > 0 and
                 type(lower) is int and lower > 0)
     if phase == "verify":
         logical = deltas["swapz_logical_read_delta"]
         physical = deltas["swapz_physical_read_delta"]
         lower = deltas["lower_read_sectors_delta"]
-        return (type(logical) is int and
-                logical >= DEVELOPMENT_PSI_PROGRESS_MIN_PAGES * PAGE_BYTES and
+        return (type(logical) is int and logical >= PAGE_BYTES and
                 type(physical) is int and physical > 0 and
                 type(lower) is int and lower > 0)
     return False
