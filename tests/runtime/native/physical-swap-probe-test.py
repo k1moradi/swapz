@@ -3591,8 +3591,13 @@ class PhysicalSwapProbeTests(unittest.TestCase):
                 }))
         run_source = SCRIPT.read_text()
         self.assertIn(
-            "if (_keep_active_capacity_supported(target) and\n"
+            "if (not compare_raw and _keep_active_capacity_supported(target) and\n"
             "                        _operator_keep_swapz_active_after_pass()):",
+            run_source)
+        # The comparison always restores the original raw device and must
+        # never offer the separate keep-active development choice.
+        self.assertIn(
+            "if not compare_raw and not _keep_active_capacity_supported(target):",
             run_source)
 
     def test_keep_active_verification_requires_exact_owned_swap(self):
