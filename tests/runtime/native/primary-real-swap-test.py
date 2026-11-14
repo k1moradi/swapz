@@ -3216,6 +3216,66 @@ class PrimaryRealSwapContracts(unittest.TestCase):
                 self.assertFalse(qualify._development_pressure_has_owned_progress(
                     deque([(0.5, old), (4.5, bad)]), stall, "fill"))
 
+    def test_development_swapz_progress_accepts_slow_media_not_stale_io(self):
+        # Lubuntu observed 31 completed upper pages and 112 lower WRITE
+        # sectors over 4.17s of high FULL PSI. Progress is real even though
+        # the old >=64-pages threshold classified the run as a stall.
+        stall = qualify.PsiStallWindow(0.0, 0)
+        self.assertTrue(stall.observe(5.05, 4_542_805))
+        baseline = {name: 0 for name, _ in qualify.PRESSURE_PROGRESS_COUNTERS}
+        baseline.update(swapz_failed=0, swapz_error=0)
+        slow = dict(baseline, swapz_upper_write_completed_ok=31,
+                    swapz_physical_write_total=57_344,
+                    lower_write_sectors_total=112)
+        observed = deque([(0.5, baseline), (4.67, slow)])
+        self.assertTrue(qualify._development_pressure_has_owned_progress(
+            observed, stall, "fill"))
+
+        # No minimum throughput: a single successfully completed page plus
+        # actual owned physical bytes and backing sectors is still progress.
+        one_page = dict(slow, swapz_upper_write_completed_ok=1,
+                        swapz_physical_write_total=4096,
+                        lower_write_sectors_total=8)
+        self.assertTrue(qualify._development_pressure_has_owned_progress(
+            deque([(0.5, baseline), (4.67, one_page)]), stall, "fill"))
+        for missing in ("swapz_upper_write_completed_ok",
+                        "swapz_physical_write_total",
+                        "lower_write_sectors_total"):
+            no_progress = dict(one_page, **{missing: 0})
+            self.assertFalse(qualify._development_pressure_has_owned_progress(
+                deque([(0.5, baseline), (4.67, no_progress)]), stall,
+                "fill"), missing)
+
+        # Historical successful I/O cannot waive an extended quiet stall.
+        earlier = deque([(0.0, baseline), (1.0, slow)] +
+                        [(float(second), slow) for second in range(2, 6)])
+        self.assertFalse(qualify._development_pressure_has_owned_progress(
+            earlier, stall, "fill"))
+        # An old final sample also fails closed even with aggregate progress.
+        self.assertFalse(qualify._development_pressure_has_owned_progress(
+            deque([(0.5, baseline), (3.5, slow)]), stall, "fill"))
+        for status_key, error_value in (("swapz_failed", 1),
+                                        ("swapz_error", -5)):
+            error_sample = dict(one_page, **{status_key: error_value})
+            self.assertFalse(qualify._development_pressure_has_owned_progress(
+                deque([(0.5, baseline), (4.67, error_sample)]), stall,
+                "fill"))
+
+        # Swap-in is similarly rate-independent, but needs real lower READ
+        # traffic and enough logical reads to cover at least one full page.
+        one_read = dict(baseline, swapz_logical_read_total=qualify.PAGE_BYTES,
+                        swapz_physical_read_total=512,
+                        lower_read_sectors_total=1)
+        self.assertTrue(qualify._development_pressure_has_owned_progress(
+            deque([(0.5, baseline), (4.67, one_read)]), stall, "verify"))
+        for missing in ("swapz_logical_read_total",
+                        "swapz_physical_read_total",
+                        "lower_read_sectors_total"):
+            no_read = dict(one_read, **{missing: 0})
+            self.assertFalse(qualify._development_pressure_has_owned_progress(
+                deque([(0.5, baseline), (4.67, no_read)]), stall,
+                "verify"), missing)
+
     def test_pressure_progress_deltas_use_only_same_window_samples(self):
         window = qualify.PsiStallWindow(0.0, 0)
         self.assertTrue(window.observe(5.0, 4_500_000))
