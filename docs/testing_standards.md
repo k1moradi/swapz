@@ -13,7 +13,11 @@ is **not** a successful durable transition; an absent marker after failed
 retention is not a new ownership grant. The rootless `tests/suites/Makefile test-userspace` recipe must execute
 this fixture once after the native test binaries and primary late-race
 regression, with a nonzero exit retaining the original script name and
-exit status. The `make-interface-test.py` contract checks registration;
+exit status.
+GNU Make's script recipes must double the dollar in shell-status and
+shell-variable references (`$$?`, `$$script_exit_status`); a plain `$?` is
+Make's automatic prerequisite variable, not the failing child exit code.
+The source-controlled Make-interface regression must reject that mistake. The `make-interface-test.py` contract checks registration;
 an independently successful CI run establishes only execution of these
 mocked cases, not loaded/physical recovery qualification.
 

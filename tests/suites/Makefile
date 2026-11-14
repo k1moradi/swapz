@@ -232,14 +232,14 @@ test-userspace: $(OUT)/swapzctl-status $(OUT)/swapzctl-watch $(OUT)/swapz-primar
 	    script_exit_status=$$?; \
 	    printf 'FAIL: native test-userspace script=%s exit=%s\n' \
 	      'swapz-primary-late-race-test.py' "$$script_exit_status" >&2; \
-	    exit "$script_exit_status"; \
+	    exit "$$script_exit_status"; \
 	  fi
 	@set -e; \
 	  if python3 -B "$(NATIVE)/userspace/swapzctl-trial-ownership-test.py" -q; then :; else \
-	    script_exit_status=$?; \
+	    script_exit_status=$$?; \
 	    printf 'FAIL: native test-userspace script=%s exit=%s\n' \
-	      'swapzctl-trial-ownership-test.py' "$script_exit_status" >&2; \
-	    exit "$script_exit_status"; \
+	      'swapzctl-trial-ownership-test.py' "$$script_exit_status" >&2; \
+	    exit "$$script_exit_status"; \
 	  fi
 
 test-replay-helper: $(OUT)/io-replay-native
