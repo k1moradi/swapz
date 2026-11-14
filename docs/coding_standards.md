@@ -11,8 +11,14 @@ prove the exact named mapper has precisely one swapz target, bind DM device,
 optional DM UUID presence and exact value, event, table generation, target
 index/count/type and sector geometry, and supply canonical cumulative kernel
 counters. An absent UUID must stay absent across samples; neither an empty
-UUID nor a stable DM event number proves an unreplaceable mapper incarnation. No multi-target adoption or
-inference from `/proc/swaps`, host vmstat or PSI is permitted.
+UUID nor a stable DM event number proves an unreplaceable mapper incarnation.
+`target_count` must come from the **complete** wire-validated DM table, not
+from counting filtered swapz rows. Reject a zero/unavailable table generation;
+reusing `event_number` as invented table-generation provenance is prohibited.
+Where no independent source exists, the collector must refuse the watch sample
+rather than supplying a guessed generation or setting `validated=1`.
+No multi-target adoption or inference from `/proc/swaps`, host vmstat or PSI
+is permitted.
 
 Parse the watch interval as an exact canonical decimal number of seconds with
 up to nine fractional digits, between 1 ms and one hour, without exponent,

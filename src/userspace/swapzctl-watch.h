@@ -31,7 +31,10 @@ enum swapz_watch_counter {
 
 /*
  * Only an independently validated, complete two-INFO/final-LIST report may
- * set validated=1. The producer owns no borrowed DM buffers after returning.
+ * set validated=1. target_count MUST be the full DM table's wire-validated
+ * count, not a count of swapz-only report rows. If the collector cannot prove
+ * an independent table-generation source, it MUST refuse the sample even if
+ * event_number is stable. The producer owns no borrowed DM buffers on return.
  * Observational identity is not lifecycle ownership or swapoff authority.
  */
 struct swapz_watch_snapshot {
@@ -42,6 +45,7 @@ struct swapz_watch_snapshot {
 	uint64_t dm_device;
 	uint64_t sector_start;
 	uint64_t sector_count;
+	/* Independently sourced, nonzero table generation; never fake from event_nr. */
 	uint64_t table_generation;
 	uint32_t event_number;
 	uint32_t target_index;

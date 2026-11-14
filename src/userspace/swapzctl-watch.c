@@ -91,6 +91,7 @@ static int swapz_watch_valid_snapshot(const struct swapz_watch_snapshot *snapsho
 
 	if (snapshot->validated != 1 || snapshot->kernel_failed ||
 	    snapshot->kernel_error || !snapshot->dm_device ||
+	    !snapshot->table_generation ||
 	    snapshot->target_count != 1U || snapshot->target_index != 0U ||
 	    !snapshot->sector_count ||
 	    snapshot->sector_start > UINT64_MAX - snapshot->sector_count ||

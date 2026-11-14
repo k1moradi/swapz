@@ -138,7 +138,7 @@ static int test_intervals(void)
 	CHECK(errno == ERANGE);
 	CHECK(memcmp(&unchanged, &result, sizeof(result)) == 0);
 	after = later_sample(1, 0);
-	for (index = 0; index < 14; ++index) {
+	for (index = 0; index < 16; ++index) {
 		struct swapz_watch_snapshot broken = after;
 
 		switch (index) {
@@ -155,6 +155,8 @@ static int test_intervals(void)
 		case 10: broken.dm_uuid[0] = 'X'; break;
 		case 11: broken.has_dm_uuid = 0; broken.dm_uuid[0] = '\0'; break;
 		case 12: broken.has_dm_uuid = 2; break;
+		case 13: broken.table_generation = 0; break;
+		case 14: broken.target_index = 1; break;
 		default: memset(broken.dm_uuid, 'x', sizeof(broken.dm_uuid)); break;
 		}
 		before = sample(0, 0);
@@ -338,6 +340,12 @@ static int test_runner(void)
 	CHECK(swapz_watch_run("swapz-test", 1000000000ULL, 2,
 			      &fixture.stop_requested, &callbacks) == -1);
 	CHECK(errno == ESTALE && fixture.emitted == 0);
+	/* A missing generation is unavailable, even if the event number exists. */
+	fixture = fake_fixture();
+	fixture.readings[0].table_generation = 0;
+	CHECK(swapz_watch_run("swapz-test", 1000000000ULL, 2,
+			      &fixture.stop_requested, &callbacks) == -1);
+	CHECK(errno == EPROTO && fixture.emitted == 0);
 	fixture = fake_fixture();
 	fixture.readings[0].validated = 0;
 	CHECK(swapz_watch_run("swapz-test", 1000000000ULL, 2,

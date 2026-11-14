@@ -57,8 +57,10 @@ with `-Wall -Wextra -Werror -pedantic`; ASan/UBSan are used when available.
 Deterministic fake reader, clock, wait and output callbacks exercise canonical
 1/2-second sampling, actual delayed elapsed time, 64-bit high counter values,
 zero/backward clocks, counter wrap/reset, changed mapper name/dev/event/table
-identity or geometry, multi-target rejection, failed kernel, no module,
-read/clock/wait/output failures, EINTR, cancellation and output EPIPE. Failure
+identity or geometry, zero/unavailable table generation, full-table
+multi-target and invalid selected-target-index rejection, failed kernel,
+no module, read/clock/wait/output failures, EINTR, cancellation and
+output EPIPE. Failure
 reporting names a repository-relative test source and first failed invariant;
 no privileged storage operation is used.
 
