@@ -6,6 +6,7 @@ future privileged harnesses from accidentally selecting the old swapz module
 or the standalone memory-only research smoke instead of the real DM target.
 """
 from collections import Counter
+from functools import lru_cache
 from pathlib import Path
 import re
 import subprocess
@@ -41,6 +42,7 @@ MANDATORY_ROOTLESS_PYTHON_SUITES = (
 )
 
 
+@lru_cache(maxsize=128)
 def _raw_body(symbol: str) -> str:
     match = re.search(r"static\s+(?:noinline\s+)?(?:int|void|bool|u64|unsigned\s+long|enum\s+hrtimer_restart|const\s+u8\s*\*)\s*" + re.escape(symbol) +
                       r"\s*\([^;]*?\)\s*\{", DM, re.S)
@@ -58,6 +60,7 @@ def _raw_body(symbol: str) -> str:
     raise AssertionError("Unclosed function: " + symbol)
 
 
+@lru_cache(maxsize=128)
 def body(symbol: str) -> str:
     source = _raw_body(symbol)
     if symbol == "swapz_status":
@@ -65,6 +68,7 @@ def body(symbol: str) -> str:
     return source
 
 
+@lru_cache(maxsize=128)
 def source_body(symbol: str, source: str) -> str:
     match = re.search(r"(?:static\s+)?(?:int|void|swapz_u8|swapz_u16|swapz_u32)\s+" + re.escape(symbol) +
                       r"\s*\([^;]*?\)\s*\{", source, re.S)
@@ -128,6 +132,19 @@ def status_format_sequence(source: str = "") -> str:
 
 
 class SwapzProductionSourceQualification(unittest.TestCase):
+    def test_source_body_cache_is_bound_to_exact_source_content(self):
+        """Caching must not reuse an extraction from a different source."""
+        original = "static int swapz_cache_probe(void) { return 1; }\n"
+        changed = original.replace("return 1", "return 2")
+        self.assertEqual(
+            source_body("swapz_cache_probe", original).strip(), "return 1;")
+        self.assertEqual(
+            source_body("swapz_cache_probe", changed).strip(), "return 2;")
+        self.assertIs(
+            source_body("swapz_cache_probe", original),
+            source_body("swapz_cache_probe", original))
+        self.assertIs(_raw_body("swapz_status"), _raw_body("swapz_status"))
+
     def test_rootless_native_make_synchronizes_parallel_evidence_output(self):
         runner = (ROOT / "tests/tools/test-rootless.sh").read_text(
             encoding="utf-8")

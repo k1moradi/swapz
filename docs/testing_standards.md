@@ -3398,6 +3398,23 @@ as `counters=unavailable`, never interpolated from raw child fields.
 The owner must not need separate JSON extraction commands to see the
 failed rounds.
 
+### Bounded source-contract extraction cache
+
+The source-contract unittest imports production C text once per invocation.
+Its repeated extraction of the same function body may reuse a process-local,
+bounded 128-entry memoized result for each helper. The key for any helper that
+accepts a source string includes the **complete immutable source text**, not
+only its symbol name: altered/synthetic source fixtures must receive fresh
+extraction, including malformed-input rejection. No cache persists across
+commits, processes or test invocations; this is an execution accelerator only,
+not qualification evidence or an authorization to skip source checks.
+
+The interactive unified qualification table disables xterm focus reporting
+before rendering rows, preventing focus input from echoing as `^[[I` or
+`^[[O`. Redirected stdout and noninteractive invocations emit no control
+sequence. Existing progress verdicts, terminal width, authentic completion
+events, report JSON and timeout ownership remain unchanged.
+
 ### Native/rootless fail-only subprocess attribution
 
 The private `tests/tools/test-rootless.sh` runner must keep the exact registered
