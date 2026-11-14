@@ -355,7 +355,8 @@ exec sleep 30
         self.assertEqual(self.diagnostics._ci_make_recipe_owner(recipe_line),
                          "test-userspace")
         private_log = "build/tests/rootless-failure.Abc123xy/diagnostic.log"
-        for binary_name in ("swapzctl-status", "swapz-primary-policy",
+        for binary_name in ("swapzctl-status", "swapzctl-watch",
+                            "swapz-primary-policy",
                             "swapz-primary-mount-namespace"):
             with self.subTest(binary_name=binary_name):
                 marker = (

@@ -450,7 +450,7 @@ classify_rootless_private_make_failure() {
             $line =~ ^FAIL:[[:space:]]native[[:space:]]test-mapping[[:space:]]binary=([a-z0-9-]{1,64})[[:space:]]exit=([0-9]{1,3})$ ]]; then
       mapping_native_test=${BASH_REMATCH[1]}
       mapping_runtime_exit=${BASH_REMATCH[2]}
-    elif [[ $line =~ ^FAIL:[[:space:]]native[[:space:]]test-userspace[[:space:]]binary=(swapzctl-status|swapz-primary-policy|swapz-primary-mount-namespace)[[:space:]]exit=([0-9]+)$ ]]; then
+    elif [[ $line =~ ^FAIL:[[:space:]]native[[:space:]]test-userspace[[:space:]]binary=(swapzctl-status|swapzctl-watch|swapz-primary-policy|swapz-primary-mount-namespace)[[:space:]]exit=([0-9]+)$ ]]; then
       userspace_native_test=${BASH_REMATCH[1]}
       userspace_runtime_exit=${BASH_REMATCH[2]}
     elif [[ $line =~ ^FAIL:[[:space:]]native[[:space:]]test-userspace[[:space:]]script=(swapz-primary-late-race-test[.]py)[[:space:]]exit=([0-9]+)$ ]]; then

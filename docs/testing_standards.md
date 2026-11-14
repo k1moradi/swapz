@@ -60,7 +60,7 @@ See `docs/handoff/swapzctl-trial-ownership-audit.md`.
 ### Native userspace first-failure reporting
 
 The native-rootless CI reporter must accept only the producer-authenticated
-`swapzctl-status`, `swapz-primary-policy` and
+`swapzctl-status`, `swapzctl-watch`, `swapz-primary-policy` and
 `swapz-primary-mount-namespace` executable names under the
 `Makefile native and metadata` / `test-userspace` nonzero Make-exit-2
 envelope. It must preserve the binary name, first child exit, verified Make

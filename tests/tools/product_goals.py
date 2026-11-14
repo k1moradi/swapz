@@ -515,7 +515,7 @@ def diagnose_ci_failure(lines, exit_code, suite):
         r"subtest=(?P<subtest>[a-z0-9-]{1,64}|unavailable) "
         r"test=(?P<test>test_[A-Za-z0-9_]{1,96}|"
         r"swapz-primary-late-race-test[.]py|"
-        r"swapzctl-status|swapz-primary-policy|"
+        r"swapzctl-status|swapzctl-watch|swapz-primary-policy|"
         r"swapz-primary-mount-namespace|unavailable) "
         r"exit=(?P<exit>[0-9]{1,3}) "
         r"reason=(?P<reason>nonzero_exit|native_compile|timeout_or_exit_124|"
@@ -577,7 +577,8 @@ def diagnose_ci_failure(lines, exit_code, suite):
             rootless_pattern.fullmatch(safe_line)
             if suite == "native-rootless" else None)
         if rootless_match is not None and rootless_match.group("test") in (
-                "swapzctl-status", "swapz-primary-policy",
+                "swapzctl-status", "swapzctl-watch",
+                "swapz-primary-policy",
                 "swapz-primary-mount-namespace"):
             # The producer verifies these fixed binaries against its own
             # test-userspace Make recipe. Reject cross-phase identity claims.
