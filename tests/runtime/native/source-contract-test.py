@@ -42,22 +42,37 @@ MANDATORY_ROOTLESS_PYTHON_SUITES = (
 )
 
 
+def _balanced_function_body(source: str, start: int, unclosed_label: str) -> str:
+    """Find exact body boundaries without walking each source byte in Python.
+
+    This deliberately counts literal braces in comments and strings, just as
+    the existing source-contract extractor does. Only the search engine changes.
+    """
+    depth = 1
+    next_character = start
+    while next_character < len(source):
+        next_open = source.find("{", next_character)
+        next_close = source.find("}", next_character)
+        if next_close < 0:
+            break
+        if 0 <= next_open < next_close:
+            depth += 1
+            next_character = next_open + 1
+        else:
+            depth -= 1
+            if depth == 0:
+                return source[start:next_close]
+            next_character = next_close + 1
+    raise AssertionError("Unclosed " + unclosed_label)
+
+
 @lru_cache(maxsize=128)
 def _raw_body(symbol: str) -> str:
     match = re.search(r"static\s+(?:noinline\s+)?(?:int|void|bool|u64|unsigned\s+long|enum\s+hrtimer_restart|const\s+u8\s*\*)\s*" + re.escape(symbol) +
                       r"\s*\([^;]*?\)\s*\{", DM, re.S)
     if not match:
         raise AssertionError(f"Missing production symbol {symbol}")
-    start = match.end()
-    depth = 1
-    for pos in range(start, len(DM)):
-        if DM[pos] == "{":
-            depth += 1
-        elif DM[pos] == "}":
-            depth -= 1
-            if depth == 0:
-                return DM[start:pos]
-    raise AssertionError("Unclosed function: " + symbol)
+    return _balanced_function_body(DM, match.end(), "function: " + symbol)
 
 
 @lru_cache(maxsize=128)
@@ -74,16 +89,8 @@ def source_body(symbol: str, source: str) -> str:
                       r"\s*\([^;]*?\)\s*\{", source, re.S)
     if not match:
         raise AssertionError(f"Missing source symbol {symbol}")
-    start = match.end()
-    depth = 1
-    for pos in range(start, len(source)):
-        if source[pos] == "{":
-            depth += 1
-        elif source[pos] == "}":
-            depth -= 1
-            if depth == 0:
-                return source[start:pos]
-    raise AssertionError("Unclosed source function: " + symbol)
+    return _balanced_function_body(
+        source, match.end(), "source function: " + symbol)
 
 
 def status_format_sequence(source: str = "") -> str:
@@ -144,6 +151,32 @@ class SwapzProductionSourceQualification(unittest.TestCase):
             source_body("swapz_cache_probe", original),
             source_body("swapz_cache_probe", original))
         self.assertIs(_raw_body("swapz_status"), _raw_body("swapz_status"))
+
+    def test_source_body_delimiter_search_preserves_nested_brace_boundaries(self):
+        # Source-contract extraction has historically counted literal braces
+        # even inside strings and comments. Preserve that exact byte oracle.
+        bodies = (
+            " return 1; ",
+            " if (ready) { return 2; } return 0; ",
+            ' const char *text = "{literal}"; /* {comment} */ '
+            "if (ready) { { return 3; } } ",
+        )
+        for body_bytes in bodies:
+            with self.subTest(body=body_bytes):
+                source = "static int swapz_brace_probe(void) {" + body_bytes + "}"
+                self.assertEqual(source_body("swapz_brace_probe", source),
+                                 body_bytes)
+                self.assertIs(
+                    source_body("swapz_brace_probe", source),
+                    source_body("swapz_brace_probe", source))
+        with self.assertRaisesRegex(
+                AssertionError, "Unclosed source function: swapz_brace_probe"):
+            source_body("swapz_brace_probe",
+                        "static int swapz_brace_probe(void) { if (ready) { }")
+        with self.assertRaisesRegex(
+                AssertionError, "Missing source symbol swapz_missing_probe"):
+            source_body("swapz_missing_probe",
+                        "static int swapz_brace_probe(void) { return 0; }")
 
     def test_rootless_native_make_synchronizes_parallel_evidence_output(self):
         runner = (ROOT / "tests/tools/test-rootless.sh").read_text(

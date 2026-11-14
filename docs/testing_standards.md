@@ -3512,6 +3512,14 @@ only its symbol name: altered/synthetic source fixtures must receive fresh
 extraction, including malformed-input rejection. No cache persists across
 commits, processes or test invocations; this is an execution accelerator only,
 not qualification evidence or an authorization to skip source checks.
+Both C function-body extractors may use built-in forward delimiter searches
+instead of Python per-character brace loops. Preserve the original exact
+lexical behavior: every literal `{` and `}` counts, including in C comments
+and quoted strings; nested braces, the returned byte span, and distinct
+missing-symbol/unclosed-function errors must remain unchanged. This is
+source parsing CPU optimization only, not a relaxation of syntax or a
+qualifying test shortcut. Rootless regression must exercise both nested
+and literal braces, unchanged cached results, and malformed-source errors.
 
 The interactive unified qualification table disables xterm focus reporting
 before rendering rows, preventing focus input from echoing as `^[[I` or
