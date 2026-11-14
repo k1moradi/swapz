@@ -7462,13 +7462,17 @@ class PhysicalSwapProbeTests(unittest.TestCase):
             stack.enter_context(mock.patch.object(
                 probe, "_git_result", return_value=subprocess.CompletedProcess(
                     [], 0, stdout="source")))
-            stack.enter_context(mock.patch.object(
+            identity = stack.enter_context(mock.patch.object(
                 probe, "_verify_target_identity"))
             stack.enter_context(mock.patch.object(
+                probe, "block_identity", return_value=(8, 4)))
+            header = stack.enter_context(mock.patch.object(
                 probe, "_read_block0", return_value=b"known"))
             commands = stack.enter_context(mock.patch.object(probe, "_run"))
             output = probe._run_algorithm_raw_swap_comparison(
                 state, target, Path(directory), monitor)
+            self.assertEqual(identity.call_count, 2)
+            self.assertEqual(header.call_count, 2)
         self.assertEqual(output["mode"], "raw_linux_swap")
         self.assertTrue(output["workload"]["slot_reuse_proven"])
         self.assertTrue(workload._run_workload.call_args.kwargs["raw_linux_swap"])
@@ -7477,6 +7481,116 @@ class PhysicalSwapProbeTests(unittest.TestCase):
         self.assertIn("raw-compare",
                       str(workload.pin_real_swap_oracle.call_args.args[1]))
         commands.assert_not_called()
+
+
+    def test_paired_raw_guard_samples_cheap_identity_without_subprocess_churn(self):
+        raw = SimpleNamespace(
+            device=(8, 4), type="partition", used_kib=0,
+            priority=-1, size_kib=16 * 1024 * 1024)
+        policy = {"workload_mib": 384, "resident_mib": 128,
+                  "swap_limit_mib": 384, "timeout_seconds": 240}
+        def run_workload(*_args, telemetry_check, **_kwargs):
+            for _ in range(4):
+                telemetry_check()
+            return {"slot_reuse_proven": True, "reuse_rounds": 2}
+        workload = SimpleNamespace(
+            Blocked=ValueError, QualificationFailure=RuntimeError,
+            read_swap_rows=mock.Mock(return_value=[raw]),
+            _row_for_device=lambda rows, device: raw,
+            require_expected_swap_priority=mock.Mock(),
+            _swap_identity=lambda rows, excluded: set(),
+            pin_real_swap_oracle=mock.Mock(return_value=(
+                Path("/private/oracle.py"), "a" * 64)),
+            _run_workload=mock.Mock(side_effect=run_workload))
+        state = {"source_sha": "a" * 40, "run_id": "1" * 32}
+        target = {"major": 8, "minor": 4, "swap_was_active": True,
+                  "swap_used_kib": 0, "swap_priority": -1,
+                  "device": "/dev/sda4", "header": b"known"}
+        with tempfile.TemporaryDirectory() as directory, ExitStack() as stack:
+            stack.enter_context(mock.patch.object(
+                probe, "_algorithm_real_swap_workload",
+                return_value=(workload, policy)))
+            stack.enter_context(mock.patch.object(
+                probe, "_git_result", return_value=subprocess.CompletedProcess(
+                    [], 0, stdout="source")))
+            stack.enter_context(mock.patch.object(
+                probe.time, "monotonic_ns", side_effect=[
+                    1_000_000_000, 1_100_000_000, 1_150_000_000,
+                    2_400_000_000, 2_600_000_000, 2_700_000_000]))
+            full_identity = stack.enter_context(mock.patch.object(
+                probe, "_verify_target_identity"))
+            cheap_identity = stack.enter_context(mock.patch.object(
+                probe, "block_identity", return_value=(8, 4)))
+            header = stack.enter_context(mock.patch.object(
+                probe, "_read_block0", return_value=b"known"))
+            stack.enter_context(mock.patch.object(probe, "_run"))
+            result = probe._run_algorithm_raw_swap_comparison(
+                state, target, Path(directory), mock.Mock())
+        self.assertEqual(result["status"], "PASS")
+        self.assertEqual(cheap_identity.call_count, 6)
+        self.assertEqual(full_identity.call_count, 3)
+        self.assertEqual(header.call_count, 3)
+        self.assertEqual(workload.read_swap_rows.call_count, 7)
+
+    def test_paired_raw_pressure_failure_preserves_numeric_diagnostic(self):
+        raw = SimpleNamespace(
+            device=(8, 4), type="partition", used_kib=0,
+            priority=-1, size_kib=16 * 1024 * 1024)
+        policy = {"workload_mib": 384, "resident_mib": 128,
+                  "swap_limit_mib": 384, "timeout_seconds": 240}
+        refusal = RuntimeError(
+            "sustained cgroup memory PSI full exceeded safe stop threshold")
+        refusal.pressure_observation = {
+            "window_usec": 5_000_000, "stalled_usec": 4_900_000,
+            "limit_usec": 4_250_000, "workload_phase": "fill",
+            "raw_swap_used_kib": 262_144,
+            "raw_cgroup_swap_bytes": 262_144 * 1024,
+            "raw_pswpout_delta": 0, "lower_write_sectors_delta": 0,
+            "progress_sample_age_usec": 900_000,
+            "private_path": "/private/do-not-print"}
+        workload = SimpleNamespace(
+            Blocked=ValueError, QualificationFailure=RuntimeError,
+            read_swap_rows=mock.Mock(return_value=[raw]),
+            _row_for_device=lambda rows, device: raw,
+            require_expected_swap_priority=mock.Mock(),
+            _swap_identity=lambda rows, excluded: set(),
+            pin_real_swap_oracle=mock.Mock(return_value=(
+                Path("/private/oracle.py"), "a" * 64)),
+            _run_workload=mock.Mock(side_effect=refusal))
+        state = {"source_sha": "a" * 40, "run_id": "1" * 32}
+        target = {"major": 8, "minor": 4, "swap_was_active": True,
+                  "swap_used_kib": 0, "swap_priority": -1,
+                  "device": "/dev/sda4", "header": b"known"}
+        stderr = io.StringIO()
+        with tempfile.TemporaryDirectory() as directory, ExitStack() as stack:
+            stack.enter_context(mock.patch.object(
+                probe, "_algorithm_real_swap_workload",
+                return_value=(workload, policy)))
+            stack.enter_context(mock.patch.object(
+                probe, "_git_result", return_value=subprocess.CompletedProcess(
+                    [], 0, stdout="source")))
+            stack.enter_context(mock.patch.object(
+                probe, "block_identity", return_value=(8, 4)))
+            stack.enter_context(mock.patch.object(
+                probe, "_verify_target_identity"))
+            stack.enter_context(mock.patch.object(
+                probe, "_read_block0", return_value=b"known"))
+            stack.enter_context(mock.patch.object(probe.sys, "stderr", stderr))
+            with self.assertRaisesRegex(
+                    probe.ProbeError, "bounded ordinary Linux swap comparison failed"
+            ) as rejected:
+                probe._run_algorithm_raw_swap_comparison(
+                    state, target, Path(directory), mock.Mock())
+        marker_lines = [line for line in stderr.getvalue().splitlines()
+                        if line.startswith("PHYSICAL_ALGORITHM_DEBUG=")]
+        self.assertEqual(len(marker_lines), 1)
+        diagnostic = rejected.exception.workload_diagnostic
+        self.assertEqual(diagnostic["phase"], "raw_linux_swap_workload")
+        self.assertEqual(diagnostic["reason"], "memory_pressure")
+        self.assertEqual(diagnostic["pressure"]["raw_pswpout_delta"], 0)
+        self.assertEqual(diagnostic["pressure"]["progress_sample_age_usec"], 900_000)
+        self.assertEqual(diagnostic["pressure"]["raw_swap_used_kib"], 262_144)
+        self.assertNotIn("do-not-print", stderr.getvalue())
 
     def test_paired_raw_phase_rejects_competing_equal_priority_swapfile(self):
         raw = SimpleNamespace(device=(8, 4), type="partition",

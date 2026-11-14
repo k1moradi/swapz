@@ -131,6 +131,21 @@ verified recovery. Rootless regressions must cover RAW attribution, PSI
 no-progress, corrupted/missing bytes, competing swap, namespace ownership,
 and no new swapoff/mkswap path.
 
+The read-only unprivileged selector reports an equal-or-higher-priority
+foreign swap area **before** prompting for paired physical consent. This is
+only an early refusal: the root-owned guard repeats the exact priority and
+inventory proof after its partition ownership claim. A refusal must not change
+any unrelated swapfile's priority or activation state. During a RAW oracle
+wait, cheap block-identity and full `/proc/swaps` inventory equality checks
+run on every callback; expensive full topology/card identity and byte-exact
+swap-header checks run at entry, at least every second, and at completion.
+The existing complete identity proof immediately before swapoff remains
+mandatory. The bounded, development-only producer diagnostic records numeric
+RAW cgroup/partition charge, `pswpout`/`pswpin` and selected-sector deltas,
+and the age of its last sampled progress counter on a PSI stop. Missing or
+stale progress does NOT authorize continuing the test. Preserve the original
+85% FULL PSI for 5 seconds policy and exact physical recovery guarantees.
+
 ## Real-partition architecture preflight
 
 The owner-approved partition architectures are little-endian x86_64 and ARM64
