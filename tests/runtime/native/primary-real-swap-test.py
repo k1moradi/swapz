@@ -5165,6 +5165,36 @@ class PrimaryRealSwapContracts(unittest.TestCase):
         self.assertEqual(digest, hashlib.sha256(payload).hexdigest())
 
 
+
+    def test_raw_psi_stop_retains_bounded_swap_progress_observation(self):
+        window = qualify.PsiStallWindow(0.0, 0)
+        window.observe(5.0, 4_500_000)
+        before = {name: None for name, _ in qualify.PRESSURE_PROGRESS_COUNTERS}
+        after = dict(before)
+        before.update(raw_pswpout_total=100, raw_pswpin_total=20,
+                      lower_write_sectors_total=40)
+        after.update(raw_pswpout_total=100, raw_pswpin_total=20,
+                     lower_write_sectors_total=40,
+                     raw_swap_used_kib=2048, raw_cgroup_swap_bytes=2 * qualify.MIB)
+        samples = deque([(1.0, before), (4.0, after)])
+        with mock.patch.object(qualify, "_mem_available_mib", return_value=12000), \
+                mock.patch.object(qualify, "_read_uint", return_value=2 * qualify.MIB), \
+                mock.patch.object(qualify, "_psi_total", return_value=0), \
+                mock.patch.object(qualify, "_memory_events", return_value={"max": 0}), \
+                mock.patch.object(qualify, "_backing_inflight_requests", return_value=1), \
+                mock.patch.object(qualify, "read_block_stats", return_value=qualify.BlockStats(0, 40)):
+            failure = qualify._workload_pressure_failure(
+                window, Path("/synthetic/cgroup"), lambda: {}, (8, 4),
+                "fill", progress_samples=samples, observed_time=5.0,
+                workload_started=0.0, phase_started=1.0, round_index=1)
+        observation = failure.pressure_observation
+        self.assertEqual(observation["raw_swap_used_kib"], 2048)
+        self.assertEqual(observation["raw_cgroup_swap_bytes"], 2 * qualify.MIB)
+        self.assertEqual(observation["raw_pswpout_delta"], 0)
+        self.assertEqual(observation["lower_write_sectors_delta"], 0)
+        self.assertEqual(observation["progress_sample_age_usec"], 1_000_000)
+        self.assertEqual(observation["workload_phase"], "fill")
+
     def test_raw_comparison_evidence_requires_real_sectors_swapin_and_exact_bytes(self):
         # No fake dmsetup status is supplied for the ordinary Linux swap side.
         before = qualify.BlockStats(read_sectors=10, write_sectors=20)

@@ -697,6 +697,71 @@ class AlgorithmPhysicalTest(unittest.TestCase):
         self.assertEqual(state["other_active_swap_count"], 1)
         self.assertEqual(state["other_active_swapfile_count"], 1)
         self.assertEqual(state["other_active_partition_count"], 0)
+        self.assertEqual(state["highest_unrelated_swap_priority"], -1)
+
+
+    def test_paired_raw_competing_swap_priority_refuses_before_consent(self):
+        # An equal-priority swapfile can receive pages. Do not modify it.
+        candidate = {
+            "path": "/dev/sdb1", "parent": "/dev/sdb",
+            "partuuid": "f13428f6-01", "size_bytes": 116 * 1024 ** 3,
+            "selector": "/dev/disk/by-partuuid/f13428f6-01",
+            "parent_has_other_partitions": False,
+            "active_swap": {"used_kib": 177572, "priority": -1,
+                            "capacity_kib": 121863164},
+            "highest_unrelated_swap_priority": -1,
+            "other_active_partition_count": 0,
+        }
+        with contextlib.ExitStack() as stack:
+            stack.enter_context(mock.patch.object(
+                subject.sys.stdin, "isatty", return_value=True))
+            stack.enter_context(mock.patch.object(
+                subject.sys.stdout, "isatty", return_value=True))
+            stack.enter_context(mock.patch.object(
+                subject, "_require_read_only_preflight",
+                return_value=candidate))
+            consent = stack.enter_context(mock.patch("builtins.input"))
+            privileged = stack.enter_context(mock.patch.object(
+                subject.subprocess, "run"))
+            output = stack.enter_context(mock.patch("builtins.print"))
+            self.assertEqual(subject.main(compare_raw=True), 2)
+        consent.assert_not_called()
+        privileged.assert_not_called()
+        self.assertTrue(any(
+            "paired_raw_swap_competing_priority_not_lower" in str(call)
+            for call in output.call_args_list))
+
+    def test_paired_raw_lower_priority_swapfile_does_not_preblock(self):
+        candidate = {
+            "path": "/dev/sdb1", "parent": "/dev/sdb",
+            "partuuid": "f13428f6-01", "size_bytes": 116 * 1024 ** 3,
+            "selector": "/dev/disk/by-partuuid/f13428f6-01",
+            "parent_has_other_partitions": False,
+            "active_swap": {"used_kib": 0, "priority": -1,
+                            "capacity_kib": 121863164},
+            "highest_unrelated_swap_priority": -2,
+            "other_active_partition_count": 0,
+        }
+        with contextlib.ExitStack() as stack:
+            stack.enter_context(mock.patch.object(
+                subject.sys.stdin, "isatty", return_value=True))
+            stack.enter_context(mock.patch.object(
+                subject.sys.stdout, "isatty", return_value=True))
+            stack.enter_context(mock.patch.object(
+                subject, "_require_read_only_preflight",
+                return_value=candidate))
+            stack.enter_context(mock.patch.object(
+                subject, "_canonical_source_preflight", return_value=None))
+            stack.enter_context(mock.patch(
+                "builtins.input", return_value="yes"))
+            stack.enter_context(mock.patch.object(
+                subject.shutil, "which", return_value="/usr/bin/sudo"))
+            privileged = stack.enter_context(mock.patch.object(
+                subject.subprocess, "run",
+                return_value=SimpleNamespace(returncode=2)))
+            self.assertEqual(subject.main(compare_raw=True), 2)
+        self.assertEqual(privileged.call_count, 1)
+        self.assertIn("--compare-raw", privileged.call_args.args[0])
 
     def test_shared_parent_reaches_only_privileged_fail_closed_gate(self):
         candidate = {

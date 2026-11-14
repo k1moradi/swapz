@@ -3901,6 +3901,10 @@ def _emit_algorithm_workload_failure(error, phase="anonymous_workload"):
         "real-swap byte oracle reported corruption or incomplete verification": "byte_oracle",
         "cgroup OOM counters changed during admitted real-swap workload": "cgroup_oom",
         "sustained cgroup memory PSI full exceeded safe stop threshold": "memory_pressure",
+        "raw swap did not reach the required real-swap floor": "raw_swap_floor",
+        "raw swap workload encountered cgroup OOM": "cgroup_oom",
+        "raw swap lacked independent backing I/O and Linux swap evidence": "raw_io",
+        "raw swap byte oracle reported corruption or incomplete verification": "byte_oracle",
     }
     first_cause = str(error).split("; cleanup also failed:", 1)[0]
     original_errno = _errno_text(error)
@@ -3944,6 +3948,11 @@ def _emit_algorithm_workload_failure(error, phase="anonymous_workload"):
                 "swapz_commit_nonio_wall_delta_ns",
                 "swapz_prep_wait_wall_delta_ns",
                 "lower_write_sectors_delta", "lower_write_requests_delta",
+                "lower_read_sectors_delta",
+                "raw_swap_used_kib", "raw_cgroup_swap_bytes",
+                "raw_pswpout_total", "raw_pswpin_total",
+                "raw_pswpout_delta", "raw_pswpin_delta",
+                "progress_sample_age_usec",
                 "workload_elapsed_usec", "phase_elapsed_usec", "round_index")
             pressure = {key: observation.get(key) for key in fields}
             for key, value in pressure.items():
@@ -4261,10 +4270,24 @@ def _run_algorithm_raw_swap_comparison(state, target, state_dir, monitor):
     except (workload.Blocked, workload.QualificationFailure) as exc:
         raise ProbeError("paired raw oracle is not source authenticated") from exc
 
-    def guard_raw():
-        _verify_target_identity(target)
-        if _read_block0(target["device"], target) != target["header"]:
-            raise ProbeError("paired raw swap header changed")
+    last_full_identity_ns = 0
+
+    def guard_raw(*, force=False):
+        # The oracle guard is called on each ~100ms wait. Re-running lsblk,
+        # blockdev and the full card probe at that rate can itself distort
+        # the raw baseline, especially on the USB/shared-root machine.
+        # Keep the cheap device and /proc/swaps checks on EVERY callback;
+        # repeat the complete identity/header proof at most once per second,
+        # plus mandatory entry/exit checks before any owned swapoff.
+        nonlocal last_full_identity_ns
+        if block_identity(target["device"]) != device:
+            raise ProbeError("paired raw swap block identity changed")
+        now_ns = time.monotonic_ns()
+        if force or now_ns - last_full_identity_ns >= 1_000_000_000:
+            _verify_target_identity(target)
+            if _read_block0(target["device"], target) != target["header"]:
+                raise ProbeError("paired raw swap header changed")
+            last_full_identity_ns = now_ns
         current_rows = workload.read_swap_rows()
         current = workload._row_for_device(current_rows, device)
         if (current is None or current.type != "partition" or
@@ -4275,6 +4298,7 @@ def _run_algorithm_raw_swap_comparison(state, target, state_dir, monitor):
             raise ProbeError("paired raw swap inventory or identity changed")
         monitor.sample()
 
+    guard_raw(force=True)
     monitor.sample(force=True)
     try:
         result = workload._run_workload(
@@ -4286,11 +4310,18 @@ def _run_algorithm_raw_swap_comparison(state, target, state_dir, monitor):
             telemetry_check=guard_raw,
             expected_mapper_baseline_kib=raw_row.used_kib,
             development_progress_aware_psi=True, raw_linux_swap=True)
-        guard_raw()
+        guard_raw(force=True)
     except (workload.Blocked, workload.QualificationFailure) as exc:
-        raise ProbeError(
+        # Preserve the original bounded producer's numeric PSI window and
+        # progress deltas before ownership cleanup destroys the cgroup.
+        # One failure marker is emitted; physical recovery still runs.
+        diagnostic = _emit_algorithm_workload_failure(
+            exc, phase="raw_linux_swap_workload")
+        failure = ProbeError(
             "bounded ordinary Linux swap comparison failed: " +
-            _bounded_text(exc)) from exc
+            _bounded_text(exc))
+        failure.workload_diagnostic = diagnostic
+        raise failure from exc
     return {
         "status": "PASS",
         "mode": "raw_linux_swap",

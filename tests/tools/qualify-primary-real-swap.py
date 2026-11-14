@@ -3774,6 +3774,18 @@ def _workload_pressure_failure(window: PsiStallWindow, cgroup: Path,
             if observed_time is not None and phase_started is not None
             else None)
         observation["round_index"] = round_index
+        # The raw workload has no dmsetup status counters. Preserve only
+        # read-only selected-partition/cgroup/Linux observations from the
+        # most recent bounded sample, including its actual age.
+        if progress_samples and "raw_swap_used_kib" in progress_samples[-1][1]:
+            sampled_at, last_sample = progress_samples[-1]
+            for key in ("raw_swap_used_kib", "raw_cgroup_swap_bytes",
+                        "raw_pswpout_total", "raw_pswpin_total"):
+                observation[key] = last_sample.get(key)
+            observation["progress_sample_age_usec"] = (
+                int((observed_time - sampled_at) * 1_000_000)
+                if observed_time is not None and observed_time >= sampled_at
+                else None)
     readers = {
         "mem_available_mib": _mem_available_mib,
         "cgroup_memory_bytes": lambda: _read_uint(cgroup / "memory.current"),

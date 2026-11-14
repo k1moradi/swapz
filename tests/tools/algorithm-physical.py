@@ -129,6 +129,7 @@ def _selected_swap_inventory(partition: dict, swap_lines: list[str]) -> dict:
     unrelated = 0
     unrelated_swapfiles = 0
     unrelated_partitions = 0
+    highest_unrelated_priority = None
     for line in swap_lines[1:]:
         fields = line.split()
         if len(fields) != 5:
@@ -150,6 +151,9 @@ def _selected_swap_inventory(partition: dict, swap_lines: list[str]) -> dict:
         if swap_kind == "file":
             unrelated += 1
             unrelated_swapfiles += 1
+            highest_unrelated_priority = (
+                priority_number if highest_unrelated_priority is None
+                else max(priority_number, highest_unrelated_priority))
             continue
         try:
             active_stat = os.stat(swap_path)
@@ -164,6 +168,9 @@ def _selected_swap_inventory(partition: dict, swap_lines: list[str]) -> dict:
         else:
             unrelated += 1
             unrelated_partitions += 1
+            highest_unrelated_priority = (
+                priority_number if highest_unrelated_priority is None
+                else max(priority_number, highest_unrelated_priority))
     if len(matching) > 1:
         raise ValueError("duplicate active swap entries for selected partition")
     active = matching[0] if matching else None
@@ -174,6 +181,9 @@ def _selected_swap_inventory(partition: dict, swap_lines: list[str]) -> dict:
         "other_active_swap_count": unrelated,
         "other_active_swapfile_count": unrelated_swapfiles,
         "other_active_partition_count": unrelated_partitions,
+        # Read-only advisory. The root helper independently revalidates
+        # priority and source identity under its existing ownership claim.
+        "highest_unrelated_swap_priority": highest_unrelated_priority,
     }
 
 
@@ -422,6 +432,11 @@ def main(*, compare_raw: bool = False) -> int:
         blockers.append("unrelated_active_partition_not_supported")
     if compare_raw and active_swap is None:
         blockers.append("paired_raw_swap_requires_active_partition")
+    if compare_raw and active_swap is not None:
+        highest_foreign_priority = selected.get("highest_unrelated_swap_priority")
+        if (type(highest_foreign_priority) is int and
+                highest_foreign_priority >= active_swap["priority"]):
+            blockers.append("paired_raw_swap_competing_priority_not_lower")
     if compare_raw and active_swap is not None:
         print("  Paired mode: exact raw Linux swap oracle before owned swapoff,")
         print("  then the identical oracle on swapz; foreign swap traffic refuses.")
