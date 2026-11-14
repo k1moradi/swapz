@@ -3586,12 +3586,19 @@ def _pressure_progress_snapshot(cgroup: Path,
     observed["swapz_error"] = None
     if raw_linux_swap:
         observed["raw_swap_used_kib"] = None
+        observed["raw_swap_used_after_kib"] = None
         observed["raw_cgroup_swap_bytes"] = None
         try:
+            # /proc/swaps and memory.swap.current are not an atomic pair.
+            # Read the partition twice around the cgroup charge so a
+            # one-page discrepancy is diagnostic, never a guessed match.
             row = _row_for_device(read_swap_rows(), lower_device)
             if row is not None:
                 observed["raw_swap_used_kib"] = row.used_kib
             observed["raw_cgroup_swap_bytes"] = _read_uint(cgroup / "memory.swap.current")
+            row_after = _row_for_device(read_swap_rows(), lower_device)
+            if row_after is not None:
+                observed["raw_swap_used_after_kib"] = row_after.used_kib
             swap_counters = read_vmstat()
             observed["raw_pswpout_total"] = swap_counters["pswpout"]
             observed["raw_pswpin_total"] = swap_counters["pswpin"]
@@ -3662,6 +3669,26 @@ def _pressure_progress_deltas(samples: deque, window: PsiStallWindow) -> dict:
     return deltas
 
 
+
+def _raw_recent_pressure_progress_deltas(
+        samples: deque, window: PsiStallWindow) -> dict:
+    """Check only the latest approximately four seconds of raw-swap I/O.
+
+    Cumulative progress since the start of a long FULL-PSI window must not
+    substitute for fresh progress. Keep one sample period of scheduling
+    slack beyond the frozen three-second minimum.
+    """
+    if not samples:
+        return _pressure_progress_deltas(samples, window)
+    recent_start = samples[-1][0] - (
+        DEVELOPMENT_PSI_PROGRESS_MIN_WINDOW_USEC / 1_000_000 +
+        PRESSURE_PROGRESS_SAMPLE_SECONDS * 1.25)
+    recent_samples = deque(
+        (sample_time, values) for sample_time, values in samples
+        if sample_time >= recent_start)
+    return _pressure_progress_deltas(recent_samples, window)
+
+
 def _development_pressure_has_owned_progress(
         samples: deque, window: PsiStallWindow, phase: str) -> bool:
     """Permit high PSI in the DEV smoke only with independently proven I/O.
@@ -3710,7 +3737,7 @@ def _development_raw_pressure_has_owned_progress(
     assignment. Whole-device sectors and vmstat alone are NOT enough to
     attribute traffic to the bounded test group.
     """
-    deltas = _pressure_progress_deltas(samples, window)
+    deltas = _raw_recent_pressure_progress_deltas(samples, window)
     if (deltas["progress_window_usec"] is None or
             deltas["progress_window_usec"] <
             DEVELOPMENT_PSI_PROGRESS_MIN_WINDOW_USEC or not samples):
@@ -3760,7 +3787,9 @@ def _workload_pressure_failure(window: PsiStallWindow, cgroup: Path,
                                observed_time: float | None = None,
                                workload_started: float | None = None,
                                phase_started: float | None = None,
-                               round_index: int | None = None) -> QualificationFailure:
+                               round_index: int | None = None,
+                               raw_swap_baseline_used_kib: int | None = None
+                               ) -> QualificationFailure:
     """Capture bounded context before child cleanup changes the first PSI stop."""
     observation = {**window.observation(), "workload_phase": phase}
     if progress_samples is not None:
@@ -3779,13 +3808,37 @@ def _workload_pressure_failure(window: PsiStallWindow, cgroup: Path,
         # most recent bounded sample, including its actual age.
         if progress_samples and "raw_swap_used_kib" in progress_samples[-1][1]:
             sampled_at, last_sample = progress_samples[-1]
-            for key in ("raw_swap_used_kib", "raw_cgroup_swap_bytes",
-                        "raw_pswpout_total", "raw_pswpin_total"):
+            for key in ("raw_swap_used_kib", "raw_swap_used_after_kib",
+                        "raw_cgroup_swap_bytes", "raw_pswpout_total",
+                        "raw_pswpin_total"):
                 observation[key] = last_sample.get(key)
             observation["progress_sample_age_usec"] = (
                 int((observed_time - sampled_at) * 1_000_000)
                 if observed_time is not None and observed_time >= sampled_at
                 else None)
+            observation["raw_swap_baseline_used_kib"] = (
+                raw_swap_baseline_used_kib)
+            observed_used = last_sample.get("raw_swap_used_kib")
+            observed_charge = last_sample.get("raw_cgroup_swap_bytes")
+            observation["raw_attribution_gap_bytes"] = (
+                observed_charge -
+                (observed_used - raw_swap_baseline_used_kib) * 1024
+                if (type(observed_used) is int and
+                    type(observed_charge) is int and
+                    type(raw_swap_baseline_used_kib) is int and
+                    observed_used >= raw_swap_baseline_used_kib)
+                else None)
+            recent = _raw_recent_pressure_progress_deltas(
+                progress_samples, window)
+            for original, name in (
+                    ("progress_window_usec", "raw_recent_progress_window_usec"),
+                    ("raw_pswpout_delta", "raw_recent_pswpout_delta"),
+                    ("raw_pswpin_delta", "raw_recent_pswpin_delta"),
+                    ("lower_write_sectors_delta",
+                     "raw_recent_lower_write_sectors_delta"),
+                    ("lower_read_sectors_delta",
+                     "raw_recent_lower_read_sectors_delta")):
+                observation[name] = recent[original]
     readers = {
         "mem_available_mib": _mem_available_mib,
         "cgroup_memory_bytes": lambda: _read_uint(cgroup / "memory.current"),
@@ -3955,7 +4008,9 @@ def _run_workload(manifest: dict, active: dict, oracle_path: Path,
                 (manifest["device_major_int"], manifest["device_minor_int"]),
                 workload_phase, progress_samples=progress_samples,
                 observed_time=observed_time, workload_started=workload_started,
-                phase_started=phase_started, round_index=round_index)
+                phase_started=phase_started, round_index=round_index,
+                raw_swap_baseline_used_kib=(
+                    expected_mapper_baseline_kib if raw_linux_swap else None))
 
     oracle_python = _trusted_executable_path(
         sys.executable, "running Python interpreter")
@@ -4268,7 +4323,9 @@ def _run_workload(manifest: dict, active: dict, oracle_path: Path,
                 (manifest["device_major_int"], manifest["device_minor_int"]), "final",
                 progress_samples=progress_samples, observed_time=observed_time,
                 workload_started=workload_started, phase_started=phase_started,
-                round_index=round_index)
+                round_index=round_index,
+                raw_swap_baseline_used_kib=(
+                    expected_mapper_baseline_kib if raw_linux_swap else None))
         return {
             "concurrent_workers": CONCURRENT_ORACLE_PROCESSES,
             "reuse_rounds": len(rounds),

@@ -11,6 +11,7 @@ to source, helper and device. Live pages on the selected swap are migrated by
 the owned swapoff transition after a bounded RAM-headroom check.
 """
 import argparse
+from collections import deque
 from datetime import datetime, timezone
 import errno
 import fcntl
@@ -3952,11 +3953,21 @@ def _emit_algorithm_workload_failure(error, phase="anonymous_workload"):
                 "raw_swap_used_kib", "raw_cgroup_swap_bytes",
                 "raw_pswpout_total", "raw_pswpin_total",
                 "raw_pswpout_delta", "raw_pswpin_delta",
+                "raw_swap_used_after_kib", "raw_swap_baseline_used_kib",
+                "raw_attribution_gap_bytes",
+                "raw_recent_progress_window_usec",
+                "raw_recent_pswpout_delta", "raw_recent_pswpin_delta",
+                "raw_recent_lower_write_sectors_delta",
+                "raw_recent_lower_read_sectors_delta",
                 "progress_sample_age_usec",
                 "workload_elapsed_usec", "phase_elapsed_usec", "round_index")
             pressure = {key: observation.get(key) for key in fields}
             for key, value in pressure.items():
-                lower, upper = (-4095, 4095) if key == "swapz_error" else (0, MAX_BLOCK_COUNTER)
+                lower, upper = (
+                    (-4095, 4095) if key == "swapz_error" else
+                    (-MAX_BLOCK_COUNTER, MAX_BLOCK_COUNTER)
+                    if key == "raw_attribution_gap_bytes"
+                    else (0, MAX_BLOCK_COUNTER))
                 if type(value) is not int or not lower <= value <= upper:
                     pressure[key] = None
             pressure["workload_phase"] = observation.get("workload_phase")
@@ -4187,7 +4198,10 @@ class _PairedBlockIoSampler:
                         self.devices["root_partition"] = root
             except (OSError, ValueError, ProbeError):
                 pass
-        self.samples = []
+        # Keep the stall tail, not the first ~64 seconds of a long raw
+        # fill. The fixed-size deque bounds memory and recovery records.
+        self.samples = deque(maxlen=256)
+        self.samples_seen = 0
         self.previous_ns = 0
 
     def sample(self, *, force=False):
@@ -4196,8 +4210,6 @@ class _PairedBlockIoSampler:
                 now_ns - self.previous_ns < 250_000_000):
             return
         self.previous_ns = now_ns
-        if len(self.samples) >= 256:
-            return
         devices = {}
         for name, identity in self.devices.items():
             try:
@@ -4221,6 +4233,7 @@ class _PairedBlockIoSampler:
             except (OSError, ValueError):
                 devices[name] = None
         self.samples.append({"monotonic_ns": now_ns, "devices": devices})
+        self.samples_seen += 1
 
     def report(self):
         self.sample(force=True)
@@ -4229,6 +4242,7 @@ class _PairedBlockIoSampler:
             "metric_kind": "aggregate_sysfs_not_per_request_latency",
             "devices": dict(self.devices),
             "sampling_interval_ms": 250,
+            "samples_dropped": max(0, self.samples_seen - 256),
             "samples": list(self.samples),
         }
 
