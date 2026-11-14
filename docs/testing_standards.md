@@ -1,5 +1,17 @@
 # Testing Standards
 
+## Retained trial owner-release negative-path regression (2026-11-14)
+
+The integrated `swapzctl-trial-ownership-test.py` tests that a
+post-COMPLETE marker release rejects missing/foreign one-use consumption,
+duplicate-key or foreign active-marker records, and a failing owner-marker
+unlink, without claiming successful release. The original marker must
+remain after these refusals. All records are mocked temporary files;
+this does not qualify safe post-COMPLETE reconciliation or grant lifecycle
+authority. Any future release needs independent boot, source/module,
+physical identity, Linux swap policy, and fd-anchored owner checks while
+holding the original partition lock.
+
 ## Agent 3 completed-journal and provenance regression (2026-11-14)
 
 The integrated, rootless swapzctl-trial-ownership-test.py exercises an

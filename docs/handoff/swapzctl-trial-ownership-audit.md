@@ -131,3 +131,30 @@ absence, immutable header and exact partition/parent identity all hold.
 Do not replay swapoff, remove a mapper or unload a module from COMPLETE.
 A cross-file consistency match does not authenticate the executable or
 current kernel module against the recorded hashes.
+
+## Agent 3 release-custody negative paths (2026-11-14)
+
+The integrated rootless ownership fixture now checks three additional
+post-COMPLETE release refusals against the original private helper:
+a missing or foreign one-use `consumed-<run_id>.json` record, ambiguous
+duplicate-key or foreign `partition-<PARTUUID>.active` records, and a
+failed marker `unlink`. All cases must leave the original active owner
+marker present and must not grant another caller the partition. These
+tests exercise temporary rootless records only, with no live swap operation.
+
+The implementation deliberately does **not** implement post-COMPLETE
+reconciliation: the current `recover()` refuses COMPLETE before acquiring
+the original per-partition lock and before revalidating results or observing
+the current kernel/partition. The release helper's path-based record
+`read_bytes()` and `unlink()` remain susceptible to privileged namespace
+or path replacement between checks. Positive journal equality is **not**
+stable inode, boot, module, holder or mapper custody.
+
+The next separately owned implementation must pin non-following dirfd/file
+descriptors (mode, UID, link count, dev/inode and mount identity), hold the
+original partition lock across verification and release, authenticate
+the current boot and module/source artifacts, and prove current original
+swap policy and physical header unchanged. Unknown state, failed fsync,
+observed mapper/module substitution or a competing holder retains
+RECOVERY_REQUIRED; no post-COMPLETE `swapoff`, `rmmod` or `dmsetup remove`
+retry is permitted. Public `swapzctl stop/recover` remains blocked.

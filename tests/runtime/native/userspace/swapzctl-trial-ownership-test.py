@@ -406,5 +406,62 @@ class TrialOwnershipTest(unittest.TestCase):
                         saved_state, mutated_results)
 
 
+    def test_release_refuses_missing_or_substituted_consumption(self):
+        # A COMPLETE claim never excuses absent or nonmatching one-use review.
+        complete = {**self.state, "stage": "COMPLETE"}
+        consumed = self.base / f"consumed-{self.run_id}.json"
+        original_marker = self.marker.read_bytes()
+        with mock.patch.object(helper, "_runtime_state_base",
+                               return_value=self.base):
+            with self.assertRaisesRegex(helper.ProbeError,
+                                        "one-use run-authorization"):
+                helper._release_partition_ownership(complete)
+            self.assertEqual(self.marker.read_bytes(), original_marker)
+
+            foreign_record = json.loads(original_marker)
+            foreign_record["run_id"] = "c" * 32
+            consumed.write_text(json.dumps(foreign_record))
+            with self.assertRaisesRegex(helper.ProbeError,
+                                        "consumed review identity"):
+                helper._release_partition_ownership(complete)
+            self.assertEqual(self.marker.read_bytes(), original_marker)
+
+    def test_release_refuses_ambiguous_or_foreign_active_marker(self):
+        complete = {**self.state, "stage": "COMPLETE"}
+        original_marker = self.marker.read_bytes()
+        consumed = self.base / f"consumed-{self.run_id}.json"
+        consumed.write_bytes(original_marker)
+        with mock.patch.object(helper, "_runtime_state_base",
+                               return_value=self.base):
+            record = json.loads(original_marker)
+            self.marker.write_text(json.dumps(record)[:-1] +
+                                   ', "run_id": "' + self.run_id + '"}')
+            with self.assertRaisesRegex(helper.ProbeError,
+                                        "marker missing or damaged"):
+                helper._release_partition_ownership(complete)
+            self.assertTrue(self.marker.exists())
+
+            record["run_id"] = "c" * 32
+            self.marker.write_text(json.dumps(record))
+            with self.assertRaisesRegex(helper.ProbeError,
+                                        "another physical run"):
+                helper._release_partition_ownership(complete)
+            self.assertTrue(self.marker.exists())
+        self.assertEqual(consumed.read_bytes(), original_marker)
+
+    def test_release_unlink_error_retains_owner_marker(self):
+        complete = {**self.state, "stage": "COMPLETE"}
+        consumed = self.base / f"consumed-{self.run_id}.json"
+        consumed.write_bytes(self.marker.read_bytes())
+        with (mock.patch.object(helper, "_runtime_state_base",
+                                return_value=self.base),
+              mock.patch.object(Path, "unlink",
+                                side_effect=PermissionError(
+                                    "injected EPERM removing owner marker"))):
+            with self.assertRaises(PermissionError):
+                helper._release_partition_ownership(complete)
+        self.assertTrue(self.marker.exists())
+
+
 if __name__ == "__main__":
     unittest.main()
