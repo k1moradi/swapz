@@ -514,7 +514,9 @@ def diagnose_ci_failure(lines, exit_code, suite):
         r"^FAIL: rootless phase=(?P<phase>[A-Za-z0-9_.: -]{1,128}) "
         r"subtest=(?P<subtest>[a-z0-9-]{1,64}|unavailable) "
         r"test=(?P<test>test_[A-Za-z0-9_]{1,96}|"
-        r"swapz-primary-late-race-test[.]py|unavailable) "
+        r"swapz-primary-late-race-test[.]py|"
+        r"swapzctl-status|swapz-primary-policy|"
+        r"swapz-primary-mount-namespace|unavailable) "
         r"exit=(?P<exit>[0-9]{1,3}) "
         r"reason=(?P<reason>nonzero_exit|native_compile|timeout_or_exit_124|"
         r"signal_or_child_exit|received_TERM|received_INT|"
@@ -574,6 +576,17 @@ def diagnose_ci_failure(lines, exit_code, suite):
         rootless_match = (
             rootless_pattern.fullmatch(safe_line)
             if suite == "native-rootless" else None)
+        if rootless_match is not None and rootless_match.group("test") in (
+                "swapzctl-status", "swapz-primary-policy",
+                "swapz-primary-mount-namespace"):
+            # The producer verifies these fixed binaries against its own
+            # test-userspace Make recipe. Reject cross-phase identity claims.
+            if not (rootless_match.group("phase") ==
+                    "Makefile native and metadata" and
+                    rootless_match.group("subtest") == "test-userspace" and
+                    rootless_match.group("reason") == "nonzero_exit" and
+                    rootless_match.group("exit") == "2"):
+                rootless_match = None
         if safe_line.startswith("FAIL: rootless "):
             # The final marker owns the failing-suite boundary. An invalid
             # final marker must also revoke any earlier valid attribution.

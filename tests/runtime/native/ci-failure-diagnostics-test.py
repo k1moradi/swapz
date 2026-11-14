@@ -343,6 +343,72 @@ exec sleep 30
         self.assertNotIn("rootless_private_log", malformed)
         self.assertNotIn("SpoofedContract", json.dumps(malformed))
 
+    def test_native_userspace_binary_failure_is_not_masked_by_reporter(self):
+        # The rootless producer authenticates exactly these Make binaries.
+        # The consumer must recognize them without trusting raw child stderr.
+        makefile_lines = (ROOT / "tests/suites/Makefile").read_text(
+            encoding="utf-8").splitlines()
+        target_index = makefile_lines.index(next(
+            line for line in makefile_lines
+            if line.startswith("test-userspace:")))
+        recipe_line = target_index + 2
+        self.assertEqual(self.diagnostics._ci_make_recipe_owner(recipe_line),
+                         "test-userspace")
+        private_log = "build/tests/rootless-failure.Abc123xy/diagnostic.log"
+        for binary_name in ("swapzctl-status", "swapz-primary-policy",
+                            "swapz-primary-mount-namespace"):
+            with self.subTest(binary_name=binary_name):
+                marker = (
+                    "FAIL: rootless phase=Makefile native and metadata "
+                    "subtest=test-userspace test=" + binary_name +
+                    " exit=2 reason=nonzero_exit phase_s=37 stage_s=37 "
+                    "line=922 log=" + private_log)
+                details = (
+                    "Reason: exit=2 reason=nonzero_exit "
+                    "subtest=test-userspace phase_wall_s=37 stage_wall_s=37 "
+                    "line=922 log=" + private_log +
+                    " first_errno=unavailable "
+                    "cleanup=not_independently_verified")
+                lines = [
+                    "FAIL: priority token case=0 expected=-32768 actual=-9223372036854775808",
+                    "FAIL: native test-userspace binary=" + binary_name +
+                    " exit=134",
+                    "make[1]: *** [Makefile:" + str(recipe_line) +
+                    ": test-userspace] Error 134",
+                    marker, details,
+                ]
+                result = self.diagnostics.diagnose_ci_failure(
+                    lines, 2, "native-rootless")
+                self.assertEqual(result["status"], "FAIL")
+                self.assertEqual(result["category"], "RUNTIME_ASSERTION")
+                self.assertEqual(result["test"], binary_name)
+                self.assertEqual(result["phase"], "Makefile native and metadata")
+                self.assertEqual(result["first_exit_code"], 2)
+                self.assertEqual(result["child_exit_code"], 2)
+                self.assertEqual(result["rootless_private_log"], private_log)
+                self.assertNotIn("priority token", result["first_error"])
+                self.assertNotIn("actual=-922337", json.dumps(result))
+
+                # A child cannot transfer a native binary name to another
+                # phase, subtest, reason, status or arbitrary executable.
+                for forged in (
+                    marker.replace("subtest=test-userspace",
+                                   "subtest=test-lower-io"),
+                    marker.replace("phase=Makefile native and metadata",
+                                   "phase=package-dkms-test.py"),
+                    marker.replace("exit=2 reason=", "exit=1 reason="),
+                    marker.replace("reason=nonzero_exit",
+                                   "reason=unittest_assertion"),
+                    marker.replace("test=" + binary_name,
+                                   "test=private-binary"),
+                ):
+                    rejected = self.diagnostics.diagnose_ci_failure(
+                        lines[:-2] + [forged], 2, "native-rootless")
+                    self.assertEqual(rejected["category"], "UNKNOWN_FAILURE")
+                    self.assertIn("malformed or unverified",
+                                  rejected["first_error"])
+                    self.assertNotIn(binary_name, rejected["test"])
+
     def test_matched_errno_compiler_helper_and_signal_remain_distinct(self):
         marker = (
             "FAIL: rootless phase=package-dkms-test.py subtest=unavailable "

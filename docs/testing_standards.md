@@ -37,6 +37,20 @@ See `docs/handoff/swapzctl-trial-ownership-audit.md`.
 
 ## swapzctl rootless observability qualification (2026-11-14)
 
+### Native userspace first-failure reporting
+
+The native-rootless CI reporter must accept only the producer-authenticated
+`swapzctl-status`, `swapz-primary-policy` and
+`swapz-primary-mount-namespace` executable names under the
+`Makefile native and metadata` / `test-userspace` nonzero Make-exit-2
+envelope. It must preserve the binary name, first child exit, verified Make
+recipe failure category and retained private diagnostic location without
+exposing raw assertion operands. A forged phase, subtest, reason, exit or
+executable name must remain `UNKNOWN_FAILURE`, not borrow an earlier error.
+Keep these positive and adversarial cases in the hermetic
+`tests/runtime/native/ci-failure-diagnostics-test.py` suite.
+
+
 The side-effect-free command-help regression invokes the public C dispatcher
 without a loaded module or privileged device: generic and command-specific
 help must succeed, unknown topics must return nonzero, and their fail-only
