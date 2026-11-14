@@ -1,0 +1,29 @@
+name: Test owned lower progress PSI regression
+on:
+  push:
+    branches: [ci/owned-lower-progress-20261114]
+permissions:
+  contents: read
+jobs:
+  physical-progress:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Parse changed Python sources
+        run: |
+          python3 -B - <<'PY'
+          import ast
+          from pathlib import Path
+          for path in (
+              "tests/tools/qualify-primary-real-swap.py",
+              "tests/runtime/native/primary-real-swap-test.py",
+          ):
+              ast.parse(Path(path).read_text(encoding="utf-8"), filename=path)
+          PY
+      - name: Physical real-swap rootless regressions
+        run: python3 -B tests/runtime/native/primary-real-swap-test.py
+      - name: Patch whitespace
+        run: git diff --check bde78945689179a1fad98b14e275d5cec6caa129 HEAD
