@@ -5272,6 +5272,100 @@ class PrimaryRealSwapContracts(unittest.TestCase):
         self.assertFalse(qualify._development_raw_pressure_has_owned_progress(
             samples, window, "release", 0))
 
+
+    def test_raw_progress_does_not_reuse_old_writes_after_recent_stall(self):
+        psi = qualify.PsiStallWindow(0.0, 0)
+        psi.observe(18.0, 17_000_000)
+        before = {name: 0 for name, _ in qualify.PRESSURE_PROGRESS_COUNTERS}
+        before.update(raw_swap_used_kib=0, raw_cgroup_swap_bytes=0)
+        middle = dict(before,
+                      raw_pswpout_total=1000,
+                      lower_write_sectors_total=8000,
+                      raw_swap_used_kib=256,
+                      raw_cgroup_swap_bytes=256 * 1024)
+        stalled = dict(middle)
+        snapshots = deque([(1.0, before), (14.0, middle), (18.0, stalled)])
+        # The historical window claims ample I/O, but none completed
+        # in the most recent four seconds: the PSI exception MUST refuse.
+        self.assertGreater(
+            qualify._pressure_progress_deltas(
+                snapshots, psi)["raw_pswpout_delta"], 64)
+        recent = qualify._raw_recent_pressure_progress_deltas(snapshots, psi)
+        self.assertEqual(recent["raw_pswpout_delta"], 0)
+        self.assertEqual(recent["lower_write_sectors_delta"], 0)
+        self.assertFalse(qualify._development_raw_pressure_has_owned_progress(
+            snapshots, psi, "fill", 0))
+        progressing = dict(stalled, raw_pswpout_total=1100,
+                           lower_write_sectors_total=8800)
+        snapshots[-1] = (18.0, progressing)
+        self.assertTrue(qualify._development_raw_pressure_has_owned_progress(
+            snapshots, psi, "fill", 0))
+
+    def test_raw_snapshot_brackets_nonatomic_swap_charge_observation(self):
+        original = qualify.SwapRow(
+            path="/dev/sda4", type="partition", size_kib=16 * 1024 * 1024,
+            used_kib=8, priority=-1, device=(8, 4))
+        advanced = qualify.SwapRow(
+            path="/dev/sda4", type="partition", size_kib=16 * 1024 * 1024,
+            used_kib=12, priority=-1, device=(8, 4))
+        with mock.patch.object(
+                qualify, "read_swap_rows",
+                side_effect=[[original], [advanced]]) as inventory, \
+                mock.patch.object(qualify, "_read_uint",
+                                  return_value=12 * 1024), \
+                mock.patch.object(qualify, "read_vmstat",
+                                  return_value={"pswpout": 5, "pswpin": 0}), \
+                mock.patch.object(qualify, "_psi_total", return_value=0), \
+                mock.patch.object(qualify.Path, "read_text",
+                                  return_value="1 0 2 3 4 0 5 6 0 0 0"):
+            sample = qualify._pressure_progress_snapshot(
+                Path("/synthetic/cgroup"), lambda: {}, (8, 4),
+                raw_linux_swap=True)
+        self.assertEqual(inventory.call_count, 2)
+        self.assertEqual(sample["raw_swap_used_kib"], 8)
+        self.assertEqual(sample["raw_swap_used_after_kib"], 12)
+        self.assertEqual(sample["raw_cgroup_swap_bytes"], 12 * 1024)
+        self.assertFalse(qualify._development_raw_pressure_has_owned_progress(
+            deque([(1.0, sample), (4.5, sample)]),
+            qualify.PsiStallWindow(0.0, 0), "fill", 0))
+
+    def test_raw_psi_gap_reports_one_page_without_allowing_attribution(self):
+        psi = qualify.PsiStallWindow(0.0, 0)
+        psi.observe(5.0, 4_500_000)
+        before = {name: 0 for name, _ in qualify.PRESSURE_PROGRESS_COUNTERS}
+        before.update(raw_swap_used_kib=160, raw_cgroup_swap_bytes=0)
+        after = dict(before, raw_swap_used_kib=170760,
+                     raw_swap_used_after_kib=170764,
+                     raw_cgroup_swap_bytes=174698496,
+                     raw_pswpout_total=3741,
+                     lower_write_sectors_total=29280)
+        samples = deque([(1.0, before), (4.5, after)])
+        self.assertFalse(qualify._development_raw_pressure_has_owned_progress(
+            samples, psi, "fill", 160))
+        with mock.patch.object(qualify, "_mem_available_mib",
+                               return_value=13151), \
+                mock.patch.object(qualify, "_read_uint",
+                                  return_value=174698496), \
+                mock.patch.object(qualify, "_psi_total", return_value=0), \
+                mock.patch.object(qualify, "_memory_events",
+                                  return_value={"max": 484}), \
+                mock.patch.object(qualify, "_backing_inflight_requests",
+                                  return_value=1), \
+                mock.patch.object(qualify, "read_block_stats",
+                                  return_value=qualify.BlockStats(0, 29280)):
+            failure = qualify._workload_pressure_failure(
+                psi, Path("/synthetic/cgroup"), lambda: {}, (8, 4), "fill",
+                progress_samples=samples, observed_time=5.0,
+                workload_started=0.0, phase_started=1.0, round_index=1,
+                raw_swap_baseline_used_kib=160)
+        observation = failure.pressure_observation
+        self.assertEqual(observation["raw_attribution_gap_bytes"], 4096)
+        self.assertEqual(observation["raw_swap_baseline_used_kib"], 160)
+        self.assertEqual(observation["raw_swap_used_after_kib"], 170764)
+        self.assertEqual(observation["raw_recent_pswpout_delta"], 3741)
+        self.assertEqual(observation["raw_recent_lower_write_sectors_delta"],
+                         29280)
+
     def test_raw_comparison_mode_is_rejected_outside_development(self):
         with self.assertRaisesRegex(
                 qualify.QualificationFailure,

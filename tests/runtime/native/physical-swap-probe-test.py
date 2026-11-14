@@ -7434,6 +7434,32 @@ class PhysicalSwapProbeTests(unittest.TestCase):
         self.assertEqual(report["metric_kind"],
                          "aggregate_sysfs_not_per_request_latency")
 
+
+    def test_paired_sampler_retains_tail_after_long_raw_fill(self):
+        # A 95-second fill previously consumed the first 256 observations
+        # and lost the actual stall. Preserve the most recent 64 seconds.
+        target = {"major": 8, "minor": 4, "parent_major_minor": "8:0",
+                  "root_same_physical_parent": False}
+        first_ns = 1_000_000_000
+        interval_ns = 300_000_000
+        total = 261  # 260 observations plus the final forced report
+        timestamps = [first_ns + i * interval_ns for i in range(total)]
+        stat_line = "1 0 2 3 4 0 5 6 7 8 9 0 0 0 0 0 0"
+        with mock.patch.object(probe.Path, "read_text",
+                               return_value=stat_line), \
+                mock.patch.object(probe.time, "monotonic_ns",
+                                  side_effect=timestamps):
+            sampler = probe._PairedBlockIoSampler(target)
+            for _ in range(total - 1):
+                sampler.sample()
+            report = sampler.report()
+        self.assertEqual(len(report["samples"]), 256)
+        self.assertEqual(report["samples_dropped"], 5)
+        self.assertEqual(report["samples"][0]["monotonic_ns"], timestamps[5])
+        self.assertEqual(report["samples"][-1]["monotonic_ns"], timestamps[-1])
+        self.assertLess(report["samples"][0]["monotonic_ns"],
+                        report["samples"][-1]["monotonic_ns"])
+
     def test_paired_raw_phase_reuses_oracle_without_switching_swap(self):
         raw = SimpleNamespace(
             device=(8, 4), type="partition", used_kib=0,
@@ -7546,6 +7572,12 @@ class PhysicalSwapProbeTests(unittest.TestCase):
             "raw_swap_used_kib": 262_144,
             "raw_cgroup_swap_bytes": 262_144 * 1024,
             "raw_pswpout_delta": 0, "lower_write_sectors_delta": 0,
+            "raw_swap_baseline_used_kib": 160,
+            "raw_swap_used_after_kib": 262148,
+            "raw_attribution_gap_bytes": 4096,
+            "raw_recent_progress_window_usec": 3_500_000,
+            "raw_recent_pswpout_delta": 0,
+            "raw_recent_lower_write_sectors_delta": 0,
             "progress_sample_age_usec": 900_000,
             "private_path": "/private/do-not-print"}
         workload = SimpleNamespace(
@@ -7590,6 +7622,8 @@ class PhysicalSwapProbeTests(unittest.TestCase):
         self.assertEqual(diagnostic["pressure"]["raw_pswpout_delta"], 0)
         self.assertEqual(diagnostic["pressure"]["progress_sample_age_usec"], 900_000)
         self.assertEqual(diagnostic["pressure"]["raw_swap_used_kib"], 262_144)
+        self.assertEqual(diagnostic["pressure"]["raw_attribution_gap_bytes"], 4096)
+        self.assertEqual(diagnostic["pressure"]["raw_recent_pswpout_delta"], 0)
         self.assertNotIn("do-not-print", stderr.getvalue())
 
     def test_paired_raw_phase_rejects_competing_equal_priority_swapfile(self):

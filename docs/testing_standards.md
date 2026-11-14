@@ -146,6 +146,23 @@ and the age of its last sampled progress counter on a PSI stop. Missing or
 stale progress does NOT authorize continuing the test. Preserve the original
 85% FULL PSI for 5 seconds policy and exact physical recovery guarantees.
 
+Long RAW fills retain the latest 256 device-stat observations in a
+constant-memory ring rather than freezing the first 256 and losing the
+terminal PSI stall. The report records the number of dropped older samples.
+Because /proc/swaps Used KiB and cgroup memory.swap.current are not
+atomically read together, record selected-partition Used KiB *before* and
+*after* the charge read. A mismatch (including a single 4096-byte page)
+continues to REFUSE the PSI progress exception; no rounding, absolute
+tolerance, priority adjustment, or automatic retry authorizes it. Failure
+diagnostics record the signed cgroup-minus-partition charge gap and
+whether the intervening read observed additional pages. In addition to
+cumulative PSI-window deltas, RAW-only safety admission requires fresh
+swap-out/in counters and selected partition I/O in approximately the
+most recent four seconds, with at least three seconds of observation.
+Historical I/O followed by a quiet stall is not continuing progress.
+The original cgroup/host/timeout limits and ordinary swapz admission are
+unchanged. These block-stat observations are not per-request WRITE latency.
+
 ## Real-partition architecture preflight
 
 The owner-approved partition architectures are little-endian x86_64 and ARM64
