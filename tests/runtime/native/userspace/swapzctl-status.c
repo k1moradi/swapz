@@ -849,7 +849,7 @@ static void test_page_count_grouping(void)
 
 static void test_status_report_groups_live_swapz_counts(void)
 {
-	/* Reproduce real-device logical/physical and page-count proportions. */
+	/* Reproduce the actual Lubuntu mapper's cumulative foreground counters. */
 	const char *const status =
 		"logical_write=589369344 physical_write=570134528 gc_write=0 "
 		"compressed=7860 raw=136020 zero_elided=9 bulk_mode=1 "
@@ -857,7 +857,7 @@ static void test_status_report_groups_live_swapz_counts(void)
 	struct swapz_ratio_status ratio;
 	FILE *capture = tmpfile();
 	int saved_stdout = dup(STDOUT_FILENO);
-	char output[2048] = { 0 };
+	char output[4096] = { 0 };
 	size_t bytes;
 
 	assert(capture && saved_stdout >= 0);
@@ -871,20 +871,88 @@ static void test_status_report_groups_live_swapz_counts(void)
 	bytes = fread(output, 1, sizeof(output) - 1U, capture);
 	output[bytes] = '\0';
 	assert(strstr(output, "swapz target: swapz-demo-physical-fixture"));
-	assert(strstr(output, "Ratios (logical / lower, foreground)"));
-	assert(strstr(output, "SWZ compressed"));
-	assert(strstr(output, "2.48:1  (30.70 MiB / 12.39 MiB)"));
+	assert(strstr(output, "Health: OK (failed=0, error=0)"));
+	assert(strstr(output, "WRITE EFFICIENCY (cumulative foreground)"));
+	assert(strstr(output, "Category"));
 	assert(strstr(output, "Overall"));
-	assert(strstr(output, "1.03:1  (562.07 MiB / 543.72 MiB)"));
-	assert(strstr(output, "Pages (4 KiB)"));
+	assert(strstr(output, "1.03:1"));
+	assert(strstr(output, "562.07 MiB"));
+	assert(strstr(output, "543.72 MiB"));
+	assert(strstr(output, "SWZ extents"));
+	assert(strstr(output, "2.48:1"));
+	assert(strstr(output, "30.70 MiB"));
+	assert(strstr(output, "12.39 MiB"));
+	assert(strstr(output, "Net WRITE reduction"));
+	assert(strstr(output, "18.34 MiB"));
+	assert(strstr(output, "3.26% of logical"));
+	assert(strstr(output, "PAGE CLASSIFICATION (4 KiB each)"));
 	assert(strstr(output, "7,860"));
+	assert(strstr(output, "5.46%"));
 	assert(strstr(output, "136,020"));
+	assert(strstr(output, "94.53%"));
 	assert(strstr(output, "Zero-elided"));
-	assert(strstr(output, "GC lower writes: 0 B (excluded from ratios)"));
-	assert(strstr(output, "Scope: cumulative successful foreground writes"));
+	assert(strstr(output, "0.01%"));
+	assert(strstr(output, "GC lower WRITEs: 0 B (excluded from ratios)"));
+	assert(strstr(output, "not current swap usage"));
 	assert(!strstr(output, "compressed ratio (SWZ extents)"));
 	fclose(capture);
 	close(saved_stdout);
+}
+
+static void test_status_report_handles_zero_and_expansion_cases(void)
+{
+	const struct {
+		const char *status;
+		const char *expected;
+		const char *additional;
+	} cases[] = {
+		{
+			"logical_write=0 physical_write=0 gc_write=0 "
+			"compressed=0 raw=0 zero_elided=0 bulk_mode=1 "
+			"bulk_padding=0 failed=0 error=0",
+			"n/a", "PAGE CLASSIFICATION"
+		},
+		{
+			"logical_write=12288 physical_write=0 gc_write=0 "
+			"compressed=0 raw=0 zero_elided=3 bulk_mode=1 "
+			"bulk_padding=0 failed=0 error=0",
+			"infinite", "100.00% of logical"
+		},
+		{
+			"logical_write=4096 physical_write=8192 gc_write=0 "
+			"compressed=1 raw=0 zero_elided=0 bulk_mode=1 "
+			"bulk_padding=0 failed=0 error=0",
+			"0.50:1", "Net WRITE overhead"
+		},
+	};
+	size_t index;
+
+	for (index = 0; index < sizeof(cases) / sizeof(cases[0]); ++index) {
+		struct swapz_ratio_status ratio;
+		FILE *capture = tmpfile();
+		int saved_stdout = dup(STDOUT_FILENO);
+		char output[4096] = { 0 };
+		size_t bytes;
+
+		assert(capture && saved_stdout >= 0);
+		assert(parse_swapz_ratio_status(cases[index].status, &ratio) ==
+		       STATUS_READY);
+		fflush(stdout);
+		assert(dup2(fileno(capture), STDOUT_FILENO) >= 0);
+		report_swapz_target("fixture", 0, &ratio);
+		fflush(stdout);
+		assert(dup2(saved_stdout, STDOUT_FILENO) >= 0);
+		rewind(capture);
+		bytes = fread(output, 1, sizeof(output) - 1U, capture);
+		output[bytes] = '\0';
+		assert(strstr(output, "Health: OK"));
+		assert(strstr(output, cases[index].expected));
+		assert(strstr(output, cases[index].additional));
+		assert(!strstr(output, "nan"));
+		assert(!strstr(output, "-nan"));
+		fclose(capture);
+		close(saved_stdout);
+	}
 }
 
 static void test_padding_output_has_no_fabricated_compressed_ratio(void)
@@ -909,12 +977,12 @@ static void test_padding_output_has_no_fabricated_compressed_ratio(void)
 	rewind(capture);
 	bytes = fread(output, 1, sizeof(output) - 1U, capture);
 	output[bytes] = '\0';
-	assert(strstr(output, "SWZ compressed"));
-	assert(strstr(output, "field 'bulk_padding'"));
+	assert(strstr(output, "SWZ extents"));
+	assert(strstr(output, "'bulk_padding'"));
 	assert(strstr(output, "nonzero staged padding"));
 	assert(!strstr(output, "cumulative padding"));
 	assert(strstr(output, "Overall"));
-	assert(!strstr(output, "SWZ compressed     1.33:1"));
+	assert(!strstr(output, "SWZ extents       1.33:1"));
 	close(saved_stdout);
 	fclose(capture);
 }
@@ -1118,10 +1186,10 @@ static void test_saturated_staged_padding_is_unavailable(void)
 	rewind(capture);
 	bytes = fread(output, 1, sizeof(output) - 1U, capture);
 	output[bytes] = '\0';
-	assert(strstr(output, "SWZ compressed"));
+	assert(strstr(output, "SWZ extents"));
 	assert(strstr(output, "nonzero staged padding"));
 	assert(strstr(output, "Overall"));
-	assert(!strstr(output, "SWZ compressed     1.33:1"));
+	assert(!strstr(output, "SWZ extents       1.33:1"));
 	close(saved_stdout);
 	fclose(capture);
 }
@@ -1379,7 +1447,7 @@ static void test_final_inventory_fake_ioctl_observation_gap(void)
 		assert(report.count == 2U);
 		if (fixture.change == FAKE_INVENTORY_STABLE) {
 			assert(result == 0);
-			assert(strstr(output, "Ratios (logical / lower, foreground)"));
+			assert(strstr(output, "WRITE EFFICIENCY (cumulative foreground)"));
 			assert(!diagnostic_bytes);
 		} else {
 			assert(result != 0);
@@ -2167,6 +2235,7 @@ int main(void)
 	test_full_target_inventory_comparison();
 	test_page_count_grouping();
 	test_status_report_groups_live_swapz_counts();
+	test_status_report_handles_zero_and_expansion_cases();
 	test_padding_output_has_no_fabricated_compressed_ratio();
 	test_saturated_staged_padding_is_unavailable();
 	test_snapshot_retry_exhaustion_and_failures();

@@ -57,12 +57,13 @@ never rebuilds, re-signs, loads a module, creates a mapper, or activates
 swap. See [the root Make API](compile.md#root-make-api).
 
 The build-local `./build/userspace/swapzctl status` reads active swapz
-Device Mapper targets without changing them. Its compact grouped output
-distinguishes SWZ-only and overall foreground logical/lower compression
-ratios, comma-grouped 4 KiB page counts, and separately excluded GC writes.
-All figures are cumulative since mapper creation, not live swap occupancy.
-The `swapzctl primary` lifecycle remains separate from a retained
-development-only physical trial.
+Device Mapper targets without changing them. Its aligned, plain-text report
+shows health, overall and SWZ-only foreground WRITE ratios, net WRITE reduction
+(or overhead), the classification and percentage of committed 4 KiB pages,
+and GC WRITE bytes separately excluded from both ratios. The printed
+WRITE statistics are cumulative since mapper creation, not live swap usage or
+NAND endurance evidence. `swapzctl primary` manages a separate lifecycle and
+must not be used to stop a retained development physical trial.
 
 `make fast_test` accepts dirty trees, runs native/replay checks and defaults
 to three raw-versus-swapz repeats per owned-RAM `null_blk` scenario.

@@ -128,6 +128,19 @@ bytes separately and exclude them from both representation ratios. Never derive
 a committed ratio from `lz4_accepted_bytes`, size bins, predictor results or
 other attempt-side diagnostics.
 
+Present a stable, monochrome terminal summary with aligned columns, clear
+units, an overall foreground WRITE ratio and a separate SWZ-only extent ratio.
+Group committed 4 KiB page counts with readable separators and shares; show
+the signed direction of net lower-WRITE reduction or overhead relative to
+committed logical bytes. This cumulative WRITE comparison is not live swap
+occupancy, free swap capacity or a claim about NAND wear. Format fractions and
+byte sizes only from already verified integer counters, handle empty,
+zero-lower-byte and expansion cases without division by zero, and never
+fabricate a compressed-only ratio when staged `bulk_padding` is nonzero.
+Output should remain useful without colors, terminal-size probes, environment
+assumptions or writable Device Mapper access; failure-only diagnostics must
+remain distinct from successful numeric output.
+
 Status parsing must use exact `key=value` tokens, checked arithmetic and
 bounded Device Mapper buffers. Before printing ratios, require two consecutive
 snapshots with identical relevant monotonic counters and validate

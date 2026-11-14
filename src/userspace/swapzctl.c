@@ -523,23 +523,38 @@ static void print_ratio(const char *label, unsigned long long logical_bytes,
 			unsigned long long physical_bytes)
 {
 	char logical_text[64];
-	char physical_text[64];
+	char lower_text[64];
+	char ratio_text[64];
 
 	format_bytes(logical_bytes, logical_text, sizeof(logical_text));
-	format_bytes(physical_bytes, physical_text, sizeof(physical_text));
-	if (!logical_bytes) {
-		printf("    %-18s n/a (no logical data)\n", label);
-		return;
-	}
-	if (!physical_bytes) {
-		printf("    %-18s infinite (%s / 0 B)\n",
-		       label, logical_text);
-		return;
-	}
-	printf("    %-18s %6.2Lf:1  (%s / %s)\n", label,
-	       (long double)logical_bytes / (long double)physical_bytes,
-	       logical_text, physical_text);
+	format_bytes(physical_bytes, lower_text, sizeof(lower_text));
+	if (!logical_bytes)
+		(void)snprintf(ratio_text, sizeof(ratio_text), "n/a");
+	else if (!physical_bytes)
+		(void)snprintf(ratio_text, sizeof(ratio_text), "infinite");
+	else
+		(void)snprintf(ratio_text, sizeof(ratio_text), "%.2Lf:1",
+			       (long double)logical_bytes / (long double)physical_bytes);
+	printf("    %-20s %12s %12s %10s\n",
+	       label, logical_text, lower_text, ratio_text);
 }
+
+/* No page share is meaningful before the first successful foreground WRITE. */
+static void report_page_classification(const char *label,
+				      unsigned long long pages,
+				      unsigned long long total_pages)
+{
+	char page_text[32];
+
+	format_page_count(pages, page_text);
+	if (!total_pages) {
+		printf("    %-20s %12s %9s\n", label, page_text, "n/a");
+		return;
+	}
+	printf("    %-20s %12s %8.2Lf%%\n", label, page_text,
+	       100.0L * (long double)pages / (long double)total_pages);
+}
+
 
 static void dm_initialize_ioctl(struct dm_ioctl *io, size_t buffer_size,
 				const char *name)
@@ -1105,10 +1120,12 @@ static void report_swapz_target(const char *name, unsigned int target_index,
 				const struct swapz_ratio_status *ratio)
 {
 	char gc_text[64];
-	char compressed_text[32];
-	char raw_text[32];
-	char zero_text[32];
+	char lower_write_delta_text[64];
+	char compressed_logical_text[64];
 	char safe_name[DM_NAME_LEN + 1U];
+	unsigned long long total_pages;
+	unsigned long long lower_write_delta;
+	const char *lower_write_delta_label;
 
 	status_safe_mapping_name(name, safe_name);
 	printf("swapz target: %s", safe_name);
@@ -1116,40 +1133,67 @@ static void report_swapz_target(const char *name, unsigned int target_index,
 		printf(" (target %u)", target_index + 1U);
 	putchar('\n');
 	if (ratio->failed) {
-		puts("  Compression: unavailable "
-		     "(target is failed; lower writes may not be published)");
+		puts("  Health: FAILED");
+		puts("  Compression ratios unavailable; lower WRITEs may not be published.");
 		return;
 	}
 
-	puts("  Ratios (logical / lower, foreground):");
-	if (ratio->compressed_pages) {
-		if (ratio->compressed_extent_ratio_exact)
-			print_ratio("SWZ compressed",
-				    ratio->compressed_logical_bytes,
-				    ratio->compressed_extent_bytes);
-		else {
-			puts("    SWZ compressed     UNAVAILABLE (nonzero staged padding)");
-			puts("      field 'bulk_padding': no exact compressed lower-byte "
-			     "split between foreground and GC");
-		}
-	} else {
-		puts("    SWZ compressed     n/a (no compressed pages)");
-	}
+	puts("  Health: OK (failed=0, error=0)");
+	puts("");
+	puts("  WRITE EFFICIENCY (cumulative foreground)");
+	printf("    %-20s %12s %12s %10s\n",
+	       "Category", "Logical", "Lower", "Ratio");
 	print_ratio("Overall", ratio->logical_write_bytes,
 		    ratio->overall_physical_bytes);
+	if (!ratio->compressed_pages) {
+		print_ratio("SWZ extents", 0, 0);
+	} else if (ratio->compressed_extent_ratio_exact) {
+		print_ratio("SWZ extents", ratio->compressed_logical_bytes,
+			    ratio->compressed_extent_bytes);
+	} else {
+		format_bytes(ratio->compressed_logical_bytes, compressed_logical_text,
+			     sizeof(compressed_logical_text));
+		printf("    %-20s %12s %12s %10s\n", "SWZ extents",
+		       compressed_logical_text, "n/a", "unavailable");
+		puts("    Note: nonzero staged padding ('bulk_padding') prevents an exact");
+		puts("          compressed lower-byte split between foreground and GC.");
+	}
+	if (ratio->logical_write_bytes) {
+		if (ratio->logical_write_bytes >= ratio->overall_physical_bytes) {
+			lower_write_delta = ratio->logical_write_bytes -
+					    ratio->overall_physical_bytes;
+			lower_write_delta_label = "Net WRITE reduction";
+		} else {
+			lower_write_delta = ratio->overall_physical_bytes -
+					    ratio->logical_write_bytes;
+			lower_write_delta_label = "Net WRITE overhead";
+		}
+		format_bytes(lower_write_delta, lower_write_delta_text,
+			     sizeof(lower_write_delta_text));
+		printf("    %-20s %12s  (%.2Lf%% of logical)\n",
+		       lower_write_delta_label, lower_write_delta_text,
+		       100.0L * (long double)lower_write_delta /
+		       (long double)ratio->logical_write_bytes);
+	}
 
-	format_page_count(ratio->compressed_pages, compressed_text);
-	format_page_count(ratio->raw_pages, raw_text);
-	format_page_count(ratio->zero_elided_pages, zero_text);
-	puts("  Pages (4 KiB):");
-	printf("    %-18s %s\n", "Compressed", compressed_text);
-	printf("    %-18s %s\n", "RAW", raw_text);
-	printf("    %-18s %s\n", "Zero-elided", zero_text);
+	/* These committed page counts were range-checked by the status parser. */
+	total_pages = ratio->compressed_pages + ratio->raw_pages +
+		      ratio->zero_elided_pages;
+	puts("");
+	puts("  PAGE CLASSIFICATION (4 KiB each)");
+	printf("    %-20s %12s %9s\n", "Category", "Pages", "Share");
+	report_page_classification("Compressed", ratio->compressed_pages,
+				   total_pages);
+	report_page_classification("RAW", ratio->raw_pages, total_pages);
+	report_page_classification("Zero-elided", ratio->zero_elided_pages,
+				   total_pages);
 
 	format_bytes(ratio->gc_write_bytes, gc_text, sizeof(gc_text));
-	printf("  GC lower writes: %s (excluded from ratios)\n", gc_text);
-	puts("  Scope: cumulative successful foreground writes since target creation");
+	printf("\n  GC lower WRITEs: %s (excluded from ratios)\n", gc_text);
+	puts("  Note: counters are cumulative since target creation; not current swap usage.");
+	putchar('\n');
 }
+
 
 /* Do not include untrusted INFO text, device paths or unverified counters. */
 static int status_report_problem(const char *state, const char *name,
