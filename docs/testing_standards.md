@@ -3214,6 +3214,21 @@ require a complete new timing extension and uint64/null values, and test the
 largest numeric record against the marker bound. Optional read failure cannot
 replace the original PSI stop or alter its safety threshold.
 
+The first *physical PSI refusal* now also records an optional, finite
+observational six-field liveness snapshot before child cleanup and mapper
+teardown: lower_write_inflight, lower_write_age_ms, ordered_worker_running,
+ordered_worker_queued, ordered_queue_pending from the owned swapz target,
+and backing_inflight_requests from sysfs stat field 9 of the exact selected
+partition. The kernel measures the age of a not-yet-returned synchronous
+dm_io WRITE or unfinished detached lower WRITE callback, not completion-only
+service wall time. Status reads may never acquire ordered_owner, wait for
+completion or alter I/O scheduling. Workqueue callback RUNNING does not prove
+CPU-runnable: an executing callback can be asleep. Only fully formed
+bounded integer/null extensions are accepted by the public reporter;
+partial/extra/private fields must fail closed. Keep historical records
+without this snapshot readable; all PSI, no-progress, OOM, device ownership,
+recovery, and production acceptance conditions are unchanged.
+
 The shared-root-parent development trial must sample its exact selected
 partition's Linux block counters, not the whole root disk: unrelated root
 reads and writes cannot establish target activity. Keep the default dedicated

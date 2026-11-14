@@ -6157,6 +6157,29 @@ int main(void)
         self.assertNotIn("mode=alpha-no-gc", body("swapz_status"))
         self.assertIn("experimental live GC", DM)
 
+    def test_first_physical_psi_refusal_reports_pending_lower_io_without_locking_owner(self):
+        kernel_status = body("swapz_status")
+        synchronous_write = body("swapz_lower")
+        asynchronous_write = body("swapz_submit_inflight_write")
+        kernel = DM
+        self.assertIn("atomic64_t sync_lower_write_started_ns;", kernel)
+        self.assertIn(
+            "atomic64_set(&ctx->sync_lower_write_started_ns, section_start);",
+            synchronous_write)
+        self.assertIn(
+            "atomic64_set(&ctx->sync_lower_write_started_ns, 0);",
+            synchronous_write)
+        self.assertIn("inflight->lower_start_ns = ktime_get_ns();",
+                      asynchronous_write)
+        self.assertIn("work_busy(&ctx->worker.work)", kernel_status)
+        self.assertIn("ordered_worker_running=%u", kernel_status)
+        self.assertIn("ordered_worker_queued=%u", kernel_status)
+        self.assertIn("lower_write_inflight=%u", kernel_status)
+        self.assertIn("lower_write_age_ms=%llu", kernel_status)
+        self.assertIn("ordered_queue_pending=%u", kernel_status)
+        self.assertNotIn("mutex_lock(&ctx->ordered_owner)", kernel_status)
+        self.assertNotIn("wait_for_completion(", kernel_status)
+
     def test_single_lower_write_owner_keeps_publication_on_ordered_worker(self):
         submit = body("swapz_submit_inflight_write")
         done = body("swapz_async_lower_write_done")

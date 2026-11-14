@@ -4153,6 +4153,10 @@ def parse_algorithm_pageout_diagnostic(error_output):
             timing_fields = {"swapz_lower_write_wall_ns", "swapz_ordered_worker_wall_ns",
                              "swapz_prep_wait_wall_ns", "swapz_commit_nonio_wall_ns",
                              "swapz_lower_write_service_ewma_ns"}
+            liveness_fields = {
+                "swapz_lower_write_inflight", "swapz_lower_write_age_ms",
+                "swapz_ordered_worker_running", "swapz_ordered_worker_queued",
+                "swapz_ordered_queue_pending", "backing_inflight_requests"}
             progress_fields = {
                 "progress_window_usec", "cgroup_io_some_delta_usec",
                 "cgroup_io_full_delta_usec", "cgroup_cpu_some_delta_usec",
@@ -4173,6 +4177,10 @@ def parse_algorithm_pageout_diagnostic(error_output):
                     optional_fields -= timing_fields
                 if stall_fields <= optional_fields:
                     pressure_fields |= stall_fields
+                    optional_fields -= stall_fields
+                if liveness_fields <= optional_fields:
+                    pressure_fields |= liveness_fields
+                    optional_fields -= liveness_fields
             if (diagnostic["reason"] != "memory_pressure" or
                     diagnostic["phase"] != "anonymous_workload" or
                     not isinstance(pressure, dict) or set(pressure) != pressure_fields or
@@ -4281,6 +4289,13 @@ def print_algorithm_workload_diagnostic(diagnostic):
                       "swapz_lower_write_wall_ns", "swapz_ordered_worker_wall_ns",
                       "swapz_prep_wait_wall_ns", "swapz_commit_nonio_wall_ns",
                       "swapz_lower_write_service_ewma_ns")), flush=True)
+        if "swapz_lower_write_inflight" in pressure:
+            print("        Live lower I/O (instantaneous; worker running != CPU runnable): "
+                  + " ".join(f"{key}={observed(key)}" for key in (
+                      "swapz_lower_write_inflight", "swapz_lower_write_age_ms",
+                      "swapz_ordered_worker_running", "swapz_ordered_worker_queued",
+                      "swapz_ordered_queue_pending", "backing_inflight_requests")),
+                  flush=True)
         if "progress_window_usec" in pressure:
             print("        Progress sampling (best-effort window deltas; ns/us as labeled): "
                   + " ".join(f"{key}={observed(key)}" for key in (

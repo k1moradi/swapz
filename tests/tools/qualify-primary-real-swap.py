@@ -3652,8 +3652,8 @@ def _development_pressure_has_owned_progress(
 def _backing_inflight_requests(lower_device: tuple[int, int]) -> int | None:
     """Best-effort sysfs stat field 9, captured before owned mapper recovery.
 
-    This is a whole-parent instantaneous observation, not proof of swapz
-    attribution or the kernel worker's runnable/sleeping task state.
+    This is an instantaneous observation of the exact selected partition.
+    It is not proof of swapz attribution or the kernel worker's CPU/task state.
     """
     try:
         fields = Path(

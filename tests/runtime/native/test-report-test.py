@@ -6485,6 +6485,26 @@ class ReportContract(unittest.TestCase):
             "round_index": 1}
         extended = {**report, "pressure": {**pressure, **progress}}
         self.assertEqual(runner.parse_algorithm_pageout_diagnostic(marker(extended)), extended)
+        liveness = {
+            "swapz_lower_write_inflight": 1, "swapz_lower_write_age_ms": 5300,
+            "swapz_ordered_worker_running": 1, "swapz_ordered_worker_queued": 0,
+            "swapz_ordered_queue_pending": 1, "backing_inflight_requests": 2}
+        observed = {**report, "pressure": {**pressure, **liveness}}
+        self.assertEqual(runner.parse_algorithm_pageout_diagnostic(marker(observed)),
+                         observed)
+        for mutation in ({"swapz_lower_write_age_ms": True},
+                         {"swapz_ordered_worker_running": "/private"},
+                         {"backing_inflight_requests": -1},
+                         {"swapz_lower_write_inflight": None, "extra": 1}):
+            with self.subTest(liveness_mutation=mutation):
+                invalid = {**observed, "pressure": {**observed["pressure"],
+                                                    **mutation}}
+                self.assertIsNone(
+                    runner.parse_algorithm_pageout_diagnostic(marker(invalid)))
+        missing_liveness = {**observed["pressure"]}
+        missing_liveness.pop("backing_inflight_requests")
+        self.assertIsNone(runner.parse_algorithm_pageout_diagnostic(
+            marker({**report, "pressure": missing_liveness})))
         for changed in ({"round_index": True},
                         {"cgroup_cpu_some_delta_usec": "/private"},
                         {"swapz_lower_write_wall_delta_ns": True},
