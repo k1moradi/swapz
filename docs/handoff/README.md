@@ -9,6 +9,16 @@ must be checked against the source being evaluated.
 [Vision](../VISION.md), [coding standards](../coding_standards.md) and
 [testing standards](../testing_standards.md) remain canonical.
 
+## Current swapzctl integration and security review
+
+- [Agent 6 coordinator review](swapzctl-agent6-integration-security-review.md):
+  exact-source observability/monitoring integration contract, authenticated
+  development-owner recovery gates, rootless CI integration, and the
+  STOP/RECOVER **BLOCKED** decision. This is not host/physical qualification.
+- [Operator guide](swapzctl-operator-guide.md) and
+  [retained-trial ownership audit](swapzctl-trial-ownership-audit.md):
+  read-only CLI syntax and private helper custody limits.
+
 ## Debugging navigation
 
 - **First dedicated-card host /dev/sda1:** [dedicated-card identity and standing scope](../AGENT_CONTEXT.md#current-production-mission); pathname alone is not identity.
