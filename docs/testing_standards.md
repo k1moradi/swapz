@@ -4647,6 +4647,19 @@ fields, and a cross-counter snapshot that must retry. Include a similarly named
 field such as `physical_write_reqs` before `physical_write` so the test proves
 exact token matching rather than prefix matching.
 
+The same production C status-printer regression must capture stdout and check
+aligned human-readable columns for overall and compressed-only successful
+foreground WRITE ratios, exact net lower-WRITE reduction/overhead, 4 KiB page
+counts and percentages, separately excluded GC WRITE bytes, and lifetime
+rather than live-occupancy scope. Ground one fixture in actual Lubuntu
+physical-device counters (562.07 MiB logical / 543.72 MiB foreground lower,
+2.48:1 compressed-only, 1.03:1 overall) and also cover zero pages,
+zero-lower-byte infinite efficiency, physical WRITE expansion, and the 64-bit
+maximum comma-grouped page count. Output must not use ANSI escape sequences
+or expose private backing-device names, and nonzero staged padding must never
+produce an invented compressed ratio. These are reporting tests, not physical
+qualification or performance evidence.
+
 The rootless status wire regression must also exercise the included production
 DM_TABLE_STATUS and DM_LIST_DEVICES parsers with fixed-capacity synthetic ioctl
 replies and a bounded, deterministic adversarial corpus. Cover UAPI 8-byte wire
