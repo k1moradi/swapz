@@ -56,6 +56,14 @@ artifacts), `make uninstall` (owned removal), `make fast_test` (development),
 never rebuilds, re-signs, loads a module, creates a mapper, or activates
 swap. See [the root Make API](compile.md#root-make-api).
 
+The build-local `./build/userspace/swapzctl status` reads active swapz
+Device Mapper targets without changing them. Its compact grouped output
+distinguishes SWZ-only and overall foreground logical/lower compression
+ratios, comma-grouped 4 KiB page counts, and separately excluded GC writes.
+All figures are cumulative since mapper creation, not live swap occupancy.
+The `swapzctl primary` lifecycle remains separate from a retained
+development-only physical trial.
+
 `make fast_test` accepts dirty trees, runs native/replay checks and defaults
 to three raw-versus-swapz repeats per owned-RAM `null_blk` scenario.
 `make fast_test SCENARIOS=fast-mixed,fast-w8 REPEAT=3` narrows the loop.

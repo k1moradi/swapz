@@ -503,6 +503,22 @@ static void format_bytes(unsigned long long bytes, char *text, size_t text_size)
 		snprintf(text, text_size, "%.2Lf %s", value, units[unit]);
 }
 
+/* A 64-bit page count has at most 20 digits and six separators. */
+static void format_page_count(unsigned long long count, char text[32])
+{
+	char digits[32];
+	size_t length = (size_t)snprintf(digits, sizeof(digits), "%llu", count);
+	size_t output_position = 0;
+	size_t index;
+
+	for (index = 0; index < length; ++index) {
+		if (index && (length - index) % 3U == 0U)
+			text[output_position++] = ',';
+		text[output_position++] = digits[index];
+	}
+	text[output_position] = '\0';
+}
+
 static void print_ratio(const char *label, unsigned long long logical_bytes,
 			unsigned long long physical_bytes)
 {
@@ -512,15 +528,15 @@ static void print_ratio(const char *label, unsigned long long logical_bytes,
 	format_bytes(logical_bytes, logical_text, sizeof(logical_text));
 	format_bytes(physical_bytes, physical_text, sizeof(physical_text));
 	if (!logical_bytes) {
-		printf("  %s: n/a (no logical data)\n", label);
+		printf("    %-18s n/a (no logical data)\n", label);
 		return;
 	}
 	if (!physical_bytes) {
-		printf("  %s: infinite (%s logical / 0 B lower)\n",
+		printf("    %-18s infinite (%s / 0 B)\n",
 		       label, logical_text);
 		return;
 	}
-	printf("  %s: %.2Lf:1 (%s logical / %s lower)\n", label,
+	printf("    %-18s %6.2Lf:1  (%s / %s)\n", label,
 	       (long double)logical_bytes / (long double)physical_bytes,
 	       logical_text, physical_text);
 }
@@ -1089,7 +1105,9 @@ static void report_swapz_target(const char *name, unsigned int target_index,
 				const struct swapz_ratio_status *ratio)
 {
 	char gc_text[64];
-	char foreground_text[64];
+	char compressed_text[32];
+	char raw_text[32];
+	char zero_text[32];
 	char safe_name[DM_NAME_LEN + 1U];
 
 	status_safe_mapping_name(name, safe_name);
@@ -1098,33 +1116,39 @@ static void report_swapz_target(const char *name, unsigned int target_index,
 		printf(" (target %u)", target_index + 1U);
 	putchar('\n');
 	if (ratio->failed) {
-		puts("  compression ratios: unavailable "
+		puts("  Compression: unavailable "
 		     "(target is failed; lower writes may not be published)");
 		return;
 	}
+
+	puts("  Ratios (logical / lower, foreground):");
 	if (ratio->compressed_pages) {
 		if (ratio->compressed_extent_ratio_exact)
-			print_ratio("compressed ratio (SWZ extents)",
+			print_ratio("SWZ compressed",
 				    ratio->compressed_logical_bytes,
 				    ratio->compressed_extent_bytes);
-		else
-			puts("  compressed ratio (SWZ extents): UNAVAILABLE: field 'bulk_padding' "
-			     "expected 0 with bulk_mode=2 for exact compressed lower bytes; "
-			     "observed nonzero staged padding without committed "
-			     "foreground/GC separation");
+		else {
+			puts("    SWZ compressed     UNAVAILABLE (nonzero staged padding)");
+			puts("      field 'bulk_padding': no exact compressed lower-byte "
+			     "split between foreground and GC");
+		}
 	} else {
-		puts("  compressed ratio (SWZ extents): n/a (no compressed pages)");
+		puts("    SWZ compressed     n/a (no compressed pages)");
 	}
-	print_ratio("overall ratio (compressed + RAW + zero)",
-		    ratio->logical_write_bytes, ratio->overall_physical_bytes);
-	printf("  pages: compressed=%llu raw=%llu zero-elided=%llu\n",
-	       ratio->compressed_pages, ratio->raw_pages, ratio->zero_elided_pages);
-	format_bytes(ratio->overall_physical_bytes, foreground_text,
-		     sizeof(foreground_text));
+	print_ratio("Overall", ratio->logical_write_bytes,
+		    ratio->overall_physical_bytes);
+
+	format_page_count(ratio->compressed_pages, compressed_text);
+	format_page_count(ratio->raw_pages, raw_text);
+	format_page_count(ratio->zero_elided_pages, zero_text);
+	puts("  Pages (4 KiB):");
+	printf("    %-18s %s\n", "Compressed", compressed_text);
+	printf("    %-18s %s\n", "RAW", raw_text);
+	printf("    %-18s %s\n", "Zero-elided", zero_text);
+
 	format_bytes(ratio->gc_write_bytes, gc_text, sizeof(gc_text));
-	printf("  foreground lower writes: %s; GC excluded: %s\n",
-	       foreground_text, gc_text);
-	puts("  scope: cumulative successful foreground writes since target creation");
+	printf("  GC lower writes: %s (excluded from ratios)\n", gc_text);
+	puts("  Scope: cumulative successful foreground writes since target creation");
 }
 
 /* Do not include untrusted INFO text, device paths or unverified counters. */

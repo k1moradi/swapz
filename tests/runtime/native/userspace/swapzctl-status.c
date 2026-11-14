@@ -831,6 +831,62 @@ static void test_full_target_inventory_comparison(void)
 	status_free_observation(&first);
 }
 
+static void test_page_count_grouping(void)
+{
+	char text[32];
+
+	format_page_count(0, text);
+	assert(!strcmp(text, "0"));
+	format_page_count(999, text);
+	assert(!strcmp(text, "999"));
+	format_page_count(1000, text);
+	assert(!strcmp(text, "1,000"));
+	format_page_count(136020, text);
+	assert(!strcmp(text, "136,020"));
+	format_page_count(ULLONG_MAX, text);
+	assert(!strcmp(text, "18,446,744,073,709,551,615"));
+}
+
+static void test_status_report_groups_live_swapz_counts(void)
+{
+	/* Reproduce real-device logical/physical and page-count proportions. */
+	const char *const status =
+		"logical_write=589369344 physical_write=570134528 gc_write=0 "
+		"compressed=7860 raw=136020 zero_elided=9 bulk_mode=1 "
+		"bulk_padding=0 failed=0 error=0";
+	struct swapz_ratio_status ratio;
+	FILE *capture = tmpfile();
+	int saved_stdout = dup(STDOUT_FILENO);
+	char output[2048] = { 0 };
+	size_t bytes;
+
+	assert(capture && saved_stdout >= 0);
+	assert(parse_swapz_ratio_status(status, &ratio) == STATUS_READY);
+	fflush(stdout);
+	assert(dup2(fileno(capture), STDOUT_FILENO) >= 0);
+	report_swapz_target("swapz-demo-physical-fixture", 0, &ratio);
+	fflush(stdout);
+	assert(dup2(saved_stdout, STDOUT_FILENO) >= 0);
+	rewind(capture);
+	bytes = fread(output, 1, sizeof(output) - 1U, capture);
+	output[bytes] = '\0';
+	assert(strstr(output, "swapz target: swapz-demo-physical-fixture"));
+	assert(strstr(output, "Ratios (logical / lower, foreground)"));
+	assert(strstr(output, "SWZ compressed"));
+	assert(strstr(output, "2.48:1  (30.70 MiB / 12.39 MiB)"));
+	assert(strstr(output, "Overall"));
+	assert(strstr(output, "1.03:1  (562.07 MiB / 543.72 MiB)"));
+	assert(strstr(output, "Pages (4 KiB)"));
+	assert(strstr(output, "7,860"));
+	assert(strstr(output, "136,020"));
+	assert(strstr(output, "Zero-elided"));
+	assert(strstr(output, "GC lower writes: 0 B (excluded from ratios)"));
+	assert(strstr(output, "Scope: cumulative successful foreground writes"));
+	assert(!strstr(output, "compressed ratio (SWZ extents)"));
+	fclose(capture);
+	close(saved_stdout);
+}
+
 static void test_padding_output_has_no_fabricated_compressed_ratio(void)
 {
 	const char *const padded_status =
@@ -853,12 +909,12 @@ static void test_padding_output_has_no_fabricated_compressed_ratio(void)
 	rewind(capture);
 	bytes = fread(output, 1, sizeof(output) - 1U, capture);
 	output[bytes] = '\0';
-	assert(strstr(output, "compressed ratio (SWZ extents): UNAVAILABLE"));
+	assert(strstr(output, "SWZ compressed"));
 	assert(strstr(output, "field 'bulk_padding'"));
 	assert(strstr(output, "nonzero staged padding"));
 	assert(!strstr(output, "cumulative padding"));
-	assert(strstr(output, "overall ratio (compressed + RAW + zero): 1.33:1"));
-	assert(!strstr(output, "compressed ratio (SWZ extents): 1.33:1"));
+	assert(strstr(output, "Overall"));
+	assert(!strstr(output, "SWZ compressed     1.33:1"));
 	close(saved_stdout);
 	fclose(capture);
 }
@@ -1062,10 +1118,10 @@ static void test_saturated_staged_padding_is_unavailable(void)
 	rewind(capture);
 	bytes = fread(output, 1, sizeof(output) - 1U, capture);
 	output[bytes] = '\0';
-	assert(strstr(output, "compressed ratio (SWZ extents): UNAVAILABLE"));
+	assert(strstr(output, "SWZ compressed"));
 	assert(strstr(output, "nonzero staged padding"));
-	assert(strstr(output, "overall ratio (compressed + RAW + zero): 1.33:1"));
-	assert(!strstr(output, "compressed ratio (SWZ extents): 1.33:1"));
+	assert(strstr(output, "Overall"));
+	assert(!strstr(output, "SWZ compressed     1.33:1"));
 	close(saved_stdout);
 	fclose(capture);
 }
@@ -1323,7 +1379,7 @@ static void test_final_inventory_fake_ioctl_observation_gap(void)
 		assert(report.count == 2U);
 		if (fixture.change == FAKE_INVENTORY_STABLE) {
 			assert(result == 0);
-			assert(strstr(output, "compressed ratio (SWZ extents)"));
+			assert(strstr(output, "Ratios (logical / lower, foreground)"));
 			assert(!diagnostic_bytes);
 		} else {
 			assert(result != 0);
@@ -2109,6 +2165,8 @@ int main(void)
 	test_dm_reply_boundaries_and_identity();
 	test_absolute_offsets_for_multiple_dm_targets();
 	test_full_target_inventory_comparison();
+	test_page_count_grouping();
+	test_status_report_groups_live_swapz_counts();
 	test_padding_output_has_no_fabricated_compressed_ratio();
 	test_saturated_staged_padding_is_unavailable();
 	test_snapshot_retry_exhaustion_and_failures();
