@@ -1609,6 +1609,126 @@ out:
 }
 
 
+
+/*
+ * /proc/swaps is an advisory Linux inventory, not a lifecycle token.
+ * Kernel names are re-resolved in our mount namespace for display only.
+ * An unmatched/overmounted name is never proof that the original swap
+ * object was drained. Mutating paths must use swapz-primary's pinned proof.
+ */
+struct swapz_linux_swap {
+	const char *state;
+	unsigned long long size_bytes;
+	unsigned long long used_bytes;
+	long priority;
+	int has_usage;
+};
+
+static int swapz_parse_swap_kib(const char *token, unsigned long long *bytes)
+{
+	const char *end;
+	unsigned long long kib;
+
+	if (parse_unsigned_decimal(token, ULLONG_MAX / 1024ULL, &end, &kib) < 0 ||
+	    *end != '\0')
+		return -1;
+	*bytes = kib * 1024ULL;
+	return 0;
+}
+
+static int swapz_read_linux_swap(FILE *inventory,
+				  const struct status_ready_report *report,
+				  struct swapz_linux_swap *observations)
+{
+	char line[4096];
+	size_t line_count = 0;
+	size_t index;
+
+	if (!fgets(line, sizeof(line), inventory) ||
+	    strcmp(line, "Filename\t\t\t\tType\t\tSize\t\tUsed\t\tPriority\n") == 0) {
+		/*
+		 * The second branch is intentionally false for standard procfs
+		 * headers: the header text is not a trusted identity proof.
+		 */
+		if (ferror(inventory) || feof(inventory))
+			return -1;
+	}
+	if (strncmp(line, "Filename", 8))
+		return -1;
+	while (fgets(line, sizeof(line), inventory)) {
+		char *fields[6] = { 0 };
+		char *save = NULL;
+		char *cursor;
+		char *priority_end;
+		struct stat path_info;
+		unsigned long long size_bytes;
+		unsigned long long used_bytes;
+		long priority;
+		size_t count = 0;
+
+		if (++line_count > SWAPZ_STATUS_MAX_RESULTS ||
+		    !strchr(line, '\n'))
+			return -1;
+		for (cursor = strtok_r(line, " \t\r\n", &save);
+		     cursor && count < 6U;
+		     cursor = strtok_r(NULL, " \t\r\n", &save))
+			fields[count++] = cursor;
+		if (count != 5U || (strcmp(fields[1], "partition") &&
+				      strcmp(fields[1], "file")) ||
+		    swapz_parse_swap_kib(fields[2], &size_bytes) < 0 ||
+		    swapz_parse_swap_kib(fields[3], &used_bytes) < 0 ||
+		    used_bytes > size_bytes)
+			return -1;
+		errno = 0;
+		priority = strtol(fields[4], &priority_end, 10);
+		if (errno == ERANGE || priority_end == fields[4] ||
+		    *priority_end != '\0')
+			return -1;
+		/* Do not follow arbitrary non-absolute procfs fields. */
+		if (fields[0][0] != '/' || stat(fields[0], &path_info) < 0 ||
+		    !S_ISBLK(path_info.st_mode))
+			continue;
+		for (index = 0; index < report->count; ++index) {
+			struct swapz_linux_swap *observed = &observations[index];
+
+			if ((uint64_t)path_info.st_rdev != report->targets[index].device_id)
+				continue;
+			if (observed->has_usage)
+				return -1; /* Same DM identity listed twice. */
+			observed->state = "active";
+			observed->size_bytes = size_bytes;
+			observed->used_bytes = used_bytes;
+			observed->priority = priority;
+			observed->has_usage = 1;
+		}
+	}
+	return ferror(inventory) ? -1 : 0;
+}
+
+static void swapz_observe_linux_swaps(const struct status_ready_report *report,
+				      struct swapz_linux_swap *observations)
+{
+	FILE *inventory;
+	size_t index;
+
+	for (index = 0; index < report->count; ++index)
+		observations[index].state = "not_observed";
+	inventory = fopen("/proc/swaps", "re");
+	if (!inventory)
+		goto unknown;
+	if (swapz_read_linux_swap(inventory, report, observations) < 0) {
+		fclose(inventory);
+		goto unknown;
+	}
+	if (fclose(inventory) == 0)
+		return;
+unknown:
+	for (index = 0; index < report->count; ++index) {
+		memset(&observations[index], 0, sizeof(observations[index]));
+		observations[index].state = "unknown";
+	}
+}
+
 /*
  * A display view is not an ownership claim. All commands below share the
  * validated INFO/inventory collector; none resolves a name into cleanup
@@ -1649,6 +1769,7 @@ static int swapz_print_view(const struct status_ready_report *report,
 			    enum swapz_view view, const char *selected_name,
 			    int json)
 {
+	struct swapz_linux_swap *linux_swaps = NULL;
 	size_t index;
 	size_t matches = 0;
 	size_t emitted = 0;
@@ -1672,6 +1793,14 @@ static int swapz_print_view(const struct status_ready_report *report,
 			"swapzctl %s: UNAVAILABLE: no validated swapz target with that exact mapper name; no control action attempted\n",
 			swapz_view_name(view));
 		return 1;
+	}
+	if (report->count) {
+		linux_swaps = calloc(report->count, sizeof(*linux_swaps));
+		if (!linux_swaps) {
+			fputs("swapzctl: UNAVAILABLE: swap inventory allocation failed\n", stderr);
+			return 1;
+		}
+		swapz_observe_linux_swaps(report, linux_swaps);
 	}
 	if (json) {
 		/* Mapping names are reduced to ASCII-safe, JSON-safe characters. */
@@ -1705,7 +1834,8 @@ static int swapz_print_view(const struct status_ready_report *report,
 			       "\"physical_write_bytes\":%llu,\"gc_write_bytes\":%llu,"
 			       "\"compressed_pages\":%llu,\"raw_pages\":%llu,"
 			       "\"zero_elided_pages\":%llu,"
-			       "\"compressed_extent_bytes_exact\":%s}}",
+			       "\"compressed_extent_bytes_exact\":%s},"
+			       "\"linux_swap\":{\"state\":\"%s\",\"size_bytes\":",
 			       emitted ? "," : "", safe_name, target->target_index,
 			       device_major, device_minor, target->sector_start,
 			       target->sector_length, capacity,
@@ -1716,7 +1846,14 @@ static int swapz_print_view(const struct status_ready_report *report,
 			       target->ratio.raw_pages,
 			       target->ratio.zero_elided_pages,
 			       target->ratio.compressed_extent_ratio_exact ?
-			       "true" : "false");
+			       "true" : "false", linux_swaps[index].state);
+			if (linux_swaps[index].has_usage)
+				printf("%llu,\"used_bytes\":%llu,\"priority\":%ld}}",
+				       linux_swaps[index].size_bytes,
+				       linux_swaps[index].used_bytes,
+				       linux_swaps[index].priority);
+			else
+				fputs("null,\"used_bytes\":null,\"priority\":null}}", stdout);
 		} else if (view == SWAPZ_VIEW_LIST) {
 			printf("%s  %u  %u:%u  %llu  OK\n", safe_name,
 			       target->target_index + 1U, device_major, device_minor, capacity);
@@ -1745,10 +1882,22 @@ static int swapz_print_view(const struct status_ready_report *report,
 			}
 			report_swapz_target(target->name, target->target_index, &target->ratio);
 		}
+		if (!json && view != SWAPZ_VIEW_DIAGNOSE) {
+			if (linux_swaps[index].has_usage)
+				printf("  Linux swap: active (advisory), size=%llu used=%llu free=%llu bytes, priority=%ld\n",
+				       linux_swaps[index].size_bytes,
+				       linux_swaps[index].used_bytes,
+				       linux_swaps[index].size_bytes - linux_swaps[index].used_bytes,
+				       linux_swaps[index].priority);
+			else
+				printf("  Linux swap: %s (not proof of an inactive or drained mapper)\n",
+				       linux_swaps[index].state);
+		}
 		++emitted;
 	}
 	if (json)
 		puts("]}");
+	free(linux_swaps);
 	return 0;
 }
 
