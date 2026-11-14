@@ -197,6 +197,48 @@ expressions. Large diagnostic snapshots may use bounded `GFP_NOIO` scratch
 allocation instead of kernel stack; allocation failure must emit an explicit
 error status without fabricated counters or backing-device I/O.
 
+### Read-only swapzctl observability (2026-11-14)
+
+The public \`swapzctl status\`, \`list\`, \`inspect <mapper>\`,
+\`stats <mapper>\`, \`health <mapper>\` and \`diagnose <mapper>\`
+must remain observation-only. They use the same fully validated bounded
+\`DM_LIST_DEVICES\` / \`DM_TABLE_STATUS\` snapshot collector, including final
+inventory drift detection. Only exact Device Mapper target type \`swapz\`
+qualifies. The list name is a selector and is never cleanup authority;
+do not infer backing, transaction ownership or recovery permission from
+a prefix, \`/dev/mapper\` pathname, DM UUID alone or Linux swap appearance.
+Failed, unstable or malformed snapshots suppress all numeric output and
+retain their original first error.
+
+The \`--json\` observation schema begins at \`schema_version=1\` and
+uses integer byte/page counters, exact byte units, zero-based target indices
+and explicit \`ownership="unverified"\` until the authenticated runtime
+journal is checked. Display names must be bounded and JSON safe; opaque
+INFO payloads, raw backing paths, journal credentials and run IDs are not
+serialized. Use \`compressed_extent_bytes_exact\` to distinguish ratios
+provable from committed compressed extents from those obscured by padding.
+Cumulative logical/lower writes are not current occupancy or live rates.
+
+Linux \`/proc/swaps\` size/used/priority are separately sampled advisory
+kernel values, never swapz compressor counters. Match an observed active
+block swap only by a currently resolved block-special \`st_rdev\` equal
+to the validated DM device number; include the active observation's bytes
+and priority but do not treat current-path nonmatches as proof the retained
+kernel swap file is inactive. Overmount, pathname replacement, races,
+unreadable or malformed procfs and incomplete namespace evidence must
+result in \`unknown\` or \`not_observed\`, not verified drained state.
+Clearly label the observation as non-atomic and advisory. \`swapoff\`,
+\`mkswap\`, \`DM_DEV_REMOVE\`, loading/unloading modules and writable
+backing opens are prohibited from observability command paths.
+
+Any extension of control over a development trial must independently
+authenticate the private helper's original same-boot journal, exact
+mapper UUID/table/backing and kernel swap inventory, and delegate cleanup
+to that already-verified helper. If that proof or source-bound qualification
+is absent, expose diagnosis only and return BLOCKED. No automatic adoption
+of name-matched mappers, force removal, reconstruction of lost volatile
+mapping state, or raw swap-header modification.
+
 ### Representative-memory tooling
 
 Representative-memory analysis must be explicitly owner supplied and offline.

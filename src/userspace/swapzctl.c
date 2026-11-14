@@ -1769,7 +1769,7 @@ static int swapz_print_view(const struct status_ready_report *report,
 	/* Verify selection and capacity before any output, including a JSON prefix. */
 	for (index = 0; index < report->count; ++index) {
 		const struct status_ready_target *target = &report->targets[index];
-		unsigned long long capacity;
+		unsigned long long capacity = 0;
 
 		if (selected_name && strcmp(target->name, selected_name))
 			continue;
@@ -1806,7 +1806,7 @@ static int swapz_print_view(const struct status_ready_report *report,
 	for (index = 0; index < report->count; ++index) {
 		const struct status_ready_target *target = &report->targets[index];
 		char safe_name[DM_NAME_LEN + 1U];
-		unsigned long long capacity;
+		unsigned long long capacity = 0;
 		unsigned int device_major;
 		unsigned int device_minor;
 
@@ -1995,7 +1995,7 @@ int main(int argc, char **argv)
 		}
 		if (view == SWAPZ_VIEW_LIST || (view == SWAPZ_VIEW_STATUS && json)) {
 			if (json)
-				printf("{\"schema_version\":1,\"command\":\"%s\",\"devices\":[]}\\n",
+				printf("{\"schema_version\":1,\"command\":\"%s\",\"devices\":[]}\n",
 				       swapz_view_name(view));
 			else
 				puts("swapz targets: none");
