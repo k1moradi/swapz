@@ -3193,13 +3193,13 @@ class PrimaryRealSwapContracts(unittest.TestCase):
             (1.0, 2.0, 3.0, 4.0, 4.5)])
         self.assertFalse(qualify._development_pressure_has_owned_progress(
             samples, window, "fill"))
-        with mock.patch.object(qualify, "_mem_available_mib", return_value=12000), \\
-                mock.patch.object(qualify, "_read_uint", return_value=1024), \\
-                mock.patch.object(qualify, "_psi_total", return_value=0), \\
+        with mock.patch.object(qualify, "_mem_available_mib", return_value=12000), \
+                mock.patch.object(qualify, "_read_uint", return_value=1024), \
+                mock.patch.object(qualify, "_psi_total", return_value=0), \
                 mock.patch.object(qualify, "_memory_events",
-                                  return_value={"max": 0}), \\
+                                  return_value={"max": 0}), \
                 mock.patch.object(qualify, "_backing_inflight_requests",
-                                  return_value=1), \\
+                                  return_value=1), \
                 mock.patch.object(qualify, "read_block_stats",
                                   return_value=qualify.BlockStats(0, 512)):
             failure = qualify._workload_pressure_failure(
