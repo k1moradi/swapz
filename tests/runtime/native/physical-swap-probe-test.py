@@ -7408,5 +7408,97 @@ class PhysicalSwapProbeTests(unittest.TestCase):
                 probe.validate_review(path, evidence, target)
 
 
+    def test_paired_block_sampler_is_observational_and_bounded(self):
+        target = {"major": 8, "minor": 4, "parent_major_minor": "8:0",
+                  "root_same_physical_parent": False}
+        stat_line = "1 0 2 3 4 0 5 6 7 8 9 0 0 0 0 0 0"
+        with mock.patch.object(probe.Path, "read_text", return_value=stat_line):
+            with mock.patch.object(probe.time, "monotonic_ns",
+                                   side_effect=[1_000_000_000, 1_100_000_000,
+                                                1_300_000_000, 1_500_000_000]):
+                monitor = probe._PairedBlockIoSampler(target)
+                monitor.sample()
+                monitor.sample()
+                monitor.sample()
+                report = monitor.report()
+        self.assertEqual(set(report["devices"]),
+                         {"swap_partition", "parent_disk"})
+        self.assertEqual(len(report["samples"]), 3)
+        self.assertEqual(report["samples"][0]["devices"]
+                         ["swap_partition"]["write_requests"], 4)
+        self.assertEqual(report["metric_kind"],
+                         "aggregate_sysfs_not_per_request_latency")
+
+    def test_paired_raw_phase_reuses_oracle_without_switching_swap(self):
+        raw = SimpleNamespace(
+            device=(8, 4), type="partition", used_kib=0,
+            priority=-1, size_kib=16 * 1024 * 1024)
+        policy = {"workload_mib": 384, "resident_mib": 128,
+                  "swap_limit_mib": 384, "timeout_seconds": 240}
+        workload = SimpleNamespace(
+            Blocked=ValueError, QualificationFailure=RuntimeError,
+            read_swap_rows=mock.Mock(return_value=[raw]),
+            _row_for_device=lambda rows, device: raw,
+            require_expected_swap_priority=mock.Mock(),
+            _swap_identity=lambda rows, excluded: set(),
+            pin_real_swap_oracle=mock.Mock(return_value=(
+                Path("/private/oracle.py"), "a" * 64)),
+            _run_workload=mock.Mock(return_value={
+                "slot_reuse_proven": True, "reuse_rounds": 2}))
+        state = {"source_sha": "a" * 40, "run_id": "1" * 32}
+        target = {"major": 8, "minor": 4, "swap_was_active": True,
+                  "swap_used_kib": 0, "swap_priority": -1,
+                  "device": "/dev/sda4", "header": b"known"}
+        monitor = SimpleNamespace(sample=mock.Mock())
+        with tempfile.TemporaryDirectory() as directory, ExitStack() as stack:
+            stack.enter_context(mock.patch.object(
+                probe, "_algorithm_real_swap_workload",
+                return_value=(workload, policy)))
+            stack.enter_context(mock.patch.object(
+                probe, "_git_result", return_value=subprocess.CompletedProcess(
+                    [], 0, stdout="source")))
+            stack.enter_context(mock.patch.object(
+                probe, "_verify_target_identity"))
+            stack.enter_context(mock.patch.object(
+                probe, "_read_block0", return_value=b"known"))
+            commands = stack.enter_context(mock.patch.object(probe, "_run"))
+            output = probe._run_algorithm_raw_swap_comparison(
+                state, target, Path(directory), monitor)
+        self.assertEqual(output["mode"], "raw_linux_swap")
+        self.assertTrue(output["workload"]["slot_reuse_proven"])
+        self.assertTrue(workload._run_workload.call_args.kwargs["raw_linux_swap"])
+        self.assertTrue(workload._run_workload.call_args.kwargs[
+                        "development_progress_aware_psi"])
+        self.assertIn("raw-compare",
+                      str(workload.pin_real_swap_oracle.call_args.args[1]))
+        commands.assert_not_called()
+
+    def test_paired_raw_phase_rejects_competing_equal_priority_swapfile(self):
+        raw = SimpleNamespace(device=(8, 4), type="partition",
+                              used_kib=0, priority=-1)
+        foreign = SimpleNamespace(device=None, type="file", priority=-1)
+        workload = SimpleNamespace(
+            Blocked=ValueError, QualificationFailure=RuntimeError,
+            read_swap_rows=mock.Mock(return_value=[raw, foreign]),
+            _row_for_device=lambda rows, device: raw,
+            require_expected_swap_priority=mock.Mock(
+                side_effect=ValueError("equal priority")))
+        target = {"major": 8, "minor": 4, "swap_was_active": True}
+        with mock.patch.object(probe, "_algorithm_real_swap_workload",
+                               return_value=(workload, {})):
+            with self.assertRaisesRegex(
+                    probe.ProbeError, "attribution cannot be proven"):
+                probe._run_algorithm_raw_swap_comparison(
+                    {"source_sha": "a" * 40}, target, Path("/private"),
+                    mock.Mock())
+        workload.require_expected_swap_priority.assert_called_once()
+
+    def test_paired_raw_phase_requires_development_only_scope(self):
+        with self.assertRaisesRegex(
+                probe.ProbeError, "paired comparison requires development"):
+            probe.run_probe("/dev/none", "/dev/none", None, None,
+                            compare_raw=True)
+
+
 if __name__ == "__main__":
     unittest.main()

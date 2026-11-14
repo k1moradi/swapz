@@ -5165,5 +5165,90 @@ class PrimaryRealSwapContracts(unittest.TestCase):
         self.assertEqual(digest, hashlib.sha256(payload).hexdigest())
 
 
+    def test_raw_comparison_evidence_requires_real_sectors_swapin_and_exact_bytes(self):
+        # No fake dmsetup status is supplied for the ordinary Linux swap side.
+        before = qualify.BlockStats(read_sectors=10, write_sectors=20)
+        after_write = qualify.BlockStats(read_sectors=10, write_sectors=300)
+        before_read = qualify.BlockStats(read_sectors=10, write_sectors=300)
+        after_read = qualify.BlockStats(read_sectors=350, write_sectors=300)
+        verified_pages = 384 * 1024 * 1024 // qualify.PAGE_BYTES
+        evidence = {
+            "cgroup_swap_bytes": 96 * qualify.MIB,
+            "cgroup_swap_peak": 110 * qualify.MIB,
+            "min_swap_bytes": 64 * qualify.MIB,
+            "raw_used_delta_kib": 96 * 1024,
+            "oom_delta": 0,
+            "oom_kill_delta": 0,
+            "lower_before": before,
+            "lower_after_fill": after_write,
+            "lower_before_verify": before_read,
+            "lower_after_verify": after_read,
+            "vm_before": {"pswpout": 50},
+            "vm_after_fill": {"pswpout": 250},
+            "vm_before_verify": {"pswpin": 90},
+            "vm_after_verify": {"pswpin": 190},
+            "oracle": {
+                "verified_pages": verified_pages,
+                "verified_bytes": verified_pages * qualify.PAGE_BYTES,
+                "mismatches": 0,
+                "digest": "a" * 64,
+                "expected_digest": "a" * 64,
+            },
+            "expected_verified_pages": verified_pages,
+        }
+        qualify.evaluate_raw_swap_evidence(**evidence)
+        for changes in (
+                {"raw_used_delta_kib": 0},
+                {"oom_kill_delta": 1},
+                {"lower_after_fill": before},
+                {"lower_after_verify": before_read},
+                {"vm_after_fill": evidence["vm_before"]},
+                {"vm_after_verify": evidence["vm_before_verify"]},
+                {"oracle": {**evidence["oracle"], "mismatches": 1}},
+                {"oracle": {**evidence["oracle"], "digest": "b" * 64}},
+        ):
+            with self.subTest(changes=changes):
+                with self.assertRaises(qualify.QualificationFailure):
+                    qualify.evaluate_raw_swap_evidence(**{**evidence, **changes})
+
+    def test_raw_comparison_psi_progress_cannot_use_foreign_io_or_wrong_charge(self):
+        window = qualify.PsiStallWindow(0.0, 0)
+        window.observe(5.0, 4_900_000)
+        before = {key: 0 for key, _ in qualify.PRESSURE_PROGRESS_COUNTERS}
+        before.update(raw_swap_used_kib=0, raw_cgroup_swap_bytes=0)
+        after = dict(before)
+        after.update(
+            raw_pswpout_total=100, raw_pswpin_total=100,
+            lower_write_sectors_total=100, lower_read_sectors_total=100,
+            raw_swap_used_kib=256, raw_cgroup_swap_bytes=256 * 1024)
+        samples = deque([(1.0, before), (4.1, after)])
+        self.assertTrue(qualify._development_raw_pressure_has_owned_progress(
+            samples, window, "fill", 0))
+        self.assertTrue(qualify._development_raw_pressure_has_owned_progress(
+            samples, window, "verify", 0))
+        for changes in (
+                {"raw_swap_used_kib": 255},
+                {"raw_cgroup_swap_bytes": 0},
+                {"raw_pswpout_total": 0},
+                {"lower_write_sectors_total": 0},
+        ):
+            with self.subTest(changes=changes):
+                bad = deque([(1.0, before), (4.1, {**after, **changes})])
+                self.assertFalse(
+                    qualify._development_raw_pressure_has_owned_progress(
+                        bad, window, "fill", 0))
+        self.assertFalse(qualify._development_raw_pressure_has_owned_progress(
+            deque([(1.0, before), (3.0, after)]), window, "fill", 0))
+        self.assertFalse(qualify._development_raw_pressure_has_owned_progress(
+            samples, window, "release", 0))
+
+    def test_raw_comparison_mode_is_rejected_outside_development(self):
+        with self.assertRaisesRegex(
+                qualify.QualificationFailure,
+                "raw comparison requires development-only"):
+            qualify._run_workload({}, {}, ORACLE, 384, 128, 384, 240,
+                                  raw_linux_swap=True)
+
+
 if __name__ == "__main__":
     unittest.main()

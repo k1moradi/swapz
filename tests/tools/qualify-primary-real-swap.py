@@ -3343,6 +3343,40 @@ def evaluate_workload_evidence(*, cgroup_swap_bytes: int, cgroup_swap_peak: int,
             raise QualificationFailure("swapz target entered failed state during real-swap workload")
 
 
+def evaluate_raw_swap_evidence(*, cgroup_swap_bytes: int,
+                               cgroup_swap_peak: int, min_swap_bytes: int,
+                               raw_used_delta_kib: int, oom_delta: int,
+                               oom_kill_delta: int,
+                               lower_before: BlockStats,
+                               lower_after_fill: BlockStats,
+                               lower_before_verify: BlockStats,
+                               lower_after_verify: BlockStats,
+                               vm_before: dict[str, int],
+                               vm_after_fill: dict[str, int],
+                               vm_before_verify: dict[str, int],
+                               vm_after_verify: dict[str, int],
+                               oracle: dict, expected_verified_pages: int) -> None:
+    """Independent ordinary-swap proof; never manufacture swapz counters."""
+    if (cgroup_swap_bytes < min_swap_bytes or cgroup_swap_peak < min_swap_bytes or
+            raw_used_delta_kib * 1024 < min_swap_bytes):
+        raise QualificationFailure("raw swap did not reach the required real-swap floor")
+    if oom_delta or oom_kill_delta:
+        raise QualificationFailure("raw swap workload encountered cgroup OOM")
+    if (lower_after_fill.write_sectors <= lower_before.write_sectors or
+            lower_after_verify.read_sectors <= lower_before_verify.read_sectors or
+            vm_after_fill["pswpout"] <= vm_before["pswpout"] or
+            vm_after_verify["pswpin"] <= vm_before_verify["pswpin"]):
+        raise QualificationFailure("raw swap lacked independent backing I/O and Linux swap evidence")
+    digest = oracle.get("digest")
+    if (oracle.get("verified_pages") != expected_verified_pages or
+            oracle.get("verified_bytes") != expected_verified_pages * PAGE_BYTES or
+            oracle.get("mismatches") != 0 or
+            not isinstance(digest, str) or
+            re.fullmatch(r"[0-9a-f]{64}", digest) is None or
+            digest != oracle.get("expected_digest")):
+        raise QualificationFailure("raw swap byte oracle reported corruption or incomplete verification")
+
+
 def split_concurrent_workload_mib(workload_mib: int) -> tuple[int, int]:
     first = workload_mib // CONCURRENT_ORACLE_PROCESSES
     second = workload_mib - first
@@ -3532,12 +3566,17 @@ PRESSURE_PROGRESS_COUNTERS = (
     ("lower_write_sectors_total", "lower_write_sectors_delta"),
     ("lower_write_requests_total", "lower_write_requests_delta"),
     ("lower_read_sectors_total", "lower_read_sectors_delta"),
+    # Ordinary raw-swap progress must come from Linux and the exact partition,
+    # never fabricated dm-swapz target status fields.
+    ("raw_pswpout_total", "raw_pswpout_delta"),
+    ("raw_pswpin_total", "raw_pswpin_delta"),
 )
 
 
 def _pressure_progress_snapshot(cgroup: Path,
                                 status_reader: Callable[[], dict[str, int]],
-                                lower_device: tuple[int, int]) -> dict[str, int | None]:
+                                lower_device: tuple[int, int], *,
+                                raw_linux_swap: bool = False) -> dict[str, int | None]:
     """Best-effort, bounded telemetry; never turn an optional read into a stop."""
     observed: dict[str, int | None] = {
         field: None for field, _ in PRESSURE_PROGRESS_COUNTERS}
@@ -3545,6 +3584,19 @@ def _pressure_progress_snapshot(cgroup: Path,
     # must be exactly ZERO in the latest sample before any PSI exception.
     observed["swapz_failed"] = None
     observed["swapz_error"] = None
+    observed["raw_swap_used_kib"] = None
+    observed["raw_cgroup_swap_bytes"] = None
+    if raw_linux_swap:
+        try:
+            row = _row_for_device(read_swap_rows(), lower_device)
+            if row is not None:
+                observed["raw_swap_used_kib"] = row.used_kib
+            observed["raw_cgroup_swap_bytes"] = _read_uint(cgroup / "memory.swap.current")
+            swap_counters = read_vmstat()
+            observed["raw_pswpout_total"] = swap_counters["pswpout"]
+            observed["raw_pswpin_total"] = swap_counters["pswpin"]
+        except (Blocked, QualificationFailure):
+            pass
     for field, path, kind in (
             ("cgroup_io_some_usec", cgroup / "io.pressure", "some"),
             ("cgroup_io_full_usec", cgroup / "io.pressure", "full"),
@@ -3649,6 +3701,41 @@ def _development_pressure_has_owned_progress(
     return False
 
 
+def _development_raw_pressure_has_owned_progress(
+        samples: deque, window: PsiStallWindow, phase: str,
+        baseline_used_kib: int) -> bool:
+    """Allow a dev-only raw comparison past FULL PSI only with real swap I/O.
+
+    Endpoint identity/charge equality excludes a competing swapfile or host
+    assignment. Whole-device sectors and vmstat alone are NOT enough to
+    attribute traffic to the bounded test group.
+    """
+    deltas = _pressure_progress_deltas(samples, window)
+    if (deltas["progress_window_usec"] is None or
+            deltas["progress_window_usec"] <
+            DEVELOPMENT_PSI_PROGRESS_MIN_WINDOW_USEC or not samples):
+        return False
+    latest = samples[-1][1]
+    used_kib = latest.get("raw_swap_used_kib")
+    charged_bytes = latest.get("raw_cgroup_swap_bytes")
+    if (type(used_kib) is not int or type(charged_bytes) is not int or
+            used_kib < baseline_used_kib or
+            (used_kib - baseline_used_kib) * 1024 != charged_bytes):
+        return False
+    if phase == "fill":
+        return (charged_bytes >= DEVELOPMENT_PSI_PROGRESS_MIN_PAGES * PAGE_BYTES and
+                type(deltas["raw_pswpout_delta"]) is int and
+                deltas["raw_pswpout_delta"] >= DEVELOPMENT_PSI_PROGRESS_MIN_PAGES and
+                type(deltas["lower_write_sectors_delta"]) is int and
+                deltas["lower_write_sectors_delta"] > 0)
+    if phase == "verify":
+        return (type(deltas["raw_pswpin_delta"]) is int and
+                deltas["raw_pswpin_delta"] >= DEVELOPMENT_PSI_PROGRESS_MIN_PAGES and
+                type(deltas["lower_read_sectors_delta"]) is int and
+                deltas["lower_read_sectors_delta"] > 0)
+    return False
+
+
 def _backing_inflight_requests(lower_device: tuple[int, int]) -> int | None:
     """Best-effort sysfs stat field 9, captured before owned mapper recovery.
 
@@ -3749,11 +3836,16 @@ def _run_workload(manifest: dict, active: dict, oracle_path: Path,
                   telemetry_check: Callable[[], None] | None = None,
                   *, status_reader: Callable[[], dict[str, int]] | None = None,
                   expected_mapper_baseline_kib: int = 0,
-                  development_progress_aware_psi: bool = False) -> dict:
+                  development_progress_aware_psi: bool = False,
+                  raw_linux_swap: bool = False) -> dict:
     # The private development trial has its own run-bound mapper name. Its
     # caller must verify that exact mapping whenever sampling its status;
     # ordinary primary qualification retains its existing status reader.
-    sample_status = read_status if status_reader is None else status_reader
+    if type(raw_linux_swap) is not bool or (raw_linux_swap and
+            (status_reader is not None or not development_progress_aware_psi)):
+        raise QualificationFailure("raw comparison requires development-only direct-swap observations")
+    sample_status = ((lambda: {}) if raw_linux_swap else
+                     read_status if status_reader is None else status_reader)
     # This baseline is supplied ONLY by the private caller that positively
     # authenticated the owned mapper. Default zero is mandatory elsewhere.
     # Do not silently reset it from later swap inventory: foreign pages
@@ -3811,7 +3903,8 @@ def _run_workload(manifest: dict, active: dict, oracle_path: Path,
             progress_samples.append((
                 observed_time, _pressure_progress_snapshot(
                     cgroup, sample_status,
-                    (manifest["device_major_int"], manifest["device_minor_int"]))))
+                    (manifest["device_major_int"], manifest["device_minor_int"]),
+                    raw_linux_swap=raw_linux_swap)))
 
     def guard() -> None:
         if telemetry_check is not None:
@@ -3840,8 +3933,11 @@ def _run_workload(manifest: dict, active: dict, oracle_path: Path,
                          not development_progress_aware_psi)
         if (stopped and not (
                 development_progress_aware_psi and
-                _development_pressure_has_owned_progress(
-                    progress_samples, psi_window, workload_phase))):
+                (_development_raw_pressure_has_owned_progress(
+                    progress_samples, psi_window, workload_phase,
+                    expected_mapper_baseline_kib) if raw_linux_swap else
+                 _development_pressure_has_owned_progress(
+                    progress_samples, psi_window, workload_phase)))):
             raise _workload_pressure_failure(
                 psi_window, cgroup, sample_status,
                 (manifest["device_major_int"], manifest["device_minor_int"]),
@@ -4036,7 +4132,9 @@ def _run_workload(manifest: dict, active: dict, oracle_path: Path,
                 events_after = _memory_events(cgroup / "memory.events")
                 oom_delta = events_after.get("oom", 0) - events_before.get("oom", 0)
                 oom_kill_delta = events_after.get("oom_kill", 0) - events_before.get("oom_kill", 0)
-                evaluate_workload_evidence(
+                evaluator = (evaluate_raw_swap_evidence if raw_linux_swap
+                             else evaluate_workload_evidence)
+                common_evidence = dict(
                     cgroup_swap_bytes=swap_current,
                     cgroup_swap_peak=swap_peak,
                     min_swap_bytes=min_swap_bytes,
@@ -4058,6 +4156,17 @@ def _run_workload(manifest: dict, active: dict, oracle_path: Path,
                     vm_after_verify=vm_after_verify,
                     oracle=verified,
                 )
+                if raw_linux_swap:
+                    evaluator(**{key: common_evidence[key] for key in (
+                        "cgroup_swap_bytes", "cgroup_swap_peak", "min_swap_bytes",
+                        "oom_delta", "oom_kill_delta", "lower_before",
+                        "lower_after_fill", "lower_before_verify",
+                        "lower_after_verify", "vm_before", "vm_after_fill",
+                        "vm_before_verify", "vm_after_verify", "oracle",
+                        "expected_verified_pages")},
+                        raw_used_delta_kib=mapper_used_delta)
+                else:
+                    evaluator(**common_evidence)
                 round_result = {
                     "round": round_index,
                     "concurrent_workers": len(round_processes),
@@ -4070,14 +4179,16 @@ def _run_workload(manifest: dict, active: dict, oracle_path: Path,
                     "cgroup_swap_peak_bytes": swap_peak,
                     "mapper_used_start_kib": expected_before.used_kib,
                     "mapper_used_delta_kib": mapper_used_delta,
-                    "swapz_logical_write_delta":
-                        fill_status_after["logical_write"] - fill_status_before["logical_write"],
-                    "swapz_physical_write_delta":
-                        fill_status_after["physical_write"] - fill_status_before["physical_write"],
-                    "swapz_logical_read_delta":
-                        verify_status_after["logical_read"] - verify_status_before["logical_read"],
-                    "swapz_physical_read_delta":
-                        verify_status_after["physical_read"] - verify_status_before["physical_read"],
+                    **({"raw_linux_swap": True} if raw_linux_swap else {
+                        "swapz_logical_write_delta":
+                            fill_status_after["logical_write"] - fill_status_before["logical_write"],
+                        "swapz_physical_write_delta":
+                            fill_status_after["physical_write"] - fill_status_before["physical_write"],
+                        "swapz_logical_read_delta":
+                            verify_status_after["logical_read"] - verify_status_before["logical_read"],
+                        "swapz_physical_read_delta":
+                            verify_status_after["physical_read"] - verify_status_before["physical_read"],
+                    }),
                     "lower_write_sector_delta":
                         lower_after_fill.write_sectors - lower_before.write_sectors,
                     "lower_write_bytes_delta":
@@ -4135,8 +4246,11 @@ def _run_workload(manifest: dict, active: dict, oracle_path: Path,
         capture_progress(observed_time, force=stopped)
         if (stopped and not (
                 development_progress_aware_psi and
-                _development_pressure_has_owned_progress(
-                    progress_samples, psi_window, "verify"))):
+                (_development_raw_pressure_has_owned_progress(
+                    progress_samples, psi_window, "verify",
+                    expected_mapper_baseline_kib) if raw_linux_swap else
+                 _development_pressure_has_owned_progress(
+                    progress_samples, psi_window, "verify")))):
             raise _workload_pressure_failure(
                 psi_window, cgroup, sample_status,
                 (manifest["device_major_int"], manifest["device_minor_int"]), "final",
@@ -4156,14 +4270,16 @@ def _run_workload(manifest: dict, active: dict, oracle_path: Path,
             "cgroup_memory_pressure_full_usec": psi_after - psi_before,
             "mapper_used_delta_kib": sum(
                 int(result["mapper_used_delta_kib"]) for result in rounds),
-            "swapz_logical_write_delta": sum(
-                int(result["swapz_logical_write_delta"]) for result in rounds),
-            "swapz_physical_write_delta": sum(
-                int(result["swapz_physical_write_delta"]) for result in rounds),
-            "swapz_logical_read_delta": sum(
-                int(result["swapz_logical_read_delta"]) for result in rounds),
-            "swapz_physical_read_delta": sum(
-                int(result["swapz_physical_read_delta"]) for result in rounds),
+            **({"raw_linux_swap": True} if raw_linux_swap else {
+                "swapz_logical_write_delta": sum(
+                    int(result["swapz_logical_write_delta"]) for result in rounds),
+                "swapz_physical_write_delta": sum(
+                    int(result["swapz_physical_write_delta"]) for result in rounds),
+                "swapz_logical_read_delta": sum(
+                    int(result["swapz_logical_read_delta"]) for result in rounds),
+                "swapz_physical_read_delta": sum(
+                    int(result["swapz_physical_read_delta"]) for result in rounds),
+            }),
             "lower_write_sector_delta": sum(
                 int(result["lower_write_sector_delta"]) for result in rounds),
             "lower_write_bytes_delta": sum(
