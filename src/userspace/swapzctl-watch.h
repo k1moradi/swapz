@@ -36,6 +36,8 @@ enum swapz_watch_counter {
  */
 struct swapz_watch_snapshot {
 	char mapper_name[DM_NAME_LEN];
+	/* DM UUID is optional; its presence and exact bytes form one identity. */
+	char dm_uuid[DM_UUID_LEN];
 	char target_type[DM_MAX_TYPE_NAME];
 	uint64_t dm_device;
 	uint64_t sector_start;
@@ -45,6 +47,7 @@ struct swapz_watch_snapshot {
 	uint32_t target_index;
 	uint32_t target_count;
 	uint64_t cumulative[SWAPZ_WATCH_COUNTER_COUNT];
+	int has_dm_uuid;
 	int validated;
 	int kernel_failed;
 	int kernel_error;

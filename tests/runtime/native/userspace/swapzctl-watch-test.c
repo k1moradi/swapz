@@ -20,6 +20,8 @@ static struct swapz_watch_snapshot sample(uint64_t seconds, long nanoseconds)
 	struct swapz_watch_snapshot result = { 0 };
 
 	memcpy(result.mapper_name, "swapz-test", sizeof("swapz-test"));
+	memcpy(result.dm_uuid, "swapz-test-uuid", sizeof("swapz-test-uuid"));
+	result.has_dm_uuid = 1;
 	memcpy(result.target_type, "swapz", sizeof("swapz"));
 	result.dm_device = 0x00080001ULL;
 	result.event_number = 8;
@@ -136,7 +138,7 @@ static int test_intervals(void)
 	CHECK(errno == ERANGE);
 	CHECK(memcmp(&unchanged, &result, sizeof(result)) == 0);
 	after = later_sample(1, 0);
-	for (index = 0; index < 10; ++index) {
+	for (index = 0; index < 14; ++index) {
 		struct swapz_watch_snapshot broken = after;
 
 		switch (index) {
@@ -149,12 +151,22 @@ static int test_intervals(void)
 		case 6: broken.target_count = 2; break;
 		case 7: broken.kernel_failed = 1; break;
 		case 8: broken.kernel_error = -EIO; break;
-		default: memcpy(broken.target_type, "linear", 7); break;
+		case 9: memcpy(broken.target_type, "linear", 7); break;
+		case 10: broken.dm_uuid[0] = 'X'; break;
+		case 11: broken.has_dm_uuid = 0; broken.dm_uuid[0] = '\0'; break;
+		case 12: broken.has_dm_uuid = 2; break;
+		default: memset(broken.dm_uuid, 'x', sizeof(broken.dm_uuid)); break;
 		}
 		before = sample(0, 0);
 		CHECK(swapz_watch_compute_interval(&before, &broken, &result) == -1);
 		CHECK(memcmp(&unchanged, &result, sizeof(result)) == 0);
 	}
+	/* Absence is a validated identity state, not a fabricated UUID. */
+	before = sample(0, 0);
+	after = later_sample(2, 0);
+	before.has_dm_uuid = after.has_dm_uuid = 0;
+	before.dm_uuid[0] = after.dm_uuid[0] = '\0';
+	CHECK(swapz_watch_compute_interval(&before, &after, &result) == 0);
 	before = sample(1, 0);
 	after = later_sample(1, 0);
 	CHECK(swapz_watch_compute_interval(&before, &after, &result) == -1);
@@ -318,6 +330,11 @@ static int test_runner(void)
 	CHECK(fixture.emitted == 1 && fixture.waited == 3);
 	fixture = fake_fixture();
 	fixture.readings[1].event_number++;
+	CHECK(swapz_watch_run("swapz-test", 1000000000ULL, 2,
+			      &fixture.stop_requested, &callbacks) == -1);
+	CHECK(errno == ESTALE && fixture.emitted == 0);
+	fixture = fake_fixture();
+	fixture.readings[1].dm_uuid[0] = 'X';
 	CHECK(swapz_watch_run("swapz-test", 1000000000ULL, 2,
 			      &fixture.stop_requested, &callbacks) == -1);
 	CHECK(errno == ESTALE && fixture.emitted == 0);

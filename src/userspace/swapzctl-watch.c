@@ -96,6 +96,10 @@ static int swapz_watch_valid_snapshot(const struct swapz_watch_snapshot *snapsho
 	    snapshot->sector_start > UINT64_MAX - snapshot->sector_count ||
 	    !memchr(snapshot->mapper_name, '\0', sizeof(snapshot->mapper_name)) ||
 	    !snapshot->mapper_name[0] ||
+	    (snapshot->has_dm_uuid != 0 && snapshot->has_dm_uuid != 1) ||
+	    !memchr(snapshot->dm_uuid, '\0', sizeof(snapshot->dm_uuid)) ||
+	    (snapshot->has_dm_uuid ? !snapshot->dm_uuid[0] :
+	     snapshot->dm_uuid[0] != '\0') ||
 	    !memchr(snapshot->target_type, '\0', sizeof(snapshot->target_type)) ||
 	    strcmp(snapshot->target_type, "swapz")) {
 		errno = EPROTO;
@@ -178,6 +182,8 @@ int swapz_watch_compute_interval(const struct swapz_watch_snapshot *before,
 	    swapz_watch_valid_snapshot(after) < 0)
 		return -1;
 	if (strcmp(before->mapper_name, after->mapper_name) ||
+	    before->has_dm_uuid != after->has_dm_uuid ||
+	    (before->has_dm_uuid && strcmp(before->dm_uuid, after->dm_uuid)) ||
 	    before->dm_device != after->dm_device ||
 	    before->event_number != after->event_number ||
 	    before->table_generation != after->table_generation ||

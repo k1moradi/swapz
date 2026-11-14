@@ -8,8 +8,10 @@ not an implemented public CLI flag. Do not introduce an independent Device
 Mapper reader, a mutating ioctl or lifecycle authority to integrate it.
 A future caller must supply a fully validated two-INFO/final-LIST snapshot,
 prove the exact named mapper has precisely one swapz target, bind DM device,
-event, table generation, target index/count/type and sector geometry, and
-supply canonical cumulative kernel counters. No multi-target adoption or
+optional DM UUID presence and exact value, event, table generation, target
+index/count/type and sector geometry, and supply canonical cumulative kernel
+counters. An absent UUID must stay absent across samples; neither an empty
+UUID nor a stable DM event number proves an unreplaceable mapper incarnation. No multi-target adoption or
 inference from `/proc/swaps`, host vmstat or PSI is permitted.
 
 Parse the watch interval as an exact canonical decimal number of seconds with
