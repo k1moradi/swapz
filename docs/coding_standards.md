@@ -170,6 +170,23 @@ is mandatory until independently attributable forward progress is verified.
 forward progress and ownership; `diagnose` preserves the first source-bound
 failure and offers only nonmutating next steps.
 
+### swapzctl staged watch INFO counters (2026-11-14)
+
+The existing validated two-INFO plus final-LIST collector retains the
+additional `logical_read`, `physical_read`, `physical_read_reqs`,
+`physical_write_reqs`, `gc_read`, `gc_read_reqs`, and `gc_write_reqs`
+fields only when the entire set is present as unique canonical bounded
+unsigned 64-bit decimals. The preexisting `logical_write`, `physical_write`,
+`gc_write`, `compressed`, `raw` and `zero_elided` fields remain mandatory.
+An absent subset is not silently treated as zero: the snapshot's
+`watch_counters_valid` flag is false. GC bytes and request totals must be
+bounded by their respective physical lower totals. Watch validity is cleared
+if any extended count changes between the two validated INFO snapshots, even
+when the historical write-side status report can otherwise succeed. This
+staged field collection makes no public `--watch` command, sampling thread,
+mutating ioctl or lifecycle claim; Agent 2 end-to-end coverage and watch
+identity/clock/output integration remain mandatory before public exposure.
+
 ### swapzctl exact-byte and headerless human output (2026-11-14)
 
 Read-only human observation modes accept `--bytes`, which prints cumulative

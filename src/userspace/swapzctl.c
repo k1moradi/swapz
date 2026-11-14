@@ -104,6 +104,15 @@ struct swapz_ratio_status {
 	unsigned long long logical_write_bytes;
 	unsigned long long physical_write_bytes;
 	unsigned long long gc_write_bytes;
+	/* Additional kernel INFO counters for the staged read-only watch path. */
+	unsigned long long logical_read_bytes;
+	unsigned long long physical_read_bytes;
+	unsigned long long physical_read_requests;
+	unsigned long long physical_write_requests;
+	unsigned long long gc_read_bytes;
+	unsigned long long gc_read_requests;
+	unsigned long long gc_write_requests;
+	int watch_counters_valid;
 	unsigned long long compressed_pages;
 	unsigned long long raw_pages;
 	unsigned long long zero_elided_pages;
@@ -304,6 +313,33 @@ static int parse_status_unsigned(const char *status, const char *key,
 	return 0;
 }
 
+/* Optional legacy status keys are accepted only as bounded canonical integers.
+ * A watch consumer must require every field; no missing value becomes zero.
+ */
+static int parse_status_unsigned_optional(const char *status, const char *key,
+					unsigned long long *value,
+					struct status_problem *problem)
+{
+	const char *value_start;
+	const char *value_end;
+	const char *parsed_end;
+	const char *expected = "one canonical unsigned 64-bit decimal";
+	unsigned long long parsed_value;
+	int found = status_find_value(status, key, expected, &value_start,
+				      &value_end, problem);
+
+	if (found <= 0)
+		return found;
+	if (parse_unsigned_decimal(value_start, ULLONG_MAX, &parsed_end,
+				   &parsed_value) < 0 || parsed_end != value_end) {
+		status_set_problem(problem, key, expected,
+				   "noncanonical or overflowing INFO counter");
+		return -1;
+	}
+	*value = parsed_value;
+	return 1;
+}
+
 static int parse_status_errno(const char *status, const char *key,
 			      int optional, int *value,
 			      struct status_problem *problem)
@@ -370,6 +406,7 @@ static int parse_swapz_ratio_status_diagnostic(
 	unsigned long long total_pages;
 	unsigned long long page_logical_bytes;
 	unsigned long long raw_physical_bytes;
+	unsigned int watch_counter_count = 0;
 	int snapshot_error = 0;
 	int snapshot_error_present;
 
@@ -438,6 +475,49 @@ static int parse_swapz_ratio_status_diagnostic(
 	    parse_status_unsigned(status, "bulk_padding", UINT_MAX,
 				  &ratio->bulk_padding_blocks, problem) < 0)
 		return STATUS_BLOCKED;
+
+	/* These seven INFO keys are supplied by current kernels, but older
+	 * test/status fixtures omit them. Only a complete independently parsed
+	 * set can ever be consumed by a future watch mode.
+	 */
+	{
+		struct {
+			const char *key;
+			unsigned long long *value;
+		} optional[] = {
+			{ "logical_read", &ratio->logical_read_bytes },
+			{ "physical_read", &ratio->physical_read_bytes },
+			{ "physical_read_reqs", &ratio->physical_read_requests },
+			{ "physical_write_reqs", &ratio->physical_write_requests },
+			{ "gc_read", &ratio->gc_read_bytes },
+			{ "gc_read_reqs", &ratio->gc_read_requests },
+			{ "gc_write_reqs", &ratio->gc_write_requests }
+		};
+		size_t counter_index;
+
+		for (counter_index = 0;
+		     counter_index < sizeof(optional) / sizeof(optional[0]);
+		     ++counter_index) {
+			int present = parse_status_unsigned_optional(status,
+				optional[counter_index].key,
+				optional[counter_index].value, problem);
+
+			if (present < 0)
+				return STATUS_BLOCKED;
+			watch_counter_count += (unsigned int)present;
+		}
+		if (watch_counter_count == sizeof(optional) / sizeof(optional[0])) {
+			if (ratio->gc_read_bytes > ratio->physical_read_bytes ||
+			    ratio->gc_read_requests > ratio->physical_read_requests ||
+			    ratio->gc_write_requests > ratio->physical_write_requests) {
+				status_set_problem(problem, "GC/lower read and request counters",
+					   "GC totals no larger than total lower I/O",
+					   "GC counters exceed total lower I/O");
+				return STATUS_RETRY;
+			}
+			ratio->watch_counters_valid = 1;
+		}
+	}
 
 	if (ratio->compressed_pages > ULLONG_MAX - ratio->raw_pages ||
 	    ratio->compressed_pages + ratio->raw_pages >
@@ -538,6 +618,22 @@ static int ratio_status_equal(const struct swapz_ratio_status *left,
 	       left->bulk_padding_blocks == right->bulk_padding_blocks &&
 	       left->failed == right->failed &&
 	       left->error == right->error;
+}
+
+/* This stricter equivalence is watch-only. The default status view still
+ * compares its historical write-side counters and remains backward compatible.
+ */
+static int status_watch_counters_equal(const struct swapz_ratio_status *left,
+				       const struct swapz_ratio_status *right)
+{
+	return left->watch_counters_valid && right->watch_counters_valid &&
+	       left->logical_read_bytes == right->logical_read_bytes &&
+	       left->physical_read_bytes == right->physical_read_bytes &&
+	       left->physical_read_requests == right->physical_read_requests &&
+	       left->physical_write_requests == right->physical_write_requests &&
+	       left->gc_read_bytes == right->gc_read_bytes &&
+	       left->gc_read_requests == right->gc_read_requests &&
+	       left->gc_write_requests == right->gc_write_requests;
 }
 
 static void format_bytes(unsigned long long bytes, char *text, size_t text_size)
@@ -1593,9 +1689,17 @@ static int report_device_status_with_reader(
 		}
 		for (target = 0; target < first.target_count; ++target) {
 			const struct swapz_target_snapshot *entry = &first.targets[target];
+			struct swapz_target_snapshot stable_entry = *entry;
 
+			/* A read-side count that changes across the two INFO reads may
+			 * still be suitable for cumulative status, but never for watch.
+			 */
 			if (entry->is_swapz &&
-			    status_append_ready_target(report, name, target, entry,
+			    !status_watch_counters_equal(&entry->ratio,
+						 &second.targets[target].ratio))
+				stable_entry.ratio.watch_counters_valid = 0;
+			if (entry->is_swapz &&
+			    status_append_ready_target(report, name, target, &stable_entry,
 						       mapper_sector_end) < 0) {
 				struct status_problem allocation_problem = {
 					.field = "validated status results",
