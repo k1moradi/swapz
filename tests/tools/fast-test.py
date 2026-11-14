@@ -1400,7 +1400,12 @@ def main():
     checkpoint_matches_current = bool(
         input_sha256 and host_fingerprint and
         checkpoint_matches_native(checkpoint, input_sha256, host_fingerprint))
-    native_reused = args.resume and checkpoint_matches_current
+    # Recheck the native bytes after opening the private checkpoint. An
+    # executable rebuilt while the PASS record was read must run fresh,
+    # rather than inheriting its earlier digest and silently being skipped.
+    native_reused = bool(
+        args.resume and checkpoint_matches_current and
+        checkpoint_matches_native(checkpoint, input_sha256, host_fingerprint))
     new_native_checkpoint = None
     if native_reused:
         evidence["resume"]["native_reused"] = True

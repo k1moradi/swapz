@@ -3708,7 +3708,8 @@ int main(void) {
                     "check=unclaimed_null_blk errno=EBUSY\n"), stderr="")
 
         def run_case(resume, current_input=input_sha, current_host=host,
-                     current_artifact=artifact_sha, invalidate_success=True):
+                     current_artifact=artifact_sha, invalidate_success=True,
+                     artifact_reads=None):
             fast = runpy.run_path(str(ROOT / "tests/tools/fast-test.py"))
             namespace = fast["main"].__globals__
             events = []
@@ -3726,7 +3727,11 @@ int main(void) {
             namespace["build_native_checks"] = lambda: events.append("native")
             namespace["resume_input_fingerprint"] = lambda: current_input
             namespace["resume_host_fingerprint"] = lambda: current_host
-            namespace["native_artifact_fingerprint"] = lambda: current_artifact
+            artifact_digests = (
+                iter(artifact_reads) if artifact_reads is not None else None)
+            namespace["native_artifact_fingerprint"] = (
+                lambda: next(artifact_digests) if artifact_digests is not None
+                else current_artifact)
             namespace["read_resume_checkpoint"] = (
                 lambda: copy.deepcopy(checkpoint))
             namespace["write_resume_checkpoint"] = (
@@ -3771,6 +3776,18 @@ int main(void) {
         reused_events, reused_evidence = run_case(True)
         self.assertEqual(reused_events, ["product-build", "preflight"])
         self.assertTrue(reused_evidence["resume"]["native_reused"])
+
+        # The first hash can match while a concurrent native rebuild
+        # replaces an executable during checkpoint lookup. The second
+        # check must refuse reuse and run all native/replay checks fresh.
+        changed_artifact = "0" * 64
+        racing_events, racing_evidence = run_case(
+            True, current_artifact=changed_artifact,
+            artifact_reads=(artifact_sha, changed_artifact, changed_artifact))
+        self.assertEqual(racing_events, [
+            "product-build", "native", "checkpoint-write", "preflight",
+        ])
+        self.assertFalse(racing_evidence["resume"]["native_reused"])
 
         for label, kwargs in (
                 ("input", {"current_input": "f" * 64}),

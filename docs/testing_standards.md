@@ -2697,7 +2697,11 @@ replay inputs and fast-test runner, the host/compiler identity, and hashes of
 every required native test artifact match a previously completed PASS. Changes
 to unrelated userspace sources, documentation or native tests that `fast_test`
 does not execute need not invalidate that cache; a change to any fingerprinted
-input, build environment or artifact does.
+input, build environment or artifact does. Immediately before honoring a
+matching native PASS, fast-test rechecks the native artifact fingerprint after
+reading the checkpoint. A changed executable during that read must force fresh
+native/replay execution, with no REUSED verdict; source-contract regression
+covers this race without using a loaded device.
 Missing, malformed, unreadable or non-private checkpoint state is ignored and
 causes the required checks to run normally. The first invocation after this
 resume implementation has no matching checkpoint and therefore runs the
