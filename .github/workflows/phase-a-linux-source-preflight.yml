@@ -1,0 +1,76 @@
+name: "Phase A pinned upstream Linux source preflight"
+
+on:
+  push:
+    paths:
+      - ".github/workflows/phase-a-linux-source-preflight.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  pinned-upstream-checkout:
+    name: "Exact Linux source checkout and Kbuild preparation"
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - name: "Fetch exact upstream Linux revision into an independent repository"
+        uses: actions/checkout@v4
+        with:
+          repository: torvalds/linux
+          ref: c339f4010dea8b0d754f84ace70cd1b089878ef8
+          path: linux-upstream
+          fetch-depth: 1
+          persist-credentials: false
+      - name: "Verify complete source identity and actual kernel configuration"
+        shell: bash
+        env:
+          EXPECTED_LINUX_SHA: c339f4010dea8b0d754f84ace70cd1b089878ef8
+        run: |
+          set -euo pipefail
+          actual_sha="$(git -C linux-upstream rev-parse HEAD)"
+          if [[ "$actual_sha" != "$EXPECTED_LINUX_SHA" ]]; then
+            echo "::error::Linux source revision mismatch"
+            exit 1
+          fi
+          if [[ -n "$(git -C linux-upstream status --porcelain)" ]]; then
+            echo "::error::Original Linux source checkout is not clean"
+            exit 1
+          fi
+          source_file_count="$(git -C linux-upstream ls-files | wc -l)"
+          if (( source_file_count < 50000 )); then
+            echo "::error::Incomplete Linux checkout"
+            exit 1
+          fi
+          for source_file in mm/zswap.c mm/page_io.c include/linux/swap_ops.h include/linux/blk_types.h include/linux/bio.h block/bio.c; do
+            if [[ ! -f "linux-upstream/$source_file" ]]; then
+              echo "::error::Required Linux source file is absent"
+              exit 1
+            fi
+          done
+          mkdir -p "$RUNNER_TEMP/linux-config"
+          make -C linux-upstream O="$RUNNER_TEMP/linux-config" defconfig
+          make -C linux-upstream O="$RUNNER_TEMP/linux-config" -j2 prepare
+          {
+            printf 'source_repository=torvalds/linux\n'
+            printf 'source_sha=%s\n' "$actual_sha"
+            printf 'source_file_count=%s\n' "$source_file_count"
+            printf 'kernel_version='
+            make -s -C linux-upstream kernelversion
+            printf 'compiler='
+            gcc --version | head -1
+            printf 'config_sha256='
+            sha256sum "$RUNNER_TEMP/linux-config/.config" | awk '{print $1}'
+            printf 'evidence_class=hosted-full-source-checkout-and-kbuild-prepare-only\n'
+            printf 'source_modified=no\nsource_committed=no\nphase_a_qualified=no\n'
+          } > "$RUNNER_TEMP/linux-preflight.txt"
+          cat "$RUNNER_TEMP/linux-preflight.txt"
+      - name: "Preserve bounded source preflight evidence"
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: "phase-a-linux-source-preflight"
+          path: "${{ runner.temp }}/linux-preflight.txt"
+          if-no-files-found: ignore
+          retention-days: 7

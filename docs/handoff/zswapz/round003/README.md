@@ -17,6 +17,10 @@
 
 **Same-round independence:** Agent 2's work and source commits occur in the authorized Linux source repository; Agent 3 starts from the already published swapz source, not from Agent 2's Round 003 changes. Neither waits for the other. Matched producer+consumer loaded qualification requires both results and therefore belongs to a later dependency layer.
 
+## Concrete Linux access/publisher unblock
+
+The [source-access-unblock plan](source-access-unblock.md) distinguishes a hosted exact-source checkout from a real, approved Linux source-code publication destination. A read-only hosted workspace can unblock checkout/compile feasibility but **not** replace a committed Linux source revision. Agent 1 must independently verify both gates before the round opens. The Round 002 archival and closeout have since been completed; do not perform them a second time.
+
 ## Agent 1 mandatory PRE-OPEN gates
 
 1. Verify the two original Round 002 `REPORT_READY` comments, archive both with exact links/content integrity, publish `round002/round-report.md`, close #119 and update [rounds.md](../rounds.md) honestly. Distinguish Agent 2's synthetic/rootless fragment replay from a committed, compiled Linux tree. Round 002 source outcome is partial, not Phase A PASS.
