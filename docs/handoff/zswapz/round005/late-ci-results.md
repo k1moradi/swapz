@@ -1,0 +1,10 @@
+# Round 005 — late exact-CI qualification addendum (2026-11-15)
+
+Original [Round 005 closeout](round-report.md) accurately recorded native and pinned Linux GCC full-module work as IN_PROGRESS at closeout. These are the **subsequent actual results**, not a retroactive change to the workers' reports:
+
+- [Native rootless run #43735000085](https://github.com/k1moradi/swapz/actions/runs/43735000085) at integration source `459b82406af34b977ed21077ba401631e0c28652`: **PASS**, including compiled userspace fixture and all policy/source-contract/Make-interface gates. The 18 Round 005 two-INFO cases were included in the fixture; this run's success is complete-suite evidence, not an independently enumerated per-case instrumented counter.
+- [Exact production-C run #43735000155](https://github.com/k1moradi/swapz/actions/runs/43735000155): **PASS** on x86_64 and ARM64, compile-only and exact-C source checks.
+- [Pinned Linux GCC external-module run #43735000163](https://github.com/k1moradi/swapz/actions/runs/43735000163): **FAIL**. Its actual first fatal workflow message was `Full pinned kernel export table missing; no qualified external module link`, at the source-controlled `verify_kernel_symvers` phase **after** building `vmlinux`; recorded runner job `132875529570` and [failure evidence artifact 14169614803](https://github.com/k1moradi/swapz/actions/runs/43735000163/artifacts/14169614803). The Linux kernel export table `Module.symvers` was absent/empty, so **neither** `CONFIG_ZSWAP=y` nor `n` linked external `dm-swapz.ko` is qualified by this run. It is NOT evidence of a proven Device Mapper C compile failure; the CI failed earlier.
+- This genuine, already observed first failure is the proposed independent [Round 007 Agent 3 repair task](../round007/agent3-pinned-gcc-linked-module-qualification-repair.md). Round 007 itself is DRAFT and not open until Round 006 closes.
+
+A stock Linux linked-module compile will not supply the missing authenticated upstream stored-entry zswap MM→BIO producer or real matched-kernel readback. **Phase A BLOCKED, Phase B DISABLED.**

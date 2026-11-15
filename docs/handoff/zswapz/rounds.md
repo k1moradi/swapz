@@ -51,3 +51,11 @@ The sole authoritative `ROUND_OPEN` comment in issue #122 is the worker executio
 | [006](round006/README.md) | `47a793c1480556c075f23ecbe13a5b465d616916` | [#123](https://github.com/k1moradi/swapz/issues/123) | Agent 7 production-linked fake-DM observer fault-atomicity stress; Agent 8 independent pinned stock Linux LLVM/Clang ZSWAP object Kbuild | Native rootless and unchanged public Linux only; Phase A BLOCKED, Phase B DEFERRED |
 
 Agent 1 alone serially integrates worker source commits and tests them in CI. The **unique `ROUND_OPEN`** comment in issue #123 defines the frozen task publication SHA. The full Linux upstream producer is unassigned because it still has no owner-approved durable writable kernel-source repository. Round 005's unfinished native and full GCC module jobs remain an Agent 1 follow-up, not a Round 006 agent prerequisite.
+
+## Round 007 — DRAFT ONLY, PREPARING / NOT OPEN
+
+| Round | Provisional planning source | Issue | Proposed independent workers | Start gate |
+| --- | --- | --- | --- | --- |
+| [007](round007/README.md) | `79bb7c0c8bdf055eaeecf81c0fa291d167bd0e61` | [#124](https://github.com/k1moradi/swapz/issues/124) | Agent 3 known `Module.symvers` linked-module CI repair; Agent 6 executable CI evidence integrity negatives | Round 006 closed, final frozen SHA/task-commit verified, unique `ROUND_OPEN` |
+
+These are **prepublished draft source-edit assignments, not execution authority**. Both use existing committed sources and disjoint implementation paths; neither needs a producer Linux repository, physical devices or another agent's Round 007 code. Agent 1 must resolve Round 006 Agent 7 missing report and review actual LLVM CI before opening Round 007.
