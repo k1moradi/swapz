@@ -35,3 +35,11 @@ The [authoritative `ROUND_OPEN`](https://github.com/k1moradi/swapz/issues/120#is
 | [004](round004/README.md) | `f9f65369c2dba65797989e10374e2350d58d25c2` | [#121](https://github.com/k1moradi/swapz/issues/121) | Agent 5 native compiled parser adversarial tests; Agent 8 full pinned Linux `CONFIG_ZSWAP=y/n` Kbuild CI | Source-bound/CI improvement; Phase A BLOCKED, Phase B DEFERRED |
 
 Worker tasks can execute simultaneously against the frozen input. Agent 1 is the sole canonical `main` writer, merges independently additive governing-standard updates and archives original reports. GitHub issue #121's unique `ROUND_OPEN` is the authoritative start, not this index entry. Agent 2's modified Linux producer is **not** assigned without an owner-authorized writable Linux source repository. **Round 004 closeout:** [report](round004/round-report.md); issue [#121](https://github.com/k1moradi/swapz/issues/121) closed after Agent 1 verified actual source integration `275187fa53d8c00200093cf1d56a9ba806e5bd2c` and [hosted pinned Linux CONFIG_ZSWAP=y/n Kbuild #43726191654](https://github.com/k1moradi/swapz/actions/runs/43726191654), [native rootless #43726191538](https://github.com/k1moradi/swapz/actions/runs/43726191538), and [exact-C #43726191553](https://github.com/k1moradi/swapz/actions/runs/43726191553) **PASS**. Phase A BLOCKED; Phase B DEFERRED.
+
+## Round 005 — independent source-edit tasks (start only at ROUND_OPEN)
+
+| Round | Frozen source | Coordination issue | Agents (2 workers) | Milestone |
+| --- | --- | --- | --- | --- |
+| [005](round005/README.md) | `8bdc02de109aa3df65b6f0d0c22d13a04703e9e4` | [#122](https://github.com/k1moradi/swapz/issues/122) | Agent 3 pinned-stock-Linux compile of actual swapz module; Agent 5 native double-INFO provenance race/atomic-output tests | Compile and rootless safety only, Phase A BLOCKED, Phase B DEFERRED |
+
+The sole authoritative `ROUND_OPEN` comment in issue #122 is the worker execution start. Both workers use pre-round sources and run simultaneously; Agent 1 integrates source, merges independent additive standards and verifies actual hosted CI. No upstream Linux producer branch, fork, additional repo or owner decision is needed for these two *bounded* tasks. Neither proves authenticated live zswap stored-entry writeback.
