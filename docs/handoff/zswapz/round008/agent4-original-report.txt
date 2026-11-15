@@ -1,0 +1,79 @@
+message: REPORT_READY
+round: "008"
+agent: 4
+task_id: agent4-native-reader-atomicity-stress
+status: BLOCKED
+implementation_state: SOURCE_READY_PENDING_COORDINATOR_CI
+source_baseline_sha: af334b3408b9a660fc7f4b15d82d8e5a9e6374bb
+task_commit_sha: 5e13fca1855bb57c86cac55da64d7c362ce30b74
+source_commit_sha: e9291f933cc77e4091d6d9fb1e838fc5496cabaf
+source_commit_parent: af334b3408b9a660fc7f4b15d82d8e5a9e6374bb
+source_tree_sha: 41a88547848a77c15bac8ac8c3144ed87bbbf789
+remote_main_updated_by_agent4: false
+modified_files:
+  - tests/runtime/native/userspace/swapzctl-status.c
+  - docs/testing_standards.md
+seed: "0x8A4F0C21"
+source_controlled_schedules: 128
+expected_success_schedules: 32
+expected_negative_schedules: 96
+executed_production_linked_schedules: 0
+evidence_class: source-linked edit + rootless syntax/compiler-object + mathematical schedule enumeration
+first_failure: "NONE in executed local syntax/object/enumeration checks. The full frozen source checkout is unavailable to this worker, so the actual production-linked native fixture was NOT_RUN."
+tests:
+  - command: "gcc -std=c11 -fsyntax-only -Wall -Wextra -Werror -Wpedantic -Wconversion -Wshadow /mnt/data/swapz-agent4-round008/syntax_check.c"
+    exit_code: 0
+    scope: "exact Round 008 added C block with explicit minimal type/API stubs; NOT full production C"
+  - command: "clang -std=c11 -fsyntax-only -Wall -Wextra -Werror -Wpedantic -Wconversion -Wshadow /mnt/data/swapz-agent4-round008/syntax_check.c"
+    exit_code: 0
+    scope: "exact Round 008 added C block with explicit minimal type/API stubs; NOT full production C"
+  - command: "gcc -std=c11 -O1 -g -Wall -Wextra -Werror -Wpedantic -Wconversion -Wshadow -fsanitize=address,undefined -fno-sanitize-recover=all -c syntax_check.c -o syntax-gcc.o"
+    exit_code: 0
+    scope: "sanitizer-instrumented syntax-stub object, NOT executed ASan/UBSan binary"
+  - command: "clang -std=c11 -O1 -g -Wall -Wextra -Werror -Wpedantic -Wconversion -Wshadow -fsanitize=address,undefined -fno-sanitize-recover=all -c syntax_check.c -o syntax-clang.o"
+    exit_code: 0
+    scope: "sanitizer-instrumented syntax-stub object, NOT executed ASan/UBSan binary"
+  - command: "python3 - <<'PY' [deterministic 16 modes × 8 variation enumeration, seed, expected callback bounds, successful/rejected classes] PY"
+    exit_code: 0
+    scope: "static schedule math: 128 enumerated, 32 expected stable/96 expected failure, 8 distinct variations per mode, callbacks expected within 1..16; NOT native execution"
+  - command: "GitHub compare af334b3408b9a660fc7f4b15d82d8e5a9e6374bb...e9291f933cc77e4091d6d9fb1e838fc5496cabaf; inspect all added diff lines"
+    exit_code: 0
+    scope: "one-parent actual Git commit, two assigned files only, 348 added/0 deleted, no added-line trailing whitespace"
+  - command: "make -C tests/suites SANITIZE=1 test-userspace"
+    exit_code: NOT_RUN
+    scope: "full checkout unavailable; Agent 1 must run source-matched integrated CI"
+  - command: "full GCC/Clang native swapzctl-status binary under ASan/UBSan"
+    exit_code: NOT_RUN
+  - command: "git diff --check in complete frozen swapz checkout"
+    exit_code: NOT_RUN
+blocking_findings:
+  - "Actual 128 production-linked schedules have NOT_RUN; no complete cloned source tree or installed project headers/linkage available in the isolated worker runtime."
+  - "A successful unreferenced Git object is not on remote main and does not trigger hosted CI; Agent 1 must integrate, compile and execute exact source."
+  - "No actual loaded producer/BIO ABI, authenticated stored zswap eviction, device readback or physical evidence."
+next_round_recommendations:
+  - "Agent 1 integrate both Agent 4 owned blobs and merge this distinct docs/testing_standards.md appendix with Agent 8's independent appendix; do not replace either."
+  - "Run make -C tests/suites SANITIZE=1 test-userspace on exact merged source; require actual 'PASS: Round 008 128 deterministic native DM observer schedules' and sanitizer-clean exit, then run GCC and Clang high warnings."
+  - "Investigate any full-source first failure and keep Phase A blocked / Phase B disabled until separate qualification."
+
+---
+
+# Agent 4 Round 008 — real source and reproducible evidence
+
+**Retrievable actual Git commit:** https://github.com/k1moradi/swapz/commit/e9291f933cc77e4091d6d9fb1e838fc5496cabaf
+
+Parent is **exactly** the frozen `af334b3408b9a660fc7f4b15d82d8e5a9e6374bb`; tree SHA is `41a88547848a77c15bac8ac8c3144ed87bbbf789`. GitHub compare confirms one commit ahead, no branch/ref move, and exactly the two permitted files:
+
+- `tests/runtime/native/userspace/swapzctl-status.c`: +316/-0, Git blob `2d1b019308d9a761517b88c89843134b4ccd8b8b`.
+- `docs/testing_standards.md`: +32/-0, Git blob `fde760f2f0ca056a0cfd06e587ae96d58753b8d2` (append-only distinct Round 008 section).
+
+The committed C adds a single-source test, `test_round008_native_reader_atomicity_stress()`, called from the existing compiled native `main()`. It reuses the **real production C** `report_device_status_with_reader()`, `parse_dm_status_observation()`, the preexisting `make_dm_multi_fixture()`, and `swapz_test_capture_output()`. It does not create an alternate product parser or modify `src/userspace/swapzctl.c`.
+
+**Schedule construction:** exactly 16 modes × 8 seeded, bounded variations, seed `0x8A4F0C21`, 128 scenarios, 32 anticipated stable coherent inventories and 96 anticipated fail-closed negatives. Modes cover stable both targets, legacy-unavailable second target, measured-zero capability, late-target malformed capability/FAILED/overflow/partial origin INFO (first- and second-INFO timing), valid-but-torn second-target commits and admissions, torn first-target commits, mapper device/name/event/count drift, persistent valid requeue-like changes, and convergence at attempt 1 through attempt 8.
+
+**Independent acceptance oracle implemented in C:** require no stdout for each read-only collector call, exactly two coherent owned targets on success, per-target origin availability and committed count with no cross-target double count, zero retained targets on failure, field-scoped redacted diagnostics not disclosing untrusted status tokens, exact callback bounds of 1–16, and exactly one caller release of the accepted result array. The single-threaded fake reader allocates only a bounded DM reply per callback, released by production's observation cleanup. No privileged ioctl or real target.
+
+**Local checks performed (all exit 0):** strict GCC 14.2/Clang 17 C11 `-fsyntax-only`, strict GCC/Clang ASan+UBSan *object compilation* (not instrumented test execution), a Python deterministic variation-count oracle proving 128 enumerated schedules / 32 expected stable / 96 expected negative and expected callbacks 1..16, and GitHub's exact-source commit/file-scope verification. The unreferenced addition Git blob `7fac9f68eaf5f638335bed8e85561ddea67053d7` exactly matched `git hash-object` for the locally syntax-compiled 11,867-byte C block; SHA-256 of that block is `ef06d3695004f6f87674c9999f255993614cc16b232f101ce2d521285c248d97`. The GitHub committed diff has zero newly introduced trailing-whitespace lines.
+
+**First failure/remaining limitation:** none in the executed scoped checks. **Actual full-source GCC/Clang execution, project `make -C tests/suites SANITIZE=1 test-userspace`, and complete-checkout `git diff --check` are NOT_RUN** because this isolated worker has no full pinned checkout and outbound git cannot resolve github.com. Do not mislabel the 128 *implemented* schedules as 128 *executed* production-linked tests. The source is **SOURCE_READY_PENDING_COORDINATOR_CI**, not an accepted native or Phase A PASS. When Agent 1 integrates, it must preserve Agent 8's independently authored standard appendix and check the actual native fixture's first failure before closing the gate.
+
+No remote main push, branch, PR, fork, alternate worktree, kernel/module load, device operation, live swap, physical trial or Phase B RAW behavior change was performed by Agent 4.

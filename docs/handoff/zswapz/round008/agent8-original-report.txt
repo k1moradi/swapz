@@ -1,0 +1,29 @@
+message: REPORT_READY
+round: "008"
+agent: 8
+task_id: agent8-inrun-kbuild-artifact-integrity
+status: SOURCE_READY_PENDING_COORDINATOR_CI
+
+**Final real Git source commit (retrievable):** [573f4d07648717e404f521f835d6fdbb8e7e2864](https://github.com/k1moradi/swapz/commit/573f4d07648717e404f521f835d6fdbb8e7e2864)
+**Frozen exact sole parent:** `af334b3408b9a660fc7f4b15d82d8e5a9e6374bb`; tree `3eb3e3e24d545cafc813f1f2cbbb56a8b7a15e5d`. Git commit API and compare independently verify the parent and **only these three source paths**:
+1. `tests/runtime/native/pinned-linux-artifact-integrity-test.py` (new executable, mode 100755; 573 lines; blob `05a6027facb1d0a3df22040c6a7c1db0ae8f6350`; exactly matches locally executed Python bytes).
+2. `.github/workflows/phase-a-linux-source-preflight.yml` (+27/-3): GCC and independent LLVM profile loops invoke the **committed** verifier on their own real output directories before appending `result=PASS`; LLVM gains its own read-only `swapz-consumer` checkout verified at `GITHUB_SHA`. Existing pinned public Linux revision, command exit gates, bounded Kbuild controls, `contents: read`, first-failure traps and `if: always()` manifest artifact uploads are retained.
+3. `docs/testing_standards.md` (+43/-0): separately titled `Round 008 real Kbuild artifact-to-manifest integrity` appendix. Agent 4's code and offline manifest grammar remain untouched.
+
+**Verifier proof classes:** GCC linked-module lane verifies exact requested source/swapz SHA, `CONFIG_SWAP=y`, enabled/disabled ZSWAP in the real SHA-256-matching `.config`, nonempty correct-profile `mm/page_io.o`, `block/bio.o` and optional enabled-only `mm/zswap.o`, successful `kernel_export_modules`/modpost and module build exits, nonempty SHA-matching `Module.symvers`, and the actual staged `dm-swapz.ko` with canonical **positive exact size**, real SHA-256, minimal ELF64 x86-64 ET_REL and in-bounds section table. LLVM stock-source-only lane matches actual per-object SHA-256 against ordered manifest object pairs, verifies Clang config/compiler identity and excludes all linked-module claims. Both reject premature PASS, duplicate/contradictory/truncated manifests, symlinks/escaping paths, non-regular/missing objects, wrong profile and forged bytes. Streamed file hashing is read-only and bounded (64 KiB chunks); diagnostics are field categories, not private paths/values. Checks are a consistency screen, **not** authenticated producer, signed provenance, loaded/ABI or adversarial concurrent-writer proof.
+
+**Actual local commands and exits:**
+- `python3 -B -m py_compile /mnt/data/agent8-round008/pinned-linux-artifact-integrity-test.py` → exit **0**.
+- `python3 -B /mnt/data/agent8-round008/pinned-linux-artifact-integrity-test.py --self-test` → exit **0**, **11/11 unittest methods PASS**, including actual temporary on-disk positive GCC/LLVM × y/n files and negatives for changed/forged digest, altered object bytes, missing/corrupt `Module.symvers`, zero-length/wrong-length module, fully forged matching size+hash but non-ELF module, symlink/nonregular files, stale and disabled-profile object contamination, invalid config or source identities, noncanonical/overflow sizes, truncated/duplicate/premature-result manifest, fake modpost status, forbidden LLVM module claim, duplicate LLVM object and path traversal.
+- `python3 -X dev -W error -B /mnt/data/agent8-round008/pinned-linux-artifact-integrity-test.py --self-test` → exit **0**, **11/11 PASS** with warnings promoted to errors.
+- `python3` + PyYAML parse of separately constructed exact GCC/LLVM verifier **integration snippets** → exit **0**, both snippets parsed and PASS emission ordered after verifier. `bash -n /mnt/data/agent8-round008/gcc-verification.bash` → exit **0**; `bash -n /mnt/data/agent8-round008/llvm-verification.bash` → exit **0**. **Limitation:** full entire remote workflow YAML/Bash was not parsed locally; only the changed integration snippets were syntax tested.
+- Missing-manifest real verifier CLI invocation `python3 -B ... --manifest /no-such-root/no-such.manifest --mode llvm --profile y --source-sha c339f4010dea8b0d754f84ace70cd1b089878ef8 --build-dir /no-such-root` → exit **1**, bounded `invalid integrity: manifest_unavailable`.
+- Post-commit GitHub source checks → **11/11 PASS**, including exact frozen parent, 3 authorized paths, executable Python blob identity, pinned checkout, read-only permission, independent jobs, both pre-PASS verifier calls and both upload-on-failure steps.
+
+**First failure:** no unresolved local test failure. A first test run exposed an O_DIRECTORY fdopen bug (corrected before publication); an additional adversarial case exposed that size+digest alone could admit a fabricated non-ELF blob (corrected in final source). Final two full real-byte unittest runs are green. A future hosted verifier failure remains the first `verify_artifact_integrity` error and must record FAIL, never a terminal PASS.
+
+**Hosted limits/artifact IDs:** exact-source GitHub-hosted GCC/LLVM Kbuild for this new unreferenced commit = **NOT_RUN**; hosted artifact IDs = **none**; no real linked `dm-swapz.ko`, `Module.symvers` or Linux object data was produced locally. Prior Round 007 GCC hosted completion is not assumed. All local positives are disposable rootless sample files, not kernel build certification.
+
+No branch, PR, fork, secondary worktree, remote `main` ref update, upstream source modification, kernel insertion, swap/mapper or physical device operation. Coordinator Agent 1 should serialize this exact three-file delta with Agent 4's independent appendix, then execute and inspect hosted workflow/artifacts before claiming genuine Kbuild PASS.
+
+**Phase A: BLOCKED. Phase B RAW bypass: DISABLED.**
