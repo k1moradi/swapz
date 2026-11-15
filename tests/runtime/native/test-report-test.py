@@ -4096,7 +4096,8 @@ class ReportContract(unittest.TestCase):
                         mock.patch.object(runner.subprocess, "run") as recovery:
                     runner.offer_retained_physical_trial_reconciliation()
                     recovery.assert_not_called()
-                self.assertIn("reason=private_scratch_directory_untrusted",
+                # O_NOFOLLOW rejects the symlink at the tests-open boundary.
+                self.assertIn("reason=tests_open_failed",
                               unsafe_directory_output.getvalue())
                 self.assertEqual(list(substituted_directory.iterdir()), [])
                 private_diagnostics.unlink()
