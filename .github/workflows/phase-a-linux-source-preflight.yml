@@ -335,3 +335,235 @@ jobs:
             ${{ runner.temp }}/linux-kbuild-evidence/*.txt
           if-no-files-found: ignore
           retention-days: 7
+
+  pinned-upstream-clang-objects:
+    name: "Independent LLVM/Clang pinned Linux CONFIG_ZSWAP=y/n object Kbuild"
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    steps:
+      - name: "Initialize independent LLVM per-profile evidence"
+        shell: bash
+        run: |
+          set -euo pipefail
+          evidence_dir="$RUNNER_TEMP/linux-clang-object-evidence"
+          mkdir -p "$evidence_dir"
+          for profile in enabled disabled; do
+            requested_zswap=y
+            if [[ "$profile" == disabled ]]; then
+              requested_zswap=n
+            fi
+            printf 'requested_zswap=%s\nresult=NOT_RUN\nreason=checkout_or_toolchain_incomplete\n' \
+              "$requested_zswap" > "$evidence_dir/$profile.txt"
+          done
+      - name: "Fetch exact read-only upstream Linux for independent Clang Kbuild"
+        uses: actions/checkout@v4
+        with:
+          repository: torvalds/linux
+          ref: c339f4010dea8b0d754f84ace70cd1b089878ef8
+          path: linux-clang-upstream
+          fetch-depth: 1
+          persist-credentials: false
+      - name: "Install bounded LLVM-18 and upstream host build prerequisites"
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo apt-get update -qq
+          sudo DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
+            clang-18 lld-18 llvm-18 bc bison flex libelf-dev libssl-dev
+      - name: "Build unchanged pinned Linux swap and BIO objects with LLVM"
+        shell: bash
+        env:
+          EXPECTED_LINUX_SHA: c339f4010dea8b0d754f84ace70cd1b089878ef8
+          LLVM_SUFFIX: "-18"
+          KBUILD_JOBS: "4"
+          KBUILD_WARNING_LEVEL: "1"
+        run: |
+          set -euo pipefail
+          evidence_dir="$RUNNER_TEMP/linux-clang-object-evidence"
+          current_manifest="$evidence_dir/setup.txt"
+          current_phase=verify_prerequisites
+          profile=setup
+          log_file="$RUNNER_TEMP/linux-clang-object-command.log"
+          record_first_failure() {
+            local command_exit_code="$?"
+            if (( command_exit_code != 0 )); then
+              printf 'result=FAIL\nfirst_failure_phase=%s\nfirst_failure_exit_code=%d\n' \
+                "$current_phase" "$command_exit_code" >> "$current_manifest"
+            fi
+          }
+          trap record_first_failure EXIT
+          if [[ "$LLVM_SUFFIX" != -18 || ! "$KBUILD_JOBS" =~ ^[1-4]$ ||
+                "$KBUILD_WARNING_LEVEL" != 1 ]]; then
+            echo "::error::Invalid pinned LLVM toolchain or bounded Kbuild controls"
+            exit 2
+          fi
+          for executable in clang-18 ld.lld-18 llvm-ar-18 llvm-nm-18 \
+              llvm-objcopy-18 llvm-objdump-18 llvm-readelf-18 llvm-strip-18; do
+            if ! command -v "$executable" > /dev/null; then
+              echo "::error::Required pinned LLVM executable is unavailable: $executable"
+              exit 1
+            fi
+          done
+          clang_version="$(clang-18 --version | sed -n '1p')"
+          linker_version="$(ld.lld-18 --version | sed -n '1p')"
+          clang_package="$(dpkg-query -W -f='${Version}' clang-18)"
+          lld_package="$(dpkg-query -W -f='${Version}' lld-18)"
+          llvm_package="$(dpkg-query -W -f='${Version}' llvm-18)"
+          clang_binary_sha="$(sha256sum "$(command -v clang-18)" | cut -d' ' -f1)"
+          linker_binary_sha="$(sha256sum "$(command -v ld.lld-18)" | cut -d' ' -f1)"
+          source_sha="$(git -C linux-clang-upstream rev-parse HEAD)"
+          if [[ "$source_sha" != "$EXPECTED_LINUX_SHA" ]] ||
+             [[ -n "$(git -C linux-clang-upstream status --porcelain --untracked-files=all)" ]]; then
+            echo "::error::Pinned Linux checkout SHA or cleanliness mismatch"
+            exit 1
+          fi
+          source_file_count="$(git -C linux-clang-upstream ls-files | wc -l)"
+          if (( source_file_count < 50000 )); then
+            echo "::error::Incomplete pinned Linux checkout"
+            exit 1
+          fi
+          for required_file in mm/page_io.c mm/zswap.c block/bio.c \
+              include/linux/bio.h include/linux/swap_ops.h scripts/config; do
+            if [[ ! -f "linux-clang-upstream/$required_file" ]]; then
+              echo "::error::Required pinned Linux source is missing: $required_file"
+              exit 1
+            fi
+          done
+          {
+            printf 'source_repository=torvalds/linux\nsource_sha=%s\nsource_file_count=%s\n' \
+              "$source_sha" "$source_file_count"
+            printf 'clang_version=%s\nld_lld_version=%s\n' "$clang_version" "$linker_version"
+            printf 'clang_package=%s\nlld_package=%s\nllvm_package=%s\n' \
+              "$clang_package" "$lld_package" "$llvm_package"
+            printf 'clang_binary_sha256=%s\nld_lld_binary_sha256=%s\n' \
+              "$clang_binary_sha" "$linker_binary_sha"
+            printf 'llvm_make_setting=LLVM=%s\nkbuild_jobs=%s\nkbuild_warning_level=%s\n' \
+              "$LLVM_SUFFIX" "$KBUILD_JOBS" "$KBUILD_WARNING_LEVEL"
+            printf 'evidence_class=LLVM_STOCK_SOURCE_OBJECT_KBUILD\n'
+            printf 'upstream_patched=no\nproducer_authenticated=no\nphase_a_qualified=no\n'
+          } > "$current_manifest"
+
+          run_logged() {
+            local command_name="$1"
+            local command_exit_code=0
+            local warning_count
+            shift
+            current_phase="$command_name"
+            {
+              printf '%s_command=' "$command_name"
+              printf '%q ' "$@"
+              printf '\n'
+            } >> "$current_manifest"
+            if "$@" > "$log_file" 2>&1; then
+              command_exit_code=0
+            else
+              command_exit_code=$?
+            fi
+            printf '%s_exit_code=%d\n' "$command_name" "$command_exit_code" >> "$current_manifest"
+            if (( command_exit_code != 0 )); then
+              echo "::error::LLVM pinned Linux $profile $command_name failed (exit $command_exit_code)"
+              tail -n 25 "$log_file"
+              return "$command_exit_code"
+            fi
+            warning_count="$(grep -Ec '(^|[[:space:]])warning:' "$log_file" || true)"
+            printf '%s_warning_count=%s\n' "$command_name" "$warning_count" >> "$current_manifest"
+            if (( warning_count != 0 )); then
+              current_phase="${command_name}_warnings"
+              echo "::error::LLVM pinned Linux $profile $command_name emitted $warning_count warnings"
+              tail -n 25 "$log_file"
+              return 1
+            fi
+          }
+
+          for profile in enabled disabled; do
+            requested_zswap=y
+            config_operation=--enable
+            expected_config=CONFIG_ZSWAP=y
+            if [[ "$profile" == disabled ]]; then
+              requested_zswap=n
+              config_operation=--disable
+              expected_config='# CONFIG_ZSWAP is not set'
+            fi
+            build_dir="$RUNNER_TEMP/linux-clang-build-$profile"
+            current_manifest="$evidence_dir/$profile.txt"
+            current_phase=initialize_configuration
+            mkdir -p "$build_dir"
+            {
+              printf 'source_repository=torvalds/linux\nsource_sha=%s\nrequested_zswap=%s\n' \
+                "$source_sha" "$requested_zswap"
+              printf 'compiler=%s\nlinker=%s\nclang_package=%s\nlld_package=%s\nllvm_package=%s\n' \
+                "$clang_version" "$linker_version" "$clang_package" "$lld_package" "$llvm_package"
+              printf 'llvm_make_setting=LLVM=%s\nkbuild_jobs=%s\nkbuild_warning_level=%s\n' \
+                "$LLVM_SUFFIX" "$KBUILD_JOBS" "$KBUILD_WARNING_LEVEL"
+              printf 'evidence_class=LLVM_STOCK_SOURCE_OBJECT_KBUILD\nphase_a_qualified=no\n'
+            } > "$current_manifest"
+            run_logged defconfig make -s -C linux-clang-upstream "O=$build_dir" \
+              "LLVM=$LLVM_SUFFIX" defconfig || exit $?
+            run_logged scripts_config linux-clang-upstream/scripts/config --file "$build_dir/.config" \
+              --enable SWAP "$config_operation" ZSWAP || exit $?
+            run_logged olddefconfig make -s -C linux-clang-upstream "O=$build_dir" \
+              "LLVM=$LLVM_SUFFIX" olddefconfig || exit $?
+            current_phase=verify_effective_config
+            if ! grep -Fxq 'CONFIG_SWAP=y' "$build_dir/.config" ||
+               ! grep -Fxq "$expected_config" "$build_dir/.config" ||
+               ! grep -Fxq 'CONFIG_CC_IS_CLANG=y' "$build_dir/.config"; then
+              echo "::error::Pinned Linux config rejected SWAP, ZSWAP or Clang; no fallback allowed"
+              exit 1
+            fi
+            printf 'effective_swap=y\neffective_zswap=%s\neffective_cc_is_clang=y\n' \
+              "$requested_zswap" >> "$current_manifest"
+            printf 'config_sha256=%s\n' \
+              "$(sha256sum "$build_dir/.config" | cut -d' ' -f1)" >> "$current_manifest"
+            run_logged prepare make -s -C linux-clang-upstream "O=$build_dir" \
+              "LLVM=$LLVM_SUFFIX" "-j$KBUILD_JOBS" "W=$KBUILD_WARNING_LEVEL" prepare || exit $?
+            current_phase=verify_compiler_config
+            if ! grep -Fxq 'CONFIG_CC_IS_CLANG=y' "$build_dir/include/config/auto.conf"; then
+              echo "::error::Prepared Kbuild compiler is not Clang"
+              exit 1
+            fi
+            recorded_compiler="$(sed -n 's/^CONFIG_CC_VERSION_TEXT=//p' \
+              "$build_dir/include/config/auto.conf")"
+            if [[ "$recorded_compiler" != *clang* ]]; then
+              echo "::error::Prepared Kbuild did not record Clang compiler identity"
+              exit 1
+            fi
+            printf 'kbuild_recorded_compiler=%s\n' "$recorded_compiler" >> "$current_manifest"
+            source_objects=(mm/page_io.o block/bio.o)
+            if [[ "$requested_zswap" == y ]]; then
+              source_objects+=(mm/zswap.o)
+            fi
+            run_logged compile_objects make -s -C linux-clang-upstream "O=$build_dir" \
+              "LLVM=$LLVM_SUFFIX" "-j$KBUILD_JOBS" "W=$KBUILD_WARNING_LEVEL" \
+              "${source_objects[@]}" || exit $?
+            current_phase=verify_compiled_objects
+            for source_object in "${source_objects[@]}"; do
+              if [[ ! -s "$build_dir/$source_object" ]]; then
+                echo "::error::Pinned Linux LLVM object missing or empty: $source_object"
+                exit 1
+              fi
+              printf 'object=%s\nobject_sha256=%s\n' "$source_object" \
+                "$(sha256sum "$build_dir/$source_object" | cut -d' ' -f1)" >> "$current_manifest"
+            done
+            if [[ "$requested_zswap" == n && -e "$build_dir/mm/zswap.o" ]]; then
+              echo "::error::Disabled ZSWAP profile unexpectedly produced mm/zswap.o"
+              exit 1
+            fi
+            current_phase=verify_unchanged_source
+            if [[ "$(git -C linux-clang-upstream rev-parse HEAD)" != "$EXPECTED_LINUX_SHA" ]] ||
+               [[ -n "$(git -C linux-clang-upstream status --porcelain --untracked-files=all)" ]]; then
+              echo "::error::Original pinned Linux source changed during LLVM Kbuild"
+              exit 1
+            fi
+            printf 'source_modified=no\nresult=PASS\n' >> "$current_manifest"
+            current_manifest="$evidence_dir/setup.txt"
+          done
+          current_manifest=""
+      - name: "Preserve independent bounded LLVM object-build evidence"
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: "phase-a-linux-clang-object-preflight"
+          path: |
+            ${{ runner.temp }}/linux-clang-object-evidence/*.txt
+          if-no-files-found: ignore
+          retention-days: 7

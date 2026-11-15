@@ -12867,3 +12867,56 @@ No new CLI or JSON v1 fields, origin-conditioned codec behavior, privileged
 ioctl, active swap, physical storage or Phase B RAW bypass is authorized.
 Phase A still requires a real matched Linux MM producer, authenticated BIO
 propagation and stored-entry writeback/readback evidence.
+
+
+## Round 006 independent pinned Linux Clang source Kbuild (2026-11-15)
+
+The repository's $.github/workflows/phase-a-linux-source-preflight.yml$
+retains the original GCC module-link job and adds a separate
+$pinned-upstream-clang-objects$ job with no $needs$ dependency. A failure or
+timeout in the GCC $vmlinux$ / $dm-swapz.ko$ linked-module stage must not prevent
+execution of this second compile-only proof. Do not convert either job into a
+PR-triggered workflow; this repository permits direct $main$ publication only.
+
+The independent job checks out unmodified, full, read-only
+$torvalds/linux@c339f4010dea8b0d754f84ace70cd1b089878ef8$,
+pins the LLVM tool *major* to the installed Ubuntu $clang-18$, $ld.lld-18$
+and $llvm-18$ packages, captures exact installed versions and compiler/linker
+binary SHA-256, and drives Linux's own $LLVM=-18$ Kbuild. A rolling package
+patch release is not a bit-reproducible toolchain lock: record the precise
+versions used for every hosted run, and never silently fall back to GCC or
+another LLVM major. Compiler and linker must both be available, and the
+effective $CONFIG_CC_IS_CLANG=y$ must be verified in the generated config
+and prepared Kbuild auto.conf. Use distinct fresh out-of-tree $O=$
+directories for $CONFIG_SWAP=y, CONFIG_ZSWAP=y$ and
+$CONFIG_SWAP=y, CONFIG_ZSWAP=n$; verify actual Kconfig settings after
+$olddefconfig$, not just what $scripts/config$ requested.
+
+Run $W=1$ with at most four make jobs for the unchanged pinned Linux
+$mm/page_io.o$ and $block/bio.o$ in both configurations, plus $mm/zswap.o$
+only in the enabled profile. Require nonempty real compiled object files,
+hash every generated object and config, verify the upstream source SHA and
+cleanliness before and after, and record each exact shell-escaped Kbuild
+command, exit, compiler version and effective configuration. Detect compiler
+warnings without suppression: this conservative preflight refuses to label a
+profile PASS if any recorded command emits a warning. Failures retain
+bounded first-phase/exit diagnostics in one small per-profile text manifest;
+an $always()$ artifact step also retains NOT_RUN placeholders if checkout or
+toolchain installation fails. No upstream patch, source commit, kernel
+installation, module load, active swap, physical device or mapper operation
+is permitted.
+
+The resulting evidence class is strictly
+$LLVM_STOCK_SOURCE_OBJECT_KBUILD$: this job does not build $vmlinux$ or
+$Module.symvers$, link $dm-swapz.ko$, validate runtime $struct bio$ layout,
+run KUnit, or authenticate MM→BIO stored-entry zswap writeback. Even
+successful stock Linux Clang object compilation is not a matched patched
+producer/consumer nor a Phase A correctness PASS; Phase A remains BLOCKED
+and Phase B RAW bypass is disabled.
+
+Before the coordinator publishes this code on $main$, a source-object commit
+and local YAML/Bash tests must be reported as
+$SOURCE_READY_PENDING_COORDINATOR_CI$. Only the exact integrated
+GitHub Actions workflow run, with both effective profiles and their artifacts
+inspected, can qualify the new LLVM stock-source object-build claim.
+
