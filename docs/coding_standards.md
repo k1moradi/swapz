@@ -440,6 +440,30 @@ digest only to prove the raw/target arms shared identical inputs; never publish
 that artifact or the sample. This tooling does not qualify kernel swap
 semantics or physical storage behavior.
 
+### Phase A read-only provenance INFO reader (Round 003)
+
+The existing `swapzctl` status/ratio snapshot parser accepts provenance only as
+one optional three-field INFO group: `verified_zswap_origin_admitted`,
+`foreground_committed_verified_zswap_writeback`, and
+`origin_carrier_compiled`. A wholly absent legacy group is **unavailable**,
+not measured zero; a partial group, duplicated token, noncanonical decimal,
+signed/empty/overflowing value, or capability outside 0/1 is malformed.
+The reader bounds committed verified origin by admitted origin and the
+overflow-checked sum of compressed, RAW and zero-elided committed 4KiB pages.
+Counter inconsistency from a non-atomic in-flight commit uses the existing
+bounded stable two-INFO retry. Capability compiled=0 with a positive origin
+counter is a contradictory malformed snapshot. Never reclassify any WRITE,
+alter compression/RAW decisions, change device state, or infer live BIO ABI
+authentication from an INFO scalar.
+
+Only the human `inspect` and `stats` views add cumulative provenance
+values and explicitly distinguish header compile capability from unavailable
+runtime ABI qualification. Do not add keys or change types in JSON schema v1
+or other views. Preserve snapshot-owned pointer lifetimes and existing
+failed/unavailable first-cause precedence. The compiled C status fixture
+must test absent/present/zero/partial/duplicate/malformed/racing states,
+unchanged JSON v1, and fail-only diagnostics under GCC/Clang when available.
+
 ## Kernel C rules
 
 ### Phase A zswap writeback origin observability (prototype, 2026-11-15)

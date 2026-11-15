@@ -315,6 +315,127 @@ static const char *const fixture_valid_status =
 	"compressed=2 raw=0 zero_elided=0 bulk_mode=1 bulk_padding=0 "
 	"failed=0 error=0";
 
+/* Synthetic INFO strings exercise the actual compiled production parser. */
+static void test_optional_origin_info_group(void)
+{
+	static const struct {
+		const char *suffix;
+		int expected_state;
+		const char *field;
+	} cases[] = {
+		{ "", STATUS_READY, NULL },
+		{ " verified_zswap_origin_admitted=0 "
+		  "foreground_committed_verified_zswap_writeback=0 "
+		  "origin_carrier_compiled=0", STATUS_READY, NULL },
+		{ " verified_zswap_origin_admitted=0 "
+		  "foreground_committed_verified_zswap_writeback=0 "
+		  "origin_carrier_compiled=1", STATUS_READY, NULL },
+		{ " verified_zswap_origin_admitted=2 "
+		  "foreground_committed_verified_zswap_writeback=1 "
+		  "origin_carrier_compiled=1", STATUS_READY, NULL },
+		{ " verified_zswap_origin_admitted=1", STATUS_BLOCKED,
+		  "origin provenance INFO group" },
+		{ " foreground_committed_verified_zswap_writeback=0 "
+		  "origin_carrier_compiled=1", STATUS_BLOCKED,
+		  "origin provenance INFO group" },
+		{ " verified_zswap_origin_admitted=2 "
+		  "foreground_committed_verified_zswap_writeback=1", STATUS_BLOCKED,
+		  "origin provenance INFO group" },
+		{ " verified_zswap_origin_admitted=1 "
+		  "foreground_committed_verified_zswap_writeback=0 "
+		  "origin_carrier_compiled=1 verified_zswap_origin_admitted=1",
+		  STATUS_BLOCKED, "verified_zswap_origin_admitted" },
+		{ " verified_zswap_origin_admitted=01 "
+		  "foreground_committed_verified_zswap_writeback=0 "
+		  "origin_carrier_compiled=1", STATUS_BLOCKED,
+		  "verified_zswap_origin_admitted" },
+		{ " verified_zswap_origin_admitted=+1 "
+		  "foreground_committed_verified_zswap_writeback=0 "
+		  "origin_carrier_compiled=1", STATUS_BLOCKED,
+		  "verified_zswap_origin_admitted" },
+		{ " verified_zswap_origin_admitted= "
+		  "foreground_committed_verified_zswap_writeback=0 "
+		  "origin_carrier_compiled=1", STATUS_BLOCKED,
+		  "verified_zswap_origin_admitted" },
+		{ " verified_zswap_origin_admitted=18446744073709551616 "
+		  "foreground_committed_verified_zswap_writeback=0 "
+		  "origin_carrier_compiled=1", STATUS_BLOCKED,
+		  "verified_zswap_origin_admitted" },
+		{ " verified_zswap_origin_admitted=2 "
+		  "foreground_committed_verified_zswap_writeback=-1 "
+		  "origin_carrier_compiled=1", STATUS_BLOCKED,
+		  "foreground_committed_verified_zswap_writeback" },
+		{ " verified_zswap_origin_admitted=2 "
+		  "foreground_committed_verified_zswap_writeback=18446744073709551616 "
+		  "origin_carrier_compiled=1", STATUS_BLOCKED,
+		  "foreground_committed_verified_zswap_writeback" },
+		{ " verified_zswap_origin_admitted=2 "
+		  "foreground_committed_verified_zswap_writeback=1 "
+		  "origin_carrier_compiled=2", STATUS_BLOCKED,
+		  "origin_carrier_compiled" },
+		{ " verified_zswap_origin_admitted=2 "
+		  "foreground_committed_verified_zswap_writeback=1 "
+		  "origin_carrier_compiled=01", STATUS_BLOCKED,
+		  "origin_carrier_compiled" },
+		{ " verified_zswap_origin_admitted=1 "
+		  "foreground_committed_verified_zswap_writeback=2 "
+		  "origin_carrier_compiled=1", STATUS_RETRY,
+		  "foreground_committed_verified_zswap_writeback" },
+		{ " verified_zswap_origin_admitted=3 "
+		  "foreground_committed_verified_zswap_writeback=3 "
+		  "origin_carrier_compiled=1", STATUS_RETRY,
+		  "foreground_committed_verified_zswap_writeback" },
+		{ " verified_zswap_origin_admitted=1 "
+		  "foreground_committed_verified_zswap_writeback=1 "
+		  "origin_carrier_compiled=0", STATUS_BLOCKED,
+		  "origin_carrier_compiled" }
+	};
+	struct swapz_ratio_status first = { 0 };
+	struct swapz_ratio_status second = { 0 };
+	struct status_problem problem = { 0 };
+	char text[1024];
+	size_t index;
+
+	for (index = 0; index < sizeof(cases) / sizeof(cases[0]); ++index) {
+		int length = snprintf(text, sizeof(text), "%s%s",
+				      fixture_valid_status, cases[index].suffix);
+		int result;
+
+		assert(length > 0 && (size_t)length < sizeof(text));
+		result = parse_swapz_ratio_status_diagnostic(text, &first, &problem);
+		if (result != cases[index].expected_state ||
+		    (cases[index].field &&
+		     (!problem.field || strcmp(problem.field, cases[index].field)))) {
+			fprintf(stderr, "FAIL: origin INFO case=%zu result=%d expected=%d field=%s\n",
+				index, result, cases[index].expected_state,
+				problem.field ? problem.field : "(none)");
+			abort();
+		}
+		if (result == STATUS_READY) {
+			assert(first.origin_telemetry_valid == (index != 0U));
+			assert(first.foreground_committed_verified_zswap_writeback <=
+			       first.verified_zswap_origin_admitted);
+		}
+	}
+	assert(parse_swapz_ratio_status_diagnostic(
+		fixture_valid_status, &first, &problem) == STATUS_READY);
+	assert(!first.origin_telemetry_valid);
+	assert(parse_swapz_ratio_status_diagnostic(
+		"logical_write=8192 physical_write=4096 gc_write=0 compressed=2 raw=0 "
+		"zero_elided=0 bulk_mode=1 bulk_padding=0 failed=0 error=0 "
+		"verified_zswap_origin_admitted=2 "
+		"foreground_committed_verified_zswap_writeback=1 "
+		"origin_carrier_compiled=1", &first, &problem) == STATUS_READY);
+	second = first;
+	assert(ratio_status_equal(&first, &second));
+	++second.foreground_committed_verified_zswap_writeback;
+	assert(!ratio_status_equal(&first, &second));
+	second = first;
+	second.origin_telemetry_valid = 0;
+	assert(!ratio_status_equal(&first, &second));
+}
+
+
 static void assert_status_problem(const char *status, int expected_result,
 				  const char *field, const char *condition)
 {
@@ -2872,6 +2993,11 @@ static void test_swapz_human_option_views(void)
 	assert(result == 0 && !diagnostic[0]);
 	assert(strstr(output, "MAPPER  TARGET  DM_DEV  MAPPER_BYTES"));
 
+	/* INFO parsing is independent; manually staged views must stay passive. */
+	targets[0].ratio.origin_telemetry_valid = 1;
+	targets[0].ratio.verified_zswap_origin_admitted = 2ULL;
+	targets[0].ratio.foreground_committed_verified_zswap_writeback = 1ULL;
+	targets[0].ratio.origin_carrier_compiled = 1ULL;
 	/* Exact decimal byte formatting must not round the retained counters. */
 	call.view = SWAPZ_VIEW_INSPECT;
 	call.selected_name = "fixture-one";
@@ -2886,6 +3012,10 @@ static void test_swapz_human_option_views(void)
 	assert(strstr(output, "SWZ extents") && strstr(output, "8192"));
 	assert(strstr(output, "GC lower WRITEs: 4096 bytes"));
 	assert(strstr(output, "Ownership: unverified"));
+	assert(strstr(output, "Verified admissions: 2 pages"));
+	assert(strstr(output, "Verified foreground commits: 1 pages"));
+	assert(strstr(output, "Carrier compiled: yes (header capability only)"));
+	assert(strstr(output, "Runtime BIO ABI and genuine stored-entry eviction: unverified."));
 	assert(!strstr(output, "fixture-two"));
 	call.options.raw_bytes = 0;
 	result = swapz_test_capture_output(swapz_test_invoke_view, &call,
@@ -2894,6 +3024,29 @@ static void test_swapz_human_option_views(void)
 	assert(result == 0 && !diagnostic[0]);
 	assert(strstr(output, "16.00 KiB") && strstr(output, "8.00 KiB"));
 	assert(!strstr(output, "Byte columns: exact decimal bytes"));
+	call.view = SWAPZ_VIEW_STATS;
+	result = swapz_test_capture_output(swapz_test_invoke_view, &call,
+					   output, sizeof(output),
+					   diagnostic, sizeof(diagnostic));
+	assert(result == 0 && !diagnostic[0]);
+	assert(strstr(output, "Verified foreground commits: 1 pages"));
+	call.options.json = 1;
+	result = swapz_test_capture_output(swapz_test_invoke_view, &call,
+					   output, sizeof(output),
+					   diagnostic, sizeof(diagnostic));
+	assert(result == 0 && !diagnostic[0]);
+	assert(strstr(output, "\"schema_version\":1"));
+	assert(!strstr(output, "verified_zswap_origin_admitted"));
+	assert(!strstr(output, "origin_carrier_compiled"));
+	call.options.json = 0;
+	call.view = SWAPZ_VIEW_INSPECT;
+	targets[0].ratio.origin_telemetry_valid = 0;
+	result = swapz_test_capture_output(swapz_test_invoke_view, &call,
+					   output, sizeof(output),
+					   diagnostic, sizeof(diagnostic));
+	assert(result == 0 && !diagnostic[0]);
+	assert(strstr(output, "Origin INFO: unavailable"));
+	targets[0].ratio.origin_telemetry_valid = 1;
 
 	/* Invalid selections must publish neither a list prefix nor counters. */
 	call.view = SWAPZ_VIEW_STATS;
@@ -3241,6 +3394,7 @@ int main(void)
 	test_missing_or_overflowing_fields_fail();
 	test_failed_target_refuses_ratio();
 	test_ratio_snapshot_equality_covers_all_inputs();
+	test_optional_origin_info_group();
 	test_optional_watch_info_counter_validation();
 	test_unsigned_decimal_parser_bounds();
 	test_required_tokens_duplicates_and_canonical_numbers();

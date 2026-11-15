@@ -113,6 +113,11 @@ struct swapz_ratio_status {
 	unsigned long long gc_read_requests;
 	unsigned long long gc_write_requests;
 	int watch_counters_valid;
+	/* Optional all-or-none producer provenance INFO group. */
+	unsigned long long verified_zswap_origin_admitted;
+	unsigned long long foreground_committed_verified_zswap_writeback;
+	unsigned long long origin_carrier_compiled;
+	int origin_telemetry_valid;
 	unsigned long long compressed_pages;
 	unsigned long long raw_pages;
 	unsigned long long zero_elided_pages;
@@ -532,6 +537,74 @@ static int parse_swapz_ratio_status_diagnostic(
 	}
 	total_pages = ratio->compressed_pages + ratio->raw_pages +
 		      ratio->zero_elided_pages;
+	/*
+	 * The provenance INFO fields are a single optional schema group.
+	 * Missing legacy groups are unavailable, not three measured zeros.
+	 * All values are individually parsed as canonical unsigned decimals.
+	 */
+	{
+		struct {
+			const char *key;
+			unsigned long long *value;
+		} origin_fields[] = {
+			{ "verified_zswap_origin_admitted",
+			  &ratio->verified_zswap_origin_admitted },
+			{ "foreground_committed_verified_zswap_writeback",
+			  &ratio->foreground_committed_verified_zswap_writeback },
+			{ "origin_carrier_compiled", &ratio->origin_carrier_compiled }
+		};
+		unsigned int present_fields = 0;
+		size_t field_index;
+
+		for (field_index = 0;
+		     field_index < sizeof(origin_fields) / sizeof(origin_fields[0]);
+		     ++field_index) {
+			int present = parse_status_unsigned_optional(status,
+				origin_fields[field_index].key,
+				origin_fields[field_index].value, problem);
+
+			if (present < 0)
+				return STATUS_BLOCKED;
+			present_fields += (unsigned int)present;
+		}
+		if (present_fields &&
+		    present_fields != sizeof(origin_fields) / sizeof(origin_fields[0])) {
+			status_set_problem(problem, "origin provenance INFO group",
+					   "all three canonical counters or none",
+					   "partial provenance group");
+			return STATUS_BLOCKED;
+		}
+		if (present_fields) {
+			if (ratio->origin_carrier_compiled > 1ULL) {
+				status_set_problem(problem, "origin_carrier_compiled",
+						   "one canonical decimal boolean (0 or 1)",
+						   "invalid compiled capability");
+				return STATUS_BLOCKED;
+			}
+			if (!ratio->origin_carrier_compiled &&
+			    (ratio->verified_zswap_origin_admitted ||
+			     ratio->foreground_committed_verified_zswap_writeback)) {
+				status_set_problem(problem, "origin_carrier_compiled",
+						   "zero admitted and committed when carrier absent",
+						   "positive provenance without compiled carrier");
+				return STATUS_BLOCKED;
+			}
+			/* Independent atomic reads may race a successful commit.
+			 * Existing bounded two-INFO sampling retries this mismatch.
+			 */
+			if (ratio->foreground_committed_verified_zswap_writeback >
+				    ratio->verified_zswap_origin_admitted ||
+			    ratio->foreground_committed_verified_zswap_writeback >
+				    total_pages) {
+				status_set_problem(problem,
+					"foreground_committed_verified_zswap_writeback",
+					"no more than admitted and all committed pages",
+					"racing or inconsistent provenance counters");
+				return STATUS_RETRY;
+			}
+			ratio->origin_telemetry_valid = 1;
+		}
+	}
 	if (pages_to_bytes(total_pages, &page_logical_bytes) < 0) {
 		status_set_problem(problem, "compressed+raw+zero_elided",
 				   "sum of pages <= UINT64_MAX / 4096",
@@ -620,7 +693,13 @@ static int ratio_status_equal(const struct swapz_ratio_status *left,
 	       left->bulk_mode == right->bulk_mode &&
 	       left->bulk_padding_blocks == right->bulk_padding_blocks &&
 	       left->failed == right->failed &&
-	       left->error == right->error;
+	       left->error == right->error &&
+	       left->origin_telemetry_valid == right->origin_telemetry_valid &&
+	       left->verified_zswap_origin_admitted ==
+		       right->verified_zswap_origin_admitted &&
+	       left->foreground_committed_verified_zswap_writeback ==
+		       right->foreground_committed_verified_zswap_writeback &&
+	       left->origin_carrier_compiled == right->origin_carrier_compiled;
 }
 
 /* This stricter equivalence is watch-only. The default status view still
@@ -1374,6 +1453,23 @@ static void report_swapz_target_mode(const char *name, unsigned int target_index
 	       raw_bytes ? " bytes" : "");
 	puts("  Note: counters are cumulative since target creation; not current swap usage.");
 	putchar('\n');
+}
+
+/* INFO is passive mapper reporting, not proof of the running kernel's BIO ABI. */
+static void report_swapz_origin_telemetry(const struct swapz_ratio_status *ratio)
+{
+	puts("  ZSWAP STORED-WRITEBACK ORIGIN (cumulative, passive)");
+	if (!ratio->origin_telemetry_valid) {
+		puts("    Origin INFO: unavailable (legacy target; carrier unknown)");
+		return;
+	}
+	printf("    Verified admissions: %llu pages\n",
+	       ratio->verified_zswap_origin_admitted);
+	printf("    Verified foreground commits: %llu pages\n",
+	       ratio->foreground_committed_verified_zswap_writeback);
+	printf("    Carrier compiled: %s (header capability only)\n",
+	       ratio->origin_carrier_compiled ? "yes" : "no");
+	puts("    Runtime BIO ABI and genuine stored-entry eviction: unverified.");
 }
 
 /* Preserve the original reporter for existing status fixtures. */
@@ -2263,6 +2359,8 @@ static int swapz_print_view_with_options(const struct status_ready_report *repor
 			else
 				report_swapz_target(target->name, target->target_index,
 						    &target->ratio);
+			if (view == SWAPZ_VIEW_INSPECT || view == SWAPZ_VIEW_STATS)
+				report_swapz_origin_telemetry(&target->ratio);
 		}
 		if (!options->json && view != SWAPZ_VIEW_DIAGNOSE &&
 		    view != SWAPZ_VIEW_LIST) {
