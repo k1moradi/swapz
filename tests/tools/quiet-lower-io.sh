@@ -34,7 +34,7 @@ swapz_quiet_observe_dmsetup() {
 swapz_quiet_parse_status() {
     local status_text="$1" token key value required_field
     local -n parsed_values="$2"
-    local expected_field_count=484
+    local expected_field_count=487
     local token_index=0
     local -a fields=()
     local -A seen_fields=()
@@ -60,8 +60,8 @@ swapz_quiet_parse_status() {
         return 1
     }
     read -r -a fields <<< "$status_text"
-    # Current production INFO has three DM header fields plus 481 complete
-    # key/value fields, including a literal numeric compatibility token.
+    # Current production INFO has three DM header fields plus 484 complete
+    # key/value fields, including the mutually exclusive carrier capability.
     # Schema drift blocks qualification until this oracle and its
     # source-derived rootless fixture are updated together.
     if (( ${#fields[@]} < expected_field_count )); then
@@ -138,6 +138,8 @@ swapz_quiet_parse_status() {
             submitter_prepare_active delta64_adopted failed error completion_active \
             lower_write_inflight lower_write_age_ms ordered_worker_running \
             ordered_worker_queued ordered_queue_pending \
+            verified_zswap_origin_admitted \
+            foreground_committed_verified_zswap_writeback origin_carrier_compiled \
             upper_write_completed_ok upper_write_completed_err endio_write_forced_err; do
         [[ -n ${seen_fields[$required_field]+present} ]] || {
             SWAPZ_QUIET_PARSE_REASON="missing-status-field:$required_field"
@@ -151,6 +153,11 @@ swapz_quiet_parse_status() {
     }
     [[ ${parsed_values[failed]} == 0 || ${parsed_values[failed]} == 1 ]] || {
         SWAPZ_QUIET_PARSE_DETAIL=invalid-failed-flag
+        return 1
+    }
+    [[ ${parsed_values[origin_carrier_compiled]} == 0 ||
+       ${parsed_values[origin_carrier_compiled]} == 1 ]] || {
+        SWAPZ_QUIET_PARSE_DETAIL=invalid-origin-carrier-capability
         return 1
     }
 }

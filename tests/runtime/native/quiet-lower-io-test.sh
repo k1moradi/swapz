@@ -31,6 +31,9 @@ fields = [field for field in fields if field != "status_snapshot_error"]
 literal_fields = re.findall(r"([A-Za-z0-9_]+)=([0-9]+)", status_source)
 tokens = []
 for field, value in literal_fields:
+    # Compiled INFO contains just one #ifdef arm. Stock-header fixtures use 0.
+    if field == "origin_carrier_compiled" and value != "0":
+        continue
     if field not in fields and field != "status_snapshot_error":
         tokens.append(f"{field}={value}")
 for field in fields:
@@ -42,7 +45,10 @@ print("0 32768 swapz " + " ".join(tokens))
 PY
 )" || fail 'cannot construct production status fixture'
 LONG_FIELD="$(printf '%065d' 0 | tr '0' 'a')"
-[[ $(wc -w <<< "$EXPECTED_STATUS") == 484 &&
+[[ $(wc -w <<< "$EXPECTED_STATUS") == 487 &&
+   $EXPECTED_STATUS == *' verified_zswap_origin_admitted=0 '* &&
+   $EXPECTED_STATUS == *' foreground_committed_verified_zswap_writeback=0 '* &&
+   $EXPECTED_STATUS == *' origin_carrier_compiled=0 '* &&
    $EXPECTED_STATUS == *' lower_write_inflight=0 '* &&
    $EXPECTED_STATUS == *' lower_write_age_ms=0 '* &&
    $EXPECTED_STATUS == *' ordered_worker_running=0 '* &&
@@ -179,6 +185,8 @@ dmsetup() {
         duplicate_status) status_text="${status_text/ gc_pages=0 / physical_read=0 }" ;;
         malformed_status) status_text="${status_text/ endio_write_forced_err=0/ opaque=invalid endio_write_forced_err=0}" ;;
         malformed_token) status_text="${status_text/ gc_pages=0 / malformed-token }" ;;
+        invalid_origin_carrier) status_text="${status_text/origin_carrier_compiled=0/origin_carrier_compiled=2}" ;;
+        missing_origin_field) status_text="${status_text/ verified_zswap_origin_admitted=0/}" ;;
         long_field_key) status_text="${status_text/ gc_pages=0 / ${LONG_FIELD}=0 }" ;;
         snapshot_error) status_text='0 32768 swapz status_snapshot_error=-12' ;;
         wrong_target) status_text="${status_text/32768 swapz /32768 linear }" ;;
@@ -300,10 +308,14 @@ reset_case width_change
 expect_unavailable final-lower lower-counter-width-changed initial+final
 reset_case width_change_later
 expect_unavailable initial-lower lower-counter-width-changed initial
+reset_case invalid_origin_carrier
+expect_unavailable initial-status malformed-status none 3 invalid-origin-carrier-capability
+reset_case missing_origin_field
+expect_unavailable initial-status incomplete-status none 3 'field-count:expected=487:actual=486'
 reset_case truncated_status
-expect_unavailable initial-status incomplete-status none 3 'field-count:expected=484:actual=483'
+expect_unavailable initial-status incomplete-status none 3 'field-count:expected=487:actual=486'
 reset_case partial_status
-expect_unavailable initial-status incomplete-status none 3 'field-count:expected=484:actual=6'
+expect_unavailable initial-status incomplete-status none 3 'field-count:expected=487:actual=6'
 reset_case internal_truncated_status
 expect_unavailable initial-status incomplete-status none
 reset_case duplicate_status

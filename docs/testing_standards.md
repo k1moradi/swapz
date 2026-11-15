@@ -19,6 +19,15 @@ compression and ordered completion, and independent concurrency review.
 capability. An unavailable carrier with a zero verified count is UNKNOWN,
 never proof that zswap caused no writeback. Phase B bypass remains disabled.
 
+The rootless quiet-lower-I/O parser requires three Device Mapper header tokens
+plus 484 production INFO key/value tokens, including the two passive verified
+origin counters and one compiled-capability token. Source-excerpt generation
+must choose exactly one mutually exclusive capability branch: stock headers
+emit `origin_carrier_compiled=0`. Reject absent/duplicate/invalid capability
+and origin fields without weakening lower-I/O quiescence or safety checks.
+These counters are diagnostics, not running-kernel BIO ABI evidence.
+
+
 ## Kernel-header compiler identity regression (2026-11-14)
 
 When CC is GNU Make's built-in default, the external-module Kbuild wrapper
