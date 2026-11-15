@@ -20,10 +20,10 @@ Round 002 **was opened** by the verified [`ROUND_OPEN` comment](https://github.c
 
 **Round 002 closeout (2026-11-15):** 2/2 accountable reports archived in [round-report.md](round002/round-report.md), and issue #119 closed for reporting. Agent 3 published real passive consumer source (bounded PASS); Agent 2 remained BLOCKED_PUBLISH with no committed Linux producer. Phase A BLOCKED, Phase B DEFERRED.
 
-## Round 003 — DRAFT ONLY (NOT OPEN)
+## Round 003 — final independent worker tasks (start only at ROUND_OPEN)
 
-| Round | Planning source | Coordination issue | Proposed workers | Execution gate |
+| Round | Frozen swapz source | Coordination issue | Workers | Milestone |
 | --- | --- | --- | --- | --- |
-| [003](round003/README.md) | `408728d43c16e67556c41f2e55c11e56ed68c33b` (tentative) | [#120](https://github.com/k1moradi/swapz/issues/120) | Agent 2 full Linux source implementation; Agent 3 swapz consumer CI and qualification | **PREPARING**: close Round 002; verify writable full Linux source tree before `ROUND_OPEN` |
+| [003](round003/README.md) | `15b98edef5d8b4e401d8c5e2c9a4d7a012100ff7` | [#120](https://github.com/k1moradi/swapz/issues/120) | Agent 4 existing swapzctl provenance reader; Agent 6 existing DM source-bound regression tests | Phase A BLOCKED; Phase B DEFERRED |
 
-Round 003 documents are planning manifests, **not execution authorization**. Agent 1 must resolve pre-opening gates, publish final immutable task commit, then post `ROUND_OPEN` in #120. Until then Agents 2 and 3 do not file Round 003 completion reports.
+The authoritative `ROUND_OPEN` issue comment supplies the task-commit SHA. Earlier Round 003 draft tasks for Agents 2 and 3 were superseded **before opening**: no approved writable Linux source repo exists for Agent 2, and Agent 3's [pre-opening repair](https://github.com/k1moradi/swapz/issues/120#issuecomment-6894963968) is historical evidence, not a Round 003 completion. Both final workers can edit independent already committed swapz sources simultaneously; Agent 1 alone integrates verified source commits to `main` serially.
