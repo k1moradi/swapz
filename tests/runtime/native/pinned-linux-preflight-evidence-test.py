@@ -13,7 +13,7 @@ GCC_CLASS = "pinned-linux-targeted-objects-and-linked-external-module"
 LLVM_CLASS = "LLVM_STOCK_SOURCE_OBJECT_KBUILD"
 GCC_STAGES = ("defconfig", "scripts_config", "olddefconfig", "prepare",
               "compile_objects", "modules_prepare", "kernel_export_build",
-              "swapz_module_kbuild")
+              "kernel_export_modules", "swapz_module_kbuild")
 LLVM_STAGES = GCC_STAGES[:5]
 COMMON_OBJECTS = ("mm/page_io.o", "block/bio.o")
 KNOWN = set("""source_repository source_sha source_modified swapz_sha requested_zswap result
@@ -271,6 +271,8 @@ class PreflightEvidenceTests(unittest.TestCase):
             "module_symvers_sha256": ["bad", None],
             "swapz_module_kbuild_exit_code": ["1", None],
             "kernel_export_build_exit_code": ["3"],
+            "kernel_export_modules_exit_code": ["2", None],
+            "kernel_export_modules_command": [None],
             "config_verification_exit_code": ["1"],
             "module_warning_count": ["1"],
             "phase_a_qualified": ["yes"],

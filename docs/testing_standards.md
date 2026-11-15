@@ -12980,3 +12980,17 @@ not optional extension fields. The validator must still accept unrelated
 optional collector annotations and distinguish four valid offline y/n grammar
 fixtures from actual artifact provenance. These are bounded grammar checks;
 no fabricated SHA-256 fixture authenticates a compiled object or module.
+
+### Round 007 coordinator integration correction — in-tree modules export stage
+
+The pinned GCC source workflow added the real `kernel_export_modules` step
+(after `kernel_export_build`, before `swapz_module_kbuild`). The offline
+GCC evidence validator must recognize and require the corresponding
+`kernel_export_modules_command` and canonical zero
+`kernel_export_modules_exit_code` in every purported successful linked-module
+profile. Reject absent or failed step evidence, in addition to missing
+`Module.symvers` hash. The generated offline positive profiles and two
+new negative failure classes cover this stage; all other existing fixture
+claims, LLVM object-only semantics and source-only qualification limits remain
+unchanged. This is a coordinator schema consistency change, not an authenticated
+Linux producer or tested live writeback.
