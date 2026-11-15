@@ -12694,3 +12694,27 @@ and ESRCH while reading a task that exits during inspection. Inject the
 read-time ESRCH deterministically and retain permission-error propagation;
 inaccessible process evidence is not proof of exit. The actual retained-child
 and unrelated-process assertions remain mandatory.
+
+
+### Phase A zswap provenance source contract and mutation negatives
+
+The source-controlled rootless `tests/runtime/native/zswap-origin-consumer-source-test.py`
+checks the actual `src/kernel/dm-target.c` at the tested source revision.
+It requires the descriptor's default UNKNOWN initialization before queue
+publication, an exact 4KiB WRITE with the optional authenticated BIO helper
+behind `BIO_HAS_ZSWAP_STORED_WRITEBACK_ORIGIN`, count-after-acceptance/requeue
+ordering, four success-only foreground representation/authority commit hooks,
+constructor counter resets and read-only INFO capability markers. It rejects
+Phase A origin-driven RAW scheduling or codec behavior. The same executable
+runs independently mutated copies of these source sites in memory; every
+deliberately broken variant must fail. No synthetic BIO stand-in or Phase B
+bypass may substitute for the pinned production C source in this check.
+
+Run `python3 -B tests/runtime/native/zswap-origin-consumer-source-test.py`
+on a clean source checkout. A source-contract PASS is not an actual Linux MM
+producer/BIO-clone/split test, authenticated stored-entry eviction, loaded
+`null_blk` write/read verification, KUnit, or physical acceptance. Until
+an exact matched producer, patched kernel and observed real zswap writeback
+have been independently qualified, Phase A remains BLOCKED; Phase B RAW
+bypass remains disabled. Existing `make test` fail-closed production and
+physical evidence gates are unchanged.
