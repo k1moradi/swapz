@@ -402,6 +402,11 @@ struct swapz_ack_dwell_batch {
 	u64 bins[2][SWAPZ_LANE_DWELL_BINS];
 };
 
+enum swapz_write_origin {
+	SWAPZ_WRITE_ORIGIN_ORDINARY_OR_UNKNOWN = 0,
+	SWAPZ_WRITE_ORIGIN_ZSWAP_STORED_WRITEBACK,
+};
+
 struct swapz_bio_ref {
 	struct list_head list;
 	struct bio *bio;
@@ -412,6 +417,8 @@ struct swapz_bio_ref {
 	struct swapz_prepared_page *prepared_page;
 	bool preparation_inline;
 	bool preparation_force_raw;
+	/* Immutable admission snapshot; invalid after upper completion. */
+	enum swapz_write_origin write_origin;
 	/*
 	 * Set while ->map owns submitter-side preparation. The ordered owner
 	 * returns without touching this descriptor until the release store.
@@ -985,6 +992,9 @@ struct swapz_dm {
 	u8 *read_compressed;   /* VMALLOC: 4KiB compressed record buffer */
 	void *lz4_workmem;
 	u64 logical_write_bytes;
+	/* Concurrent admission and successful foreground commit observations. */
+	atomic64_t verified_zswap_origin_admitted;
+	atomic64_t foreground_committed_verified_zswap_writeback;
 	/* Count actual upper WRITE BIO completions, including injected failure.
 	 * These are completion observations, not lower submitted bytes. */
 	atomic64_t upper_write_completed_ok;
@@ -1114,6 +1124,17 @@ struct swapz_dm {
 	u64 reordered_records;
 	u64 io_failures;
 };
+
+/* The ordered commit owner observes a descriptor before upper completion. */
+static void swapz_count_verified_zswap_writeback_commit(struct swapz_dm *ctx,
+							struct bio *bio)
+{
+	const struct swapz_bio_ref *entry =
+		dm_per_bio_data(bio, sizeof(*entry));
+
+	if (entry->write_origin == SWAPZ_WRITE_ORIGIN_ZSWAP_STORED_WRITEBACK)
+		atomic64_inc(&ctx->foreground_committed_verified_zswap_writeback);
+}
 
 static int swapz_maybe_inject_read_fault(struct swapz_dm *ctx)
 {
@@ -2615,6 +2636,8 @@ static int swapz_finalize_inflight_write(struct swapz_dm *ctx, bool wait)
 			ctx->raw_pages++;
 		else
 			ctx->compressed_pages++;
+		swapz_count_verified_zswap_writeback_commit(ctx,
+							inflight->bios[index]);
 		if (defer)
 			swapz_defer_upper_completion(ctx,
 						     inflight->bios[index]);
@@ -5452,6 +5475,7 @@ commit_done:
 				ctx->raw_pages++;
 			else
 				ctx->compressed_pages++;
+			swapz_count_verified_zswap_writeback_commit(ctx, bio);
 			swapz_complete(bio, 0);
 		} else {
 			swapz_complete(bio, error ? error : -EIO);
@@ -5580,6 +5604,7 @@ static int swapz_raw_write(struct swapz_dm *ctx, struct bio *bio, swapz_u32 logi
 	if (!error) {
 		ctx->raw_pages++;
 		ctx->logical_write_bytes += SWAPZ_BLOCK_BYTES;
+		swapz_count_verified_zswap_writeback_commit(ctx, bio);
 	}
 	return error;
 }
@@ -6320,6 +6345,7 @@ static int swapz_accept_write(struct swapz_dm *ctx, struct bio *bio)
 		} else {
 			ctx->logical_write_bytes += SWAPZ_BLOCK_BYTES;
 			ctx->zero_elided_pages++;
+			swapz_count_verified_zswap_writeback_commit(ctx, bio);
 		}
 		swapz_complete(bio, error);
 		return 0;
@@ -8624,6 +8650,13 @@ static int swapz_map(struct dm_target *ti, struct bio *bio)
 	entry->prepared_page = NULL;
 	entry->preparation_inline = false;
 	entry->preparation_force_raw = false;
+	entry->write_origin = SWAPZ_WRITE_ORIGIN_ORDINARY_OR_UNKNOWN;
+#ifdef BIO_HAS_ZSWAP_STORED_WRITEBACK_ORIGIN
+	if (bio_op(bio) == REQ_OP_WRITE && count == SWAPZ_SECTORS &&
+	    bio->bi_iter.bi_size == SWAPZ_BLOCK_BYTES &&
+	    bio_is_zswap_stored_writeback(bio))
+		entry->write_origin = SWAPZ_WRITE_ORIGIN_ZSWAP_STORED_WRITEBACK;
+#endif
 	atomic_set(&entry->preparation_submitter_active, 0);
 	entry->preparation_ctx = ctx;
 	entry->admitted_ns = 0;
@@ -8688,6 +8721,8 @@ static int swapz_map(struct dm_target *ti, struct bio *bio)
 				mutex_unlock(&ctx->ordered_owner);
 			return READ_ONCE(ctx->failed) ? DM_MAPIO_KILL : DM_MAPIO_REQUEUE;
 		}
+		if (entry->write_origin == SWAPZ_WRITE_ORIGIN_ZSWAP_STORED_WRITEBACK)
+			atomic64_inc(&ctx->verified_zswap_origin_admitted);
 		if (count && (bio_op(bio) == REQ_OP_READ ||
 			      bio_op(bio) == REQ_OP_WRITE)) {
 			if (bio_segs > 1) {
@@ -9150,6 +9185,8 @@ static int swapz_ctr(struct dm_target *ti, unsigned int argc, char **argv)
 	bio_list_init(&ctx->completion_bios);
 	INIT_WORK(&ctx->completion_work, swapz_completion_work);
 	atomic_set(&ctx->completion_active, 0);
+	atomic64_set(&ctx->verified_zswap_origin_admitted, 0);
+	atomic64_set(&ctx->foreground_committed_verified_zswap_writeback, 0);
 	atomic64_set(&ctx->upper_write_completed_ok, 0);
 	atomic64_set(&ctx->upper_write_completed_err, 0);
 	atomic64_set(&ctx->ack_dwell_deferred_count, 0);
@@ -9923,6 +9960,16 @@ static void swapz_status(struct dm_target *ti, status_type_t type,
 		       ctx->authority.next_block,
 		       ctx->authority_metadata_ram_bytes,
 		       ctx->read_payload_cache_ram_bytes);
+		DMEMIT(" verified_zswap_origin_admitted=%llu"
+		       " foreground_committed_verified_zswap_writeback=%llu",
+		       (u64)atomic64_read(&ctx->verified_zswap_origin_admitted),
+		       (u64)atomic64_read(
+			       &ctx->foreground_committed_verified_zswap_writeback));
+#ifdef BIO_HAS_ZSWAP_STORED_WRITEBACK_ORIGIN
+		DMEMIT(" origin_carrier_compiled=1");
+#else
+		DMEMIT(" origin_carrier_compiled=0");
+#endif
 		/*
 		 * Bounded, advisory liveness snapshot for a physical PSI refusal.
 		 * No ordered_owner acquisition, no I/O, and no failure/timeout policy

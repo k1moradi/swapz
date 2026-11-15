@@ -442,6 +442,33 @@ semantics or physical storage behavior.
 
 ## Kernel C rules
 
+### Phase A zswap writeback origin observability (prototype, 2026-11-15)
+
+For each accepted 4KiB foreground WRITE, `swapz_map()` snapshots either
+`ORDINARY_OR_UNKNOWN` (zero) or the verified zswap-stored-entry writeback
+origin (one) into the per-BIO descriptor before FIFO publication. A positive
+snapshot requires the explicit private BIO capability and its Linux MM helper,
+not merely `REQ_SWAP`, reclaim hints, task identity or global zswap counters.
+An unsupported carrier compiles to unknown only. The snapshot is valid until
+upper BIO completion and never changes compression, RAW selection, ordering,
+CRC/generation authority, IO, or completion ownership. No Phase B bypass is
+permitted.
+
+`verified_zswap_origin_admitted` counts authenticated 4KiB WRITE admissions
+after the queue-lock accepting recheck, using an atomic per-target counter.
+`foreground_committed_verified_zswap_writeback` counts only already-successful
+foreground authoritative page publications, across compressed, RAW and
+zero-elision paths, before the upper BIO is acknowledged. Async deferred ACKs
+are not additional commits; GC, failures and aborted preparations never count.
+Both counters are cumulative and may be sampled at different instants during
+active work. `origin_carrier_compiled` indicates header compilation capability
+ONLY, not a running-kernel BIO ABI identity or verified positive runtime event;
+a zero count under unavailable capability does not prove absent zswap activity.
+The INFO tokens are additive; existing versioned JSON v1 schema is unchanged.
+For quiescent target snapshots, verified successful commits cannot exceed the
+sum of compressed, RAW and zero-elided committed foreground pages.
+
+
 Use Linux-kernel-style C, kernel types/APIs, explicit ownership and checked arithmetic. Keep functions cohesive, allocations bounded, stack use modest and concurrency ownership obvious. Avoid recursion, hidden allocations, libc/C++ in the module and duplicated state machines.
 
 Every accepted BIO must have exactly one completion owner. Never publish a mapping before all required lower data and ordering work succeeds. Preserve generation/CRC checks, PREFLUSH/FUA ordering, same-page dependencies, discard semantics, suspend/drain safety and fail-closed teardown.
