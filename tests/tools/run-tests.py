@@ -2615,6 +2615,118 @@ PHYSICAL_TRIAL_PREFLIGHT_REASON = (
     "mapper and module retained")
 
 
+
+def retained_physical_trial_candidate():
+    """Observe the one exact physical-trial mapper shape, without adopting it.
+
+    The private physical helper, not this read-only hint, authenticates the
+    original root-owned journal and decides whether recovery is permissible.
+    """
+    privileged = [] if os.geteuid() == 0 else ["sudo", "-n", "--"]
+    try:
+        inventory = subprocess.run(
+            [*privileged, "dmsetup", "ls", "--target", "swapz",
+             "--noheadings"],
+            cwd=ROOT, text=True, encoding="utf-8", errors="replace",
+            stdout=subprocess.PIPE, stderr=subprocess.DEVNULL,
+            check=False, timeout=10)
+        if inventory.returncode or len(inventory.stdout) > 1024:
+            return False
+        match = re.fullmatch(
+            r"(swapz-demo-physical-([0-9a-f]{16}))\s+"
+            r"\((?:0|[1-9][0-9]{0,9})(?::|,\s+)"
+            r"(?:0|[1-9][0-9]{0,9})\)",
+            inventory.stdout.strip())
+        if match is None:
+            return False
+        identity = subprocess.run(
+            [*privileged, "dmsetup", "info", "-c", "--noheadings",
+             "-o", "uuid", match.group(1)],
+            cwd=ROOT, text=True, encoding="utf-8", errors="replace",
+            stdout=subprocess.PIPE, stderr=subprocess.DEVNULL,
+            check=False, timeout=10)
+        return (identity.returncode == 0 and len(identity.stdout) <= 128
+                and identity.stdout.strip() ==
+                "SWAPZ-TEST-PHYSICAL-" + match.group(2))
+    except (OSError, subprocess.TimeoutExpired):
+        # A failed read-only hint never grants bypass or recovery authority.
+        return False
+
+
+def offer_retained_physical_trial_reconciliation():
+    """Offer one explicit owner choice before loaded RAM qualification.
+
+    A declined, unavailable, or unsuccessful choice changes no admission gate.
+    On explicit consent, only the original private helper may touch swap; its
+    entire unbounded-by-console diagnostic is retained in a 0600 private file.
+    """
+    if not (sys.stdin.isatty() and sys.stdout.isatty()
+            and retained_physical_trial_candidate()):
+        return
+    print("  Retained physical-trial swap detected before loaded RAM tests.")
+    print("    1) Keep the physical trial active (loaded RAM test stays BLOCKED).")
+    print("    2) Request original-owner recovery (may drain live swap pages, "
+          "remove its verified mapper, and restore original swap policy).")
+    print("       Only the original journal-validated helper may act; "
+          "recovery may refuse.")
+    print("  Choice [1]: ", end="", flush=True)
+    try:
+        selection = sys.stdin.readline(16)
+    except (OSError, UnicodeError):
+        selection = ""
+    if selection not in ("2\n", "2\r\n", "2"):
+        print("  Physical trial retained; loaded preflight will enforce BLOCKED.",
+              flush=True)
+        return
+
+    diagnostic_dir = ROOT / "build/tests"
+    try:
+        directory = diagnostic_dir.lstat()
+        if (not stat.S_ISDIR(directory.st_mode) or
+                directory.st_uid != os.geteuid() or
+                directory.st_mode & (stat.S_IWGRP | stat.S_IWOTH)):
+            raise OSError("private diagnostic directory is not controlled")
+        diagnostic_fd, diagnostic_path = tempfile.mkstemp(
+            prefix="physical-owner-recovery-", suffix=".private.log",
+            dir=diagnostic_dir)
+    except OSError:
+        print("  BLOCKED: private recovery log unavailable; "
+              "no owner recovery attempted.", flush=True)
+        return
+
+    command_prefix = ([] if os.geteuid() == 0
+                      else ["sudo", "-n", "--"])
+    command = [
+        *command_prefix, sys.executable, "-I", "-B",
+        str(ROOT / "tests/tools/physical-swap-probe.py"),
+        "recover-pending",
+    ]
+    print("  Requested original-owner reconciliation; do not interrupt "
+          "the recovery helper.", flush=True)
+    recovery_exit = None
+    try:
+        with os.fdopen(diagnostic_fd, "wb") as diagnostic:
+            try:
+                recovery = subprocess.run(
+                    command, cwd=ROOT, stdin=subprocess.DEVNULL,
+                    stdout=diagnostic, stderr=subprocess.STDOUT,
+                    check=False)  # No timeout: never kill an in-progress drain.
+                recovery_exit = recovery.returncode
+            except OSError:
+                # Whether the process started is unknown; do not retry.
+                pass
+    finally:
+        print("  Private owner-recovery log (mode 0600): " +
+              str(Path(diagnostic_path).relative_to(ROOT)), flush=True)
+    if recovery_exit == 0:
+        print("  Original helper completed; loaded preflight will "
+              "recheck all host admission gates.", flush=True)
+    else:
+        print("  BLOCKED: owner recovery refused or was interrupted; "
+              "loaded preflight still decides. Resources not claimed by "
+              "the RAM test.", flush=True)
+
+
 def failure_context(output, *, loaded=True, default_phase=None,
                     child_exit_code=None):
     """Return a sanitized failure phase/reason without leaking host details.
@@ -12809,6 +12921,10 @@ def _run_qualification(args, sync_result):
                          "resume" if resume_requested else "record"),
                      "native_cache_kdir": args.kdir}
                     if i == 1 and tier == "algorithm" else {})
+                if i == 4 and tier == "algorithm":
+                    # Ask at the loaded boundary, after source and rootless
+                    # checks. Never grant recovery permission from a name.
+                    offer_retained_physical_trial_reconciliation()
                 code = run_stage(
                     title, command, result, parse_bench=(i == 4),
                     stream_rootless_progress=(i == 1),

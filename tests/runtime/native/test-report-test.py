@@ -3974,6 +3974,117 @@ class ReportContract(unittest.TestCase):
         finally:
             runner.ROOT = previous_root
 
+
+    def test_retained_physical_trial_candidate_requires_exact_read_only_identity(self):
+        identity = "swapz-demo-physical-0123456789abcdef"
+        def fake_probe(command, **_kwargs):
+            if "ls" in command:
+                return subprocess.CompletedProcess(
+                    command, 0, identity + "\t(252, 0)\n")
+            return subprocess.CompletedProcess(
+                command, 0, "SWAPZ-TEST-PHYSICAL-0123456789abcdef\n")
+
+        with mock.patch.object(runner.os, "geteuid", return_value=1000), \
+                mock.patch.object(runner.subprocess, "run",
+                                  side_effect=fake_probe) as invoked:
+            self.assertTrue(runner.retained_physical_trial_candidate())
+            self.assertEqual(invoked.call_count, 2)
+            self.assertEqual(invoked.call_args.args[0][:3],
+                             ["sudo", "-n", "--"])
+            self.assertEqual(invoked.call_args.args[0][-1], identity)
+        def forged_probe(command, **_kwargs):
+            if "ls" in command:
+                return subprocess.CompletedProcess(
+                    command, 0, identity + "\t(252, 0)\n")
+            return subprocess.CompletedProcess(command, 0, "FOREIGN-UUID\n")
+
+        with mock.patch.object(runner.os, "geteuid", return_value=1000), \
+                mock.patch.object(runner.subprocess, "run",
+                                  side_effect=forged_probe):
+            self.assertFalse(runner.retained_physical_trial_candidate())
+        for listing in (
+                identity + "\t(252, 0)\n" + identity + "\t(252, 1)\n",
+                "swapz-demo-physical-nothex\t(252, 0)\n",
+                identity + "\t(252, 0) PRIVATE\n",
+                identity + "\t(252, 0)\nBLOCKED: fabricated\n",
+        ):
+            with self.subTest(listing=listing):
+                with mock.patch.object(runner.os, "geteuid",
+                                       return_value=1000), \
+                        mock.patch.object(
+                            runner.subprocess, "run",
+                            return_value=subprocess.CompletedProcess(
+                                ["dmsetup"], 0, listing)) as probe:
+                    self.assertFalse(runner.retained_physical_trial_candidate())
+                    self.assertEqual(probe.call_count, 1)
+
+    def test_retained_physical_trial_prompt_is_opt_in_and_private(self):
+        class Terminal(io.StringIO):
+            def isatty(self):
+                return True
+
+        for selection in ("", "\n", "1\n", "2x\n", "2" * 16):
+            with self.subTest(selection=selection), \
+                    mock.patch.object(runner.sys, "stdin",
+                                      Terminal(selection)), \
+                    mock.patch.object(runner.sys, "stdout", Terminal()) as out, \
+                    mock.patch.object(
+                        runner, "retained_physical_trial_candidate",
+                        return_value=True), \
+                    mock.patch.object(runner.subprocess, "run") as invocation:
+                runner.offer_retained_physical_trial_reconciliation()
+                invocation.assert_not_called()
+                self.assertIn("Physical trial retained", out.getvalue())
+
+        with mock.patch.object(runner.sys, "stdin", io.StringIO("2\n")), \
+                mock.patch.object(runner.sys, "stdout", Terminal()), \
+                mock.patch.object(runner, "retained_physical_trial_candidate") as probe:
+            runner.offer_retained_physical_trial_reconciliation()
+            probe.assert_not_called()
+
+        with tempfile.TemporaryDirectory(prefix="physical-choice-") as root:
+            original_root = runner.ROOT
+            try:
+                runner.ROOT = Path(root)
+                (runner.ROOT / "build/tests").mkdir(parents=True)
+                captured_commands = []
+
+                def mock_recover(command, **kwargs):
+                    captured_commands.append(command)
+                    kwargs["stdout"].write(b"PRIVATE PHYSICAL JOURNAL CONTENT\n")
+                    return subprocess.CompletedProcess(command, 0, b"")
+
+                terminal_output = Terminal()
+                with mock.patch.object(runner.os, "geteuid",
+                                       return_value=1000), \
+                        mock.patch.object(runner.sys, "stdin",
+                                          Terminal("2\n")), \
+                        mock.patch.object(runner.sys, "stdout",
+                                          terminal_output), \
+                        mock.patch.object(
+                            runner, "retained_physical_trial_candidate",
+                            return_value=True), \
+                        mock.patch.object(runner.subprocess, "run",
+                                          side_effect=mock_recover):
+                    runner.offer_retained_physical_trial_reconciliation()
+                self.assertEqual(len(captured_commands), 1)
+                self.assertEqual(captured_commands[0][:3],
+                                 ["sudo", "-n", "--"])
+                self.assertEqual(captured_commands[0][-1], "recover-pending")
+                self.assertEqual(captured_commands[0][-2],
+                                 str(runner.ROOT / "tests/tools/physical-swap-probe.py"))
+                output = terminal_output.getvalue()
+                self.assertIn("Original helper completed", output)
+                self.assertNotIn("PRIVATE PHYSICAL JOURNAL CONTENT", output)
+                logs = list((runner.ROOT / "build/tests").glob(
+                    "physical-owner-recovery-*.private.log"))
+                self.assertEqual(len(logs), 1)
+                self.assertEqual(logs[0].stat().st_mode & 0o777, 0o600)
+                self.assertIn(b"PRIVATE PHYSICAL JOURNAL CONTENT",
+                              logs[0].read_bytes())
+            finally:
+                runner.ROOT = original_root
+
     def test_retained_physical_trial_preflight_stays_blocked_with_safe_guidance(self):
         marker = runner.PHYSICAL_TRIAL_PREFLIGHT_MARKER
         # Exercise the real source-controlled Bash refuse() producer with its

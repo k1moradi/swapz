@@ -3459,6 +3459,27 @@ Rootless regressions execute the exact admission branch with synthetic
 `dmsetup` output for the valid physical shape, forged/malformed physical
 shapes and valid RAM mapping, and prove zero real device operations.
 
+For interactive `make test` only, immediately before the loaded stage the
+unprivileged parent may make a **read-only, bounded** `dmsetup` observation
+of exactly one `swapz-demo-physical-<16 lowercase hex>` mapper with its
+corresponding `SWAPZ-TEST-PHYSICAL-<token>` UUID. This is an opportunity to
+ask the owner, not any recovery/creation proof. Prompt once with two choices:
+**1 (default)** keep the physical trial active and allow the existing loaded
+preflight to report BLOCKED; **2 (explicit)** request recovery only through
+the existing private `physical-swap-probe.py recover-pending` helper, never
+through the RAM harness's own cleanup. Warn that the helper may drain live
+swap pages, remove its authenticated mapper, and restore the original swap
+policy. Use noninteractive sudo, no helper timeout, no automatic retry and
+no raw helper output on the console; retain it in a mode-0600 private file.
+If no controlling interactive terminal, no exact mapper observation, missing
+private logging, or a declined choice, never invoke recovery. Even when the
+helper reports completion, the ordinary loaded preflight runs again from its
+original entry and retains every existing host-state gate; an attempted
+recovery must never imply qualification or redefine the physical owner.
+Rootless regressions mock `dmsetup` and the recovery subprocess to prove
+exact-name/UUID filtering, default-no, no non-TTY invocation, root-only
+private diagnostics, and one selected helper call without real swap I/O.
+
 When the pre-consent physical Git gate detects untracked files, the
 unprivileged helper must automatically enumerate them read-only with Git's
 NUL-delimited `ls-files --others --exclude-standard -z` and retain a bounded
