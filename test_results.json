@@ -1,15 +1,5 @@
 {
 "benchmarks": {
-"delta64_prepare": {
-"overall": "NOT_RUN",
-"reason": "retired from routine qualification"
-},
-"delta64_prepare_sessions": [],
-"delta64_rescue": {
-"overall": "NOT_RUN",
-"reason": "retired; production delta64+DELTA64_SHUF8+LZ4 is fixed on"
-},
-"delta64_rescue_sessions": [],
 "goal_scorecard": {
 "overall": "UNAVAILABLE",
 "rows": [
@@ -183,65 +173,28 @@
 }
 ]
 },
-"k1_read_bypass": {
-"overall": "NOT_RUN",
-"reason": "refuted and retired"
-},
-"k1_read_bypass_sessions": [],
 "lane_gap_attribution": [],
 "loaded_correctness": {
-"overall": "INCOMPLETE",
-"reason": "missing loaded correctness markers: constructor-cleanup,maximum-capacity,raw-read,oracle,delta64-positive,gc,gc-roll-forward,gc-pressure,discard-trim,packed-placement,suspend,completion-handoff,write-fault,read-fault,flush-fault,codec-errors,id36,primary-lifecycle,primary-interruption-recovery,primary-negative-recovery"
+"overall": "NOT_RUN"
 },
 "lz4_acceleration": {
-"overall": "NOT_RUN",
-"reason": "retired; ordinary LZ4 is fixed at acceleration 1"
+"overall": "NOT_RUN"
 },
 "lz4_acceleration_sessions": [],
-"owned_pair_phase_timings": [],
-"owned_pair_timing_coverage": {
-"complete_pairs": 0,
-"observed_records": 0,
-"status": "NOT_RECORDED"
-},
-"parallel_read_ab": {
-"overall": "NOT_RUN",
-"reason": "promoted fixed-on; routine fan-out A/B retired"
-},
-"parallel_read_ab_sessions": [],
-"read_coalesce_ab": {
-"overall": "INCOMPLETE",
-"reason": "five counterbalanced matched rounds required"
-},
-"read_coalesce_ab_sessions": [],
-"read_coalesce_cap": {
-"overall": "NOT_RUN",
-"reason": "retired; production coalescing cap is fixed at 8 blocks"
-},
-"read_coalesce_cap_sessions": [],
-"sd_read_coalesce_ab": {
-"overall": "INCOMPLETE",
-"reason": "five counterbalanced matched rounds required"
-},
-"sd_read_coalesce_ab_sessions": [],
 "sessions": [],
 "storage_envelope_sessions": [],
 "storage_envelopes": {
-"overall": "NOT_RUN",
-"reason": "storage-envelope sweep not executed"
+"overall": "NOT_RUN"
 },
 "verdicts": {
-"overall": "INCOMPLETE",
-"reason": "sd_emulated: required counterbalanced sessions missing"
+"overall": "NOT_RUN"
 },
 "write_pipeline_depth": {
-"overall": "NOT_RUN",
-"reason": "refuted and retired from routine qualification"
+"overall": "NOT_RUN"
 },
 "write_pipeline_depth_sessions": [],
 "write_saturation": {
-"overall": "INCOMPLETE",
-"reason": "sd_emulated: write-only evidence shape mismatch"
+"overall": "NOT_RUN"
 },
 "write_saturation_sessions": []
 },
@@ -296,67 +249,63 @@
 "gc_scan_scale": {
 "rows": [
 {
-"incremental_select_ns": 5825,
-"legacy_dead_probe_ns": 794404,
-"legacy_score_scan_ns": 11737264,
+"incremental_select_ns": 5762,
+"legacy_dead_probe_ns": 694246,
+"legacy_score_scan_ns": 9824723,
 "logical_pages": 262144,
-"mapped_dead_probe_ns": 3790,
-"relocation_list_ns": 2099,
-"relocation_scan_ns": 1531021,
+"mapped_dead_probe_ns": 3743,
+"relocation_list_ns": 2968,
+"relocation_scan_ns": 1586095,
 "segments": 1024,
 "victim_records": 256
 },
 {
-"incremental_select_ns": 24716,
-"legacy_dead_probe_ns": 3416406,
-"legacy_score_scan_ns": 32536363,
+"incremental_select_ns": 24856,
+"legacy_dead_probe_ns": 3035135,
+"legacy_score_scan_ns": 41091245,
 "logical_pages": 1048576,
-"mapped_dead_probe_ns": 12815,
-"relocation_list_ns": 2553,
-"relocation_scan_ns": 7116384,
+"mapped_dead_probe_ns": 12923,
+"relocation_list_ns": 3248,
+"relocation_scan_ns": 6823675,
 "segments": 4096,
 "victim_records": 256
 },
 {
-"incremental_select_ns": 55187,
-"legacy_dead_probe_ns": 7656635,
-"legacy_score_scan_ns": 130817882,
+"incremental_select_ns": 56572,
+"legacy_dead_probe_ns": 7479482,
+"legacy_score_scan_ns": 117338584,
 "logical_pages": 4194304,
-"mapped_dead_probe_ns": 40213,
-"relocation_list_ns": 2301,
-"relocation_scan_ns": 17683043,
+"mapped_dead_probe_ns": 29570,
+"relocation_list_ns": 2555,
+"relocation_scan_ns": 17255318,
 "segments": 16384,
 "victim_records": 256
 },
 {
-"incremental_select_ns": 408665,
-"legacy_dead_probe_ns": 43295089,
-"legacy_score_scan_ns": 863278919,
+"incremental_select_ns": 363466,
+"legacy_dead_probe_ns": 43105023,
+"legacy_score_scan_ns": 700806661,
 "logical_pages": 27080192,
-"mapped_dead_probe_ns": 170070,
-"relocation_list_ns": 2566,
-"relocation_scan_ns": 146008999,
+"mapped_dead_probe_ns": 172575,
+"relocation_list_ns": 2265,
+"relocation_scan_ns": 125344153,
 "segments": 105782,
 "victim_records": 256
 }
 ],
 "scope": "OFFLINE_NATIVE_GC_SCALE_ONLY"
 },
-"kernel_debug": {
-"overall": "INCOMPLETE",
-"reason": "kernel debug evidence marker missing or duplicated"
-},
 "predictor": {
 "backend_benchmarks": [
 {
-"inverse_ns_per_page": 1606,
+"inverse_ns_per_page": 1411,
 "name": "scalar",
-"transform_ns_per_page": 1683
+"transform_ns_per_page": 1479
 },
 {
-"inverse_ns_per_page": 1084,
+"inverse_ns_per_page": 1085,
 "name": "sse2",
-"transform_ns_per_page": 896
+"transform_ns_per_page": 830
 }
 ],
 "classifier": {
@@ -366,9 +315,9 @@
 "candidate": "delta64",
 "early_abort_pages": 223,
 "eligible_pages": 512,
-"ns_per_page": 871,
+"ns_per_page": 682,
 "sample_pairs": 32,
-"scalar_ns_per_page": 871,
+"scalar_ns_per_page": 682,
 "stage1_min_score": 2,
 "stage1_pairs": 8
 },
@@ -383,7 +332,7 @@
 "planner_blocks": 383,
 "planner_extents": 267,
 "raw_pages": 192,
-"wall_ns_per_page": 11065
+"wall_ns_per_page": 13010
 },
 {
 "acceleration": 2,
@@ -391,7 +340,7 @@
 "planner_blocks": 383,
 "planner_extents": 267,
 "raw_pages": 192,
-"wall_ns_per_page": 10260
+"wall_ns_per_page": 12413
 },
 {
 "acceleration": 3,
@@ -399,7 +348,7 @@
 "planner_blocks": 383,
 "planner_extents": 266,
 "raw_pages": 192,
-"wall_ns_per_page": 9898
+"wall_ns_per_page": 11789
 },
 {
 "acceleration": 4,
@@ -407,7 +356,7 @@
 "planner_blocks": 384,
 "planner_extents": 273,
 "raw_pages": 192,
-"wall_ns_per_page": 9712
+"wall_ns_per_page": 11268
 }
 ],
 "negative_pages": 256,
@@ -424,9 +373,9 @@
 "extents_saved": 38,
 "general_threshold": 24,
 "lz4_rescues": 192,
-"modeled_wall_ns_per_page": 6945,
-"modeled_wall_ns_total": 4000512,
-"ns_per_saved_block": 72736,
+"modeled_wall_ns_per_page": 6524,
+"modeled_wall_ns_total": 3758080,
+"ns_per_saved_block": 68328,
 "packing_adoptions": 0,
 "packing_eligible_pages": 51,
 "packing_threshold": 16,
@@ -451,29 +400,29 @@
 "pages": 576,
 "pairs": [
 {
-"baseline_ns_per_page": 1046,
+"baseline_ns_per_page": 951,
 "order": "baseline_first",
-"unrolled_ns_per_page": 896
+"unrolled_ns_per_page": 840
 },
 {
-"baseline_ns_per_page": 997,
+"baseline_ns_per_page": 963,
 "order": "unrolled_first",
-"unrolled_ns_per_page": 879
+"unrolled_ns_per_page": 837
 },
 {
-"baseline_ns_per_page": 998,
+"baseline_ns_per_page": 970,
 "order": "baseline_first",
-"unrolled_ns_per_page": 877
+"unrolled_ns_per_page": 944
 },
 {
-"baseline_ns_per_page": 907,
+"baseline_ns_per_page": 936,
 "order": "unrolled_first",
-"unrolled_ns_per_page": 879
+"unrolled_ns_per_page": 849
 },
 {
-"baseline_ns_per_page": 910,
+"baseline_ns_per_page": 981,
 "order": "baseline_first",
-"unrolled_ns_per_page": 848
+"unrolled_ns_per_page": 845
 }
 ],
 "repeats_per_arm": 64,
@@ -522,14 +471,14 @@
 }
 ],
 "negative_useful": 0,
-"ns_per_saved_block": 74311,
+"ns_per_saved_block": 69958,
 "routed_baseline_blocks": 257,
 "routed_baseline_extents": 182,
 "routed_blocks_saved": 60,
 "routed_candidate_blocks": 197,
 "routed_candidate_extents": 124,
-"routed_cpu_ns_per_page": 7740,
-"routed_cpu_ns_total": 4458717,
+"routed_cpu_ns_per_page": 7287,
+"routed_cpu_ns_total": 4197508,
 "routed_extents_saved": 58,
 "structured_calls": 279,
 "structured_eligible": 320,
@@ -577,14 +526,14 @@
 }
 ],
 "negative_useful": 0,
-"ns_per_saved_block": 74719,
+"ns_per_saved_block": 70304,
 "routed_baseline_blocks": 257,
 "routed_baseline_extents": 182,
 "routed_blocks_saved": 58,
 "routed_candidate_blocks": 199,
 "routed_candidate_extents": 132,
-"routed_cpu_ns_per_page": 7523,
-"routed_cpu_ns_total": 4333752,
+"routed_cpu_ns_per_page": 7079,
+"routed_cpu_ns_total": 4077664,
 "routed_extents_saved": 50,
 "structured_calls": 272,
 "structured_eligible": 320,
@@ -632,14 +581,14 @@
 }
 ],
 "negative_useful": 0,
-"ns_per_saved_block": 72736,
+"ns_per_saved_block": 68328,
 "routed_baseline_blocks": 257,
 "routed_baseline_extents": 182,
 "routed_blocks_saved": 55,
 "routed_candidate_blocks": 202,
 "routed_candidate_extents": 144,
-"routed_cpu_ns_per_page": 6945,
-"routed_cpu_ns_total": 4000512,
+"routed_cpu_ns_per_page": 6524,
+"routed_cpu_ns_total": 3758080,
 "routed_extents_saved": 38,
 "structured_calls": 256,
 "structured_eligible": 320,
@@ -687,14 +636,14 @@
 }
 ],
 "negative_useful": 0,
-"ns_per_saved_block": 72736,
+"ns_per_saved_block": 68328,
 "routed_baseline_blocks": 257,
 "routed_baseline_extents": 182,
 "routed_blocks_saved": 55,
 "routed_candidate_blocks": 202,
 "routed_candidate_extents": 144,
-"routed_cpu_ns_per_page": 6945,
-"routed_cpu_ns_total": 4000512,
+"routed_cpu_ns_per_page": 6524,
+"routed_cpu_ns_total": 3758080,
 "routed_extents_saved": 38,
 "structured_calls": 256,
 "structured_eligible": 320,
@@ -742,14 +691,14 @@
 }
 ],
 "negative_useful": 0,
-"ns_per_saved_block": 72736,
+"ns_per_saved_block": 68328,
 "routed_baseline_blocks": 257,
 "routed_baseline_extents": 182,
 "routed_blocks_saved": 55,
 "routed_candidate_blocks": 202,
 "routed_candidate_extents": 144,
-"routed_cpu_ns_per_page": 6945,
-"routed_cpu_ns_total": 4000512,
+"routed_cpu_ns_per_page": 6524,
+"routed_cpu_ns_total": 3758080,
 "routed_extents_saved": 38,
 "structured_calls": 256,
 "structured_eligible": 320,
@@ -766,17 +715,17 @@
 "candidate_extents": 93,
 "cliff_2024": 160,
 "inverse_backend": "sse2",
-"inverse_ns_per_page": 1084,
+"inverse_ns_per_page": 1085,
 "name": "delta64",
 "planner_blocks_saved": 68,
 "planner_extents_saved": 89,
 "raw_rescued": 128,
 "saved_payload_bytes": 284772,
-"scalar_inverse_ns_per_page": 1606,
-"scalar_transform_ns_per_page": 1683,
-"second_lz4_ns_per_page": 12989,
+"scalar_inverse_ns_per_page": 1411,
+"scalar_transform_ns_per_page": 1479,
+"second_lz4_ns_per_page": 12486,
 "transform_backend": "sse2",
-"transform_ns_per_page": 896
+"transform_ns_per_page": 830
 }
 ]
 }
@@ -787,254 +736,38 @@
 "schema": "swapz-host-v1"
 },
 "kernel_release": "7.0.0-43-generic",
-"overall": "BLOCKED",
+"overall": "FAIL",
 "qualification": "RAM_BACKED_NULL_BLK_ONLY",
 "qualification_tier": "ALGORITHM_PHYSICAL_PENDING",
 "qualified_artifacts": {
-"formatter_sha256": "205d0bb827447620bb55cb308f922cef0b27c9e2136ec8ee7b58a3cbba6dfca7",
-"module_sha256": "b7c4c07d6dec487bbf4249ebfb54de26b38e30d2b4131b1144a70e16bdd077fc",
+"formatter_sha256": "f1c83226d21e848df602ceb708088e3e63da3b1193c14b416117aa248d464070",
+"module_sha256": "37baa21948a98097cab129af0cca2712c642f8ad98c9f4563f465c21e3e8b99e",
 "oracle_sha256": "94ecfb7a26c47d251deb883927538f23bf0ccef8e33a46f98c09bc201734cf15",
 "status": "AVAILABLE"
 },
 "schema": "swapz-test-results-v1",
-"source_sha": "b6817ac41f96a0e7df4b0f5f3af258e582723b9e",
+"source_sha": "5d5ca4ecc6c456ce97c68cebba063bfb996f884e",
 "source_sync": {
-"head_sha": "b6817ac41f96a0e7df4b0f5f3af258e582723b9e",
+"head_sha": "5d5ca4ecc6c456ce97c68cebba063bfb996f884e",
 "reason": "already_current",
-"remote_sha": "b6817ac41f96a0e7df4b0f5f3af258e582723b9e",
+"remote_sha": "5d5ca4ecc6c456ce97c68cebba063bfb996f884e",
 "source_changed": false,
-"source_sha": "b6817ac41f96a0e7df4b0f5f3af258e582723b9e",
+"source_sha": "5d5ca4ecc6c456ce97c68cebba063bfb996f884e",
 "status": "PASS"
 },
 "stages": [
 {
-"elapsed_s": 14.363,
+"elapsed_s": 16.892,
 "exit_code": 0,
 "name": "Build module and helpers",
 "status": "PASS"
 },
 {
-"elapsed_s": 543.764,
-"exit_code": 0,
+"diagnostic": "Rootless child failed; child_exit=1 reason=nonzero_exit subtest=unavailable test=unavailable log=build/tests/rootless-failure.HInuvvHx/diagnostic.log",
+"elapsed_s": 351.972,
+"exit_code": 1,
+"failed_phase": "make-interface-test.py",
 "name": "Native and rootless contracts",
-"phase_elapsed_s": [
-{
-"elapsed_s": 0,
-"name": "rootless initialization"
-},
-{
-"elapsed_s": 39,
-"name": "tests/Makefile native and metadata"
-},
-{
-"elapsed_s": 99,
-"name": "tests/runtime/native/source-contract-test.py"
-},
-{
-"elapsed_s": 0,
-"name": "tests/runtime/native/userspace/swapzctl-active-swap-provenance-test.py"
-},
-{
-"elapsed_s": 25,
-"name": "tests/runtime/native/nullblk-identity-test.sh"
-},
-{
-"elapsed_s": 30,
-"name": "tests/runtime/native/quiet-lower-io-test.sh"
-},
-{
-"elapsed_s": 5,
-"name": "tests/runtime/native/swap-inventory-test.sh"
-},
-{
-"elapsed_s": 1,
-"name": "tests/runtime/native/tmp-cleanup-test.py"
-},
-{
-"elapsed_s": 0,
-"name": "tests/runtime/native/owned-ram-resources-test.py"
-},
-{
-"elapsed_s": 4,
-"name": "tests/runtime/native/resource-admission-test.py"
-},
-{
-"elapsed_s": 12,
-"name": "tests/runtime/native/resource-pressure-cleanup-ownership-test.py"
-},
-{
-"elapsed_s": 74,
-"name": "tests/runtime/native/primary-lifecycle-audit-test.py"
-},
-{
-"elapsed_s": 17,
-"name": "tests/runtime/native/primary-lifecycle-nullblk-qualifier-test.py"
-},
-{
-"elapsed_s": 14,
-"name": "tests/runtime/native/primary-real-swap-test.py"
-},
-{
-"elapsed_s": 8,
-"name": "tests/runtime/native/primary-real-swap-parent-ownership-test.py"
-},
-{
-"elapsed_s": 1,
-"name": "tests/runtime/native/primary-real-swap-oracle-terminal-test.py"
-},
-{
-"elapsed_s": 0,
-"name": "tests/runtime/benchmark/metadata-ram-evidence-test.py"
-},
-{
-"elapsed_s": 72,
-"name": "tests/runtime/benchmark/io-replay-test.py"
-},
-{
-"elapsed_s": 102,
-"name": "tests/runtime/native/make-interface-test.py"
-},
-{
-"elapsed_s": 46,
-"name": "tests/runtime/native/test-report-test.py"
-},
-{
-"elapsed_s": 24,
-"name": "tests/runtime/native/production-readiness-test.py"
-},
-{
-"elapsed_s": 0,
-"name": "tests/runtime/native/rootless-direct-evidence-test.py"
-},
-{
-"elapsed_s": 6,
-"name": "tests/runtime/native/rootless-attribution-test.py"
-},
-{
-"elapsed_s": 5,
-"name": "tests/runtime/native/ci-failure-diagnostics-test.py"
-},
-{
-"elapsed_s": 8,
-"name": "tests/runtime/native/physical-swap-probe-test.py"
-},
-{
-"elapsed_s": 6,
-"name": "tests/runtime/native/live-swap-supervisor-test.py"
-},
-{
-"elapsed_s": 1,
-"name": "C syntax: owned nullblk lifecycle seam"
-},
-{
-"elapsed_s": 0,
-"name": "C syntax: physical lifecycle seam"
-},
-{
-"elapsed_s": 0,
-"name": "C syntax: unqualified physical seam rejection"
-},
-{
-"elapsed_s": 0,
-"name": "C syntax: mutually exclusive lifecycle seams"
-},
-{
-"elapsed_s": 0,
-"name": "tests/runtime/benchmark/resource-pressure.py --help"
-},
-{
-"elapsed_s": 1,
-"name": "loaded-preflight executable contract"
-},
-{
-"elapsed_s": 0,
-"name": "source-contract single test runner"
-},
-{
-"elapsed_s": 0,
-"name": "bash syntax test-rootless.sh"
-},
-{
-"elapsed_s": 0,
-"name": "bash syntax test-loaded.sh"
-},
-{
-"elapsed_s": 0,
-"name": "bash syntax qualify-resource-pressure.sh"
-},
-{
-"elapsed_s": 0,
-"name": "bash syntax qualify-logical-open-balance.sh"
-},
-{
-"elapsed_s": 0,
-"name": "bash syntax package-dkms.sh"
-},
-{
-"elapsed_s": 0,
-"name": "bash syntax swapz-primary-boot-verify"
-},
-{
-"elapsed_s": 0,
-"name": "bash syntax sign-module.sh"
-},
-{
-"elapsed_s": 0,
-"name": "bash syntax deploy-nullblk.sh"
-},
-{
-"elapsed_s": 0,
-"name": "bash syntax qualify-primary-lifecycle-nullblk.sh"
-},
-{
-"elapsed_s": 0,
-"name": "bash syntax qualify-owned-ram-recovery.sh"
-},
-{
-"elapsed_s": 0,
-"name": "bash syntax loaded-preflight.sh"
-},
-{
-"elapsed_s": 0,
-"name": "bash syntax swap-inventory.sh"
-},
-{
-"elapsed_s": 0,
-"name": "bash syntax quiet-lower-io.sh"
-},
-{
-"elapsed_s": 0,
-"name": "bash syntax benchmark-owned-pair.sh"
-},
-{
-"elapsed_s": 0,
-"name": "bash syntax benchmark-striped-owned.sh"
-},
-{
-"elapsed_s": 0,
-"name": "bash syntax nullblk-identity.sh"
-},
-{
-"elapsed_s": 0,
-"name": "bash syntax nullblk-identity-test.sh"
-},
-{
-"elapsed_s": 0,
-"name": "bash syntax quiet-lower-io-test.sh"
-},
-{
-"elapsed_s": 0,
-"name": "bash syntax swap-inventory-test.sh"
-},
-{
-"elapsed_s": 0,
-"name": "x86_64 native SIMD disassembly contracts"
-},
-{
-"elapsed_s": 1,
-"name": "static source/interface contract assertions"
-}
-],
 "primary_lifecycle_case_elapsed_ms": [
 {
 "class": "PackageCrashToPrimaryAdmissionTest",
@@ -1043,47 +776,47 @@
 },
 {
 "class": "PackageCrashToPrimaryAdmissionTest",
-"elapsed_ms": 4043,
+"elapsed_ms": 4066,
 "method": "test_blocked_start_reports_explicit_package_recovery_phase"
 },
 {
 "class": "PackageCrashToPrimaryAdmissionTest",
-"elapsed_ms": 137,
+"elapsed_ms": 138,
 "method": "test_clean_and_empty_directory_admit_and_cleanup"
 },
 {
 "class": "PackageCrashToPrimaryAdmissionTest",
-"elapsed_ms": 10488,
+"elapsed_ms": 10327,
 "method": "test_committed_journal_then_verified_package_recovery_allows_reentry"
 },
 {
 "class": "PackageCrashToPrimaryAdmissionTest",
-"elapsed_ms": 92,
+"elapsed_ms": 109,
 "method": "test_crash_checkpoint_timeout_override_is_finite"
 },
 {
 "class": "PackageCrashToPrimaryAdmissionTest",
-"elapsed_ms": 188,
+"elapsed_ms": 190,
 "method": "test_directory_substitution_during_named_recheck_fails_closed"
 },
 {
 "class": "PackageCrashToPrimaryAdmissionTest",
-"elapsed_ms": 4125,
+"elapsed_ms": 4247,
 "method": "test_malformed_and_substituted_package_journals_fail_closed"
 },
 {
 "class": "PackageCrashToPrimaryAdmissionTest",
-"elapsed_ms": 36273,
+"elapsed_ms": 35927,
 "method": "test_real_sigkill_phases_block_both_commands_not_cleanup"
 },
 {
 "class": "PackageCrashToPrimaryAdmissionTest",
-"elapsed_ms": 234,
+"elapsed_ms": 232,
 "method": "test_sanitized_fixture_covers_clean_blocked_and_cleanup_paths"
 },
 {
 "class": "PackageCrashToPrimaryAdmissionTest",
-"elapsed_ms": 4688,
+"elapsed_ms": 4736,
 "method": "test_unsafe_coordinator_bypass_mutant_is_observably_rejected"
 },
 {
@@ -1218,12 +951,12 @@
 },
 {
 "class": "PrimaryLifecycleSourceGuardTest",
-"elapsed_ms": 6827,
+"elapsed_ms": 6979,
 "method": "test_cross_namespace_mount_scan_revalidates_before_first_mutation"
 },
 {
 "class": "PrimaryLifecycleSourceGuardTest",
-"elapsed_ms": 267,
+"elapsed_ms": 275,
 "method": "test_durable_package_transactions_gate_prepare_and_start"
 },
 {
@@ -1233,37 +966,37 @@
 },
 {
 "class": "PrimaryLifecycleSourceGuardTest",
-"elapsed_ms": 813,
+"elapsed_ms": 874,
 "method": "test_execution_gate_is_boot_scoped_pending_live_lifecycle_evidence"
 },
 {
 "class": "PrimaryLifecycleSourceGuardTest",
-"elapsed_ms": 92,
+"elapsed_ms": 79,
 "method": "test_native_swap_operations_are_transaction_ordered"
 },
 {
 "class": "PrimaryLifecycleSourceGuardTest",
-"elapsed_ms": 152,
+"elapsed_ms": 147,
 "method": "test_owned_nullblk_btrfs_root_matches_recovery_across_dev_numbers"
 },
 {
 "class": "PrimaryLifecycleSourceGuardTest",
-"elapsed_ms": 187,
+"elapsed_ms": 167,
 "method": "test_package_and_primary_share_global_mutation_lock_identity"
 },
 {
 "class": "PrimaryLifecycleSourceGuardTest",
-"elapsed_ms": 36,
+"elapsed_ms": 35,
 "method": "test_public_swapzctl_primary_dispatch_reaches_admission_interface"
 },
 {
 "class": "PrimaryLifecycleSourceGuardTest",
-"elapsed_ms": 172,
+"elapsed_ms": 175,
 "method": "test_qualification_import_serializes_before_partition_state"
 },
 {
 "class": "PrimaryLifecycleSourceGuardTest",
-"elapsed_ms": 2771,
+"elapsed_ms": 2976,
 "method": "test_recovery_persists_fail_closed_interruption_order"
 },
 {
@@ -1273,17 +1006,17 @@
 },
 {
 "class": "PrimaryLifecycleSourceGuardTest",
-"elapsed_ms": 18,
+"elapsed_ms": 22,
 "method": "test_source_guard_ignores_comments_and_string_literals"
 },
 {
 "class": "PrimaryOwnerReleaseDurabilityTest",
-"elapsed_ms": 11,
+"elapsed_ms": 10,
 "method": "test_failed_owner_release_fsync_stays_blocked_across_fresh_recovery"
 },
 {
 "class": "PrimaryOwnerReleaseDurabilityTest",
-"elapsed_ms": 2,
+"elapsed_ms": 3,
 "method": "test_stop_and_recover_propagate_owner_release_failure"
 }
 ],
@@ -1293,41 +1026,13 @@
 "observed_records": 50,
 "status": "COMPLETE"
 },
-"status": "PASS",
-"substage_elapsed_s": {
-"native_make_s": 39,
-"remaining_contracts_s": 505
-}
-},
-{
-"elapsed_s": 2.295,
-"exit_code": 0,
-"name": "Kernel warnings W=1",
-"status": "PASS"
-},
-{
-"elapsed_s": 1.743,
-"exit_code": 0,
-"name": "Kernel warnings W=2",
-"status": "PASS"
-},
-{
-"diagnostic": "BLOCKED: physical_trial_mapper_present; mapper name and UUID match, but same-boot root-owned recovery state is not proven; mapper and module retained",
-"elapsed_s": 0.887,
-"exit_code": 1,
-"failed_phase": "preflight / retained physical-trial mapper",
-"name": "Owned RAM smoke + mixed/QD pilot",
-"phase_elapsed_s": [
-{
-"elapsed_s": 0.873,
-"name": "preflight"
-}
-],
 "signals": [
-"BLOCKED"
+"PASS",
+"BLOCKED",
+"FAIL"
 ],
-"status": "BLOCKED"
+"status": "FAIL"
 }
 ],
-"tested_commit_sha": "b6817ac41f96a0e7df4b0f5f3af258e582723b9e"
+"tested_commit_sha": "5d5ca4ecc6c456ce97c68cebba063bfb996f884e"
 }
