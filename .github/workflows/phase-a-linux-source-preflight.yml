@@ -11,10 +11,24 @@ permissions:
 
 jobs:
   pinned-upstream-checkout:
-    name: "Exact Linux source checkout and Kbuild preparation"
+    name: "Exact Linux source and CONFIG_ZSWAP Kbuild y/n"
     runs-on: ubuntu-24.04
-    timeout-minutes: 20
+    timeout-minutes: 40
     steps:
+      - name: "Initialize bounded per-config Kbuild evidence"
+        shell: bash
+        run: |
+          set -euo pipefail
+          evidence_dir="$RUNNER_TEMP/linux-kbuild-evidence"
+          mkdir -p "$evidence_dir"
+          for profile in enabled disabled; do
+            requested_zswap=y
+            if [[ "$profile" == disabled ]]; then
+              requested_zswap=n
+            fi
+            printf 'requested_zswap=%s\nresult=NOT_RUN\nreason=checkout_or_preflight_incomplete\n' \
+              "$requested_zswap" > "$evidence_dir/$profile.txt"
+          done
       - name: "Fetch exact upstream Linux revision into an independent repository"
         uses: actions/checkout@v4
         with:
@@ -28,7 +42,7 @@ jobs:
         run: |
           set -euo pipefail
           sudo apt-get update -qq
-          sudo apt-get install -y --no-install-recommends libelf-dev
+          sudo apt-get install -y --no-install-recommends libelf-dev libssl-dev bc bison flex
       - name: "Verify complete source identity and actual kernel configuration"
         shell: bash
         env:
@@ -83,12 +97,147 @@ jobs:
             printf 'prepare_exit_code=%d\n' "$command_exit" >> "$RUNNER_TEMP/linux-preflight.txt"
             exit "$command_exit"
           fi
-          cat "$RUNNER_TEMP/linux-preflight.txt"
+          # Successful commands remain quiet; the manifest is uploaded below.
+      - name: "Compile real pinned Linux swap/BIO objects with CONFIG_ZSWAP=y/n"
+        shell: bash
+        env:
+          EXPECTED_LINUX_SHA: c339f4010dea8b0d754f84ace70cd1b089878ef8
+          KBUILD_JOBS: "2"
+          KBUILD_WARNING_LEVEL: "1"
+        run: |
+          set -euo pipefail
+          evidence_dir="$RUNNER_TEMP/linux-kbuild-evidence"
+          mkdir -p "$evidence_dir"
+          current_manifest=""
+          current_phase=matrix_prerequisites
+          record_failure() {
+            local failed_exit_code="$?"
+            if (( failed_exit_code != 0 )); then
+              local failure_manifest="${current_manifest:-$evidence_dir/setup.txt}"
+              printf 'result=FAIL\nfirst_failure=%s\nfirst_failure_exit_code=%d\n' \
+                "$current_phase" "$failed_exit_code" >> "$failure_manifest"
+            fi
+          }
+          trap record_failure EXIT
+
+          # Bound resource use and warning verbosity on the disposable runner.
+          if [[ ! "$KBUILD_JOBS" =~ ^[1-4]$ || ! "$KBUILD_WARNING_LEVEL" =~ ^[0-2]$ ]]; then
+            echo "::error::Invalid Kbuild parallelism or warning level"
+            exit 2
+          fi
+          source_sha="$(git -C linux-upstream rev-parse HEAD)"
+          if [[ "$source_sha" != "$EXPECTED_LINUX_SHA" ]]; then
+            echo "::error::Pinned Linux SHA changed before Kbuild"
+            exit 1
+          fi
+          if [[ -n "$(git -C linux-upstream status --porcelain)" ]]; then
+            echo "::error::Pinned Linux checkout changed before Kbuild"
+            exit 1
+          fi
+          compiler_version="$(gcc --version | sed -n '1p')"
+
+          run_logged() {
+            local command_name="$1"
+            local command_exit_code=0
+            shift
+            current_phase="$command_name"
+            {
+              printf '%s_command=' "$command_name"
+              printf '%q ' "$@"
+              printf '\n'
+            } >> "$current_manifest"
+            if "$@" > "$RUNNER_TEMP/linux-kbuild-command.log" 2>&1; then
+              command_exit_code=0
+            else
+              command_exit_code=$?
+              echo "::error::Pinned Linux $profile $command_name failed (exit $command_exit_code)"
+              # Failure-only bounded diagnostics; do not upload full build logs.
+              tail -n 30 "$RUNNER_TEMP/linux-kbuild-command.log"
+            fi
+            printf '%s_exit_code=%d\n' "$command_name" "$command_exit_code" >> "$current_manifest"
+            return "$command_exit_code"
+          }
+
+          for profile in enabled disabled; do
+            requested_zswap=y
+            config_operation=--enable
+            expected_line=CONFIG_ZSWAP=y
+            if [[ "$profile" == disabled ]]; then
+              requested_zswap=n
+              config_operation=--disable
+              expected_line='# CONFIG_ZSWAP is not set'
+            fi
+            build_dir="$RUNNER_TEMP/linux-kbuild-$profile"
+            current_manifest="$evidence_dir/$profile.txt"
+            current_phase=initialize_configuration
+            mkdir -p "$build_dir"
+            {
+              printf 'source_repository=torvalds/linux\n'
+              printf 'source_sha=%s\n' "$source_sha"
+              printf 'requested_zswap=%s\n' "$requested_zswap"
+              printf 'compiler=%s\n' "$compiler_version"
+              printf 'kbuild_jobs=%s\n' "$KBUILD_JOBS"
+              printf 'kbuild_warning_level=%s\n' "$KBUILD_WARNING_LEVEL"
+              printf 'evidence_class=pinned-linux-source-targeted-kbuild-only\n'
+              printf 'phase_a_qualified=no\nproducer_authenticated=no\n'
+            } > "$current_manifest"
+
+            # Each profile gets a fresh independent out-of-tree Kconfig and objects.
+            run_logged defconfig make -s -C linux-upstream "O=$build_dir" CC=gcc defconfig || exit $?
+            run_logged scripts_config linux-upstream/scripts/config --file "$build_dir/.config" \
+              --enable SWAP "$config_operation" ZSWAP || exit $?
+            run_logged olddefconfig make -s -C linux-upstream "O=$build_dir" CC=gcc olddefconfig || exit $?
+            current_phase=verify_effective_config
+            if grep -Fxq 'CONFIG_SWAP=y' "$build_dir/.config" &&
+               grep -Fxq "$expected_line" "$build_dir/.config"; then
+              printf 'effective_swap=y\neffective_zswap=%s\nconfig_verification_exit_code=0\n' \
+                "$requested_zswap" >> "$current_manifest"
+            else
+              printf 'config_verification_exit_code=1\n' >> "$current_manifest"
+              echo "::error::Pinned Linux Kconfig silently rejected the requested SWAP/ZSWAP state"
+              exit 1
+            fi
+            current_phase=hash_configuration
+            config_sha256="$(sha256sum "$build_dir/.config")"
+            printf 'config_sha256=%s\n' "${config_sha256%% *}" >> "$current_manifest"
+            run_logged prepare make -s -C linux-upstream "O=$build_dir" CC=gcc \
+              "-j$KBUILD_JOBS" "W=$KBUILD_WARNING_LEVEL" prepare || exit $?
+
+            source_objects=(mm/page_io.o block/bio.o)
+            if [[ "$requested_zswap" == y ]]; then
+              source_objects+=(mm/zswap.o)
+            fi
+            run_logged compile_objects make -s -C linux-upstream "O=$build_dir" CC=gcc \
+              "-j$KBUILD_JOBS" "W=$KBUILD_WARNING_LEVEL" "${source_objects[@]}" || exit $?
+
+            current_phase=verify_compiled_objects
+            for source_object in "${source_objects[@]}"; do
+              if [[ ! -s "$build_dir/$source_object" ]]; then
+                echo "::error::Expected compiled pinned Linux object is missing or empty"
+                exit 1
+              fi
+              printf 'compiled_object=%s\n' "$source_object" >> "$current_manifest"
+            done
+            if [[ "$requested_zswap" == n && -e "$build_dir/mm/zswap.o" ]]; then
+              echo "::error::CONFIG_ZSWAP=n unexpectedly produced mm/zswap.o"
+              exit 1
+            fi
+            current_phase=verify_unchanged_source
+            if [[ "$(git -C linux-upstream rev-parse HEAD)" != "$EXPECTED_LINUX_SHA" ]] ||
+               [[ -n "$(git -C linux-upstream status --porcelain)" ]]; then
+              echo "::error::Pinned Linux source changed during out-of-tree Kbuild"
+              exit 1
+            fi
+            printf 'source_modified=no\nresult=PASS\n' >> "$current_manifest"
+            current_manifest=""
+          done
       - name: "Preserve bounded source preflight evidence"
         if: always()
         uses: actions/upload-artifact@v4
         with:
           name: "phase-a-linux-source-preflight"
-          path: "${{ runner.temp }}/linux-preflight.txt"
+          path: |
+            ${{ runner.temp }}/linux-preflight.txt
+            ${{ runner.temp }}/linux-kbuild-evidence/*.txt
           if-no-files-found: ignore
           retention-days: 7

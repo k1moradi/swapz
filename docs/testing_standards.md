@@ -12725,3 +12725,57 @@ The read-only GitHub exact-C source-contract stage also executes the committed
 product tests. Each deliberately mutated source must fail its real-source
 contract. This is not a loaded kernel, real MM/BIO authentication, a mapper,
 active swap or physical-storage qualification.
+
+
+### Round 004 native provenance parser adversarial tests
+
+The compiled native tests/runtime/native/userspace/swapzctl-status.c fixture
+includes the actual production src/userspace/swapzctl.c parser. Its Round 004
+provenance tests use a fixed xorshift32 seed 0x5a17c0de, 256 bounded generated
+inputs and 116 fixed adversarial/property cases (372 total), a 1024-byte input
+buffer and no extra hot-loop allocation. They reject partial/duplicate origin
+groups, malformed/noncanonical 64-bit fields, non-ASCII and nonseparator token
+boundaries, invalid carrier booleans and unsupported positive provenance. Live
+counter inconsistencies require STATUS_RETRY, not silent attribution; legacy
+missing provenance and available canonical zero remain different states. Two
+INFO snapshots must agree on each origin counter, carrier validity and group
+presence. Existing compression-ratio, failed/ERROR precedence, ownership and
+JSON v1 contracts remain unchanged.
+
+Run make -C tests/suites SANITIZE=1 test-userspace on the complete checked-out
+source, and use high-warning GCC and Clang builds where available. A source
+commit or excerpt-level/syntax-only check is not proof that the actual compiled
+native fixture passed; report those as NOT_RUN if a full source checkout or
+matching build prerequisites are missing. The fixture is read-only and rootless,
+not a Linux MM/BIO producer, authentic stored-zswap writeback, loaded mapper,
+physical storage or Phase A/B qualification.
+
+## Round 004 pinned CONFIG_ZSWAP Linux source Kbuild (2026-11-15)
+
+The existing `.github/workflows/phase-a-linux-source-preflight.yml` must
+check out the exact read-only `torvalds/linux` commit
+`c339f4010dea8b0d754f84ace70cd1b089878ef8`, verify `git rev-parse
+HEAD`, a clean full-source checkout and required swap/BIO files before
+creating out-of-tree configurations. Preserve the original independent
+`defconfig` and `make prepare` gate, bounded host build dependencies,
+read-only GitHub permissions and failure-path artifact upload.
+
+For each `CONFIG_ZSWAP=y` and `CONFIG_ZSWAP=n` profile, Linux's own
+`scripts/config` and `olddefconfig` must produce a separate `RUNNER_TEMP`
+build tree. Independently verify effective `CONFIG_SWAP=y` and the exact
+requested ZSWAP setting (no silent Kconfig fallback), hash the generated
+`.config`, run targeted real Kbuild `mm/page_io.o` and `block/bio.o`,
+and additionally `mm/zswap.o` only in the enabled profile. Record source
+SHA, GCC version, bounded `-j` and `W=` settings, exact commands, exit
+codes, verified object existence, and first failure in concise per-profile
+artifact manifests even if a later command fails. Do not install or load a
+kernel/module, run swap/device operations, or treat a targeted object compile
+as full `vmlinux`, KUnit, authenticated provenance producer, or device test.
+
+Only a successfully completed hosted run of the modified exact-source CI
+workflow qualifies as a pinned upstream Linux Kbuild PASS. An unreferenced,
+retrievable source commit without that hosted run is
+`BLOCKED_CI_PENDING_COORDINATOR`, not PASS. Neither upstream unmodified
+Kbuild nor these rootless source checks remove the real producer/BIO ABI,
+stored-entry writeback or loaded-readback Phase A gates. Phase A remains
+BLOCKED; Phase B RAW bypass remains disabled.

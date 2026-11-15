@@ -436,6 +436,288 @@ static void test_optional_origin_info_group(void)
 }
 
 
+
+/*
+ * Round 004: bounded parser adversaries exercise the included production C,
+ * never a stand-in parser. Seed and maximum input length are fixed for CI.
+ */
+#define ORIGIN_ADVERSARIAL_SEED 0x5a17c0deU
+#define ORIGIN_ADVERSARIAL_RANDOM_CASES 256U
+#define ORIGIN_ADVERSARIAL_TEXT_CAPACITY 1024U
+
+static const char *const origin_adversarial_keys[] = {
+	"verified_zswap_origin_admitted",
+	"foreground_committed_verified_zswap_writeback",
+	"origin_carrier_compiled"
+};
+
+static uint32_t origin_adversarial_next(uint32_t *state)
+{
+	uint32_t value = *state;
+
+	value ^= value << 13;
+	value ^= value >> 17;
+	value ^= value << 5;
+	*state = value;
+	return value;
+}
+
+static size_t origin_adversarial_append(char *output, size_t capacity,
+					size_t used, const char *key,
+					const char *value)
+{
+	int written;
+
+	assert(used < capacity);
+	written = snprintf(output + used, capacity - used,
+			   " %s=%s", key, value);
+	assert(written > 0 && (size_t)written < capacity - used);
+	return used + (size_t)written;
+}
+
+static void origin_adversarial_build(char *output, size_t capacity,
+				     unsigned int present_mask,
+				     unsigned int starting_key,
+				     const char *const values[3],
+				     const char *extra_token)
+{
+	int written = snprintf(output, capacity, "%s", fixture_valid_status);
+	size_t used;
+	unsigned int index;
+
+	assert(written > 0 && (size_t)written < capacity);
+	used = (size_t)written;
+	for (index = 0; index < 3U; ++index) {
+		unsigned int key_index = (starting_key + index) % 3U;
+
+		if (present_mask & (1U << key_index))
+			used = origin_adversarial_append(output, capacity, used,
+				origin_adversarial_keys[key_index], values[key_index]);
+	}
+	if (extra_token) {
+		written = snprintf(output + used, capacity - used, " %s",
+				   extra_token);
+		assert(written > 0 && (size_t)written < capacity - used);
+	}
+}
+
+static void origin_adversarial_expect(const char *status, int expected_state,
+				      const char *expected_field,
+				      int expected_valid,
+				      size_t case_index)
+{
+	struct swapz_ratio_status ratio;
+	struct status_problem problem = { 0 };
+	int actual = parse_swapz_ratio_status_diagnostic(status, &ratio, &problem);
+
+	if (actual != expected_state ||
+	    (expected_field &&
+	     (!problem.field || strcmp(problem.field, expected_field))) ||
+	    (actual == STATUS_READY &&
+	     ratio.origin_telemetry_valid != expected_valid)) {
+		fprintf(stderr,
+			"FAIL: Round 004 origin parser case=%zu state=%d expected=%d field=%s expected_field=%s\n",
+			case_index, actual, expected_state,
+			problem.field ? problem.field : "(none)",
+			expected_field ? expected_field : "(none)");
+		abort();
+	}
+}
+
+static void test_round004_origin_adversarial_matrix(void)
+{
+	static const char *const invalid_values[] = {
+		"", "00", "01", "+1", "-1", "18446744073709551616",
+		"1suffix", "1,other=0", "1\r", "1\v", "1\f",
+		"1\200", "1\302\240"
+	};
+	static const char *const ignored_tokens[] = {
+		"xverified_zswap_origin_admitted=1",
+		"verified_zswap_origin_admitted_extra=1",
+		"xforeground_committed_verified_zswap_writeback=1",
+		"foreground_committed_verified_zswap_writeback_extra=1",
+		"xorigin_carrier_compiled=1",
+		"origin_carrier_compiled_extra=1",
+		"unrelated=1verified_zswap_origin_admitted=1",
+		"unrelated=0\200verified_zswap_origin_admitted=1"
+	};
+	static const char *const admitted_counts[] = {
+		"0", "1", "2", "3", "18446744073709551615"
+	};
+	static const char *const committed_counts[] = {
+		"0", "1", "2", "3", "4"
+	};
+	const char *values[3] = { "2", "1", "1" };
+	struct swapz_ratio_status original;
+	struct swapz_ratio_status changed;
+	struct status_problem problem = { 0 };
+	char status[ORIGIN_ADVERSARIAL_TEXT_CAPACITY];
+	uint32_t random_state = ORIGIN_ADVERSARIAL_SEED;
+	size_t executed_cases = 0;
+	unsigned int mask, field, variant, start, admitted, committed, carrier;
+
+	/* Every subset: wholly absent legacy is valid but not measured. */
+	for (mask = 0; mask < 8U; ++mask) {
+		origin_adversarial_build(status, sizeof(status), mask,
+					  0U, values, NULL);
+		origin_adversarial_expect(status,
+			mask == 0U || mask == 7U ? STATUS_READY : STATUS_BLOCKED,
+			mask == 0U || mask == 7U ? NULL :
+			"origin provenance INFO group", mask == 7U,
+			executed_cases++);
+	}
+	/* Each canonical field must independently reject noncanonical bytes. */
+	for (field = 0; field < 3U; ++field) {
+		for (variant = 0; variant < sizeof(invalid_values) /
+							 sizeof(invalid_values[0]); ++variant) {
+			values[field] = invalid_values[variant];
+			origin_adversarial_build(status, sizeof(status), 7U,
+						  field, values, NULL);
+			origin_adversarial_expect(status, STATUS_BLOCKED,
+					origin_adversarial_keys[field], -1, executed_cases++);
+		}
+		values[field] = field == 0U ? "2" : "1";
+	}
+	/* Duplicate exact keys fail even when their values are identical. */
+	for (field = 0; field < 3U; ++field) {
+		char duplicate[96];
+		int written = snprintf(duplicate, sizeof(duplicate), "%s=%s",
+			origin_adversarial_keys[field], values[field]);
+
+		assert(written > 0 && (size_t)written < sizeof(duplicate));
+		origin_adversarial_build(status, sizeof(status), 7U,
+					  0U, values, duplicate);
+		origin_adversarial_expect(status, STATUS_BLOCKED,
+			origin_adversarial_keys[field], -1, executed_cases++);
+	}
+	/* Prefix/suffix lookalikes and bytes glued to tokens cannot create a tag. */
+	for (variant = 0; variant < sizeof(ignored_tokens) /
+							 sizeof(ignored_tokens[0]); ++variant) {
+		origin_adversarial_build(status, sizeof(status), 0U,
+					  0U, values, ignored_tokens[variant]);
+		origin_adversarial_expect(status, STATUS_READY, NULL, 0,
+					  executed_cases++);
+	}
+	/* Check semantic bounds independently of any presentation/RAW policy. */
+	for (carrier = 0; carrier < 2U; ++carrier) {
+		for (admitted = 0; admitted < 5U; ++admitted) {
+			for (committed = 0; committed < 5U; ++committed) {
+				int expected;
+				const char *field_name = NULL;
+
+				values[0] = admitted_counts[admitted];
+				values[1] = committed_counts[committed];
+				values[2] = carrier ? "1" : "0";
+				if (!carrier && (admitted || committed)) {
+					expected = STATUS_BLOCKED;
+					field_name = "origin_carrier_compiled";
+				} else if (carrier && (committed > 2U ||
+						     (admitted != 4U && committed > admitted))) {
+					expected = STATUS_RETRY;
+					field_name =
+						"foreground_committed_verified_zswap_writeback";
+				} else {
+					expected = STATUS_READY;
+				}
+				origin_adversarial_build(status, sizeof(status), 7U,
+							  admitted % 3U, values, NULL);
+				origin_adversarial_expect(status, expected, field_name,
+							  1, executed_cases++);
+			}
+		}
+	}
+	/* Whitespace separators and reordered canonical keys are accepted. */
+	origin_adversarial_expect(
+		"failed=0 error=0 logical_write=8192 physical_write=4096 "
+		"gc_write=0 compressed=2 raw=0 zero_elided=0 bulk_mode=1 "
+		"bulk_padding=0\tverified_zswap_origin_admitted=2\n"
+		"origin_carrier_compiled=1\tforeground_committed_verified_zswap_writeback=1",
+		STATUS_READY, NULL, 1, executed_cases++);
+
+	/* Fixed xorshift32 seed, bounded 256 additional order/value adversaries. */
+	values[0] = "2";
+	values[1] = "1";
+	values[2] = "1";
+	for (start = 0; start < ORIGIN_ADVERSARIAL_RANDOM_CASES; ++start) {
+		uint32_t choice = origin_adversarial_next(&random_state);
+		unsigned int selected_field = (choice >> 8) % 3U;
+		unsigned int selected_variant = (choice >> 12) %
+			(unsigned int)(sizeof(invalid_values) / sizeof(invalid_values[0]));
+		unsigned int selected_mask = (choice & 3U) == 0U ? 0U : 7U;
+		int expected = STATUS_READY;
+		const char *field_name = NULL;
+
+		if (selected_mask && (choice & 3U) == 2U) {
+			values[selected_field] = invalid_values[selected_variant];
+			expected = STATUS_BLOCKED;
+			field_name = origin_adversarial_keys[selected_field];
+		}
+		origin_adversarial_build(status, sizeof(status), selected_mask,
+					  (choice >> 20) % 3U, values, NULL);
+		origin_adversarial_expect(status, expected, field_name,
+					  selected_mask == 7U, executed_cases++);
+		values[selected_field] = selected_field == 0U ? "2" : "1";
+	}
+	/* Two INFO samples must agree on all three fields AND group presence. */
+	values[0] = "2";
+	values[1] = "1";
+	values[2] = "1";
+	origin_adversarial_build(status, sizeof(status), 7U, 0U, values, NULL);
+	assert(parse_swapz_ratio_status_diagnostic(status, &original,
+						      &problem) == STATUS_READY);
+	for (field = 0; field < 3U; ++field) {
+		values[field] = field == 0U ? "3" :
+				field == 1U ? "2" : "0";
+		/* A disabled carrier cannot coexist with positive provenance. */
+		if (field == 2U) {
+			values[0] = "0";
+			values[1] = "0";
+		}
+		origin_adversarial_build(status, sizeof(status), 7U,
+						  field, values, NULL);
+		assert(parse_swapz_ratio_status_diagnostic(status, &changed,
+						      &problem) == STATUS_READY);
+		assert(!ratio_status_equal(&original, &changed));
+		values[0] = "2";
+		values[1] = "1";
+		values[2] = "1";
+		++executed_cases;
+	}
+	origin_adversarial_build(status, sizeof(status), 0U, 0U, values, NULL);
+	assert(parse_swapz_ratio_status_diagnostic(status, &changed,
+						      &problem) == STATUS_READY);
+	assert(!changed.origin_telemetry_valid &&
+	       !ratio_status_equal(&original, &changed));
+	++executed_cases;
+	values[0] = "0";
+	values[1] = "0";
+	values[2] = "0";
+	origin_adversarial_build(status, sizeof(status), 7U, 0U, values, NULL);
+	assert(parse_swapz_ratio_status_diagnostic(status, &changed,
+						      &problem) == STATUS_READY);
+	assert(changed.origin_telemetry_valid &&
+	       changed.verified_zswap_origin_admitted == 0ULL &&
+	       changed.foreground_committed_verified_zswap_writeback == 0ULL);
+	assert(!ratio_status_equal(&original, &changed));
+	++executed_cases;
+	/* A measured all-zero group differs from an unmeasured legacy group. */
+	assert(parse_swapz_ratio_status_diagnostic(fixture_valid_status,
+						      &original, &problem) == STATUS_READY);
+	assert(!original.origin_telemetry_valid &&
+	       !ratio_status_equal(&original, &changed));
+	++executed_cases;
+	/* With counters identically zero, carrier identity alone must differ. */
+	values[2] = "1";
+	origin_adversarial_build(status, sizeof(status), 7U, 0U, values, NULL);
+	assert(parse_swapz_ratio_status_diagnostic(status, &original,
+						      &problem) == STATUS_READY);
+	assert(original.origin_carrier_compiled == 1ULL &&
+	       !ratio_status_equal(&original, &changed));
+	++executed_cases;
+	/* One run owns this fixed case count; no unbounded malformed-input loop. */
+	assert(executed_cases == 372U);
+}
+
 static void assert_status_problem(const char *status, int expected_result,
 				  const char *field, const char *condition)
 {
@@ -3395,6 +3677,7 @@ int main(void)
 	test_failed_target_refuses_ratio();
 	test_ratio_snapshot_equality_covers_all_inputs();
 	test_optional_origin_info_group();
+	test_round004_origin_adversarial_matrix();
 	test_optional_watch_info_counter_validation();
 	test_unsigned_decimal_parser_bounds();
 	test_required_tokens_duplicates_and_canonical_numbers();
