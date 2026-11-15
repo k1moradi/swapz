@@ -4046,8 +4046,31 @@ class ReportContract(unittest.TestCase):
             original_root = runner.ROOT
             try:
                 runner.ROOT = Path(root)
-                (runner.ROOT / "build/tests").mkdir(parents=True)
+                private_diagnostics = runner.ROOT / "build/tests"
+                # A permissive caller umask must not make this synthetic log
+                # directory group-writable; real owner recovery rejects it.
+                private_diagnostics.mkdir(parents=True, mode=0o700)
+                private_diagnostics.chmod(0o700)
+                self.assertEqual(
+                    stat.S_IMODE(private_diagnostics.stat().st_mode), 0o700)
                 captured_commands = []
+
+                # Keep the real fail-closed directory admission gate covered.
+                private_diagnostics.chmod(0o770)
+                unsafe_directory_output = Terminal()
+                with mock.patch.object(runner.sys, "stdin",
+                                       Terminal("2\n")), \
+                        mock.patch.object(runner.sys, "stdout",
+                                          unsafe_directory_output), \
+                        mock.patch.object(
+                            runner, "retained_physical_trial_candidate",
+                            return_value=True), \
+                        mock.patch.object(runner.subprocess, "run") as recovery:
+                    runner.offer_retained_physical_trial_reconciliation()
+                    recovery.assert_not_called()
+                self.assertIn("private recovery log unavailable",
+                              unsafe_directory_output.getvalue())
+                private_diagnostics.chmod(0o700)
 
                 def mock_recover(command, **kwargs):
                     captured_commands.append(command)
