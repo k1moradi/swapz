@@ -4946,9 +4946,14 @@ def run_stage(title, command, result, *, parse_bench=False,
 
     try:
         child_env = os.environ.copy()
-        # Do not accept caller-supplied development selectors, particularly
-        # on make test_full or in nested synthetic runner invocations.
+        # The one-time main-sync re-exec binding belongs only to this runner.
+        # Child stages may spawn independent test repositories; they must not
+        # inherit the checkout's source SHA or an already-closed lock FD.
+        # Also reject caller-supplied development selectors, particularly on
+        # make test_full or in nested synthetic runner invocations.
         for selector in (
+                MAIN_SYNC_REEXEC, MAIN_SYNC_LOCK_FD,
+                MAIN_SYNC_EXPECTED_SOURCE,
                 "RESUME", "SWAPZ_NATIVE_CACHE_MODE", "SWAPZ_NATIVE_CACHE_KDIR",
                 "SWAPZ_ROOTLESS_RESUME_SUITES",
                 "SWAPZ_ROOTLESS_RESUME_FORMATTER_SHA256",

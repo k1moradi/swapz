@@ -3454,6 +3454,17 @@ The isolated Make-interface incremental-build fixture may
 override the checkout preflight only in its copied synthetic runner, because
 that fixture deliberately edits tracked fake sources to check dirty build
 provenance. This exemption must never reach the real `make test` command.
+When the official test fast-forwards `main` and re-executes itself once, its
+`SWAPZ_MAKE_TEST_SYNC_REEXEC`, `SWAPZ_MAKE_TEST_LOCK_FD`, and
+`SWAPZ_MAKE_TEST_EXPECTED_SOURCE` bindings belong exclusively to the
+outer runner. All spawned qualification stages must strip these markers from
+their child environments; a hermetic Make-interface fixture must also scrub
+any inherited markers before running its independent `make test_full` test
+checkout. Otherwise the isolated Git repository interprets the parent's
+already-closed lock descriptor and source identity as its own and exits 2.
+The rootless regression must inject these three realistic-looking bindings
+and verify that a real child process sees none, without releasing the
+outer runner's lock, changing source provenance, or touching swap devices.
 
 After explicit owner selection of retained physical-trial recovery, the
 reporter must normalize only verified owner-controlled checkout scratch

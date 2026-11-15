@@ -7,8 +7,10 @@ import pathlib
 import re
 import shutil
 import subprocess
+import sys
 import tempfile
 import unittest
+from unittest import mock
 
 ROOT = pathlib.Path(__file__).resolve().parents[3]
 MAKE = (ROOT / "Makefile").read_text()
@@ -751,6 +753,37 @@ class PublicMakeContract(unittest.TestCase):
                                             text=True, timeout=10)
                     self.assertEqual(result.returncode, 0, result.stderr)
                     self.assertEqual(selected.read_text().strip(), expected)
+
+    def test_main_sync_reexecution_binding_stops_at_child_stage(self):
+        """An outer fast-forward restart must not poison a nested checkout."""
+        runner_spec = importlib.util.spec_from_file_location(
+            "swapz_main_sync_fixture_runner", ROOT / "tests/tools/run-tests.py")
+        runner_contract = importlib.util.module_from_spec(runner_spec)
+        runner_spec.loader.exec_module(runner_contract)
+
+        private_binding_names = (
+            runner_contract.MAIN_SYNC_REEXEC,
+            runner_contract.MAIN_SYNC_LOCK_FD,
+            runner_contract.MAIN_SYNC_EXPECTED_SOURCE,
+        )
+        fake_parent_binding = {
+            private_binding_names[0]: "1",
+            private_binding_names[1]: "987654",
+            private_binding_names[2]: "a" * 40,
+        }
+        command = [
+            sys.executable, "-B", "-c",
+            "import os, sys; sys.exit(any("
+            "name in os.environ for name in " +
+            repr(private_binding_names) + "))",
+        ]
+        result = {"stages": []}
+        with mock.patch.dict(os.environ, fake_parent_binding):
+            child_exit = runner_contract.run_stage(
+                "Build module and helpers", command, result)
+        self.assertEqual(child_exit, 0,
+                         "main-sync reexec controls leaked to child stage")
+        self.assertEqual(result["stages"][0]["status"], "PASS")
 
     def test_parallel_build_is_incremental_and_test_stages_stay_ordered(self):
         """Run the REAL root/extent Makefiles using a fake, unprivileged Kbuild.
@@ -1679,6 +1712,13 @@ class PublicMakeContract(unittest.TestCase):
             env.pop("MAKEFLAGS", None)
             env.pop("MFLAGS", None)
             env.pop("W", None)
+            # This fixture owns an entirely separate Git repository. Never
+            # reuse a parent's one-time source-sync restart or lock binding.
+            for selector in (
+                    runner_contract.MAIN_SYNC_REEXEC,
+                    runner_contract.MAIN_SYNC_LOCK_FD,
+                    runner_contract.MAIN_SYNC_EXPECTED_SOURCE):
+                env.pop(selector, None)
             real_git = shutil.which("git")
             self.assertIsNotNone(real_git, "git executable unavailable")
             fixture_bin = fixture / "build/fixture-bin"
