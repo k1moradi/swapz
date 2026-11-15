@@ -20,10 +20,10 @@ Round 002 **was opened** by the verified [`ROUND_OPEN` comment](https://github.c
 
 **Round 002 closeout (2026-11-15):** 2/2 accountable reports archived in [round-report.md](round002/round-report.md), and issue #119 closed for reporting. Agent 3 published real passive consumer source (bounded PASS); Agent 2 remained BLOCKED_PUBLISH with no committed Linux producer. Phase A BLOCKED, Phase B DEFERRED.
 
-## Round 003 — final independent worker tasks (start only at ROUND_OPEN)
+## Round 003 — CLOSED / SOURCE-INTEGRATED, PHASE A STILL BLOCKED
 
 | Round | Frozen swapz source | Coordination issue | Workers | Milestone |
 | --- | --- | --- | --- | --- |
 | [003](round003/README.md) | `15b98edef5d8b4e401d8c5e2c9a4d7a012100ff7` | [#120](https://github.com/k1moradi/swapz/issues/120) | Agent 4 existing swapzctl provenance reader; Agent 6 existing DM source-bound regression tests | Phase A BLOCKED; Phase B DEFERRED |
 
-The authoritative `ROUND_OPEN` issue comment supplies the task-commit SHA. Earlier Round 003 draft tasks for Agents 2 and 3 were superseded **before opening**: no approved writable Linux source repo exists for Agent 2, and Agent 3's [pre-opening repair](https://github.com/k1moradi/swapz/issues/120#issuecomment-6894963968) is historical evidence, not a Round 003 completion. Both final workers can edit independent already committed swapz sources simultaneously; Agent 1 alone integrates verified source commits to `main` serially.
+The [authoritative `ROUND_OPEN`](https://github.com/k1moradi/swapz/issues/120#issuecomment-6895221177) froze Round 003 at task commit `5d5ca4ecc6c456ce97c68cebba063bfb996f884e`. Original Agent 4/6 reports are archived verbatim in [round-report.md](round003/round-report.md). Agent 1 integrated the actual source into `main` at `db82db4230473a9b386eb286733b365703944a90` and `431c9218eb2eb4905ca16c1f8c6d0928096dba83`, then provided the [full-source multi-architecture CI hook](https://github.com/k1moradi/swapz/commit/bd56936ef22d71529f2864ff2eb7de1781bb0f34). Agent 2's Linux producer remains blocked by missing authorized durable source repository. Agent 3's pre-opening report is historical, not a Round 003 completion. Phase A BLOCKED, Phase B DEFERRED.
