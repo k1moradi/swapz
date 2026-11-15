@@ -4055,8 +4055,13 @@ class ReportContract(unittest.TestCase):
                     stat.S_IMODE(private_diagnostics.stat().st_mode), 0o700)
                 captured_commands = []
 
-                # Keep the real fail-closed directory admission gate covered.
-                private_diagnostics.chmod(0o770)
+                # A substituted scratch directory never gains owner
+                # authority, and cannot receive even a private log.
+                private_diagnostics.rmdir()
+                substituted_directory = runner.ROOT / "substituted"
+                substituted_directory.mkdir(mode=0o700)
+                private_diagnostics.symlink_to(substituted_directory,
+                                               target_is_directory=True)
                 unsafe_directory_output = Terminal()
                 with mock.patch.object(runner.sys, "stdin",
                                        Terminal("2\n")), \
@@ -4068,10 +4073,17 @@ class ReportContract(unittest.TestCase):
                         mock.patch.object(runner.subprocess, "run") as recovery:
                     runner.offer_retained_physical_trial_reconciliation()
                     recovery.assert_not_called()
-                self.assertIn("private recovery log unavailable",
+                self.assertIn("reason=private_scratch_directory_untrusted",
                               unsafe_directory_output.getvalue())
-                self.assertEqual(list(private_diagnostics.iterdir()), [])
-                private_diagnostics.chmod(0o700)
+                self.assertEqual(list(substituted_directory.iterdir()), [])
+                private_diagnostics.unlink()
+                private_diagnostics.mkdir(mode=0o700)
+
+                # Consent permits tightening only owned scratch directories.
+                # The common umask 0002 must not block the real recovery.
+                build_directory = runner.ROOT / "build"
+                build_directory.chmod(0o775)
+                private_diagnostics.chmod(0o775)
 
                 def mock_recover(command, **kwargs):
                     captured_commands.append(command)
@@ -4092,6 +4104,10 @@ class ReportContract(unittest.TestCase):
                                           side_effect=mock_recover):
                     runner.offer_retained_physical_trial_reconciliation()
                 self.assertEqual(len(captured_commands), 1)
+                self.assertEqual(stat.S_IMODE(build_directory.stat().st_mode),
+                                 0o755)
+                self.assertEqual(
+                    stat.S_IMODE(private_diagnostics.stat().st_mode), 0o700)
                 expected_privilege = (
                     [] if os.geteuid() == 0 else ["sudo", "-n", "--"])
                 self.assertEqual(

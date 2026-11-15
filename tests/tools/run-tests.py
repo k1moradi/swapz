@@ -2653,6 +2653,53 @@ def retained_physical_trial_candidate():
         return False
 
 
+
+def prepare_private_physical_recovery_log_directory():
+    """Harden only owner-controlled scratch paths after explicit recovery consent.
+
+    Pin each directory without following symlinks before changing permissions.
+    A foreign-owned or substituted path cannot authorize recovery.
+    """
+    directory_flags = (os.O_RDONLY | os.O_DIRECTORY |
+                       os.O_NOFOLLOW | os.O_CLOEXEC)
+    unsafe_write_bits = stat.S_IWGRP | stat.S_IWOTH
+    descriptors = []
+    try:
+        checkout_descriptor = os.open(ROOT, directory_flags)
+        descriptors.append(checkout_descriptor)
+        checkout = os.fstat(checkout_descriptor)
+        if (not stat.S_ISDIR(checkout.st_mode) or
+                checkout.st_uid != os.geteuid() or
+                checkout.st_mode & unsafe_write_bits):
+            raise OSError("checkout directory is not trusted")
+
+        for name, private_mode in (("build", None), ("tests", 0o700)):
+            descriptor = os.open(name, directory_flags,
+                                 dir_fd=descriptors[-1])
+            descriptors.append(descriptor)
+            directory = os.fstat(descriptor)
+            if (not stat.S_ISDIR(directory.st_mode) or
+                    directory.st_uid != os.geteuid()):
+                raise OSError("scratch directory is not owner-controlled")
+
+            # An ordinary umask 0002 can leave build/tests group-writable.
+            # Repair only verified, opened inodes, never a path or symlink.
+            mode = stat.S_IMODE(directory.st_mode)
+            required_mode = (mode & ~unsafe_write_bits
+                             if private_mode is None else private_mode)
+            if mode != required_mode:
+                os.fchmod(descriptor, required_mode)
+            verified = os.fstat(descriptor)
+            if (not stat.S_ISDIR(verified.st_mode) or
+                    verified.st_uid != os.geteuid() or
+                    stat.S_IMODE(verified.st_mode) != required_mode):
+                raise OSError("private directory permissions unverified")
+    finally:
+        for descriptor in reversed(descriptors):
+            os.close(descriptor)
+
+
+
 def offer_retained_physical_trial_reconciliation():
     """Offer one explicit owner choice before loaded RAM qualification.
 
@@ -2680,18 +2727,18 @@ def offer_retained_physical_trial_reconciliation():
         return
 
     diagnostic_dir = ROOT / "build/tests"
+    refusal_category = "private_scratch_directory_untrusted"
     try:
-        directory = diagnostic_dir.lstat()
-        if (not stat.S_ISDIR(directory.st_mode) or
-                directory.st_uid != os.geteuid() or
-                directory.st_mode & (stat.S_IWGRP | stat.S_IWOTH)):
-            raise OSError("private diagnostic directory is not controlled")
+        prepare_private_physical_recovery_log_directory()
+        refusal_category = "private_log_creation_failed"
         diagnostic_fd, diagnostic_path = tempfile.mkstemp(
             prefix="physical-owner-recovery-", suffix=".private.log",
             dir=diagnostic_dir)
     except OSError:
         print("  BLOCKED: private recovery log unavailable; "
-              "no owner recovery attempted.", flush=True)
+              f"reason={refusal_category}; no owner recovery attempted. "
+              "Safe next step: inspect checkout/build/tests ownership and "
+              "permissions read-only; do not alter swap devices.", flush=True)
         return
 
     command_prefix = ([] if os.geteuid() == 0

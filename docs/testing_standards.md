@@ -3427,13 +3427,20 @@ override the checkout preflight only in its copied synthetic runner, because
 that fixture deliberately edits tracked fake sources to check dirty build
 provenance. This exemption must never reach the real `make test` command.
 
-The retained physical-trial prompt's rootless fixture must create its
-synthetic `build/tests` diagnostics directory with mode `0700` independently
-of caller umask, including `0002`. Assert the resulting private mode and
-prove that a group-writable fixture directory refuses recovery before helper
-invocation and without creating a private recovery log. Never weaken the real
-directory owner/type/write-bit gate or mode-`0600` log requirement to pass a
-synthetic test.
+After explicit owner selection of retained physical-trial recovery, the
+reporter must normalize only verified owner-controlled checkout scratch
+directories, allowing an ordinary `umask 0002` to have made `build` and
+`build/tests` group-writable. Pin the checkout, build and test directories
+without following symlinks, refuse a foreign-owned, symlinked, or group-writable
+checkout, tighten only pinned owned scratch inodes and recheck their modes
+before allocating the mode-`0600` recovery log. The checkout itself is never
+chmodded, and a refused option or untrusted path must not start recovery or
+write a log. The public refusal names only a fixed safe failure category and
+read-only inspection guidance, never filesystem or journal contents.
+The rootless fixture must prove the common permissive scratch case now
+launches only the explicitly chosen original helper, while a substituted
+scratch path remains fail-closed. Neither a repaired scratch directory nor a
+name/UUID match grants the reporter physical-device recovery authority.
 
 The reporter for a genuine `physical_trial_mapper_present` failure must
 recognize only the original source-controlled full `LOADED_PREFLIGHT` marker,
