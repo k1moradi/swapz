@@ -13026,3 +13026,46 @@ requires `SOURCE_READY_PENDING_COORDINATOR_CI`, not synthetic success. No
 rootless test establishes an authenticated MM→BIO stored-zswap writeback,
 loaded-module behavior, physical readback, or Phase A qualification.
 Phase B remains disabled.
+
+## Round 008 real Kbuild artifact-to-manifest integrity (2026-11-15)
+
+The actual existing pinned Linux workflow must run the committed standalone
+`tests/runtime/native/pinned-linux-artifact-integrity-test.py` against real
+generated output paths in **both** independently runnable GCC linked-module and
+LLVM source-object-only jobs, for each requested `CONFIG_ZSWAP=y/n` profile.
+The verifier runs after all source-identity, effective configuration, compiled
+object and clean-source checks, but **before** the terminal `result=PASS`
+manifest record. Its nonzero exit is the job's first `verify_artifact_integrity`
+failure: the existing trap records FAIL, command exit and profile identity,
+while the existing `if: always()` upload retains bounded evidence. Never
+append PASS first, suppress verifier failure, or turn a failed modpost/link into
+a later verified success.
+
+Only an explicit, canonical UTF-8/ASCII, bounded pre-PASS per-profile text
+manifest and present, bounded real output bytes may qualify. The verifier
+requires the exact caller-supplied pinned Linux source SHA, requested effective
+SWAP/ZSWAP state and hashed `.config` bytes, full command exit-zero records,
+correct compiler class, nonempty expected per-profile source objects and
+no unexpected disabled zswap object, no contradictions or duplicate keys.
+The GCC lane additionally requires source-bound `swapz_sha`, all complete
+kernel and `modpost`/module stages, real nonempty `Module.symvers` SHA-256
+and a positive, canonical exact-byte-size, SHA-256-matching staged
+`dm-swapz.ko`. The staged module must also contain a minimally
+valid ELF64 little-endian x86-64 relocatable header and in-bounds section
+table; matching the digest of arbitrary text is not a module build proof.
+This format screen does not authenticate modpost or loaded kernel ABI. The LLVM-only lane instead requires each ordered `object=`
+and `object_sha256=` pair to hash-match the corresponding real nonempty
+Linux object; a module or linked-product claim cannot pass. File content
+hashes are streamed in bounded chunks; symlinks, non-regular files,
+path traversal and stale/forged files fail closed with field-category-only
+diagnostics. The rootless `--self-test` exercises disposable positive and
+adversarial actual on-disk bytes without devices or network.
+
+This is **in-run artifact/manifest consistency**, not authenticated compiler
+custody against a hostile concurrent writer, a full trust-chain signature or
+proof of a modified kernel producer. Manifest-only offline grammar controls,
+stock public Linux GCC/LLVM build evidence, a genuinely patched and
+authenticated MM→BIO producer, a matched loaded module ABI and actual
+stored-entry writeback/readback remain distinct requirements. An unreferenced
+new source commit is `SOURCE_READY_PENDING_COORDINATOR_CI`, never hosted PASS.
+Phase A remains BLOCKED; Phase B RAW bypass remains DISABLED.

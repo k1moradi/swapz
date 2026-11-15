@@ -320,14 +320,20 @@ jobs:
               echo "::error::swapz source changed during pinned external-module build"
               exit 1
             fi
-            printf 'error_category=none\n' >> "$current_manifest"
             current_phase=verify_unchanged_source
             if [[ "$(git -C linux-upstream rev-parse HEAD)" != "$EXPECTED_LINUX_SHA" ]] ||
                [[ -n "$(git -C linux-upstream status --porcelain)" ]]; then
               echo "::error::Pinned Linux source changed during out-of-tree Kbuild"
               exit 1
             fi
-            printf 'source_modified=no\nresult=PASS\n' >> "$current_manifest"
+            # Preserve first failure if actual output bytes contradict the manifest.
+            printf 'source_modified=no\n' >> "$current_manifest"
+            current_phase=verify_artifact_integrity
+            python3 -B swapz-consumer/tests/runtime/native/pinned-linux-artifact-integrity-test.py \
+              --manifest "$current_manifest" --mode gcc --profile "$requested_zswap" \
+              --source-sha "$EXPECTED_LINUX_SHA" --swapz-sha "$swapz_sha" \
+              --build-dir "$build_dir" --module-dir "$module_stage" || exit $?
+            printf 'error_category=none\nresult=PASS\n' >> "$current_manifest"
             current_manifest=""
           done
       - name: "Preserve bounded source preflight evidence"
@@ -360,6 +366,11 @@ jobs:
             printf 'requested_zswap=%s\nresult=NOT_RUN\nreason=checkout_or_toolchain_incomplete\n' \
               "$requested_zswap" > "$evidence_dir/$profile.txt"
           done
+      - name: "Fetch committed read-only swapz verifier for LLVM"
+        uses: actions/checkout@v4
+        with:
+          path: swapz-consumer
+          persist-credentials: false
       - name: "Fetch exact read-only upstream Linux for independent Clang Kbuild"
         uses: actions/checkout@v4
         with:
@@ -559,7 +570,20 @@ jobs:
               echo "::error::Original pinned Linux source changed during LLVM Kbuild"
               exit 1
             fi
-            printf 'source_modified=no\nresult=PASS\n' >> "$current_manifest"
+            # Bind the verifier to the exact workflow commit, not external code.
+            current_phase=verify_swapz_verifier_checkout
+            if [[ "$(git -C swapz-consumer rev-parse HEAD)" != "$GITHUB_SHA" ]] ||
+               [[ -n "$(git -C swapz-consumer status --porcelain --untracked-files=all)" ]] ||
+               [[ ! -f swapz-consumer/tests/runtime/native/pinned-linux-artifact-integrity-test.py ]]; then
+              echo "::error::LLVM job verifier checkout missing, dirty or wrong SHA"
+              exit 1
+            fi
+            printf 'source_modified=no\n' >> "$current_manifest"
+            current_phase=verify_artifact_integrity
+            python3 -B swapz-consumer/tests/runtime/native/pinned-linux-artifact-integrity-test.py \
+              --manifest "$current_manifest" --mode llvm --profile "$requested_zswap" \
+              --source-sha "$EXPECTED_LINUX_SHA" --build-dir "$build_dir" || exit $?
+            printf 'result=PASS\n' >> "$current_manifest"
             current_manifest="$evidence_dir/setup.txt"
           done
           current_manifest=""
