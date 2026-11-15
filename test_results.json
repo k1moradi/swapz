@@ -296,46 +296,46 @@
 "gc_scan_scale": {
 "rows": [
 {
-"incremental_select_ns": 5825,
-"legacy_dead_probe_ns": 794404,
-"legacy_score_scan_ns": 11737264,
+"incremental_select_ns": 6402,
+"legacy_dead_probe_ns": 626337,
+"legacy_score_scan_ns": 10689677,
 "logical_pages": 262144,
-"mapped_dead_probe_ns": 3790,
-"relocation_list_ns": 2099,
-"relocation_scan_ns": 1531021,
+"mapped_dead_probe_ns": 2663,
+"relocation_list_ns": 2891,
+"relocation_scan_ns": 1560561,
 "segments": 1024,
 "victim_records": 256
 },
 {
-"incremental_select_ns": 24716,
-"legacy_dead_probe_ns": 3416406,
-"legacy_score_scan_ns": 32536363,
+"incremental_select_ns": 24927,
+"legacy_dead_probe_ns": 2557139,
+"legacy_score_scan_ns": 42612755,
 "logical_pages": 1048576,
-"mapped_dead_probe_ns": 12815,
-"relocation_list_ns": 2553,
-"relocation_scan_ns": 7116384,
+"mapped_dead_probe_ns": 11664,
+"relocation_list_ns": 2955,
+"relocation_scan_ns": 5875707,
 "segments": 4096,
 "victim_records": 256
 },
 {
-"incremental_select_ns": 55187,
-"legacy_dead_probe_ns": 7656635,
-"legacy_score_scan_ns": 130817882,
+"incremental_select_ns": 53407,
+"legacy_dead_probe_ns": 6721708,
+"legacy_score_scan_ns": 110506121,
 "logical_pages": 4194304,
-"mapped_dead_probe_ns": 40213,
-"relocation_list_ns": 2301,
-"relocation_scan_ns": 17683043,
+"mapped_dead_probe_ns": 27560,
+"relocation_list_ns": 2256,
+"relocation_scan_ns": 16709980,
 "segments": 16384,
 "victim_records": 256
 },
 {
-"incremental_select_ns": 408665,
-"legacy_dead_probe_ns": 43295089,
-"legacy_score_scan_ns": 863278919,
+"incremental_select_ns": 375411,
+"legacy_dead_probe_ns": 43319043,
+"legacy_score_scan_ns": 704014275,
 "logical_pages": 27080192,
-"mapped_dead_probe_ns": 170070,
-"relocation_list_ns": 2566,
-"relocation_scan_ns": 146008999,
+"mapped_dead_probe_ns": 196432,
+"relocation_list_ns": 2983,
+"relocation_scan_ns": 131678672,
 "segments": 105782,
 "victim_records": 256
 }
@@ -349,14 +349,14 @@
 "predictor": {
 "backend_benchmarks": [
 {
-"inverse_ns_per_page": 1606,
+"inverse_ns_per_page": 1419,
 "name": "scalar",
-"transform_ns_per_page": 1683
+"transform_ns_per_page": 1463
 },
 {
-"inverse_ns_per_page": 1084,
+"inverse_ns_per_page": 1093,
 "name": "sse2",
-"transform_ns_per_page": 896
+"transform_ns_per_page": 829
 }
 ],
 "classifier": {
@@ -366,9 +366,9 @@
 "candidate": "delta64",
 "early_abort_pages": 223,
 "eligible_pages": 512,
-"ns_per_page": 871,
+"ns_per_page": 636,
 "sample_pairs": 32,
-"scalar_ns_per_page": 871,
+"scalar_ns_per_page": 636,
 "stage1_min_score": 2,
 "stage1_pairs": 8
 },
@@ -383,7 +383,7 @@
 "planner_blocks": 383,
 "planner_extents": 267,
 "raw_pages": 192,
-"wall_ns_per_page": 11065
+"wall_ns_per_page": 11782
 },
 {
 "acceleration": 2,
@@ -391,7 +391,7 @@
 "planner_blocks": 383,
 "planner_extents": 267,
 "raw_pages": 192,
-"wall_ns_per_page": 10260
+"wall_ns_per_page": 11937
 },
 {
 "acceleration": 3,
@@ -399,7 +399,7 @@
 "planner_blocks": 383,
 "planner_extents": 266,
 "raw_pages": 192,
-"wall_ns_per_page": 9898
+"wall_ns_per_page": 11462
 },
 {
 "acceleration": 4,
@@ -407,7 +407,7 @@
 "planner_blocks": 384,
 "planner_extents": 273,
 "raw_pages": 192,
-"wall_ns_per_page": 9712
+"wall_ns_per_page": 11168
 }
 ],
 "negative_pages": 256,
@@ -424,9 +424,9 @@
 "extents_saved": 38,
 "general_threshold": 24,
 "lz4_rescues": 192,
-"modeled_wall_ns_per_page": 6945,
-"modeled_wall_ns_total": 4000512,
-"ns_per_saved_block": 72736,
+"modeled_wall_ns_per_page": 6263,
+"modeled_wall_ns_total": 3607808,
+"ns_per_saved_block": 65596,
 "packing_adoptions": 0,
 "packing_eligible_pages": 51,
 "packing_threshold": 16,
@@ -451,29 +451,29 @@
 "pages": 576,
 "pairs": [
 {
-"baseline_ns_per_page": 1046,
+"baseline_ns_per_page": 928,
 "order": "baseline_first",
-"unrolled_ns_per_page": 896
+"unrolled_ns_per_page": 825
 },
 {
-"baseline_ns_per_page": 997,
+"baseline_ns_per_page": 926,
 "order": "unrolled_first",
-"unrolled_ns_per_page": 879
+"unrolled_ns_per_page": 831
 },
 {
-"baseline_ns_per_page": 998,
+"baseline_ns_per_page": 925,
 "order": "baseline_first",
-"unrolled_ns_per_page": 877
+"unrolled_ns_per_page": 821
 },
 {
-"baseline_ns_per_page": 907,
+"baseline_ns_per_page": 929,
 "order": "unrolled_first",
-"unrolled_ns_per_page": 879
+"unrolled_ns_per_page": 828
 },
 {
-"baseline_ns_per_page": 910,
+"baseline_ns_per_page": 927,
 "order": "baseline_first",
-"unrolled_ns_per_page": 848
+"unrolled_ns_per_page": 822
 }
 ],
 "repeats_per_arm": 64,
@@ -522,14 +522,14 @@
 }
 ],
 "negative_useful": 0,
-"ns_per_saved_block": 74311,
+"ns_per_saved_block": 67181,
 "routed_baseline_blocks": 257,
 "routed_baseline_extents": 182,
 "routed_blocks_saved": 60,
 "routed_candidate_blocks": 197,
 "routed_candidate_extents": 124,
-"routed_cpu_ns_per_page": 7740,
-"routed_cpu_ns_total": 4458717,
+"routed_cpu_ns_per_page": 6998,
+"routed_cpu_ns_total": 4030901,
 "routed_extents_saved": 58,
 "structured_calls": 279,
 "structured_eligible": 320,
@@ -577,14 +577,14 @@
 }
 ],
 "negative_useful": 0,
-"ns_per_saved_block": 74719,
+"ns_per_saved_block": 67508,
 "routed_baseline_blocks": 257,
 "routed_baseline_extents": 182,
 "routed_blocks_saved": 58,
 "routed_candidate_blocks": 199,
 "routed_candidate_extents": 132,
-"routed_cpu_ns_per_page": 7523,
-"routed_cpu_ns_total": 4333752,
+"routed_cpu_ns_per_page": 6797,
+"routed_cpu_ns_total": 3915512,
 "routed_extents_saved": 50,
 "structured_calls": 272,
 "structured_eligible": 320,
@@ -632,14 +632,14 @@
 }
 ],
 "negative_useful": 0,
-"ns_per_saved_block": 72736,
+"ns_per_saved_block": 65596,
 "routed_baseline_blocks": 257,
 "routed_baseline_extents": 182,
 "routed_blocks_saved": 55,
 "routed_candidate_blocks": 202,
 "routed_candidate_extents": 144,
-"routed_cpu_ns_per_page": 6945,
-"routed_cpu_ns_total": 4000512,
+"routed_cpu_ns_per_page": 6263,
+"routed_cpu_ns_total": 3607808,
 "routed_extents_saved": 38,
 "structured_calls": 256,
 "structured_eligible": 320,
@@ -687,14 +687,14 @@
 }
 ],
 "negative_useful": 0,
-"ns_per_saved_block": 72736,
+"ns_per_saved_block": 65596,
 "routed_baseline_blocks": 257,
 "routed_baseline_extents": 182,
 "routed_blocks_saved": 55,
 "routed_candidate_blocks": 202,
 "routed_candidate_extents": 144,
-"routed_cpu_ns_per_page": 6945,
-"routed_cpu_ns_total": 4000512,
+"routed_cpu_ns_per_page": 6263,
+"routed_cpu_ns_total": 3607808,
 "routed_extents_saved": 38,
 "structured_calls": 256,
 "structured_eligible": 320,
@@ -742,14 +742,14 @@
 }
 ],
 "negative_useful": 0,
-"ns_per_saved_block": 72736,
+"ns_per_saved_block": 65596,
 "routed_baseline_blocks": 257,
 "routed_baseline_extents": 182,
 "routed_blocks_saved": 55,
 "routed_candidate_blocks": 202,
 "routed_candidate_extents": 144,
-"routed_cpu_ns_per_page": 6945,
-"routed_cpu_ns_total": 4000512,
+"routed_cpu_ns_per_page": 6263,
+"routed_cpu_ns_total": 3607808,
 "routed_extents_saved": 38,
 "structured_calls": 256,
 "structured_eligible": 320,
@@ -766,17 +766,17 @@
 "candidate_extents": 93,
 "cliff_2024": 160,
 "inverse_backend": "sse2",
-"inverse_ns_per_page": 1084,
+"inverse_ns_per_page": 1093,
 "name": "delta64",
 "planner_blocks_saved": 68,
 "planner_extents_saved": 89,
 "raw_rescued": 128,
 "saved_payload_bytes": 284772,
-"scalar_inverse_ns_per_page": 1606,
-"scalar_transform_ns_per_page": 1683,
-"second_lz4_ns_per_page": 12989,
+"scalar_inverse_ns_per_page": 1419,
+"scalar_transform_ns_per_page": 1463,
+"second_lz4_ns_per_page": 11992,
 "transform_backend": "sse2",
-"transform_ns_per_page": 896
+"transform_ns_per_page": 829
 }
 ]
 }
@@ -791,30 +791,30 @@
 "qualification": "RAM_BACKED_NULL_BLK_ONLY",
 "qualification_tier": "ALGORITHM_PHYSICAL_PENDING",
 "qualified_artifacts": {
-"formatter_sha256": "205d0bb827447620bb55cb308f922cef0b27c9e2136ec8ee7b58a3cbba6dfca7",
-"module_sha256": "b7c4c07d6dec487bbf4249ebfb54de26b38e30d2b4131b1144a70e16bdd077fc",
+"formatter_sha256": "f7f20675166496c6cde63bcbb572644634e20e922692ca0305d481a75cd3f0c9",
+"module_sha256": "a0f68be821a49af5ef0d08c6c2985f62d41d2ac57c3377177ace766431d27324",
 "oracle_sha256": "94ecfb7a26c47d251deb883927538f23bf0ccef8e33a46f98c09bc201734cf15",
 "status": "AVAILABLE"
 },
 "schema": "swapz-test-results-v1",
-"source_sha": "b6817ac41f96a0e7df4b0f5f3af258e582723b9e",
+"source_sha": "a2cdcf7c88502304c7b73d89dba7ac32198fa4b9",
 "source_sync": {
-"head_sha": "b6817ac41f96a0e7df4b0f5f3af258e582723b9e",
+"head_sha": "a2cdcf7c88502304c7b73d89dba7ac32198fa4b9",
 "reason": "already_current",
-"remote_sha": "b6817ac41f96a0e7df4b0f5f3af258e582723b9e",
+"remote_sha": "a2cdcf7c88502304c7b73d89dba7ac32198fa4b9",
 "source_changed": false,
-"source_sha": "b6817ac41f96a0e7df4b0f5f3af258e582723b9e",
+"source_sha": "a2cdcf7c88502304c7b73d89dba7ac32198fa4b9",
 "status": "PASS"
 },
 "stages": [
 {
-"elapsed_s": 14.363,
+"elapsed_s": 15.47,
 "exit_code": 0,
 "name": "Build module and helpers",
 "status": "PASS"
 },
 {
-"elapsed_s": 543.764,
+"elapsed_s": 551.63,
 "exit_code": 0,
 "name": "Native and rootless contracts",
 "phase_elapsed_s": [
@@ -823,11 +823,11 @@
 "name": "rootless initialization"
 },
 {
-"elapsed_s": 39,
+"elapsed_s": 44,
 "name": "tests/Makefile native and metadata"
 },
 {
-"elapsed_s": 99,
+"elapsed_s": 100,
 "name": "tests/runtime/native/source-contract-test.py"
 },
 {
@@ -835,7 +835,7 @@
 "name": "tests/runtime/native/userspace/swapzctl-active-swap-provenance-test.py"
 },
 {
-"elapsed_s": 25,
+"elapsed_s": 24,
 "name": "tests/runtime/native/nullblk-identity-test.sh"
 },
 {
@@ -863,7 +863,7 @@
 "name": "tests/runtime/native/resource-pressure-cleanup-ownership-test.py"
 },
 {
-"elapsed_s": 74,
+"elapsed_s": 76,
 "name": "tests/runtime/native/primary-lifecycle-audit-test.py"
 },
 {
@@ -871,15 +871,15 @@
 "name": "tests/runtime/native/primary-lifecycle-nullblk-qualifier-test.py"
 },
 {
-"elapsed_s": 14,
+"elapsed_s": 13,
 "name": "tests/runtime/native/primary-real-swap-test.py"
 },
 {
-"elapsed_s": 8,
+"elapsed_s": 9,
 "name": "tests/runtime/native/primary-real-swap-parent-ownership-test.py"
 },
 {
-"elapsed_s": 1,
+"elapsed_s": 0,
 "name": "tests/runtime/native/primary-real-swap-oracle-terminal-test.py"
 },
 {
@@ -887,7 +887,7 @@
 "name": "tests/runtime/benchmark/metadata-ram-evidence-test.py"
 },
 {
-"elapsed_s": 72,
+"elapsed_s": 73,
 "name": "tests/runtime/benchmark/io-replay-test.py"
 },
 {
@@ -895,7 +895,7 @@
 "name": "tests/runtime/native/make-interface-test.py"
 },
 {
-"elapsed_s": 46,
+"elapsed_s": 47,
 "name": "tests/runtime/native/test-report-test.py"
 },
 {
@@ -911,11 +911,11 @@
 "name": "tests/runtime/native/rootless-attribution-test.py"
 },
 {
-"elapsed_s": 5,
+"elapsed_s": 6,
 "name": "tests/runtime/native/ci-failure-diagnostics-test.py"
 },
 {
-"elapsed_s": 8,
+"elapsed_s": 7,
 "name": "tests/runtime/native/physical-swap-probe-test.py"
 },
 {
@@ -935,7 +935,7 @@
 "name": "C syntax: unqualified physical seam rejection"
 },
 {
-"elapsed_s": 0,
+"elapsed_s": 1,
 "name": "C syntax: mutually exclusive lifecycle seams"
 },
 {
@@ -943,7 +943,7 @@
 "name": "tests/runtime/benchmark/resource-pressure.py --help"
 },
 {
-"elapsed_s": 1,
+"elapsed_s": 0,
 "name": "loaded-preflight executable contract"
 },
 {
@@ -1027,23 +1027,23 @@
 "name": "bash syntax swap-inventory-test.sh"
 },
 {
-"elapsed_s": 0,
+"elapsed_s": 1,
 "name": "x86_64 native SIMD disassembly contracts"
 },
 {
-"elapsed_s": 1,
+"elapsed_s": 0,
 "name": "static source/interface contract assertions"
 }
 ],
 "primary_lifecycle_case_elapsed_ms": [
 {
 "class": "PackageCrashToPrimaryAdmissionTest",
-"elapsed_ms": 620,
+"elapsed_ms": 815,
 "method": "test_all_refusing_coordinator_fake_cannot_satisfy_contract"
 },
 {
 "class": "PackageCrashToPrimaryAdmissionTest",
-"elapsed_ms": 4043,
+"elapsed_ms": 4165,
 "method": "test_blocked_start_reports_explicit_package_recovery_phase"
 },
 {
@@ -1053,37 +1053,37 @@
 },
 {
 "class": "PackageCrashToPrimaryAdmissionTest",
-"elapsed_ms": 10488,
+"elapsed_ms": 10544,
 "method": "test_committed_journal_then_verified_package_recovery_allows_reentry"
 },
 {
 "class": "PackageCrashToPrimaryAdmissionTest",
-"elapsed_ms": 92,
+"elapsed_ms": 120,
 "method": "test_crash_checkpoint_timeout_override_is_finite"
 },
 {
 "class": "PackageCrashToPrimaryAdmissionTest",
-"elapsed_ms": 188,
+"elapsed_ms": 190,
 "method": "test_directory_substitution_during_named_recheck_fails_closed"
 },
 {
 "class": "PackageCrashToPrimaryAdmissionTest",
-"elapsed_ms": 4125,
+"elapsed_ms": 4272,
 "method": "test_malformed_and_substituted_package_journals_fail_closed"
 },
 {
 "class": "PackageCrashToPrimaryAdmissionTest",
-"elapsed_ms": 36273,
+"elapsed_ms": 36243,
 "method": "test_real_sigkill_phases_block_both_commands_not_cleanup"
 },
 {
 "class": "PackageCrashToPrimaryAdmissionTest",
-"elapsed_ms": 234,
+"elapsed_ms": 227,
 "method": "test_sanitized_fixture_covers_clean_blocked_and_cleanup_paths"
 },
 {
 "class": "PackageCrashToPrimaryAdmissionTest",
-"elapsed_ms": 4688,
+"elapsed_ms": 4758,
 "method": "test_unsafe_coordinator_bypass_mutant_is_observably_rejected"
 },
 {
@@ -1218,12 +1218,12 @@
 },
 {
 "class": "PrimaryLifecycleSourceGuardTest",
-"elapsed_ms": 6827,
+"elapsed_ms": 6892,
 "method": "test_cross_namespace_mount_scan_revalidates_before_first_mutation"
 },
 {
 "class": "PrimaryLifecycleSourceGuardTest",
-"elapsed_ms": 267,
+"elapsed_ms": 422,
 "method": "test_durable_package_transactions_gate_prepare_and_start"
 },
 {
@@ -1233,37 +1233,37 @@
 },
 {
 "class": "PrimaryLifecycleSourceGuardTest",
-"elapsed_ms": 813,
+"elapsed_ms": 921,
 "method": "test_execution_gate_is_boot_scoped_pending_live_lifecycle_evidence"
 },
 {
 "class": "PrimaryLifecycleSourceGuardTest",
-"elapsed_ms": 92,
+"elapsed_ms": 100,
 "method": "test_native_swap_operations_are_transaction_ordered"
 },
 {
 "class": "PrimaryLifecycleSourceGuardTest",
-"elapsed_ms": 152,
+"elapsed_ms": 207,
 "method": "test_owned_nullblk_btrfs_root_matches_recovery_across_dev_numbers"
 },
 {
 "class": "PrimaryLifecycleSourceGuardTest",
-"elapsed_ms": 187,
+"elapsed_ms": 191,
 "method": "test_package_and_primary_share_global_mutation_lock_identity"
 },
 {
 "class": "PrimaryLifecycleSourceGuardTest",
-"elapsed_ms": 36,
+"elapsed_ms": 34,
 "method": "test_public_swapzctl_primary_dispatch_reaches_admission_interface"
 },
 {
 "class": "PrimaryLifecycleSourceGuardTest",
-"elapsed_ms": 172,
+"elapsed_ms": 171,
 "method": "test_qualification_import_serializes_before_partition_state"
 },
 {
 "class": "PrimaryLifecycleSourceGuardTest",
-"elapsed_ms": 2771,
+"elapsed_ms": 3055,
 "method": "test_recovery_persists_fail_closed_interruption_order"
 },
 {
@@ -1273,17 +1273,17 @@
 },
 {
 "class": "PrimaryLifecycleSourceGuardTest",
-"elapsed_ms": 18,
+"elapsed_ms": 20,
 "method": "test_source_guard_ignores_comments_and_string_literals"
 },
 {
 "class": "PrimaryOwnerReleaseDurabilityTest",
-"elapsed_ms": 11,
+"elapsed_ms": 10,
 "method": "test_failed_owner_release_fsync_stays_blocked_across_fresh_recovery"
 },
 {
 "class": "PrimaryOwnerReleaseDurabilityTest",
-"elapsed_ms": 2,
+"elapsed_ms": 3,
 "method": "test_stop_and_recover_propagate_owner_release_failure"
 }
 ],
@@ -1295,31 +1295,31 @@
 },
 "status": "PASS",
 "substage_elapsed_s": {
-"native_make_s": 39,
-"remaining_contracts_s": 505
+"native_make_s": 44,
+"remaining_contracts_s": 508
 }
 },
 {
-"elapsed_s": 2.295,
+"elapsed_s": 2.129,
 "exit_code": 0,
 "name": "Kernel warnings W=1",
 "status": "PASS"
 },
 {
-"elapsed_s": 1.743,
+"elapsed_s": 1.752,
 "exit_code": 0,
 "name": "Kernel warnings W=2",
 "status": "PASS"
 },
 {
 "diagnostic": "BLOCKED: physical_trial_mapper_present; mapper name and UUID match, but same-boot root-owned recovery state is not proven; mapper and module retained",
-"elapsed_s": 0.887,
+"elapsed_s": 0.845,
 "exit_code": 1,
 "failed_phase": "preflight / retained physical-trial mapper",
 "name": "Owned RAM smoke + mixed/QD pilot",
 "phase_elapsed_s": [
 {
-"elapsed_s": 0.873,
+"elapsed_s": 0.813,
 "name": "preflight"
 }
 ],
@@ -1329,5 +1329,5 @@
 "status": "BLOCKED"
 }
 ],
-"tested_commit_sha": "b6817ac41f96a0e7df4b0f5f3af258e582723b9e"
+"tested_commit_sha": "a2cdcf7c88502304c7b73d89dba7ac32198fa4b9"
 }
