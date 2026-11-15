@@ -4085,6 +4085,36 @@ class ReportContract(unittest.TestCase):
                 self.assertEqual(logs[0].stat().st_mode & 0o777, 0o600)
                 self.assertIn(b"PRIVATE PHYSICAL JOURNAL CONTENT",
                               logs[0].read_bytes())
+
+                # A helper refusal is never upgraded to PASS and its private
+                # journal message must not enter the make-test console.
+                def mock_refused_recovery(command, **kwargs):
+                    kwargs["stdout"].write(b"PRIVATE RECOVERY REQUIRED\n")
+                    return subprocess.CompletedProcess(command, 3, b"")
+
+                refused_output = Terminal()
+                with mock.patch.object(runner.sys, "stdin",
+                                       Terminal("2\n")), \
+                        mock.patch.object(runner.sys, "stdout",
+                                          refused_output), \
+                        mock.patch.object(
+                            runner, "retained_physical_trial_candidate",
+                            return_value=True), \
+                        mock.patch.object(runner.subprocess, "run",
+                                          side_effect=mock_refused_recovery):
+                    runner.offer_retained_physical_trial_reconciliation()
+                self.assertIn("owner recovery refused",
+                              refused_output.getvalue())
+                self.assertNotIn("PRIVATE RECOVERY REQUIRED",
+                                 refused_output.getvalue())
+                logs = list((runner.ROOT / "build/tests").glob(
+                    "physical-owner-recovery-*.private.log"))
+                self.assertEqual(len(logs), 2)
+                self.assertTrue(all(
+                    log.stat().st_mode & 0o777 == 0o600 for log in logs))
+                self.assertTrue(any(
+                    b"PRIVATE RECOVERY REQUIRED" in log.read_bytes()
+                    for log in logs))
             finally:
                 runner.ROOT = original_root
 

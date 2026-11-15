@@ -3479,6 +3479,11 @@ recovery must never imply qualification or redefine the physical owner.
 Rootless regressions mock `dmsetup` and the recovery subprocess to prove
 exact-name/UUID filtering, default-no, no non-TTY invocation, root-only
 private diagnostics, and one selected helper call without real swap I/O.
+Use the actual test process's effective UID for temporary private-log
+ownership assertions: CI runners need not have UID 1000. Exercise both a
+successful helper exit and an explicit nonzero recovery refusal, asserting
+that private recovery messages are never echoed onto the terminal and no
+helper refusal can be called loaded qualification PASS.
 
 When the pre-consent physical Git gate detects untracked files, the
 unprivileged helper must automatically enumerate them read-only with Git's
