@@ -1,0 +1,28 @@
+# Agent 8 — Round 008: in-run real Linux Kbuild artifact/manifest integrity verifier
+
+**Task ID:** `agent8-inrun-kbuild-artifact-integrity`
+**Issue mailbox:** https://github.com/k1moradi/swapz/issues/125
+**Frozen source (new Git commit parent):** `af334b3408b9a660fc7f4b15d82d8e5a9e6374bb`
+**Start:** at Round 008 `ROUND_OPEN`, simultaneously with Agent 4. **No same-round peer dependency**.
+
+## Exclusive real implementation source
+
+Own the new Python stdlib executable `tests/runtime/native/pinned-linux-artifact-integrity-test.py` and the **existing** `.github/workflows/phase-a-linux-source-preflight.yml`, plus your independent append-only `Round 008 real Kbuild artifact-to-manifest integrity` section in `docs/testing_standards.md`. Do NOT edit Agent 4's C fixture, existing offline claim grammar `tests/runtime/native/pinned-linux-preflight-evidence-test.py`, production C or upstream Linux tree.
+
+Already committed source provides (1) GCC separate `CONFIG_ZSWAP=y/n` actual pinned full Linux source `O=` trees, per-profile `enabled.txt/disabled.txt` manifest, `.config`, `mm/page_io.o`, `block/bio.o`, optional `mm/zswap.o`, `Module.symvers`, and staged linked `dm-swapz.ko` when the build succeeds, and (2) independent LLVM object-only job with per-object SHA-256 and config data. Full GCC hosted success from Round 007 is **PENDING**, not a prerequisite for writing and unit testing your verifier; do not assume it succeeded.
+
+## Implement real-byte integrity validation and rootless negatives
+
+1. Implement a small **standalone, bounded, read-only Python 3 stdlib verifier** with a CLI that accepts the already generated per-profile evidence text, explicit profile (`y` or `n`), exact expected source identities, and explicit existing build output paths. Reject symlinks and non-regular files as needed, path traversal/escape, duplicates/contradictory manifest claims, invalid/noncanonical sizes, missing files, mismatched SHA-256, and wrong config or cross-profile object mixups. Prefer streaming digest over allocation of whole large files, use `pathlib`/context managers and no heavy deps.
+2. For **GCC full linked-module** evidence verify real `.config` bytes versus manifest hash, strict effective profile, nonempty `mm/page_io.o` and `block/bio.o`, enabled-only `mm/zswap.o`, nonempty real `Module.symvers` SHA against manifest, positive actual staged `dm-swapz.ko` byte length and digest, and consistent `swapz_sha`. No success for `modules_prepare` only, `vmlinux` only, ignored kernel `modpost` failure or fabricated `.ko`.
+3. For **LLVM source-object-only** evidence verify actual real object bytes digest against every corresponding `object=`/`object_sha256=` pair and `.config` hash, source SHA, expected compiler/config identity, enabled-vs-disabled object set. Never accept a `module_linked` claim or treat LLVM stock-source objects as a linked module. Linux upstream remains unchanged.
+4. Wire the verifier into the **same existing pinned source workflow**, once per profile in both independent jobs, **before** their terminal `result=PASS` line is emitted. The workflow's LLVM job currently checks out only public Linux; add a bounded read-only `actions/checkout@v4` of the exact current swapz workflow commit in a separate `swapz-consumer` directory if required to execute your committed Python source. Preserve all other success steps, source identities, proof classes, concurrency limits, `contents: read` permissions, first-failure trap, and retained `upload-artifact if: always()` manifests. A validator failure must fail its job and leave `FAIL` evidence; no contradictory `result=PASS` ahead of validation.
+5. Add **actual executable stdlib negative/positive tests** using small temporary on-disk files (no snippet-only parser): forged digest, altered object after hashing, zero-length linked module, missing/export mismatch, symlink, stale profile/incorrect object, bad config, inconsistent source, noncanonical sizes, truncated manifest and independent LLVM object-only class. Ensure test itself is runnable locally with `python3 -B tests/runtime/native/pinned-linux-artifact-integrity-test.py --self-test` or documented `unittest` entry. No network, actual kernel, module loading or physical device access for rootless tests.
+6. Compile/parse YAML and embedded Bash, run Python syntax/unittest, optionally run actual pinned Linux hosted CI **only if the source is already integrated**. For source-object-only handoff honestly report `SOURCE_READY_PENDING_COORDINATOR_CI`; Agent 1 runs full GitHub-hosted exact-source matrix after publication. Never call local mock PASS a genuine kernel linked-module success.
+7. Append same-commit testing-standard section documenting real-output provenance ceiling, exact artifact size and SHA-256 checks, failure behavior, and distinction between offline bytes validation, stock public kernel build, and unavailable authenticated MM→BIO producer.
+
+## Source commit and report
+
+Create one **retrievable real Git blob/tree/commit object** with parent `af334b3408b9a660fc7f4b15d82d8e5a9e6374bb`, actual Python executable and workflow modifications and distinct standards addition. No branches, PRs, forks, extra worktrees or update to remote `main`. Do not touch Agent 4 implementation path or await its tests. Submit one `message: REPORT_READY` to https://github.com/k1moradi/swapz/issues/125 with `round: "008"`, `agent: 8`, exact task ID, new SHA, owned paths, commands/exits, measured negative tests, and hosted NOT_RUN limits.
+
+No Linux upstream writes, module insertion, mapper/swap/reclaim or physical-device test. **Phase A BLOCKED; Phase B RAW bypass DISABLED.**
