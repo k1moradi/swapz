@@ -3483,7 +3483,11 @@ Use the actual test process's effective UID for temporary private-log
 ownership assertions: CI runners need not have UID 1000. Exercise both a
 successful helper exit and an explicit nonzero recovery refusal, asserting
 that private recovery messages are never echoed onto the terminal and no
-helper refusal can be called loaded qualification PASS.
+helper refusal can be called loaded qualification PASS. Existing synthetic
+algorithm-physical selector regression fixtures mock all subprocess calls and
+must explicitly stub the independent *read-only retained-mapper observation*
+to false, leaving their original physical-selector assertions unchanged;
+the dedicated interaction regression exercises the new observation itself.
 
 When the pre-consent physical Git gate detects untracked files, the
 unprivileged helper must automatically enumerate them read-only with Git's

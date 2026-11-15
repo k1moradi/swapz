@@ -5992,6 +5992,9 @@ class ReportContract(unittest.TestCase):
                         runner, "make_invocation",
                         return_value=(["make"], "fixture")),
                     mock.patch.object(
+                        runner, "retained_physical_trial_candidate",
+                        return_value=False),
+                    mock.patch.object(
                         runner, "tracked_source_checkout_preflight",
                         return_value=None),
                     mock.patch.object(runner, "run_stage",
@@ -6110,6 +6113,9 @@ class ReportContract(unittest.TestCase):
                     stack.enter_context(mock.patch.object(
                         runner, "make_invocation",
                         return_value=(["make"], "fixture")))
+                    stack.enter_context(mock.patch.object(
+                        runner, "retained_physical_trial_candidate",
+                        return_value=False))
                     stack.enter_context(mock.patch.object(
                         runner, "tracked_source_checkout_preflight",
                         return_value=None))
@@ -6298,6 +6304,9 @@ class ReportContract(unittest.TestCase):
              mock.patch.object(runner, "git_sha", return_value=source_sha), \
              mock.patch.object(runner, "make_invocation",
                                return_value=(["make"], "fixture")), \
+             mock.patch.object(
+                 runner, "retained_physical_trial_candidate",
+                 return_value=False), \
              mock.patch.object(runner, "tracked_source_checkout_preflight",
                                return_value=None), \
              mock.patch.object(runner, "run_stage",
@@ -6458,6 +6467,9 @@ class ReportContract(unittest.TestCase):
             mock.patch.object(runner, "git_sha", return_value=source_sha),
             mock.patch.object(runner, "make_invocation",
                               return_value=(["make"], "fixture")),
+            mock.patch.object(
+                runner, "retained_physical_trial_candidate",
+                return_value=False),
             mock.patch.object(runner, "tracked_source_checkout_preflight",
                               return_value=None),
             mock.patch.object(runner, "run_stage", side_effect=stage_pass),
