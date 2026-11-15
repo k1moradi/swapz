@@ -1,9 +1,9 @@
 # Round 001 — independent baseline and negative-path preparation
 
-**Issue:** [#118 — concurrent mailbox](https://github.com/k1moradi/swapz/issues/118)  
-**Status rule:** This round is *not executable* until Agent 1 posts `message: ROUND_OPEN` with the exact task-commit SHA. Issue creation and presence of these files alone are insufficient.  
-**Frozen source baseline:** `c128ac32374a753a0b27ae0ebec67693355b1b55` (verified ancestor of the task-publication parent).  
-**Input window:** Repository and historical coordination contracts already available when the round opens; no new peer result from this round is a prerequisite.  
+**Issue:** [#118 — concurrent mailbox](https://github.com/k1moradi/swapz/issues/118)
+**Status rule:** This round is *not executable* until Agent 1 posts `message: ROUND_OPEN` with the exact task-commit SHA. Issue creation and presence of these files alone are insufficient.
+**Frozen source baseline:** `c128ac32374a753a0b27ae0ebec67693355b1b55` (verified ancestor of the task-publication parent).
+**Input window:** Repository and historical coordination contracts already available when the round opens; no new peer result from this round is a prerequisite.
 **Expected result:** Seven accountable reports; not a green Phase A qualification.
 
 ## Pre-existing inputs
