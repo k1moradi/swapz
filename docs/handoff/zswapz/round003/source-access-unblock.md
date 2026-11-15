@@ -19,3 +19,7 @@
 ## CI regression context
 
 The failed native rootless job on `721133790fa77b8ab47dc870abea833351799723` reported `quiet-lower-io-test.sh` with an unresolved first cause. A more recent independent commit `8e0b9d5674fd6a9c424774e8cfd0e6590d1d6dee` adjusted `tests/runtime/native/quiet-lower-io-test.sh`, `tests/tools/quiet-lower-io.sh` and `docs/testing_standards.md` to reconcile new passive origin INFO fields. That commit's exact-SHA CI outcome must be checked separately, not assumed PASS. Agent 3's Round 003 assignment must avoid duplicating fixes already published.
+
+## Actual hosted first-run result and bounded correction
+
+[First preflight run #43718360611](https://github.com/k1moradi/swapz/actions/runs/43718360611): the **actual exact GitHub Actions checkout succeeded**, complete-source SHA/count/file checks passed, and real Linux `defconfig` succeeded. Real kernel `prepare` then failed with `tools/objtool/include/objtool/elf.h:10:10: fatal error: gelf.h: No such file or directory`; this is a missing **`libelf-dev` host build dependency**, not a demonstrated producer-code defect. The runner had no source modifications, source commit or loaded kernel qualification. An additive workflow correction installs `libelf-dev` in the disposable GitHub runner and now writes a bounded preflight manifest *before* the potentially failing kernel preparation, recording exact exit status. Verify that corrected workflow run on its own commit before claiming `prepare` PASS.

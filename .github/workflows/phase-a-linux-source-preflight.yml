@@ -23,6 +23,12 @@ jobs:
           path: linux-upstream
           fetch-depth: 1
           persist-credentials: false
+      - name: "Install upstream Linux host-build dependency"
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo apt-get update -qq
+          sudo apt-get install -y --no-install-recommends libelf-dev
       - name: "Verify complete source identity and actual kernel configuration"
         shell: bash
         env:
@@ -50,8 +56,6 @@ jobs:
             fi
           done
           mkdir -p "$RUNNER_TEMP/linux-config"
-          make -C linux-upstream O="$RUNNER_TEMP/linux-config" defconfig
-          make -C linux-upstream O="$RUNNER_TEMP/linux-config" -j2 prepare
           {
             printf 'source_repository=torvalds/linux\n'
             printf 'source_sha=%s\n' "$actual_sha"
@@ -60,11 +64,25 @@ jobs:
             make -s -C linux-upstream kernelversion
             printf 'compiler='
             gcc --version | head -1
-            printf 'config_sha256='
-            sha256sum "$RUNNER_TEMP/linux-config/.config" | awk '{print $1}'
             printf 'evidence_class=hosted-full-source-checkout-and-kbuild-prepare-only\n'
             printf 'source_modified=no\nsource_committed=no\nphase_a_qualified=no\n'
           } > "$RUNNER_TEMP/linux-preflight.txt"
+          if make -C linux-upstream O="$RUNNER_TEMP/linux-config" defconfig; then
+            printf 'defconfig_exit_code=0\n' >> "$RUNNER_TEMP/linux-preflight.txt"
+          else
+            command_exit=$?
+            printf 'defconfig_exit_code=%d\n' "$command_exit" >> "$RUNNER_TEMP/linux-preflight.txt"
+            exit "$command_exit"
+          fi
+          printf 'config_sha256=' >> "$RUNNER_TEMP/linux-preflight.txt"
+          sha256sum "$RUNNER_TEMP/linux-config/.config" | awk '{print $1}' >> "$RUNNER_TEMP/linux-preflight.txt"
+          if make -C linux-upstream O="$RUNNER_TEMP/linux-config" -j2 prepare; then
+            printf 'prepare_exit_code=0\n' >> "$RUNNER_TEMP/linux-preflight.txt"
+          else
+            command_exit=$?
+            printf 'prepare_exit_code=%d\n' "$command_exit" >> "$RUNNER_TEMP/linux-preflight.txt"
+            exit "$command_exit"
+          fi
           cat "$RUNNER_TEMP/linux-preflight.txt"
       - name: "Preserve bounded source preflight evidence"
         if: always()
