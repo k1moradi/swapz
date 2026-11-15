@@ -38,6 +38,7 @@ jobs:
           make -C tests/suites SANITIZE=1 test-all
           python3 -B tests/runtime/native/source-contract-test.py -v
           python3 -B tests/runtime/native/zswap-origin-consumer-source-test.py
+          python3 -B tests/runtime/native/pinned-linux-preflight-evidence-test.py -v
           git diff --check
       - name: ThreadSanitizer publication and slot-reuse probes
         if: matrix.arch == 'x86_64'

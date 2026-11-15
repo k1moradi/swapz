@@ -12920,3 +12920,63 @@ $SOURCE_READY_PENDING_COORDINATOR_CI$. Only the exact integrated
 GitHub Actions workflow run, with both effective profiles and their artifacts
 inspected, can qualify the new LLVM stock-source object-build claim.
 
+
+## Round 007 pinned GCC external-module export-table repair (2026-11-15)
+
+The pinned Linux GCC workflow builds `vmlinux` and then the **same**
+configured `O=` tree's real `modules` target with `CC=gcc`,
+`W=1` and bounded `-j4`. In pinned Linux
+`scripts/Makefile.modpost`, in-tree module `modpost` produces the
+combined `Module.symvers`; `vmlinux` alone and `modules_prepare`
+cannot qualify that export table.
+
+Require the real `modules` command to exit zero and the resulting
+`Module.symvers` to be nonempty before hashing it and compiling the
+actual source-staged `dm-swapz.ko`. Retain independent `CONFIG_ZSWAP=y/n`
+build trees, compiler/config/source identities, module linkage and
+size/hash checks, first-failure command/exits and small upload-on-failure
+manifests. Do not suppress modpost errors, infer success from an empty
+table or treat warning-only evidence as clean. Preserve the separate
+LLVM object-only job unchanged.
+
+Rootless structure/shell tests are not hosted Kbuild. Only Agent 1's
+exact-integrated-commit CI with both linked-module profiles can qualify
+the build; otherwise `SOURCE_READY_PENDING_COORDINATOR_CI`.
+Stock Linux does not authenticate stored-entry zswap BIO provenance:
+Phase A BLOCKED, Phase B RAW bypass disabled; no loaded/device tests.
+### Round 007 pinned Linux CI evidence contract negatives
+
+The rootless `tests/runtime/native/pinned-linux-preflight-evidence-test.py` is an
+adversarial **offline manifest grammar and claim-consistency test**. Run
+`python3 -B tests/runtime/native/pinned-linux-preflight-evidence-test.py -v`
+in the existing `product-codec.yml` exact-C source-contract stage, after the
+existing source-contract and zswap-origin tests. Only stdlib, bounded in-memory
+fixture bytes and no GitHub/network/kernel/privileged access are permitted.
+The standalone cases cover both pinned Linux `CONFIG_ZSWAP=y/n` profiles,
+source/config integrity, noncanonical or duplicate reserved values,
+truncation, false-clean success, missing/failed commands and forged module
+claims. An unrelated optional claim key may be tolerated only if it cannot
+change source, effective Kconfig, compiler/build outcome or module attribution.
+
+A `result=PASS` profile is **a producer claim**, not independent evidence.
+The GCC linked-module evidence class requires a matching upstream source and
+swapz checkout, validated effective config, positive canonical module size,
+module and `Module.symvers` SHA-256 digests, zero successful-command exit codes,
+and `module_linked=yes`. The independent Clang object-only evidence class
+requires bounded `LLVM=-18` command/config/object/hash proofs and **never**
+certifies a linked `dm-swapz.ko`. The fixture hashes only test parsing and do
+not authenticate real CI artifacts, existence or content of an ELF object.
+A real pinned-kernel module claim remains subject to full GitHub-hosted
+artifact inspection for the exact integrated source and both profiles.
+Neither offline manifest PASS nor linked stock-header builds prove patched
+MM/BIO provenance, running-kernel ABI, loaded mapper, stored-entry writeback,
+readback or production acceptance. Phase A remains BLOCKED; Phase B disabled.
+
+The frozen Round 007 rerun additionally enforces consistent GCC or Clang
+compiler identities and Clang LLD linker identity, and rejects a stock-source
+manifest that claims either `producer_authenticated=yes` or
+`upstream_patched=yes`. Unknown compiler/linker/LLVM claim-critical keys are
+not optional extension fields. The validator must still accept unrelated
+optional collector annotations and distinguish four valid offline y/n grammar
+fixtures from actual artifact provenance. These are bounded grammar checks;
+no fabricated SHA-256 fixture authenticates a compiled object or module.

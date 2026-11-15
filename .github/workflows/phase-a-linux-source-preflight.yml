@@ -269,6 +269,11 @@ jobs:
               "-j$KBUILD_JOBS" "W=$KBUILD_WARNING_LEVEL" modules_prepare || exit $?
             run_logged kernel_export_build make -s -C linux-upstream "O=$build_dir" CC=gcc \
               "-j$KBUILD_JOBS" "W=$KBUILD_WARNING_LEVEL" vmlinux || exit $?
+            # vmlinux alone does not generate the combined kernel export table.
+            # The in-tree modules target runs modpost and emits Module.symvers
+            # for this same configured kernel, before external-module Kbuild.
+            run_logged kernel_export_modules make -s -C linux-upstream "O=$build_dir" CC=gcc \
+              "-j$KBUILD_JOBS" "W=$KBUILD_WARNING_LEVEL" modules || exit $?
             current_phase=verify_kernel_symvers
             if [[ ! -s "$build_dir/Module.symvers" ]]; then
               echo "::error::Full pinned kernel export table missing; no qualified external module link"
