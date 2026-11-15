@@ -2654,6 +2654,14 @@ def retained_physical_trial_candidate():
 
 
 
+class PrivatePhysicalRecoveryScratchError(OSError):
+    """A fixed, path-free reason for a refused recovery log directory."""
+
+    def __init__(self, reason):
+        super().__init__(reason)
+        self.reason = reason
+
+
 def prepare_private_physical_recovery_log_directory():
     """Harden only owner-controlled scratch paths after explicit recovery consent.
 
@@ -2665,22 +2673,36 @@ def prepare_private_physical_recovery_log_directory():
     unsafe_write_bits = stat.S_IWGRP | stat.S_IWOTH
     descriptors = []
     try:
-        checkout_descriptor = os.open(ROOT, directory_flags)
+        try:
+            checkout_descriptor = os.open(ROOT, directory_flags)
+        except OSError as error:
+            raise PrivatePhysicalRecoveryScratchError(
+                "checkout_open_failed") from error
         descriptors.append(checkout_descriptor)
         checkout = os.fstat(checkout_descriptor)
         if (not stat.S_ISDIR(checkout.st_mode) or
-                checkout.st_uid != os.geteuid() or
-                checkout.st_mode & unsafe_write_bits):
-            raise OSError("checkout directory is not trusted")
+                checkout.st_uid != os.geteuid()):
+            raise PrivatePhysicalRecoveryScratchError(
+                "checkout_not_owner_controlled")
+        if checkout.st_mode & unsafe_write_bits:
+            # This checkout supplies the script later invoked with sudo.
+            # Never chmod it implicitly or execute group-writable code as root.
+            raise PrivatePhysicalRecoveryScratchError(
+                "checkout_group_or_world_writable")
 
         for name, private_mode in (("build", None), ("tests", 0o700)):
-            descriptor = os.open(name, directory_flags,
-                                 dir_fd=descriptors[-1])
+            try:
+                descriptor = os.open(name, directory_flags,
+                                     dir_fd=descriptors[-1])
+            except OSError as error:
+                raise PrivatePhysicalRecoveryScratchError(
+                    name + "_open_failed") from error
             descriptors.append(descriptor)
             directory = os.fstat(descriptor)
             if (not stat.S_ISDIR(directory.st_mode) or
                     directory.st_uid != os.geteuid()):
-                raise OSError("scratch directory is not owner-controlled")
+                raise PrivatePhysicalRecoveryScratchError(
+                    name + "_not_owner_controlled")
 
             # An ordinary umask 0002 can leave build/tests group-writable.
             # Repair only verified, opened inodes, never a path or symlink.
@@ -2688,12 +2710,17 @@ def prepare_private_physical_recovery_log_directory():
             required_mode = (mode & ~unsafe_write_bits
                              if private_mode is None else private_mode)
             if mode != required_mode:
-                os.fchmod(descriptor, required_mode)
+                try:
+                    os.fchmod(descriptor, required_mode)
+                except OSError as error:
+                    raise PrivatePhysicalRecoveryScratchError(
+                        name + "_permission_repair_failed") from error
             verified = os.fstat(descriptor)
             if (not stat.S_ISDIR(verified.st_mode) or
                     verified.st_uid != os.geteuid() or
                     stat.S_IMODE(verified.st_mode) != required_mode):
-                raise OSError("private directory permissions unverified")
+                raise PrivatePhysicalRecoveryScratchError(
+                    name + "_permission_verification_failed")
     finally:
         for descriptor in reversed(descriptors):
             os.close(descriptor)
@@ -2734,11 +2761,21 @@ def offer_retained_physical_trial_reconciliation():
         diagnostic_fd, diagnostic_path = tempfile.mkstemp(
             prefix="physical-owner-recovery-", suffix=".private.log",
             dir=diagnostic_dir)
-    except OSError:
+    except OSError as error:
+        if isinstance(error, PrivatePhysicalRecoveryScratchError):
+            refusal_category = error.reason
+        if refusal_category == "checkout_group_or_world_writable":
+            safe_action = (
+                "verify checkout ownership, then from the repository root "
+                "remove group/world write bits on that directory only "
+                "(chmod go-w -- .); do not alter swap devices")
+        else:
+            safe_action = (
+                "inspect checkout/build/tests ownership and permissions "
+                "read-only; do not alter swap devices")
         print("  BLOCKED: private recovery log unavailable; "
               f"reason={refusal_category}; no owner recovery attempted. "
-              "Safe next step: inspect checkout/build/tests ownership and "
-              "permissions read-only; do not alter swap devices.", flush=True)
+              f"Safe next step: {safe_action}.", flush=True)
         return
 
     command_prefix = ([] if os.geteuid() == 0

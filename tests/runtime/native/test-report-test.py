@@ -4055,6 +4055,29 @@ class ReportContract(unittest.TestCase):
                     stat.S_IMODE(private_diagnostics.stat().st_mode), 0o700)
                 captured_commands = []
 
+                # A writable checkout can replace the Python helper that
+                # sudo would execute. Refuse it before allocating a log,
+                # rather than silently chmodding source-controlled code.
+                runner.ROOT.chmod(0o770)
+                checkout_output = Terminal()
+                with mock.patch.object(runner.sys, "stdin",
+                                       Terminal("2\n")), \
+                        mock.patch.object(runner.sys, "stdout",
+                                          checkout_output), \
+                        mock.patch.object(
+                            runner, "retained_physical_trial_candidate",
+                            return_value=True), \
+                        mock.patch.object(runner.subprocess, "run") as recovery:
+                    runner.offer_retained_physical_trial_reconciliation()
+                    recovery.assert_not_called()
+                self.assertIn("reason=checkout_group_or_world_writable",
+                              checkout_output.getvalue())
+                self.assertIn("chmod go-w -- .", checkout_output.getvalue())
+                self.assertEqual(stat.S_IMODE(runner.ROOT.stat().st_mode),
+                                 0o770)
+                self.assertEqual(list(private_diagnostics.iterdir()), [])
+                runner.ROOT.chmod(0o700)
+
                 # A substituted scratch directory never gains owner
                 # authority, and cannot receive even a private log.
                 private_diagnostics.rmdir()

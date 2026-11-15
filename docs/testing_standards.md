@@ -3454,11 +3454,20 @@ without following symlinks, refuse a foreign-owned, symlinked, or group-writable
 checkout, tighten only pinned owned scratch inodes and recheck their modes
 before allocating the mode-`0600` recovery log. The checkout itself is never
 chmodded, and a refused option or untrusted path must not start recovery or
-write a log. The public refusal names only a fixed safe failure category and
-read-only inspection guidance, never filesystem or journal contents.
-The rootless fixture must prove the common permissive scratch case now
-launches only the explicitly chosen original helper, while a substituted
-scratch path remains fail-closed. Neither a repaired scratch directory nor a
+write a log. The public refusal must distinguish fixed checkout-open, checkout-owner,
+checkout-group/world-write, build-open/owner, tests-open/owner and scratch
+permission-repair/verification categories from private-log allocation errors.
+A group/world-writable checkout is NOT eligible for automatic permission
+repair: it supplies the Python recovery script later run as root. The console
+must give the exact safe owner-operated next step for that case (verify
+checkout ownership, then `chmod go-w -- .` from the repository root);
+never chmod source directories from the runner or change swap state to
+overcome this refusal. For all other cases, give read-only inspection
+guidance. Emit only fixed categories, not OS error messages or file paths.
+The rootless fixture must prove that a group-writable checkout blocks
+recovery without a private log or automatic chmod, while the common
+permissive owned scratch case launches only the explicitly chosen original
+helper and a substituted scratch path remains fail-closed. Neither a repaired scratch directory nor a
 name/UUID match grants the reporter physical-device recovery authority.
 
 The reporter for a genuine `physical_trial_mapper_present` failure must
