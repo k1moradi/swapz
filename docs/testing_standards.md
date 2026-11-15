@@ -3473,6 +3473,10 @@ checkout ownership, then `chmod go-w -- .` from the repository root);
 never chmod source directories from the runner or change swap state to
 overcome this refusal. For all other cases, give read-only inspection
 guidance. Emit only fixed categories, not OS error messages or file paths.
+The `build/tests` symlink-substitution regression must retain the exact
+`tests_open_failed` no-follow open category and prove no substituted path
+appears in public output; the recovery helper stays uncalled and no private
+log is written to the substituted directory.
 The rootless fixture must prove that a group-writable checkout blocks
 recovery without a private log or automatic chmod, while the common
 permissive owned scratch case launches only the explicitly chosen original

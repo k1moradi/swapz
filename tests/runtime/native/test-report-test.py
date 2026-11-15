@@ -4099,6 +4099,8 @@ class ReportContract(unittest.TestCase):
                 # O_NOFOLLOW rejects the symlink at the tests-open boundary.
                 self.assertIn("reason=tests_open_failed",
                               unsafe_directory_output.getvalue())
+                self.assertNotIn(str(substituted_directory),
+                                 unsafe_directory_output.getvalue())
                 self.assertEqual(list(substituted_directory.iterdir()), [])
                 private_diagnostics.unlink()
                 private_diagnostics.mkdir(mode=0o700)
