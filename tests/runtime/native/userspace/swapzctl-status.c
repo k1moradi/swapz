@@ -1512,6 +1512,9 @@ struct status_reader_fixture {
 	const char *const *statuses;
 	size_t count;
 	size_t calls;
+	/* Optional deterministic INFO sequence for the first of two targets. */
+	const char *const *first_statuses;
+	size_t first_status_count;
 	size_t present_reads; /* Zero means present on every read. */
 	uint64_t second_device; /* Nonzero changes the identity on the second read. */
 	int second_target_status; /* Negative means a failed later target. */
@@ -1539,7 +1542,13 @@ static int read_fixture_observation(
 		return -1;
 	}
 	assert(fixture->count);
-	texts[0] = fixture_valid_status;
+	if (fixture->first_statuses) {
+		assert(fixture->first_status_count);
+		texts[0] = fixture->first_statuses[fixture->calls %
+					   fixture->first_status_count];
+	} else {
+		texts[0] = fixture_valid_status;
+	}
 	texts[1] = fixture->statuses[fixture->calls % fixture->count];
 	buffer = malloc(2048);
 	assert(buffer);
@@ -3646,6 +3655,305 @@ static void test_swapz_mixed_full_table_identity_guards(void)
 	}
 }
 
+/*
+ * Round 005: real two-INFO origin observations, including multi-target
+ * atomicity. All generated DM replies use the existing bounded fake reader.
+ */
+#define ROUND005_BASE_STATUS \
+	"logical_write=8192 physical_write=4096 gc_write=0 " \
+	"compressed=2 raw=0 zero_elided=0 bulk_mode=1 bulk_padding=0 " \
+	"failed=0 error=0"
+#define ROUND005_ORIGIN(admitted, committed, carrier) \
+	ROUND005_BASE_STATUS \
+	" verified_zswap_origin_admitted=" admitted \
+	" foreground_committed_verified_zswap_writeback=" committed \
+	" origin_carrier_compiled=" carrier
+
+struct round005_expected_origin {
+	unsigned int valid;
+	unsigned long long admitted;
+	unsigned long long committed;
+	unsigned long long carrier;
+};
+
+struct round005_origin_reader_call {
+	struct status_reader_fixture *fixture;
+	struct status_ready_report *report;
+};
+
+static int round005_read_origin_pair(void *context)
+{
+	struct round005_origin_reader_call *call = context;
+
+	return report_device_status_with_reader(call->fixture,
+		read_fixture_observation, "fixture", 1, call->report);
+}
+
+static int round005_report_origin(void *context)
+{
+	report_swapz_origin_telemetry(context);
+	return 0;
+}
+
+static void round005_assert_origin(const struct swapz_ratio_status *ratio,
+				   const struct round005_expected_origin *expected)
+{
+	char output[512];
+	char error_output[128];
+
+	assert(ratio->origin_telemetry_valid == (int)expected->valid);
+	assert(ratio->verified_zswap_origin_admitted == expected->admitted);
+	assert(ratio->foreground_committed_verified_zswap_writeback ==
+	       expected->committed);
+	assert(ratio->origin_carrier_compiled == expected->carrier);
+	assert(swapz_test_capture_output(round005_report_origin, (void *)ratio,
+					 output, sizeof(output), error_output,
+					 sizeof(error_output)) == 0);
+	assert(!error_output[0]);
+	if (!expected->valid) {
+		assert(strstr(output, "Origin INFO: unavailable"));
+		assert(!strstr(output, "Verified admissions: 0 pages"));
+	} else {
+		assert(!strstr(output, "Origin INFO: unavailable"));
+		assert(strstr(output, expected->carrier ?
+			      "Carrier compiled: yes" : "Carrier compiled: no"));
+		if (!expected->admitted)
+			assert(strstr(output, "Verified admissions: 0 pages"));
+		if (!expected->committed)
+			assert(strstr(output, "Verified foreground commits: 0 pages"));
+	}
+}
+
+struct round005_origin_case {
+	const char *name;
+	const char *const *first_statuses;
+	size_t first_count;
+	const char *const *second_statuses;
+	size_t second_count;
+	uint64_t second_device;
+	int second_target_status;
+	size_t expected_reads;
+	const char *expected_state;
+	const char *expected_field;
+	const char *expected_target;
+	struct round005_expected_origin first_origin;
+	struct round005_expected_origin second_origin;
+};
+
+static void test_round005_double_info_origin_snapshot_races(void)
+{
+	static const char *const legacy[] = { ROUND005_BASE_STATUS };
+	static const char *const zero_disabled[] = {
+		ROUND005_ORIGIN("0", "0", "0")
+	};
+	static const char *const zero_enabled[] = {
+		ROUND005_ORIGIN("0", "0", "1")
+	};
+	static const char *const one_committed[] = {
+		ROUND005_ORIGIN("2", "1", "1")
+	};
+	static const char *const two_committed[] = {
+		ROUND005_ORIGIN("2", "2", "1")
+	};
+	static const char *const torn_admissions[] = {
+		ROUND005_ORIGIN("1", "2", "1")
+	};
+	static const char *const torn_total_pages[] = {
+		ROUND005_ORIGIN("3", "3", "1")
+	};
+	static const char *const invalid_carrier[] = {
+		ROUND005_ORIGIN("2", "1", "2")
+	};
+	static const char *const partial_group[] = {
+		ROUND005_BASE_STATUS " verified_zswap_origin_admitted=2"
+	};
+	static const char *const unavailable[] = {
+		"status_snapshot_error=-5"
+	};
+	static const char *const changing_admissions[] = {
+		ROUND005_ORIGIN("2", "1", "1"),
+		ROUND005_ORIGIN("3", "1", "1")
+	};
+	static const char *const changing_commits[] = {
+		ROUND005_ORIGIN("2", "1", "1"),
+		ROUND005_ORIGIN("2", "2", "1")
+	};
+	static const char *const changing_carrier[] = {
+		ROUND005_ORIGIN("0", "0", "0"),
+		ROUND005_ORIGIN("0", "0", "1")
+	};
+	static const char *const changing_availability[] = {
+		ROUND005_BASE_STATUS,
+		ROUND005_ORIGIN("0", "0", "0")
+	};
+	static const char *const converging[] = {
+		ROUND005_ORIGIN("2", "1", "1"),
+		ROUND005_ORIGIN("2", "2", "1"),
+		ROUND005_ORIGIN("2", "2", "1"),
+		ROUND005_ORIGIN("2", "2", "1")
+	};
+	static const struct round005_origin_case cases[] = {
+		{ .name = "legacy-both", .first_statuses = legacy,
+		  .first_count = 1, .second_statuses = legacy,
+		  .second_count = 1, .expected_reads = 2 },
+		{ .name = "measured-zero-disabled", .first_statuses = zero_disabled,
+		  .first_count = 1, .second_statuses = zero_disabled,
+		  .second_count = 1, .expected_reads = 2,
+		  .first_origin = { 1, 0, 0, 0 },
+		  .second_origin = { 1, 0, 0, 0 } },
+		{ .name = "measured-zero-enabled", .first_statuses = zero_enabled,
+		  .first_count = 1, .second_statuses = zero_enabled,
+		  .second_count = 1, .expected_reads = 2,
+		  .first_origin = { 1, 0, 0, 1 },
+		  .second_origin = { 1, 0, 0, 1 } },
+		{ .name = "enabled-both", .first_statuses = one_committed,
+		  .first_count = 1, .second_statuses = two_committed,
+		  .second_count = 1, .expected_reads = 2,
+		  .first_origin = { 1, 2, 1, 1 },
+		  .second_origin = { 1, 2, 2, 1 } },
+		{ .name = "torn-admissions-second", .first_statuses = one_committed,
+		  .first_count = 1, .second_statuses = torn_admissions,
+		  .second_count = 1, .expected_reads = 2U * SWAPZ_STATUS_SNAPSHOT_RETRIES,
+		  .expected_state = "UNAVAILABLE",
+		  .expected_field = "foreground_committed_verified_zswap_writeback",
+		  .expected_target = "target 2 snapshot 2" },
+		{ .name = "torn-pages-second", .first_statuses = one_committed,
+		  .first_count = 1, .second_statuses = torn_total_pages,
+		  .second_count = 1, .expected_reads = 2U * SWAPZ_STATUS_SNAPSHOT_RETRIES,
+		  .expected_state = "UNAVAILABLE",
+		  .expected_field = "foreground_committed_verified_zswap_writeback",
+		  .expected_target = "target 2 snapshot 2" },
+		{ .name = "torn-admissions-first", .first_statuses = torn_admissions,
+		  .first_count = 1, .second_statuses = one_committed,
+		  .second_count = 1, .expected_reads = 2U * SWAPZ_STATUS_SNAPSHOT_RETRIES,
+		  .expected_state = "UNAVAILABLE",
+		  .expected_field = "foreground_committed_verified_zswap_writeback",
+		  .expected_target = "target 1 snapshot 2" },
+		{ .name = "changing-admissions-first", .first_statuses = changing_admissions,
+		  .first_count = 2, .second_statuses = one_committed,
+		  .second_count = 1, .expected_reads = 2U * SWAPZ_STATUS_SNAPSHOT_RETRIES,
+		  .expected_state = "UNAVAILABLE",
+		  .expected_field = "dm_target_spec.params",
+		  .expected_target = "target 1 snapshot 2" },
+		{ .name = "changing-commits-second", .first_statuses = one_committed,
+		  .first_count = 1, .second_statuses = changing_commits,
+		  .second_count = 2, .expected_reads = 2U * SWAPZ_STATUS_SNAPSHOT_RETRIES,
+		  .expected_state = "UNAVAILABLE",
+		  .expected_field = "dm_target_spec.params",
+		  .expected_target = "target 2 snapshot 2" },
+		{ .name = "changing-carrier-second", .first_statuses = zero_enabled,
+		  .first_count = 1, .second_statuses = changing_carrier,
+		  .second_count = 2, .expected_reads = 2U * SWAPZ_STATUS_SNAPSHOT_RETRIES,
+		  .expected_state = "UNAVAILABLE",
+		  .expected_field = "dm_target_spec.params",
+		  .expected_target = "target 2 snapshot 2" },
+		{ .name = "changing-presence-second", .first_statuses = legacy,
+		  .first_count = 1, .second_statuses = changing_availability,
+		  .second_count = 2, .expected_reads = 2U * SWAPZ_STATUS_SNAPSHOT_RETRIES,
+		  .expected_state = "UNAVAILABLE",
+		  .expected_field = "dm_target_spec.params",
+		  .expected_target = "target 2 snapshot 2" },
+		{ .name = "converges-on-second-attempt", .first_statuses = one_committed,
+		  .first_count = 1, .second_statuses = converging,
+		  .second_count = 4, .expected_reads = 4,
+		  .first_origin = { 1, 2, 1, 1 },
+		  .second_origin = { 1, 2, 2, 1 } },
+		{ .name = "invalid-carrier-second", .first_statuses = one_committed,
+		  .first_count = 1, .second_statuses = invalid_carrier,
+		  .second_count = 1, .expected_reads = 1,
+		  .expected_state = "BLOCKED", .expected_field = "origin_carrier_compiled",
+		  .expected_target = "target 2 snapshot 1" },
+		{ .name = "partial-group-second", .first_statuses = one_committed,
+		  .first_count = 1, .second_statuses = partial_group,
+		  .second_count = 1, .expected_reads = 1,
+		  .expected_state = "BLOCKED",
+		  .expected_field = "origin provenance INFO group",
+		  .expected_target = "target 2 snapshot 1" },
+		{ .name = "invalid-carrier-first", .first_statuses = invalid_carrier,
+		  .first_count = 1, .second_statuses = one_committed,
+		  .second_count = 1, .expected_reads = 1,
+		  .expected_state = "BLOCKED", .expected_field = "origin_carrier_compiled",
+		  .expected_target = "target 1 snapshot 1" },
+		{ .name = "failed-later-target", .first_statuses = one_committed,
+		  .first_count = 1, .second_statuses = one_committed,
+		  .second_count = 1, .second_target_status = -5,
+		  .expected_reads = 1, .expected_state = "FAILED",
+		  .expected_field = "dm_target_spec.status",
+		  .expected_target = "target 2 snapshot 1" },
+		{ .name = "unavailable-later-target", .first_statuses = one_committed,
+		  .first_count = 1, .second_statuses = unavailable,
+		  .second_count = 1, .expected_reads = 1,
+		  .expected_state = "UNAVAILABLE",
+		  .expected_field = "status_snapshot_error",
+		  .expected_target = "target 2 snapshot 1" },
+		{ .name = "identity-mismatch-second", .first_statuses = one_committed,
+		  .first_count = 1, .second_statuses = one_committed,
+		  .second_count = 1, .second_device = 2,
+		  .expected_reads = 2, .expected_state = "BLOCKED",
+		  .expected_field = "dm_ioctl.dev",
+		  .expected_target = "snapshot 2" }
+	};
+	size_t case_index;
+
+	for (case_index = 0; case_index < sizeof(cases) / sizeof(cases[0]);
+	     ++case_index) {
+		const struct round005_origin_case *scenario = &cases[case_index];
+		struct status_reader_fixture fixture = {
+			.statuses = scenario->second_statuses,
+			.count = scenario->second_count,
+			.first_statuses = scenario->first_statuses,
+			.first_status_count = scenario->first_count,
+			.second_device = scenario->second_device,
+			.second_target_status = scenario->second_target_status
+		};
+		struct status_ready_report report = { 0 };
+		struct round005_origin_reader_call call = {
+			.fixture = &fixture, .report = &report
+		};
+		char output[512];
+		char diagnostic[2048];
+		int result = swapz_test_capture_output(round005_read_origin_pair, &call,
+					output, sizeof(output), diagnostic,
+					sizeof(diagnostic));
+
+		if (fixture.calls != scenario->expected_reads || output[0]) {
+			fprintf(stderr, "FAIL: origin snapshot case=%s reads=%zu expected=%zu partial_output=%u\n",
+				scenario->name, fixture.calls, scenario->expected_reads,
+				(unsigned int)(output[0] != '\0'));
+			abort();
+		}
+		if (scenario->expected_state) {
+			if (result != -2 || report.count || !diagnostic[0] ||
+			    !strstr(diagnostic, scenario->expected_state) ||
+			    !strstr(diagnostic, scenario->expected_field) ||
+			    !strstr(diagnostic, scenario->expected_target) ||
+			    strstr(diagnostic, "logical_write=8192") ||
+			    strstr(diagnostic, "verified_zswap_origin_admitted=")) {
+				fprintf(stderr, "FAIL: origin snapshot case=%s state/result/diagnosis mismatch\n",
+					scenario->name);
+				abort();
+			}
+		} else {
+			if (result || diagnostic[0] || report.count != 2U ||
+			    report.targets[0].target_index != 0U ||
+			    report.targets[1].target_index != 1U) {
+				fprintf(stderr, "FAIL: origin snapshot case=%s success/target count mismatch\n",
+					scenario->name);
+				abort();
+			}
+			round005_assert_origin(&report.targets[0].ratio,
+					      &scenario->first_origin);
+			round005_assert_origin(&report.targets[1].ratio,
+					      &scenario->second_origin);
+		}
+		free(report.targets);
+	}
+	assert(sizeof(cases) / sizeof(cases[0]) == 18U);
+}
+
+#undef ROUND005_ORIGIN
+#undef ROUND005_BASE_STATUS
+
 static void test_status_is_read_only(void)
 {
 	unsigned char *reply = NULL;
@@ -3697,6 +4005,7 @@ int main(void)
 	test_saturated_staged_padding_is_unavailable();
 	test_snapshot_retry_exhaustion_and_failures();
 	test_complete_snapshot_before_output();
+	test_round005_double_info_origin_snapshot_races();
 	test_final_inventory_fake_ioctl_observation_gap();
 	test_bounded_adversarial_dm_status_corpus();
 	test_bounded_adversarial_dm_list_corpus();

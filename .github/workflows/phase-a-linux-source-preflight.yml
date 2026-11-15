@@ -13,7 +13,7 @@ jobs:
   pinned-upstream-checkout:
     name: "Exact Linux source and CONFIG_ZSWAP Kbuild y/n"
     runs-on: ubuntu-24.04
-    timeout-minutes: 40
+    timeout-minutes: 85
     steps:
       - name: "Initialize bounded per-config Kbuild evidence"
         shell: bash
@@ -29,6 +29,11 @@ jobs:
             printf 'requested_zswap=%s\nresult=NOT_RUN\nreason=checkout_or_preflight_incomplete\n' \
               "$requested_zswap" > "$evidence_dir/$profile.txt"
           done
+      - name: "Fetch actual swapz consumer source at the workflow commit"
+        uses: actions/checkout@v4
+        with:
+          path: swapz-consumer
+          persist-credentials: false
       - name: "Fetch exact upstream Linux revision into an independent repository"
         uses: actions/checkout@v4
         with:
@@ -102,7 +107,7 @@ jobs:
         shell: bash
         env:
           EXPECTED_LINUX_SHA: c339f4010dea8b0d754f84ace70cd1b089878ef8
-          KBUILD_JOBS: "2"
+          KBUILD_JOBS: "4"
           KBUILD_WARNING_LEVEL: "1"
         run: |
           set -euo pipefail
@@ -114,8 +119,8 @@ jobs:
             local failed_exit_code="$?"
             if (( failed_exit_code != 0 )); then
               local failure_manifest="${current_manifest:-$evidence_dir/setup.txt}"
-              printf 'result=FAIL\nfirst_failure=%s\nfirst_failure_exit_code=%d\n' \
-                "$current_phase" "$failed_exit_code" >> "$failure_manifest"
+              printf 'result=FAIL\nfirst_failure=%s\nfirst_failure_exit_code=%d\nerror_category=%s\n' \
+                "$current_phase" "$failed_exit_code" "$current_phase" >> "$failure_manifest"
             fi
           }
           trap record_failure EXIT
@@ -134,6 +139,21 @@ jobs:
             echo "::error::Pinned Linux checkout changed before Kbuild"
             exit 1
           fi
+          current_phase=verify_swapz_checkout
+          swapz_sha="$(git -C swapz-consumer rev-parse HEAD)"
+          if [[ "$swapz_sha" != "$GITHUB_SHA" ]] ||
+             [[ -n "$(git -C swapz-consumer status --porcelain)" ]] ||
+             [[ ! -f swapz-consumer/src/kernel/Makefile ]] ||
+             [[ ! -f swapz-consumer/src/kernel/VERSION ]] ||
+             [[ ! -f swapz-consumer/src/kernel/dm-target.c ]]; then
+            echo "::error::Source-bound swapz kernel checkout missing, dirty or at wrong SHA"
+            exit 1
+          fi
+          # The staging Makefile requires an explicit existing provenance header.
+          # Embed this committed and checked-clean swapz source SHA, not a guess.
+          build_info_source="$RUNNER_TEMP/swapz-module-build-info.h"
+          printf '#define SWAPZ_BUILD_SOURCE_SHA "%s"\n#define SWAPZ_BUILD_SOURCE_CLEAN 1\n' \
+            "$swapz_sha" > "$build_info_source"
           compiler_version="$(gcc --version | sed -n '1p')"
 
           run_logged() {
@@ -155,6 +175,12 @@ jobs:
               tail -n 30 "$RUNNER_TEMP/linux-kbuild-command.log"
             fi
             printf '%s_exit_code=%d\n' "$command_name" "$command_exit_code" >> "$current_manifest"
+            if [[ "$command_name" == swapz_module_kbuild ]]; then
+              # Distinguish a linked build with warnings from a clean W=1 result.
+              module_warning_count="$(grep -cE '(^|[[:space:]])warning:' \
+                "$RUNNER_TEMP/linux-kbuild-command.log" || true)"
+              printf 'module_warning_count=%s\n' "$module_warning_count" >> "$current_manifest"
+            fi
             return "$command_exit_code"
           }
 
@@ -174,27 +200,34 @@ jobs:
             {
               printf 'source_repository=torvalds/linux\n'
               printf 'source_sha=%s\n' "$source_sha"
+              printf 'swapz_sha=%s\n' "$swapz_sha"
               printf 'requested_zswap=%s\n' "$requested_zswap"
               printf 'compiler=%s\n' "$compiler_version"
               printf 'kbuild_jobs=%s\n' "$KBUILD_JOBS"
               printf 'kbuild_warning_level=%s\n' "$KBUILD_WARNING_LEVEL"
-              printf 'evidence_class=pinned-linux-source-targeted-kbuild-only\n'
+              printf 'evidence_class=pinned-linux-targeted-objects-and-linked-external-module\n'
               printf 'phase_a_qualified=no\nproducer_authenticated=no\n'
             } > "$current_manifest"
 
             # Each profile gets a fresh independent out-of-tree Kconfig and objects.
             run_logged defconfig make -s -C linux-upstream "O=$build_dir" CC=gcc defconfig || exit $?
             run_logged scripts_config linux-upstream/scripts/config --file "$build_dir/.config" \
-              --enable SWAP "$config_operation" ZSWAP || exit $?
+              --enable SWAP "$config_operation" ZSWAP \
+              --enable MODULES --enable MD --enable BLK_DEV_DM --enable CRYPTO_LZ4 || exit $?
             run_logged olddefconfig make -s -C linux-upstream "O=$build_dir" CC=gcc olddefconfig || exit $?
             current_phase=verify_effective_config
             if grep -Fxq 'CONFIG_SWAP=y' "$build_dir/.config" &&
-               grep -Fxq "$expected_line" "$build_dir/.config"; then
-              printf 'effective_swap=y\neffective_zswap=%s\nconfig_verification_exit_code=0\n' \
+               grep -Fxq "$expected_line" "$build_dir/.config" &&
+               grep -Fxq 'CONFIG_MODULES=y' "$build_dir/.config" &&
+               grep -Fxq 'CONFIG_BLK_DEV_DM=y' "$build_dir/.config" &&
+               grep -Fxq 'CONFIG_CRYPTO_LZ4=y' "$build_dir/.config" &&
+               grep -Fxq 'CONFIG_LZ4_COMPRESS=y' "$build_dir/.config" &&
+               grep -Fxq 'CONFIG_LZ4_DECOMPRESS=y' "$build_dir/.config"; then
+              printf 'effective_swap=y\neffective_zswap=%s\neffective_modules=y\neffective_blk_dev_dm=y\neffective_crypto_lz4=y\neffective_lz4_compress=y\neffective_lz4_decompress=y\nconfig_verification_exit_code=0\n' \
                 "$requested_zswap" >> "$current_manifest"
             else
               printf 'config_verification_exit_code=1\n' >> "$current_manifest"
-              echo "::error::Pinned Linux Kconfig silently rejected the requested SWAP/ZSWAP state"
+              echo "::error::Pinned Linux rejected required SWAP, ZSWAP, module, DM or LZ4 configuration"
               exit 1
             fi
             current_phase=hash_configuration
@@ -202,6 +235,14 @@ jobs:
             printf 'config_sha256=%s\n' "${config_sha256%% *}" >> "$current_manifest"
             run_logged prepare make -s -C linux-upstream "O=$build_dir" CC=gcc \
               "-j$KBUILD_JOBS" "W=$KBUILD_WARNING_LEVEL" prepare || exit $?
+
+            current_phase=verify_kernel_compiler_identity
+            recorded_compiler="$(sed -n 's/^CONFIG_CC_VERSION_TEXT=//p' "$build_dir/include/config/auto.conf")"
+            if [[ -z "$recorded_compiler" ]]; then
+              echo "::error::Kbuild did not record its effective compiler identity"
+              exit 1
+            fi
+            printf 'kbuild_recorded_compiler=%s\n' "$recorded_compiler" >> "$current_manifest"
 
             source_objects=(mm/page_io.o block/bio.o)
             if [[ "$requested_zswap" == y ]]; then
@@ -222,6 +263,59 @@ jobs:
               echo "::error::CONFIG_ZSWAP=n unexpectedly produced mm/zswap.o"
               exit 1
             fi
+            # modules_prepare by itself cannot provide a complete Module.symvers.
+            # Build this very same out-of-tree kernel for real exported symbols.
+            run_logged modules_prepare make -s -C linux-upstream "O=$build_dir" CC=gcc \
+              "-j$KBUILD_JOBS" "W=$KBUILD_WARNING_LEVEL" modules_prepare || exit $?
+            run_logged kernel_export_build make -s -C linux-upstream "O=$build_dir" CC=gcc \
+              "-j$KBUILD_JOBS" "W=$KBUILD_WARNING_LEVEL" vmlinux || exit $?
+            current_phase=verify_kernel_symvers
+            if [[ ! -s "$build_dir/Module.symvers" ]]; then
+              echo "::error::Full pinned kernel export table missing; no qualified external module link"
+              exit 1
+            fi
+            printf 'module_symvers_sha256=%s\n' \
+              "$(sha256sum "$build_dir/Module.symvers" | cut -d' ' -f1)" >> "$current_manifest"
+
+            # Separate staging directories prevent stale object reuse across
+            # CONFIG_ZSWAP configurations without touching tracked swapz files.
+            module_stage="$RUNNER_TEMP/swapz-kbuild-$profile"
+            run_logged swapz_module_kbuild make -s -C swapz-consumer/src/kernel \
+              "KDIR=$build_dir" "SWAPZ_STAGE=$module_stage" \
+              "SWAPZ_BUILD_INFO=$build_info_source" CC=gcc \
+              "-j$KBUILD_JOBS" "W=$KBUILD_WARNING_LEVEL" all || exit $?
+            current_phase=verify_linked_swapz_module
+            module_artifact="$module_stage/dm-swapz.ko"
+            if [[ ! -s "$module_artifact" ]]; then
+              echo "::error::Pinned Linux Kbuild did not link a nonempty dm-swapz.ko"
+              exit 1
+            fi
+            module_bytes="$(stat -c '%s' "$module_artifact")"
+            printf 'module_linked=yes\nmodule_bytes=%s\nmodule_sha256=%s\n' \
+              "$module_bytes" "$(sha256sum "$module_artifact" | cut -d' ' -f1)" \
+              >> "$current_manifest"
+            current_phase=verify_staged_module_source
+            for module_source in swapz-consumer/src/kernel/Makefile \
+                swapz-consumer/src/kernel/*.c swapz-consumer/src/kernel/*.h; do
+              if [[ "${module_source##*/}" == swapz-build-info.h ]]; then
+                continue
+              fi
+              if ! cmp -s "$module_source" "$module_stage/${module_source##*/}"; then
+                echo "::error::Module staged source differs from committed swapz code"
+                exit 1
+              fi
+            done
+            if ! cmp -s "$build_info_source" "$module_stage/swapz-build-info.h"; then
+              echo "::error::Module built with unexpected source identity header"
+              exit 1
+            fi
+            current_phase=verify_clean_swapz_source
+            if [[ "$(git -C swapz-consumer rev-parse HEAD)" != "$GITHUB_SHA" ]] ||
+               [[ -n "$(git -C swapz-consumer status --porcelain)" ]]; then
+              echo "::error::swapz source changed during pinned external-module build"
+              exit 1
+            fi
+            printf 'error_category=none\n' >> "$current_manifest"
             current_phase=verify_unchanged_source
             if [[ "$(git -C linux-upstream rev-parse HEAD)" != "$EXPECTED_LINUX_SHA" ]] ||
                [[ -n "$(git -C linux-upstream status --porcelain)" ]]; then

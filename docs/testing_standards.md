@@ -12779,3 +12779,91 @@ retrievable source commit without that hosted run is
 Kbuild nor these rootless source checks remove the real producer/BIO ABI,
 stored-entry writeback or loaded-readback Phase A gates. Phase A remains
 BLOCKED; Phase B RAW bypass remains disabled.
+
+## Round 005 matched-stock-Linux swapz module compile-only (2026-11-15)
+
+The existing `.github/workflows/phase-a-linux-source-preflight.yml`
+must check out **two source-identified repositories**: the exact unmodified
+`torvalds/linux@c339f4010dea8b0d754f84ace70cd1b089878ef8` and the
+`swapz` commit corresponding to the GitHub workflow run (`GITHUB_SHA`).
+Both checkouts must be verified clean; retain the full pinned Linux file-count,
+source identity and original `CONFIG_ZSWAP=y/n` real-object checks from
+Round 004. The upstream stock Linux tree contains **no approved authenticated
+stored-entry zswap BIO provenance producer**; the expected compiled fallback
+remains ordinary/UNKNOWN with `origin_carrier_compiled=0`.
+
+Run each profile in a distinct Linux `O=` directory and isolated swapz
+module staging directory under runner temporary storage, never compiling
+against unrelated installed/running-kernel headers. After `defconfig`,
+apply the `CONFIG_ZSWAP=y` or `n` choice using Linux's own `scripts/config`
+and `olddefconfig`. Verify the *effective*, not merely requested,
+`CONFIG_SWAP=y`, `CONFIG_MODULES=y`, built-in
+`CONFIG_BLK_DEV_DM=y`, `CONFIG_CRYPTO_LZ4=y` and selected
+`CONFIG_LZ4_COMPRESS=y` / `CONFIG_LZ4_DECOMPRESS=y`.
+The DM and compression capabilities are required to build the existing
+Device Mapper consumer, independent of ZSWAP enablement. Record exact
+kernel source SHA, swapz source SHA, effective flags, `.config` SHA-256
+and the Kbuild-recorded compiler identity.
+
+Run the existing real Linux `mm/page_io.o`, `block/bio.o` and enabled-only
+`mm/zswap.o` object checks first. For a **linked** external-module build,
+`modules_prepare` alone is insufficient: it does not generate
+`Module.symvers`, so build the *same* out-of-tree kernel's `vmlinux` and
+require a nonempty source-derived `Module.symvers` before invoking the
+tracked `src/kernel/Makefile` staging wrapper with that very Linux build
+directory as `KDIR`. Use an explicit checked-source build-info header
+and profile-isolated `SWAPZ_STAGE`; do not bypass the production staging,
+version or source-copy contract. Check each original staged `.c` / `.h`
+and Makefile against the checked-out swapz originals, and verify the staged
+build-info header and clean unchanged source tree after compilation.
+
+A profile may say `result=PASS` only after the actual external-module Kbuild
+command exits zero **and** `dm-swapz.ko` exists with strictly positive size.
+Report actual `Module.symvers` hash, exact shell-escaped Kbuild command and
+exit, module byte size/hash, and counted module warning diagnostics; successful
+linking with warnings is distinct from a warning-free build. Do not mark
+`modules_prepare`, object-only compilation, a missing export symbol table,
+`KBUILD_MODPOST_WARN`, or an ignored modpost exit as linked-module PASS.
+Retain bounded per-profile manifests and first-failure phase/exit/category,
+uploading the small text artifacts even on workflow failure. Use bounded
+`-j1..4` and `W=1` or `W=2` and fail-only console diagnostics;
+do not upload a large kernel build tree or `.ko` from this preflight.
+
+The worker's unreferenced Git source-object commit, local YAML parse,
+`bash -n`, or source-bound/mock failure-path tests only establish
+`SOURCE_READY_PENDING_COORDINATOR_CI`. A **hosted workflow run on the
+exact integrated commit** must complete both independent profiles before
+claiming actual pinned-stock-Linux linked-module qualification. Neither
+this compile-only result nor a stock-header `dm-swapz.ko` establishes
+authenticated upstream MM/BIO origin, a matched patched running kernel,
+module load, a true stored-entry eviction, byte-exact readback, or physical
+qualification. Phase A remains BLOCKED; Phase B RAW bypass stays disabled.
+
+
+### Round 005 double-INFO provenance snapshot race tests
+
+The compiled native fixture tests/runtime/native/userspace/swapzctl-status.c
+must exercise the real production report_device_status_with_reader() against
+the existing bounded, read-only fake Device Mapper two-target observer. Its
+18 deterministic scenarios cover separately varying first/second target
+origin groups, legacy-absent versus measured zero (both carrier values),
+genuine enabled counters within admitted/represented bounds, torn counters,
+changed counters/carrier/group presence, eventual stable convergence, and
+later-target malformed/FAILED/unavailable or DM identity failures.
+
+Each failed pair must leave no published output or retained staged target.
+Correctly changing and torn observations exhaust exactly
+2 * SWAPZ_STATUS_SNAPSHOT_RETRIES reads; a later stable pair must succeed in
+four reads and attribute each target once. The fixture checks bounded,
+field-scoped first-cause diagnostics without echoing the raw INFO payload;
+the reported carrier state remains a build-time capability rather than
+running-kernel ABI proof. Free each successful or rejected report inventory.
+
+Run make -C tests/suites SANITIZE=1 test-userspace with the complete source
+checkout, plus available strict GCC/Clang sanitizer builds. An isolated
+compiler-interface stub may catch syntax errors but is not a passing
+production-parser test; keep it distinct from hosted full-source results.
+No new CLI or JSON v1 fields, origin-conditioned codec behavior, privileged
+ioctl, active swap, physical storage or Phase B RAW bypass is authorized.
+Phase A still requires a real matched Linux MM producer, authenticated BIO
+propagation and stored-entry writeback/readback evidence.
