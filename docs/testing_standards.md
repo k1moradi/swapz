@@ -12994,3 +12994,35 @@ new negative failure classes cover this stage; all other existing fixture
 claims, LLVM object-only semantics and source-only qualification limits remain
 unchanged. This is a coordinator schema consistency change, not an authenticated
 Linux producer or tested live writeback.
+
+## Round 008 DM observer failure-atomicity stress (2026-11-15)
+
+The existing compiled `tests/runtime/native/userspace/swapzctl-status.c`
+fixture adds exactly 128 deterministic two-target DM observation schedules
+(16 modes × 8 seeded variations; fixed seed `0x8A4F0C21`). The fake reader
+is strictly single-threaded, owns each bounded 2048-byte DM INFO reply until
+the production observation collector releases it, and never opens or operates
+on an actual mapper, Linux swap target or physical device. The successful
+result is one owned contiguous array of exactly two validated targets, freed
+once by its caller; failed cases must retain no accepted target or stdout.
+
+Schedules test late-target malformed, FAILED, partial and overflowing origin
+INFO, torn but individually canonical admission/commit counters on either
+target, changed mapper name/device/event/target count, repeated valid
+requeue-like changes, bounded retry exhaustion, and eventual convergence
+through the last permitted attempt. The oracle independently checks exact
+callback count (at most 16), fail-first field-scoped diagnostic class without
+echoing untrusted INFO, provenance availability versus measured zero, and
+the per-target committed-origin sum without double counting. These new tests
+are additive to the existing Round 004/005 adversarial cases; they do not
+weaken the original source-linked parser assertions or JSON v1 semantics.
+
+A GCC/Clang standalone **syntax-only** check of the new block is useful
+development evidence, but only execution of the native fixture compiled
+against the exact production `swapzctl.c`, with warning-clean sanitizers and
+the official `make -C tests/suites SANITIZE=1 test-userspace`, can establish
+a production-linked rootless PASS. Missing a complete checked-out source
+requires `SOURCE_READY_PENDING_COORDINATOR_CI`, not synthetic success. No
+rootless test establishes an authenticated MM→BIO stored-zswap writeback,
+loaded-module behavior, physical readback, or Phase A qualification.
+Phase B remains disabled.

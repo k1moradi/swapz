@@ -3951,6 +3951,321 @@ static void test_round005_double_info_origin_snapshot_races(void)
 	assert(sizeof(cases) / sizeof(cases[0]) == 18U);
 }
 
+/*
+ * Round 008: deterministic stress of the actual two-INFO DM status reader.
+ * This single-threaded fake owns each malloc'd reply until the production
+ * observation collector releases it. No real mapper or device is consulted.
+ * Keep these 128 schedules separate from the Round 004/005 parser corpora.
+ */
+#define ROUND008_SCHEDULE_SEED UINT32_C(0x8A4F0C21)
+#define ROUND008_VARIANTS_PER_MODE 8U
+
+enum round008_schedule_mode {
+	ROUND008_STABLE_TWO_TARGETS,
+	ROUND008_STABLE_LEGACY_SECOND,
+	ROUND008_STABLE_ZERO_COUNTS,
+	ROUND008_LATE_MALFORMED,
+	ROUND008_LATE_KERNEL_FAILURE,
+	ROUND008_LATE_COUNTER_OVERFLOW,
+	ROUND008_LATE_PARTIAL_PROVENANCE,
+	ROUND008_TORN_SECOND_COMMITTED,
+	ROUND008_TORN_SECOND_ADMITTED,
+	ROUND008_TORN_FIRST_COMMITTED,
+	ROUND008_DEVICE_ID_DRIFT,
+	ROUND008_MAPPER_NAME_DRIFT,
+	ROUND008_EVENT_GENERATION_DRIFT,
+	ROUND008_TARGET_COUNT_DRIFT,
+	ROUND008_VALID_REQUEUE_EXHAUSTION,
+	ROUND008_VALID_REQUEUE_CONVERGENCE,
+	ROUND008_MODE_COUNT
+};
+
+struct round008_schedule_fixture {
+	enum round008_schedule_mode mode;
+	unsigned int variation;
+	unsigned int reads;
+	unsigned int convergence_attempt;
+};
+
+static const char *const round008_schedule_names[] = {
+	"stable-two-targets", "stable-legacy-second", "stable-zero-counts",
+	"late-malformed", "late-kernel-failure", "late-counter-overflow",
+	"late-partial-provenance", "torn-second-committed",
+	"torn-second-admitted", "torn-first-committed",
+	"device-id-drift", "mapper-name-drift", "event-generation-drift",
+	"target-count-drift", "valid-requeue-exhaustion",
+	"valid-requeue-convergence"
+};
+
+static int round008_read_observation(
+	void *context, const char *name, uint64_t expected_device,
+	struct dm_status_observation *observation,
+	struct status_problem *problem, unsigned int *problem_target)
+{
+	static const char *const committed_one = ROUND005_ORIGIN("2", "1", "1");
+	static const char *const committed_zero = ROUND005_ORIGIN("2", "0", "1");
+	static const char *const committed_two = ROUND005_ORIGIN("2", "2", "1");
+	static const char *const admitted_one = ROUND005_ORIGIN("1", "1", "1");
+	static const char *const disabled_zero = ROUND005_ORIGIN("0", "0", "0");
+	static const char *const enabled_zero = ROUND005_ORIGIN("0", "0", "1");
+	static const char *const invalid_capability = ROUND005_ORIGIN("2", "1", "2");
+	static const char *const overflowing_commits =
+		ROUND005_ORIGIN("2", "18446744073709551616", "1");
+	static const char *const partial_origin =
+		ROUND005_BASE_STATUS " verified_zswap_origin_admitted=2";
+	const char *const types[2] = { "swapz", "swapz" };
+	const char *texts[2] = { committed_one, committed_one };
+	int target_statuses[2] = { 0, 0 };
+	struct round008_schedule_fixture *fixture = context;
+	const unsigned int read_number = fixture->reads++;
+	const int second_read = (read_number & 1U) != 0U;
+	const int late_fault_now = !(fixture->variation & 1U) || second_read;
+	const unsigned int attempt = read_number / 2U;
+	unsigned int target_count = 2U;
+	unsigned char *reply;
+	struct dm_ioctl header;
+	size_t reply_size;
+	int result;
+
+	/* Every case has a committed, valid first target unless explicitly torn. */
+	switch (fixture->mode) {
+	case ROUND008_STABLE_TWO_TARGETS:
+		texts[1] = (fixture->variation & 2U) ? committed_one : committed_zero;
+		break;
+	case ROUND008_STABLE_LEGACY_SECOND:
+		texts[1] = ROUND005_BASE_STATUS;
+		break;
+	case ROUND008_STABLE_ZERO_COUNTS:
+		texts[0] = (fixture->variation & 2U) ? enabled_zero : disabled_zero;
+		texts[1] = texts[0];
+		break;
+	case ROUND008_LATE_MALFORMED:
+		if (late_fault_now)
+			texts[1] = invalid_capability;
+		break;
+	case ROUND008_LATE_KERNEL_FAILURE:
+		if (late_fault_now)
+			target_statuses[1] = -5;
+		break;
+	case ROUND008_LATE_COUNTER_OVERFLOW:
+		if (late_fault_now)
+			texts[1] = overflowing_commits;
+		break;
+	case ROUND008_LATE_PARTIAL_PROVENANCE:
+		if (late_fault_now)
+			texts[1] = partial_origin;
+		break;
+	case ROUND008_TORN_SECOND_COMMITTED:
+		texts[1] = second_read ? committed_one : committed_zero;
+		break;
+	case ROUND008_TORN_SECOND_ADMITTED:
+		texts[1] = second_read ? committed_one : admitted_one;
+		break;
+	case ROUND008_TORN_FIRST_COMMITTED:
+		texts[0] = second_read ? committed_one : committed_zero;
+		break;
+	case ROUND008_DEVICE_ID_DRIFT:
+	case ROUND008_MAPPER_NAME_DRIFT:
+	case ROUND008_EVENT_GENERATION_DRIFT:
+		break;
+	case ROUND008_TARGET_COUNT_DRIFT:
+		if (second_read)
+			target_count = 1U;
+		break;
+	case ROUND008_VALID_REQUEUE_EXHAUSTION:
+		texts[1] = second_read ? committed_two : committed_one;
+		break;
+	case ROUND008_VALID_REQUEUE_CONVERGENCE:
+		if (attempt < fixture->convergence_attempt && second_read)
+			texts[1] = committed_two;
+		break;
+	case ROUND008_MODE_COUNT:
+		assert(0 && "invalid Round 008 mode");
+		break;
+	}
+	/* The real production observation owns/frees this heap DM reply. */
+	reply = malloc(2048U);
+	assert(reply);
+	reply_size = make_dm_multi_fixture(reply, 2048U, types, texts,
+					   target_statuses, target_count,
+					   expected_device);
+	memcpy(&header, reply, sizeof(header));
+	header.event_nr = 7U;
+	if (second_read) {
+		if (fixture->mode == ROUND008_DEVICE_ID_DRIFT)
+			header.dev = expected_device + 1U;
+		if (fixture->mode == ROUND008_MAPPER_NAME_DRIFT) {
+			memset(header.name, 0, sizeof(header.name));
+			memcpy(header.name, "replacement", sizeof("replacement"));
+		}
+		if (fixture->mode == ROUND008_EVENT_GENERATION_DRIFT)
+			++header.event_nr;
+	}
+	memcpy(reply, &header, sizeof(header));
+	memset(observation, 0, sizeof(*observation));
+	observation->reply = reply;
+	result = parse_dm_status_observation(reply, reply_size, name,
+					     expected_device, observation,
+					     problem, problem_target);
+	/* Parsing an invalid later target must still release the whole reply. */
+	observation->reply = reply;
+	return result;
+}
+
+struct round008_reader_call {
+	struct round008_schedule_fixture *fixture;
+	struct status_ready_report *report;
+};
+
+static int round008_collect_observations(void *context)
+{
+	const struct round008_reader_call *call = context;
+
+	return report_device_status_with_reader(call->fixture,
+		round008_read_observation, "fixture", 1U, call->report);
+}
+
+static void test_round008_native_reader_atomicity_stress(void)
+{
+	/* A coprime step traverses all eight variations for each of 16 modes. */
+	const unsigned int schedule_count =
+		ROUND008_MODE_COUNT * ROUND008_VARIANTS_PER_MODE;
+	unsigned int schedule_index;
+	unsigned int successful = 0U;
+	unsigned int rejected = 0U;
+
+	assert(schedule_count == 128U);
+	assert(sizeof(round008_schedule_names) /
+	       sizeof(round008_schedule_names[0]) == ROUND008_MODE_COUNT);
+	for (schedule_index = 0U; schedule_index < schedule_count;
+	     ++schedule_index) {
+		const enum round008_schedule_mode mode =
+			(enum round008_schedule_mode)(schedule_index % ROUND008_MODE_COUNT);
+		const unsigned int variation =
+			((schedule_index / ROUND008_MODE_COUNT) * 5U +
+			 (ROUND008_SCHEDULE_SEED & 7U)) & 7U;
+		struct round008_schedule_fixture fixture = {
+			.mode = mode, .variation = variation,
+			.convergence_attempt = variation
+		};
+		struct status_ready_report report = { 0 };
+		struct round008_reader_call call = { &fixture, &report };
+		const int stable = mode <= ROUND008_STABLE_ZERO_COUNTS ||
+			mode == ROUND008_VALID_REQUEUE_CONVERGENCE;
+		const unsigned int expected_reads =
+			mode == ROUND008_VALID_REQUEUE_CONVERGENCE ?
+			2U * (variation + 1U) :
+			mode >= ROUND008_TORN_SECOND_COMMITTED &&
+			mode <= ROUND008_TORN_FIRST_COMMITTED ?
+			2U * SWAPZ_STATUS_SNAPSHOT_RETRIES :
+			mode >= ROUND008_EVENT_GENERATION_DRIFT &&
+			mode <= ROUND008_VALID_REQUEUE_EXHAUSTION ?
+			2U * SWAPZ_STATUS_SNAPSHOT_RETRIES :
+			mode >= ROUND008_LATE_MALFORMED &&
+			mode <= ROUND008_LATE_PARTIAL_PROVENANCE ?
+			((variation & 1U) ? 2U : 1U) : 2U;
+		const char *expected_field = NULL;
+		const char *expected_state = "UNAVAILABLE";
+		char output[128];
+		char diagnostic[1024];
+		char schedule_name[80];
+		int result;
+
+		assert(snprintf(schedule_name, sizeof(schedule_name), "%s-v%u",
+			round008_schedule_names[mode], variation) > 0);
+		result = swapz_test_capture_output(round008_collect_observations,
+			&call, output, sizeof(output), diagnostic,
+			sizeof(diagnostic));
+		if (stable) {
+			const unsigned long long first_committed =
+				mode == ROUND008_STABLE_ZERO_COUNTS ? 0ULL : 1ULL;
+			const unsigned long long second_committed =
+				mode == ROUND008_STABLE_TWO_TARGETS ?
+				((variation & 2U) ? 1ULL : 0ULL) :
+				mode == ROUND008_VALID_REQUEUE_CONVERGENCE ? 1ULL : 0ULL;
+			const unsigned long long committed_sum = first_committed +
+				second_committed;
+
+			if (result || diagnostic[0] || report.count != 2U ||
+			    !report.targets || report.targets[0].target_index != 0U ||
+			    report.targets[1].target_index != 1U ||
+			    report.targets[0].dm_table_target_count != 2U ||
+			    report.targets[1].dm_table_target_count != 2U ||
+			    !report.targets[0].ratio.origin_telemetry_valid ||
+			    (mode == ROUND008_STABLE_LEGACY_SECOND &&
+			     report.targets[1].ratio.origin_telemetry_valid) ||
+			    (mode != ROUND008_STABLE_LEGACY_SECOND &&
+			     !report.targets[1].ratio.origin_telemetry_valid) ||
+			    report.targets[0].ratio.foreground_committed_verified_zswap_writeback !=
+				first_committed ||
+			    report.targets[1].ratio.foreground_committed_verified_zswap_writeback !=
+				second_committed ||
+			    report.targets[0].ratio.foreground_committed_verified_zswap_writeback +
+			    report.targets[1].ratio.foreground_committed_verified_zswap_writeback !=
+				committed_sum) {
+				fprintf(stderr,
+					"FAIL: Round 008 %s coherent inventory/provenance result=%d count=%zu reads=%u\n",
+					schedule_name, result, report.count, fixture.reads);
+				abort();
+			}
+			++successful;
+		} else {
+			if (mode == ROUND008_LATE_KERNEL_FAILURE) {
+				expected_field = "dm_target_spec.status";
+				expected_state = "FAILED";
+			} else if (mode == ROUND008_LATE_MALFORMED) {
+				expected_field = "origin_carrier_compiled";
+				expected_state = "BLOCKED";
+			} else if (mode == ROUND008_LATE_COUNTER_OVERFLOW) {
+				expected_field =
+					"foreground_committed_verified_zswap_writeback";
+				expected_state = "BLOCKED";
+			} else if (mode == ROUND008_LATE_PARTIAL_PROVENANCE) {
+				expected_field = "origin provenance INFO group";
+				expected_state = "BLOCKED";
+			} else if (mode == ROUND008_DEVICE_ID_DRIFT) {
+				expected_field = "dm_ioctl.dev";
+				expected_state = "BLOCKED";
+			} else if (mode == ROUND008_MAPPER_NAME_DRIFT) {
+				expected_field = "dm_ioctl.name";
+				expected_state = "BLOCKED";
+			} else if (mode == ROUND008_EVENT_GENERATION_DRIFT) {
+				expected_field = "dm_ioctl.event_nr";
+			} else if (mode == ROUND008_TARGET_COUNT_DRIFT) {
+				expected_field = "dm_ioctl.target_count";
+			} else {
+				expected_field = "dm_target_spec.params";
+			}
+			if (result != -2 || report.count || report.targets ||
+			    !strstr(diagnostic, expected_state) ||
+			    !strstr(diagnostic, expected_field) ||
+			    strstr(diagnostic, "logical_write=") ||
+			    strstr(diagnostic, "verified_zswap_origin_admitted=") ||
+			    strstr(diagnostic, "foreground_committed_verified_zswap_writeback=")) {
+				fprintf(stderr,
+					"FAIL: Round 008 %s failure atomicity/diagnostic result=%d count=%zu reads=%u\n",
+					schedule_name, result, report.count, fixture.reads);
+				abort();
+			}
+			++rejected;
+		}
+		if (fixture.reads != expected_reads || output[0]) {
+			fprintf(stderr,
+				"FAIL: Round 008 %s bounded reads/stdout reads=%u expected=%u printed=%u\n",
+				schedule_name, fixture.reads, expected_reads,
+				(unsigned int)(output[0] != '\0'));
+			abort();
+		}
+		/* The collector released both heap replies. The caller owns only
+		 * the final accepted contiguous target array, freed exactly once.
+		 */
+		free(report.targets);
+		report.targets = NULL;
+	}
+	assert(successful == 32U && rejected == 96U);
+	puts("PASS: Round 008 128 deterministic native DM observer schedules");
+}
+
 #undef ROUND005_ORIGIN
 #undef ROUND005_BASE_STATUS
 
@@ -4006,6 +4321,7 @@ int main(void)
 	test_snapshot_retry_exhaustion_and_failures();
 	test_complete_snapshot_before_output();
 	test_round005_double_info_origin_snapshot_races();
+	test_round008_native_reader_atomicity_stress();
 	test_final_inventory_fake_ioctl_observation_gap();
 	test_bounded_adversarial_dm_status_corpus();
 	test_bounded_adversarial_dm_list_corpus();
