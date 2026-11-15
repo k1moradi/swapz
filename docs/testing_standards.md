@@ -1,5 +1,24 @@
 # Testing Standards
 
+## Passive zswap origin qualification (prototype, 2026-11-15)
+
+The source-bound `tests/runtime/native/zswap-origin-consumer-source-test.py`
+checks the actual `src/kernel/dm-target.c` for capability-guarded 4KiB
+classification, descriptor reset before publication, the acceptance recheck,
+two atomic per-target counter initializations, the four existing authoritative
+foreground success sites, and additive INFO fields. Source-only tests and
+synthetic C23 helper models are rootless diagnostics: neither proves the
+Linux MM producer, kernel BIO layout, real cloned Device Mapper BIO behavior,
+loaded writeback or exact readback.
+
+Phase A qualification requires a matched patched kernel and compiled module,
+BIO clone/split/reset and mixed-origin tests, genuine zswap stored-entry
+eviction on an owner-authorized RAM target, byte-exact readback, unchanged
+compression and ordered completion, and independent concurrency review.
+`origin_carrier_compiled=1` only means the build saw the private header
+capability. An unavailable carrier with a zero verified count is UNKNOWN,
+never proof that zswap caused no writeback. Phase B bypass remains disabled.
+
 ## Kernel-header compiler identity regression (2026-11-14)
 
 When CC is GNU Make's built-in default, the external-module Kbuild wrapper

@@ -22,6 +22,25 @@ def main() -> int:
         "only guarded positive classifier")
     if source.count("swapz_count_verified_zswap_writeback_commit(ctx,") != 4:
         raise AssertionError("four final foreground-commit sites required")
+    if source.count("entry->write_origin") != 4:
+        raise AssertionError("origin may be consulted only at admission and commit")
+    if source.count("bio_is_zswap_stored_writeback(bio)") != 1:
+        raise AssertionError("single positive origin authority required")
+    body = source[source.index("static int swapz_map("):]
+    anchors = (
+        "entry->write_origin = SWAPZ_WRITE_ORIGIN_ORDINARY_OR_UNKNOWN",
+        "entry->write_origin = SWAPZ_WRITE_ORIGIN_ZSWAP_STORED_WRITEBACK",
+        "if (!ctx->accepting)",
+        "atomic64_inc(&ctx->verified_zswap_origin_admitted)",
+        "list_add_tail(&entry->list, &ctx->incoming)",
+    )
+    positions = [body.index(anchor) for anchor in anchors]
+    if positions != sorted(positions) or len(set(positions)) != len(positions):
+        raise AssertionError("descriptor reset / requeue / FIFO order changed")
+    for counter in ("verified_zswap_origin_admitted",
+                    "foreground_committed_verified_zswap_writeback"):
+        if source.count(f"atomic64_set(&ctx->{counter}, 0)") != 1:
+            raise AssertionError(f"missing mapper constructor counter reset: {counter}")
     for marker in (
         "verified_zswap_origin_admitted=%llu",
         "foreground_committed_verified_zswap_writeback=%llu",
