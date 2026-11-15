@@ -12718,3 +12718,10 @@ an exact matched producer, patched kernel and observed real zswap writeback
 have been independently qualified, Phase A remains BLOCKED; Phase B RAW
 bypass remains disabled. Existing `make test` fail-closed production and
 physical evidence gates are unchanged.
+
+The read-only GitHub exact-C source-contract stage also executes the committed
+`zswap-origin-consumer-source-test.py` against the entire checked-out
+`src/kernel/dm-target.c` on available x86_64/ARM64 runners alongside native
+product tests. Each deliberately mutated source must fail its real-source
+contract. This is not a loaded kernel, real MM/BIO authentication, a mapper,
+active swap or physical-storage qualification.
