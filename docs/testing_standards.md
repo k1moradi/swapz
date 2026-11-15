@@ -3427,6 +3427,14 @@ override the checkout preflight only in its copied synthetic runner, because
 that fixture deliberately edits tracked fake sources to check dirty build
 provenance. This exemption must never reach the real `make test` command.
 
+The retained physical-trial prompt's rootless fixture must create its
+synthetic `build/tests` diagnostics directory with mode `0700` independently
+of caller umask, including `0002`. Assert the resulting private mode and
+prove that a group-writable fixture directory refuses recovery before helper
+invocation and without creating a private recovery log. Never weaken the real
+directory owner/type/write-bit gate or mode-`0600` log requirement to pass a
+synthetic test.
+
 The reporter for a genuine `physical_trial_mapper_present` failure must
 recognize only the original source-controlled full `LOADED_PREFLIGHT` marker,
 retain the nonzero BLOCKED status, and show the fixed rootless-testable source

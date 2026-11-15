@@ -4070,6 +4070,7 @@ class ReportContract(unittest.TestCase):
                     recovery.assert_not_called()
                 self.assertIn("private recovery log unavailable",
                               unsafe_directory_output.getvalue())
+                self.assertEqual(list(private_diagnostics.iterdir()), [])
                 private_diagnostics.chmod(0o700)
 
                 def mock_recover(command, **kwargs):
