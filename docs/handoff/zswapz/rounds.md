@@ -44,13 +44,13 @@ Worker tasks can execute simultaneously against the frozen input. Agent 1 is the
 
 The sole authoritative `ROUND_OPEN` comment in issue #122 is the worker execution start. Both workers use pre-round sources and run simultaneously; Agent 1 integrates source, merges independent additive standards and verifies actual hosted CI. No upstream Linux producer branch, fork, additional repo or owner decision is needed for these two *bounded* tasks. Neither proves authenticated live zswap stored-entry writeback. [Round 005 closeout](round005/round-report.md) records both real integration commits, archived originals and exact-source CI status; #122 closed with full native and linked-module jobs still pending, no artificial PASS.
 
-## Round 006 — independent worker tasks, begin only after ROUND_OPEN
+## Round 006 — CLOSED_INCOMPLETE (Agent 8 integrated; Agent 7 NOT_DELIVERED)
 
 | Round | Frozen swapz source | Issue | Independent workers | Evidence scope |
 | --- | --- | --- | --- | --- |
 | [006](round006/README.md) | `47a793c1480556c075f23ecbe13a5b465d616916` | [#123](https://github.com/k1moradi/swapz/issues/123) | Agent 7 production-linked fake-DM observer fault-atomicity stress; Agent 8 independent pinned stock Linux LLVM/Clang ZSWAP object Kbuild | Native rootless and unchanged public Linux only; Phase A BLOCKED, Phase B DEFERRED |
 
-Agent 1 alone serially integrates worker source commits and tests them in CI. The **unique `ROUND_OPEN`** comment in issue #123 defines the frozen task publication SHA. The full Linux upstream producer is unassigned because it still has no owner-approved durable writable kernel-source repository. Round 005's unfinished native and full GCC module jobs remain an Agent 1 follow-up, not a Round 006 agent prerequisite.
+Agent 1 alone serially integrates worker source commits and tests them in CI. The **unique `ROUND_OPEN`** comment in issue #123 defines the frozen task publication SHA. The full Linux upstream producer is unassigned because it still has no owner-approved durable writable kernel-source repository. Round 005's unfinished native and full GCC module jobs remain an Agent 1 follow-up, not a Round 006 agent prerequisite. [Accountable Round 006 closeout](round006/round-report.md): original 2-worker plan, only Agent 8 delivered and passed independent LLVM source-object CI; Agent 7 did not supply code/report and is retained as unfulfilled backlog. Closed as incomplete, not PASS. Round 007 can advance independently after a new frozen task/opening.
 
 ## Round 007 — DRAFT ONLY, PREPARING / NOT OPEN
 

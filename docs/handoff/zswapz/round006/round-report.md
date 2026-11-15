@@ -1,0 +1,25 @@
+# Round 006 — coordinator accountable incomplete closeout (2026-11-15)
+
+**Outcome: CLOSED_INCOMPLETE; 1/2 assigned independent worker deliverables received.** This is NOT Round 006 engineering PASS, and not a fabricated Agent 7 source delivery.
+
+## Frozen authority and exact source
+
+- The authoritative [ROUND_OPEN](https://github.com/k1moradi/swapz/issues/123#issuecomment-6897608738) froze source `47a793c1480556c075f23ecbe13a5b465d616916` at task SHA `1f0a90621d1ade5ee1d115bc5d96c72c38e8f2f9`.
+- **Agent 8** submitted *two alternative commits and two report comments for one task*, not two independent completed workers. Agent 1 selected source [`528a0616363732cc4ec0d975728ea8ba44e1bab7`](https://github.com/k1moradi/swapz/commit/528a0616363732cc4ec0d975728ea8ba44e1bab7) and integrated its actual independent Clang/LLVM Linux Kbuild job plus applicable testing standard at [`79bb7c0c8bdf055eaeecf81c0fa291d167bd0e61`](https://github.com/k1moradi/swapz/commit/79bb7c0c8bdf055eaeecf81c0fa291d167bd0e61) by guarded, non-force direct-main update. The alternate [`a2fcfddb86d8a0e295802fbaeac7869281f35631`](https://github.com/k1moradi/swapz/commit/a2fcfddb86d8a0e295802fbaeac7869281f35631) was *not* merged as a duplicate CI job.
+- [Agent 8 original reports were archived verbatim and hashed](agent8-integration-checkpoint.md), including [first report](agent8-selected-original-report.md) and [alternate report](agent8-alternative-original-report.md), in [commit `4ba067a9`](https://github.com/k1moradi/swapz/commit/4ba067a90c4b102084841ad51627c4a29a0e4f07).
+- **Agent 7 was assigned** [production-linked native C multi-target observer stress](agent7-native-dm-observer-atomicity-stress.md), but at this closeout the round mailbox #123 contained **zero Agent 7 `REPORT_READY` comments and no supplied retrievable Agent 7 source commit**. Its 64–256 deterministic two-target error-atomicity schedules were therefore **NOT_DELIVERED / NOT_TESTED / NOT_INTEGRATED**. Do not count it toward the round's engineering acceptance. Retain the task as explicitly unfulfilled backlog rather than silently discarding or claiming complete.
+
+## Verified hosted evidence, exact classes
+
+- [Real pinned LLVM stock-Linux run #43743100361](https://github.com/k1moradi/swapz/actions/runs/43743100361), exact integration `79bb7c0c8bdf055eaeecf81c0fa291d167bd0e61`: independently running **LLVM-18 `CONFIG_ZSWAP=y/n` source-object Kbuild job PASS**; retained [artifact 14173536534](https://github.com/k1moradi/swapz/actions/runs/43743100361/artifacts/14173536534). This checks unmodified upstream `torvalds/linux@c339f4010dea8b0d754f84ace70cd1b089878ef8` swap/BIO objects; no matched producer or loaded module.
+- In that same run the separate **GCC full linked-module job FAILED**; it does not inherit LLVM PASS. Earlier [Round 005 run #43735000163](https://github.com/k1moradi/swapz/actions/runs/43735000163) gave the first confirmed fatal `Full pinned kernel export table missing; no qualified external module link` after `vmlinux`, before either real `dm-swapz.ko` had been verified. [Late Round 005 addendum](../round005/late-ci-results.md).
+- [Exact native rootless run #43743466537](https://github.com/k1moradi/swapz/actions/runs/43743466537), [production-C run #43743466526](https://github.com/k1moradi/swapz/actions/runs/43743466526), and [package run #43743466583](https://github.com/k1moradi/swapz/actions/runs/43743466583) **PASS** on `4ba067a90c4b102084841ad51627c4a29a0e4f07`. None includes the missing Agent 7 source.
+- No source test, Kbuild or CI run has authenticated actual zswap stored-entry MM→BIO provenance, real forced writeback or byte-exact readback.
+
+## Decision and ready next-layer work
+
+Close issue #123 explicitly with **`NOT_PLANNED / CLOSED_INCOMPLETE`**, not `completed`, for the unresolved Agent 7 deliverable. The developer task remains in this ledger as **UNFULFILLED**, available for later reassignment. The round is administratively accounted for with accurate failure status, enabling independently ready next-layer work rather than indefinitely holding future work hostage to a silent worker.
+
+Round 007 [planning issue #124](https://github.com/k1moradi/swapz/issues/124) may be frozen/opened **only after** the above incomplete closeout is published and verified. Agent 3's known GCC export-table failure and Agent 6's offline evidence-contract test are independent of Agent 7, each requiring real code, exact tests and one valid post-opening report. Agent 6's [pre-opening source object `136e06f4`](https://github.com/k1moradi/swapz/commit/136e06f432370c93783dec93b59b56c56612fdef) is historical candidate source; its [pre-opening report](https://github.com/k1moradi/swapz/issues/124#issuecomment-6899100424) **does not count as post-opening `REPORT_READY`**, and must be reconciled with final frozen Round 007 source before integration/qualification.
+
+**Phase A BLOCKED:** no owner-authorized committed authenticated Linux stored-entry MM→BIO origin producer or matched runtime. **Phase B RAW bypass remains DISABLED.**
