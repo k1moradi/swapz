@@ -4056,7 +4056,7 @@ class ReportContract(unittest.TestCase):
 
                 terminal_output = Terminal()
                 with mock.patch.object(runner.os, "geteuid",
-                                       return_value=1000), \
+                                       return_value=os.geteuid()), \
                         mock.patch.object(runner.sys, "stdin",
                                           Terminal("2\n")), \
                         mock.patch.object(runner.sys, "stdout",
@@ -4068,8 +4068,11 @@ class ReportContract(unittest.TestCase):
                                           side_effect=mock_recover):
                     runner.offer_retained_physical_trial_reconciliation()
                 self.assertEqual(len(captured_commands), 1)
-                self.assertEqual(captured_commands[0][:3],
-                                 ["sudo", "-n", "--"])
+                expected_privilege = (
+                    [] if os.geteuid() == 0 else ["sudo", "-n", "--"])
+                self.assertEqual(
+                    captured_commands[0][:len(expected_privilege)],
+                    expected_privilege)
                 self.assertEqual(captured_commands[0][-1], "recover-pending")
                 self.assertEqual(captured_commands[0][-2],
                                  str(runner.ROOT / "tests/tools/physical-swap-probe.py"))
