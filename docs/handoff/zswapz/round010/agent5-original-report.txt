@@ -1,0 +1,87 @@
+message: REPORT_READY
+round: "010"
+agent: 5
+task_id: agent5-real-bio-origin-lifecycle-regressions
+status: SOURCE_READY_PENDING_COORDINATOR_CI
+source_baseline_sha: 4f88c81dcba4ee09d32f067e7353664a821ba986
+task_commit_sha: e44ae5b099b9e0c2785a08398a4c65a1c1fcd3f2
+source_commit_sha: 0f8026adbbacb7459bf3f64a51de39cb82c0c74c
+source_commit_url: https://github.com/k1moradi/swapz/commit/0f8026adbbacb7459bf3f64a51de39cb82c0c74c
+kernel_source_sha: c339f4010dea8b0d754f84ace70cd1b089878ef8
+modified_files:
+  - tests/tools/stage-pinned-linux-zswap-origin.py
+  - tests/runtime/native/pinned-linux-zswap-origin-stage-test.py
+  - docs/testing_standards.md
+tests:
+  - command: "GitHub exact-source fixture source-binding: apply all 12 EDITS to six complete pinned upstream C/H blobs; verify unique nonoverlapping anchors"
+    exit_code: 0
+    evidence_class: source-review (not kernel build)
+  - command: "GCC 14.2.0: gcc -std=c11 -O1 -g -Wall -Wextra -Wpedantic -Wconversion -Werror -fsanitize=undefined -fno-sanitize-recover=all bio_origin_clone_source_coupled.c -o clone-gcc && ./clone-gcc"
+    exit_code: 0
+    evidence_class: rootless-source-coupled-C-fragment (5 cases)
+  - command: "Clang 17.0.0: clang -std=c11 -O1 -g -Wall -Wextra -Wpedantic -Wconversion -Werror -fsanitize=undefined -fno-sanitize-recover=all bio_origin_clone_source_coupled.c -o clone-clang && ./clone-clang"
+    exit_code: 0
+    evidence_class: rootless-source-coupled-C-fragment (5 cases)
+  - command: "GitHub-sourced postimage invariant negative oracle: six deliberate wrong mutations (unguarded clone, positive init, inverted merge, inverted normalization, missing REQ_SWAP, unauthenticated zswap marker)"
+    exit_code: 0
+    evidence_class: source-review/isolated-oracle (NOT the Python staging regression)
+  - command: "GitHub commit comparison of frozen parent and unattached child; check added lines for trailing whitespace"
+    exit_code: 0
+    evidence_class: source-review (not git diff --check)
+  - command: "python3 -B tests/runtime/native/pinned-linux-zswap-origin-stage-test.py -v"
+    exit_code: NOT_RUN
+    reason: "complete pinned swapz checkout unavailable locally; direct git clone DNS disabled"
+  - command: "python3 -m py_compile tests/tools/stage-pinned-linux-zswap-origin.py tests/runtime/native/pinned-linux-zswap-origin-stage-test.py"
+    exit_code: NOT_RUN
+    reason: "source bytes available via GitHub connector but not materialized in local execution checkout"
+  - command: "git diff --check"
+    exit_code: NOT_RUN
+    reason: "no local checkout; added-line whitespace checked from GitHub diff instead"
+  - command: "Linux pinned 7.3-development Kbuild CONFIG_ZSWAP=y/n of NEW edited postimage; KUnit; actual BIO lifecycle; matched linked module; stored zswap writeback/readback"
+    exit_code: NOT_RUN
+evidence_class: source-committed + rootless-C-fragment + source-review
+modified_kernel_files_on_upstream: []
+remote_main_pushed: false
+first_failure: "An initial isolated JS text-level mutation probe searched the staging Python program rather than its emitted C postimage and consequently gave a false oracle failure. Corrected to extract all literal Python EDITS and inspect their emitted C snippets: 6/6 deliberate negative probes passed. No production or Git file change was needed for this oracle correction."
+blocking_findings:
+  - "Complete swapz checkout and therefore real Python regression execution unavailable in this worker container"
+  - "New modified upstream C/H source has not been compiled in exact hosted Linux Kbuild; previous successful #43790479509 belongs to old Round 009 postimage"
+  - "No KUnit, loaded BIO clone/split/reissue/reset, real stored-entry eviction or exact linked producer+consumer writeback/readback"
+next_round_recommendations:
+  - "Agent 1 serially integrate the three source blobs with expected-head main-only check; then run the exact Python regression with -v, py_compile and git diff --check"
+  - "Rerun pinned modified-Linux CONFIG_ZSWAP=y/n real Kbuild and matched linked module on the resulting integrated exact source, recording any first compiler failure"
+  - "Keep Phase A blocked and Phase B RAW bypass disabled until actual authenticated MM→BIO→DM I/O and byte-exact readback"
+
+---
+
+# Agent 5 — Round 010 real BIO origin lifecycle and mixed-origin source changes
+
+**Actual Git commit delivered, independent from Agent 8.** [Unattached source commit 0f8026adbbacb7459bf3f64a51de39cb82c0c74c](https://github.com/k1moradi/swapz/commit/0f8026adbbacb7459bf3f64a51de39cb82c0c74c) has the required single parent [4f88c81dcba4ee09d32f067e7353664a821ba986](https://github.com/k1moradi/swapz/commit/4f88c81dcba4ee09d32f067e7353664a821ba986). GitHub compare verified **only the three owned files changed** (stager +134/-23; its regression +227/-4; applicable testing standard +35/-0). Main remains at the task-publication commit and was not moved by this worker. No branch, PR, fork, extra worktree, kernel source publication, module load, mapper/swap/physical operation.
+
+## Exact upstream source audit and lifecycle ownership
+
+The source checked is [Linux c339f4010dea8b0d754f84ace70cd1b089878ef8](https://github.com/torvalds/linux/tree/c339f4010dea8b0d754f84ace70cd1b089878ef8), NOT a stock or approved running Ubuntu kernel. Read complete original pinned blobs and specific symbols:
+
+- [block/bio.c](https://github.com/torvalds/linux/blob/c339f4010dea8b0d754f84ace70cd1b089878ef8/block/bio.c#L217-L342): bio_init() initializes fresh BIO state; bio_reset() zeros bytes before BIO_RESET_BYTES; bio_reuse() invokes bio_reset() and therefore **discards a previous positive origin**, even when retaining the payload and callbacks; bio_prepare_reissue() retains the tag because it reissues the same already-built payload. Added source comment to record this deliberate lifetime boundary.
+- [include/linux/blk_types.h](https://github.com/torvalds/linux/blob/c339f4010dea8b0d754f84ace70cd1b089878ef8/include/linux/blk_types.h#L210-L294): BIO_RESET_BYTES is offsetof(struct bio, bi_max_vecs), after the newly inserted u8 bi_swap_origin field, so memset clears the tag. No heap pointer or extra per-BIO origin allocation.
+- [block/bio.c clone and split](https://github.com/torvalds/linux/blob/c339f4010dea8b0d754f84ace70cd1b089878ef8/block/bio.c#L876-L955): __bio_clone() is used by bio_alloc_clone() and bio_init_clone(); [bio_split()](https://github.com/torvalds/linux/blob/c339f4010dea8b0d754f84ace70cd1b089878ef8/block/bio.c#L1926-L1968) clones first then advances the parent. **Strengthened generated C**: child receives positive origin ONLY when bio_is_zswap_stored_writeback(bio_src) checks WRITE, REQ_SWAP and the exact positive scalar; all other, stale, malformed and non-SWAP sources become UNKNOWN.
+- [mm/page_io.c](https://github.com/torvalds/linux/blob/c339f4010dea8b0d754f84ace70cd1b089878ef8/mm/page_io.c#L325-L372): swap_can_merge() enforces equal per-swap_iocb/ctx origin before can_merge(); swap_add_folio() submits/flushes the prior run before forming the new one. **Strengthened generated C**: new sio->swap_origin is positive only for rw==WRITE with exactly the authenticated positive ctx scalar; READ, ordinary/unknown and noncanonical values are UNKNOWN. swap_bdev_submit_write() copies that per-run scalar into the BIO only after bio_init().
+- [mm/zswap.c](https://github.com/torvalds/linux/blob/c339f4010dea8b0d754f84ace70cd1b089878ef8/mm/zswap.c#L1005-L1090): local swap_io_ctx ctx = {} defaults UNKNOWN; positive tag is introduced after exact zswap-entry xarray identity validation, successful zswap_decompress(), and folio reconstruction, before __swap_writeout(). Neither generic REQ_SWAP, PID, reclaim flag nor zswap rejection confers positive provenance.
+
+The producer context and swap_iocb retain only an enum scalar, not an MM folio/zswap-entry pointer across asynchronous DM processing. The cloned BIO still shares the original biovec lifetime according to the original kernel's clone contract; this patch does not alter that ownership.
+
+## Real source changes and retained evidence
+
+- **12 exact pinned upstream transitions across six real C/H files**: two in blk_types.h, one in bio.h, three in block/bio.c, two in swap_ops.h, three in page_io.c and one in zswap.c. All 12 old C/H anchors were checked against the exact full original blobs, uniquely and without overlap, before creating the Git commit. No Linux upstream repository was modified.
+- Added an executable postimage validator rejecting missing clone authentication, initial UNKNOWN, REQ_SWAP requirement, noncanonical-new-IOCB normalization, merge separation, and zswap origin marker. The test fixture injects **six deliberate weakened transitions** and requires a failure. Prior preimage/duplicate/missing-anchor checks are retained.
+- Added *original_sha256* alongside the already present *staged_sha256* and source Git blob identities in the bounded manifest. After all in-memory source edits are built, an additional all-file preflight checks every source before any mutation; individual write-time rechecks remain.
+- Fixed **late-publication rollback**: if an atomic source write replaces bytes and then raises, the currently attempted file is restored along with previously committed files. Restoration skips already-original bytes and refuses to overwrite third-party modifications, returning explicit rollback-incomplete rather than false success. The manifest error path also handles the case in which atomic manifest replace succeeded before reporting failure, avoiding stale STAGED_SOURCE_ONLY evidence. Added synthetic fault-injection cases for late source replacement, interference, manifest post-replacement failure, and exact before/after digests.
+- The committed native regression additionally extracts the real generated inline BIO helper and __bio_clone assignment and compiles/executes a strict GCC/Clang UBSan **source-coupled C fragment** with five cases. In this worker environment, the matching locally assembled and compared fragments passed under both compilers; full committed Python regression compilation/execution still requires Agent 1's checkout.
+
+## Execution boundaries and exact next gates
+
+**Actually executed here:** six complete upstream source blobs structurally transformed at 12 verified pinned anchors with no duplicates; GCC 14.2.0 and Clang 17.0.0 both compiled and executed the rootless C fragment (five pass each, exit 0); six isolated source-postimage negative oracles exit 0; retrieved Git commit and diff contain only the prescribed files and no added trailing whitespace.
+
+**NOT_RUN:** executing the committed full Python test runner, executing Python py_compile on its full files, full git diff --check, KUnit, new postimage Kbuild under both CONFIG_ZSWAP profiles, linked matched module, loaded BIO lifecycle and real zswap eviction/writeback/readback. The prior successful modified-source CI run #43790479509 tested an earlier postimage; it does not certify this source revision. This is **SOURCE_READY_PENDING_COORDINATOR_CI**, not Phase A PASS.
+
+**Safety:** No RAW bypass or data-path policy changes. Phase A remains BLOCKED; Phase B remains DISABLED.

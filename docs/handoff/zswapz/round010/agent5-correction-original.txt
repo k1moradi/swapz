@@ -1,0 +1,30 @@
+message: REPORT_CORRECTION
+round: "010"
+agent: 5
+task_id: agent5-real-bio-origin-lifecycle-regressions
+status: SOURCE_READY_PENDING_COORDINATOR_CI
+authoritative_source_commit_sha: 9b3fa3867677149f1a43a0d97d1e5b396ec8aa08
+authoritative_source_commit_url: https://github.com/k1moradi/swapz/commit/9b3fa3867677149f1a43a0d97d1e5b396ec8aa08
+parent_sha: 4f88c81dcba4ee09d32f067e7353664a821ba986
+superseded_source_commit_sha: 0f8026adbbacb7459bf3f64a51de39cb82c0c74c
+original_report: https://github.com/k1moradi/swapz/issues/127#issuecomment-6905591124
+modified_files:
+  - tests/tools/stage-pinned-linux-zswap-origin.py
+  - tests/runtime/native/pinned-linux-zswap-origin-stage-test.py
+  - docs/testing_standards.md
+
+## Corrected source handoff — use ONLY 9b3fa386...
+
+An extra **full exact-upstream source postimage check after the initial report** caught an implementation error: `validate_origin_postimage("include/linux/blk_types.h", ...)` used the FIRST `atomic_t` anywhere in the header. The pinned upstream header has unrelated earlier `atomic_t` members (first byte offset 1267), while `struct bio` starts around byte 6953 and the injected `bi_swap_origin` is around byte 7814. Consequently that guard would have rejected every real valid staged kernel despite the original anchored transformations being correct.
+
+**Fix:** scope the lifetime/layout assertion to the `struct bio {` region, the first `atomic_t` AFTER `bi_swap_origin`, the `bi_max_vecs` preserved field, and exact `BIO_RESET_BYTES=offsetof(struct bio, bi_max_vecs)`. Add an executable regression that inserts unrelated earlier `atomic_t` text and expects successful postimage rendering. Both existing tests comparing the first `atomic_t` were updated to the after-origin boundary. No product/DM source changed.
+
+**Corrected actual test checks performed via the GitHub connector:**
+- Re-applied all 12 staged edit pairs to the SIX complete exact upstream C/H blobs, each original anchor unique and nonoverlapping: PASS.
+- Verified every required postimage fragment and its exact occurrence count in the COMPLETE resulting files: **6/6 PASS**. The corrected `blk_types.h` body check finds `struct bio` at 6953, origin at 7814, subsequent atomic at 7868, preserved `bi_max_vecs` at 9367, and a valid exact `BIO_RESET_BYTES` definition.
+- The same rootless GCC 14.2.0 and Clang 17 UBSan C helper/clone tests remain PASS (no code change in those fragments).
+- GitHub verifies the corrected commit is a **new, independently retrievable SINGLE-PARENT sibling of the frozen baseline**, ahead by 1, touching exactly the three assigned paths and containing no added trailing whitespace. Remote `main` was not moved.
+
+**NOT_RUN and unchanged caveat:** full Python staging regression, Python py_compile on complete files, real full-checkout git diff --check, new patched-kernel Kbuild, KUnit, loaded BIO lifecycle and stored-entry zswap I/O remain unexecuted in this worker environment. Agent 1 must run the exact integrated hosted checks and archive this correction with the original report. The previous commit `0f8026...` is **superseded and must not be integrated**.
+
+This is **one correction to the original REPORT_READY**, not a second agent completion report. Phase A BLOCKED; Phase B RAW bypass DISABLED.

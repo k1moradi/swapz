@@ -82,10 +82,12 @@ Round 008 [closed accurately](round008/round-report.md): both real worker source
 
 [Round 009 late hosted evidence](round009/late-ci-results.md): source-exact modified Linux `CONFIG_ZSWAP=y/n` object Kbuild **PASS** [run #43790479509](https://github.com/k1moradi/swapz/actions/runs/43790479509), true stage and object compilation of modified pinned Linux. Native/stock GCC linked module remained independently gated; no matched kernel+consumer or loaded runtime PASS. Phase A BLOCKED; Phase B DISABLED.
 
-## Round 010 — FINAL frozen independent worker tasks (unique ROUND_OPEN required)
+## Round 010 — CLOSED_SOURCE_INTEGRATED_CI_RECHECK_PENDING (2/2 real sources, matched Kbuild pending)
 
 | Round | Frozen source | Coordination issue | Concurrent workers excluding Agent 1 | Qualification bound |
 | --- | --- | --- | --- | --- |
 | [010](round010/README.md) | `4f88c81dcba4ee09d32f067e7353664a821ba986` | [#127](https://github.com/k1moradi/swapz/issues/127) | [Agent 5 actual producer lifecycle/split/clone source hardening](round010/agent5-real-bio-origin-lifecycle-regressions.md); [Agent 8 matched patched Linux plus real dm-swapz.ko CI](round010/agent8-matched-patched-linux-swapz-module-kbuild.md) | Independent source work; no same-round dependency; Phase A BLOCKED, Phase B disabled |
 
 Round 009 [source closeout](round009/round-report.md), [late actual pinned modified Linux Kbuild PASS](round009/late-ci-results.md) and original report hashes are preserved. No result on a linked matched module, booted kernel or actual zswap writeback is assumed as a precondition. The issue #127 unique `ROUND_OPEN` marker names the final task-publication SHA and is the only authority to start. Both workers edit actual existing committed source and implement/test independently; Agent 1 alone publishes `main` and verifies hosted source. No upstream writable fork/repository or privileged device operations required.
+
+[Round 010 coordinator closeout](round010/round-report.md) records both worker source integrations, Agent 5's corrected commit supersession, [original worker report SHA-256 archive](round010/original-report-archive.md), the first actual 20-case hosted rootless test failure and coordinator's source-only assertion fix `ca8f0874`. Matched patched Linux/DM linked-module qualification remains pending on [#43793863015](https://github.com/k1moradi/swapz/actions/runs/43793863015); Phase A BLOCKED and Phase B DISABLED. Repository still has historic divergent branches; only coordinator-approved source is integrated, no open PRs.
