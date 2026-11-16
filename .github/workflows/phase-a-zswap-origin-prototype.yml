@@ -6,6 +6,7 @@ on:
       - ".github/workflows/phase-a-zswap-origin-prototype.yml"
       - "tests/tools/stage-pinned-linux-zswap-origin.py"
       - "tests/runtime/native/pinned-linux-zswap-origin-stage-test.py"
+      - "tests/runtime/native/pinned-linux-origin-paired-module-test.py"
   workflow_dispatch:
 
 permissions:
@@ -13,9 +14,9 @@ permissions:
 
 jobs:
   modified-linux-producer-objects:
-    name: "Modified pinned Linux CONFIG_ZSWAP=y/n object Kbuild"
+    name: "Modified pinned Linux CONFIG_ZSWAP=y/n and matched dm-swapz module Kbuild"
     runs-on: ubuntu-24.04
-    timeout-minutes: 65
+    timeout-minutes: 150
     steps:
       - name: "Initialize fail-closed evidence even if checkout fails"
         shell: bash
@@ -39,14 +40,14 @@ jobs:
           fetch-depth: 1
           path: linux
           persist-credentials: false
-      - name: "Install Linux object build prerequisites"
+      - name: "Install pinned Linux and external module Kbuild host prerequisites"
         shell: bash
         run: |
           set -euo pipefail
           sudo apt-get update -qq
           sudo DEBIAN_FRONTEND=noninteractive apt-get install -y \
             --no-install-recommends build-essential bc bison flex \
-            libelf-dev libssl-dev
+            libelf-dev libssl-dev kmod binutils
       - name: "Run source-controlled rootless staging regression"
         shell: bash
         run: |
@@ -56,6 +57,18 @@ jobs:
             result=$?
             echo "::error::Producer source staging regression failed (exit $result)"
             tail -n 35 "$RUNNER_TEMP/zswap-origin-rootless.log"
+            exit "$result"
+          }
+      - name: "Run matched source/module verifier regressions on full workflow"
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 -B swapz/tests/runtime/native/pinned-linux-origin-paired-module-test.py \
+            --self-test --workflow "$PWD/swapz/.github/workflows/phase-a-zswap-origin-prototype.yml" \
+            > "$RUNNER_TEMP/zswap-origin-paired-rootless.log" 2>&1 || {
+            result=$?
+            echo "::error::Paired Kbuild rootless source regression failed (exit $result)"
+            tail -n 35 "$RUNNER_TEMP/zswap-origin-paired-rootless.log"
             exit "$result"
           }
       - name: "Modify actual pinned Linux C and H in disposable full checkout"
@@ -81,7 +94,7 @@ jobs:
           fi
           printf 'source_stage=PASS\nsource_modified=yes\n' \
             > "$evidence_dir/staging-status.txt"
-      - name: "Compile modified real Linux swap/BIO objects, two configurations"
+      - name: "Build modified Linux and matched source-linked swapz module for both configurations"
         shell: bash
         env:
           KBUILD_JOBS: "2"
@@ -103,9 +116,31 @@ jobs:
             echo "::error::Modified Linux C/H manifest is missing"
             exit 1
           fi
+          current_phase=verify_swapz_checkout
+          swapz_sha="$(git -C swapz rev-parse HEAD)"
+          if [[ "$swapz_sha" != "$GITHUB_SHA" ]] ||
+             [[ -n "$(git -C swapz status --porcelain --untracked-files=all)" ]] ||
+             [[ ! -f swapz/src/kernel/Makefile ]] ||
+             [[ ! -f swapz/src/kernel/dm-target.c ]]; then
+            echo "::error::Source-linked swapz checkout SHA, cleanliness or source mismatch"
+            exit 1
+          fi
+          current_phase=verify_stock_bio_preimage
+          stock_bio_header="$RUNNER_TEMP/zswap-origin-stock-bio.h"
+          git -C linux show HEAD:include/linux/bio.h > "$stock_bio_header"
+          if grep -Fq 'BIO_HAS_ZSWAP_STORED_WRITEBACK_ORIGIN' "$stock_bio_header" ||
+             ! grep -Fxq '#define BIO_HAS_ZSWAP_STORED_WRITEBACK_ORIGIN 1' \
+               linux/include/linux/bio.h; then
+            echo "::error::BIO origin capability missing from staged source or present in stock"
+            exit 1
+          fi
+          build_info_source="$RUNNER_TEMP/zswap-origin-build-info.h"
+          printf '#define SWAPZ_BUILD_SOURCE_SHA "%s"\n#define SWAPZ_BUILD_SOURCE_CLEAN 1\n#define SWAPZ_BUILD_SOURCE_CLEAN_STRING "1"\n' \
+            "$swapz_sha" > "$build_info_source"
+          build_info_sha256="$(sha256sum "$build_info_source" | cut -d' ' -f1)"
           # No commands below write to live block devices or running kernel.
           run_logged() {
-            local command_name="$1" command_exit_code=0
+            local command_name="$1" command_exit_code=0 warning_count=0
             shift
             current_phase="$command_name"
             printf '%s_command=' "$command_name" >> "$current_manifest"
@@ -123,6 +158,19 @@ jobs:
               tail -n 30 "$log_file"
               return "$command_exit_code"
             fi
+            # W=1 diagnostics are not silently reclassified as green linked builds.
+            warning_count="$(grep -Eic '(^|[[:space:]])warning:' "$log_file" || true)"
+            printf '%s_warning_count=%s\n' "$command_name" "$warning_count" \
+              >> "$current_manifest"
+            if [[ "$command_name" == swapz_module_kbuild ]]; then
+              printf 'module_warning_count=%s\n' "$warning_count" >> "$current_manifest"
+            fi
+            if (( warning_count != 0 )); then
+              current_phase="${command_name}_warnings"
+              echo "::error::Modified Linux $profile $command_name emitted warnings"
+              tail -n 30 "$log_file"
+              return 3
+            fi
           }
 
           for profile in enabled disabled; do
@@ -138,30 +186,50 @@ jobs:
               expected_config='# CONFIG_ZSWAP is not set'
             fi
             {
-              printf 'result=IN_PROGRESS\nsource_repository=torvalds/linux\n'
+              printf 'build_state=IN_PROGRESS\nsource_repository=torvalds/linux\n'
               printf 'source_sha=c339f4010dea8b0d754f84ace70cd1b089878ef8\n'
               printf 'source_modified=yes\nrequested_zswap=%s\n' "$requested_zswap"
+              printf 'swapz_sha=%s\nmodule_build_source_sha=%s\nmodule_build_source_clean=1\n' \
+                "$swapz_sha" "$swapz_sha"
               printf 'compiler=%s\n' "$(gcc --version | sed -n '1p')"
-              printf 'kbuild_jobs=%s\nevidence_class=HOSTED_MODIFIED_SOURCE_OBJECT_KBUILD\n' "$KBUILD_JOBS"
+              printf 'kbuild_jobs=%s\nkbuild_warning_level=1\n' "$KBUILD_JOBS"
+              printf 'evidence_class=HOSTED_PATCHED_LINUX_MATCHED_SWAPZ_MODULE_KBUILD\n'
               printf 'phase_a_qualified=no\nphase_b_enabled=no\n'
             } > "$current_manifest"
             run_logged defconfig make -s -C linux "O=$build_dir" CC=gcc defconfig
             run_logged scripts_config linux/scripts/config --file "$build_dir/.config" \
-              --enable SWAP "$option" ZSWAP
+              --enable SWAP "$option" ZSWAP \
+              --enable MODULES --enable MD --enable BLK_DEV_DM --enable CRYPTO_LZ4
             run_logged olddefconfig make -s -C linux "O=$build_dir" CC=gcc olddefconfig
             current_phase=verify_effective_configuration
             if ! grep -Fxq 'CONFIG_SWAP=y' "$build_dir/.config" || \
-               ! grep -Fxq "$expected_config" "$build_dir/.config"; then
-              echo "::error::Effective CONFIG_SWAP/CONFIG_ZSWAP unexpected"
+               ! grep -Fxq "$expected_config" "$build_dir/.config" ||
+               ! grep -Fxq 'CONFIG_MODULES=y' "$build_dir/.config" ||
+               ! grep -Fxq 'CONFIG_BLK_DEV_DM=y' "$build_dir/.config" ||
+               ! grep -Fxq 'CONFIG_CRYPTO_LZ4=y' "$build_dir/.config" ||
+               ! grep -Fxq 'CONFIG_LZ4_COMPRESS=y' "$build_dir/.config" ||
+               ! grep -Fxq 'CONFIG_LZ4_DECOMPRESS=y' "$build_dir/.config"; then
+              echo "::error::Effective CONFIG_SWAP/ZSWAP/DM/LZ4 configuration fallback"
               exit 1
             fi
             printf 'effective_swap=y\neffective_zswap=%s\n' "$requested_zswap" \
+              >> "$current_manifest"
+            printf 'effective_modules=y\neffective_blk_dev_dm=y\n' >> "$current_manifest"
+            printf 'effective_crypto_lz4=y\neffective_lz4_compress=y\neffective_lz4_decompress=y\n' \
               >> "$current_manifest"
             printf 'config_sha256=%s\n' \
               "$(sha256sum "$build_dir/.config" | cut -d' ' -f1)" \
               >> "$current_manifest"
             run_logged prepare make -s -C linux "O=$build_dir" CC=gcc \
               "-j$KBUILD_JOBS" W=1 prepare
+            current_phase=verify_kbuild_recorded_compiler
+            recorded_compiler="$(sed -n 's/^CONFIG_CC_VERSION_TEXT=//p' \
+              "$build_dir/include/config/auto.conf")"
+            if [[ "$recorded_compiler" != *gcc* ]]; then
+              echo "::error::Kernel Kbuild compiler did not match GCC"
+              exit 1
+            fi
+            printf 'kbuild_recorded_compiler=%s\n' "$recorded_compiler" >> "$current_manifest"
             objects=(mm/page_io.o block/bio.o)
             if [[ "$profile" == enabled ]]; then
               objects+=(mm/zswap.o)
@@ -182,9 +250,82 @@ jobs:
               echo "::error::ZSWAP-disabled build unexpectedly emitted zswap object"
               exit 1
             fi
+            # A matched external .ko needs the *same modified* kernel's complete
+            # exported symbols. Neither modules_prepare nor vmlinux alone is enough.
+            run_logged modules_prepare make -s -C linux "O=$build_dir" CC=gcc \
+              "-j$KBUILD_JOBS" W=1 modules_prepare
+            run_logged kernel_export_build make -s -C linux "O=$build_dir" CC=gcc \
+              "-j$KBUILD_JOBS" W=1 vmlinux
+            run_logged kernel_export_modules make -s -C linux "O=$build_dir" CC=gcc \
+              "-j$KBUILD_JOBS" W=1 modules
+            current_phase=verify_complete_kernel_exports
+            if [[ ! -s "$build_dir/Module.symvers" ]]; then
+              echo "::error::Modified Linux complete Module.symvers is missing or empty"
+              exit 1
+            fi
+            printf 'module_symvers_sha256=%s\n' \
+              "$(sha256sum "$build_dir/Module.symvers" | cut -d' ' -f1)" \
+              >> "$current_manifest"
+            kernel_release="$(make -s -C linux "O=$build_dir" CC=gcc kernelrelease)"
+            if [[ -z "$kernel_release" ]]; then
+              echo "::error::Paired kernel release identity missing"
+              exit 1
+            fi
+            printf 'kernel_release=%s\n' "$kernel_release" >> "$current_manifest"
+
+            # Prevent a prior profile's or earlier run's module from satisfying
+            # this linked Kbuild; each disposable stage has a distinct path.
+            module_stage="$RUNNER_TEMP/zswap-origin-module-$profile"
+            mkdir -p "$module_stage"
+            rm -f "$module_stage/dm-swapz.ko"
+            run_logged swapz_module_kbuild make -s -C swapz/src/kernel \
+              "KDIR=$build_dir" "SWAPZ_STAGE=$module_stage" \
+              "SWAPZ_BUILD_INFO=$build_info_source" CC=gcc \
+              "-j$KBUILD_JOBS" W=1 all
+            current_phase=verify_linked_module_exists
+            module_artifact="$module_stage/dm-swapz.ko"
+            if [[ ! -s "$module_artifact" ]]; then
+              echo "::error::Matched patched Linux did not link dm-swapz.ko"
+              exit 1
+            fi
+            printf 'module_linked=yes\nmodule_bytes=%s\nmodule_sha256=%s\n' \
+              "$(stat -c '%s' "$module_artifact")" \
+              "$(sha256sum "$module_artifact" | cut -d' ' -f1)" \
+              >> "$current_manifest"
+            printf 'build_info_sha256=%s\n' "$build_info_sha256" >> "$current_manifest"
+            current_phase=verify_elf_structure
+            if ! readelf -h "$module_artifact" > "$log_file" 2>&1 ||
+               ! grep -Eq 'Class:[[:space:]]+ELF64' "$log_file" ||
+               ! grep -Eq 'Type:[[:space:]]+REL' "$log_file"; then
+              echo "::error::Linked module is not a valid ELF64 relocatable"
+              tail -n 15 "$log_file"
+              exit 1
+            fi
+            current_phase=verify_patched_source_still_exact
+            expected="$(printf '%s\n' block/bio.c include/linux/bio.h \
+              include/linux/blk_types.h include/linux/swap_ops.h mm/page_io.c mm/zswap.c)"
+            actual="$(git -C linux diff --name-only | LC_ALL=C sort)"
+            if [[ "$actual" != "$expected" ]] ||
+               [[ -n "$(git -C linux ls-files --others --exclude-standard)" ]] ||
+               [[ "$(git -C linux rev-parse HEAD)" != \
+                  c339f4010dea8b0d754f84ace70cd1b089878ef8 ]] ||
+               [[ "$(git -C swapz rev-parse HEAD)" != "$swapz_sha" ]] ||
+               [[ -n "$(git -C swapz status --porcelain --untracked-files=all)" ]]; then
+              echo "::error::Modified source allowlist or swapz checkout changed after build"
+              exit 1
+            fi
             printf 'kunit=NOT_RUN_NO_DEDICATED_PINNED_KUNIT_CASE\n' >> "$current_manifest"
+            current_phase=verify_matched_paired_artifacts
+            python3 -B swapz/tests/runtime/native/pinned-linux-origin-paired-module-test.py \
+              --manifest "$current_manifest" \
+              --source-manifest "$evidence_dir/source-manifest.json" \
+              --linux-root "$PWD/linux" --stock-bio-header "$stock_bio_header" \
+              --build-dir "$build_dir" --module-stage "$module_stage" \
+              --swapz-root "$PWD/swapz" --profile "$requested_zswap" \
+              --swapz-sha "$swapz_sha"
             printf 'result=PASS\n' >> "$current_manifest"
           done
+          current_manifest=""
       - name: "Retain source, build and first-failure evidence"
         if: always()
         uses: actions/upload-artifact@v4

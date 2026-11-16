@@ -3577,3 +3577,64 @@ Only the hosted exact integrated source commit with both GCC profiles
 and verified linked artifacts may establish pinned compiler acceptance.
 Until then report `SOURCE_READY_PENDING_COORDINATOR_CI`; Phase A
 BLOCKED and Phase B RAW bypass DISABLED.
+
+## Round 010 patched Linux to swapz paired source-build identity (2026-11-15)
+
+Extend the independent pinned-producer workflow, not the unrelated stock
+GCC/LLVM source-preflight lane. Source control retains the existing exact
+`torvalds/linux@c339f4010dea8b0d754f84ace70cd1b089878ef8` preimage
+allowlist, six-file real C/H staging, changed-postimage JSON manifest and
+separate `CONFIG_ZSWAP=y/n` out-of-tree `O=` Linux object builds. The same
+job must additionally build each **modified** profile's complete in-tree
+`vmlinux` and `modules` (including modpost and nonempty `Module.symvers`);
+`modules_prepare` alone cannot provide the complete exported-symbol ABI.
+Against that **same profile-specific patched kernel output directory**, use
+the unchanged source-controlled `src/kernel/Makefile` staging path and real
+GCC `W=1` Kbuild to link `dm-swapz.ko`. Always bound jobs, timeout,
+host dependencies and failure output. Never use a stock-header or prior
+profile's `Module.symvers`/module as a surrogate for a patched module.
+
+A clean checkout at the exact workflow `GITHUB_SHA` must supply an explicit
+generated `swapz-build-info.h` with all three coherent definitions:
+`SWAPZ_BUILD_SOURCE_SHA` as the quoted source SHA,
+`SWAPZ_BUILD_SOURCE_CLEAN=1`, and
+`SWAPZ_BUILD_SOURCE_CLEAN_STRING="1"`. The staged header and consumer
+source files must match this committed checkout. Verify effective
+`CONFIG_SWAP=y`, requested `CONFIG_ZSWAP=y/n`, modules, DM, CRYPTO_LZ4
+and LZ4 codec settings, prepared GCC identity, real nonempty expected
+swap/BIO objects, and absence of a disabled zswap object. Hash real
+`.config`, `Module.symvers`, each source object, linked module and staged
+build-info bytes. The staged source JSON must match all six real
+postimages and the stock BIO header preimage. Require
+`BIO_HAS_ZSWAP_STORED_WRITEBACK_ORIGIN` in only the patched BIO header;
+the linked module's compiled status-reader string must select
+`origin_carrier_compiled=1`, not the old stock-header branch.
+
+The actual `tests/runtime/native/pinned-linux-origin-paired-module-test.py`
+is a standalone stdlib verifier. In the hosted per-profile lane it checks
+real-file bytes with bounded streaming SHA-256, no-follow file descriptors,
+canonical manifest grammar and module size, ELF64/x86-64 relocatable
+section bounds, `modinfo` name, `vermagic` and exact source SHA/clean
+metadata. Run it **before** any terminal `result=PASS`, after real
+`modules`/modpost and the external staged Kbuild command exit zero. A
+nonzero step, warning, malformed/stale artifact, unexpected source edit,
+wrong compiler/header/profile, empty export table, missing module or mismatch
+must fail the job and preserve its first failed phase, exit status, and bounded
+`if: always()` evidence. Each profile uses distinct build/module staging
+directories, invalidating any stale module candidate before building.
+
+Rootless `--self-test` exercises actual temporary on-disk synthetic
+positive/negative artifacts, wrong Linux SHA, dirty checkout through the
+**full YAML-extracted Bash**, missing/empty exports, wrong profile and
+header, forged `PASS`, invalid ELF/modinfo/source SHA, missing/empty
+`.ko`, and ordering bypass. Local mocked output is not a Linux build PASS.
+The original stock-source artifact-integrity verifier's manifest schema is
+not interchangeable with this distinct modified-Linux paired-build schema.
+
+This proof class is `HOSTED_PATCHED_LINUX_MATCHED_SWAPZ_MODULE_KBUILD`
+only upon a real successful hosted exact-integrated-SHA run for **both**
+profiles. It does not establish a loaded module/kernel ABI, authenticated
+MM→BIO producer event, actual stored-entry writeback/readback, matched
+physical device or kernel swap/reclaim operations. An unreferenced source
+commit remains `SOURCE_READY_PENDING_COORDINATOR_CI`; Phase A remains
+BLOCKED and Phase B RAW bypass DISABLED.
