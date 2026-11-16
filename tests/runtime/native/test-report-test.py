@@ -12784,6 +12784,10 @@ class AlgorithmLocalOnlyQualificationContract(unittest.TestCase):
                 ("retained_physical_trial_candidate", lambda: False),
                 ("tracked_source_checkout_preflight", lambda: None),
                 ("source_checkout_stability", lambda *args: {"stable": True}),
+                # A separate adversarial suite covers the local source lease.
+                # This fixture checks only that a successful lease reaches the
+                # mocked physical selector without any remote publication.
+                ("algorithm_ram_source_lease_refusal", lambda *args: None),
                 ("run_stage", stage_pass),
                 ("qualification_artifact_digests",
                  lambda: {"status": "AVAILABLE"}),

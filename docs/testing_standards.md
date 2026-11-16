@@ -2,6 +2,15 @@
 
 ## Local-source algorithm qualification (owner decision, 2026-11-16)
 
+The rootless local physical-handoff regression mocks the independently
+tested local source-lease decision while asserting that the same-run RAM
+checkpoint reaches only a mocked selector, without remote Git publication
+or post-test reconciliation. The separate RAM source-lease adversarial suite
+must still reject dirty local source, changed local HEAD, malformed evidence,
+artifact drift, and interrupted selector invocation; never mock these
+refusals in actual privileged execution.
+
+
 `make test` must pin the existing, clean local `main` source and never
 fetch, fast-forward, publish, reset, or reconcile GitHub during algorithm
 qualification. Remote commits, GitHub downtime, stale `origin/main`, and
