@@ -1,0 +1,19 @@
+# Round 011 — FINAL two independent actual-source tasks
+
+**Round 011 execution authority:** only one `message: ROUND_OPEN` in https://github.com/k1moradi/swapz/issues/128, after this final task-commit is published on canonical `main`.
+**Frozen engineering source (single parent for each worker commit):** `b9ec668aa7fc7d497d33bf7174277de4de2750e4`.
+**Workers excluding coordinator Agent 1:** exactly **Agents 2 and 6**, simultaneous and independent. No extra topic branches, forks, PRs, secondary worktrees or force pushes. Agents edit real source from `main`; Agent 1 is the single remote-main publisher and integrates reviewed worker Git objects serially by expected-head non-force fast-forward.
+
+[Agent 2 full source task](agent2-pinned-linux-bio-origin-kunit.md) owns the **existing full pinned Linux source-staging tool**, existing staging regressions, new KUnit source-compilation workflow and a distinct testing-standard appendix. [Agent 6 full source task](agent6-producer-consumer-origin-abi-contract.md) owns an **independent new producer↔consumer ABI contract regression**, existing rootless CI invocation and a distinct coding-standard appendix. There are no shared source paths or same-round agent dependencies; both can begin without waiting for [the previous matched CI #43793863015](https://github.com/k1moradi/swapz/actions/runs/43793863015).
+
+The old [Round 010 report](../round010/round-report.md) records both genuine source integrations, Agent 5's authoritative correction, the 19/20 rootless failure and the coordinator's narrow test fix. [Previous modified pinned Linux C/H source-object #43790479509](https://github.com/k1moradi/swapz/actions/runs/43790479509) passed, but actual patched matched Linux module/runtime remains **NOT QUALIFIED**. No KUnit success, stored-entry zswap writeback, or 4096-byte readback is claimed.
+
+## Shared engineering and reporting contract
+
+Read `AGENTS.md`, `docs/AGENT_CONTEXT.md`, `docs/coding_standards.md`, `docs/testing_standards.md`. Work on **actual tracked C/Python/YAML source** and exact compiled Linux checkout where called for; no patch-only delivery, synthetic-only PASS, screenshots, source audits, or planning-only reports. Use exact pin `torvalds/linux@c339f4010dea8b0d754f84ace70cd1b089878ef8`. Keep all existing comments, public APIs, 4096-byte payload and no forced origin-driven RAW scheduling. No live kernel, module load, swap, mapper/reclaim or physical disk I/O.
+
+Each worker must produce a **retrievable Git commit object whose single parent is `b9ec668aa7fc7d497d33bf7174277de4de2750e4`**, publish no additional branch and never race to update remote `main`; Agent 1 reviews code and advances the one canonical `main` ref serially. On a separate, **post-ROUND_OPEN** `message: REPORT_READY` comment to #128, include `round: "011"`, agent/task, frozen source, exact real source SHA, modified files, commands/exits, negative controls, first failure and honest local, Kbuild, KUnit and NOT_RUN classifications. Agent 1 archives original reports byte-for-byte with SHA-256, qualifies exact-source CI and closes truthfully.
+
+**Branch policy:** the repository has a separate owner-authenticated cleanup task for old branch refs. At audit, 65 stale non-main remote refs (51 divergent/unmerged) and 0 open PRs remained. No worker is authorized to delete historical refs or silently merge unknown old changes. Their source files and KUnit/ABI work do not depend on branch cleanup. `tests/tools/cleanup-legacy-branches.py` on main has a deletion-lease guard but lacks a durable Git bundle backup for divergent commits: do not run its `--apply` unchanged. A safer operator cleanup is supplied separately.
+
+**Phase A BLOCKED** until actual matched authenticated MM→BIO→DM runtime writeback and 4096-byte readback; **Phase B RAW bypass DISABLED**.
