@@ -2833,8 +2833,14 @@ int main(void) {
             'note "START_LOADED_SYNTHETIC_READ_FAULT"', 1)[1].split(
             'note "START_LOADED_RETAINED_FLUSH_FAULT"', 1)[0]
         self.assertIn(
-            'dmsetup --noudevrules create "$DMNAME" --uuid "$UUID"',
+            'dmsetup --noudevrules create "$DMNAME" --uuid "$UUID"'
+            ' --addnodeoncreate',
             read_fault_phase)
+        # Both switches must stay scoped to the disposable fault mapping.
+        self.assertEqual(deploy.count("dmsetup --noudevrules create"), 1)
+        self.assertEqual(deploy.count("--addnodeoncreate"), 2)
+        self.assertLess(read_fault_phase.index("--addnodeoncreate"),
+                        read_fault_phase.index("swapz_verify_owned_dm_node"))
         self.assertIn("swapz_verify_owned_dm_node", read_fault_phase)
         self.assertIn("READ-fault fired before verification READ",
                       read_fault_phase)

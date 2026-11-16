@@ -1392,14 +1392,15 @@ OWN_DM=0
 # udev rule processing for this disposable null_blk mapper: external blkid/
 # filesystem probes can otherwise consume the one-shot READ fault between
 # mapper publication and the explicitly controlled O_DIRECT verification.
-# libdevmapper still creates its node; independently verify the exact sysfs
-# DM name/UUID and opened node after bounded udev settling as before.
+# Explicit --addnodeoncreate ensures libdevmapper publishes the node while
+# udev rules stay suppressed. Verify its sysfs DM identity and opened node
+# after bounded udev settling as before.
 # Do not disable rules for primary or physical swap devices.
 # The aligned O_DIRECT verification must fail, the target must fail closed,
 # and neither submitted-read accounting nor lower READ sectors may advance.
 note "START_LOADED_SYNTHETIC_READ_FAULT"
 UUID="SWAPZ-TEST-$TOKEN-readfault"
-dmsetup --noudevrules create "$DMNAME" --uuid "$UUID" \
+dmsetup --noudevrules create "$DMNAME" --uuid "$UUID" --addnodeoncreate \
     --table "0 32768 swapz $LOWER 0 64 0 2 0 1 0 2 0 1" ||
     fail "cannot create retained READ-fault mapping"
 OWN_DM=1
