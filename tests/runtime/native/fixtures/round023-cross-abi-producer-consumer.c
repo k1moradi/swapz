@@ -119,6 +119,8 @@ int main(void)
 	assert(zswap_swapz_capture_owned_payload(&producer, &stored, source_slot,
 		&locked, &proof, 17U) == 0);
 	assert(zswap_swapz_owned_payload_submit(&producer));
+	/* A pending source cannot abort while lower authority is outstanding. */
+	assert(!zswap_swapz_owned_payload_abort(&producer));
 
 	/* Distinct ID domains: 7 != 301 != 901 != 42; no struct bit-cast. */
 	assert(round023_test_adapter(&producer, &mapping, &record) == 0);

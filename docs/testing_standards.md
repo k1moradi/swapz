@@ -14258,3 +14258,19 @@ authenticated MM-to-BIO-to-loaded DM compressed handoff, nor loaded original
 original UNCOMPRESSED 4096; codec/generation/GC metadata remains bounded
 volatile RAM. Phase A BLOCKED; Phase B forced RAW bypass DISABLED;
 direct compressed transport DISABLED; LOADED/PHYSICAL NOT_RUN.
+
+
+### Round 023 Agent 4 — first exact-source compiler failure and fix
+
+The first exact-SHA source CI #43953308556 failed GCC and Clang
+before execution: new cross-ABI fixture omitted an invocation of the
+existing real zswap_swapz_owned_payload_abort() static function,
+causing -Werror=unused-function; legacy original src/kernel/codec.c
+also had known size_t→u32 -Wconversion warnings when held to the NEW
+fixture's stricter conversion flag. The correction now tests that
+an already submitted owner cannot abort and compiles ORIGINAL codec.c
+independently with -Wno-conversion while still -Werror for every
+other original-file warning. The NEW extracted C fixture keeps
+-Werror -Wconversion -Wshadow unchanged. No production file or
+live compressed carrier was modified. CI rerun on the new exact SHA
+is required; no mocked acceptance is loaded qualification.

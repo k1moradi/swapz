@@ -33,3 +33,19 @@ have NOT_RUN status. No physical SWAPSPACE2 header/UUID/partition
 operation, module, swap or memory pressure performed. Current RAW is
 ORIGINAL UNCOMPRESSED 4096, no compressed handoff/forced RAW bypass
 enabled, Phase A BLOCKED.
+
+
+## Original exact-source CI first failure and correction
+
+The first pinned new workflow on SHA f6bb8f5e8b7c9045e3afb889459f747dd730f9bf,
+run #43953308556, genuinely FAILED GCC and Clang compilation:
+zswap_swapz_owned_payload_abort was unused in the new excerpt;
+existing production codec.c emits size_t→swapz_u32 conversion warnings.
+No runtime decoded 4096 result may be claimed for that failed run.
+A negative assertion now exercises abort refusal after submit. The Python
+compiler pipeline builds unchanged original codec.c separately with
+-Werror and explicit -Wno-conversion only on its translation unit;
+the extracted producer/consumer C fixture retains strict
+-Wall -Wextra -Werror -Wconversion -Wshadow ASan/UBSan.
+This isolates existing production warnings without modifying/weakening
+new fixture source or touching any kernel/device.
