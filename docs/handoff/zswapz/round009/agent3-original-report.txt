@@ -1,0 +1,68 @@
+message: REPORT_READY
+round: "009"
+agent: 3
+task_id: agent3-pinned-gcc-build-info-fix
+status: SOURCE_READY_PENDING_COORDINATOR_CI
+frozen_source_sha: 4063b88422dd62b1d4b1a990f0cfe9961e73277c
+task_commit_sha: 419db8446a4d9ad58dfaf4bbebdee8895515e070
+source_commit_sha: 7f49d99ac919d23a956a23a6a7efa881a22d01a3
+source_commit_url: https://github.com/k1moradi/swapz/commit/7f49d99ac919d23a956a23a6a7efa881a22d01a3
+source_commit_parent_sha: 4063b88422dd62b1d4b1a990f0cfe9961e73277c
+workflow_blob_sha: 9eeaeb3fb29aa80db592e72ed82a97eaa9245b38
+source_contract_ci_blob_sha: 0c75f086c8a2bfe516bede321e797d8943fadb94
+test_blob_sha: 102e33ba0a03e7ad436f6e52202e7d34e6278b36
+coding_standards_blob_sha: 4cba1884f69399a76d3ef7e26a347d9aad05d26e
+modified_paths:
+  - .github/workflows/phase-a-linux-source-preflight.yml
+  - .github/workflows/product-codec.yml
+  - tests/runtime/native/pinned-gcc-build-info-source-test.py
+  - docs/coding_standards.md
+evidence_class: actual_retrievable_source_commit + rootless_header_generation_compiler_elf_tests
+rootless_unittest: PASS_7_OF_7
+gcc_compile: PASS_GCC_14_2_0
+clang_compile: PASS_Clang_17_0_0
+elf_module_info: PASS_clean_and_dirty
+negative_metadata_cases: 14_of_14_rejected
+exact_integrated_hosted_gcc_kbuild: NOT_RUN
+remote_main_updated: false
+phase_a: BLOCKED
+phase_b: DISABLED
+
+# Agent 3 — Round 009 real GCC pinned external-module build-info repair
+
+**Actual retrievable Git source commit:** https://github.com/k1moradi/swapz/commit/7f49d99ac919d23a956a23a6a7efa881a22d01a3
+
+The GitHub REST commit and one-commit comparison were independently verified: **sole parent `4063b88422dd62b1d4b1a990f0cfe9961e73277c`**, exactly the four owned source paths above, no newly added trailing whitespace and no source changes to `src/kernel/dm-target.c`, root `Makefile` or `src/kernel/swapz-build-info.h`. No fork, branch, PR, secondary worktree or remote `main` update was created. Main observed at `419db8446a4d9ad58dfaf4bbebdee8895515e070` after the source-object commit, distinct from the worker commit.
+
+## Actual confirmed source defect and implemented code fix
+
+The original exact-source [hosted GCC run 43773918173](https://github.com/k1moradi/swapz/actions/runs/43773918173), [job 132995715838](https://github.com/k1moradi/swapz/actions/runs/43773918173/job/132995715838), failed in the first enabled-profile `swapz_module_kbuild` with exit **2**. First compiler error: `dm-target.c:71:39: error: expected ',' or ';' before SWAPZ_BUILD_SOURCE_CLEAN_STRING`; the same missing token breaks the `MODULE_INFO` expansion. The workflow-generated disposable header previously supplied only `SWAPZ_BUILD_SOURCE_SHA` and numeric `SWAPZ_BUILD_SOURCE_CLEAN=1`, unlike the already-correct root Makefile and fallback header.
+
+The **actual existing** `.github/workflows/phase-a-linux-source-preflight.yml` header generator now emits the complete coherent trio, with the verified `swapz_sha` unchanged:
+
+```bash
+# Keep the numeric clean flag and quoted MODULE_INFO metadata in sync.
+build_info_source="$RUNNER_TEMP/swapz-module-build-info.h"
+printf '#define SWAPZ_BUILD_SOURCE_SHA "%s"\n#define SWAPZ_BUILD_SOURCE_CLEAN 1\n#define SWAPZ_BUILD_SOURCE_CLEAN_STRING "1"\n' \
+  "$swapz_sha" > "$build_info_source"
+```
+
+Only **two workflow lines added and one replaced**. The numeric clean-state module parameter remains `1`; the quoted `"1"` is now available to Linux `MODULE_INFO` for the actual ELF `.modinfo` metadata. No consumer metadata deletion, hardcoded SHA, origin override, bypass, Kbuild suppression or implicit module approval. The independent LLVM job was compared against the frozen workflow and remains byte-for-byte identical. Real pinned Linux `CONFIG_ZSWAP=y/n` Kbuild, `Module.symvers` and nonempty module checks, staging source identity, first-failure upload and Agent 8's actual artifact verifier **before terminal PASS** are unchanged.
+
+Added an executable **275-line** bounded Python stdlib regression `tests/runtime/native/pinned-gcc-build-info-source-test.py`. It extracts and runs the workflow's actual header-generation shell snippet and the root Makefile's actual internal build-header recipe in disposable directories; checks clean/dirty string/int parity, canonical 40-digit SHA, source exactness and consumer `MODULE_INFO` reference. Linux-shaped `MODULE_INFO` macro tests compile with strict GCC and Clang and verify that emitted ELF `.modinfo` contains the matching SHA and `clean=0/1`. Missing string reproduces GCC/Clang compilation failure. Fourteen malformed or contradictory metadata cases fail closed, and three mutated source-producer cases are rejected. One existing product-codec source-contract CI step now invokes it with `python3 -B ... -v`. Appended a uniquely named **37-line** Round 009 section to `docs/coding_standards.md` in the same source commit; Agent 2's tools/workflow/`docs/testing_standards.md` were not edited.
+
+## Exact local tests and evidence
+
+**Local environment:** Python **3.13.5**, GNU GCC **14.2.0**, Clang **17.0.0**, GNU readelf **2.44**, Git **2.47.3**. All tests are unprivileged and use temporary directories.
+
+1. `python3 -B tests/runtime/native/pinned-gcc-build-info-source-test.py -v` from disposable local source staging: **exit 0; 7/7 unittest methods PASS** in 0.146 seconds; actual GCC/Clang `-std=gnu11 -O2 -Wall -Wextra -Werror` object compilations and `readelf -p .modinfo` matched clean and dirty metadata. The test target is byte-for-byte the committed Git blob `102e33ba0a03e7ad436f6e52202e7d34e6278b36` (`git hash-object` exit 0, GitHub re-fetch exact match).
+2. `python3 -B -m py_compile tests/runtime/native/pinned-gcc-build-info-source-test.py`: **exit 0**.
+3. `python3` + PyYAML `yaml.BaseLoader` on a **locally reconstructed target-workflow fixture** plus `bash -n` for its two included `run: |` blocks: **exit 0, 2/2 embedded scripts syntax PASS**. This is explicitly a targeted fixture and **NOT** a full-source YAML or every embedded script claim.
+4. Source-bound connector tests on **the complete actual frozen and committed GitHub workflow contents**: unique minimal header producer replacement; complete LLVM job suffix byte-for-byte identical; both ZSWAP profiles, actual linked module gate, nonempty artifact guard and real-byte verifier still present; exact new source blob fetched and source diff inspected; source-commit ancestry/path ownership/whitespace checks **PASS**.
+5. Original hosted job log was independently fetched and first real compiler fatal diagnostic rechecked at `SWAPZ_BUILD_SOURCE_CLEAN_STRING`. The fix is at that actual data producer, not a speculative module patch.
+
+**NOT_RUN:** whole-source local repository `git diff --check`, full exact workflow YAML parse and `bash -n` of every embedded script in a checked-out full Git tree, full project `make test`, actual pinned Linux `CONFIG_ZSWAP=y/n` Kbuild, modpost, two linked `dm-swapz.ko` artifacts, hosted product-codec source-contract workflow and Agent 8 verification against real produced bytes. The local environment lacks a complete checked-out swapz/Linux tree and direct GitHub cloning failed DNS resolution; the local source-file fixture is **not** a full repo or a full Linux Kbuild. No PASS is inferred from fixture compilation.
+
+**Remaining first-failure status:** historical hosted first compiler error is confirmed above; **next exact-integrated-source hosted first failure = UNKNOWN until CI runs**. Agent 1 must independently integrate this commit (preserving Agent 2's separate source edits and standards) and run hosted GitHub CI at the exact integrated SHA. GCC `CONFIG_ZSWAP=y` and `n` both need actual real `Module.symvers`, nonempty linked `dm-swapz.ko`, exact source/build hashes and accepted Agent 8 verifier artifacts. A new incompatibility must retain its real command, exit and bounded error evidence; fixing this first compile error alone is not a linked-module PASS.
+
+**Result:** `SOURCE_READY_PENDING_COORDINATOR_CI` for real committed code and passing rootless tests only. No loaded kernel/module, mapper, swap, reclaim or physical operation. Stock pinned Linux still does not establish authenticated MM→BIO zswap stored-entry producer provenance. **Phase A BLOCKED; Phase B RAW bypass DISABLED.**

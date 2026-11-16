@@ -1,0 +1,73 @@
+message: REPORT_READY
+round: "009"
+agent: 2
+task_id: agent2-real-linux-provenance-source-staging
+status: SOURCE_READY_PENDING_COORDINATOR_CI
+source_sha: 4063b88422dd62b1d4b1a990f0cfe9961e73277c
+task_commit_sha: 419db8446a4d9ad58dfaf4bbebdee8895515e070
+implementation_commit_sha: b4ed94e73a778db8772d48dc9a6a1364b603bcc5
+implementation_parent_sha: 4063b88422dd62b1d4b1a990f0cfe9961e73277c
+implementation_tree_sha: bb350777380bca59cb705190bb35af723b371338
+linux_source_sha: c339f4010dea8b0d754f84ace70cd1b089878ef8
+phase_a: BLOCKED
+phase_b: DISABLED
+source_controlled_code: YES
+modified_files:
+  - tests/tools/stage-pinned-linux-zswap-origin.py
+  - tests/runtime/native/pinned-linux-zswap-origin-stage-test.py
+  - .github/workflows/phase-a-zswap-origin-prototype.yml
+  - docs/testing_standards.md
+
+# Agent 2 Round 009 — independently committed pinned Linux producer staging prototype
+
+**Actual retrievable Git source commit:** [b4ed94e73a778db8772d48dc9a6a1364b603bcc5](https://github.com/k1moradi/swapz/commit/b4ed94e73a778db8772d48dc9a6a1364b603bcc5).
+
+Verified via GitHub Git commit API: one and only one parent `4063b88422dd62b1d4b1a990f0cfe9961e73277c`, tree `bb350777380bca59cb705190bb35af723b371338`, source and test executable file modes `100755`, workflow/doc `100644`. Canonical `main` was still `419db8446a4d9ad58dfaf4bbebdee8895515e070` at final publication check: **no remote ref updated**, no branch, PR, fork, secondary worktree or force push. The intermediate draft Git object is superseded by the final commit above and must not be integrated.
+
+## Delivered executable source
+
+1. **New actual Python source mutator:** `tests/tools/stage-pinned-linux-zswap-origin.py` (Git blob `c293916ec6b2f6d4d0bb005f78d44001512c819c`; local SHA-256 `a93af6872b71f338f4d52a5871826e4794b6dfe6833fc14ee13ad39b8819ad4d`). It requires a *complete clean* `torvalds/linux` checkout of exact commit `c339f4010dea8b0d754f84ace70cd1b089878ef8`, at least 50,000 tracked files, and exact indexed/working Git blob identities of the Linux Makefile plus the six edited C/H files. No network access is made by the tool. It rejects missing/duplicate/overlapping/already-applied source anchors and validates all 11 source transitions before writing any C/H file; it writes in place using owned temporary files with rollback after a partial write or evidence-manifest failure. Fail-only diagnostics use bounded fixed categories without disclosing the missing checkout path. Changed-path JSON manifest is outside the Linux checkout and includes original/staged Git blob IDs and staged SHA-256.
+2. **New actual rootless test:** `tests/runtime/native/pinned-linux-zswap-origin-stage-test.py` (blob `d98b4b58936a5822db441175165189c0cf0993db`; SHA-256 `0f22d44955fb3f7111f2bc6d20c89114b05279a98d5b2aee8b7c1f5943dcf296`). It imports and executes that production stager on exact representative Linux source-anchor excerpts. Test cases cover source identities; scalar classification, clone and mixed-origin aggregation source assertions; wrong SHA/blob; missing/duplicate/overlapping anchors; wrong checkout/path secrecy; first stage, manifest hashes, second-run refusal; late preflight failure with unchanged tree; injected third-file write rollback; manifest failure rollback; and manifest path containment.
+3. **Independent hosted Linux workflow:** `.github/workflows/phase-a-zswap-origin-prototype.yml` (blob `250aa3d60d414e37426f1bd6723884d0274b6faa`; SHA-256 `8984d8e0ec677681b84eced6eb86b02a56f4a24f7893ff181538b88d136475ff`). Read-only permissions. It checks out swapz and the **full exact upstream Linux** checkout, installs host build dependencies, runs the rootless suite, invokes the real source mutator, verifies exactly six tracked C/H paths changed and `git diff --check`, then builds **modified** `mm/page_io.o` and `block/bio.o` in separate `CONFIG_SWAP=y`, `CONFIG_ZSWAP=y/n` builds and `mm/zswap.o` when enabled. It records requested/effective config, compiler, exact command/exits, object SHA-256 and first failed phase to bounded retained artifacts even on failure. No stock-only build substitutes for modified-source evidence; no external module/device use. KUnit is explicitly `NOT_RUN_NO_DEDICATED_PINNED_KUNIT_CASE` rather than invented.
+4. **Governing standard:** separate new “Round 009 actual pinned MM/BIO origin staging prototype” section in `docs/testing_standards.md` in the same commit (blob `b73937cfba53d82616b1b91312a5ba8013bbbaf3`).
+
+Agent 3's existing workflow, build-info files, `src/kernel/dm-target.c`, root Makefile and coding standards were not changed.
+
+## Actual Linux C/H semantics produced by the staging tool
+
+- `include/linux/blk_types.h`: define `SWAP_BIO_ORIGIN_ORDINARY_OR_UNKNOWN=0`, `SWAP_BIO_ORIGIN_ZSWAP_STORED_WRITEBACK=1` and a one-byte scalar on `struct bio` within its `BIO_RESET_BYTES` region.
+- `include/linux/bio.h`: `BIO_HAS_ZSWAP_STORED_WRITEBACK_ORIGIN` and conservative `bio_is_zswap_stored_writeback()` checking **WRITE + REQ_SWAP + exact positive scalar**. Ordinary flag, PID or folio flags alone do not certify provenance.
+- `block/bio.c`: `bio_init()` explicitly defaults UNKNOWN; `bio_reset()` already zeroes the new scalar via `memset(BIO_RESET_BYTES)`; `__bio_clone()` copies it, so kernel clone/split paths based on that helper preserve the scalar.
+- `include/linux/swap_ops.h`: scalar in existing `swap_io_ctx` and `swap_iocb`, no retained MM/folio/zswap pointer.
+- `mm/page_io.c`: prevent mixed-origin aggregation before adding a folio to a WRITE iocb, initialize the iocb origin from its context, stamp BIO after `bio_init()`; READ stays default-unknown.
+- `mm/zswap.c`: set positive context only *after* stored entry identity verification (`xa_load`) and successful `zswap_decompress()`, before the existing `__swap_writeout()`; failed, rejected and ordinary paths remain unknown.
+
+No new `REQ_ZSWAP_WRITEBACK` bit, codec/RAW bypass, persistent format or completion-owner change.
+
+## Exact upstream full-source identity and replay evidence (not a complete checkout build)
+
+GitHub full-file reads at pinned `torvalds/linux@c339f401...` verified **11/11** old-source edit anchors exactly once and no already-present postimages. A separate deterministic in-memory replay applied all 11 edits to the entire exact six real upstream file contents, and GitHub blob creation confirmed the following full-file *expected postimage* Git SHA-1 identities:
+
+| Linux source | Original Git blob SHA-1 | Expected staged Git blob SHA-1 |
+| --- | --- | --- |
+| `include/linux/blk_types.h` | `0cc09b975d8ffbd45ca3dc47533a71f8e8164de6` | `fd90369a42c4cf6c9cc152ffe1f48ad41f073aa8` |
+| `include/linux/bio.h` | `7a794ce723b84b2a148f8f9beccf057b266e8ac9` | `4243f01f0d76b044818b8fc1809013603ce59964` |
+| `block/bio.c` | `b0fcc69de653524479e3b328aa29a37e97945b84` | `023367315175f040e4a84a98e8a9d5d542e8f7ba` |
+| `include/linux/swap_ops.h` | `57ac6c703f685883d3a15ebc1a5c7f6c298deb1b` | `4ae732dd9fcdb1f6d352bd739892513ad6f7a048` |
+| `mm/page_io.c` | `c6824fcd483e0aa2c412e14dae0d2a356b17c373` | `ed63ed83896bd9ff0f05a8a6d6e33c4407973ff6` |
+| `mm/zswap.c` | `ae19e301fced7e357a4c7587dfdd6abb890b9163` | `5a23436bb876feb81afc9a0c1e089a57bed65663` |
+
+Linux Makefile original (unchanged): `7e6baa461b91a79d12b5dcbce06795dd0ff37e81`, version `7.3.0`. The expected postimages above are **unbuilt in-memory full-source byte transformations**, *not* proof of real Kbuild, Git checkout stage execution or loaded kernel data flow.
+
+## Reproducible tests and exact exits
+
+- `python3 -B tests/runtime/native/pinned-linux-zswap-origin-stage-test.py -v` — **exit 0, 12/12 PASS** (executed against the identical local source files).
+- `python3 -B -m py_compile tests/tools/stage-pinned-linux-zswap-origin.py tests/runtime/native/pinned-linux-zswap-origin-stage-test.py` — **exit 0**.
+- PyYAML `yaml.safe_load` of `.github/workflows/phase-a-zswap-origin-prototype.yml`, asserted `permissions: contents: read`, 65-minute timeout, staging regression and two-profile object build steps — **exit 0**.
+- `git diff --no-index --check /dev/null <each new source file>` — **no whitespace diagnostics on all four source/standard payloads**. Git's no-index command returns 1 for expected new-file differences; the wrapper accepted that solely when diagnostic output was empty. No assertion of a local canonical-repo `git diff --check`.
+- Negative CLI: `python3 -B tests/tools/stage-pinned-linux-zswap-origin.py --linux-root <missing-checkout> --manifest <unused-output>` — expected **exit 1**, exactly `FAIL: complete-git-checkout-required`, no manifest, no absolute host path.
+- **First unhandled failure in final source tests: none.** Earlier local test-expectation and path-disclosure failures were repaired before final commit; no kernel C or Kbuild first error is known from this prototype.
+
+**NOT_RUN / remaining gates:** no actual complete pinned Linux checkout or generated kernel headers is available in the agent's isolated environment; its `uname -r=6.18.57` does not match the only installed 6.12 Debian headers. Therefore the new full-checkout mutator invocation and modified CONFIG_ZSWAP=y/n object Kbuild have **not run**; coordinator integration is required to trigger the hosted workflow. Actual KUnit, source-bound compiler results, live clone/split/reset, stored-entry eviction, real zswap→BIO→DM provenance and byte-exact writeback/readback are **NOT_RUN**. Mark the source as `SOURCE_READY_PENDING_COORDINATOR_CI` only; do not promote to `KBUILD_PASS` or `PHASE_A_PASS` without real evidence. Phase B is DISABLED.
+
+No swap, mapper, module load, block-device write, physical I/O, filesystem preparation or kernel install was performed. Agent 1 owns any integration of this unreferenced commit into canonical main and follow-up GitHub CI; Agent 2 requires no Agent 3 result.
