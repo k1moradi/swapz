@@ -3726,6 +3726,36 @@ class PrimaryRealSwapContracts(unittest.TestCase):
                 qualify._terminate_child(timed_out, cgroup)
             self.assertEqual(timed_out.wait.call_count, 2)
 
+
+    def test_owned_worker_still_in_cgroup_cannot_enter_release(self):
+        """A reaped status without proven cgroup disappearance is unsafe."""
+        with tempfile.TemporaryDirectory() as directory:
+            cgroup = Path(directory)
+            membership = cgroup / "cgroup.procs"
+            membership.write_text("123\n", encoding="ascii")
+            exited = mock.Mock(pid=123)
+            exited.poll.return_value = 1
+            with mock.patch.object(
+                    qualify.time, "monotonic",
+                    side_effect=[0.0, 0.01, 6.0]), \
+                 mock.patch.object(qualify.time, "sleep") as sleep:
+                with self.assertRaisesRegex(
+                        qualify.QualificationFailure,
+                        "remained in dedicated cgroup after cleanup"):
+                    qualify._terminate_child(exited, cgroup)
+            sleep.assert_called_once_with(0.05)
+            exited.send_signal.assert_not_called()
+            exited.kill.assert_not_called()
+
+            membership.unlink()
+            with self.assertRaisesRegex(
+                    qualify.QualificationFailure,
+                    "cannot verify owned oracle worker cgroup exit"):
+                with mock.patch.object(
+                        qualify.time, "monotonic",
+                        side_effect=[0.0, 0.01]):
+                    qualify._terminate_child(exited, cgroup)
+
     def test_cycle_telemetry_sampler_is_bounded_and_brackets_cycle(self):
         sampler = qualify.CycleTelemetrySampler()
         with mock.patch.object(
@@ -4720,7 +4750,7 @@ class PrimaryRealSwapContracts(unittest.TestCase):
         # A timed-out sample is evidence, never a new baseline or PASS.
         with contextlib.ExitStack() as stack:
             stack.enter_context(mock.patch.object(
-                qualify.time, "monotonic", side_effect=[0.0, 1.0]))
+                qualify.time, "monotonic", side_effect=[0.0, 0.0, 1.0]))
             stack.enter_context(mock.patch.object(qualify.time, "sleep"))
             stack.enter_context(mock.patch.object(
                 qualify, "_read_uint", return_value=4096))
@@ -4742,6 +4772,142 @@ class PrimaryRealSwapContracts(unittest.TestCase):
             "mapper_used_kib": 16,
             "mapper_used_delta_kib": 4,
         })
+
+
+    def test_round_release_requires_simultaneous_clean_counters(self):
+        """Two separate clean moments never substitute for one clean pair."""
+        cases = (
+            ("cgroup_positive_only", [(4096, 12), (4096, 12)]),
+            ("mapper_positive_only", [(0, 16), (0, 16)]),
+            ("both_positive", [(4096, 16), (4096, 16)]),
+            ("non_atomic_inconsistent", [(4096, 20), (4096, 20)]),
+            ("non_atomic_inconsistent", [(4096, 12), (0, 16)]),
+            ("non_atomic_inconsistent", [(0, 16), (4096, 12)]),
+        )
+        for expected, readings in cases:
+            with self.subTest(expected=expected, readings=readings), \
+                    contextlib.ExitStack() as stack:
+                stack.enter_context(mock.patch.object(
+                    qualify.time, "monotonic",
+                    side_effect=[0.0, 0.01, 0.06, 1.0]))
+                stack.enter_context(mock.patch.object(qualify.time, "sleep"))
+                charge = stack.enter_context(mock.patch.object(
+                    qualify, "_read_uint",
+                    side_effect=[value[0] for value in readings]))
+                stack.enter_context(mock.patch.object(
+                    qualify, "read_swap_rows", return_value=[]))
+                mapper = stack.enter_context(mock.patch.object(
+                    qualify, "_row_for_device",
+                    side_effect=[SimpleNamespace(used_kib=value[1])
+                                 for value in readings]))
+                guard = mock.Mock()
+                with self.assertRaisesRegex(qualify.QualificationFailure,
+                                            "bounded release timeout") as rejected:
+                    qualify._wait_for_round_release(
+                        Path("/synthetic/cgroup"), (252, 1), 12, 0.5, guard,
+                        round_index=2, owned_workers=0)
+                self.assertEqual(guard.call_count, 2)
+                self.assertEqual(charge.call_count, 2)
+                self.assertEqual(mapper.call_count, 2)
+                self.assertEqual(rejected.exception.release_lifetime["classification"],
+                                 expected)
+                self.assertEqual(rejected.exception.release_lifetime["round_index"], 2)
+                self.assertEqual(rejected.exception.release_lifetime["owned_workers"], 0)
+                self.assertEqual(rejected.exception.release_lifetime["previous"], {
+                    "elapsed_usec": 10_000,
+                    "cgroup_swap_bytes": readings[0][0],
+                    "mapper_used_kib": readings[0][1]})
+                self.assertEqual(rejected.exception.release_lifetime["last"], {
+                    "elapsed_usec": 60_000,
+                    "cgroup_swap_bytes": readings[1][0],
+                    "mapper_used_kib": readings[1][1]})
+                self.assertEqual(rejected.exception.release_observation[
+                    "cgroup_swap_bytes"], readings[-1][0])
+
+        with contextlib.ExitStack() as stack:
+            stack.enter_context(mock.patch.object(
+                qualify.time, "monotonic", side_effect=[0.0, 0.01]))
+            stack.enter_context(mock.patch.object(
+                qualify, "_read_uint", return_value=0))
+            stack.enter_context(mock.patch.object(
+                qualify, "read_swap_rows", return_value=[]))
+            stack.enter_context(mock.patch.object(
+                qualify, "_row_for_device",
+                return_value=SimpleNamespace(used_kib=12)))
+            guard = mock.Mock()
+            accepted = qualify._wait_for_round_release(
+                Path("/synthetic/cgroup"), (252, 1), 12, 0.5, guard)
+        self.assertEqual(accepted, {
+            "release_swap_current_bytes": 0,
+            "mapper_used_released_kib": 12})
+        guard.assert_called_once()
+
+    def test_round_release_missing_sample_and_unsafe_early_abort(self):
+        with contextlib.ExitStack() as stack:
+            stack.enter_context(mock.patch.object(
+                qualify.time, "monotonic", side_effect=[0.0, 1.0]))
+            reads = stack.enter_context(mock.patch.object(
+                qualify, "_read_uint"))
+            guard = mock.Mock()
+            with self.assertRaisesRegex(
+                    qualify.QualificationFailure, "bounded release timeout") as failed:
+                qualify._wait_for_round_release(
+                    Path("/synthetic/cgroup"), (252, 1), 12, 0.5, guard)
+        reads.assert_not_called()
+        guard.assert_not_called()
+        self.assertFalse(hasattr(failed.exception, "release_observation"))
+        self.assertEqual(failed.exception.release_lifetime["classification"],
+                         "last_sample_missing")
+        self.assertIsNone(failed.exception.release_lifetime["last"])
+        self.assertIsNone(failed.exception.release_lifetime["previous"])
+
+        for charge, mapper, expected in (
+                (4096, None, "mapper vanished"),
+                (0, 8, "below the round baseline"),
+                (False, 12, "charge is malformed"),
+                (-1, 12, "charge is malformed"),
+                (0, True, "below the round baseline")):
+            with self.subTest(charge=charge, mapper=mapper), \
+                    contextlib.ExitStack() as stack:
+                stack.enter_context(mock.patch.object(
+                    qualify.time, "monotonic", side_effect=[0.0, 0.01]))
+                stack.enter_context(mock.patch.object(
+                    qualify, "_read_uint", return_value=charge))
+                stack.enter_context(mock.patch.object(
+                    qualify, "read_swap_rows", return_value=[]))
+                stack.enter_context(mock.patch.object(
+                    qualify, "_row_for_device",
+                    return_value=(SimpleNamespace(used_kib=mapper)
+                                  if mapper is not None else None)))
+                with self.assertRaisesRegex(
+                        qualify.QualificationFailure, expected) as rejected:
+                    qualify._wait_for_round_release(
+                        Path("/synthetic/cgroup"), (252, 1), 12, 0.5, mock.Mock())
+                self.assertNotIn("release_lifetime", vars(rejected.exception))
+
+        with contextlib.ExitStack() as stack:
+            stack.enter_context(mock.patch.object(
+                qualify.time, "monotonic", side_effect=[0.0, 0.01]))
+            reads = stack.enter_context(mock.patch.object(qualify, "_read_uint"))
+            guard = mock.Mock(side_effect=qualify.QualificationFailure(
+                "dedicated oracle cgroup OOM/PSI early-stop"))
+            with self.assertRaisesRegex(
+                    qualify.QualificationFailure, "OOM/PSI early-stop"):
+                qualify._wait_for_round_release(
+                    Path("/synthetic/cgroup"), (252, 1), 12, 0.5, guard)
+        reads.assert_not_called()
+        guard.assert_called_once()
+
+    def test_round_release_is_ordered_after_complete_worker_cleanup(self):
+        # This structural source-binding complements the existing direct
+        # _terminate_child() slow/stuck-worker and cleanup exception tests.
+        import inspect
+        source = inspect.getsource(qualify._run_workload)
+        self.assertLess(source.index("_terminate_child(process, cgroup)"),
+                        source.index("_raise_cleanup_errors(original_error, cleanup_errors)"))
+        self.assertLess(source.index("_raise_cleanup_errors(original_error, cleanup_errors)"),
+                        source.index("_wait_for_round_release("))
+        self.assertIn("round_index=round_index, owned_workers=0", source)
 
     def test_slot_reuse_requires_full_release_then_second_concurrent_allocation(self):
         rounds = [

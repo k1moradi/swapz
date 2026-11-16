@@ -3123,9 +3123,15 @@ def _terminate_child(process: subprocess.Popen, cgroup: Path) -> None:
             if str(process.pid) not in (cgroup / "cgroup.procs").read_text(
                     encoding="ascii").split():
                 return
-        except OSError:
-            return
+        except OSError as exc:
+            # An unreadable cgroup is not proof the worker was reaped.
+            raise QualificationFailure(
+                "cannot verify owned oracle worker cgroup exit") from exc
         time.sleep(0.05)
+    # This bounded wait is mandatory: a still-listed PID can retain swap
+    # references, and must not be reported as a successfully stopped worker.
+    raise QualificationFailure(
+        "owned oracle worker remained in dedicated cgroup after cleanup")
 
 
 _ORACLE_FAILURE_SUMMARY_RE = re.compile(
@@ -3532,33 +3538,101 @@ def evaluate_reuse_rounds(rounds: list[dict], *,
     }
 
 
+def _release_lifetime_classification(previous, last, baseline_kib):
+    """Label two non-atomic counter pairs; no label proves slot ownership."""
+    if last is None:
+        return "last_sample_missing"
+    last_charge = last["cgroup_swap_bytes"]
+    last_delta_kib = last["mapper_used_kib"] - baseline_kib
+    if previous is not None:
+        previous_charge = previous["cgroup_swap_bytes"]
+        previous_delta_kib = previous["mapper_used_kib"] - baseline_kib
+        # Reversed unilateral states across consecutive samples show that
+        # these independent interfaces cannot establish a single owner.
+        if ((previous_charge > 0 and previous_delta_kib == 0 and
+             last_charge == 0 and last_delta_kib > 0) or
+            (previous_charge == 0 and previous_delta_kib > 0 and
+             last_charge > 0 and last_delta_kib == 0)):
+            return "non_atomic_inconsistent"
+    if last_charge > 0 and last_delta_kib > 0:
+        return ("both_positive" if last_charge == last_delta_kib * 1024
+                else "non_atomic_inconsistent")
+    if last_charge > 0:
+        return "cgroup_positive_only"
+    if last_delta_kib > 0:
+        return "mapper_positive_only"
+    # Successful zero-and-baseline observations return before this helper.
+    return "non_atomic_inconsistent"
+
+
 def _wait_for_round_release(cgroup: Path, mapper_device: tuple[int, int],
                             expected_used_kib: int, deadline: float,
-                            guard: Callable[[], None]) -> dict:
+                            guard: Callable[[], None], *,
+                            round_index: int | None = None,
+                            owned_workers: int | None = None) -> dict:
+    """Conjunctive release gate with two cached, independent failure samples.
+
+    The caller has finished both worker terminations before entering this
+    gate. Counters are read sequentially, NEVER an atomic ownership proof.
+    No diagnostic dict or log write is performed in the hot polling loop.
+    """
+    started = time.monotonic()
+    previous_elapsed_usec = None
+    previous_swap_current_bytes = None
+    previous_mapper_used_kib = None
+    last_elapsed_usec = None
     last_swap_current_bytes = None
     last_mapper_used_kib = None
-    while time.monotonic() < deadline:
+    while (observed_time := time.monotonic()) < deadline:
         guard()
         swap_current = _read_uint(cgroup / "memory.swap.current")
         row = _row_for_device(read_swap_rows(), mapper_device)
         if row is None:
             raise QualificationFailure("expected mapper vanished while releasing swap slots")
-        if row.used_kib < expected_used_kib:
+        if type(row.used_kib) is not int or row.used_kib < expected_used_kib:
             raise QualificationFailure("mapper swap usage fell below the round baseline")
+        if type(swap_current) is not int or swap_current < 0:
+            raise QualificationFailure("dedicated oracle cgroup swap charge is malformed")
         if swap_current == 0 and row.used_kib == expected_used_kib:
             return {
                 "release_swap_current_bytes": 0,
                 "mapper_used_released_kib": row.used_kib,
             }
-        # Cache the last independent observations without allocating on
-        # every poll. They are non-atomic and cannot themselves prove release.
+        # Retain only two fixed-width numerical observations on the stack.
+        # elapsed_usec dates the beginning of independent sequential reads;
+        # the pair itself does not certify simultaneous kernel state.
+        previous_elapsed_usec = last_elapsed_usec
+        previous_swap_current_bytes = last_swap_current_bytes
+        previous_mapper_used_kib = last_mapper_used_kib
+        last_elapsed_usec = max(0, int((observed_time - started) * 1_000_000))
         last_swap_current_bytes = swap_current
         last_mapper_used_kib = row.used_kib
         time.sleep(0.05)
     failure = QualificationFailure(
         "swap slots did not return to baseline within the bounded release timeout")
-    if last_swap_current_bytes is not None and last_mapper_used_kib is not None:
-        # Preserve bounded, identity-free counters through chained cleanup.
+    def sample(elapsed_usec, charge_bytes, mapper_kib):
+        if elapsed_usec is None:
+            return None
+        return {
+            "elapsed_usec": elapsed_usec,
+            "cgroup_swap_bytes": charge_bytes,
+            "mapper_used_kib": mapper_kib,
+        }
+    previous = sample(previous_elapsed_usec, previous_swap_current_bytes,
+                      previous_mapper_used_kib)
+    last = sample(last_elapsed_usec, last_swap_current_bytes,
+                  last_mapper_used_kib)
+    failure.release_lifetime = {
+        "expected_baseline_used_kib": expected_used_kib,
+        "round_index": round_index,
+        "owned_workers": owned_workers,
+        "previous": previous,
+        "last": last,
+        "classification": _release_lifetime_classification(
+            previous, last, expected_used_kib),
+    }
+    if last is not None:
+        # Preserve historical numeric failure evidence and no-success rule.
         failure.release_observation = {
             "expected_baseline_used_kib": expected_used_kib,
             "cgroup_swap_bytes": last_swap_current_bytes,
@@ -4473,7 +4547,8 @@ def _run_workload(manifest: dict, active: dict, oracle_path: Path,
             start_phase("release")
             release = _wait_for_round_release(
                 cgroup, active["mapper_device"], expected_before.used_kib,
-                time.monotonic() + min(timeout_seconds, 30), guard)
+                time.monotonic() + min(timeout_seconds, 30), guard,
+                round_index=round_index, owned_workers=0)
             round_result.update(release)
             rounds.append(round_result)
 

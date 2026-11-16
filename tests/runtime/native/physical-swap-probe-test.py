@@ -1151,6 +1151,98 @@ class PhysicalSwapProbeTests(unittest.TestCase):
         invalid, _ = observe()
         self.assertNotIn("release", invalid)
 
+
+    def test_release_lifetime_carries_two_finite_samples_across_cleanup(self):
+        cases = (
+            ("cgroup_positive_only", (4096, 12), (4096, 12)),
+            ("mapper_positive_only", (0, 16), (0, 16)),
+            ("both_positive", (4096, 16), (4096, 16)),
+            ("non_atomic_inconsistent", (4096, 12), (0, 16)),
+            ("non_atomic_inconsistent", (4096, 20), (4096, 20)),
+        )
+        for expected, (first_charge, first_mapper), (last_charge, last_mapper) in cases:
+            with self.subTest(expected=expected):
+                first = RuntimeError(
+                    "swap slots did not return to baseline within the bounded release timeout")
+                previous = {"elapsed_usec": 10_000,
+                            "cgroup_swap_bytes": first_charge,
+                            "mapper_used_kib": first_mapper}
+                last = {"elapsed_usec": 60_000,
+                        "cgroup_swap_bytes": last_charge,
+                        "mapper_used_kib": last_mapper}
+                first.release_lifetime = {
+                    "expected_baseline_used_kib": 12, "round_index": 2,
+                    "owned_workers": 0, "previous": previous, "last": last,
+                    "classification": expected,
+                    "private_pid": 99999}  # Unauthenticated extras fail closed.
+                first.release_observation = {
+                    "expected_baseline_used_kib": 12,
+                    "cgroup_swap_bytes": last_charge,
+                    "mapper_used_kib": last_mapper,
+                    "mapper_used_delta_kib": last_mapper - 12}
+                wrapped = RuntimeError(
+                    str(first) + "; cleanup also failed: /private/KEEP_SECRET")
+                wrapped.__cause__ = first
+
+                def observe():
+                    output = io.StringIO()
+                    with mock.patch.object(probe.sys, "stderr", output):
+                        record = probe._emit_algorithm_workload_failure(wrapped)
+                    self.assertEqual(json.loads(output.getvalue().split("=", 1)[1]),
+                                     record)
+                    self.assertNotIn("/private", output.getvalue())
+                    return record
+
+                # First test that arbitrary/private untrusted fields cannot
+                # be promoted even when the known first error is recognized.
+                self.assertNotIn("release_lifetime", observe())
+                first.release_lifetime.pop("private_pid")
+                record = observe()
+                self.assertEqual(record["reason"], "swap_slot_release")
+                self.assertEqual(record["release_lifetime"]["classification"], expected)
+                self.assertEqual(record["release_lifetime"]["round_index"], 2)
+                self.assertEqual(record["release_lifetime"]["owned_workers"], 0)
+                self.assertEqual(record["release_lifetime"]["previous"], previous)
+                self.assertEqual(record["release_lifetime"]["last"], last)
+                self.assertIsNone(record["original_errno"])
+                self.assertEqual(record["release"]["mapper_used_delta_kib"],
+                                 last_mapper - 12)
+
+                for mutation in (
+                        {"last": {**last, "cgroup_swap_bytes": True}},
+                        {"last": {**last, "mapper_used_kib": -1}},
+                        {"last": {**last, "mapper_used_kib": 1 << 64}},
+                        {"last": {**last, "elapsed_usec": 30_000_001}},
+                        {"previous": {**previous, "elapsed_usec": 60_000}},
+                        {"owned_workers": 2},
+                        {"round_index": False},
+                        {"classification": "all_clean"},
+                        {"classification": "/private/KEEP_SECRET"}):
+                    with self.subTest(mutation=mutation):
+                        saved = first.release_lifetime
+                        try:
+                            first.release_lifetime = {**saved, **mutation}
+                            self.assertNotIn("release_lifetime", observe())
+                        finally:
+                            first.release_lifetime = saved
+
+    def test_release_lifetime_before_first_sample_keeps_unknown_numbers(self):
+        first = RuntimeError(
+            "swap slots did not return to baseline within the bounded release timeout")
+        first.release_lifetime = {
+            "classification": "last_sample_missing",
+            "expected_baseline_used_kib": 12,
+            "round_index": 1, "owned_workers": 0,
+            "previous": None, "last": None}
+        stderr = io.StringIO()
+        with mock.patch.object(probe.sys, "stderr", stderr):
+            record = probe._emit_algorithm_workload_failure(first)
+        self.assertEqual(record["release_lifetime"]["classification"],
+                         "last_sample_missing")
+        self.assertNotIn("release", record)
+        self.assertEqual(record["reason"], "swap_slot_release")
+        self.assertNotIn("/private", stderr.getvalue())
+
     def test_algorithm_memory_pressure_remains_first_cause_after_child_cleanup_timeout(self):
         stderr = io.StringIO()
         original = RuntimeError("sustained cgroup memory PSI full exceeded safe stop threshold")

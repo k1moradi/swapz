@@ -6306,6 +6306,10 @@ class ReportContract(unittest.TestCase):
                 "swapz_lower_write_service_ewma_ns": 80,
                 "swapz_error": -5}
 
+    def test_official_algorithm_tier_retains_slot_release_class_and_nonzero_exit(self):
+        self.assert_official_physical_debug(
+            workload_phase="anonymous_workload", slot_lifetime=True)
+
     def test_official_algorithm_tier_promotes_terminal_child_exit_without_leak(self):
         self.assert_official_physical_debug(
             workload_phase="anonymous_workload", oracle_terminal=True)
@@ -6326,7 +6330,7 @@ class ReportContract(unittest.TestCase):
     def assert_official_physical_debug(self, *, readback=False, workload_phase=None,
                                       log_failure=False, pressure=False,
                                       activation_refusal=False, shared_root_refusal=False,
-                                      oracle_terminal=False):
+                                      oracle_terminal=False, slot_lifetime=False):
         source_sha = "a" * 40
         report_snapshots = []
         private_output = mock.Mock(return_value="build/tests/physical-fixture.private.log")
@@ -6380,6 +6384,21 @@ class ReportContract(unittest.TestCase):
             error_context.update(reason="oracle_child_exit",
                                  oracle={"expected_event": "WAITING",
                                          "child_exit": 2})
+        if slot_lifetime:
+            self.assertEqual(workload_phase, "anonymous_workload")
+            error_context.update(
+                reason="swap_slot_release",
+                release={"expected_baseline_used_kib": 12,
+                         "cgroup_swap_bytes": 0, "mapper_used_kib": 16,
+                         "mapper_used_delta_kib": 4},
+                release_lifetime={
+                    "classification": "mapper_positive_only",
+                    "expected_baseline_used_kib": 12,
+                    "round_index": 2, "owned_workers": 0,
+                    "previous": {"elapsed_usec": 10_000,
+                                 "cgroup_swap_bytes": 4096, "mapper_used_kib": 16},
+                    "last": {"elapsed_usec": 60_000,
+                             "cgroup_swap_bytes": 0, "mapper_used_kib": 16}})
         physical_exit = (2 if workload_phase == "anonymous_preflight" or
                          activation_refusal or shared_root_refusal else 3)
 
@@ -6478,6 +6497,14 @@ class ReportContract(unittest.TestCase):
         self.assertIn(f"{'check' if workload_phase else 'gate'}={error_context['gate']}", console)
         if readback:
             self.assertIn("lower_read_bytes=0", console)
+        if slot_lifetime:
+            self.assertIn("reason=swap_slot_release", console)
+            self.assertIn("class=mapper_positive_only", console)
+            self.assertIn("previous_cgroup_swap_bytes=4096", console)
+            self.assertIn("last_mapper_used_kib=16", console)
+            self.assertIn("owned_workers=0", console)
+            self.assertIn("Overall qualification: FAIL", console)
+            self.assertNotIn("private_root_identity", console)
         if oracle_terminal:
             self.assertIn("reason=oracle_child_exit", console)
             self.assertIn("expected_event=WAITING child_exit=2", console)
@@ -6995,6 +7022,108 @@ class ReportContract(unittest.TestCase):
                 self.assertIsNone(parse({**record, **changed}))
         self.assertEqual(parse({**record, "release": {
             **release, "cgroup_swap_bytes": 4096}})["reason"], "swap_slot_release")
+
+
+    def test_slot_release_lifetime_parser_checks_independent_coherent_pairs(self):
+        source = {
+            "schema": "swapz-algorithm-workload-diagnostic-v1",
+            "phase": "anonymous_workload",
+            "gate": "bounded_primary_workload",
+            "reason": "swap_slot_release",
+            "original_errno": None,
+        }
+        def sample(elapsed, charge, used):
+            return {"elapsed_usec": elapsed, "cgroup_swap_bytes": charge,
+                    "mapper_used_kib": used}
+        def report(label, previous, last):
+            payload = {
+                **source,
+                "release_lifetime": {
+                    "classification": label,
+                    "expected_baseline_used_kib": 12,
+                    "round_index": 2,
+                    "owned_workers": 0,
+                    "previous": previous,
+                    "last": last}}
+            if last is not None:
+                payload["release"] = {
+                    "expected_baseline_used_kib": 12,
+                    "cgroup_swap_bytes": last["cgroup_swap_bytes"],
+                    "mapper_used_kib": last["mapper_used_kib"],
+                    "mapper_used_delta_kib": last["mapper_used_kib"] - 12}
+            return payload
+        def decode(value):
+            return runner.parse_algorithm_pageout_diagnostic(
+                "PHYSICAL_ALGORITHM_DEBUG=" + json.dumps(value))
+        cases = (
+            report("cgroup_positive_only", sample(10_000, 4096, 12),
+                   sample(60_000, 4096, 12)),
+            report("mapper_positive_only", sample(10_000, 0, 16),
+                   sample(60_000, 0, 16)),
+            report("both_positive", sample(10_000, 4096, 16),
+                   sample(60_000, 4096, 16)),
+            report("non_atomic_inconsistent", sample(10_000, 4096, 12),
+                   sample(60_000, 0, 16)),
+            report("non_atomic_inconsistent", sample(10_000, 4096, 20),
+                   sample(60_000, 4096, 20)),
+            report("last_sample_missing", None, None),
+        )
+        for record in cases:
+            with self.subTest(label=record["release_lifetime"]["classification"]):
+                self.assertEqual(decode(record), record)
+                console = io.StringIO()
+                with contextlib.redirect_stdout(console):
+                    runner.print_algorithm_workload_diagnostic(record)
+                self.assertIn("Slot lifetime (independent sequential", console.getvalue())
+                self.assertNotIn("PASS", console.getvalue())
+                self.assertIn("verify recovery", console.getvalue())
+                self.assertNotIn("/owner/", console.getvalue())
+                self.assertNotIn("private", console.getvalue().split("class=", 1)[0])
+
+        clean = report("last_sample_missing", None, None)
+        dirty = report("mapper_positive_only", sample(10_000, 0, 16),
+                       sample(60_000, 0, 16))
+        mutations = (
+            {"release_lifetime": {**dirty["release_lifetime"],
+                                  "last": sample(60_000, 0, 12)}},
+            {"release_lifetime": {**dirty["release_lifetime"],
+                                  "last": sample(60_000, 0, 16),
+                                  "classification": "both_positive"}},
+            {"release_lifetime": {**dirty["release_lifetime"],
+                                  "previous": sample(60_000, 0, 16)}},
+            {"release_lifetime": {**dirty["release_lifetime"],
+                                  "last": sample(30_000_001, 0, 16)}},
+            {"release_lifetime": {**dirty["release_lifetime"],
+                                  "last": sample(60_000, True, 16)}},
+            {"release_lifetime": {**dirty["release_lifetime"],
+                                  "last": sample(60_000, 0, 1 << 64)}},
+            {"release_lifetime": {**dirty["release_lifetime"],
+                                  "last": sample(60_000, 0, -1)}},
+            {"release_lifetime": {**dirty["release_lifetime"],
+                                  "owned_workers": 1}},
+            {"release_lifetime": {**dirty["release_lifetime"],
+                                  "round_index": False}},
+            {"release_lifetime": {**dirty["release_lifetime"],
+                                  "private_host_path": "/owner/KEEP_PRIVATE"}},
+            {"release": {**dirty["release"], "mapper_used_delta_kib": 8}},
+            {"reason": "byte_oracle"},
+            {"phase": "anonymous_preflight"},
+            {"original_errno": True},
+            {"release_lifetime": None},
+            {"release_lifetime": {**dirty["release_lifetime"],
+                                  "previous": None, "last": None}},
+        )
+        for change in mutations:
+            with self.subTest(change=str(change)[:80]):
+                self.assertIsNone(decode({**dirty, **change}))
+        self.assertIsNone(decode({**clean, "release": dirty["release"]}))
+        self.assertIsNone(decode({**source, "release_lifetime": {
+            **clean["release_lifetime"], "previous": sample(10, 0, 12)}}))
+        self.assertIsNone(decode({**dirty, "release_lifetime": {
+            **dirty["release_lifetime"], "classification": "/owner/SECRET"}}))
+        duplicate = "PHYSICAL_ALGORITHM_DEBUG=" + json.dumps(dirty)
+        self.assertIsNone(runner.parse_algorithm_pageout_diagnostic(
+            duplicate + "\n" + duplicate))
 
     def test_pressure_observation_rejects_malformed_or_private_fields(self):
         pressure = self.pressure_observation_fixture()

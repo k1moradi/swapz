@@ -3925,6 +3925,10 @@ def _classify_algorithm_workload_first_cause(first_cause):
         "fresh dedicated oracle cgroup already recorded OOM events":
             "cgroup_oom",
         "cgroup exceeded configured swap-usage bound": "cgroup_swap_limit",
+        "owned oracle worker remained in dedicated cgroup after cleanup":
+            "oracle_cgroup_ownership",
+        "cannot verify owned oracle worker cgroup exit":
+            "oracle_cgroup_ownership",
         "exact mapper use drifted from pre-oracle baseline": "swap_attribution",
     }
     if first_cause in exact:
@@ -4018,6 +4022,81 @@ def _classify_algorithm_workload_first_cause(first_cause):
     return reason, {"expected_event": expected, "child_exit": child_exit}, transport_errno
 
 
+def _bounded_release_lifetime(observation):
+    """Copy only coherent source-owned, identity-free release-failure pairs."""
+    keys = {"classification", "expected_baseline_used_kib",
+            "round_index", "owned_workers", "previous", "last"}
+    if not isinstance(observation, dict) or set(observation) != keys:
+        return None
+    baseline = observation["expected_baseline_used_kib"]
+    round_index = observation["round_index"]
+    workers = observation["owned_workers"]
+    if (type(baseline) is not int or not 0 <= baseline <= MAX_BLOCK_COUNTER or
+            (round_index is not None and
+             (type(round_index) is not int or not 1 <= round_index <= 2)) or
+            (workers is not None and (type(workers) is not int or workers != 0)) or
+            (round_index is None) != (workers is None)):
+        return None
+
+    def finite_sample(value):
+        if value is None:
+            return None
+        if (not isinstance(value, dict) or set(value) != {
+                "elapsed_usec", "cgroup_swap_bytes", "mapper_used_kib"}):
+            return None
+        if any(type(value[key]) is not int or
+               not 0 <= value[key] <= (
+                   30_000_000 if key == "elapsed_usec" else MAX_BLOCK_COUNTER)
+               for key in value):
+            return None
+        if value["mapper_used_kib"] < baseline:
+            return None
+        return {key: value[key] for key in (
+            "elapsed_usec", "cgroup_swap_bytes", "mapper_used_kib")}
+
+    previous_input = observation["previous"]
+    last_input = observation["last"]
+    previous = finite_sample(previous_input)
+    last = finite_sample(last_input)
+    if ((previous_input is not None and previous is None) or
+            (last_input is not None and last is None) or
+            (previous is not None and last is None) or
+            (previous is not None and
+             previous["elapsed_usec"] >= last["elapsed_usec"])):
+        return None
+
+    classification = observation["classification"]
+    if last is None:
+        if classification != "last_sample_missing":
+            return None
+    else:
+        charge = last["cgroup_swap_bytes"]
+        delta = last["mapper_used_kib"] - baseline
+        if charge == 0 and delta == 0:
+            return None
+        flipped = previous is not None and (
+            ((previous["cgroup_swap_bytes"] > 0 and
+              previous["mapper_used_kib"] == baseline) and
+             (charge == 0 and delta > 0)) or
+            ((previous["cgroup_swap_bytes"] == 0 and
+              previous["mapper_used_kib"] > baseline) and
+             (charge > 0 and delta == 0)))
+        expected = ("non_atomic_inconsistent" if flipped else
+                    "both_positive" if charge > 0 and delta > 0 and
+                    charge == delta * 1024 else
+                    "non_atomic_inconsistent" if charge > 0 and delta > 0 else
+                    "cgroup_positive_only" if charge > 0 else
+                    "mapper_positive_only")
+        if classification != expected:
+            return None
+    return {
+        "classification": classification,
+        "expected_baseline_used_kib": baseline,
+        "round_index": round_index, "owned_workers": workers,
+        "previous": previous, "last": last,
+    }
+
+
 def _emit_algorithm_workload_failure(error, phase="anonymous_workload"):
     """Expose only finite producer refusal classes, never private exception text."""
     reasons = {
@@ -4068,6 +4147,10 @@ def _emit_algorithm_workload_failure(error, phase="anonymous_workload"):
            len(seen) < 16):
         seen.add(id(current))
         if record["reason"] == "swap_slot_release":
+            lifetime = _bounded_release_lifetime(
+                getattr(current, "release_lifetime", None))
+            if lifetime is not None:
+                record["release_lifetime"] = lifetime
             observation = getattr(current, "release_observation", None)
             keys = (
                 "expected_baseline_used_kib", "cgroup_swap_bytes",
@@ -4081,7 +4164,11 @@ def _emit_algorithm_workload_failure(error, phase="anonymous_workload"):
                 if (mapper_used >= baseline and delta == mapper_used - baseline and
                         (observation["cgroup_swap_bytes"] > 0 or delta > 0)):
                     record["release"] = {key: observation[key] for key in keys}
-                    break
+            # The original error is authoritative, not a later cleanup
+            # observation. Keep scanning only until a complete source-owned
+            # first-error snapshot is retained.
+            if "release_lifetime" in record or "release" in record:
+                break
         if record["reason"] == "swap_attribution":
             attribution = getattr(current, "attribution_observation", None)
             if isinstance(attribution, dict):

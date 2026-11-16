@@ -4459,6 +4459,8 @@ def parse_algorithm_pageout_diagnostic(error_output):
             fields.add("pressure")
         if "release" in diagnostic:
             fields.add("release")
+        if "release_lifetime" in diagnostic:
+            fields.add("release_lifetime")
         if "oracle" in diagnostic:
             fields.add("oracle")
         if set(diagnostic) != fields:
@@ -4501,6 +4503,70 @@ def parse_algorithm_pageout_diagnostic(error_output):
                     delta != release["mapper_used_kib"] - baseline or
                     (release["cgroup_swap_bytes"] == 0 and delta == 0)):
                 return None
+        if "release_lifetime" in diagnostic:
+            lifetime = diagnostic["release_lifetime"]
+            expected_fields = {
+                "classification", "expected_baseline_used_kib", "round_index",
+                "owned_workers", "previous", "last"}
+            if (diagnostic["reason"] != "swap_slot_release" or
+                    diagnostic["phase"] != "anonymous_workload" or
+                    not isinstance(lifetime, dict) or
+                    set(lifetime) != expected_fields):
+                return None
+            baseline = lifetime["expected_baseline_used_kib"]
+            round_index = lifetime["round_index"]
+            workers = lifetime["owned_workers"]
+            if (type(baseline) is not int or not 0 <= baseline <= (1 << 64) - 1 or
+                    (round_index is not None and
+                     (type(round_index) is not int or not 1 <= round_index <= 2)) or
+                    (workers is not None and (type(workers) is not int or workers != 0)) or
+                    (round_index is None) != (workers is None)):
+                return None
+            previous = lifetime["previous"]
+            last = lifetime["last"]
+            def valid_sample(sample):
+                return (isinstance(sample, dict) and
+                        set(sample) == {"elapsed_usec", "cgroup_swap_bytes",
+                                        "mapper_used_kib"} and
+                        all(type(sample[key]) is int and 0 <= sample[key] <= (
+                            30_000_000 if key == "elapsed_usec" else (1 << 64) - 1)
+                            for key in sample) and
+                        sample["mapper_used_kib"] >= baseline)
+            if ((previous is not None and not valid_sample(previous)) or
+                    (last is not None and not valid_sample(last)) or
+                    (previous is not None and (last is None or
+                     previous["elapsed_usec"] >= last["elapsed_usec"]))):
+                return None
+            if last is None:
+                if (lifetime["classification"] != "last_sample_missing" or
+                        "release" in diagnostic):
+                    return None
+            else:
+                charge = last["cgroup_swap_bytes"]
+                delta = last["mapper_used_kib"] - baseline
+                if charge == 0 and delta == 0:
+                    return None
+                flipped = previous is not None and (
+                    ((previous["cgroup_swap_bytes"] > 0 and
+                      previous["mapper_used_kib"] == baseline) and
+                     (charge == 0 and delta > 0)) or
+                    ((previous["cgroup_swap_bytes"] == 0 and
+                      previous["mapper_used_kib"] > baseline) and
+                     (charge > 0 and delta == 0)))
+                expected = ("non_atomic_inconsistent" if flipped else
+                            "both_positive" if charge > 0 and delta > 0 and
+                            charge == delta * 1024 else
+                            "non_atomic_inconsistent" if charge > 0 and delta > 0 else
+                            "cgroup_positive_only" if charge > 0 else
+                            "mapper_positive_only")
+                released = diagnostic.get("release")
+                if (lifetime["classification"] != expected or
+                        not isinstance(released, dict) or
+                        released["expected_baseline_used_kib"] != baseline or
+                        released["cgroup_swap_bytes"] != charge or
+                        released["mapper_used_kib"] != last["mapper_used_kib"] or
+                        released["mapper_used_delta_kib"] != delta):
+                    return None
         if (diagnostic["reason"] in {"oracle_child_exit", "oracle_timeout"}
                 and "oracle" not in diagnostic):
             return None
@@ -4667,6 +4733,39 @@ def print_algorithm_workload_diagnostic(diagnostic):
               flush=True)
         print("        Next: distinguish a remaining cgroup charge from mapper-only "
               "slot usage; neither permits accepting partial release", flush=True)
+    lifetime = diagnostic.get("release_lifetime")
+    if lifetime is not None:
+        previous = lifetime["previous"]
+        last = lifetime["last"]
+        print("        Slot lifetime (independent sequential samples; "
+              "not atomic proof): "
+              f"class={lifetime['classification']} "
+              f"round={lifetime['round_index'] if lifetime['round_index'] is not None else 'unavailable'} "
+              f"owned_workers={lifetime['owned_workers'] if lifetime['owned_workers'] is not None else 'unavailable'}",
+              flush=True)
+        for label, sample in (("previous", previous), ("last", last)):
+            if sample is None:
+                print(f"        {label}_sample=unavailable", flush=True)
+            else:
+                print(f"        {label}_sample_elapsed_usec={sample['elapsed_usec']} "
+                      f"{label}_cgroup_swap_bytes={sample['cgroup_swap_bytes']} "
+                      f"{label}_mapper_used_kib={sample['mapper_used_kib']}",
+                      flush=True)
+        next_actions = {
+            "cgroup_positive_only":
+                "inspect retained dedicated-cgroup charge and verified worker exit",
+            "mapper_positive_only":
+                "inspect owned mapper slot lifetime and independent swap inventory",
+            "both_positive":
+                "inspect both cgroup charge and mapper slot lifetime after recovery",
+            "non_atomic_inconsistent":
+                "compare independently sampled counters; do not infer ownership",
+            "last_sample_missing":
+                "inspect first guard/error and retained private evidence",
+        }
+        print("        Next: " + next_actions[lifetime["classification"]] +
+              "; verify recovery before any separately authorized trial",
+              flush=True)
     oracle = diagnostic.get("oracle")
     if oracle is not None:
         child_exit = oracle["child_exit"]

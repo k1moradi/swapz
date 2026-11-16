@@ -13819,3 +13819,74 @@ Therefore the source-contract verifier must require **exactly one** raw
 shared-log size check and **two** per-profile captured-TAP bounds (at fresh
 copy and again before actual TAP verification); mutation of either bound
 must fail closed. This is not a change to the KUnit PASS definition.
+
+
+## Round 019 — Agent 4: swap-slot release lifetime and worker-teardown proof
+
+The real owner first failure on the original authorized host was
+`swap slots did not return to baseline within the bounded release timeout`.
+The cause of lingering slot references remains UNKNOWN. A release succeeds
+**only** when `memory.swap.current == 0` and the exact run-owned mapper
+`/proc/swaps Used KiB == immutable pinned baseline` in the same guarded
+poll. A clean snapshot of either counter alone, unrelated host swap traffic,
+a later zero, or a worker child exit does not certify fully released slots.
+Do not extend or bypass the 30-second release deadline or the 50ms poll,
+retry with a moving baseline, or convert cgroup PSI/OOM into a success.
+
+The actual producer caches only two consecutive non-atomic numerical
+observations, timestamped in microseconds from release-gate entry. At the
+*original timeout only*, an identity-free failure field
+`release_lifetime` carries the last/previous sequential pairs, fixed mapper
+baseline, exact reuse round, and proven zero owned workers after cleanup.
+Classifications are `cgroup_positive_only`, `mapper_positive_only`,
+`both_positive`, `non_atomic_inconsistent`, and
+`last_sample_missing`. A matching pair of positive counters is still an
+observed state, **not an atomic ownership proof**; a mismatching or
+oscillating pair has no implied kernel/codec explanation. The former
+`release` last-sample fields remain available for compatibility. The
+first producer exception is authoritative; cleanup/recovery observations
+cannot overwrite it, original nonzero exit, or the 0600 private stage log.
+
+The physical probe copies this bounded source-defined record only if its
+field set, timestamps, 0..uint64 counts, immutable baseline, class and
+round/worker evidence are coherent. The public `make test` reporter
+independently validates it against the last-sample `release` fields, rejects
+success-shaped zero-baseline, stale/reordered, malformed/oversized/boolean,
+foreign/private values and contradictory classes, and prints a short
+class-specific read-only next step. It does not echo child stderr, cgroup
+paths, device identity, PID, UUID, privileged logs or page bytes.
+
+The actual worker teardown now fails closed if an exited PID remains in its
+dedicated cgroup after the existing bounded five-second ownership check, or
+if its membership cannot be read. This is a source-backed correctness
+fix: a returned exit code is not proof of cgroup removal; allowing
+`_run_workload` to proceed to slot release while worker ownership is
+unproven can misclassify its lifetime. The two-oracle cleanup precedes
+the release gate and `_raise_cleanup_errors` prevents subsequent release
+when cleanup was incomplete. The cgroup OOM/PSI stop, 384/128/384 MiB
+workload, READ/WRITE, full 4096-byte page oracle, swap baseline and normal
+recovery remain unchanged.
+
+Rootless source tests must exercise simultaneous clean pair, each positive
+class, non-atomic mismatches/oscillations, missing first sample, dirty or
+foreign baseline, malformed counters, early guard stop, both worker
+termination and teardown failure, first-error-before-cleanup precedence,
+public strict JSON and synthetic official nonzero console path. A
+self-contained Python source excerpt is supporting unit evidence only,
+not the full source-imported suite, CI or physical PASS.
+
+### Non-mutating owner follow-up, only before a separately authorized trial
+
+Review the existing mode-0600 private failure record and independently
+verify that prior recovery was COMPLETE: ordinary SWAPSPACE2 header unchanged,
+ordinary swap inventory restored, mapper/module removed and no retained
+owned recovery resource. Without modifying host state, compare the last
+and preceding `memory.swap.current` observations with exact mapper
+`/proc/swaps Used KiB` relative to the immutable initial baseline;
+review cgroup `memory.events` oom/oom_kill and `memory.pressure full`,
+both oracle terminal exit/EOF records and original errno/cleanup disposition.
+These different interfaces are not synchronized. If any ownership, recovery
+or first-cause evidence is missing, treat it as UNKNOWN and do not repeat
+a physical swap trial. Phase A BLOCKED; Phase B forced RAW bypass and
+direct compressed handoff DISABLED. Current swapz RAW is the original
+uncompressed full 4096-byte page.
