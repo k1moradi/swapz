@@ -165,7 +165,22 @@ jobs:
             if [[ "$command_name" == swapz_module_kbuild ]]; then
               printf 'module_warning_count=%s\n' "$warning_count" >> "$current_manifest"
             fi
-            if (( warning_count != 0 )); then
+            if [[ "$command_name" == kernel_export_build ]]; then
+              # Only exact pinned unmodified upstream kernel-doc diagnostics
+              # may be accepted. Modified producer and GCC warnings still fail.
+              current_phase=kernel_export_build_warnings
+              if ! python3 -B swapz/tests/runtime/native/pinned-linux-origin-paired-module-test.py \
+                  --classify-kernel-doc-warnings --kernel-log "$log_file" \
+                  --linux-root "$PWD/linux" \
+                  --source-manifest "$evidence_dir/source-manifest.json" \
+                  --source-sha "$(git -C linux rev-parse HEAD)" \
+                  --profile "$requested_zswap" \
+                  --kernel-export-exit "$command_exit_code" >> "$current_manifest"; then
+                echo "::error::Modified Linux $profile kernel exporter baseline warning gate failed"
+                tail -n 30 "$log_file"
+                return 3
+              fi
+            elif (( warning_count != 0 )); then
               current_phase="${command_name}_warnings"
               echo "::error::Modified Linux $profile $command_name emitted warnings"
               tail -n 30 "$log_file"

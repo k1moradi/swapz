@@ -3677,3 +3677,44 @@ x86_64 and ARM64. Keep failure diagnostics bounded and record exactly which
 unavailable full-source or runtime gate was not run. No hardware, kernel
 module loading, swap or physical-device writes are authorized.
 Phase A remains BLOCKED; Phase B RAW bypass remains DISABLED.
+
+## Round 012 exact pinned upstream kernel-doc W=1 warning exception (2026-11-16)
+
+The matched modified-Linux `phase-a-zswap-origin-prototype.yml` job retains
+`CC=gcc`, `W=1`, per-profile independent `O=` trees, the actual Make exit,
+in-tree `vmlinux` and `modules` export builds, a nonempty `Module.symvers`,
+real external `dm-swapz.ko` Kbuild/link, ELF/modinfo/source/profile identity,
+and the paired real-byte verifier **before** the sole terminal PASS.
+
+The hosted pinned-Linux `kernel_export_build` phase previously failed on six
+kernel-doc warnings in four **unchanged** original Linux files: `ipc/sem.c:629`
+(once), `block/blk-map.c:366` (twice), `block/blk-mq-dma.c:379` (twice), and
+`drivers/gpu/drm/drm_gem_shmem_helper.c:174` (once). The standard-library
+paired-module verifier admits only the exact observed warning messages,
+line numbers and complete multiplicities, when the caller has proven the
+exact pinned `torvalds/linux@c339f4010dea8b0d754f84ace70cd1b089878ef8`
+revision, the original Git blobs for those four unchanged files, a successful
+actual exporter Make exit, and `CONFIG_ZSWAP=y/n` profile identity.
+A zero-warning exporter also records zero exceptions.
+
+The classifier reads the bounded actual captured build log and rejects
+changed text/locations, unexpected counts or continuation, unknown kernel-doc
+warnings, compiler warnings/errors, unapproved paths, modified `mm/zswap.c`,
+`mm/page_io.c`, `block/bio.c`, staged headers or swapz source warnings, and
+mismatched original Git blobs. Each profile manifest records the approved
+exception count, category counts, deterministic SHA-256 of normalized warning
+signatures (never a private runner path), pinned Linux SHA and source profile.
+The paired verifier requires those fields to match the stage warning count;
+every other build stage still requires **zero** warnings. An exception
+cannot override a nonzero Make exit or produce terminal PASS.
+
+Rootless negative tests exercise these boundaries against the actual
+source-controlled workflow, alongside existing fail-closed missing export,
+bad ELF, forged module/source/profile and premature-PASS cases. These tests
+do not establish modified-kernel compilation or a successful module link.
+The exact integrated hosted job must complete BOTH ZSWAP profiles with real
+source objects, full exports and nonempty linked `dm-swapz.ko`, verified
+ELF/modinfo and SHA-256, before source-level Kbuild PASS. A paired compile
+does not establish a booted matched producer, real stored-entry zswap
+eviction/readback, or physical safety. Phase A remains BLOCKED; Phase B RAW
+bypass remains DISABLED.

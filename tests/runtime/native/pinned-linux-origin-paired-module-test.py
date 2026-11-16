@@ -42,7 +42,33 @@ RE_UINT = re.compile(r"(?:0|[1-9][0-9]*)\Z")
 RE_KEY = re.compile(r"[a-z][a-z0-9_]{0,63}\Z")
 LIMITS = {"manifest": 32768, "source_manifest": 65536, "source": 16 * 1024 * 1024,
           "config": 2 * 1024 * 1024, "object": 512 * 1024 * 1024,
-          "symvers": 64 * 1024 * 1024, "module": 512 * 1024 * 1024}
+          "symvers": 64 * 1024 * 1024, "module": 512 * 1024 * 1024,
+          "build_log": 16 * 1024 * 1024}
+
+# Exact unchanged upstream Linux Git blobs and W=1 diagnostics from run 43793863015.
+# None of these four files is a patched producer or consumer source.
+BASELINE_KERNEL_DOC = (
+    ("ipc_sem", "ipc/sem.c", 629,
+     "This comment starts with '/**', but isn't a kernel-doc comment. Refer to Documentation/doc-guide/kernel-doc.rst",
+     1, "5ec41de7e85b2b4ce00def87f8a082b70d5efe49"),
+    ("blk_map_op", "block/blk-map.c", 366,
+     "Excess function parameter 'op' description in 'bio_copy_kern'",
+     2, "81cba3af4e9c1de234dc9a8573a978cf3d942be0"),
+    ("blk_dma_state", "block/blk-mq-dma.c", 379,
+     "Excess function parameter 'state' description in 'blk_rq_integrity_dma_map_iter_next'",
+     2, "88fd9cbc951f44af45c1f7af31571624bbad1263"),
+    ("drm_shmem_proto", "drivers/gpu/drm/drm_gem_shmem_helper.c", 174,
+     "expecting prototype for __drm_gem_shmem_release_sgt_locked(). Prototype was for __drm_gem_shmem_free_sgt_locked() instead",
+     1, "d654a22a30dedac27574d1179a278c93185f03b1"),
+)
+BASELINE_IPC_CONTINUATION = " * perform_atomic_semop[_slow] - Attempt to perform semaphore"
+BASELINE_WARNING_KEYS = (
+    "kernel_export_build_baseline_warning_count",
+    "kernel_export_build_baseline_warning_categories",
+    "kernel_export_build_baseline_warning_sha256",
+    "kernel_export_build_baseline_warning_source_sha",
+    "kernel_export_build_baseline_warning_profile",
+)
 
 
 class VerificationError(ValueError):
@@ -94,7 +120,8 @@ def read_regular(path: Path, category: str, *, retain: bool = False,
             with os.fdopen(file_descriptor, "rb") as stream:
                 before = os.fstat(stream.fileno())
                 require(stat.S_ISREG(before.st_mode) and
-                        0 < before.st_size <= LIMITS[category], category + "_file")
+                        (before.st_size > 0 or category == "build_log") and
+                        before.st_size <= LIMITS[category], category + "_file")
                 digest = hashlib.sha256()
                 saved = bytearray() if retain or prefix_length else None
                 seen = [False] * len(markers)
@@ -179,6 +206,88 @@ def load_source_manifest(path: Path) -> list[dict[str, object]]:
     return entries
 
 
+
+def baseline_warning_summary(counts: tuple[int, ...]) -> tuple[int, str, str]:
+    """Deterministic digest of approved signatures; no runner-private paths."""
+    require(len(counts) == len(BASELINE_KERNEL_DOC), "baseline_counts")
+    total = sum(counts)
+    if total == 0:
+        return 0, "none", hashlib.sha256(b"").hexdigest()
+    require(counts == tuple(item[4] for item in BASELINE_KERNEL_DOC),
+            "baseline_counts")
+    categories = ",".join(f"{item[0]}:{count}" for item, count
+                          in zip(BASELINE_KERNEL_DOC, counts))
+    canonical = "".join(
+        f"{item[0]}|{item[1]}:{item[2]}|{item[3]}\n" * count
+        for item, count in zip(BASELINE_KERNEL_DOC, counts)
+    ).encode("utf-8")
+    return total, categories, hashlib.sha256(canonical).hexdigest()
+
+
+def classify_kernel_doc_warnings(data: bytes, linux_root: Path, source_sha: str,
+                                 profile: str, command_exit: int,
+                                 original_blobs: dict[str, str]) -> dict[str, str]:
+    """Allow exact pinned upstream kernel-doc warnings, never compiler errors."""
+    require(source_sha == LINUX_SHA and profile in ("y", "n"),
+            "baseline_source_identity")
+    require(command_exit == 0 and len(data) <= LIMITS["build_log"],
+            "baseline_kernel_export_exit")
+    require(linux_root.is_absolute() and not linux_root.is_symlink(),
+            "baseline_source_root")
+    require(original_blobs == {item[1]: item[5] for item in BASELINE_KERNEL_DOC},
+            "baseline_unmodified_blobs")
+    try:
+        lines = data.decode("utf-8").splitlines()
+    except UnicodeError as error:
+        raise VerificationError("paired-build-invalid: baseline_log_encoding") from error
+    approved = {
+        f"Warning: {linux_root / item[1]}:{item[2]} {item[3]}": index
+        for index, item in enumerate(BASELINE_KERNEL_DOC)
+    }
+    counts = [0] * len(BASELINE_KERNEL_DOC)
+    diagnostic = re.compile(
+        r"(?i)(?:\bwarning:|\berror:|\bfatal:|\bfailed\b|"
+        r"\bundefined reference\b|(?:^|\s)make(?:\[\d+\])?:\s*\*\*\*)"
+    )
+    index = 0
+    while index < len(lines):
+        line = lines[index]
+        if line.startswith("Warning: "):
+            require(line in approved, "baseline_unknown_warning")
+            position = approved[line]
+            counts[position] += 1
+            require(counts[position] <= BASELINE_KERNEL_DOC[position][4],
+                    "baseline_excess_warning")
+            if position == 0:
+                index += 1
+                require(index < len(lines) and
+                        lines[index] == BASELINE_IPC_CONTINUATION,
+                        "baseline_ipc_continuation")
+        else:
+            require(diagnostic.search(line) is None and
+                    line != BASELINE_IPC_CONTINUATION,
+                    "baseline_unapproved_diagnostic")
+        index += 1
+    count, categories, digest = baseline_warning_summary(tuple(counts))
+    return dict(zip(BASELINE_WARNING_KEYS,
+                    (str(count), categories, digest, source_sha, profile)))
+
+
+def classify_real_kernel_export(log: Path, linux_root: Path, source_manifest: Path,
+                                source_sha: str, profile: str, command_exit: int) -> dict[str, str]:
+    """Reject any changed originally-unmodified upstream Git blob."""
+    load_source_manifest(source_manifest)
+    original_blobs: dict[str, str] = {}
+    for _, path, _, _, _, expected in BASELINE_KERNEL_DOC:
+        _, _, data, _ = read_regular(linux_root / path, "source", retain=True)
+        blob = hashlib.sha1(f"blob {len(data)}\0".encode() + data).hexdigest()
+        require(blob == expected, "baseline_source_changed")
+        original_blobs[path] = blob
+    _, _, data, _ = read_regular(log, "build_log", retain=True)
+    return classify_kernel_doc_warnings(data, linux_root, source_sha, profile,
+                                        command_exit, original_blobs)
+
+
 def validate_config(path: Path, expected_sha: str, profile: str) -> None:
     _, digest, data, _ = read_regular(path, "config", retain=True)
     require(digest == sha256_field(expected_sha, "config_hash"), "config_digest")
@@ -259,6 +368,22 @@ def verify(manifest: Path, source_manifest: Path, linux_root: Path,
     for stage in STAGES:
         require(fields.get(stage + "_exit_code") == "0" and
                 bool(fields.get(stage + "_command")), "stage_" + stage)
+        warnings = canonical_uint(fields.get(stage + "_warning_count"),
+                                  "stage_warning_count")
+        require(stage == "kernel_export_build" or warnings == 0,
+                "unapproved_stage_warnings")
+    baseline_count = canonical_uint(
+        fields.get("kernel_export_build_baseline_warning_count"), "baseline_count")
+    require(baseline_count == canonical_uint(
+        fields.get("kernel_export_build_warning_count"), "baseline_warning_count") and
+        fields.get("kernel_export_build_baseline_warning_source_sha") == LINUX_SHA and
+        fields.get("kernel_export_build_baseline_warning_profile") == profile,
+        "baseline_manifest_identity")
+    baseline = baseline_warning_summary(
+        tuple(item[4] if baseline_count else 0 for item in BASELINE_KERNEL_DOC))
+    require((baseline_count, fields.get("kernel_export_build_baseline_warning_categories"),
+             fields.get("kernel_export_build_baseline_warning_sha256")) == baseline,
+            "baseline_manifest_evidence")
     validate_config(build_dir / ".config", fields.get("config_sha256", ""), profile)
     expected_objects = ("mm/page_io.o", "block/bio.o") + (
         ("mm/zswap.o",) if profile == "y" else ())
@@ -366,6 +491,18 @@ def assert_full_workflow_contract(workflow: Path) -> None:
     require("git -C linux show HEAD:include/linux/bio.h" in text and
             "GITHUB_SHA" in text and "SWAPZ_BUILD_SOURCE_CLEAN_STRING" in text,
             "workflow_source_identity")
+    require(build_step.count("--classify-kernel-doc-warnings") == 1 and
+            build_step.count("current_phase=kernel_export_build_warnings") == 1 and
+            "if [[ \"$command_name\" == kernel_export_build ]]" in build_step and
+            "warning_count" in build_step and
+            "command_exit_code" in build_step and
+            "--source-manifest \"$evidence_dir/source-manifest.json\"" in build_step,
+            "workflow_baseline_fail_closed")
+    require(build_step.index("current_phase=kernel_export_build_warnings") <
+            build_step.index("for profile in enabled disabled") and
+            build_step.index("run_logged kernel_export_build") <
+            build_step.index("run_logged kernel_export_modules"),
+            "workflow_baseline_warning_gate")
 
 
 class PairedModuleTests(unittest.TestCase):
@@ -472,6 +609,10 @@ class PairedModuleTests(unittest.TestCase):
         for stage in STAGES:
             self.fields[stage + "_command"] = "make " + stage
             self.fields[stage + "_exit_code"] = "0"
+            self.fields[stage + "_warning_count"] = "0"
+        baseline = baseline_warning_summary((0,) * len(BASELINE_KERNEL_DOC))
+        self.fields.update(dict(zip(BASELINE_WARNING_KEYS, (
+            str(baseline[0]), baseline[1], baseline[2], LINUX_SHA, self.profile))))
         self.save()
 
     def save(self) -> None:
@@ -497,12 +638,27 @@ class PairedModuleTests(unittest.TestCase):
         self.check()
         self.profile = "n"
         self.fields["requested_zswap"] = self.fields["effective_zswap"] = "n"
+        self.fields["kernel_export_build_baseline_warning_profile"] = "n"
         self.put(".config", (self.build / ".config").read_bytes().replace(
             b"CONFIG_ZSWAP=y\n", b"# CONFIG_ZSWAP is not set\n"))
         self.fields["config_sha256"] = self.digest((self.build / ".config").read_bytes())
         (self.build / "mm/zswap.o").unlink()
         self.save()
         self.check()
+
+    def test_forged_baseline_warning_metadata(self) -> None:
+        self.fields["kernel_export_build_warning_count"] = "6"
+        self.save()
+        self.assert_rejects("baseline_manifest_identity")
+        self.fields["kernel_export_build_baseline_warning_count"] = "6"
+        self.fields["kernel_export_build_baseline_warning_categories"] = "none"
+        self.save()
+        self.assert_rejects("baseline_manifest_evidence")
+
+    def test_unapproved_warning_stage(self) -> None:
+        self.fields["swapz_module_kbuild_warning_count"] = "1"
+        self.save()
+        self.assert_rejects("unapproved_stage_warnings")
 
     def test_wrong_sha_and_dirty_preimage(self) -> None:
         self.fields["source_sha"] = "f" * 40
@@ -599,6 +755,106 @@ class PairedModuleTests(unittest.TestCase):
         self.assert_rejects("module_origin_reader_compiled")
 
 
+
+class KernelDocBaselineTests(unittest.TestCase):
+    """Source-controlled exact warning classifier; synthetic log, not Linux PASS."""
+
+    def setUp(self) -> None:
+        self.linux_root = Path("/pinned-fixture/linux")
+        self.original_blobs = {item[1]: item[5] for item in BASELINE_KERNEL_DOC}
+        self.lines: list[str] = []
+        for position, item in enumerate(BASELINE_KERNEL_DOC):
+            for _ in range(item[4]):
+                self.lines.append(
+                    f"Warning: {self.linux_root / item[1]}:{item[2]} {item[3]}")
+                if position == 0:
+                    self.lines.append(BASELINE_IPC_CONTINUATION)
+
+    def as_text(self) -> str:
+        return "\n".join(self.lines) + "\n"
+
+    def classify(self, *, text: str | None = None, sha: str = LINUX_SHA,
+                 profile: str = "y", status: int = 0,
+                 blobs: dict[str, str] | None = None) -> dict[str, str]:
+        return classify_kernel_doc_warnings(
+            (self.as_text() if text is None else text).encode("utf-8"),
+            self.linux_root, sha, profile, status,
+            self.original_blobs if blobs is None else blobs)
+
+    def bad(self, text: str, category: str) -> None:
+        with self.assertRaisesRegex(VerificationError, category):
+            self.classify(text=text)
+
+    def test_positive_six_unchanged_baseline_warnings_not_module_pass(self) -> None:
+        record = self.classify()
+        count, categories, digest = baseline_warning_summary((1, 2, 2, 1))
+        self.assertEqual(record["kernel_export_build_baseline_warning_count"], str(count))
+        self.assertEqual(record["kernel_export_build_baseline_warning_categories"], categories)
+        self.assertEqual(record["kernel_export_build_baseline_warning_sha256"], digest)
+        self.assertNotIn("result", record)
+
+    def test_positive_empty_log_is_not_module_pass(self) -> None:
+        self.assertEqual(self.classify(text="")[
+            "kernel_export_build_baseline_warning_count"], "0")
+
+    def test_reject_moved_line(self) -> None:
+        self.bad(self.as_text().replace("sem.c:629", "sem.c:630"),
+                 "baseline_unknown_warning")
+
+    def test_reject_wrong_wording(self) -> None:
+        self.bad(self.as_text().replace("Excess function parameter", "Unknown function parameter", 1),
+                 "baseline_unknown_warning")
+
+    def test_reject_wrong_path(self) -> None:
+        self.bad(self.as_text().replace("blk-map.c:366", "bio.c:366"),
+                 "baseline_unknown_warning")
+
+    def test_reject_modified_producer_warning(self) -> None:
+        self.bad(self.as_text() +
+                 f"Warning: {self.linux_root}/mm/zswap.c:101 new doc issue\n",
+                 "baseline_unknown_warning")
+
+    def test_reject_gcc_warning(self) -> None:
+        self.bad(self.as_text() + "mm/zswap.c:101:4: warning: -Werror\n",
+                 "baseline_unapproved_diagnostic")
+
+    def test_reject_nonzero_make(self) -> None:
+        with self.assertRaisesRegex(VerificationError, "baseline_kernel_export_exit"):
+            self.classify(status=2)
+
+    def test_reject_forged_source_sha(self) -> None:
+        with self.assertRaisesRegex(VerificationError, "baseline_source_identity"):
+            self.classify(sha="f" * 40)
+
+    def test_reject_swapped_profile(self) -> None:
+        with self.assertRaisesRegex(VerificationError, "baseline_source_identity"):
+            self.classify(profile="enabled")
+
+    def test_reject_changed_upstream_blob(self) -> None:
+        blobs = dict(self.original_blobs)
+        blobs["block/blk-map.c"] = "f" * 40
+        with self.assertRaisesRegex(VerificationError, "baseline_unmodified_blobs"):
+            self.classify(blobs=blobs)
+
+    def test_reject_excess_warning(self) -> None:
+        self.bad(self.as_text() + self.lines[2] + "\n", "baseline_excess_warning")
+
+    def test_reject_missing_expected_warning(self) -> None:
+        self.bad("\n".join(self.lines[:-1]) + "\n", "baseline_counts")
+
+    def test_reject_missing_kernel_doc_continuation(self) -> None:
+        self.bad(self.as_text().replace(BASELINE_IPC_CONTINUATION, ""),
+                 "baseline_ipc_continuation")
+
+    def test_reject_hidden_compiler_error(self) -> None:
+        self.bad(self.as_text() + "ld: error: undefined reference\n",
+                 "baseline_unapproved_diagnostic")
+
+    def test_reject_unpaired_continuation(self) -> None:
+        self.bad(BASELINE_IPC_CONTINUATION + "\n",
+                 "baseline_unapproved_diagnostic")
+
+
 class FullWorkflowContractTests(unittest.TestCase):
     workflow_path: Path
 
@@ -665,6 +921,17 @@ class FullWorkflowContractTests(unittest.TestCase):
     def test_real_full_workflow(self) -> None:
         assert_full_workflow_contract(self.workflow_path)
 
+    def test_removing_classifier_is_rejected(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="kernel-doc-gate-") as directory:
+            text = self.workflow_path.read_text()
+            anchor = "            current_phase=kernel_export_build_warnings"
+            self.assertEqual(text.count(anchor), 1)
+            changed = text.replace(anchor, "            current_phase=untrusted_warning_bypass")
+            path = Path(directory) / "workflow.yml"
+            path.write_text(changed)
+            with self.assertRaisesRegex(VerificationError, "workflow_baseline_fail_closed"):
+                assert_full_workflow_contract(path)
+
     def test_guard_rejects_full_workflow_pass_bypass(self) -> None:
         with tempfile.TemporaryDirectory(prefix="workflow-integrity-") as directory:
             text = self.workflow_path.read_text()
@@ -684,6 +951,10 @@ class FullWorkflowContractTests(unittest.TestCase):
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--self-test", action="store_true")
+    parser.add_argument("--classify-kernel-doc-warnings", action="store_true")
+    parser.add_argument("--kernel-log", type=Path)
+    parser.add_argument("--source-sha")
+    parser.add_argument("--kernel-export-exit", type=int)
     parser.add_argument("--workflow", type=Path)
     parser.add_argument("--manifest", type=Path)
     parser.add_argument("--source-manifest", type=Path)
@@ -701,8 +972,24 @@ def main() -> int:
             ".github/workflows/phase-a-zswap-origin-prototype.yml")
         suite = unittest.TestSuite((
             unittest.defaultTestLoader.loadTestsFromTestCase(PairedModuleTests),
+            unittest.defaultTestLoader.loadTestsFromTestCase(KernelDocBaselineTests),
             unittest.defaultTestLoader.loadTestsFromTestCase(FullWorkflowContractTests)))
         return 0 if unittest.TextTestRunner(verbosity=2).run(suite).wasSuccessful() else 1
+    if args.classify_kernel_doc_warnings:
+        if not all((args.kernel_log, args.linux_root, args.source_manifest,
+                    args.source_sha, args.profile)) or args.kernel_export_exit is None:
+            parser.error("kernel-doc classifier needs log, source identity, profile and make exit")
+        try:
+            result = classify_real_kernel_export(
+                args.kernel_log, args.linux_root, args.source_manifest,
+                args.source_sha, args.profile, args.kernel_export_exit)
+        except (VerificationError, OSError, UnicodeError) as error:
+            print(str(error) if isinstance(error, VerificationError)
+                  else "paired-build-invalid: baseline_io", file=sys.stderr)
+            return 1
+        for field in BASELINE_WARNING_KEYS:
+            print(f"{field}={result[field]}")
+        return 0
     if not all((args.manifest, args.source_manifest, args.linux_root,
                 args.stock_bio_header, args.build_dir, args.module_stage,
                 args.swapz_root, args.profile, args.swapz_sha)):
