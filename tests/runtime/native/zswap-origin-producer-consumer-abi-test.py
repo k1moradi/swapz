@@ -49,8 +49,8 @@ def source_postimages() -> dict[str, str]:
     require(stager.LINUX_COMMIT == PINNED_LINUX_SHA, "Linux source SHA")
     require(set(stager.EDITS) == set(stager.ORIGINAL_BLOBS) - {"Makefile"},
             "six-file pinned allowlist")
-    require(sum(len(edits) for edits in stager.EDITS.values()) == 12,
-            "twelve frozen source transformations")
+    require(sum(len(edits) for edits in stager.EDITS.values()) == 13,
+            "thirteen frozen source transformations")
     result = {}
     for path, edits in stager.EDITS.items():
         original = "\n\n/* original upstream anchor boundary */\n\n".join(
@@ -86,7 +86,7 @@ def validate_staged(postimages: dict[str, str]) -> None:
             "bio->bi_swap_origin = bio_is_zswap_stored_writeback(bio_src) ?" in block and
             "bio->bi_swap_origin = bio_src->bi_swap_origin;" not in block,
             "recycled BIO reset and clone must not forge provenance")
-    require("rw == WRITE && ctx->sio->swap_origin != ctx->swap_origin" in page and
+    require("rw == WRITE &&\n\t    !swap_bio_origin_can_merge(ctx->sio->swap_origin, ctx->swap_origin)" in page and
             "sio->swap_origin = rw == WRITE &&" in page and
             "bio->bi_swap_origin = sio->swap_origin;" in page,
             "only homogeneous WRITE contexts propagate positive origin")
@@ -140,15 +140,15 @@ PRODUCER_NEGATIVES = (
     ("clone raw scalar", "block/bio.c", "bio_is_zswap_stored_writeback(bio_src) ?", "bio_src->bi_swap_origin ?"),
     ("clone unconditional positive", "block/bio.c", "\t\tSWAP_BIO_ORIGIN_ZSWAP_STORED_WRITEBACK :\n\t\tSWAP_BIO_ORIGIN_ORDINARY_OR_UNKNOWN;", "\t\tSWAP_BIO_ORIGIN_ZSWAP_STORED_WRITEBACK :\n\t\tSWAP_BIO_ORIGIN_ZSWAP_STORED_WRITEBACK;"),
     ("lost context owner", "include/linux/swap_ops.h", "len;\n\tenum swap_bio_origin\tswap_origin;", "len;\n\tunsigned int unused_origin;"),
-    ("mixed-origin merge", "mm/page_io.c", "ctx->sio->swap_origin != ctx->swap_origin", "ctx->sio->swap_origin == ctx->swap_origin"),
-    ("missing origin merge fence", "mm/page_io.c", "rw == WRITE && ctx->sio->swap_origin != ctx->swap_origin", "rw == WRITE && false"),
+    ("mixed-origin merge", "mm/page_io.c", "!swap_bio_origin_can_merge(ctx->sio->swap_origin, ctx->swap_origin)", "swap_bio_origin_can_merge(ctx->sio->swap_origin, ctx->swap_origin)"),
+    ("missing origin merge fence", "mm/page_io.c", "rw == WRITE &&\\n\\t    !swap_bio_origin_can_merge(ctx->sio->swap_origin, ctx->swap_origin)", "rw == WRITE &&\\n\\t    false"),
     ("READ origin propagation", "mm/page_io.c", "sio->swap_origin = rw == WRITE &&", "sio->swap_origin = true &&"),
     ("drop BIO origin transfer", "mm/page_io.c", "bio->bi_swap_origin = sio->swap_origin;", "bio->bi_swap_origin = SWAP_BIO_ORIGIN_ORDINARY_OR_UNKNOWN;"),
     ("forged scalar transfer", "mm/page_io.c", "bio->bi_swap_origin = sio->swap_origin;", "bio->bi_swap_origin = SWAP_BIO_ORIGIN_ZSWAP_STORED_WRITEBACK;"),
     ("zswap attribution missing", "mm/zswap.c", "ctx.swap_origin = SWAP_BIO_ORIGIN_ZSWAP_STORED_WRITEBACK;", "ctx.swap_origin = SWAP_BIO_ORIGIN_ORDINARY_OR_UNKNOWN;"),
     ("missing BIO reset", "block/bio.c", "bio->bi_swap_origin = SWAP_BIO_ORIGIN_ORDINARY_OR_UNKNOWN;", "/* origin reset removed */"),
     ("lost second context", "include/linux/swap_ops.h", "/* Zero initialized for every ordinary or rejected swap page. */\n\tenum swap_bio_origin\tswap_origin;", "/* context provenance removed */"),
-    ("mixed-origin merge via OR", "mm/page_io.c", "rw == WRITE && ctx->sio->swap_origin != ctx->swap_origin", "rw == WRITE || ctx->sio->swap_origin != ctx->swap_origin"),
+    ("mixed-origin merge via OR", "mm/page_io.c", "rw == WRITE &&\\n\\t    !swap_bio_origin_can_merge(ctx->sio->swap_origin, ctx->swap_origin)", "rw == WRITE ||\\n\\t    !swap_bio_origin_can_merge(ctx->sio->swap_origin, ctx->swap_origin)"),
     ("unverified producer positive", "mm/zswap.c", "ctx.swap_origin = SWAP_BIO_ORIGIN_ZSWAP_STORED_WRITEBACK;", "ctx.swap_origin = SWAP_BIO_ORIGIN_ZSWAP_STORED_WRITEBACK | 1;"),
     ("zswap assignment too early", "mm/zswap.c", "folio_set_dropbehind(folio);\n\t/* Entry identity was checked and decompression succeeded. */\n\tctx.swap_origin = SWAP_BIO_ORIGIN_ZSWAP_STORED_WRITEBACK;", "ctx.swap_origin = SWAP_BIO_ORIGIN_ZSWAP_STORED_WRITEBACK;\n\tfolio_set_dropbehind(folio);"),
 )
