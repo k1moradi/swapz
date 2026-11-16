@@ -185,6 +185,23 @@ int main(void) {
     assert(!zswap_swapz_owned_payload_submit(&owner));
     memcpy(owner.original_sha256,trusted_original_sha256,32);
     assert(zswap_swapz_owned_payload_submit(&owner));
+    struct zswap_swapz_compressed_carrier_v1 carrier={0};
+    assert(zswap_swapz_carrier_snapshot_source_only(&carrier,&owner)==0);
+    assert(carrier.payload_owner==&owner && carrier.immutable_payload==owner.owned_bytes);
+    assert(carrier.compressed_length==owner.compressed_length &&
+           carrier.original_decoded_length==4096 &&
+           carrier.store_generation==owner.slot_generation &&
+           carrier.stored_slot.val==key.val &&
+           carrier.payload_crc32c==owner.payload_crc32c);
+    assert(memcmp(carrier.original_sha256,owner.original_sha256,32)==0);
+    assert(zswap_swapz_carrier_publish_disabled(&carrier,true,true,true,true,true)==-EOPNOTSUPP);
+    carrier.source_only_untrusted=false; /* A forged live origin is still refused. */
+    assert(zswap_swapz_carrier_publish_disabled(&carrier,true,true,true,true,true)==-EOPNOTSUPP);
+    assert(zswap_swapz_carrier_publish_disabled(&carrier,true,false,true,true,true)==-EOPNOTSUPP);
+    assert(zswap_swapz_carrier_publish_disabled(&carrier,true,true,false,true,true)==-EOPNOTSUPP);
+    assert(zswap_swapz_carrier_publish_disabled(&carrier,true,true,true,false,true)==-EOPNOTSUPP);
+    assert(zswap_swapz_carrier_publish_disabled(&carrier,true,true,true,true,false)==-EOPNOTSUPP);
+    carrier.source_only_untrusted=true;
     assert(!zswap_swapz_owned_payload_abort(&owner));
     assert(!zswap_swapz_owned_payload_submit(&owner));
     pthread_t first_thread,second_thread;
@@ -277,6 +294,24 @@ class CompressedHandoffTests(unittest.TestCase):
                 with self.assertRaises(stage.StagingError):
                     stage.validate_disabled_compressed_contract(
                         source.replace(before,after,1))
+
+    def test_round023_no_live_bio_compressed_carrier(self):
+        source=stage.COMPRESSED_HANDOFF_SOURCE
+        self.assertEqual(source.count('#if 0 /* SWAPZ_COMPRESSED_HANDOFF_DISABLED'),1)
+        for token in ('struct zswap_swapz_compressed_carrier_v1',
+                      'zswap_swapz_carrier_snapshot_source_only(',
+                      'zswap_swapz_carrier_publish_disabled(',
+                      'source_only_untrusted',
+                      'original_decoded_length',
+                      'clones_preserve_owner',
+                      'splits_preserve_owner',
+                      'merges_preserve_owner',
+                      'retries_preserve_owner'):
+            with self.subTest(token=token): self.assertIn(token,source)
+        self.assertNotIn('submit_bio(',source)
+        self.assertNotIn('REQ_ZSWAP_WRITEBACK',source)
+        # An ordinary 4096-byte BIO cannot carry variable compressed bytes.
+        self.assertIn('return -EOPNOTSUPP;',source)
 
     def test_compiled_guarded_producer_gcc_clang_ubsan(self):
         c=stage.COMPRESSED_HANDOFF_SOURCE

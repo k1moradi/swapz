@@ -681,6 +681,80 @@ static bool zswap_swapz_owned_payload_abort(
 	transfer->owned_bytes = NULL;
 	return true;
 }
+/*
+ * Round023 research: typed source-only carrier. The current pinned kernel has
+ * NO authority to bind a real store-time slot generation to the downstream
+ * cloned/split/reissued 4096-byte BIO. A source-only snapshot can identify
+ * bytes and epoch, but cannot make the ordinary BIO transport compressed.
+ * The carrier borrows only the separately OWNED producer copy, never zpool.
+ */
+struct zswap_swapz_compressed_carrier_v1 {
+	const struct zswap_swapz_owned_payload *payload_owner;
+	const u8 *immutable_payload;
+	unsigned int compressed_length;
+	unsigned int original_decoded_length;
+	unsigned int version;
+	swp_entry_t stored_slot;
+	u64 store_generation;
+	u32 payload_crc32c;
+	u8 original_sha256[ZSWAP_SWAPZ_DIGEST_BYTES];
+	bool source_only_untrusted;
+};
+
+/* Only a host fixture can inspect this borrowed typed descriptor. The
+ * source owner must outlive it, including every async callback; a real ABI
+ * would need explicit counted references through cloning and reissue.
+ */
+static int zswap_swapz_carrier_snapshot_source_only(
+		struct zswap_swapz_compressed_carrier_v1 *carrier,
+		const struct zswap_swapz_owned_payload *owner)
+{
+	if (!carrier || !owner)
+		return -EINVAL;
+	if (owner->self != owner ||
+	    atomic_read(&owner->owner_state) != ZSWAP_SWAPZ_PAYLOAD_SUBMITTED ||
+	    !zswap_swapz_owned_payload_is_valid(owner))
+		return -ESTALE;
+	if (!owner->slot_generation || owner->codec != ZSWAP_SWAPZ_CODEC_LZ4 ||
+	    owner->representation != ZSWAP_SWAPZ_REPR_ZSWAP_LZ4_V1 ||
+	    owner->representation_version != ZSWAP_SWAPZ_RECORD_VERSION)
+		return -EOPNOTSUPP;
+	*carrier = (struct zswap_swapz_compressed_carrier_v1) {
+		.payload_owner = owner,
+		.immutable_payload = owner->owned_bytes,
+		.compressed_length = owner->compressed_length,
+		.original_decoded_length = owner->decoded_length,
+		.version = owner->representation_version,
+		.stored_slot = owner->entry_identity,
+		.store_generation = owner->slot_generation,
+		.payload_crc32c = owner->payload_crc32c,
+		.source_only_untrusted = true,
+	};
+	memcpy(carrier->original_sha256, owner->original_sha256,
+	       sizeof(carrier->original_sha256));
+	return 0;
+}
+
+/* Every caller, including one presenting forged clone/merge/origin markers,
+ * MUST use the already compiled zswap_decompress -> normal 4096-byte WRITE.
+ * There is no authenticated MM/BIO -> DM sideband ABI in pinned Linux.
+ */
+static int zswap_swapz_carrier_publish_disabled(
+		const struct zswap_swapz_compressed_carrier_v1 *carrier,
+		bool claims_authenticated_origin, bool clones_preserve_owner,
+		bool splits_preserve_owner, bool merges_preserve_owner,
+		bool retries_preserve_owner)
+{
+	if (!carrier || !carrier->payload_owner)
+		return -EINVAL;
+	if (carrier->source_only_untrusted ||
+	    !claims_authenticated_origin || !clones_preserve_owner ||
+	    !splits_preserve_owner || !merges_preserve_owner ||
+	    !retries_preserve_owner)
+		return -EOPNOTSUPP;
+	/* Even forged "all true" cannot create missing kernel ABI support. */
+	return -EOPNOTSUPP;
+}
 #endif /* SWAPZ_COMPRESSED_HANDOFF_DISABLED_NO_PINNED_BIO_ABI */
 """
 COMPRESSED_HANDOFF_ANCHOR = (

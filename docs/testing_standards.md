@@ -14348,3 +14348,42 @@ Phase A BLOCKED, Phase B forced RAW bypass DISABLED, direct compressed
 handoff DISABLED. Existing RAW is the original UNCOMPRESSED full 4096
 bytes. No physical SWAPSPACE2 header/UUID/partition-table mutation,
 and no new competing reclaim pressure controller.
+
+## Round 023 — Agent 2: disabled pinned Linux typed compressed carrier refusal
+
+The pinned original Linux kernel has no source-authenticated store-time
+generation/epoch or clone/split/reissue-safe separate MM/BIO/DM compressed
+transport. The existing Round022 actual pinned Linux stager still inserts
+the prototype ONLY under
+#if 0 SWAPZ_COMPRESSED_HANDOFF_DISABLED_NO_PINNED_BIO_ABI; no live BIO
+size, origin predicate, KUnit or ordinary 4096 decompressed write changes.
+Current RAW is the original UNCOMPRESSED full 4096-byte page.
+
+The Round023 actual staged C prototype now models a source-only typed
+zswap_swapz_compressed_carrier_v1 descriptor. A SOURCE_ONLY_UNTRUSTED
+snapshot is permitted solely for a still SUBMITTED, matching owned
+immutable LZ4 v1 producer, independently captured original SHA256,
+current source slot+generation, <=3568 copy, original 4096 decoded
+length and canonical ~crc32c(~0U) checksum. It BORROWS only the
+separately owned, allocation-backed compressed payload, never a zpool
+mapping; it is invalid as soon as the source owner completes. A future
+transport MUST add real reference-counted ownership surviving BIO
+clone/split/merge/reissue and actual source-generated swap-slot epochs.
+
+The production publish seam zswap_swapz_carrier_publish_disabled
+always returns -EOPNOTSUPP even for a forged all-true origin/clone/
+split/merge/retry claim. It cannot create an authenticated kernel ABI
+or a 4096 BIO with embedded short compressed bytes. Other malformed
+claims also refuse, and the live path still decompresses into the
+ordinary original-page fallback. Host fixture under
+pinned-linux-zswap-compressed-handoff-test.py now executes these real
+source functions under GCC/Clang strict+sanitizers, refuses synthetic
+origin, broken clone/split/merge/retry state and tests no double owner
+release. Source test explicitly guards OFF-by-default and no submit_bio.
+
+Independent real loaded Linux source generation, zswap stored eviction,
+MM/BIO carrier, downstream loaded swapz 4096 original READ, and physical
+SWAPSPACE2 proof are NOT_RUN. KUnit source/build is a separate gate,
+never a live result. Phase A BLOCKED; Phase B forced RAW bypass and
+direct compressed transport DISABLED. Original SWAPSPACE2 first 4096
+header/UUID/table untouched; all future codec/GC authority volatile RAM.
