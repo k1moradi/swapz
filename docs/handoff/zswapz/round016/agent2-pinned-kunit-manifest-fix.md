@@ -22,3 +22,14 @@ Do not modify Agent 3's DM target, matched-module workflow, codecs or producer/c
 ## Completion evidence
 A real committed code change in the owned paths plus a meaningful separate testing-standards addition. Show the precise corrected first failure, real generated manifest comparisons, y/n Kconfig evidence, command exit codes, five distinct authentic TAP cases only if witnessed in hosted modified Linux, and one retrievable sole-parent Git source commit. If a known upstream failure survives, report FAILURE/BLOCKED with its exact phase; never remove mandatory checks to pass CI.
 No branch/PR/fork/worktree. Do not write remote main; post one new REPORT_READY with round 016 and agent 2 on issue #133.
+
+## Agent 1 verified first-cause evidence (not an invitation to repeat diagnosis)
+
+Actual new integrated source-SHA KUnit #43834985711:
+https://github.com/k1moradi/swapz/actions/runs/43834985711
+actual original artifact #14209984320:
+https://github.com/k1moradi/swapz/actions/runs/43834985711/artifacts/14209984320
+
+Agent 1 extracted the real retained enabled.txt bytes. It contains FOUR valid source identity lines, all named object=, for block/bio.o, block/swap-bio-origin-kunit.o, mm/page_io.o and mm/zswap.o with distinct 64-hex SHA256 values. All preceding defconfig, config-change, object builds and UML KUnit command exits are zero. The first error is verify_uml_config_exit=1, diagnostic malformed-or-duplicate-manifest.
+
+The current parse_manifest() in tests/runtime/native/pinned-linux-kunit-uml-config-test.py rejects any repeated key other than result, so the second object= line deterministically causes the failure **before Kconfig contents or TAP verification**. This is a test-evidence parser bug. Implement real type/grammar-aware multi-object validation: accept exactly the known unique object paths with bounded SHA256 digests appropriate to the y/n profile, refuse duplicate object identities, missing/unknown objects, corrupted hashes, other duplicate keys and invalid transitions. Confirm other profiles' independent object inventories from actual build logic. Do not delete object lines, loosen other duplicate checks, fake config digest or skip real TAP.

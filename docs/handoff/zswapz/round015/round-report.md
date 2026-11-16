@@ -27,3 +27,11 @@ Incompatible disabled direct-compressed prototypes: Agent 2 CRC32 vs Agent 3 CRC
 No real loaded authenticated stored-entry positive eviction and byte-exact 4096-byte swap-in, GC and physical qualification yet.
 **Disposition at this checkpoint: SOURCE_INTEGRATED_CI_PENDING. Phase A BLOCKED; Phase B RAW bypass DISABLED; direct compressed handoff DISABLED.**
 Close issue only after a subsequent final CI disposition is recorded with exact evidence and blockers.
+
+## Exact integrated-source KUnit first meaningful failure (Agent 1 verified)
+
+Real source SHA f716a5162a098742ec4bf7ab17b6a6a977bb75d4 KUnit run:
+https://github.com/k1moradi/swapz/actions/runs/43834985711
+retained artifact: https://github.com/k1moradi/swapz/actions/runs/43834985711/artifacts/14209984320
+
+The enabled source-manifest records four distinct legitimate compiled objects: block/bio.o, block/swap-bio-origin-kunit.o, mm/page_io.o and mm/zswap.o. Pinned source staging, defconfig, scripted Kconfig, prepare and modified-object builds, and UML KUnit process returned exit 0. verify_uml_config returned exit 1 with malformed-or-duplicate-manifest. Current parse_manifest() rejects repeated object= lines, so its second object line is the first deterministic parser failure before substantive effective Kconfig or five-case TAP validation. **Classification: SOURCE TEST-EVIDENCE PARSER DEFECT.** Five genuine KUnit cases in both y/n are still **NOT_VERIFIED**, not PASS; the disabled profile did not execute after the enabled failure. The next Agent 2 task now includes this exact cause, distinct identity/hash validation and mandatory no-skip TAP gates.
