@@ -2243,6 +2243,87 @@ def official_pass_binding_refusal(report, source_sha):
     return None
 
 
+ALGORITHM_RAM_LEASE_REFUSALS = frozenset((
+    "invalid_tested_source", "checkout_not_on_main",
+    "main_head_unavailable", "main_not_aligned",
+    "source_advanced_after_ram", "tracked_source_dirty",
+    "canonical_source_unavailable", "canonical_source_advanced",
+    "source_raced_after_ram",
+))
+
+
+def algorithm_ram_source_lease_refusal(tested_source_sha):
+    """Refuse a changed or unverifiable main before calling a physical helper.
+
+    The remote probe reads only the canonical ref; it never fetches, resets,
+    retries an active qualification or changes the tested checkout. The
+    privileged selector independently rechecks its own source/device gates.
+    """
+    if not isinstance(tested_source_sha, str) or not re.fullmatch(
+            r"[0-9a-f]{40}", tested_source_sha):
+        return "invalid_tested_source"
+    run = _sync_git_runner()
+    branch = run("symbolic-ref", "--quiet", "--short", "HEAD")
+    if branch is None or branch.returncode or branch.stdout.strip() != b"main":
+        return "checkout_not_on_main"
+    local_head = _git_head(run, "HEAD")
+    tracking_head = _git_head(run, "refs/remotes/origin/main")
+    if local_head is None or tracking_head is None:
+        return "main_head_unavailable"
+    if local_head != tracking_head:
+        return "main_not_aligned"
+    if git_sha() != tested_source_sha:
+        return "source_advanced_after_ram"
+    if tracked_source_checkout_preflight() is not None:
+        return "tracked_source_dirty"
+
+    # Unlike a cached origin/main ref, ls-remote observes the current
+    # canonical main without modifying refs or the private qualification.
+    if _remote_origin_url(run) is None:
+        return "canonical_source_unavailable"
+    current_remote = run(
+        "ls-remote", "--exit-code", "origin", "refs/heads/main", timeout=15)
+    if current_remote is None or current_remote.returncode:
+        return "canonical_source_unavailable"
+    remote_lines = current_remote.stdout.decode(
+        "ascii", "replace").splitlines()
+    if len(remote_lines) != 1 or re.fullmatch(
+            r"[0-9a-f]{40}\trefs/heads/main", remote_lines[0]) is None:
+        return "canonical_source_unavailable"
+    if remote_lines[0][:40] != local_head:
+        return "canonical_source_advanced"
+
+    # Re-read the local source after the remote observation. This catches
+    # a concurrent local ref change during the source-lease preflight.
+    if (_git_head(run, "HEAD") != local_head or
+            _git_head(run, "refs/remotes/origin/main") != tracking_head or
+            git_sha() != tested_source_sha or
+            tracked_source_checkout_preflight() is not None):
+        return "source_raced_after_ram"
+    return None
+
+
+def run_algorithm_physical_selector_if_leased(
+        tested_source_sha, physical_env, error_stream):
+    """Return (completed, refusal, attempted), allowing safe mock-only tests.
+
+    attempted is True before subprocess.run can raise; a selector invocation
+    failure must never be mislabeled as a source gate's zero-mutation refusal.
+    """
+    refusal = algorithm_ram_source_lease_refusal(tested_source_sha)
+    if refusal is not None:
+        return None, refusal, False
+    try:
+        trial = subprocess.run(
+            [sys.executable, "-B",
+             str(ROOT / "tests/tools/algorithm-physical.py")],
+            cwd=ROOT, check=False, env=physical_env,
+            stderr=error_stream)
+    except (OSError, subprocess.SubprocessError):
+        return None, "physical_selector_execution_unavailable", True
+    return trial, None, True
+
+
 def write_algorithm_ram_development_evidence(result):
     """Publish one private nonce-bound record from this completed RAM run."""
     if (not isinstance(result, dict) or
@@ -2250,7 +2331,9 @@ def write_algorithm_ram_development_evidence(result):
             not re.fullmatch(r"[0-9a-f]{40}", str(result.get("source_sha", ""))) or
             [stage.get("name") for stage in result.get("stages", [])
              if isinstance(stage, dict)] != list(OFFICIAL_STAGE_NAMES) or
-            any(stage.get("status") != "PASS" or stage.get("exit_code") != 0
+            any(stage.get("status") != "PASS" or
+                type(stage.get("exit_code")) is not int or
+                stage["exit_code"] != 0
                 for stage in result.get("stages", [])
                 if isinstance(stage, dict)) or
             len(result.get("stages", [])) != len(OFFICIAL_STAGE_NAMES) or
@@ -2265,9 +2348,16 @@ def write_algorithm_ram_development_evidence(result):
     source_sha = result["source_sha"]
     if (not re.fullmatch(r"[0-9a-f]{40}", head) or git_sha() != source_sha):
         raise ValueError("algorithm RAM evidence source changed after qualification")
+    lease_refusal = algorithm_ram_source_lease_refusal(source_sha)
+    if lease_refusal is not None:
+        raise ValueError("algorithm RAM source lease refused: " + lease_refusal)
 
-    nonce = os.urandom(16).hex()
     artifacts = result["qualified_artifacts"]
+    if artifacts != qualification_artifact_digests():
+        raise ValueError("algorithm RAM evidence artifact digests changed")
+    nonce = os.urandom(16).hex()
+    if re.fullmatch(r"[0-9a-f]{32}", nonce) is None:
+        raise ValueError("algorithm RAM evidence nonce unavailable")
     record = {
         "schema": "swapz-algorithm-ram-development-evidence-v1",
         "head": head,
@@ -2285,27 +2375,42 @@ def write_algorithm_ram_development_evidence(result):
     }
     evidence = ROOT / "build/tests/algorithm-ram-evidence.json"
     evidence.parent.mkdir(parents=True, exist_ok=True)
-    temporary = evidence.with_name(".algorithm-ram-evidence.json.tmp")
     payload = json.dumps(
         record, sort_keys=True, separators=(",", ":"), allow_nan=False
     ).encode("utf-8") + b"\n"
     if len(payload) > 65536:
         raise ValueError("algorithm RAM evidence exceeded its fixed bound")
+    # mkstemp creates a unique owner-only file, avoiding fixed-name races
+    # and leaving the previous complete record untouched on write failure.
+    temporary_name = None
+    descriptor = -1
     primary_error = None
     try:
-        with temporary.open("wb") as output:
+        descriptor, temporary_name = tempfile.mkstemp(
+            prefix=".algorithm-ram-evidence.", suffix=".tmp",
+            dir=evidence.parent)
+        with os.fdopen(descriptor, "wb") as output:
+            descriptor = -1
             output.write(payload)
-        os.chmod(temporary, 0o600)
-        os.replace(temporary, evidence)
+            output.flush()
+            os.fsync(output.fileno())
+        os.replace(temporary_name, evidence)
     except BaseException as error:
         primary_error = error
         raise
     finally:
-        try:
-            temporary.unlink(missing_ok=True)
-        except BaseException:
-            if primary_error is None:
-                raise
+        if descriptor >= 0:
+            try:
+                os.close(descriptor)
+            except OSError:
+                if primary_error is None:
+                    raise
+        if temporary_name is not None:
+            try:
+                Path(temporary_name).unlink(missing_ok=True)
+            except OSError:
+                if primary_error is None:
+                    raise
     return evidence, nonce
 
 
@@ -13207,12 +13312,14 @@ def _run_qualification(args, sync_result):
                 # No child stderr or privileged host identifiers reach Git.
                 with tempfile.TemporaryFile(mode="w+t",
                                             encoding="utf-8") as error_stream:
-                    physical_selector_started = True
-                    physical_trial = subprocess.run(
-                        [sys.executable, "-B",
-                         str(ROOT / "tests/tools/algorithm-physical.py")],
-                        cwd=ROOT, check=False, env=physical_env,
-                        stderr=error_stream)
+                    physical_trial, source_lease_refusal, physical_selector_started = (
+                        run_algorithm_physical_selector_if_leased(
+                            result["tested_commit_sha"], physical_env,
+                            error_stream))
+                    if source_lease_refusal is not None:
+                        raise ValueError(
+                            "algorithm RAM source lease refused: " +
+                            source_lease_refusal)
                     physical_exit = physical_trial.returncode
                     if physical_exit != 0:
                         error_stream.seek(0)
@@ -13238,7 +13345,14 @@ def _run_qualification(args, sync_result):
                     # Only this exact source-defined error is eligible for
                     # attribution. Never echo arbitrary exception text, paths,
                     # Git output, host identifiers, or privileged stderr.
+                    source_lease_prefix = "algorithm RAM source lease refused: "
+                    lease_reason = (
+                        str(error)[len(source_lease_prefix):]
+                        if isinstance(error, ValueError) and
+                        str(error).startswith(source_lease_prefix) else None)
                     pretrial_evidence_refusal = (
+                        lease_reason if lease_reason in
+                        ALGORITHM_RAM_LEASE_REFUSALS else
                         "source_advanced_after_ram"
                         if isinstance(error, ValueError) and str(error) ==
                         "algorithm RAM evidence source changed after qualification"
@@ -13332,11 +13446,26 @@ def _run_qualification(args, sync_result):
                 if pretrial_evidence_refusal is not None:
                     result["algorithm_real_swap"]["reason"] = (
                         pretrial_evidence_refusal)
+                    result["algorithm_real_swap"]["phase"] = (
+                        "before_physical_selector")
+                    result["algorithm_real_swap"]["tested_source_sha"] = (
+                        result["tested_commit_sha"])
+                    observed_source = git_sha()
+                    result["algorithm_real_swap"]["current_main_source_sha"] = (
+                        observed_source if isinstance(observed_source, str) and
+                        re.fullmatch(r"[0-9a-f]{40}", observed_source) else
+                        "unavailable")
                     print(
                         "  Physical admission first refusal: "
                         "phase=before_physical_selector gate=ram_evidence "
                         f"reason={pretrial_evidence_refusal} "
                         "mutation=not_started", flush=True)
+                    print(
+                        "  Physical source lease: tested=" +
+                        result["tested_commit_sha"][:12] +
+                        " current=" +
+                        result["algorithm_real_swap"][
+                            "current_main_source_sha"][:12], flush=True)
                 elif physical_source_admission is not None:
                     result["algorithm_real_swap"]["reason"] = (
                         physical_source_admission["reason"])

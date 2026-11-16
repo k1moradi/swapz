@@ -8,6 +8,9 @@ on:
       - 'tests/runtime/benchmark/physical-campaign-evidence-test.py'
       - '.github/workflows/physical-evidence-rootless.yml'
       - 'docs/testing_standards.md'
+      - 'tests/tools/run-tests.py'
+      - 'tests/runtime/native/algorithm-ram-source-lease-test.py'
+      - 'tests/runtime/native/algorithm-physical-test.py'
   workflow_dispatch:
 permissions:
   contents: read
@@ -22,5 +25,10 @@ jobs:
           fetch-depth: 2
       - name: Synthetic-only adversarial physical evidence regression
         run: python3 -B tests/runtime/benchmark/physical-campaign-evidence-test.py -v
+      - name: Rootless RAM source-lease and physical nonadmission regression
+        run: |
+          python3 -B tests/runtime/native/algorithm-ram-source-lease-test.py -v
+          python3 -B tests/runtime/native/algorithm-physical-test.py -v
+          python3 -m py_compile tests/tools/run-tests.py tests/runtime/native/algorithm-ram-source-lease-test.py
       - name: Validate committed patch whitespace
         run: git diff --check HEAD^ HEAD

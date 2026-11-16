@@ -13231,3 +13231,52 @@ not prove a loaded matching `dm-swapz.ko`, an MM-authenticated stored
 zswap eviction, real swap I/O, loaded readback, or physical acceptance.
 Phase A remains BLOCKED pending those end-to-end gates; Phase B
 origin-conditioned RAW bypass remains DISABLED.
+
+
+## Round 013 RAM source lease and physical selector nonadmission (2026-11-16)
+
+The actual `tests/tools/run-tests.py` treats the five official RAM stages as
+source-bound development evidence, **not physical qualification**. Even when
+each stage finishes PASS, a canonical `main` advance, dirty tracked checkout,
+different local/tracking head, lost source identity or failed remote read must
+not start `tests/tools/algorithm-physical.py`. A read-only `git ls-remote`
+immediately before the selector compares actual remote `refs/heads/main` to
+the local main HEAD; a second local source/tracking/dirty check detects
+local races. This is a best-effort pre-selector lease, **not** a distributed
+lock: the physical selector must independently reauthenticate source,
+device, permissions and runtime state before any mutation. A stale cached
+remote-tracking ref alone is insufficient to authorize selector invocation.
+
+The pretrial checkpoint publisher must first bind the exact tested
+40-character source SHA, clean checkout, all five ordered PASS stage names
+and integer-zero exits, final three canonical SHA-256 artifact digests,
+and a nonempty private 128-bit random nonce. Publish its single
+`build/tests/algorithm-ram-evidence.json` through a unique owner-only
+0600 temporary file and atomic replacement; a failure leaves the previous
+complete evidence intact and cleans the private temporary. Archived Git
+evidence is acceptable only when its immutable report blob, single-parent
+report-only commit, restoration ancestry/tree, exact canonical report path
+and source-bound notice independently match; never silently treat a
+restoration commit or later source commit as the newly tested source.
+
+A refusal has explicit `phase=before_physical_selector`,
+`physical=NOT_RUN` and `overall=INCOMPLETE`; report the original tested
+source SHA and observed current source identity or UNAVAILABLE without raw
+host paths/identifiers, arbitrary stderr or credentials. Failure at the
+actual selector invocation is **not** a zero-selector refusal and must
+retain the original failure/recovery ambiguity. Never auto-retry privileged
+work after source drift, pull or reset canonical main midway through a
+qualification to make stale RAM data appear admitted, weaken workload/owner
+scope, or promote an old report to physical PASS.
+
+The standard-library rootless
+`tests/runtime/native/algorithm-ram-source-lease-test.py` imports the
+real qualification driver, mocks Git/remote/selector/device effects and
+exercises stable-source admission boundary plus source-advanced, dirty,
+local/remote-main disagreement, local race, unavailable source, malformed
+nonce/digests, archive/restoration tampering and private atomic-publication
+failure. The physical-evidence GitHub workflow runs these rootless tests
+alongside its existing physical-campaign adversarial tests and the prior
+`algorithm-physical-test.py`. Mocked selector calls are not physical trials.
+Loaded/owner real-device admission remains NOT_RUN, Phase A BLOCKED and
+Phase B RAW bypass DISABLED.
