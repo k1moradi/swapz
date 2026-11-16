@@ -9,16 +9,25 @@ required to prove provenance, page lifetime, exclusive RAM and safe cleanup.
 from __future__ import annotations
 
 import argparse
+import contextlib
+import io
 import json
 import os
 from pathlib import Path
 import re
 import stat
+import struct
 import sys
 import tempfile
 import unittest
+from types import SimpleNamespace
+from unittest import mock
 
 PINNED_LINUX_SHA = "c339f4010dea8b0d754f84ace70cd1b089878ef8"
+# Fixed kernel pseudo-files only; no user-controlled host path or device access.
+BOOT_ID_SOURCE = Path("/proc/sys/kernel/random/boot_id")
+MODULE_SOURCE = Path("/sys/module/dm_swapz")
+MODULE_NOTE_NAME = ".note.gnu.build-id"
 MAX_MANIFEST_BYTES = 8192
 MAX_HOST_OBSERVATION_BYTES = 16384
 SHA40 = re.compile(r"[0-9a-f]{40}\Z")
@@ -161,6 +170,93 @@ def read_readonly_regular(path: Path) -> bytes:
             os.close(fd)
 
 
+
+def read_fixed_host_blob(path: Path, maximum_bytes: int, label: str) -> bytes:
+    """Nofollow, bounded read from fixed proc/sysfs kernel evidence.
+
+    procfs/sysfs files may advertise st_size=0 or PAGE_SIZE. Neither a
+    pseudo-file inode nor a matching build ID authenticates loaded code bytes.
+    """
+    descriptor = -1
+    try:
+        descriptor = os.open(
+            path, os.O_RDONLY | os.O_NONBLOCK | os.O_CLOEXEC |
+            getattr(os, "O_NOFOLLOW", 0))
+        before = os.fstat(descriptor)
+        require(stat.S_ISREG(before.st_mode) and
+                (before.st_size in (0, 4096) or
+                 0 < before.st_size <= maximum_bytes),
+                label + "_type_or_size")
+        blob = os.read(descriptor, maximum_bytes + 1)
+        after = os.fstat(descriptor)
+        require(0 < len(blob) <= maximum_bytes and
+                (before.st_size in (0, 4096) or
+                 before.st_size == len(blob)) and
+                (before.st_dev, before.st_ino, before.st_mode,
+                 before.st_size, before.st_mtime_ns) ==
+                (after.st_dev, after.st_ino, after.st_mode,
+                 after.st_size, after.st_mtime_ns),
+                label + "_changed_or_oversize")
+        return blob
+    except OSError:
+        raise NotQualified(label + "_unavailable") from None
+    finally:
+        if descriptor >= 0:
+            os.close(descriptor)
+
+
+def read_fixed_host_text(path: Path, maximum_bytes: int, label: str) -> str:
+    """Reject non-ASCII, NUL and arbitrary whitespace from kernel metadata."""
+    raw = read_fixed_host_blob(path, maximum_bytes, label)
+    try:
+        value = raw.decode("ascii", "strict")
+    except UnicodeError:
+        raise NotQualified(label + "_encoding") from None
+    require("\x00" not in value and
+            value == value.strip() + ("\n" if value.endswith("\n") else ""),
+            label + "_malformed")
+    return value.removesuffix("\n")
+
+
+def parse_kernel_module_build_id_note(raw: bytes) -> str:
+    """Validate a GNU ELF module note, never treat it as full module digest."""
+    require(32 <= len(raw) <= 128, "module_build_id_invalid")
+    name_size, digest_size, note_type = struct.unpack_from("=III", raw)
+    padded_digest_size = (digest_size + 3) & ~3
+    require(name_size == 4 and note_type == 3 and
+            16 <= digest_size <= 64 and
+            len(raw) == 16 + padded_digest_size and
+            raw[12:16] == b"GNU\x00" and
+            raw[16:16 + digest_size] != b"\x00" * digest_size,
+            "module_build_id_invalid")
+    return raw[16:16 + digest_size].hex()
+
+
+def read_actual_module_metadata() -> bool:
+    """Read only immutable sysfs-shaped host facts; no authorization result."""
+    try:
+        metadata = os.lstat(MODULE_SOURCE)
+    except FileNotFoundError:
+        return False
+    except OSError:
+        raise NotQualified("actual_module_identity_unavailable") from None
+    require(stat.S_ISDIR(metadata.st_mode), "actual_module_directory_invalid")
+    state = read_fixed_host_text(MODULE_SOURCE / "initstate", 32,
+                                 "actual_module_initstate")
+    require(state == "live", "actual_module_not_live")
+    try:
+        notes_metadata = os.lstat(MODULE_SOURCE / "notes")
+    except OSError:
+        raise NotQualified("actual_module_notes_unavailable") from None
+    require(stat.S_ISDIR(notes_metadata.st_mode),
+            "actual_module_notes_invalid")
+    note = read_fixed_host_blob(MODULE_SOURCE / "notes" / MODULE_NOTE_NAME,
+                                128, "actual_module_build_id")
+    require(bool(parse_kernel_module_build_id_note(note)),
+            "module_build_id_invalid")
+    return True
+
+
 def probe_claim_against_host(claim: dict[str, object],
                              observed_boot_id: str, observed_release: str,
                              observed_module_live: bool) -> None:
@@ -172,18 +268,16 @@ def probe_claim_against_host(claim: dict[str, object],
 
 
 def read_actual_boot_identity() -> tuple[str, str, bool]:
-    """Never infer loaded bytes/ownership from uname or sysfs presence alone."""
+    """Read actual boot and module metadata; never certify loaded bytes."""
+    boot_id = read_fixed_host_text(BOOT_ID_SOURCE, 64, "actual_boot_id")
     try:
-        with open("/proc/sys/kernel/random/boot_id", "r", encoding="ascii") as boot:
-            boot_id = boot.read(48).strip()
         release = os.uname().release
-        loaded = Path("/sys/module/dm_swapz").is_dir()
-    except (OSError, UnicodeError):
-        raise NotQualified("read_only_host_identity_unavailable") from None
+    except OSError:
+        raise NotQualified("actual_kernel_release_unavailable") from None
     require(BOOT_ID.fullmatch(boot_id) is not None, "actual_boot_id_invalid")
     require(KERNEL_RELEASE.fullmatch(release) is not None,
             "actual_kernel_release_invalid")
-    return boot_id, release, loaded
+    return boot_id, release, read_actual_module_metadata()
 
 
 def refusal(reason: str) -> None:
@@ -371,17 +465,122 @@ class CandidateTests(unittest.TestCase):
             check_candidate(self.raw() + b" " * MAX_MANIFEST_BYTES, self.source_sha)
 
 
+
+class HostReadOnlyTests(unittest.TestCase):
+    """Disposable proc/sysfs-shaped fixtures; no loaded-kernel PASS."""
+
+    @staticmethod
+    def note_bytes():
+        return (struct.pack("=III", 4, 20, 3) + b"GNU\x00" +
+                bytes(range(1, 21)))
+
+    def test_kernel_module_note_is_exact_and_nonempty(self) -> None:
+        note = self.note_bytes()
+        self.assertEqual(len(parse_kernel_module_build_id_note(note)), 40)
+        for wrong in (note[:-1], note + b"x", note[:8], b"\x00" * len(note),
+                      struct.pack("=III", 4, 20, 2) + note[12:]):
+            with self.subTest(size=len(wrong)):
+                with self.assertRaisesRegex(NotQualified, "module_build_id_invalid"):
+                    parse_kernel_module_build_id_note(wrong)
+
+    def test_host_regular_read_rejects_symlink_fifo_large_and_nul(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            page = root / "page"
+            page.write_bytes(b"live\n")
+            link = root / "link"
+            link.symlink_to(page)
+            with self.assertRaisesRegex(NotQualified, "probe_unavailable"):
+                read_fixed_host_blob(link, 32, "probe")
+            fifo = root / "fifo"
+            os.mkfifo(fifo)
+            with self.assertRaisesRegex(NotQualified, "probe_type_or_size"):
+                read_fixed_host_blob(fifo, 32, "probe")
+            page.write_bytes(b"q" * 100)
+            with self.assertRaises(NotQualified):
+                read_fixed_host_blob(page, 32, "probe")
+            page.write_bytes(b"live\x00\n")
+            with self.assertRaisesRegex(NotQualified, "probe_malformed"):
+                read_fixed_host_text(page, 32, "probe")
+            page.write_bytes(b"live\n")
+            self.assertEqual(read_fixed_host_text(page, 32, "probe"), "live")
+
+    def test_independent_host_facts_are_not_authorizing(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            boot = root / "boot_id"
+            boot.write_text("12345678-1234-1234-1234-123456789abc\n",
+                            encoding="ascii")
+            module = root / "module"
+            (module / "notes").mkdir(parents=True)
+            (module / "initstate").write_text("live\n", encoding="ascii")
+            (module / "notes" / MODULE_NOTE_NAME).write_bytes(self.note_bytes())
+            with mock.patch.dict(globals(), {"BOOT_ID_SOURCE": boot,
+                                             "MODULE_SOURCE": module}), \
+                    mock.patch.object(os, "uname",
+                                      return_value=SimpleNamespace(release="6.12.0-test")):
+                boot_id, release, module_live = read_actual_boot_identity()
+                self.assertTrue(module_live)
+                self.assertEqual(release, "6.12.0-test")
+                self.assertEqual(boot_id,
+                                 "12345678-1234-1234-1234-123456789abc")
+                console = io.StringIO()
+                with mock.patch.object(sys, "argv", ["contract", "--inspect-host"]), \
+                        contextlib.redirect_stdout(console):
+                    self.assertEqual(main(), 2)
+                self.assertIn("ENVIRONMENT_NOT_QUALIFIED", console.getvalue())
+                self.assertIn("LOADED_STORED_ENTRY=NOT_RUN", console.getvalue())
+                self.assertIn("4096_READBACK=NOT_RUN", console.getvalue())
+                self.assertNotIn("PHASE_A=PASS", console.getvalue())
+
+                (module / "initstate").write_text("coming\n", encoding="ascii")
+                with self.assertRaisesRegex(NotQualified, "actual_module_not_live"):
+                    read_actual_boot_identity()
+                (module / "initstate").write_text("live\n", encoding="ascii")
+                (module / "notes" / MODULE_NOTE_NAME).write_bytes(b"short")
+                with self.assertRaisesRegex(NotQualified, "module_build_id_invalid"):
+                    read_actual_boot_identity()
+                (module / "notes" / MODULE_NOTE_NAME).write_bytes(self.note_bytes())
+                boot.write_text("stale-boot\n", encoding="ascii")
+                with self.assertRaisesRegex(NotQualified, "actual_boot_id_invalid"):
+                    read_actual_boot_identity()
+                boot.unlink()
+                with self.assertRaisesRegex(NotQualified, "actual_boot_id_unavailable"):
+                    read_actual_boot_identity()
+
+    def test_module_absent_or_symlink_is_not_live(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            module = root / "missing"
+            with mock.patch.dict(globals(), {"MODULE_SOURCE": module}):
+                self.assertFalse(read_actual_module_metadata())
+                real = root / "real"
+                real.mkdir()
+                module.symlink_to(real, target_is_directory=True)
+                with self.assertRaisesRegex(NotQualified,
+                                            "actual_module_directory_invalid"):
+                    read_actual_module_metadata()
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     mode = parser.add_mutually_exclusive_group(required=True)
     mode.add_argument("--self-test", action="store_true")
     mode.add_argument("--inspect-candidate", type=Path)
+    mode.add_argument("--inspect-host", action="store_true")
     parser.add_argument("--expected-source-sha")
     args = parser.parse_args()
     if args.self_test:
-        suite = unittest.defaultTestLoader.loadTestsFromTestCase(CandidateTests)
+        suite = unittest.TestSuite((
+            unittest.defaultTestLoader.loadTestsFromTestCase(CandidateTests),
+            unittest.defaultTestLoader.loadTestsFromTestCase(HostReadOnlyTests)))
         return 0 if unittest.TextTestRunner(verbosity=1).run(suite).wasSuccessful() else 1
     try:
+        if args.inspect_host:
+            _, _, module_live = read_actual_boot_identity()
+            require(module_live, "actual_module_not_loaded")
+            # No sysfs evidence alone authenticates the booted Linux source,
+            # immutable loaded module bytes or owned RAM swap-in session.
+            raise NotQualified("host_metadata_not_boot_or_module_byte_attestation")
         require(bool(args.expected_source_sha), "expected_source_sha_missing")
         claim = check_candidate(read_readonly_regular(args.inspect_candidate),
                                 args.expected_source_sha)

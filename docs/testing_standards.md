@@ -14074,3 +14074,34 @@ retrial in this round. Optional `SCENARIOS=fast-mixed REPEAT=1 make fast_test`
 is RAM/null_blk performance only, not real physical attribution. Phase A
 BLOCKED, Phase B RAW bypass and direct compressed handoff DISABLED.
 RAW remains the original uncompressed 4096-byte page.
+
+## Round 021 — Agent 3: independent read-only host boot/module observation
+
+Source-only linked Linux KUnit y/n and matched dm-swapz.ko Kbuild remain
+distinct from a verified *running* modified kernel, the actually loaded
+module image and an authorized exclusive ephemeral RAM-only swap session.
+Round020 candidate JSON can never supply those independently.
+
+The Round021 existing loaded-evidence-contract.py now uses fixed host-only
+proc/sysfs paths (no caller-provided root/path), O_NOFOLLOW, nonblocking bounded
+file-descriptor reads, regular-file/identity rechecks, strict ASCII boot ID and
+module live initstate, and a fully bounded GNU ELF build-ID module note reader.
+Symlink/FIFO/device, truncated/corrupt/oversized/noncanonical notes, missing or
+not-live modules and stale boot identity are refused by rootless tests against
+disposable fake proc/sysfs shapes. The new --inspect-host mode is read-only and
+always reports ENVIRONMENT_NOT_QUALIFIED, exit 2, LOADED_STORED_ENTRY=NOT_RUN,
+4096_READBACK=NOT_RUN, Phase A BLOCKED even if the fabricated host metadata
+agrees. A sysfs module ELF build ID is NOT a bytewise digest of the loaded
+module, a booted source SHA, source-linked module signature, a verified owner,
+or evidence of an original page swap-in. It is a negative-only cross-check.
+
+The unchanged original 4096-byte offline comparator still insists on
+independent original SHA256, byte-exact readback, one authentic-origin admission,
+one committed foreground WRITE, one independent upper success and no increased
+errors. Those files/status deltas cannot certify real zswap stored-entry
+lifetime/eviction/decompression, genuine MM REQ_OP_WRITE|REQ_SWAP, loaded DM
+authority, still-owned RAM backing or on-kernel swap-in. No input can turn a
+source/mock/JSON/host-metadata match into a loaded PASS. Run the script's
+--self-test and explicit --inspect-host refusal; no sudo, module, mapper,
+pressure, physical trial or new codec/RAW format is authorized. Phase A
+BLOCKED, Phase B forced RAW bypass and direct compressed transport DISABLED.
