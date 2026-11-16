@@ -14026,3 +14026,51 @@ performance only and is not this physical gate. A real retrial requires
 separate owner review of private original observations and authorization.
 Phase A BLOCKED; Phase B forced RAW bypass and direct compressed handoff
 DISABLED. Current RAW is the original uncompressed 4096-byte page.
+
+## Round 021 — Agent 4 follow-up: finite FILL recheck and no late admission
+
+This distinct source-function hardening complements the Round 021 first-cause
+parser fix above. The dedicated-cgroup BYTES must equal the run-owned mapper's
+KiB delta from the original immutable baseline multiplied by 1024. After both
+FILL oracle receipts and positive worker/cgroup ownership proof, a mismatch
+remains a failure unless two consecutive identical and exact sequential
+counter pairs match within the original min(3-second, whole-workload) deadline.
+The new post-sleep/post-read deadline checks prevent a matching pair obtained
+after the bound from being admitted. No tolerance, baseline reset, extra
+sampling interval or physical operation is introduced.
+
+The source rejects bool, negative, oversized unsigned counters and overflow
+of KiB-to-byte conversion before accepting results. Timeout observations
+retain initial/current counters and signed gap with one bounded observational
+`classification`: `mapper_excess`, `cgroup_excess`, `sign_changed`,
+`unconfirmed_matching_pair` or `no_recheck_sample`. No class attributes
+foreign ownership or kernel cause. The probe independently validates
+source-unit arithmetic, sample/time, initial mismatch and safe whitelist;
+the official runner accepts either the earlier 10-field numeric schema or
+the new 11-field classified extension and independently validates class,
+bounds and arithmetic. Both preserve original source nonzero exit and the
+private 0600 first-error/cleanup record. No evidence may upgrade to PASS.
+
+The three committed rootless source suites include real function mocks
+for immediate exact match, two identical matches, alternating exact but
+non-identical snapshots, persistent/signed mismatch, no-sample timeout,
+deadline crossing, OOM/PSI guard, missing mapper and invalid signed/boolean/
+overflow numbers; probe redaction and classified console/schema rejection;
+and official synthetic physical exit=3. Execute in a normal source checkout:
+
+```sh
+python3 -B tests/runtime/native/primary-real-swap-test.py -k round021 -v
+python3 -B tests/runtime/native/physical-swap-probe-test.py -k round021 -v
+python3 -B tests/runtime/native/test-report-test.py -k round021 -v
+python3 -m py_compile tests/tools/qualify-primary-real-swap.py tests/tools/physical-swap-probe.py tests/tools/run-tests.py tests/runtime/native/primary-real-swap-test.py tests/runtime/native/physical-swap-probe-test.py tests/runtime/native/test-report-test.py
+git diff --check HEAD^ HEAD
+```
+
+Rootless extracted code is a **development fixture**, not execution of the
+committed imported source or physical acceptance. Future operator review
+requires the original owner private 0600 counters, cgroup/mapper independent
+observations, worker/PSI/OOM status and verified complete recovery; no physical
+retrial in this round. Optional `SCENARIOS=fast-mixed REPEAT=1 make fast_test`
+is RAM/null_blk performance only, not real physical attribution. Phase A
+BLOCKED, Phase B RAW bypass and direct compressed handoff DISABLED.
+RAW remains the original uncompressed 4096-byte page.

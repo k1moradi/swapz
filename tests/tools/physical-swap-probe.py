@@ -4097,6 +4097,61 @@ def _bounded_release_lifetime(observation):
     }
 
 
+def _bounded_swap_attribution(observation):
+    """Whitelist strictly coherent sequential swap counters from the first error.
+
+    These two readers are non-atomic and cannot establish page ownership.
+    The source-owned initial mismatch is required; never print arbitrary
+    exception attributes, device identities or private strings.
+    """
+    if not isinstance(observation, dict):
+        return None
+    fields = (
+        "round_index", "expected_baseline_used_kib",
+        "initial_cgroup_swap_bytes", "initial_mapper_used_kib",
+        "cgroup_swap_bytes", "mapper_used_kib",
+        "mapper_used_delta_kib", "gap_bytes",
+        "recheck_samples", "recheck_elapsed_usec")
+    numbers = {key: observation.get(key) for key in fields}
+    if any(type(numbers[key]) is not int or not (
+            (-MAX_BLOCK_COUNTER if key == "gap_bytes" else 0)
+            <= numbers[key] <= MAX_BLOCK_COUNTER) for key in fields):
+        return None
+    baseline = numbers["expected_baseline_used_kib"]
+    initial_used = numbers["initial_mapper_used_kib"]
+    current_used = numbers["mapper_used_kib"]
+    initial_charge = numbers["initial_cgroup_swap_bytes"]
+    current_charge = numbers["cgroup_swap_bytes"]
+    samples = numbers["recheck_samples"]
+    if (not 1 <= numbers["round_index"] <= 2 or
+            not 0 <= samples <= 256 or
+            not 0 <= numbers["recheck_elapsed_usec"] <= 10_000_000 or
+            min(initial_used, current_used) < baseline):
+        return None
+    initial_delta = initial_used - baseline
+    current_delta = current_used - baseline
+    if (initial_delta > MAX_BLOCK_COUNTER // 1024 or
+            current_delta > MAX_BLOCK_COUNTER // 1024 or
+            current_delta != numbers["mapper_used_delta_kib"] or
+            current_delta * 1024 - current_charge != numbers["gap_bytes"]):
+        return None
+    initial_gap = initial_delta * 1024 - initial_charge
+    last_gap = numbers["gap_bytes"]
+    if (initial_gap == 0 or
+            (samples == 0 and
+             (initial_used != current_used or initial_charge != current_charge))):
+        return None
+    classification = (
+        "no_recheck_sample" if samples == 0 else
+        "unconfirmed_matching_pair" if last_gap == 0 else
+        "sign_changed" if (initial_gap > 0 > last_gap or
+                           initial_gap < 0 < last_gap) else
+        "mapper_excess" if last_gap > 0 else "cgroup_excess")
+    if observation.get("classification", classification) != classification:
+        return None
+    return {**numbers, "classification": classification}
+
+
 def _emit_algorithm_workload_failure(error, phase="anonymous_workload"):
     """Expose only finite producer refusal classes, never private exception text."""
     reasons = {
@@ -4170,25 +4225,10 @@ def _emit_algorithm_workload_failure(error, phase="anonymous_workload"):
             if "release_lifetime" in record or "release" in record:
                 break
         if record["reason"] == "swap_attribution":
-            attribution = getattr(current, "attribution_observation", None)
-            if isinstance(attribution, dict):
-                fields = (
-                    "round_index", "expected_baseline_used_kib",
-                    "initial_cgroup_swap_bytes", "initial_mapper_used_kib",
-                    "cgroup_swap_bytes", "mapper_used_kib",
-                    "mapper_used_delta_kib", "gap_bytes",
-                    "recheck_samples", "recheck_elapsed_usec")
-                bounded = {}
-                for key in fields:
-                    value = attribution.get(key)
-                    lower = (-MAX_BLOCK_COUNTER if key == "gap_bytes" else 0)
-                    bounded[key] = (
-                        value if type(value) is int and
-                        lower <= value <= MAX_BLOCK_COUNTER else None)
-                if all(bounded[key] is not None for key in (
-                        "expected_baseline_used_kib",
-                        "cgroup_swap_bytes", "mapper_used_kib", "gap_bytes")):
-                    record["attribution"] = bounded
+            attribution = _bounded_swap_attribution(
+                getattr(current, "attribution_observation", None))
+            if attribution is not None:
+                record["attribution"] = attribution
                 break
         observation = getattr(current, "pressure_observation", None)
         if isinstance(observation, dict) and record["reason"] == "memory_pressure":

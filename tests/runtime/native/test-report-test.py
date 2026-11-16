@@ -6330,7 +6330,8 @@ class ReportContract(unittest.TestCase):
     def assert_official_physical_debug(self, *, readback=False, workload_phase=None,
                                       log_failure=False, pressure=False,
                                       activation_refusal=False, shared_root_refusal=False,
-                                      oracle_terminal=False, slot_lifetime=False):
+                                      oracle_terminal=False, slot_lifetime=False,
+                                      attribution=False):
         source_sha = "a" * 40
         report_snapshots = []
         private_output = mock.Mock(return_value="build/tests/physical-fixture.private.log")
@@ -6399,6 +6400,18 @@ class ReportContract(unittest.TestCase):
                                  "cgroup_swap_bytes": 4096, "mapper_used_kib": 16},
                     "last": {"elapsed_usec": 60_000,
                              "cgroup_swap_bytes": 0, "mapper_used_kib": 16}})
+        if attribution:
+            self.assertEqual(workload_phase, "anonymous_workload")
+            error_context.update(
+                reason="swap_attribution",
+                attribution={
+                    "round_index": 1, "classification": "mapper_excess",
+                    "expected_baseline_used_kib": 12,
+                    "initial_cgroup_swap_bytes": 4096,
+                    "initial_mapper_used_kib": 20,
+                    "cgroup_swap_bytes": 4096, "mapper_used_kib": 20,
+                    "mapper_used_delta_kib": 8, "gap_bytes": 4096,
+                    "recheck_samples": 60, "recheck_elapsed_usec": 3_000_000})
         physical_exit = (2 if workload_phase == "anonymous_preflight" or
                          activation_refusal or shared_root_refusal else 3)
 
@@ -6505,6 +6518,13 @@ class ReportContract(unittest.TestCase):
             self.assertIn("owned_workers=0", console)
             self.assertIn("Overall qualification: FAIL", console)
             self.assertNotIn("private_root_identity", console)
+        if attribution:
+            self.assertIn("reason=swap_attribution", console)
+            self.assertIn("observational_class=mapper_excess", console)
+            self.assertIn("initial_cgroup_bytes=4096", console)
+            self.assertIn("signed_gap_bytes=4096", console)
+            self.assertIn("Overall qualification: FAIL", console)
+            self.assertNotIn("private_root_identity", console)
         if oracle_terminal:
             self.assertIn("reason=oracle_child_exit", console)
             self.assertIn("expected_event=WAITING child_exit=2", console)
@@ -6536,6 +6556,11 @@ class ReportContract(unittest.TestCase):
         if physical_exit == 3:
             self.assertIn("Physical trial cleanup:", console)
         self.assertIn(f"Overall qualification: {expected_overall}", console)
+
+    def test_round021_classified_attribution_official_exit_is_unchanged(self):
+        # Synthetic full official runner path, not the owner's physical device.
+        self.assert_official_physical_debug(
+            workload_phase="anonymous_workload", attribution=True)
 
     def test_source_admission_diagnostic_rejects_untrusted_privileged_output(self):
         prefix = "PHYSICAL_ALGORITHM_SOURCE_ADMISSION="
@@ -13248,6 +13273,55 @@ class Round021SwapAttributionReportingContract(unittest.TestCase):
         child_exit_code = 2  # Original physical failure remains authoritative.
         self.assertNotEqual(child_exit_code, 0)
         self.assertEqual(self.parse(record)["reason"], "swap_attribution")
+
+
+    def test_source_classification_extension_preserves_legacy_and_refuses_mutations(self):
+        original = self.observation()
+        legacy = self.diagnostic(original)
+        self.assertEqual(self.parse(legacy), legacy)
+        cases = (
+            ("mapper_excess", 4096, 20, 4096, 20, 4096, 60),
+            ("cgroup_excess", 8192, 16, 8192, 16, -4096, 60),
+            ("sign_changed", 4096, 20, 8192, 16, -4096, 3),
+            ("unconfirmed_matching_pair", 4096, 20, 4096, 16, 0, 1),
+            ("no_recheck_sample", 4096, 20, 4096, 20, 4096, 0),
+        )
+        for label, first_charge, first_used, charge, used, gap, samples in cases:
+            with self.subTest(classification=label):
+                evidence = {
+                    **original, "classification": label,
+                    "initial_cgroup_swap_bytes": first_charge,
+                    "initial_mapper_used_kib": first_used,
+                    "cgroup_swap_bytes": charge,
+                    "mapper_used_kib": used,
+                    "mapper_used_delta_kib": used - 12,
+                    "gap_bytes": gap, "recheck_samples": samples}
+                record = self.diagnostic(evidence)
+                self.assertEqual(self.parse(record), record)
+                for invalid in (
+                        {"classification": "private/system/path"},
+                        {"classification": False},
+                        {"gap_bytes": gap + 1},
+                        {"recheck_samples": 257},
+                        {"recheck_elapsed_usec": 10_000_001},
+                        {"round_index": False},
+                        {"initial_mapper_used_kib": 1 << 64},
+                        {"private_path": "/private/danger"}):
+                    with self.subTest(invalid=invalid):
+                        self.assertIsNone(self.parse(
+                            self.diagnostic({**evidence, **invalid})))
+        missing = {
+            "schema": "swapz-algorithm-workload-diagnostic-v1",
+            "phase": "anonymous_workload",
+            "gate": "bounded_primary_workload",
+            "reason": "swap_attribution", "original_errno": None}
+        self.assertEqual(self.parse(missing), missing)
+        # A separate slot-release/raw-floor reason may not borrow this data.
+        for reason in ("swap_slot_release", "raw_swap_floor"):
+            self.assertIsNone(self.parse({
+                **self.diagnostic({**original, "classification": "mapper_excess"}),
+                "reason": reason}))
+
 
 if __name__ == "__main__":
     (ROOT / "build/tests").mkdir(parents=True, exist_ok=True)

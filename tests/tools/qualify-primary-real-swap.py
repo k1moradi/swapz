@@ -3655,10 +3655,23 @@ def _confirm_exact_swap_attribution(
     The guarded wait cannot run past either the oracle deadline or its own
     short attribution bound.
     """
+    # Reject malformed source readings before arithmetic or promotion. In
+    # particular, Python bool is an int subclass and arbitrary-size integers
+    # must not become the official finite failure observation.
+    maximum_counter = (1 << 64) - 1
+    if (type(round_index) is not int or not 1 <= round_index <= REUSE_ROUNDS or
+            any(type(value) is not int or not 0 <= value <= maximum_counter
+                for value in (expected_baseline_used_kib, swap_current_bytes,
+                              mapper_used_kib))):
+        raise QualificationFailure("swap attribution initial counters are malformed")
     if mapper_used_kib < expected_baseline_used_kib:
         raise QualificationFailure("mapper swap usage fell below the round baseline")
-    if (mapper_used_kib - expected_baseline_used_kib) * 1024 == swap_current_bytes:
-        return swap_current_bytes, mapper_used_kib - expected_baseline_used_kib
+    initial_delta_kib = mapper_used_kib - expected_baseline_used_kib
+    if initial_delta_kib > maximum_counter // 1024:
+        raise QualificationFailure("swap attribution mapper delta exceeds byte range")
+    initial_gap_bytes = initial_delta_kib * 1024 - swap_current_bytes
+    if initial_gap_bytes == 0:
+        return swap_current_bytes, initial_delta_kib
 
     recheck_started = time.monotonic()
     recheck_deadline = min(
@@ -3670,6 +3683,9 @@ def _confirm_exact_swap_attribution(
     while time.monotonic() < recheck_deadline:
         guard()
         time.sleep(min(0.05, max(0.0, recheck_deadline - time.monotonic())))
+        # An expired deadline cannot be waived by a late matching read.
+        if time.monotonic() >= recheck_deadline:
+            break
         # Neither read is atomic with the other. Require two unchanged,
         # exact matching snapshots; never round or accept an error margin.
         swap_current_bytes = _read_uint(cgroup / "memory.swap.current")
@@ -3677,32 +3693,49 @@ def _confirm_exact_swap_attribution(
         if row is None:
             raise QualificationFailure("expected mapper vanished during swap-out")
         mapper_used_kib = row.used_kib
-        if mapper_used_kib < expected_baseline_used_kib:
-            raise QualificationFailure("mapper swap usage fell below the round baseline")
+        if (type(swap_current_bytes) is not int or
+                not 0 <= swap_current_bytes <= maximum_counter or
+                type(mapper_used_kib) is not int or
+                not expected_baseline_used_kib <= mapper_used_kib <= maximum_counter):
+            raise QualificationFailure("swap attribution recheck counters are malformed")
+        mapper_delta_kib = mapper_used_kib - expected_baseline_used_kib
+        if mapper_delta_kib > maximum_counter // 1024:
+            raise QualificationFailure("swap attribution mapper delta exceeds byte range")
+        gap_bytes = mapper_delta_kib * 1024 - swap_current_bytes
         samples += 1
         matching_pair = (swap_current_bytes, mapper_used_kib)
-        if ((mapper_used_kib - expected_baseline_used_kib) * 1024 ==
-                swap_current_bytes):
+        if gap_bytes == 0:
             if matching_pair == previous_matching_pair:
-                return (swap_current_bytes,
-                        mapper_used_kib - expected_baseline_used_kib)
+                if time.monotonic() >= recheck_deadline:
+                    break
+                return swap_current_bytes, mapper_delta_kib
             previous_matching_pair = matching_pair
         else:
             previous_matching_pair = None
+
+    # A matching *single* final sample is not an ownership proof.
+    last_gap_bytes = ((mapper_used_kib - expected_baseline_used_kib) * 1024 -
+                      swap_current_bytes)
+    classification = (
+        "no_recheck_sample" if samples == 0 else
+        "unconfirmed_matching_pair" if last_gap_bytes == 0 else
+        "sign_changed" if (initial_gap_bytes > 0 > last_gap_bytes or
+                           initial_gap_bytes < 0 < last_gap_bytes) else
+        "mapper_excess" if last_gap_bytes > 0 else "cgroup_excess")
 
     failure = Blocked(
         "exact mapper usage and dedicated-cgroup swap charge differ; "
         "traffic attribution or mapper ownership is ambiguous")
     failure.attribution_observation = {
         "round_index": round_index,
+        "classification": classification,
         "expected_baseline_used_kib": expected_baseline_used_kib,
         "initial_cgroup_swap_bytes": initial_swap_current,
         "initial_mapper_used_kib": initial_mapper_used,
         "cgroup_swap_bytes": swap_current_bytes,
         "mapper_used_kib": mapper_used_kib,
         "mapper_used_delta_kib": mapper_used_kib - expected_baseline_used_kib,
-        "gap_bytes": ((mapper_used_kib - expected_baseline_used_kib) * 1024 -
-                      swap_current_bytes),
+        "gap_bytes": last_gap_bytes,
         "recheck_samples": samples,
         "recheck_elapsed_usec": int(
             (time.monotonic() - recheck_started) * 1_000_000),

@@ -8120,5 +8120,78 @@ class PhysicalSwapProbeTests(unittest.TestCase):
                             compare_raw=True)
 
 
+
+    def test_round021_exact_attribution_probe_first_error_and_strict_numbers(self):
+        first = RuntimeError(
+            "exact mapper usage and dedicated-cgroup swap charge differ; "
+            "traffic attribution or mapper ownership is ambiguous")
+        first.attribution_observation = {
+            "round_index": 1, "classification": "sign_changed",
+            "expected_baseline_used_kib": 12,
+            "initial_cgroup_swap_bytes": 4096, "initial_mapper_used_kib": 20,
+            "cgroup_swap_bytes": 8192, "mapper_used_kib": 16,
+            "mapper_used_delta_kib": 4, "gap_bytes": -4096,
+            "recheck_samples": 4, "recheck_elapsed_usec": 200_000,
+            "private_path": "/root/SECRET"}
+        wrapped = RuntimeError(
+            str(first) + "; cleanup also failed: /root/SECRET")
+        wrapped.__cause__ = first
+
+        def emit():
+            output = io.StringIO()
+            with mock.patch.object(probe.sys, "stderr", output):
+                result = probe._emit_algorithm_workload_failure(wrapped)
+            self.assertNotIn("SECRET", output.getvalue())
+            return result
+
+        valid = emit()
+        self.assertEqual(valid["reason"], "swap_attribution")
+        self.assertIsNone(valid["original_errno"])
+        self.assertEqual(valid["attribution"]["classification"], "sign_changed")
+        self.assertNotIn("private_path", valid["attribution"])
+        for mutation in (
+                {"classification": "mapper_excess"},
+                {"mapper_used_delta_kib": 5},
+                {"gap_bytes": -4095},
+                {"recheck_samples": True}, {"recheck_samples": -1},
+                {"recheck_samples": 257},
+                {"recheck_elapsed_usec": 30_000_001},
+                {"initial_cgroup_swap_bytes": True},
+                {"initial_mapper_used_kib": 1 << 64},
+                {"round_index": False},
+                {"expected_baseline_used_kib": -1},
+                {"mapper_used_kib": 8},
+                {"cgroup_swap_bytes": "/root/SECRET"}):
+            with self.subTest(mutation=mutation):
+                saved = first.attribution_observation
+                try:
+                    first.attribution_observation = {**saved, **mutation}
+                    record = emit()
+                    self.assertEqual(record["reason"], "swap_attribution")
+                    self.assertNotIn("attribution", record)
+                finally:
+                    first.attribution_observation = saved
+
+    def test_round021_no_recheck_attribution_is_not_clean_or_release(self):
+        first = RuntimeError(
+            "exact mapper usage and dedicated-cgroup swap charge differ; "
+            "traffic attribution or mapper ownership is ambiguous")
+        first.attribution_observation = {
+            "round_index": 2, "expected_baseline_used_kib": 12,
+            "initial_cgroup_swap_bytes": 4096, "initial_mapper_used_kib": 20,
+            "cgroup_swap_bytes": 4096, "mapper_used_kib": 20,
+            "mapper_used_delta_kib": 8, "gap_bytes": 4096,
+            "recheck_samples": 0, "recheck_elapsed_usec": 0}
+        output = io.StringIO()
+        with mock.patch.object(probe.sys, "stderr", output):
+            record = probe._emit_algorithm_workload_failure(first)
+        self.assertEqual(record["attribution"]["classification"],
+                         "no_recheck_sample")
+        self.assertNotIn("PASS", output.getvalue())
+        self.assertNotIn("release", record)
+
+
+
+
 if __name__ == "__main__":
     unittest.main()

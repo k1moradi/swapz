@@ -5888,5 +5888,142 @@ class PrimaryRealSwapContracts(unittest.TestCase):
                                   raw_linux_swap=True)
 
 
+
+    def test_round021_exact_attribution_initial_schema_and_success(self):
+        device = (253, 4)
+        guard = mock.Mock()
+        self.assertEqual(qualify._confirm_exact_swap_attribution(
+            Path("/synthetic"), device, 12, 4096, 16,
+            100.0, guard, 1), (4096, 4))
+        guard.assert_not_called()
+        for baseline, charge, used, index in (
+                (12, True, 16, 1), (12, -1, 16, 1),
+                (12, 1 << 64, 16, 1), (12, 4096, False, 1),
+                (12, 4096, -1, 1), (12, 4096, 1 << 64, 1),
+                (False, 4096, 16, 1), (12, 4096, 16, False),
+                (12, 4096, 16, 3)):
+            with self.subTest(values=(baseline, charge, used, index)):
+                with self.assertRaisesRegex(
+                        qualify.QualificationFailure, "initial counters are malformed"):
+                    qualify._confirm_exact_swap_attribution(
+                        Path("/synthetic"), device, baseline, charge, used,
+                        100.0, guard, index)
+        with self.assertRaisesRegex(
+                qualify.QualificationFailure, "delta exceeds byte range"):
+            qualify._confirm_exact_swap_attribution(
+                Path("/synthetic"), device, 0, 0,
+                (1 << 64) // 1024 + 1, 100.0, guard, 1)
+
+    def test_round021_exact_attribution_requires_two_identical_rechecks(self):
+        device, baseline = (253, 4), 12
+        clock = [0.0]
+        def monotonic():
+            clock[0] += 0.025
+            return clock[0]
+        with mock.patch.object(qualify.time, "monotonic", side_effect=monotonic), \
+             mock.patch.object(qualify.time, "sleep"), \
+             mock.patch.object(qualify, "_read_uint", side_effect=[4096, 4096]), \
+             mock.patch.object(qualify, "read_swap_rows", return_value=[]), \
+             mock.patch.object(qualify, "_row_for_device",
+                               return_value=SimpleNamespace(used_kib=16)):
+            guard = mock.Mock()
+            self.assertEqual(qualify._confirm_exact_swap_attribution(
+                Path("/synthetic"), device, baseline, 4096, 20,
+                10.0, guard, 1), (4096, 4))
+        self.assertEqual(guard.call_count, 2)
+        reads = [0]
+        def alternating_charge(_path):
+            reads[0] += 1
+            return 4096 if reads[0] % 2 else 8192
+        def alternating_mapper(_rows, _device):
+            return SimpleNamespace(used_kib=16 if reads[0] % 2 else 20)
+        clock[0] = 0.0
+        with mock.patch.object(qualify.time, "monotonic", side_effect=monotonic), \
+             mock.patch.object(qualify.time, "sleep"), \
+             mock.patch.object(qualify, "_read_uint",
+                               side_effect=alternating_charge), \
+             mock.patch.object(qualify, "read_swap_rows", return_value=[]), \
+             mock.patch.object(qualify, "_row_for_device",
+                               side_effect=alternating_mapper):
+            with self.assertRaises(qualify.Blocked) as failed:
+                qualify._confirm_exact_swap_attribution(
+                    Path("/synthetic"), device, baseline, 4096, 20,
+                    10.0, mock.Mock(), 1)
+        self.assertEqual(failed.exception.attribution_observation[
+            "classification"], "unconfirmed_matching_pair")
+        self.assertEqual(failed.exception.attribution_observation["gap_bytes"], 0)
+
+    def test_round021_exact_attribution_gap_classes_and_timeout(self):
+        device, baseline = (253, 4), 12
+        for label, first_charge, first_used, charge, used, gap in (
+                ("mapper_excess", 4096, 20, 4096, 20, 4096),
+                ("cgroup_excess", 8192, 16, 8192, 16, -4096),
+                ("sign_changed", 4096, 20, 8192, 16, -4096)):
+            with self.subTest(label=label):
+                clock = [0.0]
+                def monotonic():
+                    clock[0] += 0.05
+                    return clock[0]
+                with mock.patch.object(qualify.time, "monotonic",
+                                       side_effect=monotonic), \
+                     mock.patch.object(qualify.time, "sleep"), \
+                     mock.patch.object(qualify, "_read_uint", return_value=charge), \
+                     mock.patch.object(qualify, "read_swap_rows", return_value=[]), \
+                     mock.patch.object(qualify, "_row_for_device",
+                                       return_value=SimpleNamespace(used_kib=used)):
+                    with self.assertRaises(qualify.Blocked) as failed:
+                        qualify._confirm_exact_swap_attribution(
+                            Path("/synthetic"), device, baseline,
+                            first_charge, first_used, 1.0, mock.Mock(), 2)
+                self.assertEqual(failed.exception.attribution_observation[
+                    "classification"], label)
+                self.assertEqual(failed.exception.attribution_observation[
+                    "gap_bytes"], gap)
+        reader = mock.Mock(return_value=4096)
+        with mock.patch.object(qualify.time, "monotonic",
+                               side_effect=[0.0, 0.0, 0.01, 3.0, 3.0]), \
+             mock.patch.object(qualify.time, "sleep"), \
+             mock.patch.object(qualify, "_read_uint", reader):
+            with self.assertRaises(qualify.Blocked) as failed:
+                qualify._confirm_exact_swap_attribution(
+                    Path("/synthetic"), device, baseline, 4096, 20,
+                    10.0, mock.Mock(), 1)
+        reader.assert_not_called()
+        self.assertEqual(failed.exception.attribution_observation[
+            "classification"], "no_recheck_sample")
+        self.assertEqual(failed.exception.attribution_observation[
+            "recheck_samples"], 0)
+
+    def test_round021_exact_attribution_guard_and_counter_errors(self):
+        device, baseline = (253, 4), 12
+        for error in (qualify.Blocked("OOM guard stopped"),
+                      qualify.QualificationFailure("PSI guard stopped")):
+            with self.subTest(error=error), \
+                 mock.patch.object(qualify.time, "sleep"):
+                with self.assertRaises(type(error)):
+                    qualify._confirm_exact_swap_attribution(
+                        Path("/synthetic"), device, baseline, 4096, 20,
+                        time.monotonic() + 1.0,
+                        mock.Mock(side_effect=error), 1)
+        for charge, row in (
+                (4096, None), (4096, SimpleNamespace(used_kib=8)),
+                (True, SimpleNamespace(used_kib=20)),
+                (-1, SimpleNamespace(used_kib=20)),
+                (1 << 64, SimpleNamespace(used_kib=20)),
+                (4096, SimpleNamespace(used_kib=True))):
+            with self.subTest(charge=charge, row=row), \
+                 mock.patch.object(qualify.time, "sleep"), \
+                 mock.patch.object(qualify, "_read_uint",
+                                   return_value=charge), \
+                 mock.patch.object(qualify, "read_swap_rows", return_value=[]), \
+                 mock.patch.object(qualify, "_row_for_device", return_value=row):
+                with self.assertRaises(qualify.QualificationFailure):
+                    qualify._confirm_exact_swap_attribution(
+                        Path("/synthetic"), device, baseline, 4096, 20,
+                        time.monotonic() + 0.3, mock.Mock(), 1)
+
+
+
+
 if __name__ == "__main__":
     unittest.main()

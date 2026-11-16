@@ -4496,11 +4496,17 @@ def parse_algorithm_pageout_diagnostic(error_output):
                 "cgroup_swap_bytes", "mapper_used_kib",
                 "mapper_used_delta_kib", "gap_bytes",
                 "recheck_samples", "recheck_elapsed_usec"}
+            # The original ten-field diagnostic remains valid. Newly
+            # source-derived observational classes require an exact, independently
+            # validated extension; never accept arbitrary extra data.
+            with_class = (isinstance(attribution, dict) and
+                          "classification" in attribution)
             maximum = (1 << 64) - 1
             if (diagnostic["reason"] != "swap_attribution" or
                     diagnostic["phase"] != "anonymous_workload" or
                     not isinstance(attribution, dict) or
-                    set(attribution) != names or
+                    set(attribution) != (names | {"classification"}
+                                         if with_class else names) or
                     any(type(attribution[name]) is not int for name in names)):
                 return None
             baseline = attribution["expected_baseline_used_kib"]
@@ -4514,13 +4520,28 @@ def parse_algorithm_pageout_diagnostic(error_output):
                     not all(0 <= attribution[name] <= maximum
                             for name in names - {"gap_bytes"}) or
                     not -maximum <= gap <= maximum or
-                    not 0 <= attribution["recheck_samples"] <= 65536 or
+                    not 0 <= attribution["recheck_samples"] <= 256 or
                     not 0 <= attribution["recheck_elapsed_usec"] <= 10_000_000 or
                     initial_mapper < baseline or mapper < baseline or
+                    (initial_mapper - baseline) > maximum // 1024 or
+                    delta > maximum // 1024 or
                     delta != mapper - baseline or
                     (initial_mapper - baseline) * 1024 == initial_charge or
                     gap != delta * 1024 - charge):
                 return None
+            if with_class:
+                initial_gap = (initial_mapper - baseline) * 1024 - initial_charge
+                if (attribution["recheck_samples"] == 0 and
+                        (charge != initial_charge or mapper != initial_mapper)):
+                    return None
+                expected = (
+                    "no_recheck_sample" if attribution["recheck_samples"] == 0 else
+                    "unconfirmed_matching_pair" if gap == 0 else
+                    "sign_changed" if (initial_gap > 0 > gap or
+                                       initial_gap < 0 < gap) else
+                    "mapper_excess" if gap > 0 else "cgroup_excess")
+                if attribution["classification"] != expected:
+                    return None
         if "release" in diagnostic:
             release = diagnostic["release"]
             release_fields = {
@@ -4783,7 +4804,9 @@ def print_algorithm_workload_diagnostic(diagnostic):
               f"mapper_delta_kib={attribution['mapper_used_delta_kib']} "
               f"signed_gap_bytes={attribution['gap_bytes']} "
               f"recheck_samples={attribution['recheck_samples']} "
-              f"recheck_elapsed_usec={attribution['recheck_elapsed_usec']}",
+              f"recheck_elapsed_usec={attribution['recheck_elapsed_usec']}"
+              + (f" observational_class={attribution['classification']}"
+                 if "classification" in attribution else ""),
               flush=True)
         print("        Next: inspect the original private first-error log and "
               "verified recovery; no nonzero gap grants physical PASS",
