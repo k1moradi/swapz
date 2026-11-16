@@ -1,0 +1,33 @@
+name: Round023 source-only zswap compressed cross-ABI
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'tests/tools/stage-pinned-linux-zswap-origin.py'
+      - 'tests/runtime/native/pinned-linux-zswap-compressed-handoff-test.py'
+      - 'tests/runtime/native/zswap-compressed-cross-abi-test.py'
+      - 'tests/runtime/native/fixtures/round023-cross-abi-*.c'
+      - 'src/kernel/zswap-import-codec.h'
+      - 'src/kernel/codec.c'
+      - '.github/workflows/zswap-compressed-cross-abi.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  independent-rootless-c-abi:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install build-only compiler/codec dependencies
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y --no-install-recommends \
+            gcc clang liblz4-dev libssl-dev python3
+      - name: Show exact source and execute source-only interoperability
+        run: |
+          git rev-parse HEAD
+          python3 -B tests/runtime/native/zswap-compressed-cross-abi-test.py -v

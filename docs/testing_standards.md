@@ -14217,3 +14217,44 @@ the concurrently published producer/consumer source sections.
 No MM/DM active path, SWAPSPACE2 media, 4096 RAW or owner safety
 gate was modified. Handoff and Phase B stay DISABLED; Phase A
 BLOCKED, loaded/physical trials NOT_RUN.
+
+
+## Round 023 — Agent 4: independent frozen producer-to-consumer ABI cross-test
+
+The separate tests/runtime/native/zswap-compressed-cross-abi-test.py
+imports the EXISTING compile-disabled Round022 pinned producer C literal,
+including its host lifetime shims, and compiles it together with the
+already-published standalone src/kernel/zswap-import-codec.h and ORIGINAL
+src/kernel/codec.c. The independent C fixture explicitly maps the source
+swap slot+store generation to a DIFFERENT synthetic DM logical page,
+generation and GC epoch. This adapter is MOCK/UNTRUSTED, not a kernel ABI;
+the ordinary 4096-byte REQ_SWAP BIO and origin scalar are never treated as
+compressed data or a cross-component pointer. Real source carrier/slot
+authentication, clone/split/reissue ownership and loaded kernel remain
+UNIMPLEMENTED.
+
+GCC and Clang are required with -Wall/-Wextra/-Werror/-Wconversion/
+-Wshadow and ASan/UBSan. The test creates a real LZ4 block from an
+independently known 4096-byte plaintext, exercises the real disabled
+producer's store-time SHA fixture, xarray identity, immutable zpool copy,
+once-only submit/release and source CRC32C, maps through explicit fake
+identities, and invokes actual swapz LZ4 decoder plus production
+swapz_crc32c_bytes and OpenSSL original-page SHA256/memcmp. The independent
+nine-byte Castagnoli known vector must yield canonical CRC32C 0xe3069283;
+Linux raw crc32c(0) yields incompatible 0x58e3fa20 and old IEEE CRC32
+is separately rejected. Mutation cases cover false source authority,
+slot/ABA/stale store generation, wrong DM generation/epoch, length 0/>3568,
+codec/version/dictionary, original SHA, CRC/payload, failed/partial lower
+read, missing durable WRITE/mapping, upper ACK 0/2, teardown, aliased
+scratch/output and premature source release/double finish. No rejected
+record may expose partial output or successful ACK.
+
+The source-only CI workflow zswap-compressed-cross-abi.yml runs those
+committed files in an isolated ubuntu runner with build-only LZ4/crypto
+dependencies, does not load a kernel module or touch swap/physical media.
+A fixture PASS is expressly NOT a genuine modified Linux store/eviction,
+authenticated MM-to-BIO-to-loaded DM compressed handoff, nor loaded original
+4096 swap-in. Production SWAPSPACE2 header/UUID unchanged; current RAW is
+original UNCOMPRESSED 4096; codec/generation/GC metadata remains bounded
+volatile RAM. Phase A BLOCKED; Phase B forced RAW bypass DISABLED;
+direct compressed transport DISABLED; LOADED/PHYSICAL NOT_RUN.
