@@ -143,6 +143,20 @@ jobs:
               python3 linux/tools/testing/kunit/kunit.py run --arch=um \
               --build_dir "$uml_dir" \
               --kunitconfig "$config" --jobs=2 --make_options=W=1 --raw_output
+            # The shared run_checked log is overwritten by the NEXT command.
+            # Capture only bytes emitted by the just-finished real UML run.
+            phase=capture_real_tap
+            captured="$evidence/$profile-kunit-output.log"
+            [[ -f "$log" && ! -L "$log" && -s "$log" ]]
+            [[ "$(wc -c < "$log")" -le 8388608 ]]
+            [[ ! -e "$captured" && ! -L "$captured" ]]
+            # noclobber uses O_EXCL: stale files and symlinks cannot be reused.
+            (umask 077; set -C; cat -- "$log" > "$captured")
+            [[ -f "$captured" && ! -L "$captured" && -s "$captured" ]]
+            [[ "$(wc -c < "$captured")" -le 8388608 ]]
+            captured_sha256="$(sha256sum "$captured" | cut -d' ' -f1)"
+            chmod 0400 -- "$captured"
+            printf 'kunit_output_sha256=%s\n' "$captured_sha256" >> "$manifest"
             phase=verify_uml_config
             run_checked verify_uml_config python3 -B \
               swapz/tests/runtime/native/pinned-linux-kunit-uml-config-test.py \
@@ -171,15 +185,12 @@ jobs:
             [[ -s "$uml_dir/linux" ]]
             printf 'uml_kernel_sha256=%s\n' \
               "$(sha256sum "$uml_dir/linux" | cut -d' ' -f1)" >> "$manifest"
-            # The raw stream comes directly from exit-zero kunit.py, not
-            # a shell echo. Store bounded evidence before the verifier runs.
-            phase=capture_real_tap
-            [[ -s "$log" ]]
-            [[ "$(wc -c < "$log")" -le 8388608 ]]
-            captured="$evidence/$profile-kunit-output.log"
-            cp -- "$log" "$captured"
-            printf 'kunit_output_sha256=%s\n' \
-              "$(sha256sum "$captured" | cut -d' ' -f1)" >> "$manifest"
+            # Config verification reused "$log"; the owned TAP bytes never
+            # do. Refuse any post-capture mutation before the five-case gate.
+            phase=verify_captured_tap_identity
+            [[ -f "$captured" && ! -L "$captured" && -s "$captured" ]]
+            [[ "$(wc -c < "$captured")" -le 8388608 ]]
+            [[ "$(sha256sum "$captured" | cut -d' ' -f1)" == "$captured_sha256" ]]
             run_checked verify_real_tap python3 -B \
               swapz/tests/runtime/native/pinned-linux-zswap-origin-stage-test.py \
               --verify-kunit-tap "$captured"

@@ -4,8 +4,11 @@
 from __future__ import annotations
 
 import importlib.util
+import hashlib
 import json
 import re
+import subprocess
+import textwrap
 from pathlib import Path
 import sys
 import tempfile
@@ -120,7 +123,13 @@ def verify_kunit_workflow_contract(contents: str) -> None:
         "--make_options=W=1",
         'grep -Fxq CONFIG_ZSWAP=y "$uml_dir/.config"',
         """grep -Fxq '# CONFIG_ZSWAP is not set' "$uml_dir/.config" """.strip(),
-        'sha256sum "$captured"',
+        'captured_sha256="$(sha256sum "$captured" | cut -d\' \' -f1)"',
+        '[[ -f "$log" && ! -L "$log" && -s "$log" ]]',
+        '[[ ! -e "$captured" && ! -L "$captured" ]]',
+        '(umask 077; set -C; cat -- "$log" > "$captured")',
+        'chmod 0400 -- "$captured"',
+        'phase=verify_captured_tap_identity',
+        '[[ "$(sha256sum "$captured" | cut -d\' \' -f1)" == "$captured_sha256" ]]',
         '--verify-kunit-tap "$captured"',
         "kunit_cases_passed=5",
         "if: always()",
@@ -135,8 +144,10 @@ def verify_kunit_workflow_contract(contents: str) -> None:
         "run_checked stage ",
         "run_checked modified_objects ",
         "run_checked uml_kunit ",
+        "phase=capture_real_tap",
+        'cat -- "$log" > "$captured"',
         "run_checked verify_uml_config ",
-        'cp -- "$log" "$captured"',
+        "phase=verify_captured_tap_identity",
         "run_checked verify_real_tap ",
         "kunit_cases_passed=5",
         "run_checked verify_profile_pair ",
@@ -146,6 +157,14 @@ def verify_kunit_workflow_contract(contents: str) -> None:
         raise ValueError("KUnit publication before source, execution or TAP verification")
     if "echo KUNIT_PASS" in contents or "printf 'kunit_cases_passed=5" in contents[:positions[-2]]:
         raise ValueError("forged or premature KUnit PASS marker")
+    # The only immutable source must be the just-finished UML command log;
+    # no intervening verifier may truncate that log before copying its bytes.
+    capture_fragment = contents[positions[4]:positions[6]]
+    if (re.search(r"(?m)^\s*run_checked\s+", capture_fragment) or
+        contents.count('cat -- "$log" > "$captured"') != 1 or
+        contents.count('kunit_output_sha256=%s') != 1 or
+        contents.count('[[ "$(sha256sum "$captured" | cut -d\' \' -f1)" == "$captured_sha256" ]]') != 1):
+        raise ValueError("missing or mutable authentic UML TAP capture")
 
 
 class PinnedLinuxStageTests(unittest.TestCase):
@@ -718,6 +737,146 @@ class PinnedLinuxStageTests(unittest.TestCase):
                     with self.assertRaisesRegex(stager.StagingError,
                                                 "invalid-origin-postimage"):
                         stager.render_source(path, excerpt)
+
+
+    def test_round019_real_workflow_binds_raw_tap_before_reused_log(self):
+        """Shell-run the workflow's actual capture code; no kernel is invoked."""
+        workflow = (STAGER_PATH.parents[2] /
+                    ".github/workflows/phase-a-zswap-origin-kunit.yml").read_text()
+        verify_kunit_workflow_contract(workflow)
+        start = workflow.index("            phase=capture_real_tap\n")
+        end = workflow.index("            phase=verify_uml_config\n", start)
+        capture_code = textwrap.dedent(workflow[start:end])
+        self.assertNotRegex(capture_code, r"(?m)^\s*run_checked\s+")
+        self.assertIn('set -C; cat -- "$log" > "$captured"', capture_code)
+        # Synthetic bytes are used only to check ownership, not to claim
+        # that a real UML kernel executed these cases.
+        synthetic = ("KTAP version 1\n# Subtest: swap_bio_origin\n1..5\n" +
+                     "".join("ok " + str(index) + " - " + name + "\n"
+                             for index, name in enumerate(KUNIT_CASE_NAMES, 1)) +
+                     "ok 1 - swap_bio_origin\n").encode("ascii")
+        for profile in ("enabled", "disabled"):
+            with self.subTest(profile=profile), tempfile.TemporaryDirectory() as tmp:
+                evidence = Path(tmp)
+                command_log = evidence / "shared.log"
+                manifest = evidence / "manifest.txt"
+                command_log.write_bytes(synthetic)
+                manifest.write_text("result=IN_PROGRESS\n")
+                script = (
+                    "set -Eeuo pipefail\n"
+                    'evidence="$1"; log="$2"; manifest="$3"; profile="$4"\n' +
+                    capture_code
+                )
+                command = ["bash", "-c", script, "capture-contract", str(evidence),
+                           str(command_log), str(manifest), profile]
+                first = subprocess.run(command, capture_output=True, text=True,
+                                       check=False, timeout=10)
+                self.assertEqual(first.returncode, 0, first.stderr)
+                output = evidence / (profile + "-kunit-output.log")
+                self.assertEqual(output.read_bytes(), synthetic)
+                digest = hashlib.sha256(synthetic).hexdigest()
+                self.assertIn("kunit_output_sha256=" + digest, manifest.read_text())
+                self.assertEqual(verify_kunit_tap(output.read_text()), 5)
+                # Subsequent run_checked calls can truncate their shared log
+                # but must leave the captured kernel output byte-for-byte intact.
+                command_log.write_text("config verifier diagnostics\n")
+                self.assertEqual(output.read_bytes(), synthetic)
+                stale = subprocess.run(command, capture_output=True, text=True,
+                                       check=False, timeout=10)
+                self.assertNotEqual(stale.returncode, 0)
+                self.assertEqual(output.read_bytes(), synthetic)
+
+    def test_round019_capture_rejects_missing_empty_symlink_stale_and_oversize(self):
+        workflow = (STAGER_PATH.parents[2] /
+                    ".github/workflows/phase-a-zswap-origin-kunit.yml").read_text()
+        start = workflow.index("            phase=capture_real_tap\n")
+        end = workflow.index("            phase=verify_uml_config\n", start)
+        capture_code = textwrap.dedent(workflow[start:end])
+        script = (
+            "set -Eeuo pipefail\n"
+            'evidence="$1"; log="$2"; manifest="$3"; profile=enabled\n' +
+            capture_code
+        )
+        for mode in ("absent", "empty", "symlink-input", "symlink-output",
+                     "broken-symlink-output", "stale-output", "oversize"):
+            with self.subTest(mode=mode), tempfile.TemporaryDirectory() as tmp:
+                evidence = Path(tmp)
+                command_log = evidence / "shared.log"
+                manifest = evidence / "manifest.txt"
+                manifest.write_text("result=IN_PROGRESS\n")
+                output = evidence / "enabled-kunit-output.log"
+                if mode != "absent":
+                    command_log.write_bytes(b"raw stdout\n")
+                if mode == "empty":
+                    command_log.write_bytes(b"")
+                elif mode == "oversize":
+                    command_log.write_bytes(b"x" * (KUNIT_LOG_LIMIT + 1))
+                elif mode == "symlink-input":
+                    source = evidence / "source"
+                    command_log.rename(source)
+                    command_log.symlink_to(source)
+                elif mode == "symlink-output":
+                    output.symlink_to(command_log)
+                elif mode == "broken-symlink-output":
+                    output.symlink_to(evidence / "missing-target")
+                elif mode == "stale-output":
+                    output.write_text("old profile transcript\n")
+                previous = output.read_bytes() if output.exists() else None
+                completed = subprocess.run(
+                    ["bash", "-c", script, "capture-contract", str(evidence),
+                     str(command_log), str(manifest)],
+                    capture_output=True, text=True, check=False, timeout=10)
+                self.assertNotEqual(completed.returncode, 0, mode)
+                if previous is not None:
+                    self.assertEqual(output.read_bytes(), previous)
+                self.assertNotIn("kunit_output_sha256=", manifest.read_text())
+
+    def test_round019_captured_tap_hash_drift_refuses_before_any_pass(self):
+        workflow = (STAGER_PATH.parents[2] /
+                    ".github/workflows/phase-a-zswap-origin-kunit.yml").read_text()
+        start = workflow.index("            phase=verify_captured_tap_identity\n")
+        end = workflow.index("            run_checked verify_real_tap ", start)
+        verify_code = textwrap.dedent(workflow[start:end])
+        for modified in (False, True):
+            with self.subTest(drift=modified), tempfile.TemporaryDirectory() as tmp:
+                captured = Path(tmp) / "enabled-kunit-output.log"
+                captured.write_bytes(b"real KUnit bytes\n")
+                expected = hashlib.sha256(captured.read_bytes()).hexdigest()
+                if modified:
+                    captured.write_bytes(b"tampered\n")
+                script = ("set -Eeuo pipefail\n"
+                          'captured="$1"; captured_sha256="$2"\n' +
+                          verify_code)
+                completed = subprocess.run(
+                    ["bash", "-c", script, "identity-contract",
+                     str(captured), expected],
+                    capture_output=True, text=True, check=False, timeout=10)
+                self.assertEqual(completed.returncode, 1 if modified else 0)
+
+    def test_round019_workflow_capture_negative_mutations(self):
+        workflow = (STAGER_PATH.parents[2] /
+                    ".github/workflows/phase-a-zswap-origin-kunit.yml").read_text()
+        verify_kunit_workflow_contract(workflow)
+        modifications = (
+            ('phase=capture_real_tap', 'phase=ignore_captured_tap'),
+            ('cat -- "$log" > "$captured"', 'cat -- "$log" > /dev/null'),
+            ('[[ ! -e "$captured" && ! -L "$captured" ]]', 'true # stale output'),
+            ('[[ -f "$log" && ! -L "$log" && -s "$log" ]]', 'true # no stream'),
+            ('(umask 077; set -C; cat -- "$log" > "$captured")',
+             'cat -- "$log" > "$captured" # may clobber'),
+            ('[[ "$(wc -c < "$log")" -le 8388608 ]]', 'true # unbounded'),
+            ('phase=verify_captured_tap_identity', 'phase=unchecked_tap_identity'),
+            ('[[ "$(sha256sum "$captured" | cut -d\' \' -f1)" == "$captured_sha256" ]]',
+             'true # ignores post-capture mutation'),
+            ('run_checked verify_real_tap ', 'echo forged_tap # '),
+            ('run_checked verify_profile_pair ', 'echo forged_pair # '),
+        )
+        for original, replacement in modifications:
+            with self.subTest(original=original):
+                self.assertIn(original, workflow)
+                with self.assertRaises(ValueError):
+                    verify_kunit_workflow_contract(
+                        workflow.replace(original, replacement, 1))
 
     def test_round012_workflow_mutation_negatives(self):
         path = STAGER_PATH.parents[2] / ".github/workflows/phase-a-zswap-origin-kunit.yml"

@@ -13770,3 +13770,44 @@ Python suites and hosted CI must pass independently. The owner's actual
 Physical=NOT_RUN for this change. Phase A remains BLOCKED, Phase B RAW bypass
 and direct compressed handoff remain DISABLED; RAW is the original full
 uncompressed 4096-byte page.
+
+## Round 019 — Agent 2 authentic pinned UML KUnit TAP capture and ownership
+
+The exact pinned Linux UML run #43876402555 completed the enabled profile
+modified-object Kbuild, `kunit.py` and effective Kconfig verification with
+exit zero, but the first fatal phase was `capture_real_tap` because the
+workflow reused a single truncating `run_checked` log. The genuine KUnit TAP
+bytes were lost before copying, so the five-case result remained **UNKNOWN**;
+the disabled profile was **NOT_RUN**. A zero process exit, source-only suite,
+or names-only grep cannot qualify either profile.
+
+For both distinct `CONFIG_ZSWAP=y/n` builds, take the real, unchanged raw
+stdout bytes from the just-finished `kunit.py --raw_output` command
+**before** another `run_checked` call can overwrite its shared log.
+The source and owned per-profile destination must be regular, non-symlink,
+nonempty, un-reused files, at most 8 MiB. Create a new mode-0600 evidence
+file using no-clobber/O_EXCL semantics, lock it against accidental writes,
+record its SHA-256 immediately, and revalidate its identity and byte count
+before the real TAP parser; the final pair verifier must independently
+recheck the exact digest and reject duplicate/reused profile transcripts.
+A missing, truncated, oversized, symlinked, preexisting, modified or
+failed KUnit stream cannot append `kunit_cases_passed=5` or `result=PASS`.
+
+Source-bound regressions must verify the exact workflow sequence:
+actual UML process → immutable per-profile TAP capture → effective
+Kconfig verifier → captured-output SHA recheck → strict real TAP parser
+→ case PASS → independent paired profile verifier. Run Bash-executed
+capture fixture tests, negative mutations for stale/reused paths, malformed
+output, missing raw stream, shared-log overwrite and digest drift; retain
+separate existing 3/4 compiled-object identities, pinned source,
+CGROUPS-off conditional BLK_CGROUP, mixed-case Kconfig, independent
+request/effective/kernel/TAP SHA-256, and five distinct, ordered,
+executed no-SKIP BIO-origin TAP PASS cases in **each** profile.
+Fixtures prove test logic, not booted UML case success.
+
+Complete pinned modified-source hosted KUnit y/n is required on the
+integrated exact main SHA; no successful Linux/UML build alone proves
+matched loaded DM, genuine zswap stored-entry MM→BIO WRITE or exact
+original 4096-byte swap-in. Loaded and owner physical trials remain NOT_RUN.
+Phase A BLOCKED; Phase B RAW bypass DISABLED; compressed direct handoff
+DISABLED; current RAW is the uncompressed original 4096-byte page.
