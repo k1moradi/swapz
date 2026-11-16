@@ -52,7 +52,32 @@ class FakeStat:
         self.st_ctime_ns = 12345
 
 
+# Rootless-only source snapshot bytes. This is never a production
+# authorization record and never exists at the privileged helper's path.
+ROOTLESS_READINESS_SNAPSHOT = (
+    b'{"schema":"rootless-readiness-fixture","status":"BLOCKED"}\n')
+_ORIGINAL_STABLE_RELATIVE_FILE_READER = qualify._read_stable_relative_file_bytes
+
+
+def _read_rootless_physical_control_fixture(source_root, relative, label):
+    if (source_root == ROOT and
+            relative == Path("docs/handoff/production-readiness.json")):
+        return ROOTLESS_READINESS_SNAPSHOT
+    return _ORIGINAL_STABLE_RELATIVE_FILE_READER(
+        source_root, relative, label)
+
+
 class PrimaryRealSwapContracts(unittest.TestCase):
+    def setUp(self):
+        # Snapshot tests require an input byte digest, not actual owner consent.
+        # Every private source-root read and adversarial custom worktree still
+        # goes through the real stable reader, including O_NOFOLLOW checks.
+        patcher = mock.patch.object(
+            qualify, "_read_stable_relative_file_bytes",
+            _read_rootless_physical_control_fixture)
+        patcher.start()
+        self.addCleanup(patcher.stop)
+
     @contextlib.contextmanager
     def _mock_owned_admission_peer(self):
         # These tests exercise admission sequencing with an in-memory child;
@@ -1386,8 +1411,7 @@ class PrimaryRealSwapContracts(unittest.TestCase):
                     # checkout. Exercise the pinned-byte mismatch against an
                     # inert synthetic fixture, never fabricate an approval.
                     original = (
-                        b'{"schema":"rootless-readiness-fixture",'
-                        b'"status":"BLOCKED"}\n'
+                        ROOTLESS_READINESS_SNAPSHOT
                         if relative == "docs/handoff/production-readiness.json"
                         else (ROOT / relative).read_bytes())
                     expected = hashlib.sha256(original).hexdigest()
