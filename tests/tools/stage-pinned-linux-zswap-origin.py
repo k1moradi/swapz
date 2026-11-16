@@ -34,6 +34,12 @@ ORIGINAL_BLOBS = {
 }
 
 
+KUNIT_ORIGINAL_BLOBS = {
+    "block/Kconfig": "70e4a66d941ff66ecb0ec34f4f7eff7fd1e4be40",
+    "block/Makefile": "e7bd320e3d6971a8abf584f5de42776bb54e8216",
+}
+KUNIT_SOURCE_PATH = "block/swap-bio-origin-kunit.c"
+
 @dataclass(frozen=True)
 class Edit:
     before: str
@@ -112,6 +118,18 @@ EDITS: dict[str, tuple[Edit, ...]] = {
             "\t/* Zero initialized for every ordinary or rejected swap page. */\n"
             "\tenum swap_bio_origin\tswap_origin;\n};",
         ),
+        Edit(
+            "/*\n * SWAP_OPS_F_REQUIRE_NOFS:",
+            "/* Homogeneous only: invalid numeric origins fail closed too. */\n"
+            "static inline bool swap_bio_origin_can_merge(\n"
+            "\t\tenum swap_bio_origin established,\n"
+            "\t\tenum swap_bio_origin incoming)\n"
+            "{\n"
+            "\treturn established == incoming &&\n"
+            "\t\t(established == SWAP_BIO_ORIGIN_ORDINARY_OR_UNKNOWN ||\n"
+            "\t\t established == SWAP_BIO_ORIGIN_ZSWAP_STORED_WRITEBACK);\n"
+            "}\n\n/*\n * SWAP_OPS_F_REQUIRE_NOFS:",
+        ),
     ),
     "mm/page_io.c": (
         Edit(
@@ -119,7 +137,8 @@ EDITS: dict[str, tuple[Edit, ...]] = {
             "\treturn sis->ops->can_merge(",
             "\tif (ctx->sis != sis)\n\t\treturn false;\n"
             "\t/* Never combine ordinary and stored-entry writes in one BIO. */\n"
-            "\tif (rw == WRITE && ctx->sio->swap_origin != ctx->swap_origin)\n"
+            "\tif (rw == WRITE &&\n"
+            "\t    !swap_bio_origin_can_merge(ctx->sio->swap_origin, ctx->swap_origin))\n"
             "\t\treturn false;\n"
             "\treturn sis->ops->can_merge(",
         ),
@@ -154,6 +173,187 @@ EDITS: dict[str, tuple[Edit, ...]] = {
 }
 
 
+
+# KUnit registrations are opt-in to preserve existing six-path CI.
+KUNIT_EDITS: dict[str, tuple[Edit, ...]] = {
+    "block/Kconfig": (
+        Edit(
+            'source "block/Kconfig.iosched"\n\nendif # BLOCK',
+            'source "block/Kconfig.iosched"\n\n'
+            'config SWAP_BIO_ORIGIN_KUNIT_TEST\n'
+            '\tbool "Test pinned swap BIO origin lifecycle"\n'
+            '\tdepends on KUNIT && SWAP\n'
+            '\tdefault n\n'
+            '\thelp\n'
+            '\t  Test authenticated origin, BIO lifecycle and merge rejection.\n\n'
+            'endif # BLOCK',
+        ),
+    ),
+    "block/Makefile": (
+        Edit(
+            "obj-$(CONFIG_BLOCK_HOLDER_DEPRECATED)\t+= holder.o\n",
+            "obj-$(CONFIG_BLOCK_HOLDER_DEPRECATED)\t+= holder.o\n"
+            "obj-$(CONFIG_SWAP_BIO_ORIGIN_KUNIT_TEST) += swap-bio-origin-kunit.o\n",
+        ),
+    ),
+}
+KUNIT_SOURCE = r"""// SPDX-License-Identifier: GPL-2.0
+/* Provenance BIO lifecycle regression for the exact pinned Linux tree. */
+#include <kunit/test.h>
+#include <linux/bio.h>
+#include <linux/mm.h>
+#include <linux/swap_ops.h>
+
+static void swap_bio_origin_authentication_test(struct kunit *test)
+{
+	struct bio_vec vector = {};
+	struct bio bio;
+
+	bio_init(&bio, NULL, &vector, 1, REQ_OP_WRITE | REQ_SWAP);
+	KUNIT_EXPECT_EQ(test, bio.bi_swap_origin,
+			(enum swap_bio_origin)SWAP_BIO_ORIGIN_ORDINARY_OR_UNKNOWN);
+	KUNIT_EXPECT_FALSE(test, bio_is_zswap_stored_writeback(&bio));
+	bio.bi_swap_origin = SWAP_BIO_ORIGIN_ZSWAP_STORED_WRITEBACK;
+	KUNIT_EXPECT_TRUE(test, bio_is_zswap_stored_writeback(&bio));
+	bio.bi_opf = REQ_OP_WRITE;
+	KUNIT_EXPECT_FALSE(test, bio_is_zswap_stored_writeback(&bio));
+	bio.bi_opf = REQ_OP_READ | REQ_SWAP;
+	KUNIT_EXPECT_FALSE(test, bio_is_zswap_stored_writeback(&bio));
+	bio.bi_opf = REQ_OP_WRITE | REQ_SWAP;
+	bio.bi_swap_origin = (enum swap_bio_origin)2;
+	KUNIT_EXPECT_FALSE(test, bio_is_zswap_stored_writeback(&bio));
+	bio.bi_swap_origin = SWAP_BIO_ORIGIN_ORDINARY_OR_UNKNOWN;
+	KUNIT_EXPECT_FALSE(test, bio_is_zswap_stored_writeback(&bio));
+	bio_uninit(&bio);
+}
+
+static void swap_bio_origin_reset_reuse_reissue_test(struct kunit *test)
+{
+	struct bio_vec vector = { .bv_len = PAGE_SIZE };
+	struct bio bio;
+
+	bio_init(&bio, NULL, &vector, 1, REQ_OP_WRITE | REQ_SWAP);
+	bio.bi_vcnt = 1;
+	bio.bi_iter.bi_size = PAGE_SIZE;
+	bio.bi_swap_origin = SWAP_BIO_ORIGIN_ZSWAP_STORED_WRITEBACK;
+#ifndef CONFIG_BLK_CGROUP
+	/* A synthetic NULL-bdev BIO is safe to reissue only without blkcg. */
+	bio_prepare_reissue(&bio, NULL);
+	KUNIT_EXPECT_TRUE(test, bio_is_zswap_stored_writeback(&bio));
+	KUNIT_EXPECT_EQ(test, bio.bi_iter.bi_size, (unsigned int)PAGE_SIZE);
+#endif
+	bio_reuse(&bio, REQ_OP_WRITE | REQ_SWAP);
+	KUNIT_EXPECT_FALSE(test, bio_is_zswap_stored_writeback(&bio));
+	KUNIT_EXPECT_EQ(test, bio.bi_swap_origin,
+			(enum swap_bio_origin)SWAP_BIO_ORIGIN_ORDINARY_OR_UNKNOWN);
+	KUNIT_EXPECT_EQ(test, bio.bi_iter.bi_size, (unsigned int)PAGE_SIZE);
+	bio.bi_swap_origin = SWAP_BIO_ORIGIN_ZSWAP_STORED_WRITEBACK;
+	bio_reset(&bio, NULL, REQ_OP_WRITE | REQ_SWAP);
+	KUNIT_EXPECT_FALSE(test, bio_is_zswap_stored_writeback(&bio));
+	KUNIT_EXPECT_EQ(test, bio.bi_swap_origin,
+			(enum swap_bio_origin)SWAP_BIO_ORIGIN_ORDINARY_OR_UNKNOWN);
+	bio_uninit(&bio);
+}
+
+static void swap_bio_origin_clone_test(struct kunit *test)
+{
+	struct bio_vec vector = {};
+	struct bio original;
+	struct bio clone;
+	int ret;
+
+	bio_init(&original, NULL, &vector, 1, REQ_OP_WRITE | REQ_SWAP);
+	original.bi_swap_origin = SWAP_BIO_ORIGIN_ZSWAP_STORED_WRITEBACK;
+	ret = bio_init_clone(NULL, &clone, &original, GFP_KERNEL);
+	KUNIT_ASSERT_EQ(test, ret, 0);
+	KUNIT_EXPECT_TRUE(test, bio_is_zswap_stored_writeback(&clone));
+	bio_uninit(&clone);
+
+	original.bi_opf = REQ_OP_READ | REQ_SWAP;
+	ret = bio_init_clone(NULL, &clone, &original, GFP_KERNEL);
+	KUNIT_ASSERT_EQ(test, ret, 0);
+	KUNIT_EXPECT_FALSE(test, bio_is_zswap_stored_writeback(&clone));
+	KUNIT_EXPECT_EQ(test, clone.bi_swap_origin,
+			(enum swap_bio_origin)SWAP_BIO_ORIGIN_ORDINARY_OR_UNKNOWN);
+	bio_uninit(&clone);
+
+	original.bi_opf = REQ_OP_WRITE | REQ_SWAP;
+	original.bi_swap_origin = (enum swap_bio_origin)2;
+	ret = bio_init_clone(NULL, &clone, &original, GFP_KERNEL);
+	KUNIT_ASSERT_EQ(test, ret, 0);
+	KUNIT_EXPECT_FALSE(test, bio_is_zswap_stored_writeback(&clone));
+	KUNIT_EXPECT_EQ(test, clone.bi_swap_origin,
+			(enum swap_bio_origin)SWAP_BIO_ORIGIN_ORDINARY_OR_UNKNOWN);
+	bio_uninit(&clone);
+	bio_uninit(&original);
+}
+
+static void swap_bio_origin_split_test(struct kunit *test)
+{
+	struct bio_vec vector = {};
+	struct bio original;
+	struct bio *split;
+	struct page *page = alloc_page(GFP_KERNEL);
+
+	KUNIT_ASSERT_NOT_NULL(test, page);
+	vector.bv_page = page;
+	vector.bv_len = PAGE_SIZE;
+	bio_init(&original, NULL, &vector, 1, REQ_OP_WRITE | REQ_SWAP);
+	original.bi_vcnt = 1;
+	original.bi_iter.bi_size = PAGE_SIZE;
+	original.bi_swap_origin = SWAP_BIO_ORIGIN_ZSWAP_STORED_WRITEBACK;
+
+	split = bio_split(&original, PAGE_SIZE >> 10, GFP_KERNEL, &fs_bio_set);
+	if (IS_ERR_OR_NULL(split)) {
+		KUNIT_FAIL(test, "bio_split could not allocate a source-owned clone");
+		goto out;
+	}
+	KUNIT_EXPECT_TRUE(test, bio_is_zswap_stored_writeback(split));
+	KUNIT_EXPECT_TRUE(test, bio_is_zswap_stored_writeback(&original));
+	KUNIT_EXPECT_EQ(test, split->bi_iter.bi_size, (unsigned int)PAGE_SIZE / 2);
+	bio_put(split);
+out:
+	bio_uninit(&original);
+	__free_page(page);
+}
+
+static void swap_bio_origin_merge_reject_test(struct kunit *test)
+{
+	KUNIT_EXPECT_TRUE(test, swap_bio_origin_can_merge(
+		SWAP_BIO_ORIGIN_ORDINARY_OR_UNKNOWN,
+		SWAP_BIO_ORIGIN_ORDINARY_OR_UNKNOWN));
+	KUNIT_EXPECT_TRUE(test, swap_bio_origin_can_merge(
+		SWAP_BIO_ORIGIN_ZSWAP_STORED_WRITEBACK,
+		SWAP_BIO_ORIGIN_ZSWAP_STORED_WRITEBACK));
+	KUNIT_EXPECT_FALSE(test, swap_bio_origin_can_merge(
+		SWAP_BIO_ORIGIN_ORDINARY_OR_UNKNOWN,
+		SWAP_BIO_ORIGIN_ZSWAP_STORED_WRITEBACK));
+	KUNIT_EXPECT_FALSE(test, swap_bio_origin_can_merge(
+		SWAP_BIO_ORIGIN_ZSWAP_STORED_WRITEBACK,
+		SWAP_BIO_ORIGIN_ORDINARY_OR_UNKNOWN));
+	KUNIT_EXPECT_FALSE(test, swap_bio_origin_can_merge(
+		(enum swap_bio_origin)2, (enum swap_bio_origin)2));
+}
+
+static struct kunit_case swap_bio_origin_cases[] = {
+	KUNIT_CASE(swap_bio_origin_authentication_test),
+	KUNIT_CASE(swap_bio_origin_reset_reuse_reissue_test),
+	KUNIT_CASE(swap_bio_origin_clone_test),
+	KUNIT_CASE(swap_bio_origin_split_test),
+	KUNIT_CASE(swap_bio_origin_merge_reject_test),
+	{}
+};
+
+static struct kunit_suite swap_bio_origin_suite = {
+	.name = "swap_bio_origin",
+	.test_cases = swap_bio_origin_cases,
+};
+
+kunit_test_suite(swap_bio_origin_suite);
+
+MODULE_LICENSE("GPL");
+"""
+
 class StagingError(RuntimeError):
     """Refuse a preflight, source transition or publication failure."""
 
@@ -171,10 +371,11 @@ def check_preimage(path: str, payload: bytes, expected_hash: str) -> None:
 
 def render_source(path: str, original: str) -> str:
     """Reject missing, duplicate and overlapping anchors before any mutation."""
-    if path not in EDITS:
+    edits = EDITS.get(path, KUNIT_EDITS.get(path))
+    if edits is None:
         raise StagingError(f"unexpected-source-path:{path}")
     spans = []
-    for edit in EDITS[path]:
+    for edit in edits:
         if edit.before == edit.after or not edit.before or not edit.after:
             raise StagingError(f"invalid-transition:{path}")
         offset = original.find(edit.before)
@@ -224,9 +425,11 @@ def validate_origin_postimage(path: str, staged_source: str) -> None:
         ),
         "include/linux/swap_ops.h": (
             "enum swap_bio_origin\tswap_origin;",
+            "swap_bio_origin_can_merge(",
+            "established == incoming &&",
         ),
         "mm/page_io.c": (
-            "rw == WRITE && ctx->sio->swap_origin != ctx->swap_origin",
+            "!swap_bio_origin_can_merge(ctx->sio->swap_origin, ctx->swap_origin)",
             "sio->swap_origin = rw == WRITE &&\n"
             "\t\t\tctx->swap_origin == SWAP_BIO_ORIGIN_ZSWAP_STORED_WRITEBACK ?\n"
             "\t\t\tSWAP_BIO_ORIGIN_ZSWAP_STORED_WRITEBACK :\n"
@@ -236,9 +439,18 @@ def validate_origin_postimage(path: str, staged_source: str) -> None:
         "mm/zswap.c": (
             "ctx.swap_origin = SWAP_BIO_ORIGIN_ZSWAP_STORED_WRITEBACK;",
         ),
+        "block/Kconfig": (
+            "config SWAP_BIO_ORIGIN_KUNIT_TEST",
+            "depends on KUNIT && SWAP",
+        ),
+        "block/Makefile": (
+            "obj-$(CONFIG_SWAP_BIO_ORIGIN_KUNIT_TEST) += swap-bio-origin-kunit.o",
+        ),
     }
     if path not in required or any(
-        staged_source.count(fragment) != (2 if path == "include/linux/swap_ops.h" else 1)
+        staged_source.count(fragment) != (
+            2 if (path == "include/linux/swap_ops.h" and
+                  fragment == "enum swap_bio_origin\tswap_origin;") else 1)
         for fragment in required[path]
     ):
         raise StagingError(f"invalid-origin-postimage:{path}")
@@ -275,7 +487,7 @@ def git_output(root: Path, *args: str) -> str:
     return call.stdout.strip()
 
 
-def validate_checkout(root: Path) -> None:
+def validate_checkout(root: Path, *, with_kunit: bool = False) -> None:
     """Require the exact clean, complete upstream checkout before writing."""
     if not root.is_dir() or not (root / ".git").exists():
         raise StagingError("complete-git-checkout-required")
@@ -287,7 +499,10 @@ def validate_checkout(root: Path) -> None:
         raise StagingError("tracked-source-is-dirty")
     if len(git_output(root, "ls-files").splitlines()) < MINIMUM_TRACKED_FILES:
         raise StagingError("incomplete-linux-checkout")
-    for path, expected_hash in ORIGINAL_BLOBS.items():
+    expected_sources = dict(ORIGINAL_BLOBS)
+    if with_kunit:
+        expected_sources.update(KUNIT_ORIGINAL_BLOBS)
+    for path, expected_hash in expected_sources.items():
         full_path = root / path
         if full_path.is_symlink() or not full_path.is_file():
             raise StagingError(f"missing-or-symlink-source:{path}")
@@ -295,6 +510,11 @@ def validate_checkout(root: Path) -> None:
         if len(lines) != 1 or not lines[0].startswith("100644 " + expected_hash + " 0\t"):
             raise StagingError(f"index-blob-mismatch:{path}")
         check_preimage(path, full_path.read_bytes(), expected_hash)
+    if with_kunit:
+        addition = root / KUNIT_SOURCE_PATH
+        if (addition.exists() or addition.is_symlink() or
+            git_output(root, "ls-files", "--stage", "--", KUNIT_SOURCE_PATH)):
+            raise StagingError("kunit-source-already-present")
 
 
 def write_atomic(destination: Path, payload: bytes) -> None:
@@ -317,7 +537,7 @@ def write_atomic(destination: Path, payload: bytes) -> None:
 
 
 
-def rollback_sources(root: Path, originals: dict[str, bytes],
+def rollback_sources(root: Path, originals: dict[str, bytes | None],
                      staged: dict[str, bytes], paths: list[str]) -> list[str]:
     """Restore touched paths, including a write that raised after replacement.
 
@@ -327,18 +547,29 @@ def rollback_sources(root: Path, originals: dict[str, bytes],
     failed = []
     for path in reversed(paths):
         try:
-            current = (root / path).read_bytes()
+            destination = root / path
+            if destination.is_symlink():
+                raise StagingError("rollback-source-interference")
+            try:
+                current = destination.read_bytes()
+            except FileNotFoundError:
+                if originals[path] is None:
+                    continue
+                raise
             if current == originals[path]:
                 continue
             if current != staged[path]:
                 raise StagingError("rollback-source-interference")
-            write_atomic(root / path, originals[path])
+            if originals[path] is None:
+                destination.unlink()
+            else:
+                write_atomic(destination, originals[path])
         except (OSError, StagingError):
             failed.append(path)
     return failed
 
 
-def stage_checkout(root: Path, manifest_path: Path) -> dict[str, object]:
+def stage_checkout(root: Path, manifest_path: Path, *, with_kunit: bool = False) -> dict[str, object]:
     try:
         root = root.resolve(strict=True)
     except OSError as error:
@@ -346,30 +577,49 @@ def stage_checkout(root: Path, manifest_path: Path) -> dict[str, object]:
     manifest_path = manifest_path.resolve(strict=False)
     if manifest_path == root or root in manifest_path.parents:
         raise StagingError("manifest-must-be-outside-linux-checkout")
-    validate_checkout(root)
+    validate_checkout(root, with_kunit=with_kunit)
 
-    originals: dict[str, bytes] = {}
+    originals: dict[str, bytes | None] = {}
     staged: dict[str, bytes] = {}
-    for path in EDITS:
+    active_edits = dict(EDITS)
+    expected_hashes = dict(ORIGINAL_BLOBS)
+    if with_kunit:
+        active_edits.update(KUNIT_EDITS)
+        expected_hashes.update(KUNIT_ORIGINAL_BLOBS)
+    for path in active_edits:
         original = (root / path).read_bytes()
-        check_preimage(path, original, ORIGINAL_BLOBS[path])
+        check_preimage(path, original, expected_hashes[path])
         originals[path] = original
         staged[path] = render_source(path, original.decode("utf-8")).encode("utf-8")
+    if with_kunit:
+        addition = root / KUNIT_SOURCE_PATH
+        if addition.exists() or addition.is_symlink():
+            raise StagingError("kunit-source-already-present")
+        originals[KUNIT_SOURCE_PATH] = None
+        staged[KUNIT_SOURCE_PATH] = KUNIT_SOURCE.encode("utf-8")
 
     # Recheck the entire plan before any mutation, then recheck each file
     # immediately before replacement to catch late source interference.
     for path in sorted(staged):
         destination = root / path
-        if destination.is_symlink() or not destination.is_file():
-            raise StagingError(f"missing-or-symlink-source:{path}")
-        check_preimage(path, destination.read_bytes(), ORIGINAL_BLOBS[path])
+        if originals[path] is None:
+            if destination.exists() or destination.is_symlink():
+                raise StagingError("kunit-source-already-present")
+        else:
+            if destination.is_symlink() or not destination.is_file():
+                raise StagingError(f"missing-or-symlink-source:{path}")
+            check_preimage(path, destination.read_bytes(), expected_hashes[path])
 
     committed: list[str] = []
     attempted: str | None = None
     try:
         for path in sorted(staged):
             destination = root / path
-            check_preimage(path, destination.read_bytes(), ORIGINAL_BLOBS[path])
+            if originals[path] is None:
+                if destination.exists() or destination.is_symlink():
+                    raise StagingError("kunit-source-already-present")
+            else:
+                check_preimage(path, destination.read_bytes(), expected_hashes[path])
             attempted = path
             write_atomic(destination, staged[path])
             committed.append(path)
@@ -389,8 +639,9 @@ def stage_checkout(root: Path, manifest_path: Path) -> dict[str, object]:
         "changed_paths": [
             {
                 "path": path,
-                "original_git_sha1": ORIGINAL_BLOBS[path],
-                "original_sha256": hashlib.sha256(originals[path]).hexdigest(),
+                "original_git_sha1": expected_hashes.get(path),
+                "original_sha256": (hashlib.sha256(originals[path]).hexdigest()
+                                    if originals[path] is not None else None),
                 "staged_git_sha1": blob_sha(staged[path]),
                 "staged_sha256": hashlib.sha256(staged[path]).hexdigest(),
                 "bytes": len(staged[path]),
@@ -458,14 +709,17 @@ def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--linux-root", type=Path, required=True)
     parser.add_argument("--manifest", type=Path, required=True)
+    parser.add_argument("--with-kunit", action="store_true",
+                        help="Stage pinned BIO KUnit C test and registrations")
     arguments = parser.parse_args()
     try:
-        result = stage_checkout(arguments.linux_root, arguments.manifest)
+        result = stage_checkout(arguments.linux_root, arguments.manifest,
+                                with_kunit=arguments.with_kunit)
     except (StagingError, OSError, UnicodeError, ValueError) as error:
         print(f"FAIL: {error}", file=sys.stderr)
         return 1
     # Success remains quiet; structured source evidence is in --manifest.
-    assert len(result["changed_paths"]) == 6
+    assert len(result["changed_paths"]) == (9 if arguments.with_kunit else 6)
     return 0
 
 

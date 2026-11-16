@@ -38,26 +38,40 @@ class PinnedLinuxStageTests(unittest.TestCase):
             destination.write_bytes(payload)
         return root, payloads
 
-    def stage_fixture(self, root: Path, payloads: dict[str, bytes], manifest: Path):
+    def stage_fixture(self, root: Path, payloads: dict[str, bytes],
+                      manifest: Path, *, with_kunit: bool = False):
         synthetic_preimages = {
             path: stager.blob_sha(payload) for path, payload in payloads.items()
         }
         with mock.patch.object(stager, "ORIGINAL_BLOBS", synthetic_preimages), \
+             mock.patch.object(stager, "KUNIT_ORIGINAL_BLOBS", synthetic_preimages), \
              mock.patch.object(stager, "validate_checkout"):
-            return stager.stage_checkout(root, manifest)
+            return stager.stage_checkout(root, manifest, with_kunit=with_kunit)
+
+    def make_kunit_fixture(self, directory: Path):
+        root, originals = self.make_fixture(directory)
+        for path, edits in stager.KUNIT_EDITS.items():
+            payload = ("\n\n/* separator */\n\n".join(
+                edit.before for edit in edits) + "\n").encode("utf-8")
+            destination = root / path
+            destination.parent.mkdir(parents=True, exist_ok=True)
+            destination.write_bytes(payload)
+            originals[path] = payload
+        return root, originals
 
     def test_pinned_source_identity_and_real_anchor_structure(self):
         self.assertEqual(stager.LINUX_COMMIT,
                          "c339f4010dea8b0d754f84ace70cd1b089878ef8")
         self.assertEqual(len(stager.ORIGINAL_BLOBS), 7)
         self.assertEqual(set(stager.EDITS), set(stager.ORIGINAL_BLOBS) - {"Makefile"})
-        self.assertEqual(sum(map(len, stager.EDITS.values())), 12)
+        self.assertEqual(sum(map(len, stager.EDITS.values())), 13)
         for path, edits in stager.EDITS.items():
             excerpts = "\n\n/* separator */\n\n".join(edit.before for edit in edits)
             updated = stager.render_source(path, excerpts)
             for edit in edits:
                 self.assertIn(edit.after, updated)
-                self.assertNotIn(edit.before, updated)
+                if edit.before not in edit.after:
+                    self.assertNotIn(edit.before, updated)
             with self.assertRaises(stager.StagingError):
                 stager.render_source(path, updated)
 
@@ -72,8 +86,8 @@ class PinnedLinuxStageTests(unittest.TestCase):
              "bio->bi_swap_origin = SWAP_BIO_ORIGIN_ORDINARY_OR_UNKNOWN;",
              "bio->bi_swap_origin = SWAP_BIO_ORIGIN_ZSWAP_STORED_WRITEBACK;"),
             ("mm/page_io.c",
-             "ctx->sio->swap_origin != ctx->swap_origin",
-             "ctx->sio->swap_origin == ctx->swap_origin"),
+             "!swap_bio_origin_can_merge(ctx->sio->swap_origin, ctx->swap_origin)",
+             "swap_bio_origin_can_merge(ctx->sio->swap_origin, ctx->swap_origin)"),
             ("mm/page_io.c",
              "ctx->swap_origin == SWAP_BIO_ORIGIN_ZSWAP_STORED_WRITEBACK ?",
              "ctx->swap_origin != SWAP_BIO_ORIGIN_ZSWAP_STORED_WRITEBACK ?"),
@@ -292,7 +306,7 @@ class PinnedLinuxStageTests(unittest.TestCase):
         self.assertLess(types.index("bi_swap_origin"),
                         types.index("atomic_t", types.index("bi_swap_origin")))
         swap = changed["mm/page_io.c"]
-        self.assertIn("rw == WRITE && ctx->sio->swap_origin != ctx->swap_origin", swap)
+        self.assertIn("!swap_bio_origin_can_merge(ctx->sio->swap_origin, ctx->swap_origin)", swap)
         self.assertIn("bio->bi_swap_origin = sio->swap_origin", swap)
         self.assertIn("sio->swap_origin = rw == WRITE &&", swap)
         self.assertIn("SWAP_BIO_ORIGIN_ORDINARY_OR_UNKNOWN", swap)
@@ -447,6 +461,102 @@ class PinnedLinuxStageTests(unittest.TestCase):
             root, original = self.make_fixture(Path(temporary))
             with self.assertRaisesRegex(stager.StagingError, "manifest-must-be-outside"):
                 self.stage_fixture(root, original, root / "evidence.json")
+
+
+    def test_kunit_registration_and_source_contract(self):
+        self.assertEqual(set(stager.KUNIT_EDITS), {"block/Kconfig", "block/Makefile"})
+        self.assertEqual(stager.KUNIT_SOURCE.count("KUNIT_CASE("), 5)
+        self.assertIn("#include <kunit/test.h>", stager.KUNIT_SOURCE)
+        self.assertIn("bio_prepare_reissue(&bio, NULL)", stager.KUNIT_SOURCE)
+        self.assertIn("bio_split(&original,", stager.KUNIT_SOURCE)
+        self.assertIn("swap_bio_origin_can_merge(", stager.KUNIT_SOURCE)
+        self.assertNotIn("REQ_ZSWAP_WRITEBACK", stager.KUNIT_SOURCE)
+        for path, edits in stager.KUNIT_EDITS.items():
+            source = "\n\n/* separator */\n\n".join(edit.before for edit in edits)
+            staged = stager.render_source(path, source)
+            for edit in edits:
+                self.assertIn(edit.after, staged)
+                if edit.before not in edit.after:
+                    self.assertNotIn(edit.before, staged)
+            with self.assertRaises(stager.StagingError):
+                stager.render_source(path, staged)
+            with self.assertRaisesRegex(stager.StagingError,
+                                        "missing-or-duplicate-anchor"):
+                stager.render_source(path, source + "\n" + edits[0].before)
+
+    def test_kunit_stage_all_nine_paths_and_reapplication(self):
+        import hashlib
+        with tempfile.TemporaryDirectory() as temporary:
+            root, originals = self.make_kunit_fixture(Path(temporary))
+            evidence = Path(temporary) / "source.json"
+            result = self.stage_fixture(root, originals, evidence,
+                                        with_kunit=True)
+            self.assertEqual(len(result["changed_paths"]), 9)
+            self.assertEqual(result, json.loads(evidence.read_text()))
+            addition = next(item for item in result["changed_paths"]
+                            if item["path"] == stager.KUNIT_SOURCE_PATH)
+            self.assertIsNone(addition["original_git_sha1"])
+            self.assertIsNone(addition["original_sha256"])
+            stage_bytes = {entry["path"]: (root / entry["path"]).read_bytes()
+                           for entry in result["changed_paths"]}
+            for entry in result["changed_paths"]:
+                self.assertEqual(entry["staged_sha256"],
+                                 hashlib.sha256(stage_bytes[entry["path"]]).hexdigest())
+            with self.assertRaises(stager.StagingError):
+                self.stage_fixture(root, originals, evidence, with_kunit=True)
+            self.assertEqual(stage_bytes,
+                             {p: (root / p).read_bytes() for p in stage_bytes})
+
+    def test_kunit_collision_wrong_blob_and_new_file_rollback(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root, originals = self.make_kunit_fixture(Path(temporary))
+            evidence = Path(temporary) / "source.json"
+            addition = root / stager.KUNIT_SOURCE_PATH
+            addition.write_bytes(b"unrelated source\n")
+            unchanged = {p: (root / p).read_bytes() for p in originals}
+            with self.assertRaisesRegex(stager.StagingError,
+                                        "kunit-source-already-present"):
+                self.stage_fixture(root, originals, evidence, with_kunit=True)
+            self.assertEqual(unchanged,
+                             {p: (root / p).read_bytes() for p in unchanged})
+            addition.unlink()
+            corrupted = root / "block/Kconfig"
+            original_config = corrupted.read_bytes()
+            corrupted.write_bytes(original_config + b"foreign change\n")
+            with self.assertRaisesRegex(stager.StagingError,
+                                        "original-blob-mismatch"):
+                self.stage_fixture(root, originals, evidence, with_kunit=True)
+            corrupted.write_bytes(original_config)
+            original_write = stager.write_atomic
+
+            def fail_after_add(destination: Path, payload: bytes):
+                original_write(destination, payload)
+                if destination == addition:
+                    raise OSError("injected after new source creation")
+
+            with mock.patch.object(stager, "write_atomic",
+                                   side_effect=fail_after_add):
+                with self.assertRaisesRegex(stager.StagingError,
+                                            "publication-failed-rolled-back"):
+                    self.stage_fixture(root, originals, evidence,
+                                       with_kunit=True)
+            self.assertFalse(addition.exists())
+            self.assertFalse(evidence.exists())
+            self.assertEqual(originals, {p: (root / p).read_bytes()
+                                         for p in originals})
+
+    def test_kunit_workflow_cannot_infer_source_only_pass(self):
+        workflow = (STAGER_PATH.parents[2] /
+                    ".github/workflows/phase-a-zswap-origin-kunit.yml").read_text()
+        for token in ("--with-kunit", "CONFIG_KUNIT=y",
+                      "CONFIG_SWAP_BIO_ORIGIN_KUNIT_TEST=y",
+                      "CONFIG_ZSWAP=y", "# CONFIG_ZSWAP is not set",
+                      "tools/testing/kunit/kunit.py", "verify_real_tap",
+                      "Subtest:", "not ok", "kunit_cases_passed=5",
+                      "staged_sha256"):
+            self.assertIn(token, workflow)
+        self.assertNotIn("echo KUNIT_PASS", workflow)
+        self.assertNotIn("modprobe", workflow)
 
 
 if __name__ == "__main__":
