@@ -41,8 +41,13 @@ independent hash maps, and mutated source rejection. Never populate the
 real path, make an authorization fixture a runtime fallback, or weaken the
 production helper's missing-input refusal. Negative rootless tests must
 prove that absent real authorization still blocks both use of the physical
-coordinator and the production release decision. These are unit fixtures,
-not release or device-qualified PASS evidence.
+coordinator and the production release decision. The qualification-report
+historical-snapshot contract must explicitly handle absent live readiness
+without creating one, and must still reject a present legacy HISTORICAL record.
+These are unit fixtures, not release or device-qualified PASS evidence.
+The private source-snapshot contract may substitute this inert byte fixture
+only for the missing readiness input in its exact rootless repository read,
+never for a test-supplied worktree, pinned private copy or real coordinator.
 
 ## Audited remote-branch cleanup tool (2026-11-16)
 

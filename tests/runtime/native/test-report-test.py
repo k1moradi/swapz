@@ -12554,10 +12554,18 @@ class ProductionReadinessEvidenceTest(unittest.TestCase):
         self.assertEqual(verdict["release_verdict"], "BLOCKED")
 
     def test_committed_handoff_snapshot_is_historical_and_blocked(self):
-        snapshot = json.loads(
-            (ROOT / "docs/handoff/production-readiness.json").read_text(
-                encoding="utf-8"))
-        self.assertEqual(snapshot["snapshot_kind"], "HISTORICAL")
+        handoff_path = ROOT / "docs/handoff/production-readiness.json"
+        if handoff_path.is_file():
+            # A legacy source snapshot is never live owner authorization.
+            snapshot = json.loads(handoff_path.read_text(encoding="utf-8"))
+            self.assertEqual(snapshot["snapshot_kind"], "HISTORICAL")
+        else:
+            # Current clean sources intentionally omit owner-bound readiness.
+            # Exercise the identical historical refusal using inert test-only
+            # evidence; never create an authorization file in the worktree.
+            self.assertFalse(handoff_path.exists())
+            snapshot = self.passing_snapshot()
+            snapshot["snapshot_kind"] = "HISTORICAL"
         verdict = runner.evaluate_production_readiness(
             snapshot, runner.git_sha())
         self.assertEqual(verdict["release_verdict"], "BLOCKED")
