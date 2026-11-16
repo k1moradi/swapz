@@ -14274,3 +14274,77 @@ other original-file warning. The NEW extracted C fixture keeps
 -Werror -Wconversion -Wshadow unchanged. No production file or
 live compressed carrier was modified. CI rerun on the new exact SHA
 is required; no mocked acceptance is loaded qualification.
+
+
+## Round 023 — Agent 4 frozen-object interoperability and incorrect-producer-CRC compiler mutations
+
+This is an **append-only independent follow-up** to the first Agent 4
+cross-ABI test above; preserve its original source-only workflow and negative
+cases. `zswap-compressed-cross-abi-frozen-test.py` additionally obtains the
+four original producer/consumer Git *blob bytes* with read-only
+`git show 8ad53ee4f57c5f8b272ca3ef4fadf1d8cd7cfbc8:<path>`.
+It checks their exact SHA-1 Git blob identities before extracting the actual
+`COMPRESSED_HANDOFF_SOURCE` C literal with Python AST. Neither current
+Agent 2/3 same-round changes nor caller-created text may stand in for this
+frozen Round 022 baseline. The original `#if 0` producer and
+`SWAPZ_ZSWAP_IMPORT_ACTIVE 0U` consumer remain disabled; ONLY the
+temporary rootless compiler input strips the #if 0 wrapper and replaces two
+kernel-only includes with explicit host shims. Production `codec.c` and
+`zswap-import-codec.h` are **original, unmodified Git objects**.
+
+A distinct `round023-cross-abi-interop.c` fixture compiles the original
+producer store-proof/bind/capture/submit/finish/abort functions with real
+userspace LZ4 compression and OpenSSL SHA, an independently implemented
+Castagnoli `crc32c` raw kernel-state function, actual production
+`swapz_crc32c_bytes` linked from `codec.c`, and original
+`swapz_zswap_import_decode`. The fixture-owned mocked slot→DM logical
+mapping and lower-I/O/ACK receipts are labeled **MOCK/UNTRUSTED** and
+separately enumerate source slot, store generation, DM logical page,
+DM generation, independent entry token and GC epoch; it never casts
+producer↔consumer structs or assumes enum/slot identity. CRC is forwarded
+unchanged, not repaired by the adapter. Success means only the source-owned
+immutable LZ4 block can yield the original full 4096 bytes and independently
+matched original SHA256/memcmp through a synthetic lower read.
+
+For both GCC and Clang, run the exact original fixture and two
+compiler-executed producer **mutants**: the incorrect
+`~crc32c(0U, ...)` seed and IEEE CRC32 polynomial replacing both producer
+CRC sites. These mutants may satisfy their *internally consistent* producer
+self-check but must be rejected by original consumer CRC32C without changing
+output, even when the metadata/identity adapter is otherwise well formed.
+Other negative cases reject missing/stale authentic source model,
+unlocked store, ZSTD/unknown codec, stale xarray or slot generation,
+source clone/corrupted owned bytes, missing/incorrect mock source↔DM
+authority, wrong generation/epoch/GC/teardown, length 0/3569,
+unsupported codec/representation/version/dictionary, LZ4 frame,
+CRC32-IEEE/wrong-seed, changed independent original SHA, overwritten
+compressed bytes, failed/partial lower read/WRITE, missing durable
+publication, ACK 0/2, overlapping scratch/input/output, source release
+and double submit/final callback. All negative decoder paths must return
+error and preserve the entire sentinel-filled 4096-byte output. These are
+**source fixture outcomes only**, not real upper ACK events.
+
+Execute, with a full Git history checkout and host-only compiler packages:
+
+```sh
+python3 -B tests/runtime/native/zswap-compressed-cross-abi-test.py -v
+python3 -B tests/runtime/native/zswap-compressed-cross-abi-frozen-test.py -v
+git diff --check HEAD^ HEAD
+```
+
+The existing `.github/workflows/zswap-compressed-cross-abi.yml` now
+preserves the first test, fetches complete Git history for fixed source
+object lookup, executes this second exact-frozen test and triggers on its
+new path. It installs only host build packages; no physical swap, module,
+sudo swap, memory pressure or disk operations. Frozen source presence,
+compiler, sanitizer/runtime or SHA mismatch MUST fail closed, never
+downgrade to a mocked PASS. The local compiler-only smoke establishes
+CRC32C/LZ4/SHA semantics, not that a full original checked-out source
+test passed; rely on exact-SHA hosted result for the latter.
+
+SOURCE_ONLY if clean, KUnit prior source/build evidence separate;
+LIVE_HANDOFF=NOT_RUN, LOADED_4096=NOT_RUN and PHYSICAL=NOT_RUN.
+Phase A BLOCKED, Phase B forced RAW bypass DISABLED, direct compressed
+handoff DISABLED. Existing RAW is the original UNCOMPRESSED full 4096
+bytes. No physical SWAPSPACE2 header/UUID/partition-table mutation,
+and no new competing reclaim pressure controller.

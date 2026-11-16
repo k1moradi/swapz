@@ -7,6 +7,7 @@ on:
       - 'tests/tools/stage-pinned-linux-zswap-origin.py'
       - 'tests/runtime/native/pinned-linux-zswap-compressed-handoff-test.py'
       - 'tests/runtime/native/zswap-compressed-cross-abi-test.py'
+      - 'tests/runtime/native/zswap-compressed-cross-abi-frozen-test.py'
       - 'tests/runtime/native/fixtures/round023-cross-abi-*.c'
       - 'src/kernel/zswap-import-codec.h'
       - 'src/kernel/codec.c'
@@ -22,6 +23,9 @@ jobs:
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
       - name: Install build-only compiler/codec dependencies
         run: |
           sudo apt-get update -qq
@@ -31,3 +35,4 @@ jobs:
         run: |
           git rev-parse HEAD
           python3 -B tests/runtime/native/zswap-compressed-cross-abi-test.py -v
+          python3 -B tests/runtime/native/zswap-compressed-cross-abi-frozen-test.py -v
