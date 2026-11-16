@@ -28,8 +28,8 @@ REQUIRED = {
     "CONFIG_CGROUPS": "n",
     "CONFIG_BLK_CGROUP": "n",
 }
-CONFIG_VALUE = re.compile(r"^(CONFIG_[A-Z0-9_]+)=(.+)$")
-CONFIG_UNSET = re.compile(r"^# (CONFIG_[A-Z0-9_]+) is not set$")
+CONFIG_VALUE = re.compile(r"^(CONFIG_[A-Za-z0-9_]+)=(.+)$")
+CONFIG_UNSET = re.compile(r"^# (CONFIG_[A-Za-z0-9_]+) is not set$")
 MANIFEST_KEY = re.compile(r"^[a-z][a-z0-9_]*$")
 OBJECT_LINE = re.compile(r"^([a-z][a-z0-9_-]*/[a-z][a-z0-9_-]*\.o) sha256=([0-9a-f]{64})$")
 COMMON_OBJECTS = frozenset((
@@ -52,21 +52,36 @@ def read_evidence(path: Path, maximum: int) -> bytes:
     return path.read_bytes()
 
 
-def parse_config(data: bytes) -> dict[str, str]:
+def parse_config(data: bytes, *, source_kind: str = "config") -> dict[str, str]:
+    """Parse real Kconfig names, including lowercase suffixes, fail closed.
+
+    Preserve first malformed line and a SHA-256 fingerprint without printing
+    possible secret values, full configs, runner paths or unbounded content.
+    """
     try:
         lines = data.decode("utf-8").splitlines()
     except UnicodeError as error:
         raise EvidenceError("non-utf8-config") from error
     values = {}
-    for line in lines:
+    for line_number, line in enumerate(lines, 1):
         set_match = CONFIG_VALUE.fullmatch(line)
         unset_match = CONFIG_UNSET.fullmatch(line)
         if set_match:
             name, value = set_match.groups()
         elif unset_match:
             name, value = unset_match.group(1), "n"
-        elif line.startswith(("CONFIG_", "# CONFIG_")):
-            raise EvidenceError("malformed-config-entry")
+        elif line.lstrip().startswith(("CONFIG_", "# CONFIG_")):
+            suspicious_line = line.lstrip()
+            suspect_name = (suspicious_line[2:].split(" ", 1)[0]
+                            if suspicious_line.startswith("# CONFIG_")
+                            else suspicious_line.partition("=")[0])
+            safe_name = re.sub(r"[^A-Za-z0-9_.-]", "?",
+                               suspect_name[:80])
+            fingerprint = hashlib.sha256(line.encode("utf-8")).hexdigest()
+            raise EvidenceError(
+                "malformed-config-entry:source=" + source_kind +
+                ":line=" + str(line_number) + ":option=" + safe_name +
+                ":line_sha256=" + fingerprint)
         else:
             continue
         if name in values:
@@ -83,8 +98,8 @@ def expected_config(profile: str) -> dict[str, str]:
 
 def check_config(profile: str, requested: bytes, effective: bytes) -> None:
     expected = expected_config(profile)
-    request_values = parse_config(requested)
-    actual_values = parse_config(effective)
+    request_values = parse_config(requested, source_kind="request")
+    actual_values = parse_config(effective, source_kind="effective")
     for name, value in expected.items():
         request_value = request_values.get(name)
         if request_value != value:
@@ -326,6 +341,70 @@ class RootlessConfigTests(unittest.TestCase):
                                         "already-recorded-uml-config-digest"):
                 verify_config(profile, request, effective, manifest_path)
             self.assertEqual(manifest_path.read_bytes(), unchanged)
+
+    def test_pinned_linux_mixed_case_symbol_grammar(self):
+        """Pinned Linux Kconfig really defines SCSI_DC395x and I2C_MUX_PCA954x."""
+        legitimate = ("CONFIG_SCSI_DC395x=m\n"
+                      "# CONFIG_I2C_MUX_PCA954x is not set\n")
+        expected = {"CONFIG_SCSI_DC395x": "m",
+                    "CONFIG_I2C_MUX_PCA954x": "n"}
+        for profile in ("enabled", "disabled"):
+            with self.subTest(profile=profile):
+                request, effective, manifest = self.fixture(profile)
+                request.write_text(request.read_text() + legitimate)
+                effective.write_text(effective.read_text() + legitimate)
+                self.assertEqual({name: parse_config(effective.read_bytes())[name]
+                                  for name in expected}, expected)
+                verify_config(profile, request, effective, manifest)
+                self.assertIn("uml_config_sha256=", manifest.read_text())
+                self.assertNotIn("kunit_cases_passed=5", manifest.read_text())
+
+    def test_malformed_config_identifies_first_line_without_values_or_paths(self):
+        """A real first failure is actionable without exposing config secrets."""
+        malformed_lines = (
+            "CONFIG_SCSI_DC395x",
+            "CONFIG_SCSI_DC395x=",
+            "CONFIG_SCSI-DC395x=y",
+            "# CONFIG_I2C_MUX_PCA954x is maybe set",
+            " CONFIG_KUNIT=y",
+            "CONFIG_KUNIT =y",
+            "CONFIG_PRIVATE_VALUE:raw-secret=supersecret",
+        )
+        for invalid in malformed_lines:
+            with self.subTest(line=invalid.partition("=")[0]):
+                request, effective, manifest = self.fixture()
+                original_lines = effective.read_text().splitlines()
+                effective.write_text(effective.read_text() + invalid + "\n" +
+                                     "CONFIG_LATE_INVALID=\n")
+                with self.assertRaisesRegex(EvidenceError,
+                        "malformed-config-entry:source=effective:line=" +
+                        str(len(original_lines) + 1)) as failure:
+                    verify_config("enabled", request, effective, manifest)
+                message = str(failure.exception)
+                fingerprint = hashlib.sha256(invalid.encode("utf-8")).hexdigest()
+                self.assertIn("line_sha256=" + fingerprint, message)
+                self.assertIn("option=CONFIG_", message)
+                self.assertNotIn("supersecret", message)
+                self.assertNotIn(str(self.root), message)
+                self.assertIn("uml_config_sha256=", manifest.read_text())
+                self.assertNotIn("kunit_cases_passed=", manifest.read_text())
+
+    def test_mixed_case_duplicate_and_profile_mismatch_still_fail(self):
+        for invalid in (
+            "CONFIG_SCSI_DC395x=m\nCONFIG_SCSI_DC395x=y\n",
+            "CONFIG_SCSI_DC395x=m\n# CONFIG_SCSI_DC395x is not set\n",
+        ):
+            with self.subTest(kind=invalid.splitlines()[-1]):
+                with self.assertRaisesRegex(EvidenceError,
+                                            "duplicate-config-option:CONFIG_SCSI_DC395x"):
+                    parse_config(invalid.encode("utf-8"))
+        request, effective, manifest = self.fixture("disabled")
+        effective.write_text(effective.read_text().replace(
+            "# CONFIG_ZSWAP is not set", "CONFIG_ZSWAP=m"))
+        with self.assertRaisesRegex(EvidenceError,
+                                    "effective-CONFIG_ZSWAP:expected=n:actual=m"):
+            verify_config("disabled", request, effective, manifest)
+
 
     def test_missing_wrong_and_forced_options(self):
         for name in REQUIRED:
