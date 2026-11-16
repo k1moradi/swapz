@@ -1388,14 +1388,18 @@ timeout --signal=TERM --kill-after=2s 10s dmsetup remove --retry "$DMNAME" || fa
 OWN_DM=0
 
 # Pre-submission lower READ failure qualification. Seed one committed nonzero
-# high logical page without verify-after-write, leaving LBA0 unmapped so an
-# asynchronous block-device probe cannot consume the one-shot fault. The
-# aligned O_DIRECT verification must fail, the target must fail closed, and
-# neither target submitted-read accounting nor owned null_blk READ sectors
-# may advance.
+# high logical page without verify-after-write. Suppress only the ordinary
+# udev rule processing for this disposable null_blk mapper: external blkid/
+# filesystem probes can otherwise consume the one-shot READ fault between
+# mapper publication and the explicitly controlled O_DIRECT verification.
+# libdevmapper still creates its node; independently verify the exact sysfs
+# DM name/UUID and opened node after bounded udev settling as before.
+# Do not disable rules for primary or physical swap devices.
+# The aligned O_DIRECT verification must fail, the target must fail closed,
+# and neither submitted-read accounting nor lower READ sectors may advance.
 note "START_LOADED_SYNTHETIC_READ_FAULT"
 UUID="SWAPZ-TEST-$TOKEN-readfault"
-dmsetup create "$DMNAME" --uuid "$UUID" \
+dmsetup --noudevrules create "$DMNAME" --uuid "$UUID" \
     --table "0 32768 swapz $LOWER 0 64 0 2 0 1 0 2 0 1" ||
     fail "cannot create retained READ-fault mapping"
 OWN_DM=1

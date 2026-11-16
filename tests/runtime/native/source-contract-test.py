@@ -2827,6 +2827,17 @@ int main(void) {
         self.assertIn("read_fault_nth=%u", status)
         self.assertIn("read_fault_calls=%lld read_fault_injected=%d", status)
         self.assertIn("START_LOADED_SYNTHETIC_READ_FAULT", deploy)
+        # Suppress udev's asynchronous signature reads only on the isolated
+        # synthetic READ-fault mapper; this preserves the one-shot oracle.
+        read_fault_phase = deploy.split(
+            'note "START_LOADED_SYNTHETIC_READ_FAULT"', 1)[1].split(
+            'note "START_LOADED_RETAINED_FLUSH_FAULT"', 1)[0]
+        self.assertIn(
+            'dmsetup --noudevrules create "$DMNAME" --uuid "$UUID"',
+            read_fault_phase)
+        self.assertIn("swapz_verify_owned_dm_node", read_fault_phase)
+        self.assertIn("READ-fault fired before verification READ",
+                      read_fault_phase)
         self.assertIn("PASS_LOADED_SYNTHETIC_READ_FAULT=", deploy)
         self.assertIn('--write-page "$read_fault_seed_page" 73', deploy)
         self.assertIn('"$READ_PROBE" "/dev/mapper/$DMNAME" "$read_fault_seed_page"', deploy)
