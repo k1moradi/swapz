@@ -10417,7 +10417,13 @@ class ReportContract(unittest.TestCase):
             try:
                 with mock.patch.object(runner, "git_result",
                                        return_value=completed), \
-                     mock.patch.object(runner, "git_sha", return_value=source):
+                     mock.patch.object(runner, "git_sha", return_value=source), \
+                     mock.patch.object(
+                         runner, "algorithm_ram_source_lease_refusal",
+                         return_value=None), \
+                     mock.patch.object(
+                         runner, "qualification_artifact_digests",
+                         return_value=artifacts):
                     path, nonce = runner.write_algorithm_ram_development_evidence(
                         result)
                 self.assertEqual(path.parent, runner.ROOT / "build/tests")
