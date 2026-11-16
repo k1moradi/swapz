@@ -1,0 +1,197 @@
+name: "Phase A pinned Linux zswap provenance source prototype"
+
+on:
+  push:
+    paths:
+      - ".github/workflows/phase-a-zswap-origin-prototype.yml"
+      - "tests/tools/stage-pinned-linux-zswap-origin.py"
+      - "tests/runtime/native/pinned-linux-zswap-origin-stage-test.py"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  modified-linux-producer-objects:
+    name: "Modified pinned Linux CONFIG_ZSWAP=y/n object Kbuild"
+    runs-on: ubuntu-24.04
+    timeout-minutes: 65
+    steps:
+      - name: "Initialize fail-closed evidence even if checkout fails"
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p "$RUNNER_TEMP/zswap-origin-evidence"
+          for profile in enabled disabled; do
+            printf 'result=NOT_RUN\nreason=checkout_or_source_staging_not_completed\n' \
+              > "$RUNNER_TEMP/zswap-origin-evidence/$profile.txt"
+          done
+      - name: "Checkout committed swapz staging program (read only)"
+        uses: actions/checkout@v4
+        with:
+          path: swapz
+          persist-credentials: false
+      - name: "Checkout exact full upstream Linux source (read only)"
+        uses: actions/checkout@v4
+        with:
+          repository: torvalds/linux
+          ref: c339f4010dea8b0d754f84ace70cd1b089878ef8
+          fetch-depth: 1
+          path: linux
+          persist-credentials: false
+      - name: "Install Linux object build prerequisites"
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo apt-get update -qq
+          sudo DEBIAN_FRONTEND=noninteractive apt-get install -y \
+            --no-install-recommends build-essential bc bison flex \
+            libelf-dev libssl-dev
+      - name: "Run source-controlled rootless staging regression"
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 -B swapz/tests/runtime/native/pinned-linux-zswap-origin-stage-test.py \
+            > "$RUNNER_TEMP/zswap-origin-rootless.log" 2>&1 || {
+            result=$?
+            echo "::error::Producer source staging regression failed (exit $result)"
+            tail -n 35 "$RUNNER_TEMP/zswap-origin-rootless.log"
+            exit "$result"
+          }
+      - name: "Modify actual pinned Linux C and H in disposable full checkout"
+        shell: bash
+        run: |
+          set -euo pipefail
+          evidence_dir="$RUNNER_TEMP/zswap-origin-evidence"
+          if ! python3 -B swapz/tests/tools/stage-pinned-linux-zswap-origin.py \
+              --linux-root linux --manifest "$evidence_dir/source-manifest.json"; then
+            echo "::error::Exact Linux identity/blob or source staging failure"
+            exit 1
+          fi
+          git -C linux diff --check -- \
+            mm/zswap.c mm/page_io.c include/linux/swap_ops.h \
+            include/linux/blk_types.h include/linux/bio.h block/bio.c
+          # Exact changed-path allowlist; reject foreign, missing or unexpected changes.
+          expected="$(printf '%s\n' block/bio.c include/linux/bio.h \
+            include/linux/blk_types.h include/linux/swap_ops.h mm/page_io.c mm/zswap.c)"
+          actual="$(git -C linux diff --name-only | LC_ALL=C sort)"
+          if [[ "$actual" != "$expected" ]]; then
+            echo "::error::Unexpected modified Linux source paths"
+            exit 1
+          fi
+          printf 'source_stage=PASS\nsource_modified=yes\n' \
+            > "$evidence_dir/staging-status.txt"
+      - name: "Compile modified real Linux swap/BIO objects, two configurations"
+        shell: bash
+        env:
+          KBUILD_JOBS: "2"
+        run: |
+          set -Eeuo pipefail
+          evidence_dir="$RUNNER_TEMP/zswap-origin-evidence"
+          current_manifest="$evidence_dir/setup.txt"
+          current_phase=initialization
+          log_file="$RUNNER_TEMP/zswap-origin-build.log"
+          trap 'code=$?; if (( code != 0 )); then printf "result=FAIL\nfirst_failure_phase=%s\nfirst_failure_exit_code=%d\n" "$current_phase" "$code" >> "$current_manifest"; fi' EXIT
+
+          if [[ "$KBUILD_JOBS" != 2 ]]; then
+            echo "::error::Kbuild resource bound changed"
+            exit 2
+          fi
+          git -C linux rev-parse HEAD | grep -Fx \
+            'c339f4010dea8b0d754f84ace70cd1b089878ef8' >/dev/null
+          if [[ ! -s "$evidence_dir/source-manifest.json" ]]; then
+            echo "::error::Modified Linux C/H manifest is missing"
+            exit 1
+          fi
+          # No commands below write to live block devices or running kernel.
+          run_logged() {
+            local command_name="$1" command_exit_code=0
+            shift
+            current_phase="$command_name"
+            printf '%s_command=' "$command_name" >> "$current_manifest"
+            printf '%q ' "$@" >> "$current_manifest"
+            printf '\n' >> "$current_manifest"
+            if "$@" > "$log_file" 2>&1; then
+              command_exit_code=0
+            else
+              command_exit_code=$?
+            fi
+            printf '%s_exit_code=%d\n' "$command_name" "$command_exit_code" \
+              >> "$current_manifest"
+            if (( command_exit_code != 0 )); then
+              echo "::error::Modified Linux $profile $command_name failed ($command_exit_code)"
+              tail -n 30 "$log_file"
+              return "$command_exit_code"
+            fi
+          }
+
+          for profile in enabled disabled; do
+            current_manifest="$evidence_dir/$profile.txt"
+            build_dir="$RUNNER_TEMP/zswap-origin-build-$profile"
+            mkdir -p "$build_dir"
+            requested_zswap=y
+            option=--enable
+            expected_config=CONFIG_ZSWAP=y
+            if [[ "$profile" == disabled ]]; then
+              requested_zswap=n
+              option=--disable
+              expected_config='# CONFIG_ZSWAP is not set'
+            fi
+            {
+              printf 'result=IN_PROGRESS\nsource_repository=torvalds/linux\n'
+              printf 'source_sha=c339f4010dea8b0d754f84ace70cd1b089878ef8\n'
+              printf 'source_modified=yes\nrequested_zswap=%s\n' "$requested_zswap"
+              printf 'compiler=%s\n' "$(gcc --version | sed -n '1p')"
+              printf 'kbuild_jobs=%s\nevidence_class=HOSTED_MODIFIED_SOURCE_OBJECT_KBUILD\n' "$KBUILD_JOBS"
+              printf 'phase_a_qualified=no\nphase_b_enabled=no\n'
+            } > "$current_manifest"
+            run_logged defconfig make -s -C linux "O=$build_dir" CC=gcc defconfig
+            run_logged scripts_config linux/scripts/config --file "$build_dir/.config" \
+              --enable SWAP "$option" ZSWAP
+            run_logged olddefconfig make -s -C linux "O=$build_dir" CC=gcc olddefconfig
+            current_phase=verify_effective_configuration
+            if ! grep -Fxq 'CONFIG_SWAP=y' "$build_dir/.config" || \
+               ! grep -Fxq "$expected_config" "$build_dir/.config"; then
+              echo "::error::Effective CONFIG_SWAP/CONFIG_ZSWAP unexpected"
+              exit 1
+            fi
+            printf 'effective_swap=y\neffective_zswap=%s\n' "$requested_zswap" \
+              >> "$current_manifest"
+            printf 'config_sha256=%s\n' \
+              "$(sha256sum "$build_dir/.config" | cut -d' ' -f1)" \
+              >> "$current_manifest"
+            run_logged prepare make -s -C linux "O=$build_dir" CC=gcc \
+              "-j$KBUILD_JOBS" W=1 prepare
+            objects=(mm/page_io.o block/bio.o)
+            if [[ "$profile" == enabled ]]; then
+              objects+=(mm/zswap.o)
+            fi
+            run_logged compile_objects make -s -C linux "O=$build_dir" CC=gcc \
+              "-j$KBUILD_JOBS" W=1 "${objects[@]}"
+            current_phase=verify_compiled_postimage_objects
+            for object in "${objects[@]}"; do
+              if [[ ! -s "$build_dir/$object" ]]; then
+                echo "::error::Compiled modified object missing: $object"
+                exit 1
+              fi
+              printf 'object=%s sha256=%s\n' "$object" \
+                "$(sha256sum "$build_dir/$object" | cut -d' ' -f1)" \
+                >> "$current_manifest"
+            done
+            if [[ "$profile" == disabled && -e "$build_dir/mm/zswap.o" ]]; then
+              echo "::error::ZSWAP-disabled build unexpectedly emitted zswap object"
+              exit 1
+            fi
+            printf 'kunit=NOT_RUN_NO_DEDICATED_PINNED_KUNIT_CASE\n' >> "$current_manifest"
+            printf 'result=PASS\n' >> "$current_manifest"
+          done
+      - name: "Retain source, build and first-failure evidence"
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: "phase-a-zswap-origin-modified-linux-prototype"
+          path: |
+            ${{ runner.temp }}/zswap-origin-evidence/*.txt
+            ${{ runner.temp }}/zswap-origin-evidence/*.json
+          if-no-files-found: ignore
+          retention-days: 7

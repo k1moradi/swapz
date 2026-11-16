@@ -1,5 +1,42 @@
 # Testing Standards
 
+## Round 009 actual pinned MM/BIO origin staging prototype (2026-11-15)
+
+`tests/tools/stage-pinned-linux-zswap-origin.py` is a source-mutating program,
+not an emitted patch or a substitute for kernel compilation. It requires a
+complete clean `torvalds/linux` checkout at exact
+`c339f4010dea8b0d754f84ace70cd1b089878ef8`, checks seven original Git
+blobs including the kernel Makefile, validates every unique source anchor
+before writing, refuses second application and overlapping/foreign changes,
+and stages six original Linux C/H files. It emits a bounded changed-file
+manifest with Git-blob and SHA-256 postimages outside the kernel tree.
+`tests/runtime/native/pinned-linux-zswap-origin-stage-test.py` exercises the
+real staging program on literal upstream source excerpts, including both
+negative preflight and write-failure rollback. This is **rootless source
+replay**, never full Linux Kbuild or a functioning BIO ABI.
+
+`.github/workflows/phase-a-zswap-origin-prototype.yml` separately obtains the
+full pinned upstream Linux tree, executes the program to alter real C/H
+sources, verifies the only six changed paths, and runs isolated Linux Kbuild
+configurations with `CONFIG_ZSWAP=y/n` for modified `mm/page_io.o` and
+`block/bio.o`, plus `mm/zswap.o` only when enabled. Captured evidence must
+include the original/postimage source identities, effective configs, compiler,
+bounded first-failure phase/exit and compiled-object SHA-256. This independent
+workflow must not substitute a stock-source build or link/load an external
+module. KUnit is **NOT_RUN** until a dedicated pinned kernel suite exists;
+source checks never stand in for KUnit or actual cloned/split writeback BIO
+execution.
+
+Provenance is a scalar: zero is ORDINARY_OR_UNKNOWN; nonzero denotes only a
+previously stored, identity-matched and successfully decompressed zswap entry.
+The swap I/O context and iocb must not mix origins within one backing WRITE
+BIO. `bio_init`/reset clear origin and clone/split copy the scalar. The helper
+requires an actual WRITE with `REQ_SWAP` and the exact stored-writeback
+origin; a generic swap flag, task, or folio property is not proof. This
+prototype does not authenticate a loaded producer/consumer pairing, actual
+zswap eviction, swap-device readback, errors under real submission or owner
+physical swap. Phase A stays BLOCKED and Phase B RAW bypass remains OFF.
+
 ## Passive zswap origin qualification (prototype, 2026-11-15)
 
 The source-bound `tests/runtime/native/zswap-origin-consumer-source-test.py`
