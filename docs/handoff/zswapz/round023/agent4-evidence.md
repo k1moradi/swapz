@@ -116,3 +116,28 @@ output and disabled production. There is no change to kernel codec/DM,
 checksum arithmetic, frozen producer or physical acceptance. This is
 a test harness compiler-flag scope repair, **not** proof of loaded
 interoperability. Any later runtime failure must be separately reported.
+
+
+## Same-round producer carrier integration: source-only refusal
+
+The second hosted source-only cross-ABI workflow
+`43954356412` on `b6babfd18f7f490ceb123b3d900950e7a73df690`
+failed BEFORE the new frozen-source driver could run. Both GCC and Clang
+rejected the **previous** mutable-HEAD Agent4 fixture because Agent2's
+concurrently published disabled producer now defines two additional
+`static int` source-only carrier functions without test references
+(`-Werror=unused-function`). There is no executed kernel MM/BIO/DM
+interop outcome in that failing step.
+
+The minimal Agent4-only reconciliation preserves the exact Agent2 C
+bodies and existing warnings-as-errors: if *both* optional static
+helpers are present in the source, the original host test calls real
+`zswap_swapz_carrier_snapshot_source_only` after its synthetic
+submitted owner and demands `source_only_untrusted=true`. It calls
+real `zswap_swapz_carrier_publish_disabled` even with all mock flags
+true and after a forged `source_only_untrusted=false`; **both must
+return -EOPNOTSUPP**. Missing one half refuses source drift; if
+neither helper exists, the Round022-only baseline remains testable.
+The independent frozen-original test runs first in the CI job so a
+future HEAD-only integration failure cannot hide its verdict. No
+production carrier is activated and no warning is suppressed.

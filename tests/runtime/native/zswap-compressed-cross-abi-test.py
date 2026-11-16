@@ -49,7 +49,35 @@ def original_source_c() -> str:
         if body.count(include) != 1:
             raise AssertionError("linux_staged_header_drift: " + include)
         body = body.replace(include, "")
-    return producer_test.HOST_SHIMS + "\n" + body + "\n" + FIXTURE.read_text()
+    fixture = FIXTURE.read_text(encoding="utf-8")
+    # Round023 Agent2 may append genuine disabled source functions after
+    # the frozen baseline. Execute their rejection gate, rather than
+    # weakening compiler -Werror=unused-function or modifying source bodies.
+    carrier_functions = (
+        "zswap_swapz_carrier_snapshot_source_only(",
+        "zswap_swapz_carrier_publish_disabled(",
+    )
+    available = tuple(f"static int {function}" in body
+                      for function in carrier_functions)
+    if any(available) and not all(available):
+        raise AssertionError("incomplete_source_only_carrier_pair")
+    if all(available):
+        marker = "assert(zswap_swapz_owned_payload_submit(&producer));"
+        if fixture.count(marker) != 1:
+            raise AssertionError("stored_owner_submission_marker_drift")
+        carrier_test = """
+    /* Source-authentic carrier with MOCK owner. No MM/BIO/DM ABI exists. */
+    struct zswap_swapz_compressed_carrier_v1 carrier = { 0 };
+    assert(zswap_swapz_carrier_snapshot_source_only(&carrier, &producer) == 0);
+    assert(carrier.source_only_untrusted);
+    assert(zswap_swapz_carrier_publish_disabled(
+        &carrier, true, true, true, true, true) == -EOPNOTSUPP);
+    carrier.source_only_untrusted = false;
+    assert(zswap_swapz_carrier_publish_disabled(
+        &carrier, true, true, true, true, true) == -EOPNOTSUPP);
+"""
+        fixture = fixture.replace(marker, marker + "\n" + carrier_test, 1)
+    return producer_test.HOST_SHIMS + "\n" + body + "\n" + fixture
 
 
 class Round023IndependentCrossAbi(unittest.TestCase):

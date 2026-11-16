@@ -34,5 +34,7 @@ jobs:
       - name: Show exact source and execute source-only interoperability
         run: |
           git rev-parse HEAD
-          python3 -B tests/runtime/native/zswap-compressed-cross-abi-test.py -v
+          # Independent frozen baseline executes even when a same-round
+          # source extension fails the distinct mutable-HEAD compatibility test.
           python3 -B tests/runtime/native/zswap-compressed-cross-abi-frozen-test.py -v
+          python3 -B tests/runtime/native/zswap-compressed-cross-abi-test.py -v
