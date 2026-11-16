@@ -7,3 +7,8 @@
 - Preserve 4/3 real object digests, exact pinned source Git blobs, separate y/n configs and kernel image SHA, mixed-case and CGROUPS-off conditional BLK_CGROUP semantics, absolute no-fabrication of TAP, first failed command and per-profile/setup exit.
 - Test limits: synthetic rootless Bash capture fixtures and workflow contract mutation tests cannot demonstrate actual executed KUnit; exact-source hosted run and first failure, if any, must be separately qualified.
 - Safety: no loaded kernel, physical swap, DM or real MM/BIO source use authorized; Phase A BLOCKED; Phase B RAW bypass and compressed handoff DISABLED; swapz RAW remains original 4096 uncompressed bytes.
+
+## Exact-SHA hosted first follow-up and correction
+
+- First integrated source run: https://github.com/k1moradi/swapz/actions/runs/43897211201, job 133403912605, 2026-11-16. `rootless` rejected after 33 executed Python methods (32 PASS, 1 failure) at `test_round019_workflow_capture_negative_mutations`; mutation deleting `[[ "$(wc -c < "$log")" -le 8388608 ]]` was not detected by the source-contract checker. The real newly added Bash capture, stale/symlink, hash-drift and initial TAP parser tests had passed; this is an exact source-contract **test** failure before modified-Linux execution, not a genuine KUnit TAP case failure.
+- Follow-up correction: require the exact source log ≤8MiB check once and the captured file ≤8MiB check twice (immediately after capture and before TAP verification), and exercise removal of either bound. This closes the observed test gap without weakening the production Bash guard or five-case verifier.

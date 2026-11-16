@@ -125,6 +125,8 @@ def verify_kunit_workflow_contract(contents: str) -> None:
         """grep -Fxq '# CONFIG_ZSWAP is not set' "$uml_dir/.config" """.strip(),
         'captured_sha256="$(sha256sum "$captured" | cut -d\' \' -f1)"',
         '[[ -f "$log" && ! -L "$log" && -s "$log" ]]',
+        '[[ "$(wc -c < "$log")" -le 8388608 ]]',
+        '[[ "$(wc -c < "$captured")" -le 8388608 ]]',
         '[[ ! -e "$captured" && ! -L "$captured" ]]',
         '(umask 077; set -C; cat -- "$log" > "$captured")',
         'chmod 0400 -- "$captured"',
@@ -163,6 +165,8 @@ def verify_kunit_workflow_contract(contents: str) -> None:
     if (re.search(r"(?m)^\s*run_checked\s+", capture_fragment) or
         contents.count('cat -- "$log" > "$captured"') != 1 or
         contents.count('kunit_output_sha256=%s') != 1 or
+        contents.count('[[ "$(wc -c < "$log")" -le 8388608 ]]') != 1 or
+        contents.count('[[ "$(wc -c < "$captured")" -le 8388608 ]]') != 2 or
         contents.count('[[ "$(sha256sum "$captured" | cut -d\' \' -f1)" == "$captured_sha256" ]]') != 1):
         raise ValueError("missing or mutable authentic UML TAP capture")
 
@@ -864,7 +868,9 @@ class PinnedLinuxStageTests(unittest.TestCase):
             ('[[ -f "$log" && ! -L "$log" && -s "$log" ]]', 'true # no stream'),
             ('(umask 077; set -C; cat -- "$log" > "$captured")',
              'cat -- "$log" > "$captured" # may clobber'),
-            ('[[ "$(wc -c < "$log")" -le 8388608 ]]', 'true # unbounded'),
+            ('[[ "$(wc -c < "$log")" -le 8388608 ]]', 'true # unbounded input'),
+            ('[[ "$(wc -c < "$captured")" -le 8388608 ]]',
+             'true # unbounded captured output'),
             ('phase=verify_captured_tap_identity', 'phase=unchecked_tap_identity'),
             ('[[ "$(sha256sum "$captured" | cut -d\' \' -f1)" == "$captured_sha256" ]]',
              'true # ignores post-capture mutation'),

@@ -13811,3 +13811,11 @@ matched loaded DM, genuine zswap stored-entry MM→BIO WRITE or exact
 original 4096-byte swap-in. Loaded and owner physical trials remain NOT_RUN.
 Phase A BLOCKED; Phase B RAW bypass DISABLED; compressed direct handoff
 DISABLED; current RAW is the uncompressed original 4096-byte page.
+
+Source-linked Round 019 follow-up: a hosted negative-workflow mutation
+exposed a regression-test gap: deleting the raw-input 8 MiB bound did not
+fail the *source contract*, although the actual Bash gate was present.
+Therefore the source-contract verifier must require **exactly one** raw
+shared-log size check and **two** per-profile captured-TAP bounds (at fresh
+copy and again before actual TAP verification); mutation of either bound
+must fail closed. This is not a change to the KUnit PASS definition.
