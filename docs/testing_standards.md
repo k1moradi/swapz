@@ -14424,3 +14424,54 @@ representation, KUnit y/n gates and all SWAPSPACE2 safeguards unchanged.**
 Phase B forced RAW bypass DISABLED, `STORED_ENTRY_LIVE=NOT_RUN`,
 `4096_READBACK=NOT_RUN`, `PHYSICAL=NOT_RUN`. No module/swap/pressure
 or physical trial is part of this source gate.
+
+## Round 023 — Agent 3: disabled DM compressed import transaction and 4096 readback
+
+Actual production src/kernel/dm-target.c now contains only a #if 0
+SWAPZ_ROUND023_COMPRESSED_DM_IMPORT_DISABLED_NO_AUTHENTIC_CARRIER
+integration seam. Its compiled ordinary WRITE/READ, RAW fallback,
+LZ4/delta64/SHUF8, segment/GC/discard, mapping and exact upper ACK
+paths are bit-for-bit unchanged. The file does not include or invoke
+the imported decoder or proposed admission implementation at runtime.
+A normal 4096-byte REQ_SWAP BIO's preexisting origin bit is evidence
+of an ALREADY-DECOMPRESSED page, not a valid compressed source carrier.
+The source-only new zswap-import-admission.h has
+SWAPZ_ZSWAP_IMPORT_ADMISSION_ACTIVE=0, and try_live always returns
+-EOPNOTSUPP, irrespective of forged source/DM authority.
+
+A separate MOCK/UNTRUSTED caller-only model binds an explicitly provided
+source slot+store generation/source identity to DIFFERENT current DM
+logical-page generation+GC epoch, true-previous-store+owned-copy and
+independent-original-SHA claims. Those are synthetic, NOT authenticated
+kernel provenance. One proposed compressed LZ4 block record has length
+1..3568, original decoded length 4096, canonical production CRC32C,
+dictionary-free v1 and RAM-only descriptor. The model refuses missing
+or stale identity, invalid length/CRC/codec/SHA, unavailable authorized
+post-SWAPSPACE2-header extent, and invalid extent-size/offset. Only
+existing 4096/8192/16384-byte lower payload-only image classes with
+deterministic zero padding are represented; physical metadata is NEVER
+serialized, and no header/UUID/partition writes occur.
+
+The ordered-owner scratch model requires full successful lower extent
+WRITE completion before RAM mapping publication, matching current
+logical/generation/GC then exactly ONE upper WRITE ACK. Duplicate/early
+ACK, short/failed WRITE, stale overwrite/GC, DISCARD/teardown all refuse.
+Only after this state does a full successful extent READ allow the
+existing imported LZ4 block decoder to validate compressed payload CRC32C,
+decode exactly 4096 into separate owned scratch, independently check
+the original 4096 SHA256 and optional full original memcmp, then copy
+to upper output. Invalid READ/CRC/SHA/partial extent read must not
+modify the upper output or grant ACK. Neither lower read/write nor
+BIO completion is performed by this source helper.
+
+The new tests/runtime/native/fixtures/round023-consumer-admission.c
+is compiler executed by zswap-compressed-admission-test.py under GCC
+and Clang with strict warnings and ASan/UBSan, linked to the REAL existing
+src/kernel/codec.c, liblz4 and OpenSSL SHA256. Existing codec.c's legacy
+size_t-to-u32 warnings are isolated only on that original translation
+unit; new C keeps -Werror -Wconversion -Wshadow. These are
+SOURCE_ONLY synthetic RAM tests. No real kernel zswap store/eviction,
+authenticated MM/BIO transport, loaded matching DM, original on-kernel
+4096 swap-in, RAM-session ownership or physical trial has occurred.
+Phase A BLOCKED; forced RAW bypass and compressed handoff DISABLED.
+Current RAW is the original UNCOMPRESSED 4096, SWAPSPACE2 intact.

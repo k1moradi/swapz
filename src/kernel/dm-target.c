@@ -402,6 +402,23 @@ struct swapz_ack_dwell_batch {
 	u64 bins[2][SWAPZ_LANE_DWELL_BINS];
 };
 
+/*
+ * Round023 future compressed-zswap DM import seam. Ordinary REQ_SWAP and the
+ * existing origin scalar identify an ALREADY-DECOMPRESSED original 4096-byte
+ * page; they are never a compression-aware byte carrier. No independent
+ * source slot-generation, cloned BIO ownership or mapping translation is
+ * currently authenticated, so the following typed import remains #if 0.
+ * The host-only admission model exercises durable lower -> RAM publication
+ * -> exactly-once ACK -> 4096 READ, not the live ordered worker.
+ */
+#if 0 /* SWAPZ_ROUND023_COMPRESSED_DM_IMPORT_DISABLED_NO_AUTHENTIC_CARRIER */
+#include "zswap-import-admission.h"
+static int swapz_compressed_import_disabled(void)
+{
+	return -EOPNOTSUPP;
+}
+#endif /* SWAPZ_ROUND023_COMPRESSED_DM_IMPORT_DISABLED_NO_AUTHENTIC_CARRIER */
+
 enum swapz_write_origin {
 	SWAPZ_WRITE_ORIGIN_ORDINARY_OR_UNKNOWN = 0,
 	SWAPZ_WRITE_ORIGIN_ZSWAP_STORED_WRITEBACK,
