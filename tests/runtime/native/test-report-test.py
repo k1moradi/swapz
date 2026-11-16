@@ -6261,8 +6261,12 @@ class ReportContract(unittest.TestCase):
                 self.assertEqual(len(reports), 2)
                 self.assertEqual([stage["status"] for stage in reports[1]["stages"]],
                                  ["PASS"] * 5)
-                self.assertEqual(reports[1]["algorithm_real_swap"], {
-                    "overall": "NOT_RUN", "reason": reason})
+                refusal = reports[1]["algorithm_real_swap"]
+                self.assertEqual(refusal["overall"], "NOT_RUN")
+                self.assertEqual(refusal["reason"], reason)
+                self.assertEqual(refusal["phase"], "before_physical_selector")
+                self.assertEqual(refusal["tested_source_sha"], source_sha)
+                self.assertEqual(refusal["current_main_source_sha"], source_sha)
                 self.assertIn("phase=before_physical_selector gate=ram_evidence "
                               f"reason={reason} mutation=not_started",
                               console.getvalue())

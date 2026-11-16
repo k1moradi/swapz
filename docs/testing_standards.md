@@ -2,6 +2,13 @@
 
 ## Local-source algorithm qualification (owner decision, 2026-11-16)
 
+An unauthenticated physical selector must never run when local RAM
+source evidence refuses. The rootless report regression checks both the
+original refusal status and the bounded, locally derived source-identity
+fields (`phase`, `tested_source_sha`, `current_main_source_sha`) so
+diagnostics remain complete while avoiding device mutation and private paths.
+
+
 The rootless local physical-handoff regression mocks the independently
 tested local source-lease decision while asserting that the same-run RAM
 checkpoint reaches only a mocked selector, without remote Git publication
