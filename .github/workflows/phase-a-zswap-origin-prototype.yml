@@ -11,6 +11,7 @@ on:
       - "src/kernel/dm-target.c"
       - "tests/runtime/native/zswap-origin-consumer-source-test.py"
       - "tests/runtime/native/zswap-origin-producer-consumer-abi-test.py"
+      - "tests/runtime/native/zswap-origin-owned-ram-qualification.py"
   workflow_dispatch:
 
 permissions:
@@ -79,6 +80,35 @@ jobs:
               exit "$result"
             fi
           done
+      - name: "Run read-only owned-RAM provenance and 4096-byte guard"
+        shell: bash
+        run: |
+          set -euo pipefail
+          runner=swapz/tests/runtime/native/zswap-origin-owned-ram-qualification.py
+          log_file="$RUNNER_TEMP/zswap-origin-owned-ram-rootless.log"
+          if python3 -B "$runner" --self-test > "$log_file" 2>&1; then
+            :
+          else
+            first_exit=$?
+            echo "::error::Owned RAM offline contract regression failed (exit $first_exit)"
+            tail -n 20 "$log_file"
+            exit "$first_exit"
+          fi
+          # This must refuse even in an untrusted hosted runner; a source
+          # compiler/build never grants live-swap, mapper or module ownership.
+          if python3 -B "$runner" --preflight > "$log_file" 2>&1; then
+            first_exit=0
+          else
+            first_exit=$?
+          fi
+          if [[ "$first_exit" != 2 ]] ||
+             ! grep -q '^ENVIRONMENT_NOT_QUALIFIED first_cause=' "$log_file" ||
+             ! grep -Fxq 'LOADED_STORED_ENTRY=NOT_RUN' "$log_file" ||
+             ! grep -Fxq '4096_READBACK=NOT_RUN' "$log_file" ||
+             ! grep -Fxq 'PHASE_A=BLOCKED PHASE_B=DISABLED DIRECT_COMPRESSED=DISABLED' "$log_file"; then
+            echo "::error::Unsafe owned-RAM preflight result (exit $first_exit)"
+            exit 3
+          fi
       - name: "Run disabled compressed handoff source/ownership negative regression"
         shell: bash
         run: |

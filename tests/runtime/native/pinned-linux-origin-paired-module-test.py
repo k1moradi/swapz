@@ -536,6 +536,26 @@ def assert_full_workflow_contract(workflow: Path) -> None:
             text.index(step_name) < text.index(
                 '      - name: "Build modified Linux and matched source-linked'),
             "workflow_consumer_regression_fail_closed")
+    # This gate is intentionally read-only, and its expected exit 2 is
+    # NOT a qualified loaded-kernel result. Removing the refusal test may
+    # never silently turn a matched module compilation into Phase A PASS.
+    require('      - "tests/runtime/native/zswap-origin-owned-ram-qualification.py"'
+            in trigger, "workflow_owned_ram_trigger")
+    guard = '      - name: "Run read-only owned-RAM provenance and 4096-byte guard"'
+    require(text.count(guard) == 1 and
+            text.index(guard) < text.index(
+                '      - name: "Build modified Linux and matched source-linked'),
+            "workflow_owned_ram_order")
+    guard_step = text.split(guard, 1)[1].split(
+        '      - name: "Run disabled compressed handoff source/ownership negative regression"',
+        1)[0]
+    require("zswap-origin-owned-ram-qualification.py" in guard_step and
+            "--self-test" in guard_step and "--preflight" in guard_step and
+            'if [[ "$first_exit" != 2 ]]' in guard_step and
+            'LOADED_STORED_ENTRY=NOT_RUN' in guard_step and
+            '4096_READBACK=NOT_RUN' in guard_step and
+            'PHASE_A=BLOCKED PHASE_B=DISABLED DIRECT_COMPRESSED=DISABLED'
+            in guard_step, "workflow_owned_ram_refusal")
 
 
 class PairedModuleTests(unittest.TestCase):
@@ -975,6 +995,28 @@ class FullWorkflowContractTests(unittest.TestCase):
                 anchor, "            swapz/tests/runtime/native/incorrect-test.py; do"))
             with self.assertRaisesRegex(
                     VerificationError, "workflow_consumer_regression_fail_closed"):
+                assert_full_workflow_contract(path)
+
+    def test_owned_ram_preflight_removed_rejected(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="owned-ram-preflight-") as directory:
+            original = self.workflow_path.read_text()
+            anchor = 'if [[ "$first_exit" != 2 ]]'
+            self.assertEqual(original.count(anchor), 1)
+            path = Path(directory) / "unsafe.yml"
+            path.write_text(original.replace(anchor, 'if [[ "$first_exit" != 0 ]]'))
+            with self.assertRaisesRegex(VerificationError,
+                                        "workflow_owned_ram_refusal"):
+                assert_full_workflow_contract(path)
+
+    def test_owned_ram_source_trigger_removed_rejected(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="owned-ram-trigger-") as directory:
+            original = self.workflow_path.read_text()
+            anchor = '      - "tests/runtime/native/zswap-origin-owned-ram-qualification.py"'
+            self.assertEqual(original.count(anchor), 1)
+            path = Path(directory) / "untriggered.yml"
+            path.write_text(original.replace(anchor, '      - "irrelevant.txt"'))
+            with self.assertRaisesRegex(VerificationError,
+                                        "workflow_owned_ram_trigger"):
                 assert_full_workflow_contract(path)
 
     def test_removing_classifier_is_rejected(self) -> None:
