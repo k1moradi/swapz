@@ -482,7 +482,18 @@ def assert_full_workflow_contract(workflow: Path) -> None:
                 "current_phase=verify_matched_paired_artifacts",
                 "python3 -B swapz/tests/runtime/native/pinned-linux-origin-paired-module-test.py",
                 "printf 'result=PASS\\n'")
-    locations = [build_step.find(token) for token in required]
+    # The pinned baseline warning classifier calls the verifier before Kbuild.
+    # Only the second invocation is the real post-link artifact verifier.
+    module_verifier_command = (
+        "python3 -B swapz/tests/runtime/native/pinned-linux-origin-paired-module-test.py"
+    )
+    require(build_step.count(module_verifier_command) == 2,
+            "workflow_baseline_and_postlink_verifiers")
+    locations = [
+        build_step.rfind(token) if token == module_verifier_command
+        else build_step.find(token)
+        for token in required
+    ]
     require(all(location >= 0 for location in locations) and locations == sorted(locations),
             "workflow_compile_to_pass_order")
     require("if: always()" in text and "actions/upload-artifact@v4" in text and
