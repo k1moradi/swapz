@@ -141,3 +141,15 @@ neither helper exists, the Round022-only baseline remains testable.
 The independent frozen-original test runs first in the CI job so a
 future HEAD-only integration failure cannot hide its verdict. No
 production carrier is activated and no warning is suppressed.
+
+
+## Optional post-publication source CI extension
+
+After separately published Agent3 disabled DM admission source arrived,
+the existing Agent4-owned rootless cross-ABI workflow gained an additional
+isolated execution of zswap-compressed-admission-test.py. This preserves
+prior frozen-source tests and runs the original actual committed
+admission header + exact existing codec.c under compiler/sanitizer
+negative cases with no module, swap, pressure or physical operation.
+It is an integration source QA step only, not a dependency for Agent4
+start or a loaded DM READ proof.

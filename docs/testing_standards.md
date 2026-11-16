@@ -14475,3 +14475,17 @@ authenticated MM/BIO transport, loaded matching DM, original on-kernel
 4096 swap-in, RAM-session ownership or physical trial has occurred.
 Phase A BLOCKED; forced RAW bypass and compressed handoff DISABLED.
 Current RAW is the original UNCOMPRESSED 4096, SWAPSPACE2 intact.
+
+
+### Round 023 — Agent 4 CI additional independent consumer check
+
+The existing independent source-only cross-ABI build workflow additionally
+runs the separately committed Agent3 zswap-compressed-admission-test.py
+without depending on a privileged kernel or operator device. This
+exercises the ACTUAL disabled admission header with real production
+codec.c CRC32C, liblz4, OpenSSL SHA256 and GCC/Clang sanitizers.
+No same-round Agent3 source was required to start Agent4's frozen
+Round022 interoperability work; this is post-publication integration
+qualification only, and its synthetic positive result can never
+authorize real compressed BIO transport or loaded/physical Phase A.
+The workflow remains software-only and preserves all existing steps.

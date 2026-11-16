@@ -10,6 +10,10 @@ on:
       - 'tests/runtime/native/zswap-compressed-cross-abi-frozen-test.py'
       - 'tests/runtime/native/fixtures/round023-cross-abi-*.c'
       - 'src/kernel/zswap-import-codec.h'
+      - 'src/kernel/zswap-import-admission.h'
+      - 'src/kernel/dm-target.c'
+      - 'tests/runtime/native/zswap-compressed-admission-test.py'
+      - 'tests/runtime/native/fixtures/round023-consumer-admission.c'
       - 'src/kernel/codec.c'
       - '.github/workflows/zswap-compressed-cross-abi.yml'
   workflow_dispatch:
@@ -38,3 +42,4 @@ jobs:
           # source extension fails the distinct mutable-HEAD compatibility test.
           python3 -B tests/runtime/native/zswap-compressed-cross-abi-frozen-test.py -v
           python3 -B tests/runtime/native/zswap-compressed-cross-abi-test.py -v
+          python3 -B tests/runtime/native/zswap-compressed-admission-test.py -v
