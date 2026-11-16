@@ -10,6 +10,7 @@ from functools import lru_cache
 from pathlib import Path
 import re
 import subprocess
+import tempfile
 import unittest
 
 ROOT = Path(__file__).resolve().parents[3]
@@ -2793,6 +2794,59 @@ int main(void) {
         self.assertIn("write_wait_le1ms=%llu write_wait_1to4ms=%llu", status)
         self.assertIn("write_wait_gt4ms=%llu", status)
 
+    def test_owned_nullblk_read_fault_node_publication_is_owned_and_fail_closed(self):
+        """Execute isolated shell node-publication logic without any devices."""
+        deploy = (ROOT / "tests/tools/deploy-nullblk.sh").read_text()
+        function_body = deploy.split(
+            "swapz_publish_read_fault_node() {", 1)[1].split("\n}\n", 1)[0]
+        function_text = ("swapz_publish_read_fault_node() {" + function_body +
+                         "\n}\n").replace(
+            'local mapper_node="/dev/mapper/$DMNAME"',
+            'local mapper_node="$TEST_MAPPER_NODE"')
+        self.assertIn('dmsetup mknodes "$DMNAME"', function_text)
+        self.assertIn("swapz_verify_owned_dm_node", function_text)
+        fixture = (
+            "set -eu\n"
+            'DMNAME=swapz-demo-fixture\n'
+            'TEST_MAPPER_NODE="$1"\n'
+            'TRACE="$2"\n'
+            'fail() { printf "FAIL:%s\\n" "$*" >&2; exit 1; }\n'
+            'udevadm() { printf "settle:%s\\n" "$*" >> "$TRACE"; }\n'
+            'dmsetup() { printf "mknodes:%s\\n" "$*" >> "$TRACE"; '
+            'if [[ "${FAIL_MKNODES:-0}" == 1 ]]; then return 1; fi; }\n'
+            'swapz_verify_owned_dm_node() { '
+            'printf "verified\\n" >> "$TRACE"; }\n'
+            + function_text + "swapz_publish_read_fault_node\n"
+        )
+        with tempfile.TemporaryDirectory() as directory:
+            node = Path(directory) / "mapper-node"
+            trace = Path(directory) / "trace"
+            def run_fixture(*, fail_mknodes=False):
+                return subprocess.run(
+                    ["bash", "-c", fixture, "read-fault-node-fixture",
+                     str(node), str(trace)],
+                    text=True, capture_output=True, check=False,
+                    env={"PATH": "/usr/bin:/bin",
+                         "FAIL_MKNODES": "1" if fail_mknodes else "0"})
+            missing = run_fixture()
+            self.assertEqual(missing.returncode, 0, missing.stderr)
+            self.assertEqual(trace.read_text().splitlines(),
+                             ["settle:settle --timeout=10",
+                              "mknodes:mknodes swapz-demo-fixture", "verified"])
+            trace.unlink()
+            failed_command = run_fixture(fail_mknodes=True)
+            self.assertNotEqual(failed_command.returncode, 0)
+            self.assertIn("cannot publish owned READ-fault mapper node",
+                          failed_command.stderr)
+            self.assertNotIn("verified", trace.read_text())
+            trace.unlink()
+            node.write_text("not a block node")
+            occupied = run_fixture()
+            self.assertNotEqual(occupied.returncode, 0)
+            self.assertIn("occupied by an unexpected node", occupied.stderr)
+            self.assertEqual(trace.read_text().splitlines(),
+                             ["settle:settle --timeout=10"])
+
     def test_owned_nullblk_lower_read_fault_is_pre_submission_and_counted(self):
         ctor = body("swapz_ctr")
         injector = body("swapz_maybe_inject_read_fault")
@@ -2840,8 +2894,10 @@ int main(void) {
         self.assertEqual(deploy.count("dmsetup --noudevrules create"), 1)
         self.assertEqual(deploy.count("--addnodeoncreate"), 2)
         self.assertLess(read_fault_phase.index("--addnodeoncreate"),
-                        read_fault_phase.index("swapz_verify_owned_dm_node"))
-        self.assertIn("swapz_verify_owned_dm_node", read_fault_phase)
+                        read_fault_phase.index("swapz_publish_read_fault_node"))
+        self.assertIn("swapz_publish_read_fault_node", read_fault_phase)
+        self.assertIn('dmsetup mknodes "$DMNAME"', deploy)
+        self.assertIn("swapz_verify_owned_dm_node", deploy)
         self.assertIn("READ-fault fired before verification READ",
                       read_fault_phase)
         self.assertIn("PASS_LOADED_SYNTHETIC_READ_FAULT=", deploy)

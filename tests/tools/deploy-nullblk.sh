@@ -157,6 +157,26 @@ swapz_verify_owned_dm_node() {
         fail "owned DM node points to a different mapping: $DMNAME"
 }
 
+# The synthetic READ-fault mapper has a one-shot pre-submission failure
+# armed at creation. After pending udev node updates settle, restore only its
+# missing dedicated /dev/mapper entry. Never replace an occupied path or
+# change another mapper. The ordinary identity verifier still decides.
+swapz_publish_read_fault_node() {
+    local mapper_node="/dev/mapper/$DMNAME"
+
+    if command -v udevadm >/dev/null 2>&1; then
+        udevadm settle --timeout=10 ||
+            fail "udev queue did not settle before READ-fault node publication"
+    fi
+    if [[ ! -b "$mapper_node" ]]; then
+        [[ ! -e "$mapper_node" && ! -L "$mapper_node" ]] ||
+            fail "READ-fault mapper path is occupied by an unexpected node"
+        dmsetup mknodes "$DMNAME" ||
+            fail "cannot publish owned READ-fault mapper node"
+    fi
+    swapz_verify_owned_dm_node
+}
+
 for cmd in insmod rmmod modprobe dmsetup modinfo blockdev readlink \
            findmnt mountpoint mount timeout sha256sum cmp od awk grep tr \
            tee mktemp ls sleep cat id rmdir stat sort dd; do
@@ -1392,9 +1412,10 @@ OWN_DM=0
 # udev rule processing for this disposable null_blk mapper: external blkid/
 # filesystem probes can otherwise consume the one-shot READ fault between
 # mapper publication and the explicitly controlled O_DIRECT verification.
-# Explicit --addnodeoncreate ensures libdevmapper publishes the node while
-# udev rules stay suppressed. Verify its sysfs DM identity and opened node
-# after bounded udev settling as before.
+# --addnodeoncreate requests the node, but udev can still remove it while
+# processing queued events. Restore only this missing owned node with named
+# dmsetup mknodes AFTER bounded settle, then verify exact sysfs DM identity.
+# No READ or synthetic fault is suppressed or treated as success.
 # Do not disable rules for primary or physical swap devices.
 # The aligned O_DIRECT verification must fail, the target must fail closed,
 # and neither submitted-read accounting nor lower READ sectors may advance.
@@ -1406,7 +1427,7 @@ dmsetup --noudevrules create "$DMNAME" --uuid "$UUID" --addnodeoncreate \
 OWN_DM=1
 [[ "$(dmsetup info -c --noheadings -o uuid "$DMNAME" | tr -d '[:space:]')" == "$UUID" ]] ||
     fail "retained READ-fault DM UUID mismatch"
-swapz_verify_owned_dm_node
+swapz_publish_read_fault_node
 read_fault_before="$(dmsetup status "$DMNAME")"
 (( $(status_u64 "$read_fault_before" retain_ms) == 2 &&
    $(status_u64 "$read_fault_before" read_fault_nth) == 1 &&
