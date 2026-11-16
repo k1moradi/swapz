@@ -13344,3 +13344,45 @@ from a rootless fixture. Source-coupled Python tests are **ROOTLESS**; only
 source-linked hosted modified-Linux Kbuild and UML execution can qualify these
 stages. Owner-authorized loaded MM→BIO→DM writeback remains **NOT_RUN**.
 Phase A remains BLOCKED, and Phase B stays disabled.
+
+
+## Round 014 — Agent 4 source-coupled rootless Make interface regression (2026-11-16)
+
+The source-controlled `tests/runtime/native/make-interface-test.py` preserves
+all six existing public root Make goals, with exactly one definition each and
+the original source-bound algorithm, full and fast tiers. It exercises missing
+and duplicate goals, altered test tiers and install recipes as negative
+source-mutation fixtures. Nested GNU Make failures and unavailable compilers
+must return nonzero in disposable unprivileged subprocess fixtures; these
+tests never execute `make install`, `sudo`, kernel modules or live swap.
+
+The local RAM-source lease before the development-only physical selector
+is separate from Git sync, publication, report-only archival and cleanup.
+Instead of banning `"ls-remote"` everywhere in `run-tests.py`, inspect the
+actual named functions with Python AST and verify required local provenance
+edges, read-only Git commands and the locally constructed tracked-source
+`diff`. Inject a forbidden remote operation into a selected source-admission
+function, or remove the consumer's source lease call: both must fail. An
+unrelated remote-sync function may retain its real Git functionality without
+making the local RAM path fail. Do not weaken the lease itself or treat a
+remote canonical-main update as a change to locally tested immutable source.
+
+The disposable Git fixture also executes the exact root Makefile's generated
+`build/source-build-info.h` rule for normal, report-only descendant, dirty
+source and subsequent source commits. It corrupts that generated header and
+requires an idempotent regeneration to replace it with current SHA/clean bits.
+Dirty tracked test source is independently rejected by the actual
+`tracked_source_checkout_preflight()`, even where Make's deliberately narrower
+compiled-artifact cleanliness field remains one. Do not misattribute a
+report-only commit as a successfully tested new code revision or mask a real
+nested Make/toolchain failure.
+
+The Round 013 first failure from hosted job 133144376789 was explicitly
+`PublicMakeContract.test_exact_six_root_goals`, line 207, a historical
+file-wide `"ls-remote"` ban. The native/private diagnostic retained the
+specific test and source line even though exception details were redacted.
+Keep fail-only, private first-cause diagnostic behavior; do not print raw
+paths, full exception operands, credentials or child stderr. Full integrated
+source test execution and hosted CI remain mandatory for qualification;
+synthetic Git/Make fixtures prove only rootless source policy. Phase A remains
+BLOCKED and Phase B RAW bypass remains disabled.

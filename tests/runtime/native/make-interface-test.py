@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 """Owner policy: six user-visible root Make commands with three test tiers."""
+import ast
 import importlib.util
 import json
 import os
@@ -14,6 +15,109 @@ from unittest import mock
 
 ROOT = pathlib.Path(__file__).resolve().parents[3]
 MAKE = (ROOT / "Makefile").read_text()
+
+
+
+def local_ram_lease_source_error(source):
+    """Inspect actual local RAM admission functions, not unrelated remote helpers."""
+    try:
+        syntax = ast.parse(source)
+    except SyntaxError:
+        return "invalid runner syntax"
+    functions = {item.name: item for item in syntax.body
+                 if isinstance(item, ast.FunctionDef)}
+    required_calls = {
+        "algorithm_ram_source_lease_refusal": {
+            "_sync_git_runner", "_git_head", "git_sha",
+            "tracked_source_checkout_preflight"},
+        "run_algorithm_physical_selector_if_leased": {
+            "algorithm_ram_source_lease_refusal"},
+        "local_main_source_for_test": {
+            "_sync_git_runner", "_git_head", "git_sha",
+            "tracked_source_checkout_preflight"},
+        "tracked_source_checkout_preflight": {"git_result"},
+        "git_sha": {"git_text"},
+        "_git_head": {"run"},
+    }
+    allowed_git_commands = {
+        "run": {"symbolic-ref", "rev-parse"},
+        "git_text": {"rev-parse", "show", "diff-tree"},
+    }
+    remote_or_mutating_commands = {
+        "ls-remote", "fetch", "pull", "push", "clone", "remote",
+        "checkout", "switch", "reset"}
+    for function_name, dependencies in required_calls.items():
+        function = functions.get(function_name)
+        if function is None:
+            return f"missing source admission function: {function_name}"
+        nodes = tuple(ast.walk(function))
+        invoked = {item.func.id for item in nodes if isinstance(item, ast.Call)
+                   and isinstance(item.func, ast.Name)}
+        if not dependencies.issubset(invoked):
+            return f"local source admission dependency changed: {function_name}"
+        for item in nodes:
+            if (isinstance(item, ast.Constant) and
+                    isinstance(item.value, str) and
+                    item.value in remote_or_mutating_commands):
+                return f"remote or mutating Git command in {function_name}"
+            if not isinstance(item, ast.Call) or not isinstance(
+                    item.func, ast.Name):
+                continue
+            commands = allowed_git_commands.get(item.func.id)
+            if commands is not None and (
+                    not item.args or not isinstance(
+                        item.args[0], ast.Constant) or
+                    item.args[0].value not in commands):
+                return f"unverified Git operation in {function_name}"
+            if (item.func.id == "git_result" and
+                    function_name == "tracked_source_checkout_preflight"):
+                if len(item.args) != 1:
+                    return "preflight Git argument count changed"
+                argument = item.args[0]
+                if isinstance(argument, ast.List):
+                    if (not argument.elts or not isinstance(
+                            argument.elts[0], ast.Constant) or
+                            argument.elts[0].value != "symbolic-ref"):
+                        return "preflight Git operation is not local"
+                elif not (isinstance(argument, ast.Name) and
+                          argument.id == "command"):
+                    return "preflight Git command source not authenticated"
+        if function_name == "tracked_source_checkout_preflight" and not any(
+                isinstance(item, ast.Assign) and isinstance(
+                    item.value, ast.List) and item.value.elts and
+                isinstance(item.value.elts[0], ast.Constant) and
+                item.value.elts[0].value == "diff" and any(
+                    isinstance(target, ast.Name) and target.id == "command"
+                    for target in item.targets)
+                for item in nodes):
+            return "preflight tracked source diff contract changed"
+    return None
+
+
+def public_make_recipe_error(makefile):
+    """Source-bind six unique goals and five executable public recipes."""
+    rules = re.findall(r"(?m)^([A-Za-z][A-Za-z0-9_-]*):(?!=)", makefile)
+    expected = ("all", "install", "uninstall", "test", "test_full", "fast_test")
+    if sorted(rules) != sorted(expected):
+        return "missing, duplicate or unexpected public goal"
+    recipes = {
+        "test": '@+python3 -B tests/tools/run-tests.py --kdir "$(KDIR)" --tier algorithm',
+        "test_full": '@+python3 -B tests/tools/run-tests.py --kdir "$(KDIR)" --tier full',
+        "fast_test": "@+python3 -B tests/tools/fast-test.py",
+        "install": '@sudo bash packaging/package-dkms.sh install "$(PREFIX)"',
+        "uninstall": '@sudo bash packaging/package-dkms.sh uninstall "$(PREFIX)"',
+    }
+    lines = makefile.splitlines()
+    for goal, recipe in recipes.items():
+        position = lines.index(goal + ":")
+        if position + 1 >= len(lines) or lines[position + 1] != "\t" + recipe:
+            return f"wrong public Make recipe: {goal}"
+    if ("all: build/kernel/experimental/dm-swapz.ko "
+            "build/tests/device-roundtrip build/userspace/swapzctl"
+            not in makefile):
+        return "all build dependencies changed"
+    return None
+
 
 class PublicMakeContract(unittest.TestCase):
     def test_ci_native_prerequisites_require_installed_toolchain(self):
@@ -115,11 +219,47 @@ class PublicMakeContract(unittest.TestCase):
             source = repository / "src/kernel/dm-target.c"
             source.parent.mkdir(parents=True)
             source.write_text("int source_revision = 1;\n")
+            test_source = repository / "tests/runtime/native/make-interface-test.py"
+            test_source.parent.mkdir(parents=True)
+            test_source.write_text("source_bound_test = 1\n")
             (repository / "Makefile").write_text(MAKE)
-            git("add", "Makefile", "src/kernel/dm-target.c")
+            git("add", "Makefile", "src/kernel/dm-target.c",
+                "tests/runtime/native/make-interface-test.py")
             git("commit", "-m", "source: synthetic candidate")
             source_sha = git("rev-parse", "HEAD").stdout.strip()
             check_make_provenance(source_sha, "1", "initial-source")
+
+            def check_generated_header(expected_sha, expected_clean):
+                # Verify the genuine generated-header rule without building.
+                header_file = repository / "build/source-build-info.h"
+                # Source-extract the existing internal generated-header
+                # rule: the root public Make API intentionally rejects
+                # direct invocation of private build/... goals.
+                header_rules = MAKE.split("KDIR ?=", 1)[1].split(
+                    "\n.PHONY: all install", 1)[0]
+                self.assertIn("build/source-build-info.h:", header_rules)
+                (repository / "build-info-fixture.mk").write_text(
+                    "KDIR ?=" + header_rules + "\n")
+                command = ["make", "--no-print-directory",
+                           "-f", "build-info-fixture.mk",
+                           "build/source-build-info.h"]
+                refresh = subprocess.run(
+                    command, cwd=repository, capture_output=True,
+                    text=True, timeout=5)
+                self.assertEqual(refresh.returncode, 0)
+                self.assertEqual(header_file.read_text().splitlines(), [
+                    f'#define SWAPZ_BUILD_SOURCE_SHA "{expected_sha}"',
+                    f'#define SWAPZ_BUILD_SOURCE_CLEAN {expected_clean}',
+                    f'#define SWAPZ_BUILD_SOURCE_CLEAN_STRING "{expected_clean}"',
+                ])
+                header_file.write_text("stale-untrusted-header\n")
+                regenerated = subprocess.run(
+                    command, cwd=repository, capture_output=True,
+                    text=True, timeout=5)
+                self.assertEqual(regenerated.returncode, 0)
+                self.assertNotIn("stale-untrusted", header_file.read_text())
+
+            check_generated_header(source_sha, "1")
 
             report = repository / "test_results.json"
             report.write_text("{\"overall\":\"FAIL\"}\n")
@@ -134,9 +274,21 @@ class PublicMakeContract(unittest.TestCase):
                 ":(exclude)test_results.json").stdout.strip()
             self.assertEqual(resolved_sha, source_sha)
             check_make_provenance(source_sha, "1", "report-only-descendant")
+            check_generated_header(source_sha, "1")
+            # Test-only edits cannot be promoted to a clean qualified source.
+            test_source.write_text("source_bound_test = 2\n")
+            dirty = runner_contract.tracked_source_checkout_preflight()
+            self.assertIsNotNone(dirty)
+            self.assertEqual(dirty["reason"], "uncommitted_tracked_source")
+            self.assertIn("tests/runtime/native/make-interface-test.py",
+                          dirty["changed_paths"])
+            check_make_provenance(source_sha, "1", "dirty-test-fixture")
+            git("restore", "--", "tests/runtime/native/make-interface-test.py")
+            self.assertIsNone(runner_contract.tracked_source_checkout_preflight())
 
             source.write_text("int source_revision = 2;\n")
             check_make_provenance(source_sha, "0", "dirty-source")
+            check_generated_header(source_sha, "0")
             git("add", "src/kernel/dm-target.c")
             git("commit", "-m", "source: next synthetic candidate")
             next_source_sha = git("rev-parse", "HEAD").stdout.strip()
@@ -146,6 +298,7 @@ class PublicMakeContract(unittest.TestCase):
                 ":(exclude)test_results.json").stdout.strip()
             self.assertEqual(resolved_after_source_change, next_source_sha)
             check_make_provenance(next_source_sha, "1", "next-source")
+            check_generated_header(next_source_sha, "1")
 
             # A report-only-looking commit with a noncanonical subject is not
             # eligible for report-commit normalization. The two independent
@@ -204,7 +357,8 @@ class PublicMakeContract(unittest.TestCase):
                          "GIT_TERMINAL_PROMPT", "SYNCED_GIT"):
             self.assertIn(required, reporter)
         self.assertNotIn("code_commit_sha", reporter)
-        self.assertNotIn('"ls-remote"', reporter)
+        # Remote Git remains legal outside local RAM-source admission.
+        self.assertIsNone(local_ram_lease_source_error(reporter))
         self.assertNotIn('env["GIT_ASKPASS"] = "false"', reporter)
         self.assertNotIn('REPORT = ROOT / "build/test_results.json"', reporter)
         self.assertIn("build/tests/device-roundtrip: tests/tools/device-roundtrip.c", MAKE)
@@ -228,6 +382,76 @@ class PublicMakeContract(unittest.TestCase):
                                cwd=ROOT, capture_output=True, text=True, timeout=5)
             self.assertNotEqual(p.returncode, 0, forbidden)
 
+
+
+    def test_local_ram_source_lease_git_mutations(self):
+        runner = (ROOT / "tests/tools/run-tests.py").read_text()
+        self.assertIsNone(local_ram_lease_source_error(runner))
+        # An unrelated explicitly remote helper must not poison local tests.
+        self.assertIsNone(local_ram_lease_source_error(
+            runner + "\ndef unrelated_remote_helper():\n"
+            "    return 'ls-remote'\n"))
+        for function, operation in (
+                ("algorithm_ram_source_lease_refusal", "ls-remote"),
+                ("local_main_source_for_test", "fetch"),
+                ("tracked_source_checkout_preflight", "push"),
+                ("_git_head", "remote"),
+                ("git_sha", "pull")):
+            with self.subTest(function=function, operation=operation):
+                entry = re.search(
+                    rf"(?m)^def {re.escape(function)}\([^\n]*\):\n",
+                    runner)
+                self.assertIsNotNone(entry)
+                mutated = (runner[:entry.end()] +
+                           f'    run("{operation}", "origin")\n' +
+                           runner[entry.end():])
+                self.assertIsNotNone(local_ram_lease_source_error(mutated))
+        self.assertIsNotNone(local_ram_lease_source_error(
+            runner.replace(
+                "    refusal = algorithm_ram_source_lease_refusal(\n",
+                "    refusal = sync_main_before_test(\n", 1)))
+
+    def test_public_make_rule_negative_mutations(self):
+        self.assertIsNone(public_make_recipe_error(MAKE))
+        mutations = {
+            "missing-goal": MAKE.replace("\ntest_full:\n", "\n", 1),
+            "duplicate-goal": MAKE + "\ntest:\n\t@true\n",
+            "wrong-test-tier": MAKE.replace(
+                "--tier algorithm", "--tier full", 1),
+            "wrong-full-tier": MAKE.replace(
+                "--tier full", "--tier algorithm", 1),
+            "wrong-fast-test": MAKE.replace(
+                "@+python3 -B tests/tools/fast-test.py", "@true", 1),
+            "unsafe-install": MAKE.replace(
+                '@sudo bash packaging/package-dkms.sh install "$(PREFIX)"',
+                "@true", 1),
+        }
+        for label, mutant in mutations.items():
+            with self.subTest(label=label):
+                self.assertNotEqual(mutant, MAKE)
+                self.assertIsNotNone(public_make_recipe_error(mutant))
+
+    def test_nested_make_and_compiler_failure_remain_nonzero(self):
+        # These synthetic recipes never invoke a real install, privileged
+        # command, mapper, kernel module, or physical swap operation.
+        with tempfile.TemporaryDirectory(prefix="make-negative-") as name:
+            directory = pathlib.Path(name)
+            (directory / "Makefile").write_text(
+                "all:\n\t@$(MAKE) -f nested.mk nested\n")
+            (directory / "nested.mk").write_text(
+                "nested:\n\t@false\n")
+            nested = subprocess.run(
+                ["make", "--no-print-directory", "all"], cwd=directory,
+                capture_output=True, text=True, timeout=5)
+            self.assertNotEqual(nested.returncode, 0)
+            self.assertIn("nested", nested.stderr)
+            (directory / "Makefile").write_text(
+                "all:\n\t@$(CC) --version >/dev/null\n")
+            compiler = subprocess.run(
+                ["make", "--no-print-directory", "all",
+                 "CC=swapz-test-nonexistent-compiler"], cwd=directory,
+                capture_output=True, text=True, timeout=5)
+            self.assertNotEqual(compiler.returncode, 0)
 
     def test_secure_boot_signing_hook_is_idempotent(self):
         helper = ROOT / "packaging/sign-module.sh"
@@ -2597,6 +2821,33 @@ class CiFailureDiagnosticContract(unittest.TestCase):
         self.assertEqual(failed["first_error"],
                          "AssertionError: [private exception detail omitted]")
         self.assertNotIn("expected safe offset", failed["reason"])
+
+
+    def test_make_interface_first_error_remains_attributed(self):
+        # A later failing unittest may not replace the first source-owned
+        # failure identity or leak its arbitrary private exception detail.
+        lines = [
+            "FAIL: test_exact_six_root_goals "
+            "(__main__.PublicMakeContract.test_exact_six_root_goals)",
+            "Traceback (most recent call last):",
+            "AssertionError: private first mismatch",
+            "FAIL: test_later "
+            "(__main__.PublicMakeContract.test_later)",
+            "RuntimeError: private later failure",
+            "FAILED (failures=2)",
+        ]
+        result = self.diagnostics.diagnose_ci_failure(
+            lines, 1, "make-interface")
+        self.assertNotEqual(result["status"], "PASS")
+        self.assertEqual(result["category"], "SOURCE_CONTRACT")
+        self.assertEqual(
+            result["test"],
+            "__main__.PublicMakeContract.test_exact_six_root_goals")
+        self.assertEqual(
+            result["first_error"],
+            "AssertionError: [private exception detail omitted]")
+        self.assertNotIn("private first mismatch", result["reason"])
+        self.assertNotIn("private later failure", result["reason"])
 
     def test_expected_negative_output_is_not_the_causal_failure(self):
         negative_fixture = [
