@@ -151,8 +151,9 @@ jobs:
           fi
           # The staging Makefile requires an explicit existing provenance header.
           # Embed this committed and checked-clean swapz source SHA, not a guess.
+          # Keep the numeric clean flag and quoted MODULE_INFO metadata in sync.
           build_info_source="$RUNNER_TEMP/swapz-module-build-info.h"
-          printf '#define SWAPZ_BUILD_SOURCE_SHA "%s"\n#define SWAPZ_BUILD_SOURCE_CLEAN 1\n' \
+          printf '#define SWAPZ_BUILD_SOURCE_SHA "%s"\n#define SWAPZ_BUILD_SOURCE_CLEAN 1\n#define SWAPZ_BUILD_SOURCE_CLEAN_STRING "1"\n' \
             "$swapz_sha" > "$build_info_source"
           compiler_version="$(gcc --version | sed -n '1p')"
 

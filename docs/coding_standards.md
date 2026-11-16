@@ -3540,3 +3540,40 @@ deadline so a wedged `dmsetup`, `systemctl`, `journalctl`, `lsblk`, or
 `blkid` cannot permanently stop health sampling. Test-only executable paths
 must require the existing explicit rootless-test marker and a separate fixture
 path.
+
+## Round 009 GCC source-build-info macro compatibility (2026-11-15)
+
+The GCC pinned-Linux external-module workflow generates a disposable
+`swapz-build-info.h` from the verified clean canonical 40-digit swapz
+`GITHUB_SHA`. That header must define the complete coherent trio:
+`SWAPZ_BUILD_SOURCE_SHA` as a quoted Git SHA,
+`SWAPZ_BUILD_SOURCE_CLEAN` as the integer `1` for a source-verified clean
+checkout, and `SWAPZ_BUILD_SOURCE_CLEAN_STRING` as the quoted `"1"`.
+Both definitions are required: the consumer's `module_param_named`
+uses the numeric value, and Linux `MODULE_INFO` concatenates the
+quoted string into the module's `.modinfo` section. The root Makefile
+must continue to emit the same three definitions with `0/"0"` for a
+dirty or unverifiable root build; the direct `src/kernel` fallback
+continues to represent unknown provenance and `0/"0"`.
+
+Fix an omitted `SWAPZ_BUILD_SOURCE_CLEAN_STRING` at the header producer,
+not by rewriting `dm-target.c`'s `MODULE_INFO` declaration, guessing
+the source SHA, or relaxing compiler errors. The rootless executable
+`tests/runtime/native/pinned-gcc-build-info-source-test.py` checks
+the actual workflow header-generation shell and root Makefile header
+recipe, verifies clean/dirty consistency, rejects missing and
+contradictory macros, and compiles the same Linux-shaped module-info
+macro with available GCC/Clang, inspecting emitted ELF `.modinfo`.
+It is run by the existing `product-codec.yml` source-contract job.
+Tests run only in disposable directories and do not load modules.
+
+Preserve pinned `CONFIG_ZSWAP=y/n` out-of-tree Linux Kbuild,
+`Module.symvers`, separate module staging, source-attribution checks,
+independent LLVM preflight and real-byte artifact-integrity verification
+before any linked-module PASS. A rootless macro compile, a fixed first
+compiler error or a stock module link is **not** a qualified authenticated
+MM→BIO stored-entry zswap writeback origin or a loaded-kernel result.
+Only the hosted exact integrated source commit with both GCC profiles
+and verified linked artifacts may establish pinned compiler acceptance.
+Until then report `SOURCE_READY_PENDING_COORDINATOR_CI`; Phase A
+BLOCKED and Phase B RAW bypass DISABLED.
