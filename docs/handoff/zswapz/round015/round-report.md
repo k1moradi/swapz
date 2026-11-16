@@ -35,3 +35,29 @@ https://github.com/k1moradi/swapz/actions/runs/43834985711
 retained artifact: https://github.com/k1moradi/swapz/actions/runs/43834985711/artifacts/14209984320
 
 The enabled source-manifest records four distinct legitimate compiled objects: block/bio.o, block/swap-bio-origin-kunit.o, mm/page_io.o and mm/zswap.o. Pinned source staging, defconfig, scripted Kconfig, prepare and modified-object builds, and UML KUnit process returned exit 0. verify_uml_config returned exit 1 with malformed-or-duplicate-manifest. Current parse_manifest() rejects repeated object= lines, so its second object line is the first deterministic parser failure before substantive effective Kconfig or five-case TAP validation. **Classification: SOURCE TEST-EVIDENCE PARSER DEFECT.** Five genuine KUnit cases in both y/n are still **NOT_VERIFIED**, not PASS; the disabled profile did not execute after the enabled failure. The next Agent 2 task now includes this exact cause, distinct identity/hash validation and mandatory no-skip TAP gates.
+
+## Final Agent 1 source closeout — explicit CI partial/failure
+
+**All three independent Round 015 worker source tasks have accountable integrated outcomes** on [f716a5162a098742ec4bf7ab17b6a6a977bb75d4](https://github.com/k1moradi/swapz/commit/f716a5162a098742ec4bf7ab17b6a6a977bb75d4): Agent 2's guarded, default-disabled pinned producer; Agent 3's guarded decoder contract/test fixture; Agent 7's default-unused cooperative policy. All original reports are preserved in [original-report-archive.md](original-report-archive.md).
+
+Exact integrated-source GitHub Actions outcomes observed before close (do not conflate classes):
+
+| Run | Outcome at close | Scope |
+| --- | --- | --- |
+| [43834985537](https://github.com/k1moradi/swapz/actions/runs/43834985537) | PASS | Private/static source contracts |
+| [43834985699](https://github.com/k1moradi/swapz/actions/runs/43834985699) | PASS | Rootless physical-evidence audit, not a physical trial |
+| [43834985659](https://github.com/k1moradi/swapz/actions/runs/43834985659) | PASS | Hosted production-C matrix |
+| [43834985775](https://github.com/k1moradi/swapz/actions/runs/43834985775) | PASS | Package/systemd |
+| [43834985711](https://github.com/k1moradi/swapz/actions/runs/43834985711) | **FAIL** | Real pinned Linux KUnit UML, first failure in evidence parser |
+| [43834985619](https://github.com/k1moradi/swapz/actions/runs/43834985619) | **IN_PROGRESS** | Native kernel-C/project goals; future evidence must be reviewed |
+| [43834985929](https://github.com/k1moradi/swapz/actions/runs/43834985929) | **IN_PROGRESS** | Pinned modified Linux source + matched swapz module; not yet accepted PASS |
+
+**First verified KUnit failure:** Original [artifact 14209984320](https://github.com/k1moradi/swapz/actions/runs/43834985711/artifacts/14209984320) includes four distinct legitimate `object=` entries with hashes (bio.o, origin-KUnit.o, page_io.o, zswap.o). The workflow's `parse_manifest()` incorrectly rejects the second `object=` as a duplicate *field name*; object identities are distinct. Staging, object building and UML KUnit CLI returned zero but effective config/TAP verification did not execute, and disabled profile did not run. **This is an evidence-parser defect, not proof that the five positive KUnit cases passed or failed.** Assigned for real correction to Agent 2 next round; mandatory y/n TAP and duplicate-object protections remain.
+
+**Additional integration gap:** Prototype producer's CRC32 and guarded consumer's CRC32C with independent plaintext SHA-256 do not form a common authenticated compressed handoff. No real pinned BIO carrier transfers verified representation, codec, immutable payload lifetime or matched decompression authority. Compressed zswap bytes cannot be sent as existing full-page RAW.
+
+The additional main commit [5a40895ba79feecd22e847d57b412687da0b7afa](https://github.com/k1moradi/swapz/commit/5a40895ba79feecd22e847d57b412687da0b7afa) is a later independent synthetic READ-fault null_blk test fix (three unrelated paths), not a Round 015 worker contribution or Phase A qualification. Agent 1 recognized concurrent main movement and re-read the newer HEAD; the expected-head gate refused an obsolete parent, and no force/rewrite was performed.
+
+**Closeout state:** `CLOSED_SOURCE_INTEGRATED_CI_PARTIAL_KUNIT_FAIL`: 3/3 actual worker source implementations integrated; exact CI partial with a real harness FAIL and two jobs still pending. Subsequent CI results must retain their original run evidence and be reviewed as late evidence; their completion cannot rewrite this historical checkpoint. Phase A **BLOCKED**; Phase B forced RAW bypass **DISABLED**; compressed direct handoff **DISABLED**. No loaded authenticated genuine stored-entry writeback and byte-exact 4096-byte swap-in or physical-device qualification.
+
+Next source work is independently executable on frozen source f716a5162a098742ec4bf7ab17b6a6a977bb75d4, without any same-round dependency or unsafe device action. Two workers (2 and 3) are sufficient. Authoritative `ROUND_OPEN` on [issue #133](https://github.com/k1moradi/swapz/issues/133) is a distinct coordinator action; publishing documents does not start worker sessions.

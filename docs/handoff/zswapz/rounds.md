@@ -137,3 +137,11 @@ Round 010 is [source closed](round010/round-report.md) with actual first matched
 ## Round 016 — PREPARING, no worker started
 
 [Coordination issue #133](https://github.com/k1moradi/swapz/issues/133) and [joint task contract](round016/README.md). Frozen source candidate f716a5162a098742ec4bf7ab17b6a6a977bb75d4. Exactly **2** next workers, Agent 2 [real KUnit UML manifest first failure](round016/agent2-pinned-kunit-manifest-fix.md) and Agent 3 [real DM provenance and matched-module qualification](round016/agent3-dm-origin-qualification.md). Their source/workflow/test ownership is disjoint; distinct standards sections reconciled by Agent 1. [Short notification DRAFT](round016/notification.md). No ROUND_OPEN until prior engineering CI/accountable outcomes are verified; publication alone never starts any AI session.
+
+## Round 015 — CLOSED_SOURCE_INTEGRATED_CI_PARTIAL_KUNIT_FAIL
+
+[Final integrated source and CI report](round015/round-report.md); [original Agent 2/3/7 reports](round015/original-report-archive.md); [issue #132](https://github.com/k1moradi/swapz/issues/132). All 3 worker source commits integrated at f716a5162a098742ec4bf7ab17b6a6a977bb75d4, and original evidence preserved. Four source/rootless/package CI runs PASS; actual KUnit y/n evidence-manifest parser FAIL; native and actual matched modified-Linux module runs still IN_PROGRESS at historical closeout and must be followed up. No KUnit five-case proof, real loaded writeback or actual 4096-byte readback; Phase A BLOCKED; Phase B RAW and compressed direct handoff DISABLED.
+
+## Round 016 — source dispatch authorization pending unique ROUND_OPEN
+
+[Issue #133](https://github.com/k1moradi/swapz/issues/133), [Agent 2 exact KUnit manifest parser engineering](round016/agent2-pinned-kunit-manifest-fix.md), [Agent 3 DM observational provenance and paired module engineering](round016/agent3-dm-origin-qualification.md), and [draft short worker notification](round016/notification.md). Frozen independent engineering source f716a5162a098742ec4bf7ab17b6a6a977bb75d4, 2 workers excluding Agent 1, all code paths disjoint. Agent 7 not staffed. Single remote main writer; no PRs or alternate branches. Pending CI cannot be fabricated as PASS; late first failures must be assessed by Agent 1.
