@@ -4463,6 +4463,8 @@ def parse_algorithm_pageout_diagnostic(error_output):
             fields.add("release_lifetime")
         if "oracle" in diagnostic:
             fields.add("oracle")
+        if "attribution" in diagnostic:
+            fields.add("attribution")
         if set(diagnostic) != fields:
             return None
         if any(not isinstance(diagnostic[key], str) for key in ("phase", "gate", "reason")):
@@ -4484,6 +4486,41 @@ def parse_algorithm_pageout_diagnostic(error_output):
                 diagnostic["reason"] not in reasons or
                 (value is not None and (type(value) is not int or not 1 <= value <= 4095))):
             return None
+        if "attribution" in diagnostic:
+            # Preserve only bounded source-produced first-error numbers.
+            # These are independent non-atomic observations, not ownership proof.
+            attribution = diagnostic["attribution"]
+            names = {
+                "round_index", "expected_baseline_used_kib",
+                "initial_cgroup_swap_bytes", "initial_mapper_used_kib",
+                "cgroup_swap_bytes", "mapper_used_kib",
+                "mapper_used_delta_kib", "gap_bytes",
+                "recheck_samples", "recheck_elapsed_usec"}
+            maximum = (1 << 64) - 1
+            if (diagnostic["reason"] != "swap_attribution" or
+                    diagnostic["phase"] != "anonymous_workload" or
+                    not isinstance(attribution, dict) or
+                    set(attribution) != names or
+                    any(type(attribution[name]) is not int for name in names)):
+                return None
+            baseline = attribution["expected_baseline_used_kib"]
+            initial_charge = attribution["initial_cgroup_swap_bytes"]
+            initial_mapper = attribution["initial_mapper_used_kib"]
+            charge = attribution["cgroup_swap_bytes"]
+            mapper = attribution["mapper_used_kib"]
+            delta = attribution["mapper_used_delta_kib"]
+            gap = attribution["gap_bytes"]
+            if (not 1 <= attribution["round_index"] <= 2 or
+                    not all(0 <= attribution[name] <= maximum
+                            for name in names - {"gap_bytes"}) or
+                    not -maximum <= gap <= maximum or
+                    not 0 <= attribution["recheck_samples"] <= 65536 or
+                    not 0 <= attribution["recheck_elapsed_usec"] <= 10_000_000 or
+                    initial_mapper < baseline or mapper < baseline or
+                    delta != mapper - baseline or
+                    (initial_mapper - baseline) * 1024 == initial_charge or
+                    gap != delta * 1024 - charge):
+                return None
         if "release" in diagnostic:
             release = diagnostic["release"]
             release_fields = {
@@ -4733,6 +4770,24 @@ def print_algorithm_workload_diagnostic(diagnostic):
               flush=True)
         print("        Next: distinguish a remaining cgroup charge from mapper-only "
               "slot usage; neither permits accepting partial release", flush=True)
+    attribution = diagnostic.get("attribution")
+    if attribution is not None:
+        print("        Swap attribution first failure (sequential kernel samples; "
+              "not atomic or ownership proof): "
+              f"round={attribution['round_index']} "
+              f"baseline_mapper_kib={attribution['expected_baseline_used_kib']} "
+              f"initial_cgroup_bytes={attribution['initial_cgroup_swap_bytes']} "
+              f"initial_mapper_kib={attribution['initial_mapper_used_kib']} "
+              f"current_cgroup_bytes={attribution['cgroup_swap_bytes']} "
+              f"current_mapper_kib={attribution['mapper_used_kib']} "
+              f"mapper_delta_kib={attribution['mapper_used_delta_kib']} "
+              f"signed_gap_bytes={attribution['gap_bytes']} "
+              f"recheck_samples={attribution['recheck_samples']} "
+              f"recheck_elapsed_usec={attribution['recheck_elapsed_usec']}",
+              flush=True)
+        print("        Next: inspect the original private first-error log and "
+              "verified recovery; no nonzero gap grants physical PASS",
+              flush=True)
     lifetime = diagnostic.get("release_lifetime")
     if lifetime is not None:
         previous = lifetime["previous"]

@@ -13995,3 +13995,34 @@ swap-in under bounded headroom. A claimed event in JSON, synthetic
 BIO provenance, test decoder or offline counter is never a substitute.
 Normal swapz RAW remains the original uncompressed 4096-byte page;
 Phase B RAW bypass and direct compressed handoff remain DISABLED.
+
+
+## Round 021 — Agent 4: physical swap-attribution first-cause reporting
+
+The separate earlier owner physical run failed the FILL attribution gate, but its
+private initial/current numeric counters were not uploaded. No underlying
+foreign swap, kernel, pressure or compression cause is known. The source gate
+still requires exact byte equality of dedicated-cgroup swap charge and mapper
+Used KiB minus the immutable pre-oracle baseline, with only a guarded <=3s
+non-atomic recheck and two consecutive identical matching pairs. Worker,
+OOM/PSI, deadline, teardown and original nonzero-failure guards are unchanged.
+
+The physical producer already emits a bounded numeric attribution observation.
+The official run-tests.py parser previously omitted its attribution field and
+discarded the safe diagnostic. The Round021 parser now allows this field only
+for the source-defined swap_attribution failure and validates all ten signed/
+unsigned fields, immutable-baseline arithmetic, the initial mismatch, current
+signed gap (including zero after only one matching pair) and finite sample/time bounds. Forged booleans, private
+fields, conflicting gap/delta, duplicated markers and non-attribution reasons
+remain rejected. Console output displays only validated numbers explicitly
+as sequential non-atomic observations, never as Phase A/physical PASS.
+
+Run the targeted source-controlled rootless regression with
+python3 -B tests/runtime/native/test-report-test.py -k Round021.
+The existing physical-swap-probe-test.py and primary-real-swap-test.py cover
+the actual producer sampling/guard code independently. These source tests do
+not run physical cgroups or a device. make fast_test is optional RAM/null_blk
+performance only and is not this physical gate. A real retrial requires
+separate owner review of private original observations and authorization.
+Phase A BLOCKED; Phase B forced RAW bypass and direct compressed handoff
+DISABLED. Current RAW is the original uncompressed 4096-byte page.

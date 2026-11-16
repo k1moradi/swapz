@@ -13172,6 +13172,83 @@ class AlgorithmLocalOnlyQualificationContract(unittest.TestCase):
                         runner.write_local_ram_checkpoint(report_data)
 
 
+
+class Round021SwapAttributionReportingContract(unittest.TestCase):
+    """Rootless source parser and public console first-failure contract."""
+
+    @staticmethod
+    def observation(gap_kib=4):
+        baseline_kib = 12
+        charge = 134_217_728
+        mapper_kib = baseline_kib + charge // 1024 + gap_kib
+        return {
+            "round_index": 1, "expected_baseline_used_kib": baseline_kib,
+            "initial_cgroup_swap_bytes": charge,
+            "initial_mapper_used_kib": baseline_kib + charge // 1024 + 8,
+            "cgroup_swap_bytes": charge,
+            "mapper_used_kib": mapper_kib,
+            "mapper_used_delta_kib": mapper_kib - baseline_kib,
+            "gap_bytes": gap_kib * 1024,
+            "recheck_samples": 60, "recheck_elapsed_usec": 3_000_000}
+
+    @staticmethod
+    def diagnostic(observation):
+        return {"schema": "swapz-algorithm-workload-diagnostic-v1",
+                "phase": "anonymous_workload",
+                "gate": "bounded_primary_workload",
+                "reason": "swap_attribution",
+                "original_errno": None, "attribution": observation}
+
+    @staticmethod
+    def parse(record):
+        return runner.parse_algorithm_pageout_diagnostic(
+            "PHYSICAL_ALGORITHM_DEBUG=" + json.dumps(record, separators=(",", ":")))
+
+    def test_signed_or_single_unstable_exact_sample_is_still_failure(self):
+        for gap_kib in (-4, 0, 4):
+            with self.subTest(gap_kib=gap_kib):
+                record = self.diagnostic(self.observation(gap_kib))
+                self.assertEqual(self.parse(record), record)
+                output = io.StringIO()
+                with contextlib.redirect_stdout(output):
+                    runner.print_algorithm_workload_diagnostic(record)
+                console = output.getvalue()
+                self.assertIn("reason=swap_attribution", console)
+                self.assertIn(f"signed_gap_bytes={gap_kib * 1024}", console)
+                self.assertIn("initial_cgroup_bytes=134217728", console)
+                self.assertIn("not atomic or ownership proof", console)
+                self.assertNotIn("PHASE_A=PASS", console)
+
+    def test_incoherent_unbounded_and_private_attribution_never_admitted(self):
+        original = self.observation()
+        record = self.diagnostic(original)
+        mutations = (
+            {"private_path": "/private/do-not-print"},
+            {"gap_bytes": 1}, {"gap_bytes": True},
+            {"gap_bytes": 1 << 65}, {"recheck_samples": "60"},
+            {"recheck_samples": 65537}, {"recheck_elapsed_usec": 10_000_001},
+            {"round_index": False}, {"round_index": 3},
+            {"expected_baseline_used_kib": 1 << 64},
+            {"initial_mapper_used_kib": 12 + 134_217_728 // 1024},
+            {"mapper_used_kib": 11}, {"mapper_used_delta_kib": 2},
+            {"cgroup_swap_bytes": -1})
+        for change in mutations:
+            with self.subTest(change=change):
+                self.assertIsNone(self.parse(self.diagnostic({**original, **change})))
+        for reason in ("swap_slot_release", "raw_swap_floor", "producer_refused"):
+            self.assertIsNone(self.parse({**record, "reason": reason}))
+        self.assertIsNone(self.parse({**record, "attribution": None}))
+        marker = "PHYSICAL_ALGORITHM_DEBUG=" + json.dumps(record)
+        self.assertIsNone(runner.parse_algorithm_pageout_diagnostic(
+            marker + "\n" + marker))
+
+    def test_parsed_diagnostic_does_not_change_nonzero_physical_exit(self):
+        record = self.diagnostic(self.observation())
+        self.assertIsNotNone(self.parse(record))
+        child_exit_code = 2  # Original physical failure remains authoritative.
+        self.assertNotEqual(child_exit_code, 0)
+        self.assertEqual(self.parse(record)["reason"], "swap_attribution")
+
 if __name__ == "__main__":
     (ROOT / "build/tests").mkdir(parents=True, exist_ok=True)
     unittest.main()
