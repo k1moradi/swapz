@@ -14176,3 +14176,16 @@ committed loaded DM WRITE + future **original byte-exact 4096 READ**. Until
 then Phase A BLOCKED, Phase B forced RAW bypass DISABLED, compressed handoff
 DISABLED. Preserve SWAPSPACE2 original first 4096 bytes/UUID/signature and
 all existing ordinary swap/DM ownership and payload-only post-header extents.
+
+### Round 022 Agent 2 — archived CRC32-to-CRC32C first-failure assertion
+
+When an approved compile-disabled producer contract intentionally upgrades
+payload checksum semantics from IEEE CRC32 to CRC32C, preserve and update
+all exact-source negative test assertions in the same test transaction:
+require `crc32c(0, owned_bytes, entry->length)` and explicitly reject old
+`crc32(0,`. A stale historical test requiring the incompatible CRC32 must
+fail until corrected, not cause any rollback of the new safety contract or
+a fictional loaded-pass claim. The actual source-linked hosted test first
+failed at run `43935827239` with rootless staging exit 1; the bounded
+change corrects only this obsolete expectation, leaving real KUnit gates,
+compile-disabled transport, RAW_4096 and SWAPSPACE2 invariants intact.
