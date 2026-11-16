@@ -153,7 +153,13 @@ jobs:
             grep -Fxq CONFIG_KUNIT=y "$uml_dir/.config"
             grep -Fxq CONFIG_SWAP_BIO_ORIGIN_KUNIT_TEST=y "$uml_dir/.config"
             grep -Fxq '# CONFIG_CGROUPS is not set' "$uml_dir/.config"
-            grep -Fxq '# CONFIG_BLK_CGROUP is not set' "$uml_dir/.config"
+            # Pinned init/Kconfig puts BLK_CGROUP inside "if CGROUPS".
+            # The verified Python gate allows an absent child ONLY with a
+            # disabled parent, or an explicitly disabled child; never y/m.
+            if grep -Eq '^CONFIG_BLK_CGROUP=[ym]$' "$uml_dir/.config"; then
+              echo "::error::Effective BLK_CGROUP was unexpectedly enabled"
+              exit 1
+            fi
             if [[ "$profile" == enabled ]]; then
               grep -Fxq CONFIG_ZSWAP=y "$uml_dir/.config"
             else

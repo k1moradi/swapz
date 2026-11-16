@@ -13691,3 +13691,40 @@ I/O, byte-oracle, OOM, PSI, ownership or recovery gate. Rootless tests prove
 first-cause precedence across secondary cleanup errors, malformed/private
 observations, original nonzero refusal, and byte-exact semantics. This is
 source-only reporting evidence; physical=NOT_RUN and Phase A remains BLOCKED.
+
+## Round 018 — Agent 2 pinned KUnit dependent Kconfig child gate (2026-11-16)
+
+Pinned upstream Linux `c339f4010dea8b0d754f84ace70cd1b089878ef8`
+`init/Kconfig` defines `config BLK_CGROUP` inside the `if CGROUPS`
+block, with `depends on BLOCK` and `default n`. In the real hosted
+modified-Linux UML run 43860358473, enabled-object builds and the
+`kunit.py` process exited zero but `verify_uml_config` failed with
+`effective-CONFIG_BLK_CGROUP:expected=n:actual=MISSING`. This was
+an effective generated-config representation mismatch, **not** proof
+of five executed KUnit PASS cases. The disabled profile did not finish.
+
+For **both** `CONFIG_ZSWAP=y/n` profiles, the requested KUnit config
+MUST explicitly include both `# CONFIG_CGROUPS is not set` and
+`# CONFIG_BLK_CGROUP is not set`. With that exact pinned dependency,
+the *effective* generated config may either contain the explicit
+BLK_CGROUP-disabled comment or omit only `CONFIG_BLK_CGROUP` when
+`CONFIG_CGROUPS=n`. A missing parent, `CONFIG_CGROUPS=y/m`, active
+`CONFIG_BLK_CGROUP=y/m`, invalid request, another missing required
+option, or duplicated/malformed Kconfig record MUST fail. The
+post-verifier workflow Bash gate must not re-require the suppressed line,
+and must still refuse an enabled BLK_CGROUP value. The final profile
+verifier uses the **same** dependency-aware option gate; strict
+three/four compiled-object identities and hashes, independent source,
+config, and TAP digests, no reused outputs and five distinct, executed,
+non-skipped BIO-origin TAP results per profile remain mandatory.
+
+Rootless fixtures must cover both legitimate representations and
+adversarial wrong-parent, forced child, missing request, wrong swap
+profile, duplicate/malformed, symlink/oversized, forged TAP and object
+drift. Hosted `kunit.py` process exit zero never by itself qualifies a
+five-case KUnit result. Actual exact-source hosted Kbuild and UML
+`CONFIG_ZSWAP=y/n`, followed by loaded authenticated stored-entry
+MM→BIO→DM writeback and byte-exact original 4096-byte swap-in, remain
+distinct evidence classes; no loaded device is authorized by these
+rootless tests. Phase A BLOCKED, Phase B RAW bypass DISABLED, direct
+compressed handoff DISABLED.

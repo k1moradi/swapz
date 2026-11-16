@@ -96,19 +96,37 @@ def expected_config(profile: str) -> dict[str, str]:
     return {**REQUIRED, "CONFIG_ZSWAP": "y" if profile == "enabled" else "n"}
 
 
+def verify_effective_config(profile: str, values: dict[str, str],
+                            *, error_prefix: str) -> None:
+    """Allow only the pinned CGROUPS-off dependency to suppress BLK_CGROUP.
+
+    In pinned Linux c339f4010dea8b0d754f84ace70cd1b089878ef8, init/Kconfig nests
+    config BLK_CGROUP inside if CGROUPS and also requires BLOCK. When CGROUPS
+    is disabled, Kconfig may omit the child from the generated .config.
+    No other required option is allowed to disappear.
+    """
+    for name, value in expected_config(profile).items():
+        actual_value = values.get(name)
+        if (name == "CONFIG_BLK_CGROUP" and value == "n" and
+            actual_value is None and values.get("CONFIG_CGROUPS") == "n"):
+            continue
+        if actual_value != value:
+            raise EvidenceError(error_prefix + name + ":expected=" + value +
+                                ":actual=" + str(actual_value or "MISSING"))
+
+
 def check_config(profile: str, requested: bytes, effective: bytes) -> None:
     expected = expected_config(profile)
     request_values = parse_config(requested, source_kind="request")
     actual_values = parse_config(effective, source_kind="effective")
+    # The requested child must be explicitly disabled even when its parent
+    # causes Kconfig to suppress that child in the effective configuration.
     for name, value in expected.items():
         request_value = request_values.get(name)
         if request_value != value:
             raise EvidenceError("request-" + name + ":expected=" + value +
                                 ":actual=" + str(request_value or "MISSING"))
-        actual_value = actual_values.get(name)
-        if actual_value != value:
-            raise EvidenceError("effective-" + name + ":expected=" + value +
-                                ":actual=" + str(actual_value or "MISSING"))
+    verify_effective_config(profile, actual_values, error_prefix="effective-")
 
 
 def parse_manifest(data: bytes) -> dict[str, str]:
@@ -211,9 +229,9 @@ def verify_pair(evidence: Path, enabled: Path, disabled: Path) -> None:
             manifest.get("uml_config_sha256") != config_sha or
             manifest.get("kunit_output_sha256") != tap_sha):
             raise EvidenceError("invalid-profile-evidence:" + profile)
-        for name, value in expected_config(profile).items():
-            if parse_config(config).get(name) != value:
-                raise EvidenceError("profile-config-drift:" + profile + ":" + name)
+        verify_effective_config(
+            profile, parse_config(config, source_kind="effective"),
+            error_prefix="profile-config-drift:" + profile + ":")
         if config_sha in config_digests or tap_sha in tap_digests:
             raise EvidenceError("reused-profile-config-or-tap:" + profile)
         # Revalidate the actual bytes, not merely a copied PASS marker.
@@ -406,8 +424,118 @@ class RootlessConfigTests(unittest.TestCase):
             verify_config("disabled", request, effective, manifest)
 
 
+
+    def test_pinned_blk_cgroup_parent_dependency_positive_y_and_n(self):
+        # Real pinned init/Kconfig: BLK_CGROUP sits inside "if CGROUPS".
+        # Kconfig may suppress this requested-n child from the effective file.
+        for profile in ("enabled", "disabled"):
+            with self.subTest(profile=profile, form="omitted"):
+                request, effective, manifest = self.fixture(profile)
+                effective.write_text(effective.read_text().replace(
+                    "# CONFIG_BLK_CGROUP is not set\n", ""))
+                self.assertNotIn("CONFIG_BLK_CGROUP",
+                                 parse_config(effective.read_bytes()))
+                verify_config(profile, request, effective, manifest)
+                self.assertEqual(
+                    parse_manifest(manifest.read_bytes())["uml_config_sha256"],
+                    hashlib.sha256(effective.read_bytes()).hexdigest())
+            with self.subTest(profile=profile, form="explicit-n"):
+                request, effective, manifest = self.fixture(profile)
+                verify_config(profile, request, effective, manifest)
+                self.assertEqual(
+                    parse_config(effective.read_bytes())["CONFIG_BLK_CGROUP"],
+                    "n")
+
+    def test_blk_cgroup_missing_child_is_not_a_general_default(self):
+        for profile in ("enabled", "disabled"):
+            for mutation, expected_error in (
+                ("parent-y", "effective-CONFIG_CGROUPS"),
+                ("parent-absent", "effective-CONFIG_CGROUPS"),
+                ("request-parent-y", "request-CONFIG_CGROUPS"),
+                ("request-child-absent", "request-CONFIG_BLK_CGROUP"),
+                ("request-child-y", "request-CONFIG_BLK_CGROUP"),
+                ("active-child-y", "effective-CONFIG_BLK_CGROUP"),
+                ("module-child-m", "effective-CONFIG_BLK_CGROUP"),
+                ("missing-swap", "effective-CONFIG_SWAP"),
+                ("missing-zswap", "effective-CONFIG_ZSWAP"),
+            ):
+                with self.subTest(profile=profile, mutation=mutation):
+                    request, effective, manifest = self.fixture(profile)
+                    effective.write_text(effective.read_text().replace(
+                        "# CONFIG_BLK_CGROUP is not set\n", ""))
+                    if mutation == "parent-y":
+                        effective.write_text(effective.read_text().replace(
+                            "# CONFIG_CGROUPS is not set", "CONFIG_CGROUPS=y"))
+                    elif mutation == "parent-absent":
+                        effective.write_text(effective.read_text().replace(
+                            "# CONFIG_CGROUPS is not set\n", ""))
+                    elif mutation == "request-parent-y":
+                        request.write_text(request.read_text().replace(
+                            "# CONFIG_CGROUPS is not set", "CONFIG_CGROUPS=y"))
+                    elif mutation == "request-child-absent":
+                        request.write_text(request.read_text().replace(
+                            "# CONFIG_BLK_CGROUP is not set\n", ""))
+                    elif mutation == "request-child-y":
+                        request.write_text(request.read_text().replace(
+                            "# CONFIG_BLK_CGROUP is not set",
+                            "CONFIG_BLK_CGROUP=y"))
+                    elif mutation in ("active-child-y", "module-child-m"):
+                        effective.write_text(effective.read_text() +
+                            "CONFIG_BLK_CGROUP=" +
+                            ("y" if mutation == "active-child-y" else "m") +
+                            "\n")
+                    elif mutation == "missing-swap":
+                        effective.write_text(effective.read_text().replace(
+                            "CONFIG_SWAP=y\n", ""))
+                    elif mutation == "missing-zswap":
+                        effective.write_text(effective.read_text().replace(
+                            ("CONFIG_ZSWAP=y\n" if profile == "enabled" else
+                             "# CONFIG_ZSWAP is not set\n"), ""))
+                    with self.assertRaisesRegex(EvidenceError, expected_error):
+                        verify_config(profile, request, effective, manifest)
+
+    def test_blk_cgroup_duplicate_malformed_and_symlink_fail_closed(self):
+        request, effective, manifest = self.fixture()
+        effective.write_text(effective.read_text() +
+                             "CONFIG_BLK_CGROUP=y\n")
+        with self.assertRaisesRegex(EvidenceError, "duplicate-config-option"):
+            verify_config("enabled", request, effective, manifest)
+        request, effective, manifest = self.fixture()
+        effective.write_text(effective.read_text().replace(
+            "# CONFIG_BLK_CGROUP is not set",
+            "# CONFIG_BLK_CGROUP is wrong"))
+        with self.assertRaisesRegex(EvidenceError, "malformed-config-entry"):
+            verify_config("enabled", request, effective, manifest)
+        request, effective, manifest = self.fixture()
+        effective.unlink()
+        effective.symlink_to(request)
+        with self.assertRaisesRegex(EvidenceError, "missing-or-symlink-evidence"):
+            verify_config("enabled", request, effective, manifest)
+        request, effective, manifest = self.fixture()
+        effective.write_bytes(b"CONFIG_BLOCK=y\n" * (CONFIG_LIMIT // 15 + 1))
+        with self.assertRaisesRegex(EvidenceError, "empty-or-oversized-evidence"):
+            verify_config("enabled", request, effective, manifest)
+
+    def test_kunit_workflow_uses_the_dependency_aware_effective_gate(self):
+        workflow = (Path(__file__).resolve().parents[3] /
+                    ".github/workflows/phase-a-zswap-origin-kunit.yml").read_text()
+        self.assertIn("run_checked verify_uml_config ", workflow)
+        self.assertIn('grep -Fxq \'# CONFIG_CGROUPS is not set\' "$uml_dir/.config"',
+                      workflow)
+        self.assertIn("CONFIG_BLK_CGROUP=[ym]", workflow)
+        self.assertNotIn(
+            'grep -Fxq \'# CONFIG_BLK_CGROUP is not set\' "$uml_dir/.config"',
+            workflow)
+        self.assertIn("run_checked verify_real_tap ", workflow)
+        self.assertIn("run_checked verify_profile_pair ", workflow)
+
+
     def test_missing_wrong_and_forced_options(self):
         for name in REQUIRED:
+            if name == "CONFIG_BLK_CGROUP":
+                # Kconfig may suppress this child if CGROUPS=n; unlike all
+                # other required flags, omission is not by itself a failure.
+                continue
             request, effective, manifest = self.fixture()
             effective.write_text("\n".join(line for line in effective.read_text().splitlines()
                                            if name not in line) + "\n")
@@ -483,7 +611,8 @@ class RootlessConfigTests(unittest.TestCase):
                 config.write_text("\n".join(
                     "# " + name + " is not set" if value == "n"
                     else name + "=" + value
-                    for name, value in expected_config(profile).items()) + "\n")
+                    for name, value in expected_config(profile).items()
+                    if name != "CONFIG_BLK_CGROUP") + "\n")
                 configs.append(config)
                 tap = ("TAP version 14\n1..1\n# Subtest: swap_bio_origin\n1..5\n" +
                        "".join("ok " + str(i) + " - " + name + "\n"
@@ -508,6 +637,29 @@ class RootlessConfigTests(unittest.TestCase):
             disabled_record = root / "disabled.txt"
             real_tap = disabled_tap.read_bytes()
             real_manifest = disabled_record.read_text()
+            # The final paired gate must honor the SAME pinned parent
+            # dependency, not reject the legitimate missing child anew.
+            original_config = configs[1].read_bytes()
+            for changed_config, failed_option in (
+                (original_config.replace(
+                    b"# CONFIG_CGROUPS is not set",
+                    b"CONFIG_CGROUPS=y"), "CONFIG_CGROUPS"),
+                (original_config + b"CONFIG_BLK_CGROUP=y\n",
+                 "CONFIG_BLK_CGROUP"),
+                (original_config.replace(b"CONFIG_SWAP=y\n", b""),
+                 "CONFIG_SWAP"),
+            ):
+                configs[1].write_bytes(changed_config)
+                changed_digest = hashlib.sha256(changed_config).hexdigest()
+                disabled_record.write_text(real_manifest.replace(
+                    hashlib.sha256(original_config).hexdigest(),
+                    changed_digest))
+                with self.subTest(option=failed_option), self.assertRaisesRegex(
+                        EvidenceError,
+                        "profile-config-drift:disabled:" + failed_option):
+                    verify_pair(root, *configs)
+            configs[1].write_bytes(original_config)
+            disabled_record.write_text(real_manifest)
             object_hash = re.search(r"(?m)^object=block/bio\.o sha256=([0-9a-f]{64})$",
                                     real_manifest)
             self.assertIsNotNone(object_hash)
