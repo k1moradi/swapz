@@ -1,0 +1,77 @@
+message: REPORT_READY
+round: "012"
+agent: 5
+task_id: agent5-real-linux-bio-kunit-hardening
+status: SOURCE_READY_PENDING_COORDINATOR_CI
+frozen_source_sha: 206ed300c52e563495a15fac21df9000fb38ecee
+task_publication_sha: 1757b219be23bc608562a6904982fdb64d7e7b51
+source_commit_sha: c9ff14a2ee023e9343b63c4640be8ae4d3c028f9
+source_commit_url: https://github.com/k1moradi/swapz/commit/c9ff14a2ee023e9343b63c4640be8ae4d3c028f9
+commit_parent_sha: 206ed300c52e563495a15fac21df9000fb38ecee
+changed_paths:
+  - tests/tools/stage-pinned-linux-zswap-origin.py
+  - tests/runtime/native/pinned-linux-zswap-origin-stage-test.py
+  - .github/workflows/phase-a-zswap-origin-kunit.yml
+  - docs/testing_standards.md
+changed_paths_count: 4
+registered_linux_kunit_cases: 5
+new_declared_negative_variants: 46
+new_negative_variants_actually_executed_locally: 22
+new_positive_tap_variants_actually_executed_locally: 2
+new_full_python_regression_cases_executed_locally: 0
+new_real_linux_kunit_cases_executed_locally: 0
+evidence_class: source-committed + isolated-rootless-tap + GitHub-source-static
+tests:
+  - command: "python3 -B /mnt/data/round012-agent5/isolated-tap-verifier.py"
+    exit_code: 0
+    evidence: "isolated faithful verifier copy: 2 positive and 22 negative synthetic traces passed; NOT the full source-controlled Python test module"
+  - command: "python3 -m py_compile /mnt/data/round012-agent5/isolated-tap-verifier.py"
+    exit_code: 0
+    evidence: "local isolated TAP verifier Python syntax only"
+  - command: "GitHub connector verify committed blobs and source-owned scope against frozen parent"
+    exit_code: 0
+    evidence: "all 4 paths have correct new blobs; no introduced trailing whitespace/CRLF; appended testing standard"
+  - command: "GitHub REST GET git/commits/c9ff14a2ee023e9343b63c4640be8ae4d3c028f9 and compare"
+    exit_code: 0
+    evidence: "sole parent frozen 206ed300c52e563495a15fac21df9000fb38ecee; status ahead by one; remote main unmodified"
+  - command: "python3 -B tests/runtime/native/pinned-linux-zswap-origin-stage-test.py -v"
+    exit_code: NOT_RUN
+    reason: "complete working source tree unavailable locally; do not substitute standalone mirror"
+  - command: "python3 -m py_compile tests/tools/stage-pinned-linux-zswap-origin.py tests/runtime/native/pinned-linux-zswap-origin-stage-test.py"
+    exit_code: NOT_RUN
+    reason: "full committed Python files not materialized locally"
+  - command: "Python PyYAML parse .github/workflows/phase-a-zswap-origin-kunit.yml"
+    exit_code: NOT_RUN
+    reason: "full authored YAML not materialized locally"
+  - command: "bash -n extracted workflow run block"
+    exit_code: NOT_RUN
+    reason: "full authored YAML not materialized locally"
+  - command: "git diff --check"
+    exit_code: NOT_RUN
+    reason: "no local checkout; source-line whitespace static check passed, not a git diff substitute"
+  - command: "Full pinned Linux y/n modified-source Kbuild and tools/testing/kunit/kunit.py UML"
+    exit_code: NOT_RUN
+    reason: "source commit unattached to main; no full pinned Linux checkout/KUnit build locally"
+first_failure: "Local read-only git ls-remote https://github.com/k1moradi/swapz.git HEAD returned exit 128: Could not resolve host github.com. GitHub connector remained available, so real source blobs/tree/commit were authored and verified. No production compiler/test failure was observed."
+historical_ci: "Round 011 run https://github.com/k1moradi/swapz/actions/runs/43804553433 completed success on previous commit 4976514397697670a833afa2ec64f3e1ac0c368b; not evidence for this new source commit"
+qualification: "Phase A BLOCKED, Phase B RAW bypass DISABLED"
+
+---
+
+# Agent 5 Round 012 — source implementation and independent evidence
+
+**Real detached Git commit:** [c9ff14a2ee023e9343b63c4640be8ae4d3c028f9](https://github.com/k1moradi/swapz/commit/c9ff14a2ee023e9343b63c4640be8ae4d3c028f9). GitHub's raw Git commit endpoint verified its **sole parent** is exactly the frozen main source `206ed300c52e563495a15fac21df9000fb38ecee`, with only the four exclusive Agent 5 files modified. GitHub compare reports 1 commit ahead; no ref was moved. No branch, PR, fork, second worktree, device operation or source rewrite.
+
+## Implemented
+- **Real generated Linux KUnit C:** retained the five actual pinned Linux BIO source-API cases. Added a WRITE-without-REQ_SWAP guard clone negative, a preserved carrier scalar assertion on same-payload reissue, explicit half-page `PAGE_SIZE >> (SECTOR_SHIFT + 1)` sectors in `bio_split()`, both split/remaining byte-size and original/child sector checks, plus invalid-origin mixed merge controls. Real `bio_put()`, `bio_uninit()` and `__free_page()` lifetimes are preserved. These are KUnit source changes, not fake cloned BIO APIs.
+- **Production staging program:** added `validate_kunit_source` fail-closed *before any files are staged* to bind five unique registrations, real API signatures, correct sector units, cleanup and predicate controls. All previously pinned upstream preimage checks, eight path edit anchors, manifest hashes and partial-failure rollback remain in place.
+- **Actual compiled-test source:** added 22 distinct malformed/skipped/duplicated/forged/truncated TAP negatives, 2 valid traces, 10 mutated generated-C negatives (with real staging rollback check), 3 Kconfig/Makefile registration negatives and 11 workflow mutation negatives = **46 new declared negative variants**. The source includes `--verify-kunit-tap` command used by the hosted workflow itself. This is distinct from a substring count.
+- **Actual hosted workflow:** separate enabled/disabled UML builds use bounded jobs and `--make_options=W=1`, verify effective UML `CONFIG_SWAP/KUNIT/SWAP_BIO_ORIGIN_KUNIT_TEST/BLK_CGROUP/ZSWAP`, hash effective `.config` and UML Linux image, retain and hash <=8 MiB of real raw kernel TAP, and invoke the exact five-name/one-suite/one-plan/no-skip/no-failure source-controlled TAP verifier *before* `kunit_cases_passed=5` and PASS. Failure-first phase artifacts remain retained. Added the governing Round 012 testing standard.
+
+## Executed versus not executed
+
+The **isolated local TAP verifier copy** passed all **2 positive and 22 negative** traces (exit 0) and `python3 -m py_compile` passed (exit 0). GitHub source-level postimage/scope/whitespace and raw Git parent checks passed. These are rootless **isolated checks**, not the complete production staging Python suite nor the modified Linux y/n build. The complete new source-controlled Python tests, YAML/Bash validation, rebuilt modified Linux objects, 5 actual UML KUnit runtime cases in each profile, and actual module/kernel/real-swap tests are **NOT_RUN for this commit**. Do not promote the previous successful Round 011 KUnit build to evidence for these changes.
+
+**Agent 1 next gate:** serialize only the four owned blobs against current main; run `python3 -B tests/runtime/native/pinned-linux-zswap-origin-stage-test.py -v`, Python py_compile, parse workflow YAML, `bash -n` extracted shell, `git diff --check`, then run the integrated exact-source hosted modified pinned Linux enabled/disabled UML KUnit workflow. Inspect retained `enabled/disabled.txt` plus raw `*-kunit-output.log`, new KUnit image/config/source hashes, and actual five executed successful named cases per profile. Do not label either profile PASS if TAP verification, source identity or effective configuration fails.
+
+**Qualification ceiling:** This is a committed rootless test/staging/workflow change only. Even future two-profile real KUnit PASS is not matched loaded MM→BIO→dm-swapz genuine stored-entry writeback/readback. Phase A BLOCKED; Phase B origin-based RAW bypass DISABLED.

@@ -1,0 +1,70 @@
+message: REPORT_READY
+round: "012"
+agent: 3
+task_id: agent3-matched-linux-kernel-doc-warning-gate
+status: SOURCE_READY_PENDING_COORDINATOR_CI
+source_commit_sha: 1bbc546b2f92d7a994cf17db67c049cd0e83b492
+source_commit_url: https://github.com/k1moradi/swapz/commit/1bbc546b2f92d7a994cf17db67c049cd0e83b492
+frozen_source_sha: 206ed300c52e563495a15fac21df9000fb38ecee
+task_commit_sha: 1757b219be23bc608562a6904982fdb64d7e7b51
+linux_sha: c339f4010dea8b0d754f84ace70cd1b089878ef8
+workflow_blob_sha: 5e5b2a917ae9b5e6223655396464b07b2509e892
+paired_module_test_blob_sha: 608185f5fc96826abaf85f135ea7079014030c98
+coding_standards_blob_sha: 01cc711914c46c7fac3435e9f3e7d8a5e1daf0c4
+modified_paths:
+  - .github/workflows/phase-a-zswap-origin-prototype.yml
+  - tests/runtime/native/pinned-linux-origin-paired-module-test.py
+  - docs/coding_standards.md
+evidence_class: real_retrievable_git_source_commit + exact_workflow_yaml_shell + rootless_classifier_mirror
+rootless_warning_classifier_mirror_tests: 17/17_PASS
+exact_workflow_yaml: PASS
+exact_workflow_embedded_bash_syntax: 6/6_PASS
+exact_workflow_structure_assertions: 11/11_PASS
+full_committed_python_self_test: NOT_RUN
+hosted_modified_linux_gcc_zswap_y_n: NOT_RUN_for_this_commit
+linked_paired_dm_swapz_module: NOT_RUN_for_this_commit
+round012_kunit: NOT_RUN_by_agent3
+remote_main_updated: false
+phase_a: BLOCKED
+phase_b: DISABLED
+
+# Agent 3 — Round 012 actual source commit / matched pinned Linux kernel-doc warning gate
+
+**Real retrievable Git source commit:** https://github.com/k1moradi/swapz/commit/1bbc546b2f92d7a994cf17db67c049cd0e83b492
+
+**Frozen exact parent:** `206ed300c52e563495a15fac21df9000fb38ecee` (verified sole parent). GitHub REST compare: exactly one commit ahead, three Agent 3-owned files changed, no added trailing whitespace. Remote `main` observed at `1757b219be23bc608562a6904982fdb64d7e7b51`, distinct from my commit; I did not update it or create a branch, PR, fork, second worktree or device operation.
+
+## First actual source-bound failure and immutable upstream evidence
+
+Original hosted modified-Linux GCC run [43793863015](https://github.com/k1moradi/swapz/actions/runs/43793863015), job [133058134655](https://github.com/k1moradi/swapz/actions/runs/43793863015/job/133058134655), had successful initial staging/rootless phases and **FAILED enabled `kernel_export_build` with workflow exit 3 due to six W=1 upstream kernel-doc diagnostics**. The original log was fetched. No paired linked module was produced or qualified in that run. I separately opened the original exact upstream `torvalds/linux@c339f4010dea8b0d754f84ace70cd1b089878ef8` source files and verified their Git blob IDs:
+
+- `ipc/sem.c:629`: 1 exact kernel-doc prefix diagnostic plus its exact following `perform_atomic_semop[_slow]` continuation; original blob `5ec41de7e85b2b4ce00def87f8a082b70d5efe49`.
+- `block/blk-map.c:366`: 2 exact obsolete `op` parameter diagnostics; blob `81cba3af4e9c1de234dc9a8573a978cf3d942be0`.
+- `block/blk-mq-dma.c:379`: 2 exact obsolete `state` parameter diagnostics; blob `88fd9cbc951f44af45c1f7af31571624bbad1263`.
+- `drivers/gpu/drm/drm_gem_shmem_helper.c:174`: 1 exact prototype name diagnostic; blob `d654a22a30dedac27574d1179a278c93185f03b1`.
+
+These are **unmodified pinned upstream** files, NOT the patched `mm/zswap.c`, `mm/page_io.c`, `block/bio.c`, staged BIO headers or swapz sources. The later run [43804553333](https://github.com/k1moradi/swapz/actions/runs/43804553333) was initially observed in-progress; its job-log fetch returned 404, so I make **no success claim** from that run.
+
+## Implemented tracked source
+
+1. Existing `.github/workflows/phase-a-zswap-origin-prototype.yml`: keep real `CC=gcc`, `W=1`, bounded `-j2`, separate `CONFIG_ZSWAP=y/n` trees and real command exit checks. Only after `kernel_export_build` returns zero, invoke the **source-controlled** paired-module verifier in `--classify-kernel-doc-warnings` mode on the *actual captured full build log*, source manifest, exact pinned Linux root/SHA and requested profile. Any rejection returns exit **3**, retains first-failure `kernel_export_build_warnings`, prints bounded failure-only diagnostics and prevents modules/link/PASS. Other build stages still reject all warnings. Original `Module.symvers`, ELF64 relocatable, SHA/module bytes, modinfo/vermagic and paired final artifact verifier before terminal PASS are retained.
+2. Existing executable `tests/runtime/native/pinned-linux-origin-paired-module-test.py`: exact **four original Git blob allowlist** plus six message/signature/count controls; bounded nofollow build-log/source hashing; positive exact-six or zero-warning classification and deterministic canonical signature SHA-256. Reject wrong/missing/repeated warnings, changed lines/paths/wording, modified producer or GCC warnings, real Make failure, wrong pinned SHA/source blob/profile, malformed ELF/module, unapproved other stages, forged manifest and premature PASS. Recorded manifest fields include `kernel_export_build_baseline_warning_count`, categories, SHA-256, pinned source SHA and `y/n` profile; actual stage warning count must equal approved exception count. Added sixteen classifier-specific positive/negative methods, separate manifest/warning negatives and a full-workflow bypass mutation control.
+3. **Append-only 41-line** `Round 012 exact pinned upstream kernel-doc W=1 warning exception` in `docs/coding_standards.md`. Agent 5's independent stager/KUnit workflow/tests/testing-standard were not modified; no `dm-target.c` edits.
+
+## Exact tests actually executed
+
+| Command / check | Actual result |
+|---|---|
+| `PYTHONWARNINGS=error python3 -B /mnt/data/round012_agent3_tests/test_warning_gate.py -q` | **exit 0, 17/17 PASS** in 0.002 s; *standalone faithfully extracted classifier mirror*, NOT entire committed Python source |
+| `PYTHONWARNINGS=error python3 -B -m py_compile warning_gate.py test_warning_gate.py` | **exit 0**; standalone mirror syntax |
+| `git hash-object /mnt/data/round012_agent3_tests/phase-a-zswap-origin-prototype.yml` | **exit 0; exact committed workflow blob `5e5b2a917ae9b5e6223655396464b07b2509e892`** |
+| PyYAML `yaml.BaseLoader` parse of the **entire exact committed workflow** | **exit 0, PASS** |
+| `bash -n` for each of the entire YAML's six `run:` blocks | **6/6 PASS**, exit 0 each |
+| Source-bound 11 assertions against **exact committed workflow**: `W=1`, nonempty `Module.symvers`, real external module link, ELF verification, Python paired verifier before sole PASS, Kbuild exit failure, SHA, no modpost bypass, unique classifier, bounded diagnostics | **11/11 PASS** |
+| GitHub REST commit/compare and added-line whitespace scan | **PASS**, sole frozen parent, three exact owned files, one commit ahead, no added trailing whitespace |
+
+The independent 17-case Python mirror is intentionally NOT represented as `python3 -B ...pinned-linux-origin-paired-module-test.py --self-test`. **NOT_RUN due to unavailable complete executable local checkout:** complete 1,010-line committed source `--self-test` with warnings-as-errors, complete Python-file `py_compile`, local complete-tree `git diff --check`, actual pinned Linux source Kbuild `CONFIG_ZSWAP=y/n`, `Module.symvers` and two real linked `dm-swapz.ko` plus KUnit/runtime I/O. GitHub source-object and full-workflow text verification do not substitute for those tests.
+
+**Acceptance/limitation:** This is a real source code commit with source-coupled rootless evidence, **not** a hosted modified-Linux module PASS. Agent 1 must serially integrate my frozen-parent commit with Agent 5's independent disjoint files, then run the existing hosted exact-integrated-SHA paired build and source verifier. Only after **both** ZSWAP profiles have successful full modified-Linux exporter/module builds, a genuine nonempty `Module.symvers`, real linked ELF `dm-swapz.ko`, verified modinfo/ABI/source hashes and accepted real-byte artifacts may a Kbuild qualification be claimed. Any new compiler/ABI/diagnostic first failure must remain visible; no W=1 suppression or fake ELF is permitted.
+
+Phase A remains **BLOCKED** until authenticated matched loaded producer/consumer and actual 4KiB stored-entry eviction/readback. Phase B RAW bypass remains **DISABLED**. No module load, swap/reclaim, mapper or physical-device operation occurred.
