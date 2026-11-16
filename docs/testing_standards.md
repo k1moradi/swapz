@@ -1,5 +1,20 @@
 # Testing Standards
 
+## Local-source algorithm qualification (owner decision, 2026-11-16)
+
+`make test` must pin the existing, clean local `main` source and never
+fetch, fast-forward, publish, reset, or reconcile GitHub during algorithm
+qualification. Remote commits, GitHub downtime, stale `origin/main`, and
+remote source changes are not local test inputs and cannot block the five RAM
+stages or the optional development-only physical selector. The local pretrial
+RAM checkpoint is verified and fsynced; the owner-operated privileged helper
+still verifies exact local HEAD, stage/nonce evidence, artifact and oracle
+digests, unchanged device identity and owner/recovery policy before mutation.
+Standalone development probes and production admissions retain their
+independent restrictions. The final report remains local with an explicit
+`SKIPPED_GIT_SYNC` status. `make test_full` is unchanged.
+
+
 ## Audited remote-branch cleanup tool (2026-11-16)
 
 The private, operator-run `tests/tools/cleanup-legacy-branches.py` provides a
@@ -13237,17 +13252,15 @@ origin-conditioned RAW bypass remains DISABLED.
 
 The actual `tests/tools/run-tests.py` treats the five official RAM stages as
 source-bound development evidence, **not physical qualification**. Even when
-each stage finishes PASS, a canonical `main` advance, dirty tracked checkout,
-different local/tracking head, lost source identity or failed remote read must
-not start `tests/tools/algorithm-physical.py`. A read-only `git ls-remote`
-immediately before the selector compares actual remote `refs/heads/main` to
-the local main HEAD; a second local source/tracking/dirty check detects
-local races. This is a best-effort pre-selector lease, **not** a distributed
-lock: the physical selector must independently reauthenticate source,
-device, permissions and runtime state before any mutation. A stale cached
-remote-tracking ref alone is insufficient to authorize selector invocation.
+each stage finishes PASS, dirty tracked checkout, a changed local HEAD, lost
+local source identity, or source/artifact drift must not start
+`tests/tools/algorithm-physical.py`. A second local source/dirty check
+immediately before the selector detects local races. Remote GitHub main,
+including a stale cached remote-tracking ref, is not a qualification input.
+The privileged selector independently reauthenticates source, device,
+permissions and runtime state before any mutation.
 
-The pretrial checkpoint publisher must first bind the exact tested
+The local, non-GitHub checkpoint writer must first bind the exact tested
 40-character source SHA, clean checkout, all five ordered PASS stage names
 and integer-zero exits, final three canonical SHA-256 artifact digests,
 and a nonempty private 128-bit random nonce. Publish its single

@@ -53,6 +53,23 @@ baseline. Persistent discrepancies BLOCK with integer-only initial/current
 counts and signed gap in the automatic failure marker. This is not a swap
 charge tolerance or permission for foreign host pages.
 
+## Local-only algorithm qualification (owner decision, 2026-11-16)
+
+`make test` binds its five RAM stages and optional development physical
+trial to the clean, unchanged **local** `main` commit and exact compiled
+artifacts. It neither fetches, fast-forwards, publishes to GitHub, nor
+changes `origin/main` during this qualification. An independently advancing
+GitHub `main`, including changes to C sources or physical helper scripts
+on the *remote*, cannot invalidate evidence for the unchanged locally tested
+checkout. Local source, build/oracle/helper drift, nonce/stage mismatches,
+device identity and owner/recovery failures must still block admission.
+A durable local `test_results.json` is the pretrial RAM checkpoint; the
+development-only root-owned helper validates the exact local evidence and
+artifacts before physical mutation. Remote publication may be performed
+separately after the trial; it is not a safety or success prerequisite.
+Standalone development probes and production admission retain their
+separate canonical-source checks.
+
 ## Canonical source drift during real-device development trial
 
 A canonical-main commit touching only documentation, unexecuted benchmark

@@ -117,7 +117,7 @@ class SourceLeaseTests(unittest.TestCase):
     def launch(self):
         return runner.run_algorithm_physical_selector_if_leased(
             TESTED, {"SWAPZ_ALGORITHM_RAM_NONCE": "not-a-real-nonce"},
-            io.StringIO())
+            io.StringIO(), expected_head_sha=TESTED)
 
     def test_clean_stable_source_reaches_only_mocked_selector(self):
         completed_trial, refusal, attempted = self.launch()
@@ -141,8 +141,11 @@ class SourceLeaseTests(unittest.TestCase):
 
     def test_remote_main_advanced_after_last_fetch(self):
         self.remote = ADVANCED
-        self.assertEqual(self.launch()[1], "canonical_source_advanced")
-        self.selector.assert_not_called()
+        trial, refusal, attempted = self.launch()
+        self.assertIsNone(refusal)
+        self.assertTrue(attempted)
+        self.assertEqual(trial.returncode, 2)
+        self.selector.assert_called_once()
 
     def test_dirty_tracked_checkout_refused(self):
         self.dirty = {"reason": "uncommitted_tracked_source",
@@ -176,12 +179,14 @@ class SourceLeaseTests(unittest.TestCase):
 
     def test_remote_ref_unavailable_and_invalid_sha(self):
         self.remote_error = True
-        self.assertEqual(self.launch()[1], "canonical_source_unavailable")
-        self.remote_error = False
+        trial, refusal, attempted = self.launch()
+        self.assertIsNone(refusal)
+        self.assertTrue(attempted)
+        self.assertEqual(trial.returncode, 2)
         self.assertEqual(
             runner.algorithm_ram_source_lease_refusal("invalid"),
             "invalid_tested_source")
-        self.selector.assert_not_called()
+        self.selector.assert_called_once()
 
     def test_selector_execution_error_is_not_misreported_as_no_invocation(self):
         self.selector.side_effect = OSError("synthetic failed spawn")
@@ -270,7 +275,7 @@ class EvidencePublicationTests(unittest.TestCase):
 
     def test_source_races_between_evidence_publication_and_selector(self):
         self.patch(runner, "algorithm_ram_source_lease_refusal",
-                   side_effect=(None, "canonical_source_advanced"))
+                   side_effect=(None, "source_raced_after_ram"))
         evidence, _ = runner.write_algorithm_ram_development_evidence(
             self.result)
         selector = mock.Mock()
@@ -281,7 +286,7 @@ class EvidencePublicationTests(unittest.TestCase):
                         TESTED, {"SWAPZ_ALGORITHM_RAM_NONCE": "synthetic"},
                         io.StringIO()))
             self.assertIsNone(trial)
-            self.assertEqual(refusal, "canonical_source_advanced")
+            self.assertEqual(refusal, "source_raced_after_ram")
             self.assertFalse(attempted)
             selector.assert_not_called()
         finally:

@@ -355,9 +355,8 @@ def _emit_private_untracked_checkout_inventory(probe) -> None:
 def _canonical_source_preflight(algorithm_ram_evidence: list[str]) -> str | None:
     """Authenticate this RAM-qualified source before asking for swap consent.
 
-    The privileged probe repeats this exact check before any device mutation.
-    This early, unprivileged refusal avoids a misleading consent prompt when
-    canonical main advanced during the lengthy five-stage RAM qualification.
+    The privileged probe repeats this exact local-source check before any
+    device mutation. Remote GitHub commits never affect this RAM run.
     """
     if not algorithm_ram_evidence:
         # The direct standalone path has no make-test evidence to reuse;
@@ -382,13 +381,10 @@ def _canonical_source_preflight(algorithm_ram_evidence: list[str]) -> str | None
                 _emit_private_untracked_checkout_inventory(probe)
             return "local_checkout_changed_kind_" + kinds.replace(",", "_")
         head = probe._git("rev-parse", "HEAD")
-        if head != probe._git("rev-parse", "origin/main"):
-            return "local_tracking_main_mismatch"
         source = probe._development_code_source_sha(head)
         probe._read_algorithm_ram_development_evidence(
             Path(algorithm_ram_evidence[1]), os.getuid(), head,
             source, algorithm_ram_evidence[3])
-        probe._require_development_canonical_main(head, source)
     except (OSError, RuntimeError, TypeError, ValueError, AttributeError) as error:
         # Child Git failures may contain remote URLs or authentication output.
         # Only publish an exact, source-defined classification, never str(error).

@@ -2247,18 +2247,13 @@ ALGORITHM_RAM_LEASE_REFUSALS = frozenset((
     "invalid_tested_source", "checkout_not_on_main",
     "main_head_unavailable", "main_not_aligned",
     "source_advanced_after_ram", "tracked_source_dirty",
-    "canonical_source_unavailable", "canonical_source_advanced",
-    "source_raced_after_ram",
+    "source_raced_after_ram", "canonical_source_advanced",
+    "canonical_source_unavailable",
 ))
 
 
-def algorithm_ram_source_lease_refusal(tested_source_sha):
-    """Refuse a changed or unverifiable main before calling a physical helper.
-
-    The remote probe reads only the canonical ref; it never fetches, resets,
-    retries an active qualification or changes the tested checkout. The
-    privileged selector independently rechecks its own source/device gates.
-    """
+def algorithm_ram_source_lease_refusal(tested_source_sha, expected_head_sha=None):
+    """Check only the locally pinned source; GitHub is not an admission input."""
     if not isinstance(tested_source_sha, str) or not re.fullmatch(
             r"[0-9a-f]{40}", tested_source_sha):
         return "invalid_tested_source"
@@ -2267,36 +2262,17 @@ def algorithm_ram_source_lease_refusal(tested_source_sha):
     if branch is None or branch.returncode or branch.stdout.strip() != b"main":
         return "checkout_not_on_main"
     local_head = _git_head(run, "HEAD")
-    tracking_head = _git_head(run, "refs/remotes/origin/main")
-    if local_head is None or tracking_head is None:
+    if local_head is None:
         return "main_head_unavailable"
-    if local_head != tracking_head:
+    if expected_head_sha is not None and local_head != expected_head_sha:
         return "main_not_aligned"
     if git_sha() != tested_source_sha:
         return "source_advanced_after_ram"
     if tracked_source_checkout_preflight() is not None:
         return "tracked_source_dirty"
-
-    # Unlike a cached origin/main ref, ls-remote observes the current
-    # canonical main without modifying refs or the private qualification.
-    if _remote_origin_url(run) is None:
-        return "canonical_source_unavailable"
-    current_remote = run(
-        "ls-remote", "--exit-code", "origin", "refs/heads/main", timeout=15)
-    if current_remote is None or current_remote.returncode:
-        return "canonical_source_unavailable"
-    remote_lines = current_remote.stdout.decode(
-        "ascii", "replace").splitlines()
-    if len(remote_lines) != 1 or re.fullmatch(
-            r"[0-9a-f]{40}\trefs/heads/main", remote_lines[0]) is None:
-        return "canonical_source_unavailable"
-    if remote_lines[0][:40] != local_head:
-        return "canonical_source_advanced"
-
-    # Re-read the local source after the remote observation. This catches
-    # a concurrent local ref change during the source-lease preflight.
+    # Check local HEAD/source again immediately before invoking the selector.
+    # A remote ref may move arbitrarily; it is not read or fetched here.
     if (_git_head(run, "HEAD") != local_head or
-            _git_head(run, "refs/remotes/origin/main") != tracking_head or
             git_sha() != tested_source_sha or
             tracked_source_checkout_preflight() is not None):
         return "source_raced_after_ram"
@@ -2304,13 +2280,10 @@ def algorithm_ram_source_lease_refusal(tested_source_sha):
 
 
 def run_algorithm_physical_selector_if_leased(
-        tested_source_sha, physical_env, error_stream):
-    """Return (completed, refusal, attempted), allowing safe mock-only tests.
-
-    attempted is True before subprocess.run can raise; a selector invocation
-    failure must never be mislabeled as a source gate's zero-mutation refusal.
-    """
-    refusal = algorithm_ram_source_lease_refusal(tested_source_sha)
+        tested_source_sha, physical_env, error_stream, expected_head_sha=None):
+    """Return (completed, refusal, attempted) with no remote Git dependency."""
+    refusal = algorithm_ram_source_lease_refusal(
+        tested_source_sha, expected_head_sha)
     if refusal is not None:
         return None, refusal, False
     try:
@@ -2412,6 +2385,24 @@ def write_algorithm_ram_development_evidence(result):
                 if primary_error is None:
                     raise
     return evidence, nonce
+
+
+def write_local_ram_checkpoint(result):
+    """Durably retain exact five-stage local evidence without GitHub access."""
+    write_report(result)
+    descriptor = os.open(REPORT, os.O_RDONLY | os.O_NOFOLLOW | os.O_CLOEXEC)
+    try:
+        with os.fdopen(descriptor, "rb", closefd=False) as saved:
+            if json.load(saved) != result:
+                raise ValueError("local RAM checkpoint differs from completed result")
+        os.fsync(descriptor)
+    finally:
+        os.close(descriptor)
+    directory = os.open(REPORT.parent, os.O_RDONLY | os.O_DIRECTORY)
+    try:
+        os.fsync(directory)
+    finally:
+        os.close(directory)
 
 
 def write_report(result):
@@ -11449,6 +11440,32 @@ def _untracked_fast_forward_collisions(run, local_head, remote_head):
     return collisions
 
 
+def local_main_source_for_test(expected_source_sha=None):
+    """Pin only clean local main; never access or mutate remote refs."""
+    run = _sync_git_runner()
+    top = run("rev-parse", "--show-toplevel")
+    branch = run("symbolic-ref", "--quiet", "--short", "HEAD")
+    if (top is None or top.returncode or
+            Path(os.fsdecode(top.stdout).strip()).resolve() != ROOT):
+        return {"status": "BLOCKED", "reason": "not_the_repository_root"}
+    if branch is None or branch.returncode or branch.stdout.strip() != b"main":
+        return {"status": "BLOCKED", "reason": "checkout_not_on_main"}
+    preflight = tracked_source_checkout_preflight()
+    if preflight is not None:
+        return {"status": "BLOCKED", "reason": preflight["reason"],
+                "changed_paths": preflight.get("changed_paths", []),
+                "total_changed_paths": preflight.get("total_changed_paths", 0)}
+    head = _git_head(run, "HEAD")
+    source = git_sha()
+    if head is None or re.fullmatch(r"[0-9a-f]{40}", source) is None:
+        return {"status": "BLOCKED", "reason": "local_source_unavailable"}
+    if expected_source_sha is not None and source != expected_source_sha:
+        return {"status": "BLOCKED", "reason": "local_source_changed_before_start"}
+    return {"status": "PASS", "reason": "local_source_pinned",
+            "source_sha": source, "head_sha": head,
+            "source_changed": False}
+
+
 def sync_main_before_test(expected_source_sha=None):
     """Fast-forward clean main before tests, refusing ambiguous local state."""
     run = _sync_git_runner()
@@ -12891,7 +12908,9 @@ def main():
               flush=True)
         return 2
     try:
-        sync_result = sync_main_before_test(expected_source)
+        sync_result = (local_main_source_for_test(expected_source)
+                       if args.tier == "algorithm"
+                       else sync_main_before_test(expected_source))
         if sync_result.get("status") == "PASS":
             if (expected_source is not None and
                     sync_result.get("source_sha") != expected_source):
@@ -12921,6 +12940,8 @@ def _run_qualification(args, sync_result):
     # Isolated historical report mocks supply only kdir.
     tier = args.tier if isinstance(getattr(args, "tier", None), str) else "full"
     resume_requested = os.environ.get("RESUME") == "1" and tier == "algorithm"
+    local_only = (tier == "algorithm" and
+                  sync_result.get("reason") == "local_source_pinned")
     result = {
         "schema": "swapz-test-results-v1",
         "host_identity": report_host_identity(),
@@ -12961,7 +12982,8 @@ def _run_qualification(args, sync_result):
         print("  Development resume requested: only matching completed "
               "rootless/kernel-warning stages may be reused; loaded device "
               "work is always fresh", flush=True)
-    print("  Main synchronization: "
+    print("  " + ("Local source qualification: " if local_only
+                   else "Main synchronization: ") +
           f"{sync_result.get('status', 'BLOCKED')} "
           f"reason={sync_result.get('reason', 'unavailable')} "
           f"source={sync_source[:12]}",
@@ -13248,7 +13270,18 @@ def _run_qualification(args, sync_result):
         # source-bound RAM evidence. This checkpoint is never physical PASS.
         interactive_physical_trial = sys.stdin.isatty() and sys.stdout.isatty()
         pretrial_checkpoint_published = False
-        if interactive_physical_trial:
+        if interactive_physical_trial and local_only:
+            # Local evidence must be durable before any privileged selector.
+            # Remote GitHub publication is not a qualification dependency.
+            try:
+                write_local_ram_checkpoint(result)
+                pretrial_checkpoint_published = True
+                print("  Pretrial RAM checkpoint: LOCAL_VERIFIED "
+                      f"source={result['tested_commit_sha'][:12]}", flush=True)
+            except (OSError, ValueError, TypeError):
+                print("  Pretrial RAM checkpoint: BLOCKED "
+                      "reason=local_checkpoint_unavailable", flush=True)
+        elif interactive_physical_trial:
             try:
                 write_report(result)
                 pretrial_notice = publish(result["tested_commit_sha"])
@@ -13301,6 +13334,11 @@ def _run_qualification(args, sync_result):
             physical_selector_started = False
             pretrial_evidence_refusal = None
             try:
+                if local_only and not source_checkout_stability(
+                        sync_result.get("head_sha"),
+                        result["tested_commit_sha"]).get("stable"):
+                    raise ValueError(
+                        "algorithm RAM evidence source changed after qualification")
                 evidence_path, evidence_nonce = (
                     write_algorithm_ram_development_evidence(result))
                 physical_env = os.environ.copy()
@@ -13312,14 +13350,23 @@ def _run_qualification(args, sync_result):
                 # No child stderr or privileged host identifiers reach Git.
                 with tempfile.TemporaryFile(mode="w+t",
                                             encoding="utf-8") as error_stream:
-                    physical_trial, source_lease_refusal, physical_selector_started = (
-                        run_algorithm_physical_selector_if_leased(
-                            result["tested_commit_sha"], physical_env,
-                            error_stream))
-                    if source_lease_refusal is not None:
-                        raise ValueError(
-                            "algorithm RAM source lease refused: " +
-                            source_lease_refusal)
+                    if local_only:
+                        physical_trial, source_lease_refusal, physical_selector_started = (
+                            run_algorithm_physical_selector_if_leased(
+                                result["tested_commit_sha"], physical_env,
+                                error_stream,
+                                expected_head_sha=sync_result.get("head_sha")))
+                        if source_lease_refusal is not None:
+                            raise ValueError(
+                                "algorithm RAM source lease refused: " +
+                                source_lease_refusal)
+                    else:
+                        physical_selector_started = True
+                        physical_trial = subprocess.run(
+                            [sys.executable, "-B",
+                             str(ROOT / "tests/tools/algorithm-physical.py")],
+                            cwd=ROOT, check=False, env=physical_env,
+                            stderr=error_stream)
                     physical_exit = physical_trial.returncode
                     if physical_exit != 0:
                         error_stream.seek(0)
@@ -13460,12 +13507,6 @@ def _run_qualification(args, sync_result):
                         "phase=before_physical_selector gate=ram_evidence "
                         f"reason={pretrial_evidence_refusal} "
                         "mutation=not_started", flush=True)
-                    print(
-                        "  Physical source lease: tested=" +
-                        result["tested_commit_sha"][:12] +
-                        " current=" +
-                        result["algorithm_real_swap"][
-                            "current_main_source_sha"][:12], flush=True)
                 elif physical_source_admission is not None:
                     result["algorithm_real_swap"]["reason"] = (
                         physical_source_admission["reason"])
@@ -13588,10 +13629,15 @@ def _run_qualification(args, sync_result):
     print(f"\n  Overall qualification: {result['overall']}")
     print(f"  Report: {REPORT.relative_to(ROOT)} (single overwriteable artifact)")
     print(f"  Tested Git commit: {result['tested_commit_sha']}", flush=True)
-    notice = publish(result["tested_commit_sha"])
+    if local_only:
+        notice = "SKIPPED_GIT_SYNC: local_source_pinned; report remains local"
+        post_test_sync = {"status": "PASS", "reason": "local_source_preserved"}
+    else:
+        notice = publish(result["tested_commit_sha"])
+        post_test_sync = sync_main_after_test()
     print(f"  Git result: {notice}", flush=True)
-    post_test_sync = sync_main_after_test()
-    print("  Post-test main synchronization: "
+    print("  " + ("Post-test local source preservation: " if local_only
+                   else "Post-test main synchronization: ") +
           f"{post_test_sync.get('status', 'BLOCKED')} "
           f"reason={post_test_sync.get('reason', 'unavailable')}",
           flush=True)

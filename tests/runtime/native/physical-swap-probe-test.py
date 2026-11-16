@@ -338,6 +338,69 @@ class PhysicalSwapProbeTests(unittest.TestCase):
                 probe._read_algorithm_ram_development_evidence(
                     canonical, expected_uid, head, source, nonce)
 
+    def test_make_test_ram_admission_ignores_remote_but_checks_artifacts(self):
+        """Only the make-test nonce-bound record permits local-only admission."""
+        import pwd
+
+        source = "a" * 40
+        artifacts = {
+            "formatter_sha256": "d" * 64,
+            "module_sha256": "e" * 64,
+            "oracle_sha256": "f" * 64,
+        }
+        owner = pwd.getpwuid(
+            os.stat(probe.ROOT, follow_symlinks=False).st_uid).pw_name
+        evidence = {
+            "outcome": "MAKE_TEST_RAM_PASS",
+            "artifact_digests": artifacts,
+        }
+        expected_path = probe.ROOT / "build/tests/algorithm-ram-evidence.json"
+        git_reads = []
+
+        def local_git(*arguments):
+            git_reads.append(arguments)
+            if arguments[0] == "symbolic-ref":
+                return "main"
+            if arguments[:2] == ("rev-parse", "HEAD"):
+                return source
+            raise AssertionError("unexpected remote Git operation")
+
+        build_info = (
+            f'#define SWAPZ_BUILD_SOURCE_SHA "{source}"\n'
+            '#define SWAPZ_BUILD_SOURCE_CLEAN 1\n'
+        )
+        with mock.patch.object(probe, "_require_development_linux_abi"), \
+             mock.patch.object(probe, "_require_physical_host"), \
+             mock.patch.object(probe.os, "geteuid", return_value=0), \
+             mock.patch.dict(os.environ, {"SUDO_USER": owner}), \
+             mock.patch.object(probe, "_git", side_effect=local_git), \
+             mock.patch.object(
+                 probe, "_development_code_source_sha",
+                 return_value=source), \
+             mock.patch.object(
+                 probe, "_has_non_report_worktree_changes",
+                 return_value=False), \
+             mock.patch.object(
+                 probe, "_require_development_canonical_main",
+                 side_effect=AssertionError("remote main must not be checked")) as canonical, \
+             mock.patch.object(
+                 probe, "_read_algorithm_ram_development_evidence",
+                 return_value=evidence) as pinned, \
+             mock.patch.object(
+                 probe.Path, "read_text", return_value=build_info), \
+             mock.patch.object(
+                 probe, "_artifact_digests",
+                 return_value=artifacts) as verified:
+            admitted = probe.current_development_evidence(
+                "c" * 32, algorithm_ram_evidence=expected_path)
+        self.assertEqual(admitted["source_sha"], source)
+        self.assertEqual(admitted["artifact_digests"], artifacts)
+        self.assertFalse(any("origin/main" in part for args in git_reads
+                             for part in args))
+        canonical.assert_not_called()
+        pinned.assert_called_once()
+        verified.assert_called_once()
+
     def test_unsupported_arch_direct_probe_stops_before_device_admission(self):
         with mock.patch.object(probe, "_require_development_linux_abi"), \
              mock.patch.object(probe.platform, "machine", return_value="riscv64"), \

@@ -31,11 +31,15 @@ def mocked_main_sync(source_sha):
         runner,
         acquire_make_test_lock=mock.DEFAULT,
         sync_main_before_test=mock.DEFAULT,
+        local_main_source_for_test=mock.DEFAULT,
         sync_main_after_test=mock.DEFAULT,
         source_checkout_stability=mock.DEFAULT)
     replacements = patcher.start()
     replacements["acquire_make_test_lock"].return_value = (None, None, None)
     replacements["sync_main_before_test"].return_value = {
+        "status": "PASS", "reason": "fixture",
+        "source_sha": source_sha, "head_sha": source_sha}
+    replacements["local_main_source_for_test"].return_value = {
         "status": "PASS", "reason": "fixture",
         "source_sha": source_sha, "head_sha": source_sha}
     replacements["sync_main_after_test"].return_value = {
@@ -703,6 +707,33 @@ class MainSynchronizationContract(unittest.TestCase):
         self.assertEqual((snapshot / "worktree.json").read_text(),
                          '{"overall":"WORKTREE"}\n')
         self.assertIsNone(runner.tracked_source_checkout_preflight())
+
+    def test_algorithm_local_source_pin_ignores_remote_advancement(self):
+        """The automatic algorithm path never fetches, pushes or changes HEAD."""
+        local_head = self._git(
+            self.checkout, "rev-parse", "HEAD").stdout.strip()
+        local_source = runner.git_sha()
+        remote_head = self._advance_remote(source=True)
+        report = self.checkout / runner.GIT_RESULT
+        report.write_text('{"local":"checkpoint"}\n', encoding="utf-8")
+        with mock.patch.object(
+                runner, "git_command_with_credential_fallback",
+                side_effect=AssertionError("unexpected remote operation")):
+            pinned = runner.local_main_source_for_test()
+        self.assertEqual(pinned["status"], "PASS")
+        self.assertEqual(pinned["reason"], "local_source_pinned")
+        self.assertEqual(pinned["head_sha"], local_head)
+        self.assertEqual(pinned["source_sha"], local_source)
+        self.assertNotEqual(remote_head, local_head)
+        self.assertEqual(
+            self._git(self.checkout, "rev-parse", "HEAD").stdout.strip(),
+            local_head)
+        self.assertEqual(report.read_text(encoding="utf-8"),
+                         '{"local":"checkpoint"}\n')
+        (self.checkout / "source.c").write_text("dirty local source\n")
+        refused = runner.local_main_source_for_test()
+        self.assertEqual(refused["status"], "BLOCKED")
+        self.assertEqual(refused["reason"], "uncommitted_tracked_source")
 
     def test_report_only_remote_advance_does_not_request_make_reexec(self):
         expected_remote = self._advance_remote(report=True)
@@ -12710,6 +12741,101 @@ class OptimizationPhase5ValidationContract(unittest.TestCase):
             [1] * 5), 1 / 32)
 
 
+
+
+class AlgorithmLocalOnlyQualificationContract(unittest.TestCase):
+    """Remote publication must not gate local physical handoff."""
+
+    def test_local_physical_handoff_does_not_publish_or_sync(self):
+        source = "a" * 40
+        events = []
+
+        class OperatorConsole(io.StringIO):
+            def isatty(self):
+                return True
+
+        def stage_pass(title, command, report, **options):
+            report["stages"].append({
+                "name": title, "status": "PASS", "elapsed_s": 0.0,
+                "exit_code": 0})
+            if options.get("parse_bench"):
+                report["benchmarks"]["delta64_prepare"] = {
+                    "overall": "NOT_RUN"}
+            return 0
+
+        def physical_probe(command, **options):
+            self.assertEqual(Path(command[-1]).name, "algorithm-physical.py")
+            events.append("physical")
+            return subprocess.CompletedProcess(command, 2)
+
+        console = OperatorConsole()
+        with contextlib.ExitStack() as patches:
+            patches.enter_context(mock.patch.dict(os.environ, {"RESUME": ""}))
+            substitutions = (
+                ("report_host_identity", lambda: {"status": "AVAILABLE"}),
+                ("git_sha", lambda: source),
+                ("make_invocation", lambda: (["make"], "fixture")),
+                ("retained_physical_trial_candidate", lambda: False),
+                ("tracked_source_checkout_preflight", lambda: None),
+                ("source_checkout_stability", lambda *args: {"stable": True}),
+                ("run_stage", stage_pass),
+                ("qualification_artifact_digests",
+                 lambda: {"status": "AVAILABLE"}),
+                ("owner_qualification_artifacts_available", lambda value: True),
+                ("required_benchmark_gates_pass", lambda value: True),
+                ("lane_gap_attribution_rows", lambda value: []),
+                ("goal_scorecard",
+                 lambda value: {"overall": "UNAVAILABLE"}),
+                ("write_algorithm_ram_development_evidence",
+                 lambda value: (
+                     ROOT / "build/tests/nonexistent-local-only-fixture",
+                     "b" * 32)),
+                ("write_local_ram_checkpoint",
+                 lambda value: events.append("checkpoint")),
+                ("write_report", lambda value: events.append("final_report")),
+                ("print_bench", lambda value: None),
+                ("write_failure_diagnostic", lambda *args: None),
+                ("refresh_history", lambda identity: "NOT UPDATED"),
+            )
+            for name, value in substitutions:
+                patches.enter_context(mock.patch.object(runner, name, value))
+            patches.enter_context(mock.patch.object(
+                runner, "publish",
+                side_effect=AssertionError("remote publication forbidden")))
+            patches.enter_context(mock.patch.object(
+                runner, "sync_main_after_test",
+                side_effect=AssertionError("remote sync forbidden")))
+            patches.enter_context(mock.patch.object(
+                runner.subprocess, "run", side_effect=physical_probe))
+            patches.enter_context(mock.patch.object(
+                runner.sys, "stdin", mock.Mock(isatty=lambda: True)))
+            patches.enter_context(contextlib.redirect_stdout(console))
+            status = runner._run_qualification(
+                mock.Mock(kdir="/unused", tier="algorithm"),
+                {"status": "PASS", "reason": "local_source_pinned",
+                 "head_sha": source, "source_sha": source})
+        self.assertEqual(status, 2)
+        self.assertEqual(events,
+                         ["checkpoint", "physical", "final_report"])
+        self.assertIn("Pretrial RAM checkpoint: LOCAL_VERIFIED", console.getvalue())
+        self.assertIn("Git result: SKIPPED_GIT_SYNC: local_source_pinned",
+                      console.getvalue())
+
+    def test_local_checkpoint_refuses_mismatched_file(self):
+        report_data = {
+            "source_sha": "a" * 40, "stages": [],
+            "overall": "INCOMPLETE"}
+        with tempfile.TemporaryDirectory() as directory:
+            report = Path(directory) / "test_results.json"
+            with mock.patch.object(runner, "REPORT", report):
+                runner.write_local_ram_checkpoint(report_data)
+                self.assertEqual(json.loads(report.read_text()), report_data)
+                with mock.patch.object(
+                        runner, "write_report",
+                        side_effect=lambda value:
+                        report.write_text('{"forged":true}\n')):
+                    with self.assertRaisesRegex(ValueError, "differs"):
+                        runner.write_local_ram_checkpoint(report_data)
 
 
 if __name__ == "__main__":

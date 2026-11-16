@@ -254,18 +254,25 @@ class AlgorithmPhysicalTest(unittest.TestCase):
             self.assertEqual(len(list(private_directory.glob(
                 "source-untracked-*.private.json"))), 1)
 
-    def test_preconsent_canonical_drift_reuses_probe_source_gate(self):
-        """The authoritative remote comparison must happen before consent."""
+    def test_preconsent_make_test_uses_local_source_not_remote(self):
+        """Remote tracking or GitHub changes never invalidate pinned RAM."""
         expected_head = "a" * 40
-        qualified_source = "a" * 40
         probe = mock.Mock()
-        probe._git.side_effect = lambda *args: (
-            "main" if args[0] == "symbolic-ref" else
-            "" if args[0] == "status" else expected_head)
+        remote_reads = []
+
+        def local_git(*arguments):
+            if arguments[:2] == ("rev-parse", "origin/main"):
+                remote_reads.append(arguments)
+                raise AssertionError("unexpected remote tracking read")
+            if arguments[0] == "symbolic-ref":
+                return "main"
+            return expected_head
+
+        probe._git.side_effect = local_git
         probe._has_non_report_worktree_changes.return_value = False
-        probe._development_code_source_sha.return_value = qualified_source
-        probe._require_development_canonical_main.side_effect = RuntimeError(
-            "canonical main contains changed source after qualification")
+        probe._development_code_source_sha.return_value = expected_head
+        probe._require_development_canonical_main.side_effect = AssertionError(
+            "make test must not query remote canonical main")
         specification = SimpleNamespace(loader=mock.Mock())
         arguments = [
             "--algorithm-ram-evidence",
@@ -277,58 +284,30 @@ class AlgorithmPhysicalTest(unittest.TestCase):
                 return_value=specification), \
              mock.patch.object(subject.importlib.util, "module_from_spec",
                                return_value=probe):
-            self.assertEqual(
-                subject._canonical_source_preflight(arguments),
-                "canonical_source_advanced")
+            self.assertIsNone(subject._canonical_source_preflight(arguments))
             probe._read_algorithm_ram_development_evidence.assert_called_once_with(
                 Path(arguments[1]), subject.os.getuid(), expected_head,
-                qualified_source, "f" * 32)
-            probe._require_development_canonical_main.assert_called_once_with(
-                expected_head, qualified_source)
-            probe._require_development_canonical_main.side_effect = None
-            self.assertIsNone(subject._canonical_source_preflight(arguments))
-            probe._git.side_effect = lambda *args: (
-                "main" if args[0] == "symbolic-ref" else
-                " M tests/source.c" if args[0] == "status" else expected_head)
+                expected_head, "f" * 32)
+            self.assertFalse(remote_reads)
+            probe._require_development_canonical_main.assert_not_called()
             probe._has_non_report_worktree_changes.return_value = True
             probe._development_dirty_worktree_kinds.return_value = "tracked_source"
             self.assertEqual(
                 subject._canonical_source_preflight(arguments),
                 "local_checkout_changed_kind_tracked_source")
-            probe._development_dirty_worktree_kinds.return_value = (
-                "tracked_source,generated_report,untracked")
-            self.assertEqual(
-                subject._canonical_source_preflight(arguments),
-                "local_checkout_changed_kind_tracked_source_generated_report_untracked")
-            # The generated report does not block source admission by itself.
             probe._has_non_report_worktree_changes.return_value = False
-            probe._development_dirty_worktree_kinds.return_value = "generated_report"
-            self.assertIsNone(subject._canonical_source_preflight(arguments))
-            probe._git.side_effect = lambda *args: (
-                "main" if args[0] == "symbolic-ref" else
-                "" if args[0] == "status" else
-                "b" * 40 if args[:2] == ("rev-parse", "origin/main")
-                else expected_head)
-            self.assertEqual(
-                subject._canonical_source_preflight(arguments),
-                "local_tracking_main_mismatch")
             probe._git.side_effect = lambda *args: (
                 "other-branch" if args[0] == "symbolic-ref" else expected_head)
             self.assertEqual(
                 subject._canonical_source_preflight(arguments),
                 "local_checkout_not_main")
-            probe._git.side_effect = lambda *args: (
-                "main" if args[0] == "symbolic-ref" else
-                "?? private-file" if args[0] == "status" else expected_head)
-            probe._has_non_report_worktree_changes.return_value = True
-            probe._development_dirty_worktree_kinds.return_value = "untracked"
-            with mock.patch.object(
-                    subject, "_emit_private_untracked_checkout_inventory"
-                    ) as inventory:
-                self.assertEqual(
-                    subject._canonical_source_preflight(arguments),
-                    "local_checkout_changed_kind_untracked")
-                inventory.assert_called_once_with(probe)
+            probe._git.side_effect = local_git
+            probe._development_code_source_sha.return_value = "b" * 40
+            probe._read_algorithm_ram_development_evidence.side_effect = ValueError(
+                "RAM nonce or source differs")
+            self.assertEqual(
+                subject._canonical_source_preflight(arguments),
+                "canonical_source_verification_unavailable")
 
     def test_canonical_drift_blocks_before_prompt_or_new_privileged_run(self):
         candidate = {

@@ -1321,10 +1321,11 @@ def current_development_evidence(nonce, algorithm_ram_evidence=None,
             "non-report worktree changes block physical development smoke: "
             "kind=" + _development_dirty_worktree_kinds())
     head = _git("rev-parse", "HEAD")
-    if head != _git("rev-parse", "origin/main"):
+    if algorithm_ram_evidence is None and head != _git("rev-parse", "origin/main"):
         raise ProbeError("local and origin/main must match before development smoke")
     code_source_sha = _development_code_source_sha(head)
-    _require_development_canonical_main(head, code_source_sha)
+    if algorithm_ram_evidence is None:
+        _require_development_canonical_main(head, code_source_sha)
     try:
         repository_uid = os.stat(ROOT, follow_symlinks=False).st_uid
     except OSError as exc:
@@ -1392,7 +1393,8 @@ def current_development_evidence(nonce, algorithm_ram_evidence=None,
             development.get("artifact_digests") != artifact_digests):
         raise ProbeError(
             "algorithm RAM evidence artifact digests differ from current build")
-    _require_development_canonical_main(head, code_source_sha)
+    if algorithm_ram_evidence is None:
+        _require_development_canonical_main(head, code_source_sha)
     return {
         "source_sha": code_source_sha,
         "head": head,
@@ -5011,13 +5013,15 @@ def run_probe(device_arg, confirm_arg, state_dir_arg, review_path,
             if hashlib.sha256(Path(__file__).read_bytes()).hexdigest() != \
                     evidence["helper_sha256"] or \
                     _git("rev-parse", "HEAD") != evidence["head"] or \
-                    _git("rev-parse", "origin/main") != evidence["head"] or \
+                    (not (development_only and algorithm_ram_evidence) and
+                     _git("rev-parse", "origin/main") != evidence["head"]) or \
                     _has_non_report_worktree_changes():
                 raise ProbeError(
                     "main or the bound helper changed before physical execution")
             if development_only:
-                _require_development_canonical_main(
-                    evidence["head"], evidence["source_sha"])
+                if algorithm_ram_evidence is None:
+                    _require_development_canonical_main(
+                        evidence["head"], evidence["source_sha"])
             elif _remote_main_sha() != evidence["head"]:
                 raise ProbeError(
                     "canonical main changed before physical execution")

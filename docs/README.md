@@ -47,6 +47,14 @@ The product identity, ordinary SWAPSPACE2 backing policy and internal SWZ packin
 
 No legacy, recall, NBD, pressure, alternate-module, or historical-model subsystem is part of the working tree. Git history is the archive.
 
+**Local-only `make test`:** This tier runs against the clean local
+`main` currently checked out, without fetching or fast-forwarding remote
+GitHub commits. It retains a durable local RAM checkpoint and skips automatic
+GitHub report publication; remote updates never affect the qualification.
+A device trial still requires the same independent local source/artifact,
+operator-consent and owner-recovery checks. To test newer code, first
+synchronize the checkout explicitly with `git pull --ff-only origin main`.
+
 ## Supported commands
 
 The six root goals are `make` (build), `make install` (admit qualified
