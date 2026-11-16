@@ -70,10 +70,12 @@ Round 007 [source closeout](round007/round-report.md) accounts for both real sou
 
 [Round 008 accountable closeout](round008/round-report.md) records actual Agent 4 and Agent 8 source integrations; real native/rootless and production-C GitHub CI PASSED; pinned Linux LLVM source-object Kbuild PASSED; pinned GCC `dm-swapz.ko` failed on missing `SWAPZ_BUILD_SOURCE_CLEAN_STRING` at `dm-target.c:71`. [#125](https://github.com/k1moradi/swapz/issues/125) is administratively closed **without a full qualification PASS**; the explicit failure becomes next-round targeted engineering, not an unreported release regression. Phase A BLOCKED; Phase B DISABLED.
 
-## Round 009 — FINAL task package (start only after unique ROUND_OPEN)
+## Round 009 — CLOSED_SOURCE_INTEGRATED_CI_PENDING (2/2 sources, Kbuild pending)
 
 | Round | Frozen source | Issue | Exactly two parallel agents excluding coordinator | Start condition |
 | --- | --- | --- | --- | --- |
 | [009](round009/README.md) | `4063b88422dd62b1d4b1a990f0cfe9961e73277c` | [#126](https://github.com/k1moradi/swapz/issues/126) | [Agent 3 real GCC build-info bug fix](round009/agent3-pinned-gcc-build-info-fix.md) and [Agent 2 modified pinned Linux MM/BIO origin source staging](round009/agent2-real-linux-provenance-source-staging.md) | Final task SHA verified on main and unique `ROUND_OPEN` in #126 |
 
 Round 008 [closed accurately](round008/round-report.md): both real worker sources integrated and native/production-C passed, separate LLVM source-object Kbuild passed, GCC linked-module failed at a genuine generated build-info macro error. Round 009's GCC repair and real upstream Linux producer prototype are independent by file and test ownership; only coordinator Agent 1 publishes `main` and verifies hosted results. The MM/BIO prototype uses a disposable full source checkout and records **actual modified Linux source bytes**, not a separate writable upstream repository or standalone patch. Phase A remains BLOCKED and Phase B disabled.
+
+[Round 009 accountable closeout](round009/round-report.md) archives both complete worker sources and actual serial main integrations `7ff6a5b5` and `1db78aba`, with original source reports preserved byte-for-byte and SHA-256 at [archive](round009/original-report-archive.md). The actual [pinned GCC Kbuild #43790416873](https://github.com/k1moradi/swapz/actions/runs/43790416873) and [modified Linux MM/BIO Kbuild #43790479509](https://github.com/k1moradi/swapz/actions/runs/43790479509) were still IN_PROGRESS at closeout and must not be described as PASS. Phase A BLOCKED; Phase B DISABLED.
