@@ -13669,3 +13669,25 @@ unless real source-linked artifacts exist. Phase A BLOCKED; Phase B
 forced RAW and compressed direct handoff DISABLED. No module insertion,
 mapper, swap, loop/null_blk or physical device is authorized by this
 source-only task.
+
+## Round 018 Agent 4 — bounded physical slot-release refusal diagnostics
+
+A real anonymous-workload release timeout is a distinct first failure, not a
+generic producer refusal: preserve the exact source-defined message as the
+`swap_slot_release` category without changing the 30-second release bound,
+fixed mapper baseline, cgroup zero-charge requirement, or worker teardown.
+On timeout only, capture the last independently sampled dedicated-cgroup
+`memory.swap.current` bytes, mapper `/proc/swaps` Used KiB, original pinned
+baseline and exact nonnegative delta. The sample pair is not atomic and cannot
+prove page ownership, a kernel bug or successful slot release. Carry only a
+finite, nonnegative, internally consistent numerical record through original
+exception chaining; never print private exception text or paths.
+
+The official report parser must reject unknown/extra fields, booleans,
+negative/overflow counts, contradictory mapper deltas, success-shaped release
+observations and release fields on unrelated phases/reasons. The public console
+prints a safe bounded snapshot and follow-up without weakening any exact
+I/O, byte-oracle, OOM, PSI, ownership or recovery gate. Rootless tests prove
+first-cause precedence across secondary cleanup errors, malformed/private
+observations, original nonzero refusal, and byte-exact semantics. This is
+source-only reporting evidence; physical=NOT_RUN and Phase A remains BLOCKED.

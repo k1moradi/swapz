@@ -6851,6 +6851,40 @@ class ReportContract(unittest.TestCase):
                     prefix + json.dumps({**report, **fields})))
         self.assertIsNone(runner.parse_algorithm_pageout_diagnostic(marker + "\n" + marker))
 
+    def test_slot_release_diagnostic_is_strict_and_public_output_is_bounded(self):
+        prefix = "PHYSICAL_ALGORITHM_DEBUG="
+        release = {"expected_baseline_used_kib": 12,
+                   "cgroup_swap_bytes": 0, "mapper_used_kib": 16,
+                   "mapper_used_delta_kib": 4}
+        record = {"schema": "swapz-algorithm-workload-diagnostic-v1",
+                  "phase": "anonymous_workload", "gate": "bounded_primary_workload",
+                  "reason": "swap_slot_release", "original_errno": None,
+                  "release": release}
+        def parse(candidate):
+            return runner.parse_algorithm_pageout_diagnostic(
+                prefix + json.dumps(candidate))
+        self.assertEqual(parse(record), record)
+        stream = io.StringIO()
+        with contextlib.redirect_stdout(stream):
+            runner.print_algorithm_workload_diagnostic(record)
+        self.assertIn("mapper_used_delta_kib=4", stream.getvalue())
+        self.assertNotIn("KEEP_PRIVATE", stream.getvalue())
+        for change in ({"private_path": "/private/KEEP_PRIVATE"},
+                       {"mapper_used_delta_kib": 8},
+                       {"mapper_used_delta_kib": True},
+                       {"cgroup_swap_bytes": -1},
+                       {"mapper_used_kib": 1 << 64}):
+            with self.subTest(change=change):
+                self.assertIsNone(parse({**record, "release": {**release, **change}}))
+        for changed in ({"reason": "producer_refused"},
+                        {"phase": "anonymous_preflight"},
+                        {"pressure": {}},
+                        {"release": None}):
+            with self.subTest(changed=changed):
+                self.assertIsNone(parse({**record, **changed}))
+        self.assertEqual(parse({**record, "release": {
+            **release, "cgroup_swap_bytes": 4096}})["reason"], "swap_slot_release")
+
     def test_pressure_observation_rejects_malformed_or_private_fields(self):
         pressure = self.pressure_observation_fixture()
         report = {"schema": "swapz-algorithm-workload-diagnostic-v1",

@@ -4457,6 +4457,8 @@ def parse_algorithm_pageout_diagnostic(error_output):
         fields = {"schema", "phase", "gate", "reason", "original_errno"}
         if "pressure" in diagnostic:
             fields.add("pressure")
+        if "release" in diagnostic:
+            fields.add("release")
         if set(diagnostic) != fields:
             return None
         if any(not isinstance(diagnostic[key], str) for key in ("phase", "gate", "reason")):
@@ -4464,7 +4466,8 @@ def parse_algorithm_pageout_diagnostic(error_output):
         reasons = {
             "swapz_read", "lower_read", "kernel_swapin", "swapz_write",
             "lower_write", "kernel_swapout", "swapout_attribution",
-            "byte_oracle", "cgroup_oom", "memory_pressure", "producer_refused"}
+            "byte_oracle", "cgroup_oom", "memory_pressure",
+            "swap_slot_release", "producer_refused"}
         if diagnostic["phase"] == "anonymous_preflight":
             reasons = {"controls_unavailable"}
         elif diagnostic["phase"] != "anonymous_workload":
@@ -4474,6 +4477,25 @@ def parse_algorithm_pageout_diagnostic(error_output):
                 diagnostic["reason"] not in reasons or
                 (value is not None and (type(value) is not int or not 1 <= value <= 4095))):
             return None
+        if "release" in diagnostic:
+            release = diagnostic["release"]
+            release_fields = {
+                "expected_baseline_used_kib", "cgroup_swap_bytes",
+                "mapper_used_kib", "mapper_used_delta_kib"}
+            if (diagnostic["reason"] != "swap_slot_release" or
+                    diagnostic["phase"] != "anonymous_workload" or
+                    not isinstance(release, dict) or
+                    set(release) != release_fields or
+                    any(type(release[key]) is not int or
+                        not 0 <= release[key] <= (1 << 64) - 1
+                        for key in release_fields)):
+                return None
+            baseline = release["expected_baseline_used_kib"]
+            delta = release["mapper_used_delta_kib"]
+            if (release["mapper_used_kib"] < baseline or
+                    delta != release["mapper_used_kib"] - baseline or
+                    (release["cgroup_swap_bytes"] == 0 and delta == 0)):
+                return None
         if "pressure" in diagnostic:
             pressure = diagnostic["pressure"]
             pressure_fields = {
@@ -4604,6 +4626,17 @@ def print_algorithm_workload_diagnostic(diagnostic):
           f"reason={diagnostic['reason']} "
           f"original_errno={original_errno if original_errno is not None else 'unavailable'}",
           flush=True)
+    release = diagnostic.get("release")
+    if release is not None:
+        print("        Slot-release timeout (last independent kernel samples; "
+              "not an atomic snapshot): "
+              f"baseline_mapper_used_kib={release['expected_baseline_used_kib']} "
+              f"cgroup_swap_bytes={release['cgroup_swap_bytes']} "
+              f"mapper_used_kib={release['mapper_used_kib']} "
+              f"mapper_used_delta_kib={release['mapper_used_delta_kib']}",
+              flush=True)
+        print("        Next: distinguish a remaining cgroup charge from mapper-only "
+              "slot usage; neither permits accepting partial release", flush=True)
     pressure = diagnostic.get("pressure")
     if pressure is not None:
         def observed(key):

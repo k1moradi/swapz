@@ -1023,6 +1023,38 @@ class PhysicalSwapProbeTests(unittest.TestCase):
         self.assertNotIn("attribution", record)
         self.assertNotIn("private", stderr.getvalue())
 
+    def test_release_timeout_classifies_first_error_and_redacts_private_cleanup(self):
+        original = RuntimeError(
+            "swap slots did not return to baseline within the bounded release timeout")
+        original.release_observation = {
+            "expected_baseline_used_kib": 12,
+            "cgroup_swap_bytes": 0,
+            "mapper_used_kib": 16,
+            "mapper_used_delta_kib": 4,
+            "private_path": "/private/KEEP_PRIVATE"}
+        wrapped = RuntimeError(str(original) +
+                               "; cleanup also failed: /private/KEEP_PRIVATE")
+        wrapped.__cause__ = original
+
+        def observe():
+            error_output = io.StringIO()
+            with mock.patch.object(probe.sys, "stderr", error_output):
+                probe._emit_algorithm_workload_failure(wrapped)
+            return json.loads(error_output.getvalue().split("=", 1)[1]), error_output.getvalue()
+
+        record, output = observe()
+        self.assertEqual(record["reason"], "swap_slot_release")
+        self.assertEqual(record["release"]["mapper_used_delta_kib"], 4)
+        self.assertEqual(record["release"]["cgroup_swap_bytes"], 0)
+        self.assertNotIn("KEEP_PRIVATE", output)
+        original.release_observation["mapper_used_delta_kib"] = True
+        invalid, output = observe()
+        self.assertNotIn("release", invalid)
+        self.assertNotIn("KEEP_PRIVATE", output)
+        original.release_observation["mapper_used_delta_kib"] = 4096
+        invalid, _ = observe()
+        self.assertNotIn("release", invalid)
+
     def test_algorithm_memory_pressure_remains_first_cause_after_child_cleanup_timeout(self):
         stderr = io.StringIO()
         original = RuntimeError("sustained cgroup memory PSI full exceeded safe stop threshold")

@@ -3535,6 +3535,8 @@ def evaluate_reuse_rounds(rounds: list[dict], *,
 def _wait_for_round_release(cgroup: Path, mapper_device: tuple[int, int],
                             expected_used_kib: int, deadline: float,
                             guard: Callable[[], None]) -> dict:
+    last_swap_current_bytes = None
+    last_mapper_used_kib = None
     while time.monotonic() < deadline:
         guard()
         swap_current = _read_uint(cgroup / "memory.swap.current")
@@ -3548,8 +3550,22 @@ def _wait_for_round_release(cgroup: Path, mapper_device: tuple[int, int],
                 "release_swap_current_bytes": 0,
                 "mapper_used_released_kib": row.used_kib,
             }
+        # Cache the last independent observations without allocating on
+        # every poll. They are non-atomic and cannot themselves prove release.
+        last_swap_current_bytes = swap_current
+        last_mapper_used_kib = row.used_kib
         time.sleep(0.05)
-    raise QualificationFailure("swap slots did not return to baseline within the bounded release timeout")
+    failure = QualificationFailure(
+        "swap slots did not return to baseline within the bounded release timeout")
+    if last_swap_current_bytes is not None and last_mapper_used_kib is not None:
+        # Preserve bounded, identity-free counters through chained cleanup.
+        failure.release_observation = {
+            "expected_baseline_used_kib": expected_used_kib,
+            "cgroup_swap_bytes": last_swap_current_bytes,
+            "mapper_used_kib": last_mapper_used_kib,
+            "mapper_used_delta_kib": last_mapper_used_kib - expected_used_kib,
+        }
+    raise failure
 
 
 def _confirm_exact_swap_attribution(

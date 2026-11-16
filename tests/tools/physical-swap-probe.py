@@ -3910,6 +3910,7 @@ def _emit_algorithm_workload_failure(error, phase="anonymous_workload"):
         "real-swap byte oracle reported corruption or incomplete verification": "byte_oracle",
         "cgroup OOM counters changed during admitted real-swap workload": "cgroup_oom",
         "sustained cgroup memory PSI full exceeded safe stop threshold": "memory_pressure",
+        "swap slots did not return to baseline within the bounded release timeout": "swap_slot_release",
         "exact mapper usage and dedicated-cgroup swap charge differ; traffic attribution or mapper ownership is ambiguous": "swap_attribution",
         "raw swap did not reach the required real-swap floor": "raw_swap_floor",
         "raw swap workload encountered cgroup OOM": "cgroup_oom",
@@ -3929,10 +3930,26 @@ def _emit_algorithm_workload_failure(error, phase="anonymous_workload"):
     # and copy numeric observations rather than arbitrary exception attributes.
     current = error
     seen = set()
-    while (record["reason"] in ("memory_pressure", "swap_attribution") and
+    while (record["reason"] in ("memory_pressure", "swap_attribution",
+                                "swap_slot_release") and
            isinstance(current, BaseException) and id(current) not in seen and
            len(seen) < 16):
         seen.add(id(current))
+        if record["reason"] == "swap_slot_release":
+            observation = getattr(current, "release_observation", None)
+            keys = (
+                "expected_baseline_used_kib", "cgroup_swap_bytes",
+                "mapper_used_kib", "mapper_used_delta_kib")
+            if isinstance(observation, dict) and all(
+                    type(observation.get(key)) is int and
+                    0 <= observation[key] <= MAX_BLOCK_COUNTER for key in keys):
+                baseline = observation["expected_baseline_used_kib"]
+                mapper_used = observation["mapper_used_kib"]
+                delta = observation["mapper_used_delta_kib"]
+                if (mapper_used >= baseline and delta == mapper_used - baseline and
+                        (observation["cgroup_swap_bytes"] > 0 or delta > 0)):
+                    record["release"] = {key: observation[key] for key in keys}
+                    break
         if record["reason"] == "swap_attribution":
             attribution = getattr(current, "attribution_observation", None)
             if isinstance(attribution, dict):

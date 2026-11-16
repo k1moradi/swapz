@@ -4716,6 +4716,33 @@ class PrimaryRealSwapContracts(unittest.TestCase):
                     baseline_kib, charge_bytes, mapper_used_kib,
                     time.monotonic() + 1, mock.Mock(), 1)
 
+    def test_release_timeout_retains_last_exact_cgroup_and_mapper_counts(self):
+        # A timed-out sample is evidence, never a new baseline or PASS.
+        with contextlib.ExitStack() as stack:
+            stack.enter_context(mock.patch.object(
+                qualify.time, "monotonic", side_effect=[0.0, 1.0]))
+            stack.enter_context(mock.patch.object(qualify.time, "sleep"))
+            stack.enter_context(mock.patch.object(
+                qualify, "_read_uint", return_value=4096))
+            stack.enter_context(mock.patch.object(
+                qualify, "read_swap_rows", return_value=[]))
+            stack.enter_context(mock.patch.object(
+                qualify, "_row_for_device",
+                return_value=SimpleNamespace(used_kib=16)))
+            guard = mock.Mock()
+            with self.assertRaisesRegex(
+                    qualify.QualificationFailure,
+                    "swap slots did not return to baseline") as failure:
+                qualify._wait_for_round_release(
+                    Path("/synthetic/cgroup"), (252, 1), 12, 0.5, guard)
+        guard.assert_called_once()
+        self.assertEqual(failure.exception.release_observation, {
+            "expected_baseline_used_kib": 12,
+            "cgroup_swap_bytes": 4096,
+            "mapper_used_kib": 16,
+            "mapper_used_delta_kib": 4,
+        })
+
     def test_slot_reuse_requires_full_release_then_second_concurrent_allocation(self):
         rounds = [
             {
