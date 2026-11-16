@@ -5,6 +5,7 @@ on:
       - ".github/workflows/phase-a-zswap-origin-kunit.yml"
       - "tests/tools/stage-pinned-linux-zswap-origin.py"
       - "tests/runtime/native/pinned-linux-zswap-origin-stage-test.py"
+      - "tests/runtime/native/pinned-linux-kunit-uml-config-test.py"
   workflow_dispatch:
 permissions:
   contents: read
@@ -63,6 +64,8 @@ jobs:
           [[ "$(git -C swapz rev-parse HEAD)" == "$GITHUB_SHA" ]]
           [[ -z "$(git -C swapz status --porcelain --untracked-files=all)" ]]
           run_checked rootless python3 -B swapz/tests/runtime/native/pinned-linux-zswap-origin-stage-test.py
+          run_checked uml_config_rootless python3 -B \
+            swapz/tests/runtime/native/pinned-linux-kunit-uml-config-test.py
           run_checked stage python3 -B swapz/tests/tools/stage-pinned-linux-zswap-origin.py \
             --linux-root linux --manifest "$evidence/sources.json" --with-kunit
           phase=verify_source_hashes
@@ -124,30 +127,40 @@ jobs:
                 "$(sha256sum "$out/mm/zswap.o" | cut -d' ' -f1)" >> "$manifest"
             fi
             config="$RUNNER_TEMP/origin-$profile.kunitconfig"
-            printf 'CONFIG_BLOCK=y\nCONFIG_SWAP=y\nCONFIG_KUNIT=y\nCONFIG_SWAP_BIO_ORIGIN_KUNIT_TEST=y\n# CONFIG_BLK_CGROUP is not set\n' > "$config"
+            # Pinned init/Kconfig places BLK_CGROUP under 'if CGROUPS'; keep
+            # the BIO reuse/reissue test's NULL-bdev path genuinely no-cgroup.
+            printf 'CONFIG_BLOCK=y\nCONFIG_SWAP=y\nCONFIG_KUNIT=y\nCONFIG_SWAP_BIO_ORIGIN_KUNIT_TEST=y\n# CONFIG_CGROUPS is not set\n# CONFIG_BLK_CGROUP is not set\n' > "$config"
             if [[ "$profile" == enabled ]]; then
               printf 'CONFIG_ZSWAP=y\n' >> "$config"
             else
               printf '# CONFIG_ZSWAP is not set\n' >> "$config"
             fi
             uml_dir="$RUNNER_TEMP/origin-uml-$profile"
+            # Refuse stale build and TAP paths rather than recycling a prior run.
+            phase=pre_uml_clean_paths
+            [[ ! -e "$uml_dir" && ! -e "$evidence/$profile-kunit-output.log" ]]
             run_checked uml_kunit timeout -k 10s 40m \
               python3 linux/tools/testing/kunit/kunit.py run --arch=um \
               --build_dir "$uml_dir" \
               --kunitconfig "$config" --jobs=2 --make_options=W=1 --raw_output
             phase=verify_uml_config
+            run_checked verify_uml_config python3 -B \
+              swapz/tests/runtime/native/pinned-linux-kunit-uml-config-test.py \
+              --verify --profile "$profile" --request "$config" \
+              --effective "$uml_dir/.config" --manifest "$manifest"
             [[ -s "$uml_dir/.config" ]]
             grep -Fxq CONFIG_SWAP=y "$uml_dir/.config"
             grep -Fxq CONFIG_KUNIT=y "$uml_dir/.config"
             grep -Fxq CONFIG_SWAP_BIO_ORIGIN_KUNIT_TEST=y "$uml_dir/.config"
+            grep -Fxq '# CONFIG_CGROUPS is not set' "$uml_dir/.config"
             grep -Fxq '# CONFIG_BLK_CGROUP is not set' "$uml_dir/.config"
             if [[ "$profile" == enabled ]]; then
               grep -Fxq CONFIG_ZSWAP=y "$uml_dir/.config"
             else
               grep -Fxq '# CONFIG_ZSWAP is not set' "$uml_dir/.config"
             fi
-            printf 'uml_config_sha256=%s\n' \
-              "$(sha256sum "$uml_dir/.config" | cut -d' ' -f1)" >> "$manifest"
+            # The verifier already retained the effective config digest,
+            # even on a Kconfig refusal; never write a second conflicting hash.
             phase=verify_uml_image
             [[ -s "$uml_dir/linux" ]]
             printf 'uml_kernel_sha256=%s\n' \
@@ -167,6 +180,11 @@ jobs:
             printf 'kunit_executed=yes\nkunit_cases_passed=5\nresult=PASS\n' >> "$manifest"
           done
           manifest="$evidence/setup.txt"
+          run_checked verify_profile_pair python3 -B \
+            swapz/tests/runtime/native/pinned-linux-kunit-uml-config-test.py \
+            --verify-pair --evidence "$evidence" \
+            --enabled-config "$RUNNER_TEMP/origin-uml-enabled/.config" \
+            --disabled-config "$RUNNER_TEMP/origin-uml-disabled/.config"
           printf 'source_modified=yes\nresult=PASS\n' >> "$manifest"
       - name: "Retain bounded source and failure evidence"
         if: always()

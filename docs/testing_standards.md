@@ -13309,3 +13309,38 @@ alongside its existing physical-campaign adversarial tests and the prior
 `algorithm-physical-test.py`. Mocked selector calls are not physical trials.
 Loaded/owner real-device admission remains NOT_RUN, Phase A BLOCKED and
 Phase B RAW bypass DISABLED.
+
+## Round 014 — Agent 2 effective UML Kconfig and five-case profile evidence gate (2026-11-16)
+
+The pinned BIO origin KUnit workflow must preserve both independent
+`CONFIG_ZSWAP=y` and `CONFIG_ZSWAP=n` UML builds. The original hosted
+workflow #43811904846 artifact #14200877458 reached successful modified
+`block/bio.o`, `block/swap-bio-origin-kunit.o`, `mm/page_io.o`, and enabled
+`mm/zswap.o` builds, then `kunit.py` exited 0; it **failed** at
+`verify_uml_config` without recording which effective option diverged. This
+is not proof of five executed PASS cases or of a completed disabled profile.
+
+The pinned upstream `init/Kconfig` nests `config BLK_CGROUP` under
+`if CGROUPS`, and its `BLK_CGROUP` entry depends on `BLOCK` and defaults
+`n`. The test's `bio_prepare_reissue()` null-device path is intentionally
+compiled only when `CONFIG_BLK_CGROUP=n`; the KUnit UML request therefore
+explicitly disables `CONFIG_CGROUPS` as well as `CONFIG_BLK_CGROUP` and
+verifies the **effective** disabled values. Keep `CONFIG_BLOCK=y`, swap,
+KUnit, the BIO origin test, and the selected y/n zswap state mandatory. A
+forced, missing, wrong-type or internally contradictory option must refuse,
+not be converted to a skip or a PASS.
+
+`tests/runtime/native/pinned-linux-kunit-uml-config-test.py` records the
+actual UML `.config` SHA-256 (and request SHA-256) **before** rejecting the
+first mismatched option. Failure output is bounded to option, expected and
+actual values without absolute runner paths. Each profile must have a fresh
+UML build directory, an independently captured raw TAP transcript, source
+and object identities, and successful invocation of the existing strict
+five-case `--verify-kunit-tap` gate; both manifests must affirm five unique,
+non-skipped, non-failed cases. A final cross-profile verifier fails closed on
+missing/duplicate evidence, wrong y/n, mismatched digests, copied configuration
+or identical copied TAP, and must not retroactively claim real KUnit execution
+from a rootless fixture. Source-coupled Python tests are **ROOTLESS**; only
+source-linked hosted modified-Linux Kbuild and UML execution can qualify these
+stages. Owner-authorized loaded MM→BIO→DM writeback remains **NOT_RUN**.
+Phase A remains BLOCKED, and Phase B stays disabled.

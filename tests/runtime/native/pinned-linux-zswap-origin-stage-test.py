@@ -113,6 +113,10 @@ def verify_kunit_workflow_contract(contents: str) -> None:
         "CONFIG_ZSWAP=y",
         "# CONFIG_ZSWAP is not set",
         '# CONFIG_BLK_CGROUP is not set',
+        '# CONFIG_CGROUPS is not set',
+        'run_checked verify_uml_config ',
+        'run_checked verify_profile_pair ',
+        'pinned-linux-kunit-uml-config-test.py',
         "--make_options=W=1",
         'grep -Fxq CONFIG_ZSWAP=y "$uml_dir/.config"',
         """grep -Fxq '# CONFIG_ZSWAP is not set' "$uml_dir/.config" """.strip(),
@@ -123,16 +127,19 @@ def verify_kunit_workflow_contract(contents: str) -> None:
     )
     if (any(value not in contents for value in required) or
         contents.count("block/swap-bio-origin-kunit.c") != 2 or
-        contents.count("block/swap-bio-origin-kunit.o") != 2):
+        contents.count("block/swap-bio-origin-kunit.o") != 2 or
+        contents.count("# CONFIG_CGROUPS is not set") != 2):
         raise ValueError("incomplete pinned KUnit workflow contract")
     ordered = (
         "run_checked rootless ",
         "run_checked stage ",
         "run_checked modified_objects ",
         "run_checked uml_kunit ",
+        "run_checked verify_uml_config ",
         'cp -- "$log" "$captured"',
         "run_checked verify_real_tap ",
         "kunit_cases_passed=5",
+        "run_checked verify_profile_pair ",
     )
     positions = [contents.find(token) for token in ordered]
     if any(index < 0 for index in positions) or positions != sorted(positions):
@@ -721,6 +728,12 @@ class PinnedLinuxStageTests(unittest.TestCase):
              'run_checked verify_real_tap ', 'echo PASS # '),
             ("missing-UML-Kconfig-validation",
              'grep -Fxq CONFIG_ZSWAP=y "$uml_dir/.config"', 'true # missing'),
+            ("missing-UML-effective-diagnostic",
+             "run_checked verify_uml_config ", "printf ignored "),
+            ("missing-conditional-CGROUPS-protection",
+             "# CONFIG_CGROUPS is not set", "CONFIG_CGROUPS=y"),
+            ("missing-final-independent-profile-gate",
+             "run_checked verify_profile_pair ", "printf profile_pass "),
             ("missing-untracked-C-source",
              "block/swap-bio-origin-kunit.c", "block/not-the-kunit-source.c"),
             ("missing-modified-build",
