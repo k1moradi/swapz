@@ -833,7 +833,51 @@ def evaluate(
         cold_boot, cold_boot_raw, cold_boot_arm, cold_boot_arm_raw)
 
 
+# A real owner-authorized production-readiness snapshot is intentionally NOT
+# a checked-in source artifact. The synthetic hash below is scoped to this
+# rootless test module only; it cannot authorize any real physical operation.
+ROOTLESS_READINESS_SNAPSHOT = (
+    b'{"schema":"rootless-readiness-fixture","status":"BLOCKED"}\n')
+_ORIGINAL_PATH_READ_BYTES = Path.read_bytes
+_READINESS_PATH = ROOT / EVALUATOR.REAL_SWAP_DYNAMIC_CONTROL_INPUT
+
+
+def _read_rootless_readiness_fixture(path):
+    if path == _READINESS_PATH:
+        return ROOTLESS_READINESS_SNAPSHOT
+    return _ORIGINAL_PATH_READ_BYTES(path)
+
+
 class ProductionReadinessEvaluatorTest(unittest.TestCase):
+    def setUp(self):
+        # Model the exact digest relationship of independent producer/consumer
+        # fixtures without creating a fake authorization file on disk.
+        patcher = mock.patch.object(
+            Path, "read_bytes", _read_rootless_readiness_fixture)
+        patcher.start()
+        self.addCleanup(patcher.stop)
+
+    def test_missing_real_authorization_remains_a_release_blocker(self):
+        report = owner_report()
+        policy = acceptance_policy()
+        report_raw, policy_raw = encoded(report), encoded(policy)
+        physical = real_swap_evidence(report_raw, policy_raw)
+        evidence = current_evidence(
+            report_raw, policy_raw, encoded(physical))
+
+        def missing_authorization(path):
+            if path == _READINESS_PATH:
+                raise FileNotFoundError("authorization snapshot unavailable")
+            return _ORIGINAL_PATH_READ_BYTES(path)
+
+        with mock.patch.object(Path, "read_bytes", missing_authorization):
+            result = evaluate(report, evidence, policy, physical=physical)
+        self.assertEqual(result["CODE_PRODUCTION_READY"], "BLOCKED")
+        self.assertTrue(any(
+            "current physical control source input is unreadable: "
+            "artifact=docs/handoff/production-readiness.json" in blocker
+            for blocker in result["code_blockers"]), result["code_blockers"])
+
     def test_complete_pre_reboot_evidence_passes_both_readiness_gates(self):
         result = evaluate()
         self.assertEqual(result["CODE_PRODUCTION_READY"], "PASS")

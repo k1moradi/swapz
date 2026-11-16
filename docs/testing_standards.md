@@ -31,6 +31,19 @@ independent restrictions. The final report remains local with an explicit
 `SKIPPED_GIT_SYNC` status. `make test_full` is unchanged.
 
 
+## Rootless production authorization fixtures (2026-11-16)
+
+The genuine `docs/handoff/production-readiness.json` remains an absent,
+owner-bound production authorization input in ordinary source checkouts.
+Rootless physical and release-validator tests must use an explicitly
+synthetic, BLOCKED-status in-memory snapshot to exercise digest pinning,
+independent hash maps, and mutated source rejection. Never populate the
+real path, make an authorization fixture a runtime fallback, or weaken the
+production helper's missing-input refusal. Negative rootless tests must
+prove that absent real authorization still blocks both use of the physical
+coordinator and the production release decision. These are unit fixtures,
+not release or device-qualified PASS evidence.
+
 ## Audited remote-branch cleanup tool (2026-11-16)
 
 The private, operator-run `tests/tools/cleanup-legacy-branches.py` provides a

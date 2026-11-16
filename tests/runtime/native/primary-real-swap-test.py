@@ -1382,7 +1382,14 @@ class PrimaryRealSwapContracts(unittest.TestCase):
                     ("docs/handoff/production-readiness.json",
                      qualify._read_readiness_snapshot)):
                 with self.subTest(document=relative):
-                    original = (ROOT / relative).read_bytes()
+                    # Authorization is deliberately absent from a source-only
+                    # checkout. Exercise the pinned-byte mismatch against an
+                    # inert synthetic fixture, never fabricate an approval.
+                    original = (
+                        b'{"schema":"rootless-readiness-fixture",'
+                        b'"status":"BLOCKED"}\n'
+                        if relative == "docs/handoff/production-readiness.json"
+                        else (ROOT / relative).read_bytes())
                     expected = hashlib.sha256(original).hexdigest()
                     snapshot = root / Path(relative).name
                     snapshot.write_bytes(b'{"unauthorized":true}\n')
@@ -1400,6 +1407,15 @@ class PrimaryRealSwapContracts(unittest.TestCase):
                         with self.assertRaisesRegex(
                                 qualify.Blocked, "validated commit at policy_use"):
                             verifier(snapshot, expected_sha256=expected)
+
+    def test_missing_readiness_snapshot_is_blocked_before_any_policy_use(self):
+        # No authorization file is part of a clean public source checkout.
+        # A truly absent input must stay a refusal in the production helper.
+        with tempfile.TemporaryDirectory() as directory:
+            missing = Path(directory) / "never-authorized-readiness.json"
+            with self.assertRaises(qualify.Blocked):
+                qualify._read_readiness_snapshot(
+                    missing, expected_sha256="a" * 64)
 
     def test_private_physical_control_build_binds_exact_source_and_installed_control(self):
         source_sha = "a" * 40
