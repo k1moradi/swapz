@@ -2761,5 +2761,112 @@ class CiFailureDiagnosticContract(unittest.TestCase):
                 missing_ok=True)
 
 
+
+class LegacyRemoteBranchCleanupContract(unittest.TestCase):
+    """Mocked cleanup checks; never contacts GitHub or deletes a branch."""
+
+    @classmethod
+    def setUpClass(cls):
+        specification = importlib.util.spec_from_file_location(
+            "swapz_legacy_branch_cleanup",
+            ROOT / "tests/tools/cleanup-legacy-branches.py")
+        cls.cleanup = importlib.util.module_from_spec(specification)
+        specification.loader.exec_module(cls.cleanup)
+
+    def test_legacy_cleanup_rejects_changed_or_new_branch_heads(self):
+        cleanup = self.cleanup
+        expected = cleanup.expected_branches()
+        self.assertEqual(len(expected), 65)
+        self.assertNotIn("main", expected)
+        self.assertTrue(all(re.fullmatch(r"[0-9a-f]{40}", commit)
+                            for commit in expected.values()))
+        current_main = "f" * 40
+        self.assertEqual(cleanup.validate_inventory(
+            expected, {"main": current_main}, current_main), [])
+        first_branch = next(iter(expected))
+        for incorrect in (
+                {"main": current_main, first_branch: "0" * 40},
+                {"main": current_main, "unreviewed": "0" * 40},
+                {"main": "0" * 40}):
+            with self.subTest(incorrect=incorrect):
+                with self.assertRaises(cleanup.CleanupBlocked):
+                    cleanup.validate_inventory(
+                        expected, incorrect, current_main)
+
+    def simulate_cleanup(self, *, apply=False, response="DELETE 1",
+                         change_main_on_confirmation=False):
+        cleanup = self.cleanup
+        expected = cleanup.expected_branches()
+        first_branch = next(iter(expected))
+        local_main = "f" * 40
+        remote_branches = {
+            "main": local_main, first_branch: expected[first_branch]}
+        pushed_commands = []
+
+        def mocked_git(*command, **options):
+            if command == ("symbolic-ref", "--quiet", "--short", "HEAD"):
+                return "main"
+            if command == ("rev-parse", "HEAD"):
+                return local_main
+            if command == ("merge-base", "--is-ancestor",
+                           cleanup.AUDITED_MAIN, local_main):
+                return ""
+            if command == ("status", "--porcelain"):
+                return ""
+            if command[:2] == ("remote", "get-url"):
+                return "git@github.com:k1moradi/swapz.git"
+            if command[:3] == ("ls-remote", "--heads", "origin"):
+                return "\n".join(
+                    f"{commit}\trefs/heads/{name}"
+                    for name, commit in remote_branches.items())
+            if command[0] == "push":
+                pushed_commands.append(command)
+                self.assertEqual(command, (
+                    "push", "--porcelain",
+                    f"--force-with-lease=refs/heads/{first_branch}:"
+                    f"{expected[first_branch]}",
+                    "origin", f":refs/heads/{first_branch}"))
+                del remote_branches[first_branch]
+                return ""
+            raise AssertionError(f"Unexpected Git command: {command}")
+
+        def mocked_confirmation(_prompt):
+            if change_main_on_confirmation:
+                remote_branches["main"] = "e" * 40
+            return response
+
+        argv = ["cleanup-legacy-branches.py"] + (["--apply"] if apply else [])
+        with mock.patch.object(cleanup, "run_git", side_effect=mocked_git), \
+                mock.patch.object(sys, "argv", argv), \
+                mock.patch("builtins.input", side_effect=mocked_confirmation), \
+                mock.patch("builtins.print"):
+            status = cleanup.main()
+        return status, pushed_commands, remote_branches
+
+    def test_legacy_cleanup_preview_and_declined_consent_never_push(self):
+        status, pushed, remote = self.simulate_cleanup()
+        self.assertEqual(status, 0)
+        self.assertFalse(pushed)
+        self.assertEqual(len(remote), 2)
+        status, pushed, remote = self.simulate_cleanup(
+            apply=True, response="NO")
+        self.assertEqual(status, 2)
+        self.assertFalse(pushed)
+        self.assertEqual(len(remote), 2)
+
+    def test_legacy_cleanup_requires_exact_ref_deletion_lease(self):
+        status, pushed, remote = self.simulate_cleanup(apply=True)
+        self.assertEqual(status, 0)
+        self.assertEqual(len(pushed), 1)
+        self.assertEqual(remote, {"main": "f" * 40})
+
+    def test_legacy_cleanup_refuses_main_advance_before_deletion(self):
+        status, pushed, remote = self.simulate_cleanup(
+            apply=True, change_main_on_confirmation=True)
+        self.assertEqual(status, 2)
+        self.assertFalse(pushed)
+        self.assertEqual(remote["main"], "e" * 40)
+
+
 if __name__ == "__main__":
     unittest.main()

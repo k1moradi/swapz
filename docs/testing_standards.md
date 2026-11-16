@@ -1,5 +1,21 @@
 # Testing Standards
 
+## Audited remote-branch cleanup tool (2026-11-16)
+
+The private, operator-run `tests/tools/cleanup-legacy-branches.py` provides a
+read-only preview by default and an explicit `--apply` mode for the reviewed
+65 legacy branch names. This tool never runs as part of a qualification stage.
+It must run from a clean local `main` descendant of the original audit base,
+with matching canonical GitHub fetch/push origin and matching remote `main`.
+An immutable name-to-commit inventory refuses unknown or moved refs. Each
+branch deletion uses an exact-head lease; remote inventory is rechecked before
+every deletion and a wrong confirmation refuses. Publication of the script
+itself must not make the audited-main guard unusable. It never mutates `main`,
+opens/merges PRs, or touches swap devices. Existing rootless Make-interface
+tests mock Git and cover preview, confirmation, changed/unknown references,
+exact deletion leases and a concurrent `main` advance.
+
+
 ## Round 009 actual pinned MM/BIO origin staging prototype (2026-11-15)
 
 `tests/tools/stage-pinned-linux-zswap-origin.py` is a source-mutating program,
