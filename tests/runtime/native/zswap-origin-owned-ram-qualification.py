@@ -109,8 +109,9 @@ def compare_offline_samples(before: bytes, after: bytes,
             later["upper_write_completed_err"] ==
             earlier["upper_write_completed_err"], "unexpected_error_delta")
     # An upper ACK is an independent observation, never implied by commit.
-    require(later["upper_write_completed_ok"] >
-            earlier["upper_write_completed_ok"], "no_upper_success_evidence")
+    require(later["upper_write_completed_ok"] -
+            earlier["upper_write_completed_ok"] == 1,
+            "not_exactly_one_upper_success")
     require(hmac.compare_digest(original_page, readback_page),
             "readback_bytes_differ")
 
@@ -211,8 +212,12 @@ class RootlessEvidenceTests(unittest.TestCase):
                                       upper_err=1))
 
     def test_no_upper_ack_even_after_commit(self) -> None:
-        self.reject("no_upper_success_evidence",
+        self.reject("not_exactly_one_upper_success",
                     after=self.status(admitted=4, committed=3, upper_ok=2))
+
+    def test_double_upper_ack_even_after_single_commit(self) -> None:
+        self.reject("not_exactly_one_upper_success",
+                    after=self.status(admitted=4, committed=3, upper_ok=4))
 
     def test_io_failure_after_commit(self) -> None:
         self.reject("unexpected_error_delta",

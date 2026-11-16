@@ -556,6 +556,32 @@ def assert_full_workflow_contract(workflow: Path) -> None:
             '4096_READBACK=NOT_RUN' in guard_step and
             'PHASE_A=BLOCKED PHASE_B=DISABLED DIRECT_COMPRESSED=DISABLED'
             in guard_step, "workflow_owned_ram_refusal")
+    # Claimed kernel/module/RAM/owner identities are explicitly untrusted.
+    # The new source-controlled candidate check must run before paired Kbuild
+    # and must itself refuse any unsafe candidate rather than emit PASS.
+    require('      - "tests/runtime/native/zswap-origin-loaded-evidence-contract.py"'
+            in trigger, "workflow_loaded_candidate_trigger")
+    candidate_stage = (
+        '      - name: "Run untrusted loaded-candidate '
+        'identity/ownership negative regressions"')
+    require(text.count(candidate_stage) == 1 and
+            text.index(guard) < text.index(candidate_stage) <
+            text.index('      - name: "Build modified Linux and matched source-linked'),
+            "workflow_loaded_candidate_order")
+    candidate_body = text.split(candidate_stage, 1)[1].split(
+        '      - name: "Run disabled compressed handoff source/ownership negative regression"',
+        1)[0]
+    require("set -euo pipefail" in candidate_body and
+            "zswap-origin-loaded-evidence-contract.py" in candidate_body and
+            "--self-test" in candidate_body and "--inspect-candidate" in candidate_body and
+            '--expected-source-sha "$GITHUB_SHA"' in candidate_body and
+            'if [[ "$candidate_exit" != 2 ]]' in candidate_body and
+            'ENVIRONMENT_NOT_QUALIFIED first_cause=manifest_file_type_or_size'
+            in candidate_body and
+            'LOADED_STORED_ENTRY=NOT_RUN' in candidate_body and
+            '4096_READBACK=NOT_RUN' in candidate_body and
+            'PHASE_A=BLOCKED PHASE_B=DISABLED DIRECT_COMPRESSED=DISABLED'
+            in candidate_body, "workflow_loaded_candidate_refusal")
 
 
 class PairedModuleTests(unittest.TestCase):
@@ -1017,6 +1043,40 @@ class FullWorkflowContractTests(unittest.TestCase):
             path.write_text(original.replace(anchor, '      - "irrelevant.txt"'))
             with self.assertRaisesRegex(VerificationError,
                                         "workflow_owned_ram_trigger"):
+                assert_full_workflow_contract(path)
+
+    def test_loaded_candidate_expected_refusal_cannot_be_bypassed(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="loaded-candidate-exit-") as directory:
+            original = self.workflow_path.read_text()
+            anchor = 'if [[ "$candidate_exit" != 2 ]]'
+            self.assertEqual(original.count(anchor), 1)
+            path = Path(directory) / "unsafe.yml"
+            path.write_text(original.replace(anchor, 'if [[ "$candidate_exit" != 0 ]]'))
+            with self.assertRaisesRegex(VerificationError,
+                                        "workflow_loaded_candidate_refusal"):
+                assert_full_workflow_contract(path)
+
+    def test_loaded_candidate_source_change_must_trigger_ci(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="loaded-candidate-trigger-") as directory:
+            original = self.workflow_path.read_text()
+            anchor = '      - "tests/runtime/native/zswap-origin-loaded-evidence-contract.py"'
+            self.assertEqual(original.count(anchor), 1)
+            path = Path(directory) / "untriggered.yml"
+            path.write_text(original.replace(anchor, '      - "unrelated.txt"'))
+            with self.assertRaisesRegex(VerificationError,
+                                        "workflow_loaded_candidate_trigger"):
+                assert_full_workflow_contract(path)
+
+    def test_missing_loaded_candidate_self_test_is_rejected(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="loaded-candidate-test-") as directory:
+            original = self.workflow_path.read_text()
+            anchor = 'if python3 -B "$candidate_guard" --self-test'
+            self.assertEqual(original.count(anchor), 1)
+            path = Path(directory) / "unchecked.yml"
+            path.write_text(original.replace(anchor,
+                                             'if python3 -B "$candidate_guard" --help'))
+            with self.assertRaisesRegex(VerificationError,
+                                        "workflow_loaded_candidate_refusal"):
                 assert_full_workflow_contract(path)
 
     def test_removing_classifier_is_rejected(self) -> None:

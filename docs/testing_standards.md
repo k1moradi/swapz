@@ -13926,3 +13926,72 @@ authorized booted matched Linux/loaded swapz stored-entry completion and
 byte-exact original swap-in exists: Phase A BLOCKED, Phase B forced RAW bypass
 DISABLED and direct compressed handoff DISABLED. No privileged or physical
 operations are part of this source suite.
+
+## Round 020 — Agent 3: read-only matched-loaded evidence admission and 4096-byte readback
+
+The exact pinned Linux BIO KUnit y/n and matched `dm-swapz.ko` hosted
+builds from Round 019 establish **source/build** evidence only. Neither
+constitutes a matched *booted* kernel, genuinely loaded matching module,
+actual zswap compressed stored-entry eviction or original-page swap-in.
+Do not elevate user-supplied status or a self-consistent JSON claim into
+an authenticated loaded event. Phase A remains BLOCKED.
+
+`tests/runtime/native/zswap-origin-loaded-evidence-contract.py` is a
+stdlib-only, read-only source-controlled *candidate* evidence checker.
+A bounded JSON v1 object has an exact field inventory (duplicates/extra
+fields reject), pinned modified Linux source SHA, source-linked swapz
+source SHA and module source identity, specific boot ID, boot-image SHA
+and separately claimed measured SHA, matching disk/loaded module SHA,
+kernel release/modinfo/vermagic and live module state, compiled-origin
+carrier, nonzero generation/source-record identity and independent
+original-page SHA. The tentative backing must be a claimed exclusive
+`brd` RAM device with one owner, bounded 1..120s deadline, 1..128MiB
+pressure budget, owner permission, explicitly completed cleanup, and
+claimed stored zswap eviction→MM/REQ_SWAP→DM commit→upper ACK→4096-byte
+swap-in events. These are **untrusted claims** even if internally
+consistent; unknown/physical/shared backing, missing authorization,
+teardown uncertainty, wrong SHA/module/source/kernel, stale page identity,
+missing event, malformed/oversized JSON, symlink/FIFO input and changed
+read-only file must reject. Read-only comparisons against the actual
+boot ID, os.uname release and sysfs module existence can reject claimed
+mismatches but can never authenticate the loaded bytes, exclusive owner,
+actual 4KiB page content, kernel-origin carrier causality or authority.
+The script has **no mutating backend** and always exits 2 with
+`ENVIRONMENT_NOT_QUALIFIED`, `LOADED_STORED_ENTRY=NOT_RUN` and
+`4096_READBACK=NOT_RUN` on inspection, including a fabricated
+all-positive manifest. It never invokes module loads, mapper creation,
+swap activation, cgroups, pressure, loop/null_blk or device writes.
+
+The existing `zswap-origin-owned-ram-qualification.py` still checks
+only untrusted offline bytes and counters. In addition to exact 4096
+original/readback bytes, independent original SHA256, genuine DM-status
+field names, precisely one authenticated admission and authoritative
+foreground commit, and no new upper/endio error, it now requires
+**exactly one** successful upper WRITE ACK delta, not merely a positive
+count. Zero and double ACK are both refused even when the committed
+counter increases once. An upper ACK and committed mapping are distinct
+observations; none is genuine stored-entry or swap-in proof by itself.
+
+The existing matched-Linux source workflow now runs the full new
+candidate rootless self-test plus an expected exit-2 empty-manifest
+refusal before Kbuild. No successful candidacy, fixture or external
+module link may make Phase A PASS. The full-workflow paired verifier
+rejects disabling the candidate source trigger, exit-2 refusal or
+source-test execution. Preserve all previous exact staged Linux SHA,
+`CONFIG_ZSWAP=y/n` effective config, actual gcc/W=1 Kbuild,
+complete `Module.symvers`, nonempty linked `dm-swapz.ko`,
+source-build-info, ELF/modinfo/vermagic, compiled carrier marker,
+bounded warning classification and real-byte verifier. The W=2 gate,
+hosted kernel load and authorized RAM trial remain distinct evidence.
+
+A future owner-authorized actual loaded trial needs an independent
+trusted runtime collector that authenticates the *running* patched
+kernel, boot ID and compiled carrier, loaded module bytes/source,
+exclusive ephemeral RAM block backing/cleanup, exact original page
+identity, real compressed zswap stored-entry eviction and decompression,
+REQ_OP_WRITE|REQ_SWAP MM→BIO, DM one-and-only-one committed foreground
+authority, successful upper completion, and original full 4096-byte
+swap-in under bounded headroom. A claimed event in JSON, synthetic
+BIO provenance, test decoder or offline counter is never a substitute.
+Normal swapz RAW remains the original uncompressed 4096-byte page;
+Phase B RAW bypass and direct compressed handoff remain DISABLED.

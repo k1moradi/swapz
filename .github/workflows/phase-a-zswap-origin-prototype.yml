@@ -12,6 +12,7 @@ on:
       - "tests/runtime/native/zswap-origin-consumer-source-test.py"
       - "tests/runtime/native/zswap-origin-producer-consumer-abi-test.py"
       - "tests/runtime/native/zswap-origin-owned-ram-qualification.py"
+      - "tests/runtime/native/zswap-origin-loaded-evidence-contract.py"
   workflow_dispatch:
 
 permissions:
@@ -107,6 +108,37 @@ jobs:
              ! grep -Fxq '4096_READBACK=NOT_RUN' "$log_file" ||
              ! grep -Fxq 'PHASE_A=BLOCKED PHASE_B=DISABLED DIRECT_COMPRESSED=DISABLED' "$log_file"; then
             echo "::error::Unsafe owned-RAM preflight result (exit $first_exit)"
+            exit 3
+          fi
+      - name: "Run untrusted loaded-candidate identity/ownership negative regressions"
+        shell: bash
+        run: |
+          set -euo pipefail
+          candidate_guard=swapz/tests/runtime/native/zswap-origin-loaded-evidence-contract.py
+          candidate_log="$RUNNER_TEMP/zswap-origin-loaded-candidate-rootless.log"
+          if python3 -B "$candidate_guard" --self-test > "$candidate_log" 2>&1; then
+            :
+          else
+            first_exit=$?
+            echo "::error::Loaded candidate identity/ownership tests failed (exit $first_exit)"
+            tail -n 20 "$candidate_log"
+            exit "$first_exit"
+          fi
+          # Empty input is an unsafe candidate, never a loaded-kernel PASS.
+          candidate_file="$RUNNER_TEMP/zswap-origin-loaded-untrusted.json"
+          : > "$candidate_file"
+          if python3 -B "$candidate_guard" --inspect-candidate "$candidate_file" \
+              --expected-source-sha "$GITHUB_SHA" > "$candidate_log" 2>&1; then
+            candidate_exit=0
+          else
+            candidate_exit=$?
+          fi
+          if [[ "$candidate_exit" != 2 ]] ||
+             ! grep -Fxq 'ENVIRONMENT_NOT_QUALIFIED first_cause=manifest_file_type_or_size' "$candidate_log" ||
+             ! grep -Fxq 'LOADED_STORED_ENTRY=NOT_RUN' "$candidate_log" ||
+             ! grep -Fxq '4096_READBACK=NOT_RUN' "$candidate_log" ||
+             ! grep -Fxq 'PHASE_A=BLOCKED PHASE_B=DISABLED DIRECT_COMPRESSED=DISABLED' "$candidate_log"; then
+            echo "::error::Loaded candidate refused to fail closed (exit $candidate_exit)"
             exit 3
           fi
       - name: "Run disabled compressed handoff source/ownership negative regression"
