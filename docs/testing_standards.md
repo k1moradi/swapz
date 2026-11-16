@@ -14189,3 +14189,13 @@ a fictional loaded-pass claim. The actual source-linked hosted test first
 failed at run `43935827239` with rootless staging exit 1; the bounded
 change corrects only this obsolete expectation, leaving real KUnit gates,
 compile-disabled transport, RAW_4096 and SWAPSPACE2 invariants intact.
+
+### Round 022 Agent 2 — rootless pinned prototype CI trigger
+
+Test-assertion changes must trigger the **actual pinned source workflow** and
+not be treated as complete merely because a generic native workflow passed.
+The separate pinned Linux prototype workflow observes changes to
+`pinned-linux-zswap-compressed-handoff-test.py` and the stager, not to the
+older stored-entry source fixture alone. Keep an explicit regression that
+requires CRC32C, rejects CRC32 and direct ordinary BIO payload mutation; test
+the committed SHA and report the genuine first failing gate.

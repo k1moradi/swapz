@@ -31,3 +31,15 @@ Separate preexisting authentic pinned modified Linux KUnit proof: [five distinct
 ## Exact hosted first-failure correction (source-level, not loaded)
 
 The first real exact-commit source regression on Agent2 commit `99e8cbdac05f2acb43203050e2da473a890585bb` was [pinned modified Linux prototype run #43935827239](https://github.com/k1moradi/swapz/actions/runs/43935827239), `Run source-controlled rootless staging regression`, **exit 1**. The 34-test stage harness reported just one failed nested `test_round020_stored_entry_source_causality_gcc_clang`: its older `test_disabled_prototype_does_not_define_live_compressed_bio` asserted that the disabled producer should still contain `crc32(0, owned_bytes, entry->length)` and no `crc32c(`. That expectation became intentionally obsolete under the approved Round022 CRC32C producer contract. It was a **source-regression assertion**, not a compiled host C, real KUnit, loaded kernel, byte/readback or device failure. The narrow owned-test correction now explicitly requires `crc32c(0, owned_bytes, entry->length)` and rejects `crc32(0,`; no source verifier, real production kernel code or safety gate was relaxed. The next exact-commit CI result is authoritative and must be checked independently. Earlier local source-equivalent host GCC/Clang ASan/UBSan were both 0 as documented above; full committed Python tests had not been executed locally.
+
+## Source-workflow trigger for the corrected exact test
+
+The pinned modified Linux prototype workflow's `push.paths` includes
+`tests/runtime/native/pinned-linux-zswap-compressed-handoff-test.py` and the
+stager, but not the older `pinned-linux-zswap-stored-entry-producer-test.py`
+file corrected in the preceding commit. To obtain honest exact-commit CI
+coverage without touching the workflow, the owned compressed handoff suite now
+additionally asserts that the disabled C contains CRC32C, not CRC32, and has
+no direct normal-BIO payload-size or `submit_bio` mutation. This source
+regression change re-triggers the actual published workflow and must be
+checked for genuine pass/failure before qualification.

@@ -247,6 +247,10 @@ class CompressedHandoffTests(unittest.TestCase):
                       'atomic_cmpxchg','-ENOMEM','-ECANCELED','self != transfer'):
             with self.subTest(token=token): self.assertIn(token,c)
         self.assertNotIn('REQ_ZSWAP_WRITEBACK',c)
+        # The old CRC32 producer contract is forbidden in compressed v1.
+        self.assertNotIn('crc32(0,',c)
+        self.assertIn('crc32c(0,',c)
+        self.assertNotIn('bio->bi_iter.bi_size',c)
         self.assertNotIn('submit_bio(',c)
 
     def test_round022_crc32c_sha_and_source_mutation_refusals(self):
