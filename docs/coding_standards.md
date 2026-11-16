@@ -3638,3 +3638,42 @@ MM→BIO producer event, actual stored-entry writeback/readback, matched
 physical device or kernel swap/reclaim operations. An unreferenced source
 commit remains `SOURCE_READY_PENDING_COORDINATOR_CI`; Phase A remains
 BLOCKED and Phase B RAW bypass DISABLED.
+
+## Round 011 Linux BIO→DM origin ABI controls (2026-11-15)
+
+The real standard-library rootless test
+`tests/runtime/native/zswap-origin-producer-consumer-abi-test.py` imports the
+committed pinned-Linux source staging tool and existing production consumer
+source-contract tests. It renders the *actual frozen* six C/H staging
+transformations against their original exact upstream anchor excerpts and
+refuses altered enum defaults, missing capability guards, unverified clones,
+recycled BIO positives, mixed-origin aggregation, lost swap context, and
+premature or absent stored-entry attribution. These excerpts are not a whole
+upstream postimage: only the complete pinned Linux source staging preflight
+checks all original Git blobs, and only actual Kbuild/KUnit can qualify the
+modified source/objects.
+
+The same source-bound run reads `src/kernel/dm-target.c` and reuses its
+20 existing admission/commit/codec-negative controls. Positive carrier
+classification requires a WRITE with exactly SWAPZ_SECTORS and
+SWAPZ_BLOCK_BYTES (4096 bytes), authenticated BIO helper under
+`BIO_HAS_ZSWAP_STORED_WRITEBACK_ORIGIN`, UNKNOWN-by-default descriptor
+reset and acceptance before the verified-origin admission increment.
+The four success-only foreground hooks correspond to asynchronous and
+synchronous compressed/RAW publication, direct RAW completion and
+zero-elided authority. Retry/requeue/errors, GC or speculative work cannot
+inflate a successful foreground commit; Phase B origin-conditioned RAW
+routing is explicitly forbidden.
+
+The source-only regression must reject all twenty-two new pinned-Linux
+producer mutations and all twenty existing real-consumer mutations on the
+complete checked-out source. The source-controlled pinned staging test's
+actual predicate/clone C fragment is also executed with available GCC and
+Clang, high warnings and UBSan; these are *isolated extracted snippets*, not
+KUnit, a running kernel, a matched Linux BIO layout or an actual stored-entry
+writeback. The existing `.github/workflows/product-codec.yml` exact-C job
+runs the new test after its established origin-consumer source test on
+x86_64 and ARM64. Keep failure diagnostics bounded and record exactly which
+unavailable full-source or runtime gate was not run. No hardware, kernel
+module loading, swap or physical-device writes are authorized.
+Phase A remains BLOCKED; Phase B RAW bypass remains DISABLED.
