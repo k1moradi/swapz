@@ -14387,3 +14387,40 @@ SWAPSPACE2 proof are NOT_RUN. KUnit source/build is a separate gate,
 never a live result. Phase A BLOCKED; Phase B forced RAW bypass and
 direct compressed transport DISABLED. Original SWAPSPACE2 first 4096
 header/UUID/table untouched; all future codec/GC authority volatile RAM.
+
+### Round 023 Agent 2 addendum — stored zpool allocation identity and replay refusal
+
+The previously published Round023 disabled typed zswap carrier and
+`zswap_swapz_carrier_publish_disabled` remain unchanged and always fail
+closed: a source-only snapshot is NOT a real MM/BIO→DM compressed transport.
+Supplement the stored LZ4 proof with the immutable original **zpool pool
+identity, storage handle and compressed length** captured only while the
+original zswap store entry/xarray is established under the folio lock.
+At any later fixture capture, reject mismatched pool/handle/length even if
+entry pointer, swap slot and a caller-supplied epoch appear unchanged.
+A valid compressed length change requires a NEW authenticated stored entry
+and therefore a new source certificate, never mutation of the old proof.
+
+Use the actual compiled disabled C from
+`tests/tools/stage-pinned-linux-zswap-origin.py` plus the new
+`fixtures/round023-producer-proof-identity.c` in the existing
+`pinned-linux-zswap-compressed-handoff-test.py` GCC/Clang
+`-Wall -Wextra -Wconversion -Wshadow -Werror -fsanitize=address,undefined`
+test. Negative cases must reject a same-pointer stale zpool handle, changed
+bounded compressed length, forged certificate pool or handle, xarray ABA,
+wrong slot generation, already-released owner and false lower/split/merge
+authority, while preserving original once-only abort/finish tests. The
+Python source-bound verifier must refuse mutations deleting these exact
+allocation-identity conditions before staging or publication.
+
+An executable host mock may create source-only certificates; neither the
+actual store-time SHA hook nor an authenticated kernel slot allocation
+generation nor refcounted BIO/DM sideband exists in the live pinned kernel.
+The new checks cannot upgrade the existing mock's user-provided generation
+to live authority. **Keep `#if 0`, the active original 4096-byte
+decompress→ordinary REQ_SWAP WRITE, the original `RAW_4096` uncompressed
+representation, KUnit y/n gates and all SWAPSPACE2 safeguards unchanged.**
+`PHASE_A=BLOCKED`; `COMPRESSED_TRANSFER=DISABLED`;
+Phase B forced RAW bypass DISABLED, `STORED_ENTRY_LIVE=NOT_RUN`,
+`4096_READBACK=NOT_RUN`, `PHYSICAL=NOT_RUN`. No module/swap/pressure
+or physical trial is part of this source gate.

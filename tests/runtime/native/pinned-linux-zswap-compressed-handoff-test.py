@@ -215,9 +215,17 @@ int main(void) {
     assert(freed==1 && allocations==1 && owner.completion_error==-EIO);
     struct zswap_swapz_owned_payload aborted={0};
     host_pool.tfm_name="zstd"; entry.length=3568;
-    assert(zswap_swapz_capture_owned_payload(&aborted,&entry,key,&locked,&proof,17)==-EOPNOTSUPP);
+    /* A stored proof for 200 bytes cannot authorize a different allocation. */
+    assert(zswap_swapz_capture_owned_payload(&aborted,&entry,key,&locked,&proof,17)==-ESTALE);
     host_pool.tfm_name="lz4";
-    assert(zswap_swapz_capture_owned_payload(&aborted,&entry,key,&locked,&proof,17)==0);
+    assert(zswap_swapz_capture_owned_payload(&aborted,&entry,key,&locked,&proof,17)==-ESTALE);
+    struct zswap_swapz_stored_proof large_proof={0};
+    assert(zswap_swapz_bind_stored_entry(&large_proof,&entry,key,17,&locked,
+                                        host_original_page,PAGE_SIZE)==0);
+    host_pool.tfm_name="zstd";
+    assert(zswap_swapz_capture_owned_payload(&aborted,&entry,key,&locked,&large_proof,17)==-EOPNOTSUPP);
+    host_pool.tfm_name="lz4";
+    assert(zswap_swapz_capture_owned_payload(&aborted,&entry,key,&locked,&large_proof,17)==0);
     assert(aborted.codec==ZSWAP_SWAPZ_CODEC_LZ4);
     assert(zswap_swapz_owned_payload_abort(&aborted));
     assert(!zswap_swapz_owned_payload_abort(&aborted));
@@ -225,11 +233,17 @@ int main(void) {
     assert(!zswap_swapz_owned_payload_submit(&aborted));
     struct zswap_swapz_owned_payload successful={0};
     entry.length=1;
-    assert(zswap_swapz_capture_owned_payload(&successful,&entry,key,&locked,&proof,17)==0);
+    assert(zswap_swapz_capture_owned_payload(&successful,&entry,key,&locked,&proof,17)==-ESTALE);
+    struct zswap_swapz_stored_proof tiny_proof={0};
+    assert(zswap_swapz_bind_stored_entry(&tiny_proof,&entry,key,17,&locked,
+                                        host_original_page,PAGE_SIZE)==0);
+    assert(zswap_swapz_capture_owned_payload(&successful,&entry,key,&locked,&tiny_proof,17)==0);
     assert(zswap_swapz_owned_payload_submit(&successful));
     assert(zswap_swapz_owned_payload_finish(&successful,0));
     assert(!zswap_swapz_owned_payload_finish(&successful,-EIO));
-    assert(freed==3 && allocations==3); return 0;
+    assert(freed==3 && allocations==3);
+    round023_stored_allocation_identity_regression();
+    return 0;
 }
 '''
 
@@ -295,6 +309,29 @@ class CompressedHandoffTests(unittest.TestCase):
                     stage.validate_disabled_compressed_contract(
                         source.replace(before,after,1))
 
+    def test_round023_source_stored_allocation_proof_drift(self):
+        source=stage.COMPRESSED_HANDOFF_SOURCE
+        stage.validate_disabled_compressed_contract(source)
+        for before,after in (
+            ('entry->length != proof->stored_length',
+             'entry->length == proof->stored_length'),
+            ('entry->handle != proof->stored_handle',
+             'entry->handle == proof->stored_handle'),
+            ('pool != proof->stored_pool',
+             'pool == proof->stored_pool'),
+            ('proof->stored_handle = entry->handle;',
+             'proof->stored_handle = 0;'),
+            ('proof->stored_length = entry->length;',
+             'proof->stored_length = 0;'),
+            ('proof->stored_pool = pool;',
+             'proof->stored_pool = NULL;'),
+        ):
+            with self.subTest(mutated_anchor=before):
+                self.assertIn(before, source)
+                with self.assertRaises(stage.StagingError):
+                    stage.validate_disabled_compressed_contract(
+                        source.replace(before,after,1))
+
     def test_round023_no_live_bio_compressed_carrier(self):
         source=stage.COMPRESSED_HANDOFF_SOURCE
         self.assertEqual(source.count('#if 0 /* SWAPZ_COMPRESSED_HANDOFF_DISABLED'),1)
@@ -321,8 +358,13 @@ class CompressedHandoffTests(unittest.TestCase):
         body=c.split(head,1)[1].split(tail,1)[0]
         for header in ('#include <linux/crc32c.h>', '#include <crypto/sha2.h>'):
             body=body.replace(header,'')
+        identity_fixture = (Path(__file__).parent / "fixtures" /
+                            "round023-producer-proof-identity.c").read_text(
+                                encoding="utf-8")
         with tempfile.TemporaryDirectory() as directory:
-            path=Path(directory)/'host.c';path.write_text(HOST_SHIMS+body+HOST_CASES)
+            path=Path(directory)/'host.c'
+            path.write_text(HOST_SHIMS+body+identity_fixture+HOST_CASES,
+                            encoding="utf-8")
             compilers=[x for x in ('gcc','clang') if shutil.which(x)]
             self.assertTrue(compilers)
             for compiler in compilers:

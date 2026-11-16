@@ -449,6 +449,9 @@ enum zswap_swapz_proto_state {
 struct zswap_swapz_stored_proof {
 	struct zswap_swapz_stored_proof *self;
 	const struct zswap_entry *stored_entry;
+	const struct zswap_pool *stored_pool;
+	unsigned long stored_handle;
+	unsigned int stored_length;
 	swp_entry_t slot;
 	u64 generation;
 	enum zswap_swapz_proto_codec stored_codec;
@@ -532,6 +535,9 @@ static int zswap_swapz_bind_stored_entry(
 		return -ENODATA;
 	proof->self = proof;
 	proof->stored_entry = entry;
+	proof->stored_pool = pool;
+	proof->stored_handle = entry->handle;
+	proof->stored_length = entry->length;
 	proof->slot = swpentry;
 	proof->generation = generation;
 	proof->stored_codec = ZSWAP_SWAPZ_CODEC_LZ4;
@@ -573,9 +579,15 @@ static int zswap_swapz_capture_owned_payload(
 		return -ESTALE;
 	if (!entry->length || entry->length > ZSWAP_SWAPZ_COMPRESSED_MAX)
 		return -EMSGSIZE;
+	/* Verify the published storage allocation still matches store-time. */
+	if (entry->length != proof->stored_length ||
+	    entry->handle != proof->stored_handle)
+		return -ESTALE;
 	pool = zswap_entry_pool((struct zswap_entry *)entry);
 	if (!pool)
 		return -ENOENT;
+	if (pool != proof->stored_pool)
+		return -ESTALE;
 	codec = zswap_swapz_codec_from_tfm(pool->tfm_name);
 	/* Never reinterpret an old ZSTD entry after a pool/codec switch. */
 	if (codec != ZSWAP_SWAPZ_CODEC_LZ4 || codec != proof->stored_codec)
@@ -783,6 +795,12 @@ def validate_disabled_compressed_contract(source: str) -> None:
         "proof->stored_entry != entry",
         "proof->generation != generation",
         "proof->stored_codec != ZSWAP_SWAPZ_CODEC_LZ4",
+        "proof->stored_pool = pool;",
+        "proof->stored_handle = entry->handle;",
+        "proof->stored_length = entry->length;",
+        "entry->length != proof->stored_length",
+        "entry->handle != proof->stored_handle",
+        "pool != proof->stored_pool",
         "sha256(original_page, ZSWAP_SWAPZ_LOGICAL_BYTES, proof->original_sha256);",
         "~crc32c(~0U, owned_bytes, entry->length)",
         "~crc32c(~0U, transfer->owned_bytes, transfer->compressed_length)",
