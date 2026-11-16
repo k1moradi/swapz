@@ -14105,3 +14105,40 @@ source/mock/JSON/host-metadata match into a loaded PASS. Run the script's
 --self-test and explicit --inspect-host refusal; no sudo, module, mapper,
 pressure, physical trial or new codec/RAW format is authorized. Phase A
 BLOCKED, Phase B forced RAW bypass and direct compressed transport DISABLED.
+
+
+## Round 022 — Agent 3: separate imported-zswap LZ4 decoder (source only)
+
+The new src/kernel/zswap-import-codec.h is unused and has
+SWAPZ_ZSWAP_IMPORT_ACTIVE=0. Production dm-target.c, codec.h and existing
+SWAPSPACE2 physical partition, header/UUID, original uncompressed RAW_4096,
+ordinary swapz fast codecs, GC, ACK and on-media payload-only 4/8/16KiB
+extents remain unchanged. A distinct conceptual imported LZ4 v1 tag (0x5a)
+exists only in a volatile-RAM descriptor and is not a registered BIO/on-disk
+ABI. The source-only descriptor binds true prior stored eviction, owned
+immutable compressed bytes, exact 1..3568 payload length, decoded original
+4096, dictionary-free LZ4 block codec, current logical slot, generation,
+store generation, source entry identity, GC epoch, compressed CRC32C and an
+independently supplied original full-page SHA256. These fields cannot be
+recovered from lower payloads after RAM-mapping loss.
+
+The unintegrated helper validates the current authoritative RAM-mapping
+identity, prior durable foreground commit, exactly one separate upper WRITE
+ACK, still-owned session, absence of teardown/duplicate read completion,
+successful exact-byte lower READ, CRC32C and full original SHA256 before
+copying the decoded page into the caller's 4096-byte output. It uses separately
+owned caller-provided 4096-byte scratch; all corrupt, aliased, missing, stale,
+CRC32-instead-of-CRC32C, unsupported codec/version, malformed block/frame,
+truncated/error lower I/O, digest, GC and early/duplicate ACK paths return
+negative errors without modifying the output or granting success.
+
+The new tests/runtime/native/fixtures/round022-consumer-codec.c compiles the
+actual imported helper and the real existing src/kernel/codec.c CRC32C with
+liblz4 and OpenSSL SHA256; the new
+tests/runtime/native/zswap-compressed-consumer-test.py compiles/runs it on
+GCC and Clang with -Wall -Wextra -Werror -Wconversion -Wshadow and
+ASan/UBSan, and checks production DM never includes or activates the
+prototype. This is SOURCE_ONLY. A synthetic original 4096-byte memcmp is NOT
+a loaded Linux swap-in. Phase A BLOCKED, Phase B forced RAW bypass DISABLED,
+direct compressed handoff DISABLED, LOADED/PHYSICAL=NOT_RUN; no kernel,
+owner RAM/swap or physical device operation authorized.
