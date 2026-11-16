@@ -87,8 +87,16 @@ EDITS: dict[str, tuple[Edit, ...]] = {
             "\tbio->bi_bvec_gap_bit = bio_src->bi_bvec_gap_bit;\n"
             "\tbio->bi_iter = bio_src->bi_iter;",
             "\tbio->bi_bvec_gap_bit = bio_src->bi_bvec_gap_bit;\n"
-            "\tbio->bi_swap_origin = bio_src->bi_swap_origin;\n"
+            "\tbio->bi_swap_origin = bio_is_zswap_stored_writeback(bio_src) ?\n"
+            "\t\tSWAP_BIO_ORIGIN_ZSWAP_STORED_WRITEBACK :\n"
+            "\t\tSWAP_BIO_ORIGIN_ORDINARY_OR_UNKNOWN;\n"
             "\tbio->bi_iter = bio_src->bi_iter;",
+        ),
+        Edit(
+            "\tbio->bi_bvec_gap_bit = 0;\n\tatomic_set(&bio->__bi_remaining, 1);",
+            "\tbio->bi_bvec_gap_bit = 0;\n"
+            "\t/* Same-payload reissue preserves the verified origin tag. */\n"
+            "\tatomic_set(&bio->__bi_remaining, 1);",
         ),
     ),
     "include/linux/swap_ops.h": (
@@ -119,7 +127,9 @@ EDITS: dict[str, tuple[Edit, ...]] = {
             "\t\tsio->nr_bvecs = 0;\n\t\tsio->len = 0;\n\t}\n"
             "\tbvec_set_folio(",
             "\t\tsio->nr_bvecs = 0;\n\t\tsio->len = 0;\n"
-            "\t\tsio->swap_origin = rw == WRITE ? ctx->swap_origin :\n"
+            "\t\tsio->swap_origin = rw == WRITE &&\n"
+            "\t\t\tctx->swap_origin == SWAP_BIO_ORIGIN_ZSWAP_STORED_WRITEBACK ?\n"
+            "\t\t\tSWAP_BIO_ORIGIN_ZSWAP_STORED_WRITEBACK :\n"
             "\t\t\tSWAP_BIO_ORIGIN_ORDINARY_OR_UNKNOWN;\n"
             "\t}\n\tbvec_set_folio(",
         ),
@@ -182,8 +192,75 @@ def render_source(path: str, original: str) -> str:
         changed = changed[:begin] + edit.after + changed[end:]
     if changed == original:
         raise StagingError(f"no-source-transition:{path}")
+    validate_origin_postimage(path, changed)
     return changed
 
+
+
+def validate_origin_postimage(path: str, staged_source: str) -> None:
+    """Check safety-critical emitted C snippets, not only anchor counts.
+
+    A later edit must not silently replace the positive-origin predicate with
+    a raw scalar copy, promote a noncanonical context, or remove the merge
+    boundary. Whole-file upstream Git blobs are separately pinned.
+    """
+    required: dict[str, tuple[str, ...]] = {
+        "include/linux/blk_types.h": (
+            "SWAP_BIO_ORIGIN_ORDINARY_OR_UNKNOWN = 0,",
+            "SWAP_BIO_ORIGIN_ZSWAP_STORED_WRITEBACK = 1,",
+            "bi_swap_origin; /* scalar source, never encoding */",
+        ),
+        "include/linux/bio.h": (
+            "bio_op(bio) == REQ_OP_WRITE &&",
+            "(bio->bi_opf & REQ_SWAP) &&",
+            "bio->bi_swap_origin == SWAP_BIO_ORIGIN_ZSWAP_STORED_WRITEBACK;",
+        ),
+        "block/bio.c": (
+            "bio->bi_swap_origin = SWAP_BIO_ORIGIN_ORDINARY_OR_UNKNOWN;",
+            "bio->bi_swap_origin = bio_is_zswap_stored_writeback(bio_src) ?\n"
+            "\t\tSWAP_BIO_ORIGIN_ZSWAP_STORED_WRITEBACK :\n"
+            "\t\tSWAP_BIO_ORIGIN_ORDINARY_OR_UNKNOWN;",
+            "Same-payload reissue preserves the verified origin tag.",
+        ),
+        "include/linux/swap_ops.h": (
+            "enum swap_bio_origin\tswap_origin;",
+        ),
+        "mm/page_io.c": (
+            "rw == WRITE && ctx->sio->swap_origin != ctx->swap_origin",
+            "sio->swap_origin = rw == WRITE &&\n"
+            "\t\t\tctx->swap_origin == SWAP_BIO_ORIGIN_ZSWAP_STORED_WRITEBACK ?\n"
+            "\t\t\tSWAP_BIO_ORIGIN_ZSWAP_STORED_WRITEBACK :\n"
+            "\t\t\tSWAP_BIO_ORIGIN_ORDINARY_OR_UNKNOWN;",
+            "bio->bi_swap_origin = sio->swap_origin;",
+        ),
+        "mm/zswap.c": (
+            "ctx.swap_origin = SWAP_BIO_ORIGIN_ZSWAP_STORED_WRITEBACK;",
+        ),
+    }
+    if path not in required or any(
+        staged_source.count(fragment) != (2 if path == "include/linux/swap_ops.h" else 1)
+        for fragment in required[path]
+    ):
+        raise StagingError(f"invalid-origin-postimage:{path}")
+    if path == "block/bio.c" and (
+        "bio->bi_swap_origin = bio_src->bi_swap_origin;" in staged_source
+    ):
+        raise StagingError("unguarded-origin-clone:block/bio.c")
+    if path == "include/linux/blk_types.h":
+        origin_offset = staged_source.find("bi_swap_origin;")
+        # The original header also contains unrelated atomic_t fields before
+        # struct bio. Check the next member instead of the first in the file.
+        next_member = staged_source.find("atomic_t", origin_offset)
+        if origin_offset < 0 or next_member <= origin_offset:
+            raise StagingError("origin-reset-layout:include/linux/blk_types.h")
+        bio_start = staged_source.find("struct bio {")
+        if bio_start >= 0:
+            preserved_start = staged_source.find("bi_max_vecs;", bio_start)
+            if (origin_offset <= bio_start or
+                preserved_start <= origin_offset or
+                "#define BIO_RESET_BYTES\t\toffsetof(struct bio, bi_max_vecs)"
+                    not in staged_source):
+                raise StagingError("origin-reset-layout:include/linux/blk_types.h")
 
 def git_output(root: Path, *args: str) -> str:
     try:
@@ -239,6 +316,28 @@ def write_atomic(destination: Path, payload: bytes) -> None:
             temporary.unlink(missing_ok=True)
 
 
+
+def rollback_sources(root: Path, originals: dict[str, bytes],
+                     staged: dict[str, bytes], paths: list[str]) -> list[str]:
+    """Restore touched paths, including a write that raised after replacement.
+
+    Never overwrite unexpected third-party bytes. Such interference is a
+    reported partial rollback, not a successful source stage.
+    """
+    failed = []
+    for path in reversed(paths):
+        try:
+            current = (root / path).read_bytes()
+            if current == originals[path]:
+                continue
+            if current != staged[path]:
+                raise StagingError("rollback-source-interference")
+            write_atomic(root / path, originals[path])
+        except (OSError, StagingError):
+            failed.append(path)
+    return failed
+
+
 def stage_checkout(root: Path, manifest_path: Path) -> dict[str, object]:
     try:
         root = root.resolve(strict=True)
@@ -257,23 +356,27 @@ def stage_checkout(root: Path, manifest_path: Path) -> dict[str, object]:
         originals[path] = original
         staged[path] = render_source(path, original.decode("utf-8")).encode("utf-8")
 
-    # No writes before *all* source anchors and all preimages were validated.
-    committed = []
+    # Recheck the entire plan before any mutation, then recheck each file
+    # immediately before replacement to catch late source interference.
+    for path in sorted(staged):
+        destination = root / path
+        if destination.is_symlink() or not destination.is_file():
+            raise StagingError(f"missing-or-symlink-source:{path}")
+        check_preimage(path, destination.read_bytes(), ORIGINAL_BLOBS[path])
+
+    committed: list[str] = []
+    attempted: str | None = None
     try:
         for path in sorted(staged):
             destination = root / path
             check_preimage(path, destination.read_bytes(), ORIGINAL_BLOBS[path])
+            attempted = path
             write_atomic(destination, staged[path])
             committed.append(path)
+            attempted = None
     except (OSError, StagingError) as error:
-        rollback_errors = []
-        for path in reversed(committed):
-            try:
-                if (root / path).read_bytes() != staged[path]:
-                    raise StagingError("rollback-source-interference")
-                write_atomic(root / path, originals[path])
-            except (OSError, StagingError):
-                rollback_errors.append(path)
+        touched = committed + ([attempted] if attempted is not None else [])
+        rollback_errors = rollback_sources(root, originals, staged, touched)
         if rollback_errors:
             raise StagingError("rollback-incomplete:" + ",".join(rollback_errors)) from error
         raise StagingError("publication-failed-rolled-back") from error
@@ -287,6 +390,7 @@ def stage_checkout(root: Path, manifest_path: Path) -> dict[str, object]:
             {
                 "path": path,
                 "original_git_sha1": ORIGINAL_BLOBS[path],
+                "original_sha256": hashlib.sha256(originals[path]).hexdigest(),
                 "staged_git_sha1": blob_sha(staged[path]),
                 "staged_sha256": hashlib.sha256(staged[path]).hexdigest(),
                 "bytes": len(staged[path]),
@@ -300,29 +404,46 @@ def stage_checkout(root: Path, manifest_path: Path) -> dict[str, object]:
     }
     # The manifest is a bounded evidence file *outside* the Linux checkout.
     temporary_manifest = None
+    previous_manifest: bytes | None = None
+    manifest_text = json.dumps(result, indent=2, sort_keys=True) + "\n"
+    manifest_bytes = manifest_text.encode("utf-8")
     try:
         manifest_path.parent.mkdir(parents=True, exist_ok=True)
+        try:
+            previous_manifest = manifest_path.read_bytes()
+        except FileNotFoundError:
+            pass
         with tempfile.NamedTemporaryFile(
             mode="w", encoding="utf-8", prefix=".linux-origin-manifest-",
             dir=manifest_path.parent, delete=False,
         ) as stream:
             temporary_manifest = Path(stream.name)
-            json.dump(result, stream, indent=2, sort_keys=True)
-            stream.write("\n")
+            stream.write(manifest_text)
             stream.flush()
             os.fsync(stream.fileno())
         os.replace(temporary_manifest, manifest_path)
         temporary_manifest = None
     except OSError as error:
-        # A missing manifest cannot be reported as a successful source stage.
-        rollback_errors = []
-        for path in reversed(committed):
-            try:
-                if (root / path).read_bytes() != staged[path]:
-                    raise StagingError("rollback-source-interference")
-                write_atomic(root / path, originals[path])
-            except (OSError, StagingError):
-                rollback_errors.append(path)
+        # Even an os.replace() that succeeded before a reported failure
+        # must not leave manifest evidence claiming rolled-back source edits.
+        manifest_rollback_incomplete = False
+        try:
+            if manifest_path.is_file():
+                current_manifest = manifest_path.read_bytes()
+                if current_manifest == manifest_bytes:
+                    if previous_manifest is None:
+                        manifest_path.unlink()
+                    else:
+                        write_atomic(manifest_path, previous_manifest)
+                elif current_manifest != previous_manifest:
+                    manifest_rollback_incomplete = True
+            elif previous_manifest is not None:
+                manifest_rollback_incomplete = True
+        except OSError:
+            manifest_rollback_incomplete = True
+        rollback_errors = rollback_sources(root, originals, staged, committed)
+        if manifest_rollback_incomplete:
+            rollback_errors.append("manifest")
         if rollback_errors:
             raise StagingError("manifest-failed-rollback-incomplete:" +
                                ",".join(rollback_errors)) from error

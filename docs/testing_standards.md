@@ -13106,3 +13106,38 @@ authenticated MM→BIO producer, a matched loaded module ABI and actual
 stored-entry writeback/readback remain distinct requirements. An unreferenced
 new source commit is `SOURCE_READY_PENDING_COORDINATOR_CI`, never hosted PASS.
 Phase A remains BLOCKED; Phase B RAW bypass remains DISABLED.
+
+
+### Round 010 BIO origin lifecycle and mixed-origin correctness
+
+The pinned upstream Linux BIO provenance staging program must authenticate
+positive origin only after zswap stored-entry identity and successful
+decompression. It must default every new or reset BIO to UNKNOWN, preserve a
+positive origin across a clone or split only when the source is an authenticated
+WRITE+REQ_SWAP BIO, and preserve the existing tag only for same-payload
+bio_prepare_reissue(). bio_reuse() invokes bio_reset() and therefore clears the
+tag; BIO_RESET_BYTES must cover the custom scalar before bi_max_vecs.
+The new swap_io_ctx and swap_iocb state stays scalar and must not retain a
+folio/zswap pointer. New swap_iocb instances normalize all noncanonical or
+non-WRITE origins to UNKNOWN; swap_can_merge() must flush before joining
+pages of different origins. Generic REQ_SWAP is not authentication.
+
+The exact seven original upstream Git blobs and six transformed C/H files
+remain pinned. Every preimage and postimage must have its own SHA-256 as well
+as Git-blob identity in the staging manifest. Validate the complete
+preimage/anchor plan before any write, recheck each file immediately before
+replacement, and rollback every potentially touched file when atomic
+publication fails, including a file replaced immediately before an error.
+If another actor changes bytes during rollback, do not overwrite them;
+report rollback-incomplete rather than silently claiming the checkout clean.
+
+The existing source-coupled rootless regression must reject deliberately
+weakened clone, reset/default, merge, normalization, zswap authentication and
+status-capability mutations; verify all-file failure atomicity, before/after
+SHA-256 evidence, and a negative control raising after os.replace. Run
+python3 -B tests/runtime/native/pinned-linux-zswap-origin-stage-test.py -v,
+python3 -m py_compile on the staging and test sources, available GCC/Clang
+UBSan source-fragment tests, and Git whitespace checks. Full patched Linux
+Kbuild of the new postimage, KUnit, loaded clone/split and real stored-entry
+zswap writeback/readback are independent later gates, not rootless PASS.
+Phase A remains BLOCKED and Phase B RAW bypass DISABLED.

@@ -51,7 +51,7 @@ class PinnedLinuxStageTests(unittest.TestCase):
                          "c339f4010dea8b0d754f84ace70cd1b089878ef8")
         self.assertEqual(len(stager.ORIGINAL_BLOBS), 7)
         self.assertEqual(set(stager.EDITS), set(stager.ORIGINAL_BLOBS) - {"Makefile"})
-        self.assertEqual(sum(map(len, stager.EDITS.values())), 11)
+        self.assertEqual(sum(map(len, stager.EDITS.values())), 12)
         for path, edits in stager.EDITS.items():
             excerpts = "\n\n/* separator */\n\n".join(edit.before for edit in edits)
             updated = stager.render_source(path, excerpts)
@@ -60,6 +60,220 @@ class PinnedLinuxStageTests(unittest.TestCase):
                 self.assertNotIn(edit.before, updated)
             with self.assertRaises(stager.StagingError):
                 stager.render_source(path, updated)
+
+
+    def test_origin_postimage_mutations_are_rejected_before_publication(self):
+        """A deliberately weakened real edit must fail, not merely lose a keyword."""
+        probes = (
+            ("block/bio.c",
+             "bio_is_zswap_stored_writeback(bio_src) ?",
+             "bio_src->bi_swap_origin ?"),
+            ("block/bio.c",
+             "bio->bi_swap_origin = SWAP_BIO_ORIGIN_ORDINARY_OR_UNKNOWN;",
+             "bio->bi_swap_origin = SWAP_BIO_ORIGIN_ZSWAP_STORED_WRITEBACK;"),
+            ("mm/page_io.c",
+             "ctx->sio->swap_origin != ctx->swap_origin",
+             "ctx->sio->swap_origin == ctx->swap_origin"),
+            ("mm/page_io.c",
+             "ctx->swap_origin == SWAP_BIO_ORIGIN_ZSWAP_STORED_WRITEBACK ?",
+             "ctx->swap_origin != SWAP_BIO_ORIGIN_ZSWAP_STORED_WRITEBACK ?"),
+            ("include/linux/bio.h",
+             "(bio->bi_opf & REQ_SWAP) &&",
+             "(bio->bi_opf & REQ_FUA) &&"),
+            ("mm/zswap.c",
+             "ctx.swap_origin = SWAP_BIO_ORIGIN_ZSWAP_STORED_WRITEBACK;",
+             "ctx.swap_origin = SWAP_BIO_ORIGIN_ORDINARY_OR_UNKNOWN;"),
+        )
+        for path, original, weakened in probes:
+            with self.subTest(path=path, weakened=weakened):
+                edits = tuple(
+                    stager.Edit(edit.before, edit.after.replace(original, weakened))
+                    for edit in stager.EDITS[path]
+                )
+                self.assertTrue(any(edit.after != previous.after
+                                    for edit, previous in zip(edits, stager.EDITS[path])))
+                with mock.patch.dict(stager.EDITS, {path: edits}):
+                    source = "\n\n/* separator */\n\n".join(
+                        edit.before for edit in edits)
+                    with self.assertRaisesRegex(stager.StagingError,
+                                                "invalid-origin-postimage"):
+                        stager.render_source(path, source)
+
+    def test_postimage_bio_lifecycle_reset_and_retry_contract(self):
+        """Keep the layout/reset contract and same-payload reissue distinct."""
+        block = stager.render_source(
+            "block/bio.c",
+            "\n\n/* separator */\n\n".join(
+                edit.before for edit in stager.EDITS["block/bio.c"]))
+        types = stager.render_source(
+            "include/linux/blk_types.h",
+            "\n\n/* separator */\n\n".join(
+                edit.before for edit in stager.EDITS["include/linux/blk_types.h"]))
+        self.assertLess(types.index("bi_swap_origin"),
+                        types.index("atomic_t", types.index("bi_swap_origin")))
+        self.assertIn("bio->bi_swap_origin = SWAP_BIO_ORIGIN_ORDINARY_OR_UNKNOWN",
+                      block)
+        self.assertIn("bio_is_zswap_stored_writeback(bio_src) ?", block)
+        self.assertIn("Same-payload reissue preserves", block)
+        self.assertNotIn("bio->bi_swap_origin = bio_src->bi_swap_origin;", block)
+        # Independently inspected pinned upstream bio_reset() zeroes
+        # BIO_RESET_BYTES=offsetof(struct bio, bi_max_vecs); bio_reuse()
+        # calls bio_reset(), while bio_prepare_reissue() retries the same
+        # operation and retains the tag. Real KUnit is a separate gate.
+
+    def test_header_reset_layout_ignores_earlier_unrelated_atomics(self):
+        excerpts = "\n\n/* separator */\n\n".join(
+            edit.before for edit in stager.EDITS["include/linux/blk_types.h"])
+        # The genuine pinned Linux header has unrelated atomic_t declarations
+        # before struct bio. Only fields within struct bio define reset scope.
+        prefixed = "atomic_t unrelated_before_bio;\n\n" + excerpts
+        staged = stager.render_source("include/linux/blk_types.h", prefixed)
+        self.assertLess(staged.index("atomic_t"),
+                        staged.index("bi_swap_origin"))
+        self.assertLess(staged.index("bi_swap_origin"),
+                        staged.index("atomic_t", staged.index("bi_swap_origin")))
+
+    def test_manifest_records_exact_pre_and_post_sha256(self):
+        import hashlib
+        with tempfile.TemporaryDirectory() as temporary:
+            root, originals = self.make_fixture(Path(temporary))
+            manifest = Path(temporary) / "evidence.json"
+            result = self.stage_fixture(root, originals, manifest)
+            self.assertEqual(set(entry["path"] for entry in result["changed_paths"]),
+                             set(stager.EDITS))
+            self.assertEqual(result, json.loads(manifest.read_text()))
+            for item in result["changed_paths"]:
+                path = item["path"]
+                before = originals[path]
+                after = (root / path).read_bytes()
+                self.assertEqual(item["original_sha256"],
+                                 hashlib.sha256(before).hexdigest())
+                self.assertEqual(item["staged_sha256"],
+                                 hashlib.sha256(after).hexdigest())
+                self.assertNotEqual(item["original_sha256"], item["staged_sha256"])
+
+    def test_post_replace_failure_restores_even_current_source(self):
+        """A write can replace bytes then raise: rollback must include that file."""
+        with tempfile.TemporaryDirectory() as temporary:
+            root, originals = self.make_fixture(Path(temporary))
+            manifest = Path(temporary) / "evidence.json"
+            write_source = stager.write_atomic
+            calls = 0
+
+            def fail_after_replacement(destination: Path, payload: bytes):
+                nonlocal calls
+                calls += 1
+                write_source(destination, payload)
+                if calls == 3:
+                    raise OSError("injected failure after successful replacement")
+
+            with mock.patch.object(stager, "write_atomic",
+                                   side_effect=fail_after_replacement):
+                with self.assertRaisesRegex(stager.StagingError,
+                                            "publication-failed-rolled-back"):
+                    self.stage_fixture(root, originals, manifest)
+            self.assertFalse(manifest.exists())
+            self.assertEqual(originals, {p: (root / p).read_bytes()
+                                         for p in originals})
+
+    def test_interfered_rollback_is_reported_not_overwritten(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root, originals = self.make_fixture(Path(temporary))
+            manifest = Path(temporary) / "evidence.json"
+            protected = root / sorted(stager.EDITS)[0]
+            write_source = stager.write_atomic
+            calls = 0
+
+            def interfere_before_failure(destination: Path, payload: bytes):
+                nonlocal calls
+                calls += 1
+                if calls == 3:
+                    protected.write_bytes(b"concurrent-external-change\n")
+                    raise OSError("injected failure and third-party edit")
+                write_source(destination, payload)
+
+            with mock.patch.object(stager, "write_atomic",
+                                   side_effect=interfere_before_failure):
+                with self.assertRaisesRegex(stager.StagingError,
+                                            "rollback-incomplete:"):
+                    self.stage_fixture(root, originals, manifest)
+            self.assertEqual(protected.read_bytes(),
+                             b"concurrent-external-change\n")
+            self.assertFalse(manifest.exists())
+
+    def test_pinned_cloned_origin_c_fixture(self):
+        """Compile and run the emitted production C predicate/clone assignment.
+
+        This source-coupled rootless fragment is not a Linux BIO runtime test.
+        """
+        import shutil
+        import subprocess
+
+        header = stager.EDITS["include/linux/bio.h"][0].after
+        first = header.index("static inline bool bio_is_zswap_stored_writeback")
+        last = header.index("\n}\n", first) + len("\n}\n")
+        predicate = header[first:last]
+        clone = stager.EDITS["block/bio.c"][1].after
+        first = clone.index("\tbio->bi_swap_origin =")
+        last = clone.index(";\n", first) + len(";\n")
+        copy_origin = clone[first:last]
+        harness = (
+            "#include <assert.h>\n#include <stdbool.h>\n"
+            "enum swap_bio_origin { SWAP_BIO_ORIGIN_ORDINARY_OR_UNKNOWN = 0,"
+            " SWAP_BIO_ORIGIN_ZSWAP_STORED_WRITEBACK = 1 };\n"
+            "#define REQ_OP_WRITE 1U\n#define REQ_SWAP (1U << 4)\n"
+            "struct bio { unsigned int operation; unsigned int bi_opf;"
+            " enum swap_bio_origin bi_swap_origin; };\n"
+            "static unsigned int bio_op(const struct bio *bio)"
+            " { return bio->operation; }\n"
+            + predicate
+            + "static void copy_origin_from_bio(struct bio *bio,"
+            " const struct bio *bio_src) {\n"
+            + copy_origin + "}\n"
+            "int main(void) {\n"
+            " struct bio original = { REQ_OP_WRITE, REQ_SWAP,"
+            " SWAP_BIO_ORIGIN_ZSWAP_STORED_WRITEBACK };\n"
+            " struct bio child = { REQ_OP_WRITE, REQ_SWAP,"
+            " SWAP_BIO_ORIGIN_ORDINARY_OR_UNKNOWN };\n"
+            " copy_origin_from_bio(&child, &original);\n"
+            " assert(bio_is_zswap_stored_writeback(&child));\n"
+            " original.bi_opf = 0U;\n"
+            " copy_origin_from_bio(&child, &original);\n"
+            " assert(child.bi_swap_origin == SWAP_BIO_ORIGIN_ORDINARY_OR_UNKNOWN);\n"
+            " original.bi_opf = REQ_SWAP; original.operation = 0U;\n"
+            " copy_origin_from_bio(&child, &original);\n"
+            " assert(child.bi_swap_origin == SWAP_BIO_ORIGIN_ORDINARY_OR_UNKNOWN);\n"
+            " original.operation = REQ_OP_WRITE;"
+            " original.bi_swap_origin = SWAP_BIO_ORIGIN_ORDINARY_OR_UNKNOWN;\n"
+            " copy_origin_from_bio(&child, &original);\n"
+            " assert(child.bi_swap_origin == SWAP_BIO_ORIGIN_ORDINARY_OR_UNKNOWN);\n"
+            " original.bi_swap_origin = (enum swap_bio_origin)2;\n"
+            " copy_origin_from_bio(&child, &original);\n"
+            " assert(child.bi_swap_origin == SWAP_BIO_ORIGIN_ORDINARY_OR_UNKNOWN);\n"
+            " return 0;\n}\n"
+        )
+        compilers = tuple(compiler for compiler in ("gcc", "clang")
+                          if shutil.which(compiler))
+        if not compilers:
+            self.skipTest("no C compiler available")
+        with tempfile.TemporaryDirectory() as temporary:
+            source = Path(temporary) / "origin.c"
+            source.write_text(harness, encoding="utf-8")
+            for compiler in compilers:
+                with self.subTest(compiler=compiler):
+                    executable = Path(temporary) / f"origin-{compiler}"
+                    build = subprocess.run(
+                        [compiler, "-std=c11", "-O1", "-g", "-Wall", "-Wextra",
+                         "-Wpedantic", "-Wconversion", "-Werror",
+                         "-fsanitize=undefined", "-fno-sanitize-recover=all",
+                         str(source), "-o", str(executable)],
+                        capture_output=True, text=True, check=False,
+                        timeout=30)
+                    self.assertEqual(build.returncode, 0, build.stderr)
+                    run = subprocess.run(
+                        [str(executable)], capture_output=True,
+                        text=True, check=False, timeout=30)
+                    self.assertEqual(run.returncode, 0, run.stderr)
 
     def test_authentication_aggregation_reset_clone_and_post_decompression(self):
         changed = {path: stager.render_source(path, "\n".join(
@@ -71,20 +285,21 @@ class PinnedLinuxStageTests(unittest.TestCase):
         self.assertIn("bio->bi_swap_origin == SWAP_BIO_ORIGIN_ZSWAP_STORED_WRITEBACK", header)
         block = changed["block/bio.c"]
         self.assertIn("bio->bi_swap_origin = SWAP_BIO_ORIGIN_ORDINARY_OR_UNKNOWN", block)
-        self.assertIn("bio->bi_swap_origin = bio_src->bi_swap_origin", block)
+        self.assertIn("bio->bi_swap_origin = bio_is_zswap_stored_writeback(bio_src) ?", block)
         types = changed["include/linux/blk_types.h"]
         self.assertIn("SWAP_BIO_ORIGIN_ORDINARY_OR_UNKNOWN = 0", types)
         self.assertIn("SWAP_BIO_ORIGIN_ZSWAP_STORED_WRITEBACK = 1", types)
-        self.assertLess(types.index("bi_swap_origin"), types.index("atomic_t"))
+        self.assertLess(types.index("bi_swap_origin"),
+                        types.index("atomic_t", types.index("bi_swap_origin")))
         swap = changed["mm/page_io.c"]
         self.assertIn("rw == WRITE && ctx->sio->swap_origin != ctx->swap_origin", swap)
         self.assertIn("bio->bi_swap_origin = sio->swap_origin", swap)
-        self.assertIn("sio->swap_origin = rw == WRITE ? ctx->swap_origin", swap)
+        self.assertIn("sio->swap_origin = rw == WRITE &&", swap)
         self.assertIn("SWAP_BIO_ORIGIN_ORDINARY_OR_UNKNOWN", swap)
         zswap = changed["mm/zswap.c"]
         self.assertIn("ctx.swap_origin = SWAP_BIO_ORIGIN_ZSWAP_STORED_WRITEBACK", zswap)
         self.assertNotIn("REQ_ZSWAP_WRITEBACK", "".join(changed.values()))
-        self.assertEqual("".join(changed.values()).count("= SWAP_BIO_ORIGIN_ZSWAP_STORED_WRITEBACK"), 2)
+        self.assertEqual("".join(changed.values()).count("= SWAP_BIO_ORIGIN_ZSWAP_STORED_WRITEBACK"), 1)
         # Full-source Kbuild and actual clone/split runtime execution are separate gates.
 
     def test_preimage_git_hash_and_wrong_blob_refuse(self):
@@ -203,6 +418,28 @@ class PinnedLinuxStageTests(unittest.TestCase):
             self.assertEqual(originals,
                              {p: (root / p).read_bytes() for p in originals})
             self.assertFalse(manifest.exists())
+
+
+    def test_manifest_replace_reported_failure_rolls_back_both_domains(self):
+        """No stale success evidence after replace succeeded but raised."""
+        with tempfile.TemporaryDirectory() as temporary:
+            root, originals = self.make_fixture(Path(temporary))
+            manifest = Path(temporary) / "evidence.json"
+            original_replace = stager.os.replace
+
+            def fail_after_manifest_replace(source: Path, destination: Path):
+                original_replace(source, destination)
+                if Path(destination) == manifest:
+                    raise OSError("injected error after manifest was replaced")
+
+            with mock.patch.object(stager.os, "replace",
+                                   side_effect=fail_after_manifest_replace):
+                with self.assertRaisesRegex(stager.StagingError,
+                                            "manifest-write-failed-rolled-back"):
+                    self.stage_fixture(root, originals, manifest)
+            self.assertFalse(manifest.exists())
+            self.assertEqual(originals, {p: (root / p).read_bytes()
+                                         for p in originals})
 
     def test_manifest_inside_linux_checkout_forbidden(self):
         with tempfile.TemporaryDirectory() as temporary:
