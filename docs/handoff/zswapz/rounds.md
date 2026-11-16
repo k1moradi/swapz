@@ -60,10 +60,12 @@ Agent 1 alone serially integrates worker source commits and tests them in CI. Th
 
 The [final task package](round007/FINAL.md) supersedes the preserved historical DRAFT prompts without retroactively authorizing Agent 6's pre-opening report. Round 006 was explicitly [CLOSED_INCOMPLETE](round006/round-report.md): Agent 8 LLVM build PASS, Agent 7 NOT_DELIVERED. Both Round 007 agents start simultaneously from frozen `45a3e8e911e447d9807f786ca33e14eac99374f8` only after the unique `ROUND_OPEN` in #124. No peer result or upstream writable Linux source repository is required. [Accountable round report](round007/round-report.md): both workers' actual source is integrated, cross-worker evidence-stage contract reconciled, original reports archived, first hosted checks PASS, full GCC and exact-C pending. Phase A remains BLOCKED.
 
-## Round 008 — final independent actual-source worker tasks (ROUND_OPEN required)
+## Round 008 — CLOSED_SOURCE_INTEGRATED_CI_FAILED (2/2 delivered; GCC linked-module FAIL)
 
 | Round | Frozen source baseline | Issue | Workers (excluding Agent 1) | Evidence limit |
 | --- | --- | --- | --- | --- |
 | [008](round008/README.md) | `af334b3408b9a660fc7f4b15d82d8e5a9e6374bb` | [#125](https://github.com/k1moradi/swapz/issues/125) | Agent 4 compiled real-reader multi-target failure atomicity; Agent 8 real pinned Linux in-run artifact integrity verifier | Fake DM/rootless and stock Linux only; Phase A BLOCKED, Phase B DISABLED |
 
 Round 007 [source closeout](round007/round-report.md) accounts for both real source commits and keeps full GCC Kbuild pending. Round 006 Agent 7 undelivered native source work has been **reassigned to Agent 4**, not falsely marked complete. The unique `ROUND_OPEN` issue #125 comment with exact task commit is the only worker execution authority. Both jobs run independently from the pre-round source, with Agent 1 alone integrating source and merging distinct additive standards.
+
+[Round 008 accountable closeout](round008/round-report.md) records actual Agent 4 and Agent 8 source integrations; real native/rootless and production-C GitHub CI PASSED; pinned Linux LLVM source-object Kbuild PASSED; pinned GCC `dm-swapz.ko` failed on missing `SWAPZ_BUILD_SOURCE_CLEAN_STRING` at `dm-target.c:71`. [#125](https://github.com/k1moradi/swapz/issues/125) is administratively closed **without a full qualification PASS**; the explicit failure becomes next-round targeted engineering, not an unreported release regression. Phase A BLOCKED; Phase B DISABLED.
