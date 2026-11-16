@@ -3897,6 +3897,127 @@ def _algorithm_real_swap_workload_preflight(source_sha):
             + _bounded_text(exc)) from exc
 
 
+def _classify_algorithm_workload_first_cause(first_cause):
+    """Classify only literal errors defined by the pinned workload producer.
+
+    The child stderr is NOT a source of authority: its bounded summary may
+    confirm a producer terminal envelope, but never becomes a public string.
+    Unknown or partially parsed messages deliberately retain producer_refused.
+    """
+    # The authoritative terminal envelope, including the bounded validated
+    # oracle summary, cannot exceed this finite diagnostic limit.
+    if type(first_cause) is not str or len(first_cause) > 768:
+        return None
+    exact = {
+        "oracle stdout pipe is unavailable": "oracle_transport",
+        "oracle command pipe is unavailable": "oracle_transport",
+        "real-swap oracle emitted unexpected or oversized record": "oracle_protocol",
+        "real-swap oracle emitted malformed JSON": "oracle_protocol",
+        "real-swap oracle record is not an object": "oracle_protocol",
+        "real-swap oracle emitted oversized unterminated record": "oracle_protocol",
+        "concurrent oracle readiness PID identity is malformed": "oracle_protocol",
+        "concurrent oracle readiness PID/seed identities differ": "oracle_protocol",
+        "concurrent oracle fill digests are malformed": "oracle_protocol",
+        "dedicated oracle cgroup membership differs from owned worker PIDs":
+            "oracle_cgroup_ownership",
+        "cannot read dedicated oracle cgroup membership":
+            "oracle_cgroup_ownership",
+        "fresh dedicated oracle cgroup already recorded OOM events":
+            "cgroup_oom",
+        "cgroup exceeded configured swap-usage bound": "cgroup_swap_limit",
+        "exact mapper use drifted from pre-oracle baseline": "swap_attribution",
+    }
+    if first_cause in exact:
+        return exact[first_cause], None, None
+
+    # This errno is from the precise source-owned migration failure; never
+    # recover a supposed first errno by traversing a cleanup exception.
+    migration = re.fullmatch(
+        r"cannot move admitted oracle into dedicated cgroup errno=(none|[0-9]{1,4})",
+        first_cause)
+    if migration is not None:
+        value = migration.group(1)
+        parsed_errno = int(value) if value.isdecimal() else None
+        if parsed_errno is not None and not 1 <= parsed_errno <= 4095:
+            return None
+        return "oracle_cgroup_ownership", None, parsed_errno
+
+    terminal = re.fullmatch(
+        r"real-swap oracle phase=terminal child_exit="
+        r"(running|timeout|-?[0-9]{1,3}) evidence_complete=false"
+        r"(?:: ([^\r\n]{1,512}))?", first_cause)
+    if terminal is None:
+        return None
+    code_text, detail = terminal.groups()
+    child_exit = (None if code_text in ("running", "timeout")
+                  else int(code_text))
+    if child_exit is not None and not -255 <= child_exit <= 255:
+        return None
+
+    # The producer attaches only one of its own bounded, already-validated
+    # oracle summaries. A summary is never parsed as raw host stderr.
+    summary = None
+    if detail is not None and ": " in detail:
+        detail, summary = detail.split(": ", 1)
+        if re.fullmatch(
+                r"(?:FAIL|BLOCKED): oracle phase=(?:preflight|fill|verify) "
+                r"verified_pages=[0-9]+/[0-9]+ "
+                r"verified_bytes=[0-9]+/[0-9]+ "
+                r"expected_page_mismatches=0 observed_page_mismatches=[0-9]+ "
+                r"expected_byte_mismatches=0 observed_byte_mismatches=[0-9]+ "
+                r"error=[A-Za-z_][A-Za-z0-9_]* "
+                r"errno=(?:none|[0-9]+) cleanup_complete=(?:true|false)",
+                summary) is None:
+            return None
+    expected = "TERMINAL"
+    transport_errno = None
+    if detail in (None, "exited before dedicated cgroup migration"):
+        if detail is not None:
+            expected = "WAITING"
+        if child_exit is None:
+            return None
+        reason = "oracle_child_exit"
+    elif detail == "did not exit after byte verification":
+        if code_text != "timeout":
+            return None
+        reason = "oracle_timeout"
+    elif detail in ("trailing output after ORACLE_VERIFIED",
+                    "cannot confirm terminal EOF"):
+        if child_exit != 0:
+            return None
+        reason = "oracle_protocol"
+    else:
+        event = re.fullmatch(
+            r"(exited before|closed output before|timed out waiting for) "
+            r"ORACLE_(WAITING|FILLED|VERIFIED)=", detail or "")
+        if event is not None:
+            expected = event.group(2)
+            action = event.group(1)
+            reason = ("oracle_timeout" if action == "timed out waiting for"
+                      else "oracle_child_exit" if child_exit is not None
+                      else "oracle_transport")
+            if ((action == "timed out waiting for" and code_text != "running") or
+                    (action == "exited before" and child_exit is None)):
+                return None
+        else:
+            transport = re.fullmatch(
+                r"(cannot wait for ORACLE_(WAITING|FILLED|VERIFIED)=|"
+                r"cannot read real-swap oracle record) errno=(none|[0-9]{1,4})",
+                detail or "")
+            if transport is None:
+                return None
+            expected = transport.group(2) or "TERMINAL"
+            text_errno = transport.group(3)
+            if text_errno.isdecimal():
+                transport_errno = int(text_errno)
+                if not 1 <= transport_errno <= 4095:
+                    return None
+            reason = "oracle_transport"
+    if summary is not None and reason not in ("oracle_child_exit", "oracle_transport"):
+        return None
+    return reason, {"expected_event": expected, "child_exit": child_exit}, transport_errno
+
+
 def _emit_algorithm_workload_failure(error, phase="anonymous_workload"):
     """Expose only finite producer refusal classes, never private exception text."""
     reasons = {
@@ -3918,14 +4039,25 @@ def _emit_algorithm_workload_failure(error, phase="anonymous_workload"):
         "raw swap byte oracle reported corruption or incomplete verification": "byte_oracle",
     }
     first_cause = str(error).split("; cleanup also failed:", 1)[0]
-    original_errno = _errno_text(error)
+    # A secondary cleanup errno cannot become the apparent producer errno.
+    original_errno = (_errno_text(error) if "; cleanup also failed:" not in str(error)
+                      else "unavailable")
+    classified = (_classify_algorithm_workload_first_cause(first_cause)
+                  if phase == "anonymous_workload" else None)
+    category = (reasons.get(first_cause) or
+                (classified[0] if classified is not None else "producer_refused"))
     record = {
         "schema": "swapz-algorithm-workload-diagnostic-v1", "phase": phase,
         "gate": "bounded_primary_workload",
-        "reason": ("controls_unavailable" if phase == "anonymous_preflight"
-                   else reasons.get(first_cause, "producer_refused")),
-        "original_errno": (int(original_errno) if original_errno.isdecimal() else None),
+        "reason": "controls_unavailable" if phase == "anonymous_preflight" else category,
+        "original_errno": (int(original_errno) if original_errno.isdecimal() and
+                           1 <= int(original_errno) <= 4095 else None),
     }
+    if classified is not None and category == classified[0]:
+        if classified[1] is not None:
+            record["oracle"] = classified[1]
+        if classified[2] is not None and record["original_errno"] is None:
+            record["original_errno"] = classified[2]
     # Child cleanup wraps the first refusal. Follow only a bounded causal chain,
     # and copy numeric observations rather than arbitrary exception attributes.
     current = error

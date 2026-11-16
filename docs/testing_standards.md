@@ -13728,3 +13728,45 @@ MM→BIO→DM writeback and byte-exact original 4096-byte swap-in, remain
 distinct evidence classes; no loaded device is authorized by these
 rootless tests. Phase A BLOCKED, Phase B RAW bypass DISABLED, direct
 compressed handoff DISABLED.
+
+
+## Round 018 — Agent 4 terminal-oracle producer refusal extension
+
+The pinned `qualify-primary-real-swap.py` worker emits a source-defined
+terminal envelope `real-swap oracle phase=terminal child_exit=...` with
+`evidence_complete=false` on early exits, timeouts, transport or protocol
+failure. The physical probe now matches only anchored, finite (<=768-byte)
+source-owned messages. Unknown, private, malformed, contradictory and oversized
+terminal messages stay `producer_refused`; they never manufacture a child
+status, kernel fault, OOM verdict or physical PASS. Valid categories are
+`oracle_child_exit`, `oracle_timeout`, `oracle_transport`,
+`oracle_protocol`, `oracle_cgroup_ownership`, `cgroup_swap_limit`, and
+existing exact integrity, read/write, PSI, OOM and attribution reasons. The
+optional `oracle` record has exactly `expected_event` (WAITING, FILLED,
+VERIFIED or TERMINAL) and a signed bounded child exit or null. `running`
+cannot be classified as already exited. Only a first-cause numeric errno
+is promoted; secondary `cleanup also failed` errno is not substituted.
+
+The real `physical-swap-probe-test.py` fixture exercises exit 1/2,
+negative signal exit, producer preflight BLOCKED summary, timeout, missing
+EOF, malformed/truncated records, transport errno, cgroup ownership/limit,
+genuine known READ/WRITE/integrity refusals, and fake private/contradictory
+messages. The `test-report-test.py` fixture checks the exact optional
+JSON schema, invalid/missing/extra values, synthetic official `make test`
+console attribution with unchanged original nonzero exit, and mode-0600
+retained rootless private log. Public output prints a finite expected
+event/child exit and safe next action; it never prints raw worker stderr,
+host identities, device serials, privileged logs or original page bytes.
+
+Preserve the separately already integrated Round 018 Agent 4
+`swap_slot_release` timeout/observation contract and the Agent 2 KUnit
+CGROUPS dependency section. Neither modification weakens release deadlines,
+preflight ownership, original swap baseline, cgroup OOM/PSI gates, the
+384/128/384 MiB two-oracle workload, raw backing proof, byte-exact 4096-byte
+readback, or cleanup. Local excerpt-level tests alone are not full imported
+rootless fixture execution or device qualification; the exact-source full
+Python suites and hosted CI must pass independently. The owner's actual
+`producer_refused` cause is still UNKNOWN pending retained private evidence.
+Physical=NOT_RUN for this change. Phase A remains BLOCKED, Phase B RAW bypass
+and direct compressed handoff remain DISABLED; RAW is the original full
+uncompressed 4096-byte page.

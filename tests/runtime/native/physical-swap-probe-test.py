@@ -974,6 +974,102 @@ class PhysicalSwapProbeTests(unittest.TestCase):
             workload._run_workload.call_args.kwargs["development_progress_aware_psi"],
             True)
 
+    def test_algorithm_terminal_first_cause_is_finite_and_fail_closed(self):
+        """Source-owned terminal envelopes never export raw oracle stderr."""
+        blocked_summary = (
+            "BLOCKED: oracle phase=preflight "
+            "verified_pages=0/1 verified_bytes=0/4096 "
+            "expected_page_mismatches=0 observed_page_mismatches=0 "
+            "expected_byte_mismatches=0 observed_byte_mismatches=0 "
+            "error=MemoryDumpDenied errno=none cleanup_complete=true")
+        cases = (
+            ("real-swap oracle phase=terminal child_exit=1 "
+             "evidence_complete=false: exited before ORACLE_WAITING=",
+             "oracle_child_exit", "WAITING", 1, None),
+            ("real-swap oracle phase=terminal child_exit=2 "
+             "evidence_complete=false: exited before ORACLE_WAITING=: " +
+             blocked_summary, "oracle_child_exit", "WAITING", 2, None),
+            ("real-swap oracle phase=terminal child_exit=-9 "
+             "evidence_complete=false: exited before ORACLE_FILLED=",
+             "oracle_child_exit", "FILLED", -9, None),
+            ("real-swap oracle phase=terminal child_exit=running "
+             "evidence_complete=false: timed out waiting for ORACLE_VERIFIED=",
+             "oracle_timeout", "VERIFIED", None, None),
+            ("real-swap oracle phase=terminal child_exit=timeout "
+             "evidence_complete=false: did not exit after byte verification",
+             "oracle_timeout", "TERMINAL", None, None),
+            ("real-swap oracle phase=terminal child_exit=running "
+             "evidence_complete=false: cannot read real-swap oracle record errno=5",
+             "oracle_transport", "TERMINAL", None, 5),
+            ("real-swap oracle phase=terminal child_exit=running "
+             "evidence_complete=false: closed output before ORACLE_FILLED=",
+             "oracle_transport", "FILLED", None, None),
+            ("real-swap oracle phase=terminal child_exit=0 "
+             "evidence_complete=false: trailing output after ORACLE_VERIFIED",
+             "oracle_protocol", "TERMINAL", 0, None),
+            ("real-swap oracle emitted malformed JSON",
+             "oracle_protocol", None, None, None),
+            ("dedicated oracle cgroup membership differs from owned worker PIDs",
+             "oracle_cgroup_ownership", None, None, None),
+            ("cannot move admitted oracle into dedicated cgroup errno=3",
+             "oracle_cgroup_ownership", None, None, 3),
+            ("cgroup exceeded configured swap-usage bound",
+             "cgroup_swap_limit", None, None, None),
+            ("fresh dedicated oracle cgroup already recorded OOM events",
+             "cgroup_oom", None, None, None),
+            ("real-swap byte oracle reported corruption or incomplete verification",
+             "byte_oracle", None, None, None),
+            ("backing partition counters show no lower WRITE activity",
+             "lower_write", None, None, None),
+            ("real-swap oracle phase=terminal child_exit=2000 "
+             "evidence_complete=false: exited before ORACLE_WAITING=",
+             "producer_refused", None, None, None),
+            ("real-swap oracle phase=terminal child_exit=running "
+             "evidence_complete=false: exited before ORACLE_WAITING=",
+             "producer_refused", None, None, None),
+            ("real-swap oracle phase=terminal child_exit=2 "
+             "evidence_complete=false: exited before ORACLE_WAITING=: "
+             "PRIVATE=/owner/path", "producer_refused", None, None, None),
+            ("some unknown producer failure /owner/secret",
+             "producer_refused", None, None, None),
+            ("real-swap oracle phase=terminal child_exit=2 "
+             "evidence_complete=false: " + "X" * 769,
+             "producer_refused", None, None, None),
+        )
+        for message, reason, expected_event, child_exit, error_number in cases:
+            with self.subTest(reason=reason, message=message[:60]):
+                stderr = io.StringIO()
+                with mock.patch.object(probe.sys, "stderr", stderr):
+                    diagnostic = probe._emit_algorithm_workload_failure(
+                        RuntimeError(message + "; cleanup also failed: "
+                                     "/root/SECONDARY_SECRET"))
+                self.assertEqual(diagnostic["reason"], reason)
+                self.assertEqual(diagnostic["original_errno"], error_number)
+                self.assertEqual(diagnostic.get("oracle"), (
+                    {"expected_event": expected_event, "child_exit": child_exit}
+                    if expected_event is not None else None))
+                marker = stderr.getvalue()
+                self.assertEqual(marker.count("PHYSICAL_ALGORITHM_DEBUG="), 1)
+                self.assertNotIn("/root/", marker)
+                self.assertNotIn("SECONDARY_SECRET", marker)
+                self.assertNotIn("PRIVATE=", marker)
+                self.assertEqual(
+                    json.loads(marker.split("=", 1)[1]), diagnostic)
+
+        # Secondary cleanup OSError cannot replace an unavailable primary
+        # errno even when it is the current chained exception.
+        original = RuntimeError(
+            "real-swap oracle phase=terminal child_exit=2 "
+            "evidence_complete=false: exited before ORACLE_WAITING=")
+        wrapped = RuntimeError(
+            str(original) + "; cleanup also failed: /root/private")
+        wrapped.__cause__ = OSError(13, "/root/private")
+        with mock.patch.object(probe.sys, "stderr", io.StringIO()):
+            record = probe._emit_algorithm_workload_failure(wrapped)
+        self.assertEqual(record["reason"], "oracle_child_exit")
+        self.assertIsNone(record["original_errno"])
+        self.assertEqual(record["oracle"]["child_exit"], 2)
+
     def test_algorithm_workload_failure_marker_redacts_private_producer_details(self):
         stderr = io.StringIO()
         with mock.patch.object(probe.sys, "stderr", stderr):

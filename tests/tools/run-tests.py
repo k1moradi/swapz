@@ -4459,6 +4459,8 @@ def parse_algorithm_pageout_diagnostic(error_output):
             fields.add("pressure")
         if "release" in diagnostic:
             fields.add("release")
+        if "oracle" in diagnostic:
+            fields.add("oracle")
         if set(diagnostic) != fields:
             return None
         if any(not isinstance(diagnostic[key], str) for key in ("phase", "gate", "reason")):
@@ -4467,7 +4469,10 @@ def parse_algorithm_pageout_diagnostic(error_output):
             "swapz_read", "lower_read", "kernel_swapin", "swapz_write",
             "lower_write", "kernel_swapout", "swapout_attribution",
             "byte_oracle", "cgroup_oom", "memory_pressure",
-            "swap_slot_release", "producer_refused"}
+            "swap_slot_release", "producer_refused",
+            "swap_attribution", "raw_swap_floor", "raw_io", "cgroup_swap_limit",
+            "oracle_child_exit", "oracle_timeout", "oracle_transport",
+            "oracle_protocol", "oracle_cgroup_ownership"}
         if diagnostic["phase"] == "anonymous_preflight":
             reasons = {"controls_unavailable"}
         elif diagnostic["phase"] != "anonymous_workload":
@@ -4495,6 +4500,31 @@ def parse_algorithm_pageout_diagnostic(error_output):
             if (release["mapper_used_kib"] < baseline or
                     delta != release["mapper_used_kib"] - baseline or
                     (release["cgroup_swap_bytes"] == 0 and delta == 0)):
+                return None
+        if (diagnostic["reason"] in {"oracle_child_exit", "oracle_timeout"}
+                and "oracle" not in diagnostic):
+            return None
+        if "oracle" in diagnostic:
+            oracle = diagnostic["oracle"]
+            if (diagnostic["phase"] != "anonymous_workload" or
+                    diagnostic["reason"] not in {
+                        "oracle_child_exit", "oracle_timeout",
+                        "oracle_transport", "oracle_protocol"} or
+                    not isinstance(oracle, dict) or
+                    set(oracle) != {"expected_event", "child_exit"} or
+                    type(oracle["expected_event"]) is not str or
+                    oracle["expected_event"] not in {
+                        "WAITING", "FILLED", "VERIFIED", "TERMINAL"}):
+                return None
+            exit_status = oracle["child_exit"]
+            if (exit_status is not None and
+                    (type(exit_status) is not int or
+                     not -255 <= exit_status <= 255)):
+                return None
+            if ((diagnostic["reason"] == "oracle_child_exit" and
+                     exit_status is None) or
+                    (diagnostic["reason"] == "oracle_timeout" and
+                     exit_status is not None)):
                 return None
         if "pressure" in diagnostic:
             pressure = diagnostic["pressure"]
@@ -4637,6 +4667,24 @@ def print_algorithm_workload_diagnostic(diagnostic):
               flush=True)
         print("        Next: distinguish a remaining cgroup charge from mapper-only "
               "slot usage; neither permits accepting partial release", flush=True)
+    oracle = diagnostic.get("oracle")
+    if oracle is not None:
+        child_exit = oracle["child_exit"]
+        print("        Oracle terminal (no verified byte evidence): "
+              f"expected_event={oracle['expected_event']} "
+              f"child_exit={child_exit if child_exit is not None else 'unavailable'} "
+              "evidence_complete=false", flush=True)
+    if diagnostic["reason"] in {
+            "oracle_child_exit", "oracle_timeout", "oracle_transport",
+            "oracle_protocol", "oracle_cgroup_ownership"}:
+        print("        Next: inspect the automatically retained private workload "
+              "log and verified recovery before considering another trial; "
+              "no cgroup/byte-identity gate was waived", flush=True)
+    elif diagnostic["reason"] == "producer_refused":
+        print("        Next: first producer cause UNKNOWN; review the retained "
+              "private workload evidence and verified recovery. Do not infer "
+              "a kernel, codec or device fault or rerun the physical trial",
+              flush=True)
     pressure = diagnostic.get("pressure")
     if pressure is not None:
         def observed(key):

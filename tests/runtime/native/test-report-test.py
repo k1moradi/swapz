@@ -6306,6 +6306,10 @@ class ReportContract(unittest.TestCase):
                 "swapz_lower_write_service_ewma_ns": 80,
                 "swapz_error": -5}
 
+    def test_official_algorithm_tier_promotes_terminal_child_exit_without_leak(self):
+        self.assert_official_physical_debug(
+            workload_phase="anonymous_workload", oracle_terminal=True)
+
     def test_official_algorithm_tier_retains_first_pressure_snapshot(self):
         self.assert_official_physical_debug(
             workload_phase="anonymous_workload", pressure=True)
@@ -6321,7 +6325,8 @@ class ReportContract(unittest.TestCase):
 
     def assert_official_physical_debug(self, *, readback=False, workload_phase=None,
                                       log_failure=False, pressure=False,
-                                      activation_refusal=False, shared_root_refusal=False):
+                                      activation_refusal=False, shared_root_refusal=False,
+                                      oracle_terminal=False):
         source_sha = "a" * 40
         report_snapshots = []
         private_output = mock.Mock(return_value="build/tests/physical-fixture.private.log")
@@ -6370,6 +6375,11 @@ class ReportContract(unittest.TestCase):
         if pressure:
             error_context.update(reason="memory_pressure",
                                  pressure=self.pressure_observation_fixture())
+        if oracle_terminal:
+            self.assertEqual(workload_phase, "anonymous_workload")
+            error_context.update(reason="oracle_child_exit",
+                                 oracle={"expected_event": "WAITING",
+                                         "child_exit": 2})
         physical_exit = (2 if workload_phase == "anonymous_preflight" or
                          activation_refusal or shared_root_refusal else 3)
 
@@ -6468,6 +6478,12 @@ class ReportContract(unittest.TestCase):
         self.assertIn(f"{'check' if workload_phase else 'gate'}={error_context['gate']}", console)
         if readback:
             self.assertIn("lower_read_bytes=0", console)
+        if oracle_terminal:
+            self.assertIn("reason=oracle_child_exit", console)
+            self.assertIn("expected_event=WAITING child_exit=2", console)
+            self.assertIn("evidence_complete=false", console)
+            self.assertIn("Next: inspect the automatically retained private", console)
+            self.assertNotIn("private_root_identity", console)
         if pressure:
             self.assertIn("stalled_usec=4500000", console)
             self.assertIn("limit_usec=4250000", console)
@@ -6831,6 +6847,101 @@ class ReportContract(unittest.TestCase):
             with self.subTest(readback_fields=fields):
                 self.assertIsNone(runner.parse_algorithm_pageout_diagnostic(
                     prefix + json.dumps({**readback, **fields})))
+
+    def test_algorithm_workload_first_failure_retains_private_0600_log(self):
+        # The safe console record is intentionally separate from arbitrary
+        # child stderr and from the preserved numeric first exit.
+        with tempfile.TemporaryDirectory(prefix="algorithm-first-cause-") as directory:
+            root = Path(directory)
+            private_details = (
+                "private_child_stderr=/owner/DO_NOT_PRINT\n"
+                "PHYSICAL_ALGORITHM_DEBUG=" +
+                json.dumps({
+                    "schema": "swapz-algorithm-workload-diagnostic-v1",
+                    "phase": "anonymous_workload",
+                    "gate": "bounded_primary_workload",
+                    "reason": "oracle_child_exit", "original_errno": None,
+                    "oracle": {"expected_event": "WAITING", "child_exit": 2}}))
+            with mock.patch.object(runner, "ROOT", root):
+                private_path = runner.retain_private_stage_output(
+                    private_details, "a" * 40,
+                    "Authorized physical swap trial (dev)")
+            self.assertIsNotNone(private_path)
+            self.assertTrue(private_path.startswith("build/tests/stage-failure-"))
+            output = root / private_path
+            self.assertEqual(stat.S_IMODE(output.stat().st_mode), 0o600)
+            self.assertEqual(output.stat().st_nlink, 1)
+            self.assertIn("private_child_stderr=/owner/DO_NOT_PRINT",
+                          output.read_text())
+            self.assertNotIn("DO_NOT_PRINT", private_path)
+            self.assertNotIn("/owner/", private_path)
+
+    def test_terminal_oracle_child_diagnostic_is_schema_bound(self):
+        basic = {
+            "schema": "swapz-algorithm-workload-diagnostic-v1",
+            "phase": "anonymous_workload",
+            "gate": "bounded_primary_workload",
+            "reason": "oracle_child_exit",
+            "original_errno": None,
+            "oracle": {"expected_event": "WAITING", "child_exit": 2},
+        }
+        def decode(value):
+            return runner.parse_algorithm_pageout_diagnostic(
+                "private_identity=/owner/KEEP_PRIVATE\n"
+                "PHYSICAL_ALGORITHM_DEBUG=" +
+                json.dumps(value, sort_keys=True, separators=(",", ":")))
+        self.assertEqual(decode(basic), basic)
+        console = io.StringIO()
+        with contextlib.redirect_stdout(console):
+            runner.print_algorithm_workload_diagnostic(basic)
+        self.assertIn("expected_event=WAITING child_exit=2", console.getvalue())
+        self.assertIn("no cgroup/byte-identity gate was waived", console.getvalue())
+        self.assertNotIn("KEEP_PRIVATE", console.getvalue())
+
+        for reason, child_status in (
+                ("oracle_child_exit", 1),
+                ("oracle_child_exit", -9),
+                ("oracle_timeout", None),
+                ("oracle_transport", None),
+                ("oracle_protocol", 0)):
+            with self.subTest(reason=reason, child_status=child_status):
+                record = {**basic, "reason": reason,
+                          "oracle": {"expected_event": "TERMINAL",
+                                     "child_exit": child_status}}
+                self.assertEqual(decode(record), record)
+        for mutation in (
+                {"reason": "oracle_child_exit",
+                 "oracle": {"expected_event": "WAITING", "child_exit": None}},
+                {"reason": "cgroup_oom"},
+                {"phase": "anonymous_preflight", "reason": "controls_unavailable"},
+                {"oracle": {"expected_event": "WAITING", "child_exit": True}},
+                {"oracle": {"expected_event": "WAITING", "child_exit": 256}},
+                {"oracle": {"expected_event": "WAITING", "child_exit": -256}},
+                {"oracle": {"expected_event": "READY", "child_exit": 2}},
+                {"oracle": {"expected_event": "/private", "child_exit": 2}},
+                {"oracle": {"expected_event": "WAITING", "child_exit": 2,
+                            "private_path": "/owner/SECRET"}},
+                {"original_errno": "5"},
+                {"original_errno": True},
+                {"secret": "/owner/SECRET"}):
+            with self.subTest(mutation=mutation):
+                self.assertIsNone(decode({**basic, **mutation}))
+        valid_cgroup = dict(basic)
+        valid_cgroup.pop("oracle")
+        valid_cgroup["reason"] = "oracle_cgroup_ownership"
+        self.assertEqual(decode(valid_cgroup), valid_cgroup)
+        valid_cgroup["reason"] = "cgroup_swap_limit"
+        self.assertEqual(decode(valid_cgroup), valid_cgroup)
+        valid_cgroup["reason"] = "producer_refused"
+        self.assertEqual(decode(valid_cgroup), valid_cgroup)
+        output = io.StringIO()
+        with contextlib.redirect_stdout(output):
+            runner.print_algorithm_workload_diagnostic(valid_cgroup)
+        self.assertIn("first producer cause UNKNOWN", output.getvalue())
+        self.assertNotIn("/owner/", output.getvalue())
+        duplicate = "PHYSICAL_ALGORITHM_DEBUG=" + json.dumps(basic)
+        self.assertIsNone(runner.parse_algorithm_pageout_diagnostic(
+            duplicate + "\n" + duplicate))
 
     def test_bounded_workload_refusal_rejects_private_or_malformed_fields(self):
         report = {"schema": "swapz-algorithm-workload-diagnostic-v1",
