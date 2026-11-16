@@ -299,7 +299,8 @@ class PinnedLinuxStageTests(unittest.TestCase):
         zswap = changed["mm/zswap.c"]
         self.assertIn("ctx.swap_origin = SWAP_BIO_ORIGIN_ZSWAP_STORED_WRITEBACK", zswap)
         self.assertNotIn("REQ_ZSWAP_WRITEBACK", "".join(changed.values()))
-        self.assertEqual("".join(changed.values()).count("= SWAP_BIO_ORIGIN_ZSWAP_STORED_WRITEBACK"), 1)
+        # Count the authenticated producer assignment, not guarded copies.
+        self.assertEqual(zswap.count("ctx.swap_origin = SWAP_BIO_ORIGIN_ZSWAP_STORED_WRITEBACK;"), 1)
         # Full-source Kbuild and actual clone/split runtime execution are separate gates.
 
     def test_preimage_git_hash_and_wrong_blob_refuse(self):
