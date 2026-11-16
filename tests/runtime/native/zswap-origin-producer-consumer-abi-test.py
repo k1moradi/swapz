@@ -40,6 +40,41 @@ def require(condition: bool, label: str) -> None:
         raise AssertionError(label)
 
 
+def verify_source_transition(path: str, edits, staged_source: str) -> None:
+    """Validate exact replacement or anchor-preserving insertion, never both.
+
+    Some upstream insertions deliberately retain the original anchor in the
+    emitted postimage. All complete edits and preserved anchors must occur
+    exactly once; the production stager independently owns the safety proof.
+    """
+    stager.validate_origin_postimage(path, staged_source)
+    for edit in edits:
+        require(staged_source.count(edit.after) == 1,
+                "missing or repeated staged edit: " + path)
+        if edit.before in edit.after:
+            require(edit.after.count(edit.before) == 1 and
+                    staged_source.count(edit.before) == 1,
+                    "insertion must preserve one upstream anchor: " + path)
+        else:
+            require(edit.before not in staged_source,
+                    "replacement retained stale upstream anchor: " + path)
+
+    if path == "include/linux/swap_ops.h":
+        # Genuine source contains an insertion *before* this intact anchor.
+        # Do not accept an unguarded helper, duplicate helper, or inverted
+        # homogeneous-origin predicate simply because the anchor survived.
+        anchor = "/*\n * SWAP_OPS_F_REQUIRE_NOFS:"
+        helper = "static inline bool swap_bio_origin_can_merge("
+        require(staged_source.count(anchor) == 1 and
+                staged_source.count(helper) == 1 and
+                staged_source.index(helper) < staged_source.index(anchor),
+                "origin merge helper placement and retained anchor: " + path)
+        require("return established == incoming &&" in staged_source and
+                "established == SWAP_BIO_ORIGIN_ORDINARY_OR_UNKNOWN ||" in staged_source and
+                "established == SWAP_BIO_ORIGIN_ZSWAP_STORED_WRITEBACK);" in staged_source,
+                "only identical valid origins may merge: " + path)
+
+
 def source_postimages() -> dict[str, str]:
     """Use the real staging code and its byte-exact pinned upstream anchors.
 
@@ -56,19 +91,14 @@ def source_postimages() -> dict[str, str]:
         original = "\n\n/* original upstream anchor boundary */\n\n".join(
             edit.before for edit in edits)
         result[path] = stager.render_source(path, original)
-        for edit in edits:
-            require(edit.after in result[path] and edit.before not in result[path],
-                    "changed source staging output: " + path)
+        verify_source_transition(path, edits, result[path])
     return result
 
 
 def validate_staged(postimages: dict[str, str]) -> None:
     require(set(postimages) == set(stager.EDITS), "incomplete producer source set")
     for path, edits in stager.EDITS.items():
-        stager.validate_origin_postimage(path, postimages[path])
-        for edit in edits:
-            require(edit.after in postimages[path] and edit.before not in postimages[path],
-                    "staged C transition mismatches frozen edit: " + path)
+        verify_source_transition(path, edits, postimages[path])
     types = postimages["include/linux/blk_types.h"]
     header = postimages["include/linux/bio.h"]
     block = postimages["block/bio.c"]
@@ -170,12 +200,43 @@ class PinnedProducerConsumerTests(unittest.TestCase):
                 with self.assertRaises((AssertionError, stager.StagingError)):
                     validate_staged(changed)
                 detected += 1
+        # An insertion is different from a replacement: keep its original
+        # upstream comment anchor but require the exact guarded helper once.
+        swap_header = "include/linux/swap_ops.h"
+        insertion = next(edit for edit in stager.EDITS[swap_header]
+                         if edit.before in edit.after and
+                         "swap_bio_origin_can_merge" in edit.after)
+        original_header = original[swap_header]
+        insertion_mutations = (
+            ("helper removed, anchor retained",
+             change_one(original_header, insertion.after, insertion.before)),
+            ("helper inserted twice",
+             change_one(original_header, insertion.after,
+                        insertion.after + insertion.after)),
+            ("homogeneous merge inverted",
+             change_one(original_header, "return established == incoming &&",
+                        "return established != incoming &&")),
+            ("unknown origin promoted by merge",
+             change_one(original_header,
+                        "established == SWAP_BIO_ORIGIN_ORDINARY_OR_UNKNOWN ||",
+                        "true ||")),
+        )
+        for name, mutated_header in insertion_mutations:
+            with self.subTest(mutation=name):
+                changed = dict(original)
+                changed[swap_header] = mutated_header
+                with self.assertRaises((AssertionError, stager.StagingError)):
+                    validate_staged(changed)
+                detected += 1
         # Existing source-controlled production regression adds 20 independent
         # map/admission/commit/codec mutants to the same rootless run.
         consumer = SOURCE.read_text(encoding="utf-8")
         validate_consumer(consumer)
-        detected += consumer_test.run_negative_mutations(consumer)
-        self.assertGreaterEqual(detected, 20)
+        consumer_mutations = consumer_test.run_negative_mutations(consumer)
+        self.assertEqual(consumer_mutations, 20)
+        detected += consumer_mutations
+        self.assertEqual(detected, len(PRODUCER_NEGATIVES) +
+                         len(insertion_mutations) + consumer_mutations)
         print(f"PASS: {detected} producer and consumer mutations rejected")
 
     def test_compiled_real_bio_predicate_and_clone(self):

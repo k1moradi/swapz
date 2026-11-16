@@ -3718,3 +3718,43 @@ ELF/modinfo and SHA-256, before source-level Kbuild PASS. A paired compile
 does not establish a booted matched producer, real stored-entry zswap
 eviction/readback, or physical safety. Phase A remains BLOCKED; Phase B RAW
 bypass remains DISABLED.
+
+## Round 013 source-bound pinned Linux producer→DM ABI insertion controls (2026-11-16)
+
+The real `tests/runtime/native/zswap-origin-producer-consumer-abi-test.py`
+source contract must distinguish a byte-exact replacement, whose old anchor
+disappears, from an intentionally anchor-preserving insertion. A staged
+`Edit.after` must occur exactly once; when `Edit.before` is retained inside
+that postimage, it must remain exactly once, not be incorrectly rejected.
+The authoritative staging tool `validate_origin_postimage()` still runs
+for every one of the six pinned Linux C/H source postimages and the added
+source test does not change its original-blob allowlist or production ABI.
+
+The `include/linux/swap_ops.h` helper must appear exactly once, ahead of
+the still-present `SWAP_OPS_F_REQUIRE_NOFS` anchor. Its predicate must
+permit only equal, recognized UNKNOWN=0 or authenticated stored-entry
+writeback origins; unknown numerics and mixed origins must fail closed.
+The source test exercises the actual thirteen committed transformations,
+all twenty-two existing explicit producer mutants, four further
+insertion/guard mutations (stripped helper with retained anchor, duplicate
+helper, inverted homogeneous merge, false UNKNOWN promotion), and the
+existing twenty real production-DM admission/commit/RAW mutants. Reject each
+distinct mutation, rather than merely checking the aggregate test count.
+
+The consumer remains UNKNOWN by default on stock headers, admits a positive
+only with the optional compiled origin carrier, WRITE, exactly
+`SWAPZ_SECTORS`, `SWAPZ_BLOCK_BYTES` (4096 bytes), and the authenticated
+BIO helper. The four existing foreground representation-success commit
+hooks remain after success and before completion; rejection/requeue/retry,
+failed authority, RAW speculation, or gc must never create committed-origin
+proof. No origin-driven RAW or on-disk encoding change is permitted.
+
+Run the executable unchanged in the existing `product-codec.yml`
+x86_64/ARM64 rootless source-contract stage, with the existing standalone
+consumer source test, Python syntax checks, and available GCC/Clang
+extracted-predicate fixture. Excerpt-based local test fixtures or isolated
+source-derived checks must be labeled separately from an exact full-source
+Python run or hosted Kbuild/KUnit. No running-kernel provenance, matched
+module, real zswap eviction/readback, swap, mapper or physical device is
+qualified by a passing source contract. Phase A remains BLOCKED and Phase B
+RAW bypass DISABLED.
