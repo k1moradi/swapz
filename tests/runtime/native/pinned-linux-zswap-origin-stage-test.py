@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import importlib.util
 import json
+import re
 from pathlib import Path
 import sys
 import tempfile
@@ -18,6 +19,123 @@ assert specification and specification.loader
 stager = importlib.util.module_from_spec(specification)
 sys.modules[specification.name] = stager
 specification.loader.exec_module(stager)
+
+
+
+# A names-only grep can count skipped, repeated or forged cases as PASS.
+# This parser consumes the raw output of exit-zero pinned kunit.py, and checks
+# the complete named suite plan, all five unique cases and its suite result.
+KUNIT_CASE_NAMES = (
+    "swap_bio_origin_authentication_test",
+    "swap_bio_origin_reset_reuse_reissue_test",
+    "swap_bio_origin_clone_test",
+    "swap_bio_origin_split_test",
+    "swap_bio_origin_merge_reject_test",
+)
+KUNIT_LOG_LIMIT = 8 * 1024 * 1024
+KUNIT_RESULT_LINE = re.compile(
+    r"^(?P<state>ok|not ok)\s+(?P<ordinal>[0-9]+)\s+"
+    r"(?:-\s*)?(?P<name>swap_bio_origin(?:_[a-z_]+_test)?)"
+    r"(?:\s+(?P<directive>#.*))?$"
+)
+
+
+def verify_kunit_tap(output: str) -> int:
+    """Require the real five-case BIO suite; no absent, skipped or torn TAP."""
+    if not output or len(output.encode("utf-8")) > KUNIT_LOG_LIMIT or "\x00" in output:
+        raise ValueError("invalid KUnit output extent")
+    # --raw_output=kunit removes normal printk prefixes; --raw_output=all
+    # retains bounded kernel timestamps. Both are supported here.
+    lines = [
+        re.sub(r"^\[\s*[0-9]+\.[0-9]+\]\s*", "", line.strip())
+        for line in output.splitlines()
+    ]
+    headers = [index for index, line in enumerate(lines)
+               if line == "# Subtest: swap_bio_origin"]
+    if len(headers) != 1 or not any(
+        line in ("TAP version 13", "TAP version 14", "KTAP version 1")
+        for line in lines[:headers[0]]
+    ):
+        raise ValueError("missing or duplicate genuine KUnit suite header")
+    if any(re.match(r"^not ok\s+[0-9]+(?:\s|$)", line) for line in lines):
+        raise ValueError("failed KUnit TAP result")
+
+    header_index = headers[0]
+    plan_count = 0
+    executed: list[str] = []
+    summary_count = 0
+    for line in lines[header_index + 1:]:
+        if line == "1..5":
+            if executed or summary_count:
+                raise ValueError("late KUnit suite plan")
+            plan_count += 1
+            continue
+        result = KUNIT_RESULT_LINE.fullmatch(line)
+        if result:
+            if result["directive"] or result["state"] != "ok":
+                raise ValueError("skipped or failed BIO case")
+            if result["name"] == "swap_bio_origin":
+                if len(executed) != len(KUNIT_CASE_NAMES):
+                    raise ValueError("premature BIO suite summary")
+                summary_count += 1
+                continue
+            if summary_count or not plan_count or result["name"] not in KUNIT_CASE_NAMES:
+                raise ValueError("unplanned or late BIO test")
+            expected_index = len(executed)
+            if (expected_index >= len(KUNIT_CASE_NAMES) or
+                int(result["ordinal"]) != expected_index + 1 or
+                result["name"] != KUNIT_CASE_NAMES[expected_index]):
+                raise ValueError("missing, duplicated or reordered BIO case")
+            executed.append(result["name"])
+        elif not summary_count and re.match(r"^(?:ok|not ok)\s+[0-9]+(?:\s|$)", line):
+            raise ValueError("unexpected BIO case result")
+        elif not summary_count and "# SKIP" in line.upper():
+            raise ValueError("skipped BIO case")
+    if plan_count != 1 or executed != list(KUNIT_CASE_NAMES) or summary_count != 1:
+        raise ValueError("incomplete or duplicate BIO KUnit TAP")
+    return len(executed)
+
+
+def verify_kunit_workflow_contract(contents: str) -> None:
+    """Reject real YAML shell ordering/identity gaps before coordinator CI."""
+    required = (
+        "c339f4010dea8b0d754f84ace70cd1b089878ef8",
+        '[[ "$(git -C linux rev-parse HEAD)" == "$pinned" ]]',
+        '--linux-root linux --manifest "$evidence/sources.json" --with-kunit',
+        "block/swap-bio-origin-kunit.c",
+        "block/swap-bio-origin-kunit.o",
+        "CONFIG_SWAP=y",
+        "CONFIG_KUNIT=y",
+        "CONFIG_SWAP_BIO_ORIGIN_KUNIT_TEST=y",
+        "CONFIG_ZSWAP=y",
+        "# CONFIG_ZSWAP is not set",
+        '# CONFIG_BLK_CGROUP is not set',
+        "--make_options=W=1",
+        'grep -Fxq CONFIG_ZSWAP=y "$uml_dir/.config"',
+        """grep -Fxq '# CONFIG_ZSWAP is not set' "$uml_dir/.config" """.strip(),
+        'sha256sum "$captured"',
+        '--verify-kunit-tap "$captured"',
+        "kunit_cases_passed=5",
+        "if: always()",
+    )
+    if (any(value not in contents for value in required) or
+        contents.count("block/swap-bio-origin-kunit.c") != 2 or
+        contents.count("block/swap-bio-origin-kunit.o") != 2):
+        raise ValueError("incomplete pinned KUnit workflow contract")
+    ordered = (
+        "run_checked rootless ",
+        "run_checked stage ",
+        "run_checked modified_objects ",
+        "run_checked uml_kunit ",
+        'cp -- "$log" "$captured"',
+        "run_checked verify_real_tap ",
+        "kunit_cases_passed=5",
+    )
+    positions = [contents.find(token) for token in ordered]
+    if any(index < 0 for index in positions) or positions != sorted(positions):
+        raise ValueError("KUnit publication before source, execution or TAP verification")
+    if "echo KUNIT_PASS" in contents or "printf 'kunit_cases_passed=5" in contents[:positions[-2]]:
+        raise ValueError("forged or premature KUnit PASS marker")
 
 
 class PinnedLinuxStageTests(unittest.TestCase):
@@ -463,9 +581,177 @@ class PinnedLinuxStageTests(unittest.TestCase):
                 self.stage_fixture(root, original, root / "evidence.json")
 
 
+
+    def test_round012_tap_accepts_exact_five_executed_cases(self):
+        tap = ("TAP version 14\n1..1\n"
+               "    # Subtest: swap_bio_origin\n    1..5\n" +
+               "".join(f"    ok {number} - {name}\n"
+                       for number, name in enumerate(KUNIT_CASE_NAMES, 1)) +
+               "ok 1 - swap_bio_origin\n")
+        self.assertEqual(verify_kunit_tap(tap), 5)
+        self.assertEqual(verify_kunit_tap(
+            tap.replace("TAP version 14", "[    0.123456] KTAP version 1")), 5)
+
+    def test_round012_tap_refuses_adversarial_executed_case_claims(self):
+        good = ("TAP version 14\n1..1\n"
+                "# Subtest: swap_bio_origin\n1..5\n" +
+                "".join(f"ok {number} - {name}\n"
+                        for number, name in enumerate(KUNIT_CASE_NAMES, 1)) +
+                "ok 1 - swap_bio_origin\n")
+        cases = {
+            "missing-header": good.replace("TAP version 14\n", ""),
+            "wrong-version": good.replace("TAP version 14", "TAP version 99"),
+            "missing-suite": good.replace("# Subtest: swap_bio_origin", "# other"),
+            "duplicated-suite": good + good,
+            "missing-plan": good.replace("1..5\n", ""),
+            "wrong-plan": good.replace("1..5\n", "1..4\n"),
+            "duplicate-plan": good.replace("1..5\n", "1..5\n1..5\n"),
+            "missing-case": good.replace(
+                f"ok 5 - {KUNIT_CASE_NAMES[4]}\n", ""),
+            "reordered-cases": good.replace(
+                f"ok 2 - {KUNIT_CASE_NAMES[1]}",
+                f"ok 2 - {KUNIT_CASE_NAMES[2]}"),
+            "duplicate-case": good.replace(
+                f"ok 2 - {KUNIT_CASE_NAMES[1]}",
+                f"ok 1 - {KUNIT_CASE_NAMES[0]}"),
+            "failed-case": good.replace(
+                f"ok 2 - {KUNIT_CASE_NAMES[1]}",
+                f"not ok 2 - {KUNIT_CASE_NAMES[1]}"),
+            "skipped-case": good.replace(
+                f"ok 3 - {KUNIT_CASE_NAMES[2]}",
+                f"ok 3 - {KUNIT_CASE_NAMES[2]} # SKIP disabled"),
+            "missing-summary": good.replace("ok 1 - swap_bio_origin\n", ""),
+            "failed-summary": good.replace(
+                "ok 1 - swap_bio_origin\n", "not ok 1 - swap_bio_origin\n"),
+            "duplicate-summary": good + "ok 1 - swap_bio_origin\n",
+            "shell-echo-forgery": good.replace(
+                f"ok 1 - {KUNIT_CASE_NAMES[0]}",
+                f"echo ok 1 - {KUNIT_CASE_NAMES[0]}"),
+            "unrelated-failed-test": good + "not ok 2 - unrelated_suite\n",
+            "incomplete-suffix": good[:-2],
+            "NUL-byte": good + "\x00",
+            "unexpected-sixth-case": good.replace(
+                "ok 1 - swap_bio_origin\n",
+                "ok 6 - unrelated_extra_test\nok 1 - swap_bio_origin\n"),
+            "standalone-skip-directive": good.replace(
+                f"ok 2 - {KUNIT_CASE_NAMES[1]}\n",
+                f"ok 2 - {KUNIT_CASE_NAMES[1]}\n# SKIP ignored\n"),
+            "excessive-output": good + "X" * KUNIT_LOG_LIMIT,
+        }
+        self.assertEqual(len(cases), 22)
+        for name, invalid in cases.items():
+            with self.subTest(negative=name):
+                with self.assertRaises(ValueError):
+                    verify_kunit_tap(invalid)
+
+    def test_round012_real_kunit_source_mutation_negatives(self):
+        source = stager.KUNIT_SOURCE
+        mutations = {
+            "wrong-sector-units": source.replace(
+                "PAGE_SIZE >> (SECTOR_SHIFT + 1)", "PAGE_SIZE >> 10"),
+            "missing-bio-clone": source.replace(
+                "bio_init_clone(NULL, &clone, &original, GFP_KERNEL)",
+                "bio_init(&clone, NULL, &vector, 1, REQ_OP_WRITE | REQ_SWAP)"),
+            "missing-reissue": source.replace("bio_prepare_reissue(&bio, NULL);", ""),
+            "missing-bio-reuse": source.replace(
+                "bio_reuse(&bio, REQ_OP_WRITE | REQ_SWAP);", ""),
+            "missing-bio-reset": source.replace(
+                "bio_reset(&bio, NULL, REQ_OP_WRITE | REQ_SWAP);", ""),
+            "missing-bio-put": source.replace("bio_put(split);", ""),
+            "missing-page-free": source.replace("__free_page(page);", ""),
+            "missing-case": source.replace(
+                "KUNIT_CASE(swap_bio_origin_split_test),", ""),
+            "duplicate-case": source.replace(
+                "KUNIT_CASE(swap_bio_origin_split_test),",
+                "KUNIT_CASE(swap_bio_origin_split_test),\n"
+                "\tKUNIT_CASE(swap_bio_origin_split_test),"),
+            "missing-source": "",
+        }
+        self.assertEqual(len(mutations), 10)
+        for name, invalid in mutations.items():
+            with self.subTest(negative=name):
+                self.assertNotEqual(invalid, source)
+                with self.assertRaisesRegex(stager.StagingError,
+                                            "invalid-kunit-source-contract"):
+                    stager.validate_kunit_source(invalid)
+        # An invalid generated C source must stop the *real* stager before
+        # publishing any of the eight edited upstream files or the new C file.
+        with tempfile.TemporaryDirectory() as temporary:
+            root, originals = self.make_kunit_fixture(Path(temporary))
+            evidence = Path(temporary) / "source.json"
+            with mock.patch.object(stager, "KUNIT_SOURCE",
+                                   mutations["wrong-sector-units"]):
+                with self.assertRaisesRegex(stager.StagingError,
+                                            "invalid-kunit-source-contract"):
+                    self.stage_fixture(root, originals, evidence, with_kunit=True)
+            self.assertEqual(originals,
+                             {path: (root / path).read_bytes()
+                              for path in originals})
+            self.assertFalse((root / stager.KUNIT_SOURCE_PATH).exists())
+            self.assertFalse(evidence.exists())
+
+    def test_round012_registration_mutation_refuses_staging(self):
+        mutations = (
+            ("block/Kconfig", "config SWAP_BIO_ORIGIN_KUNIT_TEST",
+             "config SWAP_BIO_ORIGIN_TEST_DISABLED"),
+            ("block/Kconfig", "depends on KUNIT && SWAP", "depends on SWAP"),
+            ("block/Makefile", "obj-$(CONFIG_SWAP_BIO_ORIGIN_KUNIT_TEST)",
+             "obj-$(CONFIG_SWAP_BIO_ORIGIN_MISSING)"),
+        )
+        for path, original, corrupt in mutations:
+            with self.subTest(path=path, corrupt=corrupt):
+                updated = tuple(stager.Edit(
+                    edit.before, edit.after.replace(original, corrupt))
+                    for edit in stager.KUNIT_EDITS[path])
+                with mock.patch.dict(stager.KUNIT_EDITS, {path: updated}):
+                    excerpt = "\n".join(edit.before for edit in updated)
+                    with self.assertRaisesRegex(stager.StagingError,
+                                                "invalid-origin-postimage"):
+                        stager.render_source(path, excerpt)
+
+    def test_round012_workflow_mutation_negatives(self):
+        path = STAGER_PATH.parents[2] / ".github/workflows/phase-a-zswap-origin-kunit.yml"
+        workflow = path.read_text(encoding="utf-8")
+        verify_kunit_workflow_contract(workflow)
+        mutations = (
+            ("missing-tap-verifier",
+             'run_checked verify_real_tap ', 'echo PASS # '),
+            ("missing-UML-Kconfig-validation",
+             'grep -Fxq CONFIG_ZSWAP=y "$uml_dir/.config"', 'true # missing'),
+            ("missing-untracked-C-source",
+             "block/swap-bio-origin-kunit.c", "block/not-the-kunit-source.c"),
+            ("missing-modified-build",
+             "run_checked modified_objects ", "printf modified_objects "),
+            ("missing-run",
+             "run_checked uml_kunit ", "printf uml_kunit "),
+            ("wrong-source",
+             stager.LINUX_COMMIT, "0" * 40),
+            ("missing-W1",
+             "--make_options=W=1", "--make_options=W=0"),
+            ("missing-disabled-profile",
+             """grep -Fxq '# CONFIG_ZSWAP is not set' "$uml_dir/.config" """.strip(),
+             "true # disabled profile not checked"),
+            ("missing-object-allowlist",
+             "block/swap-bio-origin-kunit.o", "block/other.o"),
+            ("forged-PASS",
+             "run_checked verify_real_tap ", "echo KUNIT_PASS\n"
+              "            run_checked verify_real_tap "),
+            ("premature-PASS",
+             "run_checked verify_real_tap ",
+             "printf 'kunit_cases_passed=5\\n' >> \"$manifest\"\n"
+             "            run_checked verify_real_tap "),
+        )
+        for name, original, modified in mutations:
+            with self.subTest(negative=name):
+                self.assertIn(original, workflow)
+                with self.assertRaises(ValueError):
+                    verify_kunit_workflow_contract(
+                        workflow.replace(original, modified, 1))
+
     def test_kunit_registration_and_source_contract(self):
         self.assertEqual(set(stager.KUNIT_EDITS), {"block/Kconfig", "block/Makefile"})
         self.assertEqual(stager.KUNIT_SOURCE.count("KUNIT_CASE("), 5)
+        stager.validate_kunit_source(stager.KUNIT_SOURCE)
         self.assertIn("#include <kunit/test.h>", stager.KUNIT_SOURCE)
         self.assertIn("bio_prepare_reissue(&bio, NULL)", stager.KUNIT_SOURCE)
         self.assertIn("bio_split(&original,", stager.KUNIT_SOURCE)
@@ -559,5 +845,21 @@ class PinnedLinuxStageTests(unittest.TestCase):
         self.assertNotIn("modprobe", workflow)
 
 
-if __name__ == "__main__":
+def main() -> int:
+    if len(sys.argv) == 3 and sys.argv[1] == "--verify-kunit-tap":
+        try:
+            path = Path(sys.argv[2])
+            if not path.is_file() or path.stat().st_size > KUNIT_LOG_LIMIT:
+                raise ValueError("missing or oversized KUnit evidence")
+            verify_kunit_tap(path.read_text(encoding="utf-8"))
+        except (OSError, UnicodeError, ValueError):
+            print("FAIL: incomplete-or-invalid-swap-bio-origin-kunit-tap",
+                  file=sys.stderr)
+            return 1
+        return 0
     unittest.main(verbosity=2)
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

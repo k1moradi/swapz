@@ -241,6 +241,8 @@ static void swap_bio_origin_reset_reuse_reissue_test(struct kunit *test)
 	bio_prepare_reissue(&bio, NULL);
 	KUNIT_EXPECT_TRUE(test, bio_is_zswap_stored_writeback(&bio));
 	KUNIT_EXPECT_EQ(test, bio.bi_iter.bi_size, (unsigned int)PAGE_SIZE);
+	KUNIT_EXPECT_EQ(test, bio.bi_swap_origin,
+			(enum swap_bio_origin)SWAP_BIO_ORIGIN_ZSWAP_STORED_WRITEBACK);
 #endif
 	bio_reuse(&bio, REQ_OP_WRITE | REQ_SWAP);
 	KUNIT_EXPECT_FALSE(test, bio_is_zswap_stored_writeback(&bio));
@@ -267,6 +269,14 @@ static void swap_bio_origin_clone_test(struct kunit *test)
 	ret = bio_init_clone(NULL, &clone, &original, GFP_KERNEL);
 	KUNIT_ASSERT_EQ(test, ret, 0);
 	KUNIT_EXPECT_TRUE(test, bio_is_zswap_stored_writeback(&clone));
+	bio_uninit(&clone);
+
+	original.bi_opf = REQ_OP_WRITE;
+	ret = bio_init_clone(NULL, &clone, &original, GFP_KERNEL);
+	KUNIT_ASSERT_EQ(test, ret, 0);
+	KUNIT_EXPECT_FALSE(test, bio_is_zswap_stored_writeback(&clone));
+	KUNIT_EXPECT_EQ(test, clone.bi_swap_origin,
+			(enum swap_bio_origin)SWAP_BIO_ORIGIN_ORDINARY_OR_UNKNOWN);
 	bio_uninit(&clone);
 
 	original.bi_opf = REQ_OP_READ | REQ_SWAP;
@@ -303,7 +313,9 @@ static void swap_bio_origin_split_test(struct kunit *test)
 	original.bi_iter.bi_size = PAGE_SIZE;
 	original.bi_swap_origin = SWAP_BIO_ORIGIN_ZSWAP_STORED_WRITEBACK;
 
-	split = bio_split(&original, PAGE_SIZE >> 10, GFP_KERNEL, &fs_bio_set);
+	/* bio_split() counts 512-byte sectors, not bytes or KiB. */
+	split = bio_split(&original, PAGE_SIZE >> (SECTOR_SHIFT + 1),
+			  GFP_KERNEL, &fs_bio_set);
 	if (IS_ERR_OR_NULL(split)) {
 		KUNIT_FAIL(test, "bio_split could not allocate a source-owned clone");
 		goto out;
@@ -311,6 +323,10 @@ static void swap_bio_origin_split_test(struct kunit *test)
 	KUNIT_EXPECT_TRUE(test, bio_is_zswap_stored_writeback(split));
 	KUNIT_EXPECT_TRUE(test, bio_is_zswap_stored_writeback(&original));
 	KUNIT_EXPECT_EQ(test, split->bi_iter.bi_size, (unsigned int)PAGE_SIZE / 2);
+	KUNIT_EXPECT_EQ(test, original.bi_iter.bi_size, (unsigned int)PAGE_SIZE / 2);
+	KUNIT_EXPECT_EQ(test, split->bi_iter.bi_sector, (sector_t)0);
+	KUNIT_EXPECT_EQ(test, original.bi_iter.bi_sector,
+			(sector_t)(PAGE_SIZE >> (SECTOR_SHIFT + 1)));
 	bio_put(split);
 out:
 	bio_uninit(&original);
@@ -333,6 +349,12 @@ static void swap_bio_origin_merge_reject_test(struct kunit *test)
 		SWAP_BIO_ORIGIN_ORDINARY_OR_UNKNOWN));
 	KUNIT_EXPECT_FALSE(test, swap_bio_origin_can_merge(
 		(enum swap_bio_origin)2, (enum swap_bio_origin)2));
+	KUNIT_EXPECT_FALSE(test, swap_bio_origin_can_merge(
+		(enum swap_bio_origin)2,
+		SWAP_BIO_ORIGIN_ZSWAP_STORED_WRITEBACK));
+	KUNIT_EXPECT_FALSE(test, swap_bio_origin_can_merge(
+		SWAP_BIO_ORIGIN_ORDINARY_OR_UNKNOWN,
+		(enum swap_bio_origin)2));
 }
 
 static struct kunit_case swap_bio_origin_cases[] = {
@@ -356,6 +378,43 @@ MODULE_LICENSE("GPL");
 
 class StagingError(RuntimeError):
     """Refuse a preflight, source transition or publication failure."""
+
+def validate_kunit_source(source: str) -> None:
+    """Fail before touching Linux when the compiled KUnit contract drifts.
+
+    The exact tests use real pinned Linux APIs, no mocked BIO implementation.
+    The static guard is a negative preflight, never equivalent to Kbuild/KUnit.
+    """
+    required = (
+        "bio_init(&bio, NULL, &vector, 1, REQ_OP_WRITE | REQ_SWAP);",
+        "bio.bi_swap_origin = SWAP_BIO_ORIGIN_ZSWAP_STORED_WRITEBACK;",
+        "bio_reuse(&bio, REQ_OP_WRITE | REQ_SWAP);",
+        "bio_reset(&bio, NULL, REQ_OP_WRITE | REQ_SWAP);",
+        "bio_prepare_reissue(&bio, NULL);",
+        "bio_init_clone(NULL, &clone, &original, GFP_KERNEL);",
+        "bio_split(&original, PAGE_SIZE >> (SECTOR_SHIFT + 1),",
+        "KUNIT_EXPECT_EQ(test, original.bi_iter.bi_size, (unsigned int)PAGE_SIZE / 2);",
+        "bio_put(split);",
+        "bio_uninit(&original);",
+        "__free_page(page);",
+        "swap_bio_origin_can_merge(",
+        "KUNIT_EXPECT_FALSE(test, bio_is_zswap_stored_writeback(&bio));",
+        "KUNIT_EXPECT_TRUE(test, bio_is_zswap_stored_writeback(&bio));",
+        "MODULE_LICENSE(\"GPL\");",
+    )
+    expected_cases = (
+        "swap_bio_origin_authentication_test",
+        "swap_bio_origin_reset_reuse_reissue_test",
+        "swap_bio_origin_clone_test",
+        "swap_bio_origin_split_test",
+        "swap_bio_origin_merge_reject_test",
+    )
+    if (not source or source.count("KUNIT_CASE(") != len(expected_cases) or
+        any(source.count("KUNIT_CASE(" + name + ")") != 1
+            for name in expected_cases) or
+        any(fragment not in source for fragment in required) or
+        "bio_split(&original, PAGE_SIZE >> 10" in source):
+        raise StagingError("invalid-kunit-source-contract")
 
 
 def blob_sha(payload: bytes) -> str:
@@ -595,6 +654,7 @@ def stage_checkout(root: Path, manifest_path: Path, *, with_kunit: bool = False)
         addition = root / KUNIT_SOURCE_PATH
         if addition.exists() or addition.is_symlink():
             raise StagingError("kunit-source-already-present")
+        validate_kunit_source(KUNIT_SOURCE)
         originals[KUNIT_SOURCE_PATH] = None
         staged[KUNIT_SOURCE_PATH] = KUNIT_SOURCE.encode("utf-8")
 

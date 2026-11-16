@@ -13168,3 +13168,66 @@ The staged GPL-compatible C KUnit suite uses `<kunit/test.h>` and the actual com
 `.github/workflows/phase-a-zswap-origin-kunit.yml` is independent of the matched Device Mapper module workflows. It checks out the exact complete pinned Linux revision read-only, runs the actual source-stager and rootless tests, checks the nine changed/new paths and postimage hashes, compiles modified `block/bio.o`, `block/swap-bio-origin-kunit.o`, `mm/page_io.o` with `CONFIG_ZSWAP=y/n`, plus `mm/zswap.o` with `y`, and runs `tools/testing/kunit/kunit.py` for UML in bounded profiles. It requires an effective `CONFIG_KUNIT=y`, `CONFIG_SWAP_BIO_ORIGIN_KUNIT_TEST=y`, the requested effective ZSWAP setting, successful build objects, a real named TAP suite and exactly five successful cases; a mere C compilation, source check, synthetic trace, or passing shell exit without TAP evidence is never `KUNIT_PASS`. Preserve a bounded first-failure phase/exit and source/config/object evidence even on failure. If UML kernel execution is incompatible or unavailable, report `KUNIT_NOT_RUN` or `FAIL` with the actual first cause rather than claiming validation.
 
 Worker-local excerpt replay, syntax checks and source-structure controls remain distinct from full-source modified Linux Kbuild, real UML KUnit execution, and loaded/physical writeback qualification. Phase A is BLOCKED until matched producer→BIO→Device Mapper and real 4KiB stored-entry writeback/readback qualify. Phase B RAW bypass remains DISABLED.
+
+
+## Round 012 pinned Linux BIO origin five-case KUnit and evidence hardening (2026-11-16)
+
+The optional generated `block/swap-bio-origin-kunit.c` remains real Linux
+KUnit C against exact upstream `torvalds/linux@c339f4010dea8b0d754f84ace70cd1b089878ef8`.
+It exercises the actual `bio_init`, `bio_reset`, `bio_reuse`,
+`bio_prepare_reissue` (with `CONFIG_BLK_CGROUP=n` for the NULL device),
+`bio_init_clone`, `bio_split`, `bio_put` and
+`swap_bio_origin_can_merge` paths. The split argument is a count of
+512-byte sectors, `PAGE_SIZE >> (SECTOR_SHIFT + 1)` for a half-page
+split; require exact front/remaining byte sizes, preserved positive
+origin for both children and the expected sector displacement. The clone
+must refuse a positive tag on a plain WRITE lacking `REQ_SWAP`, on
+READ, and on noncanonical origins. A raw `REQ_SWAP` operation is never
+zswap stored-entry authentication. The caller-owned BIO and page outlive
+the borrowed cloned biovec and are released only after the clone is put.
+Real KUnit still does not create or authenticate a stored zswap entry.
+
+The pinned staging tool must validate the exact C contract before any
+upstream file is published, including exactly the five registered KUnit
+case names, source ownership/uninit, valid split units, positive-origin
+predicate, reset/reuse, reissue and homogeneous-only merge. The bounded
+rootless regression deliberately mutates the generated C and real
+block/Kconfig and block/Makefile registration, refusing absent, duplicate,
+stale, wrong-unit, missing-cleanup and partially published sources.
+Original upstream Git blobs, per-file pre/post SHA-256, all-file
+preflight and interference-aware rollback are unchanged.
+
+The hosted `.github/workflows/phase-a-zswap-origin-kunit.yml` must
+run the rootless test and source-staging program, require exactly the
+nine changed/new allowlisted Linux paths, verify all postimage hashes,
+and compile `block/bio.o`, `block/swap-bio-origin-kunit.o` and
+`mm/page_io.o` for separate effective `CONFIG_ZSWAP=y/n` profiles
+(`mm/zswap.o` enabled only). Both bounded UML KUnit profiles must
+use `W=1`, effective `CONFIG_SWAP=y`, `CONFIG_KUNIT=y`,
+`CONFIG_SWAP_BIO_ORIGIN_KUNIT_TEST=y`, the requested ZSWAP state and
+the KUnit fixture's required disabled `CONFIG_BLK_CGROUP`. Record and
+hash each effective UML `.config`, executable kernel image and the
+bounded unmodified kernel TAP output. Store the raw transcript as a
+retained failure/qualification artifact.
+
+A zero-exit `kunit.py` process alone is insufficient. The executed
+test path `--verify-kunit-tap` rejects missing or duplicate suite
+headers, incorrect TAP version or five-case plan, reordered/duplicate/
+missing/unknown cases, skipped/failed entries, absent/failed/duplicate
+suite summary, unsafe shell-echo output and overlong traces. All five
+expected exact case names must execute and pass exactly once, under the
+single real `swap_bio_origin` suite, before the workflow records
+`kunit_cases_passed=5` and `result=PASS`. An incomplete/failing
+source, effective config, source registration, source/KUnit object,
+real UML image or TAP evidence must preserve a bounded first-failure
+phase and nonzero exit, never infer a success from a grep count or
+previous hosted run. Parser rootless mutation tests are not themselves
+real UML execution or Kbuild acceptance; hosted profile success must
+be associated with the newly integrated source SHA.
+
+Even a true matched two-profile UML KUnit PASS proves only the
+generated BIO source API behavior in that compiled kernel. It does
+not prove a loaded matching `dm-swapz.ko`, an MM-authenticated stored
+zswap eviction, real swap I/O, loaded readback, or physical acceptance.
+Phase A remains BLOCKED pending those end-to-end gates; Phase B
+origin-conditioned RAW bypass remains DISABLED.

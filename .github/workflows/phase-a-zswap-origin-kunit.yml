@@ -82,6 +82,8 @@ jobs:
              "$(printf '%s\n' block/Kconfig block/Makefile block/bio.c include/linux/bio.h \
                include/linux/blk_types.h include/linux/swap_ops.h mm/page_io.c mm/zswap.c)" ]]
           [[ "$(git -C linux ls-files --others --exclude-standard)" == block/swap-bio-origin-kunit.c ]]
+          # Both profiles have distinct Kbuild and UML outputs; no profile
+          # may reuse a prior kernel, KUnit transcript or success marker.
           for profile in enabled disabled; do
             manifest="$evidence/$profile.txt"
             requested=y
@@ -128,15 +130,40 @@ jobs:
             else
               printf '# CONFIG_ZSWAP is not set\n' >> "$config"
             fi
+            uml_dir="$RUNNER_TEMP/origin-uml-$profile"
             run_checked uml_kunit timeout -k 10s 40m \
               python3 linux/tools/testing/kunit/kunit.py run --arch=um \
-              --build_dir "$RUNNER_TEMP/origin-uml-$profile" \
-              --kunitconfig "$config" --jobs=2 --raw_output
-            phase=verify_real_tap
-            grep -Eq 'Subtest:[[:space:]]*swap_bio_origin' "$log"
-            ! grep -Eq '(^|[[:space:]])not ok[[:space:]]+[0-9]+' "$log"
-            count="$(grep -Ec 'ok[[:space:]]+[0-9]+[[:space:]]+-?[[:space:]]*swap_bio_origin_[a-z_]+_test' "$log" || true)"
-            [[ "$count" == 5 ]] || { echo "::error::Expected 5 executed KUnit cases, got $count"; exit 1; }
+              --build_dir "$uml_dir" \
+              --kunitconfig "$config" --jobs=2 --make_options=W=1 --raw_output
+            phase=verify_uml_config
+            [[ -s "$uml_dir/.config" ]]
+            grep -Fxq CONFIG_SWAP=y "$uml_dir/.config"
+            grep -Fxq CONFIG_KUNIT=y "$uml_dir/.config"
+            grep -Fxq CONFIG_SWAP_BIO_ORIGIN_KUNIT_TEST=y "$uml_dir/.config"
+            grep -Fxq '# CONFIG_BLK_CGROUP is not set' "$uml_dir/.config"
+            if [[ "$profile" == enabled ]]; then
+              grep -Fxq CONFIG_ZSWAP=y "$uml_dir/.config"
+            else
+              grep -Fxq '# CONFIG_ZSWAP is not set' "$uml_dir/.config"
+            fi
+            printf 'uml_config_sha256=%s\n' \
+              "$(sha256sum "$uml_dir/.config" | cut -d' ' -f1)" >> "$manifest"
+            phase=verify_uml_image
+            [[ -s "$uml_dir/linux" ]]
+            printf 'uml_kernel_sha256=%s\n' \
+              "$(sha256sum "$uml_dir/linux" | cut -d' ' -f1)" >> "$manifest"
+            # The raw stream comes directly from exit-zero kunit.py, not
+            # a shell echo. Store bounded evidence before the verifier runs.
+            phase=capture_real_tap
+            [[ -s "$log" ]]
+            [[ "$(wc -c < "$log")" -le 8388608 ]]
+            captured="$evidence/$profile-kunit-output.log"
+            cp -- "$log" "$captured"
+            printf 'kunit_output_sha256=%s\n' \
+              "$(sha256sum "$captured" | cut -d' ' -f1)" >> "$manifest"
+            run_checked verify_real_tap python3 -B \
+              swapz/tests/runtime/native/pinned-linux-zswap-origin-stage-test.py \
+              --verify-kunit-tap "$captured"
             printf 'kunit_executed=yes\nkunit_cases_passed=5\nresult=PASS\n' >> "$manifest"
           done
           manifest="$evidence/setup.txt"
@@ -149,5 +176,6 @@ jobs:
           path: |
             ${{ runner.temp }}/origin-kunit/*.txt
             ${{ runner.temp }}/origin-kunit/*.json
+            ${{ runner.temp }}/origin-kunit/*.log
           if-no-files-found: ignore
           retention-days: 7
