@@ -1,0 +1,80 @@
+message: REPORT_READY
+round: "013"
+agent: 7
+task_id: agent7-ram-source-lease-and-physical-nonadmission
+status: SOURCE_READY_PENDING_COORDINATOR_CI
+frozen_source_sha: 2be15cb171a6a4e15453520512df8ebf779e6f3d
+source_commit_sha: 181e007a1f366693d284e14ed044e20018a28edc
+source_commit_url: https://github.com/k1moradi/swapz/commit/181e007a1f366693d284e14ed044e20018a28edc
+source_parent_sha: 2be15cb171a6a4e15453520512df8ebf779e6f3d
+modified_files:
+  - tests/tools/run-tests.py
+  - tests/runtime/native/algorithm-ram-source-lease-test.py
+  - .github/workflows/physical-evidence-rootless.yml
+  - docs/testing_standards.md
+evidence_class: rootless-isolated-excerpt-smoke + byte-exact-workflow-parse + GitHub-source-review
+tests:
+  - command: "python3 -m py_compile /mnt/data/round013_agent7_isolated_gate_smoke.py"
+    exit_code: 0
+    evidence_scope: "isolated copied helper subset, not full committed driver"
+  - command: "python3 -B /mnt/data/round013_agent7_isolated_gate_smoke.py -v"
+    exit_code: 0
+    tests_executed: 10
+    passed: 10
+    evidence_scope: "mocked source-lease/physical-selector boundary only"
+  - command: "Python PyYAML safe_load on byte-exact reconstructed .github/workflows/physical-evidence-rootless.yml"
+    exit_code: 0
+    workflow_git_blob: 4433eca4012dc250efab20aee86aca621e5edf53
+  - command: "bash -n on the YAML embedded multiline run script"
+    exit_code: 0
+  - command: "Read-only GitHub fetch_file/tree source-bound structural assertions"
+    exit_code: 0
+    assertions: 23
+    passed: 23
+  - command: "python3 -B tests/runtime/native/algorithm-ram-source-lease-test.py -v"
+    exit_code: NOT_RUN
+    reason: "no complete frozen repository checkout mounted and no network access in test runtime"
+  - command: "python3 -B tests/runtime/native/algorithm-physical-test.py -v"
+    exit_code: NOT_RUN
+  - command: "python3 -m py_compile tests/tools/run-tests.py tests/runtime/native/algorithm-ram-source-lease-test.py"
+    exit_code: NOT_RUN
+  - command: "git diff --check HEAD^ HEAD on an actual frozen source checkout"
+    exit_code: NOT_RUN
+  - command: "make test; physical selector; loaded/real-device qualification"
+    exit_code: NOT_RUN
+first_failure: "No failure in executed isolated/syntax checks; complete-source execution unavailable."
+blocking_findings:
+  - "Complete committed 21-case rootless test and historical algorithm-physical tests need coordinator exact-source CI; isolated checks do NOT qualify the actual whole driver."
+  - "No authorized physical trial took place; 5 historical RAM PASS stages do not authorize a changed main or current-source physical PASS."
+  - "Phase A producer/consumer live writeback/readback remains unqualified; Phase B bypass disabled."
+next_round_recommendations:
+  - "Agent 1 integrate exactly this 4-path source commit, rerun exact integrated source standalone native tests and physical evidence rootless workflow."
+  - "Check source-advance, bad archive restoration, dirty tree, malformed nonce/digests, os.replace failure and zero-selector assertions in real complete-source CI."
+  - "Retain physical NOT_RUN and overall INCOMPLETE, without privileged retry or touching real backing."
+
+# Agent 7 — Round 013 real source implementation and evidence
+
+## Frozen identity, source ownership and objective
+
+**Single-parent retrievable source commit: [181e007a1f366693d284e14ed044e20018a28edc](https://github.com/k1moradi/swapz/commit/181e007a1f366693d284e14ed044e20018a28edc)**, whose *only* parent is frozen `2be15cb171a6a4e15453520512df8ebf779e6f3d`. GitHub's compare returned precisely four owned paths and no changes to the producer, consumer, Agent 6 code, physical selector or `test_results.json`. Initial unattached intermediate candidate `211a6ddb256bbc371778b8a3f31d19091f356929` is superseded by this final same-parent commit; **integrate only 181e007a**, never both.
+
+## Actual source changes
+
+1. **`tests/tools/run-tests.py`, minimal safety additions to the existing owner test driver.** The new `algorithm_ram_source_lease_refusal(tested_source_sha)` checks a canonical full-length tested source, local `main` branch, HEAD vs tracking main, true current `git_sha()`, tracked source cleanliness, canonical origin, non-mutating current `git ls-remote origin refs/heads/main` and a second local HEAD/tracking/source/dirty observation. Any missing, malformed, advanced or raced condition refuses. The tested source is never silently upgraded to a new commit, and this is explicitly *not* an inter-host lock; the original physical helper must independently revalidate on entry.
+2. **Real selector call boundary.** The physical trial now goes through `run_algorithm_physical_selector_if_leased`, with tri-state `(trial, refusal, attempted)`, so a failed source lease yields *zero* selector subprocess calls; an OSError **after attempting to launch** is not misreported as a no-mutation source refusal. The original owner-typed console and private stderr behavior remain. A refusing run records `algorithm_real_swap.overall=NOT_RUN`, `phase=before_physical_selector`, original `tested_source_sha` and read-only observed current main source or UNAVAILABLE. Original overall remains `INCOMPLETE` with nonzero exit, even if all five RAM stages passed.
+3. **Private RAM evidence publication.** Still requires five exact ordered RAM PASS stages, but now validates integer-zero exits, immutable-looking 40-digit SHA, current canonical source lease, final artifact SHA-256 re-read against the report, and a full 128-bit nonce. Uses `tempfile.mkstemp` owner-only private output (0600), `flush`/`fsync` and `os.replace`, preserving the old complete record on publication error and cleaning the unique temporary. Exception cleanup retains the original error as first cause. Existing immutable report-only archive/restoration ancestry/tree/source/blob verifier is preserved unchanged.
+4. **New actual tracked executable 21-test standard-library regression:** `tests/runtime/native/algorithm-ram-source-lease-test.py` imports the real `run-tests.py`, mocks Git/artifacts/selector, checks clean stable positive-to-*mocked* selector, five RAM PASS with advanced source, remote drift after fetch, local/tracking disagreement, dirty state, absent source, second-read race, selector invocation failure attribution, missing/malformed/different digests, invalid nonce/boolean exits, os.replace first failure and temporary cleanup, report-only archive integrity/modified restore tree/bad receipt. A reproduced source advance is expected to leave zero selector calls and no physical test evidence. The test is not a model-only separate parser, but **its actual full-source execution still awaits the CI checkout**.
+5. **Rootless workflow and standard:** `.github/workflows/physical-evidence-rootless.yml` preserves its original synthetic physical adversarial test and patch hygiene; adds path triggers for the qualification driver and native tests, then invokes the new fixture, prior `algorithm-physical-test.py` and `py_compile` without privileges. The distinct `Round 013 RAM source lease and physical selector nonadmission` section was appended to `docs/testing_standards.md`; no deletion of historical policy.
+
+## Tests actually performed and qualification limits
+
+The working environment had **no complete frozen swapz checkout** and could not resolve the public GitHub host from the isolated container. Rather than infer a full pytest result, I performed these *limited, explicitly labeled* checks:
+
+- **10/10 PASS**, real Python `unittest` execution of a locally mirrored lease/selector helper subset (the exercised source paths are present in the committed GitHub blob); no subprocess was allowed beyond a patched mock. This proves only the isolated lease logic, not the complete test driver.
+- **23/23 PASS**, read-only structural assertions against the **exact source-controlled GitHub file blobs** in source commit `181e007a`: original tests/archiver preserved, selector entry guarded, remote observation/recheck, 0600 unique temp, digest re-read, numeric zero, 5 RAM stage labels, report nonadmission, new test executable (mode 100755), rootless CI triggers and original physical campaign regression retained.
+- **YAML PASS / shell syntax PASS** on a byte-for-byte reconstructed workflow confirmed by calculated Git blob SHA **`4433eca4012dc250efab20aee86aca621e5edf53`**, matching the source commit. Three-step workflow remains rootless with the existing 5-minute cap. This did **not** run the workflow.
+- **Full committed 21-test Python suite, original algorithm-physical-test.py, full Python driver py_compile, actual `git diff --check` on a complete checkout, hosted CI and owner `make test`: NOT_RUN**, not falsely marked passed. This source commit requires the coordinator's exact-SHA checkout and testing. None of these limits is a reason to bypass the source-advance barrier.
+
+No permission escalation, kernel install/module load, `dmsetup` mutation, `swapoff`/`swapon`, real device I/O, physical selector subprocess, hardware benchmark or GitHub remote-main push occurred. The isolated positive test uses a **mocked** subprocess returning a synthetic refusal. The owner's historical five RAM PASS stages remain attributable to their exact tested SHA and immutable report-only history; the observed physical attempt stayed `NOT_RUN` due to newer source and `overall=INCOMPLETE`.
+
+**Disposition:** `SOURCE_READY_PENDING_COORDINATOR_CI`. Agent 1 should review/integrate exactly the latest source commit, then run the 21 tracked native tests, older physical admission tests, official workflow, and inspect the first failure before any further qualification. **Phase A BLOCKED; Phase B RAW bypass DISABLED.**

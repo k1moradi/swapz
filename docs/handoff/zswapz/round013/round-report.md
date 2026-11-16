@@ -1,0 +1,23 @@
+# Round 013 — Agent 1 accountable source closeout
+
+**CLOSED_SOURCE_INTEGRATED_PARTIAL_QUALIFICATION** — both original reports preserved by SHA-256, 2/2 authorized worker source commits integrated serially, only canonical `main`, zero open pull requests. This is not end-to-end Phase A qualification.
+
+- Round 013 frozen engineer source `2be15cb171a6a4e15453520512df8ebf779e6f3d`, authoritative [ROUND_OPEN](https://github.com/k1moradi/swapz/issues/130#issuecomment-6908494868), task publication `751a6829ed5298136dd74a0e3edbc4288c327b05`.
+- **Agent 6** [reported `a2d12f3d7ef621644264e71ac1203945009c9985`](https://github.com/k1moradi/swapz/issues/130#issuecomment-6909518099), integrated [`fb2c925e3be2ac61298fcf4a101e5078625e0833`](https://github.com/k1moradi/swapz/commit/fb2c925e3be2ac61298fcf4a101e5078625e0833). Two authorized paths: actual pinned Linux producer→consumer ABI source regression and coding standard. Worker measured 13 pinned transitions; 26 producer mutant rejections, GCC/Clang extracted C UBSan PASS; full source checked-out test/hosted CI not executed by worker. Alternate `5bd95806` not accepted.
+- **Agent 7** [reported `181e007a1f366693d284e14ed044e20018a28edc`](https://github.com/k1moradi/swapz/issues/130#issuecomment-6909585340), integrated [`c3a26a127b0f3427b25ade00ad8ba431e20307bb`](https://github.com/k1moradi/swapz/commit/c3a26a127b0f3427b25ade00ad8ba431e20307bb). Four authorized paths: real `run-tests.py` RAM source lease, new mocked regression, physical evidence CI and testing standard. Worker measured 10 isolated mock cases and 23 source checks; full source suite and physical trial NOT_RUN by worker.
+- [Verbatim official REPORT_READY bodies and SHA-256](original-report-archive.md).
+
+## Measured GitHub CI, source-qualified distinctions
+
+- On integrated **`c3a26a`**, [production-C x86_64/ARM64 #43821180590](https://github.com/k1moradi/swapz/actions/runs/43821180590) **SUCCESS**: Agent 6 ABI rootless regression source qualification, not loaded kernel. [Physical evidence rootless #43821180658](https://github.com/k1moradi/swapz/actions/runs/43821180658) **SUCCESS**, no physical device. [Private debug/source contracts #43821180640](https://github.com/k1moradi/swapz/actions/runs/43821180640) **SUCCESS**.
+- On **`c3a26a`**, [project goals #43821180667](https://github.com/k1moradi/swapz/actions/runs/43821180667) **FAIL**: rootless make-interface regression failed in job 133144376789 (`AssertionError` detail redacted in bounded CI log) and job 133144377120 (`rootless phase=make-interface-test.py reason=nonzero_exit`). On this exact SHA the repository-policy, source-contract, readiness and lifecycle jobs PASSED. Do not call project goals all-green.
+- Earlier matched patched Linux/linked DM module [#43812229446](https://github.com/k1moradi/swapz/actions/runs/43812229446) **SUCCESS** only for its previous source SHA `462909804c85ac1899f743bfa595f1349cef94e2`, not latest loaded producer/consumer runtime.
+- Earlier pinned Linux BIO KUnit [#43811904846](https://github.com/k1moradi/swapz/actions/runs/43811904846) **FAIL**. Agent 1 downloaded and inspected authentic hosted [artifact #14200877458](https://github.com/k1moradi/swapz/actions/runs/43811904846/artifacts/14200877458): real `CONFIG_ZSWAP=y` `defconfig`, `scripts_config`, `olddefconfig`, `prepare`, modified BIO/KUnit/page_io/zswap object compilation **all exit 0**; `uml_kunit_exit=0`; then `first_failure_phase=verify_uml_config`, `first_failure_exit=1`. The exact differing UML config option is not in the artifact; no actual five-case KUnit PASS claimed.
+- Independent commits after Round 013 integration (including `e2ca2113` and its descendants) advanced `main` and altered source/physical-test qualification. Agent 1 preserved their source bytes and avoided rewinding main; new SHA-specific CI is not automatically qualified by earlier successes.
+- Owner local `make test`: all five RAM stages PASS at old tested source, but `source_advanced_after_ram` prevented physical selector invocation; physical NOT_RUN, overall INCOMPLETE. Mocks/rootless CI do not constitute real-media evidence.
+
+**Phase A BLOCKED** until loaded matched authenticated MM→BIO→DM zswap eviction, exact 4096-byte readback and provenance counters. **Phase B RAW bypass DISABLED**. No privileged device operation by Agent 1.
+
+## Next round
+
+Exactly **two independently executable worker tasks excluding Agent 1**, zero peer dependencies: (1) pinned UML KUnit effective Kconfig source/runner diagnosis and strict y/n case qualification; (2) current source-bound Make-interface native rootless first-failure regression diagnosis/repair. Each works from a new frozen main source and preserves independently appended coding/testing standards co-changes. 

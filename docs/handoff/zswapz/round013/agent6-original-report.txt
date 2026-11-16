@@ -1,0 +1,60 @@
+message: REPORT_READY
+round: "013"
+agent: 6
+task_id: agent6-source-bound-producer-consumer-abi-regression
+status: SOURCE_READY_PENDING_COORDINATOR_CI
+frozen_source_sha: 2be15cb171a6a4e15453520512df8ebf779e6f3d
+final_task_sha: 751a6829ed5298136dd74a0e3edbc4288c327b05
+source_commit_sha: a2d12f3d7ef621644264e71ac1203945009c9985
+source_commit_url: https://github.com/k1moradi/swapz/commit/a2d12f3d7ef621644264e71ac1203945009c9985
+sole_parent_sha: 2be15cb171a6a4e15453520512df8ebf779e6f3d
+source_tree_sha: 478c32b0b3a2dae260369337d04a0bde23b6ad28
+source_test_blob_sha: ccc9cf272fbcee91fca0505ad6ab03e67214a220
+coding_standard_blob_sha: 22eb487d37a7c55e6be632a4080085a3fcb99220
+changed_files:
+  - tests/runtime/native/zswap-origin-producer-consumer-abi-test.py
+  - docs/coding_standards.md
+existing_ci_invocation: .github/workflows/product-codec.yml (already present, unchanged)
+evidence_class: frozen-GitHub-source-derived-contract-plus-isolated-rootless-fixtures
+phase_a: BLOCKED
+phase_b: DISABLED
+
+# Agent 6 — Round 013 authoritative post-opening report
+
+**Delivery: real, retrievable, unreferenced Git source commit.** Reviewed the unique [ROUND_OPEN](https://github.com/k1moradi/swapz/issues/130#issuecomment-6908494868) and frozen [complete task](https://github.com/k1moradi/swapz/blob/751a6829ed5298136dd74a0e3edbc4288c327b05/docs/handoff/zswapz/round013/agent6-source-bound-producer-consumer-abi-regression.md). **Source ready pending coordinator's exact-full-source CI**, not a full-source or runtime proof.
+
+## First previous real hosted failure and narrow code fix
+
+The previously observed exact-C x86_64/ARM64 hosted first failure was `AssertionError: changed source staging output: include/linux/swap_ops.h` in [production C run #43811904940](https://github.com/k1moradi/swapz/actions/runs/43811904940). The frozen staging tool has **13** real source transitions; the third `include/linux/swap_ops.h` edit intentionally inserts the `swap_bio_origin_can_merge()` helper **before** the original `SWAP_OPS_F_REQUIRE_NOFS` anchor without deleting it. The pre-Round-013 test incorrectly applied a blanket `edit.before not in result` to this valid insertion.
+
+Updated the *actual existing tracked* source test to use `verify_source_transition()` from both `source_postimages()` and `validate_staged()`:
+- Every complete `Edit.after` must occur exactly once, and the original `stager.validate_origin_postimage()` remains authoritative.
+- A real replacement must eliminate its old `Edit.before`; an anchor-preserving insertion must retain it **exactly once** and must itself appear exactly once.
+- For `include/linux/swap_ops.h`, the homogeneous-origin helper must appear exactly once, **ahead of** its single retained original anchor, with equal-source and recognized UNKNOWN=0 / authenticated-positive semantics intact.
+- The existing 22 producer mutants are preserved. Four additional distinct negative cases explicitly remove the helper while retaining the old anchor, duplicate the inserted helper, invert homogeneous equality, or forge UNKNOWN acceptance. The consumer's existing 20 real `dm-target.c` mutation controls are still called unchanged, with a strict check requiring 20, not merely an aggregate count.
+- Frozen 4KiB geometry, WRITE / `REQ_SWAP` / compiled BIO-capability guard, default UNKNOWN, cloned origin verification, four success-only foreground commit hooks, no RAW bypass, and source stager are **not** weakened or edited. No Agent 7 files changed.
+
+Existing CI invocation already runs `python3 -B tests/runtime/native/zswap-origin-producer-consumer-abi-test.py -v` on both architectures, so the workflow was deliberately left unchanged. Added the uniquely headed, append-only `Round 013 source-bound pinned Linux producer→DM ABI insertion controls` section to `docs/coding_standards.md` in the same commit.
+
+## Actual measured checks and command exits (Python 3.13.5)
+
+1. **Frozen-source-derived independent verification** (GitHub connector read and JavaScript evaluation of the *exact frozen* `tests/tools/stage-pinned-linux-zswap-origin.py` `EDITS`, source-tested Python mutations and genuine frozen `dm-target.c`; this is NOT execution of the committed Python CI test): **PASS**, all **13/13 valid transforms accepted**, **22/22 existing plus 4/4 new producer mutations rejected**, five verified consumer structural markers. Source blobs: staging `c3ba20448a362d029efcc87d08b4881f41b0ba044`; consumer `ea7f43d2a8c93fb0b683e43459c28e93b574c7c2`. This JS test validates the narrow source transition independently, not the whole Python/test runtime.
+2. `python3 -B /mnt/data/round013-agent6/test_retained_anchor_fixture.py -v`: **exit 0**, **6/6** isolated source-anchor cases PASS (valid verified insertion/replacement, stripped helper, duplicate, inverted merge, UNKNOWN promotion, stale replacement). **This locally authored isolated fixture is NOT a complete checked-out source run.**
+3. `python3 -m py_compile /mnt/data/round013-agent6/test_retained_anchor_fixture.py`: **exit 0** (fixture syntax only).
+4. `gcc -std=c11 -O1 -g -Wall -Wextra -Wpedantic -Wconversion -Werror -fsanitize=undefined -fno-sanitize-recover=all /mnt/data/round013-agent6/producer_bio_fragment.c -o /mnt/data/round013-agent6/prod-bio-gcc && /mnt/data/round013-agent6/prod-bio-gcc`: **exit 0**, isolated **frozen-stage BIO helper/clone C fragment**.
+5. Same C command using `clang` and output `prod-bio-clang`: **exit 0**, isolated fragment.
+6. `git diff --check` from worker runtime: **exit 129** because the container does not have a synchronized Git checkout, **not** a claim of a whitespace-diff PASS. As a separate limited GitHub commit-diff check, all **110 added lines** contain **zero** whitespace/conflict-marker errors.
+7. `python3 -B tests/runtime/native/zswap-origin-producer-consumer-abi-test.py -v` on the **complete checked-out frozen source**: **NOT_RUN** (full repository not available locally; read-only GitHub connector supplied exact source).
+8. `python3 -B tests/runtime/native/zswap-origin-consumer-source-test.py` on full checkout: **NOT_RUN**.
+9. `python3 -m py_compile tests/runtime/native/zswap-origin-producer-consumer-abi-test.py` on the exact committed file: **NOT_RUN**; only the isolated local fixture was compiled.
+10. Full `make -C tests/suites SANITIZE=1 test-all`, hosted exact-C x86_64/ARM64, real pinned Linux Kbuild/KUnit, linked matched kernel module, loaded stored-entry writeback and 4096-byte readback: **NOT_RUN**.
+
+**Do not present the 20 existing consumer mutants as executed by the full committed Python runner, or the 26 JS-rejected producer mutants as 26 Python unittest cases.** Full exact-source Python/CI requalification is required.
+
+## Real Git commit/ownership verification
+
+[Source Git object `a2d12f3d7ef621644264e71ac1203945009c9985`](https://github.com/k1moradi/swapz/commit/a2d12f3d7ef621644264e71ac1203945009c9985), **exactly one parent** `2be15cb171a6a4e15453520512df8ebf779e6f3d`, verified through GitHub Git commits API. Verified tree `478c32b0b3a2dae260369337d04a0bde23b6ad28`, **only two authorized owned changed paths**, exact source and standard blobs above. The original CI file remains byte-for-byte unchanged. **Remote `main` remained at `751a6829ed5298136dd74a0e3edbc4288c327b05`** after creation; no refs, branches, PRs, forks or worktrees were created. No swap/mapper/device writes, kernel insertions or privileged operations.
+
+## Agent 1 next qualification
+
+Review/serially integrate only this unreferenced source commit; preserve Agent 7's independent paths and coding/test standard sections. Run the exact full source Python tests and `git diff --check`, then x86_64/ARM64 source-contract CI, and retain the real first failure if one remains. This corrects a rootless source-test false rejection, **not** physical or patched-kernel evidence. **Phase A BLOCKED; Phase B RAW bypass DISABLED.**
