@@ -13386,3 +13386,164 @@ paths, full exception operands, credentials or child stderr. Full integrated
 source test execution and hosted CI remain mandatory for qualification;
 synthetic Git/Make fixtures prove only rootless source policy. Phase A remains
 BLOCKED and Phase B RAW bypass remains disabled.
+
+## Round 015 — Agent 2 pinned zswap direct-payload source and lifetime (2026-11-16)
+
+The pinned Linux producer at `c339f4010dea8b0d754f84ace70cd1b089878ef8`
+still authenticates stored-entry identity under its swap-cache folio lock and
+decompresses the stored entry into the full original folio before normal
+`swap_write_submit()`. Its `zswap_pool.tfm_name` carries a compressor
+identity and `zs_obj_read_sg_begin/end` returns only a short-lived zsmalloc
+scatterlist. The pinned BIO API has **no authenticated compressed payload
+representation**, independent codec field, owned transfer association or
+end-to-end read/GC decoder; semantic stored-writeback provenance is not such
+proof. This is the first real source/ownership blocker to enabling handoff.
+
+`stage-pinned-linux-zswap-origin.py --with-compressed-handoff-prototype`
+may opt-in a **`#if 0` guarded reference only** in the real pinned
+`mm/zswap.c`. The original six-file exact-blob preflight and ordinary
+provenance postimage, optional KUnit mode, and default output/manifest remain
+unchanged. The reference first checks the live entry pointer against the
+swap tree while a matching folio is locked, then verifies swap identity,
+the *exact* known `lz4` or `zstd` codec, `PAGE_SIZE=4096`,
+a bounded compressed length `1..3568`, and allocation success.
+It copies no more than 3568 bytes out of the borrowed zsmalloc mapping
+synchronously, unmaps it before any later ownership transition, and records
+a CRC32. A separate semantic origin and compressed representation are
+required before submission; both remain disabled to any actual BIO.
+Unknown codecs, poor compression, null/old entries, wrong identity,
+allocation errors, oversized pages and digest corruption fail closed.
+
+Only one address-stable descriptor owns the immutable copied allocation.
+A self-address check refuses descriptor clones, and atomic states
+EMPTY→OWNED→CHECKING→SUBMITTED→RELEASED permit one completion to free
+the allocation on success or failure; OWNED→RELEASED handles abort before
+submission. Reject early release, double callback, requeue alias and stolen
+buffer addresses. The descriptor itself must remain allocated until
+all completion callbacks quiesce. **Copying and CRC each cost O(<=3568 bytes)
+CPU/cache traffic** and consume a separate bounded buffer; no zero-copy
+zpool ownership guarantee is claimed.
+
+The independently invoked rootless negative regression compiles the
+**literal guarded C source** in a stubbed host model under GCC/Clang with
+high warnings and UBSan and checks fail-closed identity, size, codec,
+allocation, CRC, stable copy, clone, abort, completion and one-release
+paths. It also verifies the opt-in edit, source anchors and default
+byte-equivalent stage transform. These fixtures do not imply Linux Kbuild,
+a usable compressed BIO ABI, verified 4096-byte consumer readback or
+device qualification. Real modified-Linux/KUnit, loaded origin propagation,
+swap-in, recovery and physical tests remain NOT_RUN. Direct compressed
+handoff and Phase B stay DISABLED; Phase A stays BLOCKED.
+
+## Round 015 Agent 3 — compiled zswap direct compressed contract/readback tests
+
+`tests/runtime/native/codec/zswap-direct-handoff.c` includes the *actual*
+`src/kernel/zswap-direct-handoff.h` and compile-time rejects enabling
+`SWAPZ_DIRECT_HANDOFF_PRODUCTION_ENABLED`. It uses real CRC32C and
+OpenSSL SHA-256 but deliberately **test-owned synthetic decoder** callbacks
+for LZ4/ZSTD enum branches. Those four-byte fixtures are not zswap LZ4
+or ZSTD streams and do not establish Linux pool/dictionary interoperability.
+The two successful tests compare the complete original 4096-byte page,
+check that scratch is cleared and prove no authority publication. Thirty
+negative cases cover origins/representation, full-page RAW substitution,
+unsupported codec, malformed size, null/borrowed payload, metadata version,
+stale page/generation/source identity and GC, pool/dictionary/version,
+missing/incorrect decoder, missing digest, changed CRC or encoded bytes,
+forged nonzero digest, short/long decode, decode failure, corrupt decoded
+page and unrecognized enum numeric. Every failure must leave output
+unmodified, zero scratch and create no authority.
+
+The existing `.github/workflows/product-codec.yml` exact-C job must
+compile and **execute** the checked-in fixture for both x86_64 and ARM64
+using GCC and Clang with GNU C11, high warnings as errors and UBSan.
+Install `libssl-dev` for the native fixture only; the kernel header
+takes no OpenSSL dependency. Run locally as available:
+
+```sh
+for compiler in gcc clang; do
+  "$compiler" -std=gnu11 -O2 -Wall -Wextra -Werror -Wconversion \
+    -Wshadow -Wformat=2 -Wstrict-prototypes -fsanitize=undefined \
+    -fno-sanitize-recover=all -o "/tmp/$compiler-zswap-direct-test" \
+    tests/runtime/native/codec/zswap-direct-handoff.c -lcrypto
+  "/tmp/$compiler-zswap-direct-test"
+done
+```
+
+A passing fixture proves only local header API/readback invariants, not
+the actual pinned Linux compressor's wire encoding or producer-supplied
+buffer ownership, real DM integration, matched module/KUnit, GC teardown,
+stored-entry zswap eviction or 4096-byte backing swap-in. Those remain
+distinct NOT_RUN gates until owner-authorized exact integrated CI and
+loaded acceptance. Phase A BLOCKED; Phase B DISABLED; direct handoff OFF.
+
+
+## Round 015 — Agent 7 default-unused zswap/swapz cooperative cost policy (2026-11-16)
+
+The existing production `src/kernel/window-policy.h` retains every
+current window predicate, including the unchanged
+`swapz_window_raw_hand_pays(lz4_page_ewma_ns, block_service_ewma_ns)`
+pressure threshold, its 64-slot bounded ordered hand, current RAW choices
+and production call sites. New
+`swapz_window_zswap_cooperative_choose()` is **static-inline,
+default-unused policy**, not a new BIO field, module option, dispatch hook,
+allocation, queue, lock, thread, authority transition or installed transport.
+
+The experimental **input contract** deliberately keeps stored-writeback
+origin separate from compressed representation and codec. A direct decision
+requires all of: stored-entry semantic origin, compressed representation,
+full 4096-byte logical output, exact bounded §1..3568§ compressed length,
+integrity verified, immutable buffer owned by producer through consumption,
+a separately available decoder for the *same* zswap LZ4/ZSTD codec, and a
+positive future §direct_handoff_qualified§ opt-in. This last bit is **never
+set by present production source**. Neither a numeric origin value,
+§REQ_SWAP§, high CPU pressure, an initial zswap store rejection, nor an
+unrecognized zswap/zpool payload authenticates a direct compressed record.
+Normal decompressed-page swapz compression remains the default.
+A full-page deadline RAW choice additionally needs a separate future
+opt-in, verified immutable **uncompressed 4096-byte** snapshot, imminent
+deadline and no current preparation owner/fence. It cannot carry the zswap
+compressed blob as swapz RAW.
+
+The policy only computes stack-only, saturating O(1) upper-bound cost
+estimates for the *next* accepted item. It accepts **measured** per-4KiB
+block service, fixed lower request cost, CPU decode/recompression time,
+CPU-pressure factor §0..1000§, cold-read count §0..64§ and candidate
+decode costs. 4/8/16KiB packed extents report the candidate's **marginal
+rounded physical lower bytes and added lower request count**, counting a
+fitting prefix as zero extra requests, plus conservative full-extent
+cold-read work. It includes no zswap RAM-cache pages in swapz committed
+foreground statistics: only a real stored-entry eviction could be a
+candidate. Saturated or equal cost defaults to normal compression.
+Caller-owned FUA, flush, GC, teardown, error/requeue and pending
+preparation force normal fallback, preserving existing publication and
+once-only completion authority.
+
+**Deterministic synthetic cost checks (ns; not device measurements):**
+
+| Input | Normal estimate | Direct estimate | Decision |
+| --- | ---: | ---: | --- |
+| 1024-byte verified zswap LZ4, estimated 1536-byte normal, 1 cold read, 100,000 ns/4KiB block and 15,000 ns/request | 1,430,500 | 231,500 | Future-only direct, if independently authorized |
+| 8KiB packed extent holding 7200 bytes, normal 800-byte candidate fits but direct 2500-byte candidate spills, 10,000,000 ns/block, 1,000,000 ns/request, 1000/1000 CPU pressure, no cold reads | 6,000 | 11,000,000 | Normal compression; no speculative extra WRITE |
+| Missing codec/decoder/digest/owned buffer, invalid length 0 or 3569, mismatched origin or 4KiB size, zero timing sample or active fence | Unavailable | Unavailable | Normal compression |
+
+The five additional compiled C groups are in the existing
+`tests/runtime/native/io/window-policy.c` and include 34 individually
+rejected malformed/authentication/fence mutations, ordinary vs stored,
+LZ4 and ZSTD decoder matching, 0/3568/3569 boundaries, emergency full-page
+RAW checks, partial and full 4/8/16KiB packing, repeated cold reads,
+CPU-pressure/slow-device counterexamples and saturated timing. No source
+prints a positive performance claim or uses real pressure/physical data.
+The suite's existing target is §make -C tests/suites test-lower-io§ and
+§make -C tests/suites SANITIZE=1 test-lower-io§; there is no
+§test-native§ target. A minimal source-extracted local compiler harness is
+not a substitute for the **entire** committed native executable or hosted
+exact-SHA CI.
+
+**Qualification ceiling:** policy source tests alone do not prove the
+producer's lifetime, actual transport ABI, the matched compressed read-side
+decoder, genuine loaded MM→BIO→DM zswap eviction/writeback, byte-exact
+4096-byte READ, GC/overwrite/error/FUA/flush/teardown or owned physical
+backing. **Phase A BLOCKED, Phase B forced RAW DISABLED, direct compressed
+handoff DISABLED.** Only coordinator-reviewed matched Linux/Kbuild/KUnit,
+loaded origin+readback and owner-qualified device evidence can authorize
+production activation.

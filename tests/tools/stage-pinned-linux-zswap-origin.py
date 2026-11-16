@@ -376,6 +376,206 @@ kunit_test_suite(swap_bio_origin_suite);
 MODULE_LICENSE("GPL");
 """
 
+# Optional direct-compressed reference is never compiled or submitted.
+# The pinned Linux BIO ABI has no authenticated compressed representation.
+COMPRESSED_HANDOFF_SOURCE = r"""/*
+ * Research-only bounded zswap -> swapz compressed-payload ownership model.
+ * This deliberately compiles to nothing: this pinned Linux tree has no
+ * authenticated compressed-representation BIO or matching consumer ABI.
+ * Normal zswap_writeback_entry() still decompresses before swap I/O.
+ *
+ * CPU cost if a real transport is later reviewed: at most 3568 bytes copied
+ * from zsmalloc and 3568 bytes checksummed; no zpool pointer may escape the
+ * folio-locked identity-check interval. The descriptor remains allocated and
+ * exclusively owned by the caller until callbacks are quiescent.
+ */
+#if 0 /* SWAPZ_COMPRESSED_HANDOFF_DISABLED_NO_PINNED_BIO_ABI */
+#include <linux/crc32.h>
+
+#define ZSWAP_SWAPZ_COMPRESSED_MAX 3568U
+#define ZSWAP_SWAPZ_LOGICAL_BYTES 4096U
+
+enum zswap_swapz_proto_codec {
+	ZSWAP_SWAPZ_CODEC_UNKNOWN = 0,
+	ZSWAP_SWAPZ_CODEC_LZ4 = 1,
+	ZSWAP_SWAPZ_CODEC_ZSTD = 2,
+};
+
+enum zswap_swapz_proto_state {
+	ZSWAP_SWAPZ_PAYLOAD_EMPTY = 0,
+	ZSWAP_SWAPZ_PAYLOAD_OWNED = 1,
+	ZSWAP_SWAPZ_PAYLOAD_CHECKING = 2,
+	ZSWAP_SWAPZ_PAYLOAD_SUBMITTED = 3,
+	ZSWAP_SWAPZ_PAYLOAD_RELEASED = 4,
+};
+
+struct zswap_swapz_owned_payload {
+	swp_entry_t entry_identity;
+	struct zswap_swapz_owned_payload *self; /* Reject descriptor clones. */
+	u8 *owned_allocation; /* Only this exact allocation is released. */
+	const u8 *owned_bytes; /* Never a zpool mapping or borrowed entry. */
+	unsigned int compressed_length;
+	unsigned int decoded_length;
+	u32 crc32;
+	enum zswap_swapz_proto_codec codec;
+	bool semantic_stored_writeback;
+	bool representation_compressed;
+	atomic_t owner_state;
+	int completion_error;
+};
+
+static enum zswap_swapz_proto_codec
+zswap_swapz_codec_from_tfm(const char *tfm_name)
+{
+	if (!tfm_name)
+		return ZSWAP_SWAPZ_CODEC_UNKNOWN;
+	if (!strcmp(tfm_name, "lz4"))
+		return ZSWAP_SWAPZ_CODEC_LZ4;
+	if (!strcmp(tfm_name, "zstd"))
+		return ZSWAP_SWAPZ_CODEC_ZSTD;
+	return ZSWAP_SWAPZ_CODEC_UNKNOWN;
+}
+
+/* Caller owns the locked swap-cache folio throughout this capture. */
+static int zswap_swapz_capture_owned_payload(
+		struct zswap_swapz_owned_payload *transfer,
+		const struct zswap_entry *entry, swp_entry_t swpentry,
+		const struct folio *locked_folio)
+{
+	struct zswap_pool *pool;
+	struct scatterlist input[2];
+	enum zswap_swapz_proto_codec codec;
+	u8 *owned_bytes;
+
+	if (PAGE_SIZE != ZSWAP_SWAPZ_LOGICAL_BYTES)
+		return -EOPNOTSUPP;
+	if (!transfer || !entry || !locked_folio ||
+	    !folio_test_locked(locked_folio))
+		return -EINVAL;
+	if (atomic_read(&transfer->owner_state) != ZSWAP_SWAPZ_PAYLOAD_EMPTY ||
+	    transfer->self || transfer->owned_allocation || transfer->owned_bytes)
+		return -EBUSY;
+	/* Compare the pointer before reading entry: an old entry can be freed. */
+	if (entry != xa_load(swap_zswap_tree(swpentry), swp_offset(swpentry)))
+		return -ENOENT;
+	if (entry->swpentry.val != swpentry.val)
+		return -ESTALE;
+	if (!entry->length || entry->length > ZSWAP_SWAPZ_COMPRESSED_MAX)
+		return -EMSGSIZE;
+	pool = zswap_entry_pool((struct zswap_entry *)entry);
+	if (!pool)
+		return -ENOENT;
+	codec = zswap_swapz_codec_from_tfm(pool->tfm_name);
+	if (codec == ZSWAP_SWAPZ_CODEC_UNKNOWN)
+		return -EOPNOTSUPP;
+	owned_bytes = kmalloc(entry->length, GFP_KERNEL);
+	if (!owned_bytes)
+		return -ENOMEM;
+
+	/* The folio lock protects identity; the zpool mapping is only borrowed
+	 * inside this bounded, synchronous read. It never reaches a BIO.
+	 */
+	zs_obj_read_sg_begin(pool->zs_pool, entry->handle, input, entry->length);
+	memcpy_from_sglist(owned_bytes, input, 0, entry->length);
+	zs_obj_read_sg_end(pool->zs_pool, entry->handle);
+	transfer->entry_identity = swpentry;
+	transfer->self = transfer;
+	transfer->owned_allocation = owned_bytes;
+	transfer->owned_bytes = owned_bytes;
+	transfer->compressed_length = entry->length;
+	transfer->decoded_length = ZSWAP_SWAPZ_LOGICAL_BYTES;
+	transfer->codec = codec;
+	transfer->crc32 = crc32(0, owned_bytes, entry->length);
+	transfer->semantic_stored_writeback = true;
+	transfer->representation_compressed = true;
+	transfer->completion_error = 0;
+	atomic_set(&transfer->owner_state, ZSWAP_SWAPZ_PAYLOAD_OWNED);
+	return 0;
+}
+
+static bool zswap_swapz_owned_payload_is_valid(
+		const struct zswap_swapz_owned_payload *transfer)
+{
+	return transfer && transfer->self == transfer &&
+		transfer->owned_bytes == transfer->owned_allocation &&
+		transfer->owned_bytes &&
+		transfer->semantic_stored_writeback &&
+		transfer->representation_compressed &&
+		transfer->decoded_length == ZSWAP_SWAPZ_LOGICAL_BYTES &&
+		transfer->compressed_length >= 1 &&
+		transfer->compressed_length <= ZSWAP_SWAPZ_COMPRESSED_MAX &&
+		(transfer->codec == ZSWAP_SWAPZ_CODEC_LZ4 ||
+		 transfer->codec == ZSWAP_SWAPZ_CODEC_ZSTD) &&
+		crc32(0, transfer->owned_bytes, transfer->compressed_length) ==
+		transfer->crc32;
+}
+
+/* One submission owner; the pointed-to descriptor cannot be cloned. */
+static bool zswap_swapz_owned_payload_submit(
+		struct zswap_swapz_owned_payload *transfer)
+{
+	if (!transfer || transfer->self != transfer ||
+	    atomic_cmpxchg(&transfer->owner_state,
+			ZSWAP_SWAPZ_PAYLOAD_OWNED,
+			ZSWAP_SWAPZ_PAYLOAD_CHECKING) != ZSWAP_SWAPZ_PAYLOAD_OWNED)
+		return false;
+	/* An abort cannot free the buffer during checksum verification. */
+	if (!zswap_swapz_owned_payload_is_valid(transfer)) {
+		atomic_set(&transfer->owner_state, ZSWAP_SWAPZ_PAYLOAD_OWNED);
+		return false;
+	}
+	atomic_set(&transfer->owner_state, ZSWAP_SWAPZ_PAYLOAD_SUBMITTED);
+	return true;
+}
+
+/* Caller guarantees the descriptor itself outlives all completion callbacks.
+ * Exactly one owner may release the copied bytes, on either success or error.
+ */
+static bool zswap_swapz_owned_payload_finish(
+		struct zswap_swapz_owned_payload *transfer, int completion_error)
+{
+	if (!transfer || transfer->self != transfer ||
+	    atomic_cmpxchg(&transfer->owner_state,
+			ZSWAP_SWAPZ_PAYLOAD_SUBMITTED,
+			ZSWAP_SWAPZ_PAYLOAD_RELEASED) != ZSWAP_SWAPZ_PAYLOAD_SUBMITTED)
+		return false;
+	transfer->completion_error = completion_error;
+	kfree(transfer->owned_allocation);
+	transfer->owned_allocation = NULL;
+	transfer->owned_bytes = NULL;
+	return true;
+}
+
+/* Aborts may release only a payload that was never submitted. */
+static bool zswap_swapz_owned_payload_abort(
+		struct zswap_swapz_owned_payload *transfer)
+{
+	if (!transfer || transfer->self != transfer ||
+	    atomic_cmpxchg(&transfer->owner_state,
+			ZSWAP_SWAPZ_PAYLOAD_OWNED,
+			ZSWAP_SWAPZ_PAYLOAD_RELEASED) != ZSWAP_SWAPZ_PAYLOAD_OWNED)
+		return false;
+	transfer->completion_error = -ECANCELED;
+	kfree(transfer->owned_allocation);
+	transfer->owned_allocation = NULL;
+	transfer->owned_bytes = NULL;
+	return true;
+}
+#endif /* SWAPZ_COMPRESSED_HANDOFF_DISABLED_NO_PINNED_BIO_ABI */
+"""
+COMPRESSED_HANDOFF_ANCHOR = (
+    "/*********************************\n"
+    "* writeback code\n"
+    "**********************************/"
+)
+COMPRESSED_HANDOFF_EDITS: dict[str, tuple[Edit, ...]] = {
+    "mm/zswap.c": (
+        Edit(COMPRESSED_HANDOFF_ANCHOR,
+             COMPRESSED_HANDOFF_SOURCE + COMPRESSED_HANDOFF_ANCHOR),
+    ),
+}
+
+
 class StagingError(RuntimeError):
     """Refuse a preflight, source transition or publication failure."""
 
@@ -428,9 +628,13 @@ def check_preimage(path: str, payload: bytes, expected_hash: str) -> None:
         raise StagingError(f"original-blob-mismatch:{path}")
 
 
-def render_source(path: str, original: str) -> str:
+def render_source(path: str, original: str, *, compressed_handoff: bool = False) -> str:
     """Reject missing, duplicate and overlapping anchors before any mutation."""
     edits = EDITS.get(path, KUNIT_EDITS.get(path))
+    if compressed_handoff:
+        if path != "mm/zswap.c":
+            raise StagingError(f"unexpected-compressed-prototype-path:{path}")
+        edits = edits + COMPRESSED_HANDOFF_EDITS[path]
     if edits is None:
         raise StagingError(f"unexpected-source-path:{path}")
     spans = []
@@ -628,7 +832,8 @@ def rollback_sources(root: Path, originals: dict[str, bytes | None],
     return failed
 
 
-def stage_checkout(root: Path, manifest_path: Path, *, with_kunit: bool = False) -> dict[str, object]:
+def stage_checkout(root: Path, manifest_path: Path, *, with_kunit: bool = False,
+                   with_compressed_handoff: bool = False) -> dict[str, object]:
     try:
         root = root.resolve(strict=True)
     except OSError as error:
@@ -649,7 +854,10 @@ def stage_checkout(root: Path, manifest_path: Path, *, with_kunit: bool = False)
         original = (root / path).read_bytes()
         check_preimage(path, original, expected_hashes[path])
         originals[path] = original
-        staged[path] = render_source(path, original.decode("utf-8")).encode("utf-8")
+        staged[path] = render_source(
+            path, original.decode("utf-8"),
+            compressed_handoff=with_compressed_handoff and path == "mm/zswap.c",
+        ).encode("utf-8")
     if with_kunit:
         addition = root / KUNIT_SOURCE_PATH
         if addition.exists() or addition.is_symlink():
@@ -713,6 +921,9 @@ def stage_checkout(root: Path, manifest_path: Path, *, with_kunit: bool = False)
         "phase_a_qualified": False,
         "phase_b_enabled": False,
     }
+    if with_compressed_handoff:
+        result["direct_compressed_handoff_enabled"] = False
+        result["compressed_handoff_prototype"] = "COMPILE_DISABLED_SOURCE_ONLY"
     # The manifest is a bounded evidence file *outside* the Linux checkout.
     temporary_manifest = None
     previous_manifest: bytes | None = None
@@ -771,10 +982,15 @@ def main() -> int:
     parser.add_argument("--manifest", type=Path, required=True)
     parser.add_argument("--with-kunit", action="store_true",
                         help="Stage pinned BIO KUnit C test and registrations")
+    parser.add_argument("--with-compressed-handoff-prototype",
+                        action="store_true",
+                        help="Stage disabled-only copied zswap payload reference")
     arguments = parser.parse_args()
     try:
         result = stage_checkout(arguments.linux_root, arguments.manifest,
-                                with_kunit=arguments.with_kunit)
+                                with_kunit=arguments.with_kunit,
+                                with_compressed_handoff=
+                                    arguments.with_compressed_handoff_prototype)
     except (StagingError, OSError, UnicodeError, ValueError) as error:
         print(f"FAIL: {error}", file=sys.stderr)
         return 1

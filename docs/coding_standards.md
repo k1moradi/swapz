@@ -3758,3 +3758,49 @@ Python run or hosted Kbuild/KUnit. No running-kernel provenance, matched
 module, real zswap eviction/readback, swap, mapper or physical device is
 qualified by a passing source contract. Phase A remains BLOCKED and Phase B
 RAW bypass DISABLED.
+
+## Round 015 guarded zswap compressed descriptor and readback contract (Agent 3)
+
+The experimental `src/kernel/zswap-direct-handoff.h` is a GNU C11
+kernel-compatible, stand-alone *source* contract. The production integration
+constant remains `SWAPZ_DIRECT_HANDOFF_PRODUCTION_ENABLED=0` and the live
+`src/kernel/dm-target.c` is unchanged: no producer source has yet proved
+immutable asynchronous compressed-buffer ownership, a matching registered
+Linux decoder, or page/GC lifetime. A checked scalar ownership enum is not
+a substitute for safe pin/copy/release ownership or a lifetime proof.
+
+Keep `semantic_origin=ORDINARY_UNKNOWN(0)|AUTHENTICATED_STORED(1)`,
+`representation=FULL_PAGE(0)|ZSWAP_COMPRESSED(1)`, and
+`codec=UNKNOWN(0)|ZSWAP_LZ4(1)|ZSWAP_ZSTD(2)` independently validated.
+Origin or `REQ_SWAP` alone never selects compressed handling.
+`FULL_PAGE` is never compressed and existing swapz RAW is always the
+original 4096-byte logical page; neither swapz LZ4/delta64 nor Linux zswap
+LZ4/ZSTD is an interchangeable encoded representation.
+
+A versioned bounded volatile-RAM descriptor must match a separately trusted
+logical-page, nonzero generation and source-record identity, nonzero pool
+and codec generation, exact codec/pool/dictionary/codec-generation decoder,
+immutable owned payload, and compressed length 1..3568 for the current
+extent. Before decode verify the exact source-bound payload CRC32C; after
+decode require exactly 4096 bytes and a *separately originating* expected
+page SHA-256. The caller registers working real CRC32C/SHA256 callbacks,
+a verified actual originating codec decoder and private scratch/output
+pages before any future WRITE eligibility. Unknown algorithms, missing
+digest, stale generation, mismatch or absent callback fail closed.
+
+Readback only copies the verified 4096-byte page into the caller's output
+after all checks pass; on failure output is untouched and scratch/digest
+are cleared. The interface performs no physical I/O, metadata publication,
+extent generation, completion, GC authority, or lifetime release. Any
+future integration requires exclusive synchronization, buffer nonaliasing,
+real codec/release proof, lower completion and ordinary overwrites/FUA/
+DISCARD/reuse and one upper completion to remain valid independently.
+All record authority is volatile RAM; only payload data may enter existing
+SWAPSPACE2 data extents. No partition-header or on-media format changes.
+
+Unrecognized/unsupported inputs must fall back in a later qualified
+producer to the existing full-page decompression plus ordinary swapz
+write/read path, not fall through to a new RAW or compressed-blob encoding.
+Until paired source, kernel ABI, loaded real zswap writeback and exact
+4096-byte swap-in are qualified: Phase A BLOCKED; Phase B DISABLED;
+direct compressed handoff DISABLED.

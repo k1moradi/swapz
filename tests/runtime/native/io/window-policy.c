@@ -895,6 +895,240 @@ static int test_bounded_queue_pressure_and_retry(void)
 	return 0;
 }
 
+/* Round 015: executable cooperation policy, never a live BIO or backing IO. */
+static struct swapz_window_cooperative_inputs cooperative_valid_input(void)
+{
+	return (struct swapz_window_cooperative_inputs) {
+		.semantic_origin = SWAPZ_WINDOW_ORIGIN_STORED_WRITEBACK,
+		.representation = SWAPZ_WINDOW_REPRESENTATION_ZSWAP_COMPRESSED,
+		.codec = SWAPZ_WINDOW_CODEC_ZSWAP_LZ4,
+		.matching_decoder_codec = SWAPZ_WINDOW_CODEC_ZSWAP_LZ4,
+		.uncompressed_bytes = SWAPZ_BLOCK_BYTES,
+		.compressed_length = 1024,
+		.expected_normal_compressed_length = 1536,
+		.payload_digest_verified = 1,
+		.producer_payload_owned_immutable = 1,
+		.consumer_decoder_available = 1,
+		.direct_handoff_qualified = 1,
+		.packed_extent_blocks = 0,
+		.packed_payload_bytes = 0,
+		.cpu_pressure_per_mille = 0,
+		.anticipated_cold_reads = 1,
+		.zswap_decompress_ns = 500000ULL,
+		.swapz_compress_ns = 700000ULL,
+		.lower_block_service_ns = 100000ULL,
+		.lower_request_service_ns = 15000ULL,
+		.cold_normal_decode_ns = 500ULL,
+		.cold_direct_decode_ns = 1500ULL,
+	};
+}
+
+static int test_cooperative_direct_and_cost_accounting(void)
+{
+	struct swapz_window_cooperative_inputs input = cooperative_valid_input();
+	struct swapz_window_cooperative_cost cost;
+
+	CHECK(swapz_window_zswap_cooperative_choose(&input, &cost) ==
+	      SWAPZ_WINDOW_COOPERATE_DIRECT_COMPRESSED);
+	CHECK(cost.cost_valid);
+	CHECK(cost.normal_marginal_write_bytes == SWAPZ_BLOCK_BYTES);
+	CHECK(cost.direct_marginal_write_bytes == SWAPZ_BLOCK_BYTES);
+	CHECK(cost.normal_marginal_write_requests == 1U);
+	CHECK(cost.direct_marginal_write_requests == 1U);
+	/* All times are synthetic integer inputs, not measured device data. */
+	CHECK(cost.normal_total_ns == 1430500ULL);
+	CHECK(cost.direct_total_ns == 231500ULL);
+	CHECK(swapz_window_raw_hand_pays(700000ULL, 100000ULL));
+	CHECK(!swapz_window_raw_hand_pays(1000ULL, 100000ULL));
+	CHECK(swapz_window_raw_hand_pays(0ULL, 0ULL));
+	return 0;
+}
+
+static int test_cooperative_never_authenticates_metadata_by_pressure(void)
+{
+	struct swapz_window_cooperative_inputs input = cooperative_valid_input();
+	struct swapz_window_cooperative_cost cost;
+
+#define REJECT_MUTATION(field, value) do { \
+	struct swapz_window_cooperative_inputs altered = input; \
+	altered.field = (value); \
+	cost.cost_valid = 42; \
+	CHECK(swapz_window_zswap_cooperative_choose(&altered, &cost) == \
+	      SWAPZ_WINDOW_COOPERATE_NORMAL); \
+	CHECK(!cost.cost_valid); \
+} while (0)
+	REJECT_MUTATION(semantic_origin, SWAPZ_WINDOW_ORIGIN_ORDINARY_OR_UNKNOWN);
+	REJECT_MUTATION(semantic_origin, 255U);
+	REJECT_MUTATION(representation, SWAPZ_WINDOW_REPRESENTATION_FULL_PAGE);
+	REJECT_MUTATION(representation, 255U);
+	REJECT_MUTATION(codec, SWAPZ_WINDOW_CODEC_UNKNOWN);
+	REJECT_MUTATION(codec, 255U);
+	REJECT_MUTATION(matching_decoder_codec, SWAPZ_WINDOW_CODEC_UNKNOWN);
+	REJECT_MUTATION(consumer_decoder_available, 0);
+	REJECT_MUTATION(producer_payload_owned_immutable, 0);
+	REJECT_MUTATION(payload_digest_verified, 0);
+	REJECT_MUTATION(direct_handoff_qualified, 0);
+	REJECT_MUTATION(uncompressed_bytes, 0U);
+	REJECT_MUTATION(uncompressed_bytes, 8192U);
+	REJECT_MUTATION(compressed_length, 0U);
+	REJECT_MUTATION(compressed_length, SWAPZ_MAX_COMPRESSED + 1U);
+	REJECT_MUTATION(expected_normal_compressed_length, 0U);
+	REJECT_MUTATION(expected_normal_compressed_length, SWAPZ_MAX_COMPRESSED + 1U);
+	REJECT_MUTATION(anticipated_cold_reads, SWAPZ_MAX_RECORDS + 1U);
+	REJECT_MUTATION(cpu_pressure_per_mille, 1001U);
+	REJECT_MUTATION(packed_extent_blocks, 3U);
+	REJECT_MUTATION(packed_payload_bytes, 1U);
+	REJECT_MUTATION(zswap_decompress_ns, 0ULL);
+	REJECT_MUTATION(swapz_compress_ns, 0ULL);
+	REJECT_MUTATION(lower_block_service_ns, 0ULL);
+	REJECT_MUTATION(lower_request_service_ns, 0ULL);
+	REJECT_MUTATION(cold_normal_decode_ns, 0ULL);
+	REJECT_MUTATION(cold_direct_decode_ns, 0ULL);
+	REJECT_MUTATION(preparation_inflight, 1);
+	REJECT_MUTATION(caller_fences, SWAPZ_WINDOW_COOP_FENCE_FUA);
+	REJECT_MUTATION(caller_fences, SWAPZ_WINDOW_COOP_FENCE_FLUSH);
+	REJECT_MUTATION(caller_fences, SWAPZ_WINDOW_COOP_FENCE_GC);
+	REJECT_MUTATION(caller_fences, SWAPZ_WINDOW_COOP_FENCE_TEARDOWN);
+	REJECT_MUTATION(caller_fences, SWAPZ_WINDOW_COOP_FENCE_ERROR);
+	REJECT_MUTATION(caller_fences, SWAPZ_WINDOW_COOP_FENCE_REISSUE);
+#undef REJECT_MUTATION
+	CHECK(swapz_window_zswap_cooperative_choose(NULL, &cost) ==
+	      SWAPZ_WINDOW_COOPERATE_NORMAL);
+	CHECK(!cost.cost_valid);
+	return 0;
+}
+
+static int test_cooperative_deadline_raw_requires_owned_full_page(void)
+{
+	struct swapz_window_cooperative_inputs input = cooperative_valid_input();
+	struct swapz_window_cooperative_cost cost;
+
+	input.representation = SWAPZ_WINDOW_REPRESENTATION_FULL_PAGE;
+	input.semantic_origin = SWAPZ_WINDOW_ORIGIN_ORDINARY_OR_UNKNOWN;
+	input.emergency_raw_enabled = 1;
+	input.deadline_imminent = 1;
+	input.full_page_snapshot_owned_immutable = 1;
+	input.full_page_snapshot_verified = 1;
+	CHECK(swapz_window_zswap_cooperative_choose(&input, &cost) ==
+	      SWAPZ_WINDOW_COOPERATE_FULL_PAGE_RAW);
+	input.full_page_snapshot_verified = 0;
+	CHECK(swapz_window_zswap_cooperative_choose(&input, &cost) ==
+	      SWAPZ_WINDOW_COOPERATE_NORMAL);
+	input.full_page_snapshot_verified = 1;
+	CHECK(!cost.cost_valid);
+	input.full_page_snapshot_owned_immutable = 0;
+	CHECK(swapz_window_zswap_cooperative_choose(&input, &cost) ==
+	      SWAPZ_WINDOW_COOPERATE_NORMAL);
+	input.full_page_snapshot_owned_immutable = 1;
+	input.deadline_imminent = 0;
+	CHECK(swapz_window_zswap_cooperative_choose(&input, NULL) ==
+	      SWAPZ_WINDOW_COOPERATE_NORMAL);
+	input.deadline_imminent = 1;
+	input.emergency_raw_enabled = 0;
+	CHECK(swapz_window_zswap_cooperative_choose(&input, NULL) ==
+	      SWAPZ_WINDOW_COOPERATE_NORMAL);
+	input.emergency_raw_enabled = 1;
+	input.preparation_inflight = 1;
+	CHECK(swapz_window_zswap_cooperative_choose(&input, NULL) ==
+	      SWAPZ_WINDOW_COOPERATE_NORMAL);
+	input.preparation_inflight = 0;
+	input.caller_fences = 1;
+	CHECK(swapz_window_zswap_cooperative_choose(&input, NULL) ==
+	      SWAPZ_WINDOW_COOPERATE_NORMAL);
+	input.caller_fences = 0;
+	input.representation = SWAPZ_WINDOW_REPRESENTATION_ZSWAP_COMPRESSED;
+	CHECK(swapz_window_zswap_cooperative_choose(&input, NULL) ==
+	      SWAPZ_WINDOW_COOPERATE_NORMAL);
+	input.semantic_origin = SWAPZ_WINDOW_ORIGIN_STORED_WRITEBACK;
+	CHECK(swapz_window_zswap_cooperative_choose(&input, NULL) ==
+	      SWAPZ_WINDOW_COOPERATE_DIRECT_COMPRESSED);
+	return 0;
+}
+
+static int test_cooperative_packing_and_slow_device_costs(void)
+{
+	struct swapz_window_cooperative_inputs input = cooperative_valid_input();
+	struct swapz_window_cooperative_cost cost;
+
+	/* Full planned 8KiB extent: normal fits, direct spills one block. */
+	input.packed_extent_blocks = 2U;
+	input.packed_payload_bytes = 7200U;
+	input.expected_normal_compressed_length = 800U;
+	input.compressed_length = 2500U;
+	input.cpu_pressure_per_mille = 1000U;
+	input.anticipated_cold_reads = 0U;
+	input.zswap_decompress_ns = 1000ULL;
+	input.swapz_compress_ns = 2000ULL;
+	input.lower_block_service_ns = 10000000ULL;
+	input.lower_request_service_ns = 1000000ULL;
+	CHECK(swapz_window_zswap_cooperative_choose(&input, &cost) ==
+	      SWAPZ_WINDOW_COOPERATE_NORMAL);
+	CHECK(cost.cost_valid);
+	CHECK(cost.normal_marginal_write_bytes == 0U);
+	CHECK(cost.direct_marginal_write_bytes == SWAPZ_BLOCK_BYTES);
+	CHECK(cost.normal_marginal_write_requests == 0U);
+	CHECK(cost.direct_marginal_write_requests == 1U);
+	CHECK(cost.normal_total_ns == 6000ULL);
+	CHECK(cost.direct_total_ns == 11000000ULL);
+	/* Multiple cold READs can reverse the winner; counted, never assumed. */
+	input.anticipated_cold_reads = SWAPZ_MAX_RECORDS;
+	input.cold_direct_decode_ns = 50000000ULL;
+	CHECK(swapz_window_zswap_cooperative_choose(&input, &cost) ==
+	      SWAPZ_WINDOW_COOPERATE_NORMAL);
+	/* Exactly 4/8/16KiB packing: a new 4KiB boundary adds a block. */
+	input = cooperative_valid_input();
+	input.packed_extent_blocks = 1U;
+	input.packed_payload_bytes = SWAPZ_BLOCK_BYTES - 6U;
+	input.compressed_length = 6U;
+	input.expected_normal_compressed_length = 7U;
+	input.anticipated_cold_reads = 0U;
+	CHECK(swapz_window_zswap_cooperative_choose(&input, &cost) ==
+	      SWAPZ_WINDOW_COOPERATE_DIRECT_COMPRESSED);
+	CHECK(cost.direct_marginal_write_bytes == 0U);
+	CHECK(cost.normal_marginal_write_bytes == SWAPZ_BLOCK_BYTES);
+	input.packed_extent_blocks = 4U;
+	input.packed_payload_bytes = 16384U;
+	CHECK(swapz_window_zswap_cooperative_choose(&input, &cost) ==
+	      SWAPZ_WINDOW_COOPERATE_DIRECT_COMPRESSED);
+	CHECK(cost.direct_marginal_write_bytes == SWAPZ_BLOCK_BYTES);
+	CHECK(cost.direct_marginal_write_requests == 1U);
+	return 0;
+}
+
+static int test_cooperative_saturation_and_exact_size_fences(void)
+{
+	struct swapz_window_cooperative_inputs input = cooperative_valid_input();
+	struct swapz_window_cooperative_cost cost;
+
+	input.codec = SWAPZ_WINDOW_CODEC_ZSWAP_ZSTD;
+	input.matching_decoder_codec = SWAPZ_WINDOW_CODEC_ZSWAP_ZSTD;
+	input.compressed_length = SWAPZ_MAX_COMPRESSED;
+	CHECK(swapz_window_zswap_cooperative_choose(&input, &cost) ==
+	      SWAPZ_WINDOW_COOPERATE_DIRECT_COMPRESSED);
+	CHECK(cost.cost_valid);
+	input.compressed_length++;
+	CHECK(swapz_window_zswap_cooperative_choose(&input, &cost) ==
+	      SWAPZ_WINDOW_COOPERATE_NORMAL);
+	CHECK(!cost.cost_valid);
+	input = cooperative_valid_input();
+	input.zswap_decompress_ns = ~0ULL;
+	input.swapz_compress_ns = ~0ULL;
+	input.lower_block_service_ns = ~0ULL;
+	input.lower_request_service_ns = ~0ULL;
+	input.cold_normal_decode_ns = ~0ULL;
+	input.cold_direct_decode_ns = ~0ULL;
+	input.cpu_pressure_per_mille = 1000U;
+	input.anticipated_cold_reads = SWAPZ_MAX_RECORDS;
+	CHECK(swapz_window_zswap_cooperative_choose(&input, &cost) ==
+	      SWAPZ_WINDOW_COOPERATE_NORMAL);
+	CHECK(cost.cost_valid);
+	CHECK(cost.normal_total_ns == ~0ULL);
+	CHECK(cost.direct_total_ns == ~0ULL);
+	CHECK(swapz_window_cooperative_add_saturated(~0ULL, 1ULL) == ~0ULL);
+	CHECK(swapz_window_cooperative_multiply_saturated(~0ULL, 2ULL) == ~0ULL);
+	return 0;
+}
+
 int main(void)
 {
 	int passed = 0;
@@ -933,6 +1167,11 @@ int main(void)
 	CHECK(test_late_clock_does_not_wrap_remaining_budget() == 0); passed++;
 	CHECK(test_submitter_dispatch_requires_proven_idle_singleton() == 0); passed++;
 	CHECK(test_bounded_queue_pressure_and_retry() == 0); passed++;
+	CHECK(test_cooperative_direct_and_cost_accounting() == 0); passed++;
+	CHECK(test_cooperative_never_authenticates_metadata_by_pressure() == 0); passed++;
+	CHECK(test_cooperative_deadline_raw_requires_owned_full_page() == 0); passed++;
+	CHECK(test_cooperative_packing_and_slow_device_costs() == 0); passed++;
+	CHECK(test_cooperative_saturation_and_exact_size_fences() == 0); passed++;
 	printf("SWAPZ_WINDOW_POLICY_TESTS_PASS=%d\n", passed);
 	return 0;
 }

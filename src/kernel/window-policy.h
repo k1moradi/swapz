@@ -639,4 +639,244 @@ static inline int swapz_window_submitter_dispatch_ready(
 	       !queued_followers;
 }
 
+/*
+ * Standalone, default-unused zswap/swapz cooperation proposal. Existing
+ * compression, RAW fallback and ordered completion paths are untouched.
+ * This is policy, not authentication or an implementation of a BIO carrier.
+ */
+enum swapz_window_cooperative_path {
+	SWAPZ_WINDOW_COOPERATE_NORMAL = 0,
+	SWAPZ_WINDOW_COOPERATE_FULL_PAGE_RAW = 1,
+	SWAPZ_WINDOW_COOPERATE_DIRECT_COMPRESSED = 2,
+};
+
+enum swapz_window_cooperative_origin {
+	SWAPZ_WINDOW_ORIGIN_ORDINARY_OR_UNKNOWN = 0,
+	SWAPZ_WINDOW_ORIGIN_STORED_WRITEBACK = 1,
+};
+
+enum swapz_window_cooperative_representation {
+	SWAPZ_WINDOW_REPRESENTATION_FULL_PAGE = 0,
+	SWAPZ_WINDOW_REPRESENTATION_ZSWAP_COMPRESSED = 1,
+};
+
+enum swapz_window_cooperative_codec {
+	SWAPZ_WINDOW_CODEC_UNKNOWN = 0,
+	SWAPZ_WINDOW_CODEC_ZSWAP_LZ4 = 1,
+	SWAPZ_WINDOW_CODEC_ZSWAP_ZSTD = 2,
+};
+
+/* These flags are caller-owned fences, not new dispatch or BIO API flags. */
+enum swapz_window_cooperative_fence {
+	SWAPZ_WINDOW_COOP_FENCE_FUA = 1U,
+	SWAPZ_WINDOW_COOP_FENCE_FLUSH = 2U,
+	SWAPZ_WINDOW_COOP_FENCE_GC = 4U,
+	SWAPZ_WINDOW_COOP_FENCE_TEARDOWN = 8U,
+	SWAPZ_WINDOW_COOP_FENCE_ERROR = 16U,
+	SWAPZ_WINDOW_COOP_FENCE_REISSUE = 32U,
+};
+
+struct swapz_window_cooperative_inputs {
+	/* Experimental source-verified contract, not active kernel BIO fields. */
+	unsigned int semantic_origin;
+	unsigned int representation;
+	unsigned int codec;
+	unsigned int matching_decoder_codec;
+	unsigned int uncompressed_bytes;
+	unsigned int compressed_length;
+	unsigned int expected_normal_compressed_length;
+	int payload_digest_verified;
+	int producer_payload_owned_immutable;
+	int consumer_decoder_available;
+	int direct_handoff_qualified;
+	/* RAW is only a whole immutable 4096-byte page at an urgent deadline. */
+	int full_page_snapshot_owned_immutable;
+	int full_page_snapshot_verified;
+	int emergency_raw_enabled;
+	int deadline_imminent;
+	int preparation_inflight;
+	int caller_fences; /* FUA, flush, GC, teardown, error or ordering. */
+	/* A current measured device class, not a guessed NVMe/SD label. */
+	unsigned int packed_extent_blocks; /* 0, 1, 2 or 4 physical blocks. */
+	unsigned int packed_payload_bytes;
+	unsigned int cpu_pressure_per_mille;
+	unsigned int anticipated_cold_reads; /* 0..SWAPZ_MAX_RECORDS. */
+	unsigned long long zswap_decompress_ns;
+	unsigned long long swapz_compress_ns;
+	unsigned long long lower_block_service_ns;
+	unsigned long long lower_request_service_ns;
+	unsigned long long cold_normal_decode_ns;
+	unsigned long long cold_direct_decode_ns;
+};
+
+struct swapz_window_cooperative_cost {
+	unsigned long long normal_total_ns;
+	unsigned long long direct_total_ns;
+	unsigned int normal_marginal_write_bytes;
+	unsigned int direct_marginal_write_bytes;
+	unsigned int normal_marginal_write_requests;
+	unsigned int direct_marginal_write_requests;
+	int cost_valid;
+};
+
+static inline unsigned long long swapz_window_cooperative_add_saturated(
+		unsigned long long first, unsigned long long second)
+{
+	return first > ~0ULL - second ? ~0ULL : first + second;
+}
+
+static inline unsigned long long swapz_window_cooperative_multiply_saturated(
+		unsigned long long multiplicand, unsigned long long multiplier)
+{
+	return multiplier && multiplicand > ~0ULL / multiplier ?
+		~0ULL : multiplicand * multiplier;
+}
+
+/* Exact 4KiB physical rounding with at most one 4/8/16KiB packed extent. */
+static inline unsigned int swapz_window_cooperative_write_blocks(
+		unsigned int payload_bytes, unsigned int packed_payload_bytes,
+		unsigned int packed_extent_blocks, unsigned int *extra_requests,
+		unsigned int *read_extent_blocks)
+{
+	const unsigned int block_bytes = SWAPZ_BLOCK_BYTES;
+	const unsigned int payload_blocks = payload_bytes / block_bytes +
+		(payload_bytes % block_bytes != 0U);
+	const unsigned int extent_bytes =
+		(packed_extent_blocks == 1U || packed_extent_blocks == 2U ||
+		 packed_extent_blocks == 4U) ? packed_extent_blocks * block_bytes : 0U;
+
+	if (extent_bytes && packed_payload_bytes <= extent_bytes &&
+	    payload_bytes <= extent_bytes - packed_payload_bytes) {
+		const unsigned int old_blocks =
+			(packed_payload_bytes + block_bytes - 1U) / block_bytes;
+		const unsigned int new_blocks =
+			(packed_payload_bytes + payload_bytes + block_bytes - 1U) /
+			block_bytes;
+
+		*extra_requests = packed_payload_bytes ? 0U : 1U;
+		*read_extent_blocks = packed_extent_blocks;
+		return new_blocks - old_blocks;
+	}
+	*extra_requests = 1U;
+	*read_extent_blocks = payload_blocks;
+	return payload_blocks;
+}
+
+/*
+ * Future-only O(1) cost selection. A caller must independently authenticate
+ * both representation and provenance, own the payload until consumption,
+ * guarantee a matching full-page decoder and commit one immutable decision.
+ * Zero/invalid samples or unsupported states retain ordinary compression.
+ */
+static inline enum swapz_window_cooperative_path
+swapz_window_zswap_cooperative_choose(
+		const struct swapz_window_cooperative_inputs *inputs,
+		struct swapz_window_cooperative_cost *cost)
+{
+	unsigned int normal_blocks, direct_blocks, normal_requests, direct_requests;
+	unsigned int normal_read_blocks, direct_read_blocks;
+	unsigned long long normal_cpu, pressure_cpu, normal_write, direct_write;
+	unsigned long long normal_read, direct_read, normal_total, direct_total;
+
+	if (cost)
+		*cost = (struct swapz_window_cooperative_cost){ 0 };
+	if (!inputs || inputs->caller_fences || inputs->preparation_inflight ||
+	    inputs->uncompressed_bytes != SWAPZ_BLOCK_BYTES)
+		return SWAPZ_WINDOW_COOPERATE_NORMAL;
+
+	if (inputs->emergency_raw_enabled && inputs->deadline_imminent &&
+	    inputs->representation == SWAPZ_WINDOW_REPRESENTATION_FULL_PAGE &&
+	    inputs->full_page_snapshot_owned_immutable &&
+	    inputs->full_page_snapshot_verified)
+		return SWAPZ_WINDOW_COOPERATE_FULL_PAGE_RAW;
+
+	if (!inputs->direct_handoff_qualified ||
+	    inputs->semantic_origin != SWAPZ_WINDOW_ORIGIN_STORED_WRITEBACK ||
+	    inputs->representation != SWAPZ_WINDOW_REPRESENTATION_ZSWAP_COMPRESSED ||
+	    !inputs->payload_digest_verified ||
+	    !inputs->producer_payload_owned_immutable ||
+	    !inputs->consumer_decoder_available ||
+	    (inputs->codec != SWAPZ_WINDOW_CODEC_ZSWAP_LZ4 &&
+	     inputs->codec != SWAPZ_WINDOW_CODEC_ZSWAP_ZSTD) ||
+	    inputs->matching_decoder_codec != inputs->codec ||
+	    !inputs->compressed_length ||
+	    inputs->compressed_length > SWAPZ_MAX_COMPRESSED ||
+	    !inputs->expected_normal_compressed_length ||
+	    inputs->expected_normal_compressed_length > SWAPZ_MAX_COMPRESSED ||
+	    inputs->cpu_pressure_per_mille > 1000U ||
+	    inputs->anticipated_cold_reads > SWAPZ_MAX_RECORDS ||
+	    !inputs->zswap_decompress_ns || !inputs->swapz_compress_ns ||
+	    !inputs->lower_block_service_ns ||
+	    !inputs->lower_request_service_ns ||
+	    !inputs->cold_normal_decode_ns || !inputs->cold_direct_decode_ns ||
+	    (inputs->packed_extent_blocks != 0U &&
+	     inputs->packed_extent_blocks != 1U &&
+	     inputs->packed_extent_blocks != 2U &&
+	     inputs->packed_extent_blocks != 4U) ||
+	    inputs->packed_payload_bytes >
+	    inputs->packed_extent_blocks * SWAPZ_BLOCK_BYTES)
+		return SWAPZ_WINDOW_COOPERATE_NORMAL;
+
+	normal_blocks = swapz_window_cooperative_write_blocks(
+		inputs->expected_normal_compressed_length,
+		inputs->packed_payload_bytes, inputs->packed_extent_blocks,
+		&normal_requests, &normal_read_blocks);
+	direct_blocks = swapz_window_cooperative_write_blocks(
+		inputs->compressed_length, inputs->packed_payload_bytes,
+		inputs->packed_extent_blocks, &direct_requests, &direct_read_blocks);
+	/* Pressure changes only CPU cost, never origin or representation trust.
+	 * Quotient/remainder avoid multiplying nanoseconds by 1000 and
+	 * accidentally turning a saturated estimate into a small one. */
+	normal_cpu = swapz_window_cooperative_add_saturated(
+		inputs->zswap_decompress_ns, inputs->swapz_compress_ns);
+	pressure_cpu = swapz_window_cooperative_add_saturated(
+		swapz_window_cooperative_multiply_saturated(
+			normal_cpu / 1000ULL, inputs->cpu_pressure_per_mille),
+		(normal_cpu % 1000ULL) * inputs->cpu_pressure_per_mille /
+		1000ULL);
+	normal_cpu = swapz_window_cooperative_add_saturated(
+		normal_cpu, pressure_cpu);
+	normal_write = swapz_window_cooperative_add_saturated(
+		swapz_window_cooperative_multiply_saturated(
+			normal_blocks, inputs->lower_block_service_ns),
+		swapz_window_cooperative_multiply_saturated(
+			normal_requests, inputs->lower_request_service_ns));
+	direct_write = swapz_window_cooperative_add_saturated(
+		swapz_window_cooperative_multiply_saturated(
+			direct_blocks, inputs->lower_block_service_ns),
+		swapz_window_cooperative_multiply_saturated(
+			direct_requests, inputs->lower_request_service_ns));
+	normal_read = swapz_window_cooperative_add_saturated(
+		swapz_window_cooperative_add_saturated(
+			swapz_window_cooperative_multiply_saturated(
+				normal_read_blocks, inputs->lower_block_service_ns),
+			inputs->lower_request_service_ns),
+		inputs->cold_normal_decode_ns);
+	direct_read = swapz_window_cooperative_add_saturated(
+		swapz_window_cooperative_add_saturated(
+			swapz_window_cooperative_multiply_saturated(
+				direct_read_blocks, inputs->lower_block_service_ns),
+			inputs->lower_request_service_ns),
+		inputs->cold_direct_decode_ns);
+	normal_total = swapz_window_cooperative_add_saturated(
+		swapz_window_cooperative_add_saturated(normal_cpu, normal_write),
+		swapz_window_cooperative_multiply_saturated(
+			inputs->anticipated_cold_reads, normal_read));
+	direct_total = swapz_window_cooperative_add_saturated(
+		direct_write, swapz_window_cooperative_multiply_saturated(
+			inputs->anticipated_cold_reads, direct_read));
+	if (cost) {
+		cost->normal_total_ns = normal_total;
+		cost->direct_total_ns = direct_total;
+		cost->normal_marginal_write_bytes = normal_blocks * SWAPZ_BLOCK_BYTES;
+		cost->direct_marginal_write_bytes = direct_blocks * SWAPZ_BLOCK_BYTES;
+		cost->normal_marginal_write_requests = normal_requests;
+		cost->direct_marginal_write_requests = direct_requests;
+		cost->cost_valid = 1;
+	}
+	return direct_total < normal_total ?
+		SWAPZ_WINDOW_COOPERATE_DIRECT_COMPRESSED :
+		SWAPZ_WINDOW_COOPERATE_NORMAL;
+}
+
 #endif

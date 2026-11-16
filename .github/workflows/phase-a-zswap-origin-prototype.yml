@@ -6,6 +6,7 @@ on:
       - ".github/workflows/phase-a-zswap-origin-prototype.yml"
       - "tests/tools/stage-pinned-linux-zswap-origin.py"
       - "tests/runtime/native/pinned-linux-zswap-origin-stage-test.py"
+      - "tests/runtime/native/pinned-linux-zswap-compressed-handoff-test.py"
       - "tests/runtime/native/pinned-linux-origin-paired-module-test.py"
   workflow_dispatch:
 
@@ -57,6 +58,17 @@ jobs:
             result=$?
             echo "::error::Producer source staging regression failed (exit $result)"
             tail -n 35 "$RUNNER_TEMP/zswap-origin-rootless.log"
+            exit "$result"
+          }
+      - name: "Run disabled compressed handoff source/ownership negative regression"
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 -B swapz/tests/runtime/native/pinned-linux-zswap-compressed-handoff-test.py \
+            > "$RUNNER_TEMP/zswap-origin-compressed-rootless.log" 2>&1 || {
+            result=$?
+            echo "::error::Disabled compressed source contract failed (exit $result)"
+            tail -n 35 "$RUNNER_TEMP/zswap-origin-compressed-rootless.log"
             exit "$result"
           }
       - name: "Run matched source/module verifier regressions on full workflow"

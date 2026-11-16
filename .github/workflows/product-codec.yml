@@ -27,7 +27,7 @@ jobs:
       - name: Install native predictor prerequisite
         run: |
           sudo apt-get update -qq
-          sudo DEBIAN_FRONTEND=noninteractive apt-get install -y -qq liblz4-dev
+          sudo DEBIAN_FRONTEND=noninteractive apt-get install -y -qq liblz4-dev libssl-dev
       - name: Reuse one build directory for native production-C tests
         shell: bash
         env:
@@ -42,6 +42,24 @@ jobs:
           python3 -B tests/runtime/native/pinned-linux-preflight-evidence-test.py -v
           python3 -B tests/runtime/native/pinned-gcc-build-info-source-test.py -v
           git diff --check
+      - name: Run compiled guarded compressed-zswap descriptor/readback fixture
+        shell: bash
+        env:
+          UBSAN_OPTIONS: halt_on_error=1:print_stacktrace=1
+        run: |
+          set -euo pipefail
+          # These samples are deterministic test-owned data, not actual zswap streams.
+          source=tests/runtime/native/codec/zswap-direct-handoff.c
+          mkdir -p build/tests/zswap-direct-handoff
+          for compiler in gcc clang; do
+            command -v "$compiler" >/dev/null
+            artifact="build/tests/zswap-direct-handoff/$compiler-test"
+            "$compiler" -std=gnu11 -O2 -Wall -Wextra -Werror \
+              -Wconversion -Wshadow -Wformat=2 -Wstrict-prototypes \
+              -fsanitize=undefined -fno-sanitize-recover=all \
+              -o "$artifact" "$source" -lcrypto
+            "$artifact"
+          done
       - name: ThreadSanitizer publication and slot-reuse probes
         if: matrix.arch == 'x86_64'
         env:
