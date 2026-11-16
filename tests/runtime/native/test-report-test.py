@@ -12821,6 +12821,44 @@ class AlgorithmLocalOnlyQualificationContract(unittest.TestCase):
         self.assertIn("Git result: SKIPPED_GIT_SYNC: local_source_pinned",
                       console.getvalue())
 
+    def test_blocked_local_checkout_does_not_contact_github(self):
+        source = "a" * 40
+        reports = []
+        with contextlib.ExitStack() as patches:
+            patches.enter_context(mock.patch.dict(os.environ, {"RESUME": ""}))
+            for name, replacement in (
+                    ("report_host_identity", lambda: {"status": "UNAVAILABLE"}),
+                    ("git_sha", lambda: source),
+                    ("make_invocation", lambda: (["make"], "fixture")),
+                    ("tracked_source_checkout_preflight", lambda: None),
+                    ("qualification_artifact_digests",
+                     lambda: {"status": "UNAVAILABLE"}),
+                    ("goal_scorecard", lambda result: {"overall": "UNAVAILABLE"}),
+                    ("lane_gap_attribution_rows", lambda value: []),
+                    ("write_report", lambda result: reports.append(result)),
+                    ("print_bench", lambda result: None),
+                    ("write_failure_diagnostic", lambda *args: None),
+                    ("refresh_history", lambda identity: "NOT UPDATED"),
+            ):
+                patches.enter_context(
+                    mock.patch.object(runner, name, replacement))
+            patches.enter_context(mock.patch.object(
+                runner, "publish",
+                side_effect=AssertionError("local blocked run must not publish")))
+            patches.enter_context(mock.patch.object(
+                runner, "sync_main_after_test",
+                side_effect=AssertionError("local blocked run must not fetch")))
+            with contextlib.redirect_stdout(io.StringIO()) as console:
+                status = runner._run_qualification(
+                    mock.Mock(kdir="/unused", tier="algorithm"),
+                    {"status": "BLOCKED", "reason": "uncommitted_tracked_source",
+                     "source_policy": "local", "source_sha": source,
+                     "head_sha": source})
+        self.assertEqual(status, 2)
+        self.assertEqual(reports[0]["overall"], "BLOCKED")
+        self.assertIn("SKIPPED_GIT_SYNC: local_source_pinned",
+                      console.getvalue())
+
     def test_local_checkpoint_refuses_mismatched_file(self):
         report_data = {
             "source_sha": "a" * 40, "stages": [],

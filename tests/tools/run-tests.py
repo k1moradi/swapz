@@ -12930,6 +12930,10 @@ def main():
                 sync_result = _blocked_sync_result(
                     reason, observed_source=sync_result.get("source_sha"),
                     report_snapshot=report_snapshot)
+        # Even a locally BLOCKED algorithm run must not fall through into
+        # legacy remote report publication or post-test main synchronization.
+        if args.tier == "algorithm":
+            sync_result["source_policy"] = "local"
         return _run_qualification(args, sync_result)
     finally:
         if lock_fd is not None:
@@ -12941,7 +12945,8 @@ def _run_qualification(args, sync_result):
     tier = args.tier if isinstance(getattr(args, "tier", None), str) else "full"
     resume_requested = os.environ.get("RESUME") == "1" and tier == "algorithm"
     local_only = (tier == "algorithm" and
-                  sync_result.get("reason") == "local_source_pinned")
+                  (sync_result.get("source_policy") == "local" or
+                   sync_result.get("reason") == "local_source_pinned"))
     result = {
         "schema": "swapz-test-results-v1",
         "host_identity": report_host_identity(),
