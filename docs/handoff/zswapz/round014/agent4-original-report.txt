@@ -1,0 +1,59 @@
+message: REPORT_READY
+round: "014"
+agent: 4
+task_id: agent4-native-make-interface-rootless-failure
+status: SOURCE_READY_PENDING_COORDINATOR_CI
+source_sha: 2593159e619796d555b42f3d4af6f305c27c7d5c
+source_commit_url: https://github.com/k1moradi/swapz/commit/2593159e619796d555b42f3d4af6f305c27c7d5c
+sole_parent_sha: 7b25f9c7734b82780f6a55021d4ac64ed5b194b6
+task_publication_sha: 29e66e03f2a0a562cbec40ce678782bf8280f02a
+issue: https://github.com/k1moradi/swapz/issues/131
+modified_files:
+  - tests/runtime/native/make-interface-test.py
+  - docs/testing_standards.md
+unchanged_by_agent:
+  - Makefile
+  - tests/tools/run-tests.py
+  - tests/tools/product_goals.py
+  - .github/workflows/project-goals.yml
+  - all Agent 2 files
+evidence_class: exact-source-review | historical-hosted-failure-artifact | rootless-source-excerpt
+phase_a: BLOCKED
+phase_b: DISABLED
+main_pushed: false
+first_historical_failure: "PublicMakeContract.test_exact_six_root_goals at historical make-interface-test.py:207; an obsolete assertNotIn('\"ls-remote\"', reporter) globally rejected a remote Git command unrelated to the owner-approved local RAM source lease"
+first_new_executed_failure: none
+qualification_limit: SOURCE_READY_PENDING_COORDINATOR_CI
+
+### Actual source changes
+
+A real retrievable Git Data tree commit with sole parent `7b25f9c7734b82780f6a55021d4ac64ed5b194b6` now contains source-file changes (not a patch-only handoff). GitHub compare verifies exactly two files: `tests/runtime/native/make-interface-test.py` +253/-2; separate append-only `docs/testing_standards.md` +42/-0. The test file grows from 31 to 35 declared unittest methods (declarations, **not** a claim that the 35 executed).
+
+The first failure was recovered from **the original hosted private CI artifact**, not guessed from redacted console:
+- Source-run: https://github.com/k1moradi/swapz/actions/runs/43821180667
+- Make contract job `133144376789`, artifact `14204841025` (`make-interface.log`).
+- Historical source `c3a26a127b0f3427b25ade00ad8ba431e20307bb`: 31 tests ran, **30 passed, one failed** in `PublicMakeContract.test_exact_six_root_goals`, line 207: `self.assertNotIn('"ls-remote"', reporter)`. The original failure category was SOURCE_CONTRACT; CI's redacted public `AssertionError` correctly did not leak private operands.
+- The **frozen Round 014 source** already has a local-only RAM lease and separate permitted remote Git sync/publication machinery; do not revert those owner-approved changes. The stale global prohibition is now replaced by `local_ram_lease_source_error()`, an AST source-coupled test of `algorithm_ram_source_lease_refusal`, `run_algorithm_physical_selector_if_leased`, `local_main_source_for_test`, `tracked_source_checkout_preflight`, `git_sha`, and `_git_head`. It verifies expected call edges, local-only Git operations and construction of tracked-source diff, rejecting injected `ls-remote`, `fetch`, `pull`, `push`, a remote-helper call or missing mandatory lease, while not falsely rejecting unrelated publication code.
+
+Further actual unittest fixtures: require six **unique** public Make goals and source-specific tier/install commands; mutate missing/duplicate goals, wrong test/full tier, altered fast_test and install; test an actual nested GNU Make nonzero and nonexistent compiler. The existing disposable Git provenance test now also tracks a native test file, checks dirty-test source refusal, report-only descendant SHA, source edit, and the actual source-extracted `build/source-build-info.h` rule (including deliberately corrupted/stale header regeneration). The internal header rule is executed through a disposable Make fragment derived from real root Make source; the public root Makefile remains unmodified and its private-target guard is not bypassed.
+
+A fourth new test checks `product_goals.diagnose_ci_failure()` preserves the first source-bound unittest failure and redacts both first and later private exceptions. No production code, Make CLI, source lease, CI wrapper or workflow changes were required; the original CI first-cause category was already preserved correctly.
+
+### Executed evidence (exact commands and outcomes)
+
+1. `python3 -B /mnt/data/swapz-agent4-round014/source-excerpt-smoke.py -v` — **exit 0; 7/7 rootless source-excerpt tests**: real GNU Make generated-header recipe in temporary Git repositories, report-only commit identity, dirty kernel/build inputs, dirty test-only source, subsequent source SHA, nested Make failure, missing compiler. Python 3.13.5 / Git 2.47.3 / GNU Make 4.4.1. This script is **local independent excerpt evidence**, not the full repository's `make-interface-test.py`. Local script SHA256: `193bef77439cbf018f6ff90ba7e668c94bf26a567f34efb010bb3c1dffad271e`.
+2. `python3 -m py_compile /mnt/data/swapz-agent4-round014/source-excerpt-smoke.py` — **exit 0** (excerpt only).
+3. GitHub Git Data `create_blob`/`create_tree`/`create_commit`, compare `7b25f9c7...2593159e` and fetch commit: **success**, ahead=1, exactly 2 owned files, +295/-2 lines combined; inspected all 295 added diff lines for trailing whitespace, **0 problematic lines**. This is remote GitHub diff inspection, not a local `git diff --check`.
+4. `git ls-remote https://github.com/k1moradi/swapz.git HEAD` from local sandbox — **exit 128**, DNS resolution unavailable, so a full source checkout cannot be established from this local execution environment.
+5. Historical hosted `python3 -B tests/tools/product_goals.py ci-run --suite make-interface -- python3 -B tests/runtime/native/make-interface-test.py -v` on older source `c3a26a...`: **exit 1, 31 methods, one failing assertion**, from archived artifact. This is a *diagnostic first-failure reproduction source*, NOT a new-source test PASS.
+
+### NOT RUN and next integration gate
+
+- `python3 -B tests/runtime/native/make-interface-test.py -v` on **this new SHA**: **NOT_RUN**; full frozen checkout unavailable locally.
+- `python3 -B tests/tools/product_goals.py ci-run --suite make-interface -- python3 -B tests/runtime/native/make-interface-test.py -v` on new SHA: **NOT_RUN**.
+- `make -C tests/suites SANITIZE=1 test-userspace`, full native/rootless test tier and local `git diff --check`: **NOT_RUN**.
+- Hosted exact-commit CI and authenticated kernel MM→BIO stored zswap writeback: **NOT_RUN / NOT QUALIFIED**.
+
+Agent 1: materialize exact unreferenced commit in a complete clean main checkout, run full native Make-interface Python 35-method suite, independent negative diagnostics and rootless tier, `git diff --check`, and only then serially integrate with an expected-head main guard. Agent 2's distinct testing standard must be preserved in the same final integration history. Keep original failure status if source-bound tests expose a new real regression; do not upgrade the excerpt to full PASS.
+
+No remote branch/PR/fork/worktree, main push, production change, live kernel/device/swap/sudo work, or Agent 2 code edit occurred.

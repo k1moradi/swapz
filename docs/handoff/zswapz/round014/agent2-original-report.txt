@@ -1,0 +1,48 @@
+message: REPORT_READY
+round: "014"
+agent: 2
+task_id: agent2-kunit-uml-config-diagnostic-and-case-gate
+status: SOURCE_READY_PENDING_COORDINATOR_CI
+source_commit_sha: 0b7b10d17c4a5ccc94d8e8f51d19fb9d440c91f1
+frozen_source_sha: 7b25f9c7734b82780f6a55021d4ac64ed5b194b6
+source_parent_shas: [7b25f9c7734b82780f6a55021d4ac64ed5b194b6]
+source_tree_sha: 714fc73d2ebee43d606cc01f91b7fc55c9f7340c
+linux_upstream_sha: c339f4010dea8b0d754f84ace70cd1b089878ef8
+phase_a: BLOCKED
+phase_b: DISABLED
+main_publication: AGENT_1_ONLY
+MAIN_WRITE_LEASE_RELEASED
+
+# Agent 2 Round 014 — real frozen-parent source objects and evidence
+
+## Retrievable implementation
+[Git commit 0b7b10d17c4a5ccc94d8e8f51d19fb9d440c91f1](https://github.com/k1moradi/swapz/commit/0b7b10d17c4a5ccc94d8e8f51d19fb9d440c91f1), fetched back through GitHub Git API with **sole parent 7b25f9c7734b82780f6a55021d4ac64ed5b194b6**. Four owned source paths only:
+- `.github/workflows/phase-a-zswap-origin-kunit.yml` (blob `da8533f0cfb151aee8fd5f2060fcc97c3f2c3038`)
+- `tests/runtime/native/pinned-linux-zswap-origin-stage-test.py` (blob `df8318a608f7b073d28be1eb3cdf6ddd3b554f40`)
+- New `tests/runtime/native/pinned-linux-kunit-uml-config-test.py` (blob `936d2d09085b1c4e4dcc099809e29d84f5e67c0e`)
+- Distinct append-only `## Round 014 — Agent 2 effective UML Kconfig and five-case profile evidence gate` in `docs/testing_standards.md` (blob `729ada8564c1ca5ac0fcebe8e67481d8b180b405`).
+
+Worker **did not push remote main, create a branch/PR/fork/worktree, load modules or touch swap/physical devices**. A competing main advance does not change this frozen-parent commit.
+
+## First failure: actual retained hosted artifact, not inference
+Pinned Linux BIO origin KUnit [run #43811904846](https://github.com/k1moradi/swapz/actions/runs/43811904846), artifact [#14200877458](https://github.com/k1moradi/swapz/actions/runs/43811904846/artifacts/14200877458), `enabled.txt`:
+- `defconfig_exit=0`; `scripts_config_exit=0`; `olddefconfig_exit=0`; `prepare_exit=0`; `modified_objects_exit=0`; `zswap_object_exit=0`; `uml_kunit_exit=0`.
+- `result=FAIL`, `first_failure_phase=verify_uml_config`, `first_failure_exit=1`. `config_sha256=77fe443ab5450fca565dfe22e51d4d41448356ce018db263ccbe4b8a9a304feb`.
+- The artifact did **not** retain the UML `.config` or an `uml_config_sha256`, so it cannot prove the exact diverging option. No `disabled.txt` or five-case PASS outcome exists. Do **not** assert the previous run qualified both profiles.
+- Source-grounded Kconfig dependency: pinned Linux `init/Kconfig` places `config BLK_CGROUP` under `if CGROUPS`, with `depends on BLOCK` and `default n`. The BIO KUnit test's `bio_prepare_reissue(&bio, NULL)` branch must not run under BLK_CGROUP. The workflow now requests **both** `# CONFIG_CGROUPS is not set` and `# CONFIG_BLK_CGROUP is not set`, verifies both effective values and retains mandatory `BLOCK/SWAP/KUNIT/SWAP_BIO_ORIGIN_KUNIT_TEST=y` plus the selected `ZSWAP=y/n` value. This is a proposed source-grounded config correction; actual hosted resolution still requires a new run.
+
+## New exact gates
+1. Dedicated rootless CLI `--verify` reads the requested and effective UML Kconfig (size/symlink/UTF-8 checked), rejects duplicates, malformed fields, wrong y/n/m, missing and forced values, and writes `uml_config_sha256` plus `uml_request_sha256` to the profile manifest **before** emitting the first bounded, option-specific refusal. No arbitrary full config or host absolute path in failure text.
+2. Separate y/n UML build dirs; newly-added pre-run refusal of stale UML build/TAP paths; existing bounded `timeout -k 10s 40m`, `--jobs=2`, `--make_options=W=1`, modified-source hashes and object checks preserved.
+3. Existing `--verify-kunit-tap` remains mandatory before per-profile `kunit_cases_passed=5`. A new last-stage `--verify-pair` checks both manifests, source SHA, requested y/n, exact profile config values/digests, actual TAP digests, complete five-case markers, no duplicated config or copied TAP, and **reinvokes the original strict five-case parser independently on both captured TAP files**. Missing, skipped/failed/forged or unexecuted KUnit cannot produce the final PASS.
+4. Existing source-bound workflow mutation tests now also reject a missing effective diagnostic, one-sided CGROUPS protection and a missing final pair gate. The original TAP negative suite remains intact, plus dedicated rootless malformed/duplicate/forced/wrong/absent profile checks.
+5. Phase B not enabled; no producer ABI, I/O or compression behavior changed.
+
+## Verification classes and measured limits
+- **PASS**, exact Git object readback: commit single parent 7b25f9c7734b82780f6a55021d4ac64ed5b194b6; exactly four owned changed paths; distinct standards co-change; 17/17 source-owned static contract probes and correct ordering of rootless → stage → object Kbuild → UML KUnit → effective-config check → real TAP → profile-pair check (performed on source fetched by exact SHA).
+- **PASS**, added-line trailing-whitespace scan over exact GitHub commit per-file patches: **0 findings**. This is not a local `git diff --check` invocation.
+- **PASS**, rootless independent Python verifier *prototype* at `/mnt/data/round014_agent2/pinned-linux-kunit-uml-config-test.py`: `python3 -B ...` **exit 0, 7/7 test methods**; `python3 -m py_compile ...` **exit 0**. That local prototype is **not byte-identical to the committed helper**; these results are *model-level* evidence, **not** evidence that the exact committed helper, full stage suite, or hosted KUnit passed.
+- **NOT_RUN**, exact frozen-parent full `python3 -B tests/runtime/native/pinned-linux-zswap-origin-stage-test.py -v`, exact committed helper unittest/py_compile, PyYAML validation of exact workflow, extraction/`bash -n` of exact hosted run block, exact `git diff --check`: GitHub source was accessible via connector Git blobs, but local sandbox cannot resolve GitHub or materialize this repository checkout, and those commands were not executed against exact source.
+- **NOT_RUN**, full pinned `torvalds/linux` checkout staging with `CONFIG_ZSWAP=y/n`, patched Linux Kbuild, actual UML KUnit run (five unique PASS TAP cases), and owner-authorized loaded MM→BIO→DM provenance/readback. Neither the old exit-0 `kunit.py` nor the rootless model should be promoted to actual KUnit PASS.
+
+Agent 1 owns serial integration/rebased documentation co-change and the **first post-integration real hosted workflow**. If it fails, the new manifest reports the precise effective `CONFIG_*` option and y/n actual value and SHA for direct repair. The worker SHA has no independent main publication; **MAIN_WRITE_LEASE_RELEASED**. Phase A remains BLOCKED, Phase B RAW bypass DISABLED.
