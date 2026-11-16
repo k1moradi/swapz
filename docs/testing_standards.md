@@ -14142,3 +14142,37 @@ prototype. This is SOURCE_ONLY. A synthetic original 4096-byte memcmp is NOT
 a loaded Linux swap-in. Phase A BLOCKED, Phase B forced RAW bypass DISABLED,
 direct compressed handoff DISABLED, LOADED/PHYSICAL=NOT_RUN; no kernel,
 owner RAM/swap or physical device operation authorized.
+
+## Round 022 — Agent 2: disabled zswap compressed LZ4 store/eviction certificate
+
+Keep `tests/tools/stage-pinned-linux-zswap-origin.py` pinned to the exact
+unmodified upstream `mm/zswap.c` blob, and retain genuine y/n 5-case KUnit
+evidence unchanged. The only proposed compressed producer transport is
+`#if 0` and must remain **compiled/runtime disabled**; a BIO origin flag
+from already-decompressed 4096-byte writeback does not carry compressed bytes.
+Only a separately tagged `ZSWAP_SWAPZ_REPR_ZSWAP_LZ4_V1` volatile-RAM
+descriptor may someday carry true stored-entry LZ4 after authenticated
+store-time codec, xarray pointer/folio lock and authoritative slot-generation
+identity, explicit 4096-byte original SHA256, bounded immutable 1..3568
+compressed allocation and CRC32C. IEEE CRC32 is incompatible with CRC32C and
+must fail negative source mutation. Existing `RAW_4096` is full uncompressed
+original plaintext, never repurposed for compressed zpool bytes.
+
+The compiled host C fixture exercises source-owned atomic submission,
+completion/abort, rejected replay/clone/double-free, failed callback, source
+zpool mutability, stale/ABA xarray and generation, unsupported codec, wrong
+page/length, wrong representation, SHA provenance and CRC32C byte flips.
+Test strict GCC and Clang warnings plus ASan/UBSan; failures must preserve
+the original nonzero exit. The host SHA shim validates a Python independently
+SHA256-hashed fixed original 4096-byte page; this is **not** a genuine kernel
+stored-entry or crypto benchmark. Always separately classify source-extracted
+C, complete committed Python regression, pinned kernel KUnit, matched Kbuild
+and loaded physical evidence. Do not present source mock output as Phase A.
+
+A production design must still source generation from the genuine swap-slot
+allocator, prove a legitimate retained zswap entry, cap per-entry SHA CPU
+and descriptor concurrency, transfer lifetime across clone/reissue, and verify
+committed loaded DM WRITE + future **original byte-exact 4096 READ**. Until
+then Phase A BLOCKED, Phase B forced RAW bypass DISABLED, compressed handoff
+DISABLED. Preserve SWAPSPACE2 original first 4096 bytes/UUID/signature and
+all existing ordinary swap/DM ownership and payload-only post-header extents.

@@ -410,15 +410,25 @@ COMPRESSED_HANDOFF_SOURCE = r"""/*
  * exclusively owned by the caller until callbacks are quiescent.
  */
 #if 0 /* SWAPZ_COMPRESSED_HANDOFF_DISABLED_NO_PINNED_BIO_ABI */
-#include <linux/crc32.h>
+#include <linux/crc32c.h>
+#include <crypto/sha2.h>
 
 #define ZSWAP_SWAPZ_COMPRESSED_MAX 3568U
 #define ZSWAP_SWAPZ_LOGICAL_BYTES 4096U
+#define ZSWAP_SWAPZ_DIGEST_BYTES 32U
+#define ZSWAP_SWAPZ_RECORD_VERSION 1U
 
 enum zswap_swapz_proto_codec {
 	ZSWAP_SWAPZ_CODEC_UNKNOWN = 0,
 	ZSWAP_SWAPZ_CODEC_LZ4 = 1,
 	ZSWAP_SWAPZ_CODEC_ZSTD = 2,
+};
+
+/* Dedicated volatile-RAM representation; NEVER the existing RAW_4096. */
+enum zswap_swapz_proto_representation {
+	ZSWAP_SWAPZ_REPR_INVALID = 0,
+	ZSWAP_SWAPZ_REPR_RAW_4096 = 1,
+	ZSWAP_SWAPZ_REPR_ZSWAP_LZ4_V1 = 2,
 };
 
 enum zswap_swapz_proto_state {
@@ -429,14 +439,35 @@ enum zswap_swapz_proto_state {
 	ZSWAP_SWAPZ_PAYLOAD_RELEASED = 4,
 };
 
+/*
+ * Source-only store-time certificate. This is NOT a public ABI or permission
+ * to forge a stored entry: a real integration must call the binder only after
+ * zswap_store_page() publishes an entry while holding the original folio lock,
+ * with generation from an authoritative swap-slot allocator. Caller-created
+ * host fixtures do not establish kernel provenance.
+ */
+struct zswap_swapz_stored_proof {
+	struct zswap_swapz_stored_proof *self;
+	const struct zswap_entry *stored_entry;
+	swp_entry_t slot;
+	u64 generation;
+	enum zswap_swapz_proto_codec stored_codec;
+	u8 original_sha256[ZSWAP_SWAPZ_DIGEST_BYTES];
+	bool admitted;
+};
+
 struct zswap_swapz_owned_payload {
 	swp_entry_t entry_identity;
+	u64 slot_generation;
+	unsigned int representation_version;
+	enum zswap_swapz_proto_representation representation;
+	u8 original_sha256[ZSWAP_SWAPZ_DIGEST_BYTES];
 	struct zswap_swapz_owned_payload *self; /* Reject descriptor clones. */
 	u8 *owned_allocation; /* Only this exact allocation is released. */
 	const u8 *owned_bytes; /* Never a zpool mapping or borrowed entry. */
 	unsigned int compressed_length;
 	unsigned int decoded_length;
-	u32 crc32;
+	u32 payload_crc32c;
 	enum zswap_swapz_proto_codec codec;
 	bool semantic_stored_writeback;
 	bool representation_compressed;
@@ -456,11 +487,64 @@ zswap_swapz_codec_from_tfm(const char *tfm_name)
 	return ZSWAP_SWAPZ_CODEC_UNKNOWN;
 }
 
+/* Fixed-size digest validity only; cannot manufacture missing store proof. */
+static bool zswap_swapz_digest_present(const u8 *digest)
+{
+	u8 nonzero = 0;
+	unsigned int index;
+
+	for (index = 0; index < ZSWAP_SWAPZ_DIGEST_BYTES; ++index)
+		nonzero |= digest[index];
+	return nonzero != 0;
+}
+
+/*
+ * This 4096-byte SHA256 cost is charged at genuine store time, not eviction.
+ * The outer zswap caller must independently cap RAM proof count and populate
+ * a nonzero slot generation from the real swap-slot allocator. None of these
+ * hooks are wired into live MM while the compressed transport is disabled.
+ */
+static int zswap_swapz_bind_stored_entry(
+		struct zswap_swapz_stored_proof *proof,
+		const struct zswap_entry *entry, swp_entry_t swpentry,
+		u64 generation, const struct folio *locked_folio,
+		const u8 *original_page, size_t original_length)
+{
+	struct zswap_pool *pool;
+
+	if (!proof || !entry || !locked_folio || !original_page ||
+	    !folio_test_locked(locked_folio) ||
+	    original_length != ZSWAP_SWAPZ_LOGICAL_BYTES || !generation ||
+	    proof->self || proof->admitted)
+		return -EINVAL;
+	if (entry != xa_load(swap_zswap_tree(swpentry), swp_offset(swpentry)) ||
+	    entry->swpentry.val != swpentry.val)
+		return -ESTALE;
+	if (!entry->length || entry->length > ZSWAP_SWAPZ_COMPRESSED_MAX)
+		return -EMSGSIZE;
+	pool = zswap_entry_pool((struct zswap_entry *)entry);
+	if (!pool || zswap_swapz_codec_from_tfm(pool->tfm_name) != ZSWAP_SWAPZ_CODEC_LZ4)
+		return -EOPNOTSUPP;
+
+	/* Original-page SHA, never a hash of compressed zpool bytes. */
+	sha256(original_page, ZSWAP_SWAPZ_LOGICAL_BYTES, proof->original_sha256);
+	if (!zswap_swapz_digest_present(proof->original_sha256))
+		return -ENODATA;
+	proof->self = proof;
+	proof->stored_entry = entry;
+	proof->slot = swpentry;
+	proof->generation = generation;
+	proof->stored_codec = ZSWAP_SWAPZ_CODEC_LZ4;
+	proof->admitted = true;
+	return 0;
+}
+
 /* Caller owns the locked swap-cache folio throughout this capture. */
 static int zswap_swapz_capture_owned_payload(
 		struct zswap_swapz_owned_payload *transfer,
 		const struct zswap_entry *entry, swp_entry_t swpentry,
-		const struct folio *locked_folio)
+		const struct folio *locked_folio,
+		const struct zswap_swapz_stored_proof *proof, u64 generation)
 {
 	struct zswap_pool *pool;
 	struct scatterlist input[2];
@@ -472,6 +556,13 @@ static int zswap_swapz_capture_owned_payload(
 	if (!transfer || !entry || !locked_folio ||
 	    !folio_test_locked(locked_folio))
 		return -EINVAL;
+	if (!proof || proof->self != proof || !proof->admitted ||
+	    proof->stored_entry != entry || !generation ||
+	    proof->generation != generation ||
+	    proof->slot.val != swpentry.val ||
+	    proof->stored_codec != ZSWAP_SWAPZ_CODEC_LZ4 ||
+	    !zswap_swapz_digest_present(proof->original_sha256))
+		return -ESTALE;
 	if (atomic_read(&transfer->owner_state) != ZSWAP_SWAPZ_PAYLOAD_EMPTY ||
 	    transfer->self || transfer->owned_allocation || transfer->owned_bytes)
 		return -EBUSY;
@@ -486,7 +577,8 @@ static int zswap_swapz_capture_owned_payload(
 	if (!pool)
 		return -ENOENT;
 	codec = zswap_swapz_codec_from_tfm(pool->tfm_name);
-	if (codec == ZSWAP_SWAPZ_CODEC_UNKNOWN)
+	/* Never reinterpret an old ZSTD entry after a pool/codec switch. */
+	if (codec != ZSWAP_SWAPZ_CODEC_LZ4 || codec != proof->stored_codec)
 		return -EOPNOTSUPP;
 	owned_bytes = kmalloc(entry->length, GFP_KERNEL);
 	if (!owned_bytes)
@@ -499,13 +591,18 @@ static int zswap_swapz_capture_owned_payload(
 	memcpy_from_sglist(owned_bytes, input, 0, entry->length);
 	zs_obj_read_sg_end(pool->zs_pool, entry->handle);
 	transfer->entry_identity = swpentry;
+	transfer->slot_generation = generation;
+	transfer->representation_version = ZSWAP_SWAPZ_RECORD_VERSION;
+	transfer->representation = ZSWAP_SWAPZ_REPR_ZSWAP_LZ4_V1;
+	memcpy(transfer->original_sha256, proof->original_sha256,
+	       ZSWAP_SWAPZ_DIGEST_BYTES);
 	transfer->self = transfer;
 	transfer->owned_allocation = owned_bytes;
 	transfer->owned_bytes = owned_bytes;
 	transfer->compressed_length = entry->length;
 	transfer->decoded_length = ZSWAP_SWAPZ_LOGICAL_BYTES;
 	transfer->codec = codec;
-	transfer->crc32 = crc32(0, owned_bytes, entry->length);
+	transfer->payload_crc32c = crc32c(0, owned_bytes, entry->length);
 	transfer->semantic_stored_writeback = true;
 	transfer->representation_compressed = true;
 	transfer->completion_error = 0;
@@ -521,13 +618,16 @@ static bool zswap_swapz_owned_payload_is_valid(
 		transfer->owned_bytes &&
 		transfer->semantic_stored_writeback &&
 		transfer->representation_compressed &&
+		transfer->slot_generation != 0 &&
+		transfer->representation_version == ZSWAP_SWAPZ_RECORD_VERSION &&
+		transfer->representation == ZSWAP_SWAPZ_REPR_ZSWAP_LZ4_V1 &&
+		zswap_swapz_digest_present(transfer->original_sha256) &&
 		transfer->decoded_length == ZSWAP_SWAPZ_LOGICAL_BYTES &&
 		transfer->compressed_length >= 1 &&
 		transfer->compressed_length <= ZSWAP_SWAPZ_COMPRESSED_MAX &&
-		(transfer->codec == ZSWAP_SWAPZ_CODEC_LZ4 ||
-		 transfer->codec == ZSWAP_SWAPZ_CODEC_ZSTD) &&
-		crc32(0, transfer->owned_bytes, transfer->compressed_length) ==
-		transfer->crc32;
+		transfer->codec == ZSWAP_SWAPZ_CODEC_LZ4 &&
+		crc32c(0, transfer->owned_bytes, transfer->compressed_length) ==
+		transfer->payload_crc32c;
 }
 
 /* One submission owner; the pointed-to descriptor cannot be cloned. */
@@ -596,6 +696,40 @@ COMPRESSED_HANDOFF_EDITS: dict[str, tuple[Edit, ...]] = {
 }
 
 
+
+def validate_disabled_compressed_contract(source: str) -> None:
+    """Freeze the source-only v1 representation, without enabling transport."""
+    required = (
+        "#if 0 /* SWAPZ_COMPRESSED_HANDOFF_DISABLED_NO_PINNED_BIO_ABI */",
+        "#endif /* SWAPZ_COMPRESSED_HANDOFF_DISABLED_NO_PINNED_BIO_ABI */",
+        "ZSWAP_SWAPZ_COMPRESSED_MAX 3568U",
+        "ZSWAP_SWAPZ_LOGICAL_BYTES 4096U",
+        "ZSWAP_SWAPZ_RECORD_VERSION 1U",
+        "zswap_swapz_bind_stored_entry(",
+        "proof->stored_entry != entry",
+        "proof->generation != generation",
+        "proof->stored_codec != ZSWAP_SWAPZ_CODEC_LZ4",
+        "sha256(original_page, ZSWAP_SWAPZ_LOGICAL_BYTES, proof->original_sha256);",
+        "crc32c(0, owned_bytes, entry->length)",
+        "crc32c(0, transfer->owned_bytes, transfer->compressed_length)",
+        "transfer->representation_version == ZSWAP_SWAPZ_RECORD_VERSION",
+        "transfer->representation == ZSWAP_SWAPZ_REPR_ZSWAP_LZ4_V1",
+        "ZSWAP_SWAPZ_REPR_RAW_4096 = 1",
+        "zswap_swapz_digest_present(transfer->original_sha256)",
+        "transfer->codec == ZSWAP_SWAPZ_CODEC_LZ4",
+        "atomic_cmpxchg(&transfer->owner_state,",
+        "transfer->self != transfer",
+    )
+    if (any(source.count(fragment) != 1 for fragment in required if
+            fragment not in ("atomic_cmpxchg(&transfer->owner_state,",
+                            "transfer->self != transfer")) or
+        source.count("atomic_cmpxchg(&transfer->owner_state,") != 3 or
+        source.count("transfer->self != transfer") != 3 or
+        "crc32(0," in source or
+        "submit_bio(" in source or "REQ_ZSWAP_WRITEBACK" in source):
+        raise StagingError("disabled-compressed-handoff-contract-drift")
+
+
 class StagingError(RuntimeError):
     """Refuse a preflight, source transition or publication failure."""
 
@@ -652,6 +786,7 @@ def render_source(path: str, original: str, *, compressed_handoff: bool = False)
     """Reject missing, duplicate and overlapping anchors before any mutation."""
     edits = EDITS.get(path, KUNIT_EDITS.get(path))
     if compressed_handoff:
+        validate_disabled_compressed_contract(COMPRESSED_HANDOFF_SOURCE)
         if path != "mm/zswap.c":
             raise StagingError(f"unexpected-compressed-prototype-path:{path}")
         edits = edits + COMPRESSED_HANDOFF_EDITS[path]
