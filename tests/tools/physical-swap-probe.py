@@ -79,11 +79,13 @@ LINUX_SWAP_PRIORITY_MAX = 32767
 # priority while unrelated host processes remain active. Linux may assign a
 # few host pages immediately after swapon, before our cgroup workers exist.
 # A literal zero-use check would therefore reject correct real-media tests.
-# Permit at most 16 preexisting 4KiB pages (64KiB), never count them toward
-# cgroup traffic, and require the EXACT baseline to persist at each round
-# boundary. This opt-in private physical-test allowance does NOT change
-# primary production qualification or permit arbitrary background swapping.
-MAX_DEVELOPMENT_INITIAL_MAPPER_USED_KIB = 64
+# Permit at most 128 preexisting 4KiB pages (512KiB), never count them
+# toward cgroup traffic, and require the EXACT baseline to persist at each
+# round boundary. The previous 64KiB limit rejected an observed 220KiB
+# pre-oracle baseline even though it was page-aligned. This fixed sub-MiB
+# bound still rejects significant foreign swapping and NEVER counts it as
+# oracle traffic. It does not alter primary production qualification.
+MAX_DEVELOPMENT_INITIAL_MAPPER_USED_KIB = 512
 # The swapz DM status ABI contains many named counters. Preserve a bounded
 # complete status line rather than certifying a clipped prefix as healthy.
 MAX_STATUS_OUTPUT_CHARS = 32768

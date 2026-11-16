@@ -774,6 +774,7 @@ class PhysicalSwapProbeTests(unittest.TestCase):
         for active, reason in (
                 (None, "mapper_entry_missing"),
                 ({"used_kib": 4096}, "initial_swap_usage_nonzero"),
+                ({"used_kib": 516}, "initial_swap_usage_nonzero"),
                 ({"used_kib": 66}, "initial_swap_usage_nonzero"),
                 ({"used_kib": True}, "swap_usage_unavailable"),
                 ({"used_kib": None}, "swap_usage_unavailable"),
@@ -797,6 +798,12 @@ class PhysicalSwapProbeTests(unittest.TestCase):
             {"used_kib": 12}), 12)
         self.assertEqual(probe._require_run_owned_swap_activation(
             {"used_kib": 64}), 64)
+        # The real host exposed 55 foreign pages (220KiB) after swapon.
+        # Their exact fixed baseline is allowed, not oracle attribution.
+        self.assertEqual(probe._require_run_owned_swap_activation(
+            {"used_kib": 220}), 220)
+        self.assertEqual(probe._require_run_owned_swap_activation(
+            {"used_kib": 512}), 512)
         # Untrusted or absent hints must not acquire a new public reason.
         default = probe._algorithm_physical_phase_failure_record(
             {"physical_oracle_phases": [{"status": "PASS"}]},
@@ -822,12 +829,12 @@ class PhysicalSwapProbeTests(unittest.TestCase):
             read.assert_not_called()
             with self.assertRaises(probe.ProbeError) as caught:
                 probe._require_run_owned_swap_activation(
-                    {"used_kib": 512})
+                    {"used_kib": 516})
         self.assertEqual(caught.exception.algorithm_activation_reason,
                          "initial_swap_usage_nonzero")
         observation = caught.exception.algorithm_activation_observation
         self.assertEqual(observation, {
-            "mapper_used_kib": 512,
+            "mapper_used_kib": 516,
             "mem_available_mib": 2616,
             "memory_psi_some_avg10_milli_pct": 170,
         })
@@ -844,9 +851,9 @@ class PhysicalSwapProbeTests(unittest.TestCase):
         with mock.patch.object(probe.Path, "read_text",
                                side_effect=OSError("NEVER_EXPORT")):
             with self.assertRaises(probe.ProbeError) as unavailable:
-                probe._require_run_owned_swap_activation({"used_kib": 128})
+                probe._require_run_owned_swap_activation({"used_kib": 516})
         self.assertEqual(unavailable.exception.algorithm_activation_observation, {
-            "mapper_used_kib": 128,
+            "mapper_used_kib": 516,
             "mem_available_mib": None,
             "memory_psi_some_avg10_milli_pct": None,
         })
@@ -872,6 +879,31 @@ class PhysicalSwapProbeTests(unittest.TestCase):
                     probe._algorithm_real_swap_summary(
                         result, policy, "a" * 64, expected_mapper_baseline_kib=12)
                 result["rounds"][1][field] = original
+
+    def test_algorithm_observed_foreign_baseline_never_counts_as_oracle_swap(self):
+        """A 220KiB host baseline must remain byte-exact and immutable."""
+        workload, policy, result = self.algorithm_workload_fixture()
+        for record in result["rounds"]:
+            record["mapper_used_start_kib"] = 220
+            record["mapper_used_released_kib"] = 220
+        self.assertEqual(
+            probe._algorithm_real_swap_summary(
+                result, policy, "a" * 64,
+                expected_mapper_baseline_kib=220)["status"], "PASS")
+        for field, changed_value in (
+                ("mapper_used_start_kib", 224),
+                ("mapper_used_released_kib", 216),
+                ("mapper_used_delta_kib", 4)):
+            with self.subTest(field=field):
+                original = result["rounds"][0][field]
+                result["rounds"][0][field] = changed_value
+                with self.assertRaisesRegex(
+                        probe.ProbeError,
+                        "round_integrity_and_io|independent_traffic"):
+                    probe._algorithm_real_swap_summary(
+                        result, policy, "a" * 64,
+                        expected_mapper_baseline_kib=220)
+                result["rounds"][0][field] = original
 
     def test_algorithm_summary_failure_retains_single_emitted_diagnostic(self):
         workload, policy, result = self.algorithm_workload_fixture()

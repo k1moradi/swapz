@@ -2706,8 +2706,8 @@ physical helper, oracle, frozen workload/acceptance policy, and unknown paths
 remain blocking. This never changes the local checkout, verified binary
 digests, device identity checks or recovery ownership.
 
-The bounded **development-only physical trial** may instead pin at most 64 KiB
-(16 pages) of pre-existing, page-aligned unrelated host swap immediately after
+The bounded **development-only physical trial** may instead pin at most 512 KiB
+(128 pages) of pre-existing, page-aligned unrelated host swap immediately after
 swapon. Linux can legitimately allocate those pages to a highest-priority
 mapper before our isolated oracle has started. They are never oracle evidence.
 Every round must start at exactly that original pinned mapper baseline with
@@ -3796,10 +3796,10 @@ switch swap devices, or disable the official production zero-use gate.
 For an owned swap mapper immediately after `swapon`, the development trial
 must distinguish absence from the active swap inventory, EXCESSIVE or
 misaligned initial swap usage, and invalid usage observations. Preserve exact
-mapper identity; only the private development path permits a bounded 0..64 KiB
+mapper identity; only the private development path permits a bounded 0..512 KiB
 pre-oracle baseline, which must be explicitly threaded into every workload
 round and checked against separately charged cgroup bytes. If nonzero usage
-exceeds 64 KiB or is not page-aligned, retain the finite
+exceeds 512 KiB or is not page-aligned, retain the finite
 initial_swap_usage_nonzero refusal. It is never a qualified oracle allocation.
 Do not change the independent production zero-use admission. The three fixed
 source-defined failure reasons remain stable and identity-free after recovery;

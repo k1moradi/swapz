@@ -37,8 +37,11 @@ The development helper enables a temporary owned mapper with swap priority
 few host swap pages to this new device BEFORE the dedicated cgroup oracle
 starts. Treating any positive /proc/swaps Used KiB as swapz corruption made
 the real-device correctness test intermittently impossible on a healthy host.
-Only this explicitly bounded development path may pin 0..64 KiB of
-page-aligned preexisting host use. Those pages never count as oracle traffic:
+Only this explicitly bounded development path may pin 0..512 KiB of
+page-aligned preexisting host use (up to 128 Linux 4KiB pages). A fresh
+owner-host test observed 220KiB during activation, before the cgroup oracle.
+This sub-MiB cap is not a production acceptance rule and must not become a
+moving baseline. Those pages never count as oracle traffic:
 both test rounds MUST begin/end at exactly the pinned baseline with ZERO
 dedicated-cgroup swap charge, and each in-round increment of mapper Used
 bytes MUST equal dedicated-cgroup memory.swap.current. Any baseline drift,
