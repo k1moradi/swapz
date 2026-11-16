@@ -100,6 +100,9 @@ def verify_kunit_workflow_contract(contents: str) -> None:
     """Reject real YAML shell ordering/identity gaps before coordinator CI."""
     required = (
         "c339f4010dea8b0d754f84ace70cd1b089878ef8",
+        # Both immutable upstream checkout and runtime pin must agree.
+        f"ref: {stager.LINUX_COMMIT}",
+        f"pinned={stager.LINUX_COMMIT}",
         '[[ "$(git -C linux rev-parse HEAD)" == "$pinned" ]]',
         '--linux-root linux --manifest "$evidence/sources.json" --with-kunit',
         "block/swap-bio-origin-kunit.c",
@@ -838,7 +841,7 @@ class PinnedLinuxStageTests(unittest.TestCase):
                       "CONFIG_SWAP_BIO_ORIGIN_KUNIT_TEST=y",
                       "CONFIG_ZSWAP=y", "# CONFIG_ZSWAP is not set",
                       "tools/testing/kunit/kunit.py", "verify_real_tap",
-                      "Subtest:", "not ok", "kunit_cases_passed=5",
+                      "--verify-kunit-tap", "--raw_output", "kunit_cases_passed=5",
                       "staged_sha256"):
             self.assertIn(token, workflow)
         self.assertNotIn("echo KUNIT_PASS", workflow)
