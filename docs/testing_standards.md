@@ -13547,3 +13547,107 @@ backing. **Phase A BLOCKED, Phase B forced RAW DISABLED, direct compressed
 handoff DISABLED.** Only coordinator-reviewed matched Linux/Kbuild/KUnit,
 loaded origin+readback and owner-qualified device evidence can authorize
 production activation.
+
+## Round 016 — Agent 2 pinned UML KUnit compiled-object manifest integrity (2026-11-16)
+
+The hosted pinned-Linux KUnit run `43834985711`, retained artifact
+`14209984320`, contains four legitimate `object=... sha256=...` records
+for the enabled profile. The old generic `parse_manifest()` rejected its
+second `object=` as a repeated scalar key, causing
+`verify_uml_config_exit=1` and `malformed-or-duplicate-manifest` **before**
+any effective Kconfig or five-case TAP check. Neither the zero-exit UML
+KUnit command nor this manifest refusal establishes passing KUnit cases.
+
+The source-owned verifier must treat `object=` as a *typed, repeatable
+record*, not as an arbitrary multi-valued manifest field. It accepts each
+of `block/bio.o`, `block/swap-bio-origin-kunit.o`, and `mm/page_io.o`
+exactly once for both profiles; `mm/zswap.o` is additionally required
+exactly once only when `CONFIG_ZSWAP=y`. Each line must contain one
+lowercase, full 64-hex SHA-256 digest. Duplicate object identities (even
+with a different digest), foreign paths, corrupted/truncated/uppercase
+hashes, missing required objects, or an object from the wrong y/n profile
+are failures. Every other manifest field remains unique except the
+validated `IN_PROGRESS → PASS|FAIL` result transition. No manifest data
+can forge a successful KUnit execution or bypass existing symlink, size,
+Kconfig, source-identity and TAP checks.
+
+After validating the initial object inventory, `--verify` records one
+`uml_objects_sha256` digest of the canonical sorted object-name/digest
+pairs alongside the independent request and effective UML config hashes.
+The final `--verify-pair` rechecks the exact y/n object inventories and
+refuses changes to any object digest after the first gate. This is a
+*manifest transition integrity check*, not independent verification of
+ELF contents: object bytes are checked by source-linked hosted Kbuild.
+Repeated `--verify` may not append second conflicting digest fields.
+The two profiles keep separate configuration, object inventories, output
+hashes and five distinct executed, non-skipped TAP cases. Rootless
+fixtures and historical hosted artifacts are not evidence that the
+modified source ran a fresh two-profile UML KUnit suite.
+
+Only Agent 1 can integrate and run exact committed source in hosted CI.
+Phase A remains BLOCKED; Phase B RAW bypass and the direct compressed
+handoff remain DISABLED. No running-kernel, mapper, swap, or physical
+backing device operation is authorized by this change.
+
+## Round 016 Agent 3 — authenticated DM origin exactly-once committed accounting
+
+The production Device Mapper consumer retains Phase A **passive only**
+semantic zswap-origin attribution. On each admitted per-BIO descriptor
+initialization the code sets `write_origin=ORDINARY_OR_UNKNOWN` and clears
+`origin_commit_counted`. The optional pinned Linux origin carrier may
+classify only `REQ_OP_WRITE` with precisely `SWAPZ_SECTORS` sectors
+(4096 bytes at 512 bytes/sector), 4096 BIO bytes and the authentic
+`bio_is_zswap_stored_writeback()` helper, which independently checks
+`REQ_SWAP` and exact authenticated stored-entry provenance. A missing
+carrier, READ, rejection, mixed cloned origin, wrong length or stale
+reused descriptor cannot create the positive counter. The authoritative
+producer ABI and full-page RAW meaning remain unchanged.
+
+All four established foreground success hooks — synchronous compressed,
+detached asynchronous compressed/RAW, dedicated RAW and zero-elided — still
+run **after** their real authority completion and **before** upper BIO
+completion. A new descriptor-local once-only bit is marked by the same
+serialized `ordered_owner` as the origin counter; the lower callback
+merely wakes that owner and does not own this bit. Repeated success-hook
+invocation for one still-owned BIO is idempotent without an atomic RMW,
+lock, allocation, hot-path scan or compression-policy change. On a later
+BIO using a recycled DM descriptor the bit is independently reset;
+rejected/requeued/error, READ, DISCARD, GC/reuse and reset paths cannot
+publish a foreground-origin completion. Do not read descriptor state after
+`bio_endio()`, and do not equate a committed authority with a subsequently
+successful upper ACK if a terminal failure intervenes.
+
+Run the actual rootless consumer and producer→consumer ABI source
+regressions, plus a compiler-exercised **unmodified extracted production C**
+commit helper with kernel types/counters replaced only by test stubs:
+ordinary calls must count zero, repeated success must count once, recycled
+ordinary must not count and the subsequent authenticated success must
+increment exactly once. The C fixture uses GCC/Clang when installed,
+strict C11 warnings and UBSan, and is not a kernel or racing-thread
+qualification. In addition to the existing 20 negative source mutations,
+the consumer regression rejects omitted/premarked descriptor reset,
+missing once-only guard, and setting the mark after counting. The ABI
+suite requires the updated 24 consumer mutations plus all existing
+producer/mixed-origin/clone negatives.
+
+The exact existing `phase-a-zswap-origin-prototype.yml` source workflow
+must run on changes to the DM consumer or either source-contract test and
+run both original, source-bound consumer regressions before its matched
+Linux build. The paired verifier enforces those triggers/steps with
+negative mutations while **retaining** the pinned SHA and original Git
+blob/headers, `CONFIG_ZSWAP=y/n` per-profile effective configuration,
+real full exported `Module.symvers`, linked nonempty `dm-swapz.ko` and
+SHA-256, compiler identity, generated clean source-build-info, clean
+staged source, binary `origin_carrier_compiled=1` (never stock `0`),
+modinfo/vermagic and fail-closed warning and terminal PASS ordering.
+
+Local source, mutation and extracted-C compiler success constitute
+`SOURCE_READY_PENDING_COORDINATOR_CI` only; exact integrated SHA
+matched Linux Kbuild and hosted KUnit must pass separately. Even both
+compiled profiles do not prove a booted matched kernel, actual zswap
+stored-entry WRITE or byte-exact 4096-byte swap-in. Loaded runtime,
+teardown, FUA/flush, fault/retry and physical qualification remain NOT_RUN
+unless real source-linked artifacts exist. Phase A BLOCKED; Phase B
+forced RAW and compressed direct handoff DISABLED. No module insertion,
+mapper, swap, loop/null_blk or physical device is authorized by this
+source-only task.

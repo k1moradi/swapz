@@ -514,6 +514,28 @@ def assert_full_workflow_contract(workflow: Path) -> None:
             build_step.index("run_logged kernel_export_build") <
             build_step.index("run_logged kernel_export_modules"),
             "workflow_baseline_warning_gate")
+    # The matched Linux job must run on changes to the actual DM reader and
+    # must test that reader before any potentially expensive linked build.
+    trigger, separator, _ = text.partition("  workflow_dispatch:")
+    require(bool(separator) and all(
+        f'      - "{path}"' in trigger for path in (
+            "src/kernel/dm-target.c",
+            "tests/runtime/native/zswap-origin-consumer-source-test.py",
+            "tests/runtime/native/zswap-origin-producer-consumer-abi-test.py")),
+            "workflow_consumer_change_trigger")
+    step_name = ('      - name: "Run actual DM origin and compiled once-only '
+                 'foreground-commit source regressions"')
+    require(text.count(step_name) == 1, "workflow_consumer_regression_step")
+    rootless_step = text.split(step_name, 1)[1].split(
+        '      - name: "Run disabled compressed handoff source/ownership negative regression"', 1)[0]
+    require("set -euo pipefail" in rootless_step and
+            "if python3 -B \"$script\"" in rootless_step and
+            "zswap-origin-consumer-source-test.py" in rootless_step and
+            "zswap-origin-producer-consumer-abi-test.py" in rootless_step and
+            "tail -n 35" in rootless_step and
+            text.index(step_name) < text.index(
+                '      - name: "Build modified Linux and matched source-linked'),
+            "workflow_consumer_regression_fail_closed")
 
 
 class PairedModuleTests(unittest.TestCase):
@@ -931,6 +953,29 @@ class FullWorkflowContractTests(unittest.TestCase):
 
     def test_real_full_workflow(self) -> None:
         assert_full_workflow_contract(self.workflow_path)
+
+    def test_consumer_source_changes_trigger_matched_linux(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="consumer-trigger-") as directory:
+            text = self.workflow_path.read_text()
+            anchor = '      - "src/kernel/dm-target.c"'
+            self.assertEqual(text.count(anchor), 1)
+            path = Path(directory) / "untriggered.yml"
+            path.write_text(text.replace(anchor, '      - "unrelated.txt"'))
+            with self.assertRaisesRegex(
+                    VerificationError, "workflow_consumer_change_trigger"):
+                assert_full_workflow_contract(path)
+
+    def test_missing_real_consumer_regression_fails_closed(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="consumer-regression-") as directory:
+            text = self.workflow_path.read_text()
+            anchor = "            swapz/tests/runtime/native/zswap-origin-producer-consumer-abi-test.py; do"
+            self.assertEqual(text.count(anchor), 1)
+            path = Path(directory) / "unverified.yml"
+            path.write_text(text.replace(
+                anchor, "            swapz/tests/runtime/native/incorrect-test.py; do"))
+            with self.assertRaisesRegex(
+                    VerificationError, "workflow_consumer_regression_fail_closed"):
+                assert_full_workflow_contract(path)
 
     def test_removing_classifier_is_rejected(self) -> None:
         with tempfile.TemporaryDirectory(prefix="kernel-doc-gate-") as directory:

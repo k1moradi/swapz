@@ -8,6 +8,9 @@ on:
       - "tests/runtime/native/pinned-linux-zswap-origin-stage-test.py"
       - "tests/runtime/native/pinned-linux-zswap-compressed-handoff-test.py"
       - "tests/runtime/native/pinned-linux-origin-paired-module-test.py"
+      - "src/kernel/dm-target.c"
+      - "tests/runtime/native/zswap-origin-consumer-source-test.py"
+      - "tests/runtime/native/zswap-origin-producer-consumer-abi-test.py"
   workflow_dispatch:
 
 permissions:
@@ -60,6 +63,22 @@ jobs:
             tail -n 35 "$RUNNER_TEMP/zswap-origin-rootless.log"
             exit "$result"
           }
+      - name: "Run actual DM origin and compiled once-only foreground-commit source regressions"
+        shell: bash
+        run: |
+          set -euo pipefail
+          for script in \
+            swapz/tests/runtime/native/zswap-origin-consumer-source-test.py \
+            swapz/tests/runtime/native/zswap-origin-producer-consumer-abi-test.py; do
+            if python3 -B "$script" > "$RUNNER_TEMP/zswap-origin-dm-contract.log" 2>&1; then
+              :
+            else
+              result=$?
+              echo "::error::Matched consumer source/ABI regression failed (exit $result)"
+              tail -n 35 "$RUNNER_TEMP/zswap-origin-dm-contract.log"
+              exit "$result"
+            fi
+          done
       - name: "Run disabled compressed handoff source/ownership negative regression"
         shell: bash
         run: |

@@ -139,6 +139,7 @@ def validate_consumer(source: str) -> None:
             '#define SWAPZ_SECTORS (SWAPZ_BLOCK_BYTES >> SECTOR_SHIFT)' in source,
             "fixed 4KiB / 512-byte-sector consumer geometry")
     gate = ("entry->write_origin = SWAPZ_WRITE_ORIGIN_ORDINARY_OR_UNKNOWN;\n"
+            "\tentry->origin_commit_counted = false;\n"
             "#ifdef BIO_HAS_ZSWAP_STORED_WRITEBACK_ORIGIN\n"
             "\tif (bio_op(bio) == REQ_OP_WRITE && count == SWAPZ_SECTORS &&\n"
             "\t    bio->bi_iter.bi_size == SWAPZ_BLOCK_BYTES &&\n"
@@ -228,16 +229,23 @@ class PinnedProducerConsumerTests(unittest.TestCase):
                 with self.assertRaises((AssertionError, stager.StagingError)):
                     validate_staged(changed)
                 detected += 1
-        # Existing source-controlled production regression adds 20 independent
-        # map/admission/commit/codec mutants to the same rootless run.
+        # The source-controlled regression adds 24 independent
+        # admission/commit idempotence/codec mutants to this rootless run.
         consumer = SOURCE.read_text(encoding="utf-8")
         validate_consumer(consumer)
         consumer_mutations = consumer_test.run_negative_mutations(consumer)
-        self.assertEqual(consumer_mutations, 20)
+        self.assertEqual(consumer_mutations, 24)
         detected += consumer_mutations
         self.assertEqual(detected, len(PRODUCER_NEGATIVES) +
                          len(insertion_mutations) + consumer_mutations)
         print(f"PASS: {detected} producer and consumer mutations rejected")
+
+    def test_compiled_real_ordered_owner_commit_helper(self):
+        # Compile the unchanged extracted C helper, with only kernel types
+        # stubbed. Twice calling success and reusing the BIO must count once.
+        verified = consumer_test.compile_actual_origin_commit_helper(
+            SOURCE.read_text(encoding="utf-8"))
+        self.assertGreaterEqual(verified, 1)
 
     def test_compiled_real_bio_predicate_and_clone(self):
         # Reuse the existing actual staged C predicate/clone test; it runs

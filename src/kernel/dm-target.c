@@ -419,6 +419,8 @@ struct swapz_bio_ref {
 	bool preparation_force_raw;
 	/* Immutable admission snapshot; invalid after upper completion. */
 	enum swapz_write_origin write_origin;
+	/* Only the ordered owner sets this on successful foreground authority. */
+	bool origin_commit_counted;
 	/*
 	 * Set while ->map owns submitter-side preparation. The ordered owner
 	 * returns without touching this descriptor until the release store.
@@ -1125,15 +1127,24 @@ struct swapz_dm {
 	u64 io_failures;
 };
 
-/* The ordered commit owner observes a descriptor before upper completion. */
+/*
+ * The ordered commit owner observes a descriptor before upper completion.
+ * All four foreground-authority success paths hold ordered_owner; the lower
+ * callback only wakes that owner. Never count a repeated completion hook,
+ * reissued/failed BIO, or GC copy as a second authenticated foreground WRITE.
+ * This flag is reset at every accepted per-BIO descriptor initialization.
+ */
 static void swapz_count_verified_zswap_writeback_commit(struct swapz_dm *ctx,
 							struct bio *bio)
 {
-	const struct swapz_bio_ref *entry =
+	struct swapz_bio_ref *entry =
 		dm_per_bio_data(bio, sizeof(*entry));
 
-	if (entry->write_origin == SWAPZ_WRITE_ORIGIN_ZSWAP_STORED_WRITEBACK)
-		atomic64_inc(&ctx->foreground_committed_verified_zswap_writeback);
+	if (entry->write_origin != SWAPZ_WRITE_ORIGIN_ZSWAP_STORED_WRITEBACK ||
+	    entry->origin_commit_counted)
+		return;
+	entry->origin_commit_counted = true;
+	atomic64_inc(&ctx->foreground_committed_verified_zswap_writeback);
 }
 
 static int swapz_maybe_inject_read_fault(struct swapz_dm *ctx)
@@ -8651,6 +8662,7 @@ static int swapz_map(struct dm_target *ti, struct bio *bio)
 	entry->preparation_inline = false;
 	entry->preparation_force_raw = false;
 	entry->write_origin = SWAPZ_WRITE_ORIGIN_ORDINARY_OR_UNKNOWN;
+	entry->origin_commit_counted = false;
 #ifdef BIO_HAS_ZSWAP_STORED_WRITEBACK_ORIGIN
 	if (bio_op(bio) == REQ_OP_WRITE && count == SWAPZ_SECTORS &&
 	    bio->bi_iter.bi_size == SWAPZ_BLOCK_BYTES &&

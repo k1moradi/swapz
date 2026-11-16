@@ -30,6 +30,13 @@ REQUIRED = {
 }
 CONFIG_VALUE = re.compile(r"^(CONFIG_[A-Z0-9_]+)=(.+)$")
 CONFIG_UNSET = re.compile(r"^# (CONFIG_[A-Z0-9_]+) is not set$")
+MANIFEST_KEY = re.compile(r"^[a-z][a-z0-9_]*$")
+OBJECT_LINE = re.compile(r"^([a-z][a-z0-9_-]*/[a-z][a-z0-9_-]*\.o) sha256=([0-9a-f]{64})$")
+COMMON_OBJECTS = frozenset((
+    "block/bio.o", "block/swap-bio-origin-kunit.o", "mm/page_io.o",
+))
+KNOWN_OBJECTS = COMMON_OBJECTS | {"mm/zswap.o"}
+
 
 
 class EvidenceError(ValueError):
@@ -98,7 +105,21 @@ def parse_manifest(data: bytes) -> dict[str, str]:
     transitions = []
     for line in lines:
         name, separator, value = line.partition("=")
-        if not separator or not name or (name in record and name != "result"):
+        if not separator or not MANIFEST_KEY.fullmatch(name) or not value:
+            raise EvidenceError("malformed-or-duplicate-manifest")
+        if name == "object":
+            # Multiple records are legitimate, but each object identity has
+            # exactly one bounded digest and is never an ordinary text key.
+            match = OBJECT_LINE.fullmatch(value)
+            if match is None:
+                raise EvidenceError("invalid-object-record")
+            object_path, digest = match.groups()
+            if object_path not in KNOWN_OBJECTS:
+                raise EvidenceError("unknown-object-identity")
+            name, value = "object:" + object_path, digest
+            if name in record:
+                raise EvidenceError("duplicate-object-identity")
+        elif name in record and name != "result":
             raise EvidenceError("malformed-or-duplicate-manifest")
         if name == "result":
             transitions.append(value)
@@ -107,6 +128,23 @@ def parse_manifest(data: bytes) -> dict[str, str]:
                 raise EvidenceError("invalid-result-transition")
         record[name] = value
     return record
+
+
+def verify_object_inventory(profile: str, record: dict[str, str]) -> None:
+    """Require all and only the objects compiled for the given zswap profile."""
+    expected_config(profile)
+    expected = COMMON_OBJECTS | ({"mm/zswap.o"} if profile == "enabled" else set())
+    observed = {name.removeprefix("object:") for name in record
+                if name.startswith("object:")}
+    if observed != expected:
+        raise EvidenceError("invalid-object-inventory:" + profile)
+
+
+def object_inventory_digest(record: dict[str, str]) -> str:
+    """Bind the first-pass object SHA inventory to the final pair gate."""
+    canonical = "".join(name + " sha256=" + record[name] + "\n"
+                        for name in sorted(record) if name.startswith("object:"))
+    return hashlib.sha256(canonical.encode("ascii")).hexdigest()
 
 
 def verify_config(profile: str, request_path: Path,
@@ -120,12 +158,17 @@ def verify_config(profile: str, request_path: Path,
         manifest.get("uml_kunit_exit") != "0" or
         "kunit_cases_passed" in manifest):
         raise EvidenceError("invalid-uml-execution-precondition")
+    verify_object_inventory(profile, manifest)
+    if ("uml_config_sha256" in manifest or "uml_request_sha256" in manifest or
+        "uml_objects_sha256" in manifest):
+        raise EvidenceError("already-recorded-uml-config-digest")
     # Record both digests even when the very next Kconfig check fails.
     with manifest_path.open("a", encoding="utf-8") as output:
         output.write("uml_config_sha256=" +
                      hashlib.sha256(effective).hexdigest() + "\n")
         output.write("uml_request_sha256=" +
                      hashlib.sha256(requested).hexdigest() + "\n")
+        output.write("uml_objects_sha256=" + object_inventory_digest(manifest) + "\n")
     check_config(profile, requested, effective)
 
 
@@ -137,8 +180,11 @@ def verify_pair(evidence: Path, enabled: Path, disabled: Path) -> None:
                                                 CONFIG_LIMIT))
         config = read_evidence(config_path, CONFIG_LIMIT)
         tap = read_evidence(evidence / (profile + "-kunit-output.log"), TAP_LIMIT)
+        verify_object_inventory(profile, manifest)
         config_sha = hashlib.sha256(config).hexdigest()
         tap_sha = hashlib.sha256(tap).hexdigest()
+        if manifest.get("uml_objects_sha256") != object_inventory_digest(manifest):
+            raise EvidenceError("object-digest-drift:" + profile)
         if (manifest.get("result") != "PASS" or
             manifest.get("linux_sha") != LINUX_SHA or
             manifest.get("source_modified") != "yes" or
@@ -180,6 +226,15 @@ class RootlessConfigTests(unittest.TestCase):
         self.addCleanup(self.temporary.cleanup)
         self.root = Path(self.temporary.name)
 
+    @staticmethod
+    def object_fixture_lines(profile: str) -> str:
+        """Only synthetic digest values; not a claim of compiled objects."""
+        names = sorted(COMMON_OBJECTS | ({"mm/zswap.o"} if profile == "enabled"
+                                        else set()))
+        return "".join("object=" + name + " sha256=" +
+                       hashlib.sha256((profile + ":" + name).encode()).hexdigest() +
+                       "\n" for name in names)
+
     def fixture(self, profile="enabled"):
         values = expected_config(profile)
         contents = "\n".join("# " + key + " is not set" if value == "n"
@@ -192,7 +247,8 @@ class RootlessConfigTests(unittest.TestCase):
         effective.write_text(contents)
         manifest.write_text("result=IN_PROGRESS\nrequested_zswap=" +
                             ("y" if profile == "enabled" else "n") +
-                            "\numl_kunit_exit=0\n")
+                            "\numl_kunit_exit=0\n" +
+                            self.object_fixture_lines(profile))
         return request, effective, manifest
 
     def test_positive_y_and_n(self):
@@ -201,6 +257,75 @@ class RootlessConfigTests(unittest.TestCase):
             verify_config(profile, request, effective, manifest)
             self.assertIn(hashlib.sha256(effective.read_bytes()).hexdigest(),
                           manifest.read_text())
+
+    def test_original_hosted_four_object_records_and_digest_values(self):
+        # Actual object records from #43834985711 artifact #14209984320.
+        hosted_objects = (
+            "object=block/bio.o sha256=37915d334a6ce06969a794458f49e0a4e2fb749693068a5cd7d548bcea8c8fcd\n"
+            "object=block/swap-bio-origin-kunit.o sha256=b07a5deff230d99f8fe33404a34518c811dfa64fb51ee1e4edd41f6ef7231dce\n"
+            "object=mm/page_io.o sha256=9fde29f1c5de63d4ea50e3129ba11ef8fce4d183f06bff267155d4f6585ea267\n"
+            "object=mm/zswap.o sha256=5c5b8c1d8cbc3a977c5900f1f32e22f2d856636434255aff17db2648b09196c2\n"
+        )
+        request, effective, manifest_path = self.fixture()
+        manifest_path.write_text(
+            "result=IN_PROGRESS\nrequested_zswap=y\numl_kunit_exit=0\n" +
+            hosted_objects)
+        record = parse_manifest(manifest_path.read_bytes())
+        verify_object_inventory("enabled", record)
+        self.assertEqual(len([key for key in record if key.startswith("object:")]), 4)
+        self.assertEqual(record["object:mm/zswap.o"],
+                         "5c5b8c1d8cbc3a977c5900f1f32e22f2d856636434255aff17db2648b09196c2")
+        verify_config("enabled", request, effective, manifest_path)
+        self.assertIn("uml_config_sha256=", manifest_path.read_text())
+
+    def test_object_identity_digest_and_profile_mutation_refusals(self):
+        valid = self.object_fixture_lines("enabled")
+        lines = valid.splitlines(keepends=True)
+        mutations = (
+            ("duplicate-identity", valid + lines[0], "duplicate-object-identity"),
+            ("duplicate-with-different-hash", valid + lines[0].replace(
+                lines[0].split("sha256=")[1].strip(), "f" * 64), "duplicate-object-identity"),
+            ("unknown-path", valid + "object=block/foreign.o sha256=" + "a" * 64 + "\n",
+             "unknown-object-identity"),
+            ("short-digest", valid.replace("sha256=" + lines[0].split("sha256=")[1].strip(),
+                                           "sha256=1234", 1), "invalid-object-record"),
+            ("uppercase-digest", valid.replace("sha256=" + lines[0].split("sha256=")[1].strip(),
+                                               "sha256=" + "A" * 64, 1),
+             "invalid-object-record"),
+            ("malformed-object-token", valid + "object=block/bio.o bad_sha=0\n",
+             "invalid-object-record"),
+            ("empty-object-record", valid + "object=\n",
+             "malformed-or-duplicate-manifest"),
+            ("duplicate-ordinary", valid + "requested_zswap=y\nrequested_zswap=n\n",
+             "malformed-or-duplicate-manifest"),
+            ("invalid-key", valid + "object:mm/zswap.o=not-a-record\n",
+             "malformed-or-duplicate-manifest"),
+        )
+        for name, text, expected_error in mutations:
+            with self.subTest(name=name), self.assertRaisesRegex(EvidenceError,
+                                                                   expected_error):
+                parse_manifest(("result=IN_PROGRESS\n" + text).encode())
+        for profile in ("enabled", "disabled"):
+            request, effective, manifest_path = self.fixture(profile)
+            original = manifest_path.read_text()
+            for name, content in (
+                ("missing", original.replace(self.object_fixture_lines(profile).splitlines(
+                    keepends=True)[0], "", 1)),
+                ("incompatible", original + "object=mm/zswap.o sha256=" + "a" * 64 + "\n"
+                 if profile == "disabled" else original.replace(
+                     "object=mm/zswap.o sha256=", "object=mm/foreign.o sha256=", 1)),
+            ):
+                with self.subTest(profile=profile, mutation=name):
+                    manifest_path.write_text(content)
+                    with self.assertRaises(EvidenceError):
+                        verify_config(profile, request, effective, manifest_path)
+            manifest_path.write_text(original)
+            verify_config(profile, request, effective, manifest_path)
+            unchanged = manifest_path.read_bytes()
+            with self.assertRaisesRegex(EvidenceError,
+                                        "already-recorded-uml-config-digest"):
+                verify_config(profile, request, effective, manifest_path)
+            self.assertEqual(manifest_path.read_bytes(), unchanged)
 
     def test_missing_wrong_and_forced_options(self):
         for name in REQUIRED:
@@ -291,7 +416,10 @@ class RootlessConfigTests(unittest.TestCase):
                     "result=IN_PROGRESS\nlinux_sha=" + LINUX_SHA +
                     "\nsource_modified=yes\nrequested_zswap=" +
                     ("y" if profile == "enabled" else "n") +
-                    "\numl_kunit_exit=0\nverify_real_tap_exit=0\n"
+                    "\numl_kunit_exit=0\nverify_real_tap_exit=0\n" +
+                    self.object_fixture_lines(profile) +
+                    "uml_objects_sha256=" + object_inventory_digest(parse_manifest(
+                        self.object_fixture_lines(profile).encode())) + "\n"
                     "kunit_executed=yes\nkunit_cases_passed=5\n"
                     "uml_config_sha256=" + hashlib.sha256(config.read_bytes()).hexdigest() +
                     "\nkunit_output_sha256=" + hashlib.sha256(tap.encode()).hexdigest() +
@@ -301,6 +429,14 @@ class RootlessConfigTests(unittest.TestCase):
             disabled_record = root / "disabled.txt"
             real_tap = disabled_tap.read_bytes()
             real_manifest = disabled_record.read_text()
+            object_hash = re.search(r"(?m)^object=block/bio\.o sha256=([0-9a-f]{64})$",
+                                    real_manifest)
+            self.assertIsNotNone(object_hash)
+            drifted = real_manifest.replace(object_hash.group(1), "f" * 64, 1)
+            disabled_record.write_text(drifted)
+            with self.assertRaisesRegex(EvidenceError, "object-digest-drift"):
+                verify_pair(root, *configs)
+            disabled_record.write_text(real_manifest)
             disabled_tap.write_bytes((root / "enabled-kunit-output.log").read_bytes())
             copied_hash = hashlib.sha256(disabled_tap.read_bytes()).hexdigest()
             disabled_record.write_text(re.sub(

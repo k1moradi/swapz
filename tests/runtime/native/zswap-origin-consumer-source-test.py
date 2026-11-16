@@ -2,7 +2,10 @@
 """Rootless production-source contract check, not a kernel/runtime test."""
 from pathlib import Path
 import re
+import shutil
+import subprocess
 import sys
+import tempfile
 
 SOURCE = Path(__file__).resolve().parents[3] / "src/kernel/dm-target.c"
 
@@ -15,6 +18,7 @@ def validate_source_text(source: str) -> None:
     exactly_one(source, r"enum swapz_write_origin \{[^}]*\};", "origin semantics")
     exactly_one(source,
         r"entry->write_origin = SWAPZ_WRITE_ORIGIN_ORDINARY_OR_UNKNOWN;\n"
+        r"\s*entry->origin_commit_counted = false;\n"
         r"#ifdef BIO_HAS_ZSWAP_STORED_WRITEBACK_ORIGIN\n"
         r"(?:(?!#endif).)*"
         r"bio_is_zswap_stored_writeback\(bio\)\).*?\n#endif",
@@ -23,6 +27,19 @@ def validate_source_text(source: str) -> None:
         raise AssertionError("four final foreground-commit sites required")
     if source.count("entry->write_origin") != 4:
         raise AssertionError("origin may be consulted only at admission and commit")
+    if source.count("entry->origin_commit_counted") != 3:
+        raise AssertionError("once-only origin flag must have one reset, test and mark")
+    exactly_one(source,
+        r"entry->write_origin = SWAPZ_WRITE_ORIGIN_ORDINARY_OR_UNKNOWN;\s*"
+        r"entry->origin_commit_counted = false;\s*"
+        r"#ifdef BIO_HAS_ZSWAP_STORED_WRITEBACK_ORIGIN",
+        "reused BIO origin and once-only state reset")
+    exactly_one(source,
+        r"if \(entry->write_origin != SWAPZ_WRITE_ORIGIN_ZSWAP_STORED_WRITEBACK \|\|\s*"
+        r"entry->origin_commit_counted\)\s*return;\s*"
+        r"entry->origin_commit_counted = true;\s*"
+        r"atomic64_inc\(&ctx->foreground_committed_verified_zswap_writeback\);",
+        "ordered-owner idempotent authenticated authority count")
     if source.count("bio_is_zswap_stored_writeback(bio)") != 1:
         raise AssertionError("single positive origin authority required")
     body = source[source.index("static int swapz_map("):]
@@ -118,6 +135,10 @@ def verify_strict_phase_a_contract(source: str) -> None:
 
 def run_negative_mutations(source: str) -> int:
     reset = "entry->write_origin = SWAPZ_WRITE_ORIGIN_ORDINARY_OR_UNKNOWN;"
+    once_reset = "entry->origin_commit_counted = false;"
+    once_guard = ("if (entry->write_origin != SWAPZ_WRITE_ORIGIN_ZSWAP_STORED_WRITEBACK ||\n"
+                  "\t    entry->origin_commit_counted)\n\t\treturn;")
+    once_mark = "entry->origin_commit_counted = true;"
     admitted = "atomic64_inc(&ctx->verified_zswap_origin_admitted);"
     async_hook = (r"swapz_count_verified_zswap_writeback_commit"
                   r"\(ctx,\s*inflight->bios\[index\]\);")
@@ -166,10 +187,22 @@ def run_negative_mutations(source: str) -> int:
             "error = swapz_preserve_first_error(error, finish_error);\n\tif (error) {")),
         ("zero success count missing", lambda: replace_pattern_once(source,
             zero_hook, "ctx->zero_elided_pages++;")),
-        ("commit count ignores origin", lambda: replace_exactly_once(source,
-            "if (entry->write_origin == SWAPZ_WRITE_ORIGIN_ZSWAP_STORED_WRITEBACK)\n"
-            "\t\tatomic64_inc(&ctx->foreground_committed_verified_zswap_writeback);",
-            "atomic64_inc(&ctx->foreground_committed_verified_zswap_writeback);")),
+        ("commit count ignores origin", lambda: replace_exactly_once(
+            source, once_guard,
+            "if (entry->origin_commit_counted)\n\t\treturn;")),
+        ("missing once-only reset", lambda: replace_exactly_once(source, once_reset, "")),
+        ("reused BIO premarked successful", lambda: replace_exactly_once(
+            source, once_reset, "entry->origin_commit_counted = true;")),
+        ("repeated success recounts", lambda: replace_exactly_once(
+            source, once_guard,
+            "if (entry->write_origin != SWAPZ_WRITE_ORIGIN_ZSWAP_STORED_WRITEBACK)\n"
+            "\t\treturn;")),
+        ("mark after increment", lambda: replace_exactly_once(
+            source,
+            "\t" + once_mark + "\n"
+            "\tatomic64_inc(&ctx->foreground_committed_verified_zswap_writeback);",
+            "\tatomic64_inc(&ctx->foreground_committed_verified_zswap_writeback);\n"
+            "\t" + once_mark)),
         ("origin-dependent RAW routing", lambda: replace_exactly_once(source,
             "entry->preparation_force_raw = false;",
             "entry->preparation_force_raw = true;")),
@@ -197,12 +230,117 @@ def run_negative_mutations(source: str) -> int:
     return detected
 
 
+
+def compile_actual_origin_commit_helper(source: str) -> int:
+    """Compile the exact committed production C helper, not a Python model.
+
+    The stubs replace only kernel types/counter storage; the function body is
+    extracted unmodified from dm-target.c. This proves idempotence in a
+    deterministic serial ordered-owner fixture, NOT a loaded-kernel race.
+    """
+    function_start = source.index(
+        "static void swapz_count_verified_zswap_writeback_commit(")
+    function_end = source.index("\n}\n", function_start) + len("\n}\n")
+    helper = source[function_start:function_end]
+    if helper.count("atomic64_inc(") != 1:
+        raise AssertionError("extracted original C helper no longer owns one increment")
+    prelude = r"""
+#include <stdbool.h>
+#include <stddef.h>
+#include <stdio.h>
+enum swapz_write_origin {
+    SWAPZ_WRITE_ORIGIN_ORDINARY_OR_UNKNOWN = 0,
+    SWAPZ_WRITE_ORIGIN_ZSWAP_STORED_WRITEBACK
+};
+typedef struct { unsigned long long value; } atomic64_t;
+struct swapz_dm {
+    atomic64_t foreground_committed_verified_zswap_writeback;
+};
+struct swapz_bio_ref {
+    enum swapz_write_origin write_origin;
+    bool origin_commit_counted;
+};
+struct bio { struct swapz_bio_ref descriptor; };
+static void *dm_per_bio_data(struct bio *bio, size_t size)
+{
+    (void)size;
+    return &bio->descriptor;
+}
+static void atomic64_inc(atomic64_t *counter) { ++counter->value; }
+"""
+    exercise = r"""
+int main(void)
+{
+    struct swapz_dm context = {0};
+    struct bio request = {0};
+
+    /* Ordinary, rejected, READ and requeued requests never call the
+     * success helper with authenticated origin. A stale ordinary BIO
+     * must also be ignored if a wrong caller invokes this helper. */
+    swapz_count_verified_zswap_writeback_commit(&context, &request);
+    if (context.foreground_committed_verified_zswap_writeback.value != 0)
+        return 10;
+    request.descriptor.write_origin = SWAPZ_WRITE_ORIGIN_ZSWAP_STORED_WRITEBACK;
+    swapz_count_verified_zswap_writeback_commit(&context, &request);
+    swapz_count_verified_zswap_writeback_commit(&context, &request);
+    if (context.foreground_committed_verified_zswap_writeback.value != 1 ||
+        !request.descriptor.origin_commit_counted)
+        return 11;
+    /* Two successive admissions reuse the same dm_per_bio_data slot. */
+    request.descriptor.write_origin = SWAPZ_WRITE_ORIGIN_ORDINARY_OR_UNKNOWN;
+    request.descriptor.origin_commit_counted = false;
+    swapz_count_verified_zswap_writeback_commit(&context, &request);
+    if (context.foreground_committed_verified_zswap_writeback.value != 1)
+        return 12;
+    request.descriptor.write_origin = SWAPZ_WRITE_ORIGIN_ZSWAP_STORED_WRITEBACK;
+    swapz_count_verified_zswap_writeback_commit(&context, &request);
+    swapz_count_verified_zswap_writeback_commit(&context, &request);
+    if (context.foreground_committed_verified_zswap_writeback.value != 2)
+        return 13;
+    puts("PASS exact production C helper ordinary=0 repeated=1 reused=2");
+    return 0;
+}
+"""
+    compilers = [name for name in ("gcc", "clang") if shutil.which(name)]
+    if not compilers:
+        raise AssertionError("no C compiler for actual-helper qualification")
+    with tempfile.TemporaryDirectory(prefix="swapz-origin-commit-") as directory:
+        source_path = Path(directory) / "actual-origin-commit.c"
+        source_path.write_text(prelude + helper + exercise, encoding="utf-8")
+        for compiler in compilers:
+            output_path = Path(directory) / compiler
+            compile_command = (
+                compiler, "-std=gnu11", "-O2", "-Wall", "-Wextra", "-Werror",
+                "-Wconversion", "-Wshadow", "-Wformat=2", "-Wstrict-prototypes",
+                "-fsanitize=undefined", "-fno-sanitize-recover=all",
+                str(source_path), "-o", str(output_path))
+            compile_result = subprocess.run(
+                compile_command, capture_output=True, text=True, timeout=30,
+                check=False)
+            if compile_result.returncode:
+                raise AssertionError(
+                    f"{compiler} actual helper compile exit={compile_result.returncode}: "
+                    + compile_result.stderr[-1400:])
+            execute_result = subprocess.run(
+                (str(output_path),), capture_output=True, text=True,
+                timeout=10, check=False)
+            if execute_result.returncode:
+                raise AssertionError(
+                    f"{compiler} actual helper execute exit={execute_result.returncode}: "
+                    + execute_result.stderr[-1400:])
+            if "PASS exact production C helper" not in execute_result.stdout:
+                raise AssertionError(f"{compiler} actual helper output missing")
+    return len(compilers)
+
+
 def main() -> int:
     source = SOURCE.read_text(encoding="utf-8")
     validate_source_text(source)
     verify_strict_phase_a_contract(source)
     detected = run_negative_mutations(source)
+    compiled = compile_actual_origin_commit_helper(source)
     print(f"PASS: real production-C Phase A source contract; {detected} negative mutations rejected")
+    print(f"PASS: {compiled} real C compiler(s) exercised extracted guarded commit helper")
     print("Evidence class: rootless source-contract only; no genuine kernel writeback")
     return 0
 
