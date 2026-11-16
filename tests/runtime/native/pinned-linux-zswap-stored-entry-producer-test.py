@@ -172,7 +172,7 @@ class PinnedProducerCausalityTests(unittest.TestCase):
         self.assertIn("#endif /* SWAPZ_COMPRESSED_HANDOFF_DISABLED_NO_PINNED_BIO_ABI */",
                       source)
         # Round 022 v1 deliberately rejects the older CRC32 prototype.
-        self.assertIn("crc32c(0, owned_bytes, entry->length)", source)
+        self.assertIn("~crc32c(~0U, owned_bytes, entry->length)", source)
         self.assertNotIn("crc32(0,", stager.COMPRESSED_HANDOFF_SOURCE)
         self.assertIn("ctx.swap_origin = SWAP_BIO_ORIGIN_ZSWAP_STORED_WRITEBACK;",
                       source)

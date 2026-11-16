@@ -14199,3 +14199,21 @@ The separate pinned Linux prototype workflow observes changes to
 older stored-entry source fixture alone. Keep an explicit regression that
 requires CRC32C, rejects CRC32 and direct ordinary BIO payload mutation; test
 the committed SHA and report the genuine first failing gate.
+
+
+### Round 022 — Agent 2: kernel CRC32C seed and consumer compatibility correction
+
+The original disabled producer used crc32c(0, payload, length),
+which is a raw kernel CRC32C state, while actual production
+swapz_crc32c_bytes uses ~crc32c(~0U, payload, length). The same
+Castagnoli polynomial with different seed/final XOR is NOT the
+same byte digest: the 123456789 vector gives raw 0x58e3fa20 but
+production 0xe3069283. The proposed future import path must use
+the production convention or the consumer rejects correct bytes.
+This source-only correction changes exactly those calls in the
+#if 0 producer/verification and its actual compiled mock, and
+updates the retained stored-entry regression without erasing
+the concurrently published producer/consumer source sections.
+No MM/DM active path, SWAPSPACE2 media, 4096 RAW or owner safety
+gate was modified. Handoff and Phase B stay DISABLED; Phase A
+BLOCKED, loaded/physical trials NOT_RUN.

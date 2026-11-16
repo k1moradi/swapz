@@ -78,9 +78,9 @@ static u32 crc32(u32 initial,const u8 *bytes,size_t size) {
 }
 /* Castagnoli CRC32C is not the old producer's IEEE CRC32 polynomial. */
 static u32 crc32c(u32 initial,const u8 *bytes,size_t size) {
-    u32 result=~initial; for(size_t i=0;i<size;i++) {result^=bytes[i];
+    u32 result=initial; for(size_t i=0;i<size;i++) {result^=bytes[i];
        for(unsigned int j=0;j<8;j++) result=(result>>1)^((result&1U)?0x82f63b78U:0U);}
-    return ~result;
+    return result;
 }
 /* Only fixed independent original-page SHA is modeled by this host shim:
  * kernel crypto execution and runtime cost remain NOT_RUN. */
@@ -99,7 +99,7 @@ static void *finish_owner(void *opaque) {
 }
 int main(void) {
     const u8 crc_vector[9] = {'1','2','3','4','5','6','7','8','9'};
-    assert(crc32c(0,crc_vector,sizeof(crc_vector))==0xe3069283U);
+    assert(~crc32c(~0U,crc_vector,sizeof(crc_vector))==0xe3069283U);
     assert(crc32(0,crc_vector,sizeof(crc_vector))==0xcbf43926U);
     struct zswap_entry entry={.swpentry={.val=7},.length=200};
     swp_entry_t key={.val=7}; struct folio locked={true}, unlocked={false};
@@ -151,7 +151,7 @@ int main(void) {
     assert(owner.slot_generation==17 && owner.representation_version==1);
     assert(owner.representation==ZSWAP_SWAPZ_REPR_ZSWAP_LZ4_V1);
     assert(memcmp(owner.original_sha256,trusted_original_sha256,32)==0);
-    assert(owner.payload_crc32c==crc32c(0,owner.owned_bytes,200));
+    assert(owner.payload_crc32c==~crc32c(~0U,owner.owned_bytes,200));
     assert(owner.payload_crc32c!=crc32(0,owner.owned_bytes,200));
     zpool_bytes[0]^=1U; assert(owner.owned_bytes[0]!=zpool_bytes[0]);
     struct zswap_swapz_owned_payload clone; memcpy(&clone,&owner,sizeof(clone));
@@ -159,7 +159,7 @@ int main(void) {
     assert(!zswap_swapz_owned_payload_abort(&clone));
     owner.payload_crc32c=crc32(0,owner.owned_bytes,owner.compressed_length);
     assert(!zswap_swapz_owned_payload_submit(&owner));
-    owner.payload_crc32c=crc32c(0,owner.owned_bytes,owner.compressed_length);
+    owner.payload_crc32c=~crc32c(~0U,owner.owned_bytes,owner.compressed_length);
     owner.payload_crc32c^=1U; assert(!zswap_swapz_owned_payload_submit(&owner));
     owner.payload_crc32c^=1U; owner.codec=ZSWAP_SWAPZ_CODEC_UNKNOWN;
     assert(!zswap_swapz_owned_payload_submit(&owner));
@@ -242,14 +242,14 @@ class CompressedHandoffTests(unittest.TestCase):
         self.assertEqual(c.count('#if 0 /* SWAPZ_COMPRESSED_HANDOFF_DISABLED'),1)
         for token in ('ZSWAP_SWAPZ_COMPRESSED_MAX 3568U','ZSWAP_SWAPZ_LOGICAL_BYTES 4096U',
                       'folio_test_locked','xa_load','entry->swpentry.val','pool->tfm_name',
-                      'memcpy_from_sglist','zs_obj_read_sg_end','crc32c(0,','original_sha256','slot_generation','ZSWAP_SWAPZ_REPR_ZSWAP_LZ4_V1',
+                      'memcpy_from_sglist','zs_obj_read_sg_end','~crc32c(~0U,','original_sha256','slot_generation','ZSWAP_SWAPZ_REPR_ZSWAP_LZ4_V1',
                       'owner_state',
                       'atomic_cmpxchg','-ENOMEM','-ECANCELED','self != transfer'):
             with self.subTest(token=token): self.assertIn(token,c)
         self.assertNotIn('REQ_ZSWAP_WRITEBACK',c)
         # The old CRC32 producer contract is forbidden in compressed v1.
         self.assertNotIn('crc32(0,',c)
-        self.assertIn('crc32c(0,',c)
+        self.assertIn('~crc32c(~0U,',c)
         self.assertNotIn('bio->bi_iter.bi_size',c)
         self.assertNotIn('submit_bio(',c)
 
@@ -262,7 +262,7 @@ class CompressedHandoffTests(unittest.TestCase):
         mutations=(
             ('#if 0 /* SWAPZ_COMPRESSED_HANDOFF_DISABLED_NO_PINNED_BIO_ABI */',
              '#if 1 /* SWAPZ_COMPRESSED_HANDOFF_DISABLED_NO_PINNED_BIO_ABI */'),
-            ('crc32c(0, owned_bytes, entry->length)', 'crc32(0, owned_bytes, entry->length)'),
+            ('~crc32c(~0U, owned_bytes, entry->length)', 'crc32(0, owned_bytes, entry->length)'),
             ('proof->generation != generation', 'proof->generation == generation'),
             ('sha256(original_page, ZSWAP_SWAPZ_LOGICAL_BYTES, proof->original_sha256);',
              'memcpy(proof->original_sha256, original_page, ZSWAP_SWAPZ_DIGEST_BYTES);'),

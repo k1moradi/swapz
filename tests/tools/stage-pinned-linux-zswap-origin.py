@@ -602,7 +602,7 @@ static int zswap_swapz_capture_owned_payload(
 	transfer->compressed_length = entry->length;
 	transfer->decoded_length = ZSWAP_SWAPZ_LOGICAL_BYTES;
 	transfer->codec = codec;
-	transfer->payload_crc32c = crc32c(0, owned_bytes, entry->length);
+	transfer->payload_crc32c = ~crc32c(~0U, owned_bytes, entry->length);
 	transfer->semantic_stored_writeback = true;
 	transfer->representation_compressed = true;
 	transfer->completion_error = 0;
@@ -626,7 +626,7 @@ static bool zswap_swapz_owned_payload_is_valid(
 		transfer->compressed_length >= 1 &&
 		transfer->compressed_length <= ZSWAP_SWAPZ_COMPRESSED_MAX &&
 		transfer->codec == ZSWAP_SWAPZ_CODEC_LZ4 &&
-		crc32c(0, transfer->owned_bytes, transfer->compressed_length) ==
+		~crc32c(~0U, transfer->owned_bytes, transfer->compressed_length) ==
 		transfer->payload_crc32c;
 }
 
@@ -710,8 +710,8 @@ def validate_disabled_compressed_contract(source: str) -> None:
         "proof->generation != generation",
         "proof->stored_codec != ZSWAP_SWAPZ_CODEC_LZ4",
         "sha256(original_page, ZSWAP_SWAPZ_LOGICAL_BYTES, proof->original_sha256);",
-        "crc32c(0, owned_bytes, entry->length)",
-        "crc32c(0, transfer->owned_bytes, transfer->compressed_length)",
+        "~crc32c(~0U, owned_bytes, entry->length)",
+        "~crc32c(~0U, transfer->owned_bytes, transfer->compressed_length)",
         "transfer->representation_version == ZSWAP_SWAPZ_RECORD_VERSION",
         "transfer->representation == ZSWAP_SWAPZ_REPR_ZSWAP_LZ4_V1",
         "ZSWAP_SWAPZ_REPR_RAW_4096 = 1",

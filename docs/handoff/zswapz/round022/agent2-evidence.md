@@ -43,3 +43,15 @@ additionally asserts that the disabled C contains CRC32C, not CRC32, and has
 no direct normal-BIO payload-size or `submit_bio` mutation. This source
 regression change re-triggers the actual published workflow and must be
 checked for genuine pass/failure before qualification.
+
+
+## Round022 CRC32C seed reconciliation
+
+After the independently published Agent2 source, an integration review
+found that crc32c(0, ...) mismatched production swapz_crc32c_bytes:
+its actual formula is ~crc32c(~0U, ...). The 123456789 vector proves
+raw 0x58e3fa20 != standard 0xe3069283. The disabled producer, host
+kernel-CRC32C shim and source-bound tests now match the consumer's exact
+Castagnoli seed and final XOR. All published source identity/lifetime,
+ordinary 4096 fallback, KUnit, comments and SWAPSPACE2 safeguards remain.
+No loaded/physical evidence or compressed transport activation.
