@@ -13890,3 +13890,39 @@ or first-cause evidence is missing, treat it as UNKNOWN and do not repeat
 a physical swap trial. Phase A BLOCKED; Phase B forced RAW bypass and
 direct compressed handoff DISABLED. Current swapz RAW is the original
 uncompressed full 4096-byte page.
+
+## Round 020 — Agent 2: pinned stored-entry producer causality (rootless)
+
+A positive zswap-origin claim must derive from the real pinned `mm/zswap.c`
+stored-entry admission and lifetime, second-chance shrink selection,
+swapcache-locked xarray pointer identity, successful `PAGE_SIZE` decompression,
+and the subsequent original folio WRITE/submit path. A synthetic KUnit BIO tag,
+manual `ctx.swap_origin` assignment, zpool byte copy, metadata-only source
+search, and zero-exit UML process are **not** authenticated live provenance.
+The upstream whole-source Git blob remains pinned and the stager now requires
+exact Git-blob identities for four original producer function bodies (including
+the uniquely instrumented writeback function). Mutating/deleting/reordering
+admission, LRU, identity, decompression or writeback code must fail closed.
+
+The owned `pinned-linux-zswap-stored-entry-producer-test.py` runs from the
+existing pinned stage-test suite. It executes actual staged writeback C body
+and the staged BIO predicate with GCC/Clang warnings-as-errors and UBSan, using
+explicit mocks for kernel services and decoding. Negative cases cover recycled
+entry, decompression failure, absent device, failed swapcache acquisition,
+invalid compressed size, non-SWAP/READ/unknown origin and tampered source.
+The mock decoder and observed BIO are NOT a genuine kernel compression or DM
+submission. Source-exact admission/selection verification is independent from
+the compiler-executed writeback slice; do not upgrade this to a full live
+`zswap_store_page()`+shrinker+loaded-path execution claim.
+
+Keep the authentic pinned UML KUnit `CONFIG_ZSWAP=y/n` five separate
+executed no-skip cases, compiled object inventory and matched module Kbuild
+as separately qualified tests. Never replace those real artifacts with
+fixture output. Do not enable the compile-disabled CRC32 compressed prototype
+or assume compatibility with a CRC32C plus independently hashed plaintext
+consumer. swapz RAW remains the **original uncompressed 4096 bytes**, while
+a merged swap BIO may contain multiple compatible full folios. No independently
+authorized booted matched Linux/loaded swapz stored-entry completion and
+byte-exact original swap-in exists: Phase A BLOCKED, Phase B forced RAW bypass
+DISABLED and direct compressed handoff DISABLED. No privileged or physical
+operations are part of this source suite.

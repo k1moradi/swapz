@@ -1026,6 +1026,21 @@ class PinnedLinuxStageTests(unittest.TestCase):
         self.assertNotIn("modprobe", workflow)
 
 
+
+    def test_round020_stored_entry_source_causality_gcc_clang(self):
+        """Run genuine pinned function-body host C tests in the existing CI lane."""
+        test_script = Path(__file__).with_name(
+            "pinned-linux-zswap-stored-entry-producer-test.py")
+        result = subprocess.run(
+            [sys.executable, "-B", str(test_script)],
+            capture_output=True, text=True, check=False, timeout=240,
+        )
+        self.assertEqual(
+            result.returncode, 0,
+            (result.stderr or result.stdout)[-2200:],
+        )
+
+
 def main() -> int:
     if len(sys.argv) == 3 and sys.argv[1] == "--verify-kunit-tap":
         try:

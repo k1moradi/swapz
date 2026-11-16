@@ -40,6 +40,26 @@ KUNIT_ORIGINAL_BLOBS = {
 }
 KUNIT_SOURCE_PATH = "block/swap-bio-origin-kunit.c"
 
+# Git-blob identities of the unmodified pinned producer functions, except
+# the staged writeback function which includes our single origin assignment.
+# The complete upstream mm/zswap.c blob is also authenticated above. These
+# bounds prove real control-flow ordering rather than a caller-set BIO bit.
+PINNED_ZSWAP_PRODUCER_SLICES = (
+    ("decompress", "static bool zswap_decompress(",
+     "/*********************************\n* writeback code",
+     "c0e1a14325e1bbee09e65cf6028cd68c68016af8"),
+    ("writeback", "static int zswap_writeback_entry(",
+     "/*********************************\n* shrinker functions",
+     "eab8cd08a630aad73f6d20d48935b83428ebfac4"),
+    ("shrinker", "static enum lru_status shrink_memcg_cb(",
+     "static unsigned long zswap_shrinker_count(",
+     "d24dacab8099ff5ca81ba2f04a3ccba2968b5b33"),
+    ("store", "static bool zswap_store_page(",
+     "bool zswap_store(struct folio *folio)",
+     "3628dacfe6c56773e8703e35bb6126c4a4ab136d"),
+)
+
+
 @dataclass(frozen=True)
 class Edit:
     before: str
@@ -661,6 +681,44 @@ def render_source(path: str, original: str, *, compressed_handoff: bool = False)
 
 
 
+def verify_pinned_zswap_producer(staged_source: str) -> None:
+    """Authenticate the actual stored-entry admission, eviction and WRITE gate.
+
+    This static, immutable-source gate does NOT demonstrate a booted eviction,
+    a real decompressor output or a loaded DM completion. A compiled host shim
+    separately executes the pinned writeback control flow with mocked helpers.
+    """
+    if not staged_source or len(staged_source) > 1024 * 1024:
+        raise StagingError("invalid-pinned-producer-source")
+
+    positions = []
+    for label, beginning, ending, expected_blob in PINNED_ZSWAP_PRODUCER_SLICES:
+        start = staged_source.find(beginning)
+        if start < 0 or staged_source.find(beginning, start + 1) >= 0:
+            raise StagingError("missing-or-duplicate-producer:" + label)
+        end = staged_source.find(ending, start + len(beginning))
+        if end < 0:
+            raise StagingError("missing-producer-end:" + label)
+        # The prototype is strictly #if 0 and is inserted BEFORE the original
+        # writeback banner. Never include it in the decompressor's hash.
+        if label == "decompress" and COMPRESSED_HANDOFF_SOURCE in staged_source:
+            prototype_start = staged_source.find(COMPRESSED_HANDOFF_SOURCE)
+            if prototype_start < start or prototype_start >= end:
+                raise StagingError("invalid-disabled-prototype-placement")
+            end = prototype_start
+        if blob_sha(staged_source[start:end].encode("utf-8")) != expected_blob:
+            raise StagingError("pinned-producer-causality-drift:" + label)
+        positions.append(start)
+
+    if positions != sorted(positions) or len(set(positions)) != len(positions):
+        raise StagingError("pinned-producer-causality-order")
+    if COMPRESSED_HANDOFF_SOURCE in staged_source and (
+        staged_source.count(COMPRESSED_HANDOFF_SOURCE) != 1 or
+        staged_source.count("#if 0 /* SWAPZ_COMPRESSED_HANDOFF_DISABLED_NO_PINNED_BIO_ABI */") != 1
+    ):
+        raise StagingError("disabled-prototype-contract-drift")
+
+
 def validate_origin_postimage(path: str, staged_source: str) -> None:
     """Check safety-critical emitted C snippets, not only anchor counts.
 
@@ -736,6 +794,12 @@ def validate_origin_postimage(path: str, staged_source: str) -> None:
                 "#define BIO_RESET_BYTES\t\toffsetof(struct bio, bi_max_vecs)"
                     not in staged_source):
                 raise StagingError("origin-reset-layout:include/linux/blk_types.h")
+    # Existing tiny synthetic edit-anchor fixtures intentionally omit the
+    # complete function bodies. Real full pinned Linux has all four functions
+    # and is authenticated both by its original Git blob and by this gate.
+    if path == "mm/zswap.c" and "static int zswap_writeback_entry(" in staged_source:
+        verify_pinned_zswap_producer(staged_source)
+
 
 def git_output(root: Path, *args: str) -> str:
     try:
