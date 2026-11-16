@@ -92,10 +92,12 @@ Round 009 [source closeout](round009/round-report.md), [late actual pinned modif
 
 [Round 010 coordinator closeout](round010/round-report.md) records both worker source integrations, Agent 5's corrected commit supersession, [original worker report SHA-256 archive](round010/original-report-archive.md), the first actual 20-case hosted rootless test failure and coordinator's source-only assertion fix `ca8f0874`. Matched patched Linux/DM linked-module qualification remains pending on [#43793863015](https://github.com/k1moradi/swapz/actions/runs/43793863015); Phase A BLOCKED and Phase B DISABLED. Repository still has historic divergent branches; only coordinator-approved source is integrated, no open PRs.
 
-## Round 011 — FINAL frozen two-agent source tasks (unique ROUND_OPEN required)
+## Round 011 — CLOSED_SOURCE_INTEGRATED_CI_PENDING (2/2 real commits)
 
 | Round | Frozen source | Issue | Independent workers excluding Agent 1 | Status |
 | --- | --- | --- | --- | --- |
 | [011](round011/README.md) | `b9ec668aa7fc7d497d33bf7174277de4de2750e4` | [#128](https://github.com/k1moradi/swapz/issues/128) | [Agent 2 actual pinned Linux KUnit source](round011/agent2-pinned-linux-bio-origin-kunit.md); [Agent 6 executable producer→consumer ABI negative tests](round011/agent6-producer-consumer-origin-abi-contract.md) | Publish final tasks, then one ROUND_OPEN; both start simultaneously without same-round prerequisites |
 
 Round 010 is [source closed](round010/round-report.md) with actual first matched-CI rootless failure and coordinator repair `ca8f0874`. Next tasks have no cross-worker overlap, no future hosted CI acceptance precondition and work from a single frozen `main` source. Historical 65 remote non-main branches require separate backup-backed cleanup; neither task may delete references. Phase A BLOCKED and Phase B DISABLED.
+
+[Round 011 accountable closeout](round011/round-report.md) integrates both real worker sources `18c184cc` (Agent 6) and `49765143` (Agent 2) on only `main`, with [original REPORT_READY bodies and SHA-256 archive](round011/original-report-archive.md). Real new KUnit and patched matched module GitHub workflows are in progress; do not claim PASS. Prior kernel-export warning first failure [#43793863015](https://github.com/k1moradi/swapz/actions/runs/43793863015) is retained. Live branch inventory now shows exactly `main`, with zero open PRs. Phase A BLOCKED; Phase B DISABLED.

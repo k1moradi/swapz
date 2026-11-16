@@ -1,0 +1,45 @@
+message: REPORT_READY
+round: "011"
+agent: 2
+task_id: agent2-pinned-linux-bio-origin-kunit
+status: SOURCE_READY_PENDING_COORDINATOR_CI
+frozen_source_sha: b9ec668aa7fc7d497d33bf7174277de4de2750e4
+source_commit_sha: aa124dc9e87c9bfb8ca1a9a53d1d8f4c8097f58e
+linux_upstream_sha: c339f4010dea8b0d754f84ace70cd1b089878ef8
+phase_a: BLOCKED
+phase_b: DISABLED
+remote_main_updated: no
+
+# Agent 2 — Round 011 actual source-staged Linux BIO origin KUnit
+
+**Retrievable source commit:** https://github.com/k1moradi/swapz/commit/aa124dc9e87c9bfb8ca1a9a53d1d8f4c8097f58e
+
+The Git object was created by `create_tree` and `create_commit` under the exact frozen tree. Its parent was independently verified using GitHub's Git commit endpoint as **only** `b9ec668aa7fc7d497d33bf7174277de4de2750e4`; Git tree SHA `6b83eca03dd6562d9d340686e25ba014d80947fa`. Remote `main` was read-only and remained `387dc8a05fae570c8b6119a2688077ad375efc20` when verified. No branch, PR, force push or additional worktree was created.
+
+## Source files changed in the actual Git commit
+
+- `tests/tools/stage-pinned-linux-zswap-origin.py`: Add opt-in `--with-kunit` to the existing pinned Linux source mutator. Keep the prior six-file default mode for existing CI; KUnit mode verifies two additional pinned source blobs and registers an actual Kconfig symbol and Makefile target, stages `block/swap-bio-origin-kunit.c`, then emits a nine-path original/postimage hash manifest. Includes new-path collision/preflight, preimage/anchor rejection, and rollback of a newly created source path upon failure. A source-level homogeneous origin helper now rejects invalid numeric origin states, not only mixed valid origins.
+- `tests/runtime/native/pinned-linux-zswap-origin-stage-test.py`: Expand from 20 to **24 defined tests**, including staged KUnit registration and C source, all-nine-path manifest and second application refusal, foreign-file/changed-blob and new-file rollback negatives, and real workflow/TAP-execution contract. Preserve prior tests and negative controls; account for new source edit where its replacement retains part of the original text.
+- `.github/workflows/phase-a-zswap-origin-kunit.yml`: New separate read-only hosted workflow, exact complete upstream checkout, rootless tests, source-staging and original/postimage checks, real modified Linux object builds for `CONFIG_ZSWAP=y/n`, plus bounded UML KUnit run and **explicit named TAP suite + five case** verification. Bounded failure-phase/exit and hash manifest artifact on failure; no live devices or module loads. Independent of Agent 6 and the matched DM workflow.
+- `docs/testing_standards.md`: Append distinct `Round 011 pinned Linux BIO origin KUnit` governing section; do not modify Agent 6 standards.
+
+Published Git blob SHAs:
+- staging program `3260df31d9729f51f4b7b7a7716a09679ee1f924`
+- Python regression source `2d7628d1e848e4b27601739aa3afcdec3eb55c16`
+- separate workflow `2549e9c1764ff0a9e89a59836bc31e302d56082f`
+- append-only testing standard `c4f2df9708bdb5d53cfd8a3feb73c22fb2f5a5c7`
+
+## Exact source-identity and checks actually executed
+
+1. **PASS** — GitHub Git API fetched the eight actual upstream files at `torvalds/linux@c339f4010dea8b0d754f84ace70cd1b089878ef8`: `mm/zswap.c`, `mm/page_io.c`, `include/linux/swap_ops.h`, `include/linux/blk_types.h`, `include/linux/bio.h`, `block/bio.c`, `block/Kconfig`, `block/Makefile`. Their actual Git blobs matched the pinned source identities, including Kconfig `70e4a66d...` and Makefile `e7bd320e...`. A source-coupled decoder enumerated **all 15 Python Edit transitions** (13 production transitions, two KUnit registrations) and verified that each preimage occurs exactly once and each postimage is absent. First failure: **none** for those read-only source checks.
+2. **PASS** — GitHub fetched the new source commit and verified exactly four allowed modified paths and sole frozen parent; canonical `main` unchanged. GitHub commit patch scan found no trailing whitespace on added diff lines (this is **not** a local `git diff --check`).
+3. **PASS, limited** — local shell ran `python3` `yaml.safe_load` on a representative, earlier KUnit workflow prototype and `bash -n` on its three embedded shell blocks, all exit 0. **Those bytes are not identical to the final committed workflow**; therefore do **not** claim the final committed workflow received local YAML/shell verification from this result. The final workflow was reviewed via its committed Git blob and source markers.
+4. **NOT_RUN** — exact committed Python `python3 -m py_compile tests/tools/stage-pinned-linux-zswap-origin.py tests/runtime/native/pinned-linux-zswap-origin-stage-test.py`; complete 24-case source-rootless test suite; exact `git diff --check`. Only the GitHub-hosted source bytes were accessible through the connector; the host shell could not resolve GitHub DNS. Do not promote source checks to executed Python tests.
+5. **NOT_RUN** — complete pinned Linux checkout staging and actual compiled postimage hashes. The eight original pinned blob identities were verified; new Linux postimage hashes are **to be generated by the stage program in hosted CI** rather than fabricated. GitHub API access to files is not a kernel checkout.
+6. **NOT_RUN** — actual modified `CONFIG_ZSWAP=y/n` Kbuild and UML KUnit execution. The workflow requires `CONFIG_SWAP_BIO_ORIGIN_KUNIT_TEST=y`, actual modified objects, `Subtest: swap_bio_origin` TAP output, no `not ok` cases, and exactly 5 case passes. No real KUnit PASS is claimed.
+
+## Scope, ABI and lifecycle distinctions
+
+The suite exercises an actual kernel C KUnit source file using `<kunit/test.h>`, covering default-UNKNOWN, positive WRITE+REQ_SWAP+stored-origin authentication, plain REQ_SWAP refusal, invalid origin, reset/reuse UNKNOWN, same-payload reissue, conditional NULL-device protection for blkcg, valid/invalid clone propagation, split propagation, and mixed/invalid-origin merge rejection. The pinned Linux revision implements `__bio_clone` (not a distinct `__bio_clone_fast` API in the inspected block/bio.c) and `bio_split` uses `bio_alloc_clone`. This is not a real zswap eviction, async pointer-lifetime proof or byte-exact swap readback. It does not alter RAW selection, persistent formats, completion authority, running modules, host swap or physical devices.
+
+**First environment blocker:** local GitHub DNS/name resolution failed, preventing a full exact upstream Linux checkout and local Kbuild. No first KUnit assertion failure is reported because KUnit did not execute. Agent 1 must integrate this source commit and inspect the new standalone workflow's compile/KUnit evidence, including any actual first failure. Phase A stays BLOCKED until matched producer→BIO→DM and real stored-entry writeback/readback; Phase B remains DISABLED.

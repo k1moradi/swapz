@@ -1,0 +1,49 @@
+message: REPORT_READY
+round: "011"
+agent: 6
+task_id: agent6-producer-consumer-origin-abi-contract
+status: SOURCE_READY_PENDING_COORDINATOR_CI
+source_baseline_sha: b9ec668aa7fc7d497d33bf7174277de4de2750e4
+task_commit_sha: 387dc8a05fae570c8b6119a2688077ad375efc20
+source_commit_sha: a7d0b1ddeb5506dc52d31040af8344778b6012e1
+source_commit_url: https://github.com/k1moradi/swapz/commit/a7d0b1ddeb5506dc52d31040af8344778b6012e1
+commit_parent_sha: b9ec668aa7fc7d497d33bf7174277de4de2750e4
+evidence_class: rootless-source-anchor-excerpt-and-extracted-C
+changed_files:
+  - tests/runtime/native/zswap-origin-producer-consumer-abi-test.py
+  - .github/workflows/product-codec.yml
+  - docs/coding_standards.md
+producer_mutations_defined: 22
+producer_mutations_locally_rejected: 22
+existing_consumer_mutations_invoked_by_source: 20
+existing_consumer_mutations_full_source_executed: NOT_RUN
+phase_a: BLOCKED
+phase_b: DISABLED
+
+# Agent 6 — Round 011 source-ready producer/consumer origin ABI contract
+
+**Deliverable:** a genuine retrievable unreferenced Git commit, parented directly and exclusively to the frozen engineering SHA. **Qualification:** SOURCE_READY_PENDING_COORDINATOR_CI, not a full-rootless or loaded-kernel PASS.
+
+## Source identity and ownership
+
+- Confirmed [authoritative ROUND_OPEN](https://github.com/k1moradi/swapz/issues/128#issuecomment-6905911575) and exact [Agent 6 final task](https://github.com/k1moradi/swapz/blob/387dc8a05fae570c8b6119a2688077ad375efc20/docs/handoff/zswapz/round011/agent6-producer-consumer-origin-abi-contract.md).
+- Created actual source commit **[a7d0b1ddeb5506dc52d31040af8344778b6012e1](https://github.com/k1moradi/swapz/commit/a7d0b1ddeb5506dc52d31040af8344778b6012e1)**. GitHub independently confirms its sole parent is `b9ec668aa7fc7d497d33bf7174277de4de2750e4`, tree `685fb6c82cd4514d52cc5740b750b116ff5f4983`, and exactly the three owned changed paths above. The earlier unreferenced candidate `d9711c26119d68374d92bec757d93d4bd95552f2` is **superseded**, not part of this delivery.
+- Python source Git blob `019cd4a1937ad635b663cc9e8ee60a3b8ed80cef`, CI workflow Git blob `bab89f351cc29c02bdc9be99b12d1a1f2088887e`, coding-standard Git blob `8bb96db049c77fd0e6510057a0596cfe7ef3fe0c`. The Python blob matches `git hash-object` of the locally executed source byte-for-byte.
+- The CI file adds exactly one `python3 -B tests/runtime/native/zswap-origin-producer-consumer-abi-test.py -v` invocation after the existing consumer source-contract check in the shared x86_64/ARM64 `exact-c` stage, preserving the other CI operations. Coding standard adds a unique append-only `Round 011 Linux BIO→DM origin ABI controls` section. No staging tool, Linux upstream code, production `dm-target.c`, or Agent 2 files changed.
+- Source-derived regression imports the frozen actual stage module `tests/tools/stage-pinned-linux-zswap-origin.py` (12 exact pinned upstream source transformations over 6 C/H files) plus existing `zswap-origin-consumer-source-test.py` to check the 4KiB guarded classifier, fallback UNKNOWN, admission ordering, four successful foreground commit sites, and no Phase B origin-driven RAW. It defines **22 producer mutations**, and calls the existing **20 consumer mutation negatives** when the full source is available. Reuses the existing stage test's GCC/Clang UBSan BIO helper/clone fixture. Offline staged-anchor excerpts and C fragments do NOT substitute for full pinned Linux postimages or KUnit.
+
+## Executed exact local evidence (Python 3.13.5)
+
+1. `python3 -m py_compile /mnt/data/agent6-round011/tests/runtime/native/zswap-origin-producer-consumer-abi-test.py` — **exit 0**.
+2. `python3 - <<'PY' ... import new test module; source_postimages(); validate_staged(); for name,path,before,after in PRODUCER_NEGATIVES: change_one(); validate_staged() must reject; run PinnedProducerConsumerTests('test_compiled_real_bio_predicate_and_clone') ... PY` — **exit 0**. Output: `STAGED_EXCERPTS=6 MUTANTS_REJECTED=22/22`, `EXTRACTED_C_TESTS=1 FAILURES=0 ERRORS=0 SKIPS=0`. The local staging and C test dependencies are source-anchored **partial mirrors/excerpts**, not the full frozen tools or full Linux checkout. The compiled C fixture uses GCC 14.2.0 and Clang 17.0.0 with warnings and UBSan; both reported success.
+3. `git hash-object /mnt/data/agent6-round011/tests/runtime/native/zswap-origin-producer-consumer-abi-test.py` — **exit 0**, printed `019cd4a1937ad635b663cc9e8ee60a3b8ed80cef`. Local newline/no trailing-whitespace assertions **exit 0**. GitHub's published commit diff independently has **zero added trailing-whitespace lines**.
+
+**Local first failure / incomplete fixture:** `python3 -B /mnt/data/agent6-round011/tests/runtime/native/zswap-origin-producer-consumer-abi-test.py -v` returned **exit 1**, with **3 tests run: 1 pass, 2 fail**. The first failure was `AssertionError: fixed 4KiB / 512-byte-sector consumer geometry`: the local synthetic `src/kernel/dm-target.c` was only a **483-byte excerpt** without the real production `#error "swapz requires 4KiB PAGE_SIZE"` and `#define SWAPZ_SECTORS (SWAPZ_BLOCK_BYTES >> SECTOR_SHIFT)`. Both definitions were confirmed present in frozen GitHub production source. This is an **incomplete local test environment**, not a demonstrated regression in complete production C. **No complete full-source test PASS is claimed**, and the 20 existing consumer mutation controls are NOT counted as executed.
+
+**NOT_RUN locally:** the exact new executable inside a complete synchronized checkout, full pinned Linux six-file original Git preimage hashing + actual full staged C/H, complete `make -C tests/suites SANITIZE=1 test-all`, actual repository `git diff --check` (not equivalent to a GitHub-diff whitespace inspection), integrated `product-codec.yml` x86_64/ARM64 source-contract CI, modified pinned Linux Kbuild/KUnit, loaded kernel, genuine stored-entry eviction/4096-byte readback and physical qualification.
+
+## Integration handoff
+
+Agent 1 should integrate the reviewed new Git tree while preserving other authors' changes, then execute the **exact full source** Python test in the existing `product-codec.yml` job. Any failure in the authentic checkout must remain FAIL until investigated—do not relabel it as a local excerpt limitation without evidence. The GitHub `main` HEAD remained `387dc8a05fae570c8b6119a2688077ad375efc20` after worker commit publication. No branch, PR, worktree, ref move, module load, swap/mapping or device operation was performed.
+
+**Phase A remains BLOCKED; Phase B RAW bypass remains DISABLED.**
