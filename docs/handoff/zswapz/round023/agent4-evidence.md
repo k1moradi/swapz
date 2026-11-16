@@ -92,3 +92,27 @@ historical and independent; LIVE_HANDOFF=NOT_RUN,
 LOADED_4096=NOT_RUN, PHYSICAL=NOT_RUN. Phase A BLOCKED;
 Phase B forced RAW bypass DISABLED, compressed direct transfer DISABLED.
 RAW still contains the original uncompressed 4096-byte page.
+
+
+## Hosted first compiler failure and nonproduction test correction
+
+The first exact-SHA cross-ABI workflow run
+`43953872320` on `f053e7ff65c72756b7c77d585110fb95877cbf15`
+completed FAILURE. The preexisting Round023 ordinary cross-fixture ran
+two tests successfully; the new frozen-source test had two Python/static
+checks PASS and three GCC subcases fail at **compilation**, not
+interoperability. First compiler errors were our chained boolean
+comparison in an `assert()` (`-Werror=parentheses`) and legacy
+`sizeof` to `swapz_u32` conversions in the exact original production
+`codec.c` (`-Werror=conversion`) when the driver used a blanket
+`-Wconversion` on both translation units.
+
+The correction makes the boolean CRC comparison explicit, compiles the
+**new fixture** at -Wall/-Wextra/-Werror/-Wconversion/-Wshadow,
+compiles the **unaltered frozen production codec.c** separately under
+its established -Wall/-Wextra/-Werror gate, links both with ASan/UBSan,
+and preserves source authentication, CRC fault injection, no partial
+output and disabled production. There is no change to kernel codec/DM,
+checksum arithmetic, frozen producer or physical acceptance. This is
+a test harness compiler-flag scope repair, **not** proof of loaded
+interoperability. Any later runtime failure must be separately reported.

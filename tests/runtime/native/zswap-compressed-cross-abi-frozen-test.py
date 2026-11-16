@@ -203,6 +203,28 @@ class Round023CrossAbi(unittest.TestCase):
             for name in ("codec.c", "codec.h", "zswap-import-codec.h"):
                 repository_path = "src/kernel/" + name
                 (directory / name).write_bytes(self.frozen[repository_path])
+            # The original production codec.c is separately warning-clean at
+            # its established -Wall/-Wextra/-Werror gate. Its legacy size_t
+            # conversions do not belong to this Agent4 fixture. The NEW
+            # producer adapter gets stricter conversion and shadow warnings.
+            common_flags = [
+                "-std=gnu11", "-O1", "-g", "-Wall", "-Wextra", "-Werror",
+                "-fno-omit-frame-pointer", "-fno-sanitize-recover=all",
+                "-fsanitize=address,undefined", "-pthread",
+                "-I", str(directory),
+            ]
+            codec_object = directory / "production-codec.o"
+            codec_command = [
+                executable, *common_flags, "-c",
+                str(directory / "codec.c"), "-o", str(codec_object),
+            ]
+            codec_build = subprocess.run(
+                codec_command, capture_output=True, text=True,
+                check=False, timeout=120)
+            self.assertEqual(
+                codec_build.returncode, 0,
+                f"{compiler} original production codec compile failed:\n"
+                f"{codec_build.stderr[-6000:]}")
             for fault in ("original", "seed_zero", "ieee"):
                 with self.subTest(compiler=compiler, producer=fault):
                     producer = (base_producer if fault == "original" else
@@ -211,26 +233,35 @@ class Round023CrossAbi(unittest.TestCase):
                     source_path = directory / f"round023-{fault}.c"
                     binary = directory / f"round023-{fault}"
                     source_path.write_text(generated, encoding="utf-8")
-                    command = [
-                        executable, "-std=gnu11", "-O1", "-g",
-                        "-Wall", "-Wextra", "-Werror", "-Wconversion",
-                        "-Wshadow",
-                        "-fno-omit-frame-pointer", "-fno-sanitize-recover=all",
-                        "-fsanitize=address,undefined", "-pthread",
-                        "-I", str(directory),
+                    source_object = directory / f"round023-{fault}.o"
+                    source_command = [
+                        executable, *common_flags, "-Wconversion", "-Wshadow",
                     ]
                     if fault != "original":
-                        command.append("-DROUND023_EXPECT_WRONG_PRODUCER_CRC=1")
-                    command += [
-                        str(source_path), str(directory / "codec.c"),
-                        "-llz4", "-lcrypto", "-o", str(binary),
+                        source_command.append(
+                            "-DROUND023_EXPECT_WRONG_PRODUCER_CRC=1")
+                    source_command += [
+                        "-c", str(source_path), "-o", str(source_object),
                     ]
-                    built = subprocess.run(command, capture_output=True,
-                                           text=True, check=False, timeout=120)
+                    built = subprocess.run(
+                        source_command, capture_output=True, text=True,
+                        check=False, timeout=120)
                     self.assertEqual(
                         built.returncode, 0,
-                        f"{compiler} {fault} build failed:\n"
+                        f"{compiler} {fault} source compile failed:\n"
                         f"{built.stderr[-6000:]}")
+                    link_command = [
+                        executable, "-fsanitize=address,undefined", "-pthread",
+                        str(source_object), str(codec_object),
+                        "-llz4", "-lcrypto", "-o", str(binary),
+                    ]
+                    linked = subprocess.run(
+                        link_command, capture_output=True, text=True,
+                        check=False, timeout=120)
+                    self.assertEqual(
+                        linked.returncode, 0,
+                        f"{compiler} {fault} link failed:\n"
+                        f"{linked.stderr[-6000:]}")
                     environment = dict(os.environ)
                     environment.update(
                         ASAN_OPTIONS="detect_leaks=1:halt_on_error=1",

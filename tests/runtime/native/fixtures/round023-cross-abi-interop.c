@@ -349,14 +349,13 @@ int main(void)
 	assert(source.payload_crc32c != swapz_crc32c_bytes(
 			source.owned_bytes, source.compressed_length));
 #endif
-	assert(source.payload_crc32c == swapz_crc32c_bytes(
-			source.owned_bytes, source.compressed_length)
 #ifdef ROUND023_EXPECT_WRONG_PRODUCER_CRC
-	       == 0
+	assert(source.payload_crc32c != swapz_crc32c_bytes(
+		source.owned_bytes, source.compressed_length));
 #else
-	       != 0
+	assert(source.payload_crc32c == swapz_crc32c_bytes(
+		source.owned_bytes, source.compressed_length));
 #endif
-	       );
 	assert(~crc32c(0U, source.owned_bytes, source.compressed_length) !=
 			swapz_crc32c_bytes(source.owned_bytes,
 						 source.compressed_length));
