@@ -438,6 +438,13 @@ class CompressedHandoffTests(unittest.TestCase):
         identity_fixture = (Path(__file__).parent / "fixtures" /
                             "round023-producer-proof-identity.c").read_text(
                                 encoding="utf-8")
+        # The real pool now has an idx; adapt only the synthetic old
+        # fixture's two-field initializer without modifying that C file.
+        old_pool_initializer = 'struct zswap_pool other_pool = { "lz4", &tree };'
+        self.assertEqual(identity_fixture.count(old_pool_initializer), 1)
+        identity_fixture = identity_fixture.replace(
+            old_pool_initializer,
+            'struct zswap_pool other_pool = { "lz4", &tree, 0 };', 1)
         with tempfile.TemporaryDirectory() as directory:
             path=Path(directory)/'host.c'
             path.write_text(HOST_SHIMS+body+identity_fixture+HOST_CASES,

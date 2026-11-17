@@ -71,3 +71,17 @@ published Round023 C fixture and full strict -Werror + sanitizers.
 No production Linux pool, original page, codec, CRC, kernel ABI, caller,
 raw 4096, or runtime behavior is altered. Prior compiler failures remain
 honestly recorded; retest at the corrected exact new commit is required.
+
+## Follow-up original Round023 compiler test strict diagnostic
+
+Hosted exact-SHA 84c68821 workflow 43993167178 reached compiled negative
+cases: the **new Round024** GCC/Clang executable test passed, but the
+unchanged **legacy Round023** GCC/Clang compiled test now failed with the
+same `-Werror=missing-field-initializers` at the old two-field synthetic
+pool constructor. Both tests share the newly source-faithful host pool
+structure with `idx`. The test-only follow-up adds exactly the same
+single zero `idx` initializer when composing the original GCC/Clang
+compiler fixture, without editing its stored original C file, dropping
+-Werror or changing pinned Linux source. The genuine Linux Kbuild step was
+SKIPPED at that failing source SHA; its outcome remains NOT_RUN until an
+exact succeeding host suite reaches it. No loaded/physical claim.

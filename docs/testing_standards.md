@@ -14589,3 +14589,15 @@ Linux source untouched. This resolves `-Wmissing-field-initializers`
 under GCC/Clang `-Werror`; no warnings are disabled and no success is
 inferred from synthetic provenance. Real Kbuild and live handoff remain
 separate gates.
+
+### Round 024 — Agent 2 preserve legacy compiler test with expanded pool shim
+
+The original Round023 GCC/Clang negative test shares `HOST_SHIMS` with the
+new source-exact Round024 fixture. Updating the synthetic pool structure to
+model the actual pinned `zswap_pool.idx` requires adapting the original
+host fixture's in-memory initializer in **both** call sites. Under
+`-Werror=missing-field-initializers` the legacy test must otherwise fail
+and prevent the real pinned Kbuild step. Preserve the checked-in Round023
+fixture verbatim, check that exactly one old initializer is present and
+supply the explicit zero index only in the compiler-generated C input.
+All original C logic, full strict warning flags and sanitizers are retained.
