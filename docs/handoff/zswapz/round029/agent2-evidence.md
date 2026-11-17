@@ -1,0 +1,7 @@
+# Round029 Agent2 — genuine pinned MM compiler first-error repair
+
+Task SHA ccac4ea69de6085d25d38477bd08bdbb580f600b; original pinned Linux c339f4010dea8b0d754f84ace70cd1b089878ef8.
+First Round028 TRUE Linux error: https://github.com/k1moradi/swapz/actions/runs/44085443897 job 134046533504, GCC W=1/-Werror CONFIG_ZSWAP=y mm/swapfile.o, generated void *current expands to kernel get_current() and breaks declaration/assignment. Exact generated original C four-variable fix uses stored_epoch_entry; original SHA/filenames/manifests unchanged. GCC/Clang preprocessor regression directly uses the generated function, adversarial current collision retained.
+Separate first SOURCE_CONTRACT_MISMATCH: https://github.com/k1moradi/swapz/actions/runs/44085443947 job 134046534595 for earlier policy violation; not retroactively green. This correction includes full-byte-preserved applicable canonical testing standards append in same source commit.
+Real full pinned Linux CONFIG_ZSWAP=y/n W=1/-Werror, complete vmlinux/modules/Module.symvers and matched dm-swapz.ko must finish on exact new SHA; do not call in-progress or skipped success. No local pinned compiler performed in this connector-only session, hosted CI is required.
+PHASE_A BLOCKED; direct compressed/forced RAW disabled; uncompressed original 4096 RAW; zswap RAM eviction alone, swapz disk backing; no loaded/physical/privileged tests; SWAPSPACE2 header/UUID/table/first 4096 preserved.

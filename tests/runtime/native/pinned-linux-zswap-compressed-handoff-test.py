@@ -488,6 +488,37 @@ class CompressedHandoffTests(unittest.TestCase):
                     self.assertIn("ROUND028_EPOCH_SOURCE_REAL_MINT_PASS",
                                   executed.stdout)
 
+    def test_round029_original_mm_epoch_kernel_macro_preprocess(self):
+        """Use exact emitted MM source and the real Linux current macro."""
+        staged = stage.ROUND028_ALLOCATOR_EDITS[-1].after
+        start = "u64 swapz_round028_slot_epoch(swp_entry_t slot)\n{"
+        end = "\n/* No slot from this previous device incarnation"
+        self.assertEqual(staged.count(start), 1)
+        original_function = start + staged.split(start, 1)[1].split(end, 1)[0]
+        self.assertIn("void *stored_epoch_entry;", original_function)
+        self.assertIn("stored_epoch_entry = xa_load(", original_function)
+        self.assertIn("xa_is_value(stored_epoch_entry)", original_function)
+        self.assertIn("xa_to_value(stored_epoch_entry)", original_function)
+        self.assertNotRegex(original_function, r"\bcurrent\b")
+        safe_source = "#define current get_current()\n" + original_function
+        unsafe_source = safe_source.replace("stored_epoch_entry", "current")
+        compilers = [tool for tool in ("gcc", "clang") if shutil.which(tool)]
+        self.assertTrue(compilers)
+        for compiler in compilers:
+            with self.subTest(compiler=compiler):
+                for source, expected_expansion in (
+                    (safe_source, False), (unsafe_source, True),
+                ):
+                    result = subprocess.run(
+                        [compiler, "-E", "-P", "-x", "c", "-"],
+                        input=source, capture_output=True, text=True,
+                        timeout=30, check=False)
+                    self.assertEqual(result.returncode, 0, result.stderr)
+                    self.assertEqual("get_current(" in result.stdout,
+                                     expected_expansion)
+                    if not expected_expansion:
+                        self.assertIn("stored_epoch_entry", result.stdout)
+
     def test_round026_real_swap_allocator_lock_epoch_no_go(self):
         # Exact original pinned mm/swapfile.c function is compiled below.
         # A reused swap slot with identical table bits remains a NO_GO.
