@@ -14601,3 +14601,31 @@ and prevent the real pinned Kbuild step. Preserve the checked-in Round023
 fixture verbatim, check that exactly one old initializer is present and
 supply the explicit zero index only in the compiler-generated C input.
 All original C logic, full strict warning flags and sanitizers are retained.
+
+### Round 024 — Agent 2: strict pinned zswap codec proof in real source
+
+Source-compiled disabled original pinned Linux `mm/zswap.c` must not
+allow a ZSTD or changed-pool compressor to masquerade as a genuine stored
+LZ4 v1 record. Extend the existing Round024 **compiler-only** function's
+real resolved `struct zswap_pool.tfm_name` verification with explicit
+`strcmp(..., "lz4")` refusal, source-mutation guard and negative
+GCC/Clang host fixture. Preserve the original function name, actual
+kernel struct layout, stored-entry xarray/folio check, and unconditional
+runtime `-EOPNOTSUPP`: a matching pool string alone cannot create
+missing kernel store-time digest/generation or clone/split-safe ABI.
+
+The isolated modified pinned Linux `CONFIG_ZSWAP=y` opt-in compiler
+must be invoked with `W=1` and
+`KCFLAGS="-DSWAPZ_ROUND024_ZSWAP_KBUILD_PROBE=1 -Werror"`,
+then its default restored object with `KCFLAGS=-Werror`, verifying
+actual `nm` symbol presence and subsequent absence. Do not suppress
+GCC/Clang `-Wmissing-field-initializers`: adapt only the in-memory
+synthetic legacy fixture initializer if a source type gains a real pool
+index; preserve the original frozen fixture, source comments, and
+compiler-checked safety gates. Record exact-CI first failures separately
+from complete matched Linux/module Kbuild and genuine KUnit.
+
+Phase A BLOCKED; Phase B forced RAW bypass DISABLED; compressed handoff
+DISABLED; loaded original 4096/physical SWAPSPACE2 NOT_RUN. No new
+module, swap, memory-pressure or physical actions. RAW is original
+uncompressed 4096, never compressed zswap bytes.

@@ -805,6 +805,11 @@ zswap_swapz_round024_producer_kbuild_probe(
 	stored_pool = zswap_entry_pool(stored_entry);
 	if (!stored_pool || stored_pool->idx != stored_entry->pool_idx)
 		return -ESTALE;
+	/* The actual stored pool's immutable codec must be the future v1 LZ4.
+	 * Merely matching a source slot or xarray pointer is insufficient.
+	 */
+	if (strcmp(stored_pool->tfm_name, "lz4"))
+		return -EOPNOTSUPP;
 	/* This is not a real LZ4 carrier and cannot bypass full 4096 WRITE. */
 	return -EOPNOTSUPP;
 }
@@ -823,11 +828,12 @@ def validate_round024_probe(source: str) -> None:
         "xa_load(swap_zswap_tree(source_slot),",
         "stored_pool = zswap_entry_pool(stored_entry);",
         "stored_pool->idx != stored_entry->pool_idx",
+        'strcmp(stored_pool->tfm_name, "lz4")',
         "#endif /* SWAPZ_ROUND024_ZSWAP_KBUILD_PROBE */",
     )
     if any(source.count(token) != 1 for token in required):
         raise StagingError("round024-producer-probe-source-drift")
-    if (source.count("return -EOPNOTSUPP;") != 3 or
+    if (source.count("return -EOPNOTSUPP;") != 4 or
         source.count("return -ESTALE;") != 2 or
         "return 0;" in source or "submit_bio(" in source or
         "bio_endio(" in source or "sha256(" in source):

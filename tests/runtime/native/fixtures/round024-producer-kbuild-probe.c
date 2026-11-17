@@ -27,6 +27,11 @@ static void round024_compiler_probe_negatives(void)
     assert(zswap_swapz_round024_producer_kbuild_probe(
         &entry, slot, &locked) == -EOPNOTSUPP);
     entry.length = 256;
+    /* Refuse a pool changed from genuine stored-entry LZ4 to ZSTD. */
+    host_pool.tfm_name = "zstd";
+    assert(zswap_swapz_round024_producer_kbuild_probe(
+        &entry, slot, &locked) == -EOPNOTSUPP);
+    host_pool.tfm_name = "lz4";
     slot.val++;
     assert(zswap_swapz_round024_producer_kbuild_probe(
         &entry, slot, &locked) == -EOPNOTSUPP);

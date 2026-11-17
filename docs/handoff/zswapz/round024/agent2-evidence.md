@@ -85,3 +85,53 @@ compiler fixture, without editing its stored original C file, dropping
 -Werror or changing pinned Linux source. The genuine Linux Kbuild step was
 SKIPPED at that failing source SHA; its outcome remains NOT_RUN until an
 exact succeeding host suite reaches it. No loaded/physical claim.
+
+## Agent2 supplemental exact-source LZ4 provenance and -Werror Kbuild
+
+The prior Agent2 Round024 source, GCC/Clang strict-host test harness, original
+test fixture compatibility correction, real GCC `CONFIG_ZSWAP=y/n`
+`mm/zswap.o` symbol probe and normal source/KUnit/provenance gates
+remain intact; this commit does **not** introduce a second carrier or
+change the ordinary decompressed 4096-byte BIO path.
+
+In the actual pinned kernel `struct zswap_pool`, `tfm_name` is the
+per-pool compressor identity. A previously retained zswap entry selected
+for eviction must therefore reject ZSTD/unknown codec even when the slot
+and xarray entry pointer appear current. The existing
+`zswap_swapz_round024_producer_kbuild_probe` remains **compile-only**,
+unchanged name/signature/flags, and adds a real
+`strcmp(stored_pool->tfm_name, "lz4")` mismatch refusal. The static
+source validator rejects mutation/removal of that test; the exact pinned
+C body is compiled in GCC/Clang strict native tests and the new negative
+fixture explicitly switches the host pool to ZSTD. This still is NOT
+an authenticated *codec-at-store-time generation*, not a real slot epoch
+and not a real original-page SHA256. Every branch continues returning a
+negative result, even for a forged otherwise valid source claim.
+
+The existing true pinned GCC `mm/zswap.o` Kbuild opt-in recompile now
+adds `-Werror` to
+`KCFLAGS="-DSWAPZ_ROUND024_ZSWAP_KBUILD_PROBE=1 -Werror"`
+and its default-off restoration uses `KCFLAGS=-Werror`, retaining
+`W=1`, exact source SHA, `CONFIG_ZSWAP=y/n` and module matching.
+A full Linux object, not a mock host C, must emit the probe and then
+prove absence after default restoration. GCC/Clang synthetic host fixture
+warnings still fail rather than being disabled.
+
+Real first failures from earlier exact hosted workflows remain as recorded
+above: [#43992599909](https://github.com/k1moradi/swapz/actions/runs/43992599909)
+`EXIT=1` from malformed generated C newlines/missing original Round023
+fixture and [#43992882311](https://github.com/k1moradi/swapz/actions/runs/43992882311)
+`EXIT=1` from `-Werror=missing-field-initializers` of the synthesized
+pool fixture. Those were corrected in previously published commits. The
+current commit must be judged on its own **exact-SHA** CI results; neither
+earlier source-host failure reached the complete pinned kernel build.
+
+No checkout is mounted locally and CLI GitHub DNS is unavailable
+(`git ls-remote ...` exit 128), so full source Python suite and pinned
+Linux/Kbuild/KUnit are **NOT_RUN locally**. The real hosted compiler
+commands and their first errors remain the qualification authority.
+`LIVE_STORED=NOT_RUN`, `LOADED_KERNEL_SWAPIN=NOT_RUN`,
+`4096_READBACK=NOT_RUN`, `PHYSICAL=NOT_RUN`,
+`DIRECT_COMPRESSED=DISABLED`, `PHASE_A=BLOCKED`.
+Phase B forced RAW bypass DISABLED, SWAPSPACE2 protected header/UUID/table
+untouched, and current RAW remains original uncompressed 4096 bytes.

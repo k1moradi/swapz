@@ -360,6 +360,8 @@ class CompressedHandoffTests(unittest.TestCase):
             ("xa_load(swap_zswap_tree(source_slot),", "unverified_load("),
             ("stored_pool->idx != stored_entry->pool_idx",
              "stored_pool->idx == stored_entry->pool_idx"),
+            ('strcmp(stored_pool->tfm_name, "lz4")',
+             'strcmp(stored_pool->tfm_name, "zstd"'),
         ):
             with self.subTest(mutation=before):
                 with self.assertRaises(stage.StagingError):
@@ -369,7 +371,7 @@ class CompressedHandoffTests(unittest.TestCase):
                     ".github/workflows/phase-a-zswap-origin-prototype.yml"
                     ).read_text(encoding="utf-8")
         self.assertIn("--with-round024-zswap-kbuild-probe", workflow)
-        self.assertIn("KCFLAGS=-DSWAPZ_ROUND024_ZSWAP_KBUILD_PROBE=1",
+        self.assertIn('KCFLAGS="-DSWAPZ_ROUND024_ZSWAP_KBUILD_PROBE=1 -Werror"',
                       workflow)
         self.assertIn("zswap_swapz_round024_producer_kbuild_probe", workflow)
 

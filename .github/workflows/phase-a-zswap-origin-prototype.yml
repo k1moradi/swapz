@@ -371,7 +371,7 @@ jobs:
               fi
               run_logged round024_producer_probe make -s -C linux \
                 "O=$build_dir" CC=gcc "-j$KBUILD_JOBS" W=1 \
-                KCFLAGS=-DSWAPZ_ROUND024_ZSWAP_KBUILD_PROBE=1 mm/zswap.o
+                KCFLAGS="-DSWAPZ_ROUND024_ZSWAP_KBUILD_PROBE=1 -Werror" mm/zswap.o
               current_phase=round024_verify_original_compiler_object
               if ! nm -a "$build_dir/mm/zswap.o" |
                   grep -q 'zswap_swapz_round024_producer_kbuild_probe'; then
@@ -379,7 +379,8 @@ jobs:
                 exit 1
               fi
               run_logged round024_producer_restore_default make -s -C linux \
-                "O=$build_dir" CC=gcc "-j$KBUILD_JOBS" W=1 mm/zswap.o
+                "O=$build_dir" CC=gcc "-j$KBUILD_JOBS" W=1 \
+                KCFLAGS=-Werror mm/zswap.o
               current_phase=round024_verify_default_restore
               if nm -a "$build_dir/mm/zswap.o" |
                   grep -q 'zswap_swapz_round024_producer_kbuild_probe'; then
