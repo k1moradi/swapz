@@ -42,8 +42,17 @@ class ImportedZswapLz4SourceOnly(unittest.TestCase):
         guarded_round030, ordinary = later[1].split(
             "#endif /* SWAPZ_ROUND030_DM_COMPRESSED_COMMIT_TEST */", 1)
         self.assertIn("SWAPZ_ZSWAP_IMPORT_REPRESENTATION", guarded_round030)
+        # Round031 is an independent further CI-only sidecar gate, never a
+        # default consumer of arbitrary upper BIO or RAW_4096 bytes.
+        sidecar = ordinary.split(
+            "#if defined(SWAPZ_ROUND031_DM_LZ4_SIDECAR_TEST)", 1)
+        self.assertEqual(len(sidecar), 2)
+        guarded_round031, ordinary_tail = sidecar[1].split(
+            "#endif /* SWAPZ_ROUND031_DM_LZ4_SIDECAR_TEST */", 1)
+        self.assertIn("SWAPZ_ROUND031_SOURCE_LZ4_TAG", guarded_round031)
+        self.assertIn("swapz_round031_dm_read_with_sidecar(", guarded_round031)
         self.assertNotIn("SWAPZ_ZSWAP_IMPORT_REPRESENTATION",
-                         active[0] + later[0] + ordinary)
+                         active[0] + later[0] + sidecar[0] + ordinary_tail)
         self.assertIn("swapz_crc32c_bytes", CODEC.read_text(encoding="utf-8"))
         self.assertIn("LZ4_decompress_safe", header)
         self.assertIn("original_sha256", header)
@@ -169,6 +178,110 @@ class ImportedZswapLz4SourceOnly(unittest.TestCase):
                     self.assertEqual(
                         executed.stdout.strip(),
                         "ROUND030_DM_SOURCE_EXTRACTED_ORDERED_COMMIT_PASS")
+
+    def test_round031_true_dm_source_sidecar_lifetime_gcc_clang(self) -> None:
+        """Compile actual guarded DM C with fake-only lower / authority stubs."""
+        target = TARGET.read_text(encoding="utf-8")
+        base_start = "/* ROUND030_DM_COMMIT_EXACT_START */"
+        base_end = "/* ROUND030_DM_COMMIT_EXACT_END */"
+        source_start = "/* ROUND031_DM_SIDECAR_EXACT_START */"
+        source_end = "/* ROUND031_DM_SIDECAR_EXACT_END */"
+        for marker in (base_start, base_end, source_start, source_end):
+            self.assertEqual(target.count(marker), 1)
+        base = target.split(base_start, 1)[1].split(base_end, 1)[0]
+        real_sidecar = target.split(source_start, 1)[1].split(source_end, 1)[0]
+        for symbol in (
+            "swapz_round031_dm_sidecar_init(",
+            "swapz_round031_dm_commit_with_sidecar(",
+            "swapz_round031_dm_forget_on_overwrite(",
+            "swapz_round031_dm_forget_on_discard(",
+            "swapz_round031_dm_forget_on_abort(",
+            "swapz_round031_dm_forget_on_gc_relocation(",
+            "swapz_round031_dm_forget_on_swapoff_or_teardown(",
+            "swapz_round031_dm_read_with_sidecar(",
+            "swapz_round030_dm_commit_owned_lz4(",
+            "swapz_round030_dm_read_owned_lz4(",
+            "kvcalloc(logical_pages, sizeof(*sidecar->slots),",
+            "memzero_explicit(slot, sizeof(*slot));",
+            "check_mul_overflow((size_t)logical_pages,",
+            "memcpy(decoded_page, verified_page, SWAPZ_BLOCK_BYTES);",
+        ):
+            self.assertIn(symbol, real_sidecar)
+        self.assertNotIn("\tbio_endio(", real_sidecar)
+        self.assertNotIn("\tswapz_map(", real_sidecar)
+        self.assertIn("SWAPZ_ROUND031_DM_LZ4_SIDECAR_TEST", target)
+        self.assertIn("swapz_zswap_admission_try_live(NULL)", base)
+        base_fixture = (ROOT / "tests/runtime/native/fixtures" /
+                        "round030-consumer-commit.c").read_text(encoding="utf-8")
+        original_marker = "/* ROUND030_EXACT_DM_COMMIT_SOURCE */"
+        self.assertEqual(base_fixture.count(original_marker), 1)
+        base_fixture = base_fixture.replace(original_marker, base, 1)
+        # The existing source fixture supplies only fake lower/authority
+        # boundaries. The new test links the ORIGINAL full Round030 commit
+        # source and the EXACT new Round031 per-page RAM sidecar C bodies.
+        host_patch_pairs = (
+            ("\tbool prepublication_fua;\n",
+             "\tbool prepublication_fua;\n"
+             "\tbool round031_defer_hypothetical_ack;\n"),
+            ("static swapz_u32 next_sequence = 5U;",
+             "static swapz_u32 next_sequence = 5U;\n"
+             "static swapz_u32 fake_next_start_block = 2U;"),
+            ("transaction->start_block = 2U;",
+             "transaction->start_block = fake_next_start_block;"),
+            ("if (block != 2U) return -ESTALE;",
+             "if (block != 2U && block != 4U) return -ESTALE;"),
+            ("lower_write_error = lower_read_error = "
+             "injected_finish_error = stage_error = 0;",
+             "lower_write_error = lower_read_error = "
+             "injected_finish_error = stage_error = 0;\n"
+             "\tfake_next_start_block = 2U;\n\tnext_sequence = 5U;"),
+        )
+        for prior, updated in host_patch_pairs:
+            self.assertEqual(base_fixture.count(prior), 1)
+            base_fixture = base_fixture.replace(prior, updated, 1)
+        fixture = (ROOT / "tests/runtime/native/fixtures" /
+                   "round031-dm-sidecar-host.c").read_text(encoding="utf-8")
+        base_token = "/* ROUND031_EMBED_ROUND030_SOURCE */"
+        sidecar_token = "/* ROUND031_EXACT_DM_SIDECAR_SOURCE */"
+        self.assertEqual(fixture.count(base_token), 1)
+        self.assertEqual(fixture.count(sidecar_token), 1)
+        fixture = fixture.replace(base_token, base_fixture, 1)
+        fixture = fixture.replace(sidecar_token, real_sidecar, 1)
+        compilers = [name for name in ("gcc", "clang") if shutil.which(name)]
+        self.assertTrue(compilers)
+        with tempfile.TemporaryDirectory(prefix="round031-dm-sidecar-") as directory:
+            for compiler in compilers:
+                with self.subTest(compiler=compiler):
+                    working_directory = Path(directory)
+                    source_file = working_directory / (compiler + "-sidecar.c")
+                    codec_object = working_directory / (compiler + "-codec.o")
+                    executable = working_directory / (compiler + "-sidecar")
+                    source_file.write_text(fixture, encoding="utf-8")
+                    shared = [compiler, "-std=gnu11", "-O1", "-g",
+                              "-Wall", "-Wextra", "-Werror", "-Wshadow",
+                              "-fsanitize=address,undefined",
+                              "-fno-sanitize-recover=all", "-I",
+                              str(HEADER.parent)]
+                    # Historical codec.c only: its existing conversion
+                    # warnings remain isolated, never the NEW source C.
+                    codec_result = subprocess.run([
+                        *shared, "-Wno-conversion", "-c", str(CODEC),
+                        "-o", str(codec_object)], capture_output=True,
+                        text=True, timeout=60, check=False)
+                    self.assertEqual(codec_result.returncode, 0,
+                                     codec_result.stderr)
+                    compiled = subprocess.run([
+                        *shared, "-Wconversion", str(source_file),
+                        str(codec_object), "-llz4", "-lcrypto", "-o",
+                        str(executable)], capture_output=True, text=True,
+                        timeout=60, check=False)
+                    self.assertEqual(compiled.returncode, 0, compiled.stderr)
+                    executed = subprocess.run([str(executable)],
+                                              capture_output=True, text=True,
+                                              timeout=60, check=False)
+                    self.assertEqual(executed.returncode, 0, executed.stderr)
+                    self.assertEqual(executed.stdout.splitlines()[-1],
+                                     "ROUND031_DM_ACTUAL_SOURCE_LZ4_SIDECAR_NO_LIVE_PASS")
 
     def test_exact_production_crc32c_and_real_lz4_decoder_gcc_clang(self) -> None:
         compilers = [compiler for compiler in ("gcc", "clang") if shutil.which(compiler)]

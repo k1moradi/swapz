@@ -71,7 +71,8 @@ class Round023DisabledConsumerAdmission(unittest.TestCase):
             encoding="utf-8")
         self.assertIn('KCFLAGS="-DSWAPZ_ROUND024_DM_IMPORT_KBUILD_PROBE=1 '
                       '-DSWAPZ_ROUND028_DM_OWNED_READBACK_TEST=1 '
-                      '-DSWAPZ_ROUND030_DM_COMPRESSED_COMMIT_TEST=1"', workflow)
+                      '-DSWAPZ_ROUND030_DM_COMPRESSED_COMMIT_TEST=1 '
+                      '-DSWAPZ_ROUND031_DM_LZ4_SIDECAR_TEST=1"', workflow)
         self.assertIn("nm -a", workflow)
         self.assertIn("swapz_round024_dm_import_kbuild_probe", workflow)
 

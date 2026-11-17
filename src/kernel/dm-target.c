@@ -613,6 +613,10 @@ struct swapz_dm {
 	 * Lock order: ordered_owner before queue_lock; never the reverse.
 	 */
 	struct mutex ordered_owner;
+#if defined(SWAPZ_ROUND031_DM_LZ4_SIDECAR_TEST)
+	/* CI-only; no default struct growth, live upper BIO remains unchanged. */
+	bool round031_defer_hypothetical_ack;
+#endif
 	/* Set only by the ordered-domain owner while a submitter dispatch flushes. */
 	bool submitter_dispatch_active;
 	u64 submitter_dispatches;
@@ -3520,7 +3524,14 @@ static __used noinline int swapz_round030_dm_commit_owned_lz4(
 	error = swapz_zswap_admission_publish_ram_mapping(
 		transaction, logical_page, committed->generation,
 		transaction->record.gc_epoch);
+#if defined(SWAPZ_ROUND031_DM_LZ4_SIDECAR_TEST)
+	/* Guarded wrapper publishes its per-page owner before the mock ACK.
+	 * The existing Round030 standalone caller still ACKs exactly once.
+	 */
+	if (!error && !ctx->round031_defer_hypothetical_ack)
+#else
 	if (!error)
+#endif
 		error = swapz_zswap_admission_upper_write_ack(transaction);
 	if (error) {
 		swapz_zswap_admission_invalidate(transaction);
@@ -3534,7 +3545,12 @@ static __used noinline int swapz_round030_dm_commit_owned_lz4(
 	descriptor->mapping = *committed;
 	descriptor->source_swap_slot = source_swap_slot;
 	descriptor->extent_sequence = extent_sequence;
+#if defined(SWAPZ_ROUND031_DM_LZ4_SIDECAR_TEST)
+	descriptor->hypothetical_ack_count =
+		ctx->round031_defer_hypothetical_ack ? 0U : 1U;
+#else
 	descriptor->hypothetical_ack_count = 1U;
+#endif
 	descriptor->published = 1U;
 	return 0;
 
@@ -3592,6 +3608,332 @@ static __used noinline int swapz_round030_dm_read_owned_lz4(
 }
 /* ROUND030_DM_COMMIT_EXACT_END */
 #endif /* SWAPZ_ROUND030_DM_COMPRESSED_COMMIT_TEST */
+
+
+/*
+ * Round031: bounded per-logical-page source-LZ4 RAM-only ownership. The
+ * disabled-by-default descriptor array is owned by the ordered_owner caller,
+ * not by the production DM target or compressed RAM pressure controller.
+ * The existing 20-byte swapz_map, all live BIOs, and SWAPSPACE2 media format
+ * remain unchanged. This test-only source does not authenticate a producer.
+ */
+#if defined(SWAPZ_ROUND031_DM_LZ4_SIDECAR_TEST) && \
+    defined(SWAPZ_ROUND030_DM_COMPRESSED_COMMIT_TEST) && \
+    defined(SWAPZ_ROUND028_DM_OWNED_READBACK_TEST) && \
+    defined(SWAPZ_ROUND024_DM_IMPORT_KBUILD_PROBE)
+/* ROUND031_DM_SIDECAR_EXACT_START */
+#define SWAPZ_ROUND031_SOURCE_LZ4_TAG 0x5a315a4cU
+#define SWAPZ_ROUND031_SIDECAR_MAX_BYTES (16U * 1024U * 1024U)
+
+struct swapz_round031_dm_sidecar_slot {
+	struct swapz_round030_dm_volatile_descriptor descriptor;
+	swapz_u64 owner_token;
+	swapz_u32 representation_tag;
+	swapz_u32 readers; /* ordered_owner protects the synchronous lower READ */
+};
+
+struct swapz_round031_dm_sidecar {
+	struct swapz_round031_dm_sidecar_slot *slots;
+	swapz_u32 capacity;
+	size_t allocated_bytes;
+	swapz_u64 next_owner_token;
+	bool closed;
+};
+
+/* An old owner token cannot retire a newer map after ABA/reuse. */
+static __used noinline int swapz_round031_dm_forget_owner(
+		struct swapz_dm *ctx, struct swapz_round031_dm_sidecar *sidecar,
+		swapz_u32 logical_page, swapz_u64 expected_owner_token)
+{
+	struct swapz_round031_dm_sidecar_slot *slot;
+
+	if (!ctx || !sidecar)
+		return -EINVAL;
+	lockdep_assert_held(&ctx->ordered_owner);
+	if (!sidecar->slots || logical_page >= sidecar->capacity)
+		return -ESTALE;
+	slot = &sidecar->slots[logical_page];
+	if (!slot->owner_token)
+		return 0;
+	if (!expected_owner_token ||
+	    slot->owner_token != expected_owner_token)
+		return -ESTALE;
+	if (slot->readers)
+		return -EBUSY;
+	/* Wipe SHA, source epoch, stored identity and mapping before reuse. */
+	memzero_explicit(slot, sizeof(*slot));
+	return 0;
+}
+
+static __used noinline int swapz_round031_dm_sidecar_init(
+		struct swapz_dm *ctx, struct swapz_round031_dm_sidecar *sidecar)
+{
+	size_t allocation_bytes;
+	swapz_u32 logical_pages;
+
+	if (!ctx || !sidecar)
+		return -EINVAL;
+	lockdep_assert_held(&ctx->ordered_owner);
+	if (sidecar->slots || sidecar->closed ||
+	    !ctx->authority.maps || ctx->authority.maps != ctx->maps)
+		return -ESTALE;
+	logical_pages = ctx->authority.logical_pages;
+	if (!logical_pages ||
+	    check_mul_overflow((size_t)logical_pages,
+			       sizeof(*sidecar->slots), &allocation_bytes) ||
+	    allocation_bytes > SWAPZ_ROUND031_SIDECAR_MAX_BYTES)
+		return -EOVERFLOW;
+	sidecar->slots = kvcalloc(logical_pages, sizeof(*sidecar->slots),
+				 GFP_KERNEL);
+	if (!sidecar->slots)
+		return -ENOMEM;
+	sidecar->allocated_bytes = allocation_bytes;
+	sidecar->capacity = logical_pages;
+	return 0;
+}
+
+/*
+ * Called only with ordered_owner, after the Round030 real lower WRITE/FUA
+ * and real COW authority map publication. The Round030 helper defers only
+ * its TEST hypothetical ACK; it does not suppress any actual upper IO.
+ */
+static __used noinline int swapz_round031_dm_commit_with_sidecar(
+		struct swapz_dm *ctx, struct swapz_round031_dm_sidecar *sidecar,
+		struct swapz_zswap_admission_transaction *transaction,
+		swapz_u64 source_swap_slot, const swapz_u8 *owned_bytes,
+		swapz_u32 source_capacity, swapz_u8 *lower_image,
+		swapz_u32 lower_capacity, bool requested_fua,
+		swapz_u64 *new_owner_token)
+{
+	struct swapz_round031_dm_sidecar_slot *slot;
+	struct swapz_round030_dm_volatile_descriptor prepared = {};
+	const struct swapz_map *committed;
+	swapz_u32 logical_page, sequence;
+	swapz_u64 next_token;
+	int error;
+
+	if (!ctx || !sidecar || !transaction || !new_owner_token)
+		return -EINVAL;
+	lockdep_assert_held(&ctx->ordered_owner);
+	*new_owner_token = 0;
+	if (sidecar->closed || !sidecar->slots || !sidecar->capacity ||
+	    sidecar->capacity != ctx->authority.logical_pages ||
+	    !ctx->authority.maps || ctx->authority.maps != ctx->maps ||
+	    !transaction->record.logical_page ||
+	    transaction->record.logical_page >= sidecar->capacity ||
+	    !transaction->record.store_generation ||
+	    !transaction->record.stored_entry_identity ||
+	    !transaction->record.gc_epoch ||
+	    !source_swap_slot ||
+	    transaction->phase != SWAPZ_ZSWAP_ADMISSION_PREPARED)
+		return -ESTALE;
+	logical_page = (swapz_u32)transaction->record.logical_page;
+	slot = &sidecar->slots[logical_page];
+	if (slot->readers ||
+	    (slot->owner_token &&
+	     (slot->descriptor.record.generation >=
+	      transaction->record.generation)))
+		return -ESTALE;
+	if (sidecar->next_owner_token == ~(swapz_u64)0)
+		return -EOVERFLOW;
+	next_token = sidecar->next_owner_token + 1U;
+
+	/* Non-reentrant single ordered owner. No ACK before sidecar commit. */
+	if (ctx->round031_defer_hypothetical_ack)
+		return -EBUSY;
+	ctx->round031_defer_hypothetical_ack = true;
+	error = swapz_round030_dm_commit_owned_lz4(
+		ctx, transaction, source_swap_slot, owned_bytes, source_capacity,
+		lower_image, lower_capacity, &prepared, requested_fua);
+	ctx->round031_defer_hypothetical_ack = false;
+	if (error)
+		return error;
+	if (!prepared.published || prepared.hypothetical_ack_count ||
+	    transaction->phase != SWAPZ_ZSWAP_ADMISSION_MAPPED ||
+	    !ctx->authority.maps || ctx->authority.maps != ctx->maps ||
+	    ctx->gc_recovery.active || ctx->authority.gc_allocation) {
+		error = -EUCLEAN;
+		goto fail_after_map;
+	}
+	committed = &ctx->authority.maps[logical_page];
+	error = swapz_extent_sequence_lookup(&ctx->authority,
+					     committed->start_block, &sequence);
+	if (error || !sequence || sequence != prepared.extent_sequence ||
+	    !committed->valid || committed->raw ||
+	    memcmp(committed, &prepared.mapping, sizeof(*committed))) {
+		error = -ESTALE;
+		goto fail_after_map;
+	}
+	/* Stale old reader/token is retired only AFTER durable COW success;
+	 * rejected lower I/O leaves the previous slot untouched.
+	 */
+	memzero_explicit(slot, sizeof(*slot));
+	slot->descriptor = prepared;
+	slot->representation_tag = SWAPZ_ROUND031_SOURCE_LZ4_TAG;
+	slot->owner_token = next_token;
+	sidecar->next_owner_token = next_token;
+	error = swapz_zswap_admission_upper_write_ack(transaction);
+	if (error) {
+		memzero_explicit(slot, sizeof(*slot));
+		goto fail_after_map;
+	}
+	slot->descriptor.hypothetical_ack_count = 1U;
+	*new_owner_token = next_token;
+	return 0;
+
+fail_after_map:
+	/* The map is already published. Never report a later success. */
+	swapz_zswap_admission_invalidate(transaction);
+	swapz_fail(ctx, -EUCLEAN);
+	return error;
+}
+
+/*
+ * Event transitions are token-specific. The real owner must invoke them
+ * upon its guarded lifecycle event; no normal production callback is hooked.
+ * No GC relocation can inherit source identity solely from matching length.
+ */
+static __used noinline int swapz_round031_dm_forget_on_overwrite(
+		struct swapz_dm *ctx, struct swapz_round031_dm_sidecar *sidecar,
+		swapz_u32 logical_page, swapz_u64 expected_owner_token)
+{
+	return swapz_round031_dm_forget_owner(
+		ctx, sidecar, logical_page, expected_owner_token);
+}
+
+static __used noinline int swapz_round031_dm_forget_on_discard(
+		struct swapz_dm *ctx, struct swapz_round031_dm_sidecar *sidecar,
+		swapz_u32 logical_page, swapz_u64 expected_owner_token)
+{
+	return swapz_round031_dm_forget_owner(
+		ctx, sidecar, logical_page, expected_owner_token);
+}
+
+static __used noinline int swapz_round031_dm_forget_on_abort(
+		struct swapz_dm *ctx, struct swapz_round031_dm_sidecar *sidecar,
+		swapz_u32 logical_page, swapz_u64 expected_owner_token)
+{
+	return swapz_round031_dm_forget_owner(
+		ctx, sidecar, logical_page, expected_owner_token);
+}
+
+static __used noinline int swapz_round031_dm_forget_on_gc_relocation(
+		struct swapz_dm *ctx, struct swapz_round031_dm_sidecar *sidecar,
+		swapz_u32 logical_page, swapz_u64 expected_owner_token)
+{
+	return swapz_round031_dm_forget_owner(
+		ctx, sidecar, logical_page, expected_owner_token);
+}
+
+/* Detect changes in the actual authoritative map/extent sequence on each
+ * guarded READ, even if a GC/overwrite notification was missed.
+ */
+static __used noinline int swapz_round031_dm_read_with_sidecar(
+		struct swapz_dm *ctx, struct swapz_round031_dm_sidecar *sidecar,
+		const struct swapz_zswap_admission_transaction *transaction,
+		swapz_u32 logical_page, swapz_u64 expected_owner_token,
+		swapz_u8 *lower_image, swapz_u32 lower_capacity,
+		swapz_u8 *decode_scratch, swapz_u8 *verified_page,
+		swapz_u8 *decoded_page)
+{
+	struct swapz_round031_dm_sidecar_slot *slot;
+	const struct swapz_map *mapped;
+	swapz_u32 sequence;
+	int error;
+
+	if (!ctx || !sidecar || !transaction || !lower_image ||
+	    !decode_scratch || !verified_page || !decoded_page)
+		return -EINVAL;
+	lockdep_assert_held(&ctx->ordered_owner);
+	if (sidecar->closed || !sidecar->slots ||
+	    logical_page >= sidecar->capacity || !expected_owner_token ||
+	    !ctx->authority.maps || ctx->authority.maps != ctx->maps)
+		return -ESTALE;
+	slot = &sidecar->slots[logical_page];
+	if (slot->owner_token != expected_owner_token ||
+	    slot->representation_tag != SWAPZ_ROUND031_SOURCE_LZ4_TAG ||
+	    !slot->descriptor.published ||
+	    slot->descriptor.hypothetical_ack_count != 1U ||
+	    !slot->descriptor.source_swap_slot ||
+	    slot->descriptor.record.logical_page != logical_page ||
+	    slot->descriptor.record.codec != SWAPZ_ZSWAP_IMPORT_LZ4_CODEC ||
+	    slot->descriptor.record.representation !=
+		    SWAPZ_ZSWAP_IMPORT_REPRESENTATION ||
+	    slot->descriptor.record.version != SWAPZ_ZSWAP_IMPORT_VERSION ||
+	    slot->descriptor.record.dictionary_id ||
+	    slot->descriptor.record.compressed_length == 0 ||
+	    slot->descriptor.record.compressed_length > SWAPZ_MAX_COMPRESSED ||
+	    slot->descriptor.record.decoded_length != SWAPZ_BLOCK_BYTES ||
+	    !slot->descriptor.record.stored_entry_identity ||
+	    !slot->descriptor.record.store_generation ||
+	    !slot->descriptor.record.gc_epoch ||
+	    memcmp(&transaction->record, &slot->descriptor.record,
+		   sizeof(transaction->record)) ||
+	    transaction->phase != SWAPZ_ZSWAP_ADMISSION_ACKED ||
+	    ctx->gc_recovery.active || ctx->authority.gc_allocation)
+		return -ESTALE;
+	mapped = &ctx->authority.maps[logical_page];
+	if (!mapped->valid || mapped->raw ||
+	    memcmp(mapped, &slot->descriptor.mapping, sizeof(*mapped)))
+		return -ESTALE;
+	error = swapz_extent_sequence_lookup(&ctx->authority,
+					     mapped->start_block, &sequence);
+	if (error || sequence != slot->descriptor.extent_sequence)
+		return -ESTALE;
+	/* Never write the upper page before the post-I/O map/owner fence. */
+	if (swapz_zswap_import_ranges_overlap(verified_page, SWAPZ_BLOCK_BYTES,
+			decoded_page, SWAPZ_BLOCK_BYTES) ||
+	    swapz_zswap_import_ranges_overlap(verified_page, SWAPZ_BLOCK_BYTES,
+			decode_scratch, SWAPZ_BLOCK_BYTES) ||
+	    swapz_zswap_import_ranges_overlap(verified_page, SWAPZ_BLOCK_BYTES,
+			lower_image, lower_capacity))
+		return -EINVAL;
+	if (slot->readers == ~(swapz_u32)0)
+		return -EOVERFLOW;
+	slot->readers++;
+	error = swapz_round030_dm_read_owned_lz4(
+		ctx, &slot->descriptor, transaction, lower_image,
+		lower_capacity, decode_scratch, verified_page);
+	slot->readers--;
+	if (slot->owner_token != expected_owner_token ||
+	    !ctx->authority.maps ||
+	    memcmp(&slot->descriptor.mapping,
+		   &ctx->authority.maps[logical_page],
+		   sizeof(slot->descriptor.mapping)))
+		return -ESTALE;
+	if (!error)
+		memcpy(decoded_page, verified_page, SWAPZ_BLOCK_BYTES);
+	return error;
+}
+
+static __used noinline int swapz_round031_dm_forget_on_swapoff_or_teardown(
+		struct swapz_dm *ctx, struct swapz_round031_dm_sidecar *sidecar)
+{
+	swapz_u32 index;
+
+	if (!ctx || !sidecar)
+		return -EINVAL;
+	lockdep_assert_held(&ctx->ordered_owner);
+	if (sidecar->closed)
+		return 0;
+	if (!sidecar->slots) {
+		sidecar->closed = true;
+		return 0;
+	}
+	for (index = 0; index < sidecar->capacity; ++index)
+		if (sidecar->slots[index].readers)
+			return -EBUSY;
+	/* Null the only table owner BEFORE releasing or reusing its memory. */
+	memzero_explicit(sidecar->slots, sidecar->allocated_bytes);
+	kvfree(sidecar->slots);
+	sidecar->slots = NULL;
+	sidecar->capacity = 0;
+	sidecar->allocated_bytes = 0;
+	sidecar->closed = true;
+	return 0;
+}
+/* ROUND031_DM_SIDECAR_EXACT_END */
+#endif /* SWAPZ_ROUND031_DM_LZ4_SIDECAR_TEST */
 
 
 /*
