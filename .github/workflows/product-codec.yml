@@ -225,6 +225,16 @@ jobs:
             echo "Missing Round025 source-derived DM generation/GC/ACK gate" >&2
             false
           fi
+          phase="round026-dm-map-snapshot-object-identity"
+          for symbol in swapz_round026_dm_capture_read_snapshot \
+                        swapz_round026_dm_revalidate_and_refuse; do
+            if ! nm -a build/kernel/round024-dm-ingress/dm-target.o |
+                grep -q "$symbol"; then
+              echo "::error::Missing source-real Round026 ordered map snapshot: $symbol" >&2
+              false
+            fi
+          done
+          echo "ROUND026_DM_READ_SNAPSHOT_ACTUAL_MODULE_KBUILD_COMPILED_NO_LIVE"
           echo "ROUND025_DM_AUTHORITY_ACTUAL_MODULE_KBUILD_COMPILED_DEFAULT_OFF"
           echo "ROUND024_DM_INGRESS_ACTUAL_MODULE_KBUILD_COMPILED_NO_LIVE_ADMISSION"
           compile_variant W=2 build/kernel/w2/dm-swapz.ko W=2

@@ -122,6 +122,72 @@ class Round023DisabledConsumerAdmission(unittest.TestCase):
         self.assertIn("swapz_round025_dm_authority_kbuild_probe", workflow)
         self.assertIn("round025-dm-authority", workflow)
 
+
+    def test_round026_real_dm_snapshot_fence_gcc_clang_no_go(self) -> None:
+        """Actually compile source-extracted worker-owned map recheck."""
+        dm = DM.read_text(encoding="utf-8")
+        begin = "/* ROUND026_DM_SNAPSHOT_START */"
+        end = "/* ROUND026_DM_SNAPSHOT_END */"
+        self.assertEqual(dm.count(begin), 1)
+        self.assertEqual(dm.count(end), 1)
+        source_body = dm.split(begin, 1)[1].split(end, 1)[0]
+        self.assertIn("lockdep_assert_held(&ctx->ordered_owner)", source_body)
+        self.assertIn("ctx->authority.maps[logical_page]", source_body)
+        self.assertIn("swapz_extent_sequence_lookup(", source_body)
+        self.assertIn("ctx->authority.gc_destination", source_body)
+        self.assertIn("ctx->gc_recovery.active", source_body)
+        self.assertIn("before_read->mapping.start_block !=", source_body)
+        self.assertIn("before_read->mapping.record_index !=", source_body)
+        self.assertIn("transaction->upper_write_ack_count != 1U",
+                      source_body)
+        self.assertIn("return -EOPNOTSUPP;", source_body)
+        self.assertNotIn("return 1;", source_body)
+        self.assertNotIn("bio_endio(", source_body)
+        self.assertNotIn("swapz_finish(", source_body)
+        self.assertNotIn("swapz_zswap_admission_begin_mock(", source_body)
+        # These functions are unreferenced in the live DM code.
+        self.assertEqual(dm.count("swapz_round026_dm_capture_read_snapshot("),
+                         2)  # one definition, one gated internal call
+        self.assertEqual(dm.count("swapz_round026_dm_revalidate_and_refuse("),
+                         1)
+        fixture = (ROOT / "tests/runtime/native/fixtures" /
+                   "round026-consumer-dm-snapshot.c").read_text(encoding="utf-8")
+        marker = "/* ROUND026_DM_EXACT_FUNCTIONS */"
+        self.assertEqual(fixture.count(marker), 1)
+        compilation = fixture.replace(marker, source_body, 1)
+        with tempfile.TemporaryDirectory() as temporary:
+            compiled_file = Path(temporary) / "round026-source.c"
+            compiled_file.write_text(compilation, encoding="utf-8")
+            compilers = [compiler for compiler in ("gcc", "clang")
+                         if shutil.which(compiler)]
+            self.assertTrue(compilers)
+            for compiler in compilers:
+                with self.subTest(compiler=compiler):
+                    executable = Path(temporary) / compiler
+                    command = [
+                        compiler, "-std=gnu11", "-O1", "-g",
+                        "-Wall", "-Wextra", "-Wconversion", "-Wshadow",
+                        "-Werror", "-fsanitize=address,undefined",
+                        "-fno-sanitize-recover=all", str(compiled_file),
+                        "-o", str(executable)]
+                    compiled = subprocess.run(
+                        command, capture_output=True, text=True,
+                        timeout=60, check=False)
+                    self.assertEqual(compiled.returncode, 0, compiled.stderr)
+                    result = subprocess.run(
+                        [str(executable)], capture_output=True, text=True,
+                        env=dict(os.environ, ASAN_OPTIONS="detect_leaks=1"),
+                        timeout=40, check=False)
+                    self.assertEqual(result.returncode, 0, result.stderr)
+                    self.assertIn(
+                        "ROUND026_DM_EXACT_SNAPSHOT_STALE_AND_NO_GO_PASS",
+                        result.stdout)
+        workflow = (ROOT / ".github/workflows/product-codec.yml").read_text(
+            encoding="utf-8")
+        self.assertIn("swapz_round026_dm_capture_read_snapshot", workflow)
+        self.assertIn("swapz_round026_dm_revalidate_and_refuse", workflow)
+
+
     def test_actual_crc32c_lz4_sha256_and_transaction_gcc_clang(self) -> None:
         compilers = [name for name in ("gcc", "clang") if shutil.which(name)]
         self.assertTrue(compilers, "C compiler is required")

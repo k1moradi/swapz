@@ -14920,3 +14920,46 @@ test both length/capacity corruption and retain exact once-only
 refcount release. The default-OFF source, authentic epoch/DM admission
 refusal, original 4096-byte upper swap BIO and all physical safety
 boundaries remain unchanged.
+
+## Round 026 — Agent 3: real DM ordered mapping/GC/ACK read snapshot, fail-closed NO_GO
+
+Under **existing disabled Kbuild opt-in only**, the exact production
+`src/kernel/dm-target.c` now defines an ordered-owner
+`swapz_round026_dm_capture_read_snapshot` and
+`swapz_round026_dm_revalidate_and_refuse`. The capture calls real
+`swapz_extent_sequence_lookup`, reads actual volatile
+`ctx->authority.maps[logical]`, requires the identical `ctx->maps`
+allocation, valid compressed entry, current physical/segment/offset
+bounds and 4/8/16KiB extent geometry, and copies map generation,
+exact physical start, CRC32C, length, representation record_index,
+extent sequence and current GC destination/victim/recovery state.
+The caller must own `ordered_owner` throughout each capture or
+revalidation. No pointer escapes, no default-path overhead, no
+mutation of mapping or upper completion. A GC move to new physical
+extent with *unchanged logical generation* is rejected by full
+snapshot comparisons, not caller-supplied fake GC epoch. Bounds
+checked before extent subtraction prevent wrap.
+
+Actual source-extracted C fixture
+`tests/runtime/native/fixtures/round026-consumer-dm-snapshot.c`
+runs gcc+clang strict `-Wall -Wextra -Wconversion -Wshadow -Werror`
+with ASan/UBSan. Mutation cases cover changed generation/physical
+extent/record/CRC/length, stale indexed physical sequence, active
+GC destination/recovery, DISCARD, after-teardown callback, 2048 upper
+READ, wrong REQ_OP, 0/2 ACK counts, short/failed lower read,
+corrupt compressed length/CRC and invalid mapping geometry. The C
+code always refuses even perfect synthetic matches with
+`-EOPNOTSUPP`; a clean capture is **not admission**. Separate true
+original kernel Kbuild x86_64 and ARM64 must emit BOTH Round026
+symbols from a CI-only `dm-target.o`, with W=1, W=2 and untouched
+normal modules. A failed exact-source compile or emitted-symbol
+check is BLOCKED; no mock PASS can override a compiler failure.
+
+No real slot allocation epoch, store SHA owner, authenticated
+compressed BIO→DM bridge or new original 4096 READ guarantee is
+proven. Direct compressed handoff remains **NO_GO**. No upper
+`bio_endio`, no physical read/write, no pressure/GC scheduler added.
+`LOADED=NOT_RUN`; `KUNIT_EXECUTED=NOT_APPLICABLE`;
+`PHYSICAL=NOT_RUN`; Phase A BLOCKED, forced RAW bypass DISABLED,
+direct compressed DISABLED. RAW remains ORIGINAL UNCOMPRESSED 4096;
+SWAPSPACE2 header/UUID/table preserved, codec/gen/GC metadata volatile.

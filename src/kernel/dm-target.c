@@ -1239,6 +1239,150 @@ static __used noinline int swapz_round025_dm_authority_kbuild_probe(
 }
 #endif /* SWAPZ_ROUND025_DM_AUTHORITY_KBUILD_PROBE */
 
+#if defined(SWAPZ_ROUND024_DM_IMPORT_KBUILD_PROBE)
+/* ROUND026_DM_SNAPSHOT_START */
+/*
+ * Round026: read-only, ordered-owner MAP witness; NOT compressed admission.
+ * A snapshot is only valid while the caller serializes both capture and
+ * revalidation with ctx->ordered_owner, and before that ctx is torn down.
+ * A real DM generation, extent sequence and GC state cannot authenticate a
+ * Linux swap-slot allocation epoch or cloned compressed BIO owner.
+ */
+struct swapz_round026_dm_read_snapshot {
+	struct swapz_map mapping;
+	swapz_u32 logical_page;
+	swapz_u32 extent_sequence;
+	swapz_u32 gc_destination;
+	swapz_u32 gc_forbidden_victim;
+	swapz_u8 gc_allocation;
+	swapz_u8 recovery_active;
+};
+
+static __used noinline int swapz_round026_dm_capture_read_snapshot(
+		const struct swapz_dm *ctx, swapz_u32 logical_page,
+		struct swapz_round026_dm_read_snapshot *snapshot)
+{
+	struct swapz_round026_dm_read_snapshot captured = {};
+	const struct swapz_map *current_map;
+	swapz_u32 extent_bytes;
+	int error;
+
+	if (!snapshot)
+		return -EINVAL;
+	/* Failed captures never leak an earlier witness to a reused caller. */
+	memset(snapshot, 0, sizeof(*snapshot));
+	if (!ctx || !ctx->authority.maps ||
+	    ctx->authority.maps != ctx->maps ||
+	    logical_page >= ctx->authority.logical_pages ||
+	    !ctx->authority.physical_blocks)
+		return -EOPNOTSUPP;
+	lockdep_assert_held(&ctx->ordered_owner);
+	if (!ctx->accepting || smp_load_acquire(&ctx->failed))
+		return -ESHUTDOWN;
+	current_map = &ctx->authority.maps[logical_page];
+	if (!current_map->valid)
+		return -ENODATA;
+	/* Today's original 4096-byte RAW is never a compressed sideband. */
+	if (current_map->raw)
+		return -EOPNOTSUPP;
+	if (current_map->extent_blocks != 1U &&
+	    current_map->extent_blocks != 2U &&
+	    current_map->extent_blocks != 4U)
+		return -EUCLEAN;
+	if (current_map->start_block >= ctx->authority.physical_blocks ||
+	    current_map->extent_blocks >
+		    ctx->authority.physical_blocks - current_map->start_block ||
+	    current_map->start_block % SWAPZ_SEGMENT_BLOCKS +
+		    current_map->extent_blocks > SWAPZ_SEGMENT_BLOCKS)
+		return -EUCLEAN;
+	extent_bytes = (swapz_u32)current_map->extent_blocks *
+		       SWAPZ_BLOCK_BYTES;
+	if (!current_map->generation || !current_map->payload_length ||
+	    current_map->payload_length > SWAPZ_MAX_COMPRESSED ||
+	    current_map->payload_offset > extent_bytes ||
+	    current_map->payload_length >
+		    extent_bytes - current_map->payload_offset)
+		return -EUCLEAN;
+	error = swapz_extent_sequence_lookup(&ctx->authority,
+					     current_map->start_block,
+					     &captured.extent_sequence);
+	if (error)
+		return error;
+	/* No GC epoch is minted by these fields. They are only a conservative
+	 * local read/relocation fence, not externally transferable identity.
+	 */
+	captured.mapping = *current_map;
+	captured.logical_page = logical_page;
+	captured.gc_destination = ctx->authority.gc_destination;
+	captured.gc_forbidden_victim = ctx->authority.gc_forbidden_victim;
+	captured.gc_allocation = ctx->authority.gc_allocation;
+	captured.recovery_active = ctx->gc_recovery.active;
+	*snapshot = captured;
+	return 0;
+}
+
+static __used noinline int swapz_round026_dm_revalidate_and_refuse(
+		const struct swapz_dm *ctx,
+		const struct swapz_round026_dm_read_snapshot *before_read,
+		const struct bio *upper_read,
+		const struct swapz_zswap_admission_transaction *transaction,
+		int lower_error, swapz_u32 actual_lower_read_bytes)
+{
+	struct swapz_round026_dm_read_snapshot current = {};
+	int error;
+
+	if (!before_read || !ctx || !upper_read || !transaction)
+		return -EOPNOTSUPP;
+	error = swapz_round026_dm_capture_read_snapshot(
+			ctx, before_read->logical_page, &current);
+	if (error)
+		return error == -ENODATA ? -ESTALE : error;
+	/* A relocated extent may retain the SAME logical generation.
+	 * Compare the whole volatile map descriptor and indexed extent
+	 * sequence, not only caller-presented generation or GC epoch.
+	 */
+	if (before_read->mapping.start_block != current.mapping.start_block ||
+	    before_read->mapping.generation != current.mapping.generation ||
+	    before_read->mapping.raw != current.mapping.raw ||
+	    before_read->mapping.valid != current.mapping.valid ||
+	    before_read->mapping.extent_blocks != current.mapping.extent_blocks ||
+	    before_read->mapping.payload_offset != current.mapping.payload_offset ||
+	    before_read->mapping.payload_length != current.mapping.payload_length ||
+	    before_read->mapping.payload_crc32c != current.mapping.payload_crc32c ||
+	    before_read->mapping.record_index != current.mapping.record_index ||
+	    before_read->extent_sequence != current.extent_sequence ||
+	    before_read->gc_destination != current.gc_destination ||
+	    before_read->gc_forbidden_victim != current.gc_forbidden_victim ||
+	    before_read->gc_allocation != current.gc_allocation ||
+	    before_read->recovery_active != current.recovery_active ||
+	    transaction->record.logical_page != current.logical_page ||
+	    transaction->record.generation != current.mapping.generation)
+		return -ESTALE;
+	if (bio_op(upper_read) != REQ_OP_READ ||
+	    !(upper_read->bi_opf & REQ_SWAP) ||
+	    upper_read->bi_iter.bi_size != SWAPZ_BLOCK_BYTES ||
+	    transaction->phase != SWAPZ_ZSWAP_ADMISSION_ACKED ||
+	    transaction->upper_write_ack_count != 1U ||
+	    transaction->teardown_started)
+		return -EOPNOTSUPP;
+	if (lower_error ||
+	    actual_lower_read_bytes !=
+		    (swapz_u32)current.mapping.extent_blocks * SWAPZ_BLOCK_BYTES)
+		return -EIO;
+	if (transaction->record.compressed_length !=
+		    current.mapping.payload_length ||
+	    transaction->record.compressed_crc32c !=
+		    current.mapping.payload_crc32c)
+		return -EBADMSG;
+	/* Even a byte-for-byte stable DM snapshot, durable read and apparent
+	 * ACK do not prove SOURCE allocator epoch, original SHA or owned BIO.
+	 * Do not publish, decode to an upper BIO or return success.
+	 */
+	return -EOPNOTSUPP;
+}
+/* ROUND026_DM_SNAPSHOT_END */
+#endif /* SWAPZ_ROUND026_DM_SNAPSHOT_KBUILD_PROBE */
+
 static int swapz_maybe_inject_read_fault(struct swapz_dm *ctx)
 {
 	s64 call;
