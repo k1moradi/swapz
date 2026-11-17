@@ -70,7 +70,8 @@ class Round023DisabledConsumerAdmission(unittest.TestCase):
         workflow = (ROOT / ".github/workflows/product-codec.yml").read_text(
             encoding="utf-8")
         self.assertIn('KCFLAGS="-DSWAPZ_ROUND024_DM_IMPORT_KBUILD_PROBE=1 '
-                      '-DSWAPZ_ROUND028_DM_OWNED_READBACK_TEST=1"', workflow)
+                      '-DSWAPZ_ROUND028_DM_OWNED_READBACK_TEST=1 '
+                      '-DSWAPZ_ROUND030_DM_COMPRESSED_COMMIT_TEST=1"', workflow)
         self.assertIn("nm -a", workflow)
         self.assertIn("swapz_round024_dm_import_kbuild_probe", workflow)
 
