@@ -841,15 +841,21 @@ class PairedModuleTests(unittest.TestCase):
                 bad = dict(metadata)
                 bad[name] = replacement
                 self.source_manifest.write_text(json.dumps(bad) + "\n")
-                with self.assertRaisesRegex(
-                        VerificationError, "source_manifest_round028_profile"):
+                # The frozen Round026 allocator profile is checked first.
+                # A forged global handoff flag must fail at that FIRST gate.
+                first_error = ("source_manifest_allocator_profile"
+                               if name == "direct_compressed_handoff_enabled"
+                               else "source_manifest_round028_profile")
+                with self.assertRaisesRegex(VerificationError, first_error):
                     load_source_manifest(self.source_manifest)
         metadata["changed_paths"] = [
             entry for entry in metadata["changed_paths"]
             if entry["path"] != ALLOCATOR_PATCHED_PATH]
         self.source_manifest.write_text(json.dumps(metadata) + "\n")
+        # Removing the seventh path makes this a six-path default claim
+        # while retaining Round026 fields: its first failure is allocator.
         with self.assertRaisesRegex(
-                VerificationError, "source_manifest_round028_profile"):
+                VerificationError, "source_manifest_allocator_profile"):
             load_source_manifest(self.source_manifest)
 
     def test_round027_exact_six_default_and_seven_allocator_y_n(self) -> None:
