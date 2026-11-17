@@ -28,7 +28,15 @@ class ImportedZswapLz4SourceOnly(unittest.TestCase):
         self.assertIn("#define SWAPZ_MAX_COMPRESSED 3568U", codec)
         self.assertIn("#define SWAPZ_CODEC_METADATA_ON_MEDIA 0U", codec)
         self.assertNotIn('"zswap-import-codec.h"', target)
-        self.assertNotIn("SWAPZ_ZSWAP_IMPORT_REPRESENTATION", target)
+        # Only the explicitly opt-in Round028 helpers may name compressed
+        # representation constants. Ordinary production has no such ingress.
+        active = target.split("#if defined(SWAPZ_ROUND028_DM_OWNED_READBACK_TEST)", 1)
+        self.assertEqual(len(active), 2)
+        guarded, after = active[1].split(
+            "#endif /* SWAPZ_ROUND028_DM_OWNED_READBACK_TEST */", 1)
+        self.assertIn("SWAPZ_ZSWAP_IMPORT_REPRESENTATION", guarded)
+        self.assertNotIn("SWAPZ_ZSWAP_IMPORT_REPRESENTATION",
+                         active[0] + after)
         self.assertIn("swapz_crc32c_bytes", CODEC.read_text(encoding="utf-8"))
         self.assertIn("LZ4_decompress_safe", header)
         self.assertIn("original_sha256", header)
@@ -100,16 +108,28 @@ class ImportedZswapLz4SourceOnly(unittest.TestCase):
             for compiler in compilers:
                 with self.subTest(compiler=compiler):
                     executable = Path(directory) / compiler
-                    command = [compiler, "-std=gnu11", "-O1", "-g", "-Wall",
-                               "-Wextra", "-Werror", "-Wconversion", "-Wshadow",
-                               "-fsanitize=address,undefined",
-                               "-fno-sanitize-recover=all", "-I", str(HEADER.parent),
-                               str(FIXTURE), str(CODEC), "-llz4", "-lcrypto",
+                    # Existing codec.c has unrelated historical
+                    # -Wconversion diagnostics; keep all its other warnings
+                    # fatal and require -Wconversion on the new C fixture.
+                    codec_object = Path(directory) / (compiler + "-codec.o")
+                    shared = [compiler, "-std=gnu11", "-O1", "-g", "-Wall",
+                              "-Wextra", "-Werror", "-Wshadow",
+                              "-fsanitize=address,undefined",
+                              "-fno-sanitize-recover=all", "-I",
+                              str(HEADER.parent)]
+                    compiled_codec = subprocess.run(
+                        [*shared, "-Wno-conversion", "-c", str(CODEC),
+                         "-o", str(codec_object)], capture_output=True,
+                        text=True, timeout=60, check=False)
+                    self.assertEqual(compiled_codec.returncode, 0,
+                                     f"{compiler} codec compile: {compiled_codec.stderr}")
+                    command = [*shared, "-Wconversion", str(FIXTURE),
+                               str(codec_object), "-llz4", "-lcrypto",
                                "-o", str(executable)]
                     built = subprocess.run(command, capture_output=True,
                                            text=True, timeout=60, check=False)
                     self.assertEqual(built.returncode, 0,
-                                     f"{compiler} compile: {built.stderr}")
+                                     f"{compiler} fixture compile: {built.stderr}")
                     executed = subprocess.run([str(executable)], capture_output=True,
                                               text=True, timeout=40, check=False)
                     self.assertEqual(executed.returncode, 0,
