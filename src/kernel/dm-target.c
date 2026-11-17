@@ -3939,6 +3939,276 @@ static __used noinline int swapz_round031_dm_forget_on_swapoff_or_teardown(
 
 
 /*
+ * Round032 CI-only read-only, value-only original BIO candidate validation.
+ * This mirrors the frozen Linux producer v1 field contract independently;
+ * the ordinary HWE module never imports an unpublished original BIO symbol.
+ *
+ * Even a matching copy from a mock caller has NO trusted original MM swap
+ * type/offset+allocator epoch proof. No live ->map, lower WRITE or upper ACK
+ * invokes these helpers. The final real ingress deliberately returns
+ * -EOPNOTSUPP until a matching original-kernel provider is authenticated.
+ */
+#if defined(SWAPZ_ROUND032_DM_LZ4_VIEW_VALIDATE_TEST) && \
+    defined(SWAPZ_ROUND031_DM_LZ4_SIDECAR_TEST) && \
+    defined(SWAPZ_ROUND030_DM_COMPRESSED_COMMIT_TEST) && \
+    defined(SWAPZ_ROUND028_DM_OWNED_READBACK_TEST) && \
+    defined(SWAPZ_ROUND024_DM_IMPORT_KBUILD_PROBE)
+/* ROUND032_DM_OWNED_VIEW_EXACT_START */
+struct swapz_round032_dm_owned_view_v1 {
+	swapz_u64 source_swap_entry; /* COMPLETE original swp_entry_t.val */
+	swapz_u64 source_slot_epoch; /* MM allocator-owned incarnation */
+	swapz_u64 stored_entry_identity; /* Exact original zswap STORE identity */
+	swapz_u32 compressed_crc32c;
+	swapz_u16 compressed_length;
+	swapz_u16 decoded_length;
+	swapz_u8 representation_version;
+	swapz_u8 codec;
+	swapz_u8 original_sha256[32];
+};
+
+/*
+ * Mechanical verification only, NOT original MM source authentication.
+ * Caller holds the source BIO, its separate owned compressed buffer and
+ * ordered_owner until this synchronous call returns. The independent RAM
+ * sidecar is read under the same ordered_owner: no mutation/GC races or
+ * borrowed zpool pointers, no copying to a lower/upper output on failure.
+ */
+static __used noinline int swapz_round032_dm_verify_untrusted_view_v1(
+		struct swapz_dm *ctx, const struct bio *source_bio,
+		const struct swapz_round032_dm_owned_view_v1 *source_view,
+		const swapz_u8 *independently_owned_lz4,
+		swapz_u32 owned_capacity,
+		const struct swapz_round031_dm_sidecar *sidecar,
+		swapz_u64 expected_owner_token)
+{
+	const struct swapz_round031_dm_sidecar_slot *source_slot;
+	const struct swapz_map *current_mapping;
+	struct bio_vec source_vector;
+	sector_t original_sector, mapped_page;
+	swapz_u32 current_extent_sequence;
+	unsigned int digest_index;
+	swapz_u8 digest_present = 0;
+	int error;
+
+	if (!ctx || !source_bio || !source_view || !independently_owned_lz4 ||
+	    !sidecar || !expected_owner_token)
+		return -EINVAL;
+	lockdep_assert_held(&ctx->ordered_owner);
+	if (!ctx->accepting || smp_load_acquire(&ctx->failed) ||
+	    sidecar->closed || !sidecar->slots || !ctx->target ||
+	    !ctx->authority.maps || ctx->authority.maps != ctx->maps ||
+	    !ctx->logical_pages ||
+	    ctx->logical_pages != ctx->authority.logical_pages ||
+	    sidecar->capacity != ctx->authority.logical_pages ||
+	    ctx->gc_recovery.active || ctx->authority.gc_allocation ||
+	    ctx->authority.batch_pending || ctx->authority.in_flight)
+		return -ESTALE;
+
+	/* This exact 4096-byte, unmerged original upper swap WRITE remains
+	 * ORIGINAL plaintext; a scalar origin is necessary but insufficient.
+	 */
+	if (bio_op(source_bio) != REQ_OP_WRITE ||
+	    !(source_bio->bi_opf & REQ_SWAP) ||
+	    (source_bio->bi_opf & REQ_PREFLUSH) ||
+	    source_bio->bi_iter.bi_size != SWAPZ_BLOCK_BYTES ||
+	    bio_sectors(source_bio) != SWAPZ_SECTORS ||
+	    !source_bio->bi_bdev || !source_bio->bi_io_vec ||
+	    source_bio->bi_vcnt != 1U || source_bio->bi_iter.bi_idx)
+		return -EOPNOTSUPP;
+#ifdef BIO_HAS_ZSWAP_STORED_WRITEBACK_ORIGIN
+	if (!bio_is_zswap_stored_writeback(source_bio))
+		return -EOPNOTSUPP;
+#else
+	/* The stock HWE build does not carry the original pinned scalar. */
+	return -EOPNOTSUPP;
+#endif
+	source_vector = bio_iter_iovec(source_bio, source_bio->bi_iter);
+	if (!source_vector.bv_page || source_vector.bv_offset ||
+	    source_vector.bv_len != SWAPZ_BLOCK_BYTES)
+		return -EOPNOTSUPP;
+	original_sector = source_bio->bi_iter.bi_sector;
+	if (original_sector % SWAPZ_SECTORS ||
+	    original_sector >= ctx->target->len ||
+	    SWAPZ_SECTORS > ctx->target->len - original_sector)
+		return -ERANGE;
+	mapped_page = original_sector / SWAPZ_SECTORS;
+	if (!mapped_page || mapped_page >= ctx->logical_pages ||
+	    mapped_page >= sidecar->capacity)
+		return -ERANGE;
+
+	/* Full packed swp_entry_t.val is NOT the DM-relative mapped_page;
+	 * no guessed bit shifts, type encoding, or virtual swap-offset match.
+	 */
+	if (!source_view->source_swap_entry ||
+	    !source_view->source_slot_epoch ||
+	    !source_view->stored_entry_identity)
+		return -ESTALE;
+	if (source_view->representation_version != 1U ||
+	    source_view->codec != SWAPZ_ZSWAP_IMPORT_LZ4_CODEC)
+		return -EOPNOTSUPP;
+	if (!source_view->compressed_length ||
+	    source_view->compressed_length > SWAPZ_MAX_COMPRESSED ||
+	    source_view->decoded_length != SWAPZ_BLOCK_BYTES ||
+	    owned_capacity < source_view->compressed_length ||
+	    owned_capacity > SWAPZ_MAX_COMPRESSED)
+		return -EMSGSIZE;
+	if (swapz_zswap_import_ranges_overlap(
+		    independently_owned_lz4, source_view->compressed_length,
+		    source_view, sizeof(*source_view)) ||
+	    swapz_zswap_import_ranges_overlap(
+		    independently_owned_lz4, source_view->compressed_length,
+		    source_bio, sizeof(*source_bio)))
+		return -EINVAL;
+	for (digest_index = 0; digest_index < sizeof(source_view->original_sha256);
+	     ++digest_index)
+		digest_present |= source_view->original_sha256[digest_index];
+	if (!digest_present)
+		return -ENODATA;
+	if (swapz_crc32c_bytes(independently_owned_lz4,
+			      source_view->compressed_length) !=
+	    source_view->compressed_crc32c)
+		return -EBADMSG;
+
+	source_slot = &sidecar->slots[mapped_page];
+	if (source_slot->owner_token != expected_owner_token ||
+	    source_slot->representation_tag != SWAPZ_ROUND031_SOURCE_LZ4_TAG ||
+	    source_slot->readers ||
+	    !source_slot->descriptor.published ||
+	    source_slot->descriptor.hypothetical_ack_count != 1U ||
+	    source_slot->descriptor.record.logical_page != mapped_page ||
+	    source_slot->descriptor.record.codec != SWAPZ_ZSWAP_IMPORT_LZ4_CODEC ||
+	    source_slot->descriptor.record.representation !=
+		    SWAPZ_ZSWAP_IMPORT_REPRESENTATION ||
+	    source_slot->descriptor.record.version != SWAPZ_ZSWAP_IMPORT_VERSION ||
+	    source_slot->descriptor.record.dictionary_id ||
+	    !source_slot->descriptor.record.stored_eviction ||
+	    !source_slot->descriptor.record.immutable_owned_copy ||
+	    !source_slot->descriptor.record.gc_epoch ||
+	    source_slot->descriptor.source_swap_slot !=
+		    source_view->source_swap_entry ||
+	    source_slot->descriptor.record.store_generation !=
+		    source_view->source_slot_epoch ||
+	    source_slot->descriptor.record.stored_entry_identity !=
+		    source_view->stored_entry_identity ||
+	    source_slot->descriptor.record.compressed_length !=
+		    source_view->compressed_length ||
+	    source_slot->descriptor.record.compressed_crc32c !=
+		    source_view->compressed_crc32c ||
+	    source_slot->descriptor.record.decoded_length !=
+		    source_view->decoded_length ||
+	    memcmp(source_slot->descriptor.record.original_sha256,
+		   source_view->original_sha256,
+		   sizeof(source_view->original_sha256)))
+		return -ESTALE;
+
+	current_mapping = &ctx->authority.maps[mapped_page];
+	if (!current_mapping->valid || current_mapping->raw ||
+	    current_mapping->generation !=
+		    source_slot->descriptor.record.generation ||
+	    current_mapping->payload_length != source_view->compressed_length ||
+	    current_mapping->payload_crc32c != source_view->compressed_crc32c ||
+	    memcmp(current_mapping, &source_slot->descriptor.mapping,
+		   sizeof(*current_mapping)))
+		return -ESTALE;
+	error = swapz_extent_sequence_lookup(&ctx->authority,
+					     current_mapping->start_block,
+					     &current_extent_sequence);
+	if (error || !current_extent_sequence ||
+	    current_extent_sequence != source_slot->descriptor.extent_sequence)
+		return -ESTALE;
+	return 0; /* UNTRUSTED mechanical check; never authorize actual I/O. */
+}
+
+/*
+ * Copy the test candidate into independently owned RAM only after ALL
+ * mechanical guards, and recheck copied CRC32C. The caller supplies a
+ * separate scratch buffer: no destination byte changes on ANY rejection.
+ * Returning zero here proves only deterministic value-copy mechanics.
+ */
+static __used noinline int swapz_round032_dm_copy_untrusted_for_test(
+		struct swapz_dm *ctx, const struct bio *source_bio,
+		const struct swapz_round032_dm_owned_view_v1 *source_view,
+		const swapz_u8 *independently_owned_lz4,
+		swapz_u32 owned_capacity,
+		const struct swapz_round031_dm_sidecar *sidecar,
+		swapz_u64 expected_owner_token,
+		swapz_u8 *verification_scratch, swapz_u32 scratch_capacity,
+		swapz_u8 *candidate_destination, swapz_u32 destination_capacity)
+{
+	swapz_u32 source_length;
+	int error;
+
+	if (!source_view || !verification_scratch || !candidate_destination)
+		return -EINVAL;
+	source_length = source_view->compressed_length;
+	if (!source_length || source_length > SWAPZ_MAX_COMPRESSED ||
+	    scratch_capacity < source_length ||
+	    destination_capacity < source_length)
+		return -EMSGSIZE;
+	if (swapz_zswap_import_ranges_overlap(
+		    verification_scratch, source_length,
+		    candidate_destination, source_length) ||
+	    swapz_zswap_import_ranges_overlap(
+		    verification_scratch, source_length,
+		    independently_owned_lz4, source_length) ||
+	    swapz_zswap_import_ranges_overlap(
+		    candidate_destination, source_length,
+		    independently_owned_lz4, source_length) ||
+	    swapz_zswap_import_ranges_overlap(
+		    verification_scratch, source_length,
+		    source_view, sizeof(*source_view)) ||
+	    swapz_zswap_import_ranges_overlap(
+		    candidate_destination, source_length,
+		    source_view, sizeof(*source_view)))
+		return -EINVAL;
+	error = swapz_round032_dm_verify_untrusted_view_v1(
+		ctx, source_bio, source_view, independently_owned_lz4,
+		owned_capacity, sidecar, expected_owner_token);
+	if (error)
+		return error;
+	memcpy(verification_scratch, independently_owned_lz4, source_length);
+	if (swapz_crc32c_bytes(verification_scratch, source_length) !=
+	    source_view->compressed_crc32c ||
+	    memcmp(verification_scratch, independently_owned_lz4, source_length))
+		return -EBADMSG;
+	/* Revalidate independently after copying; old token/GC must not win. */
+	error = swapz_round032_dm_verify_untrusted_view_v1(
+		ctx, source_bio, source_view, independently_owned_lz4,
+		owned_capacity, sidecar, expected_owner_token);
+	if (error)
+		return error;
+	memcpy(candidate_destination, verification_scratch, source_length);
+	return 0;
+}
+
+/*
+ * Live source ingress: no available original-kernel swp_type/swp_offset
+ * verifier that binds the FULL source swap entry to this precise BIO and
+ * current allocator epoch, and no original BIO GPL accessor is linked in
+ * ordinary HWE dm-swapz.ko. An untrusted view cannot upgrade this verdict.
+ * This function never copies payload, stages lower I/O, maps or ACKs.
+ */
+static __used noinline int swapz_round032_dm_try_accept_owned_view_v1(
+		struct swapz_dm *ctx, const struct bio *source_bio,
+		const struct swapz_round032_dm_owned_view_v1 *source_view,
+		const swapz_u8 *independently_owned_lz4,
+		swapz_u32 owned_capacity,
+		const struct swapz_round031_dm_sidecar *sidecar,
+		swapz_u64 expected_owner_token)
+{
+	int error = swapz_round032_dm_verify_untrusted_view_v1(
+		ctx, source_bio, source_view, independently_owned_lz4,
+		owned_capacity, sidecar, expected_owner_token);
+
+	if (error)
+		return error;
+	return -EOPNOTSUPP;
+}
+/* ROUND032_DM_OWNED_VIEW_EXACT_END */
+#endif /* SWAPZ_ROUND032_DM_LZ4_VIEW_VALIDATE_TEST */
+
+
+/*
  * ID29: media reclamation is allowed only after serialized authority has
  * already proven an entire 1MiB segment non-authoritative. DISCARD never
  * creates deadness. Unsupported/media failures are diagnostic and nonfatal;

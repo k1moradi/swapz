@@ -278,6 +278,38 @@ jobs:
               false
             fi
           done
+          # Round032 is a DISTINCT fifth guard. Preserve the existing
+          # four-flag Round031 source profile and its strict regression gate.
+          # Stock HWE has NO original pinned MM swp_entry provider export;
+          # no foreign GPL symbol is imported and no module is loaded.
+          phase="round032-frozen-v1-view-guarded-real-Kbuild-W1"
+          compile_variant round032_view_w1 build/kernel/round032-dm-view-w1/dm-swapz.ko \
+            SWAPZ_STAGE="$PWD/build/kernel/round032-dm-view-w1" \
+            KCFLAGS="-DSWAPZ_ROUND024_DM_IMPORT_KBUILD_PROBE=1 -DSWAPZ_ROUND028_DM_OWNED_READBACK_TEST=1 -DSWAPZ_ROUND030_DM_COMPRESSED_COMMIT_TEST=1 -DSWAPZ_ROUND031_DM_LZ4_SIDECAR_TEST=1 -DSWAPZ_ROUND032_DM_LZ4_VIEW_VALIDATE_TEST=1" W=1
+          phase="round032-frozen-v1-view-guarded-real-Kbuild-W2"
+          compile_variant round032_view_w2 build/kernel/round032-dm-view-w2/dm-swapz.ko \
+            SWAPZ_STAGE="$PWD/build/kernel/round032-dm-view-w2" \
+            KCFLAGS="-DSWAPZ_ROUND024_DM_IMPORT_KBUILD_PROBE=1 -DSWAPZ_ROUND028_DM_OWNED_READBACK_TEST=1 -DSWAPZ_ROUND030_DM_COMPRESSED_COMMIT_TEST=1 -DSWAPZ_ROUND031_DM_LZ4_SIDECAR_TEST=1 -DSWAPZ_ROUND032_DM_LZ4_VIEW_VALIDATE_TEST=1" W=2
+          phase="round032-frozen-v1-real-source-symbol-identity"
+          for symbol in swapz_round032_dm_verify_untrusted_view_v1 \
+                        swapz_round032_dm_copy_untrusted_for_test \
+                        swapz_round032_dm_try_accept_owned_view_v1; do
+            for built in build/kernel/round032-dm-view-w1/dm-target.o \
+                         build/kernel/round032-dm-view-w2/dm-target.o; do
+              if ! nm -a "$built" | grep -q "$symbol"; then
+                echo "::error::Round032 genuine guarded DM source symbol missing $symbol $built" >&2
+                false
+              fi
+            done
+            for default_off in build/kernel/w1/dm-target.o \
+                               build/kernel/round024-dm-ingress/dm-target.o; do
+              if nm -a "$default_off" | grep -q "$symbol"; then
+                echo "::error::Round032 symbol leaked into default/Round031 C $symbol" >&2
+                false
+              fi
+            done
+          done
+          echo "ROUND032_DM_FROZEN_V1_CANDIDATE_TRUE_SOURCE_NO_LIVE_INGRESS"
           echo "ROUND031_DM_PER_PAGE_VOLATILE_SOURCE_LZ4_SOURCE_COMPILE_ONLY_NO_LIVE"
           echo "ROUND030_DM_TRUE_LOWER_STAGE_COMMIT_COMPILE_ONLY_NO_LIVE"
           echo "ROUND028_DM_OWNED_READBACK_COMPILED_OPT_IN_NO_LIVE"

@@ -51,8 +51,19 @@ class ImportedZswapLz4SourceOnly(unittest.TestCase):
             "#endif /* SWAPZ_ROUND031_DM_LZ4_SIDECAR_TEST */", 1)
         self.assertIn("SWAPZ_ROUND031_SOURCE_LZ4_TAG", guarded_round031)
         self.assertIn("swapz_round031_dm_read_with_sidecar(", guarded_round031)
+        # Round032 further gates a value-only candidate validator, not a
+        # default LIVE ingress; split both independent CI-only sections.
+        owned_view = ordinary_tail.split(
+            "#if defined(SWAPZ_ROUND032_DM_LZ4_VIEW_VALIDATE_TEST)", 1)
+        self.assertEqual(len(owned_view), 2)
+        guarded_round032, normal_tail = owned_view[1].split(
+            "#endif /* SWAPZ_ROUND032_DM_LZ4_VIEW_VALIDATE_TEST */", 1)
+        self.assertIn("swapz_round032_dm_try_accept_owned_view_v1(",
+                      guarded_round032)
+        self.assertIn("return -EOPNOTSUPP;", guarded_round032)
         self.assertNotIn("SWAPZ_ZSWAP_IMPORT_REPRESENTATION",
-                         active[0] + later[0] + sidecar[0] + ordinary_tail)
+                         active[0] + later[0] + sidecar[0] +
+                         owned_view[0] + normal_tail)
         self.assertIn("swapz_crc32c_bytes", CODEC.read_text(encoding="utf-8"))
         self.assertIn("LZ4_decompress_safe", header)
         self.assertIn("original_sha256", header)
@@ -282,6 +293,159 @@ class ImportedZswapLz4SourceOnly(unittest.TestCase):
                     self.assertEqual(executed.returncode, 0, executed.stderr)
                     self.assertEqual(executed.stdout.splitlines()[-1],
                                      "ROUND031_DM_ACTUAL_SOURCE_LZ4_SIDECAR_NO_LIVE_PASS")
+
+    def test_round032_real_dm_frozen_v1_candidate_source_gcc_clang(self) -> None:
+        """Execute the original guarded DM C, not a parallel host algorithm."""
+        target = TARGET.read_text(encoding="utf-8")
+        exact_markers = {
+            "round030": ("/* ROUND030_DM_COMMIT_EXACT_START */",
+                         "/* ROUND030_DM_COMMIT_EXACT_END */"),
+            "round031": ("/* ROUND031_DM_SIDECAR_EXACT_START */",
+                         "/* ROUND031_DM_SIDECAR_EXACT_END */"),
+            "round032": ("/* ROUND032_DM_OWNED_VIEW_EXACT_START */",
+                         "/* ROUND032_DM_OWNED_VIEW_EXACT_END */"),
+        }
+        bodies = {}
+        for name, (start, end) in exact_markers.items():
+            self.assertEqual(target.count(start), 1, name)
+            self.assertEqual(target.count(end), 1, name)
+            bodies[name] = target.split(start, 1)[1].split(end, 1)[0]
+        current = bodies["round032"]
+        for token in (
+            "struct swapz_round032_dm_owned_view_v1 {",
+            "swapz_u64 source_swap_entry;",
+            "swapz_u64 source_slot_epoch;",
+            "swapz_u64 stored_entry_identity;",
+            "swapz_u32 compressed_crc32c;",
+            "swapz_u16 compressed_length;",
+            "swapz_u16 decoded_length;",
+            "swapz_u8 representation_version;",
+            "swapz_u8 codec;",
+            "swapz_u8 original_sha256[32];",
+            "swapz_round032_dm_verify_untrusted_view_v1(",
+            "swapz_round032_dm_copy_untrusted_for_test(",
+            "swapz_round032_dm_try_accept_owned_view_v1(",
+            "lockdep_assert_held(&ctx->ordered_owner);",
+            "bio_is_zswap_stored_writeback(source_bio)",
+            "source_vector.bv_len != SWAPZ_BLOCK_BYTES",
+            "source_bio->bi_vcnt != 1U",
+            "original_sector % SWAPZ_SECTORS",
+            "ctx->target->len - original_sector",
+            "current_mapping->generation",
+            "swapz_extent_sequence_lookup(&ctx->authority,",
+            "source_view->source_swap_entry",
+            "source_view->source_slot_epoch",
+            "source_view->stored_entry_identity",
+            "swapz_crc32c_bytes(independently_owned_lz4,",
+            "memcpy(candidate_destination, verification_scratch, source_length);",
+            "return -EOPNOTSUPP;",
+        ):
+            self.assertIn(token, current)
+        self.assertNotIn("bio_endio(", current)
+        self.assertNotIn("swapz_lower_write(", current)
+        self.assertNotIn("swapz_stage(", current)
+        self.assertNotIn("swp_entry_t", current.replace(
+            "swp_entry_t.val", ""))  # Cannot invent source type proof in HWE.
+        self.assertIn("swapz_zswap_admission_try_live(", (
+            ROOT / "src/kernel/zswap-import-admission.h").read_text(
+                encoding="utf-8"))
+
+        base = (ROOT / "tests/runtime/native/fixtures" /
+                "round030-consumer-commit.c").read_text(encoding="utf-8")
+        token = "/* ROUND030_EXACT_DM_COMMIT_SOURCE */"
+        self.assertEqual(base.count(token), 1)
+        base = base.replace(token, bodies["round030"], 1)
+        fake_boundary_patches = (
+            ("struct fake_gc_recovery { bool active; };",
+             "struct fake_gc_recovery { bool active; };\n"
+             "struct dm_target { uint64_t len; };"),
+            ("struct swapz_dm {\n",
+             "struct swapz_dm {\n"
+             "\tstruct dm_target *target;\n"
+             "\tswapz_u32 logical_pages;\n"),
+            ("\tbool prepublication_fua;\n",
+             "\tbool prepublication_fua;\n"
+             "\tbool round031_defer_hypothetical_ack;\n"),
+            ("static swapz_u32 next_sequence = 5U;",
+             "static swapz_u32 next_sequence = 5U;\n"
+             "static swapz_u32 fake_next_start_block = 2U;"),
+            ("transaction->start_block = 2U;",
+             "transaction->start_block = fake_next_start_block;"),
+            ("if (block != 2U) return -ESTALE;",
+             "if (block != 2U && block != 4U) return -ESTALE;"),
+            ("lower_write_error = lower_read_error = "
+             "injected_finish_error = stage_error = 0;",
+             "lower_write_error = lower_read_error = "
+             "injected_finish_error = stage_error = 0;\n"
+             "\tfake_next_start_block = 2U;\n\tnext_sequence = 5U;"),
+        )
+        for original, changed in fake_boundary_patches:
+            self.assertEqual(base.count(original), 1, original)
+            base = base.replace(original, changed, 1)
+        earlier = (ROOT / "tests/runtime/native/fixtures" /
+                   "round031-dm-sidecar-host.c").read_text(encoding="utf-8")
+        for placeholder, body in (
+            ("/* ROUND031_EMBED_ROUND030_SOURCE */", base),
+            ("/* ROUND031_EXACT_DM_SIDECAR_SOURCE */", bodies["round031"]),
+        ):
+            self.assertEqual(earlier.count(placeholder), 1)
+            earlier = earlier.replace(placeholder, body, 1)
+        existing_main = ("int main(void)\n{\n"
+                         "\tint previous = swapz_round030_fixture_main();")
+        self.assertEqual(earlier.count(existing_main), 1)
+        earlier = earlier.replace(
+            existing_main,
+            "static int swapz_round031_original_host_main(void)\n{\n"
+            "\tint previous = swapz_round030_fixture_main();", 1)
+        fixture = (ROOT / "tests/runtime/native/fixtures" /
+                   "round032-dm-owned-view-host.c").read_text(encoding="utf-8")
+        prior_placeholder = "/* ROUND032_EMBED_PRIOR_REAL_DM_AND_MOCK_BOUNDARIES */"
+        current_placeholder = "/* ROUND032_EXACT_DM_CANDIDATE_VALIDATOR */"
+        self.assertEqual(fixture.count(prior_placeholder), 1)
+        self.assertEqual(fixture.count(current_placeholder), 1)
+        fixture = fixture.replace(prior_placeholder, earlier, 1)
+        fixture = fixture.replace(current_placeholder, current, 1)
+        compilers = [name for name in ("gcc", "clang") if shutil.which(name)]
+        self.assertEqual(set(compilers), {"gcc", "clang"})
+        with tempfile.TemporaryDirectory(prefix="round032-dm-view-") as directory:
+            for compiler in compilers:
+                with self.subTest(compiler=compiler):
+                    temporary = Path(directory)
+                    executable = temporary / (compiler + "-view")
+                    source = temporary / (compiler + "-view.c")
+                    codec_object = temporary / (compiler + "-codec.o")
+                    source.write_text(fixture, encoding="utf-8")
+                    command = [
+                        compiler, "-std=gnu11", "-O1", "-g",
+                        "-Wall", "-Wextra", "-Wconversion", "-Wshadow",
+                        "-Werror", "-fsanitize=address,undefined",
+                        "-fno-sanitize-recover=all", "-fno-omit-frame-pointer",
+                        "-I", str(HEADER.parent)]
+                    # The historical codec.c exception is scoped ONLY to
+                    # previously existing codec code, never newly added DM C.
+                    codec = subprocess.run([
+                        *command, "-Wno-conversion", "-c", str(CODEC),
+                        "-o", str(codec_object)], capture_output=True,
+                        text=True, timeout=60, check=False)
+                    self.assertEqual(codec.returncode, 0, codec.stderr)
+                    compiled = subprocess.run([
+                        *command, str(source), str(codec_object),
+                        "-llz4", "-lcrypto", "-o", str(executable)],
+                        capture_output=True, text=True, timeout=60, check=False)
+                    self.assertEqual(
+                        compiled.returncode, 0,
+                        f"{compiler} first source C compiler error:\n" +
+                        compiled.stderr[-9000:])
+                    executed = subprocess.run([
+                        str(executable)], capture_output=True, text=True,
+                        timeout=60, check=False)
+                    self.assertEqual(
+                        executed.returncode, 0,
+                        f"{compiler} first actual source sanitizer failure:\n" +
+                        executed.stderr[-9000:])
+                    self.assertEqual(
+                        executed.stdout.splitlines()[-1],
+                        "ROUND032_DM_FROZEN_V1_TRUE_SOURCE_C_MECHANICS_AND_LIVE_NO_GO_PASS")
 
     def test_exact_production_crc32c_and_real_lz4_decoder_gcc_clang(self) -> None:
         compilers = [compiler for compiler in ("gcc", "clang") if shutil.which(compiler)]
