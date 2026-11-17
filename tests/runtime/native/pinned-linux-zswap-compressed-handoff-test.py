@@ -386,10 +386,10 @@ class CompressedHandoffTests(unittest.TestCase):
                        encoding="utf-8")
         main = HOST_CASES.replace(
             "int main(void) {",
-            "int main(void) {\\n    round024_compiler_probe_negatives();\\n", 1)
+            "int main(void) {\n    round024_compiler_probe_negatives();\n", 1)
         self.assertNotEqual(main, HOST_CASES)
         source = (HOST_SHIMS + body +
-                  "#define SWAPZ_ROUND024_ZSWAP_KBUILD_PROBE 1\\n" +
+                  "#define SWAPZ_ROUND024_ZSWAP_KBUILD_PROBE 1\n" +
                   stage.ROUND024_ZSWAP_KBUILD_PROBE_SOURCE +
                   fixture + main)
         with tempfile.TemporaryDirectory() as directory:

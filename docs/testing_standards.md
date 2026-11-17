@@ -14555,3 +14555,14 @@ LIVE_STORED=NOT_RUN; LOADED_KERNEL_SWAPIN=NOT_RUN; PHYSICAL=NOT_RUN;
 PHASE_A=BLOCKED; DIRECT_COMPRESSED=DISABLED; Phase B forced RAW
 bypass DISABLED. SWAPSPACE2 original first 4096/UUID/header/table
 untouched, all future metadata RAM only; RAW remains original 4096.
+
+### Round 024 — Agent 2 exact host-C newline emission correction
+
+The new compiler fixture's Python string generator MUST use single escaped
+`\\n` tokens to produce actual C line breaks. A double-escaped literal
+produces stray C backslashes instead of a valid `#define` and injected
+`main()` call, preventing the real GCC/Clang sanitizer test from executing.
+This purely test-driver correction changes no staged kernel C, Kbuild gate,
+original pinned SHA, decoded 4096 behavior or fail-closed transport status.
+Compiler and Kbuild outcomes require the corrected exact commit's workflow;
+no host-only claim is a real loaded zswap eviction or SWAPSPACE2 test.

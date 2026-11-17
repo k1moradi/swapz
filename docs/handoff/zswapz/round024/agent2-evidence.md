@@ -31,3 +31,13 @@ DIRECT_COMPRESSED=DISABLED; PHASE_A=BLOCKED;
 PHASE_B_FORCED_RAW_BYPASS=DISABLED.
 SWAPSPACE2 original first 4096/header/UUID/partition-table untouched;
 RAW_4096 remains ORIGINAL UNCOMPRESSED 4096.
+
+## Pre-execution test driver correction
+
+The first source review found that the new Python C fixture constructor
+contained three double-escaped `\\n` markers (two in the inserted
+`main()` call and one after the compiler-profile define), which would
+produce invalid C source. Before relying on hosted compiler results, a
+follow-up on main replaced them with single Python string escapes so the
+compiler receives real line breaks. This was a source-review failure, not
+a claimed GCC/Kbuild execution. No kernel, module, swap or physical access.
