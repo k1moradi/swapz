@@ -9,3 +9,16 @@ The paired verifier now requires exact ordered six-file default or seven-file op
 The owned workflow final source path allowlist matches the seven opt-in original C/H sources already required at staging. Original source SHA, exact four pinned upstream kernel-doc warning signatures, source-hash and warning-count/digest evidence, W=1/-Werror, module compilation and source cleanliness remain strict. The wrapper reports a source-manifest OR warning-classification error, preserving the actual preceding `paired-build-invalid` cause. The full original GCC CONFIG_ZSWAP=y/n, opt-in allocator mm/swapfile.o machine-code nm and objdump and normal restored object, original zswap proof objects and full vmlinux/modules plus source-linked dm-swapz.ko require **actual hosted workflow final result**; host synthetic manifest tests are not kernel build evidence.
 
 GO/NO_GO for direct compressed handoff: NO_GO; authenticated original Linux swap allocator reuse epoch absent. Phase A BLOCKED, forced RAW bypass DISABLED, direct compressed transport DISABLED. Original RAW is uncompressed 4096. SWAPSPACE2 first 4096 bytes, UUID and partition table unchanged. LOADED/PHYSICAL NOT_RUN.
+
+## First Round027 hosted regression failure and correction
+
+Initial published `3c7e8b2dc7195ab5d0ca1a76a5974d1b8b8fcd62`
+[real pinned workflow](https://github.com/k1moradi/swapz/actions/runs/44056324540),
+job `133946531684`, failed the new source-host regression before
+Linux Kbuild: `test_round027_unknown_duplicate_reordered_allocator_paths`
+expected `source_manifest_paths`, but the true first verifier response
+was `paired-build-invalid: source_manifest_allocator_profile`.
+Removing seventh path leaves the valid six paths, yet retains a forged
+allocator opt-in marker: the **profile mismatch** is correctly rejected.
+The test assertion is fixed; the validator and warning gates are unchanged.
+Next exact-SHA source/build and first compiler errors remain authoritative.

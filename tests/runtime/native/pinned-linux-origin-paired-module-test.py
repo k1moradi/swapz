@@ -809,7 +809,9 @@ class PairedModuleTests(unittest.TestCase):
         modified = json.loads(json.dumps(original))
         modified["changed_paths"].pop(-2)
         self.source_manifest.write_text(json.dumps(modified) + "\n")
-        self.assert_rejects("source_manifest_paths")
+        # The remaining six original paths are structurally legal, but the
+        # still-asserted seventh-source opt-in marker must fail independently.
+        self.assert_rejects("source_manifest_allocator_profile")
 
     def test_round027_allocator_blob_status_and_object_integrity(self) -> None:
         self.enable_round027_allocator_fixture()

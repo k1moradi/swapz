@@ -15227,3 +15227,13 @@ The older physical `swap_attribution` root cause remains unknown.
 No swap/device/pressure operation. Phase A BLOCKED, forced RAW bypass
 DISABLED, direct compressed NO_GO, RAW original 4096 uncompressed;
 SWAPSPACE2 protected header/UUID/partition table unchanged.
+
+### Round 027 — Agent 2: first hosted negative-test error
+
+At source SHA `3c7e8b2d`, pinned Linux workflow `44056324540`
+job `133946531684` failed BEFORE Kbuild in the new adversarial case.
+Removing `mm/swapfile.c` from seven opt-in paths leaves the six
+valid defaults but an illegal residual allocator opt-in marker. The
+strict validator correctly fails `source_manifest_allocator_profile`;
+the test's expected error category was wrong, now corrected without
+weakening the real manifest or compiler gates.
