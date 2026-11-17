@@ -14566,3 +14566,13 @@ This purely test-driver correction changes no staged kernel C, Kbuild gate,
 original pinned SHA, decoded 4096 behavior or fail-closed transport status.
 Compiler and Kbuild outcomes require the corrected exact commit's workflow;
 no host-only claim is a real loaded zswap eviction or SWAPSPACE2 test.
+
+### Round 024 — Agent 2 retain original Round023 C fixture in combined source
+
+The new compiler-executed Round024 test reuses the full `HOST_CASES`
+which already invokes `round023_stored_allocation_identity_regression()`.
+It MUST compile the existing unmodified `round023-producer-proof-identity.c`
+fragment as well as the new Round024 helper; otherwise the first real
+GCC/Clang compile produces an undeclared-function error and cannot qualify
+either contract. This correction preserves all original tests and source,
+without inserting mock success, bypassing sanitizers or changing runtime.

@@ -41,3 +41,19 @@ produce invalid C source. Before relying on hosted compiler results, a
 follow-up on main replaced them with single Python string escapes so the
 compiler receives real line breaks. This was a source-review failure, not
 a claimed GCC/Kbuild execution. No kernel, module, swap or physical access.
+
+## First real hosted source-compiler failure and fixture reconciliation
+
+At commit 2ac53e70, pinned Linux source workflow 43992599909 failed in
+`Run disabled compressed handoff source/ownership negative regression`
+before full Linux Kbuild. The logged Clang errors included generated
+`round024-probe.c` C identifiers and, decisively, an undeclared
+`round023_stored_allocation_identity_regression` (original C helper from
+`round023-producer-proof-identity.c`). The new combined host runner
+forgot to include this established fixture. An earlier test-only follow-up
+corrected the generated C's three double-escaped newline tokens; this
+follow-up includes the unchanged original Round023 C fragment before
+`HOST_CASES`, which already calls it. Both failures are author-side test
+construction defects, NOT evidence of a live compressed consumer ABI.
+The corrected exact-SHA source and pinned CONFIG_ZSWAP y/n Kbuild must
+be judged by subsequent workflow results, not by this note.

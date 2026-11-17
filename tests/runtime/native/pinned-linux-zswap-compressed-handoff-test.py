@@ -384,6 +384,11 @@ class CompressedHandoffTests(unittest.TestCase):
         fixture = (Path(__file__).parent / "fixtures" /
                    "round024-producer-kbuild-probe.c").read_text(
                        encoding="utf-8")
+        # HOST_CASES already calls the original Round023 regression.
+        # Include that exact original C fixture before the test main.
+        stored_identity_fixture = (Path(__file__).parent / "fixtures" /
+                                   "round023-producer-proof-identity.c").read_text(
+                                       encoding="utf-8")
         main = HOST_CASES.replace(
             "int main(void) {",
             "int main(void) {\n    round024_compiler_probe_negatives();\n", 1)
@@ -391,7 +396,7 @@ class CompressedHandoffTests(unittest.TestCase):
         source = (HOST_SHIMS + body +
                   "#define SWAPZ_ROUND024_ZSWAP_KBUILD_PROBE 1\n" +
                   stage.ROUND024_ZSWAP_KBUILD_PROBE_SOURCE +
-                  fixture + main)
+                  fixture + stored_identity_fixture + main)
         with tempfile.TemporaryDirectory() as directory:
             path = Path(directory) / "round024-probe.c"
             path.write_text(source, encoding="utf-8")
