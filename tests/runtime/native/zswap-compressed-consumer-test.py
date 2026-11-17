@@ -37,6 +37,62 @@ class ImportedZswapLz4SourceOnly(unittest.TestCase):
         self.assertIn("memcpy(output, scratch, SWAPZ_BLOCK_BYTES);", header)
         self.assertIn("SWAPZ_BLOCK_BYTES", target)
 
+    def test_round028_actual_dm_owned_lower_stage_gcc_clang(self) -> None:
+        """Compile and execute the exact new DM C, never a copied algorithm."""
+        source = TARGET.read_text(encoding="utf-8")
+        start = "/* ROUND028_DM_OWNED_STAGE_START */"
+        end = "/* ROUND028_DM_OWNED_STAGE_END */"
+        self.assertEqual(source.count(start), 1)
+        self.assertEqual(source.count(end), 1)
+        actual = source.split(start, 1)[1].split(end, 1)[0]
+        self.assertIn("swapz_round028_dm_stage_owned_payload(", actual)
+        self.assertIn("memset(lower_image, 0, extent_bytes);", actual)
+        self.assertIn("swapz_crc32c_bytes(", actual)
+        self.assertNotIn("bio_endio(", actual)
+        self.assertNotIn("swapz_lower_write(", actual)
+        self.assertIn("swapz_round028_dm_owned_lower_readback(", source)
+        self.assertIn("swapz_round026_dm_capture_read_snapshot(ctx, logical_page, &before)", source)
+        self.assertIn("swapz_lower_read(ctx, before.mapping.start_block,", source)
+        self.assertIn("before.extent_sequence != after.extent_sequence", source)
+        self.assertIn("swapz_zswap_admission_read_4096(transaction, logical_page,", source)
+        fixture = (ROOT / "tests/runtime/native/fixtures/"
+                   "round028-consumer-owned-stage.c").read_text(encoding="utf-8")
+        self.assertEqual(fixture.count("/* ROUND028_DM_EXACT_STAGE_SOURCE */"), 1)
+        fixture = fixture.replace("/* ROUND028_DM_EXACT_STAGE_SOURCE */",
+                                  actual, 1)
+        with tempfile.TemporaryDirectory(prefix="round028-owned-stage-") as directory:
+            for compiler in ("gcc", "clang"):
+                if not shutil.which(compiler):
+                    continue
+                with self.subTest(compiler=compiler):
+                    root = Path(directory)
+                    codec = root / (compiler + "-codec.o")
+                    executable = root / (compiler + "-owned-stage")
+                    shared = [compiler, "-std=gnu11", "-O1", "-g", "-Wall",
+                              "-Wextra", "-Wshadow", "-Werror",
+                              "-fsanitize=address,undefined",
+                              "-fno-sanitize-recover=all"]
+                    compiled_codec = subprocess.run(
+                        [*shared, "-Wno-conversion", "-I", str(HEADER.parent),
+                         "-c", str(CODEC), "-o", str(codec)],
+                        capture_output=True, text=True, timeout=60, check=False)
+                    self.assertEqual(compiled_codec.returncode, 0,
+                                     compiled_codec.stderr)
+                    source_path = root / (compiler + "-stage.c")
+                    source_path.write_text(fixture, encoding="utf-8")
+                    built = subprocess.run(
+                        [*shared, "-Wconversion", "-I", str(HEADER.parent),
+                         str(source_path), str(codec), "-llz4", "-lcrypto",
+                         "-o", str(executable)],
+                        capture_output=True, text=True, timeout=60, check=False)
+                    self.assertEqual(built.returncode, 0, built.stderr)
+                    executed = subprocess.run(
+                        [str(executable)], capture_output=True, text=True,
+                        timeout=40, check=False)
+                    self.assertEqual(executed.returncode, 0, executed.stderr)
+                    self.assertEqual(executed.stdout.strip(),
+                                     "ROUND028_DM_EXACT_OWNED_STAGE_NO_LIVE_PASS")
+
     def test_exact_production_crc32c_and_real_lz4_decoder_gcc_clang(self) -> None:
         compilers = [compiler for compiler in ("gcc", "clang") if shutil.which(compiler)]
         self.assertTrue(compilers, "a real C compiler is required")

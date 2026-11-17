@@ -69,8 +69,8 @@ class Round023DisabledConsumerAdmission(unittest.TestCase):
         # ordinary default module still compiles without the new header.
         workflow = (ROOT / ".github/workflows/product-codec.yml").read_text(
             encoding="utf-8")
-        self.assertIn("KCFLAGS=-DSWAPZ_ROUND024_DM_IMPORT_KBUILD_PROBE=1",
-                      workflow)
+        self.assertIn('KCFLAGS="-DSWAPZ_ROUND024_DM_IMPORT_KBUILD_PROBE=1 '
+                      '-DSWAPZ_ROUND028_DM_OWNED_READBACK_TEST=1"', workflow)
         self.assertIn("nm -a", workflow)
         self.assertIn("swapz_round024_dm_import_kbuild_probe", workflow)
 

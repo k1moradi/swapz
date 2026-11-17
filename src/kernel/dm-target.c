@@ -3194,6 +3194,152 @@ static int swapz_lower_read(void *opaque, swapz_u32 block, swapz_u8 blocks,
 	return swapz_lower(opaque, REQ_OP_READ, block, blocks, destination);
 }
 
+#if defined(SWAPZ_ROUND028_DM_OWNED_READBACK_TEST) && \
+    defined(SWAPZ_ROUND024_DM_IMPORT_KBUILD_PROBE)
+/*
+ * Round028 CI-ONLY owned payload lower-image staging. This is real DM-source
+ * byte preparation for the existing payload-only 4/8/16KiB lower machinery,
+ * not an authenticated MM-to-DM transport or a new RAW_4096 encoding.
+ * The source buffer must be an immutable copy owned by the caller until this
+ * synchronous copy returns. A successful copy never publishes a map or ACK.
+ *
+ * In the real lower-I/O path only the ordered owner may use these buffers.
+ * Keep this function compilable and executable in source-extracted host tests.
+ */
+/* ROUND028_DM_OWNED_STAGE_START */
+static __used noinline int swapz_round028_dm_stage_owned_payload(
+		const struct swapz_zswap_admission_transaction *transaction,
+		const swapz_u8 *owned_compressed_bytes, swapz_u32 source_capacity,
+		swapz_u8 *lower_image, swapz_u32 lower_image_capacity)
+{
+	const struct swapz_zswap_import_record *record;
+	swapz_u32 extent_bytes;
+	swapz_u32 payload_offset;
+
+	if (!transaction || !owned_compressed_bytes || !lower_image)
+		return -EINVAL;
+	record = &transaction->record;
+	if (transaction->phase != SWAPZ_ZSWAP_ADMISSION_PREPARED ||
+	    transaction->teardown_started ||
+	    transaction->owned_compressed_bytes != owned_compressed_bytes ||
+	    !record->immutable_owned_copy ||
+	    record->representation != SWAPZ_ZSWAP_IMPORT_REPRESENTATION ||
+	    record->codec != SWAPZ_ZSWAP_IMPORT_LZ4_CODEC ||
+	    record->version != SWAPZ_ZSWAP_IMPORT_VERSION ||
+	    record->dictionary_id || !record->stored_eviction)
+		return -EOPNOTSUPP;
+	extent_bytes = transaction->physical_extent_bytes;
+	payload_offset = transaction->compressed_payload_offset;
+	if ((extent_bytes != SWAPZ_BLOCK_BYTES &&
+	     extent_bytes != 2U * SWAPZ_BLOCK_BYTES &&
+	     extent_bytes != 4U * SWAPZ_BLOCK_BYTES) ||
+	    !record->compressed_length ||
+	    record->compressed_length > SWAPZ_MAX_COMPRESSED ||
+	    record->decoded_length != SWAPZ_BLOCK_BYTES ||
+	    payload_offset > extent_bytes ||
+	    record->compressed_length > extent_bytes - payload_offset ||
+	    source_capacity < record->compressed_length ||
+	    lower_image_capacity < extent_bytes)
+		return -EMSGSIZE;
+	if (swapz_zswap_import_ranges_overlap(owned_compressed_bytes,
+			record->compressed_length, lower_image, extent_bytes))
+		return -EINVAL;
+	if (swapz_crc32c_bytes(owned_compressed_bytes,
+			record->compressed_length) != record->compressed_crc32c)
+		return -EBADMSG;
+	/* No serialized codec/gen/CRC header is ever written to lower media. */
+	memset(lower_image, 0, extent_bytes);
+	memcpy(lower_image + payload_offset, owned_compressed_bytes,
+	       record->compressed_length);
+	return 0;
+}
+/* ROUND028_DM_OWNED_STAGE_END */
+
+/*
+ * Round028 CI-only ordered-owner readback feasibility using the actual
+ * authoritative map, extent-sequence index and synchronous lower adapter.
+ * Caller owns the three disjoint buffers and holds ordered_owner across the
+ * complete synchronous lower read and verification. This is NOT connected
+ * to the real upper READ or ACK paths. It cannot authenticate a fabricated
+ * transaction, and compiling this routine does not permit live admission.
+ */
+static __used noinline int swapz_round028_dm_owned_lower_readback(
+		struct swapz_dm *ctx,
+		const struct swapz_zswap_admission_transaction *transaction,
+		swapz_u32 logical_page, swapz_u8 *lower_image,
+		swapz_u32 lower_capacity, swapz_u8 *decode_scratch,
+		swapz_u8 *decoded_page)
+{
+	struct swapz_round026_dm_read_snapshot before = {};
+	struct swapz_round026_dm_read_snapshot after = {};
+	swapz_u32 extent_bytes;
+	int error;
+
+	if (!ctx || !transaction || !lower_image || !decode_scratch ||
+	    !decoded_page)
+		return -EINVAL;
+	lockdep_assert_held(&ctx->ordered_owner);
+	/* No actual source-issued BIO carrier exists; keep live ingress closed. */
+	if (swapz_zswap_admission_try_live(NULL) != -EOPNOTSUPP)
+		return -EPERM;
+	if (transaction->phase != SWAPZ_ZSWAP_ADMISSION_ACKED ||
+	    transaction->teardown_started ||
+	    transaction->upper_write_ack_count != 1U)
+		return -EOPNOTSUPP;
+	error = swapz_round026_dm_capture_read_snapshot(ctx, logical_page, &before);
+	if (error)
+		return error;
+	extent_bytes = (swapz_u32)before.mapping.extent_blocks * SWAPZ_BLOCK_BYTES;
+	if (lower_capacity < extent_bytes ||
+	    transaction->physical_extent_bytes != extent_bytes ||
+	    transaction->record.logical_page != logical_page ||
+	    transaction->record.generation != before.mapping.generation ||
+	    transaction->record.compressed_length != before.mapping.payload_length ||
+	    transaction->record.compressed_crc32c != before.mapping.payload_crc32c ||
+	    transaction->compressed_payload_offset != before.mapping.payload_offset ||
+	    before.mapping.payload_offset > extent_bytes ||
+	    before.mapping.payload_length > extent_bytes - before.mapping.payload_offset)
+		return -ESTALE;
+	if (swapz_zswap_import_ranges_overlap(lower_image, extent_bytes,
+			decode_scratch, SWAPZ_BLOCK_BYTES) ||
+	    swapz_zswap_import_ranges_overlap(lower_image, extent_bytes,
+			decoded_page, SWAPZ_BLOCK_BYTES) ||
+	    swapz_zswap_import_ranges_overlap(decode_scratch, SWAPZ_BLOCK_BYTES,
+			decoded_page, SWAPZ_BLOCK_BYTES))
+		return -EINVAL;
+	/* Existing post-header range guard is enforced by swapz_lower(). */
+	error = swapz_lower_read(ctx, before.mapping.start_block,
+				 (swapz_u8)before.mapping.extent_blocks, lower_image);
+	if (error)
+		return -EIO;
+	error = swapz_round026_dm_capture_read_snapshot(ctx, logical_page, &after);
+	if (error)
+		return -ESTALE;
+	/* A GC relocation may keep the logical generation unchanged. */
+	if (before.mapping.start_block != after.mapping.start_block ||
+	    before.mapping.generation != after.mapping.generation ||
+	    before.mapping.extent_blocks != after.mapping.extent_blocks ||
+	    before.mapping.payload_offset != after.mapping.payload_offset ||
+	    before.mapping.payload_length != after.mapping.payload_length ||
+	    before.mapping.payload_crc32c != after.mapping.payload_crc32c ||
+	    before.mapping.record_index != after.mapping.record_index ||
+	    before.mapping.valid != after.mapping.valid ||
+	    before.mapping.raw != after.mapping.raw ||
+	    before.extent_sequence != after.extent_sequence ||
+	    before.gc_destination != after.gc_destination ||
+	    before.gc_forbidden_victim != after.gc_forbidden_victim ||
+	    before.gc_allocation != after.gc_allocation ||
+	    before.recovery_active != after.recovery_active ||
+	    transaction->teardown_started)
+		return -ESTALE;
+	/* CRC32C, LZ4 exact 4096 and independent STORE SHA all precede copy. */
+	return swapz_zswap_admission_read_4096(transaction, logical_page,
+			before.mapping.generation, transaction->record.gc_epoch,
+			lower_image + before.mapping.payload_offset,
+		extent_bytes, 0, decode_scratch, decoded_page, NULL);
+}
+#endif /* SWAPZ_ROUND028_DM_OWNED_READBACK_TEST */
+
 /*
  * ID29: media reclamation is allowed only after serialized authority has
  * already proven an entire 1MiB segment non-authoritative. DISCARD never
