@@ -1062,6 +1062,144 @@ ROUND028_ZSWAP_EDITS = (
     Edit("\tzswap_entry_cache_free(entry);\n\tatomic_long_dec(&zswap_stored_pages);",
          "#if defined(SWAPZ_ROUND028_SLOT_EPOCH_SOURCE)\n\t/* Invalidate stored-entry proof before slab reuse or pool replacement. */\n\tentry->swapz_round028_store_bound = false;\n\tmemset(entry->swapz_round028_store_sha256, 0,\n\t       sizeof(entry->swapz_round028_store_sha256));\n#endif\n" + "\tzswap_entry_cache_free(entry);\n\tatomic_long_dec(&zswap_stored_pages);"),
 )
+ROUND030_EVICTION_SNAPSHOT_SOURCE = r"""
+#if defined(SWAPZ_ROUND030_EVICTION_SNAPSHOT_SOURCE) && \
+    defined(SWAPZ_ROUND028_SLOT_EPOCH_SOURCE)
+#include <linux/crc32c.h>
+
+/*
+ * CI-only copy of previously STORED zswap LZ4 bytes, not newly compressed
+ * folio bytes and not a transport or an authorization to change swap I/O.
+ * Locked swapcache folio pins the original entry/tree and pool during the
+ * entire synchronous observation; this routine does not hold an MM spinlock
+ * while GFP_KERNEL allocates. Caller still performs original 4096 writeback.
+ * The private allocation is never shared with a BIO and is scrubbed here.
+ */
+struct swapz_round030_eviction_image {
+	u64 allocation_epoch;
+	u64 stored_entry_identity;
+	u32 payload_crc32c;
+	u16 compressed_length;
+	u8 original_sha256[SHA256_DIGEST_SIZE];
+	u8 compressed_bytes[];
+};
+
+/* ROUND030_STORED_EVICTION_REAL_C_START */
+static __used noinline int swapz_round030_snapshot_stored_lz4(
+		struct zswap_entry *entry, swp_entry_t swpentry,
+		struct xarray *tree, pgoff_t offset)
+{
+	struct swapz_pool *pool;
+	struct swapz_round030_eviction_image *image;
+	struct scatterlist compressed_sg[2];
+	size_t image_bytes;
+	u64 allocation_epoch;
+	u8 digest_present = 0;
+	unsigned int digest_index;
+	int result = 0;
+
+	/* The caller owns the original locked swapcache folio. Only a
+	 * previously stored, tree-current entry is eligible; a recycled
+	 * pointer or pool/handle without exact provenance cannot be copied.
+	 */
+	if (!entry || !tree || xa_load(tree, offset) != entry ||
+	    entry->swpentry.val != swpentry.val ||
+	    !entry->swapz_round028_store_bound ||
+	    !entry->swapz_round028_allocation_epoch ||
+	    !entry->swapz_round028_stored_entry_identity)
+		return -ESTALE;
+	if (!entry->length || entry->length > 3568U)
+		return -EMSGSIZE;
+	pool = zswap_entry_pool(entry);
+	if (!pool || !pool->zs_pool || strcmp(pool->tfm_name, "lz4"))
+		return -EOPNOTSUPP;
+	for (digest_index = 0;
+	     digest_index < sizeof(entry->swapz_round028_store_sha256);
+	     digest_index++)
+		digest_present |=
+			entry->swapz_round028_store_sha256[digest_index];
+	if (!digest_present)
+		return -ENODATA;
+	allocation_epoch = swapz_round028_slot_epoch(swpentry);
+	if (!allocation_epoch ||
+	    allocation_epoch != entry->swapz_round028_allocation_epoch)
+		return -ESTALE;
+
+	image_bytes = struct_size(image, compressed_bytes, entry->length);
+	if (image_bytes == SIZE_MAX || image_bytes <= sizeof(*image))
+		return -EOVERFLOW;
+	image = kmalloc(image_bytes, GFP_KERNEL);
+	if (!image)
+		return -ENOMEM;
+
+	/* Genuine pinned zsmalloc object SG access, not the current compressor,
+	 * a borrowed zpool pointer or a decompressed/recompressed folio.
+	 * No allocator calls occur while the object SG is mapped.
+	 */
+	zs_obj_read_sg_begin(pool->zs_pool, entry->handle, compressed_sg,
+			     entry->length);
+	memcpy_from_sglist(image->compressed_bytes, compressed_sg,
+			   0, entry->length);
+	zs_obj_read_sg_end(pool->zs_pool, entry->handle);
+	image->compressed_length = (u16)entry->length;
+	image->allocation_epoch = allocation_epoch;
+	image->stored_entry_identity =
+		entry->swapz_round028_stored_entry_identity;
+	memcpy(image->original_sha256, entry->swapz_round028_store_sha256,
+	       sizeof(image->original_sha256));
+	image->payload_crc32c =
+		~crc32c(~0U, image->compressed_bytes, image->compressed_length);
+
+	/* Even a correct CRC32C is NOT a STORE-time 4096 SHA or allocator
+	 * proof. Refuse ABA, slot retirement, pool reissue and double capture.
+	 * Never publish to BIO/DM or acknowledge any compressed WRITE.
+	 */
+	if (xa_load(tree, offset) != entry ||
+	    !entry->swapz_round028_store_bound ||
+	    entry->swapz_round028_allocation_epoch !=
+		    swapz_round028_slot_epoch(swpentry) ||
+	    entry->swapz_round028_allocation_epoch != image->allocation_epoch ||
+	    entry->swapz_round028_stored_entry_identity !=
+		    image->stored_entry_identity ||
+	    memcmp(image->original_sha256,
+		   entry->swapz_round028_store_sha256,
+		   sizeof(image->original_sha256)) ||
+	    zswap_entry_pool(entry) != pool ||
+	    entry->length != image->compressed_length)
+		result = -ESTALE;
+	if (!result)
+		/* One observing evictor consumes the copy opportunity; a
+		 * retry never repeats a successful snapshot or publishes it.
+		 * Ordinary full-page zswap decompression remains unchanged.
+		 */
+		entry->swapz_round028_store_bound = false;
+	kfree_sensitive(image);
+	return result;
+}
+/* ROUND030_STORED_EVICTION_REAL_C_END */
+#endif /* opt-in source-only stored eviction snapshot */
+
+"""
+ROUND030_EVICTION_WRITEBACK_HOOK = r"""#if defined(SWAPZ_ROUND030_EVICTION_SNAPSHOT_SOURCE) && \
+    defined(SWAPZ_ROUND028_SLOT_EPOCH_SOURCE)
+	/* Real original pinned eviction, after locked folio and tree recheck.
+	 * Diagnostic private LZ4 snapshot only: never alter conventional
+	 * decompress -> 4096-byte BIO WRITE or source admission authority.
+	 */
+	(void)swapz_round030_snapshot_stored_lz4(entry, swpentry, tree, offset);
+#endif
+
+"""
+
+ROUND030_EVICTION_EDITS = (
+    Edit("static int zswap_writeback_entry(struct zswap_entry *entry,\n",
+         ROUND030_EVICTION_SNAPSHOT_SOURCE +
+         "static int zswap_writeback_entry(struct zswap_entry *entry,\n"),
+    Edit("\tif (!zswap_decompress(entry, folio)) {",
+         ROUND030_EVICTION_WRITEBACK_HOOK +
+         "\tif (!zswap_decompress(entry, folio)) {"),
+)
+
 ROUND028_ZSWAP_HASH_RESTORATIONS = (
     "\n#if defined(SWAPZ_ROUND028_SLOT_EPOCH_SOURCE)\n\t/* The original folio is locked and owns exact original 4096 bytes.\n\t * No MM spinlock is held while hashing this plaintext.\n\t */\n\t{\n\t\tvoid *original_page;\n\n\t\tentry->swapz_round028_store_bound = false;\n\t\tentry->swapz_round028_allocation_epoch =\n\t\t\tswapz_round028_slot_epoch(page_swpentry);\n\t\tentry->swapz_round028_stored_entry_identity =\n\t\t\tswapz_round028_next_stored_entry_identity();\n\t\tmemset(entry->swapz_round028_store_sha256, 0,\n\t\t       sizeof(entry->swapz_round028_store_sha256));\n\t\tif (entry->swapz_round028_allocation_epoch &&\n\t\t    entry->swapz_round028_stored_entry_identity) {\n\t\t\toriginal_page = kmap_local_folio(folio, index * PAGE_SIZE);\n\t\t\tsha256(original_page, PAGE_SIZE,\n\t\t\t       entry->swapz_round028_store_sha256);\n\t\t\tkunmap_local(original_page);\n\t\t\tentry->swapz_round028_store_bound = true;\n\t\t}\n\t}\n#endif\n",
     "#if defined(SWAPZ_ROUND028_SLOT_EPOCH_SOURCE)\n\t/* A rejected/retired incarnation must not carry STORE evidence even\n\t * if ordinary compression proceeds through the original fallback.\n\t */\n\tif (entry->swapz_round028_store_bound &&\n\t    entry->swapz_round028_allocation_epoch !=\n\t\t    swapz_round028_slot_epoch(page_swpentry))\n\t\tentry->swapz_round028_store_bound = false;\n#endif\n\n",
@@ -1262,7 +1400,7 @@ def render_source(path: str, original: str, *, compressed_handoff: bool = False,
         edits = (ROUND028_ALLOCATOR_EDITS if round028_slot_epoch_source
                  else ROUND026_ALLOCATOR_EPOCH_EDITS[path])
     if round028_slot_epoch_source and path == "mm/zswap.c":
-        edits = edits + ROUND028_ZSWAP_EDITS
+        edits = edits + ROUND028_ZSWAP_EDITS + ROUND030_EVICTION_EDITS
     if round028_slot_epoch_source and path not in ("mm/swapfile.c", "mm/zswap.c"):
         raise StagingError("round028-invalid-source-path")
     if compressed_handoff and (round024_probe or round025_store_proof):
@@ -1347,6 +1485,10 @@ def verify_pinned_zswap_producer(staged_source: str) -> None:
         if "SWAPZ_ROUND028_SLOT_EPOCH_SOURCE" in staged_source:
             for insertion in ROUND028_ZSWAP_HASH_RESTORATIONS:
                 original_slice = original_slice.replace(insertion, "")
+        if label == "writeback" and ROUND030_EVICTION_WRITEBACK_HOOK in original_slice:
+            if original_slice.count(ROUND030_EVICTION_WRITEBACK_HOOK) != 1:
+                raise StagingError("round030-evictor-hook-duplicate")
+            original_slice = original_slice.replace(ROUND030_EVICTION_WRITEBACK_HOOK, "")
         if blob_sha(original_slice.encode("utf-8")) != expected_blob:
             raise StagingError("pinned-producer-causality-drift:" + label)
         positions.append(start)

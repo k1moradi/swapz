@@ -7,6 +7,7 @@ on:
       - "tests/tools/stage-pinned-linux-zswap-origin.py"
       - "tests/runtime/native/pinned-linux-zswap-origin-stage-test.py"
       - "tests/runtime/native/pinned-linux-zswap-compressed-handoff-test.py"
+      - "tests/runtime/native/fixtures/round030-producer-*.c"
       - "tests/runtime/native/pinned-linux-origin-paired-module-test.py"
       - "src/kernel/dm-target.c"
       - "tests/runtime/native/zswap-origin-consumer-source-test.py"
@@ -53,7 +54,7 @@ jobs:
           sudo apt-get update -qq
           sudo DEBIAN_FRONTEND=noninteractive apt-get install -y \
             --no-install-recommends build-essential bc bison flex \
-            libelf-dev libssl-dev kmod binutils
+            libelf-dev libssl-dev liblz4-dev clang kmod binutils
       - name: "Run source-controlled rootless staging regression"
         shell: bash
         run: |
@@ -492,12 +493,29 @@ jobs:
                 echo "::error::Round024 helper unexpectedly present in Round025 profile" >&2
                 exit 1
               fi
+              # Round030: compile the ACTUAL pinned zswap evictor with its
+              # private zsmalloc stored-LZ4 copy checkpoint, never a BIO ABI.
+              run_logged round030_actual_stored_eviction_snapshot make -s -C linux \
+                "O=$build_dir" CC=gcc "-j$KBUILD_JOBS" W=1 \
+                KCFLAGS="-DSWAPZ_ROUND028_SLOT_EPOCH_SOURCE=1 -DSWAPZ_ROUND030_EVICTION_SNAPSHOT_SOURCE=1 -Werror" \
+                mm/zswap.o
+              current_phase=round030_original_eviction_machine_code
+              if ! nm -a "$build_dir/mm/zswap.o" |
+                  grep -q 'swapz_round030_snapshot_stored_lz4'; then
+                echo "::error::Real original zswap writeback has no Round030 source-attached snapshot" >&2
+                exit 3
+              fi
+              if ! objdump -d "$build_dir/mm/zswap.o" |
+                  grep -Fq '<swapz_round030_snapshot_stored_lz4>:'; then
+                echo "::error::Original stored-LZ4 snapshot machine code absent" >&2
+                exit 3
+              fi
               run_logged round024_producer_restore_default make -s -C linux \
                 "O=$build_dir" CC=gcc "-j$KBUILD_JOBS" W=1 \
                 KCFLAGS=-Werror mm/zswap.o
               current_phase=round024_verify_default_restore
               if nm -a "$build_dir/mm/zswap.o" |
-                  grep -Eq 'zswap_swapz_round024_producer_kbuild_probe|zswap_swapz_round025_store_digest_probe|swapz_round028_slot_epoch'; then
+                  grep -Eq 'zswap_swapz_round024_producer_kbuild_probe|zswap_swapz_round025_store_digest_probe|swapz_round028_slot_epoch|swapz_round030_snapshot_stored_lz4'; then
                 echo "::error::CI-only producer leaked into default build" >&2
                 exit 1
               fi

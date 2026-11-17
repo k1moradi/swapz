@@ -488,6 +488,65 @@ class CompressedHandoffTests(unittest.TestCase):
                     self.assertIn("ROUND028_EPOCH_SOURCE_REAL_MINT_PASS",
                                   executed.stdout)
 
+    def test_round030_source_real_stored_eviction_lz4_gcc_clang(self):
+        """Execute actual emitted pinned eviction C, never a recreated mock."""
+        source = stage.ROUND030_EVICTION_SNAPSHOT_SOURCE
+        self.assertEqual(source.count(
+            "/* ROUND030_STORED_EVICTION_REAL_C_START */"), 1)
+        self.assertEqual(source.count("zs_obj_read_sg_begin("), 1)
+        self.assertEqual(source.count("zs_obj_read_sg_end("), 1)
+        self.assertIn("zswap_entry_pool(entry) != pool", source)
+        self.assertIn("swapz_round028_slot_epoch(swpentry)", source)
+        self.assertIn("kfree_sensitive(image);", source)
+        self.assertIn("~crc32c(~0U,", source)
+        self.assertIn('strcmp(pool->tfm_name, "lz4")', source)
+        self.assertNotIn("submit_bio(", source)
+        hook = stage.ROUND030_EVICTION_WRITEBACK_HOOK
+        self.assertIn(
+            "(void)swapz_round030_snapshot_stored_lz4(entry, swpentry, tree, offset);",
+            hook)
+        self.assertEqual(
+            stage.ROUND030_EVICTION_EDITS[-1].after.count(hook), 1)
+        fixture = (Path(__file__).parent / "fixtures" /
+                   "round030-producer-snapshot-host.c").read_text(
+                       encoding="utf-8")
+        marker = "/* ROUND030_EXACT_STAGED_EVICTION_C */"
+        self.assertEqual(fixture.count(marker), 1)
+        compiled_c = fixture.replace(
+            marker, source.replace("#include <linux/crc32c.h>", ""), 1)
+        with tempfile.TemporaryDirectory(prefix="round030-zswap-original-") as root:
+            source_path = Path(root) / "snapshot.c"
+            source_path.write_text(compiled_c, encoding="utf-8")
+            for compiler in ("gcc", "clang"):
+                if not shutil.which(compiler):
+                    continue
+                with self.subTest(compiler=compiler):
+                    executable = Path(root) / compiler
+                    command = [
+                        compiler, "-std=gnu11", "-O1", "-g", "-Wall",
+                        "-Wextra", "-Wconversion", "-Wshadow", "-Werror",
+                        "-fno-omit-frame-pointer", "-fsanitize=address,undefined",
+                        "-fno-sanitize-recover=all", str(source_path),
+                        "-llz4", "-o", str(executable),
+                    ]
+                    compilation = subprocess.run(
+                        command, capture_output=True, text=True,
+                        timeout=60, check=False)
+                    self.assertEqual(
+                        compilation.returncode, 0,
+                        f"{compiler} first source compiler error: "
+                        + compilation.stderr[-5000:])
+                    execution = subprocess.run(
+                        [str(executable)], capture_output=True, text=True,
+                        timeout=40, check=False)
+                    self.assertEqual(
+                        execution.returncode, 0,
+                        f"{compiler} first sanitizer/source failure: "
+                        + execution.stderr[-5000:])
+                    self.assertIn(
+                        "ROUND030_ORIGINAL_EVICTION_OWNED_LZ4_SOURCE_ONLY_PASS",
+                        execution.stdout)
+
     def test_round029_original_mm_epoch_kernel_macro_preprocess(self):
         """Use exact emitted MM source and the real Linux current macro."""
         staged = stage.ROUND028_ALLOCATOR_EDITS[-1].after
