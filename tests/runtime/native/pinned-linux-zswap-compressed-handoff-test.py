@@ -531,7 +531,7 @@ class CompressedHandoffTests(unittest.TestCase):
             ".github/workflows/phase-a-zswap-origin-prototype.yml"
                  ).read_text(encoding="utf-8")
         self.assertIn("--with-round026-allocator-epoch-probe",workflow)
-        self.assertIn("KCFLAGS=\"-DSWAPZ_ROUND026_SLOT_EPOCH_PROBE=1 -Werror\"",workflow)
+        self.assertIn("KCFLAGS=\"-DSWAPZ_ROUND026_SLOT_EPOCH_PROBE=1 -DSWAPZ_ROUND028_SLOT_EPOCH_SOURCE=1 -Werror\"",workflow)
         self.assertIn("mm/swapfile.o",workflow)
         self.assertIn("swapz_round026_allocator_epoch_probe",workflow)
 
@@ -620,7 +620,7 @@ class CompressedHandoffTests(unittest.TestCase):
                   ".github/workflows/phase-a-zswap-origin-prototype.yml"
                  ).read_text(encoding="utf-8")
         self.assertIn("--with-round025-store-proof-probe",workflow)
-        self.assertIn("SWAPZ_ROUND025_STORE_PROOF_KBUILD_PROBE=1 -Werror",workflow)
+        self.assertIn("SWAPZ_ROUND025_STORE_PROOF_KBUILD_PROBE=1 -DSWAPZ_ROUND028_SLOT_EPOCH_SOURCE=1 -Werror",workflow)
         self.assertIn("zswap_swapz_round025_store_digest_probe",workflow)
 
     def test_round025_original_sha_real_crypto_gcc_clang_sanitized(self):
