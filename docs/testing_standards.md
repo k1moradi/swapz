@@ -14972,3 +14972,16 @@ exactly a third source-only block; its test now requires three distinct
 preprocessor guards while retaining the one original Round024 closing
 marker and single source-owned Round024 importer function. This changes
 only the owned host test, not the production DM or default compiled C.
+
+### Round 026 — Agent 3: genuine kernel `current` macro collision, first failure
+
+Initial exact-source `2399d418` and two-guard test follow-up
+`7a6f42a8` reached actual external x86-64 and ARM64 module Kbuild,
+not merely a synthetic fixture. Both `round024_ingress` optional
+`dm-target.o` builds failed first at `dm-target.c:1331`:
+`error: function declaration isn't a prototype [-Werror=strict-prototypes]`;
+`function 'get_current' is initialized like a variable`. The kernel
+`current` macro expanded the C local variable named `current`.
+The revised proof uses `current_snapshot` instead and the exact-source
+test rejects reintroduction. These failures are in genuine kernel builds;
+strict GCC/Clang host tests cannot substitute for that result.

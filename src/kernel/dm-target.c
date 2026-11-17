@@ -1328,35 +1328,35 @@ static __used noinline int swapz_round026_dm_revalidate_and_refuse(
 		const struct swapz_zswap_admission_transaction *transaction,
 		int lower_error, swapz_u32 actual_lower_read_bytes)
 {
-	struct swapz_round026_dm_read_snapshot current = {};
+	struct swapz_round026_dm_read_snapshot current_snapshot = {};
 	int error;
 
 	if (!before_read || !ctx || !upper_read || !transaction)
 		return -EOPNOTSUPP;
 	error = swapz_round026_dm_capture_read_snapshot(
-			ctx, before_read->logical_page, &current);
+			ctx, before_read->logical_page, &current_snapshot);
 	if (error)
 		return error == -ENODATA ? -ESTALE : error;
 	/* A relocated extent may retain the SAME logical generation.
 	 * Compare the whole volatile map descriptor and indexed extent
 	 * sequence, not only caller-presented generation or GC epoch.
 	 */
-	if (before_read->mapping.start_block != current.mapping.start_block ||
-	    before_read->mapping.generation != current.mapping.generation ||
-	    before_read->mapping.raw != current.mapping.raw ||
-	    before_read->mapping.valid != current.mapping.valid ||
-	    before_read->mapping.extent_blocks != current.mapping.extent_blocks ||
-	    before_read->mapping.payload_offset != current.mapping.payload_offset ||
-	    before_read->mapping.payload_length != current.mapping.payload_length ||
-	    before_read->mapping.payload_crc32c != current.mapping.payload_crc32c ||
-	    before_read->mapping.record_index != current.mapping.record_index ||
-	    before_read->extent_sequence != current.extent_sequence ||
-	    before_read->gc_destination != current.gc_destination ||
-	    before_read->gc_forbidden_victim != current.gc_forbidden_victim ||
-	    before_read->gc_allocation != current.gc_allocation ||
-	    before_read->recovery_active != current.recovery_active ||
-	    transaction->record.logical_page != current.logical_page ||
-	    transaction->record.generation != current.mapping.generation)
+	if (before_read->mapping.start_block != current_snapshot.mapping.start_block ||
+	    before_read->mapping.generation != current_snapshot.mapping.generation ||
+	    before_read->mapping.raw != current_snapshot.mapping.raw ||
+	    before_read->mapping.valid != current_snapshot.mapping.valid ||
+	    before_read->mapping.extent_blocks != current_snapshot.mapping.extent_blocks ||
+	    before_read->mapping.payload_offset != current_snapshot.mapping.payload_offset ||
+	    before_read->mapping.payload_length != current_snapshot.mapping.payload_length ||
+	    before_read->mapping.payload_crc32c != current_snapshot.mapping.payload_crc32c ||
+	    before_read->mapping.record_index != current_snapshot.mapping.record_index ||
+	    before_read->extent_sequence != current_snapshot.extent_sequence ||
+	    before_read->gc_destination != current_snapshot.gc_destination ||
+	    before_read->gc_forbidden_victim != current_snapshot.gc_forbidden_victim ||
+	    before_read->gc_allocation != current_snapshot.gc_allocation ||
+	    before_read->recovery_active != current_snapshot.recovery_active ||
+	    transaction->record.logical_page != current_snapshot.logical_page ||
+	    transaction->record.generation != current_snapshot.mapping.generation)
 		return -ESTALE;
 	if (bio_op(upper_read) != REQ_OP_READ ||
 	    !(upper_read->bi_opf & REQ_SWAP) ||
@@ -1367,12 +1367,12 @@ static __used noinline int swapz_round026_dm_revalidate_and_refuse(
 		return -EOPNOTSUPP;
 	if (lower_error ||
 	    actual_lower_read_bytes !=
-		    (swapz_u32)current.mapping.extent_blocks * SWAPZ_BLOCK_BYTES)
+		    (swapz_u32)current_snapshot.mapping.extent_blocks * SWAPZ_BLOCK_BYTES)
 		return -EIO;
 	if (transaction->record.compressed_length !=
-		    current.mapping.payload_length ||
+		    current_snapshot.mapping.payload_length ||
 	    transaction->record.compressed_crc32c !=
-		    current.mapping.payload_crc32c)
+		    current_snapshot.mapping.payload_crc32c)
 		return -EBADMSG;
 	/* Even a byte-for-byte stable DM snapshot, durable read and apparent
 	 * ACK do not prove SOURCE allocator epoch, original SHA or owned BIO.

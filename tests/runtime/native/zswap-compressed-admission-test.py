@@ -136,6 +136,9 @@ class Round023DisabledConsumerAdmission(unittest.TestCase):
         self.assertIn("swapz_extent_sequence_lookup(", source_body)
         self.assertIn("ctx->authority.gc_destination", source_body)
         self.assertIn("ctx->gc_recovery.active", source_body)
+        # The kernel defines current as get_current(); ordinary fixture does not.
+        self.assertIn("struct swapz_round026_dm_read_snapshot current_snapshot", source_body)
+        self.assertNotIn("struct swapz_round026_dm_read_snapshot current =", source_body)
         self.assertIn("before_read->mapping.start_block !=", source_body)
         self.assertIn("before_read->mapping.record_index !=", source_body)
         self.assertIn("transaction->upper_write_ack_count != 1U",

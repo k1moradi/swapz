@@ -82,3 +82,21 @@ only two `SWAPZ_ROUND024_DM_IMPORT_KBUILD_PROBE` occurrences. Follow-up
 expects three blocks without touching any production or other worker
 source. This was detected before claiming a completed CI pass; the
 first actual compiler/source result is governed by the corrected SHA.
+
+## Earliest genuine compiler failure and source correction
+
+At exact Round026 SHA `7a6f42a87637d37cc0646b576963d48148cf847f`,
+`Experimental swapz production C qualification` workflow
+https://github.com/k1moradi/swapz/actions/runs/44047953033
+failed BOTH x86-64 job `133918241398` and ARM64 job
+`133918241679` during the isolated actual kernel module Kbuild
+phase `round024_ingress`. First actual compiler failure at
+`dm-target.c:1331`: `-Werror=strict-prototypes`, because Linux
+`current` is a macro resolving to `get_current()`. The original
+source-extracted host fixture lacks Linux's real `current` macro.
+The narrowly scoped fix replaces only the new probe's local with
+`current_snapshot`; adds source test rejecting the kernel macro
+collision; does NOT weaken warnings, touch active DM, or change
+representation/ACK/GC behavior. New exact-SHA Kbuild must be observed
+before declaring PASS. This preserves the first true error and the
+NO_GO live-transport conclusion.
