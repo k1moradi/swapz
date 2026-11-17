@@ -59,6 +59,10 @@ class Round025PinnedSideband(unittest.TestCase):
         self.assertIn("owner->compressed_length > 3568U", STAGER.CI_HELPERS)
         self.assertIn("return -EOPNOTSUPP;", STAGER.CI_HELPERS)
         self.assertIn("bio_init_clone(", STAGER.CI_KUNIT)
+        self.assertIn("bio_split(&source", STAGER.CI_KUNIT)
+        self.assertIn("KUNIT_CASE(swapz_ci_split_lifetime_kunit)",
+                      STAGER.CI_KUNIT)
+        self.assertIn("bio_put(split)", STAGER.CI_KUNIT)
         self.assertIn("bio_prepare_reissue(", STAGER.CI_KUNIT)
         self.assertIn("bio_reset(", STAGER.CI_KUNIT)
         self.assertIn("bio_uninit(", STAGER.CI_KUNIT)

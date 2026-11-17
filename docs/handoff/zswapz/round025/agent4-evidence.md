@@ -83,3 +83,29 @@ handoff DISABLED. Existing RAW means the original UNCOMPRESSED 4096
 bytes. SWAPSPACE2 first header, UUID/signature, and partition table
 remain untouched, as do existing disk format and the zswap cache's
 exclusive memory-pressure/eviction ownership.
+
+
+## Hosted pinned source checks and genuine bio_split compiler follow-up
+
+For first published Agent4 commit
+`59a743c9ac62d0d1d95c964acef87cf8649bf788`,
+the exact-SHA GitHub Actions [run 44041682956](https://github.com/k1moradi/swapz/actions/runs/44041682956)
+completed SUCCESS: native Python/rootless tests 5/5, GCC and Clang
+ASan+UBSan source helper fixtures, exact two original Linux Git-blob
+SHA/anchor admission, `git diff --check` in the staged disposable
+upstream, real pinned `block/bio.o` GCC Kbuild/KUnit case suite symbol
+for **both** `CONFIG_ZSWAP=y` and `CONFIG_ZSWAP=n`.
+Both source build profiles printed `KUNIT_COMPILE=PASS`. This is compile
+only: no booted KUnit cases or loaded kernel were executed. The first
+observed source compiler failure at that exact SHA: NONE.
+
+The independent source extension adds a KUnit test invoking the actual
+pinned `bio_split()`, not a hand-written mock. The test performs
+source-owned reference counting over the real clone path, checks proper
+2048/2048 sector split, disallows sideband merge and cleans both BIO
+and the temporary page with fail-closed error unwind. The previously
+published full compile evidence does not establish this **new** test
+compiled until its own exact-SHA run succeeds. No Agent 2/3 source was
+changed; only the assigned separate Agent4 stager and regression file
+were extended, with this append-only evidence and a separate uniquely
+headed standards note. No production compressed carrier activation.

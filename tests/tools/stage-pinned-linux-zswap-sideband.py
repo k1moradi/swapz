@@ -174,6 +174,48 @@ static void swapz_ci_clone_lifetime_kunit(struct kunit *test)
 	bio_uninit(&clone); /* Extra uninit must not free a second time. */
 }
 
+static void swapz_ci_split_lifetime_kunit(struct kunit *test)
+{
+	struct bio_vec vector = {};
+	struct bio source;
+	struct bio *split;
+	struct page *page;
+	struct swapz_ci_owned_payload *owner;
+
+	page = alloc_page(GFP_KERNEL);
+	KUNIT_ASSERT_NOT_NULL(test, page);
+	owner = swapz_ci_kunit_owner(test);
+	if (!owner) {
+		__free_page(page);
+		return;
+	}
+	vector.bv_page = page;
+	vector.bv_len = PAGE_SIZE;
+	bio_init(&source, NULL, &vector, 1, REQ_OP_WRITE | REQ_SWAP);
+	source.bi_vcnt = 1;
+	source.bi_iter.bi_size = PAGE_SIZE;
+	source.bi_swapz_ci_sideband = owner;
+	/* Real pinned bio_split() uses bio_alloc_clone() and divides sectors. */
+	split = bio_split(&source, PAGE_SIZE >> (SECTOR_SHIFT + 1),
+			  GFP_KERNEL, &fs_bio_set);
+	if (IS_ERR_OR_NULL(split)) {
+		KUNIT_FAIL(test, "real bio_split failed, no ownership proof");
+		goto release_source;
+	}
+	KUNIT_EXPECT_PTR_EQ(test, split->bi_swapz_ci_sideband, owner);
+	KUNIT_EXPECT_EQ(test, refcount_read(&owner->references), 2);
+	KUNIT_EXPECT_EQ(test, split->bi_iter.bi_size,
+			(unsigned int)PAGE_SIZE / 2);
+	KUNIT_EXPECT_EQ(test, source.bi_iter.bi_size,
+			(unsigned int)PAGE_SIZE / 2);
+	KUNIT_EXPECT_FALSE(test, swapz_ci_bio_merge_allowed(&source, split));
+	bio_put(split);
+	KUNIT_EXPECT_EQ(test, refcount_read(&owner->references), 1);
+release_source:
+	bio_uninit(&source);
+	__free_page(page);
+}
+
 static void swapz_ci_reuse_and_abort_kunit(struct kunit *test)
 {
 	struct bio source = {};
@@ -217,6 +259,7 @@ static void swapz_ci_reject_invalid_kunit(struct kunit *test)
 
 static struct kunit_case swapz_ci_sideband_cases[] = {
 	KUNIT_CASE(swapz_ci_clone_lifetime_kunit),
+	KUNIT_CASE(swapz_ci_split_lifetime_kunit),
 	KUNIT_CASE(swapz_ci_reuse_and_abort_kunit),
 	KUNIT_CASE(swapz_ci_reject_invalid_kunit),
 	{}

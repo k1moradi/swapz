@@ -14881,3 +14881,23 @@ The original Round024 compiler probe and both disabled guards remain in
 uniquely named production C function without a fragile newline prefix,
 and still insist on actual GCC/Clang strict sanitizer execution and
 real kernel Kbuild `nm` proof. No source or live behavior changed.
+
+
+### Round 025 — Agent 4 follow-up: real pinned bio_split() KUnit lifetime source
+
+The earlier Agent4 compiler probe at `59a743c9ac62d0d1d95c964acef87cf8649bf788`
+passed all five rootless GCC/Clang ASan/UBSan Python tests and actual
+`block/bio.o` GCC/KUnit compilation for both `CONFIG_ZSWAP=y/n`
+in [hosted source-only run 44041682956](https://github.com/k1moradi/swapz/actions/runs/44041682956).
+This append-only follow-up adds a **real pinned `bio_split()` KUnit source
+case**, not just a user-space split mock. It allocates one page, initializes
+an ordinary original full-page `REQ_SWAP` BIO, holds one CI-only typed
+owned descriptor reference, splits into two real BIOs at 2048 bytes using
+`bio_split()`/`bio_alloc_clone()`, verifies refcount 2 and both 2048-byte
+iterators, then releases the split and source exactly once. The helper must
+refuse merging the split source identities and never publish compressed.
+All error branches release allocated test state. This source is under the
+same default-OFF `SWAPZ_ROUND025_SIDEBAND_CI_ONLY` compile guard and
+remains a KUnit **compile test**, NOT booted KUnit execution or a live
+authenticated MM/BIO/DM carrier; the original 4096-byte production BIO,
+zswap source fallback and physical SWAPSPACE2 semantics stay unchanged.
