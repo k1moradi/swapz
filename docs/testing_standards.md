@@ -14901,3 +14901,22 @@ same default-OFF `SWAPZ_ROUND025_SIDEBAND_CI_ONLY` compile guard and
 remains a KUnit **compile test**, NOT booted KUnit execution or a live
 authenticated MM/BIO/DM carrier; the original 4096-byte production BIO,
 zswap source fallback and physical SWAPSPACE2 semantics stay unchanged.
+
+
+### Round 025 — Agent 4 bounded owned-allocation capacity guard
+
+The opt-in BIO model carries both an immutable `owned_capacity` (the
+number of compressed bytes actually allocated) and a separately claimed
+`compressed_length`. CRC32C must be computed only after rejecting
+zero capacity, capacity over 3568, and any claimed length exceeding
+the allocated capacity; checking the global 3568 limit alone is
+insufficient when a descriptor has a smaller backing allocation.
+This source-only negative test guards the case where an 8-byte owned
+allocation reports length 3000 (within the protocol maximum but beyond
+its actual allocation), which MUST refuse before reading any bytes.
+KUnit additionally rejects a reduced owned capacity with unchanged
+compressed length. The host GCC/Clang ASan/UBSan fixtures independently
+test both length/capacity corruption and retain exact once-only
+refcount release. The default-OFF source, authentic epoch/DM admission
+refusal, original 4096-byte upper swap BIO and all physical safety
+boundaries remain unchanged.

@@ -47,6 +47,7 @@ struct swapz_ci_owned_payload {
 	u64 source_identity;
 	u32 compressed_crc32c;
 	u16 compressed_length;
+	u16 owned_capacity; /* Immutable allocation size, not claimed length. */
 	u16 decoded_length;
 	u8 representation_version;
 	u8 codec;
@@ -62,6 +63,8 @@ static bool swapz_ci_owned_valid(const struct swapz_ci_owned_payload *owner)
 	if (!owner || !owner->slot_epoch || !owner->source_identity ||
 	    owner->representation_version != 1U || owner->codec != 1U ||
 	    !owner->compressed_length || owner->compressed_length > 3568U ||
+	    !owner->owned_capacity || owner->owned_capacity > 3568U ||
+	    owner->compressed_length > owner->owned_capacity ||
 	    owner->decoded_length != 4096U)
 		return false;
 	for (index = 0; index < sizeof(owner->original_sha256); index++)
@@ -140,6 +143,7 @@ static struct swapz_ci_owned_payload *swapz_ci_kunit_owner(struct kunit *test)
 	owner->codec = 1;
 	owner->decoded_length = 4096;
 	owner->compressed_length = 16;
+	owner->owned_capacity = 16;
 	owner->original_sha256[0] = 1;
 	for (index = 0; index < 16; index++)
 		owner->compressed_bytes[index] = (u8)(index + 1);
@@ -253,6 +257,9 @@ static void swapz_ci_reject_invalid_kunit(struct kunit *test)
 	KUNIT_EXPECT_FALSE(test, swapz_ci_owned_valid(owner));
 	owner->compressed_crc32c ^= 1;
 	owner->compressed_length = 3569; /* Must refuse before CRC read. */
+	KUNIT_EXPECT_FALSE(test, swapz_ci_owned_valid(owner));
+	owner->compressed_length = 16;
+	owner->owned_capacity = 8; /* Claim within 3568, beyond allocation. */
 	KUNIT_EXPECT_FALSE(test, swapz_ci_owned_valid(owner));
 	swapz_ci_owned_put(owner);
 }

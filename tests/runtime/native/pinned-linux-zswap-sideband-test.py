@@ -57,6 +57,8 @@ class Round025PinnedSideband(unittest.TestCase):
         self.assertIn("kfree_sensitive(owner)", STAGER.CI_HELPERS)
         self.assertIn("~crc32c(~0U,", STAGER.CI_HELPERS)
         self.assertIn("owner->compressed_length > 3568U", STAGER.CI_HELPERS)
+        self.assertIn("owner->compressed_length > owner->owned_capacity",
+                      STAGER.CI_HELPERS)
         self.assertIn("return -EOPNOTSUPP;", STAGER.CI_HELPERS)
         self.assertIn("bio_init_clone(", STAGER.CI_KUNIT)
         self.assertIn("bio_split(&source", STAGER.CI_KUNIT)

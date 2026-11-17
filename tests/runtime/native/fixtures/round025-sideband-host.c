@@ -90,6 +90,7 @@ static struct swapz_ci_owned_payload *fixture_owner(unsigned int length)
 	owner->representation_version = 1U;
 	owner->decoded_length = 4096U;
 	owner->compressed_length = (u16)length;
+	owner->owned_capacity = (u16)length;
 	owner->original_sha256[0] = 0xb2U;
 	for (unsigned int index = 0; index < length; ++index)
 		owner->compressed_bytes[index] = (u8)(index & 0xffU);
@@ -137,7 +138,7 @@ int main(void)
 		swapz_ci_bio_detach(&split);
 	}
 	assert(freed_allocations == 32U);
-	for (unsigned int invalid = 0; invalid < 8U; ++invalid) {
+	for (unsigned int invalid = 0; invalid < 10U; ++invalid) {
 		struct bio original = { 0 }, attempted = { 0 };
 		struct swapz_ci_owned_payload *owner = fixture_owner(8U);
 		original.bi_swapz_ci_sideband = owner;
@@ -149,7 +150,9 @@ int main(void)
 		case 4: owner->compressed_length = 0; break;
 		case 5: owner->compressed_length = 3569; break;
 		case 6: owner->decoded_length = 4095; break;
-		default: owner->compressed_crc32c ^= 1U; break;
+		case 7: owner->compressed_crc32c ^= 1U; break;
+		case 8: owner->compressed_length = 3000; break;
+		default: owner->owned_capacity = 0; break;
 		}
 		/* Reject before dereferencing forged length > allocation. */
 		assert(!swapz_ci_owned_valid(owner));
@@ -157,7 +160,7 @@ int main(void)
 		assert(attempted.bi_swapz_ci_sideband == NULL);
 		swapz_ci_bio_detach(&original);
 	}
-	assert(freed_allocations == 40U);
+	assert(freed_allocations == 42U);
 	puts("ROUND025_SIDE_BAND_HOST_SOURCE_ONLY_PASS");
 	puts("LIVE_COMPRESSED=DISABLED LOADED_4096=NOT_RUN PHYSICAL=NOT_RUN");
 	return 0;

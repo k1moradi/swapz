@@ -109,3 +109,29 @@ compiled until its own exact-SHA run succeeds. No Agent 2/3 source was
 changed; only the assigned separate Agent4 stager and regression file
 were extended, with this append-only evidence and a separate uniquely
 headed standards note. No production compressed carrier activation.
+
+
+## Real pinned split KUnit compiler evidence and allocation-bound follow-up
+
+The second Agent4 exact-SHA
+[workflow 44042265384](https://github.com/k1moradi/swapz/actions/runs/44042265384)
+at `6278c684dd15cc1be407f3393589de0a520e0b0e`
+completed **SUCCESS**, including all five native rootless GCC+Clang tests,
+the exact original pinned SHA admission/staging, and real source
+`block/bio.o` GCC compiler/KUnit suite for both `CONFIG_ZSWAP=y/n`.
+The added real pinned `bio_split` KUnit case was compiled, NOT
+executed in a booted kernel. Source first compiler failure: NONE.
+
+A further code-review risk was found in the CI-only descriptor helper:
+validating claimed `compressed_length <= 3568` without comparing it to
+the exact allocation capacity can allow a forged length of 3000 to
+hash beyond a separately allocated 8-byte buffer. The follow-up changes
+only assigned CI-only Agent4 sources: an immutable
+`owned_capacity` field (set at allocation) must be 1..3568 and
+`compressed_length <= owned_capacity` **before any CRC or byte read**.
+The actual native host adversarial GCC+Clang model now mutates 8-byte
+allocation to claimed length 3000 and zero capacity; the pinned
+KUnit source also tests capacity mismatch. Successful source-only
+execution requires the new exact-SHA job result, not the earlier SHA.
+No default runtime BIO path, source-authoritative epoch, lower ACK,
+DM generation or physical media path was changed or enabled.
