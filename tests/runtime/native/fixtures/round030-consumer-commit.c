@@ -25,18 +25,18 @@ struct swapz_dm {
 	int ordered_owner;
 };
 static swapz_u8 disk_data[8U * SWAPZ_BLOCK_BYTES];
-static int lower_write_error, lower_read_error, finish_error, stage_error;
+static int lower_write_error, lower_read_error, injected_finish_error, stage_error;
 static int lower_writes, lower_reads, lower_fua, stage_calls, finish_calls, abort_calls;
 static swapz_u32 next_sequence = 5U;
 
 static int swapz_zswap_lz4_header_only_probe(void) { return 0; }
-static int swapz_open_segment_fits(const struct swapz_authority *authority,
+int swapz_open_segment_fits(const struct swapz_authority *authority,
 				  swapz_u8 blocks)
 {
 	return !authority->in_flight && (blocks == 1U || blocks == 2U ||
 					blocks == 4U);
 }
-static int swapz_stage(struct swapz_authority *authority,
+int swapz_stage(struct swapz_authority *authority,
 		       const swapz_u32 *logical_pages, swapz_u8 count,
 		       swapz_u8 blocks, struct swapz_tx *transaction)
 {
@@ -57,7 +57,7 @@ static int swapz_stage(struct swapz_authority *authority,
 	authority->in_flight = 1U;
 	return 0;
 }
-static int swapz_bind_compressed_record(struct swapz_authority *authority,
+int swapz_bind_compressed_record(struct swapz_authority *authority,
 				       struct swapz_tx *transaction,
 				       swapz_u8 record_index, swapz_u16 payload_offset,
 				       swapz_u16 payload_length, swapz_u32 payload_crc32c,
@@ -73,7 +73,7 @@ static int swapz_bind_compressed_record(struct swapz_authority *authority,
 	transaction->records[0].compressed_metadata_bound = 1U;
 	return 0;
 }
-static int swapz_mark_compressed_data_only(struct swapz_authority *authority,
+int swapz_mark_compressed_data_only(struct swapz_authority *authority,
 					  struct swapz_tx *transaction)
 {
 	(void)authority;
@@ -95,7 +95,7 @@ static int swapz_lower_write(void *opaque, swapz_u32 block, swapz_u8 blocks,
 	*completed = blocks;
 	return 0;
 }
-static int swapz_finish(struct swapz_authority *authority,
+int swapz_finish(struct swapz_authority *authority,
 			const struct swapz_tx *transaction, const void *extent,
 			swapz_u32 total_bytes, swapz_u8 completed, int io_error)
 {
@@ -105,7 +105,7 @@ static int swapz_finish(struct swapz_authority *authority,
 	assert(authority->in_flight == 1U);
 	authority->in_flight = 0U;
 	if (io_error) return io_error;
-	if (finish_error) return finish_error;
+	if (injected_finish_error) return injected_finish_error;
 	if (!extent || total_bytes != SWAPZ_BLOCK_BYTES * transaction->extent_blocks ||
 	    completed != transaction->extent_blocks ||
 	    !transaction->compressed_data_only)
@@ -115,7 +115,21 @@ static int swapz_finish(struct swapz_authority *authority,
 	memset(mapping, 0, sizeof(*mapping));
 	mapping->start_block = transaction->start_block;
 	mapping->generation = record->generation;
-	mapping->extent_blocks = transaction->extent_blocks;
+	/* The real authority only issues legal 1/2/4 block extents. Use
+	 * constant bitfield values so -Wconversion remains strict here. */
+	switch (transaction->extent_blocks) {
+	case 1U:
+		mapping->extent_blocks = 1U;
+		break;
+	case 2U:
+		mapping->extent_blocks = 2U;
+		break;
+	case 4U:
+		mapping->extent_blocks = 4U;
+		break;
+	default:
+		assert(0);
+	}
 	mapping->record_index = swapz_map_pack_record_index(0U, record->encoding);
 	mapping->valid = 1U;
 	mapping->payload_offset = record->payload_offset;
@@ -123,7 +137,7 @@ static int swapz_finish(struct swapz_authority *authority,
 	mapping->payload_crc32c = record->payload_crc32c;
 	return 0;
 }
-static int swapz_abort(struct swapz_authority *authority,
+int swapz_abort(struct swapz_authority *authority,
 		       const struct swapz_tx *transaction)
 {
 	(void)transaction;
@@ -131,7 +145,7 @@ static int swapz_abort(struct swapz_authority *authority,
 	authority->in_flight = 0U;
 	return 0;
 }
-static int swapz_extent_sequence_lookup(const struct swapz_authority *authority,
+int swapz_extent_sequence_lookup(const struct swapz_authority *authority,
 					swapz_u32 block, swapz_u32 *sequence)
 {
 	(void)authority;
@@ -242,7 +256,7 @@ static void initial_state(struct swapz_dm *ctx,
 	assert(swapz_zswap_admission_try_live(transaction) == -EOPNOTSUPP);
 	for (index = 0U; index < sizeof(lower_image); ++index)
 		lower_image[index] = 0xa5U;
-	lower_write_error = lower_read_error = finish_error = stage_error = 0;
+	lower_write_error = lower_read_error = injected_finish_error = stage_error = 0;
 	lower_writes = lower_reads = lower_fua = stage_calls = finish_calls = abort_calls = 0;
 }
 
