@@ -35,8 +35,15 @@ class ImportedZswapLz4SourceOnly(unittest.TestCase):
         guarded, after = active[1].split(
             "#endif /* SWAPZ_ROUND028_DM_OWNED_READBACK_TEST */", 1)
         self.assertIn("SWAPZ_ZSWAP_IMPORT_REPRESENTATION", guarded)
+        # Round030 is a second explicit, unreferenced CI-only gate.
+        later = after.split(
+            "#if defined(SWAPZ_ROUND030_DM_COMPRESSED_COMMIT_TEST)", 1)
+        self.assertEqual(len(later), 2)
+        guarded_round030, ordinary = later[1].split(
+            "#endif /* SWAPZ_ROUND030_DM_COMPRESSED_COMMIT_TEST */", 1)
+        self.assertIn("SWAPZ_ZSWAP_IMPORT_REPRESENTATION", guarded_round030)
         self.assertNotIn("SWAPZ_ZSWAP_IMPORT_REPRESENTATION",
-                         active[0] + after)
+                         active[0] + later[0] + ordinary)
         self.assertIn("swapz_crc32c_bytes", CODEC.read_text(encoding="utf-8"))
         self.assertIn("LZ4_decompress_safe", header)
         self.assertIn("original_sha256", header)
@@ -100,6 +107,68 @@ class ImportedZswapLz4SourceOnly(unittest.TestCase):
                     self.assertEqual(executed.returncode, 0, executed.stderr)
                     self.assertEqual(executed.stdout.strip(),
                                      "ROUND028_DM_EXACT_OWNED_STAGE_NO_LIVE_PASS")
+
+    def test_round030_source_attached_dm_ordered_commit_gcc_clang(self) -> None:
+        """Run exact production DM transaction body with fake lower I/O only."""
+        source = TARGET.read_text(encoding="utf-8")
+        start = "/* ROUND030_DM_COMMIT_EXACT_START */"
+        end = "/* ROUND030_DM_COMMIT_EXACT_END */"
+        self.assertEqual(source.count(start), 1)
+        self.assertEqual(source.count(end), 1)
+        actual = source.split(start, 1)[1].split(end, 1)[0]
+        for fragment in (
+            "swapz_round030_dm_commit_owned_lz4(",
+            "swapz_round030_dm_read_owned_lz4(",
+            "swapz_stage(&ctx->authority, &logical_page, 1U,",
+            "swapz_bind_compressed_record(",
+            "swapz_mark_compressed_data_only(&ctx->authority, staged)",
+            "swapz_lower_write(ctx, staged->start_block, extent_blocks,",
+            "swapz_finish(&ctx->authority, staged, lower_image,",
+            "swapz_extent_sequence_lookup(&ctx->authority,",
+            "swapz_round028_dm_owned_lower_readback(",
+            "swapz_zswap_admission_try_live(NULL)",
+        ):
+            self.assertIn(fragment, actual)
+        self.assertNotIn("\tbio_endio(", actual)
+        self.assertNotIn("\tswapz_map(", actual)
+        fixture = (ROOT / "tests/runtime/native/fixtures" /
+                   "round030-consumer-commit.c").read_text(encoding="utf-8")
+        token = "/* ROUND030_EXACT_DM_COMMIT_SOURCE */"
+        self.assertEqual(fixture.count(token), 1)
+        fixture = fixture.replace(token, actual, 1)
+        with tempfile.TemporaryDirectory(prefix="round030-dm-commit-") as directory:
+            compilers = [name for name in ("gcc", "clang") if shutil.which(name)]
+            self.assertTrue(compilers)
+            for compiler in compilers:
+                with self.subTest(compiler=compiler):
+                    output = Path(directory) / compiler
+                    codec = Path(directory) / (compiler + "-codec.o")
+                    source_file = Path(directory) / (compiler + ".c")
+                    source_file.write_text(fixture, encoding="utf-8")
+                    shared = [compiler, "-std=gnu11", "-O1", "-g", "-Wall",
+                              "-Wextra", "-Wshadow", "-Werror",
+                              "-fsanitize=address,undefined",
+                              "-fno-sanitize-recover=all", "-I",
+                              str(HEADER.parent)]
+                    # codec.c has existing, independently tested conversion
+                    # diagnostics; NEW extracted C is -Wconversion/-Werror.
+                    codec_build = subprocess.run([
+                        *shared, "-Wno-conversion", "-c", str(CODEC),
+                        "-o", str(codec)], capture_output=True, text=True,
+                        timeout=60, check=False)
+                    self.assertEqual(codec_build.returncode, 0,
+                                     codec_build.stderr)
+                    build = subprocess.run([
+                        *shared, "-Wconversion", str(source_file), str(codec),
+                        "-llz4", "-lcrypto", "-o", str(output)],
+                        capture_output=True, text=True, timeout=60, check=False)
+                    self.assertEqual(build.returncode, 0, build.stderr)
+                    executed = subprocess.run([str(output)], capture_output=True,
+                                              text=True, timeout=60, check=False)
+                    self.assertEqual(executed.returncode, 0, executed.stderr)
+                    self.assertEqual(
+                        executed.stdout.strip(),
+                        "ROUND030_DM_SOURCE_EXTRACTED_ORDERED_COMMIT_PASS")
 
     def test_exact_production_crc32c_and_real_lz4_decoder_gcc_clang(self) -> None:
         compilers = [compiler for compiler in ("gcc", "clang") if shutil.which(compiler)]

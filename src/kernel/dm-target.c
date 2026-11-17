@@ -3341,6 +3341,259 @@ static __used noinline int swapz_round028_dm_owned_lower_readback(
 #endif /* SWAPZ_ROUND028_DM_OWNED_READBACK_TEST */
 
 /*
+ * Round030: CI-only exact production lower-write -> authoritative volatile
+ * mapping -> hypothetical ACK transaction. The REAL upstream MM-sourced BIO
+ * carrier is not authenticated: NO normal swapz_map()/upper BIO callsite.
+ * The caller holds ordered_owner throughout; no worker/GC competes for the
+ * single staged authority transaction. Source buffers and descriptor are
+ * caller-owned and synchronous. Only post-header swapz_lower() I/O is used.
+ *
+ * It is intentionally an isolated opt-in proof, NOT live compression support.
+ */
+#if defined(SWAPZ_ROUND030_DM_COMPRESSED_COMMIT_TEST) && \
+    defined(SWAPZ_ROUND028_DM_OWNED_READBACK_TEST) && \
+    defined(SWAPZ_ROUND024_DM_IMPORT_KBUILD_PROBE)
+/* ROUND030_DM_COMMIT_EXACT_START */
+struct swapz_round030_dm_volatile_descriptor {
+	struct swapz_zswap_import_record record;
+	struct swapz_map mapping;
+	swapz_u64 source_swap_slot;
+	swapz_u32 extent_sequence;
+	swapz_u8 published;
+	swapz_u8 hypothetical_ack_count;
+};
+
+static __used noinline int swapz_round030_dm_commit_owned_lz4(
+		struct swapz_dm *ctx,
+		struct swapz_zswap_admission_transaction *transaction,
+		swapz_u64 source_swap_slot,
+		const swapz_u8 *owned_compressed_bytes, swapz_u32 source_capacity,
+		swapz_u8 *lower_image, swapz_u32 lower_capacity,
+		struct swapz_round030_dm_volatile_descriptor *descriptor,
+		bool requested_fua)
+{
+	struct swapz_tx *staged;
+	struct swapz_map previous;
+	const struct swapz_map *committed;
+	swapz_u32 logical_page, physical_bytes, extent_sequence = 0;
+	swapz_u32 before_gc_destination, before_gc_victim;
+	swapz_u8 before_gc_allocation;
+	swapz_u8 extent_blocks, completed = 0;
+	bool previous_fua;
+	int error, finish_error;
+
+	if (!ctx || !transaction || !descriptor || !lower_image ||
+	    !owned_compressed_bytes || !source_swap_slot)
+		return -EINVAL;
+	lockdep_assert_held(&ctx->ordered_owner);
+	/* No actual trusted Linux sideband exists; preserve the live refusal. */
+	if (swapz_zswap_admission_try_live(NULL) != -EOPNOTSUPP)
+		return -EPERM;
+	if (descriptor->published || descriptor->hypothetical_ack_count ||
+	    !ctx->accepting || smp_load_acquire(&ctx->failed) ||
+	    ctx->authority.maps != ctx->maps || !ctx->authority.maps ||
+	    transaction->phase != SWAPZ_ZSWAP_ADMISSION_PREPARED ||
+	    transaction->teardown_started)
+		return -ESTALE;
+	if (!transaction->record.logical_page ||
+	    transaction->record.logical_page >= ctx->authority.logical_pages ||
+	    transaction->record.logical_page > ~(swapz_u32)0 ||
+	    !transaction->record.store_generation ||
+	    !transaction->record.stored_entry_identity ||
+	    !transaction->record.gc_epoch ||
+	    transaction->record.representation !=
+		    SWAPZ_ZSWAP_IMPORT_REPRESENTATION ||
+	    transaction->record.codec != SWAPZ_ZSWAP_IMPORT_LZ4_CODEC ||
+	    transaction->record.version != SWAPZ_ZSWAP_IMPORT_VERSION ||
+	    transaction->record.dictionary_id ||
+	    !transaction->record.immutable_owned_copy ||
+	    !transaction->record.stored_eviction)
+		return -EOPNOTSUPP;
+	logical_page = (swapz_u32)transaction->record.logical_page;
+	physical_bytes = transaction->physical_extent_bytes;
+	if ((physical_bytes != SWAPZ_BLOCK_BYTES &&
+	     physical_bytes != 2U * SWAPZ_BLOCK_BYTES &&
+	     physical_bytes != 4U * SWAPZ_BLOCK_BYTES) ||
+	    transaction->record.compressed_length == 0 ||
+	    transaction->record.compressed_length > SWAPZ_MAX_COMPRESSED ||
+	    transaction->record.decoded_length != SWAPZ_BLOCK_BYTES ||
+	    physical_bytes > lower_capacity ||
+	    source_capacity < transaction->record.compressed_length ||
+	    transaction->compressed_payload_offset >= physical_bytes ||
+	    transaction->record.compressed_length >
+		    physical_bytes - transaction->compressed_payload_offset ||
+	    transaction->owned_compressed_bytes != owned_compressed_bytes)
+		return -EMSGSIZE;
+	extent_blocks = (swapz_u8)(physical_bytes / SWAPZ_BLOCK_BYTES);
+	if (ctx->gc_recovery.active || ctx->authority.gc_allocation ||
+	    ctx->authority.batch_pending || !swapz_open_segment_fits(
+		    &ctx->authority, extent_blocks))
+		return -ENOSPC;
+	previous = ctx->authority.maps[logical_page];
+	if (previous.generation == ~(swapz_u32)0 ||
+	    transaction->record.generation != (swapz_u64)previous.generation + 1U)
+		return -ESTALE;
+	before_gc_destination = ctx->authority.gc_destination;
+	before_gc_victim = ctx->authority.gc_forbidden_victim;
+	before_gc_allocation = ctx->authority.gc_allocation;
+
+	/* This real stage reserves a COW extent and protects the old map. */
+	staged = &ctx->raw_io_transaction;
+	error = swapz_stage(&ctx->authority, &logical_page, 1U,
+			    extent_blocks, staged);
+	if (error)
+		return error;
+	if (staged->count != 1U || staged->extent_blocks != extent_blocks ||
+	    staged->records[0].generation != transaction->record.generation ||
+	    memcmp(&previous, &ctx->authority.maps[logical_page],
+		   sizeof(previous)) ||
+	    ctx->authority.gc_destination != before_gc_destination ||
+	    ctx->authority.gc_forbidden_victim != before_gc_victim ||
+	    ctx->authority.gc_allocation != before_gc_allocation) {
+		error = -ESTALE;
+		goto abort_staged;
+	}
+	/* The source snapshot cannot be borrowed from zsmalloc: this exact
+	 * copy is bounded, CRC32C-checked and zero pads unused lower bytes.
+	 */
+	error = swapz_round028_dm_stage_owned_payload(
+		transaction, owned_compressed_bytes, source_capacity,
+		lower_image, lower_capacity);
+	if (error)
+		goto abort_staged;
+	error = swapz_bind_compressed_record(
+		&ctx->authority, staged, 0U,
+		(swapz_u16)transaction->compressed_payload_offset,
+		(swapz_u16)transaction->record.compressed_length,
+		transaction->record.compressed_crc32c, SWAPZ_ENCODING_LZ4);
+	if (!error)
+		error = swapz_mark_compressed_data_only(&ctx->authority, staged);
+	if (error)
+		goto abort_staged;
+
+	/* Genuine synchronous lower-I/O completion includes any requested
+	 * prepublication FUA flush; no upper ACK/volatile map exists yet.
+	 */
+	previous_fua = ctx->prepublication_fua;
+	ctx->prepublication_fua = requested_fua;
+	error = swapz_lower_write(ctx, staged->start_block, extent_blocks,
+				  lower_image, &completed);
+	ctx->prepublication_fua = previous_fua;
+	if (!error && completed != extent_blocks)
+		error = -EIO;
+	if (!error)
+		error = swapz_zswap_admission_lower_write_done(
+			transaction, 0, physical_bytes);
+	/* A partial/uncertain lower write is quarantined by the real
+	 * swapz_finish() authority. Never recycle this area ourselves.
+	 */
+	finish_error = swapz_finish(&ctx->authority, staged, lower_image,
+				   physical_bytes, completed, error);
+	error = swapz_preserve_first_error(error, finish_error);
+	if (error) {
+		swapz_zswap_admission_invalidate(transaction);
+		return error;
+	}
+	committed = &ctx->authority.maps[logical_page];
+	if (!committed->valid || committed->raw ||
+	    committed->start_block != staged->start_block ||
+	    committed->extent_blocks != extent_blocks ||
+	    committed->generation != transaction->record.generation ||
+	    committed->payload_offset != transaction->compressed_payload_offset ||
+	    committed->payload_length != transaction->record.compressed_length ||
+	    committed->payload_crc32c != transaction->record.compressed_crc32c ||
+	    ctx->authority.gc_destination != before_gc_destination ||
+	    ctx->authority.gc_forbidden_victim != before_gc_victim ||
+	    ctx->authority.gc_allocation != before_gc_allocation ||
+	    ctx->gc_recovery.active ||
+	    swapz_extent_sequence_lookup(&ctx->authority,
+					 committed->start_block,
+					 &extent_sequence) ||
+	    !extent_sequence) {
+		/* An unexpected post-publication mismatch is terminal, never
+		 * a success or an opportunity to retry with old geometry.
+		 */
+		swapz_zswap_admission_invalidate(transaction);
+		swapz_fail(ctx, -EUCLEAN);
+		return -EUCLEAN;
+	}
+	error = swapz_zswap_admission_publish_ram_mapping(
+		transaction, logical_page, committed->generation,
+		transaction->record.gc_epoch);
+	if (!error)
+		error = swapz_zswap_admission_upper_write_ack(transaction);
+	if (error) {
+		swapz_zswap_admission_invalidate(transaction);
+		swapz_fail(ctx, -EUCLEAN);
+		return error;
+	}
+	/* Distinct volatile descriptor: never mark this as ordinary RAW,
+	 * and no actual bio_endio()/swapz_finish_bio() is invoked.
+	 */
+	descriptor->record = transaction->record;
+	descriptor->mapping = *committed;
+	descriptor->source_swap_slot = source_swap_slot;
+	descriptor->extent_sequence = extent_sequence;
+	descriptor->hypothetical_ack_count = 1U;
+	descriptor->published = 1U;
+	return 0;
+
+abort_staged:
+	finish_error = swapz_abort(&ctx->authority, staged);
+	swapz_zswap_admission_invalidate(transaction);
+	return swapz_preserve_first_error(error, finish_error);
+}
+
+static __used noinline int swapz_round030_dm_read_owned_lz4(
+		struct swapz_dm *ctx,
+		const struct swapz_round030_dm_volatile_descriptor *descriptor,
+		const struct swapz_zswap_admission_transaction *transaction,
+		swapz_u8 *lower_image, swapz_u32 lower_capacity,
+		swapz_u8 *decode_scratch, swapz_u8 *decoded_page)
+{
+	const struct swapz_map *current;
+	swapz_u32 sequence;
+	int error;
+
+	if (!ctx || !descriptor || !transaction || !lower_image ||
+	    !decode_scratch || !decoded_page)
+		return -EINVAL;
+	lockdep_assert_held(&ctx->ordered_owner);
+	if (!descriptor->published ||
+	    descriptor->hypothetical_ack_count != 1U ||
+	    transaction->phase != SWAPZ_ZSWAP_ADMISSION_ACKED ||
+	    transaction->upper_write_ack_count != 1U ||
+	    transaction->teardown_started ||
+	    !descriptor->source_swap_slot ||
+	    descriptor->record.logical_page >= ctx->authority.logical_pages ||
+	    descriptor->record.logical_page == 0 ||
+	    memcmp(&descriptor->record, &transaction->record,
+		   sizeof(descriptor->record)) ||
+	    !ctx->authority.maps ||
+	    ctx->authority.maps != ctx->maps ||
+	    ctx->gc_recovery.active || ctx->authority.gc_allocation)
+		return -ESTALE;
+	current = &ctx->authority.maps[descriptor->record.logical_page];
+	if (!current->valid || current->raw ||
+	    memcmp(current, &descriptor->mapping, sizeof(*current)))
+		return -ESTALE;
+	error = swapz_extent_sequence_lookup(&ctx->authority,
+					     current->start_block, &sequence);
+	if (error || sequence != descriptor->extent_sequence)
+		return -ESTALE;
+	/* The Round028 function performs a genuine checked lower READ, a
+	 * second authoritative map/GC snapshot, CRC32C, exact LZ4 4096 and
+	 * independent original STORE SHA before writing decoded_page.
+	 */
+	return swapz_round028_dm_owned_lower_readback(
+		ctx, transaction, (swapz_u32)descriptor->record.logical_page,
+		lower_image, lower_capacity, decode_scratch, decoded_page);
+}
+/* ROUND030_DM_COMMIT_EXACT_END */
+#endif /* SWAPZ_ROUND030_DM_COMPRESSED_COMMIT_TEST */
+
+
+/*
  * ID29: media reclamation is allowed only after serialized authority has
  * already proven an entire 1MiB segment non-authoritative. DISCARD never
  * creates deadness. Unsupported/media failures are diagnostic and nonfatal;

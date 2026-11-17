@@ -213,7 +213,7 @@ jobs:
           phase="round024-dm-ingress-kbuild"
           compile_variant round024_ingress build/kernel/round024-dm-ingress/dm-swapz.ko \
             SWAPZ_STAGE="$PWD/build/kernel/round024-dm-ingress" \
-            KCFLAGS="-DSWAPZ_ROUND024_DM_IMPORT_KBUILD_PROBE=1 -DSWAPZ_ROUND028_DM_OWNED_READBACK_TEST=1" W=1
+            KCFLAGS="-DSWAPZ_ROUND024_DM_IMPORT_KBUILD_PROBE=1 -DSWAPZ_ROUND028_DM_OWNED_READBACK_TEST=1 -DSWAPZ_ROUND030_DM_COMPRESSED_COMMIT_TEST=1" W=1
           phase="round024-dm-ingress-object-identity"
           if ! nm -a build/kernel/round024-dm-ingress/dm-target.o |
               grep -q 'swapz_round024_dm_import_kbuild_probe'; then
@@ -249,6 +249,20 @@ jobs:
               false
             fi
           done
+          phase="round030-compressed-commit-real-object-identity"
+          for symbol in swapz_round030_dm_commit_owned_lz4 \
+                        swapz_round030_dm_read_owned_lz4; do
+            if ! nm -a build/kernel/round024-dm-ingress/dm-target.o |
+                grep -q "$symbol"; then
+              echo "::error::Round030 actual ordered source C missing $symbol" >&2
+              false
+            fi
+            if nm -a build/kernel/w1/dm-target.o | grep -q "$symbol"; then
+              echo "::error::Round030 source symbol leaked into default module" >&2
+              false
+            fi
+          done
+          echo "ROUND030_DM_TRUE_LOWER_STAGE_COMMIT_COMPILE_ONLY_NO_LIVE"
           echo "ROUND028_DM_OWNED_READBACK_COMPILED_OPT_IN_NO_LIVE"
           echo "ROUND026_DM_READ_SNAPSHOT_ACTUAL_MODULE_KBUILD_COMPILED_NO_LIVE"
           echo "ROUND025_DM_AUTHORITY_ACTUAL_MODULE_KBUILD_COMPILED_DEFAULT_OFF"
