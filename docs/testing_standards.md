@@ -15170,3 +15170,31 @@ direct compressed transfer DISABLED. `LIVE_COMPRESSED=DISABLED`,
 first original SWAPSPACE2 4096-byte page/header, UUID, signature,
 partition table and all physical data are untouched; no owner
 kernel/module, swap, null_blk, pressure or physical action.
+
+
+### Round 026 — Agent 4: preserve first executed-KUnit verification failure
+
+The initial exact-SHA hosted UML
+[workflow 44048321459](https://github.com/k1moradi/swapz/actions/runs/44048321459)
+compiled original Linux UML, booted the disposable kernel and
+**actually executed seven real KUnit cases**, all reported PASS by
+the pinned upstream KUnit parser in 0.060 seconds of execution. Its
+separate CONFIG_ZSWAP=y/n compiler job completed SUCCESS. The
+independent strict result verifier correctly kept its own qualification
+nonzero due to a **verifier grammar error**: it required the
+optional \`"-"\` in \`ok 6 - case_name\`, whereas the original
+\`lib/kunit/test.c\` uses \`kunit_print_ok_not_ok()\` with
+\`"%s %zd %s"\`, printing \`ok 6 case_name\` without a hyphen.
+The pinned upstream
+\`tools/testing/kunit/kunit_parser.py\` accepts both formats.
+This false negative was NOT an original kernel test failure.
+
+The corrected verifier accepts the two upstream-valid KTAP forms,
+still checks exact seven case names in the actual raw kernel log and
+unique JSON case records/counts, rejects errors/skip/panic/synthetic
+evidence and keeps nonzero failure exits. Its injected self-tests
+now use the **actual original no-hyphen kernel print format**.
+A fail-only CI path additionally prints bounded actual kernel KTAP
+case rows if verification refuses again. The original false-negative
+job remains FAILURE; success can be claimed ONLY from the corrected
+new exact-SHA hosted run and never from KUnit compilation.

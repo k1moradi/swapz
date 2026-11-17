@@ -226,6 +226,12 @@ jobs:
             first_exit=$?
             echo "::error::UML KUnit executed evidence refused (exit $first_exit)"
             tail -n 65 "$runner_log"
+            # Print bounded ACTUAL kernel KTAP evidence on first verifier
+            # mismatch; no owner/private host contents are involved.
+            if test -s "$build_dir/test.log"; then
+              echo "First source-bound kernel KTAP case diagnostics:"
+              grep -E 'KTAP version|# Subtest:|swapz_ci_|not ok '                 "$build_dir/test.log" | tail -n 70 || true
+            fi
             exit "$first_exit"
           fi
           echo "SOURCE_ONLY=PASS KUNIT_BOOT_EXECUTED=PASS LOADED_4096=NOT_RUN PHYSICAL=NOT_RUN"

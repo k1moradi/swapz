@@ -29,7 +29,7 @@ CASES = frozenset((
 MAX_RESULT_BYTES = 512 * 1024
 MAX_LOG_BYTES = 2 * 1024 * 1024
 KERNEL_TIMESTAMP = re.compile(r"^\[\s*[0-9]+\.[0-9]+\]\s*")
-KTAP_CASE = re.compile(r"^ok\s+[0-9]+\s+-\s+([A-Za-z0-9_]+)(?:\s+#.*)?$")
+KTAP_CASE = re.compile(r"^ok\s+[0-9]+\s+(?:-\s+)?([A-Za-z0-9_]+)(?:\s+#.*)?$")
 
 
 class QualificationRefusal(ValueError):
@@ -105,6 +105,9 @@ def verify_executed_kunit_json(document: object, kernel_log: str) -> None:
         if type(value) is not int or value != expected:
             raise QualificationRefusal(f"kunit_count_mismatch:{key}")
 
+    # Pinned lib/kunit/test.c prints "%s %zd %s" without a hyphen;
+    # pinned upstream kunit_parser.TEST_RESULT accepts an optional "-".
+    # Match that grammar, but require exact counted case identities.
     kernel_cases: dict[str, int] = {}
     for line in kernel_log.splitlines():
         clean_line = KERNEL_TIMESTAMP.sub("", line).strip()
@@ -145,7 +148,7 @@ def sample_evidence() -> tuple[dict, str]:
     }
     log = ("[    0.001] KTAP version 1\n"
            "[    0.002] # Subtest: " + SUITE + "\n" +
-           "\n".join(f"[    0.003]     ok {i} - {name}"
+           "\n".join(f"[    0.003]     ok {i} {name}"
                      for i, name in enumerate(cases, 1)) + "\n")
     return document, log
 
@@ -174,12 +177,12 @@ class ExecutedKunitVerifierSelfTest(unittest.TestCase):
             "",
             "KUnit suite compiled but not executed\n",
             log.replace("KTAP version 1", "TAP version 14"),
-            log.replace("ok 1 - ", "not ok 1 - ", 1),
+            log.replace("ok 1 ", "not ok 1 ", 1),
             log + "Kernel panic - not syncing\n",
             log + "BUG: KASAN: use-after-free\n",
             log + "UBSAN: shift-out-of-bounds\n",
             log + next(line for line in log.splitlines()
-                       if "ok 1 - " in line) + "\n",
+                       if "ok 1 " in line) + "\n",
         ):
             variants.append((copy.deepcopy(sample), changed))
         document = copy.deepcopy(sample)

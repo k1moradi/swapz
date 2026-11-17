@@ -103,3 +103,42 @@ SWAPSPACE2 header, UUID and partition table.
 \`DIRECT_COMPRESSED_HANDOFF=DISABLED\`;
 \`LOADED_ORIGINAL_4096=NOT_RUN\`;
 \`PHYSICAL_SWAPSPACE2=NOT_RUN\`.
+
+
+## First executed pinned UML KUnit run: kernel cases PASS; strict verifier falsely refused
+
+At exact SHA
+\`4a08e782a33f827e50eb7cf51b98c285b2aeebb9\`,
+[hosted run 44048321459](https://github.com/k1moradi/swapz/actions/runs/44048321459)
+demonstrated a genuine boot of original pinned Linux UML. Upstream
+KUnit stdout reported all seven named source cases PASSED:
+\`swapz_ci_clone_lifetime_kunit\`,
+\`swapz_ci_split_lifetime_kunit\`,
+\`swapz_ci_reuse_and_abort_kunit\`,
+\`swapz_ci_reject_invalid_kunit\`,
+\`swapz_ci_invalid_clone_kunit\`,
+\`swapz_ci_reuse_private_kunit\`, and
+\`swapz_ci_abort_dead_ref_kunit\`. Upstream summary:
+\`Testing complete. Ran 7 tests: passed: 7\`; reported
+\`0.060s running\`, after build. Its existing separate pinned
+\`CONFIG_ZSWAP=y/n\` kernel KUnit **compilation** job passed.
+The overall run nevertheless completed FAILURE because our additional
+kernel-log verifier returned exit 2:
+\`first_cause=missing_or_duplicate_kernel_case:swapz_ci_reuse_private_kunit\`.
+That name is the first unordered case checked; it is NOT evidence
+that the one case failed in the original kernel.
+
+Root cause confirmed in the actual original pinned source:
+\`lib/kunit/test.c::kunit_print_ok_not_ok()\` prints
+\`"%s %zd %s"\`, e.g. \`ok 6 swapz_ci_reuse_private_kunit\`,
+not necessarily \`ok 6 - swapz_ci_reuse_private_kunit\` as our
+stricter homemade \`KTAP_CASE\` regex assumed. The pinned original
+\`kunit_parser.TEST_RESULT\` accepts an OPTIONAL \`"-"\`, as KTAP
+permits. This is a source parser mismatch, not a compiler/runtime
+panic, bad refcount, loaded swap-in, or physical pass. We updated
+only Agent4's KTAP verifier (both valid source-defined grammars,
+self-test authentic no-hyphen samples) and workflow fail-only bounded
+raw kernel case diagnostics. A later exact-SHA workflow must
+separately establish the correction PASS. Regardless, actual
+MM/BIO/DM compressed handoff remains NO_GO and DISABLED, with
+loaded 4096 swap-in and physical SWAPSPACE2 NOT_RUN.
