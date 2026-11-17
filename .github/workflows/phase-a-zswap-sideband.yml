@@ -9,6 +9,7 @@ on:
       - "tests/runtime/native/pinned-linux-zswap-sideband-test.py"
       - "tests/runtime/native/fixtures/round025-sideband-*.c"
       - "tests/runtime/native/fixtures/round026-sideband-*.py"
+      - "tests/runtime/native/fixtures/round029-sideband-*.c"
   workflow_dispatch:
 
 permissions:
@@ -127,7 +128,7 @@ jobs:
       # workflow must never load a module, create a mapper, or touch swap.
 
   pinned-bio-uml-executed-kunit:
-    name: "Boot REAL pinned Linux UML KUnit; verify all seven executed BIO cases"
+    name: "Boot REAL pinned Linux UML KUnit; verify all eleven executed BIO cases"
     runs-on: ubuntu-24.04
     timeout-minutes: 75
     steps:

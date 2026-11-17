@@ -1,0 +1,7 @@
+# Round029 Agent4 — pinned original BIO bounded owned-copy constructor
+
+Frozen task `ccac4ea69de6085d25d38477bd08bdbb580f600b`; pinned original Linux `c339f4010dea8b0d754f84ace70cd1b089878ef8`. Source stager strictly matches original `block/bio.c` Git blob `b0fcc69de653524479e3b328aa29a37e97945b84` and `include/linux/blk_types.h` Git blob `0cc09b975d8ffbd45ca3dc47533a71f8e8164de6`.
+
+This source change adds `swapz_ci_owned_create` to REAL original staged `block/bio.c` behind the disabled-by-default CI macro, with bounded allocation, private copy, original SHA field, CRC32C, nonzero untrusted opaque identities and exactly one initial refcount. Seven previous original BIO lifecycle KUnit tests remain; four new cases exercise real copy isolation, failure and CRC negatives, real clone-abort and true split/reset ref teardown. Strict JSON+KTAP parser demands all eleven executed PASS; host GCC/Clang tests compile and execute source-extracted original constructor. Only exact new-SHA hosted successful jobs can qualify actual executed UML and y/n Kbuild; source publication alone does not. No trusted MM allocation epoch, DMA/DM consumer, live compressed admission or loaded/physical privilege is established.
+
+`PHASE_A=BLOCKED`, `FORCED_RAW=DISABLED`, `DIRECT_COMPRESSED=NO_GO`, `LOADED=NOT_RUN`, `PHYSICAL=NOT_RUN`. Linux zswap owns RAM compression and eviction; swapz owns disk. RAW is full uncompressed 4096 and physical SWAPSPACE2 first 4096/page/UUID/partition table remain unchanged.

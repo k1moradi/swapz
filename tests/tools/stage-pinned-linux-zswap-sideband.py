@@ -30,6 +30,7 @@ CI_BIO_FIELD = r"""#ifdef SWAPZ_ROUND025_SIDEBAND_CI_ONLY
 CI_HELPERS = r"""#ifdef SWAPZ_ROUND025_SIDEBAND_CI_ONLY
 #include <linux/refcount.h>
 #include <linux/crc32c.h>
+#include <linux/overflow.h>
 #if IS_ENABLED(CONFIG_KUNIT)
 #include <kunit/test.h>
 #endif
@@ -54,6 +55,70 @@ struct swapz_ci_owned_payload {
 	u8 original_sha256[32];
 	u8 compressed_bytes[];
 };
+
+
+/*
+ * Round029: TEST-ONLY constructor for a separately owned sealed copy.
+ * The caller owns a stable read-only input snapshot through this call.
+ * No pointer into source/zpool memory is retained. Input metadata and the
+ * purported slot epoch/SHA are untrusted, NOT source authentication.
+ * No dictionary or codec negotiation is supported: LZ4 version 1 only.
+ * Once returned, fields and bytes are read-only; a parent BIO reference
+ * protects their lifetime across clone/split, with final put freeing once.
+ */
+static struct swapz_ci_owned_payload *__maybe_unused
+swapz_ci_owned_create(const u8 *compressed_source, size_t input_capacity,
+		      size_t compressed_length, const u8 original_sha256[32],
+		      u64 slot_epoch, u64 source_identity,
+		      u8 representation_version, u8 codec,
+		      u32 expected_crc32c, gfp_t allocation_flags)
+{
+	struct swapz_ci_owned_payload *owner;
+	size_t allocation_bytes;
+	unsigned int index;
+	u8 digest_present = 0;
+
+	/* Check all declared bounds before touching the untrusted source. */
+	if (!compressed_source || !original_sha256 ||
+	    compressed_source == original_sha256 ||
+	    !compressed_length || compressed_length > 3568U ||
+	    input_capacity < compressed_length || input_capacity > 3568U ||
+	    !slot_epoch || !source_identity ||
+	    representation_version != 1U || codec != 1U)
+		return NULL;
+	for (index = 0; index < 32; index++)
+		digest_present |= original_sha256[index];
+	if (!digest_present ||
+	    check_add_overflow(sizeof(*owner), compressed_length,
+			       &allocation_bytes) ||
+	    allocation_bytes != struct_size(owner, compressed_bytes,
+					    compressed_length))
+		return NULL;
+	owner = kzalloc(allocation_bytes, allocation_flags);
+	if (!owner)
+		return NULL;
+
+	/* Copy first; CRC is computed over the PRIVATE bytes, not the input. */
+	memcpy(owner->compressed_bytes, compressed_source, compressed_length);
+	memcpy(owner->original_sha256, original_sha256,
+	       sizeof(owner->original_sha256));
+	owner->slot_epoch = slot_epoch;
+	owner->source_identity = source_identity;
+	owner->compressed_length = (u16)compressed_length;
+	owner->owned_capacity = (u16)compressed_length;
+	owner->decoded_length = 4096U;
+	owner->representation_version = representation_version;
+	owner->codec = codec;
+	owner->compressed_crc32c =
+		~crc32c(~0U, owner->compressed_bytes, compressed_length);
+	if (owner->compressed_crc32c != expected_crc32c) {
+		kfree_sensitive(owner);
+		return NULL;
+	}
+	/* Publish the ONE initial owning ref only after all checks succeed. */
+	refcount_set(&owner->references, 1);
+	return owner;
+}
 
 static bool swapz_ci_owned_valid(const struct swapz_ci_owned_payload *owner)
 {
@@ -342,7 +407,157 @@ static void swapz_ci_abort_dead_ref_kunit(struct kunit *test)
 	swapz_ci_owned_put(owner);
 }
 
+
+/* Constructor copies exact independently owned bytes, not a borrowed zpool. */
+static void swapz_ci_constructor_copy_isolation_kunit(struct kunit *test)
+{
+	u8 compressed[24], digest[32] = { 0x5a };
+	struct swapz_ci_owned_payload *owner;
+	u32 crc;
+	unsigned int index;
+
+	for (index = 0; index < sizeof(compressed); index++)
+		compressed[index] = (u8)(index + 1);
+	crc = ~crc32c(~0U, compressed, sizeof(compressed));
+	owner = swapz_ci_owned_create(compressed, sizeof(compressed),
+				      sizeof(compressed), digest, 11, 13,
+				      1, 1, crc, GFP_KERNEL);
+	KUNIT_ASSERT_NOT_NULL(test, owner);
+	KUNIT_EXPECT_TRUE(test, swapz_ci_owned_valid(owner));
+	KUNIT_EXPECT_EQ(test, owner->compressed_length, (u16)24);
+	KUNIT_EXPECT_EQ(test, owner->owned_capacity, (u16)24);
+	KUNIT_EXPECT_EQ(test, owner->decoded_length, (u16)4096);
+	KUNIT_EXPECT_EQ(test, owner->compressed_crc32c, crc);
+	KUNIT_EXPECT_NE(test, owner->compressed_bytes, compressed);
+	compressed[0] ^= 0xff;
+	digest[0] ^= 0xff;
+	KUNIT_EXPECT_EQ(test, owner->compressed_bytes[0], (u8)1);
+	KUNIT_EXPECT_EQ(test, owner->original_sha256[0], (u8)0x5a);
+	KUNIT_EXPECT_TRUE(test, swapz_ci_owned_valid(owner));
+	swapz_ci_owned_put(owner);
+}
+
+/* Invalid lengths, alias, digest, metadata and CRC refuse before exposure. */
+static void swapz_ci_constructor_reject_invalid_kunit(struct kunit *test)
+{
+	u8 compressed[32] = { 0x44 }, digest[32] = { 0x55 };
+	u8 absent_digest[32] = {};
+	u32 crc = ~crc32c(~0U, compressed, sizeof(compressed));
+
+#define SWAPZ_CI_CREATE_TEST(source, capacity, length, sha, epoch, identity, version, coding, checksum) \
+	KUNIT_EXPECT_PTR_EQ(test, swapz_ci_owned_create(source, capacity, length, \
+			sha, epoch, identity, version, coding, checksum, \
+			GFP_KERNEL), NULL)
+	SWAPZ_CI_CREATE_TEST(NULL, 32, 32, digest, 11, 13, 1, 1, crc);
+	SWAPZ_CI_CREATE_TEST(compressed, 32, 0, digest, 11, 13, 1, 1, crc);
+	SWAPZ_CI_CREATE_TEST(compressed, 32, 3569, digest, 11, 13, 1, 1, crc);
+	SWAPZ_CI_CREATE_TEST(compressed, 32, (size_t)-1, digest, 11, 13, 1, 1, crc);
+	SWAPZ_CI_CREATE_TEST(compressed, 8, 32, digest, 11, 13, 1, 1, crc);
+	SWAPZ_CI_CREATE_TEST(compressed, 3569, 32, digest, 11, 13, 1, 1, crc);
+	SWAPZ_CI_CREATE_TEST(compressed, 32, 32, NULL, 11, 13, 1, 1, crc);
+	SWAPZ_CI_CREATE_TEST(compressed, 32, 32, absent_digest, 11, 13, 1, 1, crc);
+	SWAPZ_CI_CREATE_TEST(digest, 32, 32, digest, 11, 13, 1, 1, crc);
+	SWAPZ_CI_CREATE_TEST(compressed, 32, 32, digest, 0, 13, 1, 1, crc);
+	SWAPZ_CI_CREATE_TEST(compressed, 32, 32, digest, 11, 0, 1, 1, crc);
+	SWAPZ_CI_CREATE_TEST(compressed, 32, 32, digest, 11, 13, 2, 1, crc);
+	SWAPZ_CI_CREATE_TEST(compressed, 32, 32, digest, 11, 13, 1, 2, crc);
+	SWAPZ_CI_CREATE_TEST(compressed, 32, 32, digest, 11, 13, 1, 1, crc ^ 1U);
+#undef SWAPZ_CI_CREATE_TEST
+}
+
+/* Actual original clone success and failure, then retry retires old parent. */
+static void swapz_ci_constructor_clone_abort_kunit(struct kunit *test)
+{
+	u8 compressed[16] = { 1 }, digest[32] = { 1 };
+	struct swapz_ci_owned_payload *owner;
+	struct bio source = {}, clone = {}, rejected = {};
+	u32 crc = ~crc32c(~0U, compressed, sizeof(compressed));
+	int error;
+
+	owner = swapz_ci_owned_create(compressed, sizeof(compressed),
+				      sizeof(compressed), digest, 11, 13,
+				      1, 1, crc, GFP_KERNEL);
+	KUNIT_ASSERT_NOT_NULL(test, owner);
+	bio_init(&source, NULL, NULL, 0, REQ_OP_WRITE | REQ_SWAP);
+	source.bi_swapz_ci_sideband = owner;
+	error = bio_init_clone(NULL, &clone, &source, GFP_KERNEL);
+	if (error) {
+		KUNIT_FAIL(test, "constructor owner could not clone");
+		bio_uninit(&source);
+		return;
+	}
+	KUNIT_EXPECT_EQ(test, refcount_read(&owner->references), 2);
+	owner->compressed_crc32c ^= 1U; /* Invalid mutation must fail clone. */
+	error = bio_init_clone(NULL, &rejected, &source, GFP_KERNEL);
+	KUNIT_EXPECT_EQ(test, error, -EOPNOTSUPP);
+	KUNIT_EXPECT_PTR_EQ(test, rejected.bi_swapz_ci_sideband, NULL);
+	KUNIT_EXPECT_EQ(test, refcount_read(&owner->references), 2);
+	owner->compressed_crc32c ^= 1U;
+	bio_prepare_reissue(&source, NULL);
+	KUNIT_EXPECT_PTR_EQ(test, source.bi_swapz_ci_sideband, NULL);
+	KUNIT_EXPECT_EQ(test, refcount_read(&owner->references), 1);
+	KUNIT_EXPECT_EQ(test, swapz_ci_live_compressed_admit(&clone, 11),
+			-EOPNOTSUPP);
+	bio_uninit(&source);
+	bio_uninit(&clone); /* Last owner reference released exactly once. */
+	bio_uninit(&clone); /* No resurrection on repeated uninit. */
+}
+
+/* Real original split retains an owner ref but cannot promote half pages. */
+static void swapz_ci_constructor_split_reset_kunit(struct kunit *test)
+{
+	struct bio_vec vector = {};
+	struct bio source;
+	struct bio *split;
+	struct page *page;
+	u8 compressed[16] = { 1 }, digest[32] = { 1 };
+	struct swapz_ci_owned_payload *owner;
+	u32 crc = ~crc32c(~0U, compressed, sizeof(compressed));
+
+	page = alloc_page(GFP_KERNEL);
+	KUNIT_ASSERT_NOT_NULL(test, page);
+	owner = swapz_ci_owned_create(compressed, sizeof(compressed),
+				      sizeof(compressed), digest, 11, 13,
+				      1, 1, crc, GFP_KERNEL);
+	if (!owner) {
+		KUNIT_FAIL(test, "constructor allocation failed");
+		__free_page(page);
+		return;
+	}
+	vector.bv_page = page;
+	vector.bv_len = PAGE_SIZE;
+	bio_init(&source, NULL, &vector, 1, REQ_OP_WRITE | REQ_SWAP);
+	source.bi_vcnt = 1;
+	source.bi_iter.bi_size = PAGE_SIZE;
+	source.bi_swapz_ci_sideband = owner;
+	KUNIT_EXPECT_EQ(test, source.bi_iter.bi_size, (unsigned int)4096);
+	split = bio_split(&source, PAGE_SIZE >> (SECTOR_SHIFT + 1),
+			  GFP_KERNEL, &fs_bio_set);
+	if (IS_ERR_OR_NULL(split)) {
+		KUNIT_FAIL(test, "constructor owner could not split");
+		bio_uninit(&source);
+		__free_page(page);
+		return;
+	}
+	KUNIT_EXPECT_PTR_EQ(test, split->bi_swapz_ci_sideband, owner);
+	KUNIT_EXPECT_EQ(test, refcount_read(&owner->references), 2);
+	KUNIT_EXPECT_EQ(test, split->bi_iter.bi_size, (unsigned int)2048);
+	KUNIT_EXPECT_EQ(test, source.bi_iter.bi_size, (unsigned int)2048);
+	KUNIT_EXPECT_EQ(test, swapz_ci_live_compressed_admit(split, 11),
+			-EOPNOTSUPP);
+	bio_put(split);
+	KUNIT_EXPECT_EQ(test, refcount_read(&owner->references), 1);
+	bio_reset(&source, NULL, REQ_OP_WRITE | REQ_SWAP);
+	KUNIT_EXPECT_PTR_EQ(test, source.bi_swapz_ci_sideband, NULL);
+	bio_uninit(&source);
+	__free_page(page);
+}
+
 static struct kunit_case swapz_ci_sideband_cases[] = {
+	KUNIT_CASE(swapz_ci_constructor_copy_isolation_kunit),
+	KUNIT_CASE(swapz_ci_constructor_reject_invalid_kunit),
+	KUNIT_CASE(swapz_ci_constructor_clone_abort_kunit),
+	KUNIT_CASE(swapz_ci_constructor_split_reset_kunit),
 	KUNIT_CASE(swapz_ci_clone_lifetime_kunit),
 	KUNIT_CASE(swapz_ci_split_lifetime_kunit),
 	KUNIT_CASE(swapz_ci_reuse_and_abort_kunit),

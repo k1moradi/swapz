@@ -25,6 +25,10 @@ CASES = frozenset((
     "swapz_ci_invalid_clone_kunit",
     "swapz_ci_reuse_private_kunit",
     "swapz_ci_abort_dead_ref_kunit",
+    "swapz_ci_constructor_copy_isolation_kunit",
+    "swapz_ci_constructor_reject_invalid_kunit",
+    "swapz_ci_constructor_clone_abort_kunit",
+    "swapz_ci_constructor_split_reset_kunit",
 ))
 MAX_RESULT_BYTES = 512 * 1024
 MAX_LOG_BYTES = 2 * 1024 * 1024
@@ -118,7 +122,7 @@ def verify_executed_kunit_json(document: object, kernel_log: str) -> None:
     for name in CASES:
         if kernel_cases.get(name) != 1:
             raise QualificationRefusal(f"missing_or_duplicate_kernel_case:{name}")
-    # The second, independent trace must have the exact same 7 case events.
+    # The second, independent trace must have all 11 exact case events.
     if set(kernel_cases) & CASES != CASES:
         raise QualificationRefusal("kernel_case_trace_incomplete")
 

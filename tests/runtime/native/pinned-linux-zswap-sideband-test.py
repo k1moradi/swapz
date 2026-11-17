@@ -36,15 +36,27 @@ def host_owned_source() -> str:
     marker = "/* ROUND025_EXACT_CI_HELPERS */"
     if fixture.count(marker) != 1:
         raise AssertionError("host fixture code marker drift")
+    host_support = "\n/* Match the real pinned helper's kernel allocation and overflow contracts. */\ntypedef unsigned int gfp_t;\n#define GFP_KERNEL 0U\n#define struct_size(pointer, member, count) \\\n\t(sizeof(*(pointer)) + (count) * sizeof((pointer)->member[0]))\n#define check_add_overflow(left, right, result) \\\n\t__builtin_add_overflow((left), (right), (result))\nstatic unsigned int fail_next_kzalloc;\nstatic void *kzalloc(size_t allocation_bytes, gfp_t flags)\n{\n\t(void)flags;\n\tif (fail_next_kzalloc) {\n\t\t--fail_next_kzalloc;\n\t\treturn NULL;\n\t}\n\treturn calloc(1U, allocation_bytes);\n}\n"
     functions = STAGER.CI_HELPERS
     for kernel_include in (
             "#include <linux/refcount.h>",
             "#include <linux/crc32c.h>",
+            "#include <linux/overflow.h>",
             "#include <kunit/test.h>"):
         if functions.count(kernel_include) != 1:
             raise AssertionError("unexpected kernel include count")
         functions = functions.replace(kernel_include, "", 1)
-    return fixture.replace(marker, functions, 1)
+    fixture = fixture.replace(marker, host_support + functions, 1)
+    constructor_fixture = (Path(__file__).parent / "fixtures" /
+                           "round029-sideband-constructor-host.c").read_text(
+                               encoding="utf-8")
+    main_anchor = "int main(void)\\n{"
+    if fixture.count(main_anchor) != 1:
+        raise AssertionError("host main insertion anchor drift")
+    return fixture.replace(main_anchor,
+                           constructor_fixture + "\\n" +
+                           "int main(void)\\n{\\n\\tround029_constructor_host_checks();",
+                           1)
 
 
 class Round025PinnedSideband(unittest.TestCase):
@@ -202,6 +214,32 @@ class Round025PinnedSideband(unittest.TestCase):
         self.assertEqual(result.returncode, 0,
                          "KUnit verdict negative selftest first failure:\n" +
                          result.stderr[-5000:])
+
+    def test_round029_original_constructor_and_executed_kunit_contract(self) -> None:
+        actual_source = STAGER.CI_HELPERS
+        for required in (
+            "swapz_ci_owned_create(", "check_add_overflow(",
+            "struct_size(owner, compressed_bytes,",
+            "memcpy(owner->compressed_bytes, compressed_source,",
+            "crc32c(~0U, owner->compressed_bytes, compressed_length)",
+            "refcount_set(&owner->references, 1);",
+            "compressed_source == original_sha256",
+            "return -EOPNOTSUPP;",
+        ):
+            self.assertIn(required, actual_source)
+        for case_name in (
+            "swapz_ci_constructor_copy_isolation_kunit",
+            "swapz_ci_constructor_reject_invalid_kunit",
+            "swapz_ci_constructor_clone_abort_kunit",
+            "swapz_ci_constructor_split_reset_kunit",
+        ):
+            self.assertEqual(STAGER.CI_KUNIT.count(
+                "KUNIT_CASE(" + case_name + ")"), 1)
+        self.assertIn("bio_split(&source", STAGER.CI_KUNIT)
+        self.assertIn("bio_init_clone(NULL, &clone", STAGER.CI_KUNIT)
+        self.assertIn("bio_prepare_reissue(&source", STAGER.CI_KUNIT)
+        self.assertIn("bio_reset(&source", STAGER.CI_KUNIT)
+        self.assertNotIn("submit_bio(", actual_source)
 
     def test_round025_gcc_sanitizers_owned_copy_and_refcount(self) -> None:
         self._test_compiler("gcc")
