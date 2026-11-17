@@ -1195,9 +1195,9 @@ ROUND030_EVICTION_EDITS = (
     Edit("static int zswap_writeback_entry(struct zswap_entry *entry,\n",
          ROUND030_EVICTION_SNAPSHOT_SOURCE +
          "static int zswap_writeback_entry(struct zswap_entry *entry,\n"),
-    Edit("\tif (!zswap_decompress(entry, folio)) {",
+    Edit("\tif (!zswap_decompress(entry, folio)) {\n\t\tret = -EIO;\n\t\tgoto err;\n\t}\n\n\txa_erase(tree, offset);",
          ROUND030_EVICTION_WRITEBACK_HOOK +
-         "\tif (!zswap_decompress(entry, folio)) {"),
+         "\tif (!zswap_decompress(entry, folio)) {\n\t\tret = -EIO;\n\t\tgoto err;\n\t}\n\n\txa_erase(tree, offset);"),
 )
 
 ROUND028_ZSWAP_HASH_RESTORATIONS = (

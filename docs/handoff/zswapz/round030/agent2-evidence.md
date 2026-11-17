@@ -13,3 +13,8 @@ Safety: PHASE_A=BLOCKED, DIRECT_COMPRESSED_HANDOFF=NO_GO_DISABLED, FORCED_RAW_BY
 ## First actual Round030 CI source failure and correction
 
 Source SHA 7282b65, hosted run https://github.com/k1moradi/swapz/actions/runs/44118731901 job 134163903087 exit 1 on host GCC/Clang exact emitted C, first compiler error incomplete `struct swapz_pool` and incompatible pointer from `zswap_entry_pool`; correct pinned upstream type is `struct zswap_pool`. This single-token original generated C correction remains source-only. Original pinned Linux full Kbuild was skipped at the failing SHA; no full-source/loaded/physical PASS is claimed until the corrected SHA exact jobs complete.
+
+
+## First genuine full pinned Linux staging failure, Round030 source 4890db35
+
+[Run 44120252419](https://github.com/k1moradi/swapz/actions/runs/44120252419) job 134169343567 after rootless extracted GCC/Clang pass failed exit 1 in `Modify actual pinned Linux C and H` with `missing-or-duplicate-anchor:mm/zswap.c`: the original kernel has TWO `if (!zswap_decompress(entry, folio))` sites. Pin the exact original eviction failure branch plus `xa_erase(tree, offset)` as unique insertion anchor (no weakening). The SHA-matched full original CONFIG_ZSWAP=y/n and external dm module Kbuild remained SKIPPED at this source and cannot be claimed success. Latest correction must be evaluated on its own hosted Actions SHA.
