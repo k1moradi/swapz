@@ -11,6 +11,8 @@ on:
       - 'tests/tools/run-tests.py'
       - 'tests/runtime/native/algorithm-ram-source-lease-test.py'
       - 'tests/runtime/native/algorithm-physical-test.py'
+      - 'tests/tools/round027-offline-swap-attribution.py'
+      - 'tests/runtime/native/round027-offline-swap-attribution-test.py'
   workflow_dispatch:
 permissions:
   contents: read
@@ -30,5 +32,10 @@ jobs:
           python3 -B tests/runtime/native/algorithm-ram-source-lease-test.py -v
           python3 -B tests/runtime/native/algorithm-physical-test.py -v
           python3 -m py_compile tests/tools/run-tests.py tests/runtime/native/algorithm-ram-source-lease-test.py
+      - name: Round027 rootless offline original-source swap attribution classifier
+        run: |
+          set -euo pipefail
+          python3 -B tests/runtime/native/round027-offline-swap-attribution-test.py -v
+          python3 -B -m py_compile tests/tools/round027-offline-swap-attribution.py
       - name: Validate committed patch whitespace
         run: git diff --check HEAD^ HEAD

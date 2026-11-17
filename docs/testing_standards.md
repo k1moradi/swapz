@@ -15237,3 +15237,50 @@ valid defaults but an illegal residual allocator opt-in marker. The
 strict validator correctly fails `source_manifest_allocator_profile`;
 the test's expected error category was wrong, now corrected without
 weakening the real manifest or compiler gates.
+
+## Round 027 — Agent 3: ROOTLESS offline historical physical swap attribution first-error triage
+
+Original real-owner `de5bc09e` physical `anonymous_workload` failed
+`swap_attribution`; original private counters are NOT available, so
+ROOT CAUSE **UNDETERMINED**, not a known late accounting problem or a
+successful physical swap trial. The offline-only
+`tests/tools/round027-offline-swap-attribution.py` reads only one
+explicit size-bounded local regular JSON through safe dirfd/no-symlink
+operations; no production qualifier, /proc, sysfs, cgroup, root,
+device or pressure call. It AST-extracts and actually executes the
+unaltered `evaluate_workload_evidence` function from
+`tests/tools/qualify-primary-real-swap.py`, so 128 MiB minimum,
+target/lower WRITE/READ, lower **512-byte sectors**, vmstat swap
+progress, original 4096 oracle SHA/digest, OOM and failed/error checks
+obey original source order and messages. An offline bounded replay of
+`_confirm_exact_swap_attribution` only promotes two identical,
+consecutive matching cgroup/mapper pairs within the actual 3-second
+limit; no one-off delayed sample, approximate equality, stale device
+or forged parent source identity passes.
+
+The new source-bound unittest checks synthetic coherent state,
+negative first failure for absent/zero/insufficient target/lower
+traffic and vmstat, original 4096 oracle, cgroup/mapper below floor,
+OOM, non-atomic retry, source/boot/mapper/device mismatch,
+non-monotonic counters and recheck, invalid/swapped original SHA,
+unredacted identity, malformed/duplicated/oversized JSON, symlinks and
+path traversal. Only three dispositions are possible:
+`UNKNOWN_MISSING_EVIDENCE`, `FAIL_WITH_EVIDENCE`, or
+`SYNTHETIC_SOURCE_CONSISTENT_NOT_PHYSICAL_PASS`; an owner-supplied
+apparently coherent offline record is UNKNOWN until independent
+physical review. Never print private UUID, PID, absolute device path
+or arbitrary JSON values. The rootless GitHub workflow only executes
+these tests and existing adversarial safety tests; NEVER changes
+physical admission predicates or runs physical swap.
+
+Required for later private evidence review only: source/loaded
+identity and consistent redacted boot/mapper/lower/cgroup tokens,
+monotonic before/fill/recheck/verify times, cgroup
+swap current/peak/max and OOM, /proc/swaps mapper used-kib,
+target logical/physical READ/WRITE and failed/error,
+lower read/write sector deltas in 512-byte units, vmstat pswpin/out,
+original complete 4096 oracle digest/bytes, worker ownership/cleanup.
+No owner privileged trial requested. Phase A BLOCKED, forced RAW
+bypass DISABLED, direct compressed NO_GO, LOADED/PHYSICAL NOT_RUN;
+RAW ORIGINAL UNCOMPRESSED 4096, SWAPSPACE2 protected header/UUID/table
+unchanged.
