@@ -41,6 +41,7 @@ jobs:
           python3 -B tests/runtime/native/zswap-origin-producer-consumer-abi-test.py -v
           python3 -B tests/runtime/native/pinned-linux-preflight-evidence-test.py -v
           python3 -B tests/runtime/native/pinned-gcc-build-info-source-test.py -v
+          python3 -B tests/runtime/native/zswap-compressed-admission-test.py -v
           git diff --check
       - name: Run compiled guarded compressed-zswap descriptor/readback fixture
         shell: bash
@@ -218,6 +219,13 @@ jobs:
             echo "Missing real dm-target compile-only ingress symbol" >&2
             false
           fi
+          phase="round025-dm-authority-object-identity"
+          if ! nm -a build/kernel/round024-dm-ingress/dm-target.o |
+              grep -q 'swapz_round025_dm_authority_kbuild_probe'; then
+            echo "Missing Round025 source-derived DM generation/GC/ACK gate" >&2
+            false
+          fi
+          echo "ROUND025_DM_AUTHORITY_ACTUAL_MODULE_KBUILD_COMPILED_DEFAULT_OFF"
           echo "ROUND024_DM_INGRESS_ACTUAL_MODULE_KBUILD_COMPILED_NO_LIVE_ADMISSION"
           compile_variant W=2 build/kernel/w2/dm-swapz.ko W=2
           # A normal build is deliberately separate from warning variants:

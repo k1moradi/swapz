@@ -73,6 +73,58 @@ class Round023DisabledConsumerAdmission(unittest.TestCase):
         self.assertIn("nm -a", workflow)
         self.assertIn("swapz_round024_dm_import_kbuild_probe", workflow)
 
+    def test_round025_real_dm_authority_source_compiler_negative(self) -> None:
+        """Compile the exact opt-in dm-target body, not a rewritten mock."""
+        dm = DM.read_text(encoding="utf-8")
+        start = "#if defined(SWAPZ_ROUND024_DM_IMPORT_KBUILD_PROBE)\\n" \
+                "static __used noinline int swapz_round025_dm_authority_kbuild_probe("
+        end = "#endif /* SWAPZ_ROUND025_DM_AUTHORITY_KBUILD_PROBE */"
+        self.assertEqual(dm.count(start), 1)
+        self.assertEqual(dm.count(end), 1)
+        body = dm.split(start, 1)[1].split(end, 1)[0]
+        self.assertIn("ctx->authority.maps[logical_page]", body)
+        self.assertIn("current_map->generation != transaction->record.generation",
+                      body)
+        self.assertIn("observed_gc_epoch != transaction->record.gc_epoch",
+                      body)
+        self.assertIn("transaction->upper_write_ack_count", body)
+        self.assertEqual(body.count("return -EOPNOTSUPP;"), 4)
+        self.assertNotIn("bio_endio(", body)
+        self.assertNotIn("swapz_finish(", body)
+        fixture = (ROOT / "tests/runtime/native/fixtures/"
+                   "round025-consumer-dm-authority.c").read_text(encoding="utf-8")
+        marker = "/* ROUND025_EXACT_DM_PROBE_SOURCE */"
+        self.assertEqual(fixture.count(marker), 1)
+        source = fixture.replace(marker,
+                                 "static __used noinline int "
+                                 "swapz_round025_dm_authority_kbuild_probe(" +
+                                 body, 1)
+        with tempfile.TemporaryDirectory() as temporary:
+            source_file = Path(temporary) / "round025-dm.c"
+            source_file.write_text(source, encoding="utf-8")
+            for compiler in ("gcc", "clang"):
+                if not shutil.which(compiler):
+                    continue
+                with self.subTest(compiler=compiler):
+                    executable = Path(temporary) / compiler
+                    command = [compiler, "-std=gnu11", "-O1", "-g",
+                               "-Wall", "-Wextra", "-Wconversion", "-Wshadow",
+                               "-Werror", "-fsanitize=address,undefined",
+                               "-fno-sanitize-recover=all", str(source_file),
+                               "-o", str(executable)]
+                    built = subprocess.run(command, capture_output=True,
+                                           text=True, timeout=60, check=False)
+                    self.assertEqual(built.returncode, 0, built.stderr)
+                    result = subprocess.run([str(executable)], capture_output=True,
+                                            text=True, timeout=40, check=False)
+                    self.assertEqual(result.returncode, 0, result.stderr)
+                    self.assertIn("ROUND025_REAL_DM_SOURCE_NEGATIVE_ONLY_PASS",
+                                  result.stdout)
+        workflow = (ROOT / ".github/workflows/product-codec.yml").read_text(
+            encoding="utf-8")
+        self.assertIn("swapz_round025_dm_authority_kbuild_probe", workflow)
+        self.assertIn("round025-dm-authority", workflow)
+
     def test_actual_crc32c_lz4_sha256_and_transaction_gcc_clang(self) -> None:
         compilers = [name for name in ("gcc", "clang") if shutil.which(name)]
         self.assertTrue(compilers, "C compiler is required")

@@ -1195,6 +1195,50 @@ static void swapz_count_verified_zswap_writeback_commit(struct swapz_dm *ctx,
 	atomic64_inc(&ctx->foreground_committed_verified_zswap_writeback);
 }
 
+/* Round025: compile-only source-authentic map/GC/ACK fence. The ordered
+ * worker alone owns ctx->authority.maps; neither current map generation nor
+ * a caller-presented GC epoch proves an independently sourced Linux
+ * swap-slot allocation epoch or refcounted compressed BIO owner.
+ */
+#if defined(SWAPZ_ROUND024_DM_IMPORT_KBUILD_PROBE)
+static __used noinline int swapz_round025_dm_authority_kbuild_probe(
+		const struct swapz_dm *ctx, const struct bio *upper_bio,
+		const struct swapz_zswap_admission_transaction *transaction,
+		swapz_u64 observed_gc_epoch, int lower_error,
+		swapz_u32 actual_lower_write_bytes)
+{
+	const struct swapz_map *current_map;
+	swapz_u32 logical_page;
+
+	if (!ctx || !upper_bio || !transaction ||
+	    !ctx->authority.maps || !transaction->record.logical_page ||
+	    transaction->record.logical_page >= ctx->authority.logical_pages)
+		return -EOPNOTSUPP;
+	logical_page = (swapz_u32)transaction->record.logical_page;
+	current_map = &ctx->authority.maps[logical_page];
+	if (!current_map->valid ||
+	    current_map->generation != transaction->record.generation ||
+	    observed_gc_epoch != transaction->record.gc_epoch)
+		return -ESTALE;
+	if (current_map->raw ||
+	    current_map->payload_length != transaction->record.compressed_length ||
+	    current_map->payload_crc32c != transaction->record.compressed_crc32c)
+		return -EOPNOTSUPP;
+	if (bio_op(upper_bio) != REQ_OP_WRITE ||
+	    !(upper_bio->bi_opf & REQ_SWAP) ||
+	    upper_bio->bi_iter.bi_size != SWAPZ_BLOCK_BYTES ||
+	    transaction->phase != SWAPZ_ZSWAP_ADMISSION_DURABLE ||
+	    transaction->upper_write_ack_count || transaction->teardown_started ||
+	    lower_error || !transaction->physical_extent_bytes ||
+	    actual_lower_write_bytes != transaction->physical_extent_bytes)
+		return -EOPNOTSUPP;
+	/* Even matching map fields do not authenticate the source BIO owner,
+	 * lower durability or a GC epoch owned by DM. No map or ACK mutation.
+	 */
+	return -EOPNOTSUPP;
+}
+#endif /* SWAPZ_ROUND025_DM_AUTHORITY_KBUILD_PROBE */
+
 static int swapz_maybe_inject_read_fault(struct swapz_dm *ctx)
 {
 	s64 call;

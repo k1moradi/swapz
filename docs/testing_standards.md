@@ -14659,3 +14659,43 @@ Actual pinned `CONFIG_ZSWAP=y/n` and matched module outcomes must
 again be taken from the next exact-source hosted job. Preserve the
 peer-published immutable LZ4 codec guard, all existing comments,
 ordinary decompressed original 4096 path and disabled carrier.
+
+## Round 025 — Agent 3: exact DM map-generation, GC and ACK refusal seam
+
+A source-extracted, opt-in-only `swapz_round025_dm_authority_kbuild_probe`
+is compiled into the existing isolated `SWAPZ_ROUND024_DM_IMPORT_KBUILD_PROBE`
+external `dm-target.o`, after the real `struct swapz_dm`. It reads
+`ctx->authority.maps[logical_page]`, actual `swapz_map.valid`,
+`generation`, `raw`, `payload_length` and `payload_crc32c`;
+checks canonical 4096-byte upper REQ_SWAP WRITE, serialized durable
+transaction phase, exact lower byte count, zero early/duplicate upper ACK,
+teardown and purported GC epoch. A mismatched current map/generation/GC
+returns `-ESTALE`; all other branches, including a perfectly matching
+synthetic descriptor, return `-EOPNOTSUPP`. The supplied GC epoch
+is **not** a DM-authoritative field and cannot be promoted to such.
+No source allocation epoch, authenticated refcounted BIO sideband or
+source binding is present in the actual DM target. It does not mutate
+any current mapping, ack, bio, lower extent, teardown or GC state.
+
+Native `tests/runtime/native/zswap-compressed-admission-test.py` now
+extracts that exact function from `dm-target.c` and compiles it with
+GCC and Clang, `-Wall -Wextra -Wconversion -Wshadow -Werror`,
+ASan and UBSan. The adversarial fixture exercises stale overwrite,
+GC epoch change, logical discard, RAW confusion, incorrect payload
+length/CRC, forged early/duplicate ACK, teardown, wrong upper size and
+lower write error/short completion. This is synthetic data executing
+**source-extracted function**, not actual live completion. Existing
+actual imported kernel CRC32C/LZ4/SHA decoder test remains. The
+production C workflow's x86-64 and ARM64 opt-in external kernel
+Kbuild must emit the new source symbol as well as the Round024 symbol
+in `dm-target.o`; default module variants never enable it. No
+new active import, module parameter or on-media record is introduced.
+Sole ordered worker and existing lower-durable → published RAM mapping
+→ exactly one ACK remain unchanged. Any exact-source compiler, nm or
+test failure blocks acceptance. LZ4 stored zswap would need separately
+authenticated carrier, Linux source epoch and full original-page SHA.
+
+LOADED=NOT_RUN; 4096_KERNEL_SWAPIN=NOT_RUN; PHYSICAL=NOT_RUN.
+Phase A BLOCKED; forced RAW bypass DISABLED; direct compressed
+handoff DISABLED. SWAPSPACE2 first 4096/UUID/partition table untouched;
+RAW remains original **uncompressed** 4096 and metadata stays volatile.
