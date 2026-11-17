@@ -15330,3 +15330,7 @@ Source-extracted GCC/Clang sanitizer tests must restore a deliberately mutated o
 ### Round029 Agent4 fixture lifetime accounting isolation (2026-11-17)
 
 The source-extracted original BIO constructor checks must execute after the original seven host ownership/refcount cases finish and assert their historical free counters (32 then 42). Inserting a new constructor before those counters changes test order and breaks a valid historical assertion, not a source lifecycle invariant. Preserve original accounting unchanged, then run the new copy/mutation/invalid-input/CRC/allocation-error/clone-ownership assertions. Such harness failures are first failures with exit 1 and prevent claims of actual UML execution until a fresh exact-SHA build and boot.
+
+### Round029 Agent4 original KUnit array assertion correction (2026-11-17)
+
+Pinned upstream Linux `KUNIT_EXPECT_NE` on an array right operand is not equivalent to a boolean pointer comparison: `typeof(right)` becomes an array and its initializer is invalid in the actual `block/bio.o` compilation. Test independent source-byte ownership with `KUNIT_EXPECT_TRUE(test, owner->compressed_bytes != compressed)` instead. Retain original y/n `W=1/-Werror`, all eleven unchanged case registrations, strict JSON/KTAP, and exact-source compiler-first failure evidence without source flag or policy suppression.

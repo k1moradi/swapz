@@ -429,7 +429,7 @@ static void swapz_ci_constructor_copy_isolation_kunit(struct kunit *test)
 	KUNIT_EXPECT_EQ(test, owner->owned_capacity, (u16)24);
 	KUNIT_EXPECT_EQ(test, owner->decoded_length, (u16)4096);
 	KUNIT_EXPECT_EQ(test, owner->compressed_crc32c, crc);
-	KUNIT_EXPECT_NE(test, owner->compressed_bytes, compressed);
+	KUNIT_EXPECT_TRUE(test, owner->compressed_bytes != compressed);
 	compressed[0] ^= 0xff;
 	digest[0] ^= 0xff;
 	KUNIT_EXPECT_EQ(test, owner->compressed_bytes[0], (u8)1);
