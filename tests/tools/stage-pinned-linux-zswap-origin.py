@@ -1089,7 +1089,7 @@ static __used noinline int swapz_round030_snapshot_stored_lz4(
 		struct zswap_entry *entry, swp_entry_t swpentry,
 		struct xarray *tree, pgoff_t offset)
 {
-	struct swapz_pool *pool;
+	struct zswap_pool *pool;
 	struct swapz_round030_eviction_image *image;
 	struct scatterlist compressed_sg[2];
 	size_t image_bytes;

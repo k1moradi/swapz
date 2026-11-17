@@ -9,3 +9,7 @@ Real source-extracted GCC/Clang host ASan/UBSan regression and genuine LZ4 compr
 First historical genuine compiler first-cause `current` Linux macro issue was remedied in Round029; last pinned full Linux y/n+module source run 44098295936 completed SUCCESS, no physical/loaded proof. New Round030 exact SHA CI verdict must be read from hosted Actions. No local complete pinned Linux checkout or C compiler executions through this connector-only session; hosted source and host tests are mandatory. Any true GCC/API first failure will be retained instead of reporting PASS.
 
 Safety: PHASE_A=BLOCKED, DIRECT_COMPRESSED_HANDOFF=NO_GO_DISABLED, FORCED_RAW_BYPASS=DISABLED, LOADED/PHYSICAL=NOT_RUN; CRC32C != original full 4096 SHA; no source-authenticated BIO carrier or live transfer, no privileged/physical tests; RAW remains original uncompressed 4096; SWAPSPACE2 protected first 4096/header/UUID/table unchanged.
+
+## First actual Round030 CI source failure and correction
+
+Source SHA 7282b65, hosted run https://github.com/k1moradi/swapz/actions/runs/44118731901 job 134163903087 exit 1 on host GCC/Clang exact emitted C, first compiler error incomplete `struct swapz_pool` and incompatible pointer from `zswap_entry_pool`; correct pinned upstream type is `struct zswap_pool`. This single-token original generated C correction remains source-only. Original pinned Linux full Kbuild was skipped at the failing SHA; no full-source/loaded/physical PASS is claimed until the corrected SHA exact jobs complete.
