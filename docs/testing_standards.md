@@ -14699,3 +14699,86 @@ LOADED=NOT_RUN; 4096_KERNEL_SWAPIN=NOT_RUN; PHYSICAL=NOT_RUN.
 Phase A BLOCKED; forced RAW bypass DISABLED; direct compressed
 handoff DISABLED. SWAPSPACE2 first 4096/UUID/partition table untouched;
 RAW remains original **uncompressed** 4096 and metadata stays volatile.
+
+
+## Round 025 — Agent 4: default-OFF pinned BIO sideband refcount and reset/clone feasibility
+
+This **unique append-only Agent 4 section** preserves Round 025 Agent 2 and
+Agent 3 sections and earlier standards. It covers only the independent
+`tests/tools/stage-pinned-linux-zswap-sideband.py` source stager,
+`tests/runtime/native/pinned-linux-zswap-sideband-test.py`, the separate
+`fixtures/round025-sideband-host.c` test model, the source-only pinned
+`.github/workflows/phase-a-zswap-sideband.yml`, and the Agent 4 evidence note.
+Neither Agent2's original zswap STORE/stager nor Agent3's DM target/import
+were modified by Agent4.
+
+The stage program checks the exact original Git blob SHA-1 identities of
+`torvalds/linux` commit `c339f4010dea8b0d754f84ace70cd1b089878ef8`
+for `include/linux/blk_types.h` and `block/bio.c`; both are verified in
+memory with unique precise source anchors before any writes to a disposable
+*full original kernel checkout*. It modifies exactly these two files and
+**only under `SWAPZ_ROUND025_SIDEBAND_CI_ONLY`**, which is undefined in
+production. The normal BIO `bi_iter.bi_size`, `bi_io_vec`, `bi_private`,
+ordinary swap WRITE, zswap fallback, and existing source scalar provenance
+remain unchanged. The host fixture is a strictly supplementary C mock.
+
+The guarded typed `struct swapz_ci_owned_payload` holds a refcount and
+bounded immutable owned bytes, separate source identity, nonzero slot epoch,
+version, LZ4 codec, CRC32C using `~crc32c(~0U,...)`, 4096 decoded bytes,
+and an original page digest. The data are owned in a new separately typed
+allocation—not borrowed from zpool—and only kernel-copied BIO references
+may share ownership. It is deliberately **not** source-authenticated:
+the pinned original has no real owner-issued epoch/DM logical-page binding.
+The `swapz_ci_live_compressed_admit` function therefore *always returns
+-EOPNOTSUPP*. Testing with forged positive tokens must never enable it.
+
+Actual pinned `block/bio.c` clone copies the compressed ownership
+reference only in the opt-in compiler profile, with its final release
+through `bio_uninit` on normal put, failed clone, reset, or abort.
+`bio_prepare_reissue` explicitly drops the stale sideband before retry;
+`bio_reuse` calls `bio_reset`, which already drops it. A separate
+`swapz_ci_bio_merge_allowed` helper denies any sideband-bearing merge;
+**it is NOT wired into the live block-layer merge gate**. Until real split/
+merge/DM transfer and cancellation owner transitions have source-authenticated
+proof, this is feasibility source, **not** a safe usable transport.
+
+Negative matrix: absent/zero slot epoch, zero source identity, 0/>3568
+compressed length, codec or version mismatch, wrong decoded size, bad CRC,
+refcount acquisition after final release, clone/split lifetime, mixed-origin
+merge, repeated final callback, stale retry/reuse/reset, and arbitrary
+caller-supplied authority; every live compressed admission refuses.
+The native GCC+Clang host fixture uses ASan/UBSan, warnings-as-errors,
+32x shared-clone/split owner release and eight invalid-ownership/counter
+cases. Its clone/split are explicitly **mocked** and cannot substitute for
+the pinned kernel KUnit build or actual Linux behavior. Original source
+KUnit cases compile through real `bio_init_clone`, `bio_uninit`,
+`bio_prepare_reissue` and `bio_reset` with the CI macro. They are
+compiler evidence ONLY: `KUNIT_EXECUTION=NOT_RUN` until a booted test
+kernel actually runs them.
+
+Run in a genuine full pinned Linux checkout (no host/device mutation):
+
+```sh
+ROUND025_PINNED_LINUX=/path/to/linux python3 -B tests/runtime/native/pinned-linux-zswap-sideband-test.py -v
+python3 -B tests/tools/stage-pinned-linux-zswap-sideband.py --linux-root /path/to/linux
+git -C /path/to/linux diff --check
+```
+
+The dedicated GitHub workflow stages a disposable exact upstream Linux
+checkout and compiles the actual `block/bio.o` with GCC, with
+`CONFIG_KUNIT=y` and both `CONFIG_ZSWAP=y` and `CONFIG_ZSWAP=n`,
+`KCFLAGS=-DSWAPZ_ROUND025_SIDEBAND_CI_ONLY`, and nm verifies the KUnit
+source suite in the object. It performs only compiler/package operations
+(no module loading, swap, null_blk, device mapping or pressure).
+Any pinned blob drift, unavailable compiler, API conflict, failed Kbuild,
+missing symbol or negative assertion MUST fail closed with its first error;
+a host fixture PASS cannot certify an uncompiled kernel.
+
+This does **not** establish an authenticated original zswap 4096-byte STORE
+digest/slot-allocation epoch, real cloning across every BLK/DM path, valid
+DM generation/GC/ACK identity, a compressed payload lower write/read or
+loaded original 4096 swap-in. `LIVE_COMPRESSED=DISABLED`,
+`KUNIT_EXECUTION=NOT_RUN`, `LOADED_4096=NOT_RUN`, `PHYSICAL=NOT_RUN`;
+Phase A BLOCKED, forced RAW bypass DISABLED, direct handoff DISABLED.
+Existing RAW is the ORIGINAL UNCOMPRESSED 4096 bytes, not a zswap LZ4
+record; no SWAPSPACE2 header, UUID or partition table is touched.
