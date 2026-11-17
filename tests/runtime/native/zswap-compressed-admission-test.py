@@ -149,8 +149,10 @@ class Round023DisabledConsumerAdmission(unittest.TestCase):
         self.assertNotIn("swapz_finish(", source_body)
         self.assertNotIn("swapz_zswap_admission_begin_mock(", source_body)
         # These functions are unreferenced in the live DM code.
+        # Round028 adds two CI-only ordered-owner calls to the same source
+        # function. The original one definition + one Round026 call remain.
         self.assertEqual(dm.count("swapz_round026_dm_capture_read_snapshot("),
-                         2)  # one definition, one gated internal call
+                         4)  # 1 definition, 1 Round026, 2 Round028 calls
         self.assertEqual(dm.count("swapz_round026_dm_revalidate_and_refuse("),
                          1)
         fixture = (ROOT / "tests/runtime/native/fixtures" /
