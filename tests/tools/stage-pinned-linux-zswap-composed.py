@@ -137,7 +137,9 @@ swapz_round031_mm_bio_create(struct zswap_entry *entry, swp_entry_t source_slot,
 
 
 def replace_once(text: str, before: str, after: str, path: str, label: str) -> str:
-    if not before or before == after or text.count(before) != 1 or after in text:
+    if not before or before == after or text.count(before) != 1 or (
+        after in text and after not in before
+    ):
         raise SourceCompositionError(f"COMPOSE_CONFLICT:{path}:{label}")
     return text.replace(before, after, 1)
 
