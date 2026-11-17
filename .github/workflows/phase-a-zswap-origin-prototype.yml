@@ -170,7 +170,8 @@ jobs:
           set -euo pipefail
           evidence_dir="$RUNNER_TEMP/zswap-origin-evidence"
           if ! python3 -B swapz/tests/tools/stage-pinned-linux-zswap-origin.py \
-              --linux-root linux --manifest "$evidence_dir/source-manifest.json"; then
+              --linux-root linux --manifest "$evidence_dir/source-manifest.json" \
+              --with-round024-zswap-kbuild-probe; then
             echo "::error::Exact Linux identity/blob or source staging failure"
             exit 1
           fi
@@ -357,6 +358,35 @@ jobs:
             if [[ "$profile" == disabled && -e "$build_dir/mm/zswap.o" ]]; then
               echo "::error::ZSWAP-disabled build unexpectedly emitted zswap object"
               exit 1
+            fi
+            # A source-anchored unused producer function must actually be
+            # compiled under explicit CI-only flags, then removed from the
+            # default object before complete kernel and matched module build.
+            if [[ "$profile" == enabled ]]; then
+              current_phase=round024_default_producer_off
+              if nm -a "$build_dir/mm/zswap.o" |
+                  grep -q 'zswap_swapz_round024_producer_kbuild_probe'; then
+                echo "::error::Default producer includes compile-only probe" >&2
+                exit 1
+              fi
+              run_logged round024_producer_probe make -s -C linux \
+                "O=$build_dir" CC=gcc "-j$KBUILD_JOBS" W=1 \
+                KCFLAGS=-DSWAPZ_ROUND024_ZSWAP_KBUILD_PROBE=1 mm/zswap.o
+              current_phase=round024_verify_original_compiler_object
+              if ! nm -a "$build_dir/mm/zswap.o" |
+                  grep -q 'zswap_swapz_round024_producer_kbuild_probe'; then
+                echo "::error::No original pinned mm/zswap.o probe symbol" >&2
+                exit 1
+              fi
+              run_logged round024_producer_restore_default make -s -C linux \
+                "O=$build_dir" CC=gcc "-j$KBUILD_JOBS" W=1 mm/zswap.o
+              current_phase=round024_verify_default_restore
+              if nm -a "$build_dir/mm/zswap.o" |
+                  grep -q 'zswap_swapz_round024_producer_kbuild_probe'; then
+                echo "::error::Compile-only producer leaked into default build" >&2
+                exit 1
+              fi
+              echo "ROUND024_PINNED_ZSWAP_PRODUCER_REAL_KBUILD_DEFAULT_OFF"
             fi
             # A matched external .ko needs the *same modified* kernel's complete
             # exported symbols. Neither modules_prepare nor vmlinux alone is enough.

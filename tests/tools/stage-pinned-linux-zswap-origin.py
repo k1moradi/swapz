@@ -774,6 +774,74 @@ COMPRESSED_HANDOFF_ANCHOR = (
     "* writeback code\n"
     "**********************************/"
 )
+
+# Optional compiler-emitted witness in original pinned mm/zswap.c; never live.
+ROUND024_ZSWAP_KBUILD_PROBE_SOURCE = r"""/*
+ * Round024: real pinned Linux mm/zswap.o compile-only observation. No caller.
+ * No authenticated slot-allocation epoch, stored 4096 SHA256 or owned
+ * compression-aware MM/BIO sideband is available; NEVER publish a carrier.
+ */
+#if defined(SWAPZ_ROUND024_ZSWAP_KBUILD_PROBE)
+static __attribute__((used, noinline)) int
+zswap_swapz_round024_producer_kbuild_probe(
+		struct zswap_entry *stored_entry, swp_entry_t source_slot,
+		const struct folio *locked_folio)
+{
+	struct zswap_pool *stored_pool;
+
+	if (!stored_entry || !locked_folio ||
+	    !folio_test_locked(locked_folio))
+		return -EOPNOTSUPP;
+	if (stored_entry->swpentry.val != source_slot.val ||
+	    !stored_entry->handle || !stored_entry->length ||
+	    stored_entry->length > 3568U)
+		return -EOPNOTSUPP;
+	/* xarray identity can reject stale pointers, but cannot supply
+	 * the missing authenticated swap-slot allocation generation.
+	 */
+	if (xa_load(swap_zswap_tree(source_slot),
+		    swp_offset(source_slot)) != stored_entry)
+		return -ESTALE;
+	stored_pool = zswap_entry_pool(stored_entry);
+	if (!stored_pool || stored_pool->idx != stored_entry->pool_idx)
+		return -ESTALE;
+	/* This is not a real LZ4 carrier and cannot bypass full 4096 WRITE. */
+	return -EOPNOTSUPP;
+}
+#endif /* SWAPZ_ROUND024_ZSWAP_KBUILD_PROBE */
+"""
+
+
+def validate_round024_probe(source: str) -> None:
+    """Reject modified source claiming authenticated compressed publication."""
+    required = (
+        "#if defined(SWAPZ_ROUND024_ZSWAP_KBUILD_PROBE)",
+        "zswap_swapz_round024_producer_kbuild_probe(",
+        "folio_test_locked(locked_folio)",
+        "stored_entry->swpentry.val != source_slot.val",
+        "stored_entry->length > 3568U",
+        "xa_load(swap_zswap_tree(source_slot),",
+        "stored_pool = zswap_entry_pool(stored_entry);",
+        "stored_pool->idx != stored_entry->pool_idx",
+        "#endif /* SWAPZ_ROUND024_ZSWAP_KBUILD_PROBE */",
+    )
+    if any(source.count(token) != 1 for token in required):
+        raise StagingError("round024-producer-probe-source-drift")
+    if (source.count("return -EOPNOTSUPP;") != 3 or
+        source.count("return -ESTALE;") != 2 or
+        "return 0;" in source or "submit_bio(" in source or
+        "bio_endio(" in source or "sha256(" in source):
+        raise StagingError("round024-producer-probe-unsafe-publication")
+
+
+ROUND024_PROBE_EDITS: dict[str, tuple[Edit, ...]] = {
+    "mm/zswap.c": (
+        Edit(COMPRESSED_HANDOFF_ANCHOR,
+             ROUND024_ZSWAP_KBUILD_PROBE_SOURCE + COMPRESSED_HANDOFF_ANCHOR),
+    ),
+}
+
+
 COMPRESSED_HANDOFF_EDITS: dict[str, tuple[Edit, ...]] = {
     "mm/zswap.c": (
         Edit(COMPRESSED_HANDOFF_ANCHOR,
@@ -874,9 +942,17 @@ def check_preimage(path: str, payload: bytes, expected_hash: str) -> None:
         raise StagingError(f"original-blob-mismatch:{path}")
 
 
-def render_source(path: str, original: str, *, compressed_handoff: bool = False) -> str:
+def render_source(path: str, original: str, *, compressed_handoff: bool = False,
+                  round024_probe: bool = False) -> str:
     """Reject missing, duplicate and overlapping anchors before any mutation."""
     edits = EDITS.get(path, KUNIT_EDITS.get(path))
+    if compressed_handoff and round024_probe:
+        raise StagingError("incompatible-producer-profiles")
+    if round024_probe:
+        validate_round024_probe(ROUND024_ZSWAP_KBUILD_PROBE_SOURCE)
+        if path != "mm/zswap.c":
+            raise StagingError(f"unexpected-round024-probe-path:{path}")
+        edits = edits + ROUND024_PROBE_EDITS[path]
     if compressed_handoff:
         validate_disabled_compressed_contract(COMPRESSED_HANDOFF_SOURCE)
         if path != "mm/zswap.c":
@@ -933,6 +1009,11 @@ def verify_pinned_zswap_producer(staged_source: str) -> None:
             if prototype_start < start or prototype_start >= end:
                 raise StagingError("invalid-disabled-prototype-placement")
             end = prototype_start
+        if label == "decompress" and ROUND024_ZSWAP_KBUILD_PROBE_SOURCE in staged_source:
+            probe_start = staged_source.find(ROUND024_ZSWAP_KBUILD_PROBE_SOURCE)
+            if probe_start < start or probe_start >= end:
+                raise StagingError("invalid-round024-probe-placement")
+            end = probe_start
         if blob_sha(staged_source[start:end].encode("utf-8")) != expected_blob:
             raise StagingError("pinned-producer-causality-drift:" + label)
         positions.append(start)
@@ -1124,7 +1205,8 @@ def rollback_sources(root: Path, originals: dict[str, bytes | None],
 
 
 def stage_checkout(root: Path, manifest_path: Path, *, with_kunit: bool = False,
-                   with_compressed_handoff: bool = False) -> dict[str, object]:
+                   with_compressed_handoff: bool = False,
+                   with_round024_probe: bool = False) -> dict[str, object]:
     try:
         root = root.resolve(strict=True)
     except OSError as error:
@@ -1148,6 +1230,7 @@ def stage_checkout(root: Path, manifest_path: Path, *, with_kunit: bool = False,
         staged[path] = render_source(
             path, original.decode("utf-8"),
             compressed_handoff=with_compressed_handoff and path == "mm/zswap.c",
+            round024_probe=with_round024_probe and path == "mm/zswap.c",
         ).encode("utf-8")
     if with_kunit:
         addition = root / KUNIT_SOURCE_PATH
@@ -1212,6 +1295,9 @@ def stage_checkout(root: Path, manifest_path: Path, *, with_kunit: bool = False,
         "phase_a_qualified": False,
         "phase_b_enabled": False,
     }
+    if with_round024_probe:
+        result["round024_kbuild_probe"] = "COMPILE_ONLY_NO_LIVE"
+        result["direct_compressed_handoff_enabled"] = False
     if with_compressed_handoff:
         result["direct_compressed_handoff_enabled"] = False
         result["compressed_handoff_prototype"] = "COMPILE_DISABLED_SOURCE_ONLY"
@@ -1276,12 +1362,17 @@ def main() -> int:
     parser.add_argument("--with-compressed-handoff-prototype",
                         action="store_true",
                         help="Stage disabled-only copied zswap payload reference")
+    parser.add_argument("--with-round024-zswap-kbuild-probe",
+                        action="store_true",
+                        help="Stage original kernel compile-only producer gate")
     arguments = parser.parse_args()
     try:
         result = stage_checkout(arguments.linux_root, arguments.manifest,
                                 with_kunit=arguments.with_kunit,
                                 with_compressed_handoff=
-                                    arguments.with_compressed_handoff_prototype)
+                                    arguments.with_compressed_handoff_prototype,
+                                with_round024_probe=
+                                    arguments.with_round024_zswap_kbuild_probe)
     except (StagingError, OSError, UnicodeError, ValueError) as error:
         print(f"FAIL: {error}", file=sys.stderr)
         return 1

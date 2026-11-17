@@ -41,12 +41,12 @@ static int atomic_cmpxchg(atomic_t *x,int old,int next) {
 #define PAGE_SIZE 4096U
 #define GFP_KERNEL 0
 struct folio { bool locked; };
-struct zswap_entry { swp_entry_t swpentry; unsigned int length; unsigned long handle; };
-struct zswap_pool { const char *tfm_name; void *zs_pool; };
+struct zswap_entry { swp_entry_t swpentry; unsigned int length; unsigned long handle; u8 pool_idx; };
+struct zswap_pool { const char *tfm_name; void *zs_pool; u8 idx; };
 struct scatterlist { const u8 *data; unsigned int len; };
 struct xarray { struct zswap_entry *ptr; };
 static struct xarray tree;
-static struct zswap_pool host_pool = { "lz4", &tree };
+static struct zswap_pool host_pool = { "lz4", &tree, 0 };
 static u8 zpool_bytes[PAGE_SIZE];
 static u8 host_original_page[PAGE_SIZE];
 /* Independently precomputed SHA256 of original 4096 bytes: byte[i]=i%251. */
@@ -349,6 +349,69 @@ class CompressedHandoffTests(unittest.TestCase):
         self.assertNotIn('REQ_ZSWAP_WRITEBACK',source)
         # An ordinary 4096-byte BIO cannot carry variable compressed bytes.
         self.assertIn('return -EOPNOTSUPP;',source)
+
+    def test_round024_source_probe_mutations_and_workflow(self):
+        probe = stage.ROUND024_ZSWAP_KBUILD_PROBE_SOURCE
+        stage.validate_round024_probe(probe)
+        for before, after in (
+            ("#if defined(SWAPZ_ROUND024_ZSWAP_KBUILD_PROBE)", "#if 1"),
+            ("return -EOPNOTSUPP;", "return 0;"),
+            ("folio_test_locked(locked_folio)", "true"),
+            ("xa_load(swap_zswap_tree(source_slot),", "unverified_load("),
+            ("stored_pool->idx != stored_entry->pool_idx",
+             "stored_pool->idx == stored_entry->pool_idx"),
+        ):
+            with self.subTest(mutation=before):
+                with self.assertRaises(stage.StagingError):
+                    stage.validate_round024_probe(
+                        probe.replace(before, after, 1))
+        workflow = (STAGER.parents[2] /
+                    ".github/workflows/phase-a-zswap-origin-prototype.yml"
+                    ).read_text(encoding="utf-8")
+        self.assertIn("--with-round024-zswap-kbuild-probe", workflow)
+        self.assertIn("KCFLAGS=-DSWAPZ_ROUND024_ZSWAP_KBUILD_PROBE=1",
+                      workflow)
+        self.assertIn("zswap_swapz_round024_producer_kbuild_probe", workflow)
+
+    def test_round024_exact_probe_gcc_clang_asan_ubsan(self):
+        body = stage.COMPRESSED_HANDOFF_SOURCE.split(
+            "#if 0 /* SWAPZ_COMPRESSED_HANDOFF_DISABLED_NO_PINNED_BIO_ABI */",
+            1)[1].split(
+            "#endif /* SWAPZ_COMPRESSED_HANDOFF_DISABLED_NO_PINNED_BIO_ABI */",
+            1)[0]
+        for header in ("#include <linux/crc32c.h>", "#include <crypto/sha2.h>"):
+            body = body.replace(header, "")
+        fixture = (Path(__file__).parent / "fixtures" /
+                   "round024-producer-kbuild-probe.c").read_text(
+                       encoding="utf-8")
+        main = HOST_CASES.replace(
+            "int main(void) {",
+            "int main(void) {\\n    round024_compiler_probe_negatives();\\n", 1)
+        self.assertNotEqual(main, HOST_CASES)
+        source = (HOST_SHIMS + body +
+                  "#define SWAPZ_ROUND024_ZSWAP_KBUILD_PROBE 1\\n" +
+                  stage.ROUND024_ZSWAP_KBUILD_PROBE_SOURCE +
+                  fixture + main)
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "round024-probe.c"
+            path.write_text(source, encoding="utf-8")
+            compilers = [compiler for compiler in ("gcc", "clang")
+                         if shutil.which(compiler)]
+            self.assertTrue(compilers)
+            for compiler in compilers:
+                with self.subTest(compiler=compiler):
+                    binary = Path(directory) / compiler
+                    command = [compiler, "-std=gnu11", "-O1", "-g",
+                               "-Wall", "-Wextra", "-Wconversion", "-Wshadow",
+                               "-Werror", "-fsanitize=address,undefined",
+                               "-fno-sanitize-recover=all", "-pthread",
+                               str(path), "-o", str(binary)]
+                    build = subprocess.run(command, capture_output=True,
+                                           text=True, timeout=60)
+                    self.assertEqual(build.returncode, 0, build.stderr)
+                    result = subprocess.run([str(binary)], capture_output=True,
+                                            text=True, timeout=40)
+                    self.assertEqual(result.returncode, 0, result.stderr)
 
     def test_compiled_guarded_producer_gcc_clang_ubsan(self):
         c=stage.COMPRESSED_HANDOFF_SOURCE

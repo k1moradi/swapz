@@ -14523,3 +14523,35 @@ Phase B forced RAW bypass DISABLED, compressed handoff DISABLED.
 Existing RAW remains the original uncompressed full 4096 bytes, SWAPSPACE2
 first header/UUID/table remains unchanged; only future authorized lower
 post-header payload+padding extents may be written, all mapping in RAM.
+
+## Round 024 — Agent 2: real pinned mm/zswap.o compiler-only provenance gate
+
+Exact upstream source `torvalds/linux`
+`c339f4010dea8b0d754f84ace70cd1b089878ef8` is authenticated by
+original Git blob hashes before any mutation. Optional
+`--with-round024-zswap-kbuild-probe` stages a source-identical disabled
+`#if defined(SWAPZ_ROUND024_ZSWAP_KBUILD_PROBE)` function in real
+`mm/zswap.c`. The compiler-emitted function examines the source's actual
+zswap_entry slot, handle, 1..3568 compressed length, folio lock, xarray
+identity and pool. It refuses even a current entry with EOPNOTSUPP
+(or ESTALE for stale xarray/pool): source lacks a real store-time
+4096 original SHA, authenticated slot allocation epoch and compression-aware
+MM/BIO clone/split/merge owner. No caller, new compressed BIO or live
+transport is introduced. Original decompression -> uncompressed 4096
+REQ_SWAP WRITE remains mandatory.
+
+The original pinned Linux Kbuild workflow first compiles default-off
+CONFIG_ZSWAP=y `mm/zswap.o` and demands no probe symbol, then recompiles
+exact original C with
+`KCFLAGS=-DSWAPZ_ROUND024_ZSWAP_KBUILD_PROBE=1`,
+requires its compiler-emitted object symbol with `nm`, and restores
+default-off before complete vmlinux/modules and matching dm-swapz.ko.
+CONFIG_ZSWAP=n still emits no zswap.o. GCC/Clang sanitized source-host
+tests execute that same C body, rejecting null/unlocked/ABA, zero or
+>3568 lengths and forged slot/handle, plus source-mutation fail gates.
+No test-only positive is a genuine producer. Existing source KUnit,
+CRC32C and ordinary BIO provenance checks are unchanged.
+LIVE_STORED=NOT_RUN; LOADED_KERNEL_SWAPIN=NOT_RUN; PHYSICAL=NOT_RUN;
+PHASE_A=BLOCKED; DIRECT_COMPRESSED=DISABLED; Phase B forced RAW
+bypass DISABLED. SWAPSPACE2 original first 4096/UUID/header/table
+untouched, all future metadata RAM only; RAW remains original 4096.
