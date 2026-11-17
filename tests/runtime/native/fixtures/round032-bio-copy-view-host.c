@@ -4,6 +4,10 @@
  * The synthetic BIO below models pinned original Linux's embedded
  * swap_iocb: bio_init() left bi_vcnt zero, prepopulated first bvec.
  */
+#define SWAPZ_ROUND032_BIO_COPY_VIEW_CI_ONLY 1
+#define SWAPZ_ROUND031_MM_BIO_SOURCE 1
+#define SWAPZ_ROUND025_SIDEBAND_CI_ONLY 1
+
 #include <assert.h>
 #include <stdbool.h>
 #include <stddef.h>
@@ -289,7 +293,7 @@ int main(void)
 		&source_bio, &view, private_copy, length) == 0);
 	assert(owner_live_refs == 1U);
 	legacy_owner = swapz_ci_owned_create(
-		private_copy, length, length, full_sha256,
+		expected_copy, length, length, full_sha256,
 		24U, 25U, 1U, 1U, proper_crc, GFP_KERNEL);
 	assert(legacy_owner && legacy_owner->source_swap_entry == 0U);
 	source_bio.bi_swapz_ci_sideband = legacy_owner;
