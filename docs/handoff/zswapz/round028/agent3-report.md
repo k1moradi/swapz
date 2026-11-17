@@ -1,0 +1,9 @@
+# Round028 Agent3 — accepted guarded Device Mapper source implementation, live NO-GO
+
+Original worker report [#145/6948228416](https://github.com/k1moradi/swapz/issues/145#issuecomment-6948228416), publications: [1500ddd](https://github.com/k1moradi/swapz/commit/1500ddd398e6a8f1bd2878980eecaa60db67d9f4), [4e135fb](https://github.com/k1moradi/swapz/commit/4e135fb6c6062493ff98f5c963756b4911a2122f), [c5c123e](https://github.com/k1moradi/swapz/commit/c5c123e1202944afb21760ec078db9ff366fe6b5). Engineering baseline task `d1697ffa4175d7a5455e9e3e0581b0645add7c4a`.
+
+Actual `src/kernel/dm-target.c` gains default-off `swapz_round028_dm_stage_owned_payload` (bounded copied LZ4 payload to 4/8/16KiB padded lower-image, distinct from RAW original 4096) and `swapz_round028_dm_owned_lower_readback` (real ordered-owner map and GC/extent sequence snapshot, `swapz_lower_read`, revalidation, original full 4096 CRC/LZ4/SHA decoder, no upper ACK). No live producer authentication/transport, map publication or compressed admission; ordinary DM I/O is unchanged.
+
+**ACCEPTED within bounded source-only scope.** [Exact Agent3 SHA production C run #44083431045](https://github.com/k1moradi/swapz/actions/runs/44083431045): 4/4 jobs SUCCESS, including x86_64/ARM64 host tests and normal plus CI-only external module compile. At final engineering SHA `025c3a75`, [run #44085444067](https://github.com/k1moradi/swapz/actions/runs/44085444067) also completed 4/4 SUCCESS. Earlier source-test expectation errors corrected in serial commits; those are historical, not current source C failures. This does NOT prove same-build producer/consumer compressed transport, loaded kernel or physical swap.
+
+`PHASE_A=BLOCKED`; `FORCED_RAW=DISABLED`; `DIRECT_COMPRESSED=NO_GO`; `LOADED_ORIGINAL_4096=NOT_RUN`; `PHYSICAL_SWAPSPACE2=NOT_RUN`.
