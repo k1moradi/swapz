@@ -527,6 +527,21 @@ def assert_full_workflow_contract(workflow: Path) -> None:
     require("git -C linux show HEAD:include/linux/bio.h" in text and
             "GITHUB_SHA" in text and "SWAPZ_BUILD_SOURCE_CLEAN_STRING" in text,
             "workflow_source_identity")
+    # Source/epoch provenance MUST be checked before the kernel exporter.
+    # A mismatched seventh source is not an upstream kernel-doc warning.
+    staged_step = '      - name: "Modify actual pinned Linux C and H in disposable full checkout"'
+    source_preflight = '      - name: "Verify original pinned source manifest before Kbuild"'
+    build_step_marker = '      - name: "Build modified Linux and matched source-linked'
+    require(text.count(source_preflight) == 1 and
+            text.index(staged_step) < text.index(source_preflight) <
+            text.index(build_step_marker), "workflow_source_manifest_preflight")
+    preflight_source = text.split(source_preflight, 1)[1].split(
+        build_step_marker, 1)[0]
+    require("--verify-source-manifest-only" in preflight_source and
+            '--source-manifest "$evidence_dir/source-manifest.json"'
+            in preflight_source and
+            "pinned-linux-origin-paired-module-test.py" in preflight_source and
+            'exit 3' in preflight_source, "workflow_source_manifest_preflight")
     require(build_step.count("--classify-kernel-doc-warnings") == 1 and
             build_step.count("current_phase=kernel_export_build_warnings") == 1 and
             "if [[ \"$command_name\" == kernel_export_build ]]" in build_step and
@@ -774,6 +789,26 @@ class PairedModuleTests(unittest.TestCase):
         self.source_manifest.write_text(json.dumps(metadata) + "\n")
         self.put("mm/swapfile.o", b"compiled-source-mm/swapfile.o")
         self.save()
+
+    def test_round027_source_profile_early_cli_fails_closed(self) -> None:
+        # This source-only CLI must fail before full kernel compilation.
+        command = (sys.executable, "-B", __file__,
+                   "--verify-source-manifest-only", "--source-manifest",
+                   str(self.source_manifest))
+        self.assertEqual(subprocess.run(command, capture_output=True, text=True,
+                                        timeout=15, check=False).returncode, 0)
+        self.enable_round027_allocator_fixture()
+        self.assertEqual(subprocess.run(command, capture_output=True, text=True,
+                                        timeout=15, check=False).returncode, 0)
+        original = json.loads(self.source_manifest.read_text())
+        original["round026_allocator_epoch"] = "forged"
+        self.source_manifest.write_text(json.dumps(original) + "\n")
+        rejected = subprocess.run(command, capture_output=True, text=True,
+                                  timeout=15, check=False)
+        self.assertEqual(rejected.returncode, 1)
+        self.assertIn("paired-build-invalid: source_manifest_allocator_profile",
+                      rejected.stderr)
+        self.assertNotIn(str(self.scratch.name), rejected.stderr)
 
     def test_round027_exact_six_default_and_seven_allocator_y_n(self) -> None:
         self.check()
@@ -1235,6 +1270,7 @@ def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--self-test", action="store_true")
     parser.add_argument("--classify-kernel-doc-warnings", action="store_true")
+    parser.add_argument("--verify-source-manifest-only", action="store_true")
     parser.add_argument("--kernel-log", type=Path)
     parser.add_argument("--source-sha")
     parser.add_argument("--kernel-export-exit", type=int)
@@ -1258,6 +1294,17 @@ def main() -> int:
             unittest.defaultTestLoader.loadTestsFromTestCase(KernelDocBaselineTests),
             unittest.defaultTestLoader.loadTestsFromTestCase(FullWorkflowContractTests)))
         return 0 if unittest.TextTestRunner(verbosity=2).run(suite).wasSuccessful() else 1
+    if args.verify_source_manifest_only:
+        if not args.source_manifest:
+            parser.error("--verify-source-manifest-only requires --source-manifest")
+        try:
+            load_source_manifest(args.source_manifest)
+        except (VerificationError, OSError, UnicodeError) as error:
+            print(str(error) if isinstance(error, VerificationError)
+                  else "paired-build-invalid: source_manifest_io",
+                  file=sys.stderr)
+            return 1
+        return 0
     if args.classify_kernel_doc_warnings:
         if not all((args.kernel_log, args.linux_root, args.source_manifest,
                     args.source_sha, args.profile)) or args.kernel_export_exit is None:

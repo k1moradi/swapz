@@ -207,6 +207,20 @@ jobs:
           fi
           printf 'source_stage=PASS\nsource_modified=yes\n' \
             > "$evidence_dir/staging-status.txt"
+      - name: "Verify original pinned source manifest before Kbuild"
+        shell: bash
+        run: |
+          set -euo pipefail
+          evidence_dir="$RUNNER_TEMP/zswap-origin-evidence"
+          # The paired source validator validates EXACT six/default or
+          # seven/allocator opt-in before the costly Linux exporter. Source
+          # profile failures are not kernel-doc diagnostic warnings.
+          if ! python3 -B swapz/tests/runtime/native/pinned-linux-origin-paired-module-test.py \
+              --verify-source-manifest-only \
+              --source-manifest "$evidence_dir/source-manifest.json"; then
+            echo "::error::Pinned source manifest profile invalid before Kbuild"
+            exit 3
+          fi
       - name: "Build modified Linux and matched source-linked swapz module for both configurations"
         shell: bash
         env:
