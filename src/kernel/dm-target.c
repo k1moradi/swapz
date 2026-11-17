@@ -3551,7 +3551,7 @@ static __used noinline int swapz_round030_dm_read_owned_lz4(
 		swapz_u8 *lower_image, swapz_u32 lower_capacity,
 		swapz_u8 *decode_scratch, swapz_u8 *decoded_page)
 {
-	const struct swapz_map *current;
+	const struct swapz_map *current_mapping;
 	swapz_u32 sequence;
 	int error;
 
@@ -3573,12 +3573,13 @@ static __used noinline int swapz_round030_dm_read_owned_lz4(
 	    ctx->authority.maps != ctx->maps ||
 	    ctx->gc_recovery.active || ctx->authority.gc_allocation)
 		return -ESTALE;
-	current = &ctx->authority.maps[descriptor->record.logical_page];
-	if (!current->valid || current->raw ||
-	    memcmp(current, &descriptor->mapping, sizeof(*current)))
+	current_mapping = &ctx->authority.maps[descriptor->record.logical_page];
+	if (!current_mapping->valid || current_mapping->raw ||
+	    memcmp(current_mapping, &descriptor->mapping,
+		   sizeof(*current_mapping)))
 		return -ESTALE;
 	error = swapz_extent_sequence_lookup(&ctx->authority,
-					     current->start_block, &sequence);
+					     current_mapping->start_block, &sequence);
 	if (error || sequence != descriptor->extent_sequence)
 		return -ESTALE;
 	/* The Round028 function performs a genuine checked lower READ, a
