@@ -171,9 +171,19 @@ jobs:
           evidence_dir="$RUNNER_TEMP/zswap-origin-evidence"
           if ! python3 -B swapz/tests/tools/stage-pinned-linux-zswap-origin.py \
               --linux-root linux --manifest "$evidence_dir/source-manifest.json" \
-              --with-round024-zswap-kbuild-probe; then
+              --with-round024-zswap-kbuild-probe \
+              --with-round025-store-proof-probe; then
             echo "::error::Exact Linux identity/blob or source staging failure"
             exit 1
+          fi
+          if ! grep -Fq '"round025_store_proof": "TEMPORARY_SHA_SNAPSHOT_NO_SLOT_EPOCH"' \
+                    "$evidence_dir/source-manifest.json" ||
+             ! grep -Fq '"round025_store_proof_compiled": false' \
+                    "$evidence_dir/source-manifest.json" ||
+             ! grep -Fq '"direct_compressed_handoff_enabled": false' \
+                    "$evidence_dir/source-manifest.json"; then
+            echo "::error::Round025 source-only SHA proof manifest drift"
+            exit 3
           fi
           git -C linux diff --check -- \
             mm/zswap.c mm/page_io.c include/linux/swap_ops.h \
@@ -365,8 +375,8 @@ jobs:
             if [[ "$profile" == enabled ]]; then
               current_phase=round024_default_producer_off
               if nm -a "$build_dir/mm/zswap.o" |
-                  grep -q 'zswap_swapz_round024_producer_kbuild_probe'; then
-                echo "::error::Default producer includes compile-only probe" >&2
+                  grep -Eq 'zswap_swapz_round024_producer_kbuild_probe|zswap_swapz_round025_store_digest_probe'; then
+                echo "::error::Default producer includes CI-only proof function" >&2
                 exit 1
               fi
               run_logged round024_producer_probe make -s -C linux \
@@ -378,16 +388,42 @@ jobs:
                 echo "::error::No original pinned mm/zswap.o probe symbol" >&2
                 exit 1
               fi
+              # Genuine original pinned mm/zswap.o compilation of the
+              # independently SHA256-hashing, zeroizing SOURCE-ONLY witness.
+              # The macro is isolated: no genuine slot allocation epoch or
+              # compressed transport can be established by an object build.
+              run_logged round025_original_store_sha_probe make -s -C linux \
+                "O=$build_dir" CC=gcc "-j$KBUILD_JOBS" W=1 \
+                KCFLAGS="-DSWAPZ_ROUND025_STORE_PROOF_KBUILD_PROBE=1 -Werror" \
+                mm/zswap.o
+              current_phase=round025_verify_compiled_original_sha_source
+              if ! nm -a "$build_dir/mm/zswap.o" |
+                  grep -q 'zswap_swapz_round025_store_digest_probe'; then
+                echo "::error::Round025 missing compiled pinned STORE SHA helper" >&2
+                exit 1
+              fi
+              if ! objdump -d "$build_dir/mm/zswap.o" |
+                  grep -Fq '<zswap_swapz_round025_store_digest_probe>:'; then
+                echo "::error::Round025 no real pinned STORE SHA machine code" >&2
+                exit 1
+              fi
+              # No accidental co-enabled older helper in the new-only Kbuild.
+              if nm -a "$build_dir/mm/zswap.o" |
+                  grep -q 'zswap_swapz_round024_producer_kbuild_probe'; then
+                echo "::error::Round024 helper unexpectedly present in Round025 profile" >&2
+                exit 1
+              fi
               run_logged round024_producer_restore_default make -s -C linux \
                 "O=$build_dir" CC=gcc "-j$KBUILD_JOBS" W=1 \
                 KCFLAGS=-Werror mm/zswap.o
               current_phase=round024_verify_default_restore
               if nm -a "$build_dir/mm/zswap.o" |
-                  grep -q 'zswap_swapz_round024_producer_kbuild_probe'; then
-                echo "::error::Compile-only producer leaked into default build" >&2
+                  grep -Eq 'zswap_swapz_round024_producer_kbuild_probe|zswap_swapz_round025_store_digest_probe'; then
+                echo "::error::CI-only producer leaked into default build" >&2
                 exit 1
               fi
               echo "ROUND024_PINNED_ZSWAP_PRODUCER_REAL_KBUILD_DEFAULT_OFF"
+              echo "ROUND025_ORIGINAL_4096_SHA_PINNED_KBUILD_DEFAULT_OFF"
             fi
             # A matched external .ko needs the *same modified* kernel's complete
             # exported symbols. Neither modules_prepare nor vmlinux alone is enough.

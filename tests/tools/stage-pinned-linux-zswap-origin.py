@@ -841,6 +841,136 @@ def validate_round024_probe(source: str) -> None:
         raise StagingError("round024-producer-probe-unsafe-publication")
 
 
+ROUND025_STORE_PROOF_SOURCE = r"""/*
+ * Round025 real pinned mm/zswap.c SHA feasibility probe, CI-COMPILE ONLY.
+ * The original locked folio is present in zswap_store_page() before return,
+ * and SHA256 can be computed for its exact 4096 plaintext bytes. But this
+ * kernel has NO independent swap-slot allocation generation; xarray, slot
+ * integer, zpool handle and entry address are not an ABA-safe epoch.
+ *
+ * No production STORE, shrinker, BIO, DM, swapoff or invalidate caller exists.
+ * A bounded temporary owner is scrubbed and freed before returning; none
+ * of these bytes becomes a live stored certificate. The function ALWAYS
+ * fails closed, even for a valid original SHA. Default build omits it.
+ */
+#if defined(SWAPZ_ROUND025_STORE_PROOF_KBUILD_PROBE)
+#include <crypto/sha2.h>
+
+#define ZSWAP_SWAPZ_ROUND025_ORIGINAL_BYTES 4096U
+#define ZSWAP_SWAPZ_ROUND025_MAX_COMPRESSED 3568U
+
+struct zswap_swapz_round025_store_witness {
+	const struct zswap_entry *entry;
+	const struct zswap_pool *pool;
+	swp_entry_t slot;
+	unsigned long handle;
+	unsigned int compressed_length;
+	u8 original_sha256[SHA256_DIGEST_SIZE];
+	bool original_plaintext_hashed;
+	/* No pinned swap slot allocation API supplies this epoch. */
+	u64 source_slot_allocation_epoch;
+};
+
+static __attribute__((__used__, __noinline__)) int
+zswap_swapz_round025_store_digest_probe(
+		const struct folio *original_locked_folio, long page_index,
+		struct zswap_entry *stored_entry, swp_entry_t source_slot)
+{
+	struct zswap_swapz_round025_store_witness *witness;
+	struct zswap_pool *stored_pool;
+	const u8 *original_bytes;
+	int result = -EOPNOTSUPP;
+
+	if (!original_locked_folio || !stored_entry ||
+	    !folio_test_locked(original_locked_folio) ||
+	    !folio_test_swapcache(original_locked_folio) ||
+	    page_index < 0 || page_index >= folio_nr_pages(original_locked_folio))
+		return -EINVAL;
+	if (PAGE_SIZE != ZSWAP_SWAPZ_ROUND025_ORIGINAL_BYTES)
+		return -EOPNOTSUPP;
+	/* Verify slot pointer BEFORE any other dereference of the entry. */
+	if (stored_entry != xa_load(swap_zswap_tree(source_slot),
+				    swp_offset(source_slot)))
+		return -ESTALE;
+	if (stored_entry->swpentry.val != source_slot.val)
+		return -ESTALE;
+	if (!stored_entry->handle ||
+	    !stored_entry->length ||
+	    stored_entry->length > ZSWAP_SWAPZ_ROUND025_MAX_COMPRESSED)
+		return -EMSGSIZE;
+	stored_pool = zswap_entry_pool(stored_entry);
+	if (!stored_pool || stored_pool->idx != stored_entry->pool_idx)
+		return -ESTALE;
+	if (strcmp(stored_pool->tfm_name, "lz4"))
+		return -EOPNOTSUPP;
+
+	/* Caller-local 32-byte digest + metadata, no persistent RAM charge. */
+	witness = kzalloc(sizeof(*witness), GFP_KERNEL);
+	if (!witness)
+		return -ENOMEM;
+	witness->entry = stored_entry;
+	witness->pool = stored_pool;
+	witness->slot = source_slot;
+	witness->handle = stored_entry->handle;
+	witness->compressed_length = stored_entry->length;
+	original_bytes = kmap_local_folio(original_locked_folio,
+					 (size_t)page_index * PAGE_SIZE);
+	sha256(original_bytes, ZSWAP_SWAPZ_ROUND025_ORIGINAL_BYTES,
+	       witness->original_sha256);
+	kunmap_local(original_bytes);
+	witness->original_plaintext_hashed = true;
+
+	/* Authentic original SHA != authenticated reused swap allocation.
+	 * A real allocator-owned per-slot epoch and guarded lifecycle (store,
+	 * replacement, invalidation, swapoff and BIO clone/split) do not exist.
+	 * Never publish this temporary owner even if its digest is valid.
+	 */
+	if (!witness->source_slot_allocation_epoch)
+		result = -EOPNOTSUPP;
+	memzero_explicit(witness, sizeof(*witness));
+	kfree(witness);
+	return result;
+}
+#endif /* SWAPZ_ROUND025_STORE_PROOF_KBUILD_PROBE */
+"""
+
+
+def validate_round025_store_proof(source: str) -> None:
+    """Refuse claims of source-epoch authority or active compressed STORE."""
+    required = (
+        "#if defined(SWAPZ_ROUND025_STORE_PROOF_KBUILD_PROBE)",
+        "#endif /* SWAPZ_ROUND025_STORE_PROOF_KBUILD_PROBE */",
+        "static __attribute__((__used__, __noinline__)) int",
+        "zswap_swapz_round025_store_digest_probe(",
+        "folio_test_locked(original_locked_folio)",
+        "folio_test_swapcache(original_locked_folio)",
+        "page_index >= folio_nr_pages(original_locked_folio)",
+        "stored_entry != xa_load(swap_zswap_tree(source_slot),",
+        "!stored_entry->handle ||",
+        "stored_entry->length > ZSWAP_SWAPZ_ROUND025_MAX_COMPRESSED",
+        "stored_pool->idx != stored_entry->pool_idx",
+        'strcmp(stored_pool->tfm_name, "lz4")',
+        "witness = kzalloc(sizeof(*witness), GFP_KERNEL);",
+        "if (!witness)",
+        "original_bytes = kmap_local_folio(original_locked_folio,",
+        "sha256(original_bytes, ZSWAP_SWAPZ_ROUND025_ORIGINAL_BYTES,",
+        "kunmap_local(original_bytes);",
+        "if (!witness->source_slot_allocation_epoch)",
+        "int result = -EOPNOTSUPP;",
+        "memzero_explicit(witness, sizeof(*witness));",
+        "kfree(witness);",
+    )
+    if any(source.count(token) != 1 for token in required) or (
+        source.count("return -EOPNOTSUPP;") != 2 or
+        "return 0;" in source or "submit_bio(" in source or
+        "swap_write_submit(" in source or "bi_swap_origin" in source or
+        "source_slot_allocation_epoch = " in source or
+        "source_slot_allocation_epoch++" in source or
+        "result = 0;" in source
+    ):
+        raise StagingError("round025-source-store-proof-drift")
+
+
 ROUND024_PROBE_EDITS: dict[str, tuple[Edit, ...]] = {
     "mm/zswap.c": (
         Edit(COMPRESSED_HANDOFF_ANCHOR,
@@ -950,16 +1080,27 @@ def check_preimage(path: str, payload: bytes, expected_hash: str) -> None:
 
 
 def render_source(path: str, original: str, *, compressed_handoff: bool = False,
-                  round024_probe: bool = False) -> str:
+                  round024_probe: bool = False,
+                  round025_store_proof: bool = False) -> str:
     """Reject missing, duplicate and overlapping anchors before any mutation."""
     edits = EDITS.get(path, KUNIT_EDITS.get(path))
-    if compressed_handoff and round024_probe:
+    if compressed_handoff and (round024_probe or round025_store_proof):
         raise StagingError("incompatible-producer-profiles")
+    if round025_store_proof and not round024_probe:
+        raise StagingError("round025-requires-existing-round024-source-probe")
     if round024_probe:
         validate_round024_probe(ROUND024_ZSWAP_KBUILD_PROBE_SOURCE)
         if path != "mm/zswap.c":
             raise StagingError(f"unexpected-round024-probe-path:{path}")
-        edits = edits + ROUND024_PROBE_EDITS[path]
+        if round025_store_proof:
+            validate_round025_store_proof(ROUND025_STORE_PROOF_SOURCE)
+            edits = edits + (
+                Edit(COMPRESSED_HANDOFF_ANCHOR,
+                     ROUND024_ZSWAP_KBUILD_PROBE_SOURCE +
+                     ROUND025_STORE_PROOF_SOURCE + COMPRESSED_HANDOFF_ANCHOR),
+            )
+        else:
+            edits = edits + ROUND024_PROBE_EDITS[path]
     if compressed_handoff:
         validate_disabled_compressed_contract(COMPRESSED_HANDOFF_SOURCE)
         if path != "mm/zswap.c":
@@ -1032,6 +1173,12 @@ def verify_pinned_zswap_producer(staged_source: str) -> None:
         staged_source.count("#if 0 /* SWAPZ_COMPRESSED_HANDOFF_DISABLED_NO_PINNED_BIO_ABI */") != 1
     ):
         raise StagingError("disabled-prototype-contract-drift")
+    if ROUND025_STORE_PROOF_SOURCE in staged_source:
+        validate_round025_store_proof(ROUND025_STORE_PROOF_SOURCE)
+        if (staged_source.count(ROUND025_STORE_PROOF_SOURCE) != 1 or
+            staged_source.count(ROUND024_ZSWAP_KBUILD_PROBE_SOURCE +
+                                ROUND025_STORE_PROOF_SOURCE) != 1):
+            raise StagingError("round025-source-probe-placement-drift")
 
 
 def validate_origin_postimage(path: str, staged_source: str) -> None:
@@ -1213,7 +1360,8 @@ def rollback_sources(root: Path, originals: dict[str, bytes | None],
 
 def stage_checkout(root: Path, manifest_path: Path, *, with_kunit: bool = False,
                    with_compressed_handoff: bool = False,
-                   with_round024_probe: bool = False) -> dict[str, object]:
+                   with_round024_probe: bool = False,
+                   with_round025_store_proof: bool = False) -> dict[str, object]:
     try:
         root = root.resolve(strict=True)
     except OSError as error:
@@ -1238,6 +1386,8 @@ def stage_checkout(root: Path, manifest_path: Path, *, with_kunit: bool = False,
             path, original.decode("utf-8"),
             compressed_handoff=with_compressed_handoff and path == "mm/zswap.c",
             round024_probe=with_round024_probe and path == "mm/zswap.c",
+            round025_store_proof=(with_round025_store_proof and
+                                 path == "mm/zswap.c"),
         ).encode("utf-8")
     if with_kunit:
         addition = root / KUNIT_SOURCE_PATH
@@ -1304,6 +1454,10 @@ def stage_checkout(root: Path, manifest_path: Path, *, with_kunit: bool = False,
     }
     if with_round024_probe:
         result["round024_kbuild_probe"] = "COMPILE_ONLY_NO_LIVE"
+        result["direct_compressed_handoff_enabled"] = False
+    if with_round025_store_proof:
+        result["round025_store_proof"] = "TEMPORARY_SHA_SNAPSHOT_NO_SLOT_EPOCH"
+        result["round025_store_proof_compiled"] = False
         result["direct_compressed_handoff_enabled"] = False
     if with_compressed_handoff:
         result["direct_compressed_handoff_enabled"] = False
@@ -1372,6 +1526,9 @@ def main() -> int:
     parser.add_argument("--with-round024-zswap-kbuild-probe",
                         action="store_true",
                         help="Stage original kernel compile-only producer gate")
+    parser.add_argument("--with-round025-store-proof-probe",
+                        action="store_true",
+                        help="CI-only original 4096 SHA probe, no authenticated slot epoch")
     arguments = parser.parse_args()
     try:
         result = stage_checkout(arguments.linux_root, arguments.manifest,
@@ -1379,7 +1536,9 @@ def main() -> int:
                                 with_compressed_handoff=
                                     arguments.with_compressed_handoff_prototype,
                                 with_round024_probe=
-                                    arguments.with_round024_zswap_kbuild_probe)
+                                    arguments.with_round024_zswap_kbuild_probe,
+                                with_round025_store_proof=
+                                    arguments.with_round025_store_proof_probe)
     except (StagingError, OSError, UnicodeError, ValueError) as error:
         print(f"FAIL: {error}", file=sys.stderr)
         return 1

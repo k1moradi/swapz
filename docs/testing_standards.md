@@ -14782,3 +14782,89 @@ loaded original 4096 swap-in. `LIVE_COMPRESSED=DISABLED`,
 Phase A BLOCKED, forced RAW bypass DISABLED, direct handoff DISABLED.
 Existing RAW is the ORIGINAL UNCOMPRESSED 4096 bytes, not a zswap LZ4
 record; no SWAPSPACE2 header, UUID or partition table is touched.
+
+## Round 025 — Agent 2: source-authentic original STORE 4096 SHA and missing slot-epoch refusal
+
+Pin all source to upstream Linux
+`c339f4010dea8b0d754f84ace70cd1b089878ef8` and verify its original
+C/H Git blob hashes before staging or building. Real
+`mm/zswap.c:zswap_store_page()` has the independently original **locked
+swap-cache folio** and an exact `index` into it, and
+`zswap_compress()` accesses those original bytes before assigning the
+zsmalloc handle. The pinned `include/crypto/sha2.h` exposes genuine
+`sha256(const u8 *, size_t, u8[32])`; a 4096-byte source SHA can
+therefore be computed at STORE, but this kernel still has NO
+allocator-issued source swap-slot generation/epoch. The source
+`swp_entry_t`, xarray pointer, slab pointer, zpool handle and codec do
+NOT independently authenticate reused swap slots. Neither a caller
+fabricated timestamp nor a mock boolean is a safe substitute. The
+original pinned `zswap_invalidate()`, `swap_range_free()`, old-entry
+replacement and `zswap_swapoff()` require source-owned epoch cleanup
+and ordering before genuine future handoff.
+
+Keep the existing historical Round022/23 compressed prototype behind
+`#if 0`, the Round024 CI compile-only function and all active
+decompression to ORIGINAL UNCOMPRESSED **4096-byte** ordinary
+`REQ_SWAP` WRITE unchanged. The new Round025
+`ROUND025_STORE_PROOF_SOURCE` is a *different*, default-OFF,
+**CI-only** source-identical `mm/zswap.c` function.
+Only the explicit conjunction of `--with-round024-zswap-kbuild-probe`
+and `--with-round025-store-proof-probe` in the hash-anchored stager
+can include it. Only isolated Kbuild `KCFLAGS` with
+`-DSWAPZ_ROUND025_STORE_PROOF_KBUILD_PROBE=1 -Werror` may emit its
+static `__used__` symbol; the helper has no kernel caller and always
+returns negative, including when original page SHA succeeds.
+The underlying default `CONFIG_ZSWAP=y/n` and module configs must
+never enable it.
+
+The exact-source helper checks locked original swapcache folio, bounded
+folio-index and `PAGE_SIZE == 4096`, source xarray identity BEFORE
+entry dereference, original stored slot, actual compressed handle and
+1..3568 length, retained zswap pool id and LZ4 codec. It holds a
+single temporary zeroed owner with a fixed 32-byte original-page SHA
+computed using **kernel `sha256(original_bytes,4096,digest)`** on
+`kmap_local_folio` (unmap immediately), scrubs its full owner via
+`memzero_explicit` and releases exactly once via `kfree`.
+Allocation failures are negative. No digest pointer, zpool allocation
+or snapshot owner is permitted to escape into BIO/DM. The true slot
+allocation epoch remains **zero/unavailable**, so no snapshot permits
+compressed publish; its apparent independent SHA is not a persistent
+source proof.
+
+Use `tests/runtime/native/fixtures/round025-producer-store-proof.c`
+with the **exact inserted C source** and real OpenSSL SHA256,
+GCC/Clang `-Wall -Wextra -Wconversion -Wshadow -Werror` +
+ASan/UBSan. Validate the independently known original 4096 digest,
+byte order, one map/unmap, original-page rather than compressed SHA,
+once-only calloc/free/scrub, allocation rejection, missing folio,
+unlocked/non-swapcache, invalid index, stale or recycled pointer,
+slot identity, 0/3569 compressed bytes, wrong handle, wrong pool,
+unknown/ZSTD codec and all-claims true still `-EOPNOTSUPP`.
+Run adversarial Python source mutation refusal for a bypassed
+compile macro, changed 4096 hash length, removed SHA, removed scrub,
+simulated allocator epoch or `return 0` publication. An owner-mock
+compiler result is NOT an authenticated swap-slot reuse epoch or
+booted zswap eviction.
+
+The actual hosted `.github/workflows/phase-a-zswap-origin-prototype.yml`
+must compile true pinned `mm/zswap.o` under `CONFIG_ZSWAP=y`
+default and verify both Round024 and Round025 probe symbols absent,
+compile Round024 unchanged under its own macro, compile Round025
+independently under `W=1` and `-Werror`, require actual `nm` and
+`objdump` machine-code presence, then restore original default
+object with no symbols before whole `vmlinux/modules` and matched
+`dm-swapz.ko`. `CONFIG_ZSWAP=n` must build no zswap object.
+Report the **first real** GCC/Clang or API error, not a mock
+success/unsupported status as a Kbuild PASS. KUnit and matched module
+builds are separate from a loaded original-4096 swap-in and physical
+SWAPSPACE2 evidence.
+
+`PHASE_A=BLOCKED`, `FORCED_RAW_BYPASS=DISABLED`,
+`DIRECT_COMPRESSED=DISABLED`, `LIVE_STORED=NOT_RUN`,
+`LOADED_4096=NOT_RUN`, `PHYSICAL=NOT_RUN`.
+Original SWAPSPACE2 first 4096 header/signature/UUID and
+partition table remain protected and unchanged; all prospective
+codec/CRC32C/SHA/generation/GC bookkeeping RAM-only and bounded.
+Actual current RAW is the ORIGINAL UNCOMPRESSED 4096-byte page.
+No module, swap, extra pressure controller, null_blk, physical
+device or privileged trial.

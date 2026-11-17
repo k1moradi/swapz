@@ -435,6 +435,100 @@ class CompressedHandoffTests(unittest.TestCase):
                                             text=True, timeout=40)
                     self.assertEqual(result.returncode, 0, result.stderr)
 
+    def test_round025_original_plaintext_store_proof_source_and_refusals(self):
+        # The pinned STORE owns a locked original folio and real SHA API,
+        # but has no independently allocator-owned reused slot epoch.
+        source=stage.ROUND025_STORE_PROOF_SOURCE
+        stage.validate_round025_store_proof(source)
+        self.assertIn("sha256(original_bytes, ZSWAP_SWAPZ_ROUND025_ORIGINAL_BYTES,",source)
+        self.assertIn("kmap_local_folio(original_locked_folio,",source)
+        self.assertIn("memzero_explicit(witness, sizeof(*witness));",source)
+        self.assertIn("if (!witness->source_slot_allocation_epoch)",source)
+        self.assertNotIn("return 0;",source)
+        self.assertNotIn("submit_bio(",source)
+        original="\n/* excerpt */\n".join(
+            edit.before for edit in stage.EDITS["mm/zswap.c"])
+        with self.assertRaises(stage.StagingError):
+            stage.render_source("mm/zswap.c", original,
+                                round024_probe=True,
+                                round025_store_proof=True)
+        synthetic=original+stage.COMPRESSED_HANDOFF_ANCHOR
+        with self.assertRaises(stage.StagingError):
+            stage.render_source("mm/zswap.c", synthetic,
+                                round025_store_proof=True)
+        staged=stage.render_source("mm/zswap.c", synthetic,
+                                   round024_probe=True,
+                                   round025_store_proof=True)
+        self.assertEqual(staged.count(source),1)
+        self.assertEqual(staged.count(stage.ROUND024_ZSWAP_KBUILD_PROBE_SOURCE),1)
+        self.assertIn(stage.ROUND024_ZSWAP_KBUILD_PROBE_SOURCE+source,staged)
+        default=stage.render_source("mm/zswap.c",synthetic)
+        self.assertNotIn("zswap_swapz_round025_store_digest_probe(",default)
+        for old,new in (
+            ("#if defined(SWAPZ_ROUND025_STORE_PROOF_KBUILD_PROBE)",
+             "#if 1"),
+            ("folio_test_locked(original_locked_folio)",
+             "true"),
+            ("folio_test_swapcache(original_locked_folio)",
+             "true"),
+            ("stored_entry != xa_load(swap_zswap_tree(source_slot),",
+             "stored_entry == xa_load(swap_zswap_tree(source_slot),"),
+            ('strcmp(stored_pool->tfm_name, "lz4")',
+             'strcmp(stored_pool->tfm_name, "zstd")'),
+            ("sha256(original_bytes, ZSWAP_SWAPZ_ROUND025_ORIGINAL_BYTES,",
+             "sha256(original_bytes, 256U,"),
+            ("memzero_explicit(witness, sizeof(*witness));",
+             "/* source record escaped without cleanup */"),
+            ("if (!witness->source_slot_allocation_epoch)",
+             "if (witness->source_slot_allocation_epoch)"),
+            ("return -EOPNOTSUPP;", "return 0;"),
+        ):
+            with self.subTest(source_mutation=old):
+                self.assertIn(old,source)
+                with self.assertRaises(stage.StagingError):
+                    stage.validate_round025_store_proof(
+                        source.replace(old,new,1))
+        workflow=(STAGER.parents[2] /
+                  ".github/workflows/phase-a-zswap-origin-prototype.yml"
+                 ).read_text(encoding="utf-8")
+        self.assertIn("--with-round025-store-proof-probe",workflow)
+        self.assertIn("SWAPZ_ROUND025_STORE_PROOF_KBUILD_PROBE=1 -Werror",workflow)
+        self.assertIn("zswap_swapz_round025_store_digest_probe",workflow)
+
+    def test_round025_original_sha_real_crypto_gcc_clang_sanitized(self):
+        # The fixture has a real OpenSSL SHA256 implementation and independent
+        # 4096-byte Python digest; the pinned C function is injected verbatim.
+        original=bytes(index%251 for index in range(4096))
+        self.assertEqual(hashlib.sha256(original).hexdigest(),
+                         "d67c656e01756650d77717b0839985a056ec28ffe174601d690fc407a2ceffca")
+        body=stage.ROUND025_STORE_PROOF_SOURCE.replace(
+            "#include <crypto/sha2.h>","")
+        fixture=(Path(__file__).parent / "fixtures" /
+                 "round025-producer-store-proof.c").read_text(encoding="utf-8")
+        marker="/* ROUND025_EXACT_PINNED_STORE_PROBE */"
+        self.assertEqual(fixture.count(marker),1)
+        source=fixture.replace(marker,
+            "#define SWAPZ_ROUND025_STORE_PROOF_KBUILD_PROBE 1\n" + body)
+        with tempfile.TemporaryDirectory(prefix="round025-store-sha-") as directory:
+            path=Path(directory)/"original-store-sha.c"
+            path.write_text(source,encoding="utf-8")
+            compilers=[name for name in ("gcc","clang") if shutil.which(name)]
+            self.assertTrue(compilers)
+            for compiler in compilers:
+                with self.subTest(compiler=compiler):
+                    executable=Path(directory)/compiler
+                    command=[compiler,"-std=gnu11","-O1","-g",
+                             "-Wall","-Wextra","-Wconversion","-Wshadow",
+                             "-Werror","-fsanitize=address,undefined",
+                             "-fno-sanitize-recover=all",str(path),
+                             "-lcrypto","-o",str(executable)]
+                    built=subprocess.run(command,capture_output=True,text=True,
+                                         timeout=70,check=False)
+                    self.assertEqual(built.returncode,0,built.stderr)
+                    executed=subprocess.run([str(executable)],capture_output=True,
+                                            text=True,timeout=30,check=False)
+                    self.assertEqual(executed.returncode,0,executed.stderr)
+
     def test_compiled_guarded_producer_gcc_clang_ubsan(self):
         c=stage.COMPRESSED_HANDOFF_SOURCE
         head='#if 0 /* SWAPZ_COMPRESSED_HANDOFF_DISABLED_NO_PINNED_BIO_ABI */'
