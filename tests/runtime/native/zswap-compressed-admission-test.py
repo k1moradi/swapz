@@ -51,8 +51,8 @@ class Round023DisabledConsumerAdmission(unittest.TestCase):
         dm = DM.read_text(encoding="utf-8")
         probe_start = "#if defined(SWAPZ_ROUND024_DM_IMPORT_KBUILD_PROBE)"
         probe_end = "#endif /* SWAPZ_ROUND024_DM_IMPORT_KBUILD_PROBE */"
-        # Round025 adds a second isolated use of the same compile guard.
-        self.assertEqual(dm.count(probe_start), 2)
+        # Round026 adds a third isolated, default-off source snapshot gate.
+        self.assertEqual(dm.count(probe_start), 3)
         self.assertEqual(dm.count(probe_end), 1)
         body = dm.split(probe_start, 1)[1].split(probe_end, 1)[0]
         self.assertIn("static __used noinline int "

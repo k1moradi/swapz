@@ -14963,3 +14963,12 @@ proven. Direct compressed handoff remains **NO_GO**. No upper
 `PHYSICAL=NOT_RUN`; Phase A BLOCKED, forced RAW bypass DISABLED,
 direct compressed DISABLED. RAW remains ORIGINAL UNCOMPRESSED 4096;
 SWAPSPACE2 header/UUID/table preserved, codec/gen/GC metadata volatile.
+
+### Round 026 — Agent 3 post-publication source-audit correction
+
+The original Round024/025 regression counted two guarded optional
+`SWAPZ_ROUND024_DM_IMPORT_KBUILD_PROBE` blocks. New Round026 source adds
+exactly a third source-only block; its test now requires three distinct
+preprocessor guards while retaining the one original Round024 closing
+marker and single source-owned Round024 importer function. This changes
+only the owned host test, not the production DM or default compiled C.

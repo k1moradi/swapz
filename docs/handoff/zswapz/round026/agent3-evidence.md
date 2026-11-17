@@ -73,3 +73,12 @@ Current RAW is original **uncompressed** 4096 bytes. The existing
 SWAPSPACE2 first 4096 header/UUID/signature and partition table are
 unchanged; physical data area never touched. zswap alone owns memory
 pressure and compressed-RAM eviction; swapz only disk tier.
+
+## Post-publication preflight correction
+
+Source audit of Round026's independent third default-off Kbuild gate
+identified an outdated hard-coded original-test assertion expecting
+only two `SWAPZ_ROUND024_DM_IMPORT_KBUILD_PROBE` occurrences. Follow-up
+expects three blocks without touching any production or other worker
+source. This was detected before claiming a completed CI pass; the
+first actual compiler/source result is governed by the corrected SHA.
