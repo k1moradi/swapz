@@ -1025,6 +1025,50 @@ unlock_cluster:
 """
 
 
+# Round028 immutable-source active transitions only in exact opt-in profile.
+# The local source patches are not a torvalds/linux upstream commit.
+ROUND028_EPOCH_PROFILE = "CI_ONLY_MM_MINT_RETIRE_STORE_NO_BIO"
+ROUND028_ALLOCATOR_EDITS = (
+    Edit("#include <linux/plist.h>\n",
+         "#include <linux/plist.h>\n" + "#if defined(SWAPZ_ROUND028_SLOT_EPOCH_SOURCE)\n#include <linux/xarray.h>\n#include <linux/atomic.h>\n#include <linux/limits.h>\n#endif\n\n"),
+    Edit("static bool folio_swapcache_freeable(struct folio *folio);",
+         "static bool folio_swapcache_freeable(struct folio *folio);\n" + "#if defined(SWAPZ_ROUND028_SLOT_EPOCH_SOURCE)\nstatic void swapz_round028_slot_allocated(swp_entry_t slot);\nstatic void swapz_round028_slot_retired(swp_entry_t slot);\nstatic void swapz_round028_slot_swapoff(unsigned int type);\nu64 swapz_round028_slot_epoch(swp_entry_t slot);\n#endif\n".rstrip("\n")),
+    Edit("\tswap_range_alloc(si, nr_pages);\n\n\treturn true;",
+         "\tswap_range_alloc(si, nr_pages);\n" + "#if defined(SWAPZ_ROUND028_SLOT_EPOCH_SOURCE)\n\t/* The slot table/count commit occurred above under ci->lock. Issue one\n\t * incarnation per page, including large folios and hibernation.\n\t */\n\t{\n\t\tunsigned int page_index;\n\n\t\tfor (page_index = 0; page_index < nr_pages; ++page_index)\n\t\t\tswapz_round028_slot_allocated(swp_entry(si->type,\n\t\t\t\tci_off + cluster_offset(si, ci) + page_index));\n\t}\n#endif\n" + "\n\treturn true;"),
+    Edit("\t\t__swap_table_set(ci, ci_off, null_to_swp_tb());",
+         "#if defined(SWAPZ_ROUND028_SLOT_EPOCH_SOURCE)\n\t\t/* Remove old incarnation before the slot becomes allocatable. */\n\t\tswapz_round028_slot_retired(swp_entry(si->type, ci_head + ci_off));\n#endif\n" + "\t\t__swap_table_set(ci, ci_off, null_to_swp_tb());"),
+    Edit("\tzswap_swapoff(p->type);\n\tmutex_unlock(&swapon_mutex);",
+         "\tzswap_swapoff(p->type);\n" + "#if defined(SWAPZ_ROUND028_SLOT_EPOCH_SOURCE)\n\tswapz_round028_slot_swapoff(p->type);\n#endif\n" + "\tmutex_unlock(&swapon_mutex);"),
+    Edit(ROUND026_ALLOCATOR_EPOCH_ANCHOR,
+         ROUND026_ALLOCATOR_EPOCH_SOURCE + "\n/*\n * Round028 opt-in original allocator incarnation observation. All mutations\n * execute at genuine slot assignment, final free and quiescent swapoff.\n * The xarray contains only active slots and may fail allocation; on failure\n * this observation is ABSENT and ordinary allocation still proceeds.\n *\n * Swap-entry .val selects the (type,offset) namespace, while the global\n * monotonic integer remains unique across swapoff/swapon type reuse.\n * Neither a slot epoch nor a STORE digest authenticates a BIO carrier.\n * Compiled only with the explicit CI-only KCFLAGS macro.\n */\n#if defined(SWAPZ_ROUND028_SLOT_EPOCH_SOURCE)\nstatic DEFINE_XARRAY(swapz_round028_slot_epochs);\nstatic atomic64_t swapz_round028_epoch_counter = ATOMIC64_INIT(0);\n\n/* ROUND028_MM_EPOCH_MINT_START */\nstatic __attribute__((__used__, __noinline__)) u64\nswapz_round028_epoch_mint(void)\n{\n\ts64 previous;\n\ts64 next;\n\n\tdo {\n\t\tprevious = atomic64_read(&swapz_round028_epoch_counter);\n\t\t/* xa_mk_value() retains only positive signed-long integers.\n\t\t * No wrap/reissue is possible: exhaustion permanently refuses.\n\t\t */\n\t\tif (previous < 0 || previous >= LONG_MAX)\n\t\t\treturn 0;\n\t\tnext = previous + 1;\n\t} while (atomic64_cmpxchg(&swapz_round028_epoch_counter,\n\t\t\t\t previous, next) != previous);\n\treturn (u64)next;\n}\n/* ROUND028_MM_EPOCH_MINT_END */\n\nstatic void swapz_round028_slot_allocated(swp_entry_t slot)\n{\n\tvoid *previous;\n\tu64 epoch = swapz_round028_epoch_mint();\n\n\tif (!epoch) {\n\t\txa_erase(&swapz_round028_slot_epochs, slot.val);\n\t\treturn;\n\t}\n\tprevious = xa_cmpxchg(&swapz_round028_slot_epochs, slot.val,\n\t\t\t      NULL, xa_mk_value((unsigned long)epoch),\n\t\t\t      GFP_ATOMIC);\n\t/* A duplicate/failed issuance must never expose an old epoch. */\n\tif (xa_is_err(previous) || previous)\n\t\txa_erase(&swapz_round028_slot_epochs, slot.val);\n}\n\nstatic void swapz_round028_slot_retired(swp_entry_t slot)\n{\n\txa_erase(&swapz_round028_slot_epochs, slot.val);\n}\n\n/*\n * zswap_store_page() holds the locked original folio while observing this.\n * The cluster lock supplies the same MM table consistency as free/allocate.\n * A later recheck and stored-entry lifetime are independently necessary.\n */\nu64 swapz_round028_slot_epoch(swp_entry_t slot)\n{\n\tstruct swap_info_struct *si;\n\tstruct swap_cluster_info *ci;\n\tunsigned long offset = swp_offset(slot);\n\tunsigned long slot_state;\n\tvoid *current;\n\tu64 epoch = 0;\n\n\tsi = get_swap_device(slot);\n\tif (IS_ERR_OR_NULL(si))\n\t\treturn 0;\n\tci = swap_cluster_lock(si, offset);\n\tlockdep_assert_held(&ci->lock);\n\tif (cluster_table_is_alloced(ci)) {\n\t\tslot_state = __swap_table_get(ci, offset % SWAPFILE_CLUSTER);\n\t\tif (!swp_tb_is_null(slot_state) && !swp_tb_is_bad(slot_state)) {\n\t\t\tcurrent = xa_load(&swapz_round028_slot_epochs, slot.val);\n\t\t\tif (xa_is_value(current))\n\t\t\t\tepoch = (u64)xa_to_value(current);\n\t\t}\n\t}\n\tswap_cluster_unlock(ci);\n\tput_swap_device(si);\n\treturn epoch;\n}\n\n/* No slot from this previous device incarnation may survive type reuse. */\nstatic void swapz_round028_slot_swapoff(unsigned int type)\n{\n\tunsigned long index;\n\tvoid *entry;\n\tswp_entry_t slot;\n\n\txa_for_each(&swapz_round028_slot_epochs, index, entry) {\n\t\tslot.val = index;\n\t\tif (swp_type(slot) == type)\n\t\t\txa_erase(&swapz_round028_slot_epochs, index);\n\t}\n}\n#endif /* SWAPZ_ROUND028_SLOT_EPOCH_SOURCE */\n\n" +
+         ROUND026_ALLOCATOR_EPOCH_ANCHOR),
+)
+ROUND028_ZSWAP_EDITS = (
+    Edit("#include <linux/zsmalloc.h>\n",
+         "#include <linux/zsmalloc.h>\n" + "#if defined(SWAPZ_ROUND028_SLOT_EPOCH_SOURCE)\n#include <crypto/sha2.h>\n#include <linux/limits.h>\n#endif\n"),
+    Edit("struct zswap_entry {\n",
+         "struct zswap_entry {\n" + "#if defined(SWAPZ_ROUND028_SLOT_EPOCH_SOURCE)\n\t/* Observational source-only state. No authenticated BIO transport. */\n\tu64 swapz_round028_allocation_epoch;\n\tu64 swapz_round028_stored_entry_identity;\n\tu8 swapz_round028_store_sha256[SHA256_DIGEST_SIZE];\n\tbool swapz_round028_store_bound;\n#endif\n"),
+    Edit("static unsigned int nr_zswap_trees[MAX_SWAPFILES];",
+         "static unsigned int nr_zswap_trees[MAX_SWAPFILES];\n" +
+         "#if defined(SWAPZ_ROUND028_SLOT_EPOCH_SOURCE)\n/* Only original MM, not a caller-provided BIO scalar, mints these epochs. */\nextern u64 swapz_round028_slot_epoch(swp_entry_t slot);\nstatic atomic64_t swapz_round028_stored_entry_counter = ATOMIC64_INIT(0);\nstatic u64 swapz_round028_next_stored_entry_identity(void)\n{\n\ts64 previous;\n\ts64 next;\n\n\tdo {\n\t\tprevious = atomic64_read(&swapz_round028_stored_entry_counter);\n\t\tif (previous < 0 || previous >= LONG_MAX)\n\t\t\treturn 0;\n\t\tnext = previous + 1;\n\t} while (atomic64_cmpxchg(&swapz_round028_stored_entry_counter,\n\t\t\t\t previous, next) != previous);\n\treturn (u64)next;\n}\n#endif\n\n".rstrip("\n")),
+    Edit("\tif (!zswap_compress(folio, index, entry, pool))",
+         "\n#if defined(SWAPZ_ROUND028_SLOT_EPOCH_SOURCE)\n\t/* The original folio is locked and owns exact original 4096 bytes.\n\t * No MM spinlock is held while hashing this plaintext.\n\t */\n\t{\n\t\tvoid *original_page;\n\n\t\tentry->swapz_round028_store_bound = false;\n\t\tentry->swapz_round028_allocation_epoch =\n\t\t\tswapz_round028_slot_epoch(page_swpentry);\n\t\tentry->swapz_round028_stored_entry_identity =\n\t\t\tswapz_round028_next_stored_entry_identity();\n\t\tmemset(entry->swapz_round028_store_sha256, 0,\n\t\t       sizeof(entry->swapz_round028_store_sha256));\n\t\tif (entry->swapz_round028_allocation_epoch &&\n\t\t    entry->swapz_round028_stored_entry_identity) {\n\t\t\toriginal_page = kmap_local_folio(folio, index * PAGE_SIZE);\n\t\t\tsha256(original_page, PAGE_SIZE,\n\t\t\t       entry->swapz_round028_store_sha256);\n\t\t\tkunmap_local(original_page);\n\t\t\tentry->swapz_round028_store_bound = true;\n\t\t}\n\t}\n#endif\n" +
+         "\tif (!zswap_compress(folio, index, entry, pool))"),
+    Edit("\t/*\n\t * Set pool_idx before the xa_store() below publishes the entry,",
+         "#if defined(SWAPZ_ROUND028_SLOT_EPOCH_SOURCE)\n\t/* A rejected/retired incarnation must not carry STORE evidence even\n\t * if ordinary compression proceeds through the original fallback.\n\t */\n\tif (entry->swapz_round028_store_bound &&\n\t    entry->swapz_round028_allocation_epoch !=\n\t\t    swapz_round028_slot_epoch(page_swpentry))\n\t\tentry->swapz_round028_store_bound = false;\n#endif\n\n" + "\t/*\n\t * Set pool_idx before the xa_store() below publishes the entry,"),
+    Edit("\tif (entry != xa_load(tree, offset)) {\n\t\tret = -ENOMEM;\n\t\tgoto err;\n\t}\n\n",
+         "\tif (entry != xa_load(tree, offset)) {\n\t\tret = -ENOMEM;\n\t\tgoto err;\n\t}\n\n" +
+         "#if defined(SWAPZ_ROUND028_SLOT_EPOCH_SOURCE)\n\t/* The existing locked swapcache and tree match are prerequisites.\n\t * This check is diagnostic only; decompressed original WRITE remains.\n\t */\n\tif (entry->swapz_round028_store_bound &&\n\t    entry->swapz_round028_allocation_epoch !=\n\t\t    swapz_round028_slot_epoch(swpentry))\n\t\tentry->swapz_round028_store_bound = false;\n#endif\n\n"),
+    Edit("\tzswap_entry_cache_free(entry);\n\tatomic_long_dec(&zswap_stored_pages);",
+         "#if defined(SWAPZ_ROUND028_SLOT_EPOCH_SOURCE)\n\t/* Invalidate stored-entry proof before slab reuse or pool replacement. */\n\tentry->swapz_round028_store_bound = false;\n\tmemset(entry->swapz_round028_store_sha256, 0,\n\t       sizeof(entry->swapz_round028_store_sha256));\n#endif\n" + "\tzswap_entry_cache_free(entry);\n\tatomic_long_dec(&zswap_stored_pages);"),
+)
+ROUND028_ZSWAP_HASH_RESTORATIONS = (
+    "\n#if defined(SWAPZ_ROUND028_SLOT_EPOCH_SOURCE)\n\t/* The original folio is locked and owns exact original 4096 bytes.\n\t * No MM spinlock is held while hashing this plaintext.\n\t */\n\t{\n\t\tvoid *original_page;\n\n\t\tentry->swapz_round028_store_bound = false;\n\t\tentry->swapz_round028_allocation_epoch =\n\t\t\tswapz_round028_slot_epoch(page_swpentry);\n\t\tentry->swapz_round028_stored_entry_identity =\n\t\t\tswapz_round028_next_stored_entry_identity();\n\t\tmemset(entry->swapz_round028_store_sha256, 0,\n\t\t       sizeof(entry->swapz_round028_store_sha256));\n\t\tif (entry->swapz_round028_allocation_epoch &&\n\t\t    entry->swapz_round028_stored_entry_identity) {\n\t\t\toriginal_page = kmap_local_folio(folio, index * PAGE_SIZE);\n\t\t\tsha256(original_page, PAGE_SIZE,\n\t\t\t       entry->swapz_round028_store_sha256);\n\t\t\tkunmap_local(original_page);\n\t\t\tentry->swapz_round028_store_bound = true;\n\t\t}\n\t}\n#endif\n",
+    "#if defined(SWAPZ_ROUND028_SLOT_EPOCH_SOURCE)\n\t/* A rejected/retired incarnation must not carry STORE evidence even\n\t * if ordinary compression proceeds through the original fallback.\n\t */\n\tif (entry->swapz_round028_store_bound &&\n\t    entry->swapz_round028_allocation_epoch !=\n\t\t    swapz_round028_slot_epoch(page_swpentry))\n\t\tentry->swapz_round028_store_bound = false;\n#endif\n\n",
+    "#if defined(SWAPZ_ROUND028_SLOT_EPOCH_SOURCE)\n\t/* The existing locked swapcache and tree match are prerequisites.\n\t * This check is diagnostic only; decompressed original WRITE remains.\n\t */\n\tif (entry->swapz_round028_store_bound &&\n\t    entry->swapz_round028_allocation_epoch !=\n\t\t    swapz_round028_slot_epoch(swpentry))\n\t\tentry->swapz_round028_store_bound = false;\n#endif\n\n",
+)
+
+
 def validate_round026_allocator_epoch_source(source: str) -> None:
     """Freeze actual cluster lock lifetime, no minted epoch or success."""
     required = (
@@ -1207,14 +1251,20 @@ def check_preimage(path: str, payload: bytes, expected_hash: str) -> None:
 def render_source(path: str, original: str, *, compressed_handoff: bool = False,
                   round024_probe: bool = False,
                   round025_store_proof: bool = False,
-                  round026_allocator_probe: bool = False) -> str:
+                  round026_allocator_probe: bool = False,
+                  round028_slot_epoch_source: bool = False) -> str:
     """Reject missing, duplicate and overlapping anchors before any mutation."""
     edits = EDITS.get(path, KUNIT_EDITS.get(path))
     if path == "mm/swapfile.c":
         if not round026_allocator_probe:
             raise StagingError("round026-allocator-requires-opt-in")
         validate_round026_allocator_epoch_source(ROUND026_ALLOCATOR_EPOCH_SOURCE)
-        edits = ROUND026_ALLOCATOR_EPOCH_EDITS[path]
+        edits = (ROUND028_ALLOCATOR_EDITS if round028_slot_epoch_source
+                 else ROUND026_ALLOCATOR_EPOCH_EDITS[path])
+    if round028_slot_epoch_source and path == "mm/zswap.c":
+        edits = edits + ROUND028_ZSWAP_EDITS
+    if round028_slot_epoch_source and path not in ("mm/swapfile.c", "mm/zswap.c"):
+        raise StagingError("round028-invalid-source-path")
     if compressed_handoff and (round024_probe or round025_store_proof):
         raise StagingError("incompatible-producer-profiles")
     if round025_store_proof and not round024_probe:
@@ -1293,7 +1343,11 @@ def verify_pinned_zswap_producer(staged_source: str) -> None:
             if probe_start < start or probe_start >= end:
                 raise StagingError("invalid-round024-probe-placement")
             end = probe_start
-        if blob_sha(staged_source[start:end].encode("utf-8")) != expected_blob:
+        original_slice = staged_source[start:end]
+        if "SWAPZ_ROUND028_SLOT_EPOCH_SOURCE" in staged_source:
+            for insertion in ROUND028_ZSWAP_HASH_RESTORATIONS:
+                original_slice = original_slice.replace(insertion, "")
+        if blob_sha(original_slice.encode("utf-8")) != expected_blob:
             raise StagingError("pinned-producer-causality-drift:" + label)
         positions.append(start)
 
@@ -1499,7 +1553,8 @@ def stage_checkout(root: Path, manifest_path: Path, *, with_kunit: bool = False,
                    with_compressed_handoff: bool = False,
                    with_round024_probe: bool = False,
                    with_round025_store_proof: bool = False,
-                   with_round026_allocator_probe: bool = False) -> dict[str, object]:
+                   with_round026_allocator_probe: bool = False,
+                   with_round028_slot_epoch_source: bool = False) -> dict[str, object]:
     try:
         root = root.resolve(strict=True)
     except OSError as error:
@@ -1507,6 +1562,8 @@ def stage_checkout(root: Path, manifest_path: Path, *, with_kunit: bool = False,
     manifest_path = manifest_path.resolve(strict=False)
     if manifest_path == root or root in manifest_path.parents:
         raise StagingError("manifest-must-be-outside-linux-checkout")
+    if with_round028_slot_epoch_source and not with_round026_allocator_probe:
+        raise StagingError("round028-requires-original-allocator-profile")
     validate_checkout(root, with_kunit=with_kunit,
                       with_round026_allocator_probe=with_round026_allocator_probe)
 
@@ -1532,6 +1589,8 @@ def stage_checkout(root: Path, manifest_path: Path, *, with_kunit: bool = False,
                                  path == "mm/zswap.c"),
             round026_allocator_probe=(with_round026_allocator_probe and
                                      path == "mm/swapfile.c"),
+            round028_slot_epoch_source=(with_round028_slot_epoch_source and
+                                       path in ("mm/swapfile.c", "mm/zswap.c")),
         ).encode("utf-8")
     if with_kunit:
         addition = root / KUNIT_SOURCE_PATH
@@ -1602,6 +1661,10 @@ def stage_checkout(root: Path, manifest_path: Path, *, with_kunit: bool = False,
     if with_round025_store_proof:
         result["round025_store_proof"] = "TEMPORARY_SHA_SNAPSHOT_NO_SLOT_EPOCH"
         result["round025_store_proof_compiled"] = False
+        result["direct_compressed_handoff_enabled"] = False
+    if with_round028_slot_epoch_source:
+        result["round028_epoch_store_binding"] = ROUND028_EPOCH_PROFILE
+        result["round028_epoch_compiled"] = False
         result["direct_compressed_handoff_enabled"] = False
     if with_round026_allocator_probe:
         result["round026_allocator_epoch"] = "NO_AUTHENTIC_GENERATION_NO_GO"
@@ -1680,6 +1743,9 @@ def main() -> int:
     parser.add_argument("--with-round026-allocator-epoch-probe",
                         action="store_true",
                         help="CI-only source-real mm/swapfile.c NO_GO lock proof")
+    parser.add_argument("--with-round028-slot-epoch-source",
+                        action="store_true",
+                        help="CI-only real MM mint/retire and STORE digest binding")
     arguments = parser.parse_args()
     try:
         result = stage_checkout(arguments.linux_root, arguments.manifest,
@@ -1691,7 +1757,9 @@ def main() -> int:
                                 with_round025_store_proof=
                                     arguments.with_round025_store_proof_probe,
                                 with_round026_allocator_probe=
-                                    arguments.with_round026_allocator_epoch_probe)
+                                    arguments.with_round026_allocator_epoch_probe,
+                                with_round028_slot_epoch_source=
+                                    arguments.with_round028_slot_epoch_source)
     except (StagingError, OSError, UnicodeError, ValueError) as error:
         print(f"FAIL: {error}", file=sys.stderr)
         return 1

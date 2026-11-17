@@ -226,8 +226,17 @@ def load_source_manifest(path: Path) -> list[dict[str, object]]:
         require("round026_allocator_epoch" not in record and
                 "round026_allocator_probe_compiled" not in record,
                 "source_manifest_allocator_profile")
+    # Round028 optional epoch/store evidence is permitted only on the exact
+    # original seven-source allocator profile, and never asserts compilation.
+    if ("round028_epoch_store_binding" in record or
+            "round028_epoch_compiled" in record):
+        require(paths == ALLOCATOR_PATCHED_PATHS and
+                record.get("round028_epoch_store_binding") ==
+                    "CI_ONLY_MM_MINT_RETIRE_STORE_NO_BIO" and
+                record.get("round028_epoch_compiled") is False and
+                record.get("direct_compressed_handoff_enabled") is False,
+                "source_manifest_round028_profile")
     return entries
-
 
 
 def baseline_warning_summary(counts: tuple[int, ...]) -> tuple[int, str, str]:
@@ -809,6 +818,39 @@ class PairedModuleTests(unittest.TestCase):
         self.assertIn("paired-build-invalid: source_manifest_allocator_profile",
                       rejected.stderr)
         self.assertNotIn(str(self.scratch.name), rejected.stderr)
+
+    def test_round028_exact_seven_epoch_source_and_forged_field_rejections(self) -> None:
+        """Synthetic source metadata only, not a pinned Linux build."""
+        self.enable_round027_allocator_fixture()
+        metadata = json.loads(self.source_manifest.read_text())
+        metadata["round028_epoch_store_binding"] = (
+            "CI_ONLY_MM_MINT_RETIRE_STORE_NO_BIO")
+        metadata["round028_epoch_compiled"] = False
+        self.source_manifest.write_text(json.dumps(metadata) + "\n")
+        load_source_manifest(self.source_manifest)
+        # Preserve the earlier strict SHA256-checked compiled object set.
+        self.put("mm/swapfile.o", b"synthetic-allocator-object", self.build)
+        self.save()
+        self.check()
+        for name, replacement in (
+            ("round028_epoch_store_binding", "caller-forged"),
+            ("round028_epoch_compiled", True),
+            ("direct_compressed_handoff_enabled", True),
+        ):
+            with self.subTest(name=name):
+                bad = dict(metadata)
+                bad[name] = replacement
+                self.source_manifest.write_text(json.dumps(bad) + "\n")
+                with self.assertRaisesRegex(
+                        VerificationError, "source_manifest_round028_profile"):
+                    load_source_manifest(self.source_manifest)
+        metadata["changed_paths"] = [
+            entry for entry in metadata["changed_paths"]
+            if entry["path"] != ALLOCATOR_PATCHED_PATH]
+        self.source_manifest.write_text(json.dumps(metadata) + "\n")
+        with self.assertRaisesRegex(
+                VerificationError, "source_manifest_round028_profile"):
+            load_source_manifest(self.source_manifest)
 
     def test_round027_exact_six_default_and_seven_allocator_y_n(self) -> None:
         self.check()

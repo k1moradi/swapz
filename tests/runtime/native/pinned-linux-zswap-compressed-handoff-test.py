@@ -435,6 +435,59 @@ class CompressedHandoffTests(unittest.TestCase):
                                             text=True, timeout=40)
                     self.assertEqual(result.returncode, 0, result.stderr)
 
+    def test_round028_source_actual_monotonic_epoch_mint_gcc_clang(self) -> None:
+        """Actual source-extracted MM counter, not a synthetic C rewrite."""
+        source = stage.ROUND028_ALLOCATOR_EDITS[-1].after
+        start = "/* ROUND028_MM_EPOCH_MINT_START */"
+        end = "/* ROUND028_MM_EPOCH_MINT_END */"
+        self.assertEqual(source.count(start), 1)
+        self.assertEqual(source.count(end), 1)
+        real = source.split(start, 1)[1].split(end, 1)[0]
+        self.assertIn("atomic64_cmpxchg(", real)
+        self.assertIn("LONG_MAX", real)
+        self.assertIn("swapz_round028_slot_allocated(", source)
+        self.assertIn("swapz_round028_slot_retired(", source)
+        self.assertIn("swapz_round028_slot_swapoff(", source)
+        self.assertIn("swapz_round028_slot_epoch(", source)
+        self.assertEqual(stage.ROUND028_EPOCH_PROFILE,
+                         "CI_ONLY_MM_MINT_RETIRE_STORE_NO_BIO")
+        store = "".join(edit.after for edit in stage.ROUND028_ZSWAP_EDITS)
+        for required in ("swapz_round028_slot_epoch(page_swpentry)",
+                         "sha256(original_page, PAGE_SIZE,",
+                         "swapz_round028_store_bound = true;",
+                         "swapz_round028_slot_epoch(swpentry)",
+                         "swapz_round028_store_bound = false;"):
+            self.assertIn(required, store)
+        # Never read devices or sysfs: this fixture only executes extracted
+        # original-source atomic issuance under synthetic pthread contention.
+        fixture = (STAGER.parents[2] / "tests/runtime/native/fixtures" /
+                   "round028-producer-epoch.c").read_text(encoding="utf-8")
+        token = "/* ROUND028_SOURCE_REAL_EPOCH_MINT */"
+        self.assertEqual(fixture.count(token), 1)
+        executable_source = fixture.replace(token, real, 1)
+        with tempfile.TemporaryDirectory(prefix="round028-mint-") as folder:
+            program = Path(folder) / "mint.c"
+            program.write_text(executable_source, encoding="utf-8")
+            compilers = [name for name in ("gcc", "clang") if shutil.which(name)]
+            self.assertTrue(compilers)
+            for compiler in compilers:
+                with self.subTest(compiler=compiler):
+                    executable = Path(folder) / compiler
+                    process = subprocess.run([
+                        compiler, "-std=gnu11", "-O1", "-g", "-Wall",
+                        "-Wextra", "-Wconversion", "-Wshadow", "-Werror",
+                        "-pthread", "-fsanitize=address,undefined",
+                        "-fno-sanitize-recover=all", str(program),
+                        "-o", str(executable),
+                    ], capture_output=True, text=True, timeout=60, check=False)
+                    self.assertEqual(process.returncode, 0, process.stderr)
+                    executed = subprocess.run([str(executable)],
+                                              capture_output=True, text=True,
+                                              timeout=40, check=False)
+                    self.assertEqual(executed.returncode, 0, executed.stderr)
+                    self.assertIn("ROUND028_EPOCH_SOURCE_REAL_MINT_PASS",
+                                  executed.stdout)
+
     def test_round026_real_swap_allocator_lock_epoch_no_go(self):
         # Exact original pinned mm/swapfile.c function is compiled below.
         # A reused swap slot with identical table bits remains a NO_GO.

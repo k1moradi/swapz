@@ -173,7 +173,8 @@ jobs:
               --linux-root linux --manifest "$evidence_dir/source-manifest.json" \
               --with-round024-zswap-kbuild-probe \
               --with-round025-store-proof-probe \
-              --with-round026-allocator-epoch-probe; then
+              --with-round026-allocator-epoch-probe \
+              --with-round028-slot-epoch-source; then
             echo "::error::Exact Linux identity/blob or source staging failure"
             exit 1
           fi
@@ -191,6 +192,13 @@ jobs:
              ! grep -Fq '"round026_allocator_probe_compiled": false' \
                     "$evidence_dir/source-manifest.json"; then
             echo "::error::Round026 allocator source epoch must refuse"
+            exit 3
+          fi
+          if ! grep -Fq '"round028_epoch_store_binding": "CI_ONLY_MM_MINT_RETIRE_STORE_NO_BIO"' \
+                  "$evidence_dir/source-manifest.json" ||
+             ! grep -Fq '"round028_epoch_compiled": false' \
+                  "$evidence_dir/source-manifest.json"; then
+            echo "::error::Round028 original MM/store source profile missing"
             exit 3
           fi
           git -C linux diff --check -- \
@@ -403,7 +411,15 @@ jobs:
               # lock/slot observation; no allocator-issued epoch exists.
               run_logged round026_allocator_real_kbuild make -s -C linux \
                 "O=$build_dir" CC=gcc "-j$KBUILD_JOBS" W=1 \
-                KCFLAGS="-DSWAPZ_ROUND026_SLOT_EPOCH_PROBE=1 -Werror" mm/swapfile.o
+                KCFLAGS="-DSWAPZ_ROUND026_SLOT_EPOCH_PROBE=1 -DSWAPZ_ROUND028_SLOT_EPOCH_SOURCE=1 -Werror" mm/swapfile.o
+              current_phase=round028_allocator_real_epoch_machine_code
+              for symbol in swapz_round028_epoch_mint swapz_round028_slot_epoch; do
+                if ! nm -a "$build_dir/mm/swapfile.o" |
+                    grep -q "$symbol"; then
+                  echo "::error::Original MM allocator missing Round028 $symbol" >&2
+                  exit 3
+                fi
+              done
               current_phase=round026_allocator_verify_machine_code
               if ! nm -a "$build_dir/mm/swapfile.o" |
                   grep -q 'swapz_round026_allocator_epoch_probe'; then
@@ -420,7 +436,7 @@ jobs:
                 KCFLAGS=-Werror mm/swapfile.o
               current_phase=round026_allocator_verify_restored_default
               if nm -a "$build_dir/mm/swapfile.o" |
-                  grep -q 'swapz_round026_allocator_epoch_probe'; then
+                  grep -Eq 'swapz_round026_allocator_epoch_probe|swapz_round028_epoch_mint|swapz_round028_slot_epoch'; then
                 echo "::error::Allocator probe leaked into normal kernel"
                 exit 1
               fi
@@ -432,7 +448,7 @@ jobs:
             if [[ "$profile" == enabled ]]; then
               current_phase=round024_default_producer_off
               if nm -a "$build_dir/mm/zswap.o" |
-                  grep -Eq 'zswap_swapz_round024_producer_kbuild_probe|zswap_swapz_round025_store_digest_probe'; then
+                  grep -Eq 'zswap_swapz_round024_producer_kbuild_probe|zswap_swapz_round025_store_digest_probe|swapz_round028_slot_epoch'; then
                 echo "::error::Default producer includes CI-only proof function" >&2
                 exit 1
               fi
@@ -451,8 +467,14 @@ jobs:
               # compressed transport can be established by an object build.
               run_logged round025_original_store_sha_probe make -s -C linux \
                 "O=$build_dir" CC=gcc "-j$KBUILD_JOBS" W=1 \
-                KCFLAGS="-DSWAPZ_ROUND025_STORE_PROOF_KBUILD_PROBE=1 -Werror" \
+                KCFLAGS="-DSWAPZ_ROUND025_STORE_PROOF_KBUILD_PROBE=1 -DSWAPZ_ROUND028_SLOT_EPOCH_SOURCE=1 -Werror" \
                 mm/zswap.o
+              current_phase=round028_store_epoch_linked_source
+              if ! nm -a "$build_dir/mm/zswap.o" |
+                  grep -q 'swapz_round028_slot_epoch'; then
+                echo "::error::Original zswap STORE lacks Round028 allocator epoch source" >&2
+                exit 3
+              fi
               current_phase=round025_verify_compiled_original_sha_source
               if ! nm -a "$build_dir/mm/zswap.o" |
                   grep -q 'zswap_swapz_round025_store_digest_probe'; then
@@ -475,7 +497,7 @@ jobs:
                 KCFLAGS=-Werror mm/zswap.o
               current_phase=round024_verify_default_restore
               if nm -a "$build_dir/mm/zswap.o" |
-                  grep -Eq 'zswap_swapz_round024_producer_kbuild_probe|zswap_swapz_round025_store_digest_probe'; then
+                  grep -Eq 'zswap_swapz_round024_producer_kbuild_probe|zswap_swapz_round025_store_digest_probe|swapz_round028_slot_epoch'; then
                 echo "::error::CI-only producer leaked into default build" >&2
                 exit 1
               fi
