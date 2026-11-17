@@ -1,0 +1,192 @@
+#!/usr/bin/env python3
+"""Round031 real one-tree pinned original MM+BIO C composition regression.
+
+Tests consume the exact source C emitted by the one-tree composer. Host mocks
+are not source authentication, loaded kernel execution or device proof.
+"""
+from __future__ import annotations
+
+import importlib.util
+import os
+from pathlib import Path
+import shutil
+import subprocess
+import sys
+import tempfile
+import unittest
+
+
+ROOT = Path(__file__).resolve().parents[3]
+STAGER = ROOT / "tests/tools/stage-pinned-linux-zswap-composed.py"
+MODULE_SPEC = importlib.util.spec_from_file_location("round031_composer", STAGER)
+assert MODULE_SPEC and MODULE_SPEC.loader
+stage = importlib.util.module_from_spec(MODULE_SPEC)
+sys.modules[MODULE_SPEC.name] = stage
+MODULE_SPEC.loader.exec_module(stage)
+FIXTURES = ROOT / "tests/runtime/native/fixtures"
+
+
+class OriginalMMAndBIOComposer(unittest.TestCase):
+    def test_frozen_exact_original_source_and_unmodified_stagers(self):
+        self.assertEqual(stage.PINNED_SHA,
+                         "c339f4010dea8b0d754f84ace70cd1b089878ef8")
+        self.assertEqual(stage.ORIGIN.LINUX_COMMIT, stage.PINNED_SHA)
+        self.assertEqual(stage.BIO.PINNED_LINUX_COMMIT, stage.PINNED_SHA)
+        self.assertEqual(
+            stage.BIO.PINNED_BLOBS["block/bio.c"],
+            stage.ORIGIN.ORIGINAL_BLOBS["block/bio.c"])
+        self.assertEqual(stage.ROUND031_MM_BIO_MACRO,
+                         "SWAPZ_ROUND031_MM_BIO_SOURCE")
+        self.assertIn("SWAPZ_ROUND025_SIDEBAND_CI_ONLY",
+                      stage.ROUND031_ALL_FLAGS)
+        self.assertNotIn("bio_endio(", stage.ROUND031_MM_BIO_SOURCE)
+        self.assertIn("PAGE_SIZE != 4096U", stage.ROUND031_MM_BIO_SOURCE)
+        self.assertIn("entry->swapz_round028_allocation_epoch",
+                      stage.ROUND031_MM_BIO_SOURCE)
+        self.assertIn("zs_obj_read_sg_begin(", stage.ROUND031_MM_BIO_SOURCE)
+        self.assertIn("zs_obj_read_sg_end(", stage.ROUND031_MM_BIO_SOURCE)
+        self.assertIn("entry->swapz_round028_store_sha256",
+                      stage.ROUND031_MM_BIO_SOURCE)
+        self.assertIn("swapz_ci_owned_create(", stage.ROUND031_MM_BIO_SOURCE)
+        self.assertIn("kfree_sensitive(compressed_snapshot);",
+                      stage.ROUND031_MM_BIO_SOURCE)
+        self.assertNotIn("swapz_zswap_admission_try_live",
+                         stage.ROUND031_MM_BIO_SOURCE)
+
+    def test_diff3_distinct_insertions_identical_dedup_and_refusals(self):
+        original = "alpha\nbeta\ngamma\ndelta\n"
+        mm = "alpha\nMM\nbeta\ngamma\ndelta\n"
+        bio = "alpha\nbeta\ngamma\nBIO\ndelta\n"
+        composed = stage.merge_original_postimages(
+            "block/bio.c", original, mm, bio)
+        self.assertEqual(composed, "alpha\nMM\nbeta\ngamma\nBIO\ndelta\n")
+        self.assertEqual(
+            stage.merge_original_postimages("block/bio.c", original, mm, mm),
+            mm)
+        with self.assertRaisesRegex(
+                stage.SourceCompositionError, r"COMPOSE_CONFLICT:block/bio.c"):
+            stage.merge_original_postimages(
+                "block/bio.c", original,
+                "alpha\nMM\nbeta\ngamma\ndelta\n",
+                "alpha\nBIO\nbeta\ngamma\ndelta\n")
+        with self.assertRaisesRegex(stage.SourceCompositionError,
+                                    "original-blob-mismatch"):
+            stage.compose_postimage(
+                "block/bio.c", b"fake unpinned original")
+
+    def test_original_full_source_both_postimages_from_same_preimage(self):
+        linux = os.environ.get("ROUND031_PINNED_LINUX")
+        if not linux:
+            self.skipTest("Exact full original upstream checkout not attached")
+        root = Path(linux)
+        # No in-place original-source modifications during build_plan.
+        expected = {path: stage.ORIGIN.ORIGINAL_BLOBS[path]
+                    for path in stage.ORIGIN.EDITS}
+        expected.update(stage.ORIGIN.ROUND026_ALLOCATOR_ORIGINAL_BLOBS)
+        expected.update(stage.ORIGIN.KUNIT_ORIGINAL_BLOBS)
+        originals = {path: (root / path).read_bytes() for path in expected}
+        resulting = stage.build_plan(originals)
+        self.assertEqual(
+            set(resulting), set(expected) | {stage.ORIGIN.KUNIT_SOURCE_PATH})
+        self.assertEqual((root / "block/bio.c").read_bytes(),
+                         originals["block/bio.c"])
+        for path, produced in resulting.items():
+            with self.subTest(path=path):
+                self.assertNotEqual(produced, originals.get(path, b""))
+                if path in expected:
+                    self.assertEqual(
+                        stage.ORIGIN.blob_sha(originals[path]), expected[path])
+        decoded_bio = resulting["block/bio.c"].decode()
+        decoded_pageio = resulting["mm/page_io.c"].decode()
+        decoded_zswap = resulting["mm/zswap.c"].decode()
+        self.assertIn("swapz_ci_bio_detach", decoded_bio)
+        self.assertIn("SWAP_BIO_ORIGIN_ZSWAP_STORED_WRITEBACK", decoded_bio)
+        self.assertIn("bio->bi_swapz_ci_sideband = ctx->swapz_round031_owned",
+                      decoded_pageio)
+        self.assertIn("swapz_round031_mm_bio_create(", decoded_zswap)
+        self.assertIn("swapz_round030_snapshot_stored_lz4(", decoded_zswap)
+        self.assertIn("swapz_round028_slot_epoch(", decoded_zswap)
+        self.assertIn("swap_write_submit(&ctx);", decoded_zswap)
+
+    def compile_and_run(self, generated: str, *, label: str,
+                        libraries: tuple[str, ...]):
+        compilers = [name for name in ("gcc", "clang") if shutil.which(name)]
+        self.assertEqual(len(compilers), 2,
+                         "GCC and Clang required for Round031 source tests")
+        with tempfile.TemporaryDirectory(prefix="round031-original-mm-bio-") as tmp:
+            source_path = Path(tmp) / f"{label}.c"
+            source_path.write_text(generated, encoding="utf-8")
+            for compiler in compilers:
+                with self.subTest(compiler=compiler, source=label):
+                    artifact = Path(tmp) / (compiler + "-" + label)
+                    compiled = subprocess.run(
+                        [compiler, "-std=gnu11", "-O1", "-g",
+                         "-Wall", "-Wextra", "-Wshadow", "-Wconversion",
+                         "-Werror", "-fno-omit-frame-pointer",
+                         "-fsanitize=address,undefined",
+                         "-fno-sanitize-recover=all",
+                         str(source_path), *libraries, "-o", str(artifact)],
+                        capture_output=True, text=True, timeout=60,
+                        check=False)
+                    self.assertEqual(
+                        compiled.returncode, 0,
+                        f"Original {compiler} {label} source C compile: "
+                        + compiled.stderr[-6000:])
+                    ran = subprocess.run(
+                        [str(artifact)], capture_output=True, text=True,
+                        timeout=40, check=False)
+                    self.assertEqual(
+                        ran.returncode, 0,
+                        f"Original {compiler} {label} ASan/UBSan: "
+                        + ran.stderr[-6000:])
+                    self.assertIn("ROUND031_REAL_", ran.stdout)
+
+    def test_original_source_extracted_mm_zsmalloc_owned_bio(self):
+        source = stage.ROUND031_MM_BIO_SOURCE
+        begin = "/* ROUND031_MM_ORIGINAL_OWNED_TRANSFER_START */"
+        end = "/* ROUND031_MM_ORIGINAL_OWNED_TRANSFER_END */"
+        self.assertEqual(source.count(begin), 1)
+        self.assertEqual(source.count(end), 1)
+        real_c = begin + source.split(begin, 1)[1].split(end, 1)[0] + end
+        fixture = (FIXTURES / "round031-composed-mm-owned-host.c").read_text(
+            encoding="utf-8")
+        anchor = "/* ROUND031_EXACT_ORIGINAL_MM_C */"
+        self.assertEqual(fixture.count(anchor), 1)
+        self.compile_and_run(fixture.replace(anchor, real_c, 1),
+                             label="mm", libraries=("-llz4", "-lcrypto"))
+
+    def test_original_source_extracted_pageio_move_and_bio_detach(self):
+        # Extract the actual insertion body, not a re-authored test algorithm.
+        token = ("\tbio->bi_iter.bi_size = sio->len;\n")
+        pageio_stub = (
+            "\tbio->bi_iter.bi_size = sio->len;\n" +
+            stage.apply_mm_bio_source(
+                "mm/page_io.c",
+                token + "\tbio->bi_iter.bi_sector = swap_folio_sector",
+            ).split(token, 1)[1]
+        )
+        self.assertIn(
+            "bio->bi_swapz_ci_sideband = ctx->swapz_round031_owned;",
+            pageio_stub)
+        inserted = pageio_stub.split(token, 1)[1].split(
+            "\tbio->bi_iter.bi_sector", 1)[0]
+        owner_start = "static void swapz_ci_bio_detach(struct bio *bio)"
+        owner_end = "/* A future merge call site MUST"
+        source = stage.BIO.CI_HELPERS
+        self.assertEqual(source.count(owner_start), 1)
+        detached = source.split(owner_start, 1)[1].split(owner_end, 1)[0]
+        real_detach = owner_start + detached
+        fixture = (FIXTURES /
+                   "round031-composed-bio-transfer-host.c").read_text(
+                       encoding="utf-8")
+        self.assertIn("/* ROUND031_EXACT_REAL_BIO_MOVE_C */", fixture)
+        self.assertIn("/* ROUND031_EXACT_REAL_BIO_DETACH_C */", fixture)
+        fixture = fixture.replace(
+            "/* ROUND031_EXACT_REAL_BIO_MOVE_C */", inserted, 1)
+        fixture = fixture.replace(
+            "/* ROUND031_EXACT_REAL_BIO_DETACH_C */", real_detach, 1)
+        self.compile_and_run(fixture, label="bio", libraries=())
+
+
+if __name__ == "__main__":
+    unittest.main(verbosity=2)

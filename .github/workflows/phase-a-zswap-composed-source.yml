@@ -1,0 +1,277 @@
+name: "Round031 composed original pinned Linux MM BIO"
+on:
+  push:
+    branches: [main]
+    paths:
+      - ".github/workflows/phase-a-zswap-composed-source.yml"
+      - "tests/tools/stage-pinned-linux-zswap-composed.py"
+      - "tests/runtime/native/pinned-linux-zswap-composed-source-test.py"
+      - "tests/runtime/native/fixtures/round031-composed-*.c"
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  composed-original-linux:
+    name: "Single pinned original Linux tree CONFIG_ZSWAP=y/n and matched external swapz module"
+    runs-on: ubuntu-24.04
+    timeout-minutes: 105
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          path: swapz
+          persist-credentials: false
+      - uses: actions/checkout@v4
+        with:
+          repository: torvalds/linux
+          ref: c339f4010dea8b0d754f84ace70cd1b089878ef8
+          fetch-depth: 1
+          path: linux
+          persist-credentials: false
+      - name: Install compiler and original kernel Kbuild dependencies
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo apt-get update -qq
+          sudo DEBIAN_FRONTEND=noninteractive apt-get install -y \
+            --no-install-recommends build-essential bc bison flex clang \
+            libelf-dev libssl-dev liblz4-dev python3 binutils
+      - name: Run original MM and BIO source-extracted GCC Clang ASan UBSan
+        shell: bash
+        run: |
+          set -euo pipefail
+          export ROUND031_PINNED_LINUX="$PWD/linux"
+          log="$RUNNER_TEMP/composed-host.log"
+          if python3 -B swapz/tests/runtime/native/pinned-linux-zswap-composed-source-test.py -v \
+              > "$log" 2>&1; then
+            tail -n 15 "$log"
+          else
+            status=$?
+            echo "::error::First original source-extracted C compiler/test failure exit=$status"
+            tail -n 85 "$log"
+            exit "$status"
+          fi
+      - name: Stage ONE exact clean original MM and BIO postimage and verify full manifest
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git -C linux rev-parse HEAD)" = \
+            c339f4010dea8b0d754f84ace70cd1b089878ef8
+          test "$(git -C swapz rev-parse HEAD)" = "$GITHUB_SHA"
+          test -z "$(git -C linux status --porcelain --untracked-files=all)"
+          test -z "$(git -C swapz status --porcelain --untracked-files=all)"
+          python3 -B swapz/tests/tools/stage-pinned-linux-zswap-composed.py \
+            --linux-root linux --manifest "$RUNNER_TEMP/composed-source-manifest.json"
+          python3 - "$RUNNER_TEMP/composed-source-manifest.json" <<'PY'
+          import hashlib,json,pathlib,sys
+          paths=json.loads(pathlib.Path(sys.argv[1]).read_text())["changed_paths"]
+          expected={"block/Kconfig","block/Makefile","block/bio.c",
+            "block/swap-bio-origin-kunit.c","include/linux/bio.h",
+            "include/linux/blk_types.h","include/linux/swap_ops.h",
+            "mm/page_io.c","mm/swapfile.c","mm/zswap.c"}
+          assert len(paths)==10 and {p["path"] for p in paths}==expected
+          for p in paths:
+              assert hashlib.sha256((pathlib.Path("linux")/p["path"]).read_bytes()).hexdigest()==p["staged_sha256"]
+          PY
+          expected="$(printf '%s\n' block/Kconfig block/Makefile block/bio.c \
+            include/linux/bio.h include/linux/blk_types.h include/linux/swap_ops.h \
+            mm/page_io.c mm/swapfile.c mm/zswap.c)"
+          actual="$(git -C linux diff --name-only | LC_ALL=C sort)"
+          test "$actual" = "$expected"
+          test "$(git -C linux ls-files --others --exclude-standard)" = \
+            block/swap-bio-origin-kunit.c
+          git -C linux diff --check
+          grep -Fq 'swapz_round031_mm_bio_create(entry, swpentry, tree, offset)' linux/mm/zswap.c
+          grep -Fq 'bio->bi_swapz_ci_sideband = ctx->swapz_round031_owned;' linux/mm/page_io.c
+      - name: Full original Linux y/n with exact source-only macro machine code and matched swapz.ko
+        shell: bash
+        timeout-minutes: 80
+        run: |
+          set -Eeuo pipefail
+          phase=initial
+          log="$RUNNER_TEMP/composed-first-kbuild.log"
+          evidence="$RUNNER_TEMP/composed-kbuild-evidence.txt"
+          printf 'sha=%s\noriginal=c339f4010dea8b0d754f84ace70cd1b089878ef8\n' \
+            "$GITHUB_SHA" > "$evidence"
+          trap 'code=$?; if ((code)); then printf "result=FAIL\nfirst_phase=%s\nexit=%s\n" "$phase" "$code" >> "$evidence"; fi' EXIT
+          checked() {
+            phase="$1"
+            shift
+            if "$@" > "$log" 2>&1; then
+              printf '%s_exit=0\n' "$phase" >> "$evidence"
+            else
+              code=$?
+              printf '%s_exit=%s\n' "$phase" "$code" >> "$evidence"
+              echo "::error::Actual original Linux first compiler/build failure phase=$phase exit=$code"
+              tail -n 70 "$log"
+              return "$code"
+            fi
+          }
+          flags="-DSWAPZ_ROUND028_SLOT_EPOCH_SOURCE=1 -DSWAPZ_ROUND030_EVICTION_SNAPSHOT_SOURCE=1 -DSWAPZ_ROUND025_SIDEBAND_CI_ONLY=1 -DSWAPZ_ROUND031_MM_BIO_SOURCE=1"
+          info="$RUNNER_TEMP/composed-source-build-info.h"
+          printf '#define SWAPZ_BUILD_SOURCE_SHA "%s"\n#define SWAPZ_BUILD_SOURCE_CLEAN 1\n#define SWAPZ_BUILD_SOURCE_CLEAN_STRING "1"\n' "$GITHUB_SHA" > "$info"
+          for profile in enabled disabled; do
+            out="$RUNNER_TEMP/composed-original-$profile"
+            mkdir -p "$out"
+            checked "$profile-defconfig" make -s -C linux "O=$out" CC=gcc defconfig
+            if [[ "$profile" == enabled ]]; then
+              option=--enable
+              effective=CONFIG_ZSWAP=y
+            else
+              option=--disable
+              effective='# CONFIG_ZSWAP is not set'
+            fi
+            checked "$profile-config" linux/scripts/config --file "$out/.config" \
+              --enable SWAP "$option" ZSWAP \
+              --enable KUNIT --enable SWAP_BIO_ORIGIN_KUNIT_TEST \
+              --enable MODULES --enable MD --enable BLK_DEV_DM --enable CRYPTO_LZ4
+            checked "$profile-olddefconfig" make -s -C linux "O=$out" CC=gcc olddefconfig
+            grep -Fxq CONFIG_SWAP=y "$out/.config"
+            grep -Fxq "$effective" "$out/.config"
+            grep -Fxq CONFIG_MODULES=y "$out/.config"
+            grep -Fxq CONFIG_BLK_DEV_DM=y "$out/.config"
+            grep -Fxq CONFIG_SWAP_BIO_ORIGIN_KUNIT_TEST=y "$out/.config"
+            checked "$profile-prepare" make -s -C linux "O=$out" CC=gcc -j2 W=1 prepare
+            checked "$profile-default-bio-mm" make -s -C linux "O=$out" CC=gcc \
+              -j2 W=1 KCFLAGS=-Werror block/bio.o mm/page_io.o mm/swapfile.o
+            if nm -a "$out/block/bio.o" | grep -q swapz_ci_owned_create; then
+              echo "::error::Default original BIO includes CI-only constructor"
+              exit 3
+            fi
+            if [[ "$profile" == enabled ]]; then
+              checked "$profile-default-zswap" make -s -C linux "O=$out" CC=gcc \
+                -j2 W=1 KCFLAGS=-Werror mm/zswap.o
+              if nm -a "$out/mm/zswap.o" | grep -q swapz_round031_mm_bio_create; then
+                echo "::error::Default original zswap includes CI-only source helper"
+                exit 3
+              fi
+            fi
+            checked "$profile-composed-source-objects" make -s -C linux \
+              "O=$out" CC=gcc -j2 W=1 "KCFLAGS=$flags -Werror" \
+              block/bio.o mm/page_io.o mm/swapfile.o block/swap-bio-origin-kunit.o
+            if [[ "$profile" == enabled ]]; then
+              checked "$profile-composed-zswap" make -s -C linux \
+                "O=$out" CC=gcc -j2 W=1 "KCFLAGS=$flags -Werror" mm/zswap.o
+            fi
+            for symbol in swapz_ci_owned_create swapz_ci_owned_put; do
+              if ! nm -a "$out/block/bio.o" | grep -q "$symbol"; then
+                echo "::error::Original owned BIO transfer symbol missing $symbol"
+                exit 3
+              fi
+            done
+            if [[ "$profile" == enabled ]]; then
+              for symbol in swapz_round031_mm_bio_create swapz_round030_snapshot_stored_lz4 \
+                            swapz_round028_slot_epoch; do
+                if ! nm -a "$out/mm/zswap.o" | grep -q "$symbol"; then
+                  echo "::error::True original evictor MM source symbol missing $symbol"
+                  exit 3
+                fi
+              done
+              if ! objdump -d "$out/mm/zswap.o" |
+                  grep -Fq '<swapz_round031_mm_bio_create>:'; then
+                echo "::error::Real MM->BIO source helper machine code absent"
+                exit 3
+              fi
+            fi
+            checked "$profile-modules_prepare" make -s -C linux "O=$out" CC=gcc -j2 W=1 modules_prepare
+            checked "$profile-vmlinux" make -s -C linux "O=$out" CC=gcc \
+              -j2 W=1 "KCFLAGS=$flags" vmlinux
+            checked "$profile-modules" make -s -C linux "O=$out" CC=gcc \
+              -j2 W=1 "KCFLAGS=$flags" modules
+            test -s "$out/vmlinux"
+            test -s "$out/Module.symvers"
+            module="$RUNNER_TEMP/composed-matched-module-$profile"
+            mkdir -p "$module"
+            checked "$profile-linked-dm-swapz" make -s -C swapz/src/kernel \
+              "KDIR=$out" "SWAPZ_STAGE=$module" \
+              "SWAPZ_BUILD_INFO=$info" CC=gcc -j2 W=1 all
+            test -s "$module/dm-swapz.ko"
+            readelf -h "$module/dm-swapz.ko" > "$log"
+            grep -Eq 'Type:[[:space:]]+REL' "$log"
+            printf 'profile=%s\nmodule_sha=%s\nkernel_symvers_sha=%s\n' \
+              "$profile" "$(sha256sum "$module/dm-swapz.ko" | cut -d' ' -f1)" \
+              "$(sha256sum "$out/Module.symvers" | cut -d' ' -f1)" >> "$evidence"
+          done
+          echo "ROUND031_ONE_ORIGINAL_MM_BIO_LINUX_Y_N_MATCHED_MODULE_COMPILED_NO_LIVE"
+          printf 'result=PASS\nno_live=yes\n' >> "$evidence"
+
+  original-uml-11-kunit:
+    name: "Real original composed source booted UML BIO 11/11 KUnit"
+    runs-on: ubuntu-24.04
+    timeout-minutes: 85
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          path: swapz
+          persist-credentials: false
+      - uses: actions/checkout@v4
+        with:
+          repository: torvalds/linux
+          ref: c339f4010dea8b0d754f84ace70cd1b089878ef8
+          fetch-depth: 1
+          path: linux
+          persist-credentials: false
+      - name: Install compiler and actual UML KUnit dependencies
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo apt-get update -qq
+          sudo DEBIAN_FRONTEND=noninteractive apt-get install -y \
+            --no-install-recommends build-essential bc bison flex \
+            libelf-dev libssl-dev libncurses-dev python3 python3-pyelftools
+      - name: Stage original source then boot UML, verify 11 real JSON and KTAP passes
+        shell: bash
+        timeout-minutes: 70
+        run: |
+          set -euo pipefail
+          test "$(git -C swapz rev-parse HEAD)" = "$GITHUB_SHA"
+          test "$(git -C linux rev-parse HEAD)" = \
+            c339f4010dea8b0d754f84ace70cd1b089878ef8
+          python3 -B swapz/tests/tools/stage-pinned-linux-zswap-composed.py \
+            --linux-root linux --manifest "$RUNNER_TEMP/composed-uml-manifest.json"
+          git -C linux diff --check
+          config="$RUNNER_TEMP/composed-uml.kunitconfig"
+          json="$RUNNER_TEMP/composed-uml-result.json"
+          out="$RUNNER_TEMP/composed-uml-kernel"
+          log="$RUNNER_TEMP/composed-uml-first-error.log"
+          mkdir -p "$out"
+          cat > "$config" <<'KUNIT_CFG'
+          CONFIG_KUNIT=y
+          CONFIG_BLOCK=y
+          CONFIG_SWAP=y
+          CONFIG_SWAP_BIO_ORIGIN_KUNIT_TEST=y
+          # CONFIG_ZSWAP is not set
+          # CONFIG_KUNIT_ALL_TESTS is not set
+          KUNIT_CFG
+          flags="-DSWAPZ_ROUND028_SLOT_EPOCH_SOURCE=1 -DSWAPZ_ROUND030_EVICTION_SNAPSHOT_SOURCE=1 -DSWAPZ_ROUND025_SIDEBAND_CI_ONLY=1 -DSWAPZ_ROUND031_MM_BIO_SOURCE=1"
+          if python3 -B linux/tools/testing/kunit/kunit.py run \
+              --arch=um --build_dir="$out" --kunitconfig="$config" \
+              --make_options="KCFLAGS=$flags" --jobs=2 --timeout=120 \
+              --json="$json" swapz_round025_sideband_compiler_only \
+              > "$log" 2>&1; then
+            echo "ORIGINAL_COMPOSED_UML_BOOT_RETURN=0"
+          else
+            code=$?
+            echo "::error::Original composed UML build/boot/KUnit first failure exit=$code"
+            tail -n 100 "$log"
+            if [[ -s "$out/test.log" ]]; then
+              grep -E 'KTAP version|swapz_ci_|not ok|Kernel panic' "$out/test.log" |
+                tail -n 70 || true
+            fi
+            exit "$code"
+          fi
+          test -x "$out/linux"
+          test -s "$json"
+          grep -Fxq CONFIG_SWAP=y "$out/.config"
+          grep -Fxq CONFIG_KUNIT=y "$out/.config"
+          grep -Fxq CONFIG_SWAP_BIO_ORIGIN_KUNIT_TEST=y "$out/.config"
+          grep -Fxq '# CONFIG_ZSWAP is not set' "$out/.config"
+          if python3 -B swapz/tests/runtime/native/fixtures/round026-sideband-kunit-verdict.py \
+              --result "$json" --kernel-log "$out/test.log"; then
+            echo "ROUND031_REAL_COMPOSED_PINNED_UML_BIO_KUNIT_11_OF_11_PASS"
+          else
+            code=$?
+            echo "::error::Actual original UML KUnit JSON/KTAP verification first failure exit=$code"
+            tail -n 70 "$log"
+            exit "$code"
+          fi
+          echo "PHASE_A=BLOCKED FORCED_RAW=DISABLED DIRECT_COMPRESSED=DISABLED"
