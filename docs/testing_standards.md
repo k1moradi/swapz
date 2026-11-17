@@ -15326,3 +15326,7 @@ The tested host source wrapper must insert actual LF newlines around the origina
 ### Round029 Agent4 source-first allocation-fault regression correction (2026-11-17)
 
 Source-extracted GCC/Clang sanitizer tests must restore a deliberately mutated original-SHA input before the separate constructor allocation-failure probe, or the required fail-closed missing-SHA rejection prevents the allocator from being reached and conceals whether the mock failure was exercised. Assert both the allocation-failure branch and exact two frees, preserve all negative cases, and match source CRC call semantics even when bounded length is explicitly cast to the correct kernel argument type. A failed exact-SHA hosted run remains FAIL, independent of parser self-test PASS or KUnit compile; requalify executed UML on the corrected new commit.
+
+### Round029 Agent4 fixture lifetime accounting isolation (2026-11-17)
+
+The source-extracted original BIO constructor checks must execute after the original seven host ownership/refcount cases finish and assert their historical free counters (32 then 42). Inserting a new constructor before those counters changes test order and breaks a valid historical assertion, not a source lifecycle invariant. Preserve original accounting unchanged, then run the new copy/mutation/invalid-input/CRC/allocation-error/clone-ownership assertions. Such harness failures are first failures with exit 1 and prevent claims of actual UML execution until a fresh exact-SHA build and boot.

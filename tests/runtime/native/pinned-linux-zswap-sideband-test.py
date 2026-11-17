@@ -53,10 +53,14 @@ def host_owned_source() -> str:
     main_anchor = "int main(void)\n{"
     if fixture.count(main_anchor) != 1:
         raise AssertionError("host main insertion anchor drift")
-    return fixture.replace(main_anchor,
-                           constructor_fixture + "\n" +
-                           "int main(void)\n{\n\tround029_constructor_host_checks();",
-                           1)
+    assembled = fixture.replace(main_anchor,
+                                constructor_fixture + "\n" + main_anchor, 1)
+    completed_original_assertions = '\tputs("ROUND025_SIDE_BAND_HOST_SOURCE_ONLY_PASS");'
+    if assembled.count(completed_original_assertions) != 1:
+        raise AssertionError("original host accounting anchor drift")
+    return assembled.replace(completed_original_assertions,
+                             "\tround029_constructor_host_checks();\n" +
+                             completed_original_assertions, 1)
 
 
 class Round025PinnedSideband(unittest.TestCase):
