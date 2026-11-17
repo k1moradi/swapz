@@ -3546,8 +3546,10 @@ static __used noinline int swapz_round030_dm_commit_owned_lz4(
 	descriptor->source_swap_slot = source_swap_slot;
 	descriptor->extent_sequence = extent_sequence;
 #if defined(SWAPZ_ROUND031_DM_LZ4_SIDECAR_TEST)
-	descriptor->hypothetical_ack_count =
-		ctx->round031_defer_hypothetical_ack ? 0U : 1U;
+	if (ctx->round031_defer_hypothetical_ack)
+		descriptor->hypothetical_ack_count = 0U;
+	else
+		descriptor->hypothetical_ack_count = 1U;
 #else
 	descriptor->hypothetical_ack_count = 1U;
 #endif
@@ -3701,7 +3703,7 @@ static __used noinline int swapz_round031_dm_commit_with_sidecar(
 		struct swapz_dm *ctx, struct swapz_round031_dm_sidecar *sidecar,
 		struct swapz_zswap_admission_transaction *transaction,
 		swapz_u64 source_swap_slot, const swapz_u8 *owned_bytes,
-		swapz_u32 source_capacity, swapz_u8 *lower_image,
+		swapz_u32 source_capacity, swapz_u8 *owned_lower_image,
 		swapz_u32 lower_capacity, bool requested_fua,
 		swapz_u64 *new_owner_token)
 {
@@ -3744,7 +3746,7 @@ static __used noinline int swapz_round031_dm_commit_with_sidecar(
 	ctx->round031_defer_hypothetical_ack = true;
 	error = swapz_round030_dm_commit_owned_lz4(
 		ctx, transaction, source_swap_slot, owned_bytes, source_capacity,
-		lower_image, lower_capacity, &prepared, requested_fua);
+		owned_lower_image, lower_capacity, &prepared, requested_fua);
 	ctx->round031_defer_hypothetical_ack = false;
 	if (error)
 		return error;
@@ -3832,7 +3834,7 @@ static __used noinline int swapz_round031_dm_read_with_sidecar(
 		struct swapz_dm *ctx, struct swapz_round031_dm_sidecar *sidecar,
 		const struct swapz_zswap_admission_transaction *transaction,
 		swapz_u32 logical_page, swapz_u64 expected_owner_token,
-		swapz_u8 *lower_image, swapz_u32 lower_capacity,
+		swapz_u8 *owned_lower_image, swapz_u32 lower_capacity,
 		swapz_u8 *decode_scratch, swapz_u8 *verified_page,
 		swapz_u8 *decoded_page)
 {
@@ -3841,7 +3843,7 @@ static __used noinline int swapz_round031_dm_read_with_sidecar(
 	swapz_u32 sequence;
 	int error;
 
-	if (!ctx || !sidecar || !transaction || !lower_image ||
+	if (!ctx || !sidecar || !transaction || !owned_lower_image ||
 	    !decode_scratch || !verified_page || !decoded_page)
 		return -EINVAL;
 	lockdep_assert_held(&ctx->ordered_owner);
@@ -3886,13 +3888,13 @@ static __used noinline int swapz_round031_dm_read_with_sidecar(
 	    swapz_zswap_import_ranges_overlap(verified_page, SWAPZ_BLOCK_BYTES,
 			decode_scratch, SWAPZ_BLOCK_BYTES) ||
 	    swapz_zswap_import_ranges_overlap(verified_page, SWAPZ_BLOCK_BYTES,
-			lower_image, lower_capacity))
+			owned_lower_image, lower_capacity))
 		return -EINVAL;
 	if (slot->readers == ~(swapz_u32)0)
 		return -EOVERFLOW;
 	slot->readers++;
 	error = swapz_round030_dm_read_owned_lz4(
-		ctx, &slot->descriptor, transaction, lower_image,
+		ctx, &slot->descriptor, transaction, owned_lower_image,
 		lower_capacity, decode_scratch, verified_page);
 	slot->readers--;
 	if (slot->owner_token != expected_owner_token ||
