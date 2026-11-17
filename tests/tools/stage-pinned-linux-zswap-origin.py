@@ -782,7 +782,7 @@ ROUND024_ZSWAP_KBUILD_PROBE_SOURCE = r"""/*
  * compression-aware MM/BIO sideband is available; NEVER publish a carrier.
  */
 #if defined(SWAPZ_ROUND024_ZSWAP_KBUILD_PROBE)
-static __attribute__((used, noinline)) int
+static __attribute__((__used__, __noinline__)) int
 zswap_swapz_round024_producer_kbuild_probe(
 		struct zswap_entry *stored_entry, swp_entry_t source_slot,
 		const struct folio *locked_folio)
@@ -821,6 +821,7 @@ def validate_round024_probe(source: str) -> None:
     """Reject modified source claiming authenticated compressed publication."""
     required = (
         "#if defined(SWAPZ_ROUND024_ZSWAP_KBUILD_PROBE)",
+        "static __attribute__((__used__, __noinline__)) int",
         "zswap_swapz_round024_producer_kbuild_probe(",
         "folio_test_locked(locked_folio)",
         "stored_entry->swpentry.val != source_slot.val",

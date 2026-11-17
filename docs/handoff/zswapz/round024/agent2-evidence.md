@@ -135,3 +135,28 @@ commands and their first errors remain the qualification authority.
 `DIRECT_COMPRESSED=DISABLED`, `PHASE_A=BLOCKED`.
 Phase B forced RAW bypass DISABLED, SWAPSPACE2 protected header/UUID/table
 untouched, and current RAW remains original uncompressed 4096 bytes.
+
+## First genuine original pinned Linux Kbuild compiler blocker — fixed syntax only
+
+At exact source `e675dcbabf80deb600a53664d99182a51c09d7b6`, hosted
+workflow https://github.com/k1moradi/swapz/actions/runs/43993407400
+completed **FAILURE** at `Build modified Linux and matched source-linked
+swapz module for both configurations`. The source-linked GCC+Clang
+sanitized compressed-negative test had already completed SUCCESS.
+First real pinned `mm/zswap.o` compiler diagnostic was
+`mm/zswap.c:996:28: error: expected ')' before '__attribute__'` on
+`static __attribute__((used, noinline)) int` in the opt-in producer
+witness. Linux's predefined `noinline` macro expands inside the GCC
+attribute argument list; this is not an absent source-provenance check.
+
+The narrowed fix uses compiler-supported
+`__attribute__((__used__, __noinline__))`, verified by isolated
+local GCC and Clang strict-warning compilation and `nm` symbol tests
+(both EXIT 0), and gives the combined host compiler fixture the real
+kernel `noinline` macro expansion for regression. The stager's source
+mutation validator now rejects reverting this declaration. This
+preserves the already-published peer's LZ4 store-pool codec guard, the
+original 4096 decompressed WRITE and all dormant status. The corrected
+exact-SHA pinned Linux y/n and matched module Kbuild **NOT_YET_VERIFIED**
+at documentation time. Do not turn the isolated attribute smoke into
+a loaded-kernel or full pinned Kbuild PASS.

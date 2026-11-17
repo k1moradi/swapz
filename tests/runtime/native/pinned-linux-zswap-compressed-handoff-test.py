@@ -354,6 +354,8 @@ class CompressedHandoffTests(unittest.TestCase):
         probe = stage.ROUND024_ZSWAP_KBUILD_PROBE_SOURCE
         stage.validate_round024_probe(probe)
         for before, after in (
+            ("static __attribute__((__used__, __noinline__)) int",
+             "static __attribute__((used, noinline)) int"),
             ("#if defined(SWAPZ_ROUND024_ZSWAP_KBUILD_PROBE)", "#if 1"),
             ("return -EOPNOTSUPP;", "return 0;"),
             ("folio_test_locked(locked_folio)", "true"),
@@ -404,7 +406,11 @@ class CompressedHandoffTests(unittest.TestCase):
             "int main(void) {",
             "int main(void) {\n    round024_compiler_probe_negatives();\n", 1)
         self.assertNotEqual(main, HOST_CASES)
+        # Real pinned Linux defines noinline as an attribute macro. Keep
+        # it defined in the host compiler fixture so a future accidental
+        # use inside __attribute__((...)) cannot pass host but fail Kbuild.
         source = (HOST_SHIMS + body +
+                  "#define noinline __attribute__((__noinline__))\n" +
                   "#define SWAPZ_ROUND024_ZSWAP_KBUILD_PROBE 1\n" +
                   stage.ROUND024_ZSWAP_KBUILD_PROBE_SOURCE +
                   fixture + stored_identity_fixture + main)

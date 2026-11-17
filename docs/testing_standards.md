@@ -14629,3 +14629,33 @@ Phase A BLOCKED; Phase B forced RAW bypass DISABLED; compressed handoff
 DISABLED; loaded original 4096/physical SWAPSPACE2 NOT_RUN. No new
 module, swap, memory-pressure or physical actions. RAW is original
 uncompressed 4096, never compressed zswap bytes.
+
+### Round 024 — Agent 2: real Linux noinline macro collision compiler blocker
+
+The **first real pinned-Linux** `CONFIG_ZSWAP=y` optional Kbuild at source
+`e675dcbabf80deb600a53664d99182a51c09d7b6` reached
+`mm/zswap.c` and failed at the producer probe declaration. GCC diagnostic:
+`mm/zswap.c:996:28: error: expected ')' before '__attribute__'`, followed
+by `error: expected identifier or '(' before ')' token`. Linux already
+defines `noinline` as a macro expanding to an attribute, so passing it
+as a raw attribute argument in `__attribute__((used, noinline))` cannot
+compile. This is a genuine original kernel API/preprocessor mismatch, not
+a host-mock failure, and must never be called kernel Kbuild PASS.
+
+Use GCC/Clang's double-underscore attribute spellings
+`__attribute__((__used__, __noinline__))` in the same uncalled, gated
+probe. They do not collide with kernel `noinline` and preserve unused
+symbol emission and noninlining; no caller or compressed transport is
+activated. Freeze the signature in the source staging validator and
+negative mutation matrix. The new GCC/Clang host compiler fixture also
+defines `noinline` as the actual kernel-style attribute macro, so
+reintroducing this exact mismatch fails the unchanged strict `-Werror`
+compiler build instead of escaping into the pinned Linux build.
+
+An isolated local compiler smoke test with GCC and Clang compiled an
+`__used__`/`__noinline__` function and verified an emitted `nm`
+local symbol, exit 0 for both (this is not pinned kernel Kbuild).
+Actual pinned `CONFIG_ZSWAP=y/n` and matched module outcomes must
+again be taken from the next exact-source hosted job. Preserve the
+peer-published immutable LZ4 codec guard, all existing comments,
+ordinary decompressed original 4096 path and disabled carrier.
