@@ -142,7 +142,12 @@ class OriginalMMAndBIOComposer(unittest.TestCase):
                         ran.returncode, 0,
                         f"Original {compiler} {label} ASan/UBSan: "
                         + ran.stderr[-6000:])
-                    self.assertIn("ROUND031_REAL_", ran.stdout)
+                    if label == "round032-bio":
+                        self.assertIn(
+                            "ROUND032_ORIGINAL_BIO_EXACT_SOURCE_COPY_OUT_PASS",
+                            ran.stdout)
+                    else:
+                        self.assertIn("ROUND031_REAL_", ran.stdout)
 
     def test_original_source_extracted_mm_zsmalloc_owned_bio(self):
         source = stage.ROUND031_MM_BIO_SOURCE
@@ -188,6 +193,111 @@ class OriginalMMAndBIOComposer(unittest.TestCase):
         fixture = fixture.replace(
             "/* ROUND031_EXACT_REAL_BIO_DETACH_C */", real_detach, 1)
         self.compile_and_run(fixture, label="bio", libraries=())
+
+
+    def test_round032_frozen_value_copy_contract_and_original_owner_source(self):
+        self.assertEqual(stage.ROUND032_BIO_COPY_VIEW_MACRO,
+                         "SWAPZ_ROUND032_BIO_COPY_VIEW_CI_ONLY")
+        self.assertIn("u64 source_swap_entry;",
+                      stage.ROUND032_BIO_VIEW_HEADER)
+        self.assertIn("u64 source_slot_epoch;",
+                      stage.ROUND032_BIO_VIEW_HEADER)
+        self.assertIn("u64 stored_entry_identity;",
+                      stage.ROUND032_BIO_VIEW_HEADER)
+        self.assertIn("u32 compressed_crc32c;",
+                      stage.ROUND032_BIO_VIEW_HEADER)
+        self.assertIn("u8 original_sha256[32];",
+                      stage.ROUND032_BIO_VIEW_HEADER)
+        self.assertIn("struct swapz_ci_lz4_owned_view_v1",
+                      stage.ROUND032_BIO_VIEW_HEADER)
+        self.assertNotIn("*", stage.ROUND032_BIO_VIEW_HEADER.split(
+            "struct swapz_ci_lz4_owned_view_v1 {", 1)[1].split(
+            "};", 1)[0], "The copied versioned v1 struct must have NO pointer")
+        self.assertIn("EXPORT_SYMBOL_GPL(swapz_ci_bio_snapshot_lz4_v1);",
+                      stage.ROUND032_BIO_COPY_VIEW_SOURCE)
+        self.assertIn("owner->source_swap_entry = source_swap_entry;",
+                      stage.apply_round032_bio_view(
+                          "block/bio.c",
+                          stage.apply_mm_bio_source(
+                              "block/bio.c", stage.BIO.CI_HELPERS)))
+        self.assertIn(
+            "source_slot.val &&",
+            stage.apply_round032_bio_view(
+                "mm/zswap.c", stage.ROUND031_MM_BIO_SOURCE))
+        self.assertIn("sizeof(source_slot.val) <= sizeof(u64)",
+                      stage.apply_round032_bio_view(
+                          "mm/zswap.c", stage.ROUND031_MM_BIO_SOURCE))
+        self.assertNotIn("bio_endio(",
+                         stage.ROUND032_BIO_COPY_VIEW_SOURCE)
+
+    def test_round032_original_source_full_pinned_postimage_guards(self):
+        linux_name = os.environ.get("ROUND031_PINNED_LINUX")
+        if not linux_name:
+            self.skipTest("Full pinned original Linux available in CI only")
+        linux = Path(linux_name)
+        original_sources = {
+            path: (linux / path).read_bytes()
+            for path in set(stage.ORIGIN.EDITS) |
+            set(stage.ORIGIN.ROUND026_ALLOCATOR_ORIGINAL_BLOBS) |
+            set(stage.ORIGIN.KUNIT_EDITS)
+        }
+        produced = stage.build_plan(original_sources)
+        actual_header = produced["include/linux/bio.h"].decode()
+        actual_bio = produced["block/bio.c"].decode()
+        actual_mm = produced["mm/zswap.c"].decode()
+        actual_pageio = produced["mm/page_io.c"].decode()
+        self.assertIn("swapz_ci_lz4_owned_view_v1", actual_header)
+        self.assertIn("swapz_ci_bio_snapshot_lz4_v1", actual_header)
+        self.assertIn("EXPORT_SYMBOL_GPL(swapz_ci_bio_snapshot_lz4_v1)",
+                      actual_bio)
+        self.assertIn("source_swap_entry = source_swap_entry;", actual_bio)
+        self.assertIn("swapz_ci_owned_create_source_v1(", actual_mm)
+        self.assertIn("(u64)source_slot.val", actual_mm)
+        self.assertIn("zswap_decompress(entry, folio)", actual_mm)
+        self.assertIn("bio->bi_iter.bi_size = sio->len;", actual_pageio)
+        self.assertIn("REQ_OP_WRITE | REQ_SWAP", actual_pageio)
+        self.assertNotIn("SWAPZ_ROUND032_BIO_COPY_VIEW_CI_ONLY",
+                         (linux / "include/linux/bio.h").read_text())
+
+    def test_round032_real_original_bio_source_extracted_c_sanitizers(self):
+        # Both original pinned bio.c and original BIO stager are immutable.
+        # Extract the existing owner refcount, bounded flexible-array LZ4
+        # constructor, clone lifetime and the NEW true guarded accessor from
+        # the exact composed original C. Do not rewrite the algorithm.
+        original_helpers = stage.BIO.CI_HELPERS
+        original_helpers = stage.apply_mm_bio_source(
+            "block/bio.c", original_helpers)
+        generated = stage.apply_round032_bio_view(
+            "block/bio.c", original_helpers)
+        begin = "struct swapz_ci_owned_payload {"
+        end = "#endif /* SWAPZ_ROUND025_SIDEBAND_CI_ONLY */"
+        self.assertEqual(generated.count(begin), 1)
+        self.assertEqual(generated.count(end), 1)
+        real_c = begin + generated.split(begin, 1)[1].split(end, 1)[0]
+        self.assertIn("swapz_ci_owned_create_internal(", real_c)
+        self.assertIn("swapz_ci_owned_create_source_v1(", real_c)
+        self.assertIn("EXPORT_SYMBOL_GPL(swapz_ci_bio_snapshot_lz4_v1);",
+                      real_c)
+        header = stage.ROUND032_BIO_VIEW_HEADER
+        value_type = (
+            "struct swapz_ci_lz4_owned_view_v1 {" +
+            header.split("struct swapz_ci_lz4_owned_view_v1 {", 1)[1]
+            .split("};", 1)[0] + "};\n"
+        )
+        fixture = (FIXTURES / "round032-bio-copy-view-host.c").read_text(
+            encoding="utf-8")
+        self.assertEqual(fixture.count(
+            "/* ROUND032_EXACT_HEADER_VALUE_STRUCT */"), 1)
+        self.assertEqual(fixture.count(
+            "/* ROUND032_EXACT_ORIGINAL_BIO_OWNER_AND_EXPORT */"), 1)
+        fixture = fixture.replace(
+            "/* ROUND032_EXACT_HEADER_VALUE_STRUCT */",
+            value_type, 1)
+        fixture = fixture.replace(
+            "/* ROUND032_EXACT_ORIGINAL_BIO_OWNER_AND_EXPORT */",
+            real_c, 1)
+        self.compile_and_run(
+            fixture, label="round032-bio", libraries=("-llz4", "-lcrypto"))
 
 
 if __name__ == "__main__":

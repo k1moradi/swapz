@@ -7,6 +7,7 @@ on:
       - "tests/tools/stage-pinned-linux-zswap-composed.py"
       - "tests/runtime/native/pinned-linux-zswap-composed-source-test.py"
       - "tests/runtime/native/fixtures/round031-composed-*.c"
+      - "tests/runtime/native/fixtures/round032-bio-*.c"
   workflow_dispatch:
 permissions:
   contents: read
@@ -82,6 +83,10 @@ jobs:
           git -C linux diff --check
           grep -Fq 'swapz_round031_mm_bio_create(entry, swpentry, tree, offset)' linux/mm/zswap.c
           grep -Fq 'bio->bi_swapz_ci_sideband = ctx->swapz_round031_owned;' linux/mm/page_io.c
+          grep -Fq 'EXPORT_SYMBOL_GPL(swapz_ci_bio_snapshot_lz4_v1);' linux/block/bio.c
+          grep -Fq 'source_swap_entry = source_swap_entry;' linux/block/bio.c
+          grep -Fq 'swapz_ci_owned_create_source_v1(' linux/mm/zswap.c
+          grep -Fq 'struct swapz_ci_lz4_owned_view_v1 {' linux/include/linux/bio.h
       - name: Full original Linux y/n with exact source-only macro machine code and matched swapz.ko
         shell: bash
         timeout-minutes: 80
@@ -106,7 +111,7 @@ jobs:
               return "$code"
             fi
           }
-          flags="-DSWAPZ_ROUND028_SLOT_EPOCH_SOURCE=1 -DSWAPZ_ROUND030_EVICTION_SNAPSHOT_SOURCE=1 -DSWAPZ_ROUND025_SIDEBAND_CI_ONLY=1 -DSWAPZ_ROUND031_MM_BIO_SOURCE=1"
+          flags="-DSWAPZ_ROUND028_SLOT_EPOCH_SOURCE=1 -DSWAPZ_ROUND030_EVICTION_SNAPSHOT_SOURCE=1 -DSWAPZ_ROUND025_SIDEBAND_CI_ONLY=1 -DSWAPZ_ROUND031_MM_BIO_SOURCE=1 -DSWAPZ_ROUND032_BIO_COPY_VIEW_CI_ONLY=1"
           info="$RUNNER_TEMP/composed-source-build-info.h"
           printf '#define SWAPZ_BUILD_SOURCE_SHA "%s"\n#define SWAPZ_BUILD_SOURCE_CLEAN 1\n#define SWAPZ_BUILD_SOURCE_CLEAN_STRING "1"\n' "$GITHUB_SHA" > "$info"
           for profile in enabled disabled; do
@@ -133,8 +138,8 @@ jobs:
             checked "$profile-prepare" make -s -C linux "O=$out" CC=gcc -j2 W=1 prepare
             checked "$profile-default-bio-mm" make -s -C linux "O=$out" CC=gcc \
               -j2 W=1 KCFLAGS=-Werror block/bio.o mm/page_io.o mm/swapfile.o
-            if nm -a "$out/block/bio.o" | grep -q swapz_ci_owned_create; then
-              echo "::error::Default original BIO includes CI-only constructor"
+            if nm -a "$out/block/bio.o" | grep -Eq 'swapz_ci_owned_create|swapz_ci_bio_snapshot_lz4_v1'; then
+              echo "::error::Default original BIO includes CI-only constructor or GPL export"
               exit 3
             fi
             if [[ "$profile" == enabled ]]; then
@@ -152,7 +157,9 @@ jobs:
               checked "$profile-composed-zswap" make -s -C linux \
                 "O=$out" CC=gcc -j2 W=1 "KCFLAGS=$flags -Werror" mm/zswap.o
             fi
-            for symbol in swapz_ci_owned_create swapz_ci_owned_put; do
+            for symbol in swapz_ci_owned_create swapz_ci_owned_put \
+                          swapz_ci_owned_create_source_v1 \
+                          swapz_ci_bio_snapshot_lz4_v1; do
               if ! nm -a "$out/block/bio.o" | grep -q "$symbol"; then
                 echo "::error::Original owned BIO transfer symbol missing $symbol"
                 exit 3
@@ -179,6 +186,35 @@ jobs:
               -j2 W=1 "KCFLAGS=$flags" modules
             test -s "$out/vmlinux"
             test -s "$out/Module.symvers"
+            # The REAL original Linux GPL export must have EXACT vmlinux
+            # Module.symvers identity. A compiler symbol alone is insufficient.
+            if ! awk -F '\t' '$2 == "swapz_ci_bio_snapshot_lz4_v1" &&
+                                $3 == "vmlinux" && $4 == "EXPORT_SYMBOL_GPL"
+                                { found++ } END { exit(found != 1) }'                     "$out/Module.symvers"; then
+              echo "::error::Original pinned Linux lacks one REAL Round032 GPL-only Module.symvers export"
+              exit 3
+            fi
+            if ! objdump -t "$out/block/bio.o" |
+                grep -q swapz_ci_bio_snapshot_lz4_v1; then
+              echo "::error::No real compiled original GPL snapshot C machine symbol"
+              exit 3
+            fi
+            # Tiny independent GPL external module imports public original
+            # linux/bio.h and CALLS export under exact SAME kernel ABI.
+            # This checks real symbol resolution through modpost, not a stub.
+            probe="$RUNNER_TEMP/round032-original-gpl-probe-$profile"
+            mkdir -p "$probe"
+            cp swapz/tests/runtime/native/fixtures/round032-bio-probe.c               "$probe/round032-bio-probe.c"
+            printf 'obj-m := round032-bio-probe.o\n' > "$probe/Makefile"
+            unset KBUILD_MODPOST_WARN
+            checked "$profile-gpl-symbol-modpost-probe" make -s -C linux               "O=$out" "M=$probe" CC=gcc -j2 W=1               "KCFLAGS=$flags -Werror" modules
+            test -s "$probe/round032-bio-probe.ko"
+            if ! nm -u "$probe/round032-bio-probe.ko" |
+                grep -Fq 'swapz_ci_bio_snapshot_lz4_v1'; then
+              echo "::error::Independent original linux/bio.h GPL external probe did not import real symbol"
+              exit 3
+            fi
+            printf 'profile=%s\nprobe_sha=%s\n' "$profile"               "$(sha256sum "$probe/round032-bio-probe.ko" | cut -d' ' -f1)"               >> "$evidence"
             module="$RUNNER_TEMP/composed-matched-module-$profile"
             mkdir -p "$module"
             checked "$profile-linked-dm-swapz" make -s -C swapz/src/kernel \
@@ -242,7 +278,7 @@ jobs:
           # CONFIG_ZSWAP is not set
           # CONFIG_KUNIT_ALL_TESTS is not set
           KUNIT_CFG
-          flags="-DSWAPZ_ROUND028_SLOT_EPOCH_SOURCE=1 -DSWAPZ_ROUND030_EVICTION_SNAPSHOT_SOURCE=1 -DSWAPZ_ROUND025_SIDEBAND_CI_ONLY=1 -DSWAPZ_ROUND031_MM_BIO_SOURCE=1"
+          flags="-DSWAPZ_ROUND028_SLOT_EPOCH_SOURCE=1 -DSWAPZ_ROUND030_EVICTION_SNAPSHOT_SOURCE=1 -DSWAPZ_ROUND025_SIDEBAND_CI_ONLY=1 -DSWAPZ_ROUND031_MM_BIO_SOURCE=1 -DSWAPZ_ROUND032_BIO_COPY_VIEW_CI_ONLY=1"
           if python3 -B linux/tools/testing/kunit/kunit.py run \
               --arch=um --build_dir="$out" --kunitconfig="$config" \
               --make_options="KCFLAGS=$flags" --jobs=2 --timeout=120 \

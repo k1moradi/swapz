@@ -136,6 +136,312 @@ swapz_round031_mm_bio_create(struct zswap_entry *entry, swp_entry_t source_slot,
 """
 
 
+
+# Round032 remains undefined in every default source object and must be
+# explicitly combined with the original MM and independently owned BIO gates.
+ROUND032_BIO_COPY_VIEW_MACRO = "SWAPZ_ROUND032_BIO_COPY_VIEW_CI_ONLY"
+ROUND032_VIEW_CONDITION = (
+    "defined(SWAPZ_ROUND032_BIO_COPY_VIEW_CI_ONLY) && "
+    "defined(SWAPZ_ROUND031_MM_BIO_SOURCE) && "
+    "defined(SWAPZ_ROUND025_SIDEBAND_CI_ONLY)"
+)
+
+# Actual original block/bio.c implementation, source-compiled only.
+# Caller proves synchronous lifetime of the parent BIO; no RCU search or
+# guessed source owner is permitted. The temporary extra owning reference
+# makes every early-return balanced even for a late invalid immutable record.
+ROUND032_BIO_COPY_VIEW_SOURCE = r"""
+#if defined(SWAPZ_ROUND032_BIO_COPY_VIEW_CI_ONLY) && \
+    defined(SWAPZ_ROUND031_MM_BIO_SOURCE) && \
+    defined(SWAPZ_ROUND025_SIDEBAND_CI_ONLY)
+/* ROUND032_ORIGINAL_BIO_COPY_VIEW_BEGIN */
+static bool swapz_ci_view_ranges_overlap(const void *first, size_t first_size,
+					   const void *second, size_t second_size)
+{
+	unsigned long first_start = (unsigned long)first;
+	unsigned long second_start = (unsigned long)second;
+	unsigned long first_end, second_end;
+
+	/* Pointer ordering across unrelated allocations is not C defined.
+	 * Reject address wrap before numeric extent comparisons.
+	 */
+	if (check_add_overflow(first_start, first_size, &first_end) ||
+	    check_add_overflow(second_start, second_size, &second_end))
+		return true;
+	return first_start < second_end && second_start < first_end;
+}
+
+/*
+ * CI-only original pinned BIO-owned read-only LZ4 view. The caller must
+ * already own a stable live original BIO throughout this synchronous call:
+ * refcount_inc_not_zero alone is NOT an unlocked lifetime acquisition.
+ * No heap allocation, no zpool pointer, no authentication of DM provenance,
+ * no upper compressed completion and no change to ordinary 4096 swap I/O.
+ *
+ * Original mm/page_io.c's embedded swap_iocb calls bio_init() with a
+ * pre-populated bvec but manually sets bi_iter.bi_size. Its original bio
+ * therefore has bi_vcnt == 0, not 1: this strict geometry is intentional.
+ */
+int swapz_ci_bio_snapshot_lz4_v1(const struct bio *source_bio,
+				struct swapz_ci_lz4_owned_view_v1 *view,
+				u8 *owned_destination, size_t capacity)
+{
+	struct swapz_ci_owned_payload *owner;
+	struct swapz_ci_lz4_owned_view_v1 snapshot = {};
+	int result = -EINVAL;
+
+	if (!source_bio || !view || !owned_destination)
+		return -EINVAL;
+	if (bio_op(source_bio) != REQ_OP_WRITE ||
+	    !(source_bio->bi_opf & REQ_SWAP) ||
+	    source_bio->bi_swap_origin !=
+		SWAP_BIO_ORIGIN_ZSWAP_STORED_WRITEBACK ||
+	    source_bio->bi_iter.bi_size != 4096U ||
+	    bio_sectors(source_bio) != 8U ||
+	    source_bio->bi_iter.bi_idx ||
+	    source_bio->bi_iter.bi_offset ||
+	    source_bio->bi_vcnt ||
+	    (source_bio->bi_flags & (1U << BIO_CLONED)) ||
+	    !source_bio->bi_io_vec ||
+	    !source_bio->bi_io_vec[0].bv_page ||
+	    source_bio->bi_io_vec[0].bv_len != 4096U ||
+	    source_bio->bi_io_vec[0].bv_offset)
+		return -EOPNOTSUPP;
+
+	owner = swapz_ci_owned_get(source_bio->bi_swapz_ci_sideband);
+	if (!owner)
+		return -ESTALE;
+	if (!owner->source_swap_entry || !swapz_ci_owned_valid(owner)) {
+		result = -ESTALE;
+		goto put_owner;
+	}
+	if (capacity < owner->compressed_length) {
+		result = -ENOSPC;
+		goto put_owner;
+	}
+	/* No writes whatsoever on invalid output aliases. Do not let the
+	 * destination modify the immutable source bytes or metadata.
+	 */
+	if (swapz_ci_view_ranges_overlap(view, sizeof(*view),
+					 owned_destination,
+					 owner->compressed_length) ||
+	    swapz_ci_view_ranges_overlap(owned_destination,
+					 owner->compressed_length,
+					 owner->compressed_bytes,
+					 owner->compressed_length) ||
+	    swapz_ci_view_ranges_overlap(view, sizeof(*view),
+					 owner->compressed_bytes,
+					 owner->compressed_length)) {
+		result = -EINVAL;
+		goto put_owner;
+	}
+	snapshot.source_swap_entry = owner->source_swap_entry;
+	snapshot.source_slot_epoch = owner->slot_epoch;
+	snapshot.stored_entry_identity = owner->source_identity;
+	snapshot.compressed_crc32c = owner->compressed_crc32c;
+	snapshot.compressed_length = owner->compressed_length;
+	snapshot.decoded_length = owner->decoded_length;
+	snapshot.representation_version = owner->representation_version;
+	snapshot.codec = owner->codec;
+	memcpy(snapshot.original_sha256, owner->original_sha256,
+	       sizeof(snapshot.original_sha256));
+
+	/* These are the FINAL operations. No failure point after first write.
+	 * Both caller outputs are private value copies after the call.
+	 */
+	memcpy(owned_destination, owner->compressed_bytes,
+	       owner->compressed_length);
+	memcpy(view, &snapshot, sizeof(snapshot));
+	result = 0;
+put_owner:
+	swapz_ci_owned_put(owner);
+	return result;
+}
+/* ROUND032_ORIGINAL_BIO_COPY_VIEW_END */
+EXPORT_SYMBOL_GPL(swapz_ci_bio_snapshot_lz4_v1);
+#endif /* opt-in Round032 ABI copied view, no normal object export */
+"""
+
+ROUND032_BIO_VIEW_HEADER = """#if defined(SWAPZ_ROUND032_BIO_COPY_VIEW_CI_ONLY) && \\
+    defined(SWAPZ_ROUND031_MM_BIO_SOURCE) && \\
+    defined(SWAPZ_ROUND025_SIDEBAND_CI_ONLY)
+/* CI-only source C value; not a serialized format or physical ABI. */
+struct swapz_ci_lz4_owned_view_v1 {
+	u64 source_swap_entry;
+	u64 source_slot_epoch;
+	u64 stored_entry_identity;
+	u32 compressed_crc32c;
+	u16 compressed_length;
+	u16 decoded_length;
+	u8 representation_version;
+	u8 codec;
+	u8 original_sha256[32];
+};
+
+/* Caller holds source_bio stable for the ENTIRE synchronous copy.
+ * No borrowed owner data/pointers survive this function's return.
+ */
+int swapz_ci_bio_snapshot_lz4_v1(
+		const struct bio *source_bio,
+		struct swapz_ci_lz4_owned_view_v1 *view,
+		u8 *owned_destination, size_t capacity);
+struct swapz_ci_owned_payload *swapz_ci_owned_create_source_v1(
+		const u8 *compressed_source, size_t input_capacity,
+		size_t compressed_length, const u8 original_sha256[32],
+		u64 slot_epoch, u64 source_identity, u64 source_swap_entry,
+		u8 representation_version, u8 codec, u32 expected_crc32c,
+		gfp_t allocation_flags);
+#endif
+"""
+
+ROUND032_BIO_CORE_BEFORE = (
+    "struct swapz_ci_owned_payload *\n"
+    "swapz_ci_owned_create(const u8 *compressed_source, size_t input_capacity,"
+)
+ROUND032_BIO_CORE_AFTER = """#if defined(SWAPZ_ROUND032_BIO_COPY_VIEW_CI_ONLY) && \\
+    defined(SWAPZ_ROUND031_MM_BIO_SOURCE) && \\
+    defined(SWAPZ_ROUND025_SIDEBAND_CI_ONLY)
+/* ROUND032_BIO_SEALED_CONSTRUCTOR_BEGIN */
+static struct swapz_ci_owned_payload *
+swapz_ci_owned_create_internal(const u8 *compressed_source, size_t input_capacity,
+#else
+struct swapz_ci_owned_payload *
+swapz_ci_owned_create(const u8 *compressed_source, size_t input_capacity,
+#endif
+"""
+
+ROUND032_BIO_CORE_WRAPPERS = """
+#if defined(SWAPZ_ROUND032_BIO_COPY_VIEW_CI_ONLY) && \\
+    defined(SWAPZ_ROUND031_MM_BIO_SOURCE) && \\
+    defined(SWAPZ_ROUND025_SIDEBAND_CI_ONLY)
+/* Legacy original KUnit BIO constructor stays source-compatible. Its zero
+ * source slot refuses v1 snapshots, while clone/split lifetime still works.
+ */
+struct swapz_ci_owned_payload *
+swapz_ci_owned_create(const u8 *compressed_source, size_t input_capacity,
+		      size_t compressed_length, const u8 original_sha256[32],
+		      u64 slot_epoch, u64 source_identity,
+		      u8 representation_version, u8 codec,
+		      u32 expected_crc32c, gfp_t allocation_flags)
+{
+	return swapz_ci_owned_create_internal(
+		compressed_source, input_capacity, compressed_length,
+		original_sha256, slot_epoch, source_identity, 0U,
+		representation_version, codec, expected_crc32c, allocation_flags);
+}
+
+/* Genuine original locked MM supplies FULL nonzero swp_entry_t.val
+ * BEFORE the initial refcount publication, not as a later metadata write.
+ */
+struct swapz_ci_owned_payload *
+swapz_ci_owned_create_source_v1(
+		const u8 *compressed_source, size_t input_capacity,
+		size_t compressed_length, const u8 original_sha256[32],
+		u64 slot_epoch, u64 source_identity, u64 source_swap_entry,
+		u8 representation_version, u8 codec, u32 expected_crc32c,
+		gfp_t allocation_flags)
+{
+	if (!source_swap_entry)
+		return NULL;
+	return swapz_ci_owned_create_internal(
+		compressed_source, input_capacity, compressed_length,
+		original_sha256, slot_epoch, source_identity, source_swap_entry,
+		representation_version, codec, expected_crc32c, allocation_flags);
+}
+/* ROUND032_BIO_SEALED_CONSTRUCTOR_END */
+#endif /* Round032 separate original MM-sealed constructor */
+"""
+
+def apply_round032_bio_view(path: str, composed: str) -> str:
+    """Only generated exact original Linux C, never old pinned stagers."""
+    if path == "include/linux/bio.h":
+        return replace_once(
+            composed, "void swapz_ci_owned_put(struct swapz_ci_owned_payload *owner);\n#endif\n",
+            "void swapz_ci_owned_put(struct swapz_ci_owned_payload *owner);\n#endif\n" +
+            ROUND032_BIO_VIEW_HEADER,
+            path, "original-owned-copy-header")
+    if path == "block/bio.c":
+        # Add source slot solely under the new opt-in gate. The original
+        # old 11-case KUnit constructor's source slot is deliberately zero.
+        composed = replace_once(
+            composed, "struct swapz_ci_owned_payload {\n\trefcount_t references;\n",
+            """struct swapz_ci_owned_payload {
+	refcount_t references;
+#if defined(SWAPZ_ROUND032_BIO_COPY_VIEW_CI_ONLY) && \\
+    defined(SWAPZ_ROUND031_MM_BIO_SOURCE) && \\
+    defined(SWAPZ_ROUND025_SIDEBAND_CI_ONLY)
+	u64 source_swap_entry; /* FULL original MM value before first ref. */
+#endif
+""", path, "full-original-mm-source-slot")
+        composed = replace_once(
+            composed, ROUND032_BIO_CORE_BEFORE,
+            ROUND032_BIO_CORE_AFTER, path, "internal-sealed-owner-core")
+        composed = replace_once(
+            composed, "u64 slot_epoch, u64 source_identity,\n"
+                      "\t\t      u8 representation_version, u8 codec,\n",
+            """u64 slot_epoch, u64 source_identity,
+#if defined(SWAPZ_ROUND032_BIO_COPY_VIEW_CI_ONLY) && \\
+    defined(SWAPZ_ROUND031_MM_BIO_SOURCE) && \\
+    defined(SWAPZ_ROUND025_SIDEBAND_CI_ONLY)
+		      u64 source_swap_entry,
+#endif
+		      u8 representation_version, u8 codec,
+""", path, "internal-source-slot-parameter")
+        composed = replace_once(
+            composed,
+            "\t/* Publish the ONE initial owning ref only after all checks succeed. */\n"
+            "\trefcount_set(&owner->references, 1);\n",
+            """#if defined(SWAPZ_ROUND032_BIO_COPY_VIEW_CI_ONLY) && \\
+    defined(SWAPZ_ROUND031_MM_BIO_SOURCE) && \\
+    defined(SWAPZ_ROUND025_SIDEBAND_CI_ONLY)
+	/* Final write to immutable metadata BEFORE the initial ref is live. */
+	owner->source_swap_entry = source_swap_entry;
+#endif
+	/* Publish the ONE initial owning ref only after all checks succeed. */
+	refcount_set(&owner->references, 1);
+""", path, "slot-before-sealed-first-ref")
+        composed = replace_once(
+            composed, "\nstatic bool swapz_ci_owned_valid(",
+            ROUND032_BIO_CORE_WRAPPERS +
+            "\nstatic bool swapz_ci_owned_valid(",
+            path, "source-constructor-and-legacy-kunit")
+        composed = replace_once(
+            composed, "\nstatic void swapz_ci_bio_detach(",
+            "\n" + ROUND032_BIO_COPY_VIEW_SOURCE +
+            "\nstatic void swapz_ci_bio_detach(",
+            path, "original-exported-synchronous-copy")
+        return composed
+    if path == "mm/zswap.c":
+        original_call = """\t\towned = swapz_ci_owned_create(compressed_snapshot,
+					     compressed_length,
+					     compressed_length,
+					     entry->swapz_round028_store_sha256,
+					     allocation_epoch,
+					     entry->swapz_round028_stored_entry_identity,
+					     1U, 1U, source_crc32c, GFP_KERNEL);"""
+        new_call = """#if defined(SWAPZ_ROUND032_BIO_COPY_VIEW_CI_ONLY) && \\
+    defined(SWAPZ_ROUND031_MM_BIO_SOURCE) && \\
+    defined(SWAPZ_ROUND025_SIDEBAND_CI_ONLY)
+		/* This is the TRUE full original MM swp_entry_t type+offset;
+		 * reject unrepresentable native pointer widths before casting.
+		 */
+		if (source_slot.val &&
+		    sizeof(source_slot.val) <= sizeof(u64))
+			owned = swapz_ci_owned_create_source_v1(
+				compressed_snapshot, compressed_length,
+				compressed_length, entry->swapz_round028_store_sha256,
+				allocation_epoch,
+				entry->swapz_round028_stored_entry_identity,
+				(u64)source_slot.val, 1U, 1U, source_crc32c,
+				GFP_KERNEL);
+#else
+""" + original_call + """
+#endif"""
+        return replace_once(composed, original_call, new_call, path,
+                            "original-mm-full-source-slot-sealed")
+    return composed
+
+
 def replace_once(text: str, before: str, after: str, path: str, label: str) -> str:
     if not before or before == after or text.count(before) != 1 or (
         after in text and after not in before
@@ -339,6 +645,7 @@ def compose_postimage(path: str, original_bytes: bytes, *,
     else:
         changed = original_changed
     changed = apply_mm_bio_source(path, changed)
+    changed = apply_round032_bio_view(path, changed)
     if path == "mm/zswap.c":
         for required in (
             "swapz_round028_slot_epoch(swpentry)",
