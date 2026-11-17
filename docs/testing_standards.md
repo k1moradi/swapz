@@ -15322,3 +15322,7 @@ Maintain actual original source `bio_init_clone`/split refcount acquisition, val
 ### Round029 Agent4 same-commit harness first-error correction (2026-11-17)
 
 The tested host source wrapper must insert actual LF newlines around the original C `int main(void)` anchor; a literal backslash-n is not an executable compiler regression and must fail visibly before any false UML claim. Both GCC and Clang sanitizer test exits remain mandatory, and the copied compressed length passed to CRC32C's unsigned-int API may be converted only after the explicit `1..3568` bound. Preserve the earlier exact-SHA first failure and requalify on the new source SHA with actual pinned kernel C/booted UML; no relaxed case, policy or original blob gates.
+
+### Round029 Agent4 source-first allocation-fault regression correction (2026-11-17)
+
+Source-extracted GCC/Clang sanitizer tests must restore a deliberately mutated original-SHA input before the separate constructor allocation-failure probe, or the required fail-closed missing-SHA rejection prevents the allocator from being reached and conceals whether the mock failure was exercised. Assert both the allocation-failure branch and exact two frees, preserve all negative cases, and match source CRC call semantics even when bounded length is explicitly cast to the correct kernel argument type. A failed exact-SHA hosted run remains FAIL, independent of parser self-test PASS or KUnit compile; requalify executed UML on the corrected new commit.

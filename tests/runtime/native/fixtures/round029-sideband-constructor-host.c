@@ -36,6 +36,8 @@ static void round029_constructor_host_checks(void)
 	swapz_ci_bio_detach(&clone);
 	assert(freed_allocations == freed_before + 1);
 	/* Failure cases may never return a borrowed or partially initialized owner. */
+	/* Restore the borrowed SHA only for the independent invalid-input probes. */
+	digest[0] = 0x5a;
 	const u32 new_crc = ~crc32c(~0U, compressed, sizeof(compressed));
 	assert(!swapz_ci_owned_create(compressed, 32, 0, digest, 17, 29, 1, 1, new_crc, GFP_KERNEL));
 	assert(!swapz_ci_owned_create(compressed, 32, 3569, digest, 17, 29, 1, 1, new_crc, GFP_KERNEL));
