@@ -240,8 +240,9 @@ void swapz_ci_owned_put(struct swapz_ci_owned_payload *owner);
     if path == "mm/page_io.c":
         return replace_once(
             composed,
-            "\tbio->bi_iter.bi_size = sio->len;\n\tbio->bi_iter.bi_sector = swap_folio_sector",
-            """	bio->bi_iter.bi_size = sio->len;
+            "\tbio->bi_swap_origin = sio->swap_origin;\n\tbio->bi_iter.bi_size = sio->len;\n\tbio->bi_iter.bi_sector = swap_folio_sector",
+            """	bio->bi_swap_origin = sio->swap_origin;
+	bio->bi_iter.bi_size = sio->len;
 #if defined(SWAPZ_ROUND031_MM_BIO_SOURCE) && \\
     defined(SWAPZ_ROUND025_SIDEBAND_CI_ONLY)
 	/* This exact original BLOCK write is one 4096-page replacement.

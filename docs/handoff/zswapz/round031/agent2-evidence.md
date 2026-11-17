@@ -11,3 +11,8 @@ Safety: PHASE_A=BLOCKED, FORCED_RAW_BYPASS=DISABLED, DIRECT_COMPRESSED=NO_GO_DIS
 ## First actual hosted Round031 blocker
 
 Exact initial source SHA 942e1e0, [run 44135736073](https://github.com/k1moradi/swapz/actions/runs/44135736073), booted UML job 134224639027 failed prior to compiling C, stage exit 2 `COMPOSE_CONFLICT:block/bio.c:owned-put-global`. Root cause: guard checked `after in text` but `void swapz_ci_owned_put` is a substring of `static void swapz_ci_owned_put`. Permit this exact substring case only while preserving unique-before, pinned preimage and conflicting insertion refusal. Previous failed SHA remains FAIL; full Kbuild/UML still requires new exact-SHA verdict. Original Round030 true [run 44120930434](https://github.com/k1moradi/swapz/actions/runs/44120930434) completed SUCCESS separately.
+
+
+## Corrected exact WRITE-only page-IO anchor and negative source test
+
+[Run 44136181797](https://github.com/k1moradi/swapz/actions/runs/44136181797): job 134226223557 UML source staging exit 2 at `COMPOSE_CONFLICT:mm/page_io.c:bdev-single-4096-attachment`, and job 134226224329 source tests exit 1 on same error plus original blob-mismatch exception-class negative. Frozen original read/write both contain `bio->bi_iter.bi_size = sio->len` and sector, but source-only original `bi_swap_origin = sio->swap_origin` precedes only WRITE. New exact unique anchored insertion strictly begins with that WRITE origin scalar; ordinary read path unchanged. Negative test now correctly expects the original author's `ORIGIN.StagingError` for original preimage mismatch. Both true original Linux y/n Kbuild and composed UML remain NOT_RUN on those failed commits; evaluate exact new SHA CI.

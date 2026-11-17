@@ -69,7 +69,10 @@ class OriginalMMAndBIOComposer(unittest.TestCase):
                 "block/bio.c", original,
                 "alpha\nMM\nbeta\ngamma\ndelta\n",
                 "alpha\nBIO\nbeta\ngamma\ndelta\n")
-        with self.assertRaisesRegex(stage.SourceCompositionError,
+        # Original upstream blob authenticity belongs to the original MM
+        # stager and deliberately raises its precise StagingError before any
+        # derived composer transition may be attempted.
+        with self.assertRaisesRegex(stage.ORIGIN.StagingError,
                                     "original-blob-mismatch"):
             stage.compose_postimage(
                 "block/bio.c", b"fake unpinned original")
@@ -157,13 +160,12 @@ class OriginalMMAndBIOComposer(unittest.TestCase):
 
     def test_original_source_extracted_pageio_move_and_bio_detach(self):
         # Extract the actual insertion body, not a re-authored test algorithm.
-        token = ("\tbio->bi_iter.bi_size = sio->len;\n")
-        pageio_stub = (
-            "\tbio->bi_iter.bi_size = sio->len;\n" +
-            stage.apply_mm_bio_source(
-                "mm/page_io.c",
-                token + "\tbio->bi_iter.bi_sector = swap_folio_sector",
-            ).split(token, 1)[1]
+        origin_marker = "\tbio->bi_swap_origin = sio->swap_origin;\n"
+        token = "\tbio->bi_iter.bi_size = sio->len;\n"
+        original_write = (origin_marker + token +
+                          "\tbio->bi_iter.bi_sector = swap_folio_sector")
+        pageio_stub = stage.apply_mm_bio_source(
+            "mm/page_io.c", original_write
         )
         self.assertIn(
             "bio->bi_swapz_ci_sideband = ctx->swapz_round031_owned;",
