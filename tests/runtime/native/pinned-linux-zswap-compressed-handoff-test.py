@@ -435,6 +435,81 @@ class CompressedHandoffTests(unittest.TestCase):
                                             text=True, timeout=40)
                     self.assertEqual(result.returncode, 0, result.stderr)
 
+    def test_round026_real_swap_allocator_lock_epoch_no_go(self):
+        # Exact original pinned mm/swapfile.c function is compiled below.
+        # A reused swap slot with identical table bits remains a NO_GO.
+        probe=stage.ROUND026_ALLOCATOR_EPOCH_SOURCE
+        stage.validate_round026_allocator_epoch_source(probe)
+        self.assertIn("swap_info = get_swap_device(source_slot);",probe)
+        self.assertIn("cluster = swap_cluster_lock(swap_info, offset);",probe)
+        self.assertIn("lockdep_assert_held(&cluster->lock);",probe)
+        self.assertIn("put_swap_device(swap_info);",probe)
+        self.assertNotIn("return 0;",probe)
+        self.assertNotIn("source_slot_allocation_epoch =",probe)
+        exact_anchor=stage.ROUND026_ALLOCATOR_EPOCH_ANCHOR
+        with self.assertRaises(stage.StagingError):
+            stage.render_source("mm/swapfile.c",exact_anchor)
+        with self.assertRaises(stage.StagingError):
+            stage.render_source("mm/swapfile.c", "missing allocator source",
+                                round026_allocator_probe=True)
+        for before,after in (
+            ("#if defined(SWAPZ_ROUND026_SLOT_EPOCH_PROBE)", "#if 1"),
+            ("cluster = swap_cluster_lock(swap_info, offset);",
+             "cluster = fake_unlocked_cluster(swap_info);"),
+            ("lockdep_assert_held(&cluster->lock);",
+             "/* skipped original cluster lock */"),
+            ("if (!cluster_table_is_alloced(cluster))",
+             "if (true)"),
+            ("swp_tb_is_null(slot_state) || swp_tb_is_bad(slot_state)",
+             "false"),
+            ("swap_cluster_unlock(cluster);", "/* unlock leaked */"),
+            ("put_swap_device(swap_info);", "/* device ref leaked */"),
+            ("int result = -EOPNOTSUPP;", "int result = 0;"),
+            ("return result;", "return 0;"),
+        ):
+            with self.subTest(source_mutation=before):
+                self.assertIn(before,probe)
+                with self.assertRaises(stage.StagingError):
+                    stage.validate_round026_allocator_epoch_source(
+                        probe.replace(before,after,1))
+        self.assertEqual(stage.ROUND026_ALLOCATOR_ORIGINAL_BLOBS["mm/swapfile.c"],
+                         "254ce86fa923e6b5f1fefda88c39315c4cc00642")
+        workflow=(STAGER.parents[2]/
+            ".github/workflows/phase-a-zswap-origin-prototype.yml"
+                 ).read_text(encoding="utf-8")
+        self.assertIn("--with-round026-allocator-epoch-probe",workflow)
+        self.assertIn("KCFLAGS=\"-DSWAPZ_ROUND026_SLOT_EPOCH_PROBE=1 -Werror\"",workflow)
+        self.assertIn("mm/swapfile.o",workflow)
+        self.assertIn("swapz_round026_allocator_epoch_probe",workflow)
+
+    def test_round026_exact_pinned_swap_allocator_gcc_clang_asan_ubsan(self):
+        fixture=(Path(__file__).parent/"fixtures"/
+                 "round026-producer-swap-slot-epoch.c").read_text(encoding="utf-8")
+        marker="/* ROUND026_PINNED_SWAPFILE_SOURCE */"
+        self.assertEqual(fixture.count(marker),1)
+        probe=stage.ROUND026_ALLOCATOR_EPOCH_SOURCE
+        stage.validate_round026_allocator_epoch_source(probe)
+        source=fixture.replace(marker,probe)
+        with tempfile.TemporaryDirectory(prefix="round026-slot-epoch-") as directory:
+            source_path=Path(directory)/"swap-slot-epoch.c"
+            source_path.write_text(source,encoding="utf-8")
+            compilers=[name for name in ("gcc","clang") if shutil.which(name)]
+            self.assertTrue(compilers)
+            for compiler in compilers:
+                with self.subTest(compiler=compiler):
+                    binary=Path(directory)/compiler
+                    command=[compiler,"-std=gnu11","-O1","-g",
+                             "-Wall","-Wextra","-Wconversion","-Wshadow",
+                             "-Werror","-fsanitize=address,undefined",
+                             "-fno-sanitize-recover=all","-pthread",
+                             str(source_path),"-o",str(binary)]
+                    built=subprocess.run(command,capture_output=True,text=True,
+                                         timeout=60,check=False)
+                    self.assertEqual(built.returncode,0,built.stderr)
+                    run=subprocess.run([str(binary)],capture_output=True,
+                                       text=True,timeout=35,check=False)
+                    self.assertEqual(run.returncode,0,run.stderr)
+
     def test_round025_original_plaintext_store_proof_source_and_refusals(self):
         # The pinned STORE owns a locked original folio and real SHA API,
         # but has no independently allocator-owned reused slot epoch.

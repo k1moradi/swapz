@@ -15084,3 +15084,89 @@ booted KUnit PASS. \`PHASE_A=BLOCKED\`,
 **UNCOMPRESSED** full 4096 bytes, not a tagged LZ4 compressed record;
 the original SWAPSPACE2 first header/UUID/signature and partition
 table are immutable.
+
+### Round 026 — Agent 2: original MM swap allocation epoch absence and compiler-verified NO_GO
+
+Pin original upstream Linux `c339f4010dea8b0d754f84ace70cd1b089878ef8`
+and exact original `mm/swapfile.c` blob
+`254ce86fa923e6b5f1fefda88c39315c4cc00642`.
+Original `__swap_cluster_alloc_entries()` allocates under
+`ci->lock`, populates a swap-cache folio reference or hibernation
+shadow and increments slot accounting. Original
+`__swap_cluster_free_entries()` clears swap table slots to
+`null_to_swp_tb()` under cluster protection, invokes
+`swap_range_free()` and `zswap_invalidate()`, then permits the
+same source slot and swap-table bits to be reused. The original
+`swap_cluster_info`, `swap_info_struct`, `swp_entry_t`,
+`zswap_entry`, xarray state, zpool handle, timestamps and
+`get_swap_device()` percpu reference do **not** mint an
+independent allocator-owned per-slot reuse epoch. A locked current
+slot query (even with LZ4 and original 4096 SHA) is NOT a certificate
+that the original allocation and current observation are identical.
+This is a source-backed **NO_GO** for direct compressed eviction
+until a generation-bound, cross-subsystem owner exists.
+
+Round026 Agent2 adds only an **explicit default-OFF CI-only**
+source-authentic `mm/swapfile.c` observer through the existing
+hash/clean-tree-gated pinned Linux staging helper. The observer
+must pin `get_swap_device()`, take the actual
+`swap_cluster_lock()`, inspect `cluster_table_is_alloced()` and
+`__swap_table_get()` while holding `ci->lock`, and on all paths
+release lock/device once. NULL, bad slot and missing table return
+stale/negative; any apparently current, even reused, slot
+**always returns `-EOPNOTSUPP`**, no zero/success return,
+no fabricated `atomic64_inc`/clock/slot epoch, no live caller.
+Original real allocation and freeing, swapoff and zswap STORE
+source are unchanged. Default-profile staged source still has
+only original six modified paths; explicit opt-in adds
+`mm/swapfile.c` as seventh with exact Git blob, source anchor
+and transaction rollback.
+
+Compiler-execute the **exact inserted C helper** in GCC and
+Clang `-std=gnu11 -O1 -g -Wall -Wextra -Wconversion -Wshadow
+-Werror -fsanitize=address,undefined -fno-sanitize-recover=all
+-pthread`, with synthetic table methods that assert
+pin/lock/unlock/put balance. Exercise active→NULL→reused same
+slot/identical table-bit ABA; bad/absent table, zero source slot,
+swap device error, and repeated stale callback. Every active
+observation must refuse, with no generation or ref escape.
+Mutation guard must reject an absent lock/device put, invalid
+table read, bypassed macro, `return 0` or `result = 0`.
+Synthetic concurrency is supplemental, NOT a real allocation
+epoch, even if GCC/Clang ASan/UBSan succeed.
+
+The hosted actual pinned source job must stage verified
+`mm/swapfile.c` and run `git diff --check`; compile
+**genuine pinned `mm/swapfile.o` for both
+`CONFIG_ZSWAP=y` and `CONFIG_ZSWAP=n`**, ensuring default
+symbol absence. In the enabled profile, opt-in rebuild with
+`W=1 KCFLAGS="-DSWAPZ_ROUND026_SLOT_EPOCH_PROBE=1 -Werror"`,
+verify `nm` and `objdump` real machine-code function,
+rebuild default with `KCFLAGS=-Werror` and prove absence
+again; preserve existing Round024/25 `mm/zswap.o` opt-in
+and genuine `CONFIG_ZSWAP=y/n` `vmlinux`/modules/matched
+`dm-swapz.ko` Kbuild. A test-compiled unsupported helper,
+source-host PASS or even true kernel object PASS does NOT
+constitute an allocator-issued epoch, loaded original 4096
+swap-in or a physical SWAPSPACE2 test.
+
+The bounded future alternative needs a true nonresetting,
+nonzero allocator issuer under cluster lock, a per-slot
+generation map or equivalent validated in folio STORE, atomic
+generation mint at successful first allocation and retire before
+NULL on final free; explicit safe 64-bit exhaustion
+(`U64_MAX` -> negative, NEVER wrap/restart), complete swapoff
+type reuse, large folio multi-slot, hibernation, aborted
+allocations, parallel callbacks and bounded memory profile.
+A mere local counter or atomically incremented unused helper
+is insufficient. Preserve one zswap pressure/eviction controller,
+current RAW as original UNCOMPRESSED 4096 bytes, separately
+typed future ZSWAP_COMPRESSED_LZ4_V1 and independent full
+original page SHA/CRC32C; no on-media record headers.
+
+**NO_GO**; Phase A BLOCKED, forced RAW bypass DISABLED,
+direct compressed transfer DISABLED. `LIVE_COMPRESSED=DISABLED`,
+`LOADED_4096=NOT_RUN`, `PHYSICAL=NOT_RUN`. The protected
+first original SWAPSPACE2 4096-byte page/header, UUID, signature,
+partition table and all physical data are untouched; no owner
+kernel/module, swap, null_blk, pressure or physical action.

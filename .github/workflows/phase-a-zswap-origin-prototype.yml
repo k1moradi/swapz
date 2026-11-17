@@ -172,7 +172,8 @@ jobs:
           if ! python3 -B swapz/tests/tools/stage-pinned-linux-zswap-origin.py \
               --linux-root linux --manifest "$evidence_dir/source-manifest.json" \
               --with-round024-zswap-kbuild-probe \
-              --with-round025-store-proof-probe; then
+              --with-round025-store-proof-probe \
+              --with-round026-allocator-epoch-probe; then
             echo "::error::Exact Linux identity/blob or source staging failure"
             exit 1
           fi
@@ -185,12 +186,20 @@ jobs:
             echo "::error::Round025 source-only SHA proof manifest drift"
             exit 3
           fi
+          if ! grep -Fq '"round026_allocator_epoch": "NO_AUTHENTIC_GENERATION_NO_GO"' \
+                    "$evidence_dir/source-manifest.json" ||
+             ! grep -Fq '"round026_allocator_probe_compiled": false' \
+                    "$evidence_dir/source-manifest.json"; then
+            echo "::error::Round026 allocator source epoch must refuse"
+            exit 3
+          fi
           git -C linux diff --check -- \
-            mm/zswap.c mm/page_io.c include/linux/swap_ops.h \
+            mm/zswap.c mm/swapfile.c mm/page_io.c include/linux/swap_ops.h \
             include/linux/blk_types.h include/linux/bio.h block/bio.c
           # Exact changed-path allowlist; reject foreign, missing or unexpected changes.
           expected="$(printf '%s\n' block/bio.c include/linux/bio.h \
-            include/linux/blk_types.h include/linux/swap_ops.h mm/page_io.c mm/zswap.c)"
+            include/linux/blk_types.h include/linux/swap_ops.h mm/page_io.c \
+            mm/swapfile.c mm/zswap.c)"
           actual="$(git -C linux diff --name-only | LC_ALL=C sort)"
           if [[ "$actual" != "$expected" ]]; then
             echo "::error::Unexpected modified Linux source paths"
@@ -349,7 +358,7 @@ jobs:
               exit 1
             fi
             printf 'kbuild_recorded_compiler=%s\n' "$recorded_compiler" >> "$current_manifest"
-            objects=(mm/page_io.o block/bio.o)
+            objects=(mm/page_io.o block/bio.o mm/swapfile.o)
             if [[ "$profile" == enabled ]]; then
               objects+=(mm/zswap.o)
             fi
@@ -368,6 +377,40 @@ jobs:
             if [[ "$profile" == disabled && -e "$build_dir/mm/zswap.o" ]]; then
               echo "::error::ZSWAP-disabled build unexpectedly emitted zswap object"
               exit 1
+            fi
+            current_phase=round026_allocator_default_off
+            if nm -a "$build_dir/mm/swapfile.o" |
+                grep -q 'swapz_round026_allocator_epoch_probe'; then
+              echo "::error::Default allocator emitted compile-only epoch probe"
+              exit 1
+            fi
+            if [[ "$profile" == enabled ]]; then
+              # Compile EXACT pinned mm/swapfile.c with an explicit only-CI
+              # lock/slot observation; no allocator-issued epoch exists.
+              run_logged round026_allocator_real_kbuild make -s -C linux \
+                "O=$build_dir" CC=gcc "-j$KBUILD_JOBS" W=1 \
+                KCFLAGS="-DSWAPZ_ROUND026_SLOT_EPOCH_PROBE=1 -Werror" mm/swapfile.o
+              current_phase=round026_allocator_verify_machine_code
+              if ! nm -a "$build_dir/mm/swapfile.o" |
+                  grep -q 'swapz_round026_allocator_epoch_probe'; then
+                echo "::error::No genuine pinned allocator probe symbol"
+                exit 1
+              fi
+              if ! objdump -d "$build_dir/mm/swapfile.o" |
+                  grep -Fq '<swapz_round026_allocator_epoch_probe>:'; then
+                echo "::error::Missing actual original allocator machine code"
+                exit 1
+              fi
+              run_logged round026_allocator_restore_default make -s -C linux \
+                "O=$build_dir" CC=gcc "-j$KBUILD_JOBS" W=1 \
+                KCFLAGS=-Werror mm/swapfile.o
+              current_phase=round026_allocator_verify_restored_default
+              if nm -a "$build_dir/mm/swapfile.o" |
+                  grep -q 'swapz_round026_allocator_epoch_probe'; then
+                echo "::error::Allocator probe leaked into normal kernel"
+                exit 1
+              fi
+              echo "ROUND026_ALLOCATOR_LOCK_OBSERVER_REAL_KBUILD_NO_GO_DEFAULT_OFF"
             fi
             # A source-anchored unused producer function must actually be
             # compiled under explicit CI-only flags, then removed from the

@@ -971,6 +971,131 @@ def validate_round025_store_proof(source: str) -> None:
         raise StagingError("round025-source-store-proof-drift")
 
 
+
+# Optional allocator source is NOT staged by the original/default profile.
+ROUND026_ALLOCATOR_ORIGINAL_BLOBS = {
+    "mm/swapfile.c": "254ce86fa923e6b5f1fefda88c39315c4cc00642",
+}
+ROUND026_ALLOCATOR_EPOCH_ANCHOR = "/*\n * Free a set of swap slots after their swap count dropped to zero, or will be\n * zero after putting the last ref (saves one __swap_cluster_put_entry call).\n */"
+ROUND026_ALLOCATOR_EPOCH_SOURCE = r"""/*
+ * Round026 pinned allocator CI-only observation. No runtime caller.
+ * The original allocator and free both hold ci->lock, but slot table
+ * bits can repeat after freeing and reallocation: NO slot epoch exists.
+ * Never promote a snapshot or caller supplied generation into authority.
+ */
+#if defined(SWAPZ_ROUND026_SLOT_EPOCH_PROBE)
+static __attribute__((__used__, __noinline__)) int
+swapz_round026_allocator_epoch_probe(swp_entry_t source_slot)
+{
+	struct swap_info_struct *swap_info;
+	struct swap_cluster_info *cluster;
+	unsigned long slot_state;
+	unsigned long offset;
+	int result = -EOPNOTSUPP;
+
+	swap_info = get_swap_device(source_slot);
+	if (IS_ERR(swap_info))
+		return PTR_ERR(swap_info);
+	if (!swap_info)
+		return -ENOENT;
+
+	offset = swp_offset(source_slot);
+	cluster = swap_cluster_lock(swap_info, offset);
+	lockdep_assert_held(&cluster->lock);
+	if (!cluster_table_is_alloced(cluster)) {
+		result = -ESTALE;
+		goto unlock_cluster;
+	}
+
+	slot_state = __swap_table_get(cluster, offset % SWAPFILE_CLUSTER);
+	if (swp_tb_is_null(slot_state) || swp_tb_is_bad(slot_state))
+		result = -ESTALE;
+
+	/* Current valid vs reused same-table-bits is indistinguishable.
+	 * Slot allocation epoch, original store SHA binding and sideband
+	 * lifetime are not available here. Always refuse publication.
+	 */
+unlock_cluster:
+	swap_cluster_unlock(cluster);
+	put_swap_device(swap_info);
+	return result;
+}
+#endif /* SWAPZ_ROUND026_SLOT_EPOCH_PROBE */
+
+"""
+
+
+def validate_round026_allocator_epoch_source(source: str) -> None:
+    """Freeze actual cluster lock lifetime, no minted epoch or success."""
+    required = (
+        "#if defined(SWAPZ_ROUND026_SLOT_EPOCH_PROBE)",
+        "#endif /* SWAPZ_ROUND026_SLOT_EPOCH_PROBE */",
+        "swapz_round026_allocator_epoch_probe(swp_entry_t source_slot)",
+        "swap_info = get_swap_device(source_slot);",
+        "if (IS_ERR(swap_info))",
+        "cluster = swap_cluster_lock(swap_info, offset);",
+        "lockdep_assert_held(&cluster->lock);",
+        "if (!cluster_table_is_alloced(cluster))",
+        "slot_state = __swap_table_get(cluster, offset % SWAPFILE_CLUSTER);",
+        "swp_tb_is_null(slot_state) || swp_tb_is_bad(slot_state)",
+        "swap_cluster_unlock(cluster);",
+        "put_swap_device(swap_info);",
+        "int result = -EOPNOTSUPP;",
+        "return result;",
+    )
+    if any(source.count(token) != 1 for token in required) or any(
+        forbidden in source for forbidden in (
+            "result = 0;", "return 0;", "source_slot_allocation_epoch =",
+            "source_slot_allocation_epoch++", "submit_bio(", "bio_endio(",
+            "atomic64_inc", "ktime_get"
+        )
+    ):
+        raise StagingError("round026-allocator-epoch-source-drift")
+
+
+ROUND026_ALLOCATOR_EPOCH_EDITS = {
+    "mm/swapfile.c": (
+        Edit(ROUND026_ALLOCATOR_EPOCH_ANCHOR,
+             ROUND026_ALLOCATOR_EPOCH_SOURCE +
+             ROUND026_ALLOCATOR_EPOCH_ANCHOR),
+    ),
+}
+
+
+def validate_round026_original_allocator(staged_source: str) -> None:
+    """Actual unchanged allocator lock, release and ABA source anchors."""
+    slices = (
+        ("static bool __swap_cluster_alloc_entries(",
+         "static unsigned int alloc_swap_scan_cluster("),
+        ("static void swap_range_free(", "static bool get_swap_device_info("),
+        ("void __swap_cluster_free_entries(", "int __swap_count("),
+    )
+    positions = []
+    for start_token, end_token in slices:
+        begin = staged_source.find(start_token)
+        end = staged_source.find(end_token, begin + len(start_token))
+        if (begin < 0 or end <= begin or
+            staged_source.find(start_token, begin + 1) != -1):
+            raise StagingError("round026-original-allocator-slice-drift")
+        positions.append((begin, end))
+    if any(a[1] >= b[0] for a, b in zip(positions, positions[1:])):
+        raise StagingError("round026-original-allocator-order-drift")
+    for token in (
+        "lockdep_assert_held(&ci->lock);",
+        "__swap_cache_add_folio(ci, folio, swp_entry(si->type,",
+        "swap_range_alloc(si, nr_pages);",
+        "zswap_invalidate(si->type, offset, nr_entries);",
+        "__swap_table_set(ci, ci_off, null_to_swp_tb());",
+        "swap_range_free(si, ci_head + ci_start, nr_pages);",
+        "swap_cluster_assert_empty(ci, ci_start, nr_pages, false);",
+    ):
+        if token not in staged_source:
+            raise StagingError("round026-original-allocator-lifecycle-drift")
+    validate_round026_allocator_epoch_source(ROUND026_ALLOCATOR_EPOCH_SOURCE)
+    if staged_source.count(ROUND026_ALLOCATOR_EPOCH_SOURCE) != 1:
+        raise StagingError("round026-allocator-probe-placement-drift")
+
+
 ROUND024_PROBE_EDITS: dict[str, tuple[Edit, ...]] = {
     "mm/zswap.c": (
         Edit(COMPRESSED_HANDOFF_ANCHOR,
@@ -1081,9 +1206,15 @@ def check_preimage(path: str, payload: bytes, expected_hash: str) -> None:
 
 def render_source(path: str, original: str, *, compressed_handoff: bool = False,
                   round024_probe: bool = False,
-                  round025_store_proof: bool = False) -> str:
+                  round025_store_proof: bool = False,
+                  round026_allocator_probe: bool = False) -> str:
     """Reject missing, duplicate and overlapping anchors before any mutation."""
     edits = EDITS.get(path, KUNIT_EDITS.get(path))
+    if path == "mm/swapfile.c":
+        if not round026_allocator_probe:
+            raise StagingError("round026-allocator-requires-opt-in")
+        validate_round026_allocator_epoch_source(ROUND026_ALLOCATOR_EPOCH_SOURCE)
+        edits = ROUND026_ALLOCATOR_EPOCH_EDITS[path]
     if compressed_handoff and (round024_probe or round025_store_proof):
         raise StagingError("incompatible-producer-profiles")
     if round025_store_proof and not round024_probe:
@@ -1230,6 +1361,9 @@ def validate_origin_postimage(path: str, staged_source: str) -> None:
             "obj-$(CONFIG_SWAP_BIO_ORIGIN_KUNIT_TEST) += swap-bio-origin-kunit.o",
         ),
     }
+    if path == "mm/swapfile.c":
+        validate_round026_original_allocator(staged_source)
+        return
     if path not in required or any(
         staged_source.count(fragment) != (
             2 if (path == "include/linux/swap_ops.h" and
@@ -1276,7 +1410,8 @@ def git_output(root: Path, *args: str) -> str:
     return call.stdout.strip()
 
 
-def validate_checkout(root: Path, *, with_kunit: bool = False) -> None:
+def validate_checkout(root: Path, *, with_kunit: bool = False,
+                      with_round026_allocator_probe: bool = False) -> None:
     """Require the exact clean, complete upstream checkout before writing."""
     if not root.is_dir() or not (root / ".git").exists():
         raise StagingError("complete-git-checkout-required")
@@ -1289,6 +1424,8 @@ def validate_checkout(root: Path, *, with_kunit: bool = False) -> None:
     if len(git_output(root, "ls-files").splitlines()) < MINIMUM_TRACKED_FILES:
         raise StagingError("incomplete-linux-checkout")
     expected_sources = dict(ORIGINAL_BLOBS)
+    if with_round026_allocator_probe:
+        expected_sources.update(ROUND026_ALLOCATOR_ORIGINAL_BLOBS)
     if with_kunit:
         expected_sources.update(KUNIT_ORIGINAL_BLOBS)
     for path, expected_hash in expected_sources.items():
@@ -1361,7 +1498,8 @@ def rollback_sources(root: Path, originals: dict[str, bytes | None],
 def stage_checkout(root: Path, manifest_path: Path, *, with_kunit: bool = False,
                    with_compressed_handoff: bool = False,
                    with_round024_probe: bool = False,
-                   with_round025_store_proof: bool = False) -> dict[str, object]:
+                   with_round025_store_proof: bool = False,
+                   with_round026_allocator_probe: bool = False) -> dict[str, object]:
     try:
         root = root.resolve(strict=True)
     except OSError as error:
@@ -1369,12 +1507,16 @@ def stage_checkout(root: Path, manifest_path: Path, *, with_kunit: bool = False,
     manifest_path = manifest_path.resolve(strict=False)
     if manifest_path == root or root in manifest_path.parents:
         raise StagingError("manifest-must-be-outside-linux-checkout")
-    validate_checkout(root, with_kunit=with_kunit)
+    validate_checkout(root, with_kunit=with_kunit,
+                      with_round026_allocator_probe=with_round026_allocator_probe)
 
     originals: dict[str, bytes | None] = {}
     staged: dict[str, bytes] = {}
     active_edits = dict(EDITS)
     expected_hashes = dict(ORIGINAL_BLOBS)
+    if with_round026_allocator_probe:
+        active_edits.update(ROUND026_ALLOCATOR_EPOCH_EDITS)
+        expected_hashes.update(ROUND026_ALLOCATOR_ORIGINAL_BLOBS)
     if with_kunit:
         active_edits.update(KUNIT_EDITS)
         expected_hashes.update(KUNIT_ORIGINAL_BLOBS)
@@ -1388,6 +1530,8 @@ def stage_checkout(root: Path, manifest_path: Path, *, with_kunit: bool = False,
             round024_probe=with_round024_probe and path == "mm/zswap.c",
             round025_store_proof=(with_round025_store_proof and
                                  path == "mm/zswap.c"),
+            round026_allocator_probe=(with_round026_allocator_probe and
+                                     path == "mm/swapfile.c"),
         ).encode("utf-8")
     if with_kunit:
         addition = root / KUNIT_SOURCE_PATH
@@ -1459,6 +1603,10 @@ def stage_checkout(root: Path, manifest_path: Path, *, with_kunit: bool = False,
         result["round025_store_proof"] = "TEMPORARY_SHA_SNAPSHOT_NO_SLOT_EPOCH"
         result["round025_store_proof_compiled"] = False
         result["direct_compressed_handoff_enabled"] = False
+    if with_round026_allocator_probe:
+        result["round026_allocator_epoch"] = "NO_AUTHENTIC_GENERATION_NO_GO"
+        result["round026_allocator_probe_compiled"] = False
+        result["direct_compressed_handoff_enabled"] = False
     if with_compressed_handoff:
         result["direct_compressed_handoff_enabled"] = False
         result["compressed_handoff_prototype"] = "COMPILE_DISABLED_SOURCE_ONLY"
@@ -1529,6 +1677,9 @@ def main() -> int:
     parser.add_argument("--with-round025-store-proof-probe",
                         action="store_true",
                         help="CI-only original 4096 SHA probe, no authenticated slot epoch")
+    parser.add_argument("--with-round026-allocator-epoch-probe",
+                        action="store_true",
+                        help="CI-only source-real mm/swapfile.c NO_GO lock proof")
     arguments = parser.parse_args()
     try:
         result = stage_checkout(arguments.linux_root, arguments.manifest,
@@ -1538,12 +1689,16 @@ def main() -> int:
                                 with_round024_probe=
                                     arguments.with_round024_zswap_kbuild_probe,
                                 with_round025_store_proof=
-                                    arguments.with_round025_store_proof_probe)
+                                    arguments.with_round025_store_proof_probe,
+                                with_round026_allocator_probe=
+                                    arguments.with_round026_allocator_epoch_probe)
     except (StagingError, OSError, UnicodeError, ValueError) as error:
         print(f"FAIL: {error}", file=sys.stderr)
         return 1
     # Success remains quiet; structured source evidence is in --manifest.
-    assert len(result["changed_paths"]) == (9 if arguments.with_kunit else 6)
+    assert len(result["changed_paths"]) == (
+        (9 if arguments.with_kunit else 6) +
+        int(arguments.with_round026_allocator_epoch_probe))
     return 0
 
 
