@@ -14868,3 +14868,16 @@ codec/CRC32C/SHA/generation/GC bookkeeping RAM-only and bounded.
 Actual current RAW is the ORIGINAL UNCOMPRESSED 4096-byte page.
 No module, swap, extra pressure controller, null_blk, physical
 device or privileged trial.
+
+### Round 025 — Agent 3: exact-source two-guard extraction regression correction
+
+The first hosted Agent3 exact SHA 382ef9fb source tests failed before actual C compilation:
+`test_round024_kbuild_ingress_is_unreferenced_and_fails_closed` counted two
+shared opt-in `#if defined(SWAPZ_ROUND024_DM_IMPORT_KBUILD_PROBE)` guards
+against its outdated single-guard expectation. The new Round025 extractor
+incorrectly represented a Python newline as a double-escaped literal.
+The original Round024 compiler probe and both disabled guards remain in
+`dm-target.c`; tests now require exactly two guards, extract the exact
+uniquely named production C function without a fragile newline prefix,
+and still insist on actual GCC/Clang strict sanitizer execution and
+real kernel Kbuild `nm` proof. No source or live behavior changed.

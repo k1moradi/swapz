@@ -51,7 +51,8 @@ class Round023DisabledConsumerAdmission(unittest.TestCase):
         dm = DM.read_text(encoding="utf-8")
         probe_start = "#if defined(SWAPZ_ROUND024_DM_IMPORT_KBUILD_PROBE)"
         probe_end = "#endif /* SWAPZ_ROUND024_DM_IMPORT_KBUILD_PROBE */"
-        self.assertEqual(dm.count(probe_start), 1)
+        # Round025 adds a second isolated use of the same compile guard.
+        self.assertEqual(dm.count(probe_start), 2)
         self.assertEqual(dm.count(probe_end), 1)
         body = dm.split(probe_start, 1)[1].split(probe_end, 1)[0]
         self.assertIn("static __used noinline int "
@@ -76,8 +77,7 @@ class Round023DisabledConsumerAdmission(unittest.TestCase):
     def test_round025_real_dm_authority_source_compiler_negative(self) -> None:
         """Compile the exact opt-in dm-target body, not a rewritten mock."""
         dm = DM.read_text(encoding="utf-8")
-        start = "#if defined(SWAPZ_ROUND024_DM_IMPORT_KBUILD_PROBE)\\n" \
-                "static __used noinline int swapz_round025_dm_authority_kbuild_probe("
+        start = "static __used noinline int swapz_round025_dm_authority_kbuild_probe("
         end = "#endif /* SWAPZ_ROUND025_DM_AUTHORITY_KBUILD_PROBE */"
         self.assertEqual(dm.count(start), 1)
         self.assertEqual(dm.count(end), 1)
@@ -95,10 +95,7 @@ class Round023DisabledConsumerAdmission(unittest.TestCase):
                    "round025-consumer-dm-authority.c").read_text(encoding="utf-8")
         marker = "/* ROUND025_EXACT_DM_PROBE_SOURCE */"
         self.assertEqual(fixture.count(marker), 1)
-        source = fixture.replace(marker,
-                                 "static __used noinline int "
-                                 "swapz_round025_dm_authority_kbuild_probe(" +
-                                 body, 1)
+        source = fixture.replace(marker, start + body, 1)
         with tempfile.TemporaryDirectory() as temporary:
             source_file = Path(temporary) / "round025-dm.c"
             source_file.write_text(source, encoding="utf-8")

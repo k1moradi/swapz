@@ -28,3 +28,17 @@ LOADED=NOT_RUN; 4096_KERNEL_SWAPIN=NOT_RUN; PHYSICAL=NOT_RUN;
 LIVE_COMPRESSED=DISABLED; PHASE_A=BLOCKED; PHASE_B_RAW_BYPASS=DISABLED.
 SWAPSPACE2 protected header/UUID/table untouched; ordinary RAW original
 uncompressed 4096 semantics retained, no physical write occurred.
+
+## First true hosted source regression and correction
+
+At 382ef9fbe06a6f2a6ced726300ca7364e862e7ad, GitHub Actions
+`Experimental swapz production C qualification` run 44041248220 and
+`Round023 source-only zswap compressed cross-ABI` run 44041248021
+failed their actual Python test before compiler execution: existing
+Round024 test observed two source compile guards, expected one
+(`AssertionError: 2 != 1`), and the Round025 function extractor
+used a double-escaped newline and found zero matching source anchors
+(`AssertionError: 0 != 1`). New follow-up on peer-advanced sole main
+corrects these *test only* defects, preserving all original kernel C,
+existing comments, and all peer commits. Exact compiled C and Kbuild
+outcomes must be checked on the corrected commit. No loaded success.
