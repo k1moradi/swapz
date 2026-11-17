@@ -15198,3 +15198,32 @@ A fail-only CI path additionally prints bounded actual kernel KTAP
 case rows if verification refuses again. The original false-negative
 job remains FAILURE; success can be claimed ONLY from the corrected
 new exact-SHA hosted run and never from KUnit compilation.
+
+## Round 027 — Agent 2: exact six/default vs seven/allocator pinned source and paired object gate
+
+Round026 pinned Linux source workflow 44048517348 failed FIRST at
+`paired-build-invalid: source_manifest_paths`, prior to warning
+classification, because optional original `mm/swapfile.c` is seventh
+source, while paired validator only allowed six. Repair must accept
+only six default sources or seven with exact original upstream Git
+blob `254ce86fa923e6b5f1fefda88c39315c4cc00642` and
+`round026_allocator_epoch=NO_AUTHENTIC_GENERATION_NO_GO`,
+`round026_allocator_probe_compiled=false`, direct compressed
+handoff disabled. Reject missing/duplicate/new/reordered paths, bad
+original blob, arbitrary seventh source, forged compiled flags, and
+unmatched `mm/swapfile.o` SHA256. Both CONFIG_ZSWAP=y and n full
+paired profiles require the opt-in allocator object; original zswap
+object must only appear in y. The original six-source workflow remains
+possible and unchanged.
+
+The real GitHub-hosted pinned Linux original source SHA and exact
+four unchanged kernel-doc warning families are not bypassed, and
+all other compiler warnings/errors must still fail. The genuine
+`vmlinux`, `modules`, restored default allocator proof absence,
+original producer probe and matched `dm-swapz.ko` are source
+qualification, **not** loaded kernel or physical qualification.
+Synthetic source-contract tests cannot promote them to PASS.
+The older physical `swap_attribution` root cause remains unknown.
+No swap/device/pressure operation. Phase A BLOCKED, forced RAW bypass
+DISABLED, direct compressed NO_GO, RAW original 4096 uncompressed;
+SWAPSPACE2 protected header/UUID/partition table unchanged.

@@ -28,6 +28,11 @@ PATCHED_PATHS = (
     "block/bio.c", "include/linux/bio.h", "include/linux/blk_types.h",
     "include/linux/swap_ops.h", "mm/page_io.c", "mm/zswap.c",
 )
+# Exactly six original ordinary sources and one authenticated opt-in source.
+ALLOCATOR_PATCHED_PATH = "mm/swapfile.c"
+ALLOCATOR_ORIGINAL_BLOB = "254ce86fa923e6b5f1fefda88c39315c4cc00642"
+ALLOCATOR_SOURCE_EPOCH_STATUS = "NO_AUTHENTIC_GENERATION_NO_GO"
+ALLOCATOR_PATCHED_PATHS = tuple(sorted((*PATCHED_PATHS, ALLOCATOR_PATCHED_PATH)))
 BIO_ORIGIN_MACRO = b"#define BIO_HAS_ZSWAP_STORED_WRITEBACK_ORIGIN 1\n"
 MODULE_ORIGIN_MARKER = b" origin_carrier_compiled=1"
 MODULE_STOCK_MARKER = b" origin_carrier_compiled=0"
@@ -166,7 +171,7 @@ def read_manifest(path: Path) -> tuple[dict[str, str], list[tuple[str, str]]]:
         require(RE_KEY.fullmatch(name) is not None and
                 all(32 <= ord(character) <= 126 for character in value), "manifest_grammar")
         if name == "object":
-            match = re.fullmatch(r"(mm/page_io\.o|block/bio\.o|mm/zswap\.o) sha256=([a-f0-9]{64})", value)
+            match = re.fullmatch(r"(mm/page_io\.o|block/bio\.o|mm/swapfile\.o|mm/zswap\.o) sha256=([a-f0-9]{64})", value)
             require(match is not None, "object_pair")
             objects.append((match.group(1), match.group(2)))
         else:
@@ -199,10 +204,28 @@ def load_source_manifest(path: Path) -> list[dict[str, object]]:
             record.get("compiled") is False and
             record.get("phase_a_qualified") is False, "source_manifest_identity")
     entries = record.get("changed_paths")
-    require(isinstance(entries, list) and len(entries) == len(PATCHED_PATHS) and
-            all(isinstance(entry, dict) for entry in entries), "source_manifest_paths")
-    require(tuple(sorted(entry.get("path") for entry in entries)) == PATCHED_PATHS,
+    require(isinstance(entries, list) and
+            all(isinstance(entry, dict) and isinstance(entry.get("path"), str)
+                for entry in entries), "source_manifest_paths")
+    paths = tuple(entry["path"] for entry in entries)
+    require(len(paths) == len(set(paths)) and
+            paths in (PATCHED_PATHS, ALLOCATOR_PATCHED_PATHS),
             "source_manifest_paths")
+    if paths == ALLOCATOR_PATCHED_PATHS:
+        require(record.get("round026_allocator_epoch") ==
+                ALLOCATOR_SOURCE_EPOCH_STATUS and
+                record.get("round026_allocator_probe_compiled") is False and
+                record.get("direct_compressed_handoff_enabled") is False,
+                "source_manifest_allocator_profile")
+        allocator = next(entry for entry in entries
+                         if entry["path"] == ALLOCATOR_PATCHED_PATH)
+        require(allocator.get("original_git_sha1") == ALLOCATOR_ORIGINAL_BLOB and
+                RE_SHA256.fullmatch(str(allocator.get("original_sha256", "")))
+                is not None, "source_manifest_allocator_blob")
+    else:
+        require("round026_allocator_epoch" not in record and
+                "round026_allocator_probe_compiled" not in record,
+                "source_manifest_allocator_profile")
     return entries
 
 
@@ -385,7 +408,10 @@ def verify(manifest: Path, source_manifest: Path, linux_root: Path,
              fields.get("kernel_export_build_baseline_warning_sha256")) == baseline,
             "baseline_manifest_evidence")
     validate_config(build_dir / ".config", fields.get("config_sha256", ""), profile)
+    source_entries = load_source_manifest(source_manifest)
     expected_objects = ("mm/page_io.o", "block/bio.o") + (
+        ("mm/swapfile.o",)
+        if len(source_entries) == len(ALLOCATOR_PATCHED_PATHS) else ()) + (
         ("mm/zswap.o",) if profile == "y" else ())
     require(tuple(sorted(name for name, _ in object_claims)) ==
             tuple(sorted(expected_objects)), "object_set")
@@ -399,7 +425,6 @@ def verify(manifest: Path, source_manifest: Path, linux_root: Path,
             sha256_field(fields.get("module_symvers_sha256"), "symvers_hash"),
             "symvers_digest")
 
-    source_entries = load_source_manifest(source_manifest)
     for entry in source_entries:
         name = entry["path"]
         length, sha256, data, _ = read_regular(linux_root / name, "source", retain=True)
@@ -696,8 +721,10 @@ class PairedModuleTests(unittest.TestCase):
 
     def save(self) -> None:
         lines = [f"{key}={value}" for key, value in self.fields.items()]
-        for obj in ("mm/page_io.o", "block/bio.o") + (("mm/zswap.o",)
-                 if self.profile == "y" else ()):
+        allocator_objects = (("mm/swapfile.o",)
+                             if (self.build / "mm/swapfile.o").exists() else ())
+        for obj in ("mm/page_io.o", "block/bio.o") + allocator_objects + (
+                ("mm/zswap.o",) if self.profile == "y" else ()):
             data = (self.build / obj).read_bytes()
             lines.append(f"object={obj} sha256={self.digest(data)}")
         self.manifest.write_text("\n".join(lines) + "\n")
@@ -724,6 +751,102 @@ class PairedModuleTests(unittest.TestCase):
         (self.build / "mm/zswap.o").unlink()
         self.save()
         self.check()
+
+
+    def enable_round027_allocator_fixture(self) -> None:
+        """A synthetic seven-path manifest; never a real Linux build."""
+        metadata = json.loads(self.source_manifest.read_text())
+        content = b"synthetic-staged-allocator-for-manifest-only"
+        self.put(ALLOCATOR_PATCHED_PATH, content, self.linux)
+        metadata["changed_paths"].append({
+            "path": ALLOCATOR_PATCHED_PATH,
+            "bytes": len(content),
+            "original_git_sha1": ALLOCATOR_ORIGINAL_BLOB,
+            "original_sha256": self.digest(b"synthetic-original-content"),
+            "staged_sha256": self.digest(content),
+            "staged_git_sha1": hashlib.sha1(
+                f"blob {len(content)}\0".encode() + content).hexdigest(),
+        })
+        metadata["changed_paths"].sort(key=lambda item: item["path"])
+        metadata["round026_allocator_epoch"] = ALLOCATOR_SOURCE_EPOCH_STATUS
+        metadata["round026_allocator_probe_compiled"] = False
+        metadata["direct_compressed_handoff_enabled"] = False
+        self.source_manifest.write_text(json.dumps(metadata) + "\n")
+        self.put("mm/swapfile.o", b"compiled-source-mm/swapfile.o")
+        self.save()
+
+    def test_round027_exact_six_default_and_seven_allocator_y_n(self) -> None:
+        self.check()
+        self.enable_round027_allocator_fixture()
+        self.check()
+        self.profile = "n"
+        self.fields["requested_zswap"] = "n"
+        self.fields["effective_zswap"] = "n"
+        self.fields["kernel_export_build_baseline_warning_profile"] = "n"
+        updated = (self.build / ".config").read_bytes().replace(
+            b"CONFIG_ZSWAP=y\n", b"# CONFIG_ZSWAP is not set\n")
+        self.put(".config", updated)
+        self.fields["config_sha256"] = self.digest(updated)
+        (self.build / "mm/zswap.o").unlink()
+        self.save()
+        self.check()
+
+    def test_round027_unknown_duplicate_reordered_allocator_paths(self) -> None:
+        self.enable_round027_allocator_fixture()
+        original = json.loads(self.source_manifest.read_text())
+        modified = json.loads(json.dumps(original))
+        modified["changed_paths"][-2]["path"] = "mm/unknown-seventh.c"
+        self.source_manifest.write_text(json.dumps(modified) + "\n")
+        self.assert_rejects("source_manifest_paths")
+        modified = json.loads(json.dumps(original))
+        modified["changed_paths"].append(dict(modified["changed_paths"][-2]))
+        self.source_manifest.write_text(json.dumps(modified) + "\n")
+        self.assert_rejects("source_manifest_paths")
+        modified = json.loads(json.dumps(original))
+        modified["changed_paths"].reverse()
+        self.source_manifest.write_text(json.dumps(modified) + "\n")
+        self.assert_rejects("source_manifest_paths")
+        modified = json.loads(json.dumps(original))
+        modified["changed_paths"].pop(-2)
+        self.source_manifest.write_text(json.dumps(modified) + "\n")
+        self.assert_rejects("source_manifest_paths")
+
+    def test_round027_allocator_blob_status_and_object_integrity(self) -> None:
+        self.enable_round027_allocator_fixture()
+        original = json.loads(self.source_manifest.read_text())
+        allocator = next(entry for entry in original["changed_paths"]
+                         if entry["path"] == ALLOCATOR_PATCHED_PATH)
+        allocator["original_git_sha1"] = "a" * 40
+        self.source_manifest.write_text(json.dumps(original) + "\n")
+        self.assert_rejects("source_manifest_allocator_blob")
+        allocator["original_git_sha1"] = ALLOCATOR_ORIGINAL_BLOB
+        del original["round026_allocator_epoch"]
+        self.source_manifest.write_text(json.dumps(original) + "\n")
+        self.assert_rejects("source_manifest_allocator_profile")
+        original["round026_allocator_epoch"] = ALLOCATOR_SOURCE_EPOCH_STATUS
+        original["round026_allocator_probe_compiled"] = True
+        self.source_manifest.write_text(json.dumps(original) + "\n")
+        self.assert_rejects("source_manifest_allocator_profile")
+        original["round026_allocator_probe_compiled"] = False
+        original["compiled"] = True
+        self.source_manifest.write_text(json.dumps(original) + "\n")
+        self.assert_rejects("source_manifest_identity")
+        original["compiled"] = False
+        self.source_manifest.write_text(json.dumps(original) + "\n")
+        manifest_lines = self.manifest.read_text().splitlines()
+        self.manifest.write_text("\n".join(
+            line for line in manifest_lines
+            if not line.startswith("object=mm/swapfile.o ")) + "\n")
+        self.assert_rejects("object_set")
+        self.save()
+        (self.build / "mm/swapfile.o").write_bytes(b"forged-object")
+        self.assert_rejects("object_digest")
+
+    def test_round027_six_default_rejects_fake_allocator_epoch(self) -> None:
+        metadata = json.loads(self.source_manifest.read_text())
+        metadata["round026_allocator_epoch"] = ALLOCATOR_SOURCE_EPOCH_STATUS
+        self.source_manifest.write_text(json.dumps(metadata) + "\n")
+        self.assert_rejects("source_manifest_allocator_profile")
 
     def test_forged_baseline_warning_metadata(self) -> None:
         self.fields["kernel_export_build_warning_count"] = "6"

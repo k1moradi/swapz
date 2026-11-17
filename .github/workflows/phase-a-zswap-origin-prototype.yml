@@ -289,7 +289,7 @@ jobs:
                   --source-sha "$(git -C linux rev-parse HEAD)" \
                   --profile "$requested_zswap" \
                   --kernel-export-exit "$command_exit_code" >> "$current_manifest"; then
-                echo "::error::Modified Linux $profile kernel exporter baseline warning gate failed"
+                echo "::error::Modified Linux $profile source-manifest or pinned warning classifier failed (see first paired-build-invalid above)"
                 tail -n 30 "$log_file"
                 return 3
               fi
@@ -521,7 +521,8 @@ jobs:
             fi
             current_phase=verify_patched_source_still_exact
             expected="$(printf '%s\n' block/bio.c include/linux/bio.h \
-              include/linux/blk_types.h include/linux/swap_ops.h mm/page_io.c mm/zswap.c)"
+              include/linux/blk_types.h include/linux/swap_ops.h mm/page_io.c \
+              mm/swapfile.c mm/zswap.c)"
             actual="$(git -C linux diff --name-only | LC_ALL=C sort)"
             if [[ "$actual" != "$expected" ]] ||
                [[ -n "$(git -C linux ls-files --others --exclude-standard)" ]] ||
