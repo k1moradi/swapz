@@ -12357,7 +12357,7 @@ finite deadlines for external observer commands, a fixed production PATH, and
 portable mixed-case kernel error detection. These tests remain rootless and
 must never perform host swap or hibernation actions.
 
- 
+
 Raw triple-quoted shell fixtures preserve the literal backslash preceding a
 newline and may lose their executable shebang after naïve dedenting. Normalize
 the fixture before `chmod +x`, and exercise a real subprocess launch with
