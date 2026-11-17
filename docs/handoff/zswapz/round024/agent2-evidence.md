@@ -57,3 +57,17 @@ follow-up includes the unchanged original Round023 C fragment before
 construction defects, NOT evidence of a live compressed consumer ABI.
 The corrected exact-SHA source and pinned CONFIG_ZSWAP y/n Kbuild must
 be judged by subsequent workflow results, not by this note.
+
+## Exact hosted first strict compiler diagnostic: pool fixture
+
+At exact source 15824ab7, workflow 43992882311 failed before Linux Kbuild
+in the disabled compressed source host test. Both GCC and Clang emitted
+`-Werror=missing-field-initializers` for the existing Round023 test's
+`struct zswap_pool other_pool = { "lz4", &tree };`: the Round024 host shim
+now models original kernel `idx` as a third field for the new original
+probe. The follow-up adapts exactly this one **synthetic** initializer in
+the new combined test's in-memory fixture text, preserving the original
+published Round023 C fixture and full strict -Werror + sanitizers.
+No production Linux pool, original page, codec, CRC, kernel ABI, caller,
+raw 4096, or runtime behavior is altered. Prior compiler failures remain
+honestly recorded; retest at the corrected exact new commit is required.

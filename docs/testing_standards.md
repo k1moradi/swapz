@@ -14576,3 +14576,16 @@ fragment as well as the new Round024 helper; otherwise the first real
 GCC/Clang compile produces an undeclared-function error and cannot qualify
 either contract. This correction preserves all original tests and source,
 without inserting mock success, bypassing sanitizers or changing runtime.
+
+### Round 024 — Agent 2 exact pinned pool-index host fixture initializer
+
+The Round024 probe accesses the original pinned `struct zswap_pool.idx`.
+The Round023 synthetic C fixture previously initialized only the original
+host shim's two fields (`tfm_name`, `zs_pool`). The extended strictly
+compiled shim has a third `idx` field. The new *Round024-only combined*
+compiler harness adds one explicit zero `idx` to that local test-generated
+initializer, leaving the checked-in Round023 fixture and actual pinned
+Linux source untouched. This resolves `-Wmissing-field-initializers`
+under GCC/Clang `-Werror`; no warnings are disabled and no success is
+inferred from synthetic provenance. Real Kbuild and live handoff remain
+separate gates.

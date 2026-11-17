@@ -389,6 +389,15 @@ class CompressedHandoffTests(unittest.TestCase):
         stored_identity_fixture = (Path(__file__).parent / "fixtures" /
                                    "round023-producer-proof-identity.c").read_text(
                                        encoding="utf-8")
+        # The real pinned pool has an idx field. Round023's host-only pool
+        # fixture predates the idx field now used by this exact-source probe.
+        # Extend only the in-memory fixture initializer, never the original C
+        # file or any staged Linux source; retain strict -Werror for both.
+        old_pool_initializer = 'struct zswap_pool other_pool = { "lz4", &tree };'
+        self.assertEqual(stored_identity_fixture.count(old_pool_initializer), 1)
+        stored_identity_fixture = stored_identity_fixture.replace(
+            old_pool_initializer,
+            'struct zswap_pool other_pool = { "lz4", &tree, 0 };', 1)
         main = HOST_CASES.replace(
             "int main(void) {",
             "int main(void) {\n    round024_compiler_probe_negatives();\n", 1)
