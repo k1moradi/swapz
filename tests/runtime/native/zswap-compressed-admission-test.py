@@ -24,7 +24,7 @@ class Round023DisabledConsumerAdmission(unittest.TestCase):
         gate = ("#if 0 /* "
                 "SWAPZ_ROUND023_COMPRESSED_DM_IMPORT_DISABLED_NO_AUTHENTIC_CARRIER */")
         self.assertEqual(dm.count(gate), 1)
-        self.assertEqual(dm.count('#include "zswap-import-admission.h"'), 1)
+        self.assertEqual(dm.count('#include "zswap-import-admission.h"'), 2)
         self.assertIn("return -EOPNOTSUPP;", dm)
         # The actual importer decoder is not included or used by the DM.
         self.assertNotIn('#include "zswap-import-codec.h"', dm)
@@ -46,6 +46,32 @@ class Round023DisabledConsumerAdmission(unittest.TestCase):
         self.assertIn("SWAPZ_CODEC_METADATA_ON_MEDIA 0U",
                       CODEC_HEADER.read_text(encoding="utf-8"))
         self.assertIn("swapz_crc32c_bytes", CODEC.read_text(encoding="utf-8"))
+
+    def test_round024_kbuild_ingress_is_unreferenced_and_fails_closed(self) -> None:
+        dm = DM.read_text(encoding="utf-8")
+        probe_start = "#if defined(SWAPZ_ROUND024_DM_IMPORT_KBUILD_PROBE)"
+        probe_end = "#endif /* SWAPZ_ROUND024_DM_IMPORT_KBUILD_PROBE */"
+        self.assertEqual(dm.count(probe_start), 1)
+        self.assertEqual(dm.count(probe_end), 1)
+        body = dm.split(probe_start, 1)[1].split(probe_end, 1)[0]
+        self.assertIn("static __used noinline int "
+                      "swapz_round024_dm_import_kbuild_probe(", body)
+        self.assertIn("swapz_zswap_admission_read_4096(", body)
+        self.assertIn("swapz_zswap_admission_try_live(NULL)", body)
+        self.assertTrue(body.rstrip().endswith("}"))
+        self.assertIn("return -EOPNOTSUPP;", body)
+        self.assertNotIn("submit_bio(", body)
+        self.assertNotIn("bio_endio(", body)
+        self.assertNotIn("swapz_zswap_admission_begin_mock(", body)
+        self.assertEqual(dm.count("swapz_round024_dm_import_kbuild_probe("), 1)
+        # Compilation is selected by KCFLAGS in a separate module build. The
+        # ordinary default module still compiles without the new header.
+        workflow = (ROOT / ".github/workflows/product-codec.yml").read_text(
+            encoding="utf-8")
+        self.assertIn("KCFLAGS=-DSWAPZ_ROUND024_DM_IMPORT_KBUILD_PROBE=1",
+                      workflow)
+        self.assertIn("nm -a", workflow)
+        self.assertIn("swapz_round024_dm_import_kbuild_probe", workflow)
 
     def test_actual_crc32c_lz4_sha256_and_transaction_gcc_clang(self) -> None:
         compilers = [name for name in ("gcc", "clang") if shutil.which(name)]

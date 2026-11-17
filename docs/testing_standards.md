@@ -14489,3 +14489,37 @@ Round022 interoperability work; this is post-publication integration
 qualification only, and its synthetic positive result can never
 authorize real compressed BIO transport or loaded/physical Phase A.
 The workflow remains software-only and preserves all existing steps.
+
+## Round 024 — Agent 3: actual dm-swapz kernel compile-only disabled ingress
+
+The live `dm-target.c` WRITE, READ, GC, DISCARD, upper ACK, RAW_4096 and
+physical SWAPSPACE2 behavior are unchanged. The previous Round023 `#if 0`
+source-only admission sketch remains intact. New, separate
+`SWAPZ_ROUND024_DM_IMPORT_KBUILD_PROBE` compiles the **real original**
+`zswap-import-admission.h` and `zswap-import-codec.h` into `dm-target.o`
+only for explicitly opted-in external kernel module Kbuild. The unreferenced
+`__used noinline` probe actually emits the full existing imported
+CRC32C, kernel LZ4 block, 4096-byte SHA256/read validation path; it always
+returns `-EOPNOTSUPP`. It cannot publish a map, upper ACK, or compressed
+BIO, and no production call site exists. The runtime admission helper also
+always returns `-EOPNOTSUPP`. The positive host transaction remains
+MOCK/UNTRUSTED, never converted into a real authenticated transport.
+
+The experimental production-C workflow retains its normal and W=1/W=2
+module builds. An extra isolated `SWAPZ_STAGE` and
+`KCFLAGS=-DSWAPZ_ROUND024_DM_IMPORT_KBUILD_PROBE=1` must Kbuild and link
+`dm-swapz.ko` and prove the original `dm-target.o` emitted the new probe
+symbol via `nm`; missing kernel crypto/LZ4 exports or compiler diagnostics
+are a real first failure, not host-test success. The original GCC/Clang
+sanitized imported decoder and wrong generation, CRC, SHA, lower short IO,
+early ACK, GC stale and partial-output source-host tests still execute,
+with an additional exact integration-gate regression. No module is loaded.
+
+Any Kbuild compiler or modpost failure blocks qualification and must be
+recorded by its exact first failing diagnostic; compiler-only success is
+SOURCE_ONLY, not a genuine MM/BIO producer bridge. `SWAPZ_ZSWAP_IMPORT_ACTIVE`
+and `SWAPZ_ZSWAP_IMPORT_ADMISSION_ACTIVE` remain 0U. Phase A BLOCKED,
+Phase B forced RAW bypass DISABLED, compressed handoff DISABLED.
+Existing RAW remains the original uncompressed full 4096 bytes, SWAPSPACE2
+first header/UUID/table remains unchanged; only future authorized lower
+post-header payload+padding extents may be written, all mapping in RAM.

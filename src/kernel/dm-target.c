@@ -419,6 +419,37 @@ static int swapz_compressed_import_disabled(void)
 }
 #endif /* SWAPZ_ROUND023_COMPRESSED_DM_IMPORT_DISABLED_NO_AUTHENTIC_CARRIER */
 
+/*
+ * Round024: compiler-only, zero-call-site kernel ingress proof. The ordinary
+ * 4096-byte REQ_SWAP BIO, RAW record and existing upper ACK paths do not call
+ * this function. Only CI's explicit Kbuild macro emits the read verifier and
+ * its real kernel LZ4/SHA/CRC dependencies into the module.
+ *
+ * This probe is NOT an authenticated producer bridge. Even if a synthetic
+ * transaction passes the decoder, return EOPNOTSUPP and publish nothing.
+ * The caller (there is none) would own all buffers and ordered state.
+ */
+#if defined(SWAPZ_ROUND024_DM_IMPORT_KBUILD_PROBE)
+#include "zswap-import-admission.h"
+static __used noinline int swapz_round024_dm_import_kbuild_probe(
+		const struct swapz_zswap_admission_transaction *transaction,
+		swapz_u64 current_logical_page, swapz_u64 current_generation,
+		swapz_u64 current_gc_epoch, const swapz_u8 *lower_bytes,
+		swapz_u32 actual_lower_bytes, int lower_error,
+		swapz_u8 *scratch, swapz_u8 *upper_output)
+{
+	/* Always reject admission: no authenticated MM/BIO compressed carrier. */
+	if (swapz_zswap_admission_try_live(NULL) != -EOPNOTSUPP)
+		return -EPERM;
+	/* Kbuild must type-check AND emit the real imported decode path. */
+	(void)swapz_zswap_admission_read_4096(
+		transaction, current_logical_page, current_generation,
+		current_gc_epoch, lower_bytes, actual_lower_bytes, lower_error,
+		scratch, upper_output, NULL);
+	return -EOPNOTSUPP;
+}
+#endif /* SWAPZ_ROUND024_DM_IMPORT_KBUILD_PROBE */
+
 enum swapz_write_origin {
 	SWAPZ_WRITE_ORIGIN_ORDINARY_OR_UNKNOWN = 0,
 	SWAPZ_WRITE_ORIGIN_ZSWAP_STORED_WRITEBACK,
