@@ -50,12 +50,12 @@ def host_owned_source() -> str:
     constructor_fixture = (Path(__file__).parent / "fixtures" /
                            "round029-sideband-constructor-host.c").read_text(
                                encoding="utf-8")
-    main_anchor = "int main(void)\\n{"
+    main_anchor = "int main(void)\n{"
     if fixture.count(main_anchor) != 1:
         raise AssertionError("host main insertion anchor drift")
     return fixture.replace(main_anchor,
-                           constructor_fixture + "\\n" +
-                           "int main(void)\\n{\\n\\tround029_constructor_host_checks();",
+                           constructor_fixture + "\n" +
+                           "int main(void)\n{\n\tround029_constructor_host_checks();",
                            1)
 
 

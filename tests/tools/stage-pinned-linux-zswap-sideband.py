@@ -110,7 +110,8 @@ swapz_ci_owned_create(const u8 *compressed_source, size_t input_capacity,
 	owner->representation_version = representation_version;
 	owner->codec = codec;
 	owner->compressed_crc32c =
-		~crc32c(~0U, owner->compressed_bytes, compressed_length);
+		~crc32c(~0U, owner->compressed_bytes,
+			 (unsigned int)compressed_length);
 	if (owner->compressed_crc32c != expected_crc32c) {
 		kfree_sensitive(owner);
 		return NULL;
