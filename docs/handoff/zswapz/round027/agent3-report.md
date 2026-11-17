@@ -1,0 +1,7 @@
+# Round027 — Agent3 accountable source-review result
+
+Task publication: [5da826bd](https://github.com/k1moradi/swapz/commit/5da826bdcfbc358ed80814afb0ca19d46ac23806). Original [Agent3 REPORT_READY](https://github.com/k1moradi/swapz/issues/144#issuecomment-6944314230). Exact committed source [87c171ac](https://github.com/k1moradi/swapz/commit/87c171ac6f1dea504e452e7fa598750614b9a978) already on sole main.
+
+**Accepted — rootless forensic tooling only.** `tests/tools/round027-offline-swap-attribution.py` executes original owner qualifier evaluator AST read-only with safe bounded synthetic/redacted JSON input. `tests/runtime/native/round027-offline-swap-attribution-test.py` contains seven adversarial methods; `.github/workflows/physical-evidence-rootless.yml` runs all 106 rootless tests including 48 physical adversarial, 21 RAM lease, 30 physical nonadmission, and seven new offline attribution methods. Exact [current-head run #44058599352](https://github.com/k1moradi/swapz/actions/runs/44058599352) job 133954250418 succeeded. Rootless results do not create genuine physical evidence.
+
+**Historical failure remains unresolved:** older owner's real anonymous_workload failed `swap_attribution`; original cgroup vs /proc/swaps/mapper/physical-lower numerical counters and source/runtime identities are absent. Its first numerical cause and root cause remain `UNKNOWN/UNDETERMINED`, not a presumed timing race. No privilege, kernel loading, swap operation, mapper or physical device was exercised. `PHASE_A=BLOCKED`, `FORCED_RAW=DISABLED`, `DIRECT_COMPRESSED=NO_GO`.
