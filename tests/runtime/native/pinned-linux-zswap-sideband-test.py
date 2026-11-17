@@ -172,6 +172,37 @@ class Round025PinnedSideband(unittest.TestCase):
                           ran.stdout)
             self.assertIn("LIVE_COMPRESSED=DISABLED", ran.stdout)
 
+    def test_round026_actual_kernel_lifecycle_cases_registered(self) -> None:
+        source = STAGER.CI_KUNIT
+        for case_name in (
+            "swapz_ci_clone_lifetime_kunit",
+            "swapz_ci_split_lifetime_kunit",
+            "swapz_ci_reuse_and_abort_kunit",
+            "swapz_ci_reject_invalid_kunit",
+            "swapz_ci_invalid_clone_kunit",
+            "swapz_ci_reuse_private_kunit",
+            "swapz_ci_abort_dead_ref_kunit",
+        ):
+            with self.subTest(case=case_name):
+                self.assertEqual(source.count(
+                    "KUNIT_CASE(" + case_name + ")"), 1)
+        self.assertIn("bio_init_clone(NULL, &clone, &source", source)
+        self.assertIn("bio_split(&source", source)
+        self.assertIn("bio_reuse(&source", source)
+        self.assertIn("bio_prepare_reissue(&source", source)
+        self.assertIn("refcount_set(&owner->references, 0)", source)
+        self.assertIn("return -EOPNOTSUPP;", STAGER.CI_HELPERS)
+
+    def test_round026_booted_kunit_verifier_negative_selftest(self) -> None:
+        verifier = (Path(__file__).parent / "fixtures" /
+                    "round026-sideband-kunit-verdict.py")
+        result = subprocess.run(
+            [sys.executable, "-B", str(verifier), "--self-test"],
+            capture_output=True, text=True, check=False, timeout=25)
+        self.assertEqual(result.returncode, 0,
+                         "KUnit verdict negative selftest first failure:\n" +
+                         result.stderr[-5000:])
+
     def test_round025_gcc_sanitizers_owned_copy_and_refcount(self) -> None:
         self._test_compiler("gcc")
 

@@ -213,6 +213,11 @@ static void swapz_ci_split_lifetime_kunit(struct kunit *test)
 	KUNIT_EXPECT_EQ(test, source.bi_iter.bi_size,
 			(unsigned int)PAGE_SIZE / 2);
 	KUNIT_EXPECT_FALSE(test, swapz_ci_bio_merge_allowed(&source, split));
+	/* Neither 2048-byte split can authenticate one original 4096 record. */
+	KUNIT_EXPECT_EQ(test, swapz_ci_live_compressed_admit(split, 11),
+			-EOPNOTSUPP);
+	KUNIT_EXPECT_EQ(test, swapz_ci_live_compressed_admit(&source, 11),
+			-EOPNOTSUPP);
 	bio_put(split);
 	KUNIT_EXPECT_EQ(test, refcount_read(&owner->references), 1);
 release_source:
@@ -264,11 +269,87 @@ static void swapz_ci_reject_invalid_kunit(struct kunit *test)
 	swapz_ci_owned_put(owner);
 }
 
+/*
+ * Real __bio_clone must reject an invalid owner BEFORE acquiring a ref;
+ * bio_init_clone then bio_uninit's the destination on failure.
+ */
+static void swapz_ci_invalid_clone_kunit(struct kunit *test)
+{
+	struct bio source = {}, clone = {};
+	struct swapz_ci_owned_payload *owner = swapz_ci_kunit_owner(test);
+	int error;
+
+	KUNIT_ASSERT_NOT_NULL(test, owner);
+	bio_init(&source, NULL, NULL, 0, REQ_OP_WRITE | REQ_SWAP);
+	source.bi_swapz_ci_sideband = owner;
+	owner->compressed_crc32c ^= 1U;
+	error = bio_init_clone(NULL, &clone, &source, GFP_KERNEL);
+	KUNIT_EXPECT_EQ(test, error, -EOPNOTSUPP);
+	KUNIT_EXPECT_PTR_EQ(test, clone.bi_swapz_ci_sideband, NULL);
+	KUNIT_EXPECT_EQ(test, refcount_read(&owner->references), 1);
+	bio_uninit(&source);
+}
+
+/*
+ * bio_reuse() must preserve unrelated endio/bi_private state and clear
+ * the old compressed owner, not leak/refcount it across source epochs.
+ */
+static void swapz_ci_reuse_private_kunit(struct kunit *test)
+{
+	struct bio source = {};
+	struct swapz_ci_owned_payload *owner = swapz_ci_kunit_owner(test);
+	unsigned int endio_token = 42;
+
+	KUNIT_ASSERT_NOT_NULL(test, owner);
+	bio_init(&source, NULL, NULL, 0, REQ_OP_WRITE | REQ_SWAP);
+	source.bi_swapz_ci_sideband = owner;
+	source.bi_private = &endio_token;
+	bio_reuse(&source, REQ_OP_WRITE | REQ_SWAP);
+	KUNIT_EXPECT_PTR_EQ(test, source.bi_swapz_ci_sideband, NULL);
+	KUNIT_EXPECT_PTR_EQ(test, source.bi_private, &endio_token);
+	KUNIT_EXPECT_EQ(test, endio_token, 42U);
+	KUNIT_EXPECT_EQ(test, swapz_ci_live_compressed_admit(&source, 11),
+			-EOPNOTSUPP);
+	bio_uninit(&source);
+}
+
+/*
+ * Cancel/double cleanup: detaching clears the pointer before last put;
+ * no new ref may be acquired from a deliberately zero-count test owner.
+ * Never dereference a previously freed owner in this test.
+ */
+static void swapz_ci_abort_dead_ref_kunit(struct kunit *test)
+{
+	struct bio source = {};
+	struct swapz_ci_owned_payload *owner = swapz_ci_kunit_owner(test);
+
+	KUNIT_ASSERT_NOT_NULL(test, owner);
+	bio_init(&source, NULL, NULL, 0, REQ_OP_WRITE | REQ_SWAP);
+	source.bi_swapz_ci_sideband = owner;
+	swapz_ci_bio_detach(&source);
+	KUNIT_EXPECT_PTR_EQ(test, source.bi_swapz_ci_sideband, NULL);
+	swapz_ci_bio_detach(&source);
+	bio_uninit(&source);
+	bio_reset(&source, NULL, REQ_OP_WRITE | REQ_SWAP);
+	KUNIT_EXPECT_PTR_EQ(test, source.bi_swapz_ci_sideband, NULL);
+	bio_uninit(&source);
+
+	owner = swapz_ci_kunit_owner(test);
+	KUNIT_ASSERT_NOT_NULL(test, owner);
+	refcount_set(&owner->references, 0);
+	KUNIT_EXPECT_PTR_EQ(test, swapz_ci_owned_get(owner), NULL);
+	refcount_set(&owner->references, 1);
+	swapz_ci_owned_put(owner);
+}
+
 static struct kunit_case swapz_ci_sideband_cases[] = {
 	KUNIT_CASE(swapz_ci_clone_lifetime_kunit),
 	KUNIT_CASE(swapz_ci_split_lifetime_kunit),
 	KUNIT_CASE(swapz_ci_reuse_and_abort_kunit),
 	KUNIT_CASE(swapz_ci_reject_invalid_kunit),
+	KUNIT_CASE(swapz_ci_invalid_clone_kunit),
+	KUNIT_CASE(swapz_ci_reuse_private_kunit),
+	KUNIT_CASE(swapz_ci_abort_dead_ref_kunit),
 	{}
 };
 

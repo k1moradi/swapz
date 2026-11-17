@@ -14985,3 +14985,102 @@ not merely a synthetic fixture. Both `round024_ingress` optional
 The revised proof uses `current_snapshot` instead and the exact-source
 test rejects reintroduction. These failures are in genuine kernel builds;
 strict GCC/Clang host tests cannot substitute for that result.
+
+
+## Round 026 — Agent 4: BOOT-executed pinned Linux BIO KUnit, strict KTAP+JSON, NO_GO
+
+This independent Agent4 runtime escalation uses **only** the existing
+\`tests/tools/stage-pinned-linux-zswap-sideband.py\`,
+\`tests/runtime/native/pinned-linux-zswap-sideband-test.py\`,
+\`.github/workflows/phase-a-zswap-sideband.yml\`, the new
+\`tests/runtime/native/fixtures/round026-sideband-kunit-verdict.py\`,
+and \`docs/handoff/zswapz/round026/agent4-evidence.md\`. Preserve all
+previous and Agent2/3 append-only sections verbatim. This is a
+**source-only experimental kernel**; no host Linux kernel/module,
+physical swap, null_blk, mapper, memory-pressure or owner device operation.
+
+**Source chain:** Git blob SHA-1 source gates require original
+\`torvalds/linux\` commit
+\`c339f4010dea8b0d754f84ace70cd1b089878ef8\` and precisely
+\`include/linux/blk_types.h\` blob
+\`0cc09b975d8ffbd45ca3dc47533a71f8e8164de6\` plus
+\`block/bio.c\` blob
+\`b0fcc69de653524479e3b328aa29a37e97945b84\`. Modify only
+those two files in a **disposable CI upstream checkout** with
+\`SWAPZ_ROUND025_SIDEBAND_CI_ONLY\` defined only in Kbuild. The
+production compiler never defines that macro. The ordinary original
+4096-byte \`REQ_SWAP\` upper BIO, \`bi_private\`, \`bi_io_vec\` and
+disk format remain unchanged.
+
+The prior four original BIO KUnit cases (real \`bio_init_clone\`,
+real \`bio_split\` with 2048/2048-byte halves, reset/reissue, invalid
+codec/CRC/length/owned-capacity) now also include real
+\`bio_init_clone\` invalid-CRC failure unwinding without an extra
+ref, real \`bio_reuse\` preserving unrelated \`bi_private\` while
+dropping the typed source owner, and repeated abort/zero-ref
+nonresurrection. Both split BIO halves MUST still refuse compressed
+admission as neither can represent an independently verified full
+4096-byte record. The only source-only admission function still
+unconditionally returns \`-EOPNOTSUPP\`; no borrowed zpool pointer,
+runtime decoder, DM consumer or second reclaim controller is enabled.
+
+**Test ladder (never conflate):** The existing workflow job retains
+GCC CONFIG_ZSWAP=y/n original-source \`block/bio.o\` and KUnit
+*COMPILATION*, plus rootless GCC/Clang ASan+UBSan host negatives.
+A distinct job uses upstream \`tools/testing/kunit/kunit.py run
+--arch=um\` to compile, **BOOT**, and execute the seven original
+source-embedded KUnit cases inside disposable Linux UML. It records
+kunit.py JSON and the real UML \`test.log\`. The strict independent
+verifier requires architecture \`um\`, exactly one expected suite
+\`swapz_round025_sideband_compiler_only\`, each of the seven named
+cases exactly once with explicit \`PASS\`, no skipped/failed/crashed/
+errored cases, suite counts 7/7, a kernel \`KTAP version 1\` and one
+matching actual \`ok N - case_name\` kernel trace for every case.
+KUnit symbols, source substrings, an empty report, fabricated
+\`PASS\` text, non-UM Linux runs and missing/partial/excess KTAP
+are **not** evidence. KUnit runner nonzero exit, kernel BUG/Oops,
+panic, leak/refcount warning, timeout or suite missing MUST return
+nonzero with bounded first-failure log; CI cannot convert failure
+into a skip.
+
+Reproduce on a fresh GitHub Actions Ubuntu-hosted runner (no owner host):
+
+\`\`\`sh
+python3 -B swapz/tests/runtime/native/fixtures/round026-sideband-kunit-verdict.py --self-test
+python3 -B swapz/tests/runtime/native/pinned-linux-zswap-sideband-test.py
+python3 -B swapz/tests/tools/stage-pinned-linux-zswap-sideband.py --linux-root linux
+git -C linux diff --check
+python3 -B linux/tools/testing/kunit/kunit.py run --arch=um \
+  --build_dir="$RUNNER_TEMP/round026-uml-build" \
+  --kunitconfig="$RUNNER_TEMP/round026-uml.kunitconfig" \
+  --make_options="KCFLAGS=-DSWAPZ_ROUND025_SIDEBAND_CI_ONLY" \
+  --jobs=2 --timeout=120 --json="$RUNNER_TEMP/round026-uml-kunit.json" \
+  swapz_round025_sideband_compiler_only
+python3 -B swapz/tests/runtime/native/fixtures/round026-sideband-kunit-verdict.py \
+  --result "$RUNNER_TEMP/round026-uml-kunit.json" \
+  --kernel-log "$RUNNER_TEMP/round026-uml-build/test.log"
+\`\`\`
+
+The \`round026-uml.kunitconfig\` must contain \`CONFIG_KUNIT=y\`,
+\`CONFIG_SWAP=y\`, \`CONFIG_BLOCK=y\` and \`# CONFIG_ZSWAP is not set\`;
+the earlier separate native source job still compiles BOTH
+CONFIG_ZSWAP=y/n profiles. The UML test runs in a userspace Linux
+kernel process and is **not** a loaded matching host Linux swap-in,
+physical backing acceptance, or permission to run privileged tests.
+
+**GO/NO_GO:** Even seven real kernel KUnit PASS results support
+only the opt-in BIO ownership/refcount correctness **under tested
+UML paths**, not production compressed transport. An allocator-issued
+swap-slot reuse epoch joined to authentic zswap STORE original SHA256,
+verified full compressed ownership through semantic split/DM ingress,
+and actual DM generation/GC/ordered once-only ACK/read mapping remain
+missing as one authenticated live cross-component transport.
+Thus the end-to-end architecture gate is **NO_GO**, regardless of
+booted KUnit PASS. \`PHASE_A=BLOCKED\`,
+\`PHASE_B_FORCED_RAW_BYPASS=DISABLED\`,
+\`DIRECT_COMPRESSED_HANDOFF=DISABLED\`,
+\`LOADED_ORIGINAL_4096_SWAPIN=NOT_RUN\`,
+\`PHYSICAL_SWAPSPACE2=NOT_RUN\`. Existing RAW is original
+**UNCOMPRESSED** full 4096 bytes, not a tagged LZ4 compressed record;
+the original SWAPSPACE2 first header/UUID/signature and partition
+table are immutable.
