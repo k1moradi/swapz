@@ -2081,6 +2081,428 @@ def apply_round037_original_mm_owner(path: str, composed: str) -> str:
                         ROUND036_LIFETIME_HOOK + ROUND037_MM_OWNER_HOOK,
                         path, "round037-original-mm-dispatch-probe")
 
+
+# Round038 original zswap STORE-time CRC capture and already-stored owned
+# writeback provenance: diagnostic only, default never compiled.
+ROUND038_STORE_PROVENANCE_MACRO = "SWAPZ_ROUND038_ORIGINAL_STORE_PROVENANCE_TEST"
+ROUND038_STORE_PROVENANCE_C = r"""#if defined(SWAPZ_ROUND038_ORIGINAL_STORE_PROVENANCE_TEST) && \
+    defined(SWAPZ_ROUND037_ORIGINAL_MM_LIFETIME_OWNER_TEST) && \
+    defined(SWAPZ_ROUND036_ORIGINAL_ROUTE_LIFETIME_TEST) && \
+    defined(SWAPZ_ROUND035_ORIGINAL_MM_ROUTE_WITNESS_TEST) && \
+    defined(SWAPZ_ROUND034_ORIGINAL_V1_KUNIT_TEST) && \
+    defined(SWAPZ_ROUND032_BIO_COPY_VIEW_CI_ONLY) && \
+    defined(SWAPZ_ROUND031_MM_BIO_SOURCE) && \
+    defined(SWAPZ_ROUND030_EVICTION_SNAPSHOT_SOURCE) && \
+    defined(SWAPZ_ROUND028_SLOT_EPOCH_SOURCE) && \
+    defined(SWAPZ_ROUND025_SIDEBAND_CI_ONLY) && IS_ENABLED(CONFIG_KUNIT)
+/* ROUND038_ORIGINAL_STORE_PROVENANCE_BEGIN */
+#include <kunit/test.h>
+
+/*
+ * A diagnostic value COPY, not an authenticated allocation/DM authority.
+ * STORE's SHA is taken from the ORIGINAL full 4096 locked folio before
+ * compression; STORE CRC is taken from original compressor dst, AFTER the
+ * real zsmalloc write and BEFORE the compressor mutex is dropped.
+ * At eviction the owned CRC is independently recomputed over a copy of
+ * that very same zsmalloc object, NEVER the decompressed 4096 BIO.
+ */
+struct swapz_round038_store_observation {
+	u64 source_swap_entry;
+	u64 allocation_epoch;
+	u64 stored_identity;
+	u32 compressed_crc32c;
+	u16 compressed_length;
+	u16 decoded_length;
+	u8 representation_version;
+	u8 codec;
+	u8 original_sha256[SHA256_DIGEST_SIZE];
+	bool stored_in_original_tree;
+	bool source_owner_live;
+	bool folio_locked;
+	bool original_bio_full_4096;
+	bool current_slot_ref_held;
+	bool current_dm_gc_ref_held;
+};
+
+/* ROUND038_ORIGINAL_STORE_PURE_C_BEGIN */
+static int swapz_round038_store_observation_check(
+		const struct swapz_round038_store_observation *store,
+		const struct swapz_round038_store_observation *writeback)
+{
+	u8 digest_present = 0;
+	unsigned int digest_index;
+
+	if (!store || !writeback)
+		return -EINVAL;
+	if (!store->source_swap_entry || !store->allocation_epoch ||
+	    !store->stored_identity || !store->stored_in_original_tree ||
+	    !writeback->stored_in_original_tree ||
+	    !writeback->source_owner_live || !writeback->folio_locked)
+		return -ESTALE;
+	if (store->source_swap_entry != writeback->source_swap_entry ||
+	    store->allocation_epoch != writeback->allocation_epoch ||
+	    store->stored_identity != writeback->stored_identity)
+		return -ESTALE;
+	if (!store->compressed_length || store->compressed_length > 3568U ||
+	    !writeback->compressed_length ||
+	    writeback->compressed_length > 3568U ||
+	    store->compressed_length != writeback->compressed_length ||
+	    store->decoded_length != 4096U ||
+	    writeback->decoded_length != 4096U ||
+	    store->representation_version != 1U ||
+	    writeback->representation_version != 1U ||
+	    store->codec != 1U || writeback->codec != 1U ||
+	    !writeback->original_bio_full_4096)
+		return -EOPNOTSUPP;
+	for (digest_index = 0; digest_index < SHA256_DIGEST_SIZE;
+	     digest_index++)
+		digest_present |= store->original_sha256[digest_index];
+	if (!digest_present)
+		return -ENODATA;
+	if (store->compressed_crc32c != writeback->compressed_crc32c ||
+	    memcmp(store->original_sha256, writeback->original_sha256,
+		   SHA256_DIGEST_SIZE))
+		return -EBADMSG;
+	/*
+	 * Even a real original zswap STORE and true matching CRC+SHA do NOT
+	 * pin a current slot incarnation and current downstream DM map/GC
+	 * across asynchronous original BIO clone/split/endio/swapoff.
+	 * Forged TRUE booleans in synthetic KUnit cannot mint either lease.
+	 */
+	return -EOPNOTSUPP;
+}
+/* ROUND038_ORIGINAL_STORE_PURE_C_END */
+
+/* Called ONLY from actual pinned zswap STORE acceptance or writeback. */
+static noinline int swapz_round038_actual_store_provenance_probe(
+		struct zswap_entry *entry, swp_entry_t original_slot,
+		struct xarray *tree, pgoff_t offset,
+		bool writeback_phase, bool original_owned_bio)
+{
+	struct swapz_round038_store_observation store = {};
+	struct swapz_round038_store_observation observed = {};
+	struct zswap_pool *pool;
+	u64 epoch;
+
+	if (!entry || !tree || xa_load(tree, offset) != entry ||
+	    entry->swpentry.val != original_slot.val ||
+	    !entry->swapz_round028_store_bound ||
+	    !entry->swapz_round038_store_compressed ||
+	    !entry->swapz_round028_stored_entry_identity ||
+	    !entry->swapz_round028_allocation_epoch)
+		return -ESTALE;
+	pool = zswap_entry_pool(entry);
+	if (!pool || !pool->zs_pool || strcmp(pool->tfm_name, "lz4"))
+		return -EOPNOTSUPP;
+	epoch = swapz_round028_slot_epoch(original_slot);
+	if (!epoch || epoch != entry->swapz_round028_allocation_epoch)
+		return -ESTALE;
+	store.source_swap_entry = (u64)original_slot.val;
+	store.allocation_epoch = epoch;
+	store.stored_identity = entry->swapz_round028_stored_entry_identity;
+	store.compressed_crc32c = entry->swapz_round038_store_crc32c;
+	store.compressed_length = (u16)entry->length;
+	store.decoded_length = 4096U;
+	store.representation_version = 1U;
+	store.codec = 1U;
+	memcpy(store.original_sha256, entry->swapz_round028_store_sha256,
+	       sizeof(store.original_sha256));
+	store.stored_in_original_tree = true;
+	observed = store;
+	/* The original locked folio pins the entry only during observation. */
+	observed.folio_locked = true;
+	observed.source_owner_live = writeback_phase && original_owned_bio;
+	observed.original_bio_full_4096 = writeback_phase && original_owned_bio;
+	return swapz_round038_store_observation_check(&store, &observed);
+}
+
+/* Internal KUnit inputs below are SYNTHETIC, not actual zswap STORE. */
+static void swapz_round038_store_fixture(
+		struct swapz_round038_store_observation *sample)
+{
+	memset(sample, 0, sizeof(*sample));
+	sample->source_swap_entry = (u64)swp_entry(1U, 37U).val;
+	sample->allocation_epoch = 17U;
+	sample->stored_identity = 31U;
+	sample->compressed_crc32c = 0x4badb002U;
+	sample->compressed_length = 312U;
+	sample->decoded_length = 4096U;
+	sample->representation_version = 1U;
+	sample->codec = 1U;
+	sample->original_sha256[0] = 1U;
+	sample->original_sha256[31] = 2U;
+	sample->stored_in_original_tree = true;
+	sample->source_owner_live = true;
+	sample->folio_locked = true;
+	sample->original_bio_full_4096 = true;
+}
+
+static void swapz_round038_store_provenance_identity_kunit(struct kunit *test)
+{
+	struct swapz_round038_store_observation source, consumer;
+
+	swapz_round038_store_fixture(&source);
+	consumer = source;
+	KUNIT_EXPECT_EQ(test,
+		swapz_round038_store_observation_check(&source, &consumer),
+		-EOPNOTSUPP);
+	consumer.allocation_epoch++;
+	KUNIT_EXPECT_EQ(test,
+		swapz_round038_store_observation_check(&source, &consumer),
+		-ESTALE);
+	consumer = source;
+	consumer.stored_identity++;
+	KUNIT_EXPECT_EQ(test,
+		swapz_round038_store_observation_check(&source, &consumer),
+		-ESTALE);
+	consumer = source;
+	consumer.source_swap_entry = (u64)swp_entry(2U, 37U).val;
+	KUNIT_EXPECT_EQ(test,
+		swapz_round038_store_observation_check(&source, &consumer),
+		-ESTALE);
+}
+
+static void swapz_round038_store_provenance_crc_sha_kunit(struct kunit *test)
+{
+	struct swapz_round038_store_observation source, consumer;
+
+	swapz_round038_store_fixture(&source);
+	consumer = source;
+	consumer.compressed_crc32c ^= 1U;
+	KUNIT_EXPECT_EQ(test,
+		swapz_round038_store_observation_check(&source, &consumer),
+		-EBADMSG);
+	consumer = source;
+	consumer.original_sha256[31] ^= 1U;
+	KUNIT_EXPECT_EQ(test,
+		swapz_round038_store_observation_check(&source, &consumer),
+		-EBADMSG);
+	memset(source.original_sha256, 0, sizeof(source.original_sha256));
+	KUNIT_EXPECT_EQ(test,
+		swapz_round038_store_observation_check(&source, &source),
+		-ENODATA);
+}
+
+static void swapz_round038_store_provenance_format_kunit(struct kunit *test)
+{
+	struct swapz_round038_store_observation source, consumer;
+
+	swapz_round038_store_fixture(&source);
+	consumer = source;
+	consumer.compressed_length = 0;
+	KUNIT_EXPECT_EQ(test,
+		swapz_round038_store_observation_check(&source, &consumer),
+		-EOPNOTSUPP);
+	consumer.compressed_length = 3569U;
+	KUNIT_EXPECT_EQ(test,
+		swapz_round038_store_observation_check(&source, &consumer),
+		-EOPNOTSUPP);
+	consumer = source;
+	consumer.codec = 2U;
+	KUNIT_EXPECT_EQ(test,
+		swapz_round038_store_observation_check(&source, &consumer),
+		-EOPNOTSUPP);
+	consumer = source;
+	consumer.decoded_length = 2048U;
+	KUNIT_EXPECT_EQ(test,
+		swapz_round038_store_observation_check(&source, &consumer),
+		-EOPNOTSUPP);
+}
+
+static void swapz_round038_store_provenance_retired_kunit(struct kunit *test)
+{
+	struct swapz_round038_store_observation source, consumer;
+
+	swapz_round038_store_fixture(&source);
+	consumer = source;
+	consumer.stored_in_original_tree = false;
+	KUNIT_EXPECT_EQ(test,
+		swapz_round038_store_observation_check(&source, &consumer),
+		-ESTALE);
+	consumer = source;
+	consumer.source_owner_live = false;
+	KUNIT_EXPECT_EQ(test,
+		swapz_round038_store_observation_check(&source, &consumer),
+		-ESTALE);
+	consumer = source;
+	consumer.folio_locked = false;
+	KUNIT_EXPECT_EQ(test,
+		swapz_round038_store_observation_check(&source, &consumer),
+		-ESTALE);
+	consumer = source;
+	consumer.original_bio_full_4096 = false;
+	KUNIT_EXPECT_EQ(test,
+		swapz_round038_store_observation_check(&source, &consumer),
+		-EOPNOTSUPP);
+}
+
+static void swapz_round038_store_provenance_no_authority_kunit(struct kunit *test)
+{
+	struct swapz_round038_store_observation source, consumer, unchanged;
+
+	swapz_round038_store_fixture(&source);
+	consumer = source;
+	unchanged = consumer;
+	consumer.current_slot_ref_held = true;
+	consumer.current_dm_gc_ref_held = true;
+	KUNIT_EXPECT_EQ(test,
+		swapz_round038_store_observation_check(&source, &consumer),
+		-EOPNOTSUPP);
+	KUNIT_EXPECT_EQ(test, memcmp(&source, &unchanged, sizeof(source)), 0);
+	KUNIT_EXPECT_EQ(test,
+		swapz_round038_store_observation_check(NULL, &consumer),
+		-EINVAL);
+}
+
+static struct kunit_case swapz_round038_store_cases[] = {
+	KUNIT_CASE(swapz_round038_store_provenance_identity_kunit),
+	KUNIT_CASE(swapz_round038_store_provenance_crc_sha_kunit),
+	KUNIT_CASE(swapz_round038_store_provenance_format_kunit),
+	KUNIT_CASE(swapz_round038_store_provenance_retired_kunit),
+	KUNIT_CASE(swapz_round038_store_provenance_no_authority_kunit),
+	{}
+};
+
+static struct kunit_suite swapz_round038_store_suite = {
+	.name = "swapz_round038_original_store_provenance_no_authority",
+	.test_cases = swapz_round038_store_cases,
+};
+kunit_test_suite(swapz_round038_store_suite);
+/* ROUND038_ORIGINAL_STORE_PROVENANCE_END */
+#endif /* CI-only original STORE provenance; never live authority */
+"""
+
+def apply_round038_original_store(path: str, composed: str) -> str:
+    """Guard the authentic original STORE producer and writeback observer."""
+    if path != "mm/zswap.c":
+        return composed
+    composed = replace_once(composed,
+        "\tbool swapz_round028_store_bound;\n#endif\n",
+        "\tbool swapz_round028_store_bound;\n#endif\n" + r"""#if defined(SWAPZ_ROUND038_ORIGINAL_STORE_PROVENANCE_TEST) && \
+    defined(SWAPZ_ROUND037_ORIGINAL_MM_LIFETIME_OWNER_TEST) && \
+    defined(SWAPZ_ROUND036_ORIGINAL_ROUTE_LIFETIME_TEST) && \
+    defined(SWAPZ_ROUND035_ORIGINAL_MM_ROUTE_WITNESS_TEST) && \
+    defined(SWAPZ_ROUND034_ORIGINAL_V1_KUNIT_TEST) && \
+    defined(SWAPZ_ROUND032_BIO_COPY_VIEW_CI_ONLY) && \
+    defined(SWAPZ_ROUND031_MM_BIO_SOURCE) && \
+    defined(SWAPZ_ROUND030_EVICTION_SNAPSHOT_SOURCE) && \
+    defined(SWAPZ_ROUND028_SLOT_EPOCH_SOURCE) && \
+    defined(SWAPZ_ROUND025_SIDEBAND_CI_ONLY) && IS_ENABLED(CONFIG_KUNIT)
+	/* Original dictionary-free LZ4 compressor output CRC at STORE. */
+	u32 swapz_round038_store_crc32c;
+	bool swapz_round038_store_compressed;
+#endif
+""",
+        path, "store-crc-field")
+    composed = replace_once(composed,
+        "static int zswap_writeback_entry(struct zswap_entry *entry,\n",
+        ROUND038_STORE_PROVENANCE_C + "\nstatic int zswap_writeback_entry(struct zswap_entry *entry,\n",
+        path, "original-provenance-source")
+    composed = replace_once(composed,
+        "\tif (!zswap_compress(folio, index, entry, pool))",
+        r"""#if defined(SWAPZ_ROUND038_ORIGINAL_STORE_PROVENANCE_TEST) && \
+    defined(SWAPZ_ROUND037_ORIGINAL_MM_LIFETIME_OWNER_TEST) && \
+    defined(SWAPZ_ROUND036_ORIGINAL_ROUTE_LIFETIME_TEST) && \
+    defined(SWAPZ_ROUND035_ORIGINAL_MM_ROUTE_WITNESS_TEST) && \
+    defined(SWAPZ_ROUND034_ORIGINAL_V1_KUNIT_TEST) && \
+    defined(SWAPZ_ROUND032_BIO_COPY_VIEW_CI_ONLY) && \
+    defined(SWAPZ_ROUND031_MM_BIO_SOURCE) && \
+    defined(SWAPZ_ROUND030_EVICTION_SNAPSHOT_SOURCE) && \
+    defined(SWAPZ_ROUND028_SLOT_EPOCH_SOURCE) && \
+    defined(SWAPZ_ROUND025_SIDEBAND_CI_ONLY) && IS_ENABLED(CONFIG_KUNIT)
+	entry->swapz_round038_store_crc32c = 0;
+	entry->swapz_round038_store_compressed = false;
+#endif
+""" + "\tif (!zswap_compress(folio, index, entry, pool))",
+        path, "initialize-original-store-crc")
+    composed = replace_once(composed,
+        "\tzs_obj_write(pool->zs_pool, handle, dst, dlen);\n",
+        "\tzs_obj_write(pool->zs_pool, handle, dst, dlen);\n" + r"""#if defined(SWAPZ_ROUND038_ORIGINAL_STORE_PROVENANCE_TEST) && \
+    defined(SWAPZ_ROUND037_ORIGINAL_MM_LIFETIME_OWNER_TEST) && \
+    defined(SWAPZ_ROUND036_ORIGINAL_ROUTE_LIFETIME_TEST) && \
+    defined(SWAPZ_ROUND035_ORIGINAL_MM_ROUTE_WITNESS_TEST) && \
+    defined(SWAPZ_ROUND034_ORIGINAL_V1_KUNIT_TEST) && \
+    defined(SWAPZ_ROUND032_BIO_COPY_VIEW_CI_ONLY) && \
+    defined(SWAPZ_ROUND031_MM_BIO_SOURCE) && \
+    defined(SWAPZ_ROUND030_EVICTION_SNAPSHOT_SOURCE) && \
+    defined(SWAPZ_ROUND028_SLOT_EPOCH_SOURCE) && \
+    defined(SWAPZ_ROUND025_SIDEBAND_CI_ONLY) && IS_ENABLED(CONFIG_KUNIT)
+	/* Original compressor's dst is still valid under its own mutex;
+	 * CRC exactly matches original zs_obj_write input, not recompressed data.
+	 */
+	if (dlen >= 1U && dlen <= 3568U &&
+	    !strcmp(pool->tfm_name, "lz4") &&
+	    entry->swapz_round028_store_bound) {
+		entry->swapz_round038_store_crc32c = ~crc32c(~0U, dst, dlen);
+		entry->swapz_round038_store_compressed = true;
+	}
+#endif
+""",
+        path, "capture-real-compressor-stored-crc")
+    composed = replace_once(composed,
+        "\treturn true;\n\nstore_failed:",
+        r"""#if defined(SWAPZ_ROUND038_ORIGINAL_STORE_PROVENANCE_TEST) && \
+    defined(SWAPZ_ROUND037_ORIGINAL_MM_LIFETIME_OWNER_TEST) && \
+    defined(SWAPZ_ROUND036_ORIGINAL_ROUTE_LIFETIME_TEST) && \
+    defined(SWAPZ_ROUND035_ORIGINAL_MM_ROUTE_WITNESS_TEST) && \
+    defined(SWAPZ_ROUND034_ORIGINAL_V1_KUNIT_TEST) && \
+    defined(SWAPZ_ROUND032_BIO_COPY_VIEW_CI_ONLY) && \
+    defined(SWAPZ_ROUND031_MM_BIO_SOURCE) && \
+    defined(SWAPZ_ROUND030_EVICTION_SNAPSHOT_SOURCE) && \
+    defined(SWAPZ_ROUND028_SLOT_EPOCH_SOURCE) && \
+    defined(SWAPZ_ROUND025_SIDEBAND_CI_ONLY) && IS_ENABLED(CONFIG_KUNIT)
+	/* A REAL original xa_store + LRU publication and original STORE SHA;
+	 * diagnostic only, never an authorized downstream route token.
+	 */
+	(void)swapz_round038_actual_store_provenance_probe(
+		entry, page_swpentry, swap_zswap_tree(page_swpentry),
+		swp_offset(page_swpentry), false, false);
+#endif
+""" + "\treturn true;\n\nstore_failed:",
+        path, "real-accepted-store-after-xarray")
+    composed = replace_once(composed,
+        "\tctx.swapz_round031_owned =\n\t\tswapz_round031_mm_bio_create(entry, swpentry, tree, offset);\n",
+        "\tctx.swapz_round031_owned =\n\t\tswapz_round031_mm_bio_create(entry, swpentry, tree, offset);\n" + r"""#if defined(SWAPZ_ROUND038_ORIGINAL_STORE_PROVENANCE_TEST) && \
+    defined(SWAPZ_ROUND037_ORIGINAL_MM_LIFETIME_OWNER_TEST) && \
+    defined(SWAPZ_ROUND036_ORIGINAL_ROUTE_LIFETIME_TEST) && \
+    defined(SWAPZ_ROUND035_ORIGINAL_MM_ROUTE_WITNESS_TEST) && \
+    defined(SWAPZ_ROUND034_ORIGINAL_V1_KUNIT_TEST) && \
+    defined(SWAPZ_ROUND032_BIO_COPY_VIEW_CI_ONLY) && \
+    defined(SWAPZ_ROUND031_MM_BIO_SOURCE) && \
+    defined(SWAPZ_ROUND030_EVICTION_SNAPSHOT_SOURCE) && \
+    defined(SWAPZ_ROUND028_SLOT_EPOCH_SOURCE) && \
+    defined(SWAPZ_ROUND025_SIDEBAND_CI_ONLY) && IS_ENABLED(CONFIG_KUNIT)
+	/* Original locked folio and current xarray still pin the real
+	 * zsmalloc entry; the separately owned BIO copy must match STORE CRC.
+	 */
+	(void)swapz_round038_actual_store_provenance_probe(
+		entry, swpentry, tree, offset, true,
+		ctx.swapz_round031_owned != NULL);
+#endif
+""",
+        path, "real-original-writeback-ownership")
+    # Compare original STORE's compressor CRC to real later zsmalloc copy
+    # BEFORE the independently refcounted BIO owner is constructed.
+    composed = replace_once(composed,
+        "    entry->length == compressed_length) {",
+        "    entry->length == compressed_length\n" + r"""
+#if defined(SWAPZ_ROUND038_ORIGINAL_STORE_PROVENANCE_TEST) && \
+    defined(SWAPZ_ROUND037_ORIGINAL_MM_LIFETIME_OWNER_TEST) && \
+    defined(SWAPZ_ROUND036_ORIGINAL_ROUTE_LIFETIME_TEST) && \
+    defined(SWAPZ_ROUND035_ORIGINAL_MM_ROUTE_WITNESS_TEST) && \
+    defined(SWAPZ_ROUND034_ORIGINAL_V1_KUNIT_TEST) && \
+    defined(SWAPZ_ROUND032_BIO_COPY_VIEW_CI_ONLY) && \
+    defined(SWAPZ_ROUND031_MM_BIO_SOURCE) && \
+    defined(SWAPZ_ROUND030_EVICTION_SNAPSHOT_SOURCE) && \
+    defined(SWAPZ_ROUND028_SLOT_EPOCH_SOURCE) && \
+    defined(SWAPZ_ROUND025_SIDEBAND_CI_ONLY) && IS_ENABLED(CONFIG_KUNIT)
+	    && entry->swapz_round038_store_compressed &&
+	    entry->swapz_round038_store_crc32c == source_crc32c
+#endif
+""" + ") {",
+        path, "sealed-store-vs-owned-copy-crc")
+    return composed
+
 def replace_once(text: str, before: str, after: str, path: str, label: str) -> str:
     if not before or before == after or text.count(before) != 1 or (
         after in text and after not in before
@@ -2293,6 +2715,8 @@ def compose_postimage(path: str, original_bytes: bytes, *,
         changed = apply_round036_original_lifetime(path, changed)
     if with_kunit:
         changed = apply_round037_original_mm_owner(path, changed)
+    if with_kunit:
+        changed = apply_round038_original_store(path, changed)
     if path == "mm/zswap.c":
         for required in (
             "swapz_round028_slot_epoch(swpentry)",

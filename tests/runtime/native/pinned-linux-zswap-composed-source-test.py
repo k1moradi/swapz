@@ -548,5 +548,64 @@ class OriginalMMAndBIOComposer(unittest.TestCase):
         self.compile_and_run(fixture.replace(marker, c_source, 1),
                              label="round037-original-mm", libraries=())
 
+
+    def test_round038_real_original_store_bound_and_default_disabled(self):
+        source = stage.ROUND038_STORE_PROVENANCE_C
+        self.assertEqual(stage.ROUND038_STORE_PROVENANCE_MACRO,
+                         "SWAPZ_ROUND038_ORIGINAL_STORE_PROVENANCE_TEST")
+        for literal in (
+            "SWAPZ_ROUND037_ORIGINAL_MM_LIFETIME_OWNER_TEST",
+            "IS_ENABLED(CONFIG_KUNIT)",
+            "swapz_round038_actual_store_provenance_probe(",
+            "swapz_round028_slot_epoch(original_slot)",
+            "swapz_round028_store_sha256",
+            "swapz_round038_store_crc32c",
+            "return -EOPNOTSUPP;",
+            "swapz_round038_original_store_provenance_no_authority",
+        ):
+            self.assertIn(literal, source)
+        for name in ("identity", "crc_sha", "format", "retired", "no_authority"):
+            self.assertEqual(source.count(
+                "KUNIT_CASE(swapz_round038_store_provenance_" +
+                name + "_kunit)"), 1)
+        no_comments = re.sub(r"/\*[\s\S]*?\*/", "", source)
+        for forbidden in ("EXPORT_SYMBOL", "bio_endio(", "submit_bio(",
+                          "swapz_map(", "SOURCE_MAPPED_AUTHENTICATED=1"):
+            self.assertNotIn(forbidden, no_comments)
+        composer_source = Path(STAGER).read_text()
+        self.assertIn("zs_obj_write(pool->zs_pool, handle, dst, dlen);",
+                      composer_source)
+        self.assertIn("~crc32c(~0U, dst, dlen)", composer_source)
+        self.assertIn("entry->swapz_round038_store_crc32c == source_crc32c",
+                      composer_source)
+        self.assertIn("apply_round038_original_store(path, changed)",
+                      composer_source)
+        self.assertIn("swapz_round031_mm_bio_create(entry, swpentry, tree, offset)",
+                      composer_source)
+        self.assertIn("xa_load(tree, offset) != entry", source)
+        self.assertIn("!entry->swapz_round028_store_bound", source)
+        if os.environ.get("ROUND031_PINNED_LINUX"):
+            real = (Path(os.environ["ROUND031_PINNED_LINUX"]) / "mm/zswap.c").read_text()
+            self.assertIn("entry->swpentry = page_swpentry;", real)
+            self.assertIn("old = xa_store(swap_zswap_tree(page_swpentry)", real)
+            self.assertIn("if (old)\n\t\tzswap_entry_free(old);", real)
+            self.assertIn("zs_obj_write(pool->zs_pool, handle, dst, dlen);", real)
+            self.assertIn("entry = xa_erase(tree, offset + i);", real)
+
+    def test_round038_original_store_actual_c_gcc_clang_asan_ubsan(self):
+        # Compile EXACT generated original C check, not a reimplementation.
+        source = stage.ROUND038_STORE_PROVENANCE_C
+        start = "struct swapz_round038_store_observation {"
+        end = "/* ROUND038_ORIGINAL_STORE_PURE_C_END */"
+        self.assertEqual(source.count(start), 1)
+        self.assertEqual(source.count(end), 1)
+        extracted = start + source.split(start, 1)[1].split(end, 1)[0]
+        template = (FIXTURES / "round038-original-store-provenance-host.c").read_text()
+        marker = "/* ROUND038_EXACT_ORIGINAL_STORE_PROVENANCE_C */"
+        self.assertEqual(template.count(marker), 1)
+        self.compile_and_run(template.replace(marker, extracted, 1),
+                             label="round038-original-store", libraries=())
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)
