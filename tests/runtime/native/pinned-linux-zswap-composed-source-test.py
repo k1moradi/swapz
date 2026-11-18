@@ -338,5 +338,67 @@ class OriginalMMAndBIOComposer(unittest.TestCase):
             "mm/zswap.c", "original"), "original")
 
 
+    def test_round035_original_mm_route_witness_guard_and_source_only(self):
+        self.assertEqual(stage.ROUND035_ROUTE_MACRO,
+                         "SWAPZ_ROUND035_ORIGINAL_MM_ROUTE_WITNESS_TEST")
+        self.assertEqual(len(stage.ROUND035_ROUTE_FLAGS), 7)
+        self.assertIn("IS_ENABLED(CONFIG_KUNIT)", stage.ROUND035_ROUTE_CONDITION)
+        self.assertIn("get_swap_device(original_slot);", stage.ROUND035_ROUTE_MM)
+        self.assertIn("swap_folio_sector(folio)", stage.ROUND035_ROUTE_MM)
+        self.assertIn("swapz_round028_slot_epoch(original_slot)",
+                      stage.ROUND035_ROUTE_MM)
+        self.assertIn("folio_test_writeback(folio)", stage.ROUND035_ROUTE_MM)
+        self.assertIn("swapz_round035_bio_owner_matches(", stage.ROUND035_ROUTE_MM)
+        self.assertIn("return -EOPNOTSUPP;", stage.ROUND035_ROUTE_MM)
+        self.assertNotIn("bio_endio(", stage.ROUND035_ROUTE_MM)
+        self.assertNotIn("submit_bio(", stage.ROUND035_ROUTE_MM)
+        self.assertNotIn("SOURCE_MAPPED_AUTHENTICATED=1", stage.ROUND035_ROUTE_MM)
+        for case in (
+            "swapz_round035_route_type_kunit",
+            "swapz_round035_route_epoch_kunit",
+            "swapz_round035_route_geometry_kunit",
+            "swapz_round035_route_no_authority_kunit",
+        ):
+            self.assertEqual(stage.ROUND035_ROUTE_MM.count(
+                "KUNIT_CASE(" + case + ")"), 1)
+        self.assertEqual(stage.ROUND035_ROUTE_MM.count(
+            'kunit_test_suite(swapz_round035_route_suite);'), 1)
+        base = ("static void swap_bdev_submit_write(struct swap_io_ctx *ctx)\n"
+                "HEADER\n"
+                "\t\tbio->bi_swapz_ci_sideband = ctx->swapz_round031_owned;\n"
+                "\t\tctx->swapz_round031_owned = NULL;\n"
+                "\t}\n#endif\n"
+                "\tbio->bi_iter.bi_sector = swap_folio_sector(bio_first_folio_all(bio));\n")
+        rendered = stage.apply_round035_original_route("mm/page_io.c", base)
+        self.assertIn("swapz_round035_mm_route_preflight(", rendered)
+        with self.assertRaisesRegex(
+                stage.SourceCompositionError,
+                "COMPOSE_CONFLICT:mm/page_io.c"):
+            stage.apply_round035_original_route("mm/page_io.c", rendered)
+        self.assertEqual(stage.apply_round035_original_route(
+            "mm/swapfile.c", "original"), "original")
+
+    def test_round035_exact_original_route_C_host_compilers_sanitizers(self):
+        # Extract the ACTUAL new original Linux source helper expressions.
+        # The host fixture merely supplies types and addresses; it cannot
+        # authorize current original swap mapping or zswap MM eviction.
+        real = stage.ROUND035_ROUTE_MM
+        identity = ("static int swapz_round035_route_identity" +
+                    real.split("static int swapz_round035_route_identity", 1)[1]
+                    .split("/*\n * Source-side shape only.", 1)[0])
+        geometry = ("static int swapz_round035_route_geometry" +
+                    real.split("static int swapz_round035_route_geometry", 1)[1]
+                    .split("/*\n * Called at ACTUAL", 1)[0])
+        template = (FIXTURES / "round035-original-route-host.c").read_text(
+            encoding="utf-8")
+        for marker, fragment in (
+            ("/* ROUND035_EXACT_REAL_ORIGINAL_ROUTE_IDENTITY_C */", identity),
+            ("/* ROUND035_EXACT_REAL_ORIGINAL_ROUTE_GEOMETRY_C */", geometry),
+        ):
+            self.assertEqual(template.count(marker), 1)
+            template = template.replace(marker, fragment, 1)
+        self.compile_and_run(template, label="round035-route", libraries=())
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)

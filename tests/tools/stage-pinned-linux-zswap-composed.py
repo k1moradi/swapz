@@ -859,6 +859,422 @@ def apply_round034_original_v1_kunit(path: str, composed: str) -> str:
         path, "v1-real-kunit-cases")
 
 
+
+# Round035: diagnostic-only original MM routing observation. This is NOT a
+# public provenance ABI, a current DM authorization, or an actual zswap
+# pressure eviction. All previous compiler-only gates and KUnit are required.
+ROUND035_ROUTE_MACRO = "SWAPZ_ROUND035_ORIGINAL_MM_ROUTE_WITNESS_TEST"
+ROUND035_ROUTE_FLAGS = (
+    "SWAPZ_ROUND035_ORIGINAL_MM_ROUTE_WITNESS_TEST",
+    "SWAPZ_ROUND034_ORIGINAL_V1_KUNIT_TEST",
+    "SWAPZ_ROUND032_BIO_COPY_VIEW_CI_ONLY",
+    "SWAPZ_ROUND031_MM_BIO_SOURCE",
+    "SWAPZ_ROUND030_EVICTION_SNAPSHOT_SOURCE",
+    "SWAPZ_ROUND028_SLOT_EPOCH_SOURCE",
+    "SWAPZ_ROUND025_SIDEBAND_CI_ONLY",
+)
+ROUND035_ROUTE_CONDITION = " && ".join(
+    "defined(" + name + ")" for name in ROUND035_ROUTE_FLAGS
+) + " && IS_ENABLED(CONFIG_KUNIT)"
+
+ROUND035_ROUTE_HEADER = r"""
+#if defined(SWAPZ_ROUND035_ORIGINAL_MM_ROUTE_WITNESS_TEST) && \
+    defined(SWAPZ_ROUND034_ORIGINAL_V1_KUNIT_TEST) && \
+    defined(SWAPZ_ROUND032_BIO_COPY_VIEW_CI_ONLY) && \
+    defined(SWAPZ_ROUND031_MM_BIO_SOURCE) && \
+    defined(SWAPZ_ROUND030_EVICTION_SNAPSHOT_SOURCE) && \
+    defined(SWAPZ_ROUND028_SLOT_EPOCH_SOURCE) && \
+    defined(SWAPZ_ROUND025_SIDEBAND_CI_ONLY) && IS_ENABLED(CONFIG_KUNIT)
+/*
+ * Internal-only observation while the source BIO is still independently
+ * owned. Not EXPORT_SYMBOL, not part of copied view v1, not a DM API.
+ */
+bool swapz_round035_bio_owner_matches(const struct bio *bio,
+				     u64 source_entry, u64 source_epoch);
+#endif
+"""
+
+ROUND035_ROUTE_CTX = r"""
+#if defined(SWAPZ_ROUND035_ORIGINAL_MM_ROUTE_WITNESS_TEST) && \
+    defined(SWAPZ_ROUND034_ORIGINAL_V1_KUNIT_TEST) && \
+    defined(SWAPZ_ROUND032_BIO_COPY_VIEW_CI_ONLY) && \
+    defined(SWAPZ_ROUND031_MM_BIO_SOURCE) && \
+    defined(SWAPZ_ROUND030_EVICTION_SNAPSHOT_SOURCE) && \
+    defined(SWAPZ_ROUND028_SLOT_EPOCH_SOURCE) && \
+    defined(SWAPZ_ROUND025_SIDEBAND_CI_ONLY) && IS_ENABLED(CONFIG_KUNIT)
+	/* The actual original zswap writeback callback sets this ONLY after
+	 * a successfully sealed MM owner. A naked caller cannot create one.
+	 * This stack-local route hint never enters a published record.
+	 */
+	swp_entry_t swapz_round035_original_slot;
+	u64 swapz_round035_original_epoch;
+#endif
+"""
+
+ROUND035_ROUTE_BIO = r"""
+#if defined(SWAPZ_ROUND035_ORIGINAL_MM_ROUTE_WITNESS_TEST) && \
+    defined(SWAPZ_ROUND034_ORIGINAL_V1_KUNIT_TEST) && \
+    defined(SWAPZ_ROUND032_BIO_COPY_VIEW_CI_ONLY) && \
+    defined(SWAPZ_ROUND031_MM_BIO_SOURCE) && \
+    defined(SWAPZ_ROUND030_EVICTION_SNAPSHOT_SOURCE) && \
+    defined(SWAPZ_ROUND028_SLOT_EPOCH_SOURCE) && \
+    defined(SWAPZ_ROUND025_SIDEBAND_CI_ONLY) && IS_ENABLED(CONFIG_KUNIT)
+/*
+ * Original block/bio.c owns the payload ref under the source BIO lifetime.
+ * A synchronous validated comparison is permitted, NOT a pointer escape.
+ * Caller must already pin BIO until this function returns; no RCU lookup.
+ * A source identity check is NOT a current backing-device authorization.
+ */
+bool swapz_round035_bio_owner_matches(const struct bio *bio,
+				      u64 source_entry, u64 source_epoch)
+{
+	struct swapz_ci_owned_payload *owner;
+	bool matches = false;
+
+	if (!bio || !source_entry || !source_epoch)
+		return false;
+	owner = swapz_ci_owned_get(bio->bi_swapz_ci_sideband);
+	if (!owner)
+		return false;
+	if (swapz_ci_owned_valid(owner) &&
+	    owner->source_swap_entry == source_entry &&
+	    owner->slot_epoch == source_epoch)
+		matches = true;
+	swapz_ci_owned_put(owner);
+	return matches;
+}
+#endif /* Round035 internal original BIO identity only */
+"""
+
+ROUND035_ROUTE_MM = r"""
+#if defined(SWAPZ_ROUND035_ORIGINAL_MM_ROUTE_WITNESS_TEST) && \
+    defined(SWAPZ_ROUND034_ORIGINAL_V1_KUNIT_TEST) && \
+    defined(SWAPZ_ROUND032_BIO_COPY_VIEW_CI_ONLY) && \
+    defined(SWAPZ_ROUND031_MM_BIO_SOURCE) && \
+    defined(SWAPZ_ROUND030_EVICTION_SNAPSHOT_SOURCE) && \
+    defined(SWAPZ_ROUND028_SLOT_EPOCH_SOURCE) && \
+    defined(SWAPZ_ROUND025_SIDEBAND_CI_ONLY) && IS_ENABLED(CONFIG_KUNIT)
+/* ROUND035_ORIGINAL_MM_ROUTE_C_BEGIN */
+#include <kunit/test.h>
+
+/* Real original mm/swapfile.c allocator generation, not a guessed sector. */
+extern u64 swapz_round028_slot_epoch(swp_entry_t source_slot);
+
+/*
+ * Identity is typed: a packed swp_entry_t.val is NOT a DM relative page.
+ * The caller-supplied source token is not authority. Neither a different
+ * type with equal offsets nor a reused old epoch can match the MM slot.
+ */
+static int swapz_round035_route_identity(swp_entry_t actual_folio_slot,
+					 swp_entry_t source_store_slot,
+					 u64 original_store_epoch,
+					 u64 current_allocator_epoch)
+{
+	if (!actual_folio_slot.val || !source_store_slot.val ||
+	    !original_store_epoch || !current_allocator_epoch ||
+	    swp_type(actual_folio_slot) >= MAX_SWAPFILES ||
+	    swp_type(source_store_slot) >= MAX_SWAPFILES ||
+	    swp_type(actual_folio_slot) != swp_type(source_store_slot) ||
+	    swp_offset(actual_folio_slot) != swp_offset(source_store_slot) ||
+	    original_store_epoch != current_allocator_epoch)
+		return -ESTALE;
+	return 0;
+}
+
+/*
+ * Source-side shape only. The expected device/sector are supplied by
+ * get_swap_device() + swap_folio_sector() from ORIGINAL swap_info extents.
+ * No linear swapfile offset math. Block 0 is a protected swap header.
+ * Geometry accepted here never authorizes any downstream transfer.
+ */
+static int swapz_round035_route_geometry(const struct bio *bio,
+					 const struct swap_info_struct *active,
+					 sector_t actual_swap_sector)
+{
+	if (!bio || !active || !active->bdev ||
+	    bio->bi_bdev != active->bdev)
+		return -ESTALE;
+	if (PAGE_SIZE != 4096U || bio_op(bio) != REQ_OP_WRITE ||
+	    !(bio->bi_opf & REQ_SWAP) ||
+	    bio->bi_iter.bi_size != 4096U || bio_sectors(bio) != 8U ||
+	    bio->bi_iter.bi_idx || bio->bi_iter.bi_offset ||
+	    bio->bi_vcnt || (bio->bi_flags & (1U << BIO_CLONED)) ||
+	    !bio->bi_io_vec || !bio->bi_io_vec[0].bv_page ||
+	    bio->bi_io_vec[0].bv_len != 4096U ||
+	    bio->bi_io_vec[0].bv_offset)
+		return -EOPNOTSUPP;
+	if (!actual_swap_sector || (actual_swap_sector & 7U) ||
+	    actual_swap_sector > (sector_t)-1 - 7U ||
+	    bio->bi_iter.bi_sector != actual_swap_sector)
+		return -ERANGE;
+	return 0;
+}
+
+/*
+ * Called at ACTUAL original swap_bdev_submit_write() just before normal
+ * submit_bio. The original folio is already UNLOCKED by __swap_writeout();
+ * PG_writeback keeps the folio in swapcache until write completion, but
+ * the observation cannot pin a future DM lookup or prove swapfile type
+ * activation over a later consumer lifetime. The active swap-device
+ * percpu_ref below protects swapoff only DURING this synchronous call.
+ *
+ * Do not write any outputs, accept/complete any BIO or install authority.
+ * Every path, including all mechanically valid inputs, refuses live routing.
+ */
+static int swapz_round035_mm_route_preflight(struct swap_io_ctx *ctx,
+					    const struct bio *bio,
+					    struct folio *folio)
+{
+	struct swap_info_struct *active;
+	swp_entry_t original_slot;
+	sector_t mapped_sector;
+	u64 current_epoch;
+	int result = -ESTALE;
+
+	if (!ctx || !ctx->sis || !bio || !folio ||
+	    !bio->bi_swapz_ci_sideband ||
+	    !folio_test_swapcache(folio) || !folio_test_writeback(folio))
+		return -ESTALE;
+	original_slot = folio_swap_entry(folio, 0);
+	/* Current slot epoch checks run under ORIGINAL swap-cluster lock. */
+	current_epoch = swapz_round028_slot_epoch(original_slot);
+	if (swapz_round035_route_identity(
+		    original_slot, ctx->swapz_round035_original_slot,
+		    ctx->swapz_round035_original_epoch, current_epoch))
+		return -ESTALE;
+	active = get_swap_device(original_slot);
+	if (IS_ERR_OR_NULL(active))
+		return -ESTALE;
+	if (active != ctx->sis)
+		goto put_active;
+
+	/* Real original swap extent tree; can be nonlinear swapfile. */
+	mapped_sector = swap_folio_sector(folio);
+	if (swapz_round035_route_geometry(bio, active, mapped_sector) ||
+	    !swapz_round035_bio_owner_matches(
+		    bio, (u64)original_slot.val,
+		    ctx->swapz_round035_original_epoch))
+		goto put_active;
+	/*
+	 * Mechanical identity checks passed. NO active type-to-DM target
+	 * mapping and no pinned allocation incarnation survives return.
+	 * An original MM route witness is NOT transferable admission.
+	 */
+	result = -EOPNOTSUPP;
+put_active:
+	put_swap_device(active);
+	return result;
+}
+
+/* Hostless original KUnit cases use synthetic scalars, never fake MM STORE. */
+static void swapz_round035_route_type_kunit(struct kunit *test)
+{
+	swp_entry_t first = swp_entry(1U, 37U);
+	swp_entry_t different_type = swp_entry(2U, 37U);
+	swp_entry_t different_offset = swp_entry(1U, 38U);
+
+	KUNIT_EXPECT_EQ(test, swapz_round035_route_identity(
+				first, first, 11U, 11U), 0);
+	KUNIT_EXPECT_EQ(test, swapz_round035_route_identity(
+				first, different_type, 11U, 11U), -ESTALE);
+	KUNIT_EXPECT_EQ(test, swapz_round035_route_identity(
+				first, different_offset, 11U, 11U), -ESTALE);
+	KUNIT_EXPECT_EQ(test, swapz_round035_route_identity(
+				first, swp_entry(MAX_SWAPFILES, 37U),
+				11U, 11U), -ESTALE);
+}
+
+static void swapz_round035_route_epoch_kunit(struct kunit *test)
+{
+	swp_entry_t slot = swp_entry(1U, 37U);
+	swp_entry_t absent = {};
+
+	KUNIT_EXPECT_EQ(test, swapz_round035_route_identity(
+				slot, slot, 11U, 12U), -ESTALE);
+	KUNIT_EXPECT_EQ(test, swapz_round035_route_identity(
+				slot, slot, 0U, 11U), -ESTALE);
+	KUNIT_EXPECT_EQ(test, swapz_round035_route_identity(
+				slot, slot, 11U, 0U), -ESTALE);
+	KUNIT_EXPECT_EQ(test, swapz_round035_route_identity(
+				slot, absent, 11U, 11U), -ESTALE);
+	KUNIT_EXPECT_EQ(test, swapz_round035_route_identity(
+				absent, slot, 11U, 11U), -ESTALE);
+}
+
+/* Fake KUnit pointers are compared ONLY, never dereferenced as real bdev. */
+static void swapz_round035_route_geometry_kunit(struct kunit *test)
+{
+	struct block_device *device_one;
+	struct block_device *device_two;
+	struct swap_info_struct *area;
+	struct bio *bio;
+	struct bio_vec *vector;
+	struct page *page;
+
+	area = kunit_kzalloc(test, sizeof(*area), GFP_KERNEL);
+	bio = kunit_kzalloc(test, sizeof(*bio), GFP_KERNEL);
+	vector = kunit_kzalloc(test, sizeof(*vector), GFP_KERNEL);
+	device_one = kunit_kzalloc(test, sizeof(*device_one), GFP_KERNEL);
+	device_two = kunit_kzalloc(test, sizeof(*device_two), GFP_KERNEL);
+	page = alloc_page(GFP_KERNEL);
+	if (!area || !bio || !vector || !device_one || !device_two || !page) {
+		KUNIT_FAIL(test, "bounded route fixture allocation unavailable");
+		if (page)
+			__free_page(page);
+		return;
+	}
+	area->bdev = device_one;
+	bio->bi_bdev = device_one;
+	bio->bi_io_vec = vector;
+	bio->bi_opf = REQ_OP_WRITE | REQ_SWAP;
+	bio->bi_iter.bi_size = PAGE_SIZE;
+	bio->bi_iter.bi_sector = 8U;
+	vector->bv_page = page;
+	vector->bv_len = PAGE_SIZE;
+	KUNIT_EXPECT_EQ(test, swapz_round035_route_geometry(
+				bio, area, 8U), 0);
+	/* The same offset on a DIFFERENT backing device is never proof. */
+	bio->bi_bdev = device_two;
+	KUNIT_EXPECT_EQ(test, swapz_round035_route_geometry(
+				bio, area, 8U), -ESTALE);
+	bio->bi_bdev = device_one;
+	KUNIT_EXPECT_EQ(test, swapz_round035_route_geometry(
+				bio, area, 0U), -ERANGE);
+	KUNIT_EXPECT_EQ(test, swapz_round035_route_geometry(
+				bio, area, 9U), -ERANGE);
+	KUNIT_EXPECT_EQ(test, swapz_round035_route_geometry(
+				bio, area, (sector_t)-1), -ERANGE);
+	KUNIT_EXPECT_EQ(test, swapz_round035_route_geometry(
+				bio, area, 16U), -ERANGE);
+	bio->bi_iter.bi_sector = 16U;
+	KUNIT_EXPECT_EQ(test, swapz_round035_route_geometry(
+				bio, area, 16U), 0);
+	bio->bi_iter.bi_size = 2048U;
+	KUNIT_EXPECT_EQ(test, swapz_round035_route_geometry(
+				bio, area, 16U), -EOPNOTSUPP);
+	bio->bi_iter.bi_size = 4096U;
+	bio->bi_vcnt = 1;
+	KUNIT_EXPECT_EQ(test, swapz_round035_route_geometry(
+				bio, area, 16U), -EOPNOTSUPP);
+	bio->bi_vcnt = 0;
+	bio->bi_opf = REQ_OP_READ | REQ_SWAP;
+	KUNIT_EXPECT_EQ(test, swapz_round035_route_geometry(
+				bio, area, 16U), -EOPNOTSUPP);
+	__free_page(page);
+}
+
+static void swapz_round035_route_no_authority_kunit(struct kunit *test)
+{
+	struct swap_io_ctx context = {};
+	struct bio source_bio = {};
+	/* No fabricated active swap_info/bdev/epoch can be accepted. */
+	KUNIT_EXPECT_EQ(test, swapz_round035_mm_route_preflight(
+				NULL, &source_bio, NULL), -ESTALE);
+	KUNIT_EXPECT_EQ(test, swapz_round035_mm_route_preflight(
+				&context, &source_bio, NULL), -ESTALE);
+	KUNIT_EXPECT_EQ(test, swapz_round035_mm_route_preflight(
+				&context, NULL, NULL), -ESTALE);
+}
+
+static struct kunit_case swapz_round035_route_cases[] = {
+	KUNIT_CASE(swapz_round035_route_type_kunit),
+	KUNIT_CASE(swapz_round035_route_epoch_kunit),
+	KUNIT_CASE(swapz_round035_route_geometry_kunit),
+	KUNIT_CASE(swapz_round035_route_no_authority_kunit),
+	{}
+};
+
+static struct kunit_suite swapz_round035_route_suite = {
+	.name = "swapz_round035_original_mm_route_no_authority",
+	.test_cases = swapz_round035_route_cases,
+};
+kunit_test_suite(swapz_round035_route_suite);
+/* ROUND035_ORIGINAL_MM_ROUTE_C_END */
+#endif /* original MM route diagnostic KUnit only, live admission OFF */
+"""
+
+ROUND035_ROUTE_HOOK = r"""
+#if defined(SWAPZ_ROUND035_ORIGINAL_MM_ROUTE_WITNESS_TEST) && \
+    defined(SWAPZ_ROUND034_ORIGINAL_V1_KUNIT_TEST) && \
+    defined(SWAPZ_ROUND032_BIO_COPY_VIEW_CI_ONLY) && \
+    defined(SWAPZ_ROUND031_MM_BIO_SOURCE) && \
+    defined(SWAPZ_ROUND030_EVICTION_SNAPSHOT_SOURCE) && \
+    defined(SWAPZ_ROUND028_SLOT_EPOCH_SOURCE) && \
+    defined(SWAPZ_ROUND025_SIDEBAND_CI_ONLY) && IS_ENABLED(CONFIG_KUNIT)
+	/* Probe ACTUAL upstream MM's bdev/extent/epoch at original dispatch.
+	 * Failure or success never changes decompressed 4096-byte WRITE.
+	 * No logging, allocation, authority publication or extra completion.
+	 */
+	if (bio->bi_swapz_ci_sideband)
+		(void)swapz_round035_mm_route_preflight(
+			ctx, bio, bio_first_folio_all(bio));
+#endif
+"""
+
+ROUND035_ZSWAP_HINT = r"""
+#if defined(SWAPZ_ROUND035_ORIGINAL_MM_ROUTE_WITNESS_TEST) && \
+    defined(SWAPZ_ROUND034_ORIGINAL_V1_KUNIT_TEST) && \
+    defined(SWAPZ_ROUND032_BIO_COPY_VIEW_CI_ONLY) && \
+    defined(SWAPZ_ROUND031_MM_BIO_SOURCE) && \
+    defined(SWAPZ_ROUND030_EVICTION_SNAPSHOT_SOURCE) && \
+    defined(SWAPZ_ROUND028_SLOT_EPOCH_SOURCE) && \
+    defined(SWAPZ_ROUND025_SIDEBAND_CI_ONLY) && IS_ENABLED(CONFIG_KUNIT)
+	/* Generated from a real original MM STORE, not caller-supplied:
+	 * the original zswap-entry lifetime is still pinned here.
+	 */
+	if (ctx.swapz_round031_owned) {
+		ctx.swapz_round035_original_slot = swpentry;
+		ctx.swapz_round035_original_epoch =
+			entry->swapz_round028_allocation_epoch;
+	}
+#endif
+"""
+
+
+def apply_round035_original_route(path: str, composed: str) -> str:
+    """Guard all new original-C checks, fail if any source anchor moves."""
+    if path == "include/linux/bio.h":
+        return replace_once(
+            composed,
+            "struct swapz_ci_lz4_owned_view_v1 {",
+            ROUND035_ROUTE_HEADER + "\nstruct swapz_ci_lz4_owned_view_v1 {",
+            path, "round035-internal-bio-owner-api")
+    if path == "include/linux/swap_ops.h":
+        return replace_once(
+            composed, "struct swap_io_ctx {\n",
+            "struct swap_io_ctx {\n" + ROUND035_ROUTE_CTX,
+            path, "round035-private-original-io-hint")
+    if path == "block/bio.c":
+        anchor = "static struct kunit_case swapz_ci_sideband_cases[] = {\n"
+        return replace_once(
+            composed, anchor,
+            ROUND035_ROUTE_BIO + "\n" + anchor,
+            path, "round035-sealed-owner-identity")
+    if path == "mm/page_io.c":
+        anchor = "static void swap_bdev_submit_write(struct swap_io_ctx *ctx)\n"
+        composed = replace_once(
+            composed, anchor, ROUND035_ROUTE_MM + "\n" + anchor,
+            path, "round035-actual-mm-route-test-source")
+        insertion = ("\t\tbio->bi_swapz_ci_sideband = ctx->swapz_round031_owned;\n"
+                     "\t\tctx->swapz_round031_owned = NULL;\n"
+                     "\t}\n#endif\n"
+                     "\tbio->bi_iter.bi_sector = swap_folio_sector(bio_first_folio_all(bio));\n")
+        return replace_once(
+            composed, insertion, insertion + ROUND035_ROUTE_HOOK,
+            path, "round035-actual-mm-bdev-extent-observe")
+    if path == "mm/zswap.c":
+        anchor = """	ctx.swapz_round031_owned =
+		swapz_round031_mm_bio_create(entry, swpentry, tree, offset);
+#endif"""
+        if composed.count(anchor) != 1:
+            raise SourceCompositionError("COMPOSE_CONFLICT:mm/zswap.c:route-owner")
+        return composed.replace(anchor,
+            """	ctx.swapz_round031_owned =
+		swapz_round031_mm_bio_create(entry, swpentry, tree, offset);
+""" + ROUND035_ZSWAP_HINT + "#endif", 1)
+    return composed
+
+
 def replace_once(text: str, before: str, after: str, path: str, label: str) -> str:
     if not before or before == after or text.count(before) != 1 or (
         after in text and after not in before
@@ -1065,6 +1481,8 @@ def compose_postimage(path: str, original_bytes: bytes, *,
     changed = apply_round032_bio_view(path, changed)
     if with_kunit:
         changed = apply_round034_original_v1_kunit(path, changed)
+    if with_kunit:
+        changed = apply_round035_original_route(path, changed)
     if path == "mm/zswap.c":
         for required in (
             "swapz_round028_slot_epoch(swpentry)",
