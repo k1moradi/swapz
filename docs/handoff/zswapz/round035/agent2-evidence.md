@@ -19,3 +19,7 @@ Original source checks can prove an observed original swap area bdev/sector at o
 ## Actual CI verdict
 
 Pending exact new run evidence. Append only exact run/job SHA/result and first true errors after GitHub Actions completes; do not change source/workflow without its own same-commit substantive standards section.
+
+## First genuine Round035 CI failure and test-harness correction
+
+[Run #44274559631](https://github.com/k1moradi/swapz/actions/runs/44274559631), job `134699253460`, original UML qualification **FAIL before KUnit** at `Real original source-extracted GCC Clang ASan UBSan and verifier hostile cases`. Two independent adversarial route JSON/KTAP verifier self-tests PASS. Exact source-extracted real original route helper C compiled and ran under **both GCC and Clang**, but the unchanged reusable `compile_and_run` wrapper rejected its silent stdout: first diagnostic `AssertionError: 'ROUND031_REAL_' not found in ''` for each compiler. No original UML boot or case execution qualified for this commit. The test fixture follow-up adds one required success marker printed only after all real C source checks pass, without weakening or bypassing the host harness. That follow-up must have its own full-standards substantive same-commit append and new exact-source CI; historical first failure remains red. The independent full original x86 y/n build job of this first run was still in progress when this fixture correction was drafted, so no full-Kbuild verdict can yet be claimed.

@@ -9,6 +9,7 @@
 #include <stddef.h>
 #include <stdint.h>
 #include <errno.h>
+#include <stdio.h>
 
 typedef uint8_t u8;
 typedef uint64_t u64;
@@ -96,5 +97,6 @@ int main(void)
     original.bi_opf = REQ_OP_WRITE | REQ_SWAP;
     vector.bv_offset = 1U;
     assert(swapz_round035_route_geometry(&original, &active, 16U) == -EOPNOTSUPP);
+    puts("ROUND031_REAL_ROUND035_EXACT_SOURCE_ROUTE_HOST_PASS");
     return 0;
 }
