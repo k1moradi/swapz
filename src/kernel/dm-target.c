@@ -4250,7 +4250,7 @@ static __used noinline int swapz_round033_dm_copy_original_bio_v1_for_link(
 	struct swapz_ci_lz4_owned_view_v1 original_view = {};
 	unsigned int digest_offset;
 	swapz_u8 digest_present = 0;
-	size_t copied_length;
+	swapz_u32 copied_length; /* original v1 u16; checked before CRC */
 	int error;
 
 	/* Compile-time proof against the ACTUAL generated original bio.h.

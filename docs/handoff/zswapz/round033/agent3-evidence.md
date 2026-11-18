@@ -25,3 +25,7 @@ This is source compile-time only, never a loaded original MM pressure eviction o
 ## Verified exact commit and job results
 
 Initial source commit and exact GitHub Actions run will be recorded after GitHub publication/readback. A passing host mock is NOT proof of original kernel ELF/modpost linkage. Report actual first failure, scope and exit without changing the original Linux source.
+
+## First actual hosted CI source compiler failure and narrowly scoped correction
+
+[First Round033 genuine original DM CI run #44257436644](https://github.com/k1moradi/swapz/actions/runs/44257436644), first source SHA aa7894e51da5d70ac8a04bfe61c7f177bbd52e78, job 134642397766: COMPLETED FAILURE, first exact source host step exit=1. No original Linux full vmlinux, Module.symvers or DM modpost job was reached; this is NOT original GPL link PASS. Actual GCC and Clang -Wconversion/-Wshadow/-Werror errors: src/kernel/dm-target.c size_t copied_length narrowing to codec swapz_u32, fixture signed int compared to unsigned SWAPZ_MAX_COMPRESSED, and unused int result. The next source-changing commit corrects only these exact lines: bounded v1 u16 copied_length kept as swapz_u32, host signed check to exact signed length 3568, unused int eliminated; preserved warnings and complete full standards with a new own appended regression clause. Rerun genuine original-vmlinux-and-modpost workflow on the corrected exact source SHA; do not count the first red run.

@@ -91,7 +91,6 @@ int main(void)
 	swapz_u8 copied_before[SWAPZ_MAX_COMPRESSED];
 	const size_t buffer_capacity = SWAPZ_MAX_COMPRESSED;
 	int compressed_length;
-	int result;
 	unsigned int index;
 
 	memset(original_page, 0x1e, sizeof(original_page));
@@ -100,7 +99,7 @@ int main(void)
 	compressed_length = LZ4_compress_default(
 		(const char *)original_page, (char *)source_lz4_bytes,
 		(int)SWAPZ_BLOCK_BYTES, (int)SWAPZ_MAX_COMPRESSED);
-	assert(compressed_length > 0 && compressed_length <= SWAPZ_MAX_COMPRESSED);
+	assert(compressed_length > 0 && compressed_length <= 3568);
 	source_lz4_length = (u16)compressed_length;
 	original_provider_view.source_swap_entry = 0x110025U; /* FULL packed, not DM page */
 	original_provider_view.source_slot_epoch = 1001U;
