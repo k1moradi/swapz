@@ -4593,6 +4593,10 @@ static __used noinline int swapz_round034_dm_source_mechanical_preflight(
 	    provider_copy_capacity != SWAPZ_MAX_COMPRESSED ||
 	    provider_scratch_capacity != SWAPZ_MAX_COMPRESSED)
 		return -EMSGSIZE;
+	/* Sidecar is bounded to 16MiB by its allocator. Validate its
+	 * width before using the existing uint32 overlap API. */
+	if (sidecar->allocated_bytes > (size_t)~(swapz_u32)0)
+		return -EOVERFLOW;
 	if (swapz_zswap_import_ranges_overlap(
 		    result_bytes, SWAPZ_MAX_COMPRESSED,
 		    provider_copy, SWAPZ_MAX_COMPRESSED) ||
@@ -4634,7 +4638,7 @@ static __used noinline int swapz_round034_dm_source_mechanical_preflight(
 		    source_bio, sizeof(*source_bio)) ||
 	    swapz_zswap_import_ranges_overlap(
 		    result_bytes, SWAPZ_MAX_COMPRESSED,
-		    sidecar->slots, sidecar->allocated_bytes))
+		    sidecar->slots, (swapz_u32)sidecar->allocated_bytes))
 		return -EINVAL;
 
 	/* Exactly the original Linux public API accepts only its current BIO

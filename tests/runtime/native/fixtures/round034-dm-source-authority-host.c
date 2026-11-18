@@ -15,6 +15,8 @@
 #define MAX_SWAPFILES 30U
 
 struct bio_vec { void *bv_page; unsigned int bv_offset, bv_len; };
+/* Kernel's sector_t is mocked ONLY for native exact-source tests. */
+typedef uint64_t sector_t;
 struct dm_target { uint64_t len; };
 struct swapz_map {
 	bool valid, raw;
@@ -94,20 +96,6 @@ static int swapz_extent_sequence_lookup(
 	*sequence = current_extent_sequence;
 	return 0;
 }
-static bool swapz_zswap_import_ranges_overlap(
-		const void *first, size_t first_length,
-		const void *second, size_t second_length)
-{
-	const uintptr_t begin_first = (uintptr_t)first;
-	const uintptr_t begin_second = (uintptr_t)second;
-	if (!first || !second)
-		return false;
-	if (first_length > UINTPTR_MAX - begin_first ||
-	    second_length > UINTPTR_MAX - begin_second)
-		return true;
-	return begin_first < begin_second + second_length &&
-		begin_second < begin_first + first_length;
-}
 static struct swapz_dm *mutable_context;
 static struct swapz_round031_dm_sidecar_slot *mutable_slot;
 static void change_map_after_provider_copy(void)
@@ -162,7 +150,6 @@ static void run_round034_real_source_host(void)
 	const swp_entry_t original_entry = swp_entry(2U, 39U);
 	unsigned int check_index;
 	int compressed_length;
-	int status;
 
 	assert(original_entry.val != 5U && swp_type(original_entry) == 2U);
 	assert(swp_offset(original_entry) == 39U);

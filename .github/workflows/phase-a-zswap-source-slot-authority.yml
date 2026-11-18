@@ -41,7 +41,7 @@ jobs:
             tail -n 22 "$RUNNER_TEMP/round033-source-host.log"
           else
             exitcode=$?
-            echo "::error::ROUND033 first exact-source C host error exit=$exitcode" >&2
+            echo "::error::ROUND034 first actual source-slot preflight C host error exit=$exitcode" >&2
             tail -n 90 "$RUNNER_TEMP/round033-source-host.log" >&2
             exit "$exitcode"
           fi
