@@ -33,12 +33,10 @@ def compose_actual_production_c() -> str:
     new_section, after = tail.split(end, 1)
     if before.count("#if defined(" + NEW_GUARD + ")") != 1:
         raise AssertionError("Round038 default-OFF guard not unique")
-    if "SWAPZ_ROUND037_DM_ASYNC_LOWER_LIFETIME_TEST" not in (
-        before.rsplit("/* ROUND037_DM_ASYNC_LOWER_EXACT_END */", 1)[-1]
-        + after.split("#endif /* SWAPZ_ROUND037_", 1)[0]
-    ):
-        # Exact ordering is additionally checked below.
-        pass
+    if before.rfind(
+        "#if defined(SWAPZ_ROUND037_DM_ASYNC_LOWER_LIFETIME_TEST)"
+    ) < 0:
+        raise AssertionError("Round038 must be nested under Round037")
     if "#endif /* SWAPZ_ROUND038_DM_ASYNC_READ_GC_TEST */" not in after:
         raise AssertionError("Round038 guard missing")
     if "#endif /* SWAPZ_ROUND037_DM_ASYNC_LOWER_LIFETIME_TEST */" not in after:
@@ -85,10 +83,13 @@ def compose_actual_production_c() -> str:
         str(PREVIOUS), run_name="round037_source_import")[
             "compose_actual_production_c"]
     old_source = previous_compose()
-    if old_source.count("int main(void)") != 1:
-        raise AssertionError("expected one Round037 real source fixture main")
-    old_source = old_source.replace(
-        "int main(void)", "int round037_fixture_main(void)", 1)
+    # Round030's earlier source fragment intentionally has its own text
+    # main; Round036/037 renames only the LAST fixture entry point. Keep
+    # all earlier source bytes and preserve that same nested composition.
+    if old_source.count("int main(void)") != 2:
+        raise AssertionError("nested Round030/037 exact source main drift")
+    earlier, previous_main = old_source.rsplit("int main(void)", 1)
+    old_source = earlier + "int round037_fixture_main(void)" + previous_main
     fixture = FIXTURE.read_text(encoding="utf-8")
     for marker, replacement in (
         ("/* ROUND038_EXTRACT_ALL_PRIOR_SOURCE */", old_source),
