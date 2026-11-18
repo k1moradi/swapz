@@ -1839,7 +1839,7 @@ static int swapz_round037_mm_scope_check(
  * again, then close the ref exactly once BEFORE later asynchronous submit.
  * Even two matching epochs can suffer ABA after the cluster lock releases.
  */
-static int swapz_round037_original_mm_scoped_probe(
+static noinline int swapz_round037_original_mm_scoped_probe(
 		struct swap_io_ctx *ctx, const struct bio *source_bio,
 		struct folio *folio)
 {

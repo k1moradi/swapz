@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import importlib.util
 import os
+import re
 from pathlib import Path
 import shutil
 import subprocess
@@ -514,9 +515,14 @@ class OriginalMMAndBIOComposer(unittest.TestCase):
         self.assertIn("swapz_round037_mm_scope_detach(&scope)", source)
         self.assertIn("return -EOPNOTSUPP;", source)
         self.assertNotIn("return 0;", source)
+        # Comments may describe upstream submit_bio without calling it.
+        # Enforce the actual generated statements, not documentation prose.
+        executable_c = re.sub(r"/\*[\s\S]*?\*/", "", source)
         for forbidden in ("EXPORT_SYMBOL", "bio_endio(", "submit_bio(",
                           "swapz_map(", "SOURCE_MAPPED_AUTHENTICATED=1"):
-            self.assertNotIn(forbidden, source)
+            self.assertNotIn(forbidden, executable_c)
+        self.assertIn("static noinline int swapz_round037_original_mm_scoped_probe(",
+                      source)
         for name in ("epoch_aba", "swapoff_readd", "bio_late", "close_once"):
             self.assertEqual(source.count(
                 "KUNIT_CASE(swapz_round037_scope_" + name + "_kunit)"), 1)
