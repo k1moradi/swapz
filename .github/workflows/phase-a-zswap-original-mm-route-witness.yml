@@ -103,8 +103,8 @@ jobs:
           phase=original-kunit-config
           log=round035-evidence/uml-first-error.log
           out="$RUNNER_TEMP/round035-route-uml"
-          result=round035-evidence/real-original-21.json
-          request=round035-evidence/real-original.kunitconfig
+          result="$PWD/round035-evidence/real-original-21.json"
+          request="$PWD/round035-evidence/real-original.kunitconfig"
           printf 'main_sha=%s\noriginal_sha=c339f4010dea8b0d754f84ace70cd1b089878ef8\n' \
             "$GITHUB_SHA" >round035-evidence/verdict.txt
           trap 'status=$?; if ((status)); then echo "::error::Round035 actual original UML first failure phase=$phase code=$status"; tail -n 100 "$log" 2>/dev/null || :; printf "result=FAIL\nfirst_phase=%s\nexit=%d\n" "$phase" "$status" >>round035-evidence/verdict.txt; fi' EXIT
