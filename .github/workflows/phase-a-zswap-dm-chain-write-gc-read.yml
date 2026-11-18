@@ -1,0 +1,313 @@
+name: "Round039 guarded actual DM fake LZ4 write GC relocation async read SHA and original GPL modpost"
+on:
+  push:
+    branches: [main]
+    paths:
+      - "src/kernel/dm-target.c"
+      - "docs/testing_standards.md"
+      - "tests/tools/round037-dm-async-verify.py"
+      - "tests/tools/round038-dm-async-read-verify.py"
+      - "tests/tools/round039-dm-chain-verify.py"
+      - "tests/tools/round036-dm-two-phase-verify.py"
+      - "tests/runtime/native/fixtures/round037-dm-async-*"
+      - "tests/runtime/native/fixtures/round038-dm-async-read-*"
+      - "tests/runtime/native/fixtures/round039-dm-chain-*"
+      - "tests/runtime/native/fixtures/round036-dm-*"
+      - "tests/tools/round035-dm-lower-verify.py"
+      - ".github/workflows/phase-a-zswap-dm-chain-write-gc-read.yml"
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  original-same-kernel-dm:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 110
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          path: swapz
+          persist-credentials: false
+      - uses: actions/checkout@v4
+        with:
+          repository: torvalds/linux
+          ref: c339f4010dea8b0d754f84ace70cd1b089878ef8
+          fetch-depth: 1
+          path: linux
+          persist-credentials: false
+      - name: Install real original Linux kernel build and native C prerequisites
+        run: |
+          set -euo pipefail
+          sudo apt-get update -qq
+          sudo DEBIAN_FRONTEND=noninteractive apt-get install -y \
+            --no-install-recommends build-essential bc bison flex clang \
+            libelf-dev libssl-dev liblz4-dev kmod python3 binutils
+      - name: GCC and Clang strict ASan UBSan execute actual DM fake write GC relocated async READ exact original 4096 SHA
+        run: |
+          set -Eeuo pipefail
+          if python3 -B swapz/tests/tools/round039-dm-chain-verify.py host-test \
+              > "$RUNNER_TEMP/round039-source-host.log" 2>&1; then
+            tail -n 22 "$RUNNER_TEMP/round039-source-host.log"
+          else
+            exitcode=$?
+            echo "::error::ROUND039 first actual DM C write-GC-read chain compiler/sanitizer error exit=$exitcode" >&2
+            tail -n 90 "$RUNNER_TEMP/round039-source-host.log" >&2
+            exit "$exitcode"
+          fi
+      - name: Stage exact clean pinned original Linux source through published composer, verify each SHA
+        run: |
+          set -Eeuo pipefail
+          test "$(git -C linux rev-parse HEAD)" = c339f4010dea8b0d754f84ace70cd1b089878ef8
+          test "$(git -C swapz rev-parse HEAD)" = "$GITHUB_SHA"
+          test -z "$(git -C linux status --porcelain --untracked-files=all)"
+          test -z "$(git -C swapz status --porcelain --untracked-files=all)"
+          python3 -B swapz/tests/tools/stage-pinned-linux-zswap-composed.py \
+            --linux-root linux --manifest "$RUNNER_TEMP/round033-dm-original-manifest.json"
+          python3 - "$RUNNER_TEMP/round033-dm-original-manifest.json" <<'PY'
+          import hashlib, json, pathlib, sys
+          document = json.loads(pathlib.Path(sys.argv[1]).read_text())
+          assert document["source_sha"] == "c339f4010dea8b0d754f84ace70cd1b089878ef8"
+          assert document["original_source_verified"] is True
+          assert document["source_manifest_complete"] is True
+          entries = document["changed_paths"]
+          expected = {"block/Kconfig", "block/Makefile", "block/bio.c",
+              "block/swap-bio-origin-kunit.c", "include/linux/bio.h",
+              "include/linux/blk_types.h", "include/linux/swap_ops.h",
+              "mm/page_io.c", "mm/swapfile.c", "mm/zswap.c"}
+          assert len(entries) == 10 and {item["path"] for item in entries} == expected
+          for entry in entries:
+              assert hashlib.sha256((pathlib.Path("linux") / entry["path"]).read_bytes()).hexdigest() == entry["staged_sha256"]
+          PY
+          git -C linux diff --check
+          grep -Fq 'struct swapz_ci_lz4_owned_view_v1 {' linux/include/linux/bio.h
+          grep -Fq 'EXPORT_SYMBOL_GPL(swapz_ci_bio_snapshot_lz4_v1);' linux/block/bio.c
+      - name: True pinned original Linux CONFIG_ZSWAP=y full vmlinux modules Module.symvers and actual DM same-source modpost
+        timeout-minutes: 98
+        run: |
+          set -Eeuo pipefail
+          phase=initial
+          logfile="$RUNNER_TEMP/round033-first-real-kbuild-error.log"
+          checked() {
+            phase="$1"
+            shift
+            if "$@" >"$logfile" 2>&1; then
+              printf 'ROUND033_PHASE_PASS phase=%s\n' "$phase"
+            else
+              result=$?
+              printf '::error::ROUND033 first true original compiler/Kbuild/modpost error phase=%s exit=%s\n' "$phase" "$result" >&2
+              tail -n 95 "$logfile" >&2
+              return "$result"
+            fi
+          }
+          kernel_flags="-DSWAPZ_ROUND028_SLOT_EPOCH_SOURCE=1 -DSWAPZ_ROUND030_EVICTION_SNAPSHOT_SOURCE=1 -DSWAPZ_ROUND025_SIDEBAND_CI_ONLY=1 -DSWAPZ_ROUND031_MM_BIO_SOURCE=1 -DSWAPZ_ROUND032_BIO_COPY_VIEW_CI_ONLY=1"
+          dm_flags="-DSWAPZ_ROUND024_DM_IMPORT_KBUILD_PROBE=1 -DSWAPZ_ROUND028_DM_OWNED_READBACK_TEST=1 -DSWAPZ_ROUND030_DM_COMPRESSED_COMMIT_TEST=1 -DSWAPZ_ROUND031_DM_LZ4_SIDECAR_TEST=1 -DSWAPZ_ROUND032_DM_LZ4_VIEW_VALIDATE_TEST=1 -DSWAPZ_ROUND033_DM_ORIGINAL_BIO_GPL_LINK_TEST=1 -DSWAPZ_ROUND034_DM_SOURCE_SLOT_AUTHORITY_TEST=1 -DSWAPZ_ROUND035_DM_LZ4_LOWER_ROUNDTRIP_TEST=1 -DSWAPZ_ROUND036_DM_TRANSACTION_PHASE_TEST=1 -DSWAPZ_ROUND037_DM_ASYNC_LOWER_LIFETIME_TEST=1 -DSWAPZ_ROUND038_DM_ASYNC_READ_GC_TEST=1 -DSWAPZ_ROUND039_DM_FAKE_CHAIN_WRITE_GC_READ_TEST=1"
+          original_dir="$RUNNER_TEMP/round033-pinned-original-kernel"
+          default_dir="$RUNNER_TEMP/round033-default-original-dm"
+          guarded_dir="$RUNNER_TEMP/round033-guarded-original-dm"
+          info="$RUNNER_TEMP/round033-source-build-info.h"
+          mkdir -p "$original_dir" "$default_dir" "$guarded_dir"
+          printf '#define SWAPZ_BUILD_SOURCE_SHA "%s"\n#define SWAPZ_BUILD_SOURCE_CLEAN 1\n#define SWAPZ_BUILD_SOURCE_CLEAN_STRING "1"\n' "$GITHUB_SHA" >"$info"
+          checked original-defconfig make -s -C linux "O=$original_dir" CC=gcc defconfig
+          checked original-zswap-y linux/scripts/config --file "$original_dir/.config" \
+            --enable SWAP --enable ZSWAP --enable MODULES --enable MD \
+            --enable BLK_DEV_DM --enable CRYPTO_LZ4 --enable KUNIT \
+            --enable SWAP_BIO_ORIGIN_KUNIT_TEST
+          checked original-olddefconfig make -s -C linux "O=$original_dir" CC=gcc olddefconfig
+          grep -Fxq CONFIG_ZSWAP=y "$original_dir/.config"
+          grep -Fxq CONFIG_SWAP=y "$original_dir/.config"
+          grep -Fxq CONFIG_MODULES=y "$original_dir/.config"
+          grep -Fxq CONFIG_BLK_DEV_DM=y "$original_dir/.config"
+          checked original-prepare make -s -C linux "O=$original_dir" CC=gcc -j2 W=1 prepare
+          checked original-default-bio-mm-Werror make -s -C linux \
+            "O=$original_dir" CC=gcc -j2 W=1 KCFLAGS=-Werror \
+            block/bio.o mm/page_io.o mm/swapfile.o
+          if nm -a "$original_dir/block/bio.o" | grep -Eq 'swapz_ci_bio_snapshot_lz4_v1|swapz_ci_owned_create'; then
+            echo "::error::Original default kernel contains CI-only BIO export" >&2
+            exit 3
+          fi
+          checked original-opt-in-bio-mm-zswap-Werror make -s -C linux \
+            "O=$original_dir" CC=gcc -j2 W=1 "KCFLAGS=$kernel_flags -Werror" \
+            block/bio.o mm/page_io.o mm/swapfile.o mm/zswap.o
+          nm -a "$original_dir/block/bio.o" | grep -q ' T swapz_ci_bio_snapshot_lz4_v1$'
+          checked original-modules_prepare make -s -C linux \
+            "O=$original_dir" CC=gcc -j2 W=1 modules_prepare
+          checked original-full-vmlinux make -s -C linux \
+            "O=$original_dir" CC=gcc -j2 W=1 "KCFLAGS=$kernel_flags" vmlinux
+          checked original-full-modules make -s -C linux \
+            "O=$original_dir" CC=gcc -j2 W=1 "KCFLAGS=$kernel_flags" modules
+          test -s "$original_dir/vmlinux"
+          test -s "$original_dir/Module.symvers"
+          checked original-Module.symvers-exact-byte-unique-GPL-row \
+            python3 -B swapz/tests/tools/round033-original-consumer-verify.py \
+            verify-symvers --symvers "$original_dir/Module.symvers"
+          grep -F 'ROUND033_ORIGINAL_VMLINUX_GPL_SYMBOL_ROW_EXACT_ONE_HEX=' "$logfile"
+          unset KBUILD_MODPOST_WARN
+          checked ordinary-actual-dm-swapz-W1-modpost make -s -C swapz/src/kernel \
+            "KDIR=$original_dir" "SWAPZ_STAGE=$default_dir" \
+            "SWAPZ_BUILD_INFO=$info" CC=gcc -j2 W=1 KCFLAGS=-Werror all
+          test -s "$default_dir/dm-swapz.ko"
+          checked original-guarded-real-dm-swapz-W1-GPL-modpost make -s -C swapz/src/kernel \
+            "KDIR=$original_dir" "SWAPZ_STAGE=$guarded_dir" \
+            "SWAPZ_BUILD_INFO=$info" CC=gcc -j2 W=1 \
+            "KCFLAGS=$kernel_flags $dm_flags -Werror" all
+          test -s "$guarded_dir/dm-swapz.ko"
+          # Verify the NEW source section exists in the actual guarded
+          # production object; the ordinary original/HWE module has none.
+          nm -a "$guarded_dir/dm-target.o" > "$RUNNER_TEMP/round034-guarded-dm-symbols.txt"
+          nm -a "$default_dir/dm-target.o" > "$RUNNER_TEMP/round034-default-dm-symbols.txt"
+          for compiled_symbol in swapz_round033_dm_copy_original_bio_v1_for_link \
+                                 swapz_round034_dm_snapshot_candidate \
+                                 swapz_round034_dm_source_mechanical_preflight \
+                                 swapz_round034_dm_try_authenticate_source_slot \
+                                 swapz_round035_dm_owned_lz4_lower_roundtrip \
+                                 swapz_round036_dm_mock_prepare \
+                                 swapz_round036_dm_mock_submit \
+                                 swapz_round036_dm_mock_complete \
+                                 swapz_round036_dm_mock_publish_once \
+                                 swapz_round037_dm_async_initialize \
+                                 swapz_round037_dm_async_prepare \
+                                 swapz_round037_dm_async_submit \
+                                 swapz_round037_dm_async_fake_callback \
+                                 swapz_round037_dm_async_finish \
+                                 swapz_round037_dm_async_cancel \
+                                 swapz_round038_dm_read_initialize \
+                                 swapz_round038_dm_read_snapshot_write \
+                                 swapz_round038_dm_read_revalidate \
+                                 swapz_round038_dm_read_prepare \
+                                 swapz_round038_dm_read_submit \
+                                 swapz_round038_dm_read_fake_callback \
+                                 swapz_round038_dm_read_verify_private \
+                                 swapz_round038_dm_read_finish \
+                                 swapz_round038_dm_read_cancel \
+                                 swapz_round039_dm_chain_initialize \
+                                 swapz_round039_dm_chain_revalidate \
+                                 swapz_round039_dm_chain_accept_write \
+                                 swapz_round039_dm_chain_gc_prepare \
+                                 swapz_round039_dm_chain_gc_fake_callback \
+                                 swapz_round039_dm_chain_gc_finish \
+                                 swapz_round039_dm_chain_read_prepare \
+                                 swapz_round039_dm_chain_read_finish \
+                                 swapz_round039_dm_chain_cancel_gc; do
+            if ! grep -Fq "$compiled_symbol" "$RUNNER_TEMP/round034-guarded-dm-symbols.txt"; then
+              echo "::error::Round039 actual production guarded DM C symbol missing $compiled_symbol" >&2
+              exit 3
+            fi
+            if grep -Fq "$compiled_symbol" "$RUNNER_TEMP/round034-default-dm-symbols.txt"; then
+              echo "::error::Round039 guarded-only symbol leaked into DEFAULT DM $compiled_symbol" >&2
+              exit 3
+            fi
+          done
+          original_release="$(make -s -C linux "O=$original_dir" kernelrelease)"
+          checked original-actual-module-ELF-unique-undefined-GPL-import \
+            python3 -B swapz/tests/tools/round033-original-consumer-verify.py \
+            verify-link --symvers "$original_dir/Module.symvers" \
+            --default "$default_dir/dm-swapz.ko" \
+            --guarded "$guarded_dir/dm-swapz.ko" \
+            --kernel-release "$original_release"
+          grep -F ROUND033_GENUINE_SAME_ORIGINAL_KERNEL_MODULE_SYMVERS_GPL_MODPOST_PASS "$logfile"
+          echo "ROUND039_TRUE_ORIGINAL_LINUX_DM_FAKE_WRITE_GC_READ_MODULE_COMPILE_ONLY_PASS"
+          echo "ROUND038_FAKE_CALLBACK_NOT_DURABLE=1 SIMULATED_MAP_ONLY=1 HYPOTHETICAL_ACK_ONLY=1"
+          echo "SOURCE_COPY_MECHANICALLY_VALID_ONLY=1 SOURCE_MAPPED_AUTHENTICATED=0 PHASE_A=BLOCKED FORCED_RAW=DISABLED DIRECT_COMPRESSED=NO_GO LOADED=NOT_RUN PHYSICAL=NOT_RUN"
+
+      - name: Upload only bounded source-only first-failure logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: round039-dm-chain-source-only-logs-${{ github.sha }}
+          path: |
+            ${{ runner.temp }}/round039-source-host.log
+            ${{ runner.temp }}/round033-first-real-kbuild-error.log
+          if-no-files-found: warn
+          retention-days: 5
+
+
+  native-product-default-and-prior-guard:
+    name: "Native ${{ matrix.arch }} actual DM module default and old guard"
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: ubuntu-24.04
+            arch: x86_64
+          - runner: ubuntu-24.04-arm
+            arch: arm64
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Native linked kernel headers without loading
+        run: |
+          set -euo pipefail
+          sudo apt-get update -qq
+          sudo DEBIAN_FRONTEND=noninteractive apt-get install -y \
+            --no-install-recommends build-essential linux-headers-generic-hwe-24.04 kmod binutils
+      - name: Actual production C GCC W1 Werror default and previous guard module linkage
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          phase=native-headers
+          log="$RUNNER_TEMP/round039-native-first-error.log"
+          trap 'status=$?; if ((status)); then echo "::error::ROUND039 native real C first failure phase=$phase exit=$status" >&2; tail -n 95 "$log" 2>/dev/null >&2 || :; fi' EXIT
+          case "${{ matrix.arch }}:$(uname -m)" in
+            x86_64:x86_64|arm64:aarch64) ;;
+            *) echo "::error::native arch runner mismatch" >&2; exit 3 ;;
+          esac
+          kdir="$(find /usr/src -maxdepth 1 -type d -name 'linux-headers-*-generic' | sort -V | tail -n1)"
+          test -n "$kdir"
+          test -s "$kdir/include/config/auto.conf"
+          recorded_compiler="$(sed -n 's/^CONFIG_CC_VERSION_TEXT=//p' "$kdir/include/config/auto.conf")"
+          recorded_major="$(printf '%s' "${recorded_compiler##* }" | cut -d. -f1)"
+          build_major="$(gcc -dumpfullversion -dumpversion | cut -d. -f1)"
+          test -n "$recorded_major" && test "$recorded_major" = "$build_major"
+          original_release="$(cat "$kdir/include/config/kernel.release")"
+          test "${kdir##*/}" = "linux-headers-$original_release"
+          phase=default-W1-compiler-modpost
+          make -s -C src/kernel "KDIR=$kdir" \
+            "SWAPZ_STAGE=$PWD/build/round039-native-default" \
+            CC=gcc KCFLAGS=-Werror W=1 -j2 all >"$log" 2>&1
+          test -s build/round039-native-default/dm-swapz.ko
+          if nm -a build/round039-native-default/dm-target.o |
+              grep -Eq 'swapz_round037_dm_async_|swapz_round039_dm_chain_'; then
+            echo "::error::default DM C leaked source-only Round037 helper" >&2
+            exit 3
+          fi
+          phase=prior-real-guard-W1-compiler-modpost
+          prior_flags="-DSWAPZ_ROUND024_DM_IMPORT_KBUILD_PROBE=1 -DSWAPZ_ROUND028_DM_OWNED_READBACK_TEST=1 -DSWAPZ_ROUND030_DM_COMPRESSED_COMMIT_TEST=1 -DSWAPZ_ROUND031_DM_LZ4_SIDECAR_TEST=1"
+          make -s -C src/kernel "KDIR=$kdir" \
+            "SWAPZ_STAGE=$PWD/build/round039-native-prior" \
+            CC=gcc "KCFLAGS=$prior_flags -Werror" W=1 -j2 all >"$log" 2>&1
+          test -s build/round039-native-prior/dm-swapz.ko
+          nm -a build/round039-native-prior/dm-target.o |
+            grep -Fq swapz_round031_dm_sidecar_init
+          if nm -a build/round039-native-prior/dm-target.o |
+              grep -Eq 'swapz_round037_dm_async_|swapz_round039_dm_chain_'; then
+            echo "::error::prior guard leaked source-only Round037" >&2
+            exit 3
+          fi
+          test "$(modinfo -F vermagic build/round039-native-default/dm-swapz.ko | awk '{print $1}')" = "$original_release"
+          test "$(modinfo -F vermagic build/round039-native-prior/dm-swapz.ko | awk '{print $1}')" = "$original_release"
+          echo "ROUND039_NATIVE_${{ matrix.arch }}_REAL_DEFAULT_AND_OLD_GUARD_MODULE_LINK_PASS"
+      - uses: actions/upload-artifact@v4
+        if: failure()
+        with:
+          name: round039-native-${{ matrix.arch }}-first-error
+          path: ${{ runner.temp }}/round039-native-first-error.log
+          if-no-files-found: warn
+          retention-days: 5
+
+  repository-policy:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Enforce exact source and workflow same-commit testing standards
+        env:
+          SWAPZ_PUSH_BEFORE_SHA: ${{ github.event.before }}
+        run: |
+          set -Eeuo pipefail
+          python3 -B tests/runtime/native/repository-policy-test.py --enforce
+          echo ROUND038_NEW_SOURCE_STANDARDS_POLICY_PASS
