@@ -6730,6 +6730,300 @@ static __used noinline int swapz_round039_dm_chain_cancel_gc(
 	return 0;
 }
 /* ROUND039_DM_CHAIN_EXACT_END */
+
+/*
+ * Round040 CI-only two-incarnation gate. The synthetic logical slot is
+ * unchanged, but its original allocator epoch and STORE object differ.
+ * All transitions below require ctx->ordered_owner. Independently scheduled
+ * old write/GC/read callbacks retain ONLY their prior private mailboxes.
+ * This witness never publishes a real DM map or completes an upper BIO.
+ */
+#if defined(SWAPZ_ROUND040_DM_SAME_SLOT_REISSUE_CONCURRENCY_TEST) && \
+    defined(SWAPZ_ROUND039_DM_FAKE_CHAIN_WRITE_GC_READ_TEST) && \
+    defined(SWAPZ_ROUND038_DM_ASYNC_READ_GC_TEST) && \
+    defined(SWAPZ_ROUND037_DM_ASYNC_LOWER_LIFETIME_TEST) && \
+    defined(SWAPZ_ROUND036_DM_TRANSACTION_PHASE_TEST) && \
+    defined(SWAPZ_ROUND035_DM_LZ4_LOWER_ROUNDTRIP_TEST) && \
+    defined(SWAPZ_ROUND034_DM_SOURCE_SLOT_AUTHORITY_TEST) && \
+    defined(SWAPZ_ROUND033_DM_ORIGINAL_BIO_GPL_LINK_TEST) && \
+    defined(SWAPZ_ROUND032_DM_LZ4_VIEW_VALIDATE_TEST) && \
+    defined(SWAPZ_ROUND031_DM_LZ4_SIDECAR_TEST) && \
+    defined(SWAPZ_ROUND030_DM_COMPRESSED_COMMIT_TEST) && \
+    defined(SWAPZ_ROUND028_DM_OWNED_READBACK_TEST) && \
+    defined(SWAPZ_ROUND024_DM_IMPORT_KBUILD_PROBE) && \
+    defined(SWAPZ_ROUND032_BIO_COPY_VIEW_CI_ONLY) && \
+    defined(SWAPZ_ROUND031_MM_BIO_SOURCE) && \
+    defined(SWAPZ_ROUND030_EVICTION_SNAPSHOT_SOURCE) && \
+    defined(SWAPZ_ROUND028_SLOT_EPOCH_SOURCE) && \
+    defined(SWAPZ_ROUND025_SIDEBAND_CI_ONLY)
+/* ROUND040_DM_REISSUE_EXACT_START */
+#define SWAPZ_ROUND040_SOURCE_MAPPED_AUTHENTICATED 0U
+#define SWAPZ_ROUND040_CANDIDATES 2U
+
+struct swapz_round040_dm_reissue_witness {
+	struct swapz_round038_dm_read_record record[SWAPZ_ROUND040_CANDIDATES];
+	struct swapz_round032_dm_owned_view_v1 source[SWAPZ_ROUND040_CANDIDATES];
+	struct swapz_round036_dm_mock_publication publication[
+		SWAPZ_ROUND040_CANDIDATES];
+	swapz_u64 ticket[SWAPZ_ROUND040_CANDIDATES];
+	swapz_u64 original_area_cookie;
+	swapz_u64 issue_generation;
+	swapz_u8 hypothetical_ack_count[SWAPZ_ROUND040_CANDIDATES];
+	swapz_u8 active_candidate;
+	bool armed[SWAPZ_ROUND040_CANDIDATES];
+	bool closed;
+};
+
+static __used noinline bool swapz_round040_dm_same_source(
+		const struct swapz_round032_dm_owned_view_v1 *left,
+		const struct swapz_round032_dm_owned_view_v1 *right)
+{
+	return left && right &&
+	       left->source_swap_entry == right->source_swap_entry &&
+	       left->source_slot_epoch == right->source_slot_epoch &&
+	       left->stored_entry_identity == right->stored_entry_identity &&
+	       left->compressed_crc32c == right->compressed_crc32c &&
+	       left->compressed_length == right->compressed_length &&
+	       left->decoded_length == right->decoded_length &&
+	       left->representation_version == right->representation_version &&
+	       left->codec == right->codec &&
+	       !memcmp(left->original_sha256, right->original_sha256,
+		       sizeof(left->original_sha256));
+}
+
+static __used noinline void swapz_round040_dm_reissue_initialize(
+		struct swapz_round040_dm_reissue_witness *witness)
+{
+	if (!witness)
+		return;
+	memset(witness, 0, sizeof(*witness));
+	witness->active_candidate = SWAPZ_ROUND040_CANDIDATES;
+}
+
+/* The caller supplies a MOCK immutable original swap-area identity.
+ * swp_entry_t.val is decoded as type+offset, NEVER as a DM sector.
+ * A later different bdev/area token must be rejected, not aliased.
+ */
+static __used noinline int swapz_round040_dm_reissue_arm(
+		struct swapz_dm *ctx,
+		struct swapz_round040_dm_reissue_witness *witness,
+		swapz_u8 candidate,
+		const struct swapz_round038_dm_read_record *record,
+		const struct swapz_round032_dm_owned_view_v1 *source,
+		swapz_u64 original_area_cookie, swapz_u64 ticket)
+{
+	swp_entry_t original_slot;
+
+	if (!ctx || !witness || !record || !source || !ctx->target ||
+	    !original_area_cookie || !ticket ||
+	    candidate >= SWAPZ_ROUND040_CANDIDATES)
+		return -EINVAL;
+	lockdep_assert_held(&ctx->ordered_owner);
+	original_slot.val = source->source_swap_entry;
+	if (witness->closed || witness->armed[candidate] ||
+	    (candidate == 0U && witness->armed[1]) ||
+	    (candidate == 1U && !witness->armed[0]) ||
+	    !source->source_swap_entry ||
+	    swp_type(original_slot) >= MAX_SWAPFILES ||
+	    !swp_offset(original_slot) ||
+	    swp_entry(swp_type(original_slot), swp_offset(original_slot)).val !=
+		    original_slot.val ||
+	    !source->source_slot_epoch || !source->stored_entry_identity ||
+	    source->compressed_length == 0U ||
+	    source->compressed_length > SWAPZ_MAX_COMPRESSED ||
+	    source->decoded_length != SWAPZ_BLOCK_BYTES ||
+	    source->representation_version != SWAPZ_ZSWAP_IMPORT_VERSION ||
+	    source->codec != SWAPZ_ZSWAP_IMPORT_LZ4_CODEC ||
+	    !swapz_round040_dm_same_source(&record->source, source) ||
+	    record->write_ticket != ticket ||
+	    record->logical_page == 0U ||
+	    record->logical_page >= ctx->authority.logical_pages ||
+	    record->target_identity != (unsigned long)ctx->target ||
+	    record->target_length != ctx->target->len ||
+	    !ctx->authority.maps || ctx->authority.maps != ctx->maps ||
+	    ctx->gc_recovery.active || !ctx->accepting ||
+	    smp_load_acquire(&ctx->failed) ||
+	    swapz_zswap_admission_try_live(NULL) != -EOPNOTSUPP)
+		return -ESTALE;
+	if (candidate == 0U) {
+		witness->original_area_cookie = original_area_cookie;
+	} else {
+		const struct swapz_round038_dm_read_record *old =
+			&witness->record[0];
+		const struct swapz_round032_dm_owned_view_v1 *prior =
+			&witness->source[0];
+
+		if (original_area_cookie != witness->original_area_cookie ||
+		    source->source_swap_entry != prior->source_swap_entry ||
+		    (source->source_slot_epoch == prior->source_slot_epoch &&
+		     source->stored_entry_identity ==
+			     prior->stored_entry_identity) ||
+		    !memcmp(source->original_sha256, prior->original_sha256,
+			    sizeof(source->original_sha256)) ||
+		    (source->compressed_crc32c == prior->compressed_crc32c &&
+		     source->compressed_length == prior->compressed_length) ||
+		    record->logical_page != old->logical_page ||
+		    record->target_identity != old->target_identity ||
+		    record->fake_start_block == old->fake_start_block ||
+		    record->fake_extent_sequence <= old->fake_extent_sequence ||
+		    ticket <= witness->ticket[0] ||
+		    witness->issue_generation == ~(swapz_u64)0)
+			return -ESTALE;
+	}
+	witness->record[candidate] = *record;
+	witness->source[candidate] = *source;
+	witness->ticket[candidate] = ticket;
+	witness->armed[candidate] = true;
+	witness->active_candidate = candidate;
+	witness->issue_generation++;
+	return 0;
+}
+
+/* ordered_owner is the sole owner of witness state. The callbacks never
+ * touch this witness; a stale A may complete but cannot enter Round037's
+ * actual private map/hypothetical ACK publication after B reissues.
+ */
+static __used noinline int swapz_round040_dm_reissue_current(
+		struct swapz_dm *ctx,
+		const struct swapz_round040_dm_reissue_witness *witness,
+		swapz_u8 candidate, swapz_u64 original_area_cookie,
+		const struct swapz_round032_dm_owned_view_v1 *current_source)
+{
+	if (!ctx || !witness || !current_source)
+		return -EINVAL;
+	lockdep_assert_held(&ctx->ordered_owner);
+	if (witness->closed || candidate >= SWAPZ_ROUND040_CANDIDATES ||
+	    witness->active_candidate != candidate ||
+	    !witness->armed[candidate] ||
+	    original_area_cookie != witness->original_area_cookie ||
+	    !swapz_round040_dm_same_source(
+		&witness->source[candidate], current_source) ||
+	    !ctx->target ||
+	    witness->record[candidate].target_identity !=
+		    (unsigned long)ctx->target ||
+	    witness->record[candidate].target_length != ctx->target->len ||
+	    !ctx->accepting || smp_load_acquire(&ctx->failed))
+		return -ESTALE;
+	return 0;
+}
+
+static __used noinline int swapz_round040_dm_reissue_finish_write(
+		struct swapz_dm *ctx,
+		const struct swapz_round031_dm_sidecar *sidecar,
+		struct swapz_round040_dm_reissue_witness *witness,
+		swapz_u8 candidate, swapz_u64 original_area_cookie,
+		const struct swapz_round032_dm_owned_view_v1 *current_source,
+		struct swapz_round037_dm_async_mailbox *mailbox,
+		swapz_u8 *mock_upper_output)
+{
+	struct swapz_round036_dm_mock_publication publication = {};
+	const struct swapz_round038_dm_read_record *record;
+	int error;
+
+	if (!ctx || !witness || !mailbox || !mock_upper_output)
+		return -EINVAL;
+	lockdep_assert_held(&ctx->ordered_owner);
+	error = swapz_round040_dm_reissue_current(
+		ctx, witness, candidate, original_area_cookie, current_source);
+	if (error)
+		return error;
+	if (witness->hypothetical_ack_count[candidate])
+		return -ESTALE;
+	record = &witness->record[candidate];
+	error = swapz_round037_dm_async_finish(
+		ctx, sidecar, witness->ticket[candidate],
+		record->fake_extent_sequence, current_source, &publication,
+		mock_upper_output, mailbox);
+	if (error)
+		return error;
+	if (publication.hypothetical_ack_count != 1U)
+		return -EUCLEAN;
+	witness->publication[candidate] = publication;
+	witness->hypothetical_ack_count[candidate] = 1U;
+	return 0;
+}
+
+static __used noinline int swapz_round040_dm_reissue_gc_finish(
+		struct swapz_dm *ctx,
+		const struct swapz_round031_dm_sidecar *sidecar,
+		const struct swapz_round032_dm_owned_view_v1 *current_source,
+		struct swapz_round040_dm_reissue_witness *witness,
+		swapz_u8 candidate, swapz_u64 original_area_cookie,
+		struct swapz_round039_dm_chain *chain, swapz_u64 gc_ticket)
+{
+	int error;
+
+	if (!ctx || !witness || !chain)
+		return -EINVAL;
+	lockdep_assert_held(&ctx->ordered_owner);
+	error = swapz_round040_dm_reissue_current(
+		ctx, witness, candidate, original_area_cookie, current_source);
+	if (error)
+		return error;
+	if (witness->hypothetical_ack_count[candidate] != 1U)
+		return -ESTALE;
+	return swapz_round039_dm_chain_gc_finish(
+		ctx, sidecar, current_source, chain, gc_ticket);
+}
+
+static __used noinline int swapz_round040_dm_reissue_read_finish(
+		struct swapz_dm *ctx,
+		const struct swapz_round031_dm_sidecar *sidecar,
+		const struct swapz_round032_dm_owned_view_v1 *current_source,
+		struct swapz_round040_dm_reissue_witness *witness,
+		swapz_u8 candidate, swapz_u64 original_area_cookie,
+		struct swapz_round039_dm_chain *chain,
+		swapz_u64 expected_gc_generation, swapz_u64 read_ticket,
+		swapz_u8 *mock_upper_output,
+		struct swapz_round038_dm_read_mailbox *read_mailbox)
+{
+	int error;
+
+	if (!ctx || !witness || !chain || !mock_upper_output || !read_mailbox)
+		return -EINVAL;
+	lockdep_assert_held(&ctx->ordered_owner);
+	error = swapz_round040_dm_reissue_current(
+		ctx, witness, candidate, original_area_cookie, current_source);
+	if (error)
+		return error;
+	if (witness->hypothetical_ack_count[candidate] != 1U ||
+	    chain->hypothetical_write_acks != 1U)
+		return -ESTALE;
+	return swapz_round039_dm_chain_read_finish(
+		ctx, sidecar, current_source, chain, expected_gc_generation,
+		read_ticket, mock_upper_output, read_mailbox);
+}
+
+/* Tombstone is retained across all fake callback drains. On teardown,
+ * caller must first release both WRITE, both READ and both GC references.
+ * Do not zero a still-referenced source identity to "fix" a race.
+ */
+static __used noinline int swapz_round040_dm_reissue_retire(
+		struct swapz_dm *ctx,
+		struct swapz_round040_dm_reissue_witness *witness,
+		const struct swapz_round037_dm_async_mailbox *write_a,
+		const struct swapz_round037_dm_async_mailbox *write_b,
+		const struct swapz_round038_dm_read_mailbox *read_a,
+		const struct swapz_round038_dm_read_mailbox *read_b,
+		const struct swapz_round039_dm_chain *chain_a,
+		const struct swapz_round039_dm_chain *chain_b)
+{
+	if (!ctx || !witness || !write_a || !write_b ||
+	    !read_a || !read_b || !chain_a || !chain_b)
+		return -EINVAL;
+	lockdep_assert_held(&ctx->ordered_owner);
+	if (write_a->callback_references || write_b->callback_references ||
+	    read_a->callback_references || read_b->callback_references ||
+	    chain_a->callback_references || chain_b->callback_references)
+		return -EBUSY;
+	memzero_explicit(witness->record, sizeof(witness->record));
+	memzero_explicit(witness->source, sizeof(witness->source));
+	memzero_explicit(witness->publication, sizeof(witness->publication));
+	witness->closed = true;
+	return 0;
+}
+/* ROUND040_DM_REISSUE_EXACT_END */
+#endif /* SWAPZ_ROUND040_DM_SAME_SLOT_REISSUE_CONCURRENCY_TEST */
 #endif /* SWAPZ_ROUND039_DM_FAKE_CHAIN_WRITE_GC_READ_TEST */
 #endif /* SWAPZ_ROUND037_DM_ASYNC_LOWER_LIFETIME_TEST */
 #endif /* SWAPZ_ROUND036_DM_TRANSACTION_PHASE_TEST */
