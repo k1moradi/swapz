@@ -5848,6 +5848,498 @@ static __used noinline int swapz_round037_dm_async_cancel(
 	return 0;
 }
 /* ROUND037_DM_ASYNC_LOWER_EXACT_END */
+
+#if defined(SWAPZ_ROUND038_DM_ASYNC_READ_GC_TEST)
+/* ROUND038_DM_ASYNC_READ_GC_EXACT_START */
+#define SWAPZ_ROUND038_SOURCE_MAPPED_AUTHENTICATED 0U
+
+enum swapz_round038_dm_read_phase {
+	SWAPZ_ROUND038_READ_EMPTY = 0,
+	SWAPZ_ROUND038_READ_PREPARED,
+	SWAPZ_ROUND038_FAKE_LOWER_READ_IN_FLIGHT,
+	SWAPZ_ROUND038_FAKE_READ_OK,
+	SWAPZ_ROUND038_FAKE_READ_ERROR,
+	SWAPZ_ROUND038_GC_OWNER_REVALIDATING,
+	SWAPZ_ROUND038_GC_OWNER_REVALIDATED,
+	SWAPZ_ROUND038_ORIGINAL_4096_HASH_VERIFIED,
+	SWAPZ_ROUND038_MOCK_READ_BUFFER_PUBLISHED,
+	SWAPZ_ROUND038_READ_CANCELLED,
+	SWAPZ_ROUND038_READ_EXPIRED
+};
+
+/*
+ * All witnesses are copied while the actual DM ordered_owner is held.
+ * target_identity is an integer-only identity; it is NEVER dereferenced.
+ * Original source identity includes the ENTIRE swp_entry_t.val, STORE ID,
+ * allocator incarnation and independently supplied STORE plaintext SHA.
+ * This is a MOCK write-publication record, not original MM authority.
+ */
+struct swapz_round038_dm_read_record {
+	struct swapz_round032_dm_owned_view_v1 source;
+	struct swapz_map prior_map;
+	swapz_u64 write_ticket;
+	swapz_u64 dm_generation;
+	swapz_u64 gc_epoch;
+	swapz_u64 previous_sidecar_owner;
+	unsigned long target_identity;
+	sector_t target_length;
+	swapz_u32 logical_page;
+	swapz_u32 fake_start_block;
+	swapz_u32 fake_extent_sequence;
+	swapz_u32 previous_gc_destination;
+	swapz_u32 previous_gc_victim;
+	swapz_u32 extent_bytes;
+	swapz_u32 payload_offset;
+};
+
+/*
+ * Only the caller may free this mailbox, AFTER its sole fake callback ref
+ * has drained. ordered_owner -> callback_lock, never the reverse.
+ * Prepare, submit, finish and cancel require ordered_owner; callback takes
+ * ONLY callback_lock, never a ctx, target, BIO, zpool, map or sidecar ptr.
+ * No lock is held across the separately scheduled fake I/O (the callback
+ * only copies bounded fake lower bytes under callback_lock) or LZ4/SHA.
+ * Cancellation scrubs buffers, but preserves the outstanding ref tombstone.
+ */
+struct swapz_round038_dm_read_mailbox {
+	spinlock_t callback_lock;
+	enum swapz_round038_dm_read_phase phase;
+	swapz_u64 ticket;
+	swapz_u64 cancellation_epoch;
+	swapz_u32 callback_references;
+	bool initialized;
+	struct swapz_round038_dm_read_record record;
+	swapz_u8 fake_lower_image[4U * SWAPZ_BLOCK_BYTES];
+	swapz_u8 decoded_original[SWAPZ_BLOCK_BYTES];
+	swapz_u8 verified_original[SWAPZ_BLOCK_BYTES];
+};
+
+static __used noinline void swapz_round038_dm_read_initialize(
+		struct swapz_round038_dm_read_mailbox *mailbox)
+{
+	if (!mailbox)
+		return;
+	memset(mailbox, 0, sizeof(*mailbox));
+	spin_lock_init(&mailbox->callback_lock);
+	mailbox->initialized = true;
+}
+
+/* Caller owns ordered_owner and mailbox; callbacks have drained or see a
+ * cancellation tombstone before this private-data scrub.
+ */
+static __used noinline void swapz_round038_dm_read_scrub(
+		struct swapz_round038_dm_read_mailbox *mailbox)
+{
+	memzero_explicit(mailbox->fake_lower_image,
+			 sizeof(mailbox->fake_lower_image));
+	memzero_explicit(mailbox->decoded_original,
+			 sizeof(mailbox->decoded_original));
+	memzero_explicit(mailbox->verified_original,
+			 sizeof(mailbox->verified_original));
+	memzero_explicit(&mailbox->record, sizeof(mailbox->record));
+}
+
+/*
+ * Capture original v1 bytes and the Round036 owner/GC/extent/target witness
+ * from the ALREADY PREPARED real product source write fixture, before its
+ * private ledger retires on a hypothetical ACK. No borrowed pointers escape.
+ */
+static __used noinline int swapz_round038_dm_read_snapshot_write(
+		struct swapz_dm *ctx,
+		const struct swapz_round036_dm_mock_ledger *write_ledger,
+		struct swapz_round038_dm_read_record *destination)
+{
+	struct swapz_round038_dm_read_record snapshot = {};
+
+	if (!ctx || !write_ledger || !destination)
+		return -EINVAL;
+	lockdep_assert_held(&ctx->ordered_owner);
+	if (!ctx->target || !ctx->authority.maps ||
+	    write_ledger->phase != SWAPZ_ROUND036_PREPARED ||
+	    !write_ledger->private_stage ||
+	    !write_ledger->source.source_swap_entry ||
+	    !write_ledger->source.source_slot_epoch ||
+	    !write_ledger->source.stored_entry_identity)
+		return -ESTALE;
+	snapshot.source = write_ledger->source;
+	snapshot.prior_map = write_ledger->previous_map;
+	snapshot.write_ticket = write_ledger->callback_cookie;
+	snapshot.dm_generation = write_ledger->dm_generation;
+	snapshot.gc_epoch = write_ledger->gc_epoch;
+	snapshot.previous_sidecar_owner =
+		write_ledger->previous_sidecar_owner;
+	snapshot.target_identity = (unsigned long)ctx->target;
+	snapshot.target_length = ctx->target->len;
+	snapshot.logical_page = write_ledger->logical_page;
+	snapshot.fake_start_block = write_ledger->fake_start_block;
+	snapshot.fake_extent_sequence = write_ledger->fake_extent_sequence;
+	snapshot.previous_gc_destination =
+		write_ledger->previous_gc_destination;
+	snapshot.previous_gc_victim =
+		write_ledger->previous_gc_victim;
+	snapshot.extent_bytes = write_ledger->extent_bytes;
+	snapshot.payload_offset = write_ledger->payload_offset;
+	*destination = snapshot;
+	return 0;
+}
+
+/*
+ * Recheck actual (currently owned) DM maps and mock original-MM witnesses
+ * at PREPARE, SUBMIT, and twice at FINISH. The previous map can be empty:
+ * Round037 published ONLY a mock private map, never the real current map.
+ * Any GC relocation/reuse requires new provenance and a NEW read operation.
+ */
+static __used noinline int swapz_round038_dm_read_revalidate(
+		struct swapz_dm *ctx,
+		const struct swapz_round031_dm_sidecar *sidecar,
+		const struct swapz_round036_dm_mock_publication *publication,
+		const struct swapz_round032_dm_owned_view_v1 *current_source,
+		const struct swapz_round038_dm_read_record *record,
+		swapz_u32 current_extent_sequence)
+{
+	const struct swapz_round031_dm_sidecar_slot *slot;
+	swapz_u32 logical_page;
+
+	if (!ctx || !sidecar || !publication || !current_source || !record)
+		return -EINVAL;
+	lockdep_assert_held(&ctx->ordered_owner);
+	logical_page = record->logical_page;
+	if (!ctx->accepting || smp_load_acquire(&ctx->failed) ||
+	    !ctx->target ||
+	    (unsigned long)ctx->target != record->target_identity ||
+	    ctx->target->len != record->target_length ||
+	    !ctx->authority.maps || ctx->authority.maps != ctx->maps ||
+	    logical_page == 0U ||
+	    logical_page >= ctx->authority.logical_pages ||
+	    !sidecar->slots || sidecar->closed ||
+	    sidecar->capacity != ctx->authority.logical_pages ||
+	    ctx->gc_recovery.active || ctx->authority.gc_allocation ||
+	    ctx->authority.batch_pending || ctx->authority.batch_replaying ||
+	    ctx->authority.in_flight ||
+	    ctx->authority.gc_destination !=
+		    record->previous_gc_destination ||
+	    ctx->authority.gc_forbidden_victim !=
+		    record->previous_gc_victim ||
+	    memcmp(&ctx->authority.maps[logical_page], &record->prior_map,
+		   sizeof(record->prior_map)) ||
+	    record->fake_start_block < 1U ||
+	    record->fake_start_block >= ctx->authority.physical_blocks ||
+	    (record->extent_bytes != SWAPZ_BLOCK_BYTES &&
+	     record->extent_bytes != 2U * SWAPZ_BLOCK_BYTES &&
+	     record->extent_bytes != 4U * SWAPZ_BLOCK_BYTES) ||
+	    record->extent_bytes / SWAPZ_BLOCK_BYTES >
+		    ctx->authority.physical_blocks - record->fake_start_block ||
+	    record->source.compressed_length == 0U ||
+	    record->source.compressed_length > SWAPZ_MAX_COMPRESSED ||
+	    record->source.decoded_length != SWAPZ_BLOCK_BYTES ||
+	    record->source.representation_version !=
+		    SWAPZ_ZSWAP_IMPORT_VERSION ||
+	    record->source.codec != SWAPZ_ZSWAP_IMPORT_LZ4_CODEC ||
+	    record->payload_offset > record->extent_bytes ||
+	    record->source.compressed_length >
+		    record->extent_bytes - record->payload_offset ||
+	    !record->write_ticket || !record->dm_generation ||
+	    !record->gc_epoch || !record->source.source_swap_entry ||
+	    !record->source.source_slot_epoch ||
+	    !record->source.stored_entry_identity ||
+	    current_extent_sequence != record->fake_extent_sequence ||
+	    publication->owner_cookie != record->write_ticket ||
+	    publication->source_swap_entry !=
+		    record->source.source_swap_entry ||
+	    publication->source_epoch != record->source.source_slot_epoch ||
+	    publication->stored_identity !=
+		    record->source.stored_entry_identity ||
+	    publication->dm_generation != record->dm_generation ||
+	    publication->fake_start_block != record->fake_start_block ||
+	    publication->fake_extent_sequence !=
+		    record->fake_extent_sequence ||
+	    publication->hypothetical_ack_count != 1U ||
+	    current_source->source_swap_entry !=
+		    record->source.source_swap_entry ||
+	    current_source->source_slot_epoch !=
+		    record->source.source_slot_epoch ||
+	    current_source->stored_entry_identity !=
+		    record->source.stored_entry_identity ||
+	    current_source->compressed_crc32c !=
+		    record->source.compressed_crc32c ||
+	    current_source->compressed_length !=
+		    record->source.compressed_length ||
+	    current_source->decoded_length != SWAPZ_BLOCK_BYTES ||
+	    current_source->representation_version !=
+		    SWAPZ_ZSWAP_IMPORT_VERSION ||
+	    current_source->codec != SWAPZ_ZSWAP_IMPORT_LZ4_CODEC ||
+	    memcmp(current_source->original_sha256,
+		   record->source.original_sha256,
+		   sizeof(record->source.original_sha256)) ||
+	    swapz_zswap_admission_try_live(NULL) != -EOPNOTSUPP)
+		return -ESTALE;
+	slot = &sidecar->slots[logical_page];
+	if (slot->readers ||
+	    slot->owner_token != record->previous_sidecar_owner)
+		return -ESTALE;
+	return 0;
+}
+
+static __used noinline int swapz_round038_dm_read_prepare(
+		struct swapz_dm *ctx,
+		const struct swapz_round031_dm_sidecar *sidecar,
+		const struct swapz_round036_dm_mock_publication *publication,
+		const struct swapz_round032_dm_owned_view_v1 *current_source,
+		const struct swapz_round038_dm_read_record *record,
+		swapz_u32 current_extent_sequence, swapz_u64 ticket,
+		struct swapz_round038_dm_read_mailbox *mailbox)
+{
+	unsigned long flags;
+	int error;
+
+	if (!mailbox || !mailbox->initialized || !record || !ticket)
+		return -EINVAL;
+	if (!ctx)
+		return -EINVAL;
+	lockdep_assert_held(&ctx->ordered_owner);
+	spin_lock_irqsave(&mailbox->callback_lock, flags);
+	if (mailbox->callback_references || ticket <= mailbox->ticket ||
+	    (mailbox->phase != SWAPZ_ROUND038_READ_EMPTY &&
+	     mailbox->phase != SWAPZ_ROUND038_READ_CANCELLED &&
+	     mailbox->phase != SWAPZ_ROUND038_READ_EXPIRED &&
+	     mailbox->phase != SWAPZ_ROUND038_MOCK_READ_BUFFER_PUBLISHED)) {
+		spin_unlock_irqrestore(&mailbox->callback_lock, flags);
+		return -EBUSY;
+	}
+	mailbox->ticket = ticket;
+	mailbox->phase = SWAPZ_ROUND038_READ_PREPARED;
+	spin_unlock_irqrestore(&mailbox->callback_lock, flags);
+	swapz_round038_dm_read_scrub(mailbox);
+	error = swapz_round038_dm_read_revalidate(
+		ctx, sidecar, publication, current_source, record,
+		current_extent_sequence);
+	if (!error)
+		mailbox->record = *record;
+	spin_lock_irqsave(&mailbox->callback_lock, flags);
+	if (error)
+		mailbox->phase = SWAPZ_ROUND038_READ_EXPIRED;
+	spin_unlock_irqrestore(&mailbox->callback_lock, flags);
+	return error;
+}
+
+static __used noinline int swapz_round038_dm_read_submit(
+		struct swapz_dm *ctx,
+		const struct swapz_round031_dm_sidecar *sidecar,
+		const struct swapz_round036_dm_mock_publication *publication,
+		const struct swapz_round032_dm_owned_view_v1 *current_source,
+		swapz_u32 current_extent_sequence, swapz_u64 ticket,
+		struct swapz_round038_dm_read_mailbox *mailbox)
+{
+	unsigned long flags;
+	int error;
+
+	if (!ctx || !mailbox || !mailbox->initialized)
+		return -EINVAL;
+	lockdep_assert_held(&ctx->ordered_owner);
+	spin_lock_irqsave(&mailbox->callback_lock, flags);
+	if (mailbox->phase != SWAPZ_ROUND038_READ_PREPARED ||
+	    mailbox->ticket != ticket || mailbox->callback_references) {
+		spin_unlock_irqrestore(&mailbox->callback_lock, flags);
+		return -ESTALE;
+	}
+	error = swapz_round038_dm_read_revalidate(
+		ctx, sidecar, publication, current_source, &mailbox->record,
+		current_extent_sequence);
+	if (!error) {
+		mailbox->callback_references = 1U;
+		mailbox->phase = SWAPZ_ROUND038_FAKE_LOWER_READ_IN_FLIGHT;
+	}
+	spin_unlock_irqrestore(&mailbox->callback_lock, flags);
+	return error;
+}
+
+/*
+ * Independently scheduled MOCK lower READ callback, NO ctx or other
+ * revocable source pointer. Fake input image is owned by the test driver
+ * through the call; read_image is an independent deep copy. A positive
+ * lower error, a short/split read or an undersized image always fails.
+ */
+static __used noinline int swapz_round038_dm_read_fake_callback(
+		struct swapz_round038_dm_read_mailbox *mailbox,
+		swapz_u64 ticket, int lower_error, swapz_u32 completed_bytes,
+		const swapz_u8 *fake_lower_image, swapz_u32 image_capacity)
+{
+	unsigned long flags;
+	swapz_u32 extent_bytes;
+	int error = 0;
+
+	if (!mailbox || !mailbox->initialized)
+		return -EINVAL;
+	spin_lock_irqsave(&mailbox->callback_lock, flags);
+	if (mailbox->ticket != ticket || !mailbox->callback_references) {
+		error = -ESTALE;
+		goto unlock;
+	}
+	mailbox->callback_references = 0U;
+	if (mailbox->phase == SWAPZ_ROUND038_READ_CANCELLED) {
+		mailbox->phase = SWAPZ_ROUND038_READ_EXPIRED;
+		error = -ESTALE;
+		goto unlock;
+	}
+	if (mailbox->phase != SWAPZ_ROUND038_FAKE_LOWER_READ_IN_FLIGHT) {
+		error = -ESTALE;
+		goto unlock;
+	}
+	extent_bytes = mailbox->record.extent_bytes;
+	if (lower_error || !fake_lower_image ||
+	    completed_bytes != extent_bytes || image_capacity < extent_bytes) {
+		mailbox->phase = SWAPZ_ROUND038_FAKE_READ_ERROR;
+		error = -EIO;
+		goto unlock;
+	}
+	memcpy(mailbox->fake_lower_image, fake_lower_image, extent_bytes);
+	mailbox->phase = SWAPZ_ROUND038_FAKE_READ_OK;
+unlock:
+	spin_unlock_irqrestore(&mailbox->callback_lock, flags);
+	return error;
+}
+
+/* Private readback validation operates on EXACT actual production C helpers.
+ * No caller output is touched, including on a partial decoder result.
+ */
+static __used noinline int swapz_round038_dm_read_verify_private(
+		struct swapz_round038_dm_read_mailbox *mailbox)
+{
+	const struct swapz_round038_dm_read_record *record = &mailbox->record;
+	swapz_u8 calculated_sha256[32] = {};
+	swapz_u32 index, payload_end;
+	int decoded_length;
+	int error = -EBADMSG;
+
+	if (mailbox->phase != SWAPZ_ROUND038_GC_OWNER_REVALIDATED)
+		return -ESTALE;
+	if (record->payload_offset > record->extent_bytes ||
+	    record->source.compressed_length == 0U ||
+	    record->source.compressed_length > SWAPZ_MAX_COMPRESSED ||
+	    record->source.compressed_length >
+		    record->extent_bytes - record->payload_offset)
+		goto reject;
+	payload_end = record->payload_offset + record->source.compressed_length;
+	for (index = 0U; index < record->extent_bytes; ++index)
+		if ((index < record->payload_offset || index >= payload_end) &&
+		    mailbox->fake_lower_image[index])
+			goto reject;
+	if (swapz_crc32c_bytes(
+		    mailbox->fake_lower_image + record->payload_offset,
+		    record->source.compressed_length) !=
+	    record->source.compressed_crc32c)
+		goto reject;
+	decoded_length = LZ4_decompress_safe(
+		(const char *)mailbox->fake_lower_image + record->payload_offset,
+		(char *)mailbox->decoded_original,
+		(int)record->source.compressed_length, (int)SWAPZ_BLOCK_BYTES);
+	if (decoded_length != (int)SWAPZ_BLOCK_BYTES ||
+	    swapz_zswap_import_sha256(mailbox->decoded_original,
+				     calculated_sha256) ||
+	    memcmp(calculated_sha256, record->source.original_sha256,
+		   sizeof(calculated_sha256)))
+		goto reject;
+	memcpy(mailbox->verified_original, mailbox->decoded_original,
+	       SWAPZ_BLOCK_BYTES);
+	error = 0;
+reject:
+	memzero_explicit(calculated_sha256, sizeof(calculated_sha256));
+	memzero_explicit(mailbox->decoded_original, sizeof(mailbox->decoded_original));
+	return error;
+}
+
+/*
+ * ordered_owner fences every map/GC/source/sidecar mutation between the
+ * second revalidation and the single mock 4096-byte destination copy.
+ * A stale owner or corrupted lower byte NEVER changes caller's output.
+ */
+static __used noinline int swapz_round038_dm_read_finish(
+		struct swapz_dm *ctx,
+		const struct swapz_round031_dm_sidecar *sidecar,
+		const struct swapz_round036_dm_mock_publication *publication,
+		const struct swapz_round032_dm_owned_view_v1 *current_source,
+		swapz_u32 current_extent_sequence, swapz_u64 ticket,
+		swapz_u8 *mock_upper_read_destination,
+		struct swapz_round038_dm_read_mailbox *mailbox)
+{
+	unsigned long flags;
+	int error;
+
+	if (!ctx || !mock_upper_read_destination || !mailbox ||
+	    !mailbox->initialized)
+		return -EINVAL;
+	lockdep_assert_held(&ctx->ordered_owner);
+	spin_lock_irqsave(&mailbox->callback_lock, flags);
+	if (mailbox->ticket != ticket || mailbox->callback_references ||
+	    (mailbox->phase != SWAPZ_ROUND038_FAKE_READ_OK &&
+	     mailbox->phase != SWAPZ_ROUND038_FAKE_READ_ERROR)) {
+		spin_unlock_irqrestore(&mailbox->callback_lock, flags);
+		return -ESTALE;
+	}
+	if (mailbox->phase == SWAPZ_ROUND038_FAKE_READ_ERROR) {
+		mailbox->phase = SWAPZ_ROUND038_READ_EXPIRED;
+		spin_unlock_irqrestore(&mailbox->callback_lock, flags);
+		swapz_round038_dm_read_scrub(mailbox);
+		return -EIO;
+	}
+	mailbox->phase = SWAPZ_ROUND038_GC_OWNER_REVALIDATING;
+	spin_unlock_irqrestore(&mailbox->callback_lock, flags);
+	error = swapz_round038_dm_read_revalidate(
+		ctx, sidecar, publication, current_source, &mailbox->record,
+		current_extent_sequence);
+	if (!error) {
+		mailbox->phase = SWAPZ_ROUND038_GC_OWNER_REVALIDATED;
+		error = swapz_round038_dm_read_verify_private(mailbox);
+	}
+	if (!error) {
+		mailbox->phase = SWAPZ_ROUND038_ORIGINAL_4096_HASH_VERIFIED;
+		error = swapz_round038_dm_read_revalidate(
+			ctx, sidecar, publication, current_source,
+			&mailbox->record, current_extent_sequence);
+	}
+	if (!error) {
+		/* The only publication is to a caller-supplied mock buffer. */
+		memcpy(mock_upper_read_destination, mailbox->verified_original,
+		       SWAPZ_BLOCK_BYTES);
+		mailbox->phase = SWAPZ_ROUND038_MOCK_READ_BUFFER_PUBLISHED;
+	} else {
+		mailbox->phase = SWAPZ_ROUND038_READ_EXPIRED;
+	}
+	swapz_round038_dm_read_scrub(mailbox);
+	return error;
+}
+
+/*
+ * Caller cancels under ordered_owner while ctx is still alive, then can
+ * destroy ctx independently; the callback only sees the mailbox tombstone.
+ * Never free the mailbox until the outstanding callback ref drains.
+ */
+static __used noinline int swapz_round038_dm_read_cancel(
+		struct swapz_dm *ctx, swapz_u64 ticket,
+		struct swapz_round038_dm_read_mailbox *mailbox)
+{
+	unsigned long flags;
+
+	if (!ctx || !mailbox || !mailbox->initialized)
+		return -EINVAL;
+	lockdep_assert_held(&ctx->ordered_owner);
+	spin_lock_irqsave(&mailbox->callback_lock, flags);
+	if (mailbox->ticket != ticket ||
+	    mailbox->phase == SWAPZ_ROUND038_MOCK_READ_BUFFER_PUBLISHED ||
+	    mailbox->phase == SWAPZ_ROUND038_READ_EXPIRED ||
+	    mailbox->phase == SWAPZ_ROUND038_READ_CANCELLED ||
+	    mailbox->phase == SWAPZ_ROUND038_READ_EMPTY) {
+		spin_unlock_irqrestore(&mailbox->callback_lock, flags);
+		return -ESTALE;
+	}
+	mailbox->cancellation_epoch++;
+	mailbox->phase = SWAPZ_ROUND038_READ_CANCELLED;
+	spin_unlock_irqrestore(&mailbox->callback_lock, flags);
+	swapz_round038_dm_read_scrub(mailbox);
+	return 0;
+}
+/* ROUND038_DM_ASYNC_READ_GC_EXACT_END */
+#endif /* SWAPZ_ROUND038_DM_ASYNC_READ_GC_TEST */
 #endif /* SWAPZ_ROUND037_DM_ASYNC_LOWER_LIFETIME_TEST */
 #endif /* SWAPZ_ROUND036_DM_TRANSACTION_PHASE_TEST */
 
