@@ -4793,6 +4793,250 @@ static __used noinline int swapz_round034_dm_try_authenticate_source_slot(
 
 
 /*
+ * Round035 CI-ONLY source-owned LZ4 -> existing payload-only lower staging,
+ * ordered COW map/sidecar, lower READ and full 4096 STORE SHA round-trip.
+ * The caller pins the original BIO and holds ordered_owner for this entire
+ * synchronous test. Eight disjoint caller-owned buffers avoid stack-sized
+ * payloads; no pointer survives their caller-controlled lifetime.
+ *
+ * The original MM active swap-area/bdev/sector/allocator-epoch bridge is NOT
+ * exported to this module. The original source slot is decoded mechanically,
+ * never authenticated. No ordinary ->map, device or upper bio_endio callsite.
+ * The Round031 ACK is strictly hypothetical, not an actual durable ACK.
+ */
+#if defined(SWAPZ_ROUND035_DM_LZ4_LOWER_ROUNDTRIP_TEST) && \
+    defined(SWAPZ_ROUND034_DM_SOURCE_SLOT_AUTHORITY_TEST) && \
+    defined(SWAPZ_ROUND033_DM_ORIGINAL_BIO_GPL_LINK_TEST) && \
+    defined(SWAPZ_ROUND032_DM_LZ4_VIEW_VALIDATE_TEST) && \
+    defined(SWAPZ_ROUND031_DM_LZ4_SIDECAR_TEST) && \
+    defined(SWAPZ_ROUND030_DM_COMPRESSED_COMMIT_TEST) && \
+    defined(SWAPZ_ROUND028_DM_OWNED_READBACK_TEST) && \
+    defined(SWAPZ_ROUND024_DM_IMPORT_KBUILD_PROBE) && \
+    defined(SWAPZ_ROUND032_BIO_COPY_VIEW_CI_ONLY) && \
+    defined(SWAPZ_ROUND031_MM_BIO_SOURCE) && \
+    defined(SWAPZ_ROUND030_EVICTION_SNAPSHOT_SOURCE) && \
+    defined(SWAPZ_ROUND028_SLOT_EPOCH_SOURCE) && \
+    defined(SWAPZ_ROUND025_SIDEBAND_CI_ONLY)
+/* ROUND035_DM_OWNED_LOWER_EXACT_START */
+static __used noinline int swapz_round035_dm_owned_lz4_lower_roundtrip(
+		struct swapz_dm *ctx, const struct bio *source_bio,
+		struct swapz_round031_dm_sidecar *sidecar,
+		struct swapz_zswap_admission_transaction *transaction,
+		swapz_u64 expected_source_swap_entry,
+		swapz_u8 *owned_source, swapz_u8 *provider_scratch,
+		swapz_u8 *lower_stage, swapz_u8 *lower_readback,
+		swapz_u8 *decode_scratch, swapz_u8 *verified_page,
+		swapz_u8 *candidate_page, swapz_u8 *upper_output,
+		swapz_u32 lower_capacity, swapz_u64 *result_owner_token)
+{
+	struct swapz_round032_dm_owned_view_v1 view = {};
+	struct bio_vec source_vector;
+	swp_entry_t source_entry, roundtrip_entry;
+	const void *buffers[8] = {
+		owned_source, provider_scratch, lower_stage, lower_readback,
+		decode_scratch, verified_page, candidate_page, upper_output
+	};
+	const swapz_u32 sizes[8] = {
+		SWAPZ_MAX_COMPRESSED, SWAPZ_MAX_COMPRESSED,
+		lower_capacity, lower_capacity, SWAPZ_BLOCK_BYTES,
+		SWAPZ_BLOCK_BYTES, SWAPZ_BLOCK_BYTES, SWAPZ_BLOCK_BYTES
+	};
+	sector_t source_sector;
+	swapz_u64 owner_token = 0;
+	swapz_u32 index, payload_end;
+	unsigned int first, second, original_type;
+	pgoff_t original_offset;
+	bool staged = false;
+	int error = -EINVAL;
+
+	if (!ctx || !ctx->target || !source_bio || !sidecar ||
+	    !transaction || !expected_source_swap_entry ||
+	    !result_owner_token)
+		return -EINVAL;
+	for (first = 0; first < 8U; ++first) {
+		if (!buffers[first])
+			return -EINVAL;
+		for (second = first + 1U; second < 8U; ++second)
+			if (swapz_zswap_import_ranges_overlap(
+				    buffers[first], sizes[first],
+				    buffers[second], sizes[second]))
+				return -EINVAL;
+	}
+	if (transaction->physical_extent_bytes != lower_capacity ||
+	    (lower_capacity != SWAPZ_BLOCK_BYTES &&
+	     lower_capacity != 2U * SWAPZ_BLOCK_BYTES &&
+	     lower_capacity != 4U * SWAPZ_BLOCK_BYTES))
+		return -EMSGSIZE;
+	if (sidecar->slots &&
+	    (sidecar->allocated_bytes > (size_t)~(swapz_u32)0 ||
+	     swapz_zswap_import_ranges_overlap(
+		     upper_output, SWAPZ_BLOCK_BYTES, sidecar->slots,
+		     (swapz_u32)sidecar->allocated_bytes)))
+		return -EINVAL;
+	lockdep_assert_held(&ctx->ordered_owner);
+	if (swapz_zswap_admission_try_live(NULL) != -EOPNOTSUPP)
+		return -EPERM;
+	if (!ctx->accepting || smp_load_acquire(&ctx->failed) ||
+	    !ctx->maps || ctx->authority.maps != ctx->maps ||
+	    ctx->gc_recovery.active || ctx->authority.gc_allocation ||
+	    ctx->authority.batch_pending || ctx->authority.batch_replaying ||
+	    ctx->authority.in_flight || sidecar->closed || !sidecar->slots ||
+	    sidecar->capacity != ctx->authority.logical_pages ||
+	    transaction->phase != SWAPZ_ZSWAP_ADMISSION_PREPARED ||
+	    transaction->teardown_started || transaction->upper_write_ack_count ||
+	    transaction->owned_compressed_bytes != owned_source ||
+	    transaction->payload_capacity < SWAPZ_MAX_COMPRESSED) {
+		error = -ESTALE;
+		goto clear_private;
+	}
+	/* Original page_io.c uses one prepopulated vector and bi_vcnt==0.
+	 * Source BIO provenance is still insufficient to authenticate MM.
+	 */
+	if (bio_op(source_bio) != REQ_OP_WRITE ||
+	    !(source_bio->bi_opf & REQ_SWAP) ||
+	    (source_bio->bi_opf & REQ_PREFLUSH) ||
+	    source_bio->bi_swap_origin !=
+		    SWAP_BIO_ORIGIN_ZSWAP_STORED_WRITEBACK ||
+	    source_bio->bi_iter.bi_size != SWAPZ_BLOCK_BYTES ||
+	    bio_sectors(source_bio) != SWAPZ_SECTORS ||
+	    source_bio->bi_iter.bi_idx || source_bio->bi_iter.bi_offset ||
+	    source_bio->bi_vcnt || !source_bio->bi_io_vec ||
+	    !source_bio->bi_bdev) {
+		error = -EOPNOTSUPP;
+		goto clear_private;
+	}
+	source_vector = bio_iter_iovec(source_bio, source_bio->bi_iter);
+	if (!source_vector.bv_page || source_vector.bv_offset ||
+	    source_vector.bv_len != SWAPZ_BLOCK_BYTES) {
+		error = -EOPNOTSUPP;
+		goto clear_private;
+	}
+	source_sector = source_bio->bi_iter.bi_sector;
+	if (source_sector % SWAPZ_SECTORS ||
+	    source_sector >= ctx->target->len ||
+	    SWAPZ_SECTORS > ctx->target->len - source_sector ||
+	    source_sector / SWAPZ_SECTORS == 0 ||
+	    source_sector / SWAPZ_SECTORS >= ctx->authority.logical_pages ||
+	    source_sector / SWAPZ_SECTORS !=
+		    transaction->record.logical_page) {
+		error = -ERANGE;
+		goto clear_private;
+	}
+	BUILD_BUG_ON(sizeof(source_entry.val) != sizeof(view.source_swap_entry));
+	source_entry.val = expected_source_swap_entry;
+	original_type = swp_type(source_entry);
+	original_offset = swp_offset(source_entry);
+	roundtrip_entry = swp_entry(original_type, original_offset);
+	if (original_type >= MAX_SWAPFILES || !original_offset ||
+	    roundtrip_entry.val != source_entry.val) {
+		error = -EOPNOTSUPP;
+		goto clear_private;
+	}
+	/* Never infer the DM-relative page from original swp_offset(). */
+	error = swapz_round033_dm_copy_original_bio_v1_for_link(
+		source_bio, &view, owned_source, SWAPZ_MAX_COMPRESSED,
+		provider_scratch, SWAPZ_MAX_COMPRESSED);
+	if (error)
+		goto clear_private;
+	if (view.source_swap_entry != expected_source_swap_entry ||
+	    view.source_slot_epoch != transaction->record.store_generation ||
+	    view.stored_entry_identity !=
+		    transaction->record.stored_entry_identity ||
+	    view.compressed_crc32c != transaction->record.compressed_crc32c ||
+	    view.compressed_length != transaction->record.compressed_length ||
+	    view.decoded_length != SWAPZ_BLOCK_BYTES ||
+	    view.representation_version != SWAPZ_ZSWAP_IMPORT_VERSION ||
+	    view.codec != SWAPZ_ZSWAP_IMPORT_LZ4_CODEC ||
+	    memcmp(view.original_sha256,
+		   transaction->record.original_sha256, sizeof(view.original_sha256))) {
+		error = -ESTALE;
+		goto clear_private;
+	}
+	/* Genuine existing production C stages byte-only 4/8/16KiB extents.
+	 * The test's lower adapter binds only a bounded fake post-header image.
+	 */
+	error = swapz_round031_dm_commit_with_sidecar(
+		ctx, sidecar, transaction, view.source_swap_entry,
+		owned_source, SWAPZ_MAX_COMPRESSED, lower_stage, lower_capacity,
+		true, &owner_token);
+	if (error)
+		goto clear_private;
+	staged = true;
+	if (!owner_token || transaction->upper_write_ack_count != 1U ||
+	    transaction->phase != SWAPZ_ZSWAP_ADMISSION_ACKED ||
+	    !sidecar->slots[transaction->record.logical_page].owner_token) {
+		error = -ESTALE;
+		goto invalidate;
+	}
+	error = swapz_round031_dm_read_with_sidecar(
+		ctx, sidecar, transaction,
+		(swapz_u32)transaction->record.logical_page, owner_token,
+		lower_readback, lower_capacity, decode_scratch, verified_page,
+		candidate_page);
+	if (error)
+		goto invalidate;
+	/* CRC32C and the independent STORE SHA were checked inside actual
+	 * Round028/031 production READ before candidate_page became readable.
+	 * Padding MUST be deterministic even if payload SHA still passes.
+	 */
+	payload_end = transaction->compressed_payload_offset +
+		      transaction->record.compressed_length;
+	if (payload_end > lower_capacity ||
+	    memcmp(lower_stage, lower_readback, lower_capacity)) {
+		error = -EBADMSG;
+		goto invalidate;
+	}
+	for (index = 0; index < lower_capacity; ++index) {
+		if (index >= transaction->compressed_payload_offset &&
+		    index < payload_end)
+			continue;
+		if (lower_stage[index] || lower_readback[index]) {
+			error = -EBADMSG;
+			goto invalidate;
+		}
+	}
+	if (sidecar->closed || ctx->gc_recovery.active ||
+	    ctx->authority.gc_allocation ||
+	    sidecar->slots[transaction->record.logical_page].owner_token !=
+		    owner_token) {
+		error = -ESTALE;
+		goto invalidate;
+	}
+	/* FIRST externally visible success: no fallible operations remain. */
+	memcpy(upper_output, candidate_page, SWAPZ_BLOCK_BYTES);
+	*result_owner_token = owner_token;
+	error = 0;
+	goto clear_private;
+
+invalidate:
+	/* Physical media is NEVER rolled back/recycled here; this only
+	 * retires a CI-only volatile owner after failed post-stage proof.
+	 */
+	if (staged) {
+		(void)swapz_round031_dm_forget_on_abort(
+			ctx, sidecar, (swapz_u32)transaction->record.logical_page,
+			owner_token);
+		swapz_zswap_admission_invalidate(transaction);
+	}
+clear_private:
+	/* On success too: only independent verified upper bytes survive.
+	 * Never retain a pointer to caller's previously-stored compressed data.
+	 */
+	memzero_explicit(owned_source, SWAPZ_MAX_COMPRESSED);
+	memzero_explicit(provider_scratch, SWAPZ_MAX_COMPRESSED);
+	memzero_explicit(lower_stage, lower_capacity);
+	memzero_explicit(lower_readback, lower_capacity);
+	memzero_explicit(decode_scratch, SWAPZ_BLOCK_BYTES);
+	memzero_explicit(verified_page, SWAPZ_BLOCK_BYTES);
+	memzero_explicit(candidate_page, SWAPZ_BLOCK_BYTES);
+	return error;
+}
+/* ROUND035_DM_OWNED_LOWER_EXACT_END */
+#endif /* SWAPZ_ROUND035_DM_LZ4_LOWER_ROUNDTRIP_TEST */
+
+
+
+/*
  * ID29: media reclamation is allowed only after serialized authority has
  * already proven an entire 1MiB segment non-authoritative. DISCARD never
  * creates deadness. Unsupported/media failures are diagnostic and nonfatal;

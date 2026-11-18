@@ -15495,3 +15495,69 @@ The actual original Linux `mm/page_io.c` receives an **additional** KUnit suite 
 A second independent full original x86 Kbuild job must verify the full source-to-source ten-manifest, then produce **both** `CONFIG_ZSWAP=y` and `CONFIG_ZSWAP=n` real original `vmlinux`, `modules`, `Module.symvers`, strict GPL export raw `Module.symvers` validation, independent original header-including standalone GPL importer `round032-bio-probe.ko` via strict true same-kernel modpost, and matching original-release `dm-swapz.ko` with `vermagic`; no fake `KBUILD_MODPOST_WARN`. Verify absent new symbols in default original BIO+MM object and present real generated source machine code under all seven flags, both profiles; original strict warnings fail with first actual error. Include exact CI run URLs/jobs, sources, source SHA and first genuine failure in Agent2's Round035 evidence before `REPORT_READY`. A queued job, timed-out build, locally simulated verifier sample or prior-round success cannot qualify current source.
 
 Do not overwrite physical SWAPSPACE2 signature/header/UUID/partition table (entire original first 4096 protected bytes), do not call privileged source or host tests or load original kernel/module, no real physical backing null_blk/mapper/swapon/mkswap, swapfile pressure, or owner hardware. Zswap alone owns bounded compressed RAM and actual memory-pressure eviction; swapz is solely disk SWAPSPACE2 tier with existing 4/8/16KiB post-header extent zero padding and volatile descriptors. Existing `RAW_4096` means exactly **4096 original UNCOMPRESSED bytes**, never a stored LZ4 alias. Future genuine privately owned stored dictionary-free LZ4 may reuse only RAW lower-I/O mechanical staging after independently authenticated current source type/offset/epoch and bdev→DM target mapping, GC generation, true durable lower completion and verified full original 4096 SHA on lower read. Until this is really demonstrated: `PHASE_A=BLOCKED`, `FORCED_RAW_BYPASS=DISABLED`, `DIRECT_COMPRESSED_HANDOFF=NO_GO_DISABLED`, `SOURCE_MAPPED_AUTHENTICATED=0`, `ORIGINAL_MM_PRESSURE_EVICTION=NOT_RUN`, `LOADED_PRODUCTION=NOT_RUN`, `PHYSICAL_SWAPSPACE2=NOT_RUN`.
+
+## Round035 Agent3 — source-owned original LZ4 fake lower readback, 4096 SHA and strict original-kernel CI (2026-11-18)
+
+This uniquely headed substantive testing standard accompanies the SAME commit that
+changes src/kernel/dm-target.c and introduces phase-a-zswap-owned-lz4-lower-roundtrip.yml.
+Preserve all preceding canonical standards bytes without removal/truncation, including
+the independent Agent2 append if present. Every later source/workflow commit requires
+its own substantive new applicable same-commit standards delta. Preserve historical
+Round034 workflow-only policy FAILED, never weaken policy or rewrite old history.
+
+Run python3 -B tests/tools/round035-dm-lower-verify.py host-test with GCC and
+Clang -Wall -Wextra -Wconversion -Wshadow -Werror and ASan/UBSan, with fail-only
+first compiler/sanitizer error. Extract EXACT existing production C sections:
+Round026 read authority snapshot, Round028 owned byte staging and lower readback,
+Round030 authoritative COW stage/lower write/map publish, Round031 per-page
+volatile LZ4 sidecar/owner token, Round033 original GPL BIO owned source copy,
+and new Round035 nested guarded source. Host substitutes only original BIO
+provider and bounded fake lower media/authority callback. A parallel host-only
+codec, staged algorithm, or decoder never qualifies actual production C.
+
+Verify caller-owned previously stored dictionary-free original LZ4 1..3568
+bytes traverses the existing RAW LOWER-I/O machinery WITHOUT becoming RAW_4096:
+tag new representation only in bounded volatile source-LZ4 sidecar, use 4/8/16KiB
+extent stage with deterministic zero padding, and physically copy bytes to a
+bounded fake image strictly after protected first SWAPSPACE2 4096. Read back
+through the actual production lower read path, decompress exactly original
+4096 and check independent original-at-STORE SHA256 of ALL 4096; compressed
+CRC32C alone is not plaintext integrity. Assert entire first header page,
+SWAPSPACE2 UUID/signature and image boundaries remain untouched.
+
+Test unsupported codec/version, zero/too-large compressed length, bad CRC32C,
+bad original STORE SHA, altered source type with SAME offset, invalid/non-current
+slot epoch or stored entry ID, invalid packed entry, original prepopulated
+BIO bvec bi_vcnt=0 versus synthetic, wrong REQ_SWAP/WRITE or sectors/header0,
+short/failing lower READ, alias/overlap, GC active/relocation/extent sequence,
+old owner token and ABA, teardown/swapoff, invalidated slot, duplicate
+hypothetical ACK and wrong representation RAW mislabel. Failures must leave
+external output bytes and owner result token unchanged and scrub private
+copied LZ4 and decode scratch before returning. Caller pins original BIO
+and owns independent bounded memory until synchronously finished. Caller
+must hold ordered_owner across source copy, lower stage, fake I/O, read
+and final GC/ownership snapshot; no concurrent teardown may reclaim it.
+Post-lower errors retire only the CI sidecar, never unquarantine committed
+or uncertain media extents, never call bio_endio or claim durable ACK.
+
+Fresh independent hosted workflow stages pristine exact upstream Linux
+torvalds/linux@c339f4010dea8b0d754f84ace70cd1b089878ef8 via the
+unmodified ten-file composed stager with byte-checked exact Git SHA manifest.
+Build genuine CONFIG_ZSWAP=y original kernel full vmlinux/modules/Module.symvers
+and the identical-source default and all-guard dm-swapz.ko modules under
+W=1/-Werror, GPL vmlinux original provider export resolved with strict modpost,
+ELF/vermagic verified, guarded symbol present and absent in default.
+Separately report exact-source original y/n, booted UML KUnit 17/17,
+x86/ARM default module jobs with actual execution; do not substitute
+historical success. Execute repository-policy-test.py --enforce at the
+exact new SHA, report CI job IDs/conclusions, first real failures,
+parent/changed paths and issue #152 REPORT_READY.
+
+Even a real kernel modpost and synthetic host round-trip cannot authenticate
+the CURRENT original MM swap area/bdev/sector and nonlinear swapfile
+translation or current allocator incarnation. SOURCE_MAPPED_AUTHENTICATED=0;
+live ingress is unconditional -EOPNOTSUPP. Original zswap alone manages
+bounded compressed RAM and actual memory-pressure eviction; swapz only
+SWAPSPACE2 disk packing/GC. Original RAW always uncompressed full 4096;
+no new on-media fields, no real physical header writes, no privileged/loaded
+production tests, Phase A BLOCKED, forced RAW DISABLED, compressed handoff NO_GO.
