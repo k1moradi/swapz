@@ -400,5 +400,101 @@ class OriginalMMAndBIOComposer(unittest.TestCase):
         self.compile_and_run(template, label="round035-route", libraries=())
 
 
+    def test_round036_real_original_route_lifetime_guard_and_anchor(self):
+        self.assertEqual(stage.ROUND036_LIFETIME_MACRO,
+                         "SWAPZ_ROUND036_ORIGINAL_ROUTE_LIFETIME_TEST")
+        self.assertEqual(len(stage.ROUND036_LIFETIME_FLAGS), 8)
+        source = stage.ROUND036_LIFETIME_C
+        for prerequisite in stage.ROUND036_LIFETIME_FLAGS:
+            self.assertIn("defined(" + prerequisite + ")", source)
+        self.assertIn("IS_ENABLED(CONFIG_KUNIT)", source)
+        for required in (
+            "swapz_round028_slot_epoch(original_slot)",
+            "get_swap_device(original_slot)",
+            "put_swap_device(active)",
+            "swap_folio_sector(folio)",
+            "swapz_round035_bio_owner_matches",
+            "folio_test_locked(folio)",
+            "swapz_round036_route_lifetime_check",
+            "source_bio->bi_vcnt",
+            "(1U << BIO_CLONED)",
+            "return -EOPNOTSUPP; /* NO AUTHORITY",
+            "kunit_test_suite(swapz_round036_lifetime_suite);",
+        ):
+            self.assertIn(required, source)
+        for forbidden in (
+            "EXPORT_SYMBOL", "bio_endio(", "submit_bio(", "swapz_map(",
+            "SOURCE_MAPPED_AUTHENTICATED=1", "swapz_lower_write",
+        ):
+            self.assertNotIn(forbidden, source)
+        new_cases = (
+            "slot_epoch_aba", "swapoff_area_reuse", "nonlinear_sector",
+            "target_gc_race", "bio_clone_split_unlock",
+            "no_lease_double_release",
+        )
+        for name in new_cases:
+            self.assertEqual(source.count(
+                "KUNIT_CASE(swapz_round036_" + name + "_kunit)"), 1)
+        self.assertEqual(len(new_cases), 6)
+        self.assertIn("if (bio->bi_swapz_ci_sideband)",
+                      stage.ROUND036_LIFETIME_HOOK)
+        # Original 035 registered suite remains unchanged (21 old cases).
+        self.assertIn("kunit_test_suite(swapz_round035_route_suite);",
+                      stage.ROUND035_ROUTE_MM)
+        base = (stage.ROUND035_ROUTE_MM +
+                "\nstatic void swap_bdev_submit_write(struct swap_io_ctx *ctx)\n" +
+                stage.ROUND035_ROUTE_HOOK)
+        rendered = stage.apply_round036_original_lifetime(
+            "mm/page_io.c", base)
+        self.assertIn("ROUND036_ORIGINAL_MM_LIFETIME_C_BEGIN", rendered)
+        self.assertIn("swapz_round035_route_suite", rendered)
+        self.assertIn("swapz_round036_original_lifetime_probe(", rendered)
+        with self.assertRaisesRegex(
+                stage.SourceCompositionError,
+                "COMPOSE_CONFLICT:mm/page_io.c"):
+            stage.apply_round036_original_lifetime("mm/page_io.c", rendered)
+        self.assertEqual(stage.apply_round036_original_lifetime(
+            "mm/swapfile.c", "original"), "original")
+
+    def test_round036_exact_original_route_lifetime_host_werror_sanitizers(self):
+        # Compile/execute ACTUAL extracted original MM C helper under both
+        # compilers; only bounded host structs are fake, never MM authority.
+        source = stage.ROUND036_LIFETIME_C
+        beginning = "struct swapz_round036_route_lifetime {"
+        ending = "\n/*\n * Called at the ACTUAL original swap_bdev_submit_write()"
+        self.assertEqual(source.count(beginning), 1)
+        self.assertEqual(source.count(ending), 1)
+        extracted = beginning + source.split(beginning, 1)[1].split(
+            ending, 1)[0]
+        template = (FIXTURES / "round036-original-route-lifetime-host.c").read_text()
+        marker = "/* ROUND036_REAL_ORIGINAL_SOURCE_LIFETIME_STRUCT_AND_HELPER */"
+        self.assertEqual(template.count(marker), 1)
+        self.assertIn("return -EOPNOTSUPP;", extracted)
+        self.compile_and_run(template.replace(marker, extracted, 1),
+                             label="round036-original-route", libraries=())
+
+    def test_round036_original_completion_and_ref_scope_unchanged(self):
+        # Inspect actual unchanged original mm/page_io.c completion and
+        # zswap_writeback_entry lifetimes, not only a mock state enum.
+        original_source = stage.ORIGIN
+        self.assertEqual(stage.PINNED_SHA, original_source.LINUX_COMMIT)
+        self.assertIn("bio_uninit()", stage.ROUND036_LIFETIME_C)
+        upstream = os.environ.get("ROUND031_PINNED_LINUX")
+        if upstream:
+            actual = (Path(upstream) / "mm/page_io.c").read_text()
+            done = actual.split("static void end_swap_bio_write(", 1)[1].split(
+                "static void swap_read_end(", 1)[0]
+            self.assertLess(done.index("bio_uninit(bio);"),
+                            done.index("swap_write_end(sio, failed);"))
+            dispatch = actual.split("void __swap_writeout(", 1)[1].split(
+                "static int swap_zeromap_batch(", 1)[0]
+            self.assertLess(dispatch.index("folio_unlock(folio);"),
+                            dispatch.index("swap_add_folio(ctx, folio, WRITE);"))
+        self.assertIn("folio_end_writeback()", stage.ROUND036_LIFETIME_C)
+        self.assertIn("get_swap_device()/put_swap_device()",
+                      stage.ROUND036_LIFETIME_C)
+        self.assertIn("original swap allocation epoch lookup", stage.ROUND036_LIFETIME_C)
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)
