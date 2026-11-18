@@ -2376,6 +2376,24 @@ def apply_round038_original_store(path: str, composed: str) -> str:
     """Guard the authentic original STORE producer and writeback observer."""
     if path != "mm/zswap.c":
         return composed
+    # crc32c is called inside ORIGINAL zswap_compress(), before the older
+    # Round030 snapshot source's later local include. Declare it up front.
+    composed = replace_once(composed,
+        "#include <linux/zsmalloc.h>\n",
+        "#include <linux/zsmalloc.h>\n" + """#if defined(SWAPZ_ROUND038_ORIGINAL_STORE_PROVENANCE_TEST) && \\
+    defined(SWAPZ_ROUND037_ORIGINAL_MM_LIFETIME_OWNER_TEST) && \\
+    defined(SWAPZ_ROUND036_ORIGINAL_ROUTE_LIFETIME_TEST) && \\
+    defined(SWAPZ_ROUND035_ORIGINAL_MM_ROUTE_WITNESS_TEST) && \\
+    defined(SWAPZ_ROUND034_ORIGINAL_V1_KUNIT_TEST) && \\
+    defined(SWAPZ_ROUND032_BIO_COPY_VIEW_CI_ONLY) && \\
+    defined(SWAPZ_ROUND031_MM_BIO_SOURCE) && \\
+    defined(SWAPZ_ROUND030_EVICTION_SNAPSHOT_SOURCE) && \\
+    defined(SWAPZ_ROUND028_SLOT_EPOCH_SOURCE) && \\
+    defined(SWAPZ_ROUND025_SIDEBAND_CI_ONLY) && IS_ENABLED(CONFIG_KUNIT)
+#include <linux/crc32c.h>
+#endif
+""",
+        path, "round038-original-store-crc32c-before-compress")
     composed = replace_once(composed,
         "\tbool swapz_round028_store_bound;\n#endif\n",
         "\tbool swapz_round028_store_bound;\n#endif\n" + r"""#if defined(SWAPZ_ROUND038_ORIGINAL_STORE_PROVENANCE_TEST) && \

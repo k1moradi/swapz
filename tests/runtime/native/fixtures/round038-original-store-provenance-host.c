@@ -78,6 +78,6 @@ int main(void)
     consumed = accepted;
     assert(memcmp(&consumed, &unchanged, sizeof(unchanged)) == 0);
     assert(swapz_round038_store_observation_check(NULL, &consumed) == -EINVAL);
-    puts("ROUND038_ORIGINAL_STORE_PROVENANCE_EXTRACTED_C_HOST_PASS");
+    puts("ROUND031_REAL_ROUND038_ORIGINAL_STORE_PROVENANCE_EXTRACTED_C_HOST_PASS");
     return 0;
 }
