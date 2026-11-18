@@ -5534,6 +5534,321 @@ reject:
 	return error;
 }
 /* ROUND036_DM_TRANSACTION_PHASE_EXACT_END */
+
+#if defined(SWAPZ_ROUND037_DM_ASYNC_LOWER_LIFETIME_TEST)
+/* ROUND037_DM_ASYNC_LOWER_EXACT_START */
+#define SWAPZ_ROUND037_SOURCE_MAPPED_AUTHENTICATED 0U
+
+enum swapz_round037_dm_async_phase {
+	SWAPZ_ROUND037_EMPTY = 0,
+	SWAPZ_ROUND037_PREPARING,
+	SWAPZ_ROUND037_PREPARED,
+	SWAPZ_ROUND037_FAKE_WRITE_IN_FLIGHT,
+	SWAPZ_ROUND037_LOWER_COMPLETION_OK,
+	SWAPZ_ROUND037_LOWER_COMPLETION_ERROR,
+	SWAPZ_ROUND037_REVALIDATING,
+	SWAPZ_ROUND037_REVALIDATED,
+	SWAPZ_ROUND037_MOCK_MAP_PUBLISHED,
+	SWAPZ_ROUND037_MOCK_ACKED,
+	SWAPZ_ROUND037_CANCELLED,
+	SWAPZ_ROUND037_EXPIRED
+};
+
+/*
+ * CI-ONLY mailbox, allocated and owned by the caller outside the target.
+ * Its allocation MUST outlive the last callback reference; no callback
+ * references a source BIO, zpool object, dm_target or swapz_dm. The single
+ * outstanding fake callback carries only (mailbox, incarnation ticket).
+ *
+ * Lock order: ordered_owner -> callback_lock, NEVER the reverse. The callback
+ * takes ONLY callback_lock, including after ctx teardown. No lock is held
+ * across fake lower I/O. The ordered owner serializes prepare, cancellation,
+ * map/GC/sidecar revalidation and hypothetical publication. The callback
+ * lock fences cancellation, receipt and reuse; it is NOT source-MM authority.
+ * This is intentionally not a production workqueue/bio completion hook.
+ */
+struct swapz_round037_dm_async_mailbox {
+	spinlock_t callback_lock;
+	enum swapz_round037_dm_async_phase phase;
+	swapz_u64 incarnation_ticket;
+	swapz_u64 cancellation_epoch;
+	swapz_u32 callback_references;
+	bool initialized;
+	struct swapz_round036_dm_mock_ledger ledger;
+	struct swapz_zswap_admission_transaction private_transaction;
+	swapz_u8 owned_compressed[SWAPZ_MAX_COMPRESSED];
+	swapz_u8 provider_scratch[SWAPZ_MAX_COMPRESSED];
+	swapz_u8 staged_extent[4U * SWAPZ_BLOCK_BYTES];
+	swapz_u8 fake_lower_image[4U * SWAPZ_BLOCK_BYTES];
+	swapz_u8 decoded_original[SWAPZ_BLOCK_BYTES];
+	swapz_u8 decode_scratch[SWAPZ_BLOCK_BYTES];
+};
+
+static __used noinline void swapz_round037_dm_async_initialize(
+		struct swapz_round037_dm_async_mailbox *mailbox)
+{
+	if (!mailbox)
+		return;
+	memset(mailbox, 0, sizeof(*mailbox));
+	spin_lock_init(&mailbox->callback_lock);
+	mailbox->initialized = true;
+}
+
+/* Called only with ordered_owner. Caller retains the mailbox allocation. */
+static __used noinline void swapz_round037_dm_async_scrub(
+		struct swapz_round037_dm_async_mailbox *mailbox)
+{
+	swapz_round036_dm_mock_retire(&mailbox->ledger);
+	memzero_explicit(mailbox->owned_compressed,
+			 sizeof(mailbox->owned_compressed));
+	memzero_explicit(mailbox->provider_scratch,
+			 sizeof(mailbox->provider_scratch));
+	memzero_explicit(mailbox->staged_extent,
+			 sizeof(mailbox->staged_extent));
+	memzero_explicit(mailbox->fake_lower_image,
+			 sizeof(mailbox->fake_lower_image));
+	memzero_explicit(mailbox->decoded_original,
+			 sizeof(mailbox->decoded_original));
+	memzero_explicit(mailbox->decode_scratch,
+			 sizeof(mailbox->decode_scratch));
+	memzero_explicit(&mailbox->private_transaction,
+			 sizeof(mailbox->private_transaction));
+}
+
+/*
+ * All original source pointers are consumed here under ordered_owner; only
+ * owned copied bytes, immutable scalar witnesses and a private transaction
+ * cross the handoff. The caller transaction is NEVER modified.
+ */
+static __used noinline int swapz_round037_dm_async_prepare(
+		struct swapz_dm *ctx, const struct bio *source_bio,
+		const struct swapz_round031_dm_sidecar *sidecar,
+		const struct swapz_zswap_admission_transaction *transaction,
+		swapz_u64 expected_source_swap_entry,
+		swapz_u64 expected_previous_sidecar_owner,
+		swapz_u64 incarnation_ticket, swapz_u32 fake_start_block,
+		swapz_u32 fake_extent_sequence,
+		struct swapz_round037_dm_async_mailbox *mailbox)
+{
+	unsigned long flags;
+	int error;
+
+	if (!ctx || !source_bio || !sidecar || !transaction || !mailbox ||
+	    !mailbox->initialized || !incarnation_ticket)
+		return -EINVAL;
+	lockdep_assert_held(&ctx->ordered_owner);
+	spin_lock_irqsave(&mailbox->callback_lock, flags);
+	if (mailbox->callback_references ||
+	    incarnation_ticket == mailbox->incarnation_ticket ||
+	    (mailbox->phase != SWAPZ_ROUND037_EMPTY &&
+	     mailbox->phase != SWAPZ_ROUND037_CANCELLED &&
+	     mailbox->phase != SWAPZ_ROUND037_EXPIRED &&
+	     mailbox->phase != SWAPZ_ROUND037_MOCK_ACKED)) {
+		spin_unlock_irqrestore(&mailbox->callback_lock, flags);
+		return -EBUSY;
+	}
+	mailbox->phase = SWAPZ_ROUND037_PREPARING;
+	mailbox->incarnation_ticket = incarnation_ticket;
+	spin_unlock_irqrestore(&mailbox->callback_lock, flags);
+	swapz_round037_dm_async_scrub(mailbox);
+	mailbox->private_transaction = *transaction;
+	mailbox->private_transaction.owned_compressed_bytes =
+		mailbox->owned_compressed;
+	mailbox->private_transaction.payload_capacity = SWAPZ_MAX_COMPRESSED;
+	error = swapz_round036_dm_mock_prepare(
+		ctx, source_bio, sidecar, &mailbox->private_transaction,
+		expected_source_swap_entry, expected_previous_sidecar_owner,
+		incarnation_ticket, fake_start_block, fake_extent_sequence,
+		&mailbox->ledger, mailbox->owned_compressed,
+		mailbox->provider_scratch, mailbox->staged_extent,
+		mailbox->decoded_original);
+	if (error)
+		swapz_round037_dm_async_scrub(mailbox);
+	spin_lock_irqsave(&mailbox->callback_lock, flags);
+	mailbox->phase = error ? SWAPZ_ROUND037_EXPIRED :
+				 SWAPZ_ROUND037_PREPARED;
+	spin_unlock_irqrestore(&mailbox->callback_lock, flags);
+	return error;
+}
+
+/* The preparer drops ordered_owner after this transition, before the
+ * independently scheduled fake lower WRITE callback is invoked.
+ */
+static __used noinline int swapz_round037_dm_async_submit(
+		struct swapz_dm *ctx,
+		struct swapz_round037_dm_async_mailbox *mailbox,
+		swapz_u64 incarnation_ticket)
+{
+	unsigned long flags;
+	int error;
+
+	if (!ctx || !mailbox || !mailbox->initialized)
+		return -EINVAL;
+	lockdep_assert_held(&ctx->ordered_owner);
+	spin_lock_irqsave(&mailbox->callback_lock, flags);
+	if (mailbox->phase != SWAPZ_ROUND037_PREPARED ||
+	    mailbox->incarnation_ticket != incarnation_ticket ||
+	    mailbox->callback_references) {
+		spin_unlock_irqrestore(&mailbox->callback_lock, flags);
+		return -ESTALE;
+	}
+	error = swapz_round036_dm_mock_submit(
+		ctx, &mailbox->ledger, incarnation_ticket);
+	if (!error) {
+		mailbox->callback_references = 1U;
+		mailbox->phase = SWAPZ_ROUND037_FAKE_WRITE_IN_FLIGHT;
+	}
+	spin_unlock_irqrestore(&mailbox->callback_lock, flags);
+	return error;
+}
+
+/*
+ * Fake asynchronous completion: NO ctx, source BIO, sidecar, map or upper BIO
+ * argument and NO target dereference. Single bounded copy from a test-only
+ * fake lower image; a split/short/error callback cannot be accepted as a
+ * complete 4/8/16KiB extent. The mailbox persists until the callback drops
+ * its one owned reference, including after cancellation or target teardown.
+ */
+static __used noinline int swapz_round037_dm_async_fake_callback(
+		struct swapz_round037_dm_async_mailbox *mailbox,
+		swapz_u64 incarnation_ticket, int lower_error,
+		swapz_u32 completed_bytes, const swapz_u8 *fake_lower_image,
+		swapz_u32 image_capacity)
+{
+	unsigned long flags;
+	swapz_u32 extent_bytes;
+	int error = 0;
+
+	if (!mailbox || !mailbox->initialized)
+		return -EINVAL;
+	spin_lock_irqsave(&mailbox->callback_lock, flags);
+	if (mailbox->incarnation_ticket != incarnation_ticket ||
+	    !mailbox->callback_references) {
+		error = -ESTALE;
+		goto unlock;
+	}
+	mailbox->callback_references = 0U;
+	if (mailbox->phase == SWAPZ_ROUND037_CANCELLED) {
+		mailbox->phase = SWAPZ_ROUND037_EXPIRED;
+		error = -ESTALE;
+		goto unlock;
+	}
+	if (mailbox->phase != SWAPZ_ROUND037_FAKE_WRITE_IN_FLIGHT) {
+		error = -ESTALE;
+		goto unlock;
+	}
+	extent_bytes = mailbox->ledger.extent_bytes;
+	if (lower_error || !fake_lower_image ||
+	    completed_bytes != extent_bytes || image_capacity < extent_bytes) {
+		mailbox->phase = SWAPZ_ROUND037_LOWER_COMPLETION_ERROR;
+		error = lower_error ? lower_error : -EIO;
+		goto unlock;
+	}
+	memcpy(mailbox->fake_lower_image, fake_lower_image, extent_bytes);
+	mailbox->phase = SWAPZ_ROUND037_LOWER_COMPLETION_OK;
+unlock:
+	spin_unlock_irqrestore(&mailbox->callback_lock, flags);
+	return error;
+}
+
+/*
+ * Called under ordered_owner, after callback delivery. Round036's EXACT real
+ * DM C validates post-header padding, CRC32C, dictionary-free LZ4 4096,
+ * STORE SHA and revalidates map/GC/sidecar/source witnesses. It publishes and
+ * ACKs ONLY a private transaction and caller-provided mock values.
+ */
+static __used noinline int swapz_round037_dm_async_finish(
+		struct swapz_dm *ctx,
+		const struct swapz_round031_dm_sidecar *sidecar,
+		swapz_u64 incarnation_ticket,
+		swapz_u32 current_fake_extent_sequence,
+		const struct swapz_round032_dm_owned_view_v1 *mock_current_source,
+		struct swapz_round036_dm_mock_publication *mock_publication,
+		swapz_u8 *upper_output,
+		struct swapz_round037_dm_async_mailbox *mailbox)
+{
+	unsigned long flags;
+	int error;
+
+	if (!ctx || !sidecar || !mock_current_source || !mock_publication ||
+	    !upper_output || !mailbox || !mailbox->initialized)
+		return -EINVAL;
+	lockdep_assert_held(&ctx->ordered_owner);
+	spin_lock_irqsave(&mailbox->callback_lock, flags);
+	if (mailbox->incarnation_ticket != incarnation_ticket ||
+	    mailbox->callback_references ||
+	    (mailbox->phase != SWAPZ_ROUND037_LOWER_COMPLETION_OK &&
+	     mailbox->phase != SWAPZ_ROUND037_LOWER_COMPLETION_ERROR)) {
+		spin_unlock_irqrestore(&mailbox->callback_lock, flags);
+		return -ESTALE;
+	}
+	if (mailbox->phase == SWAPZ_ROUND037_LOWER_COMPLETION_ERROR) {
+		mailbox->phase = SWAPZ_ROUND037_EXPIRED;
+		spin_unlock_irqrestore(&mailbox->callback_lock, flags);
+		swapz_round037_dm_async_scrub(mailbox);
+		return -EIO;
+	}
+	mailbox->phase = SWAPZ_ROUND037_REVALIDATING;
+	spin_unlock_irqrestore(&mailbox->callback_lock, flags);
+	error = swapz_round036_dm_mock_complete(
+		ctx, &mailbox->ledger, incarnation_ticket, 0,
+		mailbox->ledger.extent_bytes, mailbox->fake_lower_image,
+		mailbox->ledger.extent_bytes, mailbox->decode_scratch);
+	if (!error) {
+		spin_lock_irqsave(&mailbox->callback_lock, flags);
+		mailbox->phase = SWAPZ_ROUND037_REVALIDATED;
+		spin_unlock_irqrestore(&mailbox->callback_lock, flags);
+		error = swapz_round036_dm_mock_publish_once(
+			ctx, sidecar, &mailbox->private_transaction,
+			&mailbox->ledger, incarnation_ticket,
+			current_fake_extent_sequence, mock_current_source,
+			mock_publication, upper_output);
+	}
+	/* ordered_owner prevents teardown/cancel between the revalidation
+	 * and the inseparable private mock publication/hypothetical ACK.
+	 */
+	spin_lock_irqsave(&mailbox->callback_lock, flags);
+	if (!error)
+		mailbox->phase = SWAPZ_ROUND037_MOCK_MAP_PUBLISHED;
+	mailbox->phase = error ? SWAPZ_ROUND037_EXPIRED :
+				 SWAPZ_ROUND037_MOCK_ACKED;
+	spin_unlock_irqrestore(&mailbox->callback_lock, flags);
+	swapz_round037_dm_async_scrub(mailbox);
+	return error;
+}
+
+/* Cancellation must run while ctx is STILL alive and ordered_owner held.
+ * After it returns, a callback may run without ANY ctx pointer. Cancellation
+ * retains the outstanding reference/ticket as a tombstone until that callback
+ * drains; rearm cannot reuse the mailbox while the reference exists.
+ */
+static __used noinline int swapz_round037_dm_async_cancel(
+		struct swapz_dm *ctx,
+		struct swapz_round037_dm_async_mailbox *mailbox,
+		swapz_u64 incarnation_ticket)
+{
+	unsigned long flags;
+
+	if (!ctx || !mailbox || !mailbox->initialized)
+		return -EINVAL;
+	lockdep_assert_held(&ctx->ordered_owner);
+	spin_lock_irqsave(&mailbox->callback_lock, flags);
+	if (mailbox->incarnation_ticket != incarnation_ticket ||
+	    mailbox->phase == SWAPZ_ROUND037_MOCK_ACKED ||
+	    mailbox->phase == SWAPZ_ROUND037_EXPIRED ||
+	    mailbox->phase == SWAPZ_ROUND037_CANCELLED ||
+	    mailbox->phase == SWAPZ_ROUND037_EMPTY) {
+		spin_unlock_irqrestore(&mailbox->callback_lock, flags);
+		return -ESTALE;
+	}
+	mailbox->cancellation_epoch++;
+	mailbox->phase = SWAPZ_ROUND037_CANCELLED;
+	spin_unlock_irqrestore(&mailbox->callback_lock, flags);
+	swapz_round037_dm_async_scrub(mailbox);
+	return 0;
+}
+/* ROUND037_DM_ASYNC_LOWER_EXACT_END */
+#endif /* SWAPZ_ROUND037_DM_ASYNC_LOWER_LIFETIME_TEST */
 #endif /* SWAPZ_ROUND036_DM_TRANSACTION_PHASE_TEST */
 
 
