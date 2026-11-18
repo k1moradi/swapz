@@ -828,7 +828,7 @@ static void swapz_round034_v1_lifetime_kunit(struct kunit *test)
 	bio_put(split);
 }
 #endif /* Round034 real original v1 test-only, no loaded transport */
-
+"""
 
 ROUND034_KUNIT_CASES = r"""#if defined(SWAPZ_ROUND034_ORIGINAL_V1_KUNIT_TEST) && \
     defined(SWAPZ_ROUND032_BIO_COPY_VIEW_CI_ONLY) && \
