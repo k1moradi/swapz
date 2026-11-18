@@ -4209,6 +4209,200 @@ static __used noinline int swapz_round032_dm_try_accept_owned_view_v1(
 
 
 /*
+ * Round033 genuine pinned-original-kernel GPL BIO provider IMPORT, compile
+ * and modpost ONLY. The original Linux header and symbol MUST come from the
+ * exact same composed original kernel KDIR/Module.symvers, never HWE or a
+ * synthetic provider. The separate guards prevent ordinary target modules
+ * and normal ->map/ordered-owner paths from referencing this export.
+ *
+ * Original page_io.c's swap_iocb has one prepopulated bvec, bi_vcnt == 0,
+ * and an uncompressed 4096-byte WRITE. The original BIO provider alone
+ * validates its private owner and seals a caller-owned snapshot. Do not run
+ * the Round032 synthetic one-bvec/bi_vcnt == 1 shape validator as a source
+ * authenticity gate; no original MM swap-type/offset vs DM slot bridge exists.
+ */
+#if defined(SWAPZ_ROUND033_DM_ORIGINAL_BIO_GPL_LINK_TEST) && \
+    defined(SWAPZ_ROUND032_DM_LZ4_VIEW_VALIDATE_TEST) && \
+    defined(SWAPZ_ROUND031_DM_LZ4_SIDECAR_TEST) && \
+    defined(SWAPZ_ROUND030_DM_COMPRESSED_COMMIT_TEST) && \
+    defined(SWAPZ_ROUND028_DM_OWNED_READBACK_TEST) && \
+    defined(SWAPZ_ROUND024_DM_IMPORT_KBUILD_PROBE) && \
+    defined(SWAPZ_ROUND032_BIO_COPY_VIEW_CI_ONLY) && \
+    defined(SWAPZ_ROUND031_MM_BIO_SOURCE) && \
+    defined(SWAPZ_ROUND030_EVICTION_SNAPSHOT_SOURCE) && \
+    defined(SWAPZ_ROUND028_SLOT_EPOCH_SOURCE) && \
+    defined(SWAPZ_ROUND025_SIDEBAND_CI_ONLY)
+/* ROUND033_DM_ORIGINAL_GPL_IMPORT_EXACT_START */
+/*
+ * Caller holds source_bio LIVE across the complete synchronous provider
+ * call; the provider takes a temporary ref on the sealed BIO-owned payload.
+ * Caller additionally owns two disjoint, writable RAM arrays; private
+ * scratch must have exactly SWAPZ_MAX_COMPRESSED bytes (3568). No stored
+ * pointer escapes; outputs are caller-owned VALUE + copy, unchanged on error.
+ * This routine is unreferenced by production BIO processing.
+ */
+static __used noinline int swapz_round033_dm_copy_original_bio_v1_for_link(
+		const struct bio *source_bio,
+		struct swapz_round032_dm_owned_view_v1 *owned_view,
+		swapz_u8 *owned_destination, size_t destination_capacity,
+		swapz_u8 *private_scratch, size_t scratch_capacity)
+{
+	struct swapz_ci_lz4_owned_view_v1 original_view = {};
+	unsigned int digest_offset;
+	swapz_u8 digest_present = 0;
+	size_t copied_length;
+	int error;
+
+	/* Compile-time proof against the ACTUAL generated original bio.h.
+	 * Metadata is copied fieldwise: padding is never compared, persisted
+	 * or interpreted as an on-disk format or pointer.
+	 */
+	BUILD_BUG_ON(sizeof(struct swapz_ci_lz4_owned_view_v1) !=
+		     sizeof(struct swapz_round032_dm_owned_view_v1));
+	BUILD_BUG_ON(offsetof(struct swapz_ci_lz4_owned_view_v1,
+			      source_swap_entry) !=
+		     offsetof(struct swapz_round032_dm_owned_view_v1,
+			      source_swap_entry));
+	BUILD_BUG_ON(offsetof(struct swapz_ci_lz4_owned_view_v1,
+			      source_slot_epoch) !=
+		     offsetof(struct swapz_round032_dm_owned_view_v1,
+			      source_slot_epoch));
+	BUILD_BUG_ON(offsetof(struct swapz_ci_lz4_owned_view_v1,
+			      stored_entry_identity) !=
+		     offsetof(struct swapz_round032_dm_owned_view_v1,
+			      stored_entry_identity));
+	BUILD_BUG_ON(offsetof(struct swapz_ci_lz4_owned_view_v1,
+			      compressed_crc32c) !=
+		     offsetof(struct swapz_round032_dm_owned_view_v1,
+			      compressed_crc32c));
+	BUILD_BUG_ON(offsetof(struct swapz_ci_lz4_owned_view_v1,
+			      compressed_length) !=
+		     offsetof(struct swapz_round032_dm_owned_view_v1,
+			      compressed_length));
+	BUILD_BUG_ON(offsetof(struct swapz_ci_lz4_owned_view_v1,
+			      decoded_length) !=
+		     offsetof(struct swapz_round032_dm_owned_view_v1,
+			      decoded_length));
+	BUILD_BUG_ON(offsetof(struct swapz_ci_lz4_owned_view_v1,
+			      representation_version) !=
+		     offsetof(struct swapz_round032_dm_owned_view_v1,
+			      representation_version));
+	BUILD_BUG_ON(offsetof(struct swapz_ci_lz4_owned_view_v1,
+			      codec) !=
+		     offsetof(struct swapz_round032_dm_owned_view_v1, codec));
+	BUILD_BUG_ON(offsetof(struct swapz_ci_lz4_owned_view_v1,
+			      original_sha256) !=
+		     offsetof(struct swapz_round032_dm_owned_view_v1,
+			      original_sha256));
+
+	if (!source_bio || !owned_view || !owned_destination ||
+	    !private_scratch)
+		return -EINVAL;
+	if (scratch_capacity != SWAPZ_MAX_COMPRESSED ||
+	    destination_capacity < SWAPZ_MAX_COMPRESSED)
+		return -EMSGSIZE;
+	/* Both VALUE output and private copy must be independent of the
+	 * source BIO and of each other. No output can alias a source owner.
+	 */
+	if (swapz_zswap_import_ranges_overlap(
+		    owned_destination, SWAPZ_MAX_COMPRESSED,
+		    private_scratch, SWAPZ_MAX_COMPRESSED) ||
+	    swapz_zswap_import_ranges_overlap(
+		    owned_view, sizeof(*owned_view),
+		    private_scratch, SWAPZ_MAX_COMPRESSED) ||
+	    swapz_zswap_import_ranges_overlap(
+		    owned_view, sizeof(*owned_view),
+		    owned_destination, SWAPZ_MAX_COMPRESSED) ||
+	    swapz_zswap_import_ranges_overlap(
+		    source_bio, sizeof(*source_bio),
+		    private_scratch, SWAPZ_MAX_COMPRESSED) ||
+	    swapz_zswap_import_ranges_overlap(
+		    source_bio, sizeof(*source_bio),
+		    owned_destination, SWAPZ_MAX_COMPRESSED) ||
+	    swapz_zswap_import_ranges_overlap(
+		    source_bio, sizeof(*source_bio),
+		    owned_view, sizeof(*owned_view)))
+		return -EINVAL;
+
+	/* This is the REAL original pinned BIO header GPL symbol. The
+	 * synchronous provider holds the sealed separate source owner and
+	 * places only a private bounded byte copy in caller's scratch.
+	 * A symbol-only mock/shim is NOT accepted by the workflow modpost.
+	 */
+	error = swapz_ci_bio_snapshot_lz4_v1(source_bio, &original_view,
+					   private_scratch,
+					   SWAPZ_MAX_COMPRESSED);
+	if (error)
+		goto clear_scratch;
+	if (!original_view.source_swap_entry ||
+	    !original_view.source_slot_epoch ||
+	    !original_view.stored_entry_identity) {
+		error = -ESTALE;
+		goto clear_scratch;
+	}
+	if (original_view.representation_version != 1U ||
+	    original_view.codec != SWAPZ_ZSWAP_IMPORT_LZ4_CODEC) {
+		error = -EOPNOTSUPP;
+		goto clear_scratch;
+	}
+	copied_length = original_view.compressed_length;
+	if (!copied_length || copied_length > SWAPZ_MAX_COMPRESSED ||
+	    original_view.decoded_length != SWAPZ_BLOCK_BYTES) {
+		error = -EMSGSIZE;
+		goto clear_scratch;
+	}
+	for (digest_offset = 0;
+	     digest_offset < sizeof(original_view.original_sha256);
+	     ++digest_offset)
+		digest_present |= original_view.original_sha256[digest_offset];
+	if (!digest_present) {
+		error = -ENODATA;
+		goto clear_scratch;
+	}
+	if (swapz_crc32c_bytes(private_scratch, copied_length) !=
+	    original_view.compressed_crc32c) {
+		error = -EBADMSG;
+		goto clear_scratch;
+	}
+
+	/* No additional failing operation after the FIRST result write.
+	 * No BIO-owned pointer is borrowed after provider returns.
+	 */
+	memcpy(owned_destination, private_scratch, copied_length);
+	owned_view->source_swap_entry = original_view.source_swap_entry;
+	owned_view->source_slot_epoch = original_view.source_slot_epoch;
+	owned_view->stored_entry_identity = original_view.stored_entry_identity;
+	owned_view->compressed_crc32c = original_view.compressed_crc32c;
+	owned_view->compressed_length = original_view.compressed_length;
+	owned_view->decoded_length = original_view.decoded_length;
+	owned_view->representation_version = original_view.representation_version;
+	owned_view->codec = original_view.codec;
+	memcpy(owned_view->original_sha256, original_view.original_sha256,
+	       sizeof(owned_view->original_sha256));
+	error = 0;
+
+clear_scratch:
+	/* Scrub private temporary copied compressed bytes even on rejection.
+	 * The independent caller-owned success output is not erased.
+	 */
+	memzero_explicit(private_scratch, SWAPZ_MAX_COMPRESSED);
+	return error;
+}
+
+/* A linked original export is source/API proof, not a live MM source-slot
+ * type+epoch bridge into current DM authority. No lower I/O or ACK.
+ */
+static __used noinline int swapz_round033_dm_try_live_original_bio_v1(
+		const struct bio *source_bio)
+{
+	(void)source_bio;
+	return -EOPNOTSUPP;
+}
+/* ROUND033_DM_ORIGINAL_GPL_IMPORT_EXACT_END */
+#endif /* SWAPZ_ROUND033_DM_ORIGINAL_BIO_GPL_LINK_TEST */
+
+
+/*
  * ID29: media reclamation is allowed only after serialized authority has
  * already proven an entire 1MiB segment non-authoritative. DISCARD never
  * creates deadness. Unsupported/media failures are diagnostic and nonfatal;
