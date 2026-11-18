@@ -146,42 +146,8 @@ jobs:
           grep -Fxq CONFIG_KUNIT=y "$out/.config"
           grep -Fxq CONFIG_CRYPTO_SHA256=y "$out/.config"
           grep -Fxq CONFIG_CRYPTO_LIB_SHA256=y "$out/.config"
-          if grep -Eq '^CONFIG_BLK_CGROUP=[ym]          grep -Fxq CONFIG_LZ4_COMPRESS=y "$out/.config"
-          grep -Fxq CONFIG_LZ4_DECOMPRESS=y "$out/.config"
-          grep -Fxq CONFIG_SWAP_BIO_ORIGIN_KUNIT_TEST=y "$out/.config"
-          grep -Fxq '# CONFIG_CGROUPS is not set' "$out/.config"
-          printf 'effective_config_sha256=%s\n' \
-            "$(sha256sum "$out/.config" | cut -d' ' -f1)" >>"$evidence"
-          printf 'kernel_sha256=%s\n' \
-            "$(sha256sum "$out/linux" | cut -d' ' -f1)" >>"$evidence"
-          printf 'json_sha256=%s\n' \
-            "$(sha256sum "$result" | cut -d' ' -f1)" >>"$evidence"
-          printf 'ktap_sha256=%s\n' \
-            "$(sha256sum "$out/test.log" | cut -d' ' -f1)" >>"$evidence"
-          phase=independent-real-JSON-plus-KTAP
-          python3 -B swapz/tests/tools/round034-original-v1-kunit-verify.py \
-            --result "$result" --kernel-log "$out/test.log" >"$log" 2>&1
-          cat "$log"
-          printf 'old_cases=11\nnew_v1_cases=6\ntotal_executed=17\nresult=PASS\n' \
-            >>"$evidence"
-          echo "PHASE_A=BLOCKED FORCED_RAW=DISABLED DIRECT_COMPRESSED=DISABLED"
-      - name: "Retain first failure, real original source SHA and executed KTAP evidence"
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: round034-original-zswap-on-v1
-          path: |
-            ${{ runner.temp }}/round034-original-host-first-error.log
-            ${{ runner.temp }}/round034-original-uml-first-error.log
-            ${{ runner.temp }}/round034-original-ten-source-manifest.json
-            ${{ runner.temp }}/round034-original-v1-evidence.txt
-            ${{ runner.temp }}/round034-original-v1.kunitconfig
-            ${{ runner.temp }}/round034-original-v1.json
-            ${{ runner.temp }}/round034-original-uml/test.log
-          if-no-files-found: ignore
-          retention-days: 7
- "$out/.config"; then
-            echo '::error::Original UML erroneously enabled BLK_CGROUP with CGROUPS disabled'
+          if grep -Eq '^CONFIG_BLK_CGROUP=[ym]$' "$out/.config"; then
+            echo '::error::UML BLK_CGROUP unexpectedly enabled'
             exit 3
           fi
           grep -Fxq CONFIG_LZ4_COMPRESS=y "$out/.config"
