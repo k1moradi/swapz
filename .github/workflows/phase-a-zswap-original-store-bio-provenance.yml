@@ -6,6 +6,7 @@ on:
       - ".github/workflows/phase-a-zswap-original-store-bio-provenance.yml"
       - "tests/tools/stage-pinned-linux-zswap-composed.py"
       - "tests/tools/round038-original-store-provenance-verify.py"
+      - "tests/tools/round039-original-store-gates-verify.py"
       - "tests/runtime/native/pinned-linux-zswap-composed-source-test.py"
       - "tests/runtime/native/fixtures/round038-original-store-*.c"
       - "docs/handoff/zswapz/round038/agent2-evidence.md"
@@ -47,6 +48,18 @@ jobs:
           test -z "$(git -C swapz status --porcelain --untracked-files=all)"
           test -z "$(git -C linux status --porcelain --untracked-files=all)"
           export ROUND031_PINNED_LINUX="$PWD/linux"
+          # Reject copied 037/038 page-IO vs zswap STORE symbol checks
+          # before any full original kernel compilation; hostile mutations
+          # must also be caught by the independent verifier.
+          if python3 -B swapz/tests/tools/round039-original-store-gates-verify.py --self-test \
+              >round038-evidence/round039-gates.log 2>&1; then
+            tail -n 8 round038-evidence/round039-gates.log
+          else
+            code=$?
+            echo "::error::Round039 first independent source-gate verification failure exit=$code"
+            tail -n 70 round038-evidence/round039-gates.log
+            exit "$code"
+          fi
           if python3 -B swapz/tests/tools/round038-original-store-provenance-verify.py --self-test \
               >round038-evidence/host-verifier.log 2>&1; then
             tail -n 8 round038-evidence/host-verifier.log
@@ -90,8 +103,16 @@ jobs:
           git -C linux diff --check
           grep -Fq 'swapz_round035_mm_route_preflight(' linux/mm/page_io.c
           grep -Fq 'swapz_round036_original_lifetime_probe(' linux/mm/page_io.c
-          grep -Fq 'swapz_round038_original_mm_scoped_probe(' linux/mm/page_io.c
-          grep -Fq 'kunit_test_suite(swapz_round038_scope_suite);' linux/mm/page_io.c
+          grep -Fq 'swapz_round037_original_mm_scoped_probe(' linux/mm/page_io.c
+          grep -Fq 'kunit_test_suite(swapz_round037_scope_suite);' linux/mm/page_io.c
+          # Keep the prior original MM scoped witness separate from the new
+          # original zswap STORE producer and its five-case KUnit suite.
+          grep -Fq 'swapz_round038_actual_store_provenance_probe(' linux/mm/zswap.c
+          grep -Fq 'swapz_round038_store_crc32c = ~crc32c(' linux/mm/zswap.c
+          grep -Fq 'entry->swapz_round038_store_crc32c == source_crc32c' linux/mm/zswap.c
+          grep -Fq 'kunit_test_suite(swapz_round038_store_suite);' linux/mm/zswap.c
+          grep -Fq '"swapz_round038_original_store_provenance_no_authority"' linux/mm/zswap.c
+          grep -Fq 'put_swap_device(active_area)' linux/mm/page_io.c
           grep -Fq 'kunit_test_suite(swapz_round036_lifetime_suite);' linux/mm/page_io.c
           grep -Fq 'swap_folio_sector(folio)' linux/mm/page_io.c
           grep -Fq 'get_swap_device(original_slot)' linux/mm/page_io.c
@@ -278,7 +299,7 @@ jobs:
               echo "::error::Unmodified original default BIO included gated source"
               exit 3
             fi
-            if nm -a "$out/mm/page_io.o" | grep -Eq 'swapz_round035_mm_route_preflight|swapz_round036_original_lifetime_probe|swapz_round038_original_mm_scoped_probe'; then
+            if nm -a "$out/mm/page_io.o" | grep -Eq 'swapz_round035_mm_route_preflight|swapz_round036_original_lifetime_probe|swapz_round037_original_mm_scoped_probe'; then
               echo "::error::Unmodified original default page-IO included gated source"
               exit 3
             fi
@@ -314,15 +335,15 @@ jobs:
               fi
             done
             if ! nm -a "$out/mm/page_io.o" | grep -q swapz_round035_mm_route_preflight; then
-              echo "::error::Actual original zswap STORE provenance source machine code absent"
+              echo "::error::Actual original Round035 page-IO route witness machine code absent"
               exit 3
             fi
             if ! nm -a "$out/mm/page_io.o" | grep -q swapz_round036_original_lifetime_probe; then
-              echo "::error::Actual original Round038 lifetime C machine code missing"
+              echo "::error::Actual original Round036 page-IO lifetime machine code absent"
               exit 3
             fi
-            if ! nm -a "$out/mm/page_io.o" | grep -q swapz_round038_original_mm_scoped_probe; then
-              echo "::error::Actual original Round038 scoped MM owner machine code absent"
+            if ! nm -a "$out/mm/page_io.o" | grep -q swapz_round037_original_mm_scoped_probe; then
+              echo "::error::Actual original Round037 page-IO scoped MM witness machine code absent"
               exit 3
             fi
             checked "$profile-vmlinux" make -s -C linux "O=$out" CC=gcc \
