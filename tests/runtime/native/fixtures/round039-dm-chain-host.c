@@ -145,9 +145,9 @@ static void round039_test_chain(unsigned int extent_blocks,
 	if (fault == 1U)
 		write_event.completed_bytes--;
 	if (fault == 2U)
-		write_event.lower_error = 1;
+		write_event.fake_error = 1;
 	if (fault == 3U)
-		write_event.lower_error = -EIO;
+		write_event.fake_error = -EIO;
 	if (fault == 4U)
 		assert(swapz_round037_dm_async_cancel(
 			&context, write_mailbox, write_ticket) == 0);
