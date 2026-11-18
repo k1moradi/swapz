@@ -1,0 +1,414 @@
+name: "Round040 original MM asynchronous slot lease negatives (NO LIVE AUTHORITY)"
+on:
+  push:
+    branches: [main]
+    paths:
+      - ".github/workflows/phase-a-zswap-original-mm-async-lease-negative.yml"
+      - "tests/tools/stage-pinned-linux-zswap-composed.py"
+      - "tests/tools/round038-original-store-provenance-verify.py"
+      - "tests/tools/round039-original-store-gates-verify.py"
+      - "tests/tools/round040-original-lease-verify.py"
+      - "tests/runtime/native/pinned-linux-zswap-composed-source-test.py"
+      - "tests/runtime/native/fixtures/round038-original-store-*.c"
+      - "tests/runtime/native/fixtures/round040-original-lease-*.c"
+      - "docs/handoff/zswapz/round040/agent2-evidence.md"
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  original-uml-async-lease-41:
+    name: "Original CONFIG_ZSWAP=y UML previous 36 + 5 new ORIGINAL async slot lease C KUnit"
+    runs-on: ubuntu-24.04
+    timeout-minutes: 100
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          path: swapz
+          persist-credentials: false
+      - uses: actions/checkout@v4
+        with:
+          repository: torvalds/linux
+          ref: c339f4010dea8b0d754f84ace70cd1b089878ef8
+          fetch-depth: 1
+          path: linux
+          persist-credentials: false
+      - name: Install original Linux UML and real host sanitizer prerequisites
+        run: |
+          set -euo pipefail
+          sudo apt-get update -qq
+          sudo DEBIAN_FRONTEND=noninteractive apt-get install -y \
+            --no-install-recommends build-essential bc bison flex clang \
+            libelf-dev libssl-dev libncurses-dev liblz4-dev python3 \
+            python3-pyelftools binutils
+      - name: Real original source-extracted GCC Clang ASan UBSan and verifier hostile cases
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          mkdir -p round040-evidence
+          test "$(git -C swapz rev-parse HEAD)" = "$GITHUB_SHA"
+          test "$(git -C linux rev-parse HEAD)" = c339f4010dea8b0d754f84ace70cd1b089878ef8
+          test -z "$(git -C swapz status --porcelain --untracked-files=all)"
+          test -z "$(git -C linux status --porcelain --untracked-files=all)"
+          export ROUND031_PINNED_LINUX="$PWD/linux"
+          # Reject copied 037/038 page-IO vs zswap STORE symbol checks
+          # before any full original kernel compilation; hostile mutations
+          # must also be caught by the independent verifier.
+          if python3 -B swapz/tests/tools/round040-original-lease-verify.py --self-test \
+              >round040-evidence/round040-verifier-hostile.log 2>&1; then
+            tail -n 8 round040-evidence/round040-verifier-hostile.log
+          else
+            code=$?
+            echo "::error::Round040 first independent adversarial JSON+KTAP verifier failure exit=$code"
+            tail -n 70 round040-evidence/round040-verifier-hostile.log
+            exit "$code"
+          fi
+          if python3 -B swapz/tests/tools/round039-original-store-gates-verify.py --self-test \
+              >round040-evidence/round039-gates.log 2>&1; then
+            tail -n 8 round040-evidence/round039-gates.log
+          else
+            code=$?
+            echo "::error::Round039 first independent source-gate verification failure exit=$code"
+            tail -n 70 round040-evidence/round039-gates.log
+            exit "$code"
+          fi
+          if python3 -B swapz/tests/tools/round038-original-store-provenance-verify.py --self-test \
+              >round040-evidence/host-verifier.log 2>&1; then
+            tail -n 8 round040-evidence/host-verifier.log
+          else
+            code=$?
+            echo "::error::Round040 first adversarial verifier failure exit=$code"
+            tail -n 80 round040-evidence/host-verifier.log
+            exit "$code"
+          fi
+          if python3 -B swapz/tests/runtime/native/pinned-linux-zswap-composed-source-test.py -v \
+              >round040-evidence/host-c-test.log 2>&1; then
+            tail -n 12 round040-evidence/host-c-test.log
+          else
+            code=$?
+            echo "::error::Round040 first actual extracted source GCC/Clang/sanitizer failure exit=$code"
+            tail -n 100 round040-evidence/host-c-test.log
+            exit "$code"
+          fi
+      - name: Stage exact pristine original Linux source and SHA-verify ten files
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          python3 -B swapz/tests/tools/stage-pinned-linux-zswap-composed.py \
+            --linux-root linux --manifest round040-evidence/ten-original-source-sha.json
+          python3 - round040-evidence/ten-original-source-sha.json <<'PY'
+          import hashlib, json, pathlib, sys
+          manifest = json.loads(pathlib.Path(sys.argv[1]).read_text())
+          assert manifest["source_sha"] == "c339f4010dea8b0d754f84ace70cd1b089878ef8"
+          assert manifest["original_source_verified"] is True
+          assert manifest["source_manifest_complete"] is True
+          expected = {"block/Kconfig", "block/Makefile", "block/bio.c",
+              "block/swap-bio-origin-kunit.c", "include/linux/bio.h",
+              "include/linux/blk_types.h", "include/linux/swap_ops.h",
+              "mm/page_io.c", "mm/swapfile.c", "mm/zswap.c"}
+          entries = manifest["changed_paths"]
+          assert len(entries) == 10 and {p["path"] for p in entries} == expected
+          for item in entries:
+              data = (pathlib.Path("linux") / item["path"]).read_bytes()
+              assert hashlib.sha256(data).hexdigest() == item["staged_sha256"]
+          PY
+          git -C linux diff --check
+          grep -Fq 'swapz_round035_mm_route_preflight(' linux/mm/page_io.c
+          grep -Fq 'swapz_round036_original_lifetime_probe(' linux/mm/page_io.c
+          grep -Fq 'swapz_round037_original_mm_scoped_probe(' linux/mm/page_io.c
+          grep -Fq 'swapz_round040_original_mm_post_put_lease_probe(' linux/mm/page_io.c
+          grep -Fq 'swapz_round040_async_lease_refuse(' linux/mm/page_io.c
+          grep -Fq 'kunit_test_suite(swapz_round040_async_lease_suite);' linux/mm/page_io.c
+          grep -Fq '"swapz_round040_original_mm_async_lease_no_authority"' linux/mm/page_io.c
+          grep -Fq 'kunit_test_suite(swapz_round037_scope_suite);' linux/mm/page_io.c
+          # Keep the prior original MM scoped witness separate from the new
+          # original zswap STORE producer and its five-case KUnit suite.
+          grep -Fq 'swapz_round038_actual_store_provenance_probe(' linux/mm/zswap.c
+          grep -Fq 'swapz_round038_store_crc32c = ~crc32c(' linux/mm/zswap.c
+          grep -Fq 'entry->swapz_round038_store_crc32c == source_crc32c' linux/mm/zswap.c
+          grep -Fq 'kunit_test_suite(swapz_round038_store_suite);' linux/mm/zswap.c
+          grep -Fq '"swapz_round038_original_store_provenance_no_authority"' linux/mm/zswap.c
+          grep -Fq 'put_swap_device(active_area)' linux/mm/page_io.c
+          grep -Fq 'kunit_test_suite(swapz_round036_lifetime_suite);' linux/mm/page_io.c
+          grep -Fq 'swap_folio_sector(folio)' linux/mm/page_io.c
+          grep -Fq 'get_swap_device(original_slot)' linux/mm/page_io.c
+          grep -Fq 'swapz_round035_original_slot = swpentry' linux/mm/zswap.c
+          grep -Fq 'swapz_round035_bio_owner_matches' linux/block/bio.c
+          grep -Fq 'kunit_test_suite(swapz_round035_route_suite);' linux/mm/page_io.c
+          echo "ROUND040_ORIGINAL_10_FILE_MANIFEST_ASYNC_LEASE_PASS"
+      - name: Real original UML boot with CONFIG_ZSWAP=y and independent 41-case JSON KTAP
+        shell: bash
+        timeout-minutes: 80
+        run: |
+          set -Eeuo pipefail
+          phase=original-kunit-config
+          log=round040-evidence/uml-first-error.log
+          out="$RUNNER_TEMP/round040-lease-uml"
+          result="$PWD/round040-evidence/real-original-41.json"
+          request="$PWD/round040-evidence/real-original.kunitconfig"
+          printf 'main_sha=%s\noriginal_sha=c339f4010dea8b0d754f84ace70cd1b089878ef8\n' \
+            "$GITHUB_SHA" >round040-evidence/verdict.txt
+          trap 'status=$?; if ((status)); then echo "::error::Round040 actual original UML first failure phase=$phase code=$status"; tail -n 100 "$log" 2>/dev/null || :; printf "result=FAIL\nfirst_phase=%s\nexit=%d\n" "$phase" "$status" >>round040-evidence/verdict.txt; fi' EXIT
+          cat >"$request" <<'KUNIT_CFG'
+          CONFIG_KUNIT=y
+          CONFIG_BLOCK=y
+          CONFIG_SWAP=y
+          CONFIG_ZSWAP=y
+          CONFIG_SWAP_BIO_ORIGIN_KUNIT_TEST=y
+          CONFIG_CRYPTO=y
+          CONFIG_CRYPTO_LZ4=y
+          CONFIG_CRYPTO_SHA256=y
+          CONFIG_LZ4_COMPRESS=y
+          CONFIG_LZ4_DECOMPRESS=y
+          # CONFIG_CGROUPS is not set
+          # CONFIG_KUNIT_ALL_TESTS is not set
+          KUNIT_CFG
+          flags="-DSWAPZ_ROUND028_SLOT_EPOCH_SOURCE=1 -DSWAPZ_ROUND030_EVICTION_SNAPSHOT_SOURCE=1 -DSWAPZ_ROUND025_SIDEBAND_CI_ONLY=1 -DSWAPZ_ROUND031_MM_BIO_SOURCE=1 -DSWAPZ_ROUND032_BIO_COPY_VIEW_CI_ONLY=1 -DSWAPZ_ROUND034_ORIGINAL_V1_KUNIT_TEST=1 -DSWAPZ_ROUND035_ORIGINAL_MM_ROUTE_WITNESS_TEST=1 -DSWAPZ_ROUND036_ORIGINAL_ROUTE_LIFETIME_TEST=1 -DSWAPZ_ROUND037_ORIGINAL_MM_LIFETIME_OWNER_TEST=1 -DSWAPZ_ROUND038_ORIGINAL_STORE_PROVENANCE_TEST=1 -DSWAPZ_ROUND040_ORIGINAL_ASYNC_SLOT_LEASE_NEGATIVE_TEST=1"
+          phase=real-original-uml-build-boot
+          if timeout -k 10s 65m python3 -B linux/tools/testing/kunit/kunit.py run \
+              --arch=um --build_dir="$out" --kunitconfig="$request" \
+              --make_options="KCFLAGS=$flags -Werror" --jobs=2 --timeout=120 \
+              --json="$result" 'swapz_round0*' >"$log" 2>&1; then
+            echo "ROUND040_REAL_ORIGINAL_UML_RETURN=0"
+          else
+            exit "$?"
+          fi
+          phase=real-original-effective-kconfig
+          test -x "$out/linux"
+          test -s "$result"
+          test -s "$out/test.log"
+          for exact in CONFIG_ZSWAP=y CONFIG_SWAP=y CONFIG_KUNIT=y \
+              CONFIG_CRYPTO_SHA256=y CONFIG_CRYPTO_LIB_SHA256=y \
+              CONFIG_LZ4_COMPRESS=y CONFIG_LZ4_DECOMPRESS=y \
+              CONFIG_SWAP_BIO_ORIGIN_KUNIT_TEST=y \
+              '# CONFIG_CGROUPS is not set'; do
+            grep -Fxq "$exact" "$out/.config"
+          done
+          if grep -Eq '^CONFIG_BLK_CGROUP=[ym]$' "$out/.config"; then
+            echo "::error::Original UML CGROUPS-off BLK_CGROUP unexpectedly enabled"
+            exit 3
+          fi
+          printf 'effective_config_sha256=%s\n' "$(sha256sum "$out/.config" | cut -d' ' -f1)" >>round040-evidence/verdict.txt
+          printf 'actual_kernel_sha256=%s\n' "$(sha256sum "$out/linux" | cut -d' ' -f1)" >>round040-evidence/verdict.txt
+          printf 'json_sha256=%s\n' "$(sha256sum "$result" | cut -d' ' -f1)" >>round040-evidence/verdict.txt
+          printf 'ktap_sha256=%s\n' "$(sha256sum "$out/test.log" | cut -d' ' -f1)" >>round040-evidence/verdict.txt
+          cp "$out/test.log" round040-evidence/original-kernel-ktap.log
+          phase=independent-41-case-original-json-ktap
+          if python3 -B swapz/tests/tools/round040-original-lease-verify.py \
+              --result "$result" --kernel-log "$out/test.log" \
+              >round040-evidence/verified-41.log 2>&1; then
+            cat round040-evidence/verified-41.log
+          else
+            code=$?
+            cat round040-evidence/verified-41.log
+            exit "$code"
+          fi
+          printf 'prior_original_executed_cases=36\nnew_async_lease_cases=5\nexecuted_total=41\nresult=PASS\n' \
+            >>round040-evidence/verdict.txt
+          echo "ORIGINAL_STORE_EXECUTED=NO SOURCE_MAPPED_AUTHENTICATED=0 MM_PRESSURE_EVICTION=NOT_RUN PHASE_A=BLOCKED"
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: round040-real-original-mm-async-lease-uml
+          path: round040-evidence/
+          if-no-files-found: ignore
+          retention-days: 7
+
+  original-x86-y-n:
+    name: "Real original x86 ZSWAP y/n full kernel, GPL probe and matched DM module"
+    runs-on: ubuntu-24.04
+    timeout-minutes: 110
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          path: swapz
+          persist-credentials: false
+      - uses: actions/checkout@v4
+        with:
+          repository: torvalds/linux
+          ref: c339f4010dea8b0d754f84ace70cd1b089878ef8
+          fetch-depth: 1
+          path: linux
+          persist-credentials: false
+      - name: Install real original Linux full Kbuild dependencies
+        run: |
+          set -euo pipefail
+          sudo apt-get update -qq
+          sudo DEBIAN_FRONTEND=noninteractive apt-get install -y \
+            --no-install-recommends build-essential bc bison flex \
+            libelf-dev libssl-dev python3 binutils
+      - name: Stage exact original source and validate all manifest SHA256
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          mkdir -p round040-evidence
+          test "$(git -C swapz rev-parse HEAD)" = "$GITHUB_SHA"
+          test "$(git -C linux rev-parse HEAD)" = c339f4010dea8b0d754f84ace70cd1b089878ef8
+          test -z "$(git -C linux status --porcelain --untracked-files=all)"
+          python3 -B swapz/tests/tools/stage-pinned-linux-zswap-composed.py \
+            --linux-root linux --manifest round040-evidence/real-original-manifest.json
+          python3 - round040-evidence/real-original-manifest.json <<'PY'
+          import json, hashlib, pathlib, sys
+          data = json.loads(pathlib.Path(sys.argv[1]).read_text())
+          assert data["source_sha"] == "c339f4010dea8b0d754f84ace70cd1b089878ef8"
+          items = data["changed_paths"]
+          assert len(items) == 10
+          for item in items:
+              assert hashlib.sha256((pathlib.Path("linux") / item["path"]).read_bytes()).hexdigest() == item["staged_sha256"]
+          PY
+          git -C linux diff --check
+      - name: Actual original Linux vmlinux modules Module.symvers GPL probe and real matched DM
+        shell: bash
+        timeout-minutes: 85
+        run: |
+          set -Eeuo pipefail
+          phase=initial
+          log=round040-evidence/real-kbuild-first-error.log
+          report=round040-evidence/real-original-x86-y-n-verdict.txt
+          printf 'main_sha=%s\nupstream_sha=c339f4010dea8b0d754f84ace70cd1b089878ef8\n' \
+            "$GITHUB_SHA" >"$report"
+          trap 'code=$?; if ((code)); then echo "::error::Round040 first genuine original Kbuild failure phase=$phase code=$code"; tail -n 95 "$log" 2>/dev/null || :; printf "result=FAIL\nfirst_phase=%s\nexit=%d\n" "$phase" "$code" >>"$report"; fi' EXIT
+          checked() {
+            phase="$1"
+            shift
+            if "$@" >"$log" 2>&1; then
+              printf '%s_exit=0\n' "$phase" >>"$report"
+            else
+              local code=$?
+              echo "::error::Actual pinned original Kbuild first error phase=$phase code=$code"
+              tail -n 85 "$log"
+              return "$code"
+            fi
+          }
+          flags="-DSWAPZ_ROUND028_SLOT_EPOCH_SOURCE=1 -DSWAPZ_ROUND030_EVICTION_SNAPSHOT_SOURCE=1 -DSWAPZ_ROUND025_SIDEBAND_CI_ONLY=1 -DSWAPZ_ROUND031_MM_BIO_SOURCE=1 -DSWAPZ_ROUND032_BIO_COPY_VIEW_CI_ONLY=1 -DSWAPZ_ROUND034_ORIGINAL_V1_KUNIT_TEST=1 -DSWAPZ_ROUND035_ORIGINAL_MM_ROUTE_WITNESS_TEST=1 -DSWAPZ_ROUND036_ORIGINAL_ROUTE_LIFETIME_TEST=1 -DSWAPZ_ROUND037_ORIGINAL_MM_LIFETIME_OWNER_TEST=1 -DSWAPZ_ROUND038_ORIGINAL_STORE_PROVENANCE_TEST=1 -DSWAPZ_ROUND040_ORIGINAL_ASYNC_SLOT_LEASE_NEGATIVE_TEST=1"
+          info="$RUNNER_TEMP/round040-source-build-info.h"
+          printf '#define SWAPZ_BUILD_SOURCE_SHA "%s"\n#define SWAPZ_BUILD_SOURCE_CLEAN 1\n#define SWAPZ_BUILD_SOURCE_CLEAN_STRING "1"\n' \
+            "$GITHUB_SHA" > "$info"
+          for profile in enabled disabled; do
+            out="$RUNNER_TEMP/round040-original-$profile"
+            mkdir -p "$out"
+            checked "$profile-defconfig" make -s -C linux "O=$out" CC=gcc defconfig
+            if [[ "$profile" == enabled ]]; then
+              option=--enable
+              effective=CONFIG_ZSWAP=y
+            else
+              option=--disable
+              effective='# CONFIG_ZSWAP is not set'
+            fi
+            checked "$profile-config" linux/scripts/config --file "$out/.config" \
+              --enable SWAP "$option" ZSWAP --enable KUNIT \
+              --enable SWAP_BIO_ORIGIN_KUNIT_TEST --enable MODULES \
+              --enable MD --enable BLK_DEV_DM --enable CRYPTO_LZ4 \
+              --enable CRYPTO_SHA256 --enable LZ4_COMPRESS \
+              --enable LZ4_DECOMPRESS
+            checked "$profile-olddefconfig" make -s -C linux "O=$out" CC=gcc olddefconfig
+            for expected in CONFIG_SWAP=y CONFIG_KUNIT=y CONFIG_MODULES=y \
+                CONFIG_BLK_DEV_DM=y CONFIG_SWAP_BIO_ORIGIN_KUNIT_TEST=y \
+                CONFIG_CRYPTO_LIB_SHA256=y CONFIG_LZ4_COMPRESS=y \
+                CONFIG_LZ4_DECOMPRESS=y "$effective"; do
+              grep -Fxq "$expected" "$out/.config"
+            done
+            checked "$profile-prepare" make -s -C linux "O=$out" CC=gcc -j2 W=1 prepare
+            checked "$profile-default-original-objects" make -s -C linux \
+              "O=$out" CC=gcc -j2 W=1 KCFLAGS=-Werror block/bio.o mm/page_io.o mm/swapfile.o
+            if nm -a "$out/block/bio.o" | grep -Eq 'swapz_round035_bio_owner_matches|swapz_ci_bio_snapshot_lz4_v1'; then
+              echo "::error::Unmodified original default BIO included gated source"
+              exit 3
+            fi
+            if nm -a "$out/mm/page_io.o" | grep -Eq 'swapz_round035_mm_route_preflight|swapz_round036_original_lifetime_probe|swapz_round037_original_mm_scoped_probe|swapz_round040_original_mm_post_put_lease_probe'; then
+              echo "::error::Unmodified original default page-IO included gated source"
+              exit 3
+            fi
+            if [[ "$profile" == enabled ]]; then
+            checked "$profile-original-default-zswap-object" make -s -C linux \
+              "O=$out" CC=gcc -j2 W=1 KCFLAGS=-Werror mm/zswap.o
+            if nm -a "$out/mm/zswap.o" | grep -q swapz_round038_actual_store_provenance_probe; then
+              echo "::error::Original zswap default object included CI-only Round038 STORE probe"
+              exit 3
+            fi
+          fi
+          checked "$profile-original-guarded-objects" make -s -C linux \
+              "O=$out" CC=gcc -j2 W=1 "KCFLAGS=$flags -Werror" \
+              block/bio.o mm/page_io.o mm/swapfile.o \
+              block/swap-bio-origin-kunit.o
+            if [[ "$profile" == enabled ]]; then
+              checked "$profile-original-guarded-zswap" make -s -C linux \
+                "O=$out" CC=gcc -j2 W=1 "KCFLAGS=$flags -Werror" mm/zswap.o
+              if ! nm -a "$out/mm/zswap.o" | grep -q swapz_round038_actual_store_provenance_probe; then
+                echo "::error::Real original guarded Round038 STORE provenance C machine code absent"
+                exit 3
+              fi
+              if ! nm -a "$out/mm/zswap.o" | grep -q swapz_round038_store_observation_check; then
+                echo "::error::Original Round038 provenance original C check absent"
+                exit 3
+              fi
+            fi
+            for symbol in swapz_ci_bio_snapshot_lz4_v1 \
+                swapz_round035_bio_owner_matches; do
+              if ! nm -a "$out/block/bio.o" | grep -q "$symbol"; then
+                echo "::error::Original guarded BIO source symbol missing $symbol"
+                exit 3
+              fi
+            done
+            if ! nm -a "$out/mm/page_io.o" | grep -q swapz_round035_mm_route_preflight; then
+              echo "::error::Actual original Round035 page-IO route witness machine code absent"
+              exit 3
+            fi
+            if ! nm -a "$out/mm/page_io.o" | grep -q swapz_round036_original_lifetime_probe; then
+              echo "::error::Actual original Round036 page-IO lifetime machine code absent"
+              exit 3
+            fi
+            if ! nm -a "$out/mm/page_io.o" | grep -q swapz_round040_original_mm_post_put_lease_probe; then
+              echo "::error::Actual original Round040 post-put async lease C machine code absent"
+              exit 3
+            fi
+            if ! nm -a "$out/mm/page_io.o" | grep -q swapz_round037_original_mm_scoped_probe; then
+              echo "::error::Actual original Round037 page-IO scoped MM witness machine code absent"
+              exit 3
+            fi
+            checked "$profile-vmlinux" make -s -C linux "O=$out" CC=gcc \
+              -j2 W=1 "KCFLAGS=$flags" vmlinux
+            checked "$profile-modules" make -s -C linux "O=$out" CC=gcc \
+              -j2 W=1 "KCFLAGS=$flags" modules
+            test -s "$out/vmlinux"
+            test -s "$out/Module.symvers"
+            release="$(make -s -C linux "O=$out" CC=gcc kernelrelease)"
+            checked "$profile-strict-gpl-symbol" python3 -B \
+              swapz/tests/runtime/native/fixtures/round033-provider-symbol-gate.py \
+              --symvers "$out/Module.symvers"
+            grep -Fq 'ROUND033_ORIGINAL_GPL_EXPORT_PASS count=1 ' "$log"
+            probe="$RUNNER_TEMP/round040-original-gpl-probe-$profile"
+            mkdir -p "$probe"
+            cp swapz/tests/runtime/native/fixtures/round032-bio-probe.c \
+              "$probe/round032-bio-probe.c"
+            printf 'obj-m := round032-bio-probe.o\n' >"$probe/Makefile"
+            unset KBUILD_MODPOST_WARN
+            checked "$profile-real-gpl-modpost" make -s -C linux "O=$out" \
+              "M=$probe" CC=gcc -j2 W=1 "KCFLAGS=$flags -Werror" modules
+            test -s "$probe/round032-bio-probe.ko"
+            nm -u "$probe/round032-bio-probe.ko" |
+              grep -Fq swapz_ci_bio_snapshot_lz4_v1
+            readelf -p .modinfo "$probe/round032-bio-probe.ko" |
+              grep -Fq "vermagic=$release"
+            module="$RUNNER_TEMP/round040-real-dm-$profile"
+            mkdir -p "$module"
+            checked "$profile-real-dm-swapz" make -s -C swapz/src/kernel \
+              "KDIR=$out" "SWAPZ_STAGE=$module" \
+              "SWAPZ_BUILD_INFO=$info" CC=gcc -j2 W=1 all
+            test -s "$module/dm-swapz.ko"
+            readelf -p .modinfo "$module/dm-swapz.ko" |
+              grep -Fq "vermagic=$release"
+            printf 'profile=%s\nkernel_sha=%s\nsymvers_sha=%s\nprobe_sha=%s\ndm_sha=%s\n' \
+              "$profile" "$(sha256sum "$out/vmlinux" | cut -d' ' -f1)" \
+              "$(sha256sum "$out/Module.symvers" | cut -d' ' -f1)" \
+              "$(sha256sum "$probe/round032-bio-probe.ko" | cut -d' ' -f1)" \
+              "$(sha256sum "$module/dm-swapz.ko" | cut -d' ' -f1)" >> "$report"
+          done
+          printf 'result=PASS\n' >> "$report"
+          echo "ROUND040_REAL_PINNED_ORIGINAL_X86_Y_N_GPL_PROBE_AND_DM_MODULE_PASS"
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: round040-original-mm-real-x86-y-n
+          path: round040-evidence/
+          if-no-files-found: ignore
+          retention-days: 7

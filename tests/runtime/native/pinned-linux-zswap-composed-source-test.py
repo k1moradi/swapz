@@ -607,5 +607,77 @@ class OriginalMMAndBIOComposer(unittest.TestCase):
                              label="round038-original-store", libraries=())
 
 
+
+    def test_round040_original_async_lease_source_negatives_and_dispatch(self):
+        source = stage.ROUND040_ORIGINAL_ASYNC_LEASE_C
+        self.assertEqual(stage.ROUND040_ORIGINAL_ASYNC_LEASE_MACRO,
+                         "SWAPZ_ROUND040_ORIGINAL_ASYNC_SLOT_LEASE_NEGATIVE_TEST")
+        self.assertIn("SWAPZ_ROUND038_ORIGINAL_STORE_PROVENANCE_TEST", source)
+        self.assertIn("SWAPZ_ROUND037_ORIGINAL_MM_LIFETIME_OWNER_TEST", source)
+        self.assertIn("IS_ENABLED(CONFIG_KUNIT)", source)
+        for literal in (
+            "swapz_round040_original_mm_post_put_lease_probe(",
+            "swapz_round040_async_lease_refuse(",
+            "swapz_round028_slot_epoch(original_slot)",
+            "folio_swap_entry(folio, 0)",
+            "swap_folio_sector(folio)",
+            "get_swap_device(original_slot)",
+            "put_swap_device(active_area)",
+            "active_area != ctx->sis",
+            "active_area->bdev",
+            "swapz_round035_bio_owner_matches(",
+            "source_bio->bi_bdev",
+            "source_bio->bi_iter.bi_sector",
+            "area_ref_released_before_submit",
+            "source_allocation_lease_held",
+            "current_dm_gc_lease_held",
+            "return -EOPNOTSUPP;",
+            'swapz_round040_original_mm_async_lease_no_authority',
+            "kunit_test_suite(swapz_round040_async_lease_suite)",
+        ):
+            self.assertIn(literal, source)
+        for name in ("scope_put_late_callback",
+                     "slot_swapoff_readd_aba", "clone_split_last_ref",
+                     "cancel_teardown_gc_unknown",
+                     "bdev_sector_raw_geometry"):
+            self.assertEqual(source.count(
+                "KUNIT_CASE(swapz_round040_" + name + "_kunit)"), 1)
+        no_comments = re.sub(r"/\*[\s\S]*?\*/", "", source)
+        for forbidden in ("EXPORT_SYMBOL", "bio_endio(", "submit_bio(",
+                          "swapz_map(", "SOURCE_MAPPED_AUTHENTICATED=1"):
+            self.assertNotIn(forbidden, no_comments)
+        self.assertIn("apply_round040_original_async_lease(path, changed)",
+                      Path(STAGER).read_text(encoding="utf-8"))
+        self.assertIn("ROUND037_MM_OWNER_HOOK + ROUND040_ORIGINAL_ASYNC_LEASE_HOOK",
+                      Path(STAGER).read_text(encoding="utf-8"))
+        self.assertIn("swapz_round040_original_mm_post_put_lease_probe(",
+                      stage.ROUND040_ORIGINAL_ASYNC_LEASE_HOOK)
+        if os.environ.get("ROUND031_PINNED_LINUX"):
+            original = (Path(os.environ["ROUND031_PINNED_LINUX"]) /
+                        "mm/page_io.c").read_text(encoding="utf-8")
+            for anchor in ("folio_unlock(folio);",
+                           "swap_folio_sector(bio_first_folio_all(bio))",
+                           "bio->bi_end_io = end_swap_bio_write;",
+                           "submit_bio(bio);",
+                           "bio_uninit(bio);"):
+                self.assertIn(anchor, original)
+
+    def test_round040_original_async_lease_exact_c_gcc_clang_asan_ubsan(self):
+        # The test extracts EXACT original mm/page_io C; host stubs do not
+        # reproduce original allocator, users ref, BIO, or a DM target lease.
+        source = stage.ROUND040_ORIGINAL_ASYNC_LEASE_C
+        start = "struct swapz_round040_async_lease_evidence {"
+        end = "/* ROUND040_ORIGINAL_ASYNC_LEASE_PURE_C_END */"
+        self.assertEqual(source.count(start), 1)
+        self.assertEqual(source.count(end), 1)
+        extracted = start + source.split(start, 1)[1].split(end, 1)[0]
+        fixture = (FIXTURES / "round040-original-lease-host.c").read_text(
+            encoding="utf-8")
+        marker = "/* ROUND040_EXACT_ORIGINAL_ASYNC_LEASE_C */"
+        self.assertEqual(fixture.count(marker), 1)
+        self.compile_and_run(fixture.replace(marker, extracted, 1),
+                             label="round040-original-lease", libraries=())
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)

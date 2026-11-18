@@ -2521,6 +2521,351 @@ def apply_round038_original_store(path: str, composed: str) -> str:
         path, "sealed-store-vs-owned-copy-crc")
     return composed
 
+
+# Round040 original MM asynchronous source-area/slot lifetime falsification:
+# original KUnit source only. No authorization exported to downstream DM.
+ROUND040_ORIGINAL_ASYNC_LEASE_MACRO = "SWAPZ_ROUND040_ORIGINAL_ASYNC_SLOT_LEASE_NEGATIVE_TEST"
+ROUND040_ORIGINAL_ASYNC_LEASE_C = r"""#if defined(SWAPZ_ROUND040_ORIGINAL_ASYNC_SLOT_LEASE_NEGATIVE_TEST) && \
+    defined(SWAPZ_ROUND038_ORIGINAL_STORE_PROVENANCE_TEST) && \
+    defined(SWAPZ_ROUND037_ORIGINAL_MM_LIFETIME_OWNER_TEST) && \
+    defined(SWAPZ_ROUND036_ORIGINAL_ROUTE_LIFETIME_TEST) && \
+    defined(SWAPZ_ROUND035_ORIGINAL_MM_ROUTE_WITNESS_TEST) && \
+    defined(SWAPZ_ROUND034_ORIGINAL_V1_KUNIT_TEST) && \
+    defined(SWAPZ_ROUND032_BIO_COPY_VIEW_CI_ONLY) && \
+    defined(SWAPZ_ROUND031_MM_BIO_SOURCE) && \
+    defined(SWAPZ_ROUND030_EVICTION_SNAPSHOT_SOURCE) && \
+    defined(SWAPZ_ROUND028_SLOT_EPOCH_SOURCE) && \
+    defined(SWAPZ_ROUND025_SIDEBAND_CI_ONLY) && IS_ENABLED(CONFIG_KUNIT)
+/* ROUND040_ORIGINAL_ASYNC_LEASE_C_BEGIN */
+/*
+ * Negative proof ONLY: this is a VALUE snapshot of the real original
+ * synchronous area observation, never a pin or permission. The genuine
+ * get_swap_device() area users percpu_ref in Round037 was put BEFORE this
+ * dispatch observation and BEFORE the original asynchronous submit_bio().
+ * A folio lock/allocated-swap epoch read cannot be retained by a later
+ * clone, split, endio, swapoff/re-add or target DM GC map generation.
+ * No positive transfer path, hardware operation or raw BIO mutation exists.
+ */
+struct swapz_round040_async_lease_evidence {
+	u64 source_swap_entry;
+	u64 candidate_swap_entry;
+	u64 source_slot_epoch;
+	u64 candidate_slot_epoch;
+	u64 original_area_generation;
+	u64 candidate_area_generation;
+	u64 expected_dm_map_generation;
+	u64 expected_dm_gc_generation;
+	const void *original_bdev;
+	const void *candidate_bdev;
+	u64 original_sector;
+	u64 candidate_sector;
+	u32 original_bio_bytes;
+	u32 candidate_bio_bytes;
+	bool area_ref_was_scoped;
+	bool area_ref_released_before_submit;
+	bool source_bio_live;
+	bool original_owner_live;
+	bool folio_unlocked_for_writeback;
+	bool async_endio_pending;
+	bool bio_cloned;
+	bool bio_split;
+	bool canceled_or_teardown;
+	bool source_allocation_lease_held;
+	bool current_dm_gc_lease_held;
+};
+
+/* ROUND040_ORIGINAL_ASYNC_LEASE_PURE_C_BEGIN */
+static int swapz_round040_async_lease_refuse(
+		const struct swapz_round040_async_lease_evidence *evidence)
+{
+	if (!evidence)
+		return -EINVAL;
+	if (!evidence->source_swap_entry ||
+	    !evidence->candidate_swap_entry ||
+	    evidence->source_swap_entry != evidence->candidate_swap_entry ||
+	    !evidence->source_slot_epoch || !evidence->candidate_slot_epoch ||
+	    evidence->source_slot_epoch != evidence->candidate_slot_epoch)
+		return -ESTALE;
+	/* Area generation is UNKNOWN (zero) on real original dispatch.
+	 * A matching synthetic generation never becomes an actual ref.
+	 */
+	if (evidence->original_area_generation &&
+	    evidence->candidate_area_generation &&
+	    evidence->original_area_generation !=
+		    evidence->candidate_area_generation)
+		return -ESTALE;
+	if (!evidence->original_bdev || !evidence->candidate_bdev ||
+	    evidence->original_bdev != evidence->candidate_bdev)
+		return -ESTALE;
+	if (!evidence->original_sector || !evidence->candidate_sector ||
+	    (evidence->original_sector & 7U) ||
+	    (evidence->candidate_sector & 7U) ||
+	    evidence->original_sector != evidence->candidate_sector)
+		return -ERANGE;
+	if (evidence->original_bio_bytes != 4096U ||
+	    evidence->candidate_bio_bytes != 4096U)
+		return -EOPNOTSUPP;
+	if (!evidence->area_ref_was_scoped ||
+	    !evidence->area_ref_released_before_submit ||
+	    !evidence->source_bio_live ||
+	    !evidence->original_owner_live ||
+	    !evidence->folio_unlocked_for_writeback)
+		return -ESTALE;
+	/* Released area ref cannot survive original asynchronous callback.
+	 * Neither cloned/split children nor canceled/late endio inherit it.
+	 */
+	if (!evidence->async_endio_pending || evidence->bio_cloned ||
+	    evidence->bio_split || evidence->canceled_or_teardown)
+		return -EOPNOTSUPP;
+	if (!evidence->source_allocation_lease_held ||
+	    !evidence->current_dm_gc_lease_held ||
+	    !evidence->expected_dm_map_generation ||
+	    !evidence->expected_dm_gc_generation)
+		return -EOPNOTSUPP;
+	/*
+	 * Even fabricated all-positive future-generation flags do NOT
+	 * establish an allocator-incarnation lease or a current active
+	 * downstream DM target/extent/GC ref through async submission.
+	 */
+	return -EOPNOTSUPP;
+}
+/* ROUND040_ORIGINAL_ASYNC_LEASE_PURE_C_END */
+
+/*
+ * This actual original mm/page_io.c call occurs AFTER the existing
+ * Round037 synchronous scope's real users ref has ALREADY been put.
+ * Acquire a NEW ORIGINAL get_swap_device() area users ref ONLY while
+ * reading the original bdev/nonlinear sector, full packed slot, cluster
+ * epoch and genuinely owned BIO, then put THAT REF EXACTLY ONCE before
+ * checking any proposed async source/DM lease. No area pointer escapes,
+ * and no freed swap_info_struct is dereferenced after its reference put.
+ * This does NOT issue IO or mutate the original uncompressed 4096 WRITE.
+ */
+static noinline int swapz_round040_original_mm_post_put_lease_probe(
+		const struct swap_io_ctx *ctx, const struct bio *source_bio,
+		struct folio *folio)
+{
+	struct swapz_round040_async_lease_evidence evidence = {};
+	struct swap_info_struct *active_area;
+	swp_entry_t original_slot;
+
+	if (!ctx || !ctx->sis || !source_bio || !folio ||
+	    !source_bio->bi_swapz_ci_sideband ||
+	    !folio_test_swapcache(folio) ||
+	    !folio_test_writeback(folio) || folio_test_locked(folio))
+		return -ESTALE;
+	original_slot = folio_swap_entry(folio, 0);
+	if (!original_slot.val || swp_type(original_slot) >= MAX_SWAPFILES)
+		return -ESTALE;
+	active_area = get_swap_device(original_slot);
+	if (IS_ERR_OR_NULL(active_area))
+		return -ESTALE;
+	if (active_area != ctx->sis || !active_area->bdev)
+		goto release_area;
+
+	evidence.source_swap_entry = (u64)original_slot.val;
+	evidence.candidate_swap_entry =
+		(u64)ctx->swapz_round035_original_slot.val;
+	evidence.source_slot_epoch = swapz_round028_slot_epoch(original_slot);
+	evidence.candidate_slot_epoch =
+		ctx->swapz_round035_original_epoch;
+	evidence.original_bdev = active_area->bdev;
+	evidence.candidate_bdev = source_bio->bi_bdev;
+	evidence.original_sector = (u64)swap_folio_sector(folio);
+	evidence.candidate_sector = (u64)source_bio->bi_iter.bi_sector;
+	evidence.original_bio_bytes = 4096U;
+	evidence.candidate_bio_bytes = source_bio->bi_iter.bi_size;
+	evidence.area_ref_was_scoped = true;
+	evidence.source_bio_live = true;
+	evidence.original_owner_live = swapz_round035_bio_owner_matches(
+		source_bio, (u64)original_slot.val, evidence.source_slot_epoch);
+	evidence.folio_unlocked_for_writeback = true;
+	evidence.async_endio_pending = true;
+release_area:
+	/* A second genuine, locally held ref: never forwarded to BIO/DM. */
+	put_swap_device(active_area);
+	if (!evidence.area_ref_was_scoped)
+		return -ESTALE;
+	evidence.area_ref_released_before_submit = true;
+	/* No ORIGINAL lease API exists for slot reuse/swapoff or DM GC.
+	 * Map+GC generation and both real async ownership pins stay ZERO.
+	 */
+	return swapz_round040_async_lease_refuse(&evidence);
+}
+
+/* KUnit fixtures below are synthetic values, no active swapon/swapoff/IO. */
+static void swapz_round040_async_lease_fixture(
+		struct swapz_round040_async_lease_evidence *evidence)
+{
+	memset(evidence, 0, sizeof(*evidence));
+	evidence->source_swap_entry = (u64)swp_entry(1U, 37U).val;
+	evidence->candidate_swap_entry = evidence->source_swap_entry;
+	evidence->source_slot_epoch = 17U;
+	evidence->candidate_slot_epoch = 17U;
+	evidence->original_area_generation = 3U; /* Synthetic only. */
+	evidence->candidate_area_generation = 3U;
+	/* Nonlinear original swapfile extent: 4096 != 37*8. */
+	evidence->original_sector = 4096U;
+	evidence->candidate_sector = 4096U;
+	evidence->original_bdev = evidence;
+	evidence->candidate_bdev = evidence;
+	evidence->original_bio_bytes = 4096U;
+	evidence->candidate_bio_bytes = 4096U;
+	evidence->area_ref_was_scoped = true;
+	evidence->area_ref_released_before_submit = true;
+	evidence->source_bio_live = true;
+	evidence->original_owner_live = true;
+	evidence->folio_unlocked_for_writeback = true;
+	evidence->async_endio_pending = true;
+}
+
+static void swapz_round040_scope_put_late_callback_kunit(struct kunit *test)
+{
+	struct swapz_round040_async_lease_evidence evidence;
+
+	swapz_round040_async_lease_fixture(&evidence);
+	KUNIT_EXPECT_EQ(test, swapz_round040_async_lease_refuse(&evidence),
+			-EOPNOTSUPP);
+	evidence.area_ref_released_before_submit = false;
+	KUNIT_EXPECT_EQ(test, swapz_round040_async_lease_refuse(&evidence),
+			-ESTALE);
+	evidence.area_ref_released_before_submit = true;
+	evidence.source_bio_live = false;
+	KUNIT_EXPECT_EQ(test, swapz_round040_async_lease_refuse(&evidence),
+			-ESTALE);
+}
+
+static void swapz_round040_slot_swapoff_readd_aba_kunit(struct kunit *test)
+{
+	struct swapz_round040_async_lease_evidence evidence;
+
+	swapz_round040_async_lease_fixture(&evidence);
+	evidence.candidate_slot_epoch++;
+	KUNIT_EXPECT_EQ(test, swapz_round040_async_lease_refuse(&evidence),
+			-ESTALE);
+	evidence.candidate_slot_epoch = evidence.source_slot_epoch;
+	evidence.candidate_swap_entry = (u64)swp_entry(2U, 37U).val;
+	KUNIT_EXPECT_EQ(test, swapz_round040_async_lease_refuse(&evidence),
+			-ESTALE);
+	evidence.candidate_swap_entry = evidence.source_swap_entry;
+	evidence.candidate_area_generation++;
+	KUNIT_EXPECT_EQ(test, swapz_round040_async_lease_refuse(&evidence),
+			-ESTALE);
+}
+
+static void swapz_round040_clone_split_last_ref_kunit(struct kunit *test)
+{
+	struct swapz_round040_async_lease_evidence evidence;
+
+	swapz_round040_async_lease_fixture(&evidence);
+	evidence.bio_cloned = true;
+	KUNIT_EXPECT_EQ(test, swapz_round040_async_lease_refuse(&evidence),
+			-EOPNOTSUPP);
+	evidence.bio_cloned = false;
+	evidence.bio_split = true;
+	KUNIT_EXPECT_EQ(test, swapz_round040_async_lease_refuse(&evidence),
+			-EOPNOTSUPP);
+	evidence.bio_split = false;
+	evidence.original_owner_live = false;
+	KUNIT_EXPECT_EQ(test, swapz_round040_async_lease_refuse(&evidence),
+			-ESTALE);
+}
+
+static void swapz_round040_cancel_teardown_gc_unknown_kunit(struct kunit *test)
+{
+	struct swapz_round040_async_lease_evidence evidence, unchanged;
+
+	swapz_round040_async_lease_fixture(&evidence);
+	evidence.canceled_or_teardown = true;
+	KUNIT_EXPECT_EQ(test, swapz_round040_async_lease_refuse(&evidence),
+			-EOPNOTSUPP);
+	evidence.canceled_or_teardown = false;
+	evidence.async_endio_pending = false;
+	KUNIT_EXPECT_EQ(test, swapz_round040_async_lease_refuse(&evidence),
+			-EOPNOTSUPP);
+	evidence.async_endio_pending = true;
+	evidence.expected_dm_map_generation = 7U;
+	evidence.expected_dm_gc_generation = 9U;
+	evidence.source_allocation_lease_held = true;
+	evidence.current_dm_gc_lease_held = true;
+	unchanged = evidence;
+	KUNIT_EXPECT_EQ(test, swapz_round040_async_lease_refuse(&evidence),
+			-EOPNOTSUPP);
+	KUNIT_EXPECT_EQ(test, memcmp(&evidence, &unchanged,
+				    sizeof(evidence)), 0);
+}
+
+static void swapz_round040_bdev_sector_raw_geometry_kunit(struct kunit *test)
+{
+	struct swapz_round040_async_lease_evidence evidence;
+
+	swapz_round040_async_lease_fixture(&evidence);
+	evidence.candidate_bdev = (const void *)test;
+	KUNIT_EXPECT_EQ(test, swapz_round040_async_lease_refuse(&evidence),
+			-ESTALE);
+	evidence.candidate_bdev = evidence.original_bdev;
+	evidence.candidate_sector = 296U; /* Packed slot != original sector. */
+	KUNIT_EXPECT_EQ(test, swapz_round040_async_lease_refuse(&evidence),
+			-ERANGE);
+	evidence.candidate_sector = evidence.original_sector;
+	evidence.candidate_bio_bytes = 2048U;
+	KUNIT_EXPECT_EQ(test, swapz_round040_async_lease_refuse(&evidence),
+			-EOPNOTSUPP);
+	KUNIT_EXPECT_EQ(test, swapz_round040_async_lease_refuse(NULL),
+			-EINVAL);
+}
+
+static struct kunit_case swapz_round040_async_lease_cases[] = {
+	KUNIT_CASE(swapz_round040_scope_put_late_callback_kunit),
+	KUNIT_CASE(swapz_round040_slot_swapoff_readd_aba_kunit),
+	KUNIT_CASE(swapz_round040_clone_split_last_ref_kunit),
+	KUNIT_CASE(swapz_round040_cancel_teardown_gc_unknown_kunit),
+	KUNIT_CASE(swapz_round040_bdev_sector_raw_geometry_kunit),
+	{}
+};
+
+static struct kunit_suite swapz_round040_async_lease_suite = {
+	.name = "swapz_round040_original_mm_async_lease_no_authority",
+	.test_cases = swapz_round040_async_lease_cases,
+};
+kunit_test_suite(swapz_round040_async_lease_suite);
+/* ROUND040_ORIGINAL_ASYNC_LEASE_C_END */
+#endif /* Round040 original MM source lifetime negative, no live authority */
+"""
+ROUND040_ORIGINAL_ASYNC_LEASE_HOOK = r"""#if defined(SWAPZ_ROUND040_ORIGINAL_ASYNC_SLOT_LEASE_NEGATIVE_TEST) && \
+    defined(SWAPZ_ROUND038_ORIGINAL_STORE_PROVENANCE_TEST) && \
+    defined(SWAPZ_ROUND037_ORIGINAL_MM_LIFETIME_OWNER_TEST) && \
+    defined(SWAPZ_ROUND036_ORIGINAL_ROUTE_LIFETIME_TEST) && \
+    defined(SWAPZ_ROUND035_ORIGINAL_MM_ROUTE_WITNESS_TEST) && \
+    defined(SWAPZ_ROUND034_ORIGINAL_V1_KUNIT_TEST) && \
+    defined(SWAPZ_ROUND032_BIO_COPY_VIEW_CI_ONLY) && \
+    defined(SWAPZ_ROUND031_MM_BIO_SOURCE) && \
+    defined(SWAPZ_ROUND030_EVICTION_SNAPSHOT_SOURCE) && \
+    defined(SWAPZ_ROUND028_SLOT_EPOCH_SOURCE) && \
+    defined(SWAPZ_ROUND025_SIDEBAND_CI_ONLY) && IS_ENABLED(CONFIG_KUNIT)
+	/* Round037 ALREADY released the real scoped area users ref.
+	 * No area/slot/DM generation authority survives original async IO.
+	 */
+	if (bio->bi_swapz_ci_sideband)
+		(void)swapz_round040_original_mm_post_put_lease_probe(
+			ctx, bio, bio_first_folio_all(bio));
+#endif
+"""
+
+
+def apply_round040_original_async_lease(path: str, composed: str) -> str:
+    """Add real original dispatch witness plus synthetic original C KUnit negatives."""
+    if path != "mm/page_io.c":
+        return composed
+    handler = "static void swap_bdev_submit_write(struct swap_io_ctx *ctx)\n"
+    composed = replace_once(
+        composed, handler, ROUND040_ORIGINAL_ASYNC_LEASE_C + "\n" + handler,
+        path, "round040-original-post-put-lease-negative")
+    return replace_once(
+        composed, ROUND037_MM_OWNER_HOOK,
+        ROUND037_MM_OWNER_HOOK + ROUND040_ORIGINAL_ASYNC_LEASE_HOOK,
+        path, "round040-original-post-put-dispatch-hook")
+
 def replace_once(text: str, before: str, after: str, path: str, label: str) -> str:
     if not before or before == after or text.count(before) != 1 or (
         after in text and after not in before
@@ -2735,6 +3080,8 @@ def compose_postimage(path: str, original_bytes: bytes, *,
         changed = apply_round037_original_mm_owner(path, changed)
     if with_kunit:
         changed = apply_round038_original_store(path, changed)
+    if with_kunit:
+        changed = apply_round040_original_async_lease(path, changed)
     if path == "mm/zswap.c":
         for required in (
             "swapz_round028_slot_epoch(swpentry)",
