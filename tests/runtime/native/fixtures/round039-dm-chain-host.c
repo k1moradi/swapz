@@ -98,6 +98,11 @@ static void round039_test_chain(unsigned int extent_blocks,
 	       compressed_length <= SWAPZ_MAX_COMPRESSED);
 	initial_state(&context, &transaction, &descriptor, extent_bytes,
 		      compressed_length);
+	/* The inherited Round035 host has only eight fake physical blocks.
+	 * This chain owns TWO nonoverlapping four-block postheader extents;
+	 * expand only its bounded fake geometry, never the actual DM target.
+	 */
+	context.authority.physical_blocks = 16U;
 	context.target = &target;
 	assert(swapz_round031_dm_sidecar_init(&context, &sidecar) == 0);
 	memcpy(source_lz4_bytes, compressed, compressed_length);
