@@ -96,7 +96,8 @@ static void round040_test_reissue(unsigned int extent_blocks,
 	bool early_old_ack = fault == 1U || fault == 2U;
 	bool new_write_rejected = fault >= 7U && fault <= 22U;
 	bool new_gc_rejected = fault >= 25U && fault <= 34U;
-	bool new_read_rejected = fault >= 35U && fault <= 49U;
+	bool new_read_rejected = (fault >= 35U && fault <= 49U) ||
+		fault == 51U;
 	int result;
 
 	assert(old_write && new_write && old_read && new_read &&
@@ -269,6 +270,21 @@ static void round040_test_reissue(unsigned int extent_blocks,
 	assert(swapz_round040_dm_reissue_arm(
 		&context, reissue, 1U, &new_record, &new_source,
 		area_cookie + 1U, new_ticket) == -ESTALE);
+	{
+		/* The same original full type+offset may NOT turn B's
+		 * different plaintext into A's old epoch/STORE incarnation.
+		 */
+		struct swapz_round038_dm_read_record alias_record = new_record;
+		struct swapz_round032_dm_owned_view_v1 alias_source = new_source;
+
+		alias_source.source_slot_epoch = old_source.source_slot_epoch;
+		alias_source.stored_entry_identity =
+			old_source.stored_entry_identity;
+		alias_record.source = alias_source;
+		assert(swapz_round040_dm_reissue_arm(
+			&context, reissue, 1U, &alias_record, &alias_source,
+			area_cookie, new_ticket) == -ESTALE);
+	}
 	assert(swapz_round040_dm_reissue_arm(
 		&context, reissue, 1U, &new_record, &new_source,
 		area_cookie, new_ticket) == 0);
@@ -481,6 +497,39 @@ drain_old:
 		assert(new_read_event.result == -EIO);
 	else
 		assert(new_read_event.result == 0);
+	if (fault == 51U) {
+		/* A REAL second source-extracted Round039 fake GC moves B
+		 * again AFTER the old READ callback, BEFORE output commit.
+		 * No generation-only synthetic mutation can substitute for
+		 * the completed new extent stage/callback/map transition.
+		 */
+		struct round039_gc_event second_gc_event = { 0 };
+
+		assert(swapz_round039_dm_chain_gc_prepare(
+			&context, &sidecar, &new_source, new_chain,
+			new_gc_ticket + 1U, old_gc_block,
+			new_gc_sequence + 1U,
+			new_gc_extent, extent_bytes) == 0);
+		memcpy(old_gc_extent, new_chain->staged_relocation,
+		       extent_bytes);
+		second_gc_event.chain = new_chain;
+		second_gc_event.gc_ticket = new_gc_ticket + 1U;
+		second_gc_event.readback = old_gc_extent;
+		second_gc_event.completed_bytes = extent_bytes;
+		second_gc_event.capacity = extent_bytes;
+		context.ordered_owner = 0;
+		round039_dispatch_gc(&second_gc_event);
+		context.ordered_owner = 1;
+		assert(second_gc_event.result == 0);
+		assert(swapz_round040_dm_reissue_gc_finish(
+			&context, &sidecar, &new_source, reissue, 1U,
+			area_cookie, new_chain, new_gc_ticket + 1U) == 0);
+		assert(new_chain->gc_generation ==
+		       current_gc_generation + 1U);
+		assert(new_chain->current_record.fake_start_block ==
+		       old_gc_block);
+		assert(new_chain->mock_read_publications == 0U);
+	}
 	switch (fault) {
 	case 40U: new_source.source_slot_epoch++; break;
 	case 41U: new_source.stored_entry_identity++; break;
@@ -605,7 +654,7 @@ int main(void)
 
 	assert(round039_fixture_main() == 0);
 	for (extent_blocks = 1U; extent_blocks <= 4U; extent_blocks *= 2U)
-		for (fault = 0U; fault <= 50U; ++fault)
+		for (fault = 0U; fault <= 51U; ++fault)
 			round040_test_reissue(extent_blocks, fault);
 	puts("ROUND040_ACTUAL_DM_SAME_SLOT_REISSUE_2_SOURCE_SHA_GC_READ_NO_GO_PASS");
 	return 0;
