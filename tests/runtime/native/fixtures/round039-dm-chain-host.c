@@ -205,7 +205,7 @@ static void round039_test_chain(unsigned int extent_blocks,
 	case 10U: context.authority.gc_destination++; break;
 	case 11U: original_extent[original_write.payload_offset] ^= 1U;
 		  break;
-	case 12U: original_extent[extent_bytes - 1U] = 1U; break;
+	case 12U: original_extent[0] = 1U; break;
 	case 13U: chain->current_record.source.original_sha256[0] ^= 1U;
 		  break;
 	default: break;
@@ -318,7 +318,7 @@ static void round039_test_chain(unsigned int extent_blocks,
 	if (fault == 29U)
 		relocated_extent[chain->current_record.payload_offset] ^= 1U;
 	if (fault == 30U)
-		relocated_extent[extent_bytes - 1U] = 1U;
+		relocated_extent[0] = 1U;
 	context.ordered_owner = 0;
 	round038_dispatch_read(&read_event);
 	context.ordered_owner = 1;
@@ -408,6 +408,24 @@ complete:
 	assert(chain->callback_references == 0U);
 	assert(swapz_round031_dm_forget_on_swapoff_or_teardown(
 		&context, &sidecar) == 0);
+	/* The host owns every private witness, fake lower byte and mock page.
+	 * Retire them only after both async callback references are drained.
+	 */
+	swapz_round039_dm_chain_scrub_relocation(chain);
+	memzero_explicit(&chain->current_record, sizeof(chain->current_record));
+	memzero_explicit(&chain->current_publication,
+			 sizeof(chain->current_publication));
+	memzero_explicit(&original_write, sizeof(original_write));
+	memzero_explicit(&current_source, sizeof(current_source));
+	memzero_explicit(mock_write, sizeof(mock_write));
+	memzero_explicit(mock_read, sizeof(mock_read));
+	memzero_explicit(lower_area, 16U * SWAPZ_BLOCK_BYTES);
+	round036_check_zeros((const swapz_u8 *)&chain->current_record,
+			     sizeof(chain->current_record));
+	round036_check_zeros((const swapz_u8 *)&chain->current_publication,
+			     sizeof(chain->current_publication));
+	round036_check_zeros(chain->staged_relocation,
+			     sizeof(chain->staged_relocation));
 	assert(pthread_mutex_destroy(&write_mailbox->callback_lock) == 0);
 	assert(pthread_mutex_destroy(&read_mailbox->callback_lock) == 0);
 	assert(pthread_mutex_destroy(&chain->gc_callback_lock) == 0);
