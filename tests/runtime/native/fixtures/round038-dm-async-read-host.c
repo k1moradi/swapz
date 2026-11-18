@@ -385,6 +385,15 @@ done:
 	assert(transaction.upper_write_ack_count == 0U);
 	assert(lower_reads == 0 && lower_writes == 0);
 	assert(read_mailbox->callback_references == 0U);
+	/* Fault 35 owns one synthetic reader. Prove teardown refuses it,
+	 * then drain that fixture-owned reference before final teardown.
+	 */
+	if (fault == 35U) {
+		assert(sidecar.slots[5].readers == 1U);
+		assert(swapz_round031_dm_forget_on_swapoff_or_teardown(
+			&ctx, &sidecar) == -EBUSY);
+		sidecar.slots[5].readers--;
+	}
 	assert(swapz_round031_dm_forget_on_swapoff_or_teardown(
 		&ctx, &sidecar) == 0);
 	assert(pthread_mutex_destroy(&write_mailbox->callback_lock) == 0);
