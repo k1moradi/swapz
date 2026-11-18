@@ -8,6 +8,7 @@ on:
       - "tests/runtime/native/pinned-linux-zswap-composed-source-test.py"
       - "tests/runtime/native/fixtures/round031-composed-*.c"
       - "tests/runtime/native/fixtures/round032-bio-*.c"
+      - "tests/runtime/native/fixtures/round033-provider-*.py"
   workflow_dispatch:
 permissions:
   contents: read
@@ -36,6 +37,15 @@ jobs:
           sudo DEBIAN_FRONTEND=noninteractive apt-get install -y \
             --no-install-recommends build-essential bc bison flex clang \
             libelf-dev libssl-dev liblz4-dev python3 binutils
+      - name: Rootless byte-exact GPL export audit and historical awk false-red adversarial fixtures
+        shell: bash
+        run: |
+          set -euo pipefail
+          # Prove the actual broken Round032 awk two-row rule is rejected
+          # while the genuine 5-field original vmlinux GPL row is accepted.
+          # This is separate from the MANDATORY real full kernel .symvers.
+          python3 -B swapz/tests/runtime/native/fixtures/round033-provider-symbol-gate.py \
+            --self-test
       - name: Run original MM and BIO source-extracted GCC Clang ASan UBSan
         shell: bash
         run: |
@@ -186,16 +196,25 @@ jobs:
               -j2 W=1 "KCFLAGS=$flags" modules
             test -s "$out/vmlinux"
             test -s "$out/Module.symvers"
-            # The REAL original Linux GPL export must have EXACT vmlinux
-            # Module.symvers identity. A compiler symbol alone is insufficient.
-            if ! awk -F '\t' '$2 == "swapz_ci_bio_snapshot_lz4_v1" &&
-                                $3 == "vmlinux" && $4 == "EXPORT_SYMBOL_GPL"
-                                { found++ } END { exit(found != 1) }'                     "$out/Module.symvers"; then
-              echo "::error::Original pinned Linux lacks one REAL Round032 GPL-only Module.symvers export"
-              exit 3
-            fi
+            kernel_release="$(make -s -C linux "O=$out" CC=gcc kernelrelease)"
+            test -n "$kernel_release"
+            printf 'profile=%s original_kernel_release=%s\n' \
+              "$profile" "$kernel_release" >> "$evidence"
+            # Round032 first red audit was a true awk multi-rule bug:
+            # condition on one line followed by a *separate unconditional*
+            # { found++ } rule counted every original Module.symvers row.
+            # This replacement checks raw original Kbuild file bytes,
+            # exactly 5 tab-delimited fields, one true vmlinux GPL export,
+            # empty namespace and correct CRC token. Never forge .symvers.
+            checked "$profile-gpl-symbol-byte-exact-symvers" python3 -B \
+              swapz/tests/runtime/native/fixtures/round033-provider-symbol-gate.py \
+              --symvers "$out/Module.symvers"
+            # Preserve real symbol row SHA and HEX, not whitespace-collapsed
+            # text; failed checked() reports the FIRST actionable diagnostic.
+            tail -n 1 "$log"
+            grep -Fq 'ROUND033_ORIGINAL_GPL_EXPORT_PASS count=1 ' "$log"
             if ! objdump -t "$out/block/bio.o" |
-                grep -q swapz_ci_bio_snapshot_lz4_v1; then
+                grep -Fq swapz_ci_bio_snapshot_lz4_v1; then
               echo "::error::No real compiled original GPL snapshot C machine symbol"
               exit 3
             fi
@@ -209,6 +228,11 @@ jobs:
             unset KBUILD_MODPOST_WARN
             checked "$profile-gpl-symbol-modpost-probe" make -s -C linux               "O=$out" "M=$probe" CC=gcc -j2 W=1               "KCFLAGS=$flags -Werror" modules
             test -s "$probe/round032-bio-probe.ko"
+            if ! readelf -p .modinfo "$probe/round032-bio-probe.ko" |
+                grep -Fq "vermagic=$kernel_release"; then
+              echo "::error::Independent original GPL probe vermagic does not match SAME source kernel $kernel_release"
+              exit 3
+            fi
             if ! nm -u "$probe/round032-bio-probe.ko" |
                 grep -Fq 'swapz_ci_bio_snapshot_lz4_v1'; then
               echo "::error::Independent original linux/bio.h GPL external probe did not import real symbol"
@@ -223,6 +247,11 @@ jobs:
             test -s "$module/dm-swapz.ko"
             readelf -h "$module/dm-swapz.ko" > "$log"
             grep -Eq 'Type:[[:space:]]+REL' "$log"
+            if ! readelf -p .modinfo "$module/dm-swapz.ko" |
+                grep -Fq "vermagic=$kernel_release"; then
+              echo "::error::Actual original-kernel matched dm-swapz.ko vermagic mismatch $kernel_release"
+              exit 3
+            fi
             printf 'profile=%s\nmodule_sha=%s\nkernel_symvers_sha=%s\n' \
               "$profile" "$(sha256sum "$module/dm-swapz.ko" | cut -d' ' -f1)" \
               "$(sha256sum "$out/Module.symvers" | cut -d' ' -f1)" >> "$evidence"
