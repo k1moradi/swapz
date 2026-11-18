@@ -1714,6 +1714,373 @@ def apply_round036_original_lifetime(path: str, composed: str) -> str:
         path, "round036-actual-original-mm-dispatch")
 
 
+
+# Round037: original MM's actual get_swap_device lifetime is scoped, not
+# transferable across async BIO / allocator ABA / target GC. CI only.
+ROUND037_MM_OWNER_MACRO = "SWAPZ_ROUND037_ORIGINAL_MM_LIFETIME_OWNER_TEST"
+ROUND037_MM_OWNER_FLAGS = (ROUND037_MM_OWNER_MACRO,) + ROUND036_LIFETIME_FLAGS
+ROUND037_MM_OWNER_C = r"""
+#if defined(SWAPZ_ROUND037_ORIGINAL_MM_LIFETIME_OWNER_TEST) && \
+    defined(SWAPZ_ROUND036_ORIGINAL_ROUTE_LIFETIME_TEST) && \
+    defined(SWAPZ_ROUND035_ORIGINAL_MM_ROUTE_WITNESS_TEST) && \
+    defined(SWAPZ_ROUND034_ORIGINAL_V1_KUNIT_TEST) && \
+    defined(SWAPZ_ROUND032_BIO_COPY_VIEW_CI_ONLY) && \
+    defined(SWAPZ_ROUND031_MM_BIO_SOURCE) && \
+    defined(SWAPZ_ROUND030_EVICTION_SNAPSHOT_SOURCE) && \
+    defined(SWAPZ_ROUND028_SLOT_EPOCH_SOURCE) && \
+    defined(SWAPZ_ROUND025_SIDEBAND_CI_ONLY) && IS_ENABLED(CONFIG_KUNIT)
+/* ROUND037_MM_SCOPED_OWNER_BEGIN */
+/*
+ * Scope boundary: the only real area reference is acquired by original
+ * get_swap_device() below, after the original folio has been unlocked and
+ * before submit_bio(). No pointer, owner ref, or token escapes this function.
+ * A swap-area users percpu_ref fences swapoff only while actually held; it
+ * does not pin an allocated slot's incarnation, a later BIO clone/split or
+ * any DM target/extent/GC generation. Both cluster-locked allocator-epoch
+ * reads are momentary and do not convert this scope to an async lease.
+ */
+struct swapz_round037_mm_owner_scope {
+	swp_entry_t original_slot;
+	u64 initial_epoch;
+	u64 final_epoch;
+	struct swap_info_struct *active_area;
+	struct block_device *source_device;
+	sector_t original_sector;
+	bool area_ref_held;
+	bool source_bio_live;
+	bool owner_live;
+	bool folio_unlocked;
+};
+
+/* ROUND037_MM_SCOPED_HELPERS_BEGIN */
+/*
+ * Detach one genuinely acquired ORIGINAL get_swap_device() reference.
+ * Transfer only to the local synchronous cleanup site for exactly one put.
+ * KUnit may exercise detach with an unreferenced fake area, but MUST NOT
+ * call put_swap_device() on such fake state.
+ */
+static struct swap_info_struct *swapz_round037_mm_scope_detach(
+		struct swapz_round037_mm_owner_scope *scope)
+{
+	struct swap_info_struct *active_area;
+
+	if (!scope || !scope->area_ref_held)
+		return NULL;
+	active_area = scope->active_area;
+	scope->active_area = NULL;
+	scope->area_ref_held = false;
+	return active_area;
+}
+
+/*
+ * Evaluates ORIGINAL source-owned observations only while the real area
+ * ref and the original source BIO are held by this synchronous caller.
+ * Consumer arguments are negative-test stimuli, never signed authority.
+ * Even forged positive lease booleans cannot make this return success:
+ * neither the current allocation epoch nor the downstream DM map/GC target
+ * can be atomically ref-pinned through source BIO async completion here.
+ */
+static int swapz_round037_mm_scope_check(
+		const struct swapz_round037_mm_owner_scope *scope,
+		const struct bio *source_bio, swp_entry_t consumer_slot,
+		u64 consumer_epoch, struct swap_info_struct *consumer_area,
+		sector_t consumer_sector, bool genuine_source_owner,
+		bool async_allocation_lease, bool dm_target_gc_lease)
+{
+	if (!scope || !source_bio || !consumer_area)
+		return -EINVAL;
+	if (!scope->area_ref_held || !scope->active_area ||
+	    !scope->source_device || !scope->original_slot.val ||
+	    !scope->initial_epoch || !scope->final_epoch ||
+	    !scope->source_bio_live || !scope->owner_live ||
+	    !scope->folio_unlocked || !consumer_epoch ||
+	    swp_type(scope->original_slot) >= MAX_SWAPFILES ||
+	    swp_type(consumer_slot) >= MAX_SWAPFILES)
+		return -ESTALE;
+	if (!scope->original_sector || (scope->original_sector & 7U) ||
+	    scope->original_sector > (sector_t)-1 - 7U ||
+	    !consumer_sector || (consumer_sector & 7U) ||
+	    consumer_sector > (sector_t)-1 - 7U)
+		return -ERANGE;
+	if (scope->original_slot.val != consumer_slot.val ||
+	    scope->initial_epoch != scope->final_epoch ||
+	    scope->final_epoch != consumer_epoch ||
+	    scope->active_area != consumer_area ||
+	    scope->active_area->bdev != scope->source_device ||
+	    scope->original_sector != consumer_sector ||
+	    source_bio->bi_bdev != scope->source_device ||
+	    source_bio->bi_iter.bi_sector != consumer_sector)
+		return -ESTALE;
+	/* This real original MM BIO has one prepopulated vector: bi_vcnt=0. */
+	if (PAGE_SIZE != 4096U || bio_op(source_bio) != REQ_OP_WRITE ||
+	    !(source_bio->bi_opf & REQ_SWAP) ||
+	    source_bio->bi_iter.bi_size != 4096U ||
+	    bio_sectors(source_bio) != 8U ||
+	    source_bio->bi_iter.bi_idx || source_bio->bi_iter.bi_offset ||
+	    source_bio->bi_vcnt ||
+	    (source_bio->bi_flags & (1U << BIO_CLONED)) ||
+	    !source_bio->bi_io_vec || !source_bio->bi_io_vec[0].bv_page ||
+	    source_bio->bi_io_vec[0].bv_len != 4096U ||
+	    source_bio->bi_io_vec[0].bv_offset)
+		return -EOPNOTSUPP;
+	if (!genuine_source_owner)
+		return -ESTALE;
+	if (!async_allocation_lease || !dm_target_gc_lease)
+		return -EOPNOTSUPP;
+	return -EOPNOTSUPP; /* Fabricated leases are never real authority. */
+}
+/* ROUND037_MM_SCOPED_HELPERS_END */
+
+/*
+ * ACTUAL original mm/page_io.c REQ_SWAP WRITE BIO dispatch boundary.
+ * Original folio unlock already happened in __swap_writeout(). Acquire the
+ * real active-area ref BEFORE the first allocator read, compare the true
+ * nonlinear source swapfile sector and source-sealed BIO owner, read epoch
+ * again, then close the ref exactly once BEFORE later asynchronous submit.
+ * Even two matching epochs can suffer ABA after the cluster lock releases.
+ */
+static int swapz_round037_original_mm_scoped_probe(
+		struct swap_io_ctx *ctx, const struct bio *source_bio,
+		struct folio *folio)
+{
+	struct swapz_round037_mm_owner_scope scope = {};
+	struct swap_info_struct *active_area;
+	swp_entry_t original_slot;
+	bool genuine_owner;
+	int result = -ESTALE;
+
+	if (!ctx || !ctx->sis || !source_bio || !folio ||
+	    !source_bio->bi_swapz_ci_sideband ||
+	    !folio_test_swapcache(folio) ||
+	    !folio_test_writeback(folio) || folio_test_locked(folio))
+		return -ESTALE;
+
+	original_slot = folio_swap_entry(folio, 0);
+	active_area = get_swap_device(original_slot);
+	if (IS_ERR_OR_NULL(active_area))
+		return -ESTALE;
+
+	scope.active_area = active_area;
+	scope.area_ref_held = true;
+	if (active_area != ctx->sis)
+		goto release_area;
+	scope.original_slot = original_slot;
+	scope.initial_epoch = swapz_round028_slot_epoch(original_slot);
+	if (swapz_round035_route_identity(
+		    original_slot, ctx->swapz_round035_original_slot,
+		    ctx->swapz_round035_original_epoch, scope.initial_epoch))
+		goto release_area;
+
+	scope.source_device = active_area->bdev;
+	scope.original_sector = swap_folio_sector(folio);
+	scope.source_bio_live = true; /* Caller owns BIO until submit_bio. */
+	scope.owner_live = true; /* Independently refcounted sealed owner. */
+	scope.folio_unlocked = true;
+	genuine_owner = swapz_round035_bio_owner_matches(
+		source_bio, (u64)original_slot.val, scope.initial_epoch);
+	scope.final_epoch = swapz_round028_slot_epoch(original_slot);
+	/*
+	 * No current slot-incarnation lease and no exact downstream DM
+	 * target/GC lease exist; the only current area ref is released below.
+	 * A source BIO clone never inherits these scoped privileges.
+	 */
+	result = swapz_round037_mm_scope_check(
+		&scope, source_bio, original_slot, scope.final_epoch,
+		active_area, scope.original_sector, genuine_owner, false, false);
+release_area:
+	active_area = swapz_round037_mm_scope_detach(&scope);
+	if (active_area)
+		put_swap_device(active_area);
+	return result;
+}
+
+/* All KUnit area/device objects below are synthetic, never swap-activated. */
+struct swapz_round037_mm_fixture {
+	struct swapz_round037_mm_owner_scope scope;
+	struct swap_info_struct *area;
+	struct block_device *device;
+	struct bio bio;
+	struct bio_vec vector;
+	struct page *page;
+};
+
+static bool swapz_round037_mm_fixture_init(
+		struct kunit *test, struct swapz_round037_mm_fixture *fixture)
+{
+	fixture->area = kunit_kzalloc(test, sizeof(*fixture->area), GFP_KERNEL);
+	fixture->device = kunit_kzalloc(test, sizeof(*fixture->device), GFP_KERNEL);
+	fixture->page = kunit_kzalloc(test, sizeof(*fixture->page), GFP_KERNEL);
+	if (!fixture->area || !fixture->device || !fixture->page) {
+		KUNIT_FAIL(test, "Round037 synthetic original MM fixture allocation");
+		return false;
+	}
+	fixture->area->bdev = fixture->device;
+	fixture->scope.original_slot = swp_entry(1U, 37U);
+	fixture->scope.initial_epoch = 17U;
+	fixture->scope.final_epoch = 17U;
+	fixture->scope.active_area = fixture->area;
+	fixture->scope.source_device = fixture->device;
+	fixture->scope.original_sector = 4096U; /* Nonlinear: 37*8 is 296. */
+	fixture->scope.area_ref_held = true; /* KUnit simulation, NOT real ref. */
+	fixture->scope.source_bio_live = true;
+	fixture->scope.owner_live = true;
+	fixture->scope.folio_unlocked = true;
+	fixture->vector.bv_page = fixture->page;
+	fixture->vector.bv_len = 4096U;
+	fixture->bio.bi_bdev = fixture->device;
+	fixture->bio.bi_io_vec = &fixture->vector;
+	fixture->bio.bi_opf = REQ_OP_WRITE | REQ_SWAP;
+	fixture->bio.bi_iter.bi_size = 4096U;
+	fixture->bio.bi_iter.bi_sector = 4096U;
+	return true;
+}
+
+static int swapz_round037_mm_fixture_check(
+		const struct swapz_round037_mm_fixture *fixture)
+{
+	return swapz_round037_mm_scope_check(
+		&fixture->scope, &fixture->bio, swp_entry(1U, 37U),
+		17U, fixture->area, 4096U, true, true, true);
+}
+
+static void swapz_round037_scope_epoch_aba_kunit(struct kunit *test)
+{
+	struct swapz_round037_mm_fixture fixture = {};
+
+	if (!swapz_round037_mm_fixture_init(test, &fixture))
+		return;
+	KUNIT_EXPECT_EQ(test, swapz_round037_mm_fixture_check(&fixture),
+			-EOPNOTSUPP);
+	fixture.scope.final_epoch = 18U; /* Reallocated same slot. */
+	KUNIT_EXPECT_EQ(test, swapz_round037_mm_fixture_check(&fixture),
+			-ESTALE);
+	fixture.scope.final_epoch = 17U;
+	fixture.scope.original_slot = swp_entry(2U, 37U);
+	KUNIT_EXPECT_EQ(test, swapz_round037_mm_fixture_check(&fixture),
+			-ESTALE);
+	fixture.scope.original_slot = swp_entry(1U, 37U);
+	fixture.scope.owner_live = false; /* Older sealed owner released. */
+	KUNIT_EXPECT_EQ(test, swapz_round037_mm_fixture_check(&fixture),
+			-ESTALE);
+}
+
+static void swapz_round037_scope_swapoff_readd_kunit(struct kunit *test)
+{
+	struct swapz_round037_mm_fixture fixture = {};
+	struct block_device *replacement;
+
+	if (!swapz_round037_mm_fixture_init(test, &fixture))
+		return;
+	replacement = kunit_kzalloc(test, sizeof(*replacement), GFP_KERNEL);
+	KUNIT_ASSERT_NOT_NULL(test, replacement);
+	fixture.area->bdev = replacement; /* Same packed slot; different area. */
+	KUNIT_EXPECT_EQ(test, swapz_round037_mm_fixture_check(&fixture),
+			-ESTALE);
+	fixture.area->bdev = fixture.device;
+	fixture.scope.original_sector = 37U * 8U; /* Wrong linear guess. */
+	KUNIT_EXPECT_EQ(test, swapz_round037_mm_fixture_check(&fixture),
+			-ESTALE);
+	fixture.scope.original_sector = 0U; /* Protected SWAPSPACE2 header. */
+	KUNIT_EXPECT_EQ(test, swapz_round037_mm_fixture_check(&fixture),
+			-ERANGE);
+	fixture.scope.original_sector = (sector_t)-1;
+	KUNIT_EXPECT_EQ(test, swapz_round037_mm_fixture_check(&fixture),
+			-ERANGE);
+}
+
+static void swapz_round037_scope_bio_late_kunit(struct kunit *test)
+{
+	struct swapz_round037_mm_fixture fixture = {};
+
+	if (!swapz_round037_mm_fixture_init(test, &fixture))
+		return;
+	fixture.bio.bi_flags |= 1U << BIO_CLONED;
+	KUNIT_EXPECT_EQ(test, swapz_round037_mm_fixture_check(&fixture),
+			-EOPNOTSUPP);
+	fixture.bio.bi_flags = 0;
+	fixture.bio.bi_iter.bi_size = 2048U; /* Split clone, half page. */
+	KUNIT_EXPECT_EQ(test, swapz_round037_mm_fixture_check(&fixture),
+			-EOPNOTSUPP);
+	fixture.bio.bi_iter.bi_size = 4096U;
+	fixture.scope.source_bio_live = false; /* Parent uninit already ran. */
+	KUNIT_EXPECT_EQ(test, swapz_round037_mm_fixture_check(&fixture),
+			-ESTALE);
+	fixture.scope.source_bio_live = true;
+	fixture.scope.folio_unlocked = false; /* Unexpected unlock state. */
+	KUNIT_EXPECT_EQ(test, swapz_round037_mm_fixture_check(&fixture),
+			-ESTALE);
+}
+
+static void swapz_round037_scope_close_once_kunit(struct kunit *test)
+{
+	struct swapz_round037_mm_fixture fixture = {};
+	struct swap_info_struct *borrowed_area;
+	struct swapz_round037_mm_owner_scope unchanged;
+
+	if (!swapz_round037_mm_fixture_init(test, &fixture))
+		return;
+	unchanged = fixture.scope;
+	KUNIT_EXPECT_EQ(test, swapz_round037_mm_fixture_check(&fixture),
+			-EOPNOTSUPP);
+	KUNIT_EXPECT_EQ(test, memcmp(&unchanged, &fixture.scope,
+				     sizeof(unchanged)), 0);
+	KUNIT_EXPECT_EQ(test, swapz_round037_mm_scope_check(
+		&fixture.scope, NULL, fixture.scope.original_slot, 17U,
+		fixture.area, 4096U, true, true, true), -EINVAL);
+	/* Synthetic detaches verify once-only control, NOT an actual put. */
+	borrowed_area = swapz_round037_mm_scope_detach(&fixture.scope);
+	KUNIT_EXPECT_PTR_EQ(test, borrowed_area, fixture.area);
+	KUNIT_EXPECT_PTR_EQ(test,
+		swapz_round037_mm_scope_detach(&fixture.scope), NULL);
+	KUNIT_EXPECT_EQ(test, swapz_round037_mm_fixture_check(&fixture),
+			-ESTALE);
+}
+
+static struct kunit_case swapz_round037_scope_cases[] = {
+	KUNIT_CASE(swapz_round037_scope_epoch_aba_kunit),
+	KUNIT_CASE(swapz_round037_scope_swapoff_readd_kunit),
+	KUNIT_CASE(swapz_round037_scope_bio_late_kunit),
+	KUNIT_CASE(swapz_round037_scope_close_once_kunit),
+	{}
+};
+
+static struct kunit_suite swapz_round037_scope_suite = {
+	.name = "swapz_round037_original_mm_area_scoped_no_authority",
+	.test_cases = swapz_round037_scope_cases,
+};
+kunit_test_suite(swapz_round037_scope_suite);
+/* ROUND037_MM_SCOPED_OWNER_END */
+#endif /* Original MM scoped KUnit observation; NO async authority */
+"""
+ROUND037_MM_OWNER_HOOK = r"""
+#if defined(SWAPZ_ROUND037_ORIGINAL_MM_LIFETIME_OWNER_TEST) && \
+    defined(SWAPZ_ROUND036_ORIGINAL_ROUTE_LIFETIME_TEST) && \
+    defined(SWAPZ_ROUND035_ORIGINAL_MM_ROUTE_WITNESS_TEST) && \
+    defined(SWAPZ_ROUND034_ORIGINAL_V1_KUNIT_TEST) && \
+    defined(SWAPZ_ROUND032_BIO_COPY_VIEW_CI_ONLY) && \
+    defined(SWAPZ_ROUND031_MM_BIO_SOURCE) && \
+    defined(SWAPZ_ROUND030_EVICTION_SNAPSHOT_SOURCE) && \
+    defined(SWAPZ_ROUND028_SLOT_EPOCH_SOURCE) && \
+    defined(SWAPZ_ROUND025_SIDEBAND_CI_ONLY) && IS_ENABLED(CONFIG_KUNIT)
+	/* Synchronous original-area ownership observation; never redirects IO. */
+	if (bio->bi_swapz_ci_sideband)
+		(void)swapz_round037_original_mm_scoped_probe(
+			ctx, bio, bio_first_folio_all(bio));
+#endif
+"""
+
+
+def apply_round037_original_mm_owner(path: str, composed: str) -> str:
+    """Inject only private genuine original page_io.c C and dispatch probe."""
+    if path != "mm/page_io.c":
+        return composed
+    handler = "static void swap_bdev_submit_write(struct swap_io_ctx *ctx)\n"
+    composed = replace_once(composed, handler, ROUND037_MM_OWNER_C + "\n" + handler,
+                            path, "round037-original-mm-scoped-owner")
+    return replace_once(composed, ROUND036_LIFETIME_HOOK,
+                        ROUND036_LIFETIME_HOOK + ROUND037_MM_OWNER_HOOK,
+                        path, "round037-original-mm-dispatch-probe")
+
 def replace_once(text: str, before: str, after: str, path: str, label: str) -> str:
     if not before or before == after or text.count(before) != 1 or (
         after in text and after not in before
@@ -1924,6 +2291,8 @@ def compose_postimage(path: str, original_bytes: bytes, *,
         changed = apply_round035_original_route(path, changed)
     if with_kunit:
         changed = apply_round036_original_lifetime(path, changed)
+    if with_kunit:
+        changed = apply_round037_original_mm_owner(path, changed)
     if path == "mm/zswap.c":
         for required in (
             "swapz_round028_slot_epoch(swpentry)",

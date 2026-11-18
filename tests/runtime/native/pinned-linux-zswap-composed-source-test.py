@@ -500,5 +500,47 @@ class OriginalMMAndBIOComposer(unittest.TestCase):
         self.assertIn("original swap allocation epoch lookup", stage.ROUND036_LIFETIME_C)
 
 
+    def test_round037_original_mm_scoped_real_source_default_off_and_closure(self):
+        source = stage.ROUND037_MM_OWNER_C
+        self.assertEqual(stage.ROUND037_MM_OWNER_MACRO,
+                         "SWAPZ_ROUND037_ORIGINAL_MM_LIFETIME_OWNER_TEST")
+        self.assertIn("SWAPZ_ROUND036_ORIGINAL_ROUTE_LIFETIME_TEST", source)
+        self.assertIn("IS_ENABLED(CONFIG_KUNIT)", source)
+        self.assertIn("get_swap_device(original_slot)", source)
+        self.assertIn("swapz_round028_slot_epoch(original_slot)", source)
+        self.assertIn("swap_folio_sector(folio)", source)
+        self.assertIn("swapz_round035_bio_owner_matches(", source)
+        self.assertIn("put_swap_device(active_area)", source)
+        self.assertIn("swapz_round037_mm_scope_detach(&scope)", source)
+        self.assertIn("return -EOPNOTSUPP;", source)
+        self.assertNotIn("return 0;", source)
+        for forbidden in ("EXPORT_SYMBOL", "bio_endio(", "submit_bio(",
+                          "swapz_map(", "SOURCE_MAPPED_AUTHENTICATED=1"):
+            self.assertNotIn(forbidden, source)
+        for name in ("epoch_aba", "swapoff_readd", "bio_late", "close_once"):
+            self.assertEqual(source.count(
+                "KUNIT_CASE(swapz_round037_scope_" + name + "_kunit)"), 1)
+        base = (stage.ROUND036_LIFETIME_C + "\n" +
+                "static void swap_bdev_submit_write(struct swap_io_ctx *ctx)\n"
+                + stage.ROUND036_LIFETIME_HOOK)
+        composed = stage.apply_round037_original_mm_owner("mm/page_io.c", base)
+        self.assertIn("swapz_round037_original_mm_scoped_probe(", composed)
+        with self.assertRaisesRegex(
+                stage.SourceCompositionError, "COMPOSE_CONFLICT:mm/page_io.c"):
+            stage.apply_round037_original_mm_owner("mm/page_io.c", composed)
+
+    def test_round037_original_mm_scope_c_gcc_clang_werror_asan_ubsan(self):
+        source = stage.ROUND037_MM_OWNER_C
+        start = "/* ROUND037_MM_SCOPED_OWNER_BEGIN */"
+        end = "/* ROUND037_MM_SCOPED_HELPERS_END */"
+        self.assertEqual(source.count(start), 1)
+        self.assertEqual(source.count(end), 1)
+        c_source = source.split(start, 1)[1].split(end, 1)[0]
+        fixture = (FIXTURES / "round037-original-mm-scope-host.c").read_text()
+        marker = "/* ROUND037_EXACT_ORIGINAL_MM_SCOPE_C */"
+        self.assertEqual(fixture.count(marker), 1)
+        self.compile_and_run(fixture.replace(marker, c_source, 1),
+                             label="round037-original-mm", libraries=())
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)
