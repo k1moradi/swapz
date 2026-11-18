@@ -493,6 +493,10 @@ class OriginalMMAndBIOComposer(unittest.TestCase):
         self.assertIn("folio_end_writeback()", stage.ROUND036_LIFETIME_C)
         self.assertIn("get_swap_device()/put_swap_device()",
                       stage.ROUND036_LIFETIME_C)
+        self.assertIn("struct swapz_round036_route_lifetime consumer_sample = {}",
+                      stage.ROUND036_LIFETIME_C)
+        self.assertNotIn("struct swapz_round036_route_lifetime current = {}",
+                         stage.ROUND036_LIFETIME_C)
         self.assertIn("original swap allocation epoch lookup", stage.ROUND036_LIFETIME_C)
 
 

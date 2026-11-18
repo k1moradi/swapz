@@ -1417,7 +1417,7 @@ static int swapz_round036_original_lifetime_probe(
 {
 	struct swap_info_struct *active;
 	struct swapz_round036_route_lifetime initial = {};
-	struct swapz_round036_route_lifetime current = {};
+	struct swapz_round036_route_lifetime consumer_sample = {};
 	swp_entry_t original_slot;
 	u64 allocator_epoch;
 	sector_t original_sector;
@@ -1459,14 +1459,14 @@ static int swapz_round036_original_lifetime_probe(
 	initial.writeback_in_flight = true;
 	initial.original_bio_live = true;
 	initial.original_owner_live = true;
-	current = initial;
+	consumer_sample = initial;
 	/*
 	 * No actual MM→DM target identity or GC generation can be read here.
 	 * The transient area ref is held now, NOT at a later consumer.
 	 * A second local snapshot cannot lease the slot across future ABA.
 	 */
 	result = swapz_round036_route_lifetime_check(
-		&initial, &current, source_bio, false, false, false);
+		&initial, &consumer_sample, source_bio, false, false, false);
 release_area:
 	put_swap_device(active);
 	return result;
