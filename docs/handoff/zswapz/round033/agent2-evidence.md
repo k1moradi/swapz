@@ -28,3 +28,26 @@ Initial original Round032 red run and first cause remain traceable. The new Roun
 ## Safety
 
 `PHASE_A=BLOCKED`, `DIRECT_COMPRESSED_HANDOFF=NO_GO_DISABLED`, `FORCED_RAW_BYPASS=DISABLED`, `LOADED_KERNEL=NOT_RUN`, `PHYSICAL_SWAPSPACE2=NOT_RUN`; original RAW always original uncompressed 4096 bytes and original SWAPSPACE2 first 4096-byte header/UUID and partition table are immutable. zswap alone controls compressed RAM cache and eviction; swapz manages existing disk-backed swap without competing reclaim. Real exported module link is not live source-authenticated compressed data transfer, not real memory pressure eviction, nor physical full readback. No root/loaded/physical/mkswap/swapon/swappoff null_blk/reboot tests.
+
+
+## Final exact-source hosted real original y/n and GPL modpost — COMPLETE PASS
+
+**Verified original source SHA:** `2c4d583ef9ef8959b57b56d5dd9221441b90c102`; one-parent direct-main publication over frozen `90069e3bef16a5cc2a1e442a4597551f48f464c6`, expected-head nonforce and postwrite remote SHA verified. **Final [original run 44256959809](https://github.com/k1moradi/swapz/actions/runs/44256959809) COMPLETED SUCCESS both jobs 2/2.** Strict original full same-pinned-kernel y/n+GPL external modpost/matched DM **job 134640846624 COMPLETED SUCCESS exit 0**. Independently **booted original UML KUnit job 134640847089 COMPLETED SUCCESS**, actual checked KTAP + JSON 11/11 original BIO ownership KUnit, `CONFIG_ZSWAP` disabled in UML (not real zswap pressure).
+
+Original kernel compiler job confirmed on exact full source:
+- New original same-data-byte GPL audit self-tests **5/5 PASS** including true original multiline awk false-negative with two valid table rows, malformed/duplicate/negative bytes and one positive canonical GPL row.
+- Actual source-extracted original C strict GCC and Clang `-Wall -Wextra -Wshadow -Wconversion -Werror -fsanitize=address,undefined` plus pinned source-authentic manifest **8/8 PASS**.
+- Exactly ONE valid genuine kernel-owned `vmlinux EXPORT_SYMBOL_GPL` for `swapz_ci_bio_snapshot_lz4_v1` in BOTH full original `CONFIG_ZSWAP=y` and `CONFIG_ZSWAP=n` generated `Module.symvers`, each read as raw bytes by the standalone validator. Original public symbol value has `row_bytes=66` and four real 09-hex tabs including an **empty namespace**:
+
+  ```text
+  row_hex=3078303030303030303009737761707a5f63695f62696f5f736e617073686f745f6c7a345f763109766d6c696e7578094558504f52545f53594d424f4c5f47504c09
+  ```
+
+  Actual complete same-source `Module.symvers` SHA256 by profile:
+  - Original `CONFIG_ZSWAP=y`: `b6d2cea7c1d0d06e4801fe96bc7358db388127b5ca2354c574fd819747c55657`, logged at 2026-11-18 07:23:22 UTC.
+  - Original `CONFIG_ZSWAP=n`: `39eba5d7709d57e0c85d2df22958bba63a335988ca824a72c698ad4849e62f9a`, logged at 2026-11-18 07:34:16 UTC.
+- BOTH original full pinned y/n kernel profiles compiled real original `vmlinux`, `modules`, `Module.symvers`; original generated `block/bio.o` and other modified objects strict `W=1/-Werror` with default symbol absence and opt-in positive `nm`/`objdump`. Each independently Kbuilt **actual GPL external `round032-bio-probe.ko` from real generated `linux/bio.h`** via full original source-specific KDIR, with genuine strong unresolved symbol `swapz_ci_bio_snapshot_lz4_v1` verified by `nm -u` and successfully resolved by Kbuild `modpost` using that SAME real original `Module.symvers`. No `KBUILD_MODPOST_WARN`, no fake/stub/overwritten symbol. Source `kernelrelease` matches probe `.modinfo vermagic` each profile.
+- ALSO `dm-swapz.ko` built and linked against original same source-specific generated `KDIR` each profile; `readelf` ELF REL and exact `vermagic=original kernelrelease` passed. Neither module was loaded, no runtime source authentication claim or live compressed transfer. Module binary SHA256 calculated into private runner file but **not emitted** in hosted stdout; do not invent it.
+- Historical Round032 exact run [44168876688](https://github.com/k1moradi/swapz/actions/runs/44168876688) original link job 134342259183 remains **FAILED exit 3** due broken multi-rule awk; its original first failure and printed row remain preserved, not retrospectively relabeled. The final successful Round033 source fixes only the test harness, not original C, and does not hide failed original source run.
+
+**Final safety:** `PHASE_A=BLOCKED`; `FORCED_RAW_BYPASS=DISABLED`; `DIRECT_COMPRESSED_HANDOFF=NO_GO_DISABLED`; `LOADED_KERNEL=NOT_RUN`; `PHYSICAL_SWAPSPACE2=NOT_RUN`. zswap alone manages bounded compressed RAM cache and original pressure eviction; swapz disk backing only. RAW always original uncompressed 4096. Preserve physical SWAPSPACE2 first 4096 header/UUID/partition table. Do NOT claim authenticated original MM-to-loaded swapz consumer, actual memory-pressure eviction to disk, loaded module success or physical readback from this compile-only evidence.
