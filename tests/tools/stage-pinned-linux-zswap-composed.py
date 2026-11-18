@@ -442,6 +442,423 @@ def apply_round032_bio_view(path: str, composed: str) -> str:
     return composed
 
 
+
+# Round034 is a NEW additional guard. Old real original BIO KUnit's 11
+# lifecycle cases and the original immutable upstream blobs are unchanged.
+# These tests run IN original block/bio.c so they invoke the actual exported
+# provider and its separately owned private C allocation, not a host mock.
+ROUND034_ORIGINAL_V1_KUNIT_MACRO = "SWAPZ_ROUND034_ORIGINAL_V1_KUNIT_TEST"
+ROUND034_KUNIT_GUARD = (
+    "defined(SWAPZ_ROUND034_ORIGINAL_V1_KUNIT_TEST) && "
+    "defined(SWAPZ_ROUND032_BIO_COPY_VIEW_CI_ONLY) && "
+    "defined(SWAPZ_ROUND031_MM_BIO_SOURCE) && "
+    "defined(SWAPZ_ROUND025_SIDEBAND_CI_ONLY) && IS_ENABLED(CONFIG_KUNIT)"
+)
+ROUND034_KUNIT_HEADERS = r"""
+#if defined(SWAPZ_ROUND034_ORIGINAL_V1_KUNIT_TEST) && \
+    defined(SWAPZ_ROUND032_BIO_COPY_VIEW_CI_ONLY) && \
+    defined(SWAPZ_ROUND031_MM_BIO_SOURCE) && \
+    defined(SWAPZ_ROUND025_SIDEBAND_CI_ONLY) && IS_ENABLED(CONFIG_KUNIT)
+#include <linux/lz4.h>
+#include <crypto/sha2.h>
+#endif
+"""
+
+ROUND034_KUNIT_SOURCE = r"""
+#if defined(SWAPZ_ROUND034_ORIGINAL_V1_KUNIT_TEST) && \
+    defined(SWAPZ_ROUND032_BIO_COPY_VIEW_CI_ONLY) && \
+    defined(SWAPZ_ROUND031_MM_BIO_SOURCE) && \
+    defined(SWAPZ_ROUND025_SIDEBAND_CI_ONLY) && IS_ENABLED(CONFIG_KUNIT)
+/*
+ * KUnit SYNTHETIC PRODUCER STIMULUS; even CONFIG_ZSWAP=y does not make
+ * this an MM STORE, an actual eviction, or proof of a live DM mapping.
+ * The tested function and owning allocation ARE genuine original bio.c C.
+ * No block device, swap area, privileged host operation or bio_endio.
+ */
+struct swapz_round034_v1_fixture {
+	struct bio bio;
+	struct bio_vec vector;
+	struct page *page;
+	u8 *compressed;
+	u8 *destination;
+	u8 *decoded;
+	u8 digest[32];
+	size_t compressed_length;
+	bool bio_initialized;
+};
+
+static void swapz_round034_v1_fixture_release(void *argument)
+{
+	struct swapz_round034_v1_fixture *fixture = argument;
+
+	if (fixture->bio_initialized)
+		bio_uninit(&fixture->bio);
+	if (fixture->page)
+		__free_page(fixture->page);
+}
+
+/* Real original pre-populated one-bvec page_io geometry: bi_vcnt == 0. */
+static struct swapz_round034_v1_fixture *
+swapz_round034_v1_fixture_create(struct kunit *test)
+{
+	struct swapz_round034_v1_fixture *fixture;
+	struct swapz_ci_owned_payload *owner;
+	u8 *workspace;
+	u8 *plaintext;
+	int length;
+
+	fixture = kunit_kzalloc(test, sizeof(*fixture), GFP_KERNEL);
+	if (!fixture) {
+		KUNIT_FAIL(test, "v1 fixture allocation refused");
+		return NULL;
+	}
+	if (kunit_add_action_or_reset(test, swapz_round034_v1_fixture_release,
+				      fixture)) {
+		KUNIT_FAIL(test, "v1 cleanup registration refused");
+		return NULL;
+	}
+	fixture->page = alloc_page(GFP_KERNEL);
+	fixture->compressed = kunit_kmalloc(test, 3568U, GFP_KERNEL);
+	fixture->destination = kunit_kmalloc(test, 3568U, GFP_KERNEL);
+	fixture->decoded = kunit_kmalloc(test, PAGE_SIZE, GFP_KERNEL);
+	workspace = kunit_kmalloc(test, LZ4_MEM_COMPRESS, GFP_KERNEL);
+	if (!fixture->page || !fixture->compressed || !fixture->destination ||
+	    !fixture->decoded || !workspace) {
+		KUNIT_FAIL(test, "v1 bounded allocation refused");
+		return NULL;
+	}
+	plaintext = page_address(fixture->page);
+	memset(plaintext, 0x5a, PAGE_SIZE);
+	/* The digest covers the original entire 4096, not compressed padding. */
+	sha256(plaintext, PAGE_SIZE, fixture->digest);
+	length = LZ4_compress_default((const char *)plaintext,
+				      (char *)fixture->compressed, PAGE_SIZE,
+				      3568, workspace);
+	if (length <= 1 || length > 3568) {
+		KUNIT_FAIL(test, "real dictionary-free LZ4 compressor refused");
+		return NULL;
+	}
+	fixture->compressed_length = (size_t)length;
+	owner = swapz_ci_owned_create_source_v1(
+		fixture->compressed, fixture->compressed_length,
+		fixture->compressed_length, fixture->digest,
+		11U, 13U, 0x123456U, 1U, 1U,
+		~crc32c(~0U, fixture->compressed, fixture->compressed_length),
+		GFP_KERNEL);
+	if (!owner) {
+		KUNIT_FAIL(test, "genuine original sealed v1 owner refused");
+		return NULL;
+	}
+	fixture->vector.bv_page = fixture->page;
+	fixture->vector.bv_len = PAGE_SIZE;
+	fixture->vector.bv_offset = 0;
+	bio_init(&fixture->bio, NULL, &fixture->vector, 1,
+		 REQ_OP_WRITE | REQ_SWAP);
+	fixture->bio_initialized = true;
+	fixture->bio.bi_iter.bi_size = PAGE_SIZE;
+	fixture->bio.bi_swap_origin =
+		SWAP_BIO_ORIGIN_ZSWAP_STORED_WRITEBACK;
+	fixture->bio.bi_swapz_ci_sideband = owner;
+	return fixture;
+}
+
+/* Compare both output objects to the EXACT pre-call bytes on each error. */
+static void swapz_round034_v1_expect_refusal(struct kunit *test,
+					   struct bio *source,
+					   size_t capacity, int expected)
+{
+	struct swapz_ci_lz4_owned_view_v1 view;
+	u8 destination[128];
+	int error;
+
+	memset(&view, 0xa5, sizeof(view));
+	memset(destination, 0x6b, sizeof(destination));
+	error = swapz_ci_bio_snapshot_lz4_v1(source, &view, destination,
+					    capacity);
+	KUNIT_EXPECT_EQ(test, error, expected);
+	KUNIT_EXPECT_PTR_EQ(test, memchr_inv(&view, 0xa5, sizeof(view)), NULL);
+	KUNIT_EXPECT_PTR_EQ(test, memchr_inv(destination, 0x6b,
+					   sizeof(destination)), NULL);
+}
+
+static void swapz_round034_v1_owned_copy_kunit(struct kunit *test)
+{
+	struct swapz_round034_v1_fixture *fixture =
+		swapz_round034_v1_fixture_create(test);
+	struct swapz_ci_lz4_owned_view_v1 view = {};
+	u8 decoded_sha[32];
+	int error;
+
+	KUNIT_ASSERT_NOT_NULL(test, fixture);
+	KUNIT_EXPECT_EQ(test, fixture->bio.bi_vcnt, 0U);
+	KUNIT_EXPECT_EQ(test, bio_sectors(&fixture->bio), 8U);
+	KUNIT_EXPECT_EQ(test, fixture->bio.bi_iter.bi_size, 4096U);
+	memset(fixture->destination, 0x6b, 3568U);
+	error = swapz_ci_bio_snapshot_lz4_v1(
+		&fixture->bio, &view, fixture->destination, 3568U);
+	KUNIT_ASSERT_EQ(test, error, 0);
+	KUNIT_EXPECT_EQ(test, view.source_swap_entry, (u64)0x123456U);
+	KUNIT_EXPECT_EQ(test, view.source_slot_epoch, (u64)11U);
+	KUNIT_EXPECT_EQ(test, view.stored_entry_identity, (u64)13U);
+	KUNIT_EXPECT_EQ(test, view.compressed_length,
+			(u16)fixture->compressed_length);
+	KUNIT_EXPECT_EQ(test, view.decoded_length, (u16)4096U);
+	KUNIT_EXPECT_EQ(test, view.representation_version, (u8)1);
+	KUNIT_EXPECT_EQ(test, view.codec, (u8)1);
+	KUNIT_EXPECT_EQ(test, view.compressed_crc32c,
+			~crc32c(~0U, fixture->compressed,
+				 fixture->compressed_length));
+	KUNIT_EXPECT_EQ(test, memcmp(fixture->destination,
+				     fixture->compressed,
+				     fixture->compressed_length), 0);
+	KUNIT_EXPECT_EQ(test, memcmp(view.original_sha256,
+				     fixture->digest, sizeof(fixture->digest)), 0);
+	error = LZ4_decompress_safe((const char *)fixture->destination,
+				    (char *)fixture->decoded,
+				    view.compressed_length, PAGE_SIZE);
+	KUNIT_ASSERT_EQ(test, error, (int)PAGE_SIZE);
+	sha256(fixture->decoded, PAGE_SIZE, decoded_sha);
+	KUNIT_EXPECT_EQ(test, memcmp(decoded_sha, view.original_sha256,
+				     sizeof(decoded_sha)), 0);
+	/* A changed constructor input must not alter the sealed private copy. */
+	fixture->compressed[0] ^= 0x80U;
+	KUNIT_EXPECT_EQ(test, swapz_ci_bio_snapshot_lz4_v1(
+				&fixture->bio, &view, fixture->destination,
+				3568U), 0);
+	KUNIT_EXPECT_EQ(test, LZ4_decompress_safe(
+				(const char *)fixture->destination,
+				(char *)fixture->decoded,
+				view.compressed_length, PAGE_SIZE),
+			(int)PAGE_SIZE);
+	/* No read from freed BIO. Caller-owned output survives final uninit. */
+	bio_uninit(&fixture->bio);
+	KUNIT_EXPECT_EQ(test, memcmp(fixture->decoded,
+				     page_address(fixture->page), PAGE_SIZE), 0);
+}
+
+static void swapz_round034_v1_bio_reject_kunit(struct kunit *test)
+{
+	struct swapz_round034_v1_fixture *fixture =
+		swapz_round034_v1_fixture_create(test);
+	struct bio *source;
+
+	KUNIT_ASSERT_NOT_NULL(test, fixture);
+	source = &fixture->bio;
+	source->bi_opf = REQ_OP_READ | REQ_SWAP;
+	swapz_round034_v1_expect_refusal(test, source, 128U, -EOPNOTSUPP);
+	source->bi_opf = REQ_OP_WRITE;
+	swapz_round034_v1_expect_refusal(test, source, 128U, -EOPNOTSUPP);
+	source->bi_opf = REQ_OP_WRITE | REQ_SWAP;
+	source->bi_iter.bi_size = 2048U;
+	swapz_round034_v1_expect_refusal(test, source, 128U, -EOPNOTSUPP);
+	source->bi_iter.bi_size = 4096U;
+	source->bi_iter.bi_offset = 512U;
+	swapz_round034_v1_expect_refusal(test, source, 128U, -EOPNOTSUPP);
+	source->bi_iter.bi_offset = 0U;
+	source->bi_vcnt = 1;
+	swapz_round034_v1_expect_refusal(test, source, 128U, -EOPNOTSUPP);
+	source->bi_vcnt = 0;
+	source->bi_swap_origin = SWAP_BIO_ORIGIN_ORDINARY_OR_UNKNOWN;
+	swapz_round034_v1_expect_refusal(test, source, 128U, -EOPNOTSUPP);
+	source->bi_swap_origin = SWAP_BIO_ORIGIN_ZSWAP_STORED_WRITEBACK;
+	source->bi_flags |= (1U << BIO_CLONED);
+	swapz_round034_v1_expect_refusal(test, source, 128U, -EOPNOTSUPP);
+	source->bi_flags &= ~(1U << BIO_CLONED);
+	source->bi_iter.bi_idx = 1;
+	swapz_round034_v1_expect_refusal(test, source, 128U, -EOPNOTSUPP);
+	source->bi_iter.bi_idx = 0;
+}
+
+static void swapz_round034_v1_owner_reject_kunit(struct kunit *test)
+{
+	struct swapz_round034_v1_fixture *fixture =
+		swapz_round034_v1_fixture_create(test);
+	struct swapz_ci_owned_payload *owner;
+
+	KUNIT_ASSERT_NOT_NULL(test, fixture);
+	owner = fixture->bio.bi_swapz_ci_sideband;
+	KUNIT_ASSERT_NOT_NULL(test, owner);
+	owner->source_swap_entry = 0;
+	swapz_round034_v1_expect_refusal(test, &fixture->bio, 128U, -ESTALE);
+	owner->source_swap_entry = 0x123456U;
+	owner->slot_epoch = 0;
+	swapz_round034_v1_expect_refusal(test, &fixture->bio, 128U, -ESTALE);
+	owner->slot_epoch = 11;
+	owner->source_identity = 0;
+	swapz_round034_v1_expect_refusal(test, &fixture->bio, 128U, -ESTALE);
+	owner->source_identity = 13;
+	owner->codec = 2; /* ZSTD/dictionary cannot be represented as codec1. */
+	swapz_round034_v1_expect_refusal(test, &fixture->bio, 128U, -ESTALE);
+	owner->codec = 1;
+	owner->representation_version = 2;
+	swapz_round034_v1_expect_refusal(test, &fixture->bio, 128U, -ESTALE);
+	owner->representation_version = 1;
+	owner->compressed_length = 0;
+	swapz_round034_v1_expect_refusal(test, &fixture->bio, 128U, -ESTALE);
+	owner->compressed_length = 3569;
+	swapz_round034_v1_expect_refusal(test, &fixture->bio, 128U, -ESTALE);
+	owner->compressed_length = (u16)fixture->compressed_length;
+	owner->compressed_crc32c ^= 1U;
+	swapz_round034_v1_expect_refusal(test, &fixture->bio, 128U, -ESTALE);
+	owner->compressed_crc32c ^= 1U;
+	memset(owner->original_sha256, 0, sizeof(owner->original_sha256));
+	swapz_round034_v1_expect_refusal(test, &fixture->bio, 128U, -ESTALE);
+}
+
+static void swapz_round034_v1_constructor_reject_kunit(struct kunit *test)
+{
+	struct swapz_round034_v1_fixture *fixture =
+		swapz_round034_v1_fixture_create(test);
+	struct swapz_ci_owned_payload *owner;
+	u8 absent_sha[32] = {};
+	u32 checksum;
+
+	KUNIT_ASSERT_NOT_NULL(test, fixture);
+	checksum = ~crc32c(~0U, fixture->compressed,
+			    fixture->compressed_length);
+#define SWAPZ_ROUND034_BAD(source, capacity, length, digest, epoch, identity, slot, version, codec, crc) \
+	KUNIT_EXPECT_PTR_EQ(test, swapz_ci_owned_create_source_v1( \
+		source, capacity, length, digest, epoch, identity, slot, \
+		version, codec, crc, GFP_KERNEL), NULL)
+	SWAPZ_ROUND034_BAD(fixture->compressed, fixture->compressed_length,
+			   fixture->compressed_length, fixture->digest,
+			   11, 13, 0, 1, 1, checksum);
+	SWAPZ_ROUND034_BAD(fixture->compressed, fixture->compressed_length,
+			   fixture->compressed_length, fixture->digest,
+			   0, 13, 0x123456, 1, 1, checksum);
+	SWAPZ_ROUND034_BAD(fixture->compressed, fixture->compressed_length,
+			   fixture->compressed_length, fixture->digest,
+			   11, 0, 0x123456, 1, 1, checksum);
+	SWAPZ_ROUND034_BAD(fixture->compressed, fixture->compressed_length,
+			   0, fixture->digest, 11, 13, 0x123456, 1, 1, checksum);
+	SWAPZ_ROUND034_BAD(fixture->compressed, fixture->compressed_length,
+			   3569, fixture->digest, 11, 13, 0x123456, 1, 1, checksum);
+	SWAPZ_ROUND034_BAD(fixture->compressed, fixture->compressed_length,
+			   fixture->compressed_length, fixture->digest,
+			   11, 13, 0x123456, 1, 2, checksum);
+	SWAPZ_ROUND034_BAD(fixture->compressed, fixture->compressed_length,
+			   fixture->compressed_length, absent_sha,
+			   11, 13, 0x123456, 1, 1, checksum);
+	SWAPZ_ROUND034_BAD(fixture->compressed, fixture->compressed_length,
+			   fixture->compressed_length, fixture->digest,
+			   11, 13, 0x123456, 1, 1, checksum ^ 1U);
+#undef SWAPZ_ROUND034_BAD
+	/* A valid BIO lifetime without any owner cannot be upgraded. */
+	owner = fixture->bio.bi_swapz_ci_sideband;
+	fixture->bio.bi_swapz_ci_sideband = NULL;
+	swapz_round034_v1_expect_refusal(test, &fixture->bio, 128U, -ESTALE);
+	fixture->bio.bi_swapz_ci_sideband = owner;
+}
+
+static void swapz_round034_v1_alias_kunit(struct kunit *test)
+{
+	struct swapz_round034_v1_fixture *fixture =
+		swapz_round034_v1_fixture_create(test);
+	struct swapz_ci_lz4_owned_view_v1 view;
+	struct swapz_ci_owned_payload *owner;
+	u8 *unchanged;
+	int error;
+
+	KUNIT_ASSERT_NOT_NULL(test, fixture);
+	owner = fixture->bio.bi_swapz_ci_sideband;
+	KUNIT_ASSERT_NOT_NULL(test, owner);
+	unchanged = kunit_kmalloc(test, owner->compressed_length, GFP_KERNEL);
+	KUNIT_ASSERT_NOT_NULL(test, unchanged);
+	memcpy(unchanged, owner->compressed_bytes, owner->compressed_length);
+	memset(&view, 0xa5, sizeof(view));
+	error = swapz_ci_bio_snapshot_lz4_v1(
+		&fixture->bio, &view, (u8 *)&view, sizeof(view));
+	KUNIT_EXPECT_EQ(test, error, -EINVAL);
+	KUNIT_EXPECT_PTR_EQ(test, memchr_inv(&view, 0xa5, sizeof(view)), NULL);
+	error = swapz_ci_bio_snapshot_lz4_v1(
+		&fixture->bio, &view, owner->compressed_bytes,
+		owner->compressed_length);
+	KUNIT_EXPECT_EQ(test, error, -EINVAL);
+	KUNIT_EXPECT_PTR_EQ(test, memchr_inv(&view, 0xa5, sizeof(view)), NULL);
+	KUNIT_EXPECT_EQ(test, memcmp(owner->compressed_bytes, unchanged,
+				     owner->compressed_length), 0);
+	swapz_round034_v1_expect_refusal(test, &fixture->bio,
+					fixture->compressed_length - 1U,
+					-ENOSPC);
+}
+
+static void swapz_round034_v1_lifetime_kunit(struct kunit *test)
+{
+	struct swapz_round034_v1_fixture *fixture =
+		swapz_round034_v1_fixture_create(test);
+	struct swapz_ci_lz4_owned_view_v1 view = {};
+	struct swapz_ci_owned_payload *owner;
+	struct bio clone = {};
+	struct bio *split;
+	int error;
+
+	KUNIT_ASSERT_NOT_NULL(test, fixture);
+	owner = fixture->bio.bi_swapz_ci_sideband;
+	error = swapz_ci_bio_snapshot_lz4_v1(
+		&fixture->bio, &view, fixture->destination, 3568U);
+	KUNIT_ASSERT_EQ(test, error, 0);
+	error = bio_init_clone(NULL, &clone, &fixture->bio, GFP_KERNEL);
+	if (error) {
+		KUNIT_FAIL(test, "real original v1 BIO clone failed");
+		return;
+	}
+	KUNIT_EXPECT_EQ(test, refcount_read(&owner->references), 2);
+	swapz_round034_v1_expect_refusal(test, &clone, 128U, -EOPNOTSUPP);
+	bio_uninit(&fixture->bio); /* Clone retains its independent owner ref. */
+	KUNIT_EXPECT_EQ(test, refcount_read(&owner->references), 1);
+	KUNIT_EXPECT_EQ(test, view.source_swap_entry, (u64)0x123456U);
+	KUNIT_EXPECT_EQ(test, LZ4_decompress_safe(
+				(const char *)fixture->destination,
+				(char *)fixture->decoded,
+				view.compressed_length, PAGE_SIZE),
+			(int)PAGE_SIZE);
+	bio_uninit(&clone); /* Last owner reference, never use freed BIO. */
+	/* Separate fresh source: original split must never yield 4096 snapshot. */
+	fixture = swapz_round034_v1_fixture_create(test);
+	KUNIT_ASSERT_NOT_NULL(test, fixture);
+	fixture->bio.bi_vcnt = 1; /* Required only by the old split API. */
+	split = bio_split(&fixture->bio, 4U, GFP_KERNEL, &fs_bio_set);
+	if (IS_ERR_OR_NULL(split)) {
+		KUNIT_FAIL(test, "real original v1 BIO split failed");
+		return;
+	}
+	swapz_round034_v1_expect_refusal(test, split, 128U, -EOPNOTSUPP);
+	swapz_round034_v1_expect_refusal(test, &fixture->bio, 128U,
+					-EOPNOTSUPP);
+	bio_put(split);
+}
+#endif /* Round034 real original v1 test-only, no loaded transport */
+
+
+ROUND034_KUNIT_CASES = r"""#if defined(SWAPZ_ROUND034_ORIGINAL_V1_KUNIT_TEST) && \
+    defined(SWAPZ_ROUND032_BIO_COPY_VIEW_CI_ONLY) && \
+    defined(SWAPZ_ROUND031_MM_BIO_SOURCE) && \
+    defined(SWAPZ_ROUND025_SIDEBAND_CI_ONLY) && IS_ENABLED(CONFIG_KUNIT)
+	KUNIT_CASE(swapz_round034_v1_owned_copy_kunit),
+	KUNIT_CASE(swapz_round034_v1_bio_reject_kunit),
+	KUNIT_CASE(swapz_round034_v1_owner_reject_kunit),
+	KUNIT_CASE(swapz_round034_v1_constructor_reject_kunit),
+	KUNIT_CASE(swapz_round034_v1_alias_kunit),
+	KUNIT_CASE(swapz_round034_v1_lifetime_kunit),
+#endif
+"""
+
+
+def apply_round034_original_v1_kunit(path: str, composed: str) -> str:
+    """Append new opt-in real block/bio.c tests, never edit old 11 tests."""
+    if path != "block/bio.c":
+        return composed
+    composed = replace_once(
+        composed, '#include "blk-cgroup.h"\n',
+        '#include "blk-cgroup.h"\n' + ROUND034_KUNIT_HEADERS,
+        path, "v1-real-kunit-kernel-headers")
+    anchor = "static struct kunit_case swapz_ci_sideband_cases[] = {\n"
+    return replace_once(
+        composed, anchor,
+        ROUND034_KUNIT_SOURCE + "\n" + anchor + ROUND034_KUNIT_CASES,
+        path, "v1-real-kunit-cases")
+
+
 def replace_once(text: str, before: str, after: str, path: str, label: str) -> str:
     if not before or before == after or text.count(before) != 1 or (
         after in text and after not in before
@@ -646,6 +1063,8 @@ def compose_postimage(path: str, original_bytes: bytes, *,
         changed = original_changed
     changed = apply_mm_bio_source(path, changed)
     changed = apply_round032_bio_view(path, changed)
+    if with_kunit:
+        changed = apply_round034_original_v1_kunit(path, changed)
     if path == "mm/zswap.c":
         for required in (
             "swapz_round028_slot_epoch(swpentry)",

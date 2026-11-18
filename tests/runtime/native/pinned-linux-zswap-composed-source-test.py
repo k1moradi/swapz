@@ -300,5 +300,43 @@ class OriginalMMAndBIOComposer(unittest.TestCase):
             fixture, label="round032-bio", libraries=("-llz4", "-lcrypto"))
 
 
+    def test_round034_actual_bio_c_v1_kunit_gate_and_case_inventory(self):
+        self.assertEqual(stage.ROUND034_ORIGINAL_V1_KUNIT_MACRO,
+                         "SWAPZ_ROUND034_ORIGINAL_V1_KUNIT_TEST")
+        self.assertIn("IS_ENABLED(CONFIG_KUNIT)", stage.ROUND034_KUNIT_GUARD)
+        source = stage.ROUND034_KUNIT_SOURCE
+        self.assertIn("LZ4_compress_default(", source)
+        self.assertIn("LZ4_decompress_safe(", source)
+        self.assertIn("sha256(fixture->decoded, PAGE_SIZE, decoded_sha);",
+                      source)
+        self.assertIn("fixture->bio.bi_vcnt, 0U", source)
+        self.assertIn("swapz_ci_bio_snapshot_lz4_v1(", source)
+        self.assertIn("memchr_inv(destination, 0x6b", source)
+        self.assertIn("refcount_read(&owner->references)", source)
+        expected = (
+            "swapz_round034_v1_owned_copy_kunit",
+            "swapz_round034_v1_bio_reject_kunit",
+            "swapz_round034_v1_owner_reject_kunit",
+            "swapz_round034_v1_constructor_reject_kunit",
+            "swapz_round034_v1_alias_kunit",
+            "swapz_round034_v1_lifetime_kunit",
+        )
+        for case in expected:
+            self.assertEqual(stage.ROUND034_KUNIT_CASES.count(
+                "KUNIT_CASE(" + case + ")"), 1)
+        base = '#include "blk-cgroup.h"\n' + stage.BIO.CI_KUNIT
+        generated = stage.apply_round034_original_v1_kunit(
+            "block/bio.c", base)
+        self.assertEqual(generated.count(
+            "static struct kunit_case swapz_ci_sideband_cases[] = {"), 1)
+        for case in expected:
+            self.assertIn("KUNIT_CASE(" + case + ")", generated)
+        with self.assertRaisesRegex(
+                stage.SourceCompositionError, "COMPOSE_CONFLICT:block/bio.c"):
+            stage.apply_round034_original_v1_kunit("block/bio.c", generated)
+        self.assertEqual(stage.apply_round034_original_v1_kunit(
+            "mm/zswap.c", "original"), "original")
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)

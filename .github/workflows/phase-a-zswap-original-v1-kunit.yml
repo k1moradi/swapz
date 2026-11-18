@@ -1,0 +1,182 @@
+name: "Round034 original Linux zswap=y booted v1 BIO KUnit"
+on:
+  push:
+    branches: [main]
+    paths:
+      - ".github/workflows/phase-a-zswap-original-v1-kunit.yml"
+      - "tests/tools/stage-pinned-linux-zswap-composed.py"
+      - "tests/tools/round034-original-v1-kunit-verify.py"
+      - "tests/runtime/native/pinned-linux-zswap-composed-source-test.py"
+      - "tests/runtime/native/fixtures/round034-original-bio-*"
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  original-uml-zswap-on-v1:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 100
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          path: swapz
+          persist-credentials: false
+      - uses: actions/checkout@v4
+        with:
+          repository: torvalds/linux
+          ref: c339f4010dea8b0d754f84ace70cd1b089878ef8
+          fetch-depth: 1
+          path: linux
+          persist-credentials: false
+      - name: "Install original UML dependencies and strict host compilers"
+        run: |
+          set -euo pipefail
+          sudo apt-get update -qq
+          sudo DEBIAN_FRONTEND=noninteractive apt-get install -y \
+            --no-install-recommends build-essential bc bison flex clang \
+            libelf-dev libssl-dev libncurses-dev liblz4-dev python3 \
+            python3-pyelftools binutils
+      - name: "Source-extracted original provider GCC Clang ASan UBSan and hostile verifier"
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          export ROUND031_PINNED_LINUX="$PWD/linux"
+          logfile="$RUNNER_TEMP/round034-original-host-first-error.log"
+          checked() {
+            local name="$1"
+            shift
+            if "$@" >"$logfile" 2>&1; then
+              echo "ROUND034_REAL_SOURCE_HOST_PASS=$name"
+              tail -n 6 "$logfile"
+            else
+              local code=$?
+              echo "::error::First real source host failure phase=$name exit=$code"
+              tail -n 85 "$logfile"
+              return "$code"
+            fi
+          }
+          test "$(git -C linux rev-parse HEAD)" = c339f4010dea8b0d754f84ace70cd1b089878ef8
+          test "$(git -C swapz rev-parse HEAD)" = "$GITHUB_SHA"
+          test -z "$(git -C linux status --porcelain --untracked-files=all)"
+          test -z "$(git -C swapz status --porcelain --untracked-files=all)"
+          checked adversarial-verifier python3 -B \
+            swapz/tests/tools/round034-original-v1-kunit-verify.py --self-test
+          checked real-original-GCC-Clang-ASan-UBSan python3 -B \
+            swapz/tests/runtime/native/pinned-linux-zswap-composed-source-test.py -v
+      - name: "Compose exact pristine original source and SHA-verify ten changed files"
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          manifest="$RUNNER_TEMP/round034-original-ten-source-manifest.json"
+          python3 -B swapz/tests/tools/stage-pinned-linux-zswap-composed.py \
+            --linux-root linux --manifest "$manifest"
+          python3 - "$manifest" <<'PY'
+          import hashlib, json, pathlib, sys
+          document = json.loads(pathlib.Path(sys.argv[1]).read_text())
+          assert document["source_sha"] == "c339f4010dea8b0d754f84ace70cd1b089878ef8"
+          assert document["original_source_verified"] is True
+          assert document["source_manifest_complete"] is True
+          expected = {"block/Kconfig", "block/Makefile", "block/bio.c",
+                      "block/swap-bio-origin-kunit.c", "include/linux/bio.h",
+                      "include/linux/blk_types.h", "include/linux/swap_ops.h",
+                      "mm/page_io.c", "mm/swapfile.c", "mm/zswap.c"}
+          entries = document["changed_paths"]
+          assert len(entries) == 10 and {item["path"] for item in entries} == expected
+          for entry in entries:
+              data = (pathlib.Path("linux") / entry["path"]).read_bytes()
+              assert hashlib.sha256(data).hexdigest() == entry["staged_sha256"]
+          PY
+          git -C linux diff --check
+          grep -Fq 'swapz_round034_v1_owned_copy_kunit' linux/block/bio.c
+          grep -Fq 'SWAPZ_ROUND034_ORIGINAL_V1_KUNIT_TEST' linux/block/bio.c
+          grep -Fq 'EXPORT_SYMBOL_GPL(swapz_ci_bio_snapshot_lz4_v1)' linux/block/bio.c
+          grep -Fq 'swapz_round031_mm_bio_create(entry, swpentry, tree, offset)' linux/mm/zswap.c
+          echo "ROUND034_GENUINE_ORIGINAL_SOURCE_MANIFEST_SHA256_PASS"
+      - name: "Boot REAL UML with CONFIG_ZSWAP=y and run 11 old + 6 new v1 C KUnit"
+        shell: bash
+        timeout-minutes: 80
+        run: |
+          set -Eeuo pipefail
+          phase=initial
+          log="$RUNNER_TEMP/round034-original-uml-first-error.log"
+          evidence="$RUNNER_TEMP/round034-original-v1-evidence.txt"
+          config="$RUNNER_TEMP/round034-original-v1.kunitconfig"
+          out="$RUNNER_TEMP/round034-original-uml"
+          result="$RUNNER_TEMP/round034-original-v1.json"
+          printf 'source=%s\noriginal=c339f4010dea8b0d754f84ace70cd1b089878ef8\n' \
+            "$GITHUB_SHA" >"$evidence"
+          trap 'code=$?; if ((code)); then echo "::error::First original UML phase=$phase exit=$code"; tail -n 100 "$log" 2>/dev/null || :; printf "result=FAIL\nfirst_phase=%s\nexit=%d\n" "$phase" "$code" >>"$evidence"; fi' EXIT
+          cat > "$config" <<'KUNIT_CFG'
+          CONFIG_KUNIT=y
+          CONFIG_BLOCK=y
+          CONFIG_SWAP=y
+          CONFIG_ZSWAP=y
+          CONFIG_SWAP_BIO_ORIGIN_KUNIT_TEST=y
+          CONFIG_CRYPTO=y
+          CONFIG_CRYPTO_LZ4=y
+          CONFIG_CRYPTO_LIB_SHA256=y
+          CONFIG_LZ4_COMPRESS=y
+          CONFIG_LZ4_DECOMPRESS=y
+          # CONFIG_CGROUPS is not set
+          # CONFIG_BLK_CGROUP is not set
+          # CONFIG_KUNIT_ALL_TESTS is not set
+          KUNIT_CFG
+          flags="-DSWAPZ_ROUND028_SLOT_EPOCH_SOURCE=1 -DSWAPZ_ROUND030_EVICTION_SNAPSHOT_SOURCE=1 -DSWAPZ_ROUND025_SIDEBAND_CI_ONLY=1 -DSWAPZ_ROUND031_MM_BIO_SOURCE=1 -DSWAPZ_ROUND032_BIO_COPY_VIEW_CI_ONLY=1 -DSWAPZ_ROUND034_ORIGINAL_V1_KUNIT_TEST=1"
+          phase=real-original-uml-build-boot
+          if timeout -k 10s 65m python3 -B linux/tools/testing/kunit/kunit.py run \
+              --arch=um --build_dir="$out" --kunitconfig="$config" \
+              --make_options="KCFLAGS=$flags -Werror" --jobs=2 --timeout=120 \
+              --json="$result" swapz_round025_sideband_compiler_only \
+              >"$log" 2>&1; then
+            echo "ROUND034_REAL_ORIGINAL_UML_RETURN=0"
+            printf 'uml_exit=0\n' >>"$evidence"
+          else
+            code=$?
+            printf 'uml_exit=%d\n' "$code" >>"$evidence"
+            if [[ -s "$out/test.log" ]]; then
+              grep -E 'KTAP version|swapz_ci_|swapz_round034_|not ok|Kernel panic' \
+                "$out/test.log" | tail -n 75 || true
+            fi
+            exit "$code"
+          fi
+          phase=effective-original-uml-config
+          test -x "$out/linux"
+          test -s "$out/test.log"
+          test -s "$result"
+          grep -Fxq CONFIG_ZSWAP=y "$out/.config"
+          grep -Fxq CONFIG_SWAP=y "$out/.config"
+          grep -Fxq CONFIG_KUNIT=y "$out/.config"
+          grep -Fxq CONFIG_CRYPTO_LIB_SHA256=y "$out/.config"
+          grep -Fxq CONFIG_LZ4_COMPRESS=y "$out/.config"
+          grep -Fxq CONFIG_LZ4_DECOMPRESS=y "$out/.config"
+          grep -Fxq CONFIG_SWAP_BIO_ORIGIN_KUNIT_TEST=y "$out/.config"
+          grep -Fxq '# CONFIG_CGROUPS is not set' "$out/.config"
+          printf 'effective_config_sha256=%s\n' \
+            "$(sha256sum "$out/.config" | cut -d' ' -f1)" >>"$evidence"
+          printf 'kernel_sha256=%s\n' \
+            "$(sha256sum "$out/linux" | cut -d' ' -f1)" >>"$evidence"
+          printf 'json_sha256=%s\n' \
+            "$(sha256sum "$result" | cut -d' ' -f1)" >>"$evidence"
+          printf 'ktap_sha256=%s\n' \
+            "$(sha256sum "$out/test.log" | cut -d' ' -f1)" >>"$evidence"
+          phase=independent-real-JSON-plus-KTAP
+          python3 -B swapz/tests/tools/round034-original-v1-kunit-verify.py \
+            --result "$result" --kernel-log "$out/test.log" >"$log" 2>&1
+          cat "$log"
+          printf 'old_cases=11\nnew_v1_cases=6\ntotal_executed=17\nresult=PASS\n' \
+            >>"$evidence"
+          echo "PHASE_A=BLOCKED FORCED_RAW=DISABLED DIRECT_COMPRESSED=DISABLED"
+      - name: "Retain first failure, real original source SHA and executed KTAP evidence"
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: round034-original-zswap-on-v1
+          path: |
+            ${{ runner.temp }}/round034-original-host-first-error.log
+            ${{ runner.temp }}/round034-original-uml-first-error.log
+            ${{ runner.temp }}/round034-original-ten-source-manifest.json
+            ${{ runner.temp }}/round034-original-v1-evidence.txt
+            ${{ runner.temp }}/round034-original-v1.kunitconfig
+            ${{ runner.temp }}/round034-original-v1.json
+            ${{ runner.temp }}/round034-original-uml/test.log
+          if-no-files-found: ignore
+          retention-days: 7
