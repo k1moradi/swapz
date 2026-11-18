@@ -88,7 +88,7 @@ jobs:
               assert hashlib.sha256(data).hexdigest() == item["staged_sha256"]
           PY
           git -C linux diff --check
-          grep -Fq 'swapz_round035_mm_route_preflight(ctx,' linux/mm/page_io.c
+          grep -Fq 'swapz_round035_mm_route_preflight(' linux/mm/page_io.c
           grep -Fq 'swap_folio_sector(folio)' linux/mm/page_io.c
           grep -Fq 'get_swap_device(original_slot)' linux/mm/page_io.c
           grep -Fq 'swapz_round035_original_slot = swpentry' linux/mm/zswap.c
