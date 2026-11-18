@@ -15565,3 +15565,20 @@ production tests, Phase A BLOCKED, forced RAW DISABLED, compressed handoff NO_GO
 ### Round035 Agent2 CI-host fixture output contract correction after first red (2026-11-18)
 
 First exact fresh source [run #44274559631](https://github.com/k1moradi/swapz/actions/runs/44274559631) original UML job `134699253460` **FAILED before kernel build/boot** after two executable hostile verifier self-tests passed. The original source-extracted GCC and Clang sanitizer host programs both actually compiled and ran successfully, but the existing reusable host `compile_and_run` harness requires the literal prefix `ROUND031_REAL_` in stdout to distinguish a completed executable from a no-output/fabricated invocation. The new actual-source C fixture returned 0 silently, so the independent host test correctly reported `AssertionError: 'ROUND031_REAL_' not found in ''` for both compiler runs. This new same-commit rootless test-fixture correction adds a single explicit `puts("ROUND031_REAL_ROUND035_EXACT_SOURCE_ROUTE_HOST_PASS")` **only after every assert and sanitizers have completed**. It does not weaken the harness, mock the actual source C algorithm, alter ABI, kernel producer, KUnit cases, eviction policy, source authority or physical behavior. The new expected-head single-parent correction has its **own applicable substantive standards update** (this section), not a retrospective waiver; preserve both the historical Round034 missing-standards policy failure and the genuinely red Round035 CI result. Require a **fresh exact SHA** source test and actual booted original Linux `CONFIG_ZSWAP=y` 21-case JSON/KTAP, plus true x86 y/n vmlinux/modules/GPL/modpost and new repository-policy PASS. If any fails, report first real failure without assigning pass to the earlier red SHA. `SOURCE_MAPPED_AUTHENTICATED=0`, `PHASE_A=BLOCKED`, `FORCED_RAW_BYPASS=DISABLED`, `DIRECT_COMPRESSED_HANDOFF=NO_GO_DISABLED`, `ORIGINAL_MM_PRESSURE_EVICTION=NOT_RUN`, `PHYSICAL=NOT_RUN`; this is compiler fixture evidence only, not source-swap-area authority.
+
+### Round035 same-commit host source-entrypoint diagnostics correction (2026-11-18)
+
+The Round035 original-C fixture nests the older Round030 test inside the
+Round031 fixture: the earlier C textual int main(void) is renamed by its
+existing temporary #define main, whereas the later Round031 textual
+int main(void) follows #undef main. The host composer MUST detect exactly
+two textual C main definitions at this point, preserve the prior Round030
+preprocessor renaming and change ONLY the last Round031 definition to a
+unique callable fixture entrypoint. A global replace or uniqueness assertion
+on the bare int main(void) text falsely rejects the correctly nested fixture.
+Fail closed if the expected two-entrypoint shape changes, before invoking
+the compilers. Execute both inherited Round030/031 tests and Round035
+4/8/16KiB hostile lower cases under GCC/Clang ASan/UBSan, and retain
+the initial source-bound workflow run 44275178629 failure as a REAL failed
+host-assembly gate. The exact fresh same-commit policy check remains mandatory;
+historical policy failure is unaffected. No Phase A upgrade.

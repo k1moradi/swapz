@@ -149,8 +149,12 @@ static int swapz_lower_read(void *opaque, swapz_u32 block, swapz_u8 blocks,
         sidecar_host, "/* ROUND031_EXACT_DM_SIDECAR_SOURCE */",
         extract(target, "/* ROUND031_DM_SIDECAR_EXACT_START */",
                 "/* ROUND031_DM_SIDECAR_EXACT_END */"))
-    sidecar_host = replace_once(sidecar_host, "int main(void)",
-                                "int swapz_round031_fixture_main(void)")
+    # The nested Round030 source retains a separate textual main(), renamed
+    # only by its enclosing #define. Rename the last/main Round031 entry.
+    if sidecar_host.count("int main(void)") != 2:
+        raise AssertionError("nested Round030/031 fixture mains drifted")
+    prefix, final_main = sidecar_host.rsplit("int main(void)", 1)
+    sidecar_host = prefix + "int swapz_round031_fixture_main(void)" + final_main
     fixture = (FIXTURES / "round035-dm-lower-host.c").read_text(
         encoding="utf-8")
     fixture = replace_once(fixture, "/* ROUND035_EMBED_PRIOR_ACTUAL_DM */",
