@@ -5036,6 +5036,508 @@ clear_private:
 
 
 
+
+/*
+ * Round036 SOURCE-ONLY two-phase mock completion/ACK ledger. Each operation
+ * holds ordered_owner, but the in-flight interval holds NO mutex: a separate
+ * fake callback must reenter with a stable caller-owned ledger slot and a
+ * never-reused cookie. No pointer to an original BIO or zswap pool survives
+ * prepare. The caller must quiesce callbacks before freeing this ledger or
+ * any of its private buffers; callbacks use the slot/cookie, never a freed
+ * transaction pointer. Extents must be pinned by an eventual real allocator,
+ * which is NOT implemented here. No real lower I/O, map mutation or bio_endio.
+ *
+ * The public original MM area/bdev/current slot allocator incarnation is
+ * still unproven. Mock success is NOT SOURCE_MAPPED_AUTHENTICATED and is not
+ * a production durable-write/upper-ACK witness; ordinary swapz_map and RAW
+ * still consume the original uncompressed full 4096-byte page.
+ */
+#if defined(SWAPZ_ROUND036_DM_TRANSACTION_PHASE_TEST) && \
+    defined(SWAPZ_ROUND035_DM_LZ4_LOWER_ROUNDTRIP_TEST) && \
+    defined(SWAPZ_ROUND034_DM_SOURCE_SLOT_AUTHORITY_TEST) && \
+    defined(SWAPZ_ROUND033_DM_ORIGINAL_BIO_GPL_LINK_TEST) && \
+    defined(SWAPZ_ROUND032_DM_LZ4_VIEW_VALIDATE_TEST) && \
+    defined(SWAPZ_ROUND031_DM_LZ4_SIDECAR_TEST) && \
+    defined(SWAPZ_ROUND030_DM_COMPRESSED_COMMIT_TEST) && \
+    defined(SWAPZ_ROUND028_DM_OWNED_READBACK_TEST) && \
+    defined(SWAPZ_ROUND024_DM_IMPORT_KBUILD_PROBE) && \
+    defined(SWAPZ_ROUND032_BIO_COPY_VIEW_CI_ONLY) && \
+    defined(SWAPZ_ROUND031_MM_BIO_SOURCE) && \
+    defined(SWAPZ_ROUND030_EVICTION_SNAPSHOT_SOURCE) && \
+    defined(SWAPZ_ROUND028_SLOT_EPOCH_SOURCE) && \
+    defined(SWAPZ_ROUND025_SIDEBAND_CI_ONLY)
+/* ROUND036_DM_TRANSACTION_PHASE_EXACT_START */
+#define SWAPZ_ROUND036_SOURCE_MAPPED_AUTHENTICATED 0U
+
+enum swapz_round036_dm_mock_phase {
+	SWAPZ_ROUND036_EMPTY = 0,
+	SWAPZ_ROUND036_PREPARED,
+	SWAPZ_ROUND036_FAKE_WRITE_IN_FLIGHT,
+	SWAPZ_ROUND036_FAKE_READ_VERIFIED,
+	SWAPZ_ROUND036_SIMULATED_PUBLISHED,
+	SWAPZ_ROUND036_ABORTED
+};
+
+/* All pointers are private, disjoint, caller-owned and lifetime-pinned. */
+struct swapz_round036_dm_mock_ledger {
+	enum swapz_round036_dm_mock_phase phase;
+	struct swapz_round032_dm_owned_view_v1 source;
+	struct swapz_map previous_map;
+	swapz_u64 callback_cookie;
+	swapz_u64 previous_sidecar_owner;
+	swapz_u64 dm_generation;
+	swapz_u64 gc_epoch;
+	swapz_u32 logical_page;
+	swapz_u32 fake_start_block;
+	swapz_u32 fake_extent_sequence;
+	swapz_u32 previous_gc_destination;
+	swapz_u32 previous_gc_victim;
+	swapz_u32 extent_bytes;
+	swapz_u32 payload_offset;
+	swapz_u8 hypothetical_ack_count;
+	swapz_u8 *private_compressed;
+	swapz_u8 *private_stage;
+	swapz_u8 *private_verified;
+};
+
+struct swapz_round036_dm_mock_publication {
+	swapz_u64 source_swap_entry;
+	swapz_u64 source_epoch;
+	swapz_u64 stored_identity;
+	swapz_u64 owner_cookie;
+	swapz_u64 dm_generation;
+	swapz_u32 fake_start_block;
+	swapz_u32 fake_extent_sequence;
+	swapz_u8 hypothetical_ack_count;
+};
+
+static __used noinline void swapz_round036_dm_mock_retire(
+		struct swapz_round036_dm_mock_ledger *ledger)
+{
+	if (!ledger)
+		return;
+	/* Caller holds ordered_owner and retains these buffers until all
+	 * fake callbacks have quiesced. Retire is idempotent for late replay.
+	 */
+	if (ledger->private_compressed)
+		memzero_explicit(ledger->private_compressed, SWAPZ_MAX_COMPRESSED);
+	if (ledger->private_stage)
+		memzero_explicit(ledger->private_stage, ledger->extent_bytes);
+	if (ledger->private_verified)
+		memzero_explicit(ledger->private_verified, SWAPZ_BLOCK_BYTES);
+	memzero_explicit(&ledger->source, sizeof(ledger->source));
+	memzero_explicit(&ledger->previous_map, sizeof(ledger->previous_map));
+	ledger->private_compressed = NULL;
+	ledger->private_stage = NULL;
+	ledger->private_verified = NULL;
+	ledger->extent_bytes = 0;
+	ledger->phase = SWAPZ_ROUND036_ABORTED;
+}
+
+static __used noinline int swapz_round036_dm_mock_prepare(
+		struct swapz_dm *ctx, const struct bio *source_bio,
+		const struct swapz_round031_dm_sidecar *sidecar,
+		const struct swapz_zswap_admission_transaction *transaction,
+		swapz_u64 expected_source_swap_entry,
+		swapz_u64 expected_previous_sidecar_owner,
+		swapz_u64 callback_cookie, swapz_u32 fake_start_block,
+		swapz_u32 fake_extent_sequence,
+		struct swapz_round036_dm_mock_ledger *ledger,
+		swapz_u8 *private_compressed, swapz_u8 *provider_scratch,
+		swapz_u8 *private_stage, swapz_u8 *private_verified)
+{
+	struct swapz_round032_dm_owned_view_v1 view = {};
+	swp_entry_t source_entry;
+	const struct swapz_map *prior;
+	const struct swapz_round031_dm_sidecar_slot *prior_slot;
+	swapz_u32 logical_page, capacity, compressed_length;
+	sector_t source_sector;
+	int error = -ESTALE;
+
+	if (!ctx || !source_bio || !sidecar || !transaction || !ledger ||
+	    !private_compressed || !provider_scratch || !private_stage ||
+	    !private_verified || !expected_source_swap_entry ||
+	    !callback_cookie || !fake_extent_sequence)
+		return -EINVAL;
+	lockdep_assert_held(&ctx->ordered_owner);
+	if ((ledger->phase != SWAPZ_ROUND036_EMPTY &&
+	     ledger->phase != SWAPZ_ROUND036_ABORTED) ||
+	    ledger->callback_cookie == callback_cookie)
+		return -ESTALE;
+	if (swapz_zswap_import_ranges_overlap(
+		    private_compressed, SWAPZ_MAX_COMPRESSED,
+		    provider_scratch, SWAPZ_MAX_COMPRESSED) ||
+	    swapz_zswap_import_ranges_overlap(
+		    private_compressed, SWAPZ_MAX_COMPRESSED,
+		    private_stage, transaction->physical_extent_bytes) ||
+	    swapz_zswap_import_ranges_overlap(
+		    private_stage, transaction->physical_extent_bytes,
+		    private_verified, SWAPZ_BLOCK_BYTES) ||
+	    swapz_zswap_import_ranges_overlap(
+		    private_compressed, SWAPZ_MAX_COMPRESSED,
+		    private_verified, SWAPZ_BLOCK_BYTES) ||
+	    swapz_zswap_import_ranges_overlap(
+		    provider_scratch, SWAPZ_MAX_COMPRESSED,
+		    private_stage, transaction->physical_extent_bytes) ||
+	    swapz_zswap_import_ranges_overlap(
+		    provider_scratch, SWAPZ_MAX_COMPRESSED,
+		    private_verified, SWAPZ_BLOCK_BYTES))
+		return -EINVAL;
+	capacity = transaction->physical_extent_bytes;
+	logical_page = (swapz_u32)transaction->record.logical_page;
+	if ((capacity != SWAPZ_BLOCK_BYTES &&
+	     capacity != 2U * SWAPZ_BLOCK_BYTES &&
+	     capacity != 4U * SWAPZ_BLOCK_BYTES) ||
+	    transaction->record.logical_page != logical_page ||
+	    !logical_page || !ctx->target ||
+	    !ctx->authority.maps || ctx->authority.maps != ctx->maps ||
+	    logical_page >= ctx->authority.logical_pages ||
+	    !sidecar->slots || sidecar->closed ||
+	    sidecar->capacity != ctx->authority.logical_pages ||
+	    !ctx->accepting || smp_load_acquire(&ctx->failed) ||
+	    ctx->gc_recovery.active || ctx->authority.gc_allocation ||
+	    ctx->authority.batch_pending || ctx->authority.batch_replaying ||
+	    ctx->authority.in_flight ||
+	    transaction->phase != SWAPZ_ZSWAP_ADMISSION_PREPARED ||
+	    transaction->teardown_started || transaction->upper_write_ack_count ||
+	    transaction->owned_compressed_bytes != private_compressed ||
+	    transaction->payload_capacity < SWAPZ_MAX_COMPRESSED ||
+	    !transaction->record.generation || !transaction->record.gc_epoch ||
+	    !transaction->record.store_generation ||
+	    !transaction->record.stored_entry_identity ||
+	    fake_start_block < 1U ||
+	    fake_start_block >= ctx->authority.physical_blocks ||
+	    capacity / SWAPZ_BLOCK_BYTES >
+		    ctx->authority.physical_blocks - fake_start_block ||
+	    swapz_zswap_admission_try_live(NULL) != -EOPNOTSUPP)
+		goto clear_scratch;
+	if (bio_op(source_bio) != REQ_OP_WRITE ||
+	    !(source_bio->bi_opf & REQ_SWAP) ||
+	    (source_bio->bi_opf & REQ_PREFLUSH) ||
+	    source_bio->bi_swap_origin !=
+		    SWAP_BIO_ORIGIN_ZSWAP_STORED_WRITEBACK ||
+	    source_bio->bi_iter.bi_size != SWAPZ_BLOCK_BYTES ||
+	    source_bio->bi_iter.bi_idx || source_bio->bi_iter.bi_offset ||
+	    source_bio->bi_vcnt || !source_bio->bi_io_vec ||
+	    !source_bio->bi_bdev ||
+	    !bio_iter_iovec(source_bio, source_bio->bi_iter).bv_page ||
+	    bio_iter_iovec(source_bio, source_bio->bi_iter).bv_offset ||
+	    bio_iter_iovec(source_bio, source_bio->bi_iter).bv_len !=
+		    SWAPZ_BLOCK_BYTES)
+		goto clear_scratch;
+	source_sector = source_bio->bi_iter.bi_sector;
+	if (source_sector % SWAPZ_SECTORS ||
+	    source_sector >= ctx->target->len ||
+	    SWAPZ_SECTORS > ctx->target->len - source_sector ||
+	    source_sector / SWAPZ_SECTORS != logical_page)
+		goto clear_scratch;
+	source_entry.val = expected_source_swap_entry;
+	if (swp_type(source_entry) >= MAX_SWAPFILES ||
+	    !swp_offset(source_entry) ||
+	    swp_entry(swp_type(source_entry), swp_offset(source_entry)).val !=
+		    source_entry.val)
+		goto clear_scratch;
+	prior = &ctx->authority.maps[logical_page];
+	prior_slot = &sidecar->slots[logical_page];
+	if (prior_slot->readers ||
+	    prior_slot->owner_token != expected_previous_sidecar_owner ||
+	    prior->generation == ~(swapz_u32)0 ||
+	    transaction->record.generation != prior->generation + 1U)
+		goto clear_scratch;
+	error = swapz_round033_dm_copy_original_bio_v1_for_link(
+		source_bio, &view, private_compressed, SWAPZ_MAX_COMPRESSED,
+		provider_scratch, SWAPZ_MAX_COMPRESSED);
+	if (error)
+		goto clear_scratch;
+	compressed_length = transaction->record.compressed_length;
+	if (view.source_swap_entry != expected_source_swap_entry ||
+	    view.source_slot_epoch != transaction->record.store_generation ||
+	    view.stored_entry_identity !=
+		    transaction->record.stored_entry_identity ||
+	    view.compressed_length != compressed_length ||
+	    view.compressed_crc32c != transaction->record.compressed_crc32c ||
+	    view.decoded_length != SWAPZ_BLOCK_BYTES ||
+	    view.representation_version != SWAPZ_ZSWAP_IMPORT_VERSION ||
+	    view.codec != SWAPZ_ZSWAP_IMPORT_LZ4_CODEC ||
+	    memcmp(view.original_sha256, transaction->record.original_sha256,
+		   sizeof(view.original_sha256))) {
+		error = -ESTALE;
+		goto clear_scratch;
+	}
+	error = swapz_round028_dm_stage_owned_payload(
+		transaction, private_compressed, SWAPZ_MAX_COMPRESSED,
+		private_stage, capacity);
+	if (error)
+		goto clear_scratch;
+	/* No externally visible result or sidecar/map mutation until every
+	 * source check and real source C payload staging operation succeeds.
+	 */
+	ledger->source = view;
+	ledger->previous_map = *prior;
+	ledger->callback_cookie = callback_cookie;
+	ledger->previous_sidecar_owner = expected_previous_sidecar_owner;
+	ledger->dm_generation = transaction->record.generation;
+	ledger->gc_epoch = transaction->record.gc_epoch;
+	ledger->logical_page = logical_page;
+	ledger->fake_start_block = fake_start_block;
+	ledger->fake_extent_sequence = fake_extent_sequence;
+	ledger->previous_gc_destination = ctx->authority.gc_destination;
+	ledger->previous_gc_victim = ctx->authority.gc_forbidden_victim;
+	ledger->extent_bytes = capacity;
+	ledger->payload_offset = transaction->compressed_payload_offset;
+	ledger->hypothetical_ack_count = 0;
+	ledger->private_compressed = private_compressed;
+	ledger->private_stage = private_stage;
+	ledger->private_verified = private_verified;
+	ledger->phase = SWAPZ_ROUND036_PREPARED;
+	memzero_explicit(provider_scratch, SWAPZ_MAX_COMPRESSED);
+	return 0;
+
+clear_scratch:
+	memzero_explicit(private_compressed, SWAPZ_MAX_COMPRESSED);
+	memzero_explicit(provider_scratch, SWAPZ_MAX_COMPRESSED);
+	return error;
+}
+
+/* Nonblocking fake submit: the caller releases ordered_owner before a
+ * hypothetical async wait. The callback receives an incarnation cookie.
+ */
+static __used noinline int swapz_round036_dm_mock_submit(
+		struct swapz_dm *ctx,
+		struct swapz_round036_dm_mock_ledger *ledger,
+		swapz_u64 callback_cookie)
+{
+	if (!ctx || !ledger)
+		return -EINVAL;
+	lockdep_assert_held(&ctx->ordered_owner);
+	if (ledger->phase != SWAPZ_ROUND036_PREPARED ||
+	    ledger->callback_cookie != callback_cookie)
+		return -ESTALE;
+	ledger->phase = SWAPZ_ROUND036_FAKE_WRITE_IN_FLIGHT;
+	return 0;
+}
+
+/* Fake callback supplies a privately copied post-header lower READ image,
+ * not a real durable I/O completion. No map/ACK is called from this callback.
+ */
+static __used noinline int swapz_round036_dm_mock_complete(
+		struct swapz_dm *ctx,
+		struct swapz_round036_dm_mock_ledger *ledger,
+		swapz_u64 callback_cookie, int fake_lower_error,
+		swapz_u32 fake_written_bytes,
+		const swapz_u8 *fake_lower_readback,
+		swapz_u32 readback_capacity, swapz_u8 *decode_scratch)
+{
+	swapz_u8 calculated_sha256[32];
+	swapz_u32 index, payload_end;
+	int decoded_length;
+	int error = -EIO;
+
+	if (!ctx || !ledger || !fake_lower_readback || !decode_scratch)
+		return -EINVAL;
+	lockdep_assert_held(&ctx->ordered_owner);
+	if (ledger->callback_cookie != callback_cookie ||
+	    ledger->phase != SWAPZ_ROUND036_FAKE_WRITE_IN_FLIGHT ||
+	    ledger->hypothetical_ack_count)
+		return -ESTALE;
+	if (fake_lower_error || fake_written_bytes != ledger->extent_bytes ||
+	    readback_capacity < ledger->extent_bytes)
+		goto reject;
+	if (swapz_zswap_import_ranges_overlap(
+		    fake_lower_readback, ledger->extent_bytes,
+		    decode_scratch, SWAPZ_BLOCK_BYTES) ||
+	    swapz_zswap_import_ranges_overlap(
+		    fake_lower_readback, ledger->extent_bytes,
+		    ledger->private_verified, SWAPZ_BLOCK_BYTES) ||
+	    swapz_zswap_import_ranges_overlap(
+		    decode_scratch, SWAPZ_BLOCK_BYTES,
+		    ledger->private_verified, SWAPZ_BLOCK_BYTES)) {
+		error = -EINVAL;
+		goto reject;
+	}
+	if (memcmp(fake_lower_readback, ledger->private_stage,
+		   ledger->extent_bytes)) {
+		error = -EBADMSG;
+		goto reject;
+	}
+	payload_end = ledger->payload_offset + ledger->source.compressed_length;
+	if (payload_end > ledger->extent_bytes) {
+		error = -EMSGSIZE;
+		goto reject;
+	}
+	for (index = 0; index < ledger->extent_bytes; ++index)
+		if ((index < ledger->payload_offset || index >= payload_end) &&
+		    fake_lower_readback[index]) {
+			error = -EBADMSG;
+			goto reject;
+		}
+	if (swapz_crc32c_bytes(
+		    fake_lower_readback + ledger->payload_offset,
+		    ledger->source.compressed_length) !=
+	    ledger->source.compressed_crc32c) {
+		error = -EBADMSG;
+		goto reject;
+	}
+	decoded_length = LZ4_decompress_safe(
+		(const char *)fake_lower_readback + ledger->payload_offset,
+		(char *)decode_scratch, (int)ledger->source.compressed_length,
+		(int)SWAPZ_BLOCK_BYTES);
+	if (decoded_length != (int)SWAPZ_BLOCK_BYTES ||
+	    swapz_zswap_import_sha256(decode_scratch, calculated_sha256) ||
+	    memcmp(calculated_sha256, ledger->source.original_sha256,
+		   sizeof(calculated_sha256))) {
+		error = -EBADMSG;
+		goto reject;
+	}
+	memcpy(ledger->private_verified, decode_scratch, SWAPZ_BLOCK_BYTES);
+	ledger->phase = SWAPZ_ROUND036_FAKE_READ_VERIFIED;
+	memzero_explicit(calculated_sha256, sizeof(calculated_sha256));
+	memzero_explicit(decode_scratch, SWAPZ_BLOCK_BYTES);
+	return 0;
+
+reject:
+	memzero_explicit(calculated_sha256, sizeof(calculated_sha256));
+	memzero_explicit(decode_scratch, SWAPZ_BLOCK_BYTES);
+	swapz_round036_dm_mock_retire(ledger);
+	return error;
+}
+
+/* All "current original source" fields here are MOCK witness inputs, not
+ * authenticated ORIGINAL MM slot/bdev/epoch. The original DM maps and
+ * sidecar are READ ONLY; publication and ACK occur only in private values.
+ */
+static __used noinline int swapz_round036_dm_mock_publish_once(
+		struct swapz_dm *ctx,
+		const struct swapz_round031_dm_sidecar *sidecar,
+		struct swapz_zswap_admission_transaction *transaction,
+		struct swapz_round036_dm_mock_ledger *ledger,
+		swapz_u64 callback_cookie, swapz_u32 current_fake_extent_sequence,
+		const struct swapz_round032_dm_owned_view_v1 *mock_current_source,
+		struct swapz_round036_dm_mock_publication *publication,
+		swapz_u8 *upper_output)
+{
+	struct swapz_zswap_admission_transaction simulated;
+	struct swapz_round036_dm_mock_publication accepted = {};
+	swapz_u8 verified_sha256[32];
+	const struct swapz_round031_dm_sidecar_slot *slot;
+	swapz_u32 logical_page;
+	int error;
+
+	if (!ctx || !sidecar || !transaction || !ledger ||
+	    !mock_current_source || !publication || !upper_output)
+		return -EINVAL;
+	lockdep_assert_held(&ctx->ordered_owner);
+	if (ledger->phase != SWAPZ_ROUND036_FAKE_READ_VERIFIED ||
+	    ledger->callback_cookie != callback_cookie ||
+	    !ledger->private_verified || !ledger->private_compressed ||
+	    !ledger->private_stage || ledger->hypothetical_ack_count)
+		return -ESTALE;
+	logical_page = ledger->logical_page;
+	if (!ctx->accepting || smp_load_acquire(&ctx->failed) ||
+	    !ctx->authority.maps || ctx->authority.maps != ctx->maps ||
+	    ctx->gc_recovery.active || ctx->authority.gc_allocation ||
+	    ctx->authority.batch_pending || ctx->authority.batch_replaying ||
+	    ctx->authority.in_flight || sidecar->closed || !sidecar->slots ||
+	    sidecar->capacity != ctx->authority.logical_pages ||
+	    logical_page >= sidecar->capacity ||
+	    ctx->authority.gc_destination != ledger->previous_gc_destination ||
+	    ctx->authority.gc_forbidden_victim != ledger->previous_gc_victim ||
+	    current_fake_extent_sequence != ledger->fake_extent_sequence ||
+	    memcmp(&ctx->authority.maps[logical_page],
+		   &ledger->previous_map, sizeof(ledger->previous_map)) ||
+	    transaction->phase != SWAPZ_ZSWAP_ADMISSION_PREPARED ||
+	    transaction->teardown_started || transaction->upper_write_ack_count ||
+	    transaction->record.logical_page != logical_page ||
+	    transaction->record.generation != ledger->dm_generation ||
+	    transaction->record.gc_epoch != ledger->gc_epoch ||
+	    transaction->record.store_generation != ledger->source.source_slot_epoch ||
+	    transaction->record.stored_entry_identity !=
+		    ledger->source.stored_entry_identity ||
+	    transaction->record.compressed_crc32c !=
+		    ledger->source.compressed_crc32c ||
+	    transaction->record.compressed_length !=
+		    ledger->source.compressed_length ||
+	    transaction->physical_extent_bytes != ledger->extent_bytes ||
+	    transaction->compressed_payload_offset != ledger->payload_offset ||
+	    transaction->owned_compressed_bytes != ledger->private_compressed ||
+	    mock_current_source->source_swap_entry !=
+		    ledger->source.source_swap_entry ||
+	    mock_current_source->source_slot_epoch !=
+		    ledger->source.source_slot_epoch ||
+	    mock_current_source->stored_entry_identity !=
+		    ledger->source.stored_entry_identity ||
+	    mock_current_source->compressed_crc32c !=
+		    ledger->source.compressed_crc32c ||
+	    mock_current_source->compressed_length !=
+		    ledger->source.compressed_length ||
+	    mock_current_source->codec != SWAPZ_ZSWAP_IMPORT_LZ4_CODEC ||
+	    mock_current_source->representation_version !=
+		    SWAPZ_ZSWAP_IMPORT_VERSION ||
+	    mock_current_source->decoded_length != SWAPZ_BLOCK_BYTES ||
+	    memcmp(mock_current_source->original_sha256,
+		   ledger->source.original_sha256, 32U) ||
+	    swapz_zswap_admission_try_live(NULL) != -EOPNOTSUPP)
+		goto stale;
+	slot = &sidecar->slots[logical_page];
+	if (slot->readers ||
+	    slot->owner_token != ledger->previous_sidecar_owner)
+		goto stale;
+	error = swapz_zswap_import_sha256(ledger->private_verified,
+					 verified_sha256);
+	if (error || memcmp(verified_sha256, ledger->source.original_sha256,
+			   sizeof(verified_sha256))) {
+		error = -EBADMSG;
+		goto reject;
+	}
+	/* Operate on a LOCAL copy: even a later simulated transition error
+	 * cannot modify the original transaction, sidecar, map or upper bytes.
+	 */
+	simulated = *transaction;
+	error = swapz_zswap_admission_lower_write_done(
+		&simulated, 0, ledger->extent_bytes);
+	if (error)
+		goto reject;
+	error = swapz_zswap_admission_publish_ram_mapping(
+		&simulated, logical_page, ledger->dm_generation, ledger->gc_epoch);
+	if (error)
+		goto reject;
+	error = swapz_zswap_admission_upper_write_ack(&simulated);
+	if (error || simulated.upper_write_ack_count != 1U) {
+		error = -ESTALE;
+		goto reject;
+	}
+	accepted.source_swap_entry = ledger->source.source_swap_entry;
+	accepted.source_epoch = ledger->source.source_slot_epoch;
+	accepted.stored_identity = ledger->source.stored_entry_identity;
+	accepted.owner_cookie = ledger->callback_cookie;
+	accepted.dm_generation = ledger->dm_generation;
+	accepted.fake_start_block = ledger->fake_start_block;
+	accepted.fake_extent_sequence = ledger->fake_extent_sequence;
+	accepted.hypothetical_ack_count = 1U;
+	/* No fallible work after the first simulated publication. */
+	simulated.owned_compressed_bytes = NULL;
+	simulated.payload_capacity = 0;
+	*transaction = simulated;
+	*publication = accepted;
+	memcpy(upper_output, ledger->private_verified, SWAPZ_BLOCK_BYTES);
+	ledger->hypothetical_ack_count = 1U;
+	swapz_round036_dm_mock_retire(ledger);
+	ledger->phase = SWAPZ_ROUND036_SIMULATED_PUBLISHED;
+	memzero_explicit(verified_sha256, sizeof(verified_sha256));
+	return 0;
+
+stale:
+	error = -ESTALE;
+reject:
+	memzero_explicit(verified_sha256, sizeof(verified_sha256));
+	swapz_round036_dm_mock_retire(ledger);
+	return error;
+}
+/* ROUND036_DM_TRANSACTION_PHASE_EXACT_END */
+#endif /* SWAPZ_ROUND036_DM_TRANSACTION_PHASE_TEST */
+
+
+
 /*
  * ID29: media reclamation is allowed only after serialized authority has
  * already proven an entire 1MiB segment non-authoritative. DISCARD never
