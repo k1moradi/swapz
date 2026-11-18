@@ -5639,7 +5639,7 @@ static __used noinline int swapz_round037_dm_async_prepare(
 	lockdep_assert_held(&ctx->ordered_owner);
 	spin_lock_irqsave(&mailbox->callback_lock, flags);
 	if (mailbox->callback_references ||
-	    incarnation_ticket == mailbox->incarnation_ticket ||
+	    incarnation_ticket <= mailbox->incarnation_ticket ||
 	    (mailbox->phase != SWAPZ_ROUND037_EMPTY &&
 	     mailbox->phase != SWAPZ_ROUND037_CANCELLED &&
 	     mailbox->phase != SWAPZ_ROUND037_EXPIRED &&
@@ -5741,7 +5741,7 @@ static __used noinline int swapz_round037_dm_async_fake_callback(
 	if (lower_error || !fake_lower_image ||
 	    completed_bytes != extent_bytes || image_capacity < extent_bytes) {
 		mailbox->phase = SWAPZ_ROUND037_LOWER_COMPLETION_ERROR;
-		error = lower_error ? lower_error : -EIO;
+		error = -EIO; /* positive fake lower status must also fail closed */
 		goto unlock;
 	}
 	memcpy(mailbox->fake_lower_image, fake_lower_image, extent_bytes);

@@ -233,6 +233,11 @@ static void round037_test_one(unsigned int extent_blocks,
 				mailbox, callback_ticket + 1U, 0,
 				extent_bytes, fake_image, extent_bytes) == -ESTALE);
 			round037_assert_clean(mailbox);
+			/* A retired token must never be reintroduced after reissue. */
+			assert(swapz_round037_dm_async_prepare(
+				&ctx, &source_bio, &sidecar, &transaction,
+				source_entry, 0U, callback_ticket,
+				2U, 79U, mailbox) == -EBUSY);
 		}
 		goto done;
 	case 13U: callback_event.completed_bytes--; break;
@@ -244,6 +249,7 @@ static void round037_test_one(unsigned int extent_blocks,
 	case 34U: fake_image[mailbox->ledger.payload_offset + 1U] ^= 1U; break;
 	case 35U: fake_image[extent_bytes - 1U] ^= 1U; break;
 	case 36U: callback_event.completed_bytes /= 2U; break;
+	case 37U: callback_event.fake_error = 1; break;
 	default: break;
 	}
 	ctx.ordered_owner = 0; /* Actual distinct callback phase/thread. */
@@ -255,7 +261,8 @@ static void round037_test_one(unsigned int extent_blocks,
 	}
 	round037_dispatch_fake_callback(&callback_event);
 	ctx.ordered_owner = 1;
-	if (fault == 13U || fault == 14U || fault == 15U || fault == 36U) {
+	if (fault == 13U || fault == 14U || fault == 15U ||
+	    fault == 36U || fault == 37U) {
 		assert(callback_event.result < 0);
 		assert(mailbox->phase == SWAPZ_ROUND037_LOWER_COMPLETION_ERROR);
 	} else {
@@ -337,7 +344,7 @@ int main(void)
 
 	assert(swapz_round036_fixture_main() == 0);
 	for (extent_blocks = 1U; extent_blocks <= 4U; extent_blocks *= 2U)
-		for (fault = 0U; fault <= 36U; ++fault)
+		for (fault = 0U; fault <= 37U; ++fault)
 			round037_test_one(extent_blocks, fault);
 	puts("ROUND037_ACTUAL_PRODUCTION_DM_ASYNC_LATER_CALLBACK_4096_SHA_GC_FENCE_NO_GO_PASS");
 	return 0;
