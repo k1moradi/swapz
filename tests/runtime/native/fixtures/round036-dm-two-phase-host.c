@@ -292,7 +292,7 @@ static void round036_reuse_after_abort_case(void)
 	swapz_u8 stage[SWAPZ_BLOCK_BYTES];
 	swapz_u8 readback[SWAPZ_BLOCK_BYTES];
 	swapz_u8 verified[SWAPZ_BLOCK_BYTES];
-	swapz_u8 scratch[SWAPZ_BLOCK_BYTES];
+	swapz_u8 callback_decode_scratch[SWAPZ_BLOCK_BYTES];
 	swapz_u8 upper[SWAPZ_BLOCK_BYTES];
 	const swapz_u64 source_entry = swp_entry(2U, 39U).val;
 	swapz_u32 length = (swapz_u32)LZ4_compress_default(
@@ -327,7 +327,7 @@ static void round036_reuse_after_abort_case(void)
 	swapz_round036_dm_mock_retire(&ledger);
 	assert(swapz_round036_dm_mock_complete(
 		&ctx, &ledger, 41U, 0, SWAPZ_BLOCK_BYTES, stage,
-		SWAPZ_BLOCK_BYTES, scratch) == -ESTALE);
+		SWAPZ_BLOCK_BYTES, callback_decode_scratch) == -ESTALE);
 	memcpy(private_compressed, compressed, length);
 	assert(swapz_round036_dm_mock_prepare(
 		&ctx, &pinned_bio, &sidecar, &transaction, source_entry,
@@ -336,11 +336,11 @@ static void round036_reuse_after_abort_case(void)
 	assert(swapz_round036_dm_mock_submit(&ctx, &ledger, 42U) == 0);
 	assert(swapz_round036_dm_mock_complete(
 		&ctx, &ledger, 41U, 0, SWAPZ_BLOCK_BYTES, stage,
-		SWAPZ_BLOCK_BYTES, scratch) == -ESTALE);
+		SWAPZ_BLOCK_BYTES, callback_decode_scratch) == -ESTALE);
 	memcpy(readback, stage, SWAPZ_BLOCK_BYTES);
 	assert(swapz_round036_dm_mock_complete(
 		&ctx, &ledger, 42U, 0, SWAPZ_BLOCK_BYTES, readback,
-		SWAPZ_BLOCK_BYTES, scratch) == 0);
+		SWAPZ_BLOCK_BYTES, callback_decode_scratch) == 0);
 	current_source = ledger.source;
 	assert(swapz_round036_dm_mock_publish_once(
 		&ctx, &sidecar, &transaction, &ledger, 42U, 78U,
