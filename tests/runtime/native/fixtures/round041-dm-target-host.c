@@ -28,7 +28,7 @@ static void round041_target_negative_case(unsigned int extent_blocks,
 		calloc(1U, sizeof(*verifier));
 	struct swapz_map map_snapshot;
 	swapz_u8 plaintext[SWAPZ_BLOCK_BYTES];
-	swapz_u8 compressed[SWAPZ_MAX_COMPRESSED];
+	swapz_u8 compressed_page_data[SWAPZ_MAX_COMPRESSED];
 	swapz_u8 mock_upper[SWAPZ_BLOCK_BYTES];
 	swapz_u8 mock_upper_snapshot[SWAPZ_BLOCK_BYTES];
 	swapz_u8 *fake_lower = calloc(32U, SWAPZ_BLOCK_BYTES);
@@ -45,7 +45,7 @@ static void round041_target_negative_case(unsigned int extent_blocks,
 	plaintext[0] = 0x31U;
 	plaintext[SWAPZ_BLOCK_BYTES - 1U] = 0x62U;
 	compressed_length = (swapz_u32)LZ4_compress_default(
-		(const char *)plaintext, (char *)compressed,
+		(const char *)plaintext, (char *)compressed_page_data,
 		(int)SWAPZ_BLOCK_BYTES, (int)SWAPZ_MAX_COMPRESSED);
 	assert(compressed_length > 0U &&
 	       compressed_length <= SWAPZ_MAX_COMPRESSED);
@@ -66,7 +66,7 @@ static void round041_target_negative_case(unsigned int extent_blocks,
 	source.source_slot_epoch = 33U;
 	source.stored_entry_identity = 55U;
 	source.compressed_crc32c =
-		swapz_crc32c_bytes(compressed, compressed_length);
+		swapz_crc32c_bytes(compressed_page_data, compressed_length);
 	source.compressed_length = (swapz_u16)compressed_length;
 	source.decoded_length = SWAPZ_BLOCK_BYTES;
 	source.representation_version = SWAPZ_ZSWAP_IMPORT_VERSION;
@@ -97,7 +97,7 @@ static void round041_target_negative_case(unsigned int extent_blocks,
 	memset(fake_lower, 0, 32U * SWAPZ_BLOCK_BYTES);
 	memset(fake_lower, 0x36, SWAPZ_BLOCK_BYTES);
 	memcpy(fake_lower + (1U + 6U) * SWAPZ_BLOCK_BYTES +
-		       record.payload_offset, compressed, compressed_length);
+		       record.payload_offset, compressed_page_data, compressed_length);
 
 	/* This is the ACTUAL Round038 production C CRC, dictionary-free LZ4
 	 * decode and ORIGINAL STORE-time full 4096 SHA, not another codec.
@@ -164,7 +164,13 @@ static void round041_target_negative_case(unsigned int extent_blocks,
 	case 17U: upper.bi_iter.bi_sector++; break;
 	case 18U: claim.relative_sector += SWAPZ_SECTORS; break;
 	case 19U: upper.bi_iter.bi_size -= 512U; break;
-	case 20U: upper.bi_opf = REQ_OP_READ | REQ_SWAP; break;
+	case 20U: /* Linux REQ_OP_READ is operation zero: REQ_SWAP alone is READ.
+		 * The inherited host shim has REQ_OP_WRITE=1 and bio_op() masks
+		 * the low 4 op bits. Never turn this negative into WRITE.
+		 */
+		upper.bi_opf = REQ_SWAP;
+		assert(bio_op(&upper) != REQ_OP_WRITE);
+		break;
 	case 21U: claim.source.source_swap_entry = 0U; break;
 	case 22U: source.source_swap_entry = ~(swapz_u64)0; break;
 	case 23U: observed.original_area_cookie = 0U; break;
@@ -246,7 +252,7 @@ static void round041_target_negative_case(unsigned int extent_blocks,
 	       lower_writes == write_count_before);
 
 	memzero_explicit(verifier, sizeof(*verifier));
-	memzero_explicit(compressed, sizeof(compressed));
+	memzero_explicit(compressed_page_data, sizeof(compressed_page_data));
 	memzero_explicit(plaintext, sizeof(plaintext));
 	memzero_explicit(mock_upper, sizeof(mock_upper));
 	memzero_explicit(fake_lower, 32U * SWAPZ_BLOCK_BYTES);

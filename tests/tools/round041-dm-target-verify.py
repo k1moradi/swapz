@@ -31,6 +31,34 @@ def replace_once(content: str, original: str, replacement: str) -> str:
     return content.replace(original, replacement, 1)
 
 
+def validate_round042_host_fixture(fixture: str) -> None:
+    """Fail closed on a shadowed compressor or a fake WRITE in read fault 20."""
+    original_local = "swapz_u8 compressed[SWAPZ_MAX_COMPRESSED];"
+    distinct_local = "swapz_u8 compressed_page_data[SWAPZ_MAX_COMPRESSED];"
+    if original_local in fixture or fixture.count(distinct_local) != 1:
+        raise AssertionError("Round042 source fixture still shadows compressor")
+    for required in (
+        "(char *)compressed_page_data,",
+        "swapz_crc32c_bytes(compressed_page_data, compressed_length)",
+        "record.payload_offset, compressed_page_data, compressed_length);",
+        "memzero_explicit(compressed_page_data, sizeof(compressed_page_data));",
+    ):
+        if fixture.count(required) != 1:
+            raise AssertionError("Round042 compressed source owner drift: " + required)
+    if fixture.count("case 20U:") != 1 or fixture.count("case 21U:") != 1:
+        raise AssertionError("Round042 original hostile read fault removed")
+    read_fault = fixture.split("case 20U:", 1)[1].split("case 21U:", 1)[0]
+    if (read_fault.count("upper.bi_opf = REQ_SWAP;") != 1 or
+            read_fault.count("assert(bio_op(&upper) != REQ_OP_WRITE);") != 1 or
+            "upper.bi_opf = REQ_OP_WRITE" in read_fault or
+            "upper.bi_opf = REQ_OP_READ" in read_fault):
+        raise AssertionError("Round042 hostile read became WRITE or unverified")
+    if (fixture.count("fault < 50U") != 1 or
+            "ROUND041_ACTUAL_DM_TARGET_INTERVAL_TABLE_GC_TEARDOWN_150_NO_AUTHORITY_PASS"
+            not in fixture):
+        raise AssertionError("Round042 inherited 150-case matrix weakened")
+
+
 def compose_actual_production_c() -> str:
     source = TARGET.read_text(encoding="utf-8")
     begin = "/* ROUND041_DM_TARGET_INTERVAL_EXACT_START */"
@@ -131,6 +159,7 @@ def compose_actual_production_c() -> str:
                source.split(backing_start, 1)[1].split(backing_end, 1)[0])
     backing = "typedef uint64_t sector_t;\n" + backing
     fixture = FIXTURE.read_text(encoding="utf-8")
+    validate_round042_host_fixture(fixture)
     for marker, replacement in (
         ("/* ROUND041_EXTRACT_ALL_PRIOR_SOURCE */", old),
         ("/* ROUND041_EXTRACT_TARGET_BACKING_CONVERSION */", backing),
@@ -138,6 +167,29 @@ def compose_actual_production_c() -> str:
     ):
         fixture = replace_once(fixture, marker, replacement)
     return fixture
+
+
+class Round042HostileFixtureSelfTests(unittest.TestCase):
+    def test_source_fixture_rejects_corrupt_hostile_mutations(self) -> None:
+        fixture = FIXTURE.read_text(encoding="utf-8")
+        validate_round042_host_fixture(fixture)
+        for original, hostile in (
+            ("swapz_u8 compressed_page_data[SWAPZ_MAX_COMPRESSED];",
+             "swapz_u8 compressed[SWAPZ_MAX_COMPRESSED];"),
+            ("upper.bi_opf = REQ_SWAP;",
+             "upper.bi_opf = REQ_OP_WRITE | REQ_SWAP;"),
+            ("assert(bio_op(&upper) != REQ_OP_WRITE);",
+             "assert(bio_op(&upper) == REQ_OP_WRITE);"),
+            ("fault < 50U", "fault < 1U"),
+            ("memzero_explicit(compressed_page_data, sizeof(compressed_page_data));",
+             "memzero_explicit(compressed_page_data, 0U);"),
+        ):
+            with self.subTest(hostile=hostile):
+                self.assertEqual(fixture.count(original), 1)
+                mutant = fixture.replace(original, hostile, 1)
+                with self.assertRaisesRegex(AssertionError, "Round042"):
+                    validate_round042_host_fixture(mutant)
+        print("ROUND042_DM_HOSTILE_SOURCE_FIXTURE_MUTANTS_REJECTED_PASS")
 
 
 class ActualDmTargetNonAuthorityTests(unittest.TestCase):
@@ -196,9 +248,12 @@ class ActualDmTargetNonAuthorityTests(unittest.TestCase):
 if __name__ == "__main__":
     import argparse
     parser = argparse.ArgumentParser()
-    parser.add_argument("mode", choices=("host-test",))
-    parser.parse_args()
+    parser.add_argument("mode", choices=("host-test", "hostile-self-test"))
+    mode = parser.parse_args().mode
     suite = unittest.defaultTestLoader.loadTestsFromTestCase(
-        ActualDmTargetNonAuthorityTests)
+        Round042HostileFixtureSelfTests)
+    if mode == "host-test":
+        suite.addTests(unittest.defaultTestLoader.loadTestsFromTestCase(
+            ActualDmTargetNonAuthorityTests))
     raise SystemExit(0 if unittest.TextTestRunner(verbosity=2).run(
         suite).wasSuccessful() else 1)
