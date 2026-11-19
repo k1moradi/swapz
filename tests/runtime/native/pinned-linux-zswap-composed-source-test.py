@@ -947,6 +947,118 @@ class OriginalMMAndBIOComposer(unittest.TestCase):
             "KUNIT_CASE(swapz_round043_"), 3)
 
 
+
+    def test_round045_real_original_stored_bio_source_scope_only(self):
+        original_source = stage.ROUND045_ORIGINAL_STORED_BIO_SCOPE_C
+        composer = Path(STAGER).read_text(encoding="utf-8")
+        self.assertEqual(
+            stage.ROUND045_ORIGINAL_STORED_BIO_SCOPE_MACRO,
+            "SWAPZ_ROUND045_ORIGINAL_STORED_BIO_SOURCE_SCOPE_TEST")
+        for required in (
+            "SWAPZ_ROUND043_ORIGINAL_BIO_CLONE_COPY_TEST",
+            "SWAPZ_ROUND042_ORIGINAL_STORED_WRITEBACK_LIFETIME_TEST",
+            "SWAPZ_ROUND041_ORIGINAL_SECTOR_TO_DM_NONAUTHORITY_TEST",
+            "SWAPZ_ROUND028_SLOT_EPOCH_SOURCE",
+            "IS_ENABLED(CONFIG_KUNIT)",
+            "swapz_round045_original_stored_bio_scope_probe(",
+            "swapz_round045_stored_bio_scope_refuse(",
+            "folio_swap_entry(folio, 0)",
+            "swp_type(original_slot) >= MAX_SWAPFILES",
+            "swp_offset(original_slot)",
+            "swapz_round028_slot_epoch(original_slot)",
+            "ctx->swapz_round035_original_slot.val",
+            "ctx->swapz_round035_original_epoch",
+            "get_swap_device(original_slot)",
+            "active_area != ctx->sis",
+            "active_area->bdev",
+            "source_bio->bi_bdev",
+            "swap_folio_sector(folio)",
+            "source_bio->bi_iter.bi_sector",
+            "source_bio->bi_io_vec[0].bv_len",
+            "bio_op(source_bio) == REQ_OP_WRITE",
+            "(source_bio->bi_opf & REQ_SWAP)",
+            "swapz_round035_bio_owner_matches(",
+            "put_swap_device(active_area)",
+            "evidence.area_ref_released_before_submit = true;",
+            "source_slot_incarnation_ref_held_across_async",
+            "current_dm_table_extent_gc_ref_held",
+            "return -EOPNOTSUPP;",
+            "kunit_test_suite(swapz_round045_stored_bio_scope_suite);",
+            '"swapz_round045_original_stored_bio_source_scope_no_authority"',
+        ):
+            self.assertIn(required, original_source)
+        self.assertEqual(original_source.count(
+            "put_swap_device(active_area);"), 1)
+        self.assertEqual(
+            original_source.count("KUNIT_CASE(swapz_round045_"), 2)
+        for name in (
+            "nonlinear_bdev_dm_collision",
+            "source_ref_aba_clone_reissue",
+        ):
+            self.assertEqual(original_source.count(
+                "KUNIT_CASE(swapz_round045_" + name + "_kunit)"), 1)
+        self.assertIn(
+            "apply_round045_original_stored_bio_scope(path, changed)",
+            composer)
+        self.assertIn(
+            "ROUND041_ORIGINAL_SECTOR_DOMAIN_HOOK +\n"
+            "        ROUND045_ORIGINAL_STORED_BIO_SCOPE_HOOK",
+            composer)
+        self.assertIn(
+            "swapz_round045_original_stored_bio_scope_probe(",
+            stage.ROUND045_ORIGINAL_STORED_BIO_SCOPE_HOOK)
+        source_without_comments = re.sub(
+            r"/\*[\s\S]*?\*/", "", original_source)
+        for forbidden in (
+            "EXPORT_SYMBOL", "bio_endio(", "submit_bio(",
+            "swapz_map(", "SOURCE_MAPPED_AUTHENTICATED=1",
+            "kunit_kmalloc(", "kmalloc(", "bio_split(",
+        ):
+            self.assertNotIn(forbidden, source_without_comments)
+        if os.environ.get("ROUND031_PINNED_LINUX"):
+            root = Path(os.environ["ROUND031_PINNED_LINUX"])
+            page = (root / "mm/page_io.c").read_text(encoding="utf-8")
+            zswap = (root / "mm/zswap.c").read_text(encoding="utf-8")
+            swapfile = (root / "mm/swapfile.c").read_text(encoding="utf-8")
+            for token in (
+                "bio_init(bio, ctx->sis->bdev,",
+                "bio->bi_iter.bi_sector = swap_folio_sector(",
+                "submit_bio_wait(bio);", "submit_bio(bio);",
+                "folio_end_writeback(folio);",
+                "bio_uninit(bio);",
+            ):
+                self.assertIn(token, page)
+            for token in (
+                "si = get_swap_device(swpentry);",
+                "put_swap_device(si);",
+                "xa_erase(tree, offset);",
+                "zswap_entry_free(entry);",
+                "__swap_writeout(&ctx, folio);",
+                "swap_write_submit(&ctx);",
+            ):
+                self.assertIn(token, zswap)
+            for token in (
+                "offset = swp_offset(folio->swap);",
+                "se = offset_to_swap_extent(sis, offset);",
+                "sector = se->start_block + (offset - se->start_page);",
+            ):
+                self.assertIn(token, swapfile)
+
+    def test_round045_real_original_source_scope_gcc_clang_sanitizers(self):
+        source = stage.ROUND045_ORIGINAL_STORED_BIO_SCOPE_C
+        start = "/* ROUND045_ORIGINAL_STORED_BIO_SOURCE_SCOPE_PURE_C_BEGIN */"
+        end = "/* ROUND045_ORIGINAL_STORED_BIO_SOURCE_SCOPE_PURE_C_END */"
+        self.assertEqual(source.count(start), 1)
+        self.assertEqual(source.count(end), 1)
+        extracted = source.split(start, 1)[1].split(end, 1)[0]
+        fixture = (FIXTURES / "round045-original-stored-bio-scope-host.c").read_text(
+            encoding="utf-8")
+        marker = "/* ROUND045_EXACT_ORIGINAL_SOURCE_C */"
+        self.assertEqual(fixture.count(marker), 1)
+        self.compile_and_run(fixture.replace(marker, extracted, 1),
+                             label="round045-original-stored-bio-scope", libraries=())
+
+
     def test_round043_original_bio_clone_exact_gcc_clang_sanitizers(self):
         source = stage.ROUND043_ORIGINAL_BIO_CLONE_SOURCE
         start = ("static noinline bool\n"

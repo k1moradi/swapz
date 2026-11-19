@@ -4130,6 +4130,325 @@ def apply_round043_original_bio_clone(path: str, composed: str) -> str:
         path, "round043-original-genuine-clone-kunit")
 
 
+# Round045 observation is private original Linux C, default UNDEFINED, and
+# establishes no real current allocation or DM target/GC ownership lease.
+ROUND045_ORIGINAL_STORED_BIO_SCOPE_MACRO = "SWAPZ_ROUND045_ORIGINAL_STORED_BIO_SOURCE_SCOPE_TEST"
+ROUND045_ORIGINAL_STORED_BIO_SCOPE_C = r"""#if defined(SWAPZ_ROUND045_ORIGINAL_STORED_BIO_SOURCE_SCOPE_TEST) && \
+    defined(SWAPZ_ROUND043_ORIGINAL_BIO_CLONE_COPY_TEST) && \
+    defined(SWAPZ_ROUND042_ORIGINAL_STORED_WRITEBACK_LIFETIME_TEST) && \
+    defined(SWAPZ_ROUND041_ORIGINAL_SECTOR_TO_DM_NONAUTHORITY_TEST) && \
+    defined(SWAPZ_ROUND040_ORIGINAL_ASYNC_SLOT_LEASE_NEGATIVE_TEST) && \
+    defined(SWAPZ_ROUND038_ORIGINAL_STORE_PROVENANCE_TEST) && \
+    defined(SWAPZ_ROUND037_ORIGINAL_MM_LIFETIME_OWNER_TEST) && \
+    defined(SWAPZ_ROUND036_ORIGINAL_ROUTE_LIFETIME_TEST) && \
+    defined(SWAPZ_ROUND035_ORIGINAL_MM_ROUTE_WITNESS_TEST) && \
+    defined(SWAPZ_ROUND034_ORIGINAL_V1_KUNIT_TEST) && \
+    defined(SWAPZ_ROUND032_BIO_COPY_VIEW_CI_ONLY) && \
+    defined(SWAPZ_ROUND031_MM_BIO_SOURCE) && \
+    defined(SWAPZ_ROUND030_EVICTION_SNAPSHOT_SOURCE) && \
+    defined(SWAPZ_ROUND028_SLOT_EPOCH_SOURCE) && \
+    defined(SWAPZ_ROUND025_SIDEBAND_CI_ONLY) && IS_ENABLED(CONFIG_KUNIT)
+/* ROUND045_ORIGINAL_STORED_BIO_SOURCE_SCOPE_BEGIN */
+/* ROUND045_ORIGINAL_STORED_BIO_SOURCE_SCOPE_PURE_C_BEGIN */
+struct swapz_round045_stored_bio_scope_evidence {
+	u64 original_typed_slot;
+	u64 source_typed_slot;
+	u64 original_slot_offset;
+	u64 original_slot_epoch;
+	u64 current_slot_epoch;
+	const void *original_area_identity;
+	const void *bio_area_identity;
+	const void *original_backing_bdev;
+	const void *bio_backing_bdev;
+	u64 original_backing_sector;
+	u64 original_bio_sector;
+	u64 claimed_dm_relative_sector;
+	u32 original_bio_bytes;
+	u32 original_bvec_bytes;
+	u32 original_bvec_offset;
+	u32 original_bio_vec_count;
+	bool original_swap_write;
+	bool original_stored_lz4_owner_checked;
+	bool area_ref_acquired_for_source_observation;
+	bool area_ref_released_before_submit;
+	bool source_entry_erased_and_freed;
+	bool source_slot_incarnation_ref_held_across_async;
+	bool current_dm_table_extent_gc_ref_held;
+	bool cloned_split_or_reissued;
+};
+
+/* Original typed-slot+area and nonlinear sector are data, NOT a lease. */
+static int swapz_round045_stored_bio_scope_refuse(
+		const struct swapz_round045_stored_bio_scope_evidence *evidence)
+{
+	const u64 sectors_per_page = 4096U / 512U;
+
+	if (!evidence)
+		return -EINVAL;
+	if (!evidence->original_typed_slot ||
+	    evidence->original_typed_slot != evidence->source_typed_slot ||
+	    !evidence->original_slot_epoch ||
+	    evidence->original_slot_epoch != evidence->current_slot_epoch)
+		return -ESTALE;
+	if (!evidence->original_area_identity ||
+	    evidence->original_area_identity != evidence->bio_area_identity ||
+	    !evidence->original_backing_bdev ||
+	    evidence->original_backing_bdev != evidence->bio_backing_bdev)
+		return -ESTALE;
+	if (!evidence->original_backing_sector ||
+	    (evidence->original_backing_sector & (sectors_per_page - 1U)) ||
+	    evidence->original_backing_sector > (u64)-1 - sectors_per_page)
+		return -ERANGE;
+	if (evidence->original_backing_sector != evidence->original_bio_sector)
+		return -ESTALE;
+	if (!evidence->original_bio_bytes ||
+	    evidence->original_bio_bytes != 4096U ||
+	    evidence->original_bvec_bytes != 4096U ||
+	    evidence->original_bvec_offset ||
+	    evidence->original_bio_vec_count ||
+	    !evidence->original_swap_write)
+		return -EOPNOTSUPP;
+	if (!evidence->original_stored_lz4_owner_checked ||
+	    !evidence->area_ref_acquired_for_source_observation ||
+	    !evidence->area_ref_released_before_submit ||
+	    !evidence->source_entry_erased_and_freed)
+		return -ESTALE;
+	if (evidence->cloned_split_or_reissued)
+		return -EOPNOTSUPP;
+	/* Even an original sector numerically identical to a DM relative
+	 * sector cannot pin a current target, allocation, GC or destructor.
+	 * Here the original users ref is ALREADY put, and no allocation
+	 * incarnation ref exists across the async completion. Fabricating
+	 * the last two bools can never produce authorization either.
+	 */
+	(void)evidence->original_slot_offset;
+	(void)evidence->claimed_dm_relative_sector;
+	(void)evidence->source_slot_incarnation_ref_held_across_async;
+	(void)evidence->current_dm_table_extent_gc_ref_held;
+	return -EOPNOTSUPP;
+}
+/* ROUND045_ORIGINAL_STORED_BIO_SOURCE_SCOPE_PURE_C_END */
+
+/*
+ * ORIGINAL mm/page_io.c single-bvec swap_bdev_submit_write() after the
+ * preexisting Round031 owned STORED sideband was attached and ORIGINAL
+ * zswap_writeback_entry() erased/freed the source zpool entry. The original
+ * folio is UNLOCKED and PG_writeback, retained by swapcache only.
+ * Acquire a NEW original swap-area users ref for the synchronous read of
+ * ctx->sis->bdev, typed swp_entry_t, allocation epoch and mapped swapfile
+ * extent. Drop this specific ref exactly once BEFORE returning, BEFORE
+ * the unchanged synchronous/async submit_bio(). Do not retain a raw
+ * swap_info_struct, bdev, slot, extent or folio pointer for later use.
+ * No owner of a current downstream DM table/extent GC lifetime is present.
+ */
+static noinline int swapz_round045_original_stored_bio_scope_probe(
+		const struct swap_io_ctx *ctx, const struct bio *source_bio,
+		struct folio *folio)
+{
+	struct swapz_round045_stored_bio_scope_evidence evidence = {};
+	struct swap_info_struct *active_area;
+	swp_entry_t original_slot;
+
+	if (!ctx || !ctx->sis || !source_bio || !folio ||
+	    !source_bio->bi_swapz_ci_sideband ||
+	    !folio_test_swapcache(folio) ||
+	    !folio_test_writeback(folio) || folio_test_locked(folio))
+		return -ESTALE;
+	original_slot = folio_swap_entry(folio, 0);
+	if (!original_slot.val || swp_type(original_slot) >= MAX_SWAPFILES)
+		return -ESTALE;
+	active_area = get_swap_device(original_slot);
+	if (IS_ERR_OR_NULL(active_area))
+		return -ESTALE;
+
+	if (active_area != ctx->sis || !active_area->bdev ||
+	    !source_bio->bi_io_vec || !source_bio->bi_io_vec[0].bv_page)
+		goto release_original_area;
+
+	evidence.original_typed_slot = (u64)original_slot.val;
+	evidence.source_typed_slot =
+		(u64)ctx->swapz_round035_original_slot.val;
+	evidence.original_slot_offset = (u64)swp_offset(original_slot);
+	evidence.original_slot_epoch =
+		ctx->swapz_round035_original_epoch;
+	evidence.current_slot_epoch =
+		swapz_round028_slot_epoch(original_slot);
+	evidence.original_area_identity = active_area;
+	evidence.bio_area_identity = ctx->sis;
+	evidence.original_backing_bdev = active_area->bdev;
+	evidence.bio_backing_bdev = source_bio->bi_bdev;
+	evidence.original_backing_sector = (u64)swap_folio_sector(folio);
+	evidence.original_bio_sector =
+		(u64)source_bio->bi_iter.bi_sector;
+	evidence.original_bio_bytes = source_bio->bi_iter.bi_size;
+	evidence.original_bvec_bytes =
+		source_bio->bi_io_vec[0].bv_len;
+	evidence.original_bvec_offset =
+		source_bio->bi_io_vec[0].bv_offset;
+	evidence.original_bio_vec_count = source_bio->bi_vcnt;
+	evidence.original_swap_write =
+		bio_op(source_bio) == REQ_OP_WRITE &&
+		(source_bio->bi_opf & REQ_SWAP) != 0U &&
+		!source_bio->bi_iter.bi_idx &&
+		!source_bio->bi_iter.bi_offset &&
+		!(source_bio->bi_flags & (1U << BIO_CLONED));
+	evidence.original_stored_lz4_owner_checked =
+		swapz_round035_bio_owner_matches(
+			source_bio, (u64)original_slot.val,
+			evidence.current_slot_epoch);
+	evidence.area_ref_acquired_for_source_observation = true;
+	/* The original entry was freed in zswap_writeback_entry() before
+	 * __swap_writeout(), before this original page-IO BIO construction.
+	 */
+	evidence.source_entry_erased_and_freed = true;
+release_original_area:
+	put_swap_device(active_area);
+	if (!evidence.area_ref_acquired_for_source_observation)
+		return -ESTALE;
+	evidence.area_ref_released_before_submit = true;
+	/* No pointer in evidence is dereferenced after this release.
+	 * Current slot allocation and DM target/GC leases remain UNKNOWN.
+	 */
+	return swapz_round045_stored_bio_scope_refuse(&evidence);
+}
+
+static void swapz_round045_stored_bio_scope_fixture(
+		struct swapz_round045_stored_bio_scope_evidence *evidence)
+{
+	memset(evidence, 0, sizeof(*evidence));
+	evidence->original_typed_slot = (u64)swp_entry(1U, 37U).val;
+	evidence->source_typed_slot = evidence->original_typed_slot;
+	evidence->original_slot_offset = 37U;
+	evidence->original_slot_epoch = 17U;
+	evidence->current_slot_epoch = 17U;
+	evidence->original_area_identity = evidence;
+	evidence->bio_area_identity = evidence;
+	evidence->original_backing_bdev = &evidence->original_backing_sector;
+	evidence->bio_backing_bdev = &evidence->original_backing_sector;
+	evidence->original_backing_sector = 4096U; /* Nonlinear: 37*8=296. */
+	evidence->original_bio_sector = 4096U;
+	evidence->claimed_dm_relative_sector = 4096U; /* MOCK coincidence. */
+	evidence->original_bio_bytes = 4096U; /* ORIGINAL uncompressed RAW. */
+	evidence->original_bvec_bytes = 4096U;
+	evidence->original_swap_write = true;
+	evidence->original_stored_lz4_owner_checked = true;
+	evidence->area_ref_acquired_for_source_observation = true;
+	evidence->area_ref_released_before_submit = true;
+	evidence->source_entry_erased_and_freed = true;
+}
+
+static void swapz_round045_nonlinear_bdev_dm_collision_kunit(
+		struct kunit *test)
+{
+	struct swapz_round045_stored_bio_scope_evidence evidence;
+
+	swapz_round045_stored_bio_scope_fixture(&evidence);
+	KUNIT_EXPECT_NE(test, evidence.original_backing_sector,
+			evidence.original_slot_offset * 8U);
+	KUNIT_EXPECT_EQ(test, evidence.original_backing_sector,
+			evidence.claimed_dm_relative_sector);
+	KUNIT_EXPECT_EQ(test, swapz_round045_stored_bio_scope_refuse(&evidence),
+			-EOPNOTSUPP);
+	evidence.bio_backing_bdev = test;
+	KUNIT_EXPECT_EQ(test, swapz_round045_stored_bio_scope_refuse(&evidence),
+			-ESTALE);
+	evidence.bio_backing_bdev = evidence.original_backing_bdev;
+	evidence.original_bio_sector = evidence.original_slot_offset * 8U;
+	KUNIT_EXPECT_EQ(test, swapz_round045_stored_bio_scope_refuse(&evidence),
+			-ESTALE);
+	evidence.original_bio_sector = evidence.original_backing_sector;
+	evidence.original_bio_bytes = 2048U;
+	KUNIT_EXPECT_EQ(test, swapz_round045_stored_bio_scope_refuse(&evidence),
+			-EOPNOTSUPP);
+}
+
+static void swapz_round045_source_ref_aba_clone_reissue_kunit(
+		struct kunit *test)
+{
+	struct swapz_round045_stored_bio_scope_evidence evidence;
+
+	swapz_round045_stored_bio_scope_fixture(&evidence);
+	/* Independently copied STORED bytes outlive erased zswap entry but
+	 * do not keep a typed slot, original area, or DM map alive.
+	 */
+	evidence.source_slot_incarnation_ref_held_across_async = true;
+	evidence.current_dm_table_extent_gc_ref_held = true;
+	KUNIT_EXPECT_EQ(test, swapz_round045_stored_bio_scope_refuse(&evidence),
+			-EOPNOTSUPP);
+	evidence.current_slot_epoch++;
+	KUNIT_EXPECT_EQ(test, swapz_round045_stored_bio_scope_refuse(&evidence),
+			-ESTALE);
+	evidence.current_slot_epoch = evidence.original_slot_epoch;
+	evidence.source_typed_slot = (u64)swp_entry(2U, 37U).val;
+	KUNIT_EXPECT_EQ(test, swapz_round045_stored_bio_scope_refuse(&evidence),
+			-ESTALE);
+	evidence.source_typed_slot = evidence.original_typed_slot;
+	evidence.cloned_split_or_reissued = true;
+	KUNIT_EXPECT_EQ(test, swapz_round045_stored_bio_scope_refuse(&evidence),
+			-EOPNOTSUPP);
+	evidence.cloned_split_or_reissued = false;
+	evidence.area_ref_released_before_submit = false;
+	KUNIT_EXPECT_EQ(test, swapz_round045_stored_bio_scope_refuse(&evidence),
+			-ESTALE);
+	KUNIT_EXPECT_EQ(test, swapz_round045_stored_bio_scope_refuse(NULL),
+			-EINVAL);
+}
+
+static struct kunit_case swapz_round045_stored_bio_scope_cases[] = {
+	KUNIT_CASE(swapz_round045_nonlinear_bdev_dm_collision_kunit),
+	KUNIT_CASE(swapz_round045_source_ref_aba_clone_reissue_kunit),
+	{}
+};
+static struct kunit_suite swapz_round045_stored_bio_scope_suite = {
+	.name = "swapz_round045_original_stored_bio_source_scope_no_authority",
+	.test_cases = swapz_round045_stored_bio_scope_cases,
+};
+kunit_test_suite(swapz_round045_stored_bio_scope_suite);
+/* ROUND045_ORIGINAL_STORED_BIO_SOURCE_SCOPE_END */
+#endif /* REAL original MM scope values only, never source-to-DM AUTH */
+"""
+ROUND045_ORIGINAL_STORED_BIO_SCOPE_HOOK = r"""#if defined(SWAPZ_ROUND045_ORIGINAL_STORED_BIO_SOURCE_SCOPE_TEST) && \
+    defined(SWAPZ_ROUND043_ORIGINAL_BIO_CLONE_COPY_TEST) && \
+    defined(SWAPZ_ROUND042_ORIGINAL_STORED_WRITEBACK_LIFETIME_TEST) && \
+    defined(SWAPZ_ROUND041_ORIGINAL_SECTOR_TO_DM_NONAUTHORITY_TEST) && \
+    defined(SWAPZ_ROUND040_ORIGINAL_ASYNC_SLOT_LEASE_NEGATIVE_TEST) && \
+    defined(SWAPZ_ROUND038_ORIGINAL_STORE_PROVENANCE_TEST) && \
+    defined(SWAPZ_ROUND037_ORIGINAL_MM_LIFETIME_OWNER_TEST) && \
+    defined(SWAPZ_ROUND036_ORIGINAL_ROUTE_LIFETIME_TEST) && \
+    defined(SWAPZ_ROUND035_ORIGINAL_MM_ROUTE_WITNESS_TEST) && \
+    defined(SWAPZ_ROUND034_ORIGINAL_V1_KUNIT_TEST) && \
+    defined(SWAPZ_ROUND032_BIO_COPY_VIEW_CI_ONLY) && \
+    defined(SWAPZ_ROUND031_MM_BIO_SOURCE) && \
+    defined(SWAPZ_ROUND030_EVICTION_SNAPSHOT_SOURCE) && \
+    defined(SWAPZ_ROUND028_SLOT_EPOCH_SOURCE) && \
+    defined(SWAPZ_ROUND025_SIDEBAND_CI_ONLY) && IS_ENABLED(CONFIG_KUNIT)
+	/* TRUE original STORED->ordinary BIO source, immediately after the
+	 * sideband transfer; source bytes remain independent of RAW_4096.
+	 */
+	if (bio->bi_swapz_ci_sideband)
+		(void)swapz_round045_original_stored_bio_scope_probe(
+			ctx, bio, bio_first_folio_all(bio));
+#endif
+"""
+
+
+def apply_round045_original_stored_bio_scope(path: str,
+                                             composed: str) -> str:
+    """Observe the genuine original page_io BIO source only; no owner escape."""
+    if path != "mm/page_io.c":
+        return composed
+    handler = "static void swap_bdev_submit_write(struct swap_io_ctx *ctx)\n"
+    composed = replace_once(
+        composed, handler,
+        ROUND045_ORIGINAL_STORED_BIO_SCOPE_C + "\n" + handler,
+        path, "round045-original-stored-bio-source-scope")
+    return replace_once(
+        composed, ROUND041_ORIGINAL_SECTOR_DOMAIN_HOOK,
+        ROUND041_ORIGINAL_SECTOR_DOMAIN_HOOK +
+        ROUND045_ORIGINAL_STORED_BIO_SCOPE_HOOK,
+        path, "round045-original-page-io-actual-dispatch-scope")
+
+
 def compose_postimage(path: str, original_bytes: bytes, *,
                       with_kunit: bool = True) -> bytes:
     """In-memory exactly pinned original source -> deterministic combined C."""
@@ -4174,6 +4493,8 @@ def compose_postimage(path: str, original_bytes: bytes, *,
         changed = apply_round042_original_stored_writeback(path, changed)
     if with_kunit:
         changed = apply_round043_original_bio_clone(path, changed)
+    if with_kunit:
+        changed = apply_round045_original_stored_bio_scope(path, changed)
     if path == "mm/zswap.c":
         for required in (
             "swapz_round028_slot_epoch(swpentry)",
@@ -4196,6 +4517,7 @@ def compose_postimage(path: str, original_bytes: bytes, *,
         "bio->bi_swap_origin = sio->swap_origin;",
         "bio->bi_swapz_ci_sideband = ctx->swapz_round031_owned;",
         "bio->bi_iter.bi_size = sio->len;",
+        "swapz_round045_original_stored_bio_scope_probe(",
     )):
         raise SourceCompositionError("COMPOSE_CONFLICT:mm/page_io.c:bio-size")
     if changed == preimage:
