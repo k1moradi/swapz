@@ -3962,10 +3962,13 @@ static void swapz_round043_split_or_consumed_clone_refused_kunit(struct kunit *t
 	struct swapz_ci_owned_payload *owner;
 	struct swapz_ci_lz4_owned_view_v1 view;
 	struct bio *split;
-	u8 destination[3568];
+	u8 *destination;
 	int error;
 
 	KUNIT_ASSERT_NOT_NULL(test, fixture);
+	/* Test-scoped heap scratch: never reserve 3568 bytes on kernel stack. */
+	destination = kunit_kmalloc(test, 3568U, GFP_KERNEL);
+	KUNIT_ASSERT_NOT_NULL(test, destination);
 	owner = fixture->bio.bi_swapz_ci_sideband;
 	KUNIT_ASSERT_NOT_NULL(test, owner);
 	fixture->bio.bi_vcnt = 1; /* Original bio_split bvec walker. */
@@ -3979,15 +3982,15 @@ static void swapz_round043_split_or_consumed_clone_refused_kunit(struct kunit *t
 	KUNIT_EXPECT_EQ(test, split->bi_iter.bi_size, 2048U);
 	KUNIT_EXPECT_EQ(test, fixture->bio.bi_iter.bi_size, 2048U);
 	memset(&view, 0xa5, sizeof(view));
-	memset(destination, 0x6b, sizeof(destination));
+	memset(destination, 0x6b, 3568U);
 	error = swapz_ci_bio_snapshot_lz4_v1(
-		split, &view, destination, sizeof(destination));
+		split, &view, destination, 3568U);
 	KUNIT_EXPECT_EQ(test, error, -EOPNOTSUPP);
 	KUNIT_EXPECT_PTR_EQ(test, memchr_inv(&view, 0xa5, sizeof(view)), NULL);
 	KUNIT_EXPECT_PTR_EQ(test, memchr_inv(destination, 0x6b,
-					    sizeof(destination)), NULL);
+					    3568U), NULL);
 	error = swapz_ci_bio_snapshot_lz4_v1(
-		&fixture->bio, &view, destination, sizeof(destination));
+		&fixture->bio, &view, destination, 3568U);
 	KUNIT_EXPECT_EQ(test, error, -EOPNOTSUPP);
 	bio_put(split); /* Actual split uninit: ref 2 -> 1. */
 	KUNIT_EXPECT_EQ(test, refcount_read(&owner->references), 1);
@@ -4000,10 +4003,13 @@ static void swapz_round043_reset_reissue_and_forged_clone_kunit(struct kunit *te
 	struct swapz_ci_owned_payload *owner;
 	struct swapz_ci_lz4_owned_view_v1 view;
 	struct bio clone = {};
-	u8 destination[3568];
+	u8 *destination;
 	int error;
 
 	KUNIT_ASSERT_NOT_NULL(test, fixture);
+	/* Test-scoped heap scratch: never reserve 3568 bytes on kernel stack. */
+	destination = kunit_kmalloc(test, 3568U, GFP_KERNEL);
+	KUNIT_ASSERT_NOT_NULL(test, destination);
 	owner = fixture->bio.bi_swapz_ci_sideband;
 	KUNIT_ASSERT_NOT_NULL(test, owner);
 	error = bio_init_clone(NULL, &clone, &fixture->bio, GFP_KERNEL);
@@ -4013,17 +4019,17 @@ static void swapz_round043_reset_reissue_and_forged_clone_kunit(struct kunit *te
 	}
 	KUNIT_EXPECT_EQ(test, refcount_read(&owner->references), 2);
 	memset(&view, 0xa5, sizeof(view));
-	memset(destination, 0x6b, sizeof(destination));
+	memset(destination, 0x6b, 3568U);
 	clone.bi_swapz_ci_full_clone_owned = false;
 	KUNIT_EXPECT_EQ(test, swapz_ci_bio_snapshot_lz4_v1(
-		&clone, &view, destination, sizeof(destination)),
+		&clone, &view, destination, 3568U),
 			-EOPNOTSUPP);
 	KUNIT_EXPECT_PTR_EQ(test, memchr_inv(&view, 0xa5, sizeof(view)), NULL);
 	KUNIT_EXPECT_PTR_EQ(test, memchr_inv(destination, 0x6b,
-					    sizeof(destination)), NULL);
+					    3568U), NULL);
 	clone.bi_swapz_ci_full_clone_owned = true;
 	KUNIT_EXPECT_EQ(test, swapz_ci_bio_snapshot_lz4_v1(
-		&clone, &view, destination, sizeof(destination)), 0);
+		&clone, &view, destination, 3568U), 0);
 	bio_prepare_reissue(&clone, NULL);
 	KUNIT_EXPECT_PTR_EQ(test, clone.bi_swapz_ci_sideband, NULL);
 	KUNIT_EXPECT_FALSE(test, clone.bi_swapz_ci_full_clone_owned);

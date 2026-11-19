@@ -909,6 +909,44 @@ class OriginalMMAndBIOComposer(unittest.TestCase):
                            "bio->bi_iter = bio_src->bi_iter;"):
                 self.assertIn(anchor, original)
 
+    def test_round044_original_kunit_3568_scratch_is_test_owned_not_stack(self):
+        # The original W=1/-Werror kernel rejects >2048-byte test frames.
+        # An allocated 3568-byte test-only buffer remains bounded by KUnit,
+        # and its size MUST NOT silently become sizeof(u8 *).
+        original_kunit = stage.ROUND043_ORIGINAL_BIO_CLONE_KUNIT
+        for test_name in (
+            "swapz_round043_split_or_consumed_clone_refused_kunit",
+            "swapz_round043_reset_reissue_and_forged_clone_kunit",
+        ):
+            with self.subTest(original_kunit_case=test_name):
+                marker = "static void " + test_name + "(struct kunit *test)\n{"
+                self.assertEqual(original_kunit.count(marker), 1)
+                test_body = original_kunit.split(marker, 1)[1].split(
+                    "\n}\n", 1)[0]
+                self.assertIn("u8 *destination;", test_body)
+                self.assertIn(
+                    "destination = kunit_kmalloc(test, 3568U, GFP_KERNEL);",
+                    test_body)
+                self.assertIn("KUNIT_ASSERT_NOT_NULL(test, destination);",
+                              test_body)
+                self.assertIn("memset(destination, 0x6b, 3568U);", test_body)
+                self.assertIn("memchr_inv(destination, 0x6b,",
+                              test_body)
+                self.assertIn("3568U), NULL);", test_body)
+                self.assertIn("swapz_ci_bio_snapshot_lz4_v1(", test_body)
+                self.assertNotIn("u8 destination[3568];", test_body)
+                self.assertNotIn("sizeof(destination)", test_body)
+                self.assertLess(
+                    test_body.index("KUNIT_ASSERT_NOT_NULL(test, destination);"),
+                    test_body.index("bio_init_clone(") if
+                    "bio_init_clone(" in test_body else
+                    test_body.index("bio_split("))
+        self.assertEqual(original_kunit.count(
+            "destination = kunit_kmalloc(test, 3568U, GFP_KERNEL);"), 2)
+        self.assertEqual(original_kunit.count(
+            "KUNIT_CASE(swapz_round043_"), 3)
+
+
     def test_round043_original_bio_clone_exact_gcc_clang_sanitizers(self):
         source = stage.ROUND043_ORIGINAL_BIO_CLONE_SOURCE
         start = ("static noinline bool\n"
