@@ -12894,6 +12894,126 @@ static void swapz_submitter_dispatch(struct swapz_dm *ctx,
 	swapz_preparation_release_slot(&ctx->submitter_lane_free_mask, lane_slot);
 }
 
+
+/*
+ * Round043: CI-ONLY observation at the ACTUAL production swapz_map() entry.
+ * Source BIO and target/ctx are live solely for the synchronous DM ->map call.
+ * This does not pin the original swap slot/area, original physical nonlinear
+ * source sector, current DM table across reload/dtr, or map/GC generation.
+ * No borrowed BIO/zpool pointer, private copied LZ4 byte or value escapes.
+ * A copied original v1 value is NOT an authenticated source-to-DM lease.
+ *
+ * No allocation or GPL call exists in the default-undefined product build.
+ */
+#if defined(SWAPZ_ROUND043_DM_REAL_MAP_INGRESS_OBSERVATION_TEST) && \
+    defined(SWAPZ_ROUND041_DM_TARGET_INTERVAL_MAP_NONAUTHORITY_TEST) && \
+    defined(SWAPZ_ROUND033_DM_ORIGINAL_BIO_GPL_LINK_TEST) && \
+    defined(SWAPZ_ROUND032_BIO_COPY_VIEW_CI_ONLY)
+/* ROUND043_DM_REAL_MAP_INGRESS_EXACT_START */
+#define SWAPZ_ROUND043_SOURCE_MAPPED_AUTHENTICATED 0U
+
+static __used noinline int swapz_round043_dm_observe_real_map_v1(
+		const struct dm_target *target, const struct swapz_dm *ctx,
+		const struct bio *upper_bio)
+{
+	struct swapz_ci_lz4_owned_view_v1 source_view = {};
+	swapz_u8 *private_compressed_bytes;
+	sector_t target_relative_sector;
+	unsigned int digest_offset;
+	swapz_u8 digest_present = 0;
+	int error;
+
+	if (!target || !ctx || !upper_bio)
+		return -EINVAL;
+	/* The DM core owns this callback's BIO and target only until return.
+	 * Neither ctx->target nor a matching sector authenticates any future
+	 * original MM allocation incarnation or current target/GC lifetime.
+	 */
+	if (target->private != ctx || ctx->target != target ||
+	    !READ_ONCE(ctx->accepting))
+		return -ESTALE;
+	if (bio_op(upper_bio) != REQ_OP_WRITE ||
+	    !(upper_bio->bi_opf & REQ_SWAP) ||
+	    upper_bio->bi_iter.bi_size != SWAPZ_BLOCK_BYTES ||
+	    bio_sectors(upper_bio) != SWAPZ_SECTORS)
+		return -EOPNOTSUPP;
+	/* The CURRENT original GPL v1 snapshot refuses DM-cloned BIOs.
+	 * Do not pretend a cloned view's numerical sector or copied bytes
+	 * reacquire the original active swap-area or slot allocation lease.
+	 */
+	if (upper_bio->bi_flags & (1U << BIO_CLONED))
+		return -EOPNOTSUPP;
+	/* swapz_map() uses target-RELATIVE 512-byte BIO sectors. ti->begin
+	 * is the DM table's absolute origin, never this BIO's source
+	 * swapfile physical sector or packed swp_entry_t offset.
+	 */
+	target_relative_sector = upper_bio->bi_iter.bi_sector;
+	if (target_relative_sector % SWAPZ_SECTORS ||
+	    target_relative_sector >= target->len ||
+	    SWAPZ_SECTORS > target->len - target_relative_sector)
+		return -ERANGE;
+	if (target->len % SWAPZ_SECTORS ||
+	    target->len / SWAPZ_SECTORS != ctx->logical_pages ||
+	    target_relative_sector / SWAPZ_SECTORS >= ctx->logical_pages)
+		return -ESTALE;
+	/* ->map must not sleep. This temporary bounded GFP_ATOMIC byte
+	 * owner is TEST ONLY, never allocated in normal/default product.
+	 * Failure is an observation, not a change to ordinary RAW I/O.
+	 */
+	private_compressed_bytes = kmalloc(SWAPZ_MAX_COMPRESSED, GFP_ATOMIC);
+	if (!private_compressed_bytes)
+		return -ENOMEM;
+	error = swapz_ci_bio_snapshot_lz4_v1(
+		upper_bio, &source_view, private_compressed_bytes,
+		SWAPZ_MAX_COMPRESSED);
+	if (error)
+		goto scrub_private;
+	if (!source_view.source_swap_entry ||
+	    !source_view.source_slot_epoch ||
+	    !source_view.stored_entry_identity) {
+		error = -ESTALE;
+		goto scrub_private;
+	}
+	if (source_view.representation_version != 1U ||
+	    source_view.codec != SWAPZ_ZSWAP_IMPORT_LZ4_CODEC) {
+		error = -EOPNOTSUPP;
+		goto scrub_private;
+	}
+	if (!source_view.compressed_length ||
+	    source_view.compressed_length > SWAPZ_MAX_COMPRESSED ||
+	    source_view.decoded_length != SWAPZ_BLOCK_BYTES) {
+		error = -EMSGSIZE;
+		goto scrub_private;
+	}
+	for (digest_offset = 0;
+	     digest_offset < sizeof(source_view.original_sha256);
+	     ++digest_offset)
+		digest_present |= source_view.original_sha256[digest_offset];
+	if (!digest_present) {
+		error = -ENODATA;
+		goto scrub_private;
+	}
+	if (swapz_crc32c_bytes(private_compressed_bytes,
+			      source_view.compressed_length) !=
+	    source_view.compressed_crc32c) {
+		error = -EBADMSG;
+		goto scrub_private;
+	}
+	/* A successful private byte copy has NO original swap allocation,
+	 * current bdev/nonlinear source sector, DM table epoch or GC/dtr
+	 * reference; never return an admitted mapping or lower-I/O owner.
+	 */
+	error = -EOPNOTSUPP;
+
+scrub_private:
+	memzero_explicit(private_compressed_bytes, SWAPZ_MAX_COMPRESSED);
+	kfree(private_compressed_bytes);
+	memzero_explicit(&source_view, sizeof(source_view));
+	return error;
+}
+/* ROUND043_DM_REAL_MAP_INGRESS_EXACT_END */
+#endif /* SWAPZ_ROUND043_DM_REAL_MAP_INGRESS_OBSERVATION_TEST */
+
 static int swapz_map(struct dm_target *ti, struct bio *bio)
 {
 	struct swapz_dm *ctx = ti->private;
@@ -12926,6 +13046,22 @@ static int swapz_map(struct dm_target *ti, struct bio *bio)
 		 * protocol is WRITE|PREFLUSH with zero sectors. */
 		return DM_MAPIO_KILL;
 	}
+#if defined(SWAPZ_ROUND043_DM_REAL_MAP_INGRESS_OBSERVATION_TEST) && \
+    defined(SWAPZ_ROUND041_DM_TARGET_INTERVAL_MAP_NONAUTHORITY_TEST) && \
+    defined(SWAPZ_ROUND033_DM_ORIGINAL_BIO_GPL_LINK_TEST) && \
+    defined(SWAPZ_ROUND032_BIO_COPY_VIEW_CI_ONLY)
+/* ROUND043_DM_REAL_MAP_CALLSITE_EXACT_START */
+	/* Strictly observational: never use this error/value to influence
+	 * admission, normal zswap-origin attribution, GC, I/O or upper ACK.
+	 * The caller still owns the live BIO, before dm_per_bio_data init.
+	 */
+	if (bio_op(bio) == REQ_OP_WRITE &&
+	    count == SWAPZ_SECTORS &&
+	    bio->bi_iter.bi_size == SWAPZ_BLOCK_BYTES)
+		(void)swapz_round043_dm_observe_real_map_v1(ti, ctx, bio);
+/* ROUND043_DM_REAL_MAP_CALLSITE_EXACT_END */
+#endif /* SWAPZ_ROUND043_DM_REAL_MAP_INGRESS_OBSERVATION_TEST */
+
 	entry = dm_per_bio_data(bio, sizeof(*entry));
 	INIT_LIST_HEAD(&entry->list);
 	INIT_LIST_HEAD(&entry->preparation_list);
