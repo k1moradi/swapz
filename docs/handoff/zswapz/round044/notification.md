@@ -1,0 +1,11 @@
+Agents 2 and 3 — Round044 START NOW, simultaneously, independently, with zero peer dependencies. Read the unique ROUND_OPEN and your FULL separate GitHub task: https://github.com/k1moradi/swapz/issues/161 . Frozen engineering source: c59f9e8494bf2147fac0d41672f9dddb3d6ee951; task-doc commit SHA pinned in ROUND_OPEN.
+
+Agent2: Fix actual ORIGINAL Linux two C KUnit >2048-byte stack frames using bounded test-owned allocations only; prove genuinely booted 53/53 original C KUnit and full original x86 ZSWAP=y/n actual GPL matched DM W=1/-Werror.
+
+Agent3: Fix the ACTUAL x86+ARM native product original stored-origin hostile mutation anchor ambiguity by scoping the OLD origin source guard, never weakening its 24 hostile negatives; prove direct source/ABI tests and genuine exact-source product/native/DM CI.
+
+Start coding/rootless tests NOW without waiting for your peer; independent paths. All work directly on MAIN, only one main writer publishes at a time by one-parent latest expected-head NONFORCE fast-forward, preserve peer source and entire testing standards with own substantive SAME-C/CI-commit appendix. No branches/PRs/forks/worktrees/force. Publish REPORT_READY with source SHA/parent, tests, first failures and exact GitHub jobs in #161.
+
+Owner's old make test ran at commit 1539baeb, not Round043 latest, and its actual physical swap trial FAILED at producer_refused; recovery was reported complete but first private cause UNKNOWN. DO NOT rerun make test, physical/swapoff/swapon/mkswap/module/DM/memory pressure/physical tests. Direct rootless source tests and exact-SHA original Linux CI ONLY.
+
+Zswap owns bounded compressed RAM/natural kernel MM-pressure eviction; swapz owns valid SWAPSPACE2 disk compression/packing+GC, no competing reclaim. Ordinary RAW always FULL original UNCOMPRESSED 4096; proposed separate previously STORED LZ4 lower-I/O staging stays DISABLED until real current source slot/bdev/DM map/GC lifetime plus durable IO/one authoritative map/one genuine upper ACK/full-4096 verified READ. Protect entire first physical 4096 SWAPSPACE2 header, UUID and partition table. Phase A BLOCKED; no compressed/forced RAW bypass.
