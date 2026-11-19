@@ -889,6 +889,8 @@ class OriginalMMAndBIOComposer(unittest.TestCase):
             "bio_prepare_reissue(&clone, NULL)",
             "bio_reset(&clone, NULL, REQ_OP_WRITE | REQ_SWAP)",
             "kunit_test_suite(swapz_round043_clone_copy_suite);",
+            "clone.bi_swapz_ci_full_clone_owned = false;",
+            "clone.bi_swapz_ci_full_clone_owned = true;",
         ):
             self.assertIn(expected, composer)
         self.assertEqual(

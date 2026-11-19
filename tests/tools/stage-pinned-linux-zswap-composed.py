@@ -803,7 +803,19 @@ static void swapz_round034_v1_lifetime_kunit(struct kunit *test)
 		return;
 	}
 	KUNIT_EXPECT_EQ(test, refcount_read(&owner->references), 2);
+#if defined(SWAPZ_ROUND043_ORIGINAL_BIO_CLONE_COPY_TEST) && \
+    defined(SWAPZ_ROUND034_ORIGINAL_V1_KUNIT_TEST) && IS_ENABLED(CONFIG_KUNIT)
+	/* Round034's historic refusal now checks an UNPROVEN clone marker;
+	 * a separate new Round043 KUnit proves a genuinely owned full clone.
+	 * Keep the one real acquired owner ref for ordinary cleanup below.
+	 */
+	clone.bi_swapz_ci_full_clone_owned = false;
+#endif
 	swapz_round034_v1_expect_refusal(test, &clone, 128U, -EOPNOTSUPP);
+#if defined(SWAPZ_ROUND043_ORIGINAL_BIO_CLONE_COPY_TEST) && \
+    defined(SWAPZ_ROUND034_ORIGINAL_V1_KUNIT_TEST) && IS_ENABLED(CONFIG_KUNIT)
+	clone.bi_swapz_ci_full_clone_owned = true;
+#endif
 	bio_uninit(&fixture->bio); /* Clone retains its independent owner ref. */
 	KUNIT_EXPECT_EQ(test, refcount_read(&owner->references), 1);
 	KUNIT_EXPECT_EQ(test, view.source_swap_entry, (u64)0x123456U);
