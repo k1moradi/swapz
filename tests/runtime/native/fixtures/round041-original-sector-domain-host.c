@@ -159,6 +159,6 @@ int main(void)
 	CHECK(-EOPNOTSUPP);
 	assert(memcmp(&source, &unchanged, sizeof(source)) == 0);
 	assert(swapz_round041_sector_domain_refuse(NULL) == -EINVAL);
-	puts("ROUND041_REAL_ORIGINAL_SECTOR_DOMAIN_EXTRACTED_C_HOST_PASS");
+	puts("ROUND031_REAL_ROUND041_ORIGINAL_SECTOR_DOMAIN_EXTRACTED_C_HOST_PASS");
 	return 0;
 }
