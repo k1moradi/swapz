@@ -866,5 +866,62 @@ class OriginalMMAndBIOComposer(unittest.TestCase):
                              label="round042-original-writeback", libraries=())
 
 
+    def test_round043_original_bio_clone_real_owner_and_copy_only(self):
+        source = stage.ROUND043_ORIGINAL_BIO_CLONE_SOURCE
+        composer = Path(STAGER).read_text(encoding="utf-8")
+        for expected in (
+            "SWAPZ_ROUND043_ORIGINAL_BIO_CLONE_COPY_TEST",
+            "SWAPZ_ROUND034_ORIGINAL_V1_KUNIT_TEST",
+            "IS_ENABLED(CONFIG_KUNIT)",
+            "swapz_round043_bio_clone_owner_is_independent(",
+            "source_bio->bi_swapz_ci_full_clone_owned",
+            "source_bio->bi_swapz_ci_sideband != NULL",
+            "source_bio->bi_iter.bi_size == 4096U",
+        ):
+            self.assertIn(expected, source)
+        for expected in (
+            "apply_round043_original_bio_clone(path, changed)",
+            "bio->bi_swapz_ci_full_clone_owned = true;",
+            "bio->bi_swapz_ci_full_clone_owned = false;",
+            "bio->bi_swapz_ci_sideband = swapz_ci_owned_get(owner);",
+            "bio_init_clone(NULL, &clone, &fixture->bio, GFP_KERNEL)",
+            "bio_split(&fixture->bio, 4, GFP_KERNEL, &fs_bio_set)",
+            "bio_prepare_reissue(&clone, NULL)",
+            "bio_reset(&clone, NULL, REQ_OP_WRITE | REQ_SWAP)",
+            "kunit_test_suite(swapz_round043_clone_copy_suite);",
+        ):
+            self.assertIn(expected, composer)
+        self.assertEqual(
+            composer.count("KUNIT_CASE(swapz_round043_"), 3)
+        for forbidden in ("EXPORT_SYMBOL_GPL(swapz_round043",
+                          "SOURCE_MAPPED_AUTHENTICATED=1",
+                          "bio_endio(&clone)", "submit_bio(&clone)"):
+            self.assertNotIn(forbidden, source)
+        if os.environ.get("ROUND031_PINNED_LINUX"):
+            original = (Path(os.environ["ROUND031_PINNED_LINUX"]) /
+                        "block/bio.c").read_text(encoding="utf-8")
+            for anchor in ("int bio_init_clone(", "struct bio *bio_alloc_clone(",
+                           "struct bio *bio_split(", "void bio_uninit(",
+                           "void bio_reset(", "void bio_prepare_reissue(",
+                           "bio_advance(bio, split->bi_iter.bi_size);",
+                           "bio->bi_iter = bio_src->bi_iter;"):
+                self.assertIn(anchor, original)
+
+    def test_round043_original_bio_clone_exact_gcc_clang_sanitizers(self):
+        source = stage.ROUND043_ORIGINAL_BIO_CLONE_SOURCE
+        start = ("static noinline bool\n"
+                 "swapz_round043_bio_clone_owner_is_independent(")
+        end = "/* ROUND043_ORIGINAL_BIO_CLONE_PURE_C_END */"
+        self.assertEqual(source.count(start), 1)
+        self.assertEqual(source.count(end), 1)
+        extracted = start + source.split(start, 1)[1].split(end, 1)[0]
+        fixture = (FIXTURES / "round043-original-bio-clone-host.c").read_text(
+            encoding="utf-8")
+        marker = "/* ROUND043_EXACT_ORIGINAL_BIO_CLONE_C */"
+        self.assertEqual(fixture.count(marker), 1)
+        self.compile_and_run(fixture.replace(marker, extracted, 1),
+                             label="round043-original-bio-clone", libraries=())
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)

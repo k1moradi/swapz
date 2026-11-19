@@ -3849,6 +3849,269 @@ err:
     return composed
 
 
+
+# Round043 actual pinned original BIO clone owner: copy-only, default undefined.
+ROUND043_ORIGINAL_BIO_CLONE_MACRO = "SWAPZ_ROUND043_ORIGINAL_BIO_CLONE_COPY_TEST"
+ROUND043_ORIGINAL_BIO_CLONE_SOURCE = r"""#if defined(SWAPZ_ROUND043_ORIGINAL_BIO_CLONE_COPY_TEST) && \
+    defined(SWAPZ_ROUND034_ORIGINAL_V1_KUNIT_TEST) && \
+    defined(SWAPZ_ROUND032_BIO_COPY_VIEW_CI_ONLY) && \
+    defined(SWAPZ_ROUND031_MM_BIO_SOURCE) && \
+    defined(SWAPZ_ROUND025_SIDEBAND_CI_ONLY) && IS_ENABLED(CONFIG_KUNIT)
+/* ROUND043_ORIGINAL_BIO_CLONE_COPY_C_BEGIN */
+/* Copy-only observation. This bit is published exclusively after the real
+ * __bio_clone() acquired its own immutable LZ4 owner ref, not from a
+ * caller-supplied BIO_CLONED flag, a sector, or a guessed target identity.
+ */
+/* ROUND043_ORIGINAL_BIO_CLONE_PURE_C_BEGIN */
+static noinline bool
+swapz_round043_bio_clone_owner_is_independent(const struct bio *source_bio)
+{
+	if (!source_bio)
+		return false;
+	if (!(source_bio->bi_flags & (1U << BIO_CLONED)))
+		return !source_bio->bi_swapz_ci_full_clone_owned;
+	return source_bio->bi_swapz_ci_full_clone_owned &&
+	       source_bio->bi_swapz_ci_sideband != NULL &&
+	       source_bio->bi_vcnt == 0U &&
+	       source_bio->bi_iter.bi_size == 4096U &&
+	       source_bio->bi_iter.bi_idx == 0U &&
+	       source_bio->bi_iter.bi_offset == 0U;
+}
+/* ROUND043_ORIGINAL_BIO_CLONE_PURE_C_END */
+/* ROUND043_ORIGINAL_BIO_CLONE_COPY_C_END */
+#endif
+"""
+ROUND043_ORIGINAL_BIO_CLONE_KUNIT = r"""#if defined(SWAPZ_ROUND043_ORIGINAL_BIO_CLONE_COPY_TEST) && \
+    defined(SWAPZ_ROUND034_ORIGINAL_V1_KUNIT_TEST) && \
+    defined(SWAPZ_ROUND032_BIO_COPY_VIEW_CI_ONLY) && \
+    defined(SWAPZ_ROUND031_MM_BIO_SOURCE) && \
+    defined(SWAPZ_ROUND025_SIDEBAND_CI_ONLY) && IS_ENABLED(CONFIG_KUNIT)
+/* All inputs are SYNTHETIC, but these calls execute REAL pinned original
+ * BIO clone/split/reset and sealed original LZ4 copy code in booted KUnit.
+ * No source MM pressure, real DM target, lower IO or production authority.
+ */
+static void swapz_round043_full_clone_owned_lz4_copy_kunit(struct kunit *test)
+{
+	struct swapz_round034_v1_fixture *fixture =
+		swapz_round034_v1_fixture_create(test);
+	struct swapz_ci_lz4_owned_view_v1 view = {};
+	struct swapz_ci_owned_payload *owner;
+	struct bio clone = {};
+	u8 decoded_sha[32];
+	int error;
+
+	KUNIT_ASSERT_NOT_NULL(test, fixture);
+	owner = fixture->bio.bi_swapz_ci_sideband;
+	KUNIT_ASSERT_NOT_NULL(test, owner);
+	error = bio_init_clone(NULL, &clone, &fixture->bio, GFP_KERNEL);
+	if (error) {
+		KUNIT_FAIL(test, "real original clone acquisition failed");
+		return;
+	}
+	KUNIT_EXPECT_EQ(test, refcount_read(&owner->references), 2);
+	KUNIT_EXPECT_TRUE(test, clone.bi_swapz_ci_full_clone_owned);
+	KUNIT_EXPECT_EQ(test, clone.bi_iter.bi_size, 4096U);
+	KUNIT_EXPECT_EQ(test, clone.bi_vcnt, 0U);
+	KUNIT_EXPECT_EQ(test, swapz_ci_bio_snapshot_lz4_v1(
+		&clone, &view, fixture->destination, 3568U), 0);
+	KUNIT_EXPECT_EQ(test, view.source_swap_entry, (u64)0x123456U);
+	KUNIT_EXPECT_EQ(test, view.source_slot_epoch, (u64)11U);
+	KUNIT_EXPECT_EQ(test, view.stored_entry_identity, (u64)13U);
+	KUNIT_EXPECT_EQ(test, view.compressed_crc32c,
+			~crc32c(~0U, fixture->compressed,
+				fixture->compressed_length));
+	KUNIT_EXPECT_EQ(test, memcmp(view.original_sha256, fixture->digest,
+				     sizeof(fixture->digest)), 0);
+	KUNIT_EXPECT_EQ(test, memcmp(fixture->destination, fixture->compressed,
+				     fixture->compressed_length), 0);
+	/* Fixture retains the shared original bvec memory after parent uninit. */
+	bio_uninit(&fixture->bio);
+	fixture->bio_initialized = false;
+	KUNIT_EXPECT_EQ(test, refcount_read(&owner->references), 1);
+	KUNIT_EXPECT_EQ(test, swapz_ci_bio_snapshot_lz4_v1(
+		&clone, &view, fixture->destination, 3568U), 0);
+	error = LZ4_decompress_safe((const char *)fixture->destination,
+				    (char *)fixture->decoded,
+				    view.compressed_length, PAGE_SIZE);
+	KUNIT_EXPECT_EQ(test, error, (int)PAGE_SIZE);
+	if (error == PAGE_SIZE) {
+		sha256(fixture->decoded, PAGE_SIZE, decoded_sha);
+		KUNIT_EXPECT_EQ(test, memcmp(decoded_sha, view.original_sha256,
+					     sizeof(decoded_sha)), 0);
+	}
+	bio_uninit(&clone);
+	bio_uninit(&clone);
+}
+
+static void swapz_round043_split_or_consumed_clone_refused_kunit(struct kunit *test)
+{
+	struct swapz_round034_v1_fixture *fixture =
+		swapz_round034_v1_fixture_create(test);
+	struct swapz_ci_owned_payload *owner;
+	struct swapz_ci_lz4_owned_view_v1 view;
+	struct bio *split;
+	u8 destination[3568];
+	int error;
+
+	KUNIT_ASSERT_NOT_NULL(test, fixture);
+	owner = fixture->bio.bi_swapz_ci_sideband;
+	KUNIT_ASSERT_NOT_NULL(test, owner);
+	fixture->bio.bi_vcnt = 1; /* Original bio_split bvec walker. */
+	split = bio_split(&fixture->bio, 4, GFP_KERNEL, &fs_bio_set);
+	if (IS_ERR_OR_NULL(split)) {
+		KUNIT_FAIL(test, "real original bio_split failed");
+		return;
+	}
+	KUNIT_EXPECT_TRUE(test, split->bi_swapz_ci_full_clone_owned);
+	KUNIT_EXPECT_EQ(test, refcount_read(&owner->references), 2);
+	KUNIT_EXPECT_EQ(test, split->bi_iter.bi_size, 2048U);
+	KUNIT_EXPECT_EQ(test, fixture->bio.bi_iter.bi_size, 2048U);
+	memset(&view, 0xa5, sizeof(view));
+	memset(destination, 0x6b, sizeof(destination));
+	error = swapz_ci_bio_snapshot_lz4_v1(
+		split, &view, destination, sizeof(destination));
+	KUNIT_EXPECT_EQ(test, error, -EOPNOTSUPP);
+	KUNIT_EXPECT_PTR_EQ(test, memchr_inv(&view, 0xa5, sizeof(view)), NULL);
+	KUNIT_EXPECT_PTR_EQ(test, memchr_inv(destination, 0x6b,
+					    sizeof(destination)), NULL);
+	error = swapz_ci_bio_snapshot_lz4_v1(
+		&fixture->bio, &view, destination, sizeof(destination));
+	KUNIT_EXPECT_EQ(test, error, -EOPNOTSUPP);
+	bio_put(split); /* Actual split uninit: ref 2 -> 1. */
+	KUNIT_EXPECT_EQ(test, refcount_read(&owner->references), 1);
+}
+
+static void swapz_round043_reset_reissue_and_forged_clone_kunit(struct kunit *test)
+{
+	struct swapz_round034_v1_fixture *fixture =
+		swapz_round034_v1_fixture_create(test);
+	struct swapz_ci_owned_payload *owner;
+	struct swapz_ci_lz4_owned_view_v1 view;
+	struct bio clone = {};
+	u8 destination[3568];
+	int error;
+
+	KUNIT_ASSERT_NOT_NULL(test, fixture);
+	owner = fixture->bio.bi_swapz_ci_sideband;
+	KUNIT_ASSERT_NOT_NULL(test, owner);
+	error = bio_init_clone(NULL, &clone, &fixture->bio, GFP_KERNEL);
+	if (error) {
+		KUNIT_FAIL(test, "real original first clone failed");
+		return;
+	}
+	KUNIT_EXPECT_EQ(test, refcount_read(&owner->references), 2);
+	memset(&view, 0xa5, sizeof(view));
+	memset(destination, 0x6b, sizeof(destination));
+	clone.bi_swapz_ci_full_clone_owned = false;
+	KUNIT_EXPECT_EQ(test, swapz_ci_bio_snapshot_lz4_v1(
+		&clone, &view, destination, sizeof(destination)),
+			-EOPNOTSUPP);
+	KUNIT_EXPECT_PTR_EQ(test, memchr_inv(&view, 0xa5, sizeof(view)), NULL);
+	KUNIT_EXPECT_PTR_EQ(test, memchr_inv(destination, 0x6b,
+					    sizeof(destination)), NULL);
+	clone.bi_swapz_ci_full_clone_owned = true;
+	KUNIT_EXPECT_EQ(test, swapz_ci_bio_snapshot_lz4_v1(
+		&clone, &view, destination, sizeof(destination)), 0);
+	bio_prepare_reissue(&clone, NULL);
+	KUNIT_EXPECT_PTR_EQ(test, clone.bi_swapz_ci_sideband, NULL);
+	KUNIT_EXPECT_FALSE(test, clone.bi_swapz_ci_full_clone_owned);
+	KUNIT_EXPECT_EQ(test, refcount_read(&owner->references), 1);
+	bio_uninit(&clone);
+	bio_uninit(&clone);
+	error = bio_init_clone(NULL, &clone, &fixture->bio, GFP_KERNEL);
+	if (error) {
+		KUNIT_FAIL(test, "real original second clone failed");
+		return;
+	}
+	KUNIT_EXPECT_EQ(test, refcount_read(&owner->references), 2);
+	bio_reset(&clone, NULL, REQ_OP_WRITE | REQ_SWAP);
+	KUNIT_EXPECT_PTR_EQ(test, clone.bi_swapz_ci_sideband, NULL);
+	KUNIT_EXPECT_FALSE(test, clone.bi_swapz_ci_full_clone_owned);
+	KUNIT_EXPECT_EQ(test, refcount_read(&owner->references), 1);
+	bio_uninit(&clone);
+}
+
+static struct kunit_case swapz_round043_clone_copy_cases[] = {
+	KUNIT_CASE(swapz_round043_full_clone_owned_lz4_copy_kunit),
+	KUNIT_CASE(swapz_round043_split_or_consumed_clone_refused_kunit),
+	KUNIT_CASE(swapz_round043_reset_reissue_and_forged_clone_kunit),
+	{}
+};
+static struct kunit_suite swapz_round043_clone_copy_suite = {
+	.name = "swapz_round043_original_bio_clone_copy_only",
+	.test_cases = swapz_round043_clone_copy_cases,
+};
+kunit_test_suite(swapz_round043_clone_copy_suite);
+#endif /* Source-only copy, never source-to-DM lease. */
+"""
+
+
+def apply_round043_original_bio_clone(path: str, composed: str) -> str:
+    """Only original BIO clone owner ref and v1 copy; no map/IO semantics."""
+    guard = """#if defined(SWAPZ_ROUND043_ORIGINAL_BIO_CLONE_COPY_TEST) && \
+    defined(SWAPZ_ROUND034_ORIGINAL_V1_KUNIT_TEST) && \
+    defined(SWAPZ_ROUND032_BIO_COPY_VIEW_CI_ONLY) && \
+    defined(SWAPZ_ROUND031_MM_BIO_SOURCE) && \
+    defined(SWAPZ_ROUND025_SIDEBAND_CI_ONLY) && IS_ENABLED(CONFIG_KUNIT)"""
+    if path == "include/linux/blk_types.h":
+        return replace_once(
+            composed, "\tstruct swapz_ci_owned_payload *bi_swapz_ci_sideband;\n",
+            "\tstruct swapz_ci_owned_payload *bi_swapz_ci_sideband;\n" +
+            guard + "\n\tbool bi_swapz_ci_full_clone_owned;\n#endif\n",
+            path, "round043-clone-owner-state")
+    if path != "block/bio.c":
+        return composed
+    # The actual original bio_init always explicitly resets both fields.
+    init_anchor = ("\tbio->bi_private = NULL;\n"
+                   "#ifdef SWAPZ_ROUND025_SIDEBAND_CI_ONLY\n"
+                   "\tbio->bi_swapz_ci_sideband = NULL;\n#endif\n")
+    composed = replace_once(
+        composed, init_anchor,
+        "\tbio->bi_private = NULL;\n"
+        "#ifdef SWAPZ_ROUND025_SIDEBAND_CI_ONLY\n"
+        "\tbio->bi_swapz_ci_sideband = NULL;\n" +
+        guard + "\n\tbio->bi_swapz_ci_full_clone_owned = false;\n#endif\n"
+        "#endif\n", path, "round043-bio-init-owner-clear")
+    detach_anchor = ("\tbio->bi_swapz_ci_sideband = NULL;\n"
+                     "\tswapz_ci_owned_put(owner);")
+    composed = replace_once(
+        composed, detach_anchor,
+        "\tbio->bi_swapz_ci_sideband = NULL;\n" +
+        guard + "\n\tbio->bi_swapz_ci_full_clone_owned = false;\n#endif\n"
+        "\tswapz_ci_owned_put(owner);",
+        path, "round043-uninit-reset-reissue-owner-clear")
+    clone_anchor = ("\t\tbio->bi_swapz_ci_sideband = swapz_ci_owned_get(owner);\n"
+                    "\t\tif (!bio->bi_swapz_ci_sideband)\n"
+                    "\t\t\treturn -ESTALE;")
+    composed = replace_once(
+        composed, clone_anchor, clone_anchor + "\n" + guard +
+        "\n\t\t/* Exact new owning ref is live before publishing marker. */\n"
+        "\t\tbio->bi_swapz_ci_full_clone_owned = true;\n#endif",
+        path, "round043-real-clone-acquired-ref")
+    composed = replace_once(
+        composed, "int swapz_ci_bio_snapshot_lz4_v1(const struct bio *source_bio,",
+        ROUND043_ORIGINAL_BIO_CLONE_SOURCE + "\n" +
+        "int swapz_ci_bio_snapshot_lz4_v1(const struct bio *source_bio,",
+        path, "round043-clone-only-v1-private-checker")
+    geometry = ("\t    source_bio->bi_vcnt ||\n"
+                "\t    (source_bio->bi_flags & (1U << BIO_CLONED)) ||\n"
+                "\t    !source_bio->bi_io_vec ||")
+    replacement = ("\t    source_bio->bi_vcnt ||\n" + guard +
+                   "\n\t    !swapz_round043_bio_clone_owner_is_independent("
+                   "source_bio) ||\n"
+                   "#else\n"
+                   "\t    (source_bio->bi_flags & (1U << BIO_CLONED)) ||\n"
+                   "#endif\n"
+                   "\t    !source_bio->bi_io_vec ||")
+    composed = replace_once(composed, geometry, replacement, path,
+                            "round043-existing-v1-geometry-copy-only")
+    return replace_once(
+        composed, "static struct kunit_case swapz_ci_sideband_cases[] = {\n",
+        ROUND043_ORIGINAL_BIO_CLONE_KUNIT + "\n" +
+        "static struct kunit_case swapz_ci_sideband_cases[] = {\n",
+        path, "round043-original-genuine-clone-kunit")
+
+
 def compose_postimage(path: str, original_bytes: bytes, *,
                       with_kunit: bool = True) -> bytes:
     """In-memory exactly pinned original source -> deterministic combined C."""
@@ -3891,6 +4154,8 @@ def compose_postimage(path: str, original_bytes: bytes, *,
         changed = apply_round041_original_sector_domain(path, changed)
     if with_kunit:
         changed = apply_round042_original_stored_writeback(path, changed)
+    if with_kunit:
+        changed = apply_round043_original_bio_clone(path, changed)
     if path == "mm/zswap.c":
         for required in (
             "swapz_round028_slot_epoch(swpentry)",
