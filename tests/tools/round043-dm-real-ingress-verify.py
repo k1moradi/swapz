@@ -9,6 +9,7 @@ separate required workflow step, never replaced by this host-only stub.
 from __future__ import annotations
 
 import os
+import re
 from pathlib import Path
 import runpy
 import shutil
@@ -102,13 +103,19 @@ def validate_real_map_ingress(source: str) -> tuple[str, str]:
             "count == SWAPZ_SECTORS" in callsite and
             "bio->bi_iter.bi_size == SWAPZ_BLOCK_BYTES" in callsite):
         raise AssertionError("Round043 true map callsite changed ordinary admission")
+    # Check executable tokens only. The REAL C explanatory comment
+    # correctly says "swapz_map() uses target-relative sectors"; matching
+    # that comment caused the first historical false-positive RED before
+    # either GCC or Clang source compilation. Never weaken the real-I/O ban.
+    executable = re.sub(r"/\*.*?\*/|//[^\n]*", "",
+                        helper + "\n" + callsite, flags=re.DOTALL)
     for forbidden in (
         "return DM_MAPIO_", "bio_endio(", "submit_bio(",
         "swapz_lower_write(", "swapz_lower_read(",
         "swapz_map(", "entry->", "ctx->authority.maps[",
         "ctx->authority.gc_destination =", "swapz_gc(",
     ):
-        if forbidden in helper or forbidden in callsite:
+        if forbidden in executable:
             raise AssertionError("Round043 witness mutates mapped product: " +
                                  forbidden)
     if source.count("SWAPZ_ROUND043_SOURCE_MAPPED_AUTHENTICATED 0U") != 1:
@@ -175,13 +182,14 @@ class ActualOriginalDmIngressTests(unittest.TestCase):
              "return swapz_round043_dm_observe_real_map_v1(ti, ctx, bio);"),
             ("target_relative_sector = upper_bio->bi_iter.bi_sector",
              "target_relative_sector = target->begin + upper_bio->bi_iter.bi_sector"),
+            (CALL_END, "swapz_map(ti, bio);\n" + CALL_END),
         ):
             with self.subTest(mutant=hostile):
                 self.assertEqual(real_source.count(original), 1)
                 mutant = real_source.replace(original, hostile, 1)
                 with self.assertRaisesRegex(AssertionError, "Round043"):
                     validate_real_map_ingress(mutant)
-        print("ROUND043_REAL_MAP_CALLSITE_HOSTILE_6_MUTANTS_REJECTED_PASS")
+        print("ROUND043_REAL_MAP_CALLSITE_HOSTILE_7_MUTANTS_REJECTED_PASS")
 
     def test_genuine_product_map_ingress_gcc_clang_asan_ubsan(self) -> None:
         source = compose_actual_production_c()
