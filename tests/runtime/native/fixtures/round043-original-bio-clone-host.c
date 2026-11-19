@@ -6,6 +6,8 @@
 #include <stddef.h>
 #include <stdint.h>
 #include <stdio.h>
+/* Kernel noinline annotation: keep the exact extracted original C unchanged. */
+#define noinline __attribute__((noinline))
 #define BIO_CLONED 2U
 struct swapz_ci_owned_payload { uint32_t immutable; };
 struct bio_iter {
