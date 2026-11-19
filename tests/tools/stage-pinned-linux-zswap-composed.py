@@ -3331,6 +3331,346 @@ def apply_round041_original_sector_domain(path: str, composed: str) -> str:
         ROUND040_ORIGINAL_ASYNC_LEASE_HOOK + ROUND041_ORIGINAL_SECTOR_DOMAIN_HOOK,
         path, "round041-original-after-area-put-dispatch-hook")
 
+
+# Round042 genuine ORIGINAL zswap_writeback_entry source before xa_erase/free.
+# All guards are default UNDEFINED. No live source/DM positive authority.
+ROUND042_ORIGINAL_STORED_WRITEBACK_MACRO = "SWAPZ_ROUND042_ORIGINAL_STORED_WRITEBACK_LIFETIME_TEST"
+ROUND042_ORIGINAL_STORED_WRITEBACK_C = r"""#if defined(SWAPZ_ROUND042_ORIGINAL_STORED_WRITEBACK_LIFETIME_TEST) && \
+    defined(SWAPZ_ROUND041_ORIGINAL_SECTOR_TO_DM_NONAUTHORITY_TEST) && \
+    defined(SWAPZ_ROUND040_ORIGINAL_ASYNC_SLOT_LEASE_NEGATIVE_TEST) && \
+    defined(SWAPZ_ROUND038_ORIGINAL_STORE_PROVENANCE_TEST) && \
+    defined(SWAPZ_ROUND037_ORIGINAL_MM_LIFETIME_OWNER_TEST) && \
+    defined(SWAPZ_ROUND036_ORIGINAL_ROUTE_LIFETIME_TEST) && \
+    defined(SWAPZ_ROUND035_ORIGINAL_MM_ROUTE_WITNESS_TEST) && \
+    defined(SWAPZ_ROUND034_ORIGINAL_V1_KUNIT_TEST) && \
+    defined(SWAPZ_ROUND032_BIO_COPY_VIEW_CI_ONLY) && \
+    defined(SWAPZ_ROUND031_MM_BIO_SOURCE) && \
+    defined(SWAPZ_ROUND030_EVICTION_SNAPSHOT_SOURCE) && \
+    defined(SWAPZ_ROUND028_SLOT_EPOCH_SOURCE) && \
+    defined(SWAPZ_ROUND025_SIDEBAND_CI_ONLY) && IS_ENABLED(CONFIG_KUNIT)
+/* ROUND042_ORIGINAL_STORED_WRITEBACK_C_BEGIN */
+/*
+ * ORIGINAL mm/zswap.c C only. Entries are legal to dereference ONLY while
+ * original locked swapcache folio and xarray identity still pin the current
+ * zswap entry. A separately refcounted copied BIO owner is not an allocation
+ * incarnation or live downstream DM target/extent/GC ownership lease.
+ * All post-erase/free observations contain values ONLY, not zpool pointers.
+ */
+struct swapz_round042_stored_writeback_observation {
+	u64 source_swap_entry;
+	u64 current_swap_entry;
+	u64 source_allocation_epoch;
+	u64 current_allocation_epoch;
+	u64 source_stored_identity;
+	u64 current_stored_identity;
+	u32 original_store_crc32c;
+	u32 copied_source_crc32c;
+	u32 compressed_length;
+	u32 decoded_length;
+	bool original_xarray_matches;
+	bool folio_locked;
+	bool folio_swapcache;
+	bool original_decompressed_to_folio;
+	bool copied_payload_independently_owned;
+	bool original_entry_erased;
+	bool original_entry_freed;
+	bool original_folio_writeback_started;
+	bool delayed_bio_completion;
+	bool original_swap_area_ref_held;
+	bool allocation_incarnation_ref_held;
+	bool current_dm_target_gc_ref_held;
+};
+
+/* ROUND042_ORIGINAL_STORED_WRITEBACK_PURE_C_BEGIN */
+static int swapz_round042_stored_writeback_refuse(
+		const struct swapz_round042_stored_writeback_observation *observation)
+{
+	if (!observation)
+		return -EINVAL;
+	if (!observation->source_swap_entry ||
+	    observation->source_swap_entry != observation->current_swap_entry ||
+	    !observation->source_allocation_epoch ||
+	    observation->source_allocation_epoch !=
+		    observation->current_allocation_epoch ||
+	    !observation->source_stored_identity ||
+	    observation->source_stored_identity !=
+		    observation->current_stored_identity ||
+	    !observation->original_xarray_matches)
+		return -ESTALE;
+	/* Original STORE SHA remains in an independently owned original BIO
+	 * byte-view; CRC binds original STORE compressed bytes, not current
+	 * allocation incarnation or current DM map lifetime.
+	 */
+	if (!observation->original_store_crc32c ||
+	    observation->original_store_crc32c !=
+		    observation->copied_source_crc32c)
+		return -ESTALE;
+	if (!observation->compressed_length ||
+	    observation->compressed_length > 3568U ||
+	    observation->decoded_length != 4096U)
+		return -ERANGE;
+	if (!observation->folio_locked ||
+	    !observation->folio_swapcache ||
+	    !observation->original_decompressed_to_folio)
+		return -ESTALE;
+	/* After xa_erase / zswap_entry_free, no source entry pointer or
+	 * zpool handle may be borrowed, regardless of copied BIO refcount.
+	 */
+	if (observation->original_entry_erased !=
+	    observation->original_entry_freed)
+		return -ESTALE;
+	if (!observation->copied_payload_independently_owned ||
+	    observation->delayed_bio_completion ||
+	    observation->original_entry_freed ||
+	    observation->original_folio_writeback_started)
+		return -EOPNOTSUPP;
+	/* Even every manufactured ref would lack a real authenticated
+	 * original allocation+current DM target/extent/GC joined lease.
+	 */
+	return -EOPNOTSUPP;
+}
+/* ROUND042_ORIGINAL_STORED_WRITEBACK_PURE_C_END */
+
+/* The ORIGINAL evictor invokes this only before xa_erase and free, while
+ * the genuine locked folio and current xarray make entry dereference safe.
+ * No GFP allocation, borrowed pointer escape, new ref, export, BIO mutation,
+ * extra reclaim policy or IO; mark all downstream identity as UNKNOWN.
+ */
+static noinline int swapz_round042_original_stored_writeback_probe(
+		struct zswap_entry *entry, swp_entry_t original_slot,
+		struct xarray *tree, pgoff_t offset, struct folio *folio,
+		const struct swap_io_ctx *ctx,
+		struct swapz_round042_stored_writeback_observation *observation)
+{
+	if (!entry || !tree || !folio || !ctx || !observation ||
+	    entry != xa_load(tree, offset) ||
+	    entry->swpentry.val != original_slot.val ||
+	    !folio_test_locked(folio) || !folio_test_swapcache(folio))
+		return -ESTALE;
+	observation->source_swap_entry = (u64)entry->swpentry.val;
+	observation->current_swap_entry = (u64)original_slot.val;
+	observation->source_allocation_epoch =
+		entry->swapz_round028_allocation_epoch;
+	observation->current_allocation_epoch =
+		swapz_round028_slot_epoch(original_slot);
+	observation->source_stored_identity =
+		entry->swapz_round028_stored_entry_identity;
+	observation->current_stored_identity =
+		entry->swapz_round028_stored_entry_identity;
+	observation->original_store_crc32c =
+		entry->swapz_round038_store_crc32c;
+	observation->copied_source_crc32c =
+		ctx->swapz_round031_owned &&
+		entry->swapz_round038_store_compressed ?
+		entry->swapz_round038_store_crc32c : 0U;
+	observation->compressed_length = (u32)entry->length;
+	observation->decoded_length = 4096U;
+	observation->original_xarray_matches = true;
+	observation->folio_locked = true;
+	observation->folio_swapcache = true;
+	observation->original_decompressed_to_folio = true;
+	observation->copied_payload_independently_owned =
+		ctx->swapz_round031_owned != NULL;
+	/* A real independent owner exists for payload bytes only; the
+	 * original temporary swap AREA users ref was ALREADY put.
+	 * No real current slot-incarnation or DM target/GC lease exists.
+	 */
+	return swapz_round042_stored_writeback_refuse(observation);
+}
+
+static void swapz_round042_writeback_fixture(
+		struct swapz_round042_stored_writeback_observation *observation)
+{
+	memset(observation, 0, sizeof(*observation));
+	observation->source_swap_entry = (u64)swp_entry(1U, 37U).val;
+	observation->current_swap_entry = observation->source_swap_entry;
+	observation->source_allocation_epoch = 17U;
+	observation->current_allocation_epoch = 17U;
+	observation->source_stored_identity = 29U;
+	observation->current_stored_identity = 29U;
+	observation->original_store_crc32c = 0xa19be32fU;
+	observation->copied_source_crc32c = 0xa19be32fU;
+	observation->compressed_length = 912U;
+	observation->decoded_length = 4096U;
+	observation->original_xarray_matches = true;
+	observation->folio_locked = true;
+	observation->folio_swapcache = true;
+	observation->original_decompressed_to_folio = true;
+	observation->copied_payload_independently_owned = true;
+}
+
+/* These four KUnit scenarios are SYNTHETIC value-only, NOT real pressure. */
+static void swapz_round042_xarray_stale_typed_slot_kunit(struct kunit *test)
+{
+	struct swapz_round042_stored_writeback_observation observation;
+
+	swapz_round042_writeback_fixture(&observation);
+	observation.original_xarray_matches = false;
+	KUNIT_EXPECT_EQ(test, swapz_round042_stored_writeback_refuse(&observation),
+			-ESTALE);
+	observation.original_xarray_matches = true;
+	observation.current_swap_entry = (u64)swp_entry(2U, 37U).val;
+	KUNIT_EXPECT_EQ(test, swapz_round042_stored_writeback_refuse(&observation),
+			-ESTALE);
+}
+
+static void swapz_round042_store_identity_epoch_crc_kunit(struct kunit *test)
+{
+	struct swapz_round042_stored_writeback_observation observation;
+
+	swapz_round042_writeback_fixture(&observation);
+	observation.current_stored_identity++;
+	KUNIT_EXPECT_EQ(test, swapz_round042_stored_writeback_refuse(&observation),
+			-ESTALE);
+	observation.current_stored_identity = observation.source_stored_identity;
+	observation.current_allocation_epoch++;
+	KUNIT_EXPECT_EQ(test, swapz_round042_stored_writeback_refuse(&observation),
+			-ESTALE);
+	observation.current_allocation_epoch = observation.source_allocation_epoch;
+	observation.copied_source_crc32c++;
+	KUNIT_EXPECT_EQ(test, swapz_round042_stored_writeback_refuse(&observation),
+			-ESTALE);
+}
+
+static void swapz_round042_owned_copy_after_free_kunit(struct kunit *test)
+{
+	struct swapz_round042_stored_writeback_observation observation;
+	struct swapz_round042_stored_writeback_observation original;
+
+	swapz_round042_writeback_fixture(&observation);
+	original = observation;
+	KUNIT_EXPECT_EQ(test, swapz_round042_stored_writeback_refuse(&observation),
+			-EOPNOTSUPP);
+	KUNIT_EXPECT_EQ(test, memcmp(&observation, &original,
+				    sizeof(observation)), 0);
+	observation.original_entry_erased = true;
+	KUNIT_EXPECT_EQ(test, swapz_round042_stored_writeback_refuse(&observation),
+			-ESTALE);
+	observation.original_entry_freed = true;
+	KUNIT_EXPECT_EQ(test, swapz_round042_stored_writeback_refuse(&observation),
+			-EOPNOTSUPP);
+	observation.copied_payload_independently_owned = false;
+	KUNIT_EXPECT_EQ(test, swapz_round042_stored_writeback_refuse(&observation),
+			-EOPNOTSUPP);
+}
+
+static void swapz_round042_post_erase_late_completion_kunit(struct kunit *test)
+{
+	struct swapz_round042_stored_writeback_observation observation;
+
+	swapz_round042_writeback_fixture(&observation);
+	observation.original_entry_erased = true;
+	observation.original_entry_freed = true;
+	observation.original_folio_writeback_started = true;
+	observation.delayed_bio_completion = true;
+	KUNIT_EXPECT_EQ(test, swapz_round042_stored_writeback_refuse(&observation),
+			-EOPNOTSUPP);
+	observation.original_swap_area_ref_held = true;
+	observation.allocation_incarnation_ref_held = true;
+	observation.current_dm_target_gc_ref_held = true;
+	KUNIT_EXPECT_EQ(test, swapz_round042_stored_writeback_refuse(&observation),
+			-EOPNOTSUPP);
+	observation.current_swap_entry = 0U;
+	KUNIT_EXPECT_EQ(test, swapz_round042_stored_writeback_refuse(&observation),
+			-ESTALE);
+	KUNIT_EXPECT_EQ(test, swapz_round042_stored_writeback_refuse(NULL),
+			-EINVAL);
+}
+
+static struct kunit_case swapz_round042_stored_writeback_cases[] = {
+	KUNIT_CASE(swapz_round042_xarray_stale_typed_slot_kunit),
+	KUNIT_CASE(swapz_round042_store_identity_epoch_crc_kunit),
+	KUNIT_CASE(swapz_round042_owned_copy_after_free_kunit),
+	KUNIT_CASE(swapz_round042_post_erase_late_completion_kunit),
+	{}
+};
+static struct kunit_suite swapz_round042_stored_writeback_suite = {
+	.name = "swapz_round042_original_stored_writeback_no_authority",
+	.test_cases = swapz_round042_stored_writeback_cases,
+};
+kunit_test_suite(swapz_round042_stored_writeback_suite);
+/* ROUND042_ORIGINAL_STORED_WRITEBACK_C_END */
+#endif /* Original source only, no REAL compressed handoff */
+"""
+
+
+def apply_round042_original_stored_writeback(path: str, composed: str) -> str:
+    """Add original zswap eviction ownership-boundary observation, no IO."""
+    if path != "mm/zswap.c":
+        return composed
+    declaration = "\tstruct swap_io_ctx ctx = {};\n"
+    composed = replace_once(composed, declaration, declaration + r"""#if defined(SWAPZ_ROUND042_ORIGINAL_STORED_WRITEBACK_LIFETIME_TEST) && \
+    defined(SWAPZ_ROUND041_ORIGINAL_SECTOR_TO_DM_NONAUTHORITY_TEST) && \
+    defined(SWAPZ_ROUND040_ORIGINAL_ASYNC_SLOT_LEASE_NEGATIVE_TEST) && \
+    defined(SWAPZ_ROUND038_ORIGINAL_STORE_PROVENANCE_TEST) && \
+    defined(SWAPZ_ROUND037_ORIGINAL_MM_LIFETIME_OWNER_TEST) && \
+    defined(SWAPZ_ROUND036_ORIGINAL_ROUTE_LIFETIME_TEST) && \
+    defined(SWAPZ_ROUND035_ORIGINAL_MM_ROUTE_WITNESS_TEST) && \
+    defined(SWAPZ_ROUND034_ORIGINAL_V1_KUNIT_TEST) && \
+    defined(SWAPZ_ROUND032_BIO_COPY_VIEW_CI_ONLY) && \
+    defined(SWAPZ_ROUND031_MM_BIO_SOURCE) && \
+    defined(SWAPZ_ROUND030_EVICTION_SNAPSHOT_SOURCE) && \
+    defined(SWAPZ_ROUND028_SLOT_EPOCH_SOURCE) && \
+    defined(SWAPZ_ROUND025_SIDEBAND_CI_ONLY) && IS_ENABLED(CONFIG_KUNIT)
+	struct swapz_round042_stored_writeback_observation
+		swapz_round042_source_observation = {};
+#endif
+""", path, "round042-original-eviction-owned-scalar")
+    before_entry = "static int zswap_writeback_entry(struct zswap_entry *entry,\n"
+    composed = replace_once(composed, before_entry,
+                            ROUND042_ORIGINAL_STORED_WRITEBACK_C +
+                            "\n" + before_entry,
+                            path, "round042-original-eviction-source-c")
+    erase = "\txa_erase(tree, offset);\n\n\tcount_vm_event(ZSWPWB);"
+    composed = replace_once(composed, erase, r"""#if defined(SWAPZ_ROUND042_ORIGINAL_STORED_WRITEBACK_LIFETIME_TEST) && \
+    defined(SWAPZ_ROUND041_ORIGINAL_SECTOR_TO_DM_NONAUTHORITY_TEST) && \
+    defined(SWAPZ_ROUND040_ORIGINAL_ASYNC_SLOT_LEASE_NEGATIVE_TEST) && \
+    defined(SWAPZ_ROUND038_ORIGINAL_STORE_PROVENANCE_TEST) && \
+    defined(SWAPZ_ROUND037_ORIGINAL_MM_LIFETIME_OWNER_TEST) && \
+    defined(SWAPZ_ROUND036_ORIGINAL_ROUTE_LIFETIME_TEST) && \
+    defined(SWAPZ_ROUND035_ORIGINAL_MM_ROUTE_WITNESS_TEST) && \
+    defined(SWAPZ_ROUND034_ORIGINAL_V1_KUNIT_TEST) && \
+    defined(SWAPZ_ROUND032_BIO_COPY_VIEW_CI_ONLY) && \
+    defined(SWAPZ_ROUND031_MM_BIO_SOURCE) && \
+    defined(SWAPZ_ROUND030_EVICTION_SNAPSHOT_SOURCE) && \
+    defined(SWAPZ_ROUND028_SLOT_EPOCH_SOURCE) && \
+    defined(SWAPZ_ROUND025_SIDEBAND_CI_ONLY) && IS_ENABLED(CONFIG_KUNIT)
+	/* The TRUE ORIGINAL folio remains locked and xarray still matches.
+	 * Only COPY observed scalars while original zswap_entry is valid.
+	 */
+	(void)swapz_round042_original_stored_writeback_probe(
+		entry, swpentry, tree, offset, folio, &ctx,
+		&swapz_round042_source_observation);
+#endif
+""" + erase, path, "round042-original-before-xarray-erase")
+    freed = "\tzswap_entry_free(entry);\n\n\t/* folio is up to date */"
+    composed = replace_once(composed, freed, "\tzswap_entry_free(entry);\n" +
+                            r"""#if defined(SWAPZ_ROUND042_ORIGINAL_STORED_WRITEBACK_LIFETIME_TEST) && \
+    defined(SWAPZ_ROUND041_ORIGINAL_SECTOR_TO_DM_NONAUTHORITY_TEST) && \
+    defined(SWAPZ_ROUND040_ORIGINAL_ASYNC_SLOT_LEASE_NEGATIVE_TEST) && \
+    defined(SWAPZ_ROUND038_ORIGINAL_STORE_PROVENANCE_TEST) && \
+    defined(SWAPZ_ROUND037_ORIGINAL_MM_LIFETIME_OWNER_TEST) && \
+    defined(SWAPZ_ROUND036_ORIGINAL_ROUTE_LIFETIME_TEST) && \
+    defined(SWAPZ_ROUND035_ORIGINAL_MM_ROUTE_WITNESS_TEST) && \
+    defined(SWAPZ_ROUND034_ORIGINAL_V1_KUNIT_TEST) && \
+    defined(SWAPZ_ROUND032_BIO_COPY_VIEW_CI_ONLY) && \
+    defined(SWAPZ_ROUND031_MM_BIO_SOURCE) && \
+    defined(SWAPZ_ROUND030_EVICTION_SNAPSHOT_SOURCE) && \
+    defined(SWAPZ_ROUND028_SLOT_EPOCH_SOURCE) && \
+    defined(SWAPZ_ROUND025_SIDEBAND_CI_ONLY) && IS_ENABLED(CONFIG_KUNIT)
+	/* AFTER REAL zswap_entry_free(): NO entry/zpool dereference.
+	 * Only local scalar evidence, no ref transfer or positive route.
+	 */
+	swapz_round042_source_observation.original_entry_erased = true;
+	swapz_round042_source_observation.original_entry_freed = true;
+	(void)swapz_round042_stored_writeback_refuse(
+		&swapz_round042_source_observation);
+#endif
+""" + "\n\t/* folio is up to date */",
+                            path, "round042-original-post-free-scalar-only")
+    return composed
+
+
 def replace_once(text: str, before: str, after: str, path: str, label: str) -> str:
     if not before or before == after or text.count(before) != 1 or (
         after in text and after not in before
@@ -3549,6 +3889,8 @@ def compose_postimage(path: str, original_bytes: bytes, *,
         changed = apply_round040_original_async_lease(path, changed)
     if with_kunit:
         changed = apply_round041_original_sector_domain(path, changed)
+    if with_kunit:
+        changed = apply_round042_original_stored_writeback(path, changed)
     if path == "mm/zswap.c":
         for required in (
             "swapz_round028_slot_epoch(swpentry)",

@@ -784,5 +784,87 @@ class OriginalMMAndBIOComposer(unittest.TestCase):
                              label="round041-original-sector", libraries=())
 
 
+
+    def test_round042_original_stored_writeback_real_boundary_and_no_authority(self):
+        source = stage.ROUND042_ORIGINAL_STORED_WRITEBACK_C
+        self.assertEqual(stage.ROUND042_ORIGINAL_STORED_WRITEBACK_MACRO,
+                         "SWAPZ_ROUND042_ORIGINAL_STORED_WRITEBACK_LIFETIME_TEST")
+        for required in (
+            "SWAPZ_ROUND041_ORIGINAL_SECTOR_TO_DM_NONAUTHORITY_TEST",
+            "SWAPZ_ROUND038_ORIGINAL_STORE_PROVENANCE_TEST",
+            "SWAPZ_ROUND031_MM_BIO_SOURCE",
+            "IS_ENABLED(CONFIG_KUNIT)",
+            "swapz_round042_original_stored_writeback_probe(",
+            "entry != xa_load(tree, offset)",
+            "folio_test_locked(folio)",
+            "folio_test_swapcache(folio)",
+            "entry->swapz_round028_allocation_epoch",
+            "entry->swapz_round028_stored_entry_identity",
+            "entry->swapz_round038_store_crc32c",
+            "ctx->swapz_round031_owned",
+            "swapz_round028_slot_epoch(original_slot)",
+            "original_entry_erased",
+            "original_entry_freed",
+            "current_dm_target_gc_ref_held",
+            "return -EOPNOTSUPP;",
+            "kunit_test_suite(swapz_round042_stored_writeback_suite);",
+            '"swapz_round042_original_stored_writeback_no_authority"',
+        ):
+            self.assertIn(required, source)
+        for case in (
+            "xarray_stale_typed_slot", "store_identity_epoch_crc",
+            "owned_copy_after_free", "post_erase_late_completion",
+        ):
+            self.assertEqual(source.count(
+                "KUNIT_CASE(swapz_round042_" + case + "_kunit)"), 1)
+        no_comments = re.sub(r"/\*[\s\S]*?\*/", "", source)
+        for forbidden in ("EXPORT_SYMBOL", "bio_endio(", "submit_bio(",
+                          "swapz_map(", "SOURCE_MAPPED_AUTHENTICATED=1"):
+            self.assertNotIn(forbidden, no_comments)
+        composer = Path(STAGER).read_text(encoding="utf-8")
+        for anchor in (
+            "apply_round042_original_stored_writeback(path, changed)",
+            "swapz_round042_source_observation.original_entry_erased = true;",
+            "swapz_round042_source_observation.original_entry_freed = true;",
+            "zswap_entry_free(entry);",
+            "xa_erase(tree, offset);",
+            "swapz_round042_stored_writeback_refuse(",
+        ):
+            self.assertIn(anchor, composer)
+        self.assertIn("ROUND041_ORIGINAL_SECTOR_DOMAIN_C", composer)
+        if os.environ.get("ROUND031_PINNED_LINUX"):
+            original_zswap = (Path(os.environ["ROUND031_PINNED_LINUX"]) /
+                              "mm/zswap.c").read_text(encoding="utf-8")
+            for original_anchor in (
+                "si = get_swap_device(swpentry);",
+                "put_swap_device(si);",
+                "folio = __swap_cache_alloc_folio(swpentry",
+                "if (entry != xa_load(tree, offset)) {",
+                "if (!zswap_decompress(entry, folio)) {",
+                "xa_erase(tree, offset);",
+                "zswap_entry_free(entry);",
+                "folio_put(folio);",
+                "__swap_writeout(&ctx, folio);",
+                "swap_write_submit(&ctx);",
+                "swap_cache_del_folio(folio);",
+                "folio_unlock(folio);",
+            ):
+                self.assertIn(original_anchor, original_zswap)
+
+    def test_round042_original_stored_writeback_exact_gcc_clang_sanitizers(self):
+        source = stage.ROUND042_ORIGINAL_STORED_WRITEBACK_C
+        start = "struct swapz_round042_stored_writeback_observation {"
+        end = "/* ROUND042_ORIGINAL_STORED_WRITEBACK_PURE_C_END */"
+        self.assertEqual(source.count(start), 1)
+        self.assertEqual(source.count(end), 1)
+        actual_original_c = start + source.split(start, 1)[1].split(end, 1)[0]
+        fixture = (FIXTURES / "round042-original-writeback-host.c").read_text(
+            encoding="utf-8")
+        marker = "/* ROUND042_EXACT_ORIGINAL_STORED_WRITEBACK_C */"
+        self.assertEqual(fixture.count(marker), 1)
+        self.compile_and_run(fixture.replace(marker, actual_original_c, 1),
+                             label="round042-original-writeback", libraries=())
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)
