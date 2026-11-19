@@ -90,6 +90,76 @@ def replace_exactly_once(source: str, old: str, new: str) -> str:
     return source.replace(old, new, 1)
 
 
+def original_origin_attribution_bounds(source: str) -> tuple[int, int]:
+    """Locate the ONE real provenance gate, never the Round043 observer."""
+    beginning = (
+        "\tentry->write_origin = SWAPZ_WRITE_ORIGIN_ORDINARY_OR_UNKNOWN;\n"
+        "\tentry->origin_commit_counted = false;\n"
+        "#ifdef BIO_HAS_ZSWAP_STORED_WRITEBACK_ORIGIN\n"
+    )
+    if source.count(beginning) != 1:
+        raise AssertionError("original STORED origin attribution gate drift")
+    start = source.index(beginning)
+    end_marker = "\n#endif"
+    end = source.find(end_marker, start + len(beginning))
+    if end < 0:
+        raise AssertionError("original STORED origin attribution endif missing")
+    end += len(end_marker)
+    if source[start:end].count(
+            "entry->write_origin = SWAPZ_WRITE_ORIGIN_ZSWAP_STORED_WRITEBACK;") != 1:
+        raise AssertionError("original STORED positive attribution not unique")
+    return start, end
+
+
+def replace_original_origin_attribution_once(
+        source: str, old: str, new: str) -> str:
+    """Mutate original guarded attribution only; preserve all other C bytes."""
+    start, end = original_origin_attribution_bounds(source)
+    original_gate = source[start:end]
+    changed_gate = replace_exactly_once(original_gate, old, new)
+    return source[:start] + changed_gate + source[end:]
+
+
+def verify_scoped_original_origin_mutations(source: str) -> None:
+    """Prove that duplicate Round043 geometry cannot steer old 24 oracles."""
+    old = "count == SWAPZ_SECTORS &&\n\t    bio->bi_iter.bi_size"
+    start, end = original_origin_attribution_bounds(source)
+    if source.count(old) < 2 or source[start:end].count(old) != 1:
+        raise AssertionError("original versus observer geometry not independent")
+    changed = replace_original_origin_attribution_once(
+        source, old, "bio->bi_iter.bi_size")
+    if (changed[:start] != source[:start] or
+            changed[start + len(source[start:end]) - len(old) +
+                    len("bio->bi_iter.bi_size"):] != source[end:]):
+        raise AssertionError("scoped original mutation changed unrelated C")
+    if changed.count(old) != source.count(old) - 1:
+        raise AssertionError("original mutation did not leave observer intact")
+    try:
+        validate_source_text(changed)
+        verify_strict_phase_a_contract(changed)
+    except (AssertionError, ValueError):
+        pass
+    else:
+        raise AssertionError("mutated original STORED geometry accepted")
+    observer_begin = "/* ROUND043_DM_REAL_MAP_CALLSITE_EXACT_START */"
+    observer_end = "/* ROUND043_DM_REAL_MAP_CALLSITE_EXACT_END */"
+    if source.count(observer_begin) != 1 or source.count(observer_end) != 1:
+        raise AssertionError("original source Round043 observer markers drift")
+    before, remainder = source.split(observer_begin, 1)
+    observer, after = remainder.split(observer_end, 1)
+    if observer.count(old) != 1:
+        raise AssertionError("Round043 observer geometry collision disappeared")
+    observer_only = (before + observer_begin +
+                     observer.replace(old, "bio->bi_iter.bi_size", 1) +
+                     observer_end + after)
+    other_start, other_end = original_origin_attribution_bounds(observer_only)
+    if observer_only[other_start:other_end] != source[start:end]:
+        raise AssertionError("observation-only mutation altered original gate")
+    validate_source_text(observer_only)
+    verify_strict_phase_a_contract(observer_only)
+    print("PASS: Round044 real origin scoped mutation; observer untouched")
+
+
 def replace_pattern_once(source: str, expression: str, new: str) -> str:
     matches = list(re.finditer(expression, source, re.MULTILINE | re.DOTALL))
     if len(matches) != 1:
@@ -155,16 +225,16 @@ def run_negative_mutations(source: str) -> int:
             replace_exactly_once(source, reset, ""),
             "list_add_tail(&entry->list, &ctx->incoming);",
             "list_add_tail(&entry->list, &ctx->incoming);\n\t" + reset)),
-        ("missing feature guard", lambda: replace_exactly_once(source,
+        ("missing feature guard", lambda: replace_original_origin_attribution_once(source,
             "#ifdef BIO_HAS_ZSWAP_STORED_WRITEBACK_ORIGIN\n\tif (bio_op(bio)",
             "\tif (bio_op(bio)")),
-        ("READ origin accepted", lambda: replace_exactly_once(source,
+        ("READ origin accepted", lambda: replace_original_origin_attribution_once(source,
             "if (bio_op(bio) == REQ_OP_WRITE && count == SWAPZ_SECTORS &&",
             "if (count == SWAPZ_SECTORS &&")),
-        ("non-4KiB sectors accepted", lambda: replace_exactly_once(source,
+        ("non-4KiB sectors accepted", lambda: replace_original_origin_attribution_once(source,
             "count == SWAPZ_SECTORS &&\n\t    bio->bi_iter.bi_size",
             "bio->bi_iter.bi_size")),
-        ("non-4KiB byte length accepted", lambda: replace_exactly_once(source,
+        ("non-4KiB byte length accepted", lambda: replace_original_origin_attribution_once(source,
             "bio->bi_iter.bi_size == SWAPZ_BLOCK_BYTES &&",
             "bio->bi_iter.bi_size >= SWAPZ_BLOCK_BYTES &&")),
         ("admission count skipped", lambda: replace_exactly_once(source,
@@ -215,6 +285,8 @@ def run_negative_mutations(source: str) -> int:
         ("Phase B origin bypass introduced", lambda:
             source + "\nstatic unsigned long raw_committed_verified_origin_bypass;\n"),
     ]
+    if len(controls) != 24:
+        raise AssertionError("the 24 original adversarial controls were weakened")
     detected = 0
     for name, mutate in controls:
         changed = mutate()
@@ -337,6 +409,7 @@ def main() -> int:
     source = SOURCE.read_text(encoding="utf-8")
     validate_source_text(source)
     verify_strict_phase_a_contract(source)
+    verify_scoped_original_origin_mutations(source)
     detected = run_negative_mutations(source)
     compiled = compile_actual_origin_commit_helper(source)
     print(f"PASS: real production-C Phase A source contract; {detected} negative mutations rejected")
