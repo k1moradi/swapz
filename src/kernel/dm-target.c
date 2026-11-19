@@ -7023,6 +7023,198 @@ static __used noinline int swapz_round040_dm_reissue_retire(
 	return 0;
 }
 /* ROUND040_DM_REISSUE_EXACT_END */
+
+
+/*
+ * Round041: CI-only negative witness for the PRODUCT DM mapping/sector boundary.
+ * swapz_map() consumes the BIO sector as a target-local page index, whereas
+ * ti->begin/ti->len delimit the table interval and the original MM bdev's
+ * nonlinear physical sector belongs to an unrelated namespace. This probe
+ * explicitly interprets its test BIO's sector as table-absolute; unlike a
+ * genuine DM ->map callback it has NO core-owned target/table SRCU lease.
+ *
+ * All pointers are caller-owned, live through this ordered-owner call only.
+ * No callback keeps them, no map is copied back or modified. The synthetic
+ * observed epochs/bdev cookies are NOT original MM or DM-issued credentials.
+ */
+#if defined(SWAPZ_ROUND041_DM_TARGET_INTERVAL_MAP_NONAUTHORITY_TEST) && \
+    defined(SWAPZ_ROUND040_DM_SAME_SLOT_REISSUE_CONCURRENCY_TEST) && \
+    defined(SWAPZ_ROUND039_DM_FAKE_CHAIN_WRITE_GC_READ_TEST) && \
+    defined(SWAPZ_ROUND038_DM_ASYNC_READ_GC_TEST) && \
+    defined(SWAPZ_ROUND037_DM_ASYNC_LOWER_LIFETIME_TEST) && \
+    defined(SWAPZ_ROUND036_DM_TRANSACTION_PHASE_TEST) && \
+    defined(SWAPZ_ROUND035_DM_LZ4_LOWER_ROUNDTRIP_TEST) && \
+    defined(SWAPZ_ROUND034_DM_SOURCE_SLOT_AUTHORITY_TEST) && \
+    defined(SWAPZ_ROUND033_DM_ORIGINAL_BIO_GPL_LINK_TEST) && \
+    defined(SWAPZ_ROUND032_DM_LZ4_VIEW_VALIDATE_TEST) && \
+    defined(SWAPZ_ROUND031_DM_LZ4_SIDECAR_TEST) && \
+    defined(SWAPZ_ROUND030_DM_COMPRESSED_COMMIT_TEST) && \
+    defined(SWAPZ_ROUND028_DM_OWNED_READBACK_TEST) && \
+    defined(SWAPZ_ROUND024_DM_IMPORT_KBUILD_PROBE) && \
+    defined(SWAPZ_ROUND032_BIO_COPY_VIEW_CI_ONLY) && \
+    defined(SWAPZ_ROUND031_MM_BIO_SOURCE) && \
+    defined(SWAPZ_ROUND030_EVICTION_SNAPSHOT_SOURCE) && \
+    defined(SWAPZ_ROUND028_SLOT_EPOCH_SOURCE) && \
+    defined(SWAPZ_ROUND025_SIDEBAND_CI_ONLY)
+/* ROUND041_DM_TARGET_INTERVAL_EXACT_START */
+#define SWAPZ_ROUND041_SOURCE_MAPPED_AUTHENTICATED 0U
+
+struct swapz_round041_dm_target_claim {
+	struct swapz_round032_dm_owned_view_v1 source;
+	swapz_u64 original_area_cookie;
+	swapz_u64 original_bdev_cookie;
+	swapz_u64 original_physical_sector;
+	swapz_u64 dm_device_cookie;
+	swapz_u64 table_epoch;
+	swapz_u64 lifetime_epoch;
+	swapz_u64 callback_ticket;
+	swapz_u64 target_begin;
+	swapz_u64 target_length;
+	swapz_u64 relative_sector;
+	swapz_u64 expected_lower_sector;
+	swapz_u32 logical_page;
+	swapz_u32 map_generation;
+	swapz_u32 gc_destination;
+	swapz_u32 extent_start_block;
+	swapz_u32 extent_sequence;
+	unsigned long target_identity;
+	unsigned long private_identity;
+};
+
+struct swapz_round041_dm_target_observed {
+	swapz_u64 original_area_cookie;
+	swapz_u64 original_bdev_cookie;
+	swapz_u64 original_physical_sector;
+	swapz_u64 dm_device_cookie;
+	swapz_u64 table_epoch;
+	swapz_u64 lifetime_epoch;
+	swapz_u64 callback_ticket;
+};
+
+/*
+ * A positive preflight is INTENTIONALLY IMPOSSIBLE: even all equal synthetic
+ * observations do not pin the original slot allocation or the DM table/dtr.
+ * Never return a current target pointer, map owner, ACK or I/O authorization.
+ */
+static __used noinline int swapz_round041_dm_target_interval_refuse(
+		const struct swapz_dm *ctx, const struct dm_target *target,
+		const struct bio *upper_bio,
+		const struct swapz_round038_dm_read_record *record,
+		const struct swapz_round032_dm_owned_view_v1 *current_source,
+		const struct swapz_round041_dm_target_claim *claim,
+		const struct swapz_round041_dm_target_observed *observed)
+{
+	const struct swapz_map *current_map;
+	swp_entry_t original_slot;
+	swapz_u64 absolute_sector, relative_sector, lower_sector;
+	swapz_u64 sector_max = ~(swapz_u64)0;
+	swapz_u32 logical_page, extent_blocks;
+	
+	if (!ctx || !target || !upper_bio || !record ||
+	    !current_source || !claim || !observed)
+		return -EINVAL;
+	lockdep_assert_held(&ctx->ordered_owner);
+	/* No borrowed ctx/ti pointer may be used after dtr or table replacement. */
+	if (ctx->target != target || target->private != ctx ||
+	    claim->target_identity != (unsigned long)target ||
+	    claim->private_identity != (unsigned long)ctx ||
+	    !ctx->accepting || smp_load_acquire(&ctx->failed) ||
+	    ctx->gc_recovery.active || !ctx->authority.maps ||
+	    ctx->authority.maps != ctx->maps)
+		return -ESTALE;
+	if (!claim->table_epoch || !claim->lifetime_epoch ||
+	    claim->table_epoch != observed->table_epoch ||
+	    claim->lifetime_epoch != observed->lifetime_epoch ||
+	    !claim->dm_device_cookie ||
+	    claim->dm_device_cookie != observed->dm_device_cookie ||
+	    !claim->callback_ticket ||
+	    claim->callback_ticket != observed->callback_ticket)
+		return -ESTALE;
+	if (!claim->original_area_cookie || !claim->original_bdev_cookie ||
+	    !claim->original_physical_sector ||
+	    claim->original_area_cookie != observed->original_area_cookie ||
+	    claim->original_bdev_cookie != observed->original_bdev_cookie ||
+	    claim->original_physical_sector != observed->original_physical_sector)
+		return -ESTALE;
+	original_slot.val = current_source->source_swap_entry;
+	if (!original_slot.val || swp_type(original_slot) >= MAX_SWAPFILES ||
+	    !swp_offset(original_slot) ||
+	    swp_entry(swp_type(original_slot), swp_offset(original_slot)).val !=
+		    original_slot.val ||
+	    !swapz_round040_dm_same_source(&claim->source, current_source) ||
+	    !swapz_round040_dm_same_source(&record->source, current_source))
+		return -ESTALE;
+	/* The full ORIGINAL 4096-byte upper BIO spans exactly 8 sectors.
+	 * Neither swp_entry_t.val nor source physical sector is that index.
+	 */
+	if (upper_bio->bi_iter.bi_size != SWAPZ_BLOCK_BYTES ||
+	    bio_op(upper_bio) != REQ_OP_WRITE ||
+	    !(upper_bio->bi_opf & REQ_SWAP))
+		return -EINVAL;
+	absolute_sector = (swapz_u64)upper_bio->bi_iter.bi_sector;
+	if (!target->len || (swapz_u64)target->begin >
+		    sector_max - (swapz_u64)target->len ||
+	    absolute_sector > sector_max - SWAPZ_SECTORS)
+		return -ERANGE;
+	if (claim->target_begin != (swapz_u64)target->begin ||
+	    claim->target_length != (swapz_u64)target->len ||
+	    absolute_sector < (swapz_u64)target->begin)
+		return -ESTALE;
+	relative_sector = absolute_sector - (swapz_u64)target->begin;
+	if (relative_sector % SWAPZ_SECTORS ||
+	    relative_sector >= (swapz_u64)target->len ||
+	    SWAPZ_SECTORS > (swapz_u64)target->len - relative_sector ||
+	    claim->relative_sector != relative_sector)
+		return -ERANGE;
+	if (relative_sector / SWAPZ_SECTORS > (swapz_u64)~(swapz_u32)0)
+		return -ERANGE;
+	logical_page = (swapz_u32)(relative_sector / SWAPZ_SECTORS);
+	if (!logical_page || logical_page != claim->logical_page ||
+	    logical_page >= ctx->authority.logical_pages ||
+	    record->logical_page != logical_page ||
+	    record->target_identity != (unsigned long)target ||
+	    record->target_length != target->len)
+		return -ESTALE;
+	current_map = &ctx->authority.maps[logical_page];
+	if (!current_map->valid || current_map->raw ||
+	    !current_map->generation ||
+	    current_map->generation != claim->map_generation ||
+	    ctx->authority.gc_destination != claim->gc_destination ||
+	    current_map->start_block != claim->extent_start_block ||
+	    record->fake_start_block != current_map->start_block ||
+	    record->fake_extent_sequence != claim->extent_sequence)
+		return -ESTALE;
+	extent_blocks = current_map->extent_blocks;
+	if ((extent_blocks != 1U && extent_blocks != 2U &&
+	     extent_blocks != 4U) ||
+	    current_map->start_block >= ctx->authority.physical_blocks ||
+	    extent_blocks > ctx->authority.physical_blocks -
+		    current_map->start_block ||
+	    record->extent_bytes != extent_blocks * SWAPZ_BLOCK_BYTES ||
+	    current_map->payload_length != current_source->compressed_length ||
+	    current_map->payload_crc32c != current_source->compressed_crc32c ||
+	    record->payload_offset > record->extent_bytes ||
+	    current_source->compressed_length >
+		    record->extent_bytes - record->payload_offset)
+		return -ESTALE;
+	/* Use the REAL product's postheader/bad-page physical conversion.
+	 * It is NOT the source swapfile sector or the target logical sector.
+	 */
+	lower_sector = (swapz_u64)swapz_backing_data_sector(
+		ctx, current_map->start_block);
+	if (lower_sector < SWAPZ_SECTORS ||
+	    lower_sector > sector_max -
+		    (swapz_u64)extent_blocks * SWAPZ_SECTORS ||
+	    lower_sector != claim->expected_lower_sector)
+		return -ERANGE;
+	/* Source swap-area ref/epoch and current DM table generation/target
+	 * SRCU/dtr ownership are NOT transferable through these values.
+	 */
+	return -EOPNOTSUPP;
+}
+/* ROUND041_DM_TARGET_INTERVAL_EXACT_END */
+#endif /* SWAPZ_ROUND041_DM_TARGET_INTERVAL_MAP_NONAUTHORITY_TEST */
+
 #endif /* SWAPZ_ROUND040_DM_SAME_SLOT_REISSUE_CONCURRENCY_TEST */
 #endif /* SWAPZ_ROUND039_DM_FAKE_CHAIN_WRITE_GC_READ_TEST */
 #endif /* SWAPZ_ROUND037_DM_ASYNC_LOWER_LIFETIME_TEST */
