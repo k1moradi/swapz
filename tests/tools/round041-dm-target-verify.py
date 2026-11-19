@@ -22,7 +22,7 @@ CODEC = ROOT / "src/kernel/codec.c"
 PREVIOUS = ROOT / "tests/tools/round040-dm-reissue-verify.py"
 FIXTURE = ROOT / "tests/runtime/native/fixtures/round041-dm-target-host.c"
 NEW_GUARD = "SWAPZ_ROUND041_DM_TARGET_INTERVAL_MAP_NONAUTHORITY_TEST"
-EXPECTED = "ROUND041_ACTUAL_DM_TARGET_INTERVAL_TABLE_GC_TEARDOWN_144_NO_AUTHORITY_PASS"
+EXPECTED = "ROUND041_ACTUAL_DM_TARGET_INTERVAL_TABLE_GC_TEARDOWN_150_NO_AUTHORITY_PASS"
 
 
 def replace_once(content: str, original: str, replacement: str) -> str:

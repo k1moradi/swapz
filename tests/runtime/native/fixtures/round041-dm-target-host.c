@@ -87,7 +87,11 @@ static void round041_target_negative_case(unsigned int extent_blocks,
 	maps[5].raw = false;
 	maps[5].generation = 77U;
 	maps[5].start_block = 6U;
-	maps[5].extent_blocks = (swapz_u8)extent_blocks;
+	/* The real swapz_map field is three bits wide: dynamic cast still
+	 * warns under GCC -Wconversion. Only these three legal values exist.
+	 */
+	maps[5].extent_blocks = extent_blocks == 1U ? 1U :
+		(extent_blocks == 2U ? 2U : 4U);
 	maps[5].payload_length = (swapz_u16)compressed_length;
 	maps[5].payload_crc32c = source.compressed_crc32c;
 	memset(fake_lower, 0, 32U * SWAPZ_BLOCK_BYTES);
@@ -135,8 +139,8 @@ static void round041_target_negative_case(unsigned int extent_blocks,
 	observed.lifetime_epoch = claim.lifetime_epoch;
 	observed.callback_ticket = claim.callback_ticket;
 
-	/* 48 distinct deterministic target/domain/ABA/GC/teardown faults
-	 * per legal fake extent size: 3 * 48 = 144 source-executed negatives.
+	/* 50 distinct deterministic target/domain/ABA/GC/teardown faults
+	 * per legal fake extent size: 3 * 50 = 150 source-executed negatives.
 	 */
 	switch (fault) {
 	case 0U: break; /* even fully matching synthetic fields: NO AUTH */
@@ -209,6 +213,13 @@ static void round041_target_negative_case(unsigned int extent_blocks,
 		       -EBADMSG);
 		swapz_round038_dm_read_scrub(verifier);
 		break;
+	case 48U: /* stale lower-callback ticket is not a current token */
+		observed.callback_ticket++;
+		break;
+	case 49U: /* A->B->A identical ticket/target pointer ABA, new epoch */
+		observed.callback_ticket = claim.callback_ticket;
+		observed.lifetime_epoch += 3U;
+		break;
 	default: assert(0);
 	}
 
@@ -250,8 +261,8 @@ int main(void)
 
 	assert(round040_fixture_main() == 0);
 	for (extent_blocks = 1U; extent_blocks <= 4U; extent_blocks *= 2U)
-		for (fault = 0U; fault < 48U; ++fault)
+		for (fault = 0U; fault < 50U; ++fault)
 			round041_target_negative_case(extent_blocks, fault);
-	puts("ROUND041_ACTUAL_DM_TARGET_INTERVAL_TABLE_GC_TEARDOWN_144_NO_AUTHORITY_PASS");
+	puts("ROUND041_ACTUAL_DM_TARGET_INTERVAL_TABLE_GC_TEARDOWN_150_NO_AUTHORITY_PASS");
 	return 0;
 }
