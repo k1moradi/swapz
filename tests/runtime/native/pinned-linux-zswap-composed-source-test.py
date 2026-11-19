@@ -679,5 +679,110 @@ class OriginalMMAndBIOComposer(unittest.TestCase):
                              label="round040-original-lease", libraries=())
 
 
+
+    def test_round041_original_sector_three_domains_and_scoped_area_ref(self):
+        source = stage.ROUND041_ORIGINAL_SECTOR_DOMAIN_C
+        self.assertEqual(stage.ROUND041_ORIGINAL_SECTOR_DOMAIN_MACRO,
+                         "SWAPZ_ROUND041_ORIGINAL_SECTOR_TO_DM_NONAUTHORITY_TEST")
+        for mandatory_guard in (
+            "SWAPZ_ROUND040_ORIGINAL_ASYNC_SLOT_LEASE_NEGATIVE_TEST",
+            "SWAPZ_ROUND038_ORIGINAL_STORE_PROVENANCE_TEST",
+            "SWAPZ_ROUND037_ORIGINAL_MM_LIFETIME_OWNER_TEST",
+            "SWAPZ_ROUND028_SLOT_EPOCH_SOURCE",
+            "IS_ENABLED(CONFIG_KUNIT)",
+        ):
+            self.assertIn(mandatory_guard, source)
+        for actual_original_c in (
+            "swapz_round041_original_mm_sector_domain_probe(",
+            "swapz_round041_sector_domain_refuse(",
+            "folio_swap_entry(folio, 0)",
+            "swp_type(original_slot)",
+            "swp_offset(original_slot)",
+            "swapz_round028_slot_epoch(original_slot)",
+            "get_swap_device(original_slot)",
+            "put_swap_device(active_area)",
+            "active_area != ctx->sis",
+            "active_area->bdev",
+            "swap_folio_sector(folio)",
+            "source_bio->bi_iter.bi_sector",
+            "source_bio->bi_vcnt",
+            "bio_op(source_bio) == REQ_OP_WRITE",
+            "source_bio->bi_opf & REQ_SWAP",
+            "swapz_round035_bio_owner_matches(",
+            "maximum_sector - evidence->dm_target_length",
+            "target_end - sectors_per_page",
+            "original_backing_sector",
+            "source_slot_offset",
+            "claimed_dm_relative_sector",
+            "current_dm_gc_ref_held",
+            "return -EOPNOTSUPP;",
+            "kunit_test_suite(swapz_round041_sector_domain_suite);",
+            '"swapz_round041_original_sector_domain_no_authority"',
+        ):
+            self.assertIn(actual_original_c, source)
+        for case in (
+            "nonlinear_swapfile_sector", "same_numeric_different_bdev_target",
+            "typed_slot_swapoff_area_aba", "single_bvec_interval_overflow",
+            "wrong_partition_gc_teardown",
+        ):
+            self.assertEqual(
+                source.count("KUNIT_CASE(swapz_round041_" + case + "_kunit)"),
+                1)
+        no_comments = re.sub(r"/\*[\s\S]*?\*/", "", source)
+        for forbidden in (
+            "EXPORT_SYMBOL", "bio_endio(", "submit_bio(", "swapz_map(",
+            "SOURCE_MAPPED_AUTHENTICATED=1",
+        ):
+            self.assertNotIn(forbidden, no_comments)
+        composer = Path(STAGER).read_text(encoding="utf-8")
+        self.assertIn("apply_round041_original_sector_domain(path, changed)",
+                      composer)
+        self.assertIn(
+            "ROUND040_ORIGINAL_ASYNC_LEASE_HOOK + "
+            "ROUND041_ORIGINAL_SECTOR_DOMAIN_HOOK", composer)
+        self.assertIn("swapz_round041_original_mm_sector_domain_probe(",
+                      stage.ROUND041_ORIGINAL_SECTOR_DOMAIN_HOOK)
+        if os.environ.get("ROUND031_PINNED_LINUX"):
+            original_root = Path(os.environ["ROUND031_PINNED_LINUX"])
+            original_page_io = (original_root / "mm/page_io.c").read_text(
+                encoding="utf-8")
+            original_swapfile = (original_root / "mm/swapfile.c").read_text(
+                encoding="utf-8")
+            for source_anchor in (
+                "folio_unlock(folio);", "REQ_OP_WRITE | REQ_SWAP",
+                "bio->bi_iter.bi_size = sio->len",
+                "swap_folio_sector(bio_first_folio_all(bio))",
+                "bio->bi_end_io = end_swap_bio_write;",
+                "submit_bio(bio);", "bio_uninit(bio);",
+            ):
+                self.assertIn(source_anchor, original_page_io)
+            for extent_anchor in (
+                "sector_t swap_folio_sector(struct folio *folio)",
+                "offset = swp_offset(folio->swap);",
+                "se = offset_to_swap_extent(sis, offset);",
+                "sector = se->start_block + (offset - se->start_page);",
+                "return sector << (PAGE_SHIFT - 9);",
+                "percpu_ref_tryget_live(&si->users)",
+                "percpu_ref_kill(&p->users)",
+            ):
+                self.assertIn(extent_anchor, original_swapfile)
+
+    def test_round041_original_sector_exact_c_gcc_clang_asan_ubsan(self):
+        # Host tests compile EXACT generated original mm/page_io.c helper C,
+        # not an alternate implementation of sector-domain validation.
+        source = stage.ROUND041_ORIGINAL_SECTOR_DOMAIN_C
+        start = "struct swapz_round041_sector_domain_evidence {"
+        end = "/* ROUND041_ORIGINAL_SECTOR_DOMAIN_PURE_C_END */"
+        self.assertEqual(source.count(start), 1)
+        self.assertEqual(source.count(end), 1)
+        extracted = start + source.split(start, 1)[1].split(end, 1)[0]
+        template = (FIXTURES / "round041-original-sector-domain-host.c").read_text(
+            encoding="utf-8")
+        marker = "/* ROUND041_EXACT_ORIGINAL_SECTOR_DOMAIN_C */"
+        self.assertEqual(template.count(marker), 1)
+        self.compile_and_run(template.replace(marker, extracted, 1),
+                             label="round041-original-sector", libraries=())
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)

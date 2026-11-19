@@ -2866,6 +2866,471 @@ def apply_round040_original_async_lease(path: str, composed: str) -> str:
         ROUND037_MM_OWNER_HOOK + ROUND040_ORIGINAL_ASYNC_LEASE_HOOK,
         path, "round040-original-post-put-dispatch-hook")
 
+
+# Round041 original source backing/typed slot/nonlinear swapfile sector versus
+# UNKNOWN current downstream DM target logical interval. ORIGINAL C negative only.
+ROUND041_ORIGINAL_SECTOR_DOMAIN_MACRO = "SWAPZ_ROUND041_ORIGINAL_SECTOR_TO_DM_NONAUTHORITY_TEST"
+ROUND041_ORIGINAL_SECTOR_DOMAIN_C = r"""#if defined(SWAPZ_ROUND041_ORIGINAL_SECTOR_TO_DM_NONAUTHORITY_TEST) && \
+    defined(SWAPZ_ROUND040_ORIGINAL_ASYNC_SLOT_LEASE_NEGATIVE_TEST) && \
+    defined(SWAPZ_ROUND038_ORIGINAL_STORE_PROVENANCE_TEST) && \
+    defined(SWAPZ_ROUND037_ORIGINAL_MM_LIFETIME_OWNER_TEST) && \
+    defined(SWAPZ_ROUND036_ORIGINAL_ROUTE_LIFETIME_TEST) && \
+    defined(SWAPZ_ROUND035_ORIGINAL_MM_ROUTE_WITNESS_TEST) && \
+    defined(SWAPZ_ROUND034_ORIGINAL_V1_KUNIT_TEST) && \
+    defined(SWAPZ_ROUND032_BIO_COPY_VIEW_CI_ONLY) && \
+    defined(SWAPZ_ROUND031_MM_BIO_SOURCE) && \
+    defined(SWAPZ_ROUND030_EVICTION_SNAPSHOT_SOURCE) && \
+    defined(SWAPZ_ROUND028_SLOT_EPOCH_SOURCE) && \
+    defined(SWAPZ_ROUND025_SIDEBAND_CI_ONLY) && IS_ENABLED(CONFIG_KUNIT)
+/* ROUND041_ORIGINAL_SECTOR_DOMAIN_C_BEGIN */
+/*
+ * All source measurements are ORIGINAL MM-only, one synchronous area-users
+ * ref scope. A packed typed swap entry is not a sector. The original
+ * nonlinear swapfile sector is not a downstream DM-relative sector,
+ * DM target table identity, GC ownership or allocation-incarnation lease.
+ * No real DM target is available to the source-only diagnostic.
+ * The check must fail closed even for a fully fabricated positive witness.
+ */
+struct swapz_round041_sector_domain_evidence {
+	u64 source_swap_entry;
+	u64 candidate_swap_entry;
+	u64 source_slot_offset;
+	u64 candidate_slot_offset;
+	u64 source_slot_epoch;
+	u64 candidate_slot_epoch;
+	u64 source_area_generation;
+	u64 candidate_area_generation;
+	const void *source_area_identity;
+	const void *candidate_area_identity;
+	const void *source_bdev_identity;
+	const void *candidate_source_bdev_identity;
+	u64 original_backing_sector;
+	u64 original_bio_sector;
+	u64 candidate_original_backing_sector;
+	u64 dm_target_begin;
+	u64 dm_target_length;
+	u64 claimed_dm_relative_sector;
+	const void *current_dm_target_identity;
+	const void *claimed_dm_target_identity;
+	u64 current_dm_map_generation;
+	u64 claimed_dm_map_generation;
+	u64 current_dm_gc_generation;
+	u64 claimed_dm_gc_generation;
+	u32 original_upper_bio_bytes;
+	u32 original_upper_bvec_bytes;
+	u32 original_upper_bvec_offset;
+	u32 original_upper_bi_vcnt;
+	bool original_upper_req_swap_write;
+	bool genuine_source_bio_owner;
+	bool area_ref_released_before_submit;
+	bool current_allocation_incarnation_ref_held;
+	bool current_dm_target_ref_held;
+	bool current_dm_gc_ref_held;
+	bool target_tearing_down;
+};
+
+/* ROUND041_ORIGINAL_SECTOR_DOMAIN_PURE_C_BEGIN */
+static int swapz_round041_sector_domain_refuse(
+		const struct swapz_round041_sector_domain_evidence *evidence)
+{
+	/* Exact 4096-byte original upper page, 512-byte Linux BIO sectors. */
+	const u64 sectors_per_page = 4096U / 512U;
+	const u64 maximum_sector = (u64)-1;
+	u64 swap_offset_linear_sector;
+	u64 target_end;
+
+	if (!evidence)
+		return -EINVAL;
+	if (!evidence->source_swap_entry || !evidence->candidate_swap_entry ||
+	    evidence->source_swap_entry != evidence->candidate_swap_entry ||
+	    !evidence->source_slot_epoch || !evidence->candidate_slot_epoch ||
+	    evidence->source_slot_epoch != evidence->candidate_slot_epoch ||
+	    evidence->source_slot_offset != evidence->candidate_slot_offset)
+		return -ESTALE;
+	if (evidence->source_slot_offset > maximum_sector / sectors_per_page)
+		return -ERANGE;
+	/*
+	 * This checked calculation is intentionally NOT an actual physical
+	 * extent lookup: swap_folio_sector() uses original swap_extents,
+	 * where start_block + (offset - start_page) may be NONLINEAR.
+	 * It is never a DM target relative sector or an authority token.
+	 */
+	swap_offset_linear_sector =
+		evidence->source_slot_offset * sectors_per_page;
+	if (evidence->source_area_generation &&
+	    evidence->candidate_area_generation &&
+	    evidence->source_area_generation !=
+		    evidence->candidate_area_generation)
+		return -ESTALE;
+	if (!evidence->source_area_identity ||
+	    evidence->source_area_identity != evidence->candidate_area_identity ||
+	    !evidence->source_bdev_identity ||
+	    evidence->source_bdev_identity !=
+		    evidence->candidate_source_bdev_identity)
+		return -ESTALE;
+	if (!evidence->original_backing_sector ||
+	    (evidence->original_backing_sector & (sectors_per_page - 1U)) ||
+	    evidence->original_backing_sector >
+		    maximum_sector - sectors_per_page)
+		return -ERANGE;
+	if (evidence->original_backing_sector != evidence->original_bio_sector ||
+	    evidence->original_backing_sector !=
+		    evidence->candidate_original_backing_sector)
+		return -ESTALE;
+	/*
+	 * ORIGINAL upper single prepopulated bvec can have bi_vcnt == 0.
+	 * Its logical WRITE is still eight sectors of UNCOMPRESSED 4096.
+	 */
+	if (evidence->original_upper_bio_bytes != 4096U ||
+	    evidence->original_upper_bvec_bytes != 4096U ||
+	    evidence->original_upper_bvec_offset != 0U ||
+	    evidence->original_upper_bi_vcnt != 0U ||
+	    !evidence->original_upper_req_swap_write)
+		return -EOPNOTSUPP;
+	if (!evidence->genuine_source_bio_owner ||
+	    !evidence->area_ref_released_before_submit)
+		return -ESTALE;
+	/*
+	 * Original MM has NO real DM target reference or relative begin/len.
+	 * Even an original sector numerically EQUAL to a fake DM sector is
+	 * a comparison across unrelated address-space and lifetime domains.
+	 */
+	if (!evidence->current_dm_target_identity ||
+	    !evidence->claimed_dm_target_identity)
+		return -EOPNOTSUPP;
+	if (evidence->current_dm_target_identity !=
+	    evidence->claimed_dm_target_identity)
+		return -ESTALE;
+	if (!evidence->dm_target_length ||
+	    evidence->dm_target_begin >
+		    maximum_sector - evidence->dm_target_length)
+		return -ERANGE;
+	target_end = evidence->dm_target_begin + evidence->dm_target_length;
+	if (evidence->dm_target_length < sectors_per_page ||
+	    (evidence->claimed_dm_relative_sector &
+	     (sectors_per_page - 1U)) ||
+	    evidence->claimed_dm_relative_sector <
+		    evidence->dm_target_begin ||
+	    evidence->claimed_dm_relative_sector >
+		    target_end - sectors_per_page)
+		return -ERANGE;
+	if ((evidence->current_dm_map_generation &&
+	     evidence->claimed_dm_map_generation &&
+	     evidence->current_dm_map_generation !=
+		     evidence->claimed_dm_map_generation) ||
+	    (evidence->current_dm_gc_generation &&
+	     evidence->claimed_dm_gc_generation &&
+	     evidence->current_dm_gc_generation !=
+		     evidence->claimed_dm_gc_generation))
+		return -ESTALE;
+	if (evidence->target_tearing_down ||
+	    !evidence->current_allocation_incarnation_ref_held ||
+	    !evidence->current_dm_target_ref_held ||
+	    !evidence->current_dm_gc_ref_held ||
+	    !evidence->current_dm_map_generation ||
+	    !evidence->current_dm_gc_generation)
+		return -EOPNOTSUPP;
+	/*
+	 * A checked linear swap-offset sector, nonlinear original backing
+	 * sector and forged current DM target LBA CAN coincide numerically.
+	 * None is the same ownership domain. Never emit a positive lease.
+	 */
+	(void)swap_offset_linear_sector;
+	return -EOPNOTSUPP;
+}
+/* ROUND041_ORIGINAL_SECTOR_DOMAIN_PURE_C_END */
+
+/*
+ * This is actual pristine-original mm/page_io.c WRITE dispatch, nested
+ * behind the prior 040 + older original CI guards. All area fields are
+ * read only WHILE a newly acquired real get_swap_device() users ref lives.
+ * On EVERY successful acquisition, put_swap_device() executes EXACTLY
+ * ONCE before the value-only negative check. No pointer dereference
+ * after put; no source swapentry->DM map or token is exported.
+ */
+static noinline int swapz_round041_original_mm_sector_domain_probe(
+		const struct swap_io_ctx *ctx, const struct bio *source_bio,
+		struct folio *folio)
+{
+	struct swapz_round041_sector_domain_evidence evidence = {};
+	struct swap_info_struct *active_area;
+	swp_entry_t original_slot;
+
+	if (!ctx || !ctx->sis || !source_bio || !folio ||
+	    !source_bio->bi_swapz_ci_sideband ||
+	    !folio_test_swapcache(folio) || !folio_test_writeback(folio) ||
+	    folio_test_locked(folio))
+		return -ESTALE;
+	original_slot = folio_swap_entry(folio, 0);
+	if (!original_slot.val || swp_type(original_slot) >= MAX_SWAPFILES)
+		return -ESTALE;
+	active_area = get_swap_device(original_slot);
+	if (IS_ERR_OR_NULL(active_area))
+		return -ESTALE;
+	if (active_area != ctx->sis || !active_area->bdev ||
+	    !source_bio->bi_io_vec ||
+	    !source_bio->bi_io_vec[0].bv_page)
+		goto put_area;
+
+	evidence.source_swap_entry = (u64)original_slot.val;
+	evidence.candidate_swap_entry =
+		(u64)ctx->swapz_round035_original_slot.val;
+	evidence.source_slot_offset = (u64)swp_offset(original_slot);
+	evidence.candidate_slot_offset =
+		(u64)swp_offset(ctx->swapz_round035_original_slot);
+	evidence.source_slot_epoch =
+		swapz_round028_slot_epoch(original_slot);
+	evidence.candidate_slot_epoch =
+		ctx->swapz_round035_original_epoch;
+	evidence.source_area_identity = active_area;
+	evidence.candidate_area_identity = ctx->sis;
+	evidence.source_bdev_identity = active_area->bdev;
+	evidence.candidate_source_bdev_identity = source_bio->bi_bdev;
+	evidence.original_backing_sector = (u64)swap_folio_sector(folio);
+	evidence.original_bio_sector = (u64)source_bio->bi_iter.bi_sector;
+	evidence.candidate_original_backing_sector =
+		(u64)source_bio->bi_iter.bi_sector;
+	evidence.original_upper_bio_bytes = source_bio->bi_iter.bi_size;
+	evidence.original_upper_bvec_bytes =
+		source_bio->bi_io_vec[0].bv_len;
+	evidence.original_upper_bvec_offset =
+		source_bio->bi_io_vec[0].bv_offset;
+	evidence.original_upper_bi_vcnt = source_bio->bi_vcnt;
+	evidence.original_upper_req_swap_write =
+		bio_op(source_bio) == REQ_OP_WRITE &&
+		(source_bio->bi_opf & REQ_SWAP) != 0U;
+	evidence.genuine_source_bio_owner =
+		swapz_round035_bio_owner_matches(
+			source_bio, (u64)original_slot.val,
+			evidence.source_slot_epoch);
+put_area:
+	/* No original swap_info_struct dereference after this real put. */
+	put_swap_device(active_area);
+	if (!evidence.source_area_identity)
+		return -ESTALE;
+	evidence.area_ref_released_before_submit = true;
+	/* Real original MM C has NO current DM target begin/len/GC lease:
+	 * all fake target identity/generation/refs stay ZERO.
+	 */
+	return swapz_round041_sector_domain_refuse(&evidence);
+}
+
+/* All mock source+DM area values in KUnit are SYNTHETIC; no live target. */
+static void swapz_round041_sector_domain_fixture(
+		struct swapz_round041_sector_domain_evidence *evidence)
+{
+	memset(evidence, 0, sizeof(*evidence));
+	evidence->source_swap_entry = (u64)swp_entry(1U, 37U).val;
+	evidence->candidate_swap_entry = evidence->source_swap_entry;
+	evidence->source_slot_offset = 37U;
+	evidence->candidate_slot_offset = 37U;
+	evidence->source_slot_epoch = 17U;
+	evidence->candidate_slot_epoch = 17U;
+	evidence->source_area_generation = 3U; /* MOCK only. */
+	evidence->candidate_area_generation = 3U;
+	evidence->source_area_identity = evidence;
+	evidence->candidate_area_identity = evidence;
+	evidence->source_bdev_identity = &evidence->original_backing_sector;
+	evidence->candidate_source_bdev_identity =
+		&evidence->original_backing_sector;
+	evidence->original_backing_sector = 4096U;
+	evidence->original_bio_sector = 4096U;
+	evidence->candidate_original_backing_sector = 4096U;
+	evidence->dm_target_begin = 128U;
+	evidence->dm_target_length = 512U;
+	evidence->claimed_dm_relative_sector = 296U;
+	evidence->current_dm_target_identity = &evidence->dm_target_begin;
+	evidence->claimed_dm_target_identity = &evidence->dm_target_begin;
+	evidence->current_dm_map_generation = 4U;
+	evidence->claimed_dm_map_generation = 4U;
+	evidence->current_dm_gc_generation = 5U;
+	evidence->claimed_dm_gc_generation = 5U;
+	evidence->original_upper_bio_bytes = 4096U;
+	evidence->original_upper_bvec_bytes = 4096U;
+	evidence->original_upper_req_swap_write = true;
+	evidence->genuine_source_bio_owner = true; /* Synthetic claim. */
+	evidence->area_ref_released_before_submit = true;
+	evidence->current_allocation_incarnation_ref_held = true; /* Forged. */
+	evidence->current_dm_target_ref_held = true; /* Forged. */
+	evidence->current_dm_gc_ref_held = true; /* Forged. */
+}
+
+static void swapz_round041_nonlinear_swapfile_sector_kunit(struct kunit *test)
+{
+	struct swapz_round041_sector_domain_evidence evidence;
+
+	swapz_round041_sector_domain_fixture(&evidence);
+	KUNIT_EXPECT_NE(test, evidence.original_backing_sector,
+			evidence.source_slot_offset * 8U);
+	KUNIT_EXPECT_NE(test, evidence.original_backing_sector,
+			evidence.claimed_dm_relative_sector);
+	KUNIT_EXPECT_EQ(test, swapz_round041_sector_domain_refuse(&evidence),
+			-EOPNOTSUPP);
+	evidence.original_bio_sector = evidence.source_slot_offset * 8U;
+	KUNIT_EXPECT_EQ(test, swapz_round041_sector_domain_refuse(&evidence),
+			-ESTALE);
+}
+
+static void swapz_round041_same_numeric_different_bdev_target_kunit(
+		struct kunit *test)
+{
+	struct swapz_round041_sector_domain_evidence evidence;
+
+	swapz_round041_sector_domain_fixture(&evidence);
+	evidence.dm_target_begin = 4000U;
+	evidence.dm_target_length = 512U;
+	evidence.claimed_dm_relative_sector = 4096U;
+	KUNIT_EXPECT_EQ(test, swapz_round041_sector_domain_refuse(&evidence),
+			-EOPNOTSUPP); /* Same number NEVER grants authority. */
+	evidence.candidate_source_bdev_identity = test;
+	KUNIT_EXPECT_EQ(test, swapz_round041_sector_domain_refuse(&evidence),
+			-ESTALE);
+	evidence.candidate_source_bdev_identity = evidence.source_bdev_identity;
+	evidence.claimed_dm_target_identity = test;
+	KUNIT_EXPECT_EQ(test, swapz_round041_sector_domain_refuse(&evidence),
+			-ESTALE);
+}
+
+static void swapz_round041_typed_slot_swapoff_area_aba_kunit(struct kunit *test)
+{
+	struct swapz_round041_sector_domain_evidence evidence;
+
+	swapz_round041_sector_domain_fixture(&evidence);
+	evidence.candidate_swap_entry = (u64)swp_entry(2U, 37U).val;
+	KUNIT_EXPECT_EQ(test, swapz_round041_sector_domain_refuse(&evidence),
+			-ESTALE);
+	evidence.candidate_swap_entry = evidence.source_swap_entry;
+	evidence.candidate_slot_epoch++;
+	KUNIT_EXPECT_EQ(test, swapz_round041_sector_domain_refuse(&evidence),
+			-ESTALE);
+	evidence.candidate_slot_epoch = evidence.source_slot_epoch;
+	evidence.candidate_area_generation++;
+	KUNIT_EXPECT_EQ(test, swapz_round041_sector_domain_refuse(&evidence),
+			-ESTALE);
+	evidence.candidate_area_generation = evidence.source_area_generation;
+	evidence.area_ref_released_before_submit = false;
+	KUNIT_EXPECT_EQ(test, swapz_round041_sector_domain_refuse(&evidence),
+			-ESTALE);
+}
+
+static void swapz_round041_single_bvec_interval_overflow_kunit(struct kunit *test)
+{
+	struct swapz_round041_sector_domain_evidence evidence;
+
+	swapz_round041_sector_domain_fixture(&evidence);
+	evidence.dm_target_begin = 256U;
+	evidence.dm_target_length = 8U;
+	evidence.claimed_dm_relative_sector = 256U; /* End-exclusive 264. */
+	/* bi_vcnt==0 is VALID for original prepopulated single bvec. */
+	KUNIT_EXPECT_EQ(test, evidence.original_upper_bi_vcnt, 0U);
+	KUNIT_EXPECT_EQ(test, swapz_round041_sector_domain_refuse(&evidence),
+			-EOPNOTSUPP);
+	evidence.dm_target_length = 7U;
+	KUNIT_EXPECT_EQ(test, swapz_round041_sector_domain_refuse(&evidence),
+			-ERANGE);
+	evidence.dm_target_length = 8U;
+	evidence.dm_target_begin = (u64)-4;
+	KUNIT_EXPECT_EQ(test, swapz_round041_sector_domain_refuse(&evidence),
+			-ERANGE);
+	evidence.dm_target_begin = 256U;
+	evidence.claimed_dm_relative_sector = (u64)-8;
+	KUNIT_EXPECT_EQ(test, swapz_round041_sector_domain_refuse(&evidence),
+			-ERANGE);
+	evidence.claimed_dm_relative_sector = 256U;
+	evidence.original_upper_bvec_bytes = 2048U;
+	KUNIT_EXPECT_EQ(test, swapz_round041_sector_domain_refuse(&evidence),
+			-EOPNOTSUPP);
+	evidence.original_upper_bvec_bytes = 4096U;
+	evidence.source_slot_offset = (u64)-1;
+	evidence.candidate_slot_offset = (u64)-1;
+	KUNIT_EXPECT_EQ(test, swapz_round041_sector_domain_refuse(&evidence),
+			-ERANGE);
+}
+
+static void swapz_round041_wrong_partition_gc_teardown_kunit(struct kunit *test)
+{
+	struct swapz_round041_sector_domain_evidence evidence;
+	struct swapz_round041_sector_domain_evidence unchanged;
+
+	swapz_round041_sector_domain_fixture(&evidence);
+	evidence.candidate_area_identity = test;
+	KUNIT_EXPECT_EQ(test, swapz_round041_sector_domain_refuse(&evidence),
+			-ESTALE);
+	evidence.candidate_area_identity = evidence.source_area_identity;
+	evidence.claimed_dm_gc_generation++;
+	KUNIT_EXPECT_EQ(test, swapz_round041_sector_domain_refuse(&evidence),
+			-ESTALE);
+	evidence.claimed_dm_gc_generation = evidence.current_dm_gc_generation;
+	evidence.target_tearing_down = true;
+	KUNIT_EXPECT_EQ(test, swapz_round041_sector_domain_refuse(&evidence),
+			-EOPNOTSUPP);
+	evidence.target_tearing_down = false;
+	evidence.current_dm_target_identity = NULL; /* Real original source. */
+	KUNIT_EXPECT_EQ(test, swapz_round041_sector_domain_refuse(&evidence),
+			-EOPNOTSUPP);
+	evidence.current_dm_target_identity = &evidence.dm_target_begin;
+	unchanged = evidence;
+	KUNIT_EXPECT_EQ(test, swapz_round041_sector_domain_refuse(&evidence),
+			-EOPNOTSUPP);
+	KUNIT_EXPECT_EQ(test, memcmp(&evidence, &unchanged,
+				    sizeof(evidence)), 0);
+	KUNIT_EXPECT_EQ(test, swapz_round041_sector_domain_refuse(NULL),
+			-EINVAL);
+}
+
+static struct kunit_case swapz_round041_sector_domain_cases[] = {
+	KUNIT_CASE(swapz_round041_nonlinear_swapfile_sector_kunit),
+	KUNIT_CASE(swapz_round041_same_numeric_different_bdev_target_kunit),
+	KUNIT_CASE(swapz_round041_typed_slot_swapoff_area_aba_kunit),
+	KUNIT_CASE(swapz_round041_single_bvec_interval_overflow_kunit),
+	KUNIT_CASE(swapz_round041_wrong_partition_gc_teardown_kunit),
+	{}
+};
+
+static struct kunit_suite swapz_round041_sector_domain_suite = {
+	.name = "swapz_round041_original_sector_domain_no_authority",
+	.test_cases = swapz_round041_sector_domain_cases,
+};
+kunit_test_suite(swapz_round041_sector_domain_suite);
+/* ROUND041_ORIGINAL_SECTOR_DOMAIN_C_END */
+#endif /* Guarded ORIGINAL source 041 sector/target negative, NO LIVE AUTH */
+"""
+ROUND041_ORIGINAL_SECTOR_DOMAIN_HOOK = r"""#if defined(SWAPZ_ROUND041_ORIGINAL_SECTOR_TO_DM_NONAUTHORITY_TEST) && \
+    defined(SWAPZ_ROUND040_ORIGINAL_ASYNC_SLOT_LEASE_NEGATIVE_TEST) && \
+    defined(SWAPZ_ROUND038_ORIGINAL_STORE_PROVENANCE_TEST) && \
+    defined(SWAPZ_ROUND037_ORIGINAL_MM_LIFETIME_OWNER_TEST) && \
+    defined(SWAPZ_ROUND036_ORIGINAL_ROUTE_LIFETIME_TEST) && \
+    defined(SWAPZ_ROUND035_ORIGINAL_MM_ROUTE_WITNESS_TEST) && \
+    defined(SWAPZ_ROUND034_ORIGINAL_V1_KUNIT_TEST) && \
+    defined(SWAPZ_ROUND032_BIO_COPY_VIEW_CI_ONLY) && \
+    defined(SWAPZ_ROUND031_MM_BIO_SOURCE) && \
+    defined(SWAPZ_ROUND030_EVICTION_SNAPSHOT_SOURCE) && \
+    defined(SWAPZ_ROUND028_SLOT_EPOCH_SOURCE) && \
+    defined(SWAPZ_ROUND025_SIDEBAND_CI_ONLY) && IS_ENABLED(CONFIG_KUNIT)
+	/* Previous Round037+040 original scoped area refs were already put.
+	 * This private source-only probe also releases its OWN real area ref
+	 * before any asynchronous submission, without source->DM authority.
+	 */
+	if (bio->bi_swapz_ci_sideband)
+		(void)swapz_round041_original_mm_sector_domain_probe(
+			ctx, bio, bio_first_folio_all(bio));
+#endif
+"""
+
+
+def apply_round041_original_sector_domain(path: str, composed: str) -> str:
+    """Introduce actual original page_io.c guarded source-sector negative tests."""
+    if path != "mm/page_io.c":
+        return composed
+    handler = "static void swap_bdev_submit_write(struct swap_io_ctx *ctx)\n"
+    composed = replace_once(
+        composed, handler, ROUND041_ORIGINAL_SECTOR_DOMAIN_C + "\n" + handler,
+        path, "round041-original-source-sector-no-dm-authority")
+    return replace_once(
+        composed, ROUND040_ORIGINAL_ASYNC_LEASE_HOOK,
+        ROUND040_ORIGINAL_ASYNC_LEASE_HOOK + ROUND041_ORIGINAL_SECTOR_DOMAIN_HOOK,
+        path, "round041-original-after-area-put-dispatch-hook")
+
 def replace_once(text: str, before: str, after: str, path: str, label: str) -> str:
     if not before or before == after or text.count(before) != 1 or (
         after in text and after not in before
@@ -3082,6 +3547,8 @@ def compose_postimage(path: str, original_bytes: bytes, *,
         changed = apply_round038_original_store(path, changed)
     if with_kunit:
         changed = apply_round040_original_async_lease(path, changed)
+    if with_kunit:
+        changed = apply_round041_original_sector_domain(path, changed)
     if path == "mm/zswap.c":
         for required in (
             "swapz_round028_slot_epoch(swpentry)",
