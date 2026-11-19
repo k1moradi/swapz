@@ -7109,7 +7109,7 @@ static __used noinline int swapz_round041_dm_target_interval_refuse(
 	swapz_u64 absolute_sector, relative_sector, lower_sector;
 	swapz_u64 sector_max = ~(swapz_u64)0;
 	swapz_u32 logical_page, extent_blocks;
-	
+
 	if (!ctx || !target || !upper_bio || !record ||
 	    !current_source || !claim || !observed)
 		return -EINVAL;
@@ -7137,7 +7137,14 @@ static __used noinline int swapz_round041_dm_target_interval_refuse(
 	    claim->original_physical_sector != observed->original_physical_sector)
 		return -ESTALE;
 	original_slot.val = current_source->source_swap_entry;
-	if (!original_slot.val || swp_type(original_slot) >= MAX_SWAPFILES ||
+	/* A syntactically matching original swap type+offset is insufficient:
+	 * the observed allocator incarnation and independently sealed STORE
+	 * identity must be nonzero even for this negative-only local witness.
+	 * Real source/DM lifetime authority still cannot cross this boundary.
+	 */
+	if (!current_source->source_slot_epoch ||
+	    !current_source->stored_entry_identity ||
+	    !original_slot.val || swp_type(original_slot) >= MAX_SWAPFILES ||
 	    !swp_offset(original_slot) ||
 	    swp_entry(swp_type(original_slot), swp_offset(original_slot)).val !=
 		    original_slot.val ||
