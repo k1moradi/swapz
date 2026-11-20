@@ -254,7 +254,23 @@ class ActualOriginalDmIngressTests(unittest.TestCase):
 
     def test_hostile_real_map_source_mutations_fail_closed(self) -> None:
         real_source = TARGET.read_text(encoding="utf-8")
-        validate_real_map_ingress(real_source)
+        round043_helper, _ = validate_real_map_ingress(real_source)
+        # These identical original source-sector tokens are valid in TWO
+        # separate default-undefined observers, not a whole-file collision.
+        round046_helper_begin = "/* ROUND046_DM_LIFETIME_HELPER_EXACT_START */"
+        round046_helper_end = "/* ROUND046_DM_LIFETIME_HELPER_EXACT_END */"
+        round046_call_begin = "/* ROUND046_DM_LIFETIME_MAP_CALLSITE_EXACT_START */"
+        round046_call_end = "/* ROUND046_DM_LIFETIME_MAP_CALLSITE_EXACT_END */"
+        round046_helper = extract_unique(
+            real_source, round046_helper_begin, round046_helper_end)
+        round046_callsite = extract_unique(
+            real_source, round046_call_begin, round046_call_end)
+        relative_sector_anchor = (
+            "target_relative_sector = upper_bio->bi_iter.bi_sector")
+        self.assertGreaterEqual(real_source.count(relative_sector_anchor), 2)
+        self.assertEqual(round043_helper.count(relative_sector_anchor), 1)
+        self.assertEqual(round046_helper.count(relative_sector_anchor), 1)
+        checked_hostile_mutants = 0
         for original, hostile in (
             ("kmalloc(SWAPZ_MAX_COMPRESSED, GFP_ATOMIC)",
              "kmalloc(SWAPZ_MAX_COMPRESSED, GFP_KERNEL)"),
@@ -271,10 +287,40 @@ class ActualOriginalDmIngressTests(unittest.TestCase):
             (CALL_END, "swapz_map(ti, bio);\n" + CALL_END),
         ):
             with self.subTest(mutant=hostile):
-                self.assertEqual(real_source.count(original), 1)
-                mutant = real_source.replace(original, hostile, 1)
+                # Original Round043 helper/callsite markers, not the whole
+                # production file: the later Round046 helper also contains
+                # a legitimate copy of the target-relative sector token.
+                region_begin, region_end = (
+                    (CALL_BEGIN, CALL_END)
+                    if original in (
+                        "(void)swapz_round043_dm_observe_real_map_v1(ti, ctx, bio);",
+                        CALL_END)
+                    else (HELPER_BEGIN, HELPER_END))
+                original_region = (
+                    region_begin +
+                    extract_unique(real_source, region_begin, region_end) +
+                    region_end)
+                self.assertEqual(original_region.count(original), 1)
+                mutated_region = original_region.replace(original, hostile, 1)
+                self.assertNotEqual(mutated_region, original_region)
+                mutant = replace_unique(real_source, original_region,
+                                        mutated_region)
+                self.assertNotEqual(mutant, real_source)
+                self.assertNotEqual(
+                    extract_unique(mutant, region_begin, region_end),
+                    extract_unique(real_source, region_begin, region_end))
+                # The complete separate Round046 actual C witness must be
+                # byte-identical for all seven original hostile mutants.
+                self.assertEqual(
+                    extract_unique(mutant, round046_helper_begin,
+                                   round046_helper_end), round046_helper)
+                self.assertEqual(
+                    extract_unique(mutant, round046_call_begin,
+                                   round046_call_end), round046_callsite)
                 with self.assertRaisesRegex(AssertionError, "Round043"):
                     validate_real_map_ingress(mutant)
+                checked_hostile_mutants += 1
+        self.assertEqual(checked_hostile_mutants, 7)
         print("ROUND043_REAL_MAP_CALLSITE_HOSTILE_7_MUTANTS_REJECTED_PASS")
 
     def test_genuine_product_map_ingress_gcc_clang_asan_ubsan(self) -> None:
