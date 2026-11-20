@@ -56,8 +56,31 @@ def exact_production_c() -> str:
         raise AssertionError("unexpected real lower/map/upper side effects")
     if tail.count("#endif /* SWAPZ_ROUND033_DM_ORIGINAL_BIO_GPL_LINK_TEST */") != 1:
         raise AssertionError("original-only source guard incorrectly terminated")
-    if "swapz_ci_bio_snapshot_lz4_v1(" in tail:
+    # The original Round043 synchronous observer also calls this ORIGINAL
+    # GPL provider, under its own nested default-undefined source guards.
+    # Distinguish the two genuinely guarded call sites from an arbitrary
+    # unprotected third call rather than counting an original guarded call
+    # as a security regression.
+    round043_begin = "/* ROUND043_DM_REAL_MAP_INGRESS_EXACT_START */"
+    round043_end = "/* ROUND043_DM_REAL_MAP_INGRESS_EXACT_END */"
+    original_call = "swapz_ci_bio_snapshot_lz4_v1("
+    if tail.count(round043_begin) != 1 or tail.count(round043_end) != 1:
+        raise AssertionError("original guarded Round043 source delimiters drift")
+    before_round043, remaining = tail.split(round043_begin, 1)
+    round043_guarded, after_round043 = remaining.split(round043_end, 1)
+    if (original_call in before_round043 or original_call in after_round043
+            or round043_guarded.count(original_call) != 1):
         raise AssertionError("unprotected original GPL symbol")
+    nested = before_round043.rsplit(
+        "#if defined(SWAPZ_ROUND043_DM_REAL_MAP_INGRESS_OBSERVATION_TEST)", 1)
+    if len(nested) != 2 or "#endif" in nested[1]:
+        raise AssertionError("original Round043 GPL call not within its guard")
+    for guard in (
+            "SWAPZ_ROUND041_DM_TARGET_INTERVAL_MAP_NONAUTHORITY_TEST",
+            "SWAPZ_ROUND033_DM_ORIGINAL_BIO_GPL_LINK_TEST",
+            "SWAPZ_ROUND032_BIO_COPY_VIEW_CI_ONLY"):
+        if "defined(" + guard + ")" not in nested[1]:
+            raise AssertionError("original Round043 GPL nested guard missing " + guard)
     return extracted
 
 
@@ -97,7 +120,7 @@ class RealOriginalConsumerTests(unittest.TestCase):
         self.assertIn("return -EOPNOTSUPP;", source)
         self.assertNotIn("struct swapz_ci_owned_payload", source)
         self.assertEqual(TARGET.read_text(encoding="utf-8").count(
-            "swapz_ci_bio_snapshot_lz4_v1("), 1)
+            "swapz_ci_bio_snapshot_lz4_v1("), 2)
 
     def test_original_modpost_export_strict_negative_rows(self) -> None:
         valid = b"0x00000000\t" + SYMBOL + b"\tvmlinux\tEXPORT_SYMBOL_GPL\t\n"
