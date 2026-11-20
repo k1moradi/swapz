@@ -196,11 +196,37 @@ class OriginalSlotHostileSourceTests(unittest.TestCase):
             ("block/bio.c", "bio->bi_end_io(bio);", "/* lost callback */"),
             ("include/linux/swap.h", "percpu_ref_put(&si->users);", "/* lost area put */"),
         )
-        for number, (name, old, new) in enumerate(changes):
+        # Scope each hostile mutation to the exact genuine original C owner.
+        # Repeated tokens in other functions cannot make the control vacuous.
+        signatures = (
+            "static bool get_swap_device_info(struct swap_info_struct *si)",
+            "void __swap_cluster_free_entries(struct swap_info_struct *si,",
+            "static void swap_range_free(struct swap_info_struct *si,",
+            "int swap_dup_entry_direct(swp_entry_t entry)",
+            "sector_t swap_folio_sector(struct folio *folio)",
+            "SYSCALL_DEFINE1(swapoff,",
+            "static int zswap_writeback_entry(struct zswap_entry *entry,",
+            "static int zswap_writeback_entry(struct zswap_entry *entry,",
+            "static int zswap_writeback_entry(struct zswap_entry *entry,",
+            "static int zswap_writeback_entry(struct zswap_entry *entry,",
+            "static void zswap_entry_free(struct zswap_entry *entry)",
+            "void __swap_writeout(struct swap_io_ctx *ctx, struct folio *folio)",
+            "static void swap_bdev_submit_write(struct swap_io_ctx *ctx)",
+            "static void swap_bdev_submit_write(struct swap_io_ctx *ctx)",
+            "static void end_swap_bio_write(struct bio *bio)",
+            "static int __bio_clone(struct bio *bio, struct bio *bio_src, gfp_t gfp)",
+            "void bio_endio(struct bio *bio)",
+            None,  # Unique area put in CONFIG_SWAP header; CONFIG_SWAP=n has a stub.
+        )
+        self.assertEqual(len(changes), len(signatures))
+        for number, ((name, old, new), signature) in enumerate(zip(changes, signatures)):
             with self.subTest(mutant=number, file=name):
                 source = self.sources[name]
-                self.assertIn(old, source)
-                changed = source.replace(old, new, 1)
+                region = function_body(source, signature) if signature else source
+                self.assertEqual(region.count(old), 1,
+                                 "hostile token not unique inside original owner")
+                changed_region = region.replace(old, new, 1)
+                changed = source.replace(region, changed_region, 1)
                 self.assertNotEqual(changed, source, "hostile mutant was unchanged")
                 modified = dict(self.sources)
                 modified[name] = changed
