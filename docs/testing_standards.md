@@ -16301,3 +16301,92 @@ Original `swap_put_entries_direct(entry,nr)` requires an actually preowned lock-
 New rootless `tests/tools/round050-original-deferred-slot-source-audit.py` verifies **seven** actual pristine exact original upstream Git blobs including real private `mm/swap.h`, inherits complete Round047 18 and Round048 16 negative source controls, and adds **16** non-no-op function-scoped named ORIGINAL C hostile mutations against original `try_to_unuse`, `swapoff`, area live check, direct put, folio dup/put, original cache removal, zswap source area lifetime and real ordinary BIO end/writeback. It executes independently in pristine original source before composer in both original UML and x86 y/n original W=1/-Werror same pristine original KDIR GPL matched real DM; preserve existing actual **57/57** original C KUnit JSON+KTAP, default-off original guarded source and inherited strict GCC/Clang sanitizer real product + native x86/ARM/policy/rootless package/offline physical gates. NO new fake C `HELD` KUnit or positive source-to-DM flag because no legal external callback owner or genuine live counted slot available under permitted source-only test scope; the precise missing capability is a real current original counted ref transferred to a bound independently owned completion with cycle-free swapoff cancellation and exactly one count put, plus independent current original source bdev/nonlinear sector→actual current target/GC/dtr mapping lease and durable lower write/map/one actual upper ACK/full original 4096 SHA readback.
 
 Phase A stays BLOCKED, SOURCE_MAPPED_AUTHENTICATED=0, compressed STORED LZ4 lower staging and forced RAW bypass disabled. Linux zswap alone bounded RAM/native MM pressure eviction and swapz alone valid SWAPSPACE2 DISK 4/8/16KiB packing GC, no competing shrinker. Ordinary upper RAW_4096 always ORIGINAL full UNCOMPRESSED 4096 bytes. Physical ENTIRE FIRST 4096 SWAPSPACE2 header/signature/UUID and parent partition table immutable. Prior physical producer_refused first private cause UNKNOWN; no owner make test/fast_test, privilege, module loading, physical swap/real pressure/DM/swapoff/on/mkswap/null_blk/reboot.
+
+## Round050 Agent3 — real production C one-shot default-off negative transaction and decoder admission standard
+
+The actual src/kernel/dm-target.c target-owned BIO path MAY accept the original
+Linux DM core-delivered clone only through normal swapz_map admission under the
+queue lock; it must never treat copied zswap STORED entry, numeric source sector,
+target pointer, callback ticket, epoch, map/GC generation, CRC or SHA as an
+independently held ORIGINAL counted type+offset allocation incarnation or
+independently live dm_table/target/dtr lease. The original pinned Linux
+dm_get_live_table / dm_put_live_table SRCU functions are not exported to an
+external dm-swapz.ko module. The current ordinary RAW_4096 WRITE is ALWAYS
+the entire ORIGINAL UNCOMPRESSED 4096 bytes. No new external callback may
+dereference freed ctx after dtr on evidence of matching synthetic scalars.
+
+A narrowly guarded SWAPZ_ROUND050_DM_ONE_SHOT_NEGATIVE_TEST source-only helper
+in the real production src/kernel/dm-target.c MUST be DEFAULT UNDEFINED, with
+two exact helper/callsite markers and a single optional genuine swapz_map
+read-only synchronous (void) call passing BOTH NULL report pointers. The
+helper MUST NOT create real lower WRITE/READ, map publication, GC migration,
+source ref/target lease, BIO status or genuine upper ACK. It MUST return a
+negative errno on every possible path, including when all synthetic slot,
+live-table/map/GC/bdev/callback/durable one-map one-upper-ACK scalars match.
+The real callsite MUST be after original eight-sector full-page geometry
+validation, before per-BIO initialization, and its return ignored. Source
+without the guards MUST be byte-identical to the old normal actual production
+target so no new default runtime allocation, lock, reclaim scheduler, ABI or
+behavior appears. Kernel guard-ON is still no-auth and not an admission API.
+
+Strict tests/tools/round050-dm-one-shot-real-c-verify.py MUST extract the
+ACTUAL marked source C helper AND source map callsite from real product C,
+validate 42 uniquely located source requirements and 11 temporal conditions,
+then compile and EXECUTE the same true source-extracted C using both GCC and
+Clang -std=gnu11 -Wall -Wextra -Wconversion -Wshadow -Werror and
+-fsanitize=address,undefined (no warning waivers, recover disabled) against
+159 nonvacuous negative C states per compiler: 53 independent fault classes
+over each of 1/2/4 original 4096-byte extent blocks. Verify expected exact
+terminal errno and zero observable input mutation: closed admission,
+target/dtr/shutdown, source absolute vs DM target-relative 8 sectors, stale
+table/ctx/map/GC/extent/callback, malformed compressed size/padding/CRC,
+duplicate lower callback/upper ACK, premature lower durability or map, zero
+or multiple map publications. The genuinely copied real in-band source
+callsite may be observed ONLY with NULL reports, no positive fake authority.
+At least 22 separate real product source-changing FUNCTION-SCOPED non-no-op
+hostile mutants MUST each fail the strict source validator AND each be
+compiled by both strict GCC and Clang with ASan+UBSan and ACTUALLY fail the
+exact negative C runtime oracle with its bounded FIRST error. Neither
+synthetic host fixture nor success markers alone qualify original live
+asynchronous callback ownership or the historical original full-page read.
+
+Preserve the independent pinned original Linux git-object source audit
+and 18 actual DM hostile source mutations plus fake EXPORT_SYMBOL rejection;
+inherited Round049 15 genuine functions/63 markers/12 orders/26 genuine
+source hostile; old Round041 150 and Round043 90 real source-extracted C
+GCC+Clang sanitizers and inherited 7+9 hostile source controls; Round046
+90 genuine product C map/GC/dtr ABA host negative C and 12 source hostile.
+The original immutable pinned kernel genuine CONFIG_ZSWAP=y UML 57/57 (or
+genuinely new 57+N) actual booted C KUnit JSON and KTAP, original x86 BOTH
+ZSWAP=y/n full vmlinux/modules/Module.symvers uniquely correct original
+GPL provider/probe and actual dm-swapz.ko SAME original KDIR W=1/-Werror,
+native x86/ARM/policy, systemd/package and rootless offline physical-safety
+patch hygiene remain distinct MANDATORY exact new source-SHA terminal gates.
+Old 26/26 PASS is historical and must not be applied to an unverified
+new source SHA. A synthetic host test and compiled real DM module are still
+NOT permission to operate physical swap or pressure.
+
+Before any future separately tagged dictionary-free STORED LZ4 lower staging,
+verify exact selected original zswap crypto_acomp tfm_name/codec, raw LZ4
+block framing and dictionary/session, compressed CRC and FULL ORIGINAL
+4096 decompressed SHA with current product LZ4_decompress_safe and volatile
+SWAPZ_ENCODING_LZ4 0U (other delta64/shuf8 transformations are not
+interchangeable). Actual product SWAPZ_MAX_COMPRESSED is ONLY 3568 bytes:
+original zswap may retain larger compressed records or raw 4096, so such
+sources cannot be admitted as existing compressed LZ4 map records. One
+current counted source slot incarnation owner AND currently legitimately
+owned in-band target/GC/dtr lease MUST survive every callback; real durable
+lower WRITE/flush before at most one current map, exactly ONE real original
+upper ACK, later decoded FULL 4096 SHA-verified READ with correct errors,
+teardown, GC, slot reuse and double callback unwind. No on-media header or
+metadata sidecar, no silent compressed-as-upper-RAW fallback.
+
+Linux zswap alone manages bounded compressed RAM and NATIVE Linux MM natural
+pressure eviction; swapz alone manages valid preexisting SWAPSPACE2 DISK
+compressed payload-only 4/8/16KiB extent packing/GC, NO other RAM reclaim.
+The entire FIRST PHYSICAL 4096 SWAPSPACE2 signature/header/UUID and partition
+table are immutable. Prior physical owner source producer_refused underlying
+first error UNKNOWN, recovery owner-reported only; no make test/fast_test,
+privilege, loaded module/DM, physical/real pressure, swapoff/on, mkswap,
+null_blk or reboot. SOURCE_MAPPED_AUTHENTICATED=0 PHASE_A=BLOCKED
+DIRECT_COMPRESSED_HANDOFF=DISABLED FORCED_RAW_BYPASS=DISABLED.

@@ -13124,6 +13124,153 @@ static __used noinline int swapz_round046_dm_lifetime_refuse(
 /* ROUND046_DM_LIFETIME_HELPER_EXACT_END */
 #endif /* SWAPZ_ROUND046_DM_LIFETIME_NONAUTHORITY_TEST */
 
+/*
+ * ROUND050: CI-ONLY, default-UNDEFINED, read-only negative observation of
+ * future in-band lower-LZ4 staging. This is NOT a source slot reference, a
+ * live dm_table/GC lease, a durable lower write or permission to ACK.
+ * Production must never make a mapping/ACK decision from these scalars.
+ */
+#if defined(SWAPZ_ROUND050_DM_ONE_SHOT_NEGATIVE_TEST)
+/* ROUND050_DM_ONE_SHOT_NEGATIVE_HELPER_START */
+#define SWAPZ_ROUND050_SOURCE_MAPPED_AUTHENTICATED 0U
+
+struct swapz_round050_dm_pending_report {
+	unsigned long target_identity;
+	unsigned long context_identity;
+	unsigned long upper_bio_identity;
+	swapz_u64 target_relative_sector;
+	swapz_u64 original_bdev_cookie;
+	swapz_u64 original_physical_sector;
+	swapz_u64 table_epoch;
+	swapz_u64 callback_ticket;
+	swapz_u32 map_generation;
+	swapz_u32 gc_epoch;
+	swapz_u32 extent_start_block;
+	swapz_u32 extent_blocks;
+	swapz_u32 compressed_length;
+	swapz_u32 lower_write_bytes;
+	unsigned int lower_completion_count;
+	unsigned int map_publications;
+	unsigned int upper_ack_attempts;
+	int lower_error;
+	bool teardown_started;
+	bool lower_write_durable;
+	bool compressed_crc_valid;
+	bool source_counted_owner_reported;
+	bool current_table_lease_reported;
+};
+
+static __used noinline int swapz_round050_dm_one_shot_refuse(
+		const struct dm_target *target, const struct swapz_dm *ctx,
+		const struct bio *upper_bio,
+		const struct swapz_round050_dm_pending_report *submitted,
+		const struct swapz_round050_dm_pending_report *observed)
+{
+	sector_t target_relative_sector;
+
+	if (!target || !ctx || !upper_bio)
+		return -EINVAL;
+	/* Even an in-band clone with no new source provenance must be refused. */
+	if (!submitted || !observed)
+		return -EOPNOTSUPP;
+	/*
+	 * Stop on an already-known teardown BEFORE dereferencing live target
+	 * state. This is not a remedy for a previously freed ctx/ti pointer:
+	 * the caller must be the genuine in-band core ->map owner. A late
+	 * external callback is NEVER permitted to call this observer.
+	 */
+	if (submitted->teardown_started || observed->teardown_started)
+		return -ESHUTDOWN;
+	if (!READ_ONCE(ctx->accepting) || smp_load_acquire(&ctx->failed))
+		return -ESHUTDOWN;
+	if (target->private != ctx || ctx->target != target ||
+	    !ctx->authority.maps || ctx->authority.maps != ctx->maps)
+		return -ESTALE;
+	if (bio_op(upper_bio) != REQ_OP_WRITE ||
+	    !(upper_bio->bi_opf & REQ_SWAP) ||
+	    upper_bio->bi_iter.bi_size != SWAPZ_BLOCK_BYTES ||
+	    bio_sectors(upper_bio) != SWAPZ_SECTORS)
+		return -ERANGE;
+
+	/* Original swapfile absolute sectors NEVER replace relative DM sectors. */
+	target_relative_sector = upper_bio->bi_iter.bi_sector;
+	if (target_relative_sector % SWAPZ_SECTORS ||
+	    target_relative_sector >= target->len ||
+	    SWAPZ_SECTORS > target->len - target_relative_sector)
+		return -ERANGE;
+	if (target->len % SWAPZ_SECTORS ||
+	    target->len / SWAPZ_SECTORS != ctx->logical_pages)
+		return -ESTALE;
+
+	/*
+	 * Two matching snapshots may still refer to reloaded/reused targets,
+	 * slot incarnation ABA or GC relocated extents. Equality is only an
+	 * early REJECTION predicate, never positive current ownership.
+	 */
+	if (submitted->target_identity != (unsigned long)target ||
+	    observed->target_identity != submitted->target_identity ||
+	    submitted->context_identity != (unsigned long)ctx ||
+	    observed->context_identity != submitted->context_identity ||
+	    submitted->upper_bio_identity != (unsigned long)upper_bio ||
+	    observed->upper_bio_identity != submitted->upper_bio_identity ||
+	    submitted->target_relative_sector != target_relative_sector ||
+	    observed->target_relative_sector != target_relative_sector ||
+	    !submitted->table_epoch || !submitted->callback_ticket ||
+	    submitted->table_epoch != observed->table_epoch ||
+	    submitted->callback_ticket != observed->callback_ticket ||
+	    submitted->map_generation != observed->map_generation ||
+	    submitted->gc_epoch != observed->gc_epoch ||
+	    submitted->extent_start_block != observed->extent_start_block ||
+	    submitted->extent_blocks != observed->extent_blocks ||
+	    !submitted->original_bdev_cookie ||
+	    submitted->original_bdev_cookie != observed->original_bdev_cookie ||
+	    !submitted->original_physical_sector ||
+	    submitted->original_physical_sector != observed->original_physical_sector)
+		return -ESTALE;
+	if ((submitted->extent_blocks != 1U &&
+	     submitted->extent_blocks != 2U &&
+	     submitted->extent_blocks != 4U) ||
+	    submitted->compressed_length == 0U ||
+	    submitted->compressed_length > SWAPZ_MAX_COMPRESSED ||
+	    submitted->compressed_length >
+		    submitted->extent_blocks * SWAPZ_BLOCK_BYTES ||
+	    submitted->extent_start_block >= ctx->physical_blocks ||
+	    submitted->extent_blocks >
+		    ctx->physical_blocks - submitted->extent_start_block)
+		return -ERANGE;
+	if (!submitted->compressed_crc_valid ||
+	    !observed->compressed_crc_valid)
+		return -EBADMSG;
+
+	/* A second clone ACK or lower callback is terminally ineligible. */
+	if (submitted->upper_ack_attempts || observed->upper_ack_attempts ||
+	    submitted->lower_completion_count > 1U ||
+	    observed->lower_completion_count > 1U)
+		return -EALREADY;
+	/* A numeric "durable" flag is NOT evidence of a real completed FUA. */
+	if (!submitted->lower_write_durable ||
+	    !observed->lower_write_durable ||
+	    submitted->lower_completion_count != 1U ||
+	    observed->lower_completion_count != 1U ||
+	    submitted->lower_error || observed->lower_error ||
+	    submitted->lower_write_bytes !=
+		    submitted->extent_blocks * SWAPZ_BLOCK_BYTES ||
+	    observed->lower_write_bytes != submitted->lower_write_bytes)
+		return -EAGAIN;
+	if (submitted->map_publications != 1U ||
+	    observed->map_publications != 1U)
+		return -EUCLEAN;
+
+	/*
+	 * Reported source counts, table tokens, callback tickets, checksums,
+	 * one publication and zero ACKs are not real independently retained
+	 * original MM/DM ownership. There is NO success or map/ACK mutation.
+	 */
+	return -EOPNOTSUPP;
+}
+/* ROUND050_DM_ONE_SHOT_NEGATIVE_HELPER_END */
+#endif /* SWAPZ_ROUND050_DM_ONE_SHOT_NEGATIVE_TEST */
+
 static int swapz_map(struct dm_target *ti, struct bio *bio)
 {
 	struct swapz_dm *ctx = ti->private;
@@ -13186,6 +13333,15 @@ static int swapz_map(struct dm_target *ti, struct bio *bio)
 		(void)swapz_round046_dm_lifetime_refuse(ti, ctx, bio, NULL, NULL);
 /* ROUND046_DM_LIFETIME_MAP_CALLSITE_EXACT_END */
 #endif /* SWAPZ_ROUND046_DM_LIFETIME_NONAUTHORITY_TEST */
+
+#if defined(SWAPZ_ROUND050_DM_ONE_SHOT_NEGATIVE_TEST)
+/* ROUND050_DM_ONE_SHOT_MAP_CALLSITE_START */
+	/* Before per-BIO initialization; never inspect source or act on result. */
+	if (bio_op(bio) == REQ_OP_WRITE && count == SWAPZ_SECTORS &&
+	    bio->bi_iter.bi_size == SWAPZ_BLOCK_BYTES)
+		(void)swapz_round050_dm_one_shot_refuse(ti, ctx, bio, NULL, NULL);
+/* ROUND050_DM_ONE_SHOT_MAP_CALLSITE_END */
+#endif /* SWAPZ_ROUND050_DM_ONE_SHOT_NEGATIVE_TEST */
 
 	entry = dm_per_bio_data(bio, sizeof(*entry));
 	INIT_LIST_HEAD(&entry->list);
