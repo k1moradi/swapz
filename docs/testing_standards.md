@@ -16169,7 +16169,7 @@ A new rootless audit must consume **pristine pinned original** `mm/swapfile.c`, 
 
 Maintain `SOURCE_MAPPED_AUTHENTICATED=0 PHASE_A=BLOCKED`, direct compressed handoff and forced RAW disabled. No owner `make test`/`make fast_test`, loaded/physical/null_blk/real-pressure/swapoff/swapon/mkswap/DM/reboot. Retain entire physical first SWAPSPACE2 4096 and partition table; prior physical producer_refused first private cause remains unknown. Normal upper RAW_4096 is entire **original uncompressed 4096**. No alternative reclaim.
 
- 
+
 ### Round047 Agent2 real-original hostile mutator source-function scoping correction
 
 The pinned genuine original `block/bio.c` contains `bio->bi_end_io(bio);` in more than one function; global first-token replacement can accidentally mutate an unrelated handler, leaving the intended `bio_endio()` path unchanged. The new original-source audit therefore binds all eighteen hostile mutations to the **exact named original C function body** (with one explicitly unique CONFIG_SWAP area-put header token), requires exactly one token occurrence *inside that function*, asserts the source changes, and demands the unchanged negative auditor rejects every altered source. No original kernel C, existing 55 KUnit, production behavior, public GPL interface or peer product verifier changes. An accidental mutation of a different original function must not count as an anti-ABA source control. Genuine CI on the new exact SHA, not an old queued run, is required. Source-to-DM lifetime remains NO_AUTH.
