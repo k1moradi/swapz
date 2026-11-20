@@ -11,6 +11,8 @@ on:
       - "tests/tools/round040-dm-reissue-verify.py"
       - "tests/tools/round041-dm-target-verify.py"
       - "tests/tools/round043-dm-real-ingress-verify.py"
+      - "tests/tools/round046-dm-real-lifetime-verify.py"
+      - "tests/runtime/native/fixtures/round046-dm-lifetime-host.c"
       - "tests/tools/round036-dm-two-phase-verify.py"
       - "tests/runtime/native/fixtures/round037-dm-async-*"
       - "tests/runtime/native/fixtures/round038-dm-async-read-*"
@@ -59,6 +61,18 @@ jobs:
             tail -n 90 "$RUNNER_TEMP/round043-source-host.log" >&2
             exit "$exitcode"
           fi
+      - name: Round046 source-extracted real current DM lifetime GCC Clang ASan UBSan plus inherited 150 90 and 12 hostiles
+        run: |
+          set -Eeuo pipefail
+          if python3 -B swapz/tests/tools/round046-dm-real-lifetime-verify.py host-test \
+              > "$RUNNER_TEMP/round046-source-host.log" 2>&1; then
+            tail -n 28 "$RUNNER_TEMP/round046-source-host.log"
+          else
+            exitcode=$?
+            echo "::error::ROUND046 first genuine product map/table/GC/dtr C compiler/sanitizer error exit=$exitcode" >&2
+            tail -n 95 "$RUNNER_TEMP/round046-source-host.log" >&2
+            exit "$exitcode"
+          fi
       - name: Stage exact clean pinned original Linux source through published composer, verify each SHA
         run: |
           set -Eeuo pipefail
@@ -105,7 +119,7 @@ jobs:
             fi
           }
           kernel_flags="-DSWAPZ_ROUND028_SLOT_EPOCH_SOURCE=1 -DSWAPZ_ROUND030_EVICTION_SNAPSHOT_SOURCE=1 -DSWAPZ_ROUND025_SIDEBAND_CI_ONLY=1 -DSWAPZ_ROUND031_MM_BIO_SOURCE=1 -DSWAPZ_ROUND032_BIO_COPY_VIEW_CI_ONLY=1"
-          dm_flags="-DSWAPZ_ROUND024_DM_IMPORT_KBUILD_PROBE=1 -DSWAPZ_ROUND028_DM_OWNED_READBACK_TEST=1 -DSWAPZ_ROUND030_DM_COMPRESSED_COMMIT_TEST=1 -DSWAPZ_ROUND031_DM_LZ4_SIDECAR_TEST=1 -DSWAPZ_ROUND032_DM_LZ4_VIEW_VALIDATE_TEST=1 -DSWAPZ_ROUND033_DM_ORIGINAL_BIO_GPL_LINK_TEST=1 -DSWAPZ_ROUND034_DM_SOURCE_SLOT_AUTHORITY_TEST=1 -DSWAPZ_ROUND035_DM_LZ4_LOWER_ROUNDTRIP_TEST=1 -DSWAPZ_ROUND036_DM_TRANSACTION_PHASE_TEST=1 -DSWAPZ_ROUND037_DM_ASYNC_LOWER_LIFETIME_TEST=1 -DSWAPZ_ROUND038_DM_ASYNC_READ_GC_TEST=1 -DSWAPZ_ROUND039_DM_FAKE_CHAIN_WRITE_GC_READ_TEST=1 -DSWAPZ_ROUND040_DM_SAME_SLOT_REISSUE_CONCURRENCY_TEST=1 -DSWAPZ_ROUND041_DM_TARGET_INTERVAL_MAP_NONAUTHORITY_TEST=1 -DSWAPZ_ROUND043_DM_REAL_MAP_INGRESS_OBSERVATION_TEST=1"
+          dm_flags="-DSWAPZ_ROUND024_DM_IMPORT_KBUILD_PROBE=1 -DSWAPZ_ROUND028_DM_OWNED_READBACK_TEST=1 -DSWAPZ_ROUND030_DM_COMPRESSED_COMMIT_TEST=1 -DSWAPZ_ROUND031_DM_LZ4_SIDECAR_TEST=1 -DSWAPZ_ROUND032_DM_LZ4_VIEW_VALIDATE_TEST=1 -DSWAPZ_ROUND033_DM_ORIGINAL_BIO_GPL_LINK_TEST=1 -DSWAPZ_ROUND034_DM_SOURCE_SLOT_AUTHORITY_TEST=1 -DSWAPZ_ROUND035_DM_LZ4_LOWER_ROUNDTRIP_TEST=1 -DSWAPZ_ROUND036_DM_TRANSACTION_PHASE_TEST=1 -DSWAPZ_ROUND037_DM_ASYNC_LOWER_LIFETIME_TEST=1 -DSWAPZ_ROUND038_DM_ASYNC_READ_GC_TEST=1 -DSWAPZ_ROUND039_DM_FAKE_CHAIN_WRITE_GC_READ_TEST=1 -DSWAPZ_ROUND040_DM_SAME_SLOT_REISSUE_CONCURRENCY_TEST=1 -DSWAPZ_ROUND041_DM_TARGET_INTERVAL_MAP_NONAUTHORITY_TEST=1 -DSWAPZ_ROUND043_DM_REAL_MAP_INGRESS_OBSERVATION_TEST=1 -DSWAPZ_ROUND046_DM_LIFETIME_NONAUTHORITY_TEST=1"
           original_dir="$RUNNER_TEMP/round033-pinned-original-kernel"
           default_dir="$RUNNER_TEMP/round033-default-original-dm"
           guarded_dir="$RUNNER_TEMP/round033-guarded-original-dm"

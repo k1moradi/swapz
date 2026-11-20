@@ -1,0 +1,43 @@
+name: "Round046 rootless real product DM map/table/GC/dtr lifetime 90 NO_AUTH GCC Clang"
+on:
+  push:
+    branches: [main]
+    paths:
+      - "src/kernel/dm-target.c"
+      - "tests/tools/round046-dm-real-lifetime-verify.py"
+      - "tests/runtime/native/fixtures/round046-dm-lifetime-host.c"
+      - "docs/testing_standards.md"
+      - ".github/workflows/phase-a-zswap-dm-real-lifetime-noauth.yml"
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  real-product-source-extracted-negative:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Install source-extracted host C dependencies
+        run: |
+          set -Eeuo pipefail
+          sudo apt-get update -qq
+          sudo DEBIAN_FRONTEND=noninteractive apt-get install -y \
+            --no-install-recommends build-essential clang liblz4-dev libssl-dev
+      - name: Validate real production source and reject twelve hostile source mutations
+        run: |
+          set -Eeuo pipefail
+          python3 -B tests/tools/round046-dm-real-lifetime-verify.py hostile-self-test
+      - name: GCC Clang -Werror ASan UBSan actual extracted C, inherited 150 plus 90 plus new 90
+        run: |
+          set -Eeuo pipefail
+          if python3 -B tests/tools/round046-dm-real-lifetime-verify.py host-test \
+              > "$RUNNER_TEMP/round046-first-error.log" 2>&1; then
+            tail -n 32 "$RUNNER_TEMP/round046-first-error.log"
+          else
+            result=$?
+            echo "::error::ROUND046 first source compiler/sanitizer error exit=$result" >&2
+            tail -n 95 "$RUNNER_TEMP/round046-first-error.log" >&2
+            exit "$result"
+          fi

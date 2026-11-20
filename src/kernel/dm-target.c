@@ -13014,6 +13014,116 @@ scrub_private:
 /* ROUND043_DM_REAL_MAP_INGRESS_EXACT_END */
 #endif /* SWAPZ_ROUND043_DM_REAL_MAP_INGRESS_OBSERVATION_TEST */
 
+/*
+ * Round046: genuine product-side map-entry lifetime refusal, compiled only
+ * by the opt-in original-kernel source-qualification guard. The DM core lends
+ * ti/ctx/bio only through this synchronous ->map invocation. A copied scalar
+ * report (including a matching pointer value) cannot retain a DM table, map,
+ * extent, GC generation, or dtr lifetime across asynchronous completion.
+ *
+ * No target/map pointer is dereferenced after teardown. Only the CURRENT live
+ * callback's ti/ctx are inspected; the synthetic submitted/observed reports
+ * have no source or DM credential authority. There is deliberately no
+ * success result, lower I/O, publication, ACK or external ABI.
+ */
+#if defined(SWAPZ_ROUND046_DM_LIFETIME_NONAUTHORITY_TEST) && \
+    defined(SWAPZ_ROUND043_DM_REAL_MAP_INGRESS_OBSERVATION_TEST) && \
+    defined(SWAPZ_ROUND041_DM_TARGET_INTERVAL_MAP_NONAUTHORITY_TEST) && \
+    defined(SWAPZ_ROUND033_DM_ORIGINAL_BIO_GPL_LINK_TEST) && \
+    defined(SWAPZ_ROUND032_BIO_COPY_VIEW_CI_ONLY)
+/* ROUND046_DM_LIFETIME_HELPER_EXACT_START */
+#define SWAPZ_ROUND046_SOURCE_MAPPED_AUTHENTICATED 0U
+
+struct swapz_round046_dm_lifetime_report {
+	unsigned long target_identity;
+	unsigned long context_identity;
+	swapz_u64 target_begin;
+	swapz_u64 target_length;
+	swapz_u64 target_relative_sector;
+	swapz_u64 original_bdev_cookie;
+	swapz_u64 original_physical_sector;
+	swapz_u64 dm_device_cookie;
+	swapz_u64 table_epoch;
+	swapz_u64 callback_ticket;
+	swapz_u32 map_generation;
+	swapz_u32 extent_start_block;
+	swapz_u32 gc_destination;
+};
+
+static __used noinline int swapz_round046_dm_lifetime_refuse(
+		const struct dm_target *target, const struct swapz_dm *ctx,
+		const struct bio *upper_bio,
+		const struct swapz_round046_dm_lifetime_report *submitted,
+		const struct swapz_round046_dm_lifetime_report *observed)
+{
+	sector_t target_relative_sector;
+
+	if (!target || !ctx || !upper_bio)
+		return -EINVAL;
+	/*
+	 * A missing source-to-current-table live reference is NOT replaceable
+	 * with a zero/matching fake report. Production passes NULL here.
+	 */
+	if (!submitted || !observed)
+		return -EOPNOTSUPP;
+	if (target->private != ctx || ctx->target != target ||
+	    !READ_ONCE(ctx->accepting) || !ctx->authority.maps ||
+	    ctx->authority.maps != ctx->maps)
+		return -ESTALE;
+	if (bio_op(upper_bio) != REQ_OP_WRITE ||
+	    !(upper_bio->bi_opf & REQ_SWAP) ||
+	    upper_bio->bi_iter.bi_size != SWAPZ_BLOCK_BYTES ||
+	    bio_sectors(upper_bio) != SWAPZ_SECTORS)
+		return -EOPNOTSUPP;
+	/* The original swapfile bdev/absolute LBA cannot substitute for the
+	 * CURRENT DM target-relative eight-sector domain, even when equal.
+	 */
+	target_relative_sector = upper_bio->bi_iter.bi_sector;
+	if (target_relative_sector % SWAPZ_SECTORS ||
+	    target_relative_sector >= target->len ||
+	    SWAPZ_SECTORS > target->len - target_relative_sector)
+		return -ERANGE;
+	if (target->len % SWAPZ_SECTORS ||
+	    target->len / SWAPZ_SECTORS != ctx->logical_pages)
+		return -ESTALE;
+	/*
+	 * All these values are host-synthetic observations, NOT an acquired
+	 * dm_table SRCU/dtr reference or an ordered-owner GC map lease.
+	 * Exact equality is a NEGATIVE CONTROL, not a positive credential.
+	 */
+	if (submitted->target_identity != (unsigned long)target ||
+	    submitted->context_identity != (unsigned long)ctx ||
+	    submitted->target_begin != target->begin ||
+	    submitted->target_length != target->len ||
+	    submitted->target_relative_sector != target_relative_sector ||
+	    submitted->target_identity != observed->target_identity ||
+	    submitted->context_identity != observed->context_identity ||
+	    submitted->target_begin != observed->target_begin ||
+	    submitted->target_length != observed->target_length ||
+	    submitted->target_relative_sector != observed->target_relative_sector)
+		return -ESTALE;
+	if (!submitted->table_epoch || !submitted->callback_ticket ||
+	    !submitted->dm_device_cookie ||
+	    submitted->table_epoch != observed->table_epoch ||
+	    submitted->callback_ticket != observed->callback_ticket ||
+	    submitted->dm_device_cookie != observed->dm_device_cookie ||
+	    submitted->map_generation != observed->map_generation ||
+	    submitted->extent_start_block != observed->extent_start_block ||
+	    submitted->gc_destination != observed->gc_destination)
+		return -ESTALE;
+	if (!submitted->original_bdev_cookie ||
+	    !submitted->original_physical_sector ||
+	    submitted->original_bdev_cookie != observed->original_bdev_cookie ||
+	    submitted->original_physical_sector != observed->original_physical_sector)
+		return -ESTALE;
+	/* Not a live original source incarnation, table/GC/dtr retention,
+	 * durable lower WRITE, current map publication or upper completion.
+	 */
+	return -EOPNOTSUPP;
+}
+/* ROUND046_DM_LIFETIME_HELPER_EXACT_END */
+#endif /* SWAPZ_ROUND046_DM_LIFETIME_NONAUTHORITY_TEST */
+
 static int swapz_map(struct dm_target *ti, struct bio *bio)
 {
 	struct swapz_dm *ctx = ti->private;
@@ -13061,6 +13171,21 @@ static int swapz_map(struct dm_target *ti, struct bio *bio)
 		(void)swapz_round043_dm_observe_real_map_v1(ti, ctx, bio);
 /* ROUND043_DM_REAL_MAP_CALLSITE_EXACT_END */
 #endif /* SWAPZ_ROUND043_DM_REAL_MAP_INGRESS_OBSERVATION_TEST */
+
+#if defined(SWAPZ_ROUND046_DM_LIFETIME_NONAUTHORITY_TEST) && \
+    defined(SWAPZ_ROUND043_DM_REAL_MAP_INGRESS_OBSERVATION_TEST) && \
+    defined(SWAPZ_ROUND041_DM_TARGET_INTERVAL_MAP_NONAUTHORITY_TEST) && \
+    defined(SWAPZ_ROUND033_DM_ORIGINAL_BIO_GPL_LINK_TEST) && \
+    defined(SWAPZ_ROUND032_BIO_COPY_VIEW_CI_ONLY)
+/* ROUND046_DM_LIFETIME_MAP_CALLSITE_EXACT_START */
+	/* Source C only: synchronous observation, no return-value authority.
+	 * NULL reports guarantee a refusal; normal BIO admission is unchanged.
+	 */
+	if (bio_op(bio) == REQ_OP_WRITE && count == SWAPZ_SECTORS &&
+	    bio->bi_iter.bi_size == SWAPZ_BLOCK_BYTES)
+		(void)swapz_round046_dm_lifetime_refuse(ti, ctx, bio, NULL, NULL);
+/* ROUND046_DM_LIFETIME_MAP_CALLSITE_EXACT_END */
+#endif /* SWAPZ_ROUND046_DM_LIFETIME_NONAUTHORITY_TEST */
 
 	entry = dm_per_bio_data(bio, sizeof(*entry));
 	INIT_LIST_HEAD(&entry->list);

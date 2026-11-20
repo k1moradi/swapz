@@ -16007,3 +16007,65 @@ After guarded original 043 full-4096 cloned byte-view feasibility, audit found t
 **Correct original slot lifetime and first missing reference:** Genuine pinned `mm/zswap.c` initially acquires `get_swap_device(swpentry)` original area users percpu ref but **puts it** immediately after swapcache folio allocation, BEFORE original xarray/locked folio verified, original zpool entry erase/free, old STORE LZ4 independent ref transfer and ordinary original page-IO BIO sync/async write. Genuine original `mm/page_io.c` obtains a fresh, short-lived users ref only while original typed `folio_swap_entry` type+offset, original allocator epoch, true `active_area->bdev`, possibly nonlinear `swap_folio_sector`, actual BIO sector/device/4096 uncompressed geometry and copied ORIGINAL 4096 SHA/CRC STORED LZ4 owner are synchronously sampled. **All newly acquired swap area refs are put before later async IO**. The source's integer `swapz_round028_slot_epoch` and copied STORED identity/CRC do not constitute a *currently held slot allocation-incarnation object ref* spanning source release, BIO clone/split/reissue, swapoff/reuse and current Device Mapper table/extent/GC/dtr map generation. A numeric source-sector coincidence with current DM 8-sector target-relative offset cannot authenticate mapping. Before adding any new C hook beyond true 55, inspect actual original `mm/swapfile.c` slot allocation and swapoff ref semantics, and require genuinely live source API, not fabricated positive token. If no such source API/ref exists, document first unavailable owner and remain `NO_AUTH`; do not manufacture a standalone synthetic mock to pad C test counts.
 
 **Architectural and physical safety:** zswap solely bounded compressed RAM with NATURAL Linux MM-pressure shrinker/eviction; swapz solely valid existing SWAPSPACE2 disk tier compression and payload-only 4/8/16KiB extent packing/GC, no competing reclaim controller or hotpath changes. Ordinary upper RAW_4096 ALWAYS whole original **UNCOMPRESSED** 4096, distinct from privately copied STORED compressed LZ4 bytes. Future distinct lower-I/O byte staging requires real live original full typed source slot+incarnation+STORE ID/full original SHA+CRC + original bdev/nonlinear mapped sector + correct **CURRENT** DM target-relative 8-sector map/GC/dtr lease + durable lower IO/one current mapping/exactly-once actual upper ACK + verified full original 4096 SHA READ. Entire first physical 4096 SWAPSPACE2 header/signature/UUID and physical partition table immutable. Owner older local physical `make test` at 1539baeb FAILED `producer_refused` first private cause UNKNOWN; owner reports recovery complete not independently reverified. No local `make test` or `make fast_test`, privileged/loaded DM/swap, memory pressure/physical/reboot. `PHASE_A=BLOCKED SOURCE_MAPPED_AUTHENTICATED=0 DIRECT_COMPRESSED_HANDOFF=NO_GO_DISABLED FORCED_RAW_BYPASS=DISABLED LOADED_PRODUCTION=NOT_RUN PHYSICAL_SWAPSPACE2=NOT_RUN`.
+
+## Round046 Agent3 — current production DM table/GC/dtr async stale-map refusal (2026-11-19)
+
+This independent source-changing correction is based on the Round046 frozen engineering
+source 00d5d7e1ad8c92a88c4f81f4680786533e3a40ce, rebased as an unreleased
+one-parent direct-main fast-forward over the **whole** published Agent2 source,
+hostile verifier, and canonical standards appendix. Keep the entire preceding
+canonical testing-standards byte prefix intact; add this separately substantive
+Agent3 appendix in the same commit as actual product source, true C fixture and CI.
+
+The *actual* `src/kernel/dm-target.c::swapz_map` now has a strictly
+DEFAULT-UNDEFINED `SWAPZ_ROUND046_DM_LIFETIME_NONAUTHORITY_TEST`
+observational refusal witness, nested under the genuine Round043/041/033/032
+source-test guards. The extraction harness `tests/tools/round046-dm-real-lifetime-verify.py`
+compiles the original C helper and real map callsite, preserving and executing
+all inherited original Round030/040 same-slot/GC/READ-SHA, Round041 **150**
+target/interval/GC negatives, Round043 **90** original GPL source-ingress
+negatives, and adds **90** new independent 4/8/16KiB synthetic current DM
+table/GC/dtr lifetime/stale-callback negatives, plus **12** source-hostile
+mutants that must actually alter source and be rejected. Run:
+`python3 -B tests/tools/round046-dm-real-lifetime-verify.py hostile-self-test`
+and `python3 -B tests/tools/round046-dm-real-lifetime-verify.py host-test`,
+using genuine GNU11 GCC AND Clang `-Wall -Wextra -Wconversion -Wshadow -Werror`,
+ASan+UBSan with inherited legacy codec's existing translation-unit exception;
+never skip a prior case to make a new result green. Each first source/compiler/
+sanitizer failure reports a bounded first-error console tail, never a claim of
+success. Both the new fast rootless workflow and the inherited original pinned
+Linux GPL matched-DM full-Kbuild workflow must succeed on the SAME final SHA,
+including default-off and guarded `dm-swapz.ko` with W=1/-Werror,
+unique original GPL provider, same ORIGINAL KDIR and matching vermagic.
+Product native x86/ARM and policy are separate required exact-SHA gates.
+
+The synthetic host may deliberately place an old table/ctx claim next to a
+new distinct live instance with *identical* target geometry, reissue a stale
+WRITE/READ callback after GC generation/extent ABA, and confuse a nonlinear
+original source backing-device/physical sector with current target-relative
+eight-sector BIO intervals. Both equal and unequal fabricated scalar
+claims must refuse: -ESTALE/-ERANGE for demonstrable mismatches and
+-EOPNOTSUPP even for exact fake numeric matches. These values cannot hold
+a real `dm_table` SRCU/read-side lease, `dm_target`/ctx ownership through
+teardown, an ordered-owner map/GC generation reference, or the original
+swap-area allocation-incarnation object; no freed target dereference allowed.
+The real callsite passes NULL reports, ignores the negative return, and
+changes NO admission, allocation, normal RAW, GC, lower I/O, or upper ACK
+when default guard is off. All host headers, 4096-byte originals, fake
+extent output and SHA checks are SYNTHETIC, not loaded-device tests.
+A copied compressed snapshot alone never authenticates source-to-DM ownership;
+there is no success code and no claimed durable lower WRITE or exactly-one
+real upper BIO ACK.
+
+Zswap owns bounded RAM with only native Linux-MM natural-pressure eviction;
+swapz owns existing SWAPSPACE2 disk compression, 4/8/16KiB packing and GC.
+Normal RAW_4096 always contains all ORIGINAL 4096 uncompressed bytes.
+A separate STORED owned dictionary-free LZ4 lower-I/O staging representation
+is NOT authorized. Entire first physical 4096-byte swap header/signature/UUID
+and partition table remain immutable; no disk mutation, null_blk/physical,
+privileged, loaded DM, swapoff/on/mkswap, real-pressure tests, `make test` or
+`make fast_test`. The prior owner `producer_refused` physical first cause
+is still unknown despite owner-reported recovery. Keep
+`SOURCE_MAPPED_AUTHENTICATED=0`, `PHASE_A=BLOCKED`,
+`DIRECT_COMPRESSED_HANDOFF=NO_GO_DISABLED`, and
+`FORCED_RAW_BYPASS=DISABLED` even if all synthetic C/CI tests pass.
