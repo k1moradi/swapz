@@ -15,6 +15,7 @@ typedef uint64_t swapz_u64;
 typedef uint32_t swapz_u32;
 
 #define __used __attribute__((used))
+#define noinline __attribute__((noinline))
 #define READ_ONCE(value) (value)
 #define smp_load_acquire(pointer) (*(pointer))
 #define SWAPZ_BLOCK_BYTES 4096U

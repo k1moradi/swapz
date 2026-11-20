@@ -278,11 +278,14 @@ class RealProductionGuardTests(unittest.TestCase):
             self.assertIsNotNone(shutil.which(compiler), compiler)
         with tempfile.TemporaryDirectory(prefix="round050-product-negative-") as directory:
             root = Path(directory)
+            verified_compilers = 0
+            verified_hostile_binaries = 0
             for compiler in ("gcc", "clang"):
                 with self.subTest(compiler=compiler):
                     compile_and_execute(
                         compiler, base_fixture, root, compiler + "-original",
                         expected_failure=False)
+                    verified_compilers += 1
                     print("ROUND050_REAL_PRODUCT_ONE_SHOT_" +
                           compiler.upper() + "_STRICT_ASAN_UBSAN_PASS")
                     for index, (before, after) in enumerate(MUTATIONS):
@@ -293,6 +296,10 @@ class RealProductionGuardTests(unittest.TestCase):
                             compiler, mutant_fixture, root,
                             compiler + "-hostile-" + str(index),
                             expected_failure=True)
+                        verified_hostile_binaries += 1
+            # Do not print a PASS if unittest subTest failures skipped compilers.
+            self.assertEqual(verified_compilers, 2)
+            self.assertEqual(verified_hostile_binaries, 44)
             print("ROUND050_REAL_PRODUCT_22_HOSTILE_C_BINARIES_GCC_CLANG_REJECTED_PASS")
 
 
