@@ -17,6 +17,8 @@ on:
       - "tests/tools/round049-original-counted-pair-source-verify.py"
       - "tests/tools/round049-original-counted-pair-kunit-verify.py"
       - "tests/tools/round050-original-deferred-slot-source-audit.py"
+      - "tests/tools/round051-original-swapoff-drain-cycle-proof.py"
+      - "docs/handoff/zswapz/round051/agent2-evidence.md"
       - "docs/handoff/zswapz/round050/agent2-evidence.md"
       - "docs/handoff/zswapz/round049/agent2-evidence.md"
       - "docs/handoff/zswapz/round048/agent2-evidence.md"
@@ -105,6 +107,20 @@ jobs:
             code=$?
             echo "::error::Round050 first pinned original swapoff and deferred slot lifetime audit failure exit=$code"
             tail -n 80 round045-evidence/round050-original-deferred-slot.log
+            exit "$code"
+          fi
+          # Original swapoff has NO pre-unuse hidden counted-slot callback
+          # registration. The distinct 20-case dry wait graph and 14 new
+          # REAL original C function mutations refuse a false cycle-free
+          # retained-slot claim while preserving all 57 original KUnit.
+          if python3 -B swapz/tests/tools/round051-original-swapoff-drain-cycle-proof.py \
+              --linux-root linux --self-test \
+              >round045-evidence/round051-original-drain-graph.log 2>&1; then
+            tail -n 10 round045-evidence/round051-original-drain-graph.log
+          else
+            code=$?
+            echo "::error::Round051 first pristine original swapoff pre-unuse cancellation graph or function-scoped C mutant error exit=$code"
+            tail -n 100 round045-evidence/round051-original-drain-graph.log
             exit "$code"
           fi
           # Independently reject forged booted KUnit evidence; self-test
@@ -368,6 +384,8 @@ jobs:
             --linux-root linux --self-test
           python3 -B swapz/tests/tools/round049-original-counted-pair-kunit-verify.py --self-test
           python3 -B swapz/tests/tools/round050-original-deferred-slot-source-audit.py \
+            --linux-root linux --self-test
+          python3 -B swapz/tests/tools/round051-original-swapoff-drain-cycle-proof.py \
             --linux-root linux --self-test
           python3 -B swapz/tests/tools/stage-pinned-linux-zswap-composed.py \
             --linux-root linux --manifest round045-evidence/real-original-manifest.json
