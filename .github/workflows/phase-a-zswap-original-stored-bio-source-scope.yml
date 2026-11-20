@@ -13,6 +13,8 @@ on:
       - "tests/tools/round043-original-bio-clone-verify.py"
       - "tests/tools/round045-original-stored-bio-scope-verify.py"
       - "tests/tools/round047-original-slot-incarnation-source-audit.py"
+      - "tests/tools/round048-original-counted-slot-source-audit.py"
+      - "docs/handoff/zswapz/round048/agent2-evidence.md"
       - "docs/handoff/zswapz/round047/agent2-evidence.md"
       - "tests/runtime/native/fixtures/round045-original-stored-bio-scope-host.c"
       - "docs/handoff/zswapz/round045/agent2-evidence.md"
@@ -72,6 +74,18 @@ jobs:
             code=$?
             echo "::error::Round047 first pristine original Linux slot-lifetime source audit failure exit=$code"
             tail -n 80 round045-evidence/round047-original-slot-audit.log
+            exit "$code"
+          fi
+          # Reject an external counted swap-slot ref claim without the
+          # current original locked swapcache folio and complete unwind.
+          if python3 -B swapz/tests/tools/round048-original-counted-slot-source-audit.py \
+              --linux-root linux --self-test \
+              >round045-evidence/round048-counted-slot-source.log 2>&1; then
+            tail -n 8 round045-evidence/round048-counted-slot-source.log
+          else
+            code=$?
+            echo "::error::Round048 first original counted slot ownership negative source test exit=$code"
+            tail -n 80 round045-evidence/round048-counted-slot-source.log
             exit "$code"
           fi
           # Reject copied 037/038 page-IO vs zswap STORE symbol checks
@@ -305,6 +319,8 @@ jobs:
           test -z "$(git -C linux status --porcelain --untracked-files=all)"
           python3 -B swapz/tests/tools/round047-original-slot-incarnation-source-audit.py \
             --linux-root linux
+          python3 -B swapz/tests/tools/round048-original-counted-slot-source-audit.py \
+            --linux-root linux --self-test
           python3 -B swapz/tests/tools/stage-pinned-linux-zswap-composed.py \
             --linux-root linux --manifest round045-evidence/real-original-manifest.json
           python3 - round045-evidence/real-original-manifest.json <<'PY'
