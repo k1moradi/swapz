@@ -16069,3 +16069,20 @@ is still unknown despite owner-reported recovery. Keep
 `SOURCE_MAPPED_AUTHENTICATED=0`, `PHASE_A=BLOCKED`,
 `DIRECT_COMPRESSED_HANDOFF=NO_GO_DISABLED`, and
 `FORCED_RAW_BYPASS=DISABLED` even if all synthetic C/CI tests pass.
+
+### Round046 Agent3 first genuine source-compiler RED correction (2026-11-19)
+
+At immutable first Agent3 published source `4630213e03e43678ecfc919416f9439b4c75f3c7`,
+the new rootless original-C source extraction workflow
+[#44643872189](https://github.com/k1moradi/swapz/actions/runs/44643872189)
+first genuinely **FAILED**, job `135981421369`: twelve hostile source
+mutations PASS, then strict GCC `-Werror=conversion` rejects a variable
+assignment to actual product `struct swapz_map.extent_blocks` three-bit
+bitfield; strict GCC and Clang both reject synthetic `REQ_OP_READ` since the
+inherited host-only stub correctly encodes Linux READ as opcode zero without
+a separately named test constant. The fix is only in the new host fixture:
+use the already-qualified bounded 1/2/4 constant ternary assignment as
+the inherited Round043 fixture does, and `REQ_SWAP` as the fake test
+READ opcode. No cast suppresses a warning, production C/API is unchanged,
+the hostile guards and 90 negatives are preserved. Do not count this
+source-SHA-red job green or substitute the new run until terminal.

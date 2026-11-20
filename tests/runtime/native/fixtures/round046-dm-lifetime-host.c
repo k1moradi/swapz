@@ -85,7 +85,8 @@ static void round046_run_synthetic_lifetime_negative(
 	current_maps[5].valid = true;
 	current_maps[5].generation = 13U;
 	current_maps[5].start_block = 6U;
-	current_maps[5].extent_blocks = (swapz_u8)extent_blocks;
+	current_maps[5].extent_blocks = extent_blocks == 1U ? 1U :
+		(extent_blocks == 2U ? 2U : 4U);
 	for (byte_index = 0U; byte_index < SWAPZ_BLOCK_BYTES; ++byte_index)
 		original_page[byte_index] = (swapz_u8)(byte_index & 0xffU);
 	memcpy(synthetic_readback, original_page, sizeof(original_page));
@@ -164,7 +165,7 @@ static void round046_run_synthetic_lifetime_negative(
 		expected_error = -ERANGE; break;
 	case 21U: upper.bi_iter.bi_sector = ~(sector_t)0 - 3U;
 		expected_error = -ERANGE; break;
-	case 22U: upper.bi_opf = REQ_OP_READ | REQ_SWAP; break;
+	case 22U: upper.bi_opf = REQ_SWAP; break; /* REQ_OP_READ is zero */
 	case 23U: upper.bi_iter.bi_size = 0U; break;
 	case 24U: /* Even equal fabricated original/DM bdev is NO_AUTH */
 		submitted.original_bdev_cookie = submitted.dm_device_cookie;

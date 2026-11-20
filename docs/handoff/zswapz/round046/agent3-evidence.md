@@ -51,3 +51,14 @@ and source-extraction first error if red. The historical prior-source
 23-success/1-failed-original-UML count is not green qualification and is
 not substituted for this final publication. No CI status is asserted here
 before the new exact-source workflows actually finish.
+
+## First actual source-extracted compiler RED and minimal correction
+
+First Agent3 source `4630213e03e43678ecfc919416f9439b4c75f3c7`,
+rootless job [135981421369](https://github.com/k1moradi/swapz/actions/runs/44643872189/job/135981421369):
+12/12 genuine hostile mutation controls PASS, GCC -Werror=conversion
+rejects a variable -> three-bit map.extent_blocks assignment; GCC and
+Clang reject absent synthetic REQ_OP_READ host constant. The correction
+uses exact existing 1/2/4 known constant selection and REQ_SWAP (Linux
+READ opcode zero), respectively; no production C behavior or warnings
+disabled. Follow-up exact-source CI must be inspected independently.
