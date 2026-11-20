@@ -16087,75 +16087,11 @@ READ opcode. No cast suppresses a warning, production C/API is unchanged,
 the hostile guards and 90 negatives are preserved. Do not count this
 source-SHA-red job green or substitute the new run until terminal.
 
-## Round047 Agent3 — original Round043 actual source hostile mutation ownership (2026-11-20)
 
-Round047 frozen engineering source `7248af62c0832d9bdac854eea8b7a6cb47d8a8c1`
-has a genuine original product CI RED, not a runtime DM defect: in
-[Round043 original matched workflow #44644183580, job 135982473052](https://github.com/k1moradi/swapz/actions/runs/44644183580/job/135982473052),
-actual GNU11 GCC and Clang strict `-Wall -Wextra -Wconversion -Wshadow
--Werror -fsanitize=address,undefined` extracted-C tests and inherited
-Round041 **150**, Round043 **90** negatives PASSED; inherited Round045
-**nine** negative entrypoint mutations PASSED. Original seven-source-hostile
-collection FAILED first in `tests/tools/round043-dm-real-ingress-verify.py`
-line 274, `AssertionError: 2 != 1`: global textual uniqueness incorrectly
-assumed the token `target_relative_sector = upper_bio->bi_iter.bi_sector`
-appears once in the whole product source. It rightfully appears in two
-independent default-undefined **real** C source helpers: Round043 and
-Round046. The original pinned GPL matched same-KDIR DM module step in that
-failed workflow was NOT EXECUTED; do not call it failed at Kbuild or PASS.
+### Round047 Agent2 pristine original Linux swap-slot lifetime negative source audit (2026-11-19)
 
-The original Round043 seven hostile mutation controls now operate on the
-unique **framed original helper** `ROUND043_DM_REAL_MAP_INGRESS_EXACT_START/END`
-or **framed real callsite**
-`ROUND043_DM_REAL_MAP_CALLSITE_EXACT_START/END`, preserving the original
-seven distinct mutations: GFP_ATOMIC, BIO_CLONED, missing refusal,
-forgotten private scrub, real callsite return, incorrect absolute-sector
-`ti->begin` addition, and exact callsite end-marker injection. Each
-real source-mutant must differ from the original source and intended marked
-region, change its original anchor exactly once, be rejected by the
-independent actual Round043 source validator, and leave **both** later
-Round046 guarded helper and real map callsite byte-for-byte intact. Do not
-assert global uniqueness of an explicitly shared valid token. Independently
-assert the old relative sector token is present once in each observer and
-at least twice globally; require all seven intended hostile controls to
-actually execute before printing their old PASS marker. Preserve original
-Round045 **nine** nested-main mutants and Round046 **twelve** real source
-mutants, prior Round040 two-source same-slot/GC/READ SHA, Round041 **150**
-and Round043 **90** executable actual C negatives, plus Round046 **90**
-separate current DM table/GC/dtr/ABA negatives on 4/8/16KiB host fixtures.
+The pinned original `torvalds/linux@c339f4010dea8b0d754f84ace70cd1b089878ef8` calls `get_swap_device()`/`put_swap_device()` for **swap-area** `percpu_ref users` scope; this is **not** the current allocation-incarnation ref of a specific type+offset swap slot. The original per-cluster swap-table slot can be zeroed/reclaimed and reused after its actual counted/PTE/swapcache owner ends. `swap_dup_entry_direct()` requires a *preexisting caller-owned locked direct counted slot reference* (e.g., PTL), not merely a copied typed slot/epoch or STORED payload. Original `zswap_writeback_entry()` validates its locked swapcache folio plus xarray entry, erases/frees the old STORED object and then performs ordinary uncompressed 4096 BIO writeback. Internal folio writeback lifetime does not transfer an external source allocation ref to DM, and `get_swap_device` is put before the async lower submit. Source backing sector comes from original swapfile physical extents; it is not current DM target-relative 8-sector mapping and does not pin GC/dtr lifetime.
 
-Required rootless exact-source checks are the existing
-`tests/tools/round041-dm-target-verify.py host-test`,
-`tests/tools/round043-dm-real-ingress-verify.py hostile-self-test`,
-`tests/tools/round043-dm-real-ingress-verify.py host-test`, and
-`tests/tools/round046-dm-real-lifetime-verify.py host-test`, including
-strict actual original C GNU11 GCC+Clang ASan+UBSan. Qualify the actual
-original pinned torvalds/linux@c339f4010dea8b0d754f84ace70cd1b089878ef8
-CONFIG_ZSWAP=y full vmlinux/modules/Module.symvers, unique original
-GPL v1 provider/probe, real production `dm-swapz.ko` built W=1/-Werror
-with matched SAME ORIGINAL KDIR default and opt-in guarded form; confirm
-real modpost/vermagic/ELF and native x86/ARM/policy. Original 55/55
-booted UML KUnit at earlier Agent2 SHA `dd5f387b` is genuine, but MUST
-NOT be described as a 55/55 execution on any new combined SHA without a
-new actual original kernel boot. Pending and queued jobs do NOT pass.
+A new rootless audit must consume **pristine pinned original** `mm/swapfile.c`, `mm/zswap.c`, `mm/page_io.c`, `include/linux/swap.h` and `block/bio.c` by exact immutable original Git blob IDs, validate actual source functions and negative owner/ordering/callback boundaries, and reject **18 genuinely changed hostile C-source mutants** without manufacturing a transferable owner or altering runtime. This audit is intentionally BEFORE 10-source original compositor staging, and supplements rather than replaces genuine original kernel booted **55/55 JSON+KTAP**, original GCC/Clang source sanitizer, original x86 both ZSWAP=y/n actual full vmlinux/modules/Module.symvers GPL and same-original-KDIR DM W=1/-Werror, native x86/ARM/policy exact-current-commit CI. No original C test count change is authorized without meaningful true original source hook.
 
-The correction changes only the **host verifier**, not product C, kernel
-Linux composer, public GPL ABI, real admission, lower IO, map, GC, dtr,
-upper ACK or default-off code path. Strict warnings, old C code, and
-test counts cannot be relaxed to make CI green. A copied STORED LZ4
-snapshot, typed source slot/epoch, source bdev/nonlinear absolute sector
-or matching DM pointers/cookies cannot authenticate a current live
-source allocation-incarnation and correct DM target-relative 8-sector
-table/map/GC/dtr lease across asynchronous callback. All mock headers,
-4/8/16KiB extents and original 4096 SHA/CRC are synthetic only; no
-real loaded or physical swap is inferred. Zswap remains exclusively
-bounded compressed RAM with natural native MM-pressure eviction; swapz
-remains preexisting valid SWAPSPACE2 disk compression/packing/GC with no
-competing reclaim controller. Ordinary upper RAW_4096 is always full
-ORIGINAL UNCOMPRESSED 4096 bytes, and the entire FIRST physical 4096-byte
-swap header/signature/UUID and partition table are immutable. No new
-physical trial, `make test`, `make fast_test`, privileged, loaded,
-null_blk, real pressure, swapoff/on, mkswap or reboot. The older physical
-`producer_refused` cause remains UNKNOWN despite owner-reported recovery.
-Keep `SOURCE_MAPPED_AUTHENTICATED=0 PHASE_A=BLOCKED
-DIRECT_COMPRESSED_HANDOFF=DISABLED FORCED_RAW_BYPASS=DISABLED`.
+Maintain `SOURCE_MAPPED_AUTHENTICATED=0 PHASE_A=BLOCKED`, direct compressed handoff and forced RAW disabled. No owner `make test`/`make fast_test`, loaded/physical/null_blk/real-pressure/swapoff/swapon/mkswap/DM/reboot. Retain entire physical first SWAPSPACE2 4096 and partition table; prior physical producer_refused first private cause remains unknown. Normal upper RAW_4096 is entire **original uncompressed 4096**. No alternative reclaim.

@@ -12,6 +12,8 @@ on:
       - "tests/tools/round042-original-writeback-verify.py"
       - "tests/tools/round043-original-bio-clone-verify.py"
       - "tests/tools/round045-original-stored-bio-scope-verify.py"
+      - "tests/tools/round047-original-slot-incarnation-source-audit.py"
+      - "docs/handoff/zswapz/round047/agent2-evidence.md"
       - "tests/runtime/native/fixtures/round045-original-stored-bio-scope-host.c"
       - "docs/handoff/zswapz/round045/agent2-evidence.md"
       - "tests/runtime/native/fixtures/round043-original-bio-clone-*.c"
@@ -60,6 +62,18 @@ jobs:
           test -z "$(git -C swapz status --porcelain --untracked-files=all)"
           test -z "$(git -C linux status --porcelain --untracked-files=all)"
           export ROUND031_PINNED_LINUX="$PWD/linux"
+          # Prove the real original allocation/area/slot and BIO lifetime
+          # before composing or modifying any of the ten pinned C files.
+          if python3 -B swapz/tests/tools/round047-original-slot-incarnation-source-audit.py \
+              --linux-root linux --self-test \
+              >round045-evidence/round047-original-slot-audit.log 2>&1; then
+            tail -n 8 round045-evidence/round047-original-slot-audit.log
+          else
+            code=$?
+            echo "::error::Round047 first pristine original Linux slot-lifetime source audit failure exit=$code"
+            tail -n 80 round045-evidence/round047-original-slot-audit.log
+            exit "$code"
+          fi
           # Reject copied 037/038 page-IO vs zswap STORE symbol checks
           # before any full original kernel compilation; hostile mutations
           # must also be caught by the independent verifier.
@@ -289,6 +303,8 @@ jobs:
           test "$(git -C swapz rev-parse HEAD)" = "$GITHUB_SHA"
           test "$(git -C linux rev-parse HEAD)" = c339f4010dea8b0d754f84ace70cd1b089878ef8
           test -z "$(git -C linux status --porcelain --untracked-files=all)"
+          python3 -B swapz/tests/tools/round047-original-slot-incarnation-source-audit.py \
+            --linux-root linux
           python3 -B swapz/tests/tools/stage-pinned-linux-zswap-composed.py \
             --linux-root linux --manifest round045-evidence/real-original-manifest.json
           python3 - round045-evidence/real-original-manifest.json <<'PY'
