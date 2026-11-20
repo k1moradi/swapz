@@ -4130,6 +4130,129 @@ def apply_round043_original_bio_clone(path: str, composed: str) -> str:
         path, "round043-original-genuine-clone-kunit")
 
 
+# Round049 guarded source-only counted slot immediate pair (NO_AUTH).
+# Both acquisition and release occur BEFORE original folio unlock.
+ROUND049_COUNTED_PAIR_MACRO = "SWAPZ_ROUND049_ORIGINAL_LOCKED_FOLIO_COUNT_PAIR_TEST"
+ROUND049_COUNTED_PAIR_C = r"""#if defined(SWAPZ_ROUND049_ORIGINAL_LOCKED_FOLIO_COUNT_PAIR_TEST) && IS_ENABLED(CONFIG_KUNIT)
+/* ROUND049_ORIGINAL_COUNTED_PAIR_BEGIN */
+/* This CI-only local pair owns NO reference on return. */
+static noinline int swapz_round049_original_locked_folio_counted_pair(
+		struct folio *folio, const struct zswap_entry *stored,
+		swp_entry_t original_slot, struct xarray *tree)
+{
+	int result;
+
+	if (!folio || !stored || !tree || !original_slot.val)
+		return -EINVAL;
+	if (!folio_test_locked(folio) || !folio_test_swapcache(folio))
+		return -ESTALE;
+	if (folio->swap.val != original_slot.val ||
+	    xa_load(tree, swp_offset(original_slot)) != stored)
+		return -ESTALE;
+
+	/*
+	 * Original folio_dup_swap owns a counted slot only while a real
+	 * locked cache folio pins that incarnation. The original cluster
+	 * lock, extension allocation retry and rollback stay in the helper.
+	 */
+	result = folio_dup_swap(folio, NULL);
+	if (result)
+		return result;
+
+	/*
+	 * Balance the EXACT count before unlocking this SAME folio.
+	 * folio_put_swap needs no new swap-area get, so no release races
+	 * with percpu_ref_tryget_live after original get_swap_device put.
+	 * NEVER transfer any counted ref to an external callback.
+	 */
+	folio_put_swap(folio, NULL);
+	return 0;
+}
+
+static void swapz_round049_missing_original_owner_kunit(struct kunit *test)
+{
+	struct zswap_entry fake_store = {};
+	struct xarray tree;
+	swp_entry_t original_slot = { .val = 1 };
+
+	xa_init(&tree);
+	KUNIT_EXPECT_EQ(test, swapz_round049_original_locked_folio_counted_pair(
+			NULL, &fake_store, original_slot, &tree), -EINVAL);
+	KUNIT_EXPECT_EQ(test, swapz_round049_original_locked_folio_counted_pair(
+			NULL, NULL, original_slot, &tree), -EINVAL);
+	KUNIT_EXPECT_EQ(test, swapz_round049_original_locked_folio_counted_pair(
+			NULL, &fake_store, original_slot, NULL), -EINVAL);
+	original_slot.val = 0;
+	KUNIT_EXPECT_EQ(test, swapz_round049_original_locked_folio_counted_pair(
+			NULL, &fake_store, original_slot, &tree), -EINVAL);
+	xa_destroy(&tree);
+}
+
+static void swapz_round049_unlocked_uncached_folio_kunit(struct kunit *test)
+{
+	struct zswap_entry fake_store = {};
+	struct xarray tree;
+	struct folio *folio;
+	swp_entry_t original_slot = { .val = 1 };
+
+	folio = folio_alloc(GFP_KERNEL, 0);
+	KUNIT_ASSERT_NOT_NULL(test, folio);
+	xa_init(&tree);
+	/* Neither a borrowed unlocked page nor a locked uncached page owns
+	 * the original allocation incarnation.
+	 */
+	KUNIT_EXPECT_FALSE(test, folio_test_locked(folio));
+	KUNIT_EXPECT_FALSE(test, folio_test_swapcache(folio));
+	KUNIT_EXPECT_EQ(test, swapz_round049_original_locked_folio_counted_pair(
+			folio, &fake_store, original_slot, &tree), -ESTALE);
+	folio_lock(folio);
+	KUNIT_EXPECT_TRUE(test, folio_test_locked(folio));
+	KUNIT_EXPECT_FALSE(test, folio_test_swapcache(folio));
+	KUNIT_EXPECT_EQ(test, swapz_round049_original_locked_folio_counted_pair(
+			folio, &fake_store, original_slot, &tree), -ESTALE);
+	folio_unlock(folio);
+	xa_destroy(&tree);
+	folio_put(folio);
+}
+
+static struct kunit_case swapz_round049_original_counted_pair_cases[] = {
+	KUNIT_CASE(swapz_round049_missing_original_owner_kunit),
+	KUNIT_CASE(swapz_round049_unlocked_uncached_folio_kunit),
+	{}
+};
+static struct kunit_suite swapz_round049_original_counted_pair_suite = {
+	.name = "swapz_round049_original_locked_folio_counted_pair_no_authority",
+	.test_cases = swapz_round049_original_counted_pair_cases,
+};
+kunit_test_suite(swapz_round049_original_counted_pair_suite);
+/* ROUND049_ORIGINAL_COUNTED_PAIR_END */
+#endif /* CI-only, DEFAULT UNDEFINED; NO external slot lease */
+"""
+ROUND049_COUNTED_PAIR_HOOK = r"""#if defined(SWAPZ_ROUND049_ORIGINAL_LOCKED_FOLIO_COUNT_PAIR_TEST) && IS_ENABLED(CONFIG_KUNIT)
+	/* Only after the genuine source xarray identity/decompression check,
+	 * while the current folio remains locked, BEFORE STORED erase.
+	 */
+	ret = swapz_round049_original_locked_folio_counted_pair(
+		folio, entry, swpentry, tree);
+	if (ret)
+		goto err;
+#endif
+"""
+
+
+def apply_round049_original_counted_pair(path: str, composed: str) -> str:
+    """No default behavior: original C synchronous counted pair only."""
+    if path != "mm/zswap.c":
+        return composed
+    declaration = "static int zswap_writeback_entry(struct zswap_entry *entry,\n"
+    composed = replace_once(composed, declaration,
+                            ROUND049_COUNTED_PAIR_C + "\n" + declaration,
+                            path, "round049-genuine-original-locked-folio")
+    erase = "\txa_erase(tree, offset);\n\n\tcount_vm_event(ZSWPWB);"
+    return replace_once(composed, erase, ROUND049_COUNTED_PAIR_HOOK + erase,
+                        path, "round049-after-original-store-verification")
+
+
 # Round045 observation is private original Linux C, default UNDEFINED, and
 # establishes no real current allocation or DM target/GC ownership lease.
 ROUND045_ORIGINAL_STORED_BIO_SCOPE_MACRO = "SWAPZ_ROUND045_ORIGINAL_STORED_BIO_SOURCE_SCOPE_TEST"
@@ -4495,6 +4618,8 @@ def compose_postimage(path: str, original_bytes: bytes, *,
         changed = apply_round043_original_bio_clone(path, changed)
     if with_kunit:
         changed = apply_round045_original_stored_bio_scope(path, changed)
+    if with_kunit:
+        changed = apply_round049_original_counted_pair(path, changed)
     if path == "mm/zswap.c":
         for required in (
             "swapz_round028_slot_epoch(swpentry)",
