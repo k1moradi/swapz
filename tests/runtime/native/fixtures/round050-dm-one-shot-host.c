@@ -258,6 +258,23 @@ static void round050_run_real_negative(
 		submitted.current_table_lease_reported = true;
 		observed = submitted;
 		break;
+	case 53U:
+		/* Exactly 3568 bytes plus spoofed credentials never authorizes I/O. */
+		submitted.compressed_length = SWAPZ_MAX_COMPRESSED;
+		submitted.source_counted_owner_reported = true;
+		submitted.current_table_lease_reported = true;
+		observed = submitted;
+		break;
+	case 54U:
+		/* Either report's failed compressed CRC must abort. */
+		observed.compressed_crc_valid = false;
+		expected = -EBADMSG;
+		break;
+	case 55U:
+		/* A failed observed callback is not a durable write. */
+		observed.lower_error = -EIO;
+		expected = -EAGAIN;
+		break;
 	default: assert(0 && "bad Round050 hostile fault selector");
 	}
 
@@ -305,13 +322,13 @@ int main(void)
 
 	/* All cases are negative; all three bounded 4/8/16KiB extents. */
 	for (extent_blocks = 1U; extent_blocks <= 4U; extent_blocks *= 2U) {
-		for (fault = 0U; fault < 53U; ++fault) {
+		for (fault = 0U; fault < 56U; ++fault) {
 			round050_run_real_negative(extent_blocks, fault);
 			++negative_cases;
 		}
 	}
-	assert(negative_cases == 159U);
-	puts("ROUND050_REAL_PRODUCT_ONE_SHOT_159_NEGATIVE_C_CASES_PASS");
+	assert(negative_cases == 168U);
+	puts("ROUND050_REAL_PRODUCT_ONE_SHOT_168_NEGATIVE_C_CASES_PASS");
 	puts("ROUND050_SOURCE_TO_CURRENT_DM_AUTHENTICATED=0");
 	return 0;
 }

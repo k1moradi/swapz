@@ -44,7 +44,7 @@ jobs:
           set -euo pipefail
           python3 -B tests/tools/round049-dm-target-owned-intake-audit.py \
             --kernel-root "$RUNNER_TEMP/round048-pristine-dm"
-      - name: Round050 extract genuine product guarded C and run 159 negative cases GCC Clang ASan UBSan plus 22 hostile binaries each
+      - name: Round050 extract genuine product guarded C and run 168 negative cases GCC Clang ASan UBSan plus 22 hostile binaries each
         shell: bash
         run: |
           set -euo pipefail

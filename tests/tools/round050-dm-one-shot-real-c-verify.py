@@ -24,7 +24,7 @@ BEGIN = "/* ROUND050_DM_ONE_SHOT_NEGATIVE_HELPER_START */"
 END = "/* ROUND050_DM_ONE_SHOT_NEGATIVE_HELPER_END */"
 CALL_BEGIN = "/* ROUND050_DM_ONE_SHOT_MAP_CALLSITE_START */"
 CALL_END = "/* ROUND050_DM_ONE_SHOT_MAP_CALLSITE_END */"
-EXPECTED = "ROUND050_REAL_PRODUCT_ONE_SHOT_159_NEGATIVE_C_CASES_PASS"
+EXPECTED = "ROUND050_REAL_PRODUCT_ONE_SHOT_168_NEGATIVE_C_CASES_PASS"
 
 # Distinct *genuine* C guard mutations. Every one changes exactly one
 # occurrence in the marked, product-owned helper function, not another helper
@@ -202,9 +202,10 @@ def compose(source: str) -> str:
         fixture, "/* ROUND050_INJECT_REAL_PRODUCT_NEGATIVE_HELPER */", helper)
     fixture = replace_unique(
         fixture, "/* ROUND050_INJECT_REAL_PRODUCT_MAP_CALLSITE */", call)
-    if (EXPECTED not in fixture or "negative_cases == 159U" not in fixture or
+    if (EXPECTED not in fixture or "negative_cases == 168U" not in fixture or
+            "fault < 56U" not in fixture or
             fixture.count("int main(void)") != 1):
-        raise AssertionError("Round050 host fixture would skip 159 original C cases")
+        raise AssertionError("Round050 host fixture would skip 168 real C negatives")
     return fixture
 
 
@@ -237,7 +238,7 @@ def compile_and_execute(
                                  " sanitizer/assertion failure:\n" +
                                  run.stdout[-4000:] + run.stderr[-12000:])
         if EXPECTED not in run.stdout:
-            raise AssertionError("Round050 did not execute 159 original C negatives")
+            raise AssertionError("Round050 did not execute 168 real C negatives")
     else:
         if run.returncode == 0 or (
                 "FIRST Round050 actual product negative C failure:" not in

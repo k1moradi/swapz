@@ -16390,3 +16390,75 @@ first error UNKNOWN, recovery owner-reported only; no make test/fast_test,
 privilege, loaded module/DM, physical/real pressure, swapoff/on, mkswap,
 null_blk or reboot. SOURCE_MAPPED_AUTHENTICATED=0 PHASE_A=BLOCKED
 DIRECT_COMPRESSED_HANDOFF=DISABLED FORCED_RAW_BYPASS=DISABLED.
+
+## Round051 Agent3 — new real C negative corpus and same-source-commit native-policy recovery (2026-11-20)
+
+The immutable Round050 engineering commit `d98aa016682275fa9f18fd9debd6553870a8a5a2`
+had a REAL failed native repository-policy gate: its edited
+`tests/runtime/native/fixtures/round050-dm-one-shot-host.c` did not accompany
+a meaningful non-whitespace `docs/testing_standards.md` edit IN THAT
+source-changing commit. Later docs-only text cannot retroactively qualify
+the bad SHA. This Round051 corrective code-bearing commit MUST change the
+actual negative C fixture, its real-product extraction verifier and the
+canonical testing standard together, preserve all preceding standard bytes,
+and pass `python3 -B tests/runtime/native/repository-policy-test.py --enforce`
+at the EXACT NEW Git commit under `main` with the proper push-before SHA.
+Do not disable, bypass, weaken or rewrite the repository-policy checker.
+A new source SHA is qualified only by its own terminal CI results.
+
+The additional deterministic real-C host negatives apply to EACH 1/2/4
+physical block (4096/8192/16384-byte) extent: a source report at the EXACT
+3568-byte compressed upper boundary with both fabricated counted-source and
+live-table claims still MUST return `-EOPNOTSUPP` without permitting a
+mapping, physical WRITE or original ACK; an invalid independent OBSERVED
+compressed CRC MUST return `-EBADMSG`; and an independent OBSERVED lower
+callback `-EIO` MUST return `-EAGAIN` even when submitted report says its
+write was durable. These are distinct from submitted-CRC and
+submitted-lower-error negatives. All remain read-only scalar C stand-ins:
+not genuine original swap-slot counted ownership, DM SRCU refs, successful
+durability, GC/dtr lifetime protection or authentic BIO completion.
+
+The verifier MUST extract the UNIQUE actual guarded C helper and actual
+in-band `swapz_map` callsite from `src/kernel/dm-target.c` into the
+host fixture, never substitute a reimplementation, alter real product
+`swapz_map`/async lower IO/GC/dtr/ACK, or make a default-on path. The
+`SWAPZ_ROUND050_DM_ONE_SHOT_NEGATIVE_TEST` guard remains UNDEFINED in the
+ordinary product, and its real in-band observer receives exactly TWO
+null reports, discards the result and cannot grant authorization. The
+fixture MUST execute at least **168 exact-errno negative C cases EACH**
+under GCC AND Clang (56 fault selectors times all THREE extent geometries),
+including cap=3568, observed-CRC refusal and observed-callback failure,
+with unchanged-input checks and precise first-case failure diagnostics.
+The strict GNU11 `-Wall -Wextra -Wconversion -Wshadow -Werror` and
+`-fsanitize=address,undefined -fno-sanitize-recover=all` flags MUST remain
+for BOTH original and mutation builds, and ASan/UBSan binaries MUST execute.
+
+At least **22 distinct function-scoped hostile genuine production helper
+source mutations** MUST EACH be caught by the exact source validator AND
+built AND executed as a separate mutated real-C binary with BOTH GCC and
+Clang (minimum 44 executed hostile binaries), rejected by an exact-errno
+runtime assertion rather than by a mere status string or compilation
+failure. A new fixture or verifier change MUST preserve this matrix and
+append its OWN substantive non-whitespace testing standard within the
+SAME source-changing commit. Retain inherited genuine Round041/043/046
+C/sanitizer audits and real pinned original Linux Round048 source
+mutation/export-audit gates, plus native x86/ARM, systemd/package and
+physical-safety rootless policy gates. The original genuine booted UML C
+KUnit 57/57 and full original x86 BOTH ZSWAP=y/n full Kbuild with matched
+GPL `dm-swapz.ko` are distinct per-SHA gates; never substitute green
+ancestor evidence or label queued/skipped runs successful.
+
+This negative-only test C does NOT authorize original STORED compressed
+handoff. Native zswap alone controls bounded compressed RAM by native MM
+pressure eviction; swapz alone compresses valid SWAPSPACE2 DISK with
+4/8/16KiB payload-only extents, RAM-only metadata and GC. Ordinary
+`RAW_4096` ALWAYS contains the complete ORIGINAL UNCOMPRESSED 4096
+bytes; codec/framing/CRC/3568-cap verification and independent original
+counted slot incarnation ownership, real current target/GC/dtr async lease,
+durable lower write, single authoritative map, exactly one genuine ACK and
+original 4096-byte readback all remain unproven. The ENTIRE first physical
+4096-byte SWAPSPACE2 header/UUID/signature and partition table are
+immutable. `SOURCE_MAPPED_AUTHENTICATED=0`; `PHASE_A=BLOCKED`;
+`DIRECT_COMPRESSED_HANDOFF=DISABLED`; `FORCED_RAW_BYPASS=DISABLED`.
+No owner `make test`/`make fast_test`, privilege, loaded device mapper,
+real pressure, physical swap or reboot is authorized for this fixture.
