@@ -38,6 +38,12 @@ jobs:
           set -euo pipefail
           python3 -B tests/tools/round048-dm-live-table-source-audit.py \
             --kernel-root "$RUNNER_TEMP/round048-pristine-dm"
+      - name: Round049 real target-owned clone ACK GC dtr and 26 actual source-hostile negatives
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 -B tests/tools/round049-dm-target-owned-intake-audit.py \
+            --kernel-root "$RUNNER_TEMP/round048-pristine-dm"
       - name: Re-execute real Round043 old 150 90 and seven nine source hostile and GCC Clang ASan UBSan
         shell: bash
         run: |
