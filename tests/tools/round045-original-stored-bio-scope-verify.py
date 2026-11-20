@@ -127,7 +127,7 @@ class HostileVerifierSelfTests(unittest.TestCase):
             doc = copy.deepcopy(baseline)
             doc["sub_groups"][-1]["test_cases"][0]["status"] = status
             bad.append((doc, log))
-        for field, value in (("tests", 2), ("passed", 2), ("failed", 1),
+        for field, value in (("tests", 3), ("passed", 1), ("failed", 1),
                              ("skipped", 1), ("crashed", 1), ("errors", 1)):
             doc = copy.deepcopy(baseline)
             doc["sub_groups"][-1]["misc"][field] = value
@@ -157,6 +157,12 @@ class HostileVerifierSelfTests(unittest.TestCase):
             bad.append((copy.deepcopy(baseline), changed))
         for index, (document, trace) in enumerate(bad):
             with self.subTest(case=index):
+                # Reject vacuous hostile fixtures before testing the verifier.
+                # A valid 2/2 sample must remain accepted; self-test mutations
+                # must change actual JSON or actual KTAP and be refused.
+                self.assertNotEqual(
+                    (document, trace), (baseline, log),
+                    "hostile mutant left both valid JSON and KTAP unchanged")
                 with self.assertRaises(OriginalStoredBioScopeEvidenceError):
                     verify(document, trace)
 
