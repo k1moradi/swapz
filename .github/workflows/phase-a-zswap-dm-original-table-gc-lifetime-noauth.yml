@@ -1,0 +1,50 @@
+name: Round048 genuine pinned DM SRCU table and product async GC dtr NO_AUTH source
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  original-dm-source-and-current-product-negatives:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install rootless actual C compiler and source test dependencies
+        run: |
+          set -euo pipefail
+          sudo apt-get update -qq
+          sudo apt-get install -y --no-install-recommends clang gcc liblz4-dev libssl-dev curl
+      - name: Retrieve exact pristine Linux DM core C; no checkout of another swapz branch
+        shell: bash
+        run: |
+          set -euo pipefail
+          original="$RUNNER_TEMP/round048-pristine-dm"
+          mkdir -p "$original/drivers/md" "$original/include/linux"
+          pinned="c339f4010dea8b0d754f84ace70cd1b089878ef8"
+          for path in drivers/md/dm.c drivers/md/dm-table.c include/linux/device-mapper.h; do
+            curl --fail --location --silent --show-error --retry 4 --retry-delay 2 \
+              "https://raw.githubusercontent.com/torvalds/linux/$pinned/$path" \
+              --output "$original/$path"
+          done
+          echo "ROUND048_ORIGINAL_DM_PINNED_SOURCES_DOWNLOADED_NOT_AUTHENTICATED_YET"
+      - name: Validate exact pinned Linux and production C; reject 18 plus export-hostile mutations
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 -B tests/tools/round048-dm-live-table-source-audit.py \
+            --kernel-root "$RUNNER_TEMP/round048-pristine-dm"
+      - name: Re-execute real Round043 old 150 90 and seven nine source hostile and GCC Clang ASan UBSan
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 -B tests/tools/round043-dm-real-ingress-verify.py host-test
+      - name: Re-execute genuine Round046 90 GC dtr ABA 12 source hostile GCC Clang ASan UBSan
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 -B tests/tools/round046-dm-real-lifetime-verify.py host-test

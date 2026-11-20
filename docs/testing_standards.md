@@ -16173,3 +16173,88 @@ Maintain `SOURCE_MAPPED_AUTHENTICATED=0 PHASE_A=BLOCKED`, direct compressed hand
 ### Round047 Agent2 real-original hostile mutator source-function scoping correction
 
 The pinned genuine original `block/bio.c` contains `bio->bi_end_io(bio);` in more than one function; global first-token replacement can accidentally mutate an unrelated handler, leaving the intended `bio_endio()` path unchanged. The new original-source audit therefore binds all eighteen hostile mutations to the **exact named original C function body** (with one explicitly unique CONFIG_SWAP area-put header token), requires exactly one token occurrence *inside that function*, asserts the source changes, and demands the unchanged negative auditor rejects every altered source. No original kernel C, existing 55 KUnit, production behavior, public GPL interface or peer product verifier changes. An accidental mutation of a different original function must not count as an anti-ABA source control. Genuine CI on the new exact SHA, not an old queued run, is required. Source-to-DM lifetime remains NO_AUTH.
+
+## Round048 Agent3 — pristine original DM SRCU table versus target/GC/dtr asynchronous lease audit (2026-11-20)
+
+The immutable pinned upstream kernel is
+`torvalds/linux@c339f4010dea8b0d754f84ace70cd1b089878ef8`.
+Rootless `tests/tools/round048-dm-live-table-source-audit.py` MUST
+verify exact original Git object blob IDs for `drivers/md/dm.c`
+(`1881d86111fb2e655893ad898cf21b88f0e4e7f3`),
+`drivers/md/dm-table.c` (`a483f49dd4ce6383ef66464707865187aa4cf51c`),
+and `include/linux/device-mapper.h`
+(`cd4faaf5d4275c038d06ccef4da3d77430154388`);
+never rely on mocked kernel source, uncontrolled headers, text that merely
+resembles current Linux, or pasted fixture assertions. The actual source
+has `dm_get_live_table()` acquiring a per-mapped-device SRCU reader,
+`dm_put_live_table()` releasing the SAME `srcu_idx`,
+`dm_sync_table()` synchronizing before old-table dtr/free, and
+`__map_bio()` transferring ownership only of its original DM clone
+when target `->map` returns `DM_MAPIO_SUBMITTED`. Neither live-table
+reader/release nor sync function is `EXPORT_SYMBOL` in this original
+Linux build: a declared prototype or mapped-device handle is NOT a
+reference-counted, exported, freely transferable independent table pin.
+An SRCU index acquired by core is NOT a permanent token across an
+unrelated async callback, nor proof that a currently loaded target
+is the same old target under table reload/geometry ABA.
+
+Current production `src/kernel/dm-target.c` normal WRITE accepts
+original uncompressed 4096 upper BIO under `ctx->queue_lock` and
+returns `DM_MAPIO_SUBMITTED`. Asynchronous lower WRITE callback
+dereferences its own `inflight->ctx`, writes its lower status, publishes
+`lower_done` under `ctx->queue_lock`, and queues the worker. Target
+`swapz_drain()` closes admission, waits for outstanding lower writes,
+drains worker queue and checks pending ACK state; `swapz_dtr()`
+calls that drain before freeing `ctx`. These source-specific invariants
+protect existing accepted target IO, NOT an independent, currently valid
+source-to-table/target/GC/dtr owner for copied upstream zswap compressed
+STORED records. `swapz_gc_relocate_one` obtains a current
+`ctx->maps[logical]` snapshot owned by the ordered GC worker, which
+cannot be borrowed into unrelated late callback after extent ABA.
+Matching pointer, geometry, table epoch, GC destination, current logical
+eight-sector offset, original bdev cookie or original possibly nonlinear
+physical sector does NOT make an owner reference live.
+
+The rootless source audit must extract these precise original C function
+bodies and check 48 function-local original core/product anchors;
+18 independently distinct actual pinned real-source hostile mutations
+must each genuinely modify exactly one correct function and cause the
+validator to reject. A further attempted fabricated
+`EXPORT_SYMBOL_GPL(dm_get_live_table)` must also reject. Keep full
+original `Round046` default-off guard's unconditional negative return,
+no reachable success code, unchanged original `swapz_map` callsite
+with NULL synthetic reports and ignored result. Run original
+`round043-dm-real-ingress-verify.py host-test` (inherited real C
+Round041 150 + Round043 90, 7+9 hostile source controls) AND
+`round046-dm-real-lifetime-verify.py host-test` (actual source C GCC+
+Clang strict GNU11 `-Wall -Wextra -Wconversion -Wshadow -Werror`
+ASan+UBSan, 90 target/GC/dtr negative cases, 12 source mutants).
+The new workflow must genuinely acquire original pinned Git source
+and verify object IDs before claiming evidence. Existing complete
+original ZSWAP=y UML real 55/55 JSON AND KTAP, original x86
+ZSWAP=y/n real full vmlinux/modules/Module.symvers one ORIGINAL GPL
+export/probe and real same ORIGINAL KDIR `dm-swapz.ko` default/guard
+W=1/-Werror, native x86/ARM/policy, package/systemd and rootless
+physical-simulated patch hygiene remain separate mandatory SAME-source
+CI gates. Never declare queued or running complete.
+
+No new positive source-to-current-DM lease, no source or on-disk format
+change, and no loaded module trial is introduced. A proper future
+integration would need a separately, legitimately retained actual
+current original swap-slot counted allocation-incarnation ref PLUS an
+actually held current DM table/target/ctx/GC generation lease extending
+across asynchronous lower completion, and real durable lower WRITE ->
+exactly one authoritative map -> exactly one actual upper ACK -> original
+4096 SHA-verified decoded READ. Original Linux zswap alone owns bounded
+compressed RAM and native MM-driven pressure eviction; swapz alone owns
+preexisting SWAPSPACE2 disk payload-only 4/8/16KiB compressed extents
+and GC with no second reclaim. Ordinary RAW_4096 upper BIO is full
+ORIGINAL UNCOMPRESSED 4096; copied source STORED dictionary-free LZ4
+must NEVER masquerade as this. The entire FIRST physical 4096
+SWAPSPACE2 header/UUID/signature and partition table are immutable.
+Old owner physical `producer_refused` cause remains UNKNOWN and
+recovery owner-reported only. No `make test`, `make fast_test`,
+privilege, loaded/physical/real pressure, swapon/off, mkswap, null_blk,
+DM activation or reboot. `SOURCE_MAPPED_AUTHENTICATED=0`,
+`PHASE_A=BLOCKED`, `DIRECT_COMPRESSED_HANDOFF=DISABLED`,
+`FORCED_RAW_BYPASS=DISABLED`.
