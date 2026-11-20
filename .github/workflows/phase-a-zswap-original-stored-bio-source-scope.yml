@@ -16,6 +16,8 @@ on:
       - "tests/tools/round048-original-counted-slot-source-audit.py"
       - "tests/tools/round049-original-counted-pair-source-verify.py"
       - "tests/tools/round049-original-counted-pair-kunit-verify.py"
+      - "tests/tools/round050-original-deferred-slot-source-audit.py"
+      - "docs/handoff/zswapz/round050/agent2-evidence.md"
       - "docs/handoff/zswapz/round049/agent2-evidence.md"
       - "docs/handoff/zswapz/round048/agent2-evidence.md"
       - "docs/handoff/zswapz/round047/agent2-evidence.md"
@@ -89,6 +91,20 @@ jobs:
             code=$?
             echo "::error::Round048 first original counted slot ownership negative source test exit=$code"
             tail -n 80 round045-evidence/round048-counted-slot-source.log
+            exit "$code"
+          fi
+          # Genuine pinned upstream swapoff retries on untracked counted
+          # slots; a copied slot and late void direct-put lack an independent
+          # callback owner. Verify 16 function-scoped hostile original C
+          # mutations before modifying any original source file.
+          if python3 -B swapz/tests/tools/round050-original-deferred-slot-source-audit.py \
+              --linux-root linux --self-test \
+              >round045-evidence/round050-original-deferred-slot.log 2>&1; then
+            tail -n 8 round045-evidence/round050-original-deferred-slot.log
+          else
+            code=$?
+            echo "::error::Round050 first pinned original swapoff and deferred slot lifetime audit failure exit=$code"
+            tail -n 80 round045-evidence/round050-original-deferred-slot.log
             exit "$code"
           fi
           # Independently reject forged booted KUnit evidence; self-test
@@ -351,6 +367,8 @@ jobs:
           python3 -B swapz/tests/tools/round048-original-counted-slot-source-audit.py \
             --linux-root linux --self-test
           python3 -B swapz/tests/tools/round049-original-counted-pair-kunit-verify.py --self-test
+          python3 -B swapz/tests/tools/round050-original-deferred-slot-source-audit.py \
+            --linux-root linux --self-test
           python3 -B swapz/tests/tools/stage-pinned-linux-zswap-composed.py \
             --linux-root linux --manifest round045-evidence/real-original-manifest.json
           python3 - round045-evidence/real-original-manifest.json <<'PY'
