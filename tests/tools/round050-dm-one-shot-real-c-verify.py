@@ -183,7 +183,7 @@ def validate(source: str) -> tuple[str, str]:
                   "complete(&inflight->lower_done);",
                   "static void swapz_complete(",
                   "bio_endio(bio);",
-                  "static void swapz_gc_relocate_one(",
+                  "static int swapz_gc_relocate_one(",
                   "snapshot = ctx->maps[logical];",
                   "static void swapz_dtr(",
                   "swapz_drain(ti);",
