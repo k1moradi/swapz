@@ -17651,3 +17651,35 @@ unauthorized: `SOURCE_MAPPED_AUTHENTICATED=0`, `PHASE_A=BLOCKED`,
 direct compressed handoff DISABLED, forced RAW bypass DISABLED. Ordinary
 `RAW_4096` remains the full original uncompressed 4096-byte page; the
 physical SWAPSPACE2 header/UUID and parent partition table remain untouched.
+
+
+## Round061 authority workflow authentic GitHub push metadata (2026-11-21)
+
+The authority-conversion no-auth main-push workflow must propagate the exact
+GitHub push event `github.event.before` through `SWAPZ_PUSH_BEFORE_SHA` to
+the unchanged `tests/runtime/native/repository-policy-test.py --enforce`.
+It must not manufacture a parent, replace a missing event value with a commit
+constant, suppress a policy failure, or waive its full checkout, clean main,
+exact `GITHUB_SHA`, ordered first-parent, and canonical same-commit standards
+checks. Manual `workflow_dispatch` is a separate nonpush event; it must not
+be misrepresented as a push or given a fabricated push-base SHA.
+
+A rootless synthetic regression must execute that unchanged policy against
+real temporary Git objects and verify: positive exact-ancestor push and
+multi-commit first-parent co-changes; negative absent, empty, zero, malformed,
+unrelated and empty-range push bases; rejected wrong checkout SHA; rejection
+of a workflow implementation change without a meaningful same-commit
+`docs/testing_standards.md` change; and rejection of a later docs-only
+attempt to repair an invalid source commit. The runner must check the actual
+workflow environment binding and keep failure output bounded and free of
+host temporary paths. Neither a negative test's expected nonzero exit nor a
+successful synthetic test alone establishes product/module authorization.
+
+Keep the authority workflow's existing genuine linked production C GCC/Clang
+ASan+UBSan and ten compiled/executed changed-source mutants followed by the
+mandatory uncompromised first-parent policy gate. No owner Make, privileged,
+loaded-kernel, physical-device, or real-pressure tests are authorized.
+The default native compressed import remains unauthenticated and disabled:
+`SOURCE_MAPPED_AUTHENTICATED=0`, `PHASE_A=BLOCKED`, compressed handoff and
+forced RAW bypass disabled. Ordinary RAW_4096 remains the full original
+uncompressed page; physical SWAPSPACE2 header and partition table protected.

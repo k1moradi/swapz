@@ -7,6 +7,7 @@ on:
       - 'src/kernel/authority.h'
       - 'tests/runtime/native/fixtures/round059-authority-import-lifetime.c'
       - 'tests/tools/round059-authority-import-lifetime.py'
+      - 'tests/tools/round061-authority-push-metadata-verify.py'
       - '.github/workflows/phase-a-round060-authority-conversion-noauth.yml'
       - 'docs/testing_standards.md'
   workflow_dispatch:
@@ -16,6 +17,9 @@ jobs:
   changed-production-authority-c-gcc-clang-sanitizers:
     runs-on: ubuntu-24.04
     timeout-minutes: 25
+    env:
+      # Authentic GitHub push event metadata; nonpush events remain distinct.
+      SWAPZ_PUSH_BEFORE_SHA: ${{ github.event.before }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -28,6 +32,8 @@ jobs:
           test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
           test -z "$(git status --porcelain --untracked-files=all)"
           git diff --check HEAD^ HEAD
+      - name: Real Git push metadata and strict first-parent negative and positive regressions
+        run: python3 -B tests/tools/round061-authority-push-metadata-verify.py
       - name: Genuine linked product authority GCC and Clang ASan UBSan and 10 executable mutants
         run: python3 -B tests/tools/round059-authority-import-lifetime.py
       - name: Same-commit full prior testing standards preserved
