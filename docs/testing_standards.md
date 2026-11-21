@@ -17052,3 +17052,14 @@ Preserve all preexisting and peer canonical standards as an exact byte
 prefix, append this substantive same-commit source/fixture/workflow policy,
 and do not claim REPORT_READY before exact current-source terminal CI or
 an explicit bounded NO_GO.
+
+### Round057 Clang/GCC host-original const-preservation correction
+
+Under the pristine upstream `COPY4` macro, `get_unaligned` receives a
+`const u32 *` input. A host `__typeof__(*(pointer))` local remains
+`const u32`, which cannot be written by `memcpy`: GCC `-Werror`
+diagnoses discarded qualifiers. Use `__typeof__(*(pointer) + 0)`
+inside this test-only shim to perform integer promotions and obtain
+an unqualified scalar temporary; retain explicit `const void *`
+input, `void *` output, native upstream warning policy, and full
+ASan/UBSan. This is not a source change to pristine Linux.

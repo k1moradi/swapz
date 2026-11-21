@@ -37,7 +37,7 @@ typedef uint64_t u64;
  "linux/unaligned.h": """#pragma once
 #include <stdint.h>
 #include <string.h>
-#define get_unaligned(pointer) ({ __typeof__(*(pointer)) value; memcpy(&value, (const void *)(pointer), sizeof(value)); value; })
+#define get_unaligned(pointer) ({ __typeof__(*(pointer) + 0) value; memcpy(&value, (const void *)(pointer), sizeof(value)); value; })
 #define put_unaligned(value,pointer) do { __typeof__(*(pointer)) value_copy = (value); memcpy((void *)(pointer), &value_copy, sizeof(value_copy)); } while (0)
 static inline uint16_t get_unaligned_le16(const void *pointer) { uint16_t value; memcpy(&value,pointer,sizeof(value)); return value; }
 static inline uint32_t get_unaligned_le32(const void *pointer) { uint32_t value; memcpy(&value,pointer,sizeof(value)); return value; }

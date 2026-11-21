@@ -42,3 +42,19 @@ genuine KUnit boot success at `1c89862` is independent and does
 not authenticate live target ownership or durable lower I/O/ACK.
 No owner make/fast tests, privileged or loaded kernel, actual
 swap, memory pressure or physical device trials.
+
+## First exact-source CI diagnostic and bounded correction
+
+Initial Agent4 published commit `85c763a653bb5f4b4bcd6086182cf080b94ddbdb`
+registered original decoder [run #44901525313](https://github.com/k1moradi/swapz/actions/runs/44901525313),
+job `136838254455`. Its actual first error advanced past original
+decompressor sign conversion: GCC `gcc/baseline/compile/original-lzo-compressor`
+reported `linux/unaligned.h:4` `-Werror=discarded-qualifiers` at the
+host `get_unaligned` temporary initialized through `memcpy`. The prior
+`__typeof__(*(pointer))` produced a `const u32` local when the pristine
+`COPY4` passed a `const u32 *`. Host-only
+`__typeof__(*(pointer) + 0)` removes that local const qualification
+via integer promotions without weakening upstream warnings or UBSan.
+An independent local source-adaptor C reproduction passed GCC 14.2
+and Clang 17 with ASan/UBSan and `-Wall -Wextra -Werror`. This is not
+a full original LZO proof; report fresh exact-source CI terminal logs.
