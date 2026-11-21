@@ -1,0 +1,89 @@
+/* ROUND058_ORIGINAL_STORED_BIO_KUNIT_BEGIN */
+#if defined(SWAPZ_ROUND058_ORIGINAL_STORED_BIO_CHAIN_TEST) && \
+    defined(SWAPZ_ROUND056_PREERASE_SINGLE_OWNER_TEST) && \
+    defined(SWAPZ_ROUND056_ORIGINAL_CLONE_PROVENANCE_TEST) && \
+    defined(SWAPZ_ROUND034_ORIGINAL_V1_KUNIT_TEST) && IS_ENABLED(CONFIG_KUNIT)
+#include <kunit/test.h>
+/* This is a genuine block/bio.c C integration test, not pressure eviction. */
+static void swapz_round058_original_stored_bio_chain_kunit(struct kunit *test)
+{
+	struct swapz_ci_owned_payload *owner = NULL;
+	struct bio original_bio = {}, cloned_bio = {};
+	struct bio_vec vector = {};
+	struct page *page;
+	u8 original_sha[SHA256_DIGEST_SIZE];
+	void *bytes;
+	u8 *private_bytes;
+	int result;
+
+	page = alloc_page(GFP_KERNEL);
+	KUNIT_ASSERT_NOT_NULL(test, page);
+	bytes = kmap_local_page(page);
+	memset(bytes, 0x37, 4096U);
+	sha256(bytes, 4096U, original_sha);
+	kunmap_local(bytes);
+	owner = swapz_round056_owned_reserve_source_v1(
+		48U, original_sha, 9U, 11U, 13U);
+	if (!owner) {
+		KUNIT_FAIL(test, "bounded source owner reservation failed");
+		goto free_page;
+	}
+	private_bytes = swapz_round056_owned_private_bytes(owner, 48U);
+	if (!private_bytes) {
+		KUNIT_FAIL(test, "source private bytes unavailable");
+		goto put_owner;
+	}
+	memset(private_bytes, 0x5d, 48U);
+	if (!swapz_round056_owned_seal_source_v1(owner)) {
+		KUNIT_FAIL(test, "source sealing rejected");
+		goto put_owner;
+	}
+	bvec_set_page(&vector, page, 4096U, 0);
+	bio_init(&original_bio, NULL, &vector, 1U, REQ_OP_WRITE | REQ_SWAP);
+	/* bio_init must preserve native embedded swap_iocb zero bi_vcnt. */
+	KUNIT_EXPECT_EQ(test, original_bio.bi_vcnt, 0U);
+	original_bio.bi_bdev = (struct block_device *)test;
+	original_bio.bi_iter.bi_sector = 8U;
+	original_bio.bi_iter.bi_size = 4096U;
+	original_bio.bi_swap_origin = SWAP_BIO_ORIGIN_ZSWAP_STORED_WRITEBACK;
+	original_bio.bi_swapz_ci_sideband = owner;
+	owner = NULL; /* Original bio_uninit now owns the sole owner ref. */
+	KUNIT_EXPECT_EQ(test, swapz_round058_source_bio_observe(&original_bio), 0);
+	/* The older ticket fixture uses bi_vcnt=1; it must NOT claim this BIO. */
+	KUNIT_EXPECT_PTR_EQ(test,
+		swapz_round056_attach_original(&original_bio), NULL);
+	result = bio_init_clone(NULL, &cloned_bio, &original_bio, GFP_KERNEL);
+	if (result) {
+		KUNIT_FAIL(test, "original core bio_init_clone failed");
+		goto uninit_original;
+	}
+	KUNIT_EXPECT_TRUE(test, bio_flagged(&cloned_bio, BIO_CLONED));
+	KUNIT_EXPECT_PTR_EQ(test, cloned_bio.bi_io_vec,
+		original_bio.bi_io_vec);
+	KUNIT_EXPECT_EQ(test, cloned_bio.bi_iter.bi_size, 4096U);
+	KUNIT_EXPECT_NE(test, swapz_round058_source_bio_observe(&cloned_bio), 0);
+	KUNIT_EXPECT_FALSE(test, swapz_round056_complete_clone_view(&cloned_bio));
+	/* Parent lifetime ends before clone; borrowed bvec is never re-read. */
+	bio_uninit(&original_bio);
+	bio_uninit(&cloned_bio);
+	goto free_page;
+uninit_original:
+	bio_uninit(&original_bio);
+	goto free_page;
+put_owner:
+	swapz_ci_owned_put(owner);
+free_page:
+	__free_page(page);
+}
+
+static struct kunit_case swapz_round058_original_chain_cases[] = {
+	KUNIT_CASE(swapz_round058_original_stored_bio_chain_kunit),
+	{}
+};
+static struct kunit_suite swapz_round058_original_chain_suite = {
+	.name = "swapz_round058_original_stored_bio_no_authority",
+	.test_cases = swapz_round058_original_chain_cases,
+};
+kunit_test_suite(swapz_round058_original_chain_suite);
+#endif
+/* ROUND058_ORIGINAL_STORED_BIO_KUNIT_END */

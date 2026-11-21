@@ -1,0 +1,15 @@
+# Round058 Agent2 original pinned STORED source → BIO / clone lifetime — PROGRESS
+
+Official [ROUND_OPEN #175](https://github.com/k1moradi/swapz/issues/175#issuecomment-7062413356). Frozen last engineering `383d2b4e5b1b5a31b2f785f99f88241b2d08bce5`; frozen task `ffc15247418f4566a3230f55af99de96744f9741`. This source/fixture/workflow commit uses its actual main parent at publication; its own new Actions cannot be called green before terminal evidence.
+
+## Real source changed under explicit CI-only gates
+
+- Reuses existing pinned-original source composer, the frozen Round056 pre-erase source-to-BIO owner and Round057 guarded original BIO clone ticket; no edited Agent3 production `src/kernel/dm-target.c` or Agent4 decoder, and no new public GPL export or active runtime import.
+- `round058-original-stored-bio-chain.cfrag` is compiled into actual pristine pinned original Linux `block/bio.c`; its call is staged directly in the genuine `mm/page_io.c` original block-write submit after complete bdev/sector/4096 ordinary RAW source and before original dispatch. It observes original full 4096 SHA256 against an independently refcounted sealed STORED owner without changing the original write, ACK, endio, DM lease or source-slot count.
+- Real original `bio_init` embedded swap_iocb uses `bi_vcnt=0` and a pre-populated full original 4096 bvec. Existing standalone clone ticket expects `bi_vcnt=1` and therefore MUST not authenticate the real embedded BIO; an additional original block/bio.c KUnit tests this refusal, genuine `bio_init_clone` borrowed bvec, source-only content comparison, and parent cleanup before clone teardown. Native 66+4 KUnit remain unmodified; intended actual total 71 after genuine boot/JSON+KTAP.
+- Local rootless compiled unchanged new native-source fragment through GCC and Clang with `-std=gnu11 -O1 -Wall -Wextra -Wconversion -Wshadow -Werror -fsanitize=address,undefined`: each **19 host source scenarios PASS** plus **6 actually changed C mutant binaries each semantically rejected**. Local first host shim compilation failure was missing `SHA256_DIGEST_SIZE` alias to OpenSSL's `SHA256_DIGEST_LENGTH`; fixed in the host-only shim before passing. These are HOST tests, **not kernel boot or real pressure**.
+- CI to prove actual exact-SHA pinned original clean 10 blob source staging, original Linux UML actual **71 C KUnit** independently JSON+KTAP verified and full original x86 ZSWAP=y/n unique GPL provider/probe with matched `dm-swapz.ko`. Report terminal first errors, not queued false green. Existing Round057 [#44901406039](https://github.com/k1moradi/swapz/actions/runs/44901406039) and clone [#44901458489](https://github.com/k1moradi/swapz/actions/runs/44901458489) are **ancestor only**, never this source.
+
+No authenticated current original BIO→accepted target full clone, no durable lower compressed WRITE/map/one upper ACK, no independent codec lifetime and no exact 4096 imported read yet. No loaded/privileged/physical/pressure or owner make tests.
+
+`SOURCE_MAPPED_AUTHENTICATED=0 PHASE_A=BLOCKED DIRECT_COMPRESSED_HANDOFF=DISABLED FORCED_RAW_BYPASS=DISABLED`.

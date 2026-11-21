@@ -1,0 +1,245 @@
+name: Round058 original pinned STORED BIO chain source-only NO_AUTH
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/phase-a-round058-original-stored-bio-chain-noauth.yml'
+      - 'tests/tools/round058-original-stored-bio-chain.py'
+      - 'tests/runtime/native/fixtures/round058-original-stored-bio-*'
+      - 'tests/tools/round056-original-preerase-module.py'
+      - 'tests/tools/round056-original-preerase-verify.py'
+      - 'tests/tools/round056-original-clone-*'
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  source-host:
+    name: Original source C GCC Clang ASan UBSan and semantic mutants
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - name: Rootless exact original C source host; refuse all changed semantic mutants
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 -B tests/tools/round058-original-stored-bio-chain.py host-test
+          python3 -B tests/tools/round058-original-stored-bio-chain.py verifier-self-test
+          echo 'ROUND058_SOURCE_HOST_COMPILED_BOTH_GCC_CLANG_ASAN_UBSAN_19_AND_6_CHANGED_C_MUTANTS_EACH_PASS_AUTH0'
+
+  native-original-71:
+    name: Genuine pinned original 66 plus four clone and one source BIO C KUnit
+    runs-on: ubuntu-24.04
+    timeout-minutes: 110
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          path: swapz
+          persist-credentials: false
+      - uses: actions/checkout@v4
+        with:
+          repository: torvalds/linux
+          ref: c339f4010dea8b0d754f84ace70cd1b089878ef8
+          fetch-depth: 1
+          path: linux
+          persist-credentials: false
+      - name: Original user-mode kernel build prerequisites (CI only)
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo apt-get update -qq
+          sudo DEBIAN_FRONTEND=noninteractive apt-get install -y \
+            --no-install-recommends build-essential bc bison flex clang \
+            libelf-dev libssl-dev libncurses-dev liblz4-dev python3 \
+            python3-pyelftools binutils
+      - name: Stage native original-source all 70 ancestors plus one integration KUnit and immutable SHA manifest
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git -C swapz rev-parse HEAD)" = "$GITHUB_SHA"
+          test "$(git -C linux rev-parse HEAD)" = c339f4010dea8b0d754f84ace70cd1b089878ef8
+          mkdir -p round058-evidence
+          python3 -B swapz/tests/tools/round058-original-stored-bio-chain.py stage \
+            --linux-root linux --manifest round058-evidence/actual-original-source.json
+          git -C linux diff --check
+          python3 -B - <<'PY'
+          import hashlib,json,pathlib
+          m=json.loads(pathlib.Path('round058-evidence/actual-original-source.json').read_text())
+          assert m['original_sha']=='c339f4010dea8b0d754f84ace70cd1b089878ef8'
+          assert m['native_original66_plus4_plus1']==71
+          assert m['source_mapped_authenticated'] is False
+          for f in m['changed_paths']:
+              assert hashlib.sha256((pathlib.Path('linux')/f['path']).read_bytes()).hexdigest()==f['sha256']
+          print('ROUND058_REAL_PINNED_ORIGINAL_ALL_FILE_POSTIMAGE_SHA_MANIFEST_PASS')
+          PY
+      - name: Compile real original Linux UML and verify 71 registered C KUnit via independent JSON KTAP
+        shell: bash
+        timeout-minutes: 90
+        run: |
+          set -Eeuo pipefail
+          first_phase=initial
+          log=round058-evidence/first-original-uml-error.log
+          verdict=round058-evidence/uml-verdict.txt
+          out="$RUNNER_TEMP/round058-uml"
+          result="$PWD/round058-evidence/actual-original-71.json"
+          request="$PWD/round058-evidence/original.kunitconfig"
+          printf 'source=%s\noriginal=c339f4010dea8b0d754f84ace70cd1b089878ef8\n' "$GITHUB_SHA" >"$verdict"
+          trap 'code=$?; if ((code)); then echo "::error::ROUND058_ORIGINAL_FIRST_ERROR phase=$first_phase exit=$code"; tail -n 95 "$log" 2>/dev/null || :; printf "result=FAIL\nfirst_phase=%s\nexit=%s\n" "$first_phase" "$code" >>"$verdict"; fi' EXIT
+          cat >"$request" <<'KUNIT_CFG'
+          CONFIG_KUNIT=y
+          CONFIG_BLOCK=y
+          CONFIG_SWAP=y
+          CONFIG_ZSWAP=y
+          CONFIG_SWAP_BIO_ORIGIN_KUNIT_TEST=y
+          CONFIG_CRYPTO=y
+          CONFIG_CRYPTO_LZ4=y
+          CONFIG_CRYPTO_SHA256=y
+          CONFIG_LZ4_COMPRESS=y
+          CONFIG_LZ4_DECOMPRESS=y
+          # CONFIG_CGROUPS is not set
+          # CONFIG_KUNIT_ALL_TESTS is not set
+          KUNIT_CFG
+          flags='-DSWAPZ_ROUND028_SLOT_EPOCH_SOURCE=1 -DSWAPZ_ROUND030_EVICTION_SNAPSHOT_SOURCE=1 -DSWAPZ_ROUND025_SIDEBAND_CI_ONLY=1 -DSWAPZ_ROUND031_MM_BIO_SOURCE=1 -DSWAPZ_ROUND032_BIO_COPY_VIEW_CI_ONLY=1 -DSWAPZ_ROUND034_ORIGINAL_V1_KUNIT_TEST=1 -DSWAPZ_ROUND035_ORIGINAL_MM_ROUTE_WITNESS_TEST=1 -DSWAPZ_ROUND036_ORIGINAL_ROUTE_LIFETIME_TEST=1 -DSWAPZ_ROUND037_ORIGINAL_MM_LIFETIME_OWNER_TEST=1 -DSWAPZ_ROUND038_ORIGINAL_STORE_PROVENANCE_TEST=1 -DSWAPZ_ROUND040_ORIGINAL_ASYNC_SLOT_LEASE_NEGATIVE_TEST=1 -DSWAPZ_ROUND041_ORIGINAL_SECTOR_TO_DM_NONAUTHORITY_TEST=1 -DSWAPZ_ROUND042_ORIGINAL_STORED_WRITEBACK_LIFETIME_TEST=1 -DSWAPZ_ROUND043_ORIGINAL_BIO_CLONE_COPY_TEST=1 -DSWAPZ_ROUND045_ORIGINAL_STORED_BIO_SOURCE_SCOPE_TEST=1 -DSWAPZ_ROUND049_ORIGINAL_LOCKED_FOLIO_COUNT_PAIR_TEST=1 -DSWAPZ_ROUND052_ORIGINAL_PRE_UNUSE_CANCEL_TEST=1 -DSWAPZ_ROUND056_ORIGINAL_CLONE_PROVENANCE_TEST=1 -DSWAPZ_ROUND056_PREERASE_SINGLE_OWNER_TEST=1 -DSWAPZ_ROUND058_ORIGINAL_STORED_BIO_CHAIN_TEST=1'
+          first_phase=actual-original-71-C-kunit-boot
+          timeout -k 10s 75m python3 -B linux/tools/testing/kunit/kunit.py run \
+            --arch=um --build_dir="$out" --kunitconfig="$request" \
+            --make_options="KCFLAGS=$flags -Werror" --jobs=2 --timeout=120 \
+            --json="$result" 'swapz_round0*' >"$log" 2>&1
+          first_phase=verify-original-effective-config
+          test -x "$out/linux" && test -s "$result" && test -s "$out/test.log"
+          for required in CONFIG_ZSWAP=y CONFIG_KUNIT=y CONFIG_SWAP_BIO_ORIGIN_KUNIT_TEST=y '# CONFIG_CGROUPS is not set'; do
+            grep -Fxq "$required" "$out/.config"
+          done
+          first_phase=independent-original-71-JSON-KTAP
+          python3 -B swapz/tests/tools/round058-original-stored-bio-chain.py kernel-verify \
+            --result "$result" --kernel-log "$out/test.log" >round058-evidence/verified-71.log 2>&1 || {
+              code=$?; tail -n 95 round058-evidence/verified-71.log; exit "$code";
+            }
+          cat round058-evidence/verified-71.log
+          printf 'original66=PASS\nexisting4=PASS\noriginal_source_chain1=PASS\nresult=PASS\n' >>"$verdict"
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: round058-real-original-71-UML
+          path: round058-evidence/
+          if-no-files-found: ignore
+          retention-days: 7
+
+  native-original-x86-y-n:
+    name: Original x86 ZSWAP=y/n kernel GPL provider plus exact matched dm-swapz.ko
+    runs-on: ubuntu-24.04
+    timeout-minutes: 110
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          path: swapz
+          persist-credentials: false
+      - uses: actions/checkout@v4
+        with:
+          repository: torvalds/linux
+          ref: c339f4010dea8b0d754f84ace70cd1b089878ef8
+          fetch-depth: 1
+          path: linux
+          persist-credentials: false
+      - name: Original Linux x86 full Kbuild prerequisites (CI only)
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo apt-get update -qq
+          sudo DEBIAN_FRONTEND=noninteractive apt-get install -y \
+            --no-install-recommends build-essential bc bison flex clang \
+            libelf-dev libssl-dev libncurses-dev liblz4-dev python3 binutils
+      - name: Compile original native y/n with real GPL provider probe and matched Device Mapper
+        shell: bash
+        timeout-minutes: 90
+        run: |
+          set -Eeuo pipefail
+          mkdir -p round058-x86-evidence
+          verdict=round058-x86-evidence/verdict.txt
+          log=round058-x86-evidence/first-kbuild-error.log
+          phase=stage
+          printf 'source=%s\noriginal=c339f4010dea8b0d754f84ace70cd1b089878ef8\n' "$GITHUB_SHA" >"$verdict"
+          trap 'code=$?; if ((code)); then echo "::error::ROUND058_ORIGINAL_X86_FIRST_ERROR phase=$phase exit=$code"; tail -n 90 "$log" 2>/dev/null || :; printf "result=FAIL\nfirst_phase=%s\nexit=%s\n" "$phase" "$code" >>"$verdict"; fi' EXIT
+          test "$(git -C swapz rev-parse HEAD)" = "$GITHUB_SHA"
+          test "$(git -C linux rev-parse HEAD)" = c339f4010dea8b0d754f84ace70cd1b089878ef8
+          python3 -B swapz/tests/tools/round058-original-stored-bio-chain.py stage \
+            --linux-root linux --manifest round058-x86-evidence/actual-original-source.json >"$log" 2>&1
+          git -C linux diff --check
+          flags='-DSWAPZ_ROUND028_SLOT_EPOCH_SOURCE=1 -DSWAPZ_ROUND030_EVICTION_SNAPSHOT_SOURCE=1 -DSWAPZ_ROUND025_SIDEBAND_CI_ONLY=1 -DSWAPZ_ROUND031_MM_BIO_SOURCE=1 -DSWAPZ_ROUND032_BIO_COPY_VIEW_CI_ONLY=1 -DSWAPZ_ROUND034_ORIGINAL_V1_KUNIT_TEST=1 -DSWAPZ_ROUND035_ORIGINAL_MM_ROUTE_WITNESS_TEST=1 -DSWAPZ_ROUND036_ORIGINAL_ROUTE_LIFETIME_TEST=1 -DSWAPZ_ROUND037_ORIGINAL_MM_LIFETIME_OWNER_TEST=1 -DSWAPZ_ROUND038_ORIGINAL_STORE_PROVENANCE_TEST=1 -DSWAPZ_ROUND040_ORIGINAL_ASYNC_SLOT_LEASE_NEGATIVE_TEST=1 -DSWAPZ_ROUND041_ORIGINAL_SECTOR_TO_DM_NONAUTHORITY_TEST=1 -DSWAPZ_ROUND042_ORIGINAL_STORED_WRITEBACK_LIFETIME_TEST=1 -DSWAPZ_ROUND043_ORIGINAL_BIO_CLONE_COPY_TEST=1 -DSWAPZ_ROUND045_ORIGINAL_STORED_BIO_SOURCE_SCOPE_TEST=1 -DSWAPZ_ROUND049_ORIGINAL_LOCKED_FOLIO_COUNT_PAIR_TEST=1 -DSWAPZ_ROUND052_ORIGINAL_PRE_UNUSE_CANCEL_TEST=1 -DSWAPZ_ROUND056_ORIGINAL_CLONE_PROVENANCE_TEST=1 -DSWAPZ_ROUND056_PREERASE_SINGLE_OWNER_TEST=1 -DSWAPZ_ROUND058_ORIGINAL_STORED_BIO_CHAIN_TEST=1'
+          info="$RUNNER_TEMP/round058-build-source.h"
+          printf '#define SWAPZ_BUILD_SOURCE_SHA "%s"\n#define SWAPZ_BUILD_SOURCE_CLEAN 1\n#define SWAPZ_BUILD_SOURCE_CLEAN_STRING "1"\n' "$GITHUB_SHA" >"$info"
+          checked() {
+            phase="$1"; shift
+            if "$@" >"$log" 2>&1; then
+              printf '%s_exit=0\n' "$phase" >>"$verdict"
+            else
+              code=$?
+              echo "::error::ROUND058_ORIGINAL_X86_FIRST_ERROR phase=$phase exit=$code"
+              tail -n 90 "$log"
+              return "$code"
+            fi
+          }
+          for profile in enabled disabled; do
+            out="$RUNNER_TEMP/round058-original-$profile"
+            mkdir -p "$out"
+            checked "$profile-defconfig" make -s -C linux "O=$out" CC=gcc defconfig
+            if [[ "$profile" == enabled ]]; then option=--enable; effective=CONFIG_ZSWAP=y; else option=--disable; effective='# CONFIG_ZSWAP is not set'; fi
+            checked "$profile-config" linux/scripts/config --file "$out/.config" \
+              --enable SWAP "$option" ZSWAP --enable KUNIT \
+              --enable SWAP_BIO_ORIGIN_KUNIT_TEST --enable MODULES --enable MD \
+              --enable BLK_DEV_DM --enable CRYPTO_LZ4 --enable CRYPTO_SHA256
+            checked "$profile-olddefconfig" make -s -C linux "O=$out" CC=gcc olddefconfig
+            grep -Fxq "$effective" "$out/.config"
+            checked "$profile-prepare" make -s -C linux "O=$out" CC=gcc -j2 W=1 prepare
+            checked "$profile-default-objects" make -s -C linux "O=$out" CC=gcc -j2 W=1 \
+              KCFLAGS=-Werror block/bio.o mm/page_io.o mm/swapfile.o
+            if nm -a "$out/block/bio.o" | grep -q swapz_round058_source_bio_observe; then
+              echo '::error::Default original BIO includes Round058 guarded source'; exit 3
+            fi
+            if [[ "$profile" == enabled ]]; then
+              checked "$profile-default-zswap" make -s -C linux "O=$out" CC=gcc -j2 W=1 KCFLAGS=-Werror mm/zswap.o
+            fi
+            checked "$profile-guarded-objects" make -s -C linux "O=$out" CC=gcc \
+              -j2 W=1 "KCFLAGS=$flags -Werror" block/bio.o mm/page_io.o mm/swapfile.o
+            if [[ "$profile" == enabled ]]; then
+              checked "$profile-guarded-zswap" make -s -C linux "O=$out" CC=gcc -j2 W=1 "KCFLAGS=$flags -Werror" mm/zswap.o
+            fi
+            nm -a "$out/block/bio.o" | grep -q swapz_round058_source_bio_observe || {
+              echo '::error::Original real guarded source witness absent'; exit 3;
+            }
+            checked "$profile-modules_prepare" make -s -C linux "O=$out" CC=gcc -j2 W=1 modules_prepare
+            checked "$profile-vmlinux" make -s -C linux "O=$out" CC=gcc -j2 W=1 "KCFLAGS=$flags" vmlinux
+            checked "$profile-modules" make -s -C linux "O=$out" CC=gcc -j2 W=1 "KCFLAGS=$flags" modules
+            test -s "$out/vmlinux" && test -s "$out/Module.symvers"
+            checked "$profile-real-GPL-export-row" python3 -B \
+              swapz/tests/runtime/native/fixtures/round033-provider-symbol-gate.py \
+              --symvers "$out/Module.symvers"
+            kernel_release="$(make -s -C linux "O=$out" CC=gcc kernelrelease)"
+            probe="$RUNNER_TEMP/round058-original-probe-$profile"
+            mkdir -p "$probe"
+            cp swapz/tests/runtime/native/fixtures/round032-bio-probe.c "$probe/round032-bio-probe.c"
+            printf 'obj-m := round032-bio-probe.o\n' > "$probe/Makefile"
+            checked "$profile-GPL-modpost-probe" make -s -C linux "O=$out" \
+              "M=$probe" CC=gcc -j2 W=1 "KCFLAGS=$flags -Werror" modules
+            test -s "$probe/round032-bio-probe.ko"
+            readelf -p .modinfo "$probe/round032-bio-probe.ko" | grep -Fq "vermagic=$kernel_release"
+            module="$RUNNER_TEMP/round058-matched-dm-$profile"
+            mkdir -p "$module"
+            checked "$profile-real-matched-dm" make -s -C swapz/src/kernel \
+              "KDIR=$out" "SWAPZ_STAGE=$module" "SWAPZ_BUILD_INFO=$info" \
+              CC=gcc -j2 W=1 all
+            test -s "$module/dm-swapz.ko"
+            readelf -p .modinfo "$module/dm-swapz.ko" | grep -Fq "vermagic=$kernel_release"
+            printf 'profile=%s kernel_release=%s module_sha=%s\n' "$profile" "$kernel_release" \
+              "$(sha256sum "$module/dm-swapz.ko" | cut -d' ' -f1)" >>"$verdict"
+          done
+          printf 'result=PASS\nAUTH0=YES\n' >>"$verdict"
+          echo 'ROUND058_REAL_PINNED_ORIGINAL_X86_Y_N_GPL_DM_MODULE_PASS_AUTH0'
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: round058-original-x86-y-n-source
+          path: round058-x86-evidence/
+          if-no-files-found: ignore
+          retention-days: 7

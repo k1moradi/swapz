@@ -1,0 +1,61 @@
+/* ROUND058_ORIGINAL_STORED_BIO_CHAIN_BEGIN */
+#if defined(SWAPZ_ROUND058_ORIGINAL_STORED_BIO_CHAIN_TEST) && \
+    defined(SWAPZ_ROUND056_PREERASE_SINGLE_OWNER_TEST) && \
+    defined(SWAPZ_ROUND056_ORIGINAL_CLONE_PROVENANCE_TEST) && \
+    defined(SWAPZ_ROUND032_BIO_COPY_VIEW_CI_ONLY) && \
+    defined(SWAPZ_ROUND031_MM_BIO_SOURCE) && \
+    defined(SWAPZ_ROUND028_SLOT_EPOCH_SOURCE) && \
+    defined(SWAPZ_ROUND025_SIDEBAND_CI_ONLY)
+#ifndef SWAPZ_ROUND058_HOST_TEST
+#include <crypto/sha2.h>
+#include <linux/highmem.h>
+#endif
+/*
+ * Synchronous original-source observation ONLY. The caller serializes BIO
+ * mutation and guarantees its original embedded swap_iocb/bvec is alive.
+ * A successful comparison never owns the current DM table, target, source
+ * swap slot after PG_writeback, decoder, lower write or upper completion.
+ * Native bio_init() has bi_vcnt == 0 despite one full pre-populated bvec.
+ */
+int swapz_round058_source_bio_observe(const struct bio *bio)
+{
+	struct swapz_ci_owned_payload *owner;
+	u8 digest[SHA256_DIGEST_SIZE] = {};
+	const void *original;
+	int result = -ESTALE;
+
+	if (!bio || bio_op(bio) != REQ_OP_WRITE ||
+	    !(bio->bi_opf & REQ_SWAP) ||
+	    bio->bi_swap_origin != SWAP_BIO_ORIGIN_ZSWAP_STORED_WRITEBACK ||
+	    (bio->bi_flags & (1U << BIO_CLONED)) ||
+	    !bio->bi_bdev || !bio->bi_swapz_ci_sideband ||
+	    bio->bi_iter.bi_size != 4096U ||
+	    bio->bi_iter.bi_idx || bio->bi_iter.bi_offset ||
+	    bio->bi_iter.bi_sector < 8U ||
+	    bio->bi_iter.bi_sector % 8U ||
+	    bio->bi_vcnt || !bio->bi_io_vec ||
+	    !bio->bi_io_vec[0].bv_page ||
+	    bio->bi_io_vec[0].bv_offset ||
+	    bio->bi_io_vec[0].bv_len != 4096U)
+		return -EOPNOTSUPP;
+
+	owner = swapz_ci_owned_get(bio->bi_swapz_ci_sideband);
+	if (!owner)
+		return -ESTALE;
+	if (!owner->swapz_round056_budgeted ||
+	    !owner->swapz_round056_sealed ||
+	    !owner->source_swap_entry || !swapz_ci_owned_valid(owner))
+		goto out;
+
+	original = kmap_local_page(bio->bi_io_vec[0].bv_page);
+	sha256(original, 4096U, digest);
+	kunmap_local(original);
+	if (!memcmp(digest, owner->original_sha256, sizeof(digest)))
+		result = 0; /* Source-only evidence, NEVER target authorization. */
+out:
+	memzero_explicit(digest, sizeof(digest));
+	swapz_ci_owned_put(owner);
+	return result;
+}
+#endif /* guarded original source-only BIO observation */
+/* ROUND058_ORIGINAL_STORED_BIO_CHAIN_END */
