@@ -1,0 +1,59 @@
+name: "Round052 original zswap host LZ4 codec subset NO_AUTH"
+on:
+  push:
+    branches: [main]
+    paths:
+      - "tests/tools/round052-zswap-swapz-codec-verify.py"
+      - "tests/runtime/native/fixtures/round052-zswap-swapz-codec.c"
+      - ".github/workflows/phase-a-zswap-round052-codec-interop-noauth.yml"
+      - "src/kernel/codec.c"
+      - "src/kernel/codec.h"
+      - "src/kernel/dm-target.c"
+      - "docs/testing_standards.md"
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  original-host-raw-lz4-noauth:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 18
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          path: swapz
+          persist-credentials: false
+      - uses: actions/checkout@v4
+        with:
+          repository: torvalds/linux
+          ref: c339f4010dea8b0d754f84ace70cd1b089878ef8
+          fetch-depth: 1
+          sparse-checkout: |
+            crypto/lz4.c
+            crypto/acompress.c
+            mm/zswap.c
+            mm/Kconfig
+          path: linux
+          persist-credentials: false
+      - name: Install host codec libraries and strict sanitizing compilers
+        run: |
+          set -euo pipefail
+          sudo apt-get update -qq
+          sudo DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
+            gcc clang liblz4-dev libssl-dev python3
+      - name: Check exact source and execute pinned original-wrapper / product C baseline and hostile mutants
+        run: |
+          set -Eeuo pipefail
+          test "$(git -C swapz rev-parse HEAD)" = "$GITHUB_SHA"
+          test -z "$(git -C swapz status --porcelain --untracked-files=all)"
+          test "$(git -C linux rev-parse HEAD)" = c339f4010dea8b0d754f84ace70cd1b089878ef8
+          if python3 -B swapz/tests/tools/round052-zswap-swapz-codec-verify.py \
+              --linux-root linux > "$RUNNER_TEMP/round052-codec-first-error.log" 2>&1; then
+            tail -n 35 "$RUNNER_TEMP/round052-codec-first-error.log"
+          else
+            result=$?
+            echo "::error::ROUND052 first rootless original-source/actual-product-codec C error exit=$result" >&2
+            tail -n 90 "$RUNNER_TEMP/round052-codec-first-error.log" >&2
+            exit "$result"
+          fi
+          test -z "$(git -C swapz status --porcelain --untracked-files=all)"
+          git -C swapz diff --check HEAD^ HEAD
