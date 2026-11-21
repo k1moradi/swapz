@@ -5,6 +5,7 @@ on:
     paths:
       - 'tests/runtime/native/fixtures/round057-transaction-product.c'
       - 'tests/tools/round057-transaction-product.py'
+      - 'tests/tools/round061-product-mutant-workspace-verify.py'
       - 'src/kernel/authority.c'
       - 'src/kernel/codec.c'
       - 'src/kernel/flush-qual.h'
@@ -34,6 +35,8 @@ jobs:
           test "$(git branch --show-current)" = main
           test -z "$(git status --porcelain)"
           git diff --check HEAD^ HEAD
+      - name: Verify GCC/Clang mutant workspace and private host failures
+        run: python3 -B tests/tools/round061-product-mutant-workspace-verify.py
       - name: Exact product C normal RAW authority/flush/GC and default-off imported gate
         run: python3 -B tests/tools/round057-transaction-product.py
       - name: Enforce current-history canonical repository standards

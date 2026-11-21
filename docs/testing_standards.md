@@ -17683,3 +17683,44 @@ The default native compressed import remains unauthenticated and disabled:
 `SOURCE_MAPPED_AUTHENTICATED=0`, `PHASE_A=BLOCKED`, compressed handoff and
 forced RAW bypass disabled. Ordinary RAW_4096 remains the full original
 uncompressed page; physical SWAPSPACE2 header and partition table protected.
+
+## Round061 Agent5 — genuine two-compiler product-mutant scratch ownership and private host errors
+
+The existing real linked production transaction runner compiles actual
+src/kernel/authority.c + codec.c, the original fixture and original five
+distinct changed-C/header semantic mutations for GCC then Clang under
+-Wall -Wextra -Wconversion -Wshadow -Werror and ASan/UBSan. Each compiler
+owns an independent scratch subtree and executable: GCC's five mutant-N
+directories must not be reused by Clang. All ten mutants must compile,
+execute and hit their named semantic FIRST_ERROR with process exit 1;
+compile errors, sanitizer crashes, workspace collisions and unexecuted
+mutants are NOT successful semantic kills. The two original Round057
+and Round059 inherited LZ4 workflows must both reach a terminal exact-source
+result; ancestor successes do not qualify current source.
+
+Use a separate rootless Round061 control-flow regression to execute the
+actual runner's full GCC-then-Clang workspace lifecycle with stubbed ONLY
+compiler/fixture outputs; require two baseline and ten separate mutant
+executions, disjoint compiler/mutant directories, and immutable
+first-error names. This lightweight regression is NOT a substitute for the
+real linked production C and ten executed semantic mutants from the actual
+runner. On untrusted OSError/TimeoutExpired host failures, print only the
+bounded failure class/errno and repository-relative owner-private log path,
+never absolute /tmp paths, arbitrary compiler stderr, command argv, secrets
+or raw subprocess outputs; retain bounded details in mode-0600 files under
+an owner-only mode-0700 directory. Baseline and mutant mismatches likewise
+retain stdout/stderr privately while emitting finite fail-only diagnostics.
+Preserve the original Round059 hostile GCC/Clang source-first-error reporter,
+the exact same strict compiler flags and fail-on-first-source-drift
+semantics; do not relax existing first-parent repository-policy checks.
+
+No native stored source→current DM lease, loaded original codec reference,
+durable compressed lower I/O, independently decoded 4096-byte imported read
+or production compressed handoff is authenticated by a host transaction.
+Linux MM alone manages compressed zswap RAM and natural pressure eviction;
+swapz remains disk packing/GC. Normal RAW_4096 stays the full ORIGINAL
+UNCOMPRESSED 4096. The 20-byte map, existing SWAPSPACE2 first 4096
+signature/UUID/header, partition table and 4/8/16KiB payload-only classes
+are unchanged. SOURCE_MAPPED_AUTHENTICATED=0, PHASE_A=BLOCKED, direct
+compressed handoff and forced RAW bypass DISABLED; no owner make,
+privileged, kernel-loaded, actual-pressure or physical tests.

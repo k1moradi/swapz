@@ -176,6 +176,30 @@ def retain_private_compiler_error(stderr: str, compiler: str) -> str:
     return saved_path.relative_to(ROOT).as_posix()
 
 
+
+def create_compiler_workspace(location: Path, compiler_name: str) -> Path:
+    """Use one compiler-owned directory for its binary and all five mutants."""
+    if compiler_name not in ("gcc", "clang"):
+        raise RuntimeError("unexpected compiler workspace")
+    workspace = location / compiler_name
+    workspace.mkdir(mode=0o700)
+    return workspace
+
+
+def safe_external_failure(error: OSError | subprocess.TimeoutExpired) -> str:
+    """Keep untrusted exception paths private; report only a finite first cause."""
+    try:
+        evidence = retain_private_compiler_error(str(error), "host-failure")
+    except OSError:
+        evidence = "private-evidence-unavailable"
+    if isinstance(error, OSError):
+        cause = ("host I/O failure errno=" +
+                 (str(error.errno) if error.errno is not None else "unknown"))
+    else:
+        cause = "child command timeout"
+    return cause + " evidence=" + evidence
+
+
 def build(compiler, workspace, binary, *, altered_source=None, altered_header=None):
     sources = [
         FIXTURE,
@@ -210,15 +234,19 @@ def main():
             compiler = shutil.which(compiler_name)
             if not compiler:
                 raise RuntimeError("required compiler missing " + compiler_name)
-            binary = location / "spine"
+            compiler_location = create_compiler_workspace(location, compiler_name)
+            binary = compiler_location / "spine"
             build(compiler, compiler_name, binary)
             baseline = execute([str(binary)])
             if baseline.returncode or baseline.stderr or not re.fullmatch(
                     r"PASS product_raw_authority=7 map_bytes=20 "
                     r"import_record_bytes=\d+ descriptor_limit=8 staging_limit=2 "
                     r"NOT_AUTH=1 PHASE_A=BLOCKED\n", baseline.stdout):
-                raise RuntimeError(compiler_name + " baseline: " +
-                                   (baseline.stderr or baseline.stdout)[:250])
+                evidence = retain_private_compiler_error(
+                    "stdout:\n" + baseline.stdout + "\nstderr:\n" + baseline.stderr,
+                    compiler_name + "-baseline")
+                raise RuntimeError(compiler_name + " baseline oracle mismatch exit=" +
+                                   str(baseline.returncode) + " evidence=" + evidence)
             if expected is not None and expected != baseline.stdout:
                 raise RuntimeError("different compiler ABI/behavior")
             expected = baseline.stdout
@@ -229,7 +257,7 @@ def main():
                 if product.count(original) != 1:
                     raise RuntimeError("non-unique genuine-source mutant " + name)
                 altered = product.replace(original, replacement, 1)
-                copy = location / ("mutant-" + str(index))
+                copy = compiler_location / ("mutant-" + str(index))
                 copy.mkdir()
                 source_override = None
                 header_override = None
@@ -244,17 +272,23 @@ def main():
                 observed = execute([str(binary), case])
                 if (observed.returncode != 1 or observed.stdout or
                         observed.stderr != "FIRST_ERROR " + case + "\n"):
+                    evidence = retain_private_compiler_error(
+                        "stdout:\n" + observed.stdout + "\nstderr:\n" + observed.stderr,
+                        compiler_name + "-" + name)
                     raise RuntimeError(compiler_name + " mutation " + name +
-                                       " not semantically rejected: exit=" +
-                                       str(observed.returncode) + " first=" +
-                                       observed.stderr[:160])
+                                       " not semantically rejected exit=" +
+                                       str(observed.returncode) + " evidence=" + evidence)
             print("PASS " + compiler_name + " actual-source semantic mutants=5")
 
 
 if __name__ == "__main__":
     try:
         main()
-    except (RuntimeError, OSError, subprocess.TimeoutExpired) as error:
+    except RuntimeError as error:
         print("FIRST_ERROR round057-transaction: " + str(error)[:350],
+              file=sys.stderr)
+        sys.exit(1)
+    except (OSError, subprocess.TimeoutExpired) as error:
+        print("FIRST_ERROR round057-transaction: " + safe_external_failure(error),
               file=sys.stderr)
         sys.exit(1)
