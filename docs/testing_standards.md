@@ -17269,3 +17269,70 @@ SWAPSPACE2 header and parent partition table remain immutable. Phase A
 BLOCKED, SOURCE_MAPPED_AUTHENTICATED=0, direct compressed handoff and forced
 RAW bypass DISABLED; no privileged, physical, loaded, pressure, swap or owner
 make test/fast_test.
+
+## Round059 Agent4 — original selected LZO opt-in vs inherited LZ4-only host, exact first error and pinned Linux DM checkout
+
+The dormant `src/kernel/zswap-import-codec.h` is shared by original
+selected-LZO source-only tests and **existing generic LZ4-only host** C
+programs. `SWAPZ_ZSWAP_IMPORT_HOST_TEST` alone MUST NOT include
+`linux/lzo.h`, require the pinned Linux header, reference an original
+`lzo1x_decompress_safe` linker symbol, or silently treat original
+compressed LZO1X as ordinary RAW_4096. Only the independently qualified
+pinned-original source fixture may explicitly define
+`SWAPZ_ZSWAP_IMPORT_ORIGINAL_LZO_HOST_TEST` and link unchanged genuine
+Linux original LZO1X C. If the original decoder is not linked in a
+generic host process, a selected tagged LZO1X record MUST return
+`-EOPNOTSUPP` with the entire 4096-byte output immutable. Kernel
+source continues to include real Linux LZO ABI; don't modify upstream
+Linux originals, skip original LZO tests or mask compiler/link failures.
+
+Retain both true selected-original-codec full 4096-byte GCC/Clang
+ASan+UBSan source-profile tests with six pinned immutable original
+Git blob identities, source `crypto/lzo.c` selected wrapper,
+strict trailing input, CRC32C, complete original page SHA256,
+1..3568 compressed bound, zero dictionary, eight independent buffer
+offsets, entire output scratch-before-copy and all existing compiled
+semantic mutant binaries. Independently compile, LINK and execute an
+unaltered generic LZ4-only import fixture with the real `codec.c`
+CRC, no LZO header or symbol, same strict own-source warning flags and
+sanitizers, explicit unsupported selected LZO, CRC/SHA/overlap/
+teardown/ACK/length negative cases and actual changed-header compiled
+executable semantic mutants in **both** GCC and Clang. A source stub
+or compiler failure is not a semantic kill; fail if `nm -u` shows any
+unresolved original LZO1X symbol.
+
+Round048 previously fetched three exact immutable original DM source
+files using repeated `raw.githubusercontent.com` `curl` requests,
+which failed with actual HTTP 429. Instead use one immutable
+`torvalds/linux@c339f4010dea8b0d754f84ace70cd1b089878ef8`
+`actions/checkout@v4` non-cone sparse checkout of genuine
+`drivers/md/dm.c`, `dm-table.c` and
+`include/linux/device-mapper.h`. Check actual checkout HEAD, clean
+Git state, all three pinned original Git blob IDs, then run unchanged
+real original Round048/049 hostile source audits against that exact
+checkout path. No unpinned fallback, skip-on-429, substituted copied
+C or posthoc attribution of a compiler failure to HTTP429 is allowed.
+
+On a real compiler error, retain the bounded raw stderr in a new
+repository-relative `.private/round057-transaction-*.log` under
+mode 0700 directory and 0600 log, only on failure. The console must
+select the **first source-bound** GCC/Clang
+`file:line:column: fatal error/error` instead of its earlier
+included-from prelude, print bounded sanitized repository-relative
+source and reason and private relative evidence path, never arbitrary
+raw stderr/host absolute paths/secrets, and preserve original nonzero
+test exit. Inject deterministic hostile multi-line GCC and Clang
+input containing a preceding include path, later competing error,
+absolute paths and a fake credential; verify the decisive first
+missing-header line surfaces, no leak, and private evidence permissions.
+No actual owner `make test`, privilege, kernel loading or devices.
+
+These are source-host compatibility and original pinned-source
+availability tests only; they do not prove original STORED→BIO current
+DM target lifetime, selected original decoder module retention,
+durable compressed lower WRITE/flush, current volatile map/GC, actual
+upper ACK or physical imported read. The first full 4096 SWAPSPACE2
+bytes and parent partition table are untouched. Ordinary RAW_4096
+still contains **the complete original uncompressed 4096 bytes**.
+SOURCE_MAPPED_AUTHENTICATED=0, PHASE_A=BLOCKED, direct compressed
+handoff and forced RAW bypass DISABLED.

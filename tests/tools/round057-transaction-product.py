@@ -8,6 +8,7 @@ from pathlib import Path
 import os
 import re
 import shutil
+import stat
 import subprocess
 import sys
 import tempfile
@@ -116,6 +117,65 @@ def execute(command, *, stdin=None):
              "UBSAN_OPTIONS": "halt_on_error=1:print_stacktrace=1"})
 
 
+# Fail-only, source-bound diagnostic. Compiler stderr may include arbitrary
+# runner paths, generated source, toolchain detail, credentials or huge output.
+# Keep complete bounded diagnostics in a mode-0600 private repository-local log;
+# print only the first recognizable source error with a repository-relative
+# path and a bounded, sanitized message. No raw child stderr on the console.
+SOURCE_DIAGNOSTIC = re.compile(
+    r"^(?P<path>[^:\r\n]+?):(?P<line>[0-9]+)(?::(?P<column>[0-9]+))?:"
+    r"\s*(?P<severity>fatal error|error):\s*(?P<detail>[^\r\n]+)$"
+)
+
+
+def compiler_first_error(stderr: str) -> str:
+    for line in stderr.splitlines():
+        match = SOURCE_DIAGNOSTIC.match(line.strip())
+        if match is None:
+            continue
+        original_path = Path(match.group("path"))
+        if original_path.is_absolute():
+            try:
+                source_path = original_path.relative_to(ROOT).as_posix()
+            except ValueError:
+                source_path = "external-source"
+        else:
+            source_path = original_path.as_posix()
+        if (not source_path or source_path.startswith("../") or
+                not re.fullmatch(r"[A-Za-z0-9_.\-/]+", source_path)):
+            source_path = "external-source"
+        detail = match.group("detail")
+        # Never print absolute runner paths or arbitrary sensitive assignments.
+        detail = re.sub(r"(?<![A-Za-z0-9_.-])/(?:[A-Za-z0-9_.-]+/)*[A-Za-z0-9_.-]+",
+                        "[external-path]", detail)
+        detail = re.sub(
+            r"(?i)\b(?:token|secret|password|authorization|private_key)"
+            r"\s*[:=]\s*\S+", "[redacted]", detail)
+        detail = re.sub(r"[^\x20-\x7e]", "?", detail)[:150]
+        return (source_path + ":" + match.group("line") +
+                (":" + match.group("column") if match.group("column") else "") +
+                " " + match.group("severity") + ": " + detail)
+    return "compiler failed without a recognizable source-bound diagnostic"
+
+
+def retain_private_compiler_error(stderr: str, compiler: str) -> str:
+    details_dir = ROOT / ".private"
+    details_dir.mkdir(mode=0o700, exist_ok=True)
+    # Existing private directories are owned by the current test user;
+    # never expose compiler stderr to a wider repository or default umask.
+    details_dir.chmod(0o700)
+    safe_name = re.sub(r"[^A-Za-z0-9_-]", "-", compiler)[:32]
+    with tempfile.NamedTemporaryFile(
+            mode="w", encoding="utf-8", dir=details_dir,
+            prefix="round057-transaction-" + safe_name + "-",
+            suffix=".log", delete=False) as details:
+        details.write(stderr[:65536])
+        details.flush()
+        os.fchmod(details.fileno(), stat.S_IRUSR | stat.S_IWUSR)
+        saved_path = Path(details.name)
+    return saved_path.relative_to(ROOT).as_posix()
+
+
 def build(compiler, workspace, binary, *, altered_source=None, altered_header=None):
     sources = [
         FIXTURE,
@@ -134,8 +194,11 @@ def build(compiler, workspace, binary, *, altered_source=None, altered_header=No
     ]
     result = execute(command)
     if result.returncode:
-        raise RuntimeError("compiler failure " + workspace + ": " +
-                           (result.stderr.splitlines() or ["unknown"])[0][:260])
+        private_path = retain_private_compiler_error(result.stderr, workspace)
+        raise RuntimeError("compiler failure " + workspace + " exit=" +
+                           str(result.returncode) + ": " +
+                           compiler_first_error(result.stderr) +
+                           " evidence=" + private_path)
 
 
 def main():

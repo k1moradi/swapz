@@ -21,7 +21,10 @@
 #include <errno.h>
 #include <limits.h>
 #include <lz4.h>
+/* Generic host fixtures are LZ4-only; original LZO is an explicit opt-in. */
+#ifdef SWAPZ_ZSWAP_IMPORT_ORIGINAL_LZO_HOST_TEST
 #include <linux/lzo.h>
+#endif
 #include <openssl/sha.h>
 #include <stddef.h>
 #include <string.h>
@@ -164,6 +167,8 @@ static inline int swapz_zswap_import_decode(
 	    record->compressed_crc32c)
 		return -EBADMSG;
 	if (original_lzo1x) {
+#if !defined(SWAPZ_ZSWAP_IMPORT_HOST_TEST) || \
+    defined(SWAPZ_ZSWAP_IMPORT_ORIGINAL_LZO_HOST_TEST)
 		/*
 		 * Exact original lib/lzo/lzo1x_decompress_safe.c byte stream,
 		 * independently callable without a retired zswap pool/tfm. Original
@@ -179,6 +184,10 @@ static inline int swapz_zswap_import_decode(
 		if (result != LZO_E_OK ||
 		    original_decoded_bytes != SWAPZ_BLOCK_BYTES)
 			return -EBADMSG;
+#else
+		/* No original Linux decoder was linked by generic LZ4 host tests. */
+		return -EOPNOTSUPP;
+#endif
 	} else {
 		/* Raw LZ4 block, never framed LZ4 or original LZO1X bytes. */
 		decoded_bytes = LZ4_decompress_safe((const char *)compressed_bytes,

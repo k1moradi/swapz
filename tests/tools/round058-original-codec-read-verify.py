@@ -197,6 +197,12 @@ def main() -> None:
             "dormant source guard altered")
     require("lzo1x_decompress_safe(compressed_bytes" in source,
             "not using actual original LZO1X decoder")
+    require("#ifdef SWAPZ_ZSWAP_IMPORT_ORIGINAL_LZO_HOST_TEST" in source,
+            "original LZO Linux header is not opt-in")
+    require("#if !defined(SWAPZ_ZSWAP_IMPORT_HOST_TEST) ||" in source,
+            "original LZO compiled into generic LZ4-only host")
+    require("#define SWAPZ_ZSWAP_IMPORT_ORIGINAL_LZO_HOST_TEST 1" in FIXTURE.read_text(),
+            "pinned original LZO fixture did not explicitly opt in")
     require("LZ4_decompress_safe((const char *)compressed_bytes" in source,
             "existing raw LZ4 decoder missing")
     require(FIXTURE.is_file() and PRODUCT_CODEC.is_file(),

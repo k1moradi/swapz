@@ -6,6 +6,8 @@
  * completes BIOs, owns a live source pool, or touches a swap device.
  */
 #define SWAPZ_ZSWAP_IMPORT_HOST_TEST 1
+/* Only this fixture stages pristine pinned Linux LZO headers and objects. */
+#define SWAPZ_ZSWAP_IMPORT_ORIGINAL_LZO_HOST_TEST 1
 #include "zswap-import-codec.h"
 #include <stdint.h>
 #include <stdio.h>

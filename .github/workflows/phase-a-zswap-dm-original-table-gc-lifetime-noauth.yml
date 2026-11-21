@@ -20,32 +20,43 @@ jobs:
         run: |
           set -euo pipefail
           sudo apt-get update -qq
-          sudo apt-get install -y --no-install-recommends clang gcc liblz4-dev libssl-dev curl
-      - name: Retrieve exact pristine Linux DM core C; no checkout of another swapz branch
+          sudo apt-get install -y --no-install-recommends clang gcc liblz4-dev libssl-dev
+      - name: Checkout exact pristine Linux DM core C without raw HTTP 429
+        uses: actions/checkout@v4
+        with:
+          repository: torvalds/linux
+          ref: c339f4010dea8b0d754f84ace70cd1b089878ef8
+          path: round048-pristine-dm
+          fetch-depth: 1
+          sparse-checkout-cone-mode: false
+          sparse-checkout: |
+            drivers/md/dm.c
+            drivers/md/dm-table.c
+            include/linux/device-mapper.h
+          persist-credentials: false
+      - name: Verify pinned Linux commit and exact original DM Git blobs
         shell: bash
         run: |
           set -euo pipefail
-          original="$RUNNER_TEMP/round048-pristine-dm"
-          mkdir -p "$original/drivers/md" "$original/include/linux"
-          pinned="c339f4010dea8b0d754f84ace70cd1b089878ef8"
-          for path in drivers/md/dm.c drivers/md/dm-table.c include/linux/device-mapper.h; do
-            curl --fail --location --silent --show-error --retry 4 --retry-delay 2 \
-              "https://raw.githubusercontent.com/torvalds/linux/$pinned/$path" \
-              --output "$original/$path"
-          done
-          echo "ROUND048_ORIGINAL_DM_PINNED_SOURCES_DOWNLOADED_NOT_AUTHENTICATED_YET"
+          original="$GITHUB_WORKSPACE/round048-pristine-dm"
+          test "$(git -C "$original" rev-parse HEAD)" = c339f4010dea8b0d754f84ace70cd1b089878ef8
+          test -z "$(git -C "$original" status --porcelain --untracked-files=all)"
+          test "$(git -C "$original" hash-object "$original/drivers/md/dm.c")" = 1881d86111fb2e655893ad898cf21b88f0e4e7f3
+          test "$(git -C "$original" hash-object "$original/drivers/md/dm-table.c")" = a483f49dd4ce6383ef66464707865187aa4cf51c
+          test "$(git -C "$original" hash-object "$original/include/linux/device-mapper.h")" = cd4faaf5d4275c038d06ccef4da3d77430154388
+          echo "ROUND048_ORIGINAL_DM_PINNED_COMMIT_THREE_BLOBS_VERIFIED_NO_AUTH"
       - name: Validate exact pinned Linux and production C; reject 18 plus export-hostile mutations
         shell: bash
         run: |
           set -euo pipefail
           python3 -B tests/tools/round048-dm-live-table-source-audit.py \
-            --kernel-root "$RUNNER_TEMP/round048-pristine-dm"
+            --kernel-root "$GITHUB_WORKSPACE/round048-pristine-dm"
       - name: Round049 real target-owned clone ACK GC dtr and 26 actual source-hostile negatives
         shell: bash
         run: |
           set -euo pipefail
           python3 -B tests/tools/round049-dm-target-owned-intake-audit.py \
-            --kernel-root "$RUNNER_TEMP/round048-pristine-dm"
+            --kernel-root "$GITHUB_WORKSPACE/round048-pristine-dm"
       - name: Round050 extract genuine product guarded C and run 168 negative cases GCC Clang ASan UBSan plus 22 hostile binaries each
         shell: bash
         run: |

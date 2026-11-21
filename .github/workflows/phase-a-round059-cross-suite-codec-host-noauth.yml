@@ -1,0 +1,55 @@
+name: Round059 inherited LZ4 host and explicit pinned LZO no-auth regression
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'src/kernel/zswap-import-codec.h'
+      - 'tests/runtime/native/fixtures/round058-original-codec-read.c'
+      - 'tests/tools/round058-original-codec-read-verify.py'
+      - 'tests/runtime/native/fixtures/round059-codec-host-compat.c'
+      - 'tests/tools/round059-codec-host-compat-verify.py'
+      - 'tests/tools/round057-transaction-product.py'
+      - 'tests/tools/round059-transaction-first-error-verify.py'
+      - '.github/workflows/phase-a-zswap-dm-original-table-gc-lifetime-noauth.yml'
+      - '.github/workflows/phase-a-round059-cross-suite-codec-host-noauth.yml'
+      - 'src/kernel/authority.c'
+      - 'src/kernel/codec.c'
+      - 'docs/testing_standards.md'
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  inherited-lz4-host-without-original-lzo:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Install strict compilers and codec dependencies for real source
+        run: |
+          set -euo pipefail
+          sudo apt-get update -qq
+          sudo DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
+            gcc clang python3 liblz4-dev libssl-dev
+      - name: Verify source identity, exact main and byte-safe source diff
+        run: |
+          set -euo pipefail
+          test "$GITHUB_REF" = refs/heads/main
+          test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
+          test -z "$(git status --porcelain --untracked-files=all)"
+          git diff --check HEAD^ HEAD
+      - name: Hostile GCC and Clang real first-error report, private 0600
+        run: |
+          set -euo pipefail
+          python3 -B tests/tools/round059-transaction-first-error-verify.py
+      - name: Real imported LZ4-only C no upstream LZO header or symbol plus semantic mutants
+        run: |
+          set -euo pipefail
+          python3 -B tests/tools/round059-codec-host-compat-verify.py
+      - name: Preserve original Round057 actual authority, CRC and flush real C transaction
+        run: |
+          set -euo pipefail
+          python3 -B tests/tools/round057-transaction-product.py
+          test -z "$(git status --porcelain --untracked-files=all)"
