@@ -17769,3 +17769,57 @@ table, 20-byte product map and volatile payload-only extents remain
 unchanged. SOURCE_MAPPED_AUTHENTICATED=0, PHASE_A=BLOCKED, compressed
 handoff DISABLED and forced RAW bypass DISABLED. No owner Make, privileged,
 kernel-loaded, physical device or actual-pressure tests.
+
+## Round062 Agent4 — strict Clang original decoder host prerequisite flag regression (2026-11-21)
+
+At exact Round061 engineering `0593173cad62192bb89f5ba37c6a993e7bafd0d7`,
+original decoder CI run `44945987651` source-host `136973284607`
+terminated SUCCESS, while both pinned original Linux native jobs
+`136975869586` (`CONFIG_ZSWAP=n`) and `136975869644`
+(`CONFIG_ZSWAP=y`) terminated FAILURE at the same **pre-Kbuild**
+first error: `ROUND061_DECODER_FIRST_ERROR clang real libelf
+compile/link failed`. Neither kernel `vmlinux` nor actual GPL
+`Module.symvers`/positive/negative `modpost` was reached. Hosted
+`libelf-dev` installation and GCC libelf probe had proceeded;
+the helper passed a redundant `-x none` AFTER the last stdin C source
+`-`, which Clang diagnoses as
+`[-Werror,-Wunused-command-line-argument]`; GCC permits it.
+
+Keep strict `-Wall -Wextra -Wconversion -Wshadow -Werror`
+for BOTH compilers, `-x c -` stdin source selection and genuine
+`-lelf` linkage; omit only redundant `-x none`. The actual helper
+`tests/tools/round061-original-kbuild-host-deps-verify.py self-test`
+must compile, link and EXECUTE both original strict GCC and Clang stdin
+C binaries, and negatively execute the earlier Clang command and
+require its real unused-command-line-argument compiler failure.
+Retain prior synthetic missing-`elf.h`, `gelf.h`, `libelf.h`
+negative gates, but do NOT present synthetic headers as native proof.
+The `check` action must still compile, link and EXECUTE with genuine
+installed `elf.h`, `gelf.h`, `libelf.h` and real `libelf-dev`
+library on each isolated hosted runner, without privileged owner-host
+actions. Fail-only output remains bounded, without compiler stderr
+or absolute runner paths.
+
+After the preflight, require separately terminal successful genuine
+pinned `torvalds/linux@c339f4010dea8b0d754f84ace70cd1b089878ef8`
+full x86 `CONFIG_ZSWAP=y/n` `vmlinux` and `modules`, exact
+original `Module.symvers` with selected LZO1X GPL and LZ4 exports,
+correct matched GPL compile-only module containing actual product
+import decoder and CRC, and a deliberately missing symbol rejected
+**specifically** by real original Linux `modpost`. Any subsequent
+kernel compiler/link/config/modpost first error is a NEW real
+unresolved cause, never converted to a positive by preflight success.
+Preserve source-host exact original source blob pin, original LZO/LZ4
+and strict GCC/Clang ASan+UBSan plus ten genuine compiled/executed
+codec C mutants.
+
+Native compilation alone cannot establish a loaded, independently
+retained decoder/module reference after source zswap pool teardown,
+authentic original STORED-to-current-DM bvec ownership, durable lower
+compressed WRITE/FUA, authoritative GC/read, upper ACK or whole-page
+readback. Remain `SOURCE_MAPPED_AUTHENTICATED=0`, `PHASE_A=BLOCKED`,
+direct compressed handoff DISABLED and forced RAW bypass DISABLED.
+Ordinary `RAW_4096` remains FULL ORIGINAL UNCOMPRESSED 4096, Linux
+MM retains compressed RAM and naturally evicts; no owner Make,
+loaded/privileged/physical/pressure tests or SWAPSPACE2 header/table
+mutation.

@@ -36,6 +36,54 @@ def check_headers(include_directory: Path) -> None:
             raise PrerequisiteError("missing development header " + header)
 
 
+def compiler_command(executable: str, output: Path, *, link_libelf: bool) -> list[str]:
+    # Clang rejects an unneeded "-x none" after the final stdin source under
+    # -Werror,-Wunused-command-line-argument. Library flags are linker inputs,
+    # not language-selected C source files, so no language reset is needed.
+    arguments = [executable, "-std=c11", "-Wall", "-Wextra", "-Wconversion",
+                 "-Wshadow", "-Werror", "-x", "c", "-", "-o", str(output)]
+    if link_libelf:
+        arguments.append("-lelf")
+    return arguments
+
+
+def compiler_command_self_test() -> None:
+    # Genuine GCC and Clang source compiles and program executions here;
+    # synthetic-only headers below never qualify the original Linux module.
+    with tempfile.TemporaryDirectory(prefix="swapz-original-compiler-") as directory:
+        compiler_paths: dict[str, str] = {}
+        for compiler in ("gcc", "clang"):
+            executable = shutil.which(compiler)
+            if executable is None:
+                raise PrerequisiteError("missing compiler " + compiler)
+            compiler_paths[compiler] = executable
+            output = Path(directory) / ("strict-stdin-" + compiler)
+            command = compiler_command(executable, output, link_libelf=False)
+            compiled = subprocess.run(
+                command, input="int main(void) { return 0; }\n",
+                capture_output=True, text=True, check=False, timeout=30)
+            if compiled.returncode or compiled.stderr:
+                raise PrerequisiteError(compiler + " strict stdin compile/link regression")
+            executed = subprocess.run([str(output)], capture_output=True,
+                                      check=False, timeout=15)
+            if executed.returncode:
+                raise PrerequisiteError(compiler + " strict stdin execution regression")
+        # The original failure reproduces as a real Clang -Werror diagnostic.
+        # This is a negative compiler-command test, not a simulated modpost.
+        clang = compiler_paths["clang"]
+        bad_output = Path(directory) / "legacy-language-reset"
+        bad_command = compiler_command(clang, bad_output, link_libelf=False)
+        bad_command[bad_command.index("-o"):bad_command.index("-o")] = ["-x", "none"]
+        rejected = subprocess.run(
+            bad_command, input="int main(void) { return 0; }\n",
+            capture_output=True, text=True, check=False, timeout=30)
+        if rejected.returncode == 0 or "unused-command-line-argument" not in rejected.stderr:
+            raise PrerequisiteError("Clang failed to reject original redundant -x none")
+    print("ROUND062_GCC_CLANG_STRICT_STDIN_COMPILER_ARGUMENTS_PASS "
+          "actual_compiles=2 actual_executions=2 original_clang_negative=1",
+          flush=True)
+
+
 def check_native_libelf() -> None:
     check_headers(Path("/usr/include"))
     with tempfile.TemporaryDirectory(prefix="swapz-original-libelf-") as directory:
@@ -46,9 +94,7 @@ def check_native_libelf() -> None:
             output = Path(directory) / ("libelf-" + compiler)
             try:
                 compiled = subprocess.run(
-                    [executable, "-std=c11", "-Wall", "-Wextra", "-Wconversion",
-                     "-Wshadow", "-Werror", "-x", "c", "-", "-x", "none",
-                     "-o", str(output), "-lelf"],
+                    compiler_command(executable, output, link_libelf=True),
                     input=LIBELF_PROBE, capture_output=True, text=True,
                     check=False, timeout=30)
                 if compiled.returncode:
@@ -64,6 +110,7 @@ def check_native_libelf() -> None:
 
 
 def self_test() -> None:
+    compiler_command_self_test()
     with tempfile.TemporaryDirectory(prefix="swapz-original-header-gate-") as directory:
         root = Path(directory)
         (root / "elf.h").write_text("/* synthetic header gate fixture */\n")
