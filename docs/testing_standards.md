@@ -16890,3 +16890,62 @@ This optional owner is NOT an accepted source-to-target lease. Clone full-bvec p
 ### Round056 Agent2 correction — consuming old source observation before new post-decode capture
 
 When moving a test-only STORED snapshot producer from before native `zswap_decompress` to after successful decompression but before original `xa_erase`, inspect *all inherited original source callbacks* on the same path. In this pinned source the earlier Round030 pre-decode diagnostic consumes `entry->swapz_round028_store_bound` on success; a new post-decode producer checking this flag would silently refuse every otherwise eligible source. Under the new guarded `SWAPZ_ROUND056_PREERASE_SINGLE_OWNER_TEST`, skip that **old diagnostic only**, preserving it byte-for-byte when the new flag is undefined. The same-commit independent staged-source verifier must reject removal of the conditional, reporting `predecode_diagnostic_consumes_new_snapshot` as the first error. This is a source-order root-cause correction, **not** a live original pressure-eviction proof or permission for compressed handoff; the old 66 genuine original C tests, the new quota assertions in existing registered C cases and both matched original x86 configurations must still compile and pass on exact new source. Default RAW_4096 remains the complete original uncompressed 4096 bytes, and no hidden swap-slot count, new reclaim, physical writes, kernel export or authorization state is introduced. Preserve all preceding and peer standards bytes in this same commit. `SOURCE_MAPPED_AUTHENTICATED=0 PHASE_A=BLOCKED DIRECT_COMPRESSED_HANDOFF=DISABLED FORCED_RAW_BYPASS=DISABLED`.
+
+## Round056 Agent3 — pinned original BIO full-clone provenance as a default-undefined negative-only owner test (2026-11-21)
+
+When experimenting with a compressed-snapshot sidecar on native original
+Linux swap writeback, maintain an independent, **default-disabled** source
+instrumentation boundary. Pin and SHA-verify original block/bio.c,
+include/linux/bio.h, include/linux/blk_types.h, drivers/md/dm.c and
+mm/page_io.c before composing the inherited original C KUnit. Preserve the
+existing 66 real original registered C tests; an additional four newly
+registered block-clone KUnit tests are not counted as executed until actual
+pinned UML boot yields verified JSON **and** KTAP with no skipped, duplicated,
+failed or synthetic-only case. Never replace genuine original API calls with
+host-simulated clones or claim original x86 GPL/module build success on an
+ancestor SHA. New rootless host qualification must separately compile and
+**execute** the exact guarded C under GCC and Clang GNU11 strict
+-Wall -Wextra -Wconversion -Wshadow -Werror with AddressSanitizer,
+UndefinedBehaviorSanitizer, no sanitizer recovery and leak detection. All
+individually changed helper-C mutants must compile and execute to a named
+semantic first-error assertion with exit 1, not a compiler or sanitizer
+accident; the successful baseline must remain sanitizer-clean. Stop at the
+first real compiler/test/KUnit error and identify exact source and CI SHA.
+
+A cloned BIO **shares** the parent bvec storage and BIO_CLONED merely records
+that relationship. A test ticket ref is not an original swap-slot count,
+original compressed STORED source, held folio or DM SRCU lease. For an
+optional per-BIO negative-only witness, preserve original vector pointer,
+full 4096-byte exact one-vector payload and REQ_SWAP WRITE op, source sector,
+current candidate bdev, actual candidate flags, iterator index/offset and
+explicit per-BIO ref transfer **after** real clone initialization succeeds.
+On a failed clone acquire no ticket ref; release each acquired ticket exactly
+once at the original bio_uninit/bio_reset boundary. Invalidating any
+split/trim/bio_advance/__bio_advance/reissue must be monotonic even if size,
+sector or pointer are later restored; check the zero-offset trim special
+case. A terminal original or DM callback cannot access a freed parent bvec,
+source zpool/SG, manually freed swap_iocb or retired source ticket. Real DM
+alloc_io always clones, alloc_tio may change bdev and truncate size,
+queue_io can requeue across suspend and __dm_io_complete handles terminal
+original bio_endio only after pending accounting. Explicit test-only
+alloc_tio/queue_io invalidation should be fail-closed; never simply remove
+the current product v1 BIO_CLONED refusal or treat an observed matching sector
+as target acceptance. A reviewed future accepted target bridge requires real
+native original writeback protection, exact physical and target-relative
+sector domains, current DM target/map/GC/dtr ownership and separately
+validated codec-aware persistent read lifetime.
+
+All production code stays unmodified with the test macro undefined. No new
+original GPL export, static branch, BIO ABI field, scheduler, reclaim or
+memory-pressure controller may be enabled. Ordinary RAW_4096 continues to
+hold the entire ORIGINAL UNCOMPRESSED 4096 bytes; no external compressed
+STORED data may impersonate it. Independently tagged future compressed disk
+IO remains blocked until true source-slot and current DM owners, stable codec
+and integrity, actual durable lower write, a single authoritative mapping,
+one genuine upper completion and complete original-page verified readback are
+all demonstrated. Protect the full first physical 4096-byte SWAPSPACE2
+header/signature/UUID and partition table; volatile metadata only. No owner
+make test or fast_test, privileged, loaded, real pressure, swap activation,
+physical device or media trial. `SOURCE_MAPPED_AUTHENTICATED=0
+PHASE_A=BLOCKED DIRECT_COMPRESSED_HANDOFF=DISABLED
+FORCED_RAW_BYPASS=DISABLED`.

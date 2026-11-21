@@ -1,0 +1,135 @@
+name: Round056 pinned original block BIO clone full-view lifetime C NO_AUTH
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/phase-a-zswap-round056-original-clone-provenance.yml'
+      - 'tests/tools/round056-original-clone-stage.py'
+      - 'tests/tools/round056-original-clone-verify.py'
+      - 'tests/runtime/native/fixtures/round056-original-clone-*'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  original-clone-source-extracted-host:
+    name: Original guarded clone-ticket GCC Clang C semantic negatives
+    runs-on: ubuntu-24.04
+    timeout-minutes: 16
+    steps:
+      - uses: actions/checkout@v4
+      - name: Execute unchanged guarded C under strict GCC Clang sanitizers and every actual changed mutant
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 -B tests/tools/round056-original-clone-verify.py host-test
+          python3 -B tests/tools/round056-original-clone-verify.py verifier-self-test
+          echo 'ROUND056_CLONE_HOST_84_CASES_16_MUTANTS_EACH_GCC_CLANG_PASS SOURCE_MAPPED_AUTHENTICATED=0'
+
+  genuine-pinned-original-uml-kunit:
+    name: Pinned original Linux genuine 66 plus four actual cloned BIO KUnit
+    runs-on: ubuntu-24.04
+    timeout-minutes: 105
+    needs: [original-clone-source-extracted-host]
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          path: swapz
+          persist-credentials: false
+      - uses: actions/checkout@v4
+        with:
+          repository: torvalds/linux
+          ref: c339f4010dea8b0d754f84ace70cd1b089878ef8
+          fetch-depth: 1
+          path: linux
+          persist-credentials: false
+      - name: Install original Linux user-mode KUnit build prerequisites (CI only, no owner device)
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo apt-get update -qq
+          sudo DEBIAN_FRONTEND=noninteractive apt-get install -y \
+            --no-install-recommends build-essential bc bison flex clang \
+            libelf-dev libssl-dev libncurses-dev liblz4-dev python3 \
+            python3-pyelftools binutils
+      - name: Stage exact pristine pinned original C and preserve all inherited KUnit
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git -C swapz rev-parse HEAD)" = "$GITHUB_SHA"
+          test "$(git -C linux rev-parse HEAD)" = c339f4010dea8b0d754f84ace70cd1b089878ef8
+          mkdir -p round056-evidence
+          python3 -B swapz/tests/tools/round056-original-clone-stage.py \
+            --linux-root linux --manifest round056-evidence/exact-original-staging.json
+          git -C linux diff --check
+          python3 - <<'PY'
+          import json
+          from pathlib import Path
+          item = json.loads(Path('round056-evidence/exact-original-staging.json').read_text())
+          assert item['original_sha'] == 'c339f4010dea8b0d754f84ace70cd1b089878ef8'
+          assert item['inherited_original_verified'] is True
+          assert item['positive_source_target_authorization'] is False
+          assert len(item['own_changed_paths']) == 4
+          for path in item['own_changed_paths']:
+              assert (Path('linux') / path).exists()
+          print('ROUND056_ORIGINAL_PRISTINE_STAGED_4_PROVENANCE_HOOK_PATHS_PASS')
+          PY
+      - name: Boot real original Linux UML C KUnit and verify inherited 66 plus new four
+        shell: bash
+        timeout-minutes: 90
+        run: |
+          set -Eeuo pipefail
+          first_phase=original-kunit-config
+          log=round056-evidence/first-kernel-error.log
+          verdict=round056-evidence/verdict.txt
+          out="$RUNNER_TEMP/round056-original-clone-uml"
+          result="$PWD/round056-evidence/actual-original-70.json"
+          request="$PWD/round056-evidence/original.kunitconfig"
+          printf 'exact_source=%s\noriginal_sha=c339f4010dea8b0d754f84ace70cd1b089878ef8\n' \
+            "$GITHUB_SHA" >"$verdict"
+          trap 'code=$?; if ((code)); then echo "::error::ROUND056_ORIGINAL_CLONE_FIRST_ERROR phase=$first_phase exit=$code"; tail -n 85 "$log" 2>/dev/null || :; printf "result=FAIL\nfirst_phase=%s\nexit=%s\n" "$first_phase" "$code" >>"$verdict"; fi' EXIT
+          cat >"$request" <<'KUNIT_CFG'
+          CONFIG_KUNIT=y
+          CONFIG_BLOCK=y
+          CONFIG_SWAP=y
+          CONFIG_ZSWAP=y
+          CONFIG_SWAP_BIO_ORIGIN_KUNIT_TEST=y
+          CONFIG_CRYPTO=y
+          CONFIG_CRYPTO_LZ4=y
+          CONFIG_CRYPTO_SHA256=y
+          CONFIG_LZ4_COMPRESS=y
+          CONFIG_LZ4_DECOMPRESS=y
+          # CONFIG_CGROUPS is not set
+          # CONFIG_KUNIT_ALL_TESTS is not set
+          KUNIT_CFG
+          flags='-DSWAPZ_ROUND028_SLOT_EPOCH_SOURCE=1 -DSWAPZ_ROUND030_EVICTION_SNAPSHOT_SOURCE=1 -DSWAPZ_ROUND025_SIDEBAND_CI_ONLY=1 -DSWAPZ_ROUND031_MM_BIO_SOURCE=1 -DSWAPZ_ROUND032_BIO_COPY_VIEW_CI_ONLY=1 -DSWAPZ_ROUND034_ORIGINAL_V1_KUNIT_TEST=1 -DSWAPZ_ROUND035_ORIGINAL_MM_ROUTE_WITNESS_TEST=1 -DSWAPZ_ROUND036_ORIGINAL_ROUTE_LIFETIME_TEST=1 -DSWAPZ_ROUND037_ORIGINAL_MM_LIFETIME_OWNER_TEST=1 -DSWAPZ_ROUND038_ORIGINAL_STORE_PROVENANCE_TEST=1 -DSWAPZ_ROUND040_ORIGINAL_ASYNC_SLOT_LEASE_NEGATIVE_TEST=1 -DSWAPZ_ROUND041_ORIGINAL_SECTOR_TO_DM_NONAUTHORITY_TEST=1 -DSWAPZ_ROUND042_ORIGINAL_STORED_WRITEBACK_LIFETIME_TEST=1 -DSWAPZ_ROUND043_ORIGINAL_BIO_CLONE_COPY_TEST=1 -DSWAPZ_ROUND045_ORIGINAL_STORED_BIO_SOURCE_SCOPE_TEST=1 -DSWAPZ_ROUND049_ORIGINAL_LOCKED_FOLIO_COUNT_PAIR_TEST=1 -DSWAPZ_ROUND052_ORIGINAL_PRE_UNUSE_CANCEL_TEST=1 -DSWAPZ_ROUND056_ORIGINAL_CLONE_PROVENANCE_TEST=1'
+          first_phase=actual-original-uml-compile-and-boot
+          timeout -k 10s 75m python3 -B linux/tools/testing/kunit/kunit.py run \
+            --arch=um --build_dir="$out" --kunitconfig="$request" \
+            --make_options="KCFLAGS=$flags -Werror" --jobs=2 --timeout=120 \
+            --json="$result" 'swapz_round0*' >"$log" 2>&1
+          first_phase=original-effective-config
+          test -x "$out/linux"
+          test -s "$result"
+          test -s "$out/test.log"
+          for required in CONFIG_ZSWAP=y CONFIG_KUNIT=y CONFIG_SWAP_BIO_ORIGIN_KUNIT_TEST=y \
+              '# CONFIG_CGROUPS is not set'; do
+            grep -Fxq "$required" "$out/.config"
+          done
+          first_phase=independent-real-original-70-json-ktap
+          python3 -B swapz/tests/tools/round056-original-clone-verify.py kernel-verify \
+            --result "$result" --kernel-log "$out/test.log" >round056-evidence/verified-kunit.log 2>&1 || {
+              code=$?; tail -n 85 round056-evidence/verified-kunit.log; exit "$code";
+            }
+          cat round056-evidence/verified-kunit.log
+          printf 'actual_original_66=PASS\nnew_actual_clone=4_PASS\nresult=PASS\n' >>"$verdict"
+          echo 'ROUND056_REAL_ORIGINAL_PINNED_UML_66_PLUS_4_CLONE_KUNIT_PASS AUTH0 PHASE_A=BLOCKED'
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: round056-original-clone-real-kernel
+          path: round056-evidence/
+          if-no-files-found: ignore
+          retention-days: 7

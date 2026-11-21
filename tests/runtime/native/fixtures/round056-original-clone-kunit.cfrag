@@ -1,0 +1,214 @@
+/* ROUND056_ORIGINAL_CLONE_KUNIT_BEGIN */
+#if defined(SWAPZ_ROUND056_ORIGINAL_CLONE_PROVENANCE_TEST) && IS_ENABLED(CONFIG_KUNIT)
+#include <kunit/test.h>
+
+/* Staged pristine original block/bio.c only: no loaded target or swap media. */
+static void swapz_round056_clone_endio_count(struct bio *bio)
+{
+	atomic_t *completed = bio->bi_private;
+
+	atomic_inc(completed);
+}
+
+struct swapz_round056_clone_fixture {
+	struct bio original;
+	struct bio_vec vector;
+	struct page *page;
+};
+
+static int swapz_round056_fixture_init(struct swapz_round056_clone_fixture *state)
+{
+	state->page = alloc_page(GFP_KERNEL);
+	if (!state->page)
+		return -ENOMEM;
+	bvec_set_page(&state->vector, state->page, SWAPZ_ROUND056_PAGE_BYTES, 0);
+	bio_init(&state->original, NULL, &state->vector, 1,
+		 REQ_OP_WRITE | REQ_SWAP);
+	state->original.bi_iter.bi_sector = SWAPZ_ROUND056_PAGE_SECTORS;
+	state->original.bi_iter.bi_size = SWAPZ_ROUND056_PAGE_BYTES;
+	state->original.bi_vcnt = 1;
+	return 0;
+}
+
+static void swapz_round056_fixture_finish(struct swapz_round056_clone_fixture *state)
+{
+	bio_uninit(&state->original);
+	__free_page(state->page);
+}
+
+static void swapz_round056_actual_init_clone_endio_kunit(struct kunit *test)
+{
+	struct swapz_round056_clone_fixture state = {};
+	struct swapz_round056_clone_ticket *ticket;
+	struct bio clone = {};
+	atomic_t completed = ATOMIC_INIT(0);
+	int freed_before = atomic_read(&swapz_round056_ticket_frees);
+	int error;
+
+	KUNIT_ASSERT_EQ(test, swapz_round056_fixture_init(&state), 0);
+	ticket = swapz_round056_attach_original(&state.original);
+	if (!ticket) {
+		KUNIT_FAIL(test, "real full original BIO refused before clone");
+		swapz_round056_fixture_finish(&state);
+		return;
+	}
+	error = bio_init_clone(NULL, &clone, &state.original, GFP_KERNEL);
+	if (error) {
+		KUNIT_FAIL(test, "real bio_init_clone failed");
+		swapz_round056_fixture_finish(&state);
+		return;
+	}
+	KUNIT_EXPECT_TRUE(test, bio_flagged(&clone, BIO_CLONED));
+	KUNIT_EXPECT_PTR_EQ(test, clone.bi_io_vec, state.original.bi_io_vec);
+	KUNIT_EXPECT_EQ(test, clone.bi_iter.bi_size, 4096U);
+	KUNIT_EXPECT_EQ(test, refcount_read(&ticket->references), 2);
+	KUNIT_EXPECT_TRUE(test, swapz_round056_complete_clone_view(&clone));
+
+	/* Real parent uninit precedes the clone's terminal callback. The bvec
+	 * still resides in the test fixture; real DM must retain original sio. */
+	bio_uninit(&state.original);
+	KUNIT_EXPECT_EQ(test, refcount_read(&ticket->references), 1);
+	KUNIT_EXPECT_TRUE(test, swapz_round056_complete_clone_view(&clone));
+	clone.bi_private = &completed;
+	clone.bi_end_io = swapz_round056_clone_endio_count;
+	bio_endio(&clone);
+	KUNIT_EXPECT_EQ(test, atomic_read(&completed), 1);
+	bio_uninit(&clone);
+	KUNIT_EXPECT_EQ(test, atomic_read(&swapz_round056_ticket_frees),
+			freed_before + 1);
+	__free_page(state.page);
+}
+
+static void swapz_round056_actual_split_trim_kunit(struct kunit *test)
+{
+	struct swapz_round056_clone_fixture state = {};
+	struct swapz_round056_clone_ticket *ticket;
+	struct bio *split;
+	struct bio clone = {};
+	int freed_before = atomic_read(&swapz_round056_ticket_frees);
+	int error;
+
+	KUNIT_ASSERT_EQ(test, swapz_round056_fixture_init(&state), 0);
+	ticket = swapz_round056_attach_original(&state.original);
+	if (!ticket) {
+		KUNIT_FAIL(test, "real split source acquisition failed");
+		swapz_round056_fixture_finish(&state);
+		return;
+	}
+	split = bio_split(&state.original, 4, GFP_KERNEL, &fs_bio_set);
+	if (IS_ERR_OR_NULL(split)) {
+		KUNIT_FAIL(test, "real bio_split allocation failed");
+		swapz_round056_fixture_finish(&state);
+		return;
+	}
+	KUNIT_EXPECT_EQ(test, refcount_read(&ticket->references), 2);
+	KUNIT_EXPECT_EQ(test, split->bi_iter.bi_size, 2048U);
+	KUNIT_EXPECT_EQ(test, state.original.bi_iter.bi_size, 2048U);
+	KUNIT_EXPECT_FALSE(test, swapz_round056_complete_clone_view(split));
+	KUNIT_EXPECT_FALSE(test, state.original.bi_round056_candidate);
+	bio_put(split);
+	swapz_round056_fixture_finish(&state);
+	KUNIT_EXPECT_EQ(test, atomic_read(&swapz_round056_ticket_frees),
+			freed_before + 1);
+
+	/* The zero-offset trim is not bio_advance; it MUST invalidate too. */
+	KUNIT_ASSERT_EQ(test, swapz_round056_fixture_init(&state), 0);
+	ticket = swapz_round056_attach_original(&state.original);
+	if (!ticket) {
+		KUNIT_FAIL(test, "real trim source acquisition failed");
+		swapz_round056_fixture_finish(&state);
+		return;
+	}
+	error = bio_init_clone(NULL, &clone, &state.original, GFP_KERNEL);
+	if (error) {
+		KUNIT_FAIL(test, "real trim clone creation failed");
+		swapz_round056_fixture_finish(&state);
+		return;
+	}
+	bio_trim(&clone, 0, 6);
+	KUNIT_EXPECT_EQ(test, clone.bi_iter.bi_size, 3072U);
+	KUNIT_EXPECT_FALSE(test, swapz_round056_complete_clone_view(&clone));
+	bio_uninit(&clone);
+	swapz_round056_fixture_finish(&state);
+	KUNIT_EXPECT_EQ(test, atomic_read(&swapz_round056_ticket_frees),
+			freed_before + 2);
+}
+
+static void swapz_round056_actual_requeue_reset_kunit(struct kunit *test)
+{
+	struct swapz_round056_clone_fixture state = {};
+	struct swapz_round056_clone_ticket *ticket;
+	struct bio clone = {};
+	int freed_before = atomic_read(&swapz_round056_ticket_frees);
+	int error;
+
+	KUNIT_ASSERT_EQ(test, swapz_round056_fixture_init(&state), 0);
+	ticket = swapz_round056_attach_original(&state.original);
+	if (!ticket) {
+		KUNIT_FAIL(test, "real requeue source acquisition failed");
+		swapz_round056_fixture_finish(&state);
+		return;
+	}
+	error = bio_init_clone(NULL, &clone, &state.original, GFP_KERNEL);
+	if (error) {
+		KUNIT_FAIL(test, "real requeue clone creation failed");
+		swapz_round056_fixture_finish(&state);
+		return;
+	}
+	KUNIT_EXPECT_TRUE(test, swapz_round056_complete_clone_view(&clone));
+	bio_prepare_reissue(&clone, NULL);
+	KUNIT_EXPECT_FALSE(test, swapz_round056_complete_clone_view(&clone));
+	KUNIT_EXPECT_EQ(test, refcount_read(&ticket->references), 2);
+	bio_reset(&clone, NULL, REQ_OP_WRITE | REQ_SWAP);
+	KUNIT_EXPECT_PTR_EQ(test, clone.bi_round056_ticket, NULL);
+	KUNIT_EXPECT_EQ(test, refcount_read(&ticket->references), 1);
+	bio_uninit(&clone);
+	swapz_round056_fixture_finish(&state);
+	KUNIT_EXPECT_EQ(test, atomic_read(&swapz_round056_ticket_frees),
+			freed_before + 1);
+}
+
+static void swapz_round056_actual_clone_failure_kunit(struct kunit *test)
+{
+	struct swapz_round056_clone_fixture state = {};
+	struct swapz_round056_clone_ticket *ticket;
+	struct bio clone = {};
+	struct bio *heap_clone;
+	int freed_before = atomic_read(&swapz_round056_ticket_frees);
+
+	KUNIT_ASSERT_EQ(test, swapz_round056_fixture_init(&state), 0);
+	ticket = swapz_round056_attach_original(&state.original);
+	if (!ticket) {
+		KUNIT_FAIL(test, "real failed-clone source acquisition failed");
+		swapz_round056_fixture_finish(&state);
+		return;
+	}
+	atomic_set(&swapz_round056_fail_next_clone, 1);
+	KUNIT_EXPECT_EQ(test, bio_init_clone(NULL, &clone,
+					      &state.original, GFP_KERNEL), -ENOMEM);
+	KUNIT_EXPECT_PTR_EQ(test, clone.bi_round056_ticket, NULL);
+	KUNIT_EXPECT_EQ(test, refcount_read(&ticket->references), 1);
+	atomic_set(&swapz_round056_fail_next_clone, 1);
+	heap_clone = bio_alloc_clone(NULL, &state.original, GFP_KERNEL,
+				     &fs_bio_set);
+	KUNIT_EXPECT_PTR_EQ(test, heap_clone, NULL);
+	KUNIT_EXPECT_EQ(test, refcount_read(&ticket->references), 1);
+	swapz_round056_fixture_finish(&state);
+	KUNIT_EXPECT_EQ(test, atomic_read(&swapz_round056_ticket_frees),
+			freed_before + 1);
+}
+
+static struct kunit_case swapz_round056_original_clone_cases[] = {
+	KUNIT_CASE(swapz_round056_actual_init_clone_endio_kunit),
+	KUNIT_CASE(swapz_round056_actual_split_trim_kunit),
+	KUNIT_CASE(swapz_round056_actual_requeue_reset_kunit),
+	KUNIT_CASE(swapz_round056_actual_clone_failure_kunit),
+	{}
+};
+static struct kunit_suite swapz_round056_original_clone_suite = {
+	.name = "swapz_round056_original_clone_ticket_only",
+	.test_cases = swapz_round056_original_clone_cases,
+};
+kunit_test_suite(swapz_round056_original_clone_suite);
+#endif /* SWAPZ_ROUND056_ORIGINAL_CLONE_PROVENANCE_TEST */
+/* ROUND056_ORIGINAL_CLONE_KUNIT_END */

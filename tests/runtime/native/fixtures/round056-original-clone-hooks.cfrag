@@ -1,0 +1,111 @@
+/* ROUND056_ORIGINAL_CLONE_HOOKS_BEGIN */
+#if defined(SWAPZ_ROUND056_ORIGINAL_CLONE_PROVENANCE_TEST)
+/*
+ * Default-undefined, staged ORIGINAL block-only test observation, not a
+ * real swap-slot owner, DM-table lease, immutable STORED capture or ABI.
+ * Original BIO owns the bvec storage. The copied identity is NEVER an auth.
+ * Mutations of each BIO are serialized by its existing I/O owner; only the
+ * immutable ticket reference count is shared by sibling full clones.
+ */
+#define SWAPZ_ROUND056_PAGE_BYTES 4096U
+#define SWAPZ_ROUND056_PAGE_SECTORS 8U
+struct swapz_round056_clone_ticket {
+	refcount_t references;
+	const struct bio_vec *source_vectors;
+	struct block_device *source_device;
+	sector_t sector;
+};
+static atomic_t swapz_round056_ticket_frees = ATOMIC_INIT(0);
+static atomic_t swapz_round056_fail_next_clone = ATOMIC_INIT(0);
+
+static void swapz_round056_drop_clone_ticket(struct bio *bio)
+{
+	struct swapz_round056_clone_ticket *ticket = bio->bi_round056_ticket;
+
+	/* Idempotent for bio_uninit() after failed initialization or reset. */
+	bio->bi_round056_ticket = NULL;
+	bio->bi_round056_candidate = false;
+	bio->bi_round056_clone_device = NULL;
+	if (ticket && refcount_dec_and_test(&ticket->references)) {
+		atomic_inc(&swapz_round056_ticket_frees);
+		kfree(ticket);
+	}
+}
+
+static void swapz_round056_invalidate_clone(struct bio *bio)
+{
+	/* Keep the allocated ref until bio_uninit(); never resurrect it. */
+	bio->bi_round056_candidate = false;
+}
+
+static struct swapz_round056_clone_ticket *
+swapz_round056_attach_original(struct bio *source)
+{
+	struct swapz_round056_clone_ticket *ticket;
+	const struct bio_vec *vector;
+
+	if (!source || source->bi_round056_ticket ||
+	    bio_flagged(source, BIO_CLONED) ||
+	    bio_op(source) != REQ_OP_WRITE ||
+	    !(source->bi_opf & REQ_SWAP) ||
+	    source->bi_iter.bi_size != SWAPZ_ROUND056_PAGE_BYTES ||
+	    source->bi_iter.bi_idx || source->bi_iter.bi_offset ||
+	    source->bi_iter.bi_sector % SWAPZ_ROUND056_PAGE_SECTORS ||
+	    source->bi_vcnt != 1U || !source->bi_io_vec)
+		return NULL;
+	vector = source->bi_io_vec;
+	if (!vector->bv_page || vector->bv_offset ||
+	    vector->bv_len != SWAPZ_ROUND056_PAGE_BYTES)
+		return NULL;
+	ticket = kzalloc(sizeof(*ticket), GFP_KERNEL);
+	if (!ticket)
+		return NULL;
+	refcount_set(&ticket->references, 1);
+	ticket->source_vectors = vector;
+	ticket->source_device = source->bi_bdev;
+	ticket->sector = source->bi_iter.bi_sector;
+	source->bi_round056_ticket = ticket;
+	source->bi_round056_candidate = true;
+	source->bi_round056_clone_device = source->bi_bdev;
+	return ticket;
+}
+
+static void swapz_round056_propagate_full_clone(struct bio *clone,
+					       const struct bio *source)
+{
+	struct swapz_round056_clone_ticket *ticket =
+		source->bi_round056_ticket;
+
+	/* Only the initial original full BIO can create one child witness. */
+	if (!ticket || !source->bi_round056_candidate ||
+	    bio_flagged(source, BIO_CLONED) ||
+	    source->bi_iter.bi_size != SWAPZ_ROUND056_PAGE_BYTES ||
+	    source->bi_io_vec != ticket->source_vectors ||
+	    source->bi_iter.bi_sector != ticket->sector ||
+	    source->bi_bdev != ticket->source_device ||
+	    !refcount_inc_not_zero(&ticket->references))
+		return;
+	clone->bi_round056_ticket = ticket;
+	clone->bi_round056_candidate = true;
+	/* Any later remap must invalidate until a separately reviewed DM owner. */
+	clone->bi_round056_clone_device = clone->bi_bdev;
+}
+
+static bool swapz_round056_complete_clone_view(const struct bio *clone)
+{
+	const struct swapz_round056_clone_ticket *ticket;
+
+	if (!clone || !clone->bi_round056_candidate ||
+	    !bio_flagged(clone, BIO_CLONED))
+		return false;
+	ticket = clone->bi_round056_ticket;
+	return ticket && clone->bi_io_vec == ticket->source_vectors &&
+	       clone->bi_iter.bi_sector == ticket->sector &&
+	       clone->bi_iter.bi_size == SWAPZ_ROUND056_PAGE_BYTES &&
+	       !clone->bi_iter.bi_idx && !clone->bi_iter.bi_offset &&
+	       clone->bi_round056_clone_device == clone->bi_bdev &&
+	       bio_op(clone) == REQ_OP_WRITE &&
+	       (clone->bi_opf & REQ_SWAP);
+}
+#endif /* SWAPZ_ROUND056_ORIGINAL_CLONE_PROVENANCE_TEST */
+/* ROUND056_ORIGINAL_CLONE_HOOKS_END */
