@@ -1,0 +1,16 @@
+# Round055 — four independent agents: actual cooperation, no redundant test-count expansion
+
+Official [issue #172](https://github.com/k1moradi/swapz/issues/172). Begin only after unique official ROUND_OPEN. Frozen last real engineering 31adfb7ff57cc5c061304beae749b485d093130b. Read [entire frozen contract](frozen-contract.md), [verified Round054 closeout](../round054/round-report.md), [verbatim previous reports](../round054/original-report-archive.md), AGENTS.md and entire canonical docs/testing_standards.md.
+
+- [Agent2: original MM/BIO-owner alternative to independent hidden counted-slot lease](agent2-original-bio-owner-alternative.md). Inspect actual 66 KUnit and matched original kernel pending jobs; precise core feasibility or NO_GO, no fake source authority.
+- [Agent3: actual existing production packer/retention/GC qualification](agent3-real-existing-packer-qualification.md). Reconcile real existing batching rather than creating competing packer; identify first real improvement or NO_CHANGE.
+- [Agent4: current codec repair qualification and different-codec read contract](agent4-codec-qualified-different-codec-read-contract.md). Repair already published; verify complete pristine original host LZ4 + real product C exact-source CI; only fix actual remaining errors. Design codec-aware volatile metadata/decoder lifetime to avoid recompression where safe.
+- [Agent5: adaptive bounded disk-side scheduling tradeoff frontier](agent5-adaptive-bounded-scheduling-frontier.md). Compare no extra hold versus adaptive ready-only packing, latency, capacity, GC cost and RAM limits on identical synthetic traces.
+
+[Owner notification](notification.md). [Historical index](../rounds.md).
+
+Round054 all 4 source deliveries on main, only Agent3 formal REPORT_READY. Agent3 exact DM CI success; Agent5 own scheduling CI subsequently success, model lower requests −30.8%, completed padded bytes −10.3% with identical success IDs and 0->2 tick worst wait. Agent4 latest size_t correction published with reported local source C 96 pages/52776 assertions/13 executed semantic mutants per compiler, exact combined codec CI still queued. Agent2 actual original 66 registered boot pending; verified 63 at ancestor only. Final engineering source 18/18 queued at independent repeated snapshot. No combined green claim.
+
+Only rootless parallel independent work. Only direct main nonforce fresh expected-head single-parent commits serialized. No branch/PR/fork/worktree/force. Preserve complete past+peer standards exact prefix; same-commit meaningful nonwhitespace standards additions for each source/fixture/CI change. Canonical repo-policy enforced. No gratuitous source change if evidence/no-go is correct outcome.
+
+Zswap native MM bounded compressed RAM, swapz disk compressed payload/GC only, no competing reclaim. RAW_4096 is full original UNCOMPRESSED 4096. Future separately tagged compressed handoff requires real original and DM ownership, codec-aware read decoder stable across pool lifetime, durable write/map/one actual ACK/full original decode, volatile metadata only. AUTH0 Phase A BLOCKED, compressed handoff/forced RAW bypass disabled. Protect all first physical 4096 and partition table. No owner make test/fast_test, physical/privileged/loaded/real-pressure/device tests.
