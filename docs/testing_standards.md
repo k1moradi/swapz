@@ -17364,3 +17364,21 @@ not a green run.
 - Strict rootless actual changed C `-std=gnu11 -Wall -Wextra -Wconversion -Wshadow -Werror` plus GCC and Clang ASan+UBSan must execute 21 original-source BIO cases and reject eight **compiled** actual C mutation binaries each with a semantic first-error exit, not a sanitizer/compiler failure. Original source-order audit must reject 17 changed original C source gates independently, and inspect the REAL pinned post-composition `mm/zswap.c` decomp→capture→erase, `mm/page_io.c` bdev/sector→observer→submit, and `block/bio.c` clone ticket/endio boundaries with exact pinned source blob+postimage manifest.
 - Use the owned Round058 workflow instead of introducing a duplicated kernel workflow: genuine pinned original Linux `torvalds/linux@c339f4010dea8b0d754f84ace70cd1b089878ef8` UML 71 registered C KUnit boot independently parsed JSON+KTAP and real x86 ZSWAP=y/n complete vmlinux/modules/unique GPL provider/probe/matched `dm-swapz.ko`. Exact new commit-specific tests may be pending; an older original terminal PASS is not transferable. Emit first failing phase and preserve the untruncated bounded compiler/semantic evidence. Semantic mutant removing the host's only `folio_test_swapcache` call previously failed at `-Werror=unused-function`; keep the reference in the negative expression so the executable reaches the intended semantic failure.
 - No physical/privileged/loaded/pressure/make tests. No new authenticated source→current accepted `dm_per_bio_data` target generation, BIO/bvec lease, decoder after pool death, ordered durable compressed lower write, one upper ACK or GC/read lifetime. Normal `RAW_4096` remains full **original uncompressed** data. `SOURCE_MAPPED_AUTHENTICATED=0`, `PHASE_A=BLOCKED`, `DIRECT_COMPRESSED_HANDOFF=DISABLED`, `FORCED_RAW_BYPASS=DISABLED`. Entire first physical 4096 SWAPSPACE2 header/UUID/signature and parent partition table immutable.
+
+## Round059 Agent4 — strict warning-clean semantic overlap mutant (P0 CI follow-up)
+
+The restored generic LZ4-only imported decoder host source must link without
+`linux/lzo.h` or original LZO symbols, return `-EOPNOTSUPP` for selected
+LZO without the deliberately staged pinned original decoder, and preserve
+the previous original LZO/LZ4 full-4096 evidence. In the Round059 inherited
+host regression, the one actual `scratch-output-overlap` changed-header C
+mutant must change semantics and execute to the named immutable-output oracle.
+A bare inserted `0 && overlap(...)` in the enclosing `if (... || ...)`
+triggers GCC `-Werror=parentheses` and is a **test infrastructure first
+error, not a semantic mutant kill**. Parenthesize the complete false-guarded
+subexpression `(0 && overlap(...))` so GCC/Clang high-warning builds
+compile normally and runtime asserts rejection; do not suppress warnings or
+count any compiler error, sanitizer report or signal as an executed mutant.
+Keep full `-Wall -Wextra -Wconversion -Wshadow -Werror` plus ASan/UBSan
+on changed-source GCC and Clang binaries, and retain all five original
+mutant cases unchanged except this narrow expression correction.

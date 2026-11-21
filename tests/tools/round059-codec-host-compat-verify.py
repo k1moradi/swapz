@@ -37,8 +37,8 @@ MUTANTS = (
     ("scratch-output-overlap",
      "swapz_zswap_import_ranges_overlap(scratch, SWAPZ_BLOCK_BYTES,\n"
      "\t\t\toutput, SWAPZ_BLOCK_BYTES)",
-     "0 && swapz_zswap_import_ranges_overlap(scratch, SWAPZ_BLOCK_BYTES,\n"
-     "\t\t\toutput, SWAPZ_BLOCK_BYTES)"),
+     "(0 && swapz_zswap_import_ranges_overlap(scratch, SWAPZ_BLOCK_BYTES,\n"
+     "\t\t\toutput, SWAPZ_BLOCK_BYTES))"),
 )
 
 

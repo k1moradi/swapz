@@ -96,3 +96,33 @@ FORCED_RAW_BYPASS=DISABLED
 
 No owner Make, privilege, loaded-kernel, device, mkswap, actual
 pressure or physical operations authorized or performed.
+
+## First same-round exact-CI error: changed overlap mutant did not compile
+
+At the actual Agent4 main source commit
+`2f805a9c5ab8975ee088b567a415bf271e8bc8c8`,
+[Round059 generic host regression run #44916829333](https://github.com/k1moradi/swapz/actions/runs/44916829333),
+job `136884144441`, TERMINAL FAILURE after executed GCC baseline
+`ROUND059_GENERIC_LZ4_ONLY_HOST_PASS` and four real semantic mutant
+binaries. The fifth changed-header mutant
+`gcc/scratch-output-overlap/compile-and-link` failed
+`-Werror=parentheses` at generated
+`zswap-import-codec.h:159:15`, because the hostile source
+`0 && function(...) || function(...)` needs explicit grouping.
+The first failure is a **mutant compiler warning**, not a decoder/ABI
+failure and not an accepted semantic kill. A narrow amendment to the
+**test-only** mutant replacement inserts parentheses:
+`(0 && swapz_zswap_import_ranges_overlap(...))`. No product source,
+original LZO decoder or strict compiler flags changed.
+
+At the same original Agent4 P0 SHA, the historical generic host-header
+first error has been fixed: 11 inherited source-host workflows and
+Round048 pristine DM pinned original source checkout now succeeded.
+Dedicated original pinned LZO/LZ4 4096 read `44916829151` and
+original decoder `44916829032` both terminal SUCCESS. Round057
+product `44916829322` was RED solely for Agent5's separate actual
+`authority.c:1991:17 -Wconversion` source compiler issue, not the
+missing LZO header, and Agent5 corrected this at
+`d5aaba588dd161ae750ffe5cf9b574d00306d118`.
+Full integrated all-green must await latest own and peer exact SHA
+workflows; no retroactive cross-source PASS claimed.
