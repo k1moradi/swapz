@@ -157,12 +157,20 @@ def run_checked(command: list[str], *, expected_zero: bool, label: str,
                        'ROUND052_CODEC_FIRST_ERROR line=' in completed.stderr and
                        'ERROR: AddressSanitizer' not in completed.stderr and
                        'runtime error:' not in completed.stderr)
-    if actual_zero != expected_zero or (not expected_zero and not oracle_rejected):
+    sanitizer_reported = ('AddressSanitizer' in completed.stderr or
+                          'UndefinedBehaviorSanitizer' in completed.stderr or
+                          'runtime error:' in completed.stderr or
+                          'LeakSanitizer' in completed.stderr)
+    if (actual_zero != expected_zero or sanitizer_reported or
+            (expected_zero and completed.stderr) or
+            (not expected_zero and not oracle_rejected)):
         snippet = '\n'.join((completed.stdout + '\n' + completed.stderr).splitlines()[-22:])
         raise AssertionError(f"ROUND052_CODEC_FIRST_ERROR {label} exit={completed.returncode} "
                              f"expected_zero={expected_zero} oracle_rejected={oracle_rejected}\n{snippet}")
     if marker is not None:
         require(completed.stdout, marker, label)
+        # Preserve the actual executed C marker and assertion count per compiler.
+        print(f'{label}: {completed.stdout.strip()}', flush=True)
 
 
 def compile_and_execute(compiler: str, tempdir: Path, fixture: Path, codec: str,
@@ -172,7 +180,8 @@ def compile_and_execute(compiler: str, tempdir: Path, fixture: Path, codec: str,
     source_path.write_text(codec)
     flags = [compiler, '-std=gnu11', '-O1', '-g', '-Wall', '-Wextra',
              '-Wconversion', '-Wshadow', '-Werror', '-fno-omit-frame-pointer',
-             '-fsanitize=address,undefined', '-I', str(HEADER.parent),
+             '-fsanitize=address,undefined', '-fno-sanitize-recover=all',
+             '-I', str(HEADER.parent),
              str(fixture), str(source_path), '-llz4', '-lcrypto', '-o', str(binary_path)]
     run_checked(flags, expected_zero=True, label=f'{name}/{compiler}/compile')
     run_checked([str(binary_path)], expected_zero=expected_zero,

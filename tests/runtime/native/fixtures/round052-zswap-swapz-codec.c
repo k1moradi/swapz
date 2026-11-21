@@ -159,6 +159,28 @@ static int test_page(unsigned int seed)
                                      result);
     CHECK(rc == (length <= SWAPZ_MAX_COMPRESSED ? 1 : 0));
     CHECK(memcmp(result, original, sizeof(original)) == 0);
+    if (rc == 1) {
+        /* Exercise actual packed RAM codec storage and readback before the
+         * host raw-block decoder, not merely direct liblz4 roundtripping. */
+        u8 lower[SWAPZ_BLOCK_BYTES];
+        struct swapz_ram_extent extent;
+        struct swapz_decoded records[1];
+        const u8 *stored = NULL;
+
+        CHECK(swapz_ram_extent_begin(&extent, lower, SWAPZ_BLOCK_BYTES,
+                                     1U, records, 1U) == 0);
+        CHECK(swapz_ram_extent_append(&extent, 7U, 2U, compressed,
+                                      (swapz_u16)length, SWAPZ_ENCODING_LZ4) == 0);
+        CHECK(swapz_ram_extent_seal(&extent) == 0);
+        CHECK(swapz_ram_extent_read(&extent, 0U, 7U, 2U, &stored) == 0);
+        CHECK(records[0].payload_length == length);
+        CHECK(records[0].payload_crc32c == crc);
+        CHECK(verify_host_lower_candidate(stored, records[0].payload_length,
+                                          HOST_RAW_BLOCK, records[0].encoding,
+                                          records[0].payload_crc32c, sha,
+                                          original, result) == 1);
+        CHECK(memcmp(result, original, sizeof(original)) == 0);
+    }
     CHECK(verify_host_lower_candidate(compressed, length, HOST_ZSTD,
                                       SWAPZ_ENCODING_LZ4, crc, sha,
                                       original, result) == 0);
@@ -325,9 +347,17 @@ static int test_legacy_metadata_lengths(void)
     u8 scratch[SWAPZ_BLOCK_BYTES];
     struct swapz_ram_extent_metadata snapshot = { 0 };
     struct swapz_header malformed_header = { 0 };
+    struct swapz_builder builder;
+    u8 payload[32] = { 0 };
+    u8 sealed[SWAPZ_BLOCK_BYTES];
     unsigned int index;
 
     memset(scratch, 0xa5, sizeof(scratch));
+    CHECK(swapz_attach_extent_metadata(scratch, SWAPZ_BLOCK_BYTES,
+                                       &snapshot) == -EINVAL);
+    snapshot.length = (swapz_u16)sizeof(struct swapz_header);
+    CHECK(swapz_attach_extent_metadata(scratch, SWAPZ_BLOCK_BYTES,
+                                       &snapshot) == -EUCLEAN);
     /* 65535 must not narrow to a valid RAM descriptor length. */
     snapshot.length = UINT16_MAX;
     CHECK(swapz_attach_extent_metadata(scratch, SWAPZ_BLOCK_BYTES,
@@ -348,6 +378,23 @@ static int test_legacy_metadata_lengths(void)
     malformed_header.sequence_le = 1U;
     memcpy(scratch, &malformed_header, sizeof(malformed_header));
     CHECK(swapz_validate_metadata_crc(scratch, SWAPZ_BLOCK_BYTES) == -EUCLEAN);
+    malformed_header.record_count = 0U;
+    memcpy(scratch, &malformed_header, sizeof(malformed_header));
+    CHECK(swapz_validate_metadata_crc(scratch, SWAPZ_BLOCK_BYTES) == -EUCLEAN);
+
+    /* The corrected length comparison must still admit a valid RAM-only
+     * snapshot, restore exactly its original bytes, and reject reattachment
+     * to already populated scratch without mutation. */
+    CHECK(swapz_begin(&builder, scratch, SWAPZ_BLOCK_BYTES, 1U) == 0);
+    CHECK(swapz_append(&builder, 7U, 2U, payload, sizeof(payload)) == 0);
+    CHECK(swapz_seal(&builder) == 0);
+    memcpy(sealed, scratch, sizeof(sealed));
+    CHECK(swapz_detach_extent_metadata(&builder, &snapshot) == 0);
+    CHECK(snapshot.length == sizeof(struct swapz_header) + sizeof(struct swapz_record));
+    CHECK(swapz_attach_extent_metadata(scratch, SWAPZ_BLOCK_BYTES, &snapshot) == 0);
+    CHECK(memcmp(scratch, sealed, sizeof(scratch)) == 0);
+    CHECK(swapz_attach_extent_metadata(scratch, SWAPZ_BLOCK_BYTES, &snapshot) == -ESTALE);
+    CHECK(memcmp(scratch, sealed, sizeof(scratch)) == 0);
     return 0;
 }
 

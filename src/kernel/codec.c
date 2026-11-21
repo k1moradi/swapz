@@ -537,7 +537,7 @@ int swapz_attach_extent_metadata(
 	const struct swapz_ram_extent_metadata *metadata)
 {
 	const swapz_u8 *prefix;
-	swapz_u32 expected_bytes;
+	size_t expected_bytes;
 	swapz_u32 index;
 	struct swapz_builder overlap_check;
 	int error;
@@ -558,8 +558,8 @@ int swapz_attach_extent_metadata(
 	 * not the remainder of the stated extent geometry.
 	 */
 	prefix = metadata->bytes;
-	expected_bytes = (swapz_u32)sizeof(struct swapz_header) +
-		(swapz_u32)prefix[offsetof(struct swapz_header, record_count)] *
+	expected_bytes = sizeof(struct swapz_header) +
+		prefix[offsetof(struct swapz_header, record_count)] *
 		sizeof(struct swapz_record);
 	if (expected_bytes != metadata->length)
 		return -EUCLEAN;
