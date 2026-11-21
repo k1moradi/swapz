@@ -49,6 +49,9 @@ MUTATIONS = (
     ("(clone->bi_opf & REQ_SWAP);", "true;"),
     ("bio->bi_round056_candidate = false;\n}\n\nstatic struct swapz_round056_clone_ticket *",
      "bio->bi_round056_candidate = true;\n}\n\nstatic struct swapz_round056_clone_ticket *"),
+    ("ticket->source_bio == bio", "false"),
+    ("atomic_read(&ticket->source_live) &&",
+     "(atomic_read(&ticket->source_live) || true) &&"),
 )
 
 
@@ -127,7 +130,7 @@ def host_test() -> None:
                 compile_execute(compiler, compose(mutated), scratch,
                                 compiler + "-changed-actual-C-" + str(number), True)
             print("ROUND056_REAL_GUARDED_CLONE_" + compiler.upper() +
-                  "_16_CHANGED_C_BINARIES_SEMANTIC_ORACLE_PASS")
+                  f"_{len(MUTATIONS)}_CHANGED_C_BINARIES_SEMANTIC_ORACLE_PASS")
 
 
 def kernel_verify(document: object, kernel_log: str) -> None:

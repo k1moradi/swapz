@@ -64,11 +64,11 @@ static void swapz_round056_actual_init_clone_endio_kunit(struct kunit *test)
 	KUNIT_EXPECT_EQ(test, refcount_read(&ticket->references), 2);
 	KUNIT_EXPECT_TRUE(test, swapz_round056_complete_clone_view(&clone));
 
-	/* Real parent uninit precedes the clone's terminal callback. The bvec
-	 * still resides in the test fixture; real DM must retain original sio. */
+	/* Parent uninit retires its borrowed bvec lifetime. The fixture's bvec
+	 * still exists, but a real embedded swap_iocb may already be freed. */
 	bio_uninit(&state.original);
 	KUNIT_EXPECT_EQ(test, refcount_read(&ticket->references), 1);
-	KUNIT_EXPECT_TRUE(test, swapz_round056_complete_clone_view(&clone));
+	KUNIT_EXPECT_FALSE(test, swapz_round056_complete_clone_view(&clone));
 	clone.bi_private = &completed;
 	clone.bi_end_io = swapz_round056_clone_endio_count;
 	bio_endio(&clone);

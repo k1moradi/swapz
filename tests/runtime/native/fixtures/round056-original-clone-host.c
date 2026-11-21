@@ -23,6 +23,14 @@ typedef uint64_t sector_t;
 typedef atomic_int atomic_t;
 typedef struct { atomic_uint value; } refcount_t;
 #define ATOMIC_INIT(number) ATOMIC_VAR_INIT(number)
+static void atomic_set(atomic_t *value, int count)
+{
+	atomic_store(value, count);
+}
+static int atomic_read(const atomic_t *value)
+{
+	return atomic_load(value);
+}
 static void atomic_inc(atomic_t *value)
 {
 	(void)atomic_fetch_add_explicit(value, 1, memory_order_relaxed);
@@ -267,6 +275,8 @@ static int run_one(unsigned int case_number, unsigned int scenario)
 	}
 	/* The kernel, not this fixture, controls actual callback and bvec lifetime. */
 	swapz_round056_drop_clone_ticket(&state.source);
+	if (swapz_round056_complete_clone_view(&state.clone))
+		return fail(case_number, scenario, "retired-source-still-eligible");
 	if (refcount_read(&ticket->references) != 1U)
 		return fail(case_number, scenario, "early-parent-release");
 	swapz_round056_drop_clone_ticket(&state.clone);

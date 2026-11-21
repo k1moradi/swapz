@@ -11,6 +11,9 @@
 #define SWAPZ_ROUND056_PAGE_SECTORS 8U
 struct swapz_round056_clone_ticket {
 	refcount_t references;
+	/* Witness only: never dereference or retain the original BIO. */
+	struct bio *source_bio;
+	atomic_t source_live;
 	const struct bio_vec *source_vectors;
 	struct block_device *source_device;
 	sector_t sector;
@@ -26,6 +29,9 @@ static void swapz_round056_drop_clone_ticket(struct bio *bio)
 	bio->bi_round056_ticket = NULL;
 	bio->bi_round056_candidate = false;
 	bio->bi_round056_clone_device = NULL;
+	/* A child ticket ref cannot keep the parent's borrowed bvec alive. */
+	if (ticket && ticket->source_bio == bio)
+		atomic_set(&ticket->source_live, 0);
 	if (ticket && refcount_dec_and_test(&ticket->references)) {
 		atomic_inc(&swapz_round056_ticket_frees);
 		kfree(ticket);
@@ -61,6 +67,8 @@ swapz_round056_attach_original(struct bio *source)
 	if (!ticket)
 		return NULL;
 	refcount_set(&ticket->references, 1);
+	ticket->source_bio = source;
+	atomic_set(&ticket->source_live, 1);
 	ticket->source_vectors = vector;
 	ticket->source_device = source->bi_bdev;
 	ticket->sector = source->bi_iter.bi_sector;
@@ -77,7 +85,8 @@ static void swapz_round056_propagate_full_clone(struct bio *clone,
 		source->bi_round056_ticket;
 
 	/* Only the initial original full BIO can create one child witness. */
-	if (!ticket || !source->bi_round056_candidate ||
+	if (!ticket || !atomic_read(&ticket->source_live) ||
+	    !source->bi_round056_candidate ||
 	    bio_flagged(source, BIO_CLONED) ||
 	    source->bi_iter.bi_size != SWAPZ_ROUND056_PAGE_BYTES ||
 	    source->bi_io_vec != ticket->source_vectors ||
@@ -99,7 +108,8 @@ static bool swapz_round056_complete_clone_view(const struct bio *clone)
 	    !bio_flagged(clone, BIO_CLONED))
 		return false;
 	ticket = clone->bi_round056_ticket;
-	return ticket && clone->bi_io_vec == ticket->source_vectors &&
+	return ticket && atomic_read(&ticket->source_live) &&
+	       clone->bi_io_vec == ticket->source_vectors &&
 	       clone->bi_iter.bi_sector == ticket->sector &&
 	       clone->bi_iter.bi_size == SWAPZ_ROUND056_PAGE_BYTES &&
 	       !clone->bi_iter.bi_idx && !clone->bi_iter.bi_offset &&

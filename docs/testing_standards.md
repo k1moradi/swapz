@@ -16956,3 +16956,27 @@ FORCED_RAW_BYPASS=DISABLED`.
 - The genuine pinned original kernel API for the selected acomp implementation is `crypto_acomp_driver_name`; `crypto_acomp_alg_driver_name` is not a declared function. Keep both actual algorithm-name and driver-name checks, never rely on the pool name alone, and retain compiler warnings as errors rather than inserting a cast or a suppression.
 - The staged-source verifier must reject a semantic hostile mutation that moves the guarded original producer to the pre-decompress site, separately from function-scoped textual controls. Qualify both genuine original UML KUnit JSON+KTAP and full original x86 ZSWAP=y/n unique GPL matched DM module on the exact changed commit; ancestor success and queued jobs do not count as a pass. The four-owner GFP_NOWAIT|__GFP_NOWARN bound, last-reference budget unwind, source-slot/epoch/store SHA, no extra slot count, and old/default guarded behavior are immutable safety checks.
 - This is source-only, test-only observation, never source-to-target authentication or durable lower completion. `SOURCE_MAPPED_AUTHENTICATED=0`, `PHASE_A=BLOCKED`, `DIRECT_COMPRESSED_HANDOFF=DISABLED`, `FORCED_RAW_BYPASS=DISABLED`; no owner `make test` / `make fast_test`, loaded-kernel, physical/DM/swap activation or real pressure trial was authorized for this round.
+
+## Round057 default-disabled clone ticket source-retirement regression (2026-11-21)
+
+A refcount on an original block/BIO test ticket retains only that ticket's
+allocation; it never retains the original parent BIO, parent-owned bvec array,
+embedded swap_iocb, swap-slot count, source folio, or Device Mapper target.
+The guarded original-source witness must remember its original BIO pointer
+for identity comparison only (no later dereference) and an atomic, monotonic
+source-live flag. Original bio_uninit() clears that flag before releasing its
+ticket reference. Both full-view recognition and further propagation reject
+the retired source even if a child ref and the old shared bvec address remain.
+Releasing a child reference cannot retire the still-live original. This is
+negative evidence only, not a cross-thread current-source lease or acceptance.
+
+Preserve the four genuine pinned original clone C KUnit registrations and the
+84 deterministic host cases, assert surviving child witness refusal after
+original parent uninit in both paths, and require semantic rejection of
+separate mutants that skip original-owner invalidation and ignore liveness.
+Run strict GCC and Clang with ASan/UBSan; a sanitizer crash or compiler
+failure is not a successful semantic mutant. Original Linux boot JSON+KTAP at
+an older source SHA is historical only; a new source SHA needs its own
+terminal exact-source evidence before claiming original KUnit qualification.
+The guarded macro stays default undefined and product BIO_CLONED refusal,
+SOURCE_MAPPED_AUTHENTICATED=0, PHASE_A=BLOCKED and compressed handoff OFF remain.

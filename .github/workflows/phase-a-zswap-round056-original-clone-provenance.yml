@@ -26,7 +26,7 @@ jobs:
           set -euo pipefail
           python3 -B tests/tools/round056-original-clone-verify.py host-test
           python3 -B tests/tools/round056-original-clone-verify.py verifier-self-test
-          echo 'ROUND056_CLONE_HOST_84_CASES_16_MUTANTS_EACH_GCC_CLANG_PASS SOURCE_MAPPED_AUTHENTICATED=0'
+          echo 'ROUND056_CLONE_HOST_84_CASES_18_MUTANTS_EACH_GCC_CLANG_PASS SOURCE_MAPPED_AUTHENTICATED=0'
 
   genuine-pinned-original-uml-kunit:
     name: Pinned original Linux genuine 66 plus four actual cloned BIO KUnit
