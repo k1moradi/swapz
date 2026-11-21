@@ -145,7 +145,8 @@ def validate_product() -> str:
     return codec
 
 
-def run_checked(command: list[str], *, expected_zero: bool, label: str) -> None:
+def run_checked(command: list[str], *, expected_zero: bool, label: str,
+                marker: str | None = None) -> None:
     completed = subprocess.run(command, text=True, capture_output=True,
                                timeout=80, check=False)
     actual_zero = completed.returncode == 0
@@ -153,8 +154,8 @@ def run_checked(command: list[str], *, expected_zero: bool, label: str) -> None:
         snippet = '\n'.join((completed.stdout + '\n' + completed.stderr).splitlines()[-22:])
         raise AssertionError(f"ROUND052_CODEC_FIRST_ERROR {label} exit={completed.returncode} "
                              f"expected_zero={expected_zero}\n{snippet}")
-    if expected_zero:
-        require(completed.stdout, 'ROUND052_HOST_RAW_LZ4_SUBSET_PASS', label)
+    if marker is not None:
+        require(completed.stdout, marker, label)
 
 
 def compile_and_execute(compiler: str, tempdir: Path, fixture: Path, codec: str,
@@ -168,7 +169,8 @@ def compile_and_execute(compiler: str, tempdir: Path, fixture: Path, codec: str,
              str(fixture), str(source_path), '-llz4', '-lcrypto', '-o', str(binary_path)]
     run_checked(flags, expected_zero=True, label=f'{name}/{compiler}/compile')
     run_checked([str(binary_path)], expected_zero=expected_zero,
-                label=f'{name}/{compiler}/C-execution')
+                label=f'{name}/{compiler}/C-execution',
+                marker='ROUND052_HOST_RAW_LZ4_SUBSET_PASS' if expected_zero else None)
 
 
 def main() -> None:
