@@ -37,8 +37,8 @@ typedef uint64_t u64;
  "linux/unaligned.h": """#pragma once
 #include <stdint.h>
 #include <string.h>
-#define get_unaligned(pointer) ({ __typeof__(*(pointer)) value; memcpy(&value, (pointer), sizeof(value)); value; })
-#define put_unaligned(value,pointer) do { __typeof__(*(pointer)) value_copy = (value); memcpy((pointer), &value_copy, sizeof(value_copy)); } while (0)
+#define get_unaligned(pointer) ({ __typeof__(*(pointer)) value; memcpy(&value, (const void *)(pointer), sizeof(value)); value; })
+#define put_unaligned(value,pointer) do { __typeof__(*(pointer)) value_copy = (value); memcpy((void *)(pointer), &value_copy, sizeof(value_copy)); } while (0)
 static inline uint16_t get_unaligned_le16(const void *pointer) { uint16_t value; memcpy(&value,pointer,sizeof(value)); return value; }
 static inline uint32_t get_unaligned_le32(const void *pointer) { uint32_t value; memcpy(&value,pointer,sizeof(value)); return value; }
 static inline void put_unaligned_le32(uint32_t value, void *pointer) { memcpy(pointer,&value,sizeof(value)); }
@@ -48,6 +48,14 @@ static inline void put_unaligned_le32(uint32_t value, void *pointer) { memcpy(po
 #define MODULE_LICENSE(...)
 #define MODULE_DESCRIPTION(...)
 """,
+}
+ORIGINAL_BLOBS = {
+ "crypto/lzo.c": "d43242b24b4e831e7e0d26f38d2f263877d5748e",
+ "include/linux/lzo.h": "4d30e3624acd237290dbfeaefdb9c710e4f85f56",
+ "lib/lzo/lzo1x_compress.c": "01586af2347f5e2f8c8528b94e02622fc8b262c8",
+ "lib/lzo/lzo1x_compress_safe.c": "371c9f849492814afed88a443acb2262dcf35dfe",
+ "lib/lzo/lzo1x_decompress_safe.c": "318abb82c63d2c27c0d5497b7cf4e21d87d13154",
+ "lib/lzo/lzodefs.h": "b60851fcf6ce54b57e87d04e917deaa2b6cf62cc",
 }
 ORIGINAL = {
  "crypto/lzo.c": ["__lzo_compress(", "lzo1x_1_compress_safe(", "__lzo_decompress(", "lzo1x_decompress_safe(", 'cra_driver_name = "lzo-scomp"'],
@@ -81,6 +89,11 @@ def main() -> None:
         raise AssertionError("ROUND056_DECODER_FIRST_ERROR wrong original SHA")
     if checked(["git", "-C", str(linux), "status", "--porcelain"], "clean"):
         raise AssertionError("ROUND056_DECODER_FIRST_ERROR dirty original")
+    for path, expected_blob in ORIGINAL_BLOBS.items():
+        actual_blob = checked(["git", "-C", str(linux), "hash-object",
+                               str(linux / path)], f"original-blob/{path}")
+        if actual_blob != expected_blob:
+            raise AssertionError(f"ROUND056_DECODER_FIRST_ERROR original blob SHA {path}: {actual_blob}")
     for path, anchors in ORIGINAL.items():
         contents = (linux / path).read_text()
         for anchor in anchors:
@@ -108,13 +121,28 @@ def main() -> None:
                 modified_path = scratch / f"{compiler}-{name}.c"
                 executable = scratch / f"{compiler}-{name}"
                 modified_path.write_text(modified)
-                flags = [compiler, "-std=gnu11", "-O1", "-g", "-Wall", "-Wextra",
-                         "-Wconversion", "-Wshadow", "-Werror", "-fsanitize=address,undefined",
-                         "-fno-sanitize-recover=all", "-fno-omit-frame-pointer",
-                         "-I", str(scratch), "-I", str(ROOT / "src/kernel"),
-                         str(modified_path), str(PRODUCT), *(str(x) for x in units),
-                         "-lcrypto", "-o", str(executable)]
-                checked(flags, f"{compiler}/{name}/compile")
+                common_flags = [compiler, "-std=gnu11", "-O1", "-g", "-Wall",
+                                "-Wextra", "-Werror", "-fsanitize=address,undefined",
+                                "-fno-sanitize-recover=all", "-fno-omit-frame-pointer",
+                                "-I", str(scratch), "-I", str(ROOT / "src/kernel")]
+                # Pristine upstream C uses native warnings only. Actual swapz
+                # and owned fixture C retain the full strict project flags.
+                components = (
+                    ("host-profile", modified_path, ("-Wconversion", "-Wshadow")),
+                    ("actual-product-codec", PRODUCT, ("-Wconversion", "-Wshadow")),
+                    ("original-lzo-compressor", units[0], ()),
+                    ("original-lzo-decompressor", units[1], ()),
+                )
+                objects = []
+                for component, path, extra_warnings in components:
+                    object_path = scratch / f"{compiler}-{name}-{component}.o"
+                    checked([*common_flags, *extra_warnings, "-c", str(path),
+                             "-o", str(object_path)],
+                            f"{compiler}/{name}/compile/{component}")
+                    objects.append(str(object_path))
+                checked([compiler, *objects, "-fsanitize=address,undefined",
+                         "-lcrypto", "-o", str(executable)],
+                        f"{compiler}/{name}/link")
                 output = checked([str(executable)], f"{compiler}/{name}/execute", mutant)
                 if not mutant:
                     if "ROUND056_PINNED_ORIGINAL_LZO1X_HOST_PASS" not in output:

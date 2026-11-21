@@ -88,12 +88,12 @@ UNALIGNED = r'''
 #include <linux/kernel.h>
 #define get_unaligned(pointer) ({ \
     __typeof__(*(pointer) + 0) copied; \
-    memcpy(&copied, (pointer), sizeof(copied)); \
+    memcpy(&copied, (const void *)(pointer), sizeof(copied)); \
     copied; \
 })
 #define put_unaligned(value, pointer) do { \
     __typeof__(*(pointer) + 0) copied = (value); \
-    memcpy((pointer), &copied, sizeof(copied)); \
+    memcpy((void *)(pointer), &copied, sizeof(copied)); \
 } while (0)
 static inline u16 get_unaligned_le16(const void *source)
 {

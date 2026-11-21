@@ -16980,3 +16980,27 @@ an older source SHA is historical only; a new source SHA needs its own
 terminal exact-source evidence before claiming original KUnit qualification.
 The guarded macro stays default undefined and product BIO_CLONED refusal,
 SOURCE_MAPPED_AUTHENTICATED=0, PHASE_A=BLOCKED and compressed handoff OFF remain.
+
+## Round057 original LZO1X host ABI and warning-scope qualification (Agent4, 2026-11-21)
+
+Pristine original Linux `COPY4`/`COPY8` use unaligned access for
+compressed output; aligning the buffer base cannot align every internal
+offset. Host shims must use `const void *` input and `void *`
+destination for `memcpy` on possibly unaligned offsets, with
+ASan/UBSan alignment checks still enabled; ensure original
+`unsigned short` LZO compressor dictionary workspace alignment.
+Do not modify pinned upstream code or original per-file Git hashes.
+
+Compile pristine upstream C in separately linked units under its
+native `-Wall -Wextra -Werror` diagnostics; continue to compile
+both the owned host fixture and real product `src/kernel/codec.c`
+independently with `-Wall -Wextra -Wconversion -Wshadow -Werror`,
+`-fsanitize=address,undefined -fno-sanitize-recover=all`.
+Require two actual GCC/Clang full-page 4096 CRC/SHA/EOF and failed
+output-unchanged baselines, plus compiled-and-run named semantic
+mutants, not compiler or sanitizer accidents. Current exact-source
+two dedicated workflow terminal statuses decide LZO qualification,
+never an ancestor or a one-off macro reproducer. No original
+source-to-DM ownership, durable lower I/O or native ACK is inferred.
+Normal RAW_4096 is always uncompressed original data and Phase A
+and direct compressed handoff stay blocked.

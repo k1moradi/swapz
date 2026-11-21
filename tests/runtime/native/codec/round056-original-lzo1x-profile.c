@@ -41,7 +41,7 @@ static int run(void)
 {
  uint8_t original[PAGE_BYTES], compressed[PAGE_BYTES + 512U];
  uint8_t scratch[PAGE_BYTES], output[PAGE_BYTES], untouched[PAGE_BYTES];
- uint8_t workspace[LZO1X_1_MEM_COMPRESS];
+ _Alignas(unsigned short) uint8_t workspace[LZO1X_1_MEM_COMPRESS];
  unsigned accepted = 0;
  for (unsigned seed=0; seed<32U; ++seed) {
   struct source_record record = { .codec=2U, .version=1U };
