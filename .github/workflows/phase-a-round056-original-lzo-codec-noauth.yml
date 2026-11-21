@@ -1,0 +1,61 @@
+name: "Round056 pinned original LZO1X stable decoder host only NO_AUTH"
+on:
+  push:
+    branches: [main]
+    paths:
+      - "tests/runtime/native/codec/round056-original-lzo1x-profile.c"
+      - "tests/tools/round056-original-lzo-decoder-verify.py"
+      - ".github/workflows/phase-a-round056-original-lzo-codec-noauth.yml"
+      - "src/kernel/codec.c"
+      - "src/kernel/codec.h"
+      - "docs/testing_standards.md"
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  original-lzo1x-source-and-host-codec:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          path: swapz
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/checkout@v4
+        with:
+          repository: torvalds/linux
+          ref: c339f4010dea8b0d754f84ace70cd1b089878ef8
+          fetch-depth: 1
+          sparse-checkout: |
+            crypto/lzo.c
+            lib/lzo/lzo1x_compress.c
+            lib/lzo/lzo1x_compress_safe.c
+            lib/lzo/lzo1x_decompress_safe.c
+            lib/lzo/lzodefs.h
+            include/linux/lzo.h
+          path: linux
+          persist-credentials: false
+      - name: Install strict rootless source compilers
+        run: |
+          set -euo pipefail
+          sudo apt-get update -qq
+          sudo DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
+            gcc clang libssl-dev python3
+      - name: Check exact source and run original LZO1X C and semantic mutated C
+        run: |
+          set -Eeuo pipefail
+          test "$(git -C swapz rev-parse HEAD)" = "$GITHUB_SHA"
+          test -z "$(git -C swapz status --porcelain --untracked-files=all)"
+          test "$(git -C linux rev-parse HEAD)" = c339f4010dea8b0d754f84ace70cd1b089878ef8
+          if python3 -B swapz/tests/tools/round056-original-lzo-decoder-verify.py \
+              --linux-root linux > "$RUNNER_TEMP/round056-original-lzo-first-error.log" 2>&1; then
+            tail -n 35 "$RUNNER_TEMP/round056-original-lzo-first-error.log"
+          else
+            result=$?
+            echo "::error::ROUND056_DECODER_FIRST_ERROR source-host-C exit=$result" >&2
+            tail -n 70 "$RUNNER_TEMP/round056-original-lzo-first-error.log" >&2
+            exit "$result"
+          fi
+          git -C swapz diff --check HEAD^ HEAD
+          test -z "$(git -C swapz status --porcelain --untracked-files=all)"
