@@ -16618,3 +16618,60 @@ SWAPSPACE2 disk packed extents/GC and immutable first physical 4096.
 Never exercise privileged/loaded/physical-swap/real-pressure/make-test
 paths without fresh owner authorization. \`SOURCE_MAPPED_AUTHENTICATED=0\`,
 \`PHASE_A=BLOCKED\` and direct compressed handoff disabled.
+
+### Round053 Agent4 codec first-red metadata-width and genuine compiled C mutation standard
+
+The previous original product codec source-extracted GNU11 GCC compiler failed
+at `-Werror=conversion` **before** baseline or mutant execution; never upgrade
+an earlier `baseline/gcc/compile` failure into a codec PASS. Every legacy
+header/descriptor width cast from `sizeof` (host `size_t`) to `swapz_u32`
+must have a compile-time independently checked finite upper bound; the
+complete maximal 8-bit `record_count=255` header+record span must fit in
+one 4096-byte extent block, and every actual use that calculates a metadata
+offset or CRC input length must narrow explicitly. Do not disable or
+globally suppress `-Wconversion` / `-Werror`. The existing original
+crypto/lz4.c wrapper-only isolated upstream `-Wsign-conversion` diagnostic
+exception is different from and must not mask actual product-code warnings.
+
+The untrusted RAM-only metadata-length oracle must reject a 65535-byte
+snapshot and an 8-bit maximum-count 16-byte mismatch without modifying a
+separate 4096-byte scratch sentinel, and reject a header claiming 255 records
+through its actual bounded validator; compiler-only static bounds checks
+are not evidence of those executable error paths. Both GCC and Clang
+`-std=gnu11 -Wall -Wextra -Wconversion -Wshadow -Werror` plus ASan+UBSan
+must first **compile then execute** the actual production `codec.c`
+function bodies and pinned original `crypto/lz4.c::__lz4_compress_crypto`
+source wrapper bridged only to **host** raw-block liblz4. Count 96 original
+4096-byte patterns (full decoded byte equality and SHA-256), actual CRC32C,
+3568 admitted / 3569 refused, incorrect frame/dictionary/other selected
+compressor and delta64/SHUF8 mismatches, payload-only zero padded 4/8/16KiB
+extents, target-relative eight-sector refusal, and complete original
+uncompressed 4096 ordinary `RAW_4096` fallback. A host subset remains
+`HOST_RAW_LZ4_SUBSET`; live original runtime-selected LZO/LZ4
+`crypto_acomp` STORED-source identity is **NOT_RUN**.
+
+Each of the original 13 function-scoped changed **actual product C**
+mutants must compile under BOTH GCC and Clang and then separately execute,
+with a deterministic semantic `ROUND052_CODEC_FIRST_ERROR line=`
+fixture-assertion exit code exactly 1. A compiler failure, sanitizer
+report, nonassertion abort/signal, or missing oracle cannot be treated as
+a killed mutant; print the exact first compiler/mutant failure. Retain
+full first-parent Git history for any checkout that invokes `git diff
+--check HEAD^ HEAD` and enforce existing native repository policy via
+the canonical non-bypassed exact first-parent Git-metadata gate. Existing
+and peer testing standards remain byte-identical before this appendix.
+No owner hardware, privileged, loaded module, physical swap, natural
+MM-pressure or owner `make test`/`make fast_test` trial is authorized.
+
+Original Linux zswap owns only bounded compressed RAM under *natural*
+Linux MM eviction; swapz owns only valid SWAPSPACE2 disk payload
+compression/GC. Any original STORED bypass remains a **separately tagged,
+disabled lower I/O path**, never ordinary `RAW_4096`, until a current typed
+counted swap-slot incarnation, pre-unuse cancel/drain, selected raw LZ4
+framing/CRC/full decoded 4096 SHA, original bdev/physical sector and
+current target-relative live DM table/map/GC/dtr lease plus real durable
+lower write → one authoritative map → exactly one original upper ACK →
+full-page verified readback all exist. The entire FIRST PHYSICAL 4096
+SWAPSPACE2 header/UUID/signature and partition table stay immutable.
+`SOURCE_MAPPED_AUTHENTICATED=0 PHASE_A=BLOCKED
+DIRECT_COMPRESSED_HANDOFF=DISABLED FORCED_RAW_BYPASS=DISABLED`.

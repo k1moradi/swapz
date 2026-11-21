@@ -150,10 +150,17 @@ def run_checked(command: list[str], *, expected_zero: bool, label: str,
     completed = subprocess.run(command, text=True, capture_output=True,
                                timeout=80, check=False)
     actual_zero = completed.returncode == 0
-    if actual_zero != expected_zero:
+    # A hostile mutant is killed only when its executable reaches a genuine
+    # fixture CHECK assertion. Compile failures, sanitizer faults, signals,
+    # or unrelated nonzero exits never count as semantic mutation detection.
+    oracle_rejected = (completed.returncode == 1 and
+                       'ROUND052_CODEC_FIRST_ERROR line=' in completed.stderr and
+                       'ERROR: AddressSanitizer' not in completed.stderr and
+                       'runtime error:' not in completed.stderr)
+    if actual_zero != expected_zero or (not expected_zero and not oracle_rejected):
         snippet = '\n'.join((completed.stdout + '\n' + completed.stderr).splitlines()[-22:])
         raise AssertionError(f"ROUND052_CODEC_FIRST_ERROR {label} exit={completed.returncode} "
-                             f"expected_zero={expected_zero}\n{snippet}")
+                             f"expected_zero={expected_zero} oracle_rejected={oracle_rejected}\n{snippet}")
     if marker is not None:
         require(completed.stdout, marker, label)
 

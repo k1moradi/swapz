@@ -6,6 +6,7 @@
 #include <lz4.h>
 #include <lz4frame.h>
 #include <openssl/sha.h>
+#include <stddef.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -314,6 +315,40 @@ static int test_product_ram_extent(void)
     return 0;
 }
 
+/* Host-only legacy RAM descriptor width boundaries. These test the real
+ * codec's earliest refusal and verify no rejected snapshot can touch scratch.
+ * They do not load a module or write a SWAPSPACE2 header. */
+static int test_legacy_metadata_lengths(void)
+{
+    u8 scratch[SWAPZ_BLOCK_BYTES];
+    struct swapz_ram_extent_metadata snapshot = { 0 };
+    struct swapz_header malformed_header = { 0 };
+    unsigned int index;
+
+    memset(scratch, 0xa5, sizeof(scratch));
+    /* 65535 must not narrow to a valid RAM descriptor length. */
+    snapshot.length = UINT16_MAX;
+    CHECK(swapz_attach_extent_metadata(scratch, SWAPZ_BLOCK_BYTES,
+                                       &snapshot) == -EINVAL);
+    /* Maximal u8 record_count yields exactly 4096 bytes rather than a
+     * wrapping 16-bit descriptor length. It cannot match a 16-byte snapshot. */
+    snapshot.length = (swapz_u16)sizeof(struct swapz_header);
+    snapshot.bytes[offsetof(struct swapz_header, record_count)] = UINT8_MAX;
+    CHECK(swapz_attach_extent_metadata(scratch, SWAPZ_BLOCK_BYTES,
+                                       &snapshot) == -EUCLEAN);
+    for (index = 0; index < SWAPZ_BLOCK_BYTES; ++index)
+        CHECK(scratch[index] == 0xa5U);
+
+    memset(scratch, 0, sizeof(scratch));
+    malformed_header.magic_le = SWAPZ_MAGIC;
+    malformed_header.extent_blocks = 1U;
+    malformed_header.record_count = UINT8_MAX;
+    malformed_header.sequence_le = 1U;
+    memcpy(scratch, &malformed_header, sizeof(malformed_header));
+    CHECK(swapz_validate_metadata_crc(scratch, SWAPZ_BLOCK_BYTES) == -EUCLEAN);
+    return 0;
+}
+
 int main(void)
 {
     unsigned int seed;
@@ -323,6 +358,7 @@ int main(void)
     CHECK(SWAPZ_ENCODING_DELTA64 == 1U);
     CHECK(SWAPZ_ENCODING_DELTA64_SHUF8 == 2U);
     CHECK(test_product_ram_extent() == 0);
+    CHECK(test_legacy_metadata_lengths() == 0);
     for (seed = 0; seed < 96U; ++seed)
         CHECK(test_page(seed) == 0);
     printf("ROUND052_HOST_RAW_LZ4_SUBSET_PASS seed_cases=96 assertions=%u "

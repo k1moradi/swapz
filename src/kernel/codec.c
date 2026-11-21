@@ -18,6 +18,15 @@
 #endif
 #endif
 
+/* The in-RAM legacy descriptor span is bounded by one block at compile time.
+ * Every count is at most a u8 (or a prechecked <= SWAPZ_MAX_RECORDS);
+ * explicit swapz_u32 narrowing of sizeof below therefore cannot truncate.
+ * No on-media metadata layout or decode behavior changes.
+ */
+_Static_assert(sizeof(struct swapz_header) +
+               0xffU * sizeof(struct swapz_record) <= SWAPZ_BLOCK_BYTES,
+               "legacy descriptor arithmetic exceeds one extent block");
+
 /*
  * Keep the endian conversion explicit: the wire structs hold bytes, not
  * native-endian values. GCC/Clang define BYTE_ORDER on kernel and host builds.
@@ -159,7 +168,7 @@ static inline const swapz_u8 *swapz_record_ptr(const void *bytes,
 					       swapz_u8 index)
 {
 	return (const swapz_u8 *)bytes + sizeof(struct swapz_header) +
-	       (swapz_u32)index * sizeof(struct swapz_record);
+	       (swapz_u32)index * (swapz_u32)sizeof(struct swapz_record);
 }
 
 static inline void swapz_get_record(const void *bytes, swapz_u8 index,
@@ -272,8 +281,8 @@ static int swapz_append_validate(struct swapz_builder *builder,
 		return -EINVAL;
 	if (builder->count >= SWAPZ_MAX_RECORDS)
 		return -ENOSPC;
-	metadata_end = sizeof(struct swapz_header) +
-		((swapz_u32)builder->count + 1U) * sizeof(struct swapz_record);
+	metadata_end = (swapz_u32)sizeof(struct swapz_header) +
+		((swapz_u32)builder->count + 1U) * (swapz_u32)sizeof(struct swapz_record);
 	if (builder->payload_start < length ||
 	    (swapz_u32)builder->payload_start - length < metadata_end)
 		return -ENOSPC;
@@ -453,8 +462,8 @@ int swapz_seal(struct swapz_builder *builder)
 		return -EINVAL;
 	if (builder->count > SWAPZ_MAX_RECORDS)
 		return -EUCLEAN;
-	metadata_end = sizeof(struct swapz_header) +
-		(swapz_u32)builder->count * sizeof(struct swapz_record);
+	metadata_end = (swapz_u32)sizeof(struct swapz_header) +
+		(swapz_u32)builder->count * (swapz_u32)sizeof(struct swapz_record);
 	if (metadata_end > builder->payload_start)
 		return -EUCLEAN;
 
@@ -503,8 +512,8 @@ int swapz_detach_extent_metadata(
 	    swapz_payload_overlaps_extent(
 		    builder, metadata, (swapz_u32)sizeof(*metadata)))
 		return -EINVAL;
-	metadata_bytes = sizeof(struct swapz_header) +
-		(swapz_u32)builder->count * sizeof(struct swapz_record);
+	metadata_bytes = (swapz_u32)sizeof(struct swapz_header) +
+		(swapz_u32)builder->count * (swapz_u32)sizeof(struct swapz_record);
 	if (metadata_bytes > sizeof(metadata->bytes) ||
 	    metadata_bytes > builder->payload_start)
 		return -EUCLEAN;
@@ -549,7 +558,7 @@ int swapz_attach_extent_metadata(
 	 * not the remainder of the stated extent geometry.
 	 */
 	prefix = metadata->bytes;
-	expected_bytes = sizeof(struct swapz_header) +
+	expected_bytes = (swapz_u32)sizeof(struct swapz_header) +
 		(swapz_u32)prefix[offsetof(struct swapz_header, record_count)] *
 		sizeof(struct swapz_record);
 	if (expected_bytes != metadata->length)
@@ -582,8 +591,8 @@ int swapz_validate_metadata_crc(const void *bytes, swapz_u32 bytes_total)
 	    !header.record_count || header.record_count > SWAPZ_MAX_RECORDS ||
 	    !header.sequence_le)
 		return -EUCLEAN;
-	metadata_end = sizeof(header) +
-		(swapz_u32)header.record_count * sizeof(struct swapz_record);
+	metadata_end = (swapz_u32)sizeof(header) +
+		(swapz_u32)header.record_count * (swapz_u32)sizeof(struct swapz_record);
 	if (metadata_end > bytes_total)
 		return -EUCLEAN;
 
@@ -592,7 +601,7 @@ int swapz_validate_metadata_crc(const void *bytes, swapz_u32 bytes_total)
 	crc_state = swapz_crc32c_state(~0U, &header, sizeof(header));
 	crc_state = swapz_crc32c_state(crc_state,
 				       (const swapz_u8 *)bytes + sizeof(header),
-				       metadata_end - sizeof(header));
+				       metadata_end - (swapz_u32)sizeof(header));
 	computed_crc = ~crc_state;
 	return saved_crc == computed_crc ? 0 : -EBADMSG;
 }
@@ -610,8 +619,8 @@ int swapz_validate(const void *bytes, swapz_u32 bytes_total)
 	if (error)
 		return error;
 	record_count = swapz_get_record_count(bytes);
-	metadata_end = sizeof(struct swapz_header) +
-		(swapz_u32)record_count * sizeof(struct swapz_record);
+	metadata_end = (swapz_u32)sizeof(struct swapz_header) +
+		(swapz_u32)record_count * (swapz_u32)sizeof(struct swapz_record);
 
 	for (index = 0; index < record_count; ++index) {
 		swapz_u32 start, length;
@@ -686,8 +695,8 @@ int swapz_lookup_validated_descriptor(const void *bytes,
 		*out = (struct swapz_decoded){ 0 };
 		return -ERANGE;
 	}
-	metadata_end = sizeof(struct swapz_header) +
-		(swapz_u32)record_count * sizeof(struct swapz_record);
+	metadata_end = (swapz_u32)sizeof(struct swapz_header) +
+		(swapz_u32)record_count * (swapz_u32)sizeof(struct swapz_record);
 	swapz_get_record(bytes, index, &record);
 	swapz_decode_record(&record, out);
 	/* A metadata CRC authenticates the record bytes, not their semantics.
