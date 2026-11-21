@@ -16703,3 +16703,40 @@ Model only already-accepted **original UNCOMPRESSED full 4096-byte `REQ_SWAP` up
 The 4096-byte size test must be nonvacuous: a malformed 4100-byte BIO whose truncated 512-sector count equals eight must still be rejected by the exact full-page check; hostile deletion of that check must cause the C oracle to fail. Mutants must reach execution under strict `-Werror` (avoid bogus compiler-only unused-parameter RED), and the reporter must distinguish initial test-design errors from final product source evidence. The C host cannot generate actual Linux core `clone_endio`, lower device durability, a correct held current DM table, real `bio_endio`, independently retained original MM swap-slot incarnation, or authenticated external compressed STORED source. Do NOT claim any positive compressed handoff: `SOURCE_MAPPED_AUTHENTICATED=0`, `PHASE_A=BLOCKED`, `DIRECT_COMPRESSED_HANDOFF=DISABLED`, `FORCED_RAW_BYPASS=DISABLED`.
 
 Linux zswap alone manages bounded compressed RAM with natural Linux MM pressure-driven eviction; swapz manages valid existing SWAPSPACE2 disk payload-only 4/8/16KiB extents and GC. Ordinary RAW_4096 is **always** original FULL UNCOMPRESSED 4096. Never touch the first physical 4096-byte swap header/signature/UUID or partition table. Preserve all preceding and peer testing-standards bytes, use a substantive same-commit appendix whenever code/fixture/workflow changes, and require exact-source terminal GitHub CI. Do not run privileged, loaded-module, real memory pressure, swapoff/swapon, physical-media, `make test`, or `make fast_test` trials under this rootless assignment.
+
+
+## Round054 Agent3 — cancellation identity on accepted NORMAL BIO reissue (2026-11-21)
+
+The default-UNDEFINED Round053 DM lifecycle test helper must reject a
+non-NULL late cancellation observation whose recorded target-relative sector,
+map generation, GC epoch, extent start, extent size or synthetic lease token
+does not match the receipt, even when the original BIO, target and context
+addresses are reused. These scalar comparisons never dereference stale
+objects; NULL abort is reserved for the already-owned receipt, not a public
+cancellation API. This guard must not add default product allocations,
+locking, map writes, lower I/O or upper completion calls.
+
+Run the existing Round053 162/17, Round052 144/13, Round050 168/22 and
+earlier DM suites unchanged, followed by the Round054 source-extracted
+helper verifier. Eight adversarial reissue sequences at each of 1/2/4
+4096-byte physical extent blocks (24 C cases per compiler) must cover
+reversed lower callbacks, old cancellation aimed at the new receipt,
+same-address generation/GC/lease/geometry changes, different clone
+identity, accepted-worker progress after close, and teardown before map.
+Check exact -ESTALE, no mutation of the current receipt on stale abort,
+one modeled release per accepted receipt, and a terminal late ACK refusal.
+For each of the six separately changed source-function predicates, GCC
+and Clang must compile with gnu11 -Wall -Wextra -Wconversion -Wshadow
+-Werror and ASan/UBSan, execute the mutant, and return exactly 1 with
+only the fault-specific ROUND054_DM_FIRST_ERROR stale-abort oracle.
+Compiler failures, signals, sanitizer diagnostics or other assertions
+are not valid kills. The exact new source run must be terminal before
+REPORT_READY; prior CI and a local host run are not substitutes.
+
+This remains synthetic normal original uncompressed 4096-byte upper BIO
+receipt evidence, not actual core clone_endio, durable lower write, live
+table lease or original counted STORED slot ownership. No compressed
+handoff or forced RAW bypass, no competing MM reclaim, no owner make
+test/fast_test or privileged, loaded, physical or real-pressure trial.
+The entire first physical SWAPSPACE2 4096 bytes and partition table
+remain immutable. SOURCE_MAPPED_AUTHENTICATED=0 PHASE_A=BLOCKED.

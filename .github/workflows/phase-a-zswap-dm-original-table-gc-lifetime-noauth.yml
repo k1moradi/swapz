@@ -14,6 +14,8 @@ jobs:
     timeout-minutes: 45
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
       - name: Install rootless actual C compiler and source test dependencies
         run: |
           set -euo pipefail
@@ -59,6 +61,12 @@ jobs:
         run: |
           set -euo pipefail
           python3 -B tests/tools/round053-dm-accepted-normal-bio-real-c-verify.py host-test
+      - name: Round054 real guarded DM stale abort and reversed callback reissue 24 cases plus six executable mutants per compiler
+        shell: bash
+        run: |
+          set -euo pipefail
+          git diff --check HEAD^ HEAD
+          python3 -B tests/tools/round054-dm-reissue-verify.py
       - name: Re-execute real Round043 old 150 90 and seven nine source hostile and GCC Clang ASan UBSan
         shell: bash
         run: |

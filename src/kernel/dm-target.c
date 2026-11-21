@@ -13529,6 +13529,18 @@ static __used noinline int swapz_round053_internal_receipt_step(
 		     receipt->context != observation->context ||
 		     receipt->upper_bio != observation->upper_bio))
 			return -ESTALE;
+		/* Round054: a late cancellation may reuse all three addresses.
+		 * Compare the recorded incarnation without dereferencing them.
+		 * A NULL observation remains reserved for the receipt owner.
+		 */
+		if (observation &&
+		    (observation->target_relative_sector != receipt->target_relative_sector ||
+		     observation->map_generation != receipt->map_generation ||
+		     observation->gc_epoch != receipt->gc_epoch ||
+		     observation->extent_start_block != receipt->extent_start_block ||
+		     observation->extent_blocks != receipt->extent_blocks ||
+		     receipt->synthetic_lease_token != observation->synthetic_lease_token))
+			return -ESTALE;
 		receipt->phase = SWAPZ_ROUND053_ABORTED;
 		receipt->terminal_releases++;
 		receipt->terminal_error = lower_error < 0 ? lower_error : -ECANCELED;
