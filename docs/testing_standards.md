@@ -17004,3 +17004,51 @@ never an ancestor or a one-off macro reproducer. No original
 source-to-DM ownership, durable lower I/O or native ACK is inferred.
 Normal RAW_4096 is always uncompressed original data and Phase A
 and direct compressed handoff stay blocked.
+
+## Round057 Agent5 — actual-product RAW transaction and imported NO_AUTH (2026-11-21)
+
+The new tests/runtime/native/fixtures/round057-transaction-product.c and
+tests/tools/round057-transaction-product.py MUST link and execute the current
+production src/kernel/authority.c plus codec.c and flush-qual.h, never a
+reimplemented fake publication algorithm. Inspect actual dm-target.c accepted
+target-relative 8-sector map geometry, normal full-original-page raw writer,
+lower WRITE with FUA-before-authority publication, raw read/GC, protected
+backing-data sector conversion and teardown drain. Any drift from an anchored
+production function or ordering is an explicit first-error FAIL, not assumed
+native BIO ownership or permission to change product behavior.
+
+Strict rootless GCC and Clang GNU11, -Wall/-Wextra/-Wconversion/-Wshadow
+-Werror, ASan and UBSan (fatal runtime diagnostics, leak checking), must
+compile and execute the real product C. Prove 4096-byte RAW map and CRC,
+full successful lower completion before publication, no map after modeled
+write error, flush error or partial completion, one authoritative generation
+after RAW relocation, and fail-closed live compressed admission. Mutants
+must modify the genuinely compiled product authority, flush or admission
+source: require successful strict compile and precisely named first-error
+runtime assertion, never count compile failure or sanitizer death as a
+semantic mutant. All lower and flush callbacks in this rootless fixture are
+host models, NOT kernel/device I/O or power-loss durability evidence.
+
+Keep ordinary RAW_4096 a full ORIGINAL UNCOMPRESSED page, never STORED.
+Production 20-byte map has no authenticated imported-bit lease and its ABI
+is immutable in this task. The imported headers' two ACTIVE flags stay zero,
+all product import callsites stay disabled, no sidecar or new scheduler
+is installed, and original Linux MM alone owns zswap RAM reclaim.
+A prospective eight-descriptor/two-staged imported cap is test-only:
+account for sizeof imported records plus whole retained bytes, read/decoder
+pins, inflight/retire headroom and teardown independently before any kernel
+memory allocation. Actual original-source BIO and live target acceptance,
+selected retired-pool-independent decoder, FUA/device durability, atomic
+current map+sidecar, exactly one real upper BIO ACK, reader lifetime across
+GC/teardown and CRC32C/SHA256-verified complete original 4096 readback
+remain missing. Host callback success cannot fill those gaps.
+
+Never touch the first physical 4096 SWAPSPACE2 header/signature/UUID or
+the parent partition table; no persistent metadata. No privilege, physical
+swap, loaded module, real pressure, owner make test or make fast_test.
+SOURCE_MAPPED_AUTHENTICATED=0 PHASE_A=BLOCKED
+DIRECT_COMPRESSED_HANDOFF=DISABLED FORCED_RAW_BYPASS=DISABLED.
+Preserve all preexisting and peer canonical standards as an exact byte
+prefix, append this substantive same-commit source/fixture/workflow policy,
+and do not claim REPORT_READY before exact current-source terminal CI or
+an explicit bounded NO_GO.

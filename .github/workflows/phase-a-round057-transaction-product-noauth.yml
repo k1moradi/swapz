@@ -1,0 +1,40 @@
+name: Round057 Agent5 actual product transaction no-auth source proof
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'tests/runtime/native/fixtures/round057-transaction-product.c'
+      - 'tests/tools/round057-transaction-product.py'
+      - 'src/kernel/authority.c'
+      - 'src/kernel/codec.c'
+      - 'src/kernel/flush-qual.h'
+      - 'src/kernel/dm-target.c'
+      - 'src/kernel/zswap-import-admission.h'
+      - 'src/kernel/zswap-import-codec.h'
+      - '.github/workflows/phase-a-round057-transaction-product-noauth.yml'
+      - 'docs/testing_standards.md'
+  workflow_dispatch:
+jobs:
+  exact-product-transaction-noauth:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    permissions:
+      contents: read
+    env:
+      SWAPZ_PUSH_BEFORE_SHA: ${{ github.event.before }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Verify sole main exact clean source and diff
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
+          test "$(git branch --show-current)" = main
+          test -z "$(git status --porcelain)"
+          git diff --check HEAD^ HEAD
+      - name: Exact product C normal RAW authority/flush/GC and default-off imported gate
+        run: python3 -B tests/tools/round057-transaction-product.py
+      - name: Enforce current-history canonical repository standards
+        run: python3 -B tests/runtime/native/repository-policy-test.py --enforce
