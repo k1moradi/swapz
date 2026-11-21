@@ -38,6 +38,8 @@ enum { BIO_CLONED = 1, BIO_REMAPPED = 2 };
 enum { REQ_OP_WRITE = 1, REQ_OP_ZONE_APPEND = 2 };
 static unsigned int allocation_count;
 static unsigned int release_count;
+/* Test allocation ledger: an expected mutant failure also owns cleanup. */
+static struct bio *live_bios[4];
 static bool reject_next_allocation;
 static bool reject_next_integrity;
 
@@ -102,15 +104,32 @@ static struct bio *bio_alloc_bioset(struct block_device *device,
 	bio = calloc(1U, sizeof(*bio));
 	if (bio) {
 		bio_init(bio, device, NULL, 0U, operation);
-		allocation_count++;
+		if (allocation_count >= sizeof(live_bios) / sizeof(live_bios[0])) {
+			free(bio);
+			return NULL;
+		}
+		live_bios[allocation_count++] = bio;
 	}
 	return bio;
 }
 static void bio_put(struct bio *bio)
 {
 	if (bio) {
+		for (unsigned int index = 0U;
+		     index < sizeof(live_bios) / sizeof(live_bios[0]); ++index)
+			if (live_bios[index] == bio)
+				live_bios[index] = NULL;
 		release_count++;
 		free(bio);
+	}
+}
+/* Expected semantic mutant assertions must not produce a spurious LSan red. */
+static void release_live_bios_after_assertion(void)
+{
+	for (unsigned int index = 0U;
+	     index < sizeof(live_bios) / sizeof(live_bios[0]); ++index) {
+		free(live_bios[index]);
+		live_bios[index] = NULL;
 	}
 }
 #define BIO_RESET_BYTES offsetof(struct bio, bi_io_vec)
@@ -157,6 +176,7 @@ static int terminal(struct clone_observer *owner)
 	if (!(condition)) { \
 		fprintf(stderr, "ROUND056_CLONE_FIRST_ERROR stage=%s line=%d\n", \
 			stage, __LINE__); \
+		release_live_bios_after_assertion(); \
 		return 1; \
 	} \
 } while (0)
