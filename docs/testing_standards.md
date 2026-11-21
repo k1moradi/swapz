@@ -16751,3 +16751,59 @@ The test-only scheduler accepts only already native-MM-origin full original unco
 Compare the **same successful event-ID set**, not merely equal counts, before aggregating useful disk-write reductions. Count separately attempted lower requests/bytes, completed bytes, true opaque payload lengths, zero padding, GC relocation bytes, CPU invocation and upper-input byte counts, queue occupancy and discrete wait ticks. The model assumes instantaneous lower completion at scheduled service steps; a two-tick bound is not physical latency or throughput, and FIFO's zero ticks versus coalescing's two ticks prevents an unconditional performance/production claim. No live codec decode proof or measured CPU, cycles, energy, IOPS or pressure. Recommend only a future default-OFF opt-in after real ownership, latency, capacity and fault qualification. `SOURCE_MAPPED_AUTHENTICATED=0 PHASE_A=BLOCKED DIRECT_COMPRESSED_HANDOFF=DISABLED FORCED_RAW_BYPASS=DISABLED`.
 
 Preserve full true push-before SHA, fetch-depth: 0, exact main/GITHUB_SHA, git diff --check and unchanged canonical repository-policy --enforce in the scheduler workflow; every source/fixture/workflow-changing commit must include a substantive same-commit standards update with preceding and peer bytes intact. Require terminal exact-source scheduler CI; queued is PROGRESS, not REPORT_READY. Never run owner make test/fast_test, physical swap, privilege, actual MM pressure, loaded modules or DM activation.
+
+
+## Round054 Agent2 — original MM closure, slot incarnation and never-dispatched refusal
+
+The staged original kernel test-only `swapz_round054_release_refuse` helper
+must remain inside the inherited default-undefined
+`SWAPZ_ROUND052_ORIGINAL_PRE_UNUSE_CANCEL_TEST` and CONFIG_KUNIT guard.
+Its copied typed slot, nonzero synthetic incarnation, observed STORED
+identity, observed folio lock and dispatch flags are not a reference or
+callback registry. It checks terminal before close, close before identity,
+stale type/incarnation and retired/unlocked observations before dispatch,
+and MUST return a negative result even for all matching observations.
+No original slot count may be acquired, retained or put by this helper.
+No runtime writeback hook, new export, counterfeited swapcache folio or
+competing reclaim may be added. A duplicate or late completion may not
+dereference an old folio or xarray entry. The new three genuine registered
+C KUnit cases cover typed ABA, original-kernel private folio and xarray
+retirement, and close-before-unuse versus never-dispatched callback.
+Keep all existing 63 registrations and require 66/66 actual original
+CONFIG_ZSWAP=y UML kernel cases with independent JSON and KTAP checks.
+Reject mismatched/missing/duplicate outcomes, non-PASS new cases and
+KTAP skip directives even if JSON claims PASS; execute all 20 synthetic
+negative verifier controls separately from the boot. Keep the full
+original pinned x86 ZSWAP=y/n vmlinux/modules/Module.symvers and unique
+GPL provider/probe and matched same-original-KDIR dm-swapz.ko build.
+Check the new helper symbol absent in the default object and present in
+the guarded build; preserve all prior real source audits and the ten-file
+manifest.
+
+The new pristine-source audit must verify the exact original allocation
+barrier (SWP_WRITEOK closed, cluster lock/unlock), swapoff release of
+swap_lock and p->lock before waiting, interrupted swapoff reinsertion,
+swapcache retirement preserving counted shadow flags while clearing the
+folio's swap identity, and native failed/normal folio completion. Its 14
+changed function-scoped pristine-C source negatives and the 10 new staged
+C release-guard mutations must genuinely change unique function regions
+and be rejected. Textual audit mutations, host-shim executions and
+synthetic JSON/KTAP controls never count as executed original kernel tests.
+
+A future MM-owned registered asynchronous counted-slot lifetime would
+require closing admission with allocation removal and an independently
+runnable cancel/drain between wait_for_allocation and try_to_unuse, with
+appropriate rollback of interrupted swapoff, no sleep under spinlocks,
+no callback dependent on swapoff/dtr/GC, and exactly one release of a
+genuinely acquired count even if never dispatched. An area users ref is
+not a count, and the later users kill/zswap cleanup cannot fix an earlier
+hidden unuse dependency. Current original core has no such registry;
+NO_GO for positive deferred source-to-DM ownership.
+
+Zswap remains bounded RAM under natural Linux MM pressure, ordinary upper
+RAW_4096 remains complete original uncompressed 4096 bytes, and swapz
+independently compresses valid SWAPSPACE2 disk payload extents and GC.
+First physical 4096 and partition table immutable. No privileged, actual
+pressure, loaded, physical or owner make test/fast_test run. Preserve
+SOURCE_MAPPED_AUTHENTICATED=0, PHASE_A=BLOCKED, DIRECT_COMPRESSED_HANDOFF=DISABLED
+and FORCED_RAW_BYPASS=DISABLED. Exact-source terminal CI remains mandatory.

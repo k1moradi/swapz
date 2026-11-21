@@ -23,6 +23,10 @@ on:
       - "tests/tools/round053-original-preunuse-source-verify.py"
       - "tests/tools/round053-original-preunuse-kunit-verify.py"
       - "docs/handoff/zswapz/round053/agent2-evidence.md"
+      - "tests/tools/round054-original-preunuse-lock-order-audit.py"
+      - "tests/tools/round054-original-preunuse-source-verify.py"
+      - "tests/tools/round054-original-preunuse-kunit-verify.py"
+      - "docs/handoff/zswapz/round054/agent2-evidence.md"
       - "docs/handoff/zswapz/round052/agent2-evidence.md"
       - "docs/handoff/zswapz/round051/agent2-evidence.md"
       - "docs/handoff/zswapz/round050/agent2-evidence.md"
@@ -44,7 +48,7 @@ permissions:
   contents: read
 jobs:
   original-uml-original-stored-source-scope-55:
-    name: "Original CONFIG_ZSWAP=y UML inherited 53 + 2 genuine source scope C KUnit"
+    name: "Original CONFIG_ZSWAP=y UML 63 inherited + 3 release-order C KUnit"
     runs-on: ubuntu-24.04
     timeout-minutes: 100
     steps:
@@ -129,6 +133,15 @@ jobs:
             tail -n 100 round045-evidence/round051-original-drain-graph.log
             exit "$code"
           fi
+          if python3 -B swapz/tests/tools/round054-original-preunuse-lock-order-audit.py --linux-root linux \
+              >round045-evidence/round054-pristine-lock-order.log 2>&1; then
+            tail -n 9 round045-evidence/round054-pristine-lock-order.log
+          else
+            code=$?
+            echo "::error::Round054 first pristine original lock-order mutation failure exit=$code"
+            tail -n 80 round045-evidence/round054-pristine-lock-order.log
+            exit "$code"
+          fi
           # Genuine new kernel-C refusal suite: 57 old + 3 original C tests.
           # Synthetic verifier hostiles never substitute for booted kernel.
           if python3 -B swapz/tests/tools/round052-original-preunuse-kunit-verify.py --self-test \
@@ -149,6 +162,15 @@ jobs:
             code=$?
             echo "::error::Round053 first new KUnit verifier negative-control failure exit=$code"
             tail -n 80 round045-evidence/round053-kunit-hostiles.log
+            exit "$code"
+          fi
+          if python3 -B swapz/tests/tools/round054-original-preunuse-kunit-verify.py --self-test \
+              >round045-evidence/round054-kunit-hostiles.log 2>&1; then
+            tail -n 9 round045-evidence/round054-kunit-hostiles.log
+          else
+            code=$?
+            echo "::error::Round054 first independently corrupted KUnit verifier failure exit=$code"
+            tail -n 80 round045-evidence/round054-kunit-hostiles.log
             exit "$code"
           fi
           # Independently reject forged booted KUnit evidence; self-test
@@ -264,6 +286,15 @@ jobs:
             tail -n 80 round045-evidence/round053-staged-original-C-mutants.log
             exit "$code"
           fi
+          if python3 -B swapz/tests/tools/round054-original-preunuse-source-verify.py --linux-root linux \
+              >round045-evidence/round054-staged-source-hostiles.log 2>&1; then
+            tail -n 9 round045-evidence/round054-staged-source-hostiles.log
+          else
+            code=$?
+            echo "::error::Round054 first staged original release-order C source mutation failure exit=$code"
+            tail -n 80 round045-evidence/round054-staged-source-hostiles.log
+            exit "$code"
+          fi
           # TRUE original C staged: function-scoped hostile mutants and
           # exact current source placement of the counted local pair.
           if python3 -B swapz/tests/tools/round049-original-counted-pair-source-verify.py \
@@ -319,7 +350,7 @@ jobs:
           grep -Fq 'get_swap_device(original_slot)' linux/mm/page_io.c
           grep -Fq 'put_swap_device(active_area)' linux/mm/page_io.c
           echo "ROUND045_ORIGINAL_10_FILE_MANIFEST_SOURCE_SCOPE_PASS"
-      - name: Real original UML boot with CONFIG_ZSWAP=y and independent 63-case JSON KTAP
+      - name: Real original UML boot with CONFIG_ZSWAP=y and independent 66-case JSON KTAP
         shell: bash
         timeout-minutes: 80
         run: |
@@ -327,7 +358,7 @@ jobs:
           phase=original-kunit-config
           log=round045-evidence/uml-first-error.log
           out="$RUNNER_TEMP/round045-source-scope-uml"
-          result="$PWD/round045-evidence/real-original-60.json"
+          result="$PWD/round045-evidence/real-original-66.json"
           request="$PWD/round045-evidence/real-original.kunitconfig"
           printf 'main_sha=%s\noriginal_sha=c339f4010dea8b0d754f84ace70cd1b089878ef8\n' \
             "$GITHUB_SHA" >round045-evidence/verdict.txt
@@ -396,7 +427,17 @@ jobs:
             cat round045-evidence/verified-63.log
             exit "$code"
           fi
-          printf 'prior_original_executed_cases=50\nnew_bio_clone_cases=3\nnew_source_scope_cases=2\nnew_original_counted_refusal_cases=2\nnew_preunuse_refusal_cases=3\nnew_preunuse_closed_gate_refusal_cases=3\ninherited_total=60\nexecuted_total=63\nresult=PASS\n' \
+          phase=independent-66-case-original-json-ktap
+          if python3 -B swapz/tests/tools/round054-original-preunuse-kunit-verify.py \
+              --result "$result" --kernel-log "$out/test.log" \
+              >round045-evidence/verified-66.log 2>&1; then
+            cat round045-evidence/verified-66.log
+          else
+            code=$?
+            cat round045-evidence/verified-66.log
+            exit "$code"
+          fi
+          printf 'prior_original_executed_cases=50\nnew_bio_clone_cases=3\nnew_source_scope_cases=2\nnew_original_counted_refusal_cases=2\nnew_preunuse_refusal_cases=3\nnew_preunuse_closed_gate_refusal_cases=3\nnew_release_order_refusal_cases=3\ninherited_total=63\nexecuted_total=66\nresult=PASS\n' \
             >>round045-evidence/verdict.txt
           echo "ORIGINAL_STORE_EXECUTED=NO SOURCE_MAPPED_AUTHENTICATED=0 MM_PRESSURE_EVICTION=NOT_RUN PHASE_A=BLOCKED"
       - uses: actions/upload-artifact@v4
@@ -445,6 +486,8 @@ jobs:
           python3 -B swapz/tests/tools/round049-original-counted-pair-kunit-verify.py --self-test
           python3 -B swapz/tests/tools/round052-original-preunuse-kunit-verify.py --self-test
           python3 -B swapz/tests/tools/round053-original-preunuse-kunit-verify.py --self-test
+          python3 -B swapz/tests/tools/round054-original-preunuse-kunit-verify.py --self-test
+          python3 -B swapz/tests/tools/round054-original-preunuse-lock-order-audit.py --linux-root linux
           python3 -B swapz/tests/tools/round050-original-deferred-slot-source-audit.py \
             --linux-root linux --self-test
           python3 -B swapz/tests/tools/round051-original-swapoff-drain-cycle-proof.py \
@@ -467,6 +510,7 @@ jobs:
             --linux-root linux --self-test
           python3 -B swapz/tests/tools/round053-original-preunuse-source-verify.py \
             --linux-root linux --self-test
+          python3 -B swapz/tests/tools/round054-original-preunuse-source-verify.py --linux-root linux
       - name: Actual original Linux vmlinux modules Module.symvers GPL probe and real matched DM
         shell: bash
         timeout-minutes: 85
@@ -532,7 +576,7 @@ jobs:
             if [[ "$profile" == enabled ]]; then
             checked "$profile-original-default-zswap-object" make -s -C linux \
               "O=$out" CC=gcc -j2 W=1 KCFLAGS=-Werror mm/zswap.o
-            if nm -a "$out/mm/zswap.o" | grep -Eq 'swapz_round038_actual_store_provenance_probe|swapz_round042_original_stored_writeback_probe|swapz_round049_original_locked_folio_counted_pair|swapz_round052_original_preunuse_cancel_refusal|swapz_round053_preunuse_gate_refuse'; then
+            if nm -a "$out/mm/zswap.o" | grep -Eq 'swapz_round038_actual_store_provenance_probe|swapz_round042_original_stored_writeback_probe|swapz_round049_original_locked_folio_counted_pair|swapz_round052_original_preunuse_cancel_refusal|swapz_round053_preunuse_gate_refuse|swapz_round054_release_refuse'; then
               echo "::error::Original zswap default object included CI-only Round038 STORE probe"
               exit 3
             fi
@@ -550,6 +594,10 @@ jobs:
               fi
               if ! nm -a "$out/mm/zswap.o" | grep -q swapz_round053_preunuse_gate_refuse; then
                 echo "::error::Real original guarded Round053 closed-gate NO_OWNER C function missing"
+                exit 3
+              fi
+              if ! nm -a "$out/mm/zswap.o" | grep -q swapz_round054_release_refuse; then
+                echo "::error::Round054 real original guarded release refusal missing"
                 exit 3
               fi
               if ! nm -a "$out/mm/zswap.o" | grep -q swapz_round049_original_locked_folio_counted_pair; then

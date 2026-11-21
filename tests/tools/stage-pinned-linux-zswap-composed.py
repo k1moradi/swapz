@@ -4515,6 +4515,169 @@ def apply_round053_original_preunuse_gate(path: str, composed: str) -> str:
                         path, "round053-real-original-C-closed-gate-negative")
 
 
+
+# Round054 stays inside the inherited default-undefined CONFIG_KUNIT guard.
+# Only copied observations survive the synthetic folio/xarray retirement.
+ROUND054_PREUNUSE_RELEASE_NEGATIVE_C = r"""/* ROUND054_ORIGINAL_PREUNUSE_RELEASE_NEGATIVE_BEGIN */
+/*
+ * Test-local, sequential refusal of copied identity observations. Neither
+ * the slot value, incarnation, folio lock nor xarray match owns an original
+ * count. No folio/entry/area pointers cross this boundary. The terminal bit
+ * is not a concurrent callback primitive or a real MM cancellation hook.
+ */
+struct swapz_round054_release_snapshot {
+	swp_entry_t slot;
+	u64 incarnation;
+	bool closed;
+	bool terminal;
+};
+
+static noinline int swapz_round054_release_refuse(
+		struct swapz_round054_release_snapshot *snapshot,
+		swp_entry_t observed_slot, u64 observed_incarnation,
+		bool stored_current, bool folio_locked, bool callback_dispatched)
+{
+	if (!snapshot)
+		return -EINVAL;
+	if (snapshot->terminal)
+		return -EALREADY;
+	snapshot->terminal = true;
+	if (snapshot->closed)
+		return -ESHUTDOWN;
+	if (!snapshot->slot.val || !snapshot->incarnation ||
+	    !observed_slot.val || !observed_incarnation)
+		return -EINVAL;
+	if (snapshot->slot.val != observed_slot.val ||
+	    snapshot->incarnation != observed_incarnation)
+		return -ESTALE;
+	if (!stored_current || !folio_locked)
+		return -ESTALE;
+	if (!callback_dispatched)
+		return -ENXIO;
+	/* Even an exact observation has NO registered original count owner. */
+	return -EOPNOTSUPP;
+}
+
+static void swapz_round054_slot_type_incarnation_kunit(struct kunit *test)
+{
+	const struct swapz_round054_release_snapshot initial = {
+		.slot = swp_entry(1U, 37U),
+		.incarnation = 19U,
+	};
+	struct swapz_round054_release_snapshot snapshot = initial;
+
+	KUNIT_EXPECT_EQ(test, swapz_round054_release_refuse(&snapshot,
+			swp_entry(2U, 37U), 19U, true, true, true), -ESTALE);
+	KUNIT_EXPECT_EQ(test, swapz_round054_release_refuse(&snapshot,
+			initial.slot, 19U, true, true, true), -EALREADY);
+	/* Independent negative attempt, not a reset of an acquired owner. */
+	snapshot = initial;
+	KUNIT_EXPECT_EQ(test, swapz_round054_release_refuse(&snapshot,
+			initial.slot, 20U, true, true, true), -ESTALE);
+	snapshot = initial;
+	KUNIT_EXPECT_EQ(test, swapz_round054_release_refuse(&snapshot,
+			initial.slot, 0U, true, true, true), -EINVAL);
+}
+
+static void swapz_round054_store_retirement_kunit(struct kunit *test)
+{
+	const struct swapz_round054_release_snapshot initial = {
+		.slot = swp_entry(1U, 37U),
+		.incarnation = 19U,
+	};
+	struct swapz_round054_release_snapshot snapshot = initial;
+	struct zswap_entry stored = {};
+	struct xarray tree;
+	struct folio *folio;
+	void *previous;
+	bool current_store;
+
+	/* Actual kernel folio and xarray, but NOT an allocated swap slot. */
+	folio = folio_alloc(GFP_KERNEL, 0);
+	KUNIT_ASSERT_NOT_NULL(test, folio);
+	xa_init(&tree);
+	previous = xa_store(&tree, swp_offset(initial.slot), &stored, GFP_KERNEL);
+	KUNIT_EXPECT_FALSE(test, xa_is_err(previous));
+	if (xa_is_err(previous))
+		goto cleanup;
+	KUNIT_EXPECT_PTR_EQ(test, previous, NULL);
+	folio_lock(folio);
+	KUNIT_EXPECT_FALSE(test, folio_test_swapcache(folio));
+	current_store = xa_load(&tree, swp_offset(initial.slot)) == &stored;
+	KUNIT_EXPECT_TRUE(test, current_store);
+	KUNIT_EXPECT_EQ(test, swapz_round054_release_refuse(&snapshot,
+			initial.slot, 19U, current_store,
+			folio_test_locked(folio), true), -EOPNOTSUPP);
+
+	/* Original xarray API retirement; the test owns the stack entry. */
+	KUNIT_EXPECT_PTR_EQ(test, xa_erase(&tree, swp_offset(initial.slot)),
+			    &stored);
+	current_store = xa_load(&tree, swp_offset(initial.slot)) == &stored;
+	KUNIT_EXPECT_FALSE(test, current_store);
+	folio_unlock(folio);
+	folio_put(folio);
+	xa_destroy(&tree);
+
+	/* Only scalar observations remain; no old folio or entry dereference. */
+	KUNIT_EXPECT_EQ(test, swapz_round054_release_refuse(&snapshot,
+			initial.slot, 19U, current_store, false, true), -EALREADY);
+	snapshot = initial;
+	KUNIT_EXPECT_EQ(test, swapz_round054_release_refuse(&snapshot,
+			initial.slot, 19U, current_store, false, true), -ESTALE);
+	snapshot = initial;
+	KUNIT_EXPECT_EQ(test, swapz_round054_release_refuse(&snapshot,
+			initial.slot, 19U, true, false, true), -ESTALE);
+	return;
+cleanup:
+	xa_destroy(&tree);
+	folio_put(folio);
+}
+
+static void swapz_round054_close_never_dispatch_kunit(struct kunit *test)
+{
+	const struct swapz_round054_release_snapshot initial = {
+		.slot = swp_entry(1U, 37U),
+		.incarnation = 19U,
+	};
+	struct swapz_round054_release_snapshot snapshot = initial;
+
+	/* Teardown before dispatch: no registered owner to cancel or put. */
+	KUNIT_EXPECT_EQ(test, swapz_round054_release_refuse(&snapshot,
+			initial.slot, 19U, true, true, false), -ENXIO);
+	KUNIT_EXPECT_TRUE(test, snapshot.terminal);
+	snapshot = initial;
+	snapshot.closed = true;
+	KUNIT_EXPECT_EQ(test, swapz_round054_release_refuse(&snapshot,
+			initial.slot, 19U, true, true, false), -ESHUTDOWN);
+	KUNIT_EXPECT_EQ(test, swapz_round054_release_refuse(&snapshot,
+			swp_entry(2U, 37U), 20U, false, false, true), -EALREADY);
+}
+
+static struct kunit_case swapz_round054_release_negative_cases[] = {
+	KUNIT_CASE(swapz_round054_slot_type_incarnation_kunit),
+	KUNIT_CASE(swapz_round054_store_retirement_kunit),
+	KUNIT_CASE(swapz_round054_close_never_dispatch_kunit),
+	{}
+};
+static struct kunit_suite swapz_round054_release_negative_suite = {
+	.name = "swapz_round054_original_release_order_no_authority",
+	.test_cases = swapz_round054_release_negative_cases,
+};
+kunit_test_suite(swapz_round054_release_negative_suite);
+/* ROUND054_ORIGINAL_PREUNUSE_RELEASE_NEGATIVE_END */
+"""
+
+
+def apply_round054_original_preunuse_release(path: str, composed: str) -> str:
+    """Add negative-only release observations, not an original counted owner."""
+    if path != "mm/zswap.c":
+        return composed
+    marker = "/* ROUND052_ORIGINAL_PRE_UNUSE_NEGATIVE_END */"
+    return replace_once(composed, marker,
+                        ROUND054_PREUNUSE_RELEASE_NEGATIVE_C + marker,
+                        path, "round054-real-original-C-release-negative")
+
+
 # Round045 observation is private original Linux C, default UNDEFINED, and
 # establishes no real current allocation or DM target/GC ownership lease.
 ROUND045_ORIGINAL_STORED_BIO_SCOPE_MACRO = "SWAPZ_ROUND045_ORIGINAL_STORED_BIO_SOURCE_SCOPE_TEST"
@@ -4885,6 +5048,7 @@ def compose_postimage(path: str, original_bytes: bytes, *,
     if with_kunit:
         changed = apply_round052_original_preunuse_negative(path, changed)
         changed = apply_round053_original_preunuse_gate(path, changed)
+        changed = apply_round054_original_preunuse_release(path, changed)
     if path == "mm/zswap.c":
         for required in (
             "swapz_round028_slot_epoch(swpentry)",
