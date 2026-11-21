@@ -17523,3 +17523,39 @@ GCC+Clang ASan+UBSan and original x86 GPL compilation. Never count the
 broken-anchor prior run as a source compiler/semantic success, weaken a
 mutation check or declare a no-auth observer authenticated. Same immutable
 safety gates and parent standards apply.
+
+### Round060 Agent5 product GC minimum-block unsigned-bound follow-up (2026-11-21)
+
+At newly corrected source `ebd96466a12333e27da258f01c129c9f779ed23f`,
+the Round059 inherited generic-host original LZ4 GCC/Clang baselines and
+ten changed-source codec mutants passed, then the linked real product
+authority exposed one newly visible compiler diagnostic:
+`src/kernel/authority.c:3118:38 -Werror=sign-compare`. A previously
+16-bit `(swapz_u16)~0U` maximum promoted to **signed int** when
+subtracting a 16-bit delta, while the fixed `min_base` is an unsigned
+32-bit intermediate. Keep the original 65535 upper bound and the
+pre-subtraction `-EUCLEAN` underflow guard; widen that **constant**
+once to `const swapz_u32 maximum_min_live_blocks` before subtracting
+the `swapz_u16` delta, then compare `swapz_u32` to `swapz_u32`.
+This is a widening of an already bounded constant, not a blind
+dynamic-value cast, a larger capacity or a warning suppression. The
+production 20-byte mapping and GC accounting remain otherwise
+unchanged. Preserve the prior exact first-error evidence and rerun
+the corrected exact source; a source compiler failure must not be
+reclassified as passed sanitizer/mutant evidence.
+
+If the existing Round059 authority workflow has not registered for
+a new exact-source push despite the correct source-path trigger,
+introduce one narrowly scoped Round060 source CI workflow rather than
+claiming it ran. It shall run the **existing** unchanged single
+GCC/Clang real linked `authority.c` + `codec.c` strict
+`-Wall -Wextra -Wconversion -Wshadow -Werror` ASan+UBSan test
+with nine genuine fixture cases and ten executed changed-real-C
+semantic mutants; do not introduce a substitute model, mask first
+errors, call owner Make or require privilege. The other two old
+rootless product/codec inherited source workflows retain their
+own independent exact changed-source terminal gates. No AUTH, imported
+map publication, original upper ACK, lower durability, native source
+lease, physical device or owner production acceptance follows from
+a narrow C compiler correction. SOURCE_MAPPED_AUTHENTICATED=0 and
+PHASE_A=BLOCKED remain mandatory.

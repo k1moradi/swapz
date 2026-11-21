@@ -3101,6 +3101,9 @@ int swapz_finish(struct swapz_authority *a, const struct swapz_tx *tx,
 				a->segment_gc_io_cost[new_segment] -
 				(new_seg_delta ? new_seg_delta->io_cost : 0U);
 			swapz_u32 min_base;
+			/* Widen the existing 16-bit saturation limit before subtracting
+			 * its 16-bit delta, avoiding an int/unsigned comparison. */
+			const swapz_u32 maximum_min_live_blocks = (swapz_u16)~0U;
 
 			/* The accounting sidecar is RAM authority, not a hint:
 			 * reject a corrupt decrement before unsigned subtraction. */
@@ -3115,7 +3118,7 @@ int swapz_finish(struct swapz_authority *a, const struct swapz_tx *tx,
 
 			if (live_base > ~(swapz_u32)0 - new_gc_live_bytes ||
 			    io_base > ~(swapz_u32)0 - new_gc_io_cost ||
-			    min_base > (swapz_u16)~0U - new_gc_min_live_blocks) {
+			    min_base > maximum_min_live_blocks - new_gc_min_live_blocks) {
 				error = -EOVERFLOW;
 				goto fail;
 			}
