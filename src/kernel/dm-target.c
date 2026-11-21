@@ -460,6 +460,45 @@ enum swapz_write_origin {
 	SWAPZ_WRITE_ORIGIN_ZSWAP_STORED_WRITEBACK,
 };
 
+/* Round052: test-only per-accepted-clone receipt; no independent DM lease. */
+#if defined(SWAPZ_ROUND052_DM_INTERNAL_ONE_SHOT_TEST)
+/* ROUND052_DM_INTERNAL_TICKET_DECL_START */
+enum swapz_round052_internal_phase {
+	SWAPZ_ROUND052_NOT_ACCEPTED,
+	SWAPZ_ROUND052_ACCEPTED,
+	SWAPZ_ROUND052_LOWER_DONE,
+	SWAPZ_ROUND052_PUBLISHED,
+	SWAPZ_ROUND052_COMPLETED,
+	SWAPZ_ROUND052_ABORTED,
+};
+
+enum swapz_round052_internal_event {
+	SWAPZ_ROUND052_ACCEPT,
+	SWAPZ_ROUND052_LOWER_COMPLETE,
+	SWAPZ_ROUND052_PUBLISH,
+	SWAPZ_ROUND052_ACK,
+	SWAPZ_ROUND052_ABORT,
+};
+
+struct swapz_round052_internal_ticket {
+	const struct dm_target *target;
+	const struct swapz_dm *context;
+	const struct bio *upper_bio;
+	sector_t target_relative_sector;
+	swapz_u32 map_generation;
+	swapz_u32 gc_epoch;
+	swapz_u32 extent_start_block;
+	swapz_u32 extent_blocks;
+	enum swapz_round052_internal_phase phase;
+	unsigned int lower_callbacks;
+	unsigned int map_publications;
+	unsigned int upper_ack_attempts;
+	unsigned int terminal_releases;
+	int terminal_error;
+};
+/* ROUND052_DM_INTERNAL_TICKET_DECL_END */
+#endif /* SWAPZ_ROUND052_DM_INTERNAL_ONE_SHOT_TEST */
+
 struct swapz_bio_ref {
 	struct list_head list;
 	struct bio *bio;
@@ -489,6 +528,9 @@ struct swapz_bio_ref {
 	bool published_deferred;
 	struct swapz_ack_dwell_batch *ack_batch;
 	int preparation_error;
+#if defined(SWAPZ_ROUND052_DM_INTERNAL_ONE_SHOT_TEST)
+	struct swapz_round052_internal_ticket round052_ticket;
+#endif /* SWAPZ_ROUND052_DM_INTERNAL_ONE_SHOT_TEST */
 };
 
 /* The worker attributes exactly one primary reason to each real window. */
@@ -13271,6 +13313,134 @@ static __used noinline int swapz_round050_dm_one_shot_refuse(
 /* ROUND050_DM_ONE_SHOT_NEGATIVE_HELPER_END */
 #endif /* SWAPZ_ROUND050_DM_ONE_SHOT_NEGATIVE_TEST */
 
+/*
+ * Round052: test-only receipt for the EXISTING accepted NORMAL full-page
+ * target-owned clone. Synthetic generation/extent arguments are REJECTION
+ * predicates, NEVER an independently held current table/GC or source owner.
+ * A simulated ACK transition does NOT call bio_endio(), submit lower I/O or
+ * grant permission to pass zswap STORED bytes as an ordinary RAW_4096 BIO.
+ * Callers must already own live ctx/target/bio while inspecting them; after
+ * the terminal transition this helper only checks the local ticket state.
+ */
+#if defined(SWAPZ_ROUND052_DM_INTERNAL_ONE_SHOT_TEST)
+/* ROUND052_DM_INTERNAL_TICKET_HELPER_START */
+static __used noinline int swapz_round052_internal_ticket_step(
+		const struct dm_target *target, const struct swapz_dm *ctx,
+		const struct bio *upper_bio,
+		struct swapz_round052_internal_ticket *ticket,
+		enum swapz_round052_internal_event event,
+		swapz_u32 map_generation, swapz_u32 gc_epoch,
+		swapz_u32 extent_start_block, swapz_u32 extent_blocks,
+		bool lower_durable, int lower_error)
+{
+	sector_t target_relative_sector;
+
+	if (!ticket)
+		return -EINVAL;
+	/* Do not inspect ctx/bio after their sole terminal owner released them. */
+	if (ticket->phase == SWAPZ_ROUND052_COMPLETED ||
+	    ticket->phase == SWAPZ_ROUND052_ABORTED)
+		return -EALREADY;
+	if (event == SWAPZ_ROUND052_ABORT) {
+		if (ticket->phase == SWAPZ_ROUND052_NOT_ACCEPTED)
+			return -ENOENT;
+		if (ticket->target != target || ticket->context != ctx ||
+		    ticket->upper_bio != upper_bio)
+			return -ESTALE;
+		ticket->phase = SWAPZ_ROUND052_ABORTED;
+		ticket->terminal_releases++;
+		ticket->terminal_error = lower_error < 0 ? lower_error : -ECANCELED;
+		return ticket->terminal_error;
+	}
+	if (!target || !ctx || !upper_bio)
+		return -EINVAL;
+	if (event == SWAPZ_ROUND052_ACCEPT) {
+		if (ticket->phase != SWAPZ_ROUND052_NOT_ACCEPTED)
+			return -EALREADY;
+		if (!READ_ONCE(ctx->accepting) || smp_load_acquire(&ctx->failed))
+			return -ESHUTDOWN;
+		if (target->private != ctx || ctx->target != target ||
+		    !ctx->maps || ctx->authority.maps != ctx->maps ||
+		    target->len % SWAPZ_SECTORS ||
+		    target->len / SWAPZ_SECTORS != ctx->logical_pages)
+			return -ESTALE;
+		if (bio_op(upper_bio) != REQ_OP_WRITE ||
+		    !(upper_bio->bi_opf & REQ_SWAP) ||
+		    upper_bio->bi_iter.bi_size != SWAPZ_BLOCK_BYTES ||
+		    bio_sectors(upper_bio) != SWAPZ_SECTORS)
+			return -ERANGE;
+		target_relative_sector = upper_bio->bi_iter.bi_sector;
+		if (target_relative_sector % SWAPZ_SECTORS ||
+		    target_relative_sector >= target->len ||
+		    SWAPZ_SECTORS > target->len - target_relative_sector ||
+		    !map_generation || !gc_epoch ||
+		    (extent_blocks != 1U && extent_blocks != 2U &&
+		     extent_blocks != 4U) ||
+		    extent_start_block >= ctx->physical_blocks ||
+		    extent_blocks > ctx->physical_blocks - extent_start_block)
+			return -ERANGE;
+		ticket->target = target;
+		ticket->context = ctx;
+		ticket->upper_bio = upper_bio;
+		ticket->target_relative_sector = target_relative_sector;
+		ticket->map_generation = map_generation;
+		ticket->gc_epoch = gc_epoch;
+		ticket->extent_start_block = extent_start_block;
+		ticket->extent_blocks = extent_blocks;
+		ticket->phase = SWAPZ_ROUND052_ACCEPTED;
+		return 0;
+	}
+	if (ticket->phase == SWAPZ_ROUND052_NOT_ACCEPTED)
+		return -EPERM;
+	if (ticket->target != target || ticket->context != ctx ||
+	    ticket->upper_bio != upper_bio ||
+	    ticket->target_relative_sector != upper_bio->bi_iter.bi_sector ||
+	    ticket->map_generation != map_generation ||
+	    ticket->gc_epoch != gc_epoch ||
+	    ticket->extent_start_block != extent_start_block ||
+	    ticket->extent_blocks != extent_blocks ||
+	    target->private != ctx || ctx->target != target ||
+	    !ctx->maps || ctx->authority.maps != ctx->maps)
+		return -ESTALE;
+	if (!READ_ONCE(ctx->accepting) || smp_load_acquire(&ctx->failed))
+		return -ESHUTDOWN;
+	if (event == SWAPZ_ROUND052_LOWER_COMPLETE) {
+		if (ticket->phase != SWAPZ_ROUND052_ACCEPTED)
+			return -EALREADY;
+		if (lower_error < 0) {
+			ticket->phase = SWAPZ_ROUND052_ABORTED;
+			ticket->terminal_releases++;
+			ticket->terminal_error = lower_error;
+			return lower_error;
+		}
+		if (lower_error || !lower_durable)
+			return -EAGAIN;
+		ticket->lower_callbacks++;
+		ticket->phase = SWAPZ_ROUND052_LOWER_DONE;
+		return 0;
+	}
+	if (event == SWAPZ_ROUND052_PUBLISH) {
+		if (ticket->phase != SWAPZ_ROUND052_LOWER_DONE)
+			return -EAGAIN;
+		ticket->map_publications++;
+		ticket->phase = SWAPZ_ROUND052_PUBLISHED;
+		return 0;
+	}
+	if (event == SWAPZ_ROUND052_ACK) {
+		if (ticket->phase != SWAPZ_ROUND052_PUBLISHED ||
+		    ticket->map_publications != 1U ||
+		    ticket->lower_callbacks != 1U)
+			return -EAGAIN;
+		ticket->upper_ack_attempts++;
+		ticket->terminal_releases++;
+		ticket->phase = SWAPZ_ROUND052_COMPLETED;
+		return 0;
+	}
+	return -EINVAL;
+}
+/* ROUND052_DM_INTERNAL_TICKET_HELPER_END */
+#endif /* SWAPZ_ROUND052_DM_INTERNAL_ONE_SHOT_TEST */
+
 static int swapz_map(struct dm_target *ti, struct bio *bio)
 {
 	struct swapz_dm *ctx = ti->private;
@@ -13443,6 +13613,21 @@ static int swapz_map(struct dm_target *ti, struct bio *bio)
 		entry->lane_admitted_ns = entry->admitted_ns;
 	}
 	list_add_tail(&entry->list, &ctx->incoming);
+#if defined(SWAPZ_ROUND052_DM_INTERNAL_ONE_SHOT_TEST)
+/* ROUND052_DM_INTERNAL_MAP_ACCEPTED_START */
+	/*
+	 * The core-owned normal cloned BIO has just entered incoming under the
+	 * queue lock. Synthetic tags prove only the test state transitions:
+	 * no later async callback consumes this passive test-only receipt.
+	 */
+	memset(&entry->round052_ticket, 0, sizeof(entry->round052_ticket));
+	if (bio_op(bio) == REQ_OP_WRITE && (bio->bi_opf & REQ_SWAP) &&
+	    count == SWAPZ_SECTORS && bio->bi_iter.bi_size == SWAPZ_BLOCK_BYTES)
+		(void)swapz_round052_internal_ticket_step(ti, ctx, bio,
+			&entry->round052_ticket, SWAPZ_ROUND052_ACCEPT,
+			1U, 1U, 0U, 1U, false, 0);
+/* ROUND052_DM_INTERNAL_MAP_ACCEPTED_END */
+#endif /* SWAPZ_ROUND052_DM_INTERNAL_ONE_SHOT_TEST */
 	if (ctx->async_prepare && bio_op(bio) == REQ_OP_WRITE && count) {
 		/*
 		 * ID150: ordinary task-context submissions may prepare their already

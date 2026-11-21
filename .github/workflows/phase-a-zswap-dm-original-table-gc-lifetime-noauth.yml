@@ -49,6 +49,11 @@ jobs:
         run: |
           set -euo pipefail
           python3 -B tests/tools/round050-dm-one-shot-real-c-verify.py host-test
+      - name: Round052 actual accepted normal BIO internal one-shot source C 144 GCC Clang sanitizer plus 13 mutant binaries each
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 -B tests/tools/round052-dm-internal-one-shot-real-c-verify.py host-test
       - name: Re-execute real Round043 old 150 90 and seven nine source hostile and GCC Clang ASan UBSan
         shell: bash
         run: |

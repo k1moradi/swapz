@@ -16489,3 +16489,73 @@ The required missing future protocol is a NEW original kernel-core pre-`try_to_u
 The canonical original pinned `torvalds/linux@c339f4010dea8b0d754f84ace70cd1b089878ef8` `mm/zswap.c` selects `pool->tfm_name` at runtime through `zswap_compressor` and `crypto_acomp`; original Kconfig defaults to LZO, NOT an authenticated current LZ4 pool. Its original `crypto/lz4.c` wrapper calls unframed `LZ4_compress_default`, but a rootless userspace liblz4 bridge is evidence only for a HOST_RAW_LZ4_SUBSET, NOT an actually executing original selected crypto_acomp byte stream. The new `tests/tools/round052-zswap-swapz-codec-verify.py` MUST verify the pristine exact original SHA and source anchors and compile/execute its extracted original compressor C wrapper with existing product `src/kernel/codec.c` and fixture `tests/runtime/native/fixtures/round052-zswap-swapz-codec.c` under both GNU11 GCC and Clang with `-Wall -Wextra -Wconversion -Wshadow -Werror -fsanitize=address,undefined`. Each compiler MUST pass at least 96 full original 4096-byte deterministic patterns with SHA256 and byte-for-byte decode, actual product compressed-payload CRC32C, 4/8/16KiB RAM-only zero-padded packed extents and 8-sector target-relative refusal. Compression length 0/1/3568/3569/4095/4096, real LZ4 frame, dictionary/mis-tag/unknown compressor, altered CRC/SHA, truncated decode, invalid encoding, sentinel header and wrong offset MUST fail closed. The runner MUST compile and execute 13 *actual production codec.c function-scoped* hostile mutants per compiler; passing only textual string searches does NOT count as killed mutations. An unknown source-selected compressor, LZO/zstd, framed/dictionary bytes, oversized length or bad CRC/decoded length/SHA MUST fall back to the complete **ORIGINAL UNCOMPRESSED** 4096-byte ordinary upper `RAW_4096`, never a compressed buffer pretending to be RAW. The existing product delta64 and delta64+shuffle encodings are NOT native source zswap metadata or transport permission. 
 
 This proof is **codec HOST compatibility potential only**, not a live selected original Linux compressor, authenticated current counted source swap-slot/epoch, held target-relative current Device Mapper table/GC/dtr lease, lower write durability, one authoritative map, one genuine upper ACK or full 4096 physical readback; NONE are authorized by an LZ4 byte match. Rootless tests MUST NOT perform actual swap activation, privileged/loaded operations, real MM pressure, any physical write or owner `make test`/`make fast_test`. The entire first physical 4096-byte SWAPSPACE2 header/UUID/signature and parent partition table remain untouched (RAM-only sentinel in the test). zswap RAM remains bounded and naturally Linux-MM evicted, swapz only separately compresses/GCs valid SWAPSPACE2 disk; no forced drain, competing reclaim mechanism or alternate compressed ordinary RAW ABI. `SOURCE_MAPPED_AUTHENTICATED=0 PHASE_A=BLOCKED DIRECT_COMPRESSED_HANDOFF=DISABLED FORCED_RAW_BYPASS=DISABLED`.
+
+## Round052 Agent3 — accepted normal clone receipt, guarded actual C one-shot model (2026-11-20)
+
+The `SWAPZ_ROUND052_DM_INTERNAL_ONE_SHOT_TEST` guard MUST remain UNDEFINED
+in every ordinary product Kbuild. If enabled for controlled source tests,
+the receipt is stored inside `swapz_bio_ref` of the EXISTING core-delivered
+normal 4096-byte target clone, initialized only under `queue_lock` AFTER
+successful `ctx->accepting` admission and `list_add_tail` into
+`ctx->incoming`. There is no default product hot-path allocation, new
+callback, extra ACK, new Device Mapper ABI, competing memory reclaim or
+change to actual map, lower I/O, GC/dtr or `bio_endio`. The bounded
+test-only state machine models `NOT_ACCEPTED -> ACCEPTED -> LOWER_DONE ->
+PUBLISHED -> COMPLETED` and terminal `ABORTED`, with exactly one
+simulated terminal release, at most one simulated map publication and ACK,
+and refusal of late/duplicate callbacks and ACKs. A simulated successful
+ticket step never calls `bio_endio` or grants real I/O authorization.
+
+Real exact product source extraction MUST verify the unique marked C
+declaration, helper and map callsite, including location after the genuine
+`queue_lock` admission and before preparation dispatch. Source anchors
+MUST retain original `swapz_complete`, async lower callback, GC relocate,
+drain/dtr and DM_MAPIO_SUBMITTED path. Strict GCC and Clang GNU11
+`-Wall -Wextra -Wconversion -Wshadow -Werror`, ASan+UBSan
+`-fno-sanitize-recover=all` MUST compile and EXECUTE at least **144
+real source-extracted C cases EACH** (48 adversarial selectors x 1/2/4
+physical blocks): correct full ORIGINAL 4096 upper BIO/8x512-sector
+target-relative mapping, wrong operation/size/sector, target/clone
+identity, unavailable maps, shutdown, late worker, lower `-EIO`,
+not-durable callback, premature or repeated publication, duplicate ACK,
+map-generation/GC ABA, stale extent, abort at multiple stages and
+exactly one terminal release. The checked generation and extent numbers
+are REJECTION predicates, NEVER a real source slot or retained DM lease.
+
+At least **13 distinct genuine product-helper source-changing hostile
+mutations** MUST each fail the source validator AND individually compile
+and EXECUTE under BOTH GCC and Clang with the same Werror ASan/UBSan
+flags (26 hostile binaries), failing the precise first-error C oracle.
+Skipping a compiler, compiling without execution, asserting a status
+string instead of an exact C error, or substituting a toy C implementation
+cannot qualify the test. Preserve prior Round050/051 genuine 168 C
+negative exact-errno cases PER compiler and 22 executed hostile C mutants
+PER compiler, older 150+90 and 7+9+12 source C hostiles, original
+pinned Linux SRCU/18 and Round049 26 changes, native x86/ARM and full
+original actual Linux KUnit and GPL Kbuild gates. Every test/fixture or
+product source change requires a substantive NONWHITESPACE
+`docs/testing_standards.md` appendix IN THE SAME one-parent main commit,
+preserving ALL previous and peer canonical bytes. New exact-SHA native
+repository-policy and all relevant terminal GitHub CI are necessary:
+old/queued CI is not new-source qualification.
+
+The test-only host DOES NOT execute actual DM core `__map_bio`,
+`clone_endio`, real async lower write/flush, a production upper ACK or
+a current target-owned lifetime after dtr; it does not retain a current
+original Linux counted swap slot or solve hidden swapoff cancellation.
+The helper only dereferences current ctx/bio when the caller already
+legitimately owns their lifetime; copied pointer/epoch/GC/CRC and a
+synthetic durable flag are NOT independently retained credentials.
+Native zswap exclusively owns bounded compressed RAM and natural Linux
+MM pressure eviction; swapz exclusively compresses valid SWAPSPACE2 DISK
+into 4/8/16KiB payload-only extents and GC. Ordinary `RAW_4096` is
+ALWAYS FULL ORIGINAL UNCOMPRESSED 4096 bytes. A future separately
+tagged compressed lower path remains disabled without authenticated
+original selected codec, counted slot incarnation, held current DM
+table/map/GC/dtr across callbacks, REAL durable lower write, ONE map
+and genuine ACK, verified full original 4096 readback. First ENTIRE
+physical 4096-byte swap header/signature/UUID and partition table
+remain immutable. No owner `make test`/`make fast_test`, root,
+loaded mapper, physical swap, real memory pressure or reboot was run.
+`SOURCE_MAPPED_AUTHENTICATED=0`, `PHASE_A=BLOCKED`,
+`DIRECT_COMPRESSED_HANDOFF=DISABLED`, `FORCED_RAW_BYPASS=DISABLED`.
