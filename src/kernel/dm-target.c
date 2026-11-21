@@ -565,9 +565,13 @@ struct swapz_round058_dm_observation {
 	const struct swapz_dm *context;
 	const struct bio *upper_bio;
 	const struct block_device *device;
+	/* Borrowed cloned bvec array identity only; never dereference after map. */
+	const struct bio_vec *borrowed_clone_vectors;
 	sector_t target_relative_sector;
 	bool shape_observed;
 	bool terminal;
+	/* A terminally invalidated observation cannot resurrect on reissue. */
+	bool terminal_shape_preserved;
 	bool endio_seen;
 };
 #endif /* SWAPZ_ROUND058_DM_INGRESS_LIFETIME_TEST */
@@ -1368,6 +1372,7 @@ static __used noinline int swapz_round058_dm_ingress_refuse(
 	observation->context = ctx;
 	observation->upper_bio = upper_bio;
 	observation->device = upper_bio->bi_bdev;
+	observation->borrowed_clone_vectors = upper_bio->bi_io_vec;
 	observation->target_relative_sector = relative_sector;
 	observation->shape_observed = true;
 	/* A live clone shape is not a source-owner/DM SRCU/codec/durable lease. */
@@ -1391,15 +1396,23 @@ static __used noinline int swapz_round058_dm_terminal_refuse(
 	    observation->upper_bio != upper_bio ||
 	    observation->target != ctx->target ||
 	    ctx->target->private != ctx ||
+	    observation->borrowed_clone_vectors != upper_bio->bi_io_vec ||
 	    observation->device != upper_bio->bi_bdev ||
 	    observation->target_relative_sector != upper_bio->bi_iter.bi_sector ||
-	    upper_bio->bi_iter.bi_size != SWAPZ_BLOCK_BYTES)
+	    upper_bio->bi_iter.bi_size != SWAPZ_BLOCK_BYTES ||
+	    bio_sectors(upper_bio) != SWAPZ_SECTORS ||
+	    upper_bio->bi_vcnt != 1U ||
+	    upper_bio->bi_iter.bi_idx || upper_bio->bi_iter.bi_offset ||
+	    bio_op(upper_bio) != REQ_OP_WRITE ||
+	    !(upper_bio->bi_opf & REQ_SWAP) ||
+	    !(upper_bio->bi_flags & (1U << BIO_CLONED)))
 		return -ESTALE;
 	/* ->postsuspend may close new admission while this accepted BIO drains.
 	 * Do not reject its completion solely because ctx->accepting is false.
 	 */
 	if (smp_load_acquire(&ctx->failed))
 		return -ESHUTDOWN;
+	observation->terminal_shape_preserved = true;
 	return -EOPNOTSUPP;
 }
 
@@ -1415,13 +1428,26 @@ static __used noinline int swapz_round058_dm_endio_refuse(
 	observation->endio_seen = true;
 	if (!observation->shape_observed)
 		return -EOPNOTSUPP;
+	/* Terminal invalidation is monotonic even if BIO fields are restored. */
 	if (!target || !upper_bio || !observation->terminal ||
+	    !observation->terminal_shape_preserved ||
 	    observation->target != target ||
 	    observation->context != target->private ||
+	    observation->context->target != target ||
 	    observation->upper_bio != upper_bio ||
 	    observation->device != upper_bio->bi_bdev ||
-	    observation->target_relative_sector != upper_bio->bi_iter.bi_sector)
+	    observation->borrowed_clone_vectors != upper_bio->bi_io_vec ||
+	    observation->target_relative_sector != upper_bio->bi_iter.bi_sector ||
+	    upper_bio->bi_iter.bi_size != SWAPZ_BLOCK_BYTES ||
+	    bio_sectors(upper_bio) != SWAPZ_SECTORS ||
+	    upper_bio->bi_vcnt != 1U ||
+	    upper_bio->bi_iter.bi_idx || upper_bio->bi_iter.bi_offset ||
+	    bio_op(upper_bio) != REQ_OP_WRITE ||
+	    !(upper_bio->bi_opf & REQ_SWAP) ||
+	    !(upper_bio->bi_flags & (1U << BIO_CLONED)))
 		return -ESTALE;
+	if (smp_load_acquire(&observation->context->failed))
+		return -ESHUTDOWN;
 	return -EOPNOTSUPP;
 }
 #endif /* SWAPZ_ROUND058_DM_INGRESS_LIFETIME_TEST */
@@ -2320,8 +2346,9 @@ static int swapz_end_io(struct dm_target *ti, struct bio *bio,
 	struct swapz_dm *ctx = ti->private;
 
 #if defined(SWAPZ_ROUND058_DM_INGRESS_LIFETIME_TEST)
-	/* The original DM clone callback still owns per-BIO private storage. */
-	if (bio_op(bio) == REQ_OP_WRITE && bio_sectors(bio)) {
+	/* Callback owns per-BIO storage even if reissue altered the opcode or
+	 * the iterator: never skip the negative-only lifetime observation. */
+	{
 		struct swapz_bio_ref *entry = dm_per_bio_data(bio, sizeof(*entry));
 
 		(void)swapz_round058_dm_endio_refuse(ti, bio,

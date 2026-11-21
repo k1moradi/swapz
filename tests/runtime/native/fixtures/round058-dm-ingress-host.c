@@ -140,6 +140,7 @@ int main(void)
         observed = swapz_round058_dm_endio_refuse(
             &scenario.target, &scenario.upper_bio, &scenario.observation);
         require(observed == ((scenario_number == 15U || scenario_number == 16U ||
+                              scenario_number == 17U || scenario_number == 19U ||
                               scenario_number == 20U) ? -ESTALE : -EOPNOTSUPP),
                 scenario_number, "native-endio-no-auth");
         require(scenario.observation.endio_seen, scenario_number, "endio-monotonic");
@@ -147,6 +148,74 @@ int main(void)
                     &scenario.target, &scenario.upper_bio, &scenario.observation) == -EALREADY,
                 scenario_number, "endio-exactly-once");
     }
-    puts("ROUND058_DM_INGRESS_HOST_PASS cases=22 SOURCE_MAPPED_AUTHENTICATED=0 PHASE_A=BLOCKED");
+    /* Post-admission reissue, trim and replacement must make terminal
+     * invalidation monotonic despite later restoration of identical scalars. */
+    for (unsigned int mutation = 0; mutation < 5U; ++mutation) {
+        struct scenario scenario;
+        struct bio_vec replacement_vector;
+        setup(&scenario);
+        replacement_vector = scenario.vector;
+        require(swapz_round058_dm_ingress_refuse(
+                    &scenario.target, &scenario.context, &scenario.upper_bio,
+                    &scenario.observation) == -EOPNOTSUPP &&
+                scenario.observation.shape_observed,
+                mutation, "clone-ingress-observed");
+        switch (mutation) {
+        case 0: scenario.upper_bio.bi_flags = 0U; break;
+        case 1: scenario.upper_bio.bi_opf &= ~REQ_SWAP; break;
+        case 2: scenario.upper_bio.bi_io_vec = &replacement_vector; break;
+        case 3: scenario.upper_bio.bi_iter.bi_idx = 1U; break;
+        default: scenario.upper_bio.bi_vcnt = 2U; break;
+        }
+        require(swapz_round058_dm_terminal_refuse(
+                    &scenario.context, &scenario.upper_bio,
+                    &scenario.observation) == -ESTALE,
+                mutation, "stale-transaction-terminal-rejected");
+        require(!scenario.observation.terminal_shape_preserved,
+                mutation, "terminal-not-resurrectable");
+        /* Restoring all old fields cannot revalidate a retired witness. */
+        scenario.upper_bio.bi_flags = 1U << BIO_CLONED;
+        scenario.upper_bio.bi_opf = REQ_OP_WRITE | REQ_SWAP;
+        scenario.upper_bio.bi_io_vec = &scenario.vector;
+        scenario.upper_bio.bi_iter.bi_idx = 0U;
+        scenario.upper_bio.bi_vcnt = 1U;
+        require(swapz_round058_dm_endio_refuse(
+                    &scenario.target, &scenario.upper_bio,
+                    &scenario.observation) == -ESTALE,
+                mutation, "restored-fields-still-refused");
+        require(swapz_round058_dm_endio_refuse(
+                    &scenario.target, &scenario.upper_bio,
+                    &scenario.observation) == -EALREADY,
+                mutation, "one-endio-only");
+    }
+    /* A valid terminal snapshot cannot override the real changed callback. */
+    for (unsigned int mutation = 0; mutation < 4U; ++mutation) {
+        struct scenario scenario;
+        struct bio_vec replacement_vector;
+        setup(&scenario);
+        replacement_vector = scenario.vector;
+        require(swapz_round058_dm_ingress_refuse(
+                    &scenario.target, &scenario.context, &scenario.upper_bio,
+                    &scenario.observation) == -EOPNOTSUPP,
+                mutation, "endio-initial-ingress");
+        require(swapz_round058_dm_terminal_refuse(
+                    &scenario.context, &scenario.upper_bio,
+                    &scenario.observation) == -EOPNOTSUPP &&
+                scenario.observation.terminal_shape_preserved,
+                mutation, "endio-valid-terminal-observation");
+        if (mutation == 0U)
+            scenario.upper_bio.bi_flags = 0U;
+        else if (mutation == 1U)
+            scenario.upper_bio.bi_io_vec = &replacement_vector;
+        else if (mutation == 2U)
+            scenario.upper_bio.bi_iter.bi_offset = 8U;
+        else
+            scenario.upper_bio.bi_opf = REQ_OP_READ | REQ_SWAP;
+        require(swapz_round058_dm_endio_refuse(
+                    &scenario.target, &scenario.upper_bio,
+                    &scenario.observation) == -ESTALE,
+                mutation, "changed-endio-bio-refused");
+    }
+    puts("ROUND059_DM_COMPLETION_HOST_PASS cases=22 retired=5 endio_mutations=4 SOURCE_MAPPED_AUTHENTICATED=0 PHASE_A=BLOCKED");
     return 0;
 }

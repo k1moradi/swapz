@@ -17236,3 +17236,36 @@ Append this substantive policy after the entire previous and peer
 canonical standards as a byte-identical prefix in the same source/
 fixture/workflow commit; rootless and native qualification is not
 production release evidence.
+
+## Round059 negative-only actual DM terminal/clone revalidation (2026-11-21)
+
+The existing default-undefined production dm-target.c clone observer is
+read-only and is NOT native MM source tenure, a BIO allocation reference,
+a current table SRCU lease or permission to submit imported compressed
+bytes. Before genuine bio_endio, the ordered owner must revalidate original
+REQ_SWAP WRITE, BIO_CLONED, 4096 bytes, eight target-relative sectors,
+current context/target, original bdev, single borrowed bvec-array POINTER,
+iterator index/offset and vector count. Never dereference the borrowed parent
+bvec after ingress. An invalidated terminal is monotonic: even restoration
+of all apparent fields at endio must not authorize a new original source
+or duplicated upper completion. Genuine DM end_io must recheck the current
+callback clone even if its opcode/iterator changed, reject terminal failure,
+changed vectors, target teardown and a duplicate callback observation.
+
+Rootless exact product C extraction runs strict GCC/Clang GNU11 -Werror
+-Wall -Wextra -Wconversion -Wshadow with ASan+UBSan and leak checking,
+retains 22 existing cases and adds five distinct terminal mutation/restore
+refusals, four changed endio BIO views, plus four executed semantic
+source-mutant binaries beyond the inherited seven. Compiler failure and
+sanitizer crashes do not count as successful semantic rejection. The
+original pinned Linux ZSWAP=y/n full same-source GPL Module.symvers,
+default DM and guarded DM module Kbuild is required at the changed commit.
+A host stand-in does not establish loaded kernel DMA/DM closure, source
+ownership, durable imported lower WRITE/FUA, authoritative imported GC
+map, genuine one-time upper ACK or complete independently decoded original
+4096 READ. Production RAW_4096 stays ORIGINAL UNCOMPRESSED full 4096; no
+new disk format or persistent metadata and the first physical 4096
+SWAPSPACE2 header and parent partition table remain immutable. Phase A
+BLOCKED, SOURCE_MAPPED_AUTHENTICATED=0, direct compressed handoff and forced
+RAW bypass DISABLED; no privileged, physical, loaded, pressure, swap or owner
+make test/fast_test.

@@ -17,10 +17,12 @@ ROOT = Path(__file__).resolve().parents[2]
 PRODUCT = ROOT / 'src/kernel/dm-target.c'
 FIXTURE = ROOT / 'tests/runtime/native/fixtures/round058-dm-ingress-host.c'
 FIRST_ERROR = 'ROUND058_DM_FIRST_ERROR'
-PASS = ('ROUND058_DM_INGRESS_HOST_PASS cases=22 '
+PASS = ('ROUND059_DM_COMPLETION_HOST_PASS cases=22 retired=5 endio_mutations=4 '
         'SOURCE_MAPPED_AUTHENTICATED=0 PHASE_A=BLOCKED')
 MUTANTS = (
-    ('cloned_required', '!(upper_bio->bi_flags & (1U << BIO_CLONED))', 'false'),
+    ('cloned_required',
+     '!(upper_bio->bi_flags & (1U << BIO_CLONED)))\n\t\treturn -EOPNOTSUPP;',
+     'false)\n\t\treturn -EOPNOTSUPP;'),
     ('target_relative_alignment', 'relative_sector % SWAPZ_SECTORS ||', 'false ||'),
     ('accepted_target_private', 'if (target->private != ctx || ctx->target != target ||',
      'if (false || ctx->target != target ||'),
@@ -30,6 +32,17 @@ MUTANTS = (
     ('terminal_current_target', 'observation->target != ctx->target ||', 'false ||'),
     ('terminal_exactly_once', 'if (observation->terminal)', 'if (false)'),
     ('endio_exactly_once', 'if (observation->endio_seen)', 'if (false)'),
+    ('terminal_borrowed_vectors',
+     'observation->borrowed_clone_vectors != upper_bio->bi_io_vec ||\n\t    observation->device',
+     'false ||\n\t    observation->device'),
+    ('terminal_original_swap_op',
+     '!(upper_bio->bi_opf & REQ_SWAP) ||\n\t    !(upper_bio->bi_flags & (1U << BIO_CLONED)))\n\t\treturn -ESTALE;\n\t/* ->postsuspend',
+     'false ||\n\t    !(upper_bio->bi_flags & (1U << BIO_CLONED)))\n\t\treturn -ESTALE;\n\t/* ->postsuspend'),
+    ('terminal_failure_not_resurrectable',
+     '!observation->terminal_shape_preserved ||', 'false ||'),
+    ('endio_replaced_borrowed_vectors',
+     'observation->borrowed_clone_vectors != upper_bio->bi_io_vec ||\n\t    observation->target_relative_sector',
+     'false ||\n\t    observation->target_relative_sector'),
 )
 
 
@@ -58,6 +71,8 @@ def source_sections() -> tuple[str, str]:
     helpers = extract(product, '/* ROUND058_DM_INGRESS_HELPERS_START */',
                       '/* ROUND058_DM_INGRESS_HELPERS_END */')
     for marker in ('SWAPZ_ROUND058_DM_INGRESS_LIFETIME_TEST',
+                   'terminal_shape_preserved',
+                   'borrowed_clone_vectors',
                    'swapz_round058_dm_ingress_refuse',
                    'swapz_round058_dm_terminal_refuse',
                    'swapz_round058_dm_endio_refuse',
@@ -147,7 +162,7 @@ def main() -> None:
                 compile_and_run(compiler, compose(helpers.replace(original, changed, 1)),
                                 directory, compiler + '-' + name, True)
             print('ROUND058_ACTUAL_PRODUCT_DM_' + compiler.upper() +
-                  '_7_CHANGED_SOURCE_C_MUTANTS_SEMANTIC_PASS')
+                  f'_{len(MUTANTS)}_CHANGED_SOURCE_C_MUTANTS_SEMANTIC_PASS')
     print('ROUND058_DM_PRODUCT_INGRESS_NO_AUTH PASS exact_source=dm-target.c '
           'SOURCE_MAPPED_AUTHENTICATED=0 PHASE_A=BLOCKED')
 
