@@ -17609,3 +17609,45 @@ release, keep import ACTIVE=0, SOURCE_MAPPED_AUTHENTICATED=0,
 PHASE_A=BLOCKED, direct compressed handoff/forced RAW bypass
 DISABLED and all privileged, actual-pressure and physical testing
 not authorized.
+
+## Round061 — original pinned LZO1X/LZ4 GPL Kbuild libelf prerequisite (Agent4)
+
+The original Linux decoder native build must remain an actual rootless/test-only
+kernel-source qualification against the exact pinned pristine upstream commit
+`c339f4010dea8b0d754f84ace70cd1b089878ef8` and the existing eleven
+verified Linux Git blobs. Both genuine x86 `CONFIG_ZSWAP=y` and
+`CONFIG_ZSWAP=n` matrices must build `vmlinux`, all modules and the matching
+nonempty original `Module.symvers` before their compile-only GPL decoder
+external module may be described as successfully linked. The module must
+consume the original LZO1X `EXPORT_SYMBOL_GPL`, original LZ4 export and
+original SHA256 export with the real product CRC C translation unit.
+The deliberate nonexistent decoder symbol must fail at genuine kernel
+`modpost` specifically as undefined; header, compiler and linker failures
+are NOT valid negative modpost evidence.
+
+Each isolated disposable GitHub-hosted native runner installs its own Kbuild
+prerequisites, including `libelf-dev` for `gelf.h`/`libelf.h` and the libelf
+linker, `bc`, `bison`, `flex` and original kernel build tools, before
+`defconfig`/`olddefconfig`. This is CI build dependency installation,
+NEVER privileged owner-host, loaded module, swap/physical storage or
+pressure testing. The separate bounded fail-only regression
+`tests/tools/round061-original-kbuild-host-deps-verify.py self-test`
+negatively checks that `elf.h` alone is not sufficient, rejects absent
+`gelf.h`, `libelf.h` and `elf.h`, and does not treat its synthetic
+files as native proof. The `check` action must compile, link and EXECUTE
+a real `elf.h`/`gelf.h`/`libelf.h` and `-lelf` translation unit with
+BOTH GCC and Clang on the actual runner before native Kbuild.
+Failures show only a bounded missing-header/compiler/link phase, without
+leaking runner-local paths. Existing original-source GCC/Clang ASan+UBSan,
+ten changed-source semantic C mutants, pinned blob checks, config, positive
+and negative modpost gates must remain enabled on this exact source.
+
+Successful build-time native GPL symbol matching establishes neither a
+loaded kernel decoder/module reference surviving zswap pool teardown nor
+an original STORED folio/source BIO bvec through current accepted swapz DM
+table and durable mapped lower write, GC and exact read lifetime. All
+production imported admission and physical-device/owner tests remain
+unauthorized: `SOURCE_MAPPED_AUTHENTICATED=0`, `PHASE_A=BLOCKED`,
+direct compressed handoff DISABLED, forced RAW bypass DISABLED. Ordinary
+`RAW_4096` remains the full original uncompressed 4096-byte page; the
+physical SWAPSPACE2 header/UUID and parent partition table remain untouched.

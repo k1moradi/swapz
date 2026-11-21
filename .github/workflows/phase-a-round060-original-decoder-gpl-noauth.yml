@@ -5,6 +5,7 @@ on:
     paths:
       - 'src/kernel/zswap-import-codec.h'
       - 'tests/tools/round060-original-decoder-kbuild-verify.py'
+      - 'tests/tools/round061-original-kbuild-host-deps-verify.py'
       - 'tests/runtime/native/fixtures/round060-original-decoder-module.c'
       - '.github/workflows/phase-a-round060-original-decoder-gpl-noauth.yml'
       - 'docs/testing_standards.md'
@@ -49,6 +50,7 @@ jobs:
           git -C swapz diff --check HEAD^ HEAD
           python3 -B swapz/tests/tools/round060-original-decoder-kbuild-verify.py original --linux-root linux
           python3 -B swapz/tests/tools/round060-original-decoder-kbuild-verify.py self-test
+          python3 -B swapz/tests/tools/round061-original-kbuild-host-deps-verify.py self-test
           (cd swapz && python3 -B tests/tools/round059-codec-host-compat-verify.py)
           echo 'ROUND060_ORIGINAL_PINNED_GCC_CLANG_HOST_ASAN_UBSAN_10_SEMANTIC_MUTANTS_PASS_AUTH0'
 
@@ -74,20 +76,34 @@ jobs:
           fetch-depth: 1
           path: linux
           persist-credentials: false
-      - name: Require existing rootless x86 build prerequisites (no sudo)
+      - name: Install original pinned x86 kernel build dependencies on ephemeral CI runner only
         shell: bash
         run: |
           set -Eeuo pipefail
-          for executable in gcc make bc bison flex ld nm readelf python3; do
+          # Build-tool installation on this disposable GitHub host is NOT a
+          # privileged, loaded-module, physical-I/O or owner-host test.
+          if ! sudo -n apt-get update -qq >"$RUNNER_TEMP/round061-kbuild-deps.log" 2>&1; then
+            echo '::error::ROUND061_DECODER_FIRST_ERROR hosted apt metadata unavailable' >&2
+            exit 3
+          fi
+          if ! sudo -n env DEBIAN_FRONTEND=noninteractive apt-get install -y -qq \
+              --no-install-recommends build-essential bc bison flex clang \
+              libelf-dev libssl-dev libncurses-dev dwarves binutils \
+              >>"$RUNNER_TEMP/round061-kbuild-deps.log" 2>&1; then
+            echo '::error::ROUND061_DECODER_FIRST_ERROR hosted original kernel dependencies unavailable' >&2
+            exit 3
+          fi
+      - name: Require real GCC Clang gelf.h libelf headers and executable linkage
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          for executable in gcc clang make bc bison flex ld nm readelf python3; do
             command -v "$executable" >/dev/null || {
               echo "::error::ROUND060_DECODER_FIRST_ERROR missing rootless prerequisite $executable" >&2
               exit 3
             }
           done
-          test -r /usr/include/elf.h || {
-            echo "::error::ROUND060_DECODER_FIRST_ERROR missing libelf development header" >&2
-            exit 3
-          }
+          python3 -B swapz/tests/tools/round061-original-kbuild-host-deps-verify.py check
       - name: Exact original ZSWAP y/n vmlinux modules GPL symvers and positive/negative real modpost
         shell: bash
         timeout-minutes: 135
