@@ -1,0 +1,42 @@
+name: Round056 original pinned BIO full clone provenance C NO_AUTH
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "tests/tools/round056-original-clone-provenance-verify.py"
+      - "tests/runtime/native/fixtures/round056-original-clone-owner.c"
+      - ".github/workflows/round056-original-bio-clone-provenance-noauth.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  original-bio-clone-source-rootless:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 18
+    steps:
+      - uses: actions/checkout@v4
+      - name: Retrieve exact pinned pristine original C sources, no branch fallback
+        shell: bash
+        run: |
+          set -euo pipefail
+          root="$RUNNER_TEMP/round056-original-linux"
+          pin=c339f4010dea8b0d754f84ace70cd1b089878ef8
+          mkdir -p "$root/block" "$root/drivers/md" "$root/mm"
+          for source in block/bio.c drivers/md/dm.c mm/page_io.c; do
+            curl --fail --location --silent --show-error --retry 4 --retry-delay 2 \
+              "https://raw.githubusercontent.com/torvalds/linux/$pin/$source" \
+              -o "$root/$source"
+          done
+          printf 'ROUND056_ORIGINAL_PRISTINE_SOURCES_RETRIEVED_HASH_NOT_YET_VERIFIED\n'
+      - name: Execute real pinned original clone C excerpts GCC and Clang strict ASan UBSan plus four changed C mutants each
+        shell: bash
+        run: |
+          set -euo pipefail
+          command -v gcc
+          command -v clang
+          python3 -B tests/tools/round056-original-clone-provenance-verify.py \
+            --kernel-root "$RUNNER_TEMP/round056-original-linux"
+          printf 'ROUND056_PINNED_ORIGINAL_BIO_CLONE_NO_AUTH_TEST_END\n'
