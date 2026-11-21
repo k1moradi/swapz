@@ -17724,3 +17724,48 @@ signature/UUID/header, partition table and 4/8/16KiB payload-only classes
 are unchanged. SOURCE_MAPPED_AUTHENTICATED=0, PHASE_A=BLOCKED, direct
 compressed handoff and forced RAW bypass DISABLED; no owner make,
 privileged, kernel-loaded, actual-pressure or physical tests.
+
+## Round062 Agent5 — standalone actual linked-product mutant oracle must be type-correct
+
+The Round061 standalone transaction workspace regression is a UNIT control-flow
+oracle, not a substitute for compiled-and-executed production C. A changed
+`authority.c` source override is an actual FILE inside
+`gcc/mutant-N` or `clang/mutant-N`; a changed `flush-qual.h` or
+`zswap-import-admission.h` override passed to the real runner's
+`build(..., altered_header=...)` is already the containing DIRECTORY.
+Never blindly take the parent of both kinds. Assert exactly one source/header
+override, correct existing path type, genuine compiler-owned sibling
+`mutant-N` directory, nonescaped resolved directory identity, and
+unique GCC/Clang numbered mutant mutation. The same actual-workspace
+validator must reject independent escaped mutated-C FILE, escaped
+header DIRECTORY and compiler-child symlink redirected outside ownership;
+negatives count only on the exact workspace-first-error oracle, not on a
+later missing file or altered content. The two compiler baseline + ten mutant
+invocations remain required.
+
+Unit-test assertion and host exceptions must print one bounded fail-only
+first-error class with a repository-relative mode-0600 private evidence path,
+never a Python traceback, absolute `/tmp` host path, arbitrary child
+diagnostic or private token. The evidence directory must be owner-only
+mode-0700 and a symlinked diagnostics directory must not be followed.
+Require isolated rootless positive/negative path and diagnostic privacy
+coverage. Separately run the UNMOCKED original real linked
+`src/kernel/authority.c + codec.c` source/fixture against GCC and Clang
+`-Wall -Wextra -Wconversion -Wshadow -Werror`, ASan/UBSan and FIVE
+distinct genuinely compiled and executed changed-real-source semantic mutants
+per compiler. A compiler error, sanitizer failure, mocked kill or
+workspace assert is NEVER a semantic mutant PASS. Standalone Round057
+and inherited Round059 LZ4 actual-source jobs must each terminate SUCCESS
+on the corrected source, preserving prior standards/first-parent policy.
+
+The test-only correction does not establish authentic original Linux
+STORED folio/BIO bvec-to-current DM ownership, durable imported I/O,
+independent selected decoder module lease, real compressed ACK or full
+native decoded 4096 read. Native Linux MM solely manages zswap compressed
+RAM and natural pressure eviction; swapz solely disk packing/GC.
+Ordinary RAW_4096 is full ORIGINAL UNCOMPRESSED 4096, not already-compressed
+data. Original physical SWAPSPACE2 header first 4096 and parent partition
+table, 20-byte product map and volatile payload-only extents remain
+unchanged. SOURCE_MAPPED_AUTHENTICATED=0, PHASE_A=BLOCKED, compressed
+handoff DISABLED and forced RAW bypass DISABLED. No owner Make, privileged,
+kernel-loaded, physical device or actual-pressure tests.
