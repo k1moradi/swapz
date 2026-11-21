@@ -4383,6 +4383,138 @@ def apply_round052_original_preunuse_negative(path: str, composed: str) -> str:
                         path, "round052-real-original-C-KUnit-source-negative")
 
 
+
+# Round053 test-only original C: independently explicit closed admission,
+# no registered owner and retired terminal status. This sits INSIDE the
+# existing default-off Round052 CONFIG_KUNIT guard; no swapoff hook is added.
+ROUND053_PREUNUSE_GATE_NEGATIVE_C = r"""/* ROUND053_ORIGINAL_PREUNUSE_GATE_NEGATIVE_BEGIN */
+/*
+ * Explicit pre-unuse CLOSED and RETIRED observations are test-local states.
+ * There is no real MM admission registry, counted swap slot, area users ref,
+ * async callback owner or installed swapoff hook. Terminal is not atomic and
+ * can NEVER be used by concurrent runtime callers. A copied valid-looking
+ * source candidate cannot supply ownership.
+ */
+enum swapz_round053_preunuse_admission {
+	SWAPZ_ROUND053_OPEN_UNREGISTERED,
+	SWAPZ_ROUND053_CLOSED_BEFORE_UNUSE,
+	SWAPZ_ROUND053_RETIRED_AFTER_UNUSE,
+};
+
+struct swapz_round053_preunuse_gate {
+	enum swapz_round053_preunuse_admission admission;
+	bool terminal;
+};
+
+static noinline int swapz_round053_preunuse_gate_refuse(
+		struct swapz_round053_preunuse_gate *gate,
+		const struct swapz_round052_unowned_source_candidate *candidate)
+{
+	if (!gate)
+		return -EINVAL;
+	/* Duplicate/late completion must win before inspecting old source. */
+	if (gate->terminal)
+		return -EALREADY;
+	gate->terminal = true;
+	if (gate->admission == SWAPZ_ROUND053_RETIRED_AFTER_UNUSE)
+		return -ESTALE;
+	if (gate->admission == SWAPZ_ROUND053_CLOSED_BEFORE_UNUSE)
+		return -ESHUTDOWN;
+	if (gate->admission != SWAPZ_ROUND053_OPEN_UNREGISTERED)
+		return -EINVAL;
+	if (!candidate)
+		return -EINVAL;
+	/* No genuine independently registered owner in ORIGINAL swap MM. */
+	return -ENXIO;
+}
+
+static void swapz_round053_unregistered_source_refused_kunit(
+		struct kunit *test)
+{
+	struct swapz_round053_preunuse_gate gate = {
+		.admission = SWAPZ_ROUND053_OPEN_UNREGISTERED,
+	};
+	struct swapz_round052_unowned_source_candidate candidate = {};
+	struct zswap_entry fake_stored = {};
+	struct xarray tree;
+	struct folio *folio;
+
+	folio = folio_alloc(GFP_KERNEL, 0);
+	KUNIT_ASSERT_NOT_NULL(test, folio);
+	xa_init(&tree);
+	folio_lock(folio);
+	candidate.folio = folio;
+	candidate.stored = &fake_stored;
+	candidate.tree = &tree;
+	candidate.original_slot = swp_entry(1U, 37U);
+	/* Real allocated locked original folio, NOT real swapcache or count. */
+	KUNIT_EXPECT_TRUE(test, folio_test_locked(folio));
+	KUNIT_EXPECT_FALSE(test, folio_test_swapcache(folio));
+	KUNIT_EXPECT_EQ(test, swapz_round053_preunuse_gate_refuse(
+			&gate, &candidate), -ENXIO);
+	KUNIT_EXPECT_TRUE(test, gate.terminal);
+	folio_unlock(folio);
+	xa_destroy(&tree);
+	folio_put(folio);
+}
+
+static void swapz_round053_closed_duplicate_cancel_refused_kunit(
+		struct kunit *test)
+{
+	struct swapz_round053_preunuse_gate gate = {
+		.admission = SWAPZ_ROUND053_CLOSED_BEFORE_UNUSE,
+	};
+	struct swapz_round052_unowned_source_candidate candidate = {};
+
+	KUNIT_EXPECT_EQ(test, swapz_round053_preunuse_gate_refuse(
+			&gate, &candidate), -ESHUTDOWN);
+	KUNIT_EXPECT_TRUE(test, gate.terminal);
+	/* Must never examine a possibly expired old candidate. */
+	KUNIT_EXPECT_EQ(test, swapz_round053_preunuse_gate_refuse(
+			&gate, NULL), -EALREADY);
+}
+
+static void swapz_round053_retired_late_callback_refused_kunit(
+		struct kunit *test)
+{
+	struct swapz_round053_preunuse_gate gate = {
+		.admission = SWAPZ_ROUND053_RETIRED_AFTER_UNUSE,
+	};
+	struct swapz_round052_unowned_source_candidate candidate = {};
+
+	KUNIT_EXPECT_EQ(test, swapz_round053_preunuse_gate_refuse(
+			&gate, &candidate), -ESTALE);
+	KUNIT_EXPECT_TRUE(test, gate.terminal);
+	KUNIT_EXPECT_EQ(test, swapz_round053_preunuse_gate_refuse(
+			&gate, NULL), -EALREADY);
+}
+
+static struct kunit_case swapz_round053_preunuse_gate_negative_cases[] = {
+	KUNIT_CASE(swapz_round053_unregistered_source_refused_kunit),
+	KUNIT_CASE(swapz_round053_closed_duplicate_cancel_refused_kunit),
+	KUNIT_CASE(swapz_round053_retired_late_callback_refused_kunit),
+	{}
+};
+static struct kunit_suite swapz_round053_preunuse_gate_negative_suite = {
+	.name = "swapz_round053_original_preunuse_closed_gate_no_authority",
+	.test_cases = swapz_round053_preunuse_gate_negative_cases,
+};
+kunit_test_suite(swapz_round053_preunuse_gate_negative_suite);
+/* ROUND053_ORIGINAL_PREUNUSE_GATE_NEGATIVE_END */
+
+"""
+
+
+def apply_round053_original_preunuse_gate(path: str, composed: str) -> str:
+    """Only original mm/zswap.c; preserve all 60 prior actual C tests."""
+    if path != "mm/zswap.c":
+        return composed
+    marker = "/* ROUND052_ORIGINAL_PRE_UNUSE_NEGATIVE_END */"
+    return replace_once(composed, marker,
+                        ROUND053_PREUNUSE_GATE_NEGATIVE_C + marker,
+                        path, "round053-real-original-C-closed-gate-negative")
+
+
 # Round045 observation is private original Linux C, default UNDEFINED, and
 # establishes no real current allocation or DM target/GC ownership lease.
 ROUND045_ORIGINAL_STORED_BIO_SCOPE_MACRO = "SWAPZ_ROUND045_ORIGINAL_STORED_BIO_SOURCE_SCOPE_TEST"
@@ -4752,6 +4884,7 @@ def compose_postimage(path: str, original_bytes: bytes, *,
         changed = apply_round049_original_counted_pair(path, changed)
     if with_kunit:
         changed = apply_round052_original_preunuse_negative(path, changed)
+        changed = apply_round053_original_preunuse_gate(path, changed)
     if path == "mm/zswap.c":
         for required in (
             "swapz_round028_slot_epoch(swpentry)",

@@ -16582,3 +16582,39 @@ The own synthetic native-MM-origin scheduling workflow MUST preserve and execute
 The actual GCC and Clang C23 `-Wall -Wextra -Wconversion -Wshadow -Werror -fsanitize=address,undefined` synthetic scheduler executable MUST retain all 192 externally given already-native-Linux-MM-origin eviction stream cases across 16/32/64 modeled 4KiB-block disk capacities, the original 19 source/DM/codec hostile decision checks, and new hostile stale GC and recycled swap-slot incarnation transitions. The added bounded regression starts with a durable full ORIGINAL uncompressed 4096-byte RAW mapping, fills the eight-event queue, asserts a refused new rewrite owns no upper ACK, executes a subsequently accepted EIO rewrite with one failure ACK and zero authoritative map replacement, moves the last durable mapping in GC, rejects stale GC and slot-ABA rewrites, and finally retries the same entire 4096 original bytes to one current mapping/ACK. Verify the full byte array including first and last modified bytes, not solely a digest or compressed-prefix comparison. Check duplicate ACK idempotence, unchanged first 4096 synthetic SWAPSPACE2 header/partition sentinel, padded I/O accounting, and original committed map on every failure. An outcome is modeled logical state only, never an assertion of actual kernel BIO, original counted-slot or physical durability.
 
 The model can count abstract original decompress/swapz recompress invocations and padded physical output bytes, but MUST NOT claim wall-clock performance, host page eviction control, genuine codec equivalence, or actual readback verification of an LZ4 compressed stream. Ordinary upper RAW_4096 ALWAYS means the full original UNCOMPRESSED 4096-byte page, never original STORED bytes. `SOURCE_MAPPED_AUTHENTICATED=0`, `PHASE_A=BLOCKED`, `DIRECT_COMPRESSED_HANDOFF=DISABLED`, and `FORCED_RAW_BYPASS=DISABLED` continue with no competing shrinker/reclaim. No new loaded, privileged, physical SWAPSPACE2, make test/fast_test, real pressure, or device trial is authorized. An actual exact-source GitHub Actions terminal success is separately required; local source-host sanitizer success or a queued run cannot qualify the combined commit.
+
+## Round053 original pre-try_to_unuse gate source negative C (Agent2, 2026-11-20)
+
+Default-undefined original \`SWAPZ_ROUND052_ORIGINAL_PRE_UNUSE_CANCEL_TEST\`
+plus \`CONFIG_KUNIT\` now includes a distinct Round053 closed-admission
+negative-only KUnit suite. Its noowner/closed/retired/terminal status is
+stack-local test state and must never be treated as actual swap-table count,
+source STORED ownership, async callback cancellation, concurrency-safe state
+or authorized external BIO. All previous 60 registered original C cases
+remain intact; three new cases must be **actually compiled and booted** in
+the pinned \`torvalds/linux@c339f4010dea8b0d754f84ace70cd1b089878ef8\`
+\`CONFIG_ZSWAP=y\` UML kernel. Independent JSON+KTAP verification must
+require exactly the three added C cases with PASS and consistent counters
+alongside the inherited 60, reject duplicates/missing/fail/skip/crash,
+and distinguish the Python verifier's synthetic fixtures from a real boot.
+Source-hostile mutation checks must change actual staged original C
+functions, identify the first rejected guard, preserve the 14 inherited
+Round052 hostile source checks and not mislabel Python mutations as
+executed C binaries. Both original x86 ZSWAP=y/n Kbuild profiles,
+Module.symvers original unique GPL provider/probe and matching original
+KDIR \`dm-swapz.ko\` W=1/-Werror/modpost/ELF remain mandatory.
+
+Original \`swapoff\` must close any hypothetical external slot admissions
+and cancel/drain independently runnable owned callbacks *before*
+\`try_to_unuse\`; native current MM provides no such registered external
+owner facility. No hidden ref, copied typed slot, old folio/xarray pointer,
+unheld users ref or terminal test bit can authorize an async put. Never
+wait for swapoff, target dtr or GC while unuse waits for such a ref; never
+sleep while holding a swap cluster or xarray spinlock. Retain NO_GO for
+positive deferred original counted refs, area lifetime and source→DM
+mapping. Preserve normal full original uncompressed 4096-byte RAW BIO,
+native bounded zswap MM-pressure eviction, independently compressed
+SWAPSPACE2 disk packed extents/GC and immutable first physical 4096.
+Never exercise privileged/loaded/physical-swap/real-pressure/make-test
+paths without fresh owner authorization. \`SOURCE_MAPPED_AUTHENTICATED=0\`,
+\`PHASE_A=BLOCKED\` and direct compressed handoff disabled.
