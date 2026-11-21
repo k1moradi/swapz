@@ -1,0 +1,25 @@
+# Agent5 Round052 rootless natural-MM-origin arrival / swapz disk model
+
+Status: **MODEL PASS, production source-to-DM authorization NOT_AUTH, Phase A BLOCKED.** This is deliberately independent of Agent2/3/4, their changes, and real Linux pressure. No native zswap reclaim, forced source drain, new shrinker, kernel ABI, target module or actual disk access is added.
+
+## Reproducible results (local rootless)
+
+`python3 -B tests/tools/round052-zswap-swapz-natural-pressure-scheduling.py --self-test` compiles the **actual repository C fixture** with GCC and Clang, strict C23 (c2x fallback for older compilers), `-Wall -Wextra -Wconversion -Wshadow -Werror -fsanitize=address,undefined`. Both compilers executed with terminal PASS: **192 separate deterministic arrival cases, 19 hostile eligibility mutations, capacities 16/32/64 four-KiB blocks**, covering 4/8/16KiB physical packed extent classes and data-only zero-padding. Test case counts are checked, not inferred from successful compilation. The C fixture includes a full 4096-byte original RAW write/read byte comparison. Encoded synthetic records are *opaque first-N-byte placeholders*, not real swapz LZ4 and not a full compressed decode proof; Agent4 separately owns genuine codec compatibility.
+
+Other executable scenarios: eight-event bounded FIFO, ninth-event `-EAGAIN`, normal full-page fallback for length 0 and >3568, model-sized `-ENOSPC` with previous mappings unchanged, injected lower `-EIO` with no publication, a copied-live-extent GC move with map authority retained, in-flight stale GC epoch cancellation, source swapoff refusal, target dtr drain and new-admission refusal, repeated completion that cannot ACK twice, source-slot ABA, original codec/frame/CRC/SHA uncertainty, non-linear backing/target-relative geometry flag mismatch, and a synthetic first-block/partition-table RAM sentinel verified after stream and faults. No real `swapoff`, target unload, MM eviction, device, module or physical header was exercised.
+
+## Decisions and cost / queue bounds
+
+| Arrival and proof | Scheduler action | Lower extent / authority |
+|---|---|---|
+| Normal original Linux MM-generated eviction; original lease absent | Deliver **full original uncompressed 4096** upper RAW, independent swapz attempt | Size-selected 4/8/16KiB payload-only disk class; map only after simulated lower completion |
+| Original selected compressor codec incompatible, framed, >3568, or unknown CRC / decoded SHA | Same full 4096 normal upper RAW fallback | Never inject STORED bytes into normal RAW path |
+| Synthetic queue full (8), no disk contiguous capacity, or simulated lower EIO | Bounded refusal / affected accepted BIO error, no busy retry | Preserve preceding authoritative committed map and GC readers |
+| Stale GC/target, canceled source swapoff, target dtr | Fail or drain outstanding synthetic event | No new source-owned counted slot, no double completion |
+| **FUTURE ONLY**, proven source counted lease + current target lease + real raw LZ4 <=3568 + checksum + full SHA + confirmed durable lower completion | *Hypothetical lower-tagged staging only*, **disabled** | Would require new separately verified one-map/one-ACK/4096-readback ownership; not present |
+
+The actual model's event queue is **8 × sizeof(struct event)** bytes, fixed 64 × 4096-byte fake disk (including immutable block zero), at most four independently prepared 4096-byte pages per packed lower attempt, 32 resident logical map slots and 64 descriptors; all arrays are statically bounded. No allocation growth, threads, retry loops on persistent ENOSPC, or time-based arrival generation. Under normal path each accepted event models **one original full-page decompression + one swapz compression attempt**, 4096 upper input bytes. For 192 arrivals this is 192+192 modeled invocations and **786,432 upper bytes**, independent of lower outcomes. Padded lower bytes for each successful pack equal `4096 × {1,2,4}` and overhead is that padded size minus its summed synthetic stored lengths; GC relocation adds its own copied extent bytes. These are deterministic instruction/counter accounting rules, not measured time, CPU cycles, energy, actual kernel throughput, or durable physical I/O.
+
+The FIFO processing is deterministic and serial (not a concurrent kernel race proof), while arrival timing is **externally supplied**. A separate future-eligibility predicate can be true only under manually constructed hypothetical booleans; the current path unconditionally stays 4096 RAW despite that predicate. Immutable physical first 4096-byte SWAPSPACE2 header and partition table are represented solely by synthetic RAM sentinels. The fixture models only storage bytes; it does not construct or format a real SWAPSPACE2 device.
+
+**Gate:** `SOURCE_MAPPED_AUTHENTICATED=0`, `PHASE_A=BLOCKED`, `DIRECT_COMPRESSED_HANDOFF=DISABLED`, `FORCED_RAW_BYPASS=DISABLED`. Prior exact 16/16 terminal-success Actions results qualify their earlier SHA only; this fixture does not inherit that status. New workflows must be examined separately at the new exact source commit.

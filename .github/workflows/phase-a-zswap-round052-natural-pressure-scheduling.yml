@@ -1,0 +1,31 @@
+name: Round052 synthetic natural-MM-origin swapz disk scheduling (rootless)
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'tests/tools/round052-zswap-swapz-natural-pressure-scheduling.py'
+      - 'tests/runtime/native/fixtures/round052-natural-pressure-scheduling.c'
+      - 'src/kernel/codec.h'
+      - 'docs/testing_standards.md'
+      - '.github/workflows/phase-a-zswap-round052-natural-pressure-scheduling.yml'
+  workflow_dispatch:
+jobs:
+  synthetic-rootless-only:
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+    timeout-minutes: 12
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Assert exact event source commit
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
+          test "$(git branch --show-current)" = main
+      - name: Compile and execute bounded real C model under both sanitizers
+        run: python3 -B tests/tools/round052-zswap-swapz-natural-pressure-scheduling.py --self-test
+      - name: Enforce same-commit canonical standards
+        run: python3 -B tests/runtime/native/repository-policy-test.py --enforce
