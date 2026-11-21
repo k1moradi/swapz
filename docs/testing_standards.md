@@ -16675,3 +16675,18 @@ full-page verified readback all exist. The entire FIRST PHYSICAL 4096
 SWAPSPACE2 header/UUID/signature and partition table stay immutable.
 `SOURCE_MAPPED_AUTHENTICATED=0 PHASE_A=BLOCKED
 DIRECT_COMPRESSED_HANDOFF=DISABLED FORCED_RAW_BYPASS=DISABLED`.
+
+
+### Round053 Agent4 hostile descriptor-capacity mutation must be a C oracle, not an ASan accident
+
+In the `append-over-capacity` negative mutant, the fixture deliberately
+declares only one authoritative record slot to the codec, but MUST allocate
+at least two **test-only** backing descriptors. When the real product guard
+`builder->count >= builder->record_capacity` is mutated away, a second
+append must fail the fixture's exact `-ENOSPC` expectation as a checked
+C assertion with exit 1, not write past the stack array and fail via
+AddressSanitizer. Keep actual product record capacity exactly one and leave
+production allocation, map publication, lower I/O, first SWAPSPACE2 header,
+and normal original full 4096 `RAW_4096` untouched. Mutant killers must
+enforce compiler-success then deterministic assertion-exit semantics; an
+ASan/UBSan process failure is a harness defect until diagnosed, not PASS.

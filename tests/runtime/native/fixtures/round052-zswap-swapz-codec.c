@@ -220,7 +220,9 @@ static int test_product_ram_extent(void)
     u8 protected_header[SWAPZ_BLOCK_BYTES];
     u8 original_header[SWAPZ_BLOCK_BYTES];
     struct swapz_ram_extent extent;
-    struct swapz_decoded records[1];
+    /* The declared codec capacity stays one; a second backing element lets
+     * the capacity-guard mutant fail the C assertion rather than ASan. */
+    struct swapz_decoded records[2];
     const u8 *payload = NULL;
     unsigned int size_index;
     unsigned int extent_index;
