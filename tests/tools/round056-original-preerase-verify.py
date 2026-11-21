@@ -116,6 +116,16 @@ def verify(mm: str, bio: str, *, staged: bool) -> None:
                 MOVE_SIGNATURE, "xa_erase(tree, offset)",
                 "zswap_entry_free(entry)", "__swap_writeout(&ctx, folio)",
                 "swap_write_submit(&ctx)")
+        # The older Round030 probe consumes the STORE-bound bit BEFORE
+        # native decompression. It must not run in the new source producer
+        # mode or the post-decode snapshot can never pass validation.
+        protected_probe = (
+            "#if !defined(SWAPZ_ROUND056_PREERASE_SINGLE_OWNER_TEST)\n"
+            "\t(void)swapz_round030_snapshot_stored_lz4("
+            "entry, swpentry, tree, offset);\n"
+            "#endif\n")
+        if protected_probe not in original_writeback:
+            raise SourceAuditError("predecode_diagnostic_consumes_new_snapshot")
         if "swapz_round031_mm_bio_create(entry, swpentry, tree, offset)" not in original_writeback:
             raise SourceAuditError("inherited_snapshot_fallback_removed")
         if "ROUND056_ORIGINAL_MM_PREERASE_BEGIN" not in mm or \

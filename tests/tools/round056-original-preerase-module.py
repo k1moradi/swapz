@@ -365,6 +365,19 @@ static atomic_t swapz_round056_held_owners = ATOMIC_INIT(0);
             composed, "static int zswap_writeback_entry(struct zswap_entry *entry,\n",
             MM_C + "\nstatic int zswap_writeback_entry(struct zswap_entry *entry,\n",
             path, "round056-original-preerase-SG-ownership")
+        # Round030's older pre-decode diagnostic consumes
+        # entry->swapz_round028_store_bound=true on success. With the
+        # Round056 producer moved AFTER native decompression, that
+        # diagnostic must not retire the same proof before capture.
+        # Keep it byte-for-byte active for every older/default guard.
+        old_diagnostic = (
+            "\t(void)swapz_round030_snapshot_stored_lz4("
+            "entry, swpentry, tree, offset);\n")
+        composed = replace_once(
+            composed, old_diagnostic,
+            "#if !defined(SWAPZ_ROUND056_PREERASE_SINGLE_OWNER_TEST)\n" +
+            old_diagnostic + "#endif\n",
+            path, "round056-disable-predecode-consuming-diagnostic")
         return replace_once(
             composed, "\tctx.swapz_round031_owned =\n"
                       "\t\tswapz_round031_mm_bio_create(entry, swpentry, tree, offset);\n",
