@@ -24,6 +24,13 @@ static void swapz_round058_original_stored_bio_chain_kunit(struct kunit *test)
 	source_folio->swap.val = 13U;
 	folio_set_swapbacked(source_folio);
 	folio_set_swapcache(source_folio);
+	/* Original zswap marks the decoded folio uptodate; __swap_writeout
+	 * starts accounted writeback while locked and unlocks before submit.
+	 */
+	folio_mark_uptodate(source_folio);
+	folio_lock(source_folio);
+	folio_start_writeback(source_folio);
+	folio_unlock(source_folio);
 	bytes = kmap_local_page(page);
 	memset(bytes, 0x37, 4096U);
 	sha256(bytes, 4096U, original_sha);
@@ -54,6 +61,18 @@ static void swapz_round058_original_stored_bio_chain_kunit(struct kunit *test)
 	original_bio.bi_swap_origin = SWAP_BIO_ORIGIN_ZSWAP_STORED_WRITEBACK;
 	original_bio.bi_swapz_ci_sideband = owner;
 	owner = NULL; /* Original bio_uninit now owns the sole owner ref. */
+	KUNIT_EXPECT_EQ(test, swapz_round058_source_bio_observe(&original_bio), 0);
+	/* A same-slot, same-byte folio outside the actual native writeback
+	 * interval is NOT an original STORED-to-BIO lifetime witness.
+	 */
+	folio_end_writeback_no_dropbehind(source_folio);
+	KUNIT_EXPECT_NE(test, swapz_round058_source_bio_observe(&original_bio), 0);
+	folio_lock(source_folio);
+	folio_start_writeback(source_folio);
+	folio_unlock(source_folio);
+	folio_clear_uptodate(source_folio);
+	KUNIT_EXPECT_NE(test, swapz_round058_source_bio_observe(&original_bio), 0);
+	folio_mark_uptodate(source_folio);
 	KUNIT_EXPECT_EQ(test, swapz_round058_source_bio_observe(&original_bio), 0);
 	source_folio->swap.val = 14U;
 	KUNIT_EXPECT_NE(test, swapz_round058_source_bio_observe(&original_bio), 0);
@@ -86,6 +105,12 @@ uninit_original:
 put_owner:
 	swapz_ci_owned_put(owner);
 free_page:
+	/* Balance the actual folio writeback accounting even on test failure.
+	 * Never return a writeback or uptodate test page to the allocator.
+	 */
+	if (folio_test_writeback(source_folio))
+		folio_end_writeback_no_dropbehind(source_folio);
+	folio_clear_uptodate(source_folio);
 	/* Synthetic swapcache flags must not escape into the page allocator. */
 	folio_clear_swapcache(source_folio);
 	folio_clear_swapbacked(source_folio);

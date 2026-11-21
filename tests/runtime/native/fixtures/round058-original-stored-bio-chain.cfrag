@@ -18,6 +18,8 @@
  * Native bio_init() has bi_vcnt == 0 despite one full pre-populated bvec.
  * Identical page bytes in different swap slots are NOT the same source.
  * The original swapcache folio must still match its sealed owner's slot.
+ * Even that is insufficient before decompression or after native writeback:
+ * require the original folio's uptodate/writeback phase at observation time.
  */
 int swapz_round058_source_bio_observe(const struct bio *bio)
 {
@@ -47,6 +49,8 @@ int swapz_round058_source_bio_observe(const struct bio *bio)
 	 */
 	source_folio = page_folio(bio->bi_io_vec[0].bv_page);
 	if (!folio_test_swapcache(source_folio) ||
+	    !folio_test_uptodate(source_folio) ||
+	    !folio_test_writeback(source_folio) ||
 	    folio_nr_pages(source_folio) != 1U)
 		return -ESTALE;
 

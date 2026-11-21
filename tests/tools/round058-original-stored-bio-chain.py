@@ -28,7 +28,7 @@ PINNED = "c339f4010dea8b0d754f84ace70cd1b089878ef8"
 GUARD = "#if defined(SWAPZ_ROUND058_ORIGINAL_STORED_BIO_CHAIN_TEST) && \\\n    defined(SWAPZ_ROUND056_PREERASE_SINGLE_OWNER_TEST) && \\\n    defined(SWAPZ_ROUND056_ORIGINAL_CLONE_PROVENANCE_TEST) && \\\n    defined(SWAPZ_ROUND032_BIO_COPY_VIEW_CI_ONLY) && \\\n    defined(SWAPZ_ROUND031_MM_BIO_SOURCE) && \\\n    defined(SWAPZ_ROUND028_SLOT_EPOCH_SOURCE) && \\\n    defined(SWAPZ_ROUND025_SIDEBAND_CI_ONLY)"
 SUITE = "swapz_round058_original_stored_bio_no_authority"
 CASE = "swapz_round058_original_stored_bio_chain_kunit"
-PASS = "ROUND058_CHAIN_HOST_ORIGINAL_SOURCE_C_PASS scenarios=21"
+PASS = "ROUND058_CHAIN_HOST_ORIGINAL_SOURCE_C_PASS scenarios=23"
 MUTANTS = (
     ("bio->bi_vcnt || !bio->bi_io_vec", "false || !bio->bi_io_vec"),
     ("bio->bi_iter.bi_size != 4096U", "false"),
@@ -38,6 +38,8 @@ MUTANTS = (
     ("!memcmp(digest, owner->original_sha256, sizeof(digest))", "true"),
     ("!folio_test_swapcache(source_folio)", "(folio_test_swapcache(source_folio) && false)"),
     ("owner->source_swap_entry != source_folio->swap.val", "false"),
+    ("!folio_test_uptodate(source_folio)", "(folio_test_uptodate(source_folio) && false)"),
+    ("!folio_test_writeback(source_folio)", "(folio_test_writeback(source_folio) && false)"),
 )
 
 
@@ -61,6 +63,8 @@ def verify_fixture(source: str, kunit: str) -> None:
     for required in ("bio->bi_vcnt ||", "sha256(original, 4096U, digest)",
                      "owner->original_sha256", "swapz_ci_owned_put(owner)",
                      "folio_test_swapcache(source_folio)",
+                     "!folio_test_uptodate(source_folio)",
+                     "!folio_test_writeback(source_folio)",
                      "owner->source_swap_entry != source_folio->swap.val",
                      "return -EOPNOTSUPP;", "bio->bi_iter.bi_sector % 8U"):
         if required not in (source + kunit):

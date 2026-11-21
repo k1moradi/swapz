@@ -32,6 +32,8 @@ struct folio {
 	struct page page;
 	struct { uint64_t val; } swap;
 	bool swapcache;
+	bool uptodate;
+	bool writeback;
 };
 struct bio_vec {
 	struct page *bv_page;
@@ -90,6 +92,14 @@ static bool folio_test_swapcache(const struct folio *folio)
 {
 	return folio->swapcache;
 }
+static bool folio_test_uptodate(const struct folio *folio)
+{
+	return folio->uptodate;
+}
+static bool folio_test_writeback(const struct folio *folio)
+{
+	return folio->writeback;
+}
 static unsigned int folio_nr_pages(const struct folio *folio)
 {
 	(void)folio;
@@ -123,7 +133,10 @@ static int fail(unsigned int scenario, const char *reason)
 
 static int run_scenario(unsigned int scenario)
 {
-	struct folio source_folio = {.swap = {.val = 13U}, .swapcache = true};
+	struct folio source_folio = {
+	.swap = {.val = 13U}, .swapcache = true,
+	.uptodate = true, .writeback = true,
+};
 	struct bio_vec vector = { .bv_page = &source_folio.page, .bv_len = 4096U };
 	struct block_device device = {};
 	struct swapz_ci_owned_payload owned = {
@@ -164,6 +177,8 @@ static int run_scenario(unsigned int scenario)
 	case 18U: source.bi_io_vec[0].bv_page = NULL; break;
 	case 19U: source_folio.swap.val = 14U; break;
 	case 20U: source_folio.swapcache = false; break;
+	case 21U: source_folio.uptodate = false; break;
+	case 22U: source_folio.writeback = false; break;
 	default: break;
 	}
 	const int actual = swapz_round058_source_bio_observe(&source);
@@ -176,9 +191,9 @@ static int run_scenario(unsigned int scenario)
 
 int main(void)
 {
-	for (unsigned int scenario = 0U; scenario <= 20U; ++scenario)
+	for (unsigned int scenario = 0U; scenario <= 22U; ++scenario)
 		if (run_scenario(scenario))
 			return 1;
-	puts("ROUND058_CHAIN_HOST_ORIGINAL_SOURCE_C_PASS scenarios=21 AUTH0 PHASE_A=BLOCKED");
+	puts("ROUND058_CHAIN_HOST_ORIGINAL_SOURCE_C_PASS scenarios=23 AUTH0 PHASE_A=BLOCKED");
 	return 0;
 }
