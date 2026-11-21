@@ -15,9 +15,12 @@ jobs:
     permissions:
       contents: read
     timeout-minutes: 12
+    env:
+      SWAPZ_PUSH_BEFORE_SHA: ${{ github.event.before }}
     steps:
       - uses: actions/checkout@v4
         with:
+          fetch-depth: 0
           persist-credentials: false
       - name: Assert exact event source commit
         shell: bash

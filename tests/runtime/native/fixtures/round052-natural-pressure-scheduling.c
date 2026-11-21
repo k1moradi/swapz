@@ -269,6 +269,28 @@ static bool mapping_payload_matches(uint32_t logical, const struct event *event)
     return memcmp(payload, event->original, record->length) == 0;
 }
 
+/*
+ * RAW_4096 model readback requires every ORIGINAL uncompressed byte, not
+ * just a matching identity hash or a compressed payload prefix.
+ */
+static bool mapping_full_raw_matches(uint32_t logical, const struct event *event)
+{
+    const struct mapping *record = &state.mappings[logical];
+    if (!record->live || !record->raw || record->length != SWAPZ_BLOCK_BYTES ||
+        record->original_hash != page_identity(event->original) ||
+        record->extent_index >= MAX_EXTENTS)
+        return false;
+    const struct extent *extent = &state.extents[record->extent_index];
+    if (!extent->occupied ||
+        (uint32_t)record->offset + SWAPZ_BLOCK_BYTES >
+            (uint32_t)extent->blocks * SWAPZ_BLOCK_BYTES)
+        return false;
+    const uint8_t *payload =
+        &state.disk[(size_t)extent->start_block * SWAPZ_BLOCK_BYTES +
+                    record->offset];
+    return memcmp(payload, event->original, SWAPZ_BLOCK_BYTES) == 0;
+}
+
 static int service_one_pack(bool inject_lower_eio)
 {
     if (!state.queue_count)
@@ -531,11 +553,90 @@ static int test_lifecycle_and_gc(void)
     return 0;
 }
 
+/*
+ * A rejected admission owns no upper ACK; a failed accepted rewrite does
+ * receive one error ACK but must not supersede the last durable map. Later
+ * GC movement, stale slot mutation and a full-byte RAW retry retain that
+ * ordering without ever initiating native Linux MM reclaim.
+ */
+static int test_full_raw_retry_after_backpressure_and_rollback(void)
+{
+    reset_model(32);
+    struct event committed = make_event(1000, 5, SWAPZ_BLOCK_BYTES);
+    REQUIRE(!submit_native_event(&committed));
+    REQUIRE(!service_one_pack(false));
+    REQUIRE(mapping_full_raw_matches(5, &committed));
+    const uint32_t committed_generation = state.mappings[5].generation;
+
+    struct event rejected = make_event(1050, 5, SWAPZ_BLOCK_BYTES);
+    rejected.original[0] ^= 0xa5U;
+    rejected.original[SWAPZ_BLOCK_BYTES - 1U] ^= 0x5aU;
+    for (uint64_t index = 0; index < MAX_QUEUE; ++index) {
+        struct event neighbor = make_event(1010 + index,
+                                           (uint32_t)index + 8U,
+                                           SWAPZ_BLOCK_BYTES);
+        REQUIRE(!submit_native_event(&neighbor));
+    }
+    REQUIRE(state.queue_count == MAX_QUEUE);
+    REQUIRE(submit_native_event(&rejected) == -EAGAIN);
+    REQUIRE(!state.acknowledged[rejected.event_id]);
+    REQUIRE(state.mappings[5].generation == committed_generation);
+    REQUIRE(mapping_full_raw_matches(5, &committed));
+    while (state.queue_count)
+        REQUIRE(!service_one_pack(false));
+
+    struct event failed_rewrite = make_event(1051, 5, SWAPZ_BLOCK_BYTES);
+    memcpy(failed_rewrite.original, rejected.original, SWAPZ_BLOCK_BYTES);
+    const uint64_t durable_bytes = state.lower_bytes;
+    const uint64_t upper_bytes = state.upper_bytes;
+    REQUIRE(!submit_native_event(&failed_rewrite));
+    REQUIRE(service_one_pack(true) == -EIO);
+    REQUIRE(state.acknowledged[failed_rewrite.event_id]);
+    REQUIRE(state.lower_bytes == durable_bytes);
+    REQUIRE(state.upper_bytes == upper_bytes + SWAPZ_BLOCK_BYTES);
+    REQUIRE(state.mappings[5].generation == committed_generation);
+    REQUIRE(mapping_full_raw_matches(5, &committed));
+
+    const uint32_t previous_extent = state.mappings[5].extent_index;
+    REQUIRE(!move_live_extent(previous_extent));
+    REQUIRE(mapping_full_raw_matches(5, &committed));
+    struct event stale_gc = failed_rewrite;
+    stale_gc.event_id = 1052;
+    REQUIRE(!submit_native_event(&stale_gc));
+    REQUIRE(service_one_pack(false) == -ECANCELED);
+    REQUIRE(mapping_full_raw_matches(5, &committed));
+    ++hostile_cases; /* Changed GC generation cannot publish an old rewrite. */
+
+    struct event recycled_slot = make_event(1053, 5, SWAPZ_BLOCK_BYTES);
+    recycled_slot.observed_incarnation++;
+    REQUIRE(!submit_native_event(&recycled_slot));
+    REQUIRE(service_one_pack(false) == -ECANCELED);
+    REQUIRE(mapping_full_raw_matches(5, &committed));
+    ++hostile_cases; /* Recycled slot ABA cannot publish stale upper bytes. */
+
+    struct event valid_retry = make_event(1054, 5, SWAPZ_BLOCK_BYTES);
+    memcpy(valid_retry.original, failed_rewrite.original, SWAPZ_BLOCK_BYTES);
+    REQUIRE(memcmp(valid_retry.original, committed.original,
+                   SWAPZ_BLOCK_BYTES) != 0);
+    REQUIRE(current_upper_raw_bytes(&valid_retry) == SWAPZ_BLOCK_BYTES);
+    REQUIRE(!submit_native_event(&valid_retry));
+    REQUIRE(!service_one_pack(false));
+    REQUIRE(mapping_full_raw_matches(5, &valid_retry));
+    REQUIRE(!mapping_full_raw_matches(5, &committed));
+    REQUIRE(state.mappings[5].generation == valid_retry.slot_incarnation);
+    const uint64_t unique_ack_count = state.acknowledged_count;
+    acknowledge_one(&valid_retry); /* Late duplicate completion is inert. */
+    REQUIRE(state.acknowledged_count == unique_ack_count);
+    REQUIRE(state.queue_count == 0U && header_untouched());
+    return 0;
+}
+
 int main(void)
 {
     if (test_hostile_future_gates() ||
         test_stream(16, 0) || test_stream(32, 64) ||
-        test_stream(64, 128) || test_lifecycle_and_gc())
+        test_stream(64, 128) || test_lifecycle_and_gc() ||
+        test_full_raw_retry_after_backpressure_and_rollback())
         return 1;
     if (cases < 120U || hostile_cases < 10U) {
         fprintf(stderr, "FIRST_ERROR insufficient deterministic cases\n");
