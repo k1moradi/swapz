@@ -37,9 +37,25 @@ static int kernel_lz4_compress_default(const u8 *source, u8 *destination,
     return LZ4_compress_default((const char *)source, (char *)destination,
                                 (int)source_length, (int)destination_capacity);
 }
+/* The pinned original crypto/lz4.c assigns its positive signed LZ4 result
+ * to an unsigned length without a cast. Keep its extracted bytes unchanged;
+ * isolate only this genuine upstream signedness diagnostic from the host
+ * build. Our product/fixture remains -Wconversion -Werror throughout. */
+#if defined(__clang__)
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Wsign-conversion"
+#elif defined(__GNUC__)
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wsign-conversion"
+#endif
 #define LZ4_compress_default kernel_lz4_compress_default
 #include "round052-original-crypto-lz4-extracted.inc"
 #undef LZ4_compress_default
+#if defined(__clang__)
+#pragma clang diagnostic pop
+#elif defined(__GNUC__)
+#pragma GCC diagnostic pop
+#endif
 
 /* Hypothetical separately tagged lower-stage admission, NEVER normal RAW.
  * A source-supplied full original page is mandatory for the rejection path.
