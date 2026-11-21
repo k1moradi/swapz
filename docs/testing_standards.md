@@ -16559,3 +16559,7 @@ remain immutable. No owner `make test`/`make fast_test`, root,
 loaded mapper, physical swap, real memory pressure or reboot was run.
 `SOURCE_MAPPED_AUTHENTICATED=0`, `PHASE_A=BLOCKED`,
 `DIRECT_COMPRESSED_HANDOFF=DISABLED`, `FORCED_RAW_BYPASS=DISABLED`.
+
+### Round052 original compression output-capacity and non-vacuous mutation clarifications
+
+The pinned genuine `mm/zswap.c::zswap_compress` passes **exactly `PAGE_SIZE` destination capacity** into original `crypto_acomp`, rather than the host `LZ4_COMPRESSBOUND(PAGE_SIZE)` worst-case allocation. The Round052 fixture MUST likewise call the real original `crypto/lz4.c::__lz4_compress_crypto` wrapper with `dlen=4096` and explicitly treat compressed output capacity failure as full original 4096-byte ordinary RAW fallback, never a 4096+ compressed STORED entry. Real source-mutant tests MUST isolate a check under mutation: for the empty extent count guard, arrange otherwise-valid scratch cursor/last record bounds; for a rejected 3569-byte read record, arrange otherwise-valid offset, CRC and 4/8/16KiB bounds; for zero generation, match the presented zero generation so only the zero-generation guard refuses. Such hostile scratch mutations are synthetic RAM-only C tests and do not constitute original source MM authority, live map, actual media writes, or authentication.
