@@ -42,7 +42,7 @@ struct model {
     struct map maps[SLOTS];
     struct ticket active;
     struct costs cost;
-    unsigned int capacity, reserve, count, tick, epoch, next_token, last_ack;
+    unsigned int capacity, reserve, reserve_blocks, count, tick, epoch, next_token, last_ack;
     bool coalesce, closed;
 };
 static struct model disk;
@@ -73,7 +73,8 @@ static void reset(unsigned int capacity, bool coalesce)
 {
     memset(&disk, 0, sizeof(disk));
     disk.capacity = capacity;
-    disk.reserve = capacity - RESERVE;
+    disk.reserve_blocks = RESERVE;
+    disk.reserve = capacity - disk.reserve_blocks;
     disk.coalesce = coalesce;
     disk.epoch = 1U;
     disk.used[0] = true;
@@ -84,7 +85,7 @@ static void reset(unsigned int capacity, bool coalesce)
 }
 static bool reserved(unsigned int block)
 {
-    return block >= disk.reserve && block < disk.reserve + RESERVE;
+    return block >= disk.reserve && block < disk.reserve + disk.reserve_blocks;
 }
 static bool intact(void)
 {
@@ -93,7 +94,7 @@ static bool intact(void)
     for (unsigned int i = 0; i < sizeof(disk.partition); ++i)
         if (disk.partition[i] != 0xa5U)
             return false;
-    for (unsigned int i = disk.reserve; i < disk.reserve + RESERVE; ++i)
+    for (unsigned int i = disk.reserve; i < disk.reserve + disk.reserve_blocks; ++i)
         if (disk.used[i])
             return false;
     for (unsigned int i = 0; i < SLOTS; ++i) {
@@ -304,26 +305,27 @@ static bool map_matches(unsigned int slot, unsigned int id, unsigned int length)
             return false;
     return true;
 }
-/* One explicit GC COW move of a four-block extent rotates the reserve. */
+/* One explicit GC COW move of a four-block extent rotates the reserve.
+ * The comparative frontier may select a smaller equal-class reserve. */
 static int relocate(unsigned int slot, bool durable)
 {
     struct map old = disk.maps[slot];
-    if (!old.live || old.blocks != RESERVE || disk.active.active)
+    if (!old.live || old.blocks != disk.reserve_blocks || disk.active.active)
         return -EINVAL;
     unsigned int destination = disk.reserve;
     memcpy(disk.disk + destination * SWAPZ_BLOCK_BYTES,
-           disk.disk + old.start * SWAPZ_BLOCK_BYTES, RESERVE * SWAPZ_BLOCK_BYTES);
+           disk.disk + old.start * SWAPZ_BLOCK_BYTES, disk.reserve_blocks * SWAPZ_BLOCK_BYTES);
     ++disk.cost.gc_requests;
     if (!durable)
         return -EIO;
-    mark(destination, RESERVE, true);
+    mark(destination, disk.reserve_blocks, true);
     for (unsigned int i = 0; i < SLOTS; ++i)
         if (disk.maps[i].live && disk.maps[i].start == old.start)
             disk.maps[i].start = destination;
-    mark(old.start, RESERVE, false);
+    mark(old.start, disk.reserve_blocks, false);
     disk.reserve = old.start;
     ++disk.epoch;
-    disk.cost.gc_bytes += RESERVE * SWAPZ_BLOCK_BYTES;
+    disk.cost.gc_bytes += disk.reserve_blocks * SWAPZ_BLOCK_BYTES;
     return 0;
 }
 static bool ready(void)

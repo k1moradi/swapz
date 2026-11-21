@@ -7,6 +7,8 @@ on:
       - 'tests/runtime/native/fixtures/round052-natural-pressure-scheduling.c'
       - 'tests/tools/round054-natural-mm-coalescing.py'
       - 'tests/runtime/native/fixtures/round054-natural-mm-coalescing.c'
+      - 'tests/tools/round055-natural-mm-frontier.py'
+      - 'tests/runtime/native/fixtures/round055-natural-mm-frontier.c'
       - 'src/kernel/codec.h'
       - 'docs/testing_standards.md'
       - '.github/workflows/phase-a-zswap-round052-natural-pressure-scheduling.yml'
@@ -36,5 +38,7 @@ jobs:
         run: python3 -B tests/tools/round052-zswap-swapz-natural-pressure-scheduling.py --self-test
       - name: Compare bounded coalescing and execute changed C semantic mutants
         run: python3 -B tests/tools/round054-natural-mm-coalescing.py
+      - name: Compare finite-service ready-only and adaptive frontier
+        run: python3 -B tests/tools/round055-natural-mm-frontier.py
       - name: Enforce same-commit canonical standards
         run: python3 -B tests/runtime/native/repository-policy-test.py --enforce
