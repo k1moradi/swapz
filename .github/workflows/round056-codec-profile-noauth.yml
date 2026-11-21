@@ -1,0 +1,58 @@
+name: "Round056 pristine original LZO1X stable codec profiles NO_AUTH"
+on:
+  push:
+    branches: [main]
+    paths:
+      - "tests/tools/round056-codec-profile-verify.py"
+      - "tests/runtime/native/fixtures/round056-codec-profile.c"
+      - ".github/workflows/round056-codec-profile-noauth.yml"
+      - "src/kernel/codec.c"
+      - "src/kernel/codec.h"
+      - "docs/testing_standards.md"
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  pristine-original-lzo1x-stable-read-noauth:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          path: swapz
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/checkout@v4
+        with:
+          repository: torvalds/linux
+          ref: c339f4010dea8b0d754f84ace70cd1b089878ef8
+          fetch-depth: 1
+          sparse-checkout: |
+            crypto/lzo.c
+            include/linux/lzo.h
+            lib/lzo
+          path: linux
+          persist-credentials: false
+      - name: Install bounded host-only compilers and crypto libraries
+        run: |
+          set -euo pipefail
+          sudo apt-get update -qq
+          sudo DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
+            gcc clang liblz4-dev libssl-dev python3
+      - name: Verify exact immutable source and genuinely run both compilers and semantic C mutants
+        run: |
+          set -Eeuo pipefail
+          test "$(git -C swapz rev-parse HEAD)" = "$GITHUB_SHA"
+          test -z "$(git -C swapz status --porcelain --untracked-files=all)"
+          test "$(git -C linux rev-parse HEAD)" = c339f4010dea8b0d754f84ace70cd1b089878ef8
+          if python3 -B swapz/tests/tools/round056-codec-profile-verify.py \
+               --linux-root linux > "$RUNNER_TEMP/round056-codec-first-error.log" 2>&1; then
+            tail -n 35 "$RUNNER_TEMP/round056-codec-first-error.log"
+          else
+            result=$?
+            echo "::error::ROUND056_CODEC_FIRST_ERROR rootless source/host codec C exit=$result" >&2
+            tail -n 95 "$RUNNER_TEMP/round056-codec-first-error.log" >&2
+            exit "$result"
+          fi
+          test -z "$(git -C swapz status --porcelain --untracked-files=all)"
+          git -C swapz diff --check HEAD^ HEAD
