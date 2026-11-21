@@ -17159,3 +17159,16 @@ one actual upper ACK or verified imported read. Phase A remains BLOCKED.
 - The cloned BIO may borrow the parent's bvec only while the original source is alive. Original `bio_uninit` and `swap_write_end` own the embedded original buffer lifetime; no `bio_get` on `swap_iocb`, no protected DM live target, no private/endio hijack. A native `bio_init_clone` with this embedded source must NOT transfer synthetic Round056 `bi_vcnt==1` ticket authorization, and requeue, split, trim, advance, reset and parent teardown cannot resurrect that missing lease.
 - Original-source integration verification reuses the existing 66+4 genuine registered KUnit and adds **one substantive C source-owned BIO lifetime integration case**, independently checked via exact JSON+KTAP. Retain strict actual GCC/Clang GNU11 -Werror ASan+UBSan baseline plus six executed changed-source semantic mutants each, and full original x86 CONFIG_ZSWAP=y/n current GPL provider with exact matching original-KDIR `dm-swapz.ko`. Original upstream pristine blobs and postimage SHA256 must match, all guards default undefined, no redundant case-count padding, no owner device/pressure/loaded/privileged/make tests. CI pending is PROGRESS, never REPORT_READY.
 - The entire first physical SWAPSPACE2 4096-byte header and parent partition table remain immutable; normal `RAW_4096` remains the full ORIGINAL uncompressed page. `SOURCE_MAPPED_AUTHENTICATED=0`, `PHASE_A=BLOCKED`, `DIRECT_COMPRESSED_HANDOFF=DISABLED`, `FORCED_RAW_BYPASS=DISABLED`. Independent original codec decoder, actual current accepted DM target clone lease, durable ordered lower write, atomic map/GC and genuine single upper ACK/full 4096 imported read are still unproven end-to-end.
+
+### Round058 original-source imported fixture include-order verification
+
+The hostile imported decoder C fixture includes an actual variant header
+from a bounded temporary compiler include directory, before the real
+`src/kernel` include path. A Python launch driver must pass its compiler
+argument tail with native list slicing `common[1:]`, not nonexistent
+`common.slice(1)`, or the original-source test cannot compile any
+baseline and must remain RED. Preserve the ordering:
+`compiler, -I mutant_header_directory, *common[1:]`, so each changed
+source C header actually compiles into the executed mutant binary.
+An unexecuted mutation, a Python TypeError, a compiler failure,
+or a sanitizer crash never qualifies a semantic mutation kill.

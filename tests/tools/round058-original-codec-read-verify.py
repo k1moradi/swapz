@@ -162,7 +162,7 @@ def test_compiler(compiler: str, scratch: Path, linux: Path,
         object_path = variant_root / "import-read-test.o"
         binary_path = variant_root / "source-read"
         run_checked(
-            [common[0], "-I", str(variant_root), *common.slice(1),
+            [common[0], "-I", str(variant_root), *common[1:],
              "-Wconversion", "-Wshadow", "-c", str(FIXTURE),
              "-o", str(object_path)],
             f"{compiler}/{variant_name}/compile/imported-source-read")

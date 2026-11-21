@@ -64,3 +64,17 @@ the entire ORIGINAL UNCOMPRESSED 4096 bytes. No physical first
 changes. No owner make/fast tests, actual pressure, loaded kernel,
 DM activation, physical swap, privileged operations or
 independently authenticated production transfer.
+
+## Round058 source-only verifier preflight correction
+
+Following `ac80341b7c63d29133e95e19371ecac55225db70` publication,
+static review found that its new Python test driver invoked
+`common.slice(1)`, which is not a Python list method. This would raise
+`AttributeError` before the first imported-source test compile.
+Correct the command to `[common[0], "-I", variant_root, *common[1:], ...]`.
+This also enforces mutated-header include precedence over the existing
+product include directory. This was proactively found in static
+inspection, **not** an observed CI first error. The actual dedicated
+run at `ac80341` remained in pinned original checkout when found.
+The next commit's complete GCC/Clang sanitizer/semantic source C CI
+must finish terminal before any result is claimed.
