@@ -4253,6 +4253,136 @@ def apply_round049_original_counted_pair(path: str, composed: str) -> str:
                         path, "round049-after-original-store-verification")
 
 
+# Round052 genuine original Linux kernel C NEGATIVE ONLY pre-unuse probe.
+# DEFAULT UNDEFINED. No swapoff hook, no registered count, no external owner.
+ROUND052_PREUNUSE_GUARD = "SWAPZ_ROUND052_ORIGINAL_PRE_UNUSE_CANCEL_TEST"
+ROUND052_PREUNUSE_NEGATIVE_C = r"""#if defined(SWAPZ_ROUND052_ORIGINAL_PRE_UNUSE_CANCEL_TEST) && IS_ENABLED(CONFIG_KUNIT)
+/* ROUND052_ORIGINAL_PRE_UNUSE_NEGATIVE_BEGIN */
+/*
+ * KUnit-local single caller, stack-only refusal. No runtime path calls it,
+ * no counted ref is acquired or released, no swapoff hook is installed.
+ * A genuine future source owner would need a NEW pre-try_to_unuse closed
+ * admission/cancel/drain and independent real counted-slot put guarantee.
+ */
+struct swapz_round052_unowned_source_candidate {
+	struct folio *folio;
+	const struct zswap_entry *stored;
+	struct xarray *tree;
+	swp_entry_t original_slot;
+	bool terminal;
+};
+
+static noinline int swapz_round052_original_preunuse_cancel_refusal(
+		struct swapz_round052_unowned_source_candidate *candidate)
+{
+	if (!candidate)
+		return -EINVAL;
+	/* Terminal is checked BEFORE any old folio/store pointer dereference. */
+	if (candidate->terminal)
+		return -EALREADY;
+	candidate->terminal = true;
+	if (!candidate->folio || !candidate->stored || !candidate->tree ||
+	    !candidate->original_slot.val)
+		return -EINVAL;
+	if (!folio_test_locked(candidate->folio) ||
+	    !folio_test_swapcache(candidate->folio))
+		return -ESTALE;
+	if (candidate->folio->swap.val != candidate->original_slot.val ||
+	    xa_load(candidate->tree, swp_offset(candidate->original_slot)) !=
+	    candidate->stored)
+		return -ESTALE;
+	/*
+	 * Even a genuine current matching source cannot be registered,
+	 * safely cancelled or drained before original try_to_unuse().
+	 * NEVER invoke folio_dup_swap, swap_put_entries_direct or submit_bio.
+	 */
+	return -EOPNOTSUPP;
+}
+
+static void swapz_round052_no_registered_source_owner_kunit(struct kunit *test)
+{
+	struct swapz_round052_unowned_source_candidate candidate = {};
+
+	KUNIT_EXPECT_EQ(test, swapz_round052_original_preunuse_cancel_refusal(
+			NULL), -EINVAL);
+	KUNIT_EXPECT_EQ(test, swapz_round052_original_preunuse_cancel_refusal(
+			&candidate), -EINVAL);
+	KUNIT_EXPECT_TRUE(test, candidate.terminal);
+}
+
+static void swapz_round052_actual_uncached_folio_refused_kunit(struct kunit *test)
+{
+	struct swapz_round052_unowned_source_candidate candidate = {};
+	struct zswap_entry fake_store = {};
+	struct xarray tree;
+	struct folio *folio;
+
+	folio = folio_alloc(GFP_KERNEL, 0);
+	KUNIT_ASSERT_NOT_NULL(test, folio);
+	xa_init(&tree);
+	candidate.folio = folio;
+	candidate.stored = &fake_store;
+	candidate.tree = &tree;
+	candidate.original_slot.val = 1;
+	KUNIT_EXPECT_FALSE(test, folio_test_swapcache(folio));
+	KUNIT_EXPECT_EQ(test, swapz_round052_original_preunuse_cancel_refusal(
+			&candidate), -ESTALE);
+	KUNIT_EXPECT_TRUE(test, candidate.terminal);
+
+	/* Test-only stack reset; NO real swap count/owner was ever obtained. */
+	candidate.terminal = false;
+	folio_lock(folio);
+	KUNIT_EXPECT_TRUE(test, folio_test_locked(folio));
+	KUNIT_EXPECT_FALSE(test, folio_test_swapcache(folio));
+	KUNIT_EXPECT_EQ(test, swapz_round052_original_preunuse_cancel_refusal(
+			&candidate), -ESTALE);
+	folio_unlock(folio);
+	xa_destroy(&tree);
+	folio_put(folio);
+}
+
+static void swapz_round052_duplicate_late_cancel_refused_kunit(struct kunit *test)
+{
+	struct swapz_round052_unowned_source_candidate candidate = {
+		.terminal = true,
+	};
+
+	/* A previous negative terminal cannot dereference any stale folio. */
+	KUNIT_EXPECT_EQ(test, swapz_round052_original_preunuse_cancel_refusal(
+			&candidate), -EALREADY);
+	candidate.terminal = false;
+	KUNIT_EXPECT_EQ(test, swapz_round052_original_preunuse_cancel_refusal(
+			&candidate), -EINVAL);
+	KUNIT_EXPECT_EQ(test, swapz_round052_original_preunuse_cancel_refusal(
+			&candidate), -EALREADY);
+}
+
+static struct kunit_case swapz_round052_original_preunuse_negative_cases[] = {
+	KUNIT_CASE(swapz_round052_no_registered_source_owner_kunit),
+	KUNIT_CASE(swapz_round052_actual_uncached_folio_refused_kunit),
+	KUNIT_CASE(swapz_round052_duplicate_late_cancel_refused_kunit),
+	{}
+};
+static struct kunit_suite swapz_round052_original_preunuse_negative_suite = {
+	.name = "swapz_round052_original_preunuse_cancel_negative_no_authority",
+	.test_cases = swapz_round052_original_preunuse_negative_cases,
+};
+kunit_test_suite(swapz_round052_original_preunuse_negative_suite);
+/* ROUND052_ORIGINAL_PRE_UNUSE_NEGATIVE_END */
+#endif /* CI KUnit test-only, DEFAULT UNDEFINED, no asynchronous owner */
+"""
+
+
+def apply_round052_original_preunuse_negative(path: str, composed: str) -> str:
+    """Only original mm/zswap.c, no live swapoff/writeback route changes."""
+    if path != "mm/zswap.c":
+        return composed
+    declaration = "static int zswap_writeback_entry(struct zswap_entry *entry,\n"
+    return replace_once(composed, declaration,
+                        ROUND052_PREUNUSE_NEGATIVE_C + "\n" + declaration,
+                        path, "round052-real-original-C-KUnit-source-negative")
+
+
 # Round045 observation is private original Linux C, default UNDEFINED, and
 # establishes no real current allocation or DM target/GC ownership lease.
 ROUND045_ORIGINAL_STORED_BIO_SCOPE_MACRO = "SWAPZ_ROUND045_ORIGINAL_STORED_BIO_SOURCE_SCOPE_TEST"
@@ -4620,6 +4750,8 @@ def compose_postimage(path: str, original_bytes: bytes, *,
         changed = apply_round045_original_stored_bio_scope(path, changed)
     if with_kunit:
         changed = apply_round049_original_counted_pair(path, changed)
+    if with_kunit:
+        changed = apply_round052_original_preunuse_negative(path, changed)
     if path == "mm/zswap.c":
         for required in (
             "swapz_round028_slot_epoch(swpentry)",
