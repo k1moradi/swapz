@@ -1,0 +1,62 @@
+name: "Round058 pristine original LZO1X and raw LZ4 imported 4096 read NO_AUTH"
+on:
+  push:
+    branches: [main]
+    paths:
+      - "src/kernel/zswap-import-codec.h"
+      - "tests/runtime/native/fixtures/round058-original-codec-read.c"
+      - "tests/tools/round058-original-codec-read-verify.py"
+      - "tests/tools/round056-original-lzo-decoder-verify.py"
+      - "tests/tools/round056-codec-profile-verify.py"
+      - ".github/workflows/phase-a-round058-original-codec-read-noauth.yml"
+      - "src/kernel/codec.c"
+      - "src/kernel/codec.h"
+      - "docs/testing_standards.md"
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  original-codec-read-native-source-only:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          path: swapz
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/checkout@v4
+        with:
+          repository: torvalds/linux
+          ref: c339f4010dea8b0d754f84ace70cd1b089878ef8
+          fetch-depth: 1
+          sparse-checkout: |
+            crypto/lzo.c
+            include/linux/lzo.h
+            lib/lzo
+          path: linux
+          persist-credentials: false
+      - name: Install rootless strict original C test dependencies
+        run: |
+          set -euo pipefail
+          sudo apt-get update -qq
+          sudo DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
+            gcc clang python3 liblz4-dev libssl-dev
+      - name: Exact immutable pinned source and two compiler sanitizer readback plus changed-source mutants
+        run: |
+          set -Eeuo pipefail
+          test "$GITHUB_REF" = refs/heads/main
+          test "$(git -C swapz rev-parse HEAD)" = "$GITHUB_SHA"
+          test -z "$(git -C swapz status --porcelain --untracked-files=all)"
+          test "$(git -C linux rev-parse HEAD)" = c339f4010dea8b0d754f84ace70cd1b089878ef8
+          if python3 -B swapz/tests/tools/round058-original-codec-read-verify.py \
+              --linux-root linux > "$RUNNER_TEMP/round058-import-original-codec.log" 2>&1; then
+            tail -n 35 "$RUNNER_TEMP/round058-import-original-codec.log"
+          else
+            result=$?
+            echo "::error::ROUND058_IMPORT_CODEC_FIRST_ERROR native source C exit=$result" >&2
+            tail -n 90 "$RUNNER_TEMP/round058-import-original-codec.log" >&2
+            exit "$result"
+          fi
+          git -C swapz diff --check HEAD^ HEAD
+          test -z "$(git -C swapz status --porcelain --untracked-files=all)"

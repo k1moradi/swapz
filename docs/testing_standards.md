@@ -17063,3 +17063,56 @@ inside this test-only shim to perform integer promotions and obtain
 an unqualified scalar temporary; retain explicit `const void *`
 input, `void *` output, native upstream warning policy, and full
 ASan/UBSan. This is not a source change to pristine Linux.
+
+## Round058 original selected LZO1X versus raw LZ4 imported read (Agent4, 2026-11-21)
+
+The dormant `src/kernel/zswap-import-codec.h` is a separately tagged,
+volatile imported compressed record, not the production 20-byte map and
+never normal RAW_4096; `SWAPZ_ZSWAP_IMPORT_ACTIVE` must remain 0.
+Ordinary RAW_4096 contains exactly the ORIGINAL UNCOMPRESSED 4096 bytes.
+Use distinct immutable per-record codec/version/dictionary metadata derived
+from authentic selected original source, not zswap pool name or compressed
+bytes guessed as a codec. Only original upstream dictionary-free LZO1X
+version 1 via `lzo1x_decompress_safe` and raw LZ4 block version 1 via
+`LZ4_decompress_safe` have dormant candidate dispatch. Never interpret
+either as the other or accept framed formats without an independently
+verified exact original framing contract.
+
+Before any output mutation require verified current volatile authority,
+matching logical/generation/store and GC identity, prior actual durable
+WRITE/map/one upper ACK (none proven by a host model), one exact lower-read
+length, bounded compressed length 1..3568, full decoded page 4096,
+nonoverlapping exclusive scratch/output/input, compressed CRC32C and
+full-page SHA256. Original LZO `LZO_E_INPUT_NOT_CONSUMED` or truncated/
+malformed output must return `-EBADMSG`; unknown codec/version or
+dictionary `-EOPNOTSUPP`; malformed sizes `-EMSGSIZE`; stale lease
+`-ESTALE`; lower read fault `-EIO`. Failure leaves all 4096 caller
+output bytes untouched. Postcommit corruption is an explicit failed
+read and NEVER an invented RAW fallback.
+
+Rootless admission compiles exact pristine pinned
+`torvalds/linux@c339f4010dea8b0d754f84ace70cd1b089878ef8`
+`lib/lzo/lzo1x_compress_safe.c` and
+`lib/lzo/lzo1x_decompress_safe.c` with exact original per-file
+Git blobs and `crypto/lzo.c` dispatch evidence; compiler warnings on
+these original sources are separately Linux-native `-Wall -Wextra
+-Werror`. Actual swapz product CRC code and the source-only imported-read
+fixture compile under independent GNU11 `-Wall -Wextra -Wconversion
+-Wshadow -Werror`, GCC and Clang with full ASan/UBSan.
+Test complete byte-exact original full pages across eight independent
+input/compressed/scratch/output unaligned offsets, CRC/SHA, trailing
+LZO bytes, unknown codec/version, dictionary, over-bound lengths,
+stale/teardown/lower-failure paths, output nonmutation and executed
+changed-function semantic mutants. A mutant failing to compile, crashing
+under a sanitizer or missing a named CHECK does not count.
+Fix actual upstream host-shim endian omissions without editing original
+Linux source or masking diagnostics. Require exact changed-commit
+terminal CI before any LZO decoder qualification claims.
+
+A kernel LZO decoder symbol independently of the retired original pool
+is not itself proof that the current target owns a pinned decoder/module
+lease. Neither an original STORED snapshot, current accepted DM clone,
+durable write, authoritative map/GC, native ACK nor a physical 4096
+read has been authenticated. Keep AUTH=0, Phase A BLOCKED, direct
+compressed handoff and forced RAW bypass DISABLED. No privilege,
+loaded kernel, actual memory pressure, physical swap or owner make tests.

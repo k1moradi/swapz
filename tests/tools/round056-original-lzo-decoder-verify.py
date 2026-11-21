@@ -23,6 +23,12 @@ HEADERS = {
 #include <stdint.h>
 #include <stddef.h>
 #include <string.h>
+#if __BYTE_ORDER__ != __ORDER_LITTLE_ENDIAN__
+#error "Round056 host LZO shim requires little-endian source ABI"
+#endif
+#ifndef __LITTLE_ENDIAN
+#define __LITTLE_ENDIAN 1
+#endif
 typedef uint32_t u32;
 typedef uint64_t u64;
 #define likely(x) __builtin_expect(!!(x), 1)

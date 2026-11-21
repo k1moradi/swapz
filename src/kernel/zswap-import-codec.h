@@ -3,7 +3,7 @@
 #define SWAPZ_ZSWAP_IMPORT_CODEC_H
 
 /*
- * Source-only imported zswap LZ4 block representation. No production source
+ * Source-only imported zswap original LZ4/LZO1X block profiles. No production source
  * includes this header. Metadata and authority exist ONLY in volatile RAM;
  * physical lower extents contain payload bytes and deterministic padding.
  * This is NOT an ordinary RAW_4096 record and never changes SWAPSPACE2.
@@ -12,12 +12,16 @@
 #define SWAPZ_ZSWAP_IMPORT_REPRESENTATION 0x5aU
 #define SWAPZ_ZSWAP_IMPORT_LZ4_CODEC 1U
 #define SWAPZ_ZSWAP_IMPORT_VERSION 1U
+/* Independently tagged original Linux lzo-scomp / lib/lzo LZO1X v1. */
+#define SWAPZ_ZSWAP_IMPORT_LZO1X_CODEC 2U
+#define SWAPZ_ZSWAP_IMPORT_LZO1X_VERSION 1U
 
 #include "codec.h"
 #ifdef SWAPZ_ZSWAP_IMPORT_HOST_TEST
 #include <errno.h>
 #include <limits.h>
 #include <lz4.h>
+#include <linux/lzo.h>
 #include <openssl/sha.h>
 #include <stddef.h>
 #include <string.h>
@@ -25,6 +29,7 @@
 #include <crypto/sha2.h>
 #include <linux/errno.h>
 #include <linux/lz4.h>
+#include <linux/lzo.h>
 #include <linux/string.h>
 #endif
 
@@ -42,7 +47,7 @@ struct swapz_zswap_import_record {
 	swapz_u8 representation;
 	swapz_u8 codec;
 	swapz_u8 version;
-	swapz_u8 dictionary_id; /* Only dictionary-free LZ4 v1 is admitted. */
+	swapz_u8 dictionary_id; /* Only dictionary-free original LZ4/LZO1X. */
 	swapz_u8 stored_eviction;
 	swapz_u8 immutable_owned_copy;
 };
@@ -104,14 +109,23 @@ static inline int swapz_zswap_import_decode(
 {
 	swapz_u8 calculated_sha256[32];
 	int decoded_bytes;
+	int original_lzo1x;
 	unsigned int offset;
 	swapz_u8 digest_difference = 0;
 
 	if (!record || !authority || !compressed_bytes || !scratch || !output)
 		return -EINVAL;
+	/*
+	 * The codec identity MUST originate from a separately authenticated
+	 * original selected driver, not a zswap pool name or inferred payload.
+	 * This dormant function cannot itself authenticate a live source slot.
+	 */
+	original_lzo1x = record->codec == SWAPZ_ZSWAP_IMPORT_LZO1X_CODEC;
 	if (record->representation != SWAPZ_ZSWAP_IMPORT_REPRESENTATION ||
-	    record->codec != SWAPZ_ZSWAP_IMPORT_LZ4_CODEC ||
-	    record->version != SWAPZ_ZSWAP_IMPORT_VERSION ||
+	    (record->codec != SWAPZ_ZSWAP_IMPORT_LZ4_CODEC && !original_lzo1x) ||
+	    (original_lzo1x ?
+	     record->version != SWAPZ_ZSWAP_IMPORT_LZO1X_VERSION :
+	     record->version != SWAPZ_ZSWAP_IMPORT_VERSION) ||
 	    record->dictionary_id != 0U || !record->stored_eviction ||
 	    !record->immutable_owned_copy)
 		return -EOPNOTSUPP;
@@ -149,12 +163,30 @@ static inline int swapz_zswap_import_decode(
 	if (swapz_crc32c_bytes(compressed_bytes, record->compressed_length) !=
 	    record->compressed_crc32c)
 		return -EBADMSG;
-	/* LZ4 block format only. A framed LZ4 stream cannot decode as this. */
-	decoded_bytes = LZ4_decompress_safe((const char *)compressed_bytes,
-			(char *)scratch, (int)record->compressed_length,
-			(int)SWAPZ_BLOCK_BYTES);
-	if (decoded_bytes != (int)SWAPZ_BLOCK_BYTES)
-		return -EBADMSG;
+	if (original_lzo1x) {
+		/*
+		 * Exact original lib/lzo/lzo1x_decompress_safe.c byte stream,
+		 * independently callable without a retired zswap pool/tfm. Original
+		 * LZO_E_INPUT_NOT_CONSUMED and short output both fail closed.
+		 * This direct symbol still requires a real kernel decoder/module
+		 * lifetime lease before any future production read admission.
+		 */
+		size_t original_decoded_bytes = SWAPZ_BLOCK_BYTES;
+		int result = lzo1x_decompress_safe(compressed_bytes,
+				record->compressed_length, scratch,
+				&original_decoded_bytes);
+
+		if (result != LZO_E_OK ||
+		    original_decoded_bytes != SWAPZ_BLOCK_BYTES)
+			return -EBADMSG;
+	} else {
+		/* Raw LZ4 block, never framed LZ4 or original LZO1X bytes. */
+		decoded_bytes = LZ4_decompress_safe((const char *)compressed_bytes,
+				(char *)scratch, (int)record->compressed_length,
+				(int)SWAPZ_BLOCK_BYTES);
+		if (decoded_bytes != (int)SWAPZ_BLOCK_BYTES)
+			return -EBADMSG;
+	}
 	if (swapz_zswap_import_sha256(scratch, calculated_sha256))
 		return -EIO;
 	for (offset = 0; offset < sizeof(calculated_sha256); ++offset)
