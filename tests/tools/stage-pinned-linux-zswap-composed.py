@@ -48,6 +48,8 @@ ORIGIN = load_source_module("round031_original_mm_source",
                             "stage-pinned-linux-zswap-origin.py")
 BIO = load_source_module("round031_original_bio_source",
                          "stage-pinned-linux-zswap-sideband.py")
+ROUND056 = load_source_module("round056_original_preerase_source",
+                             "round056-original-preerase-module.py")
 
 if ORIGIN.LINUX_COMMIT != PINNED_SHA or BIO.PINNED_LINUX_COMMIT != PINNED_SHA:
     raise SourceCompositionError("original-source-commit-drift")
@@ -5049,6 +5051,8 @@ def compose_postimage(path: str, original_bytes: bytes, *,
         changed = apply_round052_original_preunuse_negative(path, changed)
         changed = apply_round053_original_preunuse_gate(path, changed)
         changed = apply_round054_original_preunuse_release(path, changed)
+    changed = ROUND056.apply(path, changed, replace_once,
+                            with_kunit=with_kunit)
     if path == "mm/zswap.c":
         for required in (
             "swapz_round028_slot_epoch(swpentry)",
