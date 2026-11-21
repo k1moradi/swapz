@@ -1,0 +1,17 @@
+
+Agents 3, 4 and 5 — ROUND062 START NOW IN PARALLEL, ROOTLESS, INDEPENDENTLY AND UNBLOCKED.
+
+Read UNIQUE official ROUND_OPEN, full frozen contract and your COMPLETE individual GitHub prompt:
+https://github.com/k1moradi/swapz/issues/179
+
+Last actual frozen engineering SHA 0593173cad62192bb89f5ba37c6a993e7bafd0d7; full task SHA is on official ROUND_OPEN. Read round062/frozen-contract.md, your entire round062/agent*.md, Round061 independent closeout and all original worker evidence, AGENTS.md, context/vision, and all applicable docs/testing_standards.md.
+
+Agent3 — ONE CROSS-LAYER OWNER: OWN BOTH genuine pinned original Linux zswap STORED preerase compressed source + original page_io/BIO/borrowed bvec lifetime AND actual product src/kernel/dm-target.c current accepted clone/target. Identify first genuine missing source→current DM carrier; design and test actual source/DM ownership under a DEFAULT-OFF compiled native interface if real, or report precise upstream API/lifetime blocker, NO fake authenticated import. Prior separate source and DM auditors are consolidated; no Agent2 this round.
+Agent4 — original selected LZO1X/LZ4 decoder: inspect exact original native ZSWAP=y/n job status, require full pinned original x86 vmlinux/modules + same-kernel GPL Module.symvers and TRUE positive+negative modpost. Earlier native gelf.h fixed, source-host passes; native still queued at prior check, NOT qualified. No loaded module or false decoder runtime reference.
+Agent5 — P0 fix original Round057 standalone regression test's false `mutant escaped compiler-owned directory`: `altered_header` is a DIRECTORY already, while `altered_source` is a FILE. Preserve compiler-specific mutant dirs, safe .private mode0600 fail-only logging, actual GCC+Clang linked production C with 5 semantic mutants EACH, and inherited LZ4 suites. Restore exact standalone CI terminal success.
+
+Start ALL THREE simultaneously; no same-round NEW peer code/API/CI/hardware prerequisite. Local work parallel; remote commits ONLY to sole main via fresh expected-head single-parent NONFORCE fast-forward, preserve all peers and full byte-identical OLD+PEER standards prefix with meaningful same-commit additions. No branches, PRs, forks, worktrees, merge/force, unrelated refactors or comment removals. Actual changed-source strict GCC+Clang ASan/UBSan, semantic-mutant C binaries compiled AND executed, genuine original pinned KUnit/x86 GPL when relevant; exact source SHA/job/first error posted on issue #179. PROGRESS if CI pending, REPORT_READY only truly scoped terminal evidence.
+
+Linux native MM alone controls compressed zswap RAM and natural eviction under pressure, swapz only DISK packing/GC — never a competing shrinker. Ordinary RAW_4096 ALWAYS full ORIGINAL UNCOMPRESSED 4096. A future already-STORED original compressed LZO1X/LZ4 handoff requires separately tagged original selected codec and REAL source+BIO/current accepted DM ownership, independent decoder beyond source pool death, durable lower compressed WRITE/FUA, volatile authoritative map/GC/reader lifetime, one genuine upper BIO ACK and entire original 4096 decoded READ. Until truly proven, SOURCE_MAPPED_AUTHENTICATED=0, PHASE_A=BLOCKED, DIRECT_COMPRESSED_HANDOFF=DISABLED, FORCED_RAW_BYPASS=DISABLED. Protect the existing physical SWAPSPACE2 first 4096 header/UUID/signature and parent partition table. No owner make test/fast_test, privileged, loaded, physical or actual memory-pressure tests.
+
+BEGIN independent work now.
