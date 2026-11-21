@@ -499,6 +499,64 @@ struct swapz_round052_internal_ticket {
 /* ROUND052_DM_INTERNAL_TICKET_DECL_END */
 #endif /* SWAPZ_ROUND052_DM_INTERNAL_ONE_SHOT_TEST */
 
+/* Round053 negative-only synthetic accepted ordinary BIO teardown receipt. */
+#if defined(SWAPZ_ROUND053_DM_ACCEPTED_BIO_LIFECYCLE_TEST)
+/* ROUND053_DM_ACCEPTED_LIFECYCLE_DECL_START */
+enum swapz_round053_internal_phase {
+	SWAPZ_ROUND053_NOT_ACCEPTED,
+	SWAPZ_ROUND053_LOWER_PENDING,
+	SWAPZ_ROUND053_DURABLE,
+	SWAPZ_ROUND053_MAPPED,
+	SWAPZ_ROUND053_COMPLETED,
+	SWAPZ_ROUND053_ABORTED,
+};
+
+enum swapz_round053_internal_event {
+	SWAPZ_ROUND053_ACCEPT,
+	SWAPZ_ROUND053_LOWER_COMPLETE,
+	SWAPZ_ROUND053_PUBLISH,
+	SWAPZ_ROUND053_ACK,
+	SWAPZ_ROUND053_ABORT,
+};
+
+/* Host-only scalar observations are not source-slot or DM-table references. */
+struct swapz_round053_internal_observation {
+	const struct dm_target *target;
+	const struct swapz_dm *context;
+	const struct bio *upper_bio;
+	sector_t target_relative_sector;
+	swapz_u32 map_generation;
+	swapz_u32 gc_epoch;
+	swapz_u32 extent_start_block;
+	swapz_u32 extent_blocks;
+	swapz_u32 synthetic_lease_token;
+	swapz_u32 original_uncompressed_bytes;
+	bool synthetic_live_lease;
+	bool worker_owns_bio;
+	bool dtr_started;
+	bool external_stored;
+};
+
+struct swapz_round053_internal_receipt {
+	const struct dm_target *target;
+	const struct swapz_dm *context;
+	const struct bio *upper_bio;
+	sector_t target_relative_sector;
+	swapz_u32 map_generation;
+	swapz_u32 gc_epoch;
+	swapz_u32 extent_start_block;
+	swapz_u32 extent_blocks;
+	swapz_u32 synthetic_lease_token;
+	enum swapz_round053_internal_phase phase;
+	unsigned int lower_callbacks;
+	unsigned int map_publications;
+	unsigned int upper_ack_attempts;
+	unsigned int terminal_releases;
+	int terminal_error;
+};
+/* ROUND053_DM_ACCEPTED_LIFECYCLE_DECL_END */
+#endif /* SWAPZ_ROUND053_DM_ACCEPTED_BIO_LIFECYCLE_TEST */
+
 struct swapz_bio_ref {
 	struct list_head list;
 	struct bio *bio;
@@ -531,6 +589,9 @@ struct swapz_bio_ref {
 #if defined(SWAPZ_ROUND052_DM_INTERNAL_ONE_SHOT_TEST)
 	struct swapz_round052_internal_ticket round052_ticket;
 #endif /* SWAPZ_ROUND052_DM_INTERNAL_ONE_SHOT_TEST */
+#if defined(SWAPZ_ROUND053_DM_ACCEPTED_BIO_LIFECYCLE_TEST)
+	struct swapz_round053_internal_receipt round053_receipt;
+#endif /* SWAPZ_ROUND053_DM_ACCEPTED_BIO_LIFECYCLE_TEST */
 };
 
 /* The worker attributes exactly one primary reason to each real window. */
@@ -13441,6 +13502,150 @@ static __used noinline int swapz_round052_internal_ticket_step(
 /* ROUND052_DM_INTERNAL_TICKET_HELPER_END */
 #endif /* SWAPZ_ROUND052_DM_INTERNAL_ONE_SHOT_TEST */
 
+/* Test-only lifecycle ordering; no actual lower I/O, mapping or ACK. */
+#if defined(SWAPZ_ROUND053_DM_ACCEPTED_BIO_LIFECYCLE_TEST)
+/* ROUND053_DM_ACCEPTED_LIFECYCLE_HELPER_START */
+static __used noinline int swapz_round053_internal_receipt_step(
+		struct swapz_round053_internal_receipt *receipt,
+		const struct swapz_round053_internal_observation *observation,
+		enum swapz_round053_internal_event event,
+		bool lower_durable, int lower_error)
+{
+	const struct dm_target *target;
+	const struct swapz_dm *ctx;
+	const struct bio *upper_bio;
+
+	if (!receipt)
+		return -EINVAL;
+	/* After terminal release, never dereference ctx, target or upper BIO. */
+	if (receipt->phase == SWAPZ_ROUND053_COMPLETED ||
+	    receipt->phase == SWAPZ_ROUND053_ABORTED)
+		return -EALREADY;
+	if (event == SWAPZ_ROUND053_ABORT) {
+		if (receipt->phase == SWAPZ_ROUND053_NOT_ACCEPTED)
+			return -ENOENT;
+		if (observation &&
+		    (receipt->target != observation->target ||
+		     receipt->context != observation->context ||
+		     receipt->upper_bio != observation->upper_bio))
+			return -ESTALE;
+		receipt->phase = SWAPZ_ROUND053_ABORTED;
+		receipt->terminal_releases++;
+		receipt->terminal_error = lower_error < 0 ? lower_error : -ECANCELED;
+		return receipt->terminal_error;
+	}
+	if (!observation || !observation->target || !observation->context ||
+	    !observation->upper_bio)
+		return -EINVAL;
+	target = observation->target;
+	ctx = observation->context;
+	upper_bio = observation->upper_bio;
+	if (event == SWAPZ_ROUND053_ACCEPT) {
+		if (receipt->phase != SWAPZ_ROUND053_NOT_ACCEPTED)
+			return -EALREADY;
+		if (!READ_ONCE(ctx->accepting) || smp_load_acquire(&ctx->failed))
+			return -ESHUTDOWN;
+		if (!observation->synthetic_live_lease ||
+		    !observation->worker_owns_bio || observation->dtr_started ||
+		    !observation->synthetic_lease_token ||
+		    target->private != ctx || ctx->target != target ||
+		    !ctx->maps || ctx->authority.maps != ctx->maps ||
+		    target->len % SWAPZ_SECTORS ||
+		    target->len / SWAPZ_SECTORS != ctx->logical_pages)
+			return -ESTALE;
+		/* NORMAL RAW is the original uncompressed whole page, never STORED. */
+		if (observation->external_stored ||
+		    observation->original_uncompressed_bytes != SWAPZ_BLOCK_BYTES)
+			return -EOPNOTSUPP;
+		if (bio_op(upper_bio) != REQ_OP_WRITE ||
+		    !(upper_bio->bi_opf & REQ_SWAP) ||
+		    upper_bio->bi_iter.bi_size != SWAPZ_BLOCK_BYTES ||
+		    bio_sectors(upper_bio) != SWAPZ_SECTORS)
+			return -ERANGE;
+		if (observation->target_relative_sector !=
+			    upper_bio->bi_iter.bi_sector ||
+		    observation->target_relative_sector % SWAPZ_SECTORS ||
+		    observation->target_relative_sector >= target->len ||
+		    SWAPZ_SECTORS > target->len -
+			    observation->target_relative_sector ||
+		    !observation->map_generation || !observation->gc_epoch ||
+		    (observation->extent_blocks != 1U &&
+		     observation->extent_blocks != 2U &&
+		     observation->extent_blocks != 4U) ||
+		    observation->extent_start_block >= ctx->physical_blocks ||
+		    observation->extent_blocks > ctx->physical_blocks -
+			    observation->extent_start_block)
+			return -ERANGE;
+		receipt->target = target;
+		receipt->context = ctx;
+		receipt->upper_bio = upper_bio;
+		receipt->target_relative_sector = observation->target_relative_sector;
+		receipt->map_generation = observation->map_generation;
+		receipt->gc_epoch = observation->gc_epoch;
+		receipt->extent_start_block = observation->extent_start_block;
+		receipt->extent_blocks = observation->extent_blocks;
+		receipt->synthetic_lease_token = observation->synthetic_lease_token;
+		receipt->phase = SWAPZ_ROUND053_LOWER_PENDING;
+		return 0;
+	}
+	if (receipt->phase == SWAPZ_ROUND053_NOT_ACCEPTED)
+		return -EPERM;
+	/* The caller MUST independently hold all real objects during this check. */
+	if (!observation->synthetic_live_lease || observation->dtr_started)
+		return -ESHUTDOWN;
+	if (!observation->worker_owns_bio ||
+	    receipt->target != target || receipt->context != ctx ||
+	    receipt->upper_bio != upper_bio ||
+	    receipt->target_relative_sector != observation->target_relative_sector ||
+	    receipt->target_relative_sector != upper_bio->bi_iter.bi_sector ||
+	    receipt->map_generation != observation->map_generation ||
+	    receipt->gc_epoch != observation->gc_epoch ||
+	    receipt->extent_start_block != observation->extent_start_block ||
+	    receipt->extent_blocks != observation->extent_blocks ||
+	    observation->synthetic_lease_token != receipt->synthetic_lease_token ||
+	    target->private != ctx || ctx->target != target ||
+	    !ctx->maps || ctx->authority.maps != ctx->maps)
+		return -ESTALE;
+	/* Closing new admission must NOT cancel a still-owned accepted worker. */
+	if (smp_load_acquire(&ctx->failed))
+		return -ESHUTDOWN;
+	if (event == SWAPZ_ROUND053_LOWER_COMPLETE) {
+		if (receipt->phase != SWAPZ_ROUND053_LOWER_PENDING)
+			return -EALREADY;
+		if (lower_error < 0) {
+			receipt->phase = SWAPZ_ROUND053_ABORTED;
+			receipt->terminal_releases++;
+			receipt->terminal_error = lower_error;
+			return lower_error;
+		}
+		if (lower_error || !lower_durable)
+			return -EAGAIN;
+		receipt->lower_callbacks++;
+		receipt->phase = SWAPZ_ROUND053_DURABLE;
+		return 0;
+	}
+	if (event == SWAPZ_ROUND053_PUBLISH) {
+		if (receipt->phase != SWAPZ_ROUND053_DURABLE)
+			return -EAGAIN;
+		receipt->map_publications++;
+		receipt->phase = SWAPZ_ROUND053_MAPPED;
+		return 0;
+	}
+	if (event == SWAPZ_ROUND053_ACK) {
+		if (receipt->phase != SWAPZ_ROUND053_MAPPED ||
+		    receipt->lower_callbacks != 1U ||
+		    receipt->map_publications != 1U)
+			return -EAGAIN;
+		receipt->upper_ack_attempts++;
+		receipt->terminal_releases++;
+		receipt->phase = SWAPZ_ROUND053_COMPLETED;
+		return 0;
+	}
+	return -EINVAL;
+}
+/* ROUND053_DM_ACCEPTED_LIFECYCLE_HELPER_END */
+#endif /* SWAPZ_ROUND053_DM_ACCEPTED_BIO_LIFECYCLE_TEST */
+
 static int swapz_map(struct dm_target *ti, struct bio *bio)
 {
 	struct swapz_dm *ctx = ti->private;
@@ -13628,6 +13833,32 @@ static int swapz_map(struct dm_target *ti, struct bio *bio)
 			1U, 1U, 0U, 1U, false, 0);
 /* ROUND052_DM_INTERNAL_MAP_ACCEPTED_END */
 #endif /* SWAPZ_ROUND052_DM_INTERNAL_ONE_SHOT_TEST */
+#if defined(SWAPZ_ROUND053_DM_ACCEPTED_BIO_LIFECYCLE_TEST)
+/* ROUND053_DM_ACCEPTED_LIFECYCLE_MAP_START */
+	/*
+	 * Synchronous test-only observation AFTER incoming admission under the
+	 * queue lock. No worker/callback, fake table lease or external compressed
+	 * STORED source is authorized by this passive receipt.
+	 */
+	memset(&entry->round053_receipt, 0, sizeof(entry->round053_receipt));
+	if (bio_op(bio) == REQ_OP_WRITE && (bio->bi_opf & REQ_SWAP) &&
+	    count == SWAPZ_SECTORS && bio->bi_iter.bi_size == SWAPZ_BLOCK_BYTES) {
+		const struct swapz_round053_internal_observation observation = {
+			.target = ti, .context = ctx, .upper_bio = bio,
+			.target_relative_sector = bio->bi_iter.bi_sector,
+			.map_generation = 1U, .gc_epoch = 1U,
+			.extent_start_block = 0U, .extent_blocks = 1U,
+			.synthetic_lease_token = 1U,
+			.original_uncompressed_bytes = SWAPZ_BLOCK_BYTES,
+			.synthetic_live_lease = true, .worker_owns_bio = true,
+		};
+
+		(void)swapz_round053_internal_receipt_step(
+			&entry->round053_receipt, &observation,
+			SWAPZ_ROUND053_ACCEPT, false, 0);
+	}
+/* ROUND053_DM_ACCEPTED_LIFECYCLE_MAP_END */
+#endif /* SWAPZ_ROUND053_DM_ACCEPTED_BIO_LIFECYCLE_TEST */
 	if (ctx->async_prepare && bio_op(bio) == REQ_OP_WRITE && count) {
 		/*
 		 * ID150: ordinary task-context submissions may prepare their already

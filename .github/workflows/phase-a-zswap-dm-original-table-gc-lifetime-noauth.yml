@@ -54,6 +54,11 @@ jobs:
         run: |
           set -euo pipefail
           python3 -B tests/tools/round052-dm-internal-one-shot-real-c-verify.py host-test
+      - name: Round053 actual accepted NORMAL 4096 upper BIO lifecycle 162 C cases and 17 real changed C mutants per compiler
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 -B tests/tools/round053-dm-accepted-normal-bio-real-c-verify.py host-test
       - name: Re-execute real Round043 old 150 90 and seven nine source hostile and GCC Clang ASan UBSan
         shell: bash
         run: |
