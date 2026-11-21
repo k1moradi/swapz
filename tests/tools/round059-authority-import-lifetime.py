@@ -66,14 +66,18 @@ def build(compiler, authority_source, output):
     ]
     result = execute(command)
     if result.returncode:
-        diagnostic = next(
-            (line.strip() for line in result.stderr.splitlines()
-             if "error:" in line or "fatal error:" in line),
-            (result.stderr.splitlines() or ["compiler failed without stderr"])[0],
-        )
-        # Paths in this reporting lane are source-local and need no host details.
-        diagnostic = diagnostic.replace(str(ROOT) + "/", "")
-        raise RuntimeError("compiler " + Path(compiler).name + ": " + diagnostic[:500])
+        diagnostics = [
+            line.strip().replace(str(ROOT) + "/", "")
+            for line in result.stderr.splitlines()
+            if re.search(r":\d+:\d+: (?:fatal )?error:", line)
+        ]
+        if not diagnostics:
+            diagnostics = ["compiler exited nonzero without source-bound error"]
+        # Bounded source-local diagnostics: first real error FIRST, then at most
+        # four distinct additional actual errors, never arbitrary child stderr.
+        unique_diagnostics = list(dict.fromkeys(diagnostics))[:5]
+        raise RuntimeError("compiler " + Path(compiler).name + ": " +
+                           " | ".join(unique_diagnostics)[:1000])
 
 
 def main():

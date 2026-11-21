@@ -17336,3 +17336,22 @@ bytes and parent partition table are untouched. Ordinary RAW_4096
 still contains **the complete original uncompressed 4096 bytes**.
 SOURCE_MAPPED_AUTHENTICATED=0, PHASE_A=BLOCKED, direct compressed
 handoff and forced RAW bypass DISABLED.
+
+### Round059 Agent5 exact GCC conversion first-error correction (2026-11-21)
+
+The initial exact product-authority guarded import CI on commit
+`277216f6159102e7853186ae327148707451b0a6` failed before
+runtime at GCC `-Werror=conversion` in original
+`src/kernel/authority.c:swapz_batch_abort_tail`: assigning
+`a->batch_pending - 1U` to a `swapz_u8` local. Preserve
+the 0..63 batch index and use a `swapz_u32` stack local
+rather than disabling narrowing warnings or renaming unrelated APIs.
+Do not alter the active batch transaction/commit ordering, map or
+scheduler. The dedicated first-error runner may print up to five
+distinct **source-relative error lines** (first true error first)
+without dumping arbitrary child stderr, secrets, host paths or
+sanitizer crashes; return nonzero on compile failure. Require a
+new terminal exact-source GCC/Clang ASan+UBSan and changed-product-C
+mutant run before calling the guarded witness qualified. Preserve
+the earlier 277216f failing CI as historical first-cause evidence,
+not a green run.

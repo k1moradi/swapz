@@ -15,3 +15,18 @@ The real `authority.c` and `codec.c` compiled with strict GCC+Clang ASan+UBSan i
 Before any positive admission: original STORED source's genuine MM/native BIO leased into current DM `alloc_io`/target table; stable codec decoder module independent of zswap pool retirement; separate imported tag with coherent 20-byte map+sidecar atomic commit; FUA/cache write actually completed, one original upper BIO completion, validated CRC32C/SHA256 full 4096-byte read and GC reader/codec refs surviving teardown. In particular **do not** relabel foreign STORED compressed bytes as ordinary RAW_4096. Linux MM controls zswap RAM, swapz only payload disk packing/GC. SWAPSPACE2 entire physical first 4096 and partition table immutable. SOURCE_MAPPED_AUTHENTICATED=0 PHASE_A=BLOCKED DIRECT_COMPRESSED_HANDOFF=DISABLED FORCED_RAW_BYPASS=DISABLED. No privilege, owner Make, physical, real-pressure or loaded kernel operations.
 
 Exact HEAD/parent, first error and CI status are reported in issue #176. This is a dormant SOURCE-C invariant, not real imported disk I/O or release readiness.
+
+## Exact-source CI first failure and narrow correction
+
+At source commit `277216f6159102e7853186ae327148707451b0a6`,
+[run 44916681295, job 136883699233](https://github.com/k1moradi/swapz/actions/runs/44916681295)
+completed FAILURE. The source-bound first GCC error occurred before any C test:
+`src/kernel/authority.c:1991:17: error: conversion from unsigned int to swapz_u8 may change value [-Werror=conversion]`.
+The current production `swapz_batch_abort_tail()` subtracts one from a
+bounded u8 `batch_pending` (promoted to unsigned int) and cached the
+index back to u8. The correction uses `swapz_u32 index` without changing
+index boundaries, transaction identity, the public map, packet geometry
+or runtime policy. The own runner retains -Wconversion -Werror and now
+reports up to five source-bound compiler errors without arbitrary log stderr;
+no compiler warning was disabled. New exact-source run evidence must be
+verified before qualifying this correction; previous run remains RED.

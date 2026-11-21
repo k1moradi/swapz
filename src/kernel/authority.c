@@ -1976,7 +1976,7 @@ int swapz_batch_pause_run(struct swapz_authority *a,
 int swapz_batch_abort_tail(struct swapz_authority *a,
 			   const struct swapz_tx *tx)
 {
-	swapz_u8 index;
+	swapz_u32 index;
 	swapz_u32 expected_sequence;
 
 	/*
