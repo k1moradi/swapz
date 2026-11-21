@@ -16949,3 +16949,10 @@ make test or fast_test, privileged, loaded, real pressure, swap activation,
 physical device or media trial. `SOURCE_MAPPED_AUTHENTICATED=0
 PHASE_A=BLOCKED DIRECT_COMPRESSED_HANDOFF=DISABLED
 FORCED_RAW_BYPASS=DISABLED`.
+
+## Round057 Agent2 pinned original pre-erase guarded source qualification
+
+- For the default-UNDEFINED `SWAPZ_ROUND056_PREERASE_SINGLE_OWNER_TEST` opt-in, the original live writeback must first recheck its locked swapcache folio and current xarray, complete native `zswap_decompress(entry, folio)`, and only then reserve/copy/seal the STORED bytes before `xa_erase` and `zswap_entry_free`. A pre-decode Round031 owner call is permitted only outside the Round056 gate. A failed optional reservation leaves the native full original uncompressed 4096-byte BIO and error/cleanup path intact.
+- The genuine pinned original kernel API for the selected acomp implementation is `crypto_acomp_driver_name`; `crypto_acomp_alg_driver_name` is not a declared function. Keep both actual algorithm-name and driver-name checks, never rely on the pool name alone, and retain compiler warnings as errors rather than inserting a cast or a suppression.
+- The staged-source verifier must reject a semantic hostile mutation that moves the guarded original producer to the pre-decompress site, separately from function-scoped textual controls. Qualify both genuine original UML KUnit JSON+KTAP and full original x86 ZSWAP=y/n unique GPL matched DM module on the exact changed commit; ancestor success and queued jobs do not count as a pass. The four-owner GFP_NOWAIT|__GFP_NOWARN bound, last-reference budget unwind, source-slot/epoch/store SHA, no extra slot count, and old/default guarded behavior are immutable safety checks.
+- This is source-only, test-only observation, never source-to-target authentication or durable lower completion. `SOURCE_MAPPED_AUTHENTICATED=0`, `PHASE_A=BLOCKED`, `DIRECT_COMPRESSED_HANDOFF=DISABLED`, `FORCED_RAW_BYPASS=DISABLED`; no owner `make test` / `make fast_test`, loaded-kernel, physical/DM/swap activation or real pressure trial was authorized for this round.

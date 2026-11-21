@@ -147,7 +147,7 @@ swapz_round056_mm_bio_create(struct zswap_entry *entry, swp_entry_t source_slot,
 	acomp_ctx = raw_cpu_ptr(pool->acomp_ctx);
 	if (!acomp_ctx || IS_ERR_OR_NULL(acomp_ctx->acomp) ||
 	    strcmp(crypto_acomp_alg_name(acomp_ctx->acomp), "lz4") ||
-	    strcmp(crypto_acomp_alg_driver_name(acomp_ctx->acomp), "lz4-scomp"))
+	    strcmp(crypto_acomp_driver_name(acomp_ctx->acomp), "lz4-scomp"))
 		return NULL;
 	decoded = kmap_local_folio(folio, 0);
 	sha256(decoded, PAGE_SIZE, decoded_sha256);
@@ -378,16 +378,30 @@ static atomic_t swapz_round056_held_owners = ATOMIC_INIT(0);
             "#if !defined(SWAPZ_ROUND056_PREERASE_SINGLE_OWNER_TEST)\n" +
             old_diagnostic + "#endif\n",
             path, "round056-disable-predecode-consuming-diagnostic")
+        # Preserve the original pre-decode owner for older/default profiles.
+        # Under Round056 only the post-decode, pre-erase owner is eligible.
+        composed = replace_once(
+            composed,
+            "\tctx.swapz_round031_owned =\n"
+            "\t\tswapz_round031_mm_bio_create(entry, swpentry, tree, offset);\n",
+            "#if !defined(SWAPZ_ROUND056_PREERASE_SINGLE_OWNER_TEST)\n"
+            "\tctx.swapz_round031_owned =\n"
+            "\t\tswapz_round031_mm_bio_create(entry, swpentry, tree, offset);\n"
+            "#endif\n",
+            path, "round056-legacy-owner-only-without-guard")
+        # The native decompression may fail. Capture only its successful
+        # original full 4096-byte folio, before xa_erase/entry_free.
+        successful_decode = (
+            "\tif (!zswap_decompress(entry, folio)) {\n"
+            "\t\tret = -EIO;\n"
+            "\t\tgoto err;\n"
+            "\t}\n\n")
         return replace_once(
-            composed, "\tctx.swapz_round031_owned =\n"
-                      "\t\tswapz_round031_mm_bio_create(entry, swpentry, tree, offset);\n",
-            GUARD + """
-	ctx.swapz_round031_owned =
-		swapz_round056_mm_bio_create(entry, swpentry, tree, offset,
-					    folio);
-#else
-	ctx.swapz_round031_owned =
-		swapz_round031_mm_bio_create(entry, swpentry, tree, offset);
+            composed, successful_decode,
+            successful_decode + GUARD + """
+\tctx.swapz_round031_owned =
+\t\tswapz_round056_mm_bio_create(entry, swpentry, tree, offset,
+\t\t\t\t\t    folio);
 #endif
-""", path, "round056-move-only-live-owner-into-original-writeback")
+""", path, "round056-after-original-decompress-before-erase")
     return composed

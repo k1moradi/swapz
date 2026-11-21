@@ -74,7 +74,7 @@ def verify(mm: str, bio: str, *, staged: bool) -> None:
     ordered(mm_helper, "folio_test_locked(folio)",
             "folio_test_swapcache(folio)", "folio->swap.val != source_slot.val",
             "xa_load(tree, offset) != entry", 'strcmp(pool->tfm_name, "lz4")',
-            'crypto_acomp_alg_driver_name(acomp_ctx->acomp)',
+            'crypto_acomp_driver_name(acomp_ctx->acomp)',
             "sha256(decoded, PAGE_SIZE, decoded_sha256)",
             "memcmp(decoded_sha256, entry->swapz_round028_store_sha256",
             "swapz_round028_slot_epoch(source_slot)",
@@ -154,7 +154,7 @@ def verify_hostile_controls() -> int:
     changes = [
         ("mm", "folio_test_locked(folio)", "folio_test_lru(folio)"),
         ("mm", "entry != xa_load(tree, offset)", "entry == xa_load(tree, offset)"),
-        ("mm", "crypto_acomp_alg_driver_name(acomp_ctx->acomp)",
+        ("mm", "crypto_acomp_driver_name(acomp_ctx->acomp)",
          "crypto_acomp_alg_name(acomp_ctx->acomp)"),
         ("mm", "sha256(decoded, PAGE_SIZE, decoded_sha256)",
          "memcpy(decoded_sha256, decoded, 32U)"),
@@ -182,6 +182,40 @@ def verify_hostile_controls() -> int:
     return len(changes)
 
 
+def verify_staged_order_hostile(mm: str, bio: str) -> None:
+    """Move the actual composed C producer before decode; require rejection.
+
+    This semantic original-source mutation is separate from function-scoped
+    textual controls; it never executes on a loaded kernel.
+    """
+    producer = (source_module.GUARD + "\n"
+                "\tctx.swapz_round031_owned =\n"
+                "\t\tswapz_round056_mm_bio_create(entry, swpentry, tree, offset,\n"
+                "\t\t\t\t\t    folio);\n#endif\n")
+    native_decode = ("\tif (!zswap_decompress(entry, folio)) {\n"
+                     "\t\tret = -EIO;\n"
+                     "\t\tgoto err;\n"
+                     "\t}\n\n")
+    native_writeback = body(mm, NATIVE_SOURCE)
+    if (native_writeback.count(producer) != 1 or
+            native_writeback.count(native_decode) != 1):
+        raise SourceAuditError("staged_original_order_mutation_anchor_missing")
+    # Simulate the former defective call site: pre-decode source capture.
+    misplaced = native_writeback.replace(producer, "", 1).replace(
+        native_decode, producer + native_decode, 1)
+    mutated_mm = mm.replace(native_writeback, misplaced, 1)
+    if mutated_mm == mm:
+        raise SourceAuditError("empty_original_order_mutation")
+    try:
+        verify(mutated_mm, bio, staged=True)
+    except SourceAuditError as error:
+        if "missing_or_wrong_order:" + MOVE_SIGNATURE in str(error):
+            return
+        raise SourceAuditError(
+            "wrong_original_order_mutation_rejection:" + str(error)) from error
+    raise SourceAuditError("predecode_original_order_mutation_not_rejected")
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--linux-root", type=Path)
@@ -194,6 +228,7 @@ def main() -> int:
             mm = (root / "mm/zswap.c").read_text(encoding="utf-8")
             bio = (root / "block/bio.c").read_text(encoding="utf-8")
             verify(mm, bio, staged=True)
+            verify_staged_order_hostile(mm, bio)
         elif not args.self_test:
             parser.error("use --self-test or --linux-root")
     except (SourceAuditError, OSError, UnicodeError) as error:
