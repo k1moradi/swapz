@@ -45,6 +45,18 @@ MUTANTS = (
      "current->generation + 1U != record->generation)",
      "current->generation + 1U == record->generation)",
      "no_import_map_publication"),
+    ("normal_extent_class_two",
+     "tx->extent_blocks == 2U ? 2U : 4U,",
+     "tx->extent_blocks == 2U ? 1U : 4U,",
+     "actual_product_extent_classes"),
+    ("normal_extent_class_four",
+     "tx->extent_blocks == 2U ? 2U : 4U,",
+     "tx->extent_blocks == 2U ? 2U : 1U,",
+     "actual_product_extent_classes"),
+    ("normal_compressed_read_crc",
+     "if (swapz_crc32c_bytes(stored, current_map->payload_length) !=",
+     "if (swapz_crc32c_bytes(stored, current_map->payload_length) ==",
+     "actual_product_extent_classes"),
 )
 
 
@@ -108,7 +120,7 @@ def main():
             build(compiler, KERNEL / "authority.c", binary)
             result = execute([str(binary)])
             if result.returncode or result.stderr or not re.fullmatch(
-                    r"PASS authority_actual_product_cases=8 map_bytes=20 "
+                    r"PASS authority_actual_product_cases=9 map_bytes=20 "
                     r"descriptor_bytes=\d+ pool_bytes=\d+ capacity=8 staged=2 "
                     r"AUTH0 PHASE_A=BLOCKED\n", result.stdout):
                 raise RuntimeError(name + " pristine baseline: " +

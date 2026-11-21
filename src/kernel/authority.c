@@ -2705,6 +2705,8 @@ int swapz_finish(struct swapz_authority *a, const struct swapz_tx *tx,
 	int data_only;
 	int error = 0;
 
+	/* swapz_is_active() validates the staged extent class as 1/2/4,
+	 * so no dynamic 8-bit value outside the 3-bit map domain is published. */
 	if (!swapz_is_active(a, tx))
 		return -ESTALE;
 	if (io_error || completed_blocks != tx->extent_blocks ||
@@ -2752,9 +2754,24 @@ int swapz_finish(struct swapz_authority *a, const struct swapz_tx *tx,
 						 &new_sequence_delta);
 	if (error)
 		goto fail;
-	metadata_end = data_only ? 0 :
-		sizeof(struct swapz_header) +
-		(swapz_u32)tx->count * sizeof(struct swapz_record);
+	if (data_only) {
+		metadata_end = 0;
+	} else {
+		/*
+		 * Metadata arithmetic starts at size_t width. Check against the
+		 * complete u32 extent BEFORE narrowing; a malformed legacy header
+		 * must never wrap its first permissible payload offset.
+		 */
+		swapz_u64 metadata_bytes =
+			sizeof(struct swapz_header) +
+			(swapz_u64)tx->count * sizeof(struct swapz_record);
+
+		if (metadata_bytes > bytes_total) {
+			error = -EUCLEAN;
+			goto fail;
+		}
+		metadata_end = (swapz_u32)metadata_bytes;
+	}
 	previous_end = bytes_total;
 
 	/*
@@ -3083,8 +3100,17 @@ int swapz_finish(struct swapz_authority *a, const struct swapz_tx *tx,
 			swapz_u32 io_base =
 				a->segment_gc_io_cost[new_segment] -
 				(new_seg_delta ? new_seg_delta->io_cost : 0U);
-			swapz_u16 min_base =
-				a->segment_gc_min_live_blocks[new_segment] -
+			swapz_u32 min_base;
+
+			/* The accounting sidecar is RAM authority, not a hint:
+			 * reject a corrupt decrement before unsigned subtraction. */
+			if (new_seg_delta &&
+			    a->segment_gc_min_live_blocks[new_segment] <
+				    new_seg_delta->min_live_blocks) {
+				error = -EUCLEAN;
+				goto fail;
+			}
+			min_base = a->segment_gc_min_live_blocks[new_segment] -
 				(new_seg_delta ? new_seg_delta->min_live_blocks : 0U);
 
 			if (live_base > ~(swapz_u32)0 - new_gc_live_bytes ||
@@ -3148,7 +3174,10 @@ int swapz_finish(struct swapz_authority *a, const struct swapz_tx *tx,
 			.payload_crc32c = payload_crc32cs[index],
 			.payload_length = payload_lengths[index],
 			.payload_offset = payload_offsets[index],
-			.extent_blocks = tx->extent_blocks,
+			/* Domain proved by swapz_is_active(); literal classes fit 3-bit ABI
+			 * without narrowing a dynamic 8-bit expression. */
+			.extent_blocks = tx->extent_blocks == 1U ? 1U :
+					tx->extent_blocks == 2U ? 2U : 4U,
 			.shared_extent = tx->count > 1U,
 			.record_index = swapz_map_pack_record_index(
 				index, payload_encodings[index]),

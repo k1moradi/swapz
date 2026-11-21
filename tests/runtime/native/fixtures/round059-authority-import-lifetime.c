@@ -262,6 +262,73 @@ static int test_protected_header_and_ordinary_raw(void)
 	return 0;
 }
 
+/*
+ * Real production compressed data-only map ownership, not a zswap import.
+ * Bytes here are a CRC-checked authority payload, NOT decoded native LZ4.
+ * The three legal 1/2/4-block classes must survive the 3-bit in-RAM field,
+ * and a wrong/stale lower payload must fail its independent READ check.
+ */
+static swapz_u8 compressed_extent[SWAPZ_MAX_EXTENT_BYTES];
+
+static int test_actual_product_extent_classes(void)
+{
+	static const struct {
+		swapz_u8 blocks;
+		swapz_u16 payload_offset;
+	} classes[] = {
+		{ 1U, 4032U }, { 2U, 8128U }, { 4U, 16320U },
+	};
+	const swapz_u16 payload_length = 64U;
+	swapz_u32 logical_page = 24U;
+
+	CHECK(initialize_test() == 0);
+	for (size_t index = 0; index < sizeof(classes) / sizeof(classes[0]);
+	     ++index, ++logical_page) {
+		const swapz_u8 blocks = classes[index].blocks;
+		const swapz_u16 payload_offset = classes[index].payload_offset;
+		const swapz_u32 extent_bytes =
+			(swapz_u32)blocks * SWAPZ_BLOCK_BYTES;
+		const swapz_u8 *read_payload = NULL;
+		struct swapz_tx transaction;
+		swapz_u32 payload_crc32c;
+
+		CHECK((swapz_u32)payload_offset + payload_length == extent_bytes);
+		memset(compressed_extent, 0, sizeof(compressed_extent));
+		for (swapz_u32 byte_index = 0U; byte_index < payload_length;
+		     ++byte_index)
+			compressed_extent[payload_offset + byte_index] =
+				original_page[byte_index];
+		payload_crc32c = swapz_crc32c_bytes(
+			compressed_extent + payload_offset, payload_length);
+		CHECK(swapz_stage(&authority, &logical_page, 1U, blocks,
+				  &transaction) == 0);
+		CHECK(swapz_bind_compressed_record(
+			&authority, &transaction, 0U, payload_offset,
+			payload_length, payload_crc32c, SWAPZ_ENCODING_LZ4) == 0);
+		CHECK(swapz_mark_compressed_data_only(
+			&authority, &transaction) == 0);
+		CHECK(!maps[logical_page].valid);
+		CHECK(swapz_finish(&authority, &transaction, compressed_extent,
+				   extent_bytes, blocks, 0) == 0);
+		CHECK(maps[logical_page].valid && !maps[logical_page].raw);
+		CHECK(maps[logical_page].extent_blocks == blocks);
+		CHECK(maps[logical_page].payload_length == payload_length);
+		CHECK(maps[logical_page].payload_offset == payload_offset);
+		CHECK(swapz_read_authoritative_payload(
+			&authority, logical_page, &maps[logical_page],
+			compressed_extent + payload_offset, &read_payload) == 0);
+		CHECK(read_payload == compressed_extent + payload_offset);
+		compressed_extent[payload_offset] ^= 1U;
+		read_payload = (const swapz_u8 *)original_page;
+		CHECK(swapz_read_authoritative_payload(
+			&authority, logical_page, &maps[logical_page],
+			compressed_extent + payload_offset, &read_payload) ==
+		      -EBADMSG);
+		CHECK(read_payload == NULL);
+	}
+	return 0;
+}
+
 struct test_case {
 	const char *name;
 	int (*run)(void);
@@ -278,6 +345,7 @@ int main(int argc, char **argv)
 		{ "generation_and_reissue_identity", test_generation_and_reissue_identity },
 		{ "terminal_callback_drain", test_terminal_callback_drain },
 		{ "protected_header_and_ordinary_raw", test_protected_header_and_ordinary_raw },
+		{ "actual_product_extent_classes", test_actual_product_extent_classes },
 	};
 	size_t executed = 0U;
 

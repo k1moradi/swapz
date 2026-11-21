@@ -17424,3 +17424,74 @@ volatile map, normal full ORIGINAL UNCOMPRESSED RAW_4096, first physical
 remain unchanged. SOURCE_MAPPED_AUTHENTICATED=0, PHASE_A=BLOCKED, direct
 compressed handoff DISABLED and forced RAW bypass DISABLED. No owner make
 test/fast_test, privileged, loaded, real pressure, physical or swap acts.
+
+## Round060 Agent5 P0 — strict actual authority C conversions and GC/readback (2026-11-21)
+
+The original real product `src/kernel/authority.c:swapz_finish()` must
+compile with both GCC and Clang strict GNU11 `-Wall -Wextra -Wconversion
+-Wshadow -Werror`, ASan and UBSan. Its THREE existing failing old GCC
+diagnostics at legacy metadata offset :2755, GC minimum-live-block
+subtraction :3087 and in-RAM 3-bit extent-class :3151 require source
+correction, not dropped warning flags, silent signedness changes or
+unverified casts. The :1991 8-bit batch-tail index fix from Round059
+must remain intact.
+
+Preserve `sizeof`-derived metadata lengths at `swapz_u64` width
+through the full `bytes_total` extent range check; only a positive
+bounded check (where `bytes_total` is itself `swapz_u32`) authorizes
+a final narrowing to `swapz_u32`. A short/invalid userspace-only
+legacy descriptor fails `-EUCLEAN` before any mapping mutation.
+Production compressed payload remains data-only and carries no
+serialized metadata. A destination GC minimum-live-block subtraction
+must first reject any old cached segment count smaller than the
+validated lost-block delta; accumulate in `swapz_u32` without
+narrowing to `swapz_u16` before the existing final legal-u16-capacity
+check. Failing or corrupt GC metadata may not alter any map/extent
+or quarantine an otherwise referenced lower extent through false
+success. Do not suppress overflow/underflow.
+
+The real `swapz_is_active()` already authenticates the ordered
+transaction snapshot, extent class via `swapz_legal_class()` and
+physical reservation. A 3-bit `swapz_map.extent_blocks` may contain
+only the literal 1, 2 or 4 product classes; assign those exact
+representable constants, never a dynamic unproven `swapz_u8`
+narrowing. Preserve exact `sizeof(struct swapz_map)==20`, other
+bitfield positions, per-page identity, extent CRC, page-list order,
+existing 4/8/16KiB allocation/GC and 4096-byte full ORIGINAL
+UNCOMPRESSED RAW behavior. Do not introduce per-record heap
+allocation, an MM reclaim worker or new disk metadata.
+
+The owned Round059 actual linked-authority C fixture is expanded to
+execute the normal product `swapz_stage`, descriptor bind, data-only
+`swapz_finish` and `swapz_read_authoritative_payload` for all
+three legal extent classes. CRC corruption after a successful read
+must return `-EBADMSG` with cleared returned pointer. This is
+ordinary swapz on-disk compressed descriptor integrity, NOT a
+native zswap selected-decoder/upper-BIO/real lower durable witness.
+GCC AND Clang must each compile/execute a genuine source-linked
+ASan+UBSan baseline (nine meaningful cases) and ten deliberate
+changed-`authority.c` mutants including two class corruption
+and one CRC-read bypass, and kill mutants by a named first-error
+runtime assertion, **not** compiler or sanitizer failure.
+
+The exact new source SHA must also restore three previously red
+existing rootless workflows: original Round059 actual authority,
+Round057 product raw/flush transaction and Round059 generic LZ4
+host with inherited transaction. Capture per-job real first
+errors and terminal outcomes on issue #177; source-only PASS
+does not establish imported AUTH or owner production release.
+All earlier/peer testing standards are a byte-identical prefix
+of this same-commit append. No owner `make test`/`make fast_test`,
+loaded, privileged, physical or actual pressure work.
+
+Linux MM exclusively manages native zswap compressed RAM/natural
+pressure eviction, swapz only disk packing/GC. A future direct
+compressed handoff needs a separately tagged codec-aware true native
+source+accepted DM owner lease, independently surviving decoder,
+durable lower WRITE+FUA, atomic volatile imported map/GC and reader
+pins, exactly one original upper ACK and verified full decoded 4096
+READ. Imported `try_publish` must remain `-EOPNOTSUPP` until so
+qualified. All first physical 4096 SWAPSPACE2 bytes and parent
+partition table are immutable. `SOURCE_MAPPED_AUTHENTICATED=0`,
+`PHASE_A=BLOCKED`, direct compressed handoff DISABLED and forced
+RAW bypass DISABLED.
