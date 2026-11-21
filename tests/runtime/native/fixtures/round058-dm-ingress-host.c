@@ -216,6 +216,54 @@ int main(void)
                     &scenario.observation) == -ESTALE,
                 mutation, "changed-endio-bio-refused");
     }
-    puts("ROUND059_DM_COMPLETION_HOST_PASS cases=22 retired=5 endio_mutations=4 SOURCE_MAPPED_AUTHENTICATED=0 PHASE_A=BLOCKED");
+    /* Same ctx/target pointer does NOT preserve table geometry or map tenure.
+     * The real callbacks own these objects only until they return. */
+    for (unsigned int callback_stage = 0; callback_stage < 2U; ++callback_stage) {
+        for (unsigned int mutation = 0; mutation < 5U; ++mutation) {
+            struct scenario scenario;
+            setup(&scenario);
+            require(swapz_round058_dm_ingress_refuse(
+                        &scenario.target, &scenario.context, &scenario.upper_bio,
+                        &scenario.observation) == -EOPNOTSUPP,
+                    mutation, "original-table-ingress");
+            if (callback_stage == 1U)
+                require(swapz_round058_dm_terminal_refuse(
+                            &scenario.context, &scenario.upper_bio,
+                            &scenario.observation) == -EOPNOTSUPP &&
+                        scenario.observation.terminal_shape_preserved,
+                        mutation, "valid-before-table-reload");
+            switch (mutation) {
+            case 0:
+                scenario.target.len -= SWAPZ_SECTORS;
+                scenario.context.logical_pages--;
+                break;
+            case 1: scenario.context.maps = &scenario.other_context; break;
+            case 2: scenario.context.authority.maps = &scenario.other_context; break;
+            case 3:
+                scenario.context.maps = &scenario.other_context;
+                scenario.context.authority.maps = scenario.context.maps;
+                break;
+            default: scenario.context.logical_pages--; break;
+            }
+            if (callback_stage == 0U) {
+                require(swapz_round058_dm_terminal_refuse(
+                            &scenario.context, &scenario.upper_bio,
+                            &scenario.observation) == -ESTALE,
+                        mutation, "stale-table-before-ack-rejected");
+                require(!scenario.observation.terminal_shape_preserved,
+                        mutation, "failed-table-terminal-sticky");
+                /* Reissue may restore the old values, but not old tenure. */
+                scenario.target.len = 16U * SWAPZ_SECTORS;
+                scenario.context.logical_pages = 16U;
+                scenario.context.maps = &scenario.map_identity;
+                scenario.context.authority.maps = scenario.context.maps;
+            }
+            require(swapz_round058_dm_endio_refuse(
+                        &scenario.target, &scenario.upper_bio,
+                        &scenario.observation) == -ESTALE,
+                    mutation, "stale-table-endio-rejected");
+        }
+    }
+    puts("ROUND060_DM_TABLE_HOST_PASS inherited=22 changed_stage=2 changed_table=5 NO_AUTH=1 PHASE_A=BLOCKED");
     return 0;
 }

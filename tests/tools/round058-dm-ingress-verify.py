@@ -17,8 +17,8 @@ ROOT = Path(__file__).resolve().parents[2]
 PRODUCT = ROOT / 'src/kernel/dm-target.c'
 FIXTURE = ROOT / 'tests/runtime/native/fixtures/round058-dm-ingress-host.c'
 FIRST_ERROR = 'ROUND058_DM_FIRST_ERROR'
-PASS = ('ROUND059_DM_COMPLETION_HOST_PASS cases=22 retired=5 endio_mutations=4 '
-        'SOURCE_MAPPED_AUTHENTICATED=0 PHASE_A=BLOCKED')
+PASS = ('ROUND060_DM_TABLE_HOST_PASS inherited=22 changed_stage=2 changed_table=5 '
+        'NO_AUTH=1 PHASE_A=BLOCKED')
 MUTANTS = (
     ('cloned_required',
      '!(upper_bio->bi_flags & (1U << BIO_CLONED)))\n\t\treturn -EOPNOTSUPP;',
@@ -43,6 +43,18 @@ MUTANTS = (
     ('endio_replaced_borrowed_vectors',
      'observation->borrowed_clone_vectors != upper_bio->bi_io_vec ||\n\t    observation->target_relative_sector',
      'false ||\n\t    observation->target_relative_sector'),
+    ('terminal_table_span',
+     'ctx->target->len != observation->target_sectors_at_admission ||',
+     'false ||'),
+    ('terminal_map_storage',
+     'ctx->maps != observation->authority_maps_at_admission ||',
+     'false ||'),
+    ('endio_table_span',
+     '\n\t    target->len != observation->target_sectors_at_admission ||',
+     '\n\t    false ||'),
+    ('endio_map_storage',
+     'observation->context->maps != observation->authority_maps_at_admission ||',
+     'false ||'),
 )
 
 
@@ -73,6 +85,8 @@ def source_sections() -> tuple[str, str]:
     for marker in ('SWAPZ_ROUND058_DM_INGRESS_LIFETIME_TEST',
                    'terminal_shape_preserved',
                    'borrowed_clone_vectors',
+                   'target_sectors_at_admission',
+                   'authority_maps_at_admission',
                    'swapz_round058_dm_ingress_refuse',
                    'swapz_round058_dm_terminal_refuse',
                    'swapz_round058_dm_endio_refuse',

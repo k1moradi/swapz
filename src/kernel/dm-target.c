@@ -567,6 +567,9 @@ struct swapz_round058_dm_observation {
 	const struct block_device *device;
 	/* Borrowed cloned bvec array identity only; never dereference after map. */
 	const struct bio_vec *borrowed_clone_vectors;
+	/* Rejection snapshots, never a held mapping or table/SRCU lease. */
+	const void *authority_maps_at_admission;
+	sector_t target_sectors_at_admission;
 	sector_t target_relative_sector;
 	bool shape_observed;
 	bool terminal;
@@ -1373,6 +1376,8 @@ static __used noinline int swapz_round058_dm_ingress_refuse(
 	observation->upper_bio = upper_bio;
 	observation->device = upper_bio->bi_bdev;
 	observation->borrowed_clone_vectors = upper_bio->bi_io_vec;
+	observation->authority_maps_at_admission = ctx->maps;
+	observation->target_sectors_at_admission = target->len;
 	observation->target_relative_sector = relative_sector;
 	observation->shape_observed = true;
 	/* A live clone shape is not a source-owner/DM SRCU/codec/durable lease. */
@@ -1396,6 +1401,11 @@ static __used noinline int swapz_round058_dm_terminal_refuse(
 	    observation->upper_bio != upper_bio ||
 	    observation->target != ctx->target ||
 	    ctx->target->private != ctx ||
+	    ctx->target->len != observation->target_sectors_at_admission ||
+	    ctx->target->len % SWAPZ_SECTORS ||
+	    ctx->target->len / SWAPZ_SECTORS != ctx->logical_pages ||
+	    ctx->maps != observation->authority_maps_at_admission ||
+	    ctx->authority.maps != observation->authority_maps_at_admission ||
 	    observation->borrowed_clone_vectors != upper_bio->bi_io_vec ||
 	    observation->device != upper_bio->bi_bdev ||
 	    observation->target_relative_sector != upper_bio->bi_iter.bi_sector ||
@@ -1407,7 +1417,9 @@ static __used noinline int swapz_round058_dm_terminal_refuse(
 	    !(upper_bio->bi_opf & REQ_SWAP) ||
 	    !(upper_bio->bi_flags & (1U << BIO_CLONED)))
 		return -ESTALE;
-	/* ->postsuspend may close new admission while this accepted BIO drains.
+	/* These matching scalar identities cannot prevent table ABA/reuse or
+	 * provide a source/SRCU lease. They only reject visible table drift.
+	 * ->postsuspend may close admission while accepted BIOs drain.
 	 * Do not reject its completion solely because ctx->accepting is false.
 	 */
 	if (smp_load_acquire(&ctx->failed))
@@ -1434,6 +1446,11 @@ static __used noinline int swapz_round058_dm_endio_refuse(
 	    observation->target != target ||
 	    observation->context != target->private ||
 	    observation->context->target != target ||
+	    target->len != observation->target_sectors_at_admission ||
+	    target->len % SWAPZ_SECTORS ||
+	    target->len / SWAPZ_SECTORS != observation->context->logical_pages ||
+	    observation->context->maps != observation->authority_maps_at_admission ||
+	    observation->context->authority.maps != observation->authority_maps_at_admission ||
 	    observation->upper_bio != upper_bio ||
 	    observation->device != upper_bio->bi_bdev ||
 	    observation->borrowed_clone_vectors != upper_bio->bi_io_vec ||

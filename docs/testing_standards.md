@@ -17382,3 +17382,45 @@ count any compiler error, sanitizer report or signal as an executed mutant.
 Keep full `-Wall -Wextra -Wconversion -Wshadow -Werror` plus ASan/UBSan
 on changed-source GCC and Clang binaries, and retain all five original
 mutant cases unchanged except this narrow expression correction.
+
+## Round060 DM same-address table reissue negative-only witness (2026-11-21)
+
+The existing default-UNDEFINED guarded actual production dm-target.c source
+observer sees a clone that is accepted under the genuine queue_lock but its
+borrowed pointers, bdev, BIO flags and sector cannot guarantee the same
+current DM table interval or RAM authority map through suspend/resume,
+reissue, target table reload or teardown. Synchronous map ingress must also
+capture the then-current target sector length and exact in-RAM map pointer
+as identity-only scalars (NOT pins or SRCU/folio/source references). Both
+the ordered-owner terminal observation before bio_endio and the genuine DM
+end_io callback must reject visible changes in original target span,
+eight-sector logical-page capacity, ctx->maps and ctx->authority.maps.
+Never dereference a saved borrowed bvec/map pointer after its owner can
+free it. A currently matching table pointer can be ABA/recycled and does
+NOT grant positive source authentication. A failed terminal witness remains
+monotonically invalid even if a later reissue restores all old scalars.
+Postsuspend closing fresh admission alone does not invalidate an already
+admitted owned completion. Actual failure of target still requires error.
+
+Require the existing source-extracted actual product C under GCC and Clang
+GNU11 -Wall -Wextra -Wconversion -Wshadow -Werror with ASan+UBSan and
+leak checking, preserve the inherited 22 scenarios and 11 original
+compiled/executed changed-C mutants, and add five distinct table/authority
+pointer/span/logical-page mutations between real map and terminal plus
+five analogous mutations after valid terminal before endio. At terminal
+also test restoration and retained refusal; no silent resurrection.
+Four more new changed-source mutants must independently compile, execute
+and fail at the named semantic first error, not compiler error or sanitizer
+crash. Confirm on the exact source in CI with native pinned original full
+Linux x86 ZSWAP=y/n GPL original provider Module.symvers, both default and
+guarded dm-swapz.ko original-KDIR module linkage. Host stand-ins and module
+compile do NOT establish a loaded kernel, independent original STORED
+MM→BIO→current DM lease, durable lower imported write/FUA, authoritative
+GC/read map, real one upper ACK or decoded complete original 4096 READ.
+
+Production default actual I/O, original BIO_CLONED v1 refusal, 20-byte
+volatile map, normal full ORIGINAL UNCOMPRESSED RAW_4096, first physical
+4096 SWAPSPACE2 signature/UUID/header and parent partition table must
+remain unchanged. SOURCE_MAPPED_AUTHENTICATED=0, PHASE_A=BLOCKED, direct
+compressed handoff DISABLED and forced RAW bypass DISABLED. No owner make
+test/fast_test, privileged, loaded, real pressure, physical or swap acts.
