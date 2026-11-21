@@ -20,17 +20,62 @@ jobs:
       - uses: actions/checkout@v4
       - name: Retrieve exact pinned pristine original C sources, no branch fallback
         shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
           root="$RUNNER_TEMP/round056-original-linux"
-          pin=c339f4010dea8b0d754f84ace70cd1b089878ef8
+          # Fetch immutable original Git blob objects through authenticated
+          # GitHub API; raw.githubusercontent.com may return HTTP 429.
+          # SHA identities below were verified against the exact Linux pin.
           mkdir -p "$root/block" "$root/drivers/md" "$root/mm"
-          for source in block/bio.c drivers/md/dm.c mm/page_io.c; do
-            curl --fail --location --silent --show-error --retry 4 --retry-delay 2 \
-              "https://raw.githubusercontent.com/torvalds/linux/$pin/$source" \
-              -o "$root/$source"
-          done
-          printf 'ROUND056_ORIGINAL_PRISTINE_SOURCES_RETRIEVED_HASH_NOT_YET_VERIFIED\n'
+          export ROUND056_ORIGINAL_ROOT="$root"
+          python3 -B - <<'ROUND056_PINNED_FETCH'
+          import base64
+          import hashlib
+          import json
+          import os
+          from pathlib import Path
+          from urllib.request import Request, urlopen
+
+          repository_root = Path(os.environ["ROUND056_ORIGINAL_ROOT"])
+          github_token = os.environ["GH_TOKEN"]
+          sources = {
+              "block/bio.c": "b0fcc69de653524479e3b328aa29a37e97945b84",
+              "drivers/md/dm.c": "1881d86111fb2e655893ad898cf21b88f0e4e7f3",
+              "mm/page_io.c": "c6824fcd483e0aa2c412e14dae0d2a356b17c373",
+          }
+          for relative_path, expected_blob in sources.items():
+              request = Request(
+                  "https://api.github.com/repos/torvalds/linux/git/blobs/" +
+                  expected_blob,
+                  headers={
+                      "Authorization": "Bearer " + github_token,
+                      "Accept": "application/vnd.github+json",
+                      "X-GitHub-Api-Version": "2022-11-28",
+                      "User-Agent": "swapz-round056-pinned-original-source",
+                  },
+              )
+              try:
+                  with urlopen(request, timeout=30) as response:
+                      document = json.load(response)
+                  if (document.get("sha") != expected_blob or
+                          document.get("encoding") != "base64"):
+                      raise ValueError("identity or encoding mismatch")
+                  source_bytes = base64.b64decode(
+                      document["content"], validate=False)
+                  observed_blob = hashlib.sha1(
+                      b"blob " + str(len(source_bytes)).encode("ascii") +
+                      b"\0" + source_bytes).hexdigest()
+                  if observed_blob != expected_blob:
+                      raise ValueError("source blob SHA mismatch")
+                  (repository_root / relative_path).write_bytes(source_bytes)
+              except Exception as error:
+                  raise SystemExit(
+                      "ROUND056_CLONE_FIRST_ERROR stage=pinned-source-fetch " +
+                      relative_path + " type=" + type(error).__name__) from None
+          print("ROUND056_ORIGINAL_PRISTINE_3_GIT_BLOBS_VERIFIED")
+          ROUND056_PINNED_FETCH
       - name: Execute real pinned original clone C excerpts GCC and Clang strict ASan UBSan plus four changed C mutants each
         shell: bash
         run: |
