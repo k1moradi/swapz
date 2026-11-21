@@ -17507,3 +17507,19 @@ Modify the ONE previously registered original source BIO KUnit case, keeping exa
 Require strict rootless **both GCC and Clang** `-std=gnu11 -Wall -Wextra -Wconversion -Wshadow -Werror` ASan+UBSan execution of **23 existing+new source-shaped BIO cases**, plus **10 actually changed original C compiled executable semantic mutation binaries per compiler**. Compiler warning, sanitizer report and crash never count as semantic mutant kill. The immutable exact original C fragment Git blob for this round is `906864fded6570195717d5a1f90d1fd970f0a7a2`; compare generated staged postimage SHA, not only source text. Independently inspect pinned `torvalds/linux@c339f4010dea8b0d754f84ace70cd1b089878ef8` actual original `mm/zswap.c` decode→uptodate→submit, original `mm/page_io.c` start writeback→unlock→BIO sector→observer→submit, and original `block/bio.c` injected C + KUnit; preserve the 17 older source gates and nine new hostile source-phase audits. New native original UML 71 JSON+KTAP and full x86 ZSWAP=y/n matched GPL DM module are mandatory **on the exact changed commit**, not inherited green. Maintain safe first-error diagnostics and no owner `make test`/`make fast_test`, privilege, load, physical backing or pressure trial.
 
 Ordinary `RAW_4096` must remain the full original UNCOMPRESSED page. Original selected LZO1X/LZ4 decoding after pool death, current accepted source→DM lease, durable compressed lower WRITE+FUA/flush, authoritative volatile GC/read map and exactly one upper ACK remain unproven; retain `SOURCE_MAPPED_AUTHENTICATED=0`, `PHASE_A=BLOCKED`, `DIRECT_COMPRESSED_HANDOFF=DISABLED`, `FORCED_RAW_BYPASS=DISABLED`. The first physical 4096 SWAPSPACE2 header/UUID/signature and entire parent partition table remain untouched.
+
+### Round060 source-C mutant anchor after changed terminal explanatory comment
+
+The inherited original REQ_SWAP negative terminal mutant originally matched
+its predicate plus the immediately following literal postsuspend comment.
+When the real product C comment was expanded to explain target-table ABA,
+this unrelated test anchor returned the first exact-source workflow error
+`ROUND058_DM_FIRST_ERROR first_error=mutation-anchor:terminal_original_swap_op`
+(job136918760052, source 882308f), before GCC/Clang host execution. Update
+both mutant target and replacement to match the new unchanged C predicate
+and its current adjacent comment, assert ALL FIFTEEN source mutations still
+select exactly one changed-source C occurrence, then rerun new exact-source
+GCC+Clang ASan+UBSan and original x86 GPL compilation. Never count the
+broken-anchor prior run as a source compiler/semantic success, weaken a
+mutation check or declare a no-auth observer authenticated. Same immutable
+safety gates and parent standards apply.
