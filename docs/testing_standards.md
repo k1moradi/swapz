@@ -17172,3 +17172,67 @@ baseline and must remain RED. Preserve the ordering:
 source C header actually compiles into the executed mutant binary.
 An unexecuted mutation, a Python TypeError, a compiler failure,
 or a sanitizer crash never qualifies a semantic mutation kill.
+
+## Round059 Agent5 — product authority bounded imported witness, always NO_AUTH (2026-11-21)
+
+Real `src/kernel/authority.c` and `authority.h` may carry an explicitly
+default-undefined `SWAPZ_ROUND059_AUTHORITY_IMPORT_LIFETIME_TEST` source
+instrumentation seam with immutable 20-byte normal map. The dormant
+`SWAPZ_AUTHORITY_IMPORT_ACTIVE` must equal zero even in guarded builds.
+The code uses actual ordered `swapz_stage()` active transaction identity
+(logical page, generation, sequence and physical data-relative extent),
+preallocated volatile capacity eight and at most two staged; never allocate
+in the production hot path, invent a second authoritative map, modify
+production compression/GC or attach a fake native source-to-target lease.
+
+Each prospective separately tagged import record must bind the original
+source slot, source entry identity and STORE generation, current target
+logical generation, selected codec/version, independent original SHA256,
+compressed CRC32C/length, GC epoch and a monotonic non-reused receipt.
+Reject missing digest/owner, duplicate logical identity, unsupported codec,
+oversize, stale generation, wrong current stage, unsafe geometry and
+staging/capacity exhaustion before touching mapping authority. Callback
+submission has one owner: short/failed lower I/O, missing requested FUA
+observation, reissue, duplicate callback and teardown must refuse any
+new authoritative mapping or ACK. An uncertainty/quarantine witness does
+NOT free the actual extent; only the real existing `swapz_abort`/finish
+allocator path may handle reserved lower space with its unchanged
+quarantine semantics. No lower callback is itself proof of stable media
+or FUA/device durability.
+
+Readers of the *diagnostic witness* may pin its immutable record under a
+single serialized test owner; a retained record cannot be overwritten,
+moved by GC or freed by teardown until the matching pin is put. This
+is explicitly NOT a native upper READ pin, codec/module ref, GC
+publication or current DM target ownership. Without an authenticated
+distinct imported representation bit/sidecar and atomic simultaneous map,
+read and GC authority, `swapz_authority_import_try_publish` must return
+`-EOPNOTSUPP` even after modeled full lower completion and a successful
+host flush observation. `swapz_authority_import_gc_move` must never
+publish an imported extent; `upper_ack_count` must stay zero. Ordinary
+`RAW_4096` continues to be the full ORIGINAL UNCOMPRESSED 4096-byte page.
+
+Own strict rootless GNU11 GCC/Clang -Wall/-Wextra/-Wconversion/-Wshadow
+-Werror and ASan+UBSan compile/execution must link real product
+`authority.c` and `codec.c` without including the imported codec
+header that P0 Agent4 owns. Test actual `swapz_stage`, normal raw
+`swapz_finish_raw`/CRC read and the guarded source witness. Changed
+production authority C mutants must each compile under the same strict
+flags, execute and fail with exact named first-error assertions; compiler
+or sanitizer failure does not count as a semantic mutant. No hidden root,
+physical, loaded-kernel, real-pressure, swap device or owner Make tests.
+Actual original Linux MM→accepted cloned BIO and live DM target, stable
+selected codec decoder, durable lower WRITE+FUA, atomic imported map and
+reader/GC sidecar, one real original ACK, exact complete independent
+4096-byte SHA readback remain separate unproven real integration gates.
+
+Protect the entire first physical SWAPSPACE2 4096 bytes and parent
+partition table; preserve payload-only 4/8/16KiB disk extents, no new
+persistent metadata. Linux MM alone manages zswap compressed RAM
+natural-pressure eviction; swapz only disk packing and GC.
+SOURCE_MAPPED_AUTHENTICATED=0 PHASE_A=BLOCKED
+DIRECT_COMPRESSED_HANDOFF=DISABLED FORCED_RAW_BYPASS=DISABLED.
+Append this substantive policy after the entire previous and peer
+canonical standards as a byte-identical prefix in the same source/
+fixture/workflow commit; rootless and native qualification is not
+production release evidence.

@@ -1,0 +1,38 @@
+name: Round059 genuine product authority dormant import lifetime NO_AUTH
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'src/kernel/authority.c'
+      - 'src/kernel/authority.h'
+      - 'src/kernel/codec.c'
+      - 'src/kernel/codec.h'
+      - 'tests/tools/round059-authority-import-lifetime.py'
+      - 'tests/runtime/native/fixtures/round059-authority-import-lifetime.c'
+      - '.github/workflows/phase-a-round059-authority-import-lifetime-noauth.yml'
+      - 'docs/testing_standards.md'
+  workflow_dispatch:
+jobs:
+  actual-authority-volatile-import-noauth:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    permissions:
+      contents: read
+    env:
+      SWAPZ_PUSH_BEFORE_SHA: ${{ github.event.before }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Exact sole main source and whitespace
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
+          test "$(git branch --show-current)" = main
+          test -z "$(git status --porcelain)"
+          git diff --check HEAD^ HEAD
+      - name: Actual production authority C strict sanitizer and mutants
+        run: python3 -B tests/tools/round059-authority-import-lifetime.py
+      - name: Complete first-parent policy standards
+        run: python3 -B tests/runtime/native/repository-policy-test.py --enforce

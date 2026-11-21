@@ -514,4 +514,88 @@ int swapz_read_authoritative_peeked(const struct swapz_authority *authority,
 				  const struct swapz_decoded *peeked,
 				  const swapz_u8 **payload);
 
+/*
+ * Round059 owner-only compressed-import witness. Entirely absent with the
+ * diagnostic guard undefined; never changes the 20-byte production map ABI.
+ * The witness is NOT map authority, native source ownership, durable I/O or
+ * permission to ACK. All methods run under ONE serialized owner, including
+ * pin/put. A future concurrent reader requires its own reviewed synchronization.
+ */
+#define SWAPZ_AUTHORITY_IMPORT_ACTIVE 0U
+#if defined(SWAPZ_ROUND059_AUTHORITY_IMPORT_LIFETIME_TEST)
+#define SWAPZ_AUTHORITY_IMPORT_CAPACITY 8U
+#define SWAPZ_AUTHORITY_IMPORT_STAGING_LIMIT 2U
+#define SWAPZ_AUTHORITY_IMPORT_LZ4 1U
+#define SWAPZ_AUTHORITY_IMPORT_LZO1X 2U
+
+enum swapz_authority_import_state {
+	SWAPZ_AUTHORITY_IMPORT_EMPTY = 0,
+	SWAPZ_AUTHORITY_IMPORT_RESERVED,
+	SWAPZ_AUTHORITY_IMPORT_SUBMITTED,
+	SWAPZ_AUTHORITY_IMPORT_LOWER_CONFIRMED,
+	SWAPZ_AUTHORITY_IMPORT_QUARANTINED,
+	SWAPZ_AUTHORITY_IMPORT_RETIRED,
+};
+
+struct swapz_authority_import_spec {
+	swapz_u64 source_swap_slot;
+	swapz_u64 source_entry_identity;
+	swapz_u64 source_store_generation;
+	swapz_u64 gc_epoch;
+	swapz_u32 logical_page;
+	swapz_u32 compressed_crc32c;
+	swapz_u16 compressed_length;
+	swapz_u8 codec;
+	swapz_u8 codec_version;
+	swapz_u8 requested_fua;
+	swapz_u8 original_sha256[32];
+};
+
+struct swapz_authority_import_record {
+	struct swapz_authority_import_spec spec;
+	swapz_u64 ticket;
+	swapz_u32 generation;
+	swapz_u32 start_block; /* Data-block relative; first physical 4KiB excluded. */
+	swapz_u32 sequence;
+	swapz_u8 extent_blocks;
+	swapz_u8 state;
+	swapz_u8 reader_pins; /* Single-owner bounded retained witness, NOT upper READ. */
+	swapz_u8 upper_ack_count; /* ALWAYS zero until a separately owned DM interface. */
+};
+
+struct swapz_authority_import_pool {
+	const struct swapz_authority *authority;
+	struct swapz_authority_import_record
+		records[SWAPZ_AUTHORITY_IMPORT_CAPACITY];
+	swapz_u64 next_ticket;
+	swapz_u8 staged;
+	swapz_u8 closing;
+};
+
+void swapz_authority_import_init(struct swapz_authority_import_pool *pool,
+				const struct swapz_authority *authority);
+int swapz_authority_import_begin(struct swapz_authority_import_pool *pool,
+				 const struct swapz_tx *transaction,
+				 const struct swapz_authority_import_spec *spec,
+				 swapz_u64 *ticket);
+int swapz_authority_import_submit(struct swapz_authority_import_pool *pool,
+				  swapz_u64 ticket);
+int swapz_authority_import_lower_done(struct swapz_authority_import_pool *pool,
+				      swapz_u64 ticket, int lower_error,
+				      swapz_u8 completed_blocks,
+				      int flush_completed);
+int swapz_authority_import_try_publish(struct swapz_authority_import_pool *pool,
+				       swapz_u64 ticket);
+int swapz_authority_import_pin_witness(struct swapz_authority_import_pool *pool,
+				       swapz_u64 ticket,
+				       struct swapz_authority_import_spec *view);
+int swapz_authority_import_put_witness(struct swapz_authority_import_pool *pool,
+				       swapz_u64 ticket);
+int swapz_authority_import_gc_move(struct swapz_authority_import_pool *pool,
+				   swapz_u64 ticket, swapz_u64 next_gc_epoch);
+int swapz_authority_import_abort(struct swapz_authority_import_pool *pool,
+				 swapz_u64 ticket);
+int swapz_authority_import_close(struct swapz_authority_import_pool *pool);
+#endif
+
 #endif
