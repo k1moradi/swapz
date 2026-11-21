@@ -1,0 +1,35 @@
+name: Round056 disabled imported-map and decoder lifetime rootless proof
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'tests/runtime/native/fixtures/round056-imported-volatile-map.c'
+      - 'tests/tools/round056-imported-volatile-map.py'
+      - '.github/workflows/phase-a-zswap-round056-imported-volatile-map.yml'
+      - 'src/kernel/codec.h'
+      - 'docs/testing_standards.md'
+  workflow_dispatch:
+jobs:
+  disabled-imported-map:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 12
+    permissions:
+      contents: read
+    env:
+      SWAPZ_PUSH_BEFORE_SHA: ${{ github.event.before }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Verify source, main, cleanliness and diff
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
+          test "$(git branch --show-current)" = main
+          test -z "$(git status --porcelain)"
+          git diff --check HEAD^ HEAD
+      - name: Strict GCC and Clang C23 ASan UBSan host-LZ4 full-page and mutants
+        run: python3 -B tests/tools/round056-imported-volatile-map.py
+      - name: Enforce canonical standards and all pushed first-parent metadata
+        run: python3 -B tests/runtime/native/repository-policy-test.py --enforce
