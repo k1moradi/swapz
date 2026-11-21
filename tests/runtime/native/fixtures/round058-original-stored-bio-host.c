@@ -2,6 +2,7 @@
  * Mocked BIO lifetime is not a native kernel/DM acceptance certificate.
  */
 #include <errno.h>
+#include <stddef.h>
 #include <stdbool.h>
 #include <stdint.h>
 #include <stdio.h>
@@ -27,6 +28,11 @@
 typedef unsigned char u8;
 struct block_device { unsigned int unused; };
 struct page { u8 content[4096]; };
+struct folio {
+	struct page page;
+	struct { uint64_t val; } swap;
+	bool swapcache;
+};
 struct bio_vec {
 	struct page *bv_page;
 	unsigned int bv_offset;
@@ -76,6 +82,19 @@ static bool swapz_ci_owned_valid(const struct swapz_ci_owned_payload *owner)
 	return owner && owner->source_swap_entry &&
 		owner->swapz_round056_sealed;
 }
+static struct folio *page_folio(struct page *page)
+{
+	return (struct folio *)((unsigned char *)page - offsetof(struct folio, page));
+}
+static bool folio_test_swapcache(const struct folio *folio)
+{
+	return folio->swapcache;
+}
+static unsigned int folio_nr_pages(const struct folio *folio)
+{
+	(void)folio;
+	return 1U;
+}
 static void *kmap_local_page(struct page *page)
 {
 	return page->content;
@@ -104,8 +123,8 @@ static int fail(unsigned int scenario, const char *reason)
 
 static int run_scenario(unsigned int scenario)
 {
-	struct page page = {};
-	struct bio_vec vector = { .bv_page = &page, .bv_len = 4096U };
+	struct folio source_folio = {.swap = {.val = 13U}, .swapcache = true};
+	struct bio_vec vector = { .bv_page = &source_folio.page, .bv_len = 4096U };
 	struct block_device device = {};
 	struct swapz_ci_owned_payload owned = {
 		.swapz_round056_budgeted = true,
@@ -122,8 +141,8 @@ static int run_scenario(unsigned int scenario)
 		.bi_iter = {.bi_sector = 8U, .bi_size = 4096U},
 	};
 
-	memset(page.content, 0x37, sizeof(page.content));
-	sha256(page.content, 4096U, owned.original_sha256);
+	memset(source_folio.page.content, 0x37, sizeof(source_folio.page.content));
+	sha256(source_folio.page.content, 4096U, owned.original_sha256);
 	switch (scenario) {
 	case 1U: source.bi_vcnt = 1U; break;
 	case 2U: source.bi_iter.bi_size = 2048U; break;
@@ -139,10 +158,12 @@ static int run_scenario(unsigned int scenario)
 	case 12U: source.bi_iter.bi_idx = 1U; break;
 	case 13U: owned.swapz_round056_sealed = false; break;
 	case 14U: owned.original_sha256[0] ^= 0x3aU; break;
-	case 15U: page.content[17] ^= 0x3aU; break;
+	case 15U: source_folio.page.content[17] ^= 0x3aU; break;
 	case 16U: source.bi_swapz_ci_sideband = NULL; break;
 	case 17U: source.bi_io_vec = NULL; break;
 	case 18U: source.bi_io_vec[0].bv_page = NULL; break;
+	case 19U: source_folio.swap.val = 14U; break;
+	case 20U: source_folio.swapcache = false; break;
 	default: break;
 	}
 	const int actual = swapz_round058_source_bio_observe(&source);
@@ -155,9 +176,9 @@ static int run_scenario(unsigned int scenario)
 
 int main(void)
 {
-	for (unsigned int scenario = 0U; scenario <= 18U; ++scenario)
+	for (unsigned int scenario = 0U; scenario <= 20U; ++scenario)
 		if (run_scenario(scenario))
 			return 1;
-	puts("ROUND058_CHAIN_HOST_ORIGINAL_SOURCE_C_PASS scenarios=19 AUTH0 PHASE_A=BLOCKED");
+	puts("ROUND058_CHAIN_HOST_ORIGINAL_SOURCE_C_PASS scenarios=21 AUTH0 PHASE_A=BLOCKED");
 	return 0;
 }

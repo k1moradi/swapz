@@ -16,10 +16,13 @@
  * A successful comparison never owns the current DM table, target, source
  * swap slot after PG_writeback, decoder, lower write or upper completion.
  * Native bio_init() has bi_vcnt == 0 despite one full pre-populated bvec.
+ * Identical page bytes in different swap slots are NOT the same source.
+ * The original swapcache folio must still match its sealed owner's slot.
  */
 int swapz_round058_source_bio_observe(const struct bio *bio)
 {
 	struct swapz_ci_owned_payload *owner;
+	struct folio *source_folio;
 	u8 digest[SHA256_DIGEST_SIZE] = {};
 	const void *original;
 	int result = -ESTALE;
@@ -39,12 +42,22 @@ int swapz_round058_source_bio_observe(const struct bio *bio)
 	    bio->bi_io_vec[0].bv_len != 4096U)
 		return -EOPNOTSUPP;
 
+	/* Borrowed bvec lives only until the original swap_iocb is retired.
+	 * This observation executes synchronously before native BIO submit.
+	 */
+	source_folio = page_folio(bio->bi_io_vec[0].bv_page);
+	if (!folio_test_swapcache(source_folio) ||
+	    folio_nr_pages(source_folio) != 1U)
+		return -ESTALE;
+
 	owner = swapz_ci_owned_get(bio->bi_swapz_ci_sideband);
 	if (!owner)
 		return -ESTALE;
 	if (!owner->swapz_round056_budgeted ||
 	    !owner->swapz_round056_sealed ||
-	    !owner->source_swap_entry || !swapz_ci_owned_valid(owner))
+	    !owner->source_swap_entry ||
+	    owner->source_swap_entry != source_folio->swap.val ||
+	    !swapz_ci_owned_valid(owner))
 		goto out;
 
 	original = kmap_local_page(bio->bi_io_vec[0].bv_page);

@@ -6,6 +6,7 @@ on:
     paths:
       - '.github/workflows/phase-a-round058-original-stored-bio-chain-noauth.yml'
       - 'tests/tools/round058-original-stored-bio-chain.py'
+      - 'tests/tools/round059-original-source-lease-verify.py'
       - 'tests/runtime/native/fixtures/round058-original-stored-bio-*'
       - 'tests/tools/round056-original-preerase-module.py'
       - 'tests/tools/round056-original-preerase-verify.py'
@@ -26,7 +27,8 @@ jobs:
           set -euo pipefail
           python3 -B tests/tools/round058-original-stored-bio-chain.py host-test
           python3 -B tests/tools/round058-original-stored-bio-chain.py verifier-self-test
-          echo 'ROUND058_SOURCE_HOST_COMPILED_BOTH_GCC_CLANG_ASAN_UBSAN_19_AND_6_CHANGED_C_MUTANTS_EACH_PASS_AUTH0'
+          python3 -B tests/tools/round059-original-source-lease-verify.py self-test
+          echo 'ROUND059_SOURCE_HOST_COMPILED_BOTH_GCC_CLANG_ASAN_UBSAN_21_AND_8_CHANGED_C_MUTANTS_EACH_PASS_AUTH0'
 
   native-original-71:
     name: Genuine pinned original 66 plus four clone and one source BIO C KUnit
@@ -63,6 +65,7 @@ jobs:
           python3 -B swapz/tests/tools/round058-original-stored-bio-chain.py stage \
             --linux-root linux --manifest round058-evidence/actual-original-source.json
           git -C linux diff --check
+          python3 -B swapz/tests/tools/round059-original-source-lease-verify.py staged --linux-root linux
           python3 -B - <<'PY'
           import hashlib,json,pathlib
           m=json.loads(pathlib.Path('round058-evidence/actual-original-source.json').read_text())
@@ -166,6 +169,7 @@ jobs:
           python3 -B swapz/tests/tools/round058-original-stored-bio-chain.py stage \
             --linux-root linux --manifest round058-x86-evidence/actual-original-source.json >"$log" 2>&1
           git -C linux diff --check
+          python3 -B swapz/tests/tools/round059-original-source-lease-verify.py staged --linux-root linux
           flags='-DSWAPZ_ROUND028_SLOT_EPOCH_SOURCE=1 -DSWAPZ_ROUND030_EVICTION_SNAPSHOT_SOURCE=1 -DSWAPZ_ROUND025_SIDEBAND_CI_ONLY=1 -DSWAPZ_ROUND031_MM_BIO_SOURCE=1 -DSWAPZ_ROUND032_BIO_COPY_VIEW_CI_ONLY=1 -DSWAPZ_ROUND034_ORIGINAL_V1_KUNIT_TEST=1 -DSWAPZ_ROUND035_ORIGINAL_MM_ROUTE_WITNESS_TEST=1 -DSWAPZ_ROUND036_ORIGINAL_ROUTE_LIFETIME_TEST=1 -DSWAPZ_ROUND037_ORIGINAL_MM_LIFETIME_OWNER_TEST=1 -DSWAPZ_ROUND038_ORIGINAL_STORE_PROVENANCE_TEST=1 -DSWAPZ_ROUND040_ORIGINAL_ASYNC_SLOT_LEASE_NEGATIVE_TEST=1 -DSWAPZ_ROUND041_ORIGINAL_SECTOR_TO_DM_NONAUTHORITY_TEST=1 -DSWAPZ_ROUND042_ORIGINAL_STORED_WRITEBACK_LIFETIME_TEST=1 -DSWAPZ_ROUND043_ORIGINAL_BIO_CLONE_COPY_TEST=1 -DSWAPZ_ROUND045_ORIGINAL_STORED_BIO_SOURCE_SCOPE_TEST=1 -DSWAPZ_ROUND049_ORIGINAL_LOCKED_FOLIO_COUNT_PAIR_TEST=1 -DSWAPZ_ROUND052_ORIGINAL_PRE_UNUSE_CANCEL_TEST=1 -DSWAPZ_ROUND056_ORIGINAL_CLONE_PROVENANCE_TEST=1 -DSWAPZ_ROUND056_PREERASE_SINGLE_OWNER_TEST=1 -DSWAPZ_ROUND058_ORIGINAL_STORED_BIO_CHAIN_TEST=1'
           info="$RUNNER_TEMP/round058-build-source.h"
           printf '#define SWAPZ_BUILD_SOURCE_SHA "%s"\n#define SWAPZ_BUILD_SOURCE_CLEAN 1\n#define SWAPZ_BUILD_SOURCE_CLEAN_STRING "1"\n' "$GITHUB_SHA" >"$info"

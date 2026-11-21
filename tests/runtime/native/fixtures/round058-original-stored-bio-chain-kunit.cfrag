@@ -11,6 +11,7 @@ static void swapz_round058_original_stored_bio_chain_kunit(struct kunit *test)
 	struct bio original_bio = {}, cloned_bio = {};
 	struct bio_vec vector = {};
 	struct page *page;
+	struct folio *source_folio;
 	u8 original_sha[SHA256_DIGEST_SIZE];
 	void *bytes;
 	u8 *private_bytes;
@@ -18,6 +19,11 @@ static void swapz_round058_original_stored_bio_chain_kunit(struct kunit *test)
 
 	page = alloc_page(GFP_KERNEL);
 	KUNIT_ASSERT_NOT_NULL(test, page);
+	source_folio = page_folio(page);
+	/* Synthetic flags model an ORIGINAL swapcache folio during native IO. */
+	source_folio->swap.val = 13U;
+	folio_set_swapbacked(source_folio);
+	folio_set_swapcache(source_folio);
 	bytes = kmap_local_page(page);
 	memset(bytes, 0x37, 4096U);
 	sha256(bytes, 4096U, original_sha);
@@ -49,6 +55,13 @@ static void swapz_round058_original_stored_bio_chain_kunit(struct kunit *test)
 	original_bio.bi_swapz_ci_sideband = owner;
 	owner = NULL; /* Original bio_uninit now owns the sole owner ref. */
 	KUNIT_EXPECT_EQ(test, swapz_round058_source_bio_observe(&original_bio), 0);
+	source_folio->swap.val = 14U;
+	KUNIT_EXPECT_NE(test, swapz_round058_source_bio_observe(&original_bio), 0);
+	source_folio->swap.val = 13U;
+	folio_clear_swapcache(source_folio);
+	KUNIT_EXPECT_NE(test, swapz_round058_source_bio_observe(&original_bio), 0);
+	folio_set_swapcache(source_folio);
+	KUNIT_EXPECT_EQ(test, swapz_round058_source_bio_observe(&original_bio), 0);
 	/* The older ticket fixture uses bi_vcnt=1; it must NOT claim this BIO. */
 	KUNIT_EXPECT_PTR_EQ(test,
 		swapz_round056_attach_original(&original_bio), NULL);
@@ -73,6 +86,10 @@ uninit_original:
 put_owner:
 	swapz_ci_owned_put(owner);
 free_page:
+	/* Synthetic swapcache flags must not escape into the page allocator. */
+	folio_clear_swapcache(source_folio);
+	folio_clear_swapbacked(source_folio);
+	source_folio->swap.val = 0;
 	__free_page(page);
 }
 
