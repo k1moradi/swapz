@@ -1,0 +1,151 @@
+name: Round060 pristine original LZO1X LZ4 GPL decoder compile-only NO_AUTH
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'src/kernel/zswap-import-codec.h'
+      - 'tests/tools/round060-original-decoder-kbuild-verify.py'
+      - 'tests/runtime/native/fixtures/round060-original-decoder-module.c'
+      - '.github/workflows/phase-a-round060-original-decoder-gpl-noauth.yml'
+      - 'docs/testing_standards.md'
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  source-host:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          path: swapz
+          fetch-depth: 2
+          persist-credentials: false
+      - uses: actions/checkout@v4
+        with:
+          repository: torvalds/linux
+          ref: c339f4010dea8b0d754f84ace70cd1b089878ef8
+          fetch-depth: 1
+          sparse-checkout: |
+            include/linux/lzo.h
+            include/linux/lz4.h
+            include/crypto/sha2.h
+            crypto/lzo.c
+            crypto/lz4.c
+            lib/lzo
+            lib/lz4
+            lib/crypto/sha256.c
+            lib/Kconfig
+          sparse-checkout-cone-mode: false
+          path: linux
+          persist-credentials: false
+      - name: Pin 11 original source blobs; execute seven negative symbol/config cases and existing real C mutants
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          test "$GITHUB_REF" = refs/heads/main
+          test "$(git -C swapz rev-parse HEAD)" = "$GITHUB_SHA"
+          test -z "$(git -C swapz status --porcelain --untracked-files=all)"
+          git -C swapz diff --check HEAD^ HEAD
+          python3 -B swapz/tests/tools/round060-original-decoder-kbuild-verify.py original --linux-root linux
+          python3 -B swapz/tests/tools/round060-original-decoder-kbuild-verify.py self-test
+          (cd swapz && python3 -B tests/tools/round059-codec-host-compat-verify.py)
+          echo 'ROUND060_ORIGINAL_PINNED_GCC_CLANG_HOST_ASAN_UBSAN_10_SEMANTIC_MUTANTS_PASS_AUTH0'
+
+  original-native:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 150
+    needs: source-host
+    strategy:
+      fail-fast: false
+      matrix:
+        zswap: ['y', 'n']
+    env:
+      ZSWAP_MATRIX: ${{ matrix.zswap }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          path: swapz
+          persist-credentials: false
+      - uses: actions/checkout@v4
+        with:
+          repository: torvalds/linux
+          ref: c339f4010dea8b0d754f84ace70cd1b089878ef8
+          fetch-depth: 1
+          path: linux
+          persist-credentials: false
+      - name: Require existing rootless x86 build prerequisites (no sudo)
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          for executable in gcc make bc bison flex ld nm readelf python3; do
+            command -v "$executable" >/dev/null || {
+              echo "::error::ROUND060_DECODER_FIRST_ERROR missing rootless prerequisite $executable" >&2
+              exit 3
+            }
+          done
+          test -r /usr/include/elf.h || {
+            echo "::error::ROUND060_DECODER_FIRST_ERROR missing libelf development header" >&2
+            exit 3
+          }
+      - name: Exact original ZSWAP y/n vmlinux modules GPL symvers and positive/negative real modpost
+        shell: bash
+        timeout-minutes: 135
+        run: |
+          set -Eeuo pipefail
+          umask 077
+          test "$GITHUB_REF" = refs/heads/main
+          test "$(git -C swapz rev-parse HEAD)" = "$GITHUB_SHA"
+          python3 -B swapz/tests/tools/round060-original-decoder-kbuild-verify.py original --linux-root linux
+          original="$RUNNER_TEMP/round060-linux-$ZSWAP_MATRIX"
+          probe="$RUNNER_TEMP/round060-probe-$ZSWAP_MATRIX"
+          negative="$RUNNER_TEMP/round060-negative-$ZSWAP_MATRIX"
+          log="$RUNNER_TEMP/round060-first-$ZSWAP_MATRIX.log"
+          mkdir -p "$original"
+          checked() {
+            phase="$1"; shift
+            if "$@" >"$log" 2>&1; then
+              printf 'ROUND060_ORIGINAL_KBUILD_PHASE_PASS zswap=%s phase=%s\n' "$ZSWAP_MATRIX" "$phase"
+            else
+              code=$?
+              python3 -B swapz/tests/tools/round060-original-decoder-kbuild-verify.py \
+                first-error --log "$log" --phase "$phase" --exit-code "$code"
+              return "$code"
+            fi
+          }
+          checked original-defconfig make -s -C linux "O=$original" CC=gcc defconfig
+          if [ "$ZSWAP_MATRIX" = y ]; then
+            linux/scripts/config --file "$original/.config" --enable MODULES \
+              --enable SWAP --enable ZSWAP \
+              --disable ZSWAP_COMPRESSOR_DEFAULT_LZO \
+              --enable ZSWAP_COMPRESSOR_DEFAULT_DEFLATE \
+              --enable CRYPTO_SHA256 --module LZO_DECOMPRESS --module LZ4_DECOMPRESS
+          else
+            linux/scripts/config --file "$original/.config" --enable MODULES \
+              --enable SWAP --disable ZSWAP --enable CRYPTO_SHA256 \
+              --module LZO_DECOMPRESS --module LZ4_DECOMPRESS
+          fi
+          checked original-olddefconfig make -s -C linux "O=$original" CC=gcc olddefconfig
+          checked original-vmlinux make -s -C linux "O=$original" CC=gcc -j2 vmlinux
+          checked original-all-modules make -s -C linux "O=$original" CC=gcc -j2 modules
+          test -s "$original/vmlinux"
+          test -s "$original/Module.symvers"
+          python3 -B swapz/tests/tools/round060-original-decoder-kbuild-verify.py prepare --destination "$probe"
+          checked actual-original-GPL-modpost make -s -C linux \
+            "O=$original" "M=$probe" CC=gcc -j2 W=1 KCFLAGS=-Werror modules
+          release="$(make -s -C linux "O=$original" kernelrelease)"
+          python3 -B swapz/tests/tools/round060-original-decoder-kbuild-verify.py verify-module \
+            --original-config "$original/.config" --symvers "$original/Module.symvers" \
+            --module "$probe/round060-decoder-noauth.ko" \
+            --zswap "$ZSWAP_MATRIX" --kernel-release "$release"
+          python3 -B swapz/tests/tools/round060-original-decoder-kbuild-verify.py prepare --destination "$negative"
+          if make -s -C linux "O=$original" "M=$negative" CC=gcc -j2 W=1 \
+              KCFLAGS='-Werror -DSWAPZ_ROUND060_MISSING_DECODER_EXPORT_NEGATIVE_TEST=1' \
+              modules >"$log" 2>&1; then
+            echo '::error::ROUND060_DECODER_FIRST_ERROR genuine modpost accepted nonexistent decoder' >&2
+            exit 1
+          fi
+          python3 -B swapz/tests/tools/round060-original-decoder-kbuild-verify.py \
+            verify-negative --log "$log"
+          test -z "$(git -C linux status --porcelain --untracked-files=all)"
+          echo "ROUND060_GENUINE_PINNED_X86_ZSWAP_$ZSWAP_MATRIX-GPL_DECODERS_PASS SOURCE_AUTH=0 NO_LOADED"

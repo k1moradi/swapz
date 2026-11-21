@@ -17559,3 +17559,53 @@ map publication, original upper ACK, lower durability, native source
 lease, physical device or owner production acceptance follows from
 a narrow C compiler correction. SOURCE_MAPPED_AUTHENTICATED=0 and
 PHASE_A=BLOCKED remain mandatory.
+
+## Round060 Agent4 — true original Linux decoder GPL kernel symbol/provider gate
+
+The imported LZO1X/LZ4 decoder remains a disabled, separate volatile
+representation; normal RAW_4096 is the complete ORIGINAL UNCOMPRESSED
+4096-byte page. Source-only execution of original lib/lzo and LZ4 plus
+GCC/Clang ASan/UBSan is necessary but does not prove the real selected
+Linux kernel exports, configuration or independent module lifetime.
+
+Use pristine pin `torvalds/linux@c339f4010dea8b0d754f84ace70cd1b089878ef8`,
+verify exact original Git blob SHAs of original public decoder headers,
+`lib/lzo/lzo1x_decompress_safe.c`, `lib/lz4/lz4_decompress.c`,
+respective Makefiles/Kconfig, original `crypto/lzo.c` and
+`crypto/lz4.c` driver names and `lib/crypto/sha256.c`.
+Original `lzo1x_decompress_safe` must have true
+`EXPORT_SYMBOL_GPL` with `CONFIG_LZO_DECOMPRESS` n/m/y and
+`lib/lzo/lzo_decompress` provider. Original
+`LZ4_decompress_safe` has `EXPORT_SYMBOL` via
+`CONFIG_LZ4_DECOMPRESS` and `lib/lz4/lz4_decompress`.
+Original crypto `lzo-scomp` and `lz4-scomp` compressor transforms
+are NOT independent library decoder module ownership.
+
+Build real pinned original x86 `CONFIG_ZSWAP=y` AND `=n`
+kernel vmlinux+modules using unmodified Linux C, effective original
+`.config`, real GPL `Module.symvers` and a separately named test-only
+external GPL module containing actual
+`src/kernel/zswap-import-codec.h` and `src/kernel/codec.c`.
+Kernel `W=1 KCFLAGS=-Werror` native modpost must link actual LZO1X,
+LZ4 and SHA256 symbols, with no local dummy decoder, faux symvers or
+unresolved selected import ABI. The native probe's init returns
+`-EOPNOTSUPP`, so tests NEVER load it. Test absence of selected
+symbols/config/export kind/incorrect module provider with bounded
+fail-closed verification; a *separately compiled* negative external
+module may deliberately reference an undefined symbol only to prove
+that ORIGINAL modpost truly rejects it. Do not count a compiler error,
+lack of prerequisites, sanitizer fault or an unrelated Kbuild failure
+as a successful negative-link test.
+
+If decoder is built as a kernel module, verify genuine ELF `.modinfo`
+dependencies on `lzo_decompress`/`lz4_decompress`, matched kernel
+`vermagic`, `MODULE_LICENSE("GPL")`, exact original config and
+symbol/Module.symvers export provenance. A successful linked .ko is
+NOT proof that a production imported mapping has actually acquired
+and retained module references after the source zswap pool/tfm dies,
+nor an authenticated source BIO/current DM/GC/read lifetime lease.
+Until actual loaded-kernel source-to-target independently authenticated
+release, keep import ACTIVE=0, SOURCE_MAPPED_AUTHENTICATED=0,
+PHASE_A=BLOCKED, direct compressed handoff/forced RAW bypass
+DISABLED and all privileged, actual-pressure and physical testing
+not authorized.
