@@ -17116,3 +17116,38 @@ durable write, authoritative map/GC, native ACK nor a physical 4096
 read has been authenticated. Keep AUTH=0, Phase A BLOCKED, direct
 compressed handoff and forced RAW bypass DISABLED. No privilege,
 loaded kernel, actual memory pressure, physical swap or owner make tests.
+
+## Round058 actual product DM ingress per-BIO negative-only lifetime (2026-11-21)
+
+The genuine production Device Mapper swapz_map and the ordered owner may
+record a bounded test-only negative observation in dm_per_bio_data, but only
+after the real queue_lock admission check and before incoming publication.
+The test must require a live target and context identity, exact 4096-byte
+single-bvec BIO_CLONED WRITE with REQ_SWAP and eight 512-byte target-relative
+sectors. Reject missing or changed bvec/device, split/trim/reissue, wrong
+target interval, failed target, invalid lifetime and duplicate terminal/endio
+observation. Source bvec addresses, target pointers, copied sector and a
+current-looking context are borrowed identities, never held original Linux
+swap-slot, BIO allocation or DM SRCU table leases.
+
+The ordered owner must retire a guarded observation before bio_endio invalidates
+dm_per_bio_data, and the real DM end_io observation occurs only during the
+core-owned callback. A postsuspend admission close does not retroactively
+invalidate a still-owned accepted worker; a terminally failed target still
+requires error. Pure observation must never change the existing authoritative
+mapping, RAW full original uncompressed 4096-byte payload, completion
+ownership or production default build. A source helper that returns a matching
+shape still MUST return -EOPNOTSUPP as compressed-import admission. Preserve
+the existing BIO_CLONED v1 refusal and permanently disabled import/forced
+RAW path until separately authenticated original BIO-to-target ownership
+exists.
+
+Rootless tests must extract actual guarded product C with unique anchored
+source markers, compile/execute GCC and Clang under -Wall -Wextra -Wconversion
+-Wshadow -Werror and ASan/UBSan without recovery, and require real modified
+C semantic mutants to fail via named first-error and exit one, not sanitizer
+crash or compiler failure. Current-exact original pinned x86 ZSWAP=y/n
+Kbuild and same-kernel original GPL Module.symvers/default-plus-guarded
+dm-swapz.ko are required for native compiler qualification; host stand-ins
+do not certify a loaded current target, source ownership, durable lower IO,
+one actual upper ACK or verified imported read. Phase A remains BLOCKED.

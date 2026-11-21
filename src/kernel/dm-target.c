@@ -557,6 +557,22 @@ struct swapz_round053_internal_receipt {
 /* ROUND053_DM_ACCEPTED_LIFECYCLE_DECL_END */
 #endif /* SWAPZ_ROUND053_DM_ACCEPTED_BIO_LIFECYCLE_TEST */
 
+/* ROUND058_DM_INGRESS_TYPES_START */
+#if defined(SWAPZ_ROUND058_DM_INGRESS_LIFETIME_TEST)
+/* This per-BIO read-only witness never owns a borrowed parent vector or DM table. */
+struct swapz_round058_dm_observation {
+	const struct dm_target *target;
+	const struct swapz_dm *context;
+	const struct bio *upper_bio;
+	const struct block_device *device;
+	sector_t target_relative_sector;
+	bool shape_observed;
+	bool terminal;
+	bool endio_seen;
+};
+#endif /* SWAPZ_ROUND058_DM_INGRESS_LIFETIME_TEST */
+/* ROUND058_DM_INGRESS_TYPES_END */
+
 struct swapz_bio_ref {
 	struct list_head list;
 	struct bio *bio;
@@ -586,6 +602,9 @@ struct swapz_bio_ref {
 	bool published_deferred;
 	struct swapz_ack_dwell_batch *ack_batch;
 	int preparation_error;
+#if defined(SWAPZ_ROUND058_DM_INGRESS_LIFETIME_TEST)
+	struct swapz_round058_dm_observation round058_observation;
+#endif /* SWAPZ_ROUND058_DM_INGRESS_LIFETIME_TEST */
 #if defined(SWAPZ_ROUND052_DM_INTERNAL_ONE_SHOT_TEST)
 	struct swapz_round052_internal_ticket round052_ticket;
 #endif /* SWAPZ_ROUND052_DM_INTERNAL_ONE_SHOT_TEST */
@@ -1294,6 +1313,120 @@ struct swapz_dm {
  * reissued/failed BIO, or GC copy as a second authenticated foreground WRITE.
  * This flag is reset at every accepted per-BIO descriptor initialization.
  */
+/* ROUND058_DM_INGRESS_HELPERS_START */
+#if defined(SWAPZ_ROUND058_DM_INGRESS_LIFETIME_TEST)
+/*
+ * Observe only while DM itself owns a live target and BIO. The shared bvec,
+ * bdev and source swap entry are borrowed identities, NOT retained leases.
+ * A complete shape never grants external compressed-import authorization.
+ */
+static __used noinline int swapz_round058_dm_ingress_refuse(
+		const struct dm_target *target, const struct swapz_dm *ctx,
+		const struct bio *upper_bio,
+		struct swapz_round058_dm_observation *observation)
+{
+	sector_t relative_sector;
+	struct bio_vec vector;
+
+	if (!observation)
+		return -EINVAL;
+	/* Reset even when this per-BIO memory was used by a prior submission. */
+	memset(observation, 0, sizeof(*observation));
+	if (!target || !ctx || !upper_bio)
+		return -EINVAL;
+	if (!READ_ONCE(ctx->accepting) || smp_load_acquire(&ctx->failed))
+		return -ESHUTDOWN;
+	if (target->private != ctx || ctx->target != target ||
+	    !ctx->maps || ctx->authority.maps != ctx->maps ||
+	    target->len % SWAPZ_SECTORS ||
+	    target->len / SWAPZ_SECTORS != ctx->logical_pages)
+		return -ESTALE;
+	if (bio_op(upper_bio) != REQ_OP_WRITE ||
+	    !(upper_bio->bi_opf & REQ_SWAP) ||
+	    upper_bio->bi_iter.bi_size != SWAPZ_BLOCK_BYTES ||
+	    bio_sectors(upper_bio) != SWAPZ_SECTORS ||
+	    !(upper_bio->bi_flags & (1U << BIO_CLONED)))
+		return -EOPNOTSUPP;
+	/* These are the DM target-relative sectors, NOT original swapfile or
+	 * underlying backing-device sectors; protect the whole eight-sector page.
+	 */
+	relative_sector = upper_bio->bi_iter.bi_sector;
+	if (relative_sector % SWAPZ_SECTORS ||
+	    relative_sector >= target->len ||
+	    SWAPZ_SECTORS > target->len - relative_sector)
+		return -ERANGE;
+	if (!upper_bio->bi_io_vec || !upper_bio->bi_bdev ||
+	    upper_bio->bi_vcnt != 1U ||
+	    upper_bio->bi_iter.bi_idx || upper_bio->bi_iter.bi_offset)
+		return -EMSGSIZE;
+	vector = bio_iter_iovec(upper_bio, upper_bio->bi_iter);
+	if (!vector.bv_page || vector.bv_offset ||
+	    vector.bv_len != SWAPZ_BLOCK_BYTES)
+		return -EMSGSIZE;
+
+	observation->target = target;
+	observation->context = ctx;
+	observation->upper_bio = upper_bio;
+	observation->device = upper_bio->bi_bdev;
+	observation->target_relative_sector = relative_sector;
+	observation->shape_observed = true;
+	/* A live clone shape is not a source-owner/DM SRCU/codec/durable lease. */
+	return -EOPNOTSUPP;
+}
+
+/* The ordered owner calls this before bio_endio() invalidates per-BIO data. */
+static __used noinline int swapz_round058_dm_terminal_refuse(
+		const struct swapz_dm *ctx, const struct bio *upper_bio,
+		struct swapz_round058_dm_observation *observation)
+{
+	if (!observation)
+		return -EINVAL;
+	if (observation->terminal)
+		return -EALREADY;
+	/* A failed/stale observation is also terminal, never resurrectable. */
+	observation->terminal = true;
+	if (!observation->shape_observed)
+		return -EOPNOTSUPP;
+	if (!ctx || !upper_bio || observation->context != ctx ||
+	    observation->upper_bio != upper_bio ||
+	    observation->target != ctx->target ||
+	    ctx->target->private != ctx ||
+	    observation->device != upper_bio->bi_bdev ||
+	    observation->target_relative_sector != upper_bio->bi_iter.bi_sector ||
+	    upper_bio->bi_iter.bi_size != SWAPZ_BLOCK_BYTES)
+		return -ESTALE;
+	/* ->postsuspend may close new admission while this accepted BIO drains.
+	 * Do not reject its completion solely because ctx->accepting is false.
+	 */
+	if (smp_load_acquire(&ctx->failed))
+		return -ESHUTDOWN;
+	return -EOPNOTSUPP;
+}
+
+/* The live DM ->end_io callback owns the same target BIO until it returns. */
+static __used noinline int swapz_round058_dm_endio_refuse(
+		const struct dm_target *target, const struct bio *upper_bio,
+		struct swapz_round058_dm_observation *observation)
+{
+	if (!observation)
+		return -EINVAL;
+	if (observation->endio_seen)
+		return -EALREADY;
+	observation->endio_seen = true;
+	if (!observation->shape_observed)
+		return -EOPNOTSUPP;
+	if (!target || !upper_bio || !observation->terminal ||
+	    observation->target != target ||
+	    observation->context != target->private ||
+	    observation->upper_bio != upper_bio ||
+	    observation->device != upper_bio->bi_bdev ||
+	    observation->target_relative_sector != upper_bio->bi_iter.bi_sector)
+		return -ESTALE;
+	return -EOPNOTSUPP;
+}
+#endif /* SWAPZ_ROUND058_DM_INGRESS_LIFETIME_TEST */
+/* ROUND058_DM_INGRESS_HELPERS_END */
+
 static void swapz_count_verified_zswap_writeback_commit(struct swapz_dm *ctx,
 							struct bio *bio)
 {
@@ -2026,6 +2159,11 @@ static void swapz_complete(struct bio *bio, int error)
 	struct swapz_prepared_page *prepared = entry ?
 		READ_ONCE(entry->prepared_page) : NULL;
 
+#if defined(SWAPZ_ROUND058_DM_INGRESS_LIFETIME_TEST)
+	/* Retire before bio_endio can release or recycle dm_per_bio_data. */
+	(void)swapz_round058_dm_terminal_refuse(ctx, bio,
+						     &entry->round058_observation);
+#endif /* SWAPZ_ROUND058_DM_INGRESS_LIFETIME_TEST */
 	/* Any BIO still owned when the target becomes terminally failed must
 	 * never receive a fresh success, even if its caller missed the error.
 	 * Preserve the preexisting BIO error (if any) rather than clearing it. */
@@ -2181,6 +2319,15 @@ static int swapz_end_io(struct dm_target *ti, struct bio *bio,
 {
 	struct swapz_dm *ctx = ti->private;
 
+#if defined(SWAPZ_ROUND058_DM_INGRESS_LIFETIME_TEST)
+	/* The original DM clone callback still owns per-BIO private storage. */
+	if (bio_op(bio) == REQ_OP_WRITE && bio_sectors(bio)) {
+		struct swapz_bio_ref *entry = dm_per_bio_data(bio, sizeof(*entry));
+
+		(void)swapz_round058_dm_endio_refuse(ti, bio,
+						   &entry->round058_observation);
+	}
+#endif /* SWAPZ_ROUND058_DM_INGRESS_LIFETIME_TEST */
 	if (bio_op(bio) != REQ_OP_WRITE || !bio_sectors(bio))
 		return DM_ENDIO_DONE;
 	if (*error)
@@ -13808,6 +13955,15 @@ static int swapz_map(struct dm_target *ti, struct bio *bio)
 				mutex_unlock(&ctx->ordered_owner);
 			return READ_ONCE(ctx->failed) ? DM_MAPIO_KILL : DM_MAPIO_REQUEUE;
 		}
+#if defined(SWAPZ_ROUND058_DM_INGRESS_LIFETIME_TEST)
+		/* Guard is observation-only; never alter normal admission or ACK. */
+		memset(&entry->round058_observation, 0,
+		       sizeof(entry->round058_observation));
+		if (bio_op(bio) == REQ_OP_WRITE && count == SWAPZ_SECTORS &&
+		    (bio->bi_opf & REQ_SWAP))
+			(void)swapz_round058_dm_ingress_refuse(ti, ctx, bio,
+						&entry->round058_observation);
+#endif /* SWAPZ_ROUND058_DM_INGRESS_LIFETIME_TEST */
 		if (entry->write_origin == SWAPZ_WRITE_ORIGIN_ZSWAP_STORED_WRITEBACK)
 			atomic64_inc(&ctx->verified_zswap_origin_admitted);
 		if (count && (bio_op(bio) == REQ_OP_READ ||
