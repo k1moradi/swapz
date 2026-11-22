@@ -18754,3 +18754,84 @@ error. Exact original native config positive/negative still pending
 until a new source-bound host success and native pinned UML execution
 actually complete. Original full 4096, no-auth/bypass and physical
 SWAPSPACE2 safety contracts remain fully in force.
+
+## Round069 Agent5 — source-identical pinned original kernel BIO endio JOINED real authority in one native KUnit
+
+The previous Round068 TWO separate positive paths (host source-compiled
+BIO-shaped callback and genuine original pinned Linux three BIO KUnit cases)
+must NEVER be presented as a joined native kernel authority proof.
+Require a FRESH test-only native pinned Linux original block/bio.c
+translation unit to DIRECTLY include BYTE-IDENTICAL actual production
+src/kernel/authority.c and codec.c plus their exact authority.h/codec.h/
+gc-cost.h headers. Check pinned original Linux
+c339f4010dea8b0d754f84ace70cd1b089878ef8 and the three original
+bio.c/bio.h/blk_types.h Git blobs before any staging, plus five complete
+unchanged actual source product Git blobs and independent staged SHA256
+postimages. The only original native modification must be a guarded
+append-only KUnit to original block/bio.c and isolated test-only actual
+source include copies; no production Makefile, physical device, zswap MM,
+Agent3 DM or Agent4 decoder-owner changes. All Round066/067/068/069
+test guards are default-undefined outside disposable test invocation.
+
+ACTUALLY EXECUTE original bio_alloc/bio_add_page/bio_for_each_segment/
+kmap_local_page, original bio_endio on a kernel workqueue and the real
+guarded swapz_import_lower_end_write/flush/read C functions in the SAME
+native KUnit execution. bio_endio must only capture bounded exact
+token/sector/op/FUA/PREFLUSH/length/status and queue a SEPARATE sleepable
+ordered work item that acquires owner mutex and calls real authority C.
+Do NOT call the sleepable allocator or CRC whole extent under actual
+kernel BIO endio/IRQ context. The original native BIO may append its own
+REQ_ALLOC_CACHE allocation flag; compare the exact externally issued
+REQ_OP_WRITE/READ/FLUSH/FUA/PREFLUSH mask rather than erroneously rejecting
+a valid kernel-internal allocation flag.
+
+The true original kernel LZO1X_1 or raw LZ4 compressor must create
+ALREADY-COMPRESSED native codec-tagged test bytes. Copy into caller-owned
+BIO bvec pages before destroying/overwriting source scratch, retaining
+them until real workqueue BIO completion drains. Protect first physical
+4096-byte SWAPSPACE2 header and parent partition, map logical start block
+S to physical 512-byte sector 8*(S+1); only use data-only zero padded
+4/8/16KiB memory lower extents with fixed 20B ordinary map untouched.
+Native original CRC32C plus native sha256 of independent EXACT full
+uncompressed ORIGINAL 4096-byte decode must match before accepting
+reader output; never reinterpret ordinary RAW_4096. Actual
+swapz_stage/reservation/live_records/extent_classes/committed_blocks
+are linked and observed, not copied state. Only FULL actual BIO WRITE
+completion and modeled REQ_FUA or separately completed postwrite FLUSH
+may make the TEST-only tagged map visible. Short/torn/error, absent
+effective FUA or failed FLUSH, duplicate/late callback and close while
+pending MUST refuse publication and conservatively quarantine any
+possibly written full physical extent. GC replacement must keep the old
+real physical extent pinned until its old native lower READ callback
+finishes and releases its exact reader pin; test stale and repeat ticket
+refusal, no upper bio_endio/ACK and no stale data exposure. Actual
+bio_endio is a memory-backed fake lower callback, NEVER real media
+durable FUA; no native submit_bio to a physical or loaded device.
+
+Run strict changed ACTUAL source authority.c+codec.c GCC and Clang
+-Wall -Wextra -Wconversion -Wshadow -Werror, ASan+UBSan,
+at least seven real linked callback scenarios plus FOURTEEN distinct
+COMPILED AND EXECUTED genuine changed-real-authority-C semantic mutants
+PER compiler. Compiler failures, skipped execution, sanitizer crashes,
+timeouts or inert mutations never count as semantic kills. For the NEW
+test source, verify actual native translation-unit source copies and
+negative stage plans, then execute FOUR exact pinned-original Linux
+KUnit cases in JSON+KTAP, all 4 PASS, zero fail, skip, errors/crashes.
+Require one truly executed native original kernel BIO endio to real
+guarded authority worker, not independent host and native cases
+misdescribed as joined. Preserve existing Round068/067/066/059/057
+source-bound regression workflows and complete old+peer first-parent
+testing standards; share actual SHA/parent/CI job/first errors on #186.
+
+Linux MM exclusively controls native compressed zswap RAM residency
+and NATURAL pressure-driven eviction; swapz disk packing/GC only,
+no competing reclaim/shrinker or forced bypass. All imported ACTIVE0,
+SOURCE_MAPPED_AUTHENTICATED=0, PHASE_A=BLOCKED, direct compressed
+handoff and forced RAW bypass DISABLED. No real physical storage FUA,
+original authenticated xarray source, decoder provider lifetime,
+first/current native DM table, actual selected upper BIO, upper ACK
+or production map authorization. No owner make test/fast_test,
+privileged/loaded kernel, real swap partition, hardware/media,
+actual-pressure, mkswap/swapoff/repartition. Pending native build
+is PROGRESS; only exact-source terminal executed qualification is
+scoped REPORT_READY.

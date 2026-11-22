@@ -1,0 +1,179 @@
+name: Round069 true original BIO endio joined actual authority callback no AUTH
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'src/kernel/authority.c'
+      - 'src/kernel/authority.h'
+      - 'tests/runtime/native/fixtures/round069-original-bio-authority-joined.cfrag'
+      - 'tests/tools/round069-stage-original-bio-authority-joined.py'
+      - 'tests/tools/round069-original-bio-authority-joined-verify.py'
+      - '.github/workflows/phase-a-round069-original-bio-authority-joined-noauth.yml'
+      - 'docs/testing_standards.md'
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  exact-real-product-GCC-Clang-mutants-host:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    env:
+      SWAPZ_PUSH_BEFORE_SHA: ${{ github.event.before }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Exact sole main pristine checkout
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          test "$GITHUB_REF" = refs/heads/main
+          test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
+          test "$(git branch --show-current)" = main
+          test -z "$(git status --porcelain --untracked-files=all)"
+          git diff --check HEAD^ HEAD
+      - name: Disposable rootless host original codec link prerequisites
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          sudo apt-get update -qq
+          sudo DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
+            gcc clang liblzo2-dev liblz4-dev libssl-dev
+      - name: REAL authority source exact GCC and Clang strict ASan UBSan plus 28 compiled EXECUTED C semantic mutants
+        run: python3 -B tests/tools/round069-original-bio-authority-joined-verify.py
+      - name: Preserve original and peer first-parent canonical testing standards
+        run: python3 -B tests/runtime/native/repository-policy-test.py --enforce
+
+  actual-original-pinned-Linux-joined-native-KUnit:
+    needs: exact-real-product-GCC-Clang-mutants-host
+    runs-on: ubuntu-24.04
+    timeout-minutes: 110
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          path: swapz
+          persist-credentials: false
+      - uses: actions/checkout@v4
+        with:
+          repository: torvalds/linux
+          ref: c339f4010dea8b0d754f84ace70cd1b089878ef8
+          fetch-depth: 1
+          path: linux
+          persist-credentials: false
+      - name: Original unprivileged UML kernel build prerequisites
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          sudo apt-get update -qq
+          sudo DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
+            build-essential bc bison flex libelf-dev libssl-dev \
+            libncurses-dev python3 python3-pyelftools binutils
+      - name: Verify PINNED original BIO source and stage BYTE-IDENTICAL actual product C in one native test
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          umask 077
+          test "$(git -C swapz rev-parse HEAD)" = "$GITHUB_SHA"
+          test "$(git -C linux rev-parse HEAD)" = c339f4010dea8b0d754f84ace70cd1b089878ef8
+          mkdir -p round069-evidence
+          python3 -B swapz/tests/tools/round069-stage-original-bio-authority-joined.py \
+            --linux-root linux --manifest round069-evidence/staged.json --verify-only
+          python3 -B swapz/tests/tools/round069-stage-original-bio-authority-joined.py \
+            --linux-root linux --manifest round069-evidence/staged.json
+          git -C linux diff --check
+          python3 -B - <<'PY'
+          import hashlib,json,pathlib
+          plan=json.loads(pathlib.Path("round069-evidence/staged.json").read_text())
+          assert plan["original"]=="c339f4010dea8b0d754f84ace70cd1b089878ef8"
+          assert plan["source_mapped_authenticated"] is False
+          assert plan["phase_a"]=="BLOCKED"
+          assert plan["joined_real_linux_bio_endio_to_real_authority"] is True
+          assert len(plan["files"])==6
+          for row in plan["files"]:
+              data=(pathlib.Path("linux")/row["path"]).read_bytes()
+              assert hashlib.sha256(data).hexdigest()==row["sha256"]
+          print("PASS original_native_join exact six byte-identical source postimages AUTH0")
+          PY
+      - name: ACTUALLY execute pinned-original Linux BIO endio to source-exact real authority.c/codec.c allocator KUnit
+        shell: bash
+        timeout-minutes: 86
+        run: |
+          set -Eeuo pipefail
+          umask 077
+          mkdir -p round069-evidence
+          log=round069-evidence/native-first-error.log
+          out="$RUNNER_TEMP/round069-original-uml"
+          result="$PWD/round069-evidence/native-original.json"
+          config="$PWD/round069-evidence/original.kunitconfig"
+          cat > "$config" <<'KUNIT_CFG'
+          CONFIG_KUNIT=y
+          CONFIG_BLOCK=y
+          CONFIG_SWAP=y
+          CONFIG_CRYPTO=y
+          CONFIG_CRYPTO_SHA256=y
+          CONFIG_CRYPTO_CRC32C=y
+          CONFIG_CRYPTO_LZO=y
+          CONFIG_CRYPTO_LZ4=y
+          # CONFIG_CGROUPS is not set
+          # CONFIG_KUNIT_ALL_TESTS is not set
+          KUNIT_CFG
+          flags='-DSWAPZ_ROUND066_IMPORT_DISK_TEST=1 -DSWAPZ_ROUND067_IMPORT_DISK_PAYLOAD_TEST=1 -DSWAPZ_ROUND068_IMPORT_LOWER_BIO_TEST=1 -DSWAPZ_ROUND069_ORIGINAL_BIO_AUTHORITY_JOIN_KUNIT=1'
+          set +e
+          timeout -k 10s 79m python3 -B linux/tools/testing/kunit/kunit.py run \
+            --arch=um --build_dir="$out" --kunitconfig="$config" \
+            --make_options="KCFLAGS=$flags -Werror" --jobs=2 --timeout=140 \
+            --json="$result" 'swapz_round069_joined_native_authority_bio*' \
+            > "$log" 2>&1
+          status=$?
+          set -e
+          if test "$status" -ne 0; then
+            python3 -B - "$log" "$status" <<'PY'
+          import pathlib,re,sys
+          log,exit_code=sys.argv[1:]
+          print("::error::ROUND069_NATIVE_FIRST_ERROR phase=compiled-original-joined-kunit "
+                "exit="+exit_code+" evidence=round069-evidence/native-first-error.log")
+          lines=pathlib.Path(log).read_text(errors="replace").splitlines() if pathlib.Path(log).exists() else []
+          first=next((line for line in lines if re.search(
+              r"(error:|error\[|FAILED|Traceback|KASAN:|UBSAN:|Not all Kconfig)",
+              line,re.I)),None)
+          if first:
+              first=re.sub(r"(?:/[^:\s]+)+/","original-source/",first)
+              print("::error::ROUND069_NATIVE_FIRST_DIAGNOSTIC "+first[:230])
+          PY
+            exit "$status"
+          fi
+          test -x "$out/linux" && test -s "$result" && test -s "$out/test.log"
+          for name in CONFIG_KUNIT=y CONFIG_BLOCK=y CONFIG_SWAP=y \
+                      CONFIG_CRYPTO_LZO=y CONFIG_CRYPTO_LZ4=y \
+                      CONFIG_CRYPTO_SHA256=y CONFIG_CRYPTO_CRC32C=y; do
+            grep -Fxq "$name" "$out/.config"
+          done
+          python3 -B - "$result" "$out/test.log" <<'PY'
+          import json,pathlib,re,sys
+          document=json.loads(pathlib.Path(sys.argv[1]).read_text())
+          log=pathlib.Path(sys.argv[2]).read_text()
+          pending=[document];matches=[]
+          while pending:
+              node=pending.pop()
+              if node.get("name")=="swapz_round069_joined_native_authority_bio":
+                  matches.append(node)
+              pending.extend(node.get("sub_groups",[]))
+          assert len(matches)==1
+          cases=matches[0]["test_cases"]
+          assert {x["name"] for x in cases}=={
+              "swapz_round069_native_fua_lz4_kunit",
+              "swapz_round069_native_postwrite_lzo_flush_kunit",
+              "swapz_round069_native_short_close_duplicate_kunit",
+              "swapz_round069_native_reader_pin_gc_kunit"
+          }
+          assert all(x["status"]=="PASS" for x in cases)
+          assert all(matches[0]["misc"][key]==value for key,value in
+                     dict(tests=4,passed=4,failed=0,skipped=0,crashed=0,errors=0).items())
+          assert "swapz_round069_joined_native_authority_bio" in log
+          assert not re.search(r"(?m)^not ok [0-9]+ .*swapz_round069",log)
+          print("PASS genuine original pinned kernel REAL bio_endio JOINED actual "
+                "authority.c+codec.c native KUnit=4 4/8/16KiB original "
+                "LZO1X LZ4 full4096 SHA CRC reader GC close FUA and flush "
+                "modeled-memory=YES durable-device=NOT_PROVEN upper-ACK=NONE AUTH0")
+          PY

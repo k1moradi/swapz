@@ -1,0 +1,822 @@
+
+/* ROUND069_ORIGINAL_BIO_AUTHORITY_JOIN_BEGIN
+ * TEST ONLY. Original pinned Linux block/bio.c's real bio_endio, original
+ * kernel bvec/page functions and source-exact swapz authority.c/codec.c are
+ * compiled into this SAME kernel translation unit; no host BIO-shaped mock.
+ * Neither submit_bio nor an actual block_device, upper ACK or durable FUA.
+ */
+#if defined(SWAPZ_ROUND069_ORIGINAL_BIO_AUTHORITY_JOIN_KUNIT) && IS_ENABLED(CONFIG_KUNIT)
+#include <kunit/test.h>
+#include <linux/completion.h>
+#include <linux/highmem.h>
+#include <linux/lz4.h>
+#include <linux/lzo.h>
+#include <linux/mm.h>
+#include <linux/mutex.h>
+#include <linux/workqueue.h>
+#include <linux/vmalloc.h>
+#include <crypto/sha2.h>
+/* These are BYTE-FOR-BYTE copied real product files, not generated stubs. */
+#include "swapz_round069/codec.c"
+#include "swapz_round069/authority.c"
+
+static_assert(sizeof(struct swapz_map) == 20);
+static_assert(sizeof(struct swapz_import_disk_pool) <= 1536);
+static_assert(SWAPZ_IMPORT_DISK_ACTIVE == 0);
+static_assert(SWAPZ_IMPORT_LOWER_BIO_ACTIVE == 0);
+static_assert(SWAPZ_IMPORT_LOWER_OP_READ == REQ_OP_READ);
+static_assert(SWAPZ_IMPORT_LOWER_OP_WRITE == REQ_OP_WRITE);
+static_assert(SWAPZ_IMPORT_LOWER_OP_FLUSH == REQ_OP_FLUSH);
+static_assert(SWAPZ_IMPORT_LOWER_REQ_FUA == (unsigned int)REQ_FUA);
+static_assert(SWAPZ_IMPORT_LOWER_REQ_PREFLUSH == (unsigned int)REQ_PREFLUSH);
+
+#define SWAPZ_JOIN_LOGICAL 64U
+#define SWAPZ_JOIN_PHYSICAL 1024U
+#define SWAPZ_JOIN_LOWER_BYTES ((SWAPZ_JOIN_PHYSICAL + 1U) * SWAPZ_BLOCK_BYTES)
+#define SWAPZ_JOIN_HEADER_VALUE 0x5cU
+#define SWAPZ_JOIN_MAX_BVECS 4U
+
+struct swapz_round069_joined {
+	struct mutex authority_lock;
+	struct swapz_authority authority;
+	struct swapz_import_disk_pool pool;
+	struct swapz_import_lower_bio_owner writer;
+	struct swapz_import_lower_bio_owner reader;
+	struct swapz_map maps[SWAPZ_JOIN_LOGICAL];
+	swapz_u16 live_records[SWAPZ_JOIN_PHYSICAL];
+	swapz_u8 extent_classes[SWAPZ_JOIN_PHYSICAL];
+	swapz_u8 *lower;
+	void *codec_work;
+	swapz_u8 original[SWAPZ_BLOCK_BYTES];
+	swapz_u8 selected_bytes[SWAPZ_BLOCK_BYTES];
+	swapz_u8 read_compressed[SWAPZ_BLOCK_BYTES];
+	swapz_u8 decoded[SWAPZ_BLOCK_BYTES];
+	swapz_u8 output[SWAPZ_BLOCK_BYTES];
+	/* No upper bio_endio is constructed or invoked by this suite. */
+	unsigned int upper_ack_count;
+};
+
+enum swapz_round069_io_kind {
+	SWAPZ_JOIN_IO_WRITE = 1,
+	SWAPZ_JOIN_IO_FLUSH,
+	SWAPZ_JOIN_IO_READ,
+};
+
+struct swapz_round069_io {
+	struct work_struct fake_lower_work;
+	struct work_struct ordered_owner_work;
+	struct completion finished;
+	struct swapz_round069_joined *joined;
+	struct swapz_import_lower_bio_owner *owner;
+	struct swapz_import_lower_bio_request submitted;
+	struct swapz_import_lower_bio_request callback;
+	struct swapz_import_lower_bio_request postflush;
+	struct page *pages[SWAPZ_JOIN_MAX_BVECS];
+	struct bio *bio;
+	swapz_u8 *read_extent; /* preallocated, disjoint, full READ snapshot */
+	swapz_u32 completed_bytes;
+	swapz_u32 forced_bytes;
+	blk_status_t forced_status;
+	blk_status_t callback_status;
+	unsigned int callbacks;
+	unsigned int owner_calls;
+	int owner_result;
+	enum swapz_round069_io_kind kind;
+};
+
+#define SWAPZ_JOIN_ENSURE(condition) do { \
+	if (!(condition)) { \
+		pr_err("ROUND069_JOIN_FIRST_ERROR line=%d\n", __LINE__); \
+		return -EINVAL; \
+	} \
+} while (0)
+
+/* Four BIOs and their pages are individually caller-owned; the actual
+ * lower and ordered authority work items MUST both finish before bio_put
+ * and page release. No queue holds any stack-lifetime state. */
+static struct swapz_round069_joined *swapz_round069_join_alloc(void)
+{
+	struct swapz_round069_joined *joined;
+	unsigned int index;
+
+	joined = kvzalloc(sizeof(*joined), GFP_KERNEL);
+	if (!joined)
+		return NULL;
+	joined->lower = kvzalloc(SWAPZ_JOIN_LOWER_BYTES, GFP_KERNEL);
+	joined->codec_work = kvzalloc(max_t(size_t, LZO1X_1_MEM_COMPRESS,
+					   LZ4_MEM_COMPRESS), GFP_KERNEL);
+	if (!joined->lower || !joined->codec_work)
+		goto error;
+	mutex_init(&joined->authority_lock);
+	memset(joined->lower, SWAPZ_JOIN_HEADER_VALUE, SWAPZ_BLOCK_BYTES);
+	for (index = 0; index < SWAPZ_BLOCK_BYTES; ++index)
+		joined->original[index] = (u8)(
+			((index / 31U) * 13U +
+			 (index % 31U == 3U ? 17U : 4U)) & 255U);
+	if (swapz_authority_init(&joined->authority, joined->maps,
+				 joined->live_records, joined->extent_classes,
+				 SWAPZ_JOIN_LOGICAL, SWAPZ_JOIN_PHYSICAL))
+		goto error;
+	swapz_import_disk_init(&joined->pool, &joined->authority);
+	swapz_import_lower_init(&joined->writer, &joined->pool);
+	swapz_import_lower_init(&joined->reader, &joined->pool);
+	return joined;
+error:
+	kvfree(joined->codec_work);
+	kvfree(joined->lower);
+	kvfree(joined);
+	return NULL;
+}
+
+static void swapz_round069_join_free(struct swapz_round069_joined *joined)
+{
+	if (!joined)
+		return;
+	kvfree(joined->codec_work);
+	kvfree(joined->lower);
+	kvfree(joined);
+}
+
+static bool swapz_round069_header_intact(const struct swapz_round069_joined *joined)
+{
+	unsigned int index;
+
+	for (index = 0; index < SWAPZ_BLOCK_BYTES; ++index)
+		if (joined->lower[index] != SWAPZ_JOIN_HEADER_VALUE)
+			return false;
+	return true;
+}
+
+static int swapz_round069_select_original(struct swapz_round069_joined *joined,
+			swapz_u8 codec, swapz_u32 logical,
+			swapz_u64 epoch, struct swapz_authority_import_spec *spec)
+{
+	size_t compressed_length = sizeof(joined->selected_bytes);
+	int compressed;
+
+	memset(spec, 0, sizeof(*spec));
+	if (codec == SWAPZ_AUTHORITY_IMPORT_LZO1X) {
+		compressed = lzo1x_1_compress(joined->original,
+					    SWAPZ_BLOCK_BYTES,
+					    joined->selected_bytes,
+					    &compressed_length,
+					    joined->codec_work);
+		if (compressed != LZO_E_OK)
+			return -EBADMSG;
+	} else if (codec == SWAPZ_AUTHORITY_IMPORT_LZ4) {
+		compressed = LZ4_compress_default(
+			(const char *)joined->original,
+			(char *)joined->selected_bytes, SWAPZ_BLOCK_BYTES,
+			(int)sizeof(joined->selected_bytes), joined->codec_work);
+		if (compressed <= 0)
+			return -EBADMSG;
+		compressed_length = (size_t)compressed;
+	} else {
+		return -EOPNOTSUPP;
+	}
+	if (!compressed_length || compressed_length > SWAPZ_MAX_COMPRESSED)
+		return -EMSGSIZE;
+	spec->source_swap_slot = (swapz_u64)logical + 1U;
+	spec->source_entry_identity = 0x1122U;
+	spec->source_store_generation = 0x3344U;
+	spec->gc_epoch = epoch;
+	spec->logical_page = logical;
+	spec->compressed_crc32c =
+		swapz_crc32c_bytes(joined->selected_bytes,
+				   (swapz_u32)compressed_length);
+	spec->compressed_length = (swapz_u16)compressed_length;
+	spec->codec = codec;
+	spec->codec_version = 1U;
+	spec->requested_fua = 1U;
+	sha256(joined->original, SWAPZ_BLOCK_BYTES, spec->original_sha256);
+	return 0;
+}
+
+static void swapz_round069_fake_lower_work(struct work_struct *work);
+static void swapz_round069_ordered_authority_work(struct work_struct *work);
+
+/* A separately copied source payload in caller-owned real bio_vec pages
+ * outlives source compressor work memory and the original source buffer. */
+static struct swapz_round069_io *swapz_round069_make_io(
+			struct swapz_round069_joined *joined,
+			struct swapz_import_lower_bio_owner *owner,
+			const struct swapz_import_lower_bio_request *request,
+			enum swapz_round069_io_kind kind, const swapz_u8 *bytes,
+			swapz_u16 compressed_length)
+{
+	struct swapz_round069_io *io;
+	unsigned int index, blocks;
+	blk_opf_t opf;
+
+	if (!request || !joined || !owner || request->bytes % SWAPZ_BLOCK_BYTES ||
+	    request->bytes > SWAPZ_MAX_EXTENT_BYTES)
+		return NULL;
+	blocks = request->bytes / SWAPZ_BLOCK_BYTES;
+	if (kind == SWAPZ_JOIN_IO_FLUSH && (blocks || bytes))
+		return NULL;
+	if (kind != SWAPZ_JOIN_IO_FLUSH &&
+	    (blocks != 1U && blocks != 2U && blocks != 4U))
+		return NULL;
+	io = kzalloc(sizeof(*io), GFP_KERNEL);
+	if (!io)
+		return NULL;
+	io->joined = joined;
+	io->owner = owner;
+	io->submitted = *request;
+	io->kind = kind;
+	init_completion(&io->finished);
+	io->forced_bytes = request->bytes;
+	io->forced_status = BLK_STS_OK;
+	io->owner_result = -EINPROGRESS;
+	INIT_WORK(&io->ordered_owner_work, swapz_round069_ordered_authority_work);
+	INIT_WORK(&io->fake_lower_work, swapz_round069_fake_lower_work);
+	if (kind == SWAPZ_JOIN_IO_READ) {
+		io->read_extent = kvzalloc(request->bytes, GFP_KERNEL);
+		if (!io->read_extent)
+			goto error;
+	}
+	opf = request->opf;
+	io->bio = bio_alloc(NULL, (unsigned short)blocks, opf, GFP_KERNEL);
+	if (!io->bio)
+		goto error;
+	io->bio->bi_iter.bi_sector = request->sector;
+	io->bio->bi_private = io;
+	for (index = 0; index < blocks; ++index) {
+		void *mapped;
+
+		io->pages[index] = alloc_page(GFP_KERNEL);
+		if (!io->pages[index])
+			goto error;
+		mapped = kmap_local_page(io->pages[index]);
+		memset(mapped, 0, SWAPZ_BLOCK_BYTES);
+		if (kind == SWAPZ_JOIN_IO_WRITE && bytes) {
+			const size_t offset = (size_t)index * SWAPZ_BLOCK_BYTES;
+
+			if (offset < compressed_length)
+				memcpy(mapped, bytes + offset,
+					min_t(size_t, SWAPZ_BLOCK_BYTES,
+					      compressed_length - offset));
+		}
+		kunmap_local(mapped);
+		if (bio_add_page(io->bio, io->pages[index],
+				 SWAPZ_BLOCK_BYTES, 0) != SWAPZ_BLOCK_BYTES)
+			goto error;
+	}
+	return io;
+error:
+	if (io->bio)
+		bio_put(io->bio);
+	for (index = 0; index < SWAPZ_JOIN_MAX_BVECS; ++index)
+		if (io->pages[index])
+			__free_page(io->pages[index]);
+	kvfree(io->read_extent);
+	kfree(io);
+	return NULL;
+}
+
+static void swapz_round069_release_io(struct swapz_round069_io *io)
+{
+	unsigned int index;
+
+	if (!io)
+		return;
+	/* After completion() both works are quiescent. An aborted test also
+	 * flushes both before release, never freeing an in-flight bvec. */
+	flush_work(&io->fake_lower_work);
+	flush_work(&io->ordered_owner_work);
+	if (io->bio)
+		bio_put(io->bio);
+	for (index = 0; index < SWAPZ_JOIN_MAX_BVECS; ++index)
+		if (io->pages[index])
+			__free_page(io->pages[index]);
+	kvfree(io->read_extent);
+	kfree(io);
+}
+
+/* Execute exact ORIGINAL bio_for_each_segment and kmap_local_page against
+ * anonymous memory-backed lower data, never submit_bio/bdev. The exact
+ * callback length may be shortened for negative tests without modifying
+ * the kernel's real bi_iter shape. */
+static void swapz_round069_fake_lower_work(struct work_struct *work)
+{
+	struct swapz_round069_io *io =
+		container_of(work, struct swapz_round069_io, fake_lower_work);
+	struct bvec_iter iterator;
+	struct bio_vec vector;
+	size_t offset = (size_t)io->submitted.sector * 512U;
+	size_t progressed = 0U;
+	size_t remaining = min_t(size_t, io->forced_bytes,
+					io->submitted.bytes);
+	const size_t lower_size = SWAPZ_JOIN_LOWER_BYTES;
+	blk_status_t status = io->forced_status;
+
+	if (io->submitted.sector < SWAPZ_IMPORT_LOWER_SECTORS_PER_BLOCK ||
+	    offset > lower_size || io->submitted.bytes > lower_size - offset) {
+		status = BLK_STS_IOERR;
+		remaining = 0U;
+	}
+	if (io->kind != SWAPZ_JOIN_IO_FLUSH) {
+		bio_for_each_segment(vector, io->bio, iterator) {
+			const size_t length = min_t(size_t, vector.bv_len,
+						   remaining);
+			void *mapped;
+
+			if (!length)
+				break;
+			mapped = kmap_local_page(vector.bv_page);
+			if (io->kind == SWAPZ_JOIN_IO_WRITE)
+				memcpy(io->joined->lower + offset,
+				       (u8 *)mapped + vector.bv_offset, length);
+			else {
+				memcpy((u8 *)mapped + vector.bv_offset,
+				       io->joined->lower + offset, length);
+				memcpy(io->read_extent + progressed,
+				       (u8 *)mapped + vector.bv_offset, length);
+			}
+			kunmap_local(mapped);
+			offset += length;
+			progressed += length;
+			remaining -= length;
+		}
+	}
+	io->completed_bytes = (swapz_u32)progressed;
+	io->bio->bi_status = status;
+	/* TRUE native pinned-original endio, not a host callback. */
+	bio_endio(io->bio);
+}
+
+/* A real native bio_endio executes in a potentially IRQ-sensitive
+ * context. It copies only immutable scalar completion evidence and queues
+ * the authority work. No mutex or sleeping authority code runs in endio. */
+static void swapz_round069_original_bio_endio(struct bio *bio)
+{
+	struct swapz_round069_io *io = bio->bi_private;
+
+	io->callbacks++;
+	io->callback_status = bio->bi_status;
+	io->callback = (struct swapz_import_lower_bio_request) {
+		.token = io->submitted.token, /* exact independently owned cookie */
+		.sector = bio->bi_iter.bi_sector,
+/* bio_alloc may append REQ_ALLOC_CACHE internally. Match only the
+		 * originally issued op/FUA/PREFLUSH, not allocator-private bits. */
+		.opf = (swapz_u32)(bio->bi_opf &
+			(REQ_OP_MASK | REQ_FUA | REQ_PREFLUSH)),
+		.bytes = bio->bi_iter.bi_size,
+	};
+	schedule_work(&io->ordered_owner_work); /* round069_endio_orders_authority */
+}
+
+/* This worker invokes the ACTUAL source-exact guarded authority.c lower
+ * callback, with real swapz_stage and real live_records/GC. Thus original
+ * bio_endio and authority mutation are joined in ONE native execution,
+ * while explicit owner serialization remains sleepable and IRQ-safe. */
+static void swapz_round069_ordered_authority_work(struct work_struct *work)
+{
+	struct swapz_round069_io *io =
+		container_of(work, struct swapz_round069_io, ordered_owner_work);
+	struct swapz_round069_joined *joined = io->joined;
+	const swapz_u8 *extent;
+	const int lower_error = io->callback_status == BLK_STS_OK ? 0 : -EIO;
+
+	mutex_lock(&joined->authority_lock);
+	io->owner_calls++;
+	if (io->callback.sector < SWAPZ_IMPORT_LOWER_SECTORS_PER_BLOCK ||
+	    io->callback.sector >= SWAPZ_JOIN_LOWER_BYTES / 512U) {
+		io->owner_result = -ERANGE;
+		goto completed;
+	}
+	extent = joined->lower + (size_t)io->callback.sector * 512U;
+	if (io->kind == SWAPZ_JOIN_IO_WRITE)
+		io->owner_result = swapz_import_lower_end_write(
+			io->owner, &io->callback, io->completed_bytes,
+			lower_error, extent, &io->postflush);
+	else if (io->kind == SWAPZ_JOIN_IO_FLUSH)
+		io->owner_result = swapz_import_lower_end_flush(
+			io->owner, &io->callback, lower_error, extent);
+	else
+		io->owner_result = swapz_import_lower_end_read(
+			io->owner, &io->callback, io->completed_bytes,
+			lower_error, io->read_extent, joined->read_compressed,
+			sizeof(joined->read_compressed));
+completed:
+	mutex_unlock(&joined->authority_lock);
+	complete(&io->finished);
+}
+
+static int swapz_round069_run_io(struct swapz_round069_io *io)
+{
+	unsigned long timeout;
+
+	if (!io)
+		return -ENOMEM;
+	io->bio->bi_end_io = swapz_round069_original_bio_endio;
+	if (!schedule_work(&io->fake_lower_work))
+		return -EBUSY;
+	timeout = wait_for_completion_timeout(&io->finished,
+					      msecs_to_jiffies(5000));
+	flush_work(&io->fake_lower_work);
+	flush_work(&io->ordered_owner_work);
+	return timeout && io->callbacks == 1U && io->owner_calls == 1U ?
+		io->owner_result : -ETIMEDOUT;
+}
+
+static int swapz_round069_begin_write(struct swapz_round069_joined *joined,
+			swapz_u32 logical, swapz_u64 epoch,
+			swapz_u8 codec, swapz_u8 extent_blocks,
+			swapz_u64 replaces, int native_fua,
+			struct swapz_tx *transaction, swapz_u64 *ticket,
+			struct swapz_import_lower_bio_request *request,
+			struct swapz_authority_import_spec *spec)
+{
+	int error;
+
+	error = swapz_round069_select_original(joined, codec, logical,
+						epoch, spec);
+	if (error)
+		return error;
+	mutex_lock(&joined->authority_lock);
+	error = swapz_import_disk_stage(&joined->pool, spec,
+					extent_blocks, replaces,
+					transaction, ticket);
+	if (!error)
+		error = swapz_import_disk_submit(&joined->pool, *ticket);
+	if (!error)
+		error = swapz_import_lower_begin_write(&joined->writer,
+				transaction, *ticket, native_fua, request);
+	mutex_unlock(&joined->authority_lock);
+	return error;
+}
+
+static int swapz_round069_decode(const struct swapz_round069_joined *joined,
+				const struct swapz_authority_import_spec *spec,
+				swapz_u8 *destination)
+{
+	swapz_u8 digest[SHA256_DIGEST_SIZE];
+	size_t bytes = SWAPZ_BLOCK_BYTES;
+	int decoded_bytes;
+
+	if (spec->codec == SWAPZ_AUTHORITY_IMPORT_LZ4) {
+		decoded_bytes = LZ4_decompress_safe(
+			(const char *)joined->read_compressed,
+			(char *)destination, spec->compressed_length,
+			SWAPZ_BLOCK_BYTES);
+		if (decoded_bytes != SWAPZ_BLOCK_BYTES)
+			return -EBADMSG;
+	} else if (spec->codec == SWAPZ_AUTHORITY_IMPORT_LZO1X) {
+		decoded_bytes = lzo1x_decompress_safe(
+			joined->read_compressed, spec->compressed_length,
+			destination, &bytes);
+		if (decoded_bytes != LZO_E_OK || bytes != SWAPZ_BLOCK_BYTES)
+			return -EBADMSG;
+	} else {
+		return -EOPNOTSUPP;
+	}
+	sha256(destination, SWAPZ_BLOCK_BYTES, digest);
+	if (memcmp(digest, spec->original_sha256, sizeof(digest)) ||
+	    memcmp(destination, joined->original, SWAPZ_BLOCK_BYTES))
+		return -EBADMSG;
+	return 0;
+}
+
+/* Invokes the read side of original BIO endio and actual authority.c
+ * pin/read CRC+pad check/put, followed by complete ORIGINAL 4096 decode. */
+static int swapz_round069_native_read(struct swapz_round069_joined *joined,
+				     swapz_u64 ticket)
+{
+	struct swapz_import_lower_bio_request request;
+	struct swapz_import_disk_view view;
+	struct swapz_round069_io *io;
+	int error;
+
+	mutex_lock(&joined->authority_lock);
+	error = swapz_import_lower_begin_read(&joined->reader, ticket, &request);
+	view = joined->reader.pinned_view;
+	mutex_unlock(&joined->authority_lock);
+	if (error)
+		return error;
+	io = swapz_round069_make_io(joined, &joined->reader, &request,
+				    SWAPZ_JOIN_IO_READ, NULL, 0U);
+	if (!io)
+		return -ENOMEM;
+	error = swapz_round069_run_io(io);
+	if (!error)
+		error = swapz_round069_decode(joined, &view.spec, joined->output);
+	swapz_round069_release_io(io);
+	return error;
+}
+
+static int swapz_round069_native_write_fua(struct swapz_round069_joined *joined,
+			   swapz_u32 logical, swapz_u64 epoch,
+			   swapz_u8 codec, swapz_u8 blocks,
+			   swapz_u64 replaces, swapz_u64 *ticket,
+			   struct swapz_tx *transaction)
+{
+	struct swapz_authority_import_spec spec;
+	struct swapz_import_lower_bio_request request;
+	struct swapz_round069_io *io;
+	int error;
+
+	error = swapz_round069_begin_write(joined, logical, epoch, codec,
+			blocks, replaces, 1, transaction, ticket,
+			&request, &spec);
+	if (error)
+		return error;
+	io = swapz_round069_make_io(joined, &joined->writer, &request,
+				SWAPZ_JOIN_IO_WRITE, joined->selected_bytes,
+				spec.compressed_length);
+	if (!io)
+		return -ENOMEM;
+	/* Compressed source scratch can now disappear: actual bio owns bytes. */
+	memset(joined->selected_bytes, 0xd3, sizeof(joined->selected_bytes));
+	error = swapz_round069_run_io(io);
+	swapz_round069_release_io(io);
+	return error;
+}
+
+static int swapz_round069_test_native_fua_lz4_bvec_classes(struct kunit *test)
+{
+	static const u8 classes[] = { 1U, 2U, 4U };
+	struct swapz_round069_joined *joined = swapz_round069_join_alloc();
+	struct swapz_tx *transaction;
+	u64 ticket;
+	unsigned int class_index;
+	int error = -ENOMEM;
+
+	if (!joined)
+		goto out;
+	transaction = kvzalloc(sizeof(*transaction), GFP_KERNEL);
+	if (!transaction)
+		goto out;
+	for (class_index = 0; class_index < ARRAY_SIZE(classes); ++class_index) {
+		const u32 logical = 3U + class_index;
+		swapz_u32 block;
+		swapz_u8 blocks = classes[class_index];
+
+		error = swapz_round069_native_write_fua(joined, logical, 1U,
+				SWAPZ_AUTHORITY_IMPORT_LZ4, blocks, 0U, &ticket,
+				transaction);
+		if (error)
+			break;
+		block = transaction->start_block;
+		if (!joined->live_records[block] ||
+		    joined->extent_classes[block] != blocks ||
+		    joined->maps[logical].valid ||
+		    !swapz_round069_header_intact(joined)) {
+			error = -EUCLEAN;
+			break;
+		}
+		memset(joined->output, 0x57, SWAPZ_BLOCK_BYTES);
+		error = swapz_round069_native_read(joined, ticket);
+		if (!error && memcmp(joined->output, joined->original,
+					 SWAPZ_BLOCK_BYTES))
+			error = -EBADMSG;
+		if (error)
+			break;
+		error = swapz_import_disk_retire(&joined->pool, ticket);
+		if (error)
+			break;
+	}
+	KUNIT_EXPECT_EQ(test, error, 0);
+	KUNIT_EXPECT_EQ(test, joined->upper_ack_count, 0U);
+	kvfree(transaction);
+out:
+	swapz_round069_join_free(joined);
+	if (!joined)
+		KUNIT_FAIL(test, "original lower join alloc failed");
+	return error;
+}
+
+static void swapz_round069_native_fua_lz4_kunit(struct kunit *test)
+{
+	(void)swapz_round069_test_native_fua_lz4_bvec_classes(test);
+}
+
+static void swapz_round069_native_postwrite_lzo_flush_kunit(struct kunit *test)
+{
+	struct swapz_round069_joined *joined = swapz_round069_join_alloc();
+	struct swapz_import_lower_bio_request request;
+	struct swapz_authority_import_spec spec;
+	struct swapz_round069_io *io = NULL, *flush = NULL;
+	struct swapz_tx *transaction = NULL;
+	u64 ticket = 0U;
+	int error = -ENOMEM;
+
+	if (!joined)
+		goto out;
+	transaction = kvzalloc(sizeof(*transaction), GFP_KERNEL);
+	if (!transaction)
+		goto out;
+	error = swapz_round069_begin_write(joined, 9U, 1U,
+			SWAPZ_AUTHORITY_IMPORT_LZO1X, 2U, 0U, 0,
+			transaction, &ticket, &request, &spec);
+	if (error)
+		goto out;
+	io = swapz_round069_make_io(joined, &joined->writer, &request,
+				SWAPZ_JOIN_IO_WRITE, joined->selected_bytes,
+				spec.compressed_length);
+	if (!io) {
+		error = -ENOMEM;
+		goto out;
+	}
+	error = swapz_round069_run_io(io);
+	if (error != -EINPROGRESS || joined->maps[9].valid ||
+	    joined->live_records[transaction->start_block]) {
+		error = -EUCLEAN;
+		goto out;
+	}
+	flush = swapz_round069_make_io(joined, &joined->writer,
+				&io->postflush, SWAPZ_JOIN_IO_FLUSH, NULL, 0U);
+	if (!flush) {
+		error = -ENOMEM;
+		goto out;
+	}
+	error = swapz_round069_run_io(flush);
+	if (error || !joined->live_records[transaction->start_block])
+		goto out;
+	error = swapz_round069_native_read(joined, ticket);
+	if (!error && memcmp(joined->output, joined->original, SWAPZ_BLOCK_BYTES))
+		error = -EBADMSG;
+	if (!error)
+		error = swapz_import_disk_retire(&joined->pool, ticket);
+out:
+	if (joined)
+		KUNIT_EXPECT_EQ(test, error, 0);
+	else
+		KUNIT_FAIL(test, "original lower join alloc failed");
+	swapz_round069_release_io(flush);
+	swapz_round069_release_io(io);
+	kvfree(transaction);
+	swapz_round069_join_free(joined);
+}
+
+static void swapz_round069_native_short_close_duplicate_kunit(struct kunit *test)
+{
+	struct swapz_round069_joined *joined = swapz_round069_join_alloc();
+	struct swapz_import_lower_bio_request request;
+	struct swapz_authority_import_spec spec;
+	struct swapz_round069_io *io = NULL;
+	struct swapz_tx *transaction = NULL;
+	u64 ticket = 0U;
+	int error = -ENOMEM;
+
+	if (!joined)
+		goto out;
+	transaction = kvzalloc(sizeof(*transaction), GFP_KERNEL);
+	if (!transaction)
+		goto out;
+	error = swapz_round069_begin_write(joined, 11U, 1U,
+			SWAPZ_AUTHORITY_IMPORT_LZ4, 4U, 0U, 1,
+			transaction, &ticket, &request, &spec);
+	if (error)
+		goto out;
+	io = swapz_round069_make_io(joined, &joined->writer, &request,
+			SWAPZ_JOIN_IO_WRITE, joined->selected_bytes,
+			spec.compressed_length);
+	if (!io) {
+		error = -ENOMEM;
+		goto out;
+	}
+	io->forced_bytes = 13U;
+	error = swapz_round069_run_io(io);
+	if (error != -EIO ||
+	    joined->authority.committed_blocks != 0U ||
+	    joined->authority.abandoned_blocks != 4U ||
+	    joined->maps[11].valid ||
+	    joined->extent_classes[transaction->start_block] != 4U) {
+		error = -EUCLEAN;
+		goto out;
+	}
+	/* Duplicate callback never touches a fresh reservation. */
+	error = swapz_import_lower_end_write(&joined->writer, &io->callback,
+			io->completed_bytes, -EIO,
+			joined->lower + (size_t)request.sector * 512U, NULL);
+	if (error != -ESTALE) {
+		error = -EUCLEAN;
+		goto out;
+	}
+	error = swapz_import_disk_abort(&joined->pool, ticket);
+	if (error)
+		goto out;
+	swapz_round069_release_io(io);
+	io = NULL;
+	error = swapz_round069_begin_write(joined, 11U, 2U,
+			SWAPZ_AUTHORITY_IMPORT_LZO1X, 1U, 0U, 1,
+			transaction, &ticket, &request, &spec);
+	if (error)
+		goto out;
+	io = swapz_round069_make_io(joined, &joined->writer, &request,
+			SWAPZ_JOIN_IO_WRITE, joined->selected_bytes,
+			spec.compressed_length);
+	if (!io) {
+		error = -ENOMEM;
+		goto out;
+	}
+	error = swapz_import_lower_close(&joined->writer);
+	if (error != -EBUSY) {
+		error = -EUCLEAN;
+		goto out;
+	}
+	error = swapz_round069_run_io(io);
+	if (error != -ECANCELED || joined->maps[11].valid) {
+		error = -EUCLEAN;
+		goto out;
+	}
+	error = swapz_import_disk_abort(&joined->pool, ticket);
+	if (!error)
+		error = swapz_import_disk_close(&joined->pool);
+out:
+	if (joined)
+		KUNIT_EXPECT_EQ(test, error, 0);
+	else
+		KUNIT_FAIL(test, "original lower join alloc failed");
+	swapz_round069_release_io(io);
+	kvfree(transaction);
+	swapz_round069_join_free(joined);
+}
+
+static void swapz_round069_native_reader_pin_gc_kunit(struct kunit *test)
+{
+	struct swapz_round069_joined *joined = swapz_round069_join_alloc();
+	struct swapz_import_lower_bio_request read_request;
+	struct swapz_round069_io *read_io = NULL;
+	struct swapz_tx *transaction = NULL;
+	struct swapz_import_disk_view old_view;
+	u64 first_ticket = 0U, replacement_ticket = 0U;
+	u32 old_start, new_start;
+	int error = -ENOMEM;
+
+	if (!joined)
+		goto out;
+	transaction = kvzalloc(sizeof(*transaction), GFP_KERNEL);
+	if (!transaction)
+		goto out;
+	error = swapz_round069_native_write_fua(joined, 13U, 1U,
+		SWAPZ_AUTHORITY_IMPORT_LZ4, 2U, 0U, &first_ticket,
+		transaction);
+	if (error)
+		goto out;
+	old_start = transaction->start_block;
+	error = swapz_import_lower_begin_read(&joined->reader,
+					      first_ticket, &read_request);
+	if (error)
+		goto out;
+	old_view = joined->reader.pinned_view;
+	read_io = swapz_round069_make_io(joined, &joined->reader,
+				&read_request, SWAPZ_JOIN_IO_READ, NULL, 0U);
+	if (!read_io) {
+		error = -ENOMEM;
+		goto out;
+	}
+	/* Old native BIO pages and exact pin remain held before GC move. */
+	error = swapz_round069_native_write_fua(joined, 13U, 2U,
+			SWAPZ_AUTHORITY_IMPORT_LZO1X, 4U, first_ticket,
+			&replacement_ticket, transaction);
+	if (error)
+		goto out;
+	new_start = transaction->start_block;
+	if (joined->live_records[old_start] != 1U ||
+	    joined->live_records[new_start] != 1U ||
+	    joined->maps[13].valid) {
+		error = -EUCLEAN;
+		goto out;
+	}
+	error = swapz_round069_run_io(read_io);
+	if (error)
+		goto out;
+	error = swapz_round069_decode(joined, &old_view.spec, joined->output);
+	if (error || joined->live_records[old_start] != 0U ||
+	    joined->live_records[new_start] != 1U) {
+		error = -EUCLEAN;
+		goto out;
+	}
+	/* Exact last-pin retirement and independent full original 4096 READ. */
+	error = swapz_round069_native_read(joined, replacement_ticket);
+	if (!error && memcmp(joined->output, joined->original, SWAPZ_BLOCK_BYTES))
+		error = -EBADMSG;
+	if (!error)
+		error = swapz_import_disk_retire(&joined->pool, replacement_ticket);
+out:
+	if (joined)
+		KUNIT_EXPECT_EQ(test, error, 0);
+	else
+		KUNIT_FAIL(test, "original lower join alloc failed");
+	swapz_round069_release_io(read_io);
+	kvfree(transaction);
+	swapz_round069_join_free(joined);
+}
+
+static struct kunit_case swapz_round069_joined_native_cases[] = {
+	KUNIT_CASE(swapz_round069_native_fua_lz4_kunit),
+	KUNIT_CASE(swapz_round069_native_postwrite_lzo_flush_kunit),
+	KUNIT_CASE(swapz_round069_native_short_close_duplicate_kunit),
+	KUNIT_CASE(swapz_round069_native_reader_pin_gc_kunit),
+	{}
+};
+
+static struct kunit_suite swapz_round069_joined_native_suite = {
+	.name = "swapz_round069_joined_native_authority_bio",
+	.test_cases = swapz_round069_joined_native_cases,
+};
+kunit_test_suite(swapz_round069_joined_native_suite);
+#endif /* SWAPZ_ROUND069_ORIGINAL_BIO_AUTHORITY_JOIN_KUNIT */
+/* ROUND069_ORIGINAL_BIO_AUTHORITY_JOIN_END */
