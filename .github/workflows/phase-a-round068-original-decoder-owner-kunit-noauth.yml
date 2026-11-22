@@ -7,6 +7,7 @@ on:
       - 'src/kernel/zswap-import-decoder-owner.h'
       - 'tests/runtime/native/fixtures/round068-original-decoder-owner-kunit.c'
       - 'tests/tools/round068-original-decoder-owner-kunit-verify.py'
+      - 'tests/tools/round069-original-decoder-kconfig-verify.py'
       - '.github/workflows/phase-a-round068-original-decoder-owner-kunit-noauth.yml'
   workflow_dispatch:
 permissions:
@@ -29,6 +30,11 @@ jobs:
           sparse-checkout: |
             include/linux/lzo.h
             kernel/module/main.c
+            crypto/Kconfig
+            lib/Kconfig
+            lib/crc/Kconfig
+            lib/crypto/Kconfig
+            mm/Kconfig
           sparse-checkout-cone-mode: false
           path: linux
           persist-credentials: false
@@ -44,6 +50,8 @@ jobs:
           test -z "$(git -C linux status --porcelain --untracked-files=all)"
           git -C swapz diff --check HEAD^ HEAD
           python3 -B swapz/tests/tools/round068-original-decoder-owner-kunit-verify.py self-test
+          python3 -B swapz/tests/tools/round069-original-decoder-kconfig-verify.py self-test
+          python3 -B swapz/tests/tools/round069-original-decoder-kconfig-verify.py original --linux-root linux
           python3 -B - <<'PY'
           import ast
           from pathlib import Path
@@ -108,6 +116,7 @@ jobs:
           test "$GITHUB_REF" = refs/heads/main
           test "$(git -C swapz rev-parse HEAD)" = "$GITHUB_SHA"
           test "$(git -C linux rev-parse HEAD)" = c339f4010dea8b0d754f84ace70cd1b089878ef8
+          python3 -B swapz/tests/tools/round069-original-decoder-kconfig-verify.py original --linux-root linux
           python3 -B swapz/tests/tools/round068-original-decoder-owner-kunit-verify.py stage \
             --linux-root linux --manifest "$RUNNER_TEMP/round068-owner-manifest.json"
           git -C linux diff --check
@@ -156,7 +165,11 @@ jobs:
                     " no_recognized_native_diagnostic")
           PY
           }
-          cat >"$request" <<'KUNIT_CFG'
+          # Control: replay the exact failing Round068 KUnit fragment with
+          # genuine original UML olddefconfig. Capture ACTUAL missing options.
+          legacy_request="$RUNNER_TEMP/round069-legacy-owner.kunitconfig"
+          legacy_out="$RUNNER_TEMP/round069-legacy-owner-uml"
+          cat >"$legacy_request" <<'LEGACY_KUNIT_CFG'
           CONFIG_KUNIT=y
           CONFIG_BLOCK=y
           CONFIG_SWAP=y
@@ -171,8 +184,39 @@ jobs:
           CONFIG_LZ4_DECOMPRESS=y
           # CONFIG_KUNIT_ALL_TESTS is not set
           # CONFIG_CGROUPS is not set
+          LEGACY_KUNIT_CFG
+          phase=actual-legacy-original-Kconfig-negative
+          if python3 -B linux/tools/testing/kunit/kunit.py config \
+            --arch=um --build_dir="$legacy_out" --kunitconfig="$legacy_request" \
+            --make_options="KCFLAGS=-Werror" >"$log" 2>&1; then
+            echo '::error::ROUND069_CONFIG_FIRST_ERROR original-legacy-Kconfig-unexpectedly-accepted' >&2
+            exit 3
+          fi
+          python3 -B swapz/tests/tools/round069-original-decoder-kconfig-verify.py \
+            compare --request "$legacy_request" --effective "$legacy_out/.config" \
+            --mode legacy-negative
+          # The original codec library symbols are hidden: request their
+          # real selectable kernel algorithm providers, not only hidden flags.
+          cat >"$request" <<'KUNIT_CFG'
+          CONFIG_KUNIT=y
+          CONFIG_BLOCK=y
+          CONFIG_SWAP=y
+          CONFIG_ZSWAP=y
+          CONFIG_CRYPTO=y
+          CONFIG_CRYPTO_SHA256=y
+          CONFIG_CRYPTO_LIB_SHA256=y
+          CONFIG_CRYPTO_LZO=y
+          CONFIG_CRYPTO_LZ4=y
+          CONFIG_CRYPTO_CRC32C=y
+          CONFIG_CRC32=y
+          CONFIG_LZO_COMPRESS=y
+          CONFIG_LZO_DECOMPRESS=y
+          CONFIG_LZ4_COMPRESS=y
+          CONFIG_LZ4_DECOMPRESS=y
+          # CONFIG_KUNIT_ALL_TESTS is not set
+          # CONFIG_CGROUPS is not set
           KUNIT_CFG
-          phase=original-UML-build-and-native-KUnit
+          phase=corrected-original-UML-build-and-native-KUnit
           if timeout -k 10s 82m python3 -B linux/tools/testing/kunit/kunit.py run \
             --arch=um --build_dir="$out" --kunitconfig="$request" \
             --make_options="KCFLAGS=-Werror" --jobs=2 --timeout=180 \
@@ -180,12 +224,17 @@ jobs:
             echo 'ROUND068_GENUINE_PINNED_ORIGINAL_UML_BUILD_BOOT_PASS'
           else
             code=$?
+            # Keep exact first requested-vs-effective CONFIG key on failure.
+            if test -s "$out/.config"; then
+              python3 -B swapz/tests/tools/round069-original-decoder-kconfig-verify.py                 compare --request "$request" --effective "$out/.config"                 --mode corrected || :
+            fi
             first_error "$code"
             exit "$code"
           fi
           phase=effective-original-config
+          python3 -B swapz/tests/tools/round069-original-decoder-kconfig-verify.py             compare --request "$request" --effective "$out/.config"             --mode corrected
           test -x "$out/linux" && test -s "$out/test.log" && test -s "$result"
-          for entry in CONFIG_KUNIT=y CONFIG_ZSWAP=y CONFIG_LZO_COMPRESS=y CONFIG_LZO_DECOMPRESS=y CONFIG_LZ4_COMPRESS=y CONFIG_LZ4_DECOMPRESS=y CONFIG_CRYPTO_LIB_SHA256=y; do
+          for entry in CONFIG_KUNIT=y CONFIG_ZSWAP=y CONFIG_LZO_COMPRESS=y CONFIG_LZO_DECOMPRESS=y CONFIG_LZ4_COMPRESS=y CONFIG_LZ4_DECOMPRESS=y CONFIG_CRYPTO_LIB_SHA256=y CONFIG_CRYPTO_LZO=y CONFIG_CRYPTO_LZ4=y CONFIG_CRYPTO_CRC32C=y CONFIG_CRC32=y; do
             grep -Fxq "$entry" "$out/.config" || {
               echo "::error::ROUND068_DECODER_FIRST_ERROR phase=config missing=$entry" >&2
               exit 3

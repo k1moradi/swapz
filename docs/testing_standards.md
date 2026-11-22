@@ -18667,3 +18667,70 @@ and do not sanitize away the repository-relative .private evidence
 path when rejecting absolute host paths. All AUTH0/PHASE_A BLOCKED,
 test-only BIO and NO physical durability/upper ACK/RAW reinterpretation
 rules remain unchanged; first4096 SWAPSPACE2/partition untouched.
+
+## Round069 original pinned decoder-owner genuine UML Kunitconfig dependency and runtime P0
+
+Previously actual pinned Linux UML decoder-owner suite native run45028541067
+original-native job137228196276 FAILED at original kunit.py config before
+kernel C compilation or boot: requested options did not match generated
+.config. The prior script displayed only the generic error and held the
+per-flag Kconfig Missing line privately. It did NOT identify an actual
+missing option in published evidence. The original pinned Kconfig sources
+show LZO_COMPRESS/DECOMPRESS, LZ4_COMPRESS/DECOMPRESS, CRC32 and
+CRYPTO_LIB_SHA256 are hidden tristate libraries. Independently selecting
+their visible original CRYPTO_LZO, CRYPTO_LZ4, CRYPTO_CRC32C and
+CRYPTO_SHA256 providers is required to obtain builtin original sources.
+Original ZSWAP=y does not by itself guarantee LZ4+CRC32.
+
+Round069 actual native workflow MUST replay the exact Round068 KUnit
+fragment unchanged using the genuine original pinned Linux UML
+kunit.py config as a separate first negative control, compare the ACTUAL
+generated effective .config against the request, and emit each
+CONFIG_* name/requested/effective mismatch in bounded fail-only output.
+The old invalid config must fail; if it unexpectedly becomes valid,
+do not treat the negative as qualified. A separate genuine UML native
+positive requests all previously required KUNIT/BLOCK/SWAP/ZSWAP,
+LZO1X, LZ4, CRC32 and SHA256 capabilities PLUS original selecting
+CRYPTO_LZO/CRYPTO_LZ4/CRYPTO_CRC32C and must match every requested
+option after real olddefconfig. Never delete original codec, KUnit,
+crypto/integrity or owner options to make config validation pass.
+Check exact pinned Git source blobs for original crypto/Kconfig,
+lib/Kconfig, lib/crc/Kconfig, lib/crypto/Kconfig and mm/Kconfig;
+verify actual selecting dependencies, not approximate inferred grep.
+Fail-only first compiler/runtime error must preserve original exit
+and identify actual config keys if effective Kconfig differs. Synthetic
+config self-test mutants are not compiled C semantic mutants.
+
+The genuine original UML suite must COMPILE+BOOT and pass four ACTUALLY
+EXECUTED real kernel KUnit JSON plus KTAP cases, none skipped:
+original decoder-owner get/put/refusal/overflow; 24 repeated genuine
+kernel kthread/spin_lock/wait_event/final wake/close joins, rejecting
+late get before owner storage expires; independent actual original
+LZO1X and native raw LZ4 decodes of entire ORIGINAL 4096 with product
+CRC32C/native SHA256, immutable failed output, independently copied
+source-compressed bytes after simulated buffer free. Keep same actual
+owner C/H unmodified unless a real original native error proves a
+source defect. Round067 genuine original y/n GPL linker/module export
+and omission negatives remain prior compilation proof, not this
+native ownership runtime. Strict actual source-owner C GCC/Clang
+-Wall -Wextra -Wconversion -Wshadow -Werror ASan/UBSan four real
+baselines +22 genuinely COMPILED/EXECUTED semantic C mutants remain
+the separate mandatory same-source hosted regression gate. Fake JSON
+or Kconfig parser tests cannot replace original executable KUnit.
+
+Only terminal exact-source original native KUnit plus hosted C proof
+can mark Agent4 scoped REPORT_READY; otherwise PROGRESS. Builtin codec
+KUnit and local heap source-free model do not prove live original
+zswap pool death or modular provider lifetime across unload, real
+durable FUA, current DM table/source matching, authenticated original
+slot, authoritative map/GC or genuine upper ACK. Linux MM controls
+compressed zswap RAM and NATURAL memory eviction; swapz handles
+DISK compression/packing/GC only without extra reclaim. Ordinary
+RAW_4096 is entire original UNCOMPRESSED page; future original
+codec-tagged compressed bytes use a separate volatile representation.
+SOURCE_MAPPED_AUTHENTICATED=0 PHASE_A=BLOCKED, imported ACTIVE0,
+direct compressed handoff and forced RAW bypass DISABLED. Preserve
+SWAPSPACE2 physical first4096/header/signature/UUID and partition
+table, fixed20B ordinary map and data-only padded 4/8/16KiB extents;
+no owner Make, privilege, loaded, physical, actual pressure, swapoff,
+mkswap or repartition.
