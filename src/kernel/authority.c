@@ -3344,7 +3344,8 @@ int swapz_read_authoritative_peeked(const struct swapz_authority *a,
 		(const swapz_u8 *)extent + peeked->payload_offset, payload);
 }
 
-#if defined(SWAPZ_ROUND059_AUTHORITY_IMPORT_LIFETIME_TEST)
+#if defined(SWAPZ_ROUND059_AUTHORITY_IMPORT_LIFETIME_TEST) || \
+    defined(SWAPZ_ROUND066_IMPORT_DISK_TEST)
 /*
  * This code binds a bounded prospective import to REAL swapz_stage() state.
  * It has no live callsite, performs no lower I/O and never publishes a map.
@@ -3667,4 +3668,403 @@ int swapz_authority_import_close(struct swapz_authority_import_pool *pool)
 	}
 	return busy ? -EBUSY : 0;
 }
+
+#if defined(SWAPZ_ROUND066_IMPORT_DISK_TEST)
+/*
+ * Real swapz_stage() places every candidate in the existing physical allocator.
+ * Unlike the Round059 witness, only a completed modeled lower receipt may
+ * transfer that reservation into the REAL live_records/extent_classes arrays.
+ * These private records form a distinct volatile tagged map and are NEVER
+ * interpreted by the ordinary 20-byte swapz_map, GC worker, DM or upper BIO.
+ * Caller serializes ALL methods with the existing authority ordered owner.
+ */
+static struct swapz_import_disk_record *
+swapz_import_disk_find(struct swapz_import_disk_pool *pool, swapz_u64 ticket)
+{
+	swapz_u8 index;
+
+	if (!pool || !ticket)
+		return NULL;
+	for (index = 0; index < SWAPZ_IMPORT_DISK_CAPACITY; ++index)
+		if (pool->records[index].state != SWAPZ_IMPORT_DISK_EMPTY &&
+		    pool->records[index].ticket == ticket)
+			return &pool->records[index];
+	return NULL;
+}
+
+static int swapz_import_disk_owned_valid(
+	const struct swapz_import_disk_pool *pool,
+	const struct swapz_import_disk_record *record)
+{
+	const struct swapz_authority *authority;
+
+	if (!pool || !pool->authority || !record || !record->live_owned)
+		return -ESTALE;
+	authority = pool->authority;
+	if (!authority->maps || !authority->live_records ||
+	    !authority->extent_classes ||
+	    record->spec.logical_page >= authority->logical_pages ||
+	    authority->maps[record->spec.logical_page].valid ||
+	    authority->maps[record->spec.logical_page].generation ==
+		    ~(swapz_u32)0 ||
+	    authority->maps[record->spec.logical_page].generation + 1U !=
+		    record->ordinary_generation ||
+	    record->start_block >= authority->physical_blocks ||
+	    record->extent_blocks > authority->physical_blocks -
+		    record->start_block ||
+	    record->start_block % SWAPZ_SEGMENT_BLOCKS +
+		    record->extent_blocks > SWAPZ_SEGMENT_BLOCKS ||
+	    authority->live_records[record->start_block] != 1U ||
+	    authority->extent_classes[record->start_block] !=
+		    record->extent_blocks)
+		return -ESTALE;
+	return 0;
+}
+
+/* Never relinquish the real physical liveness count while readers exist.
+ * Leave extent_classes as a "previously written" recycle witness after free;
+ * actual GC/allocator reuse still requires the original dead-segment proof. */
+static int swapz_import_disk_release(struct swapz_import_disk_pool *pool,
+				     struct swapz_import_disk_record *record)
+{
+	if (record->reader_pins)
+		return -EBUSY;
+	if (record->live_owned) {
+		int error = swapz_import_disk_owned_valid(pool, record);
+
+		if (error)
+			return error;
+		pool->authority->live_records[record->start_block] = 0U;
+	}
+	memset(record, 0, sizeof(*record));
+	return 0;
+}
+
+void swapz_import_disk_init(struct swapz_import_disk_pool *pool,
+			    struct swapz_authority *authority)
+{
+	if (!pool)
+		return;
+	memset(pool, 0, sizeof(*pool));
+	pool->authority = authority;
+	pool->next_ticket = 1U;
+}
+
+/*
+ * Allocate exactly ONCE from the actual authority allocator and keep the
+ * original ordinary map untouched. No concurrent ordinary target operations
+ * are permitted in this isolated test fixture; there is NO runtime map router.
+ */
+int swapz_import_disk_stage(struct swapz_import_disk_pool *pool,
+			    const struct swapz_authority_import_spec *spec,
+			    swapz_u8 extent_blocks, swapz_u64 replaces_ticket,
+			    struct swapz_tx *transaction, swapz_u64 *ticket)
+{
+	struct swapz_import_disk_record *slot = NULL;
+	struct swapz_import_disk_record *previous = NULL;
+	struct swapz_authority *authority;
+	swapz_u8 index, digest = 0U;
+	int error;
+
+	if (!pool || !pool->authority || !spec || !transaction || !ticket)
+		return -EINVAL;
+	*ticket = 0U;
+	authority = pool->authority;
+	if (pool->closing || authority->in_flight || authority->batch_pending ||
+	    authority->gc_allocation)
+		return -EBUSY;
+	if (!authority->maps || !authority->live_records ||
+	    !authority->extent_classes ||
+	    spec->logical_page >= authority->logical_pages ||
+	    authority->maps[spec->logical_page].valid ||
+	    authority->maps[spec->logical_page].generation == ~(swapz_u32)0 ||
+	    !swapz_legal_class(extent_blocks) ||
+	    !spec->source_swap_slot || !spec->source_entry_identity ||
+	    !spec->source_store_generation || !spec->gc_epoch ||
+	    !spec->compressed_length ||
+	    spec->compressed_length > SWAPZ_MAX_COMPRESSED ||
+	    spec->compressed_length >
+		    (swapz_u32)extent_blocks * SWAPZ_BLOCK_BYTES ||
+	    (spec->codec != SWAPZ_AUTHORITY_IMPORT_LZ4 &&
+	     spec->codec != SWAPZ_AUTHORITY_IMPORT_LZO1X) ||
+	    spec->codec_version != 1U || spec->requested_fua != 1U)
+		return -EINVAL;
+	for (index = 0; index < sizeof(spec->original_sha256); ++index)
+		digest |= spec->original_sha256[index];
+	if (!digest)
+		return -ENODATA;
+	if (pool->next_ticket == ~(swapz_u64)0)
+		return -EOVERFLOW;
+	if (replaces_ticket) {
+		previous = swapz_import_disk_find(pool, replaces_ticket);
+		if (!previous || previous->state != SWAPZ_IMPORT_DISK_OWNED ||
+		    swapz_import_disk_owned_valid(pool, previous) ||
+		    previous->spec.logical_page != spec->logical_page ||
+		    previous->spec.source_swap_slot != spec->source_swap_slot ||
+		    previous->spec.source_entry_identity !=
+			    spec->source_entry_identity ||
+		    previous->spec.source_store_generation !=
+			    spec->source_store_generation ||
+		    previous->spec.codec != spec->codec ||
+		    previous->spec.codec_version != spec->codec_version ||
+		    previous->spec.compressed_length != spec->compressed_length ||
+		    previous->spec.compressed_crc32c != spec->compressed_crc32c ||
+		    memcmp(previous->spec.original_sha256, spec->original_sha256,
+			   sizeof(spec->original_sha256)) ||
+		    previous->spec.gc_epoch >= spec->gc_epoch)
+			return -ESTALE;
+	}
+	for (index = 0; index < SWAPZ_IMPORT_DISK_CAPACITY; ++index) {
+		struct swapz_import_disk_record *record = &pool->records[index];
+
+		if (record->state == SWAPZ_IMPORT_DISK_EMPTY) {
+			if (!slot)
+				slot = record;
+			continue;
+		}
+		if (record->spec.logical_page != spec->logical_page)
+			continue;
+		/* Only the exact previous OWNED ticket may coexist with a
+		 * pending modeled GC relocation, and only while still live. */
+		if (!previous || record != previous)
+			return -EBUSY;
+	}
+	if (!slot)
+		return -ENOSPC;
+	error = swapz_stage(authority, &spec->logical_page, 1U,
+			    extent_blocks, transaction);
+	if (error)
+		return error;
+	memset(slot, 0, sizeof(*slot));
+	slot->spec = *spec;
+	slot->ticket = ++pool->next_ticket;
+	slot->replaces_ticket = replaces_ticket;
+	slot->start_block = transaction->start_block;
+	slot->sequence = transaction->sequence;
+	slot->ordinary_generation = transaction->records[0].generation;
+	slot->extent_blocks = transaction->extent_blocks;
+	slot->state = SWAPZ_IMPORT_DISK_RESERVED;
+	*ticket = slot->ticket;
+	return 0;
+}
+
+int swapz_import_disk_submit(struct swapz_import_disk_pool *pool,
+			     swapz_u64 ticket)
+{
+	struct swapz_import_disk_record *record =
+		swapz_import_disk_find(pool, ticket);
+
+	if (!record || pool->closing ||
+	    record->state != SWAPZ_IMPORT_DISK_RESERVED)
+		return -ESTALE;
+	record->state = SWAPZ_IMPORT_DISK_SUBMITTED;
+	return 0;
+}
+
+int swapz_import_disk_complete(struct swapz_import_disk_pool *pool,
+			       swapz_u64 ticket,
+			       const struct swapz_tx *transaction,
+			       int lower_error, swapz_u8 completed_blocks,
+			       int flush_completed)
+{
+	struct swapz_import_disk_record *record =
+		swapz_import_disk_find(pool, ticket);
+	struct swapz_import_disk_record *previous = NULL;
+	struct swapz_authority *authority;
+	int error;
+
+	if (!record || !pool->authority || !transaction ||
+	    record->state != SWAPZ_IMPORT_DISK_SUBMITTED)
+		return -ESTALE; /* one lower callback, including requeue/close */
+	authority = pool->authority;
+	if (!swapz_is_active(authority, transaction) ||
+	    transaction->count != 1U ||
+	    transaction->start_block != record->start_block ||
+	    transaction->sequence != record->sequence ||
+	    transaction->extent_blocks != record->extent_blocks ||
+	    transaction->records[0].logical_page != record->spec.logical_page ||
+	    transaction->records[0].generation != record->ordinary_generation)
+		return -ESTALE;
+	if (record->replaces_ticket) {
+		previous = swapz_import_disk_find(pool, record->replaces_ticket);
+		if (!previous || previous->state != SWAPZ_IMPORT_DISK_OWNED ||
+		    swapz_import_disk_owned_valid(pool, previous))
+			return -ESTALE;
+	}
+	error = pool->closing ? -ECANCELED : lower_error < 0 ? lower_error :
+		(lower_error || completed_blocks != record->extent_blocks ||
+		 !flush_completed) ? -EIO : 0;
+	if (!error &&
+	    (authority->maps[record->spec.logical_page].valid ||
+	     authority->maps[record->spec.logical_page].generation ==
+		     ~(swapz_u32)0 ||
+	     authority->maps[record->spec.logical_page].generation + 1U !=
+		     record->ordinary_generation ||
+	     authority->live_records[record->start_block] ||
+	     authority->extent_classes[record->start_block]))
+		error = -ESTALE;
+	if (error) {
+		/*
+		 * An uncertain/short write consumes the REAL reservation.
+		 * Keep its class as a conservative programmed-space witness;
+		 * later allocator recycling must validate and reclaim the
+		 * entire segment, never this individual partially written block.
+		 */
+		if (swapz_abort(authority, transaction))
+			return -ESTALE;
+		if (lower_error || completed_blocks)
+			authority->extent_classes[record->start_block] =
+				record->extent_blocks;
+		record->state = SWAPZ_IMPORT_DISK_QUARANTINED;
+		return error;
+	}
+	/* Transfer the actual physical start liveness to the isolated tagged
+	 * record, NOT to the ordinary map or a fabricated upper ACK. */
+	authority->live_records[record->start_block] = 1U;
+	authority->extent_classes[record->start_block] =
+		record->extent_blocks;
+	record->live_owned = 1U;
+	swapz_forget_active(authority, 1);
+	record->state = SWAPZ_IMPORT_DISK_OWNED;
+	if (previous) {
+		previous->state = SWAPZ_IMPORT_DISK_RETIRED;
+		if (!previous->reader_pins) {
+			/*
+			 * This cannot fail under the serialized owner after
+			 * the validated previous state; a failure stays
+			 * fail-closed and retains its real physical pin.
+			 */
+			error = swapz_import_disk_release(pool, previous);
+			if (error)
+				return error;
+		}
+	}
+	return 0;
+}
+
+int swapz_import_disk_pin(struct swapz_import_disk_pool *pool,
+			  swapz_u64 ticket, struct swapz_import_disk_view *view)
+{
+	struct swapz_import_disk_record *record =
+		swapz_import_disk_find(pool, ticket);
+
+	if (!record || !view || pool->closing ||
+	    record->state != SWAPZ_IMPORT_DISK_OWNED ||
+	    swapz_import_disk_owned_valid(pool, record))
+		return -ESTALE;
+	if (record->reader_pins == (swapz_u8)~0U)
+		return -EOVERFLOW;
+	++record->reader_pins;
+	*view = (struct swapz_import_disk_view) {
+		.spec = record->spec,
+		.ticket = record->ticket,
+		.start_block = record->start_block,
+		.sequence = record->sequence,
+		.ordinary_generation = record->ordinary_generation,
+		.extent_blocks = record->extent_blocks,
+	};
+	return 0;
+}
+
+int swapz_import_disk_put(struct swapz_import_disk_pool *pool,
+			  swapz_u64 ticket)
+{
+	struct swapz_import_disk_record *record =
+		swapz_import_disk_find(pool, ticket);
+
+	if (!record || !record->live_owned || !record->reader_pins)
+		return -ESTALE;
+	--record->reader_pins;
+	if (!record->reader_pins &&
+	    record->state == SWAPZ_IMPORT_DISK_RETIRED)
+		return swapz_import_disk_release(pool, record);
+	return 0;
+}
+
+int swapz_import_disk_retire(struct swapz_import_disk_pool *pool,
+			     swapz_u64 ticket)
+{
+	struct swapz_import_disk_record *record =
+		swapz_import_disk_find(pool, ticket);
+
+	if (!record || record->state != SWAPZ_IMPORT_DISK_OWNED ||
+	    swapz_import_disk_owned_valid(pool, record))
+		return -ESTALE;
+	record->state = SWAPZ_IMPORT_DISK_RETIRED;
+	if (!record->reader_pins)
+		return swapz_import_disk_release(pool, record);
+	return 0;
+}
+
+/* Release RESERVED reservations through the real allocator. A SUBMITTED
+ * callback must finish or close first; never race an outstanding lower owner. */
+int swapz_import_disk_abort(struct swapz_import_disk_pool *pool,
+			    swapz_u64 ticket)
+{
+	struct swapz_import_disk_record *record =
+		swapz_import_disk_find(pool, ticket);
+	int error;
+
+	if (!record)
+		return -ESTALE;
+	if (record->state == SWAPZ_IMPORT_DISK_SUBMITTED)
+		return -EBUSY;
+	if (record->state == SWAPZ_IMPORT_DISK_RESERVED) {
+		struct swapz_tx *active = &pool->authority->active_tx;
+
+		if (!swapz_is_active(pool->authority, active) ||
+		    active->sequence != record->sequence)
+			return -ESTALE;
+		error = swapz_abort(pool->authority, active);
+		if (error)
+			return error;
+	} else if (record->state != SWAPZ_IMPORT_DISK_QUARANTINED) {
+		return -ESTALE;
+	}
+	memset(record, 0, sizeof(*record));
+	return 0;
+}
+
+int swapz_import_disk_close(struct swapz_import_disk_pool *pool)
+{
+	swapz_u8 index;
+	int busy = 0;
+
+	if (!pool)
+		return -EINVAL;
+	pool->closing = 1U;
+	for (index = 0; index < SWAPZ_IMPORT_DISK_CAPACITY; ++index) {
+		struct swapz_import_disk_record *record = &pool->records[index];
+		int error;
+
+		switch (record->state) {
+		case SWAPZ_IMPORT_DISK_EMPTY:
+			break;
+		case SWAPZ_IMPORT_DISK_SUBMITTED:
+			busy = 1; /* Keep pool alive until callback. */
+			break;
+		case SWAPZ_IMPORT_DISK_RESERVED:
+		case SWAPZ_IMPORT_DISK_QUARANTINED:
+			error = swapz_import_disk_abort(pool, record->ticket);
+			if (error)
+				return error;
+			break;
+		case SWAPZ_IMPORT_DISK_OWNED:
+			record->state = SWAPZ_IMPORT_DISK_RETIRED;
+			/* fall through */
+		case SWAPZ_IMPORT_DISK_RETIRED:
+			if (record->reader_pins) {
+				busy = 1;
+				break;
+			}
+			error = swapz_import_disk_release(pool, record);
+			if (error)
+				return error;
+			break;
+		}
+	}
+	return busy ? -EBUSY : 0;
+}
+#endif /* SWAPZ_ROUND066_IMPORT_DISK_TEST */
+
 #endif /* SWAPZ_ROUND059_AUTHORITY_IMPORT_LIFETIME_TEST */

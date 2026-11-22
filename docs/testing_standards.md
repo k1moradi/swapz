@@ -18113,3 +18113,54 @@ and forced RAW bypass DISABLED. RAW_4096 is whole ORIGINAL UNCOMPRESSED
 compressed RAM/natural pressure owner; swapz disk compression/packing/GC
 only. Physical SWAPSPACE2 header/UUID/signature and partition table
 untouched. No owner Make, privileged, loaded, physical or real pressure.
+
+## Round066 Agent5 — actual allocator-owned bounded codec-tagged test-only disk records
+
+The original Round059 diagnostic import witness must still refuse imported map
+publication and GC with -EOPNOTSUPP. A separate UNDEFINED-by-default guarded
+component in actual authority.c/.h may own up to eight preallocated original
+LZO1X/LZ4 codec-tagged volatile records with exact source slot/incarnation,
+codec version, compressed CRC32C, full original SHA256, current logical/extent
+generation, nonwrapping ticket and strictly monotonic GC epoch. This mapping
+is separate from the unmodified 20-byte ordinary swapz_map and cannot activate
+production admission or persist descriptors on physical media.
+
+All allocations MUST come from real swapz_stage; no second mock allocator.
+Only after a fully completed host-modeled lower write and required FUA/flush
+receipt may the separate test record take the physical start's actual product
+live_records/extent_classes accounting and finish the authentic staged allocator
+identity. Never modify the ordinary map, reinterpret RAW_4096 or forge upper
+ACK. A short/failed/duplicate or closing callback must consume the genuine
+reservation via swapz_abort, account abandoned blocks, and conservatively
+mark potentially programmed extents against unsafe reuse. Host callback
+input is NOT a physical durability proof.
+
+One serialized ordered authority owner protects all record state, reader
+pins, pending callbacks and teardown. Model GC replacement only after a new
+actual allocator reservation and complete modeled FUA: enforce same source,
+native codec/version/CRC/digest, increasing epoch and unique ticket. Preserve
+old real physical liveness until final retired reader put; no new pins after
+retirement, no double release and no reuse of pinned blocks. A closing pool
+must reject fresh work and remain busy until submitted callbacks and retained
+readers fully drain. An ordinary allocator encountering live imported space
+must fail closed; test-only records cannot become production read/GC authority.
+
+Run GCC and Clang rootless with original production authority.c + codec.c,
+-Wall -Wextra -Wconversion -Wshadow -Werror, ASan+UBSan, six substantive
+linked-C cases and ten individually compiled AND executed genuine changed-C
+semantic mutants per compiler. Compiler failures, sanitizer crashes, mocks or
+inert mutations are NOT semantic kills. Preserve Round059 original witness,
+Round057 actual linked product and unchanged first-parent/canonical same-commit
+standards qualification. Rootless original kernel module source workflows
+must separately qualify actual authority changes. Source-exact CI not yet
+terminal is PROGRESS, never passed by older ancestor CI.
+
+Linux MM alone manages compressed zswap RAM and natural eviction; swapz
+only disk packing/compression/GC. Ordinary RAW_4096 always full ORIGINAL
+UNCOMPRESSED 4096. No physical durable lower imported WRITE/FUA, independently
+retained native decoder, source-to-current accepted DM, authoritative read,
+one genuine upper ACK or decoded 4096 read has been proven.
+SOURCE_MAPPED_AUTHENTICATED=0 PHASE_A=BLOCKED direct compressed handoff and
+forced RAW bypass DISABLED. Protect physical SWAPSPACE2 first 4096 bytes,
+header/UUID/signature, parent partition table and 4/8/16KiB payload-only
+classes. No owner Make, privileged/loaded, physical or actual pressure tests.

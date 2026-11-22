@@ -522,7 +522,8 @@ int swapz_read_authoritative_peeked(const struct swapz_authority *authority,
  * pin/put. A future concurrent reader requires its own reviewed synchronization.
  */
 #define SWAPZ_AUTHORITY_IMPORT_ACTIVE 0U
-#if defined(SWAPZ_ROUND059_AUTHORITY_IMPORT_LIFETIME_TEST)
+#if defined(SWAPZ_ROUND059_AUTHORITY_IMPORT_LIFETIME_TEST) || \
+    defined(SWAPZ_ROUND066_IMPORT_DISK_TEST)
 #define SWAPZ_AUTHORITY_IMPORT_CAPACITY 8U
 #define SWAPZ_AUTHORITY_IMPORT_STAGING_LIMIT 2U
 #define SWAPZ_AUTHORITY_IMPORT_LZ4 1U
@@ -596,6 +597,93 @@ int swapz_authority_import_gc_move(struct swapz_authority_import_pool *pool,
 int swapz_authority_import_abort(struct swapz_authority_import_pool *pool,
 				 swapz_u64 ticket);
 int swapz_authority_import_close(struct swapz_authority_import_pool *pool);
+
+/*
+ * Round066 isolated DISK-side allocation owner. This is not the diagnostic
+ * Round059 witness, nor a production map, decoder, DMA, BIO or ACK interface.
+ * All methods run only under the same serialized/sleepable authority owner.
+ * Caller allocates this fixed-size object; no heap/stack hot-path buffers.
+ * A retained reader pin keeps the ORIGINAL extent's real live_records start
+ * occupied until its final put, including across a modeled GC replacement.
+ */
+#if defined(SWAPZ_ROUND066_IMPORT_DISK_TEST)
+#define SWAPZ_IMPORT_DISK_ACTIVE 0U
+#define SWAPZ_IMPORT_DISK_CAPACITY 8U
+
+enum swapz_import_disk_state {
+	SWAPZ_IMPORT_DISK_EMPTY = 0,
+	SWAPZ_IMPORT_DISK_RESERVED,
+	SWAPZ_IMPORT_DISK_SUBMITTED,
+	SWAPZ_IMPORT_DISK_QUARANTINED,
+	SWAPZ_IMPORT_DISK_OWNED,
+	SWAPZ_IMPORT_DISK_RETIRED,
+};
+
+struct swapz_import_disk_record {
+	struct swapz_authority_import_spec spec; /* Native codec is NOT swapz LZ4. */
+	swapz_u64 ticket;
+	swapz_u64 replaces_ticket; /* Exact pinned old ownership, not a pointer. */
+	swapz_u32 start_block;
+	swapz_u32 sequence;
+	swapz_u32 ordinary_generation;
+	swapz_u8 extent_blocks;
+	swapz_u8 state;
+	swapz_u8 reader_pins;
+	swapz_u8 live_owned;
+};
+
+struct swapz_import_disk_pool {
+	struct swapz_authority *authority;
+	struct swapz_import_disk_record records[SWAPZ_IMPORT_DISK_CAPACITY];
+	swapz_u64 next_ticket;
+	swapz_u8 closing;
+};
+
+struct swapz_import_disk_view {
+	struct swapz_authority_import_spec spec;
+	swapz_u64 ticket;
+	swapz_u32 start_block;
+	swapz_u32 sequence;
+	swapz_u32 ordinary_generation;
+	swapz_u8 extent_blocks;
+};
+
+/* Bound the entire optional owner; zero additional bytes in normal kernels. */
+_Static_assert(sizeof(struct swapz_import_disk_pool) <= 1536U,
+	       "imported test-only allocation owner exceeds fixed RAM budget");
+
+void swapz_import_disk_init(struct swapz_import_disk_pool *pool,
+			    struct swapz_authority *authority);
+/* Claims an ACTUAL swapz_stage reservation, not a parallel extent allocator.
+ * replaces_ticket=0 for a fresh isolated mapping; a nonzero live ticket is
+ * mandatory for a modeled GC replacement with increasing gc_epoch. */
+int swapz_import_disk_stage(struct swapz_import_disk_pool *pool,
+			    const struct swapz_authority_import_spec *spec,
+			    swapz_u8 extent_blocks, swapz_u64 replaces_ticket,
+			    struct swapz_tx *transaction, swapz_u64 *ticket);
+int swapz_import_disk_submit(struct swapz_import_disk_pool *pool,
+			     swapz_u64 ticket);
+/* All lower completion / FUA / flush results here are TEST-SUPPLIED receipts.
+ * This never submits a BIO or verifies physical durable storage. */
+int swapz_import_disk_complete(struct swapz_import_disk_pool *pool,
+			       swapz_u64 ticket,
+			       const struct swapz_tx *transaction,
+			       int lower_error, swapz_u8 completed_blocks,
+			       int flush_completed);
+/* Returns a retained VOLATILE map snapshot, not a production upper READ. */
+int swapz_import_disk_pin(struct swapz_import_disk_pool *pool,
+			  swapz_u64 ticket, struct swapz_import_disk_view *view);
+int swapz_import_disk_put(struct swapz_import_disk_pool *pool,
+			  swapz_u64 ticket);
+int swapz_import_disk_retire(struct swapz_import_disk_pool *pool,
+			     swapz_u64 ticket);
+int swapz_import_disk_abort(struct swapz_import_disk_pool *pool,
+			    swapz_u64 ticket);
+/* Closing fences new work; submitted callbacks and retained readers drain
+ * before caller may free the pool or the authority arrays. */
+int swapz_import_disk_close(struct swapz_import_disk_pool *pool);
+#endif /* SWAPZ_ROUND066_IMPORT_DISK_TEST */
+
 #endif
 
 #endif
