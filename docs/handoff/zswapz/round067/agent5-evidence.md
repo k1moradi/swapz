@@ -55,3 +55,22 @@ swapz only disk packing/GC. SOURCE_MAPPED_AUTHENTICATED=0, PHASE_A=BLOCKED,
 DIRECT_COMPRESSED_HANDOFF=DISABLED, FORCED_RAW_BYPASS=DISABLED, all imported
 ACTIVE=0. Physical SWAPSPACE2 header and partition table untouched.
 No owner Make, loaded, privileged, real device or actual pressure tests.
+
+## Round067 exact inherited Round066 harness first-error correction
+
+Round067 first exact source [run 45024099136 / job 137213194385](https://github.com/k1moradi/swapz/actions/runs/45024099136/job/137213194385)
+passed the complete NEW real GCC/Clang original native LZO1X/LZ4
+compressed memory lower/4096-byte independent decoder baseline, six named
+source cases and ALL TEN genuinely compiled/executed changed-C semantic
+mutants per compiler. The next preserved Round066 older script failed
+BEFORE compiling its original mutant, at:
+`FIRST_ERROR round066-import-disk: nonunique original changed-C mutant duplicate_terminal_callback`.
+The new Round067 helper properly introduces a second submitted callback
+state guard; the Round066 old mutant selector was an overbroad text anchor.
+Narrow its original changed-source predicate exclusively to the existing
+`return -ESTALE; /* one lower callback, including requeue/close */`
+source-bound real Round066 terminal callback, preserving the exact original
+operator flip, named case, strict compile and actual executable semantic
+kill. This is NOT a C product behavior or release change. Rerun exact
+Round067 + Round066 + Round059 + Round057 hosted jobs, verify genuine
+terminal first-parent standards, do not credit old red as green.

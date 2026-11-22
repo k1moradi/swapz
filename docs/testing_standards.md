@@ -18463,3 +18463,28 @@ UNCOMPRESSED 4096. SOURCE_MAPPED_AUTHENTICATED=0, PHASE_A=BLOCKED, direct
 compressed handoff and forced RAW bypass DISABLED. No physical SWAPSPACE2
 first4096 header, UUID/signature or parent partition-table changes, owner
 Make, privileged, loaded-kernel, actual-pressure or physical tests.
+
+## Round067 Agent5 — preserved Round066 changed-C mutant after added callback guard
+
+The NEW Round067 real production authority.c guarded compressed payload
+complete method has its own SUBMITTED-state check. The PRE-EXISTING Round066
+real C semantic duplicate-terminal-callback mutant's former single-token
+text anchor is therefore no longer unique and must NEVER be weakened to
+mutating an arbitrary first occurrence or counted as an executed kill on
+compile/oracle failure. The frozen original Round066 callback still carries
+the exact `one lower callback, including requeue/close` failure comment.
+Narrow the semantic mutant to that full original source-bound guard and its
+existing exact `-ESTALE` return, change only its original != to == condition,
+and require GCC+Clang genuinely compile the source-changed authority.c and
+EXECUTE the same `before_durability_invisible` first-error case. Preserve
+all other nine Round066 mutants without alteration. The first new Round067
+exact source job 45024099136/137213194385 proved six genuine full 4096
+decoded original LZO1X/LZ4 cases and all twenty new actually executed source
+mutants PASS but FAILED the inherited Round066 overbroad source anchor;
+no full workflow or original policy PASS can be credited from that red job.
+Retest the corrected exact source with all inherited genuine C and canonical
+first-parent gates, and report exact red/green job identities. No ordinary
+20B map, RAW_4096, source AUTH, physical FUA or upper ACK changes are
+permitted; SOURCE_MAPPED_AUTHENTICATED=0 PHASE_A=BLOCKED and compressed
+handoff/forced RAW bypass remain DISABLED. Original physical SWAPSPACE2
+first4096 header/partition and all owner-host safety gates are unchanged.
