@@ -164,6 +164,21 @@ def verify_provider(symbols: dict[str, tuple[str, str]],
     return result
 
 
+def require_selected_undefined(undefined: str) -> None:
+    # run_checked() strips the complete output, including the first record's
+    # GNU nm indentation. Match exact strong undefined records by fields,
+    # independently of their ordering or surrounding horizontal whitespace.
+    names = {fields[1] for line in undefined.splitlines()
+             if len(fields := line.split()) == 2 and fields[0] == "U"}
+    for name in SYMBOLS:
+        require(name in names,
+                "compiled module did not retain original decoder link " +
+                name + " retained=" +
+                ",".join(symbol for symbol in SYMBOLS if symbol in names) +
+                " missing=" +
+                ",".join(symbol for symbol in SYMBOLS if symbol not in names))
+
+
 def check_module(module: Path, config: dict[str, str],
                  providers: dict[str, str], kernel_release: str) -> None:
     require(module.is_file() and module.stat().st_size > 0,
@@ -179,19 +194,7 @@ def check_module(module: Path, config: dict[str, str],
         require(re.search(r"(?m)^\S+\s+[a-zA-Z]\s+" +
                           re.escape(name) + r"$", symbol_table) is not None,
                 "compiled module lost actual imported decoder root " + name)
-    retained = {
-        name: re.search(r"(?m)^\s+U\s+" + re.escape(name) + r"$",
-                        undefined) is not None
-        for name in SYMBOLS
-    }
-    for name in SYMBOLS:
-        require(retained[name],
-                "compiled module did not retain original decoder link " +
-                name + " retained=" +
-                ",".join(symbol for symbol, found in retained.items()
-                         if found) + " missing=" +
-                ",".join(symbol for symbol, found in retained.items()
-                         if not found))
+    require_selected_undefined(undefined)
     require("swapz_crc32c_bytes" not in undefined,
             "real product CRC32C not linked into module")
     # Read the real ELF .modinfo section with preinstalled GNU binutils.
@@ -240,7 +243,68 @@ def prepare_module(destination: Path) -> None:
           "source_authenticated=0 phase_a=BLOCKED", flush=True)
 
 
+def self_test_selected_undefined() -> None:
+    # Structural regression for the real strict verifier using genuine GCC
+    # and Clang ELF objects. Not a substitute for the native decoder probe.
+    source = """\
+extern int LZ4_decompress_safe(int);
+extern int LZ4_decompress_safe_partial(int);
+extern int lzo1x_decompress_safe(int);
+extern int sha256(int);
+int probe(int mode, int input) {
+    int decoded = mode ? lzo1x_decompress_safe(input) : LZ4_decompress_safe(input);
+    return sha256(decoded);
+}
+"""
+    with tempfile.TemporaryDirectory(prefix="round065-elf-undefined-") as directory:
+        for compiler in ("gcc", "clang"):
+            for label, code in (
+                    ("baseline", source),
+                    ("omission", source.replace("LZ4_decompress_safe(input)", "input")),
+                    ("lookalike", source.replace("LZ4_decompress_safe(input)",
+                                                 "LZ4_decompress_safe_partial(input)"))):
+                artifact = Path(directory) / (compiler + "-" + label + ".o")
+                compiled = subprocess.run(
+                    [compiler, "-std=c11", "-O2", "-Wall", "-Wextra", "-Wconversion",
+                     "-Wshadow", "-Werror", "-x", "c", "-c", "-", "-o", str(artifact)],
+                    input=code, capture_output=True, text=True, timeout=30, check=False)
+                require(compiled.returncode == 0 and not compiled.stderr,
+                        compiler + " strict real ELF parser regression compilation failed")
+                undefined = run_checked(["env", "LC_ALL=C", "nm", "-u", str(artifact)],
+                                        "real ELF parser regression nm")
+                if label == "baseline":
+                    require(undefined.splitlines()[0].split() == ["U", "LZ4_decompress_safe"],
+                            "real nm first record regression not exercised")
+                    require(re.search(r"(?m)^\s+U\s+LZ4_decompress_safe$", undefined) is None,
+                            "previous first-record whitespace false rejection not reproduced")
+                    require_selected_undefined(undefined)
+                else:
+                    try:
+                        require_selected_undefined(undefined)
+                    except AssertionError as error:
+                        require("link LZ4_decompress_safe retained=lzo1x_decompress_safe,sha256 "
+                                "missing=LZ4_decompress_safe" in str(error),
+                                "real ELF negative rejected for unrelated reason")
+                    else:
+                        require(False, "real ELF missing exact LZ4 symbol accepted " + label)
+                relocations = run_checked(["readelf", "-rW", str(artifact)], "real ELF relocations")
+                require(bool(re.search(r"\bLZ4_decompress_safe\b", relocations)) ==
+                        (label == "baseline"), "real ELF exact LZ4 relocation mismatch")
+                print(f"ROUND065_NM_REAL_ELF_PARSER_PASS compiler={compiler} case={label}")
+    # A defined symbol, weak undefined, or multi-token noise is not strong U.
+    for invalid in ("T LZ4_decompress_safe", "w LZ4_decompress_safe",
+                    "U LZ4_decompress_safe extra"):
+        try:
+            require_selected_undefined(invalid + "\n U lzo1x_decompress_safe\n U sha256")
+        except AssertionError as error:
+            require("missing=LZ4_decompress_safe" in str(error), "wrong parser negative reason")
+        else:
+            require(False, "non-strong-undefined record accepted")
+    print("ROUND065_NM_FIRST_RECORD_REGRESSION_PASS real_objects=6 exact_symbol_negatives=4 record_negatives=3")
+
+
 def self_test() -> None:
+    self_test_selected_undefined()
     original = {
         "lzo1x_decompress_safe":
             ("lib/lzo/lzo_decompress", "EXPORT_SYMBOL_GPL"),

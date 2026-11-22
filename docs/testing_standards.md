@@ -17983,3 +17983,59 @@ The actual guarded product `swapz_map` must obtain the Round063 mechanical ref o
 Rootless qualification `tests/tools/round064-original-slot-current-target-verify.py` must compile the exact original staged route C plus the actual marked production helper and three map/reject/complete callsite C fragments under both strict GNU11 GCC and Clang (`-Wall -Wextra -Wconversion -Wshadow -Werror`, ASan/UBSan). Require 27 host-stub scenarios and 18 genuinely compiled and executed semantic mutants per compiler, including stale epoch same-address reuse, wrong area/device/extent/target, rejected private owner, release on candidate refusal, actual map acquisition, reject/requeue and terminal completion callsite removal. A compiler failure or sanitizer crash is NOT a semantic kill. Fail-only bounded phase with private mode0600 diagnostic. Host exercise of real statements does not prove native DM scheduling or actual target teardown. Native qualification checks inherited 71 KUnit JSON/KTAP (not 71 new tests), explicit modified source pin/manifest, both full original-based x86 ZSWAP=y/n vmlinux/modules and exact same-source GPL exports and real guarded target imports, default imports absent. Require actual pending jobs to reach terminal success before scoped REPORT_READY; no native end-to-end claim from compile-only or inherited cases. Future work requires genuine retained/source-bound current table generation and native teardown/requeue/slot lifetime evidence, independent selected decoder module ref, durable compressed lower FUA, authoritative volatile mapping/read/GC and byte-exact independent decoder/once-only ACK.
 
 SOURCE_MAPPED_AUTHENTICATED=0, PHASE_A=BLOCKED, direct compressed handoff and forced RAW bypass DISABLED, ordinary RAW_4096 full original UNCOMPRESSED 4096, native MM sole owner of natural pressure/reclaim; no production media/header/partition changes, owner Make, privileged/loaded/physical/pressure tests.
+
+## Round065 Agent4 — proven first-record nm false rejection, exact selected ELF gate
+
+The Round064 actual pristine native diagnostic matrix
+`44991824557` at `180f310978815a4767d99b481b2b5444f6ff981a`,
+jobs `137114479192` (y) and `137114479171` (n), and integrated
+`44992035145` at `57bf1f8a192bf5e3c5cc1f0bb813ed70acce1d6a`,
+jobs `137117590339` (y) and `137117590349` (n), are all terminal.
+Each genuinely built the original pinned x86 kernel, modules and positive
+external GPL consumer. Source-matched Kbuild preprocessing showed one
+LZ4_decompress_safe call, one lzo1x_decompress_safe call and both codec
+tag comparisons. Consumer object, combined module object and final .ko
+each contained the actual strong undefined LZ4 symbol and one text
+relocation, likewise LZO1X and SHA256. Product CRC was genuinely linked.
+Both original providers were built-in with original LZO GPL and LZ4 export
+kinds in same-kernel Module.symvers. All four native jobs emitted
+`positive=1 diagnostics=0 missing_export_negative=0 omitted_branch_negative=0`.
+The actual absent-export modpost and actual staged LZ4 omission negative
+now passed independently, with no missing LZO1X or SHA256 reference.
+
+The proven old strict positive oracle bug is its `run_checked()`
+`stdout.strip()` followed by `(?m)^\s+U\s+LZ4_decompress_safe$`:
+GNU nm sorts uppercase LZ4 before the lowercase names, so the first
+line's entire indentation was stripped, not its symbol. Reproduce
+using real strict GCC and Clang compiled ELF objects, with actual
+nm -u and readelf -rW; a genuine positive LZ4 text relocation and exact
+undefined record must fail the old regex and pass the corrected gate.
+Do not fix the product decoder or add unrelated dummy symbol roots
+for this verifier-only false rejection.
+
+Parse each nm output line into exactly two whitespace-delimited fields;
+only strong undefined type U and the complete exact selected symbol
+name qualify. The first, middle or final record must be treated equally
+after normalization. Compile actual omission and similarly named
+LZ4_decompress_safe_partial negative controls per GCC and Clang and
+require exact missing-LZ4 failure, with the actual LZO1X and SHA256
+references retained and no exact LZ4 text relocation. Defined T,
+weak undefined w, and extra-token records must fail. Structural ELF
+regression is separate from actual codec C semantics. Keep all original
+11 pinned blobs, original GCC/Clang sanitizer and ten executed codec
+semantic mutants, and actual per-object/final ELF diagnostics, source,
+provider/config, GPL/vermagic/dependency, CRC and both native negatives
+mandatory and unchanged. A genuine omitted branch must fail despite an
+unrelated symbol; an actual negative modpost must reject the specific
+missing export, not an unrelated build failure. Require all four
+statuses zero independently for both pristine ZSWAP=y and n at the
+corrected exact source before scoped REPORT_READY. Prior three passing
+statuses do not substitute for the corrected full matrix.
+
+This is only decoder compile/link qualification, never a live retained
+module reference after original pool teardown. SOURCE_MAPPED_AUTHENTICATED=0,
+PHASE_A=BLOCKED, DIRECT_COMPRESSED_HANDOFF=DISABLED, FORCED_RAW_BYPASS=DISABLED,
+all import ACTIVE=0. Linux MM alone retains compressed RAM and naturally
+evicts; swapz handles disk compression, packing and GC. RAW_4096 remains
+whole original uncompressed 4096. No SWAPSPACE2 header/partition changes,
+owner Make, loaded, privileged, physical-device or actual-pressure tests.
