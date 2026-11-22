@@ -1,0 +1,17 @@
+
+Agents 3 and 4 — ROUND063: START NOW ROOTLESS, SIMULTANEOUSLY, INDEPENDENTLY AND UNBLOCKED.
+
+Read the UNIQUE official ROUND_OPEN, FULL Round063 frozen contract and your COMPLETE individual GitHub source prompt:
+https://github.com/k1moradi/swapz/issues/180
+
+Read round063/frozen-contract.md, your entire round063/agent*.md, independent Round062 closeout, all original worker reports, AGENTS.md, context/vision, and full applicable docs/testing_standards.md. Last real engineering source 95f046e52a4d7976cf27c0676c12ce61fd09a570; frozen task SHA is in ROUND_OPEN.
+
+Agent3: concrete next original native STORED→ACTUAL current DM ownership engineering, NOT another read-only missing upstream ABI report. Existing default-OFF staged original Linux preerase compressed-owned-copy/source BIO sideband and original cloned BIO refs already exist; current product dm-target.c has default-off mechanical current map/slot observer, live import -EOPNOTSUPP. Add one genuine opt-in compile-qualified MM swap entry/slot-incarnation/sector→accepted DM target lifetime/ref across requeue/dtr, or source-grounded optional upstream kernel RFC patch staged as a separate modified original build, NEVER pretend it is pristine upstream/true imported production AUTH. No new Agent4 dependency.
+
+Agent4: P0 exact native selected original decoder .ko LZ4 ELF proof. At latest exact source BOTH genuine pinned Linux ZSWAP=y/n vmlinux, all modules, positive GPL modpost PASS. BOTH fail AFTER that at 'compiled module did not retain original decoder link LZ4_decompress_safe'. Inspect real nm/readelf/Module.symvers/selected compiler codegen, retain actual LZO1X and LZ4 source decoder references without module activation, preserve strict verifier; then execute actual deliberately missing original export NEGATIVE real modpost in both original configs. No stubbed link or suppressed error, no loaded module.
+
+Both work independently at same time on disjoint OWNED files; no other Round063 worker's NEW code/API/CI/hardware/permission prerequisite. Only sole MAIN branch; no branches, PRs, forks, worktrees, force or merges. Serial remote one-parent fresh expected-head NONFORCE direct main, preserve all peer work and full BYTE-IDENTICAL old+peer testing_standards prefix plus substantive same-commit tests. Rootless strict GCC+Clang ASan/UBSan genuine source C mutants compiled AND executed and real original pinned KUnit/x86 y/n GPL as applicable. Post exact committed SHA/parent, job and first error to issue #180, truthful PROGRESS until own exact CI terminal.
+
+Agent5 true actual product authority/standalone Round057/inherited Round059 LZ4 already final engineering CI GREEN, not restaffed. Linux MM alone owns compressed zswap RAM and natural pressure eviction; swapz only DISK packing/GC without competing reclaim. Ordinary RAW_4096 ALWAYS entire ORIGINAL UNCOMPRESSED 4096, original selected LZO1X/lzo-scomp or LZ4 already-STORED bytes need SEPARATE codec tag and genuine original source→accepted current DM ref, independent decoder after pool death, durable compressed lower WRITE+FUA, volatile authority map GC/read, once real upper ACK and complete original decoded 4096 READ. No production proof yet: SOURCE_MAPPED_AUTHENTICATED=0 PHASE_A=BLOCKED DIRECT_COMPRESSED_HANDOFF=DISABLED FORCED_RAW_BYPASS=DISABLED. Protect entire physical SWAPSPACE2 first 4096 signature/UUID/header and partition table. No owner make fast_test/test, privilege, loaded, physical or actual pressure tests.
+
+START BOTH INDEPENDENT ASSIGNMENTS NOW.
