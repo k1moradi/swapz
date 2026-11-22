@@ -1,0 +1,259 @@
+# Round069 — all SIX original worker-authored comments
+
+Original official [Round069 #186](https://github.com/k1moradi/swapz/issues/186), [unique ROUND_OPEN](https://github.com/k1moradi/swapz/issues/186#issuecomment-7082028898). All six original Agent3/4/5 comment bodies in chronological order, only trailing whitespace normalized. Historical PROGRESS statuses retained as reported; [independent later CI audit](https://github.com/k1moradi/swapz/issues/186#issuecomment-7082404554) supersedes older queued/checkpoint snapshots.
+
+
+---
+
+## [Original comment 7082153859](https://github.com/k1moradi/swapz/issues/186#issuecomment-7082153859)
+
+message: AGENT4_ROUND069_ORIGINAL_NATIVE_KCONFIG_P0_SOURCE_PUBLISHED_PENDING_ACTUAL_UML
+round: "069"
+agent: 4
+official_ROUND_OPEN: 7082028898
+status: PROGRESS_EXACT_SOURCE_HOST_QUEUED_NATIVE_NOT_YET_ALLOCATED_NO_RUNTIME_PASS
+source_commit: 651e41b96a575d04c0239725e013929dda6f6d38
+single_parent: 111a833fc05e08bac259b4470504eeea9d8e9adb
+publication: SOLE_MAIN_FRESH_EXPECTED_HEAD_SINGLE_PARENT_NONFORCE_FAST_FORWARD_REMOTE_READBACK_VERIFIED
+source_files: tests/tools/round069-original-decoder-kconfig-verify.py;.github/workflows/phase-a-round068-original-decoder-owner-kunit-noauth.yml;docs/handoff/zswapz/round069/agent4-evidence.md;docs/testing_standards.md
+exact_kconfig_verifier_blob: c92df8c9f87174a8dacea042f77051cccc0e94b2
+exact_native_workflow_blob: 0c7103284897483030b50e9694cd412eab55dd82
+evidence_blob: 7d494d69811cdbaaaaeeeea694cd960c2a43643e
+new_testing_standards_blob: c5c7f1ddc13e16dea8b4df5f9b27dbeb57380d0b
+prior_complete_canonical_standards_prefix: BYTE_IDENTICAL_1605230_CHARACTERS
+append_only_same_commit: 4193_CHARACTERS_ZERO_DELETIONS
+source_owner_C_UNCHANGED: 8e0c8f4d2085af7f2e17df412f3a1af654063571
+source_owner_H_UNCHANGED: e1b4b903567070e2307f7d05f8e48c14e0bb3768
+native_KUnit_fixture_UNCHANGED: b0bf1c575c87f4f76a648e4d06549825a55eba35
+prior_failed_exact_source_native_run: https://github.com/k1moradi/swapz/actions/runs/45028541067
+prior_original_native_job: 137228196276_TERMINAL_FAILURE_BEFORE_ANY_NATIVE_OWNER_C_COMPILE_EXECUTION
+prior_first_error_actual: "ERROR:root:Not all Kconfig options selected in kunitconfig were in the generated .config."
+prior_exact_missing_CONFIG_keys: NOT_RETAINED_IN_OLD_RAW_JOB_LOG_OR_ARTIFACT_DO_NOT_GUESS
+prior_source_host_job: 137226795249_SUCCESS_GCC_CLANG_4_BASELINES_22_COMPILED_EXECUTED_REAL_OWNER_C_SEMANTIC_MUTANTS
+old_stage_source_postimages: 8_OF_8_PINNED_PASS
+genuine_original_linux_pin: c339f4010dea8b0d754f84ace70cd1b089878ef8
+original_Kconfig_blobs: crypto/Kconfig=981d5dc422d4c89c743b5724aeacd6aa5120c009;lib/Kconfig=1e42f5167c68bc6c734ed7ad69a9eef906af54b9;lib/crc/Kconfig=927fc6a6b2b9d32fc78bf6f21d113c78c53894ab;lib/crypto/Kconfig=56f308dd027311f69959e7b3166ec9213ccb85fc;mm/Kconfig=afff1b25b5438756f15e464f63dabdbd5ec6102c
+original_pin_actual_contract: "Hidden CONFIG_LZO_COMPRESS/DECOMPRESS, LZ4_COMPRESS/DECOMPRESS, CRC32, CRYPTO_LIB_SHA256 only selected by genuine selectable CRYPTO_LZO, CRYPTO_LZ4, CRYPTO_CRC32C, CRYPTO_SHA256. Round068 requested hidden LZ4/CRC32 without selecting CRYPTO_LZ4/CRYPTO_CRC32C."
+round069_native_fix: "First run identical Round068 Kunitconfig as genuine original UML NEGATIVE config in isolated O= directory and require actual generated mismatch. Print every original requested/effective exact rejected CONFIG_ key. Then run second genuine original UML native positive with additional CRYPTO_LZO=y, CRYPTO_LZ4=y, CRYPTO_CRC32C=y, preserving ALL prior original requested required config options incl both LZO1X/LZ4, SHA256 and CRC32; corrected effective .config must match every requested option."
+new_native_KUnit_expectation: FOUR_REAL_CASES_profile_close_wake_24_repeats_LZO1X_4096_LZ4_4096_original_kernel_json_ktap;NOT_YET_EXECUTED
+new_exact_workflow_run: https://github.com/k1moradi/swapz/actions/runs/45044305345
+new_source_host_job: 137275415966_QUEUED
+new_native_original_UML_job: NOT_ALLOCATED_SOURCE_HOST_DEPENDENCY
+new_first_actual_native_error: NONE_AVAILABLE_QUEUED
+previous_original_x86_y_n_GPL_run: https://github.com/k1moradi/swapz/actions/runs/45023772039
+previous_original_x86_y_n_real_positive_and_negatives: 3_OF_3_SUCCESS_COMPILE_LINK_NOT_KUNIT_RUNTIME
+SOURCE_MAPPED_AUTHENTICATED: 0
+PHASE_A: BLOCKED
+DIRECT_COMPRESSED_HANDOFF: DISABLED
+FORCED_RAW_BYPASS: DISABLED
+import_ACTIVE: 0
+ordinary_RAW_4096: ENTIRE_ORIGINAL_UNCOMPRESSED_4096
+SWAPSPACE2_FIRST4096_HEADER_UUID_SIGNATURE_PARENT_PARTITION_TABLE: UNTOUCHED
+owner_Make_privileged_loaded_physical_real_pressure: NOT_RUN
+
+The old precise missing Kconfig values will be reported from ACTUAL native generated old .config, not inferred or fabricated. Native four cases only qualify upon exact-source terminal JSON+KTAP executed PASS. This is not real original zswap source pool death, real DM current table or lower durable FUA and upper ACK. Full evidence: https://github.com/k1moradi/swapz/blob/651e41b96a575d04c0239725e013929dda6f6d38/docs/handoff/zswapz/round069/agent4-evidence.md
+
+
+---
+
+## [Original comment 7082192017](https://github.com/k1moradi/swapz/issues/186#issuecomment-7082192017)
+
+message: AGENT4_ROUND069_ACTUAL_FIRST_CI_HOST_FAILURE_AND_SCOPED_CORRECTION
+round: "069"
+agent: 4
+first_attempt_source_commit: 651e41b96a575d04c0239725e013929dda6f6d38
+first_attempt_exact_run: https://github.com/k1moradi/swapz/actions/runs/45044305345
+first_attempt_source_host: job137275415966_COMPLETED_FAILURE
+first_attempt_native_UML: job137275908198_COMPLETED_SKIPPED
+first_observed_host_error: "ROUND069_ORIGINAL_NATIVE_CONFIG_FIRST_ERROR phase=original cause=original-Kconfig-blob:crypto/Kconfig"
+true_cause: "New test verifier used relative source=linux/crypto/Kconfig with git -C linux hash-object, resolving to nonexistent linux/linux/crypto/Kconfig. The pinned original blob itself remains correct; original Git tree crypto/Kconfig blob 981d5dc422d4c89c743b5724aeacd6aa5120c009 size39218 was independently reverified."
+first_attempt_real_native_Kconfig_negative_or_positive_executed: NO_DEPENDENT_JOB_SKIPPED
+first_attempt_real_original_KUnit_cases_executed: ZERO
+first_attempt_semantic_verifier_selftest: PASS_10_SYNTHETIC_CONFIG_NEGATIVES
+first_attempt_real_C_mutants: NOT_EXECUTED_SOURCE_HOST_FAILS_BEFORE_PACKAGE_INSTALL
+first_attempt_additional_harness_diagnostic_defect: EXPECTED_NEGATIVE_SELFTEST_EMITTED_GITHUB_ERROR_ANNOTATION_IN_PASSING_PARSER_CONTROL
+corrective_commit: 6108bc7371d20647494aa03eb2a44b0218145ad4
+corrective_parent: 651e41b96a575d04c0239725e013929dda6f6d38
+publication: MAIN_ONLY_FRESH_EXPECTED_HEAD_SINGLE_PARENT_NONFORCE_FF_REMOTE_READBACK_VERIFIED
+corrective_test_helper_blob: 538e3dbb059a364eefa201fe62c05497656b61c8
+corrective_evidence_blob: 6038ea5c00c34aedd1d956eb910490e1e3efd0b5
+corrective_canonical_standards_blob: 89687eb9ade2dd890f9d6da02091b6bfbc6ed5bd
+corrective_entire_peer_testing_standards_prefix: BYTE_IDENTICAL_1609423_CHARACTERS
+corrective_append_only_testing_standards: 1223_CHARACTERS_ZERO_DELETIONS
+corrective_fix: "Normalize original Linux root with Path.resolve(strict=True) BEFORE both git -C linux and Git hash-object absolute source paths. Capture expected self-test mismatch ::error locally and assert exact CONFIG_LZ4_COMPRESS requested y effective n rather than leaking a false GitHub issue annotation. Genuine negative/positive Kconfig and native KUnit workflow remains unchanged."
+production_owner_C_H_native_fixture: UNCHANGED
+new_exact_ci: https://github.com/k1moradi/swapz/actions/runs/45044647237
+new_source_host_job: PENDING_ALLOCATION
+new_actual_native_UML_job: PENDING_HOST
+real_native_4_KUnit_cases: STILL_NOT_EXECUTED_OR_QUALIFIED
+old_prior_Round067_x86_native_selected_GPL_both_y_n_true_negatives: 3_OF_3_GREEN_COMPILE_LINK_SCOPE_ONLY
+SOURCE_MAPPED_AUTHENTICATED: 0
+PHASE_A: BLOCKED
+direct_compressed_handoff: DISABLED
+forced_RAW_bypass: DISABLED
+ordinary_RAW_4096: ENTIRE_ORIGINAL_UNCOMPRESSED_4096
+SWAPSPACE2_header_first4096_partition_table: UNTOUCHED
+owner_Make_privileged_loaded_physical_actual_pressure: NOT_RUN
+status: PROGRESS_FIRST_CAUSE_DIAGNOSED_NATIVE_PENDING
+
+No live kernel or original zswap source pool death can be claimed. Do not interpret previous Round068 or current host-verifier failures as true original decoder-owner spin/wait runtime errors. Original pin and independent native old-Kconfig control and four actual KUnit need exact-source success for REPORT_READY.
+
+
+---
+
+## [Original comment 7082218553](https://github.com/k1moradi/swapz/issues/186#issuecomment-7082218553)
+
+message: AGENT4_ROUND069_FINAL_OBSERVED_EXACT_CI_SNAPSHOT
+round: "069"
+source_commit: 6108bc7371d20647494aa03eb2a44b0218145ad4
+single_parent: 651e41b96a575d04c0239725e013929dda6f6d38
+single_main_remote_readback: VERIFIED_NONFORCE_FAST_FORWARD
+exact_source_ci: https://github.com/k1moradi/swapz/actions/runs/45044647237
+exact_source_host_job: 137276474589_QUEUED_NOT_PASS
+exact_original_native_uml_job: NOT_ALLOCATED_DEPENDS_ON_HOST
+first_error_this_new_exact_source: NONE_EXECUTED_YET
+prior_exact_failed_CI: https://github.com/k1moradi/swapz/actions/runs/45044305345
+prior_host_job: 137275415966_COMPLETED_FAILURE
+prior_native_job: 137275908198_COMPLETED_SKIPPED
+prior_actual_first_error: "phase=original cause=original-Kconfig-blob:crypto/Kconfig"
+prior_actual_cause: "New verifier relative path linux/crypto/Kconfig under git -C linux, fixed by absolute pinned original source root and expected-negative marker capture."
+prior_old_original_native_Kconfig_run: https://github.com/k1moradi/swapz/actions/runs/45028541067
+prior_old_original_native_job: 137228196276_FAILED_BEFORE_KUNIT_CONFIG
+prior_old_first_error: "Not all Kconfig options selected in kunitconfig were in the generated .config."
+actual_old_missing_config_keys: NOT_YET_RETAINED_NEW_GENUINE_NATIVE_NEGATIVE_NOT_RUN
+pinned_original_crypto_Kconfig_blob: 981d5dc422d4c89c743b5724aeacd6aa5120c009
+real_GCC_Clang_22_source_owner_C_mutants: HISTORIC_SUCCESS_RUN45028541067_NOT_YET_NEW_SOURCE_TESTED
+actual_original_native_4_get_put_close_wake_LZO1X_LZ4_KUnit_cases: 0_EXECUTED_IN_NEW_EXACT_CI
+status: PROGRESS_NOT_REPORT_READY
+SOURCE_MAPPED_AUTHENTICATED: 0
+PHASE_A: BLOCKED
+DIRECT_COMPRESSED_HANDOFF: DISABLED
+FORCED_RAW_BYPASS: DISABLED
+original_RAW_4096: WHOLE_ORIGINAL_UNCOMPRESSED_PAGE
+physical_SWASPACE2_first4096_header_partition_table: UNTOUCHED
+owner_Make_privileged_loaded_physical_actual_pressure: NONE
+
+All source and append-only standards fixes are published and read back. The new exact-source CI job is queued, not independently native qualified. No duplicate native CI or invented KUnit execution.
+
+
+---
+
+## [Original comment 7082231469](https://github.com/k1moradi/swapz/issues/186#issuecomment-7082231469)
+
+message: AGENT5_ROUND069_JOINED_REAL_NATIVE_AUTHORITY_SOURCE_PUBLISHED
+round: "069"
+agent: 5
+status: PROGRESS_HOST_AND_NATIVE_PENDING_NOT_REPORT_READY
+official: https://github.com/k1moradi/swapz/issues/186
+last_frozen_engineering: f98d00a8fa95ee2bb9df3270bf6262d5d6b040e0
+frozen_tasks: 111a833fc05e08bac259b4470504eeea9d8e9adb
+source_commit: 3ba1070db3d9527fb1437b3303eacc6f48048a84
+source_parent: 6108bc7371d20647494aa03eb2a44b0218145ad4
+publication: MAIN_ONLY_FRESH_EXPECTED_HEAD_ONE_PARENT_NONFORCE_FAST_FORWARD_REMOTE_READBACK_VERIFIED
+intervening_peer: ROUND069_AGENT4_2_COMMITS_PRESERVED_DISJOINT
+changed_paths: tests/runtime/native/fixtures/round069-original-bio-authority-joined.cfrag;tests/tools/round069-stage-original-bio-authority-joined.py;tests/tools/round069-original-bio-authority-joined-verify.py;.github/workflows/phase-a-round069-original-bio-authority-joined-noauth.yml;docs/handoff/zswapz/round069/agent5-evidence.md;docs/testing_standards.md
+previous_testing_standards_literal_byte_prefix: 1610646_CHARACTERS_PRESERVED
+same_commit_canonical_standards_append: 5135_CHARACTERS
+native_original_pin: torvalds/linux@c339f4010dea8b0d754f84ace70cd1b089878ef8
+native_original_immutable_git_blobs: block/bio.c_b0fcc69de653524479e3b328aa29a37e97945b84;include/linux/bio.h_7a794ce723b84b2a148f8f9beccf057b266e8ac9;include/linux/blk_types.h_0cc09b975d8ffbd45ca3dc47533a71f8e8164de6
+genuine_product_source_in_original_native_kernel_same_translation_unit: authority.c_003e02273edfa47b634850997a0f9c0c3ee1ea18;authority.h_3bb5bab5a5bdb2aa087f5793fc8b5e90d6636031;codec.c_d920dcaac6f2b7de1334d4133770bd649719c66d;codec.h_e89d316b9cf49f82df0b77648c1be1731607987d;gc-cost.h_2d317f1274ef36bdde157ff72acc26a9f7ae1e0e
+original_native_execution_intent: ACTUAL_original_block_bio.c_bio_alloc_bio_add_page_bio_for_each_segment_kmap_local_page_bio_endio; endio_only_records_immutable_exact_sector_token_reqopf_bytes_status_then_schedules_SLEEPABLE_WORKER_TO_CALL_ACTUAL_GUARDED_swapz_import_lower_end_write_flush_read_ACTUAL_allocator/live_records/pins
+native_cases: 4_FUA_LZ4_classes_1_2_4_with_full4096_decode;LZO1X_postwrite_separate_FLUSH;13_byte_short/duplicate/owner_CLOSE_negative;reader_PIN_held_during_GC_relocation_and_old_physical_release_after_original_native_READ
+original_native_codec_bytes: ACTUAL_kernel_LZO1X_1_or_raw_LZ4_compress; source_scratch_overwritten_after_bio_page_copy;native_crc32c_sha256_full_4096_original_decode_proved_only_when_NATIVE_EXECUTES
+native_first4096_SWAPSAPCE2: SENTINEL_ONLY_NO_PHYSICAL_MUTATION
+ordinary_map: ORIGINAL_20_BYTES_UNTOUCHED
+host_source_mutants: STRICT_GCC_CLANG_ASAN_UBSAN_TRUE_CHANGED_ACTUAL_AUTHORITY_C_14_EACH_AND_7_CASES_REQUIRED_BY_new_workflow
+new_source_workflow: https://github.com/k1moradi/swapz/actions/runs/45044912348
+new_source_host_job: 137277284940 QUEUED
+new_source_actual_native_original_KUnit_job: NOT_ALLOCATED_DEPENDS_HOST
+inherited_round068_source_and_native: https://github.com/k1moradi/swapz/actions/runs/45044912321 QUEUED
+inherited_round067: https://github.com/k1moradi/swapz/actions/runs/45044912144 QUEUED
+inherited_round066: https://github.com/k1moradi/swapz/actions/runs/45044912312 QUEUED
+inherited_round059: https://github.com/k1moradi/swapz/actions/runs/45044912337 QUEUED
+inherited_round057: https://github.com/k1moradi/swapz/actions/runs/45044912280 QUEUED
+first_error: NONE_YET_NOT_RUN
+native_compile_or_KTAP_success: NOT_CLAIMED
+native_owner_make_loaded_privileged_physical_actual_pressure: NOT_PERFORMED
+physical_durable_FUA_real_selected_zswap_source_first_current_DM_upper_ACK: NOT_PROVEN
+SOURCE_MAPPED_AUTHENTICATED: 0
+PHASE_A: BLOCKED
+DIRECT_COMPRESSED_HANDOFF: DISABLED
+FORCED_RAW_BYPASS: DISABLED
+imported_ACTIVE: 0
+ordinary_RAW_4096: COMPLETE_ORIGINAL_UNCOMPRESSED_4096
+
+This implementation genuinely joins the original Linux BIO and real product C in one ORIGINAL native test translation unit by staging byte-identical source files and invoking the real bounded allocator/reader pin from a separate sleepable worker QUEUED by bio_endio. No native success is claimed until actual pinned original KUnit JSON+KTAP is terminal. No physical submit_bio/device, persisted metadata, original selected zswap XArray+DM, real upper ACK or real durable media. Peer Agent3/4 source untouched.
+
+
+---
+
+## [Original comment 7082246399](https://github.com/k1moradi/swapz/issues/186#issuecomment-7082246399)
+
+message: AGENT3_ROUND069_PUBLISHED_SOURCE_ONLY_ORIGINAL_XARRAY_ZSMALLOC_PROGRESS
+round: "069"
+agent: 3
+status: PROGRESS_EXACT_SOURCE_HOST_AND_NATIVE_PINNED_KUNIT_QUEUED_NOT_REPORT_READY
+official_round_open: https://github.com/k1moradi/swapz/issues/186#issuecomment-7082028898
+source_commit: 23e87732203944cd1d2517fccbf08a859478023c
+single_parent: 3ba1070db3d9527fb1437b3303eacc6f48048a84
+publication: SOLE_MAIN_FRESH_EXPECTED_HEAD_NONFORCE_SINGLE_PARENT_FAST_FORWARD_VERIFIED
+observed_main: 23e87732203944cd1d2517fccbf08a859478023c
+commit_tree: 3557a928cec62099fb86f54395880d0d4964010c
+changed_paths: 6_EXCLUSIVE_FIXTURE_HOST_VERIFIER_ORIGINAL_STAGE_WORKFLOW_EVIDENCE_APPEND_ONLY_STANDARDS
+native_source_blob: 6aad6b5b4dce7707ebf9aa49ab5b3507e6c5d73f
+host_source_blob: 83fbf3006172b69f0ec5402f484ba91d0815ecfc
+original_stage_blob: b612ed67893d78f258101eb4b60321309fd09bf1
+native_workflow_blob: 35871104758c6a8f830ad0c8988190fd959cf870
+evidence_blob: 5f2bc5c570f3358432edb26bd80c3eaaeef23e33
+standards_previous_blob: 5d1da1d77256d1d6576727f2c91232fdb71faa3e
+standards_new_blob: c23fbd09b754847a67d969c3facd14aba27af588
+standards_prior_and_peer_prefix: COMPLETE_BYTE_IDENTICAL_1615781_CHARACTERS_PLUS_3590_CHARACTER_APPEND
+pinned_original_linux: torvalds/linux@c339f4010dea8b0d754f84ace70cd1b089878ef8
+original_mm_zswap_blob: ae19e301fced7e357a4c7587dfdd6abb890b9163
+previous_actual_native_DM_runtime: https://github.com/k1moradi/swapz/actions/runs/45025275603_2_OF_2_TERMINAL_SUCCESS
+new_exact_workflow: https://github.com/k1moradi/swapz/actions/runs/45045023441
+new_source_host_job: 137277630871_QUEUED_NOT_PASSED
+new_original_native_3_KUnit_job: NOT_YET_ALLOCATED_DEPENDS_ON_HOST
+new_current_native_first_error: NONE_JOBS_NOT_COMPILED_OR_EXECUTED
+local_host_GCC: STRICT_GNU11_ASAN_UBSAN_PASS_16_SCENARIOS_10_ACTUAL_COMPILED_EXECUTED_SEMANTIC_CHANGED_C_MUTANTS
+local_host_CLANG: STRICT_GNU11_ASAN_UBSAN_PASS_16_SCENARIOS_10_ACTUAL_COMPILED_EXECUTED_SEMANTIC_CHANGED_C_MUTANTS
+new_native_source_stage: DEFAULT_UNDEFINED_TEST_ONLY_ORIGINAL_MM_ZSWAP_C_NOT_PRODUCT
+new_native_test_cases: ORIGINAL_XARRAY_ZSMALLOC_LZ4_PREERASE_DEEPCOPY; SAME_SWP_NEW_POINTER_NEW_EPOCH_REISSUE_INVALIDATION; FOLIO_LOCK_SHORT_WRONG_CODEC_WRONG_TYPE_FAIL_CLOSED
+critical_limit: KUNIT_CREATES_TEST_ONLY_ENTRY_AND_LOCKED_FOLIO_NOT_GENUINE_SWAPCACHE_BACKED_ORIGINAL_ZSWAP_STORE_WRITEBACK
+real_slot_epoch_source_authentication: NOT_PROVEN_WITH_REAL_SWAPCACHE
+actual_zswap_producer_preerase_into_first_current_DM_TABLE: NOT_PROVEN
+no_new_Agent4_or_Agent5_interfaces_or_sources: YES
+source_mapped_authenticated: 0
+phase_a: BLOCKED
+direct_compressed_handoff: DISABLED
+forced_RAW_bypass: DISABLED
+ordinary_RAW_4096: ENTIRE_ORIGINAL_UNCOMPRESSED_4096
+physical_SWAPSPACE2_first4096_and_partition_table: UNCHANGED
+owner_Make_loaded_privileged_physical_pressure: NOT_PERFORMED
+
+Engineering scope: independently read original zswap_store_page, zswap_writeback_entry, zswap_decompress, zswap_load, zswap_invalidate, zswap_entry_pool and pinned zsmalloc SG API. Original locked swap-cache folio and entry == xa_load(tree,offset) must precede release; inherited Round028/031 source-only tags/SG byte copy already exist. Added separate original kernel native KUnit test of actual original metadata and real XArray/zsmalloc/LZ4 byte deep-copy surviving explicit erase/free plus stale reissue and negative controls; no new MM shrinker/reclaim/bypass, no product import path or physical lower IO. Local strict host semantic mutations are genuinely executed but native is QUEUED. Must await exact original compiled/booted 3-case JSON+KTAP and first native error before asserting scoped qualification. No duplicate jobs.
+
+
+---
+
+## [Original comment 7082319688](https://github.com/k1moradi/swapz/issues/186#issuecomment-7082319688)
+
+message: AGENT5_ROUND069_EXACT_SOURCE_FIRST_INHERITED_REGRESSION_VERIFIED
+round: "069"
+agent: 5
+source_sha: 3ba1070db3d9527fb1437b3303eacc6f48048a84
+source_parent: 6108bc7371d20647494aa03eb2a44b0218145ad4
+separate_Round066_run: https://github.com/k1moradi/swapz/actions/runs/45044912312/job/137277284851
+separate_Round066_terminal: COMPLETED_SUCCESS
+separate_Round066_genuine_actual_allocator_source_and_mutants: PASS_ONLY_IF_GREEN
+new_joined_run: https://github.com/k1moradi/swapz/actions/runs/45044912348
+new_joined_host_job: 137277284940 QUEUED_NOT_QUALIFIED
+new_joined_original_native_KUnit: NOT_ALLOCATED_DEPENDS_HOST
+first_joined_C_or_native_error: NONE_OBSERVED_YET_NOT_EXECUTED
+current_peer_main_advance: 23e87732203944cd1d2517fccbf08a859478023c_AGENT3_DISJOINT_SINGLE_PARENT_DESCENDANT
+SOURCE_MAPPED_AUTHENTICATED: 0
+PHASE_A: BLOCKED
+DIRECT_COMPRESSED_HANDOFF: DISABLED
+FORCED_RAW_BYPASS: DISABLED
+
+Do not count inherited allocator green as proof of joined original native BIO callback. Pending exact-source host and genuine pinned kernel four KUnit cases remain PENDING; never a RELEASE/AUTH claim.
