@@ -18636,3 +18636,34 @@ real pressure; no branch/fork/worktree/PR/merge/force push. Preserve
 entire previous+peer canonical standards literal byte-identical prefix
 for every new source/test/workflow commit; use fresh sole-main
 expected-head single-parent nonforce fast-forward.
+
+## Round068 Agent5 — real first masked close-fence mutant, isolated callback and pool lifetime
+
+At source commit 9613e87e6cc0cd70704ba6f03c9cb44d45cb752a
+the first actual exact hosted run 45028972192 job137228108114
+successfully compiled/executed GCC real authority source baseline of
+seven original LZO1X/LZ4 lower callback and 4096-byte decode cases, but
+FAILED the mandatory genuine changed-product-C semantic mutant
+`close_fence_missing`: `FIRST_ERROR round068-import-lower-bio:
+real semantic mutant escaped gcc close_fence_missing exit=0`.
+This is a genuine inert-test defect, not a compiler error or real kernel
+BIO KUnit success. The old test closed the test callback owner AND the
+separate real allocator pool BEFORE triggering callback; the pool-close
+fence independently canceled the callback and masked deletion of the
+callback owner's own close flag. Do NOT weaken/delete the original
+guard, negative oracle or mutant, nor count an inert edit as a kill.
+For the identical original source mutation, first close ONLY the
+test callback owner and complete its owned pending WRITE with no
+independent pool closure, requiring exact -ECANCELED. Drain/abort the
+real reservation and close. In a separately freshly initialized case,
+close the actual allocator pool with a queued WRITE and require it to
+cancel its real reservation independently. Reexecute both GCC+Clang
+strict original source, all fourteen individually compiled/executed
+semantic mutants, original Round067/066/059/057 linked C regressions
+and original pinned native BIO KUnit. The previous first job is RED
+and the successor result cannot be assumed. Report both exact source
+SHAs and first errors. Preserve mode0600 fail-only private evidence
+and do not sanitize away the repository-relative .private evidence
+path when rejecting absolute host paths. All AUTH0/PHASE_A BLOCKED,
+test-only BIO and NO physical durability/upper ACK/RAW reinterpretation
+rules remain unchanged; first4096 SWAPSPACE2/partition untouched.

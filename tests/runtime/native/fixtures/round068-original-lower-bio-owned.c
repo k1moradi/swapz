@@ -332,8 +332,10 @@ static int flush_failure_and_close_submitted(void)
 	CHECK(prepare_queued_write(8U, 1U, SWAPZ_AUTHORITY_IMPORT_LZO1X, 2U,
 				   0U, 1, &tx, &ticket, &spec, &write_request) == 0);
 	CHECK(fake_memory_write(&write_request, &tx, &spec) == 0);
+	/* Isolate the exact callback-owner close fence BEFORE independently
+	 * closing the pool. Otherwise the pool's own close check masks the
+	 * actual owner-close source mutation (an inert semantic oracle). */
 	CHECK(swapz_import_lower_close(&writer) == -EBUSY);
-	CHECK(swapz_import_disk_close(&pool) == -EBUSY);
 	CHECK(swapz_import_lower_end_write(&writer, &write_request,
 			write_request.bytes, 0, extent_at(tx.start_block),
 			NULL) == -ECANCELED);
@@ -341,6 +343,24 @@ static int flush_failure_and_close_submitted(void)
 	CHECK(swapz_import_disk_close(&pool) == 0);
 	CHECK(swapz_import_lower_close(&writer) == 0);
 	CHECK(!maps[8].valid && authority.in_flight == 0U);
+
+	/* Separately prove real authority pool close while BIO is queued,
+	 * without mistaking either independent cancellation fence for the
+	 * first case or publishing an upper ACK. */
+	CHECK(initialize() == 0);
+	swapz_import_lower_init(&writer, &pool);
+	CHECK(prepare_queued_write(8U, 1U, SWAPZ_AUTHORITY_IMPORT_LZO1X, 2U,
+				   0U, 1, &tx, &ticket, &spec, &write_request) == 0);
+	CHECK(fake_memory_write(&write_request, &tx, &spec) == 0);
+	CHECK(swapz_import_disk_close(&pool) == -EBUSY);
+	CHECK(swapz_import_lower_end_write(&writer, &write_request,
+			write_request.bytes, 0, extent_at(tx.start_block),
+			NULL) == -ECANCELED);
+	CHECK(swapz_import_disk_abort(&pool, ticket) == 0);
+	CHECK(swapz_import_disk_close(&pool) == 0);
+	CHECK(swapz_import_lower_close(&writer) == 0);
+	CHECK(!maps[8].valid && authority.in_flight == 0U &&
+	      header_intact());
 	return 0;
 }
 

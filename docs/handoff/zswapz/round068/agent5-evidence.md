@@ -99,3 +99,19 @@ all imported ACTIVE0. No owner Make, privileged/loaded kernel, physical
 device, real memory pressure, mkswap/swapoff/repartition. The actual source
 SHA, parent, run/job first-error and terminal outcomes are posted separately
 on the official issue.
+
+## First actual hosted red and independent negative correction
+
+[Exact initial Round068 source #45028972192 / host job137228108114](https://github.com/k1moradi/swapz/actions/runs/45028972192/job/137228108114)
+failed AFTER the genuine GCC source-linked seven-case baseline passed:
+`FIRST_ERROR round068-import-lower-bio: real semantic mutant escaped gcc close_fence_missing exit=0`.
+It did NOT run any native KUnit; dependent native job was SKIPPED.
+The test fixture closed both lower callback owner and actual allocator pool
+before invoking the lower callback. The pool's independent closing state
+masked removal of the callback owner's closing flag. The actual
+`authority.c` logic and original changed-real-source mutation remain
+unchanged. Correct only the fixture to separately exercise callback-owner
+closure and pool closure with their own queued WRITE completions, and adjust
+safe first-error formatting to retain mode0600 repository-relative
+`.private/` diagnostic path. Require a new exact-source full CI; the
+old red job is never evidence of native KUnit or qualified mutants.

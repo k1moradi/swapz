@@ -204,6 +204,6 @@ if __name__ == "__main__":
         main()
     except (RuntimeError, OSError, subprocess.TimeoutExpired) as error:
         print("FIRST_ERROR round068-import-lower-bio: " +
-              re.sub(r"(?:/[^:\s]+)+", "[host-path]",
+              re.sub(r"(?<![A-Za-z0-9_.-])/(?:[^:\s]+)", "[host-path]",
                      str(error))[:420], file=sys.stderr)
         sys.exit(1)
