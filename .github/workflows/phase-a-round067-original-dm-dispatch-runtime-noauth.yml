@@ -1,0 +1,166 @@
+name: Round067 pinned native DM real suspend requeue replacement KUnit NO_AUTH
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/phase-a-round067-original-dm-dispatch-runtime-noauth.yml'
+      - 'tests/runtime/native/fixtures/round067-original-dm-dispatch-runtime.cfrag'
+      - 'tests/tools/round067-stage-original-dm-dispatch-runtime.py'
+      - 'tests/tools/round067-original-dm-runtime-host-verify.py'
+      - 'docs/handoff/zswapz/round067/agent3-evidence.md'
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  exact-new-C-source-host:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Strict actual new source-C and executed semantic mutants
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
+          test "$(git branch --show-current)" = main
+          test -z "$(git status --porcelain)"
+          git diff --check HEAD^ HEAD
+          python3 -B tests/tools/round067-original-dm-runtime-host-verify.py
+          python3 -B - <<'PY'
+          import ast
+          from pathlib import Path
+          ast.parse(Path('tests/tools/round067-stage-original-dm-dispatch-runtime.py').read_text())
+          print('ROUND067_NATIVE_STAGE_PYTHON_SYNTAX_PASS')
+          PY
+      - name: Preserve complete prior and peer standards policy
+        env:
+          SWAPZ_PUSH_BEFORE_SHA: ${{ github.event.before }}
+        run: python3 -B tests/runtime/native/repository-policy-test.py --enforce
+
+  actual-original-uml-dm-runtime:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 110
+    needs: exact-new-C-source-host
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          path: swapz
+          persist-credentials: false
+      - uses: actions/checkout@v4
+        with:
+          repository: torvalds/linux
+          ref: c339f4010dea8b0d754f84ace70cd1b089878ef8
+          fetch-depth: 1
+          path: linux
+          persist-credentials: false
+      - name: Rootless original Linux user-mode kernel build prerequisites
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          sudo apt-get update -qq
+          sudo DEBIAN_FRONTEND=noninteractive apt-get install -y \
+            --no-install-recommends build-essential bc bison flex clang \
+            libelf-dev libssl-dev libncurses-dev liblz4-dev python3 \
+            python3-pyelftools binutils
+      - name: Verify original native pin and compose inherited native C stages
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          umask 077
+          test "$(git -C swapz rev-parse HEAD)" = "$GITHUB_SHA"
+          test "$(git -C linux rev-parse HEAD)" = c339f4010dea8b0d754f84ace70cd1b089878ef8
+          mkdir -p round067-evidence
+          python3 -B swapz/tests/tools/round058-original-stored-bio-chain.py stage \
+            --linux-root linux --manifest round067-evidence/round058-composed.json
+          python3 -B swapz/tests/tools/round066-stage-lineage-verify.py \
+            --linux-root linux --base-manifest round067-evidence/round058-composed.json \
+            --mode inherited
+          python3 -B swapz/tests/tools/round065-stage-original-dm-table.py \
+            --linux-root linux --base-manifest round067-evidence/round058-composed.json \
+            --manifest round067-evidence/round065-staged.json
+          python3 -B swapz/tests/tools/round067-stage-original-dm-dispatch-runtime.py \
+            --linux-root linux --base-manifest round067-evidence/round065-staged.json \
+            --manifest round067-evidence/round067-staged.json --verify-only
+          python3 -B swapz/tests/tools/round067-stage-original-dm-dispatch-runtime.py \
+            --linux-root linux --base-manifest round067-evidence/round065-staged.json \
+            --manifest round067-evidence/round067-staged.json
+          git -C linux diff --check
+          python3 -B - <<'PY'
+          import hashlib, json
+          from pathlib import Path
+          root = Path('linux')
+          manifest = json.loads(Path('round067-evidence/round067-staged.json').read_text())
+          assert manifest['original_sha'] == 'c339f4010dea8b0d754f84ace70cd1b089878ef8'
+          assert manifest['source_mapped_authenticated'] is False
+          assert len(manifest['changed_paths']) == 1
+          for entry in manifest['changed_paths']:
+              assert hashlib.sha256((root / entry['path']).read_bytes()).hexdigest() == entry['staged_sha256']
+          print('ROUND067_EXACT_ORIGINAL_NATIVE_POSTIMAGE_SHA_PASS NO_AUTH')
+          PY
+      - name: Compile and actually execute pinned original native DM suspend/requeue/rebind/dtr KUnit
+        shell: bash
+        timeout-minutes: 85
+        run: |
+          set -Eeuo pipefail
+          umask 077
+          first_phase=initial
+          log=round067-evidence/first-original-native-error.log
+          verdict=round067-evidence/uml-verdict.txt
+          out="$RUNNER_TEMP/round067-original-uml"
+          result="$PWD/round067-evidence/native-dm-runtime.json"
+          request="$PWD/round067-evidence/original.kunitconfig"
+          printf 'source=%s\noriginal=c339f4010dea8b0d754f84ace70cd1b089878ef8\n' "$GITHUB_SHA" > "$verdict"
+          trap 'code=$?; if ((code)); then echo "::error::ROUND067_NATIVE_FIRST_ERROR phase=$first_phase exit=$code"; first=$(grep -m1 -E "error:|FAILED|Traceback|KASAN:|UBSAN:" "$log" 2>/dev/null || :); if test -n "$first"; then printf "::error::ROUND067_NATIVE_FIRST_DIAGNOSTIC %s\n" "${first:0:240}"; fi; printf "result=FAIL\nfirst_phase=%s\nexit=%s\n" "$first_phase" "$code" >> "$verdict"; fi' EXIT
+          cat > "$request" <<'KUNIT_CFG'
+          CONFIG_KUNIT=y
+          CONFIG_BLOCK=y
+          CONFIG_MD=y
+          CONFIG_BLK_DEV_DM=y
+          CONFIG_SWAP=y
+          CONFIG_ZSWAP=y
+          CONFIG_SWAP_BIO_ORIGIN_KUNIT_TEST=y
+          CONFIG_CRYPTO=y
+          CONFIG_CRYPTO_LZ4=y
+          CONFIG_CRYPTO_SHA256=y
+          CONFIG_LZ4_COMPRESS=y
+          CONFIG_LZ4_DECOMPRESS=y
+          # CONFIG_CGROUPS is not set
+          # CONFIG_KUNIT_ALL_TESTS is not set
+          KUNIT_CFG
+          flags='-DSWAPZ_ROUND067_ORIGINAL_DM_RUNTIME_TEST=1 -DSWAPZ_ROUND065_ORIGINAL_DM_TABLE_TEST=1 -DSWAPZ_ROUND064_ORIGINAL_SLOT_TARGET_TEST=1 -DSWAPZ_ROUND056_PREERASE_SINGLE_OWNER_TEST=1 -DSWAPZ_ROUND063_ORIGINAL_DM_OWNER_TEST=1 -DSWAPZ_ROUND028_SLOT_EPOCH_SOURCE=1 -DSWAPZ_ROUND030_EVICTION_SNAPSHOT_SOURCE=1 -DSWAPZ_ROUND025_SIDEBAND_CI_ONLY=1 -DSWAPZ_ROUND031_MM_BIO_SOURCE=1 -DSWAPZ_ROUND032_BIO_COPY_VIEW_CI_ONLY=1 -DSWAPZ_ROUND034_ORIGINAL_V1_KUNIT_TEST=1 -DSWAPZ_ROUND035_ORIGINAL_MM_ROUTE_WITNESS_TEST=1 -DSWAPZ_ROUND036_ORIGINAL_ROUTE_LIFETIME_TEST=1 -DSWAPZ_ROUND037_ORIGINAL_MM_LIFETIME_OWNER_TEST=1 -DSWAPZ_ROUND038_ORIGINAL_STORE_PROVENANCE_TEST=1 -DSWAPZ_ROUND040_ORIGINAL_ASYNC_SLOT_LEASE_NEGATIVE_TEST=1 -DSWAPZ_ROUND041_ORIGINAL_SECTOR_TO_DM_NONAUTHORITY_TEST=1 -DSWAPZ_ROUND042_ORIGINAL_STORED_WRITEBACK_LIFETIME_TEST=1 -DSWAPZ_ROUND043_ORIGINAL_BIO_CLONE_COPY_TEST=1 -DSWAPZ_ROUND045_ORIGINAL_STORED_BIO_SOURCE_SCOPE_TEST=1 -DSWAPZ_ROUND049_ORIGINAL_LOCKED_FOLIO_COUNT_PAIR_TEST=1 -DSWAPZ_ROUND052_ORIGINAL_PRE_UNUSE_CANCEL_TEST=1 -DSWAPZ_ROUND056_ORIGINAL_CLONE_PROVENANCE_TEST=1 -DSWAPZ_ROUND058_ORIGINAL_STORED_BIO_CHAIN_TEST=1'
+          first_phase=compiled-original-uml-native-dm-suite
+          timeout -k 10s 78m python3 -B linux/tools/testing/kunit/kunit.py run \
+            --arch=um --build_dir="$out" --kunitconfig="$request" \
+            --make_options="KCFLAGS=$flags -Werror" --jobs=2 --timeout=120 \
+            --json="$result" 'swapz_round067_native_dm_runtime*' > "$log" 2>&1
+          first_phase=verify-real-original-effective-config
+          test -x "$out/linux" && test -s "$result" && test -s "$out/test.log"
+          grep -Fxq CONFIG_KUNIT=y "$out/.config"
+          grep -Fxq CONFIG_BLK_DEV_DM=y "$out/.config"
+          grep -Fxq CONFIG_ZSWAP=y "$out/.config"
+          first_phase=independent-new-native-JSON-KTAP
+          python3 -B - "$result" "$out/test.log" <<'PY'
+          import json, pathlib, re, sys
+          document = json.loads(pathlib.Path(sys.argv[1]).read_text())
+          log = pathlib.Path(sys.argv[2]).read_text()
+          pending, matches = [document], []
+          while pending:
+              group = pending.pop()
+              if group.get('name') == 'swapz_round067_native_dm_runtime':
+                  matches.append(group)
+              pending.extend(group.get('sub_groups', []))
+          assert len(matches) == 1
+          assert len(matches[0]['test_cases']) == 1
+          assert matches[0]['test_cases'][0]['name'] == 'swapz_round067_actual_native_dm_runtime_kunit'
+          assert matches[0]['test_cases'][0]['status'] == 'PASS'
+          assert all(matches[0]['misc'][key] == value for key, value in
+                     dict(tests=1, passed=1, failed=0, skipped=0, crashed=0, errors=0).items())
+          assert log.count('# Subtest: swapz_round067_native_dm_runtime') == 1
+          assert len(re.findall(r'\bok\s+\d+\s+(?:-\s+)?swapz_round067_actual_native_dm_runtime_kunit\b', log)) == 1
+          assert not re.search(r'(?i)(Kernel panic|KASAN:|UBSAN:)', log)
+          print('ROUND067_REAL_NATIVE_DM_SUSPEND_REQUEUE_REPLACEMENT_DTR_KUNIT_PASS source=' + sys.argv[1])
+          PY
+          printf 'source_native_original=PASS\nno_auth=1\nresult=PASS\n' >> "$verdict"

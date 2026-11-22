@@ -1,0 +1,416 @@
+/* ROUND067_ORIGINAL_DM_RUNTIME_BEGIN
+ * Native KUnit only. Use real DM map, suspend, noflush requeue, table swap,
+ * deferred worker, clone_endio and target dtr; NO backing block device.
+ * This deliberately does NOT construct an original zswap source owner.
+ */
+#if defined(SWAPZ_ROUND067_ORIGINAL_DM_RUNTIME_TEST) && \
+    defined(SWAPZ_ROUND065_ORIGINAL_DM_TABLE_TEST) && IS_ENABLED(CONFIG_KUNIT)
+#include <kunit/test.h>
+#include <linux/completion.h>
+#include <linux/delay.h>
+#include <linux/jiffies.h>
+#include <linux/kthread.h>
+#include <linux/mm.h>
+#include <linux/sched.h>
+
+struct swapz_round067_runtime {
+	struct dm_table *first_table;
+	struct dm_table *replacement_table;
+	struct bio *held_clone;
+	u64 first_incarnation;
+	u64 replacement_incarnation;
+	sector_t first_size;
+	struct completion clone_mapped;
+	struct completion suspend_finished;
+	atomic_t first_maps;
+	atomic_t replacement_maps;
+	atomic_t first_destructors;
+	atomic_t replacement_destructors;
+	atomic_t invalid_clone_lineage;
+	atomic_t hold_first_clone;
+	int suspend_result;
+	struct mapped_device *md;
+};
+
+struct swapz_round067_upper_io {
+	struct completion finished;
+	atomic_t completions;
+	struct bio *bio;
+	struct page *page;
+	blk_status_t final_status;
+};
+
+/* ROUND067_COMMON_BEGIN */
+/* Independent table incarnation is mandatory even for identical geometry.
+ * This predicate also has strict source-C compiler/mutant host coverage.
+ */
+static bool swapz_round067_replacement_is_distinct(u64 first_incarnation,
+		u64 next_incarnation, sector_t first_sectors, sector_t next_sectors)
+{
+	return first_incarnation != 0 && next_incarnation != 0 &&
+	       next_incarnation > first_incarnation &&
+	       first_sectors > 0 && first_sectors == next_sectors;
+}
+/* ROUND067_COMMON_END */
+
+/* A single test suite owns the only active instance; no production target. */
+static struct swapz_round067_runtime *swapz_round067_active_runtime;
+
+static int swapz_round067_runtime_ctr(struct dm_target *ti,
+		unsigned int argc, char **argv)
+{
+	struct swapz_round067_runtime *runtime =
+		READ_ONCE(swapz_round067_active_runtime);
+
+	(void)argv;
+	if (argc || !runtime)
+		return -EINVAL;
+	ti->private = runtime;
+	return 0;
+}
+
+static void swapz_round067_runtime_dtr(struct dm_target *ti)
+{
+	struct swapz_round067_runtime *runtime = ti->private;
+
+	if (ti->table == runtime->first_table)
+		atomic_inc(&runtime->first_destructors);
+	else if (ti->table == runtime->replacement_table)
+		atomic_inc(&runtime->replacement_destructors);
+	else
+		atomic_inc(&runtime->invalid_clone_lineage);
+}
+
+static int swapz_round067_runtime_map(struct dm_target *ti, struct bio *clone)
+{
+	struct swapz_round067_runtime *runtime = ti->private;
+	struct dm_target_io *target_io = clone_to_tio(clone);
+	struct dm_io *original_io = target_io->io;
+	struct bio *parent = original_io ? original_io->orig_bio : NULL;
+	u64 incarnation = READ_ONCE(ti->table->swapz_round065_incarnation);
+
+	/* Check the actual native clone created by DM, not a synthetic tio. */
+	if (!parent || original_io->md != runtime->md ||
+	    target_io->ti != ti || clone->bi_end_io != clone_endio ||
+	    !dm_tio_is_normal(target_io) ||
+	    dm_io_flagged(original_io, DM_IO_WAS_SPLIT) ||
+	    parent == clone || parent->bi_io_vec != clone->bi_io_vec ||
+	    parent->bi_iter.bi_size != 4096U ||
+	    clone->bi_iter.bi_size != 4096U ||
+	    parent->bi_iter.bi_sector != clone->bi_iter.bi_sector ||
+	    !incarnation)
+		atomic_inc(&runtime->invalid_clone_lineage);
+
+	if (ti->table == runtime->first_table) {
+		atomic_inc(&runtime->first_maps);
+		if (incarnation != READ_ONCE(runtime->first_incarnation))
+			atomic_inc(&runtime->invalid_clone_lineage);
+	} else if (ti->table == runtime->replacement_table) {
+		atomic_inc(&runtime->replacement_maps);
+		if (incarnation != READ_ONCE(runtime->replacement_incarnation) ||
+		    !swapz_round067_replacement_is_distinct(
+			READ_ONCE(runtime->first_incarnation), incarnation,
+			runtime->first_size, dm_table_get_size(ti->table)))
+			atomic_inc(&runtime->invalid_clone_lineage);
+	} else {
+		atomic_inc(&runtime->invalid_clone_lineage);
+	}
+
+	if (atomic_cmpxchg(&runtime->hold_first_clone, 1, 0) == 1) {
+		WRITE_ONCE(runtime->held_clone, clone);
+		complete(&runtime->clone_mapped);
+		return DM_MAPIO_SUBMITTED;
+	}
+
+	/* No physical submission: complete original with one explicit IOERR. */
+	return DM_MAPIO_KILL;
+}
+
+static struct target_type swapz_round067_runtime_target = {
+	.name = "swapz067mem",
+	.version = { 0, 0, 1 },
+	.module = THIS_MODULE,
+	.ctr = swapz_round067_runtime_ctr,
+	.dtr = swapz_round067_runtime_dtr,
+	.map = swapz_round067_runtime_map,
+};
+
+static void swapz_round067_upper_endio(struct bio *bio)
+{
+	struct swapz_round067_upper_io *upper = bio->bi_private;
+
+	upper->final_status = bio->bi_status;
+	atomic_inc(&upper->completions);
+	complete(&upper->finished);
+}
+
+static int swapz_round067_prepare_upper(struct mapped_device *md,
+		struct swapz_round067_upper_io *upper)
+{
+	upper->page = alloc_page(GFP_KERNEL | __GFP_ZERO);
+	if (!upper->page)
+		return -ENOMEM;
+	upper->bio = bio_alloc(md->disk->part0, 1, REQ_OP_READ, GFP_KERNEL);
+	if (!upper->bio) {
+		__free_page(upper->page);
+		upper->page = NULL;
+		return -ENOMEM;
+	}
+	if (bio_add_page(upper->bio, upper->page, 4096U, 0) != 4096U) {
+		bio_put(upper->bio);
+		__free_page(upper->page);
+		upper->bio = NULL;
+		upper->page = NULL;
+		return -EINVAL;
+	}
+	upper->bio->bi_iter.bi_sector = 8;
+	upper->bio->bi_private = upper;
+	upper->bio->bi_end_io = swapz_round067_upper_endio;
+	init_completion(&upper->finished);
+	atomic_set(&upper->completions, 0);
+	return 0;
+}
+
+static void swapz_round067_free_upper(struct swapz_round067_upper_io *upper)
+{
+	if (upper->bio)
+		bio_put(upper->bio);
+	if (upper->page)
+		__free_page(upper->page);
+}
+
+static int swapz_round067_build_table(struct mapped_device *md,
+		struct dm_table **result)
+{
+	struct dm_table *table;
+	char parameters[] = "";
+	int result_code;
+
+	result_code = dm_table_create(&table, BLK_OPEN_READ | BLK_OPEN_WRITE,
+					1, md);
+	if (result_code)
+		return result_code;
+	result_code = dm_table_add_target(table,
+			"swapz067mem", 0, 64, parameters);
+	if (!result_code)
+		result_code = dm_table_complete(table);
+	if (result_code) {
+		dm_table_destroy(table);
+		return result_code;
+	}
+	*result = table;
+	return 0;
+}
+
+static int swapz_round067_suspend_thread(void *opaque)
+{
+	struct swapz_round067_runtime *runtime = opaque;
+
+	runtime->suspend_result = dm_suspend(runtime->md,
+						DM_SUSPEND_NOFLUSH_FLAG);
+	complete(&runtime->suspend_finished);
+	return 0;
+}
+
+static bool swapz_round067_wait_for_blocked_suspend(struct mapped_device *md)
+{
+	unsigned int attempt;
+
+	for (attempt = 0; attempt < 5000; ++attempt) {
+		if (test_bit(DMF_NOFLUSH_SUSPENDING, &md->flags) &&
+		    test_bit(DMF_BLOCK_IO_FOR_SUSPEND, &md->flags))
+			return true;
+		usleep_range(1000, 2000);
+	}
+	return false;
+}
+
+static void swapz_round067_actual_native_dm_runtime_kunit(struct kunit *test)
+{
+	struct swapz_round067_runtime *runtime;
+	struct swapz_round067_upper_io first = {}, deferred = {};
+	struct dm_table *new_table = NULL, *old_table = NULL;
+	struct task_struct *suspend_task;
+	struct mapped_device *md;
+	bool first_done = false, deferred_done = false;
+	bool safe_cleanup = true;
+	int result_code;
+
+	runtime = kzalloc(sizeof(*runtime), GFP_KERNEL);
+	KUNIT_ASSERT_NOT_NULL(test, runtime);
+	init_completion(&runtime->clone_mapped);
+	init_completion(&runtime->suspend_finished);
+	atomic_set(&runtime->hold_first_clone, 1);
+	WRITE_ONCE(swapz_round067_active_runtime, runtime);
+	result_code = dm_register_target(&swapz_round067_runtime_target);
+	if (result_code) {
+		KUNIT_FAIL(test, "register memory-only target: %d", result_code);
+		goto out_free_runtime;
+	}
+	result_code = dm_create(DM_ANY_MINOR, &md);
+	if (result_code) {
+		KUNIT_FAIL(test, "create native mapped_device: %d", result_code);
+		goto out_unregister;
+	}
+	runtime->md = md;
+	result_code = swapz_round067_build_table(md, &runtime->first_table);
+	if (result_code) {
+		KUNIT_FAIL(test, "create first native target table: %d", result_code);
+		goto out_destroy_device;
+	}
+	result_code = dm_setup_md_queue(md, runtime->first_table);
+	if (result_code) {
+		KUNIT_FAIL(test, "setup native memory-only queue: %d", result_code);
+		goto out_destroy_first_table;
+	}
+	result_code = dm_suspend(md, 0);
+	if (result_code) {
+		KUNIT_FAIL(test, "suspend empty native device: %d", result_code);
+		goto out_destroy_first_table;
+	}
+	old_table = dm_swap_table(md, runtime->first_table);
+	if (IS_ERR(old_table) || old_table) {
+		KUNIT_FAIL(test, "initial native __bind failed");
+		goto out_destroy_device;
+	}
+	runtime->first_incarnation = READ_ONCE(runtime->first_table->swapz_round065_incarnation);
+	runtime->first_size = dm_table_get_size(runtime->first_table);
+	KUNIT_EXPECT_GT(test, runtime->first_incarnation, 0ULL);
+	result_code = dm_resume(md);
+	if (result_code) {
+		KUNIT_FAIL(test, "first native resume: %d", result_code);
+		goto out_destroy_device;
+	}
+	result_code = swapz_round067_prepare_upper(md, &first);
+	if (result_code) {
+		KUNIT_FAIL(test, "allocate first memory-backed original: %d", result_code);
+		goto out_destroy_device;
+	}
+	/* Actual dm_submit_bio -> __map_bio -> held native clone. */
+	dm_submit_bio(first.bio);
+	if (!wait_for_completion_timeout(&runtime->clone_mapped, msecs_to_jiffies(5000))) {
+		KUNIT_FAIL(test, "native clone never reached target map");
+		safe_cleanup = false;
+		goto out_cleanup;
+	}
+	KUNIT_EXPECT_EQ(test, atomic_read(&runtime->first_maps), 1);
+	KUNIT_EXPECT_EQ(test, atomic_read(&first.completions), 0);
+
+	/* Real suspend must wait for held original pending_io. */
+	suspend_task = kthread_run(swapz_round067_suspend_thread, runtime,
+					"swapz-round067-dm-suspend");
+	if (IS_ERR(suspend_task)) {
+		KUNIT_FAIL(test, "native noflush suspend thread unavailable");
+		safe_cleanup = false;
+		goto out_cleanup;
+	}
+	if (!swapz_round067_wait_for_blocked_suspend(md)) {
+		KUNIT_FAIL(test, "real DM noflush suspend never blocked dispatch");
+		safe_cleanup = false;
+		goto out_cleanup;
+	}
+	KUNIT_EXPECT_FALSE(test, completion_done(&runtime->suspend_finished));
+	/* Actual clone_endio -> noflush requeue -> deferred list -> pending_io drain. */
+	WRITE_ONCE(runtime->held_clone->bi_status, BLK_STS_DM_REQUEUE);
+	bio_endio(runtime->held_clone);
+	if (!wait_for_completion_timeout(&runtime->suspend_finished, msecs_to_jiffies(5000))) {
+		KUNIT_FAIL(test, "pending_io did not drain real noflush suspend");
+		safe_cleanup = false;
+		goto out_cleanup;
+	}
+	if (runtime->suspend_result) {
+		KUNIT_FAIL(test, "native noflush suspend failed: %d", runtime->suspend_result);
+		safe_cleanup = false;
+		goto out_cleanup;
+	}
+	KUNIT_EXPECT_EQ(test, atomic_read(&first.completions), 0);
+	result_code = swapz_round067_prepare_upper(md, &deferred);
+	if (result_code) {
+		KUNIT_FAIL(test, "allocate suspended original: %d", result_code);
+		goto out_cleanup;
+	}
+	/* Native queue_io must not dispatch suspended/deferred parent to old table. */
+	dm_submit_bio(deferred.bio);
+	KUNIT_EXPECT_EQ(test, atomic_read(&runtime->first_maps), 1);
+	KUNIT_EXPECT_EQ(test, atomic_read(&deferred.completions), 0);
+
+	result_code = swapz_round067_build_table(md, &new_table);
+	if (result_code) {
+		KUNIT_FAIL(test, "create same-geometry replacement: %d", result_code);
+		safe_cleanup = false;
+		goto out_cleanup;
+	}
+	runtime->replacement_table = new_table;
+	old_table = dm_swap_table(md, new_table);
+	if (IS_ERR(old_table) || old_table != runtime->first_table) {
+		KUNIT_FAIL(test, "real same-geometry dm_swap_table failed");
+		safe_cleanup = false;
+		goto out_cleanup;
+	}
+	runtime->replacement_incarnation = READ_ONCE(new_table->swapz_round065_incarnation);
+	KUNIT_EXPECT_GT(test, runtime->replacement_incarnation, runtime->first_incarnation);
+	KUNIT_EXPECT_TRUE(test, swapz_round067_replacement_is_distinct(
+		runtime->first_incarnation, runtime->replacement_incarnation,
+		runtime->first_size, dm_table_get_size(new_table)));
+	dm_table_destroy(old_table);
+	old_table = NULL;
+	KUNIT_EXPECT_EQ(test, atomic_read(&runtime->first_destructors), 1);
+	result_code = dm_resume(md);
+	if (result_code) {
+		KUNIT_FAIL(test, "resume same-geometry replacement: %d", result_code);
+		safe_cleanup = false;
+		goto out_cleanup;
+	}
+	first_done = wait_for_completion_timeout(&first.finished, msecs_to_jiffies(5000)) != 0;
+	deferred_done = wait_for_completion_timeout(&deferred.finished, msecs_to_jiffies(5000)) != 0;
+	if (!first_done || !deferred_done) {
+		KUNIT_FAIL(test, "real deferred/requeued BIO did not complete");
+		safe_cleanup = false;
+		goto out_cleanup;
+	}
+	flush_workqueue(md->wq);
+	KUNIT_EXPECT_EQ(test, atomic_read(&runtime->first_maps), 1);
+	KUNIT_EXPECT_EQ(test, atomic_read(&runtime->replacement_maps), 2);
+	KUNIT_EXPECT_EQ(test, atomic_read(&runtime->invalid_clone_lineage), 0);
+	KUNIT_EXPECT_EQ(test, atomic_read(&first.completions), 1);
+	KUNIT_EXPECT_EQ(test, atomic_read(&deferred.completions), 1);
+	KUNIT_EXPECT_EQ(test, first.final_status, BLK_STS_IOERR);
+	KUNIT_EXPECT_EQ(test, deferred.final_status, BLK_STS_IOERR);
+
+out_cleanup:
+	if (!safe_cleanup) {
+		/* Fail-closed: never free in-flight kernel BIO or asynchronous state.
+		 * The isolated UML kernel terminates after reporting this failure.
+		 */
+		return;
+	}
+	swapz_round067_free_upper(&first);
+	swapz_round067_free_upper(&deferred);
+out_destroy_device:
+	/* dm_destroy requires all user references dropped; dtr runs exactly once. */
+	dm_put(md);
+	dm_destroy(md);
+	KUNIT_EXPECT_EQ(test, atomic_read(&runtime->first_destructors), 1);
+	KUNIT_EXPECT_EQ(test, atomic_read(&runtime->replacement_destructors), 1);
+	goto out_unregister;
+out_destroy_first_table:
+	dm_table_destroy(runtime->first_table);
+	goto out_destroy_device;
+out_unregister:
+	dm_unregister_target(&swapz_round067_runtime_target);
+out_free_runtime:
+	WRITE_ONCE(swapz_round067_active_runtime, NULL);
+	kfree(runtime);
+}
+
+static struct kunit_case swapz_round067_native_dm_runtime_cases[] = {
+	KUNIT_CASE(swapz_round067_actual_native_dm_runtime_kunit),
+	{}
+};
+static struct kunit_suite swapz_round067_native_dm_runtime_suite = {
+	.name = "swapz_round067_native_dm_runtime",
+	.test_cases = swapz_round067_native_dm_runtime_cases,
+};
+kunit_test_suite(swapz_round067_native_dm_runtime_suite);
+#endif /* test-only real native DM runtime; no source AUTH */
+/* ROUND067_ORIGINAL_DM_RUNTIME_END */
