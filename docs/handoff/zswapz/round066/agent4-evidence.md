@@ -78,3 +78,33 @@ no new persistent metadata, and physical SWAPSPACE2 header and
 parent partition table untouched. Native MM sole owner compressed RAM
 and natural pressure eviction; swapz disk work only. No owner Make,
 privilege, loaded kernel, actual pressure or device trial.
+
+## Independent teardown wake/free synchronization correction
+
+Post-publication Agent4 review identified a kernel-only lifetime race in the
+source-independent owner: the final `put` decremented `active_readers`
+under `owner->lock`, unlocked, then called `wake_up_all`. A concurrent
+`close_and_drain` can observe zero readers and return while the final reader
+still references the owner's embedded wait queue, permitting free-before-wake
+and a use-after-free. This applies even without a zswap pool or physical I/O.
+The correction calls `wake_up_all` inside the spinlock, then has sleepable
+close acquire/release that lock after the wait condition becomes true. Thus
+close cannot finish until the last put has completed its wake and released
+the owner lock. The host pthread branch already broadcasts under its mutex.
+
+`tests/tools/round066-decoder-drain-release-verify.py` compiles the actual
+changed owner .c and actual unchanged owner .h in an explicitly synthetic
+pthread-backed mock for only Linux spin/wait primitives (codec call stubbed
+in this targeted synchronization test). It holds the final wake open to expose
+early close deterministically. Exact local strict GCC and Clang
+`-std=gnu11 -Wall -Wextra -Wconversion -Wshadow -Werror` ASan/UBSan:
+2 executed baselines passed; both *compiled and executed* C mutants
+(wake after unlock, close without post-wait lock join) rejected for the precise
+semantic early-close marker under each compiler (4 mutant runs). All three
+repeats passed. Initial mock-harness first error was incompatible fake Linux
+errno/wait macro definitions; corrected in the test shim, not in the product
+or native kernel. The original prior source-host job
+137177690392 is terminal success with 18 independent original-codec-owner
+C mutants, but new exact-source CI/native jobs are pending until observed.
+No loaded module, provider unload, physical I/O, real pool retirement,
+native source-slot authentication or release authority is claimed.

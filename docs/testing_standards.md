@@ -18327,3 +18327,30 @@ all import ACTIVE=0. Protect immutable physical SWAPSPACE2 first
 4096 bytes/UUID/header/signature and parent partition table, fixed
 20-byte map and data-only padded extents. No owner Make, privileged,
 loaded, real physical, actual-pressure or mkswap tests.
+
+## Round066 Agent4 final reader wake and owner teardown join (no AUTH)
+
+The dormant original LZO1X/LZ4 owner must retain itself and its embedded
+wait queue until the final reader's *entire* final-put notification has
+completed. A last reader decrementing under a spinlock and waking *after*
+unlock is not sufficient: sleepable close can read zero and release the
+owner before that wake accesses its queue. Final `wake_up_all` must finish
+while holding the owner spinlock, and `close_and_drain` must reacquire/release
+the same spinlock after `wait_event` observes zero. Closing callers still
+must exclude new get callers by an external owner-lifetime protocol.
+No extra permanent reader ref or allocation is introduced.
+
+Rootless regression command (does not touch the physical host or load a
+kernel module): `python3 -B tests/tools/round066-decoder-drain-release-verify.py
+--owner-source src/kernel/zswap-import-decoder-owner.c
+--owner-header src/kernel/zswap-import-decoder-owner.h`. Requires actual
+GCC/Clang GNU11, strict warnings, ASan/UBSan, compiled/executed real C
+baselines and two semantic mutants per compiler. The mock kernel spin/wait
+implementation tests *only* final-wake ordering, not kernel scheduling,
+zswap pool teardown or selected codec decoding; the independent exact
+original Linux y/n GPL compile/link and real LZO1X/LZ4 source-host tests
+remain mandatory. Preserve imported ACTIVE=0, SOURCE_MAPPED_AUTHENTICATED=0,
+PHASE_A=BLOCKED, direct compressed handoff DISABLED, forced RAW bypass
+DISABLED, original whole uncompressed RAW_4096, fixed 20-byte map, immutable
+physical SWAPSPACE2 header/partition table, no owner Make or loaded/device/
+pressure run.

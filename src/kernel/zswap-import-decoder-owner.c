@@ -143,9 +143,11 @@ int swapz_zswap_import_decoder_owner_put(
 		pthread_cond_broadcast(&owner->drained);
 	pthread_mutex_unlock(&owner->lock);
 #else
-	spin_unlock_irqrestore(&owner->lock, irq_flags);
+	/* Finish the wait-queue wake under the owner lock. Otherwise close
+	 * could observe zero readers and free the queue before this wake. */
 	if (wake_drainer)
 		wake_up_all(&owner->drained);
+	spin_unlock_irqrestore(&owner->lock, irq_flags);
 #endif
 	return 0;
 }
@@ -174,6 +176,11 @@ int swapz_zswap_import_decoder_owner_close_and_drain(
 	owner->closing = 1U;
 	spin_unlock_irqrestore(&owner->lock, irq_flags);
 	wait_event(owner->drained, READ_ONCE(owner->active_readers) == 0U);
+	/* READ_ONCE can see the final decrement while put still holds the
+	 * spinlock and uses the wait queue. Join that last wake before the
+	 * caller is permitted to release the owner and its wait queue. */
+	spin_lock_irqsave(&owner->lock, irq_flags);
+	spin_unlock_irqrestore(&owner->lock, irq_flags);
 #endif
 	return 0;
 }

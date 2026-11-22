@@ -8,6 +8,7 @@ on:
       - 'src/kernel/zswap-import-decoder-owner.c'
       - 'tests/runtime/native/fixtures/round066-original-decoder-owner.c'
       - 'tests/tools/round066-original-decoder-owner-verify.py'
+      - 'tests/tools/round066-decoder-drain-release-verify.py'
       - 'tests/tools/round060-original-decoder-kbuild-verify.py'
       - 'tests/tools/round064-original-decoder-elf-cause-verify.py'
       - 'tests/tools/round061-original-kbuild-host-deps-verify.py'
@@ -78,6 +79,9 @@ jobs:
             exit 3
           fi
           python3 -B swapz/tests/tools/round066-original-decoder-owner-verify.py --linux-root linux
+          python3 -B swapz/tests/tools/round066-decoder-drain-release-verify.py \
+            --owner-source swapz/src/kernel/zswap-import-decoder-owner.c \
+            --owner-header swapz/src/kernel/zswap-import-decoder-owner.h
           test -z "$(git -C linux status --porcelain --untracked-files=all)"
 
   original-native:
