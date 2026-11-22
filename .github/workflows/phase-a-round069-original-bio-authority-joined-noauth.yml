@@ -134,12 +134,32 @@ jobs:
           print("::error::ROUND069_NATIVE_FIRST_ERROR phase=compiled-original-joined-kunit "
                 "exit="+exit_code+" evidence=round069-evidence/native-first-error.log")
           lines=pathlib.Path(log).read_text(errors="replace").splitlines() if pathlib.Path(log).exists() else []
-          first=next((line for line in lines if re.search(
-              r"(error:|error\[|FAILED|Traceback|KASAN:|UBSAN:|Not all Kconfig)",
-              line,re.I)),None)
-          if first:
-              first=re.sub(r"(?:/[^:\s]+)+/","original-source/",first)
-              print("::error::ROUND069_NATIVE_FIRST_DIAGNOSTIC "+first[:230])
+          # KUnit's Python logger prefixes every multi-line compile failure
+          # with "ERROR:root:In file included from". That is NOT the first
+          # compiler diagnostic. Select an actual C/H source:line:error
+          # or linker error, then show bounded surrounding context.
+          # This is fail-only source evidence, never a successful KUnit claim.
+          error_location=re.compile(
+              r"(?:^|[ /])[^ :]+\\.(?:c|h):[0-9]+(?::[0-9]+)?: "
+              r"(?:fatal )?error:|undefined reference to|"
+              r"Not all Kconfig options selected|KASAN:|UBSAN:",
+              re.I)
+          first_index=next((index for index,line in enumerate(lines)
+                            if error_location.search(line)),None)
+          if first_index is None:
+              first_index=next((index for index,line in enumerate(lines)
+                  if re.search(r"(?i)(?:failed|traceback|error:root:)",
+                               line)),None)
+          if first_index is not None:
+              context=lines[max(0,first_index-3):first_index+9]
+              for offset,line in enumerate(context):
+                  clean=re.sub(r"(?:/[^:\s]+)+/","original-source/",line)
+                  clean=clean.replace("::", ":")
+                  print("::error::ROUND070_NATIVE_SOURCE_CONTEXT_" +
+                        str(offset).zfill(2)+" "+clean[:260])
+          else:
+              print("::error::ROUND070_NATIVE_NO_SOURCE_DIAGNOSTIC "
+                    "log_lines="+str(len(lines)))
           PY
             exit "$status"
           fi

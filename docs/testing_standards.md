@@ -18891,3 +18891,40 @@ Keep SOURCE_MAPPED_AUTHENTICATED=0, PHASE_A=BLOCKED,
 DIRECT_COMPRESSED_HANDOFF=DISABLED, FORCED_RAW_BYPASS=DISABLED,
 and imported *_ACTIVE=0. No privileged, loaded, physical-device,
 actual-pressure, mkswap/swapoff/repartition or owner Make tests.
+
+## Round070 Agent5 — true native joined BIO compile failure, preserve first C error context
+
+At original source SHA 3ba1070db3d9527fb1437b3303eacc6f48048a84,
+the EXISTING—not restarted—exact run45044912348 host job137277284940
+TERMINAL SUCCESS: original real linked authority.c+codec.c GCC and Clang
+strict sanitizers each 7 original codec lower callback cases and
+FOURTEEN compiled AND EXECUTED changed real authority C semantic
+mutants; exact five actual production source blobs and standards pass.
+Dependent rootless pinned original Linux native job137282781439 genuinely
+executed source composer, exact three pristine original BIO Git blobs,
+five byte-identical actual authority/codec source copies, six native
+postimages and five staged negative cases ALL PASS. Native original UML
+C compilation then FAILED BEFORE any four joined KUnit cases executed.
+The prior workflow's first-error filter used broad case-insensitive
+'error:' and selected Python stderr logger wrapper
+'ERROR:root:In file included from .../block/bio.c:2219:' rather than
+the FIRST ACTUAL compiler source:line:error from the suppressed private
+build log. No real kernel BIO owner KUnit was executed or qualified.
+
+Do NOT change product C or invent an unobserved first compiler
+failure. Narrow native test-only fail-only verifier to exact source C/H
+file:line:column:error and linker missing-symbol diagnostics, then
+show at most 12 adjacent original compiler lines, with source paths
+redacted and no secret/physical log. On missing source locations
+report a bounded conservative log origin instead of falsely identifying
+the Python logger wrapper as the original C defect. Preserve the
+original failed job and do not rerun it or cancel other owners' CI.
+The new exact-source one-parent main commit triggers a separate
+host+original native run; only its ACTUAL original first compiler
+error can justify subsequent fixture changes, NOT a guessed product
+bug. Keep original pinned original source, exact real source copies,
+strict C mutants, actual native four positive JSON/KTAP cases and
+all prior tests mandatory, no softening. AUTH0, PHASE_A BLOCKED,
+original complete uncompressed RAW_4096, modeled memory lower only,
+first physical SWAPSPACE2 4096/partition untouched, no upper ACK,
+real device FUA or loaded module. Pending new native result is PROGRESS.
