@@ -4051,7 +4051,9 @@ int swapz_import_disk_close(struct swapz_import_disk_pool *pool)
 			break;
 		case SWAPZ_IMPORT_DISK_OWNED:
 			record->state = SWAPZ_IMPORT_DISK_RETIRED;
+			/* Preserve the intentional OWNED-to-RETIRED close transition. */
 			/* fall through */
+			__attribute__((__fallthrough__));
 		case SWAPZ_IMPORT_DISK_RETIRED:
 			if (record->reader_pins) {
 				busy = 1;

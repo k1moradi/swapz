@@ -21,7 +21,7 @@ ORIGINAL_BLOBS = {
     "include/linux/blk_types.h": "0cc09b975d8ffbd45ca3dc47533a71f8e8164de6",
 }
 ACTUAL_PRODUCT_BLOBS = {
-    "authority.c": "003e02273edfa47b634850997a0f9c0c3ee1ea18",
+    "authority.c": "25bf2dbdc5a3af770d7027547a58254c1ba81265",
     "authority.h": "3bb5bab5a5bdb2aa087f5793fc8b5e90d6636031",
     "codec.c": "d920dcaac6f2b7de1334d4133770bd649719c66d",
     "codec.h": "e89d316b9cf49f82df0b77648c1be1731607987d",
