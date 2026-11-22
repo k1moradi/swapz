@@ -18389,3 +18389,77 @@ SWAPSPACE2 first4096/header/partition-table mutation, new on-disk metadata,
 or authorization. `SOURCE_MAPPED_AUTHENTICATED=0`, `PHASE_A=BLOCKED`,
 direct compressed handoff and forced RAW bypass disabled; ordinary
 `RAW_4096` is all 4096 original uncompressed bytes.
+
+## Round067 Agent5 — actual original-profile compressed bytes, memory lower, reader/GC, full decoded 4096 NO_AUTH
+
+The default-UNDEFINED Round066 guarded eight-record native codec-tagged actual
+allocator is NOT a second production map, disk format, upper ACK or source
+authorization. Its real swapz_stage, swapz_abort, live_records, extent_classes,
+committed/abandoned block counts, nonwrapping ticket, source identity/GC epoch,
+reader pin and GC retirement must remain enabled ONLY in test source. Round067
+adds a second default-UNDEFINED guarded actual authority.c/h byte verification
+boundary without altering the ordinary 20-byte swapz_map or actual RAW_4096.
+Only complete immutable compressed native original selected LZ4 raw-block
+(known actual original producer) and independent Linux-original-profile LZO1X
+(the host LZO1X_1 compatible decoder, NOT a claim a LZO native STORED source
+was selected) are permitted, with original source codec/version, length
+1..3568, CRC32C and full original uncompressed page SHA256 in volatile RAM.
+
+The memory-backed lower is one bounded contiguous host-allocated RAM buffer,
+physical offsets [0,4096) reserved and unmodified as a SWAPSPACE2 test
+sentinel, and logical allocator start block S maps to physical memory byte
+offset (S+1)*4096. No block-device I/O or actual FUA is performed. Each
+allocated original native compressed source stream is copied verbatim once
+into the actual reserved extent, followed by deterministic zero padding to
+its 4/8/16KiB extent class; no on-media header/tag, no recompression or
+reinterpreting RAW_4096. Before a complete modeled lower write and explicit
+modeled flush receipt, the ordinary map remains unchanged and no tagged
+payload can be pinned/read. A corrupt source byte CRC, nonzero pad, wrong
+extent length, short/failed/duplicate callback or missing modeled FUA must
+abort/quarantine the actual physical reservation with conservative programmed
+class and accounting, never synthetic successful publication/ACK.
+
+Actual authority C read_pinned must validate the exact previously acquired
+reader pin, nonreused ticket, sequence, ordinary generation, original source
+slot/entry/store generation, GC epoch, codec/version, compressed CRC/length,
+full original SHA256, requested FUA, real physical live start/extent class
+and exact complete whole-extent lower READ byte count BEFORE modifying any
+destination. Independently check compressed CRC and ALL deterministic zero
+padding; output must remain unchanged on error. A separate rootless fixture
+must use genuine liblzo2 LZO1X and raw LZ4 compressed streams with genuine
+liblzo2/LZ4 decode, OpenSSL SHA256 of the complete original 4096 decoded
+bytes, exact byte-for-byte equality against an independent original page,
+and copy the final output only after all verification succeeds. The frozen
+original zswap-import-codec.h profile remains READ-ONLY. Its live upper-ACK
+dependent admission decoder may NOT be invoked by manufacturing an upper ACK
+or false authenticated lower durable flag.
+
+For modeled GC, reserve a NEW actual authority physical start with correct
+source+codec+CRC+digest identity and increasing GC epoch, write/copy/zero-pad
+and obtain an independent complete modeled FUA receipt before switching
+test-only current owner. Retain the old extent's actual live_records pin while
+an old reader continues to decode the old full 4096; reject new old pins,
+release physical liveness only after final put, and reject all stale-ticket
+reads after retirement. Include 4/8/16KiB both codec profiles, torn compressed
+bytes, changed zero padding on write/read, partial read/write, bad source
+codec/epoch/generation/digest, resource exhaustion, close/drain, header
+protection, ordinary 4096-byte uncompressed RAW fallback, GC old/new decoded
+readback and exact once physical release.
+
+Require original authority.c+codec.c linked GCC AND Clang rootless GNU11
+-Wall -Wextra -Wconversion -Wshadow -Werror ASan+UBSan real source execution
+and TEN truly compiled/EXECUTED changed-source C semantic mutants per
+compiler; compiler/sanitizer failures are not mutant kills. Preserve Round066
+actual physical allocator 10 mutants/compiler, Round059 dormant witness
+10 mutants/compiler, Round057 original RAW and flushing 5 mutants/compiler,
+and unchanged canonical first-parent same-commit standards gate. Source-exact
+new CI must be terminal before scoped report. The host memory FUA/READ is
+not physical durability or a genuine selected original source BIO/current DM
+lease, and host library linkage is not an independently loaded pinned Linux
+decoder. No actual upper bio_endio or ACK has been proven; Phase A remains
+blocked. Linux MM exclusively manages compressed RAM and natural zswap
+eviction; swapz disk packing/GC only. Ordinary RAW_4096 remains full ORIGINAL
+UNCOMPRESSED 4096. SOURCE_MAPPED_AUTHENTICATED=0, PHASE_A=BLOCKED, direct
+compressed handoff and forced RAW bypass DISABLED. No physical SWAPSPACE2
+first4096 header, UUID/signature or parent partition-table changes, owner
+Make, privileged, loaded-kernel, actual-pressure or physical tests.

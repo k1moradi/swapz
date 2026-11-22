@@ -1,6 +1,10 @@
 /* SPDX-License-Identifier: GPL-2.0-only */
 #ifndef SWAPZ_EXTENT_AUTHORITY_H
 #define SWAPZ_EXTENT_AUTHORITY_H
+#if defined(SWAPZ_ROUND067_IMPORT_DISK_PAYLOAD_TEST) && \
+    !defined(SWAPZ_ROUND066_IMPORT_DISK_TEST)
+#error "round067 payload verification requires the dormant round066 allocator"
+#endif
 #include "codec.h"
 
 #define SWAPZ_SEGMENT_BLOCKS 256U
@@ -682,6 +686,33 @@ int swapz_import_disk_abort(struct swapz_import_disk_pool *pool,
 /* Closing fences new work; submitted callbacks and retained readers drain
  * before caller may free the pool or the authority arrays. */
 int swapz_import_disk_close(struct swapz_import_disk_pool *pool);
+
+#if defined(SWAPZ_ROUND067_IMPORT_DISK_PAYLOAD_TEST)
+/*
+ * Round067: payload-only memory-backed lower test, layered on the ACTUAL
+ * Round066 reservation/physical pin owner. Bytes remain in caller-owned
+ * contiguous RAM (DATA index start_block, physical index start_block+1).
+ * Neither receipt nor this reader is an authenticated native source BIO,
+ * physical FUA, device READ, decoder-provider lease or upper ACK.
+ *
+ * The caller MUST hold the same ordered authority owner for every call.
+ * For read_pinned, the caller already holds a successful pin() and retains
+ * it until it finishes the independently decoded full page.
+ */
+int swapz_import_disk_complete_payload(struct swapz_import_disk_pool *pool,
+					swapz_u64 ticket,
+					const struct swapz_tx *transaction,
+					const swapz_u8 *lower_extent,
+					swapz_u32 actual_extent_bytes,
+					int lower_error, swapz_u8 completed_blocks,
+					int flush_completed);
+int swapz_import_disk_read_pinned(struct swapz_import_disk_pool *pool,
+				  const struct swapz_import_disk_view *view,
+				  const swapz_u8 *lower_extent,
+				  swapz_u32 actual_read_bytes,
+				  swapz_u8 *compressed_destination,
+				  swapz_u32 destination_capacity);
+#endif /* SWAPZ_ROUND067_IMPORT_DISK_PAYLOAD_TEST */
 #endif /* SWAPZ_ROUND066_IMPORT_DISK_TEST */
 
 #endif

@@ -4065,6 +4065,133 @@ int swapz_import_disk_close(struct swapz_import_disk_pool *pool)
 	}
 	return busy ? -EBUSY : 0;
 }
+
+#if defined(SWAPZ_ROUND067_IMPORT_DISK_PAYLOAD_TEST)
+/*
+ * The ONLY accepting transition for the Round067 memory-backed fixture.
+ * It proves exact compressed bytes and zero padding were in a caller-owned
+ * complete RAM extent before the *modeled* completion receipt; then delegates
+ * authentic reservation accounting to Round066's real allocator owner.
+ *
+ * A malformed extent cannot strand a live stage: consume its real reservation
+ * with a negative lower completion and conservatively quarantine the extent.
+ */
+int swapz_import_disk_complete_payload(struct swapz_import_disk_pool *pool,
+					swapz_u64 ticket,
+					const struct swapz_tx *transaction,
+					const swapz_u8 *lower_extent,
+					swapz_u32 actual_extent_bytes,
+					int lower_error, swapz_u8 completed_blocks,
+					int flush_completed)
+{
+	struct swapz_import_disk_record *record =
+		swapz_import_disk_find(pool, ticket);
+	swapz_u32 extent_bytes, offset;
+	int error = 0;
+
+	if (!record || !pool->authority || !transaction ||
+	    record->state != SWAPZ_IMPORT_DISK_SUBMITTED)
+		return -ESTALE;
+	extent_bytes = (swapz_u32)record->extent_blocks * SWAPZ_BLOCK_BYTES;
+	if (!lower_error && completed_blocks == record->extent_blocks &&
+	    flush_completed && !pool->closing) {
+		if (!lower_extent || actual_extent_bytes != extent_bytes ||
+		    record->spec.compressed_length > extent_bytes)
+			error = -EMSGSIZE; /* round067_exact_extent_bytes */
+		else if (swapz_crc32c_bytes(lower_extent,
+					    record->spec.compressed_length) !=
+			 record->spec.compressed_crc32c)
+			error = -EBADMSG; /* round067_write_compressed_crc */
+		else
+			for (offset = record->spec.compressed_length;
+			     offset < extent_bytes; ++offset)
+				if (lower_extent[offset]) {
+					error = -EBADMSG; /* round067_write_zero_pad */
+					break;
+				}
+	}
+	return swapz_import_disk_complete(pool, ticket, transaction,
+					  error ? error : lower_error,
+					  completed_blocks, flush_completed);
+}
+
+/* Authenticate a pre-pinned exact volatile snapshot before copying any
+ * compressed bytes out of a simulated full-block lower READ. Old snapshots
+ * remain readable while RETIRED only if their retained pin still owns the
+ * real physical start. After last put, ticket reuse is forbidden.
+ *
+ * Check BEFORE copying: error leaves destination byte-for-byte untouched.
+ * Actual original LZO1X/LZ4 decode and full original SHA256 are independent
+ * tests in the caller and never use a fabricated product ACK.
+ */
+int swapz_import_disk_read_pinned(struct swapz_import_disk_pool *pool,
+				  const struct swapz_import_disk_view *view,
+				  const swapz_u8 *lower_extent,
+				  swapz_u32 actual_read_bytes,
+				  swapz_u8 *compressed_destination,
+				  swapz_u32 destination_capacity)
+{
+	const struct swapz_import_disk_record *record;
+	const struct swapz_authority_import_spec *expected, *observed;
+	const unsigned long source_address = (unsigned long)lower_extent;
+	const unsigned long destination_address =
+		(unsigned long)compressed_destination;
+	swapz_u32 extent_bytes, offset;
+
+	if (!pool || !view || !lower_extent || !compressed_destination)
+		return -EINVAL;
+	record = swapz_import_disk_find(pool, view->ticket);
+	if (!record || !record->reader_pins ||
+	    (record->state != SWAPZ_IMPORT_DISK_OWNED &&
+	     record->state != SWAPZ_IMPORT_DISK_RETIRED) ||
+	    swapz_import_disk_owned_valid(pool, record) ||
+	    record->ticket != view->ticket || /* round067_exact_reader_ticket */
+	    record->start_block != view->start_block ||
+	    record->sequence != view->sequence ||
+	    record->ordinary_generation != view->ordinary_generation ||
+	    record->extent_blocks != view->extent_blocks ||
+	    record->spec.logical_page != view->spec.logical_page)
+		return -ESTALE;
+	expected = &record->spec;
+	observed = &view->spec;
+	if (expected->source_swap_slot != observed->source_swap_slot ||
+	    expected->source_entry_identity != observed->source_entry_identity ||
+	    expected->source_store_generation !=
+		    observed->source_store_generation ||
+	    expected->gc_epoch != observed->gc_epoch || /* round067_gc_epoch */
+	    expected->codec != observed->codec ||
+	    expected->codec_version != observed->codec_version ||
+	    expected->compressed_length != observed->compressed_length ||
+	    expected->compressed_crc32c != observed->compressed_crc32c ||
+	    expected->requested_fua != observed->requested_fua ||
+	    memcmp(expected->original_sha256, observed->original_sha256,
+		   sizeof(expected->original_sha256))) /* round067_exact_digest */
+		return -ESTALE;
+	extent_bytes = (swapz_u32)record->extent_blocks * SWAPZ_BLOCK_BYTES;
+	if (actual_read_bytes != extent_bytes || /* round067_exact_lower_read */
+	    !expected->compressed_length ||
+	    expected->compressed_length > SWAPZ_MAX_COMPRESSED ||
+	    destination_capacity < expected->compressed_length)
+		return -EMSGSIZE;
+	/* Do not memcpy overlapping source/destination (including partial).
+	 * Compare integer-address differences without ordering unrelated C
+	 * pointers or subtracting beyond an object. */
+	if (source_address <= destination_address ?
+	    destination_address - source_address < extent_bytes :
+	    source_address - destination_address < destination_capacity)
+		return -EINVAL;
+	if (swapz_crc32c_bytes(lower_extent, expected->compressed_length) !=
+	    expected->compressed_crc32c) /* round067_read_compressed_crc */
+		return -EBADMSG;
+	for (offset = expected->compressed_length;
+	     offset < extent_bytes; ++offset)
+		if (lower_extent[offset]) /* round067_read_zero_pad */
+			return -EBADMSG;
+	memcpy(compressed_destination, lower_extent,
+	       expected->compressed_length);
+	return 0;
+}
+#endif /* SWAPZ_ROUND067_IMPORT_DISK_PAYLOAD_TEST */
 #endif /* SWAPZ_ROUND066_IMPORT_DISK_TEST */
 
 #endif /* SWAPZ_ROUND059_AUTHORITY_IMPORT_LIFETIME_TEST */
