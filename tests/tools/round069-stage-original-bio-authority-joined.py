@@ -53,7 +53,16 @@ def plan(original: dict[str, bytes], current: dict[str, bytes],
     for name, expected in ACTUAL_PRODUCT_BLOBS.items():
         if git_blob(product[name]) != expected:
             raise ValueError("real-product-git-blob-drift:" + name)
+    # The original-kernel current task macro must be isolated ONLY while
+    # including the byte-identical product authority.c and then restored.
+    authority_macro_guard = (
+        b'#pragma push_macro("current")\n'
+        b'#undef current\n'
+        b'#include "swapz_round069/authority.c"\n'
+        b'#pragma pop_macro("current")'
+    )
     if (fixture.count(BEG) != 1 or fixture.count(END) != 1 or
+            fixture.count(authority_macro_guard) != 1 or
             fixture.count(b'#include "swapz_round069/authority.c"') != 1 or
             fixture.count(b'#include "swapz_round069/codec.c"') != 1 or
             fixture.count(b"bio_endio(io->bio);") != 1 or
@@ -105,6 +114,10 @@ def main() -> None:
             (original, current, product,
              fixture.replace(b"bio_endio(io->bio);", b"/* missing endio */"),
              "actual-original-native-joined-fixture-source"),
+            (original, current, product,
+             fixture.replace(b'#undef current\n',
+                             b'/* current macro not hidden */\n'),
+             "actual-original-native-joined-fixture-source"),
             (original, dict(current, **{
                 "block/bio.c": staged["block/bio.c"]}), product,
              fixture, "original-source-not-pristine:block/bio.c"),
@@ -121,7 +134,7 @@ def main() -> None:
             if saved != actual:
                 raise ValueError("invalid-native-source-altered")
         print("PASS original_native_join_source_plan=6_paths pristine_pin=3 "
-              "actual_authority_codec_blobs=5 negative_plans=5 no_partial_write=1")
+              "actual_authority_codec_blobs=5 negative_plans=6 no_partial_write=1")
         return
     if (linux / DEST).exists():
         raise ValueError("joined-source-copy-already-exists")

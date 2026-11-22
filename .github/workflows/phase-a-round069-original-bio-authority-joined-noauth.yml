@@ -140,7 +140,7 @@ jobs:
           # or linker error, then show bounded surrounding context.
           # This is fail-only source evidence, never a successful KUnit claim.
           error_location=re.compile(
-              r"(?:^|[ /])[^ :]+\\.(?:c|h):[0-9]+(?::[0-9]+)?: "
+              r"(?:^|[ /])[^ :]+\.(?:c|h):[0-9]+(?::[0-9]+)?: "
               r"(?:fatal )?error:|undefined reference to|"
               r"Not all Kconfig options selected|KASAN:|UBSAN:",
               re.I)

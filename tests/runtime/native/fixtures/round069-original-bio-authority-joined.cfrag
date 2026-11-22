@@ -18,7 +18,13 @@
 #include <crypto/sha2.h>
 /* These are BYTE-FOR-BYTE copied real product files, not generated stubs. */
 #include "swapz_round069/codec.c"
+/* Linux defines current as a task macro; the unchanged product C uses
+ * current as a local map pointer. Hide only that macro during its include,
+ * then restore the original kernel definition for the rest of bio.c. */
+#pragma push_macro("current")
+#undef current
 #include "swapz_round069/authority.c"
+#pragma pop_macro("current")
 
 static_assert(sizeof(struct swapz_map) == 20);
 static_assert(sizeof(struct swapz_import_disk_pool) <= 1536);
