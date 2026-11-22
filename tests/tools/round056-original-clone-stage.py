@@ -90,6 +90,47 @@ def patch_function(source: str, signature: str, old: str, new: str, label: str) 
     return source[:index] + fragment + source[next_function:]
 
 
+def render_blk_types(original: str) -> str:
+    """Reconstruct the exact guarded Round056 BIO header from composed source."""
+    guard = "#if defined(" + GUARD + ")\n"
+    close = "#endif /* " + GUARD + " */\n"
+    field = (guard +
+             "\tstruct swapz_round056_clone_ticket *bi_round056_ticket;\n"
+             "\tstruct block_device *bi_round056_clone_device;\n"
+             "\tbool bi_round056_candidate;\n" + close)
+    header = original
+    header = once(header, "struct bio {\n",
+                  "struct swapz_round056_clone_ticket;\nstruct bio {\n",
+                  "original-bio-struct")
+    header = once(header, "\tunsigned short\t\tbi_vcnt;\t/* how many bio_vec's */\n",
+                  "\tunsigned short\t\tbi_vcnt;\t/* how many bio_vec's */\n" + field,
+                  "bio-ticket-before-reset-boundary")
+    return header
+
+
+def render_dm(original: str) -> str:
+    """Reconstruct both inherited native alloc_tio and queue_io hooks."""
+    dm = original
+    guard = "#if defined(" + GUARD + ")\n"
+    close = "#endif /* " + GUARD + " */\n"
+    dm = patch_function(
+        dm, "static struct bio *alloc_tio(struct clone_info *ci,",
+        "\tclone->bi_bdev = md->disk->part0;\n",
+        "\tclone->bi_bdev = md->disk->part0;\n" + guard +
+        "\t/* Current target acceptance is NOT authenticated by a cloned marker. */\n"
+        "\tclone->bi_round056_candidate = false;\n" + close,
+        "original-DM-alloc-tio-requires-new-owner")
+    dm = patch_function(
+        dm, "static void queue_io(struct mapped_device *md, struct bio *bio)",
+        "static void queue_io(struct mapped_device *md, struct bio *bio)\n{\n",
+        "static void queue_io(struct mapped_device *md, struct bio *bio)\n{\n" +
+        guard + "\t/* Suspended/requeued original BIO cannot reuse prior target witness. */\n"
+        "\tbio->bi_round056_candidate = false;\n" + close,
+        "original-DM-requeue-invalidation")
+
+    return dm
+
+
 def stage(root: Path, manifest: Path) -> None:
     original_source_check(root)
     composer = ROOT / "tools/stage-pinned-linux-zswap-composed.py"
@@ -104,18 +145,8 @@ def stage(root: Path, manifest: Path) -> None:
         raise SourceError("first_error=inherited-composer-provenance")
     guard = "#if defined(" + GUARD + ")\n"
     close = "#endif /* " + GUARD + " */\n"
-    field = (guard +
-             "\tstruct swapz_round056_clone_ticket *bi_round056_ticket;\n"
-             "\tstruct block_device *bi_round056_clone_device;\n"
-             "\tbool bi_round056_candidate;\n" + close)
     header_path = root / "include/linux/blk_types.h"
-    header = header_path.read_text()
-    header = once(header, "struct bio {\n",
-                  "struct swapz_round056_clone_ticket;\nstruct bio {\n",
-                  "original-bio-struct")
-    header = once(header, "\tunsigned short\t\tbi_vcnt;\t/* how many bio_vec's */\n",
-                  "\tunsigned short\t\tbi_vcnt;\t/* how many bio_vec's */\n" + field,
-                  "bio-ticket-before-reset-boundary")
+    header = render_blk_types(header_path.read_text())
     bio_path = root / "block/bio.c"
     bio = bio_path.read_text()
     hooks = (FIXTURES / "round056-original-clone-hooks.cfrag").read_text()
@@ -180,21 +211,7 @@ def stage(root: Path, manifest: Path) -> None:
             "ROUND056_ORIGINAL_CLONE_KUNIT_BEGIN")):
         raise SourceError("first_error=staged-marker-count")
     dm_path = root / "drivers/md/dm.c"
-    dm = dm_path.read_text()
-    dm = patch_function(
-        dm, "static struct bio *alloc_tio(struct clone_info *ci,",
-        "\tclone->bi_bdev = md->disk->part0;\n",
-        "\tclone->bi_bdev = md->disk->part0;\n" + guard +
-        "\t/* Current target acceptance is NOT authenticated by a cloned marker. */\n"
-        "\tclone->bi_round056_candidate = false;\n" + close,
-        "original-DM-alloc-tio-requires-new-owner")
-    dm = patch_function(
-        dm, "static void queue_io(struct mapped_device *md, struct bio *bio)",
-        "static void queue_io(struct mapped_device *md, struct bio *bio)\n{\n",
-        "static void queue_io(struct mapped_device *md, struct bio *bio)\n{\n" +
-        guard + "\t/* Suspended/requeued original BIO cannot reuse prior target witness. */\n"
-        "\tbio->bi_round056_candidate = false;\n" + close,
-        "original-DM-requeue-invalidation")
+    dm = render_dm(dm_path.read_text())
     # Publication occurs only after every source anchor was checked.
     header_path.write_text(header)
     bio_header_path.write_text(bio_header)

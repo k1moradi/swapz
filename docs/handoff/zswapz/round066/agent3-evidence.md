@@ -1,0 +1,21 @@
+# Round066 Agent3 — inherited original DM staging P0 correction and native table lifetime boundary
+
+[Round066 official #183 ROUND_OPEN](https://github.com/k1moradi/swapz/issues/183#issuecomment-7076130990); frozen task SHA `5a4c18fe9c5eef2311d88f3561f7b80d667d776f`, previous engineering `53e843489c0462382ce7400b7fd43f7ad24ef4aa`. No Agent4 decoder or Agent5 authority source modified.
+
+## First actual original UML error
+
+[Round065 run 44997424299](https://github.com/k1moradi/swapz/actions/runs/44997424299) actual host137131360894 success, native x86 y137133423594/n137133423578 SUCCESS real full kernel/modules and guarded/default GPL link; native UML job137133423534 FAILURE with exact raw first-error `ROUND065_STAGE_FIRST_ERROR pristine-core-blob:drivers/md/dm.c`. No new 72 KUnit executed at that source; preceding Round064 71 KUnit success applies preceding source.
+
+Root cause: inherited [Round056 original clone source stager](../../../../../tests/tools/round056-original-clone-stage.py) already writes the original guarded `alloc_tio` clone candidate reset and `queue_io` requeue invalidation to native `drivers/md/dm.c`, plus ticket fields to `include/linux/blk_types.h`. The Round058 aggregate `changed_paths` was constructed from inherited66 composer paths plus three additional BIO paths, silently leaving the inherited Round056 DM and ticket-header postimages undeclared. Round065 stager incorrectly required pristine dm.c even for that verified inherited UML source route. The direct pinned original x86 composer does not include those inherited Round056 changes.
+
+## Corrections and lock/ownership
+
+- Extract deterministic original Round056 renderers for the **unchanged** prior `dm.c` and `blk_types.h` modifications, reuse in original stager and new verifier. Retain all prior comments, existing hooks, default-off guard and BIO owner behavior.
+- Verify all four prior original70 SHA256 postimages in Round058 before adding the later three BIO changes; add original `drivers/md/dm.c` and `include/linux/blk_types.h` to its aggregate changed-path manifest.
+- Require exact pinned Linux `git rev-parse HEAD` and pristine `git show HEAD:path` blobs for native dm.c/dm-core.h/blk_types.h, validated aggregate postimage hashes with duplicate/traversal rejection, actual referenced original70 and inherited66 manifests, and deterministic source reconstruction. Accept exactly direct pristine x86 or original70 inherited UML bytes, never arbitrary nonpristine dm.c or forged manifest. Verify all state before any output writes; no partial writes for refused input.
+- Run new actual pinned source staging negative tester in both x86 and UML jobs before separate Round065 overlay; tests include pristine/inherited baseline, source hash forgery, changed header, unknown dm.c edits, missing inherited records, duplicated path, double staging and no output mutation on rejection. Existing 24 cases/23 source C semantic mutants under each strict GCC/Clang sanitizer retained.
+- Reuse real native pending_io and SRCU/suspend/drain lifetime for selected original candidate, without holding new table refs, long-held SRCU, swap slot counts, extra copies or reclaim. Default-OFF core generation refuses same-geometry rebinding and stale requeues; no actual loaded or physical proof.
+
+New source-specific qualified 71 inherited + 1 new KUnit, modified original x86 y/n matched GPL at new SHA must be confirmed from terminal CI before scoped REPORT_READY. The single new KUnit currently covers native compiled original state, not real async DM table swap/requeue/dtr runtime. This staging correction does not claim full authenticated native table authority, independent original codec decode, durable compressed lower write/FUA, volatile disk map/GC/read or genuine upper ACK. Document native boundary even if rootless UML cannot schedule real DM table without unauthorized loading. No other concurrent agent required.
+
+SOURCE_MAPPED_AUTHENTICATED=0; PHASE_A=BLOCKED; direct compressed handoff DISABLED; forced RAW bypass DISABLED. Linux MM solely compressed zswap RAM/natural eviction; swapz disk only. RAW_4096 full original uncompressed page. Physical SWAPSPACE2 header and parent partition table untouched. No owner Make/privileged/loaded/physical/actual pressure tests.

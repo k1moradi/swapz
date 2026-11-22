@@ -85,6 +85,20 @@ def stage(original: Path, manifest_path: Path) -> None:
     if previous.get("original_sha") != PINNED or \
        previous.get("positive_source_target_authorization") is not False:
         raise FirstError("first_error=original70_inherited_manifest_drift")
+    # Every inherited guarded change belongs in the aggregate manifest.
+    inherited_owned = {"block/bio.c", "include/linux/bio.h",
+                       "include/linux/blk_types.h", "drivers/md/dm.c"}
+    if set(previous.get("own_changed_paths", [])) != inherited_owned or \
+       previous.get("default_guard") != "SWAPZ_ROUND056_ORIGINAL_CLONE_PROVENANCE_TEST":
+        raise FirstError("first_error=original70_owned_path_manifest_drift")
+    for path, key in (
+        ("block/bio.c", "original_block_bio_sha256"),
+        ("include/linux/bio.h", "original_bio_header_sha256"),
+        ("include/linux/blk_types.h", "original_blk_types_sha256"),
+        ("drivers/md/dm.c", "original_dm_sha256"),
+    ):
+        if hashlib.sha256((original / path).read_bytes()).hexdigest() != previous.get(key):
+            raise FirstError("first_error=original70_postimage_drift:" + path)
 
     bio_path = original / "block/bio.c"
     bio_header_path = original / "include/linux/bio.h"
@@ -126,7 +140,7 @@ def stage(original: Path, manifest_path: Path) -> None:
         path.write_text(data, encoding="utf-8")
     changed_paths = sorted({entry["path"] for entry in
                             json.loads((manifest_path.with_name(manifest_path.stem + "-original70-inherited66.json")).read_text())["changed_paths"]}
-                           | {"block/bio.c", "include/linux/bio.h", "mm/page_io.c"})
+                           | inherited_owned | {"mm/page_io.c"})
     manifest = {
         "original_sha": PINNED,
         "inherited70_manifest": str(inherited_path),

@@ -18164,3 +18164,74 @@ SOURCE_MAPPED_AUTHENTICATED=0 PHASE_A=BLOCKED direct compressed handoff and
 forced RAW bypass DISABLED. Protect physical SWAPSPACE2 first 4096 bytes,
 header/UUID/signature, parent partition table and 4/8/16KiB payload-only
 classes. No owner Make, privileged/loaded, physical or actual pressure tests.
+
+
+## Round066 Agent3 — strict original staged DM core lineage and 72 actual native KUnit gate
+
+The preceding source `53e843489c0462382ce7400b7fd43f7ad24ef4aa`
+produced exact workflow [44997424299](https://github.com/k1moradi/swapz/actions/runs/44997424299):
+host job137131360894 succeeded with 24 strict GNU11 GCC and Clang sanitizer
+scenarios and 23 true changed-C compiled/executed mutants per compiler;
+staged x86 native y137133423594 and n137133423578 passed full pinned
+original kernel/modules, exact GPL, guarded/default product Kbuild;
+the original UML job137133423534 FAILED before any KUnit boot with real
+first-error `ROUND065_STAGE_FIRST_ERROR pristine-core-blob:drivers/md/dm.c`.
+Do not attribute this to kernel C or call 71+1 native tests run. Prior
+Round064 71 native KUnit green belongs to a different source SHA.
+
+The Round058 stage invokes the exact Round056 clone stager after the
+66-ancestor original composer. Round056 edits BOTH actual original
+`drivers/md/dm.c` (guarded alloc_tio candidate invalidation and queue_io
+requeue invalidation) and `include/linux/blk_types.h` (clone ticket fields).
+Round058's aggregate manifest incorrectly reported only older composer paths
+and the later three BIO files, omitting these inherited paths. The fixed
+Round056 stager uses pure byte-deterministic `render_dm` and
+`render_blk_types` helpers for the SAME C transformations; its original
+staging behavior, comments and guard placement remain unchanged.
+Round058 validates all four inherited postimage SHA256 fields against the
+previous original70 manifest before adding native BIO changes, and includes
+all four declared inherited paths in its aggregate postimage SHA manifest.
+
+Before Round065 native core staging, require the original full Git HEAD
+equals `torvalds/linux@c339f4010dea8b0d754f84ace70cd1b089878ef8`.
+Fetch the actual `git show HEAD:path` for pristine dm.c, dm-core.h and
+blk_types.h and compare each pinned Git object blob hash. Independently
+verify ALL recorded base manifest postimage bytes, duplicate-free valid
+paths and correct original70/original66 manifest identities. Accept only
+one of two explicitly verified routes: direct composed x86 with pristine
+dm.c; inherited UML with the exact original Round056 `render_dm` applied
+to pristine dm.c AND `render_blk_types` applied to the actual pinned
+composer output for blk_types.h. Both inherited postimages must equal
+the original70 SHA256 and be declared in the aggregate. Refuse mismatched
+or missing manifest, forged SHA even if both aggregate and inherited
+manifests are changed, altered kernel object, unknown extra code, already
+Round065-staged source, or missing native anchors. Plan all four output
+files in memory before writing; failed validation must write none.
+Retain original swap BIO/clone provenance and queue reissue invalidation
+hooks; do not "fix" by bypassing pristine input checks or accepting any
+dirty source. The resulting Round065 variant remains explicitly MODIFIED,
+not the pristine pinned Linux baseline.
+
+On the actual pristine original checkout in rootless native CI, execute
+the explicit `round066-stage-lineage-verify.py` negative controls before
+staging: direct x86 pristine route and inherited 71 KUnit route, failed
+pin/manifest/hash/unknown modifications, declared ancestor omission,
+forged twice-updated SHA, duplicate and second staging. Enforce
+zero in-memory mutations for all refused plans. Also run unchanged exact
+Round065 24/23 GCC and Clang semantic C mutants and real original 71
+inherited + one **separately counted** native KUnit JSON/KTAP from one
+UML build, and actual staged native x86 y/n full matched GPL guarded/default
+kernel module. The new native original UML state KUnit does NOT execute
+live core table reload, two-stage requeue, actual suspend drain, dtr or
+loaded kernel ownership. If runtime live DM cannot be tested rootlessly,
+record the exact remaining original core callback/native lifetime proof
+boundary. No newly invented historical MM table origin or cross-module
+generation AUTH.
+
+SOURCE_MAPPED_AUTHENTICATED=0, PHASE_A=BLOCKED, direct compressed handoff
+and forced RAW bypass DISABLED, RAW_4096 whole ORIGINAL UNCOMPRESSED page.
+Native Linux MM alone owns compressed RAM and natural pressure writeback;
+swapz disk compression/packing/GC only, no second reclaim. SWAPSPACE2
+first physical 4096 signature/header/UUID and parent partition table,
+20-byte map and data-only padded extents unchanged. No owner Make, loaded,
+privileged, actual-pressure or physical media tests.

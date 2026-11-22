@@ -1,4 +1,4 @@
-name: Round065 staged original first DM table incarnation candidate NO_AUTH
+name: Round066 pinned original full inherited DM table lineage and native lifetime NO_AUTH
 on:
   push:
     branches: [main]
@@ -9,6 +9,10 @@ on:
       - 'tests/runtime/native/fixtures/round065-original-dm-core.cfrag'
       - 'tests/tools/round065-stage-original-dm-table.py'
       - 'tests/tools/round065-original-dm-table-incarnation-verify.py'
+      - 'tests/tools/round056-original-clone-stage.py'
+      - 'tests/tools/round058-original-stored-bio-chain.py'
+      - 'tests/tools/round066-stage-lineage-verify.py'
+      - 'docs/handoff/zswapz/round066/agent3-evidence.md'
   workflow_dispatch:
 permissions:
   contents: read
@@ -32,6 +36,17 @@ jobs:
           python3 -B tests/tools/round063-original-dm-owner-verify.py
           python3 -B tests/tools/round064-original-slot-current-target-verify.py
           python3 -B tests/tools/round065-original-dm-table-incarnation-verify.py
+          # The real two compositor lineages are tested in native stages.
+          python3 -B - <<'PY'
+          import ast
+          from pathlib import Path
+          for path in ("tests/tools/round056-original-clone-stage.py",
+                       "tests/tools/round058-original-stored-bio-chain.py",
+                       "tests/tools/round065-stage-original-dm-table.py",
+                       "tests/tools/round066-stage-lineage-verify.py"):
+              ast.parse(Path(path).read_text(), filename=path)
+          print("ROUND066_STAGE_ALL_FOUR_PYTHON_SYNTAX_PASS")
+          PY
           python3 -B tests/tools/round058-dm-ingress-verify.py
           echo 'ROUND063_GCC_CLANG_ORIGINAL_OWNER_AND_PRODUCT_DM_NO_AUTH_HOST_PASS'
       - name: Enforce same-commit canonical testing standards
@@ -86,6 +101,9 @@ jobs:
           for item in document["changed_paths"]:
               assert hashlib.sha256((pathlib.Path("linux") / item["path"]).read_bytes()).hexdigest() == item["staged_sha256"]
           PY
+          python3 -B swapz/tests/tools/round066-stage-lineage-verify.py \
+            --linux-root linux --base-manifest "$RUNNER_TEMP/round058-original-manifest.json" \
+            --mode pristine
           python3 -B swapz/tests/tools/round065-stage-original-dm-table.py \
             --linux-root linux --base-manifest "$RUNNER_TEMP/round058-original-manifest.json" \
             --manifest "$RUNNER_TEMP/round065-original-dm-table-manifest.json"
@@ -250,6 +268,9 @@ jobs:
               assert hashlib.sha256((pathlib.Path('linux')/f['path']).read_bytes()).hexdigest()==f['sha256']
           print('ROUND058_REAL_PINNED_ORIGINAL_ALL_FILE_POSTIMAGE_SHA_MANIFEST_PASS')
           PY
+          python3 -B swapz/tests/tools/round066-stage-lineage-verify.py \
+            --linux-root linux --base-manifest round058-evidence/actual-original-source.json \
+            --mode inherited
           python3 -B swapz/tests/tools/round065-stage-original-dm-table.py \
             --linux-root linux --base-manifest round058-evidence/actual-original-source.json \
             --manifest round058-evidence/round065-table-stage.json
@@ -267,7 +288,7 @@ jobs:
           result="$PWD/round058-evidence/actual-original-71.json"
           request="$PWD/round058-evidence/original.kunitconfig"
           printf 'source=%s\noriginal=c339f4010dea8b0d754f84ace70cd1b089878ef8\n' "$GITHUB_SHA" >"$verdict"
-          trap 'code=$?; if ((code)); then echo "::error::ROUND065_ORIGINAL_FIRST_ERROR phase=$first_phase exit=$code"; printf "result=FAIL\nfirst_phase=%s\nexit=%s\n" "$first_phase" "$code" >>"$verdict"; fi' EXIT
+          trap 'code=$?; if ((code)); then echo "::error::ROUND066_ORIGINAL_FIRST_ERROR phase=$first_phase exit=$code"; printf "result=FAIL\nfirst_phase=%s\nexit=%s\n" "$first_phase" "$code" >>"$verdict"; fi' EXIT
           cat >"$request" <<'KUNIT_CFG'
           CONFIG_KUNIT=y
           CONFIG_BLOCK=y
