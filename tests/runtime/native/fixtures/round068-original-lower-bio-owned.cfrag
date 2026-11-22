@@ -1,0 +1,272 @@
+
+/* ROUND068_ORIGINAL_NATIVE_LOWER_BIO_BEGIN
+ * Test-only append to pinned c339f4010dea8b0d754f84ace70cd1b089878ef8
+ * original block/bio.c. Actual struct bio/bvec, REQ_OP_WRITE, REQ_FUA,
+ * REQ_OP_FLUSH|REQ_PREFLUSH, REQ_OP_READ and bio_endio worker are executed
+ * in an ephemeral ROOTLESS UML KUnit. Never calls submit_bio or a real bdev.
+ */
+#if defined(SWAPZ_ROUND068_ORIGINAL_LOWER_BIO_KUNIT) && IS_ENABLED(CONFIG_KUNIT)
+#include <kunit/test.h>
+#include <linux/highmem.h>
+#include <linux/completion.h>
+#include <linux/workqueue.h>
+#include <linux/mm.h>
+#include <linux/blk_types.h>
+
+/* Independent real ORIGINAL kernel ABI check for the host's explicitly
+ * bounded BIO-shaped request scalar. Any unexpected flag drift MUST fail. */
+static_assert(REQ_OP_READ == 0);
+static_assert(REQ_OP_WRITE == 1);
+static_assert(REQ_OP_FLUSH == 2);
+static_assert((unsigned int)REQ_FUA == (1U << 17));
+static_assert((unsigned int)REQ_PREFLUSH == (1U << 18));
+
+#define SWAPZ_ROUND068_BLOCK_BYTES 4096U
+#define SWAPZ_ROUND068_HEADER_SECTORS 8U
+#define SWAPZ_ROUND068_MAX_BLOCKS 4U
+
+struct swapz_round068_native_done {
+	struct completion finished;
+	unsigned int callback_count;
+	blk_status_t status;
+};
+
+struct swapz_round068_native_async {
+	struct work_struct work;
+	struct bio *bio;
+	blk_status_t completion_status;
+};
+
+static void swapz_round068_native_endio(struct bio *bio)
+{
+	struct swapz_round068_native_done *done = bio->bi_private;
+
+	done->status = bio->bi_status;
+	done->callback_count++;
+	complete(&done->finished);
+}
+
+static void swapz_round068_native_work(struct work_struct *work)
+{
+	struct swapz_round068_native_async *async =
+		container_of(work, struct swapz_round068_native_async, work);
+
+	/* Fake lower driver: no physical device, queue, or persistence claim.
+	 * Complete the actual original Linux BIO on a different work context. */
+	async->bio->bi_status = async->completion_status;
+	bio_endio(async->bio);
+}
+
+static int swapz_round068_native_complete(struct bio *bio,
+					  blk_status_t status,
+					  struct swapz_round068_native_done *done)
+{
+	struct swapz_round068_native_async async;
+	unsigned long completed;
+
+	init_completion(&done->finished);
+	done->callback_count = 0U;
+	done->status = BLK_STS_OK;
+	bio->bi_end_io = swapz_round068_native_endio;
+	bio->bi_private = done;
+	INIT_WORK(&async.work, swapz_round068_native_work);
+	async.bio = bio;
+	async.completion_status = status;
+	if (!schedule_work(&async.work))
+		return -EBUSY;
+	completed = wait_for_completion_timeout(&done->finished,
+						msecs_to_jiffies(5000));
+	flush_work(&async.work);
+	return completed ? 0 : -ETIMEDOUT;
+}
+
+/* Actual original Linux bio_for_each_segment iterator and highmem-safe
+ * page mapping. The bvec pages and BIO are independently owned by the
+ * caller until the asynchronous endio and work have BOTH finished. */
+static int swapz_round068_native_fake_lower(struct bio *bio, u8 *lower,
+					    size_t lower_bytes)
+{
+	struct bvec_iter iterator;
+	struct bio_vec vector;
+	sector_t sector = bio->bi_iter.bi_sector;
+	size_t offset, total = 0U;
+
+	if (sector < SWAPZ_ROUND068_HEADER_SECTORS ||
+	    sector > (sector_t)(lower_bytes >> 9))
+		return -ERANGE;
+	offset = (size_t)sector * 512U;
+	bio_for_each_segment(vector, bio, iterator) {
+		u8 *page;
+		size_t length = vector.bv_len;
+
+		if (offset > lower_bytes || length > lower_bytes - offset)
+			return -ERANGE;
+		page = kmap_local_page(vector.bv_page);
+		if (bio_op(bio) == REQ_OP_WRITE)
+			memcpy(lower + offset, page + vector.bv_offset, length);
+		else if (bio_op(bio) == REQ_OP_READ)
+			memcpy(page + vector.bv_offset, lower + offset, length);
+		else {
+			kunmap_local(page);
+			return -EINVAL;
+		}
+		kunmap_local(page);
+		offset += length;
+		total += length;
+	}
+	return total == bio->bi_iter.bi_size ? (int)total : -EIO;
+}
+
+static void swapz_round068_native_write_bvec_fua(struct kunit *test)
+{
+	const unsigned int classes[] = { 1U, 2U, 4U };
+	u8 *lower;
+	unsigned int class_index;
+
+	lower = kunit_kzalloc(test, 5U * SWAPZ_ROUND068_BLOCK_BYTES, GFP_KERNEL);
+	KUNIT_ASSERT_NOT_NULL(test, lower);
+	memset(lower, 0xa7, SWAPZ_ROUND068_BLOCK_BYTES);
+	for (class_index = 0; class_index < ARRAY_SIZE(classes); ++class_index) {
+		struct swapz_round068_native_done done;
+		struct page *pages[SWAPZ_ROUND068_MAX_BLOCKS] = {};
+		struct bio *bio;
+		unsigned int block, added = 0U;
+		int result;
+
+		bio = bio_alloc(NULL, SWAPZ_ROUND068_MAX_BLOCKS,
+				REQ_OP_WRITE | REQ_FUA, GFP_KERNEL);
+		KUNIT_ASSERT_NOT_NULL(test, bio);
+		bio->bi_iter.bi_sector = SWAPZ_ROUND068_HEADER_SECTORS;
+		for (block = 0; block < classes[class_index]; ++block) {
+			u8 *mapped;
+
+			pages[block] = alloc_page(GFP_KERNEL);
+			if (!pages[block])
+				break;
+			mapped = kmap_local_page(pages[block]);
+			memset(mapped, block == 0U ? 0x39 : 0U,
+			       SWAPZ_ROUND068_BLOCK_BYTES);
+			kunmap_local(mapped);
+			if (bio_add_page(bio, pages[block],
+					 SWAPZ_ROUND068_BLOCK_BYTES, 0) !=
+				 SWAPZ_ROUND068_BLOCK_BYTES)
+				break;
+			added++;
+		}
+		if (added == classes[class_index]) {
+			KUNIT_EXPECT_EQ(test, bio_op(bio), REQ_OP_WRITE);
+			KUNIT_EXPECT_TRUE(test, !!(bio->bi_opf & REQ_FUA));
+			KUNIT_EXPECT_EQ(test, bio->bi_iter.bi_sector,
+					(sector_t)SWAPZ_ROUND068_HEADER_SECTORS);
+			result = swapz_round068_native_fake_lower(bio, lower,
+					5U * SWAPZ_ROUND068_BLOCK_BYTES);
+			KUNIT_EXPECT_EQ(test, result,
+					(int)(classes[class_index] *
+					      SWAPZ_ROUND068_BLOCK_BYTES));
+			result = swapz_round068_native_complete(bio, BLK_STS_OK,
+								&done);
+			KUNIT_EXPECT_EQ(test, result, 0);
+			KUNIT_EXPECT_EQ(test, done.callback_count, 1U);
+			KUNIT_EXPECT_EQ(test, done.status, BLK_STS_OK);
+			KUNIT_EXPECT_EQ(test, lower[0], (u8)0xa7);
+			KUNIT_EXPECT_EQ(test,
+					lower[SWAPZ_ROUND068_BLOCK_BYTES], (u8)0x39);
+		} else {
+			KUNIT_FAIL(test, "original native BIO page/bvec allocation");
+		}
+		bio_put(bio);
+		for (block = 0; block < classes[class_index]; ++block)
+			if (pages[block])
+				__free_page(pages[block]);
+	}
+}
+
+static void swapz_round068_native_flush_order_and_error(struct kunit *test)
+{
+	struct swapz_round068_native_done done;
+	struct bio *flush;
+	int result;
+
+	/* A separate post-WRITE flush, not a preflush mistaken for current
+	 * WRITE persistence. The host product state machine separately proves
+	 * no tagged publication before BOTH callbacks have succeeded. */
+	flush = bio_alloc(NULL, 0, REQ_OP_FLUSH | REQ_PREFLUSH, GFP_KERNEL);
+	KUNIT_ASSERT_NOT_NULL(test, flush);
+	flush->bi_iter.bi_sector = SWAPZ_ROUND068_HEADER_SECTORS;
+	KUNIT_EXPECT_EQ(test, bio_op(flush), REQ_OP_FLUSH);
+	KUNIT_EXPECT_TRUE(test, !!(flush->bi_opf & REQ_PREFLUSH));
+	KUNIT_EXPECT_EQ(test, flush->bi_iter.bi_size, 0U);
+	result = swapz_round068_native_complete(flush, BLK_STS_OK, &done);
+	KUNIT_EXPECT_EQ(test, result, 0);
+	KUNIT_EXPECT_EQ(test, done.callback_count, 1U);
+	KUNIT_EXPECT_EQ(test, done.status, BLK_STS_OK);
+	bio_put(flush);
+
+	flush = bio_alloc(NULL, 0, REQ_OP_FLUSH | REQ_PREFLUSH, GFP_KERNEL);
+	KUNIT_ASSERT_NOT_NULL(test, flush);
+	result = swapz_round068_native_complete(flush, BLK_STS_IOERR, &done);
+	KUNIT_EXPECT_EQ(test, result, 0);
+	KUNIT_EXPECT_EQ(test, done.callback_count, 1U);
+	KUNIT_EXPECT_EQ(test, done.status, BLK_STS_IOERR);
+	bio_put(flush);
+}
+
+static void swapz_round068_native_read_bvec_short_error(struct kunit *test)
+{
+	struct swapz_round068_native_done done;
+	struct page *page;
+	struct bio *bio;
+	u8 *lower, *mapped;
+	int result;
+
+	lower = kunit_kzalloc(test, 2U * SWAPZ_ROUND068_BLOCK_BYTES, GFP_KERNEL);
+	KUNIT_ASSERT_NOT_NULL(test, lower);
+	memset(lower, 0x62, SWAPZ_ROUND068_BLOCK_BYTES);
+	memset(lower + SWAPZ_ROUND068_BLOCK_BYTES, 0xb1,
+	       SWAPZ_ROUND068_BLOCK_BYTES);
+	page = alloc_page(GFP_KERNEL | __GFP_ZERO);
+	KUNIT_ASSERT_NOT_NULL(test, page);
+	bio = bio_alloc(NULL, 1, REQ_OP_READ, GFP_KERNEL);
+	if (!bio) {
+		__free_page(page);
+		KUNIT_FAIL(test, "original READ bio allocation");
+		return;
+	}
+	bio->bi_iter.bi_sector = SWAPZ_ROUND068_HEADER_SECTORS;
+	if (bio_add_page(bio, page, SWAPZ_ROUND068_BLOCK_BYTES, 0) ==
+	    SWAPZ_ROUND068_BLOCK_BYTES) {
+		KUNIT_EXPECT_EQ(test, bio_op(bio), REQ_OP_READ);
+		result = swapz_round068_native_fake_lower(bio, lower,
+					2U * SWAPZ_ROUND068_BLOCK_BYTES);
+		KUNIT_EXPECT_EQ(test, result, (int)SWAPZ_ROUND068_BLOCK_BYTES);
+		mapped = kmap_local_page(page);
+		KUNIT_EXPECT_EQ(test, mapped[0], (u8)0xb1);
+		KUNIT_EXPECT_EQ(test,
+				mapped[SWAPZ_ROUND068_BLOCK_BYTES - 1U], (u8)0xb1);
+		kunmap_local(mapped);
+		result = swapz_round068_native_complete(bio, BLK_STS_IOERR,
+							&done);
+		KUNIT_EXPECT_EQ(test, result, 0);
+		KUNIT_EXPECT_EQ(test, done.callback_count, 1U);
+		KUNIT_EXPECT_EQ(test, done.status, BLK_STS_IOERR);
+	} else {
+		KUNIT_FAIL(test, "original READ bvec mapping");
+	}
+	bio_put(bio);
+	__free_page(page);
+}
+
+static struct kunit_case swapz_round068_native_lower_cases[] = {
+	KUNIT_CASE(swapz_round068_native_write_bvec_fua),
+	KUNIT_CASE(swapz_round068_native_flush_order_and_error),
+	KUNIT_CASE(swapz_round068_native_read_bvec_short_error),
+	{}
+};
+
+static struct kunit_suite swapz_round068_native_lower_suite = {
+	.name = "swapz_round068_native_lower_bio",
+	.test_cases = swapz_round068_native_lower_cases,
+};
+kunit_test_suite(swapz_round068_native_lower_suite);
+#endif /* SWAPZ_ROUND068_ORIGINAL_LOWER_BIO_KUNIT */
+/* ROUND068_ORIGINAL_NATIVE_LOWER_BIO_END */

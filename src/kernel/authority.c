@@ -4191,6 +4191,292 @@ int swapz_import_disk_read_pinned(struct swapz_import_disk_pool *pool,
 	       expected->compressed_length);
 	return 0;
 }
+
+#if defined(SWAPZ_ROUND068_IMPORT_LOWER_BIO_TEST)
+/*
+ * Typed scalar BIO-shaped request ownership over the genuine staged product
+ * disk extent. The native KUnit separately executes actual struct bio/bvec
+ * and bio_endio callbacks on the original pinned kernel. Here the host lower
+ * is a synchronous fake memory sink with a deliberately delayed callback.
+ * Never claim physical persistence or upper-endio from these model receipts.
+ */
+static int swapz_import_lower_next(struct swapz_import_lower_bio_owner *owner,
+				   swapz_u32 opf, swapz_u32 bytes,
+				   swapz_u64 sector,
+				   struct swapz_import_lower_bio_request *request)
+{
+	if (owner->next_token == ~(swapz_u64)0)
+		return -EOVERFLOW;
+	owner->pending = (struct swapz_import_lower_bio_request) {
+		.token = ++owner->next_token,
+		.sector = sector, .opf = opf, .bytes = bytes,
+	};
+	*request = owner->pending;
+	return 0;
+}
+
+static int swapz_import_lower_matches(
+	const struct swapz_import_lower_bio_owner *owner,
+	const struct swapz_import_lower_bio_request *observed,
+	enum swapz_import_lower_phase phase)
+{
+	return owner && observed && owner->phase == (swapz_u8)phase &&
+	       owner->pending.token == observed->token &&
+	       owner->pending.sector == observed->sector &&
+	       owner->pending.opf == observed->opf &&
+	       owner->pending.bytes == observed->bytes;
+}
+
+/* Reserve the original physical block zero: data start is start_block+1.
+ * Externally supplied byte/sector geometry is always checked before use. */
+static int swapz_import_lower_geometry(const struct swapz_authority *authority,
+					swapz_u32 start_block,
+					swapz_u8 extent_blocks,
+					swapz_u64 *sector, swapz_u32 *bytes)
+{
+	if (!authority || !sector || !bytes ||
+	    (extent_blocks != 1U && extent_blocks != 2U &&
+	     extent_blocks != 4U) ||
+	    start_block >= authority->physical_blocks ||
+	    (swapz_u32)extent_blocks >
+		    authority->physical_blocks - start_block ||
+	    start_block % SWAPZ_SEGMENT_BLOCKS +
+		    extent_blocks > SWAPZ_SEGMENT_BLOCKS)
+		return -ERANGE;
+	*sector = ((swapz_u64)start_block +
+		   SWAPZ_LINUX_SWAP_HEADER_BLOCKS) *
+		  SWAPZ_IMPORT_LOWER_SECTORS_PER_BLOCK;
+	*bytes = (swapz_u32)extent_blocks * SWAPZ_BLOCK_BYTES;
+	return 0;
+}
+
+void swapz_import_lower_init(struct swapz_import_lower_bio_owner *owner,
+			      struct swapz_import_disk_pool *pool)
+{
+	if (!owner)
+		return;
+	memset(owner, 0, sizeof(*owner));
+	owner->pool = pool;
+	owner->next_token = 1U;
+}
+
+int swapz_import_lower_begin_write(struct swapz_import_lower_bio_owner *owner,
+				    const struct swapz_tx *transaction,
+				    swapz_u64 ticket, int fua_supported,
+				    struct swapz_import_lower_bio_request *request)
+{
+	struct swapz_import_disk_record *record;
+	swapz_u64 sector;
+	swapz_u32 bytes;
+	int error;
+
+	if (!owner || !owner->pool || !owner->pool->authority ||
+	    !transaction || !request || !ticket)
+		return -EINVAL;
+	if (owner->closing || owner->pool->closing ||
+	    (owner->phase != SWAPZ_IMPORT_LOWER_IDLE &&
+	     owner->phase != SWAPZ_IMPORT_LOWER_TERMINAL) || owner->has_pin)
+		return -EBUSY;
+	record = swapz_import_disk_find(owner->pool, ticket);
+	if (!record || record->state != SWAPZ_IMPORT_DISK_SUBMITTED ||
+	    !swapz_is_active(owner->pool->authority, transaction) ||
+	    record->ticket != ticket ||
+	    record->start_block != transaction->start_block ||
+	    record->sequence != transaction->sequence ||
+	    record->extent_blocks != transaction->extent_blocks)
+		return -ESTALE;
+	error = swapz_import_lower_geometry(owner->pool->authority,
+					     record->start_block,
+					     record->extent_blocks,
+					     &sector, &bytes);
+	if (error)
+		return error;
+	error = swapz_import_lower_next(owner,
+					SWAPZ_IMPORT_LOWER_OP_WRITE |
+					(fua_supported ?
+					 SWAPZ_IMPORT_LOWER_REQ_FUA : 0U),
+					bytes, sector, request);
+	if (error)
+		return error;
+	/* SNAPSHOT owns all 64 transaction records; no borrowed stack tx. */
+	owner->transaction = *transaction;
+	owner->ticket = ticket;
+	owner->direct_fua = fua_supported != 0;
+	owner->phase = SWAPZ_IMPORT_LOWER_WRITE_PENDING;
+	return 0;
+}
+
+/* Force any failed or short callback through the real allocator's
+ * swapz_abort. Even a sub-4096 partial write MAY have programmed the medium,
+ * so round UP completed physical-block count to retain the extent-class
+ * witness against premature recycling. Only one terminal callback consumes
+ * this transaction. */
+static int swapz_import_lower_fail_write(struct swapz_import_lower_bio_owner *owner,
+					 int error, swapz_u32 completed_bytes,
+					 const swapz_u8 *lower_extent)
+{
+	const swapz_u32 bounded_bytes =
+		completed_bytes > owner->transaction.extent_blocks *
+		    SWAPZ_BLOCK_BYTES ?
+		owner->transaction.extent_blocks * SWAPZ_BLOCK_BYTES :
+		completed_bytes;
+	swapz_u8 touched_blocks =
+		(swapz_u8)((bounded_bytes + SWAPZ_BLOCK_BYTES - 1U) /
+			   SWAPZ_BLOCK_BYTES);
+	int final_error;
+	final_error = swapz_import_disk_complete_payload(owner->pool,
+			owner->ticket, &owner->transaction, lower_extent,
+			owner->pending.bytes, error, touched_blocks, 0);
+	owner->phase = SWAPZ_IMPORT_LOWER_TERMINAL;
+	return final_error;
+}
+
+int swapz_import_lower_end_write(struct swapz_import_lower_bio_owner *owner,
+				  const struct swapz_import_lower_bio_request *observed,
+				  swapz_u32 completed_bytes, int lower_error,
+				  const swapz_u8 *lower_extent,
+				  struct swapz_import_lower_bio_request *postflush)
+{
+	swapz_u32 extent_bytes;
+	int error;
+
+	if (!swapz_import_lower_matches(owner, observed,
+					SWAPZ_IMPORT_LOWER_WRITE_PENDING))
+		return -ESTALE; /* round068_exact_write_callback */
+	extent_bytes = owner->pending.bytes;
+	if (owner->closing || lower_error || completed_bytes != extent_bytes)
+		return swapz_import_lower_fail_write(owner,
+			owner->closing ? -ECANCELED :
+			lower_error < 0 ? lower_error : -EIO,
+			completed_bytes, lower_extent); /* round068_write_failure */
+	if (!lower_extent)
+		return swapz_import_lower_fail_write(owner, -EINVAL,
+						     completed_bytes, NULL);
+	if (owner->direct_fua) {
+		error = swapz_import_disk_complete_payload(owner->pool,
+				owner->ticket, &owner->transaction, lower_extent,
+				extent_bytes, 0, owner->transaction.extent_blocks,
+				1); /* round068_write_fua_required */
+		owner->phase = SWAPZ_IMPORT_LOWER_TERMINAL;
+		return error;
+	}
+	/* A preflush is NOT a postwrite persistence barrier. Unsupported FUA
+	 * must receive a separate, successful later lower FLUSH callback. */
+	if (!postflush)
+		return swapz_import_lower_fail_write(owner, -EINVAL,
+						     completed_bytes, lower_extent);
+	error = swapz_import_lower_next(owner,
+					SWAPZ_IMPORT_LOWER_OP_FLUSH |
+					SWAPZ_IMPORT_LOWER_REQ_PREFLUSH,
+					0U, owner->pending.sector, postflush);
+	if (error)
+		return swapz_import_lower_fail_write(owner, error,
+						     completed_bytes, lower_extent);
+	owner->phase = SWAPZ_IMPORT_LOWER_POSTFLUSH_PENDING;
+	return -EINPROGRESS; /* round068_flush_barrier */
+}
+
+int swapz_import_lower_end_flush(struct swapz_import_lower_bio_owner *owner,
+				  const struct swapz_import_lower_bio_request *observed,
+				  int lower_error, const swapz_u8 *lower_extent)
+{
+	int error;
+
+	if (!swapz_import_lower_matches(owner, observed,
+					SWAPZ_IMPORT_LOWER_POSTFLUSH_PENDING))
+		return -ESTALE; /* round068_exact_flush_callback */
+	if (owner->closing || lower_error)
+		return swapz_import_lower_fail_write(owner,
+			owner->closing ? -ECANCELED :
+			lower_error < 0 ? lower_error : -EIO,
+			owner->transaction.extent_blocks * SWAPZ_BLOCK_BYTES,
+			lower_extent);
+	/* No FUA support was modeled, but a separate postwrite flush
+	 * completed. We still do NOT claim a physical durability proof. */
+	error = swapz_import_disk_complete_payload(owner->pool, owner->ticket,
+			&owner->transaction, lower_extent,
+			owner->transaction.extent_blocks * SWAPZ_BLOCK_BYTES,
+			0, owner->transaction.extent_blocks, 1);
+	owner->phase = SWAPZ_IMPORT_LOWER_TERMINAL;
+	return error;
+}
+
+int swapz_import_lower_begin_read(struct swapz_import_lower_bio_owner *owner,
+				   swapz_u64 ticket,
+				   struct swapz_import_lower_bio_request *request)
+{
+	struct swapz_import_disk_view view;
+	swapz_u64 sector;
+	swapz_u32 bytes;
+	int error;
+
+	if (!owner || !owner->pool || !owner->pool->authority || !request)
+		return -EINVAL;
+	if (owner->closing || owner->pool->closing || owner->has_pin ||
+	    (owner->phase != SWAPZ_IMPORT_LOWER_IDLE &&
+	     owner->phase != SWAPZ_IMPORT_LOWER_TERMINAL))
+		return -EBUSY;
+	error = swapz_import_disk_pin(owner->pool, ticket, &view);
+	if (error)
+		return error;
+	error = swapz_import_lower_geometry(owner->pool->authority,
+					     view.start_block,
+					     view.extent_blocks,
+					     &sector, &bytes);
+	if (!error)
+		error = swapz_import_lower_next(owner,
+					SWAPZ_IMPORT_LOWER_OP_READ,
+					bytes, sector, request);
+	if (error) {
+		(void)swapz_import_disk_put(owner->pool, ticket);
+		return error;
+	}
+	owner->pinned_view = view;
+	owner->ticket = ticket;
+	owner->has_pin = 1U; /* round068_read_pin_before_lower */
+	owner->phase = SWAPZ_IMPORT_LOWER_READ_PENDING;
+	return 0;
+}
+
+int swapz_import_lower_end_read(struct swapz_import_lower_bio_owner *owner,
+				 const struct swapz_import_lower_bio_request *observed,
+				 swapz_u32 completed_bytes, int lower_error,
+				 const swapz_u8 *lower_extent,
+				 swapz_u8 *compressed_destination,
+				 swapz_u32 destination_capacity)
+{
+	int error, put_error;
+
+	if (!swapz_import_lower_matches(owner, observed,
+					SWAPZ_IMPORT_LOWER_READ_PENDING) ||
+	    !owner->has_pin)
+		return -ESTALE; /* round068_exact_read_callback */
+	error = owner->closing ? -ECANCELED :
+		lower_error ? -EIO :
+		completed_bytes != owner->pending.bytes ? -EIO :
+		swapz_import_disk_read_pinned(owner->pool, &owner->pinned_view,
+				lower_extent, completed_bytes,
+				compressed_destination, destination_capacity);
+	put_error = swapz_import_disk_put(owner->pool, owner->ticket);
+	owner->has_pin = 0U;
+	owner->phase = SWAPZ_IMPORT_LOWER_TERMINAL;
+	return put_error ? put_error : error;
+}
+
+int swapz_import_lower_close(struct swapz_import_lower_bio_owner *owner)
+{
+	if (!owner)
+		return -EINVAL;
+	owner->closing = 1U; /* round068_close_fence */
+	/* This does NOT release a BIO/page or parent authority while queued.
+	 * The matching terminal callback MUST arrive to drain the retained pin.
+	 */
+	return (owner->phase == SWAPZ_IMPORT_LOWER_WRITE_PENDING ||
+		owner->phase == SWAPZ_IMPORT_LOWER_POSTFLUSH_PENDING ||
+		owner->phase == SWAPZ_IMPORT_LOWER_READ_PENDING ||
+		owner->has_pin) ? -EBUSY : 0;
+}
+#endif /* SWAPZ_ROUND068_IMPORT_LOWER_BIO_TEST */
 #endif /* SWAPZ_ROUND067_IMPORT_DISK_PAYLOAD_TEST */
 #endif /* SWAPZ_ROUND066_IMPORT_DISK_TEST */
 

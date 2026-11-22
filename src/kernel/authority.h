@@ -712,6 +712,94 @@ int swapz_import_disk_read_pinned(struct swapz_import_disk_pool *pool,
 				  swapz_u32 actual_read_bytes,
 				  swapz_u8 *compressed_destination,
 				  swapz_u32 destination_capacity);
+
+#if defined(SWAPZ_ROUND068_IMPORT_LOWER_BIO_TEST)
+/*
+ * The original pinned c339f4010dea8b0d754f84ace70cd1b089878ef8
+ * include/linux/blk_types.h uses REQ_OP_READ=0, WRITE=1, FLUSH=2,
+ * REQ_FUA bit17 and REQ_PREFLUSH bit18. The native KUnit separately
+ * static-asserts these exact flag values against the ORIGINAL Linux types.
+ * Host fixture requests have the same scalar layout but are NOT kernel BIOs.
+ */
+#define SWAPZ_IMPORT_LOWER_BIO_ACTIVE 0U
+#define SWAPZ_IMPORT_LOWER_OP_READ 0U
+#define SWAPZ_IMPORT_LOWER_OP_WRITE 1U
+#define SWAPZ_IMPORT_LOWER_OP_FLUSH 2U
+#define SWAPZ_IMPORT_LOWER_REQ_FUA (1U << 17U)
+#define SWAPZ_IMPORT_LOWER_REQ_PREFLUSH (1U << 18U)
+#define SWAPZ_IMPORT_LOWER_SECTORS_PER_BLOCK (SWAPZ_BLOCK_BYTES / 512U)
+
+enum swapz_import_lower_phase {
+	SWAPZ_IMPORT_LOWER_IDLE = 0,
+	SWAPZ_IMPORT_LOWER_WRITE_PENDING,
+	SWAPZ_IMPORT_LOWER_POSTFLUSH_PENDING,
+	SWAPZ_IMPORT_LOWER_READ_PENDING,
+	SWAPZ_IMPORT_LOWER_TERMINAL,
+};
+
+/* One callback only, with a monotonically increasing request token.
+ * The original queued bvec/page buffers belong to the caller until its
+ * terminal callback. This struct owns a full immutable TRANSACTION snapshot
+ * for the whole asynchronous lower callback lifetime (never a stack borrow).
+ * The lower memory buffer is owned by the fixture and remains valid until
+ * callback+retained reader drain. No actual block_device or upper BIO here.
+ */
+struct swapz_import_lower_bio_request {
+	swapz_u64 token;
+	swapz_u64 sector;
+	swapz_u32 opf;
+	swapz_u32 bytes;
+};
+struct swapz_import_lower_bio_owner {
+	struct swapz_import_disk_pool *pool;
+	struct swapz_tx transaction;
+	struct swapz_import_disk_view pinned_view;
+	struct swapz_import_lower_bio_request pending;
+	swapz_u64 ticket;
+	swapz_u64 next_token;
+	swapz_u8 phase;
+	swapz_u8 closing;
+	swapz_u8 direct_fua;
+	swapz_u8 has_pin;
+};
+_Static_assert(sizeof(struct swapz_import_lower_bio_owner) <= 4096U,
+	       "test-only lower callback owner exceeds bounded memory");
+
+/*
+ * ALL methods require the serialized sleepable ordered authority owner.
+ * Actual native bio->bi_end_io runs in unspecified/IRQ context: it may ONLY
+ * record completion, then hand this small result to that ordered worker.
+ * This guard has NO real bio submission, kernel block queue or ACK.
+ */
+void swapz_import_lower_init(struct swapz_import_lower_bio_owner *owner,
+			      struct swapz_import_disk_pool *pool);
+int swapz_import_lower_begin_write(struct swapz_import_lower_bio_owner *owner,
+				    const struct swapz_tx *transaction,
+				    swapz_u64 ticket, int fua_supported,
+				    struct swapz_import_lower_bio_request *request);
+/* Return -EINPROGRESS only after successful full WRITE without FUA, which
+ * explicitly requires a separate post-WRITE REQ_OP_FLUSH|REQ_PREFLUSH. */
+int swapz_import_lower_end_write(struct swapz_import_lower_bio_owner *owner,
+				  const struct swapz_import_lower_bio_request *observed,
+				  swapz_u32 completed_bytes, int lower_error,
+				  const swapz_u8 *lower_extent,
+				  struct swapz_import_lower_bio_request *postflush);
+int swapz_import_lower_end_flush(struct swapz_import_lower_bio_owner *owner,
+				  const struct swapz_import_lower_bio_request *observed,
+				  int lower_error, const swapz_u8 *lower_extent);
+int swapz_import_lower_begin_read(struct swapz_import_lower_bio_owner *owner,
+				   swapz_u64 ticket,
+				   struct swapz_import_lower_bio_request *request);
+int swapz_import_lower_end_read(struct swapz_import_lower_bio_owner *owner,
+				 const struct swapz_import_lower_bio_request *observed,
+				 swapz_u32 completed_bytes, int lower_error,
+				 const swapz_u8 *lower_extent,
+				 swapz_u8 *compressed_destination,
+				 swapz_u32 destination_capacity);
+/* Close is a fence, not a cancellation of a physically queued request.
+ * Return -EBUSY until both lower callback and retained pin are drained. */
+int swapz_import_lower_close(struct swapz_import_lower_bio_owner *owner);
+#endif /* SWAPZ_ROUND068_IMPORT_LOWER_BIO_TEST */
 #endif /* SWAPZ_ROUND067_IMPORT_DISK_PAYLOAD_TEST */
 #endif /* SWAPZ_ROUND066_IMPORT_DISK_TEST */
 

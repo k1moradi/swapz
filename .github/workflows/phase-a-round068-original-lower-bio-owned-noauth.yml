@@ -1,0 +1,176 @@
+name: Round068 actual product lower callbacks and pinned native BIO KUnit NO_AUTH
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'src/kernel/authority.c'
+      - 'src/kernel/authority.h'
+      - 'tests/runtime/native/fixtures/round068-original-lower-bio-owned.c'
+      - 'tests/runtime/native/fixtures/round068-original-lower-bio-owned.cfrag'
+      - 'tests/tools/round068-original-lower-bio-owned-verify.py'
+      - 'tests/tools/round068-stage-original-lower-bio.py'
+      - '.github/workflows/phase-a-round068-original-lower-bio-owned-noauth.yml'
+      - 'docs/testing_standards.md'
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  actual-authority-lower-callbacks-host:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    env:
+      SWAPZ_PUSH_BEFORE_SHA: ${{ github.event.before }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Exact sole main source and whitespace
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          test "$GITHUB_REF" = refs/heads/main
+          test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
+          test "$(git branch --show-current)" = main
+          test -z "$(git status --porcelain --untracked-files=all)"
+          git diff --check HEAD^ HEAD
+      - name: Disposable original LZO LZ4 and digest link dependencies
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          sudo apt-get update -qq
+          sudo DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
+            gcc clang liblzo2-dev liblz4-dev libssl-dev
+          test -f /usr/include/lzo/lzo1x.h
+      - name: Actual production authority GCC Clang ASan UBSan and 28 executed changed-C mutants
+        run: python3 -B tests/tools/round068-original-lower-bio-owned-verify.py
+      - name: Preserve true Round067 original compressed bytes and full read
+        run: python3 -B tests/tools/round067-import-disk-payload-read-verify.py
+      - name: Preserve actual Round066 allocator reader pins and GC
+        run: python3 -B tests/tools/round066-authority-import-owned-map-verify.py
+      - name: Preserve real Round059 dormant import refusal
+        run: python3 -B tests/tools/round059-authority-import-lifetime.py
+      - name: Preserve real Round057 ordinary uncompressed RAW
+        run: python3 -B tests/tools/round057-transaction-product.py
+      - name: Preserve entire prior and peer first-parent testing standards
+        run: python3 -B tests/runtime/native/repository-policy-test.py --enforce
+
+  actual-original-pinned-linux-bio-kunit:
+    needs: actual-authority-lower-callbacks-host
+    runs-on: ubuntu-24.04
+    timeout-minutes: 110
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          path: swapz
+          persist-credentials: false
+      - uses: actions/checkout@v4
+        with:
+          repository: torvalds/linux
+          ref: c339f4010dea8b0d754f84ace70cd1b089878ef8
+          fetch-depth: 1
+          path: linux
+          persist-credentials: false
+      - name: Rootless original UML kernel build prerequisites
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          sudo apt-get update -qq
+          sudo DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
+            build-essential bc bison flex libelf-dev libssl-dev \
+            libncurses-dev python3 python3-pyelftools binutils
+      - name: Verify exact original pinned Linux and stage only the native BIO suite
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          umask 077
+          test "$(git -C swapz rev-parse HEAD)" = "$GITHUB_SHA"
+          test "$(git -C linux rev-parse HEAD)" = c339f4010dea8b0d754f84ace70cd1b089878ef8
+          mkdir -p round068-evidence
+          python3 -B swapz/tests/tools/round068-stage-original-lower-bio.py \
+            --linux-root linux --manifest round068-evidence/source.json --verify-only
+          python3 -B swapz/tests/tools/round068-stage-original-lower-bio.py \
+            --linux-root linux --manifest round068-evidence/source.json
+          git -C linux diff --check
+          python3 -B - <<'PY'
+          import hashlib,json,pathlib
+          doc=json.loads(pathlib.Path('round068-evidence/source.json').read_text())
+          actual=(pathlib.Path('linux')/doc['path']).read_bytes()
+          assert doc['source_original']=='c339f4010dea8b0d754f84ace70cd1b089878ef8'
+          assert doc['source_staged_modified'] is True
+          assert doc['SOURCE_MAPPED_AUTHENTICATED']==0
+          assert doc['path']=='block/bio.c'
+          assert hashlib.sha256(actual).hexdigest()==doc['postimage_sha256']
+          print('PASS original_bio.c_exact_pinned_postimage native_suite=3 AUTH0')
+          PY
+      - name: Compile and EXECUTE genuine original kernel BIO bvec/sector/FUA/flush/READ async endio
+        shell: bash
+        timeout-minutes: 85
+        run: |
+          set -Eeuo pipefail
+          umask 077
+          mkdir -p round068-evidence
+          log=round068-evidence/original-native.log
+          out="$RUNNER_TEMP/round068-original-uml"
+          result="$PWD/round068-evidence/original-native.json"
+          config="$PWD/round068-evidence/original.kunitconfig"
+          cat > "$config" <<'KUNIT_CFG'
+          CONFIG_KUNIT=y
+          CONFIG_BLOCK=y
+          CONFIG_SWAP=y
+          # CONFIG_CGROUPS is not set
+          # CONFIG_KUNIT_ALL_TESTS is not set
+          KUNIT_CFG
+          set +e
+          timeout -k 10s 78m python3 -B linux/tools/testing/kunit/kunit.py run \
+            --arch=um --build_dir="$out" --kunitconfig="$config" \
+            --make_options="KCFLAGS=-DSWAPZ_ROUND068_ORIGINAL_LOWER_BIO_KUNIT=1 -Werror" \
+            --jobs=2 --timeout=120 --json="$result" \
+            'swapz_round068_native_lower_bio*' > "$log" 2>&1
+          status=$?
+          set -e
+          if test "$status" -ne 0; then
+            python3 -B - "$log" "$status" <<'PY'
+          import pathlib,re,sys
+          log,exit_code=sys.argv[1:]
+          print("::error::ROUND068_NATIVE_FIRST_ERROR phase=original-uml "
+                "exit="+exit_code+" evidence=round068-evidence/original-native.log")
+          first=next((line for line in pathlib.Path(log).read_text(
+              errors="replace").splitlines() if re.search(
+              r"(?i)(error:|FAILED|Traceback|KASAN:|UBSAN:)",line)), None)
+          if first:
+              first=re.sub(r"(?:/[^:\s]+)+/","external-source/",first)
+              print("::error::ROUND068_NATIVE_FIRST_DIAGNOSTIC "+first[:230])
+          PY
+            exit "$status"
+          fi
+          test -x "$out/linux" && test -s "$result" && test -s "$out/test.log"
+          grep -Fxq CONFIG_KUNIT=y "$out/.config"
+          grep -Fxq CONFIG_BLOCK=y "$out/.config"
+          python3 -B - "$result" "$out/test.log" <<'PY'
+          import json,pathlib,re,sys
+          obj=json.loads(pathlib.Path(sys.argv[1]).read_text())
+          log=pathlib.Path(sys.argv[2]).read_text()
+          todo=[obj];matches=[]
+          while todo:
+              node=todo.pop()
+              if node.get('name')=='swapz_round068_native_lower_bio':
+                  matches.append(node)
+              todo.extend(node.get('sub_groups',[]))
+          assert len(matches)==1
+          cases=matches[0].get('test_cases',[])
+          assert {case['name'] for case in cases}=={
+              'swapz_round068_native_write_bvec_fua',
+              'swapz_round068_native_flush_order_and_error',
+              'swapz_round068_native_read_bvec_short_error'
+          }
+          assert all(case['status']=='PASS' for case in cases)
+          assert all(matches[0]['misc'][key]==value for key,value in
+                     dict(tests=3,passed=3,failed=0,skipped=0,
+                          crashed=0,errors=0).items())
+          assert 'swapz_round068_native_lower_bio' in log
+          assert not re.search(r'(?m)^not ok [0-9]+ .*swapz_round068', log)
+          print('PASS genuine original pinned Linux BIO KUnit=3 '
+                'WRITE/FUA/FLUSH/READ bvec async bio_endio '
+                'physical_device=NONE durable_FUA=NOT_PROVEN upper_ACK=NONE AUTH0')
+          PY

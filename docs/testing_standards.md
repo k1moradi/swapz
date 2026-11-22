@@ -18556,3 +18556,83 @@ Preserve physical SWAPSPACE2 first 4096 header/signature/UUID, parent
 partition table, fixed 20-byte map and data-only 4/8/16KiB extents.
 No owner Make, privileged, loaded-kernel, real physical device, real
 pressure, actual lower durable FUA or genuine upper BIO ACK tests.
+
+## Round068 Agent5 — original pinned Linux BIO callback execution and guarded real product authority lifecycle
+
+The prior Round067 real compressed original-profile LZO1X/LZ4 payload,
+full 4096 original byte-exact decoded read, source CRC/SHA and
+Round066 true swapz_stage physical liveness, eight-record 920-byte
+native-codec-tagged owner, old pinned reader GC and full 4/8/16KiB zero
+padding are mandatory and must remain unchanged. Add ONLY a nested,
+DEFAULT-UNDEFINED Round068 test guard to actual authority.c/.h. Never
+enable production compressed admission, touch the ordinary 20-byte
+swapz_map or reinterpret RAW_4096 (which always stores all 4096 original
+UNCOMPRESSED bytes). The data-only lower sector for logical data
+start_block S is 8*(S+1) in 512-byte sectors. Physical SWAPSPACE2 first
+4096 header/UUID/signature and parent partition table remain forbidden.
+
+The test-only lower owner MUST snapshot the entire real staged transaction,
+never retain a caller-stack transaction pointer over an asynchronous
+callback. Caller-owned nonaliasing bvec/page RAM buffers must outlive its
+lower completion and teardown drain. Use an exact nonwrapping lower
+callback token, expected REQ_OP_READ/WRITE/FLUSH flags, FUA and PREFLUSH,
+physical sector and exact full 4096/8192/16384 extent bytes; reject
+late/duplicate/wrong-token/sector/opf/length/ABA callbacks without
+transferring authority. Only after complete lower WRITE callback and
+correct effective FUA semantics can the memory-backed source bytes and
+zero padding be checked by real authority C and take the existing real
+allocator's live_records/extent_classes slot. A preceding preflush alone
+does NOT durably order the new write. If FUA is unsupported, require a
+separate explicit successful POST-WRITE FLUSH callback before any tagged
+test-only publication. Missing postflush, lower error, short write or
+close fence must abort via actual swapz_abort, count abandonment, and
+conservatively retain possibly programmed physical extents, rounding up
+sub-4096 partial write evidence without 32-bit wraparound.
+
+READ must hold a separately acquired exact ticket/generation/GC pin
+through completed lower copy, refuse short/error/closing callback while
+leaving caller output unchanged, release pin exactly once after terminal
+completion and preserve old physical liveness across a new completed
+GC relocation. Close rejects new work and returns busy until callbacks
+and retained readers fully drain. Each guarded method runs exclusively
+under one serialized sleepable authority owner. Actual kernel bio_endio
+can run in IRQ context and MUST only record bounded completion for later
+ordered-worker processing; no sleeping authority function, MM or GUI
+logic may run in the endio callback. No physical medium nor one real
+upper bio_endio is represented by the host receipt.
+
+Require two separately described rootless proof layers, not conflated:
+(1) actual linked production authority.c+codec.c with GCC and Clang
+-Wall -Wextra -Wconversion -Wshadow -Werror, ASan+UBSan, seven material
+delayed/wrong/duplicate/short/FUA/postflush/reader-GC/close cases and
+FOURTEEN distinct truly COMPILED AND EXECUTED changed real-C semantic
+mutants per compiler. A compiler failure, runtime sanitizer crash,
+timeout or inert mutation is NOT a semantic kill. Preserve the entire
+Round067 six scenarios/ten mutants, Round066 six/ten, Round059 nine/ten,
+Round057 ordinary RAW seven/five, both compilers and canonical
+same-source first-parent testing policy.
+(2) a separate actual original torvalds/linux pin
+c339f4010dea8b0d754f84ace70cd1b089878ef8 rootless UML KUnit,
+verify pristine original block/bio.c, include/linux/bio.h and
+include/linux/blk_types.h Git blob hashes before staging ONLY the
+append-only default-off original C fixture to original block/bio.c.
+Actually run native bio_alloc, bio_add_page, bio_for_each_segment,
+kmap_local_page, actual REQ_OP_WRITE/READ/FLUSH, REQ_FUA and
+REQ_PREFLUSH bit/sector checks, and workqueue bio_endio success/error
+callbacks through real kernel memory-backed test vectors. Require all
+three distinct native JSON+KTAP test cases PASS with zero skips,
+failures, crashes or errors. This is genuine original Linux BIO API
+execution, but NO submit_bio, true block queue, physical device,
+stable medium FUA, authenticated native source/DM/decoder lease or
+genuine upper ACK. Publish exact CI jobs/first errors; pending genuine
+native KUnit is PROGRESS, never terminal qualification.
+
+All imported active gates stay zero, SOURCE_MAPPED_AUTHENTICATED=0,
+PHASE_A=BLOCKED, direct compressed handoff and forced RAW bypass
+DISABLED. Linux MM alone owns compressed zswap RAM/natural pressure
+eviction, swapz disk packing/GC only, no competing reclaim. No owner
+Make fast_test/test, privilege, loaded kernel/device, physical swap or
+real pressure; no branch/fork/worktree/PR/merge/force push. Preserve
+entire previous+peer canonical standards literal byte-identical prefix
+for every new source/test/workflow commit; use fresh sole-main
+expected-head single-parent nonforce fast-forward.
