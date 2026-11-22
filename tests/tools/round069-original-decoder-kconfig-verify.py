@@ -8,6 +8,8 @@ and compare the actual generated .config, never a guessed negative result.
 from __future__ import annotations
 
 import argparse
+import contextlib
+import io
 from pathlib import Path
 import re
 import subprocess
@@ -90,6 +92,9 @@ def compare(request: Path, effective: Path, mode: str) -> None:
 
 
 def verify_original_kconfig(linux: Path) -> None:
+    # git -C changes the subprocess cwd. A relative linux/Kconfig pathname
+    # would then resolve as linux/linux/... and disguise a valid pin as drift.
+    linux = linux.resolve(strict=True)
     command = subprocess.run(
         ["git", "-C", str(linux), "rev-parse", "HEAD"],
         text=True, capture_output=True, check=False, timeout=30)
@@ -168,10 +173,16 @@ CONFIG_CRYPTO_LIB_SHA256=y
         (path / "effective").write_text(
             fixed.replace("CONFIG_LZ4_COMPRESS=y", "# CONFIG_LZ4_COMPRESS is not set"))
         compare(path / "requested", path / "effective", "legacy-negative")
+        diagnostic = io.StringIO()
         try:
-            compare(path / "requested", path / "effective", "corrected")
+            # Expected semantic negative: suppress its GitHub ::error
+            # annotation, but assert that its exact key was captured.
+            with contextlib.redirect_stderr(diagnostic):
+                compare(path / "requested", path / "effective", "corrected")
         except ConfigurationError as error:
-            require(str(error) == "corrected-original-Kconfig-not-effective",
+            require(str(error) == "corrected-original-Kconfig-not-effective" and
+                    "key=CONFIG_LZ4_COMPRESS requested=y effective=n"
+                    in diagnostic.getvalue(),
                     "wrong-original-Kconfig-first-error")
         else:
             raise ConfigurationError("missing-native-option-was-not-rejected")

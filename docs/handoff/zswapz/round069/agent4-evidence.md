@@ -24,3 +24,33 @@ No production owner C/H and no original Linux zswap/DM/MM, algorithm C or author
 Until new exact-source host and genuine original UML both terminal green, status PROGRESS, not REPORT_READY. Unit source pool freed as MODEL, not actual live zswap pool/tfm/module retirement. Builtin codecs don't qualify a modular provider unload, synthetic test authority flags are NOT real lower durable FUA or upper ACK; genuine source XArray slot/folio/current native DM and imported authoritative map remain unproven.
 
 Linux MM exclusively controls compressed zswap RAM and natural pressure eviction. swapz only disk compression/packing/GC; no new reclaim. Ordinary RAW_4096 is entire ORIGINAL UNCOMPRESSED 4096 bytes; selected native LZO1X/raw LZ4 would need distinct volatile codec tag. SOURCE_MAPPED_AUTHENTICATED=0, PHASE_A=BLOCKED, ACTIVE=0, direct compressed handoff disabled, forced RAW bypass disabled. Protect SWAPSPACE2 first 4096 header/UUID/signature and parent partition table; preserve ordinary fixed20B map and data-only 4/8/16KiB. No owner Make, root, privileged, loaded, actual physical device/pressure, mkswap, swapoff or repartition.
+
+## Actual first Round069 CI failure and narrowly scoped source-host fix
+
+Published first fix 651e41b96a575d04c0239725e013929dda6f6d38
+triggered exact run https://github.com/k1moradi/swapz/actions/runs/45044305345.
+Host job137275415966 FAILED BEFORE LZO/LZ4 package installation or actual
+C mutant execution: the new original-Kconfig verifier reported
+ROUND069_ORIGINAL_NATIVE_CONFIG_FIRST_ERROR phase=original
+cause=original-Kconfig-blob:crypto/Kconfig. Native job137275908198
+was correctly SKIPPED. The exact pinned original Git tree crypto/Kconfig
+blob 981d5dc422d4c89c743b5724aeacd6aa5120c009, size39218,
+was independently re-read from torvalds/linux pin with matching sha.
+The true test harness error was that it passed linux/crypto/Kconfig
+relative path to git -C linux hash-object, which resolves inside
+linux/linux/crypto/Kconfig. No real source content was corrupted.
+The narrow fix resolves the provided Linux root to an absolute
+path before every original Git blob check. It also captures and
+suppresses only EXPECTED-negative self-test ::error annotations,
+asserting the exact key is still recovered; actual test failures
+remain fail-only. The previous source-host log also printed
+an expected artificial CONFIG_LZ4_COMPRESS failure annotation in
+a successful comparison self-test; this was misleading and removed.
+This correction changes ONLY the rootless verifier, standards and
+evidence, NOT the original kernel, original codec, dormant owner C/H,
+native fixture or existing actual Kconfig positive/negative workflow.
+
+The original Round068 generated Kconfig still lacks an independently
+verified exact missing key: the first new run never reached native
+config due the above host first failure. A NEW exact-source run must
+actually execute the old original UML negative to identify it.

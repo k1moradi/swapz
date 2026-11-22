@@ -18734,3 +18734,23 @@ SWAPSPACE2 physical first4096/header/signature/UUID and partition
 table, fixed20B ordinary map and data-only padded 4/8/16KiB extents;
 no owner Make, privilege, loaded, physical, actual pressure, swapoff,
 mkswap or repartition.
+
+### Round069 original Kconfig verifier path-ownership and expected-negative annotations
+
+The first actual Round069 rootless source-host 137275415966 failed
+before native Kconfig or C compilation with original-Kconfig-blob:
+crypto/Kconfig. Independent pinned original Git tree confirms
+crypto/Kconfig 981d5dc422d4c89c743b5724aeacd6aa5120c009 unchanged.
+Cause: the test verifier passed a relative linux/crypto/Kconfig path to
+git -C linux hash-object, which resolves to linux/linux/crypto/Kconfig.
+Resolve original Linux root to an absolute path BEFORE invoking git
+hash-object. Do not interpret a test harness relative-path error as
+an original pinned Linux blob mismatch. Add source-host executable
+self-tests that preserve exact native mismatch keys and suppress
+EXPECTED negative-control GitHub ::error annotations (rather than
+printing synthetic failures in a passing workflow). Never suppress
+a REAL native config, compiled C, original KUnit, sanitizer or first
+error. Exact original native config positive/negative still pending
+until a new source-bound host success and native pinned UML execution
+actually complete. Original full 4096, no-auth/bypass and physical
+SWAPSPACE2 safety contracts remain fully in force.
