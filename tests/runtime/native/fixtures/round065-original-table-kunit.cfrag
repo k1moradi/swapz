@@ -1,0 +1,32 @@
+#if IS_ENABLED(CONFIG_KUNIT)
+#include <kunit/test.h>
+
+/* Test the actual owner state transition, not a live DM table or disk. */
+static void swapz_first_dm_table_kunit(struct kunit *test)
+{
+	struct bio parent = {}, unrelated = {};
+	struct swapz_round065_table_state state = { .parent = &parent };
+
+	KUNIT_EXPECT_FALSE(test, swapz_round065_table_matches(&state, &parent, 1));
+	swapz_round065_select_table(&state, &unrelated, 2, true);
+	KUNIT_EXPECT_FALSE(test, swapz_round065_table_matches(&state, &parent, 2));
+	swapz_round065_select_table(&state, &parent, 1, true);
+	KUNIT_EXPECT_TRUE(test, swapz_round065_table_matches(&state, &parent, 1));
+	swapz_round065_select_table(&state, &parent, 1, true);
+	KUNIT_EXPECT_TRUE(test, swapz_round065_table_matches(&state, &parent, 1));
+	swapz_round065_select_table(&state, &parent, 2, true);
+	KUNIT_EXPECT_FALSE(test, swapz_round065_table_matches(&state, &parent, 2));
+	swapz_round065_select_table(&state, &parent, 1, true);
+	KUNIT_EXPECT_FALSE(test, swapz_round065_table_matches(&state, &parent, 1));
+}
+
+static struct kunit_case swapz_first_dm_table_cases[] = {
+	KUNIT_CASE(swapz_first_dm_table_kunit),
+	{}
+};
+static struct kunit_suite swapz_first_dm_table_suite = {
+	.name = "swapz_first_dm_table",
+	.test_cases = swapz_first_dm_table_cases,
+};
+kunit_test_suite(swapz_first_dm_table_suite);
+#endif

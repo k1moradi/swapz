@@ -2240,6 +2240,17 @@ swapz_round064_current_owner_get(struct dm_target *ti, struct swapz_dm *ctx,
 		swapz_round063_original_dm_owner_put(owner);
 		return NULL;
 	}
+#if defined(SWAPZ_ROUND065_ORIGINAL_DM_TABLE_TEST)
+	/* Native first table selection must match this genuine current clone.
+	 * Refused candidates fall back to the original decompressed write. */
+/* ROUND065_PRODUCT_TABLE_GATE_BEGIN */
+	if (!swapz_round065_dm_owner_matches(ti, bio, owner)) {
+		swapz_round063_original_dm_owner_put(owner);
+		/* No table candidate is transferred to the incoming descriptor. */
+		return NULL;
+	}
+/* ROUND065_PRODUCT_TABLE_GATE_END */
+#endif
 	return owner;
 }
 

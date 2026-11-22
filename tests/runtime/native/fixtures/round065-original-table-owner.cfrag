@@ -1,0 +1,26 @@
+/* Native core only: called after the suspend check and before any split
+ * or clone creation. Existing original BIO owns the sideband. No new ref.
+ */
+void swapz_round065_original_table_select(struct bio *parent, u64 incarnation)
+{
+	struct swapz_ci_owned_payload *owner = parent->bi_swapz_ci_sideband;
+
+	if (!owner || owner->round065_table.parent != parent)
+		return;
+	swapz_round065_select_table(&owner->round065_table, parent, incarnation,
+		!(parent->bi_flags & (1U << BIO_CLONED)) &&
+		!(parent->bi_opf & REQ_PREFLUSH) &&
+		swapz_round064_original_route_matches(owner, parent));
+}
+EXPORT_SYMBOL_GPL(swapz_round065_original_table_select);
+
+bool swapz_round065_original_table_matches(const struct swapz_ci_owned_payload *owner,
+		const struct bio *parent, const struct bio *clone, u64 incarnation)
+{
+	return owner && parent && clone && parent != clone &&
+	       parent->bi_swapz_ci_sideband == owner &&
+	       clone->bi_swapz_ci_sideband == owner &&
+	       !(parent->bi_flags & (1U << BIO_CLONED)) &&
+	       swapz_round065_table_matches(&owner->round065_table, parent, incarnation);
+}
+EXPORT_SYMBOL_GPL(swapz_round065_original_table_matches);

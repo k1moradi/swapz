@@ -18039,3 +18039,77 @@ all import ACTIVE=0. Linux MM alone retains compressed RAM and naturally
 evicts; swapz handles disk compression, packing and GC. RAW_4096 remains
 whole original uncompressed 4096. No SWAPSPACE2 header/partition changes,
 owner Make, loaded, privileged, physical-device or actual-pressure tests.
+
+
+## Round065 — first dispatched native DM table incarnation candidate (NO_AUTH)
+
+Carry the exact prior Round064 staged original route candidate qualification
+`44992035073` at `57bf1f8a192bf5e3c5cc1f0bb813ed70acce1d6a` as four
+terminal successful jobs (host 137114969412, original 71 KUnit 137116704750,
+x86 ZSWAP=y 137116704778, n 137116704811). These are historical scoped
+qualification, not native execution of the new Round065 table mechanism.
+
+The separate opt-in Round065 stager verifies the full prior composed postimage
+manifest and original pinned dm.c/dm-core.h Git blobs before changing four
+files. Under default-undefined SWAPZ_ROUND065_ORIGINAL_DM_TABLE_TEST plus
+all existing original route guards, native __bind assigns a positive
+nonreused global table-publication incarnation immediately before RCU map
+publication, with permanent refusal on counter exhaustion. Original MM
+route binding records the exact original parent BIO while the sealed owner is
+private. First DM dispatch selection is made by dm_submit_bio under the
+actual live-table SRCU scope **after** the suspend/defer check and **before**
+splitting/cloning; a deferred never-dispatched parent stays unselected.
+An exact original parent may revalidate the same incarnation, never
+replace it; changed generation or invalid route permanently refuses the
+candidate. Reject a same-address table rebound with identical geometry,
+different current generation, non-original or cloned parent, split or
+duplicate clone, wrong target/map/sector/bvec/device/linkage.
+
+The actual product route helper holds the original compressed owner ref
+before asking the native GPL DM-core matcher to verify clone_endio, actual
+dm_target_io/dm_io original parent, normal nonsplit clone, actual table
+target lookup and exact old-sector/full uncompressed 4096-byte geometry.
+The native matcher may be used ONLY synchronously from the genuine
+selected ->map callback under the native submitter's live map scope.
+Original BIO and clone references retain the payload; existing native
+pending_io owns the accepted clone through completion; native suspend waits
+for submission and pending IO to drain before rebind/destruction. The
+additional incarnation evidence is stored in the bounded existing owner;
+no extra long-lived SRCU, table pointer, counted swap slot, table pin,
+allocation, or extra ACK. Pointer identity is used only for the living
+native parent linkage; never dereference a retired saved pointer.
+Parent state access is restricted to native original dispatch and its
+synchronous map callback, not workers or async completion. Product
+mismatch puts the newly acquired ref, before publication into incoming;
+existing admission-close and terminal clear-before-put-before-endio apply.
+No production compressed admission or historical table selected by MM is
+claimed. Scalar generation alone or arbitrary caller comparison is not
+authority; cross-module unload/reload lifetime and real native
+dispatch/requeue/teardown scheduling still require qualification.
+
+Execute the same changed original C state/owner/core snippets and exact
+marked actual product rejection callsite under GCC and Clang strict GNU11
+-Wall -Wextra -Wconversion -Wshadow -Werror ASan/UBSan. Require 24 host
+scenarios plus 23 compiled-and-executed changed-C semantic mutants each,
+including no first selection, generation refusal/ABA, wrong parent/current
+table/clone, removed actual product gate and rejection put. A compiler or
+sanitizer error or surviving mutant is not a semantic kill. Host stubs
+are NOT actual native refcount or DM scheduling. The initial revival
+mutant survived because it changed selector refusal but not final
+match; replace the ineffective mutation with deletion of the actual
+match refusal gate, and run the entire strict suite again. Retain the
+prior 27/18 and 16/10 source suites and actual original 71 inherited
+KUnit JSON/KTAP; separately run one new actual original owner-state
+KUnit (not full native DM I/O) from the same UML binary and check its
+own JSON/KTAP. Full modified pinned x86 y/n vmlinux/modules and real
+default+guarded same-source GPL product link must require the exact
+native matcher export/import, and default absence. Do not transfer
+old green jobs to new source. Staged original is explicitly modified;
+pristine original decoder workflow remains separate. Pending is PROGRESS.
+
+SOURCE_MAPPED_AUTHENTICATED=0; PHASE_A=BLOCKED; direct compressed handoff
+and forced RAW bypass DISABLED. RAW_4096 is whole ORIGINAL UNCOMPRESSED
+4096 bytes; original STORED producer still only LZ4. Linux MM sole
+compressed RAM/natural pressure owner; swapz disk compression/packing/GC
+only. Physical SWAPSPACE2 header/UUID/signature and partition table
+untouched. No owner Make, privileged, loaded, physical or real pressure.

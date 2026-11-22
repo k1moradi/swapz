@@ -1,0 +1,30 @@
+/* Stored only in the already bounded original owner. No table pointer/ref. */
+struct swapz_round065_table_state {
+	const struct bio *parent;
+	u64 incarnation;
+	bool refused;
+};
+
+/* Original parent submission is serialized by native BIO ownership.
+ * A cloned or unrelated submission cannot reset the first selection.
+ * Once refused, never reauthorize even if the prior table is reinstalled.
+ */
+static void swapz_round065_select_table(struct swapz_round065_table_state *state,
+		const struct bio *parent, u64 incarnation, bool route_valid)
+{
+	if (!state->parent || state->parent != parent || state->refused)
+		return;
+	if (!route_valid || !incarnation ||
+	    (state->incarnation && state->incarnation != incarnation)) {
+		state->refused = true;
+		return;
+	}
+	state->incarnation = incarnation;
+}
+
+static bool swapz_round065_table_matches(const struct swapz_round065_table_state *state,
+		const struct bio *parent, u64 incarnation)
+{
+	return parent && state->parent == parent && !state->refused &&
+	       incarnation && state->incarnation == incarnation;
+}

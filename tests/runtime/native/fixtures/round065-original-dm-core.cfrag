@@ -1,0 +1,49 @@
+/* Every actual table publication gets a fresh generation, even if the
+ * allocation address is reused. Exhaustion permanently refuses candidates.
+ */
+static atomic64_t swapz_round065_table_sequence = ATOMIC64_INIT(0);
+
+static u64 swapz_round065_next_incarnation(void)
+{
+	s64 previous = atomic64_read(&swapz_round065_table_sequence);
+
+	for (;;) {
+		if (previous < 0 || previous == S64_MAX)
+			return 0;
+		if (atomic64_try_cmpxchg(&swapz_round065_table_sequence,
+					 &previous, previous + 1))
+			return (u64)(previous + 1);
+	}
+}
+
+/* Synchronous only: called by the selected target's actual ->map while
+ * the DM submitter holds live table SRCU. DM's existing pending_io owns
+ * the accepted clone until endio. No extra table pin or SRCU is retained.
+ */
+bool swapz_round065_dm_owner_matches(struct dm_target *ti, struct bio *clone,
+		const struct swapz_ci_owned_payload *owner)
+{
+	struct dm_target_io *tio;
+	struct dm_io *io;
+	struct bio *parent;
+
+	if (!ti || !clone || !owner || clone->bi_end_io != clone_endio)
+		return false;
+	tio = clone_to_tio(clone);
+	io = tio->io;
+	if (!io || tio->ti != ti || !ti->table ||
+	    !dm_tio_is_normal(tio) || dm_io_flagged(io, DM_IO_WAS_SPLIT) ||
+	    tio->target_bio_nr || ti->table->md != io->md)
+		return false;
+	parent = io->orig_bio;
+	if (!parent || parent == clone || parent->bi_bdev != clone->bi_bdev ||
+	    parent->bi_iter.bi_sector != clone->bi_iter.bi_sector ||
+	    parent->bi_iter.bi_size != 4096U || clone->bi_iter.bi_size != 4096U ||
+	    tio->old_sector != clone->bi_iter.bi_sector ||
+	    parent->bi_io_vec != clone->bi_io_vec ||
+	    dm_table_find_target(ti->table, clone->bi_iter.bi_sector) != ti)
+		return false;
+	return swapz_round065_original_table_matches(owner, parent, clone,
+					READ_ONCE(ti->table->swapz_round065_incarnation));
+}
+EXPORT_SYMBOL_GPL(swapz_round065_dm_owner_matches);
