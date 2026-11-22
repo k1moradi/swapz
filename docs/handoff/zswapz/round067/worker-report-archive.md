@@ -1,0 +1,297 @@
+# Round067 — all SIX original worker-authored issue comments
+
+Official [#184](https://github.com/k1moradi/swapz/issues/184). Chronological original Agent3/4/5 bodies, only trailing whitespace normalized; pending/PROGRESS statements remain authentic historical snapshots. [Independent later source/CI audit](https://github.com/k1moradi/swapz/issues/184#issuecomment-7079749534).
+
+
+---
+
+## [Original comment 7079317950](https://github.com/k1moradi/swapz/issues/184#issuecomment-7079317950)
+
+message: AGENT4_ROUND067_P0_NATIVE_OWNER_INCLUDE_AND_FIRST_ERROR_SOURCE_PUBLISHED
+round: "067"
+agent: 4
+official_round_open_comment: 7078429736
+status: PROGRESS_EXACT_SOURCE_CI_QUEUED_NOT_NATIVE_QUALIFIED
+frozen_task_source: aeceaf19ddb0499fc01b3251136111f53f4c6eca
+source_commit: 564ffaaeb8a8e5bae916d2169bbb33201e976d88
+single_parent: aeceaf19ddb0499fc01b3251136111f53f4c6eca
+publication: MAIN_ONLY_FRESH_EXPECTED_HEAD_ONE_PARENT_NONFORCE_FF_REMOTE_READBACK_VERIFIED
+preserved_agent3_agent5_prior_work: YES
+changed_paths: src/kernel/zswap-import-decoder-owner.h;tests/tools/round060-original-decoder-kbuild-verify.py;.github/workflows/phase-a-round060-original-decoder-gpl-noauth.yml;docs/handoff/zswapz/round067/agent4-evidence.md;docs/testing_standards.md
+previous_complete_peer_standards_prefix: BYTE_IDENTICAL_1583001_CHARACTERS
+append_only_standards: 2167_CHARACTERS_NO_DELETIONS
+source_blob_owner_header: e1b4b903567070e2307f7d05f8e48c14e0bb3768
+source_blob_native_verifier: 4ba90545b8bb8424098d544474bb457b55ac8401
+source_blob_workflow: 25fcd6b3823c955d31fba3b33e386aee56507113
+source_blob_standards: 986b6b06008b34006f32d2bdca600e54254552e0
+original_linux_pin: c339f4010dea8b0d754f84ace70cd1b089878ef8
+original_wait_h_blob: c2af98b0074dcbdb2175850d05e377bf3b935663
+original_sched_h_blob: 1c93da75226e32400d248bf77066200a181a3f20
+prior_failing_exact_source: b181201a38dc7dde9d561e2c21a214b6c1e8e1ec
+prior_native_run: https://github.com/k1moradi/swapz/actions/runs/45014248163
+prior_native_y_job: 137186573213_COMPLETED_FAILURE
+prior_native_n_job: 137186573218_COMPLETED_FAILURE
+prior_actual_first_error: "original wait.h:223:54: error: 'TASK_NORMAL' undeclared (first use in this function)"
+prior_masking_diagnostic: "invalid original build phase rejected actual-original-GPL-modpost"
+prior_invalid_negative: MISSING_EXPORT_FAILED_AT_C_COMPILE_NOT_MODPOST
+prior_native_aggregate_both_y_n: positive_2 diagnostics_1 missing_export_negative_1 omitted_branch_negative_2
+fix: "Direct original linux/sched.h before original wait.h in dormant owner header. Exact original pinned two new headers/anchors and source include contract; first-error known phase whitelist includes uppercase GPL, bounded sanitized C compiler diagnostic preserved; C failed negative refuses to qualify as original modpost, and reports first error; true modpost-only and invalid phase regression."
+preserved_prior_close_wake_correction: REAL_OWNER_C_UNCHANGED_BLOB_8e0c8f4d2085af7f2e17df412f3a1af654063571
+original_9_per_compiler_compiled_executed_actual_C_semantic_mutants: PRESERVED_RUN_IN_NEW_EXACT_SOURCE_HOST_NOT_YET_GREEN
+close_wake_two_per_compiler_compiled_executed_semantic_mutants: PRESERVED_RUN_IN_NEW_EXACT_SOURCE_HOST_NOT_YET_GREEN
+new_exact_ci: https://github.com/k1moradi/swapz/actions/runs/45023772039
+new_source_host_job: 137212199075_QUEUED_NOT_PASS
+new_original_native_y_n_jobs: NOT_ALLOCATED_DEPENDS_ON_SOURCE_HOST
+new_exact_first_error: NONE_OBSERVED_JOBS_QUEUED
+native_positive_original_x86_y_n: PENDING
+native_missing_export_genuine_original_modpost_y_n: PENDING
+native_actual_LZ4_omitted_branch_negative_y_n: PENDING
+native_actual_owner_close_wake_compiled: PENDING
+loaded_original_decoder_module_and_actual_zswap_pool_retirement: NOT_EXECUTED_NOT_PROVEN
+SOURCE_MAPPED_AUTHENTICATED: 0
+PHASE_A: BLOCKED
+DIRECT_COMPRESSED_HANDOFF: DISABLED
+FORCED_RAW_BYPASS: DISABLED
+import_ACTIVE: 0
+RAW_4096: COMPLETE_ORIGINAL_UNCOMPRESSED_4096
+SWAPSPACE2_FIRST4096_HEADER_UUID_SIGNATURE_PARENT_PARTITION_TABLE: UNTOUCHED
+owner_Make_privileged_loaded_physical_real_pressure: NOT_RUN
+
+This is an actual source correction and newly queued genuine original native qualification, not a claim of native PASS. Prior source-host GCC/Clang evidence remains at previous commit and is not silently reused as same-source qualification. The normal production DM/authority paths and previous ELF parser were not changed; no duplicate jobs, branch, PR, fork, worktree, forced push or merge. Source evidence: https://github.com/k1moradi/swapz/blob/564ffaaeb8a8e5bae916d2169bbb33201e976d88/docs/handoff/zswapz/round067/agent4-evidence.md
+
+
+---
+
+## [Original comment 7079343270](https://github.com/k1moradi/swapz/issues/184#issuecomment-7079343270)
+
+message: AGENT4_ROUND067_EXACT_SOURCE_HOST_RAW_CI_REFRESH
+round: "067"
+source_commit: 564ffaaeb8a8e5bae916d2169bbb33201e976d88
+parent: aeceaf19ddb0499fc01b3251136111f53f4c6eca
+workflow: https://github.com/k1moradi/swapz/actions/runs/45023772039
+source_host_job: 137212199075
+source_host_status: COMPLETED_SUCCESS_RAW_LOG_VERIFIED
+actual_original_pinned_linux_source_headers: 13_OF_13_GIT_BLOBS_MATCH_PIN_c339f4010dea8b0d754f84ace70cd1b089878ef8
+actual_round067_first_error_regression: PASS_REAL_UPPERCASE_GPL_PHASE_AND_COMPILER_FIRST_ERROR_RETAINED
+first_error_invalid_phases: 3_OF_3_REJECTED
+first_error_negative_C_not_modpost: REJECTED
+first_error_true_modpost_only_control: ACCEPTED
+inherited_actual_strict_ELF_parser_GCC_Clang: 6_ACTUAL_C_OBJECTS_PASS_4_EXACT_SYMBOL_AND_3_RECORD_NEGATIVES_PASS
+inherited_original_provider_config_semantic_negatives: 7_OF_7_PASS
+actual_product_selected_LZO1X_LZ4_full_original_4096_host_ABI: BOTH_GCC_CLANG_PASS_NOTE_ORIGINAL_KERNEL_NATIVE_NOT_RUN
+actual_source_owner_C_compiled_executed_semantic_mutants: GCC_9_OF_9_PASS_CLANG_9_OF_9_PASS_ASAN_UBSAN
+actual_source_owner_C_baselines: GCC_1_OF_1_CLANG_1_OF_1_PASS
+close_wake_actual_kernel_branch_C_under_mock_spin_wait: GCC_1_BASELINE_2_SEMANTIC_C_MUTANTS_PASS_CLANG_SAME_ASAN_UBSAN
+new_exact_original_native_n: JOB137212729772_QUEUED_NOT_PASS
+new_exact_original_native_y: JOB137212729796_QUEUED_NOT_PASS
+new_native_positive_modpost_diagnostics_missing_export_omission: PENDING_CANNOT_CLAIM_PASS
+new_exact_first_job_error: NONE_OBSERVED_HOST_PASS_NATIVE_QUEUED
+previous_native_y_first_error: JOB137186573213_TASK_NORMAL_UNDECLARED_223_54
+previous_native_n_first_error: JOB137186573218_TASK_NORMAL_UNDECLARED_223_54
+SOURCE_MAPPED_AUTHENTICATED: 0
+PHASE_A: BLOCKED
+DIRECT_COMPRESSED_HANDOFF: DISABLED
+FORCED_RAW_BYPASS: DISABLED
+import_ACTIVE: 0
+ordinary_RAW_4096: ORIGINAL_WHOLE_UNCOMPRESSED_PAGE
+physical_SWAPSPACE2_header_first4096_UUID_signature_parent_partition_table: UNTOUCHED
+owner_Make_privileged_loaded_physical_actual_pressure: NONE
+status: PROGRESS_NATIVE_Y_N_QUEUED_NO_RUNTIME_OR_PRODUCTION_AUTH
+
+This exact source-host evidence proves real original ABI host decode after separately simulated source-pool free and actual dormant reader lease behavior, not native provider load/retirement. Genuine pristine original x86 kernel/module y/n jobs are separate and queued; no duplicate CI reruns or premature REPORT_READY. Prior native first error and masked phase are recorded accurately. Full source/diff in commit and docs/handoff/zswapz/round067/agent4-evidence.md.
+
+
+---
+
+## [Original comment 7079359487](https://github.com/k1moradi/swapz/issues/184#issuecomment-7079359487)
+
+message: AGENT5_ROUND067_PROGRESS_EXACT_SOURCE_CI_QUEUED
+round: "067"
+agent: 5
+status: PROGRESS
+source_sha: 472d90e6b2607a83021e919c54f14de1b0f4870f
+source_parent: 564ffaaeb8a8e5bae916d2169bbb33201e976d88
+publication: FRESH_EXPECTED_HEAD_ONE_PARENT_NONFORCE_FF_MAIN_READBACK_VERIFIED
+changed_paths:
+ - src/kernel/authority.c
+ - src/kernel/authority.h
+ - tests/runtime/native/fixtures/round067-import-disk-payload-read.c
+ - tests/tools/round067-import-disk-payload-read-verify.py
+ - .github/workflows/phase-a-round067-import-disk-payload-read-noauth.yml
+ - docs/handoff/zswapz/round067/agent5-evidence.md
+ - docs/testing_standards.md
+standards: COMPLETE_PREVIOUS_AND_PEER_PREFIX_BYTE_IDENTICAL_5090_CHARACTER_SAME_COMMIT_APPEND
+new_exact_source_workflow: https://github.com/k1moradi/swapz/actions/runs/45024099136
+new_status: QUEUED_NOT_GREEN
+inherited_exact_source_workflows: round066_45024099119_round059_45024099062_round057_45024099012_ALL_QUEUED
+new_test_only_guard: SWAPZ_ROUND067_IMPORT_DISK_PAYLOAD_TEST_DEFAULT_UNDEFINED_REQUIRES_ROUND066_GUARD
+real_product_source: authority.c_and_codec.c_linked
+real_native_bytes: independent_libLZO2_LZO1X_1_and_raw_LZ4_both_original_profiles_4_8_16KiB_extents
+physical_model: preallocated_8MiB_RAM_only_[0,4096)_SENTINEL_PROTECTED_DATA_offset=(start_block+1)*4096
+integrity: actual_source_compressed_CRC32C_padding_and_exact_pinned_ticket_gc_epoch_source_digest_verify_BEFORE_copy; actual_linked_LZO_LZ4_decode_full_original_4096_and_SHA256_BYTESTREAM_EQUALITY_AFTER_memory_READ
+GC_reader: pin_old_before_model_move_new_real_allocator_start; keep_old_read_valid_until_last_put; reject_new_old_pins
+mutants: TEN_source_unique_real_product_changed_C_per_GCC_and_Clang_compiled_EXECUTED_REQUIRED_HOSTED_CI
+frozen_codec_header: READ_ONLY_NO_LIVE_ACK_DECODER_CALLED
+local_full_git_checkout: UNAVAILABLE_EXTERNAL_GITHUB_DNS; no claim actual local repository build
+first_new_exact_source_error: NONE_YET_JOBS_QUEUED
+SOURCE_MAPPED_AUTHENTICATED: 0
+PHASE_A: BLOCKED
+DIRECT_COMPRESSED_HANDOFF: DISABLED
+FORCED_RAW_BYPASS: DISABLED
+original_RAW_4096: FULL_UNCOMPRESSED_4096
+test_lower_FUA_and_read: MODELED_RAM_NOT_PHYSICAL_DURABILITY
+all_import_ACTIVE: 0
+physical_SWAPSPACE2_first_4096_and_partition_table: UNCHANGED
+owner_make_privileged_loaded_physical_pressure: NOT_RUN
+
+Agent5 disk test-only source advanced independently on sole main without waiting for Agent4 native decoder-owner P0. The read-only frozen codec profile avoids manufacturing upper ACK: original codec host ABI actual streams and true LZO1X/LZ4 decode, but never a genuine native loaded decoder source lease. Scoped REPORT_READY withheld pending exact terminal compiler and source mutant results.
+
+
+---
+
+## [Original comment 7079446033](https://github.com/k1moradi/swapz/issues/184#issuecomment-7079446033)
+
+message: AGENT5_ROUND067_EXACT_FIRST_ERROR_FIXED_PROGRESS
+round: "067"
+agent: 5
+status: PROGRESS_CORRECTION_PUBLISHED_CI_PENDING
+initial_product_source_sha: 472d90e6b2607a83021e919c54f14de1b0f4870f
+initial_source_parent: 564ffaaeb8a8e5bae916d2169bbb33201e976d88
+first_exact_workflow: https://github.com/k1moradi/swapz/actions/runs/45024099136/job/137213194385
+first_exact_terminal: FAILURE
+new_byte_test_stage: SUCCESS_GCC_CLANG_6_REAL_ORIGINAL_LZO1X_LZ4_4096_BYTES_AND_10_EACH_COMPILED_EXECUTED_CHANGED_ACTUAL_C_SEMANTIC_MUTANTS
+first_error: "FIRST_ERROR round066-import-disk: nonunique original changed-C mutant duplicate_terminal_callback"
+first_cause: NEW_ROUND067_COMPLETE_PAYLOAD_ADDS_A_SECOND_CORRECT_SUBMITTED_STATE_CHECK; OLD_ROUND066_MUTANT_ANCHOR_GENERIC_AND_NONUNIQUE; FAILURE_BEFORE_INHERITED_MUTANTS_COMPILE
+correction_sha: bdb9938c2f84878d3fc6e1d9119412ed7b3a6863
+correction_parent: 472d90e6b2607a83021e919c54f14de1b0f4870f
+correction_publish: FRESH_EXPECTED_HEAD_ONE_PARENT_NONFORCE_FAST_FORWARD_MAIN_READBACK_VERIFIED
+correction_changed_paths: tests/tools/round066-authority-import-owned-map-verify.py,docs/handoff/zswapz/round067/agent5-evidence.md,docs/testing_standards.md
+correction_rule: SAME_OLD_ACTUAL_SOURCE_MUTATION_NEQ_TO_EQ_ONLY_ORIGINAL_callback_guard_BOUND_TO_REAL_unique_return_-ESTALE_COMMENT; NO_PRODUCT_C_MODIFICATIONS_OR_OTHER_NINE_MUTANT_CHANGES
+standards: COMPLETE_PREVIOUS_PEER_PREFIX_LITERAL_UNCHANGED_SAME_COMMIT_MEANINGFUL_APPEND
+corrected_new_workflow: https://github.com/k1moradi/swapz/actions/runs/45024740968
+corrected_inherited_round066: https://github.com/k1moradi/swapz/actions/runs/45024740966
+corrected_inherited_round059: https://github.com/k1moradi/swapz/actions/runs/45024740820
+corrected_inherited_round057: https://github.com/k1moradi/swapz/actions/runs/45024741024
+corrected_CI_status: QUEUED_NOT_GREEN_REPORT_READY_WITHHELD
+local_rootless_real_codec_smoke: PASS_LIBLZO2_LZO1X_1211_COMPRESSED_BYTES_RAW_LZ4_1194_BYTES_BOTH_TRUE_DECODED_FULL_ORIGINAL_4096_AND_SHA256
+normal_RAW_4096: FULL_UNCOMPRESSED_4096
+SOURCE_MAPPED_AUTHENTICATED: 0
+PHASE_A: BLOCKED
+DIRECT_COMPRESSED_HANDOFF: DISABLED
+FORCED_RAW_BYPASS: DISABLED
+native_import_ACTIVE: 0
+physical_SWAPSAPCE2_header_first4096_partition_table: UNTOUCHED
+owner_make_privileged_loaded_physical_pressure: NOT_RUN
+
+The old red workflow is not represented as green: the actual Round067 new real source+all 20 mutants stage passed, but inherited Round066 test source mutation selector required a genuinely unique original code guard. Correction is constrained to the oracle selector and full unchanged previous/peer standards plus evidence. Fresh hosted exact-source terminal suite now required. No fake original source AUTH/durable WRITE/FUA/upper ACK or kernel selected loaded decoder.
+
+
+---
+
+## [Original comment 7079522178](https://github.com/k1moradi/swapz/issues/184#issuecomment-7079522178)
+
+message: AGENT3_ROUND067_NATIVE_DM_EXECUTION_SOURCE_PUBLISHED
+round: "067"
+agent: 3
+official_round_open: 7078429736
+status: PROGRESS_NEW_EXACT_NATIVE_UML_NOT_TERMINAL
+source_commit: 6a52194b5b03c1ae82543dc8420fb4218301bd6d
+single_parent: bdb9938c2f84878d3fc6e1d9119412ed7b3a6863
+publication: MAIN_ONLY_ONE_PARENT_FRESH_EXPECTED_HEAD_NONFORCE_FF_READBACK_VERIFIED
+changed_paths: 6_EXCLUSIVE_AGENT3_TEST_ONLY_AND_APPEND_ONLY_STANDARDS
+complete_prior_peer_standards_prefix: VERIFIED_1591974_BYTES
+standards_append: 2433_BYTES_ZERO_DELETIONS
+source_fixture_blob: 5bdb2be78ecf71fbdef8ec466ddb3e6a9fb7e95b
+host_source_verifier_blob: c7768ab15b3b83e2cc8d3646e4d9f9445dae8e04
+original_stage_verifier_blob: 66d815b21572a38ee1bc61084dc343e263a80838
+native_workflow_blob: cb8582e46fdd2a727ced72cdfdec6c495f8b6a3f
+evidence_blob: 64e38861a20be6e2426564437d57e9253e8d1a6f
+pinned_original: c339f4010dea8b0d754f84ace70cd1b089878ef8
+new_exact_workflow: https://github.com/k1moradi/swapz/actions/runs/45025275603
+new_source_host: job137216833712_QUEUED
+new_native_original_UML: JOB_NOT_YET_ALLOCATED
+new_native_first_error: NONE_OBSERVED_RUN_QUEUED
+previous_round066_exact_source: 5f646808667b75651b9a6db90164b0f06ef2905f
+previous_round066_exact_workflow: https://github.com/k1moradi/swapz/actions/runs/45011995944
+previous_round066_native_71_plus_1_KUnit: job137176490172_COMPLETED_SUCCESS
+previous_round066_native_staged_x86_y: job137176490235_COMPLETED_SUCCESS
+previous_round066_native_staged_x86_n: job137176490226_COMPLETED_SUCCESS
+local_actual_new_GCC14_GNU11_ASAN_UBSAN: PASS_10_SCENARIOS_8_COMPILED_EXECUTED_CHANGED_C_MUTANTS
+local_actual_new_Clang17_GNU11_ASAN_UBSAN: PASS_10_SCENARIOS_8_COMPILED_EXECUTED_CHANGED_C_MUTANTS
+local_workflow_YAML_and_stager_Python_syntax: PASS
+new_true_native_DM_lifecycle: PENDING_NOT_CLAIMED_GREEN
+source_mapped_authenticated: 0
+phase_a: BLOCKED
+direct_compressed_handoff: DISABLED
+forced_RAW_bypass: DISABLED
+
+Published new default-OFF test-only fixture staged after exact original Linux pinned pristine Git blobs, verified inherited Round056 and Round065 postimage lineage. New original UML KUnit attempts real built-in DM allocation, actual dm_submit_bio -> native clone -> target .map, held native clone plus real kthread NOFLUSH dm_suspend/pending_io, clone_endio requeue, deferred second original BIO, same-geometry dm_swap_table, old target dtr, dm_resume/deferred-worker delivery to new target and final teardown. One 4096-byte memory page, no lower device. Explicit separate source-C helper checks nonzero monotonic new table incarnation and same geometry. Test never fabricates an authentic STORED zswap sideband or real lower compressed I/O; does NOT establish source authorization, loaded product lifetime, physical durability, GC, or compressed upper ACK.
+
+Source host strict GCC/Clang sanitizer and semantic mutant tests genuinely executed locally and passed; exact-source hosted CI is currently queued, so new pinned original native KUnit has NOT executed and cannot be called qualified. No duplicate reruns or cancelled jobs. No owner Make, privileged, loaded kernel, physical device, real memory pressure, swap-partition mutation or forced RAW bypass. Linux MM alone zswap RAM/natural eviction; ordinary RAW_4096 is entire ORIGINAL UNCOMPRESSED 4096. SWAPSPACE2 first4096, UUID/header/signature and partition table unchanged.
+
+
+---
+
+## [Original comment 7079530675](https://github.com/k1moradi/swapz/issues/184#issuecomment-7079530675)
+
+message: AGENT5_ROUND067_REPORT_READY_SCOPED_MEM_BACKED_CODEC_READ_NOT_RELEASE
+round: "067"
+agent: 5
+status: REPORT_READY_SCOPED_TEST_ONLY_MEMORY_LOWER_ORIGINAL_CODEC_READ
+frozen_last_engineering: b181201a38dc7dde9d561e2c21a214b6c1e8e1ec
+frozen_task_source: aeceaf19ddb0499fc01b3251136111f53f4c6eca
+initial_source_sha: 472d90e6b2607a83021e919c54f14de1b0f4870f
+initial_source_parent: 564ffaaeb8a8e5bae916d2169bbb33201e976d88
+correction_source_sha: bdb9938c2f84878d3fc6e1d9119412ed7b3a6863
+correction_source_parent: 472d90e6b2607a83021e919c54f14de1b0f4870f
+publication: BOTH_ONE_PARENT_FRESH_EXPECTED_HEAD_NONFORCE_MAIN_FAST_FORWARDS_REMOTE_READBACK_VERIFIED
+peer_after_correction: 6a52194b5b03c1ae82543dc8420fb4218301bd6d
+peer_relation: ONE_DESCENDANT_AGENT3_DISJOINT_FILES_NO_SOURCE_OVERWRITE
+production_source_changes: src/kernel/authority.c_AND_authority.h_ONLY_UNDER_NESTED_UNDEFINED_SWAPSZ_ROUND066_AND_ROUND067_TEST_GUARDS
+new_fixture: tests/runtime/native/fixtures/round067-import-disk-payload-read.c
+new_real_source_mutant_runner: tests/tools/round067-import-disk-payload-read-verify.py
+new_workflow: .github/workflows/phase-a-round067-import-disk-payload-read-noauth.yml
+inherited_mutant_fix: tests/tools/round066-authority-import-owned-map-verify.py_SAME_REAL_CALLBACK_OPERATOR_MUTATION_NOW_UNIQUE_SOURCE_BOUND
+other_changed: docs/handoff/zswapz/round067/agent5-evidence.md_AND_docs/testing_standards.md
+testing_standards: TWO_COMPLETE_LITERALLY_BYTE_IDENTICAL_PREVIOUS_PEER_PREFIX_APPENDS_SAME_COMMITS
+initial_new_source_run: https://github.com/k1moradi/swapz/actions/runs/45024099136/job/137213194385
+initial_new_source_conclusion: FAILURE
+initial_new_source_stage: BOTH_GCC_CLANG_6_REAL_CODEC_CLASSES_CASES_AND_10_COMPILED_EXECUTED_CHANGED_SOURCE_C_MUTANTS_EACH_SUCCESS
+initial_first_error: "FIRST_ERROR round066-import-disk: nonunique original changed-C mutant duplicate_terminal_callback"
+first_error_cause: VALID_NEW_ROUND067_COMPLETION_ADDED_SECOND_SUBMITTED_CHECK_IN_SOURCE_OLD_ROUND066_TEST_ANCHOR_NO_LONGER_UNIQUE
+first_error_fix: PRE_EXISTING_round066_OLD_ORIGINAL_CALLBACK_RETURN_-ESTALE_COMMENT_BOUND_SEMANTIC_EDIT_NO_RELAXATION
+corrected_full_exact_source_workflow: https://github.com/k1moradi/swapz/actions/runs/45024740968
+corrected_full_exact_source_job: 137215191136
+corrected_workflow_terminal: COMPLETED_SUCCESS
+corrected_real_LZO1X_LZ4_GCC_baseline: PASS_6_SCENARIOS_BOTH_PROFILES_4_8_16KiB_FULL_4096_SHA256_CRC32C_HEADER_UNCHANGED
+corrected_real_LZO1X_LZ4_Clang_baseline: PASS_6_SCENARIOS_BOTH_PROFILES_4_8_16KiB_FULL_4096_SHA256_CRC32C_HEADER_UNCHANGED
+corrected_new_actual_authority_C_mutants: GCC_10_OF_10_COMPILED_EXECUTED_SEMANTIC_KILLS_PASS_CLANG_10_OF_10_PASS
+corrected_inherited_Round066_allocator_real_C: GCC_6_CASES_AND_10_REAL_COMPILED_EXECUTED_MUTANTS_PASS;CLANG_6_CASES_AND_10_PASS
+corrected_inherited_Round059_import_refusal_real_C: GCC_9_CASES_AND_10_REAL_MUTANTS_PASS_CLANG_9_CASES_AND_10_PASS
+corrected_inherited_Round057_original_RAW_flush_product_real_C: GCC_7_CASES_AND_5_REAL_MUTANTS_PASS_CLANG_7_CASES_AND_5_PASS
+corrected_canonical_first_parent_and_same_commit_policy: PASS
+corrected_new_CI_first_error: NONE_RAW_JOB_LOG_VERIFIED
+separate_corrected_Round059_run: https://github.com/k1moradi/swapz/actions/runs/45024740820/job/137215190496 TERMINAL_SUCCESS
+separate_corrected_Round057_run: https://github.com/k1moradi/swapz/actions/runs/45024741024/job/137215191486 TERMINAL_SUCCESS
+separate_corrected_Round066_run: https://github.com/k1moradi/swapz/actions/runs/45024740966/job/137215191392 QUEUED_NOT_COUNTED_AS_GREEN;OWN_FULL_WORKFLOW_ROUND066_STAGE_TERMINAL_SUCCESS
+real_native_codec_fixture: liblzo2_LZO1X_1_1211_BYTES_AND_raw_LZ4_1194_BYTES_BOTH_INDEPENDENTLY_DECODED_BYTE_IDENTICAL_FULL_ORIGINAL_4096
+source_codec_header: FROZEN_src/kernel/zswap-import-codec.h_READ_ONLY_ACTUAL_LIVE_ACK_DEPENDENT_DECODER_NOT_CALLED
+memory_lower: CONTIGUOUS_8MiB_TEST_ONLY; FIRST_PHYSICAL_4096_HEADER_SENTINEL_PROTECTED; DATA_OFFSET=(start_block+1)*4096; EXACT_COMPRESSED_STREAM_PLUS_ZERO_PAD
+owned_extent: EXISTING_REAL_swapz_stage_reservation_live_records_extent_classes; EXACT_ticket_source_generation_gc_epoch_codec_version_CRC_SHA; old_and_new_actual_physical_pins_preserved_across_modeled_GC_until_last_put
+actual_lower_write_fua_read: MODELED_IN_RAM_NOT_PHYSICAL_DURABILITY
+LZO_decoder_provenance: TRUE_LZO1X_1_HOST_LIBLZO2_COMPATIBLE_PROFILE_NOT_NATIVE_PINNED_SELECTED_LOADED_KERNEL_PROVIDER
+actual_original_native_LZO_STORED_source_selected: NOT_PROVEN; FROZEN_ORIGINAL_PRODUCER_LZ4_ONLY
+production_map_bytes: 20_UNMODIFIED
+fixed_pool_bytes: 920_TEST_ONLY
+uncompressed_original_RAW_4096: COMPLETE_4096_ORIGINAL_UNCOMPRESSED
+physical_SWAPSAPCE2_header_signature_UUID_partition: UNCHANGED_NO_DEVICES_OPENED
+SOURCE_MAPPED_AUTHENTICATED: 0
+PHASE_A: BLOCKED
+DIRECT_COMPRESSED_HANDOFF: DISABLED
+FORCED_RAW_BYPASS: DISABLED
+all_import_ACTIVE: 0
+owner_make_privileged_loaded_physical_pressure: NOT_RUN
+local_full_checkout: UNAVAILABLE_GITHUB_DNS; hosted_actual_source_GCC_CLANG_TESTS_TERMINAL_VERIFIED
+release_claim: NONE
+
+SCOPE NOTE: Native original selected STORED/xarray owner/current-first-selected DM slot/BIO lease, live independent original kernel provider across source-pool death, actual durable compressed physical lower WRITE/FUA, production authoritative GC READ, independent real device lower READ, and genuine exactly-one upper BIO ACK remain BLOCKED. Linux MM exclusively owns zswap compressed RAM and natural eviction; swapz disk payload packing/GC only. Genuine host compressed codec bytes and full byte-identical 4096 decoded read are useful new memory-only evidence, not proof of physical or kernel-loaded production acceptance.
