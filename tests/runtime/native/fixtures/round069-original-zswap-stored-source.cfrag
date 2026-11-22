@@ -1,0 +1,376 @@
+/* ROUND069_ORIGINAL_STORED_SOURCE_BEGIN
+ * Test-staged in original pinned mm/zswap.c only. Neither zswap's real swap
+ * cache nor its natural reclaim policy is changed or replaced by this suite.
+ */
+#if defined(SWAPZ_ROUND069_ORIGINAL_STORED_SOURCE_TEST) && \
+    defined(SWAPZ_ROUND028_SLOT_EPOCH_SOURCE) && \
+    defined(SWAPZ_ROUND031_MM_BIO_SOURCE) && IS_ENABLED(CONFIG_KUNIT)
+#include <kunit/test.h>
+#include <linux/lz4.h>
+
+/* ROUND069_COMMON_BEGIN */
+static bool swapz_round069_slot_identity_matches(u64 expected_swp, u64 entry_swp,
+		u64 expected_epoch, u64 entry_epoch,
+		unsigned int compressed_length, unsigned int output_capacity,
+		unsigned int selected_pool_idx, unsigned int entry_pool_idx)
+{
+	return expected_swp != 0 && expected_swp == entry_swp &&
+	       expected_epoch != 0 && expected_epoch == entry_epoch &&
+	       compressed_length != 0 && compressed_length <= 3568U &&
+	       compressed_length <= output_capacity &&
+	       selected_pool_idx != 0 && selected_pool_idx == entry_pool_idx;
+}
+/* ROUND069_COMMON_END */
+
+struct swapz_round069_owned_stored {
+	u8 *bytes; /* Caller-owned, never borrowed zsmalloc storage. */
+	unsigned int capacity;
+	unsigned int length;
+	u64 source_swap_entry;
+	u64 source_epoch;
+	u8 pool_idx;
+	char original_codec[CRYPTO_MAX_ALG_NAME];
+	bool live;
+};
+
+/* Native primitives are real, but the fixture's folio is NOT swapcache-backed.
+ * Real swapcache pinning remains a separate authentication requirement.
+ * The caller must hold a genuine swap slot and folio lifetime in production.
+ */
+static int swapz_round069_capture_stored(struct zswap_entry *entry,
+		swp_entry_t original_slot, struct xarray *tree,
+		struct folio *locked_folio, u64 expected_epoch,
+		struct swapz_round069_owned_stored *owned)
+{
+	struct zswap_pool *pool;
+	struct scatterlist compressed_sg[2];
+	unsigned int compressed_length;
+
+	if (!entry || !tree || !locked_folio || !owned || !owned->bytes)
+		return -EINVAL;
+	if (!folio_test_locked(locked_folio))
+		return -EPERM;
+	if (owned->live)
+		return -EBUSY;
+	compressed_length = READ_ONCE(entry->length);
+	if (!compressed_length || compressed_length > 3568U)
+		return -EMSGSIZE;
+	if (compressed_length > owned->capacity)
+		return -ENOSPC;
+	if (entry != xa_load(tree, swp_offset(original_slot)))
+		return -ESTALE;
+	if (!entry->swapz_round028_store_bound ||
+	    !entry->swapz_round028_stored_entry_identity ||
+	    !swapz_round069_slot_identity_matches(original_slot.val,
+		    entry->swpentry.val, expected_epoch,
+		    entry->swapz_round028_allocation_epoch,
+		    compressed_length, owned->capacity,
+		    entry->pool_idx, entry->pool_idx))
+		return -ESTALE;
+	pool = zswap_entry_pool(entry);
+	if (!pool || !pool->zs_pool || pool->idx != entry->pool_idx ||
+	    !entry->handle)
+		return -ESTALE;
+	if (strcmp(pool->tfm_name, "lz4"))
+		return -EOPNOTSUPP;
+
+	/* Original SG access + independent byte copy, while the caller holds
+	 * the real source lock. No retained source pool/SG/handle pointer.
+	 */
+	zs_obj_read_sg_begin(pool->zs_pool, entry->handle,
+			     compressed_sg, compressed_length);
+	memcpy_from_sglist(owned->bytes, compressed_sg, 0, compressed_length);
+	zs_obj_read_sg_end(pool->zs_pool, entry->handle);
+
+	if (entry != xa_load(tree, swp_offset(original_slot)) ||
+	    pool != zswap_entry_pool(entry) ||
+	    entry->length != compressed_length ||
+	    !entry->swapz_round028_store_bound ||
+	    entry->swapz_round028_allocation_epoch != expected_epoch) {
+		memzero_explicit(owned->bytes, compressed_length);
+		return -ESTALE;
+	}
+	owned->length = compressed_length;
+	owned->source_swap_entry = original_slot.val;
+	owned->source_epoch = expected_epoch;
+	owned->pool_idx = entry->pool_idx;
+	strscpy(owned->original_codec, pool->tfm_name,
+		sizeof(owned->original_codec));
+	owned->live = true;
+	return 0;
+}
+
+static bool swapz_round069_release_owned(struct swapz_round069_owned_stored *owned)
+{
+	if (!owned || !owned->live)
+		return false;
+	memzero_explicit(owned->bytes, owned->length);
+	owned->live = false;
+	owned->length = 0;
+	owned->source_swap_entry = 0;
+	owned->source_epoch = 0;
+	owned->pool_idx = 0;
+	memzero_explicit(owned->original_codec, sizeof(owned->original_codec));
+	return true;
+}
+
+#define SWAPZ_ROUND069_TEST_POOL 255U
+#define SWAPZ_ROUND069_TEST_OFFSET 32U
+#define SWAPZ_ROUND069_TEST_EPOCH 17ULL
+
+struct swapz_round069_native_state {
+	struct zs_pool *allocator;
+	struct zswap_pool *pool;
+	struct zswap_entry *first;
+	struct folio *folio;
+	struct xarray tree;
+	unsigned long handle;
+	char *original_page;
+	char *compressed;
+	char *decoded;
+	u8 *owned_bytes;
+	unsigned int compressed_length;
+	bool registered;
+	bool locked;
+};
+
+static void swapz_round069_native_exit(struct kunit *test)
+{
+	struct swapz_round069_native_state *state = test->priv;
+
+	if (!state)
+		return;
+	if (state->folio) {
+		if (state->locked)
+			folio_unlock(state->folio);
+		folio_put(state->folio);
+	}
+	xa_destroy(&state->tree);
+	if (state->registered)
+		xa_erase(&zswap_pools, SWAPZ_ROUND069_TEST_POOL);
+	if (state->allocator) {
+		if (state->handle)
+			zs_free(state->allocator, state->handle);
+		zs_destroy_pool(state->allocator);
+	}
+}
+
+static int swapz_round069_native_init(struct kunit *test)
+{
+	struct swapz_round069_native_state *state;
+	void *workspace;
+	int compressed_length, error;
+
+	state = kunit_kzalloc(test, sizeof(*state), GFP_KERNEL);
+	if (!state)
+		return -ENOMEM;
+	test->priv = state;
+	xa_init(&state->tree);
+	state->pool = kunit_kzalloc(test, sizeof(*state->pool), GFP_KERNEL);
+	state->first = kunit_kzalloc(test, sizeof(*state->first), GFP_KERNEL);
+	state->original_page = kunit_kmalloc(test, PAGE_SIZE, GFP_KERNEL);
+	state->compressed = kunit_kmalloc(test, PAGE_SIZE, GFP_KERNEL);
+	state->decoded = kunit_kmalloc(test, PAGE_SIZE, GFP_KERNEL);
+	state->owned_bytes = kunit_kmalloc(test, PAGE_SIZE, GFP_KERNEL);
+	workspace = kunit_kmalloc(test, LZ4_MEM_COMPRESS, GFP_KERNEL);
+	if (!state->pool || !state->first || !state->original_page ||
+	    !state->compressed || !state->decoded || !state->owned_bytes ||
+	    !workspace) {
+		error = -ENOMEM;
+		goto failed;
+	}
+	state->folio = folio_alloc(GFP_KERNEL, 0);
+	if (!state->folio) {
+		error = -ENOMEM;
+		goto failed;
+	}
+	folio_lock(state->folio);
+	state->locked = true;
+	memset(state->original_page, 0x4d, PAGE_SIZE);
+	compressed_length = LZ4_compress_default(state->original_page,
+		state->compressed, PAGE_SIZE, PAGE_SIZE, workspace);
+	if (compressed_length <= 0 || compressed_length > 3568) {
+		error = -EMSGSIZE;
+		goto failed;
+	}
+	state->compressed_length = (unsigned int)compressed_length;
+	state->allocator = zs_create_pool("swapz-round069-native");
+	if (!state->allocator) {
+		error = -ENOMEM;
+		goto failed;
+	}
+	state->handle = zs_malloc(state->allocator, state->compressed_length,
+		GFP_KERNEL, NUMA_NO_NODE);
+	if (IS_ERR_VALUE(state->handle)) {
+		error = PTR_ERR((void *)state->handle);
+		state->handle = 0;
+		goto failed;
+	}
+	if (!state->handle) {
+		error = -ENOMEM;
+		goto failed;
+	}
+	zs_obj_write(state->allocator, state->handle,
+		state->compressed, state->compressed_length);
+	state->pool->idx = SWAPZ_ROUND069_TEST_POOL;
+	state->pool->zs_pool = state->allocator;
+	strscpy(state->pool->tfm_name, "lz4", sizeof(state->pool->tfm_name));
+	error = xa_insert(&zswap_pools, SWAPZ_ROUND069_TEST_POOL,
+			  state->pool, GFP_KERNEL);
+	if (error)
+		goto failed; /* Never replace an original live pool. */
+	state->registered = true;
+	state->first->swpentry = swp_entry(7, SWAPZ_ROUND069_TEST_OFFSET);
+	state->first->pool_idx = SWAPZ_ROUND069_TEST_POOL;
+	state->first->handle = state->handle;
+	state->first->length = state->compressed_length;
+	state->first->swapz_round028_store_bound = true;
+	state->first->swapz_round028_allocation_epoch =
+		SWAPZ_ROUND069_TEST_EPOCH;
+	state->first->swapz_round028_stored_entry_identity = 71;
+	error = xa_insert(&state->tree, SWAPZ_ROUND069_TEST_OFFSET,
+			  state->first, GFP_KERNEL);
+	if (!error)
+		return 0;
+failed:
+	swapz_round069_native_exit(test);
+	test->priv = NULL;
+	return error;
+}
+
+static struct swapz_round069_owned_stored
+swapz_round069_make_owner(struct swapz_round069_native_state *state)
+{
+	struct swapz_round069_owned_stored owned = {};
+
+	owned.bytes = state->owned_bytes;
+	owned.capacity = PAGE_SIZE;
+	return owned;
+}
+
+static void swapz_round069_native_preerase_owned_copy_kunit(struct kunit *test)
+{
+	struct swapz_round069_native_state *state = test->priv;
+	struct swapz_round069_owned_stored owned = swapz_round069_make_owner(state);
+	int error;
+
+	error = swapz_round069_capture_stored(state->first,
+		state->first->swpentry, &state->tree, state->folio,
+		SWAPZ_ROUND069_TEST_EPOCH, &owned);
+	KUNIT_ASSERT_EQ(test, error, 0);
+	KUNIT_EXPECT_TRUE(test, owned.live);
+	KUNIT_EXPECT_EQ(test, owned.source_swap_entry, state->first->swpentry.val);
+	KUNIT_EXPECT_EQ(test, owned.source_epoch, SWAPZ_ROUND069_TEST_EPOCH);
+	KUNIT_EXPECT_EQ(test, owned.length, state->compressed_length);
+	KUNIT_EXPECT_STREQ(test, owned.original_codec, "lz4");
+	KUNIT_EXPECT_EQ(test, memcmp(owned.bytes, state->compressed,
+				    state->compressed_length), 0);
+
+	/* Real native XA erase and zsmalloc free precede the independent READ. */
+	KUNIT_EXPECT_PTR_EQ(test, xa_erase(&state->tree,
+		SWAPZ_ROUND069_TEST_OFFSET), state->first);
+	zs_free(state->allocator, state->handle);
+	state->handle = 0;
+	error = LZ4_decompress_safe((char *)owned.bytes, state->decoded,
+				    owned.length, PAGE_SIZE);
+	KUNIT_EXPECT_EQ(test, error, PAGE_SIZE);
+	KUNIT_EXPECT_EQ(test, memcmp(state->decoded,
+				    state->original_page, PAGE_SIZE), 0);
+	KUNIT_EXPECT_TRUE(test, swapz_round069_release_owned(&owned));
+	KUNIT_EXPECT_FALSE(test, swapz_round069_release_owned(&owned));
+}
+
+static void swapz_round069_native_reissue_invalidate_kunit(struct kunit *test)
+{
+	struct swapz_round069_native_state *state = test->priv;
+	struct swapz_round069_owned_stored owned = swapz_round069_make_owner(state);
+	struct zswap_entry *replacement;
+	void *previous;
+	int error;
+
+	replacement = kunit_kmalloc(test, sizeof(*replacement), GFP_KERNEL);
+	KUNIT_ASSERT_NOT_NULL(test, replacement);
+	memcpy(replacement, state->first, sizeof(*replacement));
+	replacement->swapz_round028_allocation_epoch = 18;
+	previous = xa_store(&state->tree, SWAPZ_ROUND069_TEST_OFFSET,
+			    replacement, GFP_KERNEL);
+	KUNIT_ASSERT_FALSE(test, xa_is_err(previous));
+	KUNIT_EXPECT_PTR_EQ(test, previous, state->first);
+	error = swapz_round069_capture_stored(state->first,
+		state->first->swpentry, &state->tree, state->folio, 17, &owned);
+	KUNIT_EXPECT_EQ(test, error, -ESTALE);
+	error = swapz_round069_capture_stored(replacement,
+		replacement->swpentry, &state->tree, state->folio, 17, &owned);
+	KUNIT_EXPECT_EQ(test, error, -ESTALE);
+	error = swapz_round069_capture_stored(replacement,
+		replacement->swpentry, &state->tree, state->folio, 18, &owned);
+	KUNIT_ASSERT_EQ(test, error, 0);
+	KUNIT_EXPECT_PTR_EQ(test, xa_erase(&state->tree,
+		SWAPZ_ROUND069_TEST_OFFSET), replacement);
+	KUNIT_EXPECT_EQ(test, swapz_round069_capture_stored(replacement,
+		replacement->swpentry, &state->tree, state->folio, 18, &owned),
+		-EBUSY);
+	KUNIT_EXPECT_TRUE(test, swapz_round069_release_owned(&owned));
+	KUNIT_EXPECT_EQ(test, swapz_round069_capture_stored(replacement,
+		replacement->swpentry, &state->tree, state->folio, 18, &owned),
+		-ESTALE);
+}
+
+static void swapz_round069_native_invalid_source_kunit(struct kunit *test)
+{
+	struct swapz_round069_native_state *state = test->priv;
+	struct swapz_round069_owned_stored owned = swapz_round069_make_owner(state);
+	swp_entry_t wrong_type = swp_entry(8, SWAPZ_ROUND069_TEST_OFFSET);
+	unsigned int length = state->first->length;
+
+	KUNIT_EXPECT_EQ(test, swapz_round069_capture_stored(state->first,
+		wrong_type, &state->tree, state->folio, 17, &owned), -ESTALE);
+	state->first->length = 0;
+	KUNIT_EXPECT_EQ(test, swapz_round069_capture_stored(state->first,
+		state->first->swpentry, &state->tree, state->folio, 17, &owned),
+		-EMSGSIZE);
+	state->first->length = 3569U;
+	KUNIT_EXPECT_EQ(test, swapz_round069_capture_stored(state->first,
+		state->first->swpentry, &state->tree, state->folio, 17, &owned),
+		-EMSGSIZE);
+	state->first->length = length;
+	owned.capacity = length - 1;
+	KUNIT_EXPECT_EQ(test, swapz_round069_capture_stored(state->first,
+		state->first->swpentry, &state->tree, state->folio, 17, &owned),
+		-ENOSPC);
+	owned.capacity = PAGE_SIZE;
+	state->first->swapz_round028_store_bound = false;
+	KUNIT_EXPECT_EQ(test, swapz_round069_capture_stored(state->first,
+		state->first->swpentry, &state->tree, state->folio, 17, &owned),
+		-ESTALE);
+	state->first->swapz_round028_store_bound = true;
+	strscpy(state->pool->tfm_name, "lzo", sizeof(state->pool->tfm_name));
+	KUNIT_EXPECT_EQ(test, swapz_round069_capture_stored(state->first,
+		state->first->swpentry, &state->tree, state->folio, 17, &owned),
+		-EOPNOTSUPP);
+	strscpy(state->pool->tfm_name, "lz4", sizeof(state->pool->tfm_name));
+	folio_unlock(state->folio);
+	state->locked = false;
+	KUNIT_EXPECT_EQ(test, swapz_round069_capture_stored(state->first,
+		state->first->swpentry, &state->tree, state->folio, 17, &owned),
+		-EPERM);
+	folio_lock(state->folio);
+	state->locked = true;
+	KUNIT_EXPECT_FALSE(test, owned.live);
+}
+
+static struct kunit_case swapz_round069_native_cases[] = {
+	KUNIT_CASE(swapz_round069_native_preerase_owned_copy_kunit),
+	KUNIT_CASE(swapz_round069_native_reissue_invalidate_kunit),
+	KUNIT_CASE(swapz_round069_native_invalid_source_kunit),
+	{}
+};
+static struct kunit_suite swapz_round069_native_suite = {
+	.name = "swapz_round069_native_original_stored",
+	.init = swapz_round069_native_init,
+	.exit = swapz_round069_native_exit,
+	.test_cases = swapz_round069_native_cases,
+};
+kunit_test_suite(swapz_round069_native_suite);
+#endif /* original source-only KUnit, no physical source AUTH */
+/* ROUND069_ORIGINAL_STORED_SOURCE_END */

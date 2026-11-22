@@ -18835,3 +18835,59 @@ privileged/loaded kernel, real swap partition, hardware/media,
 actual-pressure, mkswap/swapoff/repartition. Pending native build
 is PROGRESS; only exact-source terminal executed qualification is
 scoped REPORT_READY.
+
+
+## Round069 — original pinned zswap STORED slot + copied bytes source-only KUnit (Agent 3)
+
+At frozen original torvalds/linux@c339f4010dea8b0d754f84ace70cd1b089878ef8,
+mm/zswap.c original Git blob ae19e301fced7e357a4c7587dfdd6abb890b9163,
+the original natural-MM writeback obtains a locked swap-cache folio, compares
+the exact STORED entry with xa_load(tree, swp_offset(swpentry)), then performs
+the ordinary decompression, xa_erase, zswap_entry_free and full uncompressed
+lower write. Original zswap_load/invalidate may independently erase entries;
+a later borrowed zsmalloc handle is not valid source evidence.
+
+A NEW default-undefined SWAPZ_ROUND069_ORIGINAL_STORED_SOURCE_TEST is only
+composed into the exact original pinned mm/zswap.c after the inherited source
+postimage/manifest checks. Three native original-kernel KUnit cases (when
+actually executed successfully in CI) use the real original zswap_entry
+metadata + Round028 store epoch, original XArray slots and pool-index XArray,
+real original zsmalloc allocation/SG copy/free, in-kernel LZ4-compressed
+bytes and independent 4096-byte full decoded readback. Reject wrong swap type,
+reissued same slot with a different pointer or epoch, late invalidation,
+wrong native codec, zero/oversize compressed length, too-short destination,
+missing bound-store metadata, missing folio lock and double owned release.
+Test pool registration must not overwrite an existing live original pool.
+
+**Evidence boundary:** These test cases instantiate a test-only original
+zswap_entry and allocated locked folio, NOT a genuine swapcache-backed
+original STORE/WRITEBACK under an active swap slot. They cannot authenticate
+native source ownership, a source-to-current-DM lease or a physical lower
+write. The already existing inherited Round031 protected native LZ4
+pre-erase copy is not a selected LZO1X source proof. Do NOT describe a native
+KUnit as passed before an actual original pinned JSON/KTAP job is terminal.
+
+Changed original-C slot identity predicate: strict GCC AND Clang GNU11
+-Wall -Wextra -Wconversion -Wshadow -Werror, ASan+UBSan, 16 cases plus TEN
+separately COMPILED and EXECUTED semantic changed-source C mutations each,
+with compiler failures, sanitizer reports, crashes and timeouts never counted
+as semantic mutation kills. Five original pinned manifest/pristine-blob
+rejection controls must reject without any partial original source write.
+Separate authentic original UML test must build, execute all THREE named
+KUnit cases and independently verify JSON+KTAP zero skip/failure/crash.
+Host predicate C is not native MM lifetime proof.
+
+The earlier exact pinned original DM Round067 run45025275603 is independently
+2/2 terminal SUCCESS, but that only executes test-only DM dispatch/suspend/
+requeue/replacement/dtr; no current real zswap source authentication.
+Default product and natural MM pressure/eviction path unchanged. Linux MM
+solely governs compressed zswap RAM and natural eviction; swapz governs disk
+compression/packing/GC only. Ordinary RAW_4096 is the ENTIRE original
+UNCOMPRESSED 4096-byte page. A future original native compressed LZO1X/
+lzo-scomp or LZ4 stream needs a separate volatile original-codec-tagged
+representation; never overload RAW_4096 or modify the fixed 20-byte map,
+persist tags or touch SWAPSPACE2 first 4096-byte header and parent partition.
+Keep SOURCE_MAPPED_AUTHENTICATED=0, PHASE_A=BLOCKED,
+DIRECT_COMPRESSED_HANDOFF=DISABLED, FORCED_RAW_BYPASS=DISABLED,
+and imported *_ACTIVE=0. No privileged, loaded, physical-device,
+actual-pressure, mkswap/swapoff/repartition or owner Make tests.
