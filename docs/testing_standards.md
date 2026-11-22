@@ -17901,3 +17901,74 @@ Rootless host tests must compile and execute the **same original injected helper
 ### Round063 workflow-parse first-error negative control
 
 A new source/native/KUnit workflow is **not** terminal source evidence if GitHub rejects its YAML before allocating any jobs. The exact Round063 initial source `dd382e27638955b4a25026dcb27e125677f02273` failed [run 44970060484](https://github.com/k1moradi/swapz/actions/runs/44970060484) with zero jobs because literal shell `grep -Eq ...$` strings were passed through a JavaScript `String.replace` replacement template: `$'` expanded the remaining source suffix into invalid artifact steps. Retain the original first error and report the exact workflow-run source; prohibit claiming any original Linux, UML KUnit, matched GPL, or decoder symbol result from this rejected run. Before committing a generated workflow, verify proper YAML indentation and uniqueness of jobs/artifact steps, preserve shell-regex dollar tokens using a replacement callback or direct slicing, and require the independently registered real jobs at the **corrected** exact main SHA to become terminal before reporting scoped success. Source and release gates stay all NO_AUTH/BLOCKED; this test-harness-only fix does not authorize compressed I/O.
+
+## Round064 Agent4 — diagnostic-first native decoder missing consumer and independent modpost
+
+At exact prior engineering `3e79823eb79fed85afb4e9a3ee67cc59835e68ed`,
+native original decoder run `44970260193` source-host job
+`137048279421` succeeded. Both actual pristine pinned original x86
+ZSWAP=y (137055334554) and n (137055334642) passed defconfig,
+olddefconfig, full vmlinux, all modules and positive external GPL
+modpost, then failed strict actual final module ELF verification:
+`compiled module did not retain original decoder link LZ4_decompress_safe retained=lzo1x_decompress_safe,sha256 missing=LZ4_decompress_safe`.
+The retained source wrapper and pointer root checks had passed. No
+old downloadable diagnostic artifacts exist. This is not evidence
+that all consumer code was discarded, that the original LZ4 provider
+is missing, or that a generic extra root will fix the real consumer.
+
+Collect evidence on the **unchanged** actual product decoder header and
+module fixture first. The pristine native job must use the same original
+`torvalds/linux@c339f4010dea8b0d754f84ace70cd1b089878ef8`,
+11 pinned original source blobs, full x86 y/n kernel and modules,
+source-matched nonempty original `Module.symvers`, and actual external
+GPL Kbuild. Record the actual saved Kbuild consumer .o.cmd, generate
+the actual .i via Kbuild with matching W=1 KCFLAGS=-Werror, verify exact
+staged source bytes, count real calls and codec tag comparisons in the
+preprocessed decoder body (not declarations), inspect nm -a/-u,
+readelf -Ws/-rW and objdump -dr separately on the real consumer .o,
+product codec.o, combined module .o and final .ko. Preserve richer
+evidence only in an owner-private mode0700 runner directory with
+mode0600 files. Emit bounded known symbol names, actual undefined and
+defined flags, text relocation counts, selected effective config and
+allowlisted original export providers/CRCs, source/command hashes and
+strict/native compiler command flags. Never publish arbitrary compiler
+commands, raw paths or stderr. Do not guess whether the omission is at
+preprocessing, compiler, intermediate link or final link; record which
+stage actually loses the genuine consumer evidence before correction.
+
+Keep the existing strict module GPL/config/provider/vermagic/dependency
+and selected symbol oracle unchanged; additionally require the actual
+consumer object text relocations to all original decoder/SHA symbols
+and actual CRC, retained final selected external text relocations, and
+real linked CRC definition. Build a separate actual source mutant in
+an independent module scratch tree that removes ONLY the existing LZ4
+call from the staged decoder header; compile genuine external modules
+and require absence of the LZ4 consumer symbol/relocation with other
+original selected references and product CRC preserved. A failed
+baseline cannot establish full mutant discrimination. The separate
+strict GCC/Clang structural self-test compiles four real object files
+(two baseline and two selective omissions) to validate the inspector;
+this is not selected original codec semantics or actual modpost proof.
+Retain existing real source-host sanitizer baselines and ten compiled
+and executed codec semantic mutants.
+
+Run the genuine deliberate absent-export modpost in a separate workspace
+even if positive ELF verification fails. Preserve actual positive,
+diagnostic, absent-export and omission-negative status independently;
+all four must be zero to pass either native member of the matrix.
+The negative must fail specifically at the actual original missing
+export modpost, not merely fail to compile; the existing verifier remains
+mandatory. Private phase logs must not be overwritten by later phases.
+Rootless control regression executes the exact workflow shell aggregation
+with stubbed status outcomes to confirm both negatives run on positive
+failure and either failure fails the aggregate; do NOT count this as
+native evidence. Validate exact workflow YAML and each bash run body.
+
+No new source decoder correction until the actual cause is demonstrated.
+No loaded decoder ref across pool destruction is proven by compile/link.
+SOURCE_MAPPED_AUTHENTICATED=0 PHASE_A=BLOCKED direct compressed handoff
+DISABLED forced RAW bypass DISABLED. Linux MM alone handles compressed
+RAM and natural eviction, swapz disk compression/packing/GC only.
+Ordinary RAW_4096 is the full ORIGINAL UNCOMPRESSED page. SWAPSPACE2
+header/signature/UUID and parent partition table remain protected;
+no owner Make, privileged, loaded-kernel, physical or actual-pressure tests.

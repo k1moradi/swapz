@@ -5,6 +5,7 @@ on:
     paths:
       - 'src/kernel/zswap-import-codec.h'
       - 'tests/tools/round060-original-decoder-kbuild-verify.py'
+      - 'tests/tools/round064-original-decoder-elf-cause-verify.py'
       - 'tests/tools/round061-original-kbuild-host-deps-verify.py'
       - 'tests/runtime/native/fixtures/round060-original-decoder-module.c'
       - '.github/workflows/phase-a-round060-original-decoder-gpl-noauth.yml'
@@ -50,6 +51,7 @@ jobs:
           git -C swapz diff --check HEAD^ HEAD
           python3 -B swapz/tests/tools/round060-original-decoder-kbuild-verify.py original --linux-root linux
           python3 -B swapz/tests/tools/round060-original-decoder-kbuild-verify.py self-test
+          python3 -B swapz/tests/tools/round064-original-decoder-elf-cause-verify.py self-test
           python3 -B swapz/tests/tools/round061-original-kbuild-host-deps-verify.py self-test
           (cd swapz && python3 -B tests/tools/round059-codec-host-compat-verify.py)
           echo 'ROUND060_ORIGINAL_PINNED_GCC_CLANG_HOST_ASAN_UBSAN_10_SEMANTIC_MUTANTS_PASS_AUTH0'
@@ -97,7 +99,7 @@ jobs:
         shell: bash
         run: |
           set -Eeuo pipefail
-          for executable in gcc clang make bc bison flex ld nm readelf python3; do
+          for executable in gcc clang make bc bison flex ld nm readelf objdump python3; do
             command -v "$executable" >/dev/null || {
               echo "::error::ROUND060_DECODER_FIRST_ERROR missing rootless prerequisite $executable" >&2
               exit 3
@@ -116,16 +118,19 @@ jobs:
           original="$RUNNER_TEMP/round060-linux-$ZSWAP_MATRIX"
           probe="$RUNNER_TEMP/round060-probe-$ZSWAP_MATRIX"
           negative="$RUNNER_TEMP/round060-negative-$ZSWAP_MATRIX"
-          log="$RUNNER_TEMP/round060-first-$ZSWAP_MATRIX.log"
+          omission="$RUNNER_TEMP/round064-omission-$ZSWAP_MATRIX"
+          log="$RUNNER_TEMP/round064-missing-export-$ZSWAP_MATRIX.log"
+          verifier=swapz/tests/tools/round060-original-decoder-kbuild-verify.py
+          inspector=swapz/tests/tools/round064-original-decoder-elf-cause-verify.py
           mkdir -p "$original"
           checked() {
-            phase="$1"; shift
-            if "$@" >"$log" 2>&1; then
+            local phase="$1"; shift
+            local phase_log="$RUNNER_TEMP/round064-$ZSWAP_MATRIX-$phase.log"
+            if "$@" >"$phase_log" 2>&1; then
               printf 'ROUND060_ORIGINAL_KBUILD_PHASE_PASS zswap=%s phase=%s\n' "$ZSWAP_MATRIX" "$phase"
             else
-              code=$?
-              python3 -B swapz/tests/tools/round060-original-decoder-kbuild-verify.py \
-                first-error --log "$log" --phase "$phase" --exit-code "$code"
+              local code=$?
+              python3 -B "$verifier" first-error --log "$phase_log" --phase "$phase" --exit-code "$code"
               return "$code"
             fi
           }
@@ -146,22 +151,66 @@ jobs:
           checked original-all-modules make -s -C linux "O=$original" CC=gcc -j2 modules
           test -s "$original/vmlinux"
           test -s "$original/Module.symvers"
-          python3 -B swapz/tests/tools/round060-original-decoder-kbuild-verify.py prepare --destination "$probe"
-          checked actual-original-GPL-modpost make -s -C linux \
-            "O=$original" "M=$probe" CC=gcc -j2 W=1 KCFLAGS=-Werror modules
-          release="$(make -s -C linux "O=$original" kernelrelease)"
-          python3 -B swapz/tests/tools/round060-original-decoder-kbuild-verify.py verify-module \
-            --original-config "$original/.config" --symvers "$original/Module.symvers" \
-            --module "$probe/round060-decoder-noauth.ko" \
-            --zswap "$ZSWAP_MATRIX" --kernel-release "$release"
-          python3 -B swapz/tests/tools/round060-original-decoder-kbuild-verify.py prepare --destination "$negative"
-          if make -s -C linux "O=$original" "M=$negative" CC=gcc -j2 W=1 \
-              KCFLAGS='-Werror -DSWAPZ_ROUND060_MISSING_DECODER_EXPORT_NEGATIVE_TEST=1' \
-              modules >"$log" 2>&1; then
-            echo '::error::ROUND060_DECODER_FIRST_ERROR genuine modpost accepted nonexistent decoder' >&2
-            exit 1
+          # Positive, diagnostics, actual absent-export negative and omission
+          # negative have separate statuses; a failed positive must not skip
+          # the genuine negative modpost or hide the earlier first failure.
+          positive_status=0
+          diagnostics_status=0
+          negative_status=0
+          omission_status=0
+          if python3 -B "$verifier" prepare --destination "$probe" &&
+             checked actual-original-GPL-modpost make -s -C linux \
+               "O=$original" "M=$probe" CC=gcc -j2 W=1 KCFLAGS=-Werror modules; then
+            checked actual-original-consumer-preprocess make -s -C linux \
+              "O=$original" "M=$probe" CC=gcc -j2 W=1 KCFLAGS=-Werror \
+              round060-original-decoder-module.i || diagnostics_status=$?
+            python3 -B "$inspector" native --probe "$probe" --original "$original" \
+              --evidence "$RUNNER_TEMP/round064-elf-$ZSWAP_MATRIX" \
+              --zswap "$ZSWAP_MATRIX" || diagnostics_status=$?
+            if release="$(make -s -C linux "O=$original" kernelrelease 2>"$RUNNER_TEMP/round064-release-$ZSWAP_MATRIX.log")"; then
+              python3 -B "$verifier" verify-module \
+                --original-config "$original/.config" --symvers "$original/Module.symvers" \
+                --module "$probe/round060-decoder-noauth.ko" \
+                --zswap "$ZSWAP_MATRIX" --kernel-release "$release" || positive_status=$?
+            else
+              positive_status=$?
+              echo '::error::ROUND064_DECODER_FIRST_ERROR original kernelrelease failed' >&2
+            fi
+          else
+            positive_status=$?
+            diagnostics_status=1
           fi
-          python3 -B swapz/tests/tools/round060-original-decoder-kbuild-verify.py \
-            verify-negative --log "$log"
+
+          if python3 -B "$verifier" prepare --destination "$negative"; then
+            if make -s -C linux "O=$original" "M=$negative" CC=gcc -j2 W=1 \
+                KCFLAGS='-Werror -DSWAPZ_ROUND060_MISSING_DECODER_EXPORT_NEGATIVE_TEST=1' \
+                modules >"$log" 2>&1; then
+              echo '::error::ROUND060_DECODER_FIRST_ERROR genuine modpost accepted nonexistent decoder' >&2
+              negative_status=1
+            else
+              python3 -B "$verifier" verify-negative --log "$log" || negative_status=$?
+            fi
+          else
+            negative_status=$?
+          fi
+
+          # Actual source mutant in its own external-module workspace.
+          # Never allow it to qualify the original positive consumer.
+          if python3 -B "$verifier" prepare --destination "$omission" &&
+             python3 -B "$inspector" stage-omission --probe "$omission" &&
+             checked actual-omission-module make -s -C linux \
+               "O=$original" "M=$omission" CC=gcc -j2 W=1 KCFLAGS=-Werror modules; then
+            python3 -B "$inspector" verify-omission --probe "$omission" \
+              --evidence "$RUNNER_TEMP/round064-omission-elf-$ZSWAP_MATRIX" || omission_status=$?
+          else
+            omission_status=$?
+          fi
+
           test -z "$(git -C linux status --porcelain --untracked-files=all)"
+          printf 'ROUND064_NATIVE_RESULTS zswap=%s positive=%s diagnostics=%s missing_export_negative=%s omitted_branch_negative=%s\n' \
+            "$ZSWAP_MATRIX" "$positive_status" "$diagnostics_status" "$negative_status" "$omission_status"
+          test "$positive_status" -eq 0
+          test "$diagnostics_status" -eq 0
+          test "$negative_status" -eq 0
+          test "$omission_status" -eq 0
           echo "ROUND060_GENUINE_PINNED_X86_ZSWAP_$ZSWAP_MATRIX-GPL_DECODERS_PASS SOURCE_AUTH=0 NO_LOADED"
