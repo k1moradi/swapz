@@ -24,6 +24,8 @@
 #ifdef SWAPZ_ZSWAP_IMPORT_DECODER_HOST_TEST
 #include <pthread.h>
 #else
+/* The pinned original wait.h wake_up_all() expands TASK_NORMAL from sched.h. */
+#include <linux/sched.h>
 #include <linux/spinlock.h>
 #include <linux/wait.h>
 #endif

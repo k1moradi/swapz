@@ -18354,3 +18354,38 @@ PHASE_A=BLOCKED, direct compressed handoff DISABLED, forced RAW bypass
 DISABLED, original whole uncompressed RAW_4096, fixed 20-byte map, immutable
 physical SWAPSPACE2 header/partition table, no owner Make or loaded/device/
 pressure run.
+
+## Round067 Agent4 actual original decoder-owner native include and first-diagnostic regression
+
+The pinned original Linux c339f4010dea8b0d754f84ace70cd1b089878ef8
+`include/linux/wait.h` has blob
+`c2af98b0074dcbdb2175850d05e377bf3b935663` and defines
+`wake_up_all(x)` using `TASK_NORMAL`. Original `include/linux/sched.h`
+blob `1c93da75226e32400d248bf77066200a181a3f20` defines
+`TASK_NORMAL`. The dormant decoder owner header must include the original
+`<linux/sched.h>` before `<linux/wait.h>`. It must not rely on accidental
+transitive includes from another translation unit or disable real wakeups.
+
+The earlier original x86 y/n GPL job's first actual compiler error was
+`TASK_NORMAL` undeclared at `wait.h:223:54`. Original native build reporter
+previously rejected the legitimate uppercase phase
+`actual-original-GPL-modpost` before printing the compiler diagnostic.
+Use a fixed allowlist of actual build phases, preserving bounded
+source-relative, redacted first compiler diagnostics and no arbitrary logs.
+A deliberately absent export must fail at original Linux modpost and
+not qualify via compiler errors, while the actual LZ4 omission negative
+must compile and be rejected by the existing exact relocation verifier.
+
+Rootless source-host regression exercises valid uppercase and invalid phase
+names, first-error sanitization, fake compile-failure negative refusal and
+a genuine modpost-only synthetic diagnostic. Full native original pristine
+x86 ZSWAP=y/n compiles remain required to verify actual product decoder-owner
+source plus real positive provider linkage and both true negative gates;
+source-host GCC and Clang strict ASan/UBSan actual C mutants and the separate
+close/wake deterministic semantic race tests remain mandatory. No loaded
+module, pool teardown runtime, real physical lower durability or upper ACK
+is implied. No owner `make`, privileged test, physical device/pressure,
+SWAPSPACE2 first4096/header/partition-table mutation, new on-disk metadata,
+or authorization. `SOURCE_MAPPED_AUTHENTICATED=0`, `PHASE_A=BLOCKED`,
+direct compressed handoff and forced RAW bypass disabled; ordinary
+`RAW_4096` is all 4096 original uncompressed bytes.

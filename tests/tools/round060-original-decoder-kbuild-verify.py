@@ -8,6 +8,8 @@ pristine torvalds/linux@c339f4010dea8b0d754f84ace70cd1b089878ef8.
 from __future__ import annotations
 
 import argparse
+import contextlib
+import io
 from pathlib import Path
 import re
 import shutil
@@ -18,6 +20,8 @@ ROOT = Path(__file__).resolve().parents[2]
 PIN = "c339f4010dea8b0d754f84ace70cd1b089878ef8"
 ORIGINAL_BLOBS = {
     "include/linux/lzo.h": "4d30e3624acd237290dbfeaefdb9c710e4f85f56",
+    "include/linux/wait.h": "c2af98b0074dcbdb2175850d05e377bf3b935663",
+    "include/linux/sched.h": "1c93da75226e32400d248bf77066200a181a3f20",
     "include/linux/lz4.h": "ad6042a718b5428792b795db7a8d4ad44c24a985",
     "include/crypto/sha2.h": "22fbc37ae840796ecbafd5eadf23373e51741f9e",
     "lib/lzo/lzo1x_decompress_safe.c": "318abb82c63d2c27c0d5497b7cf4e21d87d13154",
@@ -73,6 +77,8 @@ def validate_original(linux: Path) -> None:
     source = {key: (linux / key).read_text()
               for key in ORIGINAL_BLOBS}
     for name, expected in (
+        ("include/linux/wait.h", "#define wake_up_all(x)"),
+        ("include/linux/sched.h", "#define TASK_NORMAL"),
         ("lib/lzo/lzo1x_decompress_safe.c",
          "EXPORT_SYMBOL_GPL(lzo1x_decompress_safe);"),
         ("lib/lz4/lz4_decompress.c",
@@ -107,6 +113,13 @@ def validate_original(linux: Path) -> None:
                       "round060_missing_decoder_export_root"):
         require(root_name in fixture_text,
                 "source module lost actual retained decoder root " + root_name)
+    owner_header = DECODER_OWNER_HEADER.read_text()
+    owner_kernel_includes = re.search(
+        r"#else\s*[^#]*#include <linux/sched\.h>\s*"
+        r"#include <linux/spinlock\.h>\s*#include <linux/wait\.h>\s*#endif",
+        owner_header)
+    require(owner_kernel_includes is not None,
+            "native decoder-owner wait/sched include contract drift")
     require(CODEC.is_file() and CODEC_HEADER.is_file(),
             "real product CRC32C translation unit unavailable")
 
@@ -318,7 +331,58 @@ int probe(int mode, int input) {
     print("ROUND065_NM_FIRST_RECORD_REGRESSION_PASS real_objects=6 exact_symbol_negatives=4 record_negatives=3")
 
 
+
+def self_test_first_native_error() -> None:
+    # This is a rootless parser regression, not a substitute for native Kbuild.
+    with tempfile.TemporaryDirectory(prefix="round067-original-first-error-") as directory:
+        log = Path(directory) / "original-private-first-error.log"
+        log.write_text(
+            "/runner/private/linux/include/linux/wait.h:223:54: error: "
+            "'TASK_NORMAL' undeclared (first use in this function)\n"
+            "make[2]: *** [scripts/Makefile.build:243: test.o] Error 1\n")
+        captured = io.StringIO()
+        with contextlib.redirect_stdout(captured):
+            report_original_first_error(log, "actual-original-GPL-modpost", 2)
+        diagnostic = captured.getvalue()
+        require("phase=actual-original-GPL-modpost exit=2 first=" in diagnostic and
+                "TASK_NORMAL" in diagnostic and
+                "[original-or-probe-file]:223:54:" in diagnostic and
+                "/runner/private/" not in diagnostic,
+                "first real compiler error masked or private path leaked")
+        for invalid_phase in ("actual-original-gpl-modpost-extra",
+                              "actual-original-GPL-modpost=token",
+                              "../actual-original-GPL-modpost"):
+            try:
+                with contextlib.redirect_stdout(io.StringIO()):
+                    report_original_first_error(log, invalid_phase, 2)
+            except AssertionError as error:
+                require("invalid original build phase" in str(error),
+                        "unrecognized phase rejected for unrelated reason")
+            else:
+                require(False, "unsafe first-error phase accepted")
+        with contextlib.redirect_stdout(captured):
+            try:
+                verify_missing_export_modpost(log)
+            except AssertionError as error:
+                require("missing genuine original Linux modpost" in str(error),
+                        "C failure accepted as genuine negative modpost")
+            else:
+                require(False, "compiler failure accepted as missing-export modpost")
+        require("phase=actual-missing-export-negative" in captured.getvalue(),
+                "invalid missing-export first C diagnostic was hidden")
+        log.write_text(
+            "ERROR: modpost: \"round060_unavailable_original_decoder_export\" "
+            "[original probe] undefined!\n")
+        with contextlib.redirect_stdout(io.StringIO()):
+            verify_missing_export_modpost(log)
+    print("ROUND067_NATIVE_DECODER_FIRST_ERROR_REGRESSION_PASS "
+          "real_phase_GPL=ACCEPTED compiler_first_error=RETAINED "
+          "unsafe_phases=3_REJECTED compiler_negative=REJECTED "
+          "genuine_modpost_negative=ACCEPTED", flush=True)
+
+
 def self_test() -> None:
+    self_test_first_native_error()
     self_test_selected_undefined()
     original = {
         "lzo1x_decompress_safe":
@@ -381,6 +445,8 @@ def verify_missing_export_modpost(log: Path) -> None:
     diagnostic_lines = [line for line in lines
                         if re.search(r"(?i)(?:fatal error:|error:|ERROR: modpost:)",
                                      line)]
+    if len(failure_lines) != 1 or len(diagnostic_lines) != 1:
+        report_original_first_error(log, "actual-missing-export-negative", 2)
     require(len(failure_lines) == 1 and len(diagnostic_lines) == 1,
             "missing genuine original Linux modpost undefined decoder first cause")
     print("ROUND060_ORIGINAL_KBUILD_NEGATIVE_MISSING_EXPORT_REJECTED "
@@ -389,8 +455,15 @@ def verify_missing_export_modpost(log: Path) -> None:
 
 def report_original_first_error(log: Path, phase: str, exit_code: int) -> None:
     require(log.is_file(), "missing private original Kbuild failure log")
-    require(re.fullmatch(r"[a-z0-9-]{1,60}", phase) is not None,
-            "invalid original build phase")
+    # Enforce the exact known native phases, including uppercase "GPL".
+    # A valid phase must never mask the first real C or modpost diagnostic.
+    allowed_phases = {
+        "original-defconfig", "original-olddefconfig", "original-vmlinux",
+        "original-all-modules", "actual-original-GPL-modpost",
+        "actual-original-consumer-preprocess", "actual-omission-module",
+        "actual-missing-export-negative",
+    }
+    require(phase in allowed_phases, "invalid original build phase")
     for line in log.read_text(errors="replace").splitlines():
         if not re.search(r"(?i)(?:fatal error:|error:|modpost:.*undefined|no rule to make target)", line):
             continue
