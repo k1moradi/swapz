@@ -166,24 +166,8 @@ jobs:
           grep -Fq 'swapz_round063_original_dm_owner_get' "$original/Module.symvers"
           grep -Fq 'swapz_round063_original_dm_owner_put' "$original/Module.symvers"
           nm -u "$guarded/dm-swapz.ko" > "$RUNNER_TEMP/round063-current-dm-imports.txt"
-          grep -Eq '[[:space:]]U swapz_round063_original_dm_owner_get
-      - uses: actions/upload-artifact@v4
-        if: failure()
-        with:
-          name: round058-original-kbuild-first-error-${{ matrix.zswap }}
-          path: ${{ runner.temp }}/round058-real-kbuild-first-error.log
-          if-no-files-found: ignore
-          retention-days: 5
- "$RUNNER_TEMP/round063-current-dm-imports.txt"
-          grep -Eq '[[:space:]]U swapz_round063_original_dm_owner_put
-      - uses: actions/upload-artifact@v4
-        if: failure()
-        with:
-          name: round058-original-kbuild-first-error-${{ matrix.zswap }}
-          path: ${{ runner.temp }}/round058-real-kbuild-first-error.log
-          if-no-files-found: ignore
-          retention-days: 5
- "$RUNNER_TEMP/round063-current-dm-imports.txt"
+          grep -Eq '[[:space:]]U swapz_round063_original_dm_owner_get$' "$RUNNER_TEMP/round063-current-dm-imports.txt"
+          grep -Eq '[[:space:]]U swapz_round063_original_dm_owner_put$' "$RUNNER_TEMP/round063-current-dm-imports.txt"
           if nm -u "$ordinary/dm-swapz.ko" | grep -Eq 'swapz_round063_original_dm_owner_(get|put)'; then
             echo '::error::ROUND063_FIRST_ERROR imported-original-owner-leaked-to-default-DM' >&2
             exit 4
