@@ -17823,3 +17823,67 @@ Ordinary `RAW_4096` remains FULL ORIGINAL UNCOMPRESSED 4096, Linux
 MM retains compressed RAM and naturally evicts; no owner Make,
 loaded/privileged/physical/pressure tests or SWAPSPACE2 header/table
 mutation.
+
+## Round063 Agent4 — actual original LZO1X/LZ4 GPL ELF retained consumer and negative modpost
+
+Original pinned Linux `torvalds/linux@c339f4010dea8b0d754f84ace70cd1b089878ef8`
+native decoder workflow `44964399878` at exact previous engineering
+`95f046e52a4d7976cf27c0676c12ce61fd09a570` has genuine
+`CONFIG_ZSWAP=n` job `137031209840` and `CONFIG_ZSWAP=y`
+job `137031209846`. Each passed original defconfig, olddefconfig,
+full vmlinux, all modules and initial positive external GPL Kbuild
+modpost, then failed the unchanged strict actual-ELF `nm -u` check:
+`compiled module did not retain original decoder link LZ4_decompress_safe`.
+At this exact source, original build+export presence is true, but
+genuine retained original LZ4 consumer linkage and the deliberately
+missing-export negative have NOT passed. Do not reclassify that
+source-only failure as a loaded decoder module reference.
+
+A static `__used` dormant function alone is not an independently
+verified relocation root of every original decoder call in the final
+`.ko`. The compile-only fixture must keep the **actual** existing
+`swapz_zswap_import_decode()` invocation intact, and root that function
+through a `__used` static function-pointer data relocation. That
+mechanism retains genuine selected LZO1X and LZ4 branches without
+calling any decoder at module initialization; module_init continues
+unconditionally returning `-EOPNOTSUPP`. The separate deliberate
+`round060_unavailable_original_decoder_export` negative probe needs
+its own retained source-function-pointer root to force the genuine
+undefined external relocation into actual original kernel modpost.
+Neither pointer is production reference ownership, a synthetic decoder,
+an enable flag, or an upper ACK.
+
+Qualification requires **both** exact pinned genuine original full x86
+ZSWAP=y/n builds and source-matched nonempty `Module.symvers`,
+correct original LZO1X GPL, LZ4 and SHA256 export/provider/config,
+actual GPL module positive modpost and `nm -a` presence of both
+the real imported source function and its data root in the final
+module. The unchanged `nm -u` oracle MUST see all three selected
+external symbol references; a failed/missing symbol prints only
+a finite allowlisted selection of public symbol names, never arbitrary
+host ELF paths or compiler text. The module must also retain the
+linked real product CRC32C, proper `GPL` .modinfo, original release
+vermagic and selected module dependencies where originals were built
+as `m`. A missing LZ4 reference is an immediate failure, not optional.
+
+Then separately stage and Kbuild a **real** deliberate missing original
+decoder export: only one actual `ERROR: modpost:` matching the
+undefined test symbol and no other compiler/header/linker errors is
+an admissible negative PASS. Rootless strict GCC and Clang original
+import source-host with ASan+UBSan, real 4096 read cases and ten
+genuinely compiled/executed original changed-source semantic mutants
+stay enabled. No fake symvers, stubs or host synthetic producer can
+substitute for the genuine pinned original kernel module results.
+
+A module linked at build time does NOT prove acquisition of real
+module references enduring original zswap pool/tfm destruction, a
+source-owned STORED folio/BIO/current target lease, actual durable
+compressed lower WRITE+FUA, RAM map/GC/read, one authentic upper ACK
+or independent full original 4096 decoded READ. Linux native MM alone
+retains/evicts compressed RAM naturally; swapz manages disk packing/GC.
+`SOURCE_MAPPED_AUTHENTICATED=0`, `PHASE_A=BLOCKED`, direct
+compressed handoff DISABLED and forced RAW bypass DISABLED.
+Ordinary `RAW_4096` always stores the full ORIGINAL UNCOMPRESSED
+4096-byte page. Protect the physical SWAPSPACE2 first 4096
+header/UUID/signature and parent partition table. No owner Make,
+loaded, privileged, physical or real-pressure tests.

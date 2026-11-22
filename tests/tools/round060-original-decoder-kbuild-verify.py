@@ -98,8 +98,13 @@ def validate_original(linux: Path) -> None:
         require(anchor in header, "actual dormant product codec drift: " + anchor)
     require("swapz_zswap_import_decode(" in FIXTURE.read_text(),
             "kernel module fixture does not reference actual imported reader")
-    require("round060_unavailable_original_decoder_export" in FIXTURE.read_text(),
+    fixture_text = FIXTURE.read_text()
+    require("round060_unavailable_original_decoder_export" in fixture_text,
             "module negative missing-export probe missing")
+    for root_name in ("round060_original_decoder_consumer_root",
+                      "round060_missing_decoder_export_root"):
+        require(root_name in fixture_text,
+                "source module lost actual retained decoder root " + root_name)
     require(CODEC.is_file() and CODEC_HEADER.is_file(),
             "real product CRC32C translation unit unavailable")
 
@@ -167,10 +172,26 @@ def check_module(module: Path, config: dict[str, str],
             shutil.which("readelf") is not None,
             "missing original module binutils")
     undefined = run_checked(["nm", "-u", str(module)], "original module ELF nm")
+    symbol_table = run_checked(["nm", "-a", str(module)],
+                               "original module ELF rooted symbols")
+    for name in ("round060_pinned_original_decoder_reference",
+                 "round060_original_decoder_consumer_root"):
+        require(re.search(r"(?m)^\S+\s+[a-zA-Z]\s+" +
+                          re.escape(name) + r"$", symbol_table) is not None,
+                "compiled module lost actual imported decoder root " + name)
+    retained = {
+        name: re.search(r"(?m)^\s+U\s+" + re.escape(name) + r"$",
+                        undefined) is not None
+        for name in SYMBOLS
+    }
     for name in SYMBOLS:
-        require(re.search(r"(?m)^\s+U\s+" + re.escape(name) + r"$",
-                          undefined) is not None,
-                "compiled module did not retain original decoder link " + name)
+        require(retained[name],
+                "compiled module did not retain original decoder link " +
+                name + " retained=" +
+                ",".join(symbol for symbol, found in retained.items()
+                         if found) + " missing=" +
+                ",".join(symbol for symbol, found in retained.items()
+                         if not found))
     require("swapz_crc32c_bytes" not in undefined,
             "real product CRC32C not linked into module")
     # Read the real ELF .modinfo section with preinstalled GNU binutils.
@@ -278,7 +299,10 @@ def verify_missing_export_modpost(log: Path) -> None:
                      if ("ERROR: modpost:" in line and
                          "round060_unavailable_original_decoder_export" in line
                          and "undefined" in line)]
-    require(len(failure_lines) == 1,
+    diagnostic_lines = [line for line in lines
+                        if re.search(r"(?i)(?:fatal error:|error:|ERROR: modpost:)",
+                                     line)]
+    require(len(failure_lines) == 1 and len(diagnostic_lines) == 1,
             "missing genuine original Linux modpost undefined decoder first cause")
     print("ROUND060_ORIGINAL_KBUILD_NEGATIVE_MISSING_EXPORT_REJECTED "
           "original_modpost=YES auth=0", flush=True)

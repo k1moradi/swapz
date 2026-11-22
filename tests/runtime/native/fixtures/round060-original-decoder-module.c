@@ -5,9 +5,11 @@
  * This is NOT the dm-swapz product, a functional kernel test, or a live
  * decoder lease. No I/O, source pool, memory pressure or ACK is performed.
  * Its module_init always refuses activation, even if someone tries to load it.
- * The unused, emitted probe forces the real selected import decoder's
- * LZO1X, LZ4, SHA256 and actual swapz CRC symbols through genuine GPL
- * Module.symvers and native modpost in both original ZSWAP configurations.
+ * A retained, never-invoked data relocation roots the actual selected
+ * import decoder's LZO1X, LZ4, SHA256 and real swapz CRC C consumer through
+ * genuine GPL Module.symvers and native modpost in both ZSWAP configurations.
+ * Merely annotating an otherwise unreachable static function __used did not
+ * establish that the final module retained every decoder relocation.
  */
 #include <linux/errno.h>
 #include <linux/module.h>
@@ -37,6 +39,17 @@ static noinline __used int round060_pinned_original_decoder_reference(
 					independent_original_page);
 }
 
+/*
+ * Root the entire REAL swapz_zswap_import_decode() call path in the final
+ * module ELF even though module_init always rejects loading. The function
+ * pointer's address relocation is emitted as read-only test data; it is not
+ * an alternate decoder, an import admission switch or a runnable callback.
+ * This pins only build-time code/symbol references, never live module refs.
+ */
+static typeof(round060_pinned_original_decoder_reference) *
+	const round060_original_decoder_consumer_root __used =
+		round060_pinned_original_decoder_reference;
+
 #ifdef SWAPZ_ROUND060_MISSING_DECODER_EXPORT_NEGATIVE_TEST
 /*
  * A deliberately UNEXPORTED test symbol must be rejected by the real
@@ -49,6 +62,14 @@ static noinline __used int round060_unavailable_decoder_reference(void)
 {
 	return round060_unavailable_original_decoder_export();
 }
+
+/*
+ * Keep the intentionally undefined relocation alive through the native
+ * negative module link. A compiler failure is not a negative modpost PASS.
+ */
+static typeof(round060_unavailable_decoder_reference) *
+	const round060_missing_decoder_export_root __used =
+		round060_unavailable_decoder_reference;
 #endif
 
 static int __init round060_original_decoder_noauth_init(void)
