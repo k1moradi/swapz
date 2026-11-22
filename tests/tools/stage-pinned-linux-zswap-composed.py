@@ -4999,6 +4999,48 @@ def apply_round045_original_stored_bio_scope(path: str,
         path, "round045-original-page-io-actual-dispatch-scope")
 
 
+
+# Round063: the exact opt-in C below is ALSO compiled by both host compilers.
+# It is NOT a current swap-slot/table authentication API, compressed disk
+# admission, or new pressure/reclaim controller.
+ROUND063_ORIGINAL_DM_OWNER_SOURCE_PATH = (
+    ROOT.parent / "runtime/native/fixtures/round063-original-dm-owner.cfrag"
+)
+ROUND063_ORIGINAL_DM_OWNER_HEADER = """#if defined(SWAPZ_ROUND063_ORIGINAL_DM_OWNER_TEST) && \\
+    defined(SWAPZ_ROUND056_PREERASE_SINGLE_OWNER_TEST) && \\
+    defined(SWAPZ_ROUND031_MM_BIO_SOURCE) && \\
+    defined(SWAPZ_ROUND025_SIDEBAND_CI_ONLY)
+/* An independently held original STORED copy, NOT current DM authority.
+ * A positive get must be balanced once at terminal/requeue, before bio_endio.
+ */
+struct swapz_ci_owned_payload *
+swapz_round063_original_dm_owner_get(const struct bio *clone);
+void swapz_round063_original_dm_owner_put(
+        struct swapz_ci_owned_payload *owner);
+#endif
+"""
+
+
+def apply_round063_original_dm_owner(path: str, composed: str) -> str:
+    if path == "include/linux/bio.h":
+        anchor = "#endif /* __LINUX_BIO_H */"
+        return replace_once(composed, anchor,
+                            ROUND063_ORIGINAL_DM_OWNER_HEADER + anchor,
+                            path, "round063-owner-source-prototypes")
+    if path == "block/bio.c":
+        fragment = ROUND063_ORIGINAL_DM_OWNER_SOURCE_PATH.read_text(encoding="utf-8")
+        if fragment.count("/* ROUND063_ORIGINAL_DM_OWNER_GET_BEGIN */") != 1 or (
+                fragment.count("/* ROUND063_ORIGINAL_DM_OWNER_GET_END */") != 1):
+            raise SourceCompositionError("COMPOSE_CONFLICT:round063-source-markers")
+        for expected in ("swapz_ci_owned_get(", "swapz_ci_owned_put(",
+                         "swapz_ci_owned_valid(", "EXPORT_SYMBOL_GPL(",
+                         "return NULL;", "return owner;"):
+            if expected not in fragment:
+                raise SourceCompositionError(
+                    "COMPOSE_CONFLICT:round063-source-c:" + expected)
+        return composed.rstrip("\n") + "\n\n" + fragment.rstrip("\n") + "\n"
+    return composed
+
 def compose_postimage(path: str, original_bytes: bytes, *,
                       with_kunit: bool = True) -> bytes:
     """In-memory exactly pinned original source -> deterministic combined C."""
@@ -5053,6 +5095,7 @@ def compose_postimage(path: str, original_bytes: bytes, *,
         changed = apply_round054_original_preunuse_release(path, changed)
     changed = ROUND056.apply(path, changed, replace_once,
                             with_kunit=with_kunit)
+    changed = apply_round063_original_dm_owner(path, changed)
     if path == "mm/zswap.c":
         for required in (
             "swapz_round028_slot_epoch(swpentry)",

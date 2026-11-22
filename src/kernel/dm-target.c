@@ -609,6 +609,13 @@ struct swapz_bio_ref {
 	bool published_deferred;
 	struct swapz_ack_dwell_batch *ack_batch;
 	int preparation_error;
+#if defined(SWAPZ_ROUND063_ORIGINAL_DM_OWNER_TEST) && \
+    defined(SWAPZ_ROUND056_PREERASE_SINGLE_OWNER_TEST) && \
+    defined(SWAPZ_ROUND031_MM_BIO_SOURCE) && \
+    defined(SWAPZ_ROUND025_SIDEBAND_CI_ONLY)
+	/* Independently held original cloned-BIO STORED ref. Not source AUTH. */
+	struct swapz_ci_owned_payload *round063_owned_original;
+#endif
 #if defined(SWAPZ_ROUND058_DM_INGRESS_LIFETIME_TEST)
 	struct swapz_round058_dm_observation round058_observation;
 #endif /* SWAPZ_ROUND058_DM_INGRESS_LIFETIME_TEST */
@@ -2226,6 +2233,14 @@ static void swapz_complete(struct bio *bio, int error)
 			atomic_dec(&ctx->preparation_ready_current);
 	}
 	swapz_release_prepared(bio);
+#if defined(SWAPZ_ROUND063_ORIGINAL_DM_OWNER_TEST) && \
+    defined(SWAPZ_ROUND056_PREERASE_SINGLE_OWNER_TEST) && \
+    defined(SWAPZ_ROUND031_MM_BIO_SOURCE) && \
+    defined(SWAPZ_ROUND025_SIDEBAND_CI_ONLY)
+	/* Release before real upper bio_endio retires dm_per_bio_data. */
+	swapz_round063_original_dm_owner_put(entry->round063_owned_original);
+	entry->round063_owned_original = NULL;
+#endif
 	if (error)
 		bio->bi_status = errno_to_blk_status(error);
 	if (ctx && bio_op(bio) == REQ_OP_WRITE && bio_sectors(bio)) {
@@ -13947,6 +13962,21 @@ static int swapz_map(struct dm_target *ti, struct bio *bio)
 	if (ctx->async_prepare && bio_op(bio) == REQ_OP_WRITE && count)
 		init_completion(&entry->preparation_snapshot_ready);
 	entry->bio = bio;
+#if defined(SWAPZ_ROUND063_ORIGINAL_DM_OWNER_TEST) && \
+    defined(SWAPZ_ROUND056_PREERASE_SINGLE_OWNER_TEST) && \
+    defined(SWAPZ_ROUND031_MM_BIO_SOURCE) && \
+    defined(SWAPZ_ROUND025_SIDEBAND_CI_ONLY)
+	/* The original staged Linux clone holds its own ref; this call takes
+	 * one MORE independent reference for this accepted DM descriptor.
+	 * It grants no slot/table mapped authority, lower compressed I/O or ACK.
+	 */
+	entry->round063_owned_original = NULL;
+	if (bio_op(bio) == REQ_OP_WRITE && count == SWAPZ_SECTORS &&
+	    (bio->bi_opf & REQ_SWAP) &&
+	    bio->bi_iter.bi_size == SWAPZ_BLOCK_BYTES)
+		entry->round063_owned_original =
+			swapz_round063_original_dm_owner_get(bio);
+#endif
 	{
 		unsigned int bio_segs = 0;
 		bool bio_nonzero_off = false;
@@ -13997,6 +14027,15 @@ static int swapz_map(struct dm_target *ti, struct bio *bio)
 			spin_unlock_irqrestore(&ctx->queue_lock, flags);
 			if (ordered_owned)
 				mutex_unlock(&ctx->ordered_owner);
+#if defined(SWAPZ_ROUND063_ORIGINAL_DM_OWNER_TEST) && \
+    defined(SWAPZ_ROUND056_PREERASE_SINGLE_OWNER_TEST) && \
+    defined(SWAPZ_ROUND031_MM_BIO_SOURCE) && \
+    defined(SWAPZ_ROUND025_SIDEBAND_CI_ONLY)
+			/* A rejected clone never transfers an owner into incoming. */
+			swapz_round063_original_dm_owner_put(
+				entry->round063_owned_original);
+			entry->round063_owned_original = NULL;
+#endif
 			return READ_ONCE(ctx->failed) ? DM_MAPIO_KILL : DM_MAPIO_REQUEUE;
 		}
 #if defined(SWAPZ_ROUND058_DM_INGRESS_LIFETIME_TEST)

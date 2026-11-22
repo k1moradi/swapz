@@ -1,0 +1,50 @@
+/* ROUND063_ORIGINAL_DM_OWNER_GET_BEGIN */
+#if defined(SWAPZ_ROUND063_ORIGINAL_DM_OWNER_TEST) && \
+    defined(SWAPZ_ROUND056_PREERASE_SINGLE_OWNER_TEST) && \
+    defined(SWAPZ_ROUND031_MM_BIO_SOURCE) && \
+    defined(SWAPZ_ROUND025_SIDEBAND_CI_ONLY)
+/*
+ * The original block/BIO clone must be alive for this synchronous call.
+ * The returned increment is separately held by the current DM target until
+ * swapz_complete() or the pre-admission requeue branch drops it. Original
+ * zsmalloc/source-pool teardown never owns or frees this independent copy.
+ *
+ * A mechanically valid reference is NOT original swap-slot/current table
+ * authority and cannot authorize compressed lower writes or upper ACKs.
+ */
+struct swapz_ci_owned_payload *
+swapz_round063_original_dm_owner_get(const struct bio *clone)
+{
+	struct swapz_ci_owned_payload *owner;
+
+	if (!clone || bio_op(clone) != REQ_OP_WRITE ||
+	    !(clone->bi_opf & REQ_SWAP) ||
+	    !(clone->bi_flags & (1U << BIO_CLONED)) ||
+	    clone->bi_swap_origin != SWAP_BIO_ORIGIN_ZSWAP_STORED_WRITEBACK ||
+	    clone->bi_iter.bi_size != 4096U ||
+	    clone->bi_iter.bi_idx || clone->bi_iter.bi_offset ||
+	    clone->bi_vcnt || !clone->bi_io_vec ||
+	    !clone->bi_io_vec[0].bv_page ||
+	    clone->bi_io_vec[0].bv_offset ||
+	    clone->bi_io_vec[0].bv_len != 4096U ||
+	    !clone->bi_swapz_ci_sideband)
+		return NULL;
+
+	owner = swapz_ci_owned_get(clone->bi_swapz_ci_sideband);
+	if (!owner)
+		return NULL;
+	if (!swapz_ci_owned_valid(owner)) {
+		swapz_ci_owned_put(owner);
+		return NULL;
+	}
+	return owner;
+}
+EXPORT_SYMBOL_GPL(swapz_round063_original_dm_owner_get);
+
+void swapz_round063_original_dm_owner_put(struct swapz_ci_owned_payload *owner)
+{
+	swapz_ci_owned_put(owner);
+}
+EXPORT_SYMBOL_GPL(swapz_round063_original_dm_owner_put);
+#endif /* compiled only with four original staged-source opt-ins */
+/* ROUND063_ORIGINAL_DM_OWNER_GET_END */
