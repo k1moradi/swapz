@@ -18235,3 +18235,95 @@ swapz disk compression/packing/GC only, no second reclaim. SWAPSPACE2
 first physical 4096 signature/header/UUID and parent partition table,
 20-byte map and data-only padded extents unchanged. No owner Make, loaded,
 privileged, actual-pressure or physical media tests.
+
+## Round066 Agent4 — independent ORIGINAL LZO1X/LZ4 decoder reader ownership, no source AUTH
+
+The last original exact pristine pinned decoder consumer at
+torvalds/linux@c339f4010dea8b0d754f84ace70cd1b089878ef8 has already
+qualified native x86 ZSWAP=y and ZSWAP=n: the corrected original verifier
+run 44997018549 and integrated run 44997424261 both terminal 3/3
+SUCCESS. Original consumer ELF contains real selected LZO1X GPL,
+LZ4, SHA256 and product CRC references, same-kernel Module.symvers,
+GPL/vermagic, actual deliberately missing-export negative original
+modpost and source-selected LZ4 omission negative. This is compile/link
+evidence, not live decode after retirement or loaded module lifetime.
+
+The new dormant src/kernel/zswap-import-decoder-owner.h/.c adds
+an independent, **typed selected original codec** lease that executes
+the existing real swapz_zswap_import_decode() on caller-owned sealed
+bytes, immutable RAM record, read-authority witness and independent
+4,096-byte scratch/output buffers. The decoder owner stores only
+original LZ4 or LZO1X codec/version, a spinlock, drain wait queue,
+bounded active-reader count and closing flag. No pointer to the original
+crypto_acomp, zswap pool/tfm, source folio/xarray, BIO, lower sector,
+target or allocator is held. No allocation, module_get on every read,
+second reclaim, timer, pressure or lower I/O. Caller must maintain
+owner storage through close+drain **and** quiesce all concurrent entry
+attempts before freeing; each exclusive lease must be put once. Get
+fails with ESHUTDOWN after close, EBUSY on reuse, EOVERFLOW at reader
+count saturation; failed profile init refuses. Synchronous decode
+checks immutable owner codec/version before calling actual selected
+product original decoder with length/CRC/SHA and optional independent
+original-page checks; output stays unchanged upon error. Put clears
+lease before final ref decrement; close publishes admission shutdown
+under spinlock and waits in sleepable context for the last put, without
+holding spinlock or an SRCU read side over decode/drain. Closing under
+its own lease would deadlock and is forbidden by the documented
+caller contract. No source-mapped authority is inferred from host
+record inputs.
+
+Original torvalds/linux kernel/module/main.c resolves true external
+symbols through ref_module(), strong_try_module_get(), add_module_usage()
+and releases dependency via module_put() in module_unload_free().
+A NULL provider denotes built-in and requires no artificial module ref.
+This contract is statically source-verified against the exact original
+git HEAD in the rootless CI source host. The original native module
+fixture links and retains all new real owner C functions plus the
+existing direct selected original consumers through matched GPL
+Module.symvers, and still refuses module_init with -EOPNOTSUPP.
+Modular provider dependencies are verified by existing native
+.modinfo depends checks if providers are 'm'; the previously proven
+y/n configurations have both decoder providers built-in. **No actual
+module load/unload or post-pool-retirement native kernel callback
+execution is claimed**.
+
+Rootless host fixture compiles and executes real product codec.c plus
+the actual dormant import decode/owner, original pinned include/linux/lzo.h
+ABI, actual liblzo2 host LZO1X byte stream and liblz4 raw LZ4 stream.
+Userland liblzo2 is a compatible *host producer and decoder*, not a
+substitute for executing original pinned Linux lib/lzo C. The host
+explicitly allocates an original source buffer, compresses each real
+4,096-byte page, seals an independent copy, overwrites and frees the
+source buffer, then decodes both profiles. Verify exact independent
+4096 read, wrong profile/version, SHA and compressed CRC corruption,
+short lower read, malformed one-byte compressed payload with matching
+recomputed CRC, alias rejection and unchanged output on every error.
+One pthread closes while a previously held reader remains outstanding;
+new readers fail, old lease decodes and puts, waiting closer completes,
+double put and post-close read refuse. These are simulated source-pool
+retirement and synthetic read-authority inputs; they do not demonstrate
+genuine source, lower WRITE/FUA, kernel module unload, GC, or ACK.
+
+Both strict GCC and Clang -Wall -Wextra -Wconversion -Wshadow -Werror,
+ASan+UBSan must separately compile and execute the baseline and nine
+changed ACTUAL owner-C semantic mutants each (18 total), requiring
+explicit semantic failure and no compiler/sanitizer/timeout substitute.
+The local preliminaries used local compatibility stubs rather than
+the full original header/product C; the hosted exact-source test must
+compile against real repo product codec.c, exact git-blob checked pinned
+Linux public LZO header, and real installed liblzo2/lz4/crypto. Native
+kernel source still separately builds both original y/n full kernel,
+modules, GPL consumer and all four original negative/positive gates.
+Only exact terminal new-source CI can qualify this scoped build/source
+owner; pending remains PROGRESS.
+
+Never treat this as permission to import compressed payloads into
+ordinary RAW_4096, which remains the whole original UNCOMPRESSED page.
+Linux MM alone controls compressed zswap RAM and natural eviction;
+swapz handles disk compression, packing and GC only. Keep
+SOURCE_MAPPED_AUTHENTICATED=0, PHASE_A=BLOCKED,
+DIRECT_COMPRESSED_HANDOFF=DISABLED, FORCED_RAW_BYPASS=DISABLED,
+all import ACTIVE=0. Protect immutable physical SWAPSPACE2 first
+4096 bytes/UUID/header/signature and parent partition table, fixed
+20-byte map and data-only padded extents. No owner Make, privileged,
+loaded, real physical, actual-pressure or mkswap tests.

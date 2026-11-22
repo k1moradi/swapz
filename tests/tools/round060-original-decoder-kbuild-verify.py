@@ -40,6 +40,8 @@ FIXTURE = ROOT / "tests/runtime/native/fixtures/round060-original-decoder-module
 HEADER = ROOT / "src/kernel/zswap-import-codec.h"
 CODEC = ROOT / "src/kernel/codec.c"
 CODEC_HEADER = ROOT / "src/kernel/codec.h"
+DECODER_OWNER = ROOT / "src/kernel/zswap-import-decoder-owner.c"
+DECODER_OWNER_HEADER = ROOT / "src/kernel/zswap-import-decoder-owner.h"
 
 
 def require(condition: bool, detail: str) -> None:
@@ -190,11 +192,22 @@ def check_module(module: Path, config: dict[str, str],
     symbol_table = run_checked(["nm", "-a", str(module)],
                                "original module ELF rooted symbols")
     for name in ("round060_pinned_original_decoder_reference",
-                 "round060_original_decoder_consumer_root"):
+                 "round060_original_decoder_consumer_root",
+                 "round066_pinned_original_decoder_owner_reference",
+                 "round066_original_decoder_owner_consumer_root"):
         require(re.search(r"(?m)^\S+\s+[a-zA-Z]\s+" +
                           re.escape(name) + r"$", symbol_table) is not None,
                 "compiled module lost actual imported decoder root " + name)
     require_selected_undefined(undefined)
+    # No arbitrary symbol stubs: require the real owner C APIs defined.
+    for name in ("swapz_zswap_import_decoder_owner_init",
+                 "swapz_zswap_import_decoder_owner_get",
+                 "swapz_zswap_import_decoder_owner_decode",
+                 "swapz_zswap_import_decoder_owner_put",
+                 "swapz_zswap_import_decoder_owner_close_and_drain"):
+        require(re.search(r"(?m)^\S+\s+[tT]\s+" +
+                          re.escape(name) + r"$", symbol_table) is not None,
+                "compiled module lost actual selected decoder owner " + name)
     require("swapz_crc32c_bytes" not in undefined,
             "real product CRC32C not linked into module")
     # Read the real ELF .modinfo section with preinstalled GNU binutils.
@@ -235,10 +248,12 @@ def prepare_module(destination: Path) -> None:
     shutil.copy2(HEADER, destination / HEADER.name)
     shutil.copy2(CODEC_HEADER, destination / CODEC_HEADER.name)
     shutil.copy2(CODEC, destination / CODEC.name)
+    shutil.copy2(DECODER_OWNER, destination / DECODER_OWNER.name)
+    shutil.copy2(DECODER_OWNER_HEADER, destination / DECODER_OWNER_HEADER.name)
     # No changed original Linux C and no fake product decoder function.
     (destination / "Makefile").write_text(
         "obj-m := round060-decoder-noauth.o\n"
-        "round060-decoder-noauth-y := round060-original-decoder-module.o codec.o\n")
+        "round060-decoder-noauth-y := round060-original-decoder-module.o codec.o zswap-import-decoder-owner.o\n")
     print("ROUND060_ORIGINAL_DECODER_MODULE_STAGED actual_product_crc=YES "
           "source_authenticated=0 phase_a=BLOCKED", flush=True)
 

@@ -15,6 +15,7 @@
 #include <linux/module.h>
 
 #include "zswap-import-codec.h"
+#include "zswap-import-decoder-owner.h"
 
 #if SWAPZ_ZSWAP_IMPORT_ACTIVE != 0U
 #error "Round060 original decoder import must remain completely dormant"
@@ -71,6 +72,49 @@ static typeof(round060_unavailable_decoder_reference) *
 	const round060_missing_decoder_export_root __used =
 		round060_unavailable_decoder_reference;
 #endif
+
+/*
+ * Build-time only: retain the actual original selected decoder owner APIs
+ * and their provider relocations, not a fake module ref or live load. Each
+ * future caller must hold its own owner instance and synchronous lease; this
+ * module remains unconditionally unloadable and refuses init below.
+ */
+static noinline __used int round066_pinned_original_decoder_owner_reference(
+	const struct swapz_zswap_import_record *record,
+	const struct swapz_zswap_import_read_authority *authority,
+	const swapz_u8 *compressed_bytes, swapz_u32 compressed_capacity,
+	swapz_u8 *scratch, swapz_u32 scratch_capacity,
+	swapz_u8 *output, swapz_u32 output_capacity,
+	const swapz_u8 *independent_original_page)
+{
+	struct swapz_zswap_import_decoder_owner owner;
+	struct swapz_zswap_import_decoder_lease lease = {0};
+	int result;
+	int cleanup;
+
+	if (!record)
+		return -EINVAL;
+	result = swapz_zswap_import_decoder_owner_init(&owner, record->codec,
+							record->version);
+	if (result)
+		return result;
+	result = swapz_zswap_import_decoder_owner_get(&owner, &lease);
+	if (!result) {
+		result = swapz_zswap_import_decoder_owner_decode(
+			&lease, record, authority, compressed_bytes,
+			compressed_capacity, scratch, scratch_capacity,
+			output, output_capacity, independent_original_page);
+		cleanup = swapz_zswap_import_decoder_owner_put(&lease);
+		if (!result)
+			result = cleanup;
+	}
+	cleanup = swapz_zswap_import_decoder_owner_close_and_drain(&owner);
+	return result ? result : cleanup;
+}
+
+static typeof(round066_pinned_original_decoder_owner_reference) *
+	const round066_original_decoder_owner_consumer_root __used =
+		round066_pinned_original_decoder_owner_reference;
 
 static int __init round060_original_decoder_noauth_init(void)
 {

@@ -4,6 +4,10 @@ on:
     branches: [main]
     paths:
       - 'src/kernel/zswap-import-codec.h'
+      - 'src/kernel/zswap-import-decoder-owner.h'
+      - 'src/kernel/zswap-import-decoder-owner.c'
+      - 'tests/runtime/native/fixtures/round066-original-decoder-owner.c'
+      - 'tests/tools/round066-original-decoder-owner-verify.py'
       - 'tests/tools/round060-original-decoder-kbuild-verify.py'
       - 'tests/tools/round064-original-decoder-elf-cause-verify.py'
       - 'tests/tools/round061-original-kbuild-host-deps-verify.py'
@@ -38,6 +42,7 @@ jobs:
             lib/lz4
             lib/crypto/sha256.c
             lib/Kconfig
+            kernel/module/main.c
           sparse-checkout-cone-mode: false
           path: linux
           persist-credentials: false
@@ -55,6 +60,25 @@ jobs:
           python3 -B swapz/tests/tools/round061-original-kbuild-host-deps-verify.py self-test
           (cd swapz && python3 -B tests/tools/round059-codec-host-compat-verify.py)
           echo 'ROUND060_ORIGINAL_PINNED_GCC_CLANG_HOST_ASAN_UBSAN_10_SEMANTIC_MUTANTS_PASS_AUTH0'
+      - name: Execute default-off original decoder reader ownership and true C semantic mutants
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          umask 077
+          # Disposable GitHub runner packages only, never owner-host privilege.
+          log="$RUNNER_TEMP/round066-decoder-owner-deps.log"
+          if ! sudo -n apt-get update -qq >"$log" 2>&1; then
+            echo '::error::ROUND066_DECODER_OWNER_FIRST_ERROR hosted apt metadata unavailable' >&2
+            exit 3
+          fi
+          if ! sudo -n env DEBIAN_FRONTEND=noninteractive apt-get install -y -qq \
+              --no-install-recommends liblzo2-dev liblz4-dev libssl-dev \
+              >>"$log" 2>&1; then
+            echo '::error::ROUND066_DECODER_OWNER_FIRST_ERROR hosted LZO/LZ4/crypto libraries unavailable' >&2
+            exit 3
+          fi
+          python3 -B swapz/tests/tools/round066-original-decoder-owner-verify.py --linux-root linux
+          test -z "$(git -C linux status --porcelain --untracked-files=all)"
 
   original-native:
     runs-on: ubuntu-24.04
