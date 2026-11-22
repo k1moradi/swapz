@@ -1,0 +1,86 @@
+/* ROUND064_ORIGINAL_SLOT_ROUTE_BEGIN */
+#if defined(SWAPZ_ROUND064_ORIGINAL_SLOT_TARGET_TEST) && \
+    defined(SWAPZ_ROUND063_ORIGINAL_DM_OWNER_TEST) && \
+    defined(SWAPZ_ROUND056_PREERASE_SINGLE_OWNER_TEST) && \
+    defined(SWAPZ_ROUND032_BIO_COPY_VIEW_CI_ONLY) && \
+    defined(SWAPZ_ROUND031_MM_BIO_SOURCE) && \
+    defined(SWAPZ_ROUND028_SLOT_EPOCH_SOURCE) && \
+    defined(SWAPZ_ROUND025_SIDEBAND_CI_ONLY) && defined(CONFIG_SWAP)
+extern u64 swapz_round028_slot_epoch(swp_entry_t slot);
+
+/* Native swapcache/writeback owns the live folio and slot through the
+ * original BIO. Take only short-lived swap-area refs; retaining one through
+ * swapoff or holding queue_lock across the MM cluster lock is forbidden.
+ */
+static bool swapz_round064_live_source_route(
+		const struct swapz_ci_owned_payload *owner,
+		const struct bio *bio, const struct swap_info_struct *submitted_area)
+{
+	struct swap_info_struct *area;
+	struct folio *folio;
+	bool matches;
+
+	if (!owner || !bio || !bio->bi_bdev ||
+	    bio_op(bio) != REQ_OP_WRITE || !(bio->bi_opf & REQ_SWAP) ||
+	    bio->bi_swap_origin != SWAP_BIO_ORIGIN_ZSWAP_STORED_WRITEBACK ||
+	    bio->bi_iter.bi_size != 4096U || bio->bi_iter.bi_idx ||
+	    bio->bi_iter.bi_offset || !bio->bi_io_vec ||
+	    !bio->bi_io_vec[0].bv_page || bio->bi_io_vec[0].bv_offset ||
+	    bio->bi_io_vec[0].bv_len != 4096U ||
+	    !owner->swapz_round056_budgeted || !owner->swapz_round056_sealed)
+		return false;
+	folio = page_folio(bio->bi_io_vec[0].bv_page);
+	if (!folio_test_swapcache(folio) || !folio_test_writeback(folio) ||
+	    folio_nr_pages(folio) != 1U || PAGE_SIZE != 4096U ||
+	    !owner->slot_epoch || folio->swap.val != owner->source_swap_entry)
+		return false;
+	area = get_swap_device(folio->swap);
+	if (IS_ERR_OR_NULL(area))
+		return false;
+	/* Direct whole block device only. The original extent lookup, not
+	 * swp_offset(), decides the device-relative sector. No swapfiles,
+	 * partition remaps, or stacked different bdevs are admitted.
+	 */
+	matches = (!submitted_area || area == submitted_area) &&
+		  (area->flags & SWP_BLKDEV) && area->bdev == bio->bi_bdev &&
+		  !bdev_is_partition(area->bdev) &&
+		  swap_folio_sector(folio) == bio->bi_iter.bi_sector &&
+		  swapz_round028_slot_epoch(folio->swap) == owner->slot_epoch;
+	put_swap_device(area);
+	return matches;
+}
+
+/* Called in original page_io after sector assignment, before submission.
+ * The sideband is still privately owned. Saved pointer values are identity
+ * comparisons ONLY; they must never be dereferenced after native completion.
+ */
+bool swapz_round064_original_route_bind(struct swapz_ci_owned_payload *owner,
+		const struct bio *bio, const struct swap_info_struct *area)
+{
+	if (!owner || !area || owner->round064_route_bound ||
+	    refcount_read(&owner->references) != 1 ||
+	    !swapz_round064_live_source_route(owner, bio, area))
+		return false;
+	owner->round064_source_bdev = bio->bi_bdev;
+	owner->round064_source_sector = bio->bi_iter.bi_sector;
+	owner->round064_source_page = bio->bi_io_vec[0].bv_page;
+	owner->round064_route_bound = true;
+	return true;
+}
+
+/* Only the live incoming DM clone can request this check. The matching
+ * original route is a candidate, not a lease on a previously selected table.
+ */
+bool swapz_round064_original_route_matches(
+		const struct swapz_ci_owned_payload *owner, const struct bio *clone)
+{
+	return owner && clone && owner->round064_route_bound &&
+	       owner->round064_source_bdev == clone->bi_bdev &&
+	       owner->round064_source_sector == clone->bi_iter.bi_sector &&
+	       clone->bi_io_vec &&
+	       owner->round064_source_page == clone->bi_io_vec[0].bv_page &&
+	       swapz_round064_live_source_route(owner, clone, NULL);
+}
+EXPORT_SYMBOL_GPL(swapz_round064_original_route_matches);
+#endif
+/* ROUND064_ORIGINAL_SLOT_ROUTE_END */

@@ -5041,6 +5041,74 @@ def apply_round063_original_dm_owner(path: str, composed: str) -> str:
         return composed.rstrip("\n") + "\n\n" + fragment.rstrip("\n") + "\n"
     return composed
 
+
+# Round064 captures the MM route before the first submit, then revalidates
+# against the accepted DM clone. No additional persistent swap-area ref.
+ROUND064_SLOT_TARGET_GUARD = r"""#if defined(SWAPZ_ROUND064_ORIGINAL_SLOT_TARGET_TEST) && \
+    defined(SWAPZ_ROUND063_ORIGINAL_DM_OWNER_TEST) && \
+    defined(SWAPZ_ROUND056_PREERASE_SINGLE_OWNER_TEST) && \
+    defined(SWAPZ_ROUND032_BIO_COPY_VIEW_CI_ONLY) && \
+    defined(SWAPZ_ROUND031_MM_BIO_SOURCE) && \
+    defined(SWAPZ_ROUND028_SLOT_EPOCH_SOURCE) && \
+    defined(SWAPZ_ROUND025_SIDEBAND_CI_ONLY) && defined(CONFIG_SWAP)"""
+ROUND064_SLOT_ROUTE_PATH = (
+    ROOT.parent / "runtime/native/fixtures/round064-original-slot-route.cfrag"
+)
+
+
+def apply_round064_original_slot_route(path: str, composed: str) -> str:
+    guard = ROUND064_SLOT_TARGET_GUARD + "\n"
+    if path == "include/linux/bio.h":
+        anchor = "#endif /* __LINUX_BIO_H */"
+        header = guard + """struct swap_info_struct;
+bool swapz_round064_original_route_bind(struct swapz_ci_owned_payload *owner,
+        const struct bio *bio, const struct swap_info_struct *area);
+bool swapz_round064_original_route_matches(
+        const struct swapz_ci_owned_payload *owner, const struct bio *clone);
+#endif
+"""
+        return replace_once(composed, anchor, header + anchor,
+                            path, "round064-route-prototypes")
+    if path == "block/bio.c":
+        anchor = "\tu64 source_swap_entry; /* FULL original MM value before first ref. */\n"
+        fields = guard + """	/* Immutable before submit; borrowed identity values only. */
+	struct block_device *round064_source_bdev;
+	sector_t round064_source_sector;
+	struct page *round064_source_page;
+	bool round064_route_bound;
+#endif
+"""
+        composed = replace_once(composed, anchor, anchor + fields,
+                                path, "round064-owner-route-fields")
+        fragment = ROUND064_SLOT_ROUTE_PATH.read_text(encoding="utf-8")
+        if fragment.count("/* ROUND064_ORIGINAL_SLOT_ROUTE_BEGIN */") != 1 or (
+                fragment.count("/* ROUND064_ORIGINAL_SLOT_ROUTE_END */") != 1):
+            raise SourceCompositionError("COMPOSE_CONFLICT:round064-source-markers")
+        return composed.rstrip("\n") + "\n\n" + fragment.rstrip("\n") + "\n"
+    if path == "mm/page_io.c":
+        start = composed.index("static void swap_bdev_submit_write(struct swap_io_ctx *ctx)\n")
+        end = composed.index("static void swap_bdev_submit_read(struct swap_io_ctx *ctx)\n", start)
+        write = composed[start:end]
+        anchor = "\tbio->bi_iter.bi_sector = swap_folio_sector(bio_first_folio_all(bio));\n"
+        hook = guard + """	/* Before first submit: finalize only the private original source
+	 * route from MM's real area, folio and extent. Ordinary BIO is unchanged.
+	 */
+	if (bio->bi_swapz_ci_sideband &&
+	    !swapz_round064_original_route_bind(bio->bi_swapz_ci_sideband,
+					       bio, ctx->sis)) {
+		struct swapz_ci_owned_payload *rejected = bio->bi_swapz_ci_sideband;
+
+		bio->bi_swapz_ci_sideband = NULL;
+		swapz_ci_owned_put(rejected);
+	}
+#endif
+"""
+        write = replace_once(write, anchor, anchor + hook,
+                             path, "round064-before-original-submit-route-bind")
+        return composed[:start] + write + composed[end:]
+    return composed
+
+
 def compose_postimage(path: str, original_bytes: bytes, *,
                       with_kunit: bool = True) -> bytes:
     """In-memory exactly pinned original source -> deterministic combined C."""
@@ -5096,6 +5164,7 @@ def compose_postimage(path: str, original_bytes: bytes, *,
     changed = ROUND056.apply(path, changed, replace_once,
                             with_kunit=with_kunit)
     changed = apply_round063_original_dm_owner(path, changed)
+    changed = apply_round064_original_slot_route(path, changed)
     if path == "mm/zswap.c":
         for required in (
             "swapz_round028_slot_epoch(swpentry)",

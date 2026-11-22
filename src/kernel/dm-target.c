@@ -2202,6 +2202,58 @@ static void swapz_lane_gap_ack_flush(struct swapz_dm *ctx,
 	}
 }
 
+#if defined(SWAPZ_ROUND064_ORIGINAL_SLOT_TARGET_TEST) && \
+    defined(SWAPZ_ROUND063_ORIGINAL_DM_OWNER_TEST) && \
+    defined(SWAPZ_ROUND056_PREERASE_SINGLE_OWNER_TEST) && \
+    defined(SWAPZ_ROUND032_BIO_COPY_VIEW_CI_ONLY) && \
+    defined(SWAPZ_ROUND031_MM_BIO_SOURCE) && \
+    defined(SWAPZ_ROUND028_SLOT_EPOCH_SOURCE) && \
+    defined(SWAPZ_ROUND025_SIDEBAND_CI_ONLY) && defined(CONFIG_SWAP)
+/* ROUND064_CURRENT_TARGET_OWNER_BEGIN */
+static struct swapz_ci_owned_payload *
+swapz_round064_current_owner_get(struct dm_target *ti, struct swapz_dm *ctx,
+				struct bio *bio)
+{
+	struct mapped_device *md;
+	struct swapz_ci_owned_payload *owner;
+	sector_t sector = bio->bi_iter.bi_sector;
+
+	/* Real DM ->map is inside core's live-table read-side scope. Restrict
+	 * to the whole mapper and a zero-based target; do not infer a prior
+	 * table generation or hold an SRCU index past this call.
+	 */
+	if (ctx->target != ti || !ti->table || ti->begin ||
+	    ti->len < SWAPZ_SECTORS || sector > ti->len - SWAPZ_SECTORS ||
+	    sector % SWAPZ_SECTORS || bio_sectors(bio) != SWAPZ_SECTORS ||
+	    sector / SWAPZ_SECTORS >= ctx->logical_pages)
+		return NULL;
+	md = dm_table_get_md(ti->table);
+	if (!md || !bio->bi_bdev || dm_disk(md)->part0 != bio->bi_bdev)
+		return NULL;
+	owner = swapz_round063_original_dm_owner_get(bio);
+	if (!owner)
+		return NULL;
+	/* MM cluster/area checks precede queue_lock. Failed candidate has no
+	 * extra ref; original folio and ordinary WRITE are unchanged.
+	 */
+	if (!swapz_round064_original_route_matches(owner, bio)) {
+		swapz_round063_original_dm_owner_put(owner);
+		return NULL;
+	}
+	return owner;
+}
+
+static void swapz_round064_current_owner_put(struct swapz_bio_ref *entry)
+{
+	struct swapz_ci_owned_payload *owner = entry->round063_owned_original;
+
+	/* Caller owns descriptor, outside queue_lock, before ordinary endio. */
+	entry->round063_owned_original = NULL;
+	swapz_round063_original_dm_owner_put(owner);
+}
+/* ROUND064_CURRENT_TARGET_OWNER_END */
+#endif /* Round064 staged original slot/target candidate only */
+
 static void swapz_complete(struct bio *bio, int error)
 {
 	struct swapz_bio_ref *entry = dm_per_bio_data(bio, sizeof(*entry));
@@ -2238,8 +2290,20 @@ static void swapz_complete(struct bio *bio, int error)
     defined(SWAPZ_ROUND031_MM_BIO_SOURCE) && \
     defined(SWAPZ_ROUND025_SIDEBAND_CI_ONLY)
 	/* Release before real upper bio_endio retires dm_per_bio_data. */
+#if defined(SWAPZ_ROUND064_ORIGINAL_SLOT_TARGET_TEST) && \
+    defined(SWAPZ_ROUND063_ORIGINAL_DM_OWNER_TEST) && \
+    defined(SWAPZ_ROUND056_PREERASE_SINGLE_OWNER_TEST) && \
+    defined(SWAPZ_ROUND032_BIO_COPY_VIEW_CI_ONLY) && \
+    defined(SWAPZ_ROUND031_MM_BIO_SOURCE) && \
+    defined(SWAPZ_ROUND028_SLOT_EPOCH_SOURCE) && \
+    defined(SWAPZ_ROUND025_SIDEBAND_CI_ONLY) && defined(CONFIG_SWAP)
+/* ROUND064_COMPLETE_PUT_BEGIN */
+	swapz_round064_current_owner_put(entry);
+/* ROUND064_COMPLETE_PUT_END */
+#else
 	swapz_round063_original_dm_owner_put(entry->round063_owned_original);
 	entry->round063_owned_original = NULL;
+#endif
 #endif
 	if (error)
 		bio->bi_status = errno_to_blk_status(error);
@@ -13974,8 +14038,21 @@ static int swapz_map(struct dm_target *ti, struct bio *bio)
 	if (bio_op(bio) == REQ_OP_WRITE && count == SWAPZ_SECTORS &&
 	    (bio->bi_opf & REQ_SWAP) &&
 	    bio->bi_iter.bi_size == SWAPZ_BLOCK_BYTES)
+#if defined(SWAPZ_ROUND064_ORIGINAL_SLOT_TARGET_TEST) && \
+    defined(SWAPZ_ROUND063_ORIGINAL_DM_OWNER_TEST) && \
+    defined(SWAPZ_ROUND056_PREERASE_SINGLE_OWNER_TEST) && \
+    defined(SWAPZ_ROUND032_BIO_COPY_VIEW_CI_ONLY) && \
+    defined(SWAPZ_ROUND031_MM_BIO_SOURCE) && \
+    defined(SWAPZ_ROUND028_SLOT_EPOCH_SOURCE) && \
+    defined(SWAPZ_ROUND025_SIDEBAND_CI_ONLY) && defined(CONFIG_SWAP)
+/* ROUND064_MAP_ACQUIRE_BEGIN */
+		entry->round063_owned_original =
+			swapz_round064_current_owner_get(ti, ctx, bio);
+/* ROUND064_MAP_ACQUIRE_END */
+#else
 		entry->round063_owned_original =
 			swapz_round063_original_dm_owner_get(bio);
+#endif
 #endif
 	{
 		unsigned int bio_segs = 0;
@@ -14032,9 +14109,21 @@ static int swapz_map(struct dm_target *ti, struct bio *bio)
     defined(SWAPZ_ROUND031_MM_BIO_SOURCE) && \
     defined(SWAPZ_ROUND025_SIDEBAND_CI_ONLY)
 			/* A rejected clone never transfers an owner into incoming. */
+#if defined(SWAPZ_ROUND064_ORIGINAL_SLOT_TARGET_TEST) && \
+    defined(SWAPZ_ROUND063_ORIGINAL_DM_OWNER_TEST) && \
+    defined(SWAPZ_ROUND056_PREERASE_SINGLE_OWNER_TEST) && \
+    defined(SWAPZ_ROUND032_BIO_COPY_VIEW_CI_ONLY) && \
+    defined(SWAPZ_ROUND031_MM_BIO_SOURCE) && \
+    defined(SWAPZ_ROUND028_SLOT_EPOCH_SOURCE) && \
+    defined(SWAPZ_ROUND025_SIDEBAND_CI_ONLY) && defined(CONFIG_SWAP)
+/* ROUND064_MAP_REJECT_BEGIN */
+			swapz_round064_current_owner_put(entry);
+/* ROUND064_MAP_REJECT_END */
+#else
 			swapz_round063_original_dm_owner_put(
 				entry->round063_owned_original);
 			entry->round063_owned_original = NULL;
+#endif
 #endif
 			return READ_ONCE(ctx->failed) ? DM_MAPIO_KILL : DM_MAPIO_REQUEUE;
 		}
