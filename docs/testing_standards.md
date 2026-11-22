@@ -18494,3 +18494,65 @@ first4096 header/partition and all owner-host safety gates are unchanged.
 The sole original native Linux pin is torvalds/linux@c339f4010dea8b0d754f84ace70cd1b089878ef8. Agent3's separate, default-undefined `SWAPZ_ROUND067_ORIGINAL_DM_RUNTIME_TEST` stages a one-case KUnit suite into actual original `drivers/md/dm.c` after validating the pre-existing Round056/058/065 inherited source postimages. The test must call **real** built-in DM `dm_submit_bio`, `__map_bio`, `clone_endio`, `dm_suspend` with NOFLUSH, `dm_swap_table`, `dm_resume`, the deferred/requeue worker and target `dtr`, rather than constructing another state-only C mock. The target has no physical backing device and uses only a KUnit-allocated original 4096-byte memory page. Under noflush suspend, a genuinely retained clone is completed as DM_REQUEUE while `pending_io` drains. An already deferred second original BIO and the requeued first BIO must map to the **new** same-geometry table incarnation after resume. Both original parent upper endio callbacks must occur exactly once, return the deliberate test-only IOERR and free all owned objects only after completion. Old `dtr` runs after the original table is detached; new `dtr` runs during final DM teardown. Original source owner sideband must NOT be forged; DM execution is not authentication.
 
 Required source-specific CI: strict GCC and Clang `-Wall -Wextra -Wconversion -Wshadow -Werror` with ASan/UBSan for the exact shared changed-C incarnation predicate and 8 separately compiled AND executed semantic mutants per compiler; actual pinned original rootless UML `CONFIG_BLK_DEV_DM=y` with one new KUnit JSON **and** KTAP PASS, zero skip/crash/error and first-error reporting; full exact original source postimage and negative/duplicate stage checks before any writes. This is additive to prior Round066 71+1 native KUnit and staged x86 ZSWAP=y/n matched GPL proof at its prior SHA, not a relabeling of that prior state test. If the new native job is queued, status PROGRESS; if red, preserve true first compiler/runtime error and do not claim real asynchronous qualification. No owner Make, loaded/privileged/physical/pressure test; preserve all old and peer standards verbatim. `SOURCE_MAPPED_AUTHENTICATED=0`, `PHASE_A=BLOCKED`, compressed handoff/forced RAW bypass disabled; RAW_4096 whole original uncompressed page; physical SWAPSPACE2 header/partition table protected.
+
+## Round068 real pinned-original decoder owner KUnit execution, default-OFF
+
+The original-pristine Linux pin is torvalds/linux
+c339f4010dea8b0d754f84ace70cd1b089878ef8. The previous Round067
+native original x86 ZSWAP=y/n positive real GPL LZO1X/LZ4/SHA/CRC
+external module, absent-export genuine modpost negative and omitted-LZ4
+source negative are independently green, but are **compile/link**
+evidence only, not executed get/put/close/wake or pool retirement.
+
+Round068 Agent4's distinct rootless original UML KUnit source must copy
+byte-identical unchanged dormant decoder-owner C/header, product codec C/
+header and disabled import codec header into a disposable pinned kernel
+test-only lib/ subdirectory. Reject any original Git drift, dirty kernel
+worktree, pre-existing destination, altered source blob or a changed
+original lib/Makefile pin; stage only an additive CONFIG_KUNIT Kbuild
+object, verify all staged SHA256 postimages and keep main product/source
+authority completely inactive. Do not introduce any original MM/DM
+source mutation or another worker's new API.
+
+Require **actual booted original UML KUnit** with real native kernel
+spinlocks, wait queues, kthreads and completions. Tests must observe a
+concurrent sleepable close blocked across two live readers, reject late
+gets, perform both puts, wake/join the final reader and only then release
+owner storage. Repeat the race and verify duplicate get/put, overflow,
+wrong codec and independent immutable codec lease after simulated source
+pool retirement. Caller must keep owner alive until all racing gets
+have quiesced; the owner cannot close from its own still-pinned reader.
+Do not pretend that unit tests enforce unrepresentable caller lifetime
+requirements or reproduce an actual zswap pool teardown/module unload.
+
+For **both** native original LZO1X and raw LZ4, compress an original
+4096-byte page with its original pinned kernel codec, make a distinct
+reader-owned compressed copy, release the source-owned compressed bytes,
+then decode through the unchanged real owner and original native decoder
+with exact product CRC32C, SHA256 and full 4096-byte memcmp. Corrupted
+SHA must refuse with output unchanged. The test-only volatile map,
+lower/FUA and upper ACK authority flags are **synthetic inputs**, never
+accepted production writeback evidence.
+
+Native qualification requires a matched source SHA, effective KUnit
+original config, all four executed JSON **and** KTAP cases PASS,
+zero failed/skipped/crashed/errors, and no kernel panic, sleeping-under-
+spinlock or sanitizer fault; reject forged JSON/KTAP statuses, omissions
+and duplicate suite. Source-host original owner-C GCC and Clang strict
+-Wall -Wextra -Wconversion -Wshadow -Werror ASan+UBSan actual compiled
+AND executed 18 semantic codec/ownership C mutants and four close/wake
+C mutants remain a separate mandatory gate; synthetic verdict mutation
+self-tests do not count as compiled C mutants. Report raw first native
+compiler/assertion error via bounded privacy-redacted fail-only phase,
+not a masked secondary status. Pending native = PROGRESS.
+
+No production authentication or release: SOURCE_MAPPED_AUTHENTICATED=0,
+PHASE_A=BLOCKED, imported ACTIVE0; direct compressed handoff disabled,
+forced RAW bypass disabled. Linux MM controls zswap RAM and natural
+eviction; swapz performs disk compression, packing and GC only.
+Ordinary RAW_4096 is the *full original uncompressed* page; original
+LZO1X/LZ4 uses a separate volatile codec-tagged representation.
+Preserve physical SWAPSPACE2 first 4096 header/signature/UUID, parent
+partition table, fixed 20-byte map and data-only 4/8/16KiB extents.
+No owner Make, privileged, loaded-kernel, real physical device, real
+pressure, actual lower durable FUA or genuine upper BIO ACK tests.

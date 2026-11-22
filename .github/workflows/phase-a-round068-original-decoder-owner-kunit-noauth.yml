@@ -1,0 +1,203 @@
+name: Round068 original pinned-kernel decoder-owner native KUnit NO_AUTH
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'src/kernel/zswap-import-decoder-owner.c'
+      - 'src/kernel/zswap-import-decoder-owner.h'
+      - 'tests/runtime/native/fixtures/round068-original-decoder-owner-kunit.c'
+      - 'tests/tools/round068-original-decoder-owner-kunit-verify.py'
+      - '.github/workflows/phase-a-round068-original-decoder-owner-kunit-noauth.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  source-host:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          path: swapz
+          fetch-depth: 2
+          persist-credentials: false
+      - uses: actions/checkout@v4
+        with:
+          repository: torvalds/linux
+          ref: c339f4010dea8b0d754f84ace70cd1b089878ef8
+          fetch-depth: 1
+          sparse-checkout: |
+            include/linux/lzo.h
+            kernel/module/main.c
+          sparse-checkout-cone-mode: false
+          path: linux
+          persist-credentials: false
+      - name: Exact source and native verifier, GCC Clang ASan UBSan executed real owner C semantic mutants
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          umask 077
+          test "$GITHUB_REF" = refs/heads/main
+          test "$(git -C swapz rev-parse HEAD)" = "$GITHUB_SHA"
+          test "$(git -C linux rev-parse HEAD)" = c339f4010dea8b0d754f84ace70cd1b089878ef8
+          test -z "$(git -C swapz status --porcelain --untracked-files=all)"
+          test -z "$(git -C linux status --porcelain --untracked-files=all)"
+          git -C swapz diff --check HEAD^ HEAD
+          python3 -B swapz/tests/tools/round068-original-decoder-owner-kunit-verify.py self-test
+          python3 -B - <<'PY'
+          import ast
+          from pathlib import Path
+          path = Path('swapz/tests/tools/round068-original-decoder-owner-kunit-verify.py')
+          ast.parse(path.read_text(), filename=path.name)
+          print('ROUND068_ORIGINAL_DECODER_STAGER_SYNTAX_PASS')
+          PY
+          log="$RUNNER_TEMP/round068-host-deps.log"
+          if ! sudo -n apt-get update -qq >"$log" 2>&1; then
+            echo '::error::ROUND068_DECODER_FIRST_ERROR phase=host-apt' >&2
+            exit 3
+          fi
+          if ! sudo -n env DEBIAN_FRONTEND=noninteractive apt-get install -y -qq \
+              --no-install-recommends liblzo2-dev liblz4-dev libssl-dev >>"$log" 2>&1; then
+            echo '::error::ROUND068_DECODER_FIRST_ERROR phase=host-original-codec-deps' >&2
+            exit 3
+          fi
+          python3 -B swapz/tests/tools/round066-original-decoder-owner-verify.py \
+            --linux-root linux
+          python3 -B swapz/tests/tools/round066-decoder-drain-release-verify.py \
+            --owner-source swapz/src/kernel/zswap-import-decoder-owner.c \
+            --owner-header swapz/src/kernel/zswap-import-decoder-owner.h
+          echo 'ROUND068_ORIGINAL_DECODER_HOST_GCC_CLANG_ASAN_UBSAN_REAL_OWNER_C_PASS baselines=4 compiled_executed_semantic_mutants=22'
+  original-uml-native:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 110
+    needs: source-host
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          path: swapz
+          persist-credentials: false
+      - uses: actions/checkout@v4
+        with:
+          repository: torvalds/linux
+          ref: c339f4010dea8b0d754f84ace70cd1b089878ef8
+          fetch-depth: 1
+          path: linux
+          persist-credentials: false
+      - name: Rootless original kernel build requirements on ephemeral hosted runner only
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          umask 077
+          log="$RUNNER_TEMP/round068-uml-deps.log"
+          if ! sudo -n apt-get update -qq >"$log" 2>&1; then
+            echo '::error::ROUND068_DECODER_FIRST_ERROR phase=uml-apt' >&2
+            exit 3
+          fi
+          if ! sudo -n env DEBIAN_FRONTEND=noninteractive apt-get install -y -qq \
+              --no-install-recommends build-essential bc bison flex clang \
+              libelf-dev libssl-dev libncurses-dev liblz4-dev python3 \
+              python3-pyelftools binutils >>"$log" 2>&1; then
+            echo '::error::ROUND068_DECODER_FIRST_ERROR phase=uml-build-deps' >&2
+            exit 3
+          fi
+      - name: Pin original pristine source, stage decoder-only KUnit and verify all postimages
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          umask 077
+          test "$GITHUB_REF" = refs/heads/main
+          test "$(git -C swapz rev-parse HEAD)" = "$GITHUB_SHA"
+          test "$(git -C linux rev-parse HEAD)" = c339f4010dea8b0d754f84ace70cd1b089878ef8
+          python3 -B swapz/tests/tools/round068-original-decoder-owner-kunit-verify.py stage \
+            --linux-root linux --manifest "$RUNNER_TEMP/round068-owner-manifest.json"
+          git -C linux diff --check
+          python3 - "$RUNNER_TEMP/round068-owner-manifest.json" <<'PY'
+          import hashlib
+          import json
+          from pathlib import Path
+          import sys
+          data = json.loads(Path(sys.argv[1]).read_text())
+          assert data["original_pin"] == "c339f4010dea8b0d754f84ace70cd1b089878ef8"
+          assert data["source_mapped_authenticated"] is False
+          assert len(data["entries"]) == 8
+          for entry in data["entries"]:
+              assert hashlib.sha256((Path("linux") / entry["path"]).read_bytes()).hexdigest() == entry["sha256"]
+          print("ROUND068_PINNED_NATIVE_DECODER_ALL_POSTIMAGES_PASS count=8")
+          PY
+      - name: Actually compile and execute pinned original UML owner spin/wait and original LZO/LZ4 KUnit
+        shell: bash
+        timeout-minutes: 95
+        run: |
+          set -Eeuo pipefail
+          umask 077
+          phase=init
+          out="$RUNNER_TEMP/round068-owner-uml"
+          request="$RUNNER_TEMP/round068-owner.kunitconfig"
+          result="$RUNNER_TEMP/round068-owner.json"
+          log="$RUNNER_TEMP/round068-owner-first-error.log"
+          first_error() {
+            local code="$1"
+            python3 - "$log" "$phase" "$code" <<'PY'
+          import re
+          import sys
+          from pathlib import Path
+          content = Path(sys.argv[1]).read_text(errors="replace")
+          for line in content.splitlines():
+              if re.search(r"(?i)(?:fatal error:|error:|undefined reference|not ok\s+[0-9]+|Kernel panic|KASAN:|BUG: sleeping)", line):
+                  source = re.sub(r"/(?:[A-Za-z0-9_.-]+/)*[A-Za-z0-9_.-]+",
+                                  "[original-or-test-file]", line)
+                  source = re.sub(r"[^ -~]", "?", source)[:220]
+                  print("::error::ROUND068_DECODER_FIRST_ERROR phase=" +
+                        sys.argv[2] + " exit=" + sys.argv[3] + " first=" + source)
+                  break
+          else:
+              print("::error::ROUND068_DECODER_FIRST_ERROR phase=" +
+                    sys.argv[2] + " exit=" + sys.argv[3] +
+                    " no_recognized_native_diagnostic")
+          PY
+          }
+          cat >"$request" <<'KUNIT_CFG'
+          CONFIG_KUNIT=y
+          CONFIG_BLOCK=y
+          CONFIG_SWAP=y
+          CONFIG_ZSWAP=y
+          CONFIG_CRYPTO=y
+          CONFIG_CRYPTO_SHA256=y
+          CONFIG_CRYPTO_LIB_SHA256=y
+          CONFIG_CRC32=y
+          CONFIG_LZO_COMPRESS=y
+          CONFIG_LZO_DECOMPRESS=y
+          CONFIG_LZ4_COMPRESS=y
+          CONFIG_LZ4_DECOMPRESS=y
+          # CONFIG_KUNIT_ALL_TESTS is not set
+          # CONFIG_CGROUPS is not set
+          KUNIT_CFG
+          phase=original-UML-build-and-native-KUnit
+          if timeout -k 10s 82m python3 -B linux/tools/testing/kunit/kunit.py run \
+            --arch=um --build_dir="$out" --kunitconfig="$request" \
+            --make_options="KCFLAGS=-Werror" --jobs=2 --timeout=180 \
+            --json="$result" 'swapz_round068_decoder_owner*' >"$log" 2>&1; then
+            echo 'ROUND068_GENUINE_PINNED_ORIGINAL_UML_BUILD_BOOT_PASS'
+          else
+            code=$?
+            first_error "$code"
+            exit "$code"
+          fi
+          phase=effective-original-config
+          test -x "$out/linux" && test -s "$out/test.log" && test -s "$result"
+          for entry in CONFIG_KUNIT=y CONFIG_ZSWAP=y CONFIG_LZO_COMPRESS=y CONFIG_LZO_DECOMPRESS=y CONFIG_LZ4_COMPRESS=y CONFIG_LZ4_DECOMPRESS=y CONFIG_CRYPTO_LIB_SHA256=y; do
+            grep -Fxq "$entry" "$out/.config" || {
+              echo "::error::ROUND068_DECODER_FIRST_ERROR phase=config missing=$entry" >&2
+              exit 3
+            }
+          done
+          phase=native-JSON-KTAP-execution
+          if python3 -B swapz/tests/tools/round068-original-decoder-owner-kunit-verify.py \
+            verify-native --result "$result" --kernel-log "$out/test.log" >"$log" 2>&1; then
+            cat "$log"
+          else
+            code=$?
+            first_error "$code"
+            exit "$code"
+          fi
+          echo 'ROUND068_ORIGINAL_DECODER_NATIVE_OWNER_KUNIT_PASS original_kernel=YES real_spinlock_wait=YES full4096_native_LZO1X_LZ4=YES SOURCE_MAPPED_AUTHENTICATED=0 PHASE_A=BLOCKED'
