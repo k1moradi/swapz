@@ -100,7 +100,6 @@ int main(void)
 {
     size_t direct_output_length;
     unsigned char direct_output[SWAPZ_BLOCK_BYTES];
-    unsigned char shortened[SWAPZ_BLOCK_BYTES];
     size_t shortened_length = sizeof(original_lzo);
     unsigned char corrupted[sizeof(original_lzo)];
     struct swapz_zswap_import_record candidate;

@@ -19958,3 +19958,32 @@ secondary reclaim or recompression. Original compressed LZO1X/raw LZ4
 must remain separately authenticated, exact immutable preerase
 bytes with independent decoder lifetime/pinned GC old readers.
 Ordinary RAW_4096 always means complete original UNCOMPRESSED 4096.
+
+## Round081 Agent7 — source-linked original LZO1X strict compiler first-error regression
+
+A host-only fixture whose original Linux LZO1X input and independent
+decoder-owner lifetime are under source-lock must first compile the entire
+unchanged test and actual product decoder with GCC and Clang C23/C2x,
+-Wall/-Wextra/-Wconversion/-Wshadow/-Wpedantic/-Werror and ASan+UBSan.
+Unused local declarations fail qualification: remove genuinely redundant
+test-only declarations without relaxing strict warnings or disabling an
+existing negative. Original pinned Linux lib/lzo C translation units may
+retain the narrow documented original-source GNU11 host ABI shim; verify
+whole upstream and product Git blobs before declaring compatibility.
+
+A real PASS requires the positive 4096-original-byte genuine compressed
+LZO1X stream to decode through the existing dormant product independent
+decoder/lease, and 18 separately compiled, linked and executed directed
+product-guard C semantic mutations for **each** compiler. A warning,
+compiler failure, sanitizer crash, planned mutant or source-text-only match
+does not count as a killed runtime mutant. Preserve the exact earliest
+failure in CI and evidence for each immutable source commit; never
+relabel an older failed original-source run as PASS. Keep tests host-only:
+live selected original STORED source, real lower FUA and once-only upper
+BIO completion remain unproved. Linux MM/zswap alone controls compressed
+RAM, pressure and natural eviction; swapz owns disk packing and GC
+without additional reclaim or recompression. Ordinary RAW_4096 is the
+complete ORIGINAL UNCOMPRESSED page. Dormant original compressed
+3569..4095 rejects without truncation at max3568. Protect physical
+SWAPSPACE2 first4096 and the RAM-only 20-byte map. Source AUTH0,
+Phase A BLOCKED, direct/forced RAW/import OFF.
