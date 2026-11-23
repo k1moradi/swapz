@@ -19228,3 +19228,12 @@ PHASE_A stays BLOCKED and no direct compressed-handoff/forced RAW activation
 gate may be inferred from successful host geometry tests. Conventional
 RAW_4096 is the complete original uncompressed page; MM/zswap owns natural
 compressed-RAM eviction and swapz remains disk-packing/GC only.
+
+
+## Round073 Agent8 — current DM lower WRITE/FUA source-locked host MODEL (2026-11-23)
+
+The Agent8 host fixture (tests/runtime/native/fixtures/round073-lower-fua-ordering.c) is a bounded, deterministic C2x behavioral MODEL. tests/tools/round073-lower-fua-ordering-verify.py MUST first match the exact Git blob SHA of read-only src/kernel/dm-target.c and the real lower WRITE, asynchronous callback, FUA/flush and GC source anchors. A model cannot claim that its own tests ran production dm_io(), genuine upper bio_endio(), physical flush durability, real GC reader lifetime, or the pinned original Linux kernel.
+
+For each GCC and Clang, compile with strict C2x warnings-as-errors and ASan+UBSan; execute the successful baseline and at least ten separately compiled/executed semantic mutants per compiler. Reject a mutant only on its expected named failure and nonzero status, never a sanitizer crash, compilation failure, or grep-only marker. Cover lower EIO, post-WRITE FUA failure, PREFLUSH admission ordering, upper ACK once-only, teardown/late callback, stale generations, 4/8/16KiB and partial lower completion, first-error precedence and pinned reader GC reclaim. Source drift and the earliest compiler/mutant diagnostic must fail closed with bounded first-cause output.
+
+The workflow is rootless, unprivileged and does not touch physical media or real swap pressure. Preserve SOURCE_MAPPED_AUTHENTICATED=0, PHASE_A=BLOCKED, original source codec distinct from ordinary uncompressed RAW_4096, and Linux MM/zswap as sole compressed-RAM pressure owner. Commit Agent8's per-round evidence.md and results.json, retaining real native NOT_RUN and CI PENDING until the precise source-run is terminal.

@@ -1,0 +1,39 @@
+name: Round073 Agent8 DM lower WRITE FUA ordering host model noauth
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - tests/runtime/native/fixtures/round073-lower-fua-ordering.c
+      - tests/tools/round073-lower-fua-ordering-verify.py
+      - .github/workflows/phase-a-round073-lower-fua-ordering-noauth.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: round073-agent8-${{ github.sha }}
+  cancel-in-progress: false
+
+jobs:
+  source-locked-host-model:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - name: Checkout exact immutable source commit
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: GCC and Clang strict ASan UBSan plus fifteen compiled executed negatives each
+        run: |
+          python3 tests/tools/round073-lower-fua-ordering-verify.py \
+            --report "$RUNNER_TEMP/round073-agent8-host-results.json"
+      - name: Preserve bounded host-model qualification artifact
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: round073-agent8-source-model-${{ github.sha }}
+          path: ${{ runner.temp }}/round073-agent8-host-results.json
+          if-no-files-found: ignore
+          retention-days: 14

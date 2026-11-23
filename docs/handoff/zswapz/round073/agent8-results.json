@@ -1,0 +1,51 @@
+{
+  "agent": 8,
+  "round": "073",
+  "state": "PENDING_CI",
+  "task_commit": "5f4d74f1ea538187e37fa0cdec2babb49186c59d",
+  "engineering_baseline": "7c1ae38d41afb083345b1d7ec67b2d92d48b843a",
+  "tested_code_commit": null,
+  "tested_code_parent": null,
+  "source_anchor_path": "src/kernel/dm-target.c",
+  "source_anchor_git_blob_sha": "f1cab252cd990190646c82da81378d1563475826",
+  "qualification_kind": "source-locked userspace behavioral MODEL (production C read only)",
+  "local_host": {
+    "gcc": {
+      "version": "14.2.0",
+      "baseline": "PASS",
+      "compiled_executed_mutants_rejected": 15,
+      "mutants_total": 15,
+      "asan_ubsan": true
+    },
+    "clang": {
+      "version": "17.0.0",
+      "baseline": "PASS",
+      "compiled_executed_mutants_rejected": 15,
+      "mutants_total": 15,
+      "asan_ubsan": true
+    }
+  },
+  "github_actions": {
+    "workflow": "phase-a-round073-lower-fua-ordering-noauth.yml",
+    "run_id": null,
+    "job_id": null,
+    "status": "PENDING",
+    "conclusion": null,
+    "first_error": null
+  },
+  "original_linux": {
+    "commit": "c339f4010dea8b0d754f84ace70cd1b089878ef8",
+    "native_kunit_executed": false,
+    "ktap_pass": null,
+    "ktap_fail": null,
+    "status": "NOT_RUN_HOST_ONLY_SCOPE"
+  },
+  "real_lower_io": false,
+  "real_physical_durability_proven": false,
+  "source_mapped_authenticated": 0,
+  "phase_a": "BLOCKED",
+  "direct_compressed_handoff": "DISABLED",
+  "forced_raw_bypass": "DISABLED",
+  "import_active": 0,
+  "source_production_c_h_changed": false
+}
