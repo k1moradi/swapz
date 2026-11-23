@@ -19022,3 +19022,31 @@ imported ACTIVE=0 stay unmodified. Never activate a path, change on-disk
 20-byte mappings, SWAPSPACE2 header/UUID/signature/partition table, or claim
 physical durability, genuine MM ownership, real source authentication, or
 exactly-once real upper ACK from this scheduling simulation.
+
+## Round072 Agent6 — exact source-linked natural-pressure CI push-base qualification
+
+The dedicated natural-pressure cooperation workflow MUST pass the original
+GitHub main **push** event's exact `github.event.before` SHA to the unmodified
+repository-policy validator through a job-scoped `SWAPZ_PUSH_BEFORE_SHA`
+environment binding. It MUST NOT synthesize a base from `HEAD^`, use an
+empty/all-zero SHA, guess a merge base, disable policy enforcement or suppress
+first-parent errors. A workflow_dispatch event legitimately lacks this push
+boundary; only the policy's separately checked dispatch path may run, with no
+fake base. Each exact-source workflow must execute the existing rootless
+repository-policy selftests for both push ranges and dispatch, then run
+`--enforce` against the real checked-out `GITHUB_SHA` and actual push metadata.
+The Agent6 source-host verifier must independently fail closed if this workflow
+binding, push/main, dispatch or either policy invocation disappears.
+
+A green source-linked scheduling model requires the same GCC+Clang strict
+C23 ASan+UBSan execution and 24 independently compiled/executed semantic C
+mutants per compiler (48 total), plus green canonical first-parent policy in
+the **same exact-SHA** workflow run. A completed red policy job is an overall
+FAIL despite host-model unit PASS; published docs-only evidence cannot repair
+a red code-bearing commit. Preserve the exact 8-entry bounded owned-original
+byte-copy queue, original LZO1X/raw LZ4 volatile representation, FIFO 4/8/16KiB
+data-only extents, no secondary reclaim and no recompression. Conventional
+RAW_4096 remains full original uncompressed 4096 bytes. This remains a rootless
+model and not real MM provenance, physical durability, privileged I/O, actual
+upper BIO ACK or pressure qualification. SOURCE_MAPPED_AUTHENTICATED=0,
+PHASE_A=BLOCKED; direct compressed handoff, forced RAW bypass and imports are OFF.

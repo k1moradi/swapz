@@ -104,6 +104,23 @@ def first_diagnostic(result: subprocess.CompletedProcess[str]) -> str:
     return (lines[0][:240] if lines else "no diagnostic")
 
 
+def verify_policy_workflow_push_base() -> None:
+    """Fail closed if the real push event's first-parent SHA stops reaching CI."""
+    workflow = (ROOT / ".github/workflows/phase-a-round071-natural-pressure-cooperation-noauth.yml").read_text(
+        encoding="utf-8")
+    event_before = "$" + "{{ github.event.before }}"
+    expected_env = "    env:\n      SWAPZ_PUSH_BEFORE_SHA: " + event_before + "\n"
+    require(expected_env in workflow and
+            workflow.count("SWAPZ_PUSH_BEFORE_SHA:") == 1,
+            "exact main-push base missing, ambiguous or fabricated")
+    for required in ("on:\n", "  push:\n", "    branches: [main]\n",
+                     "  workflow_dispatch:\n",
+                     "python3 -B tests/runtime/native/repository-policy-test.py\n",
+                     "python3 -B tests/runtime/native/repository-policy-test.py --enforce"):
+        require(required in workflow,
+                f"source CI push/dispatch first-parent policy guard absent: {required!r}")
+
+
 def verify_source_contract() -> str:
     tracked = {
         CODEC: ("#define SWAPZ_BLOCK_BYTES 4096U",
@@ -160,6 +177,7 @@ def reject_mutation(source: str, name: str, before: str, after: str) -> str:
 
 
 def run_suite() -> dict[str, object]:
+    verify_policy_workflow_push_base()
     original = verify_source_contract()
     outputs: list[str] = []
     with tempfile.TemporaryDirectory(prefix="swapz-round071-agent6-") as directory:

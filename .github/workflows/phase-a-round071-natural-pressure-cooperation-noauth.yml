@@ -18,6 +18,8 @@ jobs:
   gcc-clang-asan-ubsan-compiled-semantic-mutants:
     runs-on: ubuntu-24.04
     timeout-minutes: 15
+    env:
+      SWAPZ_PUSH_BEFORE_SHA: ${{ github.event.before }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -46,6 +48,11 @@ jobs:
           python3 -B tests/tools/round071-natural-pressure-cooperation-verify.py \
             --json round071-evidence/host-policy.json \
             --ktap round071-evidence/host-policy.ktap
+      - name: Exercise source policy first-parent push and dispatch selftests
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 -B tests/runtime/native/repository-policy-test.py
       - name: Preserve existing canonical testing standards prefix
         run: python3 -B tests/runtime/native/repository-policy-test.py --enforce
       - name: Attach explicitly HOST-MODEL-only evidence
