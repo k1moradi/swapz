@@ -19987,3 +19987,19 @@ complete ORIGINAL UNCOMPRESSED page. Dormant original compressed
 3569..4095 rejects without truncation at max3568. Protect physical
 SWAPSPACE2 first4096 and the RAM-only 20-byte map. Source AUTH0,
 Phase A BLOCKED, direct/forced RAW/import OFF.
+
+### Round081 Agent7 layered owner-vs-inner decoder mutation observability
+
+A retained original decoder lease rejects mismatched codec/version before
+the inner dormant import decode function. A mutant of the inner version
+guard must be measured by a separately directed *inner import-decode*
+negative, not falsely declared killed by the outer owner check. Keep the
+existing leased-reader version refusal simultaneously and leave the
+positive original LZO1X operation under a retained independent lease.
+The direct-import negative deliberately bypasses only the test's outer
+lease to exercise the product's defense-in-depth guard; it does not
+authenticate a live original STORED source or enable production import.
+Every changed-source version-guard mutant still needs a compiled and
+executed C runtime FIRST_ERROR, while a survived mutant fails CI. Never
+change, suppress or skip strict original-source/product/compiler checks
+to manufacture qualification.

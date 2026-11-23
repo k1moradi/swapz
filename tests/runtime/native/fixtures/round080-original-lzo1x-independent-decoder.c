@@ -181,7 +181,18 @@ int main(void)
     candidate = record; candidate.codec = 3U;
     expected_failure("wrong_original_codec", candidate, authority, -EOPNOTSUPP);
     candidate = record; candidate.version = 2U;
-    expected_failure("version", candidate, authority, -EOPNOTSUPP);
+    /* The retained lease rejects stale versions before the inner decoder.
+     * Also exercise the independently defended dormant import version guard
+     * directly, so a real guard mutant cannot hide behind its outer lease. */
+    expected_failure("version_lease", candidate, authority, -EOPNOTSUPP);
+    memset(decoded_page, 0xa5, sizeof(decoded_page));
+    result = swapz_zswap_import_decode(&candidate, &authority, original_lzo,
+                 record.compressed_length, decode_scratch, SWAPZ_BLOCK_BYTES,
+                 decoded_page, SWAPZ_BLOCK_BYTES, original_page);
+    require_case("version", result == -EOPNOTSUPP, result);
+    require_case("version_direct_failure_unchanged",
+                 decoded_page[0] == 0xa5 &&
+                 decoded_page[SWAPZ_BLOCK_BYTES - 1U] == 0xa5, result);
     candidate = record; candidate.dictionary_id = 1U;
     expected_failure("dictionary", candidate, authority, -EOPNOTSUPP);
     candidate = record; candidate.stored_eviction = 0U;
