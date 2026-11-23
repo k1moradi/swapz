@@ -19784,3 +19784,74 @@ PHASE_A=BLOCKED, all activation flags OFF. Real selected original STORED
 auth, original kernel module lifetime, lower FUA/flush, upper bio_endio,
 native KUnit and physical/privileged/loaded/pressure tests remain NOT_RUN
 or UNPROVEN as applicable.
+
+
+## Round080 Agent10 original reader KUnit isolated runtime and late-pin cleanup
+
+Historical Round079 original source 14e8f8f18566e584d9640482b3437929e5da041c,
+run45236328888, host137908924597 SUCCESS (GCC+Clang 26 real
+independently compiled/executed semantic mutants each; 52 combined),
+then original pinned Linux UML native137910554522 compiled AND booted,
+two exact LZ4/LZO1X reader/GC KUnit cases PASSED, followed by 120-second
+kernel test timeout before the stale-integrity and decoder-retirement
+case results. Artifact14851590265 has tests4 passed2 crashed2 errors3;
+these are parser missing-result classifications, NOT verified kernel panic
+or 4/4. Earlier original Round073 undeclared-usleep_range native FAIL
+and Round077 Clang negative host FAIL remain separately historical red.
+
+A native read-close negative can race with the worker setting closing:
+a get attempted before closing becomes visible may unexpectedly acquire
+a second late decoder lease. The test MUST release BOTH the originally
+held lease and any unexpectedly acquired late lease before joining
+close_and_drain. Joining the closer while retaining a late pin makes
+the closer wait for the test and the test wait for the closer. All
+error paths must first drop the owned leases exactly once, preserve
+owner storage through worker termination, and only then release stack
+or source buffers. A bounded wait diagnoses a stall but NEVER licenses
+freeing a still-active thread or owner. Never increase the original
+120-second combined KUnit run limit to paper over a deadlock.
+
+The guarded original pinned kernel mm/zswap.c test-only fixture now
+uses an exact shared release helper on cleanup and one-shot delayed
+work diagnostics only for the two previously missing-result cases.
+A phase marker is atomic and the delayed work is synchronously cancelled
+before its stack storage is released. No progress diagnostics print
+during a successful case; a stalled case emits one fail-only phase with
+original codec identity. The inherited original source/XArray/zsmalloc
+and actual product lower BIO authority/pinned decoder remain source
+based; no real selected swap source is authenticated.
+
+A new strict host regression must extract the EXACT native test-only
+release helper and compile it linked to actual dormant product
+zswap-import-decoder-owner.c under GCC and Clang C23, -Werror,
+ASan+UBSan, pthread ref/close-drain. Its pristine C executable
+must put all pins before a closing worker completes. A separate
+leaked-late-pin semantic C mutant must be independently compiled AND
+executed for EACH compiler and killed by its exact nonzero runtime
+result, NOT counted for a mere preflight or compiler rejection.
+The inherited original-source 10, authority14, decoder2 C mutants
+per compiler and separate pinned original header negative must remain
+intact. Source pin, suite, fixture, release order and bounded wait
+have explicit negative staging guards.
+
+Only ONE pinned original UML kernel build is permitted for a changed
+source. From the resulting built executable, sequentially boot the
+formerly censored original stale-CRC/SHA/codec case and decoder-retire
+case with distinct KUnit filters and bounded <=25-second boot probes;
+require separately parsed exact native JSON and KTAP 1/1 and store
+bounded failure artifacts. Then execute the combined four-case suite
+with the prior 120-second kernel limit unchanged; only its genuine
+JSON and KTAP 4/4 PASS, failed0 skipped0 crashed0 errors0 and no
+KASAN/UBSAN/panic can establish native qualification. Fail early and
+report the exact first timeout/compiler or verifier error otherwise.
+
+No production code, allocator, pressure policy, compressed RAM
+ownership or physical backing is changed. SOURCE_MAPPED_AUTHENTICATED=0,
+PHASE_A=BLOCKED, all direct-handoff / forced-RAW / original-import
+activation OFF. Original MM/zswap exclusively owns compressed RAM and
+natural eviction; swapz owns disk packing and GC without competing
+reclaim or recompression. Original compressed LZO1X and raw LZ4 have
+separate volatile codec tags and independently pinned decoder lifetime,
+while ordinary RAW_4096 always means the complete ORIGINAL UNCOMPRESSED
+4096-byte page. Protect physical SWAPSPACE2 first4096 and RAM-only 20B
+map. No privileged, loaded, swapon, physical, or real-pressure tests.

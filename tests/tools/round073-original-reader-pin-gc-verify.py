@@ -81,6 +81,14 @@ def verify_preflight() -> None:
             fixture.index("usleep_range(1000, 2000);") and
             "for (iteration = 0; iteration < 1500U &&" in fixture,
             "original-pin-usleep_range-declaration-or-context-missing")
+    require(fixture.count("/* ROUND080_READER_LEASE_CLEANUP_BEGIN") == 1 and
+            fixture.count("/* ROUND080_READER_LEASE_CLEANUP_END */") == 1 and
+            fixture.count("swapz_round080_release_decoder_leases(&lease, &late);") == 1 and
+            fixture.index("swapz_round080_release_decoder_leases(&lease, &late);") <
+            fixture.index("kthread_stop(closer_task);") and
+            "ROUND080_READER_NATIVE_FIRST_ERROR stalled_phase=" in fixture and
+            "wait_for_completion(&closer.returned);" not in fixture,
+            "original-native-fail-closed-late-lease-cleanup")
     for case in CASES:
         require(fixture.count("KUNIT_CASE(" + case + ")") == 1,
                 "missing-native-unique-case:" + case)
@@ -251,6 +259,41 @@ def verify_native(document: dict, ktap: str) -> None:
         "native-KTAP-crash-or-fail")
 
 
+def verify_isolated(document: dict, ktap: str, expected_case: str) -> None:
+    """Require a genuine single filtered pinned-original case JSON + KTAP."""
+    require(expected_case in CASES, "native-isolated-unknown-case")
+    require(isinstance(document, dict), "native-isolated-json-root")
+    pending = [document]
+    suites = []
+    while pending:
+        node = pending.pop()
+        require(isinstance(node, dict), "native-isolated-bad-node")
+        if node.get("name") == SUITE:
+            suites.append(node)
+        children = node.get("sub_groups", [])
+        require(isinstance(children, list), "native-isolated-child-list")
+        pending.extend(children)
+    require(len(suites) == 1, "native-isolated-suite-missing-or-duplicated")
+    node = suites[0]
+    cases = node.get("test_cases")
+    require(isinstance(cases, list) and len(cases) == 1 and
+            isinstance(cases[0], dict) and
+            cases[0].get("name") == expected_case and
+            cases[0].get("status") == "PASS",
+            "native-isolated-case-not-executed-or-pass:" + expected_case)
+    misc = node.get("misc", {})
+    for key, expected in (("tests", 1), ("passed", 1), ("failed", 0),
+                          ("skipped", 0), ("crashed", 0), ("errors", 0)):
+        require(type(misc.get(key)) is int and misc[key] == expected,
+                "native-isolated-misc:" + key)
+    require(ktap.count("# Subtest: " + SUITE) == 1 and
+            len(re.findall(r"(?m)^\s*ok\s+[0-9]+\s+(?:-\s+)?" +
+                           re.escape(expected_case) + r"\s*$", ktap)) == 1 and
+            re.search(r"(?i)kernel panic|KASAN:|UBSAN:|not ok\s+",
+                      ktap) is None,
+            "native-isolated-KTAP-not-genuine:" + expected_case)
+
+
 def native_self_test() -> None:
     node = {
         "name": SUITE,
@@ -294,6 +337,10 @@ def main() -> int:
     modes = parser.add_subparsers(dest="mode", required=True)
     modes.add_parser("host")
     modes.add_parser("self-test")
+    isolated = modes.add_parser("verify-isolated")
+    isolated.add_argument("--result", required=True, type=Path)
+    isolated.add_argument("--kernel-log", required=True, type=Path)
+    isolated.add_argument("--case", required=True, choices=CASES)
     native = modes.add_parser("verify-native")
     native.add_argument("--result", required=True, type=Path)
     native.add_argument("--kernel-log", required=True, type=Path)
@@ -304,6 +351,13 @@ def main() -> int:
         elif args.mode == "self-test":
             verify_preflight()
             native_self_test()
+        elif args.mode == "verify-isolated":
+            verify_isolated(json.loads(args.result.read_text()),
+                            args.kernel_log.read_text(errors="replace"),
+                            args.case)
+            print("PASS ROUND080_GENUINE_ORIGINAL_PINNED_ISOLATED "
+                  "JSON_KTAP=1/1 case=" + args.case +
+                  " AUTH0 PHASE_A=BLOCKED", flush=True)
         else:
             verify_native(json.loads(args.result.read_text()),
                           args.kernel_log.read_text(errors="replace"))

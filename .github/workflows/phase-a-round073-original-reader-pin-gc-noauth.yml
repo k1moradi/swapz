@@ -7,7 +7,7 @@ on:
       - 'tests/tools/round073-stage-original-reader-pin-gc.py'
       - 'tests/tools/round073-original-reader-pin-gc-verify.py'
       - 'tests/tools/round077-original-reader-delay-compile-verify.py'
-      - 'tests/tools/round080-reader-close-lifetime-host-verify.py'
+      - 'tests/tools/round080-original-reader-lease-cleanup-verify.py'
       - '.github/workflows/phase-a-round073-original-reader-pin-gc-noauth.yml'
       - 'src/kernel/authority.c'
       - 'src/kernel/zswap-import-decoder-owner.c'
@@ -45,6 +45,11 @@ jobs:
           git diff --check HEAD^ HEAD
           python3 -B tests/tools/round073-original-reader-pin-gc-verify.py self-test
           python3 -B tests/tools/round073-original-reader-pin-gc-verify.py host
+      - name: Original decoder C and KUnit close helper lifetime semantic C mutation
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          python3 -B tests/tools/round080-original-reader-lease-cleanup-verify.py
       # This original kernel sparse read happens AFTER the clean repo and
       # policy checks, so nested original-linux remains test-only and cannot
       # taint the tracked checkout cleanliness preflight.
@@ -71,11 +76,6 @@ jobs:
           set -Eeuo pipefail
           test "$(git -C original-linux rev-parse HEAD)" = c339f4010dea8b0d754f84ace70cd1b089878ef8
           python3 -B tests/tools/round077-original-reader-delay-compile-verify.py --linux-root original-linux
-      - name: Round080 source-linked close/pin lifetime GCC Clang sanitizer mutants
-        shell: bash
-        run: |
-          set -Eeuo pipefail
-          python3 -B tests/tools/round080-reader-close-lifetime-host-verify.py
   original-linux-uml-reader-pin-gc-kunit:
     needs: original-reader-strict-source-host
     runs-on: ubuntu-24.04
@@ -157,64 +157,84 @@ jobs:
             return "$code"
           }
           flags='-DSWAPZ_ROUND069_ORIGINAL_STORED_SOURCE_TEST=1 -DSWAPZ_ROUND065_ORIGINAL_DM_TABLE_TEST=1 -DSWAPZ_ROUND064_ORIGINAL_SLOT_TARGET_TEST=1 -DSWAPZ_ROUND056_PREERASE_SINGLE_OWNER_TEST=1 -DSWAPZ_ROUND063_ORIGINAL_DM_OWNER_TEST=1 -DSWAPZ_ROUND028_SLOT_EPOCH_SOURCE=1 -DSWAPZ_ROUND030_EVICTION_SNAPSHOT_SOURCE=1 -DSWAPZ_ROUND025_SIDEBAND_CI_ONLY=1 -DSWAPZ_ROUND031_MM_BIO_SOURCE=1 -DSWAPZ_ROUND032_BIO_COPY_VIEW_CI_ONLY=1 -DSWAPZ_ROUND034_ORIGINAL_V1_KUNIT_TEST=1 -DSWAPZ_ROUND035_ORIGINAL_MM_ROUTE_WITNESS_TEST=1 -DSWAPZ_ROUND036_ORIGINAL_ROUTE_LIFETIME_TEST=1 -DSWAPZ_ROUND037_ORIGINAL_MM_LIFETIME_OWNER_TEST=1 -DSWAPZ_ROUND038_ORIGINAL_STORE_PROVENANCE_TEST=1 -DSWAPZ_ROUND040_ORIGINAL_ASYNC_SLOT_LEASE_NEGATIVE_TEST=1 -DSWAPZ_ROUND041_ORIGINAL_SECTOR_TO_DM_NONAUTHORITY_TEST=1 -DSWAPZ_ROUND042_ORIGINAL_STORED_WRITEBACK_LIFETIME_TEST=1 -DSWAPZ_ROUND043_ORIGINAL_BIO_CLONE_COPY_TEST=1 -DSWAPZ_ROUND045_ORIGINAL_STORED_BIO_SOURCE_SCOPE_TEST=1 -DSWAPZ_ROUND049_ORIGINAL_LOCKED_FOLIO_COUNT_PAIR_TEST=1 -DSWAPZ_ROUND052_ORIGINAL_PRE_UNUSE_CANCEL_TEST=1 -DSWAPZ_ROUND056_ORIGINAL_CLONE_PROVENANCE_TEST=1 -DSWAPZ_ROUND058_ORIGINAL_STORED_BIO_CHAIN_TEST=1 -DSWAPZ_ROUND066_IMPORT_DISK_TEST=1 -DSWAPZ_ROUND067_IMPORT_DISK_PAYLOAD_TEST=1 -DSWAPZ_ROUND068_IMPORT_LOWER_BIO_TEST=1 -DSWAPZ_ROUND069_ORIGINAL_BIO_AUTHORITY_JOIN_KUNIT=1 -DSWAPZ_ROUND073_ORIGINAL_READER_PIN_GC_KUNIT=1'
-          # One shared pristine original UML compile; first isolate the two
-          # previously timed-out cases with short per-kernel budgets, then
-          # require the complete genuine original 4/4 suite.
-          phase=isolated-original-reader-negative-and-retirement
-          for case_name in swapz_round073_original_stale_crc_sha_codec \
-                           swapz_round073_original_decoder_retire_with_pin; do
-            case_log="round073-evidence/isolated-$case_name.log"
-            case_json="$PWD/round073-evidence/isolated-$case_name.json"
-            if timeout -k 10s 82m python3 -B linux/tools/testing/kunit/kunit.py run \
-                   --arch=um --build_dir="$out" --kunitconfig="$request" \
-                   --make_options="KCFLAGS=$flags -Werror" --jobs=2 --timeout=40 \
-                   --json="$case_json" \
-                   "swapz_round073_original_reader_pin_gc.$case_name" \
-                   >"$case_log" 2>&1; then
-              if ! grep -Fq "[PASSED] $case_name" "$case_log"; then
-                echo "::error::ROUND080_READER_FIRST_ERROR phase=$phase missing-executed=$case_name" >&2
-                grep -E -m1 'FIRST_ERROR|FAILED|ERROR|timed out|not ok' "$case_log" |
-                  cut -c1-260 >&2 || true
-                exit 3
-              fi
-            else
-              code=$?
-              echo "::error::ROUND080_READER_FIRST_ERROR phase=$phase case=$case_name exit=$code" >&2
-              grep -E -m1 'FIRST_ERROR|FAILED|ERROR|timed out|not ok|error:' "$case_log" |
-                cut -c1-260 >&2 || true
-              exit "$code"
-            fi
-          done
-          phase=original-uml-build-boot
-
-          if timeout -k 10s 82m python3 -B linux/tools/testing/kunit/kunit.py run             --arch=um --build_dir="$out" --kunitconfig="$request"             --make_options="KCFLAGS=$flags -Werror" --jobs=2 --timeout=120             --json="$result" 'swapz_round073_original_reader_pin_gc*' >"$log" 2>&1; then
-            echo 'ROUND073_ORIGINAL_LINUX_UML_BOOT_EXECUTED'
+          # Build the pinned UML kernel ONCE; exec below only boots that
+          # same original-source image with case-specific filter globs.
+          phase=original-uml-strict-compile
+          if timeout -k 10s 75m python3 -B linux/tools/testing/kunit/kunit.py build \
+              --arch=um --build_dir="$out" --kunitconfig="$request" \
+              --make_options="KCFLAGS=$flags -Werror" --jobs=2 >"$log" 2>&1; then
+            echo 'ROUND080_ORIGINAL_PINNED_UML_COMPILED'
           else
             code=$?
             first_error "$code"
             exit "$code"
           fi
           phase=effective-original-config
-          test -x "$out/linux" && test -s "$out/test.log" && test -s "$result" ||
+          test -x "$out/linux" && test -s "$out/.config" ||
             { first_error 3; exit 3; }
-          for symbol in CONFIG_KUNIT=y CONFIG_ZSWAP=y CONFIG_CRYPTO_LZO=y             CONFIG_CRYPTO_LZ4=y CONFIG_CRYPTO_CRC32C=y             CONFIG_LZO_COMPRESS=y CONFIG_LZO_DECOMPRESS=y             CONFIG_LZ4_COMPRESS=y CONFIG_LZ4_DECOMPRESS=y; do
+          for symbol in CONFIG_KUNIT=y CONFIG_ZSWAP=y CONFIG_CRYPTO_LZO=y \
+              CONFIG_CRYPTO_LZ4=y CONFIG_CRYPTO_CRC32C=y \
+              CONFIG_LZO_COMPRESS=y CONFIG_LZO_DECOMPRESS=y \
+              CONFIG_LZ4_COMPRESS=y CONFIG_LZ4_DECOMPRESS=y; do
             grep -Fxq "$symbol" "$out/.config" ||
               { echo "::error::ROUND073_READER_FIRST_ERROR effective-config=$symbol" >&2; exit 3; }
           done
+          # Diagnose BOTH previous missing-result cases independently, with
+          # the same compiled kernel. Each is a real boot+JSON+KTAP gate.
+          # The watchdog is one-shot FAIL-only; 25 seconds is diagnostic
+          # isolation and never extends the original 120-second suite limit.
+          isolated_error=0
+          for case in swapz_round073_original_stale_crc_sha_codec \
+                      swapz_round073_original_decoder_retire_with_pin; do
+            phase="original-UML-isolated-$case"
+            isolated_log="round073-evidence/isolated-$case-run.log"
+            isolated_json="$PWD/round073-evidence/isolated-$case.json"
+            if timeout -k 5s 36s python3 -B linux/tools/testing/kunit/kunit.py exec \
+                --arch=um --build_dir="$out" --timeout=25 \
+                --json="$isolated_json" \
+                "swapz_round073_original_reader_pin_gc.$case" \
+                >"$isolated_log" 2>&1 &&
+               test -s "$out/test.log" &&
+               python3 -B swapz/tests/tools/round073-original-reader-pin-gc-verify.py \
+                  verify-isolated --result "$isolated_json" \
+                  --kernel-log "$out/test.log" --case "$case"; then
+              cp "$out/test.log" "round073-evidence/isolated-$case-KTAP.log"
+              echo "ROUND080_GENUINE_ORIGINAL_READER_ISOLATED_PASS $case"
+            else
+              isolated_error=1
+              echo "::error::ROUND080_READER_FIRST_ERROR phase=$phase" >&2
+              grep -E -m1 'ROUND080_READER_NATIVE_FIRST_ERROR|not ok|error:|timed out|KASAN:|UBSAN:|Kernel panic' \
+                "$out/test.log" "$isolated_log" 2>/dev/null | cut -c1-240 >&2 || true
+              if test -s "$out/test.log"; then
+                cp "$out/test.log" "round073-evidence/isolated-$case-KTAP.log"
+              fi
+            fi
+          done
+          if test "$isolated_error" -ne 0; then
+            echo '::error::ROUND080_READER_FIRST_ERROR isolated-original-case-failed-or-timed-out; combined-KUnit-NOT_RUN' >&2
+            exit 3
+          fi
+          phase=original-uml-combined-four-case-boot
+          if timeout -k 10s 140s python3 -B linux/tools/testing/kunit/kunit.py exec \
+              --arch=um --build_dir="$out" --timeout=120 \
+              --json="$result" 'swapz_round073_original_reader_pin_gc*' \
+              >"$log" 2>&1; then
+            echo 'ROUND080_ORIGINAL_LINUX_UML_COMBINED_EXECUTED'
+          else
+            code=$?
+            if test -s "$out/test.log"; then
+              cp "$out/test.log" round073-evidence/native-original-KTAP-partial.log
+              grep -E -m1 'ROUND080_READER_NATIVE_FIRST_ERROR' \
+                  "$out/test.log" 2>/dev/null | cut -c1-240 >&2 || true
+            fi
+            first_error "$code"
+            exit "$code"
+          fi
           phase=native-real-JSON-KTAP
           python3 -B swapz/tests/tools/round073-original-reader-pin-gc-verify.py             verify-native --result "$result" --kernel-log "$out/test.log" ||
             { first_error 3; exit 3; }
           cp "$out/test.log" round073-evidence/native-original-KTAP.log
           echo 'ROUND073_GENUINE_PINNED_ORIGINAL_NATIVE_READER_KUNIT_PASS 4/4 original codecs=2 GC pin + decoder close AUTH=0'
-      - name: Preserve UML KTAP on success and failure for exact first error
-        if: always()
-        shell: bash
-        run: |
-          if test -s "$RUNNER_TEMP/round073-original-reader-uml/test.log"; then
-            mkdir -p round073-evidence
-            cp "$RUNNER_TEMP/round073-original-reader-uml/test.log" \
-               round073-evidence/native-original-KTAP.log
-          fi
       - name: Upload bounded original-native evidence without publishing any activation
         if: always()
         uses: actions/upload-artifact@v4

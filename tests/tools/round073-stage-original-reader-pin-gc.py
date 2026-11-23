@@ -92,6 +92,16 @@ def plan(current: bytes, manifest: dict, original: dict[str, bytes],
             b"swapz_round069_native_gc_copy_fua(" in bio_fixture and
             b'#include "swapz_round069/authority.c"' in bio_fixture,
             "inherited-original-BIO-real-authority-reader")
+    require(fixture.count(b"/* ROUND080_READER_LEASE_CLEANUP_BEGIN") == 1 and
+            fixture.count(b"/* ROUND080_READER_LEASE_CLEANUP_END */") == 1 and
+            fixture.count(b"swapz_round080_release_decoder_leases(&lease, &late);") == 1 and
+            fixture.index(b"swapz_round080_release_decoder_leases(&lease, &late);") <
+            fixture.index(b"kthread_stop(closer_task);") and
+            b"if (late->owner)" in fixture and
+            b"if (lease->owner)" in fixture and
+            b"wait_for_completion(&closer.returned);" not in fixture and
+            b"ROUND080_READER_NATIVE_FIRST_ERROR stalled_phase=" in fixture,
+            "original-reader-late-lease-must-release-before-closer-join")
     require(fixture.count(b"#include <linux/delay.h>") == 1 and
             fixture.index(b"#include <linux/delay.h>") <
             fixture.index(b"usleep_range(1000, 2000);") and
@@ -195,6 +205,11 @@ def main() -> int:
              current, base, original,
              {**product, "zswap-import-decoder-owner.c": b"bad"},
              fixture, source_fixture, bio_fixture),
+            ("original-reader-late-lease-must-release-before-closer-join",
+             current, base, original, product,
+             fixture.replace(b"swapz_round080_release_decoder_leases(&lease, &late);",
+                             b"/* leaked late lease */"),
+             source_fixture, bio_fixture),
             ("original-native-delay-header-or-bounded-context",
              current, base, original, product,
              fixture.replace(b"#include <linux/delay.h>", b"/* missing */"),
@@ -217,7 +232,7 @@ def main() -> int:
                         "first-negative-" + wanted + ":" + str(failure))
             else:
                 raise StageFailure("staging-mutant-accepted:" + wanted)
-        print("PASS ROUND073_READER_STAGE_PLAN negatives=6 "
+        print("PASS ROUND073_READER_STAGE_PLAN negatives=8 "
               "pristine_original_blobs=2 product_blobs=8 "
               "original_XArray_source=YES real_BIO_authority=YES AUTH0")
         return 0
