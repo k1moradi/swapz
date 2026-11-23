@@ -7,6 +7,7 @@ on:
       - 'tests/runtime/native/fixtures/round071-original-dm-upper-owner.cfrag'
       - 'tests/tools/round071-stage-original-dm-upper-owner.py'
       - 'tests/tools/round071-original-dm-upper-owner-verify.py'
+      - 'tests/tools/round072-original-dm-selected-owner-verify.py'
       - 'docs/handoff/zswapz/round071/agent2-evidence.md'
   workflow_dispatch:
 permissions:
@@ -29,10 +30,12 @@ jobs:
           test -z "$(git status --porcelain)"
           git diff --check HEAD^ HEAD
           python3 -B tests/tools/round071-original-dm-upper-owner-verify.py
+          python3 -B tests/tools/round072-original-dm-selected-owner-verify.py
           python3 -B - <<'PY'
           import ast
           from pathlib import Path
           ast.parse(Path('tests/tools/round071-stage-original-dm-upper-owner.py').read_text())
+          ast.parse(Path('tests/tools/round072-original-dm-selected-owner-verify.py').read_text())
           print('ROUND071_AGENT2_STAGE_SYNTAX_PASS')
           PY
       - name: Retain all previous and concurrent testing standards
@@ -160,17 +163,18 @@ jobs:
               pending.extend(group.get('sub_groups', []))
           assert len(matches) == 1
           cases = matches[0]['test_cases']
-          assert len(cases) == 2
+          assert len(cases) == 3
           assert {case['name'] for case in cases} == {
               'swapz_round071_native_upper_once_kunit',
-              'swapz_round071_native_requeue_dtr_kunit'}
+              'swapz_round071_native_requeue_dtr_kunit',
+              'swapz_round072_native_current_table_negative_kunit'}
           assert all(case['status'] == 'PASS' for case in cases)
           assert all(matches[0]['misc'][key] == expected for key, expected in
-                     dict(tests=2, passed=2, failed=0, skipped=0, crashed=0, errors=0).items())
+                     dict(tests=3, passed=3, failed=0, skipped=0, crashed=0, errors=0).items())
           assert log.count('# Subtest: swapz_round071_native_dm_upper_noauth') == 1
-          assert len(re.findall(r'\bok\s+\d+\s+(?:-\s+)?swapz_round071_native_(?:upper_once|requeue_dtr)_kunit\b', log)) == 2
+          assert len(re.findall(r'\bok\s+\d+\s+(?:-\s+)?(?:swapz_round071_native_(?:upper_once|requeue_dtr)|swapz_round072_native_current_table_negative)_kunit\b', log)) == 3
           assert not re.search(r'(?i)(Kernel panic|KASAN:|UBSAN:)', log)
-          print('ROUND071_AGENT2_TRUE_ORIGINAL_KERNEL_KUNIT_PASS cases=2 skipped=0 AUTH=0')
+          print('ROUND071_AGENT2_TRUE_ORIGINAL_KERNEL_KUNIT_PASS cases=3 skipped=0 AUTH=0')
           PY
           printf 'source_native_original=PASS\nno_auth=1\nresult=PASS\n' >> "$verdict"
       - uses: actions/upload-artifact@v4

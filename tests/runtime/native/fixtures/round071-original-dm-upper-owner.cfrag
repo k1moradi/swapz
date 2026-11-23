@@ -100,6 +100,27 @@ static bool swapz_round071_authenticated_handoff(void)
 }
 /* ROUND071_OWNER_COMMON_END */
 
+/* ROUND072_SELECTED_SOURCE_BEGIN */
+/*
+ * Use the actual original-kernel struct dm_target / dm_table / bio types and
+ * the staged Round065 table-incarnation member. This is only a negative
+ * selection boundary: an externally passed table is NOT a validated live
+ * production DM table, nor is this a genuine zswap STORED source witness.
+ */
+static bool swapz_round072_current_selected_dm_owner(
+		const struct swapz_round071_owner *owner,
+		const struct bio *original_bio, const struct dm_target *selected_target,
+		const struct dm_table *active_table)
+{
+	return owner && original_bio && selected_target && active_table &&
+	       selected_target->table == active_table &&
+	       owner->phase == SWAPZ_ROUND071_OWNED &&
+	       swapz_round071_same_current_owner(owner, original_bio,
+			 selected_target, active_table,
+			 READ_ONCE(active_table->swapz_round065_incarnation));
+}
+/* ROUND072_SELECTED_SOURCE_END */
+
 static struct swapz_round071_owner swapz_round071_new_owner(
 		const void *bio, const void *target, const void *table)
 {
@@ -151,9 +172,62 @@ static void swapz_round071_native_requeue_dtr_kunit(struct kunit *test)
 	KUNIT_EXPECT_EQ(test, owner.upper_endio_attempts, 1U);
 }
 
+/*
+ * Real pinned original Linux DM types/field layout, not a test-only duplicate
+ * of the kernel ABI. No dm_create/dm_submit_bio or actual selected mapper is
+ * claimed; the inherited Round067 KUnit covers native DM dispatch separately.
+ */
+static void swapz_round072_native_current_table_negative_kunit(struct kunit *test)
+{
+	struct bio original = {}, foreign = {};
+	struct dm_table current = { .swapz_round065_incarnation = 7 };
+	struct dm_table replacement = { .swapz_round065_incarnation = 8 };
+	struct dm_target selected = { .table = &current };
+	struct dm_target other_target = { .table = &replacement };
+	struct swapz_round071_owner owner =
+		swapz_round071_new_owner(&original, &selected, &current);
+
+	KUNIT_ASSERT_TRUE(test, swapz_round071_claim(&owner, &original,
+						    &selected, &current, 7));
+	KUNIT_EXPECT_TRUE(test, swapz_round072_current_selected_dm_owner(
+				&owner, &original, &selected, &current));
+	KUNIT_EXPECT_FALSE(test, swapz_round072_current_selected_dm_owner(
+				&owner, &foreign, &selected, &current));
+	KUNIT_EXPECT_FALSE(test, swapz_round072_current_selected_dm_owner(
+				&owner, &original, &other_target, &current));
+	KUNIT_EXPECT_FALSE(test, swapz_round072_current_selected_dm_owner(
+				&owner, &original, &selected, &replacement));
+
+	/* The same original and selected target cannot reuse the old table. */
+	WRITE_ONCE(selected.table, &replacement);
+	KUNIT_EXPECT_FALSE(test, swapz_round072_current_selected_dm_owner(
+				&owner, &original, &selected, &current));
+	WRITE_ONCE(selected.table, &current);
+	WRITE_ONCE(current.swapz_round065_incarnation, 8);
+	KUNIT_EXPECT_FALSE(test, swapz_round072_current_selected_dm_owner(
+				&owner, &original, &selected, &current));
+	WRITE_ONCE(current.swapz_round065_incarnation, 0);
+	KUNIT_EXPECT_FALSE(test, swapz_round072_current_selected_dm_owner(
+				&owner, &original, &selected, &current));
+	WRITE_ONCE(current.swapz_round065_incarnation, 7);
+	KUNIT_ASSERT_TRUE(test, swapz_round071_requeue(&owner, &original,
+						     &selected, &current, 7));
+	KUNIT_EXPECT_FALSE(test, swapz_round072_current_selected_dm_owner(
+				&owner, &original, &selected, &current));
+	KUNIT_ASSERT_TRUE(test, swapz_round071_claim(&owner, &original,
+						   &selected, &current, 7));
+	KUNIT_ASSERT_TRUE(test, swapz_round071_dtr_fail(&owner, &original,
+						       &selected, &current, 7));
+	KUNIT_EXPECT_FALSE(test, swapz_round072_current_selected_dm_owner(
+				&owner, &original, &selected, &current));
+	KUNIT_EXPECT_EQ(test, owner.upper_endio_attempts, 1U);
+	KUNIT_EXPECT_EQ(test, owner.final_error, -5);
+}
+
 static struct kunit_case swapz_round071_native_upper_cases[] = {
 	KUNIT_CASE(swapz_round071_native_upper_once_kunit),
 	KUNIT_CASE(swapz_round071_native_requeue_dtr_kunit),
+	KUNIT_CASE(swapz_round072_native_current_table_negative_kunit),
 	{}
 };
 static struct kunit_suite swapz_round071_native_upper_suite = {

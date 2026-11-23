@@ -1,9 +1,9 @@
 # Round071 Agent2 — original DM upper BIO source / once-only evidence
 
-Issue: https://github.com/k1moradi/swapz/issues/188  
-Task publication: `057346ca1fbbed73c7c664c56a3272c9b1a5fbb6`  
-Engineering baseline: `73446b1a5f88ec8d3ba1e45e623825fd5fed2880`  
-Pinned original Linux: `c339f4010dea8b0d754f84ace70cd1b089878ef8`  
+Issue: https://github.com/k1moradi/swapz/issues/188
+Task publication: `057346ca1fbbed73c7c664c56a3272c9b1a5fbb6`
+Engineering baseline: `73446b1a5f88ec8d3ba1e45e623825fd5fed2880`
+Pinned original Linux: `c339f4010dea8b0d754f84ace70cd1b089878ef8`
 Read-only production DM target Git blob: `f1cab252cd990190646c82da81378d1563475826`
 
 ## Exact current code boundary

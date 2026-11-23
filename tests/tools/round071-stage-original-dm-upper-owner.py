@@ -52,7 +52,10 @@ def plan(files: dict[str, bytes], pristine_dm: bytes, base: dict,
         raise ValueError('double-stage')
     if (fragment.count(BEGIN) != 1 or fragment.count(END) != 1 or
             fragment.count(b'kunit_test_suite(swapz_round071_native_upper_suite);') != 1 or
-            fragment.count(b'#define SWAPZ_ROUND071_SOURCE_AUTH_ACTIVE 0') != 1):
+            fragment.count(b'#define SWAPZ_ROUND071_SOURCE_AUTH_ACTIVE 0') != 1 or
+            fragment.count(b'/* ROUND072_SELECTED_SOURCE_BEGIN */') != 1 or
+            fragment.count(b'/* ROUND072_SELECTED_SOURCE_END */') != 1 or
+            fragment.count(b'KUNIT_CASE(swapz_round072_native_current_table_negative_kunit)') != 1):
         raise ValueError('test-fixture-drift')
     return {DM_PATH: current + b'\n' + fragment, PRODUCT_STAGE: product}
 
@@ -75,6 +78,10 @@ def verify_negatives(files: dict[str, bytes], pristine_dm: bytes, base: dict,
                     b'#define SWAPZ_ROUND071_SOURCE_AUTH_ACTIVE 0',
                     b'#define SWAPZ_ROUND071_SOURCE_AUTH_ACTIVE 1'), product,
                     'test-fixture-drift'))
+    mutants.append((files, pristine_dm, base, fragment.replace(
+                    b'/* ROUND072_SELECTED_SOURCE_BEGIN */',
+                    b'/* ROUND072_SELECTED_SOURCE_DISABLED */'), product,
+                    'test-fixture-drift'))
     replay = dict(files, **{DM_PATH: output[DM_PATH], PRODUCT_STAGE: product})
     replay_base = json.loads(json.dumps(base))
     replay_base['changed_paths'][0]['staged_sha256'] = digest(output[DM_PATH])
@@ -90,7 +97,7 @@ def verify_negatives(files: dict[str, bytes], pristine_dm: bytes, base: dict,
             raise ValueError('mutation-survived:' + expected)
         if source != snapshot:
             raise ValueError('negative-partial-write')
-    print('ROUND071_PINNED_STAGE_NEGATIVE_PASS refused=7 no_partial_writes=1 NO_AUTH')
+    print('ROUND071_PINNED_STAGE_NEGATIVE_PASS refused=8 no_partial_writes=1 NO_AUTH')
 
 
 def main() -> None:
