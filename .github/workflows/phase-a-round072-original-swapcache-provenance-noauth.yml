@@ -1,4 +1,4 @@
-name: Round072 pinned-original swapcache no-device negative NO_AUTH
+name: Round074 original swapcache source preflight requalification AUTH0
 on:
   push:
     branches: [main]
@@ -7,8 +7,6 @@ on:
       - 'tests/runtime/native/fixtures/round072-original-swapcache-provenance.cfrag'
       - 'tests/tools/round072-stage-original-swapcache-provenance.py'
       - 'tests/tools/round072-original-swapcache-provenance-verify.py'
-      - 'docs/handoff/zswapz/round072/agent3-evidence.md'
-      - 'docs/handoff/zswapz/round072/agent3-results.json'
   workflow_dispatch:
 permissions:
   contents: read
@@ -29,12 +27,19 @@ jobs:
           test "$(git branch --show-current)" = main
           test -z "$(git status --porcelain)"
           git diff --check HEAD^ HEAD
+          python3 -B - <<'PY'
+          from pathlib import Path
+          standards = Path('docs/testing_standards.md').read_bytes()
+          if not standards.endswith(b'\n') or standards.endswith(b'\n\n'):
+              raise SystemExit('ROUND074_AGENT3_CANONICAL_FIRST_ERROR standards-blank-EOF')
+          print('ROUND074_AGENT3_CANONICAL_DIFF_AND_EOF_PREFLIGHT_PASS')
+          PY
           python3 -B tests/tools/round072-original-swapcache-provenance-verify.py
           python3 -B - <<'PY'
           import ast
           from pathlib import Path
           ast.parse(Path('tests/tools/round072-stage-original-swapcache-provenance.py').read_text())
-          print('ROUND072_PROVENANCE_STAGER_PYTHON_SYNTAX_PASS')
+          print('ROUND074_PROVENANCE_STAGER_PYTHON_SYNTAX_PASS')
           PY
       - name: Verify inherited testing standards literal prefix
         env:
@@ -120,7 +125,7 @@ jobs:
           phase=initial
           log=round072-agent3-evidence/first-native.log
           verdict=round072-agent3-evidence/verdict.txt
-          out="$RUNNER_TEMP/round071-provenance-uml"
+          out="$RUNNER_TEMP/round074-agent3-provenance-uml"
           result="$PWD/round072-agent3-evidence/native-original-provenance.json"
           request="$PWD/round072-agent3-evidence/original.kunitconfig"
           printf 'source=%s\noriginal=c339f4010dea8b0d754f84ace70cd1b089878ef8\nsource_auth=0\n' "$GITHUB_SHA" > "$verdict"
@@ -149,7 +154,7 @@ jobs:
           test -x "$out/linux" && test -s "$result" && test -s "$out/test.log"
           grep -Fxq CONFIG_KUNIT=y "$out/.config"
           grep -Fxq CONFIG_ZSWAP=y "$out/.config"
-          phase=original-negative-four-case-JSON-KTAP
+          phase=original-negative-three-case-JSON-KTAP
           python3 -B - "$result" "$out/test.log" <<'PY'
           import json,pathlib,re,sys
           data=json.loads(pathlib.Path(sys.argv[1]).read_text())
@@ -172,7 +177,7 @@ jobs:
           assert log.count('# Subtest: swapz_round072_native_original_swapcache_noauth')==1
           assert len(re.findall(r'\bok\s+\d+\s+(?:-\s+)?swapz_round072_native_\w+_kunit\b',log))==3
           assert not re.search(r'(?i)(Kernel panic|KASAN:|UBSAN:)',log)
-          print('ROUND072_GENUINE_ORIGINAL_NO_SWAP_DEVICE_NEGATIVE_3_KUNIT_PASS source_auth=0')
+          print('ROUND074_GENUINE_ORIGINAL_NO_SWAP_DEVICE_NEGATIVE_3_KUNIT_PASS source_auth=0')
           PY
           printf 'result=PASS\nreal_swapcache_source=BLOCKED_NO_SWAP_DEVICE\n' >> "$verdict"
       - name: Upload bounded private qualification evidence

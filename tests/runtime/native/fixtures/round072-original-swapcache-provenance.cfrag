@@ -16,7 +16,9 @@ struct swapz_round072_source_lease {
 	bool current_stored_xarray_entry;
 	bool original_folio_locked;
 	bool original_folio_swapcache;
+	bool original_folio_matches_selected_slot;
 	bool original_swap_device_ref;
+	bool original_swap_slot_reuse_excluded;
 	bool pre_erase_copy_window;
 	bool original_pool_ref;
 	bool original_codec_identified;
@@ -44,8 +46,18 @@ static int swapz_round072_source_lease_refuse(
 		return -EPERM;
 	if (!lease->original_folio_swapcache)
 		return -ENODEV;
+	/*
+	 * Only a real locked swapcache folio and the original kernel's
+	 * folio_matches_swap_entry() can prove this exact selected slot.
+	 * A test-supplied flag is never that proof.
+	 */
+	if (!lease->original_folio_matches_selected_slot)
+		return -ESTALE;
 	if (!lease->original_swap_device_ref)
 		return -ENODEV;
+	/* A live device ref alone must not certify a recycled swap slot. */
+	if (!lease->original_swap_slot_reuse_excluded)
+		return -ESTALE;
 	if (!lease->pre_erase_copy_window)
 		return -ESTALE;
 	if (!lease->original_pool_ref)
@@ -72,7 +84,9 @@ static struct swapz_round072_source_lease swapz_round072_complete_witness(void)
 		.current_stored_xarray_entry = true,
 		.original_folio_locked = true,
 		.original_folio_swapcache = true,
+		.original_folio_matches_selected_slot = true,
 		.original_swap_device_ref = true,
+		.original_swap_slot_reuse_excluded = true,
 		.pre_erase_copy_window = true,
 		.original_pool_ref = true,
 		.original_codec_identified = true,
@@ -110,6 +124,8 @@ static void swapz_round072_native_original_locked_folio_not_swapcache_kunit(
 	KUNIT_EXPECT_TRUE(test, folio_test_locked(folio));
 	KUNIT_EXPECT_FALSE(test, folio_test_swapcache(folio));
 	KUNIT_EXPECT_FALSE(test, folio_matches_swap_entry(folio, invalid_slot));
+	KUNIT_EXPECT_FALSE(test, folio_matches_swap_entry(folio, swp_entry(0, 2)));
+	/* A locked ordinary folio never establishes a selected slot lease. */
 	folio_unlock(folio);
 	folio_put(folio);
 }
@@ -130,6 +146,12 @@ static void swapz_round072_native_original_source_auth_refused_kunit(
 	lease.original_folio_swapcache = false;
 	KUNIT_EXPECT_EQ(test, swapz_round072_source_lease_refuse(&lease), -ENODEV);
 	lease.original_folio_swapcache = true;
+	lease.original_folio_matches_selected_slot = false;
+	KUNIT_EXPECT_EQ(test, swapz_round072_source_lease_refuse(&lease), -ESTALE);
+	lease.original_folio_matches_selected_slot = true;
+	lease.original_swap_slot_reuse_excluded = false;
+	KUNIT_EXPECT_EQ(test, swapz_round072_source_lease_refuse(&lease), -ESTALE);
+	lease.original_swap_slot_reuse_excluded = true;
 	lease.selected_dm_source_ref = false;
 	KUNIT_EXPECT_EQ(test, swapz_round072_source_lease_refuse(&lease), -ENOTCONN);
 }

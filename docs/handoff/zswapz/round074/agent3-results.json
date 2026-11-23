@@ -1,0 +1,117 @@
+{
+  "round": "074",
+  "agent": 3,
+  "task_commit": "d62552f7048d5a512c7a0a79b86558fa228b31f2",
+  "engineering_baseline": "48f2e9ce1e06a0d32f0a40b777e9347d91b80741",
+  "kind": "original-source-ci-preflight-p0-and-swapcache-lease-noauth",
+  "code_commit": null,
+  "code_parent": null,
+  "exact_tested_commit": null,
+  "commit_status": "PUBLICATION_PENDING",
+  "earlier_round072": {
+    "code_commit": "471b406d81b08e097d3bbddc8518d06bab687d8d",
+    "code_parent": "adc38477c80706908df94097467c75e0a0727753",
+    "run_id": 45127526042,
+    "workflow_url": "https://github.com/k1moradi/swapz/actions/runs/45127526042",
+    "conclusion": "FAILURE",
+    "jobs": [
+      {
+        "name": "source-linked-host-negative",
+        "id": 137535206988,
+        "conclusion": "FAILURE"
+      },
+      {
+        "name": "actual-original-no-swap-device-kunit",
+        "id": 137551007262,
+        "conclusion": "SKIPPED"
+      }
+    ],
+    "first_error": "docs/testing_standards.md:19120: new blank line at EOF.",
+    "command": "git diff --check HEAD^ HEAD",
+    "exit_code": 2,
+    "original_native": {
+      "executed": 0,
+      "passed": 0,
+      "failed": 0,
+      "skipped": "DEPENDENCY",
+      "ktap": "NOT_GENERATED",
+      "json": "NOT_GENERATED"
+    }
+  },
+  "original_linux_pin": "c339f4010dea8b0d754f84ace70cd1b089878ef8",
+  "original_blobs": {
+    "mm/zswap.c": "ae19e301fced7e357a4c7587dfdd6abb890b9163",
+    "mm/swapfile.c": "254ce86fa923e6b5f1fefda88c39315c4cc00642",
+    "mm/swap.h": "d5bf21f517dceae58eb94fb0ce5f4e1fdc679409"
+  },
+  "owned_source_changes": [
+    "tests/runtime/native/fixtures/round072-original-swapcache-provenance.cfrag",
+    "tests/tools/round072-original-swapcache-provenance-verify.py",
+    ".github/workflows/phase-a-round072-original-swapcache-provenance-noauth.yml"
+  ],
+  "new_negative_conditions": [
+    "original_folio_matches_selected_slot",
+    "original_swap_slot_reuse_excluded"
+  ],
+  "local_test": {
+    "kind": "standalone_source_guard_copy_not_full_exact_checkout",
+    "result": "PASS",
+    "compiler_versions": {
+      "gcc": "14.2.0",
+      "clang": "17.0.0"
+    },
+    "sanitizers": [
+      "ASan",
+      "UBSan"
+    ],
+    "scenarios_per_compiler": 18,
+    "compiled_executed_mutants_killed_per_compiler": 16,
+    "strict_flags": [
+      "-Wall",
+      "-Wextra",
+      "-Wconversion",
+      "-Wshadow",
+      "-Werror"
+    ]
+  },
+  "github_ci": {
+    "workflow_url": null,
+    "run_id": null,
+    "conclusion": "NOT_SCHEDULED",
+    "jobs": [],
+    "exact_host_source": {
+      "status": "NOT_EXECUTED",
+      "cases": null,
+      "mutants": null
+    },
+    "original_linux_uml": {
+      "status": "NOT_EXECUTED",
+      "expected_negative_cases": 3,
+      "executed": 0,
+      "passed": 0,
+      "failed": 0,
+      "skipped": null,
+      "json": "NOT_GENERATED",
+      "ktap": "NOT_GENERATED"
+    },
+    "original_staging_negatives": {
+      "status": "NOT_EXECUTED",
+      "expected_cases": 9,
+      "executed": 0
+    }
+  },
+  "conclusion": "IN_PROGRESS",
+  "first_error": null,
+  "first_missing_prerequisite": "BLOCKED_NO_SWAP_DEVICE",
+  "source_mapped_authenticated": false,
+  "phase_a": "BLOCKED",
+  "direct_compressed_handoff": "DISABLED",
+  "forced_raw_bypass": "DISABLED",
+  "import_active": 0,
+  "raw_4096": "FULL_ORIGINAL_UNCOMPRESSED_4096",
+  "original_codec": "VOLATILE_SEPARATE_IDENTITY_NO_RECOMPRESSION",
+  "actual_physical_io": false,
+  "privileged_tests": false,
+  "loaded_kernel_tests": false,
+  "real_memory_pressure_tests": false
+}

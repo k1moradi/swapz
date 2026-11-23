@@ -4,30 +4,32 @@
   "kind": "original-pinned-linux-swapcache-source-negative",
   "task_commit": "3c1919f1b2c2ea428045a1afb5c278151cf06ccc",
   "engineering_baseline": "4083449f12c3392d5ea534ee4e536865b4caf3ee",
-  "code_commit": null,
-  "code_parent": null,
-  "exact_tested_commit": null,
-  "source_publication": "SELF_SHA_PENDING_GITHUB_PUBLICATION_THEN_EVIDENCE_ONLY_UPDATE",
+  "code_commit": "471b406d81b08e097d3bbddc8518d06bab687d8d",
+  "code_parent": "adc38477c80706908df94097467c75e0a0727753",
+  "exact_tested_commit": "471b406d81b08e097d3bbddc8518d06bab687d8d",
+  "source_publication": "NONFORCE_SINGLE_PARENT_VERIFIED",
   "original_linux_pin": "c339f4010dea8b0d754f84ace70cd1b089878ef8",
   "original_git_blobs": {
     "mm/zswap.c": "ae19e301fced7e357a4c7587dfdd6abb890b9163",
     "mm/swapfile.c": "254ce86fa923e6b5f1fefda88c39315c4cc00642",
     "mm/swap.h": "d5bf21f517dceae58eb94fb0ce5f4e1fdc679409"
   },
-  "workflow_url": null,
-  "workflow_id": null,
+  "workflow_url": "https://github.com/k1moradi/swapz/actions/runs/45127526042",
+  "workflow_id": 45127526042,
   "jobs": [
     {
       "name": "source-linked-host-negative",
-      "id": null,
-      "status": "NOT_YET_SCHEDULED",
-      "conclusion": null
+      "id": 137535206988,
+      "status": "COMPLETED",
+      "conclusion": "FAILURE",
+      "url": "https://github.com/k1moradi/swapz/actions/runs/45127526042/job/137535206988"
     },
     {
       "name": "actual-original-no-swap-device-kunit",
-      "id": null,
-      "status": "NOT_YET_SCHEDULED",
-      "conclusion": null
+      "id": 137551007262,
+      "status": "COMPLETED",
+      "conclusion": "SKIPPED",
+      "url": "https://github.com/k1moradi/swapz/actions/runs/45127526042/job/137551007262"
     }
   ],
   "local_host": {
@@ -50,21 +52,29 @@
     ]
   },
   "original_native": {
-    "status": "NOT_RUN",
+    "status": "SKIPPED",
     "expected_cases": 3,
-    "executed": null,
-    "passed": null,
-    "failed": null,
+    "executed": 0,
+    "passed": 0,
+    "failed": 0,
     "skipped": null,
-    "ktap": null,
-    "json": null
+    "ktap": "NOT_GENERATED",
+    "json": "NOT_GENERATED"
   },
   "original_stage_negatives": {
-    "status": "NOT_RUN",
-    "expected_cases": 9
+    "status": "SKIPPED_BY_DEPENDENCY",
+    "expected_cases": 9,
+    "executed": 0
   },
-  "conclusion": "IN_PROGRESS",
-  "first_error": null,
+  "conclusion": "FAILURE",
+  "first_error": {
+    "stage": "source-linked-host-negative",
+    "command": "git diff --check HEAD^ HEAD",
+    "path": "docs/testing_standards.md",
+    "line": 19120,
+    "diagnostic": "new blank line at EOF.",
+    "exit_code": 2
+  },
   "first_missing_prerequisite": "BLOCKED_NO_SWAP_DEVICE",
   "source_mapped_authenticated": false,
   "phase_a": "BLOCKED",
@@ -78,5 +88,6 @@
   "loaded_kernel_tests": false,
   "real_memory_pressure_tests": false,
   "genuine_source_provenance": "BLOCKED_NO_SWAP_DEVICE",
-  "earlier_round071_native_4of4": "REUSED_HISTORICAL_PASS_NOT_RERUN"
+  "earlier_round071_native_4of4": "REUSED_HISTORICAL_PASS_NOT_RERUN",
+  "prior_round_terminal_evidence": "Round072 original source run failure. A new Round074 source-bearing requalification is separately required."
 }

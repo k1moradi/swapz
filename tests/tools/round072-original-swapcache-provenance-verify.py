@@ -23,7 +23,9 @@ MUTATIONS = (
     ("erased-xarray", "!lease->current_stored_xarray_entry"),
     ("unlocked-folio", "!lease->original_folio_locked"),
     ("ordinary-folio", "!lease->original_folio_swapcache"),
+    ("wrong-original-folio-slot", "!lease->original_folio_matches_selected_slot"),
     ("no-original-device-ref", "!lease->original_swap_device_ref"),
+    ("recycled-original-swap-slot", "!lease->original_swap_slot_reuse_excluded"),
     ("post-erase-window", "!lease->pre_erase_copy_window"),
     ("retired-pool", "!lease->original_pool_ref"),
     ("unknown-original-codec", "!lease->original_codec_identified"),
@@ -45,7 +47,9 @@ static struct swapz_round072_source_lease valid_inputs(void)
         .selected_epoch=17, .observed_epoch=17,
         .original_store_published=true, .current_stored_xarray_entry=true,
         .original_folio_locked=true, .original_folio_swapcache=true,
-        .original_swap_device_ref=true, .pre_erase_copy_window=true,
+        .original_folio_matches_selected_slot=true,
+        .original_swap_device_ref=true, .original_swap_slot_reuse_excluded=true,
+        .pre_erase_copy_window=true,
         .original_pool_ref=true, .original_codec_identified=true,
         .immutable_owned_bytes=true, .selected_dm_source_ref=true
     };
@@ -82,8 +86,12 @@ int main(void)
     CHECK_STATUS("unlocked-folio", -EPERM);
     lease=valid_inputs(); lease.original_folio_swapcache=false;
     CHECK_STATUS("ordinary-folio", -ENODEV);
+    lease=valid_inputs(); lease.original_folio_matches_selected_slot=false;
+    CHECK_STATUS("wrong-original-folio-slot", -ESTALE);
     lease=valid_inputs(); lease.original_swap_device_ref=false;
     CHECK_STATUS("no-original-device-ref", -ENODEV);
+    lease=valid_inputs(); lease.original_swap_slot_reuse_excluded=false;
+    CHECK_STATUS("recycled-original-swap-slot", -ESTALE);
     lease=valid_inputs(); lease.pre_erase_copy_window=false;
     CHECK_STATUS("post-erase-window", -ESTALE);
     lease=valid_inputs(); lease.original_pool_ref=false;
