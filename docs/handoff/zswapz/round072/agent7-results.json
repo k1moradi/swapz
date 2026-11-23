@@ -7,7 +7,7 @@
   "original_linux_pin": "c339f4010dea8b0d754f84ace70cd1b089878ef8",
   "tested_commit": "8fb2577d589ca7ea851d14968098b2b668934f38",
   "tested_parent": "8d9f3d41fe26855b034eae404447c3fb47b08b49",
-  "publication_status": "QUEUED",
+  "publication_status": "SUCCESS",
   "workflow_run": 45129220684,
   "workflow_url": "https://github.com/k1moradi/swapz/actions/runs/45129220684",
   "jobs": [
@@ -15,8 +15,8 @@
       "id": 137540595608,
       "url": "https://github.com/k1moradi/swapz/actions/runs/45129220684/job/137540595608",
       "name": "gcc-clang-sanitizers-and-semantic-mutants",
-      "status": "queued",
-      "conclusion": null
+      "status": "completed",
+      "conclusion": "success"
     }
   ],
   "original_kernel_sources": {
@@ -32,13 +32,13 @@
     "src/kernel/zswap-direct-handoff.h": "864abf9a12071b98f5c157a44f4ed0c04d4a594c"
   },
   "host_baselines": {
-    "gcc": "QUEUED",
-    "clang": "QUEUED"
+    "gcc": "PASS_C2X_92_ASSERTIONS_ASAN_UBSAN",
+    "clang": "PASS_C23_92_ASSERTIONS_ASAN_UBSAN"
   },
   "planned_semantic_mutants_per_compiler": 15,
-  "compiled_executed_semantic_mutants": null,
-  "mutants_rejected": null,
-  "host_ktap": "NOT_AVAILABLE_QUEUED",
+  "compiled_executed_semantic_mutants": 30,
+  "mutants_rejected": 30,
+  "host_ktap": "HOST_ONLY_KTAP_2_OF_2_ARTIFACT_14801632608",
   "native_original_kunit": "NOT_RUN",
   "actual_native_ktap": "NOT_RUN",
   "first_error": null,
@@ -74,5 +74,17 @@
   },
   "standalone_original_pool_decoder_lease_coverage": "source-linked host validation of pool identity, dictionary identity, codec generation, source record identity and wrong digest; no actual native provider lease",
   "original_linux_kunit": "NOT_RUN",
-  "latest_added_controls": "owned source readable-capacity bound; a RAW_4096 4095-byte lower read independent of compressed decoder rejection; 15 compiled semantic mutants per compiler, not yet credited"
+  "latest_added_controls": "owned source readable-capacity bound; a RAW_4096 4095-byte lower read independent of compressed decoder rejection; 15 compiled semantic mutants per compiler, not yet credited",
+  "conclusion": "success",
+  "host_artifact": {
+    "id": 14801632608,
+    "name": "round072-agent7-host-only",
+    "url": "https://github.com/k1moradi/swapz/actions/runs/45129220684/artifacts/14801632608"
+  },
+  "terminal_steps": {
+    "checkout": "success",
+    "host_gcc_clang_asan_ubsan_and_30_c_mutants": "success",
+    "canonical_repository_policy": "success",
+    "artifact_upload": "success"
+  }
 }
