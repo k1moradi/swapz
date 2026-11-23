@@ -236,27 +236,83 @@ def standard(compiler: str) -> str:
     raise RuntimeError(f"{compiler}: missing strict C23 mode")
 
 
-def compile_one(compiler: str, mode: str, workspace: Path,
-                original: Path, source: Path, executable: Path) -> None:
-    # Compilation/linking includes ACTUAL original kernel compression AND
-    # decompression implementations. The generated shims are never committed
-    # as production code and are scoped strictly to a host test temp folder.
-    args = [
-        compiler, mode, "-O1", "-g", "-Wall", "-Wextra", "-Wpedantic",
-        "-Wconversion", "-Wshadow", "-Werror", "-fsanitize=address,undefined",
+def compile_original_objects(compiler: str, mode: str, workspace: Path,
+                             original: Path, tag: str) -> list[Path]:
+    # Pinned kernel .c is compiled without altering its source or silently
+    # suppressing warnings. Original kernel LZO is NOT authored with host
+    # -Wconversion and -Wshadow; those stricter checks cover product/fixture.
+    # Compiling unchanged original .c once per compiler avoids expensive
+    # recompilation for every independent mutated host fixture.
+    common = [
+        compiler, mode, "-O1", "-g", "-Wall", "-Wpedantic",
+        "-Werror", "-fsanitize=address,undefined",
         "-fno-sanitize-recover=all", "-fno-omit-frame-pointer",
         "-fno-pie", "-no-pie", "-DSTATIC=1",
         "-I", str(workspace / "host-shim"), "-I", str(original / "include"),
-        "-I", str(FIXTURE.parent),
         "-include", "stddef.h", "-include", "stdint.h", "-include", "string.h",
-        str(source), str(DECODER_OWNER), str(PRODUCT_CODEC),
-        str(original / "lib/lzo/lzo1x_compress.c"),
-        str(original / "lib/lzo/lzo1x_decompress_safe.c"),
-        "-pthread", "-llz4", "-lcrypto", "-o", str(executable),
     ]
-    process = execute(args)
-    require(process.returncode == 0,
-            f"{compiler}: compile {source.name}: {diagnostic(process)}")
+    originals = [
+        original / "lib/lzo/lzo1x_compress.c",
+        original / "lib/lzo/lzo1x_decompress_safe.c",
+    ]
+    objects: list[Path] = []
+    for index, source in enumerate(originals):
+        output = workspace / f"{tag}-pinned-{index}.o"
+        process = execute([*common, "-c", str(source), "-o", str(output)])
+        require(process.returncode == 0,
+                f"{tag}: original pinned kernel compile {source.name}: "
+                f"{diagnostic(process)}")
+        objects.append(output)
+    return objects
+
+
+def compile_product_objects(compiler: str, mode: str, workspace: Path,
+                            original: Path, tag: str) -> list[Path]:
+    product_objects: list[Path] = []
+    for index, source in enumerate((DECODER_OWNER, PRODUCT_CODEC)):
+        output = workspace / f"{tag}-product-{index}.o"
+        process = execute([
+            compiler, mode, "-O1", "-g", "-Wall", "-Wextra", "-Wpedantic",
+            "-Wconversion", "-Wshadow", "-Werror",
+            "-fsanitize=address,undefined", "-fno-sanitize-recover=all",
+            "-fno-omit-frame-pointer", "-fno-pie", "-no-pie",
+            "-I", str(workspace / "host-shim"),
+            "-I", str(original / "include"), "-include", "stddef.h",
+            "-DSWAPZ_ZSWAP_IMPORT_HOST_TEST=1",
+            "-DSWAPZ_ZSWAP_IMPORT_ORIGINAL_LZO_HOST_TEST=1",
+            "-DSWAPZ_ZSWAP_IMPORT_DECODER_HOST_TEST=1",
+            "-c", str(source), "-o", str(output),
+        ])
+        require(process.returncode == 0,
+                f"{tag}: product source compile {source.name}: "
+                f"{diagnostic(process)}")
+        product_objects.append(output)
+    return product_objects
+
+
+def compile_one(compiler: str, mode: str, workspace: Path, original: Path,
+                source: Path, executable: Path, shared_objects: list[Path]) -> None:
+    fixture_object = workspace / (executable.name + "-mutable.o")
+    compile_process = execute([
+        compiler, mode, "-O1", "-g", "-Wall", "-Wextra", "-Wpedantic",
+        "-Wconversion", "-Wshadow", "-Werror", "-fsanitize=address,undefined",
+        "-fno-sanitize-recover=all", "-fno-omit-frame-pointer",
+        "-fno-pie", "-no-pie",
+        "-I", str(workspace / "host-shim"), "-I", str(original / "include"),
+        "-I", str(FIXTURE.parent), "-include", "stddef.h",
+        "-c", str(source), "-o", str(fixture_object),
+    ])
+    require(compile_process.returncode == 0,
+            f"{compiler}: fixture compile {source.name}: "
+            f"{diagnostic(compile_process)}")
+    link_process = execute([
+        compiler, "-fsanitize=address,undefined", "-fno-pie", "-no-pie",
+        str(fixture_object), *(str(item) for item in shared_objects),
+        "-pthread", "-llz4", "-lcrypto", "-o", str(executable),
+    ])
+    require(link_process.returncode == 0,
+            f"{compiler}: source-linked fixture link {source.name}: "
+            f"{diagnostic(link_process)}")
 
 
 def run_suite() -> dict[str, object]:
@@ -275,7 +331,13 @@ def run_suite() -> dict[str, object]:
             require(compiler is not None, f"missing required {compiler_name}")
             mode = standard(compiler)
             executable = workspace / f"test-{compiler_name}"
-            compile_one(compiler, mode, workspace, original, FIXTURE, executable)
+            originals = compile_original_objects(
+                compiler, mode, workspace, original, compiler_name)
+            products = compile_product_objects(
+                compiler, mode, workspace, original, compiler_name)
+            shared_objects = [*originals, *products]
+            compile_one(compiler, mode, workspace, original, FIXTURE,
+                        executable, shared_objects)
             baseline = execute([str(executable)])
             match = EXPECTED.fullmatch(baseline.stdout)
             require(baseline.returncode == 0 and baseline.stderr == "" and
@@ -292,7 +354,8 @@ def run_suite() -> dict[str, object]:
                 mutant = workspace / f"mutant-{compiler_name}-{index}.c"
                 mutant.write_text(fixture.replace(before, after, 1),
                                   encoding="utf-8")
-                compile_one(compiler, mode, workspace, original, mutant, executable)
+                compile_one(compiler, mode, workspace, original, mutant,
+                            executable, shared_objects)
                 rejected = execute([str(executable)])
                 require(rejected.returncode == 1 and rejected.stdout == "" and
                         re.fullmatch(r"FIRST_ERROR line=\d+ check=[^\n]+\n",

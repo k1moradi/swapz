@@ -19663,3 +19663,16 @@ only disk packing and GC, never a second shrinker or recompressor.
 SOURCE_MAPPED_AUTHENTICATED=0, PHASE_A=BLOCKED, direct compressed
 handoff/forced RAW bypass/import ACTIVE0 remain OFF; exact map 20B
 remains volatile RAM, never serialized on media.
+
+## Round080 Agent7 pinned Linux host warning scope and mutant object reuse
+
+The unmodified pinned Linux LZO compressor/decompressor are built once per
+compiler with strict -Wall -Wpedantic -Werror plus ASan+UBSan using separate
+host-only kernel symbol shims. The actual product codec/decoder owner and
+every independently mutated Agent7 C fixture are compiled with additional
+-Wextra -Wconversion -Wshadow -Werror plus the same sanitizers. Reuse only
+the immutable, source-Git-SHA-verified original and product object files;
+each mutant must still compile and execute its own changed C translation
+unit and independently fail by the expected semantic runtime assertion.
+No warning suppression in original Linux code, no production codec change,
+no actual original native kernel/physical I/O, and all activation gates OFF.
