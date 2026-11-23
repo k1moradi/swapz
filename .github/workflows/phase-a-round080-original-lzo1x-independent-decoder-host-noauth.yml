@@ -1,61 +1,88 @@
-name: Round080 Agent7 pinned original LZO1X positive dormant product HOST noauth
+name: Round080 Agent7 pinned original LZO1X positive decoder host no-auth
 on:
   push:
     branches: [main]
     paths:
       - 'tests/runtime/native/fixtures/round080-original-lzo1x-independent-decoder.c'
       - 'tests/tools/round080-original-lzo1x-independent-decoder-verify.py'
+      - '.github/workflows/phase-a-round080-original-lzo1x-independent-decoder-host-noauth.yml'
       - 'src/kernel/zswap-import-codec.h'
       - 'src/kernel/zswap-import-decoder-owner.c'
       - 'src/kernel/zswap-import-decoder-owner.h'
+      - 'src/kernel/zswap-direct-handoff.h'
       - 'src/kernel/codec.c'
       - 'src/kernel/codec.h'
       - 'docs/testing_standards.md'
-      - '.github/workflows/phase-a-round080-original-lzo1x-independent-decoder-host-noauth.yml'
   workflow_dispatch:
 permissions:
   contents: read
 jobs:
-  gcc-clang-pinned-original-lzo-positive-and-semantic-mutants:
+  pinned-original-lzo1x-real-source-host-gcc-clang:
     runs-on: ubuntu-24.04
     timeout-minutes: 30
-    env:
-      SWAPZ_PUSH_BEFORE_SHA: ${{ github.event.before }}
     steps:
       - uses: actions/checkout@v4
         with:
-          fetch-depth: 0
+          fetch-depth: 2
           persist-credentials: false
-      - name: Prove sole main exact Git SHA clean root and Git diff
+      - name: Validate exact-source clean main and patch whitespace
         shell: bash
         run: |
           set -euo pipefail
           test "$GITHUB_REF" = refs/heads/main
           test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
           test "$(git branch --show-current)" = main
-          test -z "$(git status --porcelain --untracked-files=all)"
+          if [ -n "$(git status --porcelain --untracked-files=all)" ]; then
+            echo 'FIRST_ERROR original repo checkout is dirty before independent pinned Linux acquisition' >&2
+            git status --porcelain --untracked-files=all >&2
+            exit 1
+          fi
           git diff --check HEAD^ HEAD
-      - name: Install rootless GCC Clang LZ4 and SHA dependencies
+      - name: Install host-only LZO1X and sanitizer dependencies
         shell: bash
         run: |
           set -euo pipefail
           sudo apt-get update -qq
           sudo DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
-            gcc clang liblz4-dev libssl-dev ca-certificates
-      - name: Pinned original Linux LZO1X compressor decompressor real product decoder owner plus 42 semantic C mutant runs
+            gcc clang liblzo2-dev liblz4-dev libssl-dev
+      - name: Fetch exact pinned upstream Linux LZO1X decoder in runner temp OUTSIDE main checkout
+        shell: bash
+        run: |
+          set -euo pipefail
+          linux_root="$RUNNER_TEMP/swapz-original-linux-LZO1X"
+          mkdir -p "$linux_root"
+          git -C "$linux_root" init -q
+          git -C "$linux_root" remote add origin https://github.com/torvalds/linux.git
+          git -C "$linux_root" config core.sparseCheckout true
+          printf '/include/linux/lzo.h\n/lib/lzo/lzo1x_decompress_safe.c\n/lib/lzo/lzodefs.h\n/mm/zswap.c\n' \
+            > "$linux_root/.git/info/sparse-checkout"
+          timeout 240 git -C "$linux_root" -c protocol.version=2 fetch -q \
+            --no-tags --depth=1 --filter=blob:none origin \
+            c339f4010dea8b0d754f84ace70cd1b089878ef8
+          git -C "$linux_root" checkout --detach -q FETCH_HEAD
+          test "$(git -C "$linux_root" rev-parse HEAD)" = \
+            c339f4010dea8b0d754f84ace70cd1b089878ef8
+          git diff --check HEAD^ HEAD
+          if [ -n "$(git status --porcelain --untracked-files=all)" ]; then
+            echo 'FIRST_ERROR product workspace changed during separate pinned source checkout' >&2
+            git status --porcelain --untracked-files=all >&2
+            exit 1
+          fi
+      - name: Strict source-linked GCC Clang ASan UBSan positive LZO1X and executed semantic mutants
         shell: bash
         run: |
           set -euo pipefail
           python3 -B tests/tools/round080-original-lzo1x-independent-decoder-verify.py \
-            --json round080-agent7-evidence/host.json \
-            --ktap round080-agent7-evidence/host.ktap
-      - name: Enforce canonical sole main testing standards
+            --original-linux "$RUNNER_TEMP/swapz-original-linux-LZO1X" \
+            --json round080-agent7-host/host.json \
+            --ktap round080-agent7-host/host.ktap
+      - name: Enforce canonical repository source standards
         shell: bash
         run: python3 -B tests/runtime/native/repository-policy-test.py --enforce
-      - name: Upload bounded HOST-only JSON KTAP evidence
+      - name: Attach host-only execution evidence
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: round080-agent7-pinned-original-lzo1x-host
-          path: round080-agent7-evidence/
+          name: round080-agent7-original-lzo1x-real-source-host
+          path: round080-agent7-host/
           if-no-files-found: warn

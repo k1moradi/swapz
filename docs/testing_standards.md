@@ -19739,3 +19739,48 @@ WRITE/FUA then exactly-once upper ACK; nothing here grants that.
 SWAPSPACE2 first physical4096 and exact volatile RAM 20-byte map are
 protected. Source mapping auth0, Phase A BLOCKED, all activation OFF;
 no privileged, physical-device, swapon, loaded or pressure testing.
+
+## Round080 Agent7 — exact original-Linux LZO1X positive decoder host proof
+
+The dormant original-zswap LZO1X import decoder was not positively tested by
+prior original-codec-tag collision tests. Host regression
+tests/runtime/native/fixtures/round080-original-lzo1x-independent-decoder.c
+compiles the exact original Linux pin
+torvalds/linux@c339f4010dea8b0d754f84ace70cd1b089878ef8
+lib/lzo/lzo1x_decompress_safe.c through a minimal temporary test-only
+unaligned-access shim, and includes its exact include/linux/lzo.h and
+lib/lzo/lzodefs.h. The verifier independently SHA-locks each original
+source Git blob, MM/zswap source and read-only product codec/decoder-owner
+headers, then links the REAL product decoder owner C and codec C.
+A system liblzo2 ABI-compatible LZO1X_1 compressor generates authentic
+original-compatible compressed bytes for a full 4096-byte roundtrip through
+the unchanged dormant product original LZO1X decode. A system LZO encoder
+is not source evidence of a live original Linux STORED entry or its exact
+selected compression pool. Neither this HOST-only source proof nor host
+record flags may be presented as selected DM/source authentication.
+
+Run one dedicated rootless exact-source workflow, strict GCC and Clang C23/
+C2x, -Wall -Wextra -Wpedantic -Wconversion -Wshadow -Werror,
+ASan+UBSan, two positive 4096-byte assertions, and all independently
+compiled AND executed semantic C mutants (29/compiler). Mutants killed
+only by runtime FIRST_ERROR due to the expected fail-close behavior; a
+missing anchor, syntax error, compiler warning, sanitizer abort or compiler
+absence is FAILURE, not mutant coverage. Preserve output unchanged on
+rejected original version, cross-ABI ZSTD2 masquerading as original LZO1X2,
+stale generation/slot/store/record source, retired decoder lease, short
+lower read, input CRC or SHA mismatch, short decoded page, unreadable
+input, malformed extra trailing compressed bytes and byte-range overlap.
+Account for original LZO_E_INPUT_NOT_CONSUMED. An original encoded length
+3569..4095 must fail closed under current dormant cap3568; a full
+4096 input means ORIGINAL UNCOMPRESSED, not LZO compressed. Conventional
+RAW_4096 always carries 4096 ORIGINAL UNCOMPRESSED page bytes.
+
+No production source change, direct handoff, forced RAW or original import
+activation. Only Linux MM/zswap owns compressed-RAM residency and natural
+eviction; swapz owns data-only disk packing/GC, never extra reclaim or
+recompression. Preserve first physical 4096 SWAPSPACE2 header/UUID/partition
+and 20-byte volatile map. SOURCE_MAPPED_AUTHENTICATED=0,
+PHASE_A=BLOCKED, all activation flags OFF. Real selected original STORED
+auth, original kernel module lifetime, lower FUA/flush, upper bio_endio,
+native KUnit and physical/privileged/loaded/pressure tests remain NOT_RUN
+or UNPROVEN as applicable.
