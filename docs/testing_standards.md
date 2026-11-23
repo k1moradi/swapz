@@ -19623,3 +19623,43 @@ The preflight for the rootless pinned original Linux source linked host workflow
 For independently qualified original compressed producer host models, capture original pristine mm/zswap.c and mm/zsmalloc.c Git blobs and compile verbatim source-extracted branch predicates with both GCC and Clang C2x strict warnings -Werror ASan+UBSan. Every semantic mutant must compile AND execute with deterministic fail-only C assertion; compile rejection, sanitizer crash or model-only Python detection is NOT a killed C mutant. Model distinct product import MAX_COMPRESSED 3568 guard independently of caller-provided destination capacity: an original source of 3569 or 4095 bytes must be rejected even when a 4096-byte temporary modeled destination buffer exists; otherwise a separate short-capacity guard can mask loss of the import limit. The actual imported owner still cannot accept more than 3568 original compressed bytes. Original compressed source lengths 3569..4095 must fail closed without truncation, recompression or relabeling as conventional RAW_4096. Original fully uncompressed 4096-byte source is the only ordinary RAW_4096 path, distinct from volatile-tagged original LZO1X/raw LZ4 and retained original decoder leases.
 
 No original native Linux UML execution is authorized in this host lane. The original Linux MM/zswap solely owns compressed RAM natural eviction and pressure, swapz only disk packing and GC with no competing reclaim/recompression. No production code, import activation, privileged/load/real swap, physical media/FUA, selected upper ACK or live STORED authentication. Preserve protected SWAPSPACE2 first physical 4096 bytes/UUID/partition and exact 20-byte volatile map. SOURCE_MAPPED_AUTHENTICATED=0, PHASE_A=BLOCKED, direct compressed handoff OFF, forced RAW bypass OFF, imports ACTIVE0. Publish original red and corrected exact-source results without invented counts in both mandatory Round080 Agent5 MD/JSON and immutable issue #198 links.
+
+## Round080 Agent7 original pinned Linux LZO1X positive imported decode
+
+Rootless source-host Agent7 must compile the exact torvalds/linux original
+c339f4010dea8b0d754f84ace70cd1b089878ef8 original LZO1X compressor
+lib/lzo/lzo1x_compress.c, original safe decompressor
+lib/lzo/lzo1x_decompress_safe.c, original include/linux/lzo.h and
+lib/lzo/lzodefs.h, source-lock their exact immutable Git blobs, and read the
+original mm/zswap.c source. A minimal separately generated host shim is not
+an original kernel native execution or modification. The product's dormant
+src/kernel/zswap-import-decoder-owner.c and src/kernel/codec.c must link
+unchanged and actual product decoder-owner get/decode/put/drain execute on
+genuine original compatible nonframed LZO1X bytes through a live original
+decoder lease, yielding exactly the full independently verified original
+UNCOMPRESSED 4096 page.
+
+Require GCC and Clang C23/C2x high warnings, -Werror, ASan+UBSan and
+21 separately compiled AND executed runtime semantic mutants PER compiler;
+missing source anchors, compile errors, sanitizer crashes or other unexpected
+exits are NOT counted as successful mutant kills. Test original LZO1X
+versus direct tag2 ZSTD (never numeric cross-ABI cast), wrong original
+codec/version, ownership source proof, stale epoch, short lower read,
+compressed buffer capacity, invalid CRC/SHA/decoder output, duplicate or
+missing synthetic upper ACK, pinned original decoder owner retirement,
+duplicate lease get/put and retained old reader after close begins. Include
+original LZO_E_INPUT_NOT_CONSUMED trailing-input rejection and ordinary full
+UNCOMPRESSED RAW_4096 controls, never treat a compressed 3568-byte stream or
+an original incompressible 4096-byte entry as opaque original compressed.
+3569..4095 length must be explicitly rejected by the current dormant import,
+not truncated/recompressed or silently reinterpreted.
+
+No original kernel boot/native KUnit, selected live original STORED
+source/DM authentication, actual durable lower WRITE/FUA/flush, real upper
+BIO completion, SWAPSPACE2 first physical 4096, UUID, partition, physical
+device or real pressure I/O is tested in this HOST-only lane. Original Linux
+MM/zswap is sole compressed RAM/natural eviction pressure owner; swapz is
+only disk packing and GC, never a second shrinker or recompressor.
+SOURCE_MAPPED_AUTHENTICATED=0, PHASE_A=BLOCKED, direct compressed
+handoff/forced RAW bypass/import ACTIVE0 remain OFF; exact map 20B
+remains volatile RAM, never serialized on media.

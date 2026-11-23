@@ -1,0 +1,61 @@
+name: Round080 Agent7 pinned original LZO1X positive dormant product HOST noauth
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'tests/runtime/native/fixtures/round080-original-lzo1x-independent-decoder.c'
+      - 'tests/tools/round080-original-lzo1x-independent-decoder-verify.py'
+      - 'src/kernel/zswap-import-codec.h'
+      - 'src/kernel/zswap-import-decoder-owner.c'
+      - 'src/kernel/zswap-import-decoder-owner.h'
+      - 'src/kernel/codec.c'
+      - 'src/kernel/codec.h'
+      - 'docs/testing_standards.md'
+      - '.github/workflows/phase-a-round080-original-lzo1x-independent-decoder-host-noauth.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  gcc-clang-pinned-original-lzo-positive-and-semantic-mutants:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    env:
+      SWAPZ_PUSH_BEFORE_SHA: ${{ github.event.before }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Prove sole main exact Git SHA clean root and Git diff
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$GITHUB_REF" = refs/heads/main
+          test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
+          test "$(git branch --show-current)" = main
+          test -z "$(git status --porcelain --untracked-files=all)"
+          git diff --check HEAD^ HEAD
+      - name: Install rootless GCC Clang LZ4 and SHA dependencies
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo apt-get update -qq
+          sudo DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
+            gcc clang liblz4-dev libssl-dev ca-certificates
+      - name: Pinned original Linux LZO1X compressor decompressor real product decoder owner plus 42 semantic C mutant runs
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 -B tests/tools/round080-original-lzo1x-independent-decoder-verify.py \
+            --json round080-agent7-evidence/host.json \
+            --ktap round080-agent7-evidence/host.ktap
+      - name: Enforce canonical sole main testing standards
+        shell: bash
+        run: python3 -B tests/runtime/native/repository-policy-test.py --enforce
+      - name: Upload bounded HOST-only JSON KTAP evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: round080-agent7-pinned-original-lzo1x-host
+          path: round080-agent7-evidence/
+          if-no-files-found: warn
