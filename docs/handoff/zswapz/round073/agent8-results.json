@@ -1,11 +1,11 @@
 {
   "agent": 8,
   "round": "073",
-  "state": "PENDING_CI",
+  "state": "QUEUED_CI",
   "task_commit": "5f4d74f1ea538187e37fa0cdec2babb49186c59d",
   "engineering_baseline": "7c1ae38d41afb083345b1d7ec67b2d92d48b843a",
-  "tested_code_commit": null,
-  "tested_code_parent": null,
+  "tested_code_commit": "bd78c1382b284bf257e2c452247efe1512a799a3",
+  "tested_code_parent": "64e5ef5eb376059f19471f7890eaf16261c1639e",
   "source_anchor_path": "src/kernel/dm-target.c",
   "source_anchor_git_blob_sha": "f1cab252cd990190646c82da81378d1563475826",
   "qualification_kind": "source-locked userspace behavioral MODEL (production C read only)",
@@ -27,11 +27,15 @@
   },
   "github_actions": {
     "workflow": "phase-a-round073-lower-fua-ordering-noauth.yml",
-    "run_id": null,
-    "job_id": null,
-    "status": "PENDING",
+    "run_id": 45134553634,
+    "job_id": 137557602623,
+    "status": "queued",
     "conclusion": null,
-    "first_error": null
+    "first_error": null,
+    "run_url": "https://github.com/k1moradi/swapz/actions/runs/45134553634",
+    "job_url": "https://github.com/k1moradi/swapz/actions/runs/45134553634/job/137557602623",
+    "tested_head_sha": "bd78c1382b284bf257e2c452247efe1512a799a3",
+    "event": "push"
   },
   "original_linux": {
     "commit": "c339f4010dea8b0d754f84ace70cd1b089878ef8",
