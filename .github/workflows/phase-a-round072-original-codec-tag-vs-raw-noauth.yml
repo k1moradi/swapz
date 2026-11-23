@@ -43,7 +43,7 @@ jobs:
           sudo apt-get update -qq
           sudo DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
             gcc clang liblz4-dev libssl-dev
-      - name: Read-only product headers and source, GCC/Clang ASan UBSan plus 28 compiled C mutants
+      - name: Read-only product headers and source, GCC/Clang ASan UBSan plus 30 compiled C mutants
         shell: bash
         run: |
           set -euo pipefail

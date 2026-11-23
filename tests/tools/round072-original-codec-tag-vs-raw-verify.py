@@ -64,6 +64,8 @@ MUTANTS = (
      "(false && tag.source_epoch != expected_epoch))"),
     ("short-lower-copy", "if (actual_lower_bytes != tag.length)",
      "if (false && actual_lower_bytes != tag.length)"),
+    ("source-readable-capacity", "if (source->length > source->readable_capacity ||",
+     "if ((false && source->length > source->readable_capacity) ||"),
     ("nonzero-extent-padding", "if (lower_image[SWAPZ_BLOCK_BYTES + offset] != 0U)",
      "if (false && lower_image[SWAPZ_BLOCK_BYTES + offset] != 0U)"),
     ("protected-header", "if (memcmp(lower_image, protected_header, sizeof(protected_header)) != 0)",

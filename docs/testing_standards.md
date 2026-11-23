@@ -19152,3 +19152,23 @@ identity and wrong original digest. A host fixture's expected identity,
 completed write and owned lease are mock assertions, not actual original
 kernel source provenance. These assertions must not be used to activate the
 dormant direct path or to infer an available LZO-to-ZSTD decoder.
+
+### Round072 Agent7 source-copy capacity and independent RAW short-read controls
+
+The original compressed byte-copy host carrier must independently validate
+the actual contiguous source readable capacity before copying even when the
+declared compressed length is below the 3568-byte codec limit. The test must
+include a one-byte truncated source buffer lease and distinguish the source
+capacity check from the independent compressed-codec maximum using a
+separately large model input capacity. A CRC on the copied destination is
+not proof that the original source pointer was readable for the declared
+length. The genuine native source would additionally need its real protected
+source lock/refcount and cannot be authenticated by this host model.
+
+A short compressed lower read is already rejected by the linked imported
+decoder; disabling the host check alone would not create a meaningful mutant.
+Exercise an ordinary `RAW_4096` 4095-byte lower-read rejection as well, since
+that branch has no compressed decoder to repeat the check, and keep the
+uncompressed exact 4096-byte positive path. Both mutations must be compiled
+and run under GCC and Clang strict ASan+UBSan without counting a compiler
+warning as an executed semantic kill.

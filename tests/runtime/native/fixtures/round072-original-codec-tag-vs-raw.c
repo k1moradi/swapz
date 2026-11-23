@@ -38,6 +38,7 @@ enum { PHYSICAL_BLOCKS = 5U };
 struct source_copy {
     const uint8_t *bytes;
     uint32_t length;
+    uint32_t readable_capacity; /* Actual contiguous source bytes held under lease. */
     uint64_t source_epoch;
     uint64_t observed_epoch;
     uint64_t source_identity;
@@ -118,7 +119,8 @@ static int store_host(const struct source_copy *source, uint8_t blocks,
     } else {
         return -EOPNOTSUPP;
     }
-    if (source->length > (uint32_t)blocks * SWAPZ_BLOCK_BYTES)
+    if (source->length > source->readable_capacity ||
+        source->length > (uint32_t)blocks * SWAPZ_BLOCK_BYTES)
         return -EMSGSIZE;
 
     /* The physical header is untouched; all metadata stays separate RAM. */
@@ -286,6 +288,7 @@ int main(void)
             compressed_length <= (int)SWAPZ_MAX_COMPRESSED);
     source.bytes = compressed_page;
     source.length = (uint32_t)compressed_length;
+    source.readable_capacity = source.length;
     source.source_epoch = 7U;
     source.observed_epoch = 7U;
     source.source_identity = 19U;
@@ -424,6 +427,10 @@ int main(void)
     REQUIRE_STATUS(store_host(&bad, 1U, digest), -EOPNOTSUPP);
     bad = source;
     bad.length = SWAPZ_MAX_COMPRESSED + 1U;
+    bad.readable_capacity = SWAPZ_BLOCK_BYTES; /* Isolate codec length bound. */
+    REQUIRE_STATUS(store_host(&bad, 1U, digest), -EMSGSIZE);
+    bad = source;
+    bad.readable_capacity = source.length - 1U;
     REQUIRE_STATUS(store_host(&bad, 1U, digest), -EMSGSIZE);
 
     /* LZO1X is a distinct owned opaque source, not ZSTD or swapz delta64. */
@@ -441,12 +448,15 @@ int main(void)
     bad = source;
     bad.bytes = original_page;
     bad.length = SWAPZ_BLOCK_BYTES;
+    bad.readable_capacity = SWAPZ_BLOCK_BYTES;
     bad.codec = 0U;
     bad.kind = ORDINARY_RAW_4096;
     REQUIRE_STATUS(store_host(&bad, 1U, digest), 0);
     memset(read_page, 0xc3, sizeof(read_page));
     REQUIRE_STATUS(read_host(0U, bad.source_epoch, SWAPZ_BLOCK_BYTES, read_page), 0);
     REQUIRE(memcmp(read_page, original_page, sizeof(original_page)) == 0);
+    REQUIRE_STATUS(read_host(0U, bad.source_epoch,
+                             SWAPZ_BLOCK_BYTES - 1U, read_page), -EIO);
     REQUIRE_STATUS(direct_family_compatible(&tag, SWAPZ_DIRECT_ZSWAP_LZ4),
                    -EOPNOTSUPP);
     bad.length = SWAPZ_BLOCK_BYTES - 1U;
