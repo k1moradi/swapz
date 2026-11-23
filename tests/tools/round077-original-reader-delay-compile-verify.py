@@ -144,7 +144,10 @@ def compiler_check(compiler_name: str, header: str) -> None:
         # not because the positive test's other symbols are unresolved.
         negative = directory / "missing-declaration.c"
         negative.write_text(common + main)
-        rejected = run([*flags, "-fsyntax-only", str(negative)])
+        # Link-capable compile keeps strict -no-pie valid for Clang; the
+        # missing declaration itself, not an unused driver flag, must fail.
+        rejected = run([*flags, str(negative), "-o",
+                        str(directory / "missing-declaration")])
         require(rejected.returncode != 0 and
                 "usleep_range" in rejected.stderr and
                 re.search(r"implicit declaration|undeclared function",

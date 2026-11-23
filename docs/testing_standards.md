@@ -19440,3 +19440,15 @@ The unchanged pinned original Linux `torvalds/linux@c339f4010dea8b0d754f84ace70c
 A surgical regression must verify both original Linux pinned Git blobs, original delay-header source body, the unique KUnit markers/case, the exact `usleep_range(1000, 2000)` call, the preserved 1500-iteration bound and declaration-before-use order. With each of GCC and Clang in strict C23/C2x high-warning `-Werror` ASan+UBSan mode, compile **and execute** the pinned original inline wrapper with the exact fixture delay call; removing the declaration must yield a specific `usleep_range` implicit/undeclared **compile failure**, not a runtime semantic mutant or a disguised successful test. The targeted source-extracted host adapter is not an original Linux build, and its compiled negative is not counted among inherited read-side source semantic mutants.
 
 Keep the inherited original source-host lane of ten independently compiled and executed original C predicate semantic mutants, fourteen actual authority mutants and two decoder-owner lifetime mutants **per compiler**; actual CI logs, not planned counts, decide their qualification. Independently build **and boot** the pinned original UML kernel with all strict warnings still enabled, and require exact original reader KUnit JSON/KTAP 4/4 with no fails/skips/crashes before reporting native success. A new undeclared symbol, config failure or queued job must remain a first-error FAILURE/PENDING with no invented native execution. Preserve the prior original Round073 exact-source red compile result and report the new fix under a new source SHA and run. Source authentication stays 0, Phase A stays BLOCKED, and all direct-handoff, forced-RAW and imported-codec activation gates stay OFF. Only original Linux MM/zswap owns compressed RAM pressure and natural eviction; swapz is disk-only packing and GC without recompression. Original compressed LZO1X/raw-LZ4 retains its own codec identity and independently held decoder lease, while ordinary RAW_4096 is the complete original uncompressed 4096-byte page.
+
+### Round077 Agent10 strict compiler-negative driver invocation
+
+The missing-`usleep_range` declaration negative must invoke the GCC and
+Clang **link-capable** normal compiler driver with a real test executable
+output path. When using `-fsyntax-only`, Clang reports `-no-pie` as an
+unused linker flag under `-Werror`, which is an unrelated driver error
+and cannot qualify rejection of the missing declaration. With consistent
+compile/link flags, insist on the targeted `usleep_range` undeclared
+diagnostic for the negative and a clean compiled/executed positive; neither
+a discarded linker flag nor an ASan runtime error counts as a positive or
+semantic mutant. The genuine original UML KUnit verdict remains separate.
