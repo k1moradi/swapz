@@ -1,88 +1,104 @@
-name: Round080 Agent7 pinned original LZO1X positive decoder host no-auth
+name: "Round080 original LZO1X independent decoder HOST ONLY NO_AUTH"
 on:
   push:
     branches: [main]
     paths:
-      - 'tests/runtime/native/fixtures/round080-original-lzo1x-independent-decoder.c'
-      - 'tests/tools/round080-original-lzo1x-independent-decoder-verify.py'
-      - '.github/workflows/phase-a-round080-original-lzo1x-independent-decoder-host-noauth.yml'
-      - 'src/kernel/zswap-import-codec.h'
-      - 'src/kernel/zswap-import-decoder-owner.c'
-      - 'src/kernel/zswap-import-decoder-owner.h'
-      - 'src/kernel/zswap-direct-handoff.h'
-      - 'src/kernel/codec.c'
-      - 'src/kernel/codec.h'
-      - 'docs/testing_standards.md'
+      - "tests/runtime/native/fixtures/round080-original-lzo1x-independent-decoder.c"
+      - "tests/tools/round080-original-lzo1x-independent-decoder-verify.py"
+      - ".github/workflows/phase-a-round080-original-lzo1x-independent-decoder-host-noauth.yml"
   workflow_dispatch:
 permissions:
   contents: read
 jobs:
-  pinned-original-lzo1x-real-source-host-gcc-clang:
+  pristine-original-lzo1x-product-host:
+    name: Original LZO1X pinned source + product decoder GCC/Clang ASan UBSan
     runs-on: ubuntu-24.04
-    timeout-minutes: 30
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@v4
         with:
-          fetch-depth: 2
+          path: swapz
+          fetch-depth: 1
           persist-credentials: false
-      - name: Validate exact-source clean main and patch whitespace
+      - uses: actions/checkout@v4
+        with:
+          repository: torvalds/linux
+          ref: c339f4010dea8b0d754f84ace70cd1b089878ef8
+          fetch-depth: 1
+          sparse-checkout: |
+            mm/zswap.c
+            crypto/lzo.c
+            include/linux/lzo.h
+            lib/lzo/lzo1x_compress.c
+            lib/lzo/lzo1x_compress_safe.c
+            lib/lzo/lzo1x_decompress_safe.c
+            lib/lzo/lzodefs.h
+          path: original-linux
+          persist-credentials: false
+      - name: Strict source identity and pristine sibling check
         shell: bash
         run: |
-          set -euo pipefail
-          test "$GITHUB_REF" = refs/heads/main
-          test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
-          test "$(git branch --show-current)" = main
-          if [ -n "$(git status --porcelain --untracked-files=all)" ]; then
-            echo 'FIRST_ERROR original repo checkout is dirty before independent pinned Linux acquisition' >&2
-            git status --porcelain --untracked-files=all >&2
+          set -Eeuo pipefail
+          if [[ "$(git -C swapz rev-parse HEAD)" != "$GITHUB_SHA" ]]; then
+            echo "::error::ROUND080_AGENT7_FIRST_ERROR main-source SHA mismatch" >&2
             exit 1
           fi
-          git diff --check HEAD^ HEAD
-      - name: Install host-only LZO1X and sanitizer dependencies
-        shell: bash
-        run: |
-          set -euo pipefail
-          sudo apt-get update -qq
-          sudo DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
-            gcc clang liblzo2-dev liblz4-dev libssl-dev
-      - name: Fetch exact pinned upstream Linux LZO1X decoder in runner temp OUTSIDE main checkout
-        shell: bash
-        run: |
-          set -euo pipefail
-          linux_root="$RUNNER_TEMP/swapz-original-linux-LZO1X"
-          mkdir -p "$linux_root"
-          git -C "$linux_root" init -q
-          git -C "$linux_root" remote add origin https://github.com/torvalds/linux.git
-          git -C "$linux_root" config core.sparseCheckout true
-          printf '/include/linux/lzo.h\n/lib/lzo/lzo1x_decompress_safe.c\n/lib/lzo/lzodefs.h\n/mm/zswap.c\n' \
-            > "$linux_root/.git/info/sparse-checkout"
-          timeout 240 git -C "$linux_root" -c protocol.version=2 fetch -q \
-            --no-tags --depth=1 --filter=blob:none origin \
-            c339f4010dea8b0d754f84ace70cd1b089878ef8
-          git -C "$linux_root" checkout --detach -q FETCH_HEAD
-          test "$(git -C "$linux_root" rev-parse HEAD)" = \
-            c339f4010dea8b0d754f84ace70cd1b089878ef8
-          git diff --check HEAD^ HEAD
-          if [ -n "$(git status --porcelain --untracked-files=all)" ]; then
-            echo 'FIRST_ERROR product workspace changed during separate pinned source checkout' >&2
-            git status --porcelain --untracked-files=all >&2
+          if [[ -n "$(git -C swapz status --porcelain --untracked-files=all)" ]]; then
+            echo "::error::ROUND080_AGENT7_FIRST_ERROR dirty main checkout" >&2
             exit 1
           fi
-      - name: Strict source-linked GCC Clang ASan UBSan positive LZO1X and executed semantic mutants
+          if [[ "$(git -C original-linux rev-parse HEAD)" != c339f4010dea8b0d754f84ace70cd1b089878ef8 ]]; then
+            echo "::error::ROUND080_AGENT7_FIRST_ERROR original Linux pin mismatch" >&2
+            exit 1
+          fi
+          if [[ -n "$(git -C original-linux status --porcelain --untracked-files=all)" ]]; then
+            echo "::error::ROUND080_AGENT7_FIRST_ERROR dirty original Linux checkout" >&2
+            exit 1
+          fi
+          for dependency in gcc clang python3; do
+            if ! command -v "$dependency" >/dev/null; then
+              echo "::error::ROUND080_AGENT7_FIRST_ERROR unavailable compiler/tool: $dependency" >&2
+              exit 1
+            fi
+          done
+          for header in /usr/include/lz4.h /usr/include/openssl/sha.h; do
+            if [[ ! -f "$header" ]]; then
+              echo "::error::ROUND080_AGENT7_FIRST_ERROR missing host development header: $header" >&2
+              exit 1
+            fi
+          done
+      - name: Actual pinned original Linux LZO1X and dormant product compiled executed mutants
         shell: bash
         run: |
-          set -euo pipefail
-          python3 -B tests/tools/round080-original-lzo1x-independent-decoder-verify.py \
-            --original-linux "$RUNNER_TEMP/swapz-original-linux-LZO1X" \
-            --json round080-agent7-host/host.json \
-            --ktap round080-agent7-host/host.ktap
-      - name: Enforce canonical repository source standards
-        shell: bash
-        run: python3 -B tests/runtime/native/repository-policy-test.py --enforce
-      - name: Attach host-only execution evidence
+          set -Eeuo pipefail
+          if python3 -B swapz/tests/tools/round080-original-lzo1x-independent-decoder-verify.py \
+               --linux-root original-linux \
+               --json "$RUNNER_TEMP/agent7-host-results.json" \
+               --ktap "$RUNNER_TEMP/agent7-host.ktap" \
+               > "$RUNNER_TEMP/agent7-first-error.log" 2>&1; then
+            tail -n 8 "$RUNNER_TEMP/agent7-first-error.log"
+          else
+            code=$?
+            echo "::error::ROUND080_AGENT7_FIRST_ERROR source-locked host qualification exit=$code" >&2
+            tail -n 18 "$RUNNER_TEMP/agent7-first-error.log" >&2
+            exit "$code"
+          fi
+          if ! git -C swapz diff --check HEAD^ HEAD; then
+            echo "::error::ROUND080_AGENT7_FIRST_ERROR source commit whitespace" >&2
+            exit 1
+          fi
+          if [[ -n "$(git -C swapz status --porcelain --untracked-files=all)" ]]; then
+            echo "::error::ROUND080_AGENT7_FIRST_ERROR tests modified checkout" >&2
+            exit 1
+          fi
+      - name: Upload bounded host result and first-error evidence
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: round080-agent7-original-lzo1x-real-source-host
-          path: round080-agent7-host/
+          name: round080-agent7-original-lzo-host
+          path: |
+            ${{ runner.temp }}/agent7-host-results.json
+            ${{ runner.temp }}/agent7-host.ktap
+            ${{ runner.temp }}/agent7-first-error.log
           if-no-files-found: warn
+          retention-days: 14

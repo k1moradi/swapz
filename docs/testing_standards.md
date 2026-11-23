@@ -19855,3 +19855,33 @@ separate volatile codec tags and independently pinned decoder lifetime,
 while ordinary RAW_4096 always means the complete ORIGINAL UNCOMPRESSED
 4096-byte page. Protect physical SWAPSPACE2 first4096 and RAM-only 20B
 map. No privileged, loaded, swapon, physical, or real-pressure tests.
+
+## Round080 Agent7 — pristine original LZO1X dormant import decoder host qualification
+
+Require the pristine pinned Linux lzo-scomp source binding, whole Git blob
+checks for mm/zswap.c, crypto/lzo.c, include/linux/lzo.h, and original
+lib/lzo compressor/decompressor, plus separate exact product import and
+retained decoder-owner source blobs. The host harness must generate true
+LZO1X compressed bytes with the original compatible source, decode the
+original 4096-byte page through the *actual dormant product LZO1X import*
+with an independently retained decoder lease, and independently reject
+codec/version namespace collision, stale/partial/corrupt/unaligned authority
+and data, overlap, decoder close with an old pinned reader, duplicate lease
+operations, incorrect 4095 decoded length, and the current 3569-byte limit.
+Each GCC and Clang C23/C2x -Werror ASan/UBSan positive must execute; at
+least 12 *independent* compile-and-execute C mutants per compiler must
+change the real product source guard and die at the named runtime semantic
+assertion. Compiler failure, sanitizer abort, source-string-only spoof and
+an unexecuted C mutant are NEVER a counted semantic kill. The original
+Linux C objects use only a minimal explicitly identified GNU11 host header
+shim: this is not original native KUnit, a loaded kernel or authentic live
+STORED slot, selected DM, actual durable lower write, or real upper BIO
+completion. Original LZO1X/raw LZ4 remain separate from legacy direct
+ZSTD=2 and from swapz disk compression. Linux MM/zswap alone owns pressure,
+residence and natural eviction; swapz only disk packing/GC, with no added
+reclaimer or recompression. Ordinary RAW_4096 always means a complete
+ORIGINAL UNCOMPRESSED page, and original incompressible length4096 is
+never a compressed record. Current import 3568 means reject valid original
+3569..4095 without truncation; preserve physical SWAPSPACE2 first4096
+and the exact 20-byte volatile RAM mapping. AUTH=0, Phase A BLOCKED,
+direct handoff/forced RAW bypass/import all OFF.
