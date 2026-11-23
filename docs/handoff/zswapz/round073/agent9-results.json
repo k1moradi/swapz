@@ -13,24 +13,25 @@
     {
       "id": 137557338164,
       "name": "source-linked-rootless-geometry",
-      "status": "QUEUED",
-      "conclusion": null,
+      "status": "COMPLETED",
+      "conclusion": "FAILURE",
       "url": "https://github.com/k1moradi/swapz/actions/runs/45134473707/job/137557338164"
     }
   ],
   "compilers": {
     "gcc": {
-      "status": "QUEUED",
-      "mutants_executed": 0
+      "status": "FAILURE_ON_NONUNIQUE_THIRD_ANCHOR",
+      "mutants_executed": 2,
+      "count_basis": "control-flow inferred: checker reaches third anchor only after first two source C mutants compile and execute with exit 3"
     },
     "clang": {
-      "status": "QUEUED",
+      "status": "NOT_RUN",
       "mutants_executed": 0
     }
   },
   "planned_mutants_per_compiler": 15,
-  "conclusion": "QUEUED",
-  "first_error": null,
+  "conclusion": "FAILURE",
+  "first_error": "ROUND073_GEOMETRY_FIRST_ERROR nonunique-header-mutant-anchor:two-gc-reserves",
   "source_mapped_authenticated": false,
   "phase_a": "BLOCKED",
   "direct_compressed_handoff": "DISABLED",
@@ -42,5 +43,13 @@
   "conventional_raw_4096": "ORIGINAL_FULL_UNCOMPRESSED_PAGE",
   "memory_pressure_owner": "Linux MM/zswap natural eviction only",
   "disk_owner": "swapz packing/GC only",
-  "ci_source_sha_confirmed": true
+  "ci_source_sha_confirmed": true,
+  "fully_qualified": false,
+  "corrective_round075": {
+    "tested_source_commit": "3d3e84acbf6b0930ee6e00e0751db980de206dc6",
+    "run_id": 45154650078,
+    "job_id": 137624391690,
+    "status": "QUEUED",
+    "qualified": false
+  }
 }
