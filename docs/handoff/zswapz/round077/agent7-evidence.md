@@ -1,0 +1,17 @@
+# Round077 Agent7 — dormant original-versus-direct codec tag2 collision
+
+## Immutable assignment and real source evidence
+
+Task commit: 5e5908dcf1505331ef0ab37db9b0125149c0ea16, parent 6096113f7dca73e1aec40fd558cd85d19e1c7527. Pinned original Linux: torvalds/linux@c339f4010dea8b0d754f84ace70cd1b089878ef8 (read-only; no newly scheduled original kernel KUnit).
+
+Read-only product source Git blobs: direct zswap-direct-handoff.h 864abf9a12071b98f5c157a44f4ed0c04d4a594c; import zswap-import-codec.h 0d888fe4c74115ab2388f1df1dc0b86ae4b9b6c6; actual import decoder owner C 8e0c8f4d2085af7f2e17df412f3a1af654063571. Numeric codec2 means ZSTD in the dormant direct ABI, original LZO1X in dormant import. No production source or original Linux changes.
+
+Exclusive test-only files are tests/runtime/native/fixtures/round077-original-codec-tag-cross-abi.c, tests/tools/round077-original-codec-tag-cross-abi-verify.py and dedicated .github/workflows/phase-a-round077-original-codec-tag-cross-abi-noauth.yml. Compile real source-linked original decoder owner C and swapz codec C; include and CALL real inline direct validator/readback and original-import read/lease functions. Build a HOST-generated raw LZ4 example and a retained imported decoder lease; full original compressed LZO1X positive kernel decode is NOT_RUN without the original provider. A deliberately matched synthetic direct ZSTD tag2 passes the real dormant direct validator numerically, but an independent typed HOST-only source-provenance boundary must refuse treating original LZO1X tag2 as that direct ZSTD. This demonstrates a cross-namespace risk, not currently active misdecode or a product deployment path.
+
+Required independently executed negative cases: original LZO/ZSTD tag collision both ways; wrong namespace, missing host source proof, retired/absent original decoder, malformed original version, framed versus raw LZ4, wrong pool/slot/generation/dictionary/record/codec epoch, short/readable compressed source, wrong independent original digest, swapz disk codec reinterpretation, secondary shrinker and recompression requests. Ordinary RAW allows precisely entire ORIGINAL UNCOMPRESSED 4096 bytes, not short/compressed opaque source data. Separate Round074 Agent7 already covered the real product RAW authority; this lane is a different codec ABI test.
+
+## CI and safety
+
+The current source/test commit, its parent, CI run/job, actual GCC/Clang baseline assertion counts and semantic mutant counts, first error and host artifact are PENDING new GitHub Actions. Planned are GCC and Clang strict C23/C2x ASan+UBSan and 32 independently compiled-and-executed semantic C mutants per compiler; no mutant has been credited at this preliminary source commit. Original Linux native KUnit JSON/KTAP NOT_RUN; any future host KTAP is not native.
+
+SOURCE_MAPPED_AUTHENTICATED=0; PHASE_A=BLOCKED; direct compressed handoff DISABLED; forced RAW bypass DISABLED; import ACTIVE0. Linux MM/zswap alone owns compressed RAM and natural eviction, swapz only disk packing/GC with no second reclaimer or recompression. Real selected original STORED source authenticity, immutable original bytes across erasure, real lower FUA/flush, authentic once-only upper BIO ACK and physical SWAPSPACE2 data are NOT_PROVED. Protect first physical 4096 and original UUID/partition and 20-byte volatile map. No real device, loaded/privileged, activated swap or pressure experiment.

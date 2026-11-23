@@ -19452,3 +19452,43 @@ compile/link flags, insist on the targeted `usleep_range` undeclared
 diagnostic for the negative and a clean compiled/executed positive; neither
 a discarded linker flag nor an ASan runtime error counts as a positive or
 semantic mutant. The genuine original UML KUnit verdict remains separate.
+
+## Round077 Agent7 — two incompatible dormant codec tag-2 ABIs
+
+The read-only dormant zswap-direct-handoff.h declares tag 2
+SWAPZ_DIRECT_ZSWAP_ZSTD, whereas independently owned original import
+zswap-import-codec.h declares tag 2 SWAPZ_ZSWAP_IMPORT_LZO1X_CODEC.
+Numeric equality never implies codec interchangeability. No untyped cast,
+disk-encoding shortcut, or synthetic source-auth witness can activate an
+original compressed passthrough.
+
+Agent7's rootless host regression reads these exact source headers, links
+actual src/kernel/zswap-import-decoder-owner.c plus src/kernel/codec.c,
+and compiles strict C23/C2x GCC and Clang with -Wall -Wextra -Wpedantic,
+-Wconversion -Wshadow -Werror and ASan+UBSan. Each of 32 independent
+semantic C mutants PER compiler must separately compile AND execute
+under the same sanitizer flags; syntax errors, missing anchors, abnormal
+exits, UBSan/ASan errors, and a surviving mutant count as FAILURE, not kills.
+Record actual assertions/mutants, fail-only first error, host JSON and KTAP.
+Do not report original Linux native KUnit/KTAP as run unless it is.
+
+Prove that the REAL dormant direct validator can accept tag2 numerically
+if paired with a forged synthetic direct ZSTD decoder, while the separate
+original-tag host witness refuses to interpret source LZO1X as ZSTD or
+as native LZ4. The host bridge must explicitly enforce source codec family,
+selected-source identity witness, original version, immutable compressed
+copy, retained original decoder owner, raw-block LZ4 rather than framed,
+pool/slot/generation/record/dictionary/codec epoch, independent SHA, exact
+lower read length, no secondary reclaim or recompression. It is strictly
+a test-only boundary, NOT production source authenticity or activation.
+A host-linked original LZO1X decoder branch without the original kernel
+LZO provider is explicitly unsupported, not silently mapped to ZSTD.
+
+Ordinary RAW_4096 remains a complete ORIGINAL UNCOMPRESSED 4096-byte page
+and refuses short/compressed original streams even when their compressed
+length fits. The original Linux MM/zswap alone owns natural pressure
+eviction of compressed RAM. swapz owns only data-only disk packing/GC;
+protect first physical SWAPSPACE2 4096/UUID/partition and exact 20-byte
+volatile RAM map. SOURCE_MAPPED_AUTHENTICATED=0, PHASE_A=BLOCKED,
+direct compressed handoff, forced RAW bypass, and original import OFF.
+No loaded/privileged/activated swap/physical media/real pressure tests.
