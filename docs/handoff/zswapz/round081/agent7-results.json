@@ -1,11 +1,11 @@
 {
   "round": "081",
   "agent": 7,
-  "status": "PUBLISHED_PENDING_EXACT_SOURCE_CI",
-  "result": "NOT_YET_QUALIFIED",
+  "status": "QUEUED_AT_LAST_OBSERVATION",
+  "result": "PENDING_CI_NOT_QUALIFIED",
   "task_sha": "01abda0f17874b260c3ef6d1dbe2e445622e5b7a",
-  "tested_commit": null,
-  "source_parent": null,
+  "tested_commit": "c03fc48e5772c982b7ef7fad0d7161372c9ae412",
+  "source_parent": "01abda0f17874b260c3ef6d1dbe2e445622e5b7a",
   "old_round080_failed_source": "4e801ebdc52718875935032867986feb2f2ed48b",
   "old_failed_run": 45273027725,
   "old_failed_job": 138037498047,
@@ -26,8 +26,8 @@
     "src/kernel/zswap-import-decoder-owner.c": "8e0c8f4d2085af7f2e17df412f3a1af654063571"
   },
   "workflow_url": "https://github.com/k1moradi/swapz/actions/workflows/phase-a-round080-original-lzo1x-independent-decoder-host-noauth.yml",
-  "run_id": null,
-  "job_id": null,
+  "run_id": 45291110355,
+  "job_id": 138099798638,
   "first_new_error": null,
   "planned_semantic_mutants_per_compiler": 18,
   "actual_gcc": {
@@ -58,5 +58,14 @@
   "second_reclaimer": false,
   "recompression": false,
   "swapspace2_first_physical_bytes_protected": 4096,
-  "volatile_map_bytes": 20
+  "volatile_map_bytes": 20,
+  "conclusion": "QUEUED",
+  "source_url": "https://github.com/k1moradi/swapz/commit/c03fc48e5772c982b7ef7fad0d7161372c9ae412",
+  "run_url": "https://github.com/k1moradi/swapz/actions/runs/45291110355",
+  "job_url": "https://github.com/k1moradi/swapz/actions/runs/45291110355/job/138099798638",
+  "run_status_observed": "queued",
+  "job_status_observed": "queued",
+  "first_error_status": "NONE_REPORTED_WHILE_QUEUED",
+  "counts_are_verified_as_of": "queued_observation_not_test_completion",
+  "note": "Actual new GCC/Clang executed baselines and semantic mutant counts ZERO VERIFIED while the one exact-source run is queued. Never count planned 18/compiler."
 }

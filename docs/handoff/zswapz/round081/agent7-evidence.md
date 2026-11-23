@@ -1,6 +1,6 @@
 # Round081 Agent7 — strict original LZO1X dormant decoder host qualification
 
-**Source commit status: PUBLISHED_PENDING_EXACT_SOURCE_CI.** This is an initial source-bearing commit report, not a compiler PASS. Immutable tested source SHA, parent, run/job and first genuine new error are filled by a separate evidence-only main commit after GitHub Actions reports the new attempt.
+**Status: QUEUED at last observation, NOT QUALIFIED.** The exact new source SHA and sole parent, workflow run and job have been observed. Compiler tests are not yet verified as executed.
 
 ## Exact verified historical first failure and surgical repair
 
@@ -18,8 +18,12 @@ The test expects original-compatible genuine LZO1X compressed bytes with full 40
 
 ## Actual CI vs expectations
 
-Focused workflow: https://github.com/k1moradi/swapz/actions/workflows/phase-a-round080-original-lzo1x-independent-decoder-host-noauth.yml. New exact-source run/job: **NOT YET OBSERVED**. New GCC positive, Clang positive and 18 GCC+18 Clang independently compiled and executed semantic mutants: **PENDING**, zero *verified* until Actions executes. First new error **NONE REPORTED YET**. Source-task parent and exact CI identifiers must be appended after publication; do not silently count attempted, queued, compile-rejected or sanitizer-failed cases as PASS. No new original native build; do not interfere with Agent10 or Agent11.
+Focused workflow: https://github.com/k1moradi/swapz/actions/workflows/phase-a-round080-original-lzo1x-independent-decoder-host-noauth.yml. New exact-source run [45291110355](https://github.com/k1moradi/swapz/actions/runs/45291110355) / [job138099798638](https://github.com/k1moradi/swapz/actions/runs/45291110355/job/138099798638): **QUEUED** at last observation. New GCC positive, Clang positive and 18 GCC+18 Clang independently compiled and executed semantic mutants: **PENDING**, zero *verified* until Actions executes. First new error **NONE REPORTED YET**. Source-task parent and exact CI identifiers must be appended after publication; do not silently count attempted, queued, compile-rejected or sanitizer-failed cases as PASS. No new original native build; do not interfere with Agent10 or Agent11.
 
 ## Frozen safety
 
 Linux original MM/zswap exclusively controls compressed RAM/natural eviction. swapz owns only disk packing/GC, no second pressure reclaimer/recompression. Original compressed LZO1X/raw LZ4 future sideband requires selected authentic original STORED XArray/folio/slot/generation+DM, immutable preerase owned bytes and retained independent decoder, actual ordered lower durable FUA/flush before real exactly-once upper ACK. Ordinary RAW_4096 is **complete original UNCOMPRESSED 4096**. Current dormant import max3568 refuses 3569..4095 without truncation or substitution. Preserve first physical SWAPSPACE2 4096 and the exact 20-byte volatile mapping. `SOURCE_MAPPED_AUTHENTICATED=0`, `PHASE_A=BLOCKED`, direct/forced RAW/import OFF; no loaded/swapon/physical/privileged/pressure tests.
+
+## New source SHA, one-parent lineage and actual queued Actions observation
+
+Tested source commit: [c03fc48e5772c982b7ef7fad0d7161372c9ae412](https://github.com/k1moradi/swapz/commit/c03fc48e5772c982b7ef7fad0d7161372c9ae412); one parent `01abda0f17874b260c3ef6d1dbe2e445622e5b7a`. Actual matching exact-source run [45291110355](https://github.com/k1moradi/swapz/actions/runs/45291110355), job [138099798638](https://github.com/k1moradi/swapz/actions/runs/45291110355/job/138099798638) observed `queued`, conclusion null. **No new first runtime/compiler error yet.** New GCC baseline executed VERIFIED=0; new Clang baseline executed VERIFIED=0; independently compiled+EXECUTED C semantic mutants VERIFIED GCC=0/18, Clang=0/18, while the full strict positive and 36 mutants are planned. Do not treat these zeros as a negative result once CI begins, or the planned 18 each as PASS. **Actual original Linux native KUnit NOT_RUN in this lane**, and Agent10 original native run remains independent. Historical Round080 source/job first-error remains FAILED at its immutable SHA. One source-bearing main commit with append-only standards and two evidence files, followed by an evidence-only update; no new branches/PRs, force, periodic monitoring or physical/privileged testing.
