@@ -1,15 +1,23 @@
 {
   "round": "072",
   "agent": 6,
-  "status": "IN_PROGRESS",
-  "conclusion": "PENDING",
+  "status": "COMPLETED",
+  "conclusion": "SUCCESS",
   "task_commit": "3c1919f1b2c2ea428045a1afb5c278151cf06ccc",
   "publication_parent": "3c1919f1b2c2ea428045a1afb5c278151cf06ccc",
-  "source_commit": null,
-  "tested_commit": null,
-  "workflow_url": null,
-  "run_id": null,
-  "jobs": [],
+  "source_commit": "62f137b838a2434764926a24457f700d0bfb984c",
+  "tested_commit": "62f137b838a2434764926a24457f700d0bfb984c",
+  "workflow_url": "https://github.com/k1moradi/swapz/actions/runs/45126975773",
+  "run_id": 45126975773,
+  "jobs": [
+    {
+      "id": 137533438890,
+      "name": "gcc-clang-asan-ubsan-compiled-semantic-mutants",
+      "status": "completed",
+      "conclusion": "success",
+      "url": "https://github.com/k1moradi/swapz/actions/runs/45126975773/job/137533438890"
+    }
+  ],
   "first_error": null,
   "source_files": [
     ".github/workflows/phase-a-round071-natural-pressure-cooperation-noauth.yml",
@@ -21,8 +29,8 @@
   "actual_native_ktap": "NOT_RUN",
   "expected_compiler_baselines": 2,
   "expected_compiled_executed_semantic_mutants": 48,
-  "verified_compiled_executed_semantic_mutants": null,
-  "canonical_policy": "PENDING",
+  "verified_compiled_executed_semantic_mutants": 48,
+  "canonical_policy": "SUCCESS",
   "source_mapped_authenticated": false,
   "phase_a": "BLOCKED",
   "direct_compressed_handoff": false,
@@ -31,5 +39,10 @@
   "ordinary_raw_4096": "ORIGINAL_UNCOMPRESSED_4096",
   "real_physical_io": false,
   "real_memory_pressure": false,
-  "privileged_kernel": false
+  "privileged_kernel": false,
+  "verified_compiler_baselines": 2,
+  "push_dispatch_first_parent_selftests": "SUCCESS",
+  "host_original_header_linked": true,
+  "original_linux_UML_native": "NOT_RUN",
+  "post_ci_commit": "EVIDENCE_ONLY_SHA_IN_GIT_HISTORY"
 }
