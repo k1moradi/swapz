@@ -5,17 +5,17 @@
   "task_commit": "d76081b661ce750d2fbeaa247fa16e4670db5e97",
   "task_parent": "db3608f1464d736db1d09f2e08c57f160235e640",
   "linux_pin": "c339f4010dea8b0d754f84ace70cd1b089878ef8",
-  "source_commit": null,
-  "source_parent": null,
-  "ci_status": "PENDING_EXACT_SOURCE_CI",
-  "run_id": null,
-  "job_id": null,
+  "source_commit": "ff47488530f407430163febde993473ad1de0b04",
+  "source_parent": "e56d3dcb9532ceb13c26d03cdb2c3e9e44160bc9",
+  "ci_status": "QUEUED",
+  "run_id": 45252870715,
+  "job_id": 137966865409,
   "first_error": null,
-  "gcc": "NOT_EXECUTED",
-  "clang": "NOT_EXECUTED",
+  "gcc": "NOT_EXECUTED_QUEUED",
+  "clang": "NOT_EXECUTED_QUEUED",
   "mutants_planned_per_compiler": 21,
   "mutants_compiled_executed": null,
-  "host_ktap": "NOT_EXECUTED",
+  "host_ktap": "NOT_EXECUTED_QUEUED",
   "original_linux_native_json_ktap": "NOT_RUN",
   "original_lzo_decompressor_host_compiled": "PENDING",
   "product_decoder_owner_linked": "PENDING",
@@ -31,5 +31,22 @@
   "real_upper_ack": false,
   "secondary_reclaimer": false,
   "recompression": false,
-  "production_source_changed": false
+  "production_source_changed": false,
+  "tested_commit": "ff47488530f407430163febde993473ad1de0b04",
+  "tested_parent": "e56d3dcb9532ceb13c26d03cdb2c3e9e44160bc9",
+  "status": "QUEUED",
+  "workflow_url": "https://github.com/k1moradi/swapz/actions/runs/45252870715",
+  "jobs": [
+    {
+      "id": 137966865409,
+      "url": "https://github.com/k1moradi/swapz/actions/runs/45252870715/job/137966865409",
+      "status": "queued",
+      "conclusion": null
+    }
+  ],
+  "superseded_source_run": {
+    "source_commit": "e56d3dcb9532ceb13c26d03cdb2c3e9e44160bc9",
+    "run_id": 45252219175,
+    "qualifier": "NOT_CREDITED_SUPERSEDED_BUILD_HARNESS"
+  }
 }
