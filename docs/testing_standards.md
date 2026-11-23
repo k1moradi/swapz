@@ -18978,3 +18978,47 @@ Native qualification must execute original `zswap_pool_create()` zsmalloc/per-CP
 Require independently parsed native KUnit JSON **and** KTAP for the two new plus four inherited original cases, all six actual PASS and zero FAIL/SKIP/CRASH. Generated effective original UML config must retain `CONFIG_ZSWAP_DEFAULT_ON=y` solely for in-memory CPU hotplug setup, `CONFIG_ZSWAP_SHRINKER_DEFAULT_ON=n`; no swap/physical device or memory pressure. Run strict GCC/Clang ASan/UBSan source-host tests of real dormant production decoder-owner C with 22 genuinely compiled/executed semantic C mutants inherited from Round066. Distinguish Python stage/verdict mutations from actual compiled C. If original resource, codec, compiler, Kconfig, runtime or lifetime proof fails, report exact first error and **BLOCKED/FAIL**, not model-substitute green.
 
 This does not test actual original module unload, genuine STORED swapcache source, source authentication, real lower FUA or upper ACK. Keep `SOURCE_MAPPED_AUTHENTICATED=0`, `PHASE_A=BLOCKED`, direct compressed handoff and forced RAW bypass disabled, import ACTIVE0 and whole-original-uncompressed `RAW_4096`. No privileged/loaded-kernel/physical/actual pressure test, secondary shrinker or persistent map/SWAPSPACE2 header/UUID change.
+
+
+## Round071 Agent6 — rootless natural MM cooperation scheduling policy (no auth)
+
+The only permitted RAM-compressed residency, reclamation and *natural* STORED
+eviction policy owner is the original Linux MM/zswap subsystem. swapz must not
+add a second pressure timer, shrinker, source-selection pass, speculative
+compression cycle or synchronous lower I/O under MM/source or queue locks.
+Pending already-owned compressed copies have bounded capacity; saturation or
+transient allocation failure fails closed, preserving ordinary fallback outside
+this inactive model rather than driving extra zswap reclamation. FIFO 4/8/16KiB
+data-only extent packing must retain original source codec identity (original
+LZO1X/lzo-scomp versus raw LZ4), bounded source-copy bytes, and zero original
+decompression or swapz recompression. A separately tagged volatile original
+compressed payload is never the conventional 4096-byte *uncompressed*
+RAW_4096. Durable original lower WRITE+FUA and one real upper BIO completion
+remain unproven; no model may represent them as a kernel or physical pass.
+
+The disjoint Round071 Agent6 fixture and checker are
+tests/runtime/native/fixtures/round071-natural-pressure-cooperation.c and
+tests/tools/round071-natural-pressure-cooperation-verify.py. Exact checkout
+CI includes the actual read-only src/kernel/codec.h,
+src/kernel/zswap-import-codec.h and src/kernel/zswap-direct-handoff.h,
+and the earlier Round052 natural-pressure OFF-gate policy. Both GCC and Clang
+MUST strictly compile and execute the C fixture under C23, ASan and UBSan,
+and MUST each compile and execute all 24 independent negative C semantic
+mutants. Expected model assertions include no competing reclaim/pressure
+timer/decompression/recompression, 8-entry and 28,544-byte compressed owned
+queue cap, 4/8/16KiB FIFO fairness with 128 burst arrivals, original LZO1X
+versus raw LZ4 identity, full uncompressed 4096-byte ordinary RAW fallback,
+source lock/buffer lifetime, reader-pin GC, first error and once-only modeled
+completions on lower FUA/EIO/ENOMEM/close/duplicate callbacks, and unchanged
+protected first 4096 physical-header bytes in synthetic memory. Host-only
+JSON and KTAP are model test results, NEVER original Linux native KUnit.
+Any mutant survival, sanitizer error, compile error, source/gate drift, or
+source-exact CI error MUST report the first diagnostic and FAIL.
+
+This test is neither actual RAM pressure nor a kernel/privileged/device
+experiment. SOURCE_MAPPED_AUTHENTICATED=0, PHASE_A=BLOCKED,
+DIRECT_COMPRESSED_HANDOFF=DISABLED, FORCED_RAW_BYPASS=DISABLED,
+imported ACTIVE=0 stay unmodified. Never activate a path, change on-disk
+20-byte mappings, SWAPSPACE2 header/UUID/signature/partition table, or claim
+physical durability, genuine MM ownership, real source authentication, or
+exactly-once real upper ACK from this scheduling simulation.
