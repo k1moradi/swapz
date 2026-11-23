@@ -1,31 +1,61 @@
 {
   "agent": 7,
   "round": "072",
-  "kind": "source-linked-rootless-host-contract",
+  "kind": "source-linked-rootless-codec-vs-raw-abi",
   "task_commit": "3c1919f1b2c2ea428045a1afb5c278151cf06ccc",
   "engineering_baseline": "4083449f12c3392d5ea534ee4e536865b4caf3ee",
   "original_linux_pin": "c339f4010dea8b0d754f84ace70cd1b089878ef8",
-  "tested_commit": null,
-  "tested_parent": null,
-  "publication_status": "IN_PROGRESS",
-  "workflow_run": null,
-  "workflow_url": null,
-  "jobs": [],
-  "compiler_baselines": null,
+  "tested_commit": "adc38477c80706908df94097467c75e0a0727753",
+  "tested_parent": "923709674f2d94e766b9409f1fef776b34825687",
+  "publication_status": "QUEUED",
+  "workflow_run": 45127458505,
+  "workflow_url": "https://github.com/k1moradi/swapz/actions/runs/45127458505",
+  "jobs": [
+    {
+      "id": 137534988276,
+      "url": "https://github.com/k1moradi/swapz/actions/runs/45127458505/job/137534988276",
+      "name": "gcc-clang-sanitizers-and-semantic-mutants",
+      "status": "queued",
+      "conclusion": null
+    }
+  ],
+  "original_kernel_sources": {
+    "zswap": "torvalds/linux@c339f4010dea8b0d754f84ace70cd1b089878ef8:mm/zswap.c",
+    "lzo": "torvalds/linux@c339f4010dea8b0d754f84ace70cd1b089878ef8:lib/lzo/lzo1x_decompress_safe.c",
+    "lz4": "torvalds/linux@c339f4010dea8b0d754f84ace70cd1b089878ef8:lib/lz4/lz4_decompress.c"
+  },
+  "source_blobs": {
+    "tests/runtime/native/fixtures/round072-original-codec-tag-vs-raw.c": "00b853fbe0a17bff4b1f9158491667983074562b",
+    "tests/tools/round072-original-codec-tag-vs-raw-verify.py": "b7f91671f6833d0b4a347aa0d6318c856a57779c",
+    "src/kernel/codec.c": "d920dcaac6f2b7de1334d4133770bd649719c66d",
+    "src/kernel/zswap-import-codec.h": "0d888fe4c74115ab2388f1df1dc0b86ae4b9b6c6",
+    "src/kernel/zswap-direct-handoff.h": "864abf9a12071b98f5c157a44f4ed0c04d4a594c"
+  },
+  "host_baselines": {
+    "gcc": "QUEUED",
+    "clang": "QUEUED"
+  },
+  "planned_semantic_mutants_per_compiler": 14,
   "compiled_executed_semantic_mutants": null,
-  "original_linux_kunit": "NOT_RUN",
-  "actual_native_ktap": null,
-  "host_ktap": null,
+  "mutants_rejected": null,
+  "host_ktap": "NOT_AVAILABLE_QUEUED",
+  "native_original_kunit": "NOT_RUN",
+  "actual_native_ktap": "NOT_RUN",
   "first_error": null,
   "original_lzo_positive_decode": "NOT_RUN",
-  "host_generated_lz4_not_original_linux": true,
+  "host_generated_lz4_not_authentic_original_kernel": true,
   "source_mapped_authenticated": false,
   "phase_a": "BLOCKED",
   "direct_compressed_handoff": false,
   "forced_raw_bypass": false,
   "import_active": false,
   "real_lower_io": false,
+  "real_fua": false,
   "real_upper_ack": false,
   "physical_pressure": false,
-  "ordinary_raw_4096": "FULL_ORIGINAL_UNCOMPRESSED_4096"
+  "ordinary_raw_4096": "FULL_ORIGINAL_UNCOMPRESSED_4096",
+  "production_source_changes": "NONE",
+  "no_secondary_reclaimer": true,
+  "recompression": false,
+  "known_source_only_api_divergence": "original import LZO1X codec 2 collides numerically with dormant direct ZSTD enum 2; explicit bridge refuses it"
 }
