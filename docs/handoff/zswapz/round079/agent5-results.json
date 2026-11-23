@@ -1,0 +1,88 @@
+{
+  "round": "079",
+  "agent": 5,
+  "kind": "pinned-pristine-original-Linux-zswap-XArray-pool-zsmalloc-preerase-copy-HOST_MODEL",
+  "task_commit": "94442eb2a311046b00a5fb3d89251f7b72cc5420",
+  "engineering_baseline": "a54d70314afe85ea895578c0bc6769c66cb403dc",
+  "source_commit": "b1437365849fa574c0e34f9b7729efdb530a6a51",
+  "source_parent": "28b1e25e6e82e80682c285e2e94793d860099e41",
+  "source_branch": "main",
+  "source_publication": "single-parent-nonforce-expected-head-fast-forward-verified",
+  "source_blobs": {
+    "torvalds/linux@c339f4010dea8b0d754f84ace70cd1b089878ef8:mm/zswap.c": "ae19e301fced7e357a4c7587dfdd6abb890b9163",
+    "torvalds/linux@c339f4010dea8b0d754f84ace70cd1b089878ef8:mm/zsmalloc.c": "7ef80e0da6267661cea4d48a4a615444724782e7",
+    "src/kernel/codec.h": "e89d316b9cf49f82df0b77648c1be1731607987d"
+  },
+  "workflow": {
+    "run_id": 45237411852,
+    "url": "https://github.com/k1moradi/swapz/actions/runs/45237411852",
+    "status": "QUEUED",
+    "conclusion": null
+  },
+  "jobs": [
+    {
+      "id": 137912686741,
+      "name": "original-pinned-zswap-preerase-source-host-GCC-Clang",
+      "status": "QUEUED",
+      "conclusion": null
+    }
+  ],
+  "host": {
+    "status": "NOT_EXECUTED_AT_AUDIT",
+    "source_predicates_expected": 4,
+    "source_writeback_events_expected": 9,
+    "source_decoder_events_expected": 6,
+    "baseline_cases_expected_per_compiler": 4,
+    "semantic_C_mutants_expected_per_compiler": 20,
+    "gcc": null,
+    "clang": null,
+    "first_error": null,
+    "source_link_type": "VERBATIM_PINNED_UPSTREAM_BRANCH_EXPRESSIONS_IN_MODEL_NOT_FULL_LINUX_KERNEL_C"
+  },
+  "native_kunit": {
+    "status": "NOT_REQUESTED",
+    "original_UML_run_id": null,
+    "json": null,
+    "ktap": null,
+    "cases_executed": 0,
+    "passed": null,
+    "failed": null,
+    "skipped": null,
+    "crashed": null,
+    "errors": null
+  },
+  "owned_files": [
+    "tests/runtime/native/fixtures/round079-original-zswap-preerase-source-copy.c",
+    "tests/tools/round079-original-zswap-preerase-source-copy-verify.py",
+    ".github/workflows/phase-a-round079-original-zswap-preerase-source-copy-noauth.yml",
+    "docs/testing_standards.md"
+  ],
+  "original_upstream_mm_comp_sizes": "compressed 1..4095; ordinary full original uncompressed 4096",
+  "current_dormant_import_max_bytes": 3568,
+  "fail_closed_original_compressed_bytes": "3569..4095",
+  "two_copy_upper_bound_bytes": 7136,
+  "source_lock_latency_budget": "UNMEASURED_LIVE",
+  "original_xarray_folio_live_STORED_authenticated": false,
+  "actual_source_pool_handle_race_runtime_qualified": false,
+  "independent_decoder_gc_pins_live_qualified": false,
+  "actual_current_selected_DM_owner_authenticated": false,
+  "real_lower_write_fua_flush": false,
+  "actual_upper_bio_ack": false,
+  "actual_product_C_changes": [],
+  "original_linux_source_changes": [],
+  "loaded_kernel": false,
+  "privileged_tests": false,
+  "physical_device": false,
+  "real_memory_pressure": false,
+  "first_error": null,
+  "SOURCE_MAPPED_AUTHENTICATED": 0,
+  "PHASE_A": "BLOCKED",
+  "DIRECT_COMPRESSED_HANDOFF": "DISABLED",
+  "FORCED_RAW_BYPASS": "DISABLED",
+  "import_active": 0,
+  "memory_owner": "original_Linux_MM_zswap_natural_eviction_only",
+  "disk_owner": "swapz_disk_packing_GC_no_reclaim_or_recompression",
+  "original_codec": "volatile_separate_original_LZO1X_raw_LZ4_future_authenticated",
+  "ordinary_RAW_4096": "FULL_ORIGINAL_UNCOMPRESSED_4096",
+  "conclusion": "PENDING_EXACT_SOURCE_HOST_CI"
+}
