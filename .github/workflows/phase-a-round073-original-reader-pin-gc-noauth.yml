@@ -1,0 +1,158 @@
+name: Round073 pinned original reader pin GC retained decoder NO_AUTH
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'tests/runtime/native/fixtures/round073-original-reader-pin-gc-kunit.cfrag'
+      - 'tests/tools/round073-stage-original-reader-pin-gc.py'
+      - 'tests/tools/round073-original-reader-pin-gc-verify.py'
+      - '.github/workflows/phase-a-round073-original-reader-pin-gc-noauth.yml'
+      - 'src/kernel/authority.c'
+      - 'src/kernel/zswap-import-decoder-owner.c'
+  workflow_dispatch:
+permissions:
+  contents: read
+
+jobs:
+  original-reader-strict-source-host:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 65
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 2
+          persist-credentials: false
+      - name: Install rootless host compiler and original codec headers
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          log="$RUNNER_TEMP/round073-host-deps.log"
+          if ! sudo -n apt-get update -qq >"$log" 2>&1 ||
+             ! sudo -n env DEBIAN_FRONTEND=noninteractive apt-get install -y -qq                --no-install-recommends gcc clang liblzo2-dev liblz4-dev libssl-dev >>"$log" 2>&1; then
+            echo '::error::ROUND073_READER_FIRST_ERROR phase=host-dependencies' >&2
+            exit 3
+          fi
+      - name: Strict original-source C23 GCC Clang sanitizers and executed semantic mutants
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          test "$GITHUB_REF" = refs/heads/main
+          test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
+          test "$(git branch --show-current)" = main
+          test -z "$(git status --porcelain --untracked-files=all)"
+          git diff --check HEAD^ HEAD
+          python3 -B tests/tools/round073-original-reader-pin-gc-verify.py self-test
+          python3 -B tests/tools/round073-original-reader-pin-gc-verify.py host
+      - name: Canonical cumulative testing standards and no-extra-branch policy
+        env:
+          SWAPZ_PUSH_BEFORE_SHA: ${{ github.event.before }}
+        run: python3 -B tests/runtime/native/repository-policy-test.py --enforce
+
+  original-linux-uml-reader-pin-gc-kunit:
+    needs: original-reader-strict-source-host
+    runs-on: ubuntu-24.04
+    timeout-minutes: 115
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          path: swapz
+          persist-credentials: false
+      - uses: actions/checkout@v4
+        with:
+          repository: torvalds/linux
+          ref: c339f4010dea8b0d754f84ace70cd1b089878ef8
+          fetch-depth: 1
+          path: linux
+          persist-credentials: false
+      - name: Install ephemeral original UML build tools
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          log="$RUNNER_TEMP/round073-native-deps.log"
+          if ! sudo -n apt-get update -qq >"$log" 2>&1 ||
+             ! sudo -n env DEBIAN_FRONTEND=noninteractive apt-get install -y -qq                --no-install-recommends build-essential bc bison flex clang                libelf-dev libssl-dev libncurses-dev liblz4-dev python3                python3-pyelftools binutils >>"$log" 2>&1; then
+            echo '::error::ROUND073_READER_FIRST_ERROR phase=original-UML-dependencies' >&2
+            exit 3
+          fi
+      - name: Pristine pinned original and independent original READ-side scratch stage
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          umask 077
+          test "$GITHUB_REF" = refs/heads/main
+          test "$(git -C swapz rev-parse HEAD)" = "$GITHUB_SHA"
+          test "$(git -C linux rev-parse HEAD)" = c339f4010dea8b0d754f84ace70cd1b089878ef8
+          test -z "$(git -C swapz status --porcelain --untracked-files=all)"
+          mkdir -p round073-evidence
+          python3 -B swapz/tests/tools/round058-original-stored-bio-chain.py stage             --linux-root linux --manifest round073-evidence/inherited-round058.json
+          python3 -B swapz/tests/tools/round069-stage-original-zswap-stored-source.py             --linux-root linux --base-manifest round073-evidence/inherited-round058.json             --manifest round073-evidence/inherited-round069.json --verify-only
+          python3 -B swapz/tests/tools/round069-stage-original-zswap-stored-source.py             --linux-root linux --base-manifest round073-evidence/inherited-round058.json             --manifest round073-evidence/inherited-round069.json
+          python3 -B swapz/tests/tools/round073-stage-original-reader-pin-gc.py             --linux-root linux --base-manifest round073-evidence/inherited-round069.json             --manifest round073-evidence/reader-stage.json --verify-only
+          python3 -B swapz/tests/tools/round073-stage-original-reader-pin-gc.py             --linux-root linux --base-manifest round073-evidence/inherited-round069.json             --manifest round073-evidence/reader-stage.json
+          python3 -B swapz/tests/tools/round073-stage-original-reader-pin-gc.py             --linux-root linux --base-manifest round073-evidence/inherited-round069.json             --manifest round073-evidence/reader-stage.json --verify-stage
+          git -C linux diff --check
+      - name: Original pinned Linux UML compile boot and genuine reader GC KUnit JSON KTAP
+        shell: bash
+        timeout-minutes: 95
+        run: |
+          set -Eeuo pipefail
+          umask 077
+          phase=original-uml-build-boot
+          log=round073-evidence/first-native-error.log
+          out="$RUNNER_TEMP/round073-original-reader-uml"
+          request="$RUNNER_TEMP/round073-original-reader.kunitconfig"
+          result="$PWD/round073-evidence/original-reader-kunit.json"
+          cat >"$request" <<'KUNIT_CONFIG'
+          CONFIG_KUNIT=y
+          CONFIG_BLOCK=y
+          CONFIG_SWAP=y
+          CONFIG_ZSWAP=y
+          CONFIG_CRYPTO=y
+          CONFIG_CRYPTO_LZO=y
+          CONFIG_CRYPTO_LZ4=y
+          CONFIG_CRYPTO_CRC32C=y
+          CONFIG_CRYPTO_SHA256=y
+          CONFIG_CRYPTO_LIB_SHA256=y
+          CONFIG_CRC32=y
+          CONFIG_LZO_COMPRESS=y
+          CONFIG_LZO_DECOMPRESS=y
+          CONFIG_LZ4_COMPRESS=y
+          CONFIG_LZ4_DECOMPRESS=y
+          # CONFIG_CGROUPS is not set
+          # CONFIG_KUNIT_ALL_TESTS is not set
+          KUNIT_CONFIG
+          first_error() {
+            local code="$1"
+            echo "::error::ROUND073_READER_FIRST_ERROR phase=$phase exit=$code" >&2
+            grep -E -m1 'fatal error:|error:|undefined reference|not ok|Kernel panic|KASAN:|UBSAN:' "$log" 2>/dev/null |
+              cut -c1-260 >&2 || true
+            return "$code"
+          }
+          flags='-DSWAPZ_ROUND069_ORIGINAL_STORED_SOURCE_TEST=1 -DSWAPZ_ROUND065_ORIGINAL_DM_TABLE_TEST=1 -DSWAPZ_ROUND064_ORIGINAL_SLOT_TARGET_TEST=1 -DSWAPZ_ROUND056_PREERASE_SINGLE_OWNER_TEST=1 -DSWAPZ_ROUND063_ORIGINAL_DM_OWNER_TEST=1 -DSWAPZ_ROUND028_SLOT_EPOCH_SOURCE=1 -DSWAPZ_ROUND030_EVICTION_SNAPSHOT_SOURCE=1 -DSWAPZ_ROUND025_SIDEBAND_CI_ONLY=1 -DSWAPZ_ROUND031_MM_BIO_SOURCE=1 -DSWAPZ_ROUND032_BIO_COPY_VIEW_CI_ONLY=1 -DSWAPZ_ROUND034_ORIGINAL_V1_KUNIT_TEST=1 -DSWAPZ_ROUND035_ORIGINAL_MM_ROUTE_WITNESS_TEST=1 -DSWAPZ_ROUND036_ORIGINAL_ROUTE_LIFETIME_TEST=1 -DSWAPZ_ROUND037_ORIGINAL_MM_LIFETIME_OWNER_TEST=1 -DSWAPZ_ROUND038_ORIGINAL_STORE_PROVENANCE_TEST=1 -DSWAPZ_ROUND040_ORIGINAL_ASYNC_SLOT_LEASE_NEGATIVE_TEST=1 -DSWAPZ_ROUND041_ORIGINAL_SECTOR_TO_DM_NONAUTHORITY_TEST=1 -DSWAPZ_ROUND042_ORIGINAL_STORED_WRITEBACK_LIFETIME_TEST=1 -DSWAPZ_ROUND043_ORIGINAL_BIO_CLONE_COPY_TEST=1 -DSWAPZ_ROUND045_ORIGINAL_STORED_BIO_SOURCE_SCOPE_TEST=1 -DSWAPZ_ROUND049_ORIGINAL_LOCKED_FOLIO_COUNT_PAIR_TEST=1 -DSWAPZ_ROUND052_ORIGINAL_PRE_UNUSE_CANCEL_TEST=1 -DSWAPZ_ROUND056_ORIGINAL_CLONE_PROVENANCE_TEST=1 -DSWAPZ_ROUND058_ORIGINAL_STORED_BIO_CHAIN_TEST=1 -DSWAPZ_ROUND066_IMPORT_DISK_TEST=1 -DSWAPZ_ROUND067_IMPORT_DISK_PAYLOAD_TEST=1 -DSWAPZ_ROUND068_IMPORT_LOWER_BIO_TEST=1 -DSWAPZ_ROUND069_ORIGINAL_BIO_AUTHORITY_JOIN_KUNIT=1 -DSWAPZ_ROUND073_ORIGINAL_READER_PIN_GC_KUNIT=1'
+          if timeout -k 10s 82m python3 -B linux/tools/testing/kunit/kunit.py run             --arch=um --build_dir="$out" --kunitconfig="$request"             --make_options="KCFLAGS=$flags -Werror" --jobs=2 --timeout=120             --json="$result" 'swapz_round073_original_reader_pin_gc*' >"$log" 2>&1; then
+            echo 'ROUND073_ORIGINAL_LINUX_UML_BOOT_EXECUTED'
+          else
+            code=$?
+            first_error "$code"
+            exit "$code"
+          fi
+          phase=effective-original-config
+          test -x "$out/linux" && test -s "$out/test.log" && test -s "$result" ||
+            { first_error 3; exit 3; }
+          for symbol in CONFIG_KUNIT=y CONFIG_ZSWAP=y CONFIG_CRYPTO_LZO=y             CONFIG_CRYPTO_LZ4=y CONFIG_CRYPTO_CRC32C=y             CONFIG_LZO_COMPRESS=y CONFIG_LZO_DECOMPRESS=y             CONFIG_LZ4_COMPRESS=y CONFIG_LZ4_DECOMPRESS=y; do
+            grep -Fxq "$symbol" "$out/.config" ||
+              { echo "::error::ROUND073_READER_FIRST_ERROR effective-config=$symbol" >&2; exit 3; }
+          done
+          phase=native-real-JSON-KTAP
+          python3 -B swapz/tests/tools/round073-original-reader-pin-gc-verify.py             verify-native --result "$result" --kernel-log "$out/test.log" ||
+            { first_error 3; exit 3; }
+          cp "$out/test.log" round073-evidence/native-original-KTAP.log
+          echo 'ROUND073_GENUINE_PINNED_ORIGINAL_NATIVE_READER_KUNIT_PASS 4/4 original codecs=2 GC pin + decoder close AUTH=0'
+      - name: Upload bounded original-native evidence without publishing any activation
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: round073-original-reader-pin-gc-native
+          path: round073-evidence/
+          if-no-files-found: warn
+          retention-days: 14

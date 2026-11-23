@@ -19237,3 +19237,41 @@ The Agent8 host fixture (tests/runtime/native/fixtures/round073-lower-fua-orderi
 For each GCC and Clang, compile with strict C2x warnings-as-errors and ASan+UBSan; execute the successful baseline and at least ten separately compiled/executed semantic mutants per compiler. Reject a mutant only on its expected named failure and nonzero status, never a sanitizer crash, compilation failure, or grep-only marker. Cover lower EIO, post-WRITE FUA failure, PREFLUSH admission ordering, upper ACK once-only, teardown/late callback, stale generations, 4/8/16KiB and partial lower completion, first-error precedence and pinned reader GC reclaim. Source drift and the earliest compiler/mutant diagnostic must fail closed with bounded first-cause output.
 
 The workflow is rootless, unprivileged and does not touch physical media or real swap pressure. Preserve SOURCE_MAPPED_AUTHENTICATED=0, PHASE_A=BLOCKED, original source codec distinct from ordinary uncompressed RAW_4096, and Linux MM/zswap as sole compressed-RAM pressure owner. Commit Agent8's per-round evidence.md and results.json, retaining real native NOT_RUN and CI PENDING until the precise source-run is terminal.
+
+## Round073 pinned original reader lease and GC native read-side witness (Agent10)
+
+The independent original pinned Linux READ-side native KUnit must use
+`torvalds/linux@c339f4010dea8b0d754f84ace70cd1b089878ef8`, verify the
+pristine upstream blobs and SHA-256 of every staged scratch postimage, and
+separately label inherited original XArray/zsmalloc source, original BIO
+`bio_endio` and original LZO1X/raw-LZ4 decoder versus the **test-created**
+source slot. A source leaf that is not independently proven swapcache-backed
+must keep `SOURCE_MAPPED_AUTHENTICATED=0` and Phase A BLOCKED even after a
+successful native run; do not claim selected current DM physical residency.
+
+The read test obtains an independent old decoder lease before source object
+release; a product authority old-generation lower read pin must prevent GC
+extent recycle until its genuine native read completion. GC copies the
+original compressed stream byte-for-byte with a separately retained original
+codec tag and intact CRC/SHA across an incremented GC epoch; it neither
+recompresses nor converts original compressed bytes into ordinary
+uncompressed full-page `RAW_4096`. Exercise original full-4096 LZO1X and
+raw LZ4, wrong generation/source epoch, codec, CRC, SHA, late get, duplicate
+put and close-and-drain while an existing reader still holds its original
+lease. Errors must preserve the entire upper output buffer unchanged and
+forbid use after decoder/pool retirement. A test-generated close worker is
+not evidence of original zswap pool/RCU retirement in production.
+
+Host source preflight must compile and execute the current original-source
+predicate under GCC and Clang C23/C2x `-Wall -Wextra -Wconversion -Wshadow
+-Werror`, ASan+UBSan, at least eight **compiled and executed semantic C
+mutants per compiler**, and independently rerun source-linked real authority
+and decoder-owner lifetime checks. Compiler failures, sanitizers, source
+regexes and synthetic JSON are never counted as semantic kills. Native
+qualification requires one genuine original UML kernel boot, strict exact
+suite membership and 4/4 real KUnit JSON **and** matching KTAP successes,
+with no failed/skipped/crashed cases. The verdict must record the first
+bounded diagnostic, actual run/job IDs and source parent, and distinguish
+host PASS, native QUEUED, native FAIL and native PASS precisely. All source
+gates remain off; no real swap, physical writes, forced RAW bypass, separate
+zswap pressure initiator or activation may be inferred.
