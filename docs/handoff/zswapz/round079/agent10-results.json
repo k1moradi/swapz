@@ -1,0 +1,121 @@
+{
+  "round": "079",
+  "agent": 10,
+  "message": "PROGRESS",
+  "kind": "original-Linux-read-side-KUnit-test-only-compiler-negative-fix",
+  "task_publication_commit": "94442eb2a311046b00a5fb3d89251f7b72cc5420",
+  "tested_source_commit": "14e8f8f18566e584d9640482b3437929e5da041c",
+  "tested_source_parent": "94442eb2a311046b00a5fb3d89251f7b72cc5420",
+  "branch": "main",
+  "original_linux_pin": "c339f4010dea8b0d754f84ace70cd1b089878ef8",
+  "original_zswap_git_blob": "ae19e301fced7e357a4c7587dfdd6abb890b9163",
+  "original_delay_git_blob": "82409e55b6aedc39132d2adc60c028ada12a603b",
+  "workflow_name": "phase-a-round073-original-reader-pin-gc-noauth.yml",
+  "workflow_run_id": 45236328888,
+  "workflow_url": "https://github.com/k1moradi/swapz/actions/runs/45236328888",
+  "workflow_status": "in_progress",
+  "workflow_conclusion": null,
+  "jobs": [
+    {
+      "name": "original-reader-strict-source-host",
+      "id": 137908924597,
+      "url": "https://github.com/k1moradi/swapz/actions/runs/45236328888/job/137908924597",
+      "status": "in_progress",
+      "conclusion": null
+    },
+    {
+      "name": "original-linux-uml-reader-pin-gc-kunit",
+      "id": null,
+      "status": "NOT_CREATED_AS_OF_CHECKPOINT",
+      "conclusion": null
+    }
+  ],
+  "source_host": {
+    "gcc": {
+      "status": "IN_PROGRESS",
+      "c23": null,
+      "asan_ubsan": null,
+      "compiled_executed_original_semantic_mutants": null,
+      "compiled_executed_authority_mutants": null,
+      "compiled_executed_decoder_lifetime_mutants": null
+    },
+    "clang": {
+      "status": "IN_PROGRESS",
+      "c23": null,
+      "asan_ubsan": null,
+      "compiled_executed_original_semantic_mutants": null,
+      "compiled_executed_authority_mutants": null,
+      "compiled_executed_decoder_lifetime_mutants": null
+    },
+    "expected_original_semantic_mutants_per_compiler": 10,
+    "expected_authority_per_compiler": 14,
+    "expected_decoder_lifetime_per_compiler": 2,
+    "corrected_negative_classifier": "FIRST_COMPILER_ERROR_MATCH_EXACT_USLEEP_RANGE",
+    "unrelated_compiler_negatives_expected_per_compiler": 2,
+    "source_fixture_parser_negatives_expected": 10
+  },
+  "isolated_local_compiler_probe": {
+    "qualifies_pinned_original_source": false,
+    "gcc_version": "14.2",
+    "clang_version": "17",
+    "gcc_missing_declaration_compile_exit": 1,
+    "clang_missing_declaration_compile_exit": 1,
+    "gcc_diagnostic": "implicit declaration of function usleep_range",
+    "clang_diagnostic": "use of undeclared identifier usleep_range",
+    "unrelated_compile_failures_not_mistaken_for_target": true,
+    "sanitized_positive_runtime_qualified": false
+  },
+  "original_native": {
+    "status": "NOT_RUN_PENDING_SOURCE_HOST",
+    "expected_cases": [
+      "swapz_round073_original_lz4_old_reader_gc",
+      "swapz_round073_original_lzo1x_old_reader_gc",
+      "swapz_round073_original_stale_crc_sha_codec",
+      "swapz_round073_original_decoder_retire_with_pin"
+    ],
+    "actual_cases_observed": 0,
+    "passed": null,
+    "failed": null,
+    "skipped": null,
+    "crashed": null,
+    "json_ktap": "NOT_GENERATED",
+    "compiled_and_booted_original_linux": false,
+    "original_live_stored_authenticated": false
+  },
+  "historical_round077": {
+    "source_sha": "04b190b00131c1d40254acd2279e6240a11913d0",
+    "run_id": 45179168125,
+    "host_job_id": 137708170190,
+    "host_conclusion": "failure",
+    "native_job_id": 137775410103,
+    "native_conclusion": "skipped",
+    "executed_native_cases": 0,
+    "first_error": "ROUND077_ORIGINAL_DELAY_FIRST_ERROR clang:missing-original-declaration-not-rejected"
+  },
+  "historical_round073": {
+    "source_sha": "ecaf63cb7860879364a6e3943884bc30e578ca63",
+    "run_id": 45134656124,
+    "native_job_id": 137610101851,
+    "native_conclusion": "failure",
+    "executed_native_cases": 0,
+    "first_error": "linux/mm/zswap.c:5307:25 implicit declaration of function 'usleep_range' [-Werror=implicit-function-declaration]"
+  },
+  "first_error": null,
+  "conclusion": "IN_PROGRESS",
+  "source_mapped_authenticated": false,
+  "phase_a": "BLOCKED",
+  "direct_compressed_handoff": "DISABLED",
+  "forced_raw_bypass": "DISABLED",
+  "import_active": false,
+  "ordinary_raw_4096": "FULL_ORIGINAL_UNCOMPRESSED_4096",
+  "original_codec_identity": "DISTINCT_VOLATILE_ORIGINAL_LZO1X_OR_RAW_LZ4",
+  "linux_mm_zswap_natural_eviction_only": true,
+  "swapz_disk_packing_gc_only": true,
+  "actual_physical_io": false,
+  "actual_selected_dm_auth": false,
+  "actual_upper_bio_ack": false,
+  "privileged_testing": false,
+  "branches_or_pr_created": false,
+  "force_push": false,
+  "periodic_ci_check": false
+}
