@@ -1,0 +1,52 @@
+{
+  "round": "076",
+  "task_agent": 8,
+  "prepared_by": "Agent1 project manager (GitHub connector recovery)",
+  "agent8_independent_execution_or_signoff": false,
+  "delivery_kind": "MANAGER_AUTHORED_DOCS_ONLY_RECOVERY_UNVERIFIED_BY_AGENT8",
+  "official_issue": 193,
+  "original_agent8_access_status": "BLOCKED_REPORTED_GITHUB_ACCESS",
+  "source_review_status": "SOURCE_INSPECTED_BY_AGENT1",
+  "source_snapshot_main": "28e4c2177ac8e247f3e76fd859b22ba4b026a303",
+  "original_linux_pin": "c339f4010dea8b0d754f84ace70cd1b089878ef8",
+  "source_file": "mm/zswap.c",
+  "upstream_original_blob_anchors": [
+    "994-1095:zswap_writeback_entry",
+    "1121-1230:shrinker",
+    "1642-1694:zswap_load"
+  ],
+  "product_blobs": {
+    "src/kernel/codec.h": "e89d316b9cf49f82df0b77648c1be1731607987d",
+    "src/kernel/authority.h": "3bb5bab5a5bdb2aa087f5793fc8b5e90d6636031",
+    "src/kernel/dm-target.c": "f1cab252cd990190646c82da81378d1563475826",
+    "src/kernel/superblock.h": "ba73845837b4c604b01d72f50f05ae8d4378eddd",
+    "src/kernel/zswap-direct-handoff.h": "864abf9a12071b98f5c157a44f4ed0c04d4a594c",
+    "src/kernel/zswap-import-codec.h": "0d888fe4c74115ab2388f1df1dc0b86ae4b9b6c6",
+    "src/kernel/zswap-import-decoder-owner.c": "8e0c8f4d2085af7f2e17df412f3a1af654063571"
+  },
+  "observed_biocarry": "CONVENTIONAL_FULL_ORIGINAL_UNCOMPRESSED_4096",
+  "interface_mismatch": "direct-handoff codec2 ZSTD versus original-import codec2 LZO1X; no implicit cast",
+  "actual_authenticated_source": "NOT_PROVEN",
+  "original_opaque_handoff": "UNIMPLEMENTED_DISABLED",
+  "ci": {
+    "status": "NOT_APPLICABLE_DOCS_ONLY",
+    "run_id": null,
+    "job_id": null,
+    "compiler_mutants": null,
+    "original_native_kunit": "NOT_RUN",
+    "json": null,
+    "ktap": null
+  },
+  "agent8_round076_files_committed_by_agent8": false,
+  "actual_physical_io": false,
+  "real_lower_fua": false,
+  "real_upper_bio_ack": false,
+  "source_mapped_authenticated": false,
+  "phase_a": "BLOCKED",
+  "direct_compressed_handoff": "DISABLED",
+  "forced_raw_bypass": "DISABLED",
+  "import_active": 0,
+  "memory_pressure_owner": "ORIGINAL_LINUX_MM_ZSWAP_NATURAL_ONLY",
+  "swapz_owner": "DISK_PACKING_AND_GC_ONLY",
+  "ordinary_RAW_4096": "FULL_ORIGINAL_UNCOMPRESSED_4096"
+}
