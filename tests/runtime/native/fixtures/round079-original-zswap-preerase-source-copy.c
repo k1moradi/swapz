@@ -390,12 +390,15 @@ static int test_original_length_and_raw_fallback(void)
 	source.entry.length = PAGE_SIZE + 1U;
 	R079_ASSERT(capture_preerase_owned(&source, &source.entry, &owned,
 					   sizeof(owned.bytes)) == -EOVERFLOW);
+	/* Pass a FULL modeled destination capacity to distinguish rejection
+	 * by the 3568-byte ORIGINAL import contract from a short buffer. The
+	 * imported copy must still FAIL CLOSED at 3569 and 4095, regardless. */
 	source.entry.length = 3569U;
 	R079_ASSERT(capture_preerase_owned(&source, &source.entry, &owned,
-					   sizeof(owned.bytes)) == -EMSGSIZE);
+					   PAGE_SIZE) == -EMSGSIZE);
 	source.entry.length = PAGE_SIZE - 1U;
 	R079_ASSERT(capture_preerase_owned(&source, &source.entry, &owned,
-					   sizeof(owned.bytes)) == -EMSGSIZE);
+					   PAGE_SIZE) == -EMSGSIZE);
 	source.entry.length = PAGE_SIZE;
 	R079_ASSERT(capture_preerase_owned(&source, &source.entry, &owned,
 					   sizeof(owned.bytes)) == -EOPNOTSUPP);

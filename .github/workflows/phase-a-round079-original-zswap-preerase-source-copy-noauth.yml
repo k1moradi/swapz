@@ -6,7 +6,6 @@ on:
       - 'tests/runtime/native/fixtures/round079-original-zswap-preerase-source-copy.c'
       - 'tests/tools/round079-original-zswap-preerase-source-copy-verify.py'
       - '.github/workflows/phase-a-round079-original-zswap-preerase-source-copy-noauth.yml'
-      - 'docs/testing_standards.md'
   workflow_dispatch:
 permissions:
   contents: read
@@ -21,6 +20,28 @@ jobs:
         with:
           fetch-depth: 0
           persist-credentials: false
+      - name: Assert exact-source clean root BEFORE nested checkout (fail-only labels)
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          first_error() {
+            printf '::error::ROUND080_AGENT5_PREFLIGHT_FIRST_ERROR %s\n' "$1" >&2
+            exit 1
+          }
+          [[ "$GITHUB_REF" == refs/heads/main ]] || first_error root-ref-not-main
+          [[ "$(git rev-parse HEAD)" == "$GITHUB_SHA" ]] || first_error root-exact-source-sha
+          [[ "$(git branch --show-current)" == main ]] || first_error root-branch-not-main
+          [[ ! -e original-linux ]] || first_error nested-linux-already-present-before-clean-check
+          root_dirty="$(git -c core.quotePath=true status --porcelain --untracked-files=all)"
+          if [[ -n "$root_dirty" ]]; then
+            printf '::error::ROUND080_AGENT5_PREFLIGHT_FIRST_ERROR outer-repository-dirty\n' >&2
+            printf '%s\n' "$root_dirty" | head -n 8 | cut -c1-160 >&2
+            exit 1
+          fi
+          git diff --check HEAD^ HEAD || first_error source-first-parent-diff-check
+          command -v gcc >/dev/null || first_error gcc-not-found
+          command -v clang >/dev/null || first_error clang-not-found
+          command -v python3 >/dev/null || first_error python3-not-found
       - uses: actions/checkout@v4
         with:
           repository: torvalds/linux
@@ -32,19 +53,26 @@ jobs:
             mm/zsmalloc.c
           sparse-checkout-cone-mode: false
           persist-credentials: false
-      - name: Assert exact main Git SHA pristine pinned original and compiler toolchain
+      - name: Validate nested original pin and prohibit ANY other root changes
         shell: bash
         run: |
           set -Eeuo pipefail
-          test "$GITHUB_REF" = refs/heads/main
-          test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
-          test "$(git branch --show-current)" = main
-          test -z "$(git status --porcelain --untracked-files=all)"
-          test "$(git -C original-linux rev-parse HEAD)" = c339f4010dea8b0d754f84ace70cd1b089878ef8
-          git diff --check HEAD^ HEAD
-          command -v gcc
-          command -v clang
-          python3 --version
+          first_error() {
+            printf '::error::ROUND080_AGENT5_PREFLIGHT_FIRST_ERROR %s\n' "$1" >&2
+            exit 1
+          }
+          [[ -d original-linux/.git ]] || first_error original-linux-not-independent-git-tree
+          [[ "$(git -C original-linux rev-parse HEAD)" == c339f4010dea8b0d754f84ace70cd1b089878ef8 ]] || first_error original-linux-git-pin-mismatch
+          [[ -z "$(git -C original-linux status --porcelain --untracked-files=all)" ]] || first_error original-linux-worktree-dirty
+          # Root was fully clean before checkout. Git records the nested,
+          # separately verified tree as EXACTLY one expected untracked path.
+          # No tracked edits or other untracked files are permitted afterward.
+          post_checkout_dirty="$(git -c core.quotePath=true status --porcelain --untracked-files=all)"
+          if [[ "$post_checkout_dirty" != '?? original-linux/' ]]; then
+            printf '::error::ROUND080_AGENT5_PREFLIGHT_FIRST_ERROR unexpected-root-mutation-after-nested-checkout\n' >&2
+            printf '%s\n' "$post_checkout_dirty" | head -n 8 | cut -c1-160 >&2
+            exit 1
+          fi
       - name: Source-true original mm/zswap + zsmalloc SHA and GCC Clang C2x strict ASan UBSan 40 independently EXECUTED semantic mutants
         shell: bash
         run: |
