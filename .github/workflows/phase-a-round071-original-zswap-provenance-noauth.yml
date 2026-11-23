@@ -1,0 +1,177 @@
+name: Round071 pinned-original zswap provenance negative NO_AUTH
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/phase-a-round071-original-zswap-provenance-noauth.yml'
+      - 'tests/runtime/native/fixtures/round071-original-zswap-provenance.cfrag'
+      - 'tests/tools/round071-stage-original-zswap-provenance.py'
+      - 'tests/tools/round071-original-zswap-provenance-verify.py'
+      - 'docs/handoff/zswapz/round071/agent3-evidence.md'
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  source-linked-host-negative:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Exact clean main and strict source-extracted GCC Clang semantic mutants
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
+          test "$(git branch --show-current)" = main
+          test -z "$(git status --porcelain)"
+          git diff --check HEAD^ HEAD
+          python3 -B tests/tools/round071-original-zswap-provenance-verify.py
+          python3 -B - <<'PY'
+          import ast
+          from pathlib import Path
+          ast.parse(Path('tests/tools/round071-stage-original-zswap-provenance.py').read_text())
+          print('ROUND071_PROVENANCE_STAGER_PYTHON_SYNTAX_PASS')
+          PY
+      - name: Verify inherited testing standards literal prefix
+        env:
+          SWAPZ_PUSH_BEFORE_SHA: ${{ github.event.before }}
+        run: python3 -B tests/runtime/native/repository-policy-test.py --enforce
+
+  genuine-original-native-swapcache-negative:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 110
+    needs: source-linked-host-negative
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          path: swapz
+          persist-credentials: false
+      - uses: actions/checkout@v4
+        with:
+          repository: torvalds/linux
+          ref: c339f4010dea8b0d754f84ace70cd1b089878ef8
+          fetch-depth: 1
+          path: linux
+          persist-credentials: false
+      - name: Install rootless original UML compilation prerequisites
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          sudo apt-get update -qq
+          sudo DEBIAN_FRONTEND=noninteractive apt-get install -y \
+            --no-install-recommends build-essential bc bison flex clang \
+            libelf-dev libssl-dev libncurses-dev liblz4-dev python3 \
+            python3-pyelftools binutils
+      - name: Verify original Git blob and stage inherited then provenance fixture
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          umask 077
+          test "$(git -C swapz rev-parse HEAD)" = "$GITHUB_SHA"
+          test "$(git -C linux rev-parse HEAD)" = c339f4010dea8b0d754f84ace70cd1b089878ef8
+          mkdir -p round071-provenance-evidence
+          python3 -B swapz/tests/tools/round058-original-stored-bio-chain.py stage \
+            --linux-root linux \
+            --manifest round071-provenance-evidence/round058-inherited.json
+          python3 -B swapz/tests/tools/round069-stage-original-zswap-stored-source.py \
+            --linux-root linux \
+            --base-manifest round071-provenance-evidence/round058-inherited.json \
+            --manifest round071-provenance-evidence/round069-inherited.json
+          python3 -B swapz/tests/tools/round071-stage-original-zswap-provenance.py \
+            --linux-root linux \
+            --base-manifest round071-provenance-evidence/round069-inherited.json \
+            --manifest round071-provenance-evidence/round071-staged.json --verify-only
+          python3 -B swapz/tests/tools/round071-stage-original-zswap-provenance.py \
+            --linux-root linux \
+            --base-manifest round071-provenance-evidence/round069-inherited.json \
+            --manifest round071-provenance-evidence/round071-staged.json
+          git -C linux diff --check
+          python3 -B - <<'PY'
+          import hashlib,json,pathlib
+          m=json.loads(pathlib.Path('round071-provenance-evidence/round071-staged.json').read_text())
+          assert m['original_sha']=='c339f4010dea8b0d754f84ace70cd1b089878ef8'
+          assert m['original_zswap_git_blob']=='ae19e301fced7e357a4c7587dfdd6abb890b9163'
+          assert m['source_mapped_authenticated'] is False
+          assert m['real_swapcache_source']=='BLOCKED_NO_SWAP_DEVICE'
+          assert len(m['changed_paths'])==1
+          record=m['changed_paths'][0]
+          assert record['path']=='mm/zswap.c'
+          assert hashlib.sha256(pathlib.Path('linux/mm/zswap.c').read_bytes()).hexdigest()==record['staged_sha256']
+          print('ROUND071_PINNED_ORIGINAL_POSTIMAGE_PASS AUTH=0')
+          PY
+      - name: Build and boot original UML negative-only native KUnit
+        shell: bash
+        timeout-minutes: 85
+        run: |
+          set -Eeuo pipefail
+          umask 077
+          phase=initial
+          log=round071-provenance-evidence/first-native.log
+          verdict=round071-provenance-evidence/verdict.txt
+          out="$RUNNER_TEMP/round071-provenance-uml"
+          result="$PWD/round071-provenance-evidence/native-original-provenance.json"
+          request="$PWD/round071-provenance-evidence/original.kunitconfig"
+          printf 'source=%s\noriginal=c339f4010dea8b0d754f84ace70cd1b089878ef8\nsource_auth=0\n' "$GITHUB_SHA" > "$verdict"
+          trap 'code=$?; if ((code)); then echo "::error::ROUND071_PROVENANCE_FIRST_ERROR phase=$phase exit=$code"; first=$(grep -m1 -E "error:|FAILED|Traceback|KASAN:|UBSAN:|Not all Kconfig" "$log" 2>/dev/null || :); if test -n "$first"; then printf "::error::ROUND071_PROVENANCE_FIRST_DIAGNOSTIC %s\n" "$first" | cut -c1-280; fi; printf "result=FAIL\nfirst_phase=%s\nexit=%s\n" "$phase" "$code" >> "$verdict"; fi' EXIT
+          cat > "$request" <<'KUNIT_CFG'
+          CONFIG_KUNIT=y
+          CONFIG_BLOCK=y
+          CONFIG_SWAP=y
+          CONFIG_ZSWAP=y
+          CONFIG_SWAP_BIO_ORIGIN_KUNIT_TEST=y
+          CONFIG_CRYPTO=y
+          CONFIG_CRYPTO_LZ4=y
+          CONFIG_CRYPTO_SHA256=y
+          CONFIG_LZ4_COMPRESS=y
+          CONFIG_LZ4_DECOMPRESS=y
+          # CONFIG_CGROUPS is not set
+          # CONFIG_KUNIT_ALL_TESTS is not set
+          KUNIT_CFG
+          flags='-DSWAPZ_ROUND071_ORIGINAL_ZSWAP_PROVENANCE_TEST=1 -DSWAPZ_ROUND069_ORIGINAL_STORED_SOURCE_TEST=1 -DSWAPZ_ROUND065_ORIGINAL_DM_TABLE_TEST=1 -DSWAPZ_ROUND064_ORIGINAL_SLOT_TARGET_TEST=1 -DSWAPZ_ROUND056_PREERASE_SINGLE_OWNER_TEST=1 -DSWAPZ_ROUND063_ORIGINAL_DM_OWNER_TEST=1 -DSWAPZ_ROUND028_SLOT_EPOCH_SOURCE=1 -DSWAPZ_ROUND030_EVICTION_SNAPSHOT_SOURCE=1 -DSWAPZ_ROUND025_SIDEBAND_CI_ONLY=1 -DSWAPZ_ROUND031_MM_BIO_SOURCE=1 -DSWAPZ_ROUND032_BIO_COPY_VIEW_CI_ONLY=1 -DSWAPZ_ROUND034_ORIGINAL_V1_KUNIT_TEST=1 -DSWAPZ_ROUND035_ORIGINAL_MM_ROUTE_WITNESS_TEST=1 -DSWAPZ_ROUND036_ORIGINAL_ROUTE_LIFETIME_TEST=1 -DSWAPZ_ROUND037_ORIGINAL_MM_LIFETIME_OWNER_TEST=1 -DSWAPZ_ROUND038_ORIGINAL_STORE_PROVENANCE_TEST=1 -DSWAPZ_ROUND040_ORIGINAL_ASYNC_SLOT_LEASE_NEGATIVE_TEST=1 -DSWAPZ_ROUND041_ORIGINAL_SECTOR_TO_DM_NONAUTHORITY_TEST=1 -DSWAPZ_ROUND042_ORIGINAL_STORED_WRITEBACK_LIFETIME_TEST=1 -DSWAPZ_ROUND043_ORIGINAL_BIO_CLONE_COPY_TEST=1 -DSWAPZ_ROUND045_ORIGINAL_STORED_BIO_SOURCE_SCOPE_TEST=1 -DSWAPZ_ROUND049_ORIGINAL_LOCKED_FOLIO_COUNT_PAIR_TEST=1 -DSWAPZ_ROUND052_ORIGINAL_PRE_UNUSE_CANCEL_TEST=1 -DSWAPZ_ROUND056_ORIGINAL_CLONE_PROVENANCE_TEST=1 -DSWAPZ_ROUND058_ORIGINAL_STORED_BIO_CHAIN_TEST=1'
+          phase=original-uml-build-boot
+          timeout -k 10s 78m python3 -B linux/tools/testing/kunit/kunit.py run \
+            --arch=um --build_dir="$out" --kunitconfig="$request" \
+            --make_options="KCFLAGS=$flags -Werror" --jobs=2 --timeout=120 \
+            --json="$result" 'swapz_round071_native_original_provenance_noauth*' > "$log" 2>&1
+          phase=original-effective-config
+          test -x "$out/linux" && test -s "$result" && test -s "$out/test.log"
+          grep -Fxq CONFIG_KUNIT=y "$out/.config"
+          grep -Fxq CONFIG_ZSWAP=y "$out/.config"
+          phase=original-negative-four-case-JSON-KTAP
+          python3 -B - "$result" "$out/test.log" <<'PY'
+          import json,pathlib,re,sys
+          data=json.loads(pathlib.Path(sys.argv[1]).read_text())
+          log=pathlib.Path(sys.argv[2]).read_text()
+          pending=[data]; suites=[]
+          while pending:
+              group=pending.pop()
+              if group.get('name')=='swapz_round071_native_original_provenance_noauth':
+                  suites.append(group)
+              pending.extend(group.get('sub_groups',[]))
+          assert len(suites)==1, 'original-suite-missing'
+          suite=suites[0]
+          expected={'swapz_round071_provenance_assembled_source_rejected_kunit',
+                    'swapz_round071_provenance_stale_reissue_rejected_kunit',
+                    'swapz_round071_provenance_codec_pool_rejected_kunit',
+                    'swapz_round071_provenance_owner_erase_rejected_kunit'}
+          assert {case['name'] for case in suite['test_cases']}==expected
+          assert all(case['status']=='PASS' for case in suite['test_cases'])
+          assert all(suite['misc'][key]==value for key,value in
+                     dict(tests=4,passed=4,failed=0,skipped=0,crashed=0,errors=0).items())
+          assert log.count('# Subtest: swapz_round071_native_original_provenance_noauth')==1
+          assert len(re.findall(r'\bok\s+\d+\s+(?:-\s+)?swapz_round071_provenance_\w+_kunit\b',log))==4
+          assert not re.search(r'(?i)(Kernel panic|KASAN:|UBSAN:)',log)
+          print('ROUND071_GENUINE_ORIGINAL_UML_NOAUTH_NEGATIVE_4_KUNIT_PASS source_auth=0')
+          PY
+          printf 'result=PASS\nreal_swapcache_source=BLOCKED_NO_SWAP_DEVICE\n' >> "$verdict"
+      - name: Upload bounded private qualification evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: round071-agent3-original-provenance-${{ github.sha }}
+          path: round071-provenance-evidence/
+          if-no-files-found: warn
+          retention-days: 7

@@ -1,0 +1,256 @@
+/* ROUND071_ORIGINAL_ZSWAP_PROVENANCE_BEGIN
+ * Original pinned mm/zswap.c KUnit ONLY. This does not allocate a real swap
+ * slot, install a swap device, or authenticate a test-assembled STORED entry.
+ */
+#if defined(SWAPZ_ROUND071_ORIGINAL_ZSWAP_PROVENANCE_TEST) && \
+    defined(SWAPZ_ROUND028_SLOT_EPOCH_SOURCE) && IS_ENABLED(CONFIG_KUNIT)
+#include <kunit/test.h>
+
+/* ROUND071_PROVENANCE_COMMON_BEGIN */
+struct swapz_round071_provenance_witness {
+	u64 selected_slot;
+	u64 entry_slot;
+	u64 selected_epoch;
+	u64 entry_epoch;
+	u64 selected_identity;
+	u64 entry_identity;
+	unsigned int selected_pool_idx;
+	unsigned int entry_pool_idx;
+	unsigned int compressed_length;
+	bool xarray_points_to_entry;
+	bool codec_known;
+	bool pool_live;
+};
+
+/* A same-slot test fixture can pass this guard; that is NOT source auth. */
+static int swapz_round071_provenance_identity_guard(
+		const struct swapz_round071_provenance_witness *witness)
+{
+	if (!witness || !witness->selected_slot ||
+	    witness->selected_slot != witness->entry_slot ||
+	    !witness->selected_epoch ||
+	    witness->selected_epoch != witness->entry_epoch ||
+	    !witness->selected_identity ||
+	    witness->selected_identity != witness->entry_identity ||
+	    !witness->xarray_points_to_entry)
+		return -ESTALE;
+	if (!witness->selected_pool_idx ||
+	    witness->selected_pool_idx != witness->entry_pool_idx ||
+	    !witness->pool_live || !witness->codec_known)
+		return -EOPNOTSUPP;
+	if (!witness->compressed_length || witness->compressed_length > 3568U)
+		return -EMSGSIZE;
+	return 0;
+}
+/* ROUND071_PROVENANCE_COMMON_END */
+
+/* A real swapcache folio is necessary, but insufficient: the future carrier
+ * also needs a pinned get_swap_device() reference and a selected production
+ * mapping/lifetime API. Neither is available in this rootless KUnit fixture.
+ * Explicitly refuse AUTH even if a test could manufacture a swapcache bit.
+ */
+static int swapz_round071_provenance_try_original_source(
+		const struct swapz_round071_provenance_witness *witness,
+		struct folio *folio)
+{
+	int error = swapz_round071_provenance_identity_guard(witness);
+
+	if (error)
+		return error;
+	if (!folio || !folio_test_locked(folio))
+		return -EPERM;
+	if (!folio_test_swapcache(folio))
+		return -ENODEV;
+	if (folio->swap.val != witness->selected_slot)
+		return -ESTALE;
+	return -EOPNOTSUPP; /* missing selected real swap-device/owner lease */
+}
+
+#define SWAPZ_ROUND071_TEST_OFFSET 51U
+#define SWAPZ_ROUND071_TEST_EPOCH 23ULL
+#define SWAPZ_ROUND071_TEST_IDENTITY 91ULL
+
+struct swapz_round071_provenance_native_state {
+	struct folio *folio;
+	struct zswap_entry *entry;
+	struct xarray tree;
+	bool locked;
+};
+
+static int swapz_round071_provenance_native_init(struct kunit *test)
+{
+	struct swapz_round071_provenance_native_state *state;
+	int error;
+
+	state = kunit_kzalloc(test, sizeof(*state), GFP_KERNEL);
+	if (!state)
+		return -ENOMEM;
+	test->priv = state;
+	xa_init(&state->tree);
+	state->entry = kunit_kzalloc(test, sizeof(*state->entry), GFP_KERNEL);
+	if (!state->entry) {
+		xa_destroy(&state->tree);
+		return -ENOMEM;
+	}
+	state->folio = folio_alloc(GFP_KERNEL, 0);
+	if (!state->folio) {
+		xa_destroy(&state->tree);
+		return -ENOMEM;
+	}
+	folio_lock(state->folio);
+	state->locked = true;
+	state->entry->swpentry = swp_entry(7, SWAPZ_ROUND071_TEST_OFFSET);
+	state->entry->swapz_round028_allocation_epoch = SWAPZ_ROUND071_TEST_EPOCH;
+	state->entry->swapz_round028_stored_entry_identity =
+		SWAPZ_ROUND071_TEST_IDENTITY;
+	state->entry->pool_idx = 253;
+	state->entry->length = 64;
+	state->entry->swapz_round028_store_bound = true;
+	error = xa_insert(&state->tree, SWAPZ_ROUND071_TEST_OFFSET,
+			  state->entry, GFP_KERNEL);
+	if (error) {
+		folio_unlock(state->folio);
+		state->locked = false;
+		folio_put(state->folio);
+		state->folio = NULL;
+		xa_destroy(&state->tree);
+	}
+	return error;
+}
+
+static void swapz_round071_provenance_native_exit(struct kunit *test)
+{
+	struct swapz_round071_provenance_native_state *state = test->priv;
+
+	if (!state)
+		return;
+	if (state->folio) {
+		if (state->locked)
+			folio_unlock(state->folio);
+		folio_put(state->folio);
+	}
+	xa_destroy(&state->tree);
+}
+
+static struct swapz_round071_provenance_witness
+swapz_round071_provenance_native_witness(
+		struct swapz_round071_provenance_native_state *state)
+{
+	return (struct swapz_round071_provenance_witness) {
+		.selected_slot = state->entry->swpentry.val,
+		.entry_slot = state->entry->swpentry.val,
+		.selected_epoch = SWAPZ_ROUND071_TEST_EPOCH,
+		.entry_epoch = state->entry->swapz_round028_allocation_epoch,
+		.selected_identity = SWAPZ_ROUND071_TEST_IDENTITY,
+		.entry_identity = state->entry->swapz_round028_stored_entry_identity,
+		.selected_pool_idx = 253,
+		.entry_pool_idx = state->entry->pool_idx,
+		.compressed_length = state->entry->length,
+		.xarray_points_to_entry = xa_load(&state->tree,
+			SWAPZ_ROUND071_TEST_OFFSET) == state->entry,
+		.codec_known = true, /* test assertion, no actual decoder lease */
+		.pool_live = true, /* test assertion, no actual selected pool */
+	};
+}
+
+static void swapz_round071_provenance_assembled_source_rejected_kunit(
+		struct kunit *test)
+{
+	struct swapz_round071_provenance_native_state *state = test->priv;
+	struct swapz_round071_provenance_witness witness =
+		swapz_round071_provenance_native_witness(state);
+
+	KUNIT_ASSERT_EQ(test, swapz_round071_provenance_identity_guard(&witness), 0);
+	KUNIT_ASSERT_FALSE(test, folio_test_swapcache(state->folio));
+	KUNIT_EXPECT_EQ(test,
+		swapz_round071_provenance_try_original_source(&witness, state->folio),
+		-ENODEV);
+}
+
+static void swapz_round071_provenance_stale_reissue_rejected_kunit(
+		struct kunit *test)
+{
+	struct swapz_round071_provenance_native_state *state = test->priv;
+	struct swapz_round071_provenance_witness witness =
+		swapz_round071_provenance_native_witness(state);
+
+	witness.entry_slot = swp_entry(8, SWAPZ_ROUND071_TEST_OFFSET).val;
+	KUNIT_EXPECT_EQ(test, swapz_round071_provenance_identity_guard(&witness),
+		-ESTALE);
+	witness.entry_slot = witness.selected_slot;
+	witness.entry_epoch++;
+	KUNIT_EXPECT_EQ(test, swapz_round071_provenance_identity_guard(&witness),
+		-ESTALE);
+	witness.entry_epoch = witness.selected_epoch;
+	witness.entry_identity++;
+	KUNIT_EXPECT_EQ(test, swapz_round071_provenance_identity_guard(&witness),
+		-ESTALE);
+	witness.entry_identity = witness.selected_identity;
+	witness.xarray_points_to_entry = false;
+	KUNIT_EXPECT_EQ(test, swapz_round071_provenance_identity_guard(&witness),
+		-ESTALE);
+}
+
+static void swapz_round071_provenance_codec_pool_rejected_kunit(
+		struct kunit *test)
+{
+	struct swapz_round071_provenance_native_state *state = test->priv;
+	struct swapz_round071_provenance_witness witness =
+		swapz_round071_provenance_native_witness(state);
+
+	witness.codec_known = false;
+	KUNIT_EXPECT_EQ(test, swapz_round071_provenance_identity_guard(&witness),
+		-EOPNOTSUPP);
+	witness.codec_known = true;
+	witness.pool_live = false;
+	KUNIT_EXPECT_EQ(test, swapz_round071_provenance_identity_guard(&witness),
+		-EOPNOTSUPP);
+	witness.pool_live = true;
+	witness.entry_pool_idx--;
+	KUNIT_EXPECT_EQ(test, swapz_round071_provenance_identity_guard(&witness),
+		-EOPNOTSUPP);
+	witness.entry_pool_idx = witness.selected_pool_idx;
+	witness.compressed_length = 4096;
+	KUNIT_EXPECT_EQ(test, swapz_round071_provenance_identity_guard(&witness),
+		-EMSGSIZE);
+}
+
+static void swapz_round071_provenance_owner_erase_rejected_kunit(
+		struct kunit *test)
+{
+	struct swapz_round071_provenance_native_state *state = test->priv;
+	struct swapz_round071_provenance_witness witness =
+		swapz_round071_provenance_native_witness(state);
+
+	folio_unlock(state->folio);
+	state->locked = false;
+	KUNIT_EXPECT_EQ(test,
+		swapz_round071_provenance_try_original_source(&witness, state->folio),
+		-EPERM);
+	folio_lock(state->folio);
+	state->locked = true;
+	KUNIT_ASSERT_PTR_EQ(test,
+		xa_erase(&state->tree, SWAPZ_ROUND071_TEST_OFFSET), state->entry);
+	witness = swapz_round071_provenance_native_witness(state);
+	KUNIT_EXPECT_EQ(test,
+		swapz_round071_provenance_try_original_source(&witness, state->folio),
+		-ESTALE);
+}
+
+static struct kunit_case swapz_round071_provenance_native_cases[] = {
+	KUNIT_CASE(swapz_round071_provenance_assembled_source_rejected_kunit),
+	KUNIT_CASE(swapz_round071_provenance_stale_reissue_rejected_kunit),
+	KUNIT_CASE(swapz_round071_provenance_codec_pool_rejected_kunit),
+	KUNIT_CASE(swapz_round071_provenance_owner_erase_rejected_kunit),
+	{}
+};
+
+static struct kunit_suite swapz_round071_provenance_native_suite = {
+	.name = "swapz_round071_native_original_provenance_noauth",
+	.init = swapz_round071_provenance_native_init,
+	.exit = swapz_round071_provenance_native_exit,
+	.test_cases = swapz_round071_provenance_native_cases,
+};
+kunit_test_suite(swapz_round071_provenance_native_suite);
+#endif /* original-KUnit only; source AUTH remains false */
+/* ROUND071_ORIGINAL_ZSWAP_PROVENANCE_END */
