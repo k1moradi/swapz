@@ -142,6 +142,92 @@ def verify_real_owned_retired_fallthrough(source: str) -> None:
                   flush=True)
 
 
+
+def verify_exact_original_gc_and_real_codec_guard(joined: str, source: str) -> None:
+    """New actual-C compiled/executed guard mutant and native GC no-reencode."""
+    import shutil
+
+    gc_copy = joined.split(
+        "static int swapz_round069_native_gc_copy_fua(", 1)[1].split(
+        "static int swapz_round069_test_native_fua_lz4_bvec_classes(", 1)[0]
+    required = (
+        "kmemdup(joined->lower + original_offset",
+        "next_spec = old_view->spec;",
+        "++next_spec.gc_epoch;",
+        "swapz_round069_make_io(",
+        "memset(owned_compressed, 0xd3, next_spec.compressed_length);",
+        "ROUND071_GC_COPY_FIRST_ERROR",
+    )
+    if (any(piece not in gc_copy for piece in required) or
+            "LZ4_compress_default(" in gc_copy or
+            "lzo1x_1_compress(" in gc_copy or
+            "cross-codec-LZ4-to-LZO1X-rejected-ESTALE" not in joined or
+            "error != -ESTALE || rejected_ticket" not in joined or
+            "ROUND071_READER_GC_FIRST_ERROR" not in joined):
+        raise ValueError("native-original-compressed-GC-copy-contract-missing")
+    guard = "previous->spec.codec != spec->codec ||"
+    if source.count(guard) != 1:
+        raise ValueError("real-source-original-codec-guard-not-unique")
+    kernel = ROOT / "src/kernel"
+    fixture = ROOT / "tests/runtime/native/fixtures/round067-import-disk-payload-read.c"
+    with tempfile.TemporaryDirectory(prefix="swapz-gc-codec-") as root:
+        temporary = Path(root)
+        for compiler_name in ("gcc", "clang"):
+            compiler = shutil.which(compiler_name)
+            if not compiler:
+                raise RuntimeError("strict-GC-compiler-missing:" + compiler_name)
+            actual = temporary / ("authority-" + compiler_name + ".c")
+            executable = temporary / ("gc-" + compiler_name)
+            flags = [
+                "-std=gnu11", "-O1", "-g",
+                "-DSWAPZ_ROUND066_IMPORT_DISK_TEST",
+                "-DSWAPZ_ROUND067_IMPORT_DISK_PAYLOAD_TEST",
+                "-DSWAPZ_ZSWAP_IMPORT_HOST_TEST",
+                "-Wall", "-Wextra", "-Wconversion", "-Wshadow", "-Werror",
+                "-fsanitize=address,undefined", "-fno-sanitize-recover=all",
+                "-fno-omit-frame-pointer", "-fno-pie", "-no-pie",
+                "-I", str(kernel)
+            ]
+            environment = {
+                **os.environ,
+                "ASAN_OPTIONS": "halt_on_error=1:detect_leaks=1",
+                "UBSAN_OPTIONS": "halt_on_error=1:print_stacktrace=1",
+            }
+            for changed in (False, True):
+                actual.write_text(
+                    source.replace(guard, "previous->spec.codec == spec->codec ||", 1)
+                    if changed else source)
+                compiled = subprocess.run(
+                    [compiler, *flags, str(fixture), str(actual),
+                     str(kernel / "codec.c"), "-o", str(executable),
+                     "-llzo2", "-llz4", "-lcrypto"],
+                    cwd=ROOT, capture_output=True, text=True, timeout=100,
+                    check=False)
+                if compiled.returncode:
+                    first = next((line for line in compiled.stderr.splitlines()
+                                  if "error:" in line), "compiler diagnostic absent")
+                    raise RuntimeError("real-source-GC-guard-compile-" +
+                                       compiler_name + ":" + first[-180:])
+                run = subprocess.run(
+                    [str(executable), "pinned_gc_roundtrip"],
+                    cwd=ROOT, env=environment, capture_output=True, text=True,
+                    timeout=75, check=False)
+                if changed:
+                    if (run.returncode != 1 or run.stdout or
+                            run.stderr != "FIRST_ERROR pinned_gc_roundtrip\n"):
+                        raise RuntimeError("real-source-GC-guard-mutant-escaped-" +
+                                           compiler_name + ":exit=" +
+                                           str(run.returncode))
+                elif run.returncode or run.stdout or run.stderr:
+                    raise RuntimeError("real-source-GC-guard-baseline-" +
+                                       compiler_name + ":exit=" +
+                                       str(run.returncode))
+            print("PASS " + compiler_name +
+                  " real_source_GC_original_codec_guard_ASAN_UBSAN=1 "
+                  "compiled_executed_changed_real_C_mutants=1 "
+                  "native_GC_exact_copy=SOURCE_ASSERTED", flush=True)
+
+
 def main() -> None:
     # Actual SOURCE-exact authority files are copied into the pristine
     # native test image byte-for-byte. No mock implementations are permitted.
@@ -196,6 +282,7 @@ def main() -> None:
             print(line, flush=True)
 
     verify_real_owned_retired_fallthrough(REAL_AUTHORITY.read_text())
+    verify_exact_original_gc_and_real_codec_guard(joined, REAL_AUTHORITY.read_text())
 
 
 if __name__ == "__main__":

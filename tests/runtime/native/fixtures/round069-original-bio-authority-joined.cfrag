@@ -539,6 +539,87 @@ static int swapz_round069_native_write_fua(struct swapz_round069_joined *joined,
 	return error;
 }
 
+
+/* Copy EXACT original codec bytes from the header-safe old physical extent.
+ * This intentionally performs no compression: source bytes own the immutable
+ * CRC, original codec/version and original SHA until native BIO bvec ownership
+ * is established; only the GC epoch and physical extent are allowed to move. */
+static int swapz_round069_native_gc_copy_fua(struct swapz_round069_joined *joined,
+			const struct swapz_import_disk_view *old_view,
+			swapz_u8 extent_blocks, swapz_u64 *replacement_ticket,
+			struct swapz_tx *transaction)
+{
+	struct swapz_authority_import_spec next_spec;
+	struct swapz_import_lower_bio_request request;
+	struct swapz_round069_io *io = NULL;
+	swapz_u8 *owned_compressed = NULL;
+	const char *step = "old-original-compressed-copy";
+	size_t original_offset;
+	int error;
+
+	if (old_view->spec.codec != SWAPZ_AUTHORITY_IMPORT_LZ4 ||
+	    old_view->start_block >= SWAPZ_JOIN_PHYSICAL ||
+	    !old_view->spec.compressed_length ||
+	    old_view->spec.compressed_length >
+		    (swapz_u32)old_view->extent_blocks * SWAPZ_BLOCK_BYTES ||
+	    old_view->spec.gc_epoch == ~(swapz_u64)0)
+		return -EINVAL;
+	original_offset = ((size_t)old_view->start_block +
+			   SWAPZ_LINUX_SWAP_HEADER_BLOCKS) * SWAPZ_BLOCK_BYTES;
+	if (original_offset > SWAPZ_JOIN_LOWER_BYTES ||
+	    old_view->spec.compressed_length >
+		    SWAPZ_JOIN_LOWER_BYTES - original_offset)
+		return -ERANGE;
+	owned_compressed = kmemdup(joined->lower + original_offset,
+				  old_view->spec.compressed_length, GFP_KERNEL);
+	if (!owned_compressed)
+		return -ENOMEM;
+	if (swapz_crc32c_bytes(owned_compressed, old_view->spec.compressed_length) !=
+	    old_view->spec.compressed_crc32c) {
+		error = -EBADMSG;
+		goto out;
+	}
+	next_spec = old_view->spec;
+	++next_spec.gc_epoch;
+	step = "actual-disk-stage";
+	mutex_lock(&joined->authority_lock);
+	error = swapz_import_disk_stage(&joined->pool, &next_spec, extent_blocks,
+					old_view->ticket, transaction,
+					replacement_ticket);
+	if (!error) {
+		step = "actual-disk-submit";
+		error = swapz_import_disk_submit(&joined->pool, *replacement_ticket);
+	}
+	if (!error) {
+		step = "actual-lower-begin-write";
+		error = swapz_import_lower_begin_write(&joined->writer, transaction,
+				*replacement_ticket, 1, &request);
+	}
+	mutex_unlock(&joined->authority_lock);
+	if (error)
+		goto out;
+	step = "owned-byte-copy-to-real-bio-vec";
+	io = swapz_round069_make_io(joined, &joined->writer, &request,
+				    SWAPZ_JOIN_IO_WRITE, owned_compressed,
+				    next_spec.compressed_length);
+	if (!io) {
+		error = -ENOMEM;
+		goto out;
+	}
+	/* Original source copy is gone before the genuine bio_endio callback;
+	 * only the native page/BIO-owned exact compressed stream remains. */
+	memset(owned_compressed, 0xd3, next_spec.compressed_length);
+	step = "real-bio-endio-to-sleepable-authority";
+	error = swapz_round069_run_io(io);
+out:
+	if (error)
+		pr_err("ROUND071_GC_COPY_FIRST_ERROR step=%s error=%d\n",
+		       step, error);
+	swapz_round069_release_io(io);
+	kfree(owned_compressed);
+	return error;
+}
+
 static int swapz_round069_test_native_fua_lz4_bvec_classes(struct kunit *test)
 {
 	static const u8 classes[] = { 1U, 2U, 4U };
@@ -744,11 +825,14 @@ static void swapz_round069_native_reader_pin_gc_kunit(struct kunit *test)
 {
 	struct swapz_round069_joined *joined = swapz_round069_join_alloc();
 	struct swapz_import_lower_bio_request read_request;
+	struct swapz_authority_import_spec rejected_codec;
 	struct swapz_round069_io *read_io = NULL;
 	struct swapz_tx *transaction = NULL;
 	struct swapz_import_disk_view old_view;
-	u64 first_ticket = 0U, replacement_ticket = 0U;
+	const char *first_step = "allocation";
+	u64 first_ticket = 0U, replacement_ticket = 0U, rejected_ticket = 0U;
 	u32 old_start, new_start;
+	size_t original_offset, replacement_offset;
 	int error = -ENOMEM;
 
 	if (!joined)
@@ -756,12 +840,14 @@ static void swapz_round069_native_reader_pin_gc_kunit(struct kunit *test)
 	transaction = kvzalloc(sizeof(*transaction), GFP_KERNEL);
 	if (!transaction)
 		goto out;
+	first_step = "original-LZ4-FUA";
 	error = swapz_round069_native_write_fua(joined, 13U, 1U,
 		SWAPZ_AUTHORITY_IMPORT_LZ4, 2U, 0U, &first_ticket,
 		transaction);
 	if (error)
 		goto out;
 	old_start = transaction->start_block;
+	first_step = "old-native-reader-pin";
 	error = swapz_import_lower_begin_read(&joined->reader,
 					      first_ticket, &read_request);
 	if (error)
@@ -773,22 +859,48 @@ static void swapz_round069_native_reader_pin_gc_kunit(struct kunit *test)
 		error = -ENOMEM;
 		goto out;
 	}
+	/* A real differently encoded LZO1X replacement MUST be rejected
+	 * before GC. The guarded product stage must not mutate authority. */
+	first_step = "cross-codec-LZ4-to-LZO1X-rejected-ESTALE";
+	error = swapz_round069_select_original(joined,
+			SWAPZ_AUTHORITY_IMPORT_LZO1X, 13U, 2U, &rejected_codec);
+	if (error)
+		goto out;
+	error = swapz_import_disk_stage(&joined->pool, &rejected_codec, 4U,
+			first_ticket, transaction, &rejected_ticket);
+	if (error != -ESTALE || rejected_ticket ||
+	    joined->authority.in_flight) {
+		error = -EUCLEAN;
+		goto out;
+	}
 	/* Old native BIO pages and exact pin remain held before GC move. */
-	error = swapz_round069_native_write_fua(joined, 13U, 2U,
-			SWAPZ_AUTHORITY_IMPORT_LZO1X, 4U, first_ticket,
+	first_step = "exact-original-LZ4-GC-copy-and-native-write";
+	error = swapz_round069_native_gc_copy_fua(joined, &old_view, 4U,
 			&replacement_ticket, transaction);
 	if (error)
 		goto out;
 	new_start = transaction->start_block;
-	if (joined->live_records[old_start] != 1U ||
+	original_offset = ((size_t)old_start +
+			   SWAPZ_LINUX_SWAP_HEADER_BLOCKS) * SWAPZ_BLOCK_BYTES;
+	replacement_offset = ((size_t)new_start +
+			      SWAPZ_LINUX_SWAP_HEADER_BLOCKS) * SWAPZ_BLOCK_BYTES;
+	first_step = "old-live-new-live-identical-compressed-extent";
+	if (old_start == new_start ||
+	    joined->live_records[old_start] != 1U ||
 	    joined->live_records[new_start] != 1U ||
-	    joined->maps[13].valid) {
+	    joined->maps[13].valid ||
+	    memcmp(joined->lower + original_offset,
+		   joined->lower + replacement_offset,
+		   old_view.spec.compressed_length) ||
+	    !swapz_round069_header_intact(joined)) {
 		error = -EUCLEAN;
 		goto out;
 	}
+	first_step = "old-retired-native-bio-read";
 	error = swapz_round069_run_io(read_io);
 	if (error)
 		goto out;
+	first_step = "old-original-decode-and-last-reader-put";
 	error = swapz_round069_decode(joined, &old_view.spec, joined->output);
 	if (error || joined->live_records[old_start] != 0U ||
 	    joined->live_records[new_start] != 1U) {
@@ -796,12 +908,24 @@ static void swapz_round069_native_reader_pin_gc_kunit(struct kunit *test)
 		goto out;
 	}
 	/* Exact last-pin retirement and independent full original 4096 READ. */
+	first_step = "new-original-LZ4-native-read";
 	error = swapz_round069_native_read(joined, replacement_ticket);
 	if (!error && memcmp(joined->output, joined->original, SWAPZ_BLOCK_BYTES))
 		error = -EBADMSG;
+	if (error)
+		goto out;
+	first_step = "new-ticket-retire-no-leak-no-upper-ACK";
+	error = swapz_import_disk_retire(&joined->pool, replacement_ticket);
 	if (!error)
-		error = swapz_import_disk_retire(&joined->pool, replacement_ticket);
+		error = swapz_import_disk_close(&joined->pool);
+	if (!error && (joined->live_records[new_start] != 0U ||
+		       joined->upper_ack_count != 0U ||
+		       !swapz_round069_header_intact(joined)))
+		error = -EUCLEAN;
 out:
+	if (error)
+		pr_err("ROUND071_READER_GC_FIRST_ERROR step=%s error=%d\n",
+		       first_step, error);
 	if (joined)
 		KUNIT_EXPECT_EQ(test, error, 0);
 	else
