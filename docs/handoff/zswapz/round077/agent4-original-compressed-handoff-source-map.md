@@ -1,3 +1,9 @@
+# SUPERSEDED PREPARING-ONLY DRAFT — DO NOT START THIS ASSIGNMENT
+
+**This file is retained for transparent planning history but is NOT an authorized Round077 task.** The owner-managed final frozen contract is [Round077 two-agent contract](frozen-contract.md) and the only authoritative task prompts are [Agent10](agent10-original-reader-native-delay-declaration-p0.md) and [Agent7](agent7-original-codec-cross-abi-fail-closed-p0.md). Prior Agent6 cancellation had a **manual exact-source retry already queued**; Agent8 Round076 source audit was **already manager-recovered**, so Agent4/Agent6 duplicate source work is not needed. [Issue #194](https://github.com/k1moradi/swapz/issues/194) controls authorizations only via a unique `message: ROUND_OPEN`. This is not that authorization.
+
+---
+
 # Agent4 Round077 — original pinned zswap compressed eviction to swapz opaque carrier source feasibility audit
 
 Start immediately and INDEPENDENTLY of Agents6/10 after official #194 message: ROUND_OPEN. Read frozen-contract.md and the entire prior Round076 Agent8 prompt (docs/handoff/zswapz/round076/agent8-pinned-zswap-opaque-handoff-design.md). Agent8 reported failed GitHub access, so did NOT commit the required R076 documents. This is a transfer of UNFINISHED documentation, not duplicate source implementation or attribution to Agent8. Do not modify R076 Agent8 files or claim its completed delivery.

@@ -1,13 +1,10 @@
-# Round077 — three existing agents, three independent unblocked tasks
+# Round077 — exactly two existing independent workers, one native source bug and one untyped original codec collision
 
-Official GitHub issue #194: https://github.com/k1moradi/swapz/issues/194. Shared frozen contract: frozen-contract.md. Exact-source CI facts: agent1-ci-checkpoint.md. Owner short notification: notification.md.
+**Official [issue #194](https://github.com/k1moradi/swapz/issues/194)** (sole task authority; duplicate PREPARING #195 closed before any opening); [frozen contract](frozen-contract.md); [verified first-error checkpoint](agent1-ci-checkpoint.md); [owner notification](notification.md).
 
-| Agent | Full independent prompt | Cost |
+| Reused agent | Exclusive full prompt | New CI cost |
 | --- | --- | --- |
-| Agent4 | agent4-original-compressed-handoff-source-map.md — upstream pinned real original zswap→swapz opaque codec/lifetime/ABI source audit, transferred from unfulfilled R076 Agent8 | Docs only; no new CI |
-| Agent6 | agent6-unblock-cancelled-host-ci-p0.md — Round074 unbounded apt-get canceled in 15m before verifier, require 50 true semantic mutants | One focused host GCC+Clang workflow |
-| Agent10 | agent10-original-reader-native-delay-include-p0.md — Round073 native original reader KUnit test-only usleep_range declaration compile failure | One original pinned 4-case UML requalification after host |
+| **Agent10** | [Fix pinned original reader KUnit `usleep_range` missing declaration in test-only fragment](agent10-original-reader-native-delay-declaration-p0.md) | One source-host then actual original pinned UML native 4 cases only if qualified |
+| **Agent7** | [Prove strict fail-closed distinct dormant original LZO1X tag2 vs direct ZSTD tag2 ABI boundaries](agent7-original-codec-cross-abi-fail-closed-p0.md) | One source-linked GCC/Clang ASan+UBSan host-only real C semantic mutant workflow |
 
-Optimal three reuse existing workers, excluding Agent1. All start simultaneously once one authoritative issue #194 ROUND_OPEN names immutable task commit, no dependencies on other Round077 peer output. Remote main CAS one-parent nonforce only, zero branches/PRs. Other Round073–076 agents retain previously owned CI and evidence, no speculative duplicate CI. Agent8 R076 source audit remained BLOCKED due worker GitHub access; do not manufacture its files. Round077 Agent4 completes that unfinished source-only engineering scope as a separate auditable agent.
-
-Natural Linux MM/zswap pressure alone, swapz disk packing/GC alone, no recompression or extra reclaim. Original LZO1X/raw-LZ4 independent volatile codec, ordinary RAW_4096 complete original UNCOMPRESSED 4096, authentic compressed stream needs separate proof. SOURCE_MAPPED_AUTHENTICATED0 PHASE_A BLOCKED and all handoff/import gates OFF, no physical or privileged tests. Mandatory two round077 evidence MD+JSON files per agent on main + #194 comment.
+Agent1 management only, no new workers. All other Agents2–6,8–9,11 retain ongoing pending original CI/terminal reports rather than duplicating tests. Agent6 existing cancelled exact SHA manually retried once as queued attempt2, no source fix needed without evidence; Agent8 blocked docs GitHub delivery recovered transparently by Agent1 without claiming independent author approval. Both Round077 assigned workers start **simultaneously** with no same-round peer new file/API/CI dependency. Only current `main` nonforce one-parent commit publication serial; zero branches/PRs. Source auth0/PhaseA BLOCKED; Linux MM/zswap solely owns compressed RAM/natural evictions and swapz only disk pack/GC, original opaque codec is neither ordinary RAW_4096 (full original uncompressed) nor disk codec. Both required MD+JSON published on main and links #194. No periodic checks, privileged/physical swapon or real pressure test. Owner docs-only requires no `make test` or `make fast_test`, target direct CI only.

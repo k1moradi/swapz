@@ -1,3 +1,9 @@
+# SUPERSEDED PREPARING-ONLY DRAFT — DO NOT START THIS ASSIGNMENT
+
+**This file is retained for transparent planning history but is NOT an authorized Round077 task.** The owner-managed final frozen contract is [Round077 two-agent contract](frozen-contract.md) and the only authoritative task prompts are [Agent10](agent10-original-reader-native-delay-declaration-p0.md) and [Agent7](agent7-original-codec-cross-abi-fail-closed-p0.md). Prior Agent6 cancellation had a **manual exact-source retry already queued**; Agent8 Round076 source audit was **already manager-recovered**, so Agent4/Agent6 duplicate source work is not needed. [Issue #194](https://github.com/k1moradi/swapz/issues/194) controls authorizations only via a unique `message: ROUND_OPEN`. This is not that authorization.
+
+---
+
 # Agent10 Round077 — genuine original Linux reader-pin GC native test-only usleep_range compiler first error
 
 Start simultaneously with Agents4/6 after official #194 ROUND_OPEN. Read frozen-contract.md, original Round073 Agent10 MD/JSON, docs/testing_standards.md, evidence policy and full actual native logs. Work solely on your original pinned reader KUnit source/test lane.
