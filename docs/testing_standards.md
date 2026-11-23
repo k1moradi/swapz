@@ -19088,3 +19088,15 @@ Native code MUST NOT call `flush_workqueue(system_percpu_wq)` or flush any other
 Require original LZO1X/lzo-scomp and raw LZ4 complete independent original 4096-byte decoder readback **after witnessed actual original pool retirement**; 24 kernel-reader close/wake/last-put cycles for each original codec, wrong original codec/CRC/stale read with no output modification, and the four unchanged previously passing decoder-owner KUnit cases. Strict original UML KUnit JSON and KTAP both require six actual executed PASS and zero failed/skipped/crashed; structural Python checks are not native execution. Retain the strict source-host GCC and Clang ASan/UBSan real decoder-owner C execution and all 22 real compiled/executed semantic mutants. The stage must reject exact-pin, original-source-blob, original RCU release-anchor, include, postimage, target-only completion, altered actual owner C or activation drift; no silent `-Werror` relaxation.
 
 Mandatory `docs/handoff/zswapz/round072/agent4-evidence.md` and valid `agent4-results.json` must be checked into sole `main` with exact tested SHA, parent, original C blob, actual workflow/job URLs, counts and first error. A queued test is not PASS; terminal status requires an evidence-only follow-up commit and direct issue #189 comment with commit-pinned links. Never claim original module unload, authentic selected swapcache STORED source/authentication, lower durable FUA or real upper bio_endio from this test-only proof. Keep `SOURCE_MAPPED_AUTHENTICATED=0`, `PHASE_A=BLOCKED`, import ACTIVE0, direct compressed handoff and forced RAW bypass OFF, whole original UNCOMPRESSED `RAW_4096`; no physical/privileged/loaded/pressure experiments, competing shrinker, recompression or disk-header/20B-map change.
+
+### Round072 Agent7 independent negative control for LZO/ZSTD namespace collision
+
+A negative mutant is only counted as killed if changing the tested decision
+would otherwise allow the exact forbidden behavior. A redundant guard may
+still reject a bad codec even when another guard is mutated, so removing that
+guard alone is **not** a meaningful distinct semantic mutant. The Agent7
+LZO-as-ZSTD mutation must instead explicitly add the forbidden numeric-cast
+acceptance for the otherwise unsupported direct-ZSTD slot, and the read-only
+original-family assertion must detect that acceptance at runtime under each
+compiler's ASan+UBSan. Do not delete the production guards or relabel original
+LZO1X as ZSTD/RAW/disk LZ4 to make a mutant pass.

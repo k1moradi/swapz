@@ -68,8 +68,11 @@ MUTANTS = (
      "if (false && lower_image[SWAPZ_BLOCK_BYTES + offset] != 0U)"),
     ("protected-header", "if (memcmp(lower_image, protected_header, sizeof(protected_header)) != 0)",
      "if (false && memcmp(lower_image, protected_header, sizeof(protected_header)) != 0)"),
-    ("lzo-as-zstd", "if (record->original_codec == SWAPZ_ZSWAP_IMPORT_LZO1X_CODEC)",
-     "if (false && record->original_codec == SWAPZ_ZSWAP_IMPORT_LZO1X_CODEC)"),
+    ("lzo-as-zstd",
+     "if (record->original_codec == SWAPZ_ZSWAP_IMPORT_LZO1X_CODEC)\\n"
+     "        return -EOPNOTSUPP;",
+     "if (record->original_codec == SWAPZ_ZSWAP_IMPORT_LZO1X_CODEC)\\n"
+     "        return direct_codec == SWAPZ_DIRECT_ZSWAP_ZSTD ? 0 : -EOPNOTSUPP;"),
 )
 EXPECTED = re.compile(
     r"PASS directed=([1-9][0-9]*) extents=4,8,16KiB original_lz4=decoded_4096 "
