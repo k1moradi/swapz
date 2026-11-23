@@ -1,0 +1,127 @@
+{
+  "round": "080",
+  "agent": 5,
+  "kind": "original-pinned-zswap-preerase-XArray-handle-pool-immutable-copy-source-linked-HOST_MODEL_ONLY",
+  "task_commit": "d76081b661ce750d2fbeaa247fa16e4670db5e97",
+  "source_commit": "ac92b835bf4a60ae7f8bebf8deacc8ab0644491f",
+  "source_parent": "d76081b661ce750d2fbeaa247fa16e4670db5e97",
+  "branch": "main",
+  "publication": "SINGLE_PARENT_NONFORCE_FRESH_EXPECTED_HEAD_FF_VERIFIED",
+  "source_files_changed": [
+    ".github/workflows/phase-a-round079-original-zswap-preerase-source-copy-noauth.yml",
+    "tests/runtime/native/fixtures/round079-original-zswap-preerase-source-copy.c",
+    "docs/testing_standards.md"
+  ],
+  "production_c_files_changed": [],
+  "original_linux_files_changed": [],
+  "source_mapped_authenticated": false,
+  "phase_a": "BLOCKED",
+  "direct_compressed_handoff": "DISABLED",
+  "forced_raw_bypass": "DISABLED",
+  "import_active": false,
+  "historical_round079": {
+    "source_sha": "b1437365849fa574c0e34f9b7729efdb530a6a51",
+    "run_id": 45237411852,
+    "job_id": 137912686741,
+    "job_status": "COMPLETED",
+    "job_conclusion": "FAILURE",
+    "first_observed_error": "Preflight step 'Assert exact main Git SHA pristine pinned original and compiler toolchain' exit code 1; individual shell assertion NOT logged",
+    "root_cause": "Nested original-linux checkout registered ?? original-linux/ and was created before unconditional zero-untracked status check",
+    "evidence_type": "REPRODUCED_IN_DISPOSABLE_GIT_REPOSITORY_AND_CONFIRMED_BY_NEW_PINNED_CI_STEP_SUCCESS_NOT_LOGGED_IN_OLD_RUN",
+    "gcc_cases_executed": 0,
+    "gcc_mutants_compiled": 0,
+    "gcc_mutants_executed": 0,
+    "clang_cases_executed": 0,
+    "clang_mutants_compiled": 0,
+    "clang_mutants_executed": 0,
+    "conclusion": "FAILURE"
+  },
+  "workflow": {
+    "run_id": 45251506069,
+    "run_url": "https://github.com/k1moradi/swapz/actions/runs/45251506069",
+    "head_sha": "ac92b835bf4a60ae7f8bebf8deacc8ab0644491f",
+    "status": "COMPLETED",
+    "conclusion": "SUCCESS",
+    "run_attempt": 1
+  },
+  "jobs": [
+    {
+      "id": 137962067745,
+      "name": "original-pinned-zswap-preerase-source-host-GCC-Clang",
+      "status": "COMPLETED",
+      "conclusion": "SUCCESS",
+      "url": "https://github.com/k1moradi/swapz/actions/runs/45251506069/job/137962067745"
+    }
+  ],
+  "first_error": null,
+  "preflight": {
+    "outer_clean_before_nested": "PASS",
+    "original_linux_checkout_pin_and_clean": "PASS",
+    "root_only_nested_untracked_after_checkout": "PASS",
+    "strict_first_parent_diff_check": "PASS",
+    "canonical_policy": "PASS",
+    "fail_only_labeled_first_error": true
+  },
+  "original_linux_pin": "c339f4010dea8b0d754f84ace70cd1b089878ef8",
+  "blobs": {
+    "original_mm_zswap": "ae19e301fced7e357a4c7587dfdd6abb890b9163",
+    "original_mm_zsmalloc": "7ef80e0da6267661cea4d48a4a615444724782e7",
+    "product_codec_header": "e89d316b9cf49f82df0b77648c1be1731607987d"
+  },
+  "host": {
+    "status": "PASS",
+    "compiler_flags": "-std=c2x -Werror -Wall -Wextra -Wconversion -Wshadow -Wpedantic -Wstrict-prototypes -fsanitize=address,undefined",
+    "extracted_original_branch_predicates": 4,
+    "gcc": {
+      "status": "PASS",
+      "baseline_cases": 4,
+      "semantic_C_mutants_compiled": 20,
+      "semantic_C_mutants_executed": 20,
+      "semantic_C_mutants_killed_by_runtime_assertion": 20,
+      "sanitizers": [
+        "ASAN",
+        "UBSAN"
+      ]
+    },
+    "clang": {
+      "status": "PASS",
+      "baseline_cases": 4,
+      "semantic_C_mutants_compiled": 20,
+      "semantic_C_mutants_executed": 20,
+      "semantic_C_mutants_killed_by_runtime_assertion": 20,
+      "sanitizers": [
+        "ASAN",
+        "UBSAN"
+      ]
+    },
+    "total_baseline_cases_executed": 8,
+    "total_mutants_compiled": 40,
+    "total_mutants_executed": 40,
+    "total_mutants_killed": 40,
+    "model_only": true,
+    "live_original_mm_execution": false,
+    "artifact_id": 14855993552,
+    "artifact_url": "https://github.com/k1moradi/swapz/actions/runs/45251506069/artifacts/14855993552"
+  },
+  "original_native_kunit": {
+    "status": "NOT_REQUESTED",
+    "original_uml_job_id": null,
+    "json": null,
+    "ktap": null,
+    "cases_executed": 0
+  },
+  "current_dormant_compressed_import_max_bytes": 3568,
+  "unsupported_original_compressed_lengths": "3569..4095_FAIL_CLOSED",
+  "ordinary_RAW_4096": "COMPLETE_ORIGINAL_UNCOMPRESSED_4096",
+  "authentic_live_stored_slot_folio_generation": false,
+  "selected_current_DM_owner": false,
+  "physical_durable_write_fua_flush": false,
+  "real_upper_bio_ack": false,
+  "independently_retained_live_decoder_gc_proof": false,
+  "pressure_owner": "ORIGINAL_LINUX_MM_ZSWAP_NATURAL_EVICTION_ONLY",
+  "disk_owner": "SWAPZ_DISK_PACKING_4_8_16KiB_GC_ONLY_NO_RECOMPRESSION",
+  "first_physical_SWAPSPACE2_4096_immutable": true,
+  "volatile_map_bytes": 20,
+  "privileged_loaded_physical_device_swapon_real_pressure_testing": false,
+  "conclusion": "REPORT_READY_HOST_ONLY_PHASE_A_BLOCKED"
+}
