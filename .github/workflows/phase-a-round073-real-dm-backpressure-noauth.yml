@@ -1,0 +1,56 @@
+name: Round073 Agent11 source-audited DM queue cooperation HOST no-auth
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'tests/runtime/native/fixtures/round073-real-dm-backpressure.c'
+      - 'tests/tools/round073-real-dm-backpressure-verify.py'
+      - 'src/kernel/dm-target.c'
+      - 'src/kernel/authority.h'
+      - 'src/kernel/window-policy.h'
+      - 'src/kernel/zswap-import-codec.h'
+      - 'src/kernel/zswap-direct-handoff.h'
+      - '.github/workflows/phase-a-round073-real-dm-backpressure-noauth.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  source-audited-gcc-clang-asan-ubsan-model:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    env:
+      SWAPZ_PUSH_BEFORE_SHA: ${{ github.event.before }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Exact sole-main source/parent and whitespace
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$GITHUB_REF" = refs/heads/main
+          test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
+          test "$(git branch --show-current)" = main
+          test -z "$(git status --porcelain --untracked-files=all)"
+          git diff --check HEAD^ HEAD
+      - name: Rootless genuine-header-linked C23 ASan UBSan 34 semantic mutants
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 -B tests/tools/round073-real-dm-backpressure-verify.py \
+            --json round073-evidence/agent11-host.json \
+            --ktap round073-evidence/agent11-host.ktap
+      - name: Source repo branch and standards policy guard
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 -B tests/runtime/native/repository-policy-test.py
+          python3 -B tests/runtime/native/repository-policy-test.py --enforce
+      - name: Attach bounded HOST-only proof
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: round073-agent11-source-host-model-only
+          path: round073-evidence/
+          if-no-files-found: warn

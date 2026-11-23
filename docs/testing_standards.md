@@ -19172,3 +19172,27 @@ that branch has no compressed decoder to repeat the check, and keep the
 uncompressed exact 4096-byte positive path. Both mutations must be compiled
 and run under GCC and Clang strict ASan+UBSan without counting a compiler
 warning as an executed semantic kill.
+
+## Round073 current DM queue source-audited natural-eviction HOST model (Agent11)
+
+The independent Round073 Agent11 host verifier MUST inspect unchanged current
+`src/kernel/dm-target.c` FIFO admission, work-conserving 64-BIO quantum,
+ordered worker and shutdown drain anchors, compile the real
+`swapz_authority_capacity_window` and `swapz_window_read_independent`
+header predicates, and run independently compiled GCC and Clang C23/C2x
+`-Werror`, ASan+UBSan baselines and at least twelve executed semantic C
+mutants per compiler. A successful synthetic bounded ring may establish only
+the stated model invariant: externally supplied, already-decided natural
+zswap evictions must not cause a second swapz pressure/reclaim operation,
+recompression, unbounded owned buffers, queue starvation or source-lease
+re-use. It does NOT prove that current DM's per-BIO `incoming` list has a
+hard total admission bound, that the original Linux MM producer is active,
+or that a real lower device is fair. Reject misattribution of model success
+to original zswap STORED reads, loaded DM, physical endurance or Phase A
+authentication. Ordinary `RAW_4096` always stores a full original
+uncompressed 4096-byte page; original compressed LZ4/LZO1X retain a distinct
+volatile source codec identity. Keep all production guards OFF. Surface the
+earliest source/gate/compile/mutant failure with a bounded diagnostic. Capture
+source-anchored SHA-256, per-compiler executed negative counts and separate
+original-native NOT_RUN in the round's committed evidence rather than treating
+a queued CI run as passing.
