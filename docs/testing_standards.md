@@ -19587,3 +19587,31 @@ For a prospective no-recompression original zswap compressed stream, verify the 
 A modeled future source-to-immutable-owner handoff must reject stale XArray identity, recycled swap slot/generation, unlocked folio, retired pool/handle or lost pool reference, wrong original codec or decoder generation, source erase before bounded copy, duplicate publication, missing SG unlock, short destination, empty or 4097-byte compressed payload, stale GC reader after final put, premature modeled lower FUA or duplicate upper ACK. Copy original compressed data byte-identically before any erase and never decompress/recompress it. The current dormant import maximum is 3568 original compressed bytes; upstream original can produce 3569..4095 compressed bytes, all of which must FAIL CLOSED without truncation, recompression or RAW aliasing. Upstream 4096-byte incompressible full original page is ordinary RAW_4096, never passed to the compressed original decoder or reinterpreted as opaque original bytes. Preserve a volatile separately tagged LZO1X/raw LZ4 original codec and independent decoder old GC reader pin lifetime; no product ZSTD tag2 namespace overlap.
 
 Every changed Round079 Agent5 host C semantic guard must compile AND execute separately under BOTH GCC and Clang with strict -Werror and ASan/UBSan, with at least 12 actual runtime-killed mutants per compiler. A compilation failure, sanitizer crash, static grep or Python negative alone is NOT a killed C mutant. Model test source XArray/folio/pool/zpool, private immutable bvec, modeled lower FUA and once-only ACK honestly; genuine currently selected original STORED swapcache, real upper DM owner, kernel locking races, physical WRITE+FUA/flush, real upper BIO ACK and original native KUnit are NOT proven or executed. No duplicate original UML build, privileged/loaded device, swapon or real pressure tests. Original Linux MM/zswap alone owns compressed RAM and natural eviction; swapz only disk packing/GC, data-only 4/8/16KiB extents, protected existing SWAPSPACE2 first4096/UUID/partition and 20-byte volatile map. All gates remain SOURCE_MAPPED_AUTHENTICATED=0, PHASE_A=BLOCKED, direct compressed handoff OFF, forced RAW bypass OFF, imports ACTIVE0. Commit the new exact-source host workflow and both Round079 Agent5 MD/JSON evidence on sole main with exact run/job and first error.
+
+## Round079 Agent11 original DM-core NOWAIT/REQUEUE source-compiled admission prerequisite
+
+A proposed target-local upper BIO queue budget MUST first verify the exact
+original DM-core clone owner transfer across DM_MAPIO_SUBMITTED/REQUEUE/KILL,
+upstream dm_handle_requeue status handling, REQ_NOWAIT feature rejection and
+GFP_NOWAIT BLK_STS_AGAIN, PREFLUSH/suspend wouldblock and conditional REQ_SWAP
+semaphore pressure. The sole verified swapz target still advertises no
+DM_TARGET_NOWAIT; its fixed prepared pool and finite 64-BIO worker quantum
+are NOT a bound on unique accepted incoming clone debt. No leak, safe global
+inflight maximum, forward progress, or physical once-only ACK is implied.
+Source-linked host qualification must hash-check complete pinned original
+drivers/md/dm.c and include/linux/device-mapper.h Git blobs plus unchanged
+product dm-target.c, compile true extracted source C (not only regex), run
+GCC and Clang C23/C2x -Werror ASan/UBSan, and independently compile AND
+execute every semantic mutant with its actual directed C assertion as kill.
+Compiler rejection, sanitizer crash or static text check never counts as a
+semantic kill. Original kernel native, loaded DM and lower FUA remain NOT_RUN
+unless independently performed. No target cap/requeue/NOWAIT opt-in until
+actual original DM-core retry/fairness/deadlock and token-release semantics
+are proven. This append leaves all prior standards literally unchanged,
+ends with one final newline, and accompanies the exact source/test commit.
+Linux MM/zswap alone manages natural compressed-memory eviction; swapz owns
+disk packing/GC only, with no second reclaim or recompression. Any original
+compressed LZO1X/raw-LZ4 needs a separate source lease, original volatile
+codec identity, retained decoder and bounded immutable preerase copy;
+ordinary RAW_4096 is always the complete original UNCOMPRESSED 4096 bytes.
+SOURCE_MAPPED_AUTHENTICATED=0, PHASE_A=BLOCKED, all activation gates OFF.
