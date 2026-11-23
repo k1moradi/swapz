@@ -1,0 +1,23 @@
+# Round075 Agent11 — true compiled/executed duplicate-owned-ticket mutant repair
+
+**Opening:** [issue #192 ROUND_OPEN](https://github.com/k1moradi/swapz/issues/192#issuecomment-7097150243); task publication `60b8e074a0e03faefe4ab79e3ae7cceac5b5a465`, task parent/engineering baseline `5824dd4ca939eaf7cbda95af2e11db8bfa2f1ab0`. Original Linux source pin `torvalds/linux@c339f4010dea8b0d754f84ace70cd1b089878ef8` remains untouched. This source/test change is a sole-main, one-parent fast-forward; its immutable source SHA will be reported on #192 after GitHub accepts the commit. No PR, branch, privileged/physical/loaded swap or memory-pressure activity.
+
+## Root cause and exact old result
+
+[Round073 code `fb525a6ca152a0b349818e8aac91ecee5fe096eb`](https://github.com/k1moradi/swapz/commit/fb525a6ca152a0b349818e8aac91ecee5fe096eb), [source run45134249198](https://github.com/k1moradi/swapz/actions/runs/45134249198), [job137556602510](https://github.com/k1moradi/swapz/actions/runs/45134249198/job/137556602510): **COMPLETED FAILURE**. GCC baseline and mutants 00–05 reached successful semantic execution; mutant index06 failed to compile and was **not executed**, so GCC 17/17 and all Clang mutants are **NOT QUALIFIED**. CI truncated first diagnostic to function `admit`; local isolated strict GCC 14.2 reproduction of the identical original expression identifies `[-Werror=parentheses]`, because `false && queue_contains(... ) || ...` was not parenthesized. This is a host test harness defect, not proven DM product defect.
+
+## Narrow source/test changes
+
+- `tests/tools/round073-real-dm-backpressure-verify.py`: change only mutant06's first operand to `(false && queue_contains(...))`, preserving the second, already-completed-ticket condition. Count an individually built and **executed** mutant only when its program returns exactly 1 with `FIRST_ERROR line=... invariant=...`, and demand the duplicate-ticket model assertion for mutant06. Report the first compiler `error:` line rather than only the enclosing function.
+- `tests/runtime/native/fixtures/round073-real-dm-backpressure.c`: test duplicate still-pending ownership across a different generation, four lower-busy retries without unfair early completion, resumed FIFO service of foreground WRITEs and READs, closed admission while an owned item drains with `-ECANCELED` exactly once and first `-EIO` preserved. Preallocated 16-slot/32768-byte host ring remains a **model-only bound**.
+- `tests/tools/round075-dm-fairness-mutant-compiler-verify.py`: independent GCC/Clang strict sanitizer compile+execute check for corrected mutant06 with a specific `invariant=admit(&model, &event) == -EALREADY` failure; deny compile-fail/sanitizer-abort as a semantic kill.
+- `.github/workflows/phase-a-round073-real-dm-backpressure-noauth.yml`: execute the same-source full 17-mutant suite **and** independent mutant06 regression; no new native workflow or original Linux KUnit.
+- Same-source `docs/testing_standards.md` appendix maintains the complete previous text prefix and no extra blank EOF line.
+
+## Testing status and fidelity
+
+Local scoped compiler repro: GCC 14.2 and Clang 17 C23 `-Wall -Wextra -Wconversion -Wshadow -Werror -pedantic -fsanitize=address,undefined` compile and execute the **isolated corrected boolean expression**. This is **NOT** a full repository source-host verification. Genuine exact-source GitHub CI **PENDING** at initial publication: full GCC 17/17 and Clang 17/17 counts are **unverified until the new run actually executes**. Original Linux UML/KUnit/KTAP: **NOT_RUN**. Old Round073 historical results corrected without changing their terminal FAILURE.
+
+The real current `src/kernel/dm-target.c` worker has a finite 64-BIO pass but no proven hard `incoming` BIO list admission-depth cap. The fixture compiles real authority/window predicates, audits read-only DM source anchors, and models externally supplied natural eviction only: no actual original Linux zswap/DM handshake, memory pressure, physical lower FUA, upper BIO endio or disk GC proof. Separately authorized measured production opt-in would be required to change DM backpressure; not this task.
+
+**Safety:** `SOURCE_MAPPED_AUTHENTICATED=0`, `PHASE_A=BLOCKED`, direct compressed handoff OFF, forced RAW bypass OFF, import ACTIVE0. Linux MM/zswap alone controls natural compressed-RAM eviction; swapz owns only disk packing and GC, no secondary pressure/shrinker/recompression. Original compressed LZO1X/raw LZ4 keeps distinct volatile original-codec identity; ordinary `RAW_4096` is all **4096 original UNCOMPRESSED page bytes**. SWAPSPACE2 physical header and 20-byte RAM mapping remain untouched.

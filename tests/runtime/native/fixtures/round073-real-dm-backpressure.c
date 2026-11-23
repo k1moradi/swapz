@@ -216,6 +216,12 @@ static int run_directed_tests(void)
     event.bytes = 100U;
     REQUIRE(admit(&model, &event) == 0);
     REQUIRE(admit(&model, &event) == -EALREADY);
+    /* A newer incarnation must not displace an already-owned queue slot. */
+    event.generation = 8U;
+    event.observed_generation = 8U;
+    REQUIRE(admit(&model, &event) == -EALREADY);
+    event.generation = 7U;
+    event.observed_generation = 7U;
     const uint8_t last_copied_byte = event.payload[event.bytes - 1U];
     event.payload[event.bytes - 1U] ^= 0x5aU;
     REQUIRE(model.pending[model.head].payload[event.bytes - 1U] ==
@@ -273,8 +279,10 @@ static int run_directed_tests(void)
     REQUIRE(model.peak_slots == 12U);
     REQUIRE(model.owned_bytes <= PENDING_LIMIT);
     model.lower_busy = true;
-    REQUIRE(service_next(&model, 0) == -EBUSY);
+    for (uint32_t busy_attempt = 0; busy_attempt < 4U; ++busy_attempt)
+        REQUIRE(service_next(&model, 0) == -EBUSY);
     REQUIRE(model.completions_count == 0U);
+    REQUIRE(model.count == 12U);
     model.lower_busy = false;
     uint32_t previous_completed = 0;
     for (uint32_t index = 0; index < 12U; ++index) {
@@ -292,10 +300,19 @@ static int run_directed_tests(void)
     REQUIRE(model.count == 0U && model.owned_bytes == 0U);
     REQUIRE(model.secondary_pressure_calls == 0U);
     REQUIRE(model.recompression_calls == 0U);
+    /* Admission closes before existing owned work drains. Cancellation
+     * propagates exactly once, without replacing the earlier first error. */
+    event = make_event(199U, FOREGROUND_WRITE, SWAPZ_BLOCK_BYTES, 0U);
+    REQUIRE(admit(&model, &event) == 0);
     model.closed = true;
     event = make_event(200U, ORIGINAL_COMPRESSED, 300U,
                        SWAPZ_ZSWAP_IMPORT_LZ4_CODEC);
     REQUIRE(admit(&model, &event) == -ESHUTDOWN);
+    REQUIRE(service_next(&model, -ECANCELED) == -ECANCELED);
+    REQUIRE(model.completions[199U].count == 1U);
+    REQUIRE(model.completions[199U].status == -ECANCELED);
+    REQUIRE(model.first_error == -EIO);
+    REQUIRE(model.count == 0U && model.owned_bytes == 0U);
     return 0;
 }
 

@@ -5,6 +5,7 @@ on:
     paths:
       - 'tests/runtime/native/fixtures/round073-real-dm-backpressure.c'
       - 'tests/tools/round073-real-dm-backpressure-verify.py'
+      - 'tests/tools/round075-dm-fairness-mutant-compiler-verify.py'
       - 'src/kernel/dm-target.c'
       - 'src/kernel/authority.h'
       - 'src/kernel/window-policy.h'
@@ -41,6 +42,12 @@ jobs:
           python3 -B tests/tools/round073-real-dm-backpressure-verify.py \
             --json round073-evidence/agent11-host.json \
             --ktap round073-evidence/agent11-host.ktap
+      - name: Regress mutant06 independent warning-clean C23 semantic rejection
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 -B tests/tools/round075-dm-fairness-mutant-compiler-verify.py \
+            --json round073-evidence/agent11-mutant06-regression.json
       - name: Source repo branch and standards policy guard
         shell: bash
         run: |

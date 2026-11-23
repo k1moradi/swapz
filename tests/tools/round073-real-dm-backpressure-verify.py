@@ -39,7 +39,7 @@ MUTANTS = (
     ("raw-must-be-4096", "} else if (source->bytes != SWAPZ_BLOCK_BYTES || source->codec != 0U) {",
      "} else if (source->bytes > SWAPZ_BLOCK_BYTES || source->codec != 0U) {"),
     ("duplicate-owned-ticket", "if (queue_contains(queue, source->slot) ||",
-     "if (false && queue_contains(queue, source->slot) ||"),
+     "if ((false && queue_contains(queue, source->slot)) ||"),
     ("slot-ceiling", "if (queue->count == QUEUE_SLOTS)", "if (false)"),
     ("byte-ceiling", "if (source->bytes > PENDING_LIMIT - queue->owned_bytes)",
      "if (false)"),
@@ -77,7 +77,10 @@ def run(command: list[str], *, stdin: str | None = None) -> subprocess.Completed
 
 
 def first_error(result: subprocess.CompletedProcess[str]) -> str:
-    return (result.stderr or result.stdout or "no compiler/fixture diagnostic").splitlines()[0][:300]
+    """Report the first actual compiler error, not merely its enclosing function."""
+    lines = (result.stderr or result.stdout or "no compiler/fixture diagnostic").splitlines()
+    return next((line.strip()[:300] for line in lines if "error:" in line),
+                lines[0][:300])
 
 
 def verify_real_sources() -> tuple[str, dict[str, str]]:
@@ -171,9 +174,19 @@ def evaluate() -> dict[str, object]:
                     compiler, standard, source,
                     scratch / f"mutant-{compiler_name}-{index:02d}",
                     scratch)
-                require(result.returncode != 0 and "FIRST_ERROR" in result.stderr,
-                        f"{compiler_name} mutant {name} survived: "
-                        f"{first_error(result)}")
+                # Only a successfully built and EXECUTED C program returning
+                # its own directed FIRST_ERROR kills a semantic mutant.
+                # A compiler diagnostic or sanitizer abort is a suite failure.
+                require(result.returncode == 1 and
+                        result.stderr.startswith("FIRST_ERROR line=") and
+                        " invariant=" in result.stderr,
+                        f"{compiler_name} mutant {name} did not fail a directed "
+                        f"model invariant: {first_error(result)}")
+                if name == "duplicate-owned-ticket":
+                    require("invariant=admit(&model, &event) == -EALREADY" in
+                            result.stderr,
+                            f"{compiler_name}: duplicate-ticket guard did not "
+                            f"detect mutant 06: {first_error(result)}")
                 killed.append(name)
             results[compiler_name] = {
                 "standard": standard, "baseline": "PASS",

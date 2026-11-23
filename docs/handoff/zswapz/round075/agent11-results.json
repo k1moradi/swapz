@@ -1,0 +1,75 @@
+{
+  "round": "075",
+  "agent": 11,
+  "message": "PROGRESS",
+  "task_commit": "60b8e074a0e03faefe4ab79e3ae7cceac5b5a465",
+  "task_parent": "5824dd4ca939eaf7cbda95af2e11db8bfa2f1ab0",
+  "engineering_baseline": "5824dd4ca939eaf7cbda95af2e11db8bfa2f1ab0",
+  "original_kernel_pin": "torvalds/linux@c339f4010dea8b0d754f84ace70cd1b089878ef8",
+  "tested_source_commit": null,
+  "tested_source_parent": null,
+  "source_run_id": null,
+  "source_job_id": null,
+  "source_ci_status": "PENDING_NEW_EXACT_SOURCE",
+  "fixed_mutant": "duplicate-owned-ticket",
+  "fixed_mutant_index": 6,
+  "old_round073": {
+    "exact_tested_sha": "fb525a6ca152a0b349818e8aac91ecee5fe096eb",
+    "run_id": 45134249198,
+    "job_id": 137556602510,
+    "status": "COMPLETED_FAILURE",
+    "first_error": "GCC mutant-gcc-06 compile error in admit; local isolated reproduction -Werror=parentheses",
+    "gcc": {
+      "baseline": "PASS_HOST_MODEL_ONLY",
+      "mutants_compiled": 6,
+      "mutants_executed": 6,
+      "mutants_rejected": 6,
+      "mutant06_compiled": false,
+      "mutant06_executed": false
+    },
+    "clang": {
+      "status": "NOT_RUN",
+      "mutants_compiled": 0,
+      "mutants_executed": 0
+    },
+    "original_linux_native": "NOT_RUN"
+  },
+  "local_isolated_repro": {
+    "gcc_version": "14.2.0",
+    "clang_version": "17.0.0",
+    "c23_asan_ubsan": "CORRECTED_EXPRESSION_COMPILES_AND_EXECUTES",
+    "not_full_source": true
+  },
+  "new_source_host_ci": {
+    "gcc": {
+      "baseline": "PENDING",
+      "mutants_compiled": 0,
+      "mutants_executed": 0,
+      "expected_mutants": 17
+    },
+    "clang": {
+      "baseline": "PENDING",
+      "mutants_compiled": 0,
+      "mutants_executed": 0,
+      "expected_mutants": 17
+    },
+    "standalone_mutant06_regression": "PENDING",
+    "origin": "genuine DM read-only anchors plus actual production headers compiled; host scheduler model"
+  },
+  "actual_original_linux_native": "NOT_RUN",
+  "actual_physical_io": false,
+  "actual_memory_pressure": false,
+  "first_new_source_error": null,
+  "source_mapped_authenticated": 0,
+  "phase_a": "BLOCKED",
+  "direct_compressed_handoff": "DISABLED",
+  "forced_raw_bypass": "DISABLED",
+  "import_active": 0,
+  "original_compressed_codec_separate": true,
+  "raw_4096": "complete original UNCOMPRESSED 4096 bytes",
+  "no_swapz_secondary_pressure": true,
+  "no_swapz_recompression": true,
+  "known_production_gap": "unbounded current DM incoming list lacks proven total depth cap; model capacity is not product capacity",
+  "no_pr_no_branch_no_force": true,
+  "no_periodic_ci_check": true
+}

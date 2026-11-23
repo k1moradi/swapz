@@ -19395,3 +19395,32 @@ must compile **and execute** under independently strict GCC and Clang C23/C2x
 CI, never count as semantic kills. A Python scope-only regression is additional
 evidence, not a substitute for executed source C. No physical, privileged,
 loaded-kernel or activation claim follows from this qualification.
+
+## Round075 Agent11 compiler-valid DM mutant06 source-host requirement
+
+The corrected Round073 DM fairness checker must preserve the true source-
+anchored `src/kernel/dm-target.c` 64-BIO quantum/FIFO audit and compile
+unaltered `authority.h` and `window-policy.h` policy predicates. It may
+mutate only its separately owned HOST fixture and must not infer that
+production has a bounded `incoming` BIO list from a synthetic 16-slot/
+32768-byte ring. For each of GCC and Clang under strict C23/C2x `-Werror`,
+ASan+UBSan, every one of the 17 semantic C mutants must compile without
+warning and execute as its own program before any mutation is counted as
+rejected. A source-generation, duplicate-slot, previous-ACK, byte-capacity,
+slot-capacity, FIFO/read/write, lower-busy, teardown or cancellation mutant
+is killed only by a specifically exercised directed-model `FIRST_ERROR`
+assertion; a compiler failure, warning, sanitizer abort or Python-only text
+check is never a mutant kill. The historical invalid mixed-boolean mutant06
+must use explicit parentheses and separately prove the duplicate-ticket
+semantic refusal on both compilers. CI failures should report the first
+actual compiler `error:` line, not solely the enclosing function heading.
+All local/CI HOST results are strictly models and must not claim original
+Linux KUnit, current-product loaded DM behavior, physical lower IO or live
+natural memory pressure. Old failed CI run IDs stay FAILED. The corrected
+run must have a new exact-source SHA and be reported with real per-compiler
+compiled/executed counts in the same round's GitHub evidence, with a separate
+terminal evidence-only update after the source run completes. Original Linux
+MM/zswap alone owns natural evictions and original volatile LZO1X/raw LZ4
+compressed identity; swapz owns disk packing/GC only, without secondary
+reclaim or recompression. `RAW_4096` remains the full 4096-byte original
+uncompressed page, all activation gates OFF and Phase A BLOCKED.

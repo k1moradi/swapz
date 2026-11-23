@@ -1,33 +1,39 @@
 {
   "round": "073",
   "agent": 11,
-  "message": "PROGRESS",
+  "message": "BLOCKED",
   "assigned_task_commit": "5f4d74f1ea538187e37fa0cdec2babb49186c59d",
   "engineering_baseline": "7c1ae38d41afb083345b1d7ec67b2d92d48b843a",
   "original_linux_pin": "torvalds/linux@c339f4010dea8b0d754f84ace70cd1b089878ef8",
-  "implementation_commit": null,
-  "implementation_parent": null,
-  "ci_run_id": null,
-  "ci_job_id": null,
-  "ci_status": "PENDING",
-  "qualification": "PENDING_SOURCE_HOST_CI",
+  "implementation_commit": "fb525a6ca152a0b349818e8aac91ecee5fe096eb",
+  "implementation_parent": "5f4d74f1ea538187e37fa0cdec2babb49186c59d",
+  "ci_run_id": 45134249198,
+  "ci_job_id": 137556602510,
+  "ci_status": "COMPLETED_FAILURE",
+  "qualification": "FAIL_MUTANT_06_COMPILER_INVALID",
   "actual_original_linux_native": "NOT_RUN",
   "source_anchor": {
     "dm_target_blob": "f1cab252cd990190646c82da81378d1563475826",
     "authority_blob": "3bb5bab5a5bdb2aa087f5793fc8b5e90d6636031"
   },
   "compiler_gcc": {
-    "status": "PENDING",
-    "mutants_compiled": 0,
-    "mutants_executed": 0
+    "status": "FAILED_COMPILE_MUTANT_06",
+    "baseline": "PASS_HOST_MODEL_ONLY",
+    "mutants_compiled": 6,
+    "mutants_executed": 6,
+    "mutants_rejected": 6,
+    "failed_mutant_index": 6,
+    "failed_mutant_name": "duplicate-owned-ticket",
+    "failed_mutant_executed": false
   },
   "compiler_clang": {
-    "status": "PENDING",
+    "status": "NOT_RUN",
     "mutants_compiled": 0,
-    "mutants_executed": 0
+    "mutants_executed": 0,
+    "mutants_rejected": 0
   },
   "model_expected_mutants_per_compiler": 17,
-  "first_error": null,
+  "first_error": "CI: /usr/bin/gcc compile mutant-gcc-06.c: ... In function 'admit'; isolated GCC reproduction: -Werror=parentheses at unparenthesized && within ||",
   "scope": "read-only genuine DM source audit + compiled genuine headers + modeled scheduling, no original Linux runtime",
   "known_gap": "No explicit production incoming BIO depth bound or authenticated original compressed handoff; no production fairness/eviction proof",
   "safety": {
@@ -45,5 +51,9 @@
     "branch": "main",
     "force": false,
     "additional_parents": 0
-  }
+  },
+  "ci_url": "https://github.com/k1moradi/swapz/actions/runs/45134249198",
+  "ci_job_url": "https://github.com/k1moradi/swapz/actions/runs/45134249198/job/137556602510",
+  "historical_result_only": true,
+  "separate_fix_issue": "https://github.com/k1moradi/swapz/issues/192"
 }
