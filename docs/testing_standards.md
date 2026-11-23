@@ -19196,3 +19196,35 @@ earliest source/gate/compile/mutant failure with a bounded diagnostic. Capture
 source-anchored SHA-256, per-compiler executed negative counts and separate
 original-native NOT_RUN in the round's committed evidence rather than treating
 a queued CI run as passing.
+
+
+## Round073 Agent9 — source-compiled protected SWAPSPACE2 geometry rule (2026-11-22)
+
+A SWAPSPACE2 geometry regression must compile the *current read-only*
+authority.h and superblock.h C rather than retype their capacity predicates.
+Source-anchored DM address checks must execute the unchanged extracted
+swapz_backing_range_valid() and swapz_backing_data_sector() implementations.
+For both strict C23/C2x GCC and Clang with -Werror, ASan and UBSan, execute a
+passing unmutated fixture and at least ten separately compiled *and executed*
+C semantic mutants. A compilation error, regex match, sanitizer abort or
+unexecuted case never counts as a killed semantic mutant. Record first actual
+failure and source file SHA256 in the same immutable CI run.
+
+Always reject impossible logical/physical dimensions before a modeled lower
+write. Protect exactly the first 4096 bytes, the Linux swap signature/UUID
+and any partition-table sentinel; verify all 4/8/16KiB modeled payload-only
+extents have deterministic zero padding. Enforce ceil(logical_pages/8)
+rotating GC reserve (minimum two complete 256-block segments) separately
+from the 256-block uncompressed foreground COW headroom, and test U32/U64
+and sector multiplication/translation boundaries, bad-page segment skipping
+and invalid Linux v1 headers. Preserve the real 20-byte volatile swapz_map;
+never install persistent descriptors or use synthetic/null_blk headers as
+authorization for actual physical media.
+
+Such rootless host tests prove only the compiled source helpers and explicit
+RAM backing model, not a real partition, kernel loaded path, selected real
+lower write or current-source ownership. SOURCE_MAPPED_AUTHENTICATED stays 0,
+PHASE_A stays BLOCKED and no direct compressed-handoff/forced RAW activation
+gate may be inferred from successful host geometry tests. Conventional
+RAW_4096 is the complete original uncompressed page; MM/zswap owns natural
+compressed-RAM eviction and swapz remains disk-packing/GC only.

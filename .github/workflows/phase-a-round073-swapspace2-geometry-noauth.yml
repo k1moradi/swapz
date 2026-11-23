@@ -1,0 +1,33 @@
+name: Round073 Agent9 SWAPSPACE2 geometry and protected header NO_AUTH
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/phase-a-round073-swapspace2-geometry-noauth.yml'
+      - 'tests/runtime/native/fixtures/round073-swapspace2-geometry.c'
+      - 'tests/tools/round073-swapspace2-geometry-verify.py'
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  source-linked-rootless-geometry:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Exact source, strict GCC/Clang C23 ASan UBSan and executed semantic mutants
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          test "$GITHUB_REF" = refs/heads/main
+          test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
+          test -z "$(git status --porcelain)"
+          git diff --check HEAD^ HEAD
+          python3 -B tests/tools/round073-swapspace2-geometry-verify.py
+      - name: Enforce inherited canonical testing-standards prefix
+        env:
+          SWAPZ_PUSH_BEFORE_SHA: ${{ github.event.before }}
+        run: python3 -B tests/runtime/native/repository-policy-test.py --enforce

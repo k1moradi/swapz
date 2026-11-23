@@ -1,0 +1,37 @@
+{
+  "round": "073",
+  "agent": 9,
+  "scope": "source-compiled-rootless-SWAPSPACE2-geometry",
+  "task_publication_commit": "5f4d74f1ea538187e37fa0cdec2babb49186c59d",
+  "tested_commit": null,
+  "tested_parent": null,
+  "original_linux_pin": "c339f4010dea8b0d754f84ace70cd1b089878ef8",
+  "original_native": "NOT_APPLICABLE_HOST_ONLY",
+  "workflow_url": null,
+  "run_id": null,
+  "jobs": [],
+  "compilers": {
+    "gcc": {
+      "status": "PENDING",
+      "mutants_executed": 0
+    },
+    "clang": {
+      "status": "PENDING",
+      "mutants_executed": 0
+    }
+  },
+  "planned_mutants_per_compiler": 15,
+  "conclusion": "IN_PROGRESS",
+  "first_error": null,
+  "source_mapped_authenticated": false,
+  "phase_a": "BLOCKED",
+  "direct_compressed_handoff": "DISABLED",
+  "forced_raw_bypass": "DISABLED",
+  "import_active": 0,
+  "actual_physical_io": false,
+  "real_swap_device": false,
+  "owner_make_test": false,
+  "conventional_raw_4096": "ORIGINAL_FULL_UNCOMPRESSED_PAGE",
+  "memory_pressure_owner": "Linux MM/zswap natural eviction only",
+  "disk_owner": "swapz packing/GC only"
+}
