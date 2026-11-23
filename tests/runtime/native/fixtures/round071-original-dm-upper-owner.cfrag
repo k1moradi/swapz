@@ -1,0 +1,165 @@
+/* ROUND071_ORIGINAL_DM_UPPER_OWNER_BEGIN
+ * Test-only input qualification. Pinned original DM's selected target and
+ * original BIO must be matched; a fake target cannot authenticate zswap.
+ * No production map/handoff hook, source authentication, or upper ACK is added.
+ */
+#if defined(SWAPZ_ROUND071_ORIGINAL_DM_UPPER_OWNER_TEST) && \
+    defined(SWAPZ_ROUND067_ORIGINAL_DM_RUNTIME_TEST) && IS_ENABLED(CONFIG_KUNIT)
+#include <kunit/test.h>
+
+/* ROUND071_OWNER_COMMON_BEGIN */
+#define SWAPZ_ROUND071_SOURCE_AUTH_ACTIVE 0
+
+enum swapz_round071_owner_phase {
+	SWAPZ_ROUND071_UNSEEN,
+	SWAPZ_ROUND071_OWNED,
+	SWAPZ_ROUND071_REQUEUED,
+	SWAPZ_ROUND071_TERMINAL,
+};
+
+struct swapz_round071_owner {
+	const void *original_bio;
+	const void *selected_target;
+	const void *selected_table;
+	unsigned long long generation;
+	enum swapz_round071_owner_phase phase;
+	unsigned int upper_endio_attempts;
+	int final_error;
+};
+
+/* This tests identity discipline only. The selected source remains untrusted. */
+static bool swapz_round071_same_current_owner(
+		const struct swapz_round071_owner *owner,
+		const void *original_bio, const void *target,
+		const void *table, unsigned long long generation)
+{
+	return owner && owner->original_bio && owner->selected_target &&
+	       owner->selected_table && generation != 0 &&
+	       owner->original_bio == original_bio &&
+	       owner->selected_target == target &&
+	       owner->selected_table == table &&
+	       owner->generation == generation;
+}
+
+static bool swapz_round071_claim(struct swapz_round071_owner *owner,
+		const void *original_bio, const void *target,
+		const void *table, unsigned long long generation)
+{
+	if (!swapz_round071_same_current_owner(owner, original_bio, target,
+						 table, generation) ||
+	    (owner->phase != SWAPZ_ROUND071_UNSEEN &&
+	     owner->phase != SWAPZ_ROUND071_REQUEUED))
+		return false;
+	owner->phase = SWAPZ_ROUND071_OWNED;
+	return true;
+}
+
+static bool swapz_round071_requeue(struct swapz_round071_owner *owner,
+		const void *original_bio, const void *target,
+		const void *table, unsigned long long generation)
+{
+	if (!swapz_round071_same_current_owner(owner, original_bio, target,
+						 table, generation) ||
+	    owner->phase != SWAPZ_ROUND071_OWNED)
+		return false;
+	owner->phase = SWAPZ_ROUND071_REQUEUED;
+	return true;
+}
+
+/* A failure is a terminal upper error. Success requires durable lower I/O.
+ * A duplicate/late callback cannot request a second bio_endio().
+ */
+static bool swapz_round071_terminal(struct swapz_round071_owner *owner,
+		const void *original_bio, const void *target,
+		const void *table, unsigned long long generation,
+		bool durable, int error)
+{
+	if (!swapz_round071_same_current_owner(owner, original_bio, target,
+						 table, generation) ||
+	    owner->phase != SWAPZ_ROUND071_OWNED || (!durable && !error))
+		return false;
+	owner->phase = SWAPZ_ROUND071_TERMINAL;
+	owner->final_error = error;
+	owner->upper_endio_attempts++;
+	return true;
+}
+
+/* A destructor must not silently publish success for an owned BIO. */
+static bool swapz_round071_dtr_fail(struct swapz_round071_owner *owner,
+		const void *original_bio, const void *target,
+		const void *table, unsigned long long generation)
+{
+	return swapz_round071_terminal(owner, original_bio, target, table,
+						generation, false, -5);
+}
+
+/* Immutable refusal: no source-to-current-DM authentication exists. */
+static bool swapz_round071_authenticated_handoff(void)
+{
+	return SWAPZ_ROUND071_SOURCE_AUTH_ACTIVE != 0;
+}
+/* ROUND071_OWNER_COMMON_END */
+
+static struct swapz_round071_owner swapz_round071_new_owner(
+		const void *bio, const void *target, const void *table)
+{
+	struct swapz_round071_owner owner = {
+		.original_bio = bio, .selected_target = target,
+		.selected_table = table, .generation = 7,
+	};
+	return owner;
+}
+
+/* Genuine original kernel BIO/DM types; no loaded mapper or zswap authority. */
+static void swapz_round071_native_upper_once_kunit(struct kunit *test)
+{
+	struct bio original = {}, clone = {};
+	struct dm_target selected = {}, replaced = {};
+	struct dm_table table = {};
+	struct swapz_round071_owner owner =
+		swapz_round071_new_owner(&original, &selected, &table);
+
+	KUNIT_EXPECT_FALSE(test, swapz_round071_authenticated_handoff());
+	KUNIT_EXPECT_FALSE(test, swapz_round071_claim(&owner, &clone, &selected, &table, 7));
+	KUNIT_EXPECT_FALSE(test, swapz_round071_claim(&owner, &original, &replaced, &table, 7));
+	KUNIT_EXPECT_FALSE(test, swapz_round071_claim(&owner, &original, &selected, &table, 8));
+	KUNIT_ASSERT_TRUE(test, swapz_round071_claim(&owner, &original, &selected, &table, 7));
+	KUNIT_EXPECT_FALSE(test, swapz_round071_terminal(&owner, &original, &selected, &table, 7, false, 0));
+	KUNIT_ASSERT_TRUE(test, swapz_round071_terminal(&owner, &original, &selected, &table, 7, true, 0));
+	KUNIT_EXPECT_FALSE(test, swapz_round071_terminal(&owner, &original, &selected, &table, 7, true, -5));
+	KUNIT_EXPECT_FALSE(test, swapz_round071_requeue(&owner, &original, &selected, &table, 7));
+	KUNIT_EXPECT_EQ(test, owner.upper_endio_attempts, 1U);
+	KUNIT_EXPECT_EQ(test, owner.final_error, 0);
+}
+
+static void swapz_round071_native_requeue_dtr_kunit(struct kunit *test)
+{
+	struct bio original = {};
+	struct dm_target selected = {};
+	struct dm_table table = {};
+	struct swapz_round071_owner owner =
+		swapz_round071_new_owner(&original, &selected, &table);
+
+	KUNIT_ASSERT_TRUE(test, swapz_round071_claim(&owner, &original, &selected, &table, 7));
+	KUNIT_ASSERT_TRUE(test, swapz_round071_requeue(&owner, &original, &selected, &table, 7));
+	KUNIT_EXPECT_FALSE(test, swapz_round071_terminal(&owner, &original, &selected, &table, 7, true, 0));
+	KUNIT_EXPECT_FALSE(test, swapz_round071_claim(&owner, &original, &selected, &table, 8));
+	KUNIT_ASSERT_TRUE(test, swapz_round071_claim(&owner, &original, &selected, &table, 7));
+	KUNIT_ASSERT_TRUE(test, swapz_round071_dtr_fail(&owner, &original, &selected, &table, 7));
+	KUNIT_EXPECT_FALSE(test, swapz_round071_dtr_fail(&owner, &original, &selected, &table, 7));
+	KUNIT_EXPECT_EQ(test, owner.final_error, -5);
+	KUNIT_EXPECT_EQ(test, owner.upper_endio_attempts, 1U);
+}
+
+static struct kunit_case swapz_round071_native_upper_cases[] = {
+	KUNIT_CASE(swapz_round071_native_upper_once_kunit),
+	KUNIT_CASE(swapz_round071_native_requeue_dtr_kunit),
+	{}
+};
+static struct kunit_suite swapz_round071_native_upper_suite = {
+	.name = "swapz_round071_native_dm_upper_noauth",
+	.test_cases = swapz_round071_native_upper_cases,
+};
+kunit_test_suite(swapz_round071_native_upper_suite);
+#endif /* source-untrusted native DM owner negative only */
+/* ROUND071_ORIGINAL_DM_UPPER_OWNER_END */
