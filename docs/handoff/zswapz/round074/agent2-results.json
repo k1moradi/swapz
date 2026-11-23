@@ -1,8 +1,8 @@
 {
   "round": "074",
   "agent": 2,
-  "status": "IN_PROGRESS",
-  "conclusion": "PENDING_EXACT_SOURCE_CI",
+  "status": "BLOCKED",
+  "conclusion": "FAILURE_EXACT_SOURCE_HOST_BEFORE_NATIVE",
   "task_commit": "d62552f7048d5a512c7a0a79b86558fa228b31f2",
   "task_single_parent": "48f2e9ce1e06a0d32f0a40b777e9347d91b80741",
   "tested_source_commit": "92a0a3273e1daea76e766f0d29dae05ce8b29e79",
@@ -42,20 +42,20 @@
     "id": 45144645175,
     "url": "https://github.com/k1moradi/swapz/actions/runs/45144645175",
     "head_sha": "92a0a3273e1daea76e766f0d29dae05ce8b29e79",
-    "status": "queued",
-    "conclusion": null,
+    "status": "completed",
+    "conclusion": "failure",
     "jobs": [
       {
         "id": 137590793528,
         "name": "source-host",
-        "status": "queued",
-        "conclusion": null
+        "status": "completed",
+        "conclusion": "failure"
       },
       {
-        "id": null,
+        "id": 137628116726,
         "name": "original-uml-native",
-        "status": "not_allocated",
-        "conclusion": null
+        "status": "completed",
+        "conclusion": "skipped"
       }
     ]
   },
@@ -63,25 +63,26 @@
     "old_compiled_executed_semantic_mutants_per_compiler": 18,
     "new_native_fixture_case_bodies_required": 3,
     "kernel_macro_compiler_negative_required": 1,
-    "gcc_exact": "NOT_RUN",
-    "clang_exact": "NOT_RUN"
+    "gcc_exact": "FAILED_REAL_NATIVE_FIXTURE_COMPILE_AFTER_INHERITED_MUTANTS_PASS",
+    "clang_exact": "NOT_REACHED"
   },
   "stage": {
     "negative_mutants_expected": 9,
     "actual": null
   },
   "native": {
-    "status": "NOT_RUN",
+    "status": "SKIPPED_DEPENDENT_HOST_FAILED",
     "expected": 3,
-    "actual": null,
-    "passed": null,
-    "failed": null,
-    "skipped": null,
+    "actual": 0,
+    "passed": 0,
+    "failed": 0,
+    "skipped": 0,
     "json": null,
     "ktap": null
   },
-  "first_current_error": null,
+  "first_current_error": "ROUND074_DM_NATIVE_PROTOTYPE_FIRST_ERROR gcc:real-fixture-compile: actual.c:187:33: error: implicit declaration of function 'swapz_round072_current_selected_dm_owner' [-Werror=implicit-function-declaration]",
   "remaining_blockers": [
+    "Round074 test-only verifier omitted Round072 selected predicate definition from translated real KUnit source; host job FAILED and original native job SKIPPED",
     "New original Linux native KUnit result pending",
     "No authenticated actual selected production DM target and original STORED source",
     "No physical lower FUA or actual upper bio_endio"
@@ -97,5 +98,6 @@
   "swapz_owner": "DISK_PACKING_GC_ONLY",
   "physical_io": false,
   "privileged_loaded_pressure_tests": false,
-  "periodic_checks_created": false
+  "periodic_checks_created": false,
+  "agent1_terminal_ci_audited": true
 }
