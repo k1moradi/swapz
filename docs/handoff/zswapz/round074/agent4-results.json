@@ -16,8 +16,8 @@
     "docs/testing_standards.md"
   ],
   "production_c_modified": false,
-  "status": "QUEUED",
-  "conclusion": "PENDING",
+  "status": "COMPLETED_SUCCESS_SOURCE_HOST_ONLY",
+  "conclusion": "SUCCESS",
   "workflow_run_id": 45145423813,
   "workflow_url": "https://github.com/k1moradi/swapz/actions/runs/45145423813",
   "jobs": [
@@ -25,8 +25,8 @@
       "name": "original-source-host",
       "job_id": 137593390545,
       "url": "https://github.com/k1moradi/swapz/actions/runs/45145423813/job/137593390545",
-      "status": "queued",
-      "conclusion": null
+      "status": "completed",
+      "conclusion": "success"
     }
   ],
   "local_source_c_host": {
@@ -45,11 +45,11 @@
     "model_only": true
   },
   "source_linked_ci": {
-    "status": "QUEUED",
-    "original_pinned_sha_verified": null,
+    "status": "SUCCESS",
+    "original_pinned_sha_verified": true,
     "original_staged_postimage_sha256": null,
-    "source_semantic_mutants_rejected": null,
-    "original_pin_blob_negatives_rejected": null,
+    "source_semantic_mutants_rejected": 9,
+    "original_pin_blob_negatives_rejected": 2,
     "expected_source_semantic_mutants": 9,
     "expected_pin_blob_mutants": 2
   },
@@ -92,5 +92,21 @@
   "loaded_kernel_tests": false,
   "pressure_tests": false,
   "new_periodic_monitor": false,
-  "branches_prs_force": false
+  "branches_prs_force": false,
+  "agent1_terminal_exact_source_audit": {
+    "audited_run": 45145423813,
+    "job_id": 137593390545,
+    "original_tested_sha": "14f8fe29280f0f77b1bf013aef8904913eaa869f",
+    "qualifier": "COMPLETED_SUCCESS_SOURCE_HOST_ONLY",
+    "first_error": null,
+    "counts": {
+      "compiler_baselines": 2,
+      "compiled_executed_C_mutants_total": 20,
+      "original_source_mutants_rejected": 9,
+      "original_pin_blob_negatives_rejected": 2
+    },
+    "scope": "HOST_ONLY_OR_CANCELED_NO_ORIGINAL_NATIVE",
+    "no_source_auth": true,
+    "no_physical_io": true
+  }
 }

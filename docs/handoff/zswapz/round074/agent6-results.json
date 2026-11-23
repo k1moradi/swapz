@@ -5,17 +5,17 @@
   "publication_parent": "39d8642878835868ebc3f7690b4adccc62c46fa7",
   "source_commit": "1868d599c6cf33823a36b93c962847cd6e36d475",
   "tested_commit": "1868d599c6cf33823a36b93c962847cd6e36d475",
-  "status": "QUEUED",
-  "conclusion": "PENDING",
-  "first_error": null,
+  "status": "COMPLETED_CANCELLED_BEFORE_COMPILER",
+  "conclusion": "CANCELLED",
+  "first_error": "The operation was canceled (during sudo apt-get dependency install); mutation test skipped",
   "run_id": 45145752021,
   "workflow_url": "https://github.com/k1moradi/swapz/actions/runs/45145752021",
   "jobs": [
     {
       "job_id": 137594490455,
       "name": "gcc-clang-asan-ubsan-original-lease-copy-model",
-      "status": "queued",
-      "conclusion": null,
+      "status": "completed",
+      "conclusion": "cancelled",
       "url": "https://github.com/k1moradi/swapz/actions/runs/45145752021/job/137594490455"
     }
   ],
@@ -37,8 +37,8 @@
     "max_owned_bytes": 28544,
     "first_error": null
   },
-  "exact_source_compiler_baselines": null,
-  "exact_source_compiled_executed_mutants": null,
+  "exact_source_compiler_baselines": 0,
+  "exact_source_compiled_executed_mutants": 0,
   "real_original_linux_native_kunit": "NOT_RUN",
   "native_json": "NOT_RUN",
   "native_ktap": "NOT_RUN",
@@ -63,5 +63,22 @@
     "fixture": "fea06aa1a16b47add55bcf9228e2c4a8c66d2f19",
     "verifier": "67c19013e0d8bfe24fb03283a3dc7a9ec237f1fa",
     "workflow": "191116df8163aad3aacaa07bdd712a85b98d6f64"
+  },
+  "github_job_phase": "CANCELLED_DURING_APT_INSTALL_BEFORE_C_COMPILATION",
+  "agent1_terminal_exact_source_audit": {
+    "audited_run": 45145752021,
+    "job_id": 137594490455,
+    "original_tested_sha": "1868d599c6cf33823a36b93c962847cd6e36d475",
+    "qualifier": "COMPLETED_CANCELLED_BEFORE_COMPILER",
+    "first_error": "The operation was canceled (during sudo apt-get dependency install); mutation test skipped",
+    "counts": {
+      "compiler_baselines": 0,
+      "compiled_executed_C_mutants_total": 0,
+      "first_error": "The operation was canceled (during sudo apt-get dependency install); mutation test skipped",
+      "cancelled_step": "Install unprivileged host-only C build dependencies"
+    },
+    "scope": "HOST_ONLY_OR_CANCELED_NO_ORIGINAL_NATIVE",
+    "no_source_auth": true,
+    "no_physical_io": true
   }
 }

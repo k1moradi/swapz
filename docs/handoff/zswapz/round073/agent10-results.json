@@ -1,8 +1,8 @@
 {
   "round": "073",
   "agent": 10,
-  "message": "PROGRESS",
-  "status": "QUEUED",
+  "message": "BLOCKED",
+  "status": "COMPLETED_FAILURE_ORIGINAL_UML_COMPILE_BEFORE_KUNIT",
   "kind": "original-Linux-pinned-read-side-KUnit",
   "task_publication_commit": "5f4d74f1ea538187e37fa0cdec2babb49186c59d",
   "tested_source_commit": "ecaf63cb7860879364a6e3943884bc30e578ca63",
@@ -12,22 +12,22 @@
   "workflow_name": "phase-a-round073-original-reader-pin-gc-noauth.yml",
   "workflow_run_id": 45134656124,
   "workflow_url": "https://github.com/k1moradi/swapz/actions/runs/45134656124",
-  "workflow_status": "queued",
-  "workflow_conclusion": null,
+  "workflow_status": "completed",
+  "workflow_conclusion": "failure",
   "jobs": [
     {
       "name": "original-reader-strict-source-host",
       "job_id": 137557932353,
-      "status": "queued",
-      "conclusion": null,
+      "status": "completed",
+      "conclusion": "success",
       "job_url": "https://github.com/k1moradi/swapz/actions/runs/45134656124/job/137557932353"
     },
     {
       "name": "original-linux-uml-reader-pin-gc-kunit",
-      "job_id": null,
-      "status": "WAITING_ON_SOURCE_HOST",
-      "conclusion": null,
-      "job_url": null
+      "job_id": 137610101851,
+      "status": "completed",
+      "conclusion": "failure",
+      "job_url": "https://github.com/k1moradi/swapz/actions/runs/45134656124/job/137610101851"
     }
   ],
   "source_host": {
@@ -47,30 +47,31 @@
     "expected_real_authority_mutants_per_compiler": 14,
     "expected_real_owner_lifetime_mutants_per_compiler": 2,
     "canonical_policy": "NOT_RUN",
-    "git_diff_check": "NOT_RUN"
+    "git_diff_check": "NOT_RUN",
+    "status": "SUCCESS_EXACT_SOURCE"
   },
   "original_native": {
-    "status": "NOT_RUN",
+    "status": "FAILED_COMPILE_BEFORE_KUNIT",
     "actual_original_linux_native_kunit": false,
-    "json_ktap": "NOT_RUN",
+    "json_ktap": "NOT_EXECUTED",
     "expected_cases": [
       "swapz_round073_original_lz4_old_reader_gc",
       "swapz_round073_original_lzo1x_old_reader_gc",
       "swapz_round073_original_stale_crc_sha_codec",
       "swapz_round073_original_decoder_retire_with_pin"
     ],
-    "executed_cases": null,
-    "passed": null,
-    "failed": null,
-    "skipped": null,
-    "crashed": null,
+    "executed_cases": 0,
+    "passed": 0,
+    "failed": 0,
+    "skipped": 0,
+    "crashed": 0,
     "test_created_source": true,
     "real_swapcache_authenticated": false,
     "original_bio_endio_compiled_executed": null,
     "real_kernel_decoder_compiled_executed": null
   },
-  "first_error": null,
-  "conclusion": "PENDING",
+  "first_error": "linux/mm/zswap.c:5307:25: error: implicit declaration of function ‘usleep_range’ [-Werror=implicit-function-declaration]",
+  "conclusion": "FAILURE",
   "source_mapped_authenticated": false,
   "phase_a": "BLOCKED",
   "direct_compressed_handoff": "DISABLED",
@@ -85,5 +86,22 @@
   "privileged_tests": false,
   "commits_only_main": true,
   "any_pr_or_branch_created": false,
-  "periodic_ci_checks_created": false
+  "periodic_ci_checks_created": false,
+  "pinned_original_stage_status": "PASS_POSTIMAGES_AND_NEGATIVES_BEFORE_NATIVE_COMPILER_FAILURE",
+  "agent1_terminal_exact_source_audit": {
+    "audited_run": 45134656124,
+    "job_id": 137610101851,
+    "original_tested_sha": "ecaf63cb7860879364a6e3943884bc30e578ca63",
+    "qualifier": "COMPLETED_FAILURE_ORIGINAL_UML_COMPILE_BEFORE_KUNIT",
+    "first_error": "linux/mm/zswap.c:5307:25: error: implicit declaration of function ‘usleep_range’ [-Werror=implicit-function-declaration]",
+    "counts": {
+      "source_host_job_id": 137557932353,
+      "source_host_conclusion": "success",
+      "original_KUnit_executed_cases": 0,
+      "first_error": "linux/mm/zswap.c:5307:25: error: implicit declaration of function ‘usleep_range’ [-Werror=implicit-function-declaration]"
+    },
+    "scope": "ORIGINAL_NATIVE_COMPILE_FAILED_ZERO_KUNIT",
+    "no_source_auth": true,
+    "no_physical_io": true
+  }
 }

@@ -11,3 +11,10 @@ Safety: SOURCE_MAPPED_AUTHENTICATED=0; PHASE_A=BLOCKED; direct compressed handof
 ## Exact-source Actions registration (preliminary)
 
 Tested source: https://github.com/k1moradi/swapz/commit/b88d570e8029d1657d0d3be8c8ff810fb281dacc (parent 14f8fe29280f0f77b1bf013aef8904913eaa869f). GitHub Actions run: https://github.com/k1moradi/swapz/actions/runs/45145526679; job: https://github.com/k1moradi/swapz/actions/runs/45145526679/job/137593734137. State QUEUED, conclusion null, first actual error none while queued. Compiler baseline, 34 semantic mutants, host KTAP/JSON NOT_EXECUTED; original native NOT_RUN. This report is not a substitute for terminal results.
+
+
+## Agent1 independently verified terminal exact-source CI (COMPLETED_SUCCESS_SOURCE_HOST_ONLY)
+
+This manager terminal audit **supersedes earlier QUEUED status only for this immutable tested SHA**, preserving original source commit `b88d570e8029d1657d0d3be8c8ff810fb281dacc` and previous reports. [Existing Actions run 45145526679](https://github.com/k1moradi/swapz/actions/runs/45145526679), [actual job 137593734137](https://github.com/k1moradi/swapz/actions/runs/45145526679/job/137593734137) is **COMPLETED SUCCESS**. GCC -std=c2x strict ASan/UBSan and Clang -std=c23 strict ASan/UBSan; 116 assertions per compiler and 17 independently compiled/executed C semantic mutants/compiler, 34 total. Actual unchanged product RAW_4096 path HOST_ONLY, full original UNCOMPRESSED 4096; no original KUnit, physical, real DM or source auth.
+
+**Scope:** host-source-linked model/fixture only, not authenticated original Linux swapcache STORED, original UML KUnit, physical durable FUA or production once-only upper bio_endio. Source AUTH0; Phase A BLOCKED; direct handoff, forced RAW and import OFF; ordinary RAW_4096 complete ORIGINAL UNCOMPRESSED 4096. No new periodic CI checks. No rerun of already successful unchanged source needed.

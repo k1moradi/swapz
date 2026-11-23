@@ -7,14 +7,14 @@
   "original_linux_pin": "c339f4010dea8b0d754f84ace70cd1b089878ef8",
   "tested_commit": "b88d570e8029d1657d0d3be8c8ff810fb281dacc",
   "tested_parent": "14f8fe29280f0f77b1bf013aef8904913eaa869f",
-  "status": "QUEUED",
+  "status": "COMPLETED_SUCCESS_SOURCE_HOST_ONLY",
   "run_id": 45145526679,
   "job_id": 137593734137,
-  "host_gcc": "NOT_EXECUTED_QUEUED",
-  "host_clang": "NOT_EXECUTED_QUEUED",
+  "host_gcc": "SUCCESS_116_ASSERTIONS_ASAN_UBSAN_17_MUTANTS",
+  "host_clang": "SUCCESS_116_ASSERTIONS_ASAN_UBSAN_17_MUTANTS",
   "mutants_planned": 34,
-  "mutants_compiled_executed": null,
-  "host_ktap": "NOT_EXECUTED_QUEUED",
+  "mutants_compiled_executed": 34,
+  "host_ktap": "NOT_APPLICABLE_HOST_NON_KTAP",
   "original_native_kunit_json_ktap": "NOT_RUN",
   "first_error": null,
   "product_source_modified": false,
@@ -30,15 +30,30 @@
   "ordinary_raw_4096": "FULL_ORIGINAL_UNCOMPRESSED_4096",
   "second_reclaimer": false,
   "recompression": false,
-  "ci_status": "QUEUED",
+  "ci_status": "SUCCESS",
   "workflow_run": 45145526679,
   "workflow_url": "https://github.com/k1moradi/swapz/actions/runs/45145526679",
   "jobs": [
     {
       "id": 137593734137,
       "url": "https://github.com/k1moradi/swapz/actions/runs/45145526679/job/137593734137",
-      "status": "queued",
-      "conclusion": null
+      "status": "completed",
+      "conclusion": "success"
     }
-  ]
+  ],
+  "agent1_terminal_exact_source_audit": {
+    "audited_run": 45145526679,
+    "job_id": 137593734137,
+    "original_tested_sha": "b88d570e8029d1657d0d3be8c8ff810fb281dacc",
+    "qualifier": "COMPLETED_SUCCESS_SOURCE_HOST_ONLY",
+    "first_error": null,
+    "counts": {
+      "assertions_per_compiler": 116,
+      "compiled_executed_C_mutants_total": 34,
+      "per_compiler": 17
+    },
+    "scope": "HOST_ONLY_OR_CANCELED_NO_ORIGINAL_NATIVE",
+    "no_source_auth": true,
+    "no_physical_io": true
+  }
 }

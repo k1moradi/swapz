@@ -1,7 +1,7 @@
 {
   "round": "074",
   "agent": 5,
-  "status": "QUEUED",
+  "status": "COMPLETED_SUCCESS_SOURCE_HOST_ONLY",
   "kind": "source-linked-original-compressed-owned-copy-lifetime-HOST_ONLY",
   "task_commit": "d62552f7048d5a512c7a0a79b86558fa228b31f2",
   "engineering_baseline": "48f2e9ce1e06a0d32f0a40b777e9347d91b80741",
@@ -14,14 +14,24 @@
     {
       "id": 137591957810,
       "name": "strict-host-original-owned-byte-lifetime-GCC-Clang",
-      "status": "QUEUED",
-      "conclusion": null
+      "status": "completed",
+      "conclusion": "success"
     }
   ],
   "host": {
-    "status": "NOT_EXECUTED_AT_AUDIT",
-    "gcc": null,
-    "clang": null,
+    "status": "SUCCESS_EXACT_SOURCE",
+    "gcc": {
+      "status": "PASS",
+      "baseline_cases": 6,
+      "compiled_executed_mutants": 14,
+      "actual_product_mutants": 3
+    },
+    "clang": {
+      "status": "PASS",
+      "baseline_cases": 6,
+      "compiled_executed_mutants": 14,
+      "actual_product_mutants": 3
+    },
     "expected_cases_per_compiler": 6,
     "expected_source_owner_mutants_per_compiler": 11,
     "expected_actual_product_C_mutants_per_compiler": 3
@@ -69,5 +79,21 @@
     "native_json": null,
     "ktap": null
   },
-  "no_privileged_loaded_physical_pressure_tests": true
+  "no_privileged_loaded_physical_pressure_tests": true,
+  "agent1_terminal_exact_source_audit": {
+    "audited_run": 45144990938,
+    "job_id": 137591957810,
+    "original_tested_sha": "b87e4350127164ce49c85d055fd20113c38df3bf",
+    "qualifier": "COMPLETED_SUCCESS_SOURCE_HOST_ONLY",
+    "first_error": null,
+    "counts": {
+      "baseline_cases_total": 12,
+      "compiled_executed_C_mutants_total": 28,
+      "per_compiler": 14,
+      "actual_product_C_mutants_total": 6
+    },
+    "scope": "HOST_ONLY_OR_CANCELED_NO_ORIGINAL_NATIVE",
+    "no_source_auth": true,
+    "no_physical_io": true
+  }
 }

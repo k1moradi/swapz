@@ -25,3 +25,10 @@ Cases exercise original LZ4 and LZO1X exact compression/CRC and complete decoded
 `SOURCE_MAPPED_AUTHENTICATED=0`, `PHASE_A=BLOCKED`, `DIRECT_COMPRESSED_HANDOFF=DISABLED`, `FORCED_RAW_BYPASS=DISABLED`, imported ACTIVE0. Linux MM/zswap alone owns compressed-RAM residency/natural eviction; swapz exclusively owns disk compression/packing/GC without a secondary shrinker/recompression. Original compressed LZO1X/raw LZ4 uses a distinct VOLATILE codec tag, not swapz disk codec or ordinary full uncompressed `RAW_4096`. First physical SWAPSPACE2 4096-byte header/UUID/partition and 20-byte mapping unchanged. No privileged, loaded, physical, swapon, real-pressure or true media-FUA tests.
 
 Companion [agent5-results.json](agent5-results.json) contains machine-readable exact source status; a terminal source CI result requires a separate docs-only update with real first error or actual PASS before REPORT_READY.
+
+
+## Agent1 independently verified terminal exact-source CI (COMPLETED_SUCCESS_SOURCE_HOST_ONLY)
+
+This manager terminal audit **supersedes earlier QUEUED status only for this immutable tested SHA**, preserving original source commit `b87e4350127164ce49c85d055fd20113c38df3bf` and previous reports. [Existing Actions run 45144990938](https://github.com/k1moradi/swapz/actions/runs/45144990938), [actual job 137591957810](https://github.com/k1moradi/swapz/actions/runs/45144990938/job/137591957810) is **COMPLETED SUCCESS**. Actual source-linked GCC+Clang strict ASan/UBSan, 6 baseline cases/compiler, 14 independently compiled/executed semantic mutants/compiler (3 actual-product C mutants/compiler); 12 baselines, 28 mutants total. No real original native, physical FUA or upper ACK.
+
+**Scope:** host-source-linked model/fixture only, not authenticated original Linux swapcache STORED, original UML KUnit, physical durable FUA or production once-only upper bio_endio. Source AUTH0; Phase A BLOCKED; direct handoff, forced RAW and import OFF; ordinary RAW_4096 complete ORIGINAL UNCOMPRESSED 4096. No new periodic CI checks. No rerun of already successful unchanged source needed.
