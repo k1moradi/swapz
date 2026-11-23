@@ -5,12 +5,12 @@
   "kind": "PINNED_ORIGINAL_DM_CORE_SOURCE_LINKED_HOST_TEST_ONLY",
   "task_publication_sha": "94442eb2a311046b00a5fb3d89251f7b72cc5420",
   "task_parent_sha": "a54d70314afe85ea895578c0bc6769c66cb403dc",
-  "tested_source_commit": null,
-  "tested_source_parent": null,
+  "tested_source_commit": "e4ec13176a0e552bb893f1701ec640561807e8b6",
+  "tested_source_parent": "541d9128f1fe85040ad9216f853678e9fc88caf2",
   "evidence_only_commit": null,
-  "source_run_id": null,
-  "source_job_id": null,
-  "source_ci_status": "PENDING_TRIGGER",
+  "source_run_id": 45238691443,
+  "source_job_id": 137917161225,
+  "source_ci_status": "QUEUED",
   "source_ci_conclusion": null,
   "first_actual_ci_error": null,
   "pinned_original_linux": "torvalds/linux@c339f4010dea8b0d754f84ace70cd1b089878ef8",
@@ -27,8 +27,20 @@
   ],
   "intended_mutations_per_compiler": 20,
   "real_ci_compilers": {
-    "gcc": {"status": "PENDING", "baseline": "UNVERIFIED", "mutants_compiled": 0, "mutants_executed": 0, "semantic_mutants_killed": 0},
-    "clang": {"status": "PENDING", "baseline": "UNVERIFIED", "mutants_compiled": 0, "mutants_executed": 0, "semantic_mutants_killed": 0}
+    "gcc": {
+      "status": "PENDING",
+      "baseline": "UNVERIFIED",
+      "mutants_compiled": 0,
+      "mutants_executed": 0,
+      "semantic_mutants_killed": 0
+    },
+    "clang": {
+      "status": "PENDING",
+      "baseline": "UNVERIFIED",
+      "mutants_compiled": 0,
+      "mutants_executed": 0,
+      "semantic_mutants_killed": 0
+    }
   },
   "local_smoke": {
     "kind": "STRUCTURALLY_RECONSTRUCTED_SOURCE_ONLY_NOT_COMPLETE_ORIGINAL_GIT_BLOB",
@@ -57,5 +69,7 @@
   "original_compressed": "FUTURE_SEPARATE_ORIGINAL_LZO1X_OR_RAW_LZ4_VOLATILE_SOURCE_CODEC_AND_DECODER_PIN",
   "pressure_owner": "ORIGINAL_LINUX_MM_ZSWAP_NATURAL_EVICTION_ONLY",
   "swapz_owner": "DISK_PACKING_GC_NO_SECOND_PRESSURE_OR_ORIGINAL_RECOMPRESSION",
-  "publication_policy": "SOLE_MAIN_EXPECTED_HEAD_NONFORCE_SINGLE_PARENT_NO_PR_NO_BRANCH_NO_MONITOR"
+  "publication_policy": "SOLE_MAIN_EXPECTED_HEAD_NONFORCE_SINGLE_PARENT_NO_PR_NO_BRANCH_NO_MONITOR",
+  "source_run_url": "https://github.com/k1moradi/swapz/actions/runs/45238691443",
+  "source_job_url": "https://github.com/k1moradi/swapz/actions/runs/45238691443/job/137917161225"
 }
