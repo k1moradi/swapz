@@ -1,0 +1,33 @@
+{
+  "agent": 6,
+  "round": "071",
+  "kind": "exact-repository-source-host-policy-ci-status",
+  "task_commit": "057346ca1fbbed73c7c664c56a3272c9b1a5fbb6",
+  "tested_commit": "5d0567ebec8d60c491e9c2994fa89c5cfe876b53",
+  "workflow_run": 45111120206,
+  "workflow_url": "https://github.com/k1moradi/swapz/actions/runs/45111120206",
+  "job_id": 137483465050,
+  "job_status": "completed",
+  "job_conclusion": "failure",
+  "results": {
+    "exact_clean_sole_main_commit_admission": "success",
+    "read_only_product_header_linked_GCC_strict_ASan_UBSan_baseline": "PASS",
+    "read_only_product_header_linked_Clang_strict_ASan_UBSan_baseline": "PASS",
+    "independently_compiled_and_executed_C_semantic_mutants": 48,
+    "mutants_rejected": 48,
+    "canonical_repository_testing_standards_enforce": "FAIL",
+    "evidence_artifact_upload": "success"
+  },
+  "first_error": "SOURCE_CONTRACT_MISMATCH: commit=5d0567ebec8d60c491e9c2994fa89c5cfe876b53 corrective_action=do not amend/force-push published commits or use docs-only repair; make a new source commit with a meaningful applicable standards co-change and qualify exact-SHA CI on main",
+  "interpretation": "Host source-linked tests PASS, overall workflow FAIL due to independent canonical repository testing standards enforcement. The separate preparatory JSON used temporary ABI-compatible stand-in headers.",
+  "native_original_linux_kunit": "NOT_RUN",
+  "actual_physical_pressure": "NOT_RUN",
+  "source_mapped_authenticated": false,
+  "phase_a": "BLOCKED",
+  "direct_compressed_handoff": false,
+  "forced_raw_bypass": false,
+  "import_active": false,
+  "original_raw_4096": "FULL_ORIGINAL_UNCOMPRESSED_4096",
+  "production_C_changes": "NONE",
+  "workflow_completed_utc": "2026-11-23T04:42:28Z"
+}

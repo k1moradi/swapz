@@ -1,0 +1,15 @@
+{
+  "actual_upper_ack": false,
+  "compiled_executed_semantic_mutants": 48,
+  "compiler_baselines": 2,
+  "direct_compressed_handoff": false,
+  "forced_raw_bypass": false,
+  "model_only": true,
+  "model_stdout": "PASS directed=27 burst_events=128 extents=4,8,16KiB MM_ONLY=1 SECONDARY_RECLAIM=0 RECOMPRESS=0 RAW_4096=UNCOMPRESSED AUTH=0 PHASE_A=BLOCKED copy_bytes=70400 lower_padded_bytes=81920 fua=8 upper_ack=32 queue_peak=8 owned_peak=17600 synthetic_only=1",
+  "native_kernel": false,
+  "phase_a": "BLOCKED",
+  "physical_pressure": false,
+  "real_lower_io": false,
+  "result": "PASS",
+  "source_mapped_authenticated": false
+}
