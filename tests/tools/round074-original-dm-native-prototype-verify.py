@@ -149,9 +149,12 @@ def check(compiler: str, owner: str, selected_source: str, native: str) -> None:
         # is absent; -Werror=implicit-function-declaration remains mandatory.
         source_file.write_text(HEADER + owner + native + MAIN)
         missing = subprocess.run(args, capture_output=True, text=True, timeout=60)
-        if missing.returncode == 0 or not re.search(
-                r'implicit declaration of function[^\n]*swapz_round072_current_selected_dm_owner',
-                missing.stderr):
+        # GCC diagnoses an implicit declaration; Clang diagnoses an
+        # undeclared function. Both must reject the missing definition.
+        if (missing.returncode == 0 or
+                'swapz_round072_current_selected_dm_owner' not in missing.stderr or
+                not any(phrase in missing.stderr for phrase in
+                        ('implicit declaration of function', 'undeclared function'))):
             fail(compiler + ':missing-selected-block-not-compile-rejected:' +
                  missing.stderr[:200].replace('\n', ' '))
 
