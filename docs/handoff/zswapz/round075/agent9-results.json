@@ -21,19 +21,19 @@
     {
       "id": 137624391690,
       "name": "source-linked-rootless-geometry",
-      "status": "QUEUED",
-      "conclusion": null,
+      "status": "completed",
+      "conclusion": "success",
       "url": "https://github.com/k1moradi/swapz/actions/runs/45154650078/job/137624391690"
     }
   ],
   "compilers": {
     "gcc": {
-      "ci_status": "QUEUED",
-      "mutants_compiled_executed_killed": null
+      "ci_status": "SUCCESS",
+      "mutants_compiled_executed_killed": 18
     },
     "clang": {
-      "ci_status": "QUEUED",
-      "mutants_compiled_executed_killed": null
+      "ci_status": "SUCCESS",
+      "mutants_compiled_executed_killed": 18
     }
   },
   "planned_mutants_per_compiler": 18,
@@ -55,7 +55,7 @@
     "kunit_cases": null,
     "ktap_cases": null
   },
-  "conclusion": "QUEUED",
+  "conclusion": "SUCCESS",
   "first_error": null,
   "source_mapped_authenticated": false,
   "phase_a": "BLOCKED",
@@ -69,5 +69,21 @@
   "ordinary_raw_4096": "FULL_ORIGINAL_UNCOMPRESSED_4096",
   "pressure_owner": "Linux MM/zswap natural compressed-RAM eviction alone",
   "disk_owner": "swapz disk-only payload packing and GC",
-  "workflow_url": "https://github.com/k1moradi/swapz/actions/runs/45154650078"
+  "workflow_url": "https://github.com/k1moradi/swapz/actions/runs/45154650078",
+  "status": "COMPLETED_SUCCESS_HOST_ONLY",
+  "agent1_verified_terminal_ci": {
+    "tested_source_sha": "3d3e84acbf6b0930ee6e00e0751db980de206dc6",
+    "run_id": 45154650078,
+    "job_id": 137624391690,
+    "job_status": "completed",
+    "conclusion": "success",
+    "compiler_GCC_semantic_mutants_executed": 18,
+    "compiler_Clang_semantic_mutants_executed": 18,
+    "combined_compiled_executed_semantic_mutants": 36,
+    "first_error": null,
+    "original_native": "NOT_RUN",
+    "physical_io": false,
+    "scope": "EXACT_SOURCE_HOST_ONLY",
+    "original_prior_failed_unchanged": true
+  }
 }

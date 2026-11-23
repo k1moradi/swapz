@@ -10,7 +10,7 @@
   "tested_source_parent": "3d3e84acbf6b0930ee6e00e0751db980de206dc6",
   "source_run_id": 45154838130,
   "source_job_id": 137625029172,
-  "source_ci_status": "QUEUED",
+  "source_ci_status": "COMPLETED_SUCCESS",
   "fixed_mutant": "duplicate-owned-ticket",
   "fixed_mutant_index": 6,
   "old_round073": {
@@ -42,18 +42,20 @@
   },
   "new_source_host_ci": {
     "gcc": {
-      "baseline": "PENDING",
-      "mutants_compiled": 0,
-      "mutants_executed": 0,
-      "expected_mutants": 17
+      "baseline": "PASS",
+      "mutants_compiled": 17,
+      "mutants_executed": 17,
+      "expected_mutants": 17,
+      "mutants_semantically_killed": 17
     },
     "clang": {
-      "baseline": "PENDING",
-      "mutants_compiled": 0,
-      "mutants_executed": 0,
-      "expected_mutants": 17
+      "baseline": "PASS",
+      "mutants_compiled": 17,
+      "mutants_executed": 17,
+      "expected_mutants": 17,
+      "mutants_semantically_killed": 17
     },
-    "standalone_mutant06_regression": "PENDING",
+    "standalone_mutant06_regression": "PASS_GCC_CLANG_COMPILE_EXECUTE_SEMANTIC_KILL",
     "origin": "genuine DM read-only anchors plus actual production headers compiled; host scheduler model"
   },
   "actual_original_linux_native": "NOT_RUN",
@@ -73,5 +75,22 @@
   "no_pr_no_branch_no_force": true,
   "no_periodic_ci_check": true,
   "source_run_url": "https://github.com/k1moradi/swapz/actions/runs/45154838130",
-  "source_job_url": "https://github.com/k1moradi/swapz/actions/runs/45154838130/job/137625029172"
+  "source_job_url": "https://github.com/k1moradi/swapz/actions/runs/45154838130/job/137625029172",
+  "status": "COMPLETED_SUCCESS_HOST_MODEL_ONLY",
+  "conclusion": "SUCCESS",
+  "agent1_verified_terminal_ci": {
+    "tested_source_sha": "4f2fb37d7fa2b51aa78dca0cedfe3cd3f25dfff3",
+    "run_id": 45154838130,
+    "job_id": 137625029172,
+    "job_status": "completed",
+    "conclusion": "success",
+    "compiler_GCC_semantic_mutants_executed": 17,
+    "compiler_Clang_semantic_mutants_executed": 17,
+    "combined_compiled_executed_semantic_mutants": 34,
+    "first_error": null,
+    "original_native": "NOT_RUN",
+    "physical_io": false,
+    "scope": "SOURCE_AUDITED_HOST_MODEL_ONLY",
+    "original_prior_failed_unchanged": true
+  }
 }
