@@ -89,11 +89,13 @@ static void swapz_round071_original_pool_retirement_codec(struct kunit *test,
     u8 *original_page, *source_stream, *owned_stream, *scratch, *output;
     unsigned int compressed_length = 0U, source_pool_id = 0U;
     unsigned int offset, cycle, poll;
+    unsigned long retiring_pool_address;
+    unsigned long release_waited;
     int error, destroyed_before;
-    bool retired = false;
 
     /* The original zswap CPU-hotplug callback must be registered.
      * ZSWAP_DEFAULT_ON starts ordinary RAM zswap, not swap I/O. */
+    KUNIT_ASSERT_FALSE(test, READ_ONCE(swapz_round072_release_timed_out));
     KUNIT_ASSERT_EQ(test, zswap_init_state, ZSWAP_INIT_SUCCEED);
     KUNIT_ASSERT_TRUE(test, zswap_has_pool);
     KUNIT_ASSERT_FALSE(test, zswap_shrinker_enabled);
@@ -134,26 +136,33 @@ static void swapz_round071_original_pool_retirement_codec(struct kunit *test,
     authority.actual_lower_read_bytes = compressed_length;
 
 retire_pool:
-    /* Never dereference pool after percpu_ref_kill: original
-     * __zswap_pool_empty -> RCU work -> destructor owns its lifetime. */
+    /* Register a completion for THIS original source pool before kill.
+     * The RCU callback clears the pointer identity and signals only AFTER
+     * the original hotplug, per-CPU tfms and zsmalloc destructor returns.
+     * No callback ever dereferences the retained identity after free. */
+    retiring_pool_address = (unsigned long)pool;
+    reinit_completion(&swapz_round072_target_pool_released);
+    WRITE_ONCE(swapz_round072_target_pool_address, retiring_pool_address);
     percpu_ref_kill(&pool->ref);
     pool = NULL;
-    for (poll = 0; poll < 2000U; ++poll) {
-        if (!xa_load(&zswap_pools, source_pool_id)) {
-            retired = true;
-            break;
-        }
-        usleep_range(1000, 2000);
+    release_waited = wait_for_completion_timeout(
+        &swapz_round072_target_pool_released,
+        msecs_to_jiffies(SWAPZ_R071_WAIT_MS));
+    if (!release_waited) {
+        /* Cancel only this witness. A late RCU callback still owns the
+         * original destruction, but cannot satisfy another test cycle. */
+        cmpxchg(&swapz_round072_target_pool_address,
+                retiring_pool_address, 0UL);
+        WRITE_ONCE(swapz_round072_release_timed_out, true);
+        KUNIT_FAIL(test, "target original RCU pool teardown timed out");
+        return;
     }
-    /* Counter increments AFTER original per-CPU transforms, hotplug
-     * instance and zsmalloc pool have been freed. */
-    rcu_barrier();
-    flush_workqueue(system_percpu_wq);
-    KUNIT_EXPECT_TRUE(test, retired);
+    KUNIT_EXPECT_EQ(test, READ_ONCE(swapz_round072_target_pool_address),
+                    0UL);
     KUNIT_EXPECT_PTR_EQ(test, xa_load(&zswap_pools, source_pool_id), NULL);
     KUNIT_EXPECT_EQ(test, atomic_read(&swapz_round071_destroy_complete),
                     destroyed_before + 1);
-    if (error || !retired ||
+    if (error ||
         atomic_read(&swapz_round071_destroy_complete) != destroyed_before + 1)
         return;
     kunit_kfree(test, source_stream);

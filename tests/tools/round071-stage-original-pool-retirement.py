@@ -23,6 +23,14 @@ SOURCE_PATH = "mm/zswap.c"
 COUNTER_DECLARATION = (
     b"/* Round071 KUnit-only witness: actual original pool tfm/zsmalloc death. */\n"
     b"static atomic_t swapz_round071_destroy_complete = ATOMIC_INIT(0);\n"
+    b"/* Test-only identity/complete pair; never used as a source pool ref. */\n"
+    b"static unsigned long swapz_round072_target_pool_address;\n"
+    b"static bool swapz_round072_release_timed_out;\n"
+    b"static DECLARE_COMPLETION(swapz_round072_target_pool_released);\n"
+)
+COMPLETION_INCLUDE = b"#include <linux/workqueue.h>\n"
+COMPLETION_INCLUDE_STAGED = (
+    b"#include <linux/workqueue.h>\n#include <linux/completion.h>\n"
 )
 CREATE_ANCHOR = b"static void zswap_pool_destroy(struct zswap_pool *pool)\n"
 RELEASE_ANCHOR = (
@@ -34,6 +42,38 @@ RELEASE_REPLACEMENT = (
     b"\t/* Count AFTER all original per-CPU tfms and pool are freed. */\n"
     b"\tatomic_inc(&swapz_round071_destroy_complete);\n}\n\n"
     b"static void __zswap_pool_release(struct work_struct *work)\n"
+)
+RCU_RELEASE_ANCHOR = (
+    b"static void __zswap_pool_release(struct work_struct *work)\n"
+    b"{\n"
+    b"\tstruct zswap_pool *pool = container_of(to_rcu_work(work),\n"
+    b"\t\t\t\t\t       typeof(*pool), release_rwork);\n\n"
+    b"\t/* nobody should have been able to get a ref... */\n"
+    b"\tWARN_ON(!percpu_ref_is_zero(&pool->ref));\n"
+    b"\tpercpu_ref_exit(&pool->ref);\n\n"
+    b"\t/* The pool is no longer in zswap_pools and has no references. */\n"
+    b"\tzswap_pool_destroy(pool);\n"
+    b"}\n\n"
+    b"static void __zswap_pool_empty(struct percpu_ref *ref)\n"
+)
+RCU_RELEASE_REPLACEMENT = (
+    b"static void __zswap_pool_release(struct work_struct *work)\n"
+    b"{\n"
+    b"\tstruct zswap_pool *pool = container_of(to_rcu_work(work),\n"
+    b"\t\t\t\t\t       typeof(*pool), release_rwork);\n"
+    b"\tconst unsigned long released_pool_address = (unsigned long)pool;\n\n"
+    b"\t/* nobody should have been able to get a ref... */\n"
+    b"\tWARN_ON(!percpu_ref_is_zero(&pool->ref));\n"
+    b"\tpercpu_ref_exit(&pool->ref);\n\n"
+    b"\t/* The pool is no longer in zswap_pools and has no references. */\n"
+    b"\tzswap_pool_destroy(pool);\n"
+    b"\t/* Test-only: compare saved identity, never access the freed pool.\n"
+    b"\t * Canceled and unrelated callbacks cannot wake another reader. */\n"
+    b"\tif (cmpxchg(&swapz_round072_target_pool_address,\n"
+    b"\t\t    released_pool_address, 0UL) == released_pool_address)\n"
+    b"\t\tcomplete_all(&swapz_round072_target_pool_released);\n"
+    b"}\n\n"
+    b"static void __zswap_pool_empty(struct percpu_ref *ref)\n"
 )
 
 
@@ -70,7 +110,8 @@ def render(original: bytes, fragment: bytes) -> bytes:
                   b"swapz_round071_original_lz4_pool_retirement"):
         require(fragment.count(b"static void " + label + b"(") == 1,
                 "original-KUnit-case:" + label.decode())
-    for anchor, count in ((CREATE_ANCHOR, 1), (RELEASE_ANCHOR, 1)):
+    for anchor, count in ((COMPLETION_INCLUDE, 1), (CREATE_ANCHOR, 1),
+                          (RELEASE_ANCHOR, 1), (RCU_RELEASE_ANCHOR, 1)):
         require(original.count(anchor) == count,
                 "original-pool-retirement-anchor-drift")
     require(original.count(b"percpu_ref_kill(&put_pool->ref);") == 1,
@@ -79,9 +120,12 @@ def render(original: bytes, fragment: bytes) -> bytes:
             "original-rcu-destruction-missing")
     require(b"swapz_round071_destroy_complete" not in original,
             "test-witness-already-in-original")
-    return (original.replace(CREATE_ANCHOR,
-                             COUNTER_DECLARATION + CREATE_ANCHOR, 1)
+    return (original.replace(COMPLETION_INCLUDE,
+                             COMPLETION_INCLUDE_STAGED, 1)
+            .replace(CREATE_ANCHOR,
+                     COUNTER_DECLARATION + CREATE_ANCHOR, 1)
             .replace(RELEASE_ANCHOR, RELEASE_REPLACEMENT, 1)
+            .replace(RCU_RELEASE_ANCHOR, RCU_RELEASE_REPLACEMENT, 1)
             + b"\n" + fragment)
 
 
@@ -173,7 +217,9 @@ def self_test() -> None:
     fixture = FRAGMENT.read_bytes()
     require(b"percpu_ref_kill(&pool->ref);" in fixture and
             b"zswap_pool_create((char *)compressor)" in fixture and
-            b"flush_workqueue(system_percpu_wq);" in fixture and
+            b"wait_for_completion_timeout(" in fixture and
+            b"swapz_round072_target_pool_released" in fixture and
+            b"flush_workqueue(system_percpu_wq)" not in fixture and
             b"swapz_zswap_import_decoder_owner_decode(&lease," in fixture,
             "missing-real-original-pool-or-reader-path")
     require(b"SWAPZ_R071_CLOSE_CYCLES 24U" in fixture and
@@ -182,7 +228,7 @@ def self_test() -> None:
             "missing-native-original-execution-path")
     failures = 0
     for mutation in (b"percpu_ref_kill(&pool->ref);",
-                     b"flush_workqueue(system_percpu_wq);",
+                     b"wait_for_completion_timeout(",
                      b"crypto_acomp_compress(context->req)",
                      b"swapz_zswap_import_decoder_owner_decode(&lease,"):
         require(mutation in fixture, "baseline-negative-fixture-anchor")
@@ -193,6 +239,11 @@ def self_test() -> None:
         except StageError:
             failures += 1
     require(failures == 4, "fixture-mutation-rejection-count")
+    require(RCU_RELEASE_REPLACEMENT.count(
+        b"cmpxchg(&swapz_round072_target_pool_address,") == 1 and
+        RCU_RELEASE_REPLACEMENT.count(
+            b"complete_all(&swapz_round072_target_pool_released)") == 1,
+            "missing-target-only-original-RCU-post-destruction-wake")
     print("ROUND071_ORIGINAL_POOL_STAGER_SELFTEST_PASS "
           "fixture_execution_negatives=4 original_blob_pinned=YES")
 
