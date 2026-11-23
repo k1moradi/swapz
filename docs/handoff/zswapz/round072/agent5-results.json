@@ -1,7 +1,7 @@
 {
   "round": "072",
   "agent": 5,
-  "status": "QUEUED",
+  "status": "HOST_SUCCESS_NATIVE_QUEUED",
   "kind": "original-Linux-test-only-native-mm-bio-authority-decoder-join",
   "task_commit": "3c1919f1b2c2ea428045a1afb5c278151cf06ccc",
   "engineering_baseline": "4083449f12c3392d5ea534ee4e536865b4caf3ee",
@@ -24,29 +24,52 @@
     {
       "id": 137535284018,
       "name": "exact-original-joined-source-host",
-      "status": "QUEUED",
-      "conclusion": null
+      "status": "COMPLETED",
+      "conclusion": "SUCCESS"
     },
     {
-      "id": null,
+      "id": 137557900023,
       "name": "original-MM-BIO-authority-independent-decoder-native-KUnit",
-      "status": "NOT_SCHEDULED",
+      "status": "QUEUED",
       "conclusion": null
     }
   ],
   "source_staging": {
-    "status": "NOT_RUN",
+    "status": "NOT_RUN_DEPENDENT_NATIVE_JOB_QUEUED",
     "original_postimages_expected": 10,
     "negative_plans_expected": 6
   },
   "host": {
-    "status": "NOT_RUN",
-    "gcc": null,
-    "clang": null,
-    "mutants": null
+    "status": "SUCCESS",
+    "job_id": 137535284018,
+    "gcc": {
+      "sanitizers": [
+        "ASAN",
+        "UBSAN"
+      ],
+      "source_original_profile_cases": 16,
+      "authority_lower_callback_cases": 7,
+      "original_source_semantic_mutants": 10,
+      "actual_authority_semantic_mutants": 16,
+      "decoder_lifetime_semantic_mutants": 2
+    },
+    "clang": {
+      "sanitizers": [
+        "ASAN",
+        "UBSAN"
+      ],
+      "source_original_profile_cases": 16,
+      "authority_lower_callback_cases": 7,
+      "original_source_semantic_mutants": 10,
+      "actual_authority_semantic_mutants": 16,
+      "decoder_lifetime_semantic_mutants": 2
+    },
+    "executed_semantic_mutants_total": 56,
+    "asserted_summary": "PASS round072_original_join_strict_GCC_Clang_ASAN_UBSAN"
   },
   "native_kunit": {
-    "status": "NOT_RUN",
+    "status": "QUEUED",
+    "job_id": 137557900023,
     "json": null,
     "ktap": null,
     "tests": null,
@@ -67,5 +90,6 @@
   "actual_physical_io": false,
   "actual_upper_bio_ack": false,
   "actual_swapcache_backed_original_STORED": false,
-  "privileged_loaded_physical_real_pressure_tests": false
+  "privileged_loaded_physical_real_pressure_tests": false,
+  "audit_note": "Round074 follow-up: host success exact source SHA; native still QUEUED; no new original UML workflow launched"
 }

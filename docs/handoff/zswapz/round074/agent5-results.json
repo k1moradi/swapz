@@ -1,0 +1,73 @@
+{
+  "round": "074",
+  "agent": 5,
+  "status": "QUEUED",
+  "kind": "source-linked-original-compressed-owned-copy-lifetime-HOST_ONLY",
+  "task_commit": "d62552f7048d5a512c7a0a79b86558fa228b31f2",
+  "engineering_baseline": "48f2e9ce1e06a0d32f0a40b777e9347d91b80741",
+  "tested_commit": "b87e4350127164ce49c85d055fd20113c38df3bf",
+  "source_parent": "d6cbad9f0fc35c4c6b5dce5a961e708df6b1614b",
+  "original_linux_pin": "c339f4010dea8b0d754f84ace70cd1b089878ef8",
+  "workflow_run_id": 45144990938,
+  "workflow_url": "https://github.com/k1moradi/swapz/actions/runs/45144990938",
+  "jobs": [
+    {
+      "id": 137591957810,
+      "name": "strict-host-original-owned-byte-lifetime-GCC-Clang",
+      "status": "QUEUED",
+      "conclusion": null
+    }
+  ],
+  "host": {
+    "status": "NOT_EXECUTED_AT_AUDIT",
+    "gcc": null,
+    "clang": null,
+    "expected_cases_per_compiler": 6,
+    "expected_source_owner_mutants_per_compiler": 11,
+    "expected_actual_product_C_mutants_per_compiler": 3
+  },
+  "first_error": null,
+  "native_kunit": {
+    "status": "NOT_REQUESTED",
+    "json": null,
+    "ktap": null,
+    "tests": null,
+    "passed": null,
+    "failed": null,
+    "skipped": null,
+    "crashed": null,
+    "errors": null
+  },
+  "owned_files": [
+    "tests/runtime/native/fixtures/round074-original-owned-copy-lifetime.c",
+    "tests/tools/round074-original-owned-copy-lifetime-verify.py",
+    ".github/workflows/phase-a-round074-original-owned-copy-lifetime-host-noauth.yml",
+    "docs/testing_standards.md"
+  ],
+  "production_source_C_modified": false,
+  "actual_source_header_link": "src/kernel/authority.c + src/kernel/codec.c + src/kernel/zswap-import-codec.h",
+  "provenance": "HOST_MODELED_SOURCE_LEASE_NO_SWAPCACHE_STORED",
+  "bio_ownership": "HOST_MODELED_PRIVATE_EXTENT_NO_REAL_LINUX_BIO",
+  "actual_physical_fua": false,
+  "actual_upper_bio_ack": false,
+  "actual_native_original_uml": false,
+  "source_mapped_authenticated": false,
+  "phase_a": "BLOCKED",
+  "direct_compressed_handoff": "DISABLED",
+  "forced_raw_bypass": "DISABLED",
+  "import_active": false,
+  "linux_mm_zswap": "SOLE_COMPRESSED_RAM_NATURAL_EVICTION_OWNER",
+  "swapz": "DISK_PACKING_GC_ONLY",
+  "original_codec": "VOLATILE_ORIGINAL_LZO1X_OR_LZ4_NO_RECOMPRESSION",
+  "conventional_RAW_4096": "FULL_ORIGINAL_UNCOMPRESSED_4096",
+  "previous_round_072": {
+    "source_commit": "f7e3a5ad09d7940baa9a149fdb9ac0f55878f68f",
+    "host_job_id": 137535284018,
+    "host_status": "SUCCESS",
+    "native_job_id": 137557900023,
+    "native_status": "QUEUED",
+    "native_json": null,
+    "ktap": null
+  },
+  "no_privileged_loaded_physical_pressure_tests": true
+}
