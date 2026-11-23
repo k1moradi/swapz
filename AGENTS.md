@@ -140,3 +140,18 @@ applies to every agent, even if a chat client offers file downloads.
 Follow `docs/handoff/zswapz/evidence-policy.md` and the exact current round's
 frozen contract. This communication policy never authorizes a branch, PR,
 force push, real-device/privileged operation, or production safety-gate change.
+
+## CI monitoring quota and no redundant automated checks
+
+Do not create a new periodic, hourly, scheduled or conditional automation just
+to poll GitHub Actions after publishing a zswapz round implementation. The
+owner has limited scheduled-task capacity and explicitly authorized pausing
+obsolete polling; the five Round072 CI watches were paused. CI source-run IDs
+and exact immutable tested SHAs must instead be published in the round's
+`agentN-results.json` and GitHub issue. On a later request/agent visit,
+fetch the existing run and publish an evidence-only terminal update on sole
+`main`; never rerun identical red or queued workflows merely to get a new
+status. A monitoring automation requires a new explicit owner request.
+
+This scheduling rule does not replace GitHub-first report delivery and never
+converts pending CI into PASS.
