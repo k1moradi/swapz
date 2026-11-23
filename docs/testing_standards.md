@@ -19329,3 +19329,37 @@ native KUnit, physical durability, or real upper BIO completion. Keep Linux
 MM/zswap sole natural compressed RAM eviction owner, swapz disk packing/GC
 only, no secondary shrinker or recompression, source AUTH0, Phase A BLOCKED,
 direct compressed handoff/forced RAW bypass OFF and imported ACTIVE0.
+
+## Round074 Agent6 — bounded original zswap natural-eviction source lease/copy work
+
+The original Linux MM/zswap natural eviction decision is external input:
+swapz MUST NOT request a secondary zswap shrinker, pressure timer, speculative
+RAM eviction, refault or recompression to satisfy disk packing queue capacity.
+Future authenticated compressed-source admission requires original pool and
+entry leases, an unretired codec, current slot incarnation, and a retained
+source lock. While the producer's lock is held, only a bounded nonblocking
+copy of at most 3,568 bytes into independently owned memory may occur; no
+lower BIO, GC, decoder, crypto/checksum, wait, sleeping allocation or
+pressure feedback under original source/queue/MM locks. Source erase before
+owned copy, lost lease, retirement, close, stale reissue, duplicate event,
+bounded eight-entry/28,544-byte quota or allocation failure must fail closed
+without a replacement MM eviction. After releasing original locks, asynchronous
+lower service must guard lock order, first error and idempotent completion.
+Original volatile compressed LZO1X/raw LZ4 codec identity is neither swapz
+disk codec nor ordinary RAW_4096 (full original uncompressed 4096). Keep
+physical SWAPSPACE2 first-page/UUID, 20-byte volatile map and partition table.
+
+Round074 Agent6 tests/runtime/native/fixtures/round074-eviction-lease-copy-budget.c
+and tests/tools/round074-eviction-lease-copy-budget-verify.py are rootless
+model-only. Require actual read-only codec/import/admission/direct header gate
+anchors and strict GCC+Clang C23 ASan+UBSan baseline execution with 25
+independently compiled and executed semantic C mutants per compiler (50 total)
+under -Wall -Wextra -Wconversion -Wshadow -Werror. A host KTAP is not
+original-kernel KUnit. Source-linked exact SHA CI must run unchanged
+first-parent repository-policy enforcement using the original push base.
+Missing results, sanitizer, failed mutations, compiler warnings or absent
+policy enforcement are FAIL. Model lock-work units are not measured real
+Linux lock latency, and prior Round072 CI is not reused as Round074 PASS.
+No privileged/loaded kernel, swap activation, physical IO or actual pressure
+testing. SOURCE_MAPPED_AUTHENTICATED=0, PHASE_A=BLOCKED; original compressed
+handoff, forced RAW bypass and imported activation remain disabled.
