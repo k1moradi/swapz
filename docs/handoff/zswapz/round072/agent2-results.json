@@ -1,0 +1,85 @@
+{
+  "round": "072",
+  "agent": 2,
+  "status": "IN_PROGRESS",
+  "conclusion": "PENDING_EXACT_SOURCE_CI",
+  "task_commit": "3c1919f1b2c2ea428045a1afb5c278151cf06ccc",
+  "engineering_baseline": "4083449f12c3392d5ea534ee4e536865b4caf3ee",
+  "tested_source_commit": "27e50960fdc21b51c92ce8278d2c8aedf922dc8a",
+  "tested_source_parent": "62f137b838a2434764926a24457f700d0bfb984c",
+  "original_linux_pin": "c339f4010dea8b0d754f84ace70cd1b089878ef8",
+  "original_dm_c_git_blob": "1881d86111fb2e655893ad898cf21b88f0e4e7f3",
+  "production_dm_target_c_git_blob": "f1cab252cd990190646c82da81378d1563475826",
+  "production_c_changed": false,
+  "previous_failure": {
+    "run_id": 45110728672,
+    "source_sha": "07ccd88843a3fd988b15e9f5dea4c16fe4d3a365",
+    "host_job_id": 137482233393,
+    "conclusion": "failure",
+    "native_job_id": 137486343808,
+    "native_conclusion": "skipped",
+    "first_error": "git diff --check HEAD^ HEAD: docs/handoff/zswapz/round071/agent2-evidence.md:3-6 trailing whitespace before compiler"
+  },
+  "workflow": {
+    "id": 45127049313,
+    "url": "https://github.com/k1moradi/swapz/actions/runs/45127049313",
+    "head_sha": "27e50960fdc21b51c92ce8278d2c8aedf922dc8a",
+    "status": "queued",
+    "conclusion": null,
+    "jobs": [
+      {
+        "id": 137533678365,
+        "name": "source-host",
+        "status": "queued",
+        "conclusion": null
+      },
+      {
+        "id": null,
+        "name": "original-uml-native",
+        "status": "not_allocated",
+        "conclusion": null
+      }
+    ]
+  },
+  "host": {
+    "exact_source_gcc": "NOT_RUN",
+    "exact_source_clang": "NOT_RUN",
+    "expected_compiled_executed_mutants_each_compiler": 18,
+    "additional_new_source_mutants": 6,
+    "original_ownership_mutants_preserved": 12,
+    "local_preparatory_host": "GCC and Clang standalone transcribed predicate baseline PASS plus 6/6 compiled/executed semantic C mutants each; NOT actual source-linked CI",
+    "stage_negatives": {
+      "expected": 8,
+      "actual": null,
+      "status": "NOT_RUN"
+    }
+  },
+  "original_native": {
+    "status": "NOT_RUN",
+    "json": null,
+    "ktap": null,
+    "expected_cases": 3,
+    "actual_cases": null,
+    "passed": null,
+    "failed": null,
+    "skipped": null
+  },
+  "first_current_error": null,
+  "blockers": [
+    "Production selected live DM table/source not authenticated",
+    "Genuine original swapcache-backed STORED provenance absent",
+    "Real durable lower WRITE+FUA and actual production exactly-once upper bio_endio unproved",
+    "Original pinned Linux KUnit pending"
+  ],
+  "source_mapped_authenticated": false,
+  "phase_a": "BLOCKED",
+  "direct_compressed_handoff": "DISABLED",
+  "forced_raw_bypass": "DISABLED",
+  "import_active": false,
+  "ordinary_raw_4096": "ORIGINAL_FULL_UNCOMPRESSED_4096",
+  "original_compressed_codec": "DISTINCT_VOLATILE_TAG_NO_RECOMPRESSION",
+  "memory_pressure_owner": "LINUX_MM_ZSWAP_NATURAL_EVICTION_ONLY",
+  "swapz_owner": "DISK_STORAGE_PACKING_GC_ONLY",
+  "actual_physical_io": false,
+  "privileged_or_loaded_test": false
+}
