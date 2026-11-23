@@ -15,8 +15,8 @@
     "docs/testing_standards.md"
   ],
   "product_c_changes": [],
-  "status": "QUEUED",
-  "conclusion": "IN_PROGRESS",
+  "status": "PASS",
+  "conclusion": "SUCCESS",
   "source_authentication": false,
   "source_mapped_authenticated": false,
   "phase_a": "BLOCKED",
@@ -31,33 +31,43 @@
       "name": "source-host",
       "id": 137534301766,
       "url": "https://github.com/k1moradi/swapz/actions/runs/45127241581/job/137534301766",
-      "status": "queued",
-      "conclusion": null
+      "status": "completed",
+      "conclusion": "success"
     },
     {
       "name": "original-uml-native",
-      "id": null,
-      "status": "not_allocated",
-      "conclusion": null
+      "id": 137542250005,
+      "url": "https://github.com/k1moradi/swapz/actions/runs/45127241581/job/137542250005",
+      "status": "completed",
+      "conclusion": "success"
     }
   ],
   "native_kunit": {
-    "actual_executed": null,
-    "passed": null,
-    "failed": null,
-    "skipped": null,
-    "crashed": null,
-    "ktap_verified": false,
-    "json_verified": false,
+    "actual_executed": 6,
+    "passed": 6,
+    "failed": 0,
+    "skipped": 0,
+    "crashed": 0,
+    "ktap_verified": true,
+    "json_verified": true,
     "expected_cases": 6,
-    "expected_close_cycles": 48,
-    "status": "NOT_RUN"
+    "original_pool_cases": 2,
+    "inherited_decoder_cases": 4,
+    "close_cycles_executed": 48,
+    "status": "PASS",
+    "original_mm_rcu_destructor_verified": true,
+    "fully_original_4096_lzo_lz4": true
   },
   "gcc_clang_strict_asan_ubsan": {
-    "status": "QUEUED",
-    "actual_executed_baselines": null,
-    "real_compiled_executed_c_semantic_mutants": null,
-    "expected_mutants": 22
+    "status": "PASS",
+    "actual_executed_baselines": 4,
+    "real_compiled_executed_c_semantic_mutants": 22,
+    "expected_mutants": 22,
+    "gcc": true,
+    "clang": true,
+    "asan": true,
+    "ubsan": true,
+    "host_only": true
   },
   "structural_original_anchor_audit": {
     "status": "PASS",
@@ -76,9 +86,9 @@
     "native_kunit_executed": 0
   },
   "remaining_blockers": [
-    "Exact-source source-host and original-uml-native results pending",
-    "Original true STORED swapcache provenance and source authentication unproven",
-    "Original module unloading and genuine physical lower FUA or upper BIO ACK untested"
+    "Authentic selected original swapcache STORED source/slot provenance not demonstrated",
+    "Production module unload, physical lower FUA and real upper BIO ACK not demonstrated",
+    "Phase A, all import paths and original compressed bypass remain disabled"
   ],
   "physical_io": false,
   "privileged_tests": false,
@@ -87,5 +97,9 @@
   "actual_memory_pressure": false,
   "branches_or_prs_created": false,
   "disallowed_global_workqueue_flush_removed": true,
-  "target_private_completion_enabled": true
+  "target_private_completion_enabled": true,
+  "workflow_terminal": true,
+  "workflow_run_status": "completed",
+  "workflow_conclusion": "success",
+  "workflow_completed_at": "2026-11-23T08:45:39Z"
 }
