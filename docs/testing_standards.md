@@ -19100,3 +19100,12 @@ acceptance for the otherwise unsupported direct-ZSTD slot, and the read-only
 original-family assertion must detect that acceptance at runtime under each
 compiler's ASan+UBSan. Do not delete the production guards or relabel original
 LZO1X as ZSTD/RAW/disk LZ4 to make a mutant pass.
+
+### Round072 Agent7 multiline mutant anchor self-check
+
+Compile-and-run mutation infrastructure must preserve source line boundaries
+in C replacements. A Python string containing a literal backslash followed
+by 'n' does not match the newline between the original C guard and its
+return. For each independently compiled control, assert exactly one original
+C anchor before mutation and refuse to count a missing or ambiguous anchor as
+a rejected semantic mutant. This must fail closed before qualification.

@@ -69,9 +69,9 @@ MUTANTS = (
     ("protected-header", "if (memcmp(lower_image, protected_header, sizeof(protected_header)) != 0)",
      "if (false && memcmp(lower_image, protected_header, sizeof(protected_header)) != 0)"),
     ("lzo-as-zstd",
-     "if (record->original_codec == SWAPZ_ZSWAP_IMPORT_LZO1X_CODEC)\\n"
+     "if (record->original_codec == SWAPZ_ZSWAP_IMPORT_LZO1X_CODEC)\n"
      "        return -EOPNOTSUPP;",
-     "if (record->original_codec == SWAPZ_ZSWAP_IMPORT_LZO1X_CODEC)\\n"
+     "if (record->original_codec == SWAPZ_ZSWAP_IMPORT_LZO1X_CODEC)\n"
      "        return direct_codec == SWAPZ_DIRECT_ZSWAP_ZSTD ? 0 : -EOPNOTSUPP;"),
 )
 EXPECTED = re.compile(
