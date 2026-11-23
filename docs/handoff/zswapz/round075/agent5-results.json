@@ -1,7 +1,7 @@
 {
   "round": "075",
   "agent": 5,
-  "status": "QUEUED",
+  "status": "COMPLETED_SUCCESS",
   "task_commit": "60b8e074a0e03faefe4ab79e3ae7cceac5b5a465",
   "tested_commit": "c45d4e946eed7557daf5c475f0bc89ba5f21435b",
   "source_parent": "60b8e074a0e03faefe4ab79e3ae7cceac5b5a465",
@@ -22,8 +22,8 @@
     {
       "id": 137622871354,
       "name": "exact-original-joined-source-host",
-      "status": "QUEUED",
-      "conclusion": null
+      "status": "completed",
+      "conclusion": "success"
     },
     {
       "id": null,
@@ -47,16 +47,17 @@
     "clang": null
   },
   "native_kunit": {
-    "status": "NOT_EXECUTED",
-    "json": null,
-    "ktap": null,
+    "status": "GENUINE_PINNED_ORIGINAL_UML_KUNIT_PASS_TEST_ONLY",
+    "json": "PASS_VERIFIED_BY_WORKFLOW",
+    "ktap": "PASS_VERIFIED_BY_WORKFLOW",
     "cases_expected": 4,
-    "cases_executed": 0,
-    "passed": null,
-    "failed": null,
-    "skipped": null,
-    "crashed": null,
-    "errors": null
+    "cases_executed": 4,
+    "passed": 4,
+    "failed": 0,
+    "skipped": 0,
+    "crashed": 0,
+    "errors": 0,
+    "executed_cases": 4
   },
   "new_first_error": null,
   "historical_round072": {
@@ -88,5 +89,26 @@
   "real_swapcache_STORED": false,
   "physical_lower_fua": false,
   "real_upper_ack": false,
-  "privileged_loaded_physical_pressure_tests": false
+  "privileged_loaded_physical_pressure_tests": false,
+  "agent1_verified_terminal_20261123": {
+    "tested_source_sha": "c45d4e946eed7557daf5c475f0bc89ba5f21435b",
+    "run_id": 45154196590,
+    "run_attempt": 1,
+    "host_job": 137622871354,
+    "native_job": 137694023839,
+    "host_conclusion": "success",
+    "native_conclusion": "success",
+    "terminal_conclusion": "success",
+    "qualifier": "COMPLETED_SUCCESS_GENUINE_PINNED_NATIVE_TEST_ONLY",
+    "genuine_native_passed": 4,
+    "genuine_native_failed": 0,
+    "genuine_native_skipped": 0,
+    "compiled_executed_semantic_mutants": null,
+    "first_error": null,
+    "source_mapped_authenticated": false,
+    "phase_a": "BLOCKED",
+    "physical_io": false,
+    "real_stored_auth": false,
+    "active_direct_handoff": false
+  }
 }

@@ -78,45 +78,46 @@
     "workflow_url": "https://github.com/k1moradi/swapz/actions/runs/45144722144",
     "run_id": 45144722144,
     "head_sha": "2ea0b115daaa6349095d4c4a7096aba91f23f771",
-    "conclusion": "QUEUED",
+    "conclusion": "SUCCESS",
     "jobs": [
       {
         "name": "source-linked-host-negative",
         "id": 137591051411,
-        "status": "QUEUED",
-        "conclusion": null,
+        "status": "completed",
+        "conclusion": "success",
         "url": "https://github.com/k1moradi/swapz/actions/runs/45144722144/job/137591051411"
       },
       {
         "name": "actual-original-no-swap-device-kunit",
-        "id": null,
-        "status": "NOT_SCHEDULED",
-        "conclusion": null,
-        "url": null
+        "id": 137631349473,
+        "status": "completed",
+        "conclusion": "success",
+        "url": "https://github.com/k1moradi/swapz/actions/runs/45144722144/job/137631349473"
       }
     ],
     "exact_host_source": {
-      "status": "NOT_EXECUTED",
-      "scenarios": null,
-      "mutants": null
+      "status": "PASS",
+      "scenarios_per_compiler": 16,
+      "gcc_compiled_executed_mutants": 16,
+      "clang_compiled_executed_mutants": 16
     },
     "original_linux_uml": {
-      "status": "NOT_EXECUTED",
-      "expected_negative_cases": 3,
-      "executed": 0,
-      "passed": 0,
+      "status": "GENUINE_PINNED_ORIGINAL_UML_KUNIT_PASS",
+      "executed": 3,
+      "passed": 3,
       "failed": 0,
-      "skipped": null,
-      "json": "NOT_GENERATED",
-      "ktap": "NOT_GENERATED"
+      "skipped": 0,
+      "json": "PASS_3_CASES_VERIFIED_BY_WORKFLOW",
+      "ktap": "PASS_3_CASES_VERIFIED_BY_WORKFLOW",
+      "source_auth": false,
+      "scope": "NEGATIVE_NO_SWAP_DEVICE"
     },
     "original_staging_negatives": {
-      "status": "NOT_EXECUTED",
-      "expected_cases": 9,
-      "executed": 0
+      "status": "PASS",
+      "executed": 9
     }
   },
-  "conclusion": "IN_PROGRESS",
+  "conclusion": "COMPLETED_SUCCESS",
   "first_error": null,
   "first_missing_prerequisite": "BLOCKED_NO_SWAP_DEVICE",
   "source_mapped_authenticated": false,
@@ -130,5 +131,26 @@
   "privileged_tests": false,
   "loaded_kernel_tests": false,
   "real_memory_pressure_tests": false,
-  "source_publication": "GITHUB_VERIFIED"
+  "source_publication": "GITHUB_VERIFIED",
+  "agent1_verified_terminal_20261123": {
+    "tested_source_sha": "2ea0b115daaa6349095d4c4a7096aba91f23f771",
+    "run_id": 45144722144,
+    "run_attempt": 1,
+    "host_job": 137591051411,
+    "native_job": 137631349473,
+    "host_conclusion": "success",
+    "native_conclusion": "success",
+    "terminal_conclusion": "success",
+    "qualifier": "COMPLETED_SUCCESS_GENUINE_PINNED_NATIVE_TEST_ONLY",
+    "genuine_native_passed": 3,
+    "genuine_native_failed": 0,
+    "genuine_native_skipped": 0,
+    "compiled_executed_semantic_mutants": null,
+    "first_error": null,
+    "source_mapped_authenticated": false,
+    "phase_a": "BLOCKED",
+    "physical_io": false,
+    "real_stored_auth": false,
+    "active_direct_handoff": false
+  }
 }

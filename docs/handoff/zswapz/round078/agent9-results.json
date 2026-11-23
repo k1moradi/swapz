@@ -29,23 +29,23 @@
     {
       "id": 137756992822,
       "name": "pinned-upstream-source-linked-host-length",
-      "status": "QUEUED",
-      "conclusion": null,
+      "status": "completed",
+      "conclusion": "success",
       "url": "https://github.com/k1moradi/swapz/actions/runs/45193291250/job/137756992822"
     }
   ],
   "compilers": {
     "gcc": {
-      "status": "QUEUED",
-      "mutants_compiled_executed_killed": null
+      "status": "PASS",
+      "mutants_compiled_executed_killed": 22
     },
     "clang": {
-      "status": "QUEUED",
-      "mutants_compiled_executed_killed": null
+      "status": "PASS",
+      "mutants_compiled_executed_killed": 22
     }
   },
   "planned_independent_mutants_per_compiler": 22,
-  "conclusion": "QUEUED",
+  "conclusion": "COMPLETED_SUCCESS",
   "first_error": null,
   "source_mapped_authenticated": false,
   "phase_a": "BLOCKED",
@@ -57,5 +57,26 @@
   "loaded_original_kernel": false,
   "new_production_changes": false,
   "memory_owner": "original Linux MM/zswap natural pressure and eviction only",
-  "disk_owner": "swapz packing and GC without independent reclaim or recompression"
+  "disk_owner": "swapz packing and GC without independent reclaim or recompression",
+  "agent1_verified_terminal_20261123": {
+    "tested_source_sha": "67db04875c9d1533332ae113b468293906f345ed",
+    "run_id": 45193291250,
+    "run_attempt": 1,
+    "host_job": 137756992822,
+    "native_job": null,
+    "host_conclusion": "success",
+    "native_conclusion": "NOT_RUN",
+    "terminal_conclusion": "success",
+    "qualifier": "COMPLETED_SUCCESS_HOST_ONLY",
+    "genuine_native_passed": 0,
+    "genuine_native_failed": 0,
+    "genuine_native_skipped": 0,
+    "compiled_executed_semantic_mutants": 44,
+    "first_error": null,
+    "source_mapped_authenticated": false,
+    "phase_a": "BLOCKED",
+    "physical_io": false,
+    "real_stored_auth": false,
+    "active_direct_handoff": false
+  }
 }

@@ -1,8 +1,8 @@
 {
   "round": "077",
   "agent": 10,
-  "message": "PROGRESS",
-  "conclusion": "PENDING",
+  "message": "BLOCKED_EXACT_SOURCE_HOST_FAILED",
+  "conclusion": "COMPLETED_FAILURE",
   "kind": "pinned-original-Linux-reader-GC-KUnit-test-only-declaration",
   "task_commit": "5e5908dcf1505331ef0ab37db9b0125149c0ea16",
   "original_linux_pin": "c339f4010dea8b0d754f84ace70cd1b089878ef8",
@@ -23,26 +23,27 @@
   "workflow_run_id": 45179168125,
   "workflow_url": "https://github.com/k1moradi/swapz/actions/runs/45179168125",
   "workflow_head_sha": "04b190b00131c1d40254acd2279e6240a11913d0",
-  "workflow_status": "queued",
+  "workflow_status": "COMPLETED_FAILURE",
   "workflow_conclusion": null,
   "jobs": [
     {
       "name": "original-reader-strict-source-host",
       "job_id": 137708170190,
-      "status": "queued",
-      "conclusion": null,
+      "status": "completed",
+      "conclusion": "failure",
       "url": "https://github.com/k1moradi/swapz/actions/runs/45179168125/job/137708170190"
     },
     {
       "name": "original-linux-uml-reader-pin-gc-kunit",
-      "job_id": null,
-      "status": "WAITING_ON_HOST",
-      "conclusion": null,
-      "url": null
+      "job_id": 137775410103,
+      "status": "completed",
+      "conclusion": "skipped",
+      "url": "https://github.com/k1moradi/swapz/actions/runs/45179168125/job/137775410103",
+      "id": 137775410103
     }
   ],
   "gcc": {
-    "new_exact_source_status": "NOT_RUN",
+    "new_exact_source_status": "INHERITED_HOST_MUTANTS_PASS_NEW_NEGATIVE_FAILED",
     "c23": null,
     "asan_ubsan": null,
     "original_semantic_mutants_compiled_executed": null,
@@ -53,7 +54,7 @@
     "expected_decoder_semantic_mutants": 2
   },
   "clang": {
-    "new_exact_source_status": "NOT_RUN",
+    "new_exact_source_status": "NEW_NEGATIVE_FAIL",
     "c23": null,
     "asan_ubsan": null,
     "original_semantic_mutants_compiled_executed": null,
@@ -77,13 +78,13 @@
     "native_postimages_verified_new_exact_source": null
   },
   "original_native": {
-    "status": "NOT_RUN",
+    "status": "SKIPPED_DEPENDENT_HOST_FAILED",
     "executed_cases": 0,
-    "passed": null,
-    "failed": null,
-    "skipped": null,
+    "passed": 0,
+    "failed": 0,
+    "skipped": 0,
     "crashed": null,
-    "actual_json_ktap": "NOT_RUN",
+    "actual_json_ktap": "NOT_GENERATED",
     "expected_cases": [
       "swapz_round073_original_lz4_old_reader_gc",
       "swapz_round073_original_lzo1x_old_reader_gc",
@@ -108,8 +109,8 @@
     "native_kunit_executed_cases": 0,
     "first_error": "linux/mm/zswap.c:5307:25: error: implicit declaration of function 'usleep_range' [-Werror=implicit-function-declaration]"
   },
-  "first_error": null,
-  "first_new_source_error": null,
+  "first_error": "ROUND077_ORIGINAL_DELAY_FIRST_ERROR clang:missing-original-declaration-not-rejected",
+  "first_new_source_error": "ROUND077_ORIGINAL_DELAY_FIRST_ERROR clang:missing-original-declaration-not-rejected",
   "source_mapped_authenticated": false,
   "phase_a": "BLOCKED",
   "direct_compressed_handoff": "DISABLED",
@@ -124,5 +125,26 @@
   "actual_selected_DM_source_auth": false,
   "privileged_tests": false,
   "branches_pr_force_pushes": false,
-  "periodic_ci_checks": false
+  "periodic_ci_checks": false,
+  "agent1_verified_terminal_20261123": {
+    "tested_source_sha": "04b190b00131c1d40254acd2279e6240a11913d0",
+    "run_id": 45179168125,
+    "run_attempt": 1,
+    "host_job": 137708170190,
+    "native_job": 137775410103,
+    "host_conclusion": "failure",
+    "native_conclusion": "skipped",
+    "terminal_conclusion": "failure",
+    "qualifier": "COMPLETED_FAILURE",
+    "genuine_native_passed": 0,
+    "genuine_native_failed": 0,
+    "genuine_native_skipped": "dependent_job_skipped",
+    "compiled_executed_semantic_mutants": 0,
+    "first_error": "ROUND077_ORIGINAL_DELAY_FIRST_ERROR clang:missing-original-declaration-not-rejected",
+    "source_mapped_authenticated": false,
+    "phase_a": "BLOCKED",
+    "physical_io": false,
+    "real_stored_auth": false,
+    "active_direct_handoff": false
+  }
 }

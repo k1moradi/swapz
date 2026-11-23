@@ -7,15 +7,15 @@
   "original_linux_pin": "c339f4010dea8b0d754f84ace70cd1b089878ef8",
   "tested_commit": "4cffbd53d825212339623e3954ac96ff31095bff",
   "tested_parent": "8f3650fa16b85a144cb669b809e3b68baebd0283",
-  "ci_status": "QUEUED",
+  "ci_status": "COMPLETED_SUCCESS",
   "workflow_run": 45179822062,
   "job_id": 137710418437,
   "first_error": null,
-  "host_gcc": "NOT_EXECUTED_QUEUED",
-  "host_clang": "NOT_EXECUTED_QUEUED",
+  "host_gcc": "PASS_GCC_32_OF_32_EXECUTED_C_MUTANTS",
+  "host_clang": "PASS_CLANG_32_OF_32_EXECUTED_C_MUTANTS",
   "semantic_mutants_per_compiler_planned": 32,
-  "actual_compiled_executed_mutants": null,
-  "host_ktap": "NOT_EXECUTED_QUEUED",
+  "actual_compiled_executed_mutants": 64,
+  "host_ktap": "HOST_ONLY_NOT_NATIVE",
   "original_native_ktap_json": "NOT_RUN",
   "source_blobs": {
     "src/kernel/zswap-direct-handoff.h": "864abf9a12071b98f5c157a44f4ed0c04d4a594c",
@@ -43,15 +43,36 @@
   "physical_pressure": false,
   "secondary_reclaimer": false,
   "recompression": false,
-  "status": "QUEUED",
+  "status": "COMPLETED_SUCCESS",
   "workflow_job": 137710418437,
   "workflow_url": "https://github.com/k1moradi/swapz/actions/runs/45179822062",
   "jobs": [
     {
       "id": 137710418437,
       "url": "https://github.com/k1moradi/swapz/actions/runs/45179822062/job/137710418437",
-      "status": "queued",
-      "conclusion": null
+      "status": "completed",
+      "conclusion": "success"
     }
-  ]
+  ],
+  "agent1_verified_terminal_20261123": {
+    "tested_source_sha": "4cffbd53d825212339623e3954ac96ff31095bff",
+    "run_id": 45179822062,
+    "run_attempt": 1,
+    "host_job": 137710418437,
+    "native_job": null,
+    "host_conclusion": "success",
+    "native_conclusion": "NOT_RUN",
+    "terminal_conclusion": "success",
+    "qualifier": "COMPLETED_SUCCESS_HOST_ONLY",
+    "genuine_native_passed": 0,
+    "genuine_native_failed": 0,
+    "genuine_native_skipped": 0,
+    "compiled_executed_semantic_mutants": 64,
+    "first_error": null,
+    "source_mapped_authenticated": false,
+    "phase_a": "BLOCKED",
+    "physical_io": false,
+    "real_stored_auth": false,
+    "active_direct_handoff": false
+  }
 }

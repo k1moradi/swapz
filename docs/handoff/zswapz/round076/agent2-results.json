@@ -11,28 +11,30 @@
   "source_url": "https://github.com/k1moradi/swapz/commit/84283219811616b4b731e62f02db3952315035ff",
   "workflow_url": "https://github.com/k1moradi/swapz/actions/runs/45173342924",
   "workflow_run_id": 45173342924,
-  "workflow_status": "QUEUED",
+  "workflow_status": "COMPLETED_SUCCESS",
   "workflow_conclusion": null,
   "jobs": [
     {
       "name": "source-host",
       "job_id": 137688181589,
-      "status": "QUEUED",
-      "conclusion": null,
+      "status": "completed",
+      "conclusion": "success",
       "url": "https://github.com/k1moradi/swapz/actions/runs/45173342924/job/137688181589"
     },
     {
       "name": "original-uml-native",
-      "job_id": null,
-      "status": "NOT_SCHEDULED_DEPENDENT",
-      "conclusion": null
+      "job_id": 137751252293,
+      "status": "completed",
+      "conclusion": "success",
+      "id": 137751252293,
+      "url": "https://github.com/k1moradi/swapz/actions/runs/45173342924/job/137751252293"
     }
   ],
   "actual_new_exact_source_host": {
-    "gcc": "NOT_EXECUTED",
-    "clang": "NOT_EXECUTED",
-    "native_C_case_bodies_compiled_executed": 0,
-    "as_ubsan": "NOT_EXECUTED"
+    "gcc": "PASS_STRICT_ASAN_UBSAN",
+    "clang": "PASS_STRICT_ASAN_UBSAN",
+    "native_C_case_bodies_compiled_executed": 3,
+    "as_ubsan": "PASS"
   },
   "local_diagnostic_reproducer": {
     "scope": "NARROW_UNDECLARED_FUNCTION_ONLY_NOT_EXACT_SOURCE",
@@ -55,19 +57,19 @@
     "first_error": "actual.c:187:33: error: implicit declaration of function 'swapz_round072_current_selected_dm_owner' [-Werror=implicit-function-declaration]"
   },
   "native_original_kunit": {
-    "status": "NOT_EXECUTED",
-    "executed_cases": 0,
-    "passed": 0,
+    "status": "GENUINE_PINNED_ORIGINAL_UML_KUNIT_PASS_TEST_ONLY",
+    "executed_cases": 3,
+    "passed": 3,
     "failed": 0,
     "skipped": 0,
-    "json_available": false,
-    "ktap_available": false,
+    "json_available": true,
+    "ktap_available": true,
     "required_pass": 3
   },
   "new_first_error": null,
-  "conclusion": "IN_PROGRESS_NOT_PROVEN",
-  "repository_policy": "NOT_EXECUTED_NEW_SOURCE_CI_QUEUED",
-  "git_diff_check": "NOT_EXECUTED_NEW_SOURCE_CI_QUEUED",
+  "conclusion": "COMPLETED_SUCCESS",
+  "repository_policy": "VERIFIED_PASS_IN_WORKFLOW",
+  "git_diff_check": "VERIFIED_PASS_IN_WORKFLOW",
   "source_mapped_authenticated": false,
   "phase_a": "BLOCKED",
   "direct_compressed_handoff": "DISABLED",
@@ -78,5 +80,26 @@
   "production_code_modified": false,
   "raw_4096": "FULL_ORIGINAL_UNCOMPRESSED_4096",
   "memory_reclaim_owner": "LINUX_MM_ZSWAP",
-  "swapz_owner": "DISK_PACKING_GC_ONLY"
+  "swapz_owner": "DISK_PACKING_GC_ONLY",
+  "agent1_verified_terminal_20261123": {
+    "tested_source_sha": "84283219811616b4b731e62f02db3952315035ff",
+    "run_id": 45173342924,
+    "run_attempt": 1,
+    "host_job": 137688181589,
+    "native_job": 137751252293,
+    "host_conclusion": "success",
+    "native_conclusion": "success",
+    "terminal_conclusion": "success",
+    "qualifier": "COMPLETED_SUCCESS_GENUINE_PINNED_NATIVE_TEST_ONLY",
+    "genuine_native_passed": 3,
+    "genuine_native_failed": 0,
+    "genuine_native_skipped": 0,
+    "compiled_executed_semantic_mutants": null,
+    "first_error": null,
+    "source_mapped_authenticated": false,
+    "phase_a": "BLOCKED",
+    "physical_io": false,
+    "real_stored_auth": false,
+    "active_direct_handoff": false
+  }
 }

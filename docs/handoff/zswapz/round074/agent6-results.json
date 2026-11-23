@@ -80,5 +80,48 @@
     "scope": "HOST_ONLY_OR_CANCELED_NO_ORIGINAL_NATIVE",
     "no_source_auth": true,
     "no_physical_io": true
+  },
+  "agent1_verified_terminal_20261123": {
+    "tested_source_sha": "1868d599c6cf33823a36b93c962847cd6e36d475",
+    "run_id": 45145752021,
+    "run_attempt": 2,
+    "host_job": 137694941905,
+    "native_job": null,
+    "host_conclusion": "success",
+    "native_conclusion": "NOT_RUN",
+    "terminal_conclusion": "success",
+    "qualifier": "COMPLETED_SUCCESS_ATTEMPT2",
+    "genuine_native_passed": 0,
+    "genuine_native_failed": 0,
+    "genuine_native_skipped": 0,
+    "compiled_executed_semantic_mutants": 50,
+    "first_error": null,
+    "source_mapped_authenticated": false,
+    "phase_a": "BLOCKED",
+    "physical_io": false,
+    "real_stored_auth": false,
+    "active_direct_handoff": false
+  },
+  "retry_attempt_2": {
+    "run_id": 45145752021,
+    "attempt": 2,
+    "job_id": 137694941905,
+    "status": "completed",
+    "conclusion": "success",
+    "gcc_directed_assertions": 99,
+    "clang_directed_assertions": 99,
+    "gcc_compiled_executed_semantic_mutants": 25,
+    "clang_compiled_executed_semantic_mutants": 25,
+    "modeled_bytes_per_event": 3568,
+    "modeled_owned_max": 28544,
+    "scope": "HOST_MODEL_ONLY"
+  },
+  "historical_attempt_1": {
+    "run_id": 45145752021,
+    "attempt": 1,
+    "job_id": 137594490455,
+    "conclusion": "cancelled",
+    "compile_started": false,
+    "first_error": "The operation was canceled in apt dependency install"
   }
 }
