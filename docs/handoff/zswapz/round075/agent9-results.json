@@ -1,0 +1,64 @@
+{
+  "round": "075",
+  "agent": 9,
+  "task_publication_commit": "60b8e074a0e03faefe4ab79e3ae7cceac5b5a465",
+  "scope": "repair-existing-round073-source-linked-swapspace2-geometry-mutants",
+  "tested_source_commit": null,
+  "tested_source_parent": null,
+  "historical_failure": {
+    "round": "073",
+    "tested_commit": "64e5ef5eb376059f19471f7890eaf16261c1639e",
+    "run_id": 45134473707,
+    "job_id": 137557338164,
+    "conclusion": "FAILURE",
+    "first_error": "ROUND073_GEOMETRY_FIRST_ERROR nonunique-header-mutant-anchor:two-gc-reserves",
+    "full_15_per_compiler_qualified": false
+  },
+  "workflow": ".github/workflows/phase-a-round073-swapspace2-geometry-noauth.yml",
+  "run_id": null,
+  "job_id": null,
+  "jobs": [],
+  "compilers": {
+    "gcc": {
+      "ci_status": "NOT_RUN",
+      "mutants_compiled_executed_killed": null
+    },
+    "clang": {
+      "ci_status": "NOT_RUN",
+      "mutants_compiled_executed_killed": null
+    }
+  },
+  "planned_mutants_per_compiler": 18,
+  "local_excerpt_smoke": {
+    "description": "source-text-reproduced capacity-only smoke, NOT exact-repo CI",
+    "gcc": {
+      "baseline_exit": 0,
+      "assignment_mutant_exit": 3,
+      "comparison_mutant_exit": 3
+    },
+    "clang": {
+      "baseline_exit": 0,
+      "assignment_mutant_exit": 3,
+      "comparison_mutant_exit": 3
+    }
+  },
+  "original_native": {
+    "status": "NOT_APPLICABLE_HOST_ONLY",
+    "kunit_cases": null,
+    "ktap_cases": null
+  },
+  "conclusion": "IN_PROGRESS",
+  "first_error": null,
+  "source_mapped_authenticated": false,
+  "phase_a": "BLOCKED",
+  "direct_compressed_handoff": "DISABLED",
+  "forced_raw_bypass": "DISABLED",
+  "import_active": 0,
+  "actual_physical_io": false,
+  "privileged_tests": false,
+  "loaded_kernel_tests": false,
+  "owner_make_test": false,
+  "ordinary_raw_4096": "FULL_ORIGINAL_UNCOMPRESSED_4096",
+  "pressure_owner": "Linux MM/zswap natural compressed-RAM eviction alone",
+  "disk_owner": "swapz disk-only payload packing and GC"
+}

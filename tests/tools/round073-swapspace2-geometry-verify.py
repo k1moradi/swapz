@@ -26,8 +26,15 @@ DM_TARGET = ROOT / "src/kernel/dm-target.c"
 MUTANTS = (
     ("logical-zero", "authority", "if (!logical_pages)", "if (0)"),
     ("reserve-ceiling", "authority", "(logical_pages % 8U != 0U)", "0U"),
-    ("two-gc-reserves", "authority", "2U * SWAPZ_SEGMENT_BLOCKS",
-     "1U * SWAPZ_SEGMENT_BLOCKS"),
+    # Both valid occurrences live inside the SAME capacity predicate:
+    # the comparison is the minimum guard, the assignment sets the reserve.
+    # Never replace an unspecific substring throughout authority.h.
+    ("two-gc-reserves", "authority-capacity",
+     "reserve = 2U * SWAPZ_SEGMENT_BLOCKS;",
+     "reserve = 1U * SWAPZ_SEGMENT_BLOCKS;"),
+    ("gc-reserve-threshold", "authority-capacity",
+     "if (reserve < 2U * SWAPZ_SEGMENT_BLOCKS)",
+     "if (reserve < 1U * SWAPZ_SEGMENT_BLOCKS)"),
     ("cow-headroom", "authority",
      "#define SWAPZ_FOREGROUND_HEADROOM_BLOCKS SWAPZ_SEGMENT_BLOCKS",
      "#define SWAPZ_FOREGROUND_HEADROOM_BLOCKS 0U"),
@@ -49,6 +56,11 @@ MUTANTS = (
     ("byte-swapped-v1", "superblock",
      "swapz_sb_bswap_u32(raw_version) == 1U",
      "swapz_sb_bswap_u32(raw_version) == 2U"),
+    ("swap-uuid-offset", "superblock",
+     "#define SWAPZ_LINUX_SWAP_UUID_OFFSET 1036U",
+     "#define SWAPZ_LINUX_SWAP_UUID_OFFSET 1037U"),
+    ("extent-16k-bound", "codec",
+     "#define SWAPZ_MAX_BLOCKS 4U", "#define SWAPZ_MAX_BLOCKS 3U"),
     ("physical-range-overrun", "dm",
      "blocks > ctx->physical_blocks - data_block",
      "blocks == ctx->physical_blocks - data_block"),
@@ -84,6 +96,27 @@ def extract_function(source: str, signature: str) -> str:
                 return source[start:index + 1]
     fail("source-unbalanced:" + signature)
     raise AssertionError("unreachable")
+
+
+CAPACITY_SIGNATURE = "static inline int swapz_authority_capacity_window("
+
+
+def mutate_capacity_statement(source: str, anchor: str, changed: str) -> str:
+    """Replace exactly one complete statement in the real capacity function.
+
+    Protect its two distinct 2*segment sites and leave all other source bytes
+    unchanged. The assignment and comparison are tested independently.
+    """
+    function = extract_function(source, CAPACITY_SIGNATURE)
+    if function.count("2U * SWAPZ_SEGMENT_BLOCKS") != 2 or \
+            function.count("if (reserve < 2U * SWAPZ_SEGMENT_BLOCKS)") != 1 or \
+            function.count("reserve = 2U * SWAPZ_SEGMENT_BLOCKS;") != 1:
+        fail("real-capacity-gc-two-statement-source-drift")
+    if function.count(anchor) != 1 or anchor == changed:
+        fail("nonunique-capacity-statement-mutant-anchor:" + anchor)
+    if source.count(function) != 1:
+        fail("capacity-function-body-ambiguous")
+    return source.replace(function, function.replace(anchor, changed, 1), 1)
 
 
 def assert_source_invariants(authority: str, superblock: str,
@@ -175,7 +208,10 @@ def main() -> None:
         for label, target, anchor, mutation in MUTANTS:
             originals = dict(sources)
             modified_dm = dm_boundary
-            if target == "dm":
+            if target == "authority-capacity":
+                originals["authority"] = mutate_capacity_statement(
+                    originals["authority"], anchor, mutation)
+            elif target == "dm":
                 if dm_boundary.count(anchor) != 1:
                     fail("nonunique-dm-mutant-anchor:" + label)
                 modified_dm = dm_boundary.replace(anchor, mutation, 1)
@@ -186,7 +222,7 @@ def main() -> None:
             run_one(compiler, label, originals, modified_dm, fixture, True)
             count += 1
         print(f"ROUND073_GEOMETRY_{compiler.upper()}_ASAN_UBSAN_PASS "
-              f"baseline=1 semantic_mutants_compiled_executed_killed={count} "
+              f"baseline_compiled_executed=1 semantic_mutants_compiled_executed_killed={count} "
               "native_original=NOT_APPLICABLE physical_io=0 source_auth=0")
     for file in (AUTHORITY, SUPERBLOCK, CODEC, DM_TARGET):
         digest = hashlib.sha256(file.read_bytes()).hexdigest()

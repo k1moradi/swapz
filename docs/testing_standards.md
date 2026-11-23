@@ -19369,3 +19369,29 @@ handoff, forced RAW bypass and imported activation remain disabled.
 The original pinned Linux c339f4010dea8b0d754f84ace70cd1b089878ef8 MM source must be validated twice at distinct stages. After the original Round058 and Round069 source fixture composition but BEFORE the new Round072 joined original BIO/authority/decoder source is appended, verify the Round069 inherited manifest original Git pin/blob, source AUTH0 and PRE-join mm/zswap.c SHA256 against the actual source bytes. Preserve the exact validated PRE-join source snapshot before the append. AFTER Round072 joins, independently verify the final manifest original pin, disabled gates and the final SHA256 postimages for all ten exact source/copy paths, bind its inherited-manifest SHA256 to the original inherited manifest, and verify the complete final MM source is the saved validated PRE-join source plus the actual original BIO and joined decoder KUnit fixture bytes. Do not compare the inherited digest against the changed final source, and do not replace any independent original or final SHA with a newly spoofed digest. Retain source-true host negative execution for tampered inherited source/manifest or changed original Linux pin/blob, spoofed final digest, omitted joined fixture witness, tampered real C copies, altered manifest SHA binding and wrong stage order. Preserve the existing original-source GCC+Clang strict ASan+UBSan compiled-and-executed semantic C mutant tests and real product authority link, with no compiler failure counted as a mutant kill.
 
 Only then attempt a genuine disposable pinned Linux UML boot and four-case joined KUnit (LZ4/LZO1X original exact compressed, original GC pin and lower callback negative). Qualify native success only with actual JSON and KTAP four PASS and zero failures/skips/crashes/errors. Inherited host and source-staging PASS never replace original native qualification. The historical Round072 native job 137557900023 (run45127549397) FAILED at an out-of-phase SHA assertion before Linux compiler/any KUnit, and must remain permanently recorded as FAILED, even if a NEW exact-source rerun qualifies. Original zswap/MM alone owns compressed RAM and natural eviction. swapz manages disk packing/GC without competing reclaim/recompression. Original compressed codec remains separately volatile-tagged LZO1X/raw-LZ4, not ordinary RAW_4096 (full original UNCOMPRESSED 4096). PHASE_A=BLOCKED, SOURCE_MAPPED_AUTHENTICATED=0, imported ACTIVE0, direct handoff and forced RAW OFF. Protected SWAPSPACE2 first4096/UUID/partition/map20 intact; no privileged/loaded/actual pressure or physical media operation. Both Agent5 Round075 evidence.md and results.json and corrected old Round072 MD/JSON are committed to GitHub sole main with actual CI job IDs/first error.
+
+## Round075 Agent9 — duplicate-but-distinct production GC reserve mutation sites (2026-11-23)
+
+A source-host geometry test may encounter the same critical literal more than
+once *legitimately*. In `swapz_authority_capacity_window()`, both the
+`if (reserve < 2U * SWAPZ_SEGMENT_BLOCKS)` test and the
+`reserve = 2U * SWAPZ_SEGMENT_BLOCKS;` assignment are necessary, independently
+meaningful and expected. A verifier must extract the actual named C function,
+assert both exact full statements each appear once, fail closed on source drift,
+and mutate one complete statement at a time while preserving the other and all
+unrelated source bytes. Selecting the first global substring is not sound.
+
+Add a source-independent logical-page case whose ceil(pages/8) falls between
+one and two segments to kill a threshold-only mutant; a small-page case must
+kill the assignment-only mutant. Independently assert Linux SWAPSPACE2 UUID
+at its absolute physical byte offset 1036 so changing the production header
+constant cannot change the test oracle with it. Enforce the source's 4/8/16KiB
+extent maximum with a runtime semantic guard, not a static-assert compilation
+failure passed off as a mutation kill. Preserve first physical 4096, separate
+GC reserve and foreground headroom, 20-byte volatile mapping and payload-only
+zero padding. Each mutant of a current source header or extracted DM function
+must compile **and execute** under independently strict GCC and Clang C23/C2x
+-Werror with ASan+UBSan; compiler errors and source-anchor failures must fail
+CI, never count as semantic kills. A Python scope-only regression is additional
+evidence, not a substitute for executed source C. No physical, privileged,
+loaded-kernel or activation claim follows from this qualification.

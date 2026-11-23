@@ -6,6 +6,7 @@ on:
       - '.github/workflows/phase-a-round073-swapspace2-geometry-noauth.yml'
       - 'tests/runtime/native/fixtures/round073-swapspace2-geometry.c'
       - 'tests/tools/round073-swapspace2-geometry-verify.py'
+      - 'tests/tools/round075-geometry-unique-reserve-verify.py'
   workflow_dispatch:
 permissions:
   contents: read
@@ -26,6 +27,7 @@ jobs:
           test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
           test -z "$(git status --porcelain)"
           git diff --check HEAD^ HEAD
+          python3 -B tests/tools/round075-geometry-unique-reserve-verify.py
           python3 -B tests/tools/round073-swapspace2-geometry-verify.py
       - name: Enforce inherited canonical testing-standards prefix
         env:

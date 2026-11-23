@@ -79,6 +79,12 @@ static int capacity(void)
     CHECK(!swapz_authority_capacity_window(256U, 1023U, &reserve), "segment-floor");
     CHECK(swapz_authority_capacity_window(256U, 1024U, &reserve), "four-segment-max");
     CHECK(reserve == 512U, "two-segment-reserve-exact");
+    /* The minimum COMPARISON must still apply if ceil(pages/8) lies
+     * between one and two segments. Mutation of the separate assignment
+     * cannot be used to cover this independent threshold condition. */
+    CHECK(swapz_authority_capacity_window(2048U, 3328U, &reserve),
+          "gc-minimum-threshold-admission");
+    CHECK(reserve == 512U, "gc-minimum-threshold-exact");
     CHECK(!swapz_authority_capacity_window(257U, 1024U, &reserve), "raw-overfill");
     CHECK(reserve == 512U, "reserve-no-write-on-failure");
     CHECK(swapz_authority_capacity_window(4097U, 6145U, &reserve), "ceil-reserve");
@@ -97,6 +103,12 @@ static int linux_header(void)
     struct swapz_linux_swap_layout layout = {0};
     header(1024U, 0U, false);
     CHECK(swapz_linux_swap_header_parse(backing, sizeof(backing), &layout), "linux-v1");
+    /* The on-disk Linux UUID position is independently fixed at offset
+     * 1036; deriving this expectation from a mutated source constant
+     * would make an off-by-one bug invisible to the host fixture. */
+    for (unsigned int index = 0; index < 16U; ++index)
+        CHECK(backing[1036U + index] == (uint8_t)(0xa0U + index),
+              "fixed-swapspace2-uuid-offset");
     CHECK(layout.last_page == 1024U && layout.bad_pages == 0U &&
           layout.byte_swapped == 0U, "header-fields");
     CHECK(swapz_linux_swap_clean_segment_count(backing, &layout, 256U) == 4U,
@@ -139,6 +151,8 @@ static int backing_address_and_padding(void)
                                .data_start_block = 1U,
                                .segment_backing_pages = NULL};
     const unsigned int block_counts[] = {1U, 2U, 4U};
+    /* Runtime checks (not compile-time failures) catch a changed current
+     * source extent limit; every semantic mutant must compile and execute. */
     static uint8_t original[SWAPZ_BLOCK_BYTES];
     struct swapz_linux_swap_layout layout = {0};
 
@@ -165,6 +179,7 @@ static int backing_address_and_padding(void)
         original[index] = (uint8_t)((index * 17U + 1U) & 255U);
     for (unsigned int extent = 0; extent < 3U; ++extent) {
         const unsigned int blocks = block_counts[extent];
+        CHECK(blocks <= SWAPZ_MAX_BLOCKS, "source-extent-class-bounds");
         const unsigned int start = extent * 4U;
         const size_t physical_bytes = (size_t)blocks * SWAPZ_BLOCK_BYTES;
         const size_t payload_bytes = extent == 0U ? SWAPZ_BLOCK_BYTES :
