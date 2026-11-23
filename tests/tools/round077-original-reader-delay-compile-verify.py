@@ -93,6 +93,36 @@ def compiler_mode(compiler: str, directory: Path) -> str:
     raise FirstError("compiler-no-C23-mode:" + compiler)
 
 
+def original_delay_missing_declaration_rejected(
+        result: subprocess.CompletedProcess[str]) -> bool:
+    """Accept only the FIRST compiler error naming the absent original call.
+
+    GCC and Clang emit different C23 diagnostics for a missing declaration.
+    A driver-flag, syntax, unrelated symbol or linker error is not a kill.
+    """
+    if result.returncode == 0:
+        return False
+    first_error = next(
+        (line.partition("error:")[2].strip()
+         for line in result.stderr.splitlines() if "error:" in line),
+        "",
+    )
+    return re.match(
+        r"^(?:implicit declaration of function|call to undeclared function|"
+        r"use of undeclared identifier)\s+['\"‘]?usleep_range\b['\"’]?",
+        first_error, re.IGNORECASE,
+    ) is not None
+
+
+def first_compiler_diagnostic(result: subprocess.CompletedProcess[str]) -> str:
+    """Log actual bounded error content without temporary absolute paths."""
+    return next(
+        ("error:" + line.partition("error:")[2] for line in
+         result.stderr.splitlines() if "error:" in line),
+        "NO_COMPILER_ERROR",
+    )[:180]
+
+
 def compiler_check(compiler_name: str, header: str) -> None:
     compiler = shutil.which(compiler_name)
     require(compiler is not None, "missing-compiler:" + compiler_name)
@@ -148,11 +178,47 @@ def compiler_check(compiler_name: str, header: str) -> None:
         # missing declaration itself, not an unused driver flag, must fail.
         rejected = run([*flags, str(negative), "-o",
                         str(directory / "missing-declaration")])
-        require(rejected.returncode != 0 and
-                "usleep_range" in rejected.stderr and
-                re.search(r"implicit declaration|undeclared function",
-                          rejected.stderr, re.IGNORECASE) is not None,
-                compiler_name + ":missing-original-declaration-not-rejected")
+        # Emit actual compiler exit and first diagnostic BEFORE classification.
+        # Keep -Werror, ASan+UBSan and real link-capable compile intact.
+        print("OBSERVED ROUND079_ORIGINAL_DELAY_NEGATIVE compiler=" +
+              compiler_name + " returncode=" + str(rejected.returncode) +
+              " first_diagnostic=" + first_compiler_diagnostic(rejected),
+              flush=True)
+        require(original_delay_missing_declaration_rejected(rejected),
+                compiler_name + ":missing-original-declaration-not-rejected:"
+                + "returncode=" + str(rejected.returncode) +
+                ":" + first_compiler_diagnostic(rejected))
+        # Independently compile an unrelated typo with the SAME strict flags.
+        # It must fail compilation, but may NOT masquerade as our mutation.
+        unrelated = directory / "unrelated-identifier.c"
+        unrelated.write_text(common +
+                             main.replace(CALL, "unrelated_identifier(1000, 2000);"))
+        typo = run([*flags, str(unrelated), "-o",
+                    str(directory / "unrelated-identifier")])
+        require(typo.returncode != 0 and
+                not original_delay_missing_declaration_rejected(typo),
+                compiler_name + ":unrelated-compiler-error-falsely-qualified:"
+                + first_compiler_diagnostic(typo))
+        # An invalid compiler option is a driver failure, not evidence of
+        # the source-level missing declaration, even if stderr says "error".
+        invalid_option = run([compiler, mode,
+                              "-fround079-definitely-unsupported",
+                              "-fsyntax-only", str(negative)])
+        require(invalid_option.returncode != 0 and
+                not original_delay_missing_declaration_rejected(invalid_option),
+                compiler_name + ":invalid-compiler-flag-falsely-qualified")
+        # Synthetic classifier negatives catch a zero compiler exit, a
+        # different function name, and a false positive from linker failure.
+        for outcome in (
+            subprocess.CompletedProcess([], 0, "",
+                "source.c:1:2: error: use of undeclared identifier 'usleep_range'\n"),
+            subprocess.CompletedProcess([], 1, "",
+                "source.c:1:2: error: use of undeclared identifier 'usleep_range_wrong'\n"),
+            subprocess.CompletedProcess([], 1, "",
+                "ld: error: undefined reference to usleep_range\n"),
+        ):
+            require(not original_delay_missing_declaration_rejected(outcome),
+                    compiler_name + ":diagnostic-counterexample-accepted")
         print("PASS ROUND077_ORIGINAL_DELAY_" + compiler_name.upper() +
               " original_pinned_inline_compiled_executed=1 "
               "missing_declaration_Werror_compile_negative=1 "
@@ -183,6 +249,12 @@ def main() -> int:
             (PIN, original, delay, fixture.replace(
                 "/* ROUND073_ORIGINAL_READER_PIN_GC_BEGIN", "/* missing")),
             (PIN, original, delay, fixture.replace(CALL, "/* no call */")),
+            (PIN, original, delay, fixture.replace(
+                "for (iteration = 0; iteration < 1500U &&",
+                "for (iteration = 0; iteration < 0U &&")),
+            (PIN, original, delay, fixture.replace(
+                INCLUDE, "/* moved declaration */").replace(
+                    CALL, CALL + "\n" + INCLUDE)),
         )
         for index, row in enumerate(negatives):
             try:
@@ -193,8 +265,8 @@ def main() -> int:
         for name in ("gcc", "clang"):
             compiler_check(name, ORIGINAL_INLINE)
         print("PASS ROUND077_ORIGINAL_DELAY_SOURCE_PIN=YES "
-              "original_linux_header_blob=YES negative_source_provenance=8 "
-              "gcc_clang_executed=2 missing_include_compile_negatives=2 "
+              "original_linux_header_blob=YES negative_source_provenance=10 "
+              "gcc_clang_executed=2 missing_include_compile_negatives=2 unrelated_C_compiler_negatives=2 unsupported_driver_negatives=2 "
               "AUTH0 PHASE_A=BLOCKED native_KUnit=SEPARATE_JOB", flush=True)
         return 0
     except (FirstError, OSError, ValueError, subprocess.TimeoutExpired) as error:

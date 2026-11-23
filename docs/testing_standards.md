@@ -19530,3 +19530,52 @@ exact source SHA, run/job, both compiler mutation counts and first real error.
 All original Linux natural-eviction authority stays in MM/zswap, while swapz
 only packs/GCs data-only 4/8/16KiB payloads with 20-byte volatile RAM map.
 All activation gates remain OFF and Phase A BLOCKED.
+
+
+## Round079 Agent10 strict Clang missing-delay-declaration error classification
+
+Round077 exact source 04b190b00131c1d40254acd2279e6240a11913d0,
+run45179168125 host job137708170190 FAILED:
+"clang:missing-original-declaration-not-rejected".
+Dependent original UML native job137775410103 SKIPPED (zero KUnit).
+Round073 original source ecaf63cb7860879364a6e3943884bc30e578ca63
+separately FAILED compiling usleep_range before KUnit; preserve both reds.
+
+Clang in strict C23 can reject a call with no original delay prototype
+as "error: use of undeclared identifier 'usleep_range'"; GCC uses
+"error: implicit declaration of function 'usleep_range'", and other
+Clang versions can use "call to undeclared function 'usleep_range'".
+The negative diagnostic matcher must print the actual compiler exit code
+and bounded first error content (without absolute host paths) BEFORE
+deciding whether it rejected this exact missing declaration. Require a
+nonzero exit and the FIRST compiler error with the specific symbol and
+a correct declaration diagnostic. Compiler driver options, unrelated
+missing symbols, linker errors and zero compiler exits are NOT valid
+negative outcomes, regardless of other stderr text. Compile unrelated
+symbol and unsupported flag counterexamples independently. Preserve
+strict GCC/Clang C23/C2x -Wall -Wextra -Wconversion -Wshadow -Werror,
+-Werror=implicit-function-declaration and ASan+UBSan; no warning
+suppression or positive mock substitute.
+
+Use pinned original Linux include/linux/delay.h Git blob
+82409e55b6aedc39132d2adc60c028ada12a603b for the exact inline
+usleep_range function, and original mm/zswap.c Git blob
+ae19e301fced7e357a4c7587dfdd6abb890b9163 for untouched provenance.
+Genuine positive host tests compile and execute the fixture's bounded
+usleep_range(1000, 2000) call, asserting real callback count and range.
+Preserve test-only guarded delay include, bounded 1500-iteration
+close/drain, original LZO1X/raw LZ4 reader-pin GC tests and independent
+decoder life. Retain inherited 10 original-source, 14 real product
+authority and 2 decoder-lifetime independently compiled AND executed
+semantic mutants per compiler; a negative *compilation* does not count
+as an executed semantic mutant.
+
+Only genuinely compiled and booted pinned original Linux UML, after
+host PASS, and actual native JSON+KTAP exact 4/4 PASS zero failed,
+skipped or crashed can qualify original reader/GC KUnit. Source auth0,
+Phase A BLOCKED, all activation gates OFF. Linux MM/zswap alone owns
+compressed RAM natural pressure eviction; swapz disk-only pack and GC
+with no second reclaim or recompression. Original LZO1X/raw LZ4 bytes
+need separate authenticated immutable preerase source and retained
+independent decoder; ordinary RAW_4096 is complete ORIGINAL
+UNCOMPRESSED 4096. No privileged/physical/real-pressure tests.
