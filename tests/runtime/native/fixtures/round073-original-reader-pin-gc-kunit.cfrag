@@ -6,6 +6,9 @@
  * endio completes. Decoder lease is independent of retired source storage.
  */
 #if defined(SWAPZ_ROUND073_ORIGINAL_READER_PIN_GC_KUNIT) && IS_ENABLED(CONFIG_KUNIT)
+/* Pinned original Linux include/linux/delay.h owns usleep_range().
+ * Keep the bounded, sleepable close-drain wait under strict -Werror. */
+#include <linux/delay.h>
 #include "swapz_round073/zswap-import-decoder-owner.c"
 
 #define SWAPZ_R073_LOGICAL 37U

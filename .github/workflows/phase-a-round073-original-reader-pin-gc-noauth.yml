@@ -6,6 +6,7 @@ on:
       - 'tests/runtime/native/fixtures/round073-original-reader-pin-gc-kunit.cfrag'
       - 'tests/tools/round073-stage-original-reader-pin-gc.py'
       - 'tests/tools/round073-original-reader-pin-gc-verify.py'
+      - 'tests/tools/round077-original-reader-delay-compile-verify.py'
       - '.github/workflows/phase-a-round073-original-reader-pin-gc-noauth.yml'
       - 'src/kernel/authority.c'
       - 'src/kernel/zswap-import-decoder-owner.c'
@@ -43,11 +44,32 @@ jobs:
           git diff --check HEAD^ HEAD
           python3 -B tests/tools/round073-original-reader-pin-gc-verify.py self-test
           python3 -B tests/tools/round073-original-reader-pin-gc-verify.py host
+      # This original kernel sparse read happens AFTER the clean repo and
+      # policy checks, so nested original-linux remains test-only and cannot
+      # taint the tracked checkout cleanliness preflight.
       - name: Canonical cumulative testing standards and no-extra-branch policy
         env:
           SWAPZ_PUSH_BEFORE_SHA: ${{ github.event.before }}
         run: python3 -B tests/runtime/native/repository-policy-test.py --enforce
 
+      - name: Checkout pinned original Linux declaration and source exact blobs
+        uses: actions/checkout@v4
+        with:
+          repository: torvalds/linux
+          ref: c339f4010dea8b0d754f84ace70cd1b089878ef8
+          fetch-depth: 1
+          path: original-linux
+          persist-credentials: false
+          sparse-checkout: |
+            include/linux/delay.h
+            mm/zswap.c
+          sparse-checkout-cone-mode: false
+      - name: Compile execute original pinned inline and reject undeclared source call
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          test "$(git -C original-linux rev-parse HEAD)" = c339f4010dea8b0d754f84ace70cd1b089878ef8
+          python3 -B tests/tools/round077-original-reader-delay-compile-verify.py --linux-root original-linux
   original-linux-uml-reader-pin-gc-kunit:
     needs: original-reader-strict-source-host
     runs-on: ubuntu-24.04

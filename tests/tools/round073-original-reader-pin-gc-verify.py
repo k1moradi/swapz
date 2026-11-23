@@ -76,6 +76,11 @@ def verify_preflight() -> None:
     require(fixture.count(
         "kunit_test_suite(swapz_round073_original_reader_suite);") == 1,
         "unique-original-KUnit-suite")
+    require(fixture.count("#include <linux/delay.h>") == 1 and
+            fixture.index("#include <linux/delay.h>") <
+            fixture.index("usleep_range(1000, 2000);") and
+            "for (iteration = 0; iteration < 1500U &&" in fixture,
+            "original-pin-usleep_range-declaration-or-context-missing")
     for case in CASES:
         require(fixture.count("KUNIT_CASE(" + case + ")") == 1,
                 "missing-native-unique-case:" + case)

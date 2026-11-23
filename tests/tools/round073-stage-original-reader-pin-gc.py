@@ -92,6 +92,11 @@ def plan(current: bytes, manifest: dict, original: dict[str, bytes],
             b"swapz_round069_native_gc_copy_fua(" in bio_fixture and
             b'#include "swapz_round069/authority.c"' in bio_fixture,
             "inherited-original-BIO-real-authority-reader")
+    require(fixture.count(b"#include <linux/delay.h>") == 1 and
+            fixture.index(b"#include <linux/delay.h>") <
+            fixture.index(b"usleep_range(1000, 2000);") and
+            b"for (iteration = 0; iteration < 1500U &&" in fixture,
+            "original-native-delay-header-or-bounded-context")
     require(fixture.count(TEST_BEGIN) == 1 and
             fixture.count(TEST_END) == 1 and fixture.count(SUITE) == 1 and
             b"swapz_import_lower_begin_read(" in fixture and
@@ -190,6 +195,10 @@ def main() -> int:
              current, base, original,
              {**product, "zswap-import-decoder-owner.c": b"bad"},
              fixture, source_fixture, bio_fixture),
+            ("original-native-delay-header-or-bounded-context",
+             current, base, original, product,
+             fixture.replace(b"#include <linux/delay.h>", b"/* missing */"),
+             source_fixture, bio_fixture),
             ("new-original-reader-GC-lease-KUnit-fixture",
              current, base, original, product,
              fixture.replace(SUITE, b"/* killed */"), source_fixture,
