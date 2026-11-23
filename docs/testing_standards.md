@@ -19055,3 +19055,26 @@ PHASE_A=BLOCKED; direct compressed handoff, forced RAW bypass and imports are OF
 ## Round072 Agent2 — exact-source original DM table/BIO requalification (2026-11-23)
 
 Preserve all Round071 original DM source-owner negatives and exact original Linux pin `c339f4010dea8b0d754f84ace70cd1b089878ef8`. A source-host workflow MUST run `git diff --check HEAD^ HEAD` before source-compiled GCC/Clang ASan+UBSan and genuine compiled-and-executed semantic-C mutants. Previously red Round071 Agent2 exact-source commit `07ccd88843a3fd988b15e9f5dea4c16fe4d3a365` failed *before compiler* because of trailing spaces at `docs/handoff/zswapz/round071/agent2-evidence.md:3-6`; never count that failed job or skipped original UML job as native PASS. Fix only that whitespace without dropping the previous evidence. The unchanged 12 source-C owner mutants and new selected-active-table/target/original BIO/native table-generation/requeue/teardown negative witness must both compile and execute under strict GCC+Clang `-Werror -fsanitize=address,undefined` with meaningful semantic mutants (at least six new). New native KUnit must compile actual original Linux `struct dm_target`, `struct bio`, and staged original `struct dm_table.swapz_round065_incarnation`, report exact JSON/KTAP three passing cases with zero skips only if actually executed, and verify the inherited exact postimage plus eight refusal mutations. A test-only selected target or externally passed table is NOT an authenticated, currently selected production device or original STORED source; a successful mock terminal state is NOT actual product `bio_endio()`, lower durable FUA, or source authentication. If original UML is blocked, report first exact compiler/line/phase error rather than waiving it. Commit the complete prior + peer standards prefix and append only, keep all Phase A activation gates OFF, preserve ordinary `RAW_4096` as original uncompressed 4096 and distinct volatile original codec tag, and prohibit extra zswap reclamation, device activation, loaded, privileged, physical and natural-pressure experiments. Mandatory machine-readable `round072/agent2-results.json` and human `agent2-evidence.md` must be directly committed to GitHub with exact source and terminal CI IDs, not delivered as a chat or downloaded file.
+
+## Round072 original zswap codec family versus swapz disk/RAW host regression
+
+The independent Round072 Agent7 rootless fixture compiles and executes the actual
+read-only `src/kernel/zswap-import-codec.h`, `zswap-direct-handoff.h`,
+`zswap-import-admission.h`, `codec.h`, `codec.c`, and `authority.h`
+interfaces under GCC and Clang strict C23 ASan+UBSan. The host must compile
+and execute each negative-control C mutant independently, report its first
+bounded source check on failure, preserve a separate authentic original-codec
+volatile tag, and reject accidental numeric equality across original LZO1X,
+obsolete direct ZSTD, and swapz disk delta64/shuffle/LZ4 encodings.
+Original raw LZ4 decoding may use an unframed host-generated block plus an
+independently computed SHA-256; this is **not** authenticated original Linux
+zswap provenance or proof of original source lifetime. Without an actual pinned
+kernel LZO decoder/provider lease, LZO-positive decode is NOT_RUN and its
+opaque payload must never become ordinary RAW or swapz disk-coded.
+The ordinary RAW_4096 fallback must carry the **whole original uncompressed**
+4096 bytes. The 20-byte volatile map ABI, immutable physical header first
+4096 bytes, zero-padded 4/8/16KiB extents, exact CRC/length and source epoch
+must remain fail-closed. The host-only KTAP must not be called native KUnit,
+and it must not certify physical FUA, production admission, or real upper ACK.
+No recompression, a second zswap reclaimer, Phase A activation, privileged
+swap workload, disk mutation, or extra heap allocation is authorized.
