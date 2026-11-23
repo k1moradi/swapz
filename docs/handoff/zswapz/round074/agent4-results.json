@@ -1,0 +1,96 @@
+{
+  "schema": "swapz.round074.agent4.results.v1",
+  "round": "074",
+  "agent": 4,
+  "owner": "original-pool-RCU-source-anchored-host-lifetime",
+  "task_commit": "d62552f7048d5a512c7a0a79b86558fa228b31f2",
+  "source_commit": "14f8fe29280f0f77b1bf013aef8904913eaa869f",
+  "source_parent": "da344b1937bd3df66627e2659d4a197808918564",
+  "tested_source_sha": "14f8fe29280f0f77b1bf013aef8904913eaa869f",
+  "original_linux_pin": "c339f4010dea8b0d754f84ace70cd1b089878ef8",
+  "original_mm_zswap_blob": "ae19e301fced7e357a4c7587dfdd6abb890b9163",
+  "modified_paths": [
+    "tests/runtime/native/fixtures/round074-original-pool-lifetime-boundaries.c",
+    "tests/tools/round074-original-pool-lifetime-boundaries-verify.py",
+    ".github/workflows/phase-a-round074-original-pool-lifetime-host-noauth.yml",
+    "docs/testing_standards.md"
+  ],
+  "production_c_modified": false,
+  "status": "QUEUED",
+  "conclusion": "PENDING",
+  "workflow_run_id": 45145423813,
+  "workflow_url": "https://github.com/k1moradi/swapz/actions/runs/45145423813",
+  "jobs": [
+    {
+      "name": "original-source-host",
+      "job_id": 137593390545,
+      "url": "https://github.com/k1moradi/swapz/actions/runs/45145423813/job/137593390545",
+      "status": "queued",
+      "conclusion": null
+    }
+  ],
+  "local_source_c_host": {
+    "status": "PASS",
+    "compiler_baselines_executed": 2,
+    "close_cycles_per_baseline": 48,
+    "compiled_executed_c_semantic_mutants": 20,
+    "compilers": [
+      "gcc",
+      "clang"
+    ],
+    "standard": "c2x",
+    "werror": true,
+    "asan": true,
+    "ubsan": true,
+    "model_only": true
+  },
+  "source_linked_ci": {
+    "status": "QUEUED",
+    "original_pinned_sha_verified": null,
+    "original_staged_postimage_sha256": null,
+    "source_semantic_mutants_rejected": null,
+    "original_pin_blob_negatives_rejected": null,
+    "expected_source_semantic_mutants": 9,
+    "expected_pin_blob_mutants": 2
+  },
+  "native_kunit_round074": {
+    "status": "NOT_RUN_HOST_ONLY",
+    "executed_cases": 0,
+    "json_ktap_verified": false
+  },
+  "historical_round072_native": {
+    "source_commit": "95f2310d899f8aed780c52946d52424d2052eeb2",
+    "workflow_run_id": 45127241581,
+    "host_job_id": 137534301766,
+    "native_job_id": 137542250005,
+    "conclusion": "SUCCESS",
+    "native_json_ktap_cases_passed": 6,
+    "native_cases_failed": 0,
+    "native_cases_skipped": 0,
+    "original_close_cycles": 48,
+    "compiled_executed_c_mutants": 22,
+    "evidence_commit": "d28703d6e3756b48f3d98222eb3f4f0e47e9e5c2"
+  },
+  "first_error": null,
+  "model_limitations": [
+    "Source-linked original static audit only; new Round074 C code is an independent pthread model, not original Linux kernel execution",
+    "No authentic selected STORED swapcache owner proof",
+    "No actual durable lower FUA/flush or once-only real upper BIO ACK",
+    "No real loaded module unload or physical swap experiment"
+  ],
+  "source_mapped_authenticated": false,
+  "phase_a": "BLOCKED",
+  "direct_compressed_handoff": "DISABLED",
+  "forced_raw_bypass": "DISABLED",
+  "import_active": false,
+  "ordinary_raw_4096": "FULL_ORIGINAL_UNCOMPRESSED_4096",
+  "original_compressed_codec": "VOLATILE_SEPARATE_TAG_NO_RECOMPRESSION",
+  "compressed_ram_owner": "LINUX_MM_ZSWAP_NATURAL_EVICTION_ONLY",
+  "swapz_owner": "DISK_PACKING_GC_ONLY",
+  "physical_io": false,
+  "privileged_tests": false,
+  "loaded_kernel_tests": false,
+  "pressure_tests": false,
+  "new_periodic_monitor": false,
+  "branches_prs_force": false
+}
