@@ -1,0 +1,271 @@
+/* SPDX-License-Identifier: GPL-2.0-only */
+/*
+ * Round071 test-only suffix to the byte-verified ORIGINAL mm/zswap.c.
+ * Calls the original pool creation, per-CPU crypto compressor, ref kill,
+ * XArray removal and RCU destructor, without swap activation or pressure.
+ * The independently linked dormant product decoder owns its read lease;
+ * neither a source-pool pointer nor its crypto transform survives retirement.
+ * The stage inserts a destruction-complete counter into the original release
+ * path solely to distinguish actual tfm/zsmalloc retirement from XA removal.
+ */
+#ifdef CONFIG_KUNIT
+#include <kunit/test.h>
+#include <linux/completion.h>
+#include <linux/delay.h>
+#include <linux/jiffies.h>
+#include <linux/kthread.h>
+#include <linux/lzo.h>
+#include <linux/lz4.h>
+#include "../lib/swapz-round068-owner-kunit/zswap-import-decoder-owner.h"
+
+#define SWAPZ_R071_CLOSE_CYCLES 24U
+#define SWAPZ_R071_WAIT_MS 3000U
+
+struct swapz_round071_close_context {
+    struct swapz_zswap_import_decoder_owner *owner;
+    struct completion started;
+    struct completion finished;
+    int result;
+};
+
+static int swapz_round071_close_thread(void *argument)
+{
+    struct swapz_round071_close_context *context = argument;
+
+    complete(&context->started);
+    context->result =
+        swapz_zswap_import_decoder_owner_close_and_drain(context->owner);
+    complete(&context->finished);
+    return 0;
+}
+
+/* Only the original pool's actual crypto_acomp instance produces this stream. */
+static int swapz_round071_compress_in_original_pool(
+    struct zswap_pool *pool, const u8 *original_page, u8 *source_stream,
+    unsigned int *compressed_length)
+{
+    struct crypto_acomp_ctx *context = raw_cpu_ptr(pool->acomp_ctx);
+    struct scatterlist input_sg, output_sg;
+    int error;
+
+    if (!context || !context->req || IS_ERR_OR_NULL(context->acomp))
+        return -ENODEV;
+    mutex_lock(&context->mutex);
+    sg_init_one(&input_sg, original_page, PAGE_SIZE);
+    sg_init_one(&output_sg, source_stream, PAGE_SIZE);
+    acomp_request_set_params(context->req, &input_sg, &output_sg,
+                             PAGE_SIZE, PAGE_SIZE);
+    error = crypto_wait_req(crypto_acomp_compress(context->req),
+                            &context->wait);
+    if (!error) {
+        *compressed_length = context->req->dlen;
+        if (!*compressed_length || *compressed_length > PAGE_SIZE)
+            error = -EOVERFLOW;
+    }
+    mutex_unlock(&context->mutex);
+    return error;
+}
+
+static void swapz_round071_original_pool_retirement_codec(struct kunit *test,
+                                                           u8 original_codec,
+                                                           const char *compressor)
+{
+    struct swapz_zswap_import_record record = {
+        .logical_page = 71U, .generation = 73U,
+        .stored_entry_identity = 79U, .store_generation = 83U,
+        .gc_epoch = 89U, .decoded_length = SWAPZ_BLOCK_BYTES,
+        .representation = SWAPZ_ZSWAP_IMPORT_REPRESENTATION,
+        .version = 1U, .stored_eviction = 1U,
+        .immutable_owned_copy = 1U,
+    };
+    struct swapz_zswap_import_read_authority authority = {
+        .logical_page = 71U, .generation = 73U,
+        .stored_entry_identity = 79U, .store_generation = 83U,
+        .gc_epoch = 89U, .mapping_published_after_durable_write = 1U,
+        .foreground_write_committed_once = 1U,
+        .upper_write_ack_count = 1U, .current_owned_ram_session = 1U,
+    };
+    struct zswap_pool *pool = NULL;
+    u8 *original_page, *source_stream, *owned_stream, *scratch, *output;
+    unsigned int compressed_length = 0U, source_pool_id = 0U;
+    unsigned int offset, cycle, poll;
+    int error, destroyed_before;
+    bool retired = false;
+
+    /* The original zswap CPU-hotplug callback must be registered.
+     * ZSWAP_DEFAULT_ON starts ordinary RAM zswap, not swap I/O. */
+    KUNIT_ASSERT_EQ(test, zswap_init_state, ZSWAP_INIT_SUCCEED);
+    KUNIT_ASSERT_TRUE(test, zswap_has_pool);
+    KUNIT_ASSERT_FALSE(test, zswap_shrinker_enabled);
+    KUNIT_ASSERT_FALSE(test, IS_ENABLED(CONFIG_ZSWAP_SHRINKER_DEFAULT_ON));
+    original_page = kunit_kmalloc(test, PAGE_SIZE, GFP_KERNEL);
+    source_stream = kunit_kmalloc(test, PAGE_SIZE, GFP_KERNEL);
+    owned_stream = kunit_kmalloc(test, PAGE_SIZE, GFP_KERNEL);
+    scratch = kunit_kmalloc(test, PAGE_SIZE, GFP_KERNEL);
+    output = kunit_kmalloc(test, PAGE_SIZE, GFP_KERNEL);
+    KUNIT_ASSERT_NOT_NULL(test, original_page);
+    KUNIT_ASSERT_NOT_NULL(test, source_stream);
+    KUNIT_ASSERT_NOT_NULL(test, owned_stream);
+    KUNIT_ASSERT_NOT_NULL(test, scratch);
+    KUNIT_ASSERT_NOT_NULL(test, output);
+    for (offset = 0; offset < PAGE_SIZE; ++offset)
+        original_page[offset] = (u8)((offset % 64U) ^ (offset / 512U));
+    destroyed_before = atomic_read(&swapz_round071_destroy_complete);
+    pool = zswap_pool_create((char *)compressor);
+    if (!pool) {
+        KUNIT_FAIL(test, "original pool creation/CPUHP/acomp unavailable");
+        return;
+    }
+    source_pool_id = pool->idx;
+    KUNIT_EXPECT_PTR_EQ(test, xa_load(&zswap_pools, source_pool_id), pool);
+    KUNIT_EXPECT_NOT_NULL(test, pool->zs_pool);
+    error = swapz_round071_compress_in_original_pool(
+        pool, original_page, source_stream, &compressed_length);
+    if (error) {
+        KUNIT_FAIL(test, "original pool crypto_acomp compression failed");
+        goto retire_pool;
+    }
+    memcpy(owned_stream, source_stream, compressed_length);
+    record.codec = original_codec;
+    record.compressed_length = compressed_length;
+    record.compressed_crc32c = swapz_crc32c_bytes(
+        owned_stream, compressed_length);
+    sha256(original_page, PAGE_SIZE, record.original_sha256);
+    authority.actual_lower_read_bytes = compressed_length;
+
+retire_pool:
+    /* Never dereference pool after percpu_ref_kill: original
+     * __zswap_pool_empty -> RCU work -> destructor owns its lifetime. */
+    percpu_ref_kill(&pool->ref);
+    pool = NULL;
+    for (poll = 0; poll < 2000U; ++poll) {
+        if (!xa_load(&zswap_pools, source_pool_id)) {
+            retired = true;
+            break;
+        }
+        usleep_range(1000, 2000);
+    }
+    /* Counter increments AFTER original per-CPU transforms, hotplug
+     * instance and zsmalloc pool have been freed. */
+    rcu_barrier();
+    flush_workqueue(system_percpu_wq);
+    KUNIT_EXPECT_TRUE(test, retired);
+    KUNIT_EXPECT_PTR_EQ(test, xa_load(&zswap_pools, source_pool_id), NULL);
+    KUNIT_EXPECT_EQ(test, atomic_read(&swapz_round071_destroy_complete),
+                    destroyed_before + 1);
+    if (error || !retired ||
+        atomic_read(&swapz_round071_destroy_complete) != destroyed_before + 1)
+        return;
+    kunit_kfree(test, source_stream);
+    /* 24 independent product owners read after REAL source retirement;
+     * each close thread must block until its own reader returns the lease. */
+    for (cycle = 0; cycle < SWAPZ_R071_CLOSE_CYCLES; ++cycle) {
+        struct swapz_zswap_import_decoder_owner owner = {};
+        struct swapz_zswap_import_decoder_lease lease = {};
+        struct swapz_zswap_import_decoder_lease late = {};
+        struct swapz_round071_close_context context = {
+            .owner = &owner, .result = -EINPROGRESS,
+        };
+        struct task_struct *closer;
+        unsigned long elapsed;
+        bool closing_seen = false;
+
+        KUNIT_ASSERT_EQ(test,
+            swapz_zswap_import_decoder_owner_init(
+                &owner, original_codec, 1U), 0);
+        KUNIT_ASSERT_EQ(test,
+            swapz_zswap_import_decoder_owner_get(&owner, &lease), 0);
+        init_completion(&context.started);
+        init_completion(&context.finished);
+        closer = kthread_run(swapz_round071_close_thread, &context,
+                             "swapz-r071-close");
+        if (IS_ERR(closer)) {
+            KUNIT_FAIL(test, "native close worker unavailable");
+            swapz_zswap_import_decoder_owner_put(&lease);
+            swapz_zswap_import_decoder_owner_close_and_drain(&owner);
+            return;
+        }
+        elapsed = wait_for_completion_timeout(&context.started,
+                    msecs_to_jiffies(SWAPZ_R071_WAIT_MS));
+        KUNIT_EXPECT_NE(test, elapsed, 0UL);
+        for (poll = 0; poll < 2000U && !READ_ONCE(owner.closing);
+             ++poll)
+            usleep_range(1000, 2000);
+        closing_seen = READ_ONCE(owner.closing) != 0U;
+        KUNIT_EXPECT_TRUE(test, closing_seen);
+        KUNIT_EXPECT_FALSE(test, completion_done(&context.finished));
+        if (closing_seen)
+            KUNIT_EXPECT_EQ(test,
+                swapz_zswap_import_decoder_owner_get(&owner, &late),
+                -ESHUTDOWN);
+        memset(output, 0xa5, PAGE_SIZE);
+        error = swapz_zswap_import_decoder_owner_decode(&lease,
+            &record, &authority, owned_stream, compressed_length,
+            scratch, PAGE_SIZE, output, PAGE_SIZE, original_page);
+        KUNIT_EXPECT_EQ(test, error, 0);
+        KUNIT_EXPECT_EQ(test, memcmp(output, original_page, PAGE_SIZE), 0);
+        if (!cycle) {
+            /* Wrong original codec or corrupt CRC must not publish any
+             * partial page to the caller. */
+            memset(output, 0x5a, PAGE_SIZE);
+            record.codec ^= 1U;
+            KUNIT_EXPECT_EQ(test,
+                swapz_zswap_import_decoder_owner_decode(&lease,
+                    &record, &authority, owned_stream,
+                    compressed_length, scratch, PAGE_SIZE,
+                    output, PAGE_SIZE, original_page), -EOPNOTSUPP);
+            record.codec ^= 1U;
+            KUNIT_EXPECT_EQ(test, output[0], (u8)0x5aU);
+            record.compressed_crc32c ^= 1U;
+            KUNIT_EXPECT_EQ(test,
+                swapz_zswap_import_decoder_owner_decode(&lease,
+                    &record, &authority, owned_stream,
+                    compressed_length, scratch, PAGE_SIZE,
+                    output, PAGE_SIZE, original_page), -EBADMSG);
+            record.compressed_crc32c ^= 1U;
+            KUNIT_EXPECT_EQ(test, output[0], (u8)0x5aU);
+        }
+        KUNIT_EXPECT_EQ(test,
+            swapz_zswap_import_decoder_owner_put(&lease), 0);
+        KUNIT_EXPECT_EQ(test,
+            swapz_zswap_import_decoder_owner_put(&lease), -EALREADY);
+        elapsed = wait_for_completion_timeout(&context.finished,
+                    msecs_to_jiffies(SWAPZ_R071_WAIT_MS));
+        if (!elapsed) {
+            /* Join before stack owner/context dies; a hang is FAIL. */
+            KUNIT_FAIL(test, "close/last-put did not wake");
+            wait_for_completion(&context.finished);
+        }
+        kthread_stop(closer);
+        KUNIT_EXPECT_EQ(test, context.result, 0);
+        KUNIT_EXPECT_EQ(test, owner.active_readers, 0U);
+        KUNIT_EXPECT_EQ(test,
+            swapz_zswap_import_decoder_owner_get(&owner, &late),
+            -ESHUTDOWN);
+    }
+}
+
+static void swapz_round071_original_lzo_pool_retirement(struct kunit *test)
+{
+    swapz_round071_original_pool_retirement_codec(test,
+        SWAPZ_ZSWAP_IMPORT_LZO1X_CODEC, "lzo");
+}
+
+static void swapz_round071_original_lz4_pool_retirement(struct kunit *test)
+{
+    swapz_round071_original_pool_retirement_codec(test,
+        SWAPZ_ZSWAP_IMPORT_LZ4_CODEC, "lz4");
+}
+
+static struct kunit_case swapz_round071_pool_retirement_cases[] = {
+    KUNIT_CASE(swapz_round071_original_lzo_pool_retirement),
+    KUNIT_CASE(swapz_round071_original_lz4_pool_retirement),
+    {}
+};
+
+static struct kunit_suite swapz_round071_pool_retirement_suite = {
+    .name = "swapz_round071_pool_retirement",
+    .test_cases = swapz_round071_pool_retirement_cases,
+};
+kunit_test_suite(swapz_round071_pool_retirement_suite);
+#endif /* CONFIG_KUNIT */
