@@ -20,39 +20,62 @@
       "name": "original-reader-strict-source-host",
       "id": 137908924597,
       "url": "https://github.com/k1moradi/swapz/actions/runs/45236328888/job/137908924597",
-      "status": "in_progress",
-      "conclusion": null
+      "status": "completed",
+      "conclusion": "success"
     },
     {
       "name": "original-linux-uml-reader-pin-gc-kunit",
-      "id": null,
-      "status": "NOT_CREATED_AS_OF_CHECKPOINT",
+      "id": 137910554522,
+      "url": "https://github.com/k1moradi/swapz/actions/runs/45236328888/job/137910554522",
+      "status": "queued",
       "conclusion": null
     }
   ],
   "source_host": {
     "gcc": {
-      "status": "IN_PROGRESS",
-      "c23": null,
-      "asan_ubsan": null,
-      "compiled_executed_original_semantic_mutants": null,
-      "compiled_executed_authority_mutants": null,
-      "compiled_executed_decoder_lifetime_mutants": null
+      "status": "SUCCESS_EXACT_SOURCE_HOST",
+      "c23": true,
+      "asan_ubsan": true,
+      "compiled_executed_original_semantic_mutants": 10,
+      "compiled_executed_authority_mutants": 14,
+      "compiled_executed_decoder_lifetime_mutants": 2,
+      "positive_original_inline_compiled_and_executed": 1,
+      "negative_missing_declaration_compile_exit": 1,
+      "negative_missing_declaration_compiler_rejected": true,
+      "first_negative_compiler_error": "error: implicit declaration of function ‘usleep_range’",
+      "unrelated_compile_negative_rejected": 1,
+      "unsupported_driver_negative_rejected": 1
     },
     "clang": {
-      "status": "IN_PROGRESS",
-      "c23": null,
-      "asan_ubsan": null,
-      "compiled_executed_original_semantic_mutants": null,
-      "compiled_executed_authority_mutants": null,
-      "compiled_executed_decoder_lifetime_mutants": null
+      "status": "SUCCESS_EXACT_SOURCE_HOST",
+      "c23": true,
+      "asan_ubsan": true,
+      "compiled_executed_original_semantic_mutants": 10,
+      "compiled_executed_authority_mutants": 14,
+      "compiled_executed_decoder_lifetime_mutants": 2,
+      "positive_original_inline_compiled_and_executed": 1,
+      "negative_missing_declaration_compile_exit": 1,
+      "negative_missing_declaration_compiler_rejected": true,
+      "first_negative_compiler_error": "error: use of undeclared identifier 'usleep_range'",
+      "unrelated_compile_negative_rejected": 1,
+      "unsupported_driver_negative_rejected": 1
     },
     "expected_original_semantic_mutants_per_compiler": 10,
     "expected_authority_per_compiler": 14,
     "expected_decoder_lifetime_per_compiler": 2,
     "corrected_negative_classifier": "FIRST_COMPILER_ERROR_MATCH_EXACT_USLEEP_RANGE",
     "unrelated_compiler_negatives_expected_per_compiler": 2,
-    "source_fixture_parser_negatives_expected": 10
+    "source_fixture_parser_negatives_expected": 10,
+    "status": "SUCCESS_EXACT_SOURCE_HOST",
+    "original_semantic_mutants_total_compiled_executed": 20,
+    "authority_semantic_mutants_total_compiled_executed": 28,
+    "decoder_lifetime_mutants_total_compiled_executed": 4,
+    "all_semantic_mutants_total_compiled_executed": 52,
+    "original_delay_positive_compiled_executed": 2,
+    "missing_declaration_compiler_rejected": 2,
+    "source_fixture_parser_negatives_rejected": 10,
+    "unrelated_compiler_negative_rejected": 2,
+    "unsupported_compiler_flag_negative_rejected": 2
   },
   "isolated_local_compiler_probe": {
     "qualifies_pinned_original_source": false,
@@ -66,7 +89,7 @@
     "sanitized_positive_runtime_qualified": false
   },
   "original_native": {
-    "status": "NOT_RUN_PENDING_SOURCE_HOST",
+    "status": "QUEUED_AFTER_SOURCE_HOST_PASS",
     "expected_cases": [
       "swapz_round073_original_lz4_old_reader_gc",
       "swapz_round073_original_lzo1x_old_reader_gc",
