@@ -1,0 +1,61 @@
+name: Round074 product RAW fallback original-codec HOST noauth
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'tests/runtime/native/fixtures/round074-real-raw-fallback-source.c'
+      - 'tests/tools/round074-real-raw-fallback-source-verify.py'
+      - 'src/kernel/authority.c'
+      - 'src/kernel/authority.h'
+      - 'src/kernel/codec.c'
+      - 'src/kernel/codec.h'
+      - 'src/kernel/zswap-import-codec.h'
+      - 'src/kernel/zswap-direct-handoff.h'
+      - 'docs/testing_standards.md'
+      - '.github/workflows/phase-a-round074-real-raw-fallback-source-noauth.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  gcc-clang-actual-product-raw-host-mutants:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    env:
+      SWAPZ_PUSH_BEFORE_SHA: ${{ github.event.before }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Sole main exact clean source and diff check
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$GITHUB_REF" = refs/heads/main
+          test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
+          test "$(git branch --show-current)" = main
+          test -z "$(git status --porcelain --untracked-files=all)"
+          git diff --check HEAD^ HEAD
+      - name: Install rootless host dependencies
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo apt-get update -qq
+          sudo DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
+            gcc clang liblz4-dev libssl-dev
+      - name: Real authority.c codec.c GCC Clang ASan UBSan and 34 independently executed semantic C mutants
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 -B tests/tools/round074-real-raw-fallback-source-verify.py \
+            --json round074-agent7-evidence/host.json \
+            --ktap round074-agent7-evidence/host.ktap
+      - name: Enforce canonical exact-source repository policy
+        run: python3 -B tests/runtime/native/repository-policy-test.py --enforce
+      - name: Preserve bounded HOST-only evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: round074-agent7-product-raw-host
+          path: round074-agent7-evidence/
+          if-no-files-found: warn

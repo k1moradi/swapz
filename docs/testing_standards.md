@@ -19303,3 +19303,29 @@ Check the actual original `zswap_pool_destroy()` hotplug/per-CPU/zsmalloc destru
 Run the separate 4096-byte full original page/owned byte copy and unique RCU target pthread lifetime MODEL using strict GCC and Clang C23 `-std=c2x -Wall -Wextra -Wconversion -Wshadow -Wpedantic -Wstrict-prototypes -Werror`, pthread, ASan+UBSan and leak detection. Compile and execute 2 baselines (48 close/wake cycles per compiler) and 20 real semantic C mutants (ten per compiler), requiring invariant-specific negative exit, not compile/link failure or sanitizer crash. Cover retired-pool access rejection without actual UAF, lost reader lease, duplicate destructor, premature RCU wake, unrelated target, close before final put, source erase before copy, missing target, late reader acceptance and truncated full 4096. No activated swap, root, loaded kernel, real physical device/pressure, duplicated original UML job or periodic monitoring.
 
 Commit targeted new fixtures/runner/workflow and this standards append on fresh sole main with `git diff --check` preflight and one-parent non-force FF, then commit BOTH `docs/handoff/zswapz/round074/agent4-evidence.md` and `agent4-results.json` with exact changed-source CI and first real error; notify issue #191 via immutable links. Original selected STORED source AUTH, durable lower FUA/flush, real upper ACK/module unload remain unqualified. `SOURCE_MAPPED_AUTHENTICATED=0`, `PHASE_A=BLOCKED`, import ACTIVE0, direct compressed handoff/forced RAW bypass OFF. Linux MM/zswap alone owns compressed RAM/natural eviction; swapz only disk packing/GC with no competing shrinker/recompression. Original volatile LZO1X/raw LZ4 stream requires independent codec tag, never ordinary complete ORIGINAL UNCOMPRESSED `RAW_4096`; protect first SWAPSPACE2 4096/UUID, partition table and 20B map.
+
+## Round074 Agent7 actual product RAW fallback and original codec refusal
+
+The isolated rootless Agent7 host regression compiles real src/kernel/authority.c
+and src/kernel/codec.c for swapz_stage, swapz_finish_raw, swapz_verify_raw and
+real volatile map CRC32C with full original UNCOMPRESSED 4096-byte payload.
+A separately identified host-only pre-admission witness must refuse original
+compressed LZO1X/raw LZ4, unknown original codec, retired source, stale epoch
+or record identity, missing immutable full-page provenance, short source capacity,
+mismatched independently computed original SHA, any swapz delta/shuffle/LZ4
+disk encoding on original compressed bytes, optional recompression, duplicate
+upper ACK or test-supplied incomplete lower WRITE/flush. A refusal must leave
+product mapping, lower memory image, and synthetic ACK count unchanged.
+Only a full original uncompressed 4096-byte image can proceed to normal RAW,
+and a short later READ, corrupt CRC or corrupted RAM map must fail closed.
+
+GCC and Clang each compile and execute all 17 independent semantic mutant
+executables under strict C23 high warnings ASan+UBSan, with missing anchors,
+compiler warnings, sanitizer errors and surviving mutants failing not counted.
+Verify protected first 4096 of physical SWAPSPACE2 in memory only, map20B and
+no physical device mutation. Host-modeled owner/WRITE/FUA/upper ACK, host KTAP,
+and product-function linkage are NOT authenticated Linux zswap STORED source,
+native KUnit, physical durability, or real upper BIO completion. Keep Linux
+MM/zswap sole natural compressed RAM eviction owner, swapz disk packing/GC
+only, no secondary shrinker or recompression, source AUTH0, Phase A BLOCKED,
+direct compressed handoff/forced RAW bypass OFF and imported ACTIVE0.
