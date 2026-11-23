@@ -224,11 +224,54 @@ static int read_host(uint8_t expected_codec, uint64_t expected_epoch,
                   scratch, SWAPZ_BLOCK_BYTES, page, SWAPZ_BLOCK_BYTES, NULL);
 }
 
+/* Test callbacks decode only host-generated unframed LZ4. The callback
+ * identities are explicit and never inferred from numeric enum equivalence. */
+static int direct_host_decode(const swapz_direct_u8 *compressed,
+                              swapz_direct_u32 compressed_length,
+                              swapz_direct_u8 *page,
+                              swapz_direct_u32 page_capacity,
+                              swapz_direct_u32 *decoded_length, void *context)
+{
+    (void)context;
+    if (!compressed || !page || !decoded_length ||
+        page_capacity != SWAPZ_BLOCK_BYTES)
+        return -EINVAL;
+    const int decoded = LZ4_decompress_safe((const char *)compressed,
+                                            (char *)page,
+                                            (int)compressed_length,
+                                            (int)page_capacity);
+    if (decoded < 0)
+        return -EBADMSG;
+    *decoded_length = (swapz_direct_u32)decoded;
+    return 0;
+}
+
+static int direct_host_crc(const swapz_direct_u8 *bytes,
+                           swapz_direct_u32 length,
+                           swapz_direct_u32 *digest, void *context)
+{
+    (void)context;
+    if (!bytes || !digest)
+        return -EINVAL;
+    *digest = swapz_crc32c_bytes(bytes, length);
+    return 0;
+}
+
+static int direct_host_sha(const swapz_direct_u8 *bytes,
+                           swapz_direct_u32 length,
+                           swapz_direct_u8 digest[SWAPZ_DIRECT_SHA256_BYTES],
+                           void *context)
+{
+    (void)context;
+    return SHA256(bytes, length, digest) ? 0 : -EIO;
+}
+
 int main(void)
 {
     static uint8_t original_page[SWAPZ_BLOCK_BYTES];
     static uint8_t compressed_page[SWAPZ_BLOCK_BYTES];
     static uint8_t read_page[SWAPZ_BLOCK_BYTES];
+    static uint8_t direct_scratch[SWAPZ_BLOCK_BYTES];
     uint8_t digest[SHA256_DIGEST_LENGTH];
     struct source_copy source = {0};
     int compressed_length;
@@ -261,6 +304,71 @@ int main(void)
         REQUIRE(memcmp(lower_image + SWAPZ_BLOCK_BYTES, compressed_page,
                        source.length) == 0);
         REQUIRE_STATUS(direct_family_compatible(&tag, SWAPZ_DIRECT_ZSWAP_LZ4), 0);
+        /*
+         * Exercise the read-only direct-owner registry gate as well as the
+         * independent original-codec decoder. No real pool or source lease.
+         */
+        struct swapz_direct_ram_descriptor direct = {
+            .version = SWAPZ_DIRECT_HANDOFF_VERSION,
+            .semantic_origin = SWAPZ_DIRECT_AUTHENTICATED_STORED,
+            .representation = SWAPZ_DIRECT_ZSWAP_COMPRESSED,
+            .codec = SWAPZ_DIRECT_ZSWAP_LZ4,
+            .payload_lifetime = SWAPZ_DIRECT_IMMUTABLY_OWNED,
+            .logical_bytes = SWAPZ_BLOCK_BYTES,
+            .compressed_length = source.length,
+            .logical_page = 1U,
+            .generation = 1U,
+            .source_record_identity = source.source_identity,
+            .pool_identity = 31U,
+            .dictionary_identity = 0U,
+            .codec_generation = 57U,
+            .payload = lower_image + SWAPZ_BLOCK_BYTES,
+            .payload_crc32c = tag.crc32c,
+        };
+        memcpy(direct.expected_page_sha256, digest, sizeof(digest));
+        const struct swapz_direct_read_identity expected = {
+            .logical_page = 1U, .generation = 1U,
+            .source_record_identity = source.source_identity,
+        };
+        struct swapz_direct_decoder decoder = {
+            .codec = SWAPZ_DIRECT_ZSWAP_LZ4,
+            .pool_identity = 31U,
+            .dictionary_identity = 0U,
+            .codec_generation = 57U,
+            .decode = direct_host_decode,
+        };
+        const struct swapz_direct_integrity integrity = {
+            .crc32c = direct_host_crc, .sha256 = direct_host_sha,
+        };
+        REQUIRE_STATUS(swapz_direct_validate(&direct, &expected,
+                                             &decoder, &integrity), 0);
+        REQUIRE_STATUS(swapz_direct_readback(&direct, &expected, &decoder,
+                       &integrity, direct_scratch, read_page), 0);
+        REQUIRE(memcmp(read_page, original_page, SWAPZ_BLOCK_BYTES) == 0);
+        decoder.pool_identity++;
+        REQUIRE_STATUS(swapz_direct_validate(&direct, &expected,
+                                             &decoder, &integrity), -EOPNOTSUPP);
+        decoder.pool_identity--;
+        decoder.codec_generation++;
+        REQUIRE_STATUS(swapz_direct_validate(&direct, &expected,
+                                             &decoder, &integrity), -EOPNOTSUPP);
+        decoder.codec_generation--;
+        decoder.dictionary_identity++;
+        REQUIRE_STATUS(swapz_direct_validate(&direct, &expected,
+                                             &decoder, &integrity), -EOPNOTSUPP);
+        decoder.dictionary_identity--;
+        decoder.codec = SWAPZ_DIRECT_ZSWAP_ZSTD;
+        REQUIRE_STATUS(swapz_direct_validate(&direct, &expected,
+                                             &decoder, &integrity), -EOPNOTSUPP);
+        decoder.codec = SWAPZ_DIRECT_ZSWAP_LZ4;
+        direct.source_record_identity++;
+        REQUIRE_STATUS(swapz_direct_validate(&direct, &expected,
+                                             &decoder, &integrity), -ESTALE);
+        direct.source_record_identity--;
+        direct.expected_page_sha256[0] ^= 1U;
+        REQUIRE_STATUS(swapz_direct_readback(&direct, &expected, &decoder,
+                       &integrity, direct_scratch, read_page), -EBADMSG);
+        direct.expected_page_sha256[0] ^= 1U;
         memset(read_page, 0xc3, sizeof(read_page));
         REQUIRE_STATUS(read_host(source.codec, source.source_epoch,
                                  source.length, read_page), 0);

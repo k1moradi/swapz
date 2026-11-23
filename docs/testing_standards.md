@@ -19138,3 +19138,17 @@ which must fail the suite rather than be counted as a killed mutant. The
 diagnostic reporter should select the first actual compiler `error:`
 message and bound it without disclosing temporary runner paths. A genuine
 baseline pass does not imply any of the negative mutation executions passed.
+
+### Round072 Agent7 stale original-codec provider/pool lease regression
+
+The original zswap versus swapz codec boundary needs two independently
+validated identities: a separately volatile original compressor tag and an
+explicit decoder-provider registry lease. The rootless Agent7 source-header
+test must call the dormant `swapz_direct_validate` and
+`swapz_direct_readback` entry points with host-generated LZ4 and a real
+SHA-256 implementation, then reject mismatched provider pool identity,
+codec generation, dictionary identity, decoder family, stale source-record
+identity and wrong original digest. A host fixture's expected identity,
+completed write and owned lease are mock assertions, not actual original
+kernel source provenance. These assertions must not be used to activate the
+dormant direct path or to infer an available LZO-to-ZSTD decoder.
