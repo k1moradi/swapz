@@ -1,0 +1,26 @@
+# Round078 Agent1 exact-source CI and original upstream boundary checkpoint
+
+Planning sole main d069327805223ac034d805c9d4441c2f6cd3c573, remote one branch main and zero open PRs at audit; original pristine torvalds/linux@c339f4010dea8b0d754f84ace70cd1b089878ef8. Exact source SHA is crucial: newer main evidence commits do NOT alter old test source nor retroactively change failures.
+
+| Round agent | Exact-source GitHub Actions result at audit |
+| --- | --- |
+| 075 Agent9 | [45154650078](https://github.com/k1moradi/swapz/actions/runs/45154650078) source 3d3e84acbf6b0930ee6e00e0751db980de206dc6, job137624391690 COMPLETED SUCCESS, one baseline each, GCC18/18 + Clang18/18 independently compiled/executed C mutants=36 total; host only |
+| 075 Agent11 | [45154838130](https://github.com/k1moradi/swapz/actions/runs/45154838130) source 4f2fb37d7fa2b51aa78dca0cedfe3cd3f25dfff3, job137625029172 COMPLETED SUCCESS, GCC17/17+Clang17/17 compiled/executed mutants=34 total plus independent mutant06 compiler+semantic regression; HOST MODEL ONLY |
+| 075 Agent5 | [45154196590](https://github.com/k1moradi/swapz/actions/runs/45154196590) original stage host137622871354 SUCCESS, genuine pinned native137694023839 QUEUED |
+| 074 Agent3 | [45144722144](https://github.com/k1moradi/swapz/actions/runs/45144722144) source-host137591051411 SUCCESS, genuine no-device original UML137631349473 QUEUED |
+| 074 Agent6 | [45145752021](https://github.com/k1moradi/swapz/actions/runs/45145752021) historical first attempt CANCELLED during apt deps, on-demand attempt2 source 1868d599c6cf33823a36b93c962847cd6d475 queued job137694941905; do not launch duplicate |
+| 076 Agent2 | [45173342924](https://github.com/k1moradi/swapz/actions/runs/45173342924) source-host137688181589 QUEUED, native 3-case not proven |
+| 077 Agent10 | [45179168125](https://github.com/k1moradi/swapz/actions/runs/45179168125) source-host137708170190 QUEUED, genuine original 4-case native not proven |
+| 077 Agent7 | [45179822062](https://github.com/k1moradi/swapz/actions/runs/45179822062) source-host137710418437 QUEUED, 32 mutants/compiler planned, NOT executed in CI at snapshot |
+| 073 historical Agent9 | [45134473707](https://github.com/k1moradi/swapz/actions/runs/45134473707) original old source FAILED wrong uniqueness anchor, never retroactively passed |
+| 073 historical Agent11 | [45134249198](https://github.com/k1moradi/swapz/actions/runs/45134249198) old mutant06 GCC compile FAILURE, never retroactively passed |
+
+Agent1 committed verified latest Round075 terminal source evidence directly main [d0693278](https://github.com/k1moradi/swapz/commit/d069327805223ac034d805c9d4441c2f6cd3c573), posted [Round075 #192](https://github.com/k1moradi/swapz/issues/192#issuecomment-7102355642), kept historical Round073 failures [#190](https://github.com/k1moradi/swapz/issues/190#issuecomment-7102356722). No need for new Round075 CI.
+
+**Original source length proof:** exact pin [mm/zswap.c lines856–936](https://github.com/torvalds/linux/blob/c339f4010dea8b0d754f84ace70cd1b089878ef8/mm/zswap.c#L856-L936) crypto_acomp dlen=PAGE_SIZE, acceptable compressed dlen<4096, special fallback when dlen>=4096 and writeback enabled stores original UNCOMPRESSED entry length PAGE_SIZE. [mm/zswap.c lines939–980](https://github.com/torvalds/linux/blob/c339f4010dea8b0d754f84ace70cd1b089878ef8/mm/zswap.c#L939-L980) original decoder fast path copies entry length4096 original uncompressed bytes instead of invoking compressor-specific decode. Product src/kernel/codec.h blob e89d316b9cf49f82df0b77648c1be1731607987d line45 SWAPZ_MAX_COMPRESSED 3568, src/kernel/zswap-import-codec.h blob0d888fe4c74115ab2388f1df1dc0b86ae4b9b6c6 line138 and zswap-import-admission.h blob a411da35437cbf9a43c88083d830dc9280f108e8 line118 reject longer original compressed lengths. Future distinct carrier and fallback are not implemented; source says POSSIBLE range, no native corpus frequency claim.
+
+**Actual DM source queue proof:** src/kernel/dm-target.c blob f1cab252cd990190646c82da81378d1563475826 queue_lock and incoming list around lines893–895, swapz_map admits to incoming line14171 and returns DM_MAPIO_SUBMITTED at14286, preparation worker comment lines8418–8429 explicitly contrasts bounded prepared slots with unlimited incoming BIOs. This is **not proof of a leak** nor proof of actual DM upper inflight bound. Prior Agent11 16-item model is not product.
+
+**Correct integration:** only Linux MM/zswap does pressure/eviction, swapz disk-only pack/GC no competing reclaim or reencode. Standard WRITE is decoded full page; ordinary RAW_4096 ALWAYS original UNCOMPRESSED full4096. A future original opaque sideband needs authenticated original STORED/slot/selected DM, preerase copied original bytes and typed original LZO1X/rawLZ4, independent original decoder+GC lease, real lower FUA/flush and once-only bio_endio. First physical SWAPSPACE2 4096 and exact 20B volatile map protected. Source auth0, PhaseA BLOCKED and activation OFF.
+
+**Test decision:** Agent1 does not run make test or fast_test for docs-only manager action; Agent9 one focused direct source host GCC/Clang verification, Agent11 DOCS_ONLY (no CI), no new original UML build, physical or privileged tests, and no recurring automation.
