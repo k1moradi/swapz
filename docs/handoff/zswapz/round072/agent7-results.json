@@ -5,15 +5,15 @@
   "task_commit": "3c1919f1b2c2ea428045a1afb5c278151cf06ccc",
   "engineering_baseline": "4083449f12c3392d5ea534ee4e536865b4caf3ee",
   "original_linux_pin": "c339f4010dea8b0d754f84ace70cd1b089878ef8",
-  "tested_commit": "135523cf68af842e522b3a5fe93247939699fe21",
-  "tested_parent": "87ea0eea75f285158dfb3995be93c22660b79e7f",
+  "tested_commit": "8fb2577d589ca7ea851d14968098b2b668934f38",
+  "tested_parent": "8d9f3d41fe26855b034eae404447c3fb47b08b49",
   "publication_status": "QUEUED",
-  "workflow_run": 45128095541,
-  "workflow_url": "https://github.com/k1moradi/swapz/actions/runs/45128095541",
+  "workflow_run": 45129220684,
+  "workflow_url": "https://github.com/k1moradi/swapz/actions/runs/45129220684",
   "jobs": [
     {
-      "id": 137536991228,
-      "url": "https://github.com/k1moradi/swapz/actions/runs/45128095541/job/137536991228",
+      "id": 137540595608,
+      "url": "https://github.com/k1moradi/swapz/actions/runs/45129220684/job/137540595608",
       "name": "gcc-clang-sanitizers-and-semantic-mutants",
       "status": "queued",
       "conclusion": null
@@ -25,8 +25,8 @@
     "lz4": "torvalds/linux@c339f4010dea8b0d754f84ace70cd1b089878ef8:lib/lz4/lz4_decompress.c"
   },
   "source_blobs": {
-    "tests/runtime/native/fixtures/round072-original-codec-tag-vs-raw.c": "a1afdf89777ac49f7e5d4c2940a4ae92e7c3a742",
-    "tests/tools/round072-original-codec-tag-vs-raw-verify.py": "8fe4e609ec1c77625e2820512b01073575be209b",
+    "tests/runtime/native/fixtures/round072-original-codec-tag-vs-raw.c": "6ee48cc2ee6af36ecdb73c1379cbeba64125f8a9",
+    "tests/tools/round072-original-codec-tag-vs-raw-verify.py": "656a98027e31d2948c9ddc26345d8391ef574ff9",
     "src/kernel/codec.c": "d920dcaac6f2b7de1334d4133770bd649719c66d",
     "src/kernel/zswap-import-codec.h": "0d888fe4c74115ab2388f1df1dc0b86ae4b9b6c6",
     "src/kernel/zswap-direct-handoff.h": "864abf9a12071b98f5c157a44f4ed0c04d4a594c"
@@ -35,7 +35,7 @@
     "gcc": "QUEUED",
     "clang": "QUEUED"
   },
-  "planned_semantic_mutants_per_compiler": 14,
+  "planned_semantic_mutants_per_compiler": 15,
   "compiled_executed_semantic_mutants": null,
   "mutants_rejected": null,
   "host_ktap": "NOT_AVAILABLE_QUEUED",
@@ -73,5 +73,6 @@
     "lib/lzo/lzo1x_decompress_safe.c": "318abb82c63d2c27c0d5497b7cf4e21d87d13154"
   },
   "standalone_original_pool_decoder_lease_coverage": "source-linked host validation of pool identity, dictionary identity, codec generation, source record identity and wrong digest; no actual native provider lease",
-  "original_linux_kunit": "NOT_RUN"
+  "original_linux_kunit": "NOT_RUN",
+  "latest_added_controls": "owned source readable-capacity bound; a RAW_4096 4095-byte lower read independent of compressed decoder rejection; 15 compiled semantic mutants per compiler, not yet credited"
 }

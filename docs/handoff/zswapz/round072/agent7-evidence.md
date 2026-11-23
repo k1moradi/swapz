@@ -2,9 +2,9 @@
 
 ## Exact tested source and committed input
 
-- **Latest owned source/test SHA:** [`135523cf68af842e522b3a5fe93247939699fe21`](https://github.com/k1moradi/swapz/commit/135523cf68af842e522b3a5fe93247939699fe21), **single parent** [`87ea0eea75f285158dfb3995be93c22660b79e7f`](https://github.com/k1moradi/swapz/commit/87ea0eea75f285158dfb3995be93c22660b79e7f). Root task: `3c1919f1b2c2ea428045a1afb5c278151cf06ccc`; baseline `4083449f12c3392d5ea534ee4e536865b4caf3ee`.
-- **Exact GitHub Actions:** [run 45128095541](https://github.com/k1moradi/swapz/actions/runs/45128095541), [job 137536991228](https://github.com/k1moradi/swapz/actions/runs/45128095541/job/137536991228) are **QUEUED**. No success/terminal result exists. GCC/Clang and 28 independently compiled/executed semantic mutants are planned, **NOT YET EXECUTED** on this SHA. Host JSON/KTAP pending; real original native kernel JSON/KTAP **NOT_RUN**.
-- **Owned source blobs:** C `a1afdf89777ac49f7e5d4c2940a4ae92e7c3a742`, Python `8fe4e609ec1c77625e2820512b01073575be209b`; product source `src/kernel/codec.c` `d920dcaac6f2b7de1334d4133770bd649719c66d`, `zswap-import-codec.h` `0d888fe4c74115ab2388f1df1dc0b86ae4b9b6c6`, `zswap-direct-handoff.h` `864abf9a12071b98f5c157a44f4ed0c04d4a594c`.
+- **Latest owned source/test SHA:** [`8fb2577d589ca7ea851d14968098b2b668934f38`](https://github.com/k1moradi/swapz/commit/8fb2577d589ca7ea851d14968098b2b668934f38), **single parent** [`8d9f3d41fe26855b034eae404447c3fb47b08b49`](https://github.com/k1moradi/swapz/commit/8d9f3d41fe26855b034eae404447c3fb47b08b49). Root task: `3c1919f1b2c2ea428045a1afb5c278151cf06ccc`; baseline `4083449f12c3392d5ea534ee4e536865b4caf3ee`.
+- **Exact GitHub Actions:** [run 45129220684](https://github.com/k1moradi/swapz/actions/runs/45129220684), [job 137540595608](https://github.com/k1moradi/swapz/actions/runs/45129220684/job/137540595608) are **QUEUED**. No success/terminal result exists. GCC/Clang and 30 independently compiled/executed semantic mutants are planned, **NOT YET EXECUTED** on this SHA. Host JSON/KTAP pending; real original native kernel JSON/KTAP **NOT_RUN**.
+- **Owned source blobs:** C `6ee48cc2ee6af36ecdb73c1379cbeba64125f8a9`, Python `656a98027e31d2948c9ddc26345d8391ef574ff9`; product source `src/kernel/codec.c` `d920dcaac6f2b7de1334d4133770bd649719c66d`, `zswap-import-codec.h` `0d888fe4c74115ab2388f1df1dc0b86ae4b9b6c6`, `zswap-direct-handoff.h` `864abf9a12071b98f5c157a44f4ed0c04d4a594c`.
 - **Pinned original Linux** `torvalds/linux@c339f4010dea8b0d754f84ace70cd1b089878ef8`: `mm/zswap.c` blob `ae19e301fced7e357a4c7587dfdd6abb890b9163`; `crypto/lz4.c` `57b713516aefac823f2af9481c828027b42490dd`; `crypto/lzo.c` `d43242b24b4e831e7e0d26f38d2f263877d5748e`; `lib/lz4/lz4_decompress.c` `3a2cd9acada4a09ef70a344090d48167c46088a1`; `lib/lzo/lzo1x_decompress_safe.c` `318abb82c63d2c27c0d5497b7cf4e21d87d13154`.
 
 ## What the exclusive test actually covers
@@ -20,3 +20,10 @@ The source-linked dormant direct decoder registry is now separately called to re
 **Latest exact-source first actual error: none while QUEUED.** The superseded original source SHA `adff0ee5ee3245681118e21f64ab5d6f4a90ede2` was **red** in [run 45127087314](https://github.com/k1moradi/swapz/actions/runs/45127087314), [job 137533799500](https://github.com/k1moradi/swapz/actions/runs/45127087314/job/137533799500): GCC's first 63-assertion host baseline PASS, then GCC compiler refused the `owned-source-lease` semantic mutant under strict `-Werror` due the test-generated boolean expression. The verifier was subsequently changed to parenthesize all mixed boolean mutants and emit the first actionable compiler `error:`; this does **not** certify the latest SHA or hide the older failure.
 
 **Unchanged gates:** `SOURCE_MAPPED_AUTHENTICATED=0`; `PHASE_A=BLOCKED`; direct compressed handoff OFF; forced RAW bypass OFF; all import ACTIVE0; no extra reclaim/pressure controller or recompression. Linux MM/zswap owns natural eviction, swapz disk packing and GC only. No privileged/loaded/physical/real-swap/pressure/FUA experiments. Terminal CI must be committed separately without changing test source or standards.
+
+The newest test source additionally binds the contiguous **readable source capacity**
+under its test-only owner before byte-copy. A one-byte truncated source-copy
+negative and an ordinary full-RAW 4095-byte lower read negative independently
+expose both guards; the compressed decoder's own short-read check can no
+longer make the host mutant redundant. **15 negative C mutants per compiler**
+are planned, not credited until the exact-source workflow executes successfully.
