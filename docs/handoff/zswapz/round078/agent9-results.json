@@ -1,0 +1,53 @@
+{
+  "round": "078",
+  "agent": 9,
+  "kind": "pinned-upstream-original-zswap-length-vs-current-dormant-swapz-import-host-only",
+  "task_publication_commit": "9a1cc39bf0f191093ef98857510fb6475778d2fc",
+  "tested_source_commit": null,
+  "tested_source_parent": null,
+  "upstream_linux_pin": "c339f4010dea8b0d754f84ace70cd1b089878ef8",
+  "upstream_source": "mm/zswap.c",
+  "source_blobs": {
+    "src/kernel/codec.h": "e89d316b9cf49f82df0b77648c1be1731607987d",
+    "src/kernel/zswap-import-codec.h": "0d888fe4c74115ab2388f1df1dc0b86ae4b9b6c6",
+    "src/kernel/zswap-import-admission.h": "a411da35437cbf9a43c88083d830dc9280f108e8"
+  },
+  "original_compressed_source_permitted_lengths": "1..4095 if valid and compressor succeeded",
+  "current_dormant_import_limit_bytes": 3568,
+  "unrepresentable_original_compressed_range": "3569..4095",
+  "ordinary_raw_4096": "FULL_ORIGINAL_UNCOMPRESSED_4096",
+  "actual_genuine_lz4_decode_in_fixture": true,
+  "original_lzo1x_decode": "NOT_COVERED_NO_ORIGINAL_DECODER",
+  "original_source_native": "NOT_RUN_NO_KERNEL_BUILD",
+  "kunit_cases": 0,
+  "ktap_cases": 0,
+  "workflow": ".github/workflows/phase-a-round078-original-zswap-length-admission-noauth.yml",
+  "workflow_url": null,
+  "run_id": null,
+  "job_id": null,
+  "jobs": [],
+  "compilers": {
+    "gcc": {
+      "status": "NOT_YET_RUN",
+      "mutants_compiled_executed_killed": null
+    },
+    "clang": {
+      "status": "NOT_YET_RUN",
+      "mutants_compiled_executed_killed": null
+    }
+  },
+  "planned_independent_mutants_per_compiler": 22,
+  "conclusion": "IN_PROGRESS",
+  "first_error": null,
+  "source_mapped_authenticated": false,
+  "phase_a": "BLOCKED",
+  "direct_compressed_handoff": "DISABLED",
+  "forced_raw_bypass": "DISABLED",
+  "import_active": 0,
+  "physical_io": false,
+  "privileged_tests": false,
+  "loaded_original_kernel": false,
+  "new_production_changes": false,
+  "memory_owner": "original Linux MM/zswap natural pressure and eviction only",
+  "disk_owner": "swapz packing and GC without independent reclaim or recompression"
+}

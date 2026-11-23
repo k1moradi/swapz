@@ -1,0 +1,39 @@
+name: Round078 Agent9 pinned zswap original length vs dormant import NO_AUTH
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/phase-a-round078-original-zswap-length-admission-noauth.yml'
+      - 'tests/runtime/native/fixtures/round078-original-zswap-length-admission.c'
+      - 'tests/tools/round078-original-zswap-length-admission-verify.py'
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  pinned-upstream-source-linked-host-length:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Verify exact immutable original Linux source and run source-C23 GCC and Clang ASan UBSan
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          test "$GITHUB_REF" = refs/heads/main
+          test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
+          test -z "$(git status --porcelain)"
+          git diff --check HEAD^ HEAD
+          test -f /usr/include/lz4.h
+          test -f /usr/include/openssl/sha.h
+          curl --fail --location --silent --show-error --retry 3 --max-time 45 \
+            'https://raw.githubusercontent.com/torvalds/linux/c339f4010dea8b0d754f84ace70cd1b089878ef8/mm/zswap.c' \
+            --output "$RUNNER_TEMP/round078-original-pinned-zswap.c"
+          python3 -B tests/tools/round078-original-zswap-length-admission-verify.py \
+            --pinned-linux "$RUNNER_TEMP/round078-original-pinned-zswap.c"
+      - name: Preserve inherited canonical testing-standards literal prefix
+        env:
+          SWAPZ_PUSH_BEFORE_SHA: ${{ github.event.before }}
+        run: python3 -B tests/runtime/native/repository-policy-test.py --enforce

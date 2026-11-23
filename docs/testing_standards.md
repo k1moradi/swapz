@@ -19492,3 +19492,41 @@ protect first physical SWAPSPACE2 4096/UUID/partition and exact 20-byte
 volatile RAM map. SOURCE_MAPPED_AUTHENTICATED=0, PHASE_A=BLOCKED,
 direct compressed handoff, forced RAW bypass, and original import OFF.
 No loaded/privileged/activated swap/physical media/real pressure tests.
+
+## Round078 Agent9 — pinned original zswap compressed length vs dormant swapz limit (2026-11-23)
+
+The immutable upstream Linux `zswap_compress()` initializes compressor output
+length to PAGE_SIZE and accepts genuinely compressed results below PAGE_SIZE.
+When the compressor fails, emits zero or produces at least PAGE_SIZE, the
+original full UNCOMPRESSED 4096 folio can be stored if writeback permits it.
+`zswap_decompress()` explicitly copies a stored 4096-byte entry as raw,
+without codec decode. Original lengths 3569..4095 are source-permitted, not
+proven to occur for a particular original codec or real workload.
+
+Current dormant swapz original-import code caps compressed streams at 3568.
+All lengths 3569..4095 must fail closed, with no trimming, reencoding, ordinary
+RAW_4096 labeling, mapping publication or upper ACK. A future authentic typed
+original LZO1X/raw LZ4 opaque carrier needs independently retained original
+decoder and preerase source ownership; only a separately validated complete
+original UNCOMPRESSED 4096 folio may use conventional RAW_4096.
+
+The source-linked host test downloads immutable original mm/zswap.c at the
+exact git pin, verifies both original C branches and compiles their source
+expressions into a controlled wrapper alongside current production codec.h,
+zswap-import-codec.h, zswap-import-admission.h, authority.h, superblock.h and
+codec.c. It tests compressed 3568/3569/4095 boundaries distinctly from the
+original 4096 uncompressed case, negative 0/4097/UINT_MAX and short buffer,
+digest, lifetime, once-only ACK and first4096 protection checks. Fabricated
+admission-only length buffers must NEVER be claimed decodable; test the real
+raw-block LZ4 decode independently, and record LZO1X as NOT_COVERED absent an
+original decoder/stream. No real source authentication, physical FUA/flush,
+original kernel build or loaded kernel is certified by the host mock.
+
+Each independently identified semantic C mutation must compile under GCC
+and Clang C23/C2x with high warnings, -Werror, ASan and UBSan and EXECUTE
+to a deterministic invariant failure. A source mismatch, syntax/compile
+error or sanitizer abort is a test failure, NOT a semantic kill. Record the
+exact source SHA, run/job, both compiler mutation counts and first real error.
+All original Linux natural-eviction authority stays in MM/zswap, while swapz
+only packs/GCs data-only 4/8/16KiB payloads with 20-byte volatile RAM map.
+All activation gates remain OFF and Phase A BLOCKED.
