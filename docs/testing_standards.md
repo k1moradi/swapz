@@ -19885,3 +19885,76 @@ never a compressed record. Current import 3568 means reject valid original
 3569..4095 without truncation; preserve physical SWAPSPACE2 first4096
 and the exact 20-byte volatile RAM mapping. AUTH=0, Phase A BLOCKED,
 direct handoff/forced RAW bypass/import all OFF.
+
+
+## Round080 Agent10 original UML reader GC hang diagnosis: strict independent case isolation and lease cleanup
+
+The exact Round079 original pinned Linux source
+14e8f8f18566e584d9640482b3437929e5da041c at
+run45236328888, source host137908924597, compiled and executed
+GCC26 and Clang26 original+authority+decoder semantic mutants,
+and genuine UML job137910554522 built/booted original
+torvalds/linux@c339f4010dea8b0d754f84ace70cd1b089878ef8.
+The native artifact14851590265 proves original LZ4 GC and LZO1X GC
+readers PASSED, then 120-second test timeout after which KUnit JSON
+reported four cases, two passed and two crashed as missing results.
+This does not prove a kernel panic, nor identify the third versus
+fourth test without isolation. Preserve the old R073 undeclared
+usleep_range compiler failure and R077 Clang negative-matcher red.
+
+The Round073 original test-only native fixture creates and owns
+independent decoder-reader leases and can ask a second kthread to
+close_and_drain. A negative "late get must be rejected" check
+performed before close publishes its closing flag may itself
+SUCCESSFULLY acquire a lease; that unexpected admission is a failure
+but it is STILL a held pin. Always release an unexpectedly acquired
+late pin through the exact product owner_put before joining the
+closer. Clean up late pins first and the principal lease second on
+ALL error exits. Never delete the leak by destroying an owner/queue
+or freeing stack while a closer still accesses it. Use a one-shot
+eight-second delayed-work stage diagnostic (cancel-synchronized
+before stack free) ONLY for an actual stall, and a bounded
+1500-millisecond closer-completion diagnostic without increasing
+the genuine KUnit 120-second test timeout. Retain the final
+safety join before owner/stack release if an unknown external
+reader still exists; do not pretend an arbitrary timeout authorizes
+a use-after-free. Production decoder owner and original kernel are
+READ ONLY, as are real source reclaim controls.
+
+A new host regression compiles source-extracted actual test-only
+late-pin fail-close helper against actual dormant product
+zswap-import-decoder-owner.c with typed codec stubs, GCC+Clang
+strict C23/C2x -Wall -Wextra -Wconversion -Wshadow -Werror
+ASan+UBSan and pthreads. The host baseline must COMPILE AND EXECUTE
+the unexpected successful late get, release exactly once and
+successfully drain via real owner.c. At least two independent C
+semantic mutants per compiler must COMPILE and EXECUTE and be
+rejected at runtime, one leaked pin and one misclassified
+post-close rejection. The stubs are NOT original codec decoding
+or an original Linux kernel, and a compile failure cannot count
+as executed semantic mutant rejection. Retain inherited 10 original
+source +14 real authority +2 decoder lifetime compiled-and-executed
+mutants PER compiler and strict original-delay GCC/Clang negatives.
+
+Build pinned Linux UML ONCE with strict -Werror, verify all staged
+source Git blobs/postimages and negative plans, use pinned KUnit's
+--run_isolated=test to boot EACH of the four exact cases separately
+within a SHORTER 25-second per-case failure window, preserving raw
+test.log for a stall. Then independently exec the SAME binary
+against the combined four-case suite with the unchanged 120-second
+limit. Only a real combined native JSON and raw KTAP showing all
+four exact names PASS and zero failures/skips/crashes/errors can
+qualify original reader/GC 4/4. A pending/failed build, timeout,
+missing subtest or test-only source host emulation cannot. Do not
+multiply full kernel builds by the number of tests or create
+periodic polling automation.
+
+No real authenticated original STORED current source/selected DM or
+real BIO physical FUA/ACK is proven by this fixture. Source auth0,
+Phase A BLOCKED, direct compressed/forced RAW/import gates OFF.
+Linux MM/zswap exclusively owns natural compressed-RAM pressure and
+eviction; swapz only packs/GCs data-only 4/8/16 KiB extents, no
+secondary reclaim or recompression. Original compressed LZO1X/raw LZ4
+must remain separately authenticated, exact immutable preerase
+bytes with independent decoder lifetime/pinned GC old readers.
+Ordinary RAW_4096 always means complete original UNCOMPRESSED 4096.
