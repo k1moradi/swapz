@@ -1,0 +1,121 @@
+{
+  "round": "080",
+  "agent": 10,
+  "message": "PROGRESS",
+  "status": "QUEUED_SOURCE_HOST",
+  "kind": "original-pinned-Linux-test-only-reader-GC-decoder-owner-lifetime",
+  "task_publication_commit": "d76081b661ce750d2fbeaa247fa16e4670db5e97",
+  "source_commit": "40d622424ff37bc6454f72b5870da167c9c131e9",
+  "source_parent": "ff47488530f407430163febde993473ad1de0b04",
+  "source_branch": "main",
+  "original_linux_pin": "c339f4010dea8b0d754f84ace70cd1b089878ef8",
+  "workflow": ".github/workflows/phase-a-round073-original-reader-pin-gc-noauth.yml",
+  "workflow_run_id": 45252973623,
+  "workflow_url": "https://github.com/k1moradi/swapz/actions/runs/45252973623",
+  "workflow_status": "queued",
+  "workflow_conclusion": null,
+  "jobs": [
+    {
+      "name": "original-reader-strict-source-host",
+      "id": 137967235254,
+      "url": "https://github.com/k1moradi/swapz/actions/runs/45252973623/job/137967235254",
+      "status": "queued",
+      "conclusion": null
+    },
+    {
+      "name": "original-linux-uml-reader-pin-gc-kunit",
+      "id": null,
+      "status": "NOT_CREATED",
+      "conclusion": null
+    }
+  ],
+  "new_host": {
+    "status": "NOT_YET_RUN",
+    "gcc": {
+      "compiled_executed_original_mutants": null,
+      "authority_mutants": null,
+      "decoder_mutants": null,
+      "new_leaked_pin_mutants": null
+    },
+    "clang": {
+      "compiled_executed_original_mutants": null,
+      "authority_mutants": null,
+      "decoder_mutants": null,
+      "new_leaked_pin_mutants": null
+    },
+    "expected_original_per_compiler": 10,
+    "expected_authority_per_compiler": 14,
+    "expected_decoder_lifetime_per_compiler": 2,
+    "expected_new_leaked_reader_semantic_mutants_per_compiler": 2,
+    "strict_c23_werror_asan_ubsan": "NOT_YET_CONFIRMED"
+  },
+  "new_native": {
+    "status": "NOT_RUN_DEPENDENT_HOST",
+    "expected_case_names": [
+      "swapz_round073_original_lz4_old_reader_gc",
+      "swapz_round073_original_lzo1x_old_reader_gc",
+      "swapz_round073_original_stale_crc_sha_codec",
+      "swapz_round073_original_decoder_retire_with_pin"
+    ],
+    "isolated_third_case": null,
+    "isolated_fourth_case": null,
+    "original_um_linux_compiled_booted": false,
+    "actual_json_ktap": "NOT_GENERATED",
+    "executed_cases": null,
+    "passed": null,
+    "failed": null,
+    "skipped": null,
+    "crashed": null,
+    "errors": null,
+    "expected_full_native_cases": 4
+  },
+  "previous_round079": {
+    "source_sha": "14e8f8f18566e584d9640482b3437929e5da041c",
+    "run_id": 45236328888,
+    "host_job_id": 137908924597,
+    "host_conclusion": "success",
+    "inherited_executed_semantic_mutants_total": 52,
+    "native_job_id": 137910554522,
+    "native_conclusion": "failure",
+    "original_compiled_booted": true,
+    "json": {
+      "tests": 4,
+      "passed": 2,
+      "failed": 0,
+      "skipped": 0,
+      "crashed": 2,
+      "errors": 3
+    },
+    "first_error": "KUnit original UML kernel execution timed out after 120 seconds after two passed cases",
+    "artifact_id": 14851590265
+  },
+  "prior_round073_compiler_fail_source": "ecaf63cb7860879364a6e3943884bc30e578ca63",
+  "prior_round077_clang_host_fail_source": "04b190b00131c1d40254acd2279e6240a11913d0",
+  "source_changes": [
+    "all local decoder lease puts before closer join",
+    "bounded 1500ms closer completion with heap-stable test-only ownership",
+    "fail-only 20s stage watchdog; original 120s timeout unchanged",
+    "sequential isolated stale and retirement KUnit from one pinned UML build",
+    "real native test.log copied on failure",
+    "new actual product C GCC/Clang missing old and late reader release compiled-executed semantic mutants"
+  ],
+  "first_error": null,
+  "conclusion": "QUEUED",
+  "source_mapped_authenticated": false,
+  "phase_a": "BLOCKED",
+  "direct_compressed_handoff": "DISABLED",
+  "forced_raw_bypass": "DISABLED",
+  "import_active": false,
+  "original_compressed_codec": "SEPARATE_VOLATILE_ORIGINAL_LZO1X_RAW_LZ4",
+  "ordinary_RAW_4096": "FULL_ORIGINAL_UNCOMPRESSED_4096",
+  "linux_mm_zswap_natural_eviction_only": true,
+  "swapz_disk_packing_gc_only": true,
+  "actual_physical_io": false,
+  "actual_upper_bio_ack": false,
+  "original_live_stored_source_authenticated": false,
+  "privileged_tests": false,
+  "main_only": true,
+  "branches_or_prs_created": false,
+  "force_push": false,
+  "periodic_checks_created": false
+}
