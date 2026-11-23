@@ -1,0 +1,76 @@
+name: Round074 original source owned-copy after erase actual authority host NO_AUTH
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'tests/runtime/native/fixtures/round074-original-owned-copy-lifetime.c'
+      - 'tests/tools/round074-original-owned-copy-lifetime-verify.py'
+      - '.github/workflows/phase-a-round074-original-owned-copy-lifetime-host-noauth.yml'
+      - 'src/kernel/authority.c'
+      - 'src/kernel/authority.h'
+      - 'src/kernel/zswap-import-codec.h'
+      - 'docs/testing_standards.md'
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  strict-host-original-owned-byte-lifetime-GCC-Clang:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    env:
+      SWAPZ_PUSH_BEFORE_SHA: ${{ github.event.before }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Exact main source and no whitespace/branch change
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          test "$GITHUB_REF" = refs/heads/main
+          test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
+          test "$(git branch --show-current)" = main
+          test -z "$(git status --porcelain --untracked-files=all)"
+          git diff --check HEAD^ HEAD
+      - name: Disposable host compiler and original LZO1X/raw LZ4 link libraries
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          sudo apt-get update -qq
+          sudo DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
+            gcc clang liblzo2-dev liblz4-dev libssl-dev
+      - name: Compile and execute exact product C GCC Clang ASan UBSan with 28 real C semantic negatives
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          python3 -B tests/tools/round074-original-owned-copy-lifetime-verify.py \
+            --json "$RUNNER_TEMP/round074-agent5-owned-copy-host.json"
+          test -s "$RUNNER_TEMP/round074-agent5-owned-copy-host.json"
+          python3 -B - "$RUNNER_TEMP/round074-agent5-owned-copy-host.json" <<'PY'
+          import json,pathlib,sys
+          data=json.loads(pathlib.Path(sys.argv[1]).read_text())
+          assert data['source_mapped_authenticated'] is False
+          assert data['phase_a']=='BLOCKED'
+          assert data['actual_physical_fua'] is False
+          assert data['actual_upper_ack'] is False
+          assert data['native_original_uml']=='NOT_EXECUTED'
+          assert all(data['compilers'][name]['cases']==6 and
+                     data['compilers'][name]['semantic_mutants_killed']==14 and
+                     data['compilers'][name]['actual_product_C_mutants_killed']==3
+                     for name in ('gcc','clang'))
+          print('PASS Round074 Agent5 actual source exact host 12 cases 28 semantic C mutant kills; no native/physical/auth')
+          PY
+      - name: Preserve exact first-parent canonical repository policy
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          python3 -B tests/runtime/native/repository-policy-test.py --enforce
+      - name: Preserve bounded machine-readable strict host result
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: round074-agent5-owned-source-host-evidence
+          path: ${{ runner.temp }}/round074-agent5-owned-copy-host.json
+          if-no-files-found: ignore
+          retention-days: 14
