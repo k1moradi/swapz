@@ -1,0 +1,84 @@
+name: Round079 original pinned zswap pre-erase XArray handle pool immutable copy HOST NO_AUTH
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'tests/runtime/native/fixtures/round079-original-zswap-preerase-source-copy.c'
+      - 'tests/tools/round079-original-zswap-preerase-source-copy-verify.py'
+      - '.github/workflows/phase-a-round079-original-zswap-preerase-source-copy-noauth.yml'
+      - 'docs/testing_standards.md'
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  original-pinned-zswap-preerase-source-host-GCC-Clang:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 55
+    env:
+      SWAPZ_PUSH_BEFORE_SHA: ${{ github.event.before }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/checkout@v4
+        with:
+          repository: torvalds/linux
+          ref: c339f4010dea8b0d754f84ace70cd1b089878ef8
+          path: original-linux
+          fetch-depth: 1
+          sparse-checkout: |
+            mm/zswap.c
+            mm/zsmalloc.c
+          sparse-checkout-cone-mode: false
+          persist-credentials: false
+      - name: Assert exact main Git SHA pristine pinned original and compiler toolchain
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          test "$GITHUB_REF" = refs/heads/main
+          test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
+          test "$(git branch --show-current)" = main
+          test -z "$(git status --porcelain --untracked-files=all)"
+          test "$(git -C original-linux rev-parse HEAD)" = c339f4010dea8b0d754f84ace70cd1b089878ef8
+          git diff --check HEAD^ HEAD
+          command -v gcc
+          command -v clang
+          python3 --version
+      - name: Source-true original mm/zswap + zsmalloc SHA and GCC Clang C2x strict ASan UBSan 40 independently EXECUTED semantic mutants
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          umask 077
+          python3 -B tests/tools/round079-original-zswap-preerase-source-copy-verify.py             --linux-root original-linux             --json "$RUNNER_TEMP/round079-agent5-original-source-host.json"
+          python3 -B - "$RUNNER_TEMP/round079-agent5-original-source-host.json" <<'PY'
+          import json,pathlib,sys
+          data=json.loads(pathlib.Path(sys.argv[1]).read_text())
+          assert data['status']=='PASS'
+          assert data['source']['original_linux_pin']=='c339f4010dea8b0d754f84ace70cd1b089878ef8'
+          assert data['source']['mm_zswap_git_blob']=='ae19e301fced7e357a4c7587dfdd6abb890b9163'
+          assert data['source']['mm_zsmalloc_git_blob']=='7ef80e0da6267661cea4d48a4a615444724782e7'
+          assert data['phase_a']=='BLOCKED' and not data['source_mapped_authenticated']
+          assert data['actual_original_linux_execution'] is False
+          for compiler in ('gcc','clang'):
+              result=data['compilers'][compiler]
+              assert result['status']=='PASS'
+              assert result['baseline_cases']==4
+              assert result['compiled_semantic_mutants']==20
+              assert result['executed_semantic_mutants']==20
+              assert result['killed_by_runtime_assertion']==20
+          print('PASS ROUND079_ORIGINAL_SOURCE_COMPILER_AND_EXECUTION_COVERAGE GCC20 CLANG20 HOST_MODEL_ONLY AUTH0')
+          PY
+      - name: Preserve first-parent testing standards and repository policy
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          python3 -B tests/runtime/native/repository-policy-test.py --enforce
+      - name: Preserve bounded rootless original source host evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: round079-agent5-original-zswap-source-host-results
+          path: ${{ runner.temp }}/round079-agent5-original-source-host.json
+          if-no-files-found: ignore
+          retention-days: 14
