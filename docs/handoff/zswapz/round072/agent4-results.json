@@ -1,0 +1,91 @@
+{
+  "schema": "swapz.round072.agent4.results.v1",
+  "round": "072",
+  "agent": 4,
+  "role": "original-zswap-pool-rcu-private-drain",
+  "task_commit": "3c1919f1b2c2ea428045a1afb5c278151cf06ccc",
+  "implementation_commit": "95f2310d899f8aed780c52946d52424d2052eeb2",
+  "implementation_parent": "adff0ee5ee3245681118e21f64ab5d6f4a90ede2",
+  "exact_tested_source_sha": "95f2310d899f8aed780c52946d52424d2052eeb2",
+  "original_linux_pin": "c339f4010dea8b0d754f84ace70cd1b089878ef8",
+  "original_mm_zswap_blob": "ae19e301fced7e357a4c7587dfdd6abb890b9163",
+  "changed_files": [
+    "tests/runtime/native/fixtures/round071-original-pool-retirement-kunit.cfrag",
+    "tests/tools/round071-stage-original-pool-retirement.py",
+    "docs/testing_standards.md"
+  ],
+  "product_c_changes": [],
+  "status": "QUEUED",
+  "conclusion": "IN_PROGRESS",
+  "source_authentication": false,
+  "source_mapped_authenticated": false,
+  "phase_a": "BLOCKED",
+  "direct_compressed_handoff": "DISABLED",
+  "forced_raw_bypass": "DISABLED",
+  "import_active": false,
+  "ordinary_raw_4096": "ORIGINAL_FULL_UNCOMPRESSED_4096",
+  "workflow_url": "https://github.com/k1moradi/swapz/actions/runs/45127241581",
+  "workflow_run_id": 45127241581,
+  "jobs": [
+    {
+      "name": "source-host",
+      "id": 137534301766,
+      "url": "https://github.com/k1moradi/swapz/actions/runs/45127241581/job/137534301766",
+      "status": "queued",
+      "conclusion": null
+    },
+    {
+      "name": "original-uml-native",
+      "id": null,
+      "status": "not_allocated",
+      "conclusion": null
+    }
+  ],
+  "native_kunit": {
+    "actual_executed": null,
+    "passed": null,
+    "failed": null,
+    "skipped": null,
+    "crashed": null,
+    "ktap_verified": false,
+    "json_verified": false,
+    "expected_cases": 6,
+    "expected_close_cycles": 48,
+    "status": "NOT_RUN"
+  },
+  "gcc_clang_strict_asan_ubsan": {
+    "status": "QUEUED",
+    "actual_executed_baselines": null,
+    "real_compiled_executed_c_semantic_mutants": null,
+    "expected_mutants": 22
+  },
+  "structural_original_anchor_audit": {
+    "status": "PASS",
+    "anchors_exact_once": 4,
+    "source_runtime_proof": false
+  },
+  "first_error": null,
+  "prior_source_failure": {
+    "source_commit": "4abbb0485faab3bf93b489c812d613c296ea0e07",
+    "workflow_run_id": 45110969473,
+    "host_job_id": 137482988173,
+    "host_conclusion": "success",
+    "native_job_id": 137487417303,
+    "native_conclusion": "failure",
+    "first_error": "original include/linux/workqueue.h:827:17 -Werror=attribute-warning __warn_flushing_systemwide_wq; round071 fixture:151 global system_percpu_wq flush",
+    "native_kunit_executed": 0
+  },
+  "remaining_blockers": [
+    "Exact-source source-host and original-uml-native results pending",
+    "Original true STORED swapcache provenance and source authentication unproven",
+    "Original module unloading and genuine physical lower FUA or upper BIO ACK untested"
+  ],
+  "physical_io": false,
+  "privileged_tests": false,
+  "loaded_kernel_tests": false,
+  "actual_swap_activation": false,
+  "actual_memory_pressure": false,
+  "branches_or_prs_created": false,
+  "disallowed_global_workqueue_flush_removed": true,
+  "target_private_completion_enabled": true
+}
