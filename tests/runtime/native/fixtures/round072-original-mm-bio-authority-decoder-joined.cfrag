@@ -1,0 +1,494 @@
+/* ROUND072_ORIGINAL_MM_BIO_AUTHORITY_DECODER_JOIN_BEGIN
+ * TEST ONLY: compile inside pristine pinned original Linux mm/zswap.c after
+ * staged original XArray/zsmalloc owner and independently staged actual
+ * original Linux BIO code. There is no authenticated swapcache-backed
+ * STORED entry, physical FUA, selected current DM upper or real upper ACK.
+ * The original native bio_endio is linked from original block/bio.c.
+ */
+#if defined(SWAPZ_ROUND072_NATIVE_JOIN_KUNIT) && IS_ENABLED(CONFIG_KUNIT)
+/* Include byte-identical dormant independent owner C; no synthetic codec. */
+#include "swapz_round072/zswap-import-decoder-owner.c"
+
+#define SWAPZ_ROUND072_LOGICAL 19U
+#define SWAPZ_ROUND072_GC_LOGICAL 23U
+
+static void swapz_round072_fill_spec(
+		struct swapz_round069_joined *joined,
+		const struct swapz_round069_native_state *source,
+		const struct swapz_round069_owned_stored *owned,
+		swapz_u32 logical, struct swapz_authority_import_spec *spec)
+{
+	memset(spec, 0, sizeof(*spec));
+	spec->logical_page = logical;
+	spec->source_swap_slot = source->first->swpentry.val;
+	spec->source_entry_identity =
+		source->first->swapz_round028_stored_entry_identity;
+	spec->source_store_generation = owned->source_epoch;
+	spec->gc_epoch = owned->source_epoch;
+	spec->compressed_crc32c =
+		swapz_crc32c_bytes(owned->bytes, owned->length);
+	spec->compressed_length = owned->length;
+	spec->codec = !strcmp(owned->original_codec, "lzo") ?
+		SWAPZ_AUTHORITY_IMPORT_LZO1X : SWAPZ_AUTHORITY_IMPORT_LZ4;
+	spec->codec_version = 1U;
+	spec->requested_fua = 1U;
+	sha256(joined->original, SWAPZ_BLOCK_BYTES, spec->original_sha256);
+}
+
+/* Only for the separate LZO1X original-source *test-assembled* entry.
+ * The prior Round069 original source helper deliberately supports LZ4
+ * alone and remains byte-identical/unmodified; this new isolated helper
+ * refuses any other pool codec and double capture. */
+static int swapz_round072_capture_lzo_source(
+		struct swapz_round069_native_state *source,
+		struct swapz_round069_owned_stored *owned)
+{
+	struct zswap_entry *entry = source->first;
+	struct zswap_pool *pool;
+	struct scatterlist compressed_sg[2];
+	unsigned int length;
+
+	if (!owned || !owned->bytes || owned->live || !entry ||
+	    !source->folio || !folio_test_locked(source->folio))
+		return -EPERM;
+	length = READ_ONCE(entry->length);
+	if (!length || length > 3568U || length > owned->capacity)
+		return -EMSGSIZE;
+	if (xa_load(&source->tree, swp_offset(entry->swpentry)) != entry ||
+	    !entry->swapz_round028_store_bound ||
+	    !entry->swapz_round028_stored_entry_identity ||
+	    entry->swapz_round028_allocation_epoch != SWAPZ_ROUND069_TEST_EPOCH)
+		return -ESTALE;
+	pool = zswap_entry_pool(entry);
+	if (!pool || !pool->zs_pool || pool->idx != entry->pool_idx ||
+	    !entry->handle || strcmp(pool->tfm_name, "lzo"))
+		return -ESTALE;
+	zs_obj_read_sg_begin(pool->zs_pool, entry->handle,
+			     compressed_sg, length);
+	memcpy_from_sglist(owned->bytes, compressed_sg, 0, length);
+	zs_obj_read_sg_end(pool->zs_pool, entry->handle);
+	if (xa_load(&source->tree, swp_offset(entry->swpentry)) != entry ||
+	    zswap_entry_pool(entry) != pool ||
+	    READ_ONCE(entry->length) != length) {
+		memzero_explicit(owned->bytes, length);
+		return -ESTALE;
+	}
+	owned->length = length;
+	owned->source_swap_entry = entry->swpentry.val;
+	owned->source_epoch = entry->swapz_round028_allocation_epoch;
+	owned->pool_idx = entry->pool_idx;
+	strscpy(owned->original_codec, pool->tfm_name,
+		sizeof(owned->original_codec));
+	owned->live = true;
+	return 0;
+}
+
+static int swapz_round072_make_original_lzo(
+		struct swapz_round069_native_state *source,
+		struct swapz_round069_joined *joined)
+{
+	size_t compressed_length = PAGE_SIZE;
+	unsigned long handle;
+	int result;
+
+	/* Original Linux LZO1X profile, NOT a swapz disk LZO encoder. */
+	result = lzo1x_1_compress(source->original_page, PAGE_SIZE,
+		source->compressed, &compressed_length, joined->codec_work);
+	if (result != LZO_E_OK || !compressed_length ||
+	    compressed_length > 3568U)
+		return -EMSGSIZE;
+	/* Free and replace the real original zsmalloc object while the
+	 * fixture holds its test source lock and original pool lifetime. */
+	zs_free(source->allocator, source->handle);
+	source->handle = 0;
+	handle = zs_malloc(source->allocator, compressed_length,
+			   GFP_KERNEL, NUMA_NO_NODE);
+	if (!handle || IS_ERR_VALUE(handle))
+		return -ENOMEM;
+	source->handle = handle;
+	zs_obj_write(source->allocator, source->handle,
+		     source->compressed, compressed_length);
+	source->compressed_length = compressed_length;
+	source->first->handle = source->handle;
+	source->first->length = compressed_length;
+	strscpy(source->pool->tfm_name, "lzo",
+		sizeof(source->pool->tfm_name));
+	return 0;
+}
+
+/* The KUnit source lifecycle calls the real original XArray and zs_free.
+ * The independently copied compressed page stays in BIO bvec pages after
+ * source erase, pool object free and owned-source scratch destruction. */
+static int swapz_round072_erase_source(
+		struct swapz_round069_native_state *source,
+		struct swapz_round069_owned_stored *owned)
+{
+	if (!owned->live ||
+	    xa_erase(&source->tree, SWAPZ_ROUND069_TEST_OFFSET) != source->first)
+		return -ESTALE;
+	zs_free(source->allocator, source->handle);
+	source->handle = 0;
+	source->first->handle = 0;
+	if (!swapz_round069_release_owned(owned))
+		return -EUCLEAN;
+	return 0;
+}
+
+static int swapz_round072_decode_read(
+		struct swapz_round069_joined *joined, swapz_u64 ticket,
+		struct swapz_zswap_import_decoder_lease *lease,
+		bool test_stale_and_duplicate)
+{
+	struct swapz_zswap_import_read_authority model_authority = {};
+	struct swapz_zswap_import_record record = {};
+	struct swapz_import_lower_bio_request request;
+	struct swapz_import_disk_view view;
+	struct swapz_round069_io *io = NULL;
+	const char *first_step = "begin-native-read";
+	int error, observed;
+
+	mutex_lock(&joined->authority_lock);
+	error = swapz_import_lower_begin_read(&joined->reader, ticket, &request);
+	if (!error)
+		view = joined->reader.pinned_view;
+	mutex_unlock(&joined->authority_lock);
+	if (error)
+		goto out;
+	first_step = "real-bio-read-alloc";
+	io = swapz_round069_make_io(joined, &joined->reader, &request,
+				SWAPZ_JOIN_IO_READ, NULL, 0U);
+	if (!io) {
+		error = -ENOMEM;
+		goto out;
+	}
+	first_step = "real-bio-endio-and-sleepable-authority-read";
+	error = swapz_round069_run_io(io);
+	if (error)
+		goto out;
+	if (test_stale_and_duplicate) {
+		/* A repeated/late lower callback is NOT a second bio_endio. */
+		observed = swapz_import_lower_end_read(&joined->reader,
+			&io->callback, io->completed_bytes, 0, io->read_extent,
+			joined->read_compressed, sizeof(joined->read_compressed));
+		if (observed != -ESTALE) {
+			error = -EUCLEAN;
+			goto out;
+		}
+	}
+	record.logical_page = view.spec.logical_page;
+	record.generation = view.ordinary_generation;
+	record.stored_entry_identity = view.spec.source_entry_identity;
+	record.store_generation = view.spec.source_store_generation;
+	record.gc_epoch = view.spec.gc_epoch;
+	record.compressed_length = view.spec.compressed_length;
+	record.decoded_length = SWAPZ_BLOCK_BYTES;
+	record.compressed_crc32c = view.spec.compressed_crc32c;
+	memcpy(record.original_sha256, view.spec.original_sha256,
+	       sizeof(record.original_sha256));
+	record.representation = SWAPZ_ZSWAP_IMPORT_REPRESENTATION;
+	record.codec = view.spec.codec;
+	record.version = view.spec.codec_version;
+	record.stored_eviction = 1U;
+	record.immutable_owned_copy = 1U;
+	model_authority.logical_page = record.logical_page;
+	model_authority.generation = record.generation;
+	model_authority.stored_entry_identity = record.stored_entry_identity;
+	model_authority.store_generation = record.store_generation;
+	model_authority.gc_epoch = record.gc_epoch;
+	/* The lower READ fetched an entire padded extent, but an actual
+	 * authority CRC/pad verification supplied precisely original bytes.
+	 * The following publication/ACK fields are TEST-ONLY modeled policy
+	 * assumptions, NOT durable media or a real selected upper bio ACK. */
+	model_authority.actual_lower_read_bytes = record.compressed_length;
+	model_authority.mapping_published_after_durable_write = 1U;
+	model_authority.foreground_write_committed_once = 1U;
+	model_authority.upper_write_ack_count = 1U; /* MODEL, not product ACK */
+	model_authority.current_owned_ram_session = 1U;
+	first_step = "test-model-source-generation-stale-must-reject";
+	if (test_stale_and_duplicate) {
+		model_authority.store_generation++;
+		memset(joined->output, 0x75, SWAPZ_BLOCK_BYTES);
+		observed = swapz_zswap_import_decoder_owner_decode(
+			lease, &record, &model_authority,
+			joined->read_compressed, record.compressed_length,
+			joined->decoded, SWAPZ_BLOCK_BYTES, joined->output,
+			SWAPZ_BLOCK_BYTES, joined->original);
+		model_authority.store_generation--;
+		if (observed != -ESTALE || joined->output[0] != 0x75) {
+			error = -EUCLEAN;
+			goto out;
+		}
+	}
+	first_step = "independent-original-decoder-complete-4096";
+	error = swapz_zswap_import_decoder_owner_decode(lease, &record,
+		&model_authority, joined->read_compressed,
+		record.compressed_length, joined->decoded, SWAPZ_BLOCK_BYTES,
+		joined->output, SWAPZ_BLOCK_BYTES, joined->original);
+	if (!error && memcmp(joined->output, joined->original, SWAPZ_BLOCK_BYTES))
+		error = -EBADMSG;
+out:
+	if (error)
+		pr_err("ROUND072_NATIVE_DECODE_FIRST_ERROR step=%s error=%d\n",
+		       first_step, error);
+	swapz_round069_release_io(io);
+	return error;
+}
+
+static int swapz_round072_join_original(struct kunit *test,
+				       swapz_u8 codec, bool gc)
+{
+	struct swapz_round069_native_state *source = test->priv;
+	struct swapz_round069_owned_stored owned = swapz_round069_make_owner(source);
+	struct swapz_round069_joined *joined = swapz_round069_join_alloc();
+	struct swapz_zswap_import_decoder_owner decoder_owner = {};
+	struct swapz_zswap_import_decoder_lease lease = {};
+	struct swapz_authority_import_spec spec;
+	struct swapz_import_lower_bio_request request, old_read_request;
+	struct swapz_round069_io *write_io = NULL, *old_read_io = NULL;
+	struct swapz_import_disk_view old_view;
+	struct swapz_tx *transaction = NULL;
+	const char *first_step = "allocation";
+	swapz_u64 ticket = 0U, moved_ticket = 0U;
+	swapz_u32 old_start;
+	int error = -ENOMEM, step_error;
+	bool decoder_initialized = false;
+
+	if (!joined)
+		goto out;
+	transaction = kvzalloc(sizeof(*transaction), GFP_KERNEL);
+	if (!transaction)
+		goto out;
+	memcpy(joined->original, source->original_page, SWAPZ_BLOCK_BYTES);
+	if (codec == SWAPZ_AUTHORITY_IMPORT_LZO1X) {
+		first_step = "original-LZO1X-source-zsmalloc";
+		error = swapz_round072_make_original_lzo(source, joined);
+		if (error)
+			goto out;
+	} else if (codec != SWAPZ_AUTHORITY_IMPORT_LZ4) {
+		error = -EOPNOTSUPP;
+		goto out;
+	}
+	first_step = "original-XArray-slot-and-zsmalloc-capture";
+	if (codec == SWAPZ_AUTHORITY_IMPORT_LZO1X)
+		error = swapz_round072_capture_lzo_source(source, &owned);
+	else
+		error = swapz_round069_capture_stored(source->first,
+			source->first->swpentry, &source->tree, source->folio,
+			SWAPZ_ROUND069_TEST_EPOCH, &owned);
+	if (error)
+		goto out;
+	if (!owned.live || owned.length != source->compressed_length ||
+	    memcmp(owned.bytes, source->compressed, owned.length)) {
+		error = -EBADMSG;
+		goto out;
+	}
+	swapz_round072_fill_spec(joined, source, &owned,
+			gc ? SWAPZ_ROUND072_GC_LOGICAL : SWAPZ_ROUND072_LOGICAL,
+			&spec);
+	if (spec.codec != codec || !spec.source_swap_slot ||
+	    !spec.source_entry_identity || !spec.source_store_generation) {
+		error = -EUCLEAN;
+		goto out;
+	}
+	first_step = "independent-decoder-owner-get";
+	error = swapz_zswap_import_decoder_owner_init(&decoder_owner,
+						      codec, 1U);
+	if (error)
+		goto out;
+	decoder_initialized = true;
+	error = swapz_zswap_import_decoder_owner_get(&decoder_owner, &lease);
+	if (error)
+		goto out;
+	first_step = "actual-source-byte-identical-authority-disk-stage";
+	mutex_lock(&joined->authority_lock);
+	error = swapz_import_disk_stage(&joined->pool, &spec, 2U, 0U,
+					transaction, &ticket);
+	if (!error)
+		error = swapz_import_disk_submit(&joined->pool, ticket);
+	if (!error)
+		error = swapz_import_lower_begin_write(&joined->writer,
+				transaction, ticket, 1, &request);
+	mutex_unlock(&joined->authority_lock);
+	if (error)
+		goto out;
+	first_step = "source-copy-into-real-original-bio-pages";
+	write_io = swapz_round069_make_io(joined, &joined->writer,
+			&request, SWAPZ_JOIN_IO_WRITE, owned.bytes, owned.length);
+	if (!write_io) {
+		error = -ENOMEM;
+		goto out;
+	}
+	first_step = "original-XArray-erase-zs-free-before-endio";
+	error = swapz_round072_erase_source(source, &owned);
+	if (error)
+		goto out;
+	first_step = "real-original-bio-endio-owned-authority-commit";
+	error = swapz_round069_run_io(write_io);
+	if (error)
+		goto out;
+	if (!swapz_round069_header_intact(joined) ||
+	    joined->maps[spec.logical_page].valid ||
+	    joined->upper_ack_count != 0U) {
+		error = -EUCLEAN;
+		goto out;
+	}
+	if (gc) {
+		first_step = "old-native-read-pin-before-original-GC";
+		error = swapz_import_lower_begin_read(&joined->reader,
+						      ticket, &old_read_request);
+		if (error)
+			goto out;
+		old_view = joined->reader.pinned_view;
+		old_read_io = swapz_round069_make_io(joined, &joined->reader,
+				&old_read_request, SWAPZ_JOIN_IO_READ, NULL, 0U);
+		if (!old_read_io) {
+			error = -ENOMEM;
+			goto out;
+		}
+		old_start = transaction->start_block;
+		first_step = "no-reencode-exact-original-compressed-GC";
+		error = swapz_round069_native_gc_copy_fua(joined, &old_view, 4U,
+				&moved_ticket, transaction);
+		if (error)
+			goto out;
+		if (!joined->live_records[old_start]) {
+			error = -EUCLEAN;
+			goto out;
+		}
+		first_step = "retained-old-native-read-last-put";
+		error = swapz_round069_run_io(old_read_io);
+		if (error)
+			goto out;
+		if (joined->live_records[old_start] ||
+		    !swapz_round069_header_intact(joined)) {
+			error = -EUCLEAN;
+			goto out;
+		}
+		ticket = moved_ticket;
+	}
+	first_step = "original-lower-native-read-plus-independent-decoder";
+	error = swapz_round072_decode_read(joined, ticket, &lease, true);
+	if (error)
+		goto out;
+	first_step = "retire-and-drain-lower-owner-no-ACK";
+	error = swapz_import_disk_retire(&joined->pool, ticket);
+	if (!error)
+		error = swapz_import_disk_close(&joined->pool);
+	if (!error && joined->upper_ack_count != 0U)
+		error = -EUCLEAN;
+out:
+	if (error)
+		pr_err("ROUND072_NATIVE_JOIN_FIRST_ERROR step=%s error=%d codec=%u gc=%u\n",
+		       first_step, error, codec, gc);
+	if (lease.owner) {
+		step_error = swapz_zswap_import_decoder_owner_put(&lease);
+		if (!error)
+			error = step_error;
+	}
+	if (decoder_initialized) {
+		step_error =
+			swapz_zswap_import_decoder_owner_close_and_drain(&decoder_owner);
+		if (!error)
+			error = step_error;
+	}
+	swapz_round069_release_io(old_read_io);
+	swapz_round069_release_io(write_io);
+	kvfree(transaction);
+	swapz_round069_join_free(joined);
+	return error;
+}
+
+static void swapz_round072_joined_original_lz4_kunit(struct kunit *test)
+{
+	KUNIT_EXPECT_EQ(test,
+		swapz_round072_join_original(test, SWAPZ_AUTHORITY_IMPORT_LZ4,
+					    false), 0);
+}
+
+static void swapz_round072_joined_original_lzo1x_kunit(struct kunit *test)
+{
+	KUNIT_EXPECT_EQ(test,
+		swapz_round072_join_original(test, SWAPZ_AUTHORITY_IMPORT_LZO1X,
+					    false), 0);
+}
+
+static void swapz_round072_joined_original_gc_reader_kunit(struct kunit *test)
+{
+	KUNIT_EXPECT_EQ(test,
+		swapz_round072_join_original(test, SWAPZ_AUTHORITY_IMPORT_LZ4,
+					    true), 0);
+}
+
+/* Joined short/duplicate/close uses native bvec endio with guarded actual
+ * authority; stale callback is called directly, NEVER bio_endio twice. */
+static void swapz_round072_joined_native_lower_errors_kunit(struct kunit *test)
+{
+	struct swapz_round069_joined *joined = swapz_round069_join_alloc();
+	struct swapz_import_lower_bio_request request;
+	struct swapz_authority_import_spec spec;
+	struct swapz_round069_io *io = NULL;
+	struct swapz_tx *transaction = NULL;
+	swapz_u64 ticket = 0;
+	int error = -ENOMEM, duplicate;
+
+	if (!joined)
+		goto out;
+	transaction = kvzalloc(sizeof(*transaction), GFP_KERNEL);
+	if (!transaction)
+		goto out;
+	error = swapz_round069_begin_write(joined, 27U, 1U,
+			SWAPZ_AUTHORITY_IMPORT_LZ4, 2U, 0U, 1,
+			transaction, &ticket, &request, &spec);
+	if (error)
+		goto out;
+	io = swapz_round069_make_io(joined, &joined->writer, &request,
+			SWAPZ_JOIN_IO_WRITE, joined->selected_bytes,
+			spec.compressed_length);
+	if (!io) {
+		error = -ENOMEM;
+		goto out;
+	}
+	io->forced_bytes = 13U;
+	error = swapz_round069_run_io(io);
+	duplicate = swapz_import_lower_end_write(&joined->writer,
+		&io->callback, io->completed_bytes, -EIO,
+		joined->lower + (size_t)request.sector * 512U, NULL);
+	if (error != -EIO || duplicate != -ESTALE ||
+	    joined->authority.committed_blocks != 0U ||
+	    joined->maps[27].valid ||
+	    !swapz_round069_header_intact(joined)) {
+		error = -EUCLEAN;
+		goto out;
+	}
+	error = swapz_import_disk_abort(&joined->pool, ticket);
+	if (error)
+		goto out;
+	error = swapz_import_disk_close(&joined->pool);
+out:
+	if (error)
+		pr_err("ROUND072_NATIVE_NEGATIVE_FIRST_ERROR error=%d\n", error);
+	if (joined)
+		KUNIT_EXPECT_EQ(test, error, 0);
+	else
+		KUNIT_FAIL(test, "original joined lower negative allocation failed");
+	swapz_round069_release_io(io);
+	kvfree(transaction);
+	swapz_round069_join_free(joined);
+}
+
+static struct kunit_case swapz_round072_native_joined_cases[] = {
+	KUNIT_CASE(swapz_round072_joined_original_lz4_kunit),
+	KUNIT_CASE(swapz_round072_joined_original_lzo1x_kunit),
+	KUNIT_CASE(swapz_round072_joined_original_gc_reader_kunit),
+	KUNIT_CASE(swapz_round072_joined_native_lower_errors_kunit),
+	{}
+};
+static struct kunit_suite swapz_round072_native_joined_suite = {
+	.name = "swapz_round072_native_joined",
+	.init = swapz_round069_native_init,
+	.exit = swapz_round069_native_exit,
+	.test_cases = swapz_round072_native_joined_cases,
+};
+kunit_test_suite(swapz_round072_native_joined_suite);
+#endif /* SWAPZ_ROUND072_NATIVE_JOIN_KUNIT */
+/* ROUND072_ORIGINAL_MM_BIO_AUTHORITY_DECODER_JOIN_END */

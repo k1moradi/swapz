@@ -1,0 +1,182 @@
+name: Round072 one original MM BIO actual authority independent decoder joined NO_AUTH
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/phase-a-round072-original-mm-bio-authority-decoder-noauth.yml'
+      - 'tests/runtime/native/fixtures/round072-original-mm-bio-authority-decoder-joined.cfrag'
+      - 'tests/tools/round072-stage-original-mm-bio-authority-decoder-joined.py'
+      - 'tests/tools/round072-original-mm-bio-authority-decoder-joined-verify.py'
+      - 'docs/testing_standards.md'
+      - 'src/kernel/authority.c'
+      - 'src/kernel/zswap-import-decoder-owner.c'
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  exact-original-joined-source-host:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Disposable strict GCC Clang actual original codec prerequisites
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          sudo apt-get update -qq
+          sudo DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends gcc clang liblzo2-dev liblz4-dev libssl-dev
+      - name: Actual C GCC and Clang ASan UBSan source and semantic mutants
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
+          test "$(git branch --show-current)" = main
+          test -z "$(git status --porcelain --untracked-files=all)"
+          git diff --check HEAD^ HEAD
+          python3 -B tests/tools/round072-original-mm-bio-authority-decoder-joined-verify.py
+      - name: Preserve complete inherited and peer testing standards
+        env:
+          SWAPZ_PUSH_BEFORE_SHA: ${{ github.event.before }}
+        run: python3 -B tests/runtime/native/repository-policy-test.py --enforce
+
+  original-MM-BIO-authority-independent-decoder-native-KUnit:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 115
+    needs: exact-original-joined-source-host
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          path: swapz
+          persist-credentials: false
+      - uses: actions/checkout@v4
+        with:
+          repository: torvalds/linux
+          ref: c339f4010dea8b0d754f84ace70cd1b089878ef8
+          fetch-depth: 1
+          path: linux
+          persist-credentials: false
+      - name: Rootless original Linux user-mode kernel build prerequisites
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          sudo apt-get update -qq
+          sudo DEBIAN_FRONTEND=noninteractive apt-get install -y \
+            --no-install-recommends build-essential bc bison flex clang \
+            libelf-dev libssl-dev libncurses-dev liblz4-dev python3 \
+            python3-pyelftools binutils
+      - name: Verify pristine original and stage inherited zswap and new owned source KUnit
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          umask 077
+          test "$(git -C swapz rev-parse HEAD)" = "$GITHUB_SHA"
+          test "$(git -C linux rev-parse HEAD)" = c339f4010dea8b0d754f84ace70cd1b089878ef8
+          mkdir -p round069-evidence
+          python3 -B swapz/tests/tools/round058-original-stored-bio-chain.py stage \
+            --linux-root linux --manifest round069-evidence/round058-inherited.json
+          python3 -B swapz/tests/tools/round069-stage-original-zswap-stored-source.py \
+            --linux-root linux --base-manifest round069-evidence/round058-inherited.json \
+            --manifest round069-evidence/round069-staged.json --verify-only
+          python3 -B swapz/tests/tools/round069-stage-original-zswap-stored-source.py \
+            --linux-root linux --base-manifest round069-evidence/round058-inherited.json \
+            --manifest round069-evidence/round069-staged.json
+          python3 -B swapz/tests/tools/round072-stage-original-mm-bio-authority-decoder-joined.py \
+            --linux-root linux --base-manifest round069-evidence/round069-staged.json \
+            --manifest round069-evidence/round072-joined.json --verify-only
+          python3 -B swapz/tests/tools/round072-stage-original-mm-bio-authority-decoder-joined.py \
+            --linux-root linux --base-manifest round069-evidence/round069-staged.json \
+            --manifest round069-evidence/round072-joined.json
+          git -C linux diff --check
+          python3 -B - <<'PY'
+          import hashlib,json,pathlib
+          m=json.loads(pathlib.Path('round069-evidence/round072-joined.json').read_text())
+          assert m['original']=='c339f4010dea8b0d754f84ace70cd1b089878ef8'
+          assert m['source_mapped_authenticated'] is False and m['phase_a']=='BLOCKED'
+          assert not m['actual_physical_io'] and not m['actual_upper_bio_ack']
+          assert len(m['files'])==10
+          for row in m['files']:
+              assert hashlib.sha256((pathlib.Path('linux')/row['path']).read_bytes()).hexdigest()==row['sha256']
+          print('PASS Round072 original MM BIO authority decoder native ten exact postimages AUTH0')
+          PY
+          python3 -B - <<'PY'
+          import hashlib,json,pathlib
+          m=json.loads(pathlib.Path('round069-evidence/round069-staged.json').read_text())
+          assert m['original_sha']=='c339f4010dea8b0d754f84ace70cd1b089878ef8'
+          assert m['original_zswap_git_blob']=='ae19e301fced7e357a4c7587dfdd6abb890b9163'
+          assert m['source_mapped_authenticated'] is False
+          assert len(m['changed_paths'])==1
+          for record in m['changed_paths']:
+              assert record['path']=='mm/zswap.c'
+              assert hashlib.sha256((pathlib.Path('linux')/record['path']).read_bytes()).hexdigest()==record['staged_sha256']
+          print('ROUND069_ORIGINAL_PIN_AND_STAGED_SOURCE_SHA_PASS NO_AUTH')
+          PY
+      - name: Compile and execute original pinned native XArray zsmalloc LZ4 source KUnit
+        shell: bash
+        timeout-minutes: 85
+        run: |
+          set -Eeuo pipefail
+          umask 077
+          first_phase=initial
+          log=round069-evidence/first-original-native-error.log
+          verdict=round069-evidence/native-verdict.txt
+          out="$RUNNER_TEMP/round069-original-uml"
+          result="$PWD/round069-evidence/native-original-stored-source.json"
+          request="$PWD/round069-evidence/original.kunitconfig"
+          printf 'source=%s\noriginal=c339f4010dea8b0d754f84ace70cd1b089878ef8\n' "$GITHUB_SHA" > "$verdict"
+          trap 'code=$?; if ((code)); then echo "::error::ROUND069_NATIVE_FIRST_ERROR phase=$first_phase exit=$code"; first=$(grep -m1 -E "error:|FAILED|Traceback|KASAN:|UBSAN:|Not all Kconfig" "$log" 2>/dev/null || :); if test -n "$first"; then printf "::error::ROUND069_NATIVE_FIRST_DIAGNOSTIC %s\n" "$first" | cut -c1-280; fi; printf "result=FAIL\nfirst_phase=%s\nexit=%s\n" "$first_phase" "$code" >> "$verdict"; fi' EXIT
+          cat > "$request" <<'KUNIT_CFG'
+          CONFIG_KUNIT=y
+          CONFIG_BLOCK=y
+          CONFIG_SWAP=y
+          CONFIG_ZSWAP=y
+          CONFIG_SWAP_BIO_ORIGIN_KUNIT_TEST=y
+          CONFIG_CRYPTO=y
+          CONFIG_CRYPTO_LZO=y
+          CONFIG_CRYPTO_LZ4=y
+          CONFIG_CRYPTO_CRC32C=y
+          CONFIG_CRYPTO_SHA256=y
+          CONFIG_LZ4_COMPRESS=y
+          CONFIG_LZ4_DECOMPRESS=y
+          # CONFIG_CGROUPS is not set
+          # CONFIG_KUNIT_ALL_TESTS is not set
+          KUNIT_CFG
+          flags='-DSWAPZ_ROUND069_ORIGINAL_STORED_SOURCE_TEST=1 -DSWAPZ_ROUND065_ORIGINAL_DM_TABLE_TEST=1 -DSWAPZ_ROUND064_ORIGINAL_SLOT_TARGET_TEST=1 -DSWAPZ_ROUND056_PREERASE_SINGLE_OWNER_TEST=1 -DSWAPZ_ROUND063_ORIGINAL_DM_OWNER_TEST=1 -DSWAPZ_ROUND028_SLOT_EPOCH_SOURCE=1 -DSWAPZ_ROUND030_EVICTION_SNAPSHOT_SOURCE=1 -DSWAPZ_ROUND025_SIDEBAND_CI_ONLY=1 -DSWAPZ_ROUND031_MM_BIO_SOURCE=1 -DSWAPZ_ROUND032_BIO_COPY_VIEW_CI_ONLY=1 -DSWAPZ_ROUND034_ORIGINAL_V1_KUNIT_TEST=1 -DSWAPZ_ROUND035_ORIGINAL_MM_ROUTE_WITNESS_TEST=1 -DSWAPZ_ROUND036_ORIGINAL_ROUTE_LIFETIME_TEST=1 -DSWAPZ_ROUND037_ORIGINAL_MM_LIFETIME_OWNER_TEST=1 -DSWAPZ_ROUND038_ORIGINAL_STORE_PROVENANCE_TEST=1 -DSWAPZ_ROUND040_ORIGINAL_ASYNC_SLOT_LEASE_NEGATIVE_TEST=1 -DSWAPZ_ROUND041_ORIGINAL_SECTOR_TO_DM_NONAUTHORITY_TEST=1 -DSWAPZ_ROUND042_ORIGINAL_STORED_WRITEBACK_LIFETIME_TEST=1 -DSWAPZ_ROUND043_ORIGINAL_BIO_CLONE_COPY_TEST=1 -DSWAPZ_ROUND045_ORIGINAL_STORED_BIO_SOURCE_SCOPE_TEST=1 -DSWAPZ_ROUND049_ORIGINAL_LOCKED_FOLIO_COUNT_PAIR_TEST=1 -DSWAPZ_ROUND052_ORIGINAL_PRE_UNUSE_CANCEL_TEST=1 -DSWAPZ_ROUND056_ORIGINAL_CLONE_PROVENANCE_TEST=1 -DSWAPZ_ROUND058_ORIGINAL_STORED_BIO_CHAIN_TEST=1 -DSWAPZ_ROUND066_IMPORT_DISK_TEST=1 -DSWAPZ_ROUND067_IMPORT_DISK_PAYLOAD_TEST=1 -DSWAPZ_ROUND068_IMPORT_LOWER_BIO_TEST=1 -DSWAPZ_ROUND069_ORIGINAL_BIO_AUTHORITY_JOIN_KUNIT=1 -DSWAPZ_ROUND072_NATIVE_JOIN_KUNIT=1'
+          first_phase=actual-original-uml-zswap-native-compile-boot
+          timeout -k 10s 78m python3 -B linux/tools/testing/kunit/kunit.py run \
+            --arch=um --build_dir="$out" --kunitconfig="$request" \
+            --make_options="KCFLAGS=$flags -Werror" --jobs=2 --timeout=120 \
+            --json="$result" 'swapz_round072_native_joined*' > "$log" 2>&1
+          first_phase=effective-original-kunit-config
+          test -x "$out/linux" && test -s "$result" && test -s "$out/test.log"
+          grep -Fxq CONFIG_KUNIT=y "$out/.config"
+          grep -Fxq CONFIG_ZSWAP=y "$out/.config"
+          first_phase=independent-original-four-case-JSON-KTAP
+          python3 -B - "$result" "$out/test.log" <<'PY'
+          import json,pathlib,re,sys
+          doc=json.loads(pathlib.Path(sys.argv[1]).read_text())
+          log=pathlib.Path(sys.argv[2]).read_text()
+          todo=[doc]; suites=[]
+          while todo:
+              group=todo.pop()
+              if group.get('name')=='swapz_round072_native_joined':
+                  suites.append(group)
+              todo.extend(group.get('sub_groups',[]))
+          assert len(suites)==1
+          suite=suites[0]
+          expected={'swapz_round072_joined_original_lz4_kunit',
+                    'swapz_round072_joined_original_lzo1x_kunit',
+                    'swapz_round072_joined_original_gc_reader_kunit',
+                    'swapz_round072_joined_native_lower_errors_kunit'}
+          assert {case['name'] for case in suite['test_cases']}==expected
+          assert all(case['status']=='PASS' for case in suite['test_cases'])
+          assert all(suite['misc'][k]==v for k,v in
+                     dict(tests=4,passed=4,failed=0,skipped=0,crashed=0,errors=0).items())
+          assert log.count('# Subtest: swapz_round072_native_joined')==1
+          assert len(re.findall(r'\bok\s+\d+\s+(?:-\s+)?swapz_round072_joined_\w+_kunit\b',log))==4
+          assert not re.search(r'(?i)(Kernel panic|KASAN:|UBSAN:)',log)
+          print('PASS genuine original pinned MM source XArray/zsmalloc to native BIO endio real product authority independent original codec lifetime native KUnit=4/4 both original codecs full4096 modeled receipt only AUTH0')
+          PY
+          printf 'native_original_join_test_only=PASS\nreal_swapcache_folio=NOT_TESTED\nactual_upper_ACK=NOT_TESTED\nresult=PASS\n' >> "$verdict"
