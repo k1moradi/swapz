@@ -1,0 +1,89 @@
+{
+  "round": "073",
+  "agent": 10,
+  "message": "PROGRESS",
+  "status": "QUEUED",
+  "kind": "original-Linux-pinned-read-side-KUnit",
+  "task_publication_commit": "5f4d74f1ea538187e37fa0cdec2babb49186c59d",
+  "tested_source_commit": "ecaf63cb7860879364a6e3943884bc30e578ca63",
+  "tested_source_parent": "bd78c1382b284bf257e2c452247efe1512a799a3",
+  "source_branch": "main",
+  "original_kernel_pin": "c339f4010dea8b0d754f84ace70cd1b089878ef8",
+  "workflow_name": "phase-a-round073-original-reader-pin-gc-noauth.yml",
+  "workflow_run_id": 45134656124,
+  "workflow_url": "https://github.com/k1moradi/swapz/actions/runs/45134656124",
+  "workflow_status": "queued",
+  "workflow_conclusion": null,
+  "jobs": [
+    {
+      "name": "original-reader-strict-source-host",
+      "job_id": 137557932353,
+      "status": "queued",
+      "conclusion": null,
+      "job_url": "https://github.com/k1moradi/swapz/actions/runs/45134656124/job/137557932353"
+    },
+    {
+      "name": "original-linux-uml-reader-pin-gc-kunit",
+      "job_id": null,
+      "status": "WAITING_ON_SOURCE_HOST",
+      "conclusion": null,
+      "job_url": null
+    }
+  ],
+  "source_host": {
+    "gcc": {
+      "status": "NOT_RUN",
+      "c23_mode": null,
+      "asan_ubsan": null,
+      "compiled_executed_semantic_mutants": null
+    },
+    "clang": {
+      "status": "NOT_RUN",
+      "c23_mode": null,
+      "asan_ubsan": null,
+      "compiled_executed_semantic_mutants": null
+    },
+    "expected_compiled_executed_original_source_mutants_per_compiler": 10,
+    "expected_real_authority_mutants_per_compiler": 14,
+    "expected_real_owner_lifetime_mutants_per_compiler": 2,
+    "canonical_policy": "NOT_RUN",
+    "git_diff_check": "NOT_RUN"
+  },
+  "original_native": {
+    "status": "NOT_RUN",
+    "actual_original_linux_native_kunit": false,
+    "json_ktap": "NOT_RUN",
+    "expected_cases": [
+      "swapz_round073_original_lz4_old_reader_gc",
+      "swapz_round073_original_lzo1x_old_reader_gc",
+      "swapz_round073_original_stale_crc_sha_codec",
+      "swapz_round073_original_decoder_retire_with_pin"
+    ],
+    "executed_cases": null,
+    "passed": null,
+    "failed": null,
+    "skipped": null,
+    "crashed": null,
+    "test_created_source": true,
+    "real_swapcache_authenticated": false,
+    "original_bio_endio_compiled_executed": null,
+    "real_kernel_decoder_compiled_executed": null
+  },
+  "first_error": null,
+  "conclusion": "PENDING",
+  "source_mapped_authenticated": false,
+  "phase_a": "BLOCKED",
+  "direct_compressed_handoff": "DISABLED",
+  "forced_raw_bypass": "DISABLED",
+  "import_active": false,
+  "original_codec_identity": "SEPARATE_VOLATILE_LZO1X_OR_RAW_LZ4",
+  "ordinary_raw_4096": "COMPLETE_ORIGINAL_UNCOMPRESSED_4096",
+  "external_ram_pressure_owner": "Linux_MM_zswap_only",
+  "disk_work_owner": "swapz_packing_and_GC_only",
+  "actual_physical_io": false,
+  "actual_selected_current_dm": false,
+  "privileged_tests": false,
+  "commits_only_main": true,
+  "any_pr_or_branch_created": false,
+  "periodic_ci_checks_created": false
+}
