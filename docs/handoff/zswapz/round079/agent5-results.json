@@ -16,19 +16,19 @@
   "workflow": {
     "run_id": 45237411852,
     "url": "https://github.com/k1moradi/swapz/actions/runs/45237411852",
-    "status": "QUEUED",
-    "conclusion": null
+    "status": "COMPLETED",
+    "conclusion": "FAILURE"
   },
   "jobs": [
     {
       "id": 137912686741,
       "name": "original-pinned-zswap-preerase-source-host-GCC-Clang",
-      "status": "QUEUED",
-      "conclusion": null
+      "status": "completed",
+      "conclusion": "failure"
     }
   ],
   "host": {
-    "status": "NOT_EXECUTED_AT_AUDIT",
+    "status": "NOT_EXECUTED_PRECHECK_FAILED",
     "source_predicates_expected": 4,
     "source_writeback_events_expected": 9,
     "source_decoder_events_expected": 6,
@@ -36,8 +36,12 @@
     "semantic_C_mutants_expected_per_compiler": 20,
     "gcc": null,
     "clang": null,
-    "first_error": null,
-    "source_link_type": "VERBATIM_PINNED_UPSTREAM_BRANCH_EXPRESSIONS_IN_MODEL_NOT_FULL_LINUX_KERNEL_C"
+    "first_error": "Preflight step exit=1; individual failing assertion NOT_EMITTED; GCC/Clang verifier SKIPPED",
+    "source_link_type": "VERBATIM_PINNED_UPSTREAM_BRANCH_EXPRESSIONS_IN_MODEL_NOT_FULL_LINUX_KERNEL_C",
+    "source_predicates_executed": 0,
+    "compiler_baselines_executed": 0,
+    "actual_C_mutants_compiled": 0,
+    "actual_C_mutants_executed": 0
   },
   "native_kunit": {
     "status": "NOT_REQUESTED",
@@ -74,7 +78,7 @@
   "privileged_tests": false,
   "physical_device": false,
   "real_memory_pressure": false,
-  "first_error": null,
+  "first_error": "preflight-assert-main-pristine-pin-and-compiler-toolchain exit1 (exact failing assertion unprinted)",
   "SOURCE_MAPPED_AUTHENTICATED": 0,
   "PHASE_A": "BLOCKED",
   "DIRECT_COMPRESSED_HANDOFF": "DISABLED",
@@ -84,5 +88,18 @@
   "disk_owner": "swapz_disk_packing_GC_no_reclaim_or_recompression",
   "original_codec": "volatile_separate_original_LZO1X_raw_LZ4_future_authenticated",
   "ordinary_RAW_4096": "FULL_ORIGINAL_UNCOMPRESSED_4096",
-  "conclusion": "PENDING_EXACT_SOURCE_HOST_CI"
+  "conclusion": "COMPLETED_FAILURE_HOST_PRECHECK_NO_COMPILER",
+  "agent1_verified_terminal_r079": {
+    "source_sha": "b1437365849fa574c0e34f9b7729efdb530a6a51",
+    "run_id": 45237411852,
+    "job_id": 137912686741,
+    "job_status": "completed",
+    "job_conclusion": "failure",
+    "classification": "HOST_PRECHECK_FAILED",
+    "details": "Preflight step 'Assert exact main Git SHA pristine pinned original and compiler toolchain' exit=1; commands include status --porcelain --untracked-files=all AFTER a nested original-linux checkout. Workflow emits no failing predicate line; root cause NOT FULLY IDENTIFIED. Source-linked compiler verifier and GCC/Clang C semantic mutants SKIPPED, executed 0. Original pin checkout itself succeeded. A distinct new source/workflow commit needed, diagnose by emitting nonsecret fail-only predicate, preserve clean checkout without excluding unintended changes.",
+    "first_error": "preflight step exit1, exact failed shell assertion not printed",
+    "source_mapped_authenticated": 0,
+    "phase_a": "BLOCKED",
+    "actual_physical": false
+  }
 }

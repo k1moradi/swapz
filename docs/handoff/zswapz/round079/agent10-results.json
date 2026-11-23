@@ -13,8 +13,8 @@
   "workflow_name": "phase-a-round073-original-reader-pin-gc-noauth.yml",
   "workflow_run_id": 45236328888,
   "workflow_url": "https://github.com/k1moradi/swapz/actions/runs/45236328888",
-  "workflow_status": "in_progress",
-  "workflow_conclusion": null,
+  "workflow_status": "completed",
+  "workflow_conclusion": "failure",
   "jobs": [
     {
       "name": "original-reader-strict-source-host",
@@ -27,8 +27,8 @@
       "name": "original-linux-uml-reader-pin-gc-kunit",
       "id": 137910554522,
       "url": "https://github.com/k1moradi/swapz/actions/runs/45236328888/job/137910554522",
-      "status": "queued",
-      "conclusion": null
+      "status": "completed",
+      "conclusion": "failure"
     }
   ],
   "source_host": {
@@ -89,21 +89,25 @@
     "sanitized_positive_runtime_qualified": false
   },
   "original_native": {
-    "status": "QUEUED_AFTER_SOURCE_HOST_PASS",
+    "status": "FAILED_NATIVE_RUNTIME_TIMEOUT_AFTER_TWO_PASS",
     "expected_cases": [
       "swapz_round073_original_lz4_old_reader_gc",
       "swapz_round073_original_lzo1x_old_reader_gc",
       "swapz_round073_original_stale_crc_sha_codec",
       "swapz_round073_original_decoder_retire_with_pin"
     ],
-    "actual_cases_observed": 0,
-    "passed": null,
-    "failed": null,
-    "skipped": null,
-    "crashed": null,
-    "json_ktap": "NOT_GENERATED",
-    "compiled_and_booted_original_linux": false,
-    "original_live_stored_authenticated": false
+    "actual_cases_observed": 4,
+    "passed": 2,
+    "failed": 0,
+    "skipped": 0,
+    "crashed": 2,
+    "json_ktap": "ORIGINAL_JSON_AVAILABLE_NATIVE_KTAP_PARTIAL_2_PASS_2_CRASH",
+    "compiled_and_booted_original_linux": true,
+    "original_live_stored_authenticated": false,
+    "errors": 3,
+    "kunit_booted": true,
+    "kernel_run_timeout_seconds": 120,
+    "artifact_id": 14851590265
   },
   "historical_round077": {
     "source_sha": "04b190b00131c1d40254acd2279e6240a11913d0",
@@ -123,8 +127,8 @@
     "executed_native_cases": 0,
     "first_error": "linux/mm/zswap.c:5307:25 implicit declaration of function 'usleep_range' [-Werror=implicit-function-declaration]"
   },
-  "first_error": null,
-  "conclusion": "IN_PROGRESS",
+  "first_error": "KUnit pinned UML boot/execution time limit 120s after PASS LZ4+LZO1X first 2 cases; JSON tests=4 passed=2 crashed=2 errors=3",
+  "conclusion": "COMPLETED_FAILURE_ORIGINAL_PINNED_KUNIT_RUNTIME_TIMEOUT",
   "source_mapped_authenticated": false,
   "phase_a": "BLOCKED",
   "direct_compressed_handoff": "DISABLED",
@@ -140,5 +144,18 @@
   "privileged_testing": false,
   "branches_or_pr_created": false,
   "force_push": false,
-  "periodic_ci_check": false
+  "periodic_ci_check": false,
+  "agent1_verified_terminal_r079": {
+    "source_sha": "14e8f8f18566e584d9640482b3437929e5da041c",
+    "run_id": 45236328888,
+    "job_id": 137910554522,
+    "job_status": "completed",
+    "job_conclusion": "failure",
+    "classification": "PINNED_NATIVE_KUNIT_PARTIAL_RUNTIME_TIMEOUT",
+    "details": "Source-host job137908924597 SUCCESS exact source GCC10 original+14 authority+2 decoder semantic mutants each compiler (52 total), actual GCC/Clang missing-declaration negative classifier each passed. Native original Linux UML compiled AND booted; artifact round073-original-reader-pin-gc-native id14851590265 has first-native-error.log and original-reader-kunit.json: cases original_lz4_old_reader_gc PASS, original_lzo1x_old_reader_gc PASS, then runner kernel test timeout after120s. JSON misc tests4 passed2 failed0 crashed2 skipped0 errors3. Native job exit=1 at original-uml-build-boot; NOT 4/4; no actual live STORED auth. New task must isolate 3rd/4th test hang/teardown with bounded independent exact-native per-case filters and fail-only diagnostics, not increase timeout blindly.",
+    "first_error": "original UML booted, 2/4 passed, third-or-fourth hangs until KUnit timeout 120s (2 crashed in JSON)",
+    "source_mapped_authenticated": 0,
+    "phase_a": "BLOCKED",
+    "actual_physical": false
+  }
 }
