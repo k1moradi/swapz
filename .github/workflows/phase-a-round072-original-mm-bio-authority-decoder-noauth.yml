@@ -7,6 +7,7 @@ on:
       - 'tests/runtime/native/fixtures/round072-original-mm-bio-authority-decoder-joined.cfrag'
       - 'tests/tools/round072-stage-original-mm-bio-authority-decoder-joined.py'
       - 'tests/tools/round072-original-mm-bio-authority-decoder-joined-verify.py'
+      - 'tests/tools/round075-original-stage-manifest-order-verify.py'
       - 'docs/testing_standards.md'
       - 'src/kernel/authority.c'
       - 'src/kernel/zswap-import-decoder-owner.c'
@@ -37,6 +38,7 @@ jobs:
           test -z "$(git status --porcelain --untracked-files=all)"
           git diff --check HEAD^ HEAD
           python3 -B tests/tools/round072-original-mm-bio-authority-decoder-joined-verify.py
+          python3 -B tests/tools/round075-original-stage-manifest-order-verify.py --self-test
       - name: Preserve complete inherited and peer testing standards
         env:
           SWAPZ_PUSH_BEFORE_SHA: ${{ github.event.before }}
@@ -83,6 +85,25 @@ jobs:
           python3 -B swapz/tests/tools/round069-stage-original-zswap-stored-source.py \
             --linux-root linux --base-manifest round069-evidence/round058-inherited.json \
             --manifest round069-evidence/round069-staged.json
+          # The inherited SHA describes original mm/zswap.c BEFORE the
+          # joined KUnit appends another source-exact, test-only witness.
+          # Keep this original Round069 provenance check unchanged.
+          python3 -B - <<'PY'
+          import hashlib,json,pathlib
+          m=json.loads(pathlib.Path('round069-evidence/round069-staged.json').read_text())
+          assert m['original_sha']=='c339f4010dea8b0d754f84ace70cd1b089878ef8'
+          assert m['original_zswap_git_blob']=='ae19e301fced7e357a4c7587dfdd6abb890b9163'
+          assert m['source_mapped_authenticated'] is False
+          assert len(m['changed_paths'])==1
+          for record in m['changed_paths']:
+              assert record['path']=='mm/zswap.c'
+              assert hashlib.sha256((pathlib.Path('linux')/record['path']).read_bytes()).hexdigest()==record['staged_sha256']
+          print('ROUND069_ORIGINAL_PIN_AND_STAGED_SOURCE_SHA_PASS NO_AUTH')
+          PY
+          python3 -B swapz/tests/tools/round075-original-stage-manifest-order-verify.py \
+            --phase pre --linux-root linux \
+            --inherited-manifest round069-evidence/round069-staged.json \
+            --snapshot round069-evidence/round069-prejoin-mm-zswap.c
           python3 -B swapz/tests/tools/round072-stage-original-mm-bio-authority-decoder-joined.py \
             --linux-root linux --base-manifest round069-evidence/round069-staged.json \
             --manifest round069-evidence/round072-joined.json --verify-only
@@ -101,18 +122,12 @@ jobs:
               assert hashlib.sha256((pathlib.Path('linux')/row['path']).read_bytes()).hexdigest()==row['sha256']
           print('PASS Round072 original MM BIO authority decoder native ten exact postimages AUTH0')
           PY
-          python3 -B - <<'PY'
-          import hashlib,json,pathlib
-          m=json.loads(pathlib.Path('round069-evidence/round069-staged.json').read_text())
-          assert m['original_sha']=='c339f4010dea8b0d754f84ace70cd1b089878ef8'
-          assert m['original_zswap_git_blob']=='ae19e301fced7e357a4c7587dfdd6abb890b9163'
-          assert m['source_mapped_authenticated'] is False
-          assert len(m['changed_paths'])==1
-          for record in m['changed_paths']:
-              assert record['path']=='mm/zswap.c'
-              assert hashlib.sha256((pathlib.Path('linux')/record['path']).read_bytes()).hexdigest()==record['staged_sha256']
-          print('ROUND069_ORIGINAL_PIN_AND_STAGED_SOURCE_SHA_PASS NO_AUTH')
-          PY
+          # The second validation is for the final, distinct joined image.
+          python3 -B swapz/tests/tools/round075-original-stage-manifest-order-verify.py \
+            --phase post --linux-root linux \
+            --inherited-manifest round069-evidence/round069-staged.json \
+            --joined-manifest round069-evidence/round072-joined.json \
+            --snapshot round069-evidence/round069-prejoin-mm-zswap.c
       - name: Compile and execute original pinned native XArray zsmalloc LZ4 source KUnit
         shell: bash
         timeout-minutes: 85
