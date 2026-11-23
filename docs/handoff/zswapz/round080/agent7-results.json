@@ -2,8 +2,8 @@
   "round": "080",
   "agent": 7,
   "kind": "genuine-original-lzo1x-to-dormant-product-decoder-host-only",
-  "status": "QUEUED_AT_LAST_OBSERVATION",
-  "conclusion": "QUEUED",
+  "status": "COMPLETED_FAILURE_EXACT_SOURCE_COMPILER",
+  "conclusion": "failure",
   "source_parent": "980678093cbe4a1b65d465f6c5db479779c120ca",
   "tested_commit": "4e801ebdc52718875935032867986feb2f2ed48b",
   "source_commit_link": "https://github.com/k1moradi/swapz/commit/4e801ebdc52718875935032867986feb2f2ed48b",
@@ -12,23 +12,23 @@
   "workflow_url": "https://github.com/k1moradi/swapz/actions/workflows/phase-a-round080-original-lzo1x-independent-decoder-host-noauth.yml",
   "run_id": 45273027725,
   "job_id": 138037498047,
-  "first_error": null,
+  "first_error": "tests/runtime/native/fixtures/round080-original-lzo1x-independent-decoder.c:103:19: error: unused variable ‘shortened’ [-Werror=unused-variable]",
   "expected_compiled_executed_semantic_mutants_per_compiler": 18,
   "actual_compilers": {
     "gcc": {
-      "baseline": "QUEUED",
+      "baseline": "NOT_EXECUTED_GCC_FIXTURE_COMPILE_FAILED",
       "mutants_compiled": 0,
       "mutants_executed": 0,
       "mutants_killed": 0
     },
     "clang": {
-      "baseline": "QUEUED",
+      "baseline": "NOT_EXECUTED_DEPENDENT_STEP_ABORTED_BEFORE_CLANG",
       "mutants_compiled": 0,
       "mutants_executed": 0,
       "mutants_killed": 0
     }
   },
-  "original_lzo1x_positive": "QUEUED",
+  "original_lzo1x_positive": "NOT_EXECUTED_COMPILER_FAILED",
   "original_native": "NOT_RUN_HOST_ONLY",
   "source_mapped_authenticated": 0,
   "phase_a": "BLOCKED",
@@ -43,7 +43,23 @@
   "valid_original_lzo_3569_to_4095": "CURRENT_IMPORT_REJECTS_NO_TRUNCATION",
   "run_url": "https://github.com/k1moradi/swapz/actions/runs/45273027725",
   "job_url": "https://github.com/k1moradi/swapz/actions/runs/45273027725/job/138037498047",
-  "run_status_observed": "queued",
-  "job_status_observed": "queued",
-  "note": "The observed QUEUED job has NOT compiled nor executed any GCC/Clang mutant; numbers 18/compiler are planned, not qualified."
+  "run_status_observed": "completed",
+  "job_status_observed": "completed",
+  "note": "The observed QUEUED job has NOT compiled nor executed any GCC/Clang mutant; numbers 18/compiler are planned, not qualified.",
+  "agent1_verified_terminal_r080": {
+    "exact_source_sha": "4e801ebdc52718875935032867986feb2f2ed48b",
+    "run_id": 45273027725,
+    "host_job_id": 138037498047,
+    "run_status": "completed",
+    "conclusion": "failure",
+    "test_step": "Actual pinned original Linux LZO1X and dormant product compiled executed mutants",
+    "first_error": "tests/runtime/native/fixtures/round080-original-lzo1x-independent-decoder.c:103:19: error: unused variable ‘shortened’ [-Werror=unused-variable]",
+    "actual_baselines_executed": 0,
+    "actual_independent_semantic_mutants_compiled_and_executed": 0,
+    "source_auth": 0,
+    "phase_a": "BLOCKED",
+    "native_original": "NOT_RUN",
+    "historical_prior_r080_source_b0c9_failure": "sign-conversion original LZO source GCC -Werror at line86:50, not overwritten",
+    "next_action": "New changed-source strict test-only correction under distinct Round081 Agent7 and exact-source workflow; preserve failonly provenance"
+  }
 }
