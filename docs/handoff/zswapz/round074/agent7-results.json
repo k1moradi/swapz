@@ -5,16 +5,16 @@
   "task_commit": "d62552f7048d5a512c7a0a79b86558fa228b31f2",
   "engineering_baseline": "48f2e9ce1e06a0d32f0a40b777e9347d91b80741",
   "original_linux_pin": "c339f4010dea8b0d754f84ace70cd1b089878ef8",
-  "tested_commit": null,
-  "tested_parent": null,
-  "status": "PENDING_CI",
-  "run_id": null,
-  "job_id": null,
-  "host_gcc": "NOT_EXECUTED",
-  "host_clang": "NOT_EXECUTED",
+  "tested_commit": "b88d570e8029d1657d0d3be8c8ff810fb281dacc",
+  "tested_parent": "14f8fe29280f0f77b1bf013aef8904913eaa869f",
+  "status": "QUEUED",
+  "run_id": 45145526679,
+  "job_id": 137593734137,
+  "host_gcc": "NOT_EXECUTED_QUEUED",
+  "host_clang": "NOT_EXECUTED_QUEUED",
   "mutants_planned": 34,
   "mutants_compiled_executed": null,
-  "host_ktap": "NOT_EXECUTED",
+  "host_ktap": "NOT_EXECUTED_QUEUED",
   "original_native_kunit_json_ktap": "NOT_RUN",
   "first_error": null,
   "product_source_modified": false,
@@ -29,5 +29,16 @@
   "import_active": false,
   "ordinary_raw_4096": "FULL_ORIGINAL_UNCOMPRESSED_4096",
   "second_reclaimer": false,
-  "recompression": false
+  "recompression": false,
+  "ci_status": "QUEUED",
+  "workflow_run": 45145526679,
+  "workflow_url": "https://github.com/k1moradi/swapz/actions/runs/45145526679",
+  "jobs": [
+    {
+      "id": 137593734137,
+      "url": "https://github.com/k1moradi/swapz/actions/runs/45145526679/job/137593734137",
+      "status": "queued",
+      "conclusion": null
+    }
+  ]
 }
