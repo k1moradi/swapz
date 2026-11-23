@@ -1,0 +1,92 @@
+{
+  "round": "075",
+  "agent": 5,
+  "status": "QUEUED",
+  "task_commit": "60b8e074a0e03faefe4ab79e3ae7cceac5b5a465",
+  "tested_commit": "c45d4e946eed7557daf5c475f0bc89ba5f21435b",
+  "source_parent": "60b8e074a0e03faefe4ab79e3ae7cceac5b5a465",
+  "source_branch": "main",
+  "source_commit_nonforce_fast_forward_verified": true,
+  "original_linux_pin": "c339f4010dea8b0d754f84ace70cd1b089878ef8",
+  "owned_files": [
+    ".github/workflows/phase-a-round072-original-mm-bio-authority-decoder-noauth.yml",
+    "tests/tools/round075-original-stage-manifest-order-verify.py",
+    "docs/testing_standards.md"
+  ],
+  "workflow": {
+    "run_id": 45154196590,
+    "url": "https://github.com/k1moradi/swapz/actions/runs/45154196590",
+    "status": "QUEUED"
+  },
+  "jobs": [
+    {
+      "id": 137622871354,
+      "name": "exact-original-joined-source-host",
+      "status": "QUEUED",
+      "conclusion": null
+    },
+    {
+      "id": null,
+      "name": "original-MM-BIO-authority-independent-decoder-native-KUnit",
+      "status": "NOT_SCHEDULED",
+      "conclusion": null
+    }
+  ],
+  "host": {
+    "status": "NOT_EXECUTED_AT_INITIAL_AUDIT",
+    "self_test": {
+      "expected_positive_phase_baselines": 2,
+      "expected_source_negative_cases": 12
+    },
+    "inherited_actual_source_mutants_expected_each_compiler": {
+      "original_source": 10,
+      "actual_authority": 16,
+      "decoder_owner": 2
+    },
+    "gcc": null,
+    "clang": null
+  },
+  "native_kunit": {
+    "status": "NOT_EXECUTED",
+    "json": null,
+    "ktap": null,
+    "cases_expected": 4,
+    "cases_executed": 0,
+    "passed": null,
+    "failed": null,
+    "skipped": null,
+    "crashed": null,
+    "errors": null
+  },
+  "new_first_error": null,
+  "historical_round072": {
+    "source_commit": "f7e3a5ad09d7940baa9a149fdb9ac0f55878f68f",
+    "run_id": 45127549397,
+    "host": {
+      "id": 137535284018,
+      "status": "SUCCESS"
+    },
+    "native": {
+      "id": 137557900023,
+      "status": "FAILURE",
+      "phase": "post-join wrong inherited PREJOIN mm/zswap.c SHA",
+      "first_error": "second inline Python line 9 AssertionError",
+      "original_uml_compile_executed": false,
+      "json": null,
+      "ktap": null,
+      "cases_executed": 0
+    }
+  },
+  "product_source_C_changed": false,
+  "source_mapped_authenticated": false,
+  "phase_a": "BLOCKED",
+  "direct_compressed_handoff": "DISABLED",
+  "forced_raw_bypass": "DISABLED",
+  "import_active": false,
+  "original_compressed_codec": "VOLATILE_TAGGED_LZO1X_OR_LZ4_BYTE_EXACT_NO_RECOMPRESSION",
+  "conventional_RAW_4096": "FULL_ORIGINAL_UNCOMPRESSED_4096",
+  "real_swapcache_STORED": false,
+  "physical_lower_fua": false,
+  "real_upper_ack": false,
+  "privileged_loaded_physical_pressure_tests": false
+}

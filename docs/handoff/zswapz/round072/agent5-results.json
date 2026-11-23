@@ -1,7 +1,7 @@
 {
   "round": "072",
   "agent": 5,
-  "status": "HOST_SUCCESS_NATIVE_QUEUED",
+  "status": "HOST_SUCCESS_NATIVE_STAGE_FAILURE",
   "kind": "original-Linux-test-only-native-mm-bio-authority-decoder-join",
   "task_commit": "3c1919f1b2c2ea428045a1afb5c278151cf06ccc",
   "engineering_baseline": "4083449f12c3392d5ea534ee4e536865b4caf3ee",
@@ -30,14 +30,16 @@
     {
       "id": 137557900023,
       "name": "original-MM-BIO-authority-independent-decoder-native-KUnit",
-      "status": "QUEUED",
-      "conclusion": null
+      "status": "COMPLETED",
+      "conclusion": "FAILURE",
+      "first_failed_step": "Verify pristine original and stage inherited zswap and new owned source KUnit"
     }
   ],
   "source_staging": {
-    "status": "NOT_RUN_DEPENDENT_NATIVE_JOB_QUEUED",
-    "original_postimages_expected": 10,
-    "negative_plans_expected": 6
+    "status": "FAIL_AFTER_FINAL_POSTIMAGE_DUE_TO_OUT_OF_PHASE_INHERITED_SHA",
+    "original_postimages_verified": 10,
+    "inherited_prejoin_sha_verification_phase": "INCORRECTLY_AFTER_JOIN",
+    "negative_plans_passed": 6
   },
   "host": {
     "status": "SUCCESS",
@@ -68,8 +70,9 @@
     "asserted_summary": "PASS round072_original_join_strict_GCC_Clang_ASAN_UBSAN"
   },
   "native_kunit": {
-    "status": "QUEUED",
+    "status": "NOT_EXECUTED_BEFORE_COMPILATION",
     "job_id": 137557900023,
+    "job_conclusion": "FAILURE",
     "json": null,
     "ktap": null,
     "tests": null,
@@ -77,9 +80,17 @@
     "failed": null,
     "skipped": null,
     "crashed": null,
-    "errors": null
+    "errors": null,
+    "cases_executed": 0
   },
-  "first_error": null,
+  "first_error": {
+    "phase": "post-join inherited Round069 SHA assertion",
+    "job_id": 137557900023,
+    "source": "workflow second inline Python",
+    "line": 9,
+    "diagnostic": "AssertionError",
+    "description": "Round069 staged_sha256 (prejoin mm/zswap.c) was compared to changed Round072 appended postjoin mm/zswap.c; final ten hashes had passed"
+  },
   "source_mapped_authenticated": false,
   "phase_a": "BLOCKED",
   "direct_compressed_handoff": "DISABLED",
@@ -91,5 +102,7 @@
   "actual_upper_bio_ack": false,
   "actual_swapcache_backed_original_STORED": false,
   "privileged_loaded_physical_real_pressure_tests": false,
-  "audit_note": "Round074 follow-up: host success exact source SHA; native still QUEUED; no new original UML workflow launched"
+  "audit_note": "Round075 terminal correction: original R072 host SUCCESS; original native terminal FAILURE before kernel compile and KUnit. Never re-label original source green.",
+  "historical_ci_terminal": true,
+  "round075_repair_source_commit": "c45d4e946eed7557daf5c475f0bc89ba5f21435b"
 }
