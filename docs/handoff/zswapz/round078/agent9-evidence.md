@@ -1,6 +1,6 @@
 # Round078 Agent9 — pinned original zswap compressed-length boundary, host only
 
-**Status:** NEW_SOURCE_PUBLICATION_PENDING / NOT_YET_CI_QUALIFIED. Neither native Linux nor physical backing is executed in this round.
+**Status:** QUEUED — code published, source-linked GCC/Clang GitHub CI has not yet executed; NOT QUALIFIED. Neither native Linux nor physical backing is executed in this round.
 
 ## Immutable sources and real mismatch
 
@@ -11,7 +11,7 @@
 - The host C fixture uses an independently generated genuine raw-block LZ4 stream of a full4096 page and calls the current source decoder with true CRC32C/SHA256. Original LZO1X decoder/stream is **NOT_COVERED**; no inference of the original compressor's pool/decoder provenance is made. C source-original branching is extracted after verifying the pinned upstream surrounding C and injected into the compiler input.
 - Additional source-linked host guards: full original folio ownership+SHA before modeled RAW_4096 fallback, short buffer/overread, wrong original codec, source generation/lease, once-only ACK, lower partial write, data-only 4/8/16KiB extent padding physically after protected first4096, SWAPSPACE2 UUID offset and exact 20-byte RAM map. 22 independently mutated C guards per GCC and Clang; every mutant must COMPILE and EXECUTE under strict C2x -Werror ASan+UBSan, and fail via semantic invariant (never syntax kill).
 - Test-only additions: `tests/runtime/native/fixtures/round078-original-zswap-length-admission.c`; `tests/tools/round078-original-zswap-length-admission-verify.py`; `.github/workflows/phase-a-round078-original-zswap-length-admission-noauth.yml`; append-only canonical `docs/testing_standards.md`. Zero production source changes or API alterations.
-- **Exact new CI run/job/first failure:** not yet assigned at the time of source publication; no 22/22 results asserted. Both mandatory MD+JSON committed first; follow-up evidence-only updates report exact source SHA+parent, actual run/job and genuine terminal statuses.
+- **Exact tested source:** [`67db04875c9d1533332ae113b468293906f345ed`](https://github.com/k1moradi/swapz/commit/67db04875c9d1533332ae113b468293906f345ed), single parent `b2eb6bb696a210c394b7829579ebd8eb2764edca`. **Exact new CI:** [run 45193291250](https://github.com/k1moradi/swapz/actions/runs/45193291250), [job 137756992822](https://github.com/k1moradi/swapz/actions/runs/45193291250/job/137756992822), status QUEUED / conclusion null at evidence capture. **Actual first error:** none observed while queued. Full 22/22 per compiler NOT YET EXECUTED/QUALIFIED. The separate evidence-only follow-up is not the tested source SHA.
 - Original Linux native/KUnit: **NOT_RUN**. Physical I/O and privileged/loaded/device/pressure tests: **NONE**. Host copied source expressions and mock admission do not certify any live original STORED slot, lower FUA/flush, current DM upper bio_endio or authentic original codec.
 - **Gates:** SOURCE_MAPPED_AUTHENTICATED=0; PHASE_A=BLOCKED; DIRECT_COMPRESSED_HANDOFF=DISABLED; FORCED_RAW_BYPASS=DISABLED; IMPORT_ACTIVE=0. Linux MM/zswap exclusively owns compressed RAM/natural eviction; swapz disk-only extent packing/GC without competing reclaim or recompression. Conventional RAW_4096 is the exact FULL ORIGINAL UNCOMPRESSED page.
 
