@@ -19125,3 +19125,16 @@ Source-extracted actual-C guard checks must compile AND execute 16 cases and 14 
 Exact pristine torvalds/linux@c339f4010dea8b0d754f84ace70cd1b089878ef8 UML KUnit must stage the already committed original Round058/069 XArray/zsmalloc locked test source and original BIO C together in original mm/zswap.c, with actual byte-identical authority.c/codec.c and independent original zswap-import-decoder-owner C and codec header. This must be one actually compiled/booted native suite; a mock or two disconnected tests cannot qualify. Verify all 10 staged source postimages, real original kernel blobs and six negative staging plans. Test original LZ4 and original LZO1X independently owned compressed streams, copy exact bytes to original Linux bio_vec before XArray erase and zs_free and before real bio_endio; lower endio must queue sleepable guarded real authority stage+write and read. Original codec, length, CRC32C, source slot/epoch/generation and original 4096 SHA remain invariant through exact original LZ4 GC relocation without recompression; old reader pin must keep old physical live until the last put. Test 13-byte/EIO lower failure, late/duplicate guarded callback without second bio_endio, stale generation unchanged output, zero padding and first protected 4096-byte SWAPSPACE2 physical header. Any upper ACK or durable status passed to dormant decoder is explicitly a MODEL assumption, never a genuine selected upper BIO/durable device or original swapcache-backed STORED authentication.
 
 Strict GCC and Clang -Werror ASan+UBSan MUST compile/execute previous real C authority 14 lower + 1 close + 1 GC guard mutants per compiler, original-source 10 shared C source predicate mutants per compiler and true decoder-owner close/drain C mutants. Native UML KUnit must actually run 4 joined cases, JSON+KTAP 4 PASS, zero skipped/failed/crashed/errors, or report exact first compiler/runtime error and BLOCKED. Existing Round071 green 4/4 is not a substitute. No physical, swap, loaded or real pressure tests. Source AUTH0, Phase A BLOCKED, direct handoff and forced RAW OFF, imports inactive, full original UNCOMPRESSED conventional RAW_4096 and fixed 20-byte map/header/UUID/partition untouched. Publish agent5-evidence.md AND agent5-results.json to sole GitHub main after source commit, then terminal exact-source GitHub evidence update and issue #189 comment.
+
+### Round072 Agent7 strict C negative mutation warning hygiene
+
+Mutant compilation is a required executable qualification step, not a
+test-generated C syntax check. For C23 `-Wall -Wextra -Wconversion -Wshadow
+-Werror -fsanitize=address,undefined`, mutations that disable a mixed
+logical `&&` predicate nested inside `||` must preserve explicit
+parentheses around the disabled subcondition. Otherwise `-Wparentheses`
+produces a compiler error before the negative semantic behavior can execute,
+which must fail the suite rather than be counted as a killed mutant. The
+diagnostic reporter should select the first actual compiler `error:`
+message and bound it without disclosing temporary runner paths. A genuine
+baseline pass does not imply any of the negative mutation executions passed.

@@ -45,23 +45,23 @@ MUTANTS = (
     ("natural-eviction", "if (!source->natural_eviction)",
      "if (false && !source->natural_eviction)"),
     ("owned-source-lease", "if (!source->source_lock_held || !source->immutable_owned_copy)",
-     "if (false && !source->source_lock_held || !source->immutable_owned_copy)"),
+     "if ((false && !source->source_lock_held) || !source->immutable_owned_copy)"),
     ("source-epoch", "source->source_epoch != source->observed_epoch)",
-     "false && source->source_epoch != source->observed_epoch)"),
+     "(false && source->source_epoch != source->observed_epoch))"),
     ("codec-family", "source->codec != SWAPZ_ZSWAP_IMPORT_LZO1X_CODEC)",
      "source->codec != 0xffU)"),
     ("codec-version", "if (source->codec_version != SWAPZ_ZSWAP_IMPORT_VERSION)",
      "if (false && source->codec_version != SWAPZ_ZSWAP_IMPORT_VERSION)"),
     ("max-original-compressed", "source->length > SWAPZ_MAX_COMPRESSED)",
-     "false && source->length > SWAPZ_MAX_COMPRESSED)"),
+     "(false && source->length > SWAPZ_MAX_COMPRESSED))"),
     ("swapz-disk-codec-confusion", "if (source->disk_encoding != SWAPZ_ENCODING_INVALID)",
      "if (false && source->disk_encoding != SWAPZ_ENCODING_INVALID)"),
     ("raw-full-page", "if (source->length != SWAPZ_BLOCK_BYTES || source->codec != 0U ||",
-     "if (false && source->length != SWAPZ_BLOCK_BYTES || source->codec != 0U ||"),
+     "if ((false && source->length != SWAPZ_BLOCK_BYTES) || source->codec != 0U ||"),
     ("decoder-codec-lease", "if (tag.original_codec != expected_codec ||",
-     "if (false && tag.original_codec != expected_codec ||"),
+     "if ((false && tag.original_codec != expected_codec) ||"),
     ("read-source-epoch", "tag.source_epoch != expected_epoch)",
-     "false && tag.source_epoch != expected_epoch)"),
+     "(false && tag.source_epoch != expected_epoch))"),
     ("short-lower-copy", "if (actual_lower_bytes != tag.length)",
      "if (false && actual_lower_bytes != tag.length)"),
     ("nonzero-extent-padding", "if (lower_image[SWAPZ_BLOCK_BYTES + offset] != 0U)",
@@ -97,6 +97,11 @@ def invoke(command: list[str], *, source: str | None = None) -> subprocess.Compl
 
 def diagnostic(process: subprocess.CompletedProcess[str]) -> str:
     messages = (process.stderr or process.stdout).splitlines()
+    # Report the first actionable compiler/sanitizer error, not an incidental
+    # absolute temporary path in the compilation-context prefix.
+    for message in messages:
+        if "error:" in message:
+            return message.split("error:", 1)[1].strip()[:240]
     return messages[0][:240] if messages else "no diagnostic"
 
 
