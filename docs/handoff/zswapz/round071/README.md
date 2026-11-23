@@ -1,11 +1,17 @@
-# Round071 — PREPARING, zero launches before ROUND_OPEN
+# Round071 — five independent workers, opening by issue #188 only
 
-Official coordination issue [#188](https://github.com/k1moradi/swapz/issues/188). [Full shared technical/safety contract](frozen-contract.md). Baseline planning snapshot `9ae9fdb951d5d7569a8f7f88f7a90b7b33d46c48`. This is an immutable pre-opening task publication, not a pass claim, source authentication, Phase B authorization or an agent launch.
+[Official issue #188](https://github.com/k1moradi/swapz/issues/188) • [frozen contract](frozen-contract.md) • [Round070 administrative PARTIAL closeout](../round070/round-report.md) • [notification](notification.md).
 
-Two independent proposed workers, Agent1 excluded:
-- [Agent4 actual original zswap pool / decoder owner lifetime task](agent4-original-pool-retirement-decoder.md) — isolated original native KUnit without any Agent5 Round071 dependency.
-- [Agent5 joined original source-copy → BIO → actual product authority → decoder task](agent5-joined-source-bio-authority-decoder.md) — existing already-published test-only interfaces, no Agent4 Round071 dependency. Agent5 MUST finish its existing Round070 #187 report before this round opens.
+| Worker | Independent task and exclusive artifact |
+| --- | --- |
+| **Agent2** | [Original current DM upper BIO once-only owner](agent2-original-dm-upper-owner.md) — staged original Linux, source/ACK negative admission |
+| **Agent3** | [Original zswap STORED source provenance](agent3-original-zswap-source-provenance.md) — genuine swapcache prerequisite and tested fail-closed negative, no fabricated AUTH |
+| **Agent4** | [Original zswap source-pool/decoder lifetime](agent4-original-pool-retirement-decoder.md) — genuine pinned Linux pool retirement attempt plus reader leasing |
+| **Agent5** | [Joined source-copy → native BIO → actual authority → decoder](agent5-joined-source-bio-authority-decoder.md) — first fix prior native reader-pin/GC 3/4 with same-codec exact-byte relocation |
+| **Agent6** | [Natural pressure / no recompression scheduling](agent6-natural-pressure-scheduling.md) — host-only deterministic source-linked cooperation/fairness/negative controls |
 
-[Owner send-only-after-open notification](notification.md). Agent3 deliberately not assigned another test-assembled XArray replay while real swapcache-backed original zswap source + independent genuine Linux writable publication resource are blocked. No branches or PRs, single main writer with CAS nonforce fast forward; no reruns or owner Make. Exact task commit and execution baseline will be named by separate ROUND_OPEN; do not claim work started because this draft was published.
+**Engineering baseline before this task update:** `73446b1a5f88ec8d3ba1e45e623825fd5fed2880`; earlier Round071 planning contract commit `4e4fc67fd83fcf651b2489a25a3b31d60a4a3d2a`. The only authoritative final task SHA is named by a unique `message: ROUND_OPEN` on #188. Until then, prepare but do not claim implementation is started.
 
-Linux MM alone retains/reclaims compressed zswap RAM; swapz disk compression/GC should accept already-compressed original zswap streams only through future separately authenticated, volatile original-codec-tagged handoff, with no recompression under ordinary fallback semantics changes. Ordinary RAW_4096 = complete original uncompressed 4096. All AUTH0, Phase A blocked, direct handoff and forced RAW disabled, header/UUID/partition table protected.
+Round070's newest pinned-original KUnit actually ran 4 cases: **3 PASS / 1 FAIL**; source-host green. It is administratively CLOSED **PARTIAL** and the P0 is Agent5's first Round071 task. This does NOT weaken any test gate. Agent4, Agent2, Agent3 and Agent6 are *not blocked* on Agent5's P0 and require no new peer API.
+
+All own distinct files, can develop/test simultaneously, and post to #188 separately. One remote main writer at a time (fresh HEAD, exactly one parent, non-force expected-head fast forward, verify remote). No branch/PR/fork/worktree, no suppressing warnings, no duplicate CI. All product import/activation OFF and source-auth=0, Phase A BLOCKED. Linux MM alone owns zswap compressed RAM and natural memory-pressure eviction; swapz owns only lower disk packing/GC; the future **volatile tagged passthrough** may store already-compressed original bytes without recompressing, but ordinary `RAW_4096` is still full original UNCOMPRESSED 4096. First SWAPSPACE2 4096-byte header, UUID/signature, partition table and map format remain intact.

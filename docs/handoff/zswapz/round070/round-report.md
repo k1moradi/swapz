@@ -1,0 +1,24 @@
+# Round 070 — Agent 1 independent CLOSEOUT: ADMINISTRATIVE PARTIAL (native 3/4 P0 carried)
+
+Official [Round070 issue #187](https://github.com/k1moradi/swapz/issues/187), [Agent1 raw native triage](https://github.com/k1moradi/swapz/issues/187#issuecomment-7091163934). No claim of production authorization or full original joined-native qualification.
+
+**Engineering source SHA**: `73446b1a5f88ec8d3ba1e45e623825fd5fed2880` (single parent `4e4fc67fd83fcf651b2489a25a3b31d60a4a3d2a`), original Linux pin `torvalds/linux@c339f4010dea8b0d754f84ace70cd1b089878ef8`.
+
+## Independent native workflow audit
+
+| Workstream | Exact Actions | Actual grounded outcome |
+| --- | --- | --- |
+| Agent 3 original XArray + zsmalloc compressed byte copy | [45045023441](https://github.com/k1moradi/swapz/actions/runs/45045023441), host 137277630871, native 137280264741 | Strict host source tests green, genuine original pinned native KUnit **3/3 PASS**, 0 skipped. Original STORED entry/folio test assembled, **NOT** true selected swap-cache-backed original zswap store |
+| Agent 4 original decoder owner LZO1X/LZ4 | [45044647237](https://github.com/k1moradi/swapz/actions/runs/45044647237), host 137276474589, native 137281914033 | Strict host tests green, genuine original pin and effective .config, **4/4 native KUnit PASS**. Not genuine original zswap pool retirement or modular decoder unload |
+| Agent 5 original joined source-BIO-authority | [45051870871](https://github.com/k1moradi/swapz/actions/runs/45051870871), host 137298537355, native 137300108194 | Host PASS, native compilation **FAIL at original-source/authority.c:4053:39 `-Werror=implicit-fallthrough`**, 0 KUnit run. Narrow [source correction `73446b1`](https://github.com/k1moradi/swapz/commit/73446b1a5f88ec8d3ba1e45e623825fd5fed2880) adds compiler-recognized intentional fallthrough with existing comment preserved and no semantic change |
+| Agent 5 corrected exact source native | [45062634645](https://github.com/k1moradi/swapz/actions/runs/45062634645), host 137331728966, native 137332813593 | Host **SUCCESS**; GCC and Clang each report 14 prior + 1 new compiled/executed changed-real-C semantic mutants and compiler annotation negative. **Genuine original pinned UML boots and runs 4 KUnit: 3 PASS / 1 FAIL, 0 skipped** |
+
+**Native first failing assertion at source `73446b1a5f88ec8d3ba1e45e623825fd5fed2880`:** `swapz_round069_native_reader_pin_gc_kunit` in original Linux staged `block/bio.c:3004`, aggregate expected `error == 0` observed `-ESTALE (-116)`. Other cases `native_fua_lz4`, `native_postwrite_lzo_flush` and `native_short_close_duplicate` passed. The runner still correctly returns FAIL, not a 4/4 success.
+
+**Likely source-bound cause requiring first-step proof:** the fixture first writes original LZ4 at logical page 13 with `gc_epoch=1`, then attempts `swapz_round069_native_write_fua(... gc_epoch=2, codec=LZO1X, replaces_ticket=first_ticket,...)`. The actual included product `swapz_import_disk_stage()` intentionally rejects same-entry GC relocation with changed codec, compressed length/CRC, original SHA, source slot, entry identity or source generation. The mismatch correctly merits `-ESTALE`; aggregated error does not uniquely identify the first rejecting call. **Agent5 must add bounded fail-only first-error attribution and copy the original compressed payload without recompression on legal relocation.** Never weaken real authority checks, silently re-encode a GC move or modify feature gates to make the test pass.
+
+## Administrative decision and next round
+
+Agent1 closes **Round070 ADMINISTRATIVELY PARTIAL**, preserving this P0 in Agent5's exclusive Round071 task. This is **not** production source authentication or full joined-native green. Do not stall other independent workers just because this fixture P0 remains outstanding. Round071 may start only via its own unique `message: ROUND_OPEN` on [issue #188](https://github.com/k1moradi/swapz/issues/188) naming the actual published task SHA and engineering baseline.
+
+**Unchanged safety:** Linux MM/zswap alone owns compressed RAM, zswap's natural pressure-driven eviction, original codec. swapz controls disk packing/GC, never triggers a competing shrinker or recompresses already-compressed zswap GC bytes. Normal `RAW_4096` retains its original **uncompressed 4096-byte** contract; future encrypted or compressed original data requires separate volatile codec-tagged path. `SOURCE_MAPPED_AUTHENTICATED=0`; `PHASE_A=BLOCKED`; `DIRECT_COMPRESSED_HANDOFF=DISABLED`; `FORCED_RAW_BYPASS=DISABLED`; import `ACTIVE=0`. First SWAPSPACE2 block, UUID/signature, partition table and fixed 20-byte map unchanged. No physical/privileged/loaded/actual pressure test or owner `make test`/`make fast_test` was run. Next warranted test is exactly one source-specific staged original joined native KUnit + GCC/Clang sanitizer/semantic mutant tests on Agent5's P0 correction, not a broad Make rerun.
