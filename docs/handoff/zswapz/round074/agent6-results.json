@@ -3,14 +3,22 @@
   "agent": 6,
   "task_commit": "d62552f7048d5a512c7a0a79b86558fa228b31f2",
   "publication_parent": "39d8642878835868ebc3f7690b4adccc62c46fa7",
-  "source_commit": null,
-  "tested_commit": null,
-  "status": "PENDING",
+  "source_commit": "1868d599c6cf33823a36b93c962847cd6e36d475",
+  "tested_commit": "1868d599c6cf33823a36b93c962847cd6e36d475",
+  "status": "QUEUED",
   "conclusion": "PENDING",
   "first_error": null,
-  "run_id": null,
-  "workflow_url": null,
-  "jobs": [],
+  "run_id": 45145752021,
+  "workflow_url": "https://github.com/k1moradi/swapz/actions/runs/45145752021",
+  "jobs": [
+    {
+      "job_id": 137594490455,
+      "name": "gcc-clang-asan-ubsan-original-lease-copy-model",
+      "status": "queued",
+      "conclusion": null,
+      "url": "https://github.com/k1moradi/swapz/actions/runs/45145752021/job/137594490455"
+    }
+  ],
   "source_files": [
     "tests/runtime/native/fixtures/round074-eviction-lease-copy-budget.c",
     "tests/tools/round074-eviction-lease-copy-budget-verify.py",
@@ -50,5 +58,10 @@
     "run_id": 45126975773,
     "job_id": 137533438890,
     "terminal_evidence_commit": "7c1ae38d41afb083345b1d7ec67b2d92d48b843a"
+  },
+  "source_blobs": {
+    "fixture": "fea06aa1a16b47add55bcf9228e2c4a8c66d2f19",
+    "verifier": "67c19013e0d8bfe24fb03283a3dc7a9ec237f1fa",
+    "workflow": "191116df8163aad3aacaa07bdd712a85b98d6f64"
   }
 }

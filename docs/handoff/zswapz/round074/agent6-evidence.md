@@ -1,7 +1,8 @@
 # Round074 Agent6 — natural eviction lease/copy lock budget
 
-**Initial status: source-publication in progress; exact GitHub CI pending.**
+**Source published: exact-source GitHub CI QUEUED / NOT YET EXECUTED.**
 Task commit: d62552f7048d5a512c7a0a79b86558fa228b31f2. Expected source single-parent: 39d8642878835868ebc3f7690b4adccc62c46fa7.
+Source single-parent code commit: 1868d599c6cf33823a36b93c962847cd6e36d475 (parent 39d8642878835868ebc3f7690b4adccc62c46fa7).
 Both mandatory evidence files are published with source; a subsequent
 evidence-only main commit must record actual tested SHA/job and terminal CI.
 No pending or host-model result is represented as original Linux source AUTH.
@@ -58,3 +59,7 @@ is original fully UNCOMPRESSED 4096. Activation remains OFF:
 SOURCE_MAPPED_AUTHENTICATED=0, PHASE_A=BLOCKED,
 DIRECT_COMPRESSED_HANDOFF=DISABLED, FORCED_RAW_BYPASS=DISABLED,
 imported ACTIVE=0. No privileged, loaded, physical or real-pressure tests.
+
+## Exact source CI registration (not yet a test result)
+
+Source tested SHA: 1868d599c6cf33823a36b93c962847cd6e36d475; GitHub Actions [run 45145752021](https://github.com/k1moradi/swapz/actions/runs/45145752021), host job [137594490455](https://github.com/k1moradi/swapz/actions/runs/45145752021/job/137594490455). Last inspected state: QUEUED, no executed GCC/Clang baseline/mutants, native KUnit or model JSON/KTAP verdict available yet. A prior Round072 success must not be counted as this Round074 run. Source blob IDs: fixture fea06aa1a16b47add55bcf9228e2c4a8c66d2f19; verifier 67c19013e0d8bfe24fb03283a3dc7a9ec237f1fa; workflow 191116df8163aad3aacaa07bdd712a85b98d6f64. First exact-source error: NOT_AVAILABLE_CI_QUEUED. Follow-up after terminal CI is required without periodic checks.
