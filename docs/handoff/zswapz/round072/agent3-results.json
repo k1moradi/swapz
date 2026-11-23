@@ -1,0 +1,82 @@
+{
+  "round": "072",
+  "agent": 3,
+  "kind": "original-pinned-linux-swapcache-source-negative",
+  "task_commit": "3c1919f1b2c2ea428045a1afb5c278151cf06ccc",
+  "engineering_baseline": "4083449f12c3392d5ea534ee4e536865b4caf3ee",
+  "code_commit": null,
+  "code_parent": null,
+  "exact_tested_commit": null,
+  "source_publication": "SELF_SHA_PENDING_GITHUB_PUBLICATION_THEN_EVIDENCE_ONLY_UPDATE",
+  "original_linux_pin": "c339f4010dea8b0d754f84ace70cd1b089878ef8",
+  "original_git_blobs": {
+    "mm/zswap.c": "ae19e301fced7e357a4c7587dfdd6abb890b9163",
+    "mm/swapfile.c": "254ce86fa923e6b5f1fefda88c39315c4cc00642",
+    "mm/swap.h": "d5bf21f517dceae58eb94fb0ce5f4e1fdc679409"
+  },
+  "workflow_url": null,
+  "workflow_id": null,
+  "jobs": [
+    {
+      "name": "source-linked-host-negative",
+      "id": null,
+      "status": "NOT_YET_SCHEDULED",
+      "conclusion": null
+    },
+    {
+      "name": "actual-original-no-swap-device-kunit",
+      "id": null,
+      "status": "NOT_YET_SCHEDULED",
+      "conclusion": null
+    }
+  ],
+  "local_host": {
+    "gcc": "PASS",
+    "gcc_version": "14.2.0",
+    "clang": "PASS",
+    "clang_version": "17.0.0",
+    "sanitizers": [
+      "ASan",
+      "UBSan"
+    ],
+    "scenarios_per_compiler": 16,
+    "mutants_compiled_executed_rejected_per_compiler": 14,
+    "compiler_flags": [
+      "-Wall",
+      "-Wextra",
+      "-Wconversion",
+      "-Wshadow",
+      "-Werror"
+    ]
+  },
+  "original_native": {
+    "status": "NOT_RUN",
+    "expected_cases": 3,
+    "executed": null,
+    "passed": null,
+    "failed": null,
+    "skipped": null,
+    "ktap": null,
+    "json": null
+  },
+  "original_stage_negatives": {
+    "status": "NOT_RUN",
+    "expected_cases": 9
+  },
+  "conclusion": "IN_PROGRESS",
+  "first_error": null,
+  "first_missing_prerequisite": "BLOCKED_NO_SWAP_DEVICE",
+  "source_mapped_authenticated": false,
+  "phase_a": "BLOCKED",
+  "direct_compressed_handoff": "DISABLED",
+  "forced_raw_bypass": "DISABLED",
+  "import_active": 0,
+  "normal_raw_4096": "FULL_ORIGINAL_UNCOMPRESSED_4096",
+  "source_kind": "UNAUTHENTICATED_TEST_ONLY",
+  "actual_physical_io": false,
+  "privileged_tests": false,
+  "loaded_kernel_tests": false,
+  "real_memory_pressure_tests": false,
+  "genuine_source_provenance": "BLOCKED_NO_SWAP_DEVICE",
+  "earlier_round071_native_4of4": "REUSED_HISTORICAL_PASS_NOT_RERUN"
+}

@@ -1,0 +1,149 @@
+/* ROUND072_ORIGINAL_SWAPCACHE_PROVENANCE_BEGIN
+ * Rootless test-only append to pinned original mm/zswap.c; no selected real
+ * STORED source, swap activation, or production compressed handoff exists.
+ */
+#if defined(SWAPZ_ROUND072_ORIGINAL_SWAPCACHE_TEST) && \
+    defined(SWAPZ_ROUND028_SLOT_EPOCH_SOURCE) && IS_ENABLED(CONFIG_KUNIT)
+#include <kunit/test.h>
+
+/* ROUND072_SOURCE_BOUNDARY_COMMON_BEGIN */
+struct swapz_round072_source_lease {
+	u64 selected_swap_entry;
+	u64 observed_swap_entry;
+	u64 selected_epoch;
+	u64 observed_epoch;
+	bool original_store_published;
+	bool current_stored_xarray_entry;
+	bool original_folio_locked;
+	bool original_folio_swapcache;
+	bool original_swap_device_ref;
+	bool pre_erase_copy_window;
+	bool original_pool_ref;
+	bool original_codec_identified;
+	bool immutable_owned_bytes;
+	bool selected_dm_source_ref;
+};
+
+/* This is a rejection-only witness. Its boolean inputs are untrusted: even
+ * all-true witnesses cannot grant a production source lease or source AUTH.
+ * True original folio/XArray/device objects must be independently obtained.
+ */
+static int swapz_round072_source_lease_refuse(
+		const struct swapz_round072_source_lease *lease)
+{
+	if (!lease || !lease->selected_swap_entry ||
+	    lease->selected_swap_entry != lease->observed_swap_entry ||
+	    !lease->selected_epoch ||
+	    lease->selected_epoch != lease->observed_epoch)
+		return -ESTALE;
+	if (!lease->original_store_published)
+		return -ENODATA;
+	if (!lease->current_stored_xarray_entry)
+		return -ESTALE;
+	if (!lease->original_folio_locked)
+		return -EPERM;
+	if (!lease->original_folio_swapcache)
+		return -ENODEV;
+	if (!lease->original_swap_device_ref)
+		return -ENODEV;
+	if (!lease->pre_erase_copy_window)
+		return -ESTALE;
+	if (!lease->original_pool_ref)
+		return -EOPNOTSUPP;
+	if (!lease->original_codec_identified)
+		return -EOPNOTSUPP;
+	if (!lease->immutable_owned_bytes)
+		return -ENOBUFS;
+	if (!lease->selected_dm_source_ref)
+		return -ENOTCONN;
+	return -EACCES; /* There is no authenticated original production carrier. */
+}
+/* ROUND072_SOURCE_BOUNDARY_COMMON_END */
+
+static struct swapz_round072_source_lease swapz_round072_complete_witness(void)
+{
+	/* Deliberately fictitious inputs for proving that flags never grant AUTH. */
+	return (struct swapz_round072_source_lease) {
+		.selected_swap_entry = swp_entry(0, 1).val,
+		.observed_swap_entry = swp_entry(0, 1).val,
+		.selected_epoch = 17,
+		.observed_epoch = 17,
+		.original_store_published = true,
+		.current_stored_xarray_entry = true,
+		.original_folio_locked = true,
+		.original_folio_swapcache = true,
+		.original_swap_device_ref = true,
+		.pre_erase_copy_window = true,
+		.original_pool_ref = true,
+		.original_codec_identified = true,
+		.immutable_owned_bytes = true,
+		.selected_dm_source_ref = true,
+	};
+}
+
+static void swapz_round072_native_original_get_swap_device_unavailable_kunit(
+		struct kunit *test)
+{
+	/* A pristine UML KUnit guest has no activated swap device. Do not
+	 * manufacture a swap slot, call swapon or allocate swapcache here.
+	 */
+	swp_entry_t invalid_slot = swp_entry(0, 1);
+	struct swap_info_struct *swap_device;
+
+	KUNIT_ASSERT_NE(test, invalid_slot.val, 0UL);
+	KUNIT_ASSERT_EQ(test, get_nr_swap_pages(), 0L);
+	swap_device = get_swap_device(invalid_slot);
+	if (!IS_ERR_OR_NULL(swap_device))
+		put_swap_device(swap_device); /* Never leak an unexpected ref. */
+	KUNIT_EXPECT_TRUE(test, IS_ERR_OR_NULL(swap_device));
+	KUNIT_EXPECT_PTR_EQ(test, get_swap_device((swp_entry_t) { .val = 0 }), NULL);
+}
+
+static void swapz_round072_native_original_locked_folio_not_swapcache_kunit(
+		struct kunit *test)
+{
+	struct folio *folio = folio_alloc(GFP_KERNEL, 0);
+	swp_entry_t invalid_slot = swp_entry(0, 1);
+
+	KUNIT_ASSERT_NOT_NULL(test, folio);
+	folio_lock(folio);
+	KUNIT_EXPECT_TRUE(test, folio_test_locked(folio));
+	KUNIT_EXPECT_FALSE(test, folio_test_swapcache(folio));
+	KUNIT_EXPECT_FALSE(test, folio_matches_swap_entry(folio, invalid_slot));
+	folio_unlock(folio);
+	folio_put(folio);
+}
+
+static void swapz_round072_native_original_source_auth_refused_kunit(
+		struct kunit *test)
+{
+	struct swapz_round072_source_lease lease = swapz_round072_complete_witness();
+
+	/* Matching every self-asserted scalar still does NOT authenticate. */
+	KUNIT_EXPECT_EQ(test, swapz_round072_source_lease_refuse(&lease), -EACCES);
+	lease.original_swap_device_ref = false;
+	KUNIT_EXPECT_EQ(test, swapz_round072_source_lease_refuse(&lease), -ENODEV);
+	lease.original_swap_device_ref = true;
+	lease.current_stored_xarray_entry = false;
+	KUNIT_EXPECT_EQ(test, swapz_round072_source_lease_refuse(&lease), -ESTALE);
+	lease.current_stored_xarray_entry = true;
+	lease.original_folio_swapcache = false;
+	KUNIT_EXPECT_EQ(test, swapz_round072_source_lease_refuse(&lease), -ENODEV);
+	lease.original_folio_swapcache = true;
+	lease.selected_dm_source_ref = false;
+	KUNIT_EXPECT_EQ(test, swapz_round072_source_lease_refuse(&lease), -ENOTCONN);
+}
+
+static struct kunit_case swapz_round072_native_swapcache_provenance_cases[] = {
+	KUNIT_CASE(swapz_round072_native_original_get_swap_device_unavailable_kunit),
+	KUNIT_CASE(swapz_round072_native_original_locked_folio_not_swapcache_kunit),
+	KUNIT_CASE(swapz_round072_native_original_source_auth_refused_kunit),
+	{}
+};
+static struct kunit_suite swapz_round072_native_swapcache_provenance_suite = {
+	.name = "swapz_round072_native_original_swapcache_noauth",
+	.test_cases = swapz_round072_native_swapcache_provenance_cases,
+};
+kunit_test_suite(swapz_round072_native_swapcache_provenance_suite);
+#endif /* pinned original KUnit only; source remains AUTH0 */
+/* ROUND072_ORIGINAL_SWAPCACHE_PROVENANCE_END */
