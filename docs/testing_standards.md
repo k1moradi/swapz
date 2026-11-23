@@ -20003,3 +20003,26 @@ Every changed-source version-guard mutant still needs a compiled and
 executed C runtime FIRST_ERROR, while a survived mutant fails CI. Never
 change, suppress or skip strict original-source/product/compiler checks
 to manufacture qualification.
+
+### Round081 Agent7 strict semantic mutant diagnostic hygiene
+
+The independent original LZO1X import SHA-corruption mutant must compile
+cleanly under unchanged GCC/Clang -Wall/-Wextra/-Wpedantic/-Wconversion/
+-Wshadow/-Werror before it is ever counted as an executed semantic kill.
+When deliberately disabling only a digest predicate while keeping an
+independent full-page comparison, parenthesize the new boolean conjunction
+within the enclosing disjunction. A -Wparentheses/-Wlogical-op-parentheses
+compiler rejection is NOT a killed semantic C mutant. Verify unchanged
+product source and pristine original Linux pin, and require the targeted
+named C runtime FIRST_ERROR under ASan+UBSan for the compiled mutant.
+
+### Round081 Agent7 non-vacuous capacity-source mutation under -Werror
+
+When the only use of a decoder parameter is its length guard, replacing
+the entire guard with a literal constant can trigger -Wunused-parameter
+and fail at compilation, which is NOT a semantic mutant kill. For the
+original LZO1X compressed-capacity check, invert the comparison while
+retaining both original operands, then execute the pre-existing exact
+short-capacity C negative and require its own FIRST_ERROR. Keep strict
+warnings, independent GCC and Clang compilation/execution, and all
+pristine original Linux and actual product source blob checks.

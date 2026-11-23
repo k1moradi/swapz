@@ -1,11 +1,11 @@
 {
   "round": "081",
   "agent": 7,
-  "status": "QUEUED_AT_LAST_OBSERVATION",
-  "result": "PENDING_NOT_QUALIFIED",
+  "status": "NEW_SOURCE_PENDING_CI",
+  "result": "NOT_YET_QUALIFIED",
   "task_sha": "01abda0f17874b260c3ef6d1dbe2e445622e5b7a",
-  "tested_commit": "1836fccb8bc3f8967dff4ac085db1b140d6e7d12",
-  "source_parent": "9ff7a096fc728fbea47de2770e3c22dba90cdf9a",
+  "tested_commit": null,
+  "source_parent": null,
   "old_round080_failed_source": "4e801ebdc52718875935032867986feb2f2ed48b",
   "old_failed_run": 45273027725,
   "old_failed_job": 138037498047,
@@ -26,23 +26,23 @@
     "src/kernel/zswap-import-decoder-owner.c": "8e0c8f4d2085af7f2e17df412f3a1af654063571"
   },
   "workflow_url": "https://github.com/k1moradi/swapz/actions/workflows/phase-a-round080-original-lzo1x-independent-decoder-host-noauth.yml",
-  "run_id": 45291781385,
-  "job_id": 138102073297,
+  "run_id": null,
+  "job_id": null,
   "first_new_error": null,
   "planned_semantic_mutants_per_compiler": 18,
   "actual_gcc": {
-    "baseline": "QUEUED",
+    "baseline": "PENDING_NEW_SOURCE",
     "mutants_compiled": 0,
     "mutants_executed": 0,
     "semantic_kills": 0
   },
   "actual_clang": {
-    "baseline": "QUEUED",
+    "baseline": "PENDING_NEW_SOURCE",
     "mutants_compiled": 0,
     "mutants_executed": 0,
     "semantic_kills": 0
   },
-  "positive_original_lzo1x_product_decode": "QUEUED",
+  "positive_original_lzo1x_product_decode": "PENDING_NEW_SOURCE",
   "original_linux_native": "NOT_RUN_HOST_ONLY",
   "source_mapped_authenticated": 0,
   "phase_a": "BLOCKED",
@@ -59,12 +59,12 @@
   "recompression": false,
   "swapspace2_first_physical_bytes_protected": 4096,
   "volatile_map_bytes": 20,
-  "conclusion": "QUEUED",
-  "source_url": "https://github.com/k1moradi/swapz/commit/1836fccb8bc3f8967dff4ac085db1b140d6e7d12",
-  "run_url": "https://github.com/k1moradi/swapz/actions/runs/45291781385",
-  "job_url": "https://github.com/k1moradi/swapz/actions/runs/45291781385/job/138102073297",
-  "run_status_observed": "queued",
-  "job_status_observed": "queued",
+  "conclusion": "PENDING",
+  "source_url": null,
+  "run_url": null,
+  "job_url": null,
+  "run_status_observed": null,
+  "job_status_observed": null,
   "first_error_status": "NONE_REPORTED_WHILE_QUEUED",
   "counts_are_verified_as_of": "queued_observation_not_test_completion",
   "note": "Actual new GCC/Clang executed baselines and semantic mutant counts ZERO VERIFIED while the one exact-source run is queued. Never count planned 18/compiler.",
@@ -77,5 +77,29 @@
   "previous_round081_gcc_semantic_mutants_compiled_and_executed": 3,
   "previous_round081_gcc_semantic_mutants_killed": 2,
   "previous_round081_clang_compiled_or_executed": 0,
-  "repair_phase": "Add test-only direct inner dormant product import decoder version negative after old independent-lease negative; preserve remaining 18 product-source semantic mutants and full source lock."
+  "repair_phase": "Narrow verifier-only semantic mutants: reverse compressed capacity comparison (preserves parameter use), and parenthesize skipped SHA within disjunction for strict warnings",
+  "previous_round081_sources": [
+    {
+      "source": "c03fc48e5772c982b7ef7fad0d7161372c9ae412",
+      "run_id": 45291110355,
+      "job_id": 138099798638,
+      "conclusion": "COMPLETED_FAILURE",
+      "gcc_positive_baseline": "PASS_684_DIRECTED",
+      "gcc_semantic_compiled_and_executed": 3,
+      "gcc_semantic_kills": 2,
+      "first_error": "version semantic mutant survived; outer lease preempted inner version guard"
+    },
+    {
+      "source": "1836fccb8bc3f8967dff4ac085db1b140d6e7d12",
+      "run_id": 45291781385,
+      "job_id": 138102073297,
+      "conclusion": "COMPLETED_FAILURE",
+      "gcc_positive_baseline": "PASS_708_DIRECTED",
+      "gcc_semantic_compiled_and_executed": 8,
+      "gcc_semantic_kills": 8,
+      "gcc_mutant9_compiled": false,
+      "first_error": "case-09/zswap-import-codec.h:108:61: unused parameter compressed_capacity [-Werror=unused-parameter]"
+    }
+  ],
+  "new_verifier_blob": "c2bd6a4d35bc8261e94743f92166b7c436d3c1f2"
 }
