@@ -104,3 +104,39 @@ The current documentation and this file override legacy branching/PR
 examples in historical records. Any agent discovering a new branch or PR
 created against this policy must report its name/URL and commit identity to
 the project manager, without using it as a reason to create another.
+
+## Mandatory GitHub-first, round-scoped engineering evidence (all agents)
+
+For every numbered `zswapz` round, **GitHub is the owner-to-Agent1 reporting
+channel and the repository is the evidence system of record**. This rule
+applies to every agent, even if a chat client offers file downloads.
+
+1. Publish bounded human-readable evidence as
+   `docs/handoff/zswapz/roundNNN/agentN-evidence.md` and machine-readable
+   qualification as `docs/handoff/zswapz/roundNNN/agentN-results.json`
+   on the authorized sole `main` branch. Preserve the source/test commit,
+   parent, pinned inputs, exact compiler/native test statuses, earliest true
+   error, safety gates and original-versus-synthetic limitations. Never call
+   a queued native test PASS or replace failed CI with local results.
+2. After a workflow completes, commit the updated bounded evidence JSON and
+   report in the SAME round folder using a fresh non-force direct-main
+   fast-forward; evidence-only follow-up commits do not qualify failed source
+   commits, must not change implementation/standards, and must not trigger
+   duplicate expensive workflows. Link the tested code SHA distinctly from
+   the later evidence-document SHA. Where logs are large, store a bounded
+   first-error/KTAP/JSON excerpt and link to the exact GitHub Actions job and
+   uploaded private CI artifact; do not commit raw multi-megabyte logs.
+3. POST a `message: REPORT_READY`, `PROGRESS` or `BLOCKED` comment on the
+   official numbered round GitHub issue with clickable commit-pinned GitHub
+   URLs to BOTH the report and JSON, exact CI run and job IDs and first
+   verified failure. Verify that all referenced paths exist remotely first.
+   A chat attachment, local JSON/ZIP, sandbox download, hand-delivered file,
+   or report posted only to the user is **NOT delivery to Agent1**. Never
+   require the owner to upload or forward your evidence to GitHub.
+4. If repository publication is blocked, report the exact GitHub permission
+   or non-force main fast-forward failure to the issue as `BLOCKED`, keep
+   unpublished work safe, and do not claim the evidence was delivered.
+
+Follow `docs/handoff/zswapz/evidence-policy.md` and the exact current round's
+frozen contract. This communication policy never authorizes a branch, PR,
+force push, real-device/privileged operation, or production safety-gate change.
