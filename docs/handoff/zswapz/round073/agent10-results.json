@@ -103,5 +103,13 @@
     "scope": "ORIGINAL_NATIVE_COMPILE_FAILED_ZERO_KUNIT",
     "no_source_auth": true,
     "no_physical_io": true
+  },
+  "round077_followup": {
+    "source_sha": "04b190b00131c1d40254acd2279e6240a11913d0",
+    "source_parent": "044a5616d1af6db9e05bd5dba62d88b9fa9b24c4",
+    "run_id": 45179168125,
+    "status": "QUEUED",
+    "separate_new_source_qualification": true,
+    "historical_native_remains": "FAILED_COMPILE_ZERO_KUNIT"
   }
 }

@@ -1,0 +1,39 @@
+# Round077 Agent10 — original pinned Linux reader GC usleep_range declaration
+
+**PROGRESS / new exact-source CI QUEUED, not PASS.** Authoritative task commit `5e5908dcf1505331ef0ab37db9b0125149c0ea16`; original pinned Linux `torvalds/linux@c339f4010dea8b0d754f84ace70cd1b089878ef8`.
+
+## Exact commits, exclusively main
+
+The final corrected source/test SHA is [`04b190b00131c1d40254acd2279e6240a11913d0`](https://github.com/k1moradi/swapz/commit/04b190b00131c1d40254acd2279e6240a11913d0); its **single parent** is `044a5616d1af6db9e05bd5dba62d88b9fa9b24c4`. This follows the surgical fixture/code-bearing commit [`044a5616d1af6db9e05bd5dba62d88b9fa9b24c4`](https://github.com/k1moradi/swapz/commit/044a5616d1af6db9e05bd5dba62d88b9fa9b24c4) with single parent `5e5908dcf1505331ef0ab37db9b0125149c0ea16` (the official task commit). All published changes are nonforce single-parent fast-forwards on `main`, without branches, PRs, rewritten commits or production C edits. A subsequent distinct evidence-only commit carries this file plus the required `agent10-results.json`.
+
+Exclusive files changed: original test-only `tests/runtime/native/fixtures/round073-original-reader-pin-gc-kunit.cfrag`, original scratch stager `tests/tools/round073-stage-original-reader-pin-gc.py`, original read-side preflight `tests/tools/round073-original-reader-pin-gc-verify.py`, new scoped `tests/tools/round077-original-reader-delay-compile-verify.py`, the original no-auth `.github/workflows/phase-a-round073-original-reader-pin-gc-noauth.yml`, and append-only `docs/testing_standards.md`. No edits to original Linux or production `src/kernel/*.c/*.h`; no Agent7 codec ABI work.
+
+## First genuine previous failure (historical, immutable red)
+
+Round073 previous exact-source [run 45134656124](https://github.com/k1moradi/swapz/actions/runs/45134656124), source [`ecaf63cb7860879364a6e3943884bc30e578ca63`](https://github.com/k1moradi/swapz/commit/ecaf63cb7860879364a6e3943884bc30e578ca63), completed **FAILURE** before any native KUnit: the [actual original UML job 137610101851](https://github.com/k1moradi/swapz/actions/runs/45134656124/job/137610101851) stopped at:
+
+`linux/mm/zswap.c:5307:25: error: implicit declaration of function 'usleep_range' [-Werror=implicit-function-declaration]`.
+
+This was a *missing declaration in the appended test-only fixture*, not proof of a product source failure. Its original [source-host job 137557932353](https://github.com/k1moradi/swapz/actions/runs/45134656124/job/137557932353) completed SUCCESS, with **actual logged** GCC and Clang C23 ASan+UBSan 10/10 individually compiled-executed original-source C semantic mutants each, plus inherited current-source authority 14/compiler and decoder close/drain 2/compiler. Old pinned-original KUnit executed **zero** cases; no old JSON/KTAP PASS is claimed or retroactively assigned.
+
+## Correction and narrowly bounded checks
+
+The pinned original Linux `include/linux/delay.h` blob `82409e55b6aedc39132d2adc60c028ada12a603b` defines `usleep_range()` as a `static inline` that calls `usleep_range_state(..., TASK_UNINTERRUPTIBLE)`. The pinned `mm/zswap.c` Git blob is `ae19e301fced7e357a4c7587dfdd6abb890b9163`. The test-only guarded original KUnit fixture now explicitly includes `<linux/delay.h>` before its existing bounded `usleep_range(1000, 2000)` call. No polling bound, concurrent close/drain semantics, compiler `-Werror`, real source provenance, GC reader-pinning, original LZO1X/raw-LZ4 decoder path or activation gate was changed.
+
+The new strict source-accurate host checker checks both pinned original blobs, exact inline declaration body, source marker, KUnit suite, header-before-call order and fixed 1500-iteration bound. It feeds the **byte-extracted pinned inline implementation** and exact original fixture delay invocation to GCC/Clang `-Wall -Wextra -Wconversion -Wshadow -Werror` ASan+UBSan, and requires the negative compile **without** declaration to fail specifically with `usleep_range` implicit/undeclared diagnostic. Eight additional provenance/marker mutation cases reject before scratch publication. This **host adapter is not a genuine original kernel build**, and the intentional compiler-negative is **not** an executed C semantic mutant.
+
+An isolated local reproducer compiled the source-equivalent positive test with GCC and Clang and confirmed each missing-declaration variant fails for the desired compiler diagnostic. No actual sanitized runtime success is claimed from that container, where ASan runtime execution was not usable. The exact pinned-header/Git-source validation, source-host real original C mutant executions and native KUnit remain assigned to the new CI, **not locally qualified**.
+
+An initial published source commit `044a5616d1af6db9e05bd5dba62d88b9fa9b24c4` was followed by a narrow correction because Clang `-fsyntax-only` with `-no-pie` under `-Werror` can fail for an *unused linker driver flag*, an invalid negative reason. Final source `04b190b00131c1d40254acd2279e6240a11913d0` uses a normal compile/link negative, ensuring the missing `usleep_range` declaration itself is the cause; matching testing standards were appended in the same followup commit.
+
+## Real current-source CI, pending
+
+[Actual exact-source run 45179168125](https://github.com/k1moradi/swapz/actions/runs/45179168125) is **QUEUED** at first inspection with push head `04b190b00131c1d40254acd2279e6240a11913d0`; [source-host job 137708170190](https://github.com/k1moradi/swapz/actions/runs/45179168125/job/137708170190) is **QUEUED**. The dependent original pinned UML KUnit job has **not yet been created / is waiting on host**; no job ID or native JSON/KTAP results exist to report. New-source GCC/Clang real executable sanitizer/mutant counts = **NOT_RUN**; do not carry the prior host PASS over to this new SHA. Expected inherited original-source/real-authority/decoder semantic mutants per compiler: 10 + 14 + 2; these are test requirements, **not observed** on this new SHA.
+
+The genuine pinned original UML job must compile+boot with strict `-Werror`, verify original source and staged per-path SHA, and emit exactly four actually executed KUnit JSON **and** matching KTAP cases: `swapz_round073_original_lz4_old_reader_gc`, `swapz_round073_original_lzo1x_old_reader_gc`, `swapz_round073_original_stale_crc_sha_codec`, `swapz_round073_original_decoder_retire_with_pin`. Current actual native cases executed **0**, verdict **NOT_RUN**, not 4/4. New-source `first_error=null` because no new-source CI diagnostic is available yet; the historical real prior compile error above stays recorded.
+
+Once the existing exact-source run reaches terminal state, inspect that run **on demand** and publish an evidence-only update with actual first source:line, source-host per-compiler counts, genuine native executed JSON/KTAP 4/4 or exact blocker and native job ID. Do not schedule periodic checks, rerun unchanged CI or request a user-supplied local JSON.
+
+## Unchanged safety / proof boundary
+
+The KUnit fixture uses a **test-created locked folio/XArray STORED source**, *not* authenticated original swapcache-backed eviction; it models lower extent bytes, not physical durability, selected current DM ownership or a real upper ACK. The separate retained original decoder lease and source read pin do **not** independently prove upstream pool/RCU lifetime. Original compressed LZO1X/raw LZ4 keeps a separately typed and volatile original codec and exact owned bytes; ordinary `RAW_4096` stays the **complete original UNCOMPRESSED 4096 bytes**. Linux MM/zswap alone owns compressed RAM pressure and natural eviction; swapz only disk packing/GC, no extra reclaim, recompression or independent pressure initiator. `SOURCE_MAPPED_AUTHENTICATED=0`, `PHASE_A=BLOCKED`, `DIRECT_COMPRESSED_HANDOFF=DISABLED`, `FORCED_RAW_BYPASS=DISABLED`, original import `ACTIVE0`. No privilege, swapon, loaded module, real pressure or physical I/O.

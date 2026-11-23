@@ -1,0 +1,128 @@
+{
+  "round": "077",
+  "agent": 10,
+  "message": "PROGRESS",
+  "conclusion": "PENDING",
+  "kind": "pinned-original-Linux-reader-GC-KUnit-test-only-declaration",
+  "task_commit": "5e5908dcf1505331ef0ab37db9b0125149c0ea16",
+  "original_linux_pin": "c339f4010dea8b0d754f84ace70cd1b089878ef8",
+  "source_commit": "04b190b00131c1d40254acd2279e6240a11913d0",
+  "source_parent": "044a5616d1af6db9e05bd5dba62d88b9fa9b24c4",
+  "initial_source_commit": "044a5616d1af6db9e05bd5dba62d88b9fa9b24c4",
+  "initial_source_parent": "5e5908dcf1505331ef0ab37db9b0125149c0ea16",
+  "source_branch": "main",
+  "source_code_files": [
+    "tests/runtime/native/fixtures/round073-original-reader-pin-gc-kunit.cfrag",
+    "tests/tools/round073-stage-original-reader-pin-gc.py",
+    "tests/tools/round073-original-reader-pin-gc-verify.py",
+    "tests/tools/round077-original-reader-delay-compile-verify.py",
+    ".github/workflows/phase-a-round073-original-reader-pin-gc-noauth.yml",
+    "docs/testing_standards.md"
+  ],
+  "workflow_name": "phase-a-round073-original-reader-pin-gc-noauth.yml",
+  "workflow_run_id": 45179168125,
+  "workflow_url": "https://github.com/k1moradi/swapz/actions/runs/45179168125",
+  "workflow_head_sha": "04b190b00131c1d40254acd2279e6240a11913d0",
+  "workflow_status": "queued",
+  "workflow_conclusion": null,
+  "jobs": [
+    {
+      "name": "original-reader-strict-source-host",
+      "job_id": 137708170190,
+      "status": "queued",
+      "conclusion": null,
+      "url": "https://github.com/k1moradi/swapz/actions/runs/45179168125/job/137708170190"
+    },
+    {
+      "name": "original-linux-uml-reader-pin-gc-kunit",
+      "job_id": null,
+      "status": "WAITING_ON_HOST",
+      "conclusion": null,
+      "url": null
+    }
+  ],
+  "gcc": {
+    "new_exact_source_status": "NOT_RUN",
+    "c23": null,
+    "asan_ubsan": null,
+    "original_semantic_mutants_compiled_executed": null,
+    "real_authority_mutants_compiled_executed": null,
+    "decoder_lifetime_mutants_compiled_executed": null,
+    "expected_original_semantic_mutants": 10,
+    "expected_authority_semantic_mutants": 14,
+    "expected_decoder_semantic_mutants": 2
+  },
+  "clang": {
+    "new_exact_source_status": "NOT_RUN",
+    "c23": null,
+    "asan_ubsan": null,
+    "original_semantic_mutants_compiled_executed": null,
+    "real_authority_mutants_compiled_executed": null,
+    "decoder_lifetime_mutants_compiled_executed": null,
+    "expected_original_semantic_mutants": 10,
+    "expected_authority_semantic_mutants": 14,
+    "expected_decoder_semantic_mutants": 2
+  },
+  "local_isolated_non_source_exact_compiler_probe": {
+    "gcc_positive_compiled": true,
+    "clang_positive_compiled": true,
+    "gcc_missing_declaration_compiler_rejected": true,
+    "clang_missing_declaration_compiler_rejected": true,
+    "sanitized_runtime_qualification": false,
+    "counts_as_original_native": false
+  },
+  "pinned_original_provenance": {
+    "mm_zswap_git_blob": "ae19e301fced7e357a4c7587dfdd6abb890b9163",
+    "delay_header_git_blob": "82409e55b6aedc39132d2adc60c028ada12a603b",
+    "native_postimages_verified_new_exact_source": null
+  },
+  "original_native": {
+    "status": "NOT_RUN",
+    "executed_cases": 0,
+    "passed": null,
+    "failed": null,
+    "skipped": null,
+    "crashed": null,
+    "actual_json_ktap": "NOT_RUN",
+    "expected_cases": [
+      "swapz_round073_original_lz4_old_reader_gc",
+      "swapz_round073_original_lzo1x_old_reader_gc",
+      "swapz_round073_original_stale_crc_sha_codec",
+      "swapz_round073_original_decoder_retire_with_pin"
+    ],
+    "original_kernel_compiled_executed": false,
+    "source_test_created_stored": true,
+    "source_real_swapcache_authenticated": false
+  },
+  "historical_prior_round073": {
+    "source_sha": "ecaf63cb7860879364a6e3943884bc30e578ca63",
+    "run_id": 45134656124,
+    "host_job_id": 137557932353,
+    "host_conclusion": "success",
+    "gcc_compiled_executed_original_mutants": 10,
+    "clang_compiled_executed_original_mutants": 10,
+    "real_authority_mutants_per_compiler": 14,
+    "decoder_lifetime_mutants_per_compiler": 2,
+    "original_native_job_id": 137610101851,
+    "original_native_conclusion": "failure",
+    "native_kunit_executed_cases": 0,
+    "first_error": "linux/mm/zswap.c:5307:25: error: implicit declaration of function 'usleep_range' [-Werror=implicit-function-declaration]"
+  },
+  "first_error": null,
+  "first_new_source_error": null,
+  "source_mapped_authenticated": false,
+  "phase_a": "BLOCKED",
+  "direct_compressed_handoff": "DISABLED",
+  "forced_raw_bypass": "DISABLED",
+  "import_active": false,
+  "ordinary_RAW_4096": "FULL_ORIGINAL_UNCOMPRESSED_4096",
+  "original_codec": "SEPARATE_VOLATILE_ORIGINAL_LZO1X_RAW_LZ4",
+  "linux_zswap_natural_eviction_only": true,
+  "swapz_disk_pack_gc_only": true,
+  "actual_physical_io": false,
+  "actual_upper_bio_ack": false,
+  "actual_selected_DM_source_auth": false,
+  "privileged_tests": false,
+  "branches_pr_force_pushes": false,
+  "periodic_ci_checks": false
+}
