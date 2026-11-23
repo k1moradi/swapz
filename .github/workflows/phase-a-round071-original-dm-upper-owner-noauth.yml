@@ -8,6 +8,7 @@ on:
       - 'tests/tools/round071-stage-original-dm-upper-owner.py'
       - 'tests/tools/round071-original-dm-upper-owner-verify.py'
       - 'tests/tools/round072-original-dm-selected-owner-verify.py'
+      - 'tests/tools/round074-original-dm-native-prototype-verify.py'
       - 'docs/handoff/zswapz/round071/agent2-evidence.md'
   workflow_dispatch:
 permissions:
@@ -31,11 +32,13 @@ jobs:
           git diff --check HEAD^ HEAD
           python3 -B tests/tools/round071-original-dm-upper-owner-verify.py
           python3 -B tests/tools/round072-original-dm-selected-owner-verify.py
+          python3 -B tests/tools/round074-original-dm-native-prototype-verify.py
           python3 -B - <<'PY'
           import ast
           from pathlib import Path
           ast.parse(Path('tests/tools/round071-stage-original-dm-upper-owner.py').read_text())
           ast.parse(Path('tests/tools/round072-original-dm-selected-owner-verify.py').read_text())
+          ast.parse(Path('tests/tools/round074-original-dm-native-prototype-verify.py').read_text())
           print('ROUND071_AGENT2_STAGE_SYNTAX_PASS')
           PY
       - name: Retain all previous and concurrent testing standards

@@ -180,46 +180,46 @@ static void swapz_round071_native_requeue_dtr_kunit(struct kunit *test)
 static void swapz_round072_native_current_table_negative_kunit(struct kunit *test)
 {
 	struct bio original = {}, foreign = {};
-	struct dm_table current = { .swapz_round065_incarnation = 7 };
+	struct dm_table active_table = { .swapz_round065_incarnation = 7 };
 	struct dm_table replacement = { .swapz_round065_incarnation = 8 };
-	struct dm_target selected = { .table = &current };
+	struct dm_target selected = { .table = &active_table };
 	struct dm_target other_target = { .table = &replacement };
 	struct swapz_round071_owner owner =
-		swapz_round071_new_owner(&original, &selected, &current);
+		swapz_round071_new_owner(&original, &selected, &active_table);
 
 	KUNIT_ASSERT_TRUE(test, swapz_round071_claim(&owner, &original,
-						    &selected, &current, 7));
+						    &selected, &active_table, 7));
 	KUNIT_EXPECT_TRUE(test, swapz_round072_current_selected_dm_owner(
-				&owner, &original, &selected, &current));
+				&owner, &original, &selected, &active_table));
 	KUNIT_EXPECT_FALSE(test, swapz_round072_current_selected_dm_owner(
-				&owner, &foreign, &selected, &current));
+				&owner, &foreign, &selected, &active_table));
 	KUNIT_EXPECT_FALSE(test, swapz_round072_current_selected_dm_owner(
-				&owner, &original, &other_target, &current));
+				&owner, &original, &other_target, &active_table));
 	KUNIT_EXPECT_FALSE(test, swapz_round072_current_selected_dm_owner(
 				&owner, &original, &selected, &replacement));
 
 	/* The same original and selected target cannot reuse the old table. */
 	WRITE_ONCE(selected.table, &replacement);
 	KUNIT_EXPECT_FALSE(test, swapz_round072_current_selected_dm_owner(
-				&owner, &original, &selected, &current));
-	WRITE_ONCE(selected.table, &current);
-	WRITE_ONCE(current.swapz_round065_incarnation, 8);
+				&owner, &original, &selected, &active_table));
+	WRITE_ONCE(selected.table, &active_table);
+	WRITE_ONCE(active_table.swapz_round065_incarnation, 8);
 	KUNIT_EXPECT_FALSE(test, swapz_round072_current_selected_dm_owner(
-				&owner, &original, &selected, &current));
-	WRITE_ONCE(current.swapz_round065_incarnation, 0);
+				&owner, &original, &selected, &active_table));
+	WRITE_ONCE(active_table.swapz_round065_incarnation, 0);
 	KUNIT_EXPECT_FALSE(test, swapz_round072_current_selected_dm_owner(
-				&owner, &original, &selected, &current));
-	WRITE_ONCE(current.swapz_round065_incarnation, 7);
+				&owner, &original, &selected, &active_table));
+	WRITE_ONCE(active_table.swapz_round065_incarnation, 7);
 	KUNIT_ASSERT_TRUE(test, swapz_round071_requeue(&owner, &original,
-						     &selected, &current, 7));
+						     &selected, &active_table, 7));
 	KUNIT_EXPECT_FALSE(test, swapz_round072_current_selected_dm_owner(
-				&owner, &original, &selected, &current));
+				&owner, &original, &selected, &active_table));
 	KUNIT_ASSERT_TRUE(test, swapz_round071_claim(&owner, &original,
-						   &selected, &current, 7));
+						   &selected, &active_table, 7));
 	KUNIT_ASSERT_TRUE(test, swapz_round071_dtr_fail(&owner, &original,
-						       &selected, &current, 7));
+						       &selected, &active_table, 7));
 	KUNIT_EXPECT_FALSE(test, swapz_round072_current_selected_dm_owner(
-				&owner, &original, &selected, &current));
+				&owner, &original, &selected, &active_table));
 	KUNIT_EXPECT_EQ(test, owner.upper_endio_attempts, 1U);
 	KUNIT_EXPECT_EQ(test, owner.final_error, -5);
 }
