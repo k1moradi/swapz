@@ -1,8 +1,8 @@
 {
   "round": "072",
   "agent": 2,
-  "status": "IN_PROGRESS",
-  "conclusion": "PENDING_EXACT_SOURCE_CI",
+  "status": "BLOCKED",
+  "conclusion": "FAIL_NATIVE_COMPILE",
   "task_commit": "3c1919f1b2c2ea428045a1afb5c278151cf06ccc",
   "engineering_baseline": "4083449f12c3392d5ea534ee4e536865b4caf3ee",
   "tested_source_commit": "27e50960fdc21b51c92ce8278d2c8aedf922dc8a",
@@ -24,47 +24,49 @@
     "id": 45127049313,
     "url": "https://github.com/k1moradi/swapz/actions/runs/45127049313",
     "head_sha": "27e50960fdc21b51c92ce8278d2c8aedf922dc8a",
-    "status": "queued",
-    "conclusion": null,
+    "status": "completed",
+    "conclusion": "failure",
     "jobs": [
       {
         "id": 137533678365,
         "name": "source-host",
-        "status": "queued",
-        "conclusion": null
+        "status": "completed",
+        "conclusion": "success"
       },
       {
-        "id": null,
+        "id": 137536327380,
         "name": "original-uml-native",
-        "status": "not_allocated",
-        "conclusion": null
+        "status": "completed",
+        "conclusion": "failure"
       }
     ]
   },
   "host": {
-    "exact_source_gcc": "NOT_RUN",
-    "exact_source_clang": "NOT_RUN",
-    "expected_compiled_executed_mutants_each_compiler": 18,
+    "exact_source_gcc": "PASS",
+    "exact_source_clang": "PASS",
+    "compiled_executed_semantic_C_mutants_each_compiler": 18,
+    "original_ownership_mutants": 12,
     "additional_new_source_mutants": 6,
-    "original_ownership_mutants_preserved": 12,
-    "local_preparatory_host": "GCC and Clang standalone transcribed predicate baseline PASS plus 6/6 compiled/executed semantic C mutants each; NOT actual source-linked CI",
-    "stage_negatives": {
-      "expected": 8,
-      "actual": null,
-      "status": "NOT_RUN"
+    "stager": {
+      "negative_mutants_rejected": 8,
+      "original_linux_pin": "PASS",
+      "product_byte_identical_review_only": "PASS"
     }
   },
   "original_native": {
-    "status": "NOT_RUN",
+    "status": "FAIL_BEFORE_KUNIT",
+    "job_id": 137536327380,
     "json": null,
     "ktap": null,
     "expected_cases": 3,
-    "actual_cases": null,
-    "passed": null,
-    "failed": null,
-    "skipped": null
+    "actual_cases": 0,
+    "passed": 0,
+    "failed": 0,
+    "skipped": 0,
+    "first_error": "drivers/md/dm.c:4544:16: error: function declaration isn’t a prototype [-Werror=strict-prototypes]",
+    "first_error_phase": "compile-original-native"
   },
-  "first_current_error": null,
+  "first_current_error": "drivers/md/dm.c:4544:16: error: function declaration isn’t a prototype [-Werror=strict-prototypes]",
   "blockers": [
     "Production selected live DM table/source not authenticated",
     "Genuine original swapcache-backed STORED provenance absent",
@@ -81,5 +83,12 @@
   "memory_pressure_owner": "LINUX_MM_ZSWAP_NATURAL_EVICTION_ONLY",
   "swapz_owner": "DISK_STORAGE_PACKING_GC_ONLY",
   "actual_physical_io": false,
-  "privileged_or_loaded_test": false
+  "privileged_or_loaded_test": false,
+  "root_cause": "pinned include/asm-generic/current.h macro expands test-only local struct dm_table current into get_current()",
+  "round074_corrective_source_commit": "92a0a3273e1daea76e766f0d29dae05ce8b29e79",
+  "round074_workflow": {
+    "id": 45144645175,
+    "status": "queued",
+    "url": "https://github.com/k1moradi/swapz/actions/runs/45144645175"
+  }
 }

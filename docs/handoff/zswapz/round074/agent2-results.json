@@ -1,0 +1,101 @@
+{
+  "round": "074",
+  "agent": 2,
+  "status": "IN_PROGRESS",
+  "conclusion": "PENDING_EXACT_SOURCE_CI",
+  "task_commit": "d62552f7048d5a512c7a0a79b86558fa228b31f2",
+  "task_single_parent": "48f2e9ce1e06a0d32f0a40b777e9347d91b80741",
+  "tested_source_commit": "92a0a3273e1daea76e766f0d29dae05ce8b29e79",
+  "tested_source_parent": "f74d896ae9093ed94b62d311c34dd9aafef656ba",
+  "original_linux_pin": "c339f4010dea8b0d754f84ace70cd1b089878ef8",
+  "original_dm_git_blob": "1881d86111fb2e655893ad898cf21b88f0e4e7f3",
+  "read_only_production_dm_git_blob": "f1cab252cd990190646c82da81378d1563475826",
+  "production_c_changed": false,
+  "root_cause": "struct dm_table current at staged original dm.c:4544 expands via original Linux #define current get_current() and triggers -Werror=strict-prototypes",
+  "correction": "19 test-local identifier changes to active_table; retained all three native cases; strict macro regression and ninth staging negative",
+  "old_exact_run": {
+    "id": 45127049313,
+    "tested_source": "27e50960fdc21b51c92ce8278d2c8aedf922dc8a",
+    "conclusion": "failure",
+    "host": {
+      "job_id": 137533678365,
+      "conclusion": "success",
+      "gcc_source_semantic_mutants": 18,
+      "clang_source_semantic_mutants": 18
+    },
+    "native": {
+      "job_id": 137536327380,
+      "conclusion": "failure",
+      "stage_negatives_passed": 8,
+      "actual_kunit_cases": 0,
+      "json": null,
+      "ktap": null,
+      "first_error": "drivers/md/dm.c:4544:16: error: function declaration isn’t a prototype [-Werror=strict-prototypes]"
+    }
+  },
+  "local_preliminary": {
+    "kind": "standalone macro reproducer, not original native",
+    "gcc": "legacy current REJECT; active_table compile+execute PASS",
+    "clang": "legacy current REJECT; active_table compile+execute PASS"
+  },
+  "workflow": {
+    "id": 45144645175,
+    "url": "https://github.com/k1moradi/swapz/actions/runs/45144645175",
+    "head_sha": "92a0a3273e1daea76e766f0d29dae05ce8b29e79",
+    "status": "queued",
+    "conclusion": null,
+    "jobs": [
+      {
+        "id": 137590793528,
+        "name": "source-host",
+        "status": "queued",
+        "conclusion": null
+      },
+      {
+        "id": null,
+        "name": "original-uml-native",
+        "status": "not_allocated",
+        "conclusion": null
+      }
+    ]
+  },
+  "host": {
+    "old_compiled_executed_semantic_mutants_per_compiler": 18,
+    "new_native_fixture_case_bodies_required": 3,
+    "kernel_macro_compiler_negative_required": 1,
+    "gcc_exact": "NOT_RUN",
+    "clang_exact": "NOT_RUN"
+  },
+  "stage": {
+    "negative_mutants_expected": 9,
+    "actual": null
+  },
+  "native": {
+    "status": "NOT_RUN",
+    "expected": 3,
+    "actual": null,
+    "passed": null,
+    "failed": null,
+    "skipped": null,
+    "json": null,
+    "ktap": null
+  },
+  "first_current_error": null,
+  "remaining_blockers": [
+    "New original Linux native KUnit result pending",
+    "No authenticated actual selected production DM target and original STORED source",
+    "No physical lower FUA or actual upper bio_endio"
+  ],
+  "source_mapped_authenticated": false,
+  "phase_a": "BLOCKED",
+  "direct_compressed_handoff": "DISABLED",
+  "forced_raw_bypass": "DISABLED",
+  "import_active": false,
+  "ordinary_raw_4096": "FULL_ORIGINAL_UNCOMPRESSED_4096",
+  "codec": "DISTINCT_VOLATILE_ORIGINAL_NO_RECOMPRESSION",
+  "pressure_owner": "LINUX_MM_ZSWAP_NATURAL_ONLY",
+  "swapz_owner": "DISK_PACKING_GC_ONLY",
+  "physical_io": false,
+  "privileged_loaded_pressure_tests": false,
+  "periodic_checks_created": false
+}
