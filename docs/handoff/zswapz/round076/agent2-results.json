@@ -1,0 +1,82 @@
+{
+  "round": "076",
+  "agent": 2,
+  "kind": "test-only exact-source selected-DM native extractor regression",
+  "task_commit": "80b207acd5eeee728e82a702c829eff2b181835a",
+  "original_linux_pin": "c339f4010dea8b0d754f84ace70cd1b089878ef8",
+  "source_commit": "84283219811616b4b731e62f02db3952315035ff",
+  "source_parent": "ae3985d3da8a7a0447a965c1b1100ad472954786",
+  "preceding_source_commit": "ae3985d3da8a7a0447a965c1b1100ad472954786",
+  "preceding_source_parent": "80b207acd5eeee728e82a702c829eff2b181835a",
+  "source_url": "https://github.com/k1moradi/swapz/commit/84283219811616b4b731e62f02db3952315035ff",
+  "workflow_url": "https://github.com/k1moradi/swapz/actions/runs/45173342924",
+  "workflow_run_id": 45173342924,
+  "workflow_status": "QUEUED",
+  "workflow_conclusion": null,
+  "jobs": [
+    {
+      "name": "source-host",
+      "job_id": 137688181589,
+      "status": "QUEUED",
+      "conclusion": null,
+      "url": "https://github.com/k1moradi/swapz/actions/runs/45173342924/job/137688181589"
+    },
+    {
+      "name": "original-uml-native",
+      "job_id": null,
+      "status": "NOT_SCHEDULED_DEPENDENT",
+      "conclusion": null
+    }
+  ],
+  "actual_new_exact_source_host": {
+    "gcc": "NOT_EXECUTED",
+    "clang": "NOT_EXECUTED",
+    "native_C_case_bodies_compiled_executed": 0,
+    "as_ubsan": "NOT_EXECUTED"
+  },
+  "local_diagnostic_reproducer": {
+    "scope": "NARROW_UNDECLARED_FUNCTION_ONLY_NOT_EXACT_SOURCE",
+    "gcc": "COMPILE_REJECTED",
+    "clang": "COMPILE_REJECTED",
+    "compiler_versions": [
+      "gcc 14.2.0",
+      "clang 17.0.0"
+    ],
+    "sanitizer_or_native_claim": false
+  },
+  "old_failed_source": {
+    "sha": "92a0a3273e1daea76e766f0d29dae05ce8b29e79",
+    "run_id": 45144645175,
+    "host_job_id": 137590793528,
+    "host_status": "COMPLETED_FAILURE",
+    "native_job_id": 137628116726,
+    "native_status": "SKIPPED",
+    "native_cases": 0,
+    "first_error": "actual.c:187:33: error: implicit declaration of function 'swapz_round072_current_selected_dm_owner' [-Werror=implicit-function-declaration]"
+  },
+  "native_original_kunit": {
+    "status": "NOT_EXECUTED",
+    "executed_cases": 0,
+    "passed": 0,
+    "failed": 0,
+    "skipped": 0,
+    "json_available": false,
+    "ktap_available": false,
+    "required_pass": 3
+  },
+  "new_first_error": null,
+  "conclusion": "IN_PROGRESS_NOT_PROVEN",
+  "repository_policy": "NOT_EXECUTED_NEW_SOURCE_CI_QUEUED",
+  "git_diff_check": "NOT_EXECUTED_NEW_SOURCE_CI_QUEUED",
+  "source_mapped_authenticated": false,
+  "phase_a": "BLOCKED",
+  "direct_compressed_handoff": "DISABLED",
+  "forced_raw_bypass": "DISABLED",
+  "import_active": false,
+  "physical_io": false,
+  "privileged_testing": false,
+  "production_code_modified": false,
+  "raw_4096": "FULL_ORIGINAL_UNCOMPRESSED_4096",
+  "memory_reclaim_owner": "LINUX_MM_ZSWAP",
+  "swapz_owner": "DISK_PACKING_GC_ONLY"
+}
