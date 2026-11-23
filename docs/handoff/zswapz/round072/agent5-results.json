@@ -1,0 +1,71 @@
+{
+  "round": "072",
+  "agent": 5,
+  "status": "QUEUED",
+  "kind": "original-Linux-test-only-native-mm-bio-authority-decoder-join",
+  "task_commit": "3c1919f1b2c2ea428045a1afb5c278151cf06ccc",
+  "engineering_baseline": "4083449f12c3392d5ea534ee4e536865b4caf3ee",
+  "tested_commit": "f7e3a5ad09d7940baa9a149fdb9ac0f55878f68f",
+  "source_parent": "471b406d81b08e097d3bbddc8518d06bab687d8",
+  "original_linux_pin": "c339f4010dea8b0d754f84ace70cd1b089878ef8",
+  "original_source_file": "mm/zswap.c",
+  "original_bio_file": "block/bio.c",
+  "actual_product_c_changes": [],
+  "owned_files": [
+    "tests/runtime/native/fixtures/round072-original-mm-bio-authority-decoder-joined.cfrag",
+    "tests/tools/round072-stage-original-mm-bio-authority-decoder-joined.py",
+    "tests/tools/round072-original-mm-bio-authority-decoder-joined-verify.py",
+    ".github/workflows/phase-a-round072-original-mm-bio-authority-decoder-noauth.yml",
+    "docs/testing_standards.md"
+  ],
+  "workflow_run_id": 45127549397,
+  "workflow_url": "https://github.com/k1moradi/swapz/actions/runs/45127549397",
+  "jobs": [
+    {
+      "id": 137535284018,
+      "name": "exact-original-joined-source-host",
+      "status": "QUEUED",
+      "conclusion": null
+    },
+    {
+      "id": null,
+      "name": "original-MM-BIO-authority-independent-decoder-native-KUnit",
+      "status": "NOT_SCHEDULED",
+      "conclusion": null
+    }
+  ],
+  "source_staging": {
+    "status": "NOT_RUN",
+    "original_postimages_expected": 10,
+    "negative_plans_expected": 6
+  },
+  "host": {
+    "status": "NOT_RUN",
+    "gcc": null,
+    "clang": null,
+    "mutants": null
+  },
+  "native_kunit": {
+    "status": "NOT_RUN",
+    "json": null,
+    "ktap": null,
+    "tests": null,
+    "passed": null,
+    "failed": null,
+    "skipped": null,
+    "crashed": null,
+    "errors": null
+  },
+  "first_error": null,
+  "source_mapped_authenticated": false,
+  "phase_a": "BLOCKED",
+  "direct_compressed_handoff": "DISABLED",
+  "forced_raw_bypass": "DISABLED",
+  "import_active": false,
+  "original_codec_tag": "VOLATILE_SEPARATE_NO_RECOMPRESSION",
+  "conventional_RAW_4096": "FULL_ORIGINAL_UNCOMPRESSED_4096",
+  "actual_physical_io": false,
+  "actual_upper_bio_ack": false,
+  "actual_swapcache_backed_original_STORED": false,
+  "privileged_loaded_physical_real_pressure_tests": false
+}
