@@ -19676,3 +19676,66 @@ each mutant must still compile and execute its own changed C translation
 unit and independently fail by the expected semantic runtime assertion.
 No warning suppression in original Linux code, no production codec change,
 no actual original native kernel/physical I/O, and all activation gates OFF.
+
+
+## Round080 original reader-GC KUnit timeout lease-quiescence and isolated native diagnosis (Agent10)
+
+Original pinned Linux torvalds/linux@c339f4010dea8b0d754f84ace70cd1b089878ef8
+must distinguish a genuinely booted UML kernel from a fully PASS native
+suite. Round079 exact source 14e8f8f18566e584d9640482b3437929e5da041c,
+run45236328888 host137908924597 genuinely passed GCC+Clang 26 executed
+C mutants each (10 original source, 14 authority, two decoder lifetime),
+but original pinned UML native137910554522 compiled and booted, passed
+LZ4 GC and LZO1X GC read tests, then timed out after 120 seconds. The
+real JSON described four tests, two passed, two censored as crashed from
+missing case results and three parser errors. This is not a proven kernel
+panic and is NOT 4/4. Prior R073 and R077 original failing source SHAs
+remain red.
+
+A KUnit caller must release every locally owned decoder lease, including
+any accidentally admitted late reader lease, BEFORE it waits for a drain
+worker. A closer waiting for a pin that its caller still owns deadlocks
+even if the reader's original zpool and XArray are valid. A test must
+not use a raw unbounded wait_for_completion on a worker that depends on
+its own test state. Test-only closer and owner storage must remain valid
+for the full worker lifetime: use heap-stable storage, a bounded
+wait_for_completion_timeout, and fail-only quarantine on an unexpected
+timeout rather than freeing a worker-borrowed KUnit stack (UAF). No
+success-path heap leak is permitted. An error path with no separate close
+worker must check that all local reader pins are drained BEFORE calling
+the synchronous close_and_drain. Exact source-linked host execution of
+actual dormant decoder-owner C must independently compile/execute a
+successful two-lease close and mutated missing-early-put and missing-late-put
+negative scenarios under strict GCC+Clang C23 high warnings -Werror,
+ASan+UBSan. Mutants must EXIT with an observed semantic leak verdict
+after deliberately releasing the missed pin, not timeout or compile
+fail. This host test is supplementary, NOT original Linux UML execution
+or authentic STORED proof.
+
+Use a fail-only timer-based source-step watchdog in the appended original
+test fixture (20 seconds, below unchanged KUnit 120 seconds) and always
+upload the pinned original kernel test.log on failure as well as success.
+With ONE shared scratch pinned UML build, run the previously censored
+stale CRC/SHA/codec and decoder-retirement subtests independently using
+shorter 40-second per-kernel execution limits, preserving each bounded
+log and JSON, then demand the combined original test suite's genuine
+4/4 PASS JSON AND KTAP, 0 failed/skipped/crashed/errors. This isolation
+does not replace the combined check and may not increase its 120-second
+kernel timeout, skip failing tests or claim a censored case passed.
+Keep original pinned blob manifests, strict native -Werror, source
+GCC+Clang C23, previously executed 10+14+2 semantic mutants per compiler,
+the undeclared usleep_range GCC/Clang compile negatives and error
+classification, original native BIO endio, original LZO1X/raw LZ4
+decoder and existing fail-closed authority checks.
+
+Linux MM/zswap exclusively owns compressed RAM pressure and natural
+eviction. swapz owns only data-only 4/8/16KiB disk packing/GC, never
+independent RAM reclaim or original-stream recompression. Ordinary
+RAW_4096 contains the COMPLETE ORIGINAL UNCOMPRESSED 4096 bytes.
+Original compressed LZO1X/raw LZ4 needs separate live authenticated
+STORED slot/epoch/selected-DM evidence, immutable original preerase
+bytes, independently retained decoder and reader/GC pin, lower durable
+WRITE/FUA then exactly-once upper ACK; nothing here grants that.
+SWAPSPACE2 first physical4096 and exact volatile RAM 20-byte map are
+protected. Source mapping auth0, Phase A BLOCKED, all activation OFF;
+no privileged, physical-device, swapon, loaded or pressure testing.
