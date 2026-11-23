@@ -5,15 +5,15 @@
   "task_commit": "3c1919f1b2c2ea428045a1afb5c278151cf06ccc",
   "engineering_baseline": "4083449f12c3392d5ea534ee4e536865b4caf3ee",
   "original_linux_pin": "c339f4010dea8b0d754f84ace70cd1b089878ef8",
-  "tested_commit": "adc38477c80706908df94097467c75e0a0727753",
-  "tested_parent": "923709674f2d94e766b9409f1fef776b34825687",
+  "tested_commit": "135523cf68af842e522b3a5fe93247939699fe21",
+  "tested_parent": "87ea0eea75f285158dfb3995be93c22660b79e7f",
   "publication_status": "QUEUED",
-  "workflow_run": 45127458505,
-  "workflow_url": "https://github.com/k1moradi/swapz/actions/runs/45127458505",
+  "workflow_run": 45128095541,
+  "workflow_url": "https://github.com/k1moradi/swapz/actions/runs/45128095541",
   "jobs": [
     {
-      "id": 137534988276,
-      "url": "https://github.com/k1moradi/swapz/actions/runs/45127458505/job/137534988276",
+      "id": 137536991228,
+      "url": "https://github.com/k1moradi/swapz/actions/runs/45128095541/job/137536991228",
       "name": "gcc-clang-sanitizers-and-semantic-mutants",
       "status": "queued",
       "conclusion": null
@@ -25,8 +25,8 @@
     "lz4": "torvalds/linux@c339f4010dea8b0d754f84ace70cd1b089878ef8:lib/lz4/lz4_decompress.c"
   },
   "source_blobs": {
-    "tests/runtime/native/fixtures/round072-original-codec-tag-vs-raw.c": "00b853fbe0a17bff4b1f9158491667983074562b",
-    "tests/tools/round072-original-codec-tag-vs-raw-verify.py": "b7f91671f6833d0b4a347aa0d6318c856a57779c",
+    "tests/runtime/native/fixtures/round072-original-codec-tag-vs-raw.c": "a1afdf89777ac49f7e5d4c2940a4ae92e7c3a742",
+    "tests/tools/round072-original-codec-tag-vs-raw-verify.py": "8fe4e609ec1c77625e2820512b01073575be209b",
     "src/kernel/codec.c": "d920dcaac6f2b7de1334d4133770bd649719c66d",
     "src/kernel/zswap-import-codec.h": "0d888fe4c74115ab2388f1df1dc0b86ae4b9b6c6",
     "src/kernel/zswap-direct-handoff.h": "864abf9a12071b98f5c157a44f4ed0c04d4a594c"
@@ -57,5 +57,21 @@
   "production_source_changes": "NONE",
   "no_secondary_reclaimer": true,
   "recompression": false,
-  "known_source_only_api_divergence": "original import LZO1X codec 2 collides numerically with dormant direct ZSTD enum 2; explicit bridge refuses it"
+  "known_source_only_api_divergence": "original import LZO1X codec 2 collides numerically with dormant direct ZSTD enum 2; explicit bridge refuses it",
+  "superseded_nonqualifying_run": {
+    "run_id": 45127087314,
+    "job_id": 137533799500,
+    "tested_commit": "adff0ee5ee3245681118e21f64ab5d6f4a90ede2",
+    "conclusion": "failure",
+    "first_error": "GCC mutant owned-source-lease compilation failed (precedence/warning under -Werror; host baseline passed 63 assertions); source verifier subsequently changed"
+  },
+  "original_kernel_blob_shas": {
+    "mm/zswap.c": "ae19e301fced7e357a4c7587dfdd6abb890b9163",
+    "crypto/lz4.c": "57b713516aefac823f2af9481c828027b42490dd",
+    "crypto/lzo.c": "d43242b24b4e831e7e0d26f38d2f263877d5748e",
+    "lib/lz4/lz4_decompress.c": "3a2cd9acada4a09ef70a344090d48167c46088a1",
+    "lib/lzo/lzo1x_decompress_safe.c": "318abb82c63d2c27c0d5497b7cf4e21d87d13154"
+  },
+  "standalone_original_pool_decoder_lease_coverage": "source-linked host validation of pool identity, dictionary identity, codec generation, source record identity and wrong digest; no actual native provider lease",
+  "original_linux_kunit": "NOT_RUN"
 }
