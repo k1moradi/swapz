@@ -1,0 +1,44 @@
+name: Round074 Agent4 original pool RCU lifetime HOST no-auth
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'tests/runtime/native/fixtures/round074-original-pool-lifetime-boundaries.c'
+      - 'tests/tools/round074-original-pool-lifetime-boundaries-verify.py'
+      - '.github/workflows/phase-a-round074-original-pool-lifetime-host-noauth.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  original-source-host:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          path: swapz
+          fetch-depth: 2
+          persist-credentials: false
+      - uses: actions/checkout@v4
+        with:
+          repository: torvalds/linux
+          ref: c339f4010dea8b0d754f84ace70cd1b089878ef8
+          fetch-depth: 1
+          sparse-checkout: |
+            mm/zswap.c
+          sparse-checkout-cone-mode: false
+          path: linux
+          persist-credentials: false
+      - name: Exact original source and staged RCU postimage, strict GCC Clang ASan UBSan, 20 executed C mutants
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          umask 077
+          test "$GITHUB_REF" = "refs/heads/main"
+          test "$(git -C swapz rev-parse HEAD)" = "$GITHUB_SHA"
+          test "$(git -C linux rev-parse HEAD)" = "c339f4010dea8b0d754f84ace70cd1b089878ef8"
+          test -z "$(git -C swapz status --porcelain --untracked-files=all)"
+          test -z "$(git -C linux status --porcelain --untracked-files=all)"
+          git -C swapz diff --check HEAD^ HEAD
+          python3 -B swapz/tests/tools/round074-original-pool-lifetime-boundaries-verify.py             qualify --linux-root linux
+          echo 'ROUND074_AGENT4_POOL_SOURCE_LINKED_HOST_ONLY_PASS original_pinned=YES model_only=YES code_mutants=20 original_source_mutants=9 noauth=YES'
