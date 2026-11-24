@@ -14,7 +14,6 @@ on:
       - '.github/workflows/phase-a-round059-cross-suite-codec-host-noauth.yml'
       - 'src/kernel/authority.c'
       - 'src/kernel/codec.c'
-      - 'docs/testing_standards.md'
   workflow_dispatch:
 permissions:
   contents: read

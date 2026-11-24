@@ -7,7 +7,6 @@ on:
       - 'tests/runtime/native/fixtures/round058-dm-ingress-*'
       - 'tests/tools/round058-dm-ingress-*'
       - '.github/workflows/phase-a-round058-dm-ingress-noauth.yml'
-      - 'docs/testing_standards.md'
   workflow_dispatch:
 permissions:
   contents: read

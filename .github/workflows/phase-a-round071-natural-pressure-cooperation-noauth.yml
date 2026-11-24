@@ -9,7 +9,6 @@ on:
       - 'src/kernel/zswap-import-codec.h'
       - 'src/kernel/zswap-direct-handoff.h'
       - 'tests/runtime/native/fixtures/round052-natural-pressure-scheduling.c'
-      - 'docs/testing_standards.md'
       - '.github/workflows/phase-a-round071-natural-pressure-cooperation-noauth.yml'
   workflow_dispatch:
 permissions:

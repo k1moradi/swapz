@@ -10,7 +10,6 @@ on:
       - 'tests/tools/round059-authority-import-lifetime.py'
       - 'tests/runtime/native/fixtures/round059-authority-import-lifetime.c'
       - '.github/workflows/phase-a-round059-authority-import-lifetime-noauth.yml'
-      - 'docs/testing_standards.md'
   workflow_dispatch:
 jobs:
   actual-authority-volatile-import-noauth:

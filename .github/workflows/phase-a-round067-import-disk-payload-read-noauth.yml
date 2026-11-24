@@ -8,7 +8,6 @@ on:
       - 'tests/runtime/native/fixtures/round067-import-disk-payload-read.c'
       - 'tests/tools/round067-import-disk-payload-read-verify.py'
       - '.github/workflows/phase-a-round067-import-disk-payload-read-noauth.yml'
-      - 'docs/testing_standards.md'
   workflow_dispatch:
 jobs:
   source-bound-original-compressed-memory-read:

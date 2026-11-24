@@ -9,7 +9,6 @@ on:
       - 'tests/tools/round069-stage-original-bio-authority-joined.py'
       - 'tests/tools/round069-original-bio-authority-joined-verify.py'
       - '.github/workflows/phase-a-round069-original-bio-authority-joined-noauth.yml'
-      - 'docs/testing_standards.md'
   workflow_dispatch:
 permissions:
   contents: read

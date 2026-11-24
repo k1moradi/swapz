@@ -13,7 +13,6 @@ on:
       - 'src/kernel/zswap-import-admission.h'
       - 'src/kernel/zswap-import-codec.h'
       - '.github/workflows/phase-a-round057-transaction-product-noauth.yml'
-      - 'docs/testing_standards.md'
   workflow_dispatch:
 jobs:
   exact-product-transaction-noauth:

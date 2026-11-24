@@ -7,7 +7,6 @@ on:
       - 'tests/tools/round056-imported-volatile-map.py'
       - '.github/workflows/phase-a-zswap-round056-imported-volatile-map.yml'
       - 'src/kernel/codec.h'
-      - 'docs/testing_standards.md'
   workflow_dispatch:
 jobs:
   disabled-imported-map:

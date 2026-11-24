@@ -20160,3 +20160,41 @@ Execute the actual staged credential helper under GCC C2x and Clang C23 (support
 ### Round084 Agent11 — disabled bounded original ticket broker
 
 Compile actual separately opt-in broker C and pinned codec CRC helper using strict C23/C2x GCC/Clang ASan+UBSan. Verify exact main checkout, real single parent, whitespace, append-only standards, full original and product source pins, and unique semantic mutation anchors before compiling. Caller-preallocated aligned contiguous arrays, exact checked sizes and nonoverlap; independent count/byte reservation, immutable copy/CRC, source and route identity, generation wrap, refcount overflow, trylock refusal, claim once, revoke/close with retained owners and final release. Exercise barrier-ordered host concurrency and require explicit executed behavioral assertions for all 32 independent mutants per compiler, not compiler or sanitizer failures. Host pthread synchronization only; kernel spin adapter and real selected clone/carrier remain unqualified. No normal Kbuild, production BIO cap, reclaim competitor, native/physical test, imported routing or forced RAW. AUTH0 Phase A BLOCKED all activation OFF.
+
+## Round085 — source-scoped CI trigger contract and historical fan-out regression
+
+An applicable, meaningful canonical standards update remains mandatory in the
+SAME implementation/test/workflow commit. Preserve the whole prior standards
+text byte-for-byte. The always-on main-push project-goals workflow, exact-SHA
+checkout, first-parent push range and repository-policy-test.py --enforce
+remain unchanged; neither a later docs-only commit nor removing a redundant
+historical standards path filter waives the mandatory policy. Keep all
+independently observable runs, including their concurrency/first-error and
+artifact contracts. No skipping, canceling or coalescing exact-SHA jobs.
+
+A historical focused workflow may omit its standalone
+docs/testing_standards.md positive push path ONLY when its actual job commands,
+transitive source/helper/fixture inputs and source-specific verification do
+not substantively consume that document. Every other path pattern, its
+ordering (including any negation), branch, self trigger, manual dispatch,
+permissions, jobs, exact-source gates and artifacts must remain unchanged.
+Do not narrow unresolved dependencies or unfiltered mandatory product/policy
+checks. Re-evaluate a historical lane if its real input contract changes.
+
+The migration regression reads the complete immutable before/after workflow
+texts, accepts only the audited positive quoted path grammar plus safe plain
+literal YAML paths, and refuses unknown event/filter shapes rather than
+approximating GitHub glob semantics with fnmatch. Independently witness every
+retained path, distinguish a single star from a trailing globstar across
+directories, reject source/helper/self/manual removal and weakened always-on
+policy, and replay actual first-parent changesets and observed exact-source
+run lists. Report predicted ordinary small-diff trigger counts separately
+from actual GitHub scheduling, including the one-time self-trigger cost of a
+migration. Do not claim equivalence for truncated 300-file or diff-timeout/
+large-history cases. This is rootless CI configuration qualification, not
+original kernel, source authentication or physical swap evidence.
+
+Source authentication remains zero; Phase A remains BLOCKED. Direct handoff,
+forced RAW bypass and import remain OFF. Original Linux MM/zswap alone owns
+compressed RAM and natural eviction; swapz owns disk packing and GC only.
+Ordinary RAW_4096 is the full original uncompressed 4096-byte page.

@@ -10,7 +10,6 @@ on:
       - 'tests/tools/round068-original-lower-bio-owned-verify.py'
       - 'tests/tools/round068-stage-original-lower-bio.py'
       - '.github/workflows/phase-a-round068-original-lower-bio-owned-noauth.yml'
-      - 'docs/testing_standards.md'
   workflow_dispatch:
 permissions:
   contents: read

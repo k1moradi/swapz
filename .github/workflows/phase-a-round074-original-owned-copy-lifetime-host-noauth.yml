@@ -9,7 +9,6 @@ on:
       - 'src/kernel/authority.c'
       - 'src/kernel/authority.h'
       - 'src/kernel/zswap-import-codec.h'
-      - 'docs/testing_standards.md'
   workflow_dispatch:
 permissions:
   contents: read

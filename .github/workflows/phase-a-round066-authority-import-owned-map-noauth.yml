@@ -8,7 +8,6 @@ on:
       - 'tests/runtime/native/fixtures/round066-import-disk-actual-authority.c'
       - 'tests/tools/round066-authority-import-owned-map-verify.py'
       - '.github/workflows/phase-a-round066-authority-import-owned-map-noauth.yml'
-      - 'docs/testing_standards.md'
   workflow_dispatch:
 jobs:
   actual-import-disk-owner-noauth:

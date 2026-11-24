@@ -9,7 +9,6 @@ on:
       - 'src/kernel/zswap-import-codec.h'
       - 'src/kernel/zswap-import-admission.h'
       - 'src/kernel/zswap-direct-handoff.h'
-      - 'docs/testing_standards.md'
       - '.github/workflows/phase-a-round074-eviction-lease-copy-budget-host-noauth.yml'
   workflow_dispatch:
 permissions:

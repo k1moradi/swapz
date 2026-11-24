@@ -14,7 +14,6 @@ on:
       - 'tests/tools/round061-original-kbuild-host-deps-verify.py'
       - 'tests/runtime/native/fixtures/round060-original-decoder-module.c'
       - '.github/workflows/phase-a-round060-original-decoder-gpl-noauth.yml'
-      - 'docs/testing_standards.md'
   workflow_dispatch:
 permissions:
   contents: read

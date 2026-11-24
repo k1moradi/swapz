@@ -12,7 +12,6 @@ on:
       - 'src/kernel/codec.h'
       - 'src/kernel/codec.c'
       - 'src/kernel/authority.h'
-      - 'docs/testing_standards.md'
       - '.github/workflows/phase-a-round077-original-codec-tag-cross-abi-noauth.yml'
   workflow_dispatch:
 permissions:

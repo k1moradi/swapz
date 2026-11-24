@@ -10,7 +10,6 @@ on:
       - 'tests/tools/round055-natural-mm-frontier.py'
       - 'tests/runtime/native/fixtures/round055-natural-mm-frontier.c'
       - 'src/kernel/codec.h'
-      - 'docs/testing_standards.md'
       - '.github/workflows/phase-a-zswap-round052-natural-pressure-scheduling.yml'
   workflow_dispatch:
 jobs:

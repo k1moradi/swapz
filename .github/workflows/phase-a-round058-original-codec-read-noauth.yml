@@ -11,7 +11,6 @@ on:
       - ".github/workflows/phase-a-round058-original-codec-read-noauth.yml"
       - "src/kernel/codec.c"
       - "src/kernel/codec.h"
-      - "docs/testing_standards.md"
   workflow_dispatch:
 permissions:
   contents: read

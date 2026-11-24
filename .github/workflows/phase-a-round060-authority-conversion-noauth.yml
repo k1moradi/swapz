@@ -9,7 +9,6 @@ on:
       - 'tests/tools/round059-authority-import-lifetime.py'
       - 'tests/tools/round061-authority-push-metadata-verify.py'
       - '.github/workflows/phase-a-round060-authority-conversion-noauth.yml'
-      - 'docs/testing_standards.md'
   workflow_dispatch:
 permissions:
   contents: read

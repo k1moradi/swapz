@@ -11,7 +11,6 @@ on:
       - 'src/kernel/codec.h'
       - 'src/kernel/zswap-import-codec.h'
       - 'src/kernel/zswap-direct-handoff.h'
-      - 'docs/testing_standards.md'
       - '.github/workflows/phase-a-round074-real-raw-fallback-source-noauth.yml'
   workflow_dispatch:
 permissions:

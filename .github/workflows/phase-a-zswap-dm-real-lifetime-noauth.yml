@@ -6,7 +6,6 @@ on:
       - "src/kernel/dm-target.c"
       - "tests/tools/round046-dm-real-lifetime-verify.py"
       - "tests/runtime/native/fixtures/round046-dm-lifetime-host.c"
-      - "docs/testing_standards.md"
       - ".github/workflows/phase-a-zswap-dm-real-lifetime-noauth.yml"
   workflow_dispatch:
 permissions:

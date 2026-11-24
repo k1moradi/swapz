@@ -9,7 +9,6 @@ on:
       - "src/kernel/codec.c"
       - "src/kernel/codec.h"
       - "src/kernel/dm-target.c"
-      - "docs/testing_standards.md"
   workflow_dispatch:
 permissions:
   contents: read
