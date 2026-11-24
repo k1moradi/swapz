@@ -271,7 +271,8 @@ def diagnostic_regression():
 
 
 LZ4_SOURCE = "lib/lz4/lz4_compress.c"
-LZ4_POSTIMAGE = "a1d860d6085109bc01ed6a593cf369ccbd6edc67"
+LZ4_FIRST_POSTIMAGE = "a1d860d6085109bc01ed6a593cf369ccbd6edc67"
+LZ4_POSTIMAGE = "63eb4be2e23caf770649af18f6a7b2b82d79a5e7"
 LZ4_BEFORE = (b"\tconst BYTE * const dictEnd = dictionary + dictPtr->dictSize;\n"
               b"\tconst size_t dictDelta = dictEnd - (const BYTE *)source;\n")
 LZ4_AFTER = (b"\t/* Host-test-only: avoid unused dictionary arithmetic in noDict mode. */\n"
@@ -281,15 +282,29 @@ LZ4_AFTER = (b"\t/* Host-test-only: avoid unused dictionary arithmetic in noDict
              b"\t\tdictEnd - (const BYTE *)source;\n")
 
 
-def staged_bytes(pristine, commit, dirty, anchor=LZ4_BEFORE, expected=LZ4_POSTIMAGE):
+# The prior staged Clang run independently exposed unsigned refDelta - 1.
+# noDict has refDelta=0; the preceding match > lowLimit protects match[-1].
+# Preserve the other modes exactly, not a general external dictionary repair.
+LZ4_CATCHUP_BEFORE = b"\t\t\t\t&& (unlikely(ip[-1] == match[refDelta - 1]))) {\n"
+LZ4_CATCHUP_AFTER = (b"\t\t\t\t&& (unlikely(ip[-1] == (dict == noDict ?\n"
+                     b"\t\t\t\t\tmatch[-1] : match[refDelta - 1])))) {\n")
+
+
+def staged_bytes(pristine, commit, dirty, anchor=LZ4_BEFORE, expected=LZ4_POSTIMAGE,
+                 catchup_anchor=LZ4_CATCHUP_BEFORE):
     require(commit == PIN, "staging wrong pin")
     require(not dirty, "staging unexpected dirty path")
     require(git_blob(pristine) == ORIGINAL[LZ4_SOURCE], "staging pristine blob")
     require(pristine.count(anchor) == 1 and anchor == LZ4_BEFORE, "staging unique anchor")
-    staged = pristine.replace(anchor, LZ4_AFTER, 1)
+    first = pristine.replace(anchor, LZ4_AFTER, 1)
+    require(git_blob(first) == LZ4_FIRST_POSTIMAGE, "staging first postimage")
+    require(first.count(catchup_anchor) == 1 and catchup_anchor == LZ4_CATCHUP_BEFORE,
+            "staging unique catchup anchor")
+    staged = first.replace(catchup_anchor, LZ4_CATCHUP_AFTER, 1)
     require(git_blob(staged) == expected and expected == LZ4_POSTIMAGE, "staging postimage")
-    require(staged.count(LZ4_AFTER) == 1 and staged.replace(LZ4_AFTER, anchor, 1) == pristine,
-            "staging exact one-hunk diff")
+    require(staged.count(LZ4_AFTER) == 1 and staged.count(LZ4_CATCHUP_AFTER) == 1 and
+            staged.replace(LZ4_CATCHUP_AFTER, catchup_anchor, 1).replace(LZ4_AFTER, anchor, 1) == pristine,
+            "staging exact two-hunk diff")
     return staged
 
 
@@ -304,6 +319,7 @@ def stage_plan(linux, helpers, report):
         ("staging unexpected dirty path", {"dirty": "?? unrelated"}),
         ("staging unique anchor", {"anchor": b"missing unique anchor"}),
         ("staging postimage", {"expected": "0" * 40}),
+        ("staging unique catchup anchor", {"catchup_anchor": b"missing catchup anchor"}),
     )
     for expected, changes in negatives:
         parameters = {"commit": commit, "dirty": dirty, **changes}
@@ -314,11 +330,12 @@ def stage_plan(linux, helpers, report):
         else:
             raise RuntimeError("stage negative accepted")
         require((linux / LZ4_SOURCE).read_bytes() == pristine, "negative changed original")
-    report["staging"] = {"pristine": ORIGINAL[LZ4_SOURCE], "postimage": LZ4_POSTIMAGE,
+    report["staging"] = {"pristine": ORIGINAL[LZ4_SOURCE], "prior_failed_postimage": LZ4_FIRST_POSTIMAGE,
+                         "postimage": LZ4_POSTIMAGE,
                          "postimage_sha256": hashlib.sha256(staged).hexdigest(),
                          "negatives_rejected": len(negatives), "mode": "isolated copy; original never edited",
                          "scope": "noDict only; prefix/external modes unchanged, unqualified"}
-    print("PASS staging four negative guards, exact reversible one-hunk postimage", file=sys.stderr)
+    print("PASS staging five negative guards, exact reversible two-hunk postimage", file=sys.stderr)
     return staged
 
 
@@ -409,6 +426,32 @@ def corpus_control(compiler, standard, linux, workspace, helpers, includes, fixe
                 "pristine Clang control did not reproduce exact first error")
         state["pristine_control"] = failure
         print("PASS clang pristine control reproduced UBSan lz4_compress.c:192:42 exit=1 (pristine FAIL)", file=sys.stderr)
+        # Recreate the exact earlier failed staged postimage, not a synthetic
+        # pointer probe. Preserve its separate failure before qualifying v2.
+        prior_directory = workspace / "prior-stage"
+        prior_directory.mkdir()
+        prior_source = prior_directory / "lz4_compress.c"
+        prior_source.write_bytes((linux / LZ4_SOURCE).read_bytes().replace(LZ4_BEFORE, LZ4_AFTER, 1))
+        require(git_blob(prior_source.read_bytes()) == LZ4_FIRST_POSTIMAGE,
+                "prior failed stage postimage mismatch")
+        prior_header = prior_directory / "lz4defs.h"
+        prior_header.write_bytes((linux / "lib/lz4/lz4defs.h").read_bytes())
+        require(git_blob(prior_header.read_bytes()) == ORIGINAL["lib/lz4/lz4defs.h"],
+                "prior failed stage header mismatch")
+        prior_object = workspace / "prior-lz4-compress.o"
+        state["stage"] = "compile-prior-staged-control"
+        compile_object(compiler, "-std=gnu11", prior_source, prior_object,
+                       ["-I", str(shim), "-DCONFIG_64BIT=1"], original=True)
+        actual, _ = invoke("prior-staged-control", prior_object)
+        retain_private(evidence, "clang-prior-staged-control.stderr", actual.stderr)
+        failure = runtime_failure(actual, None)
+        state["prior_staged_control_observed"] = failure
+        require(failure is not None and failure["kind"] == "sanitizer" and
+                failure["sanitizer"] == "UBSan" and failure["category"] == "addition of unsigned offset" and
+                failure["location"] == "lz4_compress.c:297:9" and failure["exit"] == 1,
+                "prior staged Clang control did not reproduce exact second error")
+        state["prior_staged_control"] = failure
+        print("PASS clang prior staged control reproduced UBSan lz4_compress.c:297:9 exit=1 (prior stage FAIL)", file=sys.stderr)
         return
     if failure is not None or actual.stdout:
         state["first_error"] = failure or {"kind": "unexpected_corpus_stdout", "exit": actual.returncode}
@@ -577,7 +620,7 @@ def main() -> int:
                 workspace = Path(temporary) / name
                 workspace.mkdir()
                 execute(compiler, linux, workspace, helpers, results[name], evidence, staged_source)
-        report["status"] = "PASS_STAGED_HOST_ONLY_PRISTINE_CLANG_FAIL"
+        report["status"] = "PASS_STAGED_HOST_ONLY_PRISTINE_AND_PRIOR_STAGE_CLANG_FAIL"
         return 0
     except (RuntimeError, OSError, ValueError, subprocess.TimeoutExpired) as error:
         state = results[active] if active else None

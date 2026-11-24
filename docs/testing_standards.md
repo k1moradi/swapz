@@ -20387,3 +20387,23 @@ Require exact main SHA/event parent, clean tracked/untracked tree, canonical pol
 Retire automatic historical VM execution only where the boot lane can be separated without losing its independent host/source checks. Keep the original full manual workflow body and route its former push paths (including self, and companion self) to byte-identical non-VM jobs; preserve branch/path filters, dependencies, permissions, exact source checks and mandatory project-goals. Archive the former push-only ticket QEMU definition byte-for-byte while retaining its exact-source non-VM stage and diagnostic regression on push. No new VM dispatch, cancellation, bypass or synthetic native PASS; report inseparable mixed lanes explicitly. Verify routing on actual workflow blobs, including peer additions at the fresh parent, with positive source-path witnesses, negative trigger/job/archive mutations and migration no-VM census. Do not claim a skipped native result as qualified.
 
 The physical probe's unsupported plain development-only mode must fail before build, inspection, claim or module preparation; preserve the existing late loaded-RAM guard. Test refusal with all side-effect boundaries mocked forbidden and test artifact mismatch on the still-gated real-swap development route. Standalone real-swap development admission runs its own single narrow fresh fast_test (fast-mixed, REPEAT=1, RESUME=1), or reuses only the exact private current-source RAM-evidence/nonce pair produced by the official runner; no stale report substitution or redundant broad test. Ordinary development smoke is not original compressed transfer or production qualification. Require exact owner-approved physical identity, current clean source and artifacts, intact SWAPSPACE2 page zero/UUID/table, bounded workload and headroom, normal swapoff, attributable byte readback and owned rollback. Existing ordinary workload requires zswap disabled; do not use it to qualify natural zswap eviction or authentic original typed streams. Future integrated physical qualification requires independent original-source/selected-DM authority, unchanged bytes without recompression, full-page CRC/SHA readback, generation and GC/decoder lifetime, real lower durability and exactly one upper ACK, with comparable baseline and scoped counters. No physical execution or gate activation in Round088.
+
+### Round088 Agent7 — second proven noDict pointer-index UB
+
+First staged source b9765d29081fa1c3a09ba0f071112528a0677738 failed
+Clang UBSan lz4_compress.c:297:9 (addition of unsigned offset), after
+pristine control reproduced 192:42; GCC 19/19 and 4098 byte-identical
+streams plus original decoder readback passed. Preserve both failures.
+In the dictionary-free catch-up condition refDelta is size_t zero;
+match[refDelta - 1] wraps the index. With match > lowLimit already
+required, use match[-1] only for noDict; do not change prefix/extDict.
+Exact prior stage a1d860d6085109bc01ed6a593cf369ccbd6edc67 and second
+postimage 63eb4be2e23caf770649af18f6a7b2b82d79a5e7 verified; two
+unique reversible hunks, five stage negatives, prior failed postimage
+actual Clang control added to reproduce the second first error. Keep
+strict sanitizer and warning flags, unchanged corpus, typed decoder,
+fixture and 19 semantic mutants. Local expression-only probe confirms
+Clang original exit1 and corrected GCC/Clang exit0, not qualification.
+A further actual failure is failure; no blind/unchanged reruns. Original
+checkout remains pristine; no upstream/production adoption, no new
+VM or physical work, AUTH0 Phase A BLOCKED all activation OFF.
