@@ -1,0 +1,104 @@
+{
+  "round": "082",
+  "agent": 10,
+  "status": "QUEUED",
+  "task_publication_commit": "9acefae6a1727123a218a7b728e44c7434f1eed2",
+  "tested_source_commit": "c17225972f890a4c5ab5eab0a1f5181af5fd62fa",
+  "tested_source_parent": "154d9014d1bf98e9eaabe1ac90d749b50892ce06",
+  "branch": "main",
+  "single_parent": true,
+  "nonforce": true,
+  "original_linux_pin": "c339f4010dea8b0d754f84ace70cd1b089878ef8",
+  "workflow_run_id": 45306150482,
+  "workflow_url": "https://github.com/k1moradi/swapz/actions/runs/45306150482",
+  "workflow_conclusion": null,
+  "jobs": [
+    {
+      "name": "original-reader-strict-source-host",
+      "id": 138150359078,
+      "status": "queued",
+      "conclusion": null,
+      "url": "https://github.com/k1moradi/swapz/actions/runs/45306150482/job/138150359078"
+    },
+    {
+      "name": "original-linux-uml-reader-pin-gc-kunit",
+      "id": null,
+      "status": "NOT_CREATED",
+      "conclusion": null
+    }
+  ],
+  "source_readback": {
+    "corrected_fixture_anchor_check": "PASS",
+    "targeted_anchor_negative_rejections": 5,
+    "full_actual_python_stage_executed": false,
+    "source_compiler_executed": false
+  },
+  "staging": {
+    "status": "PENDING_REAL_PINNED_CHECKOUT",
+    "planned_negative_cases": 12,
+    "actual_negative_cases": null,
+    "planned_postimages": 10,
+    "actual_postimages": null
+  },
+  "host": {
+    "status": "QUEUED",
+    "expected_independently_compiled_executed_mutants_per_compiler": 30,
+    "actual_gcc": null,
+    "actual_clang": null,
+    "prior_source_mutants_per_compiler": 28
+  },
+  "native": {
+    "status": "NOT_RUN",
+    "kernel_built": false,
+    "kernel_booted": false,
+    "isolated_cases_observed": 0,
+    "combined_cases_observed": 0,
+    "passed": null,
+    "failed": null,
+    "skipped": null,
+    "crashed": null,
+    "errors": null,
+    "actual_json_ktap": "NOT_GENERATED",
+    "combined_timeout_seconds": 120,
+    "isolated_timeout_seconds": 25,
+    "qualified_4_of_4": false
+  },
+  "previous_round080": {
+    "source": "4a4b339b960206cf598484432a84ede6f0e9c814",
+    "run": 45273186925,
+    "host_job": 138038046309,
+    "host_status": "SUCCESS",
+    "gcc_mutants": 28,
+    "clang_mutants": 28,
+    "native_job": 138042877345,
+    "native_status": "FAILURE_BEFORE_COMPILATION",
+    "native_cases_executed": 0,
+    "first_error": "ROUND073_READER_STAGE_FIRST_ERROR original-reader-late-lease-must-release-before-closer-join"
+  },
+  "previous_isolated": {
+    "source": "7f3808379eca67a26e9c7b392632b3f0b738bc57",
+    "run": 45262491414,
+    "stale_integrity": "PASS",
+    "retirement": "FAIL",
+    "first_error": "closer_drain_stalled active=0 phase=10"
+  },
+  "previous_round079": {
+    "source": "14e8f8f18566e584d9640482b3437929e5da041c",
+    "run": 45236328888,
+    "native_status": "FAILURE_TIMEOUT",
+    "passed": 2,
+    "crashed_missing_results": 2
+  },
+  "first_error": null,
+  "conclusion": "PENDING_GENUINE_NATIVE",
+  "source_mapped_authenticated": 0,
+  "phase_a": "BLOCKED",
+  "direct_handoff": "DISABLED",
+  "forced_raw_bypass": "DISABLED",
+  "import_active": 0,
+  "ordinary_raw_4096": "COMPLETE_ORIGINAL_UNCOMPRESSED_4096",
+  "production_code_changed": false,
+  "physical_testing": false,
+  "privileged_testing": false,
+  "periodic_monitoring": false
+}
