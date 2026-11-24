@@ -4,6 +4,7 @@ import json
 import os
 from pathlib import Path
 import re
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -20,7 +21,11 @@ PINS = {
     "src/kernel/engine.c": "20e91329fc1a1b713cb6638236c001e7d5e3f815",
     "src/kernel/dm-target.c": "f1cab252cd990190646c82da81378d1563475826",
     "src/kernel/zswap-import-codec.h": "0d888fe4c74115ab2388f1df1dc0b86ae4b9b6c6",
-    "src/kernel/Makefile": "ed6e19ae28a84a4a3e92117812adc445d5c2e8e5"
+    "src/kernel/Makefile": "ed6e19ae28a84a4a3e92117812adc445d5c2e8e5",
+    "src/kernel/zswap-original-extent.c": "c6c5af281a636447126e1a8b67484d954158a300",
+    "src/kernel/zswap-original-extent.h": "34572d01fffe1b276c2d023822266eda29a2137e",
+    "tests/runtime/native/fixtures/round084-original-extent.c": "473389e30b193626d8c33dba1cf1aad4c738fd8a",
+    "tests/runtime/native/repository-policy-test.py": "b200e0ca3e20d4c1f37e350ac9ef1c6426179817",
 }
 MUTANTS = [
     [
@@ -144,13 +149,26 @@ MUTANTS = [
         "record->logical_page + 1U)\n\t\t\t\treturn -EUCLEAN;"
     ]
 ]
-PREFIX = "ROUND084_AGENT5_FIRST_ERROR"
-REPORT = {"compilers": {}, "first_error": None, "source_mapped_authenticated": 0,
+PREFIX = "ROUND086_AGENT5_FIRST_ERROR"
+SHA = re.compile(r"[0-9a-f]{40}\Z")
+POLICY = ROOT / "tests/runtime/native/repository-policy-test.py"
+REPORT = {"compilers": {}, "preflight": {}, "first_error": None,
+          "source_mapped_authenticated": 0,
           "phase_a": "BLOCKED", "import_active": 0, "native": "NOT_RUN"}
 
+def git_bytes(*args):
+    try:
+        result = subprocess.run(["git", "--no-replace-objects", *args], cwd=ROOT,
+                                stdout=subprocess.PIPE, stderr=subprocess.DEVNULL,
+                                timeout=20, check=False)
+    except (OSError, subprocess.TimeoutExpired):
+        raise RuntimeError("Git metadata unavailable: " + args[0]) from None
+    require(result.returncode == 0, "Git metadata command failed: " + args[0])
+    return result.stdout
+
+
 def git(*args):
-    return subprocess.check_output(["git", *args], cwd=ROOT,
-                                   stderr=subprocess.PIPE, timeout=20).decode().strip()
+    return git_bytes(*args).decode().strip()
 
 def require(condition, message):
     if not condition:
@@ -174,27 +192,98 @@ def compile_and_run(compiler, standard, source, binary, name):
         raise RuntimeError(f"{compiler}/{name}: compile: {diagnostic[:240]}")
     return run([str(binary)])
 
-def main():
+def validate_push_base(environment, parent):
+    """Require the real event's before SHA, never derive a replacement."""
+    before = environment.get("SWAPZ_PUSH_BEFORE_SHA", "")
+    require(SHA.fullmatch(before) is not None and before != "0" * 40,
+            "push base SHA unavailable or invalid")
+    require(before == parent, "push base SHA differs from exact first parent")
+    require(git("rev-parse", "--verify", before + "^{commit}") == before,
+            "push base commit unavailable")
+    return before
+
+
+def check_event_base_regressions(environment, checked_out, parent):
+    # Exercise the same production preflight check against real checkout
+    # metadata, with copied environments. No mutation of the live push env.
+    ancestor = git("rev-parse", "--verify", parent + "^1^{commit}")
+    cases = (
+        ("missing", None, "push base SHA unavailable or invalid"),
+        ("malformed", "not-a-sha", "push base SHA unavailable or invalid"),
+        ("zero", "0" * 40, "push base SHA unavailable or invalid"),
+        ("self", checked_out, "push base SHA differs from exact first parent"),
+        ("older_ancestor", ancestor, "push base SHA differs from exact first parent"),
+    )
+    results = REPORT["preflight"]["event_base_regressions"] = {}
+    for name, value, expected in cases:
+        modified = environment.copy()
+        if value is None:
+            modified.pop("SWAPZ_PUSH_BEFORE_SHA", None)
+        else:
+            modified["SWAPZ_PUSH_BEFORE_SHA"] = value
+        try:
+            validate_push_base(modified, parent)
+        except RuntimeError as error:
+            require(str(error) == expected, "wrong preflight rejection: " + name)
+        else:
+            raise RuntimeError("preflight accepted invalid event base: " + name)
+        results[name] = "REJECTED"
+    require(validate_push_base(environment, parent) == parent,
+            "valid event base rejected")
+    results["exact_valid"] = "ACCEPTED"
+
+
+def preflight():
     sha = git("rev-parse", "HEAD")
     REPORT["tested_commit"] = sha
-    require(sha == os.environ.get("GITHUB_SHA", sha), "exact SHA")
+    require(SHA.fullmatch(sha) is not None and sha == os.environ.get("GITHUB_SHA"),
+            "exact GITHUB_SHA mismatch or missing")
+    require(os.environ.get("GITHUB_EVENT_NAME") == "push" and
+            os.environ.get("GITHUB_REF") == "refs/heads/main" and
+            git("symbolic-ref", "--quiet", "--short", "HEAD") == "main",
+            "not an exact main push checkout")
+    require(git("rev-parse", "--is-shallow-repository") == "false",
+            "full checkout history required")
     require(not git("status", "--porcelain", "--untracked-files=all"), "dirty checkout")
     raw = git("cat-file", "-p", "HEAD").split("\n\n", 1)[0]
     parents = [line[7:] for line in raw.splitlines() if line.startswith("parent ")]
-    require(len(parents) == 1 and git("rev-parse", "HEAD^") == parents[0],
+    require(len(parents) == 1 and SHA.fullmatch(parents[0]) is not None and
+            git("rev-parse", "--verify", "HEAD^1^{commit}") == parents[0],
             "single parent unavailable/mismatch")
-    REPORT["parent"] = parents[0]
-    require(not git("diff", "--check", "HEAD^", "HEAD", "--"), "diff whitespace")
+    parent = parents[0]
+    REPORT["parent"] = parent
+    before = validate_push_base(os.environ, parent)
+    REPORT["push_before_sha"] = before
+    git("merge-base", "--is-ancestor", before, sha)
+    require(not git("diff", "--check", before, sha, "--"), "diff whitespace")
     for path, expected in PINS.items():
         require(git("hash-object", path) == expected, "pinned blob mismatch " + path)
     REPORT["source_blobs"] = PINS | {
         str(p.relative_to(ROOT)): git("hash-object", str(p.relative_to(ROOT)))
         for p in (SOURCE, SOURCE.with_suffix(".h"), FIXTURE, Path(__file__).resolve())}
-    before = subprocess.check_output(["git", "show", "HEAD^:docs/testing_standards.md"], cwd=ROOT)
+    before_standard = git_bytes("show", before + ":docs/testing_standards.md")
     after = (ROOT / "docs/testing_standards.md").read_bytes()
-    require(after.startswith(before) and len(after) > len(before), "standards not append-only")
+    require(after.startswith(before_standard) and len(after) > len(before_standard),
+            "standards not append-only")
+    check_event_base_regressions(os.environ, sha, parent)
+    # Use the unchanged canonical policy with the untouched real event env.
+    policy = subprocess.run([sys.executable, "-B", str(POLICY), "--enforce"],
+                            cwd=ROOT, capture_output=True, text=True,
+                            timeout=90, check=False)
+    if policy.returncode:
+        first = next((line for line in policy.stderr.splitlines()
+                      if line.startswith("SOURCE_CONTRACT_MISMATCH:") and
+                      "first_error=" in line), "canonical repository policy failed")
+        raise RuntimeError(first[:320])
+    REPORT["preflight"]["canonical_policy"] = "PASS"
+    for tool in ("gcc", "clang"):
+        require(shutil.which(tool) is not None, "missing compiler: " + tool)
+
+
+def main():
+    preflight()
     original = SOURCE.read_text()
-    require(len(MUTANTS) >= 16 and len({m[0] for m in MUTANTS}) == len(MUTANTS),
+    require(len(MUTANTS) == 24 and len({m[0] for m in MUTANTS}) == len(MUTANTS),
             "mutation identities")
     for name, old, new in MUTANTS:
         require(original.count(old) == 1 and old != new, "mutation anchor " + name)
@@ -202,6 +291,10 @@ def main():
     first = MUTANTS[0][1]
     require(original.replace(first, "").count(first) == 0, "missing anchor negative")
     require((original + first).count(first) == 2, "duplicate anchor negative")
+    REPORT["preflight"]["mutation_anchors"] = len(MUTANTS)
+    REPORT["preflight"]["status"] = "PASS"
+    print("PASS ROUND086_AGENT5 preflight event_base=5 rejected + 1 accepted "
+          "canonical_policy=PASS mutation_anchors=24", flush=True)
     with tempfile.TemporaryDirectory(prefix="swapz-original-extent-") as work:
         work = Path(work)
         mutant = work / SOURCE.name
@@ -229,14 +322,26 @@ def main():
     require(not git("status", "--porcelain", "--untracked-files=all"), "test modified checkout")
 
 if __name__ == "__main__":
+    os.umask(0o077)
+    exit_code = 0
     try:
         main()
-    except (RuntimeError, OSError, subprocess.SubprocessError) as error:
+    except RuntimeError as error:
         REPORT["first_error"] = str(error)[:500]
-        print(f"{PREFIX} {REPORT['first_error']}", file=sys.stderr)
-        sys.exit_code = 1
-    else:
-        sys.exit_code = 0
+        exit_code = 1
+    except (OSError, subprocess.SubprocessError, UnicodeError):
+        # No child command, runner pathname, or raw stderr in preflight output.
+        REPORT["first_error"] = "required preflight/test operation unavailable"
+        exit_code = 1
     finally:
+        if exit_code:
+            if REPORT["preflight"].get("status") != "PASS":
+                REPORT["preflight"]["status"] = "FAIL"
+            print(f"{PREFIX} {REPORT['first_error']}", file=sys.stderr)
+            print("Corrective action: inspect exact push metadata and source pins "
+                  "or the named failing host case; publish a focused source fix "
+                  "on main, never bypass policy or rerun unchanged failure.",
+                  file=sys.stderr)
+        REPORT["conclusion"] = "FAIL" if exit_code else "PASS"
         Path(sys.argv[1]).write_text(json.dumps(REPORT, indent=2) + "\n")
-    raise SystemExit(sys.exit_code)
+    raise SystemExit(exit_code)

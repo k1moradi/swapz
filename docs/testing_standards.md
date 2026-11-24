@@ -20198,3 +20198,29 @@ Source authentication remains zero; Phase A remains BLOCKED. Direct handoff,
 forced RAW bypass and import remain OFF. Original Linux MM/zswap alone owns
 compressed RAM and natural eviction; swapz owns disk packing and GC only.
 Ordinary RAW_4096 is the full original uncompressed 4096-byte page.
+
+## Round086 Agent5 — exact push-base preflight repair for original extents
+
+Keep the R084 failed source and its zero compiler executions recorded; do
+not retroactively qualify it. The focused extent workflow must pass the
+actual github.event.before as SWAPZ_PUSH_BEFORE_SHA, check out the exact
+main push with full necessary history and require the nonzero 40-hex
+event base to equal the sole actual first parent. Never substitute HEAD^
+for a missing/invalid event base, bypass the canonical policy or qualify
+another SHA. Verify clean tracked/untracked tree, exact SHA/ref/event,
+first-parent ancestry, diff whitespace, pinned actual extent/ordinary
+sources and fixture/policy blobs, append-only standards, and the unchanged
+repository-policy-test.py --enforce with the original environment before
+any compilation. Execute the same event-base guard on copied environments
+for missing, malformed, zero, self and older real ancestor bases, plus
+the exact accepted event base. Fail closed on any unexpected result.
+Retain a private bounded JSON and actionable first-cause console diagnostic
+even if preflight fails; do not expose child Git stderr, paths or secrets.
+Require all original 24 distinct mutation anchors, actual GCC C2x and Clang
+C23 baseline and 24 independently compiled and executed explicit semantic
+kills each under Werror ASan/UBSan. No compiler failure or sanitizer crash
+counts as a kill. Preserve old ordinary 3568-byte limit, exact 20-byte map,
+original separate typed 3568/4095 geometry, all source bytes and disabled
+Kbuild/activation. One focused automatic run, no unchanged failure rerun,
+no native/physical tests; report actual exact-SHA push census. AUTH0,
+Phase A BLOCKED, direct compressed handoff, forced RAW and import OFF.
