@@ -1,0 +1,69 @@
+{
+  "round": "082",
+  "agent": 11,
+  "kind": "PINNED_ACTUAL_DM_SOURCE_LINKED_HOST_MODEL_ONLY",
+  "assignment_sha": "9acefae6a1727123a218a7b728e44c7434f1eed2",
+  "assignment_parent": "b03ad475cb90a0f0670d35610628832b62b7e70b",
+  "tested_source_commit": "eab4a609a1655820fe28975c8b5e210d86b1463b",
+  "tested_source_parent": "28fd042a0ed2090db463c93ac788f8e20ef08511",
+  "conclusion": "QUEUED",
+  "github_actions_run_id": 45305867882,
+  "github_actions_job_id": 138149441824,
+  "github_actions_run_url": "https://github.com/k1moradi/swapz/actions/runs/45305867882",
+  "github_actions_job_url": "https://github.com/k1moradi/swapz/actions/runs/45305867882/job/138149441824",
+  "first_error": null,
+  "original_linux_commit": "c339f4010dea8b0d754f84ace70cd1b089878ef8",
+  "original_linux_dm_blob": "1881d86111fb2e655893ad898cf21b88f0e4e7f3",
+  "original_linux_device_mapper_header_blob": "cd4faaf5d4275c038d06ccef4da3d77430154388",
+  "product_dm_target_blob": "f1cab252cd990190646c82da81378d1563475826",
+  "fixture_blob": "1029d86297ca7564255709b09fb93e46d28453d8",
+  "verifier_blob": "1103a7d422b62ce1a9c749e5ab89910926dd88bb",
+  "workflow_blob": "33d51aa2bab95fe36dde332c0d6c1d6eb64810d8",
+  "prepublication_connector_preflight": {
+    "complete_source_bytes_git_sha1_recomputed": "PASS",
+    "original_and_product_lifecycle_anchors": "PASS",
+    "target_initializer_positive": "PASS",
+    "target_initializer_negative_checks_equivalent_js": 6,
+    "mutant_anchors_unique": 24,
+    "expanded_c_fixture_blob": "c5f5908ac9e056f7417dabab719a3964789a37e3",
+    "python_exact_source_preflight": "PENDING_CI",
+    "python_negative_checks_expected": 7,
+    "local_compilers": "NOT_RUN_THIS_ROUND",
+    "local_git_diff_check": "NOT_RUN_NO_LOCAL_CHECKOUT",
+    "candidate_added_whitespace_screen": "PASS",
+    "remote_single_parent_verified": true,
+    "shared_standards_append_only_verified": true
+  },
+  "remote_compilers": {
+    "gcc": {
+      "baseline": "PENDING",
+      "mutants_compiled_confirmed": 0,
+      "mutants_executed_confirmed": 0,
+      "target": 24
+    },
+    "clang": {
+      "baseline": "PENDING",
+      "mutants_compiled_confirmed": 0,
+      "mutants_executed_confirmed": 0,
+      "target": 24
+    }
+  },
+  "historical_failure": {
+    "source": "10d3176e79742423174e69e648c505c374a264ed",
+    "run_id": 45293919114,
+    "job_id": 138109374984,
+    "conclusion": "failure",
+    "first_error": "ROUND081_AGENT11_FIRST_ERROR actual target features drift",
+    "remote_mutants_executed": 0
+  },
+  "production_queue_cap": "NOT_IMPLEMENTED_NO_GO",
+  "legal_queue_full_requeue": "NOT_PROVEN",
+  "native": "NOT_RUN",
+  "physical_durability": "NOT_PROVEN",
+  "actual_upper_ack": "NOT_PROVEN",
+  "source_mapped_authenticated": 0,
+  "phase_a": "BLOCKED",
+  "direct_handoff": "DISABLED",
+  "forced_raw_bypass": "DISABLED",
+  "import_active": 0
+}
