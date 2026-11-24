@@ -1,6 +1,6 @@
 # Round085 Agent9 — scoped historical CI trigger fan-out remediation
 
-**State:** ROOTLESS_TRIGGER_REGRESSION_PASS / exact migration GitHub CI not yet observed. No production or activation qualification.
+**State:** ROOTLESS_TRIGGER_REGRESSION_PASS; migration published and exact one-time automatic workflow registration VERIFIED 40/40. Remote qualification remains IN_PROGRESS. No production or activation qualification.
 
 ## Immutable scope
 
@@ -37,5 +37,7 @@ This reads the exact baseline and candidate git trees, validates recorded baseli
 
 ## Publication and safety
 
-Exact migration source SHA/parent and actual automatically registered GitHub runs will be recorded in an evidence-only follow-up. Do not qualify queued or failed runs. No need to rerun earlier jobs. No branches, PRs, force pushes, recurring checks, physical/privileged/loaded/swapon/pressure operations.
+**Exact migration commit:** [`a37d7c459ac0977836ddf5cfb40495a3ea13f375`](https://github.com/k1moradi/swapz/commit/a37d7c459ac0977836ddf5cfb40495a3ea13f375), verified single parent `9e3c770004418cbf622f5f3eb647ee79ef5fe735`. Post-publication GitHub compare confirms exactly 31 YAML files each 0 additions / 1 deletion, and the complete 82-file remote workflow directory blob census matches the tested candidates, including unedited project-goals and all R084 files. The other five files in that commit are the test, canonical standards, manifest and both reports. No product source changes.
+
+**Actual migration CI registration:** first observation 39 runs during registration; later one-time evidence census 40/40 exact expected workflow paths, no missing or unexpected paths. At that capture 25 queued, 13 in progress, 2 completed SUCCESS (historical imported-volatile-map and physical-evidence-rootless); no terminal failure observed. [Mandatory project-goals run 45408067512](https://github.com/k1moradi/swapz/actions/runs/45408067512), [repository-policy job 138494058468](https://github.com/k1moradi/swapz/actions/runs/45408067512/job/138494058468) QUEUED. The JSON includes all 40 run IDs/statuses and observed mandatory job IDs. These are automatic self-triggered migration checks, not additional dispatched work. Full remote CI remains pending, first remote error not observed; 10 per equivalent future source push remains a verified prediction, not a fresh future push observation. Evidence-only follow-up is expected to trigger four unfiltered workflows. Do not qualify queued or failed runs or rerun earlier jobs. No branches, PRs, force pushes, recurring checks, physical/privileged/loaded/swapon/pressure operations.
 SOURCE_MAPPED_AUTHENTICATED=0; PHASE_A=BLOCKED; DIRECT_COMPRESSED_HANDOFF=DISABLED; FORCED_RAW_BYPASS=DISABLED; IMPORT_ACTIVE=0. Linux MM/zswap owns compressed RAM and natural eviction only; swapz disk packing/GC only, no recompression of accepted original bytes. Ordinary RAW_4096 remains the full original uncompressed 4096-byte page.
