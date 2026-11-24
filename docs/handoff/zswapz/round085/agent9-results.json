@@ -6,7 +6,7 @@
   "inspected_baseline": "9e3c770004418cbf622f5f3eb647ee79ef5fe735",
   "tested_commit": "a37d7c459ac0977836ddf5cfb40495a3ea13f375",
   "tested_parent": "9e3c770004418cbf622f5f3eb647ee79ef5fe735",
-  "conclusion": "IN_PROGRESS",
+  "conclusion": "PASS_ROOTLESS_AND_REMOTE_MIGRATION",
   "rootless_result": "PASS_ROOTLESS_TRIGGER_CONTRACT",
   "rootless_execution": "actual V8 pure function on complete immutable connector-fetched snapshots",
   "local_git_tree_cli": "NOT_RUN_DNS_UNAVAILABLE",
@@ -41,8 +41,8 @@
     {
       "id": 45408067512,
       "path": ".github/workflows/project-goals.yml",
-      "status": "queued",
-      "conclusion": null,
+      "status": "completed",
+      "conclusion": "success",
       "head_sha": "a37d7c459ac0977836ddf5cfb40495a3ea13f375",
       "event": "push",
       "url": "https://github.com/k1moradi/swapz/actions/runs/45408067512"
@@ -50,8 +50,8 @@
     {
       "id": 45408067737,
       "path": ".github/workflows/phase-a-zswap-dm-async-read-gc.yml",
-      "status": "queued",
-      "conclusion": null,
+      "status": "completed",
+      "conclusion": "success",
       "head_sha": "a37d7c459ac0977836ddf5cfb40495a3ea13f375",
       "event": "push",
       "url": "https://github.com/k1moradi/swapz/actions/runs/45408067737"
@@ -59,8 +59,8 @@
     {
       "id": 45408067827,
       "path": ".github/workflows/phase-a-zswap-dm-two-phase-ledger.yml",
-      "status": "queued",
-      "conclusion": null,
+      "status": "completed",
+      "conclusion": "success",
       "head_sha": "a37d7c459ac0977836ddf5cfb40495a3ea13f375",
       "event": "push",
       "url": "https://github.com/k1moradi/swapz/actions/runs/45408067827"
@@ -68,8 +68,8 @@
     {
       "id": 45408067374,
       "path": ".github/workflows/phase-a-zswap-dm-real-ingress-observation.yml",
-      "status": "queued",
-      "conclusion": null,
+      "status": "completed",
+      "conclusion": "success",
       "head_sha": "a37d7c459ac0977836ddf5cfb40495a3ea13f375",
       "event": "push",
       "url": "https://github.com/k1moradi/swapz/actions/runs/45408067374"
@@ -77,8 +77,8 @@
     {
       "id": 45408067721,
       "path": ".github/workflows/phase-a-round069-original-bio-authority-joined-noauth.yml",
-      "status": "queued",
-      "conclusion": null,
+      "status": "completed",
+      "conclusion": "success",
       "head_sha": "a37d7c459ac0977836ddf5cfb40495a3ea13f375",
       "event": "push",
       "url": "https://github.com/k1moradi/swapz/actions/runs/45408067721"
@@ -86,8 +86,8 @@
     {
       "id": 45408067224,
       "path": ".github/workflows/phase-a-zswap-dm-same-slot-reissue.yml",
-      "status": "queued",
-      "conclusion": null,
+      "status": "completed",
+      "conclusion": "success",
       "head_sha": "a37d7c459ac0977836ddf5cfb40495a3ea13f375",
       "event": "push",
       "url": "https://github.com/k1moradi/swapz/actions/runs/45408067224"
@@ -95,8 +95,8 @@
     {
       "id": 45408067935,
       "path": ".github/workflows/phase-a-zswap-dm-async-lower-lifetime.yml",
-      "status": "queued",
-      "conclusion": null,
+      "status": "completed",
+      "conclusion": "success",
       "head_sha": "a37d7c459ac0977836ddf5cfb40495a3ea13f375",
       "event": "push",
       "url": "https://github.com/k1moradi/swapz/actions/runs/45408067935"
@@ -104,8 +104,8 @@
     {
       "id": 45408067748,
       "path": ".github/workflows/phase-a-round058-original-codec-read-noauth.yml",
-      "status": "queued",
-      "conclusion": null,
+      "status": "completed",
+      "conclusion": "success",
       "head_sha": "a37d7c459ac0977836ddf5cfb40495a3ea13f375",
       "event": "push",
       "url": "https://github.com/k1moradi/swapz/actions/runs/45408067748"
@@ -113,8 +113,8 @@
     {
       "id": 45408067600,
       "path": ".github/workflows/phase-a-round071-natural-pressure-cooperation-noauth.yml",
-      "status": "queued",
-      "conclusion": null,
+      "status": "completed",
+      "conclusion": "success",
       "head_sha": "a37d7c459ac0977836ddf5cfb40495a3ea13f375",
       "event": "push",
       "url": "https://github.com/k1moradi/swapz/actions/runs/45408067600"
@@ -122,8 +122,8 @@
     {
       "id": 45408067664,
       "path": ".github/workflows/phase-a-zswap-dm-real-lifetime-noauth.yml",
-      "status": "queued",
-      "conclusion": null,
+      "status": "completed",
+      "conclusion": "success",
       "head_sha": "a37d7c459ac0977836ddf5cfb40495a3ea13f375",
       "event": "push",
       "url": "https://github.com/k1moradi/swapz/actions/runs/45408067664"
@@ -131,8 +131,8 @@
     {
       "id": 45408067729,
       "path": ".github/workflows/phase-a-round063-original-mm-dm-carrier-noauth.yml",
-      "status": "queued",
-      "conclusion": null,
+      "status": "completed",
+      "conclusion": "success",
       "head_sha": "a37d7c459ac0977836ddf5cfb40495a3ea13f375",
       "event": "push",
       "url": "https://github.com/k1moradi/swapz/actions/runs/45408067729"
@@ -140,8 +140,8 @@
     {
       "id": 45408067786,
       "path": ".github/workflows/phase-a-round064-original-slot-current-target-noauth.yml",
-      "status": "queued",
-      "conclusion": null,
+      "status": "completed",
+      "conclusion": "success",
       "head_sha": "a37d7c459ac0977836ddf5cfb40495a3ea13f375",
       "event": "push",
       "url": "https://github.com/k1moradi/swapz/actions/runs/45408067786"
@@ -149,8 +149,8 @@
     {
       "id": 45408067603,
       "path": ".github/workflows/round056-codec-profile-noauth.yml",
-      "status": "queued",
-      "conclusion": null,
+      "status": "completed",
+      "conclusion": "success",
       "head_sha": "a37d7c459ac0977836ddf5cfb40495a3ea13f375",
       "event": "push",
       "url": "https://github.com/k1moradi/swapz/actions/runs/45408067603"
@@ -158,8 +158,8 @@
     {
       "id": 45408067427,
       "path": ".github/workflows/product-codec.yml",
-      "status": "queued",
-      "conclusion": null,
+      "status": "completed",
+      "conclusion": "success",
       "head_sha": "a37d7c459ac0977836ddf5cfb40495a3ea13f375",
       "event": "push",
       "url": "https://github.com/k1moradi/swapz/actions/runs/45408067427"
@@ -167,8 +167,8 @@
     {
       "id": 45408067851,
       "path": ".github/workflows/phase-a-round059-authority-import-lifetime-noauth.yml",
-      "status": "queued",
-      "conclusion": null,
+      "status": "completed",
+      "conclusion": "success",
       "head_sha": "a37d7c459ac0977836ddf5cfb40495a3ea13f375",
       "event": "push",
       "url": "https://github.com/k1moradi/swapz/actions/runs/45408067851"
@@ -176,8 +176,8 @@
     {
       "id": 45408067782,
       "path": ".github/workflows/phase-a-zswap-dm-chain-write-gc-read.yml",
-      "status": "queued",
-      "conclusion": null,
+      "status": "completed",
+      "conclusion": "success",
       "head_sha": "a37d7c459ac0977836ddf5cfb40495a3ea13f375",
       "event": "push",
       "url": "https://github.com/k1moradi/swapz/actions/runs/45408067782"
@@ -185,8 +185,8 @@
     {
       "id": 45408067890,
       "path": ".github/workflows/phase-a-zswap-round052-codec-interop-noauth.yml",
-      "status": "queued",
-      "conclusion": null,
+      "status": "completed",
+      "conclusion": "success",
       "head_sha": "a37d7c459ac0977836ddf5cfb40495a3ea13f375",
       "event": "push",
       "url": "https://github.com/k1moradi/swapz/actions/runs/45408067890"
@@ -194,8 +194,8 @@
     {
       "id": 45408067557,
       "path": ".github/workflows/phase-a-zswap-owned-lz4-lower-roundtrip.yml",
-      "status": "in_progress",
-      "conclusion": null,
+      "status": "completed",
+      "conclusion": "success",
       "head_sha": "a37d7c459ac0977836ddf5cfb40495a3ea13f375",
       "event": "push",
       "url": "https://github.com/k1moradi/swapz/actions/runs/45408067557"
@@ -203,8 +203,8 @@
     {
       "id": 45408067389,
       "path": ".github/workflows/kernel-debug.yml",
-      "status": "queued",
-      "conclusion": null,
+      "status": "completed",
+      "conclusion": "success",
       "head_sha": "a37d7c459ac0977836ddf5cfb40495a3ea13f375",
       "event": "push",
       "url": "https://github.com/k1moradi/swapz/actions/runs/45408067389"
@@ -212,8 +212,8 @@
     {
       "id": 45408067708,
       "path": ".github/workflows/phase-a-round074-original-owned-copy-lifetime-host-noauth.yml",
-      "status": "queued",
-      "conclusion": null,
+      "status": "completed",
+      "conclusion": "success",
       "head_sha": "a37d7c459ac0977836ddf5cfb40495a3ea13f375",
       "event": "push",
       "url": "https://github.com/k1moradi/swapz/actions/runs/45408067708"
@@ -221,8 +221,8 @@
     {
       "id": 45408067252,
       "path": ".github/workflows/phase-a-round056-original-lzo-codec-noauth.yml",
-      "status": "in_progress",
-      "conclusion": null,
+      "status": "completed",
+      "conclusion": "success",
       "head_sha": "a37d7c459ac0977836ddf5cfb40495a3ea13f375",
       "event": "push",
       "url": "https://github.com/k1moradi/swapz/actions/runs/45408067252"
@@ -230,8 +230,8 @@
     {
       "id": 45408067486,
       "path": ".github/workflows/systemd-package-readiness.yml",
-      "status": "queued",
-      "conclusion": null,
+      "status": "completed",
+      "conclusion": "success",
       "head_sha": "a37d7c459ac0977836ddf5cfb40495a3ea13f375",
       "event": "push",
       "url": "https://github.com/k1moradi/swapz/actions/runs/45408067486"
@@ -239,8 +239,8 @@
     {
       "id": 45408067693,
       "path": ".github/workflows/phase-a-zswap-round052-natural-pressure-scheduling.yml",
-      "status": "in_progress",
-      "conclusion": null,
+      "status": "completed",
+      "conclusion": "success",
       "head_sha": "a37d7c459ac0977836ddf5cfb40495a3ea13f375",
       "event": "push",
       "url": "https://github.com/k1moradi/swapz/actions/runs/45408067693"
@@ -248,8 +248,8 @@
     {
       "id": 45408067762,
       "path": ".github/workflows/phase-a-round057-transaction-product-noauth.yml",
-      "status": "queued",
-      "conclusion": null,
+      "status": "completed",
+      "conclusion": "success",
       "head_sha": "a37d7c459ac0977836ddf5cfb40495a3ea13f375",
       "event": "push",
       "url": "https://github.com/k1moradi/swapz/actions/runs/45408067762"
@@ -257,8 +257,8 @@
     {
       "id": 45408067566,
       "path": ".github/workflows/phase-a-round066-authority-import-owned-map-noauth.yml",
-      "status": "queued",
-      "conclusion": null,
+      "status": "completed",
+      "conclusion": "success",
       "head_sha": "a37d7c459ac0977836ddf5cfb40495a3ea13f375",
       "event": "push",
       "url": "https://github.com/k1moradi/swapz/actions/runs/45408067566"
@@ -266,8 +266,8 @@
     {
       "id": 45408067477,
       "path": ".github/workflows/phase-a-round077-original-codec-tag-cross-abi-noauth.yml",
-      "status": "queued",
-      "conclusion": null,
+      "status": "completed",
+      "conclusion": "success",
       "head_sha": "a37d7c459ac0977836ddf5cfb40495a3ea13f375",
       "event": "push",
       "url": "https://github.com/k1moradi/swapz/actions/runs/45408067477"
@@ -275,8 +275,8 @@
     {
       "id": 45408067361,
       "path": ".github/workflows/phase-a-round072-original-mm-bio-authority-decoder-noauth.yml",
-      "status": "in_progress",
-      "conclusion": null,
+      "status": "completed",
+      "conclusion": "success",
       "head_sha": "a37d7c459ac0977836ddf5cfb40495a3ea13f375",
       "event": "push",
       "url": "https://github.com/k1moradi/swapz/actions/runs/45408067361"
@@ -284,8 +284,8 @@
     {
       "id": 45408067346,
       "path": ".github/workflows/phase-a-round059-cross-suite-codec-host-noauth.yml",
-      "status": "in_progress",
-      "conclusion": null,
+      "status": "completed",
+      "conclusion": "success",
       "head_sha": "a37d7c459ac0977836ddf5cfb40495a3ea13f375",
       "event": "push",
       "url": "https://github.com/k1moradi/swapz/actions/runs/45408067346"
@@ -293,8 +293,8 @@
     {
       "id": 45408067439,
       "path": ".github/workflows/phase-a-round074-eviction-lease-copy-budget-host-noauth.yml",
-      "status": "in_progress",
-      "conclusion": null,
+      "status": "completed",
+      "conclusion": "success",
       "head_sha": "a37d7c459ac0977836ddf5cfb40495a3ea13f375",
       "event": "push",
       "url": "https://github.com/k1moradi/swapz/actions/runs/45408067439"
@@ -302,8 +302,8 @@
     {
       "id": 45408067608,
       "path": ".github/workflows/phase-a-round068-original-lower-bio-owned-noauth.yml",
-      "status": "in_progress",
-      "conclusion": null,
+      "status": "completed",
+      "conclusion": "success",
       "head_sha": "a37d7c459ac0977836ddf5cfb40495a3ea13f375",
       "event": "push",
       "url": "https://github.com/k1moradi/swapz/actions/runs/45408067608"
@@ -320,8 +320,8 @@
     {
       "id": 45408067948,
       "path": ".github/workflows/phase-a-zswap-dm-target-interval-negative.yml",
-      "status": "queued",
-      "conclusion": null,
+      "status": "completed",
+      "conclusion": "success",
       "head_sha": "a37d7c459ac0977836ddf5cfb40495a3ea13f375",
       "event": "push",
       "url": "https://github.com/k1moradi/swapz/actions/runs/45408067948"
@@ -329,8 +329,8 @@
     {
       "id": 45408067808,
       "path": ".github/workflows/phase-a-round058-dm-ingress-noauth.yml",
-      "status": "queued",
-      "conclusion": null,
+      "status": "completed",
+      "conclusion": "success",
       "head_sha": "a37d7c459ac0977836ddf5cfb40495a3ea13f375",
       "event": "push",
       "url": "https://github.com/k1moradi/swapz/actions/runs/45408067808"
@@ -338,8 +338,8 @@
     {
       "id": 45408067556,
       "path": ".github/workflows/phase-a-zswap-dm-original-table-gc-lifetime-noauth.yml",
-      "status": "in_progress",
-      "conclusion": null,
+      "status": "completed",
+      "conclusion": "success",
       "head_sha": "a37d7c459ac0977836ddf5cfb40495a3ea13f375",
       "event": "push",
       "url": "https://github.com/k1moradi/swapz/actions/runs/45408067556"
@@ -347,8 +347,8 @@
     {
       "id": 45408067736,
       "path": ".github/workflows/phase-a-round074-real-raw-fallback-source-noauth.yml",
-      "status": "in_progress",
-      "conclusion": null,
+      "status": "completed",
+      "conclusion": "success",
       "head_sha": "a37d7c459ac0977836ddf5cfb40495a3ea13f375",
       "event": "push",
       "url": "https://github.com/k1moradi/swapz/actions/runs/45408067736"
@@ -356,8 +356,8 @@
     {
       "id": 45408067538,
       "path": ".github/workflows/phase-a-round060-authority-conversion-noauth.yml",
-      "status": "in_progress",
-      "conclusion": null,
+      "status": "completed",
+      "conclusion": "success",
       "head_sha": "a37d7c459ac0977836ddf5cfb40495a3ea13f375",
       "event": "push",
       "url": "https://github.com/k1moradi/swapz/actions/runs/45408067538"
@@ -365,8 +365,8 @@
     {
       "id": 45408067611,
       "path": ".github/workflows/phase-a-round060-original-decoder-gpl-noauth.yml",
-      "status": "in_progress",
-      "conclusion": null,
+      "status": "completed",
+      "conclusion": "success",
       "head_sha": "a37d7c459ac0977836ddf5cfb40495a3ea13f375",
       "event": "push",
       "url": "https://github.com/k1moradi/swapz/actions/runs/45408067611"
@@ -374,8 +374,8 @@
     {
       "id": 45408067585,
       "path": ".github/workflows/phase-a-round067-import-disk-payload-read-noauth.yml",
-      "status": "in_progress",
-      "conclusion": null,
+      "status": "completed",
+      "conclusion": "success",
       "head_sha": "a37d7c459ac0977836ddf5cfb40495a3ea13f375",
       "event": "push",
       "url": "https://github.com/k1moradi/swapz/actions/runs/45408067585"
@@ -392,8 +392,8 @@
     {
       "id": 45408067733,
       "path": ".github/workflows/phase-a-round072-original-codec-tag-vs-raw-noauth.yml",
-      "status": "in_progress",
-      "conclusion": null,
+      "status": "completed",
+      "conclusion": "success",
       "head_sha": "a37d7c459ac0977836ddf5cfb40495a3ea13f375",
       "event": "push",
       "url": "https://github.com/k1moradi/swapz/actions/runs/45408067733"
@@ -415,9 +415,10 @@
   "import_active": 0,
   "ordinary_raw_4096": "FULL_ORIGINAL_UNCOMPRESSED_PAGE",
   "actual_migration_status_counts": {
-    "queued": 25,
-    "in_progress": 13,
-    "completed": 2
+    "queued": 0,
+    "in_progress": 0,
+    "completed": 40,
+    "success": 40
   },
   "all_remote_workflow_blobs_match": true,
   "actual_workflow_diff": {
@@ -436,39 +437,45 @@
     {
       "id": 138494058468,
       "name": "Repository policy a37d7c459ac0977836ddf5cfb40495a3ea13f375",
-      "status": "queued",
-      "conclusion": null
+      "status": "completed",
+      "conclusion": "success"
     },
     {
       "id": 138494058804,
       "name": "Rootless source-contract a37d7c459ac0977836ddf5cfb40495a3ea13f375",
-      "status": "queued",
-      "conclusion": null
+      "status": "completed",
+      "conclusion": "success"
     },
     {
       "id": 138494058830,
       "name": "Rootless primary-lifecycle-audit a37d7c459ac0977836ddf5cfb40495a3ea13f375",
-      "status": "queued",
-      "conclusion": null
+      "status": "completed",
+      "conclusion": "success"
     },
     {
       "id": 138494058841,
       "name": "Rootless production-readiness a37d7c459ac0977836ddf5cfb40495a3ea13f375",
-      "status": "queued",
-      "conclusion": null
+      "status": "completed",
+      "conclusion": "success"
     },
     {
       "id": 138494058953,
       "name": "Native rootless a37d7c459ac0977836ddf5cfb40495a3ea13f375",
-      "status": "queued",
-      "conclusion": null
+      "status": "completed",
+      "conclusion": "success"
     },
     {
       "id": 138494059068,
       "name": "Make interface a37d7c459ac0977836ddf5cfb40495a3ea13f375",
-      "status": "queued",
-      "conclusion": null
+      "status": "completed",
+      "conclusion": "success"
+    },
+    {
+      "id": 138502130021,
+      "name": "Exact-SHA CI result",
+      "status": "completed",
+      "conclusion": "success"
     }
   ],
-  "remote_qualification": "PENDING"
+  "remote_qualification": "PASS"
 }

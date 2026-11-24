@@ -29,3 +29,7 @@ Local direct Git networking unavailable (DNS for github.com). Transferred exact 
 ## Pins and safety
 
 All pins and exact new fixture/tool blob IDs are in [agent10-results.json](agent10-results.json). Source and parent separately immutable. SOURCE_MAPPED_AUTHENTICATED=0, PHASE_A=BLOCKED, direct handoff/forced RAW/import OFF. Linux MM/zswap owns compressed RAM and natural eviction exclusively; swapz disk-only packing/GC, no competing reclaim or recompression. Ordinary RAW_4096 remains the complete original uncompressed 4096-byte page. Existing ordinary compressed max3568, exact20B map and protected SWAPSPACE2 unchanged. Independent retained decoder/actual carrier/DM claim, durable lower ACK remain unqualified. No privileged/physical/loaded swap/swapon/real pressure test; ephemeral CI dependency install only. No branches/PRs/force or peer changes. Next required evidence is terminal result of this same already queued source workflow, not another dispatch.
+
+
+## Agent1 terminal reconciliation
+Exact host 138449657616 and UML 138456732512 completed SUCCESS. GCC C2x 26/26, Clang C23 26/26, both baselines and ASan/UBSan pass. Actual stage negatives19/postimage 5e8964eb92c6d5ad479926a890ae1360e0fac2a6; native JSON/KTAP 5/5 actual zswap_compress, test-created XArray, no live store or selected DM. AUTH0, PhaseA BLOCKED.
