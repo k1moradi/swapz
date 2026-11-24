@@ -1,0 +1,67 @@
+{
+  "round": "084",
+  "agent": 5,
+  "kind": "disabled-reusable-original-extent-host",
+  "task_commit": "1f8b9b89006af6cd8ad895239a023772b694cc36",
+  "tested_commit": "1095acd05fff26c9da3941d62a12e179dcaeb808",
+  "source_parent": "1f8b9b89006af6cd8ad895239a023772b694cc36",
+  "inspected_source_commit": "1f8b9b89006af6cd8ad895239a023772b694cc36",
+  "source_blobs": {
+    "src/kernel/codec.h": "e89d316b9cf49f82df0b77648c1be1731607987d",
+    "src/kernel/codec.c": "d920dcaac6f2b7de1334d4133770bd649719c66d",
+    "src/kernel/authority.h": "3bb5bab5a5bdb2aa087f5793fc8b5e90d6636031",
+    "src/kernel/authority.c": "25bf2dbdc5a3af770d7027547a58254c1ba81265",
+    "src/kernel/engine.h": "0e505915fb2e1578b4c1cee36e32be8a30f3745f",
+    "src/kernel/engine.c": "20e91329fc1a1b713cb6638236c001e7d5e3f815",
+    "src/kernel/dm-target.c": "f1cab252cd990190646c82da81378d1563475826",
+    "src/kernel/zswap-import-codec.h": "0d888fe4c74115ab2388f1df1dc0b86ae4b9b6c6",
+    "src/kernel/Makefile": "ed6e19ae28a84a4a3e92117812adc445d5c2e8e5",
+    "src/kernel/zswap-original-extent.h": "34572d01fffe1b276c2d023822266eda29a2137e",
+    "src/kernel/zswap-original-extent.c": "c6c5af281a636447126e1a8b67484d954158a300",
+    "tests/runtime/native/fixtures/round084-original-extent.c": "473389e30b193626d8c33dba1cf1aad4c738fd8a",
+    "tests/tools/round084-original-extent-verify.py": "5d61e1a23324c84293533cb2458b4f7c42b512c5",
+    ".github/workflows/phase-a-round084-original-extent-host-noauth.yml": "955614afe00c36fa84d63ebbe584d52131bcd2ce",
+    "docs/testing_standards.md": "ee9a830224442d168027b9273e3395f7155389cc"
+  },
+  "original_linux_context": {
+    "commit": "c339f4010dea8b0d754f84ace70cd1b089878ef8",
+    "mm_zswap_blob": "ae19e301fced7e357a4c7587dfdd6abb890b9163",
+    "executed": false
+  },
+  "standards_parent_blob": "6ee53e08254f80c2f575ea70b3dab632824e3885",
+  "workflow_url": "https://github.com/k1moradi/swapz/actions/runs/45394799654",
+  "run_id": 45394799654,
+  "run_status": "queued",
+  "jobs": [
+    {
+      "id": 138447600617,
+      "status": "queued",
+      "conclusion": null,
+      "url": "https://github.com/k1moradi/swapz/actions/runs/45394799654/job/138447600617"
+    }
+  ],
+  "conclusion": "QUEUED",
+  "actual_compiler_results": null,
+  "planned_mutants_per_compiler": 24,
+  "actual_mutants_per_compiler": null,
+  "first_error": null,
+  "environment_first_error": "fatal: unable to access GitHub: Could not resolve host: github.com (local git ls-remote); recovered using GitHub connector; no local compiler execution",
+  "connector_recovered_error": "workflow-specific runs URL HTTP400 not allowed; repo head_sha runs query succeeded",
+  "automatic_other_push_workflows": 40,
+  "manual_dispatch": false,
+  "native": "NOT_RUN",
+  "ordinary_map_bytes": 20,
+  "ordinary_cap": 3568,
+  "original_caps": [
+    3568,
+    4095
+  ],
+  "descriptor_bytes_static": 24,
+  "actual_physical_io": false,
+  "normal_kbuild_wiring": false,
+  "source_mapped_authenticated": 0,
+  "phase_a": "BLOCKED",
+  "direct_compressed_handoff": "DISABLED",
+  "forced_raw_bypass": "DISABLED",
+  "import_active": 0
+}
