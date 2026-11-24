@@ -20124,3 +20124,27 @@ decoder/GC lifetime, real lower durable write then once-only upper ACK
 are prerequisites, not proven by test-created source. RAW_4096 is full
 ORIGINAL UNCOMPRESSED 4096 bytes. SOURCE_MAPPED_AUTHENTICATED=0,
 PHASE_A=BLOCKED and all activation OFF.
+
+## Round084 Agent5 — disabled typed original extent geometry
+
+Compile the actual new opt-in zswap-original-extent.c with the unchanged
+pinned codec.c (actual CRC32C and ordinary builder), strict GCC C2x and
+Clang C23, Werror ASan+UBSan, exact Git blob pins, clean full checkout,
+single-parent ancestry and append-only standards before compilation.
+Dedicated 4KiB original opaque offset0/zero suffix, segregated original-only
+4/8/16KiB descending offset/zero prefix, cap3568 or4095 independently of
+ordinary3568; exact span, record capacity64, duplicate, codec/version,
+dictionary-free decoded4096, CRC, overflow/overlap, deterministic padding,
+read range and failed-preflight immutability. Test length0/1/3568/3569/4095/
+4096, 64/65, exact mixed fits, crossing, 3277*5 and corrupted seal authority.
+Every semantic mutant (at least16 per compiler) must compile separately and
+execute, then return the fixture's explicit assertion failure, never count a
+compile failure or sanitizer crash. Record actual host sizeof and results;
+no native or physical testing. Arbitrary payload lengths are geometry only,
+not authentic original decoder validity. New helper test-opt-in ACTIVE0,
+no normal Kbuild wiring, ordinary map20B and ordinary cap3568 unchanged.
+No actual allocator, map publication, decoder lease, source or DM selection,
+lower durability or upper ACK in this component. Linux MM/zswap alone owns
+compressed RAM/natural eviction; swapz disk packing/GC only, no recompression
+of accepted original bytes. RAW_4096 is complete original uncompressed page.
+SOURCE_MAPPED_AUTHENTICATED=0, PHASE_A=BLOCKED, direct/forced RAW/import OFF.

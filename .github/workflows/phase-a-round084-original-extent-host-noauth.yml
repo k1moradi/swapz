@@ -1,0 +1,49 @@
+name: "Round084 original extent HOST ONLY NO_AUTH"
+on:
+  push:
+    branches: [main]
+    paths:
+      - "src/kernel/zswap-original-extent.h"
+      - "src/kernel/zswap-original-extent.c"
+      - "tests/runtime/native/fixtures/round084-original-extent.c"
+      - "tests/tools/round084-original-extent-verify.py"
+      - ".github/workflows/phase-a-round084-original-extent-host-noauth.yml"
+permissions:
+  contents: read
+jobs:
+  original-extent-host:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 2
+          persist-credentials: false
+      - name: Exact source preflight and repository policy
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          trap 'echo "::error::ROUND084_AGENT5_FIRST_ERROR preflight line=$LINENO" >&2' ERR
+          [[ "$GITHUB_REF" == refs/heads/main ]]
+          [[ "$(git rev-parse HEAD)" == "$GITHUB_SHA" ]]
+          [[ -z "$(git status --porcelain --untracked-files=all)" ]]
+          parent=$(git --no-replace-objects cat-file -p HEAD | awk 'BEGIN { header=1 } /^$/ { header=0 } header && /^parent / { print $2 }')
+          [[ "$parent" =~ ^[0-9a-f]{40}$ ]]
+          [[ "$(git rev-parse --verify 'HEAD^1^{commit}')" == "$parent" ]]
+          git diff --check HEAD^ HEAD --
+          command -v gcc clang python3
+          python3 -B tests/runtime/native/repository-policy-test.py --enforce
+      - name: Actual reusable extent and ordinary codec semantic qualification
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          umask 077
+          python3 -B tests/tools/round084-original-extent-verify.py "$RUNNER_TEMP/agent5-results.json"
+      - name: Preserve bounded host evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: round084-agent5-original-extent-host
+          path: ${{ runner.temp }}/agent5-results.json
+          if-no-files-found: warn
+          retention-days: 14
