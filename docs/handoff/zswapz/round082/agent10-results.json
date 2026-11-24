@@ -1,7 +1,7 @@
 {
   "round": "082",
   "agent": 10,
-  "status": "QUEUED",
+  "status": "SUCCESS",
   "task_publication_commit": "9acefae6a1727123a218a7b728e44c7434f1eed2",
   "tested_source_commit": "c17225972f890a4c5ab5eab0a1f5181af5fd62fa",
   "tested_source_parent": "154d9014d1bf98e9eaabe1ac90d749b50892ce06",
@@ -11,20 +11,21 @@
   "original_linux_pin": "c339f4010dea8b0d754f84ace70cd1b089878ef8",
   "workflow_run_id": 45306150482,
   "workflow_url": "https://github.com/k1moradi/swapz/actions/runs/45306150482",
-  "workflow_conclusion": null,
+  "workflow_conclusion": "success",
   "jobs": [
     {
       "name": "original-reader-strict-source-host",
       "id": 138150359078,
-      "status": "queued",
-      "conclusion": null,
+      "status": "completed",
+      "conclusion": "success",
       "url": "https://github.com/k1moradi/swapz/actions/runs/45306150482/job/138150359078"
     },
     {
       "name": "original-linux-uml-reader-pin-gc-kunit",
-      "id": null,
-      "status": "NOT_CREATED",
-      "conclusion": null
+      "id": 138156349671,
+      "status": "completed",
+      "conclusion": "success",
+      "url": "https://github.com/k1moradi/swapz/actions/runs/45306150482/job/138156349671"
     }
   ],
   "source_readback": {
@@ -34,34 +35,55 @@
     "source_compiler_executed": false
   },
   "staging": {
-    "status": "PENDING_REAL_PINNED_CHECKOUT",
+    "status": "PASS",
     "planned_negative_cases": 12,
-    "actual_negative_cases": null,
+    "actual_negative_cases": 12,
     "planned_postimages": 10,
-    "actual_postimages": null
+    "actual_postimages": 10,
+    "verified_postimages": 10,
+    "pristine_original_blobs": 2,
+    "product_blobs": 8,
+    "before_native_build": true,
+    "inherited_round069_negatives": 5
   },
   "host": {
-    "status": "QUEUED",
+    "status": "SUCCESS",
     "expected_independently_compiled_executed_mutants_per_compiler": 30,
-    "actual_gcc": null,
-    "actual_clang": null,
-    "prior_source_mutants_per_compiler": 28
+    "actual_gcc": 30,
+    "actual_clang": 30,
+    "prior_source_mutants_per_compiler": 28,
+    "baseline_scenarios_per_compiler": 16,
+    "mutants_per_compiler_breakdown": {
+      "original": 10,
+      "inherited_authority": 14,
+      "owner_lifetime": 2,
+      "actual_fixture_helper": 4
+    },
+    "forged_verdict_mutants_rejected": 10,
+    "original_delay_inline_compiled_executed": 2,
+    "missing_declaration_compile_negatives": 2
   },
   "native": {
-    "status": "NOT_RUN",
-    "kernel_built": false,
-    "kernel_booted": false,
-    "isolated_cases_observed": 0,
-    "combined_cases_observed": 0,
-    "passed": null,
-    "failed": null,
-    "skipped": null,
-    "crashed": null,
-    "errors": null,
-    "actual_json_ktap": "NOT_GENERATED",
+    "status": "SUCCESS",
+    "kernel_built": true,
+    "kernel_booted": true,
+    "isolated_cases_observed": 4,
+    "combined_cases_observed": 4,
+    "passed": 4,
+    "failed": 0,
+    "skipped": 0,
+    "crashed": 0,
+    "errors": 0,
+    "actual_json_ktap": "VERIFIED_BY_CI_ISOLATED_AND_COMBINED",
     "combined_timeout_seconds": 120,
     "isolated_timeout_seconds": 25,
-    "qualified_4_of_4": false
+    "qualified_4_of_4": true,
+    "isolated_passed_cases": [
+      "swapz_round073_original_lz4_old_reader_gc",
+      "swapz_round073_original_lzo1x_old_reader_gc",
+      "swapz_round073_original_stale_crc_sha_codec",
+      "swapz_round073_original_decoder_retire_with_pin"
+    ]
   },
   "previous_round080": {
     "source": "4a4b339b960206cf598484432a84ede6f0e9c814",
@@ -90,7 +112,7 @@
     "crashed_missing_results": 2
   },
   "first_error": null,
-  "conclusion": "PENDING_GENUINE_NATIVE",
+  "conclusion": "GENUINE_PINNED_ORIGINAL_NATIVE_4_OF_4_PASS_AUTH0",
   "source_mapped_authenticated": 0,
   "phase_a": "BLOCKED",
   "direct_handoff": "DISABLED",
@@ -100,5 +122,18 @@
   "production_code_changed": false,
   "physical_testing": false,
   "privileged_testing": false,
-  "periodic_monitoring": false
+  "periodic_monitoring": false,
+  "workflow_completed_at": "2026-11-24T02:00:49Z",
+  "workflow_attempt": 1,
+  "terminal_evidence": {
+    "job_logs_inspected": true,
+    "artifact_metadata_inspected": true,
+    "artifact_zip_independently_unpacked": false,
+    "artifact_id": 14881259593,
+    "artifact_url": "https://github.com/k1moradi/swapz/actions/runs/45306150482/artifacts/14881259593",
+    "artifact_size_bytes": 22036,
+    "artifact_digest": "sha256:71d68609dc0bb3d47caea9787e353bfac9736a1b3f7b394fe598d223c2626cd8",
+    "artifact_expires_at": "2026-12-08T02:00:45Z",
+    "duplicate_workflow": false
+  }
 }

@@ -1,6 +1,6 @@
 # Round082 Agent10 — original pinned UML decoder retirement and native stage contract
 
-**Status: new exact-source CI QUEUED. Original Linux native 4/4 NOT qualified.**
+**Status: exact-source CI SUCCESS. Original Linux native 4/4 qualified in the pinned test-only fixture; AUTH0, Phase A BLOCKED.**
 
 ## Source and prior results
 
@@ -24,12 +24,21 @@ One shared executable stage validator is invoked by native stage, host preflight
 
 The workflow will build the one pinned original UML binary only after strict host and actual staging pass. Individually boot the four exact cases with 25s limits and separate actual JSON/raw KTAP logs; then boot same binary for combined suite with unchanged 120s limit. Each isolated verifier requires one exact case and zero fail/skip/crash/errors; combined verifier requires exactly four distinct cases, 4 PASS and no failure/crash/skip/errors. Failure-only stage diagnostics and raw KTAP retained.
 
-## Actual new CI checkpoint
+## Historical queued CI checkpoint
 
 - [Exact-source run 45306150482](https://github.com/k1moradi/swapz/actions/runs/45306150482): QUEUED.
 - [Source-host job 138150359078](https://github.com/k1moradi/swapz/actions/runs/45306150482/job/138150359078): QUEUED.
 - Dependent original native job not created when checked. Actual staging/host/compiler/native tests not yet observed in this run. New first_error=null (pending), no native JSON/KTAP generated, native 4/4 **NOT QUALIFIED**.
 - Existing historical source failures remain failed. No duplicate dispatch, no periodic polling or new branch.
+
+## Terminal exact-source CI reconciliation (2026-11-24 UTC)
+
+- [Run 45306150482](https://github.com/k1moradi/swapz/actions/runs/45306150482) completed SUCCESS at 02:00:49Z, attempt 1, push on main, head `c17225972f890a4c5ab5eab0a1f5181af5fd62fa`, exact single parent `154d9014d1bf98e9eaabe1ac90d749b50892ce06` independently verified via Git data.
+- [Host job 138150359078](https://github.com/k1moradi/swapz/actions/runs/45306150482/job/138150359078) SUCCESS. Strict GCC and Clang C23 ASan/UBSan: each baseline 16 scenarios, 10 compiled/executed original C semantic mutants + 14 inherited real product authority + 2 owner lifetime + 4 actual fixture-helper semantic mutants = 30/30 per compiler (60 total). Native JSON/KTAP verifier rejected 10 forged verdicts. Pinned original delay GCC/Clang inline compiled/executed and both intended missing-declaration negatives passed; expected negative diagnostics are not CI failures. Canonical standards and sole-branch policy step passed.
+- [Native job 138156349671](https://github.com/k1moradi/swapz/actions/runs/45306150482/job/138156349671) SUCCESS. Actual pinned original staging before compilation logged `PASS ROUND073_READER_STAGE_PLAN negatives=12 pristine_original_blobs=2 product_blobs=8`, then 10 staged postimages and 10 verified original-native postimages. Inherited Round069 stage plan logged 5 negatives and no partial writes.
+- One pinned original Linux UML build and boot path succeeded. Each actual isolated JSON+KTAP verifier reported 1/1 PASS: `swapz_round073_original_lz4_old_reader_gc`, `swapz_round073_original_lzo1x_old_reader_gc`, `swapz_round073_original_stale_crc_sha_codec`, `swapz_round073_original_decoder_retire_with_pin`. Combined execution logged `ROUND073_ORIGINAL_LINUX_UML_BOOT_EXECUTED` and `PASS ROUND073_GENUINE_ORIGINAL_LINUX_PINNED_NATIVE_READER KUNIT_JSON_KTAP=4/4 original_LZO1X_LZ4_4096=YES native_GC_reader_pin=YES independent_decoder_drain=YES SWAPCACHE_AUTH=0 PHASE_A=BLOCKED`. Final marker at 02:00:45Z: `ROUND073_GENUINE_PINNED_ORIGINAL_NATIVE_READER_KUNIT_PASS 4/4 original codecs=2 GC pin + decoder close AUTH=0`.
+- Combined verifier required four distinct cases, four PASS, zero fail/skip/crash/errors; each isolated verifier required one exact passing case and no failures. No first CI error; all job steps succeeded. [Native evidence artifact 14881259593](https://github.com/k1moradi/swapz/actions/runs/45306150482/artifacts/14881259593) uploaded successfully, 22036 bytes, SHA256 `71d68609dc0bb3d47caea9787e353bfac9736a1b3f7b394fe598d223c2626cd8`, exact head confirmed, expires 2026-12-08. Raw job logs and artifact metadata inspected; ZIP contents not independently unpacked in this session.
+- Historical queued checkpoint above remains historical; historical failed runs remain FAILED. No source/workflow edits or duplicate dispatch. Exact-source native reader/GC/decoder retirement qualification is PASS, not source authentication or activation authorization. AUTH0, Phase A BLOCKED, every activation gate OFF. No Round083 work.
 
 ## Safety
 
