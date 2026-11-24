@@ -1,13 +1,6 @@
 name: Round069 genuine pinned original zswap STORED XArray and zsmalloc NO_AUTH
 on:
-  push:
-    branches: [main]
-    paths:
-      - '.github/workflows/phase-a-round069-original-zswap-stored-source-noauth.yml'
-      - 'tests/runtime/native/fixtures/round069-original-zswap-stored-source.cfrag'
-      - 'tests/tools/round069-stage-original-zswap-stored-source.py'
-      - 'tests/tools/round069-original-zswap-stored-source-verify.py'
-      - 'docs/handoff/zswapz/round069/agent3-evidence.md'
+  # Archived native lane; explicit dispatch only (owner physical-first).
   workflow_dispatch:
 permissions:
   contents: read

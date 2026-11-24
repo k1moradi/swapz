@@ -5107,6 +5107,13 @@ def run_probe(device_arg, confirm_arg, state_dir_arg, review_path,
         raise ProbeError("virtual-only mode requires development real-swap admission")
     if os.geteuid() != 0:
         raise ProbeError("run action requires root")
+    # The plain card smoke cannot satisfy the existing loaded-RAM gate.
+    # Refuse before a build, device inspection, ownership claim or module load.
+    if development_only and not algorithm_real_swap:
+        raise ProbeError(
+            "physical run requires current-source loaded RAM qualification; "
+            "phase=preflight mutation=not_started "
+            "safe_next_step=use_admitted_real_swap_development_route")
     start_timestamp = _utc_timestamp()
     if development_only:
         # Current trials are scoped to the selected ordinary swap partition.

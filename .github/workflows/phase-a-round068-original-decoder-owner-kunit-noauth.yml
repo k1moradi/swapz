@@ -1,14 +1,6 @@
 name: Round068 original pinned-kernel decoder-owner native KUnit NO_AUTH
 on:
-  push:
-    branches: [main]
-    paths:
-      - 'src/kernel/zswap-import-decoder-owner.c'
-      - 'src/kernel/zswap-import-decoder-owner.h'
-      - 'tests/runtime/native/fixtures/round068-original-decoder-owner-kunit.c'
-      - 'tests/tools/round068-original-decoder-owner-kunit-verify.py'
-      - 'tests/tools/round069-original-decoder-kconfig-verify.py'
-      - '.github/workflows/phase-a-round068-original-decoder-owner-kunit-noauth.yml'
+  # Archived native lane; explicit dispatch only (owner physical-first).
   workflow_dispatch:
 permissions:
   contents: read

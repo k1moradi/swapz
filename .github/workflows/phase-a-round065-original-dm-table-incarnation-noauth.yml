@@ -1,18 +1,6 @@
 name: Round066 pinned original full inherited DM table lineage and native lifetime NO_AUTH
 on:
-  push:
-    branches: [main]
-    paths:
-      - 'src/kernel/dm-target.c'
-      - '.github/workflows/phase-a-round065-original-dm-table-incarnation-noauth.yml'
-      - 'tests/runtime/native/fixtures/round065-original-table-*'
-      - 'tests/runtime/native/fixtures/round065-original-dm-core.cfrag'
-      - 'tests/tools/round065-stage-original-dm-table.py'
-      - 'tests/tools/round065-original-dm-table-incarnation-verify.py'
-      - 'tests/tools/round056-original-clone-stage.py'
-      - 'tests/tools/round058-original-stored-bio-chain.py'
-      - 'tests/tools/round066-stage-lineage-verify.py'
-      - 'docs/handoff/zswapz/round066/agent3-evidence.md'
+  # Archived native lane; explicit dispatch only (owner physical-first).
   workflow_dispatch:
 permissions:
   contents: read

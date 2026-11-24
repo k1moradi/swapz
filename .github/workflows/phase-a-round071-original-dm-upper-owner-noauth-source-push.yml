@@ -1,0 +1,47 @@
+name: "Round071 original DM upper BIO owner once-only NO_AUTH (automatic non-VM source)"
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/phase-a-round071-original-dm-upper-owner-noauth.yml'
+      - '.github/workflows/phase-a-round071-original-dm-upper-owner-noauth-source-push.yml'
+      - 'tests/runtime/native/fixtures/round071-original-dm-upper-owner.cfrag'
+      - 'tests/tools/round071-stage-original-dm-upper-owner.py'
+      - 'tests/tools/round071-original-dm-upper-owner-verify.py'
+      - 'tests/tools/round072-original-dm-selected-owner-verify.py'
+      - 'tests/tools/round074-original-dm-native-prototype-verify.py'
+      - 'docs/handoff/zswapz/round071/agent2-evidence.md'
+permissions:
+  contents: read
+jobs:
+  source-host:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Strict GCC Clang compiled executed C and semantic mutants
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
+          test "$(git branch --show-current)" = main
+          test -z "$(git status --porcelain)"
+          git diff --check HEAD^ HEAD
+          python3 -B tests/tools/round071-original-dm-upper-owner-verify.py
+          python3 -B tests/tools/round072-original-dm-selected-owner-verify.py
+          python3 -B tests/tools/round074-original-dm-native-prototype-verify.py
+          python3 -B - <<'PY'
+          import ast
+          from pathlib import Path
+          ast.parse(Path('tests/tools/round071-stage-original-dm-upper-owner.py').read_text())
+          ast.parse(Path('tests/tools/round072-original-dm-selected-owner-verify.py').read_text())
+          ast.parse(Path('tests/tools/round074-original-dm-native-prototype-verify.py').read_text())
+          print('ROUND071_AGENT2_STAGE_SYNTAX_PASS')
+          PY
+      - name: Retain all previous and concurrent testing standards
+        env:
+          SWAPZ_PUSH_BEFORE_SHA: ${{ github.event.before }}
+        run: python3 -B tests/runtime/native/repository-policy-test.py --enforce

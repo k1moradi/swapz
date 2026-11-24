@@ -1,13 +1,7 @@
 name: Round056 pinned original block BIO clone full-view lifetime C NO_AUTH
 
 on:
-  push:
-    branches: [main]
-    paths:
-      - '.github/workflows/phase-a-zswap-round056-original-clone-provenance.yml'
-      - 'tests/tools/round056-original-clone-stage.py'
-      - 'tests/tools/round056-original-clone-verify.py'
-      - 'tests/runtime/native/fixtures/round056-original-clone-*'
+  # Archived native lane; explicit dispatch only (owner physical-first).
   workflow_dispatch:
 
 permissions:

@@ -1,18 +1,6 @@
 name: Round064 staged original live slot route to current DM candidate NO_AUTH
 on:
-  push:
-    branches: [main]
-    paths:
-      - 'src/kernel/dm-target.c'
-      - 'tests/runtime/native/fixtures/round058-dm-ingress-*'
-      - 'tests/tools/round058-dm-ingress-*'
-      - '.github/workflows/phase-a-round064-original-slot-current-target-noauth.yml'
-      - 'tests/runtime/native/fixtures/round064-*'
-      - 'tests/tools/round064-original-slot-current-target-verify.py'
-      - 'tests/runtime/native/fixtures/round063-original-dm-owner-*'
-      - 'tests/tools/round063-original-dm-owner-verify.py'
-      - 'tests/tools/stage-pinned-linux-zswap-composed.py'
-      - 'docs/testing_standards.md'
+  # Archived native lane; explicit dispatch only (owner physical-first).
   workflow_dispatch:
 permissions:
   contents: read

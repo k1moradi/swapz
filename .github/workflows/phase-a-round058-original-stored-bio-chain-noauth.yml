@@ -1,17 +1,7 @@
 name: Round058 original pinned STORED BIO chain source-only NO_AUTH
 
 on:
-  push:
-    branches: [main]
-    paths:
-      - '.github/workflows/phase-a-round058-original-stored-bio-chain-noauth.yml'
-      - 'tests/tools/round058-original-stored-bio-chain.py'
-      - 'tests/tools/round059-original-source-lease-verify.py'
-      - 'tests/tools/round060-original-source-owner-verify.py'
-      - 'tests/runtime/native/fixtures/round058-original-stored-bio-*'
-      - 'tests/tools/round056-original-preerase-module.py'
-      - 'tests/tools/round056-original-preerase-verify.py'
-      - 'tests/tools/round056-original-clone-*'
+  # Archived native lane; explicit dispatch only (owner physical-first).
   workflow_dispatch:
 permissions:
   contents: read

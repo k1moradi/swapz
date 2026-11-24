@@ -1,13 +1,6 @@
 name: Round067 pinned native DM real suspend requeue replacement KUnit NO_AUTH
 on:
-  push:
-    branches: [main]
-    paths:
-      - '.github/workflows/phase-a-round067-original-dm-dispatch-runtime-noauth.yml'
-      - 'tests/runtime/native/fixtures/round067-original-dm-dispatch-runtime.cfrag'
-      - 'tests/tools/round067-stage-original-dm-dispatch-runtime.py'
-      - 'tests/tools/round067-original-dm-runtime-host-verify.py'
-      - 'docs/handoff/zswapz/round067/agent3-evidence.md'
+  # Archived native lane; explicit dispatch only (owner physical-first).
   workflow_dispatch:
 permissions:
   contents: read

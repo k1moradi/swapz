@@ -1,0 +1,56 @@
+name: "Round068 actual product lower callbacks and pinned native BIO KUnit NO_AUTH (automatic non-VM source)"
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'src/kernel/authority.c'
+      - 'src/kernel/authority.h'
+      - 'tests/runtime/native/fixtures/round068-original-lower-bio-owned.c'
+      - 'tests/runtime/native/fixtures/round068-original-lower-bio-owned.cfrag'
+      - 'tests/tools/round068-original-lower-bio-owned-verify.py'
+      - 'tests/tools/round068-stage-original-lower-bio.py'
+      - '.github/workflows/phase-a-round068-original-lower-bio-owned-noauth.yml'
+      - '.github/workflows/phase-a-round068-original-lower-bio-owned-noauth-source-push.yml'
+permissions:
+  contents: read
+jobs:
+  actual-authority-lower-callbacks-host:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    env:
+      SWAPZ_PUSH_BEFORE_SHA: ${{ github.event.before }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Exact sole main source and whitespace
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          test "$GITHUB_REF" = refs/heads/main
+          test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
+          test "$(git branch --show-current)" = main
+          test -z "$(git status --porcelain --untracked-files=all)"
+          git diff --check HEAD^ HEAD
+      - name: Disposable original LZO LZ4 and digest link dependencies
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          sudo apt-get update -qq
+          sudo DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
+            gcc clang liblzo2-dev liblz4-dev libssl-dev
+          test -f /usr/include/lzo/lzo1x.h
+      - name: Actual production authority GCC Clang ASan UBSan and 28 executed changed-C mutants
+        run: python3 -B tests/tools/round068-original-lower-bio-owned-verify.py
+      - name: Preserve true Round067 original compressed bytes and full read
+        run: python3 -B tests/tools/round067-import-disk-payload-read-verify.py
+      - name: Preserve actual Round066 allocator reader pins and GC
+        run: python3 -B tests/tools/round066-authority-import-owned-map-verify.py
+      - name: Preserve real Round059 dormant import refusal
+        run: python3 -B tests/tools/round059-authority-import-lifetime.py
+      - name: Preserve real Round057 ordinary uncompressed RAW
+        run: python3 -B tests/tools/round057-transaction-product.py
+      - name: Preserve entire prior and peer first-parent testing standards
+        run: python3 -B tests/runtime/native/repository-policy-test.py --enforce
+

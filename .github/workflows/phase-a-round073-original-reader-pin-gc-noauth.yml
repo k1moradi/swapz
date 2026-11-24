@@ -1,16 +1,6 @@
 name: Round073 pinned original reader pin GC retained decoder NO_AUTH
 on:
-  push:
-    branches: [main]
-    paths:
-      - 'tests/runtime/native/fixtures/round073-original-reader-pin-gc-kunit.cfrag'
-      - 'tests/tools/round073-stage-original-reader-pin-gc.py'
-      - 'tests/tools/round073-original-reader-pin-gc-verify.py'
-      - 'tests/tools/round077-original-reader-delay-compile-verify.py'
-      - 'tests/tools/round080-original-reader-late-lease-verify.py'
-      - '.github/workflows/phase-a-round073-original-reader-pin-gc-noauth.yml'
-      - 'src/kernel/authority.c'
-      - 'src/kernel/zswap-import-decoder-owner.c'
+  # Archived native lane; explicit dispatch only (owner physical-first).
   workflow_dispatch:
 permissions:
   contents: read

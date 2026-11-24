@@ -1,15 +1,6 @@
 name: Round071 original DM upper BIO owner once-only NO_AUTH
 on:
-  push:
-    branches: [main]
-    paths:
-      - '.github/workflows/phase-a-round071-original-dm-upper-owner-noauth.yml'
-      - 'tests/runtime/native/fixtures/round071-original-dm-upper-owner.cfrag'
-      - 'tests/tools/round071-stage-original-dm-upper-owner.py'
-      - 'tests/tools/round071-original-dm-upper-owner-verify.py'
-      - 'tests/tools/round072-original-dm-selected-owner-verify.py'
-      - 'tests/tools/round074-original-dm-native-prototype-verify.py'
-      - 'docs/handoff/zswapz/round071/agent2-evidence.md'
+  # Archived native lane; explicit dispatch only (owner physical-first).
   workflow_dispatch:
 permissions:
   contents: read

@@ -1,16 +1,6 @@
 name: Round072 one original MM BIO actual authority independent decoder joined NO_AUTH
 on:
-  push:
-    branches: [main]
-    paths:
-      - '.github/workflows/phase-a-round072-original-mm-bio-authority-decoder-noauth.yml'
-      - 'tests/runtime/native/fixtures/round072-original-mm-bio-authority-decoder-joined.cfrag'
-      - 'tests/tools/round072-stage-original-mm-bio-authority-decoder-joined.py'
-      - 'tests/tools/round072-original-mm-bio-authority-decoder-joined-verify.py'
-      - 'tests/tools/round075-original-stage-manifest-order-verify.py'
-      - 'docs/testing_standards.md'
-      - 'src/kernel/authority.c'
-      - 'src/kernel/zswap-import-decoder-owner.c'
+  # Archived native lane; explicit dispatch only (owner physical-first).
   workflow_dispatch:
 permissions:
   contents: read

@@ -1,0 +1,257 @@
+{
+  "round": 88,
+  "agent": 9,
+  "task": "dcb65dca9a3c2bd990aedb2829181d0c0e015ce2",
+  "expected_parent": "f654ebf552319a3bd6e6eef260de3fd005681ae8",
+  "tested_commit": null,
+  "conclusion": "IN_PROGRESS",
+  "first_error": null,
+  "rootless": {
+    "routing": {
+      "status": "PASS_ROOTLESS_VM_ROUTING",
+      "before_workflows": 87,
+      "after_workflows": 104,
+      "manual_full_preserved": 17,
+      "automatic_non_vm_jobs_preserved": 21,
+      "automatic_vm_jobs_retired": 18,
+      "source_path_witnesses": 611,
+      "negative_mutants": [
+        "restore-automatic-VM",
+        "lose-manual",
+        "mutate-archived-job",
+        "mutate-automatic-job",
+        "lose-source-path",
+        "lose-QEMU-stage-policy",
+        "change-QEMU-archive"
+      ],
+      "checks": 134162,
+      "scenarios": [
+        {
+          "name": "ordinary-DM",
+          "before": {
+            "workflows": 25,
+            "jobs": 52,
+            "vm_jobs": [
+              ".github/workflows/phase-a-round063-original-mm-dm-carrier-noauth.yml:native-original-71-round063",
+              ".github/workflows/phase-a-round064-original-slot-current-target-noauth.yml:native-original-71-round064",
+              ".github/workflows/phase-a-round065-original-dm-table-incarnation-noauth.yml:native-original-72-round065"
+            ]
+          },
+          "after": {
+            "workflows": 25,
+            "jobs": 49,
+            "vm_jobs": []
+          }
+        },
+        {
+          "name": "codec",
+          "before": {
+            "workflows": 22,
+            "jobs": 28,
+            "vm_jobs": [
+              ".github/workflows/phase-a-round086-original-ticket-kernel-noauth.yml:original-ticket-pinned-smp-qemu-tcg"
+            ]
+          },
+          "after": {
+            "workflows": 22,
+            "jobs": 28,
+            "vm_jobs": []
+          }
+        },
+        {
+          "name": "ticket",
+          "before": {
+            "workflows": 7,
+            "jobs": 13,
+            "vm_jobs": [
+              ".github/workflows/phase-a-round086-original-ticket-kernel-noauth.yml:original-ticket-pinned-smp-qemu-tcg"
+            ]
+          },
+          "after": {
+            "workflows": 7,
+            "jobs": 13,
+            "vm_jobs": []
+          }
+        },
+        {
+          "name": "authority",
+          "before": {
+            "workflows": 17,
+            "jobs": 27,
+            "vm_jobs": [
+              ".github/workflows/phase-a-round068-original-lower-bio-owned-noauth.yml:actual-original-pinned-linux-bio-kunit",
+              ".github/workflows/phase-a-round069-original-bio-authority-joined-noauth.yml:actual-original-pinned-Linux-joined-native-KUnit",
+              ".github/workflows/phase-a-round072-original-mm-bio-authority-decoder-noauth.yml:original-MM-BIO-authority-independent-decoder-native-KUnit",
+              ".github/workflows/phase-a-round073-original-reader-pin-gc-noauth.yml:original-linux-uml-reader-pin-gc-kunit"
+            ]
+          },
+          "after": {
+            "workflows": 17,
+            "jobs": 23,
+            "vm_jobs": []
+          }
+        },
+        {
+          "name": "original-composer",
+          "before": {
+            "workflows": 17,
+            "jobs": 36,
+            "vm_jobs": [
+              ".github/workflows/phase-a-round063-original-mm-dm-carrier-noauth.yml:native-original-71-round063",
+              ".github/workflows/phase-a-round064-original-slot-current-target-noauth.yml:native-original-71-round064",
+              ".github/workflows/phase-a-zswap-composed-source.yml:original-uml-11-kunit",
+              ".github/workflows/phase-a-zswap-original-bio-clone-copy.yml:original-uml-bio-clone-53",
+              ".github/workflows/phase-a-zswap-original-mm-async-lease-negative.yml:original-uml-async-lease-41",
+              ".github/workflows/phase-a-zswap-original-mm-lifetime-owner.yml:original-uml-route-31",
+              ".github/workflows/phase-a-zswap-original-mm-route-witness.yml:original-uml-route-21",
+              ".github/workflows/phase-a-zswap-original-route-lifetime.yml:original-uml-route-27",
+              ".github/workflows/phase-a-zswap-original-sector-domain.yml:original-uml-sector-domain-46",
+              ".github/workflows/phase-a-zswap-original-store-bio-provenance.yml:original-uml-store-36",
+              ".github/workflows/phase-a-zswap-original-stored-bio-source-scope.yml:original-uml-original-stored-source-scope-55",
+              ".github/workflows/phase-a-zswap-original-v1-kunit.yml:original-uml-zswap-on-v1",
+              ".github/workflows/phase-a-zswap-original-writeback-lifetime.yml:original-uml-stored-writeback-50"
+            ]
+          },
+          "after": {
+            "workflows": 17,
+            "jobs": 33,
+            "vm_jobs": [
+              ".github/workflows/phase-a-zswap-original-bio-clone-copy.yml:original-uml-bio-clone-53",
+              ".github/workflows/phase-a-zswap-original-mm-async-lease-negative.yml:original-uml-async-lease-41",
+              ".github/workflows/phase-a-zswap-original-mm-lifetime-owner.yml:original-uml-route-31",
+              ".github/workflows/phase-a-zswap-original-mm-route-witness.yml:original-uml-route-21",
+              ".github/workflows/phase-a-zswap-original-route-lifetime.yml:original-uml-route-27",
+              ".github/workflows/phase-a-zswap-original-sector-domain.yml:original-uml-sector-domain-46",
+              ".github/workflows/phase-a-zswap-original-store-bio-provenance.yml:original-uml-store-36",
+              ".github/workflows/phase-a-zswap-original-stored-bio-source-scope.yml:original-uml-original-stored-source-scope-55",
+              ".github/workflows/phase-a-zswap-original-v1-kunit.yml:original-uml-zswap-on-v1",
+              ".github/workflows/phase-a-zswap-original-writeback-lifetime.yml:original-uml-stored-writeback-50"
+            ]
+          }
+        },
+        {
+          "name": "standards-only",
+          "before": {
+            "workflows": 9,
+            "jobs": 20,
+            "vm_jobs": [
+              ".github/workflows/phase-a-round063-original-mm-dm-carrier-noauth.yml:native-original-71-round063",
+              ".github/workflows/phase-a-round064-original-slot-current-target-noauth.yml:native-original-71-round064",
+              ".github/workflows/phase-a-round072-original-mm-bio-authority-decoder-noauth.yml:original-MM-BIO-authority-independent-decoder-native-KUnit"
+            ]
+          },
+          "after": {
+            "workflows": 9,
+            "jobs": 17,
+            "vm_jobs": []
+          }
+        },
+        {
+          "name": "physical-helper",
+          "before": {
+            "workflows": 4,
+            "jobs": 9,
+            "vm_jobs": []
+          },
+          "after": {
+            "workflows": 4,
+            "jobs": 9,
+            "vm_jobs": []
+          }
+        },
+        {
+          "name": "evidence-only",
+          "before": {
+            "workflows": 4,
+            "jobs": 9,
+            "vm_jobs": []
+          },
+          "after": {
+            "workflows": 4,
+            "jobs": 9,
+            "vm_jobs": []
+          }
+        },
+        {
+          "name": "migration",
+          "before": {
+            "workflows": 24,
+            "jobs": 51,
+            "vm_jobs": [
+              ".github/workflows/phase-a-round058-original-stored-bio-chain-noauth.yml:native-original-71",
+              ".github/workflows/phase-a-round063-original-mm-dm-carrier-noauth.yml:native-original-71-round063",
+              ".github/workflows/phase-a-round064-original-slot-current-target-noauth.yml:native-original-71-round064",
+              ".github/workflows/phase-a-round065-original-dm-table-incarnation-noauth.yml:native-original-72-round065",
+              ".github/workflows/phase-a-round067-original-dm-dispatch-runtime-noauth.yml:actual-original-uml-dm-runtime",
+              ".github/workflows/phase-a-round068-original-decoder-owner-kunit-noauth.yml:original-uml-native",
+              ".github/workflows/phase-a-round068-original-lower-bio-owned-noauth.yml:actual-original-pinned-linux-bio-kunit",
+              ".github/workflows/phase-a-round069-original-bio-authority-joined-noauth.yml:actual-original-pinned-Linux-joined-native-KUnit",
+              ".github/workflows/phase-a-round069-original-zswap-stored-source-noauth.yml:actual-pinned-original-zswap-source-kunit",
+              ".github/workflows/phase-a-round071-original-dm-upper-owner-noauth.yml:original-uml-native",
+              ".github/workflows/phase-a-round071-original-pool-retirement-noauth.yml:original-uml-native",
+              ".github/workflows/phase-a-round071-original-zswap-provenance-noauth.yml:genuine-original-native-swapcache-negative",
+              ".github/workflows/phase-a-round072-original-mm-bio-authority-decoder-noauth.yml:original-MM-BIO-authority-independent-decoder-native-KUnit",
+              ".github/workflows/phase-a-round072-original-swapcache-provenance-noauth.yml:actual-original-no-swap-device-kunit",
+              ".github/workflows/phase-a-round073-original-reader-pin-gc-noauth.yml:original-linux-uml-reader-pin-gc-kunit",
+              ".github/workflows/phase-a-round086-original-ticket-kernel-noauth.yml:original-ticket-pinned-smp-qemu-tcg",
+              ".github/workflows/phase-a-zswap-composed-source.yml:original-uml-11-kunit",
+              ".github/workflows/phase-a-zswap-round056-original-clone-provenance.yml:genuine-pinned-original-uml-kunit"
+            ]
+          },
+          "after": {
+            "workflows": 24,
+            "jobs": 34,
+            "vm_jobs": []
+          }
+        }
+      ]
+    },
+    "physical": {
+      "status": "PASS_ROOTLESS_EXACT_PREFIX",
+      "tests_passed": 2,
+      "tests_failed": 0,
+      "guard_removal_rejected": 1,
+      "probe_prefix_blob": "54063d70337e32beeeb5ed662a1980aa5080bc47",
+      "test_methods_blob": "8d411c7098ae6628ec0f4ebbf8ed7d82bf5ffaa1",
+      "full_suite": "NOT_RUN_LOCAL",
+      "initial_copy_hash_refusal": "corrected before execution"
+    }
+  },
+  "ci": {
+    "status": "PENDING_PUBLICATION",
+    "runs": []
+  },
+  "physical": {
+    "status": "BLOCKED_NOT_RUN",
+    "owner_host_verified": false,
+    "owner_device_verified": false,
+    "current_source_artifacts_verified": false,
+    "integrated_original_transfer": "NO_GO",
+    "prior_report_source": "4ba067a90c4b102084841ad51627c4a29a0e4f07",
+    "prior_report_overall": "INCOMPLETE",
+    "prior_physical_status": "NOT_RUN",
+    "existing_workload_requires_zswap_disabled": true,
+    "fast_test_standalone": "AUTO_ONE_NARROW",
+    "reuse": "ONLY_EXACT_PRIVATE_CURRENT_RAM_EVIDENCE_NONCE_PAIR",
+    "actual_physical_operations": 0
+  },
+  "vm": {
+    "new_manual_dispatches": 0,
+    "actual_agent9_vm_executions": 0,
+    "retained_mixed_lanes": 13,
+    "archived_qemu_blob": "1253bf79262e85d045e183b3eb3ba8c1f8c7fa0e"
+  },
+  "gates": {
+    "AUTH": 0,
+    "phase_a": "BLOCKED",
+    "direct_compressed_handoff": "OFF",
+    "forced_raw_bypass": "OFF",
+    "import": "OFF"
+  },
+  "limitations": [
+    "Full local checkout unavailable (DNS); exact V8 regression and Python source-prefix tests executed, not full repository suite",
+    "Mixed VM lanes retained to preserve non-VM checks",
+    "No actual owner host/device/source admission or physical execution",
+    "Remote CI pending; not qualified"
+  ]
+}

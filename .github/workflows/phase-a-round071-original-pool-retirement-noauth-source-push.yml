@@ -1,0 +1,76 @@
+name: "Round071 original zswap pool retirement decoder native NO_AUTH (automatic non-VM source)"
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'tests/runtime/native/fixtures/round071-original-pool-retirement-kunit.cfrag'
+      - 'tests/tools/round071-stage-original-pool-retirement.py'
+      - 'tests/tools/round071-original-pool-retirement-verify.py'
+      - '.github/workflows/phase-a-round071-original-pool-retirement-noauth.yml'
+      - '.github/workflows/phase-a-round071-original-pool-retirement-noauth-source-push.yml'
+permissions:
+  contents: read
+jobs:
+  source-host:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 28
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          path: swapz
+          fetch-depth: 2
+          persist-credentials: false
+      - uses: actions/checkout@v4
+        with:
+          repository: torvalds/linux
+          ref: c339f4010dea8b0d754f84ace70cd1b089878ef8
+          fetch-depth: 1
+          sparse-checkout: |
+            include/linux/lzo.h
+            kernel/module/main.c
+            crypto/Kconfig
+            lib/Kconfig
+            lib/crc/Kconfig
+            lib/crypto/Kconfig
+            mm/Kconfig
+            mm/zswap.c
+          sparse-checkout-cone-mode: false
+          path: linux
+          persist-credentials: false
+      - name: Pristine original, strict source GCC Clang ASan UBSan, executed real owner C semantic mutants
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          umask 077
+          test "$GITHUB_REF" = refs/heads/main
+          test "$(git -C swapz rev-parse HEAD)" = "$GITHUB_SHA"
+          test "$(git -C linux rev-parse HEAD)" = c339f4010dea8b0d754f84ace70cd1b089878ef8
+          test -z "$(git -C swapz status --porcelain --untracked-files=all)"
+          test -z "$(git -C linux status --porcelain --untracked-files=all)"
+          git -C swapz diff --check HEAD^ HEAD
+          python3 -B swapz/tests/tools/round071-stage-original-pool-retirement.py self-test
+          python3 -B swapz/tests/tools/round071-original-pool-retirement-verify.py self-test
+          python3 -B swapz/tests/tools/round068-original-decoder-owner-kunit-verify.py self-test
+          python3 -B swapz/tests/tools/round069-original-decoder-kconfig-verify.py self-test
+          python3 -B swapz/tests/tools/round069-original-decoder-kconfig-verify.py original --linux-root linux
+          python3 -B - <<'PY'
+          import subprocess
+          from pathlib import Path
+          source = Path('linux/mm/zswap.c').resolve()
+          result = subprocess.run(['git', '-C', 'linux', 'hash-object', str(source)],
+                                  text=True, capture_output=True, check=True)
+          assert result.stdout.strip() == 'ae19e301fced7e357a4c7587dfdd6abb890b9163'
+          print('ROUND071_ORIGINAL_POOL_PRISTINE_MM_BLOB_PASS')
+          PY
+          log="$RUNNER_TEMP/round071-host-deps.log"
+          if ! sudo -n apt-get update -qq >"$log" 2>&1 || \
+             ! sudo -n env DEBIAN_FRONTEND=noninteractive apt-get install -y -qq \
+                 --no-install-recommends liblzo2-dev liblz4-dev libssl-dev >>"$log" 2>&1; then
+            echo '::error::ROUND071_POOL_FIRST_ERROR phase=host-dependency-install' >&2
+            exit 3
+          fi
+          python3 -B swapz/tests/tools/round066-original-decoder-owner-verify.py --linux-root linux
+          python3 -B swapz/tests/tools/round066-decoder-drain-release-verify.py \
+            --owner-source swapz/src/kernel/zswap-import-decoder-owner.c \
+            --owner-header swapz/src/kernel/zswap-import-decoder-owner.h
+          echo 'ROUND071_ORIGINAL_POOL_HOST_PASS gcc_clang_real_owner_C_ASAN_UBSAN=YES compiled_executed_C_mutants=22 native_pending=YES'

@@ -1,0 +1,46 @@
+name: "Round072 one original MM BIO actual authority independent decoder joined NO_AUTH (automatic non-VM source)"
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/phase-a-round072-original-mm-bio-authority-decoder-noauth.yml'
+      - '.github/workflows/phase-a-round072-original-mm-bio-authority-decoder-noauth-source-push.yml'
+      - 'tests/runtime/native/fixtures/round072-original-mm-bio-authority-decoder-joined.cfrag'
+      - 'tests/tools/round072-stage-original-mm-bio-authority-decoder-joined.py'
+      - 'tests/tools/round072-original-mm-bio-authority-decoder-joined-verify.py'
+      - 'tests/tools/round075-original-stage-manifest-order-verify.py'
+      - 'docs/testing_standards.md'
+      - 'src/kernel/authority.c'
+      - 'src/kernel/zswap-import-decoder-owner.c'
+permissions:
+  contents: read
+jobs:
+  exact-original-joined-source-host:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Disposable strict GCC Clang actual original codec prerequisites
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          sudo apt-get update -qq
+          sudo DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends gcc clang liblzo2-dev liblz4-dev libssl-dev
+      - name: Actual C GCC and Clang ASan UBSan source and semantic mutants
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
+          test "$(git branch --show-current)" = main
+          test -z "$(git status --porcelain --untracked-files=all)"
+          git diff --check HEAD^ HEAD
+          python3 -B tests/tools/round072-original-mm-bio-authority-decoder-joined-verify.py
+          python3 -B tests/tools/round075-original-stage-manifest-order-verify.py --self-test
+      - name: Preserve complete inherited and peer testing standards
+        env:
+          SWAPZ_PUSH_BEFORE_SHA: ${{ github.event.before }}
+        run: python3 -B tests/runtime/native/repository-policy-test.py --enforce
+

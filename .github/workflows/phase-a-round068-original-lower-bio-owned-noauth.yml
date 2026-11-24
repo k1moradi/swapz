@@ -1,15 +1,6 @@
 name: Round068 actual product lower callbacks and pinned native BIO KUnit NO_AUTH
 on:
-  push:
-    branches: [main]
-    paths:
-      - 'src/kernel/authority.c'
-      - 'src/kernel/authority.h'
-      - 'tests/runtime/native/fixtures/round068-original-lower-bio-owned.c'
-      - 'tests/runtime/native/fixtures/round068-original-lower-bio-owned.cfrag'
-      - 'tests/tools/round068-original-lower-bio-owned-verify.py'
-      - 'tests/tools/round068-stage-original-lower-bio.py'
-      - '.github/workflows/phase-a-round068-original-lower-bio-owned-noauth.yml'
+  # Archived native lane; explicit dispatch only (owner physical-first).
   workflow_dispatch:
 permissions:
   contents: read

@@ -1,0 +1,46 @@
+name: "Round069 true original BIO endio joined actual authority callback no AUTH (automatic non-VM source)"
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'src/kernel/authority.c'
+      - 'src/kernel/authority.h'
+      - 'tests/runtime/native/fixtures/round069-original-bio-authority-joined.cfrag'
+      - 'tests/tools/round069-stage-original-bio-authority-joined.py'
+      - 'tests/tools/round069-original-bio-authority-joined-verify.py'
+      - '.github/workflows/phase-a-round069-original-bio-authority-joined-noauth.yml'
+      - '.github/workflows/phase-a-round069-original-bio-authority-joined-noauth-source-push.yml'
+permissions:
+  contents: read
+jobs:
+  exact-real-product-GCC-Clang-mutants-host:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    env:
+      SWAPZ_PUSH_BEFORE_SHA: ${{ github.event.before }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Exact sole main pristine checkout
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          test "$GITHUB_REF" = refs/heads/main
+          test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
+          test "$(git branch --show-current)" = main
+          test -z "$(git status --porcelain --untracked-files=all)"
+          git diff --check HEAD^ HEAD
+      - name: Disposable rootless host original codec link prerequisites
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          sudo apt-get update -qq
+          sudo DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
+            gcc clang liblzo2-dev liblz4-dev libssl-dev
+      - name: REAL authority source exact GCC and Clang strict ASan UBSan plus 28 compiled EXECUTED C semantic mutants
+        run: python3 -B tests/tools/round069-original-bio-authority-joined-verify.py
+      - name: Preserve original and peer first-parent canonical testing standards
+        run: python3 -B tests/runtime/native/repository-policy-test.py --enforce
+

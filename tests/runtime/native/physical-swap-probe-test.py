@@ -151,7 +151,7 @@ class PhysicalSwapProbeTests(unittest.TestCase):
             self.assertEqual(probe.main([
                 "run", "--device", "/dev/swapz-synthetic",
                 "--confirm-device", "/dev/swapz-synthetic",
-                "--development-only",
+                "--development-only", "--algorithm-real-swap",
             ]), 0)
             gate.assert_called_once_with()
             run_probe.assert_called_once()
@@ -5747,29 +5747,29 @@ class PhysicalSwapProbeTests(unittest.TestCase):
         recovery.assert_not_called()
         write.assert_not_called()
 
-        development_evidence = {
-            **evidence,
-            "source_sha": evidence["head"],
-            "development_only": True,
-            "scope": probe.DEVELOPMENT_SCOPE,
-        }
-        with mock.patch.object(probe.os, "geteuid", return_value=0), \
-                mock.patch.object(probe, "current_development_evidence",
-                                  return_value=development_evidence), \
-                mock.patch.object(probe, "inspect_target",
-                                  return_value=target), \
-                mock.patch.object(probe, "_runtime_state_base") as recovery, \
-                mock.patch.object(probe, "_write_block0") as write:
+    def test_plain_development_smoke_refuses_before_any_side_effect(self):
+        # The old path could claim the partition and mark MODULE_PENDING
+        # before inevitably refusing loaded-RAM qualification.
+        with ExitStack() as stack:
+            stack.enter_context(mock.patch.object(probe.os, "geteuid", return_value=0))
+            forbidden = [
+                stack.enter_context(mock.patch.object(
+                    probe, name, side_effect=AssertionError(name)))
+                for name in ("current_development_evidence", "inspect_target",
+                             "_runtime_state_base", "_artifact_digests",
+                             "_consume_review", "_prepare_state", "_run",
+                             "_write_block0")
+            ]
             with self.assertRaisesRegex(
                     probe.ProbeError,
-                    "operation=inspect_target phase=preflight .*"
-                    "expected=swap_was_active_false observed=missing .*"
-                    "safe_next_step=rerun_read_only_preflight"):
+                    "physical run requires current-source loaded RAM qualification; "
+                    "phase=preflight mutation=not_started"):
                 probe.run_probe(
-                    target["device_arg"], target["device_arg"], None, None,
+                    "/dev/disk/by-partuuid/synthetic",
+                    "/dev/disk/by-partuuid/synthetic", None, None,
                     development_only=True)
-        recovery.assert_not_called()
-        write.assert_not_called()
+            for operation in forbidden:
+                operation.assert_not_called()
 
     def test_development_artifact_mismatch_blocks_before_recovery_or_write(self):
         # A fresh development PASS cannot authorize substituted build bytes.
@@ -5786,6 +5786,9 @@ class PhysicalSwapProbeTests(unittest.TestCase):
                 mock.patch.object(
                     probe, "inspect_target", return_value=target) as inspect, \
                 mock.patch.object(
+                    probe, "_development_swap_inventory_plan",
+                    return_value=(None, [])), \
+                mock.patch.object(
                     probe, "_artifact_digests",
                     return_value=changed_artifacts), \
                 mock.patch.object(probe, "_prepare_state") as prepare, \
@@ -5795,13 +5798,14 @@ class PhysicalSwapProbeTests(unittest.TestCase):
                     "current build artifacts differ from admitted evidence"):
                 probe.run_probe(
                     target["device_arg"], target["device_arg"], None, None,
-                    development_only=True)
+                    development_only=True, algorithm_real_swap=True)
         # This test is about the artifact boundary, not where the helper
         # chooses to generate its fresh development nonce.
         development.assert_called_once()
         inspect.assert_called_once_with(
             target["device_arg"], target["device_arg"],
-            allow_inactive_swap=True)
+            allow_inactive_swap=True, allow_shared_root=True,
+            virtual_device_only=False)
         prepare.assert_not_called()
         write.assert_not_called()
 

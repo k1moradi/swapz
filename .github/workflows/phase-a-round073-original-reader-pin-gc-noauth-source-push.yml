@@ -1,0 +1,74 @@
+name: "Round073 pinned original reader pin GC retained decoder NO_AUTH (automatic non-VM source)"
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'tests/runtime/native/fixtures/round073-original-reader-pin-gc-kunit.cfrag'
+      - 'tests/tools/round073-stage-original-reader-pin-gc.py'
+      - 'tests/tools/round073-original-reader-pin-gc-verify.py'
+      - 'tests/tools/round077-original-reader-delay-compile-verify.py'
+      - 'tests/tools/round080-original-reader-late-lease-verify.py'
+      - '.github/workflows/phase-a-round073-original-reader-pin-gc-noauth.yml'
+      - '.github/workflows/phase-a-round073-original-reader-pin-gc-noauth-source-push.yml'
+      - 'src/kernel/authority.c'
+      - 'src/kernel/zswap-import-decoder-owner.c'
+permissions:
+  contents: read
+
+jobs:
+  original-reader-strict-source-host:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 65
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 2
+          persist-credentials: false
+      - name: Install rootless host compiler and original codec headers
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          log="$RUNNER_TEMP/round073-host-deps.log"
+          if ! sudo -n apt-get update -qq >"$log" 2>&1 ||
+             ! sudo -n env DEBIAN_FRONTEND=noninteractive apt-get install -y -qq                --no-install-recommends gcc clang liblzo2-dev liblz4-dev libssl-dev >>"$log" 2>&1; then
+            echo '::error::ROUND073_READER_FIRST_ERROR phase=host-dependencies' >&2
+            exit 3
+          fi
+      - name: Strict original-source C23 GCC Clang sanitizers and executed semantic mutants
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          test "$GITHUB_REF" = refs/heads/main
+          test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
+          test "$(git branch --show-current)" = main
+          test -z "$(git status --porcelain --untracked-files=all)"
+          git diff --check HEAD^ HEAD
+          python3 -B tests/tools/round073-original-reader-pin-gc-verify.py self-test
+          python3 -B tests/tools/round073-original-reader-pin-gc-verify.py host
+          python3 -B tests/tools/round080-original-reader-late-lease-verify.py
+      # This original kernel sparse read happens AFTER the clean repo and
+      # policy checks, so nested original-linux remains test-only and cannot
+      # taint the tracked checkout cleanliness preflight.
+      - name: Canonical cumulative testing standards and no-extra-branch policy
+        env:
+          SWAPZ_PUSH_BEFORE_SHA: ${{ github.event.before }}
+        run: python3 -B tests/runtime/native/repository-policy-test.py --enforce
+
+      - name: Checkout pinned original Linux declaration and source exact blobs
+        uses: actions/checkout@v4
+        with:
+          repository: torvalds/linux
+          ref: c339f4010dea8b0d754f84ace70cd1b089878ef8
+          fetch-depth: 1
+          path: original-linux
+          persist-credentials: false
+          sparse-checkout: |
+            include/linux/delay.h
+            mm/zswap.c
+          sparse-checkout-cone-mode: false
+      - name: Compile execute original pinned inline and reject undeclared source call
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          test "$(git -C original-linux rev-parse HEAD)" = c339f4010dea8b0d754f84ace70cd1b089878ef8
+          python3 -B tests/tools/round077-original-reader-delay-compile-verify.py --linux-root original-linux

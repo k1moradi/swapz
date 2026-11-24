@@ -1,0 +1,30 @@
+name: "Round056 pinned original block BIO clone full-view lifetime C NO_AUTH (automatic non-VM source)"
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/phase-a-zswap-round056-original-clone-provenance.yml'
+      - '.github/workflows/phase-a-zswap-round056-original-clone-provenance-source-push.yml'
+      - 'tests/tools/round056-original-clone-stage.py'
+      - 'tests/tools/round056-original-clone-verify.py'
+      - 'tests/runtime/native/fixtures/round056-original-clone-*'
+
+permissions:
+  contents: read
+
+jobs:
+  original-clone-source-extracted-host:
+    name: Original guarded clone-ticket GCC Clang C semantic negatives
+    runs-on: ubuntu-24.04
+    timeout-minutes: 16
+    steps:
+      - uses: actions/checkout@v4
+      - name: Execute unchanged guarded C under strict GCC Clang sanitizers and every actual changed mutant
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 -B tests/tools/round056-original-clone-verify.py host-test
+          python3 -B tests/tools/round056-original-clone-verify.py verifier-self-test
+          echo 'ROUND056_CLONE_HOST_84_CASES_18_MUTANTS_EACH_GCC_CLANG_PASS SOURCE_MAPPED_AUTHENTICATED=0'
+

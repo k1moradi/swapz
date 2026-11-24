@@ -1,0 +1,1409 @@
+{
+  "plan": {
+    "baseline": "f654ebf552319a3bd6e6eef260de3fd005681ae8",
+    "selected": [
+      ".github/workflows/phase-a-round058-original-stored-bio-chain-noauth.yml",
+      ".github/workflows/phase-a-round063-original-mm-dm-carrier-noauth.yml",
+      ".github/workflows/phase-a-round064-original-slot-current-target-noauth.yml",
+      ".github/workflows/phase-a-round065-original-dm-table-incarnation-noauth.yml",
+      ".github/workflows/phase-a-round067-original-dm-dispatch-runtime-noauth.yml",
+      ".github/workflows/phase-a-round068-original-decoder-owner-kunit-noauth.yml",
+      ".github/workflows/phase-a-round068-original-lower-bio-owned-noauth.yml",
+      ".github/workflows/phase-a-round069-original-bio-authority-joined-noauth.yml",
+      ".github/workflows/phase-a-round069-original-zswap-stored-source-noauth.yml",
+      ".github/workflows/phase-a-round071-original-dm-upper-owner-noauth.yml",
+      ".github/workflows/phase-a-round071-original-pool-retirement-noauth.yml",
+      ".github/workflows/phase-a-round071-original-zswap-provenance-noauth.yml",
+      ".github/workflows/phase-a-round072-original-mm-bio-authority-decoder-noauth.yml",
+      ".github/workflows/phase-a-round072-original-swapcache-provenance-noauth.yml",
+      ".github/workflows/phase-a-round073-original-reader-pin-gc-noauth.yml",
+      ".github/workflows/phase-a-zswap-composed-source.yml",
+      ".github/workflows/phase-a-zswap-round056-original-clone-provenance.yml"
+    ],
+    "archivedQemu": ".github/workflows/phase-a-round086-original-ticket-kernel-noauth.yml",
+    "archivePath": "docs/handoff/zswapz/round088/agent9-archived-ticket-qemu.yml",
+    "physicalSource": "tests/tools/physical-swap-probe.py",
+    "physicalTest": "tests/runtime/native/physical-swap-probe-test.py",
+    "testPath": "tests/runtime/native/round088-vm-routing-contract-test.mjs",
+    "manifestPath": "docs/handoff/zswapz/round088/agent9-workflow-manifest.json"
+  },
+  "split": [
+    {
+      "path": ".github/workflows/phase-a-round058-original-stored-bio-chain-noauth.yml",
+      "companion": ".github/workflows/phase-a-round058-original-stored-bio-chain-noauth-source-push.yml",
+      "vm_jobs": [
+        "native-original-71"
+      ],
+      "auto_jobs": [
+        "source-host",
+        "native-original-x86-y-n"
+      ],
+      "original_blob": "e5432f56e7e8d3d2223cf821b39b2efd65e6df29"
+    },
+    {
+      "path": ".github/workflows/phase-a-round063-original-mm-dm-carrier-noauth.yml",
+      "companion": ".github/workflows/phase-a-round063-original-mm-dm-carrier-noauth-source-push.yml",
+      "vm_jobs": [
+        "native-original-71-round063"
+      ],
+      "auto_jobs": [
+        "rootless-product-source-host",
+        "pinned-original-x86-y-n-matched-gpl"
+      ],
+      "original_blob": "57c31b29b63476169c2c4672ee1f2f13683d45c5"
+    },
+    {
+      "path": ".github/workflows/phase-a-round064-original-slot-current-target-noauth.yml",
+      "companion": ".github/workflows/phase-a-round064-original-slot-current-target-noauth-source-push.yml",
+      "vm_jobs": [
+        "native-original-71-round064"
+      ],
+      "auto_jobs": [
+        "rootless-product-source-host",
+        "pinned-original-x86-y-n-matched-gpl"
+      ],
+      "original_blob": "590b6364478d4cded042df03d91879b13e5286fe"
+    },
+    {
+      "path": ".github/workflows/phase-a-round065-original-dm-table-incarnation-noauth.yml",
+      "companion": ".github/workflows/phase-a-round065-original-dm-table-incarnation-noauth-source-push.yml",
+      "vm_jobs": [
+        "native-original-72-round065"
+      ],
+      "auto_jobs": [
+        "rootless-product-source-host",
+        "pinned-original-x86-y-n-matched-gpl"
+      ],
+      "original_blob": "7d138bcee1e5ff07cf098b5e97f8663b2a28b999"
+    },
+    {
+      "path": ".github/workflows/phase-a-round067-original-dm-dispatch-runtime-noauth.yml",
+      "companion": ".github/workflows/phase-a-round067-original-dm-dispatch-runtime-noauth-source-push.yml",
+      "vm_jobs": [
+        "actual-original-uml-dm-runtime"
+      ],
+      "auto_jobs": [
+        "exact-new-C-source-host"
+      ],
+      "original_blob": "cb8582e46fdd2a727ced72cdfdec6c495f8b6a3f"
+    },
+    {
+      "path": ".github/workflows/phase-a-round068-original-decoder-owner-kunit-noauth.yml",
+      "companion": ".github/workflows/phase-a-round068-original-decoder-owner-kunit-noauth-source-push.yml",
+      "vm_jobs": [
+        "original-uml-native"
+      ],
+      "auto_jobs": [
+        "source-host"
+      ],
+      "original_blob": "0c7103284897483030b50e9694cd412eab55dd82"
+    },
+    {
+      "path": ".github/workflows/phase-a-round068-original-lower-bio-owned-noauth.yml",
+      "companion": ".github/workflows/phase-a-round068-original-lower-bio-owned-noauth-source-push.yml",
+      "vm_jobs": [
+        "actual-original-pinned-linux-bio-kunit"
+      ],
+      "auto_jobs": [
+        "actual-authority-lower-callbacks-host"
+      ],
+      "original_blob": "85daa74a432f31d60f6574fb63d31759eb7e7ad8"
+    },
+    {
+      "path": ".github/workflows/phase-a-round069-original-bio-authority-joined-noauth.yml",
+      "companion": ".github/workflows/phase-a-round069-original-bio-authority-joined-noauth-source-push.yml",
+      "vm_jobs": [
+        "actual-original-pinned-Linux-joined-native-KUnit"
+      ],
+      "auto_jobs": [
+        "exact-real-product-GCC-Clang-mutants-host"
+      ],
+      "original_blob": "ef34676e4be20b52f21445c6e957097d1f5fba7d"
+    },
+    {
+      "path": ".github/workflows/phase-a-round069-original-zswap-stored-source-noauth.yml",
+      "companion": ".github/workflows/phase-a-round069-original-zswap-stored-source-noauth-source-push.yml",
+      "vm_jobs": [
+        "actual-pinned-original-zswap-source-kunit"
+      ],
+      "auto_jobs": [
+        "exact-original-source-host"
+      ],
+      "original_blob": "35871104758c6a8f830ad0c8988190fd959cf870"
+    },
+    {
+      "path": ".github/workflows/phase-a-round071-original-dm-upper-owner-noauth.yml",
+      "companion": ".github/workflows/phase-a-round071-original-dm-upper-owner-noauth-source-push.yml",
+      "vm_jobs": [
+        "original-uml-native"
+      ],
+      "auto_jobs": [
+        "source-host"
+      ],
+      "original_blob": "286c8b4d6207e375590dd17d7875be11c8849acf"
+    },
+    {
+      "path": ".github/workflows/phase-a-round071-original-pool-retirement-noauth.yml",
+      "companion": ".github/workflows/phase-a-round071-original-pool-retirement-noauth-source-push.yml",
+      "vm_jobs": [
+        "original-uml-native"
+      ],
+      "auto_jobs": [
+        "source-host"
+      ],
+      "original_blob": "18cccb06ad87330c4bcc7f0bd85bbad2c9a1f445"
+    },
+    {
+      "path": ".github/workflows/phase-a-round071-original-zswap-provenance-noauth.yml",
+      "companion": ".github/workflows/phase-a-round071-original-zswap-provenance-noauth-source-push.yml",
+      "vm_jobs": [
+        "genuine-original-native-swapcache-negative"
+      ],
+      "auto_jobs": [
+        "source-linked-host-negative"
+      ],
+      "original_blob": "af6e3c18ca61c6f75c542ca4d01f9ebbb96e9cf0"
+    },
+    {
+      "path": ".github/workflows/phase-a-round072-original-mm-bio-authority-decoder-noauth.yml",
+      "companion": ".github/workflows/phase-a-round072-original-mm-bio-authority-decoder-noauth-source-push.yml",
+      "vm_jobs": [
+        "original-MM-BIO-authority-independent-decoder-native-KUnit"
+      ],
+      "auto_jobs": [
+        "exact-original-joined-source-host"
+      ],
+      "original_blob": "0209432593db35695a44403638637a8417ced689"
+    },
+    {
+      "path": ".github/workflows/phase-a-round072-original-swapcache-provenance-noauth.yml",
+      "companion": ".github/workflows/phase-a-round072-original-swapcache-provenance-noauth-source-push.yml",
+      "vm_jobs": [
+        "actual-original-no-swap-device-kunit"
+      ],
+      "auto_jobs": [
+        "source-linked-host-negative"
+      ],
+      "original_blob": "e64e9e31d721c90c22456f32699860dffe12f2b4"
+    },
+    {
+      "path": ".github/workflows/phase-a-round073-original-reader-pin-gc-noauth.yml",
+      "companion": ".github/workflows/phase-a-round073-original-reader-pin-gc-noauth-source-push.yml",
+      "vm_jobs": [
+        "original-linux-uml-reader-pin-gc-kunit"
+      ],
+      "auto_jobs": [
+        "original-reader-strict-source-host"
+      ],
+      "original_blob": "67a456b782c8924ded1d3c7395a3ed468364b641"
+    },
+    {
+      "path": ".github/workflows/phase-a-zswap-composed-source.yml",
+      "companion": ".github/workflows/phase-a-zswap-composed-source-source-push.yml",
+      "vm_jobs": [
+        "original-uml-11-kunit"
+      ],
+      "auto_jobs": [
+        "composed-original-linux"
+      ],
+      "original_blob": "afff14c1de560c679859b029315549c01bb9e331"
+    },
+    {
+      "path": ".github/workflows/phase-a-zswap-round056-original-clone-provenance.yml",
+      "companion": ".github/workflows/phase-a-zswap-round056-original-clone-provenance-source-push.yml",
+      "vm_jobs": [
+        "genuine-pinned-original-uml-kunit"
+      ],
+      "auto_jobs": [
+        "original-clone-source-extracted-host"
+      ],
+      "original_blob": "d1843906f09871e3faa6c9b6287fdb9bd67e7c28"
+    }
+  ],
+  "regression": {
+    "status": "PASS_ROOTLESS_VM_ROUTING",
+    "before_workflows": 87,
+    "after_workflows": 104,
+    "manual_full_preserved": 17,
+    "automatic_non_vm_jobs_preserved": 21,
+    "automatic_vm_jobs_retired": 18,
+    "source_path_witnesses": 611,
+    "negative_mutants": [
+      "restore-automatic-VM",
+      "lose-manual",
+      "mutate-archived-job",
+      "mutate-automatic-job",
+      "lose-source-path",
+      "lose-QEMU-stage-policy",
+      "change-QEMU-archive"
+    ],
+    "checks": 134162,
+    "scenarios": [
+      {
+        "name": "ordinary-DM",
+        "before": {
+          "workflows": 25,
+          "jobs": 52,
+          "vm_jobs": [
+            ".github/workflows/phase-a-round063-original-mm-dm-carrier-noauth.yml:native-original-71-round063",
+            ".github/workflows/phase-a-round064-original-slot-current-target-noauth.yml:native-original-71-round064",
+            ".github/workflows/phase-a-round065-original-dm-table-incarnation-noauth.yml:native-original-72-round065"
+          ]
+        },
+        "after": {
+          "workflows": 25,
+          "jobs": 49,
+          "vm_jobs": []
+        }
+      },
+      {
+        "name": "codec",
+        "before": {
+          "workflows": 22,
+          "jobs": 28,
+          "vm_jobs": [
+            ".github/workflows/phase-a-round086-original-ticket-kernel-noauth.yml:original-ticket-pinned-smp-qemu-tcg"
+          ]
+        },
+        "after": {
+          "workflows": 22,
+          "jobs": 28,
+          "vm_jobs": []
+        }
+      },
+      {
+        "name": "ticket",
+        "before": {
+          "workflows": 7,
+          "jobs": 13,
+          "vm_jobs": [
+            ".github/workflows/phase-a-round086-original-ticket-kernel-noauth.yml:original-ticket-pinned-smp-qemu-tcg"
+          ]
+        },
+        "after": {
+          "workflows": 7,
+          "jobs": 13,
+          "vm_jobs": []
+        }
+      },
+      {
+        "name": "authority",
+        "before": {
+          "workflows": 17,
+          "jobs": 27,
+          "vm_jobs": [
+            ".github/workflows/phase-a-round068-original-lower-bio-owned-noauth.yml:actual-original-pinned-linux-bio-kunit",
+            ".github/workflows/phase-a-round069-original-bio-authority-joined-noauth.yml:actual-original-pinned-Linux-joined-native-KUnit",
+            ".github/workflows/phase-a-round072-original-mm-bio-authority-decoder-noauth.yml:original-MM-BIO-authority-independent-decoder-native-KUnit",
+            ".github/workflows/phase-a-round073-original-reader-pin-gc-noauth.yml:original-linux-uml-reader-pin-gc-kunit"
+          ]
+        },
+        "after": {
+          "workflows": 17,
+          "jobs": 23,
+          "vm_jobs": []
+        }
+      },
+      {
+        "name": "original-composer",
+        "before": {
+          "workflows": 17,
+          "jobs": 36,
+          "vm_jobs": [
+            ".github/workflows/phase-a-round063-original-mm-dm-carrier-noauth.yml:native-original-71-round063",
+            ".github/workflows/phase-a-round064-original-slot-current-target-noauth.yml:native-original-71-round064",
+            ".github/workflows/phase-a-zswap-composed-source.yml:original-uml-11-kunit",
+            ".github/workflows/phase-a-zswap-original-bio-clone-copy.yml:original-uml-bio-clone-53",
+            ".github/workflows/phase-a-zswap-original-mm-async-lease-negative.yml:original-uml-async-lease-41",
+            ".github/workflows/phase-a-zswap-original-mm-lifetime-owner.yml:original-uml-route-31",
+            ".github/workflows/phase-a-zswap-original-mm-route-witness.yml:original-uml-route-21",
+            ".github/workflows/phase-a-zswap-original-route-lifetime.yml:original-uml-route-27",
+            ".github/workflows/phase-a-zswap-original-sector-domain.yml:original-uml-sector-domain-46",
+            ".github/workflows/phase-a-zswap-original-store-bio-provenance.yml:original-uml-store-36",
+            ".github/workflows/phase-a-zswap-original-stored-bio-source-scope.yml:original-uml-original-stored-source-scope-55",
+            ".github/workflows/phase-a-zswap-original-v1-kunit.yml:original-uml-zswap-on-v1",
+            ".github/workflows/phase-a-zswap-original-writeback-lifetime.yml:original-uml-stored-writeback-50"
+          ]
+        },
+        "after": {
+          "workflows": 17,
+          "jobs": 33,
+          "vm_jobs": [
+            ".github/workflows/phase-a-zswap-original-bio-clone-copy.yml:original-uml-bio-clone-53",
+            ".github/workflows/phase-a-zswap-original-mm-async-lease-negative.yml:original-uml-async-lease-41",
+            ".github/workflows/phase-a-zswap-original-mm-lifetime-owner.yml:original-uml-route-31",
+            ".github/workflows/phase-a-zswap-original-mm-route-witness.yml:original-uml-route-21",
+            ".github/workflows/phase-a-zswap-original-route-lifetime.yml:original-uml-route-27",
+            ".github/workflows/phase-a-zswap-original-sector-domain.yml:original-uml-sector-domain-46",
+            ".github/workflows/phase-a-zswap-original-store-bio-provenance.yml:original-uml-store-36",
+            ".github/workflows/phase-a-zswap-original-stored-bio-source-scope.yml:original-uml-original-stored-source-scope-55",
+            ".github/workflows/phase-a-zswap-original-v1-kunit.yml:original-uml-zswap-on-v1",
+            ".github/workflows/phase-a-zswap-original-writeback-lifetime.yml:original-uml-stored-writeback-50"
+          ]
+        }
+      },
+      {
+        "name": "standards-only",
+        "before": {
+          "workflows": 9,
+          "jobs": 20,
+          "vm_jobs": [
+            ".github/workflows/phase-a-round063-original-mm-dm-carrier-noauth.yml:native-original-71-round063",
+            ".github/workflows/phase-a-round064-original-slot-current-target-noauth.yml:native-original-71-round064",
+            ".github/workflows/phase-a-round072-original-mm-bio-authority-decoder-noauth.yml:original-MM-BIO-authority-independent-decoder-native-KUnit"
+          ]
+        },
+        "after": {
+          "workflows": 9,
+          "jobs": 17,
+          "vm_jobs": []
+        }
+      },
+      {
+        "name": "physical-helper",
+        "before": {
+          "workflows": 4,
+          "jobs": 9,
+          "vm_jobs": []
+        },
+        "after": {
+          "workflows": 4,
+          "jobs": 9,
+          "vm_jobs": []
+        }
+      },
+      {
+        "name": "evidence-only",
+        "before": {
+          "workflows": 4,
+          "jobs": 9,
+          "vm_jobs": []
+        },
+        "after": {
+          "workflows": 4,
+          "jobs": 9,
+          "vm_jobs": []
+        }
+      },
+      {
+        "name": "migration",
+        "before": {
+          "workflows": 24,
+          "jobs": 51,
+          "vm_jobs": [
+            ".github/workflows/phase-a-round058-original-stored-bio-chain-noauth.yml:native-original-71",
+            ".github/workflows/phase-a-round063-original-mm-dm-carrier-noauth.yml:native-original-71-round063",
+            ".github/workflows/phase-a-round064-original-slot-current-target-noauth.yml:native-original-71-round064",
+            ".github/workflows/phase-a-round065-original-dm-table-incarnation-noauth.yml:native-original-72-round065",
+            ".github/workflows/phase-a-round067-original-dm-dispatch-runtime-noauth.yml:actual-original-uml-dm-runtime",
+            ".github/workflows/phase-a-round068-original-decoder-owner-kunit-noauth.yml:original-uml-native",
+            ".github/workflows/phase-a-round068-original-lower-bio-owned-noauth.yml:actual-original-pinned-linux-bio-kunit",
+            ".github/workflows/phase-a-round069-original-bio-authority-joined-noauth.yml:actual-original-pinned-Linux-joined-native-KUnit",
+            ".github/workflows/phase-a-round069-original-zswap-stored-source-noauth.yml:actual-pinned-original-zswap-source-kunit",
+            ".github/workflows/phase-a-round071-original-dm-upper-owner-noauth.yml:original-uml-native",
+            ".github/workflows/phase-a-round071-original-pool-retirement-noauth.yml:original-uml-native",
+            ".github/workflows/phase-a-round071-original-zswap-provenance-noauth.yml:genuine-original-native-swapcache-negative",
+            ".github/workflows/phase-a-round072-original-mm-bio-authority-decoder-noauth.yml:original-MM-BIO-authority-independent-decoder-native-KUnit",
+            ".github/workflows/phase-a-round072-original-swapcache-provenance-noauth.yml:actual-original-no-swap-device-kunit",
+            ".github/workflows/phase-a-round073-original-reader-pin-gc-noauth.yml:original-linux-uml-reader-pin-gc-kunit",
+            ".github/workflows/phase-a-round086-original-ticket-kernel-noauth.yml:original-ticket-pinned-smp-qemu-tcg",
+            ".github/workflows/phase-a-zswap-composed-source.yml:original-uml-11-kunit",
+            ".github/workflows/phase-a-zswap-round056-original-clone-provenance.yml:genuine-pinned-original-uml-kunit"
+          ]
+        },
+        "after": {
+          "workflows": 24,
+          "jobs": 34,
+          "vm_jobs": []
+        }
+      }
+    ],
+    "inventory": [
+      {
+        "path": ".github/workflows/kernel-debug.yml",
+        "blob": "6bd26910f56175347031a596eb3f3bc828d14b3b",
+        "vm_jobs": [],
+        "non_vm_jobs": [
+          "rootless-contract",
+          "sparse-compile-only"
+        ],
+        "decision": "retain"
+      },
+      {
+        "path": ".github/workflows/phase-a-linux-source-preflight.yml",
+        "blob": "9eeaeb3fb29aa80db592e72ed82a97eaa9245b38",
+        "vm_jobs": [],
+        "non_vm_jobs": [
+          "pinned-upstream-checkout",
+          "pinned-upstream-clang-objects"
+        ],
+        "decision": "retain"
+      },
+      {
+        "path": ".github/workflows/phase-a-round056-original-lzo-codec-noauth.yml",
+        "blob": "8f6db277f33f96b0dab6cddd44f13cdbc50510e8",
+        "vm_jobs": [],
+        "non_vm_jobs": [
+          "original-lzo1x-source-and-host-codec"
+        ],
+        "decision": "retain"
+      },
+      {
+        "path": ".github/workflows/phase-a-round057-transaction-product-noauth.yml",
+        "blob": "faf5d3ab9851040a551ab64a577df89e2bd201dd",
+        "vm_jobs": [],
+        "non_vm_jobs": [
+          "exact-product-transaction-noauth"
+        ],
+        "decision": "retain"
+      },
+      {
+        "path": ".github/workflows/phase-a-round058-dm-ingress-noauth.yml",
+        "blob": "57f2897a3223051131a8de267ce837bed7a80c4b",
+        "vm_jobs": [],
+        "non_vm_jobs": [
+          "rootless-product-source-host",
+          "pinned-original-x86-y-n-matched-gpl"
+        ],
+        "decision": "retain"
+      },
+      {
+        "path": ".github/workflows/phase-a-round058-original-codec-read-noauth.yml",
+        "blob": "4575f874f97de4a8b5197eb046b18277e3694230",
+        "vm_jobs": [],
+        "non_vm_jobs": [
+          "original-codec-read-native-source-only"
+        ],
+        "decision": "retain"
+      },
+      {
+        "path": ".github/workflows/phase-a-round058-original-stored-bio-chain-noauth.yml",
+        "blob": "e5432f56e7e8d3d2223cf821b39b2efd65e6df29",
+        "vm_jobs": [
+          "native-original-71"
+        ],
+        "non_vm_jobs": [
+          "source-host",
+          "native-original-x86-y-n"
+        ],
+        "decision": "manual-full-plus-push-non-VM"
+      },
+      {
+        "path": ".github/workflows/phase-a-round059-authority-import-lifetime-noauth.yml",
+        "blob": "fc662c29b18cb205a29fa2523fc5da90369a10d8",
+        "vm_jobs": [],
+        "non_vm_jobs": [
+          "actual-authority-volatile-import-noauth"
+        ],
+        "decision": "retain"
+      },
+      {
+        "path": ".github/workflows/phase-a-round059-cross-suite-codec-host-noauth.yml",
+        "blob": "7b66dea157e2179461253f18d402e3a3394099cc",
+        "vm_jobs": [],
+        "non_vm_jobs": [
+          "inherited-lz4-host-without-original-lzo"
+        ],
+        "decision": "retain"
+      },
+      {
+        "path": ".github/workflows/phase-a-round060-authority-conversion-noauth.yml",
+        "blob": "d8f0637f38ee856e5345fe0aa658de27601fa17c",
+        "vm_jobs": [],
+        "non_vm_jobs": [
+          "changed-production-authority-c-gcc-clang-sanitizers"
+        ],
+        "decision": "retain"
+      },
+      {
+        "path": ".github/workflows/phase-a-round060-original-decoder-gpl-noauth.yml",
+        "blob": "0892f258a7c07d2be53fb806420c97e0b49aa62c",
+        "vm_jobs": [],
+        "non_vm_jobs": [
+          "source-host",
+          "original-native"
+        ],
+        "decision": "retain"
+      },
+      {
+        "path": ".github/workflows/phase-a-round063-original-mm-dm-carrier-noauth.yml",
+        "blob": "57c31b29b63476169c2c4672ee1f2f13683d45c5",
+        "vm_jobs": [
+          "native-original-71-round063"
+        ],
+        "non_vm_jobs": [
+          "rootless-product-source-host",
+          "pinned-original-x86-y-n-matched-gpl"
+        ],
+        "decision": "manual-full-plus-push-non-VM"
+      },
+      {
+        "path": ".github/workflows/phase-a-round064-original-slot-current-target-noauth.yml",
+        "blob": "590b6364478d4cded042df03d91879b13e5286fe",
+        "vm_jobs": [
+          "native-original-71-round064"
+        ],
+        "non_vm_jobs": [
+          "rootless-product-source-host",
+          "pinned-original-x86-y-n-matched-gpl"
+        ],
+        "decision": "manual-full-plus-push-non-VM"
+      },
+      {
+        "path": ".github/workflows/phase-a-round065-original-dm-table-incarnation-noauth.yml",
+        "blob": "7d138bcee1e5ff07cf098b5e97f8663b2a28b999",
+        "vm_jobs": [
+          "native-original-72-round065"
+        ],
+        "non_vm_jobs": [
+          "rootless-product-source-host",
+          "pinned-original-x86-y-n-matched-gpl"
+        ],
+        "decision": "manual-full-plus-push-non-VM"
+      },
+      {
+        "path": ".github/workflows/phase-a-round066-authority-import-owned-map-noauth.yml",
+        "blob": "909042e076e604a17c0322c98f9779ad292982d2",
+        "vm_jobs": [],
+        "non_vm_jobs": [
+          "actual-import-disk-owner-noauth"
+        ],
+        "decision": "retain"
+      },
+      {
+        "path": ".github/workflows/phase-a-round067-import-disk-payload-read-noauth.yml",
+        "blob": "3d26c80bd477e8b62e7e965523fee7cada638ce2",
+        "vm_jobs": [],
+        "non_vm_jobs": [
+          "source-bound-original-compressed-memory-read"
+        ],
+        "decision": "retain"
+      },
+      {
+        "path": ".github/workflows/phase-a-round067-original-dm-dispatch-runtime-noauth.yml",
+        "blob": "cb8582e46fdd2a727ced72cdfdec6c495f8b6a3f",
+        "vm_jobs": [
+          "actual-original-uml-dm-runtime"
+        ],
+        "non_vm_jobs": [
+          "exact-new-C-source-host"
+        ],
+        "decision": "manual-full-plus-push-non-VM"
+      },
+      {
+        "path": ".github/workflows/phase-a-round068-original-decoder-owner-kunit-noauth.yml",
+        "blob": "0c7103284897483030b50e9694cd412eab55dd82",
+        "vm_jobs": [
+          "original-uml-native"
+        ],
+        "non_vm_jobs": [
+          "source-host"
+        ],
+        "decision": "manual-full-plus-push-non-VM"
+      },
+      {
+        "path": ".github/workflows/phase-a-round068-original-lower-bio-owned-noauth.yml",
+        "blob": "85daa74a432f31d60f6574fb63d31759eb7e7ad8",
+        "vm_jobs": [
+          "actual-original-pinned-linux-bio-kunit"
+        ],
+        "non_vm_jobs": [
+          "actual-authority-lower-callbacks-host"
+        ],
+        "decision": "manual-full-plus-push-non-VM"
+      },
+      {
+        "path": ".github/workflows/phase-a-round069-original-bio-authority-joined-noauth.yml",
+        "blob": "ef34676e4be20b52f21445c6e957097d1f5fba7d",
+        "vm_jobs": [
+          "actual-original-pinned-Linux-joined-native-KUnit"
+        ],
+        "non_vm_jobs": [
+          "exact-real-product-GCC-Clang-mutants-host"
+        ],
+        "decision": "manual-full-plus-push-non-VM"
+      },
+      {
+        "path": ".github/workflows/phase-a-round069-original-zswap-stored-source-noauth.yml",
+        "blob": "35871104758c6a8f830ad0c8988190fd959cf870",
+        "vm_jobs": [
+          "actual-pinned-original-zswap-source-kunit"
+        ],
+        "non_vm_jobs": [
+          "exact-original-source-host"
+        ],
+        "decision": "manual-full-plus-push-non-VM"
+      },
+      {
+        "path": ".github/workflows/phase-a-round071-natural-pressure-cooperation-noauth.yml",
+        "blob": "bbf2e481814aff2d0f54b7d83b40de479309e3ef",
+        "vm_jobs": [],
+        "non_vm_jobs": [
+          "gcc-clang-asan-ubsan-compiled-semantic-mutants"
+        ],
+        "decision": "retain"
+      },
+      {
+        "path": ".github/workflows/phase-a-round071-original-dm-upper-owner-noauth.yml",
+        "blob": "286c8b4d6207e375590dd17d7875be11c8849acf",
+        "vm_jobs": [
+          "original-uml-native"
+        ],
+        "non_vm_jobs": [
+          "source-host"
+        ],
+        "decision": "manual-full-plus-push-non-VM"
+      },
+      {
+        "path": ".github/workflows/phase-a-round071-original-pool-retirement-noauth.yml",
+        "blob": "18cccb06ad87330c4bcc7f0bd85bbad2c9a1f445",
+        "vm_jobs": [
+          "original-uml-native"
+        ],
+        "non_vm_jobs": [
+          "source-host"
+        ],
+        "decision": "manual-full-plus-push-non-VM"
+      },
+      {
+        "path": ".github/workflows/phase-a-round071-original-zswap-provenance-noauth.yml",
+        "blob": "af6e3c18ca61c6f75c542ca4d01f9ebbb96e9cf0",
+        "vm_jobs": [
+          "genuine-original-native-swapcache-negative"
+        ],
+        "non_vm_jobs": [
+          "source-linked-host-negative"
+        ],
+        "decision": "manual-full-plus-push-non-VM"
+      },
+      {
+        "path": ".github/workflows/phase-a-round072-original-codec-tag-vs-raw-noauth.yml",
+        "blob": "d63c7c1e9cd6cd918313c65dcb9c989a1729082f",
+        "vm_jobs": [],
+        "non_vm_jobs": [
+          "gcc-clang-sanitizers-and-semantic-mutants"
+        ],
+        "decision": "retain"
+      },
+      {
+        "path": ".github/workflows/phase-a-round072-original-mm-bio-authority-decoder-noauth.yml",
+        "blob": "0209432593db35695a44403638637a8417ced689",
+        "vm_jobs": [
+          "original-MM-BIO-authority-independent-decoder-native-KUnit"
+        ],
+        "non_vm_jobs": [
+          "exact-original-joined-source-host"
+        ],
+        "decision": "manual-full-plus-push-non-VM"
+      },
+      {
+        "path": ".github/workflows/phase-a-round072-original-swapcache-provenance-noauth.yml",
+        "blob": "e64e9e31d721c90c22456f32699860dffe12f2b4",
+        "vm_jobs": [
+          "actual-original-no-swap-device-kunit"
+        ],
+        "non_vm_jobs": [
+          "source-linked-host-negative"
+        ],
+        "decision": "manual-full-plus-push-non-VM"
+      },
+      {
+        "path": ".github/workflows/phase-a-round073-lower-fua-ordering-noauth.yml",
+        "blob": "9f806983c2fbc8db66a697e643224fda46c16d84",
+        "vm_jobs": [],
+        "non_vm_jobs": [
+          "source-locked-host-model"
+        ],
+        "decision": "retain"
+      },
+      {
+        "path": ".github/workflows/phase-a-round073-original-reader-pin-gc-noauth.yml",
+        "blob": "67a456b782c8924ded1d3c7395a3ed468364b641",
+        "vm_jobs": [
+          "original-linux-uml-reader-pin-gc-kunit"
+        ],
+        "non_vm_jobs": [
+          "original-reader-strict-source-host"
+        ],
+        "decision": "manual-full-plus-push-non-VM"
+      },
+      {
+        "path": ".github/workflows/phase-a-round073-real-dm-backpressure-noauth.yml",
+        "blob": "12554385a6888b51d5e0a6273ba8eccbbfcbf892",
+        "vm_jobs": [],
+        "non_vm_jobs": [
+          "source-audited-gcc-clang-asan-ubsan-model"
+        ],
+        "decision": "retain"
+      },
+      {
+        "path": ".github/workflows/phase-a-round073-swapspace2-geometry-noauth.yml",
+        "blob": "3825507fdedbddc8666d1f20798478bc54120f68",
+        "vm_jobs": [],
+        "non_vm_jobs": [
+          "source-linked-rootless-geometry"
+        ],
+        "decision": "retain"
+      },
+      {
+        "path": ".github/workflows/phase-a-round074-eviction-lease-copy-budget-host-noauth.yml",
+        "blob": "038d3e4c1e6e40679cdd9269c1db3a770ba7e127",
+        "vm_jobs": [],
+        "non_vm_jobs": [
+          "gcc-clang-asan-ubsan-original-lease-copy-model"
+        ],
+        "decision": "retain"
+      },
+      {
+        "path": ".github/workflows/phase-a-round074-original-owned-copy-lifetime-host-noauth.yml",
+        "blob": "da4c7b44de7024807f1adc1f3d9839970acacdf0",
+        "vm_jobs": [],
+        "non_vm_jobs": [
+          "strict-host-original-owned-byte-lifetime-GCC-Clang"
+        ],
+        "decision": "retain"
+      },
+      {
+        "path": ".github/workflows/phase-a-round074-original-pool-lifetime-host-noauth.yml",
+        "blob": "273cc67c2740a6c709f2f9726424a2b6b9aa0cca",
+        "vm_jobs": [],
+        "non_vm_jobs": [
+          "original-source-host"
+        ],
+        "decision": "retain"
+      },
+      {
+        "path": ".github/workflows/phase-a-round074-real-raw-fallback-source-noauth.yml",
+        "blob": "69b92890c492005ff218b00e10ddd1a5e3b3b893",
+        "vm_jobs": [],
+        "non_vm_jobs": [
+          "gcc-clang-actual-product-raw-host-mutants"
+        ],
+        "decision": "retain"
+      },
+      {
+        "path": ".github/workflows/phase-a-round077-original-codec-tag-cross-abi-noauth.yml",
+        "blob": "ffc971cdcc1967ea4bbbfe0cc778df0ee7d23d64",
+        "vm_jobs": [],
+        "non_vm_jobs": [
+          "strict-gcc-clang-original-vs-direct-codec-abi-host"
+        ],
+        "decision": "retain"
+      },
+      {
+        "path": ".github/workflows/phase-a-round078-original-zswap-length-admission-noauth.yml",
+        "blob": "9c4aca891c6a2755dbc555bc3851c3e2d91dc5c6",
+        "vm_jobs": [],
+        "non_vm_jobs": [
+          "pinned-upstream-source-linked-host-length"
+        ],
+        "decision": "retain"
+      },
+      {
+        "path": ".github/workflows/phase-a-round079-original-dm-core-nowait-requeue-noauth.yml",
+        "blob": "c84409ac45e7b4e7abccafffcc7fcb7733440fc0",
+        "vm_jobs": [],
+        "non_vm_jobs": [
+          "source-linked-gcc-clang-dm-core-semantics"
+        ],
+        "decision": "retain"
+      },
+      {
+        "path": ".github/workflows/phase-a-round079-original-zswap-preerase-source-copy-noauth.yml",
+        "blob": "0f981ca237c0993a76d81ef3d18bfc3969aef3fb",
+        "vm_jobs": [],
+        "non_vm_jobs": [
+          "original-pinned-zswap-preerase-source-host-GCC-Clang"
+        ],
+        "decision": "retain"
+      },
+      {
+        "path": ".github/workflows/phase-a-round080-original-lzo1x-independent-decoder-host-noauth.yml",
+        "blob": "d4783b8251d1a0e29cdeb2625c7e46bd7e449d39",
+        "vm_jobs": [],
+        "non_vm_jobs": [
+          "pristine-original-lzo1x-product-host"
+        ],
+        "decision": "retain"
+      },
+      {
+        "path": ".github/workflows/phase-a-round081-actual-dm-bio-debt-ownership-noauth.yml",
+        "blob": "33d51aa2bab95fe36dde332c0d6c1d6eb64810d8",
+        "vm_jobs": [],
+        "non_vm_jobs": [
+          "actual-accepted-clone-debt-gcc-clang-host"
+        ],
+        "decision": "retain"
+      },
+      {
+        "path": ".github/workflows/phase-a-round084-original-extent-host-noauth.yml",
+        "blob": "d77c578df86e2069ebba6f85cc526dcad9fa7402",
+        "vm_jobs": [],
+        "non_vm_jobs": [
+          "original-extent-host"
+        ],
+        "decision": "retain"
+      },
+      {
+        "path": ".github/workflows/phase-a-round084-original-store-credential-noauth.yml",
+        "blob": "7731bf0f9a84f44a8d99fd9c30aa81b862bc5bbc",
+        "vm_jobs": [
+          "original-credential-pinned-uml"
+        ],
+        "non_vm_jobs": [
+          "original-credential-strict-host"
+        ],
+        "decision": "retain"
+      },
+      {
+        "path": ".github/workflows/phase-a-round084-original-ticket-host-noauth.yml",
+        "blob": "37cf34899bd258eaebf12e952de778f55df052f4",
+        "vm_jobs": [],
+        "non_vm_jobs": [
+          "bounded-original-ticket-gcc-clang"
+        ],
+        "decision": "retain"
+      },
+      {
+        "path": ".github/workflows/phase-a-round086-original-ticket-kernel-noauth.yml",
+        "blob": "1253bf79262e85d045e183b3eb3ba8c1f8c7fa0e",
+        "vm_jobs": [
+          "original-ticket-pinned-smp-qemu-tcg"
+        ],
+        "non_vm_jobs": [],
+        "decision": "archive-QEMU-preserve-rootless-stage"
+      },
+      {
+        "path": ".github/workflows/phase-a-round086-original-typed-decode-host-noauth.yml",
+        "blob": "0930ad37ec20c2fa3210effa659878049e90e6f8",
+        "vm_jobs": [],
+        "non_vm_jobs": [
+          "original-typed-decode-strict-host"
+        ],
+        "decision": "retain"
+      },
+      {
+        "path": ".github/workflows/phase-a-round088-original-mm-carrier-host-noauth.yml",
+        "blob": "6c38a9ec86e353c11a18aed396c6cb967c917da9",
+        "vm_jobs": [],
+        "non_vm_jobs": [
+          "original-mm-carrier-strict-host"
+        ],
+        "decision": "retain"
+      },
+      {
+        "path": ".github/workflows/phase-a-round088-original-storage-host-noauth.yml",
+        "blob": "ec82328fbb8a2da215e4854b8c7b87b55ecf2e33",
+        "vm_jobs": [],
+        "non_vm_jobs": [
+          "original-storage-host"
+        ],
+        "decision": "retain"
+      },
+      {
+        "path": ".github/workflows/phase-a-round088-selected-dm-admission-host.yml",
+        "blob": "a93c9c9c81d2448656bcb71b02284a24b6e90bed",
+        "vm_jobs": [],
+        "non_vm_jobs": [
+          "selected-dm-source-host"
+        ],
+        "decision": "retain"
+      },
+      {
+        "path": ".github/workflows/phase-a-zswap-composed-source.yml",
+        "blob": "afff14c1de560c679859b029315549c01bb9e331",
+        "vm_jobs": [
+          "original-uml-11-kunit"
+        ],
+        "non_vm_jobs": [
+          "composed-original-linux"
+        ],
+        "decision": "manual-full-plus-push-non-VM"
+      },
+      {
+        "path": ".github/workflows/phase-a-zswap-dm-async-lower-lifetime.yml",
+        "blob": "91b858b36fedc52b8d4d65ba145791b718693afe",
+        "vm_jobs": [],
+        "non_vm_jobs": [
+          "original-same-kernel-dm",
+          "native-product-default-and-prior-guard",
+          "repository-policy"
+        ],
+        "decision": "retain"
+      },
+      {
+        "path": ".github/workflows/phase-a-zswap-dm-async-read-gc.yml",
+        "blob": "7c6fd0d84dc0d4e7a384da45a67f5b2598b20a45",
+        "vm_jobs": [],
+        "non_vm_jobs": [
+          "original-same-kernel-dm",
+          "native-product-default-and-prior-guard",
+          "repository-policy"
+        ],
+        "decision": "retain"
+      },
+      {
+        "path": ".github/workflows/phase-a-zswap-dm-chain-write-gc-read.yml",
+        "blob": "eda625959ac49e9d72d362de58fef056eabb5250",
+        "vm_jobs": [],
+        "non_vm_jobs": [
+          "original-same-kernel-dm",
+          "native-product-default-and-prior-guard",
+          "repository-policy"
+        ],
+        "decision": "retain"
+      },
+      {
+        "path": ".github/workflows/phase-a-zswap-dm-original-table-gc-lifetime-noauth.yml",
+        "blob": "3a44f3a2253616791fcf1ce93fff26df8cf3a5aa",
+        "vm_jobs": [],
+        "non_vm_jobs": [
+          "original-dm-source-and-current-product-negatives"
+        ],
+        "decision": "retain"
+      },
+      {
+        "path": ".github/workflows/phase-a-zswap-dm-real-ingress-observation.yml",
+        "blob": "f50bf10fea3f022ce26048a8d0ab19c5557a43bc",
+        "vm_jobs": [],
+        "non_vm_jobs": [
+          "original-same-kernel-dm",
+          "native-product-default-and-prior-guard",
+          "repository-policy"
+        ],
+        "decision": "retain"
+      },
+      {
+        "path": ".github/workflows/phase-a-zswap-dm-real-lifetime-noauth.yml",
+        "blob": "9cbf9a40ed63a66f920dfec62d6b1752b88f02ac",
+        "vm_jobs": [],
+        "non_vm_jobs": [
+          "real-product-source-extracted-negative"
+        ],
+        "decision": "retain"
+      },
+      {
+        "path": ".github/workflows/phase-a-zswap-dm-same-slot-reissue.yml",
+        "blob": "2e7b5b094d10081e8848724ca2d72c7e6de35802",
+        "vm_jobs": [],
+        "non_vm_jobs": [
+          "original-same-kernel-dm",
+          "native-product-default-and-prior-guard",
+          "repository-policy"
+        ],
+        "decision": "retain"
+      },
+      {
+        "path": ".github/workflows/phase-a-zswap-dm-target-interval-negative.yml",
+        "blob": "84f3988cad5afdc904333b44bde436b00d457a2b",
+        "vm_jobs": [],
+        "non_vm_jobs": [
+          "original-same-kernel-dm",
+          "native-product-default-and-prior-guard",
+          "repository-policy"
+        ],
+        "decision": "retain"
+      },
+      {
+        "path": ".github/workflows/phase-a-zswap-dm-two-phase-ledger.yml",
+        "blob": "060cfbfff65f06034ea9be441fa1782daad881de",
+        "vm_jobs": [],
+        "non_vm_jobs": [
+          "original-same-kernel-dm",
+          "repository-policy"
+        ],
+        "decision": "retain"
+      },
+      {
+        "path": ".github/workflows/phase-a-zswap-origin-kunit.yml",
+        "blob": "0831bca5ffd34141b28f0b86db5eaac71d90e9ef",
+        "vm_jobs": [
+          "modified-source-kunit"
+        ],
+        "non_vm_jobs": [],
+        "decision": "retain"
+      },
+      {
+        "path": ".github/workflows/phase-a-zswap-origin-prototype.yml",
+        "blob": "41d700abf7c81b2a20caa493468cc6e8281e44fa",
+        "vm_jobs": [],
+        "non_vm_jobs": [
+          "modified-linux-producer-objects"
+        ],
+        "decision": "retain"
+      },
+      {
+        "path": ".github/workflows/phase-a-zswap-original-bio-clone-copy.yml",
+        "blob": "ae862bb647d0e5b3a67cd03f406dd7109ae70b37",
+        "vm_jobs": [
+          "original-uml-bio-clone-53"
+        ],
+        "non_vm_jobs": [
+          "original-x86-y-n"
+        ],
+        "decision": "retain"
+      },
+      {
+        "path": ".github/workflows/phase-a-zswap-original-consumer-link.yml",
+        "blob": "65fc64f1e0a9f61ce22183149b6e7ff87709a20d",
+        "vm_jobs": [],
+        "non_vm_jobs": [
+          "original-same-kernel-dm"
+        ],
+        "decision": "retain"
+      },
+      {
+        "path": ".github/workflows/phase-a-zswap-original-mm-async-lease-negative.yml",
+        "blob": "fce1c4871498ad1235e3348a7598c7ed67dc2425",
+        "vm_jobs": [
+          "original-uml-async-lease-41"
+        ],
+        "non_vm_jobs": [
+          "original-x86-y-n"
+        ],
+        "decision": "retain"
+      },
+      {
+        "path": ".github/workflows/phase-a-zswap-original-mm-lifetime-owner.yml",
+        "blob": "26cad69b7fb2dc52a100943ba46d2b76efdbf6a9",
+        "vm_jobs": [
+          "original-uml-route-31"
+        ],
+        "non_vm_jobs": [
+          "original-x86-y-n"
+        ],
+        "decision": "retain"
+      },
+      {
+        "path": ".github/workflows/phase-a-zswap-original-mm-route-witness.yml",
+        "blob": "a56f24024a5110d039dfaff8af67f2726ad26463",
+        "vm_jobs": [
+          "original-uml-route-21"
+        ],
+        "non_vm_jobs": [
+          "original-x86-y-n"
+        ],
+        "decision": "retain"
+      },
+      {
+        "path": ".github/workflows/phase-a-zswap-original-route-lifetime.yml",
+        "blob": "d5baca0a18a699c4335cde48aed06439b91a4a18",
+        "vm_jobs": [
+          "original-uml-route-27"
+        ],
+        "non_vm_jobs": [
+          "original-x86-y-n"
+        ],
+        "decision": "retain"
+      },
+      {
+        "path": ".github/workflows/phase-a-zswap-original-sector-domain.yml",
+        "blob": "8e36c5253a61fdabdfe1c157563a1b9dd8a0ed68",
+        "vm_jobs": [
+          "original-uml-sector-domain-46"
+        ],
+        "non_vm_jobs": [
+          "original-x86-y-n"
+        ],
+        "decision": "retain"
+      },
+      {
+        "path": ".github/workflows/phase-a-zswap-original-store-bio-provenance.yml",
+        "blob": "1532ce523f95b2c39e4197d994f65add7db63f8f",
+        "vm_jobs": [
+          "original-uml-store-36"
+        ],
+        "non_vm_jobs": [
+          "original-x86-y-n"
+        ],
+        "decision": "retain"
+      },
+      {
+        "path": ".github/workflows/phase-a-zswap-original-stored-bio-source-scope.yml",
+        "blob": "1776d4ed3ac1a4381f9243a411f7c3364664d87e",
+        "vm_jobs": [
+          "original-uml-original-stored-source-scope-55"
+        ],
+        "non_vm_jobs": [
+          "original-x86-y-n"
+        ],
+        "decision": "retain"
+      },
+      {
+        "path": ".github/workflows/phase-a-zswap-original-v1-kunit.yml",
+        "blob": "ce111ce2ac35a15e22ea7d284696839702b13582",
+        "vm_jobs": [
+          "original-uml-zswap-on-v1"
+        ],
+        "non_vm_jobs": [],
+        "decision": "retain"
+      },
+      {
+        "path": ".github/workflows/phase-a-zswap-original-writeback-lifetime.yml",
+        "blob": "76a611f72388ced7dd27cb0500000d40b6684a48",
+        "vm_jobs": [
+          "original-uml-stored-writeback-50"
+        ],
+        "non_vm_jobs": [
+          "original-x86-y-n"
+        ],
+        "decision": "retain"
+      },
+      {
+        "path": ".github/workflows/phase-a-zswap-owned-lz4-lower-roundtrip.yml",
+        "blob": "b3484c42d816af3af41a7ff8d498ff5cd86db3ec",
+        "vm_jobs": [],
+        "non_vm_jobs": [
+          "original-same-kernel-dm",
+          "repository-policy"
+        ],
+        "decision": "retain"
+      },
+      {
+        "path": ".github/workflows/phase-a-zswap-round052-codec-interop-noauth.yml",
+        "blob": "e8a591591c3c819bf143de44a7f3ddc6c259b0a8",
+        "vm_jobs": [],
+        "non_vm_jobs": [
+          "original-host-raw-lz4-noauth"
+        ],
+        "decision": "retain"
+      },
+      {
+        "path": ".github/workflows/phase-a-zswap-round052-natural-pressure-scheduling.yml",
+        "blob": "46bc05376e2a57a809922bde8b4300d86392e884",
+        "vm_jobs": [],
+        "non_vm_jobs": [
+          "synthetic-rootless-only"
+        ],
+        "decision": "retain"
+      },
+      {
+        "path": ".github/workflows/phase-a-zswap-round056-imported-volatile-map.yml",
+        "blob": "cc5a02fd5fba5e9f02bb62962e3cd98abf54208c",
+        "vm_jobs": [],
+        "non_vm_jobs": [
+          "disabled-imported-map"
+        ],
+        "decision": "retain"
+      },
+      {
+        "path": ".github/workflows/phase-a-zswap-round056-original-clone-provenance.yml",
+        "blob": "d1843906f09871e3faa6c9b6287fdb9bd67e7c28",
+        "vm_jobs": [
+          "genuine-pinned-original-uml-kunit"
+        ],
+        "non_vm_jobs": [
+          "original-clone-source-extracted-host"
+        ],
+        "decision": "manual-full-plus-push-non-VM"
+      },
+      {
+        "path": ".github/workflows/phase-a-zswap-sideband.yml",
+        "blob": "81ce5955ce7ce2eda378b1f3384037491f30f9c9",
+        "vm_jobs": [
+          "pinned-bio-uml-executed-kunit"
+        ],
+        "non_vm_jobs": [
+          "pinned-bio-ci-only-source"
+        ],
+        "decision": "retain"
+      },
+      {
+        "path": ".github/workflows/phase-a-zswap-source-slot-authority.yml",
+        "blob": "7376c40a99bae0eefc76050a761da86460e76c6d",
+        "vm_jobs": [],
+        "non_vm_jobs": [
+          "original-same-kernel-dm"
+        ],
+        "decision": "retain"
+      },
+      {
+        "path": ".github/workflows/physical-evidence-rootless.yml",
+        "blob": "40850e47e5dd2010aecafdcf9ecd57904b5565fa",
+        "vm_jobs": [],
+        "non_vm_jobs": [
+          "adversarial-physical-evidence"
+        ],
+        "decision": "retain"
+      },
+      {
+        "path": ".github/workflows/product-codec.yml",
+        "blob": "f3128ded13e3acc331a7382e15dbf329730ab38a",
+        "vm_jobs": [],
+        "non_vm_jobs": [
+          "exact-c",
+          "compile-only"
+        ],
+        "decision": "retain"
+      },
+      {
+        "path": ".github/workflows/project-goals.yml",
+        "blob": "04596df7514ad33243d98c5a96295d8816d9ef07",
+        "vm_jobs": [],
+        "non_vm_jobs": [
+          "native-rootless",
+          "make-contract",
+          "focused-rootless",
+          "repository-policy",
+          "project-goals-conclusion"
+        ],
+        "decision": "retain"
+      },
+      {
+        "path": ".github/workflows/round056-codec-profile-noauth.yml",
+        "blob": "d0de9deb37cc27738589aaf1876aeac4d4180eee",
+        "vm_jobs": [],
+        "non_vm_jobs": [
+          "pristine-original-lzo1x-stable-read-noauth"
+        ],
+        "decision": "retain"
+      },
+      {
+        "path": ".github/workflows/round056-original-bio-clone-provenance-noauth.yml",
+        "blob": "fce2c1b64b66419a15873bdec1f9016f627bc521",
+        "vm_jobs": [],
+        "non_vm_jobs": [
+          "original-bio-clone-source-rootless"
+        ],
+        "decision": "retain"
+      },
+      {
+        "path": ".github/workflows/systemd-package-readiness.yml",
+        "blob": "d2c42d71cd13c1ff97aae23f0d9d25bb2f9148fc",
+        "vm_jobs": [],
+        "non_vm_jobs": [
+          "rootless-systemd-package"
+        ],
+        "decision": "retain"
+      },
+      {
+        "path": ".github/workflows/zswap-compressed-cross-abi.yml",
+        "blob": "dacb9f4575adc00f1e64859322a954dfac904107",
+        "vm_jobs": [],
+        "non_vm_jobs": [
+          "independent-rootless-c-abi"
+        ],
+        "decision": "retain"
+      }
+    ]
+  },
+  "execution": {
+    "task_baseline": "dcb65dca9a3c2bd990aedb2829181d0c0e015ce2",
+    "fresh_routing_baseline": "f654ebf552319a3bd6e6eef260de3fd005681ae8",
+    "peer_workflow_inputs": [
+      {
+        "path": ".github/workflows/phase-a-round086-original-typed-decode-host-noauth.yml",
+        "sha": "0930ad37ec20c2fa3210effa659878049e90e6f8"
+      },
+      {
+        "path": ".github/workflows/phase-a-round088-original-mm-carrier-host-noauth.yml",
+        "sha": "6c38a9ec86e353c11a18aed396c6cb967c917da9"
+      },
+      {
+        "path": ".github/workflows/phase-a-round088-original-storage-host-noauth.yml",
+        "sha": "ec82328fbb8a2da215e4854b8c7b87b55ecf2e33"
+      },
+      {
+        "path": ".github/workflows/phase-a-round088-selected-dm-admission-host.yml",
+        "sha": "a93c9c9c81d2448656bcb71b02284a24b6e90bed"
+      }
+    ],
+    "rerun": "Exact same rootless regression function executed against fresh parent with peer workflows preserved.",
+    "environment": "Rootless V8 exact regression function executed on complete GitHub blob snapshots; offline Node Git-tree wrapper not executed locally (checkout DNS unavailable)."
+  },
+  "retained_conflicts": [
+    {
+      "path": ".github/workflows/phase-a-round084-original-store-credential-noauth.yml",
+      "vm_jobs": [
+        "original-credential-pinned-uml"
+      ],
+      "reason": "Push-only native job also verifies actual source postimages and true github.event.before; no existing manual trigger. Retained pending a separate source-stage/manual admission contract."
+    },
+    {
+      "path": ".github/workflows/phase-a-zswap-origin-kunit.yml",
+      "vm_jobs": [
+        "modified-source-kunit"
+      ],
+      "reason": "VM job embeds separately meaningful rootless host/compiler/source or original Kbuild checks; leave whole definition rather than silently dropping them."
+    },
+    {
+      "path": ".github/workflows/phase-a-zswap-original-bio-clone-copy.yml",
+      "vm_jobs": [
+        "original-uml-bio-clone-53"
+      ],
+      "reason": "VM job embeds separately meaningful rootless host/compiler/source or original Kbuild checks; leave whole definition rather than silently dropping them."
+    },
+    {
+      "path": ".github/workflows/phase-a-zswap-original-mm-async-lease-negative.yml",
+      "vm_jobs": [
+        "original-uml-async-lease-41"
+      ],
+      "reason": "VM job embeds separately meaningful rootless host/compiler/source or original Kbuild checks; leave whole definition rather than silently dropping them."
+    },
+    {
+      "path": ".github/workflows/phase-a-zswap-original-mm-lifetime-owner.yml",
+      "vm_jobs": [
+        "original-uml-route-31"
+      ],
+      "reason": "VM job embeds separately meaningful rootless host/compiler/source or original Kbuild checks; leave whole definition rather than silently dropping them."
+    },
+    {
+      "path": ".github/workflows/phase-a-zswap-original-mm-route-witness.yml",
+      "vm_jobs": [
+        "original-uml-route-21"
+      ],
+      "reason": "VM job embeds separately meaningful rootless host/compiler/source or original Kbuild checks; leave whole definition rather than silently dropping them."
+    },
+    {
+      "path": ".github/workflows/phase-a-zswap-original-route-lifetime.yml",
+      "vm_jobs": [
+        "original-uml-route-27"
+      ],
+      "reason": "VM job embeds separately meaningful rootless host/compiler/source or original Kbuild checks; leave whole definition rather than silently dropping them."
+    },
+    {
+      "path": ".github/workflows/phase-a-zswap-original-sector-domain.yml",
+      "vm_jobs": [
+        "original-uml-sector-domain-46"
+      ],
+      "reason": "VM job embeds separately meaningful rootless host/compiler/source or original Kbuild checks; leave whole definition rather than silently dropping them."
+    },
+    {
+      "path": ".github/workflows/phase-a-zswap-original-store-bio-provenance.yml",
+      "vm_jobs": [
+        "original-uml-store-36"
+      ],
+      "reason": "VM job embeds separately meaningful rootless host/compiler/source or original Kbuild checks; leave whole definition rather than silently dropping them."
+    },
+    {
+      "path": ".github/workflows/phase-a-zswap-original-stored-bio-source-scope.yml",
+      "vm_jobs": [
+        "original-uml-original-stored-source-scope-55"
+      ],
+      "reason": "VM job embeds separately meaningful rootless host/compiler/source or original Kbuild checks; leave whole definition rather than silently dropping them."
+    },
+    {
+      "path": ".github/workflows/phase-a-zswap-original-v1-kunit.yml",
+      "vm_jobs": [
+        "original-uml-zswap-on-v1"
+      ],
+      "reason": "VM job embeds separately meaningful rootless host/compiler/source or original Kbuild checks; leave whole definition rather than silently dropping them."
+    },
+    {
+      "path": ".github/workflows/phase-a-zswap-original-writeback-lifetime.yml",
+      "vm_jobs": [
+        "original-uml-stored-writeback-50"
+      ],
+      "reason": "VM job embeds separately meaningful rootless host/compiler/source or original Kbuild checks; leave whole definition rather than silently dropping them."
+    },
+    {
+      "path": ".github/workflows/phase-a-zswap-sideband.yml",
+      "vm_jobs": [
+        "pinned-bio-uml-executed-kunit"
+      ],
+      "reason": "VM job also runs an independent rootless KUnit verdict self-test and source regression; do not remove it from automatic coverage."
+    }
+  ],
+  "qemu_original_blob": "1253bf79262e85d045e183b3eb3ba8c1f8c7fa0e",
+  "notes": "No job skipped or weakened. Archived full manual definitions preserve their previous manual semantics (including existing push-only policy refusal on dispatch where applicable). Companion auto jobs are exact copies, no VM build/boot; original source-specific VM staging/KTAP evidence remains in manual full jobs, not automatically qualified. No mandatory branch protection discovered in branch API (protected=false), repo rulesets empty; full branch-protection endpoint denied 403. Census uses actual supported positive paths and ordinary small diffs, not GitHub large-diff exceptions."
+}

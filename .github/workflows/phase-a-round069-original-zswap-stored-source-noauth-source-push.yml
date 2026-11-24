@@ -1,0 +1,42 @@
+name: "Round069 genuine pinned original zswap STORED XArray and zsmalloc NO_AUTH (automatic non-VM source)"
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/phase-a-round069-original-zswap-stored-source-noauth.yml'
+      - '.github/workflows/phase-a-round069-original-zswap-stored-source-noauth-source-push.yml'
+      - 'tests/runtime/native/fixtures/round069-original-zswap-stored-source.cfrag'
+      - 'tests/tools/round069-stage-original-zswap-stored-source.py'
+      - 'tests/tools/round069-original-zswap-stored-source-verify.py'
+      - 'docs/handoff/zswapz/round069/agent3-evidence.md'
+permissions:
+  contents: read
+jobs:
+  exact-original-source-host:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Strict GCC and Clang compiled executed actual changed-source semantic mutants
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
+          test "$(git branch --show-current)" = main
+          test -z "$(git status --porcelain)"
+          git diff --check HEAD^ HEAD
+          python3 -B tests/tools/round069-original-zswap-stored-source-verify.py
+          python3 -B - <<'PY'
+          import ast
+          from pathlib import Path
+          ast.parse(Path('tests/tools/round069-stage-original-zswap-stored-source.py').read_text())
+          print('ROUND069_SOURCE_STAGER_PYTHON_SYNTAX_PASS')
+          PY
+      - name: Preserve complete inherited and peer testing standards
+        env:
+          SWAPZ_PUSH_BEFORE_SHA: ${{ github.event.before }}
+        run: python3 -B tests/runtime/native/repository-policy-test.py --enforce
+

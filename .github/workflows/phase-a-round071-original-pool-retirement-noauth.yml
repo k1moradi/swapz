@@ -1,12 +1,6 @@
 name: Round071 original zswap pool retirement decoder native NO_AUTH
 on:
-  push:
-    branches: [main]
-    paths:
-      - 'tests/runtime/native/fixtures/round071-original-pool-retirement-kunit.cfrag'
-      - 'tests/tools/round071-stage-original-pool-retirement.py'
-      - 'tests/tools/round071-original-pool-retirement-verify.py'
-      - '.github/workflows/phase-a-round071-original-pool-retirement-noauth.yml'
+  # Archived native lane; explicit dispatch only (owner physical-first).
   workflow_dispatch:
 permissions:
   contents: read

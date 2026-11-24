@@ -1,16 +1,6 @@
 name: Round063 opt-in original STORED clone ref to accepted current production DM NO_AUTH
 on:
-  push:
-    branches: [main]
-    paths:
-      - 'src/kernel/dm-target.c'
-      - 'tests/runtime/native/fixtures/round058-dm-ingress-*'
-      - 'tests/tools/round058-dm-ingress-*'
-      - '.github/workflows/phase-a-round063-original-mm-dm-carrier-noauth.yml'
-      - 'tests/runtime/native/fixtures/round063-original-dm-owner-*'
-      - 'tests/tools/round063-original-dm-owner-verify.py'
-      - 'tests/tools/stage-pinned-linux-zswap-composed.py'
-      - 'docs/testing_standards.md'
+  # Archived native lane; explicit dispatch only (owner physical-first).
   workflow_dispatch:
 permissions:
   contents: read

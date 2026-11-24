@@ -1,13 +1,6 @@
 name: Round071 pinned-original zswap provenance negative NO_AUTH
 on:
-  push:
-    branches: [main]
-    paths:
-      - '.github/workflows/phase-a-round071-original-zswap-provenance-noauth.yml'
-      - 'tests/runtime/native/fixtures/round071-original-zswap-provenance.cfrag'
-      - 'tests/tools/round071-stage-original-zswap-provenance.py'
-      - 'tests/tools/round071-original-zswap-provenance-verify.py'
-      - 'docs/handoff/zswapz/round071/agent3-evidence.md'
+  # Archived native lane; explicit dispatch only (owner physical-first).
   workflow_dispatch:
 permissions:
   contents: read

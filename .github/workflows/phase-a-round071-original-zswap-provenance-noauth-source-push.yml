@@ -1,0 +1,42 @@
+name: "Round071 pinned-original zswap provenance negative NO_AUTH (automatic non-VM source)"
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/phase-a-round071-original-zswap-provenance-noauth.yml'
+      - '.github/workflows/phase-a-round071-original-zswap-provenance-noauth-source-push.yml'
+      - 'tests/runtime/native/fixtures/round071-original-zswap-provenance.cfrag'
+      - 'tests/tools/round071-stage-original-zswap-provenance.py'
+      - 'tests/tools/round071-original-zswap-provenance-verify.py'
+      - 'docs/handoff/zswapz/round071/agent3-evidence.md'
+permissions:
+  contents: read
+jobs:
+  source-linked-host-negative:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Exact clean main and strict source-extracted GCC Clang semantic mutants
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
+          test "$(git branch --show-current)" = main
+          test -z "$(git status --porcelain)"
+          git diff --check HEAD^ HEAD
+          python3 -B tests/tools/round071-original-zswap-provenance-verify.py
+          python3 -B - <<'PY'
+          import ast
+          from pathlib import Path
+          ast.parse(Path('tests/tools/round071-stage-original-zswap-provenance.py').read_text())
+          print('ROUND071_PROVENANCE_STAGER_PYTHON_SYNTAX_PASS')
+          PY
+      - name: Verify inherited testing standards literal prefix
+        env:
+          SWAPZ_PUSH_BEFORE_SHA: ${{ github.event.before }}
+        run: python3 -B tests/runtime/native/repository-policy-test.py --enforce
+

@@ -1,14 +1,6 @@
 name: Round069 true original BIO endio joined actual authority callback no AUTH
 on:
-  push:
-    branches: [main]
-    paths:
-      - 'src/kernel/authority.c'
-      - 'src/kernel/authority.h'
-      - 'tests/runtime/native/fixtures/round069-original-bio-authority-joined.cfrag'
-      - 'tests/tools/round069-stage-original-bio-authority-joined.py'
-      - 'tests/tools/round069-original-bio-authority-joined-verify.py'
-      - '.github/workflows/phase-a-round069-original-bio-authority-joined-noauth.yml'
+  # Archived native lane; explicit dispatch only (owner physical-first).
   workflow_dispatch:
 permissions:
   contents: read

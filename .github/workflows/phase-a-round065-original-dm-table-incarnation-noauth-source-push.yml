@@ -1,0 +1,217 @@
+name: "Round066 pinned original full inherited DM table lineage and native lifetime NO_AUTH (automatic non-VM source)"
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'src/kernel/dm-target.c'
+      - '.github/workflows/phase-a-round065-original-dm-table-incarnation-noauth.yml'
+      - '.github/workflows/phase-a-round065-original-dm-table-incarnation-noauth-source-push.yml'
+      - 'tests/runtime/native/fixtures/round065-original-table-*'
+      - 'tests/runtime/native/fixtures/round065-original-dm-core.cfrag'
+      - 'tests/tools/round065-stage-original-dm-table.py'
+      - 'tests/tools/round065-original-dm-table-incarnation-verify.py'
+      - 'tests/tools/round056-original-clone-stage.py'
+      - 'tests/tools/round058-original-stored-bio-chain.py'
+      - 'tests/tools/round066-stage-lineage-verify.py'
+      - 'docs/handoff/zswapz/round066/agent3-evidence.md'
+permissions:
+  contents: read
+jobs:
+  rootless-product-source-host:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 18
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Exact main SHA, clean first-parent code diff, and strict actual source-C semantics
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
+          test "$(git branch --show-current)" = main
+          test -z "$(git status --porcelain)"
+          git diff --check HEAD^ HEAD
+          python3 -B tests/tools/round063-original-dm-owner-verify.py
+          python3 -B tests/tools/round064-original-slot-current-target-verify.py
+          python3 -B tests/tools/round065-original-dm-table-incarnation-verify.py
+          # The real two compositor lineages are tested in native stages.
+          python3 -B - <<'PY'
+          import ast
+          from pathlib import Path
+          for path in ("tests/tools/round056-original-clone-stage.py",
+                       "tests/tools/round058-original-stored-bio-chain.py",
+                       "tests/tools/round065-stage-original-dm-table.py",
+                       "tests/tools/round066-stage-lineage-verify.py"):
+              ast.parse(Path(path).read_text(), filename=path)
+          print("ROUND066_STAGE_ALL_FOUR_PYTHON_SYNTAX_PASS")
+          PY
+          python3 -B tests/tools/round058-dm-ingress-verify.py
+          echo 'ROUND063_GCC_CLANG_ORIGINAL_OWNER_AND_PRODUCT_DM_NO_AUTH_HOST_PASS'
+      - name: Enforce same-commit canonical testing standards
+        env:
+          SWAPZ_PUSH_BEFORE_SHA: ${{ github.event.before }}
+        run: python3 -B tests/runtime/native/repository-policy-test.py --enforce
+
+  pinned-original-x86-y-n-matched-gpl:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 180
+    needs: rootless-product-source-host
+    strategy:
+      fail-fast: false
+      matrix:
+        zswap: ['y', 'n']
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          path: swapz
+          persist-credentials: false
+      - uses: actions/checkout@v4
+        with:
+          repository: torvalds/linux
+          ref: c339f4010dea8b0d754f84ace70cd1b089878ef8
+          fetch-depth: 1
+          path: linux
+          persist-credentials: false
+      - name: Install original Linux compilation prerequisites on ephemeral CI runner
+        run: |
+          set -Eeuo pipefail
+          sudo apt-get update -qq
+          sudo DEBIAN_FRONTEND=noninteractive apt-get install -y \
+            --no-install-recommends build-essential bc bison flex clang \
+            libelf-dev libssl-dev liblz4-dev kmod python3 binutils
+      - name: Verify pristine pinned base and compose explicitly modified original source
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          umask 077
+          test "$(git -C swapz rev-parse HEAD)" = "$GITHUB_SHA"
+          test "$(git -C linux rev-parse HEAD)" = c339f4010dea8b0d754f84ace70cd1b089878ef8
+          test -z "$(git -C linux status --porcelain --untracked-files=all)"
+          python3 -B swapz/tests/tools/stage-pinned-linux-zswap-composed.py \
+            --linux-root linux --manifest "$RUNNER_TEMP/round058-original-manifest.json"
+          git -C linux diff --check
+          python3 - "$RUNNER_TEMP/round058-original-manifest.json" <<'PY'
+          import hashlib, json, pathlib, sys
+          document = json.loads(pathlib.Path(sys.argv[1]).read_text())
+          assert document["source_sha"] == "c339f4010dea8b0d754f84ace70cd1b089878ef8"
+          assert document["original_source_verified"] is True
+          assert document["source_manifest_complete"] is True
+          for item in document["changed_paths"]:
+              assert hashlib.sha256((pathlib.Path("linux") / item["path"]).read_bytes()).hexdigest() == item["staged_sha256"]
+          PY
+          python3 -B swapz/tests/tools/round066-stage-lineage-verify.py \
+            --linux-root linux --base-manifest "$RUNNER_TEMP/round058-original-manifest.json" \
+            --mode pristine
+          python3 -B swapz/tests/tools/round065-stage-original-dm-table.py \
+            --linux-root linux --base-manifest "$RUNNER_TEMP/round058-original-manifest.json" \
+            --manifest "$RUNNER_TEMP/round065-original-dm-table-manifest.json"
+          git -C linux diff --check
+      - name: Full pinned original x86 ZSWAP y/n GPL provider and default/guarded dm-swapz Kbuild
+        timeout-minutes: 155
+        shell: bash
+        env:
+          ZSWAP_MATRIX: ${{ matrix.zswap }}
+        run: |
+          set -Eeuo pipefail
+          umask 077
+          phase=initial
+          first_error="$RUNNER_TEMP/round058-real-kbuild-first-error.log"
+          checked() {
+            phase="$1"; shift
+            if "$@" >"$first_error" 2>&1; then
+              printf 'ROUND065_REAL_KBUILD_PASS phase=%s zswap=%s\n' "$phase" "$ZSWAP_MATRIX"
+            else
+              result=$?
+              printf '::error::ROUND065_FIRST_ERROR phase=%s zswap=%s exit=%s\n' "$phase" "$ZSWAP_MATRIX" "$result" >&2
+              # Raw compiler diagnostics remain in the private runner file.
+              return "$result"
+            fi
+          }
+          kernel_flags='-DSWAPZ_ROUND065_ORIGINAL_DM_TABLE_TEST=1 -DSWAPZ_ROUND064_ORIGINAL_SLOT_TARGET_TEST=1 -DSWAPZ_ROUND056_PREERASE_SINGLE_OWNER_TEST=1 -DSWAPZ_ROUND063_ORIGINAL_DM_OWNER_TEST=1 -DSWAPZ_ROUND028_SLOT_EPOCH_SOURCE=1 -DSWAPZ_ROUND030_EVICTION_SNAPSHOT_SOURCE=1 -DSWAPZ_ROUND025_SIDEBAND_CI_ONLY=1 -DSWAPZ_ROUND031_MM_BIO_SOURCE=1 -DSWAPZ_ROUND032_BIO_COPY_VIEW_CI_ONLY=1'
+          dm_flags='-DSWAPZ_ROUND065_ORIGINAL_DM_TABLE_TEST=1 -DSWAPZ_ROUND064_ORIGINAL_SLOT_TARGET_TEST=1 -DSWAPZ_ROUND056_PREERASE_SINGLE_OWNER_TEST=1 -DSWAPZ_ROUND063_ORIGINAL_DM_OWNER_TEST=1 -DSWAPZ_ROUND024_DM_IMPORT_KBUILD_PROBE=1 -DSWAPZ_ROUND028_DM_OWNED_READBACK_TEST=1 -DSWAPZ_ROUND030_DM_COMPRESSED_COMMIT_TEST=1 -DSWAPZ_ROUND031_DM_LZ4_SIDECAR_TEST=1 -DSWAPZ_ROUND032_DM_LZ4_VIEW_VALIDATE_TEST=1 -DSWAPZ_ROUND033_DM_ORIGINAL_BIO_GPL_LINK_TEST=1 -DSWAPZ_ROUND058_DM_INGRESS_LIFETIME_TEST=1'
+          original="$RUNNER_TEMP/round058-linux-$ZSWAP_MATRIX"
+          ordinary="$RUNNER_TEMP/round058-dm-default-$ZSWAP_MATRIX"
+          guarded="$RUNNER_TEMP/round058-dm-guarded-$ZSWAP_MATRIX"
+          info="$RUNNER_TEMP/round058-source-build-info.h"
+          mkdir -p "$original" "$ordinary" "$guarded"
+          printf '#define SWAPZ_BUILD_SOURCE_SHA "%s"\n#define SWAPZ_BUILD_SOURCE_CLEAN 1\n#define SWAPZ_BUILD_SOURCE_CLEAN_STRING "1"\n' "$GITHUB_SHA" > "$info"
+          checked original-defconfig make -s -C linux "O=$original" CC=gcc defconfig
+          if [ "$ZSWAP_MATRIX" = y ]; then
+            checked original-config-y linux/scripts/config --file "$original/.config" \
+              --enable SWAP --enable ZSWAP --enable MODULES --enable MD \
+              --enable BLK_DEV_DM --enable CRYPTO_LZ4 --enable KUNIT \
+              --enable SWAP_BIO_ORIGIN_KUNIT_TEST
+          else
+            checked original-config-n linux/scripts/config --file "$original/.config" \
+              --enable SWAP --disable ZSWAP --enable MODULES --enable MD \
+              --enable BLK_DEV_DM --enable CRYPTO_LZ4 --enable KUNIT \
+              --enable SWAP_BIO_ORIGIN_KUNIT_TEST
+          fi
+          checked original-olddefconfig make -s -C linux "O=$original" CC=gcc olddefconfig
+          test "$(grep -Ec '^CONFIG_ZSWAP=y$' "$original/.config")" = "$([ "$ZSWAP_MATRIX" = y ] && echo 1 || echo 0)"
+          checked original-source-compile-Werror make -s -C linux \
+            "O=$original" CC=gcc -j2 W=1 "KCFLAGS=$kernel_flags -Werror" \
+            block/bio.o mm/page_io.o mm/swapfile.o drivers/md/dm.o
+          checked original-full-vmlinux make -s -C linux \
+            "O=$original" CC=gcc -j2 "KCFLAGS=$kernel_flags" vmlinux
+          checked original-full-modules make -s -C linux \
+            "O=$original" CC=gcc -j2 "KCFLAGS=$kernel_flags" modules
+          test -s "$original/vmlinux"
+          test -s "$original/Module.symvers"
+          checked exact-original-GPL-symvers python3 -B \
+            swapz/tests/tools/round033-original-consumer-verify.py \
+            verify-symvers --symvers "$original/Module.symvers"
+          checked default-actual-DM-W1-modpost make -s -C swapz/src/kernel \
+            "KDIR=$original" "SWAPZ_STAGE=$ordinary" \
+            "SWAPZ_BUILD_INFO=$info" CC=gcc -j2 W=1 KCFLAGS=-Werror all
+          checked guarded-actual-DM-W1-modpost make -s -C swapz/src/kernel \
+            "KDIR=$original" "SWAPZ_STAGE=$guarded" \
+            "SWAPZ_BUILD_INFO=$info" CC=gcc -j2 W=1 \
+            "KCFLAGS=$kernel_flags $dm_flags -Werror" all
+          test -s "$ordinary/dm-swapz.ko"
+          test -s "$guarded/dm-swapz.ko"
+          nm -a "$guarded/dm-target.o" > "$RUNNER_TEMP/round058-guarded-symbols.txt"
+          nm -a "$ordinary/dm-target.o" > "$RUNNER_TEMP/round058-default-symbols.txt"
+          for symbol in swapz_round058_dm_ingress_refuse swapz_round058_dm_terminal_refuse swapz_round058_dm_endio_refuse; do
+            grep -Fq "$symbol" "$RUNNER_TEMP/round058-guarded-symbols.txt"
+            if grep -Fq "$symbol" "$RUNNER_TEMP/round058-default-symbols.txt"; then
+              echo "::error::ROUND065_FIRST_ERROR guard-leaked-to-default $symbol" >&2
+              exit 3
+            fi
+          done
+          original_release="$(make -s -C linux "O=$original" kernelrelease)"
+          checked same-source-GPL-modpost python3 -B \
+            swapz/tests/tools/round033-original-consumer-verify.py \
+            verify-link --symvers "$original/Module.symvers" \
+            --default "$ordinary/dm-swapz.ko" --guarded "$guarded/dm-swapz.ko" \
+            --kernel-release "$original_release"
+          grep -Fq 'swapz_round063_original_dm_owner_get' "$original/Module.symvers"
+          grep -Fq 'swapz_round063_original_dm_owner_put' "$original/Module.symvers"
+          if ! awk '$2 == "swapz_round064_original_route_matches" && $4 == "EXPORT_SYMBOL_GPL" { found++ } END { exit found != 1 }' "$original/Module.symvers"; then
+            echo '::error::ROUND065_FIRST_ERROR staged-original-route-GPL-export-missing' >&2
+            exit 4
+          fi
+          for symbol in swapz_round065_original_table_select swapz_round065_original_table_matches swapz_round065_dm_owner_matches; do
+            if ! awk -v symbol="$symbol" '$2 == symbol && $4 == "EXPORT_SYMBOL_GPL" { found++ } END { exit found != 1 }' "$original/Module.symvers"; then
+              echo "::error::ROUND065_FIRST_ERROR native-table-GPL-export-missing $symbol" >&2
+              exit 4
+            fi
+          done
+          nm -u "$guarded/dm-swapz.ko" > "$RUNNER_TEMP/round063-current-dm-imports.txt"
+          if ! grep -Eq '[[:space:]]U swapz_round065_dm_owner_matches$' "$RUNNER_TEMP/round063-current-dm-imports.txt"; then
+            echo '::error::ROUND065_FIRST_ERROR guarded-native-table-import-missing' >&2
+            exit 4
+          fi
+          grep -Eq '[[:space:]]U swapz_round063_original_dm_owner_get$' "$RUNNER_TEMP/round063-current-dm-imports.txt"
+          grep -Eq '[[:space:]]U swapz_round063_original_dm_owner_put$' "$RUNNER_TEMP/round063-current-dm-imports.txt"
+          if ! grep -Eq '[[:space:]]U swapz_round064_original_route_matches$' "$RUNNER_TEMP/round063-current-dm-imports.txt"; then
+            echo '::error::ROUND065_FIRST_ERROR actual-guarded-DM-route-import-missing' >&2
+            exit 4
+          fi
+          if nm -u "$ordinary/dm-swapz.ko" | grep -Eq 'swapz_round063_original_dm_owner_(get|put)|swapz_round064_original_route_matches|swapz_round065_dm_owner_matches'; then
+            echo '::error::ROUND065_FIRST_ERROR imported-original-owner-leaked-to-default-DM' >&2
+            exit 4
+          fi
+          echo "ROUND065_TRUE_STAGED_ORIGINAL_X86_ZSWAP_${ZSWAP_MATRIX}_MATCHED_GPL_ACCEPTED_DM_OWNER_NO_AUTH_PASS"

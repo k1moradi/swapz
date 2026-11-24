@@ -1,12 +1,6 @@
 name: Round074 original swapcache source preflight requalification AUTH0
 on:
-  push:
-    branches: [main]
-    paths:
-      - '.github/workflows/phase-a-round072-original-swapcache-provenance-noauth.yml'
-      - 'tests/runtime/native/fixtures/round072-original-swapcache-provenance.cfrag'
-      - 'tests/tools/round072-stage-original-swapcache-provenance.py'
-      - 'tests/tools/round072-original-swapcache-provenance-verify.py'
+  # Archived native lane; explicit dispatch only (owner physical-first).
   workflow_dispatch:
 permissions:
   contents: read
