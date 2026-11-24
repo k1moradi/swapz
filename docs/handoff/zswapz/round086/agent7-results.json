@@ -3,8 +3,8 @@
   "agent": 7,
   "task_sha": "7732ea3eb7defb8112a87ead4b578dbe61c453ab",
   "source_parent": "1eba67adf09787f85ec5f59842613378a3669419",
-  "tested_commit": null,
-  "status": "PENDING_CI_REGISTRATION",
+  "tested_commit": "734c054cc55e2edc3a23e650ca7721cdb9f6c240",
+  "status": "COMPLETED_FAILURE_UPSTREAM_HEADER_CONVERSION",
   "source_blobs": {
     "src/kernel/zswap-original-decode.c": "eb1cd7f90d5edade9640e1ffe9dac3c8fe774644",
     "src/kernel/zswap-original-decode.h": "a247d1aaf9865de71f97cd980be806b8d8c7c20e",
@@ -43,20 +43,20 @@
   "local_exact_compiler": "NOT_RUN_DNS_FAILURE",
   "planned_mutants_per_compiler": 19,
   "actual_gcc": {
-    "baseline": "PENDING",
+    "baseline": "NOT_RUN",
     "mutants_compiled": 0,
     "mutants_executed": 0,
     "kills": 0
   },
   "actual_clang": {
-    "baseline": "PENDING",
+    "baseline": "NOT_RUN",
     "mutants_compiled": 0,
     "mutants_executed": 0,
     "kills": 0
   },
-  "run_id": null,
-  "job_id": null,
-  "first_error": null,
+  "run_id": 45448508227,
+  "job_id": 138638799087,
+  "first_error": "FIRST_ERROR round085-agent7 gcc compile zswap-import-decoder-owner.c exit=1: /tmp/swapz-round085-original-decode-o4qsvwmp/gcc/shim/linux/lz4.h:64:9: error: conversion from ‘size_t’ {aka ‘long unsigned int’} to ‘int’ may change value [-Werror=conversion]",
   "native": "NOT_RUN_HOST_ONLY",
   "source_mapped_authenticated": 0,
   "phase_a": "BLOCKED",
@@ -68,5 +68,29 @@
   "experimental_cap": 4095,
   "real_durability": false,
   "real_ack": false,
-  "normal_kbuild_changed": false
+  "normal_kbuild_changed": false,
+  "conclusion": "failure",
+  "run_url": "https://github.com/k1moradi/swapz/actions/runs/45448508227",
+  "job_url": "https://github.com/k1moradi/swapz/actions/runs/45448508227/job/138638799087",
+  "remote_preflight": "PASS_EXACT_MAIN_PARENT_POLICY_POSTIMAGES_ORIGINAL_18_BLOBS_19_ANCHORS",
+  "automatic_source_run_census": {
+    "total": 9,
+    "intended": 45448508227,
+    "other": [
+      45448508186,
+      45448507991,
+      45448508249,
+      45448508095,
+      45448508098,
+      45448508184,
+      45448508206,
+      45448508233
+    ]
+  },
+  "artifact_id": 14948355712,
+  "local_scoped_header_regression": {
+    "gcc": "PASS_original_failure_reproduced_scoped_header_accepted_product_narrowing_rejected",
+    "clang": "PASS_original_failure_reproduced_scoped_header_accepted_product_narrowing_rejected",
+    "scope": "exact upstream macro and inline body in minimal local snippet, not full pinned qualification"
+  }
 }
