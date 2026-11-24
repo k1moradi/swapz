@@ -1,6 +1,6 @@
 # Round088 Agent9 — physical-first readiness and VM routing
 
-Status: **PROGRESS — rootless routing PASS; physical qualification BLOCKED / NOT_RUN.** Source migration commit and actual run census will be pinned in the evidence-only update. Task dcb65dca9a3c2bd990aedb2829181d0c0e015ce2; refreshed routing baseline / expected parent f654ebf552319a3bd6e6eef260de3fd005681ae8. Read the immutable [Round088 contract](https://github.com/k1moradi/swapz/blob/dcb65dca9a3c2bd990aedb2829181d0c0e015ce2/docs/handoff/zswapz/round088/agent9-physical-first-readiness-p0.md), AGENTS.md, AGENT_CONTEXT physical rules, production acceptance and existing helper implementations. No other agent's implementation was used as a dependency.
+Status: **PROGRESS — rootless routing PASS; physical qualification BLOCKED / NOT_RUN.** Published source migration: [7afebebe0c968c77a77ebe179f6f88974763d25a](https://github.com/k1moradi/swapz/commit/7afebebe0c968c77a77ebe179f6f88974763d25a), sole parent f654ebf552319a3bd6e6eef260de3fd005681ae8; verified 43 changed paths and non-force expected-head publication. Exact-source CI is QUEUED. Task dcb65dca9a3c2bd990aedb2829181d0c0e015ce2; refreshed routing baseline / expected parent f654ebf552319a3bd6e6eef260de3fd005681ae8. Read the immutable [Round088 contract](https://github.com/k1moradi/swapz/blob/dcb65dca9a3c2bd990aedb2829181d0c0e015ce2/docs/handoff/zswapz/round088/agent9-physical-first-readiness-p0.md), AGENTS.md, AGENT_CONTEXT physical rules, production acceptance and existing helper implementations. No other agent's implementation was used as a dependency.
 
 ## Workflow migration and evidence
 
@@ -22,7 +22,7 @@ Status: **PROGRESS — rootless routing PASS; physical qualification BLOCKED / N
 | Physical helper / evidence only | 0 -> 0 |
 | Migration | 18 -> 0 |
 
-Migration predicted 24 workflows, 51 -> 34 job definitions (zero VM). Actual CI run census pending. Existing runs not cancelled; no manual dispatch or rerun.
+Migration predicted 24 workflows, 51 -> 34 job definitions (zero VM). Observed migration registration matches prediction: 24 exact-source workflow runs, all QUEUED at the recorded census; zero identified VM workflow routes. Mandatory [project-goals run 45460996091](https://github.com/k1moradi/swapz/actions/runs/45460996091), [repository-policy job 138683197489](https://github.com/k1moradi/swapz/actions/runs/45460996091/job/138683197489), [native rootless job 138683198413](https://github.com/k1moradi/swapz/actions/runs/45460996091/job/138683198413), [physical-evidence run 45460995520](https://github.com/k1moradi/swapz/actions/runs/45460995520) / [job 138683196285](https://github.com/k1moradi/swapz/actions/runs/45460995520/job/138683196285), [ticket rootless stage run 45460995152](https://github.com/k1moradi/swapz/actions/runs/45460995152) / [job 138683193711](https://github.com/k1moradi/swapz/actions/runs/45460995152/job/138683193711). All exact-source run IDs recorded in results JSON. No terminal remote result or first error observed. Existing runs not cancelled; no manual dispatch or rerun.
 
 ## Concrete physical admission correction
 

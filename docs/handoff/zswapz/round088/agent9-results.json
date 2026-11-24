@@ -3,7 +3,7 @@
   "agent": 9,
   "task": "dcb65dca9a3c2bd990aedb2829181d0c0e015ce2",
   "expected_parent": "f654ebf552319a3bd6e6eef260de3fd005681ae8",
-  "tested_commit": null,
+  "tested_commit": "7afebebe0c968c77a77ebe179f6f88974763d25a",
   "conclusion": "IN_PROGRESS",
   "first_error": null,
   "rootless": {
@@ -218,8 +218,273 @@
     }
   },
   "ci": {
-    "status": "PENDING_PUBLICATION",
-    "runs": []
+    "status": "QUEUED",
+    "total": 24,
+    "runs": [
+      {
+        "id": 45460995098,
+        "path": ".github/workflows/phase-a-round071-original-pool-retirement-noauth-source-push.yml",
+        "status": "queued",
+        "conclusion": null,
+        "head_sha": "7afebebe0c968c77a77ebe179f6f88974763d25a",
+        "html_url": "https://github.com/k1moradi/swapz/actions/runs/45460995098"
+      },
+      {
+        "id": 45460995774,
+        "path": ".github/workflows/phase-a-round071-original-zswap-provenance-noauth-source-push.yml",
+        "status": "queued",
+        "conclusion": null,
+        "head_sha": "7afebebe0c968c77a77ebe179f6f88974763d25a",
+        "html_url": "https://github.com/k1moradi/swapz/actions/runs/45460995774"
+      },
+      {
+        "id": 45460995520,
+        "path": ".github/workflows/physical-evidence-rootless.yml",
+        "status": "queued",
+        "conclusion": null,
+        "head_sha": "7afebebe0c968c77a77ebe179f6f88974763d25a",
+        "html_url": "https://github.com/k1moradi/swapz/actions/runs/45460995520"
+      },
+      {
+        "id": 45460994911,
+        "path": ".github/workflows/phase-a-round069-original-bio-authority-joined-noauth-source-push.yml",
+        "status": "queued",
+        "conclusion": null,
+        "head_sha": "7afebebe0c968c77a77ebe179f6f88974763d25a",
+        "html_url": "https://github.com/k1moradi/swapz/actions/runs/45460994911"
+      },
+      {
+        "id": 45460995269,
+        "path": ".github/workflows/kernel-debug.yml",
+        "status": "queued",
+        "conclusion": null,
+        "head_sha": "7afebebe0c968c77a77ebe179f6f88974763d25a",
+        "html_url": "https://github.com/k1moradi/swapz/actions/runs/45460995269"
+      },
+      {
+        "id": 45460996091,
+        "path": ".github/workflows/project-goals.yml",
+        "status": "queued",
+        "conclusion": null,
+        "head_sha": "7afebebe0c968c77a77ebe179f6f88974763d25a",
+        "html_url": "https://github.com/k1moradi/swapz/actions/runs/45460996091"
+      },
+      {
+        "id": 45460994945,
+        "path": ".github/workflows/product-codec.yml",
+        "status": "queued",
+        "conclusion": null,
+        "head_sha": "7afebebe0c968c77a77ebe179f6f88974763d25a",
+        "html_url": "https://github.com/k1moradi/swapz/actions/runs/45460994945"
+      },
+      {
+        "id": 45460995724,
+        "path": ".github/workflows/phase-a-round065-original-dm-table-incarnation-noauth-source-push.yml",
+        "status": "queued",
+        "conclusion": null,
+        "head_sha": "7afebebe0c968c77a77ebe179f6f88974763d25a",
+        "html_url": "https://github.com/k1moradi/swapz/actions/runs/45460995724"
+      },
+      {
+        "id": 45460995406,
+        "path": ".github/workflows/phase-a-round068-original-lower-bio-owned-noauth-source-push.yml",
+        "status": "queued",
+        "conclusion": null,
+        "head_sha": "7afebebe0c968c77a77ebe179f6f88974763d25a",
+        "html_url": "https://github.com/k1moradi/swapz/actions/runs/45460995406"
+      },
+      {
+        "id": 45460995093,
+        "path": ".github/workflows/phase-a-round058-original-stored-bio-chain-noauth-source-push.yml",
+        "status": "queued",
+        "conclusion": null,
+        "head_sha": "7afebebe0c968c77a77ebe179f6f88974763d25a",
+        "html_url": "https://github.com/k1moradi/swapz/actions/runs/45460995093"
+      },
+      {
+        "id": 45460995152,
+        "path": ".github/workflows/phase-a-round086-original-ticket-kernel-noauth.yml",
+        "status": "queued",
+        "conclusion": null,
+        "head_sha": "7afebebe0c968c77a77ebe179f6f88974763d25a",
+        "html_url": "https://github.com/k1moradi/swapz/actions/runs/45460995152"
+      },
+      {
+        "id": 45460994808,
+        "path": ".github/workflows/phase-a-round063-original-mm-dm-carrier-noauth-source-push.yml",
+        "status": "queued",
+        "conclusion": null,
+        "head_sha": "7afebebe0c968c77a77ebe179f6f88974763d25a",
+        "html_url": "https://github.com/k1moradi/swapz/actions/runs/45460994808"
+      },
+      {
+        "id": 45460995084,
+        "path": ".github/workflows/phase-a-zswap-round056-original-clone-provenance-source-push.yml",
+        "status": "queued",
+        "conclusion": null,
+        "head_sha": "7afebebe0c968c77a77ebe179f6f88974763d25a",
+        "html_url": "https://github.com/k1moradi/swapz/actions/runs/45460995084"
+      },
+      {
+        "id": 45460995409,
+        "path": ".github/workflows/phase-a-round068-original-decoder-owner-kunit-noauth-source-push.yml",
+        "status": "queued",
+        "conclusion": null,
+        "head_sha": "7afebebe0c968c77a77ebe179f6f88974763d25a",
+        "html_url": "https://github.com/k1moradi/swapz/actions/runs/45460995409"
+      },
+      {
+        "id": 45460994969,
+        "path": ".github/workflows/phase-a-round071-original-dm-upper-owner-noauth-source-push.yml",
+        "status": "queued",
+        "conclusion": null,
+        "head_sha": "7afebebe0c968c77a77ebe179f6f88974763d25a",
+        "html_url": "https://github.com/k1moradi/swapz/actions/runs/45460994969"
+      },
+      {
+        "id": 45460995294,
+        "path": ".github/workflows/phase-a-round069-original-zswap-stored-source-noauth-source-push.yml",
+        "status": "queued",
+        "conclusion": null,
+        "head_sha": "7afebebe0c968c77a77ebe179f6f88974763d25a",
+        "html_url": "https://github.com/k1moradi/swapz/actions/runs/45460995294"
+      },
+      {
+        "id": 45460995356,
+        "path": ".github/workflows/phase-a-round072-original-swapcache-provenance-noauth-source-push.yml",
+        "status": "queued",
+        "conclusion": null,
+        "head_sha": "7afebebe0c968c77a77ebe179f6f88974763d25a",
+        "html_url": "https://github.com/k1moradi/swapz/actions/runs/45460995356"
+      },
+      {
+        "id": 45460995745,
+        "path": ".github/workflows/phase-a-zswap-composed-source-source-push.yml",
+        "status": "queued",
+        "conclusion": null,
+        "head_sha": "7afebebe0c968c77a77ebe179f6f88974763d25a",
+        "html_url": "https://github.com/k1moradi/swapz/actions/runs/45460995745"
+      },
+      {
+        "id": 45460995330,
+        "path": ".github/workflows/phase-a-zswap-dm-original-table-gc-lifetime-noauth.yml",
+        "status": "queued",
+        "conclusion": null,
+        "head_sha": "7afebebe0c968c77a77ebe179f6f88974763d25a",
+        "html_url": "https://github.com/k1moradi/swapz/actions/runs/45460995330"
+      },
+      {
+        "id": 45460995004,
+        "path": ".github/workflows/systemd-package-readiness.yml",
+        "status": "queued",
+        "conclusion": null,
+        "head_sha": "7afebebe0c968c77a77ebe179f6f88974763d25a",
+        "html_url": "https://github.com/k1moradi/swapz/actions/runs/45460995004"
+      },
+      {
+        "id": 45460994865,
+        "path": ".github/workflows/phase-a-round067-original-dm-dispatch-runtime-noauth-source-push.yml",
+        "status": "queued",
+        "conclusion": null,
+        "head_sha": "7afebebe0c968c77a77ebe179f6f88974763d25a",
+        "html_url": "https://github.com/k1moradi/swapz/actions/runs/45460994865"
+      },
+      {
+        "id": 45460995476,
+        "path": ".github/workflows/phase-a-round072-original-mm-bio-authority-decoder-noauth-source-push.yml",
+        "status": "queued",
+        "conclusion": null,
+        "head_sha": "7afebebe0c968c77a77ebe179f6f88974763d25a",
+        "html_url": "https://github.com/k1moradi/swapz/actions/runs/45460995476"
+      },
+      {
+        "id": 45460995434,
+        "path": ".github/workflows/phase-a-round064-original-slot-current-target-noauth-source-push.yml",
+        "status": "queued",
+        "conclusion": null,
+        "head_sha": "7afebebe0c968c77a77ebe179f6f88974763d25a",
+        "html_url": "https://github.com/k1moradi/swapz/actions/runs/45460995434"
+      },
+      {
+        "id": 45460995644,
+        "path": ".github/workflows/phase-a-round073-original-reader-pin-gc-noauth-source-push.yml",
+        "status": "queued",
+        "conclusion": null,
+        "head_sha": "7afebebe0c968c77a77ebe179f6f88974763d25a",
+        "html_url": "https://github.com/k1moradi/swapz/actions/runs/45460995644"
+      }
+    ],
+    "jobs": [
+      {
+        "run": 45460995520,
+        "path": ".github/workflows/physical-evidence-rootless.yml",
+        "jobs": [
+          {
+            "id": 138683196285,
+            "name": "adversarial-physical-evidence",
+            "status": "queued",
+            "conclusion": null
+          }
+        ]
+      },
+      {
+        "run": 45460996091,
+        "path": ".github/workflows/project-goals.yml",
+        "jobs": [
+          {
+            "id": 138683197489,
+            "name": "Repository policy 7afebebe0c968c77a77ebe179f6f88974763d25a",
+            "status": "queued",
+            "conclusion": null
+          },
+          {
+            "id": 138683197887,
+            "name": "Make interface 7afebebe0c968c77a77ebe179f6f88974763d25a",
+            "status": "queued",
+            "conclusion": null
+          },
+          {
+            "id": 138683198062,
+            "name": "Rootless primary-lifecycle-audit 7afebebe0c968c77a77ebe179f6f88974763d25a",
+            "status": "queued",
+            "conclusion": null
+          },
+          {
+            "id": 138683198232,
+            "name": "Rootless production-readiness 7afebebe0c968c77a77ebe179f6f88974763d25a",
+            "status": "queued",
+            "conclusion": null
+          },
+          {
+            "id": 138683198244,
+            "name": "Rootless source-contract 7afebebe0c968c77a77ebe179f6f88974763d25a",
+            "status": "queued",
+            "conclusion": null
+          },
+          {
+            "id": 138683198413,
+            "name": "Native rootless 7afebebe0c968c77a77ebe179f6f88974763d25a",
+            "status": "queued",
+            "conclusion": null
+          }
+        ]
+      },
+      {
+        "run": 45460995152,
+        "path": ".github/workflows/phase-a-round086-original-ticket-kernel-noauth.yml",
+        "jobs": [
+          {
+            "id": 138683193711,
+            "name": "original-ticket-rootless-stage",
+            "status": "queued",
+            "conclusion": null
+          }
+        ]
+      }
+    ],
+    "expected_workflows": 24,
+    "observed_vm_routes": 0,
+    "first_error": null
   },
   "physical": {
     "status": "BLOCKED_NOT_RUN",
@@ -253,5 +518,6 @@
     "Mixed VM lanes retained to preserve non-VM checks",
     "No actual owner host/device/source admission or physical execution",
     "Remote CI pending; not qualified"
-  ]
+  ],
+  "parent": "f654ebf552319a3bd6e6eef260de3fd005681ae8"
 }
