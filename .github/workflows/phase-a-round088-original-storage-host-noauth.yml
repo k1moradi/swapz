@@ -1,0 +1,33 @@
+name: "Round088 original storage ordered HOST ONLY NO_AUTH"
+on:
+  push:
+    branches: [main]
+    paths:
+      - "src/kernel/zswap-original-storage.h"
+      - "src/kernel/zswap-original-storage.c"
+      - "tests/runtime/native/fixtures/round088-original-storage.c"
+      - "tests/tools/round088-original-storage-verify.py"
+      - ".github/workflows/phase-a-round088-original-storage-host-noauth.yml"
+permissions:
+  contents: read
+jobs:
+  original-storage-host:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Exact source and actual isolated storage sanitizer qualification
+        env:
+          SWAPZ_PUSH_BEFORE_SHA: ${{ github.event.before }}
+        run: python3 -B tests/tools/round088-original-storage-verify.py "$RUNNER_TEMP/agent5-storage"
+      - name: Preserve bounded result and private first cause
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: round088-agent5-original-storage-host
+          path: ${{ runner.temp }}/agent5-storage
+          if-no-files-found: warn
+          retention-days: 14

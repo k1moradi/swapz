@@ -20314,3 +20314,28 @@ AUTH0, Phase A BLOCKED, direct/forced RAW/import OFF; no live or physical I/O.
 ## Round087 Agent11 — correct original SMP execution backend (AUTH0)
 
 Preserve the immutable R086 build PASS/boot FAIL: actual UML kernel SHA256 6ad838ec6b13787abd17078c2f02e274fecbbbc5d5d70e8a9ec6f5b31b73c5e6, zero cases, first raw error `SMP is not supported with PTRACE userspace.` Do not repeat the unsupported backend or relax to UP. Before one corrected native build, verify exact pinned x86 KUnit QEMU config and launcher, x86 SMP/irq/spinlock sources, all inherited product and original pins and stage postimages. Reject missing/duplicate accelerator anchors in addition to six inherited negative tail plans. Scratch-only launcher replaces the three default KVM/HVF/TCG accelerator entries with explicit `tcg,thread=multi`; no fallback to KVM or HVF. Unprivileged runner QMP preflight must instantiate two vCPUs with qboot.rom, explicit TCG only, no attached disks/network, check actual QEMU version, firmware digest, QMP CPU list and KVM disabled before kernel compilation; approved ephemeral runner package provisioning only. Fail closed and retain the actual cause if unavailable. Build x86_64 SMP KUnit with actual debug spinlocks and atomic-sleep checking, no SWAP/ZSWAP; hash bzImage/vmlinux/config, verify actual linked product/case symbols and exact logged QEMU command. Execute all six inherited directed cases on a real two-vCPU guest, including bounded release/acquire IPI lock holder on the other CPU and synchronous join before lifetime release, failed reserve/claim with IRQ enabled/disabled, preemption/IRQ restoration, remote reference retirement, all prior count/byte/copy/claim/revocation/ABA/error checks. Require actual online CPU and distinct holder/contender marker, six exact PASS JSON and raw KTAP, no warnings or skips/crashes/errors. Run seven rootless diagnostic extraction regressions before build, including original PTRACE/no KTAP, real KUnit failure and earliest raw failure precedence; retain private raw logs and bounded first error even before KTAP. No production C/H or normal Kbuild wiring, no real selected-DM queue-lock proof, physical testing, extra reclaim, import or production BIO cap. AUTH0 Phase A BLOCKED; direct/forced RAW/import OFF.
+
+## Round088 Agent5 — dormant dedicated ordered original storage adapter
+
+Host-only test opt-in, no normal Kbuild or production route. Compile actual
+new storage adapter with unchanged extent, authority and codec sources,
+including actual dormant Round066/067 allocator, liveness and pin operations.
+Require real event.before equals exact sole parent, full clean checkout,
+blob pins, diff check, canonical policy and append-only standards before
+compiler. Strict GCC C2x / Clang C23 Werror ASan+UBSan; actual independent
+runtime semantic mutants only, compiler or sanitizer failure never a kill.
+Use explicitly RAM-only lower callbacks, not claimed durable physical I/O:
+full write then flush before existing reservation completion, failure and
+short write rollback, old mapping retained, failed read leaves output
+unchanged, byte-exact relocation, retired old pin and independent decoder
+lease until final put, capacity and physical reservation exhaustion. No
+fabricated upper ACK. Conservative original3568 dedicated offset0, exact
+zero pad; decline longer records. Existing dormant owner only accepts
+ordinary-invalid logicals, fixed eight records, no actual rotating GC
+or production sidecar accounting. Reject those modes rather than invent
+parallel allocator or map. Packed/experimental4095 storage publication,
+ordinary overwrite/discard, actual selected source, real decoder and
+durable lower adapter remain NO-GO until integrated. Ordinary cap3568,
+RAW_4096 full original uncompressed and map20 unchanged; MM/zswap only
+compressed RAM/natural eviction, swapz disk packing/GC only. AUTH0 Phase A
+BLOCKED direct handoff, forced RAW, import OFF; no new VM or physical test.
