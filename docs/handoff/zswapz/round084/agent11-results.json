@@ -1,7 +1,7 @@
 {
   "round": "084",
   "agent": 11,
-  "conclusion": "QUEUED",
+  "conclusion": "SUCCESS_HOST_ONLY",
   "assignment_sha": "1f8b9b89006af6cd8ad895239a023772b694cc36",
   "assignment_parent": "be84039bd108020c083ef1a929722ca6afe7f74f",
   "tested_source_commit": "f7df9058c7291d15b6159b6bbe95e8a845113bf4",
@@ -33,7 +33,7 @@
   "github_actions_run_url": "https://github.com/k1moradi/swapz/actions/runs/45395569647",
   "github_actions_job_url": "https://github.com/k1moradi/swapz/actions/runs/45395569647/job/138450309370",
   "first_error": null,
-  "first_error_scope": "NO_CI_ERROR_REPORTED_QUEUED",
+  "first_error_scope": "TERMINAL_NO_UNEXPECTED_CI_ERROR",
   "prepublication_tool_errors": [
     "Initial connector script syntax error before any writes",
     "Second connector batch exceeded per-call tool limit; no ref update",
@@ -45,26 +45,36 @@
     "actual_source_mutation_anchors_unique": 32,
     "standards_exact_prefix_verified": true,
     "source_commit_single_parent_verified": true,
-    "remote_exact_git_diff_whitespace": "PENDING",
-    "remote_full_blob_hashes": "PENDING",
+    "remote_exact_git_diff_whitespace": "PASS",
+    "remote_full_blob_hashes": "PASS",
     "local_c_execution": "NOT_RUN"
   },
   "remote_compilers": {
     "gcc": {
-      "baseline": "PENDING",
-      "mutants_compiled_confirmed": 0,
-      "mutants_executed_confirmed": 0,
-      "target": 32
+      "baseline": "PASS",
+      "mutants_compiled_confirmed": 32,
+      "mutants_executed_confirmed": 32,
+      "target": 32,
+      "semantic_kills": 32
     },
     "clang": {
-      "baseline": "PENDING",
-      "mutants_compiled_confirmed": 0,
-      "mutants_executed_confirmed": 0,
-      "target": 32
+      "baseline": "PASS",
+      "mutants_compiled_confirmed": 32,
+      "mutants_executed_confirmed": 32,
+      "target": 32,
+      "semantic_kills": 32
     }
   },
   "scope": "ACTUAL_DISABLED_REUSABLE_BROKER_HOST_ONLY",
-  "host_sizeof": "PENDING_CI",
+  "host_sizeof": {
+    "broker": 152,
+    "slot": 144,
+    "ref": 32,
+    "key": 120,
+    "index": 4,
+    "units": "bytes",
+    "scope": "actual host GCC and Clang; kernel adapter unqualified"
+  },
   "kernel_adapter": "UNQUALIFIED",
   "live_dm_claim": false,
   "caller_contract": "MOVE_ONLY_LEASE_AND_EXTERNAL_API_QUIESCENCE_BEFORE_DESTROY",
@@ -84,5 +94,22 @@
   "import_active": 0,
   "native": "NOT_RUN",
   "physical_durability": "NOT_PROVEN",
-  "actual_upper_ack": "NOT_PROVEN"
+  "actual_upper_ack": "NOT_PROVEN",
+  "agent1_verified_r085": {
+    "run_status": "completed",
+    "conclusion": "success",
+    "job_status": "completed",
+    "actual_log_marker": "PASS_HOST_ONLY ROUND084_AGENT11 GCC 32/32 Clang 32/32 independently compiled and executed",
+    "exact_source": "f7df9058c7291d15b6159b6bbe95e8a845113bf4",
+    "host_sizeof": {
+      "broker": 152,
+      "slot": 144,
+      "ref": 32,
+      "key": 120,
+      "index": 4,
+      "units": "bytes",
+      "scope": "actual host GCC and Clang; kernel adapter unqualified"
+    },
+    "limitations": "host pthread synchronization only; test supplied key; no actual DM, no physical lower/ACK; kernel adapter and foreign-lock ordering still unqualified"
+  }
 }

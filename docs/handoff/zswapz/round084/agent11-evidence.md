@@ -36,3 +36,8 @@ New exclusive files:
 - [.github/workflows/phase-a-round084-original-ticket-host-noauth.yml](https://github.com/k1moradi/swapz/blob/f7df9058c7291d15b6159b6bbe95e8a845113bf4/.github/workflows/phase-a-round084-original-ticket-host-noauth.yml) `37cf34899bd258eaebf12e952de778f55df052f4`
 
 No normal product C/H modifications, native build, physical operation, additional reclaim, production BIO cap or unsafe REQUEUE. Historical qualification preserved, no peer dependency or workflow reruns. Linux MM/zswap alone owns natural eviction; swapz disk packing/GC only. RAW_4096 full original uncompressed page. SOURCE_MAPPED_AUTHENTICATED=0, PHASE_A=BLOCKED, direct/forced RAW/import OFF.
+
+
+## Agent1 verified terminal checkpoint — Round085
+
+The earlier QUEUED snapshot is superseded for exact source `f7df9058c7291d15b6159b6bbe95e8a845113bf4` only. [Run 45395569647/job138450309370](https://github.com/k1moradi/swapz/actions/runs/45395569647/job/138450309370) COMPLETED SUCCESS. Actual terminal log: `PASS_HOST_ONLY ROUND084_AGENT11 GCC 32/32 Clang 32/32 independently compiled and executed`. Both baseline PASS, actual host sizeof broker152 slot144 ref32 key120 index4 bytes, both compilers. No unexpected first error; mutant FIRST_ERROR lines are expected behavioral kills. Exact-source preflight and repository policy passed. No local compiler execution retroactively asserted. Kernel adapter, actual selected clone and real queue-lock integration remain unqualified; current header explicitly forbids calls under foreign locks, so actual atomic claim+enqueue cannot be assumed safe without new lock-order proof. No physical durability, source auth or actual upper ACK. AUTH0 PhaseA BLOCKED all gates OFF.
