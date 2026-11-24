@@ -20229,3 +20229,45 @@ Phase A BLOCKED, direct compressed handoff, forced RAW and import OFF.
 ## Round086 Agent11 — actual disabled broker kernel synchronization adapter (AUTH0)
 
 Require clean exact push SHA/sole parent, canonical policy and full original/product blob pins before any build. Stage only into an isolated pinned original Linux checkout: two verified KUnit build/config tail additions and an opt-in subdirectory containing byte-exact broker/CRC C/H and the directed fixture. Reject six missing/duplicate/drifted tail plans, verify all stage postimages and exact changed/untracked paths; normal product Kbuild and C/H remain unchanged. Build one original x86 UML SMP kernel with two virtual CPUs, debug spinlock and atomic-sleep checks, CRC32, test-only config and disabled swap. UP debug trylock refusal is not a valid contention proof. Verify actual linked broker/CRC/case symbols, effective config and kernel SHA256. Execute six genuine KUnit cases: independent count/byte credits at both ceilings, real irqsave success/failure and preemption restoration, immutable CRC seal/one-shot claim, remote CPU retained reference and final put across revoke/close, generation/ref overflow and ABA, copy failure/cancel. No assertions or allocation while holding the broker lock; inspect exact copy/CRC unlocked boundary and reject native warnings/BUGs. Require six exact PASS JSON and raw KTAP cases, zero failed/skipped/crashed/errors. Record first failure and retained stage/build/boot evidence; pending is not PASS. This is actual test-only kernel API execution, not live selected-DM claim/enqueue, lock-order proof, durability or upper ACK. No foreign locks, production activation, BIO cap, physical testing or additional reclaim. AUTH0 Phase A BLOCKED; direct/forced RAW/import OFF.
+
+## Round086 Agent7 — applied dormant pure original typed decoder
+
+Qualification of the applied dormant independent original typed decoder requires
+exact pinned original Linux LZO1X and raw LZ4 compressor/decompressor
+objects, unchanged actual product CRC32C/SHA helpers and independently
+retained decoder lease. Before compiling, verify whole Git blobs for
+the pinned original source and every imported product/host helper,
+single-parent clean source provenance and same-commit append-only
+testing standards. The candidate is not wired into normal Kbuild or
+activated by this test. Separate pre-write byte validation from durable
+mapping/read authority: never fabricate lower-write, read or ACK receipts.
+
+Validate representation0x5a, original raw LZ4 tag1 or LZO1X tag2,
+version1, dictionary0, positive compressed length with separate 3568
+or 4095 ceilings, actual input/scratch/output capacities and all accessed
+ranges including descriptor/digest, retained lease and owner. Decode
+exactly4096 bytes, verify compressed CRC32C and original-page SHA256,
+and preserve all output bytes on failure. Scratch is expendable.
+Exercise deterministic valid compressed streams above3568 for both
+original codecs; record actual compressed lengths near4095 rather than
+inventing streams for geometric endpoints. Geometry1/3568/3569/4095/
+4096 is not itself codec validity. Test rejected raw4096, short output,
+trailing/truncated input, wrong profile, wrong digest, alias and stale
+or absent lease. Caller owns immutable bytes and genuine exclusive
+lease; external source/selected-DM authentication is still required.
+
+Use strict GCC C23/C2x and Clang C23/C2x, Werror ASan+UBSan on all
+candidate/product/fixture TUs, with the documented upstream-only GNU11
+host ABI shim and unchanged pristine original source. Require each of
+19 independently compiled, linked and executed candidate C mutants
+per compiler to fail its named behavioral assertion; compiler failure,
+sanitizer crash or system-library diagnostic is not pinned-source
+qualification. No native or physical testing. Run only the focused Round086 host lane
+with real push-before parent, exact candidate postimages, whole source
+pins and unique anchors before any expensive compiler invocation. Linux MM/zswap alone manages
+compressed RAM and natural eviction; swapz disk packing/GC only,
+no competing reclaim or recompression of accepted bytes. Ordinary
+RAW_4096 is the complete original uncompressed page; ordinary cap3568,
+20-byte volatile map and protected physical SWAPSPACE2 first4096
+remain unchanged. SOURCE_MAPPED_AUTHENTICATED=0, PHASE_A=BLOCKED,
+direct/forced RAW/import OFF.

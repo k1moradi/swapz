@@ -1,0 +1,118 @@
+name: Round086 pinned original typed decoder HOST ONLY NO_AUTH
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'src/kernel/zswap-original-decode.c'
+      - 'src/kernel/zswap-original-decode.h'
+      - 'src/kernel/zswap-import-codec.h'
+      - 'src/kernel/zswap-import-decoder-owner.c'
+      - 'src/kernel/zswap-import-decoder-owner.h'
+      - 'src/kernel/codec.c'
+      - 'src/kernel/codec.h'
+      - 'tests/runtime/native/fixtures/round085-original-decode.c'
+      - 'tests/tools/round085-original-decode-verify.py'
+      - 'tests/tools/round080-original-lzo1x-independent-decoder-verify.py'
+      - '.github/workflows/phase-a-round086-original-typed-decode-host-noauth.yml'
+permissions:
+  contents: read
+jobs:
+  original-typed-decode-strict-host:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          path: swapz
+          fetch-depth: 2
+          persist-credentials: false
+      - name: Exact main source, actual push parent, policy and candidate postimages
+        working-directory: swapz
+        env:
+          SWAPZ_PUSH_BEFORE_SHA: ${{ github.event.before }}
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          trap 'echo "::error::ROUND086_AGENT7_FIRST_ERROR product preflight line=$LINENO" >&2' ERR
+          test "$GITHUB_REF" = refs/heads/main
+          test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
+          test "$(git branch --show-current)" = main
+          test "$(git cat-file -p HEAD | awk 'BEGIN { header=1 } /^$/ { header=0 } header && /^parent / { print $2 }')" = "$SWAPZ_PUSH_BEFORE_SHA"
+          test "$(git rev-parse --verify HEAD^1)" = "$SWAPZ_PUSH_BEFORE_SHA"
+          test "$(git rev-list --parents -n1 HEAD | wc -w)" -eq 2
+          test -z "$(git status --porcelain --untracked-files=all)"
+          git diff --check HEAD^ HEAD
+          python3 -B tests/runtime/native/repository-policy-test.py --enforce
+          test "$(git hash-object src/kernel/zswap-original-decode.c)" = eb1cd7f90d5edade9640e1ffe9dac3c8fe774644
+          test "$(git hash-object src/kernel/zswap-original-decode.h)" = a247d1aaf9865de71f97cd980be806b8d8c7c20e
+          test "$(git hash-object tests/runtime/native/fixtures/round085-original-decode.c)" = 1de6f01fca08637c2877eeb396dca81a0e7efd02
+          test "$(git hash-object tests/tools/round085-original-decode-verify.py)" = 93f7cfed08a2fc34041fc4470e3d146147267ddb
+      - uses: actions/checkout@v4
+        with:
+          repository: torvalds/linux
+          ref: c339f4010dea8b0d754f84ace70cd1b089878ef8
+          path: original-linux
+          fetch-depth: 1
+          persist-credentials: false
+          sparse-checkout-cone-mode: false
+          sparse-checkout: |
+            mm/zswap.c
+            crypto/lzo.c
+            crypto/lz4.c
+            include/linux/lzo.h
+            include/linux/lz4.h
+            lib/lzo/lzo1x_compress.c
+            lib/lzo/lzo1x_compress_safe.c
+            lib/lzo/lzo1x_decompress_safe.c
+            lib/lzo/lzodefs.h
+            lib/lz4/lz4_compress.c
+            lib/lz4/lz4_decompress.c
+            lib/lz4/lz4defs.h
+      - name: Pristine original source and all whole blobs and mutation anchors before compilers
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          trap 'echo "::error::ROUND086_AGENT7_FIRST_ERROR original preflight line=$LINENO" >&2' ERR
+          test "$(git -C original-linux rev-parse HEAD)" = c339f4010dea8b0d754f84ace70cd1b089878ef8
+          test -z "$(git -C original-linux status --porcelain --untracked-files=all)"
+          python3 -B swapz/tests/tools/round085-original-decode-verify.py --linux-root original-linux --preflight-only
+          for dependency in gcc clang python3; do
+            if ! command -v "$dependency" >/dev/null; then
+              echo "::error::ROUND086_AGENT7_FIRST_ERROR missing tool $dependency" >&2
+              exit 1
+            fi
+          done
+          test -f /usr/include/openssl/sha.h
+      - name: Actual pinned original LZO1X and raw LZ4 with candidate and real product owner and CRC
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          umask 077
+          mkdir -p "$RUNNER_TEMP/round086-agent7"
+          evidence="$RUNNER_TEMP/round086-agent7"
+          if python3 -B swapz/tests/tools/round085-original-decode-verify.py \
+              --linux-root original-linux >"$evidence/results.json" 2>"$evidence/host.log"; then
+            cat "$evidence/host.log"
+            cat "$evidence/results.json"
+          else
+            code=$?
+            echo "::error::ROUND086_AGENT7_FIRST_ERROR strict host qualification exit=$code" >&2
+            tail -n 45 "$evidence/host.log" >&2
+            exit "$code"
+          fi
+          if ! status=$(git -C swapz status --porcelain --untracked-files=all) || [[ -n "$status" ]]; then
+            echo "::error::ROUND086_AGENT7_FIRST_ERROR product changed during tests" >&2
+            exit 1
+          fi
+          if ! status=$(git -C original-linux status --porcelain --untracked-files=all) || [[ -n "$status" ]]; then
+            echo "::error::ROUND086_AGENT7_FIRST_ERROR original source changed during tests" >&2
+            exit 1
+          fi
+      - name: Retain exact host result and bounded first error
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: round086-original-typed-decode-host
+          path: ${{ runner.temp }}/round086-agent7/
+          if-no-files-found: warn
+          retention-days: 14
