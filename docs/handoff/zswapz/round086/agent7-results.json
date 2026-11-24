@@ -3,8 +3,8 @@
   "agent": 7,
   "task_sha": "7732ea3eb7defb8112a87ead4b578dbe61c453ab",
   "source_parent": "3f4b9cc8eb52dd971cbe28a586f0f46b21808956",
-  "tested_commit": null,
-  "status": "PENDING_CHANGED_SOURCE_HEADER_SCOPE_REPAIR",
+  "tested_commit": "c5d5951a3842418fa0b52acb4d6cc791601b6038",
+  "status": "QUEUED_CHANGED_SOURCE_HEADER_SCOPE_REPAIR",
   "source_blobs": {
     "src/kernel/zswap-original-decode.c": "eb1cd7f90d5edade9640e1ffe9dac3c8fe774644",
     "src/kernel/zswap-original-decode.h": "a247d1aaf9865de71f97cd980be806b8d8c7c20e",
@@ -54,8 +54,8 @@
     "mutants_executed": 0,
     "kills": 0
   },
-  "run_id": null,
-  "job_id": null,
+  "run_id": 45449747704,
+  "job_id": 138643232323,
   "first_error": null,
   "native": "NOT_RUN_HOST_ONLY",
   "source_mapped_authenticated": 0,
@@ -70,10 +70,24 @@
   "real_ack": false,
   "normal_kbuild_changed": false,
   "conclusion": null,
-  "run_url": null,
-  "job_url": null,
+  "run_url": "https://github.com/k1moradi/swapz/actions/runs/45449747704",
+  "job_url": "https://github.com/k1moradi/swapz/actions/runs/45449747704/job/138643232323",
   "remote_preflight": "PENDING",
-  "automatic_source_run_census": null,
+  "automatic_source_run_census": {
+    "total": 10,
+    "intended": 45449747704,
+    "other": [
+      45449747735,
+      45449747581,
+      45449747545,
+      45449747582,
+      45449747513,
+      45449747551,
+      45449747517,
+      45449747691,
+      45449747587
+    ]
+  },
   "artifact_id": null,
   "local_scoped_header_regression": {
     "gcc": "PASS_original_failure_reproduced_scoped_header_accepted_product_narrowing_rejected",
@@ -117,5 +131,8 @@
       "artifact_id": 14948355712,
       "evidence_commit": "3f4b9cc8eb52dd971cbe28a586f0f46b21808956"
     }
-  ]
+  ],
+  "first_error_status": "PENDING_NO_COMPILER_EXECUTION_OBSERVED",
+  "run_status_observed": "queued",
+  "job_status_observed": "queued"
 }
