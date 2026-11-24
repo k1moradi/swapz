@@ -3,8 +3,8 @@
   "agent": 7,
   "task_sha": "9924c6a88e7f2dcce2b729d4d9263703dd92139f",
   "source_parent": "9924c6a88e7f2dcce2b729d4d9263703dd92139f",
-  "tested_commit": null,
-  "status": "DIAGNOSTIC_SOURCE_PENDING_REGISTRATION",
+  "tested_commit": "034274ddecf1c0f62b06459b014a7d4456752e52",
+  "status": "COMPLETED_FAILURE_UPSTREAM_LZ4_UBSAN_AUTHORIZATION_REQUIRED",
   "changed_blobs": {
     "tests/tools/round085-original-decode-verify.py": "8041e4d6fcc269452e1445e8d7e43d77f3d6a7f8",
     ".github/workflows/phase-a-round086-original-typed-decode-host-noauth.yml": "f333d38fc156ca38f513437c8ccd65f34741ab6c",
@@ -64,23 +64,106 @@
     "exact_pinned_compile": "NOT_RUN_DNS_FAILURE"
   },
   "actual_gcc": {
-    "baseline": "PENDING",
-    "mutants_compiled": 0,
-    "mutants_executed": 0,
-    "kills": 0
+    "standard": "c2x",
+    "baseline": "PASS",
+    "mutants_compiled": 19,
+    "mutants_executed": 19,
+    "kills": 19,
+    "profiles": {
+      "raw_lz4": {
+        "small": 91,
+        "large": 4095
+      },
+      "lzo1x": {
+        "small": 110,
+        "large": 4077
+      }
+    }
   },
   "actual_clang": {
-    "baseline": "PENDING",
+    "baseline": "FAIL",
     "mutants_compiled": 0,
     "mutants_executed": 0,
-    "kills": 0
+    "kills": 0,
+    "header_scope": "PASS"
   },
-  "first_error": null,
-  "root_cause": "UNKNOWN_PENDING_ACTUAL_DIAGNOSTIC",
+  "first_error": {
+    "compiler": "clang",
+    "stage": "execute-baseline",
+    "kind": "sanitizer",
+    "sanitizer": "UBSan",
+    "category": "applying zero offset to null pointer",
+    "location": "lz4_compress.c:192:42",
+    "exit": 1
+  },
+  "root_cause": {
+    "source": "lib/lz4/lz4_compress.c",
+    "blob": "2a397bb2c661d9c2e4a7a67d5f50f06bfd42f1f2",
+    "line": 192,
+    "expression": "dictionary + dictPtr->dictSize",
+    "reset_line": 771,
+    "reset_call_line": 472,
+    "no_dictionary_call_lines": [
+      479,
+      480,
+      481,
+      482
+    ],
+    "explanation": "LZ4_compress_default -> LZ4_compress_fast -> LZ4_compress_fast_extState resets stream to zero then calls generic with noDict; unconditional null+0 is instrumented by Clang. Not established candidate or shim defect.",
+    "status": "UPSTREAM_PIN_CHANGE_REQUIRES_SEPARATE_AGENT1_AUTHORITY"
+  },
   "source_mapped_authenticated": 0,
   "phase_a": "BLOCKED",
   "direct_handoff": false,
   "forced_raw_bypass": false,
   "import_active": false,
-  "native": "NOT_RUN_HOST_ONLY"
+  "native": "NOT_RUN_HOST_ONLY",
+  "conclusion": "failure",
+  "run_id": 45455475160,
+  "job_id": 138663621908,
+  "run_url": "https://github.com/k1moradi/swapz/actions/runs/45455475160",
+  "job_url": "https://github.com/k1moradi/swapz/actions/runs/45455475160/job/138663621908",
+  "artifact_id": 14949408580,
+  "artifact_url": "https://github.com/k1moradi/swapz/actions/runs/45455475160/artifacts/14949408580",
+  "remote_preflight": "PASS_EXACT_PARENT_POLICY_POSTIMAGES_18_PINS_19_ANCHORS",
+  "remote_diagnostic_regression": {
+    "gcc": "PASS",
+    "clang": "PASS"
+  },
+  "local_expression_probe": {
+    "compiler": "clang 17",
+    "flags": "GNU11 -O1 -Wall -Wextra -Werror ASan+UBSan no-recover",
+    "original": {
+      "exit": 1,
+      "category": "applying zero offset to null pointer"
+    },
+    "prospective_noDict_guard": {
+      "exit": 0,
+      "stderr": "empty"
+    },
+    "scope": "minimal expression reproduction, not full pinned original object nor native qualification"
+  },
+  "diagnostic_retention": {
+    "actual_category_location_exit": "PASS",
+    "partial_compiler_json": "PASS",
+    "artifact_uploaded": "PASS",
+    "artifact_contents_downloaded": false
+  },
+  "automatic_source_run_census": {
+    "total": 10,
+    "intended": 45455475160,
+    "other": [
+      45455475302,
+      45455475098,
+      45455475119,
+      45455475253,
+      45455475108,
+      45455475180,
+      45455475164,
+      45455475196,
+      45455475137
+    ]
+  },
+  "evidence_parent": "6ed61d05c45dd0fcee589abb9c88f1976a97e7b9",
+  "next": "Request Agent1 separate lease to stage a narrowly reviewed pinned-upstream correction in isolated original test checkout, record pristine and staged blob hashes; no source changes or unchanged reruns pending authorization."
 }
