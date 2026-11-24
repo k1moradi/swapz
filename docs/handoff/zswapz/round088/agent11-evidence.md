@@ -1,6 +1,6 @@
 # Round088 Agent11 — unapplied original MM pre-erase and BIO carrier candidate
 
-**IN_PROGRESS — actual reviewable disabled staged patch published; rootless exact-source stage/host CI pending. NO-GO live integration/activation.** [Assignment](https://github.com/k1moradi/swapz/commit/dcb65dca9a3c2bd990aedb2829181d0c0e015ce2), sole parent `cf5a539913fd169fd71bac72c61bc355285a51f6`. [Source/test commit](https://github.com/k1moradi/swapz/commit/28527084a205d7465748af29f6f92dcba420c36e), sole parent `58e2182ca9b6fb940c22174274f07953795d602f`. [Run 45459276984](https://github.com/k1moradi/swapz/actions/runs/45459276984), [job 138677070938](https://github.com/k1moradi/swapz/actions/runs/45459276984/job/138677070938), in progress at observation (checkout; exact source and compiler steps not yet confirmed). First corrected CI error: none reported. GCC/Clang actual executed counts pending; no local host or kernel execution claimed.
+**PASS_HOST_ONLY — exact-source stage and extracted carrier helpers qualified; reviewable disabled patch remains unapplied to production. NO-GO live integration/activation.** [Assignment](https://github.com/k1moradi/swapz/commit/dcb65dca9a3c2bd990aedb2829181d0c0e015ce2), sole parent `cf5a539913fd169fd71bac72c61bc355285a51f6`. [Source/test commit](https://github.com/k1moradi/swapz/commit/28527084a205d7465748af29f6f92dcba420c36e), sole parent `58e2182ca9b6fb940c22174274f07953795d602f`. [Run 45459276984](https://github.com/k1moradi/swapz/actions/runs/45459276984), [job 138677070938](https://github.com/k1moradi/swapz/actions/runs/45459276984/job/138677070938), completed SUCCESS. GCC 63/63 and Clang 63/63, 126 executed checks total. First actual test error: none observed. No local host or kernel execution claimed.
 
 ## Actual patch, ownership and limits
 
@@ -13,9 +13,9 @@
 
 ## Exact-source qualification
 
-[Verifier](https://github.com/k1moradi/swapz/blob/28527084a205d7465748af29f6f92dcba420c36e/tests/tools/round088-original-mm-carrier-verify.py) checks pinned pristine bytes and independently applies the actual unified patch to a disposable copy with git apply --unidiff-zero; compares exact seven postimage blobs, no other pinned inputs changed; duplicate refusal and reverse-check; actual source anchor/order checks for store/SG/writeback/sio/BIO terminal. Connector computed predicted exact postimages and checked 29 hunk preimages. An initial partial-line block/bio.c packaging anchor was rejected before any ref update, then regenerated. CI actual apply and compilation not yet observed.
+[Verifier](https://github.com/k1moradi/swapz/blob/28527084a205d7465748af29f6f92dcba420c36e/tests/tools/round088-original-mm-carrier-verify.py) checks pinned pristine bytes and independently applies the actual unified patch to a disposable copy with git apply --unidiff-zero; compares exact seven postimage blobs, no other pinned inputs changed; duplicate refusal and reverse-check; actual source anchor/order checks for store/SG/writeback/sio/BIO terminal. Connector computed predicted exact postimages and checked 29 hunk preimages. An initial partial-line block/bio.c packaging anchor was rejected before any ref update, then regenerated. CI actual scratch apply, seven postimage pins, fifteen pristine pins, duplicate rejection, reverse-check and source-order checks passed.
 
-[Host fixture](https://github.com/k1moradi/swapz/blob/28527084a205d7465748af29f6f92dcba420c36e/tests/runtime/native/fixtures/round088-original-mm-carrier.c) extracts exact actual staged header and profile/candidate functions with only kernel includes removed for explicit BIO ABI shim; strict GCC and Clang C23/C2x Werror ASan/UBSan against actual unchanged broker and codec. Exercises typed profiles, exclusive pointer moves, original geometry and malformed/reissued/cloned/remapped/absent borrow rejection, real retained lease/immutable bytes/credits across revoke and close. Host shim does not execute actual SG, store, BIO, workqueue or selected DM. Actual patched original kernel compile/link NOT_RUN; no VM/new native, no physical. No mutation count claimed.
+[Host fixture](https://github.com/k1moradi/swapz/blob/28527084a205d7465748af29f6f92dcba420c36e/tests/runtime/native/fixtures/round088-original-mm-carrier.c) extracts exact actual staged header and profile/candidate functions with only kernel includes removed for explicit BIO ABI shim; strict GCC and Clang C23/C2x Werror ASan/UBSan against actual unchanged broker and codec. Exercises typed profiles, exclusive pointer moves, original geometry and malformed/reissued/cloned/remapped/absent borrow rejection, real retained lease/immutable bytes/credits across revoke and close. Host shim does not execute actual SG, store, BIO, workqueue or selected DM. Actual patched original kernel compile/link NOT_RUN; no VM/new native, no physical. No semantic mutation suite executed; duplicate patch application rejection and reverse-check passed.
 
 ## Immutable pins
 
@@ -36,7 +36,7 @@ Pristine original:
 - include/crypto/acompress.h `5d5358dfab73458fc4bc345fe00650e938fe36c6`
 - include/crypto/sha2.h `22fbc37ae840796ecbafd5eadf23373e51741f9e`
 
-Predicted staged postimages:
+CI-verified staged postimages:
 - mm/zswap.c `e3caa72ca37a7a3cdb3ed51639d9507b22fe4e51`
 - mm/page_io.c `0b0fe917fa3af5deaef8263274edffbf1a62eedb`
 - include/linux/swap_ops.h `a39a1921daf6f272e9812eb63b1aa64fec96c57f`
@@ -67,3 +67,19 @@ Standards prior `09564b946a300ef12fee4375f752ec78aea8e1a4`, appended `6802dc7db7
 R087 actual broker adapter six-case PASS accepted by Agent1: [job](https://github.com/k1moradi/swapz/actions/runs/45455624750/job/138664150782), [artifact](https://github.com/k1moradi/swapz/actions/runs/45455624750/artifacts/14950116706). No repeat; R086 UML failure preserved. Focused new workflow host-only. Six automatic runs observed including five historical existing workflows; no manual VM dispatch or cancellation; A9 owns retirement. No new physical action.
 
 GO for review of the dormant source artifact; NO-GO live producer until actual route/epoch/generation snapshot, independent global broker lifetime, actual compile/link and integration proof, original ctx initialization audit, generic BIO lifecycle and selected clone proof, foreign-lock ordering and bounded memory are closed. No existing authorization to run physical mutation; no new VM. Source AUTH=0 Phase A BLOCKED direct/forced RAW/import OFF. Ordinary RAW_4096 complete original page, exact20B ordinary map and protected SWAPSPACE2 unchanged. Actual source-authenticated claim, lower durability and real upper ACK unproven.
+
+## Terminal exact-source evidence (success, no rerun)
+
+Previous progress evidence: `f654ebf552319a3bd6e6eef260de3fd005681ae8`. The existing job is terminal SUCCESS; all nine recorded steps completed successfully. Exact clean main SHA, sole parent equal to real push-before SHA, diff --check and enforced repository policy passed. Original pinned Linux checkout was clean; verifier staged only a disposable copy, with exact 15 pristine and seven staged postimage blob checks, duplicate application rejection and reverse-check. The source anchor/order checks passed, not a native execution proof.
+
+Bounded actual job log markers:
+
+```text
+gcc PASS_HOST_ONLY R088 actual staged carrier helpers checks=63
+clang PASS_HOST_ONLY R088 actual staged carrier helpers checks=63
+PASS_HOST_ONLY R088 exact stage + actual extracted C helpers; kernel NOT_RUN AUTH0
+```
+
+Both compilers executed strict Werror ASan/UBSan fixture against the extracted actual functions and unchanged broker/codec. Exact compiler versions and chosen C23/C2x spelling not printed in the job log. 126 total checks, zero claimed semantic mutants, no new native test. No first test error; nonfatal Node.js action deprecation warning only. [Artifact 14951208411](https://github.com/k1moradi/swapz/actions/runs/45459276984/artifacts/14951208411), five files, 946 bytes, SHA256 `6c39f7452591039982167847339a31c832fdef05fcb30e7325d1d7fe9924d112`; upload log and artifact metadata agree on exact tested SHA and digest, archive contents not independently extracted. Expires 2026-12-08T18:25:43Z. No additional workflow dispatch, no periodic monitoring, no physical or VM action. Source remains unchanged; this is evidence-only.
+
+GO dormant review only; missing real route/generation provider (hard refusal), independent broker lifetime/quiescence, actual kernel compile/link, selected clone atomic claim/enqueue under valid lock ordering and total memory/lifecycle proof remain NO-GO live. Host success does not establish any source authentication, lower durability or upper ACK. AUTH=0, Phase A BLOCKED, direct compressed handoff/forced RAW/import OFF.

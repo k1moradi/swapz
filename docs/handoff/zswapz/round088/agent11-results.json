@@ -1,7 +1,7 @@
 {
   "round": "088",
   "agent": 11,
-  "conclusion": "IN_PROGRESS_HOST_ONLY_UNAPPLIED_PATCH",
+  "conclusion": "PASS_HOST_ONLY_UNAPPLIED_PATCH_NO_GO_LIVE",
   "assignment_sha": "dcb65dca9a3c2bd990aedb2829181d0c0e015ce2",
   "assignment_parent": "cf5a539913fd169fd71bac72c61bc355285a51f6",
   "tested_source_commit": "28527084a205d7465748af29f6f92dcba420c36e",
@@ -59,13 +59,13 @@
     {
       "id": 138677070938,
       "name": "original-mm-carrier-strict-host",
-      "status": "in_progress",
-      "conclusion": null,
+      "status": "completed",
+      "conclusion": "success",
       "url": "https://github.com/k1moradi/swapz/actions/runs/45459276984/job/138677070938"
     }
   ],
   "first_error": null,
-  "first_error_scope": "NO_CI_ERROR_REPORTED_YET",
+  "first_error_scope": "NO_TEST_FAILURE_OBSERVED_IN_TERMINAL_JOB",
   "prepublication": {
     "exact_assignment_parent": true,
     "actual_parent_and_owned_paths_verified": true,
@@ -77,14 +77,26 @@
     "tool_error": "Initial patch packaging rejected a partial-line block/bio.c anchor before ref update; corrected and regenerated."
   },
   "host": {
-    "gcc": "PENDING",
-    "clang": "PENDING",
-    "actual_executed_checks": null,
-    "stage": "PENDING",
+    "gcc": "PASS",
+    "clang": "PASS",
+    "actual_executed_checks": 126,
+    "stage": "PASS",
     "kernel_compile": "NOT_RUN",
     "native": "NOT_RUN",
     "local_host": "NOT_RUN",
-    "fixture_scope": "EXTRACTED_ACTUAL_PROFILE_MOVE_GEOMETRY_CANDIDATE_GET_WITH_ABI_SHIM_AND_ACTUAL_BROKER_CRC"
+    "fixture_scope": "EXTRACTED_ACTUAL_PROFILE_MOVE_GEOMETRY_CANDIDATE_GET_WITH_ABI_SHIM_AND_ACTUAL_BROKER_CRC",
+    "checks_by_compiler": {
+      "gcc": 63,
+      "clang": 63
+    },
+    "compiler_versions": "NOT_PRINTED_IN_JOB_LOG",
+    "standard": "C23_OR_C2X; exact spelling not printed in job log",
+    "actual_semantic_mutants": "NOT_RUN",
+    "actual_pristine_pins_verified": 15,
+    "actual_staged_postimage_pins_verified": 7,
+    "duplicate_apply_rejected": true,
+    "reverse_apply_check_passed": true,
+    "source_anchor_checks": "PASS"
   },
   "prior_native": {
     "round": "087",
@@ -98,7 +110,7 @@
   "candidate": {
     "route_provider": "HARD_REFUSAL_NO_REAL_ROUTE_PROVIDER",
     "live_claim": "NO_GO",
-    "patch_application": "SCRATCH_ONLY_PENDING_CI",
+    "patch_application": "SCRATCH_ONLY_PASS; ORIGINAL_CHECKOUT_UNMODIFIED",
     "normal_kbuild": false,
     "source_credential_per_zswap_entry_bytes": "120 on previously measured x86_64 ticket_key ABI; actual new entry sizeof/allocator overhead unmeasured",
     "carrier_count": 1,
@@ -134,5 +146,32 @@
     45459277008,
     45459277537,
     45459277011
-  ]
+  ],
+  "exact_source_policy": {
+    "head": "PASS",
+    "sole_parent_equals_event_before": "PASS",
+    "clean": "PASS",
+    "diff_check": "PASS",
+    "repository_policy": "PASS"
+  },
+  "artifact": {
+    "id": 14951208411,
+    "url": "https://github.com/k1moradi/swapz/actions/runs/45459276984/artifacts/14951208411",
+    "size_bytes": 946,
+    "sha256": "6c39f7452591039982167847339a31c832fdef05fcb30e7325d1d7fe9924d112",
+    "files_uploaded": 5,
+    "metadata_and_upload_log_verified": true,
+    "archive_contents_independently_extracted": false,
+    "expires_at": "2026-12-08T18:25:43Z"
+  },
+  "terminal_observation": {
+    "previous_evidence_commit": "f654ebf552319a3bd6e6eef260de3fd005681ae8",
+    "job_log_markers": [
+      "gcc PASS_HOST_ONLY R088 actual staged carrier helpers checks=63",
+      "clang PASS_HOST_ONLY R088 actual staged carrier helpers checks=63",
+      "PASS_HOST_ONLY R088 exact stage + actual extracted C helpers; kernel NOT_RUN AUTH0"
+    ],
+    "job_nonfatal_warning": "Node.js 20 actions deprecation; no test failure",
+    "new_test_dispatch": false
+  }
 }
