@@ -6,7 +6,7 @@
   "assignment_parent": "b03ad475cb90a0f0670d35610628832b62b7e70b",
   "tested_source_commit": "eab4a609a1655820fe28975c8b5e210d86b1463b",
   "tested_source_parent": "28fd042a0ed2090db463c93ac788f8e20ef08511",
-  "conclusion": "QUEUED",
+  "conclusion": "success",
   "github_actions_run_id": 45305867882,
   "github_actions_job_id": 138149441824,
   "github_actions_run_url": "https://github.com/k1moradi/swapz/actions/runs/45305867882",
@@ -36,15 +36,19 @@
   },
   "remote_compilers": {
     "gcc": {
-      "baseline": "PENDING",
-      "mutants_compiled_confirmed": 0,
-      "mutants_executed_confirmed": 0,
+      "baseline": "PASS",
+      "baselines_executed": 1,
+      "mutants_compiled_confirmed": 24,
+      "mutants_executed_confirmed": 24,
+      "mutants_semantically_killed": 24,
       "target": 24
     },
     "clang": {
-      "baseline": "PENDING",
-      "mutants_compiled_confirmed": 0,
-      "mutants_executed_confirmed": 0,
+      "baseline": "PASS",
+      "baselines_executed": 1,
+      "mutants_compiled_confirmed": 24,
+      "mutants_executed_confirmed": 24,
+      "mutants_semantically_killed": 24,
       "target": 24
     }
   },
@@ -65,5 +69,25 @@
   "phase_a": "BLOCKED",
   "direct_handoff": "DISABLED",
   "forced_raw_bypass": "DISABLED",
-  "import_active": 0
+  "import_active": 0,
+  "github_actions_job_conclusion": "success",
+  "github_actions_run_attempt": 1,
+  "remote_preflight": {
+    "exact_checkout": "PASS",
+    "single_parent": "PASS",
+    "git_diff_check": "PASS",
+    "repository_standards": "PASS",
+    "full_source_pins": "PASS",
+    "feature_parser_negatives_passed": 7,
+    "mutation_anchors": 24
+  },
+  "terminal_evidence": {
+    "observed_job_log_timestamp": "2026-11-24T01:41:11.2765329Z",
+    "log_marker": "PASS_HOST_ONLY ROUND081_AGENT11 source pins+actual C fragments GCC 24/24, Clang 24/24 independently compiled AND EXECUTED semantic C mutants; no live DM/source auth",
+    "artifact_id": 14880643416,
+    "artifact_url": "https://github.com/k1moradi/swapz/actions/runs/45305867882/artifacts/14880643416",
+    "artifact_digest": "sha256:84a3ce31f7b71567ebbe524ce1c9cb3dfc3ab7be6aa7dc2e11ea606a8fa8205d",
+    "artifact_contents_independently_unpacked": false,
+    "qualification": "HOST_SOURCE_LINKED_MODEL_ONLY"
+  }
 }
