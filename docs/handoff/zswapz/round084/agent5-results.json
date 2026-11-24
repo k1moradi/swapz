@@ -64,5 +64,16 @@
   "direct_compressed_handoff": "DISABLED",
   "forced_raw_bypass": "DISABLED",
   "import_active": 0,
-  "agent1_diagnosis": "Workflow omitted SWAPZ_PUSH_BEFORE_SHA from github.event.before; exact policy fails closed. No compiler execution; no result artifact. Correct workflow and requalify new exact SHA, not retroactive PASS."
+  "agent1_diagnosis": "Workflow omitted SWAPZ_PUSH_BEFORE_SHA from github.event.before; exact policy fails closed. No compiler execution; no result artifact. Correct workflow and requalify new exact SHA, not retroactive PASS.",
+  "corrective_qualification": {
+    "round": "086",
+    "tested_commit": "3a3a3ba8c4b6bfcdeef66442c8ba2d4ee8b45b71",
+    "run_id": 45447373151,
+    "job_id": 138634741636,
+    "conclusion": "PASS_HOST_ONLY",
+    "gcc_mutants": 24,
+    "clang_mutants": 24,
+    "baseline_checks_each": 23106,
+    "old_failure_preserved": true
+  }
 }

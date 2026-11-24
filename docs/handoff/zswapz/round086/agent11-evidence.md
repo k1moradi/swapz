@@ -60,3 +60,7 @@ Standards previous `f4a096e74fbd45e38b614e7c2af2e6b0fba86f09`, appended `8a4074c
 ## Limits and next gate
 
 Historical R084 host evidence preserved. The six registered cases and successful connector checks are not actual executed KUnit results; exact hosted job is queued. One focused lane triggered automatically, eight unrelated existing lanes observed; no manual dispatch, cancellation, monitoring or repeated build. No same-round peer dependency. Kernel adapter unqualified until actual native results; selected DM lock order and atomic claim/enqueue, real carrier lifetime/quiescence, real lower durability/upper ACK, full integration remain unproven. No foreign-lock relaxation, production BIO cap, reclaim/recompression, physical testing, swapon or production activation. Ordinary RAW_4096 remains full original uncompressed 4096; exact20B map untouched. SOURCE_MAPPED_AUTHENTICATED=0, PHASE_A=BLOCKED, direct/forced RAW/import OFF.
+
+
+## Agent1 terminal reconciliation — R087
+Exact job 138636485096 FAILED at boot after real build/symbol verification. Artifact 14947585659 inspected: 'SMP is not supported with PTRACE userspace.' zero cases, one error. Kernel SHA256 6ad838ec6b13787abd17078c2f02e274fecbbbc5d5d70e8a9ec6f5b31b73c5e6; no successful boot or adapter runtime qualification. R087 #205 QEMU TCG corrective lane.

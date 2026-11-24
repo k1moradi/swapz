@@ -1,7 +1,7 @@
 {
   "round": "086",
   "agent": 11,
-  "conclusion": "QUEUED",
+  "conclusion": "FAIL_BOOT_UNSUPPORTED_UML_SMP_PTRACE",
   "assignment_sha": "7732ea3eb7defb8112a87ead4b578dbe61c453ab",
   "assignment_parent": "d77ef98bc218ffd260b7114ffcb32c411d66bb31",
   "tested_source_commit": "87eb611ed091979541e6754369af8976131f2e64",
@@ -51,13 +51,13 @@
     {
       "id": 138636485096,
       "name": "original-ticket-pinned-smp-uml",
-      "status": "queued",
-      "conclusion": null,
+      "status": "completed",
+      "conclusion": "failure",
       "url": "https://github.com/k1moradi/swapz/actions/runs/45447861121/job/138636485096"
     }
   ],
-  "first_error": null,
-  "first_error_scope": "NO_CI_ERROR_REPORTED_QUEUED",
+  "first_error": "SMP is not supported with PTRACE userspace.",
+  "first_error_scope": "ACTUAL_RETAINED_RAW_BOOT_LOG",
   "preflight": {
     "task_ancestry_verified": true,
     "connector_original_blob_metadata": 17,
@@ -69,13 +69,13 @@
     "fixture_trailing_whitespace_lines": 0,
     "standards_prefix_verified": true,
     "remote_exact_source_single_parent_verified": true,
-    "remote_policy_and_blob_hash_check": "PENDING",
-    "remote_negative_stage_plans": "PENDING",
-    "remote_stage_postimages": "PENDING",
+    "remote_policy_and_blob_hash_check": "PASS",
+    "remote_negative_stage_plans": "PASS_6",
+    "remote_stage_postimages": "PASS",
     "local_native_execution": "NOT_RUN"
   },
   "native": {
-    "status": "QUEUED",
+    "status": "BUILD_PASS_BOOT_FAIL",
     "planned_cases": [
       "r086_capacity",
       "r086_irq_and_contention",
@@ -85,16 +85,29 @@
       "r086_copy_failures"
     ],
     "planned_builds": 1,
-    "confirmed_builds": 0,
+    "confirmed_builds": 1,
     "confirmed_boots": 0,
     "confirmed_passed": 0,
-    "actual_counts": null,
-    "kernel_sha256": null,
-    "effective_config": null,
+    "actual_counts": {
+      "tests_run": 0,
+      "errors": 1
+    },
+    "kernel_sha256": "6ad838ec6b13787abd17078c2f02e274fecbbbc5d5d70e8a9ec6f5b31b73c5e6",
+    "effective_config": [
+      "CONFIG_KUNIT=y",
+      "CONFIG_SMP=y",
+      "CONFIG_NR_CPUS=2",
+      "CONFIG_DEBUG_KERNEL=y",
+      "CONFIG_DEBUG_SPINLOCK=y",
+      "CONFIG_DEBUG_ATOMIC_SLEEP=y",
+      "CONFIG_CRC32=y",
+      "CONFIG_SWAPZ_ROUND086_TICKET_TEST=y"
+    ],
     "actual_kernel_sizeof": null,
-    "actual_kernel_adapter": "UNQUALIFIED_PENDING",
-    "json_ktap": "PENDING",
-    "actual_selected_dm_claim": false
+    "actual_kernel_adapter": "COMPILED_NOT_RUNTIME_QUALIFIED",
+    "json_ktap": "NO_KTAP_ZERO_CASES",
+    "actual_selected_dm_claim": false,
+    "config_sha256": "2241d268a2ad44a1c9538691d6c43dcf1da5f249b4e940fb2e2296ae09e72002"
   },
   "prior_host_evidence": {
     "round": "084",
@@ -119,5 +132,7 @@
   "actual_upper_ack": false,
   "manual_duplicate_workflow_dispatch": false,
   "periodic_monitoring": false,
-  "automatic_other_runs_observed": 8
+  "automatic_other_runs_observed": 8,
+  "artifact_id": 14947585659,
+  "corrective_round": "087"
 }

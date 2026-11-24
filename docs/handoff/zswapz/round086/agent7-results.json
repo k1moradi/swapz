@@ -4,7 +4,7 @@
   "task_sha": "7732ea3eb7defb8112a87ead4b578dbe61c453ab",
   "source_parent": "3f4b9cc8eb52dd971cbe28a586f0f46b21808956",
   "tested_commit": "c5d5951a3842418fa0b52acb4d6cc791601b6038",
-  "status": "QUEUED_CHANGED_SOURCE_HEADER_SCOPE_REPAIR",
+  "status": "COMPLETED_FAIL_CLANG_BASELINE_SANITIZER",
   "source_blobs": {
     "src/kernel/zswap-original-decode.c": "eb1cd7f90d5edade9640e1ffe9dac3c8fe774644",
     "src/kernel/zswap-original-decode.h": "a247d1aaf9865de71f97cd980be806b8d8c7c20e",
@@ -43,20 +43,30 @@
   "local_exact_compiler": "NOT_RUN_DNS_FAILURE",
   "planned_mutants_per_compiler": 19,
   "actual_gcc": {
-    "baseline": "PENDING",
-    "mutants_compiled": 0,
-    "mutants_executed": 0,
-    "kills": 0
+    "baseline": "PASS",
+    "mutants_compiled": 19,
+    "mutants_executed": 19,
+    "kills": 19,
+    "standard": "c2x",
+    "actual_lz4_lengths": [
+      91,
+      4095
+    ],
+    "actual_lzo1x_lengths": [
+      110,
+      4077
+    ]
   },
   "actual_clang": {
-    "baseline": "PENDING",
+    "baseline": "FAIL_SANITIZER",
     "mutants_compiled": 0,
     "mutants_executed": 0,
-    "kills": 0
+    "kills": 0,
+    "header_scope": "PASS"
   },
   "run_id": 45449747704,
   "job_id": 138643232323,
-  "first_error": null,
+  "first_error": "FIRST_ERROR round085-agent7 baseline: sanitizer failure (not a kill)",
   "native": "NOT_RUN_HOST_ONLY",
   "source_mapped_authenticated": 0,
   "phase_a": "BLOCKED",
@@ -69,10 +79,10 @@
   "real_durability": false,
   "real_ack": false,
   "normal_kbuild_changed": false,
-  "conclusion": null,
+  "conclusion": "failure",
   "run_url": "https://github.com/k1moradi/swapz/actions/runs/45449747704",
   "job_url": "https://github.com/k1moradi/swapz/actions/runs/45449747704/job/138643232323",
-  "remote_preflight": "PENDING",
+  "remote_preflight": "PASS_18_BLOBS_19_ANCHORS",
   "automatic_source_run_census": {
     "total": 10,
     "intended": 45449747704,
@@ -88,7 +98,7 @@
       45449747587
     ]
   },
-  "artifact_id": null,
+  "artifact_id": 14947807032,
   "local_scoped_header_regression": {
     "gcc": "PASS_original_failure_reproduced_scoped_header_accepted_product_narrowing_rejected",
     "clang": "PASS_original_failure_reproduced_scoped_header_accepted_product_narrowing_rejected",
@@ -132,7 +142,9 @@
       "evidence_commit": "3f4b9cc8eb52dd971cbe28a586f0f46b21808956"
     }
   ],
-  "first_error_status": "PENDING_NO_COMPILER_EXECUTION_OBSERVED",
-  "run_status_observed": "queued",
-  "job_status_observed": "queued"
+  "first_error_status": "UNDERLYING_SANITIZER_DIAGNOSTIC_NOT_RETAINED",
+  "run_status_observed": "completed",
+  "job_status_observed": "completed",
+  "artifact_observation": "host.log generic failure; results.json empty",
+  "corrective_round": "087"
 }
