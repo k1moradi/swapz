@@ -1,0 +1,88 @@
+{
+  "round": "083",
+  "agent": 11,
+  "conclusion": "DESIGN_COMPLETE_IMPLEMENTATION_AND_ACTIVATION_BLOCKED",
+  "inspected_source_sha": "039d67757a7a432a4751fa025f5922e786fbf38b",
+  "inspected_source_parent": "78af69394400417fa06fd515ba046e07b161cd8e",
+  "original_linux_sha": "c339f4010dea8b0d754f84ace70cd1b089878ef8",
+  "original_blobs": {
+    "mm/zswap.c": "ae19e301fced7e357a4c7587dfdd6abb890b9163",
+    "mm/zsmalloc.c": "7ef80e0da6267661cea4d48a4a615444724782e7",
+    "mm/page_io.c": "c6824fcd483e0aa2c412e14dae0d2a356b17c373",
+    "mm/swapfile.c": "254ce86fa923e6b5f1fefda88c39315c4cc00642",
+    "drivers/md/dm.c": "1881d86111fb2e655893ad898cf21b88f0e4e7f3",
+    "drivers/md/dm-table.c": "a483f49dd4ce6383ef66464707865187aa4cf51c",
+    "block/blk-core.c": "8836c7028568b08640d0a1c26fe908dd8ebead4f",
+    "include/linux/device-mapper.h": "cd4faaf5d4275c038d06ccef4da3d77430154388",
+    "include/linux/swap.h": "4f686709d71f005dc43b2f751012b5f61d6b007a",
+    "include/linux/bio.h": "7a794ce723b84b2a148f8f9beccf057b266e8ac9",
+    "include/linux/blk_types.h": "0cc09b975d8ffbd45ca3dc47533a71f8e8164de6"
+  },
+  "product_blobs": {
+    "src/kernel/dm-target.c": "f1cab252cd990190646c82da81378d1563475826",
+    "src/kernel/authority.c": "25bf2dbdc5a3af770d7027547a58254c1ba81265",
+    "src/kernel/authority.h": "3bb5bab5a5bdb2aa087f5793fc8b5e90d6636031",
+    "src/kernel/codec.h": "e89d316b9cf49f82df0b77648c1be1731607987d",
+    "src/kernel/zswap-import-admission.h": "a411da35437cbf9a43c88083d830dc9280f108e8",
+    "src/kernel/zswap-import-codec.h": "0d888fe4c74115ab2388f1df1dc0b86ae4b9b6c6",
+    "src/kernel/zswap-import-decoder-owner.h": "e1b4b903567070e2307f7d05f8e48c14e0bb3768",
+    "src/kernel/zswap-import-decoder-owner.c": "8e0c8f4d2085af7f2e17df412f3a1af654063571"
+  },
+  "design_commit": "c17988e4670d91b2b11bd9397448cf5fe3cc55eb",
+  "design_parent": "039d67757a7a432a4751fa025f5922e786fbf38b",
+  "design_blob": "76a88bcfefdd99fb3c35ede8bb32a5ba9bd54193",
+  "design_url": "https://github.com/k1moradi/swapz/blob/c17988e4670d91b2b11bd9397448cf5fe3cc55eb/docs/handoff/zswapz/round083/agent11-preerase-reservation-design.md",
+  "ci": "NOT_RUN_DESIGN_ONLY",
+  "jobs": [],
+  "first_source_error": null,
+  "blob_verification": "IMMUTABLE_GITHUB_FETCH_IDENTITIES_NOT_LOCAL_REHASH",
+  "decisions": {
+    "future_disabled_prototype": "GO_CONDITIONAL",
+    "production_import": "NO_GO",
+    "direct_early_dm_submit": "NO_GO",
+    "slot_only_lookup": "NO_GO",
+    "skip_original_decompress": "NO_GO",
+    "production_bio_cap": "NO_GO",
+    "unsafe_requeue": "NO_GO",
+    "carrier": "EXPLICIT_TYPED_ORIGINAL_FULL_PAGE_BIO_SIDEBAND_FINAL_ACTUAL_DM_CLAIM",
+    "forward_progress": "NOT_RUNTIME_PROVEN"
+  },
+  "assumptions": {
+    "abstract_consumer_reservation": true,
+    "current_max": 3568,
+    "proposed_max": 4095,
+    "original_decoded_bytes": 4096,
+    "ordinary_map_bytes": 20,
+    "protected_physical_header_bytes": 4096,
+    "whole_zero_based_dm_only_initial_scope": true
+  },
+  "budget_examples": {
+    "alignment_example": 64,
+    "ticket_counts": [
+      8,
+      64
+    ],
+    "current_stride": 3584,
+    "proposed_stride": 4096,
+    "physical_copy_bytes_n8": [
+      28672,
+      32768
+    ],
+    "physical_copy_bytes_n64": [
+      229376,
+      262144
+    ],
+    "kernel_sizeof_and_allocation_overhead": "UNKNOWN_NOT_MEASURED"
+  },
+  "no_production_patch": true,
+  "no_workflow_changes": true,
+  "no_native_build": true,
+  "source_mapped_authenticated": 0,
+  "phase_a": "BLOCKED",
+  "direct_handoff": "DISABLED",
+  "forced_raw_bypass": "DISABLED",
+  "import_active": 0,
+  "physical_durability": "NOT_PROVEN",
+  "actual_upper_ack": "NOT_PROVEN",
+  "historical_verdicts_preserved": true
+}
