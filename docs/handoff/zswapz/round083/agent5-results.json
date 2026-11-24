@@ -1,0 +1,251 @@
+{
+  "round": "083",
+  "agent": 5,
+  "kind": "source-inspection-design-only",
+  "conclusion": "DESIGN_READY_NOT_QUALIFIED",
+  "task_commit": "039d67757a7a432a4751fa025f5922e786fbf38b",
+  "inspected_source_commit": "039d67757a7a432a4751fa025f5922e786fbf38b",
+  "inspected_source_parent": "78af69394400417fa06fd515ba046e07b161cd8e",
+  "publication_parent": "acd192201d11ee30053738058d0fdb788e201d2d",
+  "design_commit": null,
+  "design_commit_reference": "same commit containing this file; exact SHA reported in issue #201 after publication",
+  "source_blobs": {
+    "src/kernel/codec.h": "e89d316b9cf49f82df0b77648c1be1731607987d",
+    "src/kernel/codec.c": "d920dcaac6f2b7de1334d4133770bd649719c66d",
+    "src/kernel/engine.h": "0e505915fb2e1578b4c1cee36e32be8a30f3745f",
+    "src/kernel/engine.c": "20e91329fc1a1b713cb6638236c001e7d5e3f815",
+    "src/kernel/authority.h": "3bb5bab5a5bdb2aa087f5793fc8b5e90d6636031",
+    "src/kernel/authority.c": "25bf2dbdc5a3af770d7027547a58254c1ba81265",
+    "src/kernel/dm-target.c": "f1cab252cd990190646c82da81378d1563475826",
+    "src/kernel/superblock.h": "ba73845837b4c604b01d72f50f05ae8d4378eddd",
+    "src/kernel/gc-cost.h": "2d317f1274ef36bdde157ff72acc26a9f7ae1e0e",
+    "src/kernel/gc-recovery-policy.h": "26cddb997ad9f4b5b15616eba7cc0e26aaeb58eb",
+    "src/kernel/zswap-direct-handoff.h": "864abf9a12071b98f5c157a44f4ed0c04d4a594c",
+    "src/kernel/zswap-import-admission.h": "a411da35437cbf9a43c88083d830dc9280f108e8",
+    "src/kernel/zswap-import-codec.h": "0d888fe4c74115ab2388f1df1dc0b86ae4b9b6c6",
+    "src/kernel/zswap-import-decoder-owner.h": "e1b4b903567070e2307f7d05f8e48c14e0bb3768",
+    "src/kernel/zswap-import-decoder-owner.c": "8e0c8f4d2085af7f2e17df412f3a1af654063571"
+  },
+  "original_linux": {
+    "commit": "c339f4010dea8b0d754f84ace70cd1b089878ef8",
+    "blobs": {
+      "mm/zswap.c": "ae19e301fced7e357a4c7587dfdd6abb890b9163"
+    }
+  },
+  "contract_blobs": {
+    "README.md": "3195d8f8a5f3e9301e10528c30f88fa0446b5aed",
+    "frozen-contract.md": "ce20a1a2c8f446c00740d17e0d823e54b89e2ee8",
+    "agent5-original-payload-geometry-ownership-p0.md": "a578bfb02390e499bbe3399b6dd6085c463b2885"
+  },
+  "policy_blobs": {
+    "AGENTS.md": "14ebcdc3959fee864bb3a6e276c029c222f5e152",
+    "agent1-scheduling-policy.md": "3f254928b6dcd4c2a7af665dcd3845e0b8a59e83",
+    "evidence-policy.md": "dd7fe4670d2f0c13ace9f262f93ed69467ed2842",
+    "docs/testing_standards.md": "6ee53e08254f80c2f575ea70b3dab632824e3885"
+  },
+  "prior_evidence_blobs": {
+    "round078/agent9-evidence.md": "b25f05b557207b60c0b38f5cfc012e8b25960680",
+    "round078/agent1-ci-checkpoint.md": "f6d97b9fe9740c2c03ccae93839b15ca0dc639f8",
+    "round080/agent5-evidence.md": "888a7def11a0dd4a54849eb2fbae75d88048594f",
+    "round082/agent7-evidence.md": "c952acd990bdb2affe2b79f9dc9ba8d7718e1ba2",
+    "round082/agent10-evidence.md": "832ceff3a035879ed648545c3cf761c4a9abb488"
+  },
+  "first_error": {
+    "stage": "policy retrieval",
+    "path": "docs/testing_standards.md",
+    "first_observation": "range fetch returned empty content",
+    "subsequent_error": "INVALID_ARGUMENT: HTTPError 400: GitHub Fetch could not read file contents; the file may be too large or unsupported",
+    "resolved": true,
+    "recovery": "fetch_blob returned full text; applicable sections inspected"
+  },
+  "first_source_verification_error": null,
+  "ci": "NOT_RUN_DESIGN_ONLY",
+  "jobs": [],
+  "native": "NOT_RUN",
+  "tests_executed": false,
+  "geometry": [
+    {
+      "length": 1,
+      "extents": [
+        {
+          "bytes": 4096,
+          "records": 64,
+          "padding": 4032,
+          "occupancy_percent": 1.5625,
+          "blocks_per_record": 0.015625
+        },
+        {
+          "bytes": 8192,
+          "records": 64,
+          "padding": 8128,
+          "occupancy_percent": 0.78125,
+          "blocks_per_record": 0.03125
+        },
+        {
+          "bytes": 16384,
+          "records": 64,
+          "padding": 16320,
+          "occupancy_percent": 0.390625,
+          "blocks_per_record": 0.0625
+        }
+      ]
+    },
+    {
+      "length": 3568,
+      "extents": [
+        {
+          "bytes": 4096,
+          "records": 1,
+          "padding": 528,
+          "occupancy_percent": 87.109375,
+          "blocks_per_record": 1
+        },
+        {
+          "bytes": 8192,
+          "records": 2,
+          "padding": 1056,
+          "occupancy_percent": 87.109375,
+          "blocks_per_record": 1
+        },
+        {
+          "bytes": 16384,
+          "records": 4,
+          "padding": 2112,
+          "occupancy_percent": 87.109375,
+          "blocks_per_record": 1
+        }
+      ]
+    },
+    {
+      "length": 3569,
+      "extents": [
+        {
+          "bytes": 4096,
+          "records": 1,
+          "padding": 527,
+          "occupancy_percent": 87.1337890625,
+          "blocks_per_record": 1
+        },
+        {
+          "bytes": 8192,
+          "records": 2,
+          "padding": 1054,
+          "occupancy_percent": 87.1337890625,
+          "blocks_per_record": 1
+        },
+        {
+          "bytes": 16384,
+          "records": 4,
+          "padding": 2108,
+          "occupancy_percent": 87.1337890625,
+          "blocks_per_record": 1
+        }
+      ]
+    },
+    {
+      "length": 4095,
+      "extents": [
+        {
+          "bytes": 4096,
+          "records": 1,
+          "padding": 1,
+          "occupancy_percent": 99.9755859375,
+          "blocks_per_record": 1
+        },
+        {
+          "bytes": 8192,
+          "records": 2,
+          "padding": 2,
+          "occupancy_percent": 99.9755859375,
+          "blocks_per_record": 1
+        },
+        {
+          "bytes": 16384,
+          "records": 4,
+          "padding": 4,
+          "occupancy_percent": 99.9755859375,
+          "blocks_per_record": 1
+        }
+      ]
+    },
+    {
+      "length": 4096,
+      "extents": [
+        {
+          "bytes": 4096,
+          "records": 1,
+          "padding": 0,
+          "occupancy_percent": 100,
+          "blocks_per_record": 1
+        },
+        {
+          "bytes": 8192,
+          "records": 0,
+          "padding": null,
+          "occupancy_percent": null,
+          "blocks_per_record": null
+        },
+        {
+          "bytes": 16384,
+          "records": 0,
+          "padding": null,
+          "occupancy_percent": null,
+          "blocks_per_record": null
+        }
+      ]
+    }
+  ],
+  "ordinary_map_bytes": 20,
+  "ordinary_max_compressed": 3568,
+  "proposed_original_max_compressed": 4095,
+  "dormant_import_capacity": 8,
+  "dormant_records_per_extent": 1,
+  "decisions": {
+    "dedicated": "CONDITIONAL_GO_FUTURE_OWNERSHIP_PROOF",
+    "segregated_packing": "PREFERRED_CONDITIONAL_GO_FUTURE",
+    "mixed_ordinary_original": "NO_GO",
+    "ordinary_fallback": "GO",
+    "state_marker": "CONDITIONAL_NO_ACTIVATION_PENDING_AUDIT",
+    "production_import": "NO_GO"
+  },
+  "ram": {
+    "descriptor_bytes": 128,
+    "total_slots": 4096,
+    "max_current": 3904,
+    "max_foreground_tickets": 64,
+    "max_gc_pending": 64,
+    "max_retired_pinned": 64,
+    "max_readers": 64,
+    "components_bytes": {
+      "descriptor_slots": 524288,
+      "current_hash": 32768,
+      "free_indices": 8192,
+      "foreground_copies": 262144,
+      "gc_copies": 262144,
+      "reader_buffers": 1048576,
+      "extent_images": 32768,
+      "operation_contexts": 12288,
+      "pin_registry": 1024,
+      "control_decoder": 4096
+    },
+    "incremental_subtotal_bytes": 2188288,
+    "original_folio_retention_bytes": 262144,
+    "proposed_hard_envelope_bytes": 3145728,
+    "unallocated_envelope_bytes": 695296,
+    "measured": false
+  },
+  "assumptions": [
+    "abstract authenticated selected target typed immutable original bytes",
+    "real original-page failure owner and exact once upper completion supplied by future producer",
+    "independent retained original decoder",
+    "actual lower WRITE and FUA/flush"
+  ],
+  "source_mapped_authenticated": 0,
+  "phase_a": "BLOCKED",
+  "direct_compressed_handoff": "DISABLED",
+  "forced_raw_bypass": "DISABLED",
+  "import_active": 0,
+  "actual_physical_io": false,
+  "production_source_changes": false,
+  "peer_dependencies": []
+}
