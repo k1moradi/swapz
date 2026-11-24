@@ -1,15 +1,15 @@
 {
   "agent": 11,
   "round": "081",
-  "status": "LOCAL_HOST_PASS_REMOTE_CI_QUEUED",
+  "status": "LOCAL_HOST_REPORTED_PASS_REMOTE_CI_FAILED_SOURCE_ANCHOR",
   "assignment_sha": "01abda0f17874b260c3ef6d1dbe2e445622e5b7a",
   "assignment_parent": "8edefaac0f23a7749daf34ff93b34e4efacded9d",
   "tested_source_commit": "10d3176e79742423174e69e648c505c374a264ed",
   "tested_source_parent": "2f2a640366e5f99a4b007202094f6070af65e43d",
   "github_actions_workflow": ".github/workflows/phase-a-round081-actual-dm-bio-debt-ownership-noauth.yml",
-  "github_actions_run": "45293919114_QUEUED",
-  "github_actions_job": "138109374984_QUEUED",
-  "first_remote_error": "NONE_REPORTED_AS_QUEUED",
+  "github_actions_run": "45293919114_COMPLETED_FAILURE",
+  "github_actions_job": "138109374984_COMPLETED_FAILURE",
+  "first_remote_error": "ROUND081_AGENT11_FIRST_ERROR actual target features drift",
   "original_linux_commit": "c339f4010dea8b0d754f84ace70cd1b089878ef8",
   "original_linux_dm_blob": "1881d86111fb2e655893ad898cf21b88f0e4e7f3",
   "original_linux_device_mapper_header_blob": "cd4faaf5d4275c038d06ccef4da3d77430154388",
@@ -27,8 +27,14 @@
     }
   },
   "remote_compiler_execution": {
-    "gcc": "QUEUED_0_CONFIRMED",
-    "clang": "QUEUED_0_CONFIRMED"
+    "gcc": {
+      "baseline": "NOT_RUN_SOURCE_ANCHOR_FAILURE",
+      "mutants_executed": 0
+    },
+    "clang": {
+      "baseline": "NOT_RUN_SOURCE_ANCHOR_FAILURE",
+      "mutants_executed": 0
+    }
   },
   "source_fragments": "3_VERBATIM_PRODUCT_STATEMENTS_PLUS_SOURCE_LOCKED_ORIGINAL_DM_CORE_AND_HEADER_AND_PRODUCT",
   "upper_bio_debt": "TEST_ONLY_LEDGER_MODEL_NOT_PRODUCTION_CAP",
@@ -41,5 +47,14 @@
   "forced_raw_bypass": "DISABLED",
   "import_active": 0,
   "github_actions_run_url": "https://github.com/k1moradi/swapz/actions/runs/45293919114",
-  "github_actions_job_url": "https://github.com/k1moradi/swapz/actions/runs/45293919114/job/138109374984"
+  "github_actions_job_url": "https://github.com/k1moradi/swapz/actions/runs/45293919114/job/138109374984",
+  "agent1_verified_r082_checkpoint": {
+    "exact_source": "10d3176e79742423174e69e648c505c374a264ed",
+    "run_id": 45293919114,
+    "job_id": 138109374984,
+    "conclusion": "failure",
+    "first_error": "ROUND081_AGENT11_FIRST_ERROR actual target features drift",
+    "scope": "Remote FAILED before compiler execution. Whole source blobs checked, actual target .features = DM_TARGET_SINGLETON | DM_TARGET_ALWAYS_WRITEABLE, at dm-target.c:16249 differs from verifier's parenthesized literal .features = (DM_TARGET_SINGLETON | DM_TARGET_ALWAYS_WRITEABLE), at verifier:127-128. No feature drift established, no remote baseline or semantic mutants executed. Agent reported local 24/24 each; local reconstructed/host claim remains separately labeled, not remote. Product queue cap NO-GO."
+  },
+  "conclusion": "failure"
 }

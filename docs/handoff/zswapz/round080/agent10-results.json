@@ -1,7 +1,7 @@
 {
   "round": "080",
   "agent": 10,
-  "status": "QUEUED",
+  "status": "COMPLETED_FAILURE_NATIVE_STAGE",
   "kind": "original-pinned-Linux-UML-reader-GC-test-only-lifetime-cleanup",
   "task_publication_commit": "d76081b661ce750d2fbeaa247fa16e4670db5e97",
   "tested_source_commit": "4a4b339b960206cf598484432a84ede6f0e9c814",
@@ -15,36 +15,37 @@
   "workflow_name": "phase-a-round073-original-reader-pin-gc-noauth.yml",
   "workflow_run_id": 45273186925,
   "workflow_url": "https://github.com/k1moradi/swapz/actions/runs/45273186925",
-  "workflow_status": "queued",
-  "workflow_conclusion": null,
+  "workflow_status": "completed",
+  "workflow_conclusion": "failure",
   "jobs": [
     {
       "name": "original-reader-strict-source-host",
       "id": 138038046309,
       "url": "https://github.com/k1moradi/swapz/actions/runs/45273186925/job/138038046309",
-      "status": "queued",
-      "conclusion": null
+      "status": "completed",
+      "conclusion": "success"
     },
     {
       "name": "original-linux-uml-reader-pin-gc-kunit",
-      "id": null,
-      "status": "NOT_CREATED",
-      "conclusion": null
+      "id": 138042877345,
+      "status": "completed",
+      "conclusion": "failure",
+      "url": "https://github.com/k1moradi/swapz/actions/runs/45273186925/job/138042877345"
     }
   ],
   "source_host": {
-    "status": "NOT_RUN",
+    "status": "PASS",
     "inherited_expected_compiled_executed_original_semantic_mutants_per_compiler": 10,
     "inherited_expected_compiled_executed_authority_mutants_per_compiler": 14,
     "inherited_expected_compiled_executed_owner_lifetime_mutants_per_compiler": 2,
     "round080_new_expected_compiled_executed_late_lease_mutants_per_compiler": 2,
-    "gcc_actual_compiled_executed_semantic_mutants": null,
-    "clang_actual_compiled_executed_semantic_mutants": null,
+    "gcc_actual_compiled_executed_semantic_mutants": 28,
+    "clang_actual_compiled_executed_semantic_mutants": 28,
     "expected_original_delay_positive_and_negatives_per_compiler": 1,
-    "strict_c23_werror_asan_ubsan": "REQUIRED_NOT_YET_OBSERVED"
+    "strict_c23_werror_asan_ubsan": "PASS"
   },
   "original_native": {
-    "status": "NOT_RUN_SOURCE_HOST_DEPENDENT",
+    "status": "FAILED_PREBUILD_STAGE_VALIDATOR",
     "expected_cases": [
       "swapz_round073_original_lz4_old_reader_gc",
       "swapz_round073_original_lzo1x_old_reader_gc",
@@ -93,8 +94,8 @@
     "first_error": "clang:missing-original-declaration-not-rejected",
     "status": "HOST_FAILED_NATIVE_SKIPPED"
   },
-  "first_error": null,
-  "conclusion": "PENDING_GENUINE_NATIVE",
+  "first_error": "ROUND073_READER_STAGE_FIRST_ERROR original-reader-late-lease-must-release-before-closer-join",
+  "conclusion": "HOST_PASS_NATIVE_STAGE_FAILED",
   "scope": "TEST_ONLY_NO_PRODUCTION_C_CHANGE",
   "source_mapped_authenticated": false,
   "phase_a": "BLOCKED",
@@ -113,5 +114,13 @@
   "branches_created": false,
   "pr_created": false,
   "force_push": false,
-  "periodic_automations": false
+  "periodic_automations": false,
+  "agent1_verified_r082_checkpoint": {
+    "exact_source": "4a4b339b960206cf598484432a84ede6f0e9c814",
+    "run_id": 45273186925,
+    "job_id": 138042877345,
+    "conclusion": "failure",
+    "first_error": "ROUND073_READER_STAGE_FIRST_ERROR original-reader-late-lease-must-release-before-closer-join",
+    "scope": "Host job138038046309 SUCCESS actual original 10 + authority14 + decoder2 + late-pin2 semantic C mutants per compiler (56 combined); GCC/Clang strict original delay negatives correct. Dependent native job COMPLETED FAILURE during original staging before native build/boot; zero cases, no native JSON/KTAP. Stager lines95-104 expects unique swapz_round080_release_decoder_leases(&lease, &late) before kthread_stop and no wait_for_completion(&closer.returned); current fixture cleanup instead uses inline puts at lines558-567 and unbounded fallback wait at line579. Stage contract mismatch, NOT proof that native retirement hang fixed. Prior 7f3808379 run45262491414 isolated stale CRC/SHA/codec PASS and decoder retire closer_drain_stalled active=0 phase=10; R079 native 2/4 timeout history unchanged."
+  }
 }
