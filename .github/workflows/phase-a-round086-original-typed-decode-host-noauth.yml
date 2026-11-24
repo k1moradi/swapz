@@ -1,4 +1,4 @@
-name: Round086 pinned original typed decoder HOST ONLY NO_AUTH
+name: Round088 isolated staged original typed decoder HOST ONLY NO_AUTH
 on:
   push:
     branches: [main]
@@ -13,7 +13,7 @@ on:
       - 'tests/runtime/native/fixtures/round085-original-decode.c'
       - 'tests/tools/round085-original-decode-verify.py'
       - 'tests/tools/round080-original-lzo1x-independent-decoder-verify.py'
-      - '.github/workflows/phase-a-round086-original-typed-decode-host-noauth.yml'
+      - '.github/workflows/phase-a-round088-original-typed-decode-host-noauth.yml'
 permissions:
   contents: read
 jobs:
@@ -33,7 +33,7 @@ jobs:
         shell: bash
         run: |
           set -Eeuo pipefail
-          trap 'echo "::error::ROUND086_AGENT7_FIRST_ERROR product preflight line=$LINENO" >&2' ERR
+          trap 'echo "::error::ROUND088_AGENT7_FIRST_ERROR product preflight line=$LINENO" >&2' ERR
           test "$GITHUB_REF" = refs/heads/main
           test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
           test "$(git branch --show-current)" = main
@@ -46,7 +46,7 @@ jobs:
           test "$(git hash-object src/kernel/zswap-original-decode.c)" = eb1cd7f90d5edade9640e1ffe9dac3c8fe774644
           test "$(git hash-object src/kernel/zswap-original-decode.h)" = a247d1aaf9865de71f97cd980be806b8d8c7c20e
           test "$(git hash-object tests/runtime/native/fixtures/round085-original-decode.c)" = 1de6f01fca08637c2877eeb396dca81a0e7efd02
-          test "$(git hash-object tests/tools/round085-original-decode-verify.py)" = 8041e4d6fcc269452e1445e8d7e43d77f3d6a7f8
+          test "$(git hash-object tests/tools/round085-original-decode-verify.py)" = 73ddfb2ebbdcfe2c1f43d5da101491bea4a599e6
       - uses: actions/checkout@v4
         with:
           repository: torvalds/linux
@@ -72,24 +72,24 @@ jobs:
         shell: bash
         run: |
           set -Eeuo pipefail
-          trap 'echo "::error::ROUND086_AGENT7_FIRST_ERROR original preflight line=$LINENO" >&2' ERR
+          trap 'echo "::error::ROUND088_AGENT7_FIRST_ERROR original preflight line=$LINENO" >&2' ERR
           test "$(git -C original-linux rev-parse HEAD)" = c339f4010dea8b0d754f84ace70cd1b089878ef8
           test -z "$(git -C original-linux status --porcelain --untracked-files=all)"
           python3 -B swapz/tests/tools/round085-original-decode-verify.py --linux-root original-linux --preflight-only
           for dependency in gcc clang python3; do
             if ! command -v "$dependency" >/dev/null; then
-              echo "::error::ROUND086_AGENT7_FIRST_ERROR missing tool $dependency" >&2
+              echo "::error::ROUND088_AGENT7_FIRST_ERROR missing tool $dependency" >&2
               exit 1
             fi
           done
           test -f /usr/include/openssl/sha.h
-      - name: Actual pinned original LZO1X and raw LZ4 with candidate and real product owner and CRC
+      - name: Actual pristine control and staged noDict LZ4 plus pinned LZO1X typed decoder
         shell: bash
         run: |
           set -Eeuo pipefail
           umask 077
-          mkdir -p "$RUNNER_TEMP/round086-agent7"
-          evidence="$RUNNER_TEMP/round086-agent7"
+          mkdir -p "$RUNNER_TEMP/round088-agent7"
+          evidence="$RUNNER_TEMP/round088-agent7"
           python3 -B swapz/tests/tools/round085-original-decode-verify.py --diagnostic-regression >"$evidence/diagnostic-regression.log" 2>&1 || { echo "::error::ROUND087_AGENT7_FIRST_ERROR diagnostic regression failed; private artifact retained" >&2; exit 1; }
           cat "$evidence/diagnostic-regression.log"
           if python3 -B swapz/tests/tools/round085-original-decode-verify.py \
@@ -98,18 +98,18 @@ jobs:
             cat "$evidence/results.json"
           else
             code=$?
-            echo "::error::ROUND086_AGENT7_FIRST_ERROR strict host qualification exit=$code" >&2
+            echo "::error::ROUND088_AGENT7_FIRST_ERROR strict host qualification exit=$code" >&2
             # The verifier emits only controlled stage/category/location data.
             grep -E '^PASS (gcc|clang) |^FIRST_ERROR round085-agent7 |^FIRST_ERROR_RETENTION_FAILED' "$evidence/host.log" >&2 || true
             test ! -s "$evidence/results.json" || cat "$evidence/results.json"
             exit "$code"
           fi
           if ! status=$(git -C swapz status --porcelain --untracked-files=all) || [[ -n "$status" ]]; then
-            echo "::error::ROUND086_AGENT7_FIRST_ERROR product changed during tests" >&2
+            echo "::error::ROUND088_AGENT7_FIRST_ERROR product changed during tests" >&2
             exit 1
           fi
           if ! status=$(git -C original-linux status --porcelain --untracked-files=all) || [[ -n "$status" ]]; then
-            echo "::error::ROUND086_AGENT7_FIRST_ERROR original source changed during tests" >&2
+            echo "::error::ROUND088_AGENT7_FIRST_ERROR original source changed during tests" >&2
             exit 1
           fi
       - name: Retain exact host result and bounded first error
@@ -117,6 +117,6 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: round086-original-typed-decode-host
-          path: ${{ runner.temp }}/round086-agent7/
+          path: ${{ runner.temp }}/round088-agent7/
           if-no-files-found: warn
           retention-days: 14

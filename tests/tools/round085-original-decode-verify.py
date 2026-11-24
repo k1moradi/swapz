@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Exact pinned original Linux LZO1X/raw LZ4 + dormant typed decoder HOST ONLY.
+"""Exact original LZO1X/raw LZ4, authorized isolated noDict staging HOST ONLY.
 
 Run from a clean exact source snapshot:
   python3 -B tests/tools/round085-original-decode-verify.py --linux-root /path/to/pin --evidence-dir /private/new-directory
@@ -11,6 +11,8 @@ upstream warning model; candidate, fixture and product stay strict C23/C2x.
 from __future__ import annotations
 
 import argparse
+import difflib
+import hashlib
 import json
 import os
 import subprocess
@@ -194,7 +196,7 @@ def runtime_failure(execution, expected):
                  "lz4_compress.c", "lz4_decompress.c", "lz4defs.h", "lzodefs.h", "lz4.h", "lzo.h",
                  "unaligned.h", "kernel.h", "bitops.h", "codec.c", "codec.h", "zswap-import-codec.h",
                  "zswap-import-decoder-owner.c", "zswap-import-decoder-owner.h", "zswap-original-decode.h",
-                 "round085-original-decode.c", "original-compressor.c", "diagnostic-probe.c")
+                 "round085-original-decode.c", "original-compressor.c", "diagnostic-probe.c", "corpus-probe.c")
         pattern = r"(?:^|[/\s])(" + "|".join(map(re.escape, names)) + r"|case-[0-9]{2}\.c):(\d{1,8})(?::(\d{1,5}))?"
         match = re.search(pattern, stderr, re.M)
         location = ":".join(part for part in match.groups() if part) if match else "unavailable"
@@ -268,7 +270,175 @@ def diagnostic_regression():
             print(f"PASS {compiler} diagnostic regression: real UBSan, ordinary failure, exact kill, mixed failure, private retention", file=sys.stderr)
 
 
-def execute(compiler: str, linux: Path, workspace: Path, helpers: dict, state: dict, evidence: Path) -> None:
+LZ4_SOURCE = "lib/lz4/lz4_compress.c"
+LZ4_POSTIMAGE = "a1d860d6085109bc01ed6a593cf369ccbd6edc67"
+LZ4_BEFORE = (b"\tconst BYTE * const dictEnd = dictionary + dictPtr->dictSize;\n"
+              b"\tconst size_t dictDelta = dictEnd - (const BYTE *)source;\n")
+LZ4_AFTER = (b"\t/* Host-test-only: avoid unused dictionary arithmetic in noDict mode. */\n"
+             b"\tconst BYTE * const dictEnd = dict == noDict ? ip :\n"
+             b"\t\tdictionary + dictPtr->dictSize;\n"
+             b"\tconst size_t dictDelta = dict == noDict ? 0 :\n"
+             b"\t\tdictEnd - (const BYTE *)source;\n")
+
+
+def staged_bytes(pristine, commit, dirty, anchor=LZ4_BEFORE, expected=LZ4_POSTIMAGE):
+    require(commit == PIN, "staging wrong pin")
+    require(not dirty, "staging unexpected dirty path")
+    require(git_blob(pristine) == ORIGINAL[LZ4_SOURCE], "staging pristine blob")
+    require(pristine.count(anchor) == 1 and anchor == LZ4_BEFORE, "staging unique anchor")
+    staged = pristine.replace(anchor, LZ4_AFTER, 1)
+    require(git_blob(staged) == expected and expected == LZ4_POSTIMAGE, "staging postimage")
+    require(staged.count(LZ4_AFTER) == 1 and staged.replace(LZ4_AFTER, anchor, 1) == pristine,
+            "staging exact one-hunk diff")
+    return staged
+
+
+def stage_plan(linux, helpers, report):
+    checked = helpers["checked"]
+    commit = checked(["git", "-C", str(linux), "rev-parse", "HEAD"], "original commit")
+    dirty = checked(["git", "-C", str(linux), "status", "--porcelain", "--untracked-files=all"], "original status")
+    pristine = (linux / LZ4_SOURCE).read_bytes()
+    staged = staged_bytes(pristine, commit, dirty)
+    negatives = (
+        ("staging wrong pin", {"commit": "0" * 40}),
+        ("staging unexpected dirty path", {"dirty": "?? unrelated"}),
+        ("staging unique anchor", {"anchor": b"missing unique anchor"}),
+        ("staging postimage", {"expected": "0" * 40}),
+    )
+    for expected, changes in negatives:
+        parameters = {"commit": commit, "dirty": dirty, **changes}
+        try:
+            staged_bytes(pristine, **parameters)
+        except RuntimeError as error:
+            require(str(error) == expected, "wrong stage-negative first cause")
+        else:
+            raise RuntimeError("stage negative accepted")
+        require((linux / LZ4_SOURCE).read_bytes() == pristine, "negative changed original")
+    report["staging"] = {"pristine": ORIGINAL[LZ4_SOURCE], "postimage": LZ4_POSTIMAGE,
+                         "postimage_sha256": hashlib.sha256(staged).hexdigest(),
+                         "negatives_rejected": len(negatives), "mode": "isolated copy; original never edited",
+                         "scope": "noDict only; prefix/external modes unchanged, unqualified"}
+    print("PASS staging four negative guards, exact reversible one-hunk postimage", file=sys.stderr)
+    return staged
+
+
+# Actual pinned compressor comparison, not a substitute for typed decoder tests.
+# Same xorshift corpus as the fixture, all 4097 prefixes, plus 4095-byte input.
+CORPUS_PROBE = r'''#include <lz4.h>
+#include <stdint.h>
+#include <stdio.h>
+#include <string.h>
+static unsigned char page[4096], random_page[4096], compressed[4608], decoded[4096];
+static LZ4_stream_t workspace;
+
+static int compare_stream(FILE *stream, int size)
+{
+    int written = LZ4_compress_default((const char *)page, (char *)compressed,
+                                       size, (int)sizeof(compressed), &workspace);
+    if (written <= 0 || written > (int)sizeof(compressed))
+        return 1;
+    if (LZ4_decompress_safe((const char *)compressed, (char *)decoded,
+                            written, size) != size || memcmp(decoded, page, (size_t)size))
+        return 2;
+    uint32_t length = (uint32_t)written;
+    if (fwrite(&length, sizeof(length), 1, stream) != 1 ||
+        fwrite(compressed, 1, (size_t)written, stream) != (size_t)written)
+        return 3;
+    return 0;
+}
+
+int main(int argc, char **argv)
+{
+    if (argc != 2)
+        return 4;
+    FILE *stream = fopen(argv[1], "wb");
+    if (!stream)
+        return 5;
+    uint32_t state = 0x1ad57f91U;
+    for (size_t index = 0; index < sizeof(random_page); ++index) {
+        state ^= state << 13U; state ^= state >> 17U; state ^= state << 5U;
+        random_page[index] = (unsigned char)state;
+    }
+    int result = 0;
+    for (size_t prefix = 0; prefix <= sizeof(page) && !result; ++prefix) {
+        memset(page, 0, sizeof(page));
+        memcpy(page, random_page, prefix);
+        result = compare_stream(stream, (int)sizeof(page));
+    }
+    if (!result)
+        result = compare_stream(stream, (int)sizeof(page) - 1);
+    if (fclose(stream) != 0 && !result)
+        result = 6;
+    return result;
+}
+'''
+
+
+def corpus_control(compiler, standard, linux, workspace, helpers, includes, fixed, state, evidence):
+    compile_object = helpers["compile_object"]
+    checked = helpers["checked"]
+    run = helpers["run_command"]
+    name = Path(compiler).name
+    shim = workspace / "shim"
+    pristine_object = workspace / "pristine-lz4-compress.o"
+    probe = workspace / "corpus-probe.c"
+    probe.write_text(CORPUS_PROBE)
+    probe_object = probe.with_suffix(".o")
+    state["stage"] = "compile-pristine-control"
+    compile_object(compiler, "-std=gnu11", linux / LZ4_SOURCE, pristine_object,
+                   ["-I", str(shim), "-DCONFIG_64BIT=1"], original=True)
+    compile_object(compiler, standard, probe, probe_object, includes)
+    def invoke(label, compressor):
+        executable = workspace / label
+        corpus = workspace / (label + ".bytes")
+        state["stage"] = "link-" + label
+        checked([compiler, "-fsanitize=address,undefined", "-fno-pie", "-no-pie",
+                 str(probe_object), str(compressor), str(fixed[3]), "-o", str(executable)], label)
+        state["stage"] = "execute-" + label
+        return run([str(executable), str(corpus)], label, timeout=30), corpus
+
+    actual, pristine_corpus = invoke("pristine-control", pristine_object)
+    failure = runtime_failure(actual, None)
+    if name == "clang":
+        retain_private(evidence, "clang-pristine-control.stderr", actual.stderr)
+        if failure is not None:
+            state["pristine_control_observed"] = failure
+        require(failure is not None and failure["kind"] == "sanitizer" and
+                failure["sanitizer"] == "UBSan" and failure["category"] == "applying zero offset to null pointer" and
+                failure["location"] == "lz4_compress.c:192:42" and failure["exit"] == 1,
+                "pristine Clang control did not reproduce exact first error")
+        state["pristine_control"] = failure
+        print("PASS clang pristine control reproduced UBSan lz4_compress.c:192:42 exit=1 (pristine FAIL)", file=sys.stderr)
+        return
+    if failure is not None or actual.stdout:
+        state["first_error"] = failure or {"kind": "unexpected_corpus_stdout", "exit": actual.returncode}
+        retain_private(evidence, "gcc-pristine-control.stderr", actual.stderr)
+        raise RuntimeError("pristine GCC corpus rejected")
+    corrected, staged_corpus = invoke("staged-corpus", fixed[2])
+    failure = runtime_failure(corrected, None)
+    if failure is not None or corrected.stdout:
+        state["first_error"] = failure or {"kind": "unexpected_corpus_stdout", "exit": corrected.returncode}
+        retain_private(evidence, "gcc-staged-corpus.stderr", corrected.stderr)
+        raise RuntimeError("staged GCC corpus rejected")
+    pristine = pristine_corpus.read_bytes()
+    staged = staged_corpus.read_bytes()
+    require(pristine == staged and len(pristine) > 0, "pristine/staged compressed byte mismatch")
+    # Validate framing and count every real stream, rather than infer from file size.
+    offset = count = 0
+    while offset < len(pristine):
+        require(offset + 4 <= len(pristine), "truncated corpus length")
+        length = int.from_bytes(pristine[offset:offset + 4], sys.byteorder)
+        require(0 < length <= 4608 and offset + 4 + length <= len(pristine), "invalid corpus length")
+        offset += 4 + length
+        count += 1
+    require(count == 4098, "corpus count")
+    state["corpus_comparison"] = {"streams": count, "bytes": len(pristine),
+                                  "sha256": hashlib.sha256(pristine).hexdigest(),
+                                  "byte_exact": True, "pristine_decoder_readback": True}
+    print(f"PASS gcc pristine/staged byte-identical streams={count} bytes={len(pristine)} sha256={state['corpus_comparison']['sha256']}", file=sys.stderr)
+
+
+def execute(compiler: str, linux: Path, workspace: Path, helpers: dict, state: dict, evidence: Path, staged_source: Path) -> None:
     state["stage"] = "compiler-standard"
     standard = helpers["compiler_standard"](compiler)
     state["standard"] = standard
@@ -303,9 +473,10 @@ def execute(compiler: str, linux: Path, workspace: Path, helpers: dict, state: d
                      "lib/lz4/lz4_compress.c", "lib/lz4/lz4_decompress.c"):
         state["stage"] = "compile-original-" + Path(relative).name
         obj = workspace / (Path(relative).stem + ".o")
-        compile_object(compiler, "-std=gnu11", linux / relative, obj,
+        compile_object(compiler, "-std=gnu11", staged_source if relative == LZ4_SOURCE else linux / relative, obj,
                        ["-I", str(shim), "-DCONFIG_64BIT=1"], original=True)
         fixed.append(obj)
+    corpus_control(compiler, standard, linux, workspace, helpers, includes, fixed, state, evidence)
     adapter = workspace / "original-compressor.c"
     adapter.write_text(COMPRESS_ADAPTER)
     for source in (ROOT / "src/kernel/codec.c", ROOT / "src/kernel/zswap-import-decoder-owner.c",
@@ -381,6 +552,7 @@ def main() -> int:
     try:
         linux = args.linux_root.resolve()
         helpers = verify_inputs(linux)
+        staged = stage_plan(linux, helpers, report)
         if args.preflight_only:
             print(f"PASS original/product whole blobs={len(ORIGINAL) + len(PRODUCT)}; "
                   f"candidate unique semantic anchors={len(MUTANTS)}")
@@ -390,14 +562,22 @@ def main() -> int:
         report["candidate_blobs"] = {str(path.relative_to(ROOT)): git_blob(path.read_bytes())
                                      for path in (CANDIDATE, CANDIDATE.with_suffix(".h"), FIXTURE, Path(__file__).resolve())}
         with tempfile.TemporaryDirectory(prefix="swapz-round085-original-decode-") as temporary:
+            staged_directory = Path(temporary) / "staged"
+            staged_directory.mkdir()
+            staged_source = staged_directory / "lz4_compress.c"
+            staged_source.write_bytes(staged)
+            (staged_directory / "lz4defs.h").write_bytes((linux / "lib/lz4/lz4defs.h").read_bytes())
+            require(git_blob(staged_source.read_bytes()) == LZ4_POSTIMAGE, "staged disk postimage mismatch")
+            require(git_blob((staged_directory / "lz4defs.h").read_bytes()) == ORIGINAL["lib/lz4/lz4defs.h"], "staged header mismatch")
+            retain_private(evidence, "lz4-compressor.diff", "".join(difflib.unified_diff((linux / LZ4_SOURCE).read_text().splitlines(keepends=True), staged.decode().splitlines(keepends=True), fromfile=LZ4_SOURCE, tofile=LZ4_SOURCE)))
             for name in ("gcc", "clang"):
                 active = name
                 compiler = shutil.which(name)
                 require(compiler is not None, f"missing compiler {name}")
                 workspace = Path(temporary) / name
                 workspace.mkdir()
-                execute(compiler, linux, workspace, helpers, results[name], evidence)
-        report["status"] = "PASS_HOST_ONLY"
+                execute(compiler, linux, workspace, helpers, results[name], evidence, staged_source)
+        report["status"] = "PASS_STAGED_HOST_ONLY_PRISTINE_CLANG_FAIL"
         return 0
     except (RuntimeError, OSError, ValueError, subprocess.TimeoutExpired) as error:
         state = results[active] if active else None
@@ -424,6 +604,18 @@ def main() -> int:
         return 1
     finally:
         if not args.preflight_only:
+            if "staging" in report:
+                try:
+                    verify_inputs(linux)
+                    report["staging"]["pristine_after"] = "PASS"
+                except (RuntimeError, OSError, ValueError) as error:
+                    report["staging"]["pristine_after"] = "FAIL"
+                    report["status"] = "FAIL"
+                    if "first_error" not in report:
+                        report["first_error"] = {"kind": "pristine_after", "location": "unavailable"}
+                    print("FIRST_ERROR_RETENTION_FAILED pristine checkout verification", file=sys.stderr)
+                    print(json.dumps(report, indent=2))
+                    return 1
             print(json.dumps(report, indent=2))
 
 

@@ -20348,3 +20348,25 @@ contract. Exercise rejected aliased ticket, input, pin and read output.
 Dirty the dedicated staging image before the zero-suffix check so a missing
 seal cannot survive on initially zero-filled storage. These are changed
 source/fixture checks, not an unchanged run; retain the prior exact result.
+
+## Round088 Agent7 — isolated noDict original compressor sanitizer correction
+
+Preserve R087 pristine pinned LZ4 compressor Clang UBSan failure at line192:42
+(null+zero) and GCC19/19. Agent1 authorizes host-only staging of the exact
+pristine lib/lz4/lz4_compress.c blob 2a397bb2c661d9c2e4a7a67d5f50f06bfd42f1f2
+to postimage a1d860d6085109bc01ed6a593cf369ccbd6edc67. Restrict the change to
+noDict; prefix/external dictionary expressions remain unchanged and
+unqualified (cross-object subtraction and empty dictionaries not repaired).
+Require whole hashes, unique anchor, reversible exact one-hunk diff,
+four injected guard negatives (wrong pin, dirty-path status, anchor,
+postimage), and pristine full pin revalidation even after failure.
+No upstream or original checkout modification, global pin change or adoption.
+Require actual pristine Clang control reproducing category/location/exit.
+GCC pristine/staged byte-identical compression for 4097 deterministic
+full-page prefixes and one short page; verify framing, count and actual
+original decoder readback for each. Require staged GCC/Clang strict
+ASan/UBSan baselines and 19 independently executed semantic kills each,
+unchanged typed candidate/fixture/shared pins, R087 diagnostic controls,
+private raw artifact and partial JSON with bounded first error on failure.
+No suppression or VM/physical testing. Staged host PASS is not pristine
+PASS or production qualification. AUTH0 Phase A BLOCKED all activation OFF.
