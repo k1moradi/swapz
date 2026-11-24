@@ -1,0 +1,138 @@
+{
+  "round": "088",
+  "agent": 11,
+  "conclusion": "IN_PROGRESS_HOST_ONLY_UNAPPLIED_PATCH",
+  "assignment_sha": "dcb65dca9a3c2bd990aedb2829181d0c0e015ce2",
+  "assignment_parent": "cf5a539913fd169fd71bac72c61bc355285a51f6",
+  "tested_source_commit": "28527084a205d7465748af29f6f92dcba420c36e",
+  "tested_source_parent": "58e2182ca9b6fb940c22174274f07953795d602f",
+  "branch": "main",
+  "single_parent": true,
+  "nonforce": true,
+  "original_linux_pin": "c339f4010dea8b0d754f84ace70cd1b089878ef8",
+  "pristine_blobs": {
+    "mm/zswap.c": "ae19e301fced7e357a4c7587dfdd6abb890b9163",
+    "mm/page_io.c": "c6824fcd483e0aa2c412e14dae0d2a356b17c373",
+    "include/linux/swap_ops.h": "57ac6c703f685883d3a15ebc1a5c7f6c298deb1b",
+    "include/linux/blk_types.h": "0cc09b975d8ffbd45ca3dc47533a71f8e8164de6",
+    "include/linux/bio.h": "7a794ce723b84b2a148f8f9beccf057b266e8ac9",
+    "block/bio.c": "b0fcc69de653524479e3b328aa29a37e97945b84",
+    "mm/zsmalloc.c": "7ef80e0da6267661cea4d48a4a615444724782e7",
+    "mm/swapfile.c": "254ce86fa923e6b5f1fefda88c39315c4cc00642",
+    "mm/swap.h": "d5bf21f517dceae58eb94fb0ce5f4e1fdc679409",
+    "include/linux/swap.h": "4f686709d71f005dc43b2f751012b5f61d6b007a",
+    "include/linux/bvec.h": "b63914ff56e33df302055fabf2a84ba490bc8d2c",
+    "include/linux/blkdev.h": "2d5c30823aab9be31d881be1de8ae60feb7a5c57",
+    "include/linux/workqueue.h": "c8a36423cb3465ba8c00735b2ca152eb7122a97a",
+    "include/crypto/acompress.h": "5d5358dfab73458fc4bc345fe00650e938fe36c6",
+    "include/crypto/sha2.h": "22fbc37ae840796ecbafd5eadf23373e51741f9e"
+  },
+  "staged_postimages": {
+    "mm/zswap.c": "e3caa72ca37a7a3cdb3ed51639d9507b22fe4e51",
+    "mm/page_io.c": "0b0fe917fa3af5deaef8263274edffbf1a62eedb",
+    "include/linux/swap_ops.h": "a39a1921daf6f272e9812eb63b1aa64fec96c57f",
+    "include/linux/blk_types.h": "0bf866c1571fe6b4d2e49d01b1b2c87fcf2cf04c",
+    "include/linux/bio.h": "f4c5f1730514cf1816ffd5e9787562439dfae236",
+    "block/bio.c": "3ba0e12a96ba3235eb909e3b3dd0be44657c6f6e",
+    "include/linux/swapz_mm_carrier.h": "7ac3fe204983aa7ba5a291aa756d37e235f8508f"
+  },
+  "product_blobs": {
+    "src/kernel/zswap-original-ticket.h": "b772cc28755a68719f4dcdabefeefe57b5efea67",
+    "src/kernel/zswap-original-ticket.c": "dcea7cbc40094fed2997d6704c712ac47aa164a1",
+    "src/kernel/codec.h": "e89d316b9cf49f82df0b77648c1be1731607987d",
+    "src/kernel/codec.c": "d920dcaac6f2b7de1334d4133770bd649719c66d",
+    "src/kernel/Makefile": "ed6e19ae28a84a4a3e92117812adc445d5c2e8e5",
+    "tests/tools/round088-original-mm-carrier.patch": "b9a10044c7cd750d908730b5a95a4e945883ec45",
+    "tests/runtime/native/fixtures/round088-original-mm-carrier.c": "d173ef985b801ba34815754d9d9918eeace3ec06"
+  },
+  "new_test_blobs": {
+    "tests/tools/round088-original-mm-carrier.patch": "b9a10044c7cd750d908730b5a95a4e945883ec45",
+    "tests/tools/round088-original-mm-carrier-verify.py": "743f4a892e1b351f9d923da9f5241d6938fbd75f",
+    "tests/runtime/native/fixtures/round088-original-mm-carrier.c": "d173ef985b801ba34815754d9d9918eeace3ec06",
+    ".github/workflows/phase-a-round088-original-mm-carrier-host-noauth.yml": "6c38a9ec86e353c11a18aed396c6cb967c917da9"
+  },
+  "standards_before": "09564b946a300ef12fee4375f752ec78aea8e1a4",
+  "standards_after": "6802dc7db7fafa580bf2ff6ac5038317036345f6",
+  "workflow_run_id": 45459276984,
+  "workflow_url": "https://github.com/k1moradi/swapz/actions/runs/45459276984",
+  "jobs": [
+    {
+      "id": 138677070938,
+      "name": "original-mm-carrier-strict-host",
+      "status": "in_progress",
+      "conclusion": null,
+      "url": "https://github.com/k1moradi/swapz/actions/runs/45459276984/job/138677070938"
+    }
+  ],
+  "first_error": null,
+  "first_error_scope": "NO_CI_ERROR_REPORTED_YET",
+  "prepublication": {
+    "exact_assignment_parent": true,
+    "actual_parent_and_owned_paths_verified": true,
+    "whole_pristine_connector_blobs": 15,
+    "predicted_postimage_blobs": 7,
+    "exact_patch_hunks": 29,
+    "standards_prefix_verified": true,
+    "product_broker_codec_kbuild_unchanged": true,
+    "tool_error": "Initial patch packaging rejected a partial-line block/bio.c anchor before ref update; corrected and regenerated."
+  },
+  "host": {
+    "gcc": "PENDING",
+    "clang": "PENDING",
+    "actual_executed_checks": null,
+    "stage": "PENDING",
+    "kernel_compile": "NOT_RUN",
+    "native": "NOT_RUN",
+    "local_host": "NOT_RUN",
+    "fixture_scope": "EXTRACTED_ACTUAL_PROFILE_MOVE_GEOMETRY_CANDIDATE_GET_WITH_ABI_SHIM_AND_ACTUAL_BROKER_CRC"
+  },
+  "prior_native": {
+    "round": "087",
+    "source": "67a036d89a1a7412a27f9450df549347146e758f",
+    "run": 45455624750,
+    "job": 138664150782,
+    "artifact": 14950116706,
+    "actual_cases_passed": 6,
+    "scope": "AGENT1_ACCEPTED_HISTORICAL_BROKER_ADAPTER_NOT_RERUN"
+  },
+  "candidate": {
+    "route_provider": "HARD_REFUSAL_NO_REAL_ROUTE_PROVIDER",
+    "live_claim": "NO_GO",
+    "patch_application": "SCRATCH_ONLY_PENDING_CI",
+    "normal_kbuild": false,
+    "source_credential_per_zswap_entry_bytes": "120 on previously measured x86_64 ticket_key ABI; actual new entry sizeof/allocator overhead unmeasured",
+    "carrier_count": 1,
+    "carrier_scratch_bytes": 4096,
+    "broker_budget": "existing independent count/byte limits; no approved production cap",
+    "sio_ownership": "SOLE_OWNER; BIO_NONOWNING_BORROW; generic clone empty",
+    "terminal_release": "DEFERRED_STATIC_WORK; unproven native lifecycle",
+    "foreign_lock_order": "UNPROVEN",
+    "actual_source_identity": "UNQUALIFIED",
+    "patch_kernel_build": "NOT_RUN"
+  },
+  "blockers": [
+    "Real nonblocking value-only route/generation provider and independent broker registration lifetime not implemented; hard refusal",
+    "Actual patched original kernel compile/link not run; header placement and opt-in build linkage require future review",
+    "Actual origin-selected clone proof/claim-enqueue and no foreign-lock nesting unqualified",
+    "Global integration memory bound including new entry/BIO/sio/ctx overhead and release work quiescence unqualified"
+  ],
+  "source_mapped_authenticated": 0,
+  "phase_a": "BLOCKED",
+  "direct_handoff": "DISABLED",
+  "forced_raw_bypass": "DISABLED",
+  "import_active": 0,
+  "production_bio_cap": "NO_GO",
+  "physical_testing": false,
+  "privileged_swap_testing": false,
+  "new_vm_workflow": false,
+  "manual_duplicate_workflow_dispatch": false,
+  "periodic_monitoring": false,
+  "automatic_run_census_at_observation": 6,
+  "historical_other_auto_runs": [
+    45459276994,
+    45459277004,
+    45459277008,
+    45459277537,
+    45459277011
+  ]
+}
