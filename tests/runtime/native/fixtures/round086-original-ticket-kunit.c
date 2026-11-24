@@ -7,6 +7,8 @@
 #include <linux/preempt.h>
 #include <linux/smp.h>
 #include <linux/string.h>
+#include <linux/ktime.h>
+#include <linux/timekeeping.h>
 #include "zswap-original-ticket.h"
 
 #if !defined(__KERNEL__) || !defined(SWAPZ_ORIGINAL_TICKET_TEST)
@@ -114,22 +116,67 @@ static void r086_capacity(struct kunit *test)
 		sizeof(swapz_u32));
 }
 
+/* A real other CPU holds the broker lock. Release/acquire handshakes
+ * publish ownership and release; the holder never sleeps or allocates.
+ * Deadlines bound the rendezvous even if the contender is delayed.
+ * A synchronous IPI joins the async callback before stack/fixture reuse. */
+struct r087_contention {
+	struct swapz_ticket_broker *broker;
+	bool ready, release, expired;
+	int holder_cpu;
+};
+#define R087_RENDEZVOUS_NS (5ULL * NSEC_PER_SEC)
+
+static void r087_hold_lock(void *argument)
+{
+	struct r087_contention *state = argument;
+	unsigned long flags;
+	u64 deadline;
+
+	spin_lock_irqsave(&state->broker->lock, flags);
+	state->holder_cpu = raw_smp_processor_id();
+	deadline = ktime_get_mono_fast_ns() + R087_RENDEZVOUS_NS;
+	smp_store_release(&state->ready, true);
+	while (!smp_load_acquire(&state->release)) {
+		if (ktime_get_mono_fast_ns() >= deadline) {
+			state->expired = true;
+			break;
+		}
+		cpu_relax();
+	}
+	spin_unlock_irqrestore(&state->broker->lock, flags);
+}
+
+static void r087_join_holder(void *argument)
+{
+	/* Runs after the previous IPI callback on the same guest CPU. */
+	(void)argument;
+}
+
 static void r086_irq_and_contention(struct kunit *test)
 {
 	struct r086_fixture *fixture = r086_alloc(test, 3568, 128);
 	struct swapz_ticket_ref first = {}, declined = {};
 	struct swapz_ticket_key key;
+	struct r087_contention state = {};
 	unsigned long flags;
-	bool before_irq, after_irq, failed_irq, disabled_irq;
-	int before_preempt, after_preempt, locked_preempt, failed_preempt;
-	int reserve_error, claim_error, disabled_error, put_error;
+	u64 deadline;
+	bool before_irq, after_irq, failed_irq = false, disabled_irq;
+	bool enabled_failure_irq = true, ready = false;
+	int before_preempt, after_preempt, locked_preempt, failed_preempt = -1;
+	int enabled_failure_preempt = -1;
+	int reserve_error = -ETIMEDOUT, claim_error = -ETIMEDOUT;
+	int disabled_error, put_error, dispatch_error, join_error = 0;
+	int current_cpu, other_cpu;
 
 	KUNIT_ASSERT_NOT_NULL(test, fixture);
 	KUNIT_ASSERT_TRUE(test, IS_ENABLED(CONFIG_SMP));
 	KUNIT_ASSERT_TRUE(test, IS_ENABLED(CONFIG_DEBUG_SPINLOCK));
+	KUNIT_ASSERT_GE(test, num_online_cpus(), 2U);
 	key = r086_key(fixture, 64);
 	before_irq = irqs_disabled();
 	before_preempt = preempt_count();
+	KUNIT_ASSERT_FALSE(test, before_irq);
 	KUNIT_ASSERT_EQ(test, swapz_ticket_reserve(&fixture->broker, &key, &first), 0);
 	after_irq = irqs_disabled();
 	after_preempt = preempt_count();
@@ -137,24 +184,54 @@ static void r086_irq_and_contention(struct kunit *test)
 	KUNIT_EXPECT_EQ(test, after_preempt, before_preempt);
 	KUNIT_ASSERT_EQ(test, swapz_ticket_seal(&first, fixture->source, 64), 0);
 
-	/* Deliberately hold the broker's OWN lock to exercise failed trylock.
-	 * SMP is mandatory: UP debug locks diagnose failure as a kernel bug.
-	 * No assertions, printing, sleeping, allocation or foreign lock here. */
-	spin_lock_irqsave(&fixture->broker.lock, flags);
+	state.broker = &fixture->broker;
+	current_cpu = get_cpu();
+	other_cpu = current_cpu == 0 ? 1 : 0;
 	locked_preempt = preempt_count();
-	reserve_error = swapz_ticket_reserve(&fixture->broker, &key, &declined);
-	claim_error = swapz_ticket_claim(&first, &key);
-	failed_irq = irqs_disabled();
-	failed_preempt = preempt_count();
-	spin_unlock_irqrestore(&fixture->broker.lock, flags);
+	dispatch_error = smp_call_function_single(other_cpu, r087_hold_lock, &state, 0);
+	if (!dispatch_error) {
+		deadline = ktime_get_mono_fast_ns() + R087_RENDEZVOUS_NS;
+		while (!(ready = smp_load_acquire(&state.ready))) {
+			if (ktime_get_mono_fast_ns() >= deadline)
+				break;
+			cpu_relax();
+		}
+		if (ready) {
+			/* Failed reserve from IRQ-enabled caller, then failed
+			 * claim from IRQ-disabled caller. No assertions here. */
+			reserve_error = swapz_ticket_reserve(&fixture->broker, &key, &declined);
+			enabled_failure_irq = irqs_disabled();
+			enabled_failure_preempt = preempt_count();
+			local_irq_save(flags);
+			claim_error = swapz_ticket_claim(&first, &key);
+			failed_irq = irqs_disabled();
+			failed_preempt = preempt_count();
+			local_irq_restore(flags);
+		}
+		smp_store_release(&state.release, true);
+		/* No local lock or disabled IRQs during synchronous join.
+		 * Fixed two-vCPU guest has no CPU hotplug in this fixture. */
+		join_error = smp_call_function_single(other_cpu, r087_join_holder, NULL, 1);
+	}
+	put_cpu();
+	KUNIT_ASSERT_EQ(test, dispatch_error, 0);
+	KUNIT_ASSERT_EQ(test, join_error, 0);
+	KUNIT_ASSERT_TRUE(test, ready);
+	KUNIT_ASSERT_FALSE(test, state.expired);
+	KUNIT_EXPECT_EQ(test, state.holder_cpu, other_cpu);
+	KUNIT_EXPECT_NE(test, current_cpu, state.holder_cpu);
 	KUNIT_EXPECT_EQ(test, reserve_error, -EAGAIN);
 	KUNIT_EXPECT_EQ(test, claim_error, -EAGAIN);
+	KUNIT_EXPECT_FALSE(test, enabled_failure_irq);
+	KUNIT_EXPECT_EQ(test, enabled_failure_preempt, locked_preempt);
 	KUNIT_EXPECT_TRUE(test, failed_irq);
 	KUNIT_EXPECT_EQ(test, failed_preempt, locked_preempt);
 	KUNIT_EXPECT_EQ(test, (bool)irqs_disabled(), before_irq);
 	KUNIT_EXPECT_EQ(test, preempt_count(), before_preempt);
 	KUNIT_EXPECT_PTR_EQ(test, declined.broker, NULL);
 	r086_usage(test, fixture, 1, 64);
+	kunit_info(test, "R087_CPUS online=%u contender=%d holder=%d",
+		num_online_cpus(), current_cpu, state.holder_cpu);
 
 	/* Success also restores the incoming disabled state, not just enabled. */
 	local_irq_save(flags);

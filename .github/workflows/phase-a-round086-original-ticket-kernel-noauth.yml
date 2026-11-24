@@ -1,4 +1,4 @@
-name: Round086 Agent11 actual original ticket kernel adapter NO_AUTH
+name: Round087 Agent11 actual original ticket x86 QEMU TCG adapter NO_AUTH
 on:
   push:
     branches: [main]
@@ -13,7 +13,7 @@ on:
 permissions:
   contents: read
 jobs:
-  original-ticket-pinned-smp-uml:
+  original-ticket-pinned-smp-qemu-tcg:
     runs-on: ubuntu-24.04
     timeout-minutes: 115
     steps:
@@ -48,45 +48,71 @@ jobs:
         run: |
           set -Eeuo pipefail
           umask 077
-          mkdir -p round086-agent11-evidence
+          mkdir -p round087-agent11-evidence
           verifier=swapz/tests/tools/round086-original-ticket-kernel-verify.py
           for phase in verify-only stage verify-stage; do
             python3 -B "$verifier" "$phase" --linux-root linux \
-              --manifest "round086-agent11-evidence/$phase.json"
+              --manifest "round087-agent11-evidence/$phase.json"
           done
           git -C linux diff --check
-      - name: Confirm rootless runner build prerequisites
+      - name: Rootless diagnostic extraction regressions before build
+        run: python3 -B swapz/tests/tools/round086-original-ticket-kernel-verify.py diagnostic-regressions
+      - name: Provision ephemeral runner tools and prove usable rootless TCG firmware
+        shell: bash
         run: |
           set -Eeuo pipefail
-          for tool in gcc make bc bison flex ld nm python3; do
-            command -v "$tool" >/dev/null || { echo "ROUND086_AGENT11_FIRST_ERROR missing build tool $tool"; exit 2; }
-          done
-      - name: One pinned SMP UML build and genuine directed KUnit
+          umask 077
+          evidence="$PWD/round087-agent11-evidence"
+          verifier=swapz/tests/tools/round086-original-ticket-kernel-verify.py
+          phase=provision
+          log="$evidence/provision.log"
+          failure() {
+            local code="$?"
+            trap - ERR
+            python3 -B "$verifier" record-failure --raw "$evidence/qemu-preflight.stderr.log" \
+              --runner "$log" --phase "$phase" --exit-code "$code" \
+              --output "$evidence/first-error.json" || true
+            exit "$code"
+          }
+          trap failure ERR
+          # Only approved disposable hosted-runner package installation
+          # uses sudo. All QEMU and kernel tests run as unprivileged user.
+          {
+            sudo -n apt-get update -qq
+            sudo -n env DEBIAN_FRONTEND=noninteractive apt-get install -y -qq --no-install-recommends \
+              build-essential bc bison flex libelf-dev libssl-dev binutils qemu-system-x86 qemu-system-data
+          } >"$log" 2>&1
+          phase=qemu-preflight
+          log="$evidence/qemu-preflight.log"
+          python3 -B "$verifier" qemu-preflight --output "$evidence/qemu-preflight.json" >"$log" 2>&1
+          grep -Fx 'R087_QEMU_PREFLIGHT PASS TCG_ONLY qboot.rom two_vcpus rootless' "$log"
+      - name: One pinned x86 SMP QEMU TCG build and genuine directed KUnit
         shell: bash
         timeout-minutes: 95
         run: |
           set -Eeuo pipefail
           umask 077
-          evidence="$PWD/round086-agent11-evidence"
-          out="$RUNNER_TEMP/r086-original-ticket-uml"
-          config="$RUNNER_TEMP/r086-ticket.kunitconfig"
+          evidence="$PWD/round087-agent11-evidence"
+          out="$RUNNER_TEMP/r087-original-ticket-x86"
+          config="$RUNNER_TEMP/r087-ticket.kunitconfig"
           verifier=swapz/tests/tools/round086-original-ticket-kernel-verify.py
           phase=build
           log="$evidence/build.log"
           first_error() {
             local code="$?"
             trap - ERR
-            echo "::error::ROUND086_AGENT11_FIRST_ERROR phase=$phase exit=$code" >&2
             if test -s "$out/test.log"; then
               cp "$out/test.log" "$evidence/original-ticket-KTAP.log"
             fi
-            { grep -hE -m1 'fatal error:|error:|undefined reference|not ok|Kernel panic|KASAN:|UBSAN:|BUG:|WARNING:|timed out' \
-              "$log" "$out/test.log" 2>/dev/null || true; } | cut -c1-250 >&2
+            python3 -B "$verifier" record-failure --raw "$out/test.log" \
+              --runner "$log" --phase "$phase" --exit-code "$code" \
+              --output "$evidence/first-error.json" || true
             exit "$code"
           }
           trap first_error ERR
           cat >"$config" <<'KUNIT_CONFIG'
           CONFIG_KUNIT=y
+          CONFIG_X86_64=y
           CONFIG_SMP=y
           CONFIG_NR_CPUS=2
           CONFIG_DEBUG_KERNEL=y
@@ -96,28 +122,38 @@ jobs:
           CONFIG_CRC32=y
           # CONFIG_KUNIT_ALL_TESTS is not set
           # CONFIG_SWAP is not set
+          # CONFIG_ZSWAP is not set
           KUNIT_CONFIG
           timeout -k 10s 82m python3 -B linux/tools/testing/kunit/kunit.py build \
-            --arch=um --build_dir="$out" --kunitconfig="$config" --jobs=2 >"$log" 2>&1
+            --arch=x86_64 --build_dir="$out" --kunitconfig="$config" --jobs=2 >"$log" 2>&1
           phase=build-identity
-          test -x "$out/linux"
-          python3 -B "$verifier" verify-build --build "$out" --output "$evidence/build-identity.json"
+          log="$evidence/build-identity.log"
+          test -s "$out/arch/x86/boot/bzImage"
+          python3 -B "$verifier" verify-build --build "$out" --output "$evidence/build-identity.json" >"$log" 2>&1
+          cat "$log"
           cp "$out/.config" "$evidence/effective.config"
           phase=boot
           log="$evidence/run.log"
           timeout -k 10s 5m python3 -B linux/tools/testing/kunit/kunit.py exec \
-            --arch=um --build_dir="$out" --timeout=120 --kernel_args=ncpus=2 \
+            --arch=x86_64 --build_dir="$out" --timeout=180 \
+            --qemu_args="-machine pc -smp 2 -nic none -L /usr/share/qemu" \
             --json="$evidence/original-ticket.json" \
             'swapz_round086_original_ticket*' >"$log" 2>&1
           cp "$out/test.log" "$evidence/original-ticket-KTAP.log"
+          phase=command-identity
+          log="$evidence/command-identity.log"
+          python3 -B "$verifier" verify-command --run-log "$evidence/run.log" --build "$out" \
+            --output "$evidence/qemu-command.json" >"$log" 2>&1
           phase=json-ktap
+          log="$evidence/verified.log"
           python3 -B "$verifier" verify-native --result "$evidence/original-ticket.json" \
-            --kernel-log "$evidence/original-ticket-KTAP.log" --output "$evidence/verified.json"
+            --kernel-log "$evidence/original-ticket-KTAP.log" --output "$evidence/verified.json" >"$log" 2>&1
+          cat "$log"
       - name: Retain exact build identity, stage hashes and actual JSON/KTAP
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: round086-agent11-actual-kernel-ticket
-          path: round086-agent11-evidence/
+          name: round087-agent11-actual-qemu-tcg-ticket
+          path: round087-agent11-evidence/
           if-no-files-found: warn
           retention-days: 14
