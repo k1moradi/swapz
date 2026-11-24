@@ -1,0 +1,240 @@
+{
+  "round": "086",
+  "agent": 5,
+  "kind": "exact-push-base-extent-qualification-repair",
+  "task_commit": "7732ea3eb7defb8112a87ead4b578dbe61c453ab",
+  "task_parent": "d77ef98bc218ffd260b7114ffcb32c411d66bb31",
+  "tested_commit": "3a3a3ba8c4b6bfcdeef66442c8ba2d4ee8b45b71",
+  "tested_parent": "7732ea3eb7defb8112a87ead4b578dbe61c453ab",
+  "source_blobs": {
+    "src/kernel/codec.h": "e89d316b9cf49f82df0b77648c1be1731607987d",
+    "src/kernel/codec.c": "d920dcaac6f2b7de1334d4133770bd649719c66d",
+    "src/kernel/authority.h": "3bb5bab5a5bdb2aa087f5793fc8b5e90d6636031",
+    "src/kernel/authority.c": "25bf2dbdc5a3af770d7027547a58254c1ba81265",
+    "src/kernel/engine.h": "0e505915fb2e1578b4c1cee36e32be8a30f3745f",
+    "src/kernel/engine.c": "20e91329fc1a1b713cb6638236c001e7d5e3f815",
+    "src/kernel/dm-target.c": "f1cab252cd990190646c82da81378d1563475826",
+    "src/kernel/zswap-import-codec.h": "0d888fe4c74115ab2388f1df1dc0b86ae4b9b6c6",
+    "src/kernel/Makefile": "ed6e19ae28a84a4a3e92117812adc445d5c2e8e5",
+    "src/kernel/zswap-original-extent.c": "c6c5af281a636447126e1a8b67484d954158a300",
+    "src/kernel/zswap-original-extent.h": "34572d01fffe1b276c2d023822266eda29a2137e",
+    "tests/runtime/native/fixtures/round084-original-extent.c": "473389e30b193626d8c33dba1cf1aad4c738fd8a",
+    "tests/runtime/native/repository-policy-test.py": "b200e0ca3e20d4c1f37e350ac9ef1c6426179817",
+    ".github/workflows/phase-a-round084-original-extent-host-noauth.yml": "d77c578df86e2069ebba6f85cc526dcad9fa7402",
+    "tests/tools/round084-original-extent-verify.py": "af05e47f63550b7407cf7f1e00a8da6d6acf578e",
+    "docs/testing_standards.md": "f4a096e74fbd45e38b614e7c2af2e6b0fba86f09"
+  },
+  "standards_parent_blob": "7b79947956c914bd5adab7ea9494bffe6a6ba5cc",
+  "prior_round084": {
+    "tested_commit": "1095acd05fff26c9da3941d62a12e179dcaeb808",
+    "run_id": 45394799654,
+    "job_id": 138447600617,
+    "conclusion": "FAIL_PREFLIGHT_COMPILERS_NOT_RUN",
+    "actual_mutants_per_compiler": 0,
+    "first_error": "SOURCE_CONTRACT_MISMATCH: commit=1095acd05fff26c9da3941d62a12e179dcaeb808 path='<git-metadata>' required_policy=exact first-parent Git metadata first_error=push base SHA unavailable or invalid"
+  },
+  "workflow_url": "https://github.com/k1moradi/swapz/actions/runs/45447373151",
+  "run_id": 45447373151,
+  "run_status": "completed",
+  "jobs": [
+    {
+      "id": 138634741636,
+      "name": "original-extent-host",
+      "status": "completed",
+      "conclusion": "success",
+      "url": "https://github.com/k1moradi/swapz/actions/runs/45447373151/job/138634741636",
+      "steps": [
+        {
+          "name": "Set up job",
+          "status": "completed",
+          "conclusion": "success"
+        },
+        {
+          "name": "Run actions/checkout@v4",
+          "status": "completed",
+          "conclusion": "success"
+        },
+        {
+          "name": "Exact push source policy and actual extent semantic qualification",
+          "status": "completed",
+          "conclusion": "success"
+        },
+        {
+          "name": "Retain failure before verifier entry",
+          "status": "completed",
+          "conclusion": "skipped"
+        },
+        {
+          "name": "Preserve bounded host evidence",
+          "status": "completed",
+          "conclusion": "success"
+        },
+        {
+          "name": "Post Run actions/checkout@v4",
+          "status": "completed",
+          "conclusion": "success"
+        },
+        {
+          "name": "Complete job",
+          "status": "completed",
+          "conclusion": "success"
+        }
+      ]
+    }
+  ],
+  "conclusion": "PASS",
+  "first_error": null,
+  "environment_first_error": "local git ls-remote: Could not resolve host: github.com; connector used, no local compiler execution",
+  "preflight_execution": "PASS",
+  "planned_event_base_negatives": 5,
+  "planned_event_base_positives": 1,
+  "mutation_anchors_static_verified": 24,
+  "planned_mutants_per_compiler": 24,
+  "actual_compiler_results": [
+    {
+      "compiler": "gcc",
+      "checks": 23106,
+      "record_bytes": 24,
+      "builder_bytes": 48,
+      "map_bytes": 20,
+      "semantic_mutants": 24
+    },
+    {
+      "compiler": "clang",
+      "checks": 23106,
+      "record_bytes": 24,
+      "builder_bytes": 48,
+      "map_bytes": 20,
+      "semantic_mutants": 24
+    }
+  ],
+  "actual_mutants_per_compiler": {
+    "gcc": 24,
+    "clang": 24
+  },
+  "artifact": {
+    "id": 14944644877,
+    "name": "round084-agent5-original-extent-host",
+    "url": "https://github.com/k1moradi/swapz/actions/runs/45447373151/artifacts/14944644877"
+  },
+  "push_census": {
+    "prior_actual": 41,
+    "prior_equivalent_predicted": 10,
+    "new_actual": 10,
+    "predicted_path_set_matches_new": true,
+    "expected_equivalent_paths": [
+      ".github/workflows/kernel-debug.yml",
+      ".github/workflows/phase-a-round063-original-mm-dm-carrier-noauth.yml",
+      ".github/workflows/phase-a-round064-original-slot-current-target-noauth.yml",
+      ".github/workflows/phase-a-round072-original-mm-bio-authority-decoder-noauth.yml",
+      ".github/workflows/phase-a-round084-original-extent-host-noauth.yml",
+      ".github/workflows/phase-a-zswap-dm-original-table-gc-lifetime-noauth.yml",
+      ".github/workflows/physical-evidence-rootless.yml",
+      ".github/workflows/product-codec.yml",
+      ".github/workflows/project-goals.yml",
+      ".github/workflows/systemd-package-readiness.yml"
+    ],
+    "actual_runs": [
+      {
+        "id": 45447373049,
+        "path": ".github/workflows/project-goals.yml",
+        "status": "in_progress",
+        "conclusion": null,
+        "head_sha": "3a3a3ba8c4b6bfcdeef66442c8ba2d4ee8b45b71",
+        "url": "https://github.com/k1moradi/swapz/actions/runs/45447373049"
+      },
+      {
+        "id": 45447373471,
+        "path": ".github/workflows/phase-a-zswap-dm-original-table-gc-lifetime-noauth.yml",
+        "status": "in_progress",
+        "conclusion": null,
+        "head_sha": "3a3a3ba8c4b6bfcdeef66442c8ba2d4ee8b45b71",
+        "url": "https://github.com/k1moradi/swapz/actions/runs/45447373471"
+      },
+      {
+        "id": 45447373067,
+        "path": ".github/workflows/phase-a-round072-original-mm-bio-authority-decoder-noauth.yml",
+        "status": "in_progress",
+        "conclusion": null,
+        "head_sha": "3a3a3ba8c4b6bfcdeef66442c8ba2d4ee8b45b71",
+        "url": "https://github.com/k1moradi/swapz/actions/runs/45447373067"
+      },
+      {
+        "id": 45447372994,
+        "path": ".github/workflows/physical-evidence-rootless.yml",
+        "status": "completed",
+        "conclusion": "success",
+        "head_sha": "3a3a3ba8c4b6bfcdeef66442c8ba2d4ee8b45b71",
+        "url": "https://github.com/k1moradi/swapz/actions/runs/45447372994"
+      },
+      {
+        "id": 45447372999,
+        "path": ".github/workflows/phase-a-round064-original-slot-current-target-noauth.yml",
+        "status": "in_progress",
+        "conclusion": null,
+        "head_sha": "3a3a3ba8c4b6bfcdeef66442c8ba2d4ee8b45b71",
+        "url": "https://github.com/k1moradi/swapz/actions/runs/45447372999"
+      },
+      {
+        "id": 45447372903,
+        "path": ".github/workflows/phase-a-round063-original-mm-dm-carrier-noauth.yml",
+        "status": "in_progress",
+        "conclusion": null,
+        "head_sha": "3a3a3ba8c4b6bfcdeef66442c8ba2d4ee8b45b71",
+        "url": "https://github.com/k1moradi/swapz/actions/runs/45447372903"
+      },
+      {
+        "id": 45447373488,
+        "path": ".github/workflows/product-codec.yml",
+        "status": "in_progress",
+        "conclusion": null,
+        "head_sha": "3a3a3ba8c4b6bfcdeef66442c8ba2d4ee8b45b71",
+        "url": "https://github.com/k1moradi/swapz/actions/runs/45447373488"
+      },
+      {
+        "id": 45447372912,
+        "path": ".github/workflows/systemd-package-readiness.yml",
+        "status": "in_progress",
+        "conclusion": null,
+        "head_sha": "3a3a3ba8c4b6bfcdeef66442c8ba2d4ee8b45b71",
+        "url": "https://github.com/k1moradi/swapz/actions/runs/45447372912"
+      },
+      {
+        "id": 45447373151,
+        "path": ".github/workflows/phase-a-round084-original-extent-host-noauth.yml",
+        "status": "completed",
+        "conclusion": "success",
+        "head_sha": "3a3a3ba8c4b6bfcdeef66442c8ba2d4ee8b45b71",
+        "url": "https://github.com/k1moradi/swapz/actions/runs/45447373151"
+      },
+      {
+        "id": 45447373412,
+        "path": ".github/workflows/kernel-debug.yml",
+        "status": "completed",
+        "conclusion": "success",
+        "head_sha": "3a3a3ba8c4b6bfcdeef66442c8ba2d4ee8b45b71",
+        "url": "https://github.com/k1moradi/swapz/actions/runs/45447373412"
+      }
+    ],
+    "manual_dispatch": false,
+    "other_runs_automatically_triggered": 9
+  },
+  "original_linux_context": {
+    "commit": "c339f4010dea8b0d754f84ace70cd1b089878ef8",
+    "executed": false
+  },
+  "native": "NOT_RUN",
+  "ordinary_map_bytes": 20,
+  "ordinary_cap": 3568,
+  "original_caps": [
+    3568,
+    4095
+  ],
+  "actual_physical_io": false,
+  "normal_kbuild_wiring": false,
+  "source_mapped_authenticated": 0,
+  "phase_a": "BLOCKED",
+  "direct_compressed_handoff": "DISABLED",
+  "forced_raw_bypass": "DISABLED",
+  "import_active": 0
+}

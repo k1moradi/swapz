@@ -1,0 +1,38 @@
+# Round086 Agent5 — exact push-base original extent qualification repair
+
+**PASS — exact host qualification**. [ROUND_OPEN](https://github.com/k1moradi/swapz/issues/204#issuecomment-7137237156), frozen task `7732ea3eb7defb8112a87ead4b578dbe61c453ab` sole parent d77ef98bc218ffd260b7114ffcb32c411d66bb31. Exact corrective [source commit](https://github.com/k1moradi/swapz/commit/3a3a3ba8c4b6bfcdeef66442c8ba2d4ee8b45b71) `3a3a3ba8c4b6bfcdeef66442c8ba2d4ee8b45b71`, sole parent `7732ea3eb7defb8112a87ead4b578dbe61c453ab`. Fresh expected-head non-force single-parent FF on main; compared exactly three modified files and verified all blobs. No Agent7/11 dependency.
+
+## Prior first actual error and repair
+R084 source 1095acd05fff26c9da3941d62a12e179dcaeb808 [job 138447600617](https://github.com/k1moradi/swapz/actions/runs/45394799654/job/138447600617), actual log before compiler:
+`SOURCE_CONTRACT_MISMATCH: commit=1095acd05fff26c9da3941d62a12e179dcaeb808 path='<git-metadata>' required_policy=exact first-parent Git metadata first_error=push base SHA unavailable or invalid`.
+R084 remains red with zero executions; not rerun or retroactively qualified. Missing event.before was the root cause (verified actual job logs, Agent1 R085 closeout and A10 successful workflow pattern). Current local git ls-remote independently failed DNS, so connector + hosted checkout used; no local compiler execution claimed.
+
+Actual repair: workflow full checkout depth0, actual event.before env to verifier, no fallback. Verifier exact SHA/main/event/ref, full clean tree, actual single parent from commit header, nonzero 40hex real event base equals parent, ancestry/whitespace, original frozen blobs, exact append-only standards and untouched canonical policy with real event env. Five negative copied-env tests (missing/malformed/zero/self/older ancestor) plus actual valid event; same guard, no policy bypass. Preserve first error in bounded JSON with actionable console; workflow fallback for checkout/entry failure before JSON creation; artifact always. Original 24 semantic mutation definitions preserved byte-for-byte and unique anchors checked in actual immutable C via connector; no new C/H or fixture changes. Host verifier still requires GCC C2x and Clang C23, Werror ASan/UBSan baseline and independent compile/execute exit77 explicit assertion for each mutant. Compiler/sanitizer error not a kill. No actual compiler counts until job evidence. Decision: full history avoids shallow policy metadata failure; single direct push exactly matches frozen contract. No new workflow, only repair existing one.
+
+## Immutable source/test pins
+- [src/kernel/codec.h](https://github.com/k1moradi/swapz/blob/3a3a3ba8c4b6bfcdeef66442c8ba2d4ee8b45b71/src/kernel/codec.h) `e89d316b9cf49f82df0b77648c1be1731607987d`
+- [src/kernel/codec.c](https://github.com/k1moradi/swapz/blob/3a3a3ba8c4b6bfcdeef66442c8ba2d4ee8b45b71/src/kernel/codec.c) `d920dcaac6f2b7de1334d4133770bd649719c66d`
+- [src/kernel/authority.h](https://github.com/k1moradi/swapz/blob/3a3a3ba8c4b6bfcdeef66442c8ba2d4ee8b45b71/src/kernel/authority.h) `3bb5bab5a5bdb2aa087f5793fc8b5e90d6636031`
+- [src/kernel/authority.c](https://github.com/k1moradi/swapz/blob/3a3a3ba8c4b6bfcdeef66442c8ba2d4ee8b45b71/src/kernel/authority.c) `25bf2dbdc5a3af770d7027547a58254c1ba81265`
+- [src/kernel/engine.h](https://github.com/k1moradi/swapz/blob/3a3a3ba8c4b6bfcdeef66442c8ba2d4ee8b45b71/src/kernel/engine.h) `0e505915fb2e1578b4c1cee36e32be8a30f3745f`
+- [src/kernel/engine.c](https://github.com/k1moradi/swapz/blob/3a3a3ba8c4b6bfcdeef66442c8ba2d4ee8b45b71/src/kernel/engine.c) `20e91329fc1a1b713cb6638236c001e7d5e3f815`
+- [src/kernel/dm-target.c](https://github.com/k1moradi/swapz/blob/3a3a3ba8c4b6bfcdeef66442c8ba2d4ee8b45b71/src/kernel/dm-target.c) `f1cab252cd990190646c82da81378d1563475826`
+- [src/kernel/zswap-import-codec.h](https://github.com/k1moradi/swapz/blob/3a3a3ba8c4b6bfcdeef66442c8ba2d4ee8b45b71/src/kernel/zswap-import-codec.h) `0d888fe4c74115ab2388f1df1dc0b86ae4b9b6c6`
+- [src/kernel/Makefile](https://github.com/k1moradi/swapz/blob/3a3a3ba8c4b6bfcdeef66442c8ba2d4ee8b45b71/src/kernel/Makefile) `ed6e19ae28a84a4a3e92117812adc445d5c2e8e5`
+- [src/kernel/zswap-original-extent.c](https://github.com/k1moradi/swapz/blob/3a3a3ba8c4b6bfcdeef66442c8ba2d4ee8b45b71/src/kernel/zswap-original-extent.c) `c6c5af281a636447126e1a8b67484d954158a300`
+- [src/kernel/zswap-original-extent.h](https://github.com/k1moradi/swapz/blob/3a3a3ba8c4b6bfcdeef66442c8ba2d4ee8b45b71/src/kernel/zswap-original-extent.h) `34572d01fffe1b276c2d023822266eda29a2137e`
+- [tests/runtime/native/fixtures/round084-original-extent.c](https://github.com/k1moradi/swapz/blob/3a3a3ba8c4b6bfcdeef66442c8ba2d4ee8b45b71/tests/runtime/native/fixtures/round084-original-extent.c) `473389e30b193626d8c33dba1cf1aad4c738fd8a`
+- [tests/runtime/native/repository-policy-test.py](https://github.com/k1moradi/swapz/blob/3a3a3ba8c4b6bfcdeef66442c8ba2d4ee8b45b71/tests/runtime/native/repository-policy-test.py) `b200e0ca3e20d4c1f37e350ac9ef1c6426179817`
+- [.github/workflows/phase-a-round084-original-extent-host-noauth.yml](https://github.com/k1moradi/swapz/blob/3a3a3ba8c4b6bfcdeef66442c8ba2d4ee8b45b71/.github/workflows/phase-a-round084-original-extent-host-noauth.yml) `d77c578df86e2069ebba6f85cc526dcad9fa7402`
+- [tests/tools/round084-original-extent-verify.py](https://github.com/k1moradi/swapz/blob/3a3a3ba8c4b6bfcdeef66442c8ba2d4ee8b45b71/tests/tools/round084-original-extent-verify.py) `af05e47f63550b7407cf7f1e00a8da6d6acf578e`
+- [docs/testing_standards.md](https://github.com/k1moradi/swapz/blob/3a3a3ba8c4b6bfcdeef66442c8ba2d4ee8b45b71/docs/testing_standards.md) `f4a096e74fbd45e38b614e7c2af2e6b0fba86f09`
+Standards exact prefix 7b79947956c914bd5adab7ea9494bffe6a6ba5cc verified byte-exact via Git blob roundtrip and appended in source commit. Original Linux c339f4010dea8b0d754f84ace70cd1b089878ef8 is context only, no native or upstream execution here.
+
+## Actual CI and push census
+[Run 45447373151](https://github.com/k1moradi/swapz/actions/runs/45447373151), [job 138634741636](https://github.com/k1moradi/swapz/actions/runs/45447373151/job/138634741636), run completed, job completed, conclusion success.
+Preflight observed: PASS.
+Actual compiler results: [{"compiler":"gcc","checks":23106,"record_bytes":24,"builder_bytes":48,"map_bytes":20,"semantic_mutants":24},{"compiler":"clang","checks":23106,"record_bytes":24,"builder_bytes":48,"map_bytes":20,"semantic_mutants":24}]. First actual new CI error: none observed at snapshot. [Artifact](https://github.com/k1moradi/swapz/actions/runs/45447373151/artifacts/14944644877).
+Observed 10 automatic push runs on exact new SHA, 9 other existing workflow filters; R084 historical 41, R085 equivalent prediction 10, exact predicted path set matches new push: true. The changed file set is a three-path repair rather than the original six-path implementation; this is a new observed push, not a claim of all future push equivalence. Full actual run list in JSON; no manual rerun, cancellation, skip or periodic monitoring.
+
+## Safety and next gate
+Ordinary cap3568 and map20B unchanged; typed original cap3568/4095 geometry only. Actual original codec/decoder lifetime, selected source/DM, allocator/map/GC integration, lower durability and real exactly-once upper ACK remain unproven. Original MM/zswap alone owns compressed RAM/natural eviction; swapz disk packing and GC only. RAW_4096 full original uncompressed page. No native, privileged, physical, live swap, broad manual tests or activation. AUTH0, Phase A BLOCKED, direct/forced RAW/import OFF. Host-only component qualification, not production qualification.
