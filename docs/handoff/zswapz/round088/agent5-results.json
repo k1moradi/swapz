@@ -1,0 +1,179 @@
+{
+  "round": "088",
+  "agent": 5,
+  "kind": "dormant-ordered-original-storage-candidate",
+  "task_commit": "dcb65dca9a3c2bd990aedb2829181d0c0e015ce2",
+  "task_parent": "cf5a539913fd169fd71bac72c61bc355285a51f6",
+  "tested_commit": "22fbdd0090e302bd17b3811145395ceb0a814a6c",
+  "tested_parent": "3e638ccbed5983bfec0fd367ac67df47d4b3f1bd",
+  "source_blobs": {
+    "src/kernel/authority.c": "25bf2dbdc5a3af770d7027547a58254c1ba81265",
+    "src/kernel/authority.h": "3bb5bab5a5bdb2aa087f5793fc8b5e90d6636031",
+    "src/kernel/codec.c": "d920dcaac6f2b7de1334d4133770bd649719c66d",
+    "src/kernel/codec.h": "e89d316b9cf49f82df0b77648c1be1731607987d",
+    "src/kernel/engine.c": "20e91329fc1a1b713cb6638236c001e7d5e3f815",
+    "src/kernel/engine.h": "0e505915fb2e1578b4c1cee36e32be8a30f3745f",
+    "src/kernel/gc-cost.h": "2d317f1274ef36bdde157ff72acc26a9f7ae1e0e",
+    "src/kernel/zswap-original-extent.c": "c6c5af281a636447126e1a8b67484d954158a300",
+    "src/kernel/zswap-original-extent.h": "34572d01fffe1b276c2d023822266eda29a2137e",
+    "src/kernel/Makefile": "ed6e19ae28a84a4a3e92117812adc445d5c2e8e5",
+    "tests/runtime/native/repository-policy-test.py": "b200e0ca3e20d4c1f37e350ac9ef1c6426179817",
+    "src/kernel/zswap-original-storage.c": "50b0b1cf92a3294b6ecba8374069c2ddf9a44ef3",
+    "src/kernel/zswap-original-storage.h": "90537c12e39f45ded5f0411d471fcc716b4981dc",
+    "tests/runtime/native/fixtures/round088-original-storage.c": "6e731a19dd1028fc58bf60563315ddd3a91d1ef0",
+    "tests/tools/round088-original-storage-verify.py": "6894c94c7f457272e5d62517e0f143fea5300c79",
+    ".github/workflows/phase-a-round088-original-storage-host-noauth.yml": "ec82328fbb8a2da215e4854b8c7b87b55ecf2e33",
+    "docs/testing_standards.md": "2f1e8df0c7f62818417568f6a74e23555d0b2798"
+  },
+  "standards_parent_blob": "327e609f5e2ac6147bb7ccab624d152b9e250abb",
+  "prior_attempt": {
+    "tested_commit": "3e638ccbed5983bfec0fd367ac67df47d4b3f1bd",
+    "tested_parent": "dcb65dca9a3c2bd990aedb2829181d0c0e015ce2",
+    "run_id": 45458233568,
+    "job_id": 138673384889,
+    "conclusion": "FAIL",
+    "first_error": "gcc/no_seal: not semantic kill (exit=0)",
+    "gcc_baseline": "PASS (inferred from exact sequential verifier reaching last mutant)",
+    "gcc_mutants_killed": 7,
+    "gcc_mutants_executed": 8,
+    "clang_mutants_executed": 0,
+    "artifact": "https://github.com/k1moradi/swapz/actions/runs/45458233568/artifacts/14952146167"
+  },
+  "workflow_url": "https://github.com/k1moradi/swapz/actions/runs/45458554871",
+  "run_id": 45458554871,
+  "run_status": "in_progress",
+  "jobs": [
+    {
+      "id": 138674499659,
+      "name": "original-storage-host",
+      "status": "in_progress",
+      "conclusion": null,
+      "url": "https://github.com/k1moradi/swapz/actions/runs/45458554871/job/138674499659",
+      "steps": [
+        {
+          "name": "Set up job",
+          "status": "completed",
+          "conclusion": "success"
+        },
+        {
+          "name": "Run actions/checkout@v4",
+          "status": "completed",
+          "conclusion": "success"
+        },
+        {
+          "name": "Exact source and actual isolated storage sanitizer qualification",
+          "status": "in_progress",
+          "conclusion": null
+        },
+        {
+          "name": "Preserve bounded result and private first cause",
+          "status": "pending",
+          "conclusion": null
+        },
+        {
+          "name": "Post Run actions/checkout@v4",
+          "status": "pending",
+          "conclusion": null
+        }
+      ]
+    }
+  ],
+  "conclusion": "IN_PROGRESS",
+  "first_error": null,
+  "actual_compiler_results": null,
+  "planned_mutants_per_compiler": 9,
+  "actual_mutants_per_compiler": null,
+  "artifact": null,
+  "push_census": {
+    "automatic_runs": 10,
+    "other_automatic_runs": 9,
+    "manual_dispatch": false,
+    "runs": [
+      {
+        "id": 45458555506,
+        "path": ".github/workflows/product-codec.yml",
+        "status": "queued",
+        "conclusion": null
+      },
+      {
+        "id": 45458554942,
+        "path": ".github/workflows/phase-a-round072-original-mm-bio-authority-decoder-noauth.yml",
+        "status": "queued",
+        "conclusion": null
+      },
+      {
+        "id": 45458554644,
+        "path": ".github/workflows/systemd-package-readiness.yml",
+        "status": "queued",
+        "conclusion": null
+      },
+      {
+        "id": 45458555301,
+        "path": ".github/workflows/project-goals.yml",
+        "status": "queued",
+        "conclusion": null
+      },
+      {
+        "id": 45458554647,
+        "path": ".github/workflows/phase-a-zswap-dm-original-table-gc-lifetime-noauth.yml",
+        "status": "in_progress",
+        "conclusion": null
+      },
+      {
+        "id": 45458554611,
+        "path": ".github/workflows/physical-evidence-rootless.yml",
+        "status": "completed",
+        "conclusion": "success"
+      },
+      {
+        "id": 45458554869,
+        "path": ".github/workflows/phase-a-round063-original-mm-dm-carrier-noauth.yml",
+        "status": "in_progress",
+        "conclusion": null
+      },
+      {
+        "id": 45458554419,
+        "path": ".github/workflows/kernel-debug.yml",
+        "status": "queued",
+        "conclusion": null
+      },
+      {
+        "id": 45458554836,
+        "path": ".github/workflows/phase-a-round064-original-slot-current-target-noauth.yml",
+        "status": "queued",
+        "conclusion": null
+      },
+      {
+        "id": 45458554871,
+        "path": ".github/workflows/phase-a-round088-original-storage-host-noauth.yml",
+        "status": "in_progress",
+        "conclusion": null
+      }
+    ]
+  },
+  "scope": {
+    "dedicated_4k": "IMPLEMENTED_DORMANT",
+    "original_ceiling": 3568,
+    "experimental_4095_storage": "NO_GO",
+    "packed_storage_publication": "NO_GO",
+    "mapping": "existing isolated typed pool, ordinary map untouched",
+    "gc": "append-only byte-exact COW relocation, not production rotating GC",
+    "decoder": "independent opaque retained callback reference, actual decoding unqualified",
+    "lower": "RAM-only host callbacks, no physical persistence claim",
+    "upper_ack": "NONE",
+    "source_slot_zero": "refused by existing dormant owner",
+    "sidecar_records": 8,
+    "pin_capacity": 8,
+    "storage_allocation": "caller preallocated, no dynamic allocation"
+  },
+  "native": "NOT_RUN",
+  "physical_io": false,
+  "ordinary_map_bytes": 20,
+  "ordinary_cap": 3568,
+  "normal_kbuild_wiring": false,
+  "source_mapped_authenticated": 0,
+  "phase_a": "BLOCKED",
+  "direct_compressed_handoff": "DISABLED",
+  "forced_raw_bypass": "DISABLED",
+  "import_active": 0
+}
