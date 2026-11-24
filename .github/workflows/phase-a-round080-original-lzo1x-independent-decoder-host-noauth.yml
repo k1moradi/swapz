@@ -18,7 +18,7 @@ jobs:
       - uses: actions/checkout@v4
         with:
           path: swapz
-          fetch-depth: 1
+          fetch-depth: 2
           persist-credentials: false
       - uses: actions/checkout@v4
         with:
@@ -43,8 +43,25 @@ jobs:
             echo "::error::ROUND080_AGENT7_FIRST_ERROR main-source SHA mismatch" >&2
             exit 1
           fi
-          if [[ -n "$(git -C swapz status --porcelain --untracked-files=all)" ]]; then
+          if ! checkout_status=$(git -C swapz status --porcelain --untracked-files=all) || [[ -n "$checkout_status" ]]; then
             echo "::error::ROUND080_AGENT7_FIRST_ERROR dirty main checkout" >&2
+            exit 1
+          fi
+          # Read the commit header, not the shallow revision traversal.
+          if ! parent=$(git --no-replace-objects -C swapz cat-file -p HEAD | awk 'BEGIN { header=1 } /^$/ { header=0 } header && /^parent / { print $2 }') || [[ ! "$parent" =~ ^[0-9a-f]{40}$ ]]; then
+            echo "::error::ROUND080_AGENT7_FIRST_ERROR source commit must have exactly one parent" >&2
+            exit 1
+          fi
+          if ! resolved_parent=$(git -C swapz rev-parse --verify 'HEAD^1^{commit}' 2>/dev/null) || ! git -C swapz cat-file -e "$parent^{commit}" 2>/dev/null; then
+            echo "::error::ROUND080_AGENT7_FIRST_ERROR source commit parent unavailable" >&2
+            exit 1
+          fi
+          if [[ "$resolved_parent" != "$parent" ]]; then
+            echo "::error::ROUND080_AGENT7_FIRST_ERROR source commit parent mismatch" >&2
+            exit 1
+          fi
+          if ! git -C swapz diff --check HEAD^ HEAD --; then
+            echo "::error::ROUND080_AGENT7_FIRST_ERROR source commit whitespace" >&2
             exit 1
           fi
           if [[ "$(git -C original-linux rev-parse HEAD)" != c339f4010dea8b0d754f84ace70cd1b089878ef8 ]]; then
@@ -83,11 +100,7 @@ jobs:
             tail -n 18 "$RUNNER_TEMP/agent7-first-error.log" >&2
             exit "$code"
           fi
-          if ! git -C swapz diff --check HEAD^ HEAD; then
-            echo "::error::ROUND080_AGENT7_FIRST_ERROR source commit whitespace" >&2
-            exit 1
-          fi
-          if [[ -n "$(git -C swapz status --porcelain --untracked-files=all)" ]]; then
+          if ! checkout_status=$(git -C swapz status --porcelain --untracked-files=all) || [[ -n "$checkout_status" ]]; then
             echo "::error::ROUND080_AGENT7_FIRST_ERROR tests modified checkout" >&2
             exit 1
           fi

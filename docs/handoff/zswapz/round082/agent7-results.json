@@ -1,0 +1,96 @@
+{
+  "round": "082",
+  "agent": 7,
+  "task_sha": "9acefae6a1727123a218a7b728e44c7434f1eed2",
+  "status": "PENDING_SOURCE_CI_REGISTRATION",
+  "conclusion": null,
+  "tested_commit": null,
+  "source_parent": null,
+  "run_id": null,
+  "job_id": null,
+  "first_error": null,
+  "previous_round081": {
+    "source": "7a22c0ec3ec2ca56ada6a35a6ad6a670a54aacb8",
+    "parent": "932249ccb8e6a7654de7773d2008bf9c8b7ca3e9",
+    "run_id": 45293125425,
+    "job_id": 138106674475,
+    "conclusion": "failure",
+    "first_error": "fatal: ambiguous argument 'HEAD^': unknown revision or path not in the working tree.",
+    "host_semantics": "PASS",
+    "gcc": {
+      "baseline": "PASS",
+      "directed_checks": 774,
+      "compiled_executed_killed": 18
+    },
+    "clang": {
+      "baseline": "PASS",
+      "directed_checks": 560,
+      "compiled_executed_killed": 18
+    }
+  },
+  "workflow_blob": "d4783b8251d1a0e29cdeb2625c7e46bd7e449d39",
+  "unchanged_fixture_blob": "74136e58c6810f71ae44531cdecdb142df8601dc",
+  "unchanged_verifier_blob": "c2bd6a4d35bc8261e94743f92166b7c436d3c1f2",
+  "product_checkout_fetch_depth": 2,
+  "original_checkout_fetch_depth": 1,
+  "local_rootless_git_preflight": {
+    "scope": "exact product-preflight Bash block in disposable local Git repositories",
+    "assertions_passed": 9,
+    "tests": [
+      "historical_depth1_diff_failure",
+      "depth1_parent_unavailable",
+      "depth2_clean_success",
+      "wrong_sha",
+      "dirty_tracked",
+      "dirty_untracked",
+      "wrong_resolved_parent",
+      "actual_added_trailing_whitespace",
+      "two_parents"
+    ],
+    "actual_original_sibling_or_compilation": "NOT_RUN_LOCALLY"
+  },
+  "original_linux_pin": "c339f4010dea8b0d754f84ace70cd1b089878ef8",
+  "original_blobs": {
+    "mm/zswap.c": "ae19e301fced7e357a4c7587dfdd6abb890b9163",
+    "crypto/lzo.c": "d43242b24b4e831e7e0d26f38d2f263877d5748e",
+    "include/linux/lzo.h": "4d30e3624acd237290dbfeaefdb9c710e4f85f56",
+    "lib/lzo/lzo1x_compress.c": "01586af2347f5e2f8c8528b94e02622fc8b262c8",
+    "lib/lzo/lzo1x_compress_safe.c": "371c9f849492814afed88a443acb2262dcf35dfe",
+    "lib/lzo/lzo1x_decompress_safe.c": "318abb82c63d2c27c0d5497b7cf4e21d87d13154",
+    "lib/lzo/lzodefs.h": "b60851fcf6ce54b57e87d04e917deaa2b6cf62cc"
+  },
+  "product_blobs": {
+    "src/kernel/zswap-import-codec.h": "0d888fe4c74115ab2388f1df1dc0b86ae4b9b6c6",
+    "src/kernel/zswap-import-decoder-owner.c": "8e0c8f4d2085af7f2e17df412f3a1af654063571",
+    "src/kernel/zswap-import-decoder-owner.h": "e1b4b903567070e2307f7d05f8e48c14e0bb3768"
+  },
+  "workflow_url": "https://github.com/k1moradi/swapz/actions/workflows/phase-a-round080-original-lzo1x-independent-decoder-host-noauth.yml",
+  "planned_semantic_mutants_per_compiler": 18,
+  "actual_gcc": {
+    "baseline": "PENDING",
+    "mutants_compiled": 0,
+    "mutants_executed": 0,
+    "semantic_kills": 0
+  },
+  "actual_clang": {
+    "baseline": "PENDING",
+    "mutants_compiled": 0,
+    "mutants_executed": 0,
+    "semantic_kills": 0
+  },
+  "positive_original_lzo1x_product_decode": "PENDING",
+  "original_linux_native": "NOT_RUN_HOST_ONLY",
+  "source_mapped_authenticated": 0,
+  "phase_a": "BLOCKED",
+  "direct_handoff": false,
+  "forced_raw_bypass": false,
+  "import_active": false,
+  "ordinary_raw_4096": "COMPLETE_ORIGINAL_UNCOMPRESSED_4096",
+  "current_import_max_compressed": 3568,
+  "real_lower_fua": false,
+  "real_upper_ack": false,
+  "second_reclaimer": false,
+  "recompression": false,
+  "swapspace2_first_physical_bytes_protected": 4096,
+  "volatile_map_bytes": 20
+}

@@ -20031,3 +20031,29 @@ pristine original Linux and actual product source blob checks.
 ## Round081 Agent11 — distinct accepted upper-clone debt ownership HOST_ONLY (2026-11-23)
 
 The focused Round081 Agent11 source-bearing verifier `tests/tools/round081-actual-dm-bio-debt-ownership-verify.py` pins full original Linux DM core/header Git blobs and full actual product `src/kernel/dm-target.c` blob before compiling three verbatim product enqueue/splice/endio statements and an **explicitly independent** host-only C23 upper-debt state model. Qualified mutants must each separately compile under **both GCC and Clang** with `-Wall -Wextra -Wshadow -Wconversion -Wsign-conversion -Werror -pedantic -fsanitize=address,undefined -pthread`, execute, and terminate at the expected directed `FIRST_ERROR scenario=... invariant=...`; compiler failures, sanitizers alone, skipped executions and preexisting Round079 DM ABI results do **not** count. Invariant: unique accepted `DM_MAPIO_SUBMITTED` upper clone debt `U = admitted - once-only actual upper completion`; incoming/local/prep/batch/lower inflight/defer transitions do not increment/decrement `U`, failed/closed preadmission has no upper token, and independent original compressed preerase bytes/GC leases are not upper debt. Worker service quantum64 and finite preparation page pool are not accepted-descriptor budget. This is rootless test-only source-linked evidence, **not** an exact live kernel per-BIO size, real original MM selected STORED, physical lower WRITE/FUA durability, kernel-native DM execution or safe legal production queue-full disposition. Production cap, unconditional `REQUEUE`, competing reclaim/recompression and any activation remain **BLOCKED**. Ordinary `RAW_4096` always means the full original uncompressed page; preserve SWAPSPACE2 reserved first4096, volatile 20B map, import MAX3568 fail closed, and Agent10's distinct in-flight native workflow.
+
+## Round082 Agent7 — verify source ancestry and whitespace before LZO1X host qualification
+
+The focused original LZO1X host workflow must fetch depth 2 for the
+product checkout while retaining the pristine pinned original Linux
+depth-1 sibling. Before invoking any compiler or semantic verifier,
+check exact event SHA and clean product tree, read the actual commit
+header for exactly one parent, require that the parent commit object
+and HEAD^ resolve and agree, then run git diff --check HEAD^ HEAD.
+Report missing parent, wrong parent, non-single-parent, dirty checkout
+and actual whitespace failures distinctly and fail closed. Keep the
+original sibling pin/clean checks and post-test product clean check.
+Rootless disposable Git regressions must reproduce depth-1 failure and
+depth-2 success, wrong SHA/parent, multiple parents, real added-line
+whitespace, and tracked/untracked dirt. Do not treat a Git ancestry
+failure as an actual whitespace defect or hide it by skipping the diff.
+Preserve all source-locked original LZO1X/actual dormant independent
+decoder positive tests, unchanged strict GCC/Clang C23/C2x -Werror
+ASan+UBSan and 18 individually compiled and executed C semantic
+mutants each. Distinguish a passing test step from overall failed CI.
+Only a complete new exact-source workflow success qualifies this
+host-only lane; no live original STORED authentication, physical
+durability/upper ACK, native kernel or activation claim. Linux MM/zswap
+alone owns compressed RAM and natural eviction; swapz disk packing/GC
+only. RAW_4096 is the complete ORIGINAL UNCOMPRESSED 4096-byte page.
+Source AUTH0, Phase A BLOCKED, direct/forced RAW/import OFF.
