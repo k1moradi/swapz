@@ -9,16 +9,25 @@
 /* Pinned original Linux include/linux/delay.h owns usleep_range().
  * Keep the bounded, sleepable close-drain wait under strict -Werror. */
 #include <linux/delay.h>
+#include <linux/refcount.h>
+#include <linux/sched/task.h>
 #include "swapz_round073/zswap-import-decoder-owner.c"
 
 #define SWAPZ_R073_LOGICAL 37U
 
 struct swapz_round073_close {
-	struct swapz_zswap_import_decoder_owner *owner;
+	struct swapz_zswap_import_decoder_owner owner;
 	struct completion entered;
 	struct completion returned;
+	refcount_t references;
 	int result;
 };
+
+static void swapz_round082_close_put(struct swapz_round073_close *closer)
+{
+	if (refcount_dec_and_test(&closer->references))
+		kfree(closer);
+}
 
 static int swapz_round073_close_worker(void *argument)
 {
@@ -26,8 +35,11 @@ static int swapz_round073_close_worker(void *argument)
 
 	complete(&closer->entered);
 	closer->result =
-		swapz_zswap_import_decoder_owner_close_and_drain(closer->owner);
-	complete(&closer->returned);
+		swapz_zswap_import_decoder_owner_close_and_drain(&closer->owner);
+	/* Persistent completion: the success check and cleanup may both read
+	 * it. A single complete() token would be consumed by the first wait. */
+	complete_all(&closer->returned);
+	swapz_round082_close_put(closer);
 	return 0;
 }
 
@@ -49,6 +61,26 @@ static int swapz_round073_expect_shutdown(
 	return result == -ESHUTDOWN ? 0 : result;
 }
 
+/* ROUND080_READER_LEASE_CLEANUP_BEGIN
+ * The exact shared helper executes on every native exit and in host tests.
+ * Keep the first put error and attempt both releases. */
+static int swapz_round080_release_decoder_leases(
+	struct swapz_zswap_import_decoder_lease *lease,
+	struct swapz_zswap_import_decoder_lease *late)
+{
+	int error = 0, cleanup_error;
+
+	if (late->owner)
+		error = swapz_zswap_import_decoder_owner_put(late);
+	if (lease->owner) {
+		cleanup_error = swapz_zswap_import_decoder_owner_put(lease);
+		if (!error)
+			error = cleanup_error;
+	}
+	return error;
+}
+/* ROUND080_READER_LEASE_CLEANUP_END */
+
 /* One-shot, failure-only stage reporter. No watchdog owns the KUnit source,
  * decoder, lower BIO or stack after cancel_delayed_work_sync() returns. */
 struct swapz_round073_stall {
@@ -64,7 +96,7 @@ static void swapz_round073_stall_work(struct work_struct *work)
 		container_of(to_delayed_work(work), struct swapz_round073_stall,
 			     delayed);
 
-	pr_err("ROUND080_READER_FIRST_STALL step=%s codec=%u readers=%u closing=%u\n",
+	pr_err("ROUND080_READER_NATIVE_FIRST_ERROR stalled_phase=%s codec=%u readers=%u closing=%u\n",
 	       READ_ONCE(*stall->stage), stall->codec,
 	       READ_ONCE(stall->owner->active_readers),
 	       READ_ONCE(stall->owner->closing));
@@ -319,7 +351,7 @@ static int swapz_round073_one_read(struct kunit *test, swapz_u8 codec,
 	struct swapz_round069_native_state *source = test->priv;
 	struct swapz_round069_owned_stored owned = swapz_round069_make_owner(source);
 	struct swapz_round069_joined *joined = NULL;
-	struct swapz_zswap_import_decoder_owner owner = {};
+	struct swapz_zswap_import_decoder_owner *owner;
 	struct swapz_zswap_import_decoder_lease lease = {};
 	struct swapz_zswap_import_decoder_lease late = {};
 	struct swapz_import_lower_bio_request write_request, old_read_request;
@@ -327,7 +359,7 @@ static int swapz_round073_one_read(struct kunit *test, swapz_u8 codec,
 	struct swapz_import_disk_view old_view, new_view;
 	struct swapz_authority_import_spec spec = {};
 	struct swapz_round069_io *write_io = NULL, *old_io = NULL, *new_io = NULL;
-	struct swapz_round073_close closer = {};
+	struct swapz_round073_close *closer;
 	struct swapz_round073_stall stall = {};
 	struct task_struct *closer_task = NULL;
 	struct swapz_tx *transaction = NULL;
@@ -341,8 +373,13 @@ static int swapz_round073_one_read(struct kunit *test, swapz_u8 codec,
 	/* A stalled original KUnit case was otherwise silent until the
 	 * 120-second runner timeout. Report its LAST stage once after 8 s;
 	 * this does not alter the original kernel/KUnit timeout. */
+	closer = kzalloc(sizeof(*closer), GFP_KERNEL);
+	if (!closer)
+		return -ENOMEM;
+	refcount_set(&closer->references, 1);
+	owner = &closer->owner;
 	stall.stage = &step;
-	stall.owner = &owner;
+	stall.owner = owner;
 	stall.codec = codec;
 	INIT_DELAYED_WORK(&stall.delayed, swapz_round073_stall_work);
 	schedule_delayed_work(&stall.delayed, msecs_to_jiffies(8000U));
@@ -379,11 +416,11 @@ static int swapz_round073_one_read(struct kunit *test, swapz_u8 codec,
 	spec.requested_fua = 1U;
 	sha256(joined->original, SWAPZ_BLOCK_BYTES, spec.original_sha256);
 	step = "independent-original-codec-reader-lease";
-	error = swapz_zswap_import_decoder_owner_init(&owner, codec, 1U);
+	error = swapz_zswap_import_decoder_owner_init(owner, codec, 1U);
 	if (error)
 		goto out;
 	owner_initialized = true;
-	error = swapz_zswap_import_decoder_owner_get(&owner, &lease);
+	error = swapz_zswap_import_decoder_owner_get(owner, &lease);
 	if (error)
 		goto out;
 	step = "native-product-authority-prerequisite-stage";
@@ -463,28 +500,32 @@ static int swapz_round073_one_read(struct kunit *test, swapz_u8 codec,
 	if (error)
 		goto out;
 	if (retire_decoder) {
-		init_completion(&closer.entered);
-		init_completion(&closer.returned);
-		closer.owner = &owner;
-		closer.result = -EINPROGRESS;
-		closer_task = kthread_run(swapz_round073_close_worker,
-					  &closer, "swapz-r073-reader");
+		init_completion(&closer->entered);
+		init_completion(&closer->returned);
+		closer->result = -EINPROGRESS;
+		/* Acquire task reference before first wake. A separate heap
+		 * reference belongs to the worker until real drain returns. */
+		closer_task = kthread_create(swapz_round073_close_worker,
+					     closer, "swapz-r073-reader");
 		if (IS_ERR(closer_task)) {
+			error = PTR_ERR(closer_task);
 			closer_task = NULL;
-			error = -ENOMEM;
 			goto out;
 		}
-		if (!wait_for_completion_timeout(&closer.entered,
+		get_task_struct(closer_task);
+		refcount_inc(&closer->references);
+		wake_up_process(closer_task);
+		if (!wait_for_completion_timeout(&closer->entered,
 				msecs_to_jiffies(1500U))) {
 			error = -ETIMEDOUT;
 			goto out;
 		}
 		for (iteration = 0; iteration < 1500U &&
-		     !READ_ONCE(owner.closing); ++iteration)
+		     !READ_ONCE(owner->closing); ++iteration)
 			usleep_range(1000, 2000);
-		if (!READ_ONCE(owner.closing) ||
-		    completion_done(&closer.returned) ||
-		    swapz_round073_expect_shutdown(&owner, &late)) {
+		if (!READ_ONCE(owner->closing) ||
+		    completion_done(&closer->returned) ||
+		    swapz_round073_expect_shutdown(owner, &late)) {
 			error = -EUCLEAN;
 			goto out;
 		}
@@ -532,19 +573,19 @@ static int swapz_round073_one_read(struct kunit *test, swapz_u8 codec,
 	if (error)
 		goto out;
 	if (retire_decoder) {
-		if (!wait_for_completion_timeout(&closer.returned,
-				msecs_to_jiffies(1500U)) || closer.result ||
-		    swapz_round073_expect_shutdown(&owner, &late)) {
+		if (!wait_for_completion_timeout(&closer->returned,
+				msecs_to_jiffies(1500U)) || closer->result ||
+		    swapz_round073_expect_shutdown(owner, &late)) {
 			error = -EUCLEAN;
 			goto out;
 		}
 	} else {
-		error = swapz_zswap_import_decoder_owner_close_and_drain(&owner);
+		error = swapz_zswap_import_decoder_owner_close_and_drain(owner);
 		if (error)
 			goto out;
 	}
 	step = "retired-original-owner-refuses-future-read";
-	if (swapz_round073_expect_shutdown(&owner, &late) ||
+	if (swapz_round073_expect_shutdown(owner, &late) ||
 	    swapz_zswap_import_decoder_owner_put(&lease) != -EALREADY)
 		error = -EUCLEAN;
 	else
@@ -553,37 +594,36 @@ out:
 	if (error)
 		pr_err("ROUND073_READER_NATIVE_FIRST_ERROR step=%s err=%d codec=%u\n",
 		       step, error, codec);
-	/* Late admission is a real pin even when test assertions reject it.
-	 * Release ALL locally owned reader pins before joining the closer. */
-	if (late.owner) {
-		cleanup_error = swapz_zswap_import_decoder_owner_put(&late);
-		if (!error)
-			error = cleanup_error;
-	}
-	if (lease.owner) {
-		cleanup_error = swapz_zswap_import_decoder_owner_put(&lease);
-		if (!error)
-			error = cleanup_error;
-	}
+	/* Drop both owned leases before joining; never hide a failed put. */
+	cleanup_error = swapz_round080_release_decoder_leases(&lease, &late);
+	if (!error)
+		error = cleanup_error;
 	if (closer_task) {
-		/* All test-held pins were released before the join.
-		 * A bounded first check reports a real leaked external pin. */
-		if (!wait_for_completion_timeout(&closer.returned,
-				msecs_to_jiffies(1500U))) {
-			pr_err("ROUND080_READER_FIRST_ERROR step=closer-drain readers=%u\n",
-			       READ_ONCE(owner.active_readers));
+		/* Permanent completion cannot be consumed by the earlier wait.
+		 * Join only after real drain returned. On a genuine stall the
+		 * worker retains its heap owner/completions until it returns;
+		 * no worker can access this stack. This is FAIL, never PASS. */
+		if (wait_for_completion_timeout(&closer->returned,
+						msecs_to_jiffies(1500U))) {
+			kthread_stop(closer_task);
+		} else {
+			pr_err("ROUND080_READER_NATIVE_FIRST_ERROR closer_drain_stalled active=%u phase=%s\n",
+			       READ_ONCE(owner->active_readers), step);
 			if (!error)
 				error = -ETIMEDOUT;
-			/* A slow closer still owns stack/owner until it returns;
-			 * never free either while its wait_queue may be live. */
-			wait_for_completion(&closer.returned);
 		}
-		kthread_stop(closer_task);
-	} else if (owner_initialized && !owner.closing) {
-		cleanup_error = swapz_zswap_import_decoder_owner_close_and_drain(
-			&owner);
-		if (!error)
-			error = cleanup_error;
+		put_task_struct(closer_task);
+	} else if (owner_initialized && !owner->closing) {
+		/* No concurrent closer. This test is the sole lease owner. */
+		if (READ_ONCE(owner->active_readers)) {
+			if (!error)
+				error = -EUCLEAN;
+		} else {
+			cleanup_error = swapz_zswap_import_decoder_owner_close_and_drain(
+				owner);
+			if (!error)
+				error = cleanup_error;
+		}
 	}
 	if (!source_released && owned.live)
 		swapz_round069_release_owned(&owned);
@@ -593,6 +633,7 @@ out:
 	swapz_round069_release_io(write_io);
 	kvfree(transaction);
 	swapz_round069_join_free(joined);
+	swapz_round082_close_put(closer);
 	return error;
 }
 

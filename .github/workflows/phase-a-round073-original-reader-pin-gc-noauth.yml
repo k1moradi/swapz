@@ -88,16 +88,6 @@ jobs:
           fetch-depth: 1
           path: linux
           persist-credentials: false
-      - name: Install ephemeral original UML build tools
-        shell: bash
-        run: |
-          set -Eeuo pipefail
-          log="$RUNNER_TEMP/round073-native-deps.log"
-          if ! sudo -n apt-get update -qq >"$log" 2>&1 ||
-             ! sudo -n env DEBIAN_FRONTEND=noninteractive apt-get install -y -qq                --no-install-recommends build-essential bc bison flex clang                libelf-dev libssl-dev libncurses-dev liblz4-dev python3                python3-pyelftools binutils >>"$log" 2>&1; then
-            echo '::error::ROUND073_READER_FIRST_ERROR phase=original-UML-dependencies' >&2
-            exit 3
-          fi
       - name: Pristine pinned original and independent original READ-side scratch stage
         shell: bash
         run: |
@@ -115,6 +105,16 @@ jobs:
           python3 -B swapz/tests/tools/round073-stage-original-reader-pin-gc.py             --linux-root linux --base-manifest round073-evidence/inherited-round069.json             --manifest round073-evidence/reader-stage.json
           python3 -B swapz/tests/tools/round073-stage-original-reader-pin-gc.py             --linux-root linux --base-manifest round073-evidence/inherited-round069.json             --manifest round073-evidence/reader-stage.json --verify-stage
           git -C linux diff --check
+      - name: Install ephemeral original UML build tools
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          log="$RUNNER_TEMP/round073-native-deps.log"
+          if ! sudo -n apt-get update -qq >"$log" 2>&1 ||
+             ! sudo -n env DEBIAN_FRONTEND=noninteractive apt-get install -y -qq                --no-install-recommends build-essential bc bison flex clang                libelf-dev libssl-dev libncurses-dev liblz4-dev python3                python3-pyelftools binutils >>"$log" 2>&1; then
+            echo '::error::ROUND073_READER_FIRST_ERROR phase=original-UML-dependencies' >&2
+            exit 3
+          fi
       - name: Original pinned Linux UML compile boot and genuine reader GC KUnit JSON KTAP
         shell: bash
         timeout-minutes: 95
@@ -153,26 +153,43 @@ jobs:
             if test -s "$out/test.log"; then
               cp "$out/test.log" round073-evidence/last-native-raw-KTAP.log
             fi
-            grep -hE -m1 'ROUND080_READER_FIRST_STALL|ROUND080_READER_FIRST_ERROR|ROUND073_READER_NATIVE_FIRST_ERROR|fatal error:|error:|undefined reference|not ok|Kernel panic|KASAN:|UBSAN:|timed out after' "$out/test.log" "$log" 2>/dev/null |
+            grep -hE -m1 'ROUND080_READER_NATIVE_FIRST_ERROR|ROUND073_READER_NATIVE_FIRST_ERROR|fatal error:|error:|undefined reference|not ok|Kernel panic|KASAN:|UBSAN:|timed out after' "$out/test.log" "$log" 2>/dev/null |
               cut -c1-260 >&2 || true
             return "$code"
           }
           flags='-DSWAPZ_ROUND069_ORIGINAL_STORED_SOURCE_TEST=1 -DSWAPZ_ROUND065_ORIGINAL_DM_TABLE_TEST=1 -DSWAPZ_ROUND064_ORIGINAL_SLOT_TARGET_TEST=1 -DSWAPZ_ROUND056_PREERASE_SINGLE_OWNER_TEST=1 -DSWAPZ_ROUND063_ORIGINAL_DM_OWNER_TEST=1 -DSWAPZ_ROUND028_SLOT_EPOCH_SOURCE=1 -DSWAPZ_ROUND030_EVICTION_SNAPSHOT_SOURCE=1 -DSWAPZ_ROUND025_SIDEBAND_CI_ONLY=1 -DSWAPZ_ROUND031_MM_BIO_SOURCE=1 -DSWAPZ_ROUND032_BIO_COPY_VIEW_CI_ONLY=1 -DSWAPZ_ROUND034_ORIGINAL_V1_KUNIT_TEST=1 -DSWAPZ_ROUND035_ORIGINAL_MM_ROUTE_WITNESS_TEST=1 -DSWAPZ_ROUND036_ORIGINAL_ROUTE_LIFETIME_TEST=1 -DSWAPZ_ROUND037_ORIGINAL_MM_LIFETIME_OWNER_TEST=1 -DSWAPZ_ROUND038_ORIGINAL_STORE_PROVENANCE_TEST=1 -DSWAPZ_ROUND040_ORIGINAL_ASYNC_SLOT_LEASE_NEGATIVE_TEST=1 -DSWAPZ_ROUND041_ORIGINAL_SECTOR_TO_DM_NONAUTHORITY_TEST=1 -DSWAPZ_ROUND042_ORIGINAL_STORED_WRITEBACK_LIFETIME_TEST=1 -DSWAPZ_ROUND043_ORIGINAL_BIO_CLONE_COPY_TEST=1 -DSWAPZ_ROUND045_ORIGINAL_STORED_BIO_SOURCE_SCOPE_TEST=1 -DSWAPZ_ROUND049_ORIGINAL_LOCKED_FOLIO_COUNT_PAIR_TEST=1 -DSWAPZ_ROUND052_ORIGINAL_PRE_UNUSE_CANCEL_TEST=1 -DSWAPZ_ROUND056_ORIGINAL_CLONE_PROVENANCE_TEST=1 -DSWAPZ_ROUND058_ORIGINAL_STORED_BIO_CHAIN_TEST=1 -DSWAPZ_ROUND066_IMPORT_DISK_TEST=1 -DSWAPZ_ROUND067_IMPORT_DISK_PAYLOAD_TEST=1 -DSWAPZ_ROUND068_IMPORT_LOWER_BIO_TEST=1 -DSWAPZ_ROUND069_ORIGINAL_BIO_AUTHORITY_JOIN_KUNIT=1 -DSWAPZ_ROUND073_ORIGINAL_READER_PIN_GC_KUNIT=1'
-          # Build the pinned kernel ONCE and isolate all four cases through
-          # sequential original UML boots. This catches which test hangs,
-          # independently of shared-suite ordering, without rebuilding the
-          # kernel or raising the 120-second combined KUnit limit.
-          phase=original-uml-build-and-isolated-four
-          isolated="$PWD/round073-evidence/isolated-reader-kunit.json"
-          if timeout -k 10s 82m python3 -B linux/tools/testing/kunit/kunit.py run             --arch=um --build_dir="$out" --kunitconfig="$request"             --make_options="KCFLAGS=$flags -Werror" --jobs=2             --run_isolated=test --timeout=25             --json="$isolated" 'swapz_round073_original_reader_pin_gc*' >"$log" 2>&1; then
-            test -x "$out/linux" && test -s "$isolated" || { first_error 3; exit 3; }
-            cp "$out/test.log" round073-evidence/isolated-last-case-native-KTAP.log
-            echo 'ROUND080_ORIGINAL_UML_INDEPENDENT_CASES_EXECUTED'
+          # Actual staging and postimage validation already succeeded.
+          # Build once, then keep a separate JSON and raw KTAP for each boot.
+          phase=original-uml-build
+          if timeout -k 10s 82m python3 -B linux/tools/testing/kunit/kunit.py build \
+              --arch=um --build_dir="$out" --kunitconfig="$request" \
+              --make_options="KCFLAGS=$flags -Werror" --jobs=2 >"$log" 2>&1; then
+            test -x "$out/linux" || { first_error 3; exit 3; }
           else
             code=$?
             first_error "$code"
             exit "$code"
           fi
+          for case in swapz_round073_original_lz4_old_reader_gc \
+                      swapz_round073_original_lzo1x_old_reader_gc \
+                      swapz_round073_original_stale_crc_sha_codec \
+                      swapz_round073_original_decoder_retire_with_pin; do
+            phase="isolated-$case"
+            log="round073-evidence/$case-run.log"
+            isolated="$PWD/round073-evidence/$case.json"
+            if timeout -k 5s 40s python3 -B linux/tools/testing/kunit/kunit.py exec \
+                --arch=um --build_dir="$out" --timeout=25 --json="$isolated" \
+                "swapz_round073_original_reader_pin_gc.$case" >"$log" 2>&1; then
+              cp "$out/test.log" "round073-evidence/$case-KTAP.log"
+              python3 -B swapz/tests/tools/round073-original-reader-pin-gc-verify.py \
+                verify-native --case "$case" --result "$isolated" --kernel-log "$out/test.log" ||
+                { first_error 3; exit 3; }
+            else
+              code=$?
+              first_error "$code"
+              exit "$code"
+            fi
+          done
           # Reuse that exact binary; only the combined suite can qualify
           # full original Linux native KUnit 4/4 JSON + raw KTAP.
           phase=original-uml-combined-four

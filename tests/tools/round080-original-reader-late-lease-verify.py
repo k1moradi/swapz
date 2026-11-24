@@ -92,6 +92,16 @@ int main(void)
     if (swapz_round073_expect_shutdown(&owner, &unexpected) != -EUCLEAN ||
         unexpected.owner || owner.active_readers != 1U)
         return semantic_failure("late-pin-leaked-before-close");
+    /* Two actually held pins exercise the exact native failure cleanup. */
+    if (swapz_zswap_import_decoder_owner_get(&owner, &unexpected) ||
+        owner.active_readers != 2U)
+        return semantic_failure("two-held-pins");
+    if (swapz_round080_release_decoder_leases(&original, &unexpected) ||
+        original.owner || unexpected.owner || owner.active_readers)
+        return semantic_failure("shared-native-cleanup");
+    if (swapz_round080_release_decoder_leases(&original, &unexpected) ||
+        swapz_zswap_import_decoder_owner_get(&owner, &original))
+        return semantic_failure("cleanup-idempotence");
     if (pthread_create(&closer, NULL, close_worker, NULL))
         return semantic_failure("start-close");
     int observed_close = 0;
@@ -109,7 +119,7 @@ int main(void)
     if (swapz_round073_expect_shutdown(&owner, &unexpected) ||
         unexpected.owner)
         return semantic_failure("get-after-close");
-    if (swapz_zswap_import_decoder_owner_put(&original) ||
+    if (swapz_round080_release_decoder_leases(&original, &unexpected) ||
         pthread_join(closer, NULL) || close_result || owner.active_readers)
         return semantic_failure("drain-join");
     (void)pthread_cond_destroy(&owner.drained);
@@ -132,7 +142,10 @@ def source_body() -> str:
     marker = "static int swapz_round073_expect_shutdown("
     require(fixture.count(marker) == 1, "missing-single-actual-native-close-helper")
     body = fixture.split(marker, 1)[1].split("\n}\n", 1)[0]
-    return marker + body + "\n}"
+    cleanup_marker = "static int swapz_round080_release_decoder_leases("
+    require(fixture.count(cleanup_marker) == 1, "missing-native-cleanup-helper")
+    cleanup = fixture.split(cleanup_marker, 1)[1].split("\n}\n", 1)[0]
+    return marker + body + "\n}\n" + cleanup_marker + cleanup + "\n}"
 
 def run_compiler(compiler_name: str, directory: Path, body: str) -> None:
     compiler = shutil.which(compiler_name)
@@ -155,6 +168,12 @@ def run_compiler(compiler_name: str, directory: Path, body: str) -> None:
         ("ignored-post-close-rejection",
          "return result == -ESHUTDOWN ? 0 : result;",
          "return result;"),
+        ("missing-shared-late-put",
+         "error = swapz_zswap_import_decoder_owner_put(late);",
+         "error = 0;"),
+        ("missing-shared-primary-put",
+         "cleanup_error = swapz_zswap_import_decoder_owner_put(lease);",
+         "cleanup_error = 0;"),
     ]
     for index, variant in enumerate([(None, None, None), *mutant_specs]):
         name, before, after = variant
@@ -185,7 +204,7 @@ def run_compiler(compiler_name: str, directory: Path, body: str) -> None:
                     compiler_name + ":baseline-lifetime-execution")
     print("PASS ROUND080_READER_LATE_LEASE_" + compiler_name.upper() +
           " real_product_owner_source=YES fixture_helper_source=YES "
-          "strict_ASan_UBSan=YES compiled_executed_semantic_mutants=2",
+          "strict_ASan_UBSan=YES compiled_executed_semantic_mutants=4",
           flush=True)
 
 def main() -> int:
@@ -193,14 +212,20 @@ def main() -> int:
         fixture = FIXTURE.read_text()
         require(fixture.count("KUNIT_CASE(swapz_round073_original_stale_crc_sha_codec)") == 1 and
                 fixture.count("KUNIT_CASE(swapz_round073_original_decoder_retire_with_pin)") == 1 and
-                "if (late.owner)" in fixture and
-                "swapz_zswap_import_decoder_owner_put(&late)" in fixture and
+                "swapz_round080_release_decoder_leases(&lease, &late);" in fixture and
                 "cancel_delayed_work_sync(&stall.delayed)" in fixture and
-                "ROUND080_READER_FIRST_STALL" in fixture,
+                "ROUND080_READER_NATIVE_FIRST_ERROR stalled_phase=" in fixture,
                 "native-reader-KUnit-lifetime-guards")
+        import runpy
+        contract = runpy.run_path(str(Path(__file__).with_name(
+            "round073-stage-original-reader-pin-gc.py")))
+        try:
+            contract["validate_reader_cleanup"](fixture.encode())
+        except contract["StageFailure"] as failure:
+            raise ValueError(str(failure)) from failure
         body = source_body()
         require(body.count("swapz_zswap_import_decoder_owner_get(owner, late)") == 1 and
-                body.count("swapz_zswap_import_decoder_owner_put(late)") == 1 and
+                body.count("swapz_zswap_import_decoder_owner_put(late)") == 2 and
                 body.count("return result == -ESHUTDOWN ? 0 : result;") == 1,
                 "native-helper-exact-source-refcount-contract")
         with tempfile.TemporaryDirectory(prefix="swapz-round080-reader-") as folder:
@@ -212,7 +237,7 @@ def main() -> int:
             for name in ("gcc", "clang"):
                 run_compiler(name, directory, body)
         print("PASS ROUND080_ORIGINAL_READER_LATE_PIN_NEGATIVES "
-              "semantic_mutants=2_per_compiler source_AUTH=0 "
+              "semantic_mutants=4_per_compiler source_AUTH=0 "
               "original_NATIVE_KUnit=SEPARATE_PINNED_UML", flush=True)
         return 0
     except (OSError, ValueError, subprocess.TimeoutExpired) as failure:

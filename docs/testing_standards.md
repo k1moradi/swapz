@@ -20062,3 +20062,65 @@ Source AUTH0, Phase A BLOCKED, direct/forced RAW/import OFF.
 ### Round082 Agent11 — pinned actual target initializer preflight
 
 Before compiling the existing 24 independent accepted-upper-BIO debt semantic mutants per compiler, verify full pinned original DM core/header and product Git blob identities, unique actual lifecycle fragments and mutation anchors. Scope the feature expression to the unique `swapz_target` initializer: the pristine declaration is unparenthesized `DM_TARGET_SINGLETON | DM_TARGET_ALWAYS_WRITEABLE`. Run in-memory parser negatives for NOWAIT, extra feature, duplicate field/initializer, wrong target name/initializer and misplaced decoy. Reject all before compiler invocation; parser negatives are not executed C semantic kills. Check clean exact main SHA, real single parent, diff whitespace and append-only repository policy before expensive testing. Keep strict GCC/Clang ASan+UBSan flags and host-only model boundary. No production queue cap, arbitrary queue-full REQUEUE, competing reclaim, recompression, native build or activation. SOURCE_MAPPED_AUTHENTICATED=0, Phase A BLOCKED, direct/forced RAW/import OFF.
+
+
+## Round082 Agent10 — original reader close completion and shared stage/host contract
+
+Preserve exact historical red: Round080 source
+4a4b339b960206cf598484432a84ede6f0e9c814 run45273186925
+host138038046309 passed 28 real compiled/executed semantic C mutants
+per GCC and Clang; native138042877345 failed BEFORE compilation at
+ROUND073_READER_STAGE_FIRST_ERROR original-reader-late-lease-must-release-before-closer-join.
+The fixture and stager did not describe the same cleanup. Earlier
+7f3808379eca67a26e9c7b392632b3f0b738bc57 run45262491414 had an isolated
+stale CRC/SHA/codec PASS and retirement diagnostic active=0 phase=10.
+Phase10 follows a successful first wait_for_completion_timeout, which
+consumes the worker's single complete() token. The second cleanup wait
+therefore waits for a notification that has already been consumed, and
+kthread_stop on an already exited task without a retained task ref
+also risks invalid task lifetime. Do not treat either failure as
+proof of a product decoder pin leak or change the product owner.
+
+The test-only worker uses complete_all for a persistent returned
+notification, and kthread_create followed by get_task_struct BEFORE
+wake_up_process, with balanced put_task_struct after conditional join.
+The close context is heap-owned, with explicit caller and worker
+refcounts. After both test-owned leases have been put, only a real
+returned close worker may be joined. A bounded wait that still fails
+reports a real failed/quarantined drain: the worker's reference retains
+its independent decoder/completion storage until actual return;
+it can never access the KUnit stack, joined BIO, source or reporter
+after return from the test. Do not claim a timed-out drain is safe
+termination or successful qualification. The one-shot diagnostic is
+synchronously canceled before the caller drops its own reference.
+
+Native and host use one actual release_decoder_leases helper and one
+stage validator. Validate the executable late/primary put order, retained
+first error, release-before-join, persistent completion and task/heap
+ref lifetime. Reject removed shared helper call, removed late put,
+reordered join, one-shot completion, and removed task reference before
+writing staged postimages. Host must compile exact helper and actual
+unchanged dormant decoder owner, strict C23 GCC/Clang ASan+UBSan, with
+the prior two and two additional independently compiled and executed
+cleanup mutants per compiler. Keep inherited 26 semantic mutants
+per compiler (30 expected total/compiler); compile rejection is not
+a runtime mutant kill. Keep strict original delay.h declaration
+negative checks. On real pristine pinned original checkout, run
+inherited staging, 12 negative plans, actual positive stage and all
+10 postimage checks before installing native build dependencies or
+building. Preserve original Linux and product whole-blob locks.
+Build exactly one pinned original UML kernel, execute each exact
+case with its own 25-second limit and separate genuine JSON/raw KTAP,
+then boot same binary with combined unchanged 120-second limit.
+Only exact combined four PASS, zero failed/skipped/crashed/errors,
+and all four distinct native KTAP results qualify native 4/4. No
+false PASS from parser checks, source-host mutants, or pending CI.
+
+No production C/H changes, competing reclaim, recompression, privileged
+or physical testing. Linux MM/zswap owns compressed RAM/natural
+eviction; swapz owns only disk packing and GC. Distinct authenticated
+original LZO1X/raw LZ4 immutable preerase bytes and independent
+decoder/GC lifetime, real lower durable write then once-only upper ACK
+are prerequisites, not proven by test-created source. RAW_4096 is full
+ORIGINAL UNCOMPRESSED 4096 bytes. SOURCE_MAPPED_AUTHENTICATED=0,
+PHASE_A=BLOCKED and all activation OFF.

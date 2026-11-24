@@ -81,13 +81,13 @@ def verify_preflight() -> None:
             fixture.index("usleep_range(1000, 2000);") and
             "for (iteration = 0; iteration < 1500U &&" in fixture,
             "original-pin-usleep_range-declaration-or-context-missing")
-    require("static int swapz_round073_expect_shutdown(" in fixture and
-            fixture.count("swapz_zswap_import_decoder_owner_put(&late)") == 1 and
-            fixture.index("if (late.owner)") < fixture.index("if (lease.owner)") and
-            "ROUND080_READER_FIRST_STALL" in fixture and
-            "cancel_delayed_work_sync(&stall.delayed)" in fixture and
-            "wait_for_completion_timeout(&closer.returned" in fixture,
-            "original-reader-close-late-lease-owned-drain-guards")
+    import runpy
+    stage_contract = runpy.run_path(
+        str(TOOLS / "round073-stage-original-reader-pin-gc.py"))
+    try:
+        stage_contract["validate_reader_cleanup"](fixture.encode())
+    except stage_contract["StageFailure"] as failure:
+        raise FirstError(str(failure)) from failure
     for case in CASES:
         require(fixture.count("KUNIT_CASE(" + case + ")") == 1,
                 "missing-native-unique-case:" + case)
@@ -100,7 +100,7 @@ def verify_preflight() -> None:
         "swapz_zswap_import_decoder_owner_get(",
         "swapz_zswap_import_decoder_owner_put(",
         "swapz_zswap_import_decoder_owner_close_and_drain(",
-        "kthread_run(", "memchr_inv(joined->output",
+        "kthread_create(", "memchr_inv(joined->output",
         "spec.compressed_crc32c = swapz_crc32c_bytes(",
         "sha256(joined->original, SWAPZ_BLOCK_BYTES, spec.original_sha256);",
     ):
@@ -218,7 +218,7 @@ def verify_host() -> None:
           "AUTH0 PHASE_A=BLOCKED", flush=True)
 
 
-def verify_native(document: dict, ktap: str) -> None:
+def verify_native(document: dict, ktap: str, expected_cases=CASES) -> None:
     require(isinstance(document, dict), "native-json-root-not-object")
     pending = [document]
     matches = []
@@ -234,26 +234,26 @@ def verify_native(document: dict, ktap: str) -> None:
     node = matches[0]
     cases = node.get("test_cases")
     require(isinstance(cases, list) and
-            len(cases) == len(CASES), "native-KUnit-case-count")
+            len(cases) == len(expected_cases), "native-KUnit-case-count")
     require({row.get("name") for row in cases if isinstance(row, dict)}
-            == set(CASES) and
+            == set(expected_cases) and
             all(isinstance(row, dict) and row.get("status") == "PASS"
                 for row in cases), "native-KUnit-fail-skip-or-forged")
     misc = node.get("misc", {})
     for key, expected in (
-            ("tests", len(CASES)), ("passed", len(CASES)),
+            ("tests", len(expected_cases)), ("passed", len(expected_cases)),
             ("failed", 0), ("skipped", 0), ("crashed", 0), ("errors", 0)):
         require(type(misc.get(key)) is int and misc[key] == expected,
                 "native-KUnit-misc:" + key)
     require(ktap.count("# Subtest: " + SUITE) == 1,
             "native-KTAP-suite-unique")
-    for case in CASES:
+    for case in expected_cases:
         require(len(re.findall(
             r"(?m)^\s*ok\s+[0-9]+\s+(?:-\s+)?" +
             re.escape(case) + r"\s*$", ktap)) == 1,
             "native-KTAP-real-executed:" + case)
     require(re.search(
-        r"(?i)kernel panic|KASAN:|UBSAN:|BUG: sleeping|"
+        r"(?i)kernel panic|KASAN:|UBSAN:|BUG: sleeping|ROUND080_READER_NATIVE_FIRST_ERROR|"
         r"not ok\s+[0-9]+\s+" + re.escape(SUITE), ktap) is None,
         "native-KTAP-crash-or-fail")
 
@@ -302,6 +302,7 @@ def main() -> int:
     modes.add_parser("host")
     modes.add_parser("self-test")
     native = modes.add_parser("verify-native")
+    native.add_argument("--case", choices=CASES)
     native.add_argument("--result", required=True, type=Path)
     native.add_argument("--kernel-log", required=True, type=Path)
     args = parser.parse_args()
@@ -313,11 +314,16 @@ def main() -> int:
             native_self_test()
         else:
             verify_native(json.loads(args.result.read_text()),
-                          args.kernel_log.read_text(errors="replace"))
-            print("PASS ROUND073_GENUINE_ORIGINAL_LINUX_PINNED_NATIVE_READER "
-                  "KUNIT_JSON_KTAP=4/4 original_LZO1X_LZ4_4096=YES "
-                  "native_GC_reader_pin=YES independent_decoder_drain=YES "
-                  "SWAPCACHE_AUTH=0 PHASE_A=BLOCKED", flush=True)
+                          args.kernel_log.read_text(errors="replace"),
+                          (args.case,) if args.case else CASES)
+            if args.case:
+                print("PASS ROUND082_ORIGINAL_NATIVE_ISOLATED " + args.case +
+                      " KUNIT_JSON_KTAP=1/1 AUTH0", flush=True)
+            else:
+                print("PASS ROUND073_GENUINE_ORIGINAL_LINUX_PINNED_NATIVE_READER "
+                      "KUNIT_JSON_KTAP=4/4 original_LZO1X_LZ4_4096=YES "
+                      "native_GC_reader_pin=YES independent_decoder_drain=YES "
+                      "SWAPCACHE_AUTH=0 PHASE_A=BLOCKED", flush=True)
         return 0
     except (FirstError, OSError, ValueError, SyntaxError,
             subprocess.SubprocessError, subprocess.TimeoutExpired,

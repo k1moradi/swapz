@@ -64,6 +64,39 @@ def checked_output(arguments: list[str]) -> bytes:
                           timeout=55).stdout
 
 
+def validate_reader_cleanup(fixture: bytes) -> None:
+    """One native/host contract; validate actual executable helper and order."""
+    label = "original-reader-late-lease-must-release-before-closer-join"
+    begin = b"/* ROUND080_READER_LEASE_CLEANUP_BEGIN"
+    end = b"/* ROUND080_READER_LEASE_CLEANUP_END */"
+    call = b"swapz_round080_release_decoder_leases(&lease, &late);"
+    join = b"kthread_stop(closer_task);"
+    require(fixture.count(begin) == 1 and fixture.count(end) == 1 and
+            fixture.count(call) == 1 and fixture.count(join) == 1 and
+            fixture.index(call) < fixture.index(join), label)
+    helper = fixture[fixture.index(begin):fixture.index(end)]
+    late_put = b"if (late->owner)\n\t\terror = swapz_zswap_import_decoder_owner_put(late);"
+    primary_put = b"if (lease->owner) {\n\t\tcleanup_error = swapz_zswap_import_decoder_owner_put(lease);"
+    require(helper.count(late_put) == 1 and helper.count(primary_put) == 1 and
+            helper.index(late_put) < helper.index(primary_put) and
+            b"if (!error)" in helper and b"return error;" in helper, label)
+    require(fixture.count(b"complete_all(&closer->returned);") == 1 and
+            b"complete(&closer->returned);" not in fixture and
+            b"wait_for_completion(&closer->returned);" not in fixture and
+            b"wait_for_completion(&closer.returned);" not in fixture and
+            b"ROUND080_READER_NATIVE_FIRST_ERROR stalled_phase=" in fixture and
+            fixture.count(b"get_task_struct(closer_task);") == 1 and
+            fixture.count(b"put_task_struct(closer_task);") == 1 and
+            fixture.count(b"wake_up_process(closer_task);") == 1 and
+            fixture.index(b"get_task_struct(closer_task);") <
+            fixture.index(b"wake_up_process(closer_task);") and
+            fixture.count(b"refcount_inc(&closer->references);") == 1 and
+            fixture.count(b"swapz_round082_close_put(closer);") == 2 and
+            b"cancel_delayed_work_sync(&stall.delayed);" in fixture and
+            b"if (wait_for_completion_timeout(&closer->returned," in fixture,
+            label)
+
+
 def plan(current: bytes, manifest: dict, original: dict[str, bytes],
          product: dict[str, bytes], fixture: bytes,
          source_fixture: bytes, bio_fixture: bytes) -> dict[str, bytes]:
@@ -92,16 +125,7 @@ def plan(current: bytes, manifest: dict, original: dict[str, bytes],
             b"swapz_round069_native_gc_copy_fua(" in bio_fixture and
             b'#include "swapz_round069/authority.c"' in bio_fixture,
             "inherited-original-BIO-real-authority-reader")
-    require(fixture.count(b"/* ROUND080_READER_LEASE_CLEANUP_BEGIN") == 1 and
-            fixture.count(b"/* ROUND080_READER_LEASE_CLEANUP_END */") == 1 and
-            fixture.count(b"swapz_round080_release_decoder_leases(&lease, &late);") == 1 and
-            fixture.index(b"swapz_round080_release_decoder_leases(&lease, &late);") <
-            fixture.index(b"kthread_stop(closer_task);") and
-            b"if (late->owner)" in fixture and
-            b"if (lease->owner)" in fixture and
-            b"wait_for_completion(&closer.returned);" not in fixture and
-            b"ROUND080_READER_NATIVE_FIRST_ERROR stalled_phase=" in fixture,
-            "original-reader-late-lease-must-release-before-closer-join")
+    validate_reader_cleanup(fixture)
     require(fixture.count(b"#include <linux/delay.h>") == 1 and
             fixture.index(b"#include <linux/delay.h>") <
             fixture.index(b"usleep_range(1000, 2000);") and
@@ -210,6 +234,26 @@ def main() -> int:
              fixture.replace(b"swapz_round080_release_decoder_leases(&lease, &late);",
                              b"/* leaked late lease */"),
              source_fixture, bio_fixture),
+            ("original-reader-late-lease-must-release-before-closer-join",
+             current, base, original, product,
+             fixture.replace(b"error = swapz_zswap_import_decoder_owner_put(late);",
+                             b"error = 0;"),
+             source_fixture, bio_fixture),
+            ("original-reader-late-lease-must-release-before-closer-join",
+             current, base, original, product,
+             fixture.replace(b"kthread_stop(closer_task);", b"/* no join */", 1)
+                    .replace(b"cleanup_error = swapz_round080_release_decoder_leases",
+                             b"kthread_stop(closer_task);\n\tcleanup_error = swapz_round080_release_decoder_leases", 1),
+             source_fixture, bio_fixture),
+            ("original-reader-late-lease-must-release-before-closer-join",
+             current, base, original, product,
+             fixture.replace(b"complete_all(&closer->returned);",
+                             b"complete(&closer->returned);"),
+             source_fixture, bio_fixture),
+            ("original-reader-late-lease-must-release-before-closer-join",
+             current, base, original, product,
+             fixture.replace(b"get_task_struct(closer_task);", b"/* missing ref */"),
+             source_fixture, bio_fixture),
             ("original-native-delay-header-or-bounded-context",
              current, base, original, product,
              fixture.replace(b"#include <linux/delay.h>", b"/* missing */"),
@@ -232,7 +276,7 @@ def main() -> int:
                         "first-negative-" + wanted + ":" + str(failure))
             else:
                 raise StageFailure("staging-mutant-accepted:" + wanted)
-        print("PASS ROUND073_READER_STAGE_PLAN negatives=8 "
+        print("PASS ROUND073_READER_STAGE_PLAN negatives=12 "
               "pristine_original_blobs=2 product_blobs=8 "
               "original_XArray_source=YES real_BIO_authority=YES AUTH0")
         return 0
