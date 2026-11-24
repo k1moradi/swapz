@@ -1,0 +1,70 @@
+diff --git a/drivers/md/dm.c b/drivers/md/dm.c
+--- a/drivers/md/dm.c
++++ b/drivers/md/dm.c
+@@ -1406,3 +1406,66 @@
++#if defined(SWAPZ_ROUND088_SELECTED_DM_CANDIDATE_TEST)
++/*
++ * Review-only actual-clone identity seam. Caller must be the selected target's
++ * synchronous ->map, under the core's live-table SRCU scope; expected_origin
++ * must come from a separately retained core-owned carrier, never a lookup by
++ * slot/sector or an arbitrary BIO pointer. No reference is returned or minted.
++ * This does not prove a route epoch, unsuperseded generation or one-shot claim.
++ */
++bool dm_swapz_round088_clone_matches(struct dm_target *ti, struct bio *clone,
++				    const struct bio *expected_origin);
++bool dm_swapz_round088_clone_matches(struct dm_target *ti, struct bio *clone,
++				    const struct bio *expected_origin)
++{
++	struct dm_target_io *tio;
++	struct dm_io *io;
++	struct mapped_device *md;
++	struct bio_vec clone_vec, origin_vec;
++	sector_t sector;
++
++	if (!ti || !clone || !expected_origin || clone == expected_origin ||
++	    clone->bi_end_io != clone_endio)
++		return false;
++	/* Valid only on a core-created map clone, not a general BIO API. */
++	tio = clone_to_tio(clone);
++	if (tio->magic != DM_TIO_MAGIC || !dm_tio_is_normal(tio) ||
++	    tio->ti != ti || tio->target_bio_nr || !tio->len_ptr ||
++	    *tio->len_ptr != 8U)
++		return false;
++	io = tio->io;
++	if (!io || io->magic != DM_IO_MAGIC ||
++	    dm_io_flagged(io, DM_IO_WAS_SPLIT) || io->requeue_flush_with_data ||
++	    io->orig_bio != expected_origin)
++		return false;
++	md = io->md;
++	sector = clone->bi_iter.bi_sector;
++	if (!md || !ti->table || ti->begin || ti->len < 8 ||
++	    ti->len != dm_table_get_size(ti->table) ||
++	    sector > ti->len - 8 || sector % 8 ||
++	    dm_table_get_md(ti->table) != md ||
++	    dm_table_find_target(ti->table, sector) != ti ||
++	    clone->bi_bdev != md->disk->part0 ||
++	    expected_origin->bi_bdev != md->disk->part0 ||
++	    expected_origin->bi_iter.bi_sector != sector)
++		return false;
++	if (bio_op(clone) != REQ_OP_WRITE ||
++	    bio_op(expected_origin) != REQ_OP_WRITE ||
++	    !(clone->bi_opf & REQ_SWAP) || !(expected_origin->bi_opf & REQ_SWAP) ||
++	    ((clone->bi_opf | expected_origin->bi_opf) &
++	     (REQ_PREFLUSH | REQ_FUA | REQ_NOWAIT | REQ_POLLED | REQ_ATOMIC)) ||
++	    clone->bi_iter.bi_size != 4096U ||
++	    expected_origin->bi_iter.bi_size != 4096U ||
++	    clone->bi_iter.bi_bvec_done || expected_origin->bi_iter.bi_bvec_done)
++		return false;
++	clone_vec = bio_iter_iovec(clone, clone->bi_iter);
++	origin_vec = bio_iter_iovec(expected_origin, expected_origin->bi_iter);
++	return clone_vec.bv_page && clone_vec.bv_page == origin_vec.bv_page &&
++	       !PageCompound(clone_vec.bv_page) &&
++	       !clone_vec.bv_offset && !origin_vec.bv_offset &&
++	       clone_vec.bv_len == 4096U && origin_vec.bv_len == 4096U;
++}
++EXPORT_SYMBOL_GPL(dm_swapz_round088_clone_matches);
++#endif /* SWAPZ_ROUND088_SELECTED_DM_CANDIDATE_TEST */
++
+ static void __map_bio(struct bio *clone)
+ {
+ 	struct dm_target_io *tio = clone_to_tio(clone);

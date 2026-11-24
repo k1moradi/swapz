@@ -13939,6 +13939,111 @@ static __used noinline int swapz_round053_internal_receipt_step(
 /* ROUND053_DM_ACCEPTED_LIFECYCLE_HELPER_END */
 #endif /* SWAPZ_ROUND053_DM_ACCEPTED_BIO_LIFECYCLE_TEST */
 
+
+#if defined(SWAPZ_ROUND088_SELECTED_DM_CANDIDATE_TEST)
+/*
+ * Dormant target-side insertion at the genuine incoming FIFO boundary.
+ * No normal Kbuild definition, registered carrier or activation interface.
+ */
+/* ROUND088_SELECTED_DM_GUARD_BEGIN */
+/* Identity values are supplied by a future retained core carrier and observed
+ * target registration, not inferred from sector, pointers or REQ_SWAP.
+ * No broker operation is permitted under the target's queue_lock.
+ */
+struct swapz_round088_candidate {
+	const void *origin;
+	const void *clone;
+	const void *target;
+	const void *table;
+	u64 table_epoch;
+	u64 target_epoch;
+	u64 generation;
+};
+
+static int swapz_round088_claim_refuse(
+		const struct swapz_round088_candidate *candidate,
+		const struct swapz_round088_candidate *observed,
+		bool accepting, bool failed, bool fresh_descriptor)
+{
+	if (!accepting || failed)
+		return -ESHUTDOWN;
+	if (!fresh_descriptor)
+		return -EALREADY;
+	if (!candidate || !observed)
+		return -EOPNOTSUPP;
+	if (!candidate->origin || !candidate->clone ||
+	    candidate->origin == candidate->clone ||
+	    candidate->origin != observed->origin ||
+	    candidate->clone != observed->clone ||
+	    !candidate->target || candidate->target != observed->target ||
+	    !candidate->table || candidate->table != observed->table ||
+	    !candidate->table_epoch || candidate->table_epoch != observed->table_epoch ||
+	    !candidate->target_epoch || candidate->target_epoch != observed->target_epoch ||
+	    !candidate->generation || candidate->generation != observed->generation)
+		return -ESTALE;
+	/* Matching identities alone do not authorize ownership. A broker
+	 * claim/revocation primitive valid under queue_lock is still missing.
+	 */
+	return -EOPNOTSUPP;
+}
+/* ROUND088_SELECTED_DM_GUARD_END */
+
+static int swapz_round088_try_claim_locked(
+		struct dm_target *ti, struct swapz_dm *ctx,
+		struct swapz_bio_ref *entry,
+		const struct swapz_round088_candidate *candidate,
+		const struct swapz_round088_candidate *observed)
+{
+	struct bio *bio = entry->bio;
+	struct bio_vec vec;
+	sector_t sector = bio->bi_iter.bi_sector;
+	bool fresh_descriptor = list_empty(&entry->list) &&
+		list_empty(&entry->preparation_list) && !entry->prepared_page;
+
+	lockdep_assert_held(&ctx->queue_lock);
+	if (!ctx->accepting || READ_ONCE(ctx->failed))
+		return -ESHUTDOWN;
+	if (!fresh_descriptor)
+		return -EALREADY;
+	if (ctx->target != ti || !ti->table || ti->begin ||
+	    ti->len < SWAPZ_SECTORS || sector > ti->len - SWAPZ_SECTORS ||
+	    sector % SWAPZ_SECTORS || sector / SWAPZ_SECTORS >= ctx->logical_pages ||
+	    bio_op(bio) != REQ_OP_WRITE || !(bio->bi_opf & REQ_SWAP) ||
+	    (bio->bi_opf & (REQ_PREFLUSH | REQ_FUA | REQ_NOWAIT | REQ_POLLED)) ||
+	    bio->bi_iter.bi_size != SWAPZ_BLOCK_BYTES ||
+	    bio->bi_iter.bi_bvec_done)
+		return -EOPNOTSUPP;
+	vec = bio_iter_iovec(bio, bio->bi_iter);
+	if (!vec.bv_page || vec.bv_offset || vec.bv_len != SWAPZ_BLOCK_BYTES ||
+	    PageCompound(vec.bv_page))
+		return -EOPNOTSUPP;
+	if (observed && (observed->clone != bio || observed->target != ti ||
+			 observed->table != ti->table))
+		return -ESTALE;
+
+	/* Broker reserve/claim/put prohibit foreign locks. Do not call any
+	 * of them here, even the trylock claim. The missing adapter must
+	 * atomically claim the retained carrier, arbitrate revoke, and move
+	 * one reference into this descriptor with NO fallible step before
+	 * list_add_tail(). Until then, even a matched snapshot is refused.
+	 */
+	return swapz_round088_claim_refuse(candidate, observed,
+			ctx->accepting, READ_ONCE(ctx->failed), fresh_descriptor);
+}
+
+static void swapz_round088_enqueue_locked(struct dm_target *ti,
+		struct swapz_dm *ctx, struct swapz_bio_ref *entry)
+{
+	lockdep_assert_held(&ctx->queue_lock);
+	/* There is no core-owned retained candidate in the frozen tree.
+	 * Refusal is not a BIO error or REQUEUE. No reference is acquired,
+	 * no source bytes are consumed, and normal preparation stays intact.
+	 */
+	(void)swapz_round088_try_claim_locked(ti, ctx, entry, NULL, NULL);
+	list_add_tail(&entry->list, &ctx->incoming);
+}
+#endif /* SWAPZ_ROUND088_SELECTED_DM_CANDIDATE_TEST */
+
 static int swapz_map(struct dm_target *ti, struct bio *bio)
 {
 	struct swapz_dm *ctx = ti->private;
@@ -14168,7 +14273,11 @@ static int swapz_map(struct dm_target *ti, struct bio *bio)
 		entry->admitted_ns = ktime_get_ns();
 		entry->lane_admitted_ns = entry->admitted_ns;
 	}
+#if defined(SWAPZ_ROUND088_SELECTED_DM_CANDIDATE_TEST)
+	swapz_round088_enqueue_locked(ti, ctx, entry);
+#else
 	list_add_tail(&entry->list, &ctx->incoming);
+#endif
 #if defined(SWAPZ_ROUND052_DM_INTERNAL_ONE_SHOT_TEST)
 /* ROUND052_DM_INTERNAL_MAP_ACCEPTED_START */
 	/*

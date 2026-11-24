@@ -1,0 +1,55 @@
+name: Round088 selected-DM dormant admission host
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/phase-a-round088-selected-dm-admission-host.yml'
+      - 'tests/tools/round088-selected-dm-admission-verify.py'
+      - 'tests/tools/round088-original-dm-selected-clone.patch'
+permissions:
+  contents: read
+jobs:
+  selected-dm-source-host:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 12
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          path: swapz
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Exact source and canonical policy
+        working-directory: swapz
+        env:
+          SWAPZ_PUSH_BEFORE_SHA: ${{ github.event.before }}
+        run: |
+          set -Eeuo pipefail
+          test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
+          test "$(git branch --show-current)" = main
+          test "$(git rev-list --parents -n 1 HEAD | wc -w)" -eq 2
+          test "$(git rev-parse HEAD^)" = "$SWAPZ_PUSH_BEFORE_SHA"
+          test -z "$(git status --porcelain)"
+          git diff --check "$SWAPZ_PUSH_BEFORE_SHA" HEAD
+          python3 -B tests/runtime/native/repository-policy-test.py --enforce
+      - name: Exact target source strict C guard and semantic mutants
+        working-directory: swapz
+        run: |
+          set -Eeuo pipefail
+          python3 -B tests/tools/round088-selected-dm-admission-verify.py
+      - uses: actions/checkout@v4
+        with:
+          repository: torvalds/linux
+          ref: c339f4010dea8b0d754f84ace70cd1b089878ef8
+          path: linux
+          fetch-depth: 1
+          sparse-checkout: drivers/md/dm.c
+          sparse-checkout-cone-mode: false
+          persist-credentials: false
+      - name: Pristine original DM patch applicability only
+        run: |
+          set -Eeuo pipefail
+          test "$(git -C linux rev-parse HEAD)" = c339f4010dea8b0d754f84ace70cd1b089878ef8
+          test "$(git -C linux hash-object drivers/md/dm.c)" = 1881d86111fb2e655893ad898cf21b88f0e4e7f3
+          git -C linux apply --check "$GITHUB_WORKSPACE/swapz/tests/tools/round088-original-dm-selected-clone.patch"
+          test -z "$(git -C linux status --porcelain)"
+          echo ROUND088_ORIGINAL_DM_PATCH_APPLICABLE_NOT_COMPILED_AUTH0

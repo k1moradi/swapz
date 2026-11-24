@@ -1,0 +1,63 @@
+{
+  "round": "088",
+  "agent": 3,
+  "task_commit": "dcb65dca9a3c2bd990aedb2829181d0c0e015ce2",
+  "engineering_baseline": "cf5a539913fd169fd71bac72c61bc355285a51f6",
+  "code_commit": null,
+  "code_parent": null,
+  "conclusion": "DORMANT_CANDIDATE_GO_LIVE_NO_GO",
+  "source_publication": "SELF_SHA_PENDING",
+  "original_linux_pin": "c339f4010dea8b0d754f84ace70cd1b089878ef8",
+  "original_dm_blob": "1881d86111fb2e655893ad898cf21b88f0e4e7f3",
+  "target_preimage": "f1cab252cd990190646c82da81378d1563475826",
+  "target_postimage": "cb0b20aa3a52a0a136e2a84e87b838d75a462e28",
+  "original_patch_blob": "e465dacabfb12fc93382143308e7ba1a188f59e6",
+  "guard_git_blob": "8ef8b92b642289bea79924f69d04cbbcf7df154c",
+  "verifier_blob": "7bad66b9eb0df27da16030b519e9cb4d3fff71f2",
+  "local_host": {
+    "status": "PASS",
+    "scope": "EXACT_MARKED_GUARD_FRAGMENT_NOT_FULL_TARGET",
+    "gcc": "14.2.0",
+    "clang": "17.0.0",
+    "scenarios_per_compiler": 17,
+    "compiled_executed_semantic_mutants_rejected_per_compiler": 15,
+    "sanitizers": [
+      "ASan",
+      "UBSan"
+    ],
+    "development_first_error": "GCC unused parameter accepting in mutant; corrected mutant expression; strict rerun passed"
+  },
+  "local_kernel_compile": {
+    "status": "NOT_RUN",
+    "first_error": "git ls-remote failed DNS github.com; no pinned full source tree"
+  },
+  "original_patch_application": {
+    "status": "NOT_RUN_ON_ORIGINAL_LOCALLY",
+    "context_hunk_sanity": "PASS"
+  },
+  "github_ci": {
+    "status": "NOT_SCHEDULED",
+    "run_id": null,
+    "jobs": [],
+    "first_error": null
+  },
+  "native": {
+    "status": "NOT_RUN_BY_CONTRACT",
+    "json": null,
+    "ktap": null
+  },
+  "first_integration_blocker": "NO_QUEUE_LOCK_COMPATIBLE_BROKER_CLAIM_REVOCATION_AND_RETAINED_CORE_CARRIER",
+  "candidate_claimed": false,
+  "source_mapped_authenticated": false,
+  "phase_a": "BLOCKED",
+  "direct_compressed_handoff": "DISABLED",
+  "forced_raw_bypass": "DISABLED",
+  "import_active": 0,
+  "normal_raw_4096": "FULL_ORIGINAL_UNCOMPRESSED_4096",
+  "physical_mutation": false,
+  "privileged_tests": false,
+  "loaded_kernel_tests": false,
+  "vm_tests": false,
+  "actual_lower_durable_write": false,
+  "actual_upper_ack": false
+}
