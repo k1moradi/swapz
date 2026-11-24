@@ -1,6 +1,6 @@
 # Round082 Agent7 — original LZO1X host Git ancestry preflight
 
-**Status: NEW SOURCE CI NOT YET OBSERVED; not qualified.** Task `9acefae6a1727123a218a7b728e44c7434f1eed2`, [official #200 ROUND_OPEN](https://github.com/k1moradi/swapz/issues/200#issuecomment-7118124463). Exclusive workflow-only lease; no Agent10/11 changes or dependency.
+**Status: COMPLETED SUCCESS — exact-source host-only qualification.** Task `9acefae6a1727123a218a7b728e44c7434f1eed2`, [official #200 ROUND_OPEN](https://github.com/k1moradi/swapz/issues/200#issuecomment-7118124463). Exclusive workflow-only lease; no Agent10/11 changes or dependency.
 
 ## Actual preceding source outcome
 
@@ -18,7 +18,7 @@ New workflow blob `d4783b8251d1a0e29cdeb2625c7e46bd7e449d39` (old `a2d62c735ba06
 
 ## New exact-source CI
 
-One changed-source [host workflow](https://github.com/k1moradi/swapz/actions/workflows/phase-a-round080-original-lzo1x-independent-decoder-host-noauth.yml). Exact new commit/run/job to be registered after publication; no new positive execution or mutants verified yet. Required GCC and Clang baselines plus 18 compiled AND executed semantic mutants each, strict unchanged ASan+UBSan, full workflow success. Original native NOT_RUN Agent7 host-only.
+One changed-source [host workflow](https://github.com/k1moradi/swapz/actions/workflows/phase-a-round080-original-lzo1x-independent-decoder-host-noauth.yml). Exact source `28fd042a0ed2090db463c93ac788f8e20ef08511`, sole parent `9acefae6a1727123a218a7b728e44c7434f1eed2`. [Run 45305819185/job 138149283776](https://github.com/k1moradi/swapz/actions/runs/45305819185/job/138149283776) completed SUCCESS. All preflight, compiler/mutation, post-test clean and evidence upload steps succeeded. Actual job log: GCC C2x ASan+UBSan baseline PASS 388 directed checks and 18/18 independently compiled/executed semantic mutant kills; Clang C23 ASan+UBSan baseline PASS 292 directed checks and 18/18 independently compiled/executed semantic mutant kills. Total 36/36; no first error. Directed-check counts may vary with reader-thread scheduling; mutation counts and baseline outcome are fixed. [Uploaded host artifact 14880847352](https://github.com/k1moradi/swapz/actions/runs/45305819185/artifacts/14880847352), containing host JSON, KTAP and bounded log. This is not native original Linux KTAP qualification. Original native NOT_RUN Agent7 host-only.
 
 ## Frozen safety
 

@@ -2,12 +2,12 @@
   "round": "082",
   "agent": 7,
   "task_sha": "9acefae6a1727123a218a7b728e44c7434f1eed2",
-  "status": "PENDING_SOURCE_CI_REGISTRATION",
-  "conclusion": null,
-  "tested_commit": null,
-  "source_parent": null,
-  "run_id": null,
-  "job_id": null,
+  "status": "COMPLETED_SUCCESS_HOST_ONLY",
+  "conclusion": "success",
+  "tested_commit": "28fd042a0ed2090db463c93ac788f8e20ef08511",
+  "source_parent": "9acefae6a1727123a218a7b728e44c7434f1eed2",
+  "run_id": 45305819185,
+  "job_id": 138149283776,
   "first_error": null,
   "previous_round081": {
     "source": "7a22c0ec3ec2ca56ada6a35a6ad6a670a54aacb8",
@@ -67,18 +67,22 @@
   "workflow_url": "https://github.com/k1moradi/swapz/actions/workflows/phase-a-round080-original-lzo1x-independent-decoder-host-noauth.yml",
   "planned_semantic_mutants_per_compiler": 18,
   "actual_gcc": {
-    "baseline": "PENDING",
-    "mutants_compiled": 0,
-    "mutants_executed": 0,
-    "semantic_kills": 0
+    "baseline": "PASS",
+    "standard": "c2x",
+    "directed_checks": 388,
+    "mutants_compiled": 18,
+    "mutants_executed": 18,
+    "semantic_kills": 18
   },
   "actual_clang": {
-    "baseline": "PENDING",
-    "mutants_compiled": 0,
-    "mutants_executed": 0,
-    "semantic_kills": 0
+    "baseline": "PASS",
+    "standard": "c23",
+    "directed_checks": 292,
+    "mutants_compiled": 18,
+    "mutants_executed": 18,
+    "semantic_kills": 18
   },
-  "positive_original_lzo1x_product_decode": "PENDING",
+  "positive_original_lzo1x_product_decode": "PASS_GCC_CLANG_HOST_ONLY",
   "original_linux_native": "NOT_RUN_HOST_ONLY",
   "source_mapped_authenticated": 0,
   "phase_a": "BLOCKED",
@@ -92,5 +96,18 @@
   "second_reclaimer": false,
   "recompression": false,
   "swapspace2_first_physical_bytes_protected": 4096,
-  "volatile_map_bytes": 20
+  "volatile_map_bytes": 20,
+  "run_url": "https://github.com/k1moradi/swapz/actions/runs/45305819185",
+  "job_url": "https://github.com/k1moradi/swapz/actions/runs/45305819185/job/138149283776",
+  "source_ancestry_whitespace_preflight": "PASS",
+  "post_test_clean": "PASS",
+  "artifact_upload": "PASS",
+  "host_artifact": {
+    "id": 14880847352,
+    "name": "round080-agent7-original-lzo-host",
+    "size_bytes": 2176,
+    "url": "https://github.com/k1moradi/swapz/actions/runs/45305819185/artifacts/14880847352"
+  },
+  "counts_are_verified_as_of": "terminal_run_job_logs",
+  "actual_semantic_mutants_compiled_executed_killed_total": 36
 }
