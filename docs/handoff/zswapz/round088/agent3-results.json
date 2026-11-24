@@ -3,10 +3,10 @@
   "agent": 3,
   "task_commit": "dcb65dca9a3c2bd990aedb2829181d0c0e015ce2",
   "engineering_baseline": "cf5a539913fd169fd71bac72c61bc355285a51f6",
-  "code_commit": null,
-  "code_parent": null,
+  "code_commit": "6d7b8e2e8af916214a1867d701a7c9f176da9a0f",
+  "code_parent": "b9765d29081fa1c3a09ba0f071112528a0677738",
   "conclusion": "DORMANT_CANDIDATE_GO_LIVE_NO_GO",
-  "source_publication": "SELF_SHA_PENDING",
+  "source_publication": "VERIFIED_MAIN_SINGLE_PARENT_NONFORCE",
   "original_linux_pin": "c339f4010dea8b0d754f84ace70cd1b089878ef8",
   "original_dm_blob": "1881d86111fb2e655893ad898cf21b88f0e4e7f3",
   "target_preimage": "f1cab252cd990190646c82da81378d1563475826",
@@ -36,9 +36,19 @@
     "context_hunk_sanity": "PASS"
   },
   "github_ci": {
-    "status": "NOT_SCHEDULED",
-    "run_id": null,
-    "jobs": [],
+    "status": "QUEUED",
+    "run_id": 45458753262,
+    "workflow_url": "https://github.com/k1moradi/swapz/actions/runs/45458753262",
+    "head_sha": "6d7b8e2e8af916214a1867d701a7c9f176da9a0f",
+    "jobs": [
+      {
+        "id": 138675229125,
+        "name": "selected-dm-source-host",
+        "status": "QUEUED",
+        "conclusion": null,
+        "url": "https://github.com/k1moradi/swapz/actions/runs/45458753262/job/138675229125"
+      }
+    ],
     "first_error": null
   },
   "native": {
@@ -59,5 +69,12 @@
   "loaded_kernel_tests": false,
   "vm_tests": false,
   "actual_lower_durable_write": false,
-  "actual_upper_ack": false
+  "actual_upper_ack": false,
+  "local_preflight": {
+    "normal_source_restoration": "EXACT",
+    "standards_literal_prefix": true,
+    "new_whitespace": "CLEAN_GITHUB_DIFF_INSPECTION",
+    "full_repository_policy": "NOT_RUN_LOCALLY",
+    "exact_git_diff_check": "NOT_RUN_LOCALLY"
+  }
 }
