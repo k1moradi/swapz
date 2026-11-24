@@ -20148,3 +20148,10 @@ lower durability or upper ACK in this component. Linux MM/zswap alone owns
 compressed RAM/natural eviction; swapz disk packing/GC only, no recompression
 of accepted original bytes. RAW_4096 is complete original uncompressed page.
 SOURCE_MAPPED_AUTHENTICATED=0, PHASE_A=BLOCKED, direct/forced RAW/import OFF.
+
+
+## Round084 Agent10 — pinned compressor/store credential seam (AUTH0)
+
+For the new isolated original-MM producer foundation, require exact source SHA, single parent, clean tracked/untracked checkout and diff check before compilation. Verify the pristine pinned original zswap, zsmalloc, crypto driver, request/CRC/SHA headers and compressor implementation blobs, plus unchanged product codec/authority/engine/target pins. Apply only a single-file gated scratch-stage patch after all exact anchors and negative staging checks; independently recompute the full postimage from the pristine Git object, compare actual bytes and record Git blob plus SHA256 before build. A failed stage must leave the original target unchanged.
+
+Execute the actual staged credential helper under GCC C2x and Clang C23 (supported spelling), strict Werror and ASan/UBSan. Each semantic mutant must independently compile and execute, rejected by an explicit behavioral assertion, not a compiler or sanitizer failure. Verify actual selected driver/name, bounded typed profile, separate 3568/4095 ceilings, immutable bytes, original-page SHA256 and compressed CRC32C, sequence exhaustion, stale identity and optional refusal/cleanup. Only after stage and host success may one pinned original UML build execute the new compressor suite, retaining real JSON and raw KTAP with exact case names and first-error artifacts. A successful real crypto/zsmalloc compression with a fixture-owned record and test-created XArray is not execution of live zswap_store_page, selected DM, or source authentication. No normal zswap_entry growth, live swap, real reclaim/physical trial, production wiring or repeated reader suite. Phase A BLOCKED; all activation gates OFF.
