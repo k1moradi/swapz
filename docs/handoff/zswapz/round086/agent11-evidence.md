@@ -64,3 +64,7 @@ Historical R084 host evidence preserved. The six registered cases and successful
 
 ## Agent1 terminal reconciliation — R087
 Exact job 138636485096 FAILED at boot after real build/symbol verification. Artifact 14947585659 inspected: 'SMP is not supported with PTRACE userspace.' zero cases, one error. Kernel SHA256 6ad838ec6b13787abd17078c2f02e274fecbbbc5d5d70e8a9ec6f5b31b73c5e6; no successful boot or adapter runtime qualification. R087 #205 QEMU TCG corrective lane.
+
+
+## Corrective R087 qualification accepted
+Actual x86 SMP TCG job 138664150782 PASS six cases, artifact 14950116706 independently inspected. Historical R086 boot failure unchanged. Test-only kernel adapter qualified; no foreign-lock/selected-DM proof.

@@ -134,5 +134,15 @@
   "periodic_monitoring": false,
   "automatic_other_runs_observed": 8,
   "artifact_id": 14947585659,
-  "corrective_round": "087"
+  "corrective_round": "087",
+  "corrective_qualification": {
+    "round": "087",
+    "source": "67a036d89a1a7412a27f9450df549347146e758f",
+    "run": 45455624750,
+    "job": 138664150782,
+    "artifact": 14950116706,
+    "conclusion": "PASS_TEST_ONLY_KERNEL_ADAPTER",
+    "cases": 6,
+    "prior_failure_preserved": true
+  }
 }

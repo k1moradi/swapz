@@ -147,7 +147,7 @@
     "actual_category_location_exit": "PASS",
     "partial_compiler_json": "PASS",
     "artifact_uploaded": "PASS",
-    "artifact_contents_downloaded": false
+    "artifact_contents_downloaded": true
   },
   "automatic_source_run_census": {
     "total": 10,
@@ -165,5 +165,12 @@
     ]
   },
   "evidence_parent": "6ed61d05c45dd0fcee589abb9c88f1976a97e7b9",
-  "next": "Request Agent1 separate lease to stage a narrowly reviewed pinned-upstream correction in isolated original test checkout, record pristine and staged blob hashes; no source changes or unchanged reruns pending authorization."
+  "next": "Request Agent1 separate lease to stage a narrowly reviewed pinned-upstream correction in isolated original test checkout, record pristine and staged blob hashes; no source changes or unchanged reruns pending authorization.",
+  "agent1_authority": {
+    "round": "088",
+    "scope": "ISOLATED_TEST_ONLY_PINNED_LZ4_COMPRESS_C_CORRECTIVE_STAGE",
+    "pristine_blob": "2a397bb2c661d9c2e4a7a67d5f50f06bfd42f1f2",
+    "production_or_upstream_publication": false,
+    "prior_failure_preserved": true
+  }
 }

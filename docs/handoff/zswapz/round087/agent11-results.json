@@ -1,7 +1,7 @@
 {
   "round": "087",
   "agent": 11,
-  "conclusion": "IN_PROGRESS",
+  "conclusion": "PASS_TEST_ONLY_KERNEL_ADAPTER",
   "assignment_sha": "9924c6a88e7f2dcce2b729d4d9263703dd92139f",
   "assignment_parent": "4b4b22358aa061c207c85b0162f64246597b3ca3",
   "tested_source_commit": "67a036d89a1a7412a27f9450df549347146e758f",
@@ -80,13 +80,13 @@
     {
       "id": 138664150782,
       "name": "original-ticket-pinned-smp-qemu-tcg",
-      "status": "in_progress",
-      "conclusion": null,
+      "status": "completed",
+      "conclusion": "success",
       "url": "https://github.com/k1moradi/swapz/actions/runs/45455624750/job/138664150782"
     }
   ],
   "first_error": null,
-  "first_error_scope": "NO_CORRECTED_CI_ERROR_REPORTED_YET",
+  "first_error_scope": "NONE",
   "preflight": {
     "task_ancestry_verified": true,
     "connector_product_blobs_verified": true,
@@ -95,17 +95,17 @@
     "standards_prefix_verified": true,
     "remote_exact_source_single_parent_verified": true,
     "remote_exact_main_source_and_policy": "PASS",
-    "remote_original_checkout": "IN_PROGRESS",
-    "remote_full_blob_hashes": "PENDING",
+    "remote_original_checkout": "PASS",
+    "remote_full_blob_hashes": "PASS",
     "remote_negative_stage_plans": {
       "target": 8,
-      "confirmed": 0
+      "confirmed": 8
     },
     "diagnostic_regressions": {
       "target": 7,
-      "confirmed": 0
+      "confirmed": 7
     },
-    "runner_qemu_preflight": "PENDING",
+    "runner_qemu_preflight": "PASS_TCG_ONLY_TWO_VCPUS_ROOTLESS",
     "local_qemu": "NOT_AVAILABLE",
     "local_github_dns": "FAILED",
     "local_native_execution": "NOT_RUN",
@@ -114,7 +114,7 @@
     ]
   },
   "native": {
-    "status": "PENDING",
+    "status": "PASS_TEST_ONLY_KERNEL_ADAPTER",
     "backend": "x86_64 QEMU TCG thread=multi only",
     "planned_cases": [
       "r086_capacity",
@@ -125,21 +125,38 @@
       "r086_copy_failures"
     ],
     "planned_builds": 1,
-    "confirmed_builds": 0,
-    "confirmed_boots": 0,
-    "confirmed_passed": 0,
-    "actual_counts": null,
-    "actual_online_cpus": null,
-    "actual_contender_holder": null,
-    "actual_kernel_adapter": "UNQUALIFIED_PENDING",
+    "confirmed_builds": 1,
+    "confirmed_boots": 1,
+    "confirmed_passed": 6,
+    "actual_counts": {
+      "tests": 6,
+      "passed": 6,
+      "failed": 0,
+      "skipped": 0,
+      "crashed": 0,
+      "errors": 0
+    },
+    "actual_online_cpus": 2,
+    "actual_contender_holder": {
+      "contender": 0,
+      "holder": 1
+    },
+    "actual_kernel_adapter": true,
     "firmware": "qboot.rom",
-    "qemu_version": null,
-    "firmware_digest": null,
-    "bzimage_sha256": null,
-    "vmlinux_sha256": null,
-    "config_sha256": null,
-    "json_ktap": "PENDING",
-    "actual_selected_dm_claim": false
+    "qemu_version": "8.2.2",
+    "firmware_digest": "324775635733fb9f8a2628a99af288ddae256b29daf253254bb5dea64064e0f0",
+    "bzimage_sha256": "8cf07abf40e31cbf15790368a0af52ef55b95dbdb3d9dde6deafe50a7b776a45",
+    "vmlinux_sha256": "ea4b2de14070f3f7a41412b779691a2a84f4425890f390b795c83506ebcbb121",
+    "config_sha256": "888c590fc0bae40b477fdb1468f16f4a8c8edc2c711a6ace65531cacdf9258ab",
+    "json_ktap": "PASS_6_OF_6",
+    "actual_selected_dm_claim": false,
+    "sizeof": {
+      "broker": 136,
+      "slot": 144,
+      "ref": 32,
+      "key": 120,
+      "index": 4
+    }
   },
   "prior_host_evidence": {
     "round": "084",
@@ -164,5 +181,13 @@
   "actual_upper_ack": false,
   "manual_duplicate_workflow_dispatch": false,
   "periodic_monitoring": false,
-  "automatic_run_census_at_observation": 8
+  "automatic_run_census_at_observation": 8,
+  "artifact_id": 14950116706,
+  "artifact_independently_inspected": true,
+  "automatic_run_census_at_agent1_observation": {
+    "total": 10,
+    "success": 6,
+    "in_progress": 3,
+    "queued": 1
+  }
 }
