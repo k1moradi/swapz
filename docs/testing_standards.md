@@ -20286,3 +20286,26 @@ independent size_t-to-int product narrowing after the pop. The negative
 compile is a warning-scope regression, not one of the 19 runtime mutants.
 Preserve the first exact-source failure and all previous positive and
 negative decoder tests. No source authentication or activation change.
+
+## Round087 Agent7 — exact original decoder sanitizer first-cause retention
+
+Preserve R086 actual GCC baseline and 19 executed kills, but keep its exact
+source FAIL: Clang baseline sanitizer location was discarded, zero Clang
+mutants. No guessed code or upstream repair, sanitizer suppression, altered
+corpus, or system library substitution. One changed-source diagnostic lane
+is justified to recover actual first cause from unchanged pinned objects.
+Retain actual child stderr/stdout on unexpected execution in private
+mode-0600 artifacts; console and JSON expose only bounded known category,
+source basename and numeric location, actual child exit, compiler and stage.
+Unknown location stays unavailable. Emit valid partial compiler results even
+on baseline failure, retaining already completed baseline/profiles, separate
+mutant compile/execute/semantic-kill counts and exact kill identities.
+A sanitizer report always rejects a semantic mutant even with an assertion
+marker. Before pinned compilation execute real controlled UBSan failures
+with GCC/Clang, ordinary failures, correct named kills and mixed diagnostic
+negative, verify no false kill and private retention. Do not credit those
+controls as candidate semantic mutations. Preserve actual original pins,
+candidate/fixture, strict flags, warning-wrapper scope and all 19 anchors.
+After actual root cause, correct only proven owned defect; if shared source
+or pristine upstream must change, report and obtain separate authority.
+AUTH0, Phase A BLOCKED, direct/forced RAW/import OFF; no live or physical I/O.

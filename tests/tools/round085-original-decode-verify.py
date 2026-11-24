@@ -2,7 +2,7 @@
 """Exact pinned original Linux LZO1X/raw LZ4 + dormant typed decoder HOST ONLY.
 
 Run from a clean exact source snapshot:
-  python3 -B tests/tools/round085-original-decode-verify.py --linux-root /path/to/pin
+  python3 -B tests/tools/round085-original-decode-verify.py --linux-root /path/to/pin --evidence-dir /private/new-directory
 No network, native build, device access or fake durability/ACK. The runner
 uses exact upstream byte blobs and the existing R080 host compiler helpers,
 not the old R080 mutation suite. Original GNU11 objects get the same narrow
@@ -12,6 +12,8 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
+import subprocess
 from pathlib import Path
 import re
 import runpy
@@ -161,12 +163,120 @@ def build_shim(linux: Path, workspace: Path, helpers: dict) -> Path:
     return shim
 
 
-def execute(compiler: str, linux: Path, workspace: Path, helpers: dict) -> dict:
+def runtime_failure(execution, expected):
+    """Classify actual child output before accepting any semantic kill."""
+    stderr = execution.stderr
+    sanitizer = None
+    category = "unknown"
+    for line in stderr.splitlines():
+        if "runtime error:" in line or "UndefinedBehaviorSanitizer" in line:
+            sanitizer = "UBSan"
+            for reason in ("applying zero offset to null pointer", "applying non-zero offset to null pointer",
+                           "pointer index expression", "addition of unsigned offset", "subtraction of unsigned offset",
+                           "signed integer overflow", "division by zero", "shift exponent", "left shift",
+                           "misaligned address", "out of bounds", "null pointer", "insufficient space"):
+                if reason in line:
+                    category = reason
+                    break
+            break
+        if "AddressSanitizer" in line or "LeakSanitizer" in line:
+            sanitizer = "LSan" if "LeakSanitizer" in line else "ASan"
+            for reason in ("heap-buffer-overflow", "stack-buffer-overflow", "global-buffer-overflow",
+                           "stack-use-after-return", "stack-use-after-scope", "heap-use-after-free",
+                           "double-free", "SEGV", "DEADLYSIGNAL", "detected memory leaks"):
+                if reason in line:
+                    category = reason
+                    break
+            break
+    if sanitizer:
+        # Only known source basenames and numeric locations can reach console/JSON.
+        names = ("lzo1x_compress.c", "lzo1x_compress_safe.c", "lzo1x_decompress_safe.c",
+                 "lz4_compress.c", "lz4_decompress.c", "lz4defs.h", "lzodefs.h", "lz4.h", "lzo.h",
+                 "unaligned.h", "kernel.h", "bitops.h", "codec.c", "codec.h", "zswap-import-codec.h",
+                 "zswap-import-decoder-owner.c", "zswap-import-decoder-owner.h", "zswap-original-decode.h",
+                 "round085-original-decode.c", "original-compressor.c", "diagnostic-probe.c")
+        pattern = r"(?:^|[/\s])(" + "|".join(map(re.escape, names)) + r"|case-[0-9]{2}\.c):(\d{1,8})(?::(\d{1,5}))?"
+        match = re.search(pattern, stderr, re.M)
+        location = ":".join(part for part in match.groups() if part) if match else "unavailable"
+        return {"kind": "sanitizer", "sanitizer": sanitizer, "category": category,
+                "location": location, "exit": execution.returncode}
+    if expected is None:
+        if execution.returncode == 0 and not stderr:
+            return None
+    elif execution.returncode == 1 and not execution.stdout and stderr == f"FIRST_ERROR {expected}\n":
+        return None
+    return {"kind": "unexpected_execution", "exit": execution.returncode,
+            "location": "unavailable"}
+
+
+def record_execution(state, execution, expected):
+    if expected is not None:
+        state["mutants_executed"] += 1
+    failure = runtime_failure(execution, expected)
+    if failure is not None:
+        if expected is None:
+            state["baseline"] = "FAIL"
+        return failure
+    if expected is not None:
+        state["mutants"].append(expected)
+        state["mutants_compiled_executed_killed"] = len(state["mutants"])
+    return None
+
+
+def retain_private(evidence, name, value):
+    # Never print the raw child diagnostic. Exclusive private artifact file.
+    with os.fdopen(os.open(evidence / name, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600), "w") as stream:
+        stream.write(value)
+
+
+def diagnostic_regression():
+    """Real UBSan child, ordinary child failure, exact kill, mixed failure."""
+    with tempfile.TemporaryDirectory(prefix="swapz-r087-diagnostic-") as temporary:
+        directory = Path(temporary)
+        source = directory / "diagnostic-probe.c"
+        source.write_text("int main(void) { volatile int zero = 0; return 1 / zero; }\n")
+        for compiler in ("gcc", "clang"):
+            executable = directory / compiler
+            compiled = subprocess.run([compiler, "-std=c2x", "-Wall", "-Wextra", "-Werror",
+                                       "-fsanitize=address,undefined", "-fno-sanitize-recover=all",
+                                       "-fno-pie", "-no-pie", str(source), "-o", str(executable)],
+                                      capture_output=True, text=True, timeout=30)
+            require(compiled.returncode == 0 and not compiled.stderr, f"{compiler} diagnostic probe compile")
+            actual = subprocess.run([str(executable)], capture_output=True, text=True, timeout=30)
+            state = {"baseline": "PENDING", "mutants_executed": 0, "mutants": [],
+                     "mutants_compiled_executed_killed": 0}
+            failure = record_execution(state, actual, None)
+            require(failure is not None and failure["kind"] == "sanitizer" and
+                    failure["sanitizer"] == "UBSan" and failure["category"] == "division by zero" and
+                    failure["location"].startswith("diagnostic-probe.c:1") and failure["exit"] != 0 and
+                    state["baseline"] == "FAIL", f"{compiler} real diagnostic classification")
+            ordinary = subprocess.run([sys.executable, "-c", "import sys; sys.stderr.write('private path /tmp/secret\\n'); sys.exit(3)"],
+                                      capture_output=True, text=True, timeout=30)
+            require(record_execution(state, ordinary, "crc")["kind"] == "unexpected_execution",
+                    f"{compiler} ordinary failure classification")
+            exact = subprocess.run([sys.executable, "-c", "import sys; sys.stderr.write('FIRST_ERROR crc\\n'); sys.exit(1)"],
+                                   capture_output=True, text=True, timeout=30)
+            require(record_execution(state, exact, "crc") is None, f"{compiler} exact kill")
+            mixed = subprocess.CompletedProcess([], 1, "", exact.stderr + actual.stderr)
+            require(record_execution(state, mixed, "sha")["kind"] == "sanitizer" and
+                    state["mutants_executed"] == 3 and state["mutants"] == ["crc"] and
+                    state["mutants_compiled_executed_killed"] == 1, f"{compiler} sanitizer not counted as kill")
+            retain_private(directory, compiler + ".stderr", actual.stderr)
+            require((directory / (compiler + ".stderr")).stat().st_mode & 0o777 == 0o600 and
+                    (directory / (compiler + ".stderr")).read_text() == actual.stderr,
+                    f"{compiler} private diagnostic retention")
+            print(f"PASS {compiler} diagnostic regression: real UBSan, ordinary failure, exact kill, mixed failure, private retention", file=sys.stderr)
+
+
+def execute(compiler: str, linux: Path, workspace: Path, helpers: dict, state: dict, evidence: Path) -> None:
+    state["stage"] = "compiler-standard"
     standard = helpers["compiler_standard"](compiler)
+    state["standard"] = standard
     compiler_name = Path(compiler).name
     compile_object = helpers["compile_object"]
     checked = helpers["checked"]
     run = helpers["run_command"]
+    state["stage"] = "header-scope"
     shim = build_shim(linux, workspace, helpers)
     includes = ["-I", str(shim), "-I", str(ROOT / "src/kernel")]
     # Prove the exact header compiles and its diagnostic scope ends at the
@@ -191,6 +301,7 @@ def execute(compiler: str, linux: Path, workspace: Path, helpers: dict) -> dict:
     # original warning model; all candidate/product/test TUs use strict C23/C2x.
     for relative in ("lib/lzo/lzo1x_compress_safe.c", "lib/lzo/lzo1x_decompress_safe.c",
                      "lib/lz4/lz4_compress.c", "lib/lz4/lz4_decompress.c"):
+        state["stage"] = "compile-original-" + Path(relative).name
         obj = workspace / (Path(relative).stem + ".o")
         compile_object(compiler, "-std=gnu11", linux / relative, obj,
                        ["-I", str(shim), "-DCONFIG_64BIT=1"], original=True)
@@ -199,49 +310,74 @@ def execute(compiler: str, linux: Path, workspace: Path, helpers: dict) -> dict:
     adapter.write_text(COMPRESS_ADAPTER)
     for source in (ROOT / "src/kernel/codec.c", ROOT / "src/kernel/zswap-import-decoder-owner.c",
                    FIXTURE, adapter):
+        state["stage"] = "compile-product-" + source.name
         obj = workspace / (source.stem + ".o")
         compile_object(compiler, standard, source, obj, includes)
         fixed.append(obj)
     original = CANDIDATE.read_text()
     cases = [("baseline", original)] + [(name, original.replace(old, new, 1)) for name, old, new in MUTANTS]
-    profiles = []
-    killed = []
+    profiles = state["profiles"]
+    killed = state["mutants"]
     for index, (name, source) in enumerate(cases):
         unit = workspace / f"case-{index:02d}.c"
         unit.write_text(source)
         obj = unit.with_suffix(".o")
         executable = unit.with_suffix("")
+        state["stage"] = "compile-" + name
         compile_object(compiler, standard, unit, obj, includes)
+        if index:
+            state["mutants_compiled"] += 1
+        state["stage"] = "link-" + name
         checked([compiler, "-fsanitize=address,undefined", "-fno-pie", "-no-pie", str(obj),
                  *(str(path) for path in fixed), "-pthread", "-lcrypto", "-o", str(executable)], f"link {name}")
+        state["stage"] = "execute-" + name
         execution = run([str(executable)], name, timeout=30)
-        require(not any(token in execution.stderr for token in helpers["SANITIZER"]), f"{name}: sanitizer failure (not a kill)")
+        failure = record_execution(state, execution, name if index else None)
+        if failure is not None:
+            state["first_error"] = failure
+            retain_private(evidence, compiler_name + "-" + name + ".stderr", execution.stderr)
+            retain_private(evidence, compiler_name + "-" + name + ".stdout", execution.stdout)
+            raise RuntimeError("child execution rejected")
         if index == 0:
             match = re.fullmatch(r"PROFILE codec=1 small=(\d+) large=(\d+)\nPROFILE codec=2 small=(\d+) large=(\d+)\nPASS round085-original-decode AUTH=0 PHASE_A=BLOCKED\n", execution.stdout)
-            require(execution.returncode == 0 and not execution.stderr and match is not None,
-                    f"baseline: {helpers['first_diagnostic'](execution)}")
+            if match is None:
+                state["first_error"] = {"kind": "invalid_baseline_output", "exit": execution.returncode}
+                retain_private(evidence, compiler_name + "-baseline.stdout", execution.stdout)
+                raise RuntimeError("invalid baseline output")
             for codec, offset in ((1, 1), (2, 3)):
                 small, large = int(match.group(offset)), int(match.group(offset + 1))
                 require(0 < small <= 3568 < large <= 4095, "invalid real corpus lengths")
                 profiles.append({"codec": codec, "small": small, "large": large})
+            state["baseline"] = "PASS"
             print(f"PASS {compiler_name} {standard} actual pinned original LZ4/LZO1X + product baseline "
                   f"LZ4={profiles[0]['small']}/{profiles[0]['large']} "
                   f"LZO1X={profiles[1]['small']}/{profiles[1]['large']}", file=sys.stderr, flush=True)
         else:
-            require(execution.returncode == 1 and not execution.stdout and execution.stderr == f"FIRST_ERROR {name}\n",
-                    f"{name}: survived/wrong first error: {helpers['first_diagnostic'](execution)}")
-            killed.append(name)
             print(f"PASS {compiler_name} executed_semantic_mutant={name} count={len(killed)}/{len(MUTANTS)}",
                   file=sys.stderr, flush=True)
-    return {"standard": standard, "baseline": "PASS", "profiles": profiles,
-            "mutants_compiled_executed_killed": len(killed), "mutants": killed}
+    state["stage"] = "complete"
 
 
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--linux-root", type=Path, required=True)
+    parser.add_argument("--linux-root", type=Path)
     parser.add_argument("--preflight-only", action="store_true")
+    parser.add_argument("--diagnostic-regression", action="store_true")
+    parser.add_argument("--evidence-dir", type=Path)
     args = parser.parse_args()
+    os.umask(0o077)
+    if args.diagnostic_regression:
+        diagnostic_regression()
+        return 0
+    if args.linux_root is None or (not args.preflight_only and args.evidence_dir is None):
+        parser.error("linux-root and (for qualification) evidence-dir are required")
+    results = {name: {"baseline": "NOT_RUN", "stage": "not-started", "profiles": [],
+                      "mutants_compiled": 0, "mutants_executed": 0,
+                      "mutants_compiled_executed_killed": 0, "mutants": [], "first_error": None}
+               for name in ("gcc", "clang")}
+    report = {"status": "FAIL", "linux_pin": PIN, "compilers": results,
+              "source_mapped_authenticated": 0, "phase_a": "BLOCKED", "import_active": 0}
+    active = None
     try:
         linux = args.linux_root.resolve()
         helpers = verify_inputs(linux)
@@ -249,23 +385,46 @@ def main() -> int:
             print(f"PASS original/product whole blobs={len(ORIGINAL) + len(PRODUCT)}; "
                   f"candidate unique semantic anchors={len(MUTANTS)}")
             return 0
-        results = {}
+        evidence = args.evidence_dir.resolve()
+        evidence.mkdir(mode=0o700, parents=True, exist_ok=True)
+        report["candidate_blobs"] = {str(path.relative_to(ROOT)): git_blob(path.read_bytes())
+                                     for path in (CANDIDATE, CANDIDATE.with_suffix(".h"), FIXTURE, Path(__file__).resolve())}
         with tempfile.TemporaryDirectory(prefix="swapz-round085-original-decode-") as temporary:
             for name in ("gcc", "clang"):
+                active = name
                 compiler = shutil.which(name)
                 require(compiler is not None, f"missing compiler {name}")
                 workspace = Path(temporary) / name
                 workspace.mkdir()
-                results[name] = execute(compiler, linux, workspace, helpers)
-        print(json.dumps({"status": "PASS_HOST_ONLY", "linux_pin": PIN,
-                          "candidate_blobs": {str(path.relative_to(ROOT)): git_blob(path.read_bytes())
-                              for path in (CANDIDATE, CANDIDATE.with_suffix(".h"), FIXTURE, Path(__file__).resolve())},
-                          "compilers": results, "source_mapped_authenticated": 0,
-                          "phase_a": "BLOCKED", "import_active": 0}, indent=2))
+                execute(compiler, linux, workspace, helpers, results[name], evidence)
+        report["status"] = "PASS_HOST_ONLY"
         return 0
-    except (RuntimeError, OSError, ValueError) as error:
-        print(f"FIRST_ERROR round085-agent7 {error}", file=sys.stderr)
+    except (RuntimeError, OSError, ValueError, subprocess.TimeoutExpired) as error:
+        state = results[active] if active else None
+        failure = state["first_error"] if state else None
+        if failure is None:
+            failure = {"kind": type(error).__name__, "location": "unavailable"}
+            if state is not None:
+                state["first_error"] = failure
+        if state is not None and state["stage"] == "execute-baseline" and state["baseline"] != "PASS":
+            state["baseline"] = "FAIL"
+        if args.evidence_dir is not None:
+            try:
+                args.evidence_dir.resolve().mkdir(mode=0o700, parents=True, exist_ok=True)
+                retain_private(args.evidence_dir.resolve(), "exception.stderr", str(error))
+                if isinstance(error, subprocess.TimeoutExpired):
+                    for label, value in (("stdout", error.stdout), ("stderr", error.stderr)):
+                        if value:
+                            retain_private(args.evidence_dir.resolve(), "timeout." + label,
+                                           value.decode(errors="replace") if isinstance(value, bytes) else value)
+            except OSError:
+                print("FIRST_ERROR_RETENTION_FAILED private artifact unavailable", file=sys.stderr)
+        report["first_error"] = {"compiler": active, "stage": state["stage"] if state else "preflight", **failure}
+        print("FIRST_ERROR round085-agent7 " + json.dumps(report["first_error"], sort_keys=True), file=sys.stderr)
         return 1
+    finally:
+        if not args.preflight_only:
+            print(json.dumps(report, indent=2))
 
 
 if __name__ == "__main__":

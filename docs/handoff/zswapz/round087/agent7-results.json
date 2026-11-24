@@ -1,0 +1,86 @@
+{
+  "round": "087",
+  "agent": 7,
+  "task_sha": "9924c6a88e7f2dcce2b729d4d9263703dd92139f",
+  "source_parent": "9924c6a88e7f2dcce2b729d4d9263703dd92139f",
+  "tested_commit": null,
+  "status": "DIAGNOSTIC_SOURCE_PENDING_REGISTRATION",
+  "changed_blobs": {
+    "tests/tools/round085-original-decode-verify.py": "8041e4d6fcc269452e1445e8d7e43d77f3d6a7f8",
+    ".github/workflows/phase-a-round086-original-typed-decode-host-noauth.yml": "f333d38fc156ca38f513437c8ccd65f34741ab6c",
+    "docs/testing_standards.md": "5ee4b0e3eaf6272e910e6f3ded3750ac2db12860"
+  },
+  "original_linux_pin": "c339f4010dea8b0d754f84ace70cd1b089878ef8",
+  "original_blobs": {
+    "mm/zswap.c": "ae19e301fced7e357a4c7587dfdd6abb890b9163",
+    "crypto/lzo.c": "d43242b24b4e831e7e0d26f38d2f263877d5748e",
+    "crypto/lz4.c": "57b713516aefac823f2af9481c828027b42490dd",
+    "include/linux/lzo.h": "4d30e3624acd237290dbfeaefdb9c710e4f85f56",
+    "lib/lzo/lzo1x_compress.c": "01586af2347f5e2f8c8528b94e02622fc8b262c8",
+    "lib/lzo/lzo1x_compress_safe.c": "371c9f849492814afed88a443acb2262dcf35dfe",
+    "lib/lzo/lzo1x_decompress_safe.c": "318abb82c63d2c27c0d5497b7cf4e21d87d13154",
+    "lib/lzo/lzodefs.h": "b60851fcf6ce54b57e87d04e917deaa2b6cf62cc",
+    "include/linux/lz4.h": "ad6042a718b5428792b795db7a8d4ad44c24a985",
+    "lib/lz4/lz4_compress.c": "2a397bb2c661d9c2e4a7a67d5f50f06bfd42f1f2",
+    "lib/lz4/lz4_decompress.c": "3a2cd9acada4a09ef70a344090d48167c46088a1",
+    "lib/lz4/lz4defs.h": "17277ec16919f3a554afc7d91ad515c493d745ca"
+  },
+  "product_blobs": {
+    "tests/tools/round080-original-lzo1x-independent-decoder-verify.py": "c2bd6a4d35bc8261e94743f92166b7c436d3c1f2",
+    "src/kernel/codec.h": "e89d316b9cf49f82df0b77648c1be1731607987d",
+    "src/kernel/codec.c": "d920dcaac6f2b7de1334d4133770bd649719c66d",
+    "src/kernel/zswap-import-codec.h": "0d888fe4c74115ab2388f1df1dc0b86ae4b9b6c6",
+    "src/kernel/zswap-import-decoder-owner.h": "e1b4b903567070e2307f7d05f8e48c14e0bb3768",
+    "src/kernel/zswap-import-decoder-owner.c": "8e0c8f4d2085af7f2e17df412f3a1af654063571"
+  },
+  "unchanged_candidate_blobs": {
+    "c": "eb1cd7f90d5edade9640e1ffe9dac3c8fe774644",
+    "h": "a247d1aaf9865de71f97cd980be806b8d8c7c20e",
+    "fixture": "1de6f01fca08637c2877eeb396dca81a0e7efd02"
+  },
+  "historical_r086": {
+    "source": "c5d5951a3842418fa0b52acb4d6cc791601b6038",
+    "parent": "3f4b9cc8eb52dd971cbe28a586f0f46b21808956",
+    "run": 45449747704,
+    "job": 138643232323,
+    "artifact": 14947807032,
+    "conclusion": "failure",
+    "gcc": {
+      "baseline": "PASS",
+      "mutants_killed": 19
+    },
+    "clang": {
+      "baseline": "FAIL_SANITIZER",
+      "mutants_killed": 0
+    },
+    "first_error": "baseline: sanitizer failure (not a kill)",
+    "location": "unavailable"
+  },
+  "local_regression": {
+    "gcc": "PASS",
+    "clang": "PASS",
+    "scope": "actual controlled UBSan child, ordinary child failure, exact assertion kill, mixed failure rejection, private retention",
+    "tested_block_git_blob": "a5dc79e3b6b5ef38983c82de13f1063ce6cc1559",
+    "exact_pinned_compile": "NOT_RUN_DNS_FAILURE"
+  },
+  "actual_gcc": {
+    "baseline": "PENDING",
+    "mutants_compiled": 0,
+    "mutants_executed": 0,
+    "kills": 0
+  },
+  "actual_clang": {
+    "baseline": "PENDING",
+    "mutants_compiled": 0,
+    "mutants_executed": 0,
+    "kills": 0
+  },
+  "first_error": null,
+  "root_cause": "UNKNOWN_PENDING_ACTUAL_DIAGNOSTIC",
+  "source_mapped_authenticated": 0,
+  "phase_a": "BLOCKED",
+  "direct_handoff": false,
+  "forced_raw_bypass": false,
+  "import_active": false,
+  "native": "NOT_RUN_HOST_ONLY"
+}
