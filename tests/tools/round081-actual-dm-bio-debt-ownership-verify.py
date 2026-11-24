@@ -11,6 +11,7 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
+import re
 from pathlib import Path
 import shutil
 import subprocess
@@ -108,6 +109,50 @@ def function_body(source: str, signature: str) -> str:
     raise RuntimeError('unbalanced source function ' + signature)
 
 
+def target_feature_anchor(product_source: str) -> None:
+    # The pinned target uses an unparenthesized bitwise-OR expression.
+    # Scope the check to its unique initializer, never an unrelated target.
+    target = function_body(product_source, 'static struct target_type swapz_target =')
+    require(len(re.findall(r'\.\s*features\b', target)) == 1,
+            'actual swapz_target feature field missing/nonunique')
+    require(re.search(r'(?m)^[ \t]*\.features[ \t]*=[ \t]*DM_TARGET_SINGLETON'
+                      r'[ \t]*\|[ \t]*DM_TARGET_ALWAYS_WRITEABLE[ \t]*,[ \t]*$',
+                      target) is not None, 'actual swapz_target feature expression drift')
+    require(re.search(r'(?m)^[ \t]*\.name[ \t]*=[ \t]*"swapz"[ \t]*,[ \t]*$',
+                      target) is not None and
+            re.search(r'(?m)^[ \t]*\.map[ \t]*=[ \t]*swapz_map[ \t]*,[ \t]*$',
+                      target) is not None, 'actual swapz_target identity drift')
+
+
+def feature_anchor_negatives(product_source: str) -> int:
+    # In-memory parser negatives only; never modify or repin the source files.
+    line = '\t.features = DM_TARGET_SINGLETON | DM_TARGET_ALWAYS_WRITEABLE,'
+    declaration = 'static struct target_type swapz_target ='
+    require(product_source.count(line) == 1, 'pinned feature negative anchor drift')
+    cases = (
+        ('nowait', product_source.replace(line, line[:-1] + ' | DM_TARGET_NOWAIT,', 1)),
+        ('extra-feature', product_source.replace(
+            line, line[:-1] + ' | DM_TARGET_PASSES_INTEGRITY,', 1)),
+        ('duplicate-field', product_source.replace(line, line + '\n' + line, 1)),
+        ('wrong-initializer', product_source.replace(
+            declaration, 'static struct target_type other_target =', 1)),
+        ('decoy', product_source.replace(line, '', 1) +
+         '\nstatic struct target_type decoy = {\n' + line + '\n};\n'),
+        ('wrong-target-name', product_source.replace(
+            '\t.name = "swapz",', '\t.name = "wrong",', 1)),
+        ('duplicate-initializer', product_source + '\n' +
+         function_body(product_source, declaration) + ';\n'),
+    )
+    for name, changed in cases:
+        require(changed != product_source, f'feature negative {name} did not change source')
+        try:
+            target_feature_anchor(changed)
+        except RuntimeError:
+            continue
+        raise RuntimeError(f'feature negative {name} was accepted')
+    return len(cases)
+
+
 def compiled_fixture(dm_source: str, header_source: str, product_source: str) -> str:
     original_map = function_body(dm_source, 'static void __map_bio(struct bio *clone)')
     product_map = function_body(product_source, 'static int swapz_map(struct dm_target *ti, struct bio *bio)')
@@ -124,8 +169,7 @@ def compiled_fixture(dm_source: str, header_source: str, product_source: str) ->
         require(fragment in original_map, f'original DM core semantics drift: {fragment}')
     require('DM_TARGET_NOWAIT' in header_source and 'DM_MAPIO_SUBMITTED' in header_source,
             'original DM header feature/API drift')
-    feature = '.features = (DM_TARGET_SINGLETON | DM_TARGET_ALWAYS_WRITEABLE),'
-    require(product_source.count(feature) == 1, 'actual target features drift')
+    target_feature_anchor(product_source)
     anchors = (
         (product_map, 'list_add_tail(&entry->list, &ctx->incoming);'),
         (product_worker, 'list_splice_init(&ctx->incoming, &local);'),
@@ -195,7 +239,8 @@ def verify(original_dm: Path, original_header: Path, output: Path) -> dict:
     header_source = source_bytes(original_header, ORIGINAL_HEADER_BLOB)
     product_source = source_bytes(PRODUCT, PRODUCT_BLOB)
     baseline = compiled_fixture(dm_source, header_source, product_source)
-    require(len(MUTANTS) >= 16, 'insufficient semantic mutants')
+    feature_negatives = feature_anchor_negatives(product_source)
+    require(len(MUTANTS) == 24, 'expected exactly 24 semantic mutants')
     for name, anchor, replacement, _ in MUTANTS:
         require(anchor != replacement and baseline.count(anchor) == 1,
                 f'mutant {name} source anchor missing/nonunique: {anchor}')
@@ -250,6 +295,7 @@ def verify(original_dm: Path, original_header: Path, output: Path) -> dict:
         'legal_queue_full_requeue': 'NOT_PROVEN', 'source_mapped_authenticated': 0,
         'phase_a': 'BLOCKED', 'direct_handoff': 'DISABLED',
         'forced_raw_bypass': 'DISABLED', 'import_active': 0,
+        'feature_anchor_negative_checks': feature_negatives,
         'compilers': compilers,
     }
     output.parent.mkdir(parents=True, exist_ok=True)

@@ -20057,3 +20057,8 @@ durability/upper ACK, native kernel or activation claim. Linux MM/zswap
 alone owns compressed RAM and natural eviction; swapz disk packing/GC
 only. RAW_4096 is the complete ORIGINAL UNCOMPRESSED 4096-byte page.
 Source AUTH0, Phase A BLOCKED, direct/forced RAW/import OFF.
+
+
+### Round082 Agent11 — pinned actual target initializer preflight
+
+Before compiling the existing 24 independent accepted-upper-BIO debt semantic mutants per compiler, verify full pinned original DM core/header and product Git blob identities, unique actual lifecycle fragments and mutation anchors. Scope the feature expression to the unique `swapz_target` initializer: the pristine declaration is unparenthesized `DM_TARGET_SINGLETON | DM_TARGET_ALWAYS_WRITEABLE`. Run in-memory parser negatives for NOWAIT, extra feature, duplicate field/initializer, wrong target name/initializer and misplaced decoy. Reject all before compiler invocation; parser negatives are not executed C semantic kills. Check clean exact main SHA, real single parent, diff whitespace and append-only repository policy before expensive testing. Keep strict GCC/Clang ASan+UBSan flags and host-only model boundary. No production queue cap, arbitrary queue-full REQUEUE, competing reclaim, recompression, native build or activation. SOURCE_MAPPED_AUTHENTICATED=0, Phase A BLOCKED, direct/forced RAW/import OFF.

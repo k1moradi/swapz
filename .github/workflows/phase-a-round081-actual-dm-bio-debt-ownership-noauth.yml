@@ -1,4 +1,4 @@
-name: Round081 Agent11 actual accepted DM BIO debt HOST_ONLY NO_AUTH
+name: Round082 Agent11 actual accepted DM BIO debt HOST_ONLY NO_AUTH
 on:
   push:
     branches: [main]
@@ -18,14 +18,25 @@ jobs:
         with:
           fetch-depth: 0
           persist-credentials: false
-      - name: Verify pinned original Linux and full product source; execute C23 semantic mutants
+      - name: Verify exact main checkout, single parent and whitespace before compilation
         shell: bash
         run: |
           set -Eeuo pipefail
           test "$GITHUB_REF" = refs/heads/main
           test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
           test -z "$(git status --porcelain)"
+          read -r -a ancestry <<< "$(git rev-list --parents -n 1 HEAD)"
+          test "${#ancestry[@]}" -eq 2
+          git rev-parse --verify HEAD^ >/dev/null
           git diff --check HEAD^ HEAD
+      - name: Preserve inherited repository standards source prefix
+        env:
+          SWAPZ_PUSH_BEFORE_SHA: ${{ github.event.before }}
+        run: python3 -B tests/runtime/native/repository-policy-test.py --enforce
+      - name: Verify pinned original Linux and full product source; execute C23 semantic mutants
+        shell: bash
+        run: |
+          set -Eeuo pipefail
           curl --fail --location --silent --show-error --retry 3 --max-time 60 \
             'https://raw.githubusercontent.com/torvalds/linux/c339f4010dea8b0d754f84ace70cd1b089878ef8/drivers/md/dm.c' \
             --output "$RUNNER_TEMP/round081-pinned-dm.c"
@@ -36,10 +47,6 @@ jobs:
             --pinned-dm "$RUNNER_TEMP/round081-pinned-dm.c" \
             --pinned-header "$RUNNER_TEMP/round081-pinned-device-mapper.h" \
             --json round081-evidence/agent11-actual-upper-debt-host.json
-      - name: Preserve inherited repository standards source prefix
-        env:
-          SWAPZ_PUSH_BEFORE_SHA: ${{ github.event.before }}
-        run: python3 -B tests/runtime/native/repository-policy-test.py --enforce
       - name: Upload exact rootless semantic evidence
         if: always()
         uses: actions/upload-artifact@v4
