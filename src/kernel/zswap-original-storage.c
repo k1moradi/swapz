@@ -26,6 +26,44 @@ static int isolated(const struct swapz_authority *authority)
 	       !authority->extent_sequence_delta && !authority->segment_sequence_base;
 }
 
+/* Compare integer address differences, never unrelated C pointers. */
+static int span_valid(const void *pointer, swapz_u64 bytes)
+{
+	return pointer && bytes && bytes - 1U <=
+	       (swapz_u64)(~0UL - (unsigned long)pointer);
+}
+
+static int disjoint(const void *first, swapz_u64 first_bytes,
+		    const void *second, swapz_u64 second_bytes)
+{
+	unsigned long a = (unsigned long)first, b = (unsigned long)second;
+
+	return span_valid(first, first_bytes) && span_valid(second, second_bytes) &&
+	       (a <= b ? (swapz_u64)(b - a) >= first_bytes :
+			 (swapz_u64)(a - b) >= second_bytes);
+}
+
+static int outside_authority(const struct swapz_authority *authority,
+			     const void *pointer, swapz_u64 bytes)
+{
+	return disjoint(pointer, bytes, authority, sizeof(*authority)) &&
+	       disjoint(pointer, bytes, authority->maps,
+			(swapz_u64)authority->logical_pages * sizeof(*authority->maps)) &&
+	       disjoint(pointer, bytes, authority->live_records,
+			(swapz_u64)authority->physical_blocks *
+			sizeof(*authority->live_records)) &&
+	       disjoint(pointer, bytes, authority->extent_classes,
+			authority->physical_blocks);
+}
+
+static int outside_owner(const struct swapz_original_storage *storage,
+			 const void *pointer, swapz_u64 bytes)
+{
+	return storage && storage->disk.authority &&
+	       disjoint(pointer, bytes, storage, sizeof(*storage)) &&
+	       outside_authority(storage->disk.authority, pointer, bytes);
+}
+
 static int ready(const struct swapz_original_storage *storage)
 {
 	return storage && !storage->faulted && !storage->disk.closing &&
@@ -79,7 +117,9 @@ int swapz_original_storage_init(struct swapz_original_storage *storage,
 
 	if (!storage || !isolated(authority) || !ops || !ops->write ||
 	    !ops->flush || !ops->read || !ops->decoder_get || !ops->decoder_put ||
-	    authority->in_flight || authority->batch_pending)
+	    authority->in_flight || authority->batch_pending ||
+	    !outside_authority(authority, storage, sizeof(*storage)) ||
+	    !disjoint(storage, sizeof(*storage), ops, sizeof(*ops)))
 		return -EINVAL;
 	/* The existing dormant owner cannot coexist with valid ordinary maps.
 	 * Reject existing liveness too; no competing ownership domain. */
@@ -197,6 +237,15 @@ int swapz_original_storage_write(struct swapz_original_storage *storage,
 	const struct swapz_authority_import_spec *spec,
 	const struct swapz_original_extent_input *input, swapz_u64 *ticket)
 {
+	if (!ready(storage) ||
+	    !outside_owner(storage, spec, sizeof(*spec)) ||
+	    !outside_owner(storage, input, sizeof(*input)) ||
+	    !outside_owner(storage, ticket, sizeof(*ticket)) ||
+	    !outside_owner(storage, input->bytes, input->bytes_available) ||
+	    !disjoint(ticket, sizeof(*ticket), spec, sizeof(*spec)) ||
+	    !disjoint(ticket, sizeof(*ticket), input, sizeof(*input)) ||
+	    !disjoint(ticket, sizeof(*ticket), input->bytes, input->bytes_available))
+		return -EINVAL;
 	return write_record(storage, spec, input, 0U, ticket);
 }
 
@@ -206,7 +255,7 @@ int swapz_original_storage_pin(struct swapz_original_storage *storage,
 	unsigned int index;
 	int record, error;
 
-	if (!ready(storage) || !pin)
+	if (!ready(storage) || !outside_owner(storage, pin, sizeof(*pin)))
 		return -EINVAL;
 	record = record_index(storage, ticket);
 	if (record < 0 || !storage->decoder[record])
@@ -227,7 +276,7 @@ int swapz_original_storage_pin(struct swapz_original_storage *storage,
 	return 0;
 }
 
-int swapz_original_storage_read(struct swapz_original_storage *storage,
+static int read_record(struct swapz_original_storage *storage,
 	swapz_u64 pin, swapz_u8 *output, swapz_u32 capacity)
 {
 	struct swapz_original_storage_pin *held = find_pin(storage, pin);
@@ -248,6 +297,14 @@ int swapz_original_storage_read(struct swapz_original_storage *storage,
 		return -EIO;
 	return swapz_import_disk_read_pinned(&storage->disk, &held->view,
 		storage->read_image, completed, output, capacity);
+}
+
+int swapz_original_storage_read(struct swapz_original_storage *storage,
+	swapz_u64 pin, swapz_u8 *output, swapz_u32 capacity)
+{
+	if (!outside_owner(storage, output, capacity))
+		return -EINVAL;
+	return read_record(storage, pin, output, capacity);
 }
 
 int swapz_original_storage_put(struct swapz_original_storage *storage,
@@ -276,15 +333,16 @@ int swapz_original_storage_relocate(struct swapz_original_storage *storage,
 	struct swapz_original_extent_input input;
 	int index, error;
 
-	if (!ready(storage) || !held || !ticket)
+	if (!ready(storage) || !held ||
+	    !outside_owner(storage, ticket, sizeof(*ticket)))
 		return -EINVAL;
 	index = record_index(storage, held->view.ticket);
 	if (index < 0 ||
 	    storage->disk.records[index].state != SWAPZ_IMPORT_DISK_OWNED ||
 	    next_epoch <= held->view.spec.gc_epoch)
 		return -ESTALE;
-	error = swapz_original_storage_read(storage, pin, storage->gc_copy,
-					    sizeof(storage->gc_copy));
+	error = read_record(storage, pin, storage->gc_copy,
+			    sizeof(storage->gc_copy));
 	if (error)
 		return error;
 	spec = held->view.spec;

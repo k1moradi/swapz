@@ -20339,3 +20339,12 @@ durable lower adapter remain NO-GO until integrated. Ordinary cap3568,
 RAW_4096 full original uncompressed and map20 unchanged; MM/zswap only
 compressed RAM/natural eviction, swapz disk packing/GC only. AUTH0 Phase A
 BLOCKED direct handoff, forced RAW, import OFF; no new VM or physical test.
+
+Round088 Agent5 follow-up: explicitly reject external input/output aliases
+with the storage object, actual authority and its map/liveness/class arrays.
+Only the private relocation read may use the owner's GC scratch. Validate
+integer address spans without overflow and keep fresh-init/closed lifetime
+contract. Exercise rejected aliased ticket, input, pin and read output.
+Dirty the dedicated staging image before the zero-suffix check so a missing
+seal cannot survive on initially zero-filled storage. These are changed
+source/fixture checks, not an unchanged run; retain the prior exact result.

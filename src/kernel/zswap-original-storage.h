@@ -16,6 +16,9 @@
 /* All calls are serialized by ONE sleepable ordered owner, including put
  * and close. Callbacks must not reenter this owner or mutate its state.
  * Caller owns storage, authority and callback context until successful close.
+ * Init only on fresh storage or after successful close, with disjoint
+ * authority arrays. All external input/output spans must be genuinely
+ * backed, disjoint from storage and authority, and stable during calls.
  * This is a conservative dedicated candidate, NOT a live DM route. The
  * authority must be exclusive, append-only and have no ordinary map traffic,
  * rotating GC, sequence index or segment-accounting sidecars.

@@ -65,6 +65,11 @@ MUTANTS = [
         "no_seal",
         "error = swapz_original_extent_seal(&storage->extent);",
         "error = 0;"
+    ],
+    [
+        "external_read_alias",
+        "if (!outside_owner(storage, output, capacity))",
+        "if (!output || !capacity)"
     ]
 ]
 REPORT = {"compilers": {}, "first_error": None, "phase_a": "BLOCKED",

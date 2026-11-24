@@ -161,10 +161,18 @@ int main(void)
 	CHECK(swapz_original_storage_write(&storage, &value, &in, &ticket) < 0);
 	in = input(&value); in.representation = 0;
 	CHECK(swapz_original_storage_write(&storage, &value, &in, &ticket) < 0);
+	in = input(&value);
+	CHECK(swapz_original_storage_write(&storage, &value, &in,
+					   &storage.next_pin) < 0);
+	in.bytes = storage.gc_copy;
+	CHECK(swapz_original_storage_write(&storage, &value, &in, &ticket) < 0);
 	CHECK(!writes && !leases && !authority.next_block);
 	refuse_decoder = 1;
 	CHECK(store(0, 321, &ticket) < 0 && !writes && !leases);
 	refuse_decoder = 0;
+	/* A clean zero-filled initial image would hide a missing seal.
+	 * Dirty the unused suffix before the actual copy/zero-pad test. */
+	memset(storage.image, 0xa5, sizeof(storage.image));
 	CHECK(!store(0, 3568, &ticket));
 	old = destination;
 	CHECK(leases == 1 && writes == 1 && flushes == 1 && live[old] == 1);
@@ -172,7 +180,12 @@ int main(void)
 	CHECK(!memcmp(media[old], bytes, 3568));
 	for (index = 3568; index < SWAPZ_BLOCK_BYTES; ++index)
 		CHECK(!media[old][index]);
+	CHECK(swapz_original_storage_pin(&storage, ticket, &storage.next_pin) < 0);
 	CHECK(!swapz_original_storage_pin(&storage, ticket, &pin));
+	CHECK(swapz_original_storage_read(&storage, pin, storage.gc_copy,
+					  sizeof(storage.gc_copy)) < 0);
+	CHECK(swapz_original_storage_read(&storage, pin, (swapz_u8 *)maps,
+					  sizeof(maps)) < 0);
 	memset(output, 0xa5, sizeof(output));
 	short_read = 1;
 	CHECK(swapz_original_storage_read(&storage, pin, output, sizeof(output)) < 0);
