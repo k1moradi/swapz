@@ -144,7 +144,13 @@ def build_shim(linux: Path, workspace: Path, helpers: dict) -> Path:
         "linux/string.h": "#pragma once\n#include <string.h>\n",
         "linux/init.h": "#pragma once\n",
         "linux/bitops.h": "#pragma once\n#include <linux/kernel.h>\nstatic inline unsigned int __ffs(unsigned long value) { return (unsigned int)__builtin_ctzl(value); }\n",
-        "lz4.h": "#pragma once\n#include <linux/lz4.h>\n",
+        # The pinned kernel-only LZ4_compressBound(size_t) inline returns
+        # LZ4_COMPRESSBOUND(size_t) as int. It is not called by this fixture.
+        # Isolate its conversion diagnostic only while parsing the pristine
+        # upstream header; never relax warnings on candidate/product code.
+        "lz4.h": ("#pragma once\n#pragma GCC diagnostic push\n"
+                  "#pragma GCC diagnostic ignored \"-Wconversion\"\n"
+                  "#include <linux/lz4.h>\n#pragma GCC diagnostic pop\n"),
     })
     for relative, content in entries.items():
         path = shim / relative
@@ -163,6 +169,23 @@ def execute(compiler: str, linux: Path, workspace: Path, helpers: dict) -> dict:
     run = helpers["run_command"]
     shim = build_shim(linux, workspace, helpers)
     includes = ["-I", str(shim), "-I", str(ROOT / "src/kernel")]
+    # Prove the exact header compiles and its diagnostic scope ends at the
+    # include boundary. This negative compile is NOT a semantic mutant.
+    strict = [compiler, standard, "-Wall", "-Wextra", "-Wpedantic",
+              "-Wconversion", "-Wshadow", "-Werror", *includes,
+              "-x", "c", "-fsyntax-only", "-"]
+    header_only = run(strict, "upstream header scope",
+                      stdin="#include <lz4.h>\nint main(void) { return 0; }\n")
+    require(header_only.returncode == 0 and not header_only.stderr,
+            f"{compiler_name} pinned LZ4 header: {helpers['first_diagnostic'](header_only)}")
+    product_narrowing = run(strict, "strict warning negative",
+                            stdin="#include <lz4.h>\nint product_narrowing(size_t length) { return length; }\n")
+    require(product_narrowing.returncode != 0 and
+            ("-Werror=conversion" in product_narrowing.stderr or
+             "-Wshorten-64-to-32" in product_narrowing.stderr),
+            f"{compiler_name} header scope leaked or wrong negative diagnostic")
+    print(f"PASS {compiler_name} pinned upstream header scope; product narrowing rejected",
+          file=sys.stderr, flush=True)
     fixed = []
     # Only original upstream TUs use GNU11 and the already documented narrower
     # original warning model; all candidate/product/test TUs use strict C23/C2x.

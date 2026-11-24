@@ -20271,3 +20271,18 @@ RAW_4096 is the complete original uncompressed page; ordinary cap3568,
 20-byte volatile map and protected physical SWAPSPACE2 first4096
 remain unchanged. SOURCE_MAPPED_AUTHENTICATED=0, PHASE_A=BLOCKED,
 direct/forced RAW/import OFF.
+
+### Round086 Agent7 — isolate exact upstream LZ4 inline conversion diagnostic
+
+The unchanged pinned Linux include/linux/lz4.h LZ4_compressBound(size_t)
+inline narrows LZ4_COMPRESSBOUND(size_t) to int. Its host-only wrapper may
+scope the conversion diagnostic exclusively to inclusion of that exact
+whole-blob-verified original header, using diagnostic push/pop. Do not
+modify the upstream source, weaken the actual product/candidate/fixture
+warning flags or count any compilation error as an executed mutation.
+Before compiling the actual objects, both strict compiler modes must
+accept the actual pinned header through that wrapper and reject an
+independent size_t-to-int product narrowing after the pop. The negative
+compile is a warning-scope regression, not one of the 19 runtime mutants.
+Preserve the first exact-source failure and all previous positive and
+negative decoder tests. No source authentication or activation change.

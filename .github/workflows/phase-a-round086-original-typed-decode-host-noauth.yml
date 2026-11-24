@@ -46,7 +46,7 @@ jobs:
           test "$(git hash-object src/kernel/zswap-original-decode.c)" = eb1cd7f90d5edade9640e1ffe9dac3c8fe774644
           test "$(git hash-object src/kernel/zswap-original-decode.h)" = a247d1aaf9865de71f97cd980be806b8d8c7c20e
           test "$(git hash-object tests/runtime/native/fixtures/round085-original-decode.c)" = 1de6f01fca08637c2877eeb396dca81a0e7efd02
-          test "$(git hash-object tests/tools/round085-original-decode-verify.py)" = 93f7cfed08a2fc34041fc4470e3d146147267ddb
+          test "$(git hash-object tests/tools/round085-original-decode-verify.py)" = 77fc3f5df8e2e89a437445cdb731aa88d4a34093
       - uses: actions/checkout@v4
         with:
           repository: torvalds/linux
