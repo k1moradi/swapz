@@ -203,7 +203,7 @@
   "artifact_upload": {
     "status": "PASS",
     "size_bytes": 4273,
-    "contents_independently_downloaded": false
+    "contents_independently_downloaded": true
   },
   "second_cause_analysis": {
     "pristine_line": 294,
@@ -298,5 +298,17 @@
     "scope": "actual earlier postimage corpus control includes decoder readback; corrected Clang baseline NOT_RUN",
     "lease": "NOT_AUTHORIZED",
     "next": "Agent1 separate isolated original decompressor lease; preserve earlier failures, correct unexpected-control diagnostic precedence and reproduce prior compressor failure with exact prior fixture rather than changed corpus-control order. Do not suppress or skip decoder UB."
+  },
+  "agent1_authority": {
+    "round": "089",
+    "scope": "ISOLATED_HOST_TEST_ONLY_LZ4_DECOMPRESS_C",
+    "pristine_blob": "3a2cd9acada4a09ef70a344090d48167c46088a1",
+    "compressor_prior_lease_preserved": true,
+    "production_or_upstream_publication": false
+  },
+  "agent1_exact_source_census": {
+    "total": 10,
+    "success": 8,
+    "failure": 2
   }
 }

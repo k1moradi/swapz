@@ -29,3 +29,7 @@ lz4_decompress.c:89:55 exit=1
 ```
 
 Pinned original decompressor blob 3a2cd9acada4a09ef70a344090d48167c46088a1 line89 unconditionally evaluates `(const BYTE *)dictStart + dictSize`. Actual LZ4_decompress_safe at lines459–465 passes noDict, dest, NULL, 0. New genuine upstream UB in a DIFFERENT original file; not a demonstrated swapz decoder defect. Both compressor-only staging versions remain failed exact sources. No decoder staging permission in current lease. Request Agent1 authorization for separate isolated decompressor correction with exact hashes and mode analysis, retaining actual diagnostic precedence and exact prior fixture for prior-stage control (not a substitute for decoder readback). No attempt to avoid observed UB or weaken sanitizers. [Artifact 14963910496](https://github.com/k1moradi/swapz/actions/runs/45482877472/artifacts/14963910496) uploaded 4273 bytes; archive not independently downloaded. No duplicate dispatch, VM, physical tests or production adoption; AUTH0 Phase A BLOCKED all activation OFF.
+
+
+## Agent1 terminal reconciliation — R089
+Downloaded artifact 14963910496 and independently read results.json: Clang prior staged control actual UBSan lz4_decompress.c:89:55, null+0, exit1; wrapper masks cause, final staged Clang baseline not executed. Pristine source independently checked, blob 3a2cd9acada4a09ef70a344090d48167c46088a1. GCC 19/19, 4098 byte-exact streams, 8548267 bytes. R089 narrow isolated host-test-only lease extended to this one decompressor file, no production or upstream adoption; prior failures retained.
