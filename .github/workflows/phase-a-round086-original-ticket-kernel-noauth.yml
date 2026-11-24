@@ -1,0 +1,123 @@
+name: Round086 Agent11 actual original ticket kernel adapter NO_AUTH
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'src/kernel/zswap-original-ticket.c'
+      - 'src/kernel/zswap-original-ticket.h'
+      - 'src/kernel/codec.c'
+      - 'src/kernel/codec.h'
+      - 'tests/runtime/native/fixtures/round086-original-ticket-kunit.c'
+      - 'tests/tools/round086-original-ticket-kernel-verify.py'
+      - '.github/workflows/phase-a-round086-original-ticket-kernel-noauth.yml'
+permissions:
+  contents: read
+jobs:
+  original-ticket-pinned-smp-uml:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 115
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          path: swapz
+          fetch-depth: 2
+          persist-credentials: false
+      - name: Exact main source and canonical standards before compilation
+        working-directory: swapz
+        env:
+          SWAPZ_PUSH_BEFORE_SHA: ${{ github.event.before }}
+        run: |
+          set -Eeuo pipefail
+          test "$GITHUB_REF" = refs/heads/main
+          test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
+          test "$(git branch --show-current)" = main
+          test "$(git rev-parse HEAD^)" = "$SWAPZ_PUSH_BEFORE_SHA"
+          test "$(git rev-list --parents -n1 HEAD | wc -w)" -eq 2
+          test -z "$(git status --porcelain --untracked-files=all)"
+          git diff --check HEAD^ HEAD
+          python3 -B tests/runtime/native/repository-policy-test.py --enforce
+      - uses: actions/checkout@v4
+        with:
+          repository: torvalds/linux
+          ref: c339f4010dea8b0d754f84ace70cd1b089878ef8
+          path: linux
+          fetch-depth: 1
+          persist-credentials: false
+      - name: Pristine original stage preflight and exact postimages
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          umask 077
+          mkdir -p round086-agent11-evidence
+          verifier=swapz/tests/tools/round086-original-ticket-kernel-verify.py
+          for phase in verify-only stage verify-stage; do
+            python3 -B "$verifier" "$phase" --linux-root linux \
+              --manifest "round086-agent11-evidence/$phase.json"
+          done
+          git -C linux diff --check
+      - name: Confirm rootless runner build prerequisites
+        run: |
+          set -Eeuo pipefail
+          for tool in gcc make bc bison flex ld nm python3; do
+            command -v "$tool" >/dev/null || { echo "ROUND086_AGENT11_FIRST_ERROR missing build tool $tool"; exit 2; }
+          done
+      - name: One pinned SMP UML build and genuine directed KUnit
+        shell: bash
+        timeout-minutes: 95
+        run: |
+          set -Eeuo pipefail
+          umask 077
+          evidence="$PWD/round086-agent11-evidence"
+          out="$RUNNER_TEMP/r086-original-ticket-uml"
+          config="$RUNNER_TEMP/r086-ticket.kunitconfig"
+          verifier=swapz/tests/tools/round086-original-ticket-kernel-verify.py
+          phase=build
+          log="$evidence/build.log"
+          first_error() {
+            local code="$?"
+            trap - ERR
+            echo "::error::ROUND086_AGENT11_FIRST_ERROR phase=$phase exit=$code" >&2
+            if test -s "$out/test.log"; then
+              cp "$out/test.log" "$evidence/original-ticket-KTAP.log"
+            fi
+            { grep -hE -m1 'fatal error:|error:|undefined reference|not ok|Kernel panic|KASAN:|UBSAN:|BUG:|WARNING:|timed out' \
+              "$log" "$out/test.log" 2>/dev/null || true; } | cut -c1-250 >&2
+            exit "$code"
+          }
+          trap first_error ERR
+          cat >"$config" <<'KUNIT_CONFIG'
+          CONFIG_KUNIT=y
+          CONFIG_SMP=y
+          CONFIG_NR_CPUS=2
+          CONFIG_DEBUG_KERNEL=y
+          CONFIG_DEBUG_SPINLOCK=y
+          CONFIG_DEBUG_ATOMIC_SLEEP=y
+          CONFIG_SWAPZ_ROUND086_TICKET_TEST=y
+          CONFIG_CRC32=y
+          # CONFIG_KUNIT_ALL_TESTS is not set
+          # CONFIG_SWAP is not set
+          KUNIT_CONFIG
+          timeout -k 10s 82m python3 -B linux/tools/testing/kunit/kunit.py build \
+            --arch=um --build_dir="$out" --kunitconfig="$config" --jobs=2 >"$log" 2>&1
+          phase=build-identity
+          test -x "$out/linux"
+          python3 -B "$verifier" verify-build --build "$out" --output "$evidence/build-identity.json"
+          cp "$out/.config" "$evidence/effective.config"
+          phase=boot
+          log="$evidence/run.log"
+          timeout -k 10s 5m python3 -B linux/tools/testing/kunit/kunit.py exec \
+            --arch=um --build_dir="$out" --timeout=120 --kernel_args=ncpus=2 \
+            --json="$evidence/original-ticket.json" \
+            'swapz_round086_original_ticket*' >"$log" 2>&1
+          cp "$out/test.log" "$evidence/original-ticket-KTAP.log"
+          phase=json-ktap
+          python3 -B "$verifier" verify-native --result "$evidence/original-ticket.json" \
+            --kernel-log "$evidence/original-ticket-KTAP.log" --output "$evidence/verified.json"
+      - name: Retain exact build identity, stage hashes and actual JSON/KTAP
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: round086-agent11-actual-kernel-ticket
+          path: round086-agent11-evidence/
+          if-no-files-found: warn
+          retention-days: 14
