@@ -2,13 +2,13 @@
   "round": "088",
   "agent": 7,
   "task_sha": "dcb65dca9a3c2bd990aedb2829181d0c0e015ce2",
-  "source_parent": "22fbdd0090e302bd17b3811145395ceb0a814a6c",
-  "tested_commit": "b9765d29081fa1c3a09ba0f071112528a0677738",
-  "status": "COMPLETED_FAILURE_SECOND_UPSTREAM_COMPRESSOR_UB",
+  "source_parent": "5da5c7a40ac5cc89a60846ffcdf65c176ac9f34a",
+  "tested_commit": "61a1c0cc1de812d3a8240a42d6860992099871f9",
+  "status": "COMPLETED_FAILURE_ORIGINAL_DECOMPRESSOR_UB_LEASE_REQUIRED",
   "source_blobs": {
-    "tests/tools/round085-original-decode-verify.py": "73ddfb2ebbdcfe2c1f43d5da101491bea4a599e6",
-    ".github/workflows/phase-a-round086-original-typed-decode-host-noauth.yml": "0930ad37ec20c2fa3210effa659878049e90e6f8",
-    "docs/testing_standards.md": "f6657da1e16a2b91bf1e2fc56f917c2a550369de"
+    "tests/tools/round085-original-decode-verify.py": "9b53fb99c2201fce503b1a7b64d5e36e2e49ba30",
+    ".github/workflows/phase-a-round086-original-typed-decode-host-noauth.yml": "a91c4de769478dbf0ad0471caa32c4e753d62f71",
+    "docs/testing_standards.md": "2f4784b686a4827501ecb419182752a0245ef302"
   },
   "original_linux_pin": "c339f4010dea8b0d754f84ace70cd1b089878ef8",
   "original_blobs": {
@@ -40,11 +40,13 @@
   },
   "staged_lz4": {
     "pristine": "2a397bb2c661d9c2e4a7a67d5f50f06bfd42f1f2",
-    "postimage": "a1d860d6085109bc01ed6a593cf369ccbd6edc67",
-    "scope": "noDict only; no original checkout mutation",
-    "actual_stage_negatives": 4,
-    "pristine_after": "PASS",
-    "postimage_sha256": "7946da38e20d0d9eb31b4c910876ae496b9b552d3a8dee26876df4140c9ee8e2"
+    "prior_failed_postimage": "a1d860d6085109bc01ed6a593cf369ccbd6edc67",
+    "postimage": "63eb4be2e23caf770649af18f6a7b2b82d79a5e7",
+    "postimage_sha256": "eda4fe9c1d3baa178e37c0dc25d4151742f3af8c6776b6554120edbb52b929f3",
+    "negatives_rejected": 5,
+    "mode": "isolated copy; original never edited",
+    "scope": "noDict only; prefix/external modes unchanged, unqualified",
+    "pristine_after": "PASS"
   },
   "historical_r087": {
     "source": "034274ddecf1c0f62b06459b014a7d4456752e52",
@@ -66,46 +68,106 @@
   },
   "local_exact_compiler": "NOT_RUN_DNS_FAILURE",
   "actual_gcc": {
-    "standard": "c2x",
     "baseline": "PASS",
-    "mutants_compiled": 19,
-    "mutants_executed": 19,
-    "kills": 19,
-    "profiles": {
-      "raw_lz4": {
+    "stage": "complete",
+    "profiles": [
+      {
+        "codec": 1,
         "small": 91,
         "large": 4095
       },
-      "lzo1x": {
+      {
+        "codec": 2,
         "small": 110,
         "large": 4077
       }
+    ],
+    "mutants_compiled": 19,
+    "mutants_executed": 19,
+    "mutants_compiled_executed_killed": 19,
+    "mutants": [
+      "geometry_ceiling",
+      "geometry_zero",
+      "geometry_cap",
+      "representation",
+      "codec",
+      "version",
+      "dictionary",
+      "decoded_size",
+      "input_capacity",
+      "scratch_capacity",
+      "output_capacity",
+      "unretained",
+      "lease_codec",
+      "crc",
+      "sha",
+      "alias",
+      "lzo_trailing",
+      "lzo_short_output",
+      "lz4_short_output"
+    ],
+    "first_error": null,
+    "standard": "-std=c2x",
+    "corpus_comparison": {
+      "streams": 4098,
+      "bytes": 8548267,
+      "sha256": "15b5ad18c0a90780d89c1ffd99d01ac9970a167ab1d5245194289e44a4a3c595",
+      "byte_exact": true,
+      "pristine_decoder_readback": true
     }
   },
   "actual_clang": {
-    "standard": "c23",
-    "baseline": "FAIL",
+    "baseline": "NOT_RUN",
+    "stage": "execute-prior-staged-control",
+    "profiles": [],
     "mutants_compiled": 0,
     "mutants_executed": 0,
-    "kills": 0
+    "mutants_compiled_executed_killed": 0,
+    "mutants": [],
+    "first_error": {
+      "kind": "RuntimeError",
+      "location": "unavailable"
+    },
+    "standard": "-std=c23",
+    "pristine_control_observed": {
+      "kind": "sanitizer",
+      "sanitizer": "UBSan",
+      "category": "applying zero offset to null pointer",
+      "location": "lz4_compress.c:192:42",
+      "exit": 1
+    },
+    "pristine_control": {
+      "kind": "sanitizer",
+      "sanitizer": "UBSan",
+      "category": "applying zero offset to null pointer",
+      "location": "lz4_compress.c:192:42",
+      "exit": 1
+    },
+    "prior_staged_control_observed": {
+      "kind": "sanitizer",
+      "sanitizer": "UBSan",
+      "category": "applying zero offset to null pointer",
+      "location": "lz4_decompress.c:89:55",
+      "exit": 1
+    }
   },
   "first_error": {
     "compiler": "clang",
-    "stage": "execute-baseline",
+    "stage": "execute-prior-staged-control",
     "kind": "sanitizer",
     "sanitizer": "UBSan",
-    "category": "addition of unsigned offset",
-    "location": "lz4_compress.c:297:9",
+    "category": "applying zero offset to null pointer",
+    "location": "lz4_decompress.c:89:55",
     "exit": 1
   },
   "pristine_control": {
-    "status": "EXPECTED_FAIL_REPRODUCED",
+    "kind": "sanitizer",
+    "sanitizer": "UBSan",
     "category": "applying zero offset to null pointer",
     "location": "lz4_compress.c:192:42",
     "exit": 1
   },
   "corpus_comparison": {
-    "status": "PASS",
     "streams": 4098,
     "bytes": 8548267,
     "sha256": "15b5ad18c0a90780d89c1ffd99d01ac9970a167ab1d5245194289e44a4a3c595",
@@ -120,10 +182,10 @@
   "forced_raw_bypass": false,
   "import_active": false,
   "conclusion": "failure",
-  "run_id": 45458690315,
-  "job_id": 138674998545,
-  "artifact_id": 14951752236,
-  "artifact_url": "https://github.com/k1moradi/swapz/actions/runs/45458690315/artifacts/14951752236",
+  "run_id": 45482877472,
+  "job_id": 138760389279,
+  "artifact_id": 14963910496,
+  "artifact_url": "https://github.com/k1moradi/swapz/actions/runs/45482877472/artifacts/14963910496",
   "remote_preflight": "PASS_exact_main_parent_policy_postimages_18_blobs_19_anchors",
   "remote_diagnostic_controls": {
     "gcc": "PASS",
@@ -131,13 +193,16 @@
   },
   "automatic_source_run_census": {
     "total": 10,
-    "success": 9,
+    "intended": 45482877472,
+    "success": 1,
     "failure": 1,
-    "intended": 45458690315
+    "in_progress": 7,
+    "queued": 1,
+    "scope": "snapshot; others not terminal"
   },
   "artifact_upload": {
     "status": "PASS",
-    "size_bytes": 4265,
+    "size_bytes": 4273,
     "contents_independently_downloaded": false
   },
   "second_cause_analysis": {
@@ -149,5 +214,89 @@
     "interpretation": "unsigned subtraction wraps at zero; pointer index addition then overflows, independently of original null dictionary arithmetic",
     "scope": "actual first source location mapped to pristine from exact staged transform; no general extDict/prefix repair claimed"
   },
-  "evidence_parent": "f2a5aa9be21fa51249cb8a57a889a90836af52b2"
+  "evidence_parent": "61a1c0cc1de812d3a8240a42d6860992099871f9",
+  "first_staged_terminal": {
+    "tested_commit": "b9765d29081fa1c3a09ba0f071112528a0677738",
+    "source_parent": "22fbdd0090e302bd17b3811145395ceb0a814a6c",
+    "run_id": 45458690315,
+    "job_id": 138674998545,
+    "artifact_id": 14951752236,
+    "conclusion": "failure",
+    "source_blobs": {
+      "tests/tools/round085-original-decode-verify.py": "73ddfb2ebbdcfe2c1f43d5da101491bea4a599e6",
+      ".github/workflows/phase-a-round086-original-typed-decode-host-noauth.yml": "0930ad37ec20c2fa3210effa659878049e90e6f8",
+      "docs/testing_standards.md": "f6657da1e16a2b91bf1e2fc56f917c2a550369de"
+    },
+    "staged_lz4": {
+      "pristine": "2a397bb2c661d9c2e4a7a67d5f50f06bfd42f1f2",
+      "postimage": "a1d860d6085109bc01ed6a593cf369ccbd6edc67",
+      "scope": "noDict only; no original checkout mutation",
+      "actual_stage_negatives": 4,
+      "pristine_after": "PASS",
+      "postimage_sha256": "7946da38e20d0d9eb31b4c910876ae496b9b552d3a8dee26876df4140c9ee8e2"
+    },
+    "actual_gcc": {
+      "standard": "c2x",
+      "baseline": "PASS",
+      "mutants_compiled": 19,
+      "mutants_executed": 19,
+      "kills": 19,
+      "profiles": {
+        "raw_lz4": {
+          "small": 91,
+          "large": 4095
+        },
+        "lzo1x": {
+          "small": 110,
+          "large": 4077
+        }
+      }
+    },
+    "actual_clang": {
+      "standard": "c23",
+      "baseline": "FAIL",
+      "mutants_compiled": 0,
+      "mutants_executed": 0,
+      "kills": 0
+    },
+    "first_error": {
+      "compiler": "clang",
+      "stage": "execute-baseline",
+      "kind": "sanitizer",
+      "sanitizer": "UBSan",
+      "category": "addition of unsigned offset",
+      "location": "lz4_compress.c:297:9",
+      "exit": 1
+    },
+    "corpus_comparison": {
+      "status": "PASS",
+      "streams": 4098,
+      "bytes": 8548267,
+      "sha256": "15b5ad18c0a90780d89c1ffd99d01ac9970a167ab1d5245194289e44a4a3c595",
+      "byte_exact": true,
+      "pristine_decoder_readback": true
+    },
+    "evidence_commit": "5da5c7a40ac5cc89a60846ffcdf65c176ac9f34a"
+  },
+  "verifier_wrapper_first_error": {
+    "compiler": "clang",
+    "stage": "execute-prior-staged-control",
+    "kind": "RuntimeError",
+    "location": "unavailable"
+  },
+  "new_cause_analysis": {
+    "source": "lib/lz4/lz4_decompress.c",
+    "blob": "3a2cd9acada4a09ef70a344090d48167c46088a1",
+    "line": 89,
+    "column": 55,
+    "expression": "(const BYTE *)dictStart + dictSize",
+    "caller_lines": [
+      459,
+      465
+    ],
+    "caller_arguments": "noDict, (BYTE *)dest, NULL, 0",
+    "scope": "actual earlier postimage corpus control includes decoder readback; corrected Clang baseline NOT_RUN",
+    "lease": "NOT_AUTHORIZED",
+    "next": "Agent1 separate isolated original decompressor lease; preserve earlier failures, correct unexpected-control diagnostic precedence and reproduce prior compressor failure with exact prior fixture rather than changed corpus-control order. Do not suppress or skip decoder UB."
+  }
 }
