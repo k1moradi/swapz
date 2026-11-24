@@ -1,0 +1,153 @@
+{
+  "round": "085",
+  "agent": 7,
+  "status": "UNAPPLIED_CANDIDATE_PINNED_QUALIFICATION_NOT_RUN",
+  "task_sha": "9e3c770004418cbf622f5f3eb647ee79ef5fe735",
+  "task_parent": "1d8a6421a5758cfd4fabeaa57d4789df0c10a555",
+  "publication_parent": "a37d7c459ac0977836ddf5cfb40495a3ea13f375",
+  "patch_path": "docs/handoff/zswapz/round085/agent7-original-typed-decode-candidate.patch",
+  "patch_blob": "1ab5da434904bfc2b4cbefbd8bd22e3745e7c9bc",
+  "patch_sha256": "500c2c9e58fae3ed4c3d3def489524ff18d1f60c6c286e6fec74047c6501977e",
+  "candidate_blobs": {
+    "src/kernel/zswap-original-decode.c": "eb1cd7f90d5edade9640e1ffe9dac3c8fe774644",
+    "src/kernel/zswap-original-decode.h": "a247d1aaf9865de71f97cd980be806b8d8c7c20e",
+    "tests/runtime/native/fixtures/round085-original-decode.c": "1de6f01fca08637c2877eeb396dca81a0e7efd02",
+    "tests/tools/round085-original-decode-verify.py": "a00d897e92199e91ae32780d87ac5057677b345b"
+  },
+  "candidate_manifest_sha256": "b7b3fa3ebff51485fa2f37323db5436a1dcd7a7bc4bb518a04ef54e677c8e978",
+  "patch_new_file_hunks": {
+    "git_apply_check": "PASS",
+    "git_apply": "PASS",
+    "exact_postimages": 4
+  },
+  "proposed_standards_hunk": {
+    "preimage": "c7b3a138222ffecaa2cb1ceecb9ae6d942d70a65",
+    "postimage": "7fd3800fdbcb9f7511f1629ef3ec19943213b7b1",
+    "full_local_apply": "NOT_RUN",
+    "remote_changed": false
+  },
+  "linux_pin": "c339f4010dea8b0d754f84ace70cd1b089878ef8",
+  "source_lock": {
+    "connector_git_sha1_recomputed": 18,
+    "expected": 18,
+    "original": {
+      "mm/zswap.c": "ae19e301fced7e357a4c7587dfdd6abb890b9163",
+      "crypto/lzo.c": "d43242b24b4e831e7e0d26f38d2f263877d5748e",
+      "crypto/lz4.c": "57b713516aefac823f2af9481c828027b42490dd",
+      "include/linux/lzo.h": "4d30e3624acd237290dbfeaefdb9c710e4f85f56",
+      "lib/lzo/lzo1x_compress.c": "01586af2347f5e2f8c8528b94e02622fc8b262c8",
+      "lib/lzo/lzo1x_compress_safe.c": "371c9f849492814afed88a443acb2262dcf35dfe",
+      "lib/lzo/lzo1x_decompress_safe.c": "318abb82c63d2c27c0d5497b7cf4e21d87d13154",
+      "lib/lzo/lzodefs.h": "b60851fcf6ce54b57e87d04e917deaa2b6cf62cc",
+      "include/linux/lz4.h": "ad6042a718b5428792b795db7a8d4ad44c24a985",
+      "lib/lz4/lz4_compress.c": "2a397bb2c661d9c2e4a7a67d5f50f06bfd42f1f2",
+      "lib/lz4/lz4_decompress.c": "3a2cd9acada4a09ef70a344090d48167c46088a1",
+      "lib/lz4/lz4defs.h": "17277ec16919f3a554afc7d91ad515c493d745ca"
+    },
+    "product": {
+      "tests/tools/round080-original-lzo1x-independent-decoder-verify.py": "c2bd6a4d35bc8261e94743f92166b7c436d3c1f2",
+      "src/kernel/codec.h": "e89d316b9cf49f82df0b77648c1be1731607987d",
+      "src/kernel/codec.c": "d920dcaac6f2b7de1334d4133770bd649719c66d",
+      "src/kernel/zswap-import-codec.h": "0d888fe4c74115ab2388f1df1dc0b86ae4b9b6c6",
+      "src/kernel/zswap-import-decoder-owner.h": "e1b4b903567070e2307f7d05f8e48c14e0bb3768",
+      "src/kernel/zswap-import-decoder-owner.c": "8e0c8f4d2085af7f2e17df412f3a1af654063571"
+    }
+  },
+  "local_diagnostic": {
+    "scope": "SUPPLEMENTARY_SYSTEM_LIBRARY_DIAGNOSTIC_NOT_PINNED_QUALIFICATION",
+    "gcc": {
+      "version": "14.2.0",
+      "standard": "c2x",
+      "baseline": "PASS",
+      "mutants_compiled": 19,
+      "mutants_executed": 19,
+      "semantic_kills": 19
+    },
+    "clang": {
+      "version": "17.0.0",
+      "standard": "c2x",
+      "baseline": "PASS",
+      "mutants_compiled": 19,
+      "mutants_executed": 19,
+      "semantic_kills": 19
+    },
+    "mutants": [
+      "geometry_ceiling",
+      "geometry_zero",
+      "geometry_cap",
+      "representation",
+      "codec",
+      "version",
+      "dictionary",
+      "decoded_size",
+      "input_capacity",
+      "scratch_capacity",
+      "output_capacity",
+      "unretained",
+      "lease_codec",
+      "crc",
+      "sha",
+      "alias",
+      "lzo_trailing",
+      "lzo_short_output",
+      "lz4_short_output"
+    ],
+    "profiles": {
+      "raw_lz4": {
+        "small": 91,
+        "large": 4095
+      },
+      "lzo1x": {
+        "small": 110,
+        "large": 4077
+      }
+    },
+    "libraries": {
+      "liblz4": "1.10.0-4",
+      "liblzo2": "2.10-3+b1",
+      "libssl": "3.5.7-1~deb13u2"
+    },
+    "instrumentation": "candidate, fixture, local adapter ASan+UBSan; installed shared libraries not rebuilt/instrumented",
+    "input_manifest_sha256": "502ac99ef769b03a6d9f9f44abd4308ac7b5ca5dbe270335cbdff99bdb93026c",
+    "adapter_blobs": {
+      "local/adapter.c": "b4b2d22eca41b24ee39ddfd4cdb2c97d9f1c9047",
+      "local/zswap-import-decoder-owner.h": "222add36dc7211d36e08002969a7f4e7e8f3f3b9",
+      "local/run_diagnostic.py": "de42d48105e190d3796d04a22a2239c13699b77a"
+    },
+    "first_error": null
+  },
+  "pinned_source_qualification": {
+    "status": "NOT_RUN",
+    "first_preflight_error": "FIRST_ERROR round085-agent7 whole Git blob mismatch: tests/tools/round080-original-lzo1x-independent-decoder-verify.py expected=c2bd6a4d35bc8261e94743f92166b7c436d3c1f2",
+    "blocker": "GitHub DNS failure in local environment; complete original/product source not materialized. Connector bytes separately hash verified.",
+    "gcc": {
+      "baseline": "NOT_RUN",
+      "mutants_compiled": 0,
+      "mutants_executed": 0
+    },
+    "clang": {
+      "baseline": "NOT_RUN",
+      "mutants_compiled": 0,
+      "mutants_executed": 0
+    }
+  },
+  "remote_ci": {
+    "status": "NOT_DISPATCHED",
+    "run_id": null,
+    "job_id": null
+  },
+  "production_changes": false,
+  "workflow_changes": false,
+  "standards_file_changes": false,
+  "source_mapped_authenticated": 0,
+  "phase_a": "BLOCKED",
+  "direct_handoff": false,
+  "forced_raw_bypass": false,
+  "import_active": false,
+  "real_lower_durability": false,
+  "real_upper_ack": false,
+  "existing_dormant_max_compressed": 3568,
+  "experimental_candidate_max": 4095,
+  "ordinary_raw_4096": "COMPLETE_ORIGINAL_UNCOMPRESSED_4096",
+  "native": "NOT_RUN"
+}

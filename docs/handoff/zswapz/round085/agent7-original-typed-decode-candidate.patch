@@ -1,0 +1,691 @@
+diff --git a/src/kernel/zswap-original-decode.c b/src/kernel/zswap-original-decode.c
+new file mode 100644
+index 0000000000000000000000000000000000000000..eb1cd7f90d5edade9640e1ffe9dac3c8fe774644
+--- /dev/null
++++ b/src/kernel/zswap-original-decode.c
+@@ -0,0 +1,107 @@
++// SPDX-License-Identifier: GPL-2.0-only
++#include "zswap-original-decode.h"
++
++int swapz_original_decode_length_valid(swapz_u32 ceiling, swapz_u32 length)
++{
++	return (ceiling == SWAPZ_ORIGINAL_DECODE_M3568 ||
++		ceiling == SWAPZ_ORIGINAL_DECODE_M4095) &&
++		length != 0U && length <= ceiling;
++}
++
++struct swapz_original_decode_range {
++	const void *address;
++	swapz_u32 length;
++};
++
++static int swapz_original_decode_disjoint(
++	const struct swapz_zswap_import_decoder_lease *lease,
++	const struct swapz_original_decode_record *record,
++	const swapz_u8 *input, swapz_u8 *scratch, swapz_u8 *output)
++{
++	const struct swapz_original_decode_range ranges[] = {
++		{record, (swapz_u32)sizeof(*record)},
++		{lease, (swapz_u32)sizeof(*lease)},
++		{lease->owner, (swapz_u32)sizeof(*lease->owner)},
++		{input, record->compressed_length},
++		{scratch, SWAPZ_BLOCK_BYTES},
++		{output, SWAPZ_BLOCK_BYTES},
++	};
++	unsigned int first, second;
++	const unsigned int count = sizeof(ranges) / sizeof(ranges[0]);
++
++	for (first = 0U; first < count; ++first) {
++		for (second = first + 1U; second < count; ++second) {
++			if (swapz_zswap_import_ranges_overlap(ranges[first].address,
++				ranges[first].length, ranges[second].address,
++				ranges[second].length))
++				return 0;
++		}
++	}
++	return 1;
++}
++
++int swapz_original_decode(
++	const struct swapz_zswap_import_decoder_lease *lease,
++	const struct swapz_original_decode_record *record, swapz_u32 ceiling,
++	const swapz_u8 *input, swapz_u32 input_capacity,
++	swapz_u8 *scratch, swapz_u32 scratch_capacity,
++	swapz_u8 *output, swapz_u32 output_capacity)
++{
++	swapz_u8 digest[32];
++	swapz_u8 difference = 0U;
++	unsigned int offset;
++	int result;
++
++	if (!lease || !record || !input || !scratch || !output)
++		return -EINVAL;
++	if (!lease->owner)
++		return -ESTALE;
++	if (record->representation != SWAPZ_ZSWAP_IMPORT_REPRESENTATION ||
++	    (record->codec != SWAPZ_ZSWAP_IMPORT_LZ4_CODEC &&
++	     record->codec != SWAPZ_ZSWAP_IMPORT_LZO1X_CODEC) ||
++	    record->version != SWAPZ_ZSWAP_IMPORT_VERSION ||
++	    record->dictionary_id != 0U)
++		return -EOPNOTSUPP;
++	if (lease->codec != record->codec || lease->version != record->version)
++		return -ESTALE;
++	if (!swapz_original_decode_length_valid(ceiling, record->compressed_length) ||
++	    record->decoded_length != SWAPZ_BLOCK_BYTES ||
++	    input_capacity < record->compressed_length ||
++	    scratch_capacity != SWAPZ_BLOCK_BYTES || output_capacity != SWAPZ_BLOCK_BYTES)
++		return -EMSGSIZE;
++	if (!swapz_original_decode_disjoint(lease, record, input, scratch, output))
++		return -EINVAL;
++	if (swapz_crc32c_bytes(input, record->compressed_length) != record->compressed_crc32c)
++		return -EBADMSG;
++	if (record->codec == SWAPZ_ZSWAP_IMPORT_LZO1X_CODEC) {
++#if !defined(SWAPZ_ZSWAP_IMPORT_HOST_TEST) || defined(SWAPZ_ZSWAP_IMPORT_ORIGINAL_LZO_HOST_TEST)
++		size_t decoded_length = SWAPZ_BLOCK_BYTES;
++
++		result = lzo1x_decompress_safe(input, record->compressed_length,
++			scratch, &decoded_length);
++		if (result != LZO_E_OK)
++			return -EBADMSG;
++		if (decoded_length != SWAPZ_BLOCK_BYTES)
++			return -EMSGSIZE;
++#else
++		return -EOPNOTSUPP;
++#endif
++	} else {
++		result = LZ4_decompress_safe((const char *)input, (char *)scratch,
++			(int)record->compressed_length, (int)SWAPZ_BLOCK_BYTES);
++		if (result < 0)
++			return -EBADMSG;
++		if (result != (int)SWAPZ_BLOCK_BYTES)
++			return -EMSGSIZE;
++	}
++	if (swapz_zswap_import_sha256(scratch, digest))
++		return -EIO;
++	for (offset = 0U; offset < sizeof(digest); ++offset)
++		difference |= digest[offset] ^ record->original_sha256[offset];
++	if (difference)
++		return -EBADMSG;
++	/* Commit only after every guard. memmove also has defined behavior for
++	 * the intentional overlap-guard mutant in the rootless test. */
++	memmove(output, scratch, SWAPZ_BLOCK_BYTES);
++	return 0;
++}
+diff --git a/src/kernel/zswap-original-decode.h b/src/kernel/zswap-original-decode.h
+new file mode 100644
+index 0000000000000000000000000000000000000000..a247d1aaf9865de71f97cd980be806b8d8c7c20e
+--- /dev/null
++++ b/src/kernel/zswap-original-decode.h
+@@ -0,0 +1,46 @@
++/* SPDX-License-Identifier: GPL-2.0-only */
++#ifndef SWAPZ_ZSWAP_ORIGINAL_DECODE_H
++#define SWAPZ_ZSWAP_ORIGINAL_DECODE_H
++
++#include "zswap-import-decoder-owner.h"
++
++#define SWAPZ_ORIGINAL_DECODE_M3568 3568U
++#define SWAPZ_ORIGINAL_DECODE_M4095 4095U
++
++/* Volatile, immutable byte descriptor, not a mapping or receipt. The digest
++ * must come from the separately authenticated original uncompressed page.
++ * Numeric codec 2 here means original LZO1X, never legacy direct ZSTD. */
++struct swapz_original_decode_record {
++	swapz_u32 compressed_length;
++	swapz_u32 decoded_length;
++	swapz_u32 compressed_crc32c;
++	swapz_u8 original_sha256[32];
++	swapz_u8 representation;
++	swapz_u8 codec;
++	swapz_u8 version;
++	swapz_u8 dictionary_id;
++};
++
++/* Geometry alone does not imply that a valid codec stream exists. */
++int swapz_original_decode_length_valid(swapz_u32 ceiling, swapz_u32 length);
++
++/* Synchronous opt-in candidate, not wired into any production call site.
++ * Caller must already hold a genuine exclusive reader lease (obtained via
++ * owner_get, not copied/forged), retain the independent decoder/module and
++ * immutable original bytes/record, and serialize put after this call. Owner
++ * storage remains live; close may drain concurrently but cannot revoke an
++ * existing reader. Source/selected-DM authentication is an external gate.
++ * All accessed ranges (record including digest, lease, owner, input,
++ * scratch and output) must be disjoint and actually backed by their declared
++ * spans. Scratch/output are exactly one page each; input capacity covers
++ * compressed_length. Scratch can change on failure; output never changes
++ * unless both exact decode and integrity checks succeed. No allocation,
++ * lower I/O, mapping, recompression, publication or ACK is performed. */
++int swapz_original_decode(
++	const struct swapz_zswap_import_decoder_lease *lease,
++	const struct swapz_original_decode_record *record, swapz_u32 ceiling,
++	const swapz_u8 *input, swapz_u32 input_capacity,
++	swapz_u8 *scratch, swapz_u32 scratch_capacity,
++	swapz_u8 *output, swapz_u32 output_capacity);
++
++#endif /* SWAPZ_ZSWAP_ORIGINAL_DECODE_H */
+diff --git a/tests/runtime/native/fixtures/round085-original-decode.c b/tests/runtime/native/fixtures/round085-original-decode.c
+new file mode 100644
+index 0000000000000000000000000000000000000000..1de6f01fca08637c2877eeb396dca81a0e7efd02
+--- /dev/null
++++ b/tests/runtime/native/fixtures/round085-original-decode.c
+@@ -0,0 +1,227 @@
++// SPDX-License-Identifier: GPL-2.0-only
++#include "zswap-original-decode.h"
++#include <stdio.h>
++#include <stdlib.h>
++
++#define BUFFER_BYTES 4608U
++#define CHECK(name, condition) do { if (!(condition)) { \
++	fprintf(stderr, "FIRST_ERROR %s\n", name); exit(1); } } while (0)
++
++/* Test-only compressor adapter: exact pinned Linux in qualification runner.
++ * Never used for a production accepted original compressed stream. */
++int round085_compress(swapz_u8 codec, const swapz_u8 *page, swapz_u32 length,
++	swapz_u8 *compressed, swapz_u32 capacity, swapz_u32 *written);
++
++static swapz_u8 input[BUFFER_BYTES], candidate[BUFFER_BYTES];
++static swapz_u8 page[SWAPZ_BLOCK_BYTES], random_page[SWAPZ_BLOCK_BYTES];
++static swapz_u8 scratch[SWAPZ_BLOCK_BYTES], output[SWAPZ_BLOCK_BYTES];
++static swapz_u8 marker[SWAPZ_BLOCK_BYTES];
++static struct swapz_zswap_import_decoder_owner owners[2];
++static struct swapz_zswap_import_decoder_lease leases[2];
++static swapz_u32 small_lengths[2], large_lengths[2];
++
++static struct swapz_original_decode_record descriptor(swapz_u8 codec,
++	swapz_u32 length)
++{
++	struct swapz_original_decode_record record = {
++		.compressed_length = length, .decoded_length = SWAPZ_BLOCK_BYTES,
++		.compressed_crc32c = swapz_crc32c_bytes(input, length),
++		.representation = SWAPZ_ZSWAP_IMPORT_REPRESENTATION,
++		.codec = codec, .version = 1U,
++	};
++	CHECK("fixture_sha", !swapz_zswap_import_sha256(page, record.original_sha256));
++	return record;
++}
++
++static void reject(const char *name,
++	const struct swapz_zswap_import_decoder_lease *lease,
++	const struct swapz_original_decode_record *record, swapz_u32 ceiling,
++	swapz_u32 input_capacity, swapz_u32 scratch_capacity,
++	swapz_u32 output_capacity, int expected)
++{
++	memcpy(output, marker, sizeof(output));
++	CHECK(name, swapz_original_decode(lease, record, ceiling, input,
++		input_capacity, scratch, scratch_capacity, output, output_capacity) == expected);
++	CHECK("failure_output_immutable", !memcmp(output, marker, sizeof(output)));
++}
++
++static void expect_failure(const char *name,
++	const struct swapz_zswap_import_decoder_lease *lease,
++	const struct swapz_original_decode_record *record, int expected)
++{
++	reject(name, lease, record, SWAPZ_ORIGINAL_DECODE_M4095, sizeof(input),
++		SWAPZ_BLOCK_BYTES, SWAPZ_BLOCK_BYTES, expected);
++}
++
++static void positive(const char *name,
++	const struct swapz_zswap_import_decoder_lease *lease,
++	const struct swapz_original_decode_record *record, swapz_u32 ceiling)
++{
++	memcpy(output, marker, sizeof(output));
++	CHECK(name, !swapz_original_decode(lease, record, ceiling, input,
++		record->compressed_length, scratch, sizeof(scratch), output, sizeof(output)));
++	CHECK("positive_exact_page", !memcmp(page, output, sizeof(page)));
++}
++
++/* Deterministic bounded search; retain the largest *real* encoded block
++ * below 4096. Geometry at exact endpoints is checked independently. */
++static swapz_u32 corpus(swapz_u8 codec, int large)
++{
++	swapz_u32 prefix, length, best = 0U, best_prefix = 0U;
++	const swapz_u32 last_prefix = large ? SWAPZ_BLOCK_BYTES : 64U;
++
++	for (prefix = 0U; prefix <= last_prefix; ++prefix) {
++		memset(page, 0, sizeof(page));
++		memcpy(page, random_page, prefix);
++		CHECK("fixture_compress", !round085_compress(codec, page,
++			SWAPZ_BLOCK_BYTES, candidate, sizeof(candidate), &length));
++		if (length > best && length < SWAPZ_BLOCK_BYTES &&
++		    (!large || length > SWAPZ_ORIGINAL_DECODE_M3568)) {
++			best = length;
++			best_prefix = prefix;
++			memcpy(input, candidate, length);
++		}
++	}
++	CHECK("corpus_found", best != 0U);
++	memset(page, 0, sizeof(page));
++	memcpy(page, random_page, best_prefix);
++	return best;
++}
++
++static void profile(unsigned int index)
++{
++	const swapz_u8 codec = (swapz_u8)(index + 1U);
++	const struct swapz_zswap_import_decoder_lease *lease = &leases[index];
++	struct swapz_original_decode_record record, invalid;
++	struct swapz_zswap_import_decoder_lease absent = {.codec = codec, .version = 1U};
++	swapz_u32 small = corpus(codec, 0), large, short_length;
++	union { struct swapz_original_decode_record record; swapz_u8 bytes[SWAPZ_BLOCK_BYTES]; } alias;
++	union { struct swapz_zswap_import_decoder_lease lease; swapz_u8 bytes[SWAPZ_BLOCK_BYTES]; } lease_alias;
++
++	record = descriptor(codec, small);
++	positive("small_3568", lease, &record, SWAPZ_ORIGINAL_DECODE_M3568);
++	positive("small_4095", lease, &record, SWAPZ_ORIGINAL_DECODE_M4095);
++	large = corpus(codec, 1);
++	record = descriptor(codec, large);
++	positive("large_4095", lease, &record, SWAPZ_ORIGINAL_DECODE_M4095);
++	reject("large_3568_reject", lease, &record, SWAPZ_ORIGINAL_DECODE_M3568,
++		large, sizeof(scratch), sizeof(output), -EMSGSIZE);
++	invalid = record; invalid.compressed_length = SWAPZ_BLOCK_BYTES;
++	expect_failure("raw_4096_refused", lease, &invalid, -EMSGSIZE);
++	invalid = record; invalid.compressed_length = 0U;
++	expect_failure("zero_length_refused", lease, &invalid, -EMSGSIZE);
++	expect_failure("null_lease", NULL, &record, -EINVAL);
++	expect_failure("null_record", lease, NULL, -EINVAL);
++	invalid = record; invalid.representation = 0U;
++	expect_failure("representation", lease, &invalid, -EOPNOTSUPP);
++	invalid = record; invalid.codec = 3U;
++	expect_failure("codec", lease, &invalid, -EOPNOTSUPP);
++	invalid = record; invalid.version = 2U;
++	expect_failure("version", lease, &invalid, -EOPNOTSUPP);
++	invalid = record; invalid.dictionary_id = 1U;
++	expect_failure("dictionary", lease, &invalid, -EOPNOTSUPP);
++	invalid = record; invalid.decoded_length = SWAPZ_BLOCK_BYTES - 1U;
++	expect_failure("decoded_size", lease, &invalid, -EMSGSIZE);
++	reject("input_capacity", lease, &record, SWAPZ_ORIGINAL_DECODE_M4095,
++		large - 1U, sizeof(scratch), sizeof(output), -EMSGSIZE);
++	reject("scratch_capacity", lease, &record, SWAPZ_ORIGINAL_DECODE_M4095,
++		large, SWAPZ_BLOCK_BYTES - 1U, sizeof(output), -EMSGSIZE);
++	reject("output_capacity", lease, &record, SWAPZ_ORIGINAL_DECODE_M4095,
++		large, sizeof(scratch), SWAPZ_BLOCK_BYTES - 1U, -EMSGSIZE);
++	expect_failure("unretained", &absent, &record, -ESTALE);
++	expect_failure("lease_codec", &leases[1U - index], &record, -ESTALE);
++	invalid = record; invalid.compressed_crc32c ^= 1U;
++	expect_failure("crc", lease, &invalid, -EBADMSG);
++	invalid = record; invalid.original_sha256[31] ^= 1U;
++	expect_failure("sha", lease, &invalid, -EBADMSG);
++	memcpy(output, marker, sizeof(output));
++	CHECK("alias", swapz_original_decode(lease, &record,
++		SWAPZ_ORIGINAL_DECODE_M4095, input, large, output, sizeof(output),
++		output, sizeof(output)) == -EINVAL);
++	CHECK("alias_output_immutable", !memcmp(output, marker, sizeof(output)));
++	memcpy(alias.bytes, marker, sizeof(alias.bytes));
++	alias.record = record;
++	memcpy(candidate, alias.bytes, sizeof(alias.bytes));
++	CHECK("descriptor_alias", swapz_original_decode(lease, &alias.record,
++		SWAPZ_ORIGINAL_DECODE_M4095, input, large, scratch, sizeof(scratch),
++		alias.bytes, sizeof(alias.bytes)) == -EINVAL);
++	CHECK("descriptor_preserved", !memcmp(alias.bytes, candidate, sizeof(alias.bytes)));
++	memset(&lease_alias, 0, sizeof(lease_alias));
++	CHECK("lease_alias_get", !swapz_zswap_import_decoder_owner_get(
++		&owners[index], &lease_alias.lease));
++	memcpy(candidate, lease_alias.bytes, sizeof(lease_alias.bytes));
++	memcpy(output, marker, sizeof(output));
++	CHECK("lease_alias", swapz_original_decode(&lease_alias.lease, &record,
++		SWAPZ_ORIGINAL_DECODE_M4095, input, large, lease_alias.bytes,
++		sizeof(scratch), output, sizeof(output)) == -EINVAL);
++	CHECK("lease_alias_output_immutable", !memcmp(output, marker, sizeof(output)));
++	CHECK("lease_alias_preserved", !memcmp(lease_alias.bytes, candidate, sizeof(lease_alias.bytes)));
++	CHECK("lease_alias_put", !swapz_zswap_import_decoder_owner_put(&lease_alias.lease));
++	memcpy(candidate, input, sizeof(input));
++	CHECK("input_output_alias", swapz_original_decode(lease, &record,
++		SWAPZ_ORIGINAL_DECODE_M4095, input, large, scratch, sizeof(scratch),
++		input, SWAPZ_BLOCK_BYTES) == -EINVAL);
++	CHECK("input_alias_preserved", !memcmp(input, candidate, sizeof(input)));
++	CHECK("input_scratch_alias", swapz_original_decode(lease, &record,
++		SWAPZ_ORIGINAL_DECODE_M4095, input, large, input, SWAPZ_BLOCK_BYTES,
++		output, sizeof(output)) == -EINVAL);
++	CHECK("input_scratch_preserved", !memcmp(input, candidate, sizeof(input)));
++	CHECK("input_scratch_output_immutable", !memcmp(output, marker, sizeof(output)));
++	/* A complete valid compressed block with a trailing byte, CRC updated. */
++	(void)corpus(codec, 0);
++	record = descriptor(codec, small);
++	input[small] = 0U;
++	invalid = descriptor(codec, small + 1U);
++	expect_failure(codec == 2U ? "lzo_trailing" : "lz4_trailing", lease, &invalid, -EBADMSG);
++	invalid = descriptor(codec, small - 1U);
++	expect_failure("truncated_input", lease, &invalid, -EBADMSG);
++	CHECK("compress_short", !round085_compress(codec, page, SWAPZ_BLOCK_BYTES - 1U,
++		input, sizeof(input), &short_length));
++	invalid = descriptor(codec, short_length);
++	expect_failure(codec == 2U ? "lzo_short_output" : "lz4_short_output",
++		lease, &invalid, -EMSGSIZE);
++	small_lengths[index] = small;
++	large_lengths[index] = large;
++}
++
++int main(void)
++{
++	swapz_u32 state = 0x1ad57f91U;
++	unsigned int index;
++
++	CHECK("geometry_ceiling", !swapz_original_decode_length_valid(4094U, 1U));
++	CHECK("geometry_zero", !swapz_original_decode_length_valid(4095U, 0U));
++	CHECK("geometry_cap", !swapz_original_decode_length_valid(3568U, 3569U));
++	CHECK("geometry_valid", swapz_original_decode_length_valid(3568U, 1U) &&
++		swapz_original_decode_length_valid(3568U, 3568U) &&
++		swapz_original_decode_length_valid(4095U, 3569U) &&
++		swapz_original_decode_length_valid(4095U, 4095U) &&
++		!swapz_original_decode_length_valid(4095U, 4096U));
++	memset(marker, 0xa5, sizeof(marker));
++	for (index = 0U; index < sizeof(random_page); ++index) {
++		state ^= state << 13U; state ^= state >> 17U; state ^= state << 5U;
++		random_page[index] = (swapz_u8)state;
++	}
++	for (index = 0U; index < 2U; ++index) {
++		CHECK("owner_init", !swapz_zswap_import_decoder_owner_init(&owners[index],
++			(swapz_u8)(index + 1U), 1U));
++		CHECK("owner_get", !swapz_zswap_import_decoder_owner_get(&owners[index], &leases[index]));
++	}
++	for (index = 0U; index < 2U; ++index)
++		profile(index);
++	for (index = 0U; index < 2U; ++index) {
++		struct swapz_original_decode_record stale = {0};
++		CHECK("owner_put", !swapz_zswap_import_decoder_owner_put(&leases[index]));
++		expect_failure("released_lease", &leases[index], &stale, -ESTALE);
++		CHECK("owner_close", !swapz_zswap_import_decoder_owner_close_and_drain(&owners[index]));
++		CHECK("closed_owner_get", swapz_zswap_import_decoder_owner_get(&owners[index],
++			&leases[index]) == -ESHUTDOWN);
++		CHECK("owner_mutex_destroy", !pthread_mutex_destroy(&owners[index].lock));
++		CHECK("owner_cond_destroy", !pthread_cond_destroy(&owners[index].drained));
++	}
++	for (index = 0U; index < 2U; ++index)
++		printf("PROFILE codec=%u small=%u large=%u\n", index + 1U,
++			small_lengths[index], large_lengths[index]);
++	puts("PASS round085-original-decode AUTH=0 PHASE_A=BLOCKED");
++	return 0;
++}
+diff --git a/tests/tools/round085-original-decode-verify.py b/tests/tools/round085-original-decode-verify.py
+new file mode 100644
+index 0000000000000000000000000000000000000000..a00d897e92199e91ae32780d87ac5057677b345b
+--- /dev/null
++++ b/tests/tools/round085-original-decode-verify.py
+@@ -0,0 +1,238 @@
++#!/usr/bin/env python3
++"""Exact pinned original Linux LZO1X/raw LZ4 + unapplied typed decoder HOST ONLY.
++
++After applying the reviewed candidate patch, run from a clean source snapshot:
++  python3 -B tests/tools/round085-original-decode-verify.py --linux-root /path/to/pin
++No network, native build, device access or fake durability/ACK. The runner
++uses exact upstream byte blobs and the existing R080 host compiler helpers,
++not the old R080 mutation suite. Original GNU11 objects get the same narrow
++upstream warning model; candidate, fixture and product stay strict C23/C2x.
++"""
++from __future__ import annotations
++
++import argparse
++import json
++from pathlib import Path
++import re
++import runpy
++import shutil
++import sys
++import tempfile
++
++ROOT = Path(__file__).resolve().parents[2]
++HELPER = ROOT / "tests/tools/round080-original-lzo1x-independent-decoder-verify.py"
++CANDIDATE = ROOT / "src/kernel/zswap-original-decode.c"
++FIXTURE = ROOT / "tests/runtime/native/fixtures/round085-original-decode.c"
++PIN = "c339f4010dea8b0d754f84ace70cd1b089878ef8"
++PRODUCT = {
++    "tests/tools/round080-original-lzo1x-independent-decoder-verify.py": "c2bd6a4d35bc8261e94743f92166b7c436d3c1f2",
++    "src/kernel/codec.h": "e89d316b9cf49f82df0b77648c1be1731607987d",
++    "src/kernel/codec.c": "d920dcaac6f2b7de1334d4133770bd649719c66d",
++    "src/kernel/zswap-import-codec.h": "0d888fe4c74115ab2388f1df1dc0b86ae4b9b6c6",
++    "src/kernel/zswap-import-decoder-owner.h": "e1b4b903567070e2307f7d05f8e48c14e0bb3768",
++    "src/kernel/zswap-import-decoder-owner.c": "8e0c8f4d2085af7f2e17df412f3a1af654063571",
++}
++ORIGINAL = {
++    "mm/zswap.c": "ae19e301fced7e357a4c7587dfdd6abb890b9163",
++    "crypto/lzo.c": "d43242b24b4e831e7e0d26f38d2f263877d5748e",
++    "crypto/lz4.c": "57b713516aefac823f2af9481c828027b42490dd",
++    "include/linux/lzo.h": "4d30e3624acd237290dbfeaefdb9c710e4f85f56",
++    "lib/lzo/lzo1x_compress.c": "01586af2347f5e2f8c8528b94e02622fc8b262c8",
++    "lib/lzo/lzo1x_compress_safe.c": "371c9f849492814afed88a443acb2262dcf35dfe",
++    "lib/lzo/lzo1x_decompress_safe.c": "318abb82c63d2c27c0d5497b7cf4e21d87d13154",
++    "lib/lzo/lzodefs.h": "b60851fcf6ce54b57e87d04e917deaa2b6cf62cc",
++    "include/linux/lz4.h": "ad6042a718b5428792b795db7a8d4ad44c24a985",
++    "lib/lz4/lz4_compress.c": "2a397bb2c661d9c2e4a7a67d5f50f06bfd42f1f2",
++    "lib/lz4/lz4_decompress.c": "3a2cd9acada4a09ef70a344090d48167c46088a1",
++    "lib/lz4/lz4defs.h": "17277ec16919f3a554afc7d91ad515c493d745ca",
++}
++# Each mutant changes one real candidate C guard; named first runtime failure
++# is mandatory. No compile rejection, sanitizer fault, or generic exit counts.
++MUTANTS = (
++    ("geometry_ceiling", "ceiling == SWAPZ_ORIGINAL_DECODE_M3568 ||\n\t\tceiling == SWAPZ_ORIGINAL_DECODE_M4095", "ceiling != 0U"),
++    ("geometry_zero", "length != 0U && length <= ceiling", "length <= ceiling"),
++    ("geometry_cap", "length <= ceiling;", "length < SWAPZ_BLOCK_BYTES;"),
++    ("representation", "record->representation != SWAPZ_ZSWAP_IMPORT_REPRESENTATION", "0"),
++    ("codec", "(record->codec != SWAPZ_ZSWAP_IMPORT_LZ4_CODEC &&\n\t     record->codec != SWAPZ_ZSWAP_IMPORT_LZO1X_CODEC)", "0"),
++    ("version", "record->version != SWAPZ_ZSWAP_IMPORT_VERSION", "0"),
++    ("dictionary", "record->dictionary_id != 0U", "0"),
++    ("decoded_size", "record->decoded_length != SWAPZ_BLOCK_BYTES", "0"),
++    ("input_capacity", "input_capacity < record->compressed_length", "input_capacity < record->compressed_length - 1U"),
++    ("scratch_capacity", "scratch_capacity != SWAPZ_BLOCK_BYTES", "scratch_capacity < SWAPZ_BLOCK_BYTES - 1U"),
++    ("output_capacity", "output_capacity != SWAPZ_BLOCK_BYTES", "output_capacity < SWAPZ_BLOCK_BYTES - 1U"),
++    ("unretained", "if (!lease->owner)", "if (0 && !lease->owner)"),
++    ("lease_codec", "lease->codec != record->codec || lease->version != record->version", "lease->version != record->version"),
++    ("crc", "if (swapz_crc32c_bytes(input, record->compressed_length) != record->compressed_crc32c)", "if (0 && swapz_crc32c_bytes(input, record->compressed_length) != record->compressed_crc32c)"),
++    ("sha", "if (difference)", "if (0 && difference)"),
++    ("alias", "if (!swapz_original_decode_disjoint(lease, record, input, scratch, output))", "if (0 && !swapz_original_decode_disjoint(lease, record, input, scratch, output))"),
++    ("lzo_trailing", "if (result != LZO_E_OK)", "if (0 && result != LZO_E_OK)"),
++    ("lzo_short_output", "if (decoded_length != SWAPZ_BLOCK_BYTES)", "if (0 && decoded_length != SWAPZ_BLOCK_BYTES)"),
++    ("lz4_short_output", "if (result != (int)SWAPZ_BLOCK_BYTES)", "if (0 && result != (int)SWAPZ_BLOCK_BYTES)"),
++)
++
++# Exactly the original compressor signatures, never a production compressor.
++COMPRESS_ADAPTER = r'''#include "zswap-original-decode.h"
++#include <stddef.h>
++int round085_compress(swapz_u8 codec, const swapz_u8 *page, swapz_u32 length,
++    swapz_u8 *compressed, swapz_u32 capacity, swapz_u32 *written)
++{
++    static union { max_align_t alignment; unsigned char bytes[LZO1X_1_MEM_COMPRESS]; } lzo;
++    static union { max_align_t alignment; unsigned char bytes[LZ4_MEM_COMPRESS]; } lz4;
++    if (codec == SWAPZ_ZSWAP_IMPORT_LZO1X_CODEC) {
++        size_t actual = capacity;
++        int result = lzo1x_1_compress_safe(page, length, compressed, &actual, lzo.bytes);
++        if (result != LZO_E_OK || actual > capacity)
++            return -EIO;
++        *written = (swapz_u32)actual;
++        return 0;
++    }
++    int result = LZ4_compress_default((const char *)page, (char *)compressed,
++        (int)length, (int)capacity, lz4.bytes);
++    if (result <= 0)
++        return -EIO;
++    *written = (swapz_u32)result;
++    return 0;
++}
++'''
++
++
++def require(condition: bool, message: str) -> None:
++    if not condition:
++        raise RuntimeError(message)
++
++
++def git_blob(data: bytes) -> str:
++    import hashlib
++    return hashlib.sha1(b"blob " + str(len(data)).encode() + b"\0" + data).hexdigest()
++
++
++def verify_inputs(linux: Path) -> dict:
++    # Verify the existing helper itself before executing its Python definitions.
++    for root, files in ((ROOT, PRODUCT), (linux, ORIGINAL)):
++        for relative, expected in files.items():
++            path = root / relative
++            require(path.is_file() and git_blob(path.read_bytes()) == expected,
++                    f"whole Git blob mismatch: {relative} expected={expected}")
++    helpers = runpy.run_path(str(HELPER))
++    # Accept an immutable connector-exported source tree without .git only
++    # because every dependency (including source headers) is whole-blob pinned.
++    if (linux / ".git").exists():
++        require(helpers["checked"](["git", "-C", str(linux), "rev-parse", "HEAD"], "Linux pin") == PIN,
++                "original checkout SHA mismatch")
++        require(not helpers["checked"](["git", "-C", str(linux), "status", "--porcelain", "--untracked-files=all"], "Linux clean"),
++                "dirty original checkout")
++    source = CANDIDATE.read_text()
++    for name, old, new in MUTANTS:
++        require(source.count(old) == 1 and old != new, f"nonunique/vacuous C mutant: {name}")
++    return helpers
++
++
++def build_shim(linux: Path, workspace: Path, helpers: dict) -> Path:
++    shim = workspace / "shim"
++    entries = dict(helpers["SHIM"])
++    # R080's promoted typeof expression is not suitable for LZ4 u16 reads.
++    # Use an exact-width union backed by memcpy, avoiding unaligned dereference.
++    original = entries["linux/unaligned.h"]
++    pattern = r"^#define get_unaligned\(pointer\).*?$"
++    replacement = "#define get_unaligned(pointer) ({ union { __typeof__(*(pointer)) value; unsigned char bytes[sizeof(*(pointer))]; } aligned; memcpy(aligned.bytes, (const void *)(pointer), sizeof(aligned.bytes)); aligned.value; })"
++    entries["linux/unaligned.h"], count = re.subn(pattern, replacement, original, flags=re.M)
++    require(count == 1, "upstream host shim anchor drift")
++    entries["linux/unaligned.h"] += "\nstatic inline void put_unaligned_le16(uint16_t value, void *pointer) { memcpy(pointer, &value, sizeof(value)); }\n"
++    entries["linux/module.h"] += "\n#define EXPORT_SYMBOL(...)\n"
++    entries.update({
++        "linux/types.h": "#pragma once\n#include <stdint.h>\n#include <stddef.h>\n#include <stdbool.h>\n#include <linux/kernel.h>\n#ifndef __always_inline\n#define __always_inline inline __attribute__((always_inline))\n#endif\n",
++        "linux/string.h": "#pragma once\n#include <string.h>\n",
++        "linux/init.h": "#pragma once\n",
++        "linux/bitops.h": "#pragma once\n#include <linux/kernel.h>\nstatic inline unsigned int __ffs(unsigned long value) { return (unsigned int)__builtin_ctzl(value); }\n",
++        "lz4.h": "#pragma once\n#include <linux/lz4.h>\n",
++    })
++    for relative, content in entries.items():
++        path = shim / relative
++        path.parent.mkdir(parents=True, exist_ok=True)
++        path.write_text(content)
++    for relative in ("linux/lzo.h", "linux/lz4.h"):
++        (shim / relative).write_bytes((linux / "include" / relative).read_bytes())
++    return shim
++
++
++def execute(compiler: str, linux: Path, workspace: Path, helpers: dict) -> dict:
++    standard = helpers["compiler_standard"](compiler)
++    compile_object = helpers["compile_object"]
++    checked = helpers["checked"]
++    run = helpers["run_command"]
++    shim = build_shim(linux, workspace, helpers)
++    includes = ["-I", str(shim), "-I", str(ROOT / "src/kernel")]
++    fixed = []
++    # Only original upstream TUs use GNU11 and the already documented narrower
++    # original warning model; all candidate/product/test TUs use strict C23/C2x.
++    for relative in ("lib/lzo/lzo1x_compress_safe.c", "lib/lzo/lzo1x_decompress_safe.c",
++                     "lib/lz4/lz4_compress.c", "lib/lz4/lz4_decompress.c"):
++        obj = workspace / (Path(relative).stem + ".o")
++        compile_object(compiler, "-std=gnu11", linux / relative, obj,
++                       ["-I", str(shim), "-DCONFIG_64BIT=1"], original=True)
++        fixed.append(obj)
++    adapter = workspace / "original-compressor.c"
++    adapter.write_text(COMPRESS_ADAPTER)
++    for source in (ROOT / "src/kernel/codec.c", ROOT / "src/kernel/zswap-import-decoder-owner.c",
++                   FIXTURE, adapter):
++        obj = workspace / (source.stem + ".o")
++        compile_object(compiler, standard, source, obj, includes)
++        fixed.append(obj)
++    original = CANDIDATE.read_text()
++    cases = [("baseline", original)] + [(name, original.replace(old, new, 1)) for name, old, new in MUTANTS]
++    profiles = []
++    killed = []
++    for index, (name, source) in enumerate(cases):
++        unit = workspace / f"case-{index:02d}.c"
++        unit.write_text(source)
++        obj = unit.with_suffix(".o")
++        executable = unit.with_suffix("")
++        compile_object(compiler, standard, unit, obj, includes)
++        checked([compiler, "-fsanitize=address,undefined", "-fno-pie", "-no-pie", str(obj),
++                 *(str(path) for path in fixed), "-pthread", "-lcrypto", "-o", str(executable)], f"link {name}")
++        execution = run([str(executable)], name, timeout=30)
++        require(not any(token in execution.stderr for token in helpers["SANITIZER"]), f"{name}: sanitizer failure (not a kill)")
++        if index == 0:
++            match = re.fullmatch(r"PROFILE codec=1 small=(\d+) large=(\d+)\nPROFILE codec=2 small=(\d+) large=(\d+)\nPASS round085-original-decode AUTH=0 PHASE_A=BLOCKED\n", execution.stdout)
++            require(execution.returncode == 0 and not execution.stderr and match is not None,
++                    f"baseline: {helpers['first_diagnostic'](execution)}")
++            for codec, offset in ((1, 1), (2, 3)):
++                small, large = int(match.group(offset)), int(match.group(offset + 1))
++                require(0 < small <= 3568 < large <= 4095, "invalid real corpus lengths")
++                profiles.append({"codec": codec, "small": small, "large": large})
++        else:
++            require(execution.returncode == 1 and not execution.stdout and execution.stderr == f"FIRST_ERROR {name}\n",
++                    f"{name}: survived/wrong first error: {helpers['first_diagnostic'](execution)}")
++            killed.append(name)
++    return {"standard": standard, "baseline": "PASS", "profiles": profiles,
++            "mutants_compiled_executed_killed": len(killed), "mutants": killed}
++
++
++def main() -> int:
++    parser = argparse.ArgumentParser(description=__doc__)
++    parser.add_argument("--linux-root", type=Path, required=True)
++    args = parser.parse_args()
++    try:
++        linux = args.linux_root.resolve()
++        helpers = verify_inputs(linux)
++        results = {}
++        with tempfile.TemporaryDirectory(prefix="swapz-round085-original-decode-") as temporary:
++            for name in ("gcc", "clang"):
++                compiler = shutil.which(name)
++                require(compiler is not None, f"missing compiler {name}")
++                workspace = Path(temporary) / name
++                workspace.mkdir()
++                results[name] = execute(compiler, linux, workspace, helpers)
++        print(json.dumps({"status": "PASS_HOST_ONLY", "linux_pin": PIN,
++                          "candidate_blobs": {str(path.relative_to(ROOT)): git_blob(path.read_bytes())
++                              for path in (CANDIDATE, CANDIDATE.with_suffix(".h"), FIXTURE, Path(__file__).resolve())},
++                          "compilers": results, "source_mapped_authenticated": 0,
++                          "phase_a": "BLOCKED", "import_active": 0}, indent=2))
++        return 0
++    except (RuntimeError, OSError, ValueError) as error:
++        print(f"FIRST_ERROR round085-agent7 {error}", file=sys.stderr)
++        return 1
++
++
++if __name__ == "__main__":
++    raise SystemExit(main())
+diff --git a/docs/testing_standards.md b/docs/testing_standards.md
+index c7b3a138222ffecaa2cb1ceecb9ae6d942d70a65..7fd3800fdbcb9f7511f1629ef3ec19943213b7b1 100644
+--- a/docs/testing_standards.md
++++ b/docs/testing_standards.md
+@@ -20160,3 +20160,44 @@
+ ### Round084 Agent11 — disabled bounded original ticket broker
+ 
+ Compile actual separately opt-in broker C and pinned codec CRC helper using strict C23/C2x GCC/Clang ASan+UBSan. Verify exact main checkout, real single parent, whitespace, append-only standards, full original and product source pins, and unique semantic mutation anchors before compiling. Caller-preallocated aligned contiguous arrays, exact checked sizes and nonoverlap; independent count/byte reservation, immutable copy/CRC, source and route identity, generation wrap, refcount overflow, trylock refusal, claim once, revoke/close with retained owners and final release. Exercise barrier-ordered host concurrency and require explicit executed behavioral assertions for all 32 independent mutants per compiler, not compiler or sanitizer failures. Host pthread synchronization only; kernel spin adapter and real selected clone/carrier remain unqualified. No normal Kbuild, production BIO cap, reclaim competitor, native/physical test, imported routing or forced RAW. AUTH0 Phase A BLOCKED all activation OFF.
++
++## Round085 Agent7 — pure original typed decode candidate (unapplied review)
++
++Future application of the independent original typed decoder requires
++exact pinned original Linux LZO1X and raw LZ4 compressor/decompressor
++objects, unchanged actual product CRC32C/SHA helpers and independently
++retained decoder lease. Before compiling, verify whole Git blobs for
++the pinned original source and every imported product/host helper,
++single-parent clean source provenance and same-commit append-only
++testing standards. The candidate is not wired into normal Kbuild or
++activated by this test. Separate pre-write byte validation from durable
++mapping/read authority: never fabricate lower-write, read or ACK receipts.
++
++Validate representation0x5a, original raw LZ4 tag1 or LZO1X tag2,
++version1, dictionary0, positive compressed length with separate 3568
++or 4095 ceilings, actual input/scratch/output capacities and all accessed
++ranges including descriptor/digest, retained lease and owner. Decode
++exactly4096 bytes, verify compressed CRC32C and original-page SHA256,
++and preserve all output bytes on failure. Scratch is expendable.
++Exercise deterministic valid compressed streams above3568 for both
++original codecs; record actual compressed lengths near4095 rather than
++inventing streams for geometric endpoints. Geometry1/3568/3569/4095/
++4096 is not itself codec validity. Test rejected raw4096, short output,
++trailing/truncated input, wrong profile, wrong digest, alias and stale
++or absent lease. Caller owns immutable bytes and genuine exclusive
++lease; external source/selected-DM authentication is still required.
++
++Use strict GCC C23/C2x and Clang C23/C2x, Werror ASan+UBSan on all
++candidate/product/fixture TUs, with the documented upstream-only GNU11
++host ABI shim and unchanged pristine original source. Require each of
++19 independently compiled, linked and executed candidate C mutants
++per compiler to fail its named behavioral assertion; compiler failure,
++sanitizer crash or system-library diagnostic is not pinned-source
++qualification. No native or physical testing and no additional CI
++workflow until separately authorized. Linux MM/zswap alone manages
++compressed RAM and natural eviction; swapz disk packing/GC only,
++no competing reclaim or recompression of accepted bytes. Ordinary
++RAW_4096 is the complete original uncompressed page; ordinary cap3568,
++20-byte volatile map and protected physical SWAPSPACE2 first4096
++remain unchanged. SOURCE_MAPPED_AUTHENTICATED=0, PHASE_A=BLOCKED,
++direct/forced RAW/import OFF.
