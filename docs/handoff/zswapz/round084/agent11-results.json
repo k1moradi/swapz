@@ -1,0 +1,88 @@
+{
+  "round": "084",
+  "agent": 11,
+  "conclusion": "QUEUED",
+  "assignment_sha": "1f8b9b89006af6cd8ad895239a023772b694cc36",
+  "assignment_parent": "be84039bd108020c083ef1a929722ca6afe7f74f",
+  "tested_source_commit": "f7df9058c7291d15b6159b6bbe95e8a845113bf4",
+  "tested_source_parent": "3ef350588cec0e9d1364f80a94bea33e498144ad",
+  "original_linux_pin": "c339f4010dea8b0d754f84ace70cd1b089878ef8",
+  "original_blobs": {
+    "mm/zswap.c": "ae19e301fced7e357a4c7587dfdd6abb890b9163",
+    "mm/zsmalloc.c": "7ef80e0da6267661cea4d48a4a615444724782e7",
+    "drivers/md/dm.c": "1881d86111fb2e655893ad898cf21b88f0e4e7f3"
+  },
+  "product_blobs": {
+    "src/kernel/codec.h": "e89d316b9cf49f82df0b77648c1be1731607987d",
+    "src/kernel/codec.c": "d920dcaac6f2b7de1334d4133770bd649719c66d",
+    "src/kernel/authority.h": "3bb5bab5a5bdb2aa087f5793fc8b5e90d6636031",
+    "src/kernel/dm-target.c": "f1cab252cd990190646c82da81378d1563475826",
+    "src/kernel/Makefile": "ed6e19ae28a84a4a3e92117812adc445d5c2e8e5"
+  },
+  "new_blobs": {
+    "src/kernel/zswap-original-ticket.h": "b772cc28755a68719f4dcdabefeefe57b5efea67",
+    "src/kernel/zswap-original-ticket.c": "dcea7cbc40094fed2997d6704c712ac47aa164a1",
+    "tests/runtime/native/fixtures/round084-original-ticket.c": "c866418fc6e70438743c29d56c22116127a71951",
+    "tests/tools/round084-original-ticket-verify.py": "448703b4907c1e4caadc9810fd4f23dcd147e089",
+    ".github/workflows/phase-a-round084-original-ticket-host-noauth.yml": "37cf34899bd258eaebf12e952de778f55df052f4"
+  },
+  "standards_before": "f70c9a1efacd5f29b30d6b43f4d85435eebc9ea5",
+  "standards_after": "c7b3a138222ffecaa2cb1ceecb9ae6d942d70a65",
+  "github_actions_run_id": 45395569647,
+  "github_actions_job_id": 138450309370,
+  "github_actions_run_url": "https://github.com/k1moradi/swapz/actions/runs/45395569647",
+  "github_actions_job_url": "https://github.com/k1moradi/swapz/actions/runs/45395569647/job/138450309370",
+  "first_error": null,
+  "first_error_scope": "NO_CI_ERROR_REPORTED_QUEUED",
+  "prepublication_tool_errors": [
+    "Initial connector script syntax error before any writes",
+    "Second connector batch exceeded per-call tool limit; no ref update",
+    "Workflow-specific runs endpoint rejected by connector; repository run list resolved actual run"
+  ],
+  "preflight": {
+    "task_parent_verified": true,
+    "pinned_blob_metadata_checked": true,
+    "actual_source_mutation_anchors_unique": 32,
+    "standards_exact_prefix_verified": true,
+    "source_commit_single_parent_verified": true,
+    "remote_exact_git_diff_whitespace": "PENDING",
+    "remote_full_blob_hashes": "PENDING",
+    "local_c_execution": "NOT_RUN"
+  },
+  "remote_compilers": {
+    "gcc": {
+      "baseline": "PENDING",
+      "mutants_compiled_confirmed": 0,
+      "mutants_executed_confirmed": 0,
+      "target": 32
+    },
+    "clang": {
+      "baseline": "PENDING",
+      "mutants_compiled_confirmed": 0,
+      "mutants_executed_confirmed": 0,
+      "target": 32
+    }
+  },
+  "scope": "ACTUAL_DISABLED_REUSABLE_BROKER_HOST_ONLY",
+  "host_sizeof": "PENDING_CI",
+  "kernel_adapter": "UNQUALIFIED",
+  "live_dm_claim": false,
+  "caller_contract": "MOVE_ONLY_LEASE_AND_EXTERNAL_API_QUIESCENCE_BEFORE_DESTROY",
+  "copy_strides": [
+    3584,
+    4096
+  ],
+  "max_payloads": [
+    3568,
+    4095
+  ],
+  "production_bio_cap": "NO_GO_NOT_IMPLEMENTED",
+  "source_mapped_authenticated": 0,
+  "phase_a": "BLOCKED",
+  "direct_handoff": "DISABLED",
+  "forced_raw_bypass": "DISABLED",
+  "import_active": 0,
+  "native": "NOT_RUN",
+  "physical_durability": "NOT_PROVEN",
+  "actual_upper_ack": "NOT_PROVEN"
+}
