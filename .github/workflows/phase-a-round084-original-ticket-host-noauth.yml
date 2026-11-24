@@ -1,0 +1,56 @@
+name: Round084 Agent11 bounded original ticket HOST_ONLY NO_AUTH
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'src/kernel/zswap-original-ticket.h'
+      - 'src/kernel/zswap-original-ticket.c'
+      - 'tests/runtime/native/fixtures/round084-original-ticket.c'
+      - 'tests/tools/round084-original-ticket-verify.py'
+      - '.github/workflows/phase-a-round084-original-ticket-host-noauth.yml'
+permissions:
+  contents: read
+jobs:
+  bounded-original-ticket-gcc-clang:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Verify exact clean main, single parent and whitespace
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          test "$GITHUB_REF" = refs/heads/main
+          test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
+          test -z "$(git status --porcelain --untracked-files=all)"
+          read -r -a ancestry <<< "$(git rev-list --parents -n 1 HEAD)"
+          test "${#ancestry[@]}" -eq 2
+          git rev-parse --verify HEAD^ >/dev/null
+          git diff --check HEAD^ HEAD
+      - name: Preserve inherited standards
+        env:
+          SWAPZ_PUSH_BEFORE_SHA: ${{ github.event.before }}
+        run: python3 -B tests/runtime/native/repository-policy-test.py --enforce
+      - name: Verify pinned sources, compile and execute actual broker
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          original="$RUNNER_TEMP/round084-original"
+          for file in mm/zswap.c mm/zsmalloc.c drivers/md/dm.c; do
+            mkdir -p "$original/$(dirname "$file")"
+            curl --fail --location --silent --show-error --retry 2 --max-time 60 \
+              "https://raw.githubusercontent.com/torvalds/linux/c339f4010dea8b0d754f84ace70cd1b089878ef8/$file" \
+              --output "$original/$file"
+          done
+          python3 -B tests/tools/round084-original-ticket-verify.py \
+            --original-dir "$original" --json round084-agent11-evidence/results.json
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: round084-agent11-original-ticket-host
+          path: round084-agent11-evidence/results.json
+          if-no-files-found: warn
+          retention-days: 7
