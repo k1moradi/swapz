@@ -1,15 +1,15 @@
 {
   "agent": 11,
   "round": "081",
-  "status": "LOCAL_HOST_PASS_REMOTE_CI_PENDING",
+  "status": "LOCAL_HOST_PASS_REMOTE_CI_QUEUED",
   "assignment_sha": "01abda0f17874b260c3ef6d1dbe2e445622e5b7a",
   "assignment_parent": "8edefaac0f23a7749daf34ff93b34e4efacded9d",
-  "tested_source_commit": "PENDING_MAIN_PUSH_SHA",
-  "tested_source_parent": "PENDING_MAIN_PUSH_PARENT",
+  "tested_source_commit": "10d3176e79742423174e69e648c505c374a264ed",
+  "tested_source_parent": "2f2a640366e5f99a4b007202094f6070af65e43d",
   "github_actions_workflow": ".github/workflows/phase-a-round081-actual-dm-bio-debt-ownership-noauth.yml",
-  "github_actions_run": "PENDING",
-  "github_actions_job": "PENDING",
-  "first_remote_error": "PENDING",
+  "github_actions_run": "45293919114_QUEUED",
+  "github_actions_job": "138109374984_QUEUED",
+  "first_remote_error": "NONE_REPORTED_AS_QUEUED",
   "original_linux_commit": "c339f4010dea8b0d754f84ace70cd1b089878ef8",
   "original_linux_dm_blob": "1881d86111fb2e655893ad898cf21b88f0e4e7f3",
   "original_linux_device_mapper_header_blob": "cd4faaf5d4275c038d06ccef4da3d77430154388",
@@ -27,8 +27,8 @@
     }
   },
   "remote_compiler_execution": {
-    "gcc": "PENDING",
-    "clang": "PENDING"
+    "gcc": "QUEUED_0_CONFIRMED",
+    "clang": "QUEUED_0_CONFIRMED"
   },
   "source_fragments": "3_VERBATIM_PRODUCT_STATEMENTS_PLUS_SOURCE_LOCKED_ORIGINAL_DM_CORE_AND_HEADER_AND_PRODUCT",
   "upper_bio_debt": "TEST_ONLY_LEDGER_MODEL_NOT_PRODUCTION_CAP",
@@ -39,5 +39,7 @@
   "phase_a": "BLOCKED",
   "direct_handoff": "DISABLED",
   "forced_raw_bypass": "DISABLED",
-  "import_active": 0
+  "import_active": 0,
+  "github_actions_run_url": "https://github.com/k1moradi/swapz/actions/runs/45293919114",
+  "github_actions_job_url": "https://github.com/k1moradi/swapz/actions/runs/45293919114/job/138109374984"
 }
