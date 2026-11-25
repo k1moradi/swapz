@@ -677,6 +677,24 @@ struct swapz_gc_recovery {
 	bool active;
 };
 
+#if defined(SWAPZ_ROUND088_SELECTED_DM_CANDIDATE_TEST)
+/* Value-only registry metadata. The core caller must retain its independent
+ * broker capability through ->map; this record neither pins a target outside
+ * SRCU nor acquires a broker reference. No current caller can publish a route.
+ */
+struct swapz_round089_route {
+	u64 broker_session;
+	u64 table_epoch;
+	u64 target_epoch;
+	u64 registration_epoch;
+};
+
+/* Globally non-reused registration epochs for this module lifetime.
+ * A broker session must independently be non-reused across module reload.
+ */
+static atomic64_t swapz_round089_route_sequence = ATOMIC64_INIT(0);
+#endif
+
 struct swapz_dm {
 	struct dm_target *target;
 	struct dm_dev *backing;
@@ -891,6 +909,10 @@ struct swapz_dm {
 	/* Callback only queues the serialized worker; it never owns BIOs. */
 	struct hrtimer retention_timer;
 	spinlock_t queue_lock;
+#if defined(SWAPZ_ROUND088_SELECTED_DM_CANDIDATE_TEST)
+	/* Protected by queue_lock; zero registration_epoch means revoked. */
+	struct swapz_round089_route original_route;
+#endif
 	struct list_head incoming;
 	bool accepting;
 	bool failed;
@@ -2498,6 +2520,17 @@ static const char *swapz_failure_category(int error)
 	}
 }
 
+#if defined(SWAPZ_ROUND088_SELECTED_DM_CANDIDATE_TEST)
+/* No broker calls, callbacks or puts under queue_lock. Only local route
+ * metadata is invalidated; independent carrier refs outlive target teardown.
+ */
+static void swapz_round089_revoke_route_locked(struct swapz_dm *ctx)
+{
+	lockdep_assert_held(&ctx->queue_lock);
+	ctx->original_route = (struct swapz_round089_route){};
+}
+#endif
+
 static void swapz_fail_at(struct swapz_dm *ctx, int error,
 			  const char *operation, const char *category,
 			  const char *stage)
@@ -2523,6 +2556,9 @@ static void swapz_fail_at(struct swapz_dm *ctx, int error,
 		WRITE_ONCE(ctx->last_error, terminal_error);
 		ctx->io_failures++;
 		smp_store_release(&ctx->failed, true);
+#if defined(SWAPZ_ROUND088_SELECTED_DM_CANDIDATE_TEST)
+		swapz_round089_revoke_route_locked(ctx);
+#endif
 		first_failure = true;
 	}
 	spin_unlock_irqrestore(&ctx->queue_lock, flags);
@@ -13988,11 +14024,107 @@ static int swapz_round088_claim_refuse(
 }
 /* ROUND088_SELECTED_DM_GUARD_END */
 
+/* Registration is metadata only, not authentication. A future caller must
+ * supply the actual selected ti under core SRCU plus an independently retained
+ * broker capability and trusted route epochs. No caller exists in this tree.
+ * The target never stores a raw external target/table pointer or broker ref.
+ * Publish once, never reuse a revoked epoch. One CAS attempt; no wait.
+ */
+static __maybe_unused int swapz_round089_register_route(
+		struct dm_target *ti, u64 broker_session, u64 table_epoch,
+		u64 target_epoch, struct swapz_round089_route *published)
+{
+	struct swapz_dm *ctx;
+	unsigned long flags;
+	s64 previous;
+	int error = -EAGAIN;
+
+	if (!published)
+		return -EINVAL;
+	*published = (struct swapz_round089_route){};
+	if (!ti)
+		return -EINVAL;
+	ctx = ti->private;
+	if (!ctx || ctx->target != ti || !ti->table || ti->begin ||
+	    !broker_session || !table_epoch || !target_epoch)
+		return -EINVAL;
+
+	spin_lock_irqsave(&ctx->queue_lock, flags);
+	if (!ctx->accepting || READ_ONCE(ctx->failed)) {
+		error = -ESHUTDOWN;
+		goto out;
+	}
+	if (ctx->original_route.registration_epoch) {
+		error = -EALREADY;
+		goto out;
+	}
+	previous = atomic64_read(&swapz_round089_route_sequence);
+	if (previous < 0 || previous == S64_MAX) {
+		error = -EOVERFLOW;
+		goto out;
+	}
+	if (atomic64_cmpxchg(&swapz_round089_route_sequence, previous,
+			    previous + 1) != previous)
+		goto out;
+	ctx->original_route = (struct swapz_round089_route){
+		.broker_session = broker_session,
+		.table_epoch = table_epoch,
+		.target_epoch = target_epoch,
+		.registration_epoch = (u64)(previous + 1),
+	};
+	*published = ctx->original_route;
+	error = 0;
+out:
+	spin_unlock_irqrestore(&ctx->queue_lock, flags);
+	return error;
+}
+
+/* A retained core candidate must carry this value snapshot. A match only
+ * proves local registry freshness, not broker state or source authenticity.
+ */
+static bool swapz_round089_route_matches_locked(
+		struct swapz_dm *ctx, const struct swapz_round089_route *route)
+{
+	const struct swapz_round089_route *current_route = &ctx->original_route;
+
+	lockdep_assert_held(&ctx->queue_lock);
+	return route && current_route->registration_epoch &&
+	       route->registration_epoch == current_route->registration_epoch &&
+	       route->broker_session == current_route->broker_session &&
+	       route->table_epoch == current_route->table_epoch &&
+	       route->target_epoch == current_route->target_epoch;
+}
+
+/* Original core validation runs in the selected map SRCU scope, before
+ * queue_lock. No carrier exists yet; no caller may synthesize one.
+ */
+#if defined(SWAPZ_ROUND089_ORIGINAL_DM_CORE_TEST)
+extern bool dm_swapz_round088_clone_matches(struct dm_target *ti,
+		struct bio *clone, const struct bio *expected_origin);
+#endif
+
+static bool swapz_round089_core_matches(struct dm_target *ti, struct bio *bio,
+		const struct swapz_round088_candidate *candidate)
+{
+#if defined(SWAPZ_ROUND089_ORIGINAL_DM_CORE_TEST)
+	return candidate && candidate->clone == bio &&
+	       candidate->target == ti && candidate->table == ti->table &&
+	       dm_swapz_round088_clone_matches(ti, bio, candidate->origin);
+#else
+	/* Standalone target-only candidate build has no patched core. */
+	(void)ti;
+	(void)bio;
+	(void)candidate;
+	return false;
+#endif
+}
+
 static int swapz_round088_try_claim_locked(
 		struct dm_target *ti, struct swapz_dm *ctx,
 		struct swapz_bio_ref *entry,
 		const struct swapz_round088_candidate *candidate,
-		const struct swapz_round088_candidate *observed)
+		const struct swapz_round088_candidate *observed,
+		const struct swapz_round089_route *route, bool core_matches)
 {
 	struct bio *bio = entry->bio;
 	struct bio_vec vec;
@@ -14005,6 +14137,11 @@ static int swapz_round088_try_claim_locked(
 		return -ESHUTDOWN;
 	if (!fresh_descriptor)
 		return -EALREADY;
+	if (!core_matches || !swapz_round089_route_matches_locked(ctx, route))
+		return -EOPNOTSUPP;
+	if (!observed || observed->table_epoch != route->table_epoch ||
+	    observed->target_epoch != route->target_epoch)
+		return -ESTALE;
 	if (ctx->target != ti || !ti->table || ti->begin ||
 	    ti->len < SWAPZ_SECTORS || sector > ti->len - SWAPZ_SECTORS ||
 	    sector % SWAPZ_SECTORS || sector / SWAPZ_SECTORS >= ctx->logical_pages ||
@@ -14031,17 +14168,6 @@ static int swapz_round088_try_claim_locked(
 			ctx->accepting, READ_ONCE(ctx->failed), fresh_descriptor);
 }
 
-static void swapz_round088_enqueue_locked(struct dm_target *ti,
-		struct swapz_dm *ctx, struct swapz_bio_ref *entry)
-{
-	lockdep_assert_held(&ctx->queue_lock);
-	/* There is no core-owned retained candidate in the frozen tree.
-	 * Refusal is not a BIO error or REQUEUE. No reference is acquired,
-	 * no source bytes are consumed, and normal preparation stays intact.
-	 */
-	(void)swapz_round088_try_claim_locked(ti, ctx, entry, NULL, NULL);
-	list_add_tail(&entry->list, &ctx->incoming);
-}
 #endif /* SWAPZ_ROUND088_SELECTED_DM_CANDIDATE_TEST */
 
 static int swapz_map(struct dm_target *ti, struct bio *bio)
@@ -14053,6 +14179,14 @@ static int swapz_map(struct dm_target *ti, struct bio *bio)
 	sector_t count = bio_sectors(bio);
 	int submitter_lane = -1;
 	bool ordered_owned = false, submitter_dispatch = false;
+#if defined(SWAPZ_ROUND088_SELECTED_DM_CANDIDATE_TEST)
+	/* No trusted carrier adapter in the frozen tree. A future core-owned
+	 * retained candidate must be validated here, before taking queue_lock.
+	 */
+	const struct swapz_round088_candidate *candidate = NULL;
+	const struct swapz_round089_route *candidate_route = NULL;
+	bool core_matches;
+#endif
 
 	if (!READ_ONCE(ctx->accepting))
 		return READ_ONCE(ctx->failed) ? DM_MAPIO_KILL : DM_MAPIO_REQUEUE;
@@ -14142,6 +14276,9 @@ static int swapz_map(struct dm_target *ti, struct bio *bio)
 	if (ctx->async_prepare && bio_op(bio) == REQ_OP_WRITE && count)
 		init_completion(&entry->preparation_snapshot_ready);
 	entry->bio = bio;
+#if defined(SWAPZ_ROUND088_SELECTED_DM_CANDIDATE_TEST)
+	core_matches = swapz_round089_core_matches(ti, bio, candidate);
+#endif
 #if defined(SWAPZ_ROUND063_ORIGINAL_DM_OWNER_TEST) && \
     defined(SWAPZ_ROUND056_PREERASE_SINGLE_OWNER_TEST) && \
     defined(SWAPZ_ROUND031_MM_BIO_SOURCE) && \
@@ -14274,10 +14411,15 @@ static int swapz_map(struct dm_target *ti, struct bio *bio)
 		entry->lane_admitted_ns = entry->admitted_ns;
 	}
 #if defined(SWAPZ_ROUND088_SELECTED_DM_CANDIDATE_TEST)
-	swapz_round088_enqueue_locked(ti, ctx, entry);
-#else
-	list_add_tail(&entry->list, &ctx->incoming);
+	/* No retained core candidate or claim adapter exists yet. Refusal
+	 * preserves this single canonical FIFO link and ordinary preparation.
+	 * The future successful claim must move ownership without failure
+	 * immediately before the link, under this same queue_lock.
+	 */
+	(void)swapz_round088_try_claim_locked(ti, ctx, entry, candidate, NULL,
+					     candidate_route, core_matches);
 #endif
+	list_add_tail(&entry->list, &ctx->incoming);
 #if defined(SWAPZ_ROUND052_DM_INTERNAL_ONE_SHOT_TEST)
 /* ROUND052_DM_INTERNAL_MAP_ACCEPTED_START */
 	/*
@@ -14409,6 +14551,9 @@ static void swapz_drain(struct dm_target *ti)
 	 */
 	spin_lock_irqsave(&ctx->queue_lock, flags);
 	WRITE_ONCE(ctx->accepting, false);
+#if defined(SWAPZ_ROUND088_SELECTED_DM_CANDIDATE_TEST)
+	swapz_round089_revoke_route_locked(ctx);
+#endif
 	spin_unlock_irqrestore(&ctx->queue_lock, flags);
 	/* The callback takes queue_lock. Close admission first, then cancel
 	 * outside that lock before waiting for any worker or freeing it. */

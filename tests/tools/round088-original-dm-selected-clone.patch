@@ -1,7 +1,10 @@
 diff --git a/drivers/md/dm.c b/drivers/md/dm.c
 --- a/drivers/md/dm.c
 +++ b/drivers/md/dm.c
-@@ -1406,3 +1406,66 @@
+@@ -1404,4 +1404,67 @@
+ }
+-
++
 +#if defined(SWAPZ_ROUND088_SELECTED_DM_CANDIDATE_TEST)
 +/*
 + * Review-only actual-clone identity seam. Caller must be the selected target's
@@ -67,4 +70,3 @@ diff --git a/drivers/md/dm.c b/drivers/md/dm.c
 +
  static void __map_bio(struct bio *clone)
  {
- 	struct dm_target_io *tio = clone_to_tio(clone);

@@ -1,0 +1,97 @@
+{
+  "round": "089",
+  "agent": 3,
+  "task_commit": "0c893ee7a3ffc158d747c11c96b67fcf0b3efa15",
+  "engineering_baseline": "db9252db73721a768be912965ad4402e332039e8",
+  "code_commit": null,
+  "code_parent": null,
+  "source_publication": "SELF_SHA_PENDING",
+  "decision": "DORMANT_CANDIDATE_GO_LIVE_NO_GO",
+  "prior_round088": {
+    "source": "6d7b8e2e8af916214a1867d701a7c9f176da9a0f",
+    "run_id": 45458753262,
+    "job_id": 138675229125,
+    "conclusion": "FAILURE",
+    "first_error": "tests/tools/round088-original-dm-selected-clone.patch:70: space before tab in indent.",
+    "exit_code": 2,
+    "remote_compilers": 0,
+    "failed_runs": 14,
+    "failed_jobs": 15,
+    "whitespace_jobs": [
+      138675228740,
+      138675229230,
+      138675229020,
+      138675230162,
+      138675231864,
+      138675229533,
+      138675231294,
+      138675229602,
+      138675229642,
+      138675229125,
+      138675229500,
+      138675231717
+    ],
+    "duplicate_enqueue_jobs": [
+      138675230582,
+      138675229104,
+      138675229510
+    ],
+    "evidence": "AGENT1_TERMINAL_RECONCILIATION_PRESERVED"
+  },
+  "original_linux_pin": "c339f4010dea8b0d754f84ace70cd1b089878ef8",
+  "original_dm_blob": "1881d86111fb2e655893ad898cf21b88f0e4e7f3",
+  "expected_original_postimage": "59ff578305062e9a63f900a661c6ce0cf3d8a9eb",
+  "patch_preimage": "e465dacabfb12fc93382143308e7ba1a188f59e6",
+  "patch_postimage": "3ccbb9eaca06021176d52dd14888ce281af43990",
+  "target_preimage": "cb0b20aa3a52a0a136e2a84e87b838d75a462e28",
+  "target_postimage": "1b103767e1783ed48cf79b1c9e5654f8d99f646e",
+  "legacy_enqueue_anchor_count": 1,
+  "local_host": {
+    "status": "PASS",
+    "scope": "COPIED_ACTUAL_GUARD_AND_REGISTRY_FUNCTIONS_HOST_ADAPTERS_ONLY",
+    "gcc": "14.2.0",
+    "clang": "17.0.0",
+    "scenarios_per_compiler": 17,
+    "semantic_mutants_compiled_executed_rejected_per_compiler": 15,
+    "registry_checks_per_compiler": 18,
+    "sanitizers": [
+      "ASan",
+      "UBSan"
+    ]
+  },
+  "local_patch": {
+    "hash_verified": true,
+    "whitespace_diagnostic": "NONE",
+    "context_fixture_apply_reverse": "PASS",
+    "pristine_apply": "NOT_RUN_LOCALLY"
+  },
+  "local_full_checkout": {
+    "status": "BLOCKED",
+    "first_error": "git ls-remote github.com DNS resolution failed (exit 128)",
+    "kernel_compile": "NOT_RUN",
+    "exact_full_repo_policy": "NOT_RUN_LOCALLY"
+  },
+  "github_ci": {
+    "status": "NOT_SCHEDULED",
+    "run_id": null,
+    "jobs": [],
+    "first_error": null
+  },
+  "conclusion": "IN_PROGRESS",
+  "first_integration_blocker": "NO_AUTHENTIC_RETAINED_CARRIER_OR_ATOMIC_BROKER_CLAIM_REVOCATION_GENERATION_FENCE",
+  "actual_capability_retention": "NOT_IMPLEMENTED",
+  "route_registry": "DORMANT_VALUE_ONLY_METADATA",
+  "candidate_claimed": false,
+  "source_mapped_authenticated": false,
+  "phase_a": "BLOCKED",
+  "direct_compressed_handoff": "DISABLED",
+  "forced_raw_bypass": "DISABLED",
+  "import_active": 0,
+  "raw_4096": "FULL_ORIGINAL_UNCOMPRESSED_4096",
+  "physical_mutation": false,
+  "privileged_tests": false,
+  "loaded_kernel_tests": false,
+  "vm_tests": false,
+  "actual_lower_durable_write": false,
+  "actual_upper_ack": false
+}
