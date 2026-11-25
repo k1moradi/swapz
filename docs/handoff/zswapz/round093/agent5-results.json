@@ -1,0 +1,85 @@
+{
+  "round": "093",
+  "agent": 5,
+  "kind": "dormant-storage-value-adapter-modeled-provider-host",
+  "conclusion": "QUEUED",
+  "tested_commit": "e849f333b4f89d5ffd84dc14c061dfc93566e8e3",
+  "parent": "3fceb96980c47b06fe6592912225d950620a2f3b",
+  "prepared_candidate": "f1a66ae3cdb84c4e33ced613c56928feb06c6dfe",
+  "source_published": true,
+  "workflow_url": "https://github.com/k1moradi/swapz/actions/runs/45666497774",
+  "jobs": [
+    {
+      "run_id": 45666497774,
+      "job_id": 139389937913,
+      "status": "queued",
+      "conclusion": null,
+      "actual_checks": null,
+      "actual_mutants": null
+    }
+  ],
+  "artifacts": [],
+  "first_error": null,
+  "local_preflight": {
+    "local_git_exit": 128,
+    "reason": "Could not resolve host: github.com",
+    "source_text_mutation_anchors": 13,
+    "source_pins_verified": 14,
+    "remote_compare": "six paths; five added; standards append only",
+    "local_compile": "NOT_RUN",
+    "git_diff_check": "NOT_RUN",
+    "repository_policy": "NOT_RUN"
+  },
+  "carryover": {
+    "source": "78f630c9d0a2d5bfb626f2dbdef172f6024cf5ea",
+    "terminal": "PASS_HOST_ONLY",
+    "checkpoint": "https://github.com/k1moradi/swapz/blob/dc3d55c6c44482f23bb5d263211f2b747e9bee87/docs/handoff/zswapz/round093/agent1-checkpoint.md",
+    "r092_issue": "https://github.com/k1moradi/swapz/issues/210#issuecomment-7168078239",
+    "runs": [
+      45650794093,
+      45650794159
+    ],
+    "repeat": false
+  },
+  "source_blobs": {
+    "src/kernel/zswap-original-storage-value.h": "9b6be5452ff9a7ecb20fb8e661b593c290cc8b7e",
+    "src/kernel/zswap-original-storage-value.c": "8f532824e9c63a6498d71fcb1ce4c35b18130f1e",
+    "tests/runtime/native/fixtures/round092-shared-storage-value.c": "df2d69153f9b157ef7e505a77d3b10473a4a7c0b",
+    "tests/tools/round092-shared-storage-value-verify.py": "757e6cdfe5fca63747cb2cede3a19949d4961707",
+    ".github/workflows/phase-a-round092-shared-storage-value-host-noauth.yml": "93654890509255659138589691ba62dcd8c23267"
+  },
+  "standards": {
+    "parent_blob": "36e90b28ccc4af155779558b2163c7bbee3401bc",
+    "parent_bytes": 1822952,
+    "published_blob": "2e01fd52363450759840e07d9408d4a403ea70b9",
+    "published_bytes": 1825592,
+    "append_bytes": 2640,
+    "complete_prefix_verified": true
+  },
+  "value_adapter": {
+    "frozen_decoder_header": "0f103783aee10d18df5c502fdf553f7ac6a0035d",
+    "legacy_pointer_adapter_unchanged": true,
+    "record_slots": 8,
+    "provider_slots": 64,
+    "ordinary_map_bytes_static": 20,
+    "measured_overhead_bytes": null,
+    "caller_buffers": 4,
+    "caller_buffer_bytes": 16384,
+    "provider": "MODELED_FROZEN_VALUE_ABI",
+    "planned_mutants_per_compiler": 13,
+    "executed_mutants_per_compiler": 0,
+    "transient_lease_callback": "IMPLEMENTED_UNQUALIFIED",
+    "source_authentication": false,
+    "production_scale": "UNQUALIFIED",
+    "native": "NOT_RUN"
+  },
+  "source_mapped_authenticated": 0,
+  "phase_a": "BLOCKED",
+  "direct_compressed_handoff": "DISABLED",
+  "forced_raw_bypass": "DISABLED",
+  "import_active": 0,
+  "physical_io": false,
+  "vm": false,
+  "module_load": false,
+  "manual_dispatch": false
+}
