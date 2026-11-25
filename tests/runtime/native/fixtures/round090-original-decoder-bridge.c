@@ -170,6 +170,30 @@ int main(void)
 		bad = snapshot;
 		bad.compressed_capacity = compressed_length - 1U;
 		reject("short_input", &bad, 3568U, -EMSGSIZE);
+		/* Invalid pointers, page geometry and aliased workspaces must
+		 * fail before the caller's decoded output can be published. */
+		bad = snapshot;
+		bad.compressed_bytes = NULL;
+		reject("null_compressed_bytes", &bad, 3568U, -EINVAL);
+		bad = snapshot;
+		bad.record_token = NULL;
+		reject("null_record_token", &bad, 3568U, -EINVAL);
+		CHECK("scratch_short", swapz_original_decoder_bridge_read(
+			&bridge, &snapshot, 3568U,
+			scratch, SWAPZ_BLOCK_BYTES - 1U,
+			verified, sizeof(verified), output, sizeof(output)) == -EINVAL);
+		CHECK("verified_short", swapz_original_decoder_bridge_read(
+			&bridge, &snapshot, 3568U,
+			scratch, sizeof(scratch), verified, SWAPZ_BLOCK_BYTES - 1U,
+			output, sizeof(output)) == -EINVAL);
+		CHECK("output_short", swapz_original_decoder_bridge_read(
+			&bridge, &snapshot, 3568U,
+			scratch, sizeof(scratch), verified, sizeof(verified),
+			output, SWAPZ_BLOCK_BYTES - 1U) == -EINVAL);
+		CHECK("scratch_verified_alias", swapz_original_decoder_bridge_read(
+			&bridge, &snapshot, 3568U,
+			scratch, sizeof(scratch), scratch, sizeof(scratch),
+			output, sizeof(output)) == -EINVAL);
 		bad = snapshot;
 		bad.record.compressed_length = 0U;
 		reject("zero_length", &bad, 3568U, -EMSGSIZE);

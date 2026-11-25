@@ -20535,3 +20535,15 @@ Require actual extracted credit and claim C tests on both GCC and Clang strict A
 ### Round090 original independent decoder bridge (dormant host only)
 
 The original typed storage decoder callback is explicitly bound to two independently initialized original LZ4/LZO1X decoder owners. Each store/GC record receives a bounded nonreused opaque token; a synchronous read independently gets and releases a codec-matching decoder lease. `close` rejects active record tokens or in-flight readers without waiting under foreign locks; storage callbacks must be externally quiesced before bridge destruction. An exhausted 64-token session fails closed, so this deliberately cannot qualify an unbounded production lifetime or replace the missing generation-bearing callback ABI. Test strict GCC/Clang C23/C2x ASan+UBSan using the pinned original codec objects with the accepted reversible isolated noDict corrections; validate 4096-byte output, CRC/SHA, stale/ABA, alias, malformed, M3568/M4095 and concurrent readers. Original pin and original source files are unchanged. No production Kbuild, physical write, device admission, source authentication, upper ACK, VM or live codec module lease claim. AUTH=0; Phase A BLOCKED; compressed handoff, forced RAW bypass and import remain OFF.
+
+## Round090 Agent7 — real decoder bridge buffer-shape and null-source controls
+
+The source-linked independent original LZ4/LZO1X decoder bridge fixture must
+exercise absent record-token and compressed-byte pointers, short scratch,
+verified and output spans, and scratch/verified aliasing. These malformed read
+requests must fail before publishing a decoded page; the pointer regressions
+must also verify every output byte remains unchanged. Preserve the pinned
+original codec, independent lease and complete integrity gates. An invalid
+previous source revision is not qualified by a docs-only fix: commit a real
+new test/source change with these applicable standards and qualify that exact
+SHA under strict GCC/Clang ASan+UBSan; do not relax repository policy.
