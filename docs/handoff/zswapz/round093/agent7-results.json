@@ -129,11 +129,129 @@
       "run_id": 45666015960,
       "job_id": 139388246410,
       "attempt": 1,
-      "status": "in_progress",
-      "conclusion": null,
+      "status": "completed",
+      "conclusion": "success",
       "source_policy_preflight": "success",
-      "results": null,
-      "artifact": null
+      "results": {
+        "agent": 7,
+        "classifier_cases": 10,
+        "compilers": {
+          "clang": {
+            "checks": 126445,
+            "churn": 24000,
+            "compiler": "/usr/bin/clang",
+            "first_error": null,
+            "layout": {
+              "handle_bytes": 24,
+              "live_record_slots": 64,
+              "owner_bytes": 2304,
+              "slot_bytes": 32
+            },
+            "mutants_compiled": 3,
+            "mutants_executed": 3,
+            "mutants_killed": [
+              "epoch",
+              "generation",
+              "saturation"
+            ],
+            "races": {
+              "declined": 4,
+              "successful": 0
+            },
+            "scale": {
+              "checks": 2104,
+              "native": "NOT_RUN",
+              "shared_provider_bytes": 192,
+              "sidecar_bytes": 16,
+              "simultaneous_records": 1024,
+              "status": "PASS_HOST_MODEL"
+            },
+            "stage": "complete",
+            "standard": "-std=c23",
+            "status": "PASS"
+          },
+          "gcc": {
+            "checks": 126445,
+            "churn": 24000,
+            "compiler": "/usr/bin/gcc",
+            "first_error": null,
+            "layout": {
+              "handle_bytes": 24,
+              "live_record_slots": 64,
+              "owner_bytes": 2304,
+              "slot_bytes": 32
+            },
+            "mutants_compiled": 3,
+            "mutants_executed": 3,
+            "mutants_killed": [
+              "epoch",
+              "generation",
+              "saturation"
+            ],
+            "races": {
+              "declined": 3,
+              "successful": 1
+            },
+            "scale": {
+              "checks": 2104,
+              "native": "NOT_RUN",
+              "shared_provider_bytes": 192,
+              "sidecar_bytes": 16,
+              "simultaneous_records": 1024,
+              "status": "PASS_HOST_MODEL"
+            },
+            "stage": "complete",
+            "standard": "-std=c2x",
+            "status": "PASS"
+          }
+        },
+        "direct_compressed_handoff": false,
+        "first_error": null,
+        "forced_raw_bypass": false,
+        "import_active": false,
+        "linux_pin": "c339f4010dea8b0d754f84ace70cd1b089878ef8",
+        "phase_a": "BLOCKED",
+        "qualification_round": "093",
+        "round": "091",
+        "source_authenticated": 0,
+        "source_blobs": {
+          "src/kernel/zswap-original-decoder-handles.c": "c01c056fdd7f9f8aa68c7083a9e4e3ca2cdc8d6d",
+          "src/kernel/zswap-original-decoder-handles.h": "0f103783aee10d18df5c502fdf553f7ac6a0035d",
+          "tests/runtime/native/fixtures/round091-original-decoder-handles.c": "d8539d75276dd7a6bf719d702367799a6ef132ce",
+          "tests/runtime/native/fixtures/round093-decoder-shared-provider.c": "6dfa9909f4873a6a2f88a954271055b701008fe4",
+          "tests/tools/round091-original-decoder-handle-verify.py": "b33deec1916db285f5a3d77cd9597aa4fa5ea266"
+        },
+        "staging": {
+          "decoder": {
+            "negatives_rejected": 4,
+            "postimage": "8ca9e57ea0d03918e85e4aabcf472fe906b6bc7f",
+            "postimage_sha256": "c3ee112097f1cca4b321f55d712432441255f2d00157d2d0091faf941c6ab6f6",
+            "pristine": "3a2cd9acada4a09ef70a344090d48167c46088a1",
+            "scope": "noDict only; other modes unchanged, unqualified"
+          },
+          "mode": "isolated copy; original never edited",
+          "negatives_rejected": 5,
+          "postimage": "63eb4be2e23caf770649af18f6a7b2b82d79a5e7",
+          "postimage_sha256": "eda4fe9c1d3baa178e37c0dc25d4151742f3af8c6776b6554120edbb52b929f3",
+          "prior_failed_postimage": "a1d860d6085109bc01ed6a593cf369ccbd6edc67",
+          "pristine": "2a397bb2c661d9c2e4a7a67d5f50f06bfd42f1f2",
+          "scope": "noDict only; prefix/external modes unchanged, unqualified"
+        },
+        "standards_prefix": {
+          "current_blob": "a81b1f2ae6a736e3c0430ebdbc6f2d7e935fd574",
+          "current_bytes": 1820050,
+          "parent_blob": "ec97e4f1ff4b505718b28195edc32dbb6c2941d8",
+          "parent_bytes": 1818848
+        },
+        "status": "PASS_STAGED_HOST_ONLY"
+      },
+      "artifact": {
+        "id": 15047521464,
+        "size": 2185,
+        "digest": "sha256:c908ccf2500c5b487c378c4cb9d51df6eb96dbe97bca32d29f7f566fd50c29b9",
+        "digest_verified_against_job_log": true,
+        "independent_zip_download": false
+      }
     },
     "scale_scope": "Host storage-sidecar model with actual original codec/decoder-owner linkage; 1024 planned simultaneous records, external serialization and epoch modeled; actual native module/production scale unqualified",
     "source_mapped_authenticated": 0,
@@ -144,6 +262,7 @@
     "native_runtime": "NOT_RUN",
     "vm": false,
     "physical": false,
-    "manual_ci_dispatches": 0
+    "manual_ci_dispatches": 0,
+    "status": "PASS_STAGED_HOST_ONLY_SCALE_MODEL_NO_GO_LIVE"
   }
 }
