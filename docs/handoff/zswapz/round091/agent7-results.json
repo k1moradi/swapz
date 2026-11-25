@@ -4,8 +4,8 @@
   "task_sha": "7fa5e3dc74c67330f341ae39c11dc3f8bff01187",
   "frozen_baseline": "e8a3f08000f81dcc3b1bda74b407b9e523ed3bab",
   "pinned_original_linux": "c339f4010dea8b0d754f84ace70cd1b089878ef8",
-  "status": "SOURCE_PUBLISHED_CI_QUEUED_NO_GO_LIVE",
-  "conclusion": "PENDING_CI",
+  "status": "CORRECTIVE_SOURCE_PUBLISHED_CI_QUEUED_NO_GO_LIVE",
+  "conclusion": "PENDING_CORRECTIVE_SOURCE_CI",
   "source_commit": "dfd2528e009e218325989a3b7f48ee638b15493a",
   "source_parent": "e12088538d40212838bfed3bc820919a216b233f",
   "source_blobs": {
@@ -44,8 +44,8 @@
     "production_kbuild": false
   },
   "ci": {
-    "run_id": 45599948708,
-    "job_id": 139155914486,
+    "run_id": 45603445850,
+    "job_id": 139168058707,
     "status": "queued",
     "conclusion": null,
     "actual_gcc_compiled_executed": null,
@@ -78,5 +78,43 @@
   "direct_compressed_handoff": false,
   "forced_raw_bypass": false,
   "import_active": false,
-  "first_error": null
+  "first_error": null,
+  "initial_ci_failure": {
+    "source_commit": "dfd2528e009e218325989a3b7f48ee638b15493a",
+    "run_id": 45599948708,
+    "job_id": 139155914486,
+    "status": "completed",
+    "conclusion": "failure",
+    "first_error": {
+      "stage": "compile-candidate-zswap-original-decoder-handles.c",
+      "compiler": "gcc",
+      "file": "src/kernel/zswap-original-decoder-handles.c",
+      "line": 12,
+      "column": 53,
+      "diagnostic": "ATOMIC_VAR_INIT implicit declaration under C2x -Werror"
+    },
+    "gcc_executed": 0,
+    "clang_executed": 0,
+    "negative_staging_checks_passed": 9,
+    "artifact_id": 15015293600,
+    "artifact_size_bytes": 2028,
+    "artifact_digest": "sha256:2f47ab12dc51eef4c2696ea07b61c30f550ed5c8bebfdff6890caf3ba6d780c3"
+  },
+  "corrected_source": {
+    "sha": "ba9dd3c8702a71f0c5690a53e436bbe667bcc793",
+    "parent": "8dfd94e850b1ab33a27aab9b9fe6aac3dd422fff",
+    "main_nonforce_ff": true,
+    "source_blob": "c01c056fdd7f9f8aa68c7083a9e4e3ca2cdc8d6d",
+    "standards_parent_blob": "a7a957da8ae9d232eff0038b9e66fa2d5cdf9d9e",
+    "standards_postimage_blob": "d116bd8b36d7fa0e0b2f86f683dbd953e44fcd86",
+    "standards_full_parent_bytes": 1806629,
+    "standards_appended_bytes": 731,
+    "standards_full_prefix_retained": true
+  },
+  "local_atomic_initializer_only": {
+    "gcc": "PASS",
+    "clang": "PASS",
+    "sanitizers": "ASan+UBSan",
+    "source_linked_pinned": false
+  }
 }
