@@ -39,8 +39,8 @@ HISTORICAL_BLOBS = {
 # Current C differs by reviewed Round089 publication/guard changes. Retain
 # historical pins and run all original semantic negatives on CURRENT C.
 PINNED_BLOBS = HISTORICAL_BLOBS | {
-    "authority.c": "73b3e2dc98c6a47315519d3ab650c3d3b0656de7",
-    "authority.h": "c320498ce530c0887bf498cc4d5b121765bb41f3",
+    "authority.c": "14fe52cf4cf28f18568d3bf2b6ced449c9c182a3",
+    "authority.h": "c63741157141b2aa9a15de1e9182e27435fc0a3e",
 }
 
 FIXTURE_MUTANTS = (

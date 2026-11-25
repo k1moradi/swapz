@@ -75,7 +75,7 @@ def main() -> None:
             b"blob " + str(len(content)).encode("ascii") +
             b"\0" + content).hexdigest()
         require(historical_blob == expected, "historical-product-C-blob:" + name)
-    pinned = historical_pins | {"authority.c": "73b3e2dc98c6a47315519d3ab650c3d3b0656de7"}
+    pinned = historical_pins | {"authority.c": "14fe52cf4cf28f18568d3bf2b6ced449c9c182a3"}
     for name, expected in pinned.items():
         content = (actual / name).read_bytes()
         blob = hashlib.sha1(

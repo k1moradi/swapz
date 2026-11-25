@@ -448,7 +448,7 @@ int swapz_shared_storage_init(struct swapz_shared_storage *storage,
 
 static int shared_prepare(struct swapz_shared_storage *storage,
 	const struct swapz_authority_import_spec *spec,
-	const struct swapz_original_extent_input *input)
+	const struct swapz_original_extent_input *input, int reserve)
 {
 	struct swapz_authority *a = storage->authority;
 	void *lease;
@@ -478,7 +478,9 @@ static int shared_prepare(struct swapz_shared_storage *storage,
 	lease = storage->ops.decoder_get(storage->ops.context, input->codec, input->version);
 	if (!lease)
 		return -EAGAIN;
-	error = swapz_stage(a, &spec->logical_page, 1U, 1U, &storage->transaction);
+	error = reserve ? swapz_shared_original_stage_reserved(a, spec->logical_page,
+							      &storage->transaction) :
+		swapz_stage(a, &spec->logical_page, 1U, 1U, &storage->transaction);
 	if (error) {
 		storage->ops.decoder_put(storage->ops.context, lease);
 		return error;
@@ -499,8 +501,8 @@ static int shared_credit_matches(const struct swapz_shared_storage *storage,
 	       storage->transaction.start_block == a->active_start;
 }
 
-int swapz_shared_storage_commit_reserved(struct swapz_shared_storage *storage,
-					 swapz_u32 credit)
+static int shared_commit(struct swapz_shared_storage *storage, swapz_u32 credit,
+			 int reserved)
 {
 	struct swapz_authority *a;
 	swapz_u32 completed = 0;
@@ -512,6 +514,13 @@ int swapz_shared_storage_commit_reserved(struct swapz_shared_storage *storage,
 	if (!shared_credit_matches(storage, credit))
 		return -ESTALE;
 	a = storage->authority;
+	if (reserved) {
+		error = swapz_shared_original_issue_reserved(a, &storage->transaction);
+		if (error)
+			return error;
+	} else if (a->shared_unissued_sequence) {
+		return -ESTALE;
+	}
 	lease = storage->pending_decoder;
 	/* Consume before any lower callback; a failed completion is not retryable
 	 * through this credit. The caller still owns native error/completion. */
@@ -532,6 +541,12 @@ int swapz_shared_storage_commit_reserved(struct swapz_shared_storage *storage,
 	return error;
 }
 
+int swapz_shared_storage_commit_reserved(struct swapz_shared_storage *storage,
+					 swapz_u32 credit)
+{
+	return shared_commit(storage, credit, 1);
+}
+
 int swapz_shared_storage_cancel_reserved(struct swapz_shared_storage *storage,
 					 swapz_u32 credit)
 {
@@ -542,7 +557,7 @@ int swapz_shared_storage_cancel_reserved(struct swapz_shared_storage *storage,
 		return -EINVAL;
 	if (!shared_credit_matches(storage, credit))
 		return -ESTALE;
-	error = swapz_abort(storage->authority, &storage->transaction);
+	error = swapz_shared_original_cancel_unissued(storage->authority, &storage->transaction);
 	if (error)
 		return error;
 	lease = storage->pending_decoder;
@@ -570,9 +585,10 @@ int swapz_shared_storage_reserve(struct swapz_shared_storage *storage,
 		return -EBUSY;
 	/* This existing allocator proof excludes recycle callbacks and GC.
 	 * Do not reserve a typed block by invoking a possibly sleeping TRIM. */
-	if (!swapz_open_segment_fits(storage->authority, 1U))
-		return -ENOSPC;
-	error = shared_prepare(storage, spec, input);
+	error = swapz_shared_original_reservation_preflight(storage->authority);
+	if (error)
+		return error;
+	error = shared_prepare(storage, spec, input, 1);
 	if (!error)
 		*credit = storage->transaction.sequence;
 	return error;
@@ -582,10 +598,9 @@ static int shared_write(struct swapz_shared_storage *storage,
 	const struct swapz_authority_import_spec *spec,
 	const struct swapz_original_extent_input *input)
 {
-	int error = shared_prepare(storage, spec, input);
+	int error = shared_prepare(storage, spec, input, 0);
 
-	return error ? error : swapz_shared_storage_commit_reserved(storage,
-							 storage->transaction.sequence);
+	return error ? error : shared_commit(storage, storage->transaction.sequence, 0);
 }
 
 int swapz_shared_storage_write(struct swapz_shared_storage *storage,
@@ -672,7 +687,7 @@ int swapz_shared_storage_relocate(struct swapz_shared_storage *storage,
 	if (!shared_ready(storage) || !storage->authority->gc_allocation)
 		return -EINVAL;
 	old = swapz_shared_original_view(storage->authority, pin);
-	if (!old || !old->current || epoch <= old->spec.gc_epoch ||
+	if (!old || !old->is_current || epoch <= old->spec.gc_epoch ||
 	    old->map.generation == ~(swapz_u32)0)
 		return -ESTALE;
 	spec = old->spec;

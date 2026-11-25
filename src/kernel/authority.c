@@ -27,7 +27,7 @@ static struct swapz_shared_original_record *shared_current(
 	for (index = 0; index < SWAPZ_SHARED_ORIGINAL_CAPACITY; ++index) {
 		struct swapz_shared_original_record *record = &a->original->records[index];
 
-		if (record->current && record->spec.logical_page == logical)
+		if (record->is_current && record->spec.logical_page == logical)
 			return record;
 	}
 	return NULL;
@@ -54,7 +54,7 @@ static int shared_validate(const struct swapz_authority *a, swapz_u32 logical)
 static void shared_release(struct swapz_shared_original_owner *owner,
 			   struct swapz_shared_original_record *record)
 {
-	if (!record->current && !record->pins && record->decoder) {
+	if (!record->is_current && !record->pins && record->decoder) {
 		owner->decoder_put(owner->context, record->decoder);
 		memset(record, 0, sizeof(*record));
 	}
@@ -65,7 +65,7 @@ static void shared_retire(struct swapz_authority *a, swapz_u32 logical)
 	struct swapz_shared_original_record *record = shared_current(a, logical);
 
 	if (record) {
-		record->current = 0;
+		record->is_current = 0;
 		shared_release(a->original, record);
 	}
 }
@@ -227,7 +227,7 @@ const struct swapz_shared_original_record *swapz_shared_original_view(
 	if (!record->decoder || !record->pins ||
 	    record->map.start_block >= a->physical_blocks ||
 	    a->extent_classes[record->map.start_block] != 1U ||
-	    (record->current && shared_validate(a, record->spec.logical_page)))
+	    (record->is_current && shared_validate(a, record->spec.logical_page)))
 		return NULL;
 	return record;
 }
@@ -2352,8 +2352,12 @@ static void swapz_forget_active(struct swapz_authority *a, int published)
 	}
 	if (!published)
 		a->abandoned_blocks += a->active_blocks;
-	else
+	else if (published > 0)
 		a->committed_blocks += a->active_blocks;
+#ifdef SWAPZ_SHARED_ORIGINAL_TEST
+	/* A negative disposition is reserved for proven never-issued cancellation. */
+	a->shared_unissued_sequence = 0;
+#endif
 	memset(&a->active_tx, 0, swapz_tx_active_bytes(a->active_count));
 	a->in_flight = 0;
 	a->active_sequence = 0;
@@ -2368,6 +2372,107 @@ int swapz_abort(struct swapz_authority *a, const struct swapz_tx *tx)
 	swapz_forget_active(a, 0);
 	return 0;
 }
+
+#ifdef SWAPZ_SHARED_ORIGINAL_TEST
+int swapz_shared_original_reservation_preflight(const struct swapz_authority *a)
+{
+	swapz_u32 segment, base, sequence_delta, remaining;
+
+	/* A decline may never rotate/recycle a segment or allocate a new one. */
+	if (!swapz_open_segment_fits(a, 1U))
+		return -ENOSPC;
+	if (!a->original || a->shared_unissued_sequence || a->batch_replaying ||
+	    a->batch_stage_allowed)
+		return -EBUSY;
+	if (!a->live_records || !a->extent_classes ||
+	    a->live_records[a->next_block] || a->extent_classes[a->next_block])
+		return -EUCLEAN;
+	/* No repeated sequence consumption without intervening real allocator
+	 * progress. Preserve one sequence for the ordinary fallback as well. */
+	if ((a->shared_cancelled_sequence &&
+	     a->next_sequence == a->shared_cancelled_sequence + 1U) ||
+	    a->next_sequence >= ~(swapz_u32)0 - 1U)
+		return -EAGAIN;
+
+	/* A returned physical block must not silently consume the sequence
+	 * range needed by ordinary compressed writes in the same segment.
+	 * Budget one cancelled sequence plus one per remaining physical block. */
+	if (!a->extent_sequence_delta && !a->segment_sequence_base)
+		return 0;
+	segment = a->next_block / SWAPZ_SEGMENT_BLOCKS;
+	if (!a->extent_sequence_delta || !a->segment_sequence_base ||
+	    segment >= a->sequence_segment_count)
+		return -EUCLEAN;
+	base = a->segment_sequence_base[segment];
+	if (!base)
+		return 0;
+	if (a->next_sequence < base)
+		return -EUCLEAN;
+	sequence_delta = a->next_sequence - base;
+	remaining = SWAPZ_SEGMENT_BLOCKS - a->next_block % SWAPZ_SEGMENT_BLOCKS;
+	if (sequence_delta > 255U || remaining > 255U - sequence_delta)
+		return -EAGAIN;
+	return 0;
+}
+
+int swapz_shared_original_stage_reserved(struct swapz_authority *a,
+	swapz_u32 logical_page, struct swapz_tx *tx)
+{
+	int error = swapz_shared_original_reservation_preflight(a);
+
+	if (error)
+		return error;
+	error = swapz_stage(a, &logical_page, 1U, 1U, tx);
+	if (!error)
+		a->shared_unissued_sequence = tx->sequence;
+	return error;
+}
+
+static int swapz_shared_original_unissued_tail(const struct swapz_authority *a,
+	const struct swapz_tx *tx)
+{
+	swapz_u32 start, page;
+
+	if (!swapz_is_active(a, tx) || !a->original ||
+	    a->shared_unissued_sequence != tx->sequence ||
+	    a->batch_pending || a->batch_replaying || a->batch_stage_allowed ||
+	    a->gc_allocation || tx->count != 1U || tx->extent_blocks != 1U ||
+	    tx->compressed_data_only || tx->records[0].compressed_metadata_bound)
+		return 0;
+	start = tx->start_block;
+	page = tx->records[0].logical_page;
+	return start < a->physical_blocks && page < a->logical_pages &&
+	       a->next_block == start + 1U &&
+	       a->next_sequence == tx->sequence + 1U &&
+	       (!a->reuse_dead_segments ||
+		start / SWAPZ_SEGMENT_BLOCKS == a->open_segment) &&
+	       !a->live_records[start] && !a->extent_classes[start] &&
+	       a->maps[page].generation != ~(swapz_u32)0 &&
+	       a->maps[page].generation + 1U == tx->records[0].generation;
+}
+
+int swapz_shared_original_issue_reserved(struct swapz_authority *a,
+	const struct swapz_tx *tx)
+{
+	if (!swapz_shared_original_unissued_tail(a, tx))
+		return -ESTALE;
+	a->shared_unissued_sequence = 0;
+	return 0;
+}
+
+int swapz_shared_original_cancel_unissued(struct swapz_authority *a,
+	const struct swapz_tx *tx)
+{
+	if (!swapz_shared_original_unissued_tail(a, tx))
+		return -ESTALE;
+	/* Sole owner, exact active tail, no lower submission/publication.
+	 * The extent can be reused; its transaction identity never can. */
+	a->next_block = tx->start_block;
+	a->shared_cancelled_sequence = tx->sequence;
+	swapz_forget_active(a, -1);
+	return 0;
+}
+#endif
 
 /*
  * Both raw fallbacks and compressed extents share one physical-log allocator.
@@ -2392,6 +2497,10 @@ static int swapz_finish_single(struct swapz_authority *a, const struct swapz_tx 
 
 	if (!swapz_is_active(a, tx))
 		return -ESTALE;
+#ifdef SWAPZ_SHARED_ORIGINAL_TEST
+	if (a->shared_unissued_sequence)
+		return -EBUSY;
+#endif
 	if (tx->compressed_data_only ||
 	    tx->count != 1 || tx->extent_blocks != 1) {
 		error = -EINVAL;
@@ -2560,7 +2669,7 @@ static int swapz_finish_single(struct swapz_authority *a, const struct swapz_tx 
 		}
 		*slot = (struct swapz_shared_original_record) {
 			.spec = *spec, .map = new_map, .decoder = decoder,
-			.sequence = tx->sequence, .current = 1,
+			.sequence = tx->sequence, .is_current = 1,
 		};
 	}
 #endif
@@ -2593,6 +2702,8 @@ int swapz_shared_original_finish(struct swapz_authority *a, const struct swapz_t
 
 	if (!swapz_is_active(a, tx))
 		return -ESTALE;
+	if (a->shared_unissued_sequence)
+		return -EBUSY;
 	if (!error && (lower_error || completed_blocks != 1U || !flush_completed))
 		error = -EIO;
 	if (!error && (!spec || !decoder || !image || bytes != SWAPZ_BLOCK_BYTES ||
@@ -3756,7 +3867,7 @@ static int swapz_authority_import_current(
 {
 	const struct swapz_authority *authority;
 	const struct swapz_tx *active;
-	const struct swapz_map *current;
+	const struct swapz_map *current_mapping;
 
 	if (!pool || !record || !pool->authority)
 		return -EINVAL;
@@ -3766,15 +3877,15 @@ static int swapz_authority_import_current(
 	    !authority->in_flight)
 		return -ESTALE;
 	active = &authority->active_tx;
-	current = &authority->maps[record->spec.logical_page];
+	current_mapping = &authority->maps[record->spec.logical_page];
 	if (active->count != 1U ||
 	    active->records[0].logical_page != record->spec.logical_page ||
 	    active->records[0].generation != record->generation ||
 	    active->sequence != record->sequence ||
 	    active->start_block != record->start_block ||
 	    active->extent_blocks != record->extent_blocks ||
-	    current->generation == ~(swapz_u32)0 ||
-	    current->generation + 1U != record->generation)
+	    current_mapping->generation == ~(swapz_u32)0 ||
+	    current_mapping->generation + 1U != record->generation)
 		return -ESTALE;
 	return 0;
 }

@@ -30,11 +30,11 @@ HISTORICAL_PINS = {
 # authority/engine paths. Compile CURRENT code without the shared feature
 # macro, not a historical substitute or blanket pin refresh.
 PINS = HISTORICAL_PINS | {
-    "src/kernel/authority.c": "73b3e2dc98c6a47315519d3ab650c3d3b0656de7",
-    "src/kernel/authority.h": "c320498ce530c0887bf498cc4d5b121765bb41f3",
+    "src/kernel/authority.c": "14fe52cf4cf28f18568d3bf2b6ced449c9c182a3",
+    "src/kernel/authority.h": "c63741157141b2aa9a15de1e9182e27435fc0a3e",
     "src/kernel/engine.c": "e7c50c3e78449157439fba9c69e5d23b1c317f4e",
-    "src/kernel/zswap-original-storage.c": "d4feaca4d114cfdb1877df65e68e8d6b52859126",
-    "src/kernel/zswap-original-storage.h": "0da04b61921e3dbc0544cb9c9c8168513628997b",
+    "src/kernel/zswap-original-storage.c": "1f9030030f5d0fb3b06d0b0a159dd8aa6818f8dd",
+    "src/kernel/zswap-original-storage.h": "38924c3931419a93a7783de9ba622024a5e2e65c",
 }
 MUTANTS = [
     [

@@ -28,6 +28,7 @@ static int write_lower(void *context, swapz_u32 start, const swapz_u8 *image,
 		       swapz_u32 length, swapz_u32 *completed)
 {
 	CHECK(context == &storage && start < BLOCKS && authority.in_flight && !live[start]);
+	CHECK(!authority.shared_unissued_sequence);
 	CHECK(length == SWAPZ_BLOCK_BYTES);
 	++writes;
 	memcpy(media[start], image, length);
@@ -140,7 +141,7 @@ static void admission_and_accounting(void)
 	struct swapz_map old;
 	struct swapz_shared_storage_snapshot snapshot, saved;
 	swapz_u32 credit = 0, refused = 0x1234U, other_credit = 0, victim, dest, sequence;
-	swapz_u32 previous_writes, previous_flushes, page = 0;
+	swapz_u32 previous_writes, previous_flushes, page = 0, reserved_start, index;
 	swapz_u64 pin;
 	swapz_u8 first_byte = bytes[0];
 	unsigned long long abandoned;
@@ -152,7 +153,13 @@ static void admission_and_accounting(void)
 	CHECK(counts[victim] == 1 && live_bytes[victim] == 4096 && costs[victim] == 8192);
 	CHECK(min_blocks[victim] == 1 && first[victim] == 0 && last[victim] == 0);
 	abandoned = authority.abandoned_blocks;
+	reserved_start = authority.next_block;
+	classes[reserved_start] = 1;
+	CHECK(prepare_source(0, 321, 2, &refused) == -EUCLEAN && refused == 0x1234U);
+	CHECK(!authority.in_flight && !leases && authority.next_block == reserved_start);
+	classes[reserved_start] = 0;
 	CHECK(!prepare_source(0, 321, 2, &credit) && credit);
+	CHECK(authority.next_block == reserved_start + 1U && authority.shared_unissued_sequence == credit);
 	CHECK(!writes && !flushes && leases == 1 && authority.in_flight);
 	CHECK(!memcmp(&old, &maps[0], sizeof(old)) && live[old.start_block] == 1);
 	CHECK(prepare_source(1, 17, 1, &refused) == -EBUSY && refused == 0x1234U);
@@ -161,21 +168,40 @@ static void admission_and_accounting(void)
 	CHECK(swapz_shared_storage_close(&storage) == -EBUSY);
 	CHECK(swapz_shared_storage_cancel_reserved(&storage, credit + 1U) == -ESTALE);
 	CHECK(swapz_shared_storage_commit_reserved(&storage, credit + 1U) == -ESTALE);
+	/* No publication or tail recovery is allowed for a forged/non-tail stage. */
+	CHECK(swapz_finish_raw(&authority, &storage.transaction, bytes, 1U, 0) == -EBUSY);
+	CHECK(swapz_shared_original_finish(&authority, &storage.transaction,
+		&storage.pending_spec, storage.image, SWAPZ_BLOCK_BYTES, 1U, 0, 1,
+		storage.pending_decoder) == -EBUSY);
+	++authority.next_block;
+	CHECK(swapz_shared_storage_cancel_reserved(&storage, credit) == -ESTALE);
+	CHECK(authority.in_flight && leases == 1 && authority.shared_unissued_sequence == credit);
+	--authority.next_block;
 	CHECK(!swapz_shared_storage_cancel_reserved(&storage, credit));
 	CHECK(!authority.in_flight && !leases && !writes && !flushes);
-	CHECK(authority.abandoned_blocks == abandoned + 1U);
+	CHECK(authority.abandoned_blocks == abandoned && authority.next_block == reserved_start);
+	CHECK(!authority.shared_unissued_sequence && authority.next_sequence == credit + 1U);
+	for (index = 0; index < 2U * SWAPZ_SEGMENT_BLOCKS; ++index) {
+		CHECK(prepare_source(0, 321, 2, &refused) == -EAGAIN && refused == 0x1234U);
+		CHECK(authority.next_block == reserved_start && authority.next_sequence == credit + 1U);
+	}
+	CHECK(!authority.in_flight && !leases && !writes && !flushes);
 	CHECK(!memcmp(&old, &maps[0], sizeof(old)) && counts[victim] == 1);
 	CHECK(swapz_shared_storage_cancel_reserved(&storage, credit) == -ESTALE);
 	CHECK(swapz_shared_storage_commit_reserved(&storage, credit) == -ESTALE);
 	/* An ordinary fallback after refusal uses the original full page. */
 	raw(0);
 	CHECK(maps[0].raw && maps[0].generation == 2 && counts[victim] == 1);
+	CHECK(maps[0].start_block == reserved_start && ordinary.sequence > credit);
 	CHECK(live_bytes[victim] == 4096 && costs[victim] == 8192 && !live[old.start_block]);
 	old = maps[0];
+	reserved_start = authority.next_block;
 	CHECK(!prepare_source(0, 321, 3, &credit));
 	fail_flush = -EIO;
 	CHECK(swapz_shared_storage_commit_reserved(&storage, credit) == -EIO);
 	CHECK(!authority.in_flight && !leases && !memcmp(&old, &maps[0], sizeof(old)));
+	CHECK(authority.next_block == reserved_start + 1U && authority.abandoned_blocks == abandoned + 1U);
+	CHECK(swapz_shared_storage_cancel_reserved(&storage, credit) == -ESTALE);
 	CHECK(swapz_shared_storage_commit_reserved(&storage, credit) == -ESTALE);
 	fail_flush = 0;
 	previous_writes = writes;
@@ -236,6 +262,73 @@ static void admission_and_accounting(void)
 	CHECK(!counts[dest] && !live_bytes[dest] && !costs[dest] && !min_blocks[dest]);
 	CHECK(!swapz_shared_storage_close(&storage));
 }
+static void issued_failure_quarantine(void)
+{
+	struct swapz_map old;
+	swapz_u32 credit, start, mode;
+	reset();
+	raw(0);
+	old = maps[0];
+	for (mode = 0; mode < 2U; ++mode) {
+		start = authority.next_block;
+		CHECK(!prepare_source(0, 321, 2, &credit));
+		fail_write = mode ? 0 : -EIO;
+		short_write = mode != 0;
+		CHECK(swapz_shared_storage_commit_reserved(&storage, credit) == -EIO);
+		CHECK(!authority.in_flight && !leases && !authority.shared_unissued_sequence);
+		CHECK(authority.next_block == start + 1U && authority.next_sequence == credit + 1U);
+		CHECK(authority.abandoned_blocks == mode + 1U && !memcmp(&old, &maps[0], sizeof(old)));
+		CHECK(swapz_shared_storage_cancel_reserved(&storage, credit) == -ESTALE);
+	}
+	CHECK(writes == 2U && !flushes);
+	discard(0);
+	CHECK(!swapz_shared_storage_close(&storage));
+}
+
+static void sequence_budget_and_ordinary_abort(void)
+{
+	swapz_u32 segment, end, start, sequence, credit, declined = 0, cancelled = 0;
+	swapz_u32 page = 1;
+
+	reset();
+	compressed(0);
+	segment = maps[0].start_block / SWAPZ_SEGMENT_BLOCKS;
+	end = (segment + 1U) * SWAPZ_SEGMENT_BLOCKS;
+	/* Fill the actual segment with one-block ordinary compressed writes.
+	 * Optional refusals must never consume its useful physical or sequence
+	 * capacity, even when the first compressed sequence fixes the base. */
+	while (authority.next_block < end) {
+		int error;
+		start = authority.next_block;
+		sequence = authority.next_sequence;
+		credit = 0;
+		error = prepare_source(0, 321, maps[0].generation + 1U, &credit);
+		if (!error) {
+			CHECK(credit == sequence);
+			CHECK(!swapz_shared_storage_cancel_reserved(&storage, credit));
+			CHECK(authority.next_sequence == sequence + 1U);
+			++cancelled;
+		} else {
+			CHECK(error == -EAGAIN && !credit && authority.next_sequence == sequence);
+			++declined;
+		}
+		CHECK(authority.next_block == start && !authority.abandoned_blocks);
+		compressed(0);
+		CHECK(maps[0].start_block == start);
+		CHECK(!swapz_extent_sequence_lookup(&authority, start, &sequence));
+		CHECK(sequence == ordinary.sequence);
+	}
+	CHECK(declined && cancelled + declined > 1U && !writes && !flushes && !leases);
+	CHECK(authority.next_block == end && counts[segment] == 1);
+	/* A non-reservation transaction is never eligible for tail recovery. */
+	CHECK(!swapz_stage(&authority, &page, 1U, 1U, &ordinary));
+	start = authority.next_block;
+	CHECK(swapz_shared_original_cancel_unissued(&authority, &ordinary) == -ESTALE);
+	CHECK(!swapz_abort(&authority, &ordinary));
+	CHECK(authority.next_block == start && authority.abandoned_blocks == 1U);
+	discard(0);
+	CHECK(!swapz_shared_storage_close(&storage));
+}
 int main(void)
 {
 	swapz_u32 index, start, victim, dest, sequence, before_writes;
@@ -248,6 +341,8 @@ int main(void)
 	for (index = 0; index < sizeof(bytes); ++index)
 		bytes[index] = (swapz_u8)(index * 13U + 7U);
 	admission_and_accounting();
+	issued_failure_quarantine();
+	sequence_budget_and_ordinary_abort();
 	reset();
 	raw(0);
 	old = maps[0];
@@ -331,7 +426,7 @@ int main(void)
 		discard(index);
 	CHECK(!leases && !swapz_shared_storage_close(&storage));
 	CHECK(sizeof(struct swapz_map) == 20 && SWAPZ_SHARED_ORIGINAL_ACTIVE == 0);
-	printf("PASS ROUND090_AGENT5 checks=%u storage_bytes=%zu map_bytes=%zu sidecar_bytes=%zu\n",
+	printf("PASS ROUND091_AGENT5 checks=%u storage_bytes=%zu map_bytes=%zu sidecar_bytes=%zu\n",
 	       checks, sizeof(storage), sizeof(struct swapz_map), sizeof(storage.owner));
 	return 0;
 }

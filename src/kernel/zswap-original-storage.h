@@ -123,9 +123,11 @@ int swapz_shared_storage_write(struct swapz_shared_storage *,
  * declines before claim. The token is the nonwrapping allocator sequence,
  * scoped to this authority lifetime. All tokens must be drained before
  * authority reset. No other authority mutation, batch pause or owner
- * handoff is allowed between reserve and commit/cancel. A canceled stage
- * abandons its actual log block under ordinary allocator rules, not a
- * synthetic rollback of the physical cursor. It never changes the map.
+ * handoff is allowed between reserve and commit/cancel. An exact never-issued
+ * tail cancellation returns its physical block without reusing the sequence;
+ * any issued/failed extent follows ordinary quarantine rules. Repeated declines
+ * are throttled until allocator progress; reserve also protects sequence-index
+ * headroom for ordinary traffic. Cancellation never changes the map.
  * Reserve copies sealed bytes, retains a decoder, and leaves output unchanged
  * on error. Caller may claim only after reserve; cancel on refusal. Commit
  * consumes the token once and reports actual lower errors, with no upper ACK.

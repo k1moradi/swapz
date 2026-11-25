@@ -302,6 +302,10 @@ struct swapz_authority {
 		finish_segment_deltas[SWAPZ_MAX_RECORDS];
 #ifdef SWAPZ_SHARED_ORIGINAL_TEST
 	struct swapz_shared_original_owner *original;
+	/* Only the shared ordered reservation path owns these sequence fences.
+	 * Never rewind next_sequence, even when a never-issued tail is returned. */
+	swapz_u32 shared_unissued_sequence;
+	swapz_u32 shared_cancelled_sequence;
 #endif
 };
 
@@ -831,7 +835,7 @@ struct swapz_shared_original_record {
 	struct swapz_map map;
 	void *decoder;
 	swapz_u32 sequence;
-	swapz_u8 current;
+	swapz_u8 is_current;
 	swapz_u8 pins;
 };
 
@@ -853,6 +857,14 @@ int swapz_shared_original_attach(struct swapz_authority *,
 int swapz_shared_original_detach(struct swapz_authority *);
 int swapz_shared_original_preflight(struct swapz_authority *,
 	const struct swapz_authority_import_spec *, swapz_u32 generation);
+/* Preclaim admission and tail ownership are ordered-owner-only. A reserve
+ * stages one real extent without lower I/O; issue irrevocably disables tail
+ * recovery. Cancel returns only the exact never-issued tail. */
+int swapz_shared_original_reservation_preflight(const struct swapz_authority *);
+int swapz_shared_original_stage_reserved(struct swapz_authority *, swapz_u32,
+	struct swapz_tx *);
+int swapz_shared_original_issue_reserved(struct swapz_authority *, const struct swapz_tx *);
+int swapz_shared_original_cancel_unissued(struct swapz_authority *, const struct swapz_tx *);
 /* Success transfers one independent decoder reference; error leaves it
  * with the caller. No fabricated lower completion or upper ACK. */
 int swapz_shared_original_finish(struct swapz_authority *, const struct swapz_tx *,
