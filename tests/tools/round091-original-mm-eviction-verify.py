@@ -41,7 +41,8 @@ INPUTS = {
 
 
 def actual_function(source, name):
-    pattern = re.compile(r"(?m)^static (?:bool|u8|u64|int|void) " +
+    # Original exported candidate_get is int, not static; retain exact one-definition match.
+    pattern = re.compile(r"(?m)^(?:static )?(?:bool|u8|u64|int|void) " +
                          re.escape(name) + r"\([^;]+?\)\n\{")
     matches = list(pattern.finditer(source))
     require(len(matches) == 1, "original function anchor " + name)
