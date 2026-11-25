@@ -1,0 +1,246 @@
+{
+  "round": "091",
+  "agent": 5,
+  "kind": "dormant-shared-authority-kernel-namespace-never-issued-tail",
+  "task_commit": "7fa5e3dc74c67330f341ae39c11dc3f8bff01187",
+  "task_parent": "e8a3f08000f81dcc3b1bda74b407b9e523ed3bab",
+  "tested_commit": "1b31d2b4107bee88c96ccde4b742dcba5858c895",
+  "tested_parent": "dfd2528e009e218325989a3b7f48ee638b15493a",
+  "source_blobs": {
+    "docs/testing_standards.md": "fd47d45042f803e4c7f2f2487ef3b709522d4642",
+    "src/kernel/authority.c": "14fe52cf4cf28f18568d3bf2b6ced449c9c182a3",
+    "src/kernel/authority.h": "c63741157141b2aa9a15de1e9182e27435fc0a3e",
+    "src/kernel/zswap-original-storage.c": "1f9030030f5d0fb3b06d0b0a159dd8aa6818f8dd",
+    "src/kernel/zswap-original-storage.h": "38924c3931419a93a7783de9ba622024a5e2e65c",
+    "tests/runtime/native/fixtures/round089-shared-original-storage.c": "95cee696fe99b3438f387ff1bf45cb4634f70fab",
+    "tests/tools/round069-original-bio-authority-joined-verify.py": "7f6ef01165e2daccceb0d8146f8a25e13e190f14",
+    "tests/tools/round072-original-mm-bio-authority-decoder-joined-verify.py": "055ae667f86463e1a311d52351e784abe6266da9",
+    "tests/tools/round074-original-owned-copy-lifetime-verify.py": "7c35a269222c04fa90d947a012b1dce836e7ee6b",
+    "tests/tools/round088-original-storage-verify.py": "9666514cd7d5e020ab4b61f8847cb1b17af17095",
+    "tests/tools/round089-shared-original-storage-verify.py": "ada6ac0402fd71ea17e26e248b12f6fe5002efa2"
+  },
+  "standards": {
+    "frozen_blob": "6441a8b096a181b9a80890a1d1f63a87773c3fb3",
+    "frozen_bytes": 1796686,
+    "parent_blob": "61c79fdcc329707b28c4b60af0168c4f12b415b6",
+    "parent_bytes": 1799797,
+    "new_blob": "fd47d45042f803e4c7f2f2487ef3b709522d4642",
+    "new_bytes": 1802004,
+    "append_bytes": 2207,
+    "verification": "independent UTF-8 byte lengths and Git SHA1 for complete raw frozen, actual parent, constructed and read-back new blob; literal frozen and parent prefixes verified; 5 additions/0 deletions; no truncated fetch_file content"
+  },
+  "workflow_url": "https://github.com/k1moradi/swapz/actions/runs/45600148460",
+  "run_id": 45600148460,
+  "run_status": "queued",
+  "jobs": [
+    {
+      "run_id": 45600148460,
+      "id": 139156637612,
+      "name": "R091 shared authority strict host",
+      "status": "queued",
+      "conclusion": null,
+      "url": "https://github.com/k1moradi/swapz/actions/runs/45600148460/job/139156637612"
+    },
+    {
+      "run_id": 45600148475,
+      "id": 139156637976,
+      "name": "R088 legacy isolated current host",
+      "status": "queued",
+      "conclusion": null,
+      "url": "https://github.com/k1moradi/swapz/actions/runs/45600148475/job/139156637976"
+    },
+    {
+      "run_id": 45600148584,
+      "id": 139156638466,
+      "name": "R069 current authority joined host",
+      "status": "queued",
+      "conclusion": null,
+      "url": "https://github.com/k1moradi/swapz/actions/runs/45600148584/job/139156638466"
+    },
+    {
+      "run_id": 45600148189,
+      "id": 139156636659,
+      "name": "R072 current joined host and historical manifest",
+      "status": "queued",
+      "conclusion": null,
+      "url": "https://github.com/k1moradi/swapz/actions/runs/45600148189/job/139156636659"
+    },
+    {
+      "run_id": 45600148291,
+      "id": 139156637379,
+      "name": "R074 current ownership lifetime",
+      "status": "queued",
+      "conclusion": null,
+      "url": "https://github.com/k1moradi/swapz/actions/runs/45600148291/job/139156637379"
+    },
+    {
+      "run_id": 45600148586,
+      "id": 139156638584,
+      "name": "R073 separate reader pin and GC host",
+      "status": "queued",
+      "conclusion": null,
+      "url": "https://github.com/k1moradi/swapz/actions/runs/45600148586/job/139156638584"
+    },
+    {
+      "run_id": 45600148455,
+      "id": 139156638288,
+      "name": "project-goals native rootless",
+      "status": "queued",
+      "conclusion": null,
+      "url": "https://github.com/k1moradi/swapz/actions/runs/45600148455/job/139156638288"
+    },
+    {
+      "run_id": 45600148455,
+      "id": 139156638514,
+      "name": "project-goals lifecycle",
+      "status": "queued",
+      "conclusion": null,
+      "url": "https://github.com/k1moradi/swapz/actions/runs/45600148455/job/139156638514"
+    },
+    {
+      "run_id": 45600148455,
+      "id": 139156638646,
+      "name": "project-goals source contract",
+      "status": "queued",
+      "conclusion": null,
+      "url": "https://github.com/k1moradi/swapz/actions/runs/45600148455/job/139156638646"
+    },
+    {
+      "run_id": 45600148455,
+      "id": 139156638660,
+      "name": "project-goals readiness",
+      "status": "queued",
+      "conclusion": null,
+      "url": "https://github.com/k1moradi/swapz/actions/runs/45600148455/job/139156638660"
+    },
+    {
+      "run_id": 45600148455,
+      "id": 139156638688,
+      "name": "project-goals make interface",
+      "status": "queued",
+      "conclusion": null,
+      "url": "https://github.com/k1moradi/swapz/actions/runs/45600148455/job/139156638688"
+    },
+    {
+      "run_id": 45600148455,
+      "id": 139156638707,
+      "name": "project-goals repository policy",
+      "status": "queued",
+      "conclusion": null,
+      "url": "https://github.com/k1moradi/swapz/actions/runs/45600148455/job/139156638707"
+    }
+  ],
+  "conclusion": "QUEUED_NO_GO_LIVE",
+  "first_error": null,
+  "local_first_error": "git ls-remote exit 128: Could not resolve host: github.com",
+  "local_compilers": "NOT_RUN",
+  "actual_compiler_results": null,
+  "actual_mutants_per_compiler": null,
+  "planned_mutants_per_compiler": 19,
+  "artifact": null,
+  "source_ci_preflight": "PENDING; connector tree/postimage, expected-head single parent and added-line whitespace inspection verified; actual git diff --check, policy and clean full checkout pending CI",
+  "prior_round090": {
+    "admission": {
+      "source": "a82a9263783f66222c84c349cc46e3b4262ef125",
+      "run": 45586632370,
+      "job": 139109788374,
+      "checks_each": 294,
+      "mutants_each": 12,
+      "map_bytes": 20,
+      "sidecar_bytes": 1112,
+      "storage_bytes": 14912,
+      "conclusion": "PASS_HOST_ONLY"
+    },
+    "manifest": {
+      "source": "4c859e817eaba9540294806c54da56013711c883",
+      "run": 45591509623,
+      "job": 139126625541,
+      "conclusion": "success",
+      "historical_manifest_negatives": 13,
+      "original_mutants_each": 10,
+      "authority_mutants_each": 16,
+      "decoder_mutants_each": 2,
+      "log_verified": true
+    },
+    "kernel_first_error": {
+      "source": "d183f5d5127992b406013799bcb81ea3f59e93eb",
+      "run": 45586120960,
+      "job": 139108048304,
+      "conclusion": "failure",
+      "error": "linux/arch/x86/include/asm/current.h:28:17: error: ‘struct swapz_shared_original_record’ has no member named ‘get_current’; did you mean ‘current’?",
+      "exit": 2,
+      "log_verified": true
+    },
+    "native_rootless": {
+      "source": "4c859e817eaba9540294806c54da56013711c883",
+      "run": 45591509522,
+      "job": 139126625801,
+      "conclusion": "failure",
+      "artifact_id": 15011791701,
+      "artifact_bytes": 6194,
+      "artifact_sha256": "529335a8560279edefcd6b26d41e58a97aa0f4d592d954e39b0d20378e9ae02c",
+      "archive_extracted": true,
+      "log": "native-rootless.log",
+      "first_error": "source-contract-test.py:6611 test_async_lz4_preparation_overlaps_lower_io_without_publication AssertionError (private detail omitted)",
+      "exit": 1,
+      "ownership": "Agent3 targeted ordinary-preparation ordering assertion; not edited"
+    }
+  },
+  "push_census": {
+    "automatic_runs_observed": 23,
+    "run_ids": [
+      45600148461,
+      45600148377,
+      45600148475,
+      45600148624,
+      45600148102,
+      45600148411,
+      45600148484,
+      45600148189,
+      45600148144,
+      45600148101,
+      45600148399,
+      45600148599,
+      45600148455,
+      45600148443,
+      45600148120,
+      45600148618,
+      45600148291,
+      45600148586,
+      45600148460,
+      45600148485,
+      45600148584,
+      45600148108,
+      45600148600
+    ],
+    "manual_dispatch": false,
+    "terminal_audit": false,
+    "product_codec_run": "not observed in initial exact-source snapshot"
+  },
+  "scope": {
+    "macro": "typed record is_current; legacy local current_mapping; strict host -Dcurrent=get_current() planned; no kernel build claim",
+    "credit": "existing signatures, actual dedicated M3568 stage; exact never-issued fence, sole ordered owner",
+    "cancel": "only exact free active tail, generation/cursor/sequence/role/no batch or GC; physical cursor recovered; sequence monotonically consumed; no abandoned counter or map change; decoder put once",
+    "issue": "clear never-issued marker before lower callback, public commit requires exact active stage; issued lower errors ordinary abandon/quarantine, no rewind",
+    "throttle": "no another reservation after cancellation until real allocator sequence progress; leave sequence for fallback; preserve 8-bit segment index worst-case one per remaining block plus canceled sequence; finite global sequence may still be consumed faster (bounded extra one per intervening allocator progress), not production admission policy",
+    "ordinary_map_bytes": 20,
+    "authority_growth_opt_in_bytes_expected": 8,
+    "actual_size_measurements": null,
+    "dedicated_disk_gain_vs_raw_bytes": 0,
+    "packed": "NO_GO",
+    "live": "NO_GO",
+    "decoder": "host callback only",
+    "actual_upper_ack": false,
+    "native": "NOT_RUN",
+    "physical": false,
+    "normal_kbuild_wiring": false
+  },
+  "source_mapped_authenticated": 0,
+  "phase_a": "BLOCKED",
+  "direct_compressed_handoff": "DISABLED",
+  "forced_raw_bypass": "DISABLED",
+  "import_active": 0,
+  "physical_io": false,
+  "native": "NOT_RUN",
+  "normal_kbuild_wiring": false
+}
