@@ -31,63 +31,67 @@
   },
   "workflow_url": "https://github.com/k1moradi/swapz/actions/runs/45600148460",
   "run_id": 45600148460,
-  "run_status": "queued",
+  "run_status": "completed",
   "jobs": [
     {
       "run_id": 45600148460,
       "id": 139156637612,
       "name": "R091 shared authority strict host",
-      "status": "queued",
-      "conclusion": null,
+      "status": "completed",
+      "conclusion": "success",
       "url": "https://github.com/k1moradi/swapz/actions/runs/45600148460/job/139156637612"
     },
     {
       "run_id": 45600148475,
       "id": 139156637976,
       "name": "R088 legacy isolated current host",
-      "status": "queued",
-      "conclusion": null,
+      "status": "completed",
+      "conclusion": "success",
       "url": "https://github.com/k1moradi/swapz/actions/runs/45600148475/job/139156637976"
     },
     {
       "run_id": 45600148584,
       "id": 139156638466,
       "name": "R069 current authority joined host",
-      "status": "queued",
-      "conclusion": null,
+      "status": "completed",
+      "conclusion": "success",
       "url": "https://github.com/k1moradi/swapz/actions/runs/45600148584/job/139156638466"
     },
     {
       "run_id": 45600148189,
       "id": 139156636659,
       "name": "R072 current joined host and historical manifest",
-      "status": "queued",
-      "conclusion": null,
+      "status": "completed",
+      "conclusion": "success",
       "url": "https://github.com/k1moradi/swapz/actions/runs/45600148189/job/139156636659"
     },
     {
       "run_id": 45600148291,
       "id": 139156637379,
       "name": "R074 current ownership lifetime",
-      "status": "queued",
-      "conclusion": null,
+      "status": "completed",
+      "conclusion": "success",
       "url": "https://github.com/k1moradi/swapz/actions/runs/45600148291/job/139156637379"
     },
     {
       "run_id": 45600148586,
       "id": 139156638584,
       "name": "R073 separate reader pin and GC host",
-      "status": "queued",
-      "conclusion": null,
-      "url": "https://github.com/k1moradi/swapz/actions/runs/45600148586/job/139156638584"
+      "status": "completed",
+      "conclusion": "failure",
+      "url": "https://github.com/k1moradi/swapz/actions/runs/45600148586/job/139156638584",
+      "first_error": "ROUND073_READER_FIRST_ERROR phase=host cause=current-production-C-host:round069-original-bio-authority-joined-verify.py:FIRST_ERROR round069-joined-original-authority: historical-product-blob-mismatch:authority.c",
+      "exit": 2
     },
     {
       "run_id": 45600148455,
       "id": 139156638288,
       "name": "project-goals native rootless",
-      "status": "queued",
-      "conclusion": null,
-      "url": "https://github.com/k1moradi/swapz/actions/runs/45600148455/job/139156638288"
+      "status": "completed",
+      "conclusion": "failure",
+      "url": "https://github.com/k1moradi/swapz/actions/runs/45600148455/job/139156638288",
+      "first_error": "rootless phase=source-contract-test.py reason=nonzero_exit child_exit=1; private log not independently extracted for R091",
+      "exit": 1
     },
     {
       "run_id": 45600148455,
@@ -128,17 +132,136 @@
       "status": "queued",
       "conclusion": null,
       "url": "https://github.com/k1moradi/swapz/actions/runs/45600148455/job/139156638707"
+    },
+    {
+      "run_id": 45600148618,
+      "id": 139156638359,
+      "name": "R059",
+      "status": "completed",
+      "conclusion": "failure",
+      "first_error": "FIRST_ERROR round059-authority-import: nonunique actual source mutant current_generation",
+      "exit": 1,
+      "url": "https://github.com/k1moradi/swapz/actions/runs/45600148618/job/139156638359"
+    },
+    {
+      "run_id": 45600148485,
+      "id": 139156638068,
+      "name": "R060",
+      "status": "completed",
+      "conclusion": "failure",
+      "first_error": "FIRST_ERROR round059-authority-import: nonunique actual source mutant current_generation",
+      "exit": 1,
+      "url": "https://github.com/k1moradi/swapz/actions/runs/45600148485/job/139156638068"
+    },
+    {
+      "run_id": 45600148443,
+      "id": 139156637369,
+      "name": "R068",
+      "status": "completed",
+      "conclusion": "failure",
+      "first_error": "FIRST_ERROR round059-authority-import: nonunique actual source mutant current_generation",
+      "exit": 1,
+      "url": "https://github.com/k1moradi/swapz/actions/runs/45600148443/job/139156637369"
+    },
+    {
+      "run_id": 45600148461,
+      "id": 139156638454,
+      "name": "R066",
+      "status": "completed",
+      "conclusion": "failure",
+      "first_error": "FIRST_ERROR round059-authority-import: nonunique actual source mutant current_generation",
+      "exit": 1,
+      "url": "https://github.com/k1moradi/swapz/actions/runs/45600148461/job/139156638454"
+    },
+    {
+      "run_id": 45600148120,
+      "id": 139156636501,
+      "name": "R067",
+      "status": "completed",
+      "conclusion": "failure",
+      "first_error": "FIRST_ERROR round059-authority-import: nonunique actual source mutant current_generation",
+      "exit": 1,
+      "url": "https://github.com/k1moradi/swapz/actions/runs/45600148120/job/139156636501"
+    },
+    {
+      "run_id": 45600148185,
+      "id": 139156636766,
+      "name": "product x86 compile-only",
+      "status": "completed",
+      "conclusion": "success",
+      "url": "https://github.com/k1moradi/swapz/actions/runs/45600148185/job/139156636766"
+    },
+    {
+      "run_id": 45600148185,
+      "id": 139156637102,
+      "name": "product arm64 compile-only",
+      "status": "completed",
+      "conclusion": "success",
+      "url": "https://github.com/k1moradi/swapz/actions/runs/45600148185/job/139156637102"
+    },
+    {
+      "run_id": 45600148185,
+      "id": 139156637221,
+      "name": "product arm64 exact-C",
+      "status": "completed",
+      "conclusion": "failure",
+      "first_error": "test_async_lz4_preparation_overlaps_lower_io_without_publication: AssertionError: 7481 not less than 4268",
+      "exit": 1,
+      "ownership": "Agent3; unchanged by Agent5",
+      "url": "https://github.com/k1moradi/swapz/actions/runs/45600148185/job/139156637221"
+    },
+    {
+      "run_id": 45600148185,
+      "id": 139156637408,
+      "name": "product x86 exact-C",
+      "status": "completed",
+      "conclusion": "failure",
+      "first_error": "test_async_lz4_preparation_overlaps_lower_io_without_publication: AssertionError: 7481 not less than 4268",
+      "exit": 1,
+      "ownership": "Agent3; unchanged by Agent5",
+      "url": "https://github.com/k1moradi/swapz/actions/runs/45600148185/job/139156637408"
     }
   ],
-  "conclusion": "QUEUED_NO_GO_LIVE",
-  "first_error": null,
+  "conclusion": "FAIL_INHERITED_CI_CORRECTION_QUEUED_NO_GO_LIVE",
+  "first_error": "FIRST_ERROR round059-authority-import: nonunique actual source mutant current_generation",
   "local_first_error": "git ls-remote exit 128: Could not resolve host: github.com",
   "local_compilers": "NOT_RUN",
-  "actual_compiler_results": null,
-  "actual_mutants_per_compiler": null,
+  "actual_compiler_results": [
+    {
+      "compiler": "gcc",
+      "standard": "c2x",
+      "checks": 3703,
+      "semantic_mutants_killed": 19,
+      "storage_bytes": 14912,
+      "map_bytes": 20,
+      "sidecar_bytes": 1112,
+      "sanitizers": "ASan+UBSan",
+      "current_macro_simulation": "PASS",
+      "conclusion": "PASS_HOST_ONLY"
+    },
+    {
+      "compiler": "clang",
+      "standard": "c23",
+      "checks": 3703,
+      "semantic_mutants_killed": 19,
+      "storage_bytes": 14912,
+      "map_bytes": 20,
+      "sidecar_bytes": 1112,
+      "sanitizers": "ASan+UBSan",
+      "current_macro_simulation": "PASS",
+      "conclusion": "PASS_HOST_ONLY"
+    }
+  ],
+  "actual_mutants_per_compiler": 19,
   "planned_mutants_per_compiler": 19,
-  "artifact": null,
-  "source_ci_preflight": "PENDING; connector tree/postimage, expected-head single parent and added-line whitespace inspection verified; actual git diff --check, policy and clean full checkout pending CI",
+  "artifact": {
+    "id": 15015228313,
+    "url": "https://github.com/k1moradi/swapz/actions/runs/45600148460/artifacts/15015228313",
+    "size_bytes": 1839,
+    "sha256": "4f516e2ac602d4f23e486b8346e7431db022e18c0889298ec497d352d0eaaf7a",
+    "verification": "Actions metadata only, archive not extracted"
+  },
+  "source_ci_preflight": "PASS focused exact source",
   "prior_round090": {
     "admission": {
       "source": "a82a9263783f66222c84c349cc46e3b4262ef125",
@@ -187,45 +310,55 @@
     }
   },
   "push_census": {
-    "automatic_runs_observed": 23,
+    "automatic_runs_observed": 25,
     "run_ids": [
+      45600148586,
+      45600148484,
+      45600148411,
+      45600148618,
+      45600148485,
+      45600148455,
+      45600148108,
+      45600148443,
+      45600148399,
+      45600148460,
+      45600148102,
+      45600148185,
+      45600148600,
+      45600148254,
+      45600148584,
       45600148461,
       45600148377,
+      45600148189,
+      45600148120,
+      45600148599,
       45600148475,
       45600148624,
-      45600148102,
-      45600148411,
-      45600148484,
-      45600148189,
       45600148144,
       45600148101,
-      45600148399,
-      45600148599,
-      45600148455,
-      45600148443,
-      45600148120,
-      45600148618,
-      45600148291,
-      45600148586,
-      45600148460,
-      45600148485,
-      45600148584,
-      45600148108,
-      45600148600
+      45600148291
     ],
     "manual_dispatch": false,
     "terminal_audit": false,
-    "product_codec_run": "not observed in initial exact-source snapshot"
+    "product_codec_run": 45600148185,
+    "success": 15,
+    "failure": 7,
+    "pending": 3
   },
   "scope": {
-    "macro": "typed record is_current; legacy local current_mapping; strict host -Dcurrent=get_current() planned; no kernel build claim",
+    "macro": "current member and local rename verified by strict host -Dcurrent=get_current() GCC/Clang; no actual kernel compile of exact R091 source",
     "credit": "existing signatures, actual dedicated M3568 stage; exact never-issued fence, sole ordered owner",
     "cancel": "only exact free active tail, generation/cursor/sequence/role/no batch or GC; physical cursor recovered; sequence monotonically consumed; no abandoned counter or map change; decoder put once",
     "issue": "clear never-issued marker before lower callback, public commit requires exact active stage; issued lower errors ordinary abandon/quarantine, no rewind",
     "throttle": "no another reservation after cancellation until real allocator sequence progress; leave sequence for fallback; preserve 8-bit segment index worst-case one per remaining block plus canceled sequence; finite global sequence may still be consumed faster (bounded extra one per intervening allocator progress), not production admission policy",
     "ordinary_map_bytes": 20,
     "authority_growth_opt_in_bytes_expected": 8,
-    "actual_size_measurements": null,
+    "actual_size_measurements": {
+      "storage": 14912,
+      "sidecar": 1112,
+      "ordinary_map": 20,
+      "authority_growth": "not separately measured"
+    },
     "dedicated_disk_gain_vs_raw_bytes": 0,
     "packed": "NO_GO",
     "live": "NO_GO",
@@ -242,5 +375,60 @@
   "import_active": 0,
   "physical_io": false,
   "native": "NOT_RUN",
-  "normal_kbuild_wiring": false
+  "normal_kbuild_wiring": false,
+  "inherited_host": {
+    "round088": {
+      "checks_per_compiler": 12990,
+      "mutants_per_compiler": 9,
+      "storage": 15600,
+      "artifact_id": 15014609432,
+      "sha256": "692573b65257122fc631fa638f01609af20714c782d25862c1c0c85d020cd085"
+    },
+    "round069": {
+      "lower_cases_per_compiler": 7,
+      "real_C_mutants_per_compiler": 16,
+      "compiler_negative_per_compiler": 1
+    },
+    "round072": {
+      "source_mutants_per_compiler": 10,
+      "authority_mutants_per_compiler": 16,
+      "decoder_mutants_per_compiler": 2,
+      "historical_manifest_negatives": 13
+    },
+    "round074": {
+      "cases_per_compiler": 6,
+      "mutants_per_compiler": 14,
+      "real_product_mutants_per_compiler": 3
+    },
+    "round073": {
+      "conclusion": "failure",
+      "first_error": "ROUND073_READER_FIRST_ERROR phase=host cause=current-production-C-host:round069-original-bio-authority-joined-verify.py:FIRST_ERROR round069-joined-original-authority: historical-product-blob-mismatch:authority.c",
+      "diagnosis": "historical dependency pin lookup fails; exact source workflow checkout fetch-depth 2 cannot be relied on for frozen historical commit; R069 full history succeeds",
+      "routing_owner": "Agent2; no workflow edit by Agent5"
+    }
+  },
+  "corrective_source": {
+    "commit": "b8119c09f2429ea85077ae48213adaa4b1014515",
+    "parent": "ba9dd3c8702a71f0c5690a53e436bbe667bcc793",
+    "verifier_blob": "0fd76b1fb8c355ba36e2a0f780fcb38d9597b2e2",
+    "standards_parent_blob": "d116bd8b36d7fa0e0b2f86f683dbd953e44fcd86",
+    "standards_parent_bytes": 1808201,
+    "standards_blob": "ce804ef66a7bb107d340c52881c4db7b78480391",
+    "standards_bytes": 1809011,
+    "standards_append_bytes": 810,
+    "verification": "independent Git SHA1 and UTF8 byte lengths frozen/parent/postimage, literal prefixes, exact new tree identities and full readback; diff 5 additions/0 deletions",
+    "scope": "two anchor line substitutions, exact unique current guard, same inverted comparison, all ten semantic negatives retained",
+    "run_id": 45603612092,
+    "job_id": 139168619933,
+    "status": "queued",
+    "actual_mutants": null,
+    "first_error": null,
+    "automatic_runs_observed": [
+      45603612092,
+      45603612130,
+      45603612084
+    ],
+    "other_routes": "R059/R066/R067/R068 exact corrective run not observed; Agent2 owns routing, R073 full history needed; no duplicate manual run",
+    "local_execution": "NOT_RUN"
+  }
 }
