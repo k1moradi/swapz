@@ -59,7 +59,7 @@
     "exact_policy": "NOT_RUN_LOCALLY"
   },
   "github_ci": {
-    "status": "QUEUED",
+    "status": "COMPLETED",
     "run_id": 45587245295,
     "workflow_url": "https://github.com/k1moradi/swapz/actions/runs/45587245295",
     "head_sha": "3917b80eb005adba9efd6a39045265309f3b2035",
@@ -67,21 +67,40 @@
       {
         "id": 139111859253,
         "name": "selected-dm-source-host",
-        "status": "QUEUED",
-        "conclusion": null,
+        "status": "COMPLETED",
+        "conclusion": "SUCCESS",
         "url": "https://github.com/k1moradi/swapz/actions/runs/45587245295/job/139111859253"
       }
     ],
     "first_error": null,
-    "remote_compilers": "NOT_EXECUTED",
-    "original_patch_application": "NOT_EXECUTED",
+    "remote_compilers": "PASS_HOST_ADAPTER_SCOPE",
+    "original_patch_application": "PASS_CHECK_APPLY_POSTIMAGE_REVERSE_PRISTINE",
     "artifact": null,
     "automatic_source_census": {
       "total": 28,
-      "queued": 28
-    }
+      "queued": 28,
+      "scope": "INITIAL_SNAPSHOT_ONLY_NOT_TERMINAL_CENSUS"
+    },
+    "conclusion": "SUCCESS",
+    "run_attempt": 1,
+    "artifact_count": 0,
+    "canonical_policy": "PASS",
+    "exact_push_before_sha": "ada92cb20d4daa8a10602bdf56e65e745b1fa2cc",
+    "exact_tree_diff_check": "PASS",
+    "legacy_cases_per_compiler": 17,
+    "legacy_semantic_mutants_per_compiler": 15,
+    "registry_checks_per_compiler": 18,
+    "canonical_enqueue_anchor_count": 1,
+    "claim_refusal_cases_per_compiler": 20,
+    "baseline_broker_calls_per_compiler": 0,
+    "fake_credit_mutants_rejected_per_compiler": 1,
+    "fragment_sha256": "2542f8111d4dca2ef51d4dc2817adb4742dc87bd1047058e39eb7f9aae287458",
+    "original_dm_postimage": "554dd8215ec6be0cfeaa016ca25e772ac6d363ff",
+    "kernel_compile": "NOT_RUN",
+    "warning": "actions/checkout@v4 Node.js 20 deprecation; runner used Node.js 24",
+    "terminal_log_marker": "ROUND090_ORIGINAL_DM_PATCH_APPLICABLE_POSTIMAGE_VERIFIED_NOT_COMPILED_AUTH0"
   },
-  "conclusion": "IN_PROGRESS",
+  "conclusion": "SUCCESS",
   "first_integration_blocker": "NO_PRECLAIM_DESTINATION_EXTENT_SIDECAR_DECODER_GENERATION_RESERVATION_OR_CANCEL_CONSUME_ADAPTER",
   "route_registry": "DORMANT_ACTUAL_LIFECYCLE_RCU",
   "capability_bind": "SETUP_ADAPTER_NO_CURRENT_CALLER",
@@ -107,5 +126,8 @@
     "new_whitespace": "CLEAN_GITHUB_COMMIT_DIFF_INSPECTION",
     "exact_full_repo_git_diff_check": "NOT_RUN_LOCALLY",
     "exact_policy": "NOT_RUN_LOCALLY"
-  }
+  },
+  "qualification_scope": "EXACT_SOURCE_HOST_ADAPTER_REFUSAL_AND_PRISTINE_PATCH_ONLY",
+  "live_decision": "NO_GO_LIVE",
+  "terminal_evidence_parent": "1579fc8cdf70a631075e0f6935ebb73bfeab7632"
 }
