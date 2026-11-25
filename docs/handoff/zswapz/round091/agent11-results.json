@@ -1,18 +1,18 @@
 {
   "round": "091",
   "agent": 11,
-  "decision": "VERIFIER_CORRECTED_CI_QUEUED_UNAPPLIED_EVICTION_NO_GO_LIVE",
+  "decision": "PARTIAL_GCC_HOST_PASS_MUTANT_COMPILE_FAILURE_NEW_FIX_UNQUALIFIED_NO_GO_LIVE",
   "assignment": "7fa5e3dc74c67330f341ae39c11dc3f8bff01187",
   "baseline": "e8a3f08000f81dcc3b1bda74b407b9e523ed3bab",
-  "source_commit": "0e7241a9fe26f8f71d30fc4b6f9d4866e507641c",
-  "source_parent": "663b07a96fa7f9d76ecb533d41f614ff811144ee",
+  "source_commit": "63d60da34182e8870bd5ca661b370455923cd6bd",
+  "source_parent": "004d2559b7f275eaf3d0832cfd6177f1b6332900",
   "original_linux_pin": "c339f4010dea8b0d754f84ace70cd1b089878ef8",
   "source_files": {
     "src/kernel/zswap-original-ticket.h": "0630f9e4fad26458ed0778ca6ae040150e28f078",
     "src/kernel/zswap-original-ticket.c": "7ba56c5ee602853c8d0717f23aad9efc69d111ea",
     "tests/tools/round091-original-mm-eviction.patch": "94bb74549c54a614406b71f28a9e8e8c22527d6a",
-    "tests/tools/round091-original-mm-eviction-verify.py": "d956b3c68e6011ff042d2dcfa73abbecff6be053",
-    "tests/runtime/native/fixtures/round091-original-mm-eviction.c": "dea76da591f4080a496f443ef69de8f2fb9cc1fc",
+    "tests/tools/round091-original-mm-eviction-verify.py": "1fea77c85ded3d08806b8626401b777b339c3089",
+    "tests/runtime/native/fixtures/round091-original-mm-eviction.c": "5bdf06888cc0cbeabe9726d6274b1e6433a07921",
     ".github/workflows/phase-a-round091-original-mm-eviction-host-noauth.yml": "78577e9ea8471530d49a3ad31fdfc4cf9976cab2"
   },
   "patch": {
@@ -22,7 +22,7 @@
       "mm/zswap.c": "a9a0201c29f177a37ec95a652e79e4ea2008167a",
       "include/linux/swapz_mm_carrier.h": "a516cab0813a5ecb70054bf488d536b05dcd4c52"
     },
-    "postimage_status": "CONNECTOR_RECONSTRUCTED_BYTES_AND_GIT_BLOB; RUNNER_GIT_APPLY_PENDING",
+    "postimage_status": "ACTUAL_HOST_CI_GIT_APPLY_AND_PIN_CHECK_PASS_ON_PRIOR_CORRECTED_SOURCE",
     "actual_pinned_linux_compile": "NOT_RUN"
   },
   "standards": {
@@ -48,21 +48,102 @@
     "lag64": "960/960",
     "lag256": "768/768",
     "lag1024": "1024/1024",
-    "status": "EXPECTED_NOT_EXECUTED"
+    "status": "EXECUTED_GCC_BASELINE_ON_PRIOR_CORRECTED_SOURCE_ONLY"
   },
   "workflow": {
-    "run_id": 45604143022,
-    "job_id": 139170470716,
-    "url": "https://github.com/k1moradi/swapz/actions/runs/45604143022/job/139170470716",
-    "exact_source": "0e7241a9fe26f8f71d30fc4b6f9d4866e507641c",
-    "status": "queued",
+    "exact_source": "63d60da34182e8870bd5ca661b370455923cd6bd",
+    "run_id": 45638307407,
+    "job_id": 139289641783,
+    "url": "https://github.com/k1moradi/swapz/actions/runs/45638307407/job/139289641783",
+    "status": "in_progress",
     "conclusion": null,
-    "artifact": null,
     "actual_gcc_checks": null,
     "actual_clang_checks": null,
     "actual_semantic_mutant_kills": null,
-    "actual_generation_races": null,
-    "first_error": null
+    "artifact": null,
+    "first_error": null,
+    "observed_automatic_runs": [
+      {
+        "id": 45638307125,
+        "name": "Round064 staged original live slot route to current DM candidate NO_AUTH (automatic non-VM source)",
+        "status": "in_progress",
+        "conclusion": null,
+        "url": "https://github.com/k1moradi/swapz/actions/runs/45638307125",
+        "attempt": 1
+      },
+      {
+        "id": 45638307149,
+        "name": "Native kernel-C project-goal regressions",
+        "status": "in_progress",
+        "conclusion": null,
+        "url": "https://github.com/k1moradi/swapz/actions/runs/45638307149",
+        "attempt": 1
+      },
+      {
+        "id": 45638307096,
+        "name": "Round048 genuine pinned DM SRCU table and product async GC dtr NO_AUTH source",
+        "status": "in_progress",
+        "conclusion": null,
+        "url": "https://github.com/k1moradi/swapz/actions/runs/45638307096",
+        "attempt": 1
+      },
+      {
+        "id": 45638307407,
+        "name": "Round091 Agent11 actual eviction provenance host NO_AUTH",
+        "status": "in_progress",
+        "conclusion": null,
+        "url": "https://github.com/k1moradi/swapz/actions/runs/45638307407",
+        "attempt": 1
+      },
+      {
+        "id": 45638307076,
+        "name": "Round072 one original MM BIO actual authority independent decoder joined NO_AUTH (automatic non-VM source)",
+        "status": "in_progress",
+        "conclusion": null,
+        "url": "https://github.com/k1moradi/swapz/actions/runs/45638307076",
+        "attempt": 1
+      },
+      {
+        "id": 45638307081,
+        "name": "Systemd/package 63d60da34182e8870bd5ca661b370455923cd6bd (run 45638307081)",
+        "status": "in_progress",
+        "conclusion": null,
+        "url": "https://github.com/k1moradi/swapz/actions/runs/45638307081",
+        "attempt": 1
+      },
+      {
+        "id": 45638307057,
+        "name": "Private kernel debug and static contracts",
+        "status": "in_progress",
+        "conclusion": null,
+        "url": "https://github.com/k1moradi/swapz/actions/runs/45638307057",
+        "attempt": 1
+      },
+      {
+        "id": 45638307058,
+        "name": "Experimental swapz production C qualification",
+        "status": "in_progress",
+        "conclusion": null,
+        "url": "https://github.com/k1moradi/swapz/actions/runs/45638307058",
+        "attempt": 1
+      },
+      {
+        "id": 45638307221,
+        "name": "Rootless physical evidence adversarial audit",
+        "status": "completed",
+        "conclusion": "success",
+        "url": "https://github.com/k1moradi/swapz/actions/runs/45638307221",
+        "attempt": 1
+      },
+      {
+        "id": 45638307083,
+        "name": "Round063 opt-in original STORED clone ref to accepted current production DM NO_AUTH (automatic non-VM source)",
+        "status": "in_progress",
+        "conclusion": null,
+        "url": "https://github.com/k1moradi/swapz/actions/runs/45638307083",
+        "attempt": 1
+      }
+    ]
   },
   "real_kernel_compile": "NOT_RUN",
   "native": "NOT_RUN",
@@ -119,6 +200,68 @@
     "standards_complete_parent_prefix_preserved": true,
     "automatic_new_run": true
   },
-  "first_error": "R091_AGENT11_FIRST_ERROR original function anchor swapz_mm_candidate_get",
-  "first_error_scope": "VERIFIER_SOURCE_ANCHOR_PRE_COMPILATION"
+  "first_error": "gcc no_digest compile round091-original-mm-eviction.c:33:13: error: ‘sha256’ defined but not used [-Werror=unused-function]",
+  "first_error_scope": "HOST_MUTANT_COMPILE",
+  "prior_corrected_ci": {
+    "run_id": 45604143022,
+    "job_id": 139170470716,
+    "url": "https://github.com/k1moradi/swapz/actions/runs/45604143022/job/139170470716",
+    "exact_source": "0e7241a9fe26f8f71d30fc4b6f9d4866e507641c",
+    "status": "completed",
+    "conclusion": "failure",
+    "exit_code": 2,
+    "first_error": "gcc no_digest compile round091-original-mm-eviction.c:33:13: error: ‘sha256’ defined but not used [-Werror=unused-function]",
+    "first_error_scope": "HOST_MUTANT_COMPILE",
+    "canonical_policy": "PASS",
+    "staging": "PASS",
+    "gcc_baseline_checks": 52,
+    "gcc_semantic_mutant_kills": [
+      "no_generation",
+      "no_codec",
+      "no_crc"
+    ],
+    "gcc_mutants_not_completed": [
+      "no_digest",
+      "no_pool"
+    ],
+    "clang": "NOT_RUN",
+    "delayed_lag_hits": {
+      "64": [
+        960,
+        960
+      ],
+      "256": [
+        768,
+        768
+      ],
+      "1024": [
+        1024,
+        1024
+      ]
+    },
+    "cookie_bytes": 8,
+    "broker_bytes": 160,
+    "trace_cpu_seconds": 0.01329,
+    "race_threads": 2,
+    "artifact": {
+      "id": 15019325697,
+      "bytes": 2373,
+      "digest": "sha256:49de5493001f8c0480c4dace9df5bd71fb9e1d4a3a4f49c2c3f0da0575bf8730",
+      "url": "https://github.com/k1moradi/swapz/actions/runs/45604143022/artifacts/15019325697",
+      "archive_independently_extracted": false
+    }
+  },
+  "second_correction": {
+    "commit": "63d60da34182e8870bd5ca661b370455923cd6bd",
+    "parent": "004d2559b7f275eaf3d0832cfd6177f1b6332900",
+    "scope": "fixture SHA wrapper retained for expected digest; verifier fixture pin refreshed; no producer or broker change",
+    "standards_parent_blob": "1053bf44ee8234aa27dafba2c9083765ca3db92f",
+    "standards_after_blob": "e56de5aa3a3193640d358a17e123e62af03c4ae6",
+    "standards_parent_bytes": 1809873,
+    "standards_after_bytes": 1810731,
+    "standards_frozen_bytes": 1796686,
+    "full_parent_and_frozen_prefix": true,
+    "full_git_blob_readback": true,
+    "append_bytes": 858
+  }
 }
