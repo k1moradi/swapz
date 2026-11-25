@@ -1,0 +1,120 @@
+{
+  "round": "092",
+  "agent": 11,
+  "decision": "CANDIDATE_PUBLISHED_CI_QUEUED_NO_GO_LIVE",
+  "assignment": "ae0e4071bf01d1129d59cc9807e1025ecb6fac45",
+  "baseline": "2499405464110e6a97f054db5527de54b8aafb3a",
+  "source_commit": "8141a4a0fdfff0385df3898e937a8a388b833a83",
+  "source_parent": "6072006b0b3c625a30cf6875d71ce0b748058b4e",
+  "original_linux": "c339f4010dea8b0d754f84ace70cd1b089878ef8",
+  "source_files": {
+    "tests/tools/round092-original-module-boundary.patch": "62db468c14f23b59e7adaae65a11dcb9969f02b3",
+    "tests/tools/round092-original-module-boundary-verify.py": "bc222b47b301401db76954f950cfc19485ab5490",
+    "tests/runtime/native/fixtures/round092-original-module-boundary.c": "47698af8e60fe088de3fb5ab6f7725412816cea0",
+    "tests/runtime/native/fixtures/round092-module-shim.h": "79623955e77b0b35d17bd14f322412d8ee202c84",
+    ".github/workflows/phase-a-round092-original-module-boundary-host-noauth.yml": "da418c01e4fc8df1220b03f2ad27507508b1c235"
+  },
+  "patch": {
+    "scope": "STAGED_ORIGINAL_MM_AND_BUILT_IN_BROKER",
+    "hunks": 32,
+    "preimages": {
+      "mm/zswap.c": "a9a0201c29f177a37ec95a652e79e4ea2008167a",
+      "include/linux/swapz_mm_carrier.h": "a516cab0813a5ecb70054bf488d536b05dcd4c52",
+      "src/kernel/zswap-original-ticket.c": "7ba56c5ee602853c8d0717f23aad9efc69d111ea",
+      "src/kernel/zswap-original-ticket.h": "0630f9e4fad26458ed0778ca6ae040150e28f078"
+    },
+    "postimages": {
+      "mm/zswap.c": "98a8a6a66858204b61875ad9b2e8cfb0ecf8980a",
+      "include/linux/swapz_mm_carrier.h": "da1e7a367f4f5d16dc6854f33064631251acb153",
+      "src/kernel/zswap-original-ticket.c": "634b38e52b3b1e6493d6b10a694065ccc4b698ad",
+      "src/kernel/zswap-original-ticket.h": "6afac83a0655e532ce1ef9b8f290a367e8aabfce"
+    },
+    "connector_reconstruction": "PASS",
+    "hosted_git_apply": "NOT_RUN"
+  },
+  "exports": [
+    "swapz_mm_candidate_get",
+    "swapz_mm_register_provider",
+    "swapz_mm_unregister_provider",
+    "swapz_ticket_broker_put",
+    "swapz_ticket_broker_try_get",
+    "swapz_ticket_claim_under_queue_lock",
+    "swapz_ticket_put",
+    "swapz_ticket_view"
+  ],
+  "frozen_dm_consumer_blob": "6a98df348a2ffef12d8b51f857a12f7b00738fc6",
+  "export_inventory_static": "PASS exact 8/8 frozen consumer call names",
+  "provider_lifetime": {
+    "registration_pin": false,
+    "callback_pin": true,
+    "carrier_pin": true,
+    "retained_ref_pin": true,
+    "retain_duplicate_pin": true,
+    "put_after_unlock": true,
+    "unregister_grace": true,
+    "external_owner_quiescence": "UNPROVEN"
+  },
+  "memory": {
+    "entry_cookie_bytes": 8,
+    "carrier_count": 1,
+    "new_cache": false,
+    "additional_module_pointer_per_carrier": 1,
+    "additional_module_pointer_per_guarded_ticket_ref": 1,
+    "additional_global_owner_pointer": 1,
+    "actual_sizes": "NOT_RUN"
+  },
+  "standards": {
+    "frozen_blob": "e56de5aa3a3193640d358a17e123e62af03c4ae6",
+    "frozen_bytes": 1810731,
+    "parent_blob": "8a605249ee958a99e076ec58ff40df6af0f5f59e",
+    "parent_bytes": 1813675,
+    "after_blob": "c29d08c7a706f1a0194155d62996c085814e8e1a",
+    "after_bytes": 1815140,
+    "append_bytes": 1465,
+    "parent_and_frozen_prefix_identical": true,
+    "complete_git_blob_roundtrip": true,
+    "added_lines": 4,
+    "deleted_lines": 0
+  },
+  "workflow": {
+    "run_id": 45649587401,
+    "job_id": 139330113237,
+    "url": "https://github.com/k1moradi/swapz/actions/runs/45649587401/job/139330113237",
+    "head_sha": "8141a4a0fdfff0385df3898e937a8a388b833a83",
+    "attempt": 1,
+    "status": "queued",
+    "conclusion": null,
+    "actual_gcc_checks": null,
+    "actual_clang_checks": null,
+    "actual_semantic_kills": null,
+    "actual_lifecycle_races": null,
+    "artifact": null,
+    "first_error": null
+  },
+  "historical_r091_accepted": {
+    "source": "63d60da34182e8870bd5ca661b370455923cd6bd",
+    "job_id": 139289641783,
+    "checks": 104,
+    "semantic_kills": 10,
+    "unchanged_rerun": false
+  },
+  "kernel_compile": "NOT_RUN",
+  "module_link": "NOT_RUN",
+  "native_runtime": "NOT_RUN",
+  "local_git_diff_check": "NOT_RUN",
+  "source_mapped_authenticated": 0,
+  "phase_a": "BLOCKED",
+  "compressed_handoff": "DISABLED",
+  "forced_raw_bypass": "DISABLED",
+  "import_active": 0,
+  "physical_mutation": false,
+  "vm_testing": false,
+  "manual_duplicate_ci": false,
+  "blockers": [
+    "No actual R092 kernel compile or final module/modpost",
+    "External broker storage owner and every target/broker entrant must be quiesced before free; frozen target binding declines credit",
+    "Native RCU/module unload and integrated selected-route ordered claim/commit not qualified",
+    "Eviction digest does not establish store-time integrity",
+    "Durability and exactly-once native upper ACK unqualified"
+  ]
+}
