@@ -1,0 +1,139 @@
+{
+  "round": "089",
+  "agent": 10,
+  "status": "QUEUED",
+  "task_commit": "0c893ee7a3ffc158d747c11c96b67fcf0b3efa15",
+  "tested_source_commit": "d829c93cdf0b061a5b78cd177d7f4a458b9102eb",
+  "tested_source_parent": "c080db279bbf3f2c2d33d8d08926a04dfc7df4a3",
+  "baseline": "db9252db73721a768be912965ad4402e332039e8",
+  "original_linux_pin": "c339f4010dea8b0d754f84ace70cd1b089878ef8",
+  "branch": "main",
+  "single_parent": true,
+  "nonforce": true,
+  "source_files": {
+    "tests/tools/round089-original-composed-compile-verify.py": "ef9a1ffc6f508679bdad568e399eeb3165bdb63a",
+    ".github/workflows/phase-a-round089-original-composed-compile-noauth.yml": "f9ee38ca4c03698e29b71728c4dd208948c43eb9",
+    "docs/testing_standards.md": "d95a22312e1fe6c90062dfd859cbbea8461edf8a"
+  },
+  "standards_previous_blob": "de44823a377d7f31c0925be3648c4810fda4d7aa",
+  "patch_blobs": {
+    "tests/tools/round088-original-mm-carrier.patch": "b9a10044c7cd750d908730b5a95a4e945883ec45",
+    "tests/tools/round088-original-dm-selected-clone.patch": "e465dacabfb12fc93382143308e7ba1a188f59e6"
+  },
+  "preflight": {
+    "connector_verified_patch_blobs": 2,
+    "connector_verified_pristine_existing_file_blobs": 7,
+    "connector_predicted_postimages": 8,
+    "postimages": {
+      "mm/zswap.c": {
+        "preimage_blob": "ae19e301fced7e357a4c7587dfdd6abb890b9163",
+        "predicted_postimage_blob": "e3caa72ca37a7a3cdb3ed51639d9507b22fe4e51",
+        "actual_staged_postimage_blob": null
+      },
+      "include/linux/swap_ops.h": {
+        "preimage_blob": "57ac6c703f685883d3a15ebc1a5c7f6c298deb1b",
+        "predicted_postimage_blob": "a39a1921daf6f272e9812eb63b1aa64fec96c57f",
+        "actual_staged_postimage_blob": null
+      },
+      "include/linux/blk_types.h": {
+        "preimage_blob": "0cc09b975d8ffbd45ca3dc47533a71f8e8164de6",
+        "predicted_postimage_blob": "0bf866c1571fe6b4d2e49d01b1b2c87fcf2cf04c",
+        "actual_staged_postimage_blob": null
+      },
+      "include/linux/bio.h": {
+        "preimage_blob": "7a794ce723b84b2a148f8f9beccf057b266e8ac9",
+        "predicted_postimage_blob": "f4c5f1730514cf1816ffd5e9787562439dfae236",
+        "actual_staged_postimage_blob": null
+      },
+      "block/bio.c": {
+        "preimage_blob": "b0fcc69de653524479e3b328aa29a37e97945b84",
+        "predicted_postimage_blob": "3ba0e12a96ba3235eb909e3b3dd0be44657c6f6e",
+        "actual_staged_postimage_blob": null
+      },
+      "mm/page_io.c": {
+        "preimage_blob": "c6824fcd483e0aa2c412e14dae0d2a356b17c373",
+        "predicted_postimage_blob": "0b0fe917fa3af5deaef8263274edffbf1a62eedb",
+        "actual_staged_postimage_blob": null
+      },
+      "include/linux/swapz_mm_carrier.h": {
+        "preimage_blob": null,
+        "predicted_postimage_blob": "7ac3fe204983aa7ba5a291aa756d37e235f8508f",
+        "actual_staged_postimage_blob": null
+      },
+      "drivers/md/dm.c": {
+        "preimage_blob": "1881d86111fb2e655893ad898cf21b88f0e4e7f3",
+        "predicted_postimage_blob": "59ff578305062e9a63f900a661c6ce0cf3d8a9eb",
+        "actual_staged_postimage_blob": null
+      }
+    },
+    "raw_git_apply_check": "NOT_RUN",
+    "raw_git_apply": "NOT_RUN",
+    "scratch_kbuild": "NOT_RUN",
+    "patch_normalized": false,
+    "local_synthetic_git_apply_context": "PASS",
+    "local_pinned_checkout": false,
+    "local_git_first_error": "fatal: unable to access 'https://github.com/k1moradi/swapz.git/': Could not resolve host: github.com"
+  },
+  "historical_round088": {
+    "run_id": 45458753262,
+    "job_id": 138675229125,
+    "conclusion": "failure",
+    "first_error": "tests/tools/round088-original-dm-selected-clone.patch:70: space before tab in indent.",
+    "exit_code": 2,
+    "phase": "repository diff check before patch apply or compiler"
+  },
+  "source_review_candidate": {
+    "status": "NOT_COMPILER_CONFIRMED",
+    "path": "tests/tools/round088-original-dm-selected-clone.patch",
+    "line": 56,
+    "field": "bi_bvec_done",
+    "pinned_header": "include/linux/bvec.h",
+    "pinned_header_blob": "b63914ff56e33df302055fabf2a84ba490bc8d2c",
+    "actual_field": "bi_offset",
+    "owner": "Agent3"
+  },
+  "workflow_run_id": 45577221648,
+  "workflow_url": "https://github.com/k1moradi/swapz/actions/runs/45577221648",
+  "workflow_attempt": 1,
+  "workflow_created_at": "2026-11-25T08:32:46Z",
+  "workflow_conclusion": null,
+  "jobs": [
+    {
+      "id": 139078028312,
+      "name": "frozen-original-x86-compile-link",
+      "status": "queued",
+      "conclusion": null,
+      "url": "https://github.com/k1moradi/swapz/actions/runs/45577221648/job/139078028312"
+    }
+  ],
+  "ci_artifact": null,
+  "first_error": null,
+  "build_attempts_observed": 0,
+  "original_directed_objects": "NOT_RUN",
+  "product_directed_object": "NOT_RUN",
+  "full_kernel_link": "NOT_RUN",
+  "product_module_link": "NOT_RUN",
+  "modpost": "NOT_RUN",
+  "unresolved_symbol_inspection": "NOT_RUN",
+  "effective_config_sha256": null,
+  "compiler_diagnostics": null,
+  "link_diagnostics": null,
+  "local_original_compile": false,
+  "vm_build_for_qualification": false,
+  "vm_boot": false,
+  "module_loaded": false,
+  "physical_mutation": false,
+  "source_mapped_authenticated": 0,
+  "phase_a": "BLOCKED",
+  "direct_handoff": false,
+  "forced_raw_bypass": false,
+  "import_active": false,
+  "ordinary_raw_4096": "COMPLETE_ORIGINAL_UNCOMPRESSED_4096",
+  "ordinary_map_bytes": 20,
+  "production_code_changed": false,
+  "peer_code_changed": false,
+  "manual_duplicate_dispatch": false,
+  "periodic_monitoring": false,
+  "other_automatic_runs_observed": 9,
+  "conclusion": "COMPILE_ONLY_LANE_PUBLISHED_CI_QUEUED_ORIGINAL_NOT_RUN"
+}
