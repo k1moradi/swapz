@@ -1,0 +1,85 @@
+{
+  "round": "091",
+  "agent": 11,
+  "decision": "IN_PROGRESS_HOST_ONLY_UNAPPLIED_EVICTION_PATCH_NO_GO_LIVE",
+  "assignment": "7fa5e3dc74c67330f341ae39c11dc3f8bff01187",
+  "baseline": "e8a3f08000f81dcc3b1bda74b407b9e523ed3bab",
+  "source_commit": "55bc0ba3bf8ed5aa9db5d75222c1515de007b2e6",
+  "source_parent": "a44c7d7c0561294471924527bbd30bebea1bd8ac",
+  "original_linux_pin": "c339f4010dea8b0d754f84ace70cd1b089878ef8",
+  "source_files": {
+    "src/kernel/zswap-original-ticket.h": "0630f9e4fad26458ed0778ca6ae040150e28f078",
+    "src/kernel/zswap-original-ticket.c": "7ba56c5ee602853c8d0717f23aad9efc69d111ea",
+    "tests/tools/round091-original-mm-eviction.patch": "94bb74549c54a614406b71f28a9e8e8c22527d6a",
+    "tests/tools/round091-original-mm-eviction-verify.py": "5804503c3eba4aa821e1eed6a800b36d2016f6c4",
+    "tests/runtime/native/fixtures/round091-original-mm-eviction.c": "dea76da591f4080a496f443ef69de8f2fb9cc1fc",
+    ".github/workflows/phase-a-round091-original-mm-eviction-host-noauth.yml": "78577e9ea8471530d49a3ad31fdfc4cf9976cab2"
+  },
+  "patch": {
+    "hunks": 9,
+    "scope": "UNAPPLIED_R090_POSTIMAGE_OVERLAY_ONLY",
+    "postimages": {
+      "mm/zswap.c": "a9a0201c29f177a37ec95a652e79e4ea2008167a",
+      "include/linux/swapz_mm_carrier.h": "a516cab0813a5ecb70054bf488d536b05dcd4c52"
+    },
+    "postimage_status": "CONNECTOR_RECONSTRUCTED_BYTES_AND_GIT_BLOB; RUNNER_GIT_APPLY_PENDING",
+    "actual_pinned_linux_compile": "NOT_RUN"
+  },
+  "standards": {
+    "source_parent_blob": "5d2eb89b6a86ca8f898c9eb9a6143b2371094ebd",
+    "source_parent_bytes": 1805443,
+    "source_commit_blob": "a7a957da8ae9d232eff0038b9e66fa2d5cdf9d9e",
+    "source_commit_bytes": 1807468,
+    "full_prefix_byte_identical": true
+  },
+  "memory": {
+    "per_entry_cookie_bytes": 8,
+    "removed_sparse_cells": 64,
+    "prior_estimated_cell_bytes": 80,
+    "removed_sparse_estimate_bytes": 5120,
+    "carrier_host_bytes_prior": 4176,
+    "broker_host_bytes_prior": 160,
+    "carrier_count": 1,
+    "kernel_slab_delta": "NOT_RUN",
+    "real_natural_eviction_hit_rate": "NOT_RUN",
+    "cpu_benchmark": "NOT_RUN"
+  },
+  "expected_source_helper_trace": {
+    "lag64": "960/960",
+    "lag256": "768/768",
+    "lag1024": "1024/1024",
+    "status": "EXPECTED_NOT_EXECUTED"
+  },
+  "workflow": {
+    "run_id": 45600660268,
+    "job_id": 139158396211,
+    "url": "https://github.com/k1moradi/swapz/actions/runs/45600660268/job/139158396211",
+    "status": "queued",
+    "conclusion": null,
+    "artifact": null,
+    "actual_gcc_checks": null,
+    "actual_clang_checks": null,
+    "actual_semantic_mutant_kills": null,
+    "actual_generation_races": null,
+    "first_error": null
+  },
+  "real_kernel_compile": "NOT_RUN",
+  "native": "NOT_RUN",
+  "local_native_git": "DNS_FAILURE_EXIT_128_NOT_CI_RESULT",
+  "physical_mutation": false,
+  "new_vm_testing": false,
+  "manual_duplicate_ci_dispatch": false,
+  "source_mapped_authenticated": 0,
+  "phase_a": "BLOCKED",
+  "compressed_handoff": "DISABLED",
+  "forced_raw_bypass": "DISABLED",
+  "import_active": 0,
+  "blockers": [
+    "No native original MM/BIO/RCU/lockdep compile or runtime",
+    "Store-to-eviction compressor pool/slot/handle provenance requires native verification",
+    "Eviction CRC/SHA is not an independent store-time corruption witness",
+    "A3 ordered head storage reservation/claim and A5 cancel capacity not integrated",
+    "Provider/module external quiescence and independent target clone proof unproven",
+    "Real reclaim hit/CPU/slab and durable ACK unqualified"
+  ]
+}
