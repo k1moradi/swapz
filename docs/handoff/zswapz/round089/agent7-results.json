@@ -5,8 +5,8 @@
   "frozen_baseline": "db9252db73721a768be912965ad4402e332039e8",
   "tested_commit": "4ef323e0e451dee64c6019ead1044c66fbe15c76",
   "source_parent": "0c893ee7a3ffc158d747c11c96b67fcf0b3efa15",
-  "evidence_parent": "4ef323e0e451dee64c6019ead1044c66fbe15c76",
-  "status": "FAIL_OR_UNVERIFIED_TERMINAL",
+  "evidence_parent": "c2e4f945ac5042cae35ca7c35e6c1cc6eb621241",
+  "status": "PASS_STAGED_HOST_ONLY",
   "conclusion": "success",
   "source_blobs": {
     "tests/tools/round085-original-decode-verify.py": "6beb60c0c42662e11c3fc827dcbdacb1c6167370",
@@ -95,9 +95,333 @@
       "conclusion": "success"
     }
   ],
-  "actual_host_report": null,
+  "actual_host_report": {
+    "status": "PASS_STAGED_HOST_ONLY_THREE_HISTORICAL_CLANG_FAILURES",
+    "linux_pin": "c339f4010dea8b0d754f84ace70cd1b089878ef8",
+    "compilers": {
+      "gcc": {
+        "baseline": "PASS",
+        "stage": "complete",
+        "profiles": [
+          {
+            "codec": 1,
+            "small": 91,
+            "large": 4095
+          },
+          {
+            "codec": 2,
+            "small": 110,
+            "large": 4077
+          }
+        ],
+        "mutants_compiled": 19,
+        "mutants_executed": 19,
+        "mutants_compiled_executed_killed": 19,
+        "mutants": [
+          "geometry_ceiling",
+          "geometry_zero",
+          "geometry_cap",
+          "representation",
+          "codec",
+          "version",
+          "dictionary",
+          "decoded_size",
+          "input_capacity",
+          "scratch_capacity",
+          "output_capacity",
+          "unretained",
+          "lease_codec",
+          "crc",
+          "sha",
+          "alias",
+          "lzo_trailing",
+          "lzo_short_output",
+          "lz4_short_output"
+        ],
+        "first_error": null,
+        "standard": "-std=c2x",
+        "corpus_comparison": {
+          "streams": 4098,
+          "bytes": 8548267,
+          "sha256": "15b5ad18c0a90780d89c1ffd99d01ac9970a167ab1d5245194289e44a4a3c595",
+          "byte_exact": true,
+          "staged_decoder_readback": true,
+          "pristine_decoder_readback": true,
+          "reference": "GCC pristine compressor and decoder",
+          "cross_read_both_directions": true
+        }
+      },
+      "clang": {
+        "baseline": "PASS",
+        "stage": "complete",
+        "profiles": [
+          {
+            "codec": 1,
+            "small": 91,
+            "large": 4095
+          },
+          {
+            "codec": 2,
+            "small": 110,
+            "large": 4077
+          }
+        ],
+        "mutants_compiled": 19,
+        "mutants_executed": 19,
+        "mutants_compiled_executed_killed": 19,
+        "mutants": [
+          "geometry_ceiling",
+          "geometry_zero",
+          "geometry_cap",
+          "representation",
+          "codec",
+          "version",
+          "dictionary",
+          "decoded_size",
+          "input_capacity",
+          "scratch_capacity",
+          "output_capacity",
+          "unretained",
+          "lease_codec",
+          "crc",
+          "sha",
+          "alias",
+          "lzo_trailing",
+          "lzo_short_output",
+          "lz4_short_output"
+        ],
+        "first_error": null,
+        "standard": "-std=c23",
+        "pristine_control_observed": {
+          "kind": "sanitizer",
+          "sanitizer": "UBSan",
+          "category": "applying zero offset to null pointer",
+          "location": "lz4_compress.c:192:42",
+          "exit": 1
+        },
+        "pristine_control": {
+          "kind": "sanitizer",
+          "sanitizer": "UBSan",
+          "category": "applying zero offset to null pointer",
+          "location": "lz4_compress.c:192:42",
+          "exit": 1
+        },
+        "prior_staged_control_observed": {
+          "kind": "sanitizer",
+          "sanitizer": "UBSan",
+          "category": "addition of unsigned offset",
+          "location": "lz4_compress.c:297:9",
+          "exit": 1
+        },
+        "prior_staged_control": {
+          "kind": "sanitizer",
+          "sanitizer": "UBSan",
+          "category": "addition of unsigned offset",
+          "location": "lz4_compress.c:297:9",
+          "exit": 1
+        },
+        "pristine_decoder_control_observed": {
+          "kind": "sanitizer",
+          "sanitizer": "UBSan",
+          "category": "applying zero offset to null pointer",
+          "location": "lz4_decompress.c:89:55",
+          "exit": 1
+        },
+        "pristine_decoder_control": {
+          "kind": "sanitizer",
+          "sanitizer": "UBSan",
+          "category": "applying zero offset to null pointer",
+          "location": "lz4_decompress.c:89:55",
+          "exit": 1
+        },
+        "corpus_comparison": {
+          "streams": 4098,
+          "bytes": 8548267,
+          "sha256": "15b5ad18c0a90780d89c1ffd99d01ac9970a167ab1d5245194289e44a4a3c595",
+          "byte_exact": true,
+          "staged_decoder_readback": true,
+          "pristine_decoder_readback": false,
+          "reference": "GCC pristine compressor and decoder",
+          "cross_read_both_directions": false
+        }
+      }
+    },
+    "source_mapped_authenticated": 0,
+    "phase_a": "BLOCKED",
+    "import_active": 0,
+    "staging": {
+      "pristine": "2a397bb2c661d9c2e4a7a67d5f50f06bfd42f1f2",
+      "prior_failed_postimage": "a1d860d6085109bc01ed6a593cf369ccbd6edc67",
+      "postimage": "63eb4be2e23caf770649af18f6a7b2b82d79a5e7",
+      "postimage_sha256": "eda4fe9c1d3baa178e37c0dc25d4151742f3af8c6776b6554120edbb52b929f3",
+      "negatives_rejected": 5,
+      "mode": "isolated copy; original never edited",
+      "scope": "noDict only; prefix/external modes unchanged, unqualified",
+      "decoder": {
+        "pristine": "3a2cd9acada4a09ef70a344090d48167c46088a1",
+        "postimage": "8ca9e57ea0d03918e85e4aabcf472fe906b6bc7f",
+        "postimage_sha256": "c3ee112097f1cca4b321f55d712432441255f2d00157d2d0091faf941c6ab6f6",
+        "negatives_rejected": 4,
+        "scope": "noDict only; other modes unchanged, unqualified"
+      },
+      "pristine_after": "PASS"
+    },
+    "candidate_blobs": {
+      "src/kernel/zswap-original-decode.c": "eb1cd7f90d5edade9640e1ffe9dac3c8fe774644",
+      "src/kernel/zswap-original-decode.h": "a247d1aaf9865de71f97cd980be806b8d8c7c20e",
+      "tests/runtime/native/fixtures/round085-original-decode.c": "1de6f01fca08637c2877eeb396dca81a0e7efd02",
+      "tests/tools/round085-original-decode-verify.py": "6beb60c0c42662e11c3fc827dcbdacb1c6167370"
+    }
+  },
   "first_error": null,
-  "actual_compiler_counts": null,
+  "actual_compiler_counts": {
+    "gcc": {
+      "baseline": "PASS",
+      "stage": "complete",
+      "profiles": [
+        {
+          "codec": 1,
+          "small": 91,
+          "large": 4095
+        },
+        {
+          "codec": 2,
+          "small": 110,
+          "large": 4077
+        }
+      ],
+      "mutants_compiled": 19,
+      "mutants_executed": 19,
+      "mutants_compiled_executed_killed": 19,
+      "mutants": [
+        "geometry_ceiling",
+        "geometry_zero",
+        "geometry_cap",
+        "representation",
+        "codec",
+        "version",
+        "dictionary",
+        "decoded_size",
+        "input_capacity",
+        "scratch_capacity",
+        "output_capacity",
+        "unretained",
+        "lease_codec",
+        "crc",
+        "sha",
+        "alias",
+        "lzo_trailing",
+        "lzo_short_output",
+        "lz4_short_output"
+      ],
+      "first_error": null,
+      "standard": "-std=c2x",
+      "corpus_comparison": {
+        "streams": 4098,
+        "bytes": 8548267,
+        "sha256": "15b5ad18c0a90780d89c1ffd99d01ac9970a167ab1d5245194289e44a4a3c595",
+        "byte_exact": true,
+        "staged_decoder_readback": true,
+        "pristine_decoder_readback": true,
+        "reference": "GCC pristine compressor and decoder",
+        "cross_read_both_directions": true
+      }
+    },
+    "clang": {
+      "baseline": "PASS",
+      "stage": "complete",
+      "profiles": [
+        {
+          "codec": 1,
+          "small": 91,
+          "large": 4095
+        },
+        {
+          "codec": 2,
+          "small": 110,
+          "large": 4077
+        }
+      ],
+      "mutants_compiled": 19,
+      "mutants_executed": 19,
+      "mutants_compiled_executed_killed": 19,
+      "mutants": [
+        "geometry_ceiling",
+        "geometry_zero",
+        "geometry_cap",
+        "representation",
+        "codec",
+        "version",
+        "dictionary",
+        "decoded_size",
+        "input_capacity",
+        "scratch_capacity",
+        "output_capacity",
+        "unretained",
+        "lease_codec",
+        "crc",
+        "sha",
+        "alias",
+        "lzo_trailing",
+        "lzo_short_output",
+        "lz4_short_output"
+      ],
+      "first_error": null,
+      "standard": "-std=c23",
+      "pristine_control_observed": {
+        "kind": "sanitizer",
+        "sanitizer": "UBSan",
+        "category": "applying zero offset to null pointer",
+        "location": "lz4_compress.c:192:42",
+        "exit": 1
+      },
+      "pristine_control": {
+        "kind": "sanitizer",
+        "sanitizer": "UBSan",
+        "category": "applying zero offset to null pointer",
+        "location": "lz4_compress.c:192:42",
+        "exit": 1
+      },
+      "prior_staged_control_observed": {
+        "kind": "sanitizer",
+        "sanitizer": "UBSan",
+        "category": "addition of unsigned offset",
+        "location": "lz4_compress.c:297:9",
+        "exit": 1
+      },
+      "prior_staged_control": {
+        "kind": "sanitizer",
+        "sanitizer": "UBSan",
+        "category": "addition of unsigned offset",
+        "location": "lz4_compress.c:297:9",
+        "exit": 1
+      },
+      "pristine_decoder_control_observed": {
+        "kind": "sanitizer",
+        "sanitizer": "UBSan",
+        "category": "applying zero offset to null pointer",
+        "location": "lz4_decompress.c:89:55",
+        "exit": 1
+      },
+      "pristine_decoder_control": {
+        "kind": "sanitizer",
+        "sanitizer": "UBSan",
+        "category": "applying zero offset to null pointer",
+        "location": "lz4_decompress.c:89:55",
+        "exit": 1
+      },
+      "corpus_comparison": {
+        "streams": 4098,
+        "bytes": 8548267,
+        "sha256": "15b5ad18c0a90780d89c1ffd99d01ac9970a167ab1d5245194289e44a4a3c595",
+        "byte_exact": true,
+        "staged_decoder_readback": true,
+        "pristine_decoder_readback": false,
+        "reference": "GCC pristine compressor and decoder",
+        "cross_read_both_directions": false
+      }
+    }
+  },
   "artifact": {
     "id": 15003753677,
     "size_bytes": 5428,
@@ -113,5 +437,71 @@
   "import_active": false,
   "vm": false,
   "physical": false,
-  "production_adoption": false
+  "production_adoption": false,
+  "automatic_source_run_census": [
+    {
+      "run_id": 45576880204,
+      "name": "Experimental swapz production C qualification",
+      "status": "in_progress",
+      "conclusion": null
+    },
+    {
+      "run_id": 45576880306,
+      "name": "Round048 genuine pinned DM SRCU table and product async GC dtr NO_AUTH source",
+      "status": "in_progress",
+      "conclusion": null
+    },
+    {
+      "run_id": 45576879993,
+      "name": "Systemd/package 4ef323e0e451dee64c6019ead1044c66fbe15c76 (run 45576879993)",
+      "status": "in_progress",
+      "conclusion": null
+    },
+    {
+      "run_id": 45576880035,
+      "name": "Round072 one original MM BIO actual authority independent decoder joined NO_AUTH (automatic non-VM source)",
+      "status": "in_progress",
+      "conclusion": null
+    },
+    {
+      "run_id": 45576880289,
+      "name": "Native kernel-C project-goal regressions",
+      "status": "in_progress",
+      "conclusion": null
+    },
+    {
+      "run_id": 45576879925,
+      "name": "Rootless physical evidence adversarial audit",
+      "status": "completed",
+      "conclusion": "success"
+    },
+    {
+      "run_id": 45576879949,
+      "name": "Round089 isolated staged original typed decoder HOST ONLY NO_AUTH",
+      "status": "completed",
+      "conclusion": "success"
+    },
+    {
+      "run_id": 45576880089,
+      "name": "Round063 opt-in original STORED clone ref to accepted current production DM NO_AUTH (automatic non-VM source)",
+      "status": "in_progress",
+      "conclusion": null
+    },
+    {
+      "run_id": 45576880200,
+      "name": "Round064 staged original live slot route to current DM candidate NO_AUTH (automatic non-VM source)",
+      "status": "in_progress",
+      "conclusion": null
+    },
+    {
+      "run_id": 45576880069,
+      "name": "Private kernel debug and static contracts",
+      "status": "completed",
+      "conclusion": "success"
+    }
+  ],
+  "initial_evidence_parse_error": {
+    "commit": "c2e4f945ac5042cae35ca7c35e6c1cc6eb621241",
+    "cause": "nested console JSON extraction stopped at inner closing brace; terminal job was success, not failure; corrected by parsing complete actual report, no test rerun"
+  }
 }
