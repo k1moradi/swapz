@@ -96,141 +96,188 @@
   ],
   "workflow_url": "https://github.com/k1moradi/swapz/actions/runs/45586632370",
   "run_id": 45586632370,
-  "run_status": "queued",
+  "run_status": "completed",
   "jobs": [
     {
       "run_id": 45586632370,
       "id": 139109788374,
       "name": "shared admission current strict host",
-      "status": "queued",
-      "conclusion": null,
+      "status": "completed",
+      "conclusion": "success",
       "url": "https://github.com/k1moradi/swapz/actions/runs/45586632370/job/139109788374"
     },
     {
       "run_id": 45586631745,
       "id": 139109784344,
       "name": "legacy isolated current host R088",
-      "status": "queued",
-      "conclusion": null,
+      "status": "completed",
+      "conclusion": "success",
       "url": "https://github.com/k1moradi/swapz/actions/runs/45586631745/job/139109784344"
     },
     {
       "run_id": 45586631529,
       "id": 139109783483,
       "name": "actual authority joined R069",
-      "status": "queued",
-      "conclusion": null,
+      "status": "completed",
+      "conclusion": "success",
       "url": "https://github.com/k1moradi/swapz/actions/runs/45586631529/job/139109783483"
     },
     {
       "run_id": 45586631546,
       "id": 139109783860,
       "name": "owned-copy lifetime R074",
-      "status": "in_progress",
-      "conclusion": null,
+      "status": "completed",
+      "conclusion": "success",
       "url": "https://github.com/k1moradi/swapz/actions/runs/45586631546/job/139109783860"
     },
     {
       "run_id": 45586631689,
       "id": 139109784981,
       "name": "original joined host R072",
-      "status": "in_progress",
-      "conclusion": null,
-      "url": "https://github.com/k1moradi/swapz/actions/runs/45586631689/job/139109784981"
+      "status": "completed",
+      "conclusion": "failure",
+      "url": "https://github.com/k1moradi/swapz/actions/runs/45586631689/job/139109784981",
+      "first_error": "ROUND075_MANIFEST_FIRST_ERROR joined-byte-identical-product-blob:mm/swapz_round069/authority.c (exit 2 after current R072 host PASS)"
     },
     {
       "run_id": 45586631459,
       "id": 139109783111,
       "name": "product exact-C x86_64",
-      "status": "queued",
-      "conclusion": null,
-      "url": "https://github.com/k1moradi/swapz/actions/runs/45586631459/job/139109783111"
+      "status": "completed",
+      "conclusion": "failure",
+      "url": "https://github.com/k1moradi/swapz/actions/runs/45586631459/job/139109783111",
+      "first_error": "source-contract-test.py test_delta64_rescue_defaults_on_and_disabled_avoids_scratch: DELTA64_SHUF8 absent from truncated docs/testing_standards.md; also immutable naming policy missing; 182 tests, 2 failures, exit 1"
     },
     {
       "run_id": 45586631459,
       "id": 139109783415,
       "name": "product compile-only x86_64",
-      "status": "queued",
-      "conclusion": null,
+      "status": "completed",
+      "conclusion": "success",
       "url": "https://github.com/k1moradi/swapz/actions/runs/45586631459/job/139109783415"
     },
     {
       "run_id": 45586631459,
       "id": 139109783542,
       "name": "product compile-only arm64",
-      "status": "queued",
-      "conclusion": null,
+      "status": "completed",
+      "conclusion": "success",
       "url": "https://github.com/k1moradi/swapz/actions/runs/45586631459/job/139109783542"
     },
     {
       "run_id": 45586631459,
       "id": 139109783627,
       "name": "product exact-C arm64",
-      "status": "queued",
-      "conclusion": null,
-      "url": "https://github.com/k1moradi/swapz/actions/runs/45586631459/job/139109783627"
+      "status": "completed",
+      "conclusion": "failure",
+      "url": "https://github.com/k1moradi/swapz/actions/runs/45586631459/job/139109783627",
+      "first_error": "same two missing testing-standards assertions; 182 tests, 2 failures, exit 1"
     },
     {
       "run_id": 45586631652,
       "id": 139109784280,
       "name": "project-goals policy",
-      "status": "queued",
-      "conclusion": null,
+      "status": "completed",
+      "conclusion": "success",
       "url": "https://github.com/k1moradi/swapz/actions/runs/45586631652/job/139109784280"
     },
     {
       "run_id": 45586631652,
       "id": 139109784463,
       "name": "project-goals make interface",
-      "status": "queued",
-      "conclusion": null,
-      "url": "https://github.com/k1moradi/swapz/actions/runs/45586631652/job/139109784463"
+      "status": "completed",
+      "conclusion": "failure",
+      "url": "https://github.com/k1moradi/swapz/actions/runs/45586631652/job/139109784463",
+      "first_error": "PublicMakeContract.test_make_test_is_only_official_documented_test_command: AssertionError; private detail omitted, exit 1"
     },
     {
       "run_id": 45586631652,
       "id": 139109784531,
       "name": "project-goals rootless lifecycle",
-      "status": "queued",
-      "conclusion": null,
+      "status": "completed",
+      "conclusion": "success",
       "url": "https://github.com/k1moradi/swapz/actions/runs/45586631652/job/139109784531"
     },
     {
       "run_id": 45586631652,
       "id": 139109784610,
       "name": "project-goals native rootless",
-      "status": "queued",
-      "conclusion": null,
-      "url": "https://github.com/k1moradi/swapz/actions/runs/45586631652/job/139109784610"
+      "status": "completed",
+      "conclusion": "failure",
+      "url": "https://github.com/k1moradi/swapz/actions/runs/45586631652/job/139109784610",
+      "first_error": "source-contract-test.py nonzero_exit child_exit=1; private diagnostic not extracted"
     },
     {
       "run_id": 45586631652,
       "id": 139109784669,
       "name": "project-goals readiness",
-      "status": "queued",
-      "conclusion": null,
+      "status": "completed",
+      "conclusion": "success",
       "url": "https://github.com/k1moradi/swapz/actions/runs/45586631652/job/139109784669"
     },
     {
       "run_id": 45586631652,
       "id": 139109784893,
       "name": "project-goals source contract",
-      "status": "queued",
-      "conclusion": null,
-      "url": "https://github.com/k1moradi/swapz/actions/runs/45586631652/job/139109784893"
+      "status": "completed",
+      "conclusion": "failure",
+      "url": "https://github.com/k1moradi/swapz/actions/runs/45586631652/job/139109784893",
+      "first_error": "test_delta64_rescue_defaults_on_and_disabled_avoids_scratch: AssertionError; private detail omitted, exit 1"
+    },
+    {
+      "run_id": 45586631652,
+      "id": 139121452001,
+      "name": "exact SHA aggregate",
+      "status": "completed",
+      "conclusion": "failure",
+      "first_error": "failed prerequisite jobs",
+      "url": "https://github.com/k1moradi/swapz/actions/runs/45586631652/job/139121452001"
     }
   ],
-  "conclusion": "QUEUED",
-  "first_error": null,
+  "conclusion": "FAIL_INHERITED_CI_CORRECTION_QUEUED",
+  "first_error": "ROUND075_MANIFEST_FIRST_ERROR joined-byte-identical-product-blob:mm/swapz_round069/authority.c (exit 2 after current R072 host PASS)",
   "local_first_error": "git ls-remote exit 128: Could not resolve host: github.com",
   "local_compilers": "NOT_RUN",
-  "actual_compiler_results": null,
-  "actual_mutant_results": null,
+  "actual_compiler_results": [
+    {
+      "compiler": "gcc",
+      "standard": "c2x",
+      "checks": 294,
+      "storage_bytes": 14912,
+      "map_bytes": 20,
+      "sidecar_bytes": 1112,
+      "semantic_mutants_compiled_executed_killed": 12,
+      "sanitizers": "ASan+UBSan",
+      "conclusion": "PASS"
+    },
+    {
+      "compiler": "clang",
+      "standard": "c23",
+      "checks": 294,
+      "storage_bytes": 14912,
+      "map_bytes": 20,
+      "sidecar_bytes": 1112,
+      "semantic_mutants_compiled_executed_killed": 12,
+      "sanitizers": "ASan+UBSan",
+      "conclusion": "PASS"
+    }
+  ],
+  "actual_mutant_results": {
+    "per_compiler": 12,
+    "total": 24
+  },
   "planned_mutants_per_compiler": 12,
-  "artifact": null,
+  "artifact": {
+    "id": 15008802899,
+    "url": "https://github.com/k1moradi/swapz/actions/runs/45586632370/artifacts/15008802899",
+    "size_bytes": 1622,
+    "digest": "sha256:2dbc132a0b466dc615172eda00b4db229acb4f035073397164cf24a864d43d27",
+    "verification": "Actions metadata; archive not independently extracted"
+  },
   "push_census": {
     "automatic_runs": 13,
     "manual_dispatch": false,
-    "terminal_audit": false,
+    "terminal_audit": true,
     "run_ids": [
       45586633229,
       45586631652,
@@ -245,7 +292,9 @@
       45586632370,
       45586631685,
       45586631689
-    ]
+    ],
+    "success": 10,
+    "failure": 3
   },
   "scope": {
     "credit": "single active actual allocator transaction; open-segment proof; allocator sequence scoped to authority lifetime",
@@ -253,7 +302,7 @@
     "commit": "consume once; actual lower callbacks and flush before map publication; no ACK",
     "snapshot": "value descriptor and exact bytes; borrowed independently retained decoder while pin held",
     "legacy_pins": "historical native R069/072 immutable product; actual current host C/H; R088 legacy source equality and unchanged original mutant region",
-    "round073_corrected_ci": "R069 dependency corrected; separate current R073 run not observed",
+    "round073_corrected_ci": "NOT_RUN; no separate exact source R073 run observed",
     "new_mutations": [
       "credit_headroom",
       "credit_identity",
@@ -270,7 +319,7 @@
     "kernel_and_physical": "NOT_RUN",
     "source_auth": "NOT_ESTABLISHED",
     "decoder": "RAM callback lease fixture only; real decoder A7",
-    "source_ci_preflight": "PENDING"
+    "source_ci_preflight": "PASS focused exact source"
   },
   "source_mapped_authenticated": 0,
   "phase_a": "BLOCKED",
@@ -279,5 +328,84 @@
   "import_active": 0,
   "physical_io": false,
   "native": "NOT_RUN",
-  "normal_kbuild_wiring": false
+  "normal_kbuild_wiring": false,
+  "verified_inherited_host": {
+    "round088": {
+      "checks_per_compiler": 12990,
+      "mutants_per_compiler": 9,
+      "storage_bytes": 15600,
+      "artifact_id": 15010040190,
+      "digest": "sha256:ad1810be8b5dac1486467f708d51dd8c2f2f66950c0d88f55df4174a70a53618"
+    },
+    "round069": {
+      "lower_cases_per_compiler": 7,
+      "authority_mutants_per_compiler": 16,
+      "compiler_negative_per_compiler": 1
+    },
+    "round074": {
+      "cases_per_compiler": 6,
+      "mutants_per_compiler": 14,
+      "real_product_mutants_per_compiler": 3
+    },
+    "round072": {
+      "current_host": "PASS",
+      "source_mutants_per_compiler": 10,
+      "authority_mutants_per_compiler": 16,
+      "decoder_mutants_per_compiler": 2,
+      "manifest_self_test": "FAIL"
+    }
+  },
+  "corrective_source": {
+    "commit": "4c859e817eaba9540294806c54da56013711c883",
+    "parent": "20fca8dc2780db020b541d787f5c1035cecfe679",
+    "manifest_blob": "b19b4add6862552d781ce68548f54818e056e8a4",
+    "standards_parent_blob": "3ae03a457a3af62d8e5149cfe305c87e741c50ac",
+    "standards_blob": "6441a8b096a181b9a80890a1d1f63a87773c3fb3",
+    "historical_product_pins_verified": 8,
+    "manifest_negatives_planned": 13,
+    "actual_manifest_negatives": null,
+    "local_execution": "NOT_RUN",
+    "status": "QUEUED",
+    "jobs": [
+      {
+        "run_id": 45591509623,
+        "id": 139126625541,
+        "status": "queued"
+      },
+      {
+        "run_id": 45591509628,
+        "id": 139126625300,
+        "status": "queued"
+      },
+      {
+        "run_id": 45591509628,
+        "id": 139126625685,
+        "status": "queued"
+      },
+      {
+        "run_id": 45591509522,
+        "id": 139126626236,
+        "status": "queued"
+      }
+    ],
+    "automatic_runs": [
+      45591509314,
+      45591509472,
+      45591509616,
+      45591509382,
+      45591509623,
+      45591509522,
+      45591509628,
+      45591509436,
+      45591509446
+    ],
+    "first_error": null,
+    "publication": "single parent expected-head nonforce; first oversized blob write GraphQL error, first tree commit unpublished after main advanced; reconciled with fresh exact standards prefix and readback; no duplicate dispatch"
+  },
+  "standards_incident": {
+    "initial_source_blob": "2b04df5f05142a20b5f2a6f26aeb53873e25838e",
+    "actual": "historical prefix absent in initial source; Agent5 did not detect preexisting truncation",
+    "restored_by_agent7": "70fbbe12c84db56283b5e0812faf1fc8032bbae4",
+    "restoration_terminal_qualification": "pending for corrective source; no false PASS"
+  }
 }
