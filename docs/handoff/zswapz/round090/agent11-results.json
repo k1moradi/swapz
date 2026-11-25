@@ -1,7 +1,7 @@
 {
   "round": "090",
   "agent": 11,
-  "conclusion": "IN_PROGRESS_HOST_ONLY_UNAPPLIED_LIFETIME_OVERLAY_NO_GO_LIVE",
+  "conclusion": "PASS_HOST_ONLY_UNAPPLIED_LIFETIME_OVERLAY_NO_GO_LIVE",
   "assignment": "edf44c4417f14b5836b1b5f90157e24916afcde2",
   "baseline": "9f7002c896f86226e93f0523b1f6e935de5c6de9",
   "source_commit": "0131ab0a93f6708ab7de4a21f3cbd35efe05de53",
@@ -30,7 +30,7 @@
     "mm/page_io.c": "c3bd481117dbd29edd821df452f74990d6d5f00a",
     "include/linux/swapz_mm_carrier.h": "f170d2c2ac63679adb0885f746585ed77c2746a5"
   },
-  "postimage_status": "CONNECTOR_PREDICTED_EXACT_STAGE; CI_PENDING",
+  "postimage_status": "CI_VERIFIED_EXACT_SCRATCH_STAGE",
   "prior_stage_postimages_verified_by_connector": 7,
   "modified_pristine_blobs_verified_by_connector": 6,
   "overlay_hunks": 17,
@@ -43,17 +43,49 @@
     "run": 45586374203,
     "job": 139108905510,
     "url": "https://github.com/k1moradi/swapz/actions/runs/45586374203/job/139108905510",
-    "status": "queued",
-    "conclusion": null,
-    "artifact": null,
+    "status": "completed",
+    "conclusion": "success",
+    "artifact": {
+      "id": 15009155737,
+      "url": "https://github.com/k1moradi/swapz/actions/runs/45586374203/artifacts/15009155737",
+      "bytes": 2691,
+      "files_uploaded": 13,
+      "digest": "sha256:b7b65f4e11e6e97e6c0d5f8f567a2aa5fba40237e20af9d2bc1f6131f080027b",
+      "expires_at": "2026-12-09T09:33:26Z",
+      "archive_independently_extracted": false
+    },
     "first_error": null,
-    "actual_checks": null,
-    "actual_lifecycle_races": null,
-    "actual_mutant_kills": null,
-    "compiler_results": {}
+    "actual_checks": 60,
+    "actual_lifecycle_races": 2,
+    "actual_mutant_kills": 4,
+    "compiler_results": {
+      "gcc": {
+        "status": "PASS",
+        "checks": 30,
+        "lifecycle_races": 1,
+        "mutant_kills": 2,
+        "trace_cpu_seconds": 0.000731
+      },
+      "clang": {
+        "status": "PASS",
+        "checks": 30,
+        "lifecycle_races": 1,
+        "mutant_kills": 2,
+        "trace_cpu_seconds": 0.000888
+      }
+    },
+    "log_markers": [
+      "gcc PASS_HOST_ONLY R090 checks=30 lifecycle_races=1 immediate=1024 lag32=992 lag64=0 lag256=0 source=72 carrier=4176 broker=160 trace_cpu_seconds=0.000731000",
+      "gcc semantic kill no_reader",
+      "gcc semantic kill no_grace",
+      "clang PASS_HOST_ONLY R090 checks=30 lifecycle_races=1 immediate=1024 lag32=992 lag64=0 lag256=0 source=72 carrier=4176 broker=160 trace_cpu_seconds=0.000888000",
+      "clang semantic kill no_reader",
+      "clang semantic kill no_grace",
+      "PASS_HOST_ONLY R090 staged producer lifetime + sparse trace; kernel NOT_RUN AUTH0"
+    ]
   },
-  "first_error": "local git ls-remote exited 128: Could not resolve host: github.com",
-  "first_error_scope": "LOCAL_CHECKOUT_UNAVAILABLE; NOT_CI_OR_COMPILER_FAILURE",
+  "first_error": null,
+  "first_error_scope": "NO_CI_ERROR_OBSERVED; LOCAL_GIT_DNS_FAILURE_IS_SEPARATE",
   "prepublication_packaging_errors": [
     "JSON parser rejected trailing comma in prior Python dict; corrected",
     "full patch generator rejected incorrect bio.h old-line anchor; switched to exact postimage overlay"
@@ -100,9 +132,24 @@
       0,
       0
     ],
-    "actual_hits": null,
-    "host_cpu_seconds": null,
-    "scope": "DETERMINISTIC_NO_CONTENTION_SOURCE_HELPER_TRACE_NOT_NATURAL_EVICTION"
+    "actual_hits": [
+      1024,
+      992,
+      0,
+      0
+    ],
+    "host_cpu_seconds": {
+      "gcc": 0.000731,
+      "clang": 0.000888
+    },
+    "scope": "DETERMINISTIC_NO_CONTENTION_SOURCE_HELPER_TRACE_NOT_NATURAL_EVICTION",
+    "actual_lookups": [
+      1024,
+      992,
+      960,
+      768
+    ],
+    "real_natural_eviction": "NOT_RUN"
   },
   "automatic_census": 9,
   "other_automatic_runs": [
@@ -133,5 +180,19 @@
   "phase_a": "BLOCKED",
   "direct_handoff": "DISABLED",
   "forced_raw_bypass": "DISABLED",
-  "import_active": 0
+  "import_active": 0,
+  "local_checkout_first_blocker": "git ls-remote returned 128: Could not resolve host: github.com",
+  "terminal_ci": {
+    "exact_sha": "0131ab0a93f6708ab7de4a21f3cbd35efe05de53",
+    "source_parent": "3f0f52f8f07692d3b2e5614bc58bdae3ceadaff8",
+    "branch": "main",
+    "real_github_event_before_verified": true,
+    "clean_sha_verified": true,
+    "one_parent": true,
+    "git_diff_check": "PASS",
+    "repository_policy": "PASS",
+    "stage_and_source_anchor": "PASS",
+    "kernel_compile": "NOT_RUN",
+    "new_test_dispatch": false
+  }
 }
