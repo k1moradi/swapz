@@ -1,18 +1,28 @@
 {
   "round": "093",
   "agent": 2,
-  "conclusion": "BLOCKED_NOT_ROUND_OPEN",
-  "kind": "prepared_evidence_only_read_only",
+  "conclusion": "IN_PROGRESS",
+  "kind": "rootless_teardown_and_read_only_aggregate_observations",
   "frozen_main": "78f630c9d0a2d5bfb626f2dbdef172f6024cf5ea",
   "prepared_task": "5f3d9becd358f790c2d892d2f29e8e54a13f92c1",
-  "round_open": false,
-  "source_commit": null,
-  "source_parent": null,
-  "tested_commit": null,
-  "new_ci_runs": [],
+  "round_open": true,
+  "source_commit": "74ee2d04de59db75d19adc2b5f3d30200a4dea98",
+  "source_parent": "aae1b1576dea529411bf98a1b7a680b01a9c43e0",
+  "tested_commit": "74ee2d04de59db75d19adc2b5f3d30200a4dea98",
+  "new_ci_runs": [
+    45666993933,
+    45666993763,
+    45666994275,
+    45666993801,
+    45666993826,
+    45666993941,
+    45666993787,
+    45666993888,
+    45666993719
+  ],
   "first_error": null,
-  "source_edits": false,
-  "ref_update_attempted": false,
+  "source_edits": true,
+  "ref_update_attempted": true,
   "r092": {
     "tested_commit": "62e1ee2dde6ddbdb79ca79fb1c64db31ac6e9b2a",
     "parent": "ae0e4071bf01d1129d59cc9807e1025ecb6fac45",
@@ -68,11 +78,11 @@
       "host_swap_access": false
     },
     "exact_historical_reproduction": false,
-    "correction": "planned after gate: fixture input isolation and complete drain, preserve quarantine and true identity-change controls"
+    "correction": "published fixture-only: real parser, three fabricated snapshots, 21 planned scenarios; actual full fixture NOT_RUN locally, hosted pending"
   },
   "collector": {
     "dm_blob": "420751247bdfd0be9c7271b180ee5cfcc7ca5d92",
-    "implemented": false,
+    "implemented": true,
     "available_source_fields": [
       "retained typed candidate view",
       "route/session/target/table epoch",
@@ -87,7 +97,13 @@
       "map publication and exactly-once upper ACK correlation",
       "read/GC/fallback and cleanup proof"
     ],
-    "hard_refuse": true
+    "hard_refuse": true,
+    "implementation_scope": "read-only supplied DM INFO aggregate snapshots; no capture provenance or native event ingestion",
+    "planned_tests": 3,
+    "planned_negatives": 15,
+    "native_events_implemented": false,
+    "actual_tests": null,
+    "actual_negatives": null
   },
   "source_mapped_authenticated": false,
   "phase_a": "BLOCKED",
@@ -100,5 +116,36 @@
   "branches_created": 0,
   "prs_created": 0,
   "force_pushes": 0,
-  "duplicate_ci": 0
+  "duplicate_ci": 0,
+  "source_publication": {
+    "verified_main": true,
+    "expected_head_nonforce": true,
+    "sole_parent": true,
+    "changed_paths": 5,
+    "prior_candidate_races": true,
+    "transient_error": "GitHub GraphQL 99BE:B2E79:BA8607C:112705BF:6B071D09"
+  },
+  "standards": {
+    "parent_blob": "d588a71a021dfa5db42fd3bfc4c84135919b56ca",
+    "parent_bytes": 1826831,
+    "source_blob": "517c1429a72362d67fc84f09e63827e35196cd20",
+    "source_bytes": 1828438,
+    "append_bytes": 1607,
+    "full_parent_prefix_verified": true,
+    "git_hashes_recomputed": true,
+    "remote_readback_verified": true,
+    "hosted": "PENDING"
+  },
+  "focused_ci": {
+    "run": 45666993826,
+    "job": 139391706207,
+    "status": "queued",
+    "conclusion": null,
+    "first_error": null,
+    "actual_teardown_scenarios": null,
+    "actual_collector_tests": null,
+    "actual_collector_negatives": null,
+    "artifacts": null,
+    "sparse_job": 139391706854
+  }
 }
