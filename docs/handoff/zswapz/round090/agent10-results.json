@@ -304,5 +304,10 @@
     "original-directed-objects"
   ],
   "new_dispatch_this_visit": false,
-  "terminal_evidence_only": true
+  "terminal_evidence_only": true,
+  "agent1_artifact_independent_extraction": {
+    "id": 15008368383,
+    "sha256": "02ce3ad2492be35c9311ac2224072872adf725775b7af7154ea230c72cd36280",
+    "results_inspected": true
+  }
 }

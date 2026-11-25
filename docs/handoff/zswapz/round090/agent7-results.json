@@ -4,8 +4,8 @@
   "task_sha": "edf44c4417f14b5836b1b5f90157e24916afcde2",
   "frozen_baseline": "9f7002c896f86226e93f0523b1f6e935de5c6de9",
   "original_linux_pin": "c339f4010dea8b0d754f84ace70cd1b089878ef8",
-  "status": "CORRECTIVE_SOURCE_PUBLISHED_CI_QUEUED_NO_GO_LIVE",
-  "conclusion": "PENDING_CORRECTIVE_SOURCE_CI",
+  "status": "COMPLETED_SUCCESS_STAGED_HOST_ONLY_NO_GO_LIVE",
+  "conclusion": "PASS_CORRECTED_STAGED_HOST_ONLY_NO_GO_LIVE",
   "initial_source": {
     "sha": "dbb947ca895916cedbd20e93422722f1dde5b510",
     "parent": "ca95fa592eced5056a9209103c700d109c3d78ab",
@@ -65,13 +65,16 @@
   "ci": {
     "run_id": 45591425899,
     "job_id": 139126333980,
-    "status": "queued",
-    "conclusion": null,
-    "actual_gcc_compiled_executed": 0,
-    "actual_clang_compiled_executed": 0,
+    "status": "completed",
+    "conclusion": "success",
+    "actual_gcc_compiled_executed": 118930,
+    "actual_clang_compiled_executed": 118930,
     "first_error": null,
-    "artifact_id": null,
-    "manual_dispatch": false
+    "artifact_id": 15010139788,
+    "manual_dispatch": false,
+    "archive_independently_extracted": true,
+    "artifact_sha256": "43101f2e20833d68155aedefa4065ecf22e5eb9ef6817bfcb081f860413a4bcf",
+    "actual_checks": 237860
   },
   "native": "NOT_RUN",
   "physical": false,

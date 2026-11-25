@@ -59,3 +59,7 @@ PASS_HOST_ONLY R090 staged producer lifetime + sparse trace; kernel NOT_RUN AUTH
 ```
 
 The 64-entry direct-map cache is worst-case ineffective for sequential lag >=64 and one static carrier plus grace can throttle only the optimization, not ordinary native fallback. Host trace timings exclude hashing/natural eviction/system contention. This is strictly GO for dormant source review, NO-GO for activation: full provider code pin/module/broker external entrant quiescence, native object/folio/bdev stability, exact original kernel compile/link, real selected clone and lock-order proof, lower durability and once-only ACK are outstanding. No physical, new VM, branch, PR, force push, manual rerun or periodic monitor. AUTH=0 Phase A BLOCKED compressed handoff/forced RAW/import OFF.
+
+
+## Agent1 independently verified reconciliation
+Agent1 independently extracted artifact15009155737 results.json, SHA256 b7b65f4e11e6e97e6c0d5f8f567a2aa5fba40237e20af9d2bc1f6131f080027b. Actual15 pristine/7 baseline/7 overlay pins, host30+30 checks,1+1 races,2+2 semantic kills; lag0 1024/1024, lag32 992/992, lag64 0/960, lag256 0/768 each. Host trace is not natural reclaim; zero long-lag hit rate is an architectural utilization warning. R091 prioritize compact source identity with eligible preerase digest derivation, no store-time sparse-cache residency dependence if proven; no unbounded RAM expansion, no extra reclaim path.

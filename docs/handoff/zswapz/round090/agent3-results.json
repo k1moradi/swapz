@@ -129,5 +129,17 @@
   },
   "qualification_scope": "EXACT_SOURCE_HOST_ADAPTER_REFUSAL_AND_PRISTINE_PATCH_ONLY",
   "live_decision": "NO_GO_LIVE",
-  "terminal_evidence_parent": "1579fc8cdf70a631075e0f6935ebb73bfeab7632"
+  "terminal_evidence_parent": "1579fc8cdf70a631075e0f6935ebb73bfeab7632",
+  "agent1_current_regression": {
+    "job": 139126625300,
+    "test": "test_async_lz4_preparation_overlaps_lower_io_without_publication",
+    "actual": "7481 not less than 4268",
+    "owner": 3,
+    "scope": "source-contract failure, runtime not demonstrated"
+  },
+  "agent1_census": {
+    "total": 28,
+    "success": 24,
+    "failure": 4
+  }
 }

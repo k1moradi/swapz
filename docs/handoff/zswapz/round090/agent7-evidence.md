@@ -70,3 +70,7 @@ NO_GO_LIVE.** Genuine independent module-owner hard refs, generation-
 bearing nonrecycled decoder handles, actual selected-source auth and
 integrated Kbuild/link/durable upper ACK remain unqualified. AUTH=0,
 Phase A BLOCKED, compressed handoff/forced RAW bypass/import OFF.
+
+
+## Agent1 independently verified reconciliation
+Corrected exact source a240810314b5951a618619049654c2887e14d2d4 run45591425899 job139126333980 SUCCESS; actual GCC C2x and Clang C23 strict staged original LZ4/LZO1X+bridge checks118930 each, total237860. Artifact15010139788 independently downloaded and results.json inspected, SHA256 43101f2e20833d68155aedefa4065ecf22e5eb9ef6817bfcb081f860413a4bcf; isolated noDict staging, original pristine, stage negatives5+4. Actual 64 nonreused tokens/session; steady-state overwrite/GC not qualified, no module lifetime proof. Prior source70fbbe12 preflight FAIL retained. Exact-source census7/10 success,3 failures including R072 before subsequent corrective PASS and project-goals/product; no full green claim. R091 value-generation handle design, do not repeat unchanged qualification.

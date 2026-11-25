@@ -234,7 +234,7 @@
       "url": "https://github.com/k1moradi/swapz/actions/runs/45586631652/job/139121452001"
     }
   ],
-  "conclusion": "FAIL_INHERITED_CI_CORRECTION_QUEUED",
+  "conclusion": "PASS_HOST_ADMISSION_AND_R072_CORRECTIVE_MANIFEST_FULL_CI_FAIL_NO_GO_LIVE",
   "first_error": "ROUND075_MANIFEST_FIRST_ERROR joined-byte-identical-product-blob:mm/swapz_round069/authority.c (exit 2 after current R072 host PASS)",
   "local_first_error": "git ls-remote exit 128: Could not resolve host: github.com",
   "local_compilers": "NOT_RUN",
@@ -272,7 +272,7 @@
     "url": "https://github.com/k1moradi/swapz/actions/runs/45586632370/artifacts/15008802899",
     "size_bytes": 1622,
     "digest": "sha256:2dbc132a0b466dc615172eda00b4db229acb4f035073397164cf24a864d43d27",
-    "verification": "Actions metadata; archive not independently extracted"
+    "verification": "Agent1 independently extracted results.json and verified SHA256"
   },
   "push_census": {
     "automatic_runs": 13,
@@ -363,29 +363,33 @@
     "standards_blob": "6441a8b096a181b9a80890a1d1f63a87773c3fb3",
     "historical_product_pins_verified": 8,
     "manifest_negatives_planned": 13,
-    "actual_manifest_negatives": null,
+    "actual_manifest_negatives": 13,
     "local_execution": "NOT_RUN",
-    "status": "QUEUED",
+    "status": "COMPLETED_PARTIAL_FAILURE",
     "jobs": [
       {
         "run_id": 45591509623,
         "id": 139126625541,
-        "status": "queued"
+        "status": "completed",
+        "conclusion": "success"
       },
       {
         "run_id": 45591509628,
         "id": 139126625300,
-        "status": "queued"
+        "status": "completed",
+        "conclusion": "failure"
       },
       {
         "run_id": 45591509628,
         "id": 139126625685,
-        "status": "queued"
+        "status": "completed",
+        "conclusion": "failure"
       },
       {
         "run_id": 45591509522,
         "id": 139126626236,
-        "status": "queued"
+        "status": "completed",
+        "conclusion": "failure"
       }
     ],
     "automatic_runs": [
@@ -399,13 +403,19 @@
       45591509436,
       45591509446
     ],
-    "first_error": null,
-    "publication": "single parent expected-head nonforce; first oversized blob write GraphQL error, first tree commit unpublished after main advanced; reconciled with fresh exact standards prefix and readback; no duplicate dispatch"
+    "first_error": "source-contract-test.py:6611 test_async_lz4_preparation_overlaps_lower_io_without_publication: 7481 not less than 4268",
+    "publication": "single parent expected-head nonforce; first oversized blob write GraphQL error, first tree commit unpublished after main advanced; reconciled with fresh exact standards prefix and readback; no duplicate dispatch",
+    "census": {
+      "success": 7,
+      "failure": 2,
+      "total": 9
+    }
   },
   "standards_incident": {
     "initial_source_blob": "2b04df5f05142a20b5f2a6f26aeb53873e25838e",
     "actual": "historical prefix absent in initial source; Agent5 did not detect preexisting truncation",
     "restored_by_agent7": "70fbbe12c84db56283b5e0812faf1fc8032bbae4",
     "restoration_terminal_qualification": "pending for corrective source; no false PASS"
-  }
+  },
+  "agent1_kernel_blocker": "current macro collision, actual A10 job139108048304"
 }

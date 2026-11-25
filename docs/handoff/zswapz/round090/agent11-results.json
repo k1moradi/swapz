@@ -52,7 +52,7 @@
       "files_uploaded": 13,
       "digest": "sha256:b7b65f4e11e6e97e6c0d5f8f567a2aa5fba40237e20af9d2bc1f6131f080027b",
       "expires_at": "2026-12-09T09:33:26Z",
-      "archive_independently_extracted": false
+      "archive_independently_extracted": true
     },
     "first_error": null,
     "actual_checks": 60,
@@ -194,5 +194,6 @@
     "stage_and_source_anchor": "PASS",
     "kernel_compile": "NOT_RUN",
     "new_test_dispatch": false
-  }
+  },
+  "agent1_scope": "Host-only actual deterministic trace; long-lag zero hit rate, no kernel/slab/native qualification"
 }
