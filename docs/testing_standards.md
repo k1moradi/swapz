@@ -20509,3 +20509,10 @@ Measure storage/sidecar and unchanged map bytes; dedicated4KiB saves no disk
 blocks relative to ordinary raw4KiB. No repeated R088 standalone suite or VM,
 privileged, loaded or physical execution. AUTH0, Phase A BLOCKED, compressed
 handoff, forced RAW and import OFF. No normal Kbuild or active DM changes.
+
+
+## Round090 Agent10 — prerequisite-gated frozen composition (AUTH0)
+
+Do not repeat obsolete frozen compile baselines after a dependency failure. Pin the latest immutable MM/BIO and DM patches and all actual product sources. Before native x86_64 compilation, verify real tool presence and libelf package discovery, compile and link a strict GCC userspace probe including gelf.h and libelf.h, and execute it only against its own ELF file; record the result separately from any kernel object. Provision libelf-dev and the other build dependencies only on the ephemeral CI runner. Missing headers, linker libraries or tools must fail before the first expensive kernel compilation.
+
+Prove raw pristine git apply and all eight expected postimages without normalization before the separately authorized compatibility overlay. For the frozen R089 candidates only, pin the original bvec.h declaring bi_offset, require unique exact field-expression anchors, replace two obsolete field references in scratch DM core and one in scratch product target, verify independent raw and compatible hashes, and never claim untouched raw sources compiled. Record scratch-only Kbuild and module input hashes; compile the actual guarded producer/broker and selected target plus original extent, shared authority/storage and independent decoder objects. Require real kernel and module link/modpost and symbol checks for full linkage, never substitute stubs. Preserve first actual failure, stage/config/toolchain logs and object-versus-link distinction; no blind retries, VM build-for-VM or boot, module load, physical mutation or activation. AUTH0, Phase A BLOCKED, all activation OFF.
