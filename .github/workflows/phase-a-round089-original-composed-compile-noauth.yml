@@ -1,0 +1,65 @@
+name: Round089 frozen original MM DM x86 compile link only AUTH0
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'tests/tools/round089-original-composed-compile-verify.py'
+      - '.github/workflows/phase-a-round089-original-composed-compile-noauth.yml'
+permissions:
+  contents: read
+jobs:
+  frozen-original-x86-compile-link:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 115
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          path: swapz
+          fetch-depth: 2
+          persist-credentials: false
+      - name: Canonical exact source and parent before scratch checkout
+        working-directory: swapz
+        env:
+          SWAPZ_PUSH_BEFORE_SHA: ${{ github.event.before }}
+        run: |
+          set -Eeuo pipefail
+          test "$GITHUB_REF" = refs/heads/main
+          test "$(git branch --show-current)" = main
+          test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
+          test "$(git rev-parse HEAD^)" = "$SWAPZ_PUSH_BEFORE_SHA"
+          test "$(git rev-list --parents -n1 HEAD | wc -w)" -eq 2
+          test -z "$(git status --porcelain --untracked-files=all)"
+          git diff --check "$SWAPZ_PUSH_BEFORE_SHA" HEAD
+          python3 -B tests/runtime/native/repository-policy-test.py --enforce
+      - uses: actions/checkout@v4
+        with:
+          ref: db9252db73721a768be912965ad4402e332039e8
+          path: baseline
+          fetch-depth: 1
+          persist-credentials: false
+      - uses: actions/checkout@v4
+        with:
+          repository: torvalds/linux
+          ref: c339f4010dea8b0d754f84ace70cd1b089878ef8
+          path: linux
+          fetch-depth: 1
+          persist-credentials: false
+      - name: Raw immutable stage, directed objects, full x86 kernel and actual product module link
+        env:
+          SWAPZ_PUSH_BEFORE_SHA: ${{ github.event.before }}
+        run: |
+          set -Eeuo pipefail
+          python3 -B swapz/tests/tools/round089-original-composed-compile-verify.py \
+            --baseline baseline --linux linux \
+            --out "$RUNNER_TEMP/round089-x86-build" \
+            --module "$RUNNER_TEMP/round089-product-module" \
+            --evidence round089-compile-evidence \
+            --source-sha "$GITHUB_SHA" --source-parent "$SWAPZ_PUSH_BEFORE_SHA"
+      - name: Preserve exact compile logs and manifest even on failure
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: round089-frozen-original-x86-compile-evidence
+          path: round089-compile-evidence/
+          if-no-files-found: warn
+          retention-days: 14

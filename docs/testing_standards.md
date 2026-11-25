@@ -20428,3 +20428,10 @@ Require nine staging negative guards, exact reversible postimages, unchanged
 pristine checkout, no sanitizer relaxation, no new VM or physical tests.
 Staging is host-only; prefix/external modes not qualified, no production or
 upstream adoption; AUTH0, Phase A BLOCKED, all activation OFF.
+
+
+## Round089 Agent10 — immutable composed compile-only MM/BIO and DM baseline (AUTH0)
+
+Qualify the exact frozen R088 producer and DM patches independently of same-round peer edits. Distinguish repository patch-text whitespace diagnostics from raw upstream applicability: retain canonical new-commit diff check; verify whole patch blobs, pristine upstream checkout and exact file preimages, use real raw git apply check and application with whitespace errors enabled, and compare all eight predicted and actual postimage blobs before compilation. Zero-context MM hunks require the explicit git apply format option, not whitespace correction; no normalization, fuzzy source substitutions or omitted hunks. Record SHA256 of actual staged bytes and scratch-only Kconfig/Kbuild additions, exact frozen product inputs, effective configuration and compiler/linker versions.
+
+One new rootless native x86_64 compile/link attempt only, no UML/QEMU/VM boot or build-for-VM. Compile directed real MM/BIO/DM/broker/codec and target objects first, then full vmlinux and actual product module with normal modpost and unresolved-symbol inspection if the objects pass. Test guard definitions must not enable an authenticated route or replace real APIs with stubs. Keep earliest actual stage/config/compiler/link diagnostic and raw logs in the bounded evidence artifact, distinguish object compile from full link, do not hide failed source under a corrected peer patch or silently retry. No kernel/module load, physical mutation, swap activation or runtime qualification. All activation gates OFF; Phase A BLOCKED; SOURCE_MAPPED_AUTHENTICATED=0.
