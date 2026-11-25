@@ -1,0 +1,201 @@
+{
+  "round": "090",
+  "agent": 10,
+  "status": "IN_PROGRESS",
+  "task_commit": "edf44c4417f14b5836b1b5f90157e24916afcde2",
+  "tested_source_commit": "d183f5d5127992b406013799bcb81ea3f59e93eb",
+  "tested_source_parent": "edf44c4417f14b5836b1b5f90157e24916afcde2",
+  "frozen_baseline": "9f7002c896f86226e93f0523b1f6e935de5c6de9",
+  "original_linux_pin": "c339f4010dea8b0d754f84ace70cd1b089878ef8",
+  "branch": "main",
+  "single_parent": true,
+  "nonforce": true,
+  "source_files": {
+    "tests/tools/round090-original-composed-compile-verify.py": "226da88ee74ca5bce626f164a711548794bfd16f",
+    ".github/workflows/phase-a-round090-original-composed-compile-noauth.yml": "adbbe58eec60e2e0bf3ebe933eebafa895b59627",
+    "docs/testing_standards.md": "b3d32260fcd0cc4cb877fc06e3802b5130709678"
+  },
+  "standards_previous_blob": "3bc8692b5f71a5d31c9caba1b858dde8a28ab1f6",
+  "patch_blobs": {
+    "tests/tools/round089-original-mm-carrier.patch": "059d1bf29cf4990e22a2f608d5d552abeec3a8d1",
+    "tests/tools/round088-original-dm-selected-clone.patch": "3ccbb9eaca06021176d52dd14888ce281af43990"
+  },
+  "product_blobs": {
+    "Makefile": "ed6e19ae28a84a4a3e92117812adc445d5c2e8e5",
+    "VERSION": "ce022e35e5c13bea0de8a9fae9c9d6f3f0dad904",
+    "authority.c": "73b3e2dc98c6a47315519d3ab650c3d3b0656de7",
+    "authority.h": "c320498ce530c0887bf498cc4d5b121765bb41f3",
+    "codec.c": "d920dcaac6f2b7de1334d4133770bd649719c66d",
+    "codec.h": "e89d316b9cf49f82df0b77648c1be1731607987d",
+    "dm-target.c": "1b103767e1783ed48cf79b1c9e5654f8d99f646e",
+    "engine.c": "e7c50c3e78449157439fba9c69e5d23b1c317f4e",
+    "engine.h": "0e505915fb2e1578b4c1cee36e32be8a30f3745f",
+    "flush-qual.h": "095d3ef7665ba268f28c2235fbb1c8e26cb8b7d1",
+    "gc-cost.h": "2d317f1274ef36bdde157ff72acc26a9f7ae1e0e",
+    "gc-recovery-policy.h": "26cddb997ad9f4b5b15616eba7cc0e26aaeb58eb",
+    "lane-gap.h": "e97870b218c7c9b338b43323fff77181be877649",
+    "predictor-avx2.c": "0fa5746f187b2fa017782448e052f7a2c39bfc8f",
+    "predictor-avx512.c": "a9892552f516ec47157c4aacdd4f3aca994192b2",
+    "predictor-internal.h": "6b49267dac50d92e58a950ca80541d2928de6d23",
+    "predictor-neon.c": "98554e4c601ee542973bc680a7549c6ad45f073e",
+    "predictor-route.h": "ea14590608d7a92b4fb379aca26864467e158bac",
+    "predictor-shuffle.h": "d0ebd77af875c6d34757eb9b14080934af32b08a",
+    "predictor-sse2.c": "0993632a2e5f6ff7fe66cd828e7cd88ff8c577d6",
+    "predictor.c": "b1ce85ef0fb6a20d720dfba562d3a9a3588f127c",
+    "predictor.h": "54cce4ad8bcb63ee724001fff4831948ec8e8de5",
+    "preparation-slots.h": "aaa6a0420bda460dbcc42072d74f57bab9fcbbfd",
+    "superblock.h": "ba73845837b4c604b01d72f50f05ae8d4378eddd",
+    "swapz-build-info.h": "51ce0bc3a5947bb6ff660e4e5bb63aa5477cb226",
+    "window-policy.h": "cb14486a3ef4324761cde8c54b22c5f0e5d89494",
+    "zswap-direct-handoff.h": "864abf9a12071b98f5c157a44f4ed0c04d4a594c",
+    "zswap-import-admission.h": "a411da35437cbf9a43c88083d830dc9280f108e8",
+    "zswap-import-codec.h": "0d888fe4c74115ab2388f1df1dc0b86ae4b9b6c6",
+    "zswap-import-decoder-owner.c": "8e0c8f4d2085af7f2e17df412f3a1af654063571",
+    "zswap-import-decoder-owner.h": "e1b4b903567070e2307f7d05f8e48c14e0bb3768",
+    "zswap-original-decode.c": "eb1cd7f90d5edade9640e1ffe9dac3c8fe774644",
+    "zswap-original-decode.h": "a247d1aaf9865de71f97cd980be806b8d8c7c20e",
+    "zswap-original-extent.c": "c6c5af281a636447126e1a8b67484d954158a300",
+    "zswap-original-extent.h": "34572d01fffe1b276c2d023822266eda29a2137e",
+    "zswap-original-storage.c": "1a2dd5c6a29614f6f52e06cf5bcdd268fd40ed30",
+    "zswap-original-storage.h": "a47d2f7ee8f48addfd4bd6915ac06528081d52e0",
+    "zswap-original-ticket.c": "66df826d86dde1bbd5e1967daa0e62517b58ac8d",
+    "zswap-original-ticket.h": "2f850b53708c8142ee95d330192c9db1f9ae9418"
+  },
+  "pristine_bvec_blob": "b63914ff56e33df302055fabf2a84ba490bc8d2c",
+  "scratch_kbuild_preimages": {
+    "mm/Kconfig": "afff1b25b5438756f15e464f63dabdbd5ec6102c",
+    "mm/Makefile": "2a3ec53d62eef629486b87736d560b1fa1798096"
+  },
+  "preflight": {
+    "connector_patch_blobs_verified": 2,
+    "connector_existing_preimages_verified": 7,
+    "connector_raw_postimages_predicted": 8,
+    "images": {
+      "mm/zswap.c": {
+        "preimage_blob": "ae19e301fced7e357a4c7587dfdd6abb890b9163",
+        "predicted_raw_postimage_blob": "8bf7e885376c5ef521adf40b1ec736e062067bff",
+        "actual_raw_postimage_blob": null
+      },
+      "include/linux/swap_ops.h": {
+        "preimage_blob": "57ac6c703f685883d3a15ebc1a5c7f6c298deb1b",
+        "predicted_raw_postimage_blob": "a39a1921daf6f272e9812eb63b1aa64fec96c57f",
+        "actual_raw_postimage_blob": null
+      },
+      "include/linux/blk_types.h": {
+        "preimage_blob": "0cc09b975d8ffbd45ca3dc47533a71f8e8164de6",
+        "predicted_raw_postimage_blob": "0bf866c1571fe6b4d2e49d01b1b2c87fcf2cf04c",
+        "actual_raw_postimage_blob": null
+      },
+      "include/linux/bio.h": {
+        "preimage_blob": "7a794ce723b84b2a148f8f9beccf057b266e8ac9",
+        "predicted_raw_postimage_blob": "f4c5f1730514cf1816ffd5e9787562439dfae236",
+        "actual_raw_postimage_blob": null
+      },
+      "block/bio.c": {
+        "preimage_blob": "b0fcc69de653524479e3b328aa29a37e97945b84",
+        "predicted_raw_postimage_blob": "3ba0e12a96ba3235eb909e3b3dd0be44657c6f6e",
+        "actual_raw_postimage_blob": null
+      },
+      "mm/page_io.c": {
+        "preimage_blob": "c6824fcd483e0aa2c412e14dae0d2a356b17c373",
+        "predicted_raw_postimage_blob": "0b0fe917fa3af5deaef8263274edffbf1a62eedb",
+        "actual_raw_postimage_blob": null
+      },
+      "include/linux/swapz_mm_carrier.h": {
+        "preimage_blob": null,
+        "predicted_raw_postimage_blob": "72100483b42a59db8f522d3f2f4ee10d4f856550",
+        "actual_raw_postimage_blob": null
+      },
+      "drivers/md/dm.c": {
+        "preimage_blob": "1881d86111fb2e655893ad898cf21b88f0e4e7f3",
+        "predicted_raw_postimage_blob": "59ff578305062e9a63f900a661c6ce0cf3d8a9eb",
+        "actual_raw_postimage_blob": null
+      }
+    },
+    "compatibility_overlays": {
+      "drivers/md/dm.c": {
+        "raw": "59ff578305062e9a63f900a661c6ce0cf3d8a9eb",
+        "predicted_compatible": "5dfce1e9dc97fe210c6125a85396e5168eaeb445",
+        "replacements": 2
+      },
+      "dm-target.c": {
+        "raw": "1b103767e1783ed48cf79b1c9e5654f8d99f646e",
+        "predicted_compatible": "1951989aaf56680a3c1b900cb00d4c6c1ac0fb2d",
+        "replacements": 1
+      }
+    },
+    "actual_compatibility_overlay": "NOT_RUN",
+    "actual_raw_git_apply": "NOT_RUN",
+    "local_gcc_version": "14.2.0",
+    "local_elf_probe": "FAILURE",
+    "local_elf_first_error": "<stdin>:1:10: fatal error: gelf.h: No such file or directory",
+    "local_elf_exit": 1,
+    "local_checkout": "BLOCKED_DNS",
+    "local_git_first_error": "Could not resolve host: github.com",
+    "ci_libelf_provision": "PENDING",
+    "ci_elf_header_link": "NOT_RUN",
+    "ci_elf_probe_execute": "NOT_RUN"
+  },
+  "historical_round089": {
+    "source": "d829c93cdf0b061a5b78cd177d7f4a458b9102eb",
+    "run_id": 45577221648,
+    "job_id": 139078028312,
+    "conclusion": "failure",
+    "raw_stage": "PASS",
+    "first_error": "linux/tools/objtool/include/objtool/elf.h:10:10: fatal error: gelf.h: No such file or directory",
+    "exit_code": 2,
+    "artifact_id": 15004369076,
+    "artifact_digest": "sha256:d6de57c65fb59219d79880722d20930e6cb26a37922400583e2ba2fb45fe9107",
+    "artifact_bytes": 25381,
+    "artifact_contents_independently_unpacked_this_turn": false
+  },
+  "workflow_run_id": 45586120960,
+  "workflow_url": "https://github.com/k1moradi/swapz/actions/runs/45586120960",
+  "workflow_attempt": 1,
+  "workflow_created_at": "2026-11-25T09:30:53Z",
+  "workflow_conclusion": null,
+  "jobs": [
+    {
+      "id": 139108048304,
+      "name": "frozen-original-x86-compile-link",
+      "status": "in_progress",
+      "conclusion": null,
+      "url": "https://github.com/k1moradi/swapz/actions/runs/45586120960/job/139108048304",
+      "canonical_preflight": "PASS",
+      "frozen_baseline_checkout": "PASS",
+      "linux_checkout": "IN_PROGRESS",
+      "provision": "PENDING",
+      "stage_build": "PENDING"
+    }
+  ],
+  "ci_artifact": null,
+  "first_error": null,
+  "build_attempts_observed": 0,
+  "original_directed_objects": "NOT_RUN",
+  "product_directed_objects": "NOT_RUN",
+  "full_kernel_link": "NOT_RUN",
+  "product_module_link": "NOT_RUN",
+  "modpost": "NOT_RUN",
+  "unresolved_symbol_inspection": "NOT_RUN",
+  "effective_config_sha256": null,
+  "compiler_diagnostics": null,
+  "link_diagnostics": null,
+  "local_original_compile": false,
+  "vm_build_for_qualification": false,
+  "vm_boot": false,
+  "module_loaded": false,
+  "physical_mutation": false,
+  "source_mapped_authenticated": 0,
+  "phase_a": "BLOCKED",
+  "direct_handoff": false,
+  "forced_raw_bypass": false,
+  "import_active": false,
+  "ordinary_raw_4096": "COMPLETE_ORIGINAL_UNCOMPRESSED_4096",
+  "ordinary_map_bytes": 20,
+  "production_code_changed": false,
+  "peer_code_changed": false,
+  "manual_duplicate_dispatch": false,
+  "periodic_monitoring": false,
+  "other_automatic_runs_observed": 9,
+  "conclusion": "LATEST_FROZEN_COMPILE_LANE_PUBLISHED_CI_IN_PROGRESS_ORIGINAL_NOT_RUN"
+}
