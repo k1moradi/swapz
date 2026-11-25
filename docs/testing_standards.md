@@ -20435,3 +20435,31 @@ upstream adoption; AUTH0, Phase A BLOCKED, all activation OFF.
 Qualify the exact frozen R088 producer and DM patches independently of same-round peer edits. Distinguish repository patch-text whitespace diagnostics from raw upstream applicability: retain canonical new-commit diff check; verify whole patch blobs, pristine upstream checkout and exact file preimages, use real raw git apply check and application with whitespace errors enabled, and compare all eight predicted and actual postimage blobs before compilation. Zero-context MM hunks require the explicit git apply format option, not whitespace correction; no normalization, fuzzy source substitutions or omitted hunks. Record SHA256 of actual staged bytes and scratch-only Kconfig/Kbuild additions, exact frozen product inputs, effective configuration and compiler/linker versions.
 
 One new rootless native x86_64 compile/link attempt only, no UML/QEMU/VM boot or build-for-VM. Compile directed real MM/BIO/DM/broker/codec and target objects first, then full vmlinux and actual product module with normal modpost and unresolved-symbol inspection if the objects pass. Test guard definitions must not enable an authenticated route or replace real APIs with stubs. Keep earliest actual stage/config/compiler/link diagnostic and raw logs in the bounded evidence artifact, distinguish object compile from full link, do not hide failed source under a corrected peer patch or silently retry. No kernel/module load, physical mutation, swap activation or runtime qualification. All activation gates OFF; Phase A BLOCKED; SOURCE_MAPPED_AUTHENTICATED=0.
+
+### Round089 Agent11 — bounded MM credential and broker queue-lock claim
+
+The sole foreign-lock exception is the actual broker's one-attempt claim
+under the selected incoming queue lock. Require a retained candidate and
+independently validated origin/clone/current route, generation and epoch;
+all other broker calls remain outside foreign locks. Claim and O(1) revoke
+serialize on the same broker lock; never call back into MM or target, wait,
+allocate, or take another lock inside claim. On success, exactly one
+infallible FIFO insertion under the same queue lock is required; target
+invalidation ordering remains an integration prerequisite. Test actual
+contention, stale epoch/generation, one-shot claims, concurrent revocation,
+close and independently retained capability lifetime with synthetic external
+queue lock and actual broker/CRC, strict GCC and Clang ASan/UBSan.
+
+Preserve the frozen R088 patch for independent compile-only review. R089
+scratch-only patch uses an 8-byte nonwrapping cookie and 64 bounded,
+replaceable source-only credentials; missing registration, unsupported
+profile/route, collisions, contention, and stale identity fall back before
+claim. No hashing before eligibility and cell acquisition. Route key
+constructed at eviction only; RCU provider must return values and borrowed
+broker pinned through grace period; independent capability retained before
+leaving it. Separate deferred lease/capability release before carrier reuse.
+Verify exact pristine and staged postimage pins, duplicate/reverse apply
+checks, source order and extracted actual sparse helpers; record host
+sizes separately from unknown kernel slab/allocation deltas, and never
+substitute source checks or host races for actual MM/DM runtime proof.
+No new VM or physical tests, production Kbuild, active provider or auth.

@@ -1,0 +1,673 @@
+diff --git a/mm/zswap.c b/mm/zswap.c
+--- a/mm/zswap.c
++++ b/mm/zswap.c
+@@ -41,1 +41,7 @@
+-#include "swap.h"
++#ifdef CONFIG_SWAPZ_ORIGINAL_MM_CARRIER_TEST
++#include <crypto/sha2.h>
++#include <linux/rcupdate.h>
++#include <linux/swapz_mm_carrier.h>
++#endif
++
++#include "swap.h"
+@@ -209,2 +215,5 @@
+-	struct list_head lru;
+-};
++	struct list_head lru;
++#ifdef CONFIG_SWAPZ_ORIGINAL_MM_CARRIER_TEST
++	u64 original_cookie; /* bounded sparse credential, zero means fallback */
++#endif
++};
+@@ -856,1 +865,288 @@
+-static bool zswap_compress(struct folio *folio, long index,
++#ifdef CONFIG_SWAPZ_ORIGINAL_MM_CARRIER_TEST
++/* One optional scratch/carrier slot, NOT a production queue limit. Built-in
++ * static lifetime independent of target dtr. No new reclaim machinery.
++ * The route provider is intentionally absent until the selected-DM ABI and
++ * generation fencing are accepted; do not synthesize any target identity.
++ */
++static struct swapz_mm_carrier swapz_mm_carrier;
++static atomic_t swapz_mm_busy = ATOMIC_INIT(0);
++static atomic64_t swapz_mm_store_sequence = ATOMIC64_INIT(0);
++static atomic64_t swapz_mm_area_sequence = ATOMIC64_INIT(0);
++static atomic64_t swapz_mm_area_epochs[MAX_SWAPFILES];
++
++static u64 swapz_mm_next(atomic64_t *counter)
++{
++	s64 previous = atomic64_read(counter);
++
++	/* One CAS; contention/exhaustion declines optimization, never wraps. */
++	if (previous < 0 || previous == S64_MAX ||
++	    !atomic64_try_cmpxchg(counter, &previous, previous + 1))
++		return 0;
++	return previous + 1;
++}
++
++static u8 swapz_mm_profile(const char *name, const char *driver)
++{
++	if (!strcmp(name, "lz4") && !strcmp(driver, "lz4-scomp"))
++		return SWAPZ_TICKET_LZ4;
++	if (!strcmp(name, "lzo") && !strcmp(driver, "lzo-scomp"))
++		return SWAPZ_TICKET_LZO1X;
++	return 0;
++}
++
++/* One bounded contiguous sparse array; each cell is exclusively owned by
++ * one successful try-CAS, never held across SG pin or target callbacks.
++ * Collisions and contention only lose an optional credential. No allocations.
++ */
++struct swapz_mm_source_cell {
++	atomic_t busy;
++	struct swapz_mm_source source;
++};
++static struct swapz_mm_source_cell swapz_mm_sources[SWAPZ_MM_SOURCE_SLOTS];
++static DEFINE_MUTEX(swapz_mm_provider_lock);
++static const struct swapz_mm_route_provider __rcu *swapz_mm_provider;
++
++/* Registration and unregistration are process-context only, outside target
++ * and broker locks. Provider owner pins callback code and broker storage
++ * through unregister + RCU grace period; broker capabilities then pin
++ * outstanding independent leases. No raw target pointer escapes a callback.
++ */
++int swapz_mm_register_provider(const struct swapz_mm_route_provider *provider)
++{
++	int error = 0;
++
++	if (!provider || !provider->eligible || !provider->lookup)
++		return -EINVAL;
++	mutex_lock(&swapz_mm_provider_lock);
++	if (rcu_access_pointer(swapz_mm_provider))
++		error = -EBUSY;
++	else
++		rcu_assign_pointer(swapz_mm_provider, provider);
++	mutex_unlock(&swapz_mm_provider_lock);
++	return error;
++}
++
++int swapz_mm_unregister_provider(const struct swapz_mm_route_provider *provider)
++{
++	int error = 0;
++
++	mutex_lock(&swapz_mm_provider_lock);
++	if (!provider || rcu_access_pointer(swapz_mm_provider) != provider)
++		error = -EINVAL;
++	else {
++		rcu_assign_pointer(swapz_mm_provider, NULL);
++		synchronize_rcu();
++	}
++	mutex_unlock(&swapz_mm_provider_lock);
++	return error;
++}
++
++static bool swapz_mm_eligible(struct block_device *bdev, sector_t sector)
++{
++	const struct swapz_mm_route_provider *provider;
++	bool eligible = false;
++
++	rcu_read_lock();
++	provider = rcu_dereference(swapz_mm_provider);
++	if (provider)
++		eligible = provider->eligible(bdev, sector);
++	rcu_read_unlock();
++	return eligible;
++}
++
++static bool swapz_mm_route_try(struct swap_info_struct *si, sector_t sector,
++			      struct swapz_mm_route *route,
++			      struct swapz_ticket_cap *cap)
++{
++	const struct swapz_mm_route_provider *provider;
++	bool retained = false;
++
++	rcu_read_lock();
++	provider = rcu_dereference(swapz_mm_provider);
++	if (provider && provider->lookup(si->bdev, sector, route) &&
++	    route->broker && route->target_session && route->table_epoch &&
++	    route->target_epoch && route->dm_generation)
++		retained = !swapz_ticket_broker_try_get(route->broker,
++			route->target_session, route->table_epoch, cap);
++	rcu_read_unlock();
++	return retained;
++}
++
++static void swapz_mm_capture(struct zswap_entry *entry, struct folio *folio,
++			    long index, struct acomp_req *request, const u8 *bytes)
++{
++	struct crypto_acomp *tfm = crypto_acomp_reqtfm(request);
++	swp_entry_t slot = folio_swap_entry(folio, index);
++	struct swap_info_struct *si;
++	struct swapz_mm_source_cell *cell;
++	struct swapz_mm_source *source;
++	const void *original;
++	u64 sequence, area;
++	sector_t sector;
++	u8 codec;
++
++	/* No provider -> no hash, sequence increment or sparse-array access. */
++	if (!rcu_access_pointer(swapz_mm_provider) || PAGE_SIZE != 4096 ||
++	    index || folio_order(folio) || !entry->length || entry->length > 4095)
++		return;
++	codec = swapz_mm_profile(crypto_acomp_alg_name(tfm), crypto_acomp_driver_name(tfm));
++	area = atomic64_read(&swapz_mm_area_epochs[swp_type(slot)]);
++	if (!codec || !area)
++		return;
++	si = __swap_entry_to_info(slot);
++	if (!si || si->ops != &swap_bdev_ops || !si->bdev ||
++	    bdev_is_partition(si->bdev))
++		return;
++	sector = swap_folio_sector(folio);
++	if (!sector || (sector & 7) || !swapz_mm_eligible(si->bdev, sector))
++		return;
++	sequence = swapz_mm_next(&swapz_mm_store_sequence);
++	if (!sequence)
++		return;
++	cell = &swapz_mm_sources[swapz_mm_source_index(sequence)];
++	if (atomic_cmpxchg_acquire(&cell->busy, 0, 1))
++		return;
++	source = &cell->source;
++	source->cookie = sequence;
++	source->area_epoch = area;
++	source->slot_offset = swp_offset(slot);
++	source->swap_type = swp_type(slot);
++	source->length = entry->length;
++	source->codec = codec;
++	source->crc = swapz_crc32c_bytes(bytes, entry->length);
++	original = kmap_local_folio(folio, 0);
++	sha256(original, 4096, source->sha256);
++	kunmap_local(original);
++	entry->original_cookie = sequence;
++	atomic_set_release(&cell->busy, 0);
++}
++
++/* A cookie is nonreused, even if the XArray entry or sparse cell is reused. */
++static bool swapz_mm_read_source(struct zswap_entry *entry, swp_entry_t slot,
++				 struct swapz_ticket_key *key)
++{
++	u64 cookie = entry->original_cookie;
++	struct swapz_mm_source_cell *cell;
++	bool valid;
++
++	if (!cookie)
++		return false;
++	cell = &swapz_mm_sources[swapz_mm_source_index(cookie)];
++	if (atomic_cmpxchg_acquire(&cell->busy, 0, 1))
++		return false;
++	valid = swapz_mm_source_key(&cell->source, cookie,
++		atomic64_read(&swapz_mm_area_epochs[swp_type(slot)]),
++		swp_offset(slot), swp_type(slot), entry->length, key);
++	atomic_set_release(&cell->busy, 0);
++	return valid;
++}
++
++
++static void swapz_mm_release_workfn(struct work_struct *work)
++{
++	(void)work;
++	if (swapz_mm_carrier.lease.broker &&
++	    WARN_ON_ONCE(swapz_ticket_put(&swapz_mm_carrier.lease)))
++		return; /* quarantine on broken ownership, never reuse */
++	if (swapz_mm_carrier.cap.broker &&
++	    WARN_ON_ONCE(swapz_ticket_broker_put(&swapz_mm_carrier.cap)))
++		return; /* quarantine a broken capability too */
++	swapz_mm_carrier.bdev = NULL;
++	swapz_mm_carrier.page = NULL;
++	atomic_set_release(&swapz_mm_busy, 0);
++}
++static DECLARE_WORK(swapz_mm_release_work, swapz_mm_release_workfn);
++
++void swapz_mm_drop(struct swapz_mm_carrier **owner)
++{
++	struct swapz_mm_carrier *carrier = *owner;
++
++	if (!carrier)
++		return;
++	*owner = NULL;
++	/* Static work item; no allocation or broker lock here. A busy slot
++	 * cannot be reused until its release worker finishes the final put.
++	 */
++	WARN_ON_ONCE(!queue_work(system_unbound_wq, &swapz_mm_release_work));
++}
++
++int swapz_mm_candidate_get(const struct bio *origin, struct swapz_ticket_ref *out)
++{
++	const struct swapz_mm_carrier *carrier;
++
++	if (!origin || !out || out->broker)
++		return -EINVAL;
++	carrier = origin->bi_swapz_original;
++	if (!swapz_mm_bio_matches(origin, carrier))
++		return -EOPNOTSUPP;
++	/* Caller proves origin stable, no foreign lock held. */
++	return swapz_ticket_retain(&carrier->lease, out);
++}
++
++static void swapz_mm_preerase(struct zswap_entry *entry, struct folio *folio,
++			     swp_entry_t slot, struct swap_io_ctx *ctx)
++{
++	struct swapz_ticket_key key = {};
++	struct swapz_mm_route route = {};
++	struct swapz_mm_carrier *carrier = &swapz_mm_carrier;
++	struct swap_info_struct *si = __swap_entry_to_info(slot);
++	struct zswap_pool *pool;
++	struct scatterlist sg[2];
++	const void *decoded;
++	u8 digest[32];
++	sector_t sector;
++	unsigned int nents;
++	size_t copied;
++
++	/* Caller already holds locked order-0 swapcache folio, verified the
++	 * actual XArray entry and successfully decompressed the full page.
++	 * That lifetime pins source pool/slot/area until original erase.
++	 */
++	if (PAGE_SIZE != 4096 || folio_order(folio) || !folio_test_locked(folio) ||
++	    !folio_test_swapcache(folio) || folio->swap.val != slot.val ||
++	    !swapz_mm_read_source(entry, slot, &key) ||
++	    ctx->sio || ctx->original || !si || si->ops != &swap_bdev_ops ||
++	    !si->bdev || bdev_is_partition(si->bdev))
++		return;
++	sector = swap_folio_sector(folio);
++	if (!sector || (sector & 7) || atomic_cmpxchg_acquire(&swapz_mm_busy, 0, 1))
++		return;
++	if (!swapz_mm_route_try(si, sector, &route, &carrier->cap))
++		goto decline;
++	/* Source credential is not writable by the route provider. */
++	key.target_session = route.target_session;
++	key.table_epoch = route.table_epoch;
++	key.target_epoch = route.target_epoch;
++	key.logical_page = route.logical_page;
++	key.dm_generation = route.dm_generation;
++	if (swapz_ticket_reserve(carrier->cap.broker, &key, &carrier->lease))
++		goto decline;
++	pool = zswap_entry_pool(entry);
++	if (!pool)
++		goto decline;
++
++	zs_obj_read_sg_begin(pool->zs_pool, entry->handle, sg, key.length);
++	nents = sg_is_last(sg) ? 1 : 2;
++	copied = sg_copy_to_buffer(sg, nents, carrier->scratch, key.length);
++	zs_obj_read_sg_end(pool->zs_pool, entry->handle);
++	/* No SG, pool, XArray, acomp or target lock across seal/CRC/SHA. */
++	if (copied != key.length)
++		goto decline;
++	decoded = kmap_local_folio(folio, 0);
++	sha256(decoded, 4096, digest);
++	kunmap_local(decoded);
++	if (memcmp(digest, key.sha256, sizeof(digest)) ||
++	    swapz_ticket_seal(&carrier->lease, carrier->scratch, key.length))
++		goto decline;
++
++	carrier->bdev = si->bdev;
++	carrier->page = &folio->page;
++	carrier->sector = sector;
++	ctx->original = carrier; /* producer -> sole original ctx owner */
++	return;
++decline:
++	swapz_mm_drop(&carrier);
++}
++#endif
++
++static bool zswap_compress(struct folio *folio, long index,
+@@ -923,3 +1219,9 @@
+-	entry->length = dlen;
+-
+-unlock:
++	entry->length = dlen;
++#ifdef CONFIG_SWAPZ_ORIGINAL_MM_CARRIER_TEST
++	/* Clear every reused entry before publication, including raw fallback. */
++	entry->original_cookie = 0;
++	if (!mapped)
++		swapz_mm_capture(entry, folio, index, acomp_ctx->req, dst);
++#endif
++
++unlock:
+@@ -1058,3 +1360,6 @@
+-	xa_erase(tree, offset);
+-
+-	count_vm_event(ZSWPWB);
++#ifdef CONFIG_SWAPZ_ORIGINAL_MM_CARRIER_TEST
++	swapz_mm_preerase(entry, folio, swpentry, &ctx);
++#endif
++	xa_erase(tree, offset);
++
++	count_vm_event(ZSWPWB);
+@@ -1086,5 +1391,9 @@
+-	swap_write_submit(&ctx);
+-
+-	return 0;
+-
+-err:
++	swap_write_submit(&ctx);
++#ifdef CONFIG_SWAPZ_ORIGINAL_MM_CARRIER_TEST
++	/* Normally moved by swap_add_folio; defensive no-op on success. */
++	swapz_mm_drop(&ctx.original);
++#endif
++
++	return 0;
++
++err:
+@@ -1736,2 +2045,5 @@
+-	nr_zswap_trees[type] = nr;
+-	zswap_trees[type] = trees;
++#ifdef CONFIG_SWAPZ_ORIGINAL_MM_CARRIER_TEST
++	atomic64_set(&swapz_mm_area_epochs[type], swapz_mm_next(&swapz_mm_area_sequence));
++#endif
++	nr_zswap_trees[type] = nr;
++	zswap_trees[type] = trees;
+@@ -1753,2 +2065,5 @@
+-	kvfree(trees);
+-	nr_zswap_trees[type] = 0;
++#ifdef CONFIG_SWAPZ_ORIGINAL_MM_CARRIER_TEST
++	atomic64_set(&swapz_mm_area_epochs[type], 0);
++#endif
++	kvfree(trees);
++	nr_zswap_trees[type] = 0;
+diff --git a/include/linux/swap_ops.h b/include/linux/swap_ops.h
+--- a/include/linux/swap_ops.h
++++ b/include/linux/swap_ops.h
+@@ -14,2 +14,5 @@
+-	int			len;
+-};
++	int			len;
++#ifdef CONFIG_SWAPZ_ORIGINAL_MM_CARRIER_TEST
++	struct swapz_mm_carrier *original;
++#endif
++};
+@@ -19,2 +22,5 @@
+-	struct swap_info_struct	*sis;
+-};
++	struct swap_info_struct	*sis;
++#ifdef CONFIG_SWAPZ_ORIGINAL_MM_CARRIER_TEST
++	struct swapz_mm_carrier *original;
++#endif
++};
+diff --git a/include/linux/blk_types.h b/include/linux/blk_types.h
+--- a/include/linux/blk_types.h
++++ b/include/linux/blk_types.h
+@@ -251,1 +251,5 @@
+-	void			*bi_private;
++	void			*bi_private;
++#ifdef CONFIG_SWAPZ_ORIGINAL_MM_CARRIER_TEST
++	/* Borrowed only while actual original swap sio owns the carrier. */
++	struct swapz_mm_carrier *bi_swapz_original;
++#endif
+diff --git a/include/linux/bio.h b/include/linux/bio.h
+--- a/include/linux/bio.h
++++ b/include/linux/bio.h
+@@ -154,2 +154,6 @@
+-static inline void bio_advance(struct bio *bio, unsigned int nbytes)
+-{
++static inline void bio_advance(struct bio *bio, unsigned int nbytes)
++{
++#ifdef CONFIG_SWAPZ_ORIGINAL_MM_CARRIER_TEST
++	if (nbytes)
++		bio->bi_swapz_original = NULL;
++#endif
+@@ -571,2 +575,6 @@
+-static inline void bio_set_dev(struct bio *bio, struct block_device *bdev)
+-{
++static inline void bio_set_dev(struct bio *bio, struct block_device *bdev)
++{
++#ifdef CONFIG_SWAPZ_ORIGINAL_MM_CARRIER_TEST
++	if (bio->bi_bdev != bdev)
++		bio->bi_swapz_original = NULL;
++#endif
+diff --git a/block/bio.c b/block/bio.c
+--- a/block/bio.c
++++ b/block/bio.c
+@@ -180,2 +180,5 @@
+-void bio_uninit(struct bio *bio)
+-{
++void bio_uninit(struct bio *bio)
++{
++#ifdef CONFIG_SWAPZ_ORIGINAL_MM_CARRIER_TEST
++	bio->bi_swapz_original = NULL;
++#endif
+@@ -234,2 +237,5 @@
+-	bio->bi_private = NULL;
+-#ifdef CONFIG_BLK_CGROUP
++	bio->bi_private = NULL;
++#ifdef CONFIG_SWAPZ_ORIGINAL_MM_CARRIER_TEST
++	bio->bi_swapz_original = NULL;
++#endif
++#ifdef CONFIG_BLK_CGROUP
+@@ -331,2 +337,5 @@
+-void bio_prepare_reissue(struct bio *bio, struct block_device *bdev)
+-{
++void bio_prepare_reissue(struct bio *bio, struct block_device *bdev)
++{
++#ifdef CONFIG_SWAPZ_ORIGINAL_MM_CARRIER_TEST
++	bio->bi_swapz_original = NULL;
++#endif
+@@ -375,3 +384,7 @@
+-	BUG_ON(bio->bi_private || bio->bi_end_io);
+-
+-	bio->bi_private = parent;
++	BUG_ON(bio->bi_private || bio->bi_end_io);
++#ifdef CONFIG_SWAPZ_ORIGINAL_MM_CARRIER_TEST
++	bio->bi_swapz_original = NULL;
++	parent->bi_swapz_original = NULL;
++#endif
++
++	bio->bi_private = parent;
+@@ -878,2 +891,8 @@
+-	bio_set_flag(bio, BIO_CLONED);
+-	bio->bi_ioprio = bio_src->bi_ioprio;
++#ifdef CONFIG_SWAPZ_ORIGINAL_MM_CARRIER_TEST
++	/* Ordinary clones never carry MM provenance; selected DM must retain
++	 * an explicit candidate from its actual original, outside foreign locks.
++	 */
++	bio->bi_swapz_original = NULL;
++#endif
++	bio_set_flag(bio, BIO_CLONED);
++	bio->bi_ioprio = bio_src->bi_ioprio;
+@@ -1868,2 +1887,5 @@
+-	if (!bio_integrity_endio(bio))
+-		return;
++	if (!bio_integrity_endio(bio))
++		return;
++#ifdef CONFIG_SWAPZ_ORIGINAL_MM_CARRIER_TEST
++	bio->bi_swapz_original = NULL;
++#endif
+@@ -1948,1 +1970,4 @@
+-	split->bi_iter.bi_size = sectors << 9;
++#ifdef CONFIG_SWAPZ_ORIGINAL_MM_CARRIER_TEST
++	bio->bi_swapz_original = NULL;
++#endif
++	split->bi_iter.bi_size = sectors << 9;
+@@ -1993,2 +2018,5 @@
+-	bio_advance(bio, offset << 9);
+-	bio->bi_iter.bi_size = size;
++#ifdef CONFIG_SWAPZ_ORIGINAL_MM_CARRIER_TEST
++	bio->bi_swapz_original = NULL;
++#endif
++	bio_advance(bio, offset << 9);
++	bio->bi_iter.bi_size = size;
+diff --git a/mm/page_io.c b/mm/page_io.c
+--- a/mm/page_io.c
++++ b/mm/page_io.c
+@@ -29,1 +29,4 @@
+-#include "swap.h"
++#ifdef CONFIG_SWAPZ_ORIGINAL_MM_CARRIER_TEST
++#include <linux/swapz_mm_carrier.h>
++#endif
++#include "swap.h"
+@@ -333,2 +336,6 @@
+-	if (ctx->sis != sis)
+-		return false;
++#ifdef CONFIG_SWAPZ_ORIGINAL_MM_CARRIER_TEST
++	if (ctx->original || ctx->sio->original)
++		return false;
++#endif
++	if (ctx->sis != sis)
++		return false;
+@@ -343,1 +350,9 @@
+-	if (sio && !swap_can_merge(ctx, folio, rw)) {
++#ifdef CONFIG_SWAPZ_ORIGINAL_MM_CARRIER_TEST
++	/* The producer uses a dedicated empty ctx. Never carry through an
++	 * unexpected reused/merged ctx or non-block swap operations.
++	 */
++	if (ctx->original && (sio || rw != WRITE || sis->ops != &swap_bdev_ops ||
++			      folio_size(folio) != 4096))
++		swapz_mm_drop(&ctx->original);
++#endif
++	if (sio && !swap_can_merge(ctx, folio, rw)) {
+@@ -354,2 +369,7 @@
+-		sio->nr_bvecs = 0;
+-		sio->len = 0;
++		sio->nr_bvecs = 0;
++		sio->len = 0;
++#ifdef CONFIG_SWAPZ_ORIGINAL_MM_CARRIER_TEST
++		sio->original = NULL;
++		if (ctx->original)
++			swapz_mm_move(&sio->original, &ctx->original);
++#endif
+@@ -368,1 +388,5 @@
+-	    (rw == WRITE && (sis->flags & SWP_SYNCHRONOUS_IO))) {
++	    (rw == WRITE && (sis->flags & SWP_SYNCHRONOUS_IO))
++#ifdef CONFIG_SWAPZ_ORIGINAL_MM_CARRIER_TEST
++	    || sio->original
++#endif
++	    ) {
+@@ -512,3 +536,6 @@
+-		folio_end_writeback(folio);
+-	}
+-	mempool_free(sio, sio_pool);
++		folio_end_writeback(folio);
++	}
++#ifdef CONFIG_SWAPZ_ORIGINAL_MM_CARRIER_TEST
++	swapz_mm_drop(&sio->original);
++#endif
++	mempool_free(sio, sio_pool);
+@@ -604,2 +631,15 @@
+-	bio->bi_iter.bi_sector = swap_folio_sector(bio_first_folio_all(bio));
+-	bio_associate_blkg_from_folio(bio, bio_first_folio_all(bio));
++	bio->bi_iter.bi_sector = swap_folio_sector(bio_first_folio_all(bio));
++#ifdef CONFIG_SWAPZ_ORIGINAL_MM_CARRIER_TEST
++	/* This original native path constructs the iterator and sio bvecs;
++	 * bi_vcnt stays zero in pristine page_io. Set it only for the exact
++	 * opt-in one-bvec carrier, so selected-core geometry can be verified.
++	 */
++	if (sio->original && sio->nr_bvecs == 1 && sio->len == 4096) {
++		bio->bi_vcnt = 1;
++		if (swapz_mm_bio_matches(bio, sio->original))
++			bio->bi_swapz_original = sio->original;
++		else
++			bio->bi_vcnt = 0;
++	}
++#endif
++	bio_associate_blkg_from_folio(bio, bio_first_folio_all(bio));
+diff --git a/include/linux/swapz_mm_carrier.h b/include/linux/swapz_mm_carrier.h
+new file mode 100644
+--- /dev/null
++++ b/include/linux/swapz_mm_carrier.h
+@@ -0,0 +1,109 @@
++/* SPDX-License-Identifier: GPL-2.0-only */
++#ifndef _LINUX_SWAPZ_MM_CARRIER_H
++#define _LINUX_SWAPZ_MM_CARRIER_H
++/* Unapplied candidate. No Kconfig/Kbuild enables this guard.
++ * Stage the exact product broker/codec beside this header for a future build.
++ * Only original sio owns the carrier; BIO has a non-owning, revocable view.
++ */
++#ifdef CONFIG_SWAPZ_ORIGINAL_MM_CARRIER_TEST
++#include <linux/blkdev.h>
++#include <linux/mm_types.h>
++#include "zswap-original-ticket.h"
++
++#define SWAPZ_MM_SOURCE_SLOTS 64U
++/* Source-only credential, never persisted and never contains route fields. */
++struct swapz_mm_source {
++	swapz_u64 cookie, area_epoch, slot_offset;
++	swapz_u32 swap_type, length, crc;
++	swapz_u8 sha256[32], codec;
++};
++
++static inline unsigned int swapz_mm_source_index(swapz_u64 cookie)
++{
++	return (unsigned int)(cookie & (SWAPZ_MM_SOURCE_SLOTS - 1U));
++}
++
++/* Caller exclusively pins the sparse cell. No output on mismatch. */
++static inline bool swapz_mm_source_key(const struct swapz_mm_source *source,
++	swapz_u64 cookie, swapz_u64 area, swapz_u64 offset, swapz_u32 type,
++	swapz_u32 length, struct swapz_ticket_key *key)
++{
++	if (!source || !key || !cookie || !area || source->cookie != cookie ||
++	    source->area_epoch != area || source->slot_offset != offset ||
++	    source->swap_type != type || source->length != length ||
++	    !length || length > 4095U ||
++	    (source->codec != SWAPZ_TICKET_LZ4 && source->codec != SWAPZ_TICKET_LZO1X))
++		return false;
++	*key = (struct swapz_ticket_key){
++		.area_epoch = area, .store_sequence = cookie, .slot_offset = offset,
++		.swap_type = type, .length = length, .decoded_length = 4096U,
++		.crc = source->crc, .representation = SWAPZ_TICKET_ORIGINAL,
++		.codec = source->codec, .version = 1U
++	};
++	for (unsigned int index = 0; index < sizeof(key->sha256); ++index)
++		key->sha256[index] = source->sha256[index];
++	return true;
++}
++
++struct swapz_mm_route {
++	struct swapz_ticket_broker *broker; /* borrowed until callback grace period */
++	swapz_u64 target_session, table_epoch, target_epoch, logical_page, dm_generation;
++};
++
++/* Immutable provider registration. Nonblocking callbacks under RCU; no
++ * sleeping, allocation, broker calls or target pointer escape. lookup must
++ * release all target locks before return; broker storage lives through
++ * unregister + RCU grace and every separately retained capability.
++ * Neither callback is source authentication. No default provider.
++ */
++struct swapz_mm_route_provider {
++	bool (*eligible)(struct block_device *, sector_t);
++	bool (*lookup)(struct block_device *, sector_t, struct swapz_mm_route *);
++};
++int swapz_mm_register_provider(const struct swapz_mm_route_provider *);
++int swapz_mm_unregister_provider(const struct swapz_mm_route_provider *);
++
++struct swapz_mm_carrier {
++	struct swapz_ticket_ref lease;
++	struct swapz_ticket_cap cap;
++	struct block_device *bdev; /* comparison only; no target pointer */
++	struct page *page; /* borrowed from locked/writeback folio */
++	sector_t sector;
++	u8 scratch[4096];
++};
++
++/* Exclusive owner variables only; no aliasing or manufacture of a lease. */
++static inline bool swapz_mm_move(struct swapz_mm_carrier **dst,
++			       struct swapz_mm_carrier **src)
++{
++	if (!dst || !src || dst == src || *dst || !*src)
++		return false;
++	*dst = *src;
++	*src = NULL;
++	return true;
++}
++
++/* Drops owner once, asynchronously; never acquire broker lock from endio. */
++void swapz_mm_drop(struct swapz_mm_carrier **owner);
++
++/* Selected DM core must prove actual clone/table and origin lifetime before
++ * this call; no foreign lock held. Generic clones never inherit the view.
++ * This is only a retained candidate, not claim or source authentication.
++ */
++int swapz_mm_candidate_get(const struct bio *origin, struct swapz_ticket_ref *out);
++
++static inline bool swapz_mm_bio_matches(const struct bio *bio,
++				       const struct swapz_mm_carrier *carrier)
++{
++	return bio && carrier && carrier->lease.broker && bio->bi_io_vec &&
++	       bio->bi_bdev == carrier->bdev &&
++	       bio->bi_iter.bi_sector == carrier->sector &&
++	       bio->bi_iter.bi_size == 4096 && !bio->bi_iter.bi_idx &&
++	       !bio->bi_iter.bi_offset && bio->bi_vcnt == 1 &&
++	       bio_op(bio) == REQ_OP_WRITE && (bio->bi_opf & REQ_SWAP) &&
++	       !bio_flagged(bio, BIO_CLONED) && !bio_flagged(bio, BIO_REMAPPED) &&
++	       bio->bi_io_vec[0].bv_page == carrier->page &&
++	       !bio->bi_io_vec[0].bv_offset && bio->bi_io_vec[0].bv_len == 4096;
++}
++#endif
++#endif

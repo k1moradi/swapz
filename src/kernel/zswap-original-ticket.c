@@ -110,6 +110,7 @@ int swapz_ticket_init(struct swapz_ticket_broker *broker,
 	broker->capacity = count;
 	broker->free_count = count;
 	broker->max_length = max_length;
+	broker->capability_refs = 0;
 	broker->closing = false;
 	broker->initialized = true;
 	return 0;
@@ -279,7 +280,7 @@ int swapz_ticket_retain(const struct swapz_ticket_ref *ref, struct swapz_ticket_
 	ticket_unlock(broker, flags);
 	return error;
 }
-int swapz_ticket_claim(const struct swapz_ticket_ref *ref, const struct swapz_ticket_key *key)
+static int ticket_claim_once(const struct swapz_ticket_ref *ref, const struct swapz_ticket_key *key)
 {
 	struct swapz_ticket_broker *broker;
 	struct swapz_ticket_slot *slot;
@@ -298,6 +299,59 @@ int swapz_ticket_claim(const struct swapz_ticket_ref *ref, const struct swapz_ti
 		error = -EALREADY;
 	else
 		slot->state = SWAPZ_TICKET_CLAIMED;
+	ticket_unlock(broker, flags);
+	return error;
+}
+int swapz_ticket_claim(const struct swapz_ticket_ref *ref, const struct swapz_ticket_key *key)
+{
+	return ticket_claim_once(ref, key);
+}
+int swapz_ticket_claim_under_queue_lock(const struct swapz_ticket_ref *ref,
+	const struct swapz_ticket_key *key)
+{
+	/* No lock acquisition other than the single trylock in the common
+	 * implementation. Claim/revoke serialize on the same broker lock. */
+	return ticket_claim_once(ref, key);
+}
+int swapz_ticket_broker_try_get(struct swapz_ticket_broker *broker,
+	swapz_u64 session, swapz_u64 epoch, struct swapz_ticket_cap *out)
+{
+	unsigned long flags = 0;
+	int error;
+	if (!out || out->broker || !broker || !broker->initialized)
+		return -EINVAL;
+	error = ticket_lock(broker, &flags, true);
+	if (error)
+		return error;
+	if (broker->closing || !session || !epoch ||
+	    session != broker->session || epoch != broker->epoch)
+		error = -ESTALE;
+	else if (broker->capability_refs == ~(swapz_u32)0)
+		error = -EOVERFLOW;
+	else {
+		++broker->capability_refs;
+		*out = (struct swapz_ticket_cap){broker, session, epoch};
+	}
+	ticket_unlock(broker, flags);
+	return error;
+}
+int swapz_ticket_broker_put(struct swapz_ticket_cap *cap)
+{
+	struct swapz_ticket_broker *broker;
+	unsigned long flags = 0;
+	int error;
+	if (!cap || !cap->broker)
+		return -EALREADY;
+	broker = cap->broker;
+	error = ticket_lock(broker, &flags, false);
+	if (error)
+		return error;
+	if (cap->session != broker->session || !broker->capability_refs)
+		error = -ESTALE;
+	else {
+		--broker->capability_refs;
+		*cap = (struct swapz_ticket_cap){0};
+	}
 	ticket_unlock(broker, flags);
 	return error;
 }
@@ -401,7 +455,7 @@ int swapz_ticket_close(struct swapz_ticket_broker *broker)
 	if (error)
 		return error;
 	broker->closing = true;
-	if (broker->free_count != broker->capacity)
+	if (broker->free_count != broker->capacity || broker->capability_refs)
 		error = -EBUSY;
 	ticket_unlock(broker, flags);
 	return error;
@@ -415,7 +469,8 @@ int swapz_ticket_destroy(struct swapz_ticket_broker *broker)
 	error = ticket_lock(broker, &flags, false);
 	if (error)
 		return error;
-	if (!broker->closing || broker->free_count != broker->capacity || broker->used_bytes)
+	if (!broker->closing || broker->free_count != broker->capacity || broker->used_bytes ||
+	    broker->capability_refs)
 		error = -EBUSY;
 	ticket_unlock(broker, flags);
 	if (error)

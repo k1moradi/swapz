@@ -1,0 +1,76 @@
+name: Round089 Agent11 broker and bounded original MM carrier host NO_AUTH
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'src/kernel/zswap-original-ticket.c'
+      - 'src/kernel/zswap-original-ticket.h'
+      - 'tests/tools/round089-original-mm-carrier.patch'
+      - 'tests/tools/round089-original-mm-carrier-verify.py'
+      - 'tests/runtime/native/fixtures/round089-original-mm-carrier.c'
+      - '.github/workflows/phase-a-round089-original-mm-carrier-host-noauth.yml'
+permissions:
+  contents: read
+jobs:
+  broker-and-sparse-carrier-strict-host:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          path: swapz
+          fetch-depth: 2
+          persist-credentials: false
+      - name: Exact source and canonical policy
+        working-directory: swapz
+        env:
+          SWAPZ_PUSH_BEFORE_SHA: ${{ github.event.before }}
+        run: |
+          set -Eeuo pipefail
+          test "$GITHUB_REF" = refs/heads/main
+          test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
+          test "$(git branch --show-current)" = main
+          test "$(git rev-parse HEAD^)" = "$SWAPZ_PUSH_BEFORE_SHA"
+          test "$(git rev-list --parents -n1 HEAD | wc -w)" -eq 2
+          test -z "$(git status --porcelain --untracked-files=all)"
+          git diff --check HEAD^ HEAD
+          python3 -B tests/runtime/native/repository-policy-test.py --enforce
+      - uses: actions/checkout@v4
+        with:
+          repository: torvalds/linux
+          ref: c339f4010dea8b0d754f84ace70cd1b089878ef8
+          path: linux
+          fetch-depth: 1
+          persist-credentials: false
+          sparse-checkout-cone-mode: false
+          sparse-checkout: |
+            mm/zswap.c
+            mm/page_io.c
+            include/linux/swap_ops.h
+            include/linux/blk_types.h
+            include/linux/bio.h
+            block/bio.c
+            mm/zsmalloc.c
+            mm/swapfile.c
+            mm/swap.h
+            include/linux/swap.h
+            include/linux/bvec.h
+            include/linux/blkdev.h
+            include/linux/workqueue.h
+            include/crypto/acompress.h
+            include/crypto/sha2.h
+      - name: Exact unapplied patch and actual broker/sparse helpers
+        run: |
+          set -Eeuo pipefail
+          umask 077
+          mkdir -p round089-agent11-evidence
+          python3 -B swapz/tests/tools/round089-original-mm-carrier-verify.py \
+            --linux linux --output round089-agent11-evidence
+      - name: Retain source-bound host results and private diagnostics
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: round089-agent11-original-mm-carrier-host
+          path: round089-agent11-evidence/
+          if-no-files-found: warn
+          retention-days: 14

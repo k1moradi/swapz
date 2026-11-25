@@ -49,6 +49,7 @@ struct swapz_ticket_broker {
 	size_t stride, payload_bytes, metadata_bytes, index_bytes;
 	swapz_u64 session, epoch, next_generation, byte_limit, used_bytes;
 	swapz_u32 capacity, free_count, max_length;
+	swapz_u32 capability_refs; /* independent route-provider leases */
 	bool closing, initialized;
 };
 /* Move-only lease by caller contract; each variable has one thread owner.
@@ -58,6 +59,13 @@ struct swapz_ticket_ref {
 	struct swapz_ticket_broker *broker;
 	swapz_u64 session, generation;
 	swapz_u32 index;
+};
+/* Independent move-only broker lifetime capability. Provider guarantees
+ * broker storage through try_get; successful capability pins it until put.
+ * This is not a ticket, route authentication, or permission to claim. */
+struct swapz_ticket_cap {
+	struct swapz_ticket_broker *broker;
+	swapz_u64 session, epoch;
 };
 struct swapz_ticket_view {
 	const swapz_u8 *bytes; /* valid only while holding caller's lease */
@@ -70,7 +78,8 @@ struct swapz_ticket_usage {
 };
 /* Zero broker at init. Exact aligned disjoint arrays, nonreused session.
  * No allocations. Reserve/claim try once; other calls serialize by lock.
- * No calls under foreign locks; no callback or credit wait. Source must be
+ * No calls under foreign locks except the narrow queue-lock claim below;
+ * no callback or credit wait. Source must be
  * stable until seal returns, copied outside lock with exclusive lease.
  * Failed seal/cancel stays charged until put. Close never waits for refs.
  * Destroy requires external quiescence of ALL entrants, not just no refs.
@@ -84,6 +93,19 @@ int swapz_ticket_reserve(struct swapz_ticket_broker *, const struct swapz_ticket
 int swapz_ticket_seal(struct swapz_ticket_ref *, const swapz_u8 *, swapz_u32);
 int swapz_ticket_retain(const struct swapz_ticket_ref *, struct swapz_ticket_ref *);
 int swapz_ticket_claim(const struct swapz_ticket_ref *, const struct swapz_ticket_key *);
+/* The ONLY operation permitted under the selected incoming queue lock.
+ * Caller owns a retained stable ref and validates actual selected clone,
+ * current route/generation and an infallible FIFO link under that lock.
+ * One broker trylock, no callback/wait/other lock; on failure ordinary
+ * fallback remains intact. Success must be followed by exactly one link
+ * before releasing queue lock. Route invalidation must be ordered with
+ * that same queue lock by the target. Retain/put/revoke/close outside it.
+ * Broker does not call target or MM while holding its lock. */
+int swapz_ticket_claim_under_queue_lock(const struct swapz_ticket_ref *,
+	const struct swapz_ticket_key *);
+int swapz_ticket_broker_try_get(struct swapz_ticket_broker *, swapz_u64, swapz_u64,
+	struct swapz_ticket_cap *);
+int swapz_ticket_broker_put(struct swapz_ticket_cap *);
 int swapz_ticket_view(const struct swapz_ticket_ref *, struct swapz_ticket_view *);
 int swapz_ticket_cancel(const struct swapz_ticket_ref *);
 int swapz_ticket_put(struct swapz_ticket_ref *);
