@@ -24,6 +24,7 @@ ORIGINAL = ROOT / "tests/tools/round085-original-decode-verify.py"
 HANDLES_C = ROOT / "src/kernel/zswap-original-decoder-handles.c"
 HANDLES_H = ROOT / "src/kernel/zswap-original-decoder-handles.h"
 FIXTURE = ROOT / "tests/runtime/native/fixtures/round091-original-decoder-handles.c"
+SCALE_FIXTURE = ROOT / "tests/runtime/native/fixtures/round093-decoder-shared-provider.c"
 PIN = "c339f4010dea8b0d754f84ace70cd1b089878ef8"
 EXPECTED_PREFIX = "# Testing Standards\n"
 MUTANTS = (
@@ -45,6 +46,42 @@ def blob(data: bytes) -> str:
 def require(yes: bool, description: str) -> None:
     if not yes:
         raise RuntimeError(description)
+
+
+def semantic_failure(execution, expected, classify):
+    """R093: preserve sanitizer precedence, credit only the exact exit-77 sentinel."""
+    failure = classify(execution, None)
+    if failure is not None and failure["kind"] == "sanitizer":
+        return failure
+    semantic = re.fullmatch(
+        r"FIRST_ERROR round091-agent7 " + re.escape(expected) +
+        r" line=[1-9][0-9]*\n", execution.stderr)
+    if execution.returncode == 77 and not execution.stdout and semantic:
+        return None
+    return {"kind": "mutant_not_killed", "exit": execution.returncode,
+            "location": "unavailable"}
+
+
+def classifier_regression(classify):
+    sentinel = "FIRST_ERROR round091-agent7 wrong_epoch line=61\n"
+    cases = (
+        (77, "", sentinel, None),
+        (1, "", sentinel, "mutant_not_killed"),
+        (0, "", sentinel, "mutant_not_killed"),
+        (77, "extra\n", sentinel, "mutant_not_killed"),
+        (77, "", sentinel + "extra\n", "mutant_not_killed"),
+        (77, "", sentinel.replace("wrong_epoch", "wrong_generation"), "mutant_not_killed"),
+        (77, "", sentinel.replace("61", "0"), "mutant_not_killed"),
+        (77, "", sentinel + "ERROR: AddressSanitizer: heap-use-after-free\n", "sanitizer"),
+        (77, "", sentinel + "runtime error: division by zero\n", "sanitizer"),
+        (77, "", sentinel + "ERROR: LeakSanitizer: detected memory leaks\n", "sanitizer"),
+    )
+    for code, stdout, stderr, expected in cases:
+        actual = semantic_failure(subprocess.CompletedProcess([], code, stdout, stderr),
+                                  "wrong_epoch", classify)
+        require((actual["kind"] if actual else None) == expected,
+                "semantic diagnostic classifier regression")
+    return len(cases)
 
 
 def run_compiler(compiler: str, linux: Path, directory: Path, previous: dict,
@@ -131,6 +168,33 @@ def run_compiler(compiler: str, linux: Path, directory: Path, previous: dict,
                      layout={"handle_bytes": handle_bytes, "slot_bytes": slot_bytes,
                              "owner_bytes": owner_bytes, "live_record_slots": 64},
                      mutants_compiled=0, mutants_executed=0, mutants_killed=[])
+        state["stage"] = "scale-compile"
+        scale_object = directory / "scale.o"
+        compile_object(compiler, standard, SCALE_FIXTURE, scale_object, flags)
+        scale_binary = directory / "scale"
+        scale_fixed = [obj for obj in objects if obj.name != "candidate-" + FIXTURE.stem + ".o"]
+        require(len(scale_fixed) + 1 == len(objects), "scale fixture inventory")
+        state["stage"] = "scale-link"
+        checked([compiler, "-fsanitize=address,undefined", "-fno-pie", "-no-pie",
+                 str(scale_object), *(str(obj) for obj in scale_fixed),
+                 "-pthread", "-lcrypto", "-o", str(scale_binary)], "shared provider model link")
+        state["stage"] = "scale-execute"
+        scale = run_command([str(scale_binary)], "shared provider model", timeout=65)
+        scale_match = re.fullmatch(
+            r"PASS ROUND093_AGENT7 scale checks=(\d+) records=(\d+) sidecar=(\d+) providers=(\d+) codecs=2 AUTH0\n",
+            scale.stdout)
+        scale_failure = previous["runtime_failure"](scale, None)
+        if scale_failure or not scale_match:
+            (evidence / (Path(compiler).name + "-scale-stderr.txt")).write_text(
+                scale.stderr[:3600], encoding="utf-8")
+            state["first_error"] = scale_failure or {"kind": "scale_output", "location": "unavailable"}
+            raise RuntimeError("shared provider model execution rejected")
+        scale_checks, scale_records, sidecar_bytes, provider_bytes = map(int, scale_match.groups())
+        require(scale_checks > 2048 and scale_records == 1024 and sidecar_bytes <= 16,
+                "incomplete shared provider scale coverage")
+        state["scale"] = {"status": "PASS_HOST_MODEL", "checks": scale_checks,
+                          "simultaneous_records": scale_records, "sidecar_bytes": sidecar_bytes,
+                          "shared_provider_bytes": provider_bytes, "native": "NOT_RUN"}
         original = HANDLES_C.read_text()
         fixed = [obj for obj in objects if obj.name !=
                  "candidate-" + HANDLES_C.stem + ".o"]
@@ -151,17 +215,11 @@ def run_compiler(compiler: str, linux: Path, directory: Path, previous: dict,
             state["stage"] = "mutant-execute-" + name
             execution = run_command([str(executable)], name, timeout=65)
             state["mutants_executed"] += 1
-            semantic = re.fullmatch(
-                r"FIRST_ERROR round091-agent7 " + re.escape(expected) +
-                r" line=\d+\n", execution.stderr)
-            failure = previous["runtime_failure"](execution, None)
-            if execution.returncode != 77 or execution.stdout or not semantic or failure:
+            failure = semantic_failure(execution, expected, previous["runtime_failure"])
+            if failure is not None:
                 (evidence / (Path(compiler).name + "-" + name + "-stderr.txt")).write_text(
                     execution.stderr[:3600], encoding="utf-8")
-                state["first_error"] = failure or {
-                    "kind": "mutant_not_killed", "name": name, "exit": execution.returncode,
-                    "diagnostic": (execution.stderr or execution.stdout)[:330],
-                }
+                state["first_error"] = {**failure, "name": name}
                 raise RuntimeError("semantic mutant not killed: " + name)
             state["mutants_killed"].append(name)
         state.update(status="PASS", stage="complete")
@@ -169,6 +227,7 @@ def run_compiler(compiler: str, linux: Path, directory: Path, previous: dict,
               f"checks={checks} churn={churn} races={wins}/{declines} "
               "original_LZ4_LZO1X", file=sys.stderr)
     except (RuntimeError, OSError, subprocess.TimeoutExpired) as error:
+        state["status"] = "FAIL"
         if state["first_error"] is None:
             state["first_error"] = {
                 "kind": type(error).__name__,
@@ -223,15 +282,16 @@ def main() -> int:
             report["standards_prefix"] = {"parent_bytes": len(parent),
                 "current_bytes": len(current), "parent_blob": blob(parent),
                 "current_blob": blob(current)}
-        report["qualification_round"] = "092"
-        for source in (HANDLES_C, HANDLES_H, FIXTURE):
+        report["qualification_round"] = "093"
+        report["classifier_cases"] = classifier_regression(previous["runtime_failure"])
+        for source in (HANDLES_C, HANDLES_H, FIXTURE, SCALE_FIXTURE):
             require(source.is_file() and source.stat().st_size > 500,
                     "missing handle bridge source: " + source.name)
         require("#define SWAPZ_ORIGINAL_DECODER_HANDLES_ACTIVE 0U" in
                 HANDLES_H.read_text(), "decoder handle activation guard changed")
         report["source_blobs"] = {
             str(path.relative_to(ROOT)): blob(path.read_bytes())
-            for path in (HANDLES_C, HANDLES_H, FIXTURE)
+            for path in (HANDLES_C, HANDLES_H, FIXTURE, SCALE_FIXTURE, Path(__file__))
         }
         if args.preflight_only:
             report["status"] = "PASS_PREFLIGHT_ONLY"
