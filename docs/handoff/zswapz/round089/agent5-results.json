@@ -51,22 +51,51 @@
   },
   "workflow_url": "https://github.com/k1moradi/swapz/actions/runs/45577929354",
   "run_id": 45577929354,
-  "run_status": "queued",
+  "run_status": "completed",
   "jobs": [
     {
       "id": 139080377649,
       "name": "shared-original-host",
-      "status": "queued",
-      "conclusion": null,
+      "status": "completed",
+      "conclusion": "success",
       "url": "https://github.com/k1moradi/swapz/actions/runs/45577929354/job/139080377649"
     }
   ],
-  "conclusion": "QUEUED",
+  "conclusion": "PASS_HOST_ONLY",
   "first_error": null,
-  "actual_compiler_results": null,
+  "actual_compiler_results": [
+    {
+      "compiler": "gcc",
+      "standard": "c2x",
+      "checks": 187,
+      "storage_bytes": 14824,
+      "map_bytes": 20,
+      "sidecar_bytes": 1112,
+      "semantic_mutants_compiled_executed_killed": 6,
+      "sanitizers": "ASan+UBSan",
+      "conclusion": "PASS"
+    },
+    {
+      "compiler": "clang",
+      "standard": "c23",
+      "checks": 187,
+      "storage_bytes": 14824,
+      "map_bytes": 20,
+      "sidecar_bytes": 1112,
+      "semantic_mutants_compiled_executed_killed": 6,
+      "sanitizers": "ASan+UBSan",
+      "conclusion": "PASS"
+    }
+  ],
   "planned_mutants_per_compiler": 6,
-  "actual_mutants_per_compiler": null,
-  "artifact": null,
+  "actual_mutants_per_compiler": 6,
+  "artifact": {
+    "id": 15005966092,
+    "url": "https://github.com/k1moradi/swapz/actions/runs/45577929354/artifacts/15005966092",
+    "size_in_bytes": 1385,
+    "digest": "sha256:0d0b288e2d3e8bc34b0d7ea8e34ae5f1dd3d735a28cb4fdbdadc32c408fc769b",
+    "verification": "upload log and Actions metadata agree; archive contents not independently extracted"
+  },
   "push_census": {
     "automatic_runs": 24,
     "other_automatic_runs": 23,
@@ -159,8 +188,8 @@
       {
         "id": 45577929354,
         "path": ".github/workflows/phase-a-round089-shared-original-storage-host-noauth.yml",
-        "status": "queued",
-        "conclusion": null
+        "status": "completed",
+        "conclusion": "success"
       },
       {
         "id": 45577929338,
@@ -216,7 +245,8 @@
         "status": "queued",
         "conclusion": null
       }
-    ]
+    ],
+    "snapshot": "initial queued snapshot; not terminal census"
   },
   "scope": {
     "dedicated_4k": "IMPLEMENTED_DORMANT",
@@ -236,7 +266,11 @@
     "ordinary_map_growth_bytes": 0,
     "authority_growth": "one opt-in pointer, zero when guard absent",
     "ram_scratch_bytes": 12288,
-    "actual_size_measurements": null
+    "actual_size_measurements": {
+      "storage_bytes": 14824,
+      "sidecar_bytes": 1112,
+      "map_bytes": 20
+    }
   },
   "development_errors": [
     "Verifier-template Round088 docstring anchor not present; initial script stopped before publication; corrected scaffolding.",
@@ -251,5 +285,20 @@
   "phase_a": "BLOCKED",
   "direct_compressed_handoff": "DISABLED",
   "forced_raw_bypass": "DISABLED",
-  "import_active": 0
+  "import_active": 0,
+  "terminal_verification": {
+    "run_attempt": 1,
+    "event": "push",
+    "head_sha": "8089093b8ac23d5430c4d8d6071a34d8692ee193",
+    "event_before": "63412e4f2fb6f74cb02996947aca48acf047391c",
+    "preflight": "PASS (verifier success: exact main, clean checkout, sole parent, git diff --check, pins, standards prefix, canonical policy)",
+    "checks_total": 374,
+    "mutants_total": 12,
+    "first_error": null,
+    "local_reexecution": "NOT_RUN",
+    "artifact_content_extracted": false,
+    "live": "NO_GO",
+    "packed": "NO_GO",
+    "other_automatic_runs": "not independently terminal-audited in this evidence update"
+  }
 }
