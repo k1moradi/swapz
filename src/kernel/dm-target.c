@@ -12543,12 +12543,11 @@ static bool swapz_round091_reserve_claim_commit(
 }
 /* ROUND091_TRANSACTION_END */
 
-/* Frozen broker header still requires a new FIFO link after claim; the
- * revised contract allows only a transfer of the already accepted head.
- * Frozen cancellation abandons an actual block and the MM provider cannot
- * yet publish a trustworthy ordered generation. Never enable by changing
- * just this boolean: requires reviewed broker/core lifetime, admission and
- * generation contract, bounded cancellation, and real setup/teardown.
+/* Frozen R091 broker now permits same-descriptor ordered-head claim, and
+ * cancellation restores a verified never-issued active tail without sequence
+ * rewind. The MM provider still cannot publish a trustworthy ordered generation.
+ * Never enable by changing just this boolean: real module/core lifetime,
+ * route generation publication and storage/decoder setup/teardown are absent.
  */
 static bool swapz_round091_ordered_claim_permitted(void)
 {
@@ -12605,8 +12604,8 @@ static int swapz_round091_claim_reserved(void *opaque, swapz_u32 credit)
 	rcu_read_unlock();
 	if (!selected)
 		goto unlock;
-	/* Frozen implementation trylocks once; its old interface comment
-	 * prevents live use pending review. No storage/decoder call here.
+	/* Frozen R091 implementation permits this same-descriptor trylock once.
+	 * No storage/decoder call here; the live gate remains hard-disabled.
 	 */
 	error = swapz_ticket_claim_under_queue_lock(&entry->original_candidate, key);
 	if (!error)

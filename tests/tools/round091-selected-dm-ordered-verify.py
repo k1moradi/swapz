@@ -16,19 +16,25 @@ import tarfile
 import tempfile
 
 ROOT = Path(__file__).resolve().parents[2]
-BASE = "e8a3f08000f81dcc3b1bda74b407b9e523ed3bab"
+BASE = "2499405464110e6a97f054db5527de54b8aafb3a"
 LINUX = "c339f4010dea8b0d754f84ace70cd1b089878ef8"
+SHARED_FIXTURE = "tests/runtime/native/fixtures/round089-shared-original-storage.c"
+ORDERED_FIXTURE = "tests/runtime/native/fixtures/round091-selected-dm-ordered.c"
+OLD_BASE = "e8a3f08000f81dcc3b1bda74b407b9e523ed3bab"
+STAGE_PATHS = ("src/kernel", "tests/tools/round085-original-decode-verify.py",
+               "tests/tools/round080-original-lzo1x-independent-decoder-verify.py",
+               SHARED_FIXTURE)
 PINS = {
-    "src/kernel/zswap-original-ticket.h": "2f850b53708c8142ee95d330192c9db1f9ae9418",
-    "src/kernel/zswap-original-ticket.c": "66df826d86dde1bbd5e1967daa0e62517b58ac8d",
-    "src/kernel/zswap-original-storage.h": "0da04b61921e3dbc0544cb9c9c8168513628997b",
-    "src/kernel/zswap-original-storage.c": "d4feaca4d114cfdb1877df65e68e8d6b52859126",
+    "src/kernel/zswap-original-ticket.h": "0630f9e4fad26458ed0778ca6ae040150e28f078",
+    "src/kernel/zswap-original-ticket.c": "7ba56c5ee602853c8d0717f23aad9efc69d111ea",
+    "src/kernel/zswap-original-storage.h": "38924c3931419a93a7783de9ba622024a5e2e65c",
+    "src/kernel/zswap-original-storage.c": "1f9030030f5d0fb3b06d0b0a159dd8aa6818f8dd",
     "src/kernel/zswap-original-decoder-bridge.h": "507b25debe0ca7b30b57ed6a350dab4868dced51",
     "src/kernel/zswap-original-decoder-bridge.c": "9324a581e27bad62d4e2d9c90192f6ad8b96faca",
-    "src/kernel/authority.h": "c320498ce530c0887bf498cc4d5b121765bb41f3",
-    "src/kernel/authority.c": "73b3e2dc98c6a47315519d3ab650c3d3b0656de7",
+    "src/kernel/authority.h": "c63741157141b2aa9a15de1e9182e27435fc0a3e",
+    "src/kernel/authority.c": "14fe52cf4cf28f18568d3bf2b6ced449c9c182a3",
     "src/kernel/engine.c": "e7c50c3e78449157439fba9c69e5d23b1c317f4e",
-    "tests/runtime/native/fixtures/round089-shared-original-storage.c": "13ceb16b1e6cc68575c673aba273b534e593eb30",
+    "tests/runtime/native/fixtures/round089-shared-original-storage.c": "95cee696fe99b3438f387ff1bf45cb4634f70fab",
 }
 MUTANTS = (
     ("ignore_claim_refusal", "if (try_claim(context, credit)) {",
@@ -54,6 +60,38 @@ def git_blob(data):
 
 def git(*args):
     return subprocess.check_output(["git", "--no-replace-objects", *args], cwd=ROOT)
+
+
+def verify_stage(stage):
+    # Every archived file, including transitive quoted includes and helpers.
+    entries = git("ls-tree", "-r", "-z", BASE, "--", *STAGE_PATHS).split(b"\0")
+    expected = {}
+    for entry in filter(None, entries):
+        metadata, name = entry.split(b"\t", 1)
+        mode, kind, digest = metadata.decode().split()
+        require(kind == "blob" and mode in ("100644", "100755"), "nonregular staged input")
+        expected[name.decode()] = digest
+    actual = {str(path.relative_to(stage)) for path in stage.rglob("*") if path.is_file()}
+    require(actual == set(expected), "staged file inventory")
+    for path, digest in expected.items():
+        require(git_blob((stage / path).read_bytes()) == digest, "staged blob " + path)
+    return len(expected)
+
+
+def verify_fixture(path, expected):
+    require(git_blob(path.read_bytes()) == expected, "mixed-version fixture rejected")
+
+
+def isolate_fixture(stage, work):
+    # Compile from scratch, not the current source-relative include directory.
+    fixture = work / "ordered-fixture.c"
+    current = git("show", "HEAD:" + ORDERED_FIXTURE)
+    require(current == (ROOT / ORDERED_FIXTURE).read_bytes(), "current ordered fixture drift")
+    fixture.write_bytes(current)
+    shared = work / "frozen-round089-shared-original-storage.c"
+    shared.write_bytes((stage / SHARED_FIXTURE).read_bytes())
+    verify_fixture(shared, PINS[SHARED_FIXTURE])
+    return fixture, shared
 
 
 def fragment(source, name):
@@ -99,9 +137,11 @@ def static_checks(source, patch):
 
 
 def run_command(args, evidence, label, expected=0):
+    env = {key: value for key, value in os.environ.items() if key not in
+           ("CPATH", "C_INCLUDE_PATH", "CPLUS_INCLUDE_PATH", "OBJC_INCLUDE_PATH")}
     result = subprocess.run(args, cwd=ROOT, capture_output=True, text=True, timeout=180,
-                            env=os.environ | {"ASAN_OPTIONS": "halt_on_error=1:detect_leaks=1",
-                                              "UBSAN_OPTIONS": "halt_on_error=1"})
+                            env=env | {"ASAN_OPTIONS": "halt_on_error=1:detect_leaks=1",
+                                       "UBSAN_OPTIONS": "halt_on_error=1"})
     if result.returncode != expected:
         (evidence / "first-child-error.log").write_text((result.stderr + result.stdout)[:12000])
         raise RuntimeError(f"{label}: exit {result.returncode}, expected {expected}")
@@ -154,7 +194,7 @@ def run_compiler(compiler, stage, linux, work, prior, helpers, fragments, eviden
     run_command([compiler, *host_flags, *flags, "-c", str(adapter), "-o", str(obj)],
                 evidence, "compile original adapter")
     objects.append(obj)
-    fixture = ROOT / "tests/runtime/native/fixtures/round091-selected-dm-ordered.c"
+    fixture, shared = isolate_fixture(stage, work)
     result = {}
     for name, old, new in (("baseline", "", ""), *MUTANTS):
         code = fragments
@@ -163,6 +203,7 @@ def run_compiler(compiler, stage, linux, work, prior, helpers, fragments, eviden
             code = code.replace(old, new, 1)
         (work / "ordered-fragments.h").write_text(code)
         program = work / "ordered-host"
+        verify_fixture(shared, PINS[SHARED_FIXTURE])
         run_command([compiler, *host_flags, *flags, str(fixture),
                      *(str(item) for item in objects), "-pthread", "-lcrypto", "-no-pie",
                      "-o", str(program)], evidence, "fixture " + name)
@@ -189,7 +230,7 @@ def main():
     os.umask(0o077)
     evidence = args.evidence_dir.resolve()
     evidence.mkdir(mode=0o700, parents=True, exist_ok=True)
-    report = {"round": "091", "agent": 3, "tested_commit": git("rev-parse", "HEAD").decode().strip(),
+    report = {"round": "092", "agent": 3, "tested_commit": git("rev-parse", "HEAD").decode().strip(),
               "frozen_product": BASE, "linux": LINUX, "AUTH": 0, "phase_a": "BLOCKED",
               "physical_io": False, "native_dm": "NOT_RUN", "compilers": {},
               "first_error": None, "conclusion": "FAIL"}
@@ -206,11 +247,19 @@ def main():
             workspace = Path(temp)
             stage = workspace / "frozen"
             stage.mkdir()
-            archive = git("archive", BASE, "src/kernel", "tests/tools/round085-original-decode-verify.py",
-                          "tests/tools/round080-original-lzo1x-independent-decoder-verify.py",
-                          "tests/runtime/native/fixtures/round089-shared-original-storage.c")
+            archive = git("archive", BASE, *STAGE_PATHS)
             with tarfile.open(fileobj=io.BytesIO(archive)) as tar:
                 tar.extractall(stage, filter="data")
+            report["frozen_inventory_count"] = verify_stage(stage)
+            mixed = workspace / "mixed-version-fixture.c"
+            mixed.write_bytes(git("show", OLD_BASE + ":" + SHARED_FIXTURE))
+            try:
+                verify_fixture(mixed, PINS[SHARED_FIXTURE])
+            except RuntimeError as error:
+                require(str(error) == "mixed-version fixture rejected", "wrong negative cause")
+            else:
+                raise RuntimeError("mixed-version fixture was accepted")
+            report["mixed_version_negative"] = "PASS"
             for path, pin in PINS.items():
                 require(git_blob((stage / path).read_bytes()) == pin, "frozen pin " + path)
             prior = runpy.run_path(str(stage / "tests/tools/round085-original-decode-verify.py"))

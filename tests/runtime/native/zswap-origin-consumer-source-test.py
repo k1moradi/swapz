@@ -23,8 +23,10 @@ def validate_source_text(source: str) -> None:
         r"(?:(?!#endif).)*"
         r"bio_is_zswap_stored_writeback\(bio\)\).*?\n#endif",
         "only guarded positive classifier")
-    if source.count("swapz_count_verified_zswap_writeback_commit(ctx,") != 4:
-        raise AssertionError("four final foreground-commit sites required")
+    # Four ordinary sites plus the separately guarded typed owner.
+    if source.count("swapz_count_verified_zswap_writeback_commit(ctx,") != 5:
+        raise AssertionError("four ordinary and one typed foreground-commit sites required")
+    verify_typed_foreground_commit(source)
     if source.count("entry->write_origin") != 4:
         raise AssertionError("origin may be consulted only at admission and commit")
     if source.count("entry->origin_commit_counted") != 3:
@@ -82,6 +84,33 @@ def validate_source_text(source: str) -> None:
         raise AssertionError("requeued/denied BIO counted as accepted")
     if "raw_committed_verified_origin_bypass" in source:
         raise AssertionError("Phase B origin bypass must not be integrated")
+
+
+def typed_commit_region(source: str) -> str:
+    start = "static bool swapz_round091_process_candidate("
+    end = "\n#endif\n\nstatic void swapz_process("
+    if source.count(start) != 1 or end not in source.split(start, 1)[1]:
+        raise AssertionError("typed owner boundary missing")
+    return source.split(start, 1)[1].split(end, 1)[0]
+
+
+def verify_typed_foreground_commit(source: str) -> None:
+    region = typed_commit_region(source)
+    exactly_one(region,
+        r"if \(!swapz_round091_reserve_claim_commit\(ctx->original_storage, &spec,"
+        r"\s*&input, swapz_round091_claim_reserved, &claim_context, &error\)\)"
+        r"\s*goto decline;\s*if \(!error && entry->original_claimed\) \{"
+        r"\s*entry->published_ns = ktime_get_ns\(\);"
+        r"\s*ctx->logical_write_bytes \+= SWAPZ_BLOCK_BYTES;"
+        r"\s*ctx->compressed_pages\+\+;"
+        r"\s*swapz_count_verified_zswap_writeback_commit\(ctx, entry->bio\);\s*\}",
+        "typed claimed publication success before accounting")
+    exactly_one(region, r"complete:\s*swapz_complete\(entry->bio, error\);\s*return true;"
+                 r"\s*decline:\s*swapz_round091_release_candidate\(ctx, entry\);\s*return false;",
+                 "typed terminal owner versus ordinary fallback")
+    if region.count("swapz_complete(") != 1 or region.count(
+            "swapz_count_verified_zswap_writeback_commit(") != 1:
+        raise AssertionError("typed owner duplicate completion/accounting")
 
 
 def replace_exactly_once(source: str, old: str, new: str) -> str:
@@ -287,6 +316,22 @@ def run_negative_mutations(source: str) -> int:
     ]
     if len(controls) != 24:
         raise AssertionError("the 24 original adversarial controls were weakened")
+    typed_hook = "swapz_count_verified_zswap_writeback_commit(ctx, entry->bio);"
+    controls.extend([
+        ("typed commit missing", lambda: replace_exactly_once(source, typed_hook, "")),
+        ("typed count doubled", lambda: replace_exactly_once(source, typed_hook, typed_hook + typed_hook)),
+        ("typed error counted", lambda: replace_exactly_once(source,
+            "if (!error && entry->original_claimed) {", "if (entry->original_claimed) {")),
+        ("typed unclaimed counted", lambda: replace_exactly_once(source,
+            "if (!error && entry->original_claimed) {", "if (!error) {")),
+        ("typed count before commit", lambda: replace_exactly_once(
+            replace_exactly_once(source, typed_hook, ""),
+            "if (!swapz_round091_reserve_claim_commit(ctx->original_storage, &spec,",
+            typed_hook + "\n\tif (!swapz_round091_reserve_claim_commit(ctx->original_storage, &spec,")),
+        ("typed completion doubled", lambda: replace_exactly_once(source,
+            "complete:\n\tswapz_complete(entry->bio, error);",
+            "complete:\n\tswapz_complete(entry->bio, error);\n\tswapz_complete(entry->bio, error);")),
+    ])
     detected = 0
     for name, mutate in controls:
         changed = mutate()

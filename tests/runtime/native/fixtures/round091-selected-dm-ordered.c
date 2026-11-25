@@ -4,7 +4,7 @@
  * Synthetic selected provenance and upper-owner markers, never kernel AUTH.
  */
 #define main round090_storage_fixture_main
-#include "round089-shared-original-storage.c"
+#include <frozen-round089-shared-original-storage.c>
 #undef main
 #include "zswap-original-ticket.h"
 #include "zswap-original-decoder-bridge.h"
@@ -31,8 +31,8 @@ struct accepted_head {
 };
 
 /* Synthetic selected-DM adapter, real broker API and actual one-shot state.
- * The frozen header's old link-after-claim requirement prevents live use.
- * This proof exercises the revised same-descriptor transition in isolation.
+ * The frozen R091 broker permits ordered-head transfer of this descriptor.
+ * This proof still models selected provenance and queue ownership.
  */
 static int claim_accepted_head(void *opaque, swapz_u32 credit)
 {
@@ -41,6 +41,7 @@ static int claim_accepted_head(void *opaque, swapz_u32 credit)
 
 	CHECK(authority.in_flight && storage.pending_decoder);
 	CHECK(credit && authority.active_sequence == credit);
+	CHECK(authority.shared_unissued_sequence == credit && !writes && !flushes);
 	CHECK(head->links == 1U && !head->claimed);
 	CHECK(!pthread_mutex_lock(&queue_lock));
 	++head->attempts;
@@ -68,7 +69,7 @@ static void exercise(swapz_u8 codec, enum scenario scenario)
 	struct swapz_authority_import_spec spec = {0};
 	struct swapz_original_extent_input input = {0};
 	struct swapz_map predecessor;
-	swapz_u32 compressed_length, segment, index;
+	swapz_u32 compressed_length, segment, index, reserved_start, next_sequence;
 	unsigned long long abandoned;
 	int error = -123;
 	bool handled;
@@ -83,6 +84,8 @@ static void exercise(swapz_u8 codec, enum scenario scenario)
 	raw(0); /* real allocator establishes an OPEN segment and generation 1 */
 	predecessor = maps[0];
 	abandoned = authority.abandoned_blocks;
+	reserved_start = authority.next_block;
+	next_sequence = authority.next_sequence;
 	for (index = 0; index < sizeof(original_page); ++index)
 		original_page[index] = (swapz_u8)(index % 127U == 0U ? 0x5aU : 0U);
 	CHECK(!round085_compress(codec, original_page, SWAPZ_BLOCK_BYTES,
@@ -141,7 +144,7 @@ static void exercise(swapz_u8 codec, enum scenario scenario)
 		CHECK(!pthread_mutex_unlock(&broker.lock));
 	CHECK(head.links == 1U && head.claimed == claimed);
 	CHECK(head.attempts == (scenario == STALE_GENERATION ? 0U : 1U));
-	CHECK(!authority.in_flight && !storage.pending_decoder);
+	CHECK(!authority.in_flight && !storage.pending_decoder && !authority.shared_unissued_sequence);
 	CHECK(handled == claimed);
 	if (handled) {
 		++terminal_owners; /* test owner only, NOT an actual BIO ACK */
@@ -153,8 +156,12 @@ static void exercise(swapz_u8 codec, enum scenario scenario)
 		++refusals;
 		CHECK(slots[head.ref.index].state == SWAPZ_TICKET_SEALED);
 		CHECK(!writes && !flushes && !real_bridge.active_tokens);
-		CHECK(authority.abandoned_blocks == abandoned +
+		/* Never-issued cancellation restores the exact active tail, but
+		 * must never rewind the monotonic sequence. Stale input reserves nothing. */
+		CHECK(authority.abandoned_blocks == abandoned && authority.next_block == reserved_start);
+		CHECK(authority.next_sequence == next_sequence +
 			(scenario == STALE_GENERATION ? 0U : 1U));
+		CHECK(!memcmp(&predecessor, &maps[0], sizeof(predecessor)));
 	}
 	if (scenario == COMMIT_OK || scenario == BAD_DIGEST) {
 		CHECK(!error && maps[0].generation == 2U);

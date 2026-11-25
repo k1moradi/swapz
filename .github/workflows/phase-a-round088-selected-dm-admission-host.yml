@@ -1,4 +1,4 @@
-name: Round091 selected-DM ordered owner host
+name: Round092 selected-DM ordered owner host
 on:
   push:
     branches: [main]
@@ -10,6 +10,7 @@ on:
       - 'tests/tools/round091-selected-dm-ordered-verify.py'
       - 'tests/runtime/native/fixtures/round091-selected-dm-ordered.c'
       - 'src/kernel/dm-target.c'
+      - 'tests/runtime/native/zswap-origin-consumer-source-test.py'
 permissions:
   contents: read
 jobs:
@@ -48,6 +49,7 @@ jobs:
           set -Eeuo pipefail
           python3 -B tests/tools/round088-selected-dm-admission-verify.py
           python3 -B tests/tools/round089-selected-dm-registry-verify.py
+          python3 -B tests/runtime/native/zswap-origin-consumer-source-test.py
       - uses: actions/checkout@v4
         with:
           repository: torvalds/linux
@@ -93,12 +95,12 @@ jobs:
         working-directory: swapz
         run: |
           set -Eeuo pipefail
-          python3 -B tests/tools/round091-selected-dm-ordered-verify.py --linux-root ../linux --evidence-dir "$RUNNER_TEMP/round091-agent3"
+          python3 -B tests/tools/round091-selected-dm-ordered-verify.py --linux-root ../linux --evidence-dir "$RUNNER_TEMP/round092-agent3"
       - name: Retain bounded host evidence
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: round091-agent3-ordered-host
-          path: ${{ runner.temp }}/round091-agent3
+          name: round092-agent3-ordered-host
+          path: ${{ runner.temp }}/round092-agent3
           if-no-files-found: ignore
           retention-days: 14
