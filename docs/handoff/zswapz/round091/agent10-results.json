@@ -1,7 +1,7 @@
 {
   "round": "091",
   "agent": 10,
-  "status": "IN_PROGRESS",
+  "status": "FAILURE",
   "task_commit": "7fa5e3dc74c67330f341ae39c11dc3f8bff01187",
   "tested_source_commit": "8dc64dfd2c7b19e1f64e7ce42e3d6ba4c8d3fbb3",
   "tested_source_parent": "7fa5e3dc74c67330f341ae39c11dc3f8bff01187",
@@ -58,42 +58,42 @@
     "mm/zswap.c": {
       "pristine": "ae19e301fced7e357a4c7587dfdd6abb890b9163",
       "predicted_raw": "cbf160877e8d8b584d6010c009a3e500f8b99f38",
-      "actual_raw": null
+      "actual_raw": "cbf160877e8d8b584d6010c009a3e500f8b99f38"
     },
     "include/linux/swap_ops.h": {
       "pristine": "57ac6c703f685883d3a15ebc1a5c7f6c298deb1b",
       "predicted_raw": "a39a1921daf6f272e9812eb63b1aa64fec96c57f",
-      "actual_raw": null
+      "actual_raw": "a39a1921daf6f272e9812eb63b1aa64fec96c57f"
     },
     "include/linux/blk_types.h": {
       "pristine": "0cc09b975d8ffbd45ca3dc47533a71f8e8164de6",
       "predicted_raw": "50c94617b08e581021ba25fa6e182a5b88ecfa43",
-      "actual_raw": null
+      "actual_raw": "50c94617b08e581021ba25fa6e182a5b88ecfa43"
     },
     "include/linux/bio.h": {
       "pristine": "7a794ce723b84b2a148f8f9beccf057b266e8ac9",
       "predicted_raw": "4079365b37690164f85ba962a0bd0918c85899cb",
-      "actual_raw": null
+      "actual_raw": "4079365b37690164f85ba962a0bd0918c85899cb"
     },
     "block/bio.c": {
       "pristine": "b0fcc69de653524479e3b328aa29a37e97945b84",
       "predicted_raw": "38f24ee2e414107be390d3a01c6b907e06a9dca7",
-      "actual_raw": null
+      "actual_raw": "38f24ee2e414107be390d3a01c6b907e06a9dca7"
     },
     "mm/page_io.c": {
       "pristine": "c6824fcd483e0aa2c412e14dae0d2a356b17c373",
       "predicted_raw": "c3bd481117dbd29edd821df452f74990d6d5f00a",
-      "actual_raw": null
+      "actual_raw": "c3bd481117dbd29edd821df452f74990d6d5f00a"
     },
     "include/linux/swapz_mm_carrier.h": {
       "pristine": null,
       "predicted_raw": "f170d2c2ac63679adb0885f746585ed77c2746a5",
-      "actual_raw": null
+      "actual_raw": "f170d2c2ac63679adb0885f746585ed77c2746a5"
     },
     "drivers/md/dm.c": {
       "pristine": "1881d86111fb2e655893ad898cf21b88f0e4e7f3",
       "predicted_raw": "554dd8215ec6be0cfeaa016ca25e772ac6d363ff",
-      "actual_raw": null
+      "actual_raw": "554dd8215ec6be0cfeaa016ca25e772ac6d363ff"
     }
   },
   "product_blobs": {
@@ -143,7 +143,7 @@
     "authority.h": {
       "raw": "c320498ce530c0887bf498cc4d5b121765bb41f3",
       "predicted_compatible": "e65654de963016f62a45944e41de587a6c245f06",
-      "actual_compatible": null,
+      "actual_compatible": "e65654de963016f62a45944e41de587a6c245f06",
       "exact_anchors": [
         [
           "swapz_u8 current;",
@@ -155,7 +155,7 @@
     "authority.c": {
       "raw": "73b3e2dc98c6a47315519d3ab650c3d3b0656de7",
       "predicted_compatible": "6a1f575b81a2a34a2de5c2bc73e6d0526b899286",
-      "actual_compatible": null,
+      "actual_compatible": "6a1f575b81a2a34a2de5c2bc73e6d0526b899286",
       "exact_anchors": [
         [
           "record->current",
@@ -187,7 +187,7 @@
     "zswap-original-storage.c": {
       "raw": "d4feaca4d114cfdb1877df65e68e8d6b52859126",
       "predicted_compatible": "924bdb7a22a3c308948ecb70909e99892a396472",
-      "actual_compatible": null,
+      "actual_compatible": "924bdb7a22a3c308948ecb70909e99892a396472",
       "exact_anchors": [
         [
           "old->current",
@@ -204,11 +204,15 @@
     "connector_product_file_identities": 41,
     "bvec_header_blob": "b63914ff56e33df302055fabf2a84ba490bc8d2c",
     "obsolete_bvec_overlay": false,
-    "actual_raw_git_apply": "NOT_RUN",
-    "actual_compatibility_overlay": "NOT_RUN",
-    "actual_elf_prerequisite": "NOT_RUN",
-    "effective_config": "NOT_RUN",
-    "local_pinned_build": false
+    "actual_raw_git_apply": "PASS",
+    "actual_compatibility_overlay": "PASS",
+    "actual_elf_prerequisite": "PASS",
+    "effective_config": "PASS",
+    "local_pinned_build": false,
+    "actual_ordered_patch_count": 3,
+    "actual_ordered_stage_postimages_match": true,
+    "actual_raw_final_postimages": 8,
+    "actual_product_file_pins": 41
   },
   "source_review": {
     "mm_provider_and_broker_exports_absent": true,
@@ -217,8 +221,17 @@
       "dm_swapz_round090_selected_origin",
       "dm_swapz_round090_route_live"
     ],
-    "modpost_result": "NOT_RUN",
-    "no_fabricated_exports": true
+    "modpost_result": "FAILURE",
+    "no_fabricated_exports": true,
+    "actual_modpost_undefined": [
+      "swapz_ticket_put",
+      "swapz_mm_candidate_get",
+      "swapz_mm_unregister_provider",
+      "swapz_ticket_broker_put",
+      "swapz_mm_register_provider",
+      "swapz_ticket_view"
+    ],
+    "inventory_coverage_gap": "swapz_ticket_view omitted from expected symbol inventory; caught by actual modpost"
   },
   "historical_round090": {
     "source": "d183f5d5127992b406013799bcb81ea3f59e93eb",
@@ -239,32 +252,87 @@
   "workflow_url": "https://github.com/k1moradi/swapz/actions/runs/45599641943",
   "workflow_attempt": 1,
   "workflow_created_at": "2026-11-25T10:55:54Z",
-  "workflow_conclusion": null,
+  "workflow_conclusion": "failure",
   "jobs": [
     {
       "id": 139154826234,
       "url": "https://github.com/k1moradi/swapz/actions/runs/45599641943/job/139154826234",
       "name": "frozen-original-x86-compile-link",
-      "status": "in_progress",
-      "conclusion": null,
+      "status": "completed",
+      "conclusion": "failure",
       "canonical_policy_parent_prefix": "PASS",
       "frozen_baseline_checkout": "PASS",
-      "linux_checkout": "IN_PROGRESS",
-      "provision": "PENDING",
-      "stage_build": "PENDING"
+      "linux_checkout": "PASS",
+      "provision": "PASS",
+      "stage_build": "FAILURE",
+      "artifact_upload": "PASS"
     }
   ],
-  "ci_artifact": null,
-  "first_error": null,
-  "build_attempts_observed": 0,
-  "original_directed_objects": "NOT_RUN",
-  "product_directed_objects": "NOT_RUN",
-  "full_kernel_link": "NOT_RUN",
-  "product_module_link": "NOT_RUN",
-  "modpost": "NOT_RUN",
-  "unresolved_symbol_inspection": "NOT_RUN",
+  "ci_artifact": {
+    "id": 15014753457,
+    "url": "https://github.com/k1moradi/swapz/actions/runs/45599641943/artifacts/15014753457",
+    "bytes": 40551,
+    "digest": "sha256:5df09c2da63c7568683aa2f04452535e7c8c314f9f159160115920811b76b208",
+    "downloaded_digest_verified": true,
+    "results_raw_stage_manifests_and_logs_inspected": true,
+    "kernel_and_object_binaries_in_artifact": false
+  },
+  "first_error": "product-module-link: ERROR: modpost: dm-swapz.ko: symbol 'swapz_ticket_put' undefined!",
+  "build_attempts_observed": 1,
+  "original_directed_objects": "PASS",
+  "product_directed_objects": "PASS",
+  "full_kernel_link": "PASS",
+  "product_module_link": "FAILURE",
+  "modpost": "FAILURE",
+  "unresolved_symbol_inspection": "PARTIAL_KERNEL_PASS_MODULE_MODPOST_FAIL_FINAL_MODULE_NM_NOT_RUN",
   "compiler_diagnostics": null,
-  "link_diagnostics": null,
+  "link_diagnostics": {
+    "actual_modpost_undefined_symbols": [
+      "swapz_ticket_put",
+      "swapz_mm_candidate_get",
+      "swapz_mm_unregister_provider",
+      "swapz_ticket_broker_put",
+      "swapz_mm_register_provider",
+      "swapz_ticket_view"
+    ],
+    "required_kernel_exports_absent_inventory": [
+      "swapz_crc32c_bytes",
+      "swapz_mm_candidate_get",
+      "swapz_mm_drop",
+      "swapz_mm_register_provider",
+      "swapz_mm_unregister_provider",
+      "swapz_ticket_broker_put",
+      "swapz_ticket_broker_try_get",
+      "swapz_ticket_claim_under_queue_lock",
+      "swapz_ticket_put",
+      "swapz_ticket_reserve",
+      "swapz_ticket_retain",
+      "swapz_ticket_seal"
+    ],
+    "required_kernel_exports_present": [
+      "dm_swapz_round088_clone_matches",
+      "dm_swapz_round090_route_live",
+      "dm_swapz_round090_selected_origin"
+    ],
+    "kernel_symbol_inventory": [
+      "dm_swapz_round088_clone_matches",
+      "dm_swapz_round090_route_live",
+      "dm_swapz_round090_selected_origin",
+      "swapz_crc32c_bytes",
+      "swapz_mm_candidate_get",
+      "swapz_mm_drop",
+      "swapz_mm_register_provider",
+      "swapz_mm_unregister_provider",
+      "swapz_ticket_broker_put",
+      "swapz_ticket_broker_try_get",
+      "swapz_ticket_claim_under_queue_lock",
+      "swapz_ticket_put",
+      "swapz_ticket_reserve",
+      "swapz_ticket_retain",
+      "swapz_ticket_seal"
+    ],
+    "recommendation": "Agent11 MM/broker and Agent3 target consumer: narrow guarded GPL exports or reviewed built-in boundary, single broker owner, provider/module hard refs, revocation, RCU grace and teardown drain. Do not blanket-export or duplicate broker. Derive full actual consumer import inventory including ticket_view in next authorized verifier."
+  },
   "vm_boot": false,
   "vm_build_for_qualification": false,
   "module_loaded": false,
@@ -281,5 +349,44 @@
   "import_active": false,
   "ordinary_map_bytes": 20,
   "ordinary_raw_4096": "COMPLETE_ORIGINAL_UNCOMPRESSED_4096",
-  "conclusion": "CURRENT_R090_COMPILE_LANE_PUBLISHED_CI_IN_PROGRESS_ORIGINAL_NOT_RUN"
+  "conclusion": "FAILURE_MODULE_MODPOST_SIX_UNDEFINED_ORIGINAL_6_PRODUCT_9_VMLINUX_PASS",
+  "first_error_phase": "product-module-link",
+  "child_exit": 2,
+  "original_directed_object_count": 6,
+  "original_object_blobs": {
+    "block/bio.o": "0aed09203301109202b2a1a39909a856557de490",
+    "drivers/md/dm.o": "728fe0353f3b945e9ba77c63692ccc41ac1829e9",
+    "mm/page_io.o": "558dc9dab371391ccd1ea13d2c7f15a18d135bcd",
+    "mm/round091-swapz/codec.o": "aab9fb9f916891a1d719875aa7f8a91ec742726f",
+    "mm/round091-swapz/zswap-original-ticket.o": "c6c6977cab5cbd171d90dd3672c3483897486e06",
+    "mm/zswap.o": "a998da2e0e674b58ed1e086c7efca70dc209c4b8"
+  },
+  "product_directed_object_count": 9,
+  "product_object_blobs": {
+    "authority.o": "61fb90127d0606e0efa70f420858082fae48a9e9",
+    "codec.o": "aab9fb9f916891a1d719875aa7f8a91ec742726f",
+    "dm-target.o": "67d72edd2fe64d70d4f8d6f93725c00c451b43f1",
+    "engine.o": "b3d42f1c18236bed973f997482e41e4b106794c2",
+    "zswap-import-decoder-owner.o": "0a18a68bff04b25c79b150b8cd5fa92b36620611",
+    "zswap-original-decode.o": "a11680c1283c5f1280d872e60271151143e3a862",
+    "zswap-original-decoder-bridge.o": "09d3c36f6fb5cd4148e0b235f7e356b8fa4dca98",
+    "zswap-original-extent.o": "6e57729542626eb0e98ac0ee15dadcc05706f4b6",
+    "zswap-original-storage.o": "fa3d9d61b6b993191a11877d2e34dca42b9827ce"
+  },
+  "additional_product_objects_compiled": [
+    "predictor.o",
+    "predictor-sse2.o",
+    "predictor-avx2.o",
+    "predictor-avx512.o"
+  ],
+  "product_composite_object_link": "PASS",
+  "final_ko_link": "NOT_REACHED",
+  "kernel_undefined_output_bytes": 0,
+  "kernel_sha256": "def4e04f36351fb5f639103c052c43c7bd29a6146bc12489510595161d1afa9f",
+  "module_symvers_sha256": "26ea28c680007771a754de951d198798d0ad53b16ecbcec74125a731ccbe693f",
+  "effective_config_sha256": "89127024a38ad68dd091c9dd5787bba097b85c8ce69d118cd147a8d7ff4c6d0b",
+  "compiler": "gcc (Ubuntu 13.3.0-6ubuntu2~24.04.1) 13.3.0",
+  "linker": "GNU ld (GNU Binutils for Ubuntu) 2.42",
+  "new_dispatch_this_visit": false,
+  "terminal_evidence_only": true
 }
