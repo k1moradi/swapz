@@ -24,6 +24,7 @@ ROOT = Path(__file__).resolve().parents[2]
 LINUX_PIN = "c339f4010dea8b0d754f84ace70cd1b089878ef8"
 ORIGINAL_ZSWAP_BLOB = "ae19e301fced7e357a4c7587dfdd6abb890b9163"
 ORIGINAL_BIO_BLOB = "b0fcc69de653524479e3b328aa29a37e97945b84"
+HISTORICAL_PRODUCT_COMMIT = "22fbdd0090e302bd17b3811145395ceb0a814a6c"
 SOURCE_FIXTURE = ROOT / "tests/runtime/native/fixtures/round069-original-zswap-stored-source.cfrag"
 BIO_FIXTURE = ROOT / "tests/runtime/native/fixtures/round069-original-bio-authority-joined.cfrag"
 JOIN_FIXTURE = ROOT / "tests/runtime/native/fixtures/round072-original-mm-bio-authority-decoder-joined.cfrag"
@@ -202,8 +203,16 @@ def self_test() -> None:
     final_source = (inherited.rstrip(b"\n") + b"\n\n" +
                     BIO_FIXTURE.read_bytes() + b"\n" +
                     JOIN_FIXTURE.read_bytes())
-    product = {name: (ROOT / "src/kernel" / name).read_bytes()
-               for name in PRODUCT_BLOBS}
+    # This self-test models the historical native stage, not the current host
+    # qualification. Read the same immutable product bytes as the R072 stager.
+    product = {}
+    for name, expected_blob in PRODUCT_BLOBS.items():
+        content = subprocess.check_output(
+            ["git", "--no-replace-objects", "-C", str(ROOT), "show",
+             HISTORICAL_PRODUCT_COMMIT + ":src/kernel/" + name], timeout=60)
+        ensure(git_blob(content) == expected_blob,
+               "historical-product-blob:" + name)
+        product[name] = content
     files = {"mm/zswap.c": final_source}
     files.update({"mm/swapz_round069/" + name: product[name]
                   for name in ("authority.c", "authority.h", "codec.c",
@@ -292,13 +301,25 @@ def self_test() -> None:
            "joined-final-file-postimage-sha256:mm/swapz_round069/authority.c",
            after={**files, "mm/swapz_round069/authority.c":
                   files["mm/swapz_round069/authority.c"] + b"bad"})
+    # Self-consistent replacement hashes cannot substitute altered bytes
+    # for the immutable historical product identity.
+    altered_product_path = "mm/swapz_round069/authority.c"
+    altered_product = files[altered_product_path] + b"bad"
+    reject("spoofed-product-hashes",
+           "joined-byte-identical-product-blob:" + altered_product_path,
+           after={**files, altered_product_path: altered_product},
+           joined={**manifest, "files": [
+               {**row, "sha256": sha256(altered_product),
+                "actual_product_git_blob": git_blob(altered_product)}
+               if row["path"] == altered_product_path else row
+               for row in manifest["files"]]})
     reject("joined-wrong-original-pin", "joined-original-pin",
            joined={**manifest, "original": "0" * 40})
     reject("post-before-final-stage",
            "joined-final-file-postimage-sha256:mm/zswap.c",
            after={**files, "mm/zswap.c": inherited})
     print("PASS round075_original_stage_manifest_order_self_test "
-          "baseline_pre=1 baseline_final=10 negatives=12 "
+          "baseline_pre=1 baseline_final=10 negatives=13 "
           "spoofed_both=REJECTED wrong_order=REJECTED "
           "inherited_and_final_hashes=INDEPENDENT AUTH0")
 

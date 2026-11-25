@@ -20547,3 +20547,8 @@ original codec, independent lease and complete integrity gates. An invalid
 previous source revision is not qualified by a docs-only fix: commit a real
 new test/source change with these applicable standards and qualify that exact
 SHA under strict GCC/Clang ASan+UBSan; do not relax repository policy.
+
+
+### Round090 — historical joined manifest self-test correction (Agent5)
+
+The Round075 pre/post manifest self-test must read immutable historical product commit `22fbdd0090e302bd17b3811145395ceb0a814a6c`, matching the historical R072 stager, and verify each original product Git blob before constructing its manifest. Keep actual current-source R069/R072 host regressions separate, retaining every executed C semantic negative. Preserve manifest hashes, paths, stage order and all 12 negatives; add a thirteenth negative for altered product bytes with self-consistent SHA256 and Git blob metadata, which must fail the immutable product pin. No native execution claim, VM dispatch, physical mutation or activation. Preserve complete testing standards byte prefix. AUTH=0; Phase A BLOCKED; handoff, forced RAW bypass and import OFF.
