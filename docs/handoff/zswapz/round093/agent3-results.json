@@ -1,17 +1,22 @@
 {
   "round": "093",
   "agent": 3,
-  "kind": "evidence-only-preopen",
-  "conclusion": "BLOCKED_NOT_ROUND_OPEN",
-  "task_commit": "5f3d9becd358f790c2d892d2f29e8e54a13f92c1",
+  "kind": "partial-source-correction",
+  "conclusion": "PARTIAL_SOURCE_PUBLISHED_CI_PENDING_NO_GO_LIVE",
+  "task_commit": "dc3d55c6c44482f23bb5d263211f2b747e9bee87",
   "engineering_baseline": "78f630c9d0a2d5bfb626f2dbdef172f6024cf5ea",
   "original_linux_pin": "c339f4010dea8b0d754f84ace70cd1b089878ef8",
   "publication": {
-    "main_observed": "78f630c9d0a2d5bfb626f2dbdef172f6024cf5ea",
-    "round_open": false,
-    "ref_update_attempted": false,
-    "source_writes": 0,
-    "evidence_main_verified": false
+    "round_open": true,
+    "source_commit": "ee9b6be46dc99a535439e3372b3004255b4d158d",
+    "source_parent": "6faf5ce07f189baed3ec02c50608057c75bdd3d6",
+    "source_main_verified": true,
+    "expected_head_nonforce": true,
+    "source_candidate_unpublished": [
+      "c69501d01c69c00eebaa217a1eb692f5c263bfc5",
+      "07b05da1239bbb0fc7459258ddeab17c28d9e3af"
+    ],
+    "changed_paths": 5
   },
   "r092": {
     "tested_commit": "f552b13b7368f2a0a11b85cc3cd69021aec8d68e",
@@ -77,13 +82,13 @@
   "correction": {
     "candidate": "c128ee3376fdcb8e632f068e488e97497bd4c5ef",
     "parent": "89c473fc45c100830f3b4599285f34e5c11bbaac",
-    "published": false,
-    "ci": "NOT_RUN",
+    "published": true,
+    "ci": "PENDING",
     "legacy_expected": 24,
     "typed_expected": 6,
     "preimages_match": true,
     "standards_append_bytes": 791,
-    "standards_reconciliation": "REQUIRED",
+    "standards_reconciliation": "EXACT_PREFIX_VERIFIED",
     "blobs": {
       "tests/runtime/native/zswap-origin-consumer-source-test.py": {
         "pre": "4ea611f463012b207e2e92b24f043e33e9f390f1",
@@ -93,7 +98,8 @@
         "pre": "ea53adb05e200bf4bb83cd60a92b7213e542a1bb",
         "post": "11e4c4d5674e8384f7dc911a4125283fcfc280ae"
       }
-    }
+    },
+    "published_commit": "ee9b6be46dc99a535439e3372b3004255b4d158d"
   },
   "frozen_dm_audit": {
     "blob": "420751247bdfd0be9c7271b180ee5cfcc7ca5d92",
@@ -123,5 +129,90 @@
   "loaded_tests": false,
   "branch_created": false,
   "pr_created": false,
-  "force_push": false
+  "force_push": false,
+  "preopen_publication": {
+    "main_observed": "78f630c9d0a2d5bfb626f2dbdef172f6024cf5ea",
+    "round_open": false,
+    "ref_update_attempted": false,
+    "source_writes": 0,
+    "evidence_main_verified": false
+  },
+  "r093": {
+    "source_commit": "ee9b6be46dc99a535439e3372b3004255b4d158d",
+    "source_parent": "6faf5ce07f189baed3ec02c50608057c75bdd3d6",
+    "source_blobs": {
+      "src/kernel/dm-target.c": "27d3af6f4146bc62adfb091e0d4f1fbc9f1dd285",
+      "tests/tools/round089-selected-dm-registry-verify.py": "b90de1506c183d09ad0abb69645ce4e42e54cfde",
+      "tests/runtime/native/zswap-origin-consumer-source-test.py": "c87a137116dc5bdb03107fec189bb83bb6390925",
+      "tests/runtime/native/zswap-origin-producer-consumer-abi-test.py": "11e4c4d5674e8384f7dc911a4125283fcfc280ae"
+    },
+    "standards": {
+      "parent_blob": "03173703a3b40e89b021c480df89f6d98118970a",
+      "parent_bytes": 1821291,
+      "postimage_blob": "36e90b28ccc4af155779558b2163c7bbee3401bc",
+      "postimage_bytes": 1822952,
+      "appended_bytes": 1661,
+      "complete_prefix_verified": true,
+      "raw_roundtrip_verified": true
+    },
+    "rollback": {
+      "implemented": true,
+      "actual_extracted_target_helpers": true,
+      "broker_cap_model_only": true,
+      "planned_mutants_per_compiler": [
+        "omit_rollback",
+        "revoke_newer_route"
+      ],
+      "compilers": [
+        "GCC",
+        "Clang"
+      ],
+      "actual_new_checks": null,
+      "actual_new_mutants": null
+    },
+    "local": {
+      "checkout": "BLOCKED",
+      "first_error": "git ls-remote exit128: Could not resolve host: github.com",
+      "compiler": "NOT_RUN",
+      "diff_check": "NOT_RUN"
+    },
+    "github_ci": {
+      "head_sha": "ee9b6be46dc99a535439e3372b3004255b4d158d",
+      "focused": {
+        "run_id": 45666285265,
+        "job_id": 139389189043,
+        "status": "QUEUED",
+        "conclusion": null,
+        "artifact": null,
+        "first_error": null
+      },
+      "product": {
+        "run_id": 45666284948,
+        "compile_jobs": [
+          139389188954,
+          139389189411
+        ],
+        "exact_c_jobs": [
+          139389189257,
+          139389189453
+        ],
+        "status": "QUEUED",
+        "conclusion": null
+      },
+      "prototype": {
+        "run_id": 45666285385,
+        "job_id": 139389189716,
+        "status": "IN_PROGRESS",
+        "conclusion": null,
+        "first_error": null
+      }
+    },
+    "blocker": "FROZEN_NO_EXTERNAL_INDEPENDENT_BROKER_BINDING_AND_ENTRANT_QUIESCENCE_CONTRACT; NO_AUTHORITATIVE_MAP_GENERATION_PUBLICATION_PENDING_FIFO_GC_SUSPEND",
+    "actual_target_setup": "NOT_IMPLEMENTED",
+    "actual_target_teardown": "NOT_QUALIFIED",
+    "generation_authority": "NOT_IMPLEMENTED",
+    "live_claim_gate": false,
+    "destination_credit": false,
+    "normal_kbuild_changed": false
+  }
 }
