@@ -1,0 +1,82 @@
+{
+  "round": "091",
+  "agent": 7,
+  "task_sha": "7fa5e3dc74c67330f341ae39c11dc3f8bff01187",
+  "frozen_baseline": "e8a3f08000f81dcc3b1bda74b407b9e523ed3bab",
+  "pinned_original_linux": "c339f4010dea8b0d754f84ace70cd1b089878ef8",
+  "status": "SOURCE_PUBLISHED_CI_QUEUED_NO_GO_LIVE",
+  "conclusion": "PENDING_CI",
+  "source_commit": "dfd2528e009e218325989a3b7f48ee638b15493a",
+  "source_parent": "e12088538d40212838bfed3bc820919a216b233f",
+  "source_blobs": {
+    "src/kernel/zswap-original-decoder-handles.c": "22b02e400e8f8a2c6ceffa9d17e03b92ab9cf2a3",
+    "src/kernel/zswap-original-decoder-handles.h": "0f103783aee10d18df5c502fdf553f7ac6a0035d",
+    "tests/runtime/native/fixtures/round091-original-decoder-handles.c": "dc9c5cbce90ca10a1cef70c8d05145681414e431",
+    "tests/tools/round091-original-decoder-handle-verify.py": "a054205e67225ec821c7528adc341d2adf9f93eb",
+    ".github/workflows/phase-a-round091-original-decoder-handle-host-noauth.yml": "5747ac575bfdfcd2146e4c5ae0a9ac7635c3f216",
+    "docs/testing_standards.md": "61c79fdcc329707b28c4b60af0168c4f12b415b6"
+  },
+  "standards": {
+    "parent_blob": "70214fff0eee9d652c9e32e91b02ba58e4a5d833",
+    "parent_utf8_bytes": 1798344,
+    "postimage_blob": "61c79fdcc329707b28c4b60af0168c4f12b415b6",
+    "postimage_utf8_bytes": 1799797,
+    "appended_utf8_bytes": 1453,
+    "exact_full_parent_prefix_verified": true,
+    "historical_known_trailing_space_correction": true
+  },
+  "implementation": {
+    "activation_macro": 0,
+    "slots": 64,
+    "handle_fields": [
+      "lifecycle_epoch",
+      "generation",
+      "slot_index",
+      "codec",
+      "version"
+    ],
+    "generation_nonwrapping": true,
+    "record_lease_separate_from_read": true,
+    "value_handle": true,
+    "old_void_callbacks_unchanged": true,
+    "module_epoch_restarts_across_unload": "UNQUALIFIED",
+    "module_provider_hardref": "NOT_IMPLEMENTED",
+    "production_kbuild": false
+  },
+  "ci": {
+    "run_id": 45599948708,
+    "job_id": 139155914486,
+    "status": "queued",
+    "conclusion": null,
+    "actual_gcc_compiled_executed": null,
+    "actual_clang_compiled_executed": null,
+    "actual_checks": null,
+    "first_error": null,
+    "artifact_id": null,
+    "manual_dispatch": false
+  },
+  "fixture_planned": {
+    "churn_cycles": 24000,
+    "parallel_churn_workers": 4,
+    "parallel_read_retire_workers": 4,
+    "codecs": [
+      1,
+      2
+    ],
+    "ceilings": [
+      3568,
+      4095
+    ],
+    "executed": false
+  },
+  "local_pinned_compile": "NOT_RUN_GITHUB_DNS",
+  "native": "NOT_RUN",
+  "vm": false,
+  "physical": false,
+  "source_mapped_authenticated": 0,
+  "phase_a": "BLOCKED",
+  "direct_compressed_handoff": false,
+  "forced_raw_bypass": false,
+  "import_active": false,
+  "first_error": null
+}

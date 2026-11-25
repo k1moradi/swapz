@@ -1,0 +1,31 @@
+# Round091 Agent7 — generation-safe reusable original decoder value handles
+
+**Disposition at evidence snapshot: SOURCE_PUBLISHED_CI_QUEUED / NO_GO_LIVE.** Task [7fa5e3dc74c67330f341ae39c11dc3f8bff01187](https://github.com/k1moradi/swapz/commit/7fa5e3dc74c67330f341ae39c11dc3f8bff01187); frozen product `e8a3f08000f81dcc3b1bda74b407b9e523ed3bab`, original Linux `c339f4010dea8b0d754f84ace70cd1b089878ef8`. Agent7 scope only; no peer source/dependency, production wiring or activation.
+
+## Exact source and safety-preserving publication
+
+**Source** [dfd2528e009e218325989a3b7f48ee638b15493a](https://github.com/k1moradi/swapz/commit/dfd2528e009e218325989a3b7f48ee638b15493a), single immediate parent `e12088538d40212838bfed3bc820919a216b233f`, published by fresh expected-HEAD, one-parent nonforce main FF. New separate `zswap-original-decoder-handles.{c,h}`, new fixture/verifier/host workflow and meaningful same-commit append-only testing standard. Original frozen `void *` bridge C/H and storage, authority, DM, broker and MM files untouched; no normal kernel Makefile wiring.
+
+Source Git blobs:
+- `src/kernel/zswap-original-decoder-handles.c`: `22b02e400e8f8a2c6ceffa9d17e03b92ab9cf2a3`
+- `src/kernel/zswap-original-decoder-handles.h`: `0f103783aee10d18df5c502fdf553f7ac6a0035d`
+- `tests/runtime/native/fixtures/round091-original-decoder-handles.c`: `dc9c5cbce90ca10a1cef70c8d05145681414e431`
+- `tests/tools/round091-original-decoder-handle-verify.py`: `a054205e67225ec821c7528adc341d2adf9f93eb`
+- `.github/workflows/phase-a-round091-original-decoder-handle-host-noauth.yml`: `5747ac575bfdfcd2146e4c5ae0a9ac7635c3f216`
+- `docs/testing_standards.md`: `61c79fdcc329707b28c4b60af0168c4f12b415b6`
+
+**Complete testing-standards byte preservation:** re-fetched whole parent Git blob `70214fff0eee9d652c9e32e91b02ba58e4a5d833`, independently recreated same blob SHA (not truncated contents); measured 1,798,344 UTF-8 bytes. Published after-blob is 1,799,797 UTF-8 bytes, exact 1,453-byte suffix append, every parent byte preserved literally. Also confirmed complete historical frozen prefix `3bc8692b5f71a5d31c9caba1b858dde8a28ab1f6` after the one already-published historical trailing-space correction; no historical content removed. The initial strict frozen raw prefix comparison deliberately blocked until the preexisting one-byte correction was accounted for.
+
+## Actual candidate ownership, isolation and boundaries
+
+Value handle `{ lifecycle_epoch: u64, generation: u64, slot_index: u32, codec: u8, version: u8 }`; **never a pointer or integer-to-pointer cast**. Two retained original codec owners and a contiguous fixed pool of 64 reusable record slots; each get retains a real original-decoder owner lease, while each admitted read retains a separate transient lease before releasing the short in-memory owner lock. Put consumes the record lease and frees its slot; the read lease remains valid through actual native decompression, CRC+SHA, and exact 4096-byte output, despite a concurrent record put. Successful decoded output is published only after successful temporary lease release and before decrementing the owner's active-read close barrier. No hot read allocations or per-page module get/put.
+
+Lifecycle epochs are assigned from a monotone process/module-image atomic sequence with fail-closed exhaustion; per-slot generations increment without wrap and permanently saturate at maximum. Wrong slot, old generation/epoch, owner/codec mismatch or invalid bounds fail closed. Close declines with `-EBUSY` while any record/read is retained; caller must externally quiesce concurrent entrants before successful teardown. Source authenticity, actual module hard refs and module-unload/reload epoch uniqueness are **NOT** established; the value API is isolated host guarded (`SWAPZ_ORIGINAL_DECODER_HANDLES_ACTIVE=0`), not admitted to frozen storage callbacks. Existing 64 once-only `void *` tokens remain unchanged/fail-closed and are not silently reused.
+
+## Qualification snapshot and first cause
+
+New *automatic*, exact-SHA [run 45599948708 / job 139155914486](https://github.com/k1moradi/swapz/actions/runs/45599948708/job/139155914486): **QUEUED**, conclusion `pending` at inspection. Actual original GCC/Clang compiled/executed counts **not verified (0 observed)**, no CI artifact confirmed, first error **none observed**. This is **not a PASS**. Local exact pinned original checkout/compiler NOT_RUN due `git ls-remote` DNS failure (`Could not resolve host: github.com`); static source inspection is not compiler evidence. No manual/duplicate workflow dispatch or periodic monitoring.
+
+CI source-linked fixture will compile the **actual pinned original LZ4/LZO1X objects** with only previously authorized isolated noDict staged corrections (compressor postimage `63eb4be2e23caf770649af18f6a7b2b82d79a5e7`, decompressor postimage `8ca9e57ea0d03918e85e4aabcf472fe906b6bc7f`) under GCC C2x and Clang C23 strict ASan+UBSan. The fixture requires 24,000 record get/put churn operations (8,000 four-thread + 16,000 serial), two original codecs, M3568 and experimental M4095, stale/foreign generation/epoch, duplicate put, saturating generation, wrong CRC/SHA/dictionary/codec, short input, output unchanged on failures, four concurrent read/retire outcomes and close refusal. These are **fixture-required, not yet executed counts**. Prior R090 118930+118930 independent bridge host PASS remains separately accepted and is not repeated or counted toward this qualification.
+
+**NO-GO for live adoption** pending exact CI, production provider module lifetime proof, module-reload epoch uniqueness, generation-bearing storage sidecar callback ABI, selected-DM source authentication, kernel build/link and actual durable lower completion/upper ACK. No new VM, boot, physical, privileged, loaded swap or upstream/production edits. AUTH=0, Phase A BLOCKED, compressed handoff / forced RAW bypass / import OFF.
