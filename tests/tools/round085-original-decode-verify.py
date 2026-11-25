@@ -225,6 +225,23 @@ def record_execution(state, execution, expected):
     return None
 
 
+def expect_control(state, label, execution, expected, evidence):
+    """Retain the actual unexpected first error, not the wrapper exception."""
+    failure = runtime_failure(execution, None)
+    state[label + "_observed"] = failure
+    retain_private(evidence, "clang-" + label.replace("_", "-") + ".stderr", execution.stderr)
+    if failure != expected:
+        state["first_error"] = failure or {
+            "kind": "missing_expected_control_failure", "location": "unavailable",
+            "exit": execution.returncode,
+        }
+        raise RuntimeError("unexpected control result: " + label)
+    state[label] = failure
+    print(f"PASS clang {label} reproduced {failure['sanitizer']} "
+          f"{failure['location']} exit={failure['exit']} (historical source FAIL)",
+          file=sys.stderr)
+
+
 def retain_private(evidence, name, value):
     # Never print the raw child diagnostic. Exclusive private artifact file.
     with os.fdopen(os.open(evidence / name, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600), "w") as stream:
@@ -267,6 +284,17 @@ def diagnostic_regression():
             require((directory / (compiler + ".stderr")).stat().st_mode & 0o777 == 0o600 and
                     (directory / (compiler + ".stderr")).read_text() == actual.stderr,
                     f"{compiler} private diagnostic retention")
+            # Exercise unexpected-control diagnostic precedence with a real
+            # sanitizer child, not a fabricated matching error.
+            try:
+                expect_control(state, "unexpected_" + compiler, actual,
+                               {"kind": "unexpected_execution"}, directory)
+            except RuntimeError:
+                require(state["first_error"] == failure and
+                        state["unexpected_" + compiler + "_observed"] == failure,
+                        f"{compiler} unexpected control lost actual sanitizer")
+            else:
+                raise RuntimeError("unexpected control accepted")
             print(f"PASS {compiler} diagnostic regression: real UBSan, ordinary failure, exact kill, mixed failure, private retention", file=sys.stderr)
 
 
@@ -308,6 +336,30 @@ def staged_bytes(pristine, commit, dirty, anchor=LZ4_BEFORE, expected=LZ4_POSTIM
     return staged
 
 
+LZ4_DECODER_SOURCE = "lib/lz4/lz4_decompress.c"
+LZ4_DECODER_POSTIMAGE = "8ca9e57ea0d03918e85e4aabcf472fe906b6bc7f"
+LZ4_DECODER_BEFORE = b"\tconst BYTE * const dictEnd = (const BYTE *)dictStart + dictSize;\n"
+LZ4_DECODER_AFTER = (b"\t/* Host-test-only: no external dictionary arithmetic in noDict mode. */\n"
+                     b"\tconst BYTE * const dictEnd = dict == noDict ? dictStart :\n"
+                     b"\t\t(const BYTE *)dictStart + dictSize;\n")
+
+
+def staged_decoder_bytes(pristine, commit, dirty, anchor=LZ4_DECODER_BEFORE,
+                         expected=LZ4_DECODER_POSTIMAGE):
+    require(commit == PIN, "decoder staging wrong pin")
+    require(not dirty, "decoder staging unexpected dirty path")
+    require(git_blob(pristine) == ORIGINAL[LZ4_DECODER_SOURCE], "decoder staging pristine blob")
+    require(pristine.count(anchor) == 1 and anchor == LZ4_DECODER_BEFORE,
+            "decoder staging unique anchor")
+    staged = pristine.replace(anchor, LZ4_DECODER_AFTER, 1)
+    require(git_blob(staged) == expected and expected == LZ4_DECODER_POSTIMAGE,
+            "decoder staging postimage")
+    require(staged.count(LZ4_DECODER_AFTER) == 1 and
+            staged.replace(LZ4_DECODER_AFTER, anchor, 1) == pristine,
+            "decoder staging exact one-hunk diff")
+    return staged
+
+
 def stage_plan(linux, helpers, report):
     checked = helpers["checked"]
     commit = checked(["git", "-C", str(linux), "rev-parse", "HEAD"], "original commit")
@@ -335,8 +387,32 @@ def stage_plan(linux, helpers, report):
                          "postimage_sha256": hashlib.sha256(staged).hexdigest(),
                          "negatives_rejected": len(negatives), "mode": "isolated copy; original never edited",
                          "scope": "noDict only; prefix/external modes unchanged, unqualified"}
-    print("PASS staging five negative guards, exact reversible two-hunk postimage", file=sys.stderr)
-    return staged
+    pristine_decoder = (linux / LZ4_DECODER_SOURCE).read_bytes()
+    decoder = staged_decoder_bytes(pristine_decoder, commit, dirty)
+    decoder_negatives = (
+        ("decoder staging wrong pin", {"commit": "0" * 40}),
+        ("decoder staging unexpected dirty path", {"dirty": "?? unrelated"}),
+        ("decoder staging unique anchor", {"anchor": b"missing decoder anchor"}),
+        ("decoder staging postimage", {"expected": "0" * 40}),
+    )
+    for expected, changes in decoder_negatives:
+        try:
+            staged_decoder_bytes(pristine_decoder, **{"commit": commit, "dirty": dirty, **changes})
+        except RuntimeError as error:
+            require(str(error) == expected, "wrong decoder stage-negative first cause")
+        else:
+            raise RuntimeError("decoder stage negative accepted")
+        require((linux / LZ4_DECODER_SOURCE).read_bytes() == pristine_decoder,
+                "negative changed original decoder")
+    report["staging"]["decoder"] = {
+        "pristine": ORIGINAL[LZ4_DECODER_SOURCE], "postimage": LZ4_DECODER_POSTIMAGE,
+        "postimage_sha256": hashlib.sha256(decoder).hexdigest(),
+        "negatives_rejected": len(decoder_negatives),
+        "scope": "noDict only; other modes unchanged, unqualified",
+    }
+    print("PASS staging nine negative guards, exact reversible compressor and decoder postimages",
+          file=sys.stderr)
+    return staged, decoder
 
 
 # Actual pinned compressor comparison, not a substitute for typed decoder tests.
@@ -397,37 +473,51 @@ def corpus_control(compiler, standard, linux, workspace, helpers, includes, fixe
     run = helpers["run_command"]
     name = Path(compiler).name
     shim = workspace / "shim"
+    upstream_includes = ["-I", str(shim), "-DCONFIG_64BIT=1"]
     pristine_object = workspace / "pristine-lz4-compress.o"
+    pristine_decoder = workspace / "pristine-lz4-decompress.o"
     probe = workspace / "corpus-probe.c"
     probe.write_text(CORPUS_PROBE)
     probe_object = probe.with_suffix(".o")
     state["stage"] = "compile-pristine-control"
     compile_object(compiler, "-std=gnu11", linux / LZ4_SOURCE, pristine_object,
-                   ["-I", str(shim), "-DCONFIG_64BIT=1"], original=True)
+                   upstream_includes, original=True)
+    compile_object(compiler, "-std=gnu11", linux / LZ4_DECODER_SOURCE, pristine_decoder,
+                   upstream_includes, original=True)
     compile_object(compiler, standard, probe, probe_object, includes)
-    def invoke(label, compressor):
+
+    def invoke(label, compressor, decoder):
         executable = workspace / label
         corpus = workspace / (label + ".bytes")
         state["stage"] = "link-" + label
         checked([compiler, "-fsanitize=address,undefined", "-fno-pie", "-no-pie",
-                 str(probe_object), str(compressor), str(fixed[3]), "-o", str(executable)], label)
+                 str(probe_object), str(compressor), str(decoder), "-o", str(executable)], label)
         state["stage"] = "execute-" + label
         return run([str(executable), str(corpus)], label, timeout=30), corpus
 
-    actual, pristine_corpus = invoke("pristine-control", pristine_object)
-    failure = runtime_failure(actual, None)
+    def expected_sanitizer(category, location):
+        return {"kind": "sanitizer", "sanitizer": "UBSan", "category": category,
+                "location": location, "exit": 1}
+
+    def accepted(label, compressor, decoder):
+        actual, corpus = invoke(label, compressor, decoder)
+        failure = runtime_failure(actual, None)
+        if failure is not None or actual.stdout:
+            state["first_error"] = failure or {
+                "kind": "unexpected_corpus_stdout", "location": "unavailable", "exit": actual.returncode}
+            retain_private(evidence, name + "-" + label + ".stderr", actual.stderr)
+            raise RuntimeError("corpus rejected: " + label)
+        return corpus.read_bytes()
+
     if name == "clang":
-        retain_private(evidence, "clang-pristine-control.stderr", actual.stderr)
-        if failure is not None:
-            state["pristine_control_observed"] = failure
-        require(failure is not None and failure["kind"] == "sanitizer" and
-                failure["sanitizer"] == "UBSan" and failure["category"] == "applying zero offset to null pointer" and
-                failure["location"] == "lz4_compress.c:192:42" and failure["exit"] == 1,
-                "pristine Clang control did not reproduce exact first error")
-        state["pristine_control"] = failure
-        print("PASS clang pristine control reproduced UBSan lz4_compress.c:192:42 exit=1 (pristine FAIL)", file=sys.stderr)
-        # Recreate the exact earlier failed staged postimage, not a synthetic
-        # pointer probe. Preserve its separate failure before qualifying v2.
+        actual, _ = invoke("pristine-control", pristine_object, pristine_decoder)
+        expect_control(state, "pristine_control", actual,
+                       expected_sanitizer("applying zero offset to null pointer", "lz4_compress.c:192:42"),
+                       evidence)
+        # Exact R088 first-stage compressor and unchanged original decoder,
+        # linked to the same actual typed fixture and unmutated candidate.
+        # Interleaved corpus readback is deliberately NOT the reproduction
+        # harness for this historical compressor failure.
         prior_directory = workspace / "prior-stage"
         prior_directory.mkdir()
         prior_source = prior_directory / "lz4_compress.c"
@@ -441,32 +531,38 @@ def corpus_control(compiler, standard, linux, workspace, helpers, includes, fixe
         prior_object = workspace / "prior-lz4-compress.o"
         state["stage"] = "compile-prior-staged-control"
         compile_object(compiler, "-std=gnu11", prior_source, prior_object,
-                       ["-I", str(shim), "-DCONFIG_64BIT=1"], original=True)
-        actual, _ = invoke("prior-staged-control", prior_object)
-        retain_private(evidence, "clang-prior-staged-control.stderr", actual.stderr)
-        failure = runtime_failure(actual, None)
-        state["prior_staged_control_observed"] = failure
-        require(failure is not None and failure["kind"] == "sanitizer" and
-                failure["sanitizer"] == "UBSan" and failure["category"] == "addition of unsigned offset" and
-                failure["location"] == "lz4_compress.c:297:9" and failure["exit"] == 1,
-                "prior staged Clang control did not reproduce exact second error")
-        state["prior_staged_control"] = failure
-        print("PASS clang prior staged control reproduced UBSan lz4_compress.c:297:9 exit=1 (prior stage FAIL)", file=sys.stderr)
-        return
-    if failure is not None or actual.stdout:
-        state["first_error"] = failure or {"kind": "unexpected_corpus_stdout", "exit": actual.returncode}
-        retain_private(evidence, "gcc-pristine-control.stderr", actual.stderr)
-        raise RuntimeError("pristine GCC corpus rejected")
-    corrected, staged_corpus = invoke("staged-corpus", fixed[2])
-    failure = runtime_failure(corrected, None)
-    if failure is not None or corrected.stdout:
-        state["first_error"] = failure or {"kind": "unexpected_corpus_stdout", "exit": corrected.returncode}
-        retain_private(evidence, "gcc-staged-corpus.stderr", corrected.stderr)
-        raise RuntimeError("staged GCC corpus rejected")
-    pristine = pristine_corpus.read_bytes()
-    staged = staged_corpus.read_bytes()
+                       upstream_includes, original=True)
+        prior_candidate = workspace / "case-00.c"
+        prior_candidate.write_bytes(CANDIDATE.read_bytes())
+        prior_candidate_object = prior_candidate.with_suffix(".o")
+        compile_object(compiler, standard, prior_candidate, prior_candidate_object, includes)
+        prior_executable = workspace / "prior-staged-control"
+        state["stage"] = "link-prior-staged-control"
+        checked([compiler, "-fsanitize=address,undefined", "-fno-pie", "-no-pie",
+                 str(prior_candidate_object), *(str(path) for path in
+                 (fixed[:2] + [prior_object, pristine_decoder] + fixed[4:])),
+                 "-pthread", "-lcrypto", "-o", str(prior_executable)], "prior typed fixture")
+        state["stage"] = "execute-prior-staged-control"
+        actual = run([str(prior_executable)], "prior typed fixture", timeout=30)
+        expect_control(state, "prior_staged_control", actual,
+                       expected_sanitizer("addition of unsigned offset", "lz4_compress.c:297:9"),
+                       evidence)
+        # Reproduce the independent decoder failure with the prior R088
+        # first-stage compressor and the same interleaved corpus probe.
+        actual, _ = invoke("pristine-decoder-control", prior_object, pristine_decoder)
+        expect_control(state, "pristine_decoder_control", actual,
+                       expected_sanitizer("applying zero offset to null pointer", "lz4_decompress.c:89:55"),
+                       evidence)
+        staged = accepted("staged-corpus", fixed[2], fixed[3])
+        pristine = (workspace.parent / "gcc" / "pristine-control.bytes").read_bytes()
+    else:
+        pristine = accepted("pristine-control", pristine_object, pristine_decoder)
+        require(accepted("staged-compressor-pristine-decoder", fixed[2], pristine_decoder) == pristine,
+                "staged compressor/pristine decoder byte mismatch")
+        require(accepted("pristine-compressor-staged-decoder", pristine_object, fixed[3]) == pristine,
+                "pristine compressor/staged decoder byte mismatch")
+        staged = accepted("staged-corpus", fixed[2], fixed[3])
     require(pristine == staged and len(pristine) > 0, "pristine/staged compressed byte mismatch")
-    # Validate framing and count every real stream, rather than infer from file size.
     offset = count = 0
     while offset < len(pristine):
         require(offset + 4 <= len(pristine), "truncated corpus length")
@@ -477,11 +573,15 @@ def corpus_control(compiler, standard, linux, workspace, helpers, includes, fixe
     require(count == 4098, "corpus count")
     state["corpus_comparison"] = {"streams": count, "bytes": len(pristine),
                                   "sha256": hashlib.sha256(pristine).hexdigest(),
-                                  "byte_exact": True, "pristine_decoder_readback": True}
-    print(f"PASS gcc pristine/staged byte-identical streams={count} bytes={len(pristine)} sha256={state['corpus_comparison']['sha256']}", file=sys.stderr)
+                                  "byte_exact": True, "staged_decoder_readback": True,
+                                  "pristine_decoder_readback": name == "gcc",
+                                  "reference": "GCC pristine compressor and decoder",
+                                  "cross_read_both_directions": name == "gcc"}
+    print(f"PASS {name} pristine/staged byte-identical streams={count} bytes={len(pristine)} "
+          f"sha256={state['corpus_comparison']['sha256']}", file=sys.stderr)
 
 
-def execute(compiler: str, linux: Path, workspace: Path, helpers: dict, state: dict, evidence: Path, staged_source: Path) -> None:
+def execute(compiler: str, linux: Path, workspace: Path, helpers: dict, state: dict, evidence: Path, staged_source: Path, staged_decoder: Path) -> None:
     state["stage"] = "compiler-standard"
     standard = helpers["compiler_standard"](compiler)
     state["standard"] = standard
@@ -516,10 +616,10 @@ def execute(compiler: str, linux: Path, workspace: Path, helpers: dict, state: d
                      "lib/lz4/lz4_compress.c", "lib/lz4/lz4_decompress.c"):
         state["stage"] = "compile-original-" + Path(relative).name
         obj = workspace / (Path(relative).stem + ".o")
-        compile_object(compiler, "-std=gnu11", staged_source if relative == LZ4_SOURCE else linux / relative, obj,
+        source = {LZ4_SOURCE: staged_source, LZ4_DECODER_SOURCE: staged_decoder}.get(relative, linux / relative)
+        compile_object(compiler, "-std=gnu11", source, obj,
                        ["-I", str(shim), "-DCONFIG_64BIT=1"], original=True)
         fixed.append(obj)
-    corpus_control(compiler, standard, linux, workspace, helpers, includes, fixed, state, evidence)
     adapter = workspace / "original-compressor.c"
     adapter.write_text(COMPRESS_ADAPTER)
     for source in (ROOT / "src/kernel/codec.c", ROOT / "src/kernel/zswap-import-decoder-owner.c",
@@ -528,6 +628,7 @@ def execute(compiler: str, linux: Path, workspace: Path, helpers: dict, state: d
         obj = workspace / (source.stem + ".o")
         compile_object(compiler, standard, source, obj, includes)
         fixed.append(obj)
+    corpus_control(compiler, standard, linux, workspace, helpers, includes, fixed, state, evidence)
     original = CANDIDATE.read_text()
     cases = [("baseline", original)] + [(name, original.replace(old, new, 1)) for name, old, new in MUTANTS]
     profiles = state["profiles"]
@@ -595,7 +696,7 @@ def main() -> int:
     try:
         linux = args.linux_root.resolve()
         helpers = verify_inputs(linux)
-        staged = stage_plan(linux, helpers, report)
+        staged, decoder = stage_plan(linux, helpers, report)
         if args.preflight_only:
             print(f"PASS original/product whole blobs={len(ORIGINAL) + len(PRODUCT)}; "
                   f"candidate unique semantic anchors={len(MUTANTS)}")
@@ -609,18 +710,25 @@ def main() -> int:
             staged_directory.mkdir()
             staged_source = staged_directory / "lz4_compress.c"
             staged_source.write_bytes(staged)
+            staged_decoder = staged_directory / "lz4_decompress.c"
+            staged_decoder.write_bytes(decoder)
+            require(git_blob(staged_decoder.read_bytes()) == LZ4_DECODER_POSTIMAGE, "staged decoder disk postimage mismatch")
             (staged_directory / "lz4defs.h").write_bytes((linux / "lib/lz4/lz4defs.h").read_bytes())
             require(git_blob(staged_source.read_bytes()) == LZ4_POSTIMAGE, "staged disk postimage mismatch")
             require(git_blob((staged_directory / "lz4defs.h").read_bytes()) == ORIGINAL["lib/lz4/lz4defs.h"], "staged header mismatch")
             retain_private(evidence, "lz4-compressor.diff", "".join(difflib.unified_diff((linux / LZ4_SOURCE).read_text().splitlines(keepends=True), staged.decode().splitlines(keepends=True), fromfile=LZ4_SOURCE, tofile=LZ4_SOURCE)))
+            retain_private(evidence, "lz4-decompressor.diff", "".join(difflib.unified_diff(
+                (linux / LZ4_DECODER_SOURCE).read_text().splitlines(keepends=True),
+                decoder.decode().splitlines(keepends=True), fromfile=LZ4_DECODER_SOURCE,
+                tofile=LZ4_DECODER_SOURCE)))
             for name in ("gcc", "clang"):
                 active = name
                 compiler = shutil.which(name)
                 require(compiler is not None, f"missing compiler {name}")
                 workspace = Path(temporary) / name
                 workspace.mkdir()
-                execute(compiler, linux, workspace, helpers, results[name], evidence, staged_source)
-        report["status"] = "PASS_STAGED_HOST_ONLY_PRISTINE_AND_PRIOR_STAGE_CLANG_FAIL"
+                execute(compiler, linux, workspace, helpers, results[name], evidence, staged_source, staged_decoder)
+        report["status"] = "PASS_STAGED_HOST_ONLY_THREE_HISTORICAL_CLANG_FAILURES"
         return 0
     except (RuntimeError, OSError, ValueError, subprocess.TimeoutExpired) as error:
         state = results[active] if active else None

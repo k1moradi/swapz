@@ -20407,3 +20407,24 @@ Clang original exit1 and corrected GCC/Clang exit0, not qualification.
 A further actual failure is failure; no blind/unchanged reruns. Original
 checkout remains pristine; no upstream/production adoption, no new
 VM or physical work, AUTH0 Phase A BLOCKED all activation OFF.
+
+### Round089 Agent7 — isolated noDict decompressor and first-cause controls
+
+R088 exact source 61a1c0cc1de812d3a8240a42d6860992099871f9 failed
+Clang in prior-stage corpus readback, original lz4_decompress.c:89:55,
+UBSan applying zero offset to null pointer. The R089 lease adds only that
+original file, pristine 3a2cd9acada4a09ef70a344090d48167c46088a1,
+postimage 8ca9e57ea0d03918e85e4aabcf472fe906b6bc7f. In noDict, dictEnd is never
+consumed; select dictStart without pointer arithmetic. Preserve prefix and
+external dictionary expressions, including their unqualified empty cases.
+Keep both exact compressor stages and three separate historical failure
+controls: pristine compressor, prior compressor with actual typed fixture,
+and pristine decoder with interleaved corpus readback. Unexpected control
+failure retains the real first diagnostic in JSON and console; regression
+uses a real sanitizer child. Require strict GCC and Clang baseline and 19
+executed semantic kills each, exact 4098-stream GCC pristine/staged
+cross-read both ways and Clang staged byte equality against GCC pristine.
+Require nine staging negative guards, exact reversible postimages, unchanged
+pristine checkout, no sanitizer relaxation, no new VM or physical tests.
+Staging is host-only; prefix/external modes not qualified, no production or
+upstream adoption; AUTH0, Phase A BLOCKED, all activation OFF.
