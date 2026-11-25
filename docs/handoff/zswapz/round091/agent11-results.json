@@ -1,17 +1,17 @@
 {
   "round": "091",
   "agent": 11,
-  "decision": "IN_PROGRESS_HOST_ONLY_UNAPPLIED_EVICTION_PATCH_NO_GO_LIVE",
+  "decision": "VERIFIER_CORRECTED_CI_QUEUED_UNAPPLIED_EVICTION_NO_GO_LIVE",
   "assignment": "7fa5e3dc74c67330f341ae39c11dc3f8bff01187",
   "baseline": "e8a3f08000f81dcc3b1bda74b407b9e523ed3bab",
-  "source_commit": "55bc0ba3bf8ed5aa9db5d75222c1515de007b2e6",
-  "source_parent": "a44c7d7c0561294471924527bbd30bebea1bd8ac",
+  "source_commit": "0e7241a9fe26f8f71d30fc4b6f9d4866e507641c",
+  "source_parent": "663b07a96fa7f9d76ecb533d41f614ff811144ee",
   "original_linux_pin": "c339f4010dea8b0d754f84ace70cd1b089878ef8",
   "source_files": {
     "src/kernel/zswap-original-ticket.h": "0630f9e4fad26458ed0778ca6ae040150e28f078",
     "src/kernel/zswap-original-ticket.c": "7ba56c5ee602853c8d0717f23aad9efc69d111ea",
     "tests/tools/round091-original-mm-eviction.patch": "94bb74549c54a614406b71f28a9e8e8c22527d6a",
-    "tests/tools/round091-original-mm-eviction-verify.py": "5804503c3eba4aa821e1eed6a800b36d2016f6c4",
+    "tests/tools/round091-original-mm-eviction-verify.py": "d956b3c68e6011ff042d2dcfa73abbecff6be053",
     "tests/runtime/native/fixtures/round091-original-mm-eviction.c": "dea76da591f4080a496f443ef69de8f2fb9cc1fc",
     ".github/workflows/phase-a-round091-original-mm-eviction-host-noauth.yml": "78577e9ea8471530d49a3ad31fdfc4cf9976cab2"
   },
@@ -51,9 +51,10 @@
     "status": "EXPECTED_NOT_EXECUTED"
   },
   "workflow": {
-    "run_id": 45600660268,
-    "job_id": 139158396211,
-    "url": "https://github.com/k1moradi/swapz/actions/runs/45600660268/job/139158396211",
+    "run_id": 45604143022,
+    "job_id": 139170470716,
+    "url": "https://github.com/k1moradi/swapz/actions/runs/45604143022/job/139170470716",
+    "exact_source": "0e7241a9fe26f8f71d30fc4b6f9d4866e507641c",
     "status": "queued",
     "conclusion": null,
     "artifact": null,
@@ -81,5 +82,43 @@
     "A3 ordered head storage reservation/claim and A5 cancel capacity not integrated",
     "Provider/module external quiescence and independent target clone proof unproven",
     "Real reclaim hit/CPU/slab and durable ACK unqualified"
-  ]
+  ],
+  "implementation_commit": "55bc0ba3bf8ed5aa9db5d75222c1515de007b2e6",
+  "implementation_parent": "a44c7d7c0561294471924527bbd30bebea1bd8ac",
+  "initial_ci": {
+    "run_id": 45600660268,
+    "job_id": 139158396211,
+    "url": "https://github.com/k1moradi/swapz/actions/runs/45600660268/job/139158396211",
+    "head_sha": "55bc0ba3bf8ed5aa9db5d75222c1515de007b2e6",
+    "status": "completed",
+    "conclusion": "failure",
+    "first_error": "R091_AGENT11_FIRST_ERROR original function anchor swapz_mm_candidate_get",
+    "first_error_scope": "VERIFIER_SOURCE_ANCHOR_PRE_COMPILATION",
+    "pinned_stages": "PASS_BEFORE_EXTRACTOR",
+    "gcc_checks": "NOT_RUN",
+    "clang_checks": "NOT_RUN",
+    "artifact": {
+      "id": 15016631025,
+      "bytes": 381,
+      "url": "https://github.com/k1moradi/swapz/actions/runs/45600660268/artifacts/15016631025",
+      "digest": "sha256:24975d8f5be798e87bb7b2b3918e1878614ae224b70078dda2b235cae6dbc067",
+      "archive_independently_extracted": false
+    }
+  },
+  "corrected_source": {
+    "commit": "0e7241a9fe26f8f71d30fc4b6f9d4866e507641c",
+    "parent": "663b07a96fa7f9d76ecb533d41f614ff811144ee",
+    "verifier_blob": "d956b3c68e6011ff042d2dcfa73abbecff6be053",
+    "prior_verifier_blob": "5804503c3eba4aa821e1eed6a800b36d2016f6c4",
+    "changes": [
+      "exported int candidate_get exact-function extraction",
+      "complete testing standards meaningful appendix"
+    ],
+    "standards_parent_blob": "ce804ef66a7bb107d340c52881c4db7b78480391",
+    "standards_after_blob": "1053bf44ee8234aa27dafba2c9083765ca3db92f",
+    "standards_complete_parent_prefix_preserved": true,
+    "automatic_new_run": true
+  },
+  "first_error": "R091_AGENT11_FIRST_ERROR original function anchor swapz_mm_candidate_get",
+  "first_error_scope": "VERIFIER_SOURCE_ANCHOR_PRE_COMPILATION"
 }
