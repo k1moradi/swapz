@@ -92,5 +92,23 @@
       45650794159
     ],
     "status": "queued"
+  },
+  "agent1_terminal_reconciliation": {
+    "status": "PASS_RECOVERED_R073_R084_HOST_ONLY",
+    "source": "78f630c9d0a2d5bfb626f2dbdef172f6024cf5ea",
+    "r084_job": 139334417684,
+    "r084_checks_per_compiler": 23106,
+    "r084_mutants_per_compiler": 24,
+    "r084_artifact": 15041095930,
+    "r084_sha256": "b9232ad6dae994d2a255eaeabba37a4f7fbf880454e16964308ed6eb1e7768b5",
+    "r073_job": 139334416354,
+    "r073_baseline_per_compiler": 16,
+    "r073_mutants_per_compiler": 10,
+    "inherited_authority_mutants_per_compiler": 14,
+    "owner_mutants_per_compiler": 2,
+    "late_lease_mutants_per_compiler": 4,
+    "forged_verdict_negatives": 10,
+    "value_adapter_candidate": "f1a66ae3cdb84c4e33ced613c56928feb06c6dfe",
+    "value_adapter": "not published; independent read lease test missing"
   }
 }

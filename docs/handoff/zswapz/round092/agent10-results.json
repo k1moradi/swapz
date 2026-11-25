@@ -116,5 +116,26 @@
     "physical_mutation": false,
     "vm_boot": false
   },
-  "recovered_source": "78f630c9d0a2d5bfb626f2dbdef172f6024cf5ea"
+  "recovered_source": "78f630c9d0a2d5bfb626f2dbdef172f6024cf5ea",
+  "agent1_terminal_reconciliation": {
+    "status": "PASS_FROZEN_R091_PLUS_SCRATCH_EXPORTS",
+    "source": "78f630c9d0a2d5bfb626f2dbdef172f6024cf5ea",
+    "job": 139334415662,
+    "artifact": 15040891418,
+    "artifact_sha256": "5264be33109a22240b795a208ed8f073ed6792ce8f0acf64af595f30e4c16ea0",
+    "kernel_sha256": "24d1d0b5ebb00f2a4ae960b123e382f4bfeca3523efb9f99eed27a2abb6bf499",
+    "module_sha256": "b6862732906ac7addbf1d983bd2af492e7a996686d545efca8d0199f9ac14c6a",
+    "kernel_bytes": 12557384,
+    "module_bytes": 401856,
+    "original_objects": 6,
+    "product_objects": 10,
+    "full_kernel": "PASS",
+    "modpost": "PASS",
+    "final_ko": "PASS",
+    "actual_r092_overlay": "NOT_RUN",
+    "required_exports": 12,
+    "forbidden_exports_absent": 5,
+    "module_imports": 98,
+    "undefined_kernel_symbols": 0
+  }
 }

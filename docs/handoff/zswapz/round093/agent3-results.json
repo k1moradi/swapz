@@ -1,0 +1,127 @@
+{
+  "round": "093",
+  "agent": 3,
+  "kind": "evidence-only-preopen",
+  "conclusion": "BLOCKED_NOT_ROUND_OPEN",
+  "task_commit": "5f3d9becd358f790c2d892d2f29e8e54a13f92c1",
+  "engineering_baseline": "78f630c9d0a2d5bfb626f2dbdef172f6024cf5ea",
+  "original_linux_pin": "c339f4010dea8b0d754f84ace70cd1b089878ef8",
+  "publication": {
+    "main_observed": "78f630c9d0a2d5bfb626f2dbdef172f6024cf5ea",
+    "round_open": false,
+    "ref_update_attempted": false,
+    "source_writes": 0,
+    "evidence_main_verified": false
+  },
+  "r092": {
+    "tested_commit": "f552b13b7368f2a0a11b85cc3cd69021aec8d68e",
+    "parent": "62e1ee2dde6ddbdb79ca79fb1c64db31ac6e9b2a",
+    "workflow_census": {
+      "total": 28,
+      "success": 26,
+      "failure": 2
+    },
+    "focused": {
+      "run_id": 45649082619,
+      "job_id": 139328267231,
+      "attempt": 1,
+      "conclusion": "SUCCESS",
+      "first_error": null,
+      "artifact": {
+        "id": 15038948080,
+        "bytes": 656,
+        "sha256": "dc950493ef300ade70697562f7deadf564ca3b80ce4965d87bb1cef328cf73f3",
+        "provider_digest_matches_prior_verified": true,
+        "new_download": false
+      },
+      "per_compiler": {
+        "compilers": [
+          "GCC",
+          "Clang"
+        ],
+        "checks": 12708,
+        "claims": 5,
+        "refusals": 3,
+        "typed_reads": 2,
+        "modeled_terminal_owners": 5,
+        "mutants": [
+          "ignore_claim_refusal",
+          "leak_canceled_credit",
+          "fallback_after_commit_failure",
+          "leak_read_pin"
+        ]
+      }
+    },
+    "product": {
+      "run_id": 45649082729,
+      "compile_jobs": [
+        139328267854,
+        139328267963
+      ],
+      "compile_conclusion": "SUCCESS",
+      "exact_c_jobs": [
+        139328268080,
+        139328268337
+      ],
+      "exact_c_conclusion": "FAILURE"
+    },
+    "prototype": {
+      "run_id": 45649082633,
+      "job_id": 139328267409,
+      "conclusion": "FAILURE"
+    },
+    "first_error": "tests/runtime/native/zswap-origin-producer-consumer-abi-test.py:237 AssertionError: 30 != 24",
+    "terminal_report_candidate": "e30c8432b9f53884641c5e5a61b56c488c26fdbc",
+    "issue": "https://github.com/k1moradi/swapz/issues/210#issuecomment-7167561367"
+  },
+  "correction": {
+    "candidate": "c128ee3376fdcb8e632f068e488e97497bd4c5ef",
+    "parent": "89c473fc45c100830f3b4599285f34e5c11bbaac",
+    "published": false,
+    "ci": "NOT_RUN",
+    "legacy_expected": 24,
+    "typed_expected": 6,
+    "preimages_match": true,
+    "standards_append_bytes": 791,
+    "standards_reconciliation": "REQUIRED",
+    "blobs": {
+      "tests/runtime/native/zswap-origin-consumer-source-test.py": {
+        "pre": "4ea611f463012b207e2e92b24f043e33e9f390f1",
+        "post": "c87a137116dc5bdb03107fec189bb83bb6390925"
+      },
+      "tests/runtime/native/zswap-origin-producer-consumer-abi-test.py": {
+        "pre": "ea53adb05e200bf4bb83cd60a92b7213e542a1bb",
+        "post": "11e4c4d5674e8384f7dc911a4125283fcfc280ae"
+      }
+    }
+  },
+  "frozen_dm_audit": {
+    "blob": "420751247bdfd0be9c7271b180ee5cfcc7ca5d92",
+    "bind_caller": false,
+    "storage_setup": false,
+    "decoder_setup": false,
+    "destination_credit": false,
+    "ordered_claim_gate": false,
+    "route_install_rollback": "MISSING_EXPLICIT_ROLLBACK_ON_LATE_REFUSAL_LATENT_NOT_EXECUTED",
+    "native_tests": "NOT_RUN",
+    "generation_authority": "UNQUALIFIED",
+    "external_entrant_lifetime": "UNQUALIFIED"
+  },
+  "AUTH": 0,
+  "source_mapped_authenticated": false,
+  "phase_a": "BLOCKED",
+  "direct_compressed_handoff": false,
+  "forced_raw_bypass": false,
+  "import_active": 0,
+  "actual_native_dm": false,
+  "actual_lower_durable_io": false,
+  "actual_upper_ack": false,
+  "new_ci_dispatches": 0,
+  "vm_tests": false,
+  "physical_mutation": false,
+  "privileged_tests": false,
+  "loaded_tests": false,
+  "branch_created": false,
+  "pr_created": false,
+  "force_push": false
+}

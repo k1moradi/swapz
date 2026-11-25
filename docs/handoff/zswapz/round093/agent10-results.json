@@ -1,0 +1,241 @@
+{
+  "agent": 10,
+  "kind": "original-x86-compile-link-only",
+  "tested_commit": "78f630c9d0a2d5bfb626f2dbdef172f6024cf5ea",
+  "source_parent": "89c473fc45c100830f3b4599285f34e5c11bbaac",
+  "recovered_candidate": "693fb97b1b5b0e20179e9ec21e7645bc765a3984",
+  "frozen_product": "2499405464110e6a97f054db5527de54b8aafb3a",
+  "linux_pin": "c339f4010dea8b0d754f84ace70cd1b089878ef8",
+  "workflow_url": "https://github.com/k1moradi/swapz/actions/runs/45650794048",
+  "run_id": 45650794048,
+  "jobs": [
+    {
+      "id": 139334415662,
+      "url": "https://github.com/k1moradi/swapz/actions/runs/45650794048/job/139334415662",
+      "conclusion": "success",
+      "attempt": 1
+    }
+  ],
+  "conclusion": "SUCCESS",
+  "scope": "Frozen R091 plus isolated scratch eight guarded GPL exports; not raw R092",
+  "first_error": null,
+  "compiler": "gcc 13.3.0 Ubuntu 24.04",
+  "linker": "GNU ld 2.42",
+  "raw_patch_count": 4,
+  "raw_postimage_count": 8,
+  "product_input_count": 44,
+  "scratch_postimage_count": 7,
+  "completed_steps": 27,
+  "original_directed_objects": 6,
+  "product_directed_objects": 10,
+  "full_kernel_link": true,
+  "modpost": true,
+  "final_ko": true,
+  "build_attempts": 1,
+  "new_build_attempts": 0,
+  "duplicate_dispatches": 0,
+  "artifact": {
+    "id": 15040891418,
+    "url": "https://github.com/k1moradi/swapz/actions/runs/45650794048/artifacts/15040891418",
+    "zip_bytes": 3026920,
+    "entries": 32,
+    "crc_check": "PASS",
+    "sha256": {
+      "artifact.zip": "5264be33109a22240b795a208ed8f073ed6792ce8f0acf64af595f30e4c16ea0",
+      "vmlinux": "24d1d0b5ebb00f2a4ae960b123e382f4bfeca3523efb9f99eed27a2abb6bf499",
+      "dm-swapz.ko": "b6862732906ac7addbf1d983bd2af492e7a996686d545efca8d0199f9ac14c6a",
+      "effective.config": "89127024a38ad68dd091c9dd5787bba097b85c8ce69d118cd147a8d7ff4c6d0b",
+      "kernel-Module.symvers": "18c1e29f56252ca1298ae4f324242ecc2536e87c6afe03b49fef5af26aa118d2",
+      "results.json": "10514f78d1d9613a9158e986ac814ce3e4ed7d70b99bee7f1b74e1631fb6a313",
+      "raw-stage-manifest.json": "fc6cd1dfab61a2cad3cec79c9538a47fa15c36cbb7b447189367f57fd86dd9db",
+      "stage-manifest.json": "b18ae8aac65048e8901749fbc0d1fe590036ecc625d0ea5a3f3aa88861433aae"
+    },
+    "binary_bytes": {
+      "vmlinux": 12557384,
+      "dm-swapz.ko": 401856
+    },
+    "four_retained_file_hashes_match_manifest": true,
+    "directed_object_bytes_retained": false
+  },
+  "symbols": {
+    "module_imports": 98,
+    "missing_export_rows": 0,
+    "vmlinux_undefined": 0,
+    "required_gpl_exports": 12,
+    "forbidden_exports_absent": 5,
+    "isolated_scratch_exports": [
+      "swapz_mm_candidate_get",
+      "swapz_mm_register_provider",
+      "swapz_mm_unregister_provider",
+      "swapz_ticket_put",
+      "swapz_ticket_view",
+      "swapz_ticket_broker_put",
+      "swapz_ticket_broker_try_get",
+      "swapz_ticket_claim_under_queue_lock"
+    ],
+    "actual_boundary_imports": [
+      "dm_swapz_round090_route_live",
+      "dm_swapz_round090_selected_origin",
+      "swapz_mm_candidate_get",
+      "swapz_mm_register_provider",
+      "swapz_mm_unregister_provider",
+      "swapz_ticket_broker_put",
+      "swapz_ticket_put",
+      "swapz_ticket_view"
+    ]
+  },
+  "source_mapped_authenticated": 0,
+  "phase_a": "BLOCKED",
+  "direct_handoff": false,
+  "forced_raw_bypass": false,
+  "import_active": false,
+  "vm_build": false,
+  "vm_boot": false,
+  "module_loaded": false,
+  "actual_physical_io": false,
+  "runtime_kunit": "NOT_RUN",
+  "mutation_count": null,
+  "round093_open": false,
+  "publication": {
+    "status": "PREPARED_EVIDENCE_ONLY_NOT_ON_MAIN_AT_PREPARATION",
+    "reason": "Agent1 prepared sole-parent publication pending; no competing ref update",
+    "agent1_prepared_commit": "5f3d9becd358f790c2d892d2f29e8e54a13f92c1"
+  },
+  "next_raw_composition": {
+    "status": "MANIFEST_ONLY_NOT_RUN_AGENT1_AUTHORIZATION_REQUIRED",
+    "review_snapshot": "78f630c9d0a2d5bfb626f2dbdef172f6024cf5ea",
+    "linux_pin": "c339f4010dea8b0d754f84ace70cd1b089878ef8",
+    "ordered_patch_pins": [
+      {
+        "path": "tests/tools/round088-original-dm-selected-clone.patch",
+        "blob": "5c8587c3d8205fc1ab346011c092601f2113a45a"
+      },
+      {
+        "path": "tests/tools/round089-original-mm-carrier.patch",
+        "blob": "059d1bf29cf4990e22a2f608d5d552abeec3a8d1"
+      },
+      {
+        "path": "tests/tools/round090-original-mm-lifetime.patch",
+        "blob": "337f7ff29e72d955251de0c54a9349f20c2586ec"
+      },
+      {
+        "path": "tests/tools/round091-original-mm-eviction.patch",
+        "blob": "94bb74549c54a614406b71f28a9e8e8c22527d6a"
+      },
+      {
+        "path": "tests/tools/round092-original-module-boundary.patch",
+        "blob": "62db468c14f23b59e7adaae65a11dcb9969f02b3"
+      }
+    ],
+    "r092_overlay_images": {
+      "mm/zswap.c": {
+        "preimage": "a9a0201c29f177a37ec95a652e79e4ea2008167a",
+        "expected_postimage": "98a8a6a66858204b61875ad9b2e8cfb0ecf8980a"
+      },
+      "include/linux/swapz_mm_carrier.h": {
+        "preimage": "a516cab0813a5ecb70054bf488d536b05dcd4c52",
+        "expected_postimage": "da1e7a367f4f5d16dc6854f33064631251acb153"
+      },
+      "src/kernel/zswap-original-ticket.c": {
+        "preimage": "7ba56c5ee602853c8d0717f23aad9efc69d111ea",
+        "expected_postimage": "634b38e52b3b1e6493d6b10a694065ccc4b698ad"
+      },
+      "src/kernel/zswap-original-ticket.h": {
+        "preimage": "0630f9e4fad26458ed0778ca6ae040150e28f078",
+        "expected_postimage": "6afac83a0655e532ce1ef9b8f290a367e8aabfce"
+      }
+    },
+    "current_product_blob_inventory": {
+      "src/kernel/Makefile": "ed6e19ae28a84a4a3e92117812adc445d5c2e8e5",
+      "src/kernel/VERSION": "ce022e35e5c13bea0de8a9fae9c9d6f3f0dad904",
+      "src/kernel/authority.c": "14fe52cf4cf28f18568d3bf2b6ced449c9c182a3",
+      "src/kernel/authority.h": "c63741157141b2aa9a15de1e9182e27435fc0a3e",
+      "src/kernel/codec.c": "d920dcaac6f2b7de1334d4133770bd649719c66d",
+      "src/kernel/codec.h": "e89d316b9cf49f82df0b77648c1be1731607987d",
+      "src/kernel/dm-target.c": "420751247bdfd0be9c7271b180ee5cfcc7ca5d92",
+      "src/kernel/engine.c": "e7c50c3e78449157439fba9c69e5d23b1c317f4e",
+      "src/kernel/engine.h": "0e505915fb2e1578b4c1cee36e32be8a30f3745f",
+      "src/kernel/flush-qual.h": "095d3ef7665ba268f28c2235fbb1c8e26cb8b7d1",
+      "src/kernel/gc-cost.h": "2d317f1274ef36bdde157ff72acc26a9f7ae1e0e",
+      "src/kernel/gc-recovery-policy.h": "26cddb997ad9f4b5b15616eba7cc0e26aaeb58eb",
+      "src/kernel/lane-gap.h": "e97870b218c7c9b338b43323fff77181be877649",
+      "src/kernel/predictor-avx2.c": "0fa5746f187b2fa017782448e052f7a2c39bfc8f",
+      "src/kernel/predictor-avx512.c": "a9892552f516ec47157c4aacdd4f3aca994192b2",
+      "src/kernel/predictor-internal.h": "6b49267dac50d92e58a950ca80541d2928de6d23",
+      "src/kernel/predictor-neon.c": "98554e4c601ee542973bc680a7549c6ad45f073e",
+      "src/kernel/predictor-route.h": "ea14590608d7a92b4fb379aca26864467e158bac",
+      "src/kernel/predictor-shuffle.h": "d0ebd77af875c6d34757eb9b14080934af32b08a",
+      "src/kernel/predictor-sse2.c": "0993632a2e5f6ff7fe66cd828e7cd88ff8c577d6",
+      "src/kernel/predictor.c": "b1ce85ef0fb6a20d720dfba562d3a9a3588f127c",
+      "src/kernel/predictor.h": "54cce4ad8bcb63ee724001fff4831948ec8e8de5",
+      "src/kernel/preparation-slots.h": "aaa6a0420bda460dbcc42072d74f57bab9fcbbfd",
+      "src/kernel/superblock.h": "ba73845837b4c604b01d72f50f05ae8d4378eddd",
+      "src/kernel/swapz-build-info.h": "51ce0bc3a5947bb6ff660e4e5bb63aa5477cb226",
+      "src/kernel/window-policy.h": "cb14486a3ef4324761cde8c54b22c5f0e5d89494",
+      "src/kernel/zswap-direct-handoff.h": "864abf9a12071b98f5c157a44f4ed0c04d4a594c",
+      "src/kernel/zswap-import-admission.h": "a411da35437cbf9a43c88083d830dc9280f108e8",
+      "src/kernel/zswap-import-codec.h": "0d888fe4c74115ab2388f1df1dc0b86ae4b9b6c6",
+      "src/kernel/zswap-import-decoder-owner.c": "8e0c8f4d2085af7f2e17df412f3a1af654063571",
+      "src/kernel/zswap-import-decoder-owner.h": "e1b4b903567070e2307f7d05f8e48c14e0bb3768",
+      "src/kernel/zswap-original-decode.c": "eb1cd7f90d5edade9640e1ffe9dac3c8fe774644",
+      "src/kernel/zswap-original-decode.h": "a247d1aaf9865de71f97cd980be806b8d8c7c20e",
+      "src/kernel/zswap-original-decoder-bridge.c": "9324a581e27bad62d4e2d9c90192f6ad8b96faca",
+      "src/kernel/zswap-original-decoder-bridge.h": "507b25debe0ca7b30b57ed6a350dab4868dced51",
+      "src/kernel/zswap-original-decoder-handles.c": "c01c056fdd7f9f8aa68c7083a9e4e3ca2cdc8d6d",
+      "src/kernel/zswap-original-decoder-handles.h": "0f103783aee10d18df5c502fdf553f7ac6a0035d",
+      "src/kernel/zswap-original-extent.c": "c6c5af281a636447126e1a8b67484d954158a300",
+      "src/kernel/zswap-original-extent.h": "34572d01fffe1b276c2d023822266eda29a2137e",
+      "src/kernel/zswap-original-storage.c": "1f9030030f5d0fb3b06d0b0a159dd8aa6818f8dd",
+      "src/kernel/zswap-original-storage.h": "38924c3931419a93a7783de9ba622024a5e2e65c",
+      "src/kernel/zswap-original-ticket.c": "7ba56c5ee602853c8d0717f23aad9efc69d111ea",
+      "src/kernel/zswap-original-ticket.h": "0630f9e4fad26458ed0778ca6ae040150e28f078"
+    },
+    "actual_raw_r092_overlay": true,
+    "reapply_old_scratch_exports": false,
+    "config": {
+      "arch": "x86_64",
+      "seed": "allnoconfig",
+      "enable": [
+        "64BIT",
+        "X86_64",
+        "MMU",
+        "BLOCK",
+        "SWAP",
+        "ZSWAP",
+        "MD",
+        "BLK_DEV_DM",
+        "MODULES",
+        "CRYPTO_LZO",
+        "CRYPTO_LZ4",
+        "CRYPTO_SHA256",
+        "CRYPTO_LIB_SHA256",
+        "CRYPTO_CRC32C",
+        "LZ4_COMPRESS",
+        "LZ4_DECOMPRESS",
+        "LZO_DECOMPRESS",
+        "CRC32",
+        "SWAPZ_ORIGINAL_MM_CARRIER_TEST"
+      ],
+      "disable": [
+        "ZSWAP_DEFAULT_ON",
+        "ZSWAP_SHRINKER_DEFAULT_ON",
+        "KUNIT",
+        "MODULE_SIG",
+        "DEBUG_INFO",
+        "DEBUG_INFO_BTF"
+      ],
+      "olddefconfig": true,
+      "compiler": "gcc",
+      "kcflags": "-DSWAPZ_ORIGINAL_TICKET_TEST -DSWAPZ_ROUND088_SELECTED_DM_CANDIDATE_TEST -DSWAPZ_ROUND089_ORIGINAL_DM_CORE_TEST -DSWAPZ_ROUND090_SELECTED_DM_COMPOSITION_TEST -DSWAPZ_ORIGINAL_EXTENT_TEST -DSWAPZ_ORIGINAL_STORAGE_TEST -DSWAPZ_SHARED_ORIGINAL_TEST -DSWAPZ_ROUND066_IMPORT_DISK_TEST -DSWAPZ_ROUND067_IMPORT_DISK_PAYLOAD_TEST -Werror",
+      "prior_effective_config_sha256": "89127024a38ad68dd091c9dd5787bba097b85c8ce69d118cd147a8d7ff4c6d0b",
+      "prior_hash_is_reference_not_future_assertion": true
+    },
+    "stage_requirements": [
+      "Stage unmodified product broker C/H under src/kernel beside the pristine Linux four-patch composition before applying the mixed-path R092 overlay; verify every preimage and expected postimage; check reverse and diff, then copy patched broker C/H into the sole built-in scratch glue and share the identical patched header with the product module.",
+      "Do not append the old scratch exports to the actual R092 overlay; preserve exactly the eight intended guarded exports and existing four DM exports; inventory actual module undefined symbols rather than assuming eight imports.",
+      "Retain scratch-only Kconfig/Kbuild wiring and necessary product object list, pin all input and scratch bytes; ensure identical config guard and header layout, no duplicate broker, no fabricated symvers or stubs.",
+      "Agent1 must separately authorize fresh actual R092 build. No second build under current lease; no source writes or activation."
+    ]
+  },
+  "round": "093"
+}

@@ -1,0 +1,77 @@
+{
+  "round": "093",
+  "agent": 11,
+  "kind": "carryover-host-only-and-read-only-lifetime-audit",
+  "status": "BLOCKED",
+  "publication_gate": "PREPARED_NOT_ROUND_OPEN",
+  "main_observed": "78f630c9d0a2d5bfb626f2dbdef172f6024cf5ea",
+  "prepared_round_commit": "5f3d9becd358f790c2d892d2f29e8e54a13f92c1",
+  "tested_commit": "8141a4a0fdfff0385df3898e937a8a388b833a83",
+  "tested_parent": "6072006b0b3c625a30cf6875d71ce0b748058b4e",
+  "original_linux": "c339f4010dea8b0d754f84ace70cd1b089878ef8",
+  "overlay_blob": "62db468c14f23b59e7adaae65a11dcb9969f02b3",
+  "consumer_blob": "420751247bdfd0be9c7271b180ee5cfcc7ca5d92",
+  "workflow_url": "https://github.com/k1moradi/swapz/actions/runs/45649587401",
+  "jobs": [
+    {
+      "id": 139330113237,
+      "run_id": 45649587401,
+      "status": "completed",
+      "conclusion": "success",
+      "qualification": "PASS_HOST_ONLY",
+      "first_error": null
+    }
+  ],
+  "conclusion": "PASS_HOST_ONLY",
+  "first_error": null,
+  "compilers": [
+    {
+      "name": "GCC",
+      "checks": 39,
+      "modeled_lifecycle_races": 2,
+      "semantic_mutants_killed": 5
+    },
+    {
+      "name": "Clang",
+      "checks": 39,
+      "modeled_lifecycle_races": 2,
+      "semantic_mutants_killed": 5
+    }
+  ],
+  "mutants": [
+    "no_callback_pin",
+    "no_candidate_pin",
+    "no_carrier_put",
+    "no_retain_pin",
+    "no_ticket_put"
+  ],
+  "host_sizes_bytes": {
+    "carrier": 4192,
+    "ref": 40,
+    "broker": 160
+  },
+  "artifact": {
+    "id": 15040755897,
+    "size_bytes": 4890,
+    "sha256": "cca60a4cb532be77f620837b0c692b324d52598d273122044c94570d9e06327e",
+    "verification": "fresh metadata and prior extraction report; no fresh archive extraction claimed"
+  },
+  "native_kernel": "NOT_RUN",
+  "actual_overlay_modpost": "NOT_RUN",
+  "native_unload_rcu": "NOT_RUN",
+  "broker_storage_external_entrant_quiescence": "UNQUALIFIED",
+  "native_handoff_close_revoke": "UNQUALIFIED",
+  "source_writes": 0,
+  "new_ci_dispatches": 0,
+  "source_mapped_authenticated": false,
+  "auth": 0,
+  "phase_a": "BLOCKED",
+  "compressed_handoff": false,
+  "forced_raw_bypass": false,
+  "import": false,
+  "actual_physical_io": false,
+  "vm": false,
+  "publication": "evidence-only candidate; no main ref move authorized",
+  "prior_r092_comment": "https://github.com/k1moradi/swapz/issues/210#issuecomment-7168061854",
+  "prior_r093_comment": "https://github.com/k1moradi/swapz/issues/211#issuecomment-7168066706"
+}

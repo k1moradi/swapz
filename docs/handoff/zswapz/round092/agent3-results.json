@@ -150,5 +150,20 @@
     "prior_evidence_ref": "1734217be46a98ce2d9b69cdfec8069454fb6164",
     "physical_mutation": false,
     "vm_boot": false
+  },
+  "agent1_terminal_reconciliation": {
+    "status": "PASS_HOST_ONLY",
+    "source": "f552b13b7368f2a0a11b85cc3cd69021aec8d68e",
+    "census": {
+      "success": 26,
+      "failure": 2
+    },
+    "job": 139328267231,
+    "checks_per_compiler": 12708,
+    "claims_per_compiler": 5,
+    "mutants_per_compiler": 4,
+    "outer_regression": "30 != 24 in zswap-origin-producer-consumer-abi-test.py:237",
+    "terminal_candidate": "e30c8432b9f53884641c5e5a61b56c488c26fdbc",
+    "correction_candidate": "c128ee3376fdcb8e632f068e488e97497bd4c5ef"
   }
 }

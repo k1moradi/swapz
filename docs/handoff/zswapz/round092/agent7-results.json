@@ -72,5 +72,26 @@
     "prior_evidence_ref": "78f630c9d0a2d5bfb626f2dbdef172f6024cf5ea",
     "physical_mutation": false,
     "vm_boot": false
+  },
+  "agent1_terminal_reconciliation": {
+    "status": "FAIL_VERIFIER_CLASSIFIER_GCC_BASELINE_PASS",
+    "source": "78f630c9d0a2d5bfb626f2dbdef172f6024cf5ea",
+    "job": 139334415882,
+    "artifact": 15040620932,
+    "artifact_sha256": "834cdebc32747fb492bce12e10b03788e4c291602c1edd241b655624388701a4",
+    "gcc_checks": 126445,
+    "churn": 24000,
+    "handle_bytes": 24,
+    "slot_bytes": 32,
+    "owner_bytes": 2304,
+    "live_records": 64,
+    "mutants_compiled": 1,
+    "mutants_executed": 1,
+    "credited_kills": 0,
+    "clang": "NOT_RUN",
+    "actual_stderr": "FIRST_ERROR round091-agent7 wrong_epoch line=61",
+    "exit": 77,
+    "first_error": "unexpected_execution inherited classifier",
+    "correction_candidate": "98cc3ff984fb1535ede34f15a29ffc2cf134968c"
   }
 }

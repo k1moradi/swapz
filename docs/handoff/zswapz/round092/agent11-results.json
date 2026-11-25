@@ -123,5 +123,24 @@
     "prior_evidence_ref": "78f630c9d0a2d5bfb626f2dbdef172f6024cf5ea",
     "physical_mutation": false,
     "vm_boot": false
+  },
+  "agent1_terminal_reconciliation": {
+    "status": "PASS_HOST_ONLY",
+    "source": "8141a4a0fdfff0385df3898e937a8a388b833a83",
+    "job": 139330113237,
+    "artifact": 15040755897,
+    "artifact_sha256": "cca60a4cb532be77f620837b0c692b324d52598d273122044c94570d9e06327e",
+    "checks_per_compiler": 39,
+    "mutants_per_compiler": 5,
+    "races_per_compiler": 2,
+    "carrier_bytes": 4192,
+    "ref_bytes": 40,
+    "broker_bytes": 160,
+    "raw_r092_link": "NOT_RUN",
+    "external_owner_quiescence": "UNQUALIFIED",
+    "census": {
+      "success": 9,
+      "failure": 1
+    }
   }
 }

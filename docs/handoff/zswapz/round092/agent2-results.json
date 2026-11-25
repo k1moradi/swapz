@@ -192,5 +192,17 @@
     "prior_evidence_ref": "9fc48f02bb9deadf3b6d0f0b898c4af1c9913bc5",
     "physical_mutation": false,
     "vm_boot": false
+  },
+  "agent1_terminal_reconciliation": {
+    "status": "PASS_FOCUSED_OFFLINE",
+    "source": "62e1ee2dde6ddbdb79ca79fb1c64db31ac6e9b2a",
+    "census": {
+      "success": 8,
+      "failure": 2
+    },
+    "job": 139327642033,
+    "negative_cases": 38,
+    "mandatory_project_goals": "PASS",
+    "debug": "historical publication_output_failure unexpected swap identity; A2 demonstrated synthetic SIGPIPE 5/5, historical cause not yet proven"
   }
 }

@@ -1,0 +1,107 @@
+{
+  "round": "093",
+  "agent": 7,
+  "kind": "existing-source-host-qualification-and-read-only-scale-audit",
+  "tested_commit": "78f630c9d0a2d5bfb626f2dbdef172f6024cf5ea",
+  "tested_parent": "89c473fc45c100830f3b4599285f34e5c11bbaac",
+  "linux_pin": "c339f4010dea8b0d754f84ace70cd1b089878ef8",
+  "conclusion": "failure",
+  "ci": {
+    "run_id": 45650793984,
+    "job_id": 139334415882,
+    "attempt": 1,
+    "workflow_url": "https://github.com/k1moradi/swapz/actions/runs/45650793984/job/139334415882",
+    "preflight": "PASS",
+    "staging_compressor_negatives": 5,
+    "staging_decoder_negatives": 4,
+    "gcc": {
+      "standard": "-std=c2x",
+      "baseline": "PASS",
+      "raw_compiler_status": "NOT_RUN",
+      "checks": 126445,
+      "churn": 24000,
+      "codecs": 2,
+      "races": {
+        "successful": 2,
+        "declined": 2
+      },
+      "mutants_compiled": 1,
+      "mutants_executed": 1,
+      "mutants_credited": 0,
+      "mutants_planned": 3,
+      "stage": "mutant-execute-epoch"
+    },
+    "clang": "NOT_RUN",
+    "artifact": {
+      "id": 15040620932,
+      "bytes": 2168,
+      "sha256": "834cdebc32747fb492bce12e10b03788e4c291602c1edd241b655624388701a4",
+      "provider_digest_verified": true,
+      "independent_download_this_turn": false,
+      "prior_download_report": "https://github.com/k1moradi/swapz/issues/210#issuecomment-7168080467"
+    }
+  },
+  "first_error": {
+    "compiler": "gcc",
+    "stage": "mutant-execute-epoch",
+    "exit": 77,
+    "kind": "unexpected_execution",
+    "location": "unavailable",
+    "root_cause": "R091 verifier lines 154–158 calls R085 runtime_failure(execution,None), which rejects intended exit 77 even if named assertion matches. Prior artifact report: FIRST_ERROR round091-agent7 wrong_epoch line=61."
+  },
+  "source_blobs": {
+    "handles_c": "c01c056fdd7f9f8aa68c7083a9e4e3ca2cdc8d6d",
+    "handles_h": "0f103783aee10d18df5c502fdf553f7ac6a0035d",
+    "fixture": "d8539d75276dd7a6bf719d702367799a6ef132ce",
+    "verifier": "a5129a5abf20beba3e635301162c530e0f27dfe9",
+    "standards": "ec97e4f1ff4b505718b28195edc32dbb6c2941d8"
+  },
+  "correction": {
+    "existing_candidate": "98cc3ff984fb1535ede34f15a29ffc2cf134968c",
+    "verifier_blob": "038d95a450f6489e72bb9cb71da5b01e98ec8e66",
+    "status": "UNPUBLISHED_UNTESTED",
+    "action": "After ROUND_OPEN reconcile verifier-only delta against fresh head, preserve current standards prefix, add classifier acceptance/refusal regression. No unchanged repeat."
+  },
+  "capacity": {
+    "measured_host": {
+      "handle_bytes": 24,
+      "slot_bytes": 32,
+      "owner_bytes": 2304,
+      "simultaneous_records": 64,
+      "logical_bytes": 262144
+    },
+    "scale_design": "UNIMPLEMENTED_UNMEASURED",
+    "per_record_extra_bytes": [
+      8,
+      16,
+      24
+    ],
+    "example_logical_pages": 27080192,
+    "example_extra_bytes": [
+      216641536,
+      433283072,
+      649924608
+    ],
+    "native_module_lifetime": "UNPROVEN",
+    "external_entrant_quiescence": "REQUIRED",
+    "cross_reload_epoch": "UNPROVEN"
+  },
+  "publication": {
+    "observed_main": "78f630c9d0a2d5bfb626f2dbdef172f6024cf5ea",
+    "prepared_round093": "5f3d9becd358f790c2d892d2f29e8e54a13f92c1",
+    "round_open": false,
+    "source_writes": 0,
+    "ref_updates": 0,
+    "ci_dispatches": 0,
+    "evidence_main": "BLOCKED",
+    "reason": "Agent1 prepared commit not published; do not invalidate its parent"
+  },
+  "source_mapped_authenticated": 0,
+  "phase_a": "BLOCKED",
+  "direct_compressed_handoff": false,
+  "forced_raw_bypass": false,
+  "import_active": false,
+  "native_runtime": "NOT_RUN",
+  "vm": false,
+  "physical": false
+}

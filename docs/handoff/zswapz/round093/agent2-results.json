@@ -1,0 +1,104 @@
+{
+  "round": "093",
+  "agent": 2,
+  "conclusion": "BLOCKED_NOT_ROUND_OPEN",
+  "kind": "prepared_evidence_only_read_only",
+  "frozen_main": "78f630c9d0a2d5bfb626f2dbdef172f6024cf5ea",
+  "prepared_task": "5f3d9becd358f790c2d892d2f29e8e54a13f92c1",
+  "round_open": false,
+  "source_commit": null,
+  "source_parent": null,
+  "tested_commit": null,
+  "new_ci_runs": [],
+  "first_error": null,
+  "source_edits": false,
+  "ref_update_attempted": false,
+  "r092": {
+    "tested_commit": "62e1ee2dde6ddbdb79ca79fb1c64db31ac6e9b2a",
+    "parent": "ae0e4071bf01d1129d59cc9807e1025ecb6fac45",
+    "runs": 10,
+    "success": 8,
+    "failure": 2,
+    "pending": 0,
+    "attempt": 1,
+    "focused": {
+      "run": 45648914333,
+      "job": 139327642033,
+      "tests": 3,
+      "negatives": 38,
+      "conclusion": "success"
+    },
+    "physical": {
+      "run": 45648914261,
+      "job": 139327642142,
+      "conclusion": "success"
+    },
+    "project_goals": {
+      "run": 45648914359,
+      "jobs_passed": 7,
+      "aggregate_job": 139332710307,
+      "conclusion": "success"
+    },
+    "debug": {
+      "run": 45648914275,
+      "job": 139327643597,
+      "tests": 48,
+      "failures": 1,
+      "exit": 1,
+      "first_error": "publication_output_failure line522: system swap identity changed during isolated run"
+    },
+    "product": {
+      "run": 45648918015,
+      "failed_jobs": [
+        139327655710,
+        139327656002
+      ],
+      "first_error": "four final foreground-commit sites required",
+      "exit": 1
+    },
+    "issue_comment": "https://github.com/k1moradi/swapz/issues/210#issuecomment-7167982375"
+  },
+  "diagnosis": {
+    "fixture_blob": "c9b7ddfbc3c4b2ef274ae99c7d17c88478a9348b",
+    "synthetic_shell_probe": {
+      "nonconsuming_attempts": 5,
+      "nonconsuming_exit": 141,
+      "consuming_attempts": 1,
+      "consuming_exit": 0,
+      "host_swap_access": false
+    },
+    "exact_historical_reproduction": false,
+    "correction": "planned after gate: fixture input isolation and complete drain, preserve quarantine and true identity-change controls"
+  },
+  "collector": {
+    "dm_blob": "420751247bdfd0be9c7271b180ee5cfcc7ca5d92",
+    "implemented": false,
+    "available_source_fields": [
+      "retained typed candidate view",
+      "route/session/target/table epoch",
+      "generation and credit revalidation",
+      "aggregate origin and foreground commit counters",
+      "aggregate physical read/write bytes and requests"
+    ],
+    "missing_native_proof": [
+      "same BIO and selected clone correlation",
+      "original compressed bytes and independent 4096 oracle",
+      "actual lower completion and durability",
+      "map publication and exactly-once upper ACK correlation",
+      "read/GC/fallback and cleanup proof"
+    ],
+    "hard_refuse": true
+  },
+  "source_mapped_authenticated": false,
+  "phase_a": "BLOCKED",
+  "direct_compressed_handoff": false,
+  "forced_raw_bypass": false,
+  "import_active": 0,
+  "actual_physical_io": false,
+  "vm_testing": false,
+  "privileged_operation": false,
+  "branches_created": 0,
+  "prs_created": 0,
+  "force_pushes": 0,
+  "duplicate_ci": 0
+}
