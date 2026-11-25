@@ -1,0 +1,169 @@
+diff --git a/mm/zswap.c b/mm/zswap.c
+--- a/mm/zswap.c
++++ b/mm/zswap.c
+@@ -938,0 +939,1 @@
++static struct module *swapz_mm_provider_owner;
+@@ -940,4 +941,3 @@
+-/* Registration and unregistration are process-context only, outside target
+- * and broker locks. Provider owner pins callback code and broker storage
+- * through unregister + RCU grace period; broker capabilities then pin
+- * outstanding independent leases. No raw target pointer escapes a callback.
++/* Registration is process-context only, outside target and broker locks.
++ * No registration-time module reference: exit must remain reachable.
++ * Publish owner before provider; clear only after unregister's grace.
+@@ -945,1 +945,2 @@
+-int swapz_mm_register_provider(const struct swapz_mm_route_provider *provider)
++int (swapz_mm_register_provider)(const struct swapz_mm_route_provider *provider,
++				 struct module *owner)
+@@ -954,1 +955,2 @@
+-	else
++	else {
++		WRITE_ONCE(swapz_mm_provider_owner, owner);
+@@ -955,0 +958,1 @@
++	}
+@@ -958,0 +962,1 @@
++EXPORT_SYMBOL_GPL(swapz_mm_register_provider);
+@@ -969,0 +974,1 @@
++		WRITE_ONCE(swapz_mm_provider_owner, NULL);
+@@ -973,0 +979,1 @@
++EXPORT_SYMBOL_GPL(swapz_mm_unregister_provider);
+@@ -978,0 +985,1 @@
++	struct module *owner;
+@@ -983,2 +990,7 @@
+-	if (provider)
+-		eligible = provider->eligible(bdev, sector, codec, length);
++	if (provider) {
++		owner = READ_ONCE(swapz_mm_provider_owner);
++		if (try_module_get(owner)) {
++			eligible = provider->eligible(bdev, sector, codec, length);
++			module_put(owner);
++		}
++	}
+@@ -991,1 +1003,1 @@
+-			      struct swapz_ticket_cap *cap)
++			      struct swapz_ticket_cap *cap, struct module **owner_out)
+@@ -993,0 +1006,1 @@
++	struct module *owner;
+@@ -998,5 +1011,14 @@
+-	if (provider && provider->lookup(si->bdev, sector, codec, length, route) &&
+-	    route->broker && route->target_session && route->table_epoch &&
+-	    route->target_epoch && route->dm_generation)
+-		retained = !swapz_ticket_broker_try_get(route->broker,
+-			route->target_session, route->table_epoch, cap);
++	if (provider) {
++		owner = READ_ONCE(swapz_mm_provider_owner);
++		if (try_module_get(owner)) {
++			if (provider->lookup(si->bdev, sector, codec, length, route) &&
++			    route->broker && route->target_session && route->table_epoch &&
++			    route->target_epoch && route->dm_generation)
++				retained = !swapz_ticket_broker_try_get(route->broker,
++					route->target_session, route->table_epoch, cap);
++			if (retained)
++				*owner_out = owner; /* transfer to sole carrier */
++			else
++				module_put(owner);
++		}
++	}
+@@ -1048,0 +1071,2 @@
++	struct module *owner;
++
+@@ -1063,0 +1088,6 @@
++	owner = swapz_mm_carrier.provider_owner;
++	swapz_mm_carrier.provider_owner = NULL;
++	/* Reader grace and both broker puts precede the module put.
++	 * An invariant violation above quarantines the carrier and pin.
++	 */
++	module_put(owner);
+@@ -1094,2 +1124,11 @@
+-	if (swapz_mm_bio_matches(origin, carrier))
+-		error = swapz_ticket_retain(&carrier->lease, out);
++	if (swapz_mm_bio_matches(origin, carrier)) {
++		struct module *owner = carrier->provider_owner;
++
++		if (try_module_get(owner)) {
++			error = swapz_ticket_retain(&carrier->lease, out);
++			if (error)
++				module_put(owner);
++			else
++				out->provider_owner = owner; /* independent candidate pin */
++		}
++	}
+@@ -1098,0 +1138,1 @@
++EXPORT_SYMBOL_GPL(swapz_mm_candidate_get);
+@@ -1139,1 +1179,1 @@
+-			       &route, &carrier->cap))
++			       &route, &carrier->cap, &carrier->provider_owner))
+diff --git a/include/linux/swapz_mm_carrier.h b/include/linux/swapz_mm_carrier.h
+--- a/include/linux/swapz_mm_carrier.h
++++ b/include/linux/swapz_mm_carrier.h
+@@ -10,0 +11,1 @@
++#include <linux/module.h>
+@@ -37,1 +38,9 @@
+-int swapz_mm_register_provider(const struct swapz_mm_route_provider *);
++/* Bind the real calling module; NULL is reserved for built-in code.
++ * Registration never self-pins. Revoke admission and quiesce external
++ * entrants, unregister, close and drain every ticket/cap before freeing
++ * broker arrays. Registration alone never authorizes a route.
++ */
++int swapz_mm_register_provider(const struct swapz_mm_route_provider *,
++			      struct module *);
++#define swapz_mm_register_provider(provider) \
++	(swapz_mm_register_provider)((provider), THIS_MODULE)
+@@ -42,0 +52,1 @@
++	struct module *provider_owner; /* transient pin until deferred release */
+diff --git a/src/kernel/zswap-original-ticket.c b/src/kernel/zswap-original-ticket.c
+--- a/src/kernel/zswap-original-ticket.c
++++ b/src/kernel/zswap-original-ticket.c
+@@ -5,0 +6,1 @@
++#include <linux/module.h>
+@@ -194,1 +195,2 @@
+-		*out = (struct swapz_ticket_ref){broker, broker->session, slot->generation, index};
++		*out = (struct swapz_ticket_ref){.broker = broker, .session = broker->session,
++			.generation = slot->generation, .index = index};
+@@ -264,0 +267,5 @@
++#if defined(CONFIG_SWAPZ_ORIGINAL_MM_CARRIER_TEST) || defined(SWAPZ_TICKET_MODULE_HOST_TEST)
++	/* Caller owns the source lease; pin before taking the broker lock. */
++	if (!try_module_get(ref->provider_owner))
++		return -ESHUTDOWN;
++#endif
+@@ -267,1 +274,4 @@
+-	if (error)
++	if (error) {
++#if defined(CONFIG_SWAPZ_ORIGINAL_MM_CARRIER_TEST) || defined(SWAPZ_TICKET_MODULE_HOST_TEST)
++		module_put(ref->provider_owner);
++#endif
+@@ -268,0 +279,1 @@
++	}
+@@ -280,0 +292,4 @@
++#if defined(CONFIG_SWAPZ_ORIGINAL_MM_CARRIER_TEST) || defined(SWAPZ_TICKET_MODULE_HOST_TEST)
++	if (error)
++		module_put(ref->provider_owner);
++#endif
+@@ -410,0 +426,3 @@
++#if defined(CONFIG_SWAPZ_ORIGINAL_MM_CARRIER_TEST) || defined(SWAPZ_TICKET_MODULE_HOST_TEST)
++	struct module *owner;
++#endif
+@@ -422,0 +441,3 @@
++#if defined(CONFIG_SWAPZ_ORIGINAL_MM_CARRIER_TEST) || defined(SWAPZ_TICKET_MODULE_HOST_TEST)
++	owner = ref->provider_owner;
++#endif
+@@ -430,0 +452,3 @@
++#if defined(CONFIG_SWAPZ_ORIGINAL_MM_CARRIER_TEST) || defined(SWAPZ_TICKET_MODULE_HOST_TEST)
++	module_put(owner);
++#endif
+@@ -504,0 +529,8 @@
++#if defined(__KERNEL__) && defined(CONFIG_SWAPZ_ORIGINAL_MM_CARRIER_TEST)
++/* Single built-in broker; only actual frozen DM imports cross the boundary. */
++EXPORT_SYMBOL_GPL(swapz_ticket_put);
++EXPORT_SYMBOL_GPL(swapz_ticket_view);
++EXPORT_SYMBOL_GPL(swapz_ticket_broker_put);
++EXPORT_SYMBOL_GPL(swapz_ticket_broker_try_get);
++EXPORT_SYMBOL_GPL(swapz_ticket_claim_under_queue_lock);
++#endif
+diff --git a/src/kernel/zswap-original-ticket.h b/src/kernel/zswap-original-ticket.h
+--- a/src/kernel/zswap-original-ticket.h
++++ b/src/kernel/zswap-original-ticket.h
+@@ -61,0 +62,3 @@
++#if defined(CONFIG_SWAPZ_ORIGINAL_MM_CARRIER_TEST) || defined(SWAPZ_TICKET_MODULE_HOST_TEST)
++	struct module *provider_owner; /* one module pin per retained candidate */
++#endif
