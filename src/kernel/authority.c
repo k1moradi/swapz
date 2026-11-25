@@ -15,6 +15,238 @@
 #include <string.h>
 #endif
 
+
+#ifdef SWAPZ_SHARED_ORIGINAL_TEST
+static struct swapz_shared_original_record *shared_current(
+	const struct swapz_authority *a, swapz_u32 logical)
+{
+	unsigned int index;
+
+	if (!a->original)
+		return NULL;
+	for (index = 0; index < SWAPZ_SHARED_ORIGINAL_CAPACITY; ++index) {
+		struct swapz_shared_original_record *record = &a->original->records[index];
+
+		if (record->current && record->spec.logical_page == logical)
+			return record;
+	}
+	return NULL;
+}
+
+static int shared_validate(const struct swapz_authority *a, swapz_u32 logical)
+{
+	const struct swapz_map *map = &a->maps[logical];
+	const struct swapz_shared_original_record *record = shared_current(a, logical);
+
+	if (!(map->state & SWAPZ_MAP_ORIGINAL))
+		return record ? -EUCLEAN : 0;
+	if (!record || !record->decoder || !map->valid || map->raw ||
+	    map->shared_extent || map->extent_blocks != 1U ||
+	    map->record_index || map->payload_offset || (map->state & 0x80U) ||
+	    memcmp(&record->map, map, sizeof(*map)) ||
+	    map->start_block >= a->physical_blocks ||
+	    a->live_records[map->start_block] != 1U ||
+	    a->extent_classes[map->start_block] != 1U)
+		return -EUCLEAN;
+	return 0;
+}
+
+static void shared_release(struct swapz_shared_original_owner *owner,
+			   struct swapz_shared_original_record *record)
+{
+	if (!record->current && !record->pins && record->decoder) {
+		owner->decoder_put(owner->context, record->decoder);
+		memset(record, 0, sizeof(*record));
+	}
+}
+
+static void shared_retire(struct swapz_authority *a, swapz_u32 logical)
+{
+	struct swapz_shared_original_record *record = shared_current(a, logical);
+
+	if (record) {
+		record->current = 0;
+		shared_release(a->original, record);
+	}
+}
+
+int swapz_shared_original_segment_pinned(const struct swapz_authority *a,
+					 swapz_u32 segment)
+{
+	unsigned int index;
+
+	if (!a || !a->original)
+		return 0;
+	for (index = 0; index < SWAPZ_SHARED_ORIGINAL_CAPACITY; ++index) {
+		const struct swapz_shared_original_record *record = &a->original->records[index];
+
+		if (record->pins &&
+		    record->map.start_block / SWAPZ_SEGMENT_BLOCKS == segment)
+			return 1;
+	}
+	return 0;
+}
+
+int swapz_shared_original_attach(struct swapz_authority *a,
+	struct swapz_shared_original_owner *owner, void *context,
+	void (*decoder_put)(void *, void *))
+{
+	swapz_u32 logical;
+
+	if (!a || !owner || !decoder_put || a->original ||
+	    !a->maps || !a->live_records || !a->extent_classes ||
+	    a->in_flight || a->batch_pending || a->gc_allocation)
+		return -EINVAL;
+	for (logical = 0; logical < a->logical_pages; ++logical)
+		if (a->maps[logical].state & SWAPZ_MAP_ORIGINAL)
+			return -EUCLEAN;
+	memset(owner, 0, sizeof(*owner));
+	owner->context = context;
+	owner->decoder_put = decoder_put;
+	a->original = owner;
+	return 0;
+}
+
+int swapz_shared_original_detach(struct swapz_authority *a)
+{
+	unsigned int index;
+
+	if (!a || !a->original || a->in_flight || a->batch_pending || a->gc_allocation)
+		return -EINVAL;
+	for (index = 0; index < SWAPZ_SHARED_ORIGINAL_CAPACITY; ++index)
+		if (a->original->records[index].decoder || a->original->pins[index].id)
+			return -EBUSY;
+	a->original = NULL;
+	return 0;
+}
+
+static struct swapz_shared_original_record *shared_free(struct swapz_authority *a)
+{
+	unsigned int index;
+
+	for (index = 0; index < SWAPZ_SHARED_ORIGINAL_CAPACITY; ++index)
+		if (!a->original->records[index].decoder)
+			return &a->original->records[index];
+	return NULL;
+}
+
+int swapz_shared_original_preflight(struct swapz_authority *a,
+	const struct swapz_authority_import_spec *spec, swapz_u32 generation)
+{
+	const struct swapz_shared_original_record *old;
+	unsigned int index;
+	swapz_u8 digest = 0;
+
+	if (!a || !a->original || !spec || spec->logical_page >= a->logical_pages ||
+	    !spec->compressed_length || spec->compressed_length > SWAPZ_MAX_COMPRESSED ||
+	    (spec->codec != 1U && spec->codec != 2U) || spec->codec_version != 1U ||
+	    spec->requested_fua != 1U || !spec->source_entry_identity ||
+	    !spec->source_store_generation || !spec->gc_epoch)
+		return -EINVAL;
+	for (index = 0; index < sizeof(spec->original_sha256); ++index)
+		digest |= spec->original_sha256[index];
+	if (!digest)
+		return -EINVAL;
+	if (a->maps[spec->logical_page].generation == ~(swapz_u32)0)
+		return -EOVERFLOW;
+	if (generation != a->maps[spec->logical_page].generation + 1U)
+		return -ESTALE;
+	if (shared_validate(a, spec->logical_page))
+		return -EUCLEAN;
+	if (a->gc_allocation) {
+		old = shared_current(a, spec->logical_page);
+		if (!old || old->map.start_block / SWAPZ_SEGMENT_BLOCKS !=
+			    a->gc_forbidden_victim ||
+		    old->spec.gc_epoch >= spec->gc_epoch ||
+		    old->spec.source_swap_slot != spec->source_swap_slot ||
+		    old->spec.source_entry_identity != spec->source_entry_identity ||
+		    old->spec.source_store_generation != spec->source_store_generation ||
+		    old->spec.compressed_length != spec->compressed_length ||
+		    old->spec.compressed_crc32c != spec->compressed_crc32c ||
+		    old->spec.codec != spec->codec ||
+		    memcmp(old->spec.original_sha256, spec->original_sha256,
+			   sizeof(spec->original_sha256)))
+			return -ESTALE;
+	}
+	return shared_free(a) ? 0 : -ENOSPC;
+}
+
+int swapz_shared_original_pin(struct swapz_authority *a, swapz_u32 logical,
+			       swapz_u64 *pin)
+{
+	struct swapz_shared_original_record *record;
+	unsigned int index;
+
+	if (!a || !a->original || !pin || logical >= a->logical_pages)
+		return -EINVAL;
+	if (shared_validate(a, logical))
+		return -EUCLEAN;
+	record = shared_current(a, logical);
+	if (!record)
+		return -ENOENT;
+	if (a->original->next_pin == ~(swapz_u64)0)
+		return -EOVERFLOW;
+	for (index = 0; index < SWAPZ_SHARED_ORIGINAL_CAPACITY; ++index)
+		if (!a->original->pins[index].id)
+			break;
+	if (index == SWAPZ_SHARED_ORIGINAL_CAPACITY)
+		return -ENOSPC;
+	a->original->pins[index].index =
+		(swapz_u8)(record - a->original->records);
+	a->original->pins[index].id = ++a->original->next_pin;
+	++record->pins;
+	*pin = a->original->pins[index].id;
+	return 0;
+}
+
+static int shared_pin_index(const struct swapz_authority *a, swapz_u64 pin)
+{
+	unsigned int index;
+
+	if (!a || !a->original || !pin)
+		return -1;
+	for (index = 0; index < SWAPZ_SHARED_ORIGINAL_CAPACITY; ++index)
+		if (a->original->pins[index].id == pin)
+			return (int)index;
+	return -1;
+}
+
+const struct swapz_shared_original_record *swapz_shared_original_view(
+	const struct swapz_authority *a, swapz_u64 pin)
+{
+	int index = shared_pin_index(a, pin);
+	const struct swapz_shared_original_record *record;
+	swapz_u8 slot;
+
+	if (index < 0)
+		return NULL;
+	slot = a->original->pins[index].index;
+	if (slot >= SWAPZ_SHARED_ORIGINAL_CAPACITY)
+		return NULL;
+	record = &a->original->records[slot];
+	if (!record->decoder || !record->pins ||
+	    record->map.start_block >= a->physical_blocks ||
+	    a->extent_classes[record->map.start_block] != 1U ||
+	    (record->current && shared_validate(a, record->spec.logical_page)))
+		return NULL;
+	return record;
+}
+
+int swapz_shared_original_put(struct swapz_authority *a, swapz_u64 pin)
+{
+	int index = shared_pin_index(a, pin);
+	struct swapz_shared_original_record *record;
+
+	if (index < 0 || !swapz_shared_original_view(a, pin))
+		return -ESTALE;
+	record = &a->original->records[a->original->pins[index].index];
+	memset(&a->original->pins[index], 0, sizeof(a->original->pins[index]));
+	--record->pins;
+	shared_release(a->original, record);
+	return 0;
+}
+#endif
+
 static unsigned long long swapz_authority_now_ns(void)
 {
 #ifdef __KERNEL__
@@ -969,6 +1201,10 @@ static int swapz_claim_dead_segment(struct swapz_authority *a,
 	int used, previously_claimed, reclaim_required, blocked = 0;
 	int proof_error;
 
+#ifdef SWAPZ_SHARED_ORIGINAL_TEST
+	if (swapz_shared_original_segment_pinned(a, segment))
+		return -EAGAIN;
+#endif
 	if (swapz_dead_segment_sidecars_validate(a, segment))
 		return swapz_finish_alloc_probe(a, probe_start,
 			swapz_map_proof_refuse(
@@ -1075,6 +1311,10 @@ static int swapz_claim_dead_segment(struct swapz_authority *a,
 static int swapz_dead_segment_eligible(const struct swapz_authority *a,
 				       swapz_u32 segment)
 {
+#ifdef SWAPZ_SHARED_ORIGINAL_TEST
+	if (swapz_shared_original_segment_pinned(a, segment))
+		return 0;
+#endif
 	if (a->gc_allocation &&
 	    (segment == a->gc_forbidden_open ||
 	     segment == a->gc_forbidden_victim))
@@ -1291,6 +1531,10 @@ static int swapz_verify_recovery_victim_dead_for_transition(
 	if (!a || !a->live_records || segment >= a->segment_count)
 		return swapz_map_proof_refuse(
 			transition, "invalid_request", -EINVAL);
+#ifdef SWAPZ_SHARED_ORIGINAL_TEST
+	if (swapz_shared_original_segment_pinned(a, segment))
+		return -EBUSY;
+#endif
 	error = swapz_verify_segment_authoritative_maps(
 		a, segment, ~(swapz_u32)0, 0U,
 		verify_global_map_physical_metadata, transition);
@@ -1489,6 +1733,10 @@ int swapz_gc_commit_rotation(struct swapz_authority *a, swapz_u32 victim)
 	    a->in_flight || a->batch_pending || victim >= a->segment_count ||
 	    victim != a->gc_forbidden_victim)
 		return -EINVAL;
+#ifdef SWAPZ_SHARED_ORIGINAL_TEST
+	if (swapz_shared_original_segment_pinned(a, victim))
+		return -EBUSY;
+#endif
 	dest = a->gc_destination;
 	if (dest >= a->segment_count ||
 	    !a->segment_foreground[victim] ||
@@ -2126,13 +2374,21 @@ int swapz_abort(struct swapz_authority *a, const struct swapz_tx *tx)
  * Raw writes never publish on short or failed lower I/O.  The raw marker is
  * held exclusively in volatile mappings, NEVER guessed from media content.
  */
-int swapz_finish_raw(struct swapz_authority *a, const struct swapz_tx *tx,
-		     const void *raw_page, swapz_u8 completed_blocks, int io_error)
+static int swapz_finish_single(struct swapz_authority *a, const struct swapz_tx *tx,
+			     const void *raw_page, swapz_u8 completed_blocks, int io_error
+#ifdef SWAPZ_SHARED_ORIGINAL_TEST
+			     , const struct swapz_authority_import_spec *spec, void *decoder
+#endif
+			     )
 {
 	struct swapz_map *old;
 	struct swapz_map new_map;
 	swapz_u32 page, old_segment = 0, new_segment;
 	int error;
+#ifdef SWAPZ_SHARED_ORIGINAL_TEST
+	struct swapz_shared_original_record *slot = NULL;
+	swapz_u8 sequence_delta = 0;
+#endif
 
 	if (!swapz_is_active(a, tx))
 		return -ESTALE;
@@ -2155,6 +2411,29 @@ int swapz_finish_raw(struct swapz_authority *a, const struct swapz_tx *tx,
 		goto fail;
 	}
 	old = &a->maps[page];
+#ifdef SWAPZ_SHARED_ORIGINAL_TEST
+	error = shared_validate(a, page);
+	if (error)
+		goto fail;
+	if (!spec && a->gc_allocation && (old->state & SWAPZ_MAP_ORIGINAL)) {
+		error = -EOPNOTSUPP;
+		goto fail;
+	}
+	if (spec) {
+		error = swapz_shared_original_preflight(a, spec, tx->records[0].generation);
+		if (error)
+			goto fail;
+		if (!decoder || spec->logical_page != page) {
+			error = -EINVAL;
+			goto fail;
+		}
+		slot = shared_free(a);
+		error = swapz_extent_sequence_delta_for(a, tx->start_block,
+							tx->sequence, &sequence_delta);
+		if (error)
+			goto fail;
+	}
+#endif
 	new_segment = tx->start_block / SWAPZ_SEGMENT_BLOCKS;
 	if (old->generation == ~(swapz_u32)0 ||
 	    old->generation + 1U != tx->records[0].generation ||
@@ -2181,13 +2460,27 @@ int swapz_finish_raw(struct swapz_authority *a, const struct swapz_tx *tx,
 	new_map = (struct swapz_map){
 		.start_block = tx->start_block,
 		.generation = tx->records[0].generation,
+#ifdef SWAPZ_SHARED_ORIGINAL_TEST
+		.raw_crc32c = spec ? 0U : swapz_publish_crc32c(a, raw_page, SWAPZ_BLOCK_BYTES),
+#else
 		.raw_crc32c = swapz_publish_crc32c(a, raw_page, SWAPZ_BLOCK_BYTES),
+#endif
 		.payload_length = SWAPZ_BLOCK_BYTES,
 		.extent_blocks = 1,
 		.record_index = 0,
 		.raw = 1,
 		.valid = 1,
 	};
+#ifdef SWAPZ_SHARED_ORIGINAL_TEST
+	if (spec) {
+		/* Same one-map accounting, distinct typed representation. */
+		new_map.raw = 0;
+		new_map.state |= SWAPZ_MAP_ORIGINAL;
+		new_map.payload_offset = 0;
+		new_map.payload_length = spec->compressed_length;
+		new_map.payload_crc32c = spec->compressed_crc32c;
+	}
+#endif
 	if (a->segment_mapped_pages) {
 		if (new_segment >= a->segment_count) {
 			error = -EUCLEAN;
@@ -2257,6 +2550,20 @@ int swapz_finish_raw(struct swapz_authority *a, const struct swapz_tx *tx,
 			swapz_page_list_unlink_unchecked(a, page, old_segment);
 		swapz_page_list_append_unchecked(a, page, new_segment);
 	}
+#ifdef SWAPZ_SHARED_ORIGINAL_TEST
+	shared_retire(a, page);
+	if (spec) {
+		if (a->extent_sequence_delta) {
+			if (!a->segment_sequence_base[new_segment])
+				a->segment_sequence_base[new_segment] = tx->sequence;
+			a->extent_sequence_delta[tx->start_block] = sequence_delta;
+		}
+		*slot = (struct swapz_shared_original_record) {
+			.spec = *spec, .map = new_map, .decoder = decoder,
+			.sequence = tx->sequence, .current = 1,
+		};
+	}
+#endif
 	*old = new_map;
 	swapz_forget_active(a, 1);
 	return 0;
@@ -2264,6 +2571,50 @@ fail:
 	swapz_forget_active(a, 0);
 	return error;
 }
+
+int swapz_finish_raw(struct swapz_authority *a, const struct swapz_tx *tx,
+		     const void *raw_page, swapz_u8 completed_blocks, int io_error)
+{
+	return swapz_finish_single(a, tx, raw_page, completed_blocks, io_error
+#ifdef SWAPZ_SHARED_ORIGINAL_TEST
+				   , NULL, NULL
+#endif
+				   );
+}
+
+#ifdef SWAPZ_SHARED_ORIGINAL_TEST
+int swapz_shared_original_finish(struct swapz_authority *a, const struct swapz_tx *tx,
+	const struct swapz_authority_import_spec *spec, const swapz_u8 *image,
+	swapz_u32 bytes, swapz_u8 completed_blocks, int lower_error,
+	int flush_completed, void *decoder)
+{
+	swapz_u32 offset;
+	int error = lower_error < 0 ? lower_error : 0;
+
+	if (!swapz_is_active(a, tx))
+		return -ESTALE;
+	if (!error && (lower_error || completed_blocks != 1U || !flush_completed))
+		error = -EIO;
+	if (!error && (!spec || !decoder || !image || bytes != SWAPZ_BLOCK_BYTES ||
+		       tx->count != 1U || tx->extent_blocks != 1U ||
+		       !spec->compressed_length || spec->compressed_length > SWAPZ_MAX_COMPRESSED))
+		error = -EINVAL;
+	if (!error && swapz_crc32c_bytes(image, spec->compressed_length) !=
+		      spec->compressed_crc32c)
+		error = -EBADMSG;
+	if (!error)
+		for (offset = spec->compressed_length; offset < bytes; ++offset)
+			if (image[offset]) {
+				error = -EBADMSG;
+				break;
+			}
+	if (error) {
+		swapz_forget_active(a, 0);
+		return error;
+	}
+	return swapz_finish_single(a, tx, image, completed_blocks, 0, spec, decoder);
+}
+#endif
 
 /*
  * The raw-page format deliberately consumes exactly one full 4KiB lower
@@ -2328,6 +2679,12 @@ int swapz_prevalidate_discard_range(struct swapz_authority *a,
 		swapz_u32 segment = 0, live_bytes = 0, io_cost = 0;
 		swapz_u16 min_live_blocks = 0;
 
+#ifdef SWAPZ_SHARED_ORIGINAL_TEST
+		if (shared_validate(a, logical)) {
+			error = -EUCLEAN;
+			break;
+		}
+#endif
 		if (map->generation == ~(swapz_u32)0) {
 			error = -EOVERFLOW;
 			break;
@@ -2573,6 +2930,10 @@ int swapz_discard_page(struct swapz_authority *a, swapz_u32 logical_page)
 	if (a->in_flight || a->batch_pending)
 		return -EBUSY;
 	old = &a->maps[logical_page];
+#ifdef SWAPZ_SHARED_ORIGINAL_TEST
+	if (shared_validate(a, logical_page))
+		return -EUCLEAN;
+#endif
 	if (old->generation == ~(swapz_u32)0)
 		return -EOVERFLOW;
 	if (old->valid &&
@@ -2635,6 +2996,9 @@ int swapz_discard_page(struct swapz_authority *a, swapz_u32 logical_page)
 		a->segment_mapped_pages[old_segment]--;
 	if (old->valid && swapz_segment_page_lists_enabled(a))
 		swapz_page_list_unlink_unchecked(a, logical_page, old_segment);
+#ifdef SWAPZ_SHARED_ORIGINAL_TEST
+	shared_retire(a, logical_page);
+#endif
 	memset(old, 0, sizeof(*old));
 	old->generation = generation;
 	return 0;
@@ -2866,6 +3230,15 @@ int swapz_finish(struct swapz_authority *a, const struct swapz_tx *tx,
 			goto fail;
 		}
 		old = &a->maps[logical];
+#ifdef SWAPZ_SHARED_ORIGINAL_TEST
+		error = shared_validate(a, logical);
+		if (error)
+			goto fail;
+		if (a->gc_allocation && (old->state & SWAPZ_MAP_ORIGINAL)) {
+			error = -EOPNOTSUPP;
+			goto fail;
+		}
+#endif
 		if (old->generation == ~(swapz_u32)0 ||
 		    old->generation + 1U != decoded.generation) {
 			error = -ESTALE;
@@ -3195,6 +3568,9 @@ int swapz_finish(struct swapz_authority *a, const struct swapz_tx *tx,
 					SWAPZ_SEGMENT_BLOCKS);
 			swapz_page_list_append_unchecked(a, logical, new_segment);
 		}
+#ifdef SWAPZ_SHARED_ORIGINAL_TEST
+		shared_retire(a, logical);
+#endif
 		*entry = new_map;
 	}
 	swapz_forget_active(a, 1);
@@ -3216,6 +3592,10 @@ static int swapz_read_observed_authority(
 	    logical_page >= a->logical_pages)
 		return -EINVAL;
 	current_map = &a->maps[logical_page];
+#ifdef SWAPZ_SHARED_ORIGINAL_TEST
+	if ((current_map->state | observed->state) & SWAPZ_MAP_ORIGINAL)
+		return -EOPNOTSUPP;
+#endif
 	if (!current_map->valid || !observed->valid ||
 	    current_map->start_block != observed->start_block ||
 	    current_map->generation != observed->generation ||

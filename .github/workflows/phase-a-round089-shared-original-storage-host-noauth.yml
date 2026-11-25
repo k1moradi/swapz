@@ -1,0 +1,36 @@
+name: "Round089 shared original authority HOST ONLY NO_AUTH"
+on:
+  push:
+    branches: [main]
+    paths:
+      - "src/kernel/authority.c"
+      - "src/kernel/authority.h"
+      - "src/kernel/engine.c"
+      - "src/kernel/zswap-original-storage.c"
+      - "src/kernel/zswap-original-storage.h"
+      - "tests/runtime/native/fixtures/round089-shared-original-storage.c"
+      - "tests/tools/round089-shared-original-storage-verify.py"
+      - ".github/workflows/phase-a-round089-shared-original-storage-host-noauth.yml"
+permissions:
+  contents: read
+jobs:
+  shared-original-host:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Exact main source and shared authority sanitizer qualification
+        env:
+          SWAPZ_PUSH_BEFORE_SHA: ${{ github.event.before }}
+        run: python3 -B tests/tools/round089-shared-original-storage-verify.py "$RUNNER_TEMP/agent5-shared"
+      - name: Preserve result and private first cause
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: round089-agent5-shared-original
+          path: ${{ runner.temp }}/agent5-shared
+          if-no-files-found: warn
+          retention-days: 14

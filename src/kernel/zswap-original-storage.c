@@ -384,4 +384,205 @@ int swapz_original_storage_close(struct swapz_original_storage *storage)
 	release_empty(storage);
 	return error;
 }
+
+#ifdef SWAPZ_SHARED_ORIGINAL_TEST
+static int shared_ready(const struct swapz_shared_storage *storage)
+{
+	return storage && storage->authority &&
+	       storage->authority->original == &storage->owner;
+}
+
+static int shared_disjoint(const struct swapz_authority *a,
+			   const void *pointer, swapz_u64 bytes)
+{
+	if (!outside_authority(a, pointer, bytes))
+		return 0;
+#define CHECK_ARRAY(field, count) \
+	if (a->field && !disjoint(pointer, bytes, a->field, \
+				  (swapz_u64)(count) * sizeof(*a->field))) \
+		return 0
+	CHECK_ARRAY(extent_sequence_delta, a->physical_blocks);
+	CHECK_ARRAY(segment_sequence_base, a->sequence_segment_count);
+	CHECK_ARRAY(segment_foreground, a->segment_count);
+	CHECK_ARRAY(segment_mapped_pages, a->segment_count);
+	CHECK_ARRAY(segment_program_counts, a->segment_count);
+	CHECK_ARRAY(segment_first_page, a->segment_count);
+	CHECK_ARRAY(segment_last_page, a->segment_count);
+	CHECK_ARRAY(page_prev_in_segment, a->logical_pages);
+	CHECK_ARRAY(page_next_in_segment, a->logical_pages);
+	CHECK_ARRAY(segment_gc_live_bytes, a->segment_count);
+	CHECK_ARRAY(segment_gc_io_cost, a->segment_count);
+	CHECK_ARRAY(segment_gc_min_live_blocks, a->segment_count);
+#undef CHECK_ARRAY
+	return 1;
+}
+
+static int shared_outside(const struct swapz_shared_storage *storage,
+			  const void *pointer, swapz_u64 bytes)
+{
+	return disjoint(pointer, bytes, storage, sizeof(*storage)) &&
+	       shared_disjoint(storage->authority, pointer, bytes);
+}
+
+int swapz_shared_storage_init(struct swapz_shared_storage *storage,
+	struct swapz_authority *authority, const struct swapz_original_storage_ops *ops)
+{
+	int error;
+
+	if (!storage || !authority || !ops || !ops->write || !ops->flush ||
+	    !ops->read || !ops->decoder_get || !ops->decoder_put ||
+	    !shared_disjoint(authority, storage, sizeof(*storage)) ||
+	    !disjoint(storage, sizeof(*storage), ops, sizeof(*ops)))
+		return -EINVAL;
+	if (authority->original)
+		return -EBUSY;
+	memset(storage, 0, sizeof(*storage));
+	storage->authority = authority;
+	storage->ops = *ops;
+	error = swapz_shared_original_attach(authority, &storage->owner,
+					     ops->context, ops->decoder_put);
+	if (error)
+		storage->authority = NULL;
+	return error;
+}
+
+static int shared_write(struct swapz_shared_storage *storage,
+	const struct swapz_authority_import_spec *spec,
+	const struct swapz_original_extent_input *input)
+{
+	struct swapz_authority *a = storage->authority;
+	swapz_u32 completed = 0;
+	void *lease;
+	int error, flushed = 0;
+
+	if (input->logical_page != spec->logical_page ||
+	    input->length != spec->compressed_length ||
+	    input->crc32c != spec->compressed_crc32c ||
+	    input->codec != spec->codec || input->version != spec->codec_version)
+		return -ESTALE;
+	error = swapz_shared_original_preflight(a, spec, input->generation);
+	if (error)
+		return error;
+	error = swapz_original_extent_begin(&storage->extent, storage->image,
+		SWAPZ_BLOCK_BYTES, &storage->record, sizeof(storage->record), 1U,
+		SWAPZ_ORIGINAL_EXTENT_CONSERVATIVE, SWAPZ_ORIGINAL_EXTENT_DEDICATED);
+	if (!error)
+		error = swapz_original_extent_append(&storage->extent, input);
+	if (!error)
+		error = swapz_original_extent_seal(&storage->extent);
+	if (error)
+		return error;
+	lease = storage->ops.decoder_get(storage->ops.context, input->codec, input->version);
+	if (!lease)
+		return -EAGAIN;
+	error = swapz_stage(a, &spec->logical_page, 1U, 1U, &storage->transaction);
+	if (error)
+		goto release;
+	error = storage->ops.write(storage->ops.context, storage->transaction.start_block,
+				   storage->image, SWAPZ_BLOCK_BYTES, &completed);
+	if (!error && completed != SWAPZ_BLOCK_BYTES)
+		error = -EIO;
+	if (!error) {
+		error = storage->ops.flush(storage->ops.context);
+		flushed = !error;
+	}
+	error = swapz_shared_original_finish(a, &storage->transaction, spec,
+		storage->image, SWAPZ_BLOCK_BYTES, completed == SWAPZ_BLOCK_BYTES ? 1U : 0U,
+		error, flushed, lease);
+	if (!error)
+		return 0;
+release:
+	storage->ops.decoder_put(storage->ops.context, lease);
+	return error;
+}
+
+int swapz_shared_storage_write(struct swapz_shared_storage *storage,
+	const struct swapz_authority_import_spec *spec,
+	const struct swapz_original_extent_input *input)
+{
+	if (!shared_ready(storage) || !shared_outside(storage, spec, sizeof(*spec)) ||
+	    !shared_outside(storage, input, sizeof(*input)) ||
+	    !shared_outside(storage, input->bytes, input->bytes_available))
+		return -EINVAL;
+	/* GC must use a verified retained read, not a caller-supplied stream. */
+	if (storage->authority->gc_allocation)
+		return -EBUSY;
+	return shared_write(storage, spec, input);
+}
+
+static int shared_read(struct swapz_shared_storage *storage, swapz_u64 pin,
+	swapz_u8 *output, swapz_u32 capacity)
+{
+	const struct swapz_shared_original_record *record =
+		swapz_shared_original_view(storage->authority, pin);
+	swapz_u32 completed = 0, index, length;
+	int error;
+
+	if (!record)
+		return -ESTALE;
+	length = record->spec.compressed_length;
+	if (!length || length > SWAPZ_MAX_COMPRESSED || capacity < length)
+		return -EINVAL;
+	error = storage->ops.read(storage->ops.context, record->map.start_block,
+				  storage->read_image, SWAPZ_BLOCK_BYTES, &completed);
+	if (error)
+		return error < 0 ? error : -EIO;
+	if (completed != SWAPZ_BLOCK_BYTES)
+		return -EIO;
+	if (swapz_crc32c_bytes(storage->read_image, length) != record->spec.compressed_crc32c)
+		return -EBADMSG;
+	for (index = length; index < SWAPZ_BLOCK_BYTES; ++index)
+		if (storage->read_image[index])
+			return -EBADMSG;
+	memcpy(output, storage->read_image, length);
+	return 0;
+}
+
+int swapz_shared_storage_read(struct swapz_shared_storage *storage, swapz_u64 pin,
+	swapz_u8 *output, swapz_u32 capacity)
+{
+	if (!shared_ready(storage) || !shared_outside(storage, output, capacity))
+		return -EINVAL;
+	return shared_read(storage, pin, output, capacity);
+}
+
+int swapz_shared_storage_relocate(struct swapz_shared_storage *storage,
+	swapz_u64 pin, swapz_u64 epoch)
+{
+	const struct swapz_shared_original_record *old;
+	struct swapz_authority_import_spec spec;
+	struct swapz_original_extent_input input;
+	int error;
+
+	if (!shared_ready(storage) || !storage->authority->gc_allocation)
+		return -EINVAL;
+	old = swapz_shared_original_view(storage->authority, pin);
+	if (!old || !old->current || epoch <= old->spec.gc_epoch ||
+	    old->map.generation == ~(swapz_u32)0)
+		return -ESTALE;
+	spec = old->spec;
+	spec.gc_epoch = epoch;
+	input = (struct swapz_original_extent_input) {
+		.bytes = storage->gc_copy, .bytes_available = spec.compressed_length,
+		.logical_page = spec.logical_page, .generation = old->map.generation + 1U,
+		.length = spec.compressed_length, .decoded_length = SWAPZ_BLOCK_BYTES,
+		.crc32c = spec.compressed_crc32c, .representation = 0x5a,
+		.codec = spec.codec, .version = spec.codec_version,
+	};
+	error = shared_read(storage, pin, storage->gc_copy, sizeof(storage->gc_copy));
+	return error ? error : shared_write(storage, &spec, &input);
+}
+
+int swapz_shared_storage_close(struct swapz_shared_storage *storage)
+{
+	int error;
+
+	if (!shared_ready(storage))
+		return -EINVAL;
+	error = swapz_shared_original_detach(storage->authority);
+	if (!error)
+		storage->authority = NULL;
+	return error;
+}
+#endif
 #endif

@@ -92,5 +92,33 @@ int swapz_original_storage_relocate(struct swapz_original_storage *,
 int swapz_original_storage_retire(struct swapz_original_storage *,
 	swapz_u64 ticket);
 int swapz_original_storage_close(struct swapz_original_storage *);
+
+#ifdef SWAPZ_SHARED_ORIGINAL_TEST
+/* Independent opt-in shared adapter; the legacy isolated pool is not
+ * instantiated. Caller owns disjoint backing arrays and all buffers,
+ * serialized by the same ordered owner. No live DM route/early TRIM.
+ * Before activation the real DM caller must invalidate caches and check
+ * the retained segment pins on all external discard/reclaim paths. */
+struct swapz_shared_storage {
+	struct swapz_authority *authority;
+	struct swapz_shared_original_owner owner;
+	struct swapz_original_storage_ops ops;
+	struct swapz_tx transaction;
+	struct swapz_original_extent extent;
+	struct swapz_original_extent_record record;
+	swapz_u8 image[SWAPZ_BLOCK_BYTES];
+	swapz_u8 read_image[SWAPZ_BLOCK_BYTES];
+	swapz_u8 gc_copy[SWAPZ_BLOCK_BYTES];
+};
+int swapz_shared_storage_init(struct swapz_shared_storage *,
+	struct swapz_authority *, const struct swapz_original_storage_ops *);
+int swapz_shared_storage_write(struct swapz_shared_storage *,
+	const struct swapz_authority_import_spec *, const struct swapz_original_extent_input *);
+int swapz_shared_storage_read(struct swapz_shared_storage *, swapz_u64,
+	swapz_u8 *, swapz_u32);
+int swapz_shared_storage_relocate(struct swapz_shared_storage *, swapz_u64, swapz_u64);
+int swapz_shared_storage_close(struct swapz_shared_storage *);
+#endif
+
 #endif
 #endif

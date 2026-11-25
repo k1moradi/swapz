@@ -924,6 +924,10 @@ static int swapz_engine_required_read_range_resident(
 			if (logical >= a->logical_pages)
 				return -ERANGE;
 			map = &a->maps[logical];
+#ifdef SWAPZ_SHARED_ORIGINAL_TEST
+			if (map->state & SWAPZ_MAP_ORIGINAL)
+				return -EOPNOTSUPP;
+#endif
 			if (!map->valid || map->raw ||
 			    map->start_block != start_block ||
 			    map->extent_blocks != extent_blocks ||
@@ -2055,6 +2059,10 @@ int swapz_engine_read_page(struct swapz_engine *engine, swapz_u32 logical_page,
 	*payload_length = 0;
 	engine->read_validated_payload_crc32c = 0;
 	observed = engine->authority->maps[logical_page];
+#ifdef SWAPZ_SHARED_ORIGINAL_TEST
+	if (observed.state & SWAPZ_MAP_ORIGINAL)
+		return -EOPNOTSUPP;
+#endif
 	if (!observed.valid || observed.raw ||
 	    (observed.extent_blocks != 1U &&
 	     observed.extent_blocks != 2U && observed.extent_blocks != 4U) ||

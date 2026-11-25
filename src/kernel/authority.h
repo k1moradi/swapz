@@ -165,6 +165,11 @@ struct swapz_finish_segment_delta {
 typedef int (*swapz_dead_segment_recycle_fn)(void *opaque,
 					      swapz_u32 segment);
 
+#ifdef SWAPZ_SHARED_ORIGINAL_TEST
+struct swapz_shared_original_owner;
+#define SWAPZ_MAP_ORIGINAL 0x40U
+#endif
+
 struct swapz_authority {
 	/*
 	 * The ordered DM owner exclusively mutates this array and its sidecars;
@@ -295,6 +300,9 @@ struct swapz_authority {
 		finish_extent_deltas[SWAPZ_MAX_RECORDS];
 	struct swapz_finish_segment_delta
 		finish_segment_deltas[SWAPZ_MAX_RECORDS];
+#ifdef SWAPZ_SHARED_ORIGINAL_TEST
+	struct swapz_shared_original_owner *original;
+#endif
 };
 
 /*
@@ -803,6 +811,59 @@ int swapz_import_lower_close(struct swapz_import_lower_bio_owner *owner);
 #endif /* SWAPZ_ROUND067_IMPORT_DISK_PAYLOAD_TEST */
 #endif /* SWAPZ_ROUND066_IMPORT_DISK_TEST */
 
+#endif
+
+
+#ifdef SWAPZ_SHARED_ORIGINAL_TEST
+#if !defined(SWAPZ_ROUND066_IMPORT_DISK_TEST)
+#error "shared original profile requires the frozen import spec"
+#endif
+#define SWAPZ_SHARED_ORIGINAL_CAPACITY 8U
+#define SWAPZ_SHARED_ORIGINAL_ACTIVE 0U
+
+/* Primary map is the sole current location/generation authority. This
+ * bounded sidecar retains typed metadata and independent decoder leases.
+ * Retired snapshots are not current mappings or live_records references.
+ * All calls require the same serialized sleepable ordered owner; decoder
+ * put is infallible, non-reentrant. Arrays/inputs must be disjoint. */
+struct swapz_shared_original_record {
+	struct swapz_authority_import_spec spec;
+	struct swapz_map map;
+	void *decoder;
+	swapz_u32 sequence;
+	swapz_u8 current;
+	swapz_u8 pins;
+};
+
+struct swapz_shared_original_pin {
+	swapz_u64 id;
+	swapz_u8 index;
+};
+
+struct swapz_shared_original_owner {
+	struct swapz_shared_original_record records[SWAPZ_SHARED_ORIGINAL_CAPACITY];
+	struct swapz_shared_original_pin pins[SWAPZ_SHARED_ORIGINAL_CAPACITY];
+	swapz_u64 next_pin;
+	void *context;
+	void (*decoder_put)(void *, void *);
+};
+
+int swapz_shared_original_attach(struct swapz_authority *,
+	struct swapz_shared_original_owner *, void *, void (*)(void *, void *));
+int swapz_shared_original_detach(struct swapz_authority *);
+int swapz_shared_original_preflight(struct swapz_authority *,
+	const struct swapz_authority_import_spec *, swapz_u32 generation);
+/* Success transfers one independent decoder reference; error leaves it
+ * with the caller. No fabricated lower completion or upper ACK. */
+int swapz_shared_original_finish(struct swapz_authority *, const struct swapz_tx *,
+	const struct swapz_authority_import_spec *, const swapz_u8 *, swapz_u32,
+	swapz_u8 completed_blocks, int lower_error, int flush_completed, void *decoder);
+int swapz_shared_original_pin(struct swapz_authority *, swapz_u32 logical, swapz_u64 *);
+const struct swapz_shared_original_record *swapz_shared_original_view(
+	const struct swapz_authority *, swapz_u64 pin);
+int swapz_shared_original_put(struct swapz_authority *, swapz_u64 pin);
+/* External early TRIM and allocator reuse must consult this too. */
+int swapz_shared_original_segment_pinned(const struct swapz_authority *, swapz_u32);
 #endif
 
 #endif

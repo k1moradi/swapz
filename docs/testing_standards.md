@@ -20475,3 +20475,37 @@ receive the exact codec and compressed length, so the provider can reject
 normal-route lengths above 3568 before hashing and isolate experimental
 4095 admission. Exact new patch/postimage pins and source-order assertions
 must pass; no unchanged rerun or provider activation.
+
+## Round089 Agent5 — shared typed mapping and retained physical GC pins
+
+Under the separate disabled SWAPZ_SHARED_ORIGINAL_TEST guard, use the same
+20-byte primary ordinary map for current original typed location/generation,
+with explicit state bit 0x40 and eight bounded sidecar records/reader tokens.
+The actual single-map publication path supplies liveness, allocator generation,
+sequence index, segment list/count and GC accounting; typed publication uses
+distinct compressed descriptor semantics, never RAW_4096. Validate the old
+typed descriptor against its current map before overwrite or discard; retire
+after the existing fallible preflight, retain independent decoder lease and
+physical segment pin until the final token put. Current live_records counts
+maps only; retired pins separately forbid actual dead segment selection/claim,
+recovery and rotation commit. Ordinary read/required-range helpers must refuse
+typed records rather than treat original LZO1X as ordinary LZ4. Dedicated
+3568-byte ceiling only; original packing and experimental4095 are not enabled.
+Actual decoder dispatch, external DM early TRIM/cache invalidation, source
+authentication and real lower/upper completion integration remain blocked.
+
+The focused host lane requires real push before SHA equals exact sole parent,
+clean main checkout, full history, canonical policy, append-only standards,
+and exact frozen blobs before compilation. Execute GCC C2x and Clang C23 with
+Werror ASan/UBSan over actual authority/engine/storage/extent/codec objects;
+RAM-only lower callbacks and decoder retain counts are test fixtures, never
+evidence of physical durability, decoded content or ACK. Test ordinary RAW
+and compressed overwrite, typed overwrite/discard, exact generations and
+sequence, segment list/count/cost, lower failure rollback, old pinned read
+through actual GC begin/relocate/commit, role exchange refusal until last put,
+exhaustion and ordinary reader refusal. Each semantic mutant must independently
+compile and execute an explicit assertion failure (not compiler/sanitizer).
+Measure storage/sidecar and unchanged map bytes; dedicated4KiB saves no disk
+blocks relative to ordinary raw4KiB. No repeated R088 standalone suite or VM,
+privileged, loaded or physical execution. AUTH0, Phase A BLOCKED, compressed
+handoff, forced RAW and import OFF. No normal Kbuild or active DM changes.
