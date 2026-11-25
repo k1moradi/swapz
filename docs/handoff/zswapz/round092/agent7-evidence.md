@@ -1,0 +1,22 @@
+# Round092 Agent7 — strict reusable original decoder fixture and lifetime
+
+**BLOCKED_PUBLICATION / NO_GO_LIVE.** Task [ae0e4071bf01d1129d59cc9807e1025ecb6fac45](https://github.com/k1moradi/swapz/commit/ae0e4071bf01d1129d59cc9807e1025ecb6fac45), frozen product 2499405464110e6a97f054db5527de54b8aafb3a, pinned original Linux c339f4010dea8b0d754f84ace70cd1b089878ef8. Agent7 only, no peer implementation dependency.
+
+## Actual historical failure
+
+[Round091 corrected job 139168058707](https://github.com/k1moradi/swapz/actions/runs/45603445850/job/139168058707), exact source ba9dd3c8702a71f0c5690a53e436bbe667bcc793, first child GCC C2x diagnostic: `tests/runtime/native/fixtures/round091-original-decoder-handles.c:17:47: error: 'rejected_reads' defined but not used [-Werror=unused-variable]`. Nine staged negative controls succeeded; zero completed source-linked executable tests, Clang NOT_RUN. Earlier ATOMIC_VAR_INIT failure preserved; no unchanged rerun. Artifact 15017217640 is recorded by Agent1 checkpoint; no independent extraction this session.
+
+## Prepared, NOT published source
+
+[Prepared Git commit 573a902aebec47d95a863184930daeafd77da70d](https://github.com/k1moradi/swapz/commit/573a902aebec47d95a863184930daeafd77da70d), sole expected parent `0be70076e1e327b4fc695887a0e146acd92f155e`, three paths only:
+- fixture `tests/runtime/native/fixtures/round091-original-decoder-handles.c` blob d8539d75276dd7a6bf719d702367799a6ef132ce: remove two truly dead global counters (local joined success/decline counts retained); exercise 64 simultaneous live records, 65th ENOSPC and unchanged handle, drain, close with retained record and concurrent entrants, last valid generation, saturated-slot skip; measure handle/slot/owner sizes.
+- verifier `tests/tools/round091-original-decoder-handle-verify.py` blob a5129a5abf20beba3e635301162c530e0f27dfe9: three real single-guard semantic mutants (epoch, generation, saturation) with exact expected fixture assertion and exit77, no compile/sanitizer fault counted as kill; keep strict baseline and original staged pins, retain fuller first child diagnostic, verify full parent bytes in hosted preflight.
+- standards blob 068decfab3d970b95d88c09d8ad799d69359d586: complete literal frozen prefix (e56de5aa3a3193640d358a17e123e62af03c4ae6, 1,810,731 bytes) and actual parent blob 8a605249ee958a99e076ec58ff40df6af0f5f59e (1,813,675 bytes) preserved; 1,314 meaningful bytes appended, postimage 1,814,989 bytes. Raw Git blob hashes independently calculated, full candidate readback verified. Two earlier parent advances reconciled without overwriting peers.
+
+Expected-head nonforce update_ref failed twice with GitHub GraphQL service errors at 15:52:09Z request 3650:13EDEF:AA24558:FAC25A1:6B070424 and 15:52:35Z request 1EE5:2583FE:AF3FD39:102C37FF:6B070442. Fresh canonical main was still 0be70076e1e327b4fc695887a0e146acd92f155e; comparison shows prepared commit not reachable from main, zero exact source Actions runs. Do not claim push/CI or rerun old source. No local pinned compile or execution performed in this session. New counts, sizes and semantic kills NOT_RUN. Preserve prepared Git object; resume only against fresh expected parent, full prefix and actual diff/policy validation.
+
+## Lifetime and capacity audit
+
+Frozen handle header 0f103783aee10d18df5c502fdf553f7ac6a0035d and handle source c01c056fdd7f9f8aa68c7083a9e4e3ca2cdc8d6d unchanged. Separate retained record/read references protect codec owner during synchronous decode; close must refuse live records/reads and externally quiesce all entrants before destroying the mutex or wait queue. A linked-image epoch cannot authenticate across unload/reload; actual GPL symbol linkage and owner/provider lifetime remain unqualified. 64 slots permit only 64 simultaneous records (256 KiB logical uncompressed 4 KiB pages), regardless of churn. Estimated value fields total 22 bytes before alignment, likely 24 on x86-64, not measured. A sustainable larger working set needs authenticated storage sidecar identity and shared retained codec/provider lifetime, with bounded per-record generation/identity and independent transient reader ref; no heap-per-page, arbitrary slot increase, pointer ABA or altered frozen interface. No live integration proof.
+
+AUTH=0; Phase A BLOCKED; direct compressed handoff, forced RAW bypass, import OFF. No branch/PR/force/manual dispatch/VM/physical/privileged/loaded operations.
