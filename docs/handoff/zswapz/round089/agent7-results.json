@@ -1,0 +1,117 @@
+{
+  "round": "089",
+  "agent": 7,
+  "task_sha": "0c893ee7a3ffc158d747c11c96b67fcf0b3efa15",
+  "frozen_baseline": "db9252db73721a768be912965ad4402e332039e8",
+  "tested_commit": "4ef323e0e451dee64c6019ead1044c66fbe15c76",
+  "source_parent": "0c893ee7a3ffc158d747c11c96b67fcf0b3efa15",
+  "evidence_parent": "4ef323e0e451dee64c6019ead1044c66fbe15c76",
+  "status": "FAIL_OR_UNVERIFIED_TERMINAL",
+  "conclusion": "success",
+  "source_blobs": {
+    "tests/tools/round085-original-decode-verify.py": "6beb60c0c42662e11c3fc827dcbdacb1c6167370",
+    ".github/workflows/phase-a-round086-original-typed-decode-host-noauth.yml": "2beaf7c59fd0b912064389c0688b9561fd3c3fc7",
+    "docs/testing_standards.md": "de44823a377d7f31c0925be3648c4810fda4d7aa"
+  },
+  "linux_pin": "c339f4010dea8b0d754f84ace70cd1b089878ef8",
+  "original_compressor": {
+    "pristine": "2a397bb2c661d9c2e4a7a67d5f50f06bfd42f1f2",
+    "first_failed": "a1d860d6085109bc01ed6a593cf369ccbd6edc67",
+    "postimage": "63eb4be2e23caf770649af18f6a7b2b82d79a5e7"
+  },
+  "original_decompressor": {
+    "pristine": "3a2cd9acada4a09ef70a344090d48167c46088a1",
+    "postimage": "8ca9e57ea0d03918e85e4aabcf472fe906b6bc7f",
+    "scope": "isolated noDict only"
+  },
+  "historical_r088": {
+    "tested_commit": "61a1c0cc1de812d3a8240a42d6860992099871f9",
+    "run_id": 45482877472,
+    "job_id": 138760389279,
+    "artifact_id": 14963910496,
+    "first_error": {
+      "compiler": "clang",
+      "stage": "execute-prior-staged-control",
+      "kind": "sanitizer",
+      "sanitizer": "UBSan",
+      "category": "applying zero offset to null pointer",
+      "location": "lz4_decompress.c:89:55",
+      "exit": 1
+    }
+  },
+  "run_id": 45576879949,
+  "job_id": 139076892305,
+  "workflow_url": "https://github.com/k1moradi/swapz/actions/runs/45576879949/job/139076892305",
+  "job_status": "completed",
+  "steps": [
+    {
+      "name": "Set up job",
+      "status": "completed",
+      "conclusion": "success"
+    },
+    {
+      "name": "Run actions/checkout@v4",
+      "status": "completed",
+      "conclusion": "success"
+    },
+    {
+      "name": "Exact main source, actual push parent, policy and candidate postimages",
+      "status": "completed",
+      "conclusion": "success"
+    },
+    {
+      "name": "Run actions/checkout@v4",
+      "status": "completed",
+      "conclusion": "success"
+    },
+    {
+      "name": "Pristine original source and all whole blobs and mutation anchors before compilers",
+      "status": "completed",
+      "conclusion": "success"
+    },
+    {
+      "name": "Actual historical controls and staged noDict LZ4 compressor and decompressor plus pinned LZO1X",
+      "status": "completed",
+      "conclusion": "success"
+    },
+    {
+      "name": "Retain exact host result and bounded first error",
+      "status": "completed",
+      "conclusion": "success"
+    },
+    {
+      "name": "Post Run actions/checkout@v4",
+      "status": "completed",
+      "conclusion": "success"
+    },
+    {
+      "name": "Post Run actions/checkout@v4",
+      "status": "completed",
+      "conclusion": "success"
+    },
+    {
+      "name": "Complete job",
+      "status": "completed",
+      "conclusion": "success"
+    }
+  ],
+  "actual_host_report": null,
+  "first_error": null,
+  "actual_compiler_counts": null,
+  "artifact": {
+    "id": 15003753677,
+    "size_bytes": 5428,
+    "digest": "sha256:b9ec3cf8fc5c081d8e2c2ebc2320691954fdab1c829b0c41a930c2dcfa208375",
+    "url": "https://github.com/k1moradi/swapz/actions/runs/45576879949/artifacts/15003753677",
+    "independently_extracted": false
+  },
+  "local_exact_test": "NOT_RUN_GITHUB_DNS_FAILURE",
+  "source_mapped_authenticated": 0,
+  "phase_a": "BLOCKED",
+  "direct_handoff": false,
+  "forced_raw_bypass": false,
+  "import_active": false,
+  "vm": false,
+  "physical": false,
+  "production_adoption": false
+}
