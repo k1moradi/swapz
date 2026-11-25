@@ -1,6 +1,34 @@
 # Round090 Agent10 — latest frozen R089 compile/link only
 
-**New compile lane published; CI IN_PROGRESS, original compile/link NOT_RUN at evidence snapshot. AUTH0; Phase A BLOCKED; all activation OFF.**
+**Terminal CI FAILURE: 6/6 original directed objects PASS; product compile FAIL; full links NOT_RUN. AUTH0; Phase A BLOCKED; all activation OFF.**
+
+## Terminal CI reconciliation — exact frozen source, attempt 1
+
+**FAILURE at product-directed-object; original directed objects 6/6 PASS, full kernel/module link NOT_RUN.** The snapshot below is historical; this terminal section supersedes its pending fields.
+
+Actual [run 45586120960](https://github.com/k1moradi/swapz/actions/runs/45586120960) / [job 139108048304](https://github.com/k1moradi/swapz/actions/runs/45586120960/job/139108048304) completed failure (exit2). Exact source `d183f5d5127992b406013799bcb81ea3f59e93eb` sole parent `edf44c4417f14b5836b1b5f90157e24916afcde2`. Downloaded [artifact 15008368383](https://github.com/k1moradi/swapz/actions/runs/45586120960/artifacts/15008368383) (28948 bytes), independently verified archive SHA256 `02ce3ad2492be35c9311ac2224072872adf725775b7af7154ea230c72cd36280`, parsed results.json, raw-stage-manifest.json, effective.config and both actual compiler logs. Artifact records object hashes, not object binaries; no independent binary inspection or symbol claim. Raw manifest and final result postimages agree 8/8. Effective config independently hashed `89127024a38ad68dd091c9dd5787bba097b85c8ce69d118cd147a8d7ff4c6d0b`. Compiler GCC 13.3.0 (Ubuntu 13.3.0-6ubuntu2~24.04.1), linker GNU ld 2.42. Canonical policy, pristine checkout, raw apply check/application, all 8 raw postimages and compatibility overlays, scratch Kbuild, ELF header/link/userspace execution, OpenSSL prerequisite and config passed. R089 missing gelf.h is resolved on this runner. One build attempt, no repeat.
+
+| Directed object | Actual result | Git blob of object (CI manifest) |
+|---|---|---|
+| `block/bio.o` | PASS | `38319c8c7f01ab8c5ada67da04a40215cd8e4d95` |
+| `drivers/md/dm.o` | PASS | `73a36c7c423a6e816aa8450587f770f31c571d60` |
+| `mm/page_io.o` | PASS | `4c0d647e5586e89a3563446ec058731dde7682d0` |
+| `mm/round090-swapz/codec.o` | PASS | `bb6b4cbf152d0577e63d8189949904e6fd17037d` |
+| `mm/round090-swapz/zswap-original-ticket.o` | PASS | `49d730547a205882e2eaec61a4284b1b967026d3` |
+| `mm/zswap.o` | PASS | `b3bc89695b3b008339309ac247fa8c0b76cdda4d` |
+
+Compilation scope: exact frozen originals plus authorized scratch-only three field substitutions in DM/core and target; the raw untouched DM source was not compiled. The directed product invocation attempted dm-target.o and authority.o, both failed; remaining product objects, vmlinux link, .ko link, module modpost and final symbol checks NOT_RUN. Host objtool and host modpost tool compilation is not product modpost qualification.
+
+First actual compiler error (runner absolute paths omitted):
+
+```text
+linux/arch/x86/include/asm/current.h:28:17: error: ‘struct swapz_shared_original_record’ has no member named ‘get_current’; did you mean ‘current’?
+authority.c:30:29: note: in expansion of macro ‘current’
+```
+
+Kernel `#define current get_current()` expands the product member token. Actual subsequent diagnostics at authority.c:57,68,230,2563 and 3759/3769; target inclusion fails on authority.h:834 (field declared as function). Frozen [authority.c](https://github.com/k1moradi/swapz/blob/9f7002c896f86226e93f0523b1f6e935de5c6de9/src/kernel/authority.c#L30) blob `73b3e2dc98c6a47315519d3ab650c3d3b0656de7`, [authority.h](https://github.com/k1moradi/swapz/blob/9f7002c896f86226e93f0523b1f6e935de5c6de9/src/kernel/authority.h#L834) blob `c320498ce530c0887bf498cc4d5b121765bb41f3`. Source readback on main before evidence publication showed these same two blobs. Minimal Agent5 correction recommendation: rename the shared-record member to `is_current` (all access/designated initializer/consumer and fixture references) and the local map pointer in swapz_authority_import_current to `current_mapping` (declaration, assignment and generation references); keep native kernel current macro intact; no warning suppression. No new scratch overlay or peer edits authorized for this error. Do not retry frozen failed source. Future genuinely changed integrated baseline needs separate authorization and compilation. This result does not qualify any same-round peer source or runtime path.
+
+Terminal evidence-only update, no duplicate dispatch, no VM boot/build-for-VM, module load, physical mutation or activation. AUTH0, Phase A BLOCKED, compressed handoff/forced RAW/import OFF.
 
 ## Authority and publication
 
