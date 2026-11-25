@@ -34,7 +34,7 @@ PRODUCT.update({
 })
 INPUTS = {
     "tests/tools/round091-original-mm-eviction.patch": "94bb74549c54a614406b71f28a9e8e8c22527d6a",
-    "tests/runtime/native/fixtures/round091-original-mm-eviction.c": "dea76da591f4080a496f443ef69de8f2fb9cc1fc",
+    "tests/runtime/native/fixtures/round091-original-mm-eviction.c": "5bdf06888cc0cbeabe9726d6274b1e6433a07921",
     "tests/tools/round090-original-mm-lifetime.patch": "337f7ff29e72d955251de0c54a9349f20c2586ec",
     "tests/tools/round089-original-mm-carrier.patch": "059d1bf29cf4990e22a2f608d5d552abeec3a8d1",
 }

@@ -103,7 +103,8 @@ int main(void)
 
 	memset(compressed, 0x6d, sizeof(compressed));
 	memset(decoded, 0x29, sizeof(decoded));
-	(void)SHA256(decoded, sizeof(decoded), expected_digest);
+	/* Keep the host SHA wrapper used even when a mutant removes the producer digest. */
+	sha256(decoded, sizeof(decoded), expected_digest);
 
 	CHECK(swapz_mm_pool_codec("lz4") == SWAPZ_TICKET_LZ4, "pool_lz4");
 	CHECK(swapz_mm_pool_codec("lzo") == SWAPZ_TICKET_LZO1X, "pool_lzo");
