@@ -1,0 +1,123 @@
+{
+  "round": "092",
+  "agent": 2,
+  "kind": "fabricated-integrated-evidence-consistency-only",
+  "conclusion": "success",
+  "overall_qualification": "BLOCKED",
+  "source_commit": "62e1ee2dde6ddbdb79ca79fb1c64db31ac6e9b2a",
+  "tested_commit": "62e1ee2dde6ddbdb79ca79fb1c64db31ac6e9b2a",
+  "source_parent": "ae0e4071bf01d1129d59cc9807e1025ecb6fac45",
+  "frozen_product": "2499405464110e6a97f054db5527de54b8aafb3a",
+  "linux_pin": "c339f4010dea8b0d754f84ace70cd1b089878ef8",
+  "source_changed_paths": 5,
+  "source_publication": "verified expected-head single-parent nonforce main, ahead1 behind0, zero deletions",
+  "source_blobs": {
+    "tests/tools/round092-integrated-evidence.py": "30112895e2a8e8859c94fde92d77e8ed6917ca69",
+    "tests/runtime/native/round092-integrated-evidence-test.py": "42f41bd4da13733b5aa2257d83b9c0e655cc0041",
+    "docs/handoff/zswapz/round092/agent2-integrated-admission-plan.md": "c76f738c9caf1142d28d28cd2cb2f6c7b72a9b1c",
+    ".github/workflows/phase-a-round092-integrated-evidence.yml": "9bf36499df34820dc0b6423a37c3dc5f2093e3ad"
+  },
+  "standards": {
+    "parent_blob": "e56de5aa3a3193640d358a17e123e62af03c4ae6",
+    "parent_bytes": 1810731,
+    "new_blob": "a005b7847d924c11a1edb2f9a4253c82a9974681",
+    "new_bytes": 1812180,
+    "appended_bytes": 1449,
+    "complete_parent_prefix_verified": true,
+    "git_blob_hashes_recomputed": true,
+    "full_remote_readback_verified": true,
+    "hosted_prefix": "PASS",
+    "parent_sha256": "3b527df92e49e9779ba8aca8d88b152a49b5fffa32dff5fcff45889966add807",
+    "source_sha256": "0200f0fe7b56afcefd5cf692154e3b4f06496a4fe60d01dbc25db58ec8dd01fc"
+  },
+  "workflow_url": "https://github.com/k1moradi/swapz/actions/runs/45648914333",
+  "ci": {
+    "registered_attempt1_runs": 10,
+    "initial_snapshot": {
+      "success": 1,
+      "in_progress": 9
+    },
+    "focused": {
+      "run_id": 45648914333,
+      "job_id": 139327642033,
+      "status": "completed",
+      "conclusion": "success",
+      "url": "https://github.com/k1moradi/swapz/actions/runs/45648914333/job/139327642033",
+      "actual_unit_tests": 3,
+      "field_negatives": 33,
+      "structure_negatives": 5,
+      "actual_negative_count": 38,
+      "runtime_seconds": 0.012,
+      "first_error": null,
+      "artifacts": []
+    },
+    "mandatory_physical": {
+      "run_id": 45648914261,
+      "job_id": 139327642142,
+      "conclusion": "success",
+      "url": "https://github.com/k1moradi/swapz/actions/runs/45648914261/job/139327642142"
+    },
+    "mandatory_project_goals": {
+      "run_id": 45648914359,
+      "last_observed": "in_progress",
+      "job_ids": [
+        139327642399,
+        139327642737,
+        139327642846,
+        139327642969,
+        139327643065,
+        139327643130
+      ]
+    },
+    "other_run_ids": [
+      45648918015,
+      45648914400,
+      45648914412,
+      45648914310,
+      45648914275,
+      45648914360,
+      45648914478
+    ]
+  },
+  "first_error": null,
+  "local_execution_blocker": "git ls-remote exit 128: Could not resolve host github.com; no local checkout/test/diff; hosted actual test and hygiene PASS",
+  "publication_note": "Initial evidence attempt transient GitHub GraphQL error; checked head and absence of both evidence paths before retry.",
+  "model": {
+    "mode": "integrated_natural_pressure",
+    "proof_kind": "fabricated_model_only",
+    "max_pages": 128,
+    "profiles": "M3568 LZ4=1 LZO1X=2 version1 dictionary-free",
+    "outcomes": [
+      "typed_success",
+      "preclaim_decline",
+      "claimed_error"
+    ],
+    "live_admission": false,
+    "limitations": [
+      "no native collector or authenticated scope ingestion",
+      "no real codec decode, I/O, kernel ordering or physical measurement",
+      "supplied event identities and metrics are modeled assertions",
+      "serial bounded page trace; not proof of concurrency or complete live workload",
+      "exact private RAM reuse or automatic narrow preflight is planned only"
+    ]
+  },
+  "ordinary_helper_unchanged": true,
+  "ordinary_helper_blob": "51caaf3a74a79bcf202ecd7381a369bf9be4297f",
+  "mandatory_ci_unchanged": true,
+  "r091_routing": "ACCEPTED_NOT_REPEATED",
+  "owner_test_needed_now": false,
+  "source_mapped_authenticated": false,
+  "phase_a": "BLOCKED",
+  "direct_compressed_handoff": false,
+  "forced_raw_bypass": false,
+  "import_active": 0,
+  "actual_physical_io": false,
+  "vm_boot": false,
+  "vm_build": false,
+  "loaded_kernel": false,
+  "privileged_operation": false,
+  "branches_created": 0,
+  "prs_created": 0,
+  "force_pushes": 0,
+  "manual_ci_dispatches": 0
+}
