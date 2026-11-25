@@ -1,0 +1,109 @@
+diff --git a/mm/zswap.c b/mm/zswap.c
+--- a/mm/zswap.c
++++ b/mm/zswap.c
+@@ -1049,2 +1049,8 @@
+-	(void)work;
+-	if (swapz_mm_carrier.lease.broker &&
++	(void)work;
++	/* Terminal BIO clears its RCU borrow before this deferred work.
++	 * Readers already retaining a lease finish before reuse.
++	 * Only this worker waits, never ordinary I/O or target dtr.
++	 */
++	if (swapz_mm_carrier.bdev)
++		synchronize_rcu();
++	if (swapz_mm_carrier.lease.broker &&
+@@ -1077,9 +1083,15 @@
+-	const struct swapz_mm_carrier *carrier;
+-
+-	if (!origin || !out || out->broker)
+-		return -EINVAL;
+-	carrier = origin->bi_swapz_original;
+-	if (!swapz_mm_bio_matches(origin, carrier))
+-		return -EOPNOTSUPP;
+-	/* Caller proves origin stable, no foreign lock held. */
+-	return swapz_ticket_retain(&carrier->lease, out);
++	const struct swapz_mm_carrier *carrier;
++	int error = -EOPNOTSUPP;
++
++	if (!origin || !out || out->broker)
++		return -EINVAL;
++	/* Caller owns live mapping and stable BIO geometry. RCU pins the
++	 * carrier only, not the BIO or folio. No foreign lock; kernel
++	 * broker retain uses a non-sleeping spinlock.
++	 */
++	rcu_read_lock();
++	carrier = rcu_dereference(origin->bi_swapz_original);
++	if (swapz_mm_bio_matches(origin, carrier))
++		error = swapz_ticket_retain(&carrier->lease, out);
++	rcu_read_unlock();
++	return error;
+diff --git a/include/linux/blk_types.h b/include/linux/blk_types.h
+--- a/include/linux/blk_types.h
++++ b/include/linux/blk_types.h
+@@ -254,1 +254,1 @@
+-	struct swapz_mm_carrier *bi_swapz_original;
++	struct swapz_mm_carrier __rcu *bi_swapz_original;
+diff --git a/include/linux/bio.h b/include/linux/bio.h
+--- a/include/linux/bio.h
++++ b/include/linux/bio.h
+@@ -11,1 +11,4 @@
+-#include <linux/uio.h>
++#include <linux/uio.h>
++#ifdef CONFIG_SWAPZ_ORIGINAL_MM_CARRIER_TEST
++#include <linux/rcupdate.h>
++#endif
+@@ -158,1 +161,1 @@
+-		bio->bi_swapz_original = NULL;
++		rcu_assign_pointer(bio->bi_swapz_original, NULL);
+@@ -579,1 +582,1 @@
+-		bio->bi_swapz_original = NULL;
++		rcu_assign_pointer(bio->bi_swapz_original, NULL);
+diff --git a/block/bio.c b/block/bio.c
+--- a/block/bio.c
++++ b/block/bio.c
+@@ -183,1 +183,1 @@
+-	bio->bi_swapz_original = NULL;
++	rcu_assign_pointer(bio->bi_swapz_original, NULL);
+@@ -239,1 +239,1 @@
+-	bio->bi_swapz_original = NULL;
++	rcu_assign_pointer(bio->bi_swapz_original, NULL);
+@@ -340,1 +340,1 @@
+-	bio->bi_swapz_original = NULL;
++	rcu_assign_pointer(bio->bi_swapz_original, NULL);
+@@ -386,1 +386,1 @@
+-	bio->bi_swapz_original = NULL;
++	rcu_assign_pointer(bio->bi_swapz_original, NULL);
+@@ -387,1 +387,1 @@
+-	parent->bi_swapz_original = NULL;
++	rcu_assign_pointer(parent->bi_swapz_original, NULL);
+@@ -895,1 +895,1 @@
+-	bio->bi_swapz_original = NULL;
++	rcu_assign_pointer(bio->bi_swapz_original, NULL);
+@@ -1890,1 +1890,1 @@
+-	bio->bi_swapz_original = NULL;
++	rcu_assign_pointer(bio->bi_swapz_original, NULL);
+@@ -1971,1 +1971,1 @@
+-	bio->bi_swapz_original = NULL;
++	rcu_assign_pointer(bio->bi_swapz_original, NULL);
+@@ -2019,1 +2019,1 @@
+-	bio->bi_swapz_original = NULL;
++	rcu_assign_pointer(bio->bi_swapz_original, NULL);
+diff --git a/mm/page_io.c b/mm/page_io.c
+--- a/mm/page_io.c
++++ b/mm/page_io.c
+@@ -640,1 +640,1 @@
+-			bio->bi_swapz_original = sio->original;
++			rcu_assign_pointer(bio->bi_swapz_original, sio->original);
+diff --git a/include/linux/swapz_mm_carrier.h b/include/linux/swapz_mm_carrier.h
+--- a/include/linux/swapz_mm_carrier.h
++++ b/include/linux/swapz_mm_carrier.h
+@@ -92,4 +92,5 @@
+-/* Selected DM core must prove actual clone/table and origin lifetime before
+- * this call; no foreign lock held. Generic clones never inherit the view.
+- * This is only a retained candidate, not claim or source authentication.
+- */
++/* Selected DM core must prove actual clone/table and stable BIO geometry
++ * during a live mapping invocation; a BIO ref alone is insufficient.
++ * No foreign lock held. RCU protects only the carrier until retain returns.
++ * Generic clones never inherit the view; no claim or authentication here.
++ */
