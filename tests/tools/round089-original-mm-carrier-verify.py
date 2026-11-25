@@ -31,13 +31,13 @@ PRISTINE = {
     "include/crypto/sha2.h": "22fbc37ae840796ecbafd5eadf23373e51741f9e",
 }
 POST = {
-    "mm/zswap.c": "7540632d4563a8f28a5b282e97a2629e792e9ce6",
+    "mm/zswap.c": "8bf7e885376c5ef521adf40b1ec736e062067bff",
     "mm/page_io.c": "0b0fe917fa3af5deaef8263274edffbf1a62eedb",
     "include/linux/swap_ops.h": "a39a1921daf6f272e9812eb63b1aa64fec96c57f",
     "include/linux/blk_types.h": "0bf866c1571fe6b4d2e49d01b1b2c87fcf2cf04c",
     "include/linux/bio.h": "f4c5f1730514cf1816ffd5e9787562439dfae236",
     "block/bio.c": "3ba0e12a96ba3235eb909e3b3dd0be44657c6f6e",
-    "include/linux/swapz_mm_carrier.h": "26e7f6ff154bb6111ae699f25cda445d20885b64",
+    "include/linux/swapz_mm_carrier.h": "72100483b42a59db8f522d3f2f4ee10d4f856550",
 }
 PRODUCT = {
     "src/kernel/zswap-original-ticket.h": "2f850b53708c8142ee95d330192c9db1f9ae9418",
@@ -45,7 +45,7 @@ PRODUCT = {
     "src/kernel/codec.h": "e89d316b9cf49f82df0b77648c1be1731607987d",
     "src/kernel/codec.c": "d920dcaac6f2b7de1334d4133770bd649719c66d",
     "src/kernel/Makefile": "ed6e19ae28a84a4a3e92117812adc445d5c2e8e5",
-    "tests/tools/round089-original-mm-carrier.patch": "20b3234d4abc9918bd1554e90fba380495f2b4b1",
+    "tests/tools/round089-original-mm-carrier.patch": "059d1bf29cf4990e22a2f608d5d552abeec3a8d1",
     "tests/runtime/native/fixtures/round089-original-mm-carrier.c": "bc01d5f7b41e16ab3748e9350d715e85887e91cd",
 }
 
@@ -107,7 +107,8 @@ def source_checks(staged):
     header = (staged / "include/linux/swapz_mm_carrier.h").read_text()
     capture = function(zswap, "swapz_mm_capture")
     ordered(capture, ["rcu_access_pointer(swapz_mm_provider)", "swapz_mm_profile",
-                      "swapz_mm_eligible", "swapz_mm_next", "atomic_cmpxchg_acquire",
+                      "swapz_mm_eligible(si->bdev, sector, codec, entry->length)",
+                      "swapz_mm_next", "atomic_cmpxchg_acquire",
                       "swapz_crc32c_bytes", "sha256(original", "entry->original_cookie = sequence",
                       "atomic_set_release"], "eligible-only bounded capture")
     require("u64 original_cookie;" in zswap and "struct swapz_ticket_key original;" not in zswap,
@@ -117,15 +118,18 @@ def source_checks(staged):
     ordered(function(zswap, "swapz_mm_read_source"),
             ["if (!cookie)", "atomic_cmpxchg_acquire", "swapz_mm_source_key",
              "atomic_set_release"], "sparse lookup")
+    require("provider->eligible(bdev, sector, codec, length)" in
+            function(zswap, "swapz_mm_eligible"), "codec/length admission before hash")
     ordered(function(zswap, "swapz_mm_route_try"),
-            ["rcu_read_lock", "rcu_dereference", "provider->lookup",
+            ["rcu_read_lock", "rcu_dereference",
+             "provider->lookup(si->bdev, sector, codec, length, route)",
              "swapz_ticket_broker_try_get", "rcu_read_unlock"], "retained route")
     ordered(function(zswap, "swapz_mm_unregister_provider"),
             ["rcu_assign_pointer(swapz_mm_provider, NULL)", "synchronize_rcu",
              "mutex_unlock"], "provider unregister")
     preerase = function(zswap, "swapz_mm_preerase")
     ordered(preerase, ["swapz_mm_read_source", "atomic_cmpxchg_acquire",
-                       "swapz_mm_route_try", "swapz_ticket_reserve",
+                       "swapz_mm_route_try(si, sector, key.codec, key.length,", "swapz_ticket_reserve",
                        "zs_obj_read_sg_begin", "sg_copy_to_buffer",
                        "zs_obj_read_sg_end", "sha256(decoded", "swapz_ticket_seal",
                        "ctx->original = carrier", "decline:", "swapz_mm_drop(&carrier)"],

@@ -18,7 +18,7 @@ diff --git a/mm/zswap.c b/mm/zswap.c
 +	u64 original_cookie; /* bounded sparse credential, zero means fallback */
 +#endif
 +};
-@@ -856,1 +865,288 @@
+@@ -856,1 +865,291 @@
 -static bool zswap_compress(struct folio *folio, long index,
 +#ifdef CONFIG_SWAPZ_ORIGINAL_MM_CARRIER_TEST
 +/* One optional scratch/carrier slot, NOT a production queue limit. Built-in
@@ -99,7 +99,8 @@ diff --git a/mm/zswap.c b/mm/zswap.c
 +	return error;
 +}
 +
-+static bool swapz_mm_eligible(struct block_device *bdev, sector_t sector)
++static bool swapz_mm_eligible(struct block_device *bdev, sector_t sector,
++			      u8 codec, u32 length)
 +{
 +	const struct swapz_mm_route_provider *provider;
 +	bool eligible = false;
@@ -107,13 +108,13 @@ diff --git a/mm/zswap.c b/mm/zswap.c
 +	rcu_read_lock();
 +	provider = rcu_dereference(swapz_mm_provider);
 +	if (provider)
-+		eligible = provider->eligible(bdev, sector);
++		eligible = provider->eligible(bdev, sector, codec, length);
 +	rcu_read_unlock();
 +	return eligible;
 +}
 +
 +static bool swapz_mm_route_try(struct swap_info_struct *si, sector_t sector,
-+			      struct swapz_mm_route *route,
++			      u8 codec, u32 length, struct swapz_mm_route *route,
 +			      struct swapz_ticket_cap *cap)
 +{
 +	const struct swapz_mm_route_provider *provider;
@@ -121,7 +122,7 @@ diff --git a/mm/zswap.c b/mm/zswap.c
 +
 +	rcu_read_lock();
 +	provider = rcu_dereference(swapz_mm_provider);
-+	if (provider && provider->lookup(si->bdev, sector, route) &&
++	if (provider && provider->lookup(si->bdev, sector, codec, length, route) &&
 +	    route->broker && route->target_session && route->table_epoch &&
 +	    route->target_epoch && route->dm_generation)
 +		retained = !swapz_ticket_broker_try_get(route->broker,
@@ -156,7 +157,8 @@ diff --git a/mm/zswap.c b/mm/zswap.c
 +	    bdev_is_partition(si->bdev))
 +		return;
 +	sector = swap_folio_sector(folio);
-+	if (!sector || (sector & 7) || !swapz_mm_eligible(si->bdev, sector))
++	if (!sector || (sector & 7) ||
++	    !swapz_mm_eligible(si->bdev, sector, codec, entry->length))
 +		return;
 +	sequence = swapz_mm_next(&swapz_mm_store_sequence);
 +	if (!sequence)
@@ -269,7 +271,8 @@ diff --git a/mm/zswap.c b/mm/zswap.c
 +	sector = swap_folio_sector(folio);
 +	if (!sector || (sector & 7) || atomic_cmpxchg_acquire(&swapz_mm_busy, 0, 1))
 +		return;
-+	if (!swapz_mm_route_try(si, sector, &route, &carrier->cap))
++	if (!swapz_mm_route_try(si, sector, key.codec, key.length,
++			       &route, &carrier->cap))
 +		goto decline;
 +	/* Source credential is not writable by the route provider. */
 +	key.target_session = route.target_session;
@@ -308,7 +311,7 @@ diff --git a/mm/zswap.c b/mm/zswap.c
 +#endif
 +
 +static bool zswap_compress(struct folio *folio, long index,
-@@ -923,3 +1219,9 @@
+@@ -923,3 +1222,9 @@
 -	entry->length = dlen;
 -
 -unlock:
@@ -321,7 +324,7 @@ diff --git a/mm/zswap.c b/mm/zswap.c
 +#endif
 +
 +unlock:
-@@ -1058,3 +1360,6 @@
+@@ -1058,3 +1363,6 @@
 -	xa_erase(tree, offset);
 -
 -	count_vm_event(ZSWPWB);
@@ -331,7 +334,7 @@ diff --git a/mm/zswap.c b/mm/zswap.c
 +	xa_erase(tree, offset);
 +
 +	count_vm_event(ZSWPWB);
-@@ -1086,5 +1391,9 @@
+@@ -1086,5 +1394,9 @@
 -	swap_write_submit(&ctx);
 -
 -	return 0;
@@ -346,7 +349,7 @@ diff --git a/mm/zswap.c b/mm/zswap.c
 +	return 0;
 +
 +err:
-@@ -1736,2 +2045,5 @@
+@@ -1736,2 +2048,5 @@
 -	nr_zswap_trees[type] = nr;
 -	zswap_trees[type] = trees;
 +#ifdef CONFIG_SWAPZ_ORIGINAL_MM_CARRIER_TEST
@@ -354,7 +357,7 @@ diff --git a/mm/zswap.c b/mm/zswap.c
 +#endif
 +	nr_zswap_trees[type] = nr;
 +	zswap_trees[type] = trees;
-@@ -1753,2 +2065,5 @@
+@@ -1753,2 +2068,5 @@
 -	kvfree(trees);
 -	nr_zswap_trees[type] = 0;
 +#ifdef CONFIG_SWAPZ_ORIGINAL_MM_CARRIER_TEST
@@ -561,7 +564,7 @@ diff --git a/include/linux/swapz_mm_carrier.h b/include/linux/swapz_mm_carrier.h
 new file mode 100644
 --- /dev/null
 +++ b/include/linux/swapz_mm_carrier.h
-@@ -0,0 +1,109 @@
+@@ -0,0 +1,112 @@
 +/* SPDX-License-Identifier: GPL-2.0-only */
 +#ifndef _LINUX_SWAPZ_MM_CARRIER_H
 +#define _LINUX_SWAPZ_MM_CARRIER_H
@@ -618,11 +621,14 @@ new file mode 100644
 + * sleeping, allocation, broker calls or target pointer escape. lookup must
 + * release all target locks before return; broker storage lives through
 + * unregister + RCU grace and every separately retained capability.
++ * Both callbacks check the exact codec and length against the current
++ * route policy (normal 3568 or separately admitted experimental 4095).
 + * Neither callback is source authentication. No default provider.
 + */
 +struct swapz_mm_route_provider {
-+	bool (*eligible)(struct block_device *, sector_t);
-+	bool (*lookup)(struct block_device *, sector_t, struct swapz_mm_route *);
++	bool (*eligible)(struct block_device *, sector_t, swapz_u8, swapz_u32);
++	bool (*lookup)(struct block_device *, sector_t, swapz_u8, swapz_u32,
++		       struct swapz_mm_route *);
 +};
 +int swapz_mm_register_provider(const struct swapz_mm_route_provider *);
 +int swapz_mm_unregister_provider(const struct swapz_mm_route_provider *);
