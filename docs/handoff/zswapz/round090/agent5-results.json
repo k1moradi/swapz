@@ -1,0 +1,283 @@
+{
+  "round": "090",
+  "agent": 5,
+  "kind": "dormant-ordered-shared-original-reservation-current-regression",
+  "task_commit": "edf44c4417f14b5836b1b5f90157e24916afcde2",
+  "task_parent": "9f7002c896f86226e93f0523b1f6e935de5c6de9",
+  "tested_commit": "a82a9263783f66222c84c349cc46e3b4262ef125",
+  "tested_parent": "e67b1432fbc3811aa9a3a817ba187e171edc5e44",
+  "source_blobs": {
+    "src/kernel/zswap-original-storage.h": "0da04b61921e3dbc0544cb9c9c8168513628997b",
+    "src/kernel/zswap-original-storage.c": "d4feaca4d114cfdb1877df65e68e8d6b52859126",
+    "src/kernel/authority.c": "73b3e2dc98c6a47315519d3ab650c3d3b0656de7",
+    "src/kernel/authority.h": "c320498ce530c0887bf498cc4d5b121765bb41f3",
+    "src/kernel/engine.c": "e7c50c3e78449157439fba9c69e5d23b1c317f4e",
+    "src/kernel/engine.h": "0e505915fb2e1578b4c1cee36e32be8a30f3745f",
+    "src/kernel/codec.c": "d920dcaac6f2b7de1334d4133770bd649719c66d",
+    "src/kernel/codec.h": "e89d316b9cf49f82df0b77648c1be1731607987d",
+    "src/kernel/gc-cost.h": "2d317f1274ef36bdde157ff72acc26a9f7ae1e0e",
+    "src/kernel/zswap-original-extent.c": "c6c5af281a636447126e1a8b67484d954158a300",
+    "src/kernel/zswap-original-extent.h": "34572d01fffe1b276c2d023822266eda29a2137e",
+    "src/kernel/Makefile": "ed6e19ae28a84a4a3e92117812adc445d5c2e8e5",
+    "tests/runtime/native/repository-policy-test.py": "b200e0ca3e20d4c1f37e350ac9ef1c6426179817",
+    "tests/runtime/native/fixtures/round089-shared-original-storage.c": "13ceb16b1e6cc68575c673aba273b534e593eb30",
+    "tests/runtime/native/source-contract-test.py": "e10a7823684fc68c45906899ddc568487c3adf1a",
+    "tests/tools/round089-shared-original-storage-verify.py": "7ec168dd6e83242c2f10027fcae0f8e0c1656dc5",
+    "tests/tools/round088-original-storage-verify.py": "03eac083aa3be14fa275c59036c1b5aa9ee7fc93",
+    "tests/tools/round069-original-bio-authority-joined-verify.py": "3976a2c0bc999411750fadbee30c707ade60a066",
+    "tests/tools/round072-original-mm-bio-authority-decoder-joined-verify.py": "a8b70d596abedf4337f02936f322cfff0bac71c9",
+    "tests/tools/round074-original-owned-copy-lifetime-verify.py": "8186d0e58b03a9e3d7ebac26cbf6fd751e73dbbf",
+    "tests/tools/round069-stage-original-bio-authority-joined.py": "92e485a21be05af211116cda87fdd307ad2e11da",
+    "tests/tools/round072-stage-original-mm-bio-authority-decoder-joined.py": "7673ca2b4bca0dacd456599388a9a79db072667c",
+    "docs/testing_standards.md": "2b04df5f05142a20b5f2a6f26aeb53873e25838e"
+  },
+  "standards_parent_blob": "8f69e16dbdb64bfdbaaa5729d7b2939f7c8fb8c7",
+  "historical_product_commit": "22fbdd0090e302bd17b3811145395ceb0a814a6c",
+  "prior_round089": {
+    "tested_commit": "8089093b8ac23d5430c4d8d6071a34d8692ee193",
+    "run_id": 45577929354,
+    "job_id": 139080377649,
+    "conclusion": "PASS_HOST_ONLY",
+    "checks_per_compiler": 187,
+    "mutants_per_compiler": 6,
+    "artifact_id": 15005966092,
+    "reused_not_rerun": true
+  },
+  "inherited_failures": [
+    {
+      "run_id": 45577929337,
+      "job_id": 139080378372,
+      "first_error": "ROUND074_HOST_FIRST_ERROR unmodified-real-product-blob:authority.c",
+      "exit": 1,
+      "url": "https://github.com/k1moradi/swapz/actions/runs/45577929337/job/139080378372"
+    },
+    {
+      "run_id": 45577929524,
+      "job_id": 139080378515,
+      "first_error": "ROUND073_READER_FIRST_ERROR phase=host cause=current-production-C-host:round069-original-bio-authority-joined-verify.py:FIRST_ERROR round069-joined-original-authority: actual-product-blob-mismatch:authority.c",
+      "exit": 2,
+      "url": "https://github.com/k1moradi/swapz/actions/runs/45577929524/job/139080378515"
+    },
+    {
+      "run_id": 45577929318,
+      "job_id": 139080377773,
+      "first_error": "FIRST_ERROR round069-joined-original-authority: actual-product-blob-mismatch:authority.c",
+      "exit": 1,
+      "url": "https://github.com/k1moradi/swapz/actions/runs/45577929318/job/139080377773"
+    },
+    {
+      "run_id": 45577930338,
+      "job_id": 139080384774,
+      "first_error": "ROUND088_AGENT5_FIRST_ERROR blob mismatch src/kernel/authority.c",
+      "exit": 1,
+      "url": "https://github.com/k1moradi/swapz/actions/runs/45577930338/job/139080384774"
+    },
+    {
+      "run_id": 45577929166,
+      "job_id": 139080377204,
+      "first_error": "FIRST_ERROR round072-original-native-join: ROUND072_JOIN_FIRST_ERROR actual-product-C-blob:authority.c",
+      "exit": 1,
+      "url": "https://github.com/k1moradi/swapz/actions/runs/45577929166/job/139080377204"
+    },
+    {
+      "run_id": 45577929391,
+      "job_id": 139080377991,
+      "first_error": "source-contract-test.py:3289 segment_mapped_pages[new_segment]++ absent from delegating swapz_finish_raw",
+      "exit": 1,
+      "url": "https://github.com/k1moradi/swapz/actions/runs/45577929391/job/139080377991"
+    },
+    {
+      "run_id": 45577929391,
+      "job_id": 139080378842,
+      "first_error": "source-contract-test.py:3289 segment_mapped_pages[new_segment]++ absent from delegating swapz_finish_raw",
+      "exit": 1,
+      "url": "https://github.com/k1moradi/swapz/actions/runs/45577929391/job/139080378842"
+    }
+  ],
+  "workflow_url": "https://github.com/k1moradi/swapz/actions/runs/45586632370",
+  "run_id": 45586632370,
+  "run_status": "queued",
+  "jobs": [
+    {
+      "run_id": 45586632370,
+      "id": 139109788374,
+      "name": "shared admission current strict host",
+      "status": "queued",
+      "conclusion": null,
+      "url": "https://github.com/k1moradi/swapz/actions/runs/45586632370/job/139109788374"
+    },
+    {
+      "run_id": 45586631745,
+      "id": 139109784344,
+      "name": "legacy isolated current host R088",
+      "status": "queued",
+      "conclusion": null,
+      "url": "https://github.com/k1moradi/swapz/actions/runs/45586631745/job/139109784344"
+    },
+    {
+      "run_id": 45586631529,
+      "id": 139109783483,
+      "name": "actual authority joined R069",
+      "status": "queued",
+      "conclusion": null,
+      "url": "https://github.com/k1moradi/swapz/actions/runs/45586631529/job/139109783483"
+    },
+    {
+      "run_id": 45586631546,
+      "id": 139109783860,
+      "name": "owned-copy lifetime R074",
+      "status": "in_progress",
+      "conclusion": null,
+      "url": "https://github.com/k1moradi/swapz/actions/runs/45586631546/job/139109783860"
+    },
+    {
+      "run_id": 45586631689,
+      "id": 139109784981,
+      "name": "original joined host R072",
+      "status": "in_progress",
+      "conclusion": null,
+      "url": "https://github.com/k1moradi/swapz/actions/runs/45586631689/job/139109784981"
+    },
+    {
+      "run_id": 45586631459,
+      "id": 139109783111,
+      "name": "product exact-C x86_64",
+      "status": "queued",
+      "conclusion": null,
+      "url": "https://github.com/k1moradi/swapz/actions/runs/45586631459/job/139109783111"
+    },
+    {
+      "run_id": 45586631459,
+      "id": 139109783415,
+      "name": "product compile-only x86_64",
+      "status": "queued",
+      "conclusion": null,
+      "url": "https://github.com/k1moradi/swapz/actions/runs/45586631459/job/139109783415"
+    },
+    {
+      "run_id": 45586631459,
+      "id": 139109783542,
+      "name": "product compile-only arm64",
+      "status": "queued",
+      "conclusion": null,
+      "url": "https://github.com/k1moradi/swapz/actions/runs/45586631459/job/139109783542"
+    },
+    {
+      "run_id": 45586631459,
+      "id": 139109783627,
+      "name": "product exact-C arm64",
+      "status": "queued",
+      "conclusion": null,
+      "url": "https://github.com/k1moradi/swapz/actions/runs/45586631459/job/139109783627"
+    },
+    {
+      "run_id": 45586631652,
+      "id": 139109784280,
+      "name": "project-goals policy",
+      "status": "queued",
+      "conclusion": null,
+      "url": "https://github.com/k1moradi/swapz/actions/runs/45586631652/job/139109784280"
+    },
+    {
+      "run_id": 45586631652,
+      "id": 139109784463,
+      "name": "project-goals make interface",
+      "status": "queued",
+      "conclusion": null,
+      "url": "https://github.com/k1moradi/swapz/actions/runs/45586631652/job/139109784463"
+    },
+    {
+      "run_id": 45586631652,
+      "id": 139109784531,
+      "name": "project-goals rootless lifecycle",
+      "status": "queued",
+      "conclusion": null,
+      "url": "https://github.com/k1moradi/swapz/actions/runs/45586631652/job/139109784531"
+    },
+    {
+      "run_id": 45586631652,
+      "id": 139109784610,
+      "name": "project-goals native rootless",
+      "status": "queued",
+      "conclusion": null,
+      "url": "https://github.com/k1moradi/swapz/actions/runs/45586631652/job/139109784610"
+    },
+    {
+      "run_id": 45586631652,
+      "id": 139109784669,
+      "name": "project-goals readiness",
+      "status": "queued",
+      "conclusion": null,
+      "url": "https://github.com/k1moradi/swapz/actions/runs/45586631652/job/139109784669"
+    },
+    {
+      "run_id": 45586631652,
+      "id": 139109784893,
+      "name": "project-goals source contract",
+      "status": "queued",
+      "conclusion": null,
+      "url": "https://github.com/k1moradi/swapz/actions/runs/45586631652/job/139109784893"
+    }
+  ],
+  "conclusion": "QUEUED",
+  "first_error": null,
+  "local_first_error": "git ls-remote exit 128: Could not resolve host: github.com",
+  "local_compilers": "NOT_RUN",
+  "actual_compiler_results": null,
+  "actual_mutant_results": null,
+  "planned_mutants_per_compiler": 12,
+  "artifact": null,
+  "push_census": {
+    "automatic_runs": 13,
+    "manual_dispatch": false,
+    "terminal_audit": false,
+    "run_ids": [
+      45586633229,
+      45586631652,
+      45586631477,
+      45586631459,
+      45586631691,
+      45586631788,
+      45586631529,
+      45586631745,
+      45586631785,
+      45586631546,
+      45586632370,
+      45586631685,
+      45586631689
+    ]
+  },
+  "scope": {
+    "credit": "single active actual allocator transaction; open-segment proof; allocator sequence scoped to authority lifetime",
+    "cancel": "actual abort abandons real staged block; old map preserved; no lower write or cursor rewind",
+    "commit": "consume once; actual lower callbacks and flush before map publication; no ACK",
+    "snapshot": "value descriptor and exact bytes; borrowed independently retained decoder while pin held",
+    "legacy_pins": "historical native R069/072 immutable product; actual current host C/H; R088 legacy source equality and unchanged original mutant region",
+    "round073_corrected_ci": "R069 dependency corrected; separate current R073 run not observed",
+    "new_mutations": [
+      "credit_headroom",
+      "credit_identity",
+      "credit_consume",
+      "cancel_abandon",
+      "mapped_count",
+      "typed_sequence"
+    ],
+    "ordinary_map_bytes": 20,
+    "dedicated_disk_gain_vs_raw_bytes": 0,
+    "packed": "NO_GO",
+    "live": "NO_GO",
+    "native_sizes": "NOT_MEASURED",
+    "kernel_and_physical": "NOT_RUN",
+    "source_auth": "NOT_ESTABLISHED",
+    "decoder": "RAM callback lease fixture only; real decoder A7",
+    "source_ci_preflight": "PENDING"
+  },
+  "source_mapped_authenticated": 0,
+  "phase_a": "BLOCKED",
+  "direct_compressed_handoff": "DISABLED",
+  "forced_raw_bypass": "DISABLED",
+  "import_active": 0,
+  "physical_io": false,
+  "native": "NOT_RUN",
+  "normal_kbuild_wiring": false
+}
