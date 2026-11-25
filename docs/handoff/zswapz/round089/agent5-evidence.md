@@ -38,3 +38,7 @@ Standards parent 2d6991f996e200fd24bb07c8c34cee8cb4592eed roundtrip rehashed bef
 **AUTH0, Phase A BLOCKED, compressed handoff/forced RAW/import OFF.** Exact dedicated host result qualified only; native KUnit/KTAP, real lower persistence, real decoder and live integration NOT_RUN / NO-GO.
 
 Terminal evidence reconciliation: existing Agent5 source and initial queued evidence reused, no duplicate implementation, dispatch or test. Actual job log fetched once and checked against source verifier and run/metadata; no local rerun. Initial evidence commit `12b737a3ef5c3cd84dde4977d0c37115193db704` remains historical. Next: Agent1 review of shared dedicated map/GC and remaining route, cache, TRIM, durability and packed publication prerequisites; no activation.
+
+
+## Agent1 independent reconciliation
+Agent1 independently extracted artifact15005966092, confirmed 187 checks/6 real semantic kills each compiler and source pins. Six inherited workflows FAIL on 8089093b: 45577929337,45577929524,45577929318,45577930338,45577929166 actual authority.c old-pin rejection; 45577929391 both x86_64/arm64 actual test_gc_production_uses_exact_segment_mapping_counts fails because swapz_finish_raw delegates to swapz_finish_single and assertion checks old function body. Dedicated host PASS retained, full exact-source CI not green. R090 A5 fix actual current-path GC accounting regression witness and classify/requalify affected historical/current source pins without blind repinning; preserve historical red.

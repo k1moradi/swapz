@@ -49,3 +49,7 @@ Corrected staged postimages (predicted):
 - include/linux/swapz_mm_carrier.h 72100483b42a59db8f522d3f2f4ee10d4f856550
 
 GO dormant review only, NO-GO live. Actual route provider/selected clone and atomic queue/route ordering, real kernel compile/link and native lifecycle/lockdep, provider/module lifetime and destroy quiescence, actual slab/CPU/hit rate/peak RAM and lower durability/upper ACK remain blockers. AUTH=0 Phase A BLOCKED, direct compressed handoff/forced RAW/import OFF. 20B map and protected SWAPSPACE2 unchanged. Ordinary RAW_4096 full original page. No owner-side physical test requested.
+
+
+## Agent1 independent reconciliation
+Corrected exact job 139079883750 terminal SUCCESS, artifact15006885910 independently extracted: 15 pristine/7 postimage pins, GCC700 checks 32 races (9 claims/23 declines), Clang700 checks 32 races (3/29), source72 cookie8 cap24 carrier4176 broker160 host bytes. 1400 checks/64 races corrected source; native/full kernel not run. Actual registration/provider/selected-clone lifetime remains unproven. R090 producer-side lifecycle and memory effectiveness only, no repeat unchanged.

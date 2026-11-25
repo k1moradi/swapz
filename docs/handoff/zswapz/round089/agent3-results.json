@@ -72,7 +72,7 @@
     "exact_full_repo_policy": "NOT_RUN_LOCALLY"
   },
   "github_ci": {
-    "status": "QUEUED",
+    "status": "completed",
     "run_id": 45577530832,
     "workflow_url": "https://github.com/k1moradi/swapz/actions/runs/45577530832",
     "head_sha": "d56ad2e7eb0777b5b957edff3d1dbcc995556ce0",
@@ -80,21 +80,35 @@
       {
         "id": 139079053334,
         "name": "selected-dm-source-host",
-        "status": "QUEUED",
-        "conclusion": null,
+        "status": "completed",
+        "conclusion": "success",
         "url": "https://github.com/k1moradi/swapz/actions/runs/45577530832/job/139079053334"
       }
     ],
     "first_error": null,
-    "exact_source_compilers": "NOT_EXECUTED",
-    "original_patch_application": "NOT_EXECUTED",
+    "exact_source_compilers": "PASS",
+    "original_patch_application": "PASS",
     "automatic_source_census": {
       "total": 28,
-      "queued": 27,
-      "in_progress": 1
-    }
+      "success": 24,
+      "in_progress": 3,
+      "queued": 1
+    },
+    "actual_checks": {
+      "gcc": {
+        "cases": 17,
+        "mutants": 15,
+        "registry": 18
+      },
+      "clang": {
+        "cases": 17,
+        "mutants": 15,
+        "registry": 18
+      }
+    },
+    "canonical_enqueue_anchor": 1
   },
-  "conclusion": "IN_PROGRESS",
+  "conclusion": "PASS_HOST_ONLY_NO_GO_LIVE",
   "first_integration_blocker": "NO_AUTHENTIC_RETAINED_CARRIER_OR_ATOMIC_BROKER_CLAIM_REVOCATION_GENERATION_FENCE",
   "actual_capability_retention": "NOT_IMPLEMENTED",
   "route_registry": "DORMANT_VALUE_ONLY_METADATA",
@@ -116,5 +130,6 @@
     "new_whitespace": "CLEAN_GITHUB_COMMIT_DIFF_INSPECTION",
     "full_exact_git_diff_check": "NOT_RUN_LOCALLY",
     "exact_policy": "NOT_RUN_LOCALLY"
-  }
+  },
+  "agent1_source_review": "Pinned bvec.h bi_offset; patch still uses bi_bvec_done; not compiler-confirmed"
 }

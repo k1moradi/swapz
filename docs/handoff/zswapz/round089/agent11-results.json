@@ -1,7 +1,7 @@
 {
   "round": "089",
   "agent": 11,
-  "conclusion": "IN_PROGRESS_HOST_ONLY_NO_GO_LIVE",
+  "conclusion": "PASS_CORRECTED_HOST_ONLY_NO_GO_LIVE",
   "assignment": "0c893ee7a3ffc158d747c11c96b67fcf0b3efa15",
   "baseline": "db9252db73721a768be912965ad4402e332039e8",
   "source_commit": "63412e4f2fb6f74cb02996947aca48acf047391c",
@@ -47,7 +47,7 @@
     "block/bio.c": "3ba0e12a96ba3235eb909e3b3dd0be44657c6f6e",
     "include/linux/swapz_mm_carrier.h": "72100483b42a59db8f522d3f2f4ee10d4f856550"
   },
-  "postimage_status": "CONNECTOR_PREDICTED",
+  "postimage_status": "ACTUAL_STAGE_PASS",
   "standards_before": "8abec99cffe039a491d615449d389601b44e2fc9",
   "standards_after": "2d6991f996e200fd24bb07c8c34cee8cb4592eed",
   "initial": {
@@ -86,13 +86,33 @@
     "run": 45577781770,
     "job": 139079883750,
     "url": "https://github.com/k1moradi/swapz/actions/runs/45577781770/job/139079883750",
-    "status": "queued",
-    "conclusion": null,
-    "compiler_results": {},
-    "actual_checks": null,
-    "artifact": null,
+    "status": "completed",
+    "conclusion": "success",
+    "compiler_results": {
+      "gcc": {
+        "checks": 700,
+        "races": 32,
+        "claimed": 9,
+        "declined": 23
+      },
+      "clang": {
+        "checks": 700,
+        "races": 32,
+        "claimed": 3,
+        "declined": 29
+      }
+    },
+    "actual_checks": 1400,
+    "artifact": {
+      "id": 15006885910,
+      "archive_independently_inspected": true
+    },
     "first_error": null,
-    "log_markers": []
+    "log_markers": [],
+    "stage": {
+      "pristine_pins": 15,
+      "postimage_pins": 7
+    }
   },
   "memory": {
     "old_key_bytes": 120,

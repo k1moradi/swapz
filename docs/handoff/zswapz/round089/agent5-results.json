@@ -300,5 +300,22 @@
     "live": "NO_GO",
     "packed": "NO_GO",
     "other_automatic_runs": "not independently terminal-audited in this evidence update"
+  },
+  "agent1_artifact_inspected": true,
+  "agent1_inherited_failures": {
+    "runs": [
+      45577929337,
+      45577929524,
+      45577929318,
+      45577930338,
+      45577929166,
+      45577929391
+    ],
+    "pin_failures": 5,
+    "production_accounting_assertion_jobs": [
+      139080377991,
+      139080378842
+    ],
+    "scope": "FOCUSED_PASS_FULL_CI_NOT_GREEN"
   }
 }

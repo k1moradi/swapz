@@ -503,5 +503,13 @@
   "initial_evidence_parse_error": {
     "commit": "c2e4f945ac5042cae35ca7c35e6c1cc6eb621241",
     "cause": "nested console JSON extraction stopped at inner closing brace; terminal job was success, not failure; corrected by parsing complete actual report, no test rerun"
+  },
+  "agent1_artifact_inspected": true,
+  "agent1_scope": {
+    "staged_host_only": true,
+    "gcc_pristine_decoder_readback": true,
+    "clang_pristine_decoder_readback": false,
+    "clang_cross_read_both_directions": false,
+    "production_adoption": false
   }
 }

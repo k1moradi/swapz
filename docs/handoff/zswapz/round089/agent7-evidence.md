@@ -29,3 +29,7 @@ Local git ls-remote failed DNS (Could not resolve host github.com), full pinned-
 ## Terminal census and correction
 
 Initial report c2e4f945ac5042cae35ca7c35e6c1cc6eb621241 used incomplete JSON extraction, so its FAIL_OR_UNVERIFIED_TERMINAL label is superseded by actual terminal SUCCESS and verified full parsed result. No rerun. Source-run census snapshot: 45576880204 in_progress; 45576880306 in_progress; 45576879993 in_progress; 45576880035 in_progress; 45576880289 in_progress; 45576879925 success; 45576879949 success; 45576880089 in_progress; 45576880200 in_progress; 45576880069 success. Other lanes not attributed or qualified by this host-only PASS.
+
+
+## Agent1 independent reconciliation
+Agent1 independently extracted artifact15003753677: GCC/Clang actual staged baseline+19 kills each, three distinct historical UBSan controls reproduced, nine staging negatives, 4098 byte-identical streams/8548267 framed bytes each. GCC cross-read both directions and pristine decoder PASS; Clang staged readback PASS but pristine decoder/cross-read false (pristine UBSan), do not overstate. Isolated noDict staged qualification accepted; no production/upstream adoption or prefix/extDict qualification. R090 actual decoder lease bridge, no duplicate codec corpus rerun without source change.
