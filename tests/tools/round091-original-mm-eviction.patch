@@ -1,0 +1,377 @@
+diff --git a/mm/zswap.c b/mm/zswap.c
+--- a/mm/zswap.c
++++ b/mm/zswap.c
+@@ -217,1 +217,1 @@
+-	u64 original_cookie; /* bounded sparse credential, zero means fallback */
++	u64 original_cookie; /* nonwrapping eligible-store provenance, zero means fallback */
+@@ -885,1 +885,1 @@
+-	return previous + 1;
++	return (u64)(previous + 1);
+@@ -888,8 +888,45 @@
+-static u8 swapz_mm_profile(const char *name, const char *driver)
+-{
+-	if (!strcmp(name, "lz4") && !strcmp(driver, "lz4-scomp"))
+-		return SWAPZ_TICKET_LZ4;
+-	if (!strcmp(name, "lzo") && !strcmp(driver, "lzo-scomp"))
+-		return SWAPZ_TICKET_LZO1X;
+-	return 0;
+-}
++static u8 swapz_mm_profile(const char *name, const char *driver)
++{
++	if (!strcmp(name, "lz4") && !strcmp(driver, "lz4-scomp"))
++		return SWAPZ_TICKET_LZ4;
++	if (!strcmp(name, "lzo") && !strcmp(driver, "lzo-scomp"))
++		return SWAPZ_TICKET_LZO1X;
++	return 0;
++}
++
++static u8 swapz_mm_pool_codec(const char *name)
++{
++	/* The eligible-store cookie was minted only after the original
++	 * request's exact name+driver check. Its entry holds a pool ref,
++	 * so this pool's compressor name cannot change until eviction.
++	 */
++	if (name && !strcmp(name, "lz4"))
++		return SWAPZ_TICKET_LZ4;
++	if (name && !strcmp(name, "lzo"))
++		return SWAPZ_TICKET_LZO1X;
++	return 0;
++}
++
++static bool swapz_mm_eviction_key(struct swapz_ticket_key *key,
++				 u64 sequence, u64 area, u64 offset, u32 type,
++				 u8 codec, u32 length, const u8 *compressed,
++				 const void *decoded)
++{
++	/* Called only after native full-page decode, selected route,
++	 * exact SG copy and exclusive source/folio lifetime checks.
++	 * No hash on stores, unsupported routes or failed source proof.
++	 */
++	if (!key || !sequence || !area || !compressed || !decoded ||
++	    !length || length > 4095 ||
++	    (codec != SWAPZ_TICKET_LZ4 && codec != SWAPZ_TICKET_LZO1X))
++		return false;
++	*key = (struct swapz_ticket_key){
++		.area_epoch = area, .store_sequence = sequence, .slot_offset = offset,
++		.swap_type = type, .length = length, .decoded_length = 4096,
++		.representation = SWAPZ_TICKET_ORIGINAL, .codec = codec,
++		.version = 1
++	};
++	key->crc = swapz_crc32c_bytes(compressed, length);
++	sha256(decoded, 4096, key->sha256);
++	return true;
++}
+@@ -897,10 +934,4 @@
+-/* One bounded contiguous sparse array; each cell is exclusively owned by
+- * one successful try-CAS, never held across SG pin or target callbacks.
+- * Collisions and contention only lose an optional credential. No allocations.
+- */
+-struct swapz_mm_source_cell {
+-	atomic_t busy;
+-	struct swapz_mm_source source;
+-};
+-static struct swapz_mm_source_cell swapz_mm_sources[SWAPZ_MM_SOURCE_SLOTS];
+-static DEFINE_MUTEX(swapz_mm_provider_lock);
++/* No direct-mapped source cache: original entry holds the only
++ * nonwrapping store cookie. One optional carrier remains bounded.
++ */
++static DEFINE_MUTEX(swapz_mm_provider_lock);
+@@ -976,49 +1007,36 @@
+-static void swapz_mm_capture(struct zswap_entry *entry, struct folio *folio,
+-			    long index, struct acomp_req *request, const u8 *bytes)
+-{
+-	struct crypto_acomp *tfm = crypto_acomp_reqtfm(request);
+-	swp_entry_t slot = folio_swap_entry(folio, index);
+-	struct swap_info_struct *si;
+-	struct swapz_mm_source_cell *cell;
+-	struct swapz_mm_source *source;
+-	const void *original;
+-	u64 sequence, area;
+-	sector_t sector;
+-	u8 codec;
+-
+-	/* No provider -> no hash, sequence increment or sparse-array access. */
+-	if (!rcu_access_pointer(swapz_mm_provider) || PAGE_SIZE != 4096 ||
+-	    index || folio_order(folio) || !entry->length || entry->length > 4095)
+-		return;
+-	codec = swapz_mm_profile(crypto_acomp_alg_name(tfm), crypto_acomp_driver_name(tfm));
+-	area = atomic64_read(&swapz_mm_area_epochs[swp_type(slot)]);
+-	if (!codec || !area)
+-		return;
+-	si = __swap_entry_to_info(slot);
+-	if (!si || si->ops != &swap_bdev_ops || !si->bdev ||
+-	    bdev_is_partition(si->bdev))
+-		return;
+-	sector = swap_folio_sector(folio);
+-	if (!sector || (sector & 7) ||
+-	    !swapz_mm_eligible(si->bdev, sector, codec, entry->length))
+-		return;
+-	sequence = swapz_mm_next(&swapz_mm_store_sequence);
+-	if (!sequence)
+-		return;
+-	cell = &swapz_mm_sources[swapz_mm_source_index(sequence)];
+-	if (atomic_cmpxchg_acquire(&cell->busy, 0, 1))
+-		return;
+-	source = &cell->source;
+-	source->cookie = sequence;
+-	source->area_epoch = area;
+-	source->slot_offset = swp_offset(slot);
+-	source->swap_type = swp_type(slot);
+-	source->length = entry->length;
+-	source->codec = codec;
+-	source->crc = swapz_crc32c_bytes(bytes, entry->length);
+-	original = kmap_local_folio(folio, 0);
+-	sha256(original, 4096, source->sha256);
+-	kunmap_local(original);
+-	entry->original_cookie = sequence;
+-	atomic_set_release(&cell->busy, 0);
+-}
++static void swapz_mm_capture(struct zswap_entry *entry, struct folio *folio,
++			    long index, struct zswap_pool *pool,
++			    struct acomp_req *request)
++{
++	struct crypto_acomp *tfm = crypto_acomp_reqtfm(request);
++	swp_entry_t slot = folio_swap_entry(folio, index);
++	struct swap_info_struct *si;
++	sector_t sector;
++	u64 area;
++	u8 codec;
++
++	/* Cookie-only, not authorization. Each accepted stored stream gets
++	 * a nonwrapping identity after exact compressor+route eligibility.
++	 * No per-store SHA, CRC, cell lookup, allocation or extra reclaim.
++	 */
++	if (!rcu_access_pointer(swapz_mm_provider) || PAGE_SIZE != 4096 ||
++	    index || folio_order(folio) || !entry->length || entry->length > 4095 ||
++	    !pool || strcmp(pool->tfm_name, crypto_acomp_alg_name(tfm)))
++		return;
++	codec = swapz_mm_profile(crypto_acomp_alg_name(tfm),
++			       crypto_acomp_driver_name(tfm));
++	if (!codec)
++		return;
++	area = atomic64_read(&swapz_mm_area_epochs[swp_type(slot)]);
++	if (!area)
++		return;
++	si = __swap_entry_to_info(slot);
++	if (!si || si->ops != &swap_bdev_ops || !si->bdev ||
++	    bdev_is_partition(si->bdev))
++		return;
++	sector = swap_folio_sector(folio);
++	if (!sector || (sector & 7) ||
++	    !swapz_mm_eligible(si->bdev, sector, codec, entry->length))
++		return;
++	entry->original_cookie = swapz_mm_next(&swapz_mm_store_sequence);
++}
+@@ -1027,18 +1045,0 @@
+-static bool swapz_mm_read_source(struct zswap_entry *entry, swp_entry_t slot,
+-				 struct swapz_ticket_key *key)
+-{
+-	u64 cookie = entry->original_cookie;
+-	struct swapz_mm_source_cell *cell;
+-	bool valid;
+-
+-	if (!cookie)
+-		return false;
+-	cell = &swapz_mm_sources[swapz_mm_source_index(cookie)];
+-	if (atomic_cmpxchg_acquire(&cell->busy, 0, 1))
+-		return false;
+-	valid = swapz_mm_source_key(&cell->source, cookie,
+-		atomic64_read(&swapz_mm_area_epochs[swp_type(slot)]),
+-		swp_offset(slot), swp_type(slot), entry->length, key);
+-	atomic_set_release(&cell->busy, 0);
+-	return valid;
+-}
+@@ -1100,65 +1100,80 @@
+-static void swapz_mm_preerase(struct zswap_entry *entry, struct folio *folio,
+-			     swp_entry_t slot, struct swap_io_ctx *ctx)
+-{
+-	struct swapz_ticket_key key = {};
+-	struct swapz_mm_route route = {};
+-	struct swapz_mm_carrier *carrier = &swapz_mm_carrier;
+-	struct swap_info_struct *si = __swap_entry_to_info(slot);
+-	struct zswap_pool *pool;
+-	struct scatterlist sg[2];
+-	const void *decoded;
+-	u8 digest[32];
+-	sector_t sector;
+-	unsigned int nents;
+-	size_t copied;
+-
+-	/* Caller already holds locked order-0 swapcache folio, verified the
+-	 * actual XArray entry and successfully decompressed the full page.
+-	 * That lifetime pins source pool/slot/area until original erase.
+-	 */
+-	if (PAGE_SIZE != 4096 || folio_order(folio) || !folio_test_locked(folio) ||
+-	    !folio_test_swapcache(folio) || folio->swap.val != slot.val ||
+-	    !swapz_mm_read_source(entry, slot, &key) ||
+-	    ctx->sio || ctx->original || !si || si->ops != &swap_bdev_ops ||
+-	    !si->bdev || bdev_is_partition(si->bdev))
+-		return;
+-	sector = swap_folio_sector(folio);
+-	if (!sector || (sector & 7) || atomic_cmpxchg_acquire(&swapz_mm_busy, 0, 1))
+-		return;
+-	if (!swapz_mm_route_try(si, sector, key.codec, key.length,
+-			       &route, &carrier->cap))
+-		goto decline;
+-	/* Source credential is not writable by the route provider. */
+-	key.target_session = route.target_session;
+-	key.table_epoch = route.table_epoch;
+-	key.target_epoch = route.target_epoch;
+-	key.logical_page = route.logical_page;
+-	key.dm_generation = route.dm_generation;
+-	if (swapz_ticket_reserve(carrier->cap.broker, &key, &carrier->lease))
+-		goto decline;
+-	pool = zswap_entry_pool(entry);
+-	if (!pool)
+-		goto decline;
+-
+-	zs_obj_read_sg_begin(pool->zs_pool, entry->handle, sg, key.length);
+-	nents = sg_is_last(sg) ? 1 : 2;
+-	copied = sg_copy_to_buffer(sg, nents, carrier->scratch, key.length);
+-	zs_obj_read_sg_end(pool->zs_pool, entry->handle);
+-	/* No SG, pool, XArray, acomp or target lock across seal/CRC/SHA. */
+-	if (copied != key.length)
+-		goto decline;
+-	decoded = kmap_local_folio(folio, 0);
+-	sha256(decoded, 4096, digest);
+-	kunmap_local(decoded);
+-	if (memcmp(digest, key.sha256, sizeof(digest)) ||
+-	    swapz_ticket_seal(&carrier->lease, carrier->scratch, key.length))
+-		goto decline;
+-
+-	carrier->bdev = si->bdev;
+-	carrier->page = &folio->page;
+-	carrier->sector = sector;
+-	ctx->original = carrier; /* producer -> sole original ctx owner */
+-	return;
+-decline:
+-	swapz_mm_drop(&carrier);
+-}
++static void swapz_mm_preerase(struct zswap_entry *entry, struct folio *folio,
++			     swp_entry_t slot, struct swap_io_ctx *ctx)
++{
++	struct swapz_ticket_key key = {};
++	struct swapz_mm_route route = {};
++	struct swapz_mm_carrier *carrier = &swapz_mm_carrier;
++	struct swap_info_struct *si = __swap_entry_to_info(slot);
++	struct zswap_pool *pool;
++	struct scatterlist sg[2];
++	const void *decoded;
++	sector_t sector;
++	unsigned int nents;
++	size_t copied;
++	u64 area;
++	u8 codec;
++
++	/* Native writeback verified entry == xa_load(tree, offset) under
++	 * locked swapcache folio and decoded exactly PAGE_SIZE. The original
++	 * entry pins pool/handle, and the folio pins slot/area until erase.
++	 * Any uncertainty declines to the normal uncompressed full-page BIO.
++	 */
++	if (PAGE_SIZE != 4096 || folio_order(folio) || !folio_test_locked(folio) ||
++	    !folio_test_swapcache(folio) || folio->swap.val != slot.val ||
++	    entry->swpentry.val != slot.val || !entry->original_cookie ||
++	    !entry->length || entry->length > 4095 || ctx->sio || ctx->original ||
++	    !si || si->ops != &swap_bdev_ops || !si->bdev ||
++	    bdev_is_partition(si->bdev))
++		return;
++	area = atomic64_read(&swapz_mm_area_epochs[swp_type(slot)]);
++	pool = zswap_entry_pool(entry);
++	if (!area || !pool)
++		return;
++	codec = swapz_mm_pool_codec(pool->tfm_name);
++	if (!codec)
++		return;
++	sector = swap_folio_sector(folio);
++	if (!sector || (sector & 7) || atomic_cmpxchg_acquire(&swapz_mm_busy, 0, 1))
++		return;
++	if (!swapz_mm_route_try(si, sector, codec, entry->length,
++			       &route, &carrier->cap))
++		goto decline;
++
++	/* Capture the actual original compressed stream, never recompress.
++	 * Exit the zsmalloc SG pin before hash, broker lock or callbacks.
++	 */
++	zs_obj_read_sg_begin(pool->zs_pool, entry->handle, sg, entry->length);
++	nents = sg_is_last(sg) ? 1 : 2;
++	copied = sg_copy_to_buffer(sg, nents, carrier->scratch, entry->length);
++	zs_obj_read_sg_end(pool->zs_pool, entry->handle);
++	if (copied != entry->length)
++		goto decline;
++	decoded = kmap_local_folio(folio, 0);
++	if (!swapz_mm_eviction_key(&key, entry->original_cookie, area,
++				  swp_offset(slot), swp_type(slot), codec,
++				  entry->length, carrier->scratch, decoded)) {
++		kunmap_local(decoded);
++		goto decline;
++	}
++	kunmap_local(decoded);
++
++	/* Complete source provenance before introducing value-only route IDs.
++	 * Reservation/seal failure releases optional credits and never changes
++	 * the original full-page BIO or its normal completion.
++	 */
++	key.target_session = route.target_session;
++	key.table_epoch = route.table_epoch;
++	key.target_epoch = route.target_epoch;
++	key.logical_page = route.logical_page;
++	key.dm_generation = route.dm_generation;
++	if (swapz_ticket_reserve(carrier->cap.broker, &key, &carrier->lease) ||
++	    swapz_ticket_seal(&carrier->lease, carrier->scratch, key.length))
++		goto decline;
++	carrier->bdev = si->bdev;
++	carrier->page = &folio->page;
++	carrier->sector = sector;
++	ctx->original = carrier;
++	return;
++decline:
++	swapz_mm_drop(&carrier);
++}
+@@ -1239,1 +1254,1 @@
+-		swapz_mm_capture(entry, folio, index, acomp_ctx->req, dst);
++		swapz_mm_capture(entry, folio, index, pool, acomp_ctx->req);
+diff --git a/include/linux/swapz_mm_carrier.h b/include/linux/swapz_mm_carrier.h
+--- a/include/linux/swapz_mm_carrier.h
++++ b/include/linux/swapz_mm_carrier.h
+@@ -13,35 +13,6 @@
+-#define SWAPZ_MM_SOURCE_SLOTS 64U
+-/* Source-only credential, never persisted and never contains route fields. */
+-struct swapz_mm_source {
+-	swapz_u64 cookie, area_epoch, slot_offset;
+-	swapz_u32 swap_type, length, crc;
+-	swapz_u8 sha256[32], codec;
+-};
+-
+-static inline unsigned int swapz_mm_source_index(swapz_u64 cookie)
+-{
+-	return (unsigned int)(cookie & (SWAPZ_MM_SOURCE_SLOTS - 1U));
+-}
+-
+-/* Caller exclusively pins the sparse cell. No output on mismatch. */
+-static inline bool swapz_mm_source_key(const struct swapz_mm_source *source,
+-	swapz_u64 cookie, swapz_u64 area, swapz_u64 offset, swapz_u32 type,
+-	swapz_u32 length, struct swapz_ticket_key *key)
+-{
+-	if (!source || !key || !cookie || !area || source->cookie != cookie ||
+-	    source->area_epoch != area || source->slot_offset != offset ||
+-	    source->swap_type != type || source->length != length ||
+-	    !length || length > 4095U ||
+-	    (source->codec != SWAPZ_TICKET_LZ4 && source->codec != SWAPZ_TICKET_LZO1X))
+-		return false;
+-	*key = (struct swapz_ticket_key){
+-		.area_epoch = area, .store_sequence = cookie, .slot_offset = offset,
+-		.swap_type = type, .length = length, .decoded_length = 4096U,
+-		.crc = source->crc, .representation = SWAPZ_TICKET_ORIGINAL,
+-		.codec = source->codec, .version = 1U
+-	};
+-	for (unsigned int index = 0; index < sizeof(key->sha256); ++index)
+-		key->sha256[index] = source->sha256[index];
+-	return true;
+-}
+-
++/* No sparse source cells or per-entry digest. The original locked zswap
++ * entry pins pool, slot, length and compressed handle until native erase.
++ * An 8-byte eligible-store cookie prevents reuse of source identity; an
++ * eviction-only digest is not independent pre-store corruption detection.
++ */
++

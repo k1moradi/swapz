@@ -93,14 +93,21 @@ int swapz_ticket_reserve(struct swapz_ticket_broker *, const struct swapz_ticket
 int swapz_ticket_seal(struct swapz_ticket_ref *, const swapz_u8 *, swapz_u32);
 int swapz_ticket_retain(const struct swapz_ticket_ref *, struct swapz_ticket_ref *);
 int swapz_ticket_claim(const struct swapz_ticket_ref *, const struct swapz_ticket_key *);
-/* The ONLY operation permitted under the selected incoming queue lock.
- * Caller owns a retained stable ref and validates actual selected clone,
- * current route/generation and an infallible FIFO link under that lock.
- * One broker trylock, no callback/wait/other lock; on failure ordinary
- * fallback remains intact. Success must be followed by exactly one link
- * before releasing queue lock. Route invalidation must be ordered with
- * that same queue lock by the target. Retain/put/revoke/close outside it.
- * Broker does not call target or MM while holding its lock. */
+/* The ONLY broker operation permitted under selected incoming queue lock.
+ * An original full-page BIO has already been normally accepted into its
+ * single FIFO descriptor UNCLAIMED. At the ordered head, the sole sleepable
+ * owner must first finish ordinary preparation synchronization and reserve
+ * all optional storage capacity, without holding the queue lock.
+ * Caller then holds a stable retained candidate, verifies selected clone,
+ * origin and current route/generation under queue lock, and tries once.
+ * One broker trylock, no callback, wait, allocation or other foreign lock.
+ * On failure cancel optional reservation outside queue lock, then ordinary
+ * fallback. After success, transfer ownership IN PLACE to that same already
+ * accepted descriptor, infallibly before unlock; never enqueue a second BIO
+ * or link. Route invalidation must be ordered by that same target queue lock.
+ * Retain/put/revoke/close outside it. Broker invokes no target/MM callbacks,
+ * and claim/revoke serialize through the broker lock. Target lock ordering,
+ * storage ownership and native ACK are still unqualified and must fail closed. */
 int swapz_ticket_claim_under_queue_lock(const struct swapz_ticket_ref *,
 	const struct swapz_ticket_key *);
 int swapz_ticket_broker_try_get(struct swapz_ticket_broker *, swapz_u64, swapz_u64,

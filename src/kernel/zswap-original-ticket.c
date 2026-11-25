@@ -309,8 +309,10 @@ int swapz_ticket_claim(const struct swapz_ticket_ref *ref, const struct swapz_ti
 int swapz_ticket_claim_under_queue_lock(const struct swapz_ticket_ref *ref,
 	const struct swapz_ticket_key *key)
 {
-	/* No lock acquisition other than the single trylock in the common
-	 * implementation. Claim/revoke serialize on the same broker lock. */
+	/* Ordered-head variant: capacity is reserved before this call and
+	 * a single already-accepted descriptor receives ownership in place
+	 * after success, still under the caller's queue lock. One broker
+	 * trylock only; claim/revoke serialize on this broker lock. */
 	return ticket_claim_once(ref, key);
 }
 int swapz_ticket_broker_try_get(struct swapz_ticket_broker *broker,

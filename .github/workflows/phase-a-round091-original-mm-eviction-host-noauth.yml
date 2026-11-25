@@ -1,0 +1,82 @@
+name: Round091 Agent11 actual eviction provenance host NO_AUTH
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'src/kernel/zswap-original-ticket.c'
+      - 'src/kernel/zswap-original-ticket.h'
+      - 'tests/tools/round091-original-mm-eviction.patch'
+      - 'tests/tools/round091-original-mm-eviction-verify.py'
+      - 'tests/runtime/native/fixtures/round091-original-mm-eviction.c'
+      - '.github/workflows/phase-a-round091-original-mm-eviction-host-noauth.yml'
+permissions:
+  contents: read
+jobs:
+  eviction-provenance-strict-host:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          path: swapz
+          fetch-depth: 2
+          persist-credentials: false
+      - name: Exact source and canonical policy
+        working-directory: swapz
+        env:
+          SWAPZ_PUSH_BEFORE_SHA: ${{ github.event.before }}
+        run: |
+          set -Eeuo pipefail
+          test "$GITHUB_REF" = refs/heads/main
+          test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
+          test "$(git branch --show-current)" = main
+          test "$(git rev-parse HEAD^)" = "$SWAPZ_PUSH_BEFORE_SHA"
+          test "$(git rev-list --parents -n1 HEAD | wc -w)" -eq 2
+          test -z "$(git status --porcelain --untracked-files=all)"
+          git diff --check HEAD^ HEAD
+          python3 -B tests/runtime/native/repository-policy-test.py --enforce
+      - uses: actions/checkout@v4
+        with:
+          repository: torvalds/linux
+          ref: c339f4010dea8b0d754f84ace70cd1b089878ef8
+          path: linux
+          fetch-depth: 1
+          persist-credentials: false
+          sparse-checkout-cone-mode: false
+          sparse-checkout: |
+            mm/zswap.c
+            mm/page_io.c
+            include/linux/swap_ops.h
+            include/linux/blk_types.h
+            include/linux/bio.h
+            block/bio.c
+            mm/zsmalloc.c
+            mm/swapfile.c
+            mm/swap.h
+            include/linux/swap.h
+            include/linux/bvec.h
+            include/linux/blkdev.h
+            include/linux/workqueue.h
+            include/crypto/acompress.h
+            include/crypto/sha2.h
+      - name: Verify OpenSSL host link prerequisite
+        run: |
+          set -Eeuo pipefail
+          printf '#include <openssl/sha.h>\nint main(void) { unsigned char x[32]; return SHA256((const unsigned char *)"x", 1, x) ? 0 : 1; }\n' > /tmp/r091-a11-crypto.c
+          gcc -std=c11 -Wall -Wextra -Werror /tmp/r091-a11-crypto.c -lcrypto -o /tmp/r091-a11-crypto
+          /tmp/r091-a11-crypto
+      - name: Exact staged source and new original helper host regressions
+        run: |
+          set -Eeuo pipefail
+          umask 077
+          mkdir -p round091-agent11-evidence
+          python3 -B swapz/tests/tools/round091-original-mm-eviction-verify.py \
+            --linux linux --output round091-agent11-evidence
+      - name: Retain exact-source bounded diagnostics
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: round091-agent11-eviction-provenance-host
+          path: round091-agent11-evidence/
+          if-no-files-found: warn
+          retention-days: 14
