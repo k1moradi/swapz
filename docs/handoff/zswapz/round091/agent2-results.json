@@ -1,0 +1,642 @@
+{
+  "round": "091",
+  "agent": 2,
+  "kind": "physical-first-routing-and-admission-plan-only",
+  "conclusion": "IN_PROGRESS",
+  "source_commit": "5ff8ceba8f580715978130bb4585c13ce1a64eb3",
+  "tested_commit": "5ff8ceba8f580715978130bb4585c13ce1a64eb3",
+  "source_parent": "1b31d2b4107bee88c96ccde4b742dcba5858c895",
+  "task_commit": "7fa5e3dc74c67330f341ae39c11dc3f8bff01187",
+  "frozen_product": "e8a3f08000f81dcc3b1bda74b407b9e523ed3bab",
+  "linux_pin": "c339f4010dea8b0d754f84ace70cd1b089878ef8",
+  "source_url": "https://github.com/k1moradi/swapz/commit/5ff8ceba8f580715978130bb4585c13ce1a64eb3",
+  "source_changed_paths": 41,
+  "workflow_url": "https://github.com/k1moradi/swapz/actions/runs/45600205419",
+  "manifest_url": "https://github.com/k1moradi/swapz/blob/5ff8ceba8f580715978130bb4585c13ce1a64eb3/docs/handoff/zswapz/round091/agent2-workflow-manifest.json",
+  "standards": {
+    "parent_blob": "fd47d45042f803e4c7f2f2487ef3b709522d4642",
+    "parent_bytes": 1802004,
+    "source_blob": "8266330377c137fda55c33d22fd5e181a9822214",
+    "source_bytes": 1803180,
+    "complete_parent_byte_prefix_verified": true,
+    "recomputed_git_blob_sha1": true,
+    "remote_full_readback_verified": true,
+    "hosted_sha256_prefix_check": "not_yet_observed"
+  },
+  "migration": {
+    "r088_eof_repaired": 11,
+    "mixed_routes_migrated": 13,
+    "manual_full_preserved": 12,
+    "push_only_archived": 1,
+    "automatic_jobs_retained": 24,
+    "source_path_witnesses": 136,
+    "connector_negative_mutants": 7,
+    "hosted_negative_mutants_expected": 9,
+    "publication_parent_workflows": 112,
+    "candidate_workflows": 125,
+    "auto_vm_candidate_count": 0,
+    "inventory_basis": "Historical R088 manifest plus unchanged Git blobs; ten intervening workflow definitions inspected; full current Git-tree replay pending",
+    "connector_mixed_replay": "PASS",
+    "native_git_diff_check": "NOT_RUN_DNS_EXIT_128",
+    "hosted_full_replay": "NOT_TERMINAL_AT_LAST_JOB_OBSERVATION"
+  },
+  "prior": {
+    "r088_source": "7afebebe0c968c77a77ebe179f6f88974763d25a",
+    "terminal_workflows": 24,
+    "success": 5,
+    "failure": 19,
+    "failed_jobs_inspected": 20,
+    "shared_eof_jobs": 18,
+    "peer_dm_anchor_jobs": 2,
+    "failed_jobs": [
+      {
+        "run_id": 45460995644,
+        "job_id": 138683197675,
+        "exit": 2,
+        "category": "shared_EOF_patch_hygiene",
+        "first_error": ".github/workflows/phase-a-round063-original-mm-dm-carrier-noauth-source-push.yml:183: new blank line at EOF.",
+        "url": "https://github.com/k1moradi/swapz/actions/runs/45460995644/job/138683197675"
+      },
+      {
+        "run_id": 45460995356,
+        "job_id": 138683193803,
+        "exit": 2,
+        "category": "shared_EOF_patch_hygiene",
+        "first_error": ".github/workflows/phase-a-round063-original-mm-dm-carrier-noauth-source-push.yml:183: new blank line at EOF.",
+        "url": "https://github.com/k1moradi/swapz/actions/runs/45460995356/job/138683193803"
+      },
+      {
+        "run_id": 45460995520,
+        "job_id": 138683196285,
+        "exit": 2,
+        "category": "shared_EOF_patch_hygiene",
+        "first_error": ".github/workflows/phase-a-round063-original-mm-dm-carrier-noauth-source-push.yml:183: new blank line at EOF.",
+        "url": "https://github.com/k1moradi/swapz/actions/runs/45460995520/job/138683196285"
+      },
+      {
+        "run_id": 45460995004,
+        "job_id": 138683195457,
+        "exit": 2,
+        "category": "shared_EOF_patch_hygiene",
+        "first_error": ".github/workflows/phase-a-round063-original-mm-dm-carrier-noauth-source-push.yml:183: new blank line at EOF.",
+        "url": "https://github.com/k1moradi/swapz/actions/runs/45460995004/job/138683195457"
+      },
+      {
+        "run_id": 45460995434,
+        "job_id": 138683194415,
+        "exit": 2,
+        "category": "shared_EOF_patch_hygiene",
+        "first_error": ".github/workflows/phase-a-round063-original-mm-dm-carrier-noauth-source-push.yml:183: new blank line at EOF.",
+        "url": "https://github.com/k1moradi/swapz/actions/runs/45460995434/job/138683194415"
+      },
+      {
+        "run_id": 45460994865,
+        "job_id": 138683192911,
+        "exit": 2,
+        "category": "shared_EOF_patch_hygiene",
+        "first_error": ".github/workflows/phase-a-round063-original-mm-dm-carrier-noauth-source-push.yml:183: new blank line at EOF.",
+        "url": "https://github.com/k1moradi/swapz/actions/runs/45460994865/job/138683192911"
+      },
+      {
+        "run_id": 45460995476,
+        "job_id": 138683194134,
+        "exit": 2,
+        "category": "shared_EOF_patch_hygiene",
+        "first_error": ".github/workflows/phase-a-round063-original-mm-dm-carrier-noauth-source-push.yml:183: new blank line at EOF.",
+        "url": "https://github.com/k1moradi/swapz/actions/runs/45460995476/job/138683194134"
+      },
+      {
+        "run_id": 45460995409,
+        "job_id": 138683196363,
+        "exit": 2,
+        "category": "shared_EOF_patch_hygiene",
+        "first_error": ".github/workflows/phase-a-round063-original-mm-dm-carrier-noauth-source-push.yml:183: new blank line at EOF.",
+        "url": "https://github.com/k1moradi/swapz/actions/runs/45460995409/job/138683196363"
+      },
+      {
+        "run_id": 45460995774,
+        "job_id": 138683196391,
+        "exit": 2,
+        "category": "shared_EOF_patch_hygiene",
+        "first_error": ".github/workflows/phase-a-round063-original-mm-dm-carrier-noauth-source-push.yml:183: new blank line at EOF.",
+        "url": "https://github.com/k1moradi/swapz/actions/runs/45460995774/job/138683196391"
+      },
+      {
+        "run_id": 45460995406,
+        "job_id": 138683195974,
+        "exit": 2,
+        "category": "shared_EOF_patch_hygiene",
+        "first_error": ".github/workflows/phase-a-round063-original-mm-dm-carrier-noauth-source-push.yml:183: new blank line at EOF.",
+        "url": "https://github.com/k1moradi/swapz/actions/runs/45460995406/job/138683195974"
+      },
+      {
+        "run_id": 45460994808,
+        "job_id": 138683192645,
+        "exit": 2,
+        "category": "shared_EOF_patch_hygiene",
+        "first_error": ".github/workflows/phase-a-round063-original-mm-dm-carrier-noauth-source-push.yml:183: new blank line at EOF.",
+        "url": "https://github.com/k1moradi/swapz/actions/runs/45460994808/job/138683192645"
+      },
+      {
+        "run_id": 45460995152,
+        "job_id": 138683193711,
+        "exit": 2,
+        "category": "shared_EOF_patch_hygiene",
+        "first_error": ".github/workflows/phase-a-round063-original-mm-dm-carrier-noauth-source-push.yml:183: new blank line at EOF.",
+        "url": "https://github.com/k1moradi/swapz/actions/runs/45460995152/job/138683193711"
+      },
+      {
+        "run_id": 45460995098,
+        "job_id": 138683193074,
+        "exit": 2,
+        "category": "shared_EOF_patch_hygiene",
+        "first_error": ".github/workflows/phase-a-round063-original-mm-dm-carrier-noauth-source-push.yml:183: new blank line at EOF.",
+        "url": "https://github.com/k1moradi/swapz/actions/runs/45460995098/job/138683193074"
+      },
+      {
+        "run_id": 45460995294,
+        "job_id": 138683193602,
+        "exit": 2,
+        "category": "shared_EOF_patch_hygiene",
+        "first_error": ".github/workflows/phase-a-round063-original-mm-dm-carrier-noauth-source-push.yml:183: new blank line at EOF.",
+        "url": "https://github.com/k1moradi/swapz/actions/runs/45460995294/job/138683193602"
+      },
+      {
+        "run_id": 45460995724,
+        "job_id": 138683195826,
+        "exit": 2,
+        "category": "shared_EOF_patch_hygiene",
+        "first_error": ".github/workflows/phase-a-round063-original-mm-dm-carrier-noauth-source-push.yml:183: new blank line at EOF.",
+        "url": "https://github.com/k1moradi/swapz/actions/runs/45460995724/job/138683195826"
+      },
+      {
+        "run_id": 45460995330,
+        "job_id": 138683193683,
+        "exit": 2,
+        "category": "shared_EOF_patch_hygiene",
+        "first_error": ".github/workflows/phase-a-round063-original-mm-dm-carrier-noauth-source-push.yml:183: new blank line at EOF.",
+        "url": "https://github.com/k1moradi/swapz/actions/runs/45460995330/job/138683193683"
+      },
+      {
+        "run_id": 45460994911,
+        "job_id": 138683192835,
+        "exit": 2,
+        "category": "shared_EOF_patch_hygiene",
+        "first_error": ".github/workflows/phase-a-round063-original-mm-dm-carrier-noauth-source-push.yml:183: new blank line at EOF.",
+        "url": "https://github.com/k1moradi/swapz/actions/runs/45460994911/job/138683192835"
+      },
+      {
+        "run_id": 45460994969,
+        "job_id": 138683193922,
+        "exit": 2,
+        "category": "shared_EOF_patch_hygiene",
+        "first_error": ".github/workflows/phase-a-round063-original-mm-dm-carrier-noauth-source-push.yml:183: new blank line at EOF.",
+        "url": "https://github.com/k1moradi/swapz/actions/runs/45460994969/job/138683193922"
+      },
+      {
+        "run_id": 45460994945,
+        "job_id": 138683192578,
+        "exit": 1,
+        "category": "peer_DM_source_contract",
+        "first_error": "FAIL: mutation anchor count changed: list_add_tail(&entry->list, &ctx->incoming);",
+        "url": "https://github.com/k1moradi/swapz/actions/runs/45460994945/job/138683192578"
+      },
+      {
+        "run_id": 45460994945,
+        "job_id": 138683193278,
+        "exit": 1,
+        "category": "peer_DM_source_contract",
+        "first_error": "FAIL: mutation anchor count changed: list_add_tail(&entry->list, &ctx->incoming);",
+        "url": "https://github.com/k1moradi/swapz/actions/runs/45460994945/job/138683193278"
+      }
+    ],
+    "r089_agent9_report": "ABSENT_AT_FROZEN_BASELINE",
+    "r090_agent9_report": "ABSENT_AT_FROZEN_BASELINE",
+    "ownership": "Agent2 successor; not Agent9; remote stop not independently verified"
+  },
+  "ci": {
+    "registered_runs": 31,
+    "counts": {
+      "success": 3,
+      "queued": 27,
+      "in_progress": 1
+    },
+    "runs": [
+      {
+        "id": 45600205882,
+        "path": ".github/workflows/phase-a-round069-original-zswap-stored-source-noauth-source-push.yml",
+        "status": "completed",
+        "conclusion": "success",
+        "attempt": 1,
+        "url": "https://github.com/k1moradi/swapz/actions/runs/45600205882",
+        "head_sha": "5ff8ceba8f580715978130bb4585c13ce1a64eb3"
+      },
+      {
+        "id": 45600205323,
+        "path": ".github/workflows/product-codec.yml",
+        "status": "queued",
+        "conclusion": null,
+        "attempt": 1,
+        "url": "https://github.com/k1moradi/swapz/actions/runs/45600205323",
+        "head_sha": "5ff8ceba8f580715978130bb4585c13ce1a64eb3"
+      },
+      {
+        "id": 45600205498,
+        "path": ".github/workflows/phase-a-zswap-sideband-source-push.yml",
+        "status": "queued",
+        "conclusion": null,
+        "attempt": 1,
+        "url": "https://github.com/k1moradi/swapz/actions/runs/45600205498",
+        "head_sha": "5ff8ceba8f580715978130bb4585c13ce1a64eb3"
+      },
+      {
+        "id": 45600205445,
+        "path": ".github/workflows/phase-a-zswap-original-mm-route-witness-source-push.yml",
+        "status": "queued",
+        "conclusion": null,
+        "attempt": 1,
+        "url": "https://github.com/k1moradi/swapz/actions/runs/45600205445",
+        "head_sha": "5ff8ceba8f580715978130bb4585c13ce1a64eb3"
+      },
+      {
+        "id": 45600205482,
+        "path": ".github/workflows/phase-a-zswap-original-mm-async-lease-negative-source-push.yml",
+        "status": "queued",
+        "conclusion": null,
+        "attempt": 1,
+        "url": "https://github.com/k1moradi/swapz/actions/runs/45600205482",
+        "head_sha": "5ff8ceba8f580715978130bb4585c13ce1a64eb3"
+      },
+      {
+        "id": 45600205321,
+        "path": ".github/workflows/project-goals.yml",
+        "status": "queued",
+        "conclusion": null,
+        "attempt": 1,
+        "url": "https://github.com/k1moradi/swapz/actions/runs/45600205321",
+        "head_sha": "5ff8ceba8f580715978130bb4585c13ce1a64eb3"
+      },
+      {
+        "id": 45600205301,
+        "path": ".github/workflows/phase-a-zswap-original-route-lifetime-source-push.yml",
+        "status": "queued",
+        "conclusion": null,
+        "attempt": 1,
+        "url": "https://github.com/k1moradi/swapz/actions/runs/45600205301",
+        "head_sha": "5ff8ceba8f580715978130bb4585c13ce1a64eb3"
+      },
+      {
+        "id": 45600205448,
+        "path": ".github/workflows/phase-a-zswap-original-writeback-lifetime-source-push.yml",
+        "status": "queued",
+        "conclusion": null,
+        "attempt": 1,
+        "url": "https://github.com/k1moradi/swapz/actions/runs/45600205448",
+        "head_sha": "5ff8ceba8f580715978130bb4585c13ce1a64eb3"
+      },
+      {
+        "id": 45600205343,
+        "path": ".github/workflows/phase-a-zswap-dm-original-table-gc-lifetime-noauth.yml",
+        "status": "queued",
+        "conclusion": null,
+        "attempt": 1,
+        "url": "https://github.com/k1moradi/swapz/actions/runs/45600205343",
+        "head_sha": "5ff8ceba8f580715978130bb4585c13ce1a64eb3"
+      },
+      {
+        "id": 45600205311,
+        "path": ".github/workflows/phase-a-zswap-original-sector-domain-source-push.yml",
+        "status": "queued",
+        "conclusion": null,
+        "attempt": 1,
+        "url": "https://github.com/k1moradi/swapz/actions/runs/45600205311",
+        "head_sha": "5ff8ceba8f580715978130bb4585c13ce1a64eb3"
+      },
+      {
+        "id": 45600205308,
+        "path": ".github/workflows/kernel-debug.yml",
+        "status": "queued",
+        "conclusion": null,
+        "attempt": 1,
+        "url": "https://github.com/k1moradi/swapz/actions/runs/45600205308",
+        "head_sha": "5ff8ceba8f580715978130bb4585c13ce1a64eb3"
+      },
+      {
+        "id": 45600205420,
+        "path": ".github/workflows/phase-a-zswap-original-mm-lifetime-owner-source-push.yml",
+        "status": "queued",
+        "conclusion": null,
+        "attempt": 1,
+        "url": "https://github.com/k1moradi/swapz/actions/runs/45600205420",
+        "head_sha": "5ff8ceba8f580715978130bb4585c13ce1a64eb3"
+      },
+      {
+        "id": 45600205446,
+        "path": ".github/workflows/phase-a-zswap-original-stored-bio-source-scope-source-push.yml",
+        "status": "queued",
+        "conclusion": null,
+        "attempt": 1,
+        "url": "https://github.com/k1moradi/swapz/actions/runs/45600205446",
+        "head_sha": "5ff8ceba8f580715978130bb4585c13ce1a64eb3"
+      },
+      {
+        "id": 45600205585,
+        "path": ".github/workflows/phase-a-round084-original-store-credential-noauth.yml",
+        "status": "queued",
+        "conclusion": null,
+        "attempt": 1,
+        "url": "https://github.com/k1moradi/swapz/actions/runs/45600205585",
+        "head_sha": "5ff8ceba8f580715978130bb4585c13ce1a64eb3"
+      },
+      {
+        "id": 45600205572,
+        "path": ".github/workflows/phase-a-zswap-original-store-bio-provenance-source-push.yml",
+        "status": "queued",
+        "conclusion": null,
+        "attempt": 1,
+        "url": "https://github.com/k1moradi/swapz/actions/runs/45600205572",
+        "head_sha": "5ff8ceba8f580715978130bb4585c13ce1a64eb3"
+      },
+      {
+        "id": 45600205396,
+        "path": ".github/workflows/phase-a-zswap-original-v1-kunit-source-push.yml",
+        "status": "queued",
+        "conclusion": null,
+        "attempt": 1,
+        "url": "https://github.com/k1moradi/swapz/actions/runs/45600205396",
+        "head_sha": "5ff8ceba8f580715978130bb4585c13ce1a64eb3"
+      },
+      {
+        "id": 45600204974,
+        "path": ".github/workflows/systemd-package-readiness.yml",
+        "status": "queued",
+        "conclusion": null,
+        "attempt": 1,
+        "url": "https://github.com/k1moradi/swapz/actions/runs/45600204974",
+        "head_sha": "5ff8ceba8f580715978130bb4585c13ce1a64eb3"
+      },
+      {
+        "id": 45600205560,
+        "path": ".github/workflows/phase-a-zswap-original-bio-clone-copy-source-push.yml",
+        "status": "queued",
+        "conclusion": null,
+        "attempt": 1,
+        "url": "https://github.com/k1moradi/swapz/actions/runs/45600205560",
+        "head_sha": "5ff8ceba8f580715978130bb4585c13ce1a64eb3"
+      },
+      {
+        "id": 45600205493,
+        "path": ".github/workflows/phase-a-zswap-origin-kunit-source-push.yml",
+        "status": "queued",
+        "conclusion": null,
+        "attempt": 1,
+        "url": "https://github.com/k1moradi/swapz/actions/runs/45600205493",
+        "head_sha": "5ff8ceba8f580715978130bb4585c13ce1a64eb3"
+      },
+      {
+        "id": 45600205419,
+        "path": ".github/workflows/phase-a-round091-physical-first-routing.yml",
+        "status": "queued",
+        "conclusion": null,
+        "attempt": 1,
+        "url": "https://github.com/k1moradi/swapz/actions/runs/45600205419",
+        "head_sha": "5ff8ceba8f580715978130bb4585c13ce1a64eb3"
+      },
+      {
+        "id": 45600205227,
+        "path": ".github/workflows/phase-a-round069-original-bio-authority-joined-noauth-source-push.yml",
+        "status": "queued",
+        "conclusion": null,
+        "attempt": 1,
+        "url": "https://github.com/k1moradi/swapz/actions/runs/45600205227",
+        "head_sha": "5ff8ceba8f580715978130bb4585c13ce1a64eb3"
+      },
+      {
+        "id": 45600205368,
+        "path": ".github/workflows/phase-a-round072-original-mm-bio-authority-decoder-noauth-source-push.yml",
+        "status": "queued",
+        "conclusion": null,
+        "attempt": 1,
+        "url": "https://github.com/k1moradi/swapz/actions/runs/45600205368",
+        "head_sha": "5ff8ceba8f580715978130bb4585c13ce1a64eb3"
+      },
+      {
+        "id": 45600205427,
+        "path": ".github/workflows/phase-a-round064-original-slot-current-target-noauth-source-push.yml",
+        "status": "queued",
+        "conclusion": null,
+        "attempt": 1,
+        "url": "https://github.com/k1moradi/swapz/actions/runs/45600205427",
+        "head_sha": "5ff8ceba8f580715978130bb4585c13ce1a64eb3"
+      },
+      {
+        "id": 45600205390,
+        "path": ".github/workflows/phase-a-round068-original-lower-bio-owned-noauth-source-push.yml",
+        "status": "queued",
+        "conclusion": null,
+        "attempt": 1,
+        "url": "https://github.com/k1moradi/swapz/actions/runs/45600205390",
+        "head_sha": "5ff8ceba8f580715978130bb4585c13ce1a64eb3"
+      },
+      {
+        "id": 45600205485,
+        "path": ".github/workflows/phase-a-round067-original-dm-dispatch-runtime-noauth-source-push.yml",
+        "status": "queued",
+        "conclusion": null,
+        "attempt": 1,
+        "url": "https://github.com/k1moradi/swapz/actions/runs/45600205485",
+        "head_sha": "5ff8ceba8f580715978130bb4585c13ce1a64eb3"
+      },
+      {
+        "id": 45600205409,
+        "path": ".github/workflows/physical-evidence-rootless.yml",
+        "status": "queued",
+        "conclusion": null,
+        "attempt": 1,
+        "url": "https://github.com/k1moradi/swapz/actions/runs/45600205409",
+        "head_sha": "5ff8ceba8f580715978130bb4585c13ce1a64eb3"
+      },
+      {
+        "id": 45600205442,
+        "path": ".github/workflows/phase-a-round063-original-mm-dm-carrier-noauth-source-push.yml",
+        "status": "queued",
+        "conclusion": null,
+        "attempt": 1,
+        "url": "https://github.com/k1moradi/swapz/actions/runs/45600205442",
+        "head_sha": "5ff8ceba8f580715978130bb4585c13ce1a64eb3"
+      },
+      {
+        "id": 45600205144,
+        "path": ".github/workflows/phase-a-zswap-composed-source-source-push.yml",
+        "status": "queued",
+        "conclusion": null,
+        "attempt": 1,
+        "url": "https://github.com/k1moradi/swapz/actions/runs/45600205144",
+        "head_sha": "5ff8ceba8f580715978130bb4585c13ce1a64eb3"
+      },
+      {
+        "id": 45600205564,
+        "path": ".github/workflows/phase-a-round072-original-swapcache-provenance-noauth-source-push.yml",
+        "status": "completed",
+        "conclusion": "success",
+        "attempt": 1,
+        "url": "https://github.com/k1moradi/swapz/actions/runs/45600205564",
+        "head_sha": "5ff8ceba8f580715978130bb4585c13ce1a64eb3"
+      },
+      {
+        "id": 45600205166,
+        "path": ".github/workflows/phase-a-zswap-round056-original-clone-provenance-source-push.yml",
+        "status": "completed",
+        "conclusion": "success",
+        "attempt": 1,
+        "url": "https://github.com/k1moradi/swapz/actions/runs/45600205166",
+        "head_sha": "5ff8ceba8f580715978130bb4585c13ce1a64eb3"
+      },
+      {
+        "id": 45600205492,
+        "path": ".github/workflows/phase-a-round071-original-zswap-provenance-noauth-source-push.yml",
+        "status": "in_progress",
+        "conclusion": null,
+        "attempt": 1,
+        "url": "https://github.com/k1moradi/swapz/actions/runs/45600205492",
+        "head_sha": "5ff8ceba8f580715978130bb4585c13ce1a64eb3"
+      }
+    ],
+    "jobs": [
+      {
+        "run_id": 45600205419,
+        "id": 139156847990,
+        "last_observed": "queued",
+        "url": "https://github.com/k1moradi/swapz/actions/runs/45600205419/job/139156847990"
+      },
+      {
+        "run_id": 45600205321,
+        "id": 139156848881,
+        "last_observed": "queued",
+        "url": "https://github.com/k1moradi/swapz/actions/runs/45600205321/job/139156848881"
+      },
+      {
+        "run_id": 45600205321,
+        "id": 139156848339,
+        "last_observed": "queued",
+        "url": "https://github.com/k1moradi/swapz/actions/runs/45600205321/job/139156848339"
+      },
+      {
+        "run_id": 45600205321,
+        "id": 139156848839,
+        "last_observed": "queued",
+        "url": "https://github.com/k1moradi/swapz/actions/runs/45600205321/job/139156848839"
+      },
+      {
+        "run_id": 45600205321,
+        "id": 139156848842,
+        "last_observed": "queued",
+        "url": "https://github.com/k1moradi/swapz/actions/runs/45600205321/job/139156848842"
+      },
+      {
+        "run_id": 45600205321,
+        "id": 139156848867,
+        "last_observed": "queued",
+        "url": "https://github.com/k1moradi/swapz/actions/runs/45600205321/job/139156848867"
+      },
+      {
+        "run_id": 45600205321,
+        "id": 139156849248,
+        "last_observed": "queued",
+        "url": "https://github.com/k1moradi/swapz/actions/runs/45600205321/job/139156849248"
+      },
+      {
+        "run_id": 45600205409,
+        "id": 139156848913,
+        "last_observed": "queued",
+        "url": "https://github.com/k1moradi/swapz/actions/runs/45600205409/job/139156848913"
+      },
+      {
+        "run_id": 45600205323,
+        "id": 139156848016,
+        "last_observed": "queued",
+        "url": "https://github.com/k1moradi/swapz/actions/runs/45600205323/job/139156848016"
+      },
+      {
+        "run_id": 45600205323,
+        "id": 139156848187,
+        "last_observed": "queued",
+        "url": "https://github.com/k1moradi/swapz/actions/runs/45600205323/job/139156848187"
+      },
+      {
+        "run_id": 45600205323,
+        "id": 139156848313,
+        "last_observed": "queued",
+        "url": "https://github.com/k1moradi/swapz/actions/runs/45600205323/job/139156848313"
+      },
+      {
+        "run_id": 45600205323,
+        "id": 139156848345,
+        "last_observed": "queued",
+        "url": "https://github.com/k1moradi/swapz/actions/runs/45600205323/job/139156848345"
+      },
+      {
+        "run_id": 45600205493,
+        "id": 139156849959,
+        "last_observed": "queued",
+        "url": "https://github.com/k1moradi/swapz/actions/runs/45600205493/job/139156849959"
+      },
+      {
+        "run_id": 45600205585,
+        "id": 139156850110,
+        "last_observed": "queued",
+        "url": "https://github.com/k1moradi/swapz/actions/runs/45600205585/job/139156850110"
+      },
+      {
+        "run_id": 45600205882,
+        "id": 139156850827,
+        "last_observed": "success",
+        "url": "https://github.com/k1moradi/swapz/actions/runs/45600205882/job/139156850827"
+      },
+      {
+        "run_id": 45600205564,
+        "id": 139156849938,
+        "last_observed": "success",
+        "url": "https://github.com/k1moradi/swapz/actions/runs/45600205564/job/139156849938"
+      },
+      {
+        "run_id": 45600205166,
+        "id": 139156846399,
+        "last_observed": "success",
+        "url": "https://github.com/k1moradi/swapz/actions/runs/45600205166/job/139156846399"
+      }
+    ],
+    "failed_run_ids": [],
+    "first_errors": "No first new failure independently isolated at snapshot",
+    "artifacts": [],
+    "artifact_status": "No new artifact independently retrieved",
+    "no_manual_dispatch": true,
+    "no_rerun": true
+  },
+  "first_error": null,
+  "local_execution_blocker": "git ls-remote https://github.com/k1moradi/swapz.git refs/heads/main exit 128: Could not resolve host: github.com; no native full checkout or native git diff --check. Supported connector publication plus exact-source automatic CI. Earlier full-census connector call exceeded tool limit; hosted replay required. First evidence publication attempt hit transient GraphQL error; readback confirmed no evidence paths before retry.",
+  "physical": {
+    "ordinary_helper_blob": "51caaf3a74a79bcf202ecd7381a369bf9be4297f",
+    "ordinary_helper_test_blob": "e2d471bd2b33f6a5cc9fdb6b8cf98cb6f0aa7829",
+    "ordinary_wrapper_blob": "bb988de3bb829630aa94d469516be2b6c1f25dc6",
+    "helper_changed": false,
+    "reason": "Existing early refusal and exact private RAM evidence or automatic narrow fast_test preserved. Ordinary zswap-off path is not integrated typed qualification.",
+    "actual_io": false,
+    "integrated_status": "BLOCKED_PENDING_AGENT1_ADMISSION",
+    "exact_current_owner_host_device": "NOT_VERIFIED",
+    "owner_test_needed_now": false
+  },
+  "source_mapped_authenticated": false,
+  "phase_a": "BLOCKED",
+  "direct_compressed_handoff": false,
+  "forced_raw_bypass": false,
+  "import_active": 0,
+  "actual_physical_io": false,
+  "vm_build": false,
+  "vm_boot": false,
+  "loaded_kernel": false,
+  "branches_created": 0,
+  "prs_created": 0,
+  "force_pushes": 0,
+  "manual_ci_dispatches": 0
+}
