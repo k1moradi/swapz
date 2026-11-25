@@ -1,19 +1,6 @@
 name: "Round041 original swapfile nonlinear source sector versus DM target domain (NO LIVE AUTHORITY)"
 on:
-  push:
-    branches: [main]
-    paths:
-      - ".github/workflows/phase-a-zswap-original-sector-domain.yml"
-      - "tests/tools/stage-pinned-linux-zswap-composed.py"
-      - "tests/tools/round038-original-store-provenance-verify.py"
-      - "tests/tools/round039-original-store-gates-verify.py"
-      - "tests/tools/round040-original-lease-verify.py"
-      - "tests/tools/round041-original-sector-verify.py"
-      - "tests/runtime/native/pinned-linux-zswap-composed-source-test.py"
-      - "tests/runtime/native/fixtures/round038-original-store-*.c"
-      - "tests/runtime/native/fixtures/round040-original-lease-*.c"
-      - "tests/runtime/native/fixtures/round041-original-sector-*.c"
-      - "docs/handoff/zswapz/round041/agent2-evidence.md"
+  # Historical native lane: explicit dispatch only.
   workflow_dispatch:
 permissions:
   contents: read

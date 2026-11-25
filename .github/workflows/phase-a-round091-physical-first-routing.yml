@@ -1,0 +1,86 @@
+name: Round091 physical-first routing regression (rootless only)
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/phase-a-round091-physical-first-routing.yml'
+      - 'tests/runtime/native/round091-physical-first-routing-test.mjs'
+      - 'docs/handoff/zswapz/round091/agent2-workflow-manifest.json'
+      - 'docs/handoff/zswapz/round091/agent2-archived-round084-credential-native.yml'
+      - '.github/workflows/phase-a-round063-original-mm-dm-carrier-noauth-source-push.yml'
+      - '.github/workflows/phase-a-round064-original-slot-current-target-noauth-source-push.yml'
+      - '.github/workflows/phase-a-round067-original-dm-dispatch-runtime-noauth-source-push.yml'
+      - '.github/workflows/phase-a-round068-original-lower-bio-owned-noauth-source-push.yml'
+      - '.github/workflows/phase-a-round069-original-bio-authority-joined-noauth-source-push.yml'
+      - '.github/workflows/phase-a-round069-original-zswap-stored-source-noauth-source-push.yml'
+      - '.github/workflows/phase-a-round071-original-zswap-provenance-noauth-source-push.yml'
+      - '.github/workflows/phase-a-round072-original-mm-bio-authority-decoder-noauth-source-push.yml'
+      - '.github/workflows/phase-a-round072-original-swapcache-provenance-noauth-source-push.yml'
+      - '.github/workflows/phase-a-zswap-composed-source-source-push.yml'
+      - '.github/workflows/phase-a-zswap-round056-original-clone-provenance-source-push.yml'
+      - '.github/workflows/phase-a-round084-original-store-credential-noauth.yml'
+      - '.github/workflows/phase-a-zswap-origin-kunit-source-push.yml'
+      - '.github/workflows/phase-a-zswap-origin-kunit.yml'
+      - '.github/workflows/phase-a-zswap-original-bio-clone-copy-source-push.yml'
+      - '.github/workflows/phase-a-zswap-original-bio-clone-copy.yml'
+      - '.github/workflows/phase-a-zswap-original-mm-async-lease-negative-source-push.yml'
+      - '.github/workflows/phase-a-zswap-original-mm-async-lease-negative.yml'
+      - '.github/workflows/phase-a-zswap-original-mm-lifetime-owner-source-push.yml'
+      - '.github/workflows/phase-a-zswap-original-mm-lifetime-owner.yml'
+      - '.github/workflows/phase-a-zswap-original-mm-route-witness-source-push.yml'
+      - '.github/workflows/phase-a-zswap-original-mm-route-witness.yml'
+      - '.github/workflows/phase-a-zswap-original-route-lifetime-source-push.yml'
+      - '.github/workflows/phase-a-zswap-original-route-lifetime.yml'
+      - '.github/workflows/phase-a-zswap-original-sector-domain-source-push.yml'
+      - '.github/workflows/phase-a-zswap-original-sector-domain.yml'
+      - '.github/workflows/phase-a-zswap-original-store-bio-provenance-source-push.yml'
+      - '.github/workflows/phase-a-zswap-original-store-bio-provenance.yml'
+      - '.github/workflows/phase-a-zswap-original-stored-bio-source-scope-source-push.yml'
+      - '.github/workflows/phase-a-zswap-original-stored-bio-source-scope.yml'
+      - '.github/workflows/phase-a-zswap-original-v1-kunit-source-push.yml'
+      - '.github/workflows/phase-a-zswap-original-v1-kunit.yml'
+      - '.github/workflows/phase-a-zswap-original-writeback-lifetime-source-push.yml'
+      - '.github/workflows/phase-a-zswap-original-writeback-lifetime.yml'
+      - '.github/workflows/phase-a-zswap-sideband-source-push.yml'
+      - '.github/workflows/phase-a-zswap-sideband.yml'
+permissions:
+  contents: read
+jobs:
+  exact-rootless-routing:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Verify exact sole-parent source and patch whitespace
+        env:
+          SWAPZ_PUSH_BEFORE_SHA: ${{ github.event.before }}
+        run: |
+          set -euo pipefail
+          test "$GITHUB_REF" = refs/heads/main
+          test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
+          test "$(git rev-parse HEAD^)" = "$SWAPZ_PUSH_BEFORE_SHA"
+          test "$(git rev-list --parents -n1 HEAD | wc -w)" -eq 2
+          test -z "$(git status --porcelain --untracked-files=all)"
+          git diff --check "$SWAPZ_PUSH_BEFORE_SHA" HEAD
+          python3 -B tests/runtime/native/repository-policy-test.py --enforce
+      - name: Verify complete standards byte prefix against actual parent
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import hashlib, subprocess
+          path = "docs/testing_standards.md"
+          before = subprocess.check_output(["git", "show", "HEAD^:" + path])
+          after = subprocess.check_output(["git", "show", "HEAD:" + path])
+          assert after.startswith(before), "standards byte prefix changed"
+          print("standards_before_bytes", len(before), "sha256", hashlib.sha256(before).hexdigest())
+          print("standards_after_bytes", len(after), "sha256", hashlib.sha256(after).hexdigest())
+          PY
+      - name: Replay exact workflow generation and hostile routing mutations
+        run: |
+          set -euo pipefail
+          baseline="$(python3 -c 'import json; print(json.load(open("docs/handoff/zswapz/round091/agent2-workflow-manifest.json"))["plan"]["baseline"])')"
+          git cat-file -e "$baseline^{commit}"
+          node "tests/runtime/native/round091-physical-first-routing-test.mjs" "$GITHUB_SHA"

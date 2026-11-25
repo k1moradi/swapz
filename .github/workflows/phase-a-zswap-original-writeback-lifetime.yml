@@ -1,21 +1,6 @@
 name: "Round042 ORIGINAL STORED zswap writeback entry erase/free lifetime (NO LIVE AUTHORITY)"
 on:
-  push:
-    branches: [main]
-    paths:
-      - ".github/workflows/phase-a-zswap-original-writeback-lifetime.yml"
-      - "tests/tools/stage-pinned-linux-zswap-composed.py"
-      - "tests/tools/round038-original-store-provenance-verify.py"
-      - "tests/tools/round039-original-store-gates-verify.py"
-      - "tests/tools/round040-original-lease-verify.py"
-      - "tests/tools/round041-original-sector-verify.py"
-      - "tests/tools/round042-original-writeback-verify.py"
-      - "tests/runtime/native/pinned-linux-zswap-composed-source-test.py"
-      - "tests/runtime/native/fixtures/round038-original-store-*.c"
-      - "tests/runtime/native/fixtures/round040-original-lease-*.c"
-      - "tests/runtime/native/fixtures/round041-original-sector-*.c"
-      - "tests/runtime/native/fixtures/round042-original-writeback-*.c"
-      - "docs/handoff/zswapz/round042/agent2-evidence.md"
+  # Historical native lane: explicit dispatch only.
   workflow_dispatch:
 permissions:
   contents: read

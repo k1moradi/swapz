@@ -1,0 +1,104 @@
+name: "Round034 original Linux zswap=y booted v1 BIO KUnit (automatic source-only; no VM)"
+on:
+  push:
+    branches: [main]
+    paths:
+      - ".github/workflows/phase-a-zswap-original-v1-kunit.yml"
+      - ".github/workflows/phase-a-zswap-original-v1-kunit-source-push.yml"
+      - "tests/tools/stage-pinned-linux-zswap-composed.py"
+      - "tests/tools/round034-original-v1-kunit-verify.py"
+      - "tests/runtime/native/pinned-linux-zswap-composed-source-test.py"
+      - "tests/runtime/native/fixtures/round034-original-bio-*"
+permissions:
+  contents: read
+jobs:
+  original-uml-zswap-on-v1:
+    name: Original host and source checks only (no VM)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 100
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          path: swapz
+          persist-credentials: false
+      - uses: actions/checkout@v4
+        with:
+          repository: torvalds/linux
+          ref: c339f4010dea8b0d754f84ace70cd1b089878ef8
+          fetch-depth: 1
+          path: linux
+          persist-credentials: false
+      - name: "Install original UML dependencies and strict host compilers"
+        run: |
+          set -euo pipefail
+          sudo apt-get update -qq
+          sudo DEBIAN_FRONTEND=noninteractive apt-get install -y \
+            --no-install-recommends build-essential bc bison flex clang \
+            libelf-dev libssl-dev libncurses-dev liblz4-dev python3 \
+            python3-pyelftools binutils
+      - name: "Source-extracted original provider GCC Clang ASan UBSan and hostile verifier"
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          export ROUND031_PINNED_LINUX="$PWD/linux"
+          logfile="$RUNNER_TEMP/round034-original-host-first-error.log"
+          checked() {
+            local name="$1"
+            shift
+            if "$@" >"$logfile" 2>&1; then
+              echo "ROUND034_REAL_SOURCE_HOST_PASS=$name"
+              tail -n 6 "$logfile"
+            else
+              local code=$?
+              echo "::error::First real source host failure phase=$name exit=$code"
+              tail -n 85 "$logfile"
+              return "$code"
+            fi
+          }
+          test "$(git -C linux rev-parse HEAD)" = c339f4010dea8b0d754f84ace70cd1b089878ef8
+          test "$(git -C swapz rev-parse HEAD)" = "$GITHUB_SHA"
+          test -z "$(git -C linux status --porcelain --untracked-files=all)"
+          test -z "$(git -C swapz status --porcelain --untracked-files=all)"
+          checked adversarial-verifier python3 -B \
+            swapz/tests/tools/round034-original-v1-kunit-verify.py --self-test
+          checked real-original-GCC-Clang-ASan-UBSan python3 -B \
+            swapz/tests/runtime/native/pinned-linux-zswap-composed-source-test.py -v
+      - name: "Compose exact pristine original source and SHA-verify ten changed files"
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          manifest="$RUNNER_TEMP/round034-original-ten-source-manifest.json"
+          python3 -B swapz/tests/tools/stage-pinned-linux-zswap-composed.py \
+            --linux-root linux --manifest "$manifest"
+          python3 - "$manifest" <<'PY'
+          import hashlib, json, pathlib, sys
+          document = json.loads(pathlib.Path(sys.argv[1]).read_text())
+          assert document["source_sha"] == "c339f4010dea8b0d754f84ace70cd1b089878ef8"
+          assert document["original_source_verified"] is True
+          assert document["source_manifest_complete"] is True
+          expected = {"block/Kconfig", "block/Makefile", "block/bio.c",
+                      "block/swap-bio-origin-kunit.c", "include/linux/bio.h",
+                      "include/linux/blk_types.h", "include/linux/swap_ops.h",
+                      "mm/page_io.c", "mm/swapfile.c", "mm/zswap.c"}
+          entries = document["changed_paths"]
+          assert len(entries) == 10 and {item["path"] for item in entries} == expected
+          for entry in entries:
+              data = (pathlib.Path("linux") / entry["path"]).read_bytes()
+              assert hashlib.sha256(data).hexdigest() == entry["staged_sha256"]
+          PY
+          git -C linux diff --check
+          grep -Fq 'swapz_round034_v1_owned_copy_kunit' linux/block/bio.c
+          grep -Fq 'SWAPZ_ROUND034_ORIGINAL_V1_KUNIT_TEST' linux/block/bio.c
+          grep -Fq 'EXPORT_SYMBOL_GPL(swapz_ci_bio_snapshot_lz4_v1)' linux/block/bio.c
+          grep -Fq 'swapz_round031_mm_bio_create(entry, swpentry, tree, offset)' linux/mm/zswap.c
+          echo "ROUND034_GENUINE_ORIGINAL_SOURCE_MANIFEST_SHA256_PASS"
+      - name: Retain source-only evidence (no VM)
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: round034-original-zswap-on-v1-source-only
+          path: |
+            ${{ runner.temp }}/round034-original-host-first-error.log
+            ${{ runner.temp }}/round034-original-ten-source-manifest.json
+          if-no-files-found: ignore
+          retention-days: 7

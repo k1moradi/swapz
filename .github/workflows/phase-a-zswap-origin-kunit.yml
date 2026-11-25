@@ -1,11 +1,6 @@
 name: "Phase A pinned Linux BIO origin KUnit"
 on:
-  push:
-    paths:
-      - ".github/workflows/phase-a-zswap-origin-kunit.yml"
-      - "tests/tools/stage-pinned-linux-zswap-origin.py"
-      - "tests/runtime/native/pinned-linux-zswap-origin-stage-test.py"
-      - "tests/runtime/native/pinned-linux-kunit-uml-config-test.py"
+  # Historical native lane: explicit dispatch only.
   workflow_dispatch:
 permissions:
   contents: read

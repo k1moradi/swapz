@@ -1,13 +1,6 @@
 name: "Round034 original Linux zswap=y booted v1 BIO KUnit"
 on:
-  push:
-    branches: [main]
-    paths:
-      - ".github/workflows/phase-a-zswap-original-v1-kunit.yml"
-      - "tests/tools/stage-pinned-linux-zswap-composed.py"
-      - "tests/tools/round034-original-v1-kunit-verify.py"
-      - "tests/runtime/native/pinned-linux-zswap-composed-source-test.py"
-      - "tests/runtime/native/fixtures/round034-original-bio-*"
+  # Historical native lane: explicit dispatch only.
   workflow_dispatch:
 permissions:
   contents: read

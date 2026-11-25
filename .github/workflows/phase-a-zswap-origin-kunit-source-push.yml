@@ -1,0 +1,144 @@
+name: "Phase A pinned Linux BIO origin KUnit (automatic source-only; no VM)"
+on:
+  push:
+    paths:
+      - ".github/workflows/phase-a-zswap-origin-kunit.yml"
+      - ".github/workflows/phase-a-zswap-origin-kunit-source-push.yml"
+      - "tests/tools/stage-pinned-linux-zswap-origin.py"
+      - "tests/runtime/native/pinned-linux-zswap-origin-stage-test.py"
+      - "tests/runtime/native/pinned-linux-kunit-uml-config-test.py"
+permissions:
+  contents: read
+jobs:
+  modified-source-kunit:
+    name: Original host and source checks only (no VM)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          path: swapz
+          persist-credentials: false
+      - uses: actions/checkout@v4
+        with:
+          repository: torvalds/linux
+          ref: c339f4010dea8b0d754f84ace70cd1b089878ef8
+          path: linux
+          fetch-depth: 1
+          persist-credentials: false
+      - name: "Install Kbuild/UML dependencies"
+        run: |
+          set -euo pipefail
+          sudo apt-get update -qq
+          sudo apt-get install -y --no-install-recommends bc bison flex libelf-dev libssl-dev libncurses-dev
+      - name: "Stage actual Linux source and compile y/n objects only (no VM)"
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          evidence="$RUNNER_TEMP/origin-kunit"
+          mkdir -p "$evidence"
+          log="$RUNNER_TEMP/origin-kunit-command.log"
+          manifest="$evidence/setup.txt"
+          phase=preflight
+          trap 'code=$?; if ((code)); then printf "result=FAIL\nfirst_failure_phase=%s\nfirst_failure_exit=%d\n" "$phase" "$code" >> "$manifest"; fi' EXIT
+          run_checked() {
+            phase="$1"
+            shift
+            printf '%s_command=' "$phase" >> "$manifest"
+            printf '%q ' "$@" >> "$manifest"
+            printf '\n' >> "$manifest"
+            if "$@" > "$log" 2>&1; then
+              printf '%s_exit=0\n' "$phase" >> "$manifest"
+            else
+              code=$?
+              printf '%s_exit=%d\n' "$phase" "$code" >> "$manifest"
+              echo "::error::Pinned origin $phase exited $code"
+              tail -n 25 "$log"
+              return "$code"
+            fi
+          }
+          pinned=c339f4010dea8b0d754f84ace70cd1b089878ef8
+          printf 'linux_sha=%s\nsource_modified=no\n' "$pinned" > "$manifest"
+          [[ "$(git -C linux rev-parse HEAD)" == "$pinned" ]]
+          [[ "$(git -C linux ls-files | wc -l)" -ge 50000 ]]
+          [[ -z "$(git -C linux status --porcelain --untracked-files=all)" ]]
+          [[ "$(git -C swapz rev-parse HEAD)" == "$GITHUB_SHA" ]]
+          [[ -z "$(git -C swapz status --porcelain --untracked-files=all)" ]]
+          run_checked rootless python3 -B swapz/tests/runtime/native/pinned-linux-zswap-origin-stage-test.py
+          run_checked uml_config_rootless python3 -B \
+            swapz/tests/runtime/native/pinned-linux-kunit-uml-config-test.py
+          run_checked stage python3 -B swapz/tests/tools/stage-pinned-linux-zswap-origin.py \
+            --linux-root linux --manifest "$evidence/sources.json" --with-kunit
+          phase=verify_source_hashes
+          python3 - "$evidence/sources.json" <<'PY'
+          import hashlib, json, pathlib, sys
+          entries = json.loads(pathlib.Path(sys.argv[1]).read_text())['changed_paths']
+          expected = {'block/bio.c', 'block/Kconfig', 'block/Makefile',
+                      'block/swap-bio-origin-kunit.c', 'include/linux/bio.h',
+                      'include/linux/blk_types.h', 'include/linux/swap_ops.h',
+                      'mm/zswap.c', 'mm/page_io.c'}
+          assert len(entries) == 9 and {e['path'] for e in entries} == expected
+          for entry in entries:
+              data = (pathlib.Path('linux') / entry['path']).read_bytes()
+              assert hashlib.sha256(data).hexdigest() == entry['staged_sha256']
+          PY
+          [[ "$(git -C linux diff --name-only | LC_ALL=C sort)" == \
+             "$(printf '%s\n' block/Kconfig block/Makefile block/bio.c include/linux/bio.h \
+               include/linux/blk_types.h include/linux/swap_ops.h mm/page_io.c mm/zswap.c)" ]]
+          [[ "$(git -C linux ls-files --others --exclude-standard)" == block/swap-bio-origin-kunit.c ]]
+          # Both profiles have distinct Kbuild and UML outputs; no profile
+          # may reuse a prior kernel, KUnit transcript or success marker.
+          for profile in enabled disabled; do
+            manifest="$evidence/$profile.txt"
+            requested=y
+            selection=--enable
+            if [[ "$profile" == disabled ]]; then requested=n; selection=--disable; fi
+            printf 'result=IN_PROGRESS\nlinux_sha=%s\nsource_modified=yes\nrequested_zswap=%s\ncompiler=%s\n' \
+              "$pinned" "$requested" "$(gcc --version | head -1)" > "$manifest"
+            out="$RUNNER_TEMP/origin-kbuild-$profile"
+            run_checked defconfig make -s -C linux "O=$out" CC=gcc defconfig
+            run_checked scripts_config linux/scripts/config --file "$out/.config" \
+              --enable SWAP --enable KUNIT --enable SWAP_BIO_ORIGIN_KUNIT_TEST "$selection" ZSWAP
+            run_checked olddefconfig make -s -C linux "O=$out" CC=gcc olddefconfig
+            phase=effective_config
+            grep -Fxq CONFIG_SWAP=y "$out/.config"
+            grep -Fxq CONFIG_KUNIT=y "$out/.config"
+            grep -Fxq CONFIG_SWAP_BIO_ORIGIN_KUNIT_TEST=y "$out/.config"
+            if [[ "$profile" == enabled ]]; then
+              grep -Fxq CONFIG_ZSWAP=y "$out/.config"
+            else
+              grep -Fxq '# CONFIG_ZSWAP is not set' "$out/.config"
+            fi
+            printf 'config_sha256=%s\n' "$(sha256sum "$out/.config" | cut -d' ' -f1)" >> "$manifest"
+            run_checked prepare make -s -C linux "O=$out" CC=gcc -j2 W=1 prepare
+            run_checked modified_objects make -s -C linux "O=$out" CC=gcc -j2 W=1 \
+              block/bio.o block/swap-bio-origin-kunit.o mm/page_io.o
+            if [[ "$profile" == enabled ]]; then
+              run_checked zswap_object make -s -C linux "O=$out" CC=gcc -j2 W=1 mm/zswap.o
+            fi
+            for object in block/bio.o block/swap-bio-origin-kunit.o mm/page_io.o; do
+              phase=verify_object
+              [[ -s "$out/$object" ]]
+              printf 'object=%s sha256=%s\n' "$object" \
+                "$(sha256sum "$out/$object" | cut -d' ' -f1)" >> "$manifest"
+            done
+            if [[ "$profile" == enabled ]]; then
+              [[ -s "$out/mm/zswap.o" ]]
+              printf 'object=mm/zswap.o sha256=%s\n' \
+                "$(sha256sum "$out/mm/zswap.o" | cut -d' ' -f1)" >> "$manifest"
+            fi
+            printf 'kunit_executed=no\nresult=PASS_SOURCE_OBJECTS_ONLY\n' >> "$manifest"
+          done
+          manifest="$evidence/setup.txt"
+          printf 'source_modified=yes\nkunit_executed=no\nresult=PASS_SOURCE_OBJECTS_ONLY\n' >> "$manifest"
+      - name: "Retain bounded source and failure evidence"
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: phase-a-bio-origin-source-objects-only
+          path: |
+            ${{ runner.temp }}/origin-kunit/*.txt
+            ${{ runner.temp }}/origin-kunit/*.json
+            ${{ runner.temp }}/origin-kunit/*.log
+          if-no-files-found: ignore
+          retention-days: 7

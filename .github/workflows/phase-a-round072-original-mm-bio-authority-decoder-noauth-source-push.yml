@@ -43,4 +43,3 @@ jobs:
         env:
           SWAPZ_PUSH_BEFORE_SHA: ${{ github.event.before }}
         run: python3 -B tests/runtime/native/repository-policy-test.py --enforce
-

@@ -1,15 +1,7 @@
 name: "Phase A pinned Linux BIO sideband CI-only feasibility"
 
 on:
-  push:
-    branches: [main]
-    paths:
-      - ".github/workflows/phase-a-zswap-sideband.yml"
-      - "tests/tools/stage-pinned-linux-zswap-sideband.py"
-      - "tests/runtime/native/pinned-linux-zswap-sideband-test.py"
-      - "tests/runtime/native/fixtures/round025-sideband-*.c"
-      - "tests/runtime/native/fixtures/round026-sideband-*.py"
-      - "tests/runtime/native/fixtures/round029-sideband-*.c"
+  # Historical native lane: explicit dispatch only.
   workflow_dispatch:
 
 permissions:

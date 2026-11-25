@@ -1,0 +1,217 @@
+{
+  "plan": {
+    "baseline": "7fa5e3dc74c67330f341ae39c11dc3f8bff01187",
+    "eof": [
+      ".github/workflows/phase-a-round063-original-mm-dm-carrier-noauth-source-push.yml",
+      ".github/workflows/phase-a-round064-original-slot-current-target-noauth-source-push.yml",
+      ".github/workflows/phase-a-round067-original-dm-dispatch-runtime-noauth-source-push.yml",
+      ".github/workflows/phase-a-round068-original-lower-bio-owned-noauth-source-push.yml",
+      ".github/workflows/phase-a-round069-original-bio-authority-joined-noauth-source-push.yml",
+      ".github/workflows/phase-a-round069-original-zswap-stored-source-noauth-source-push.yml",
+      ".github/workflows/phase-a-round071-original-zswap-provenance-noauth-source-push.yml",
+      ".github/workflows/phase-a-round072-original-mm-bio-authority-decoder-noauth-source-push.yml",
+      ".github/workflows/phase-a-round072-original-swapcache-provenance-noauth-source-push.yml",
+      ".github/workflows/phase-a-zswap-composed-source-source-push.yml",
+      ".github/workflows/phase-a-zswap-round056-original-clone-provenance-source-push.yml"
+    ],
+    "mixed": [
+      {
+        "path": ".github/workflows/phase-a-round084-original-store-credential-noauth.yml",
+        "id": "original-credential-pinned-uml",
+        "kind": "credential",
+        "companion": ".github/workflows/phase-a-round084-original-store-credential-noauth.yml"
+      },
+      {
+        "path": ".github/workflows/phase-a-zswap-origin-kunit.yml",
+        "id": "modified-source-kunit",
+        "kind": "origin",
+        "companion": ".github/workflows/phase-a-zswap-origin-kunit-source-push.yml"
+      },
+      {
+        "path": ".github/workflows/phase-a-zswap-original-bio-clone-copy.yml",
+        "id": "original-uml-bio-clone-53",
+        "kind": "ordinary",
+        "companion": ".github/workflows/phase-a-zswap-original-bio-clone-copy-source-push.yml"
+      },
+      {
+        "path": ".github/workflows/phase-a-zswap-original-mm-async-lease-negative.yml",
+        "id": "original-uml-async-lease-41",
+        "kind": "ordinary",
+        "companion": ".github/workflows/phase-a-zswap-original-mm-async-lease-negative-source-push.yml"
+      },
+      {
+        "path": ".github/workflows/phase-a-zswap-original-mm-lifetime-owner.yml",
+        "id": "original-uml-route-31",
+        "kind": "ordinary",
+        "companion": ".github/workflows/phase-a-zswap-original-mm-lifetime-owner-source-push.yml"
+      },
+      {
+        "path": ".github/workflows/phase-a-zswap-original-mm-route-witness.yml",
+        "id": "original-uml-route-21",
+        "kind": "ordinary",
+        "companion": ".github/workflows/phase-a-zswap-original-mm-route-witness-source-push.yml"
+      },
+      {
+        "path": ".github/workflows/phase-a-zswap-original-route-lifetime.yml",
+        "id": "original-uml-route-27",
+        "kind": "ordinary",
+        "companion": ".github/workflows/phase-a-zswap-original-route-lifetime-source-push.yml"
+      },
+      {
+        "path": ".github/workflows/phase-a-zswap-original-sector-domain.yml",
+        "id": "original-uml-sector-domain-46",
+        "kind": "ordinary",
+        "companion": ".github/workflows/phase-a-zswap-original-sector-domain-source-push.yml"
+      },
+      {
+        "path": ".github/workflows/phase-a-zswap-original-store-bio-provenance.yml",
+        "id": "original-uml-store-36",
+        "kind": "ordinary",
+        "companion": ".github/workflows/phase-a-zswap-original-store-bio-provenance-source-push.yml"
+      },
+      {
+        "path": ".github/workflows/phase-a-zswap-original-stored-bio-source-scope.yml",
+        "id": "original-uml-original-stored-source-scope-55",
+        "kind": "ordinary",
+        "companion": ".github/workflows/phase-a-zswap-original-stored-bio-source-scope-source-push.yml"
+      },
+      {
+        "path": ".github/workflows/phase-a-zswap-original-v1-kunit.yml",
+        "id": "original-uml-zswap-on-v1",
+        "kind": "v1",
+        "companion": ".github/workflows/phase-a-zswap-original-v1-kunit-source-push.yml"
+      },
+      {
+        "path": ".github/workflows/phase-a-zswap-original-writeback-lifetime.yml",
+        "id": "original-uml-stored-writeback-50",
+        "kind": "ordinary",
+        "companion": ".github/workflows/phase-a-zswap-original-writeback-lifetime-source-push.yml"
+      },
+      {
+        "path": ".github/workflows/phase-a-zswap-sideband.yml",
+        "id": "pinned-bio-uml-executed-kunit",
+        "kind": "sideband",
+        "companion": ".github/workflows/phase-a-zswap-sideband-source-push.yml"
+      }
+    ],
+    "archive": "docs/handoff/zswapz/round091/agent2-archived-round084-credential-native.yml"
+  },
+  "mixed_connector_replay": {
+    "mixed": 13,
+    "manual": 12,
+    "archived": 1,
+    "preservedJobs": 24,
+    "witnesses": 136
+  },
+  "negative_mutants": [
+    "restore-automatic-VM",
+    "lose-manual",
+    "lose-rootless",
+    "lose-source-filter",
+    "alter-compile-job",
+    "mutate-archive",
+    "blank-new-companion"
+  ],
+  "connector_scope": "13 exact frozen mixed workflows, 136 path witnesses, seven targeted negative mutations; 11 exact single-LF EOF repairs. Full Git tree, exact changed-path census and nine negative mutations pending hosted replay.",
+  "r088_manifest": "docs/handoff/zswapz/round088/agent9-workflow-manifest.json",
+  "inputs": [
+    {
+      "path": ".github/workflows/phase-a-round084-original-store-credential-noauth.yml",
+      "blob": "7731bf0f9a84f44a8d99fd9c30aa81b862bc5bbc"
+    },
+    {
+      "path": ".github/workflows/phase-a-zswap-origin-kunit.yml",
+      "blob": "0831bca5ffd34141b28f0b86db5eaac71d90e9ef"
+    },
+    {
+      "path": ".github/workflows/phase-a-zswap-original-bio-clone-copy.yml",
+      "blob": "ae862bb647d0e5b3a67cd03f406dd7109ae70b37"
+    },
+    {
+      "path": ".github/workflows/phase-a-zswap-original-mm-async-lease-negative.yml",
+      "blob": "fce1c4871498ad1235e3348a7598c7ed67dc2425"
+    },
+    {
+      "path": ".github/workflows/phase-a-zswap-original-mm-lifetime-owner.yml",
+      "blob": "26cad69b7fb2dc52a100943ba46d2b76efdbf6a9"
+    },
+    {
+      "path": ".github/workflows/phase-a-zswap-original-mm-route-witness.yml",
+      "blob": "a56f24024a5110d039dfaff8af67f2726ad26463"
+    },
+    {
+      "path": ".github/workflows/phase-a-zswap-original-route-lifetime.yml",
+      "blob": "d5baca0a18a699c4335cde48aed06439b91a4a18"
+    },
+    {
+      "path": ".github/workflows/phase-a-zswap-original-sector-domain.yml",
+      "blob": "8e36c5253a61fdabdfe1c157563a1b9dd8a0ed68"
+    },
+    {
+      "path": ".github/workflows/phase-a-zswap-original-store-bio-provenance.yml",
+      "blob": "1532ce523f95b2c39e4197d994f65add7db63f8f"
+    },
+    {
+      "path": ".github/workflows/phase-a-zswap-original-stored-bio-source-scope.yml",
+      "blob": "1776d4ed3ac1a4381f9243a411f7c3364664d87e"
+    },
+    {
+      "path": ".github/workflows/phase-a-zswap-original-v1-kunit.yml",
+      "blob": "ce111ce2ac35a15e22ea7d284696839702b13582"
+    },
+    {
+      "path": ".github/workflows/phase-a-zswap-original-writeback-lifetime.yml",
+      "blob": "76a611f72388ced7dd27cb0500000d40b6684a48"
+    },
+    {
+      "path": ".github/workflows/phase-a-zswap-sideband.yml",
+      "blob": "81ce5955ce7ce2eda378b1f3384037491f30f9c9"
+    },
+    {
+      "path": ".github/workflows/phase-a-round063-original-mm-dm-carrier-noauth-source-push.yml",
+      "blob": "330c3744912955bff8cc4b0acd4b9caf28f9e5b0"
+    },
+    {
+      "path": ".github/workflows/phase-a-round064-original-slot-current-target-noauth-source-push.yml",
+      "blob": "2db1452ed32a6ada08cbf8a49904ae3ec2388252"
+    },
+    {
+      "path": ".github/workflows/phase-a-round067-original-dm-dispatch-runtime-noauth-source-push.yml",
+      "blob": "51f38819abd6354f7ae84660b84781582f5935e2"
+    },
+    {
+      "path": ".github/workflows/phase-a-round068-original-lower-bio-owned-noauth-source-push.yml",
+      "blob": "0c2a0f280594f715f03368221601399032cc12f7"
+    },
+    {
+      "path": ".github/workflows/phase-a-round069-original-bio-authority-joined-noauth-source-push.yml",
+      "blob": "5b4969914c5bca40085d97e5296365ac5cc80665"
+    },
+    {
+      "path": ".github/workflows/phase-a-round069-original-zswap-stored-source-noauth-source-push.yml",
+      "blob": "5873714c7f6be0cbe452ef2789d3fc6ba7f22aa7"
+    },
+    {
+      "path": ".github/workflows/phase-a-round071-original-zswap-provenance-noauth-source-push.yml",
+      "blob": "b8100ec65e1cd8cce7f01e079930eef65b30deca"
+    },
+    {
+      "path": ".github/workflows/phase-a-round072-original-mm-bio-authority-decoder-noauth-source-push.yml",
+      "blob": "d1b6d062f8eb94e8ec1f122d7cfbd15b139d4620"
+    },
+    {
+      "path": ".github/workflows/phase-a-round072-original-swapcache-provenance-noauth-source-push.yml",
+      "blob": "78397a9b7788059dfefdd70cde1902a15f853481"
+    },
+    {
+      "path": ".github/workflows/phase-a-zswap-composed-source-source-push.yml",
+      "blob": "4432112b80cb585105aa327e897a01e30e160233"
+    },
+    {
+      "path": ".github/workflows/phase-a-zswap-round056-original-clone-provenance-source-push.yml",
+      "blob": "de58839837294632104b50c3a69619423d77a969"
+    }
+  ],
+  "eof_connector_verified": 11,
+  "eof_mutation": "each original companion differs only by deletion of one final LF"
+}

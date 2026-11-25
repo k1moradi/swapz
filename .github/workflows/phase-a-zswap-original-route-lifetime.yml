@@ -1,14 +1,6 @@
 name: "Round036 original source MM route lifetime (NO AUTHORITY)"
 on:
-  push:
-    branches: [main]
-    paths:
-      - ".github/workflows/phase-a-zswap-original-route-lifetime.yml"
-      - "tests/tools/stage-pinned-linux-zswap-composed.py"
-      - "tests/tools/round036-original-route-lifetime-verify.py"
-      - "tests/runtime/native/pinned-linux-zswap-composed-source-test.py"
-      - "tests/runtime/native/fixtures/round036-original-route-*.c"
-      - "docs/handoff/zswapz/round036/agent2-evidence.md"
+  # Historical native lane: explicit dispatch only.
   workflow_dispatch:
 permissions:
   contents: read
