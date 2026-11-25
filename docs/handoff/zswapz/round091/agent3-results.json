@@ -1,0 +1,134 @@
+{
+  "round": "091",
+  "agent": 3,
+  "task_commit": "7fa5e3dc74c67330f341ae39c11dc3f8bff01187",
+  "engineering_baseline": "e8a3f08000f81dcc3b1bda74b407b9e523ed3bab",
+  "original_linux_pin": "c339f4010dea8b0d754f84ace70cd1b089878ef8",
+  "code_commit": "a44c7d7c0561294471924527bbd30bebea1bd8ac",
+  "code_parent": "3c97b5d399076ae45b8a51e770244486ab00f567",
+  "source_publication": "VERIFIED_SINGLE_PARENT_EXPECTED_HEAD_NONFORCE_MAIN",
+  "decision": "SOURCE_CANDIDATE_PUBLISHED_CI_QUEUED_NO_GO_LIVE",
+  "conclusion": "IN_PROGRESS",
+  "source_blobs": {
+    "src/kernel/dm-target.c": "6a98df348a2ffef12d8b51f857a12f7b00738fc6",
+    "tests/tools/round088-original-dm-selected-clone.patch": "5c8587c3d8205fc1ab346011c092601f2113a45a",
+    "tests/runtime/native/source-contract-test.py": "e223f902b8516ec3f60486f650935dc5b280d0de",
+    "tests/runtime/native/fixtures/round091-selected-dm-ordered.c": "28bd7d4dacf29cd61e41d3851aef1d100574913d",
+    "tests/tools/round091-selected-dm-ordered-verify.py": "6494fbcac29236baf1bd7575e0b3d59c0af112c8",
+    ".github/workflows/phase-a-round088-selected-dm-admission-host.yml": "8a950085337e14374d074c96104d89e111cd6d36"
+  },
+  "standards": {
+    "baseline_blob": "6441a8b096a181b9a80890a1d1f63a87773c3fb3",
+    "baseline_bytes": 1796686,
+    "parent_blob": "8266330377c137fda55c33d22fd5e181a9822214",
+    "parent_bytes": 1803180,
+    "postimage_blob": "5d2eb89b6a86ca8f898c9eb9a6143b2371094ebd",
+    "postimage_bytes": 1805443,
+    "appended_bytes": 2263,
+    "full_baseline_and_parent_prefix_verified": true,
+    "verification": "UTF8_FULL_RAW_SIZE_BLOB_ROUNDTRIP_AND_LITERAL_PREFIX_READBACK"
+  },
+  "frozen_interfaces": {
+    "broker_header": "2f850b53708c8142ee95d330192c9db1f9ae9418",
+    "broker_c": "66df826d86dde1bbd5e1967daa0e62517b58ac8d",
+    "storage_header": "0da04b61921e3dbc0544cb9c9c8168513628997b",
+    "storage_c": "d4feaca4d114cfdb1877df65e68e8d6b52859126",
+    "decoder_bridge_header": "507b25debe0ca7b30b57ed6a350dab4868dced51",
+    "decoder_bridge_c": "9324a581e27bad62d4e2d9c90192f6ad8b96faca",
+    "authority_header": "c320498ce530c0887bf498cc4d5b121765bb41f3",
+    "authority_c": "73b3e2dc98c6a47315519d3ab650c3d3b0656de7",
+    "mm_patch": "059d1bf29cf4990e22a2f608d5d552abeec3a8d1"
+  },
+  "original_dm": {
+    "pristine": "1881d86111fb2e655893ad898cf21b88f0e4e7f3",
+    "pristine_bvec": "b63914ff56e33df302055fabf2a84ba490bc8d2c",
+    "predicted_postimage": "e51af0d14465e92323970a84c1d62df3a8eb61c3",
+    "old_hunk_lines": 4,
+    "new_hunk_lines": 142,
+    "actual_git_apply": "NOT_RUN"
+  },
+  "local": {
+    "checkout": "BLOCKED",
+    "first_error": "git ls-remote exit128: Could not resolve host: github.com",
+    "native_compiler": "NOT_RUN",
+    "full_diff_check": "NOT_RUN",
+    "repository_policy": "NOT_RUN",
+    "source_static_connector": {
+      "canonical_enqueue_count": 1,
+      "normal_process_count": 1,
+      "ordinary_wait_before_process": true,
+      "source_integrity": "WHOLE_BLOB_ROUNDTRIP"
+    }
+  },
+  "github_ci": {
+    "status": "QUEUED",
+    "conclusion": null,
+    "head_sha": "a44c7d7c0561294471924527bbd30bebea1bd8ac",
+    "run_id": 45600586745,
+    "run_attempt": 1,
+    "workflow_url": "https://github.com/k1moradi/swapz/actions/runs/45600586745",
+    "jobs": [
+      {
+        "id": 139158134919,
+        "name": "selected-dm-source-host",
+        "status": "QUEUED",
+        "conclusion": null,
+        "url": "https://github.com/k1moradi/swapz/actions/runs/45600586745/job/139158134919"
+      }
+    ],
+    "first_error": null,
+    "artifact": null,
+    "compilers": {
+      "gcc": {
+        "status": "NOT_RUN",
+        "actual_checks": null,
+        "actual_claims": null,
+        "actual_refusals": null,
+        "actual_typed_reads": null,
+        "actual_mutants": null
+      },
+      "clang": {
+        "status": "NOT_RUN",
+        "actual_checks": null,
+        "actual_claims": null,
+        "actual_refusals": null,
+        "actual_typed_reads": null,
+        "actual_mutants": null
+      }
+    },
+    "planned_per_compiler": {
+      "scenarios": 8,
+      "broker_claims": 5,
+      "refusals": 3,
+      "typed_reads": 2,
+      "modeled_terminal_owners": 5,
+      "semantic_mutants": 4
+    },
+    "initial_automatic_census": {
+      "total": 28,
+      "queued": 28
+    }
+  },
+  "claim_timing": "ORDERED_HEAD_SAME_DESCRIPTOR_DORMANT",
+  "live_claim_gate": false,
+  "actual_storage_attach": false,
+  "first_integration_blocker": "FROZEN_BROKER_REQUIRES_LINK_AFTER_CLAIM; NO_TRUSTED_GENERATION_FEED; CANCELED_LOG_BLOCK_CAPACITY_LOSS; SETUP_LIFETIME_ABSENT",
+  "typed_read": "ACTUAL_DORMANT_SOURCE_PINNED_BRIDGE_PATH_HOST_PROOF_PENDING",
+  "ordinary_preparation_assertion": "SOURCE_REPAIRED_EXECUTION_PENDING",
+  "same_round_peer_dependency": false,
+  "source_mapped_authenticated": false,
+  "AUTH": 0,
+  "phase_a": "BLOCKED",
+  "direct_compressed_handoff": false,
+  "forced_raw_bypass": false,
+  "import_active": 0,
+  "actual_native_dm": false,
+  "kernel_compile_link": "NOT_RUN",
+  "actual_lower_durable_io": false,
+  "actual_upper_ack": false,
+  "physical_mutation": false,
+  "vm_tests": false,
+  "privileged_tests": false,
+  "loaded_tests": false,
+  "raw_4096": "FULL_ORIGINAL_UNCOMPRESSED_4096"
+}
