@@ -1,0 +1,285 @@
+{
+  "round": "091",
+  "agent": 10,
+  "status": "IN_PROGRESS",
+  "task_commit": "7fa5e3dc74c67330f341ae39c11dc3f8bff01187",
+  "tested_source_commit": "8dc64dfd2c7b19e1f64e7ce42e3d6ba4c8d3fbb3",
+  "tested_source_parent": "7fa5e3dc74c67330f341ae39c11dc3f8bff01187",
+  "frozen_baseline": "e8a3f08000f81dcc3b1bda74b407b9e523ed3bab",
+  "original_linux_pin": "c339f4010dea8b0d754f84ace70cd1b089878ef8",
+  "branch": "main",
+  "single_parent": true,
+  "nonforce": true,
+  "source_files": {
+    "tests/tools/round091-original-composed-compile-verify.py": "3daaceff892859fe6ab88d59abe25e6741ebc4d1",
+    ".github/workflows/phase-a-round091-original-composed-compile-noauth.yml": "875fdb1fb74d21b56a0eca3df9ec787e54391385",
+    "docs/testing_standards.md": "70214fff0eee9d652c9e32e91b02ba58e4a5d833"
+  },
+  "standards": {
+    "parent_blob": "6441a8b096a181b9a80890a1d1f63a87773c3fb3",
+    "parent_bytes": 1796686,
+    "new_blob": "70214fff0eee9d652c9e32e91b02ba58e4a5d833",
+    "new_bytes": 1798344,
+    "appended_bytes": 1658,
+    "full_parent_git_blob_roundtrip": true,
+    "full_new_exact_readback": true,
+    "full_parent_byte_prefix": true,
+    "frozen_baseline_prefix": true,
+    "ci_canonical_prefix_step": "PASS"
+  },
+  "patch_blobs": {
+    "tests/tools/round089-original-mm-carrier.patch": "059d1bf29cf4990e22a2f608d5d552abeec3a8d1",
+    "tests/tools/round090-original-mm-lifetime.patch": "337f7ff29e72d955251de0c54a9349f20c2586ec",
+    "tests/tools/round088-original-dm-selected-clone.patch": "0eaffeb0b1939c889ea7a305b378a9a1fcd75273"
+  },
+  "ordered_predicted_stage_blobs": {
+    "tests/tools/round089-original-mm-carrier.patch": {
+      "mm/zswap.c": "8bf7e885376c5ef521adf40b1ec736e062067bff",
+      "include/linux/swap_ops.h": "a39a1921daf6f272e9812eb63b1aa64fec96c57f",
+      "include/linux/blk_types.h": "0bf866c1571fe6b4d2e49d01b1b2c87fcf2cf04c",
+      "include/linux/bio.h": "f4c5f1730514cf1816ffd5e9787562439dfae236",
+      "block/bio.c": "3ba0e12a96ba3235eb909e3b3dd0be44657c6f6e",
+      "mm/page_io.c": "0b0fe917fa3af5deaef8263274edffbf1a62eedb",
+      "include/linux/swapz_mm_carrier.h": "72100483b42a59db8f522d3f2f4ee10d4f856550"
+    },
+    "tests/tools/round090-original-mm-lifetime.patch": {
+      "mm/zswap.c": "cbf160877e8d8b584d6010c009a3e500f8b99f38",
+      "include/linux/blk_types.h": "50c94617b08e581021ba25fa6e182a5b88ecfa43",
+      "include/linux/bio.h": "4079365b37690164f85ba962a0bd0918c85899cb",
+      "block/bio.c": "38f24ee2e414107be390d3a01c6b907e06a9dca7",
+      "mm/page_io.c": "c3bd481117dbd29edd821df452f74990d6d5f00a",
+      "include/linux/swapz_mm_carrier.h": "f170d2c2ac63679adb0885f746585ed77c2746a5"
+    },
+    "tests/tools/round088-original-dm-selected-clone.patch": {
+      "drivers/md/dm.c": "554dd8215ec6be0cfeaa016ca25e772ac6d363ff"
+    }
+  },
+  "pristine_and_predicted_final_blobs": {
+    "mm/zswap.c": {
+      "pristine": "ae19e301fced7e357a4c7587dfdd6abb890b9163",
+      "predicted_raw": "cbf160877e8d8b584d6010c009a3e500f8b99f38",
+      "actual_raw": null
+    },
+    "include/linux/swap_ops.h": {
+      "pristine": "57ac6c703f685883d3a15ebc1a5c7f6c298deb1b",
+      "predicted_raw": "a39a1921daf6f272e9812eb63b1aa64fec96c57f",
+      "actual_raw": null
+    },
+    "include/linux/blk_types.h": {
+      "pristine": "0cc09b975d8ffbd45ca3dc47533a71f8e8164de6",
+      "predicted_raw": "50c94617b08e581021ba25fa6e182a5b88ecfa43",
+      "actual_raw": null
+    },
+    "include/linux/bio.h": {
+      "pristine": "7a794ce723b84b2a148f8f9beccf057b266e8ac9",
+      "predicted_raw": "4079365b37690164f85ba962a0bd0918c85899cb",
+      "actual_raw": null
+    },
+    "block/bio.c": {
+      "pristine": "b0fcc69de653524479e3b328aa29a37e97945b84",
+      "predicted_raw": "38f24ee2e414107be390d3a01c6b907e06a9dca7",
+      "actual_raw": null
+    },
+    "mm/page_io.c": {
+      "pristine": "c6824fcd483e0aa2c412e14dae0d2a356b17c373",
+      "predicted_raw": "c3bd481117dbd29edd821df452f74990d6d5f00a",
+      "actual_raw": null
+    },
+    "include/linux/swapz_mm_carrier.h": {
+      "pristine": null,
+      "predicted_raw": "f170d2c2ac63679adb0885f746585ed77c2746a5",
+      "actual_raw": null
+    },
+    "drivers/md/dm.c": {
+      "pristine": "1881d86111fb2e655893ad898cf21b88f0e4e7f3",
+      "predicted_raw": "554dd8215ec6be0cfeaa016ca25e772ac6d363ff",
+      "actual_raw": null
+    }
+  },
+  "product_blobs": {
+    "Makefile": "ed6e19ae28a84a4a3e92117812adc445d5c2e8e5",
+    "VERSION": "ce022e35e5c13bea0de8a9fae9c9d6f3f0dad904",
+    "authority.c": "73b3e2dc98c6a47315519d3ab650c3d3b0656de7",
+    "authority.h": "c320498ce530c0887bf498cc4d5b121765bb41f3",
+    "codec.c": "d920dcaac6f2b7de1334d4133770bd649719c66d",
+    "codec.h": "e89d316b9cf49f82df0b77648c1be1731607987d",
+    "dm-target.c": "d9f24339c5316cb7de637bbf35b5166fba82436f",
+    "engine.c": "e7c50c3e78449157439fba9c69e5d23b1c317f4e",
+    "engine.h": "0e505915fb2e1578b4c1cee36e32be8a30f3745f",
+    "flush-qual.h": "095d3ef7665ba268f28c2235fbb1c8e26cb8b7d1",
+    "gc-cost.h": "2d317f1274ef36bdde157ff72acc26a9f7ae1e0e",
+    "gc-recovery-policy.h": "26cddb997ad9f4b5b15616eba7cc0e26aaeb58eb",
+    "lane-gap.h": "e97870b218c7c9b338b43323fff77181be877649",
+    "predictor-avx2.c": "0fa5746f187b2fa017782448e052f7a2c39bfc8f",
+    "predictor-avx512.c": "a9892552f516ec47157c4aacdd4f3aca994192b2",
+    "predictor-internal.h": "6b49267dac50d92e58a950ca80541d2928de6d23",
+    "predictor-neon.c": "98554e4c601ee542973bc680a7549c6ad45f073e",
+    "predictor-route.h": "ea14590608d7a92b4fb379aca26864467e158bac",
+    "predictor-shuffle.h": "d0ebd77af875c6d34757eb9b14080934af32b08a",
+    "predictor-sse2.c": "0993632a2e5f6ff7fe66cd828e7cd88ff8c577d6",
+    "predictor.c": "b1ce85ef0fb6a20d720dfba562d3a9a3588f127c",
+    "predictor.h": "54cce4ad8bcb63ee724001fff4831948ec8e8de5",
+    "preparation-slots.h": "aaa6a0420bda460dbcc42072d74f57bab9fcbbfd",
+    "superblock.h": "ba73845837b4c604b01d72f50f05ae8d4378eddd",
+    "swapz-build-info.h": "51ce0bc3a5947bb6ff660e4e5bb63aa5477cb226",
+    "window-policy.h": "cb14486a3ef4324761cde8c54b22c5f0e5d89494",
+    "zswap-direct-handoff.h": "864abf9a12071b98f5c157a44f4ed0c04d4a594c",
+    "zswap-import-admission.h": "a411da35437cbf9a43c88083d830dc9280f108e8",
+    "zswap-import-codec.h": "0d888fe4c74115ab2388f1df1dc0b86ae4b9b6c6",
+    "zswap-import-decoder-owner.c": "8e0c8f4d2085af7f2e17df412f3a1af654063571",
+    "zswap-import-decoder-owner.h": "e1b4b903567070e2307f7d05f8e48c14e0bb3768",
+    "zswap-original-decode.c": "eb1cd7f90d5edade9640e1ffe9dac3c8fe774644",
+    "zswap-original-decode.h": "a247d1aaf9865de71f97cd980be806b8d8c7c20e",
+    "zswap-original-decoder-bridge.c": "9324a581e27bad62d4e2d9c90192f6ad8b96faca",
+    "zswap-original-decoder-bridge.h": "507b25debe0ca7b30b57ed6a350dab4868dced51",
+    "zswap-original-extent.c": "c6c5af281a636447126e1a8b67484d954158a300",
+    "zswap-original-extent.h": "34572d01fffe1b276c2d023822266eda29a2137e",
+    "zswap-original-storage.c": "d4feaca4d114cfdb1877df65e68e8d6b52859126",
+    "zswap-original-storage.h": "0da04b61921e3dbc0544cb9c9c8168513628997b",
+    "zswap-original-ticket.c": "66df826d86dde1bbd5e1967daa0e62517b58ac8d",
+    "zswap-original-ticket.h": "2f850b53708c8142ee95d330192c9db1f9ae9418"
+  },
+  "compatibility_overlay": {
+    "authority.h": {
+      "raw": "c320498ce530c0887bf498cc4d5b121765bb41f3",
+      "predicted_compatible": "e65654de963016f62a45944e41de587a6c245f06",
+      "actual_compatible": null,
+      "exact_anchors": [
+        [
+          "swapz_u8 current;",
+          "swapz_u8 is_current;",
+          1
+        ]
+      ]
+    },
+    "authority.c": {
+      "raw": "73b3e2dc98c6a47315519d3ab650c3d3b0656de7",
+      "predicted_compatible": "6a1f575b81a2a34a2de5c2bc73e6d0526b899286",
+      "actual_compatible": null,
+      "exact_anchors": [
+        [
+          "record->current",
+          "record->is_current",
+          4
+        ],
+        [
+          ".current = 1",
+          ".is_current = 1",
+          1
+        ],
+        [
+          "const struct swapz_map *current;",
+          "const struct swapz_map *current_mapping;",
+          1
+        ],
+        [
+          "current = &authority->maps[record->spec.logical_page];",
+          "current_mapping = &authority->maps[record->spec.logical_page];",
+          1
+        ],
+        [
+          "current->generation",
+          "current_mapping->generation",
+          2
+        ]
+      ]
+    },
+    "zswap-original-storage.c": {
+      "raw": "d4feaca4d114cfdb1877df65e68e8d6b52859126",
+      "predicted_compatible": "924bdb7a22a3c308948ecb70909e99892a396472",
+      "actual_compatible": null,
+      "exact_anchors": [
+        [
+          "old->current",
+          "old->is_current",
+          1
+        ]
+      ]
+    }
+  },
+  "preflight": {
+    "connector_verified_patch_blobs": 3,
+    "connector_verified_pristine_file_blobs": 7,
+    "connector_predicted_raw_final_postimages": 8,
+    "connector_product_file_identities": 41,
+    "bvec_header_blob": "b63914ff56e33df302055fabf2a84ba490bc8d2c",
+    "obsolete_bvec_overlay": false,
+    "actual_raw_git_apply": "NOT_RUN",
+    "actual_compatibility_overlay": "NOT_RUN",
+    "actual_elf_prerequisite": "NOT_RUN",
+    "effective_config": "NOT_RUN",
+    "local_pinned_build": false
+  },
+  "source_review": {
+    "mm_provider_and_broker_exports_absent": true,
+    "core_selected_exports": [
+      "dm_swapz_round088_clone_matches",
+      "dm_swapz_round090_selected_origin",
+      "dm_swapz_round090_route_live"
+    ],
+    "modpost_result": "NOT_RUN",
+    "no_fabricated_exports": true
+  },
+  "historical_round090": {
+    "source": "d183f5d5127992b406013799bcb81ea3f59e93eb",
+    "run_id": 45586120960,
+    "job_id": 139108048304,
+    "artifact_id": 15008368383,
+    "conclusion": "failure",
+    "raw_postimages": 8,
+    "elf_prerequisite": "PASS",
+    "original_directed_object_count": 6,
+    "first_error": "linux/arch/x86/include/asm/current.h:28:17: error: struct swapz_shared_original_record has no member named get_current",
+    "expansion": "authority.c:30:29",
+    "exit": 2,
+    "full_kernel_link": "NOT_RUN",
+    "product_module_link": "NOT_RUN"
+  },
+  "workflow_run_id": 45599641943,
+  "workflow_url": "https://github.com/k1moradi/swapz/actions/runs/45599641943",
+  "workflow_attempt": 1,
+  "workflow_created_at": "2026-11-25T10:55:54Z",
+  "workflow_conclusion": null,
+  "jobs": [
+    {
+      "id": 139154826234,
+      "url": "https://github.com/k1moradi/swapz/actions/runs/45599641943/job/139154826234",
+      "name": "frozen-original-x86-compile-link",
+      "status": "in_progress",
+      "conclusion": null,
+      "canonical_policy_parent_prefix": "PASS",
+      "frozen_baseline_checkout": "PASS",
+      "linux_checkout": "IN_PROGRESS",
+      "provision": "PENDING",
+      "stage_build": "PENDING"
+    }
+  ],
+  "ci_artifact": null,
+  "first_error": null,
+  "build_attempts_observed": 0,
+  "original_directed_objects": "NOT_RUN",
+  "product_directed_objects": "NOT_RUN",
+  "full_kernel_link": "NOT_RUN",
+  "product_module_link": "NOT_RUN",
+  "modpost": "NOT_RUN",
+  "unresolved_symbol_inspection": "NOT_RUN",
+  "compiler_diagnostics": null,
+  "link_diagnostics": null,
+  "vm_boot": false,
+  "vm_build_for_qualification": false,
+  "module_loaded": false,
+  "physical_mutation": false,
+  "production_code_changed": false,
+  "peer_code_changed": false,
+  "manual_duplicate_dispatch": false,
+  "periodic_monitoring": false,
+  "other_automatic_runs_observed": 9,
+  "source_mapped_authenticated": 0,
+  "phase_a": "BLOCKED",
+  "direct_handoff": false,
+  "forced_raw_bypass": false,
+  "import_active": false,
+  "ordinary_map_bytes": 20,
+  "ordinary_raw_4096": "COMPLETE_ORIGINAL_UNCOMPRESSED_4096",
+  "conclusion": "CURRENT_R090_COMPILE_LANE_PUBLISHED_CI_IN_PROGRESS_ORIGINAL_NOT_RUN"
+}
