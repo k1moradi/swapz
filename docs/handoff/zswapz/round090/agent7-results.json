@@ -1,0 +1,84 @@
+{
+  "round": "090",
+  "agent": 7,
+  "task_sha": "edf44c4417f14b5836b1b5f90157e24916afcde2",
+  "frozen_baseline": "9f7002c896f86226e93f0523b1f6e935de5c6de9",
+  "original_linux_pin": "c339f4010dea8b0d754f84ace70cd1b089878ef8",
+  "status": "SOURCE_PUBLISHED_CI_QUEUED_NO_GO_LIVE",
+  "conclusion": "PENDING_CI",
+  "initial_source": {
+    "sha": "dbb947ca895916cedbd20e93422722f1dde5b510",
+    "parent": "ca95fa592eced5056a9209103c700d109c3d78ab",
+    "known_diff_check_risk": "one restored historical trailing whitespace line"
+  },
+  "corrected_source": {
+    "sha": "70fbbe12c84db56283b5e0812faf1fc8032bbae4",
+    "parent": "dbb947ca895916cedbd20e93422722f1dde5b510",
+    "expected_head_nonforce_ff": true
+  },
+  "blobs": {
+    "src/kernel/zswap-original-decoder-bridge.c": "9324a581e27bad62d4e2d9c90192f6ad8b96faca",
+    "src/kernel/zswap-original-decoder-bridge.h": "507b25debe0ca7b30b57ed6a350dab4868dced51",
+    "tests/runtime/native/fixtures/round090-original-decoder-bridge.c": "81b6990707b8dd65ec1e6e54c6a0bfa7269f6ebe",
+    "tests/tools/round090-original-decoder-bridge-verify.py": "e7c78d9e44fd2c28e392bfa4b30beb8b8cbeb7ee",
+    ".github/workflows/phase-a-round090-original-decoder-lease-host-noauth.yml": "5795c9c2c18aafa9d4425b0c01179dcd94c1428c",
+    "docs/testing_standards.md": "245d52f2160410ff719f0584f86dd248c9d59cf7"
+  },
+  "standards_restoration": {
+    "frozen_prefix_blob": "3bc8692b5f71a5d31c9caba1b858dde8a28ab1f6",
+    "frozen_prefix_bytes": 1785082,
+    "preexisting_truncated_blob": "ed028e01f353332154a9435e74e6e6f70bbfd33e",
+    "preexisting_suffix_bytes": 7989,
+    "preserved_contemporary_suffix": true,
+    "one_historical_trailing_space_removed": true
+  },
+  "implementation": {
+    "activation_macro": 0,
+    "decoder_codecs": [
+      1,
+      2
+    ],
+    "fixed_tokens": 64,
+    "token_reuse": false,
+    "separate_record_and_read_lease": true,
+    "serialized_in_memory": true,
+    "live_authentication": false,
+    "kbuild": false,
+    "per_page_module_get": false,
+    "module_lifetime_provider": "NOT_WIRED",
+    "source_generation_abi": "MISSING"
+  },
+  "local_tests": {
+    "gcc": {
+      "version": "14.2.0",
+      "strict_mock_syntax_only_TUs": 2,
+      "result": "PASS"
+    },
+    "clang": {
+      "version": "17.0.0",
+      "strict_mock_syntax_only_TUs": 2,
+      "result": "PASS"
+    },
+    "python_verifier_bytecode": "PASS",
+    "actual_pinned_original_compile": "NOT_RUN_GITHUB_DNS"
+  },
+  "ci": {
+    "run_id": 45588178607,
+    "job_id": 139115074685,
+    "status": "queued",
+    "conclusion": null,
+    "actual_gcc_compiled_executed": 0,
+    "actual_clang_compiled_executed": 0,
+    "first_error": null,
+    "artifact_id": null,
+    "manual_dispatch": false
+  },
+  "native": "NOT_RUN",
+  "physical": false,
+  "new_vm": false,
+  "source_mapped_authenticated": 0,
+  "phase_a": "BLOCKED",
+  "direct_compressed_handoff": false,
+  "forced_raw_bypass": false,
+  "import_active": false
+}
