@@ -4,8 +4,8 @@
   "task_sha": "edf44c4417f14b5836b1b5f90157e24916afcde2",
   "frozen_baseline": "9f7002c896f86226e93f0523b1f6e935de5c6de9",
   "original_linux_pin": "c339f4010dea8b0d754f84ace70cd1b089878ef8",
-  "status": "SOURCE_PUBLISHED_CI_QUEUED_NO_GO_LIVE",
-  "conclusion": "PENDING_CI",
+  "status": "CORRECTIVE_SOURCE_PUBLISHED_CI_QUEUED_NO_GO_LIVE",
+  "conclusion": "PENDING_CORRECTIVE_SOURCE_CI",
   "initial_source": {
     "sha": "dbb947ca895916cedbd20e93422722f1dde5b510",
     "parent": "ca95fa592eced5056a9209103c700d109c3d78ab",
@@ -63,8 +63,8 @@
     "actual_pinned_original_compile": "NOT_RUN_GITHUB_DNS"
   },
   "ci": {
-    "run_id": 45588178607,
-    "job_id": 139115074685,
+    "run_id": 45591425899,
+    "job_id": 139126333980,
     "status": "queued",
     "conclusion": null,
     "actual_gcc_compiled_executed": 0,
@@ -80,5 +80,33 @@
   "phase_a": "BLOCKED",
   "direct_compressed_handoff": false,
   "forced_raw_bypass": false,
-  "import_active": false
+  "import_active": false,
+  "previous_failed_run": {
+    "source_commit": "70fbbe12c84db56283b5e0812faf1fc8032bbae4",
+    "run_id": 45588178607,
+    "job_id": 139115074685,
+    "status": "completed",
+    "conclusion": "failure",
+    "stage": "repository-policy",
+    "first_error": {
+      "kind": "SOURCE_CONTRACT_MISMATCH",
+      "reason": "missing same-commit applicable testing standards update for workflow",
+      "path": ".github/workflows/phase-a-round090-original-decoder-lease-host-noauth.yml",
+      "line": 11
+    },
+    "actual_gcc_executed": 0,
+    "actual_clang_executed": 0,
+    "artifact_id": null
+  },
+  "new_source": {
+    "sha": "a240810314b5951a618619049654c2887e14d2d4",
+    "parent": "edbbe54e32dc02e64e054dc78cb0423a1228dc5a",
+    "expected_head_nonforce_ff": true,
+    "changed_files": {
+      "tests/runtime/native/fixtures/round090-original-decoder-bridge.c": "651986d5e70bf96dd7f7652ffc772a46997fe6e5",
+      "docs/testing_standards.md": "3ae03a457a3af62d8e5149cfe305c87e741c50ac"
+    },
+    "new_fixture_refusal_cases": 6,
+    "prior_source_untouched": true
+  }
 }

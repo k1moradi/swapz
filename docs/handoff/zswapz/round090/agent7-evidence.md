@@ -22,3 +22,51 @@ Local container checkout of pinned Linux was **NOT_RUN** because native GitHub D
 Focused workflow [run 45588178607](https://github.com/k1moradi/swapz/actions/runs/45588178607), [job 139115074685](https://github.com/k1moradi/swapz/actions/runs/45588178607/job/139115074685), **QUEUED at evidence snapshot, actual GCC/Clang executed tests 0, first new error none observed, artifact unverified**. It is rooted in actual corrected main source 70fbbe12..., checks real `github.event.before`, pristine pins and source policy, stages reversible R089 compressor/decompressor corrections only in disposable host copies, then compiles actual original Linux LZO1X/LZ4 translation units plus existing typed decoder, bridge and fixture under strict GCC/Clang ASan/UBSan. Planned evidence covers original codec 1/2, 4096 output, CRC/SHA/malformed/alias, M3568 and isolated M4095, four concurrent readers, bounded 64 tokens, ABA rejection, failure output, lower callback propagation and no live activation. Pending is NOT success. First actual CI error, if any, must be recorded without suppression or blind rerun.
 
 No VM qualification, boot, physical mutation, privileged/loaded swap action, manual dispatch, PR, branch, force push, production or upstream Linux change. **AUTH=0; Phase A BLOCKED; direct compressed handoff OFF; forced RAW bypass OFF; import OFF.** GO dormant source review only; NO_GO live until exact CI and integration authority/lifetime/ABI blockers resolved.
+
+## Exact failed first source and new corrective source (no duplicate dispatch)
+
+Initial corrected source `70fbbe12c84db56283b5e0812faf1fc8032bbae4` ran at
+[run 45588178607 / job 139115074685](https://github.com/k1moradi/swapz/actions/runs/45588178607/job/139115074685):
+**FAIL at repository policy preflight, before original checkout or any compiler**.
+Actual first error was
+`SOURCE_CONTRACT_MISMATCH`, path
+`.github/workflows/phase-a-round090-original-decoder-lease-host-noauth.yml`,
+reason **missing same-commit non-whitespace applicable testing-standards update**;
+exit 1 at preflight line 11. The initial source's standards restoration
+was followed by a workflow-only correction, and a previous-commit standards
+edit cannot qualify the workflow's own source revision. The first error
+does not demonstrate a C compiler failure or a decoder defect.
+Actual pinned GCC/Clang executions **0**, artifact **none**.
+
+**New independent corrective source**
+[a240810314b5951a618619049654c2887e14d2d4](https://github.com/k1moradi/swapz/commit/a240810314b5951a618619049654c2887e14d2d4),
+sole parent `edbbe54e32dc02e64e054dc78cb0423a1228dc5a`,
+published directly to main by fresh expected-HEAD nonforce single-parent
+fast-forward. Two changed files only: actual host fixture
+`tests/runtime/native/fixtures/round090-original-decoder-bridge.c`
+blob `651986d5e70bf96dd7f7652ffc772a46997fe6e5`
+and applicable `docs/testing_standards.md`
+blob `3ae03a457a3af62d8e5149cfe305c87e741c50ac`.
+The test source adds **six independent source-linked negative requests**:
+null compressed source, null record token, short scratch, short verified,
+short output, and aliased scratch/verified working pages. Both null-pointer
+cases check every output byte remains untouched. New standards state their
+exact required refusal semantics and strict pinned-codec host qualification.
+No decoder production code, frozen interfaces, peers' source paths, Kbuild,
+original Linux or sanitizer settings were modified. The previous failure
+remains in evidence; this is a new source qualification, not a rerun of
+unchanged source or an evidence-only policy evasion.
+
+[Automatic new source run 45591425899](https://github.com/k1moradi/swapz/actions/runs/45591425899),
+[job 139126333980](https://github.com/k1moradi/swapz/actions/runs/45591425899/job/139126333980),
+**QUEUED at recorded inspection**: GCC/Clang source-linked execution
+NOT_RUN, results/case counts unverified, artifact none and no new first
+error yet. No manual dispatch, rerun, VM, physical action or periodic
+monitoring. Historical R089 corrected isolated original codec sanitizer
+PASS is unchanged and not counted toward this bridge qualification.
+
+**Current Agent7 disposition: CORRECTIVE_SOURCE_PUBLISHED_CI_QUEUED /
+NO_GO_LIVE.** Genuine independent module-owner hard refs, generation-
+bearing nonrecycled decoder handles, actual selected-source auth and
+integrated Kbuild/link/durable upper ACK remain unqualified. AUTH=0,
+Phase A BLOCKED, compressed handoff/forced RAW bypass/import OFF.
