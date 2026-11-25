@@ -95,14 +95,16 @@
   "actual_physical_io": false,
   "runtime_kunit": "NOT_RUN",
   "mutation_count": null,
-  "round093_open": false,
+  "round093_open": true,
   "publication": {
-    "status": "PREPARED_EVIDENCE_ONLY_NOT_ON_MAIN_AT_PREPARATION",
+    "status": "RECOVERED_ON_MAIN_BY_AGENT1",
     "reason": "Agent1 prepared sole-parent publication pending; no competing ref update",
-    "agent1_prepared_commit": "5f3d9becd358f790c2d892d2f29e8e54a13f92c1"
+    "agent1_prepared_commit": "5f3d9becd358f790c2d892d2f29e8e54a13f92c1",
+    "opening_commit": "dc3d55c6c44482f23bb5d263211f2b747e9bee87",
+    "historical_prior_status": "PREPARED_EVIDENCE_ONLY_NOT_ON_MAIN_AT_PREPARATION"
   },
   "next_raw_composition": {
-    "status": "MANIFEST_ONLY_NOT_RUN_AGENT1_AUTHORIZATION_REQUIRED",
+    "status": "AUTHORIZED_SOURCE_PUBLISHED_CI_PENDING",
     "review_snapshot": "78f630c9d0a2d5bfb626f2dbdef172f6024cf5ea",
     "linux_pin": "c339f4010dea8b0d754f84ace70cd1b089878ef8",
     "ordered_patch_pins": [
@@ -237,5 +239,37 @@
       "Agent1 must separately authorize fresh actual R092 build. No second build under current lease; no source writes or activation."
     ]
   },
-  "round": "093"
+  "round": "093",
+  "actual_raw_r092_qualification": {
+    "status": "IN_PROGRESS",
+    "conclusion": null,
+    "source_commit": "9f944f4e83762b846e02aade88d2c36574c8ac13",
+    "source_parent": "489ae36d3df6a5b2e85748c7316566a874f4fe55",
+    "engineering_freeze": "78f630c9d0a2d5bfb626f2dbdef172f6024cf5ea",
+    "linux_pin": "c339f4010dea8b0d754f84ace70cd1b089878ef8",
+    "overlay_blob": "62db468c14f23b59e7adaae65a11dcb9969f02b3",
+    "verifier_blob": "2aa197fe2d22446f27e6af5777eb3daf5cbed620",
+    "workflow_blob": "476212a02fbbcbc5adccb2d521e41364effbd099",
+    "standards_parent_blob": "a81b1f2ae6a736e3c0430ebdbc6f2d7e935fd574",
+    "standards_blob": "03173703a3b40e89b021c480df89f6d98118970a",
+    "workflow_url": "https://github.com/k1moradi/swapz/actions/runs/45666130617",
+    "run_id": 45666130617,
+    "job_id": 139388647019,
+    "attempt": 1,
+    "first_error": null,
+    "first_error_status": "NOT_YET_KNOWN",
+    "artifact": null,
+    "raw_stage": "PENDING",
+    "full_kernel_link": "PENDING",
+    "modpost": "PENDING",
+    "final_ko": "PENDING",
+    "old_scratch_exports": false,
+    "manual_dispatches": 0,
+    "authorized_new_runs": 1,
+    "runtime": "NOT_RUN",
+    "phase_a": "BLOCKED",
+    "source_mapped_authenticated": 0,
+    "canonical_preflight": "PASS",
+    "stage_step": "runner prerequisites"
+  }
 }
