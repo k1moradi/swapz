@@ -1,0 +1,255 @@
+{
+  "round": "089",
+  "agent": 5,
+  "kind": "dormant-shared-typed-authority-dedicated-candidate",
+  "task_commit": "0c893ee7a3ffc158d747c11c96b67fcf0b3efa15",
+  "task_parent": "db9252db73721a768be912965ad4402e332039e8",
+  "tested_commit": "8089093b8ac23d5430c4d8d6071a34d8692ee193",
+  "tested_parent": "63412e4f2fb6f74cb02996947aca48acf047391c",
+  "source_blobs": {
+    "src/kernel/authority.c": "73b3e2dc98c6a47315519d3ab650c3d3b0656de7",
+    "src/kernel/authority.h": "c320498ce530c0887bf498cc4d5b121765bb41f3",
+    "src/kernel/codec.c": "d920dcaac6f2b7de1334d4133770bd649719c66d",
+    "src/kernel/codec.h": "e89d316b9cf49f82df0b77648c1be1731607987d",
+    "src/kernel/engine.c": "e7c50c3e78449157439fba9c69e5d23b1c317f4e",
+    "src/kernel/engine.h": "0e505915fb2e1578b4c1cee36e32be8a30f3745f",
+    "src/kernel/gc-cost.h": "2d317f1274ef36bdde157ff72acc26a9f7ae1e0e",
+    "src/kernel/zswap-original-extent.c": "c6c5af281a636447126e1a8b67484d954158a300",
+    "src/kernel/zswap-original-extent.h": "34572d01fffe1b276c2d023822266eda29a2137e",
+    "src/kernel/Makefile": "ed6e19ae28a84a4a3e92117812adc445d5c2e8e5",
+    "tests/runtime/native/repository-policy-test.py": "b200e0ca3e20d4c1f37e350ac9ef1c6426179817",
+    "src/kernel/zswap-original-storage.c": "1a2dd5c6a29614f6f52e06cf5bcdd268fd40ed30",
+    "src/kernel/zswap-original-storage.h": "a47d2f7ee8f48addfd4bd6915ac06528081d52e0",
+    "tests/runtime/native/fixtures/round089-shared-original-storage.c": "20f0f86ce4c25623f740a6217c61ffea3d38294e",
+    "tests/tools/round089-shared-original-storage-verify.py": "29fd281a2071433dd65875e132377a7d1d2cc323",
+    ".github/workflows/phase-a-round089-shared-original-storage-host-noauth.yml": "60e4e154d961a4f7588daec76b17fe7e92dd4a06",
+    "docs/testing_standards.md": "3bc8692b5f71a5d31c9caba1b858dde8a28ab1f6"
+  },
+  "standards_parent_blob": "2d6991f996e200fd24bb07c8c34cee8cb4592eed",
+  "prior_round088": {
+    "tested_commit": "22fbdd0090e302bd17b3811145395ceb0a814a6c",
+    "job_id": 138674499659,
+    "conclusion": "PASS_HOST_ONLY",
+    "actual_compiler_results": [
+      {
+        "compiler": "gcc",
+        "checks": 12990,
+        "storage_bytes": 15600,
+        "map_bytes": 20,
+        "semantic_mutants": 9
+      },
+      {
+        "compiler": "clang",
+        "checks": 12990,
+        "storage_bytes": 15600,
+        "map_bytes": 20,
+        "semantic_mutants": 9
+      }
+    ],
+    "artifact": "https://github.com/k1moradi/swapz/actions/runs/45458554871/artifacts/14952545783",
+    "repeated": false
+  },
+  "workflow_url": "https://github.com/k1moradi/swapz/actions/runs/45577929354",
+  "run_id": 45577929354,
+  "run_status": "queued",
+  "jobs": [
+    {
+      "id": 139080377649,
+      "name": "shared-original-host",
+      "status": "queued",
+      "conclusion": null,
+      "url": "https://github.com/k1moradi/swapz/actions/runs/45577929354/job/139080377649"
+    }
+  ],
+  "conclusion": "QUEUED",
+  "first_error": null,
+  "actual_compiler_results": null,
+  "planned_mutants_per_compiler": 6,
+  "actual_mutants_per_compiler": null,
+  "artifact": null,
+  "push_census": {
+    "automatic_runs": 24,
+    "other_automatic_runs": 23,
+    "manual_dispatch": false,
+    "runs": [
+      {
+        "id": 45577929337,
+        "path": ".github/workflows/phase-a-round074-original-owned-copy-lifetime-host-noauth.yml",
+        "status": "queued",
+        "conclusion": null
+      },
+      {
+        "id": 45577929250,
+        "path": ".github/workflows/phase-a-round059-authority-import-lifetime-noauth.yml",
+        "status": "queued",
+        "conclusion": null
+      },
+      {
+        "id": 45577929326,
+        "path": ".github/workflows/phase-a-round072-original-codec-tag-vs-raw-noauth.yml",
+        "status": "queued",
+        "conclusion": null
+      },
+      {
+        "id": 45577929432,
+        "path": ".github/workflows/phase-a-round060-authority-conversion-noauth.yml",
+        "status": "queued",
+        "conclusion": null
+      },
+      {
+        "id": 45577929391,
+        "path": ".github/workflows/product-codec.yml",
+        "status": "queued",
+        "conclusion": null
+      },
+      {
+        "id": 45577930338,
+        "path": ".github/workflows/phase-a-round088-original-storage-host-noauth.yml",
+        "status": "queued",
+        "conclusion": null
+      },
+      {
+        "id": 45577929318,
+        "path": ".github/workflows/phase-a-round069-original-bio-authority-joined-noauth-source-push.yml",
+        "status": "queued",
+        "conclusion": null
+      },
+      {
+        "id": 45577929302,
+        "path": ".github/workflows/project-goals.yml",
+        "status": "queued",
+        "conclusion": null
+      },
+      {
+        "id": 45577929317,
+        "path": ".github/workflows/phase-a-zswap-dm-original-table-gc-lifetime-noauth.yml",
+        "status": "queued",
+        "conclusion": null
+      },
+      {
+        "id": 45577929472,
+        "path": ".github/workflows/phase-a-round066-authority-import-owned-map-noauth.yml",
+        "status": "queued",
+        "conclusion": null
+      },
+      {
+        "id": 45577929372,
+        "path": ".github/workflows/kernel-debug.yml",
+        "status": "queued",
+        "conclusion": null
+      },
+      {
+        "id": 45577929319,
+        "path": ".github/workflows/phase-a-round077-original-codec-tag-cross-abi-noauth.yml",
+        "status": "queued",
+        "conclusion": null
+      },
+      {
+        "id": 45577929183,
+        "path": ".github/workflows/phase-a-round068-original-lower-bio-owned-noauth-source-push.yml",
+        "status": "queued",
+        "conclusion": null
+      },
+      {
+        "id": 45577929524,
+        "path": ".github/workflows/phase-a-round073-original-reader-pin-gc-noauth-source-push.yml",
+        "status": "queued",
+        "conclusion": null
+      },
+      {
+        "id": 45577929354,
+        "path": ".github/workflows/phase-a-round089-shared-original-storage-host-noauth.yml",
+        "status": "queued",
+        "conclusion": null
+      },
+      {
+        "id": 45577929338,
+        "path": ".github/workflows/phase-a-round064-original-slot-current-target-noauth-source-push.yml",
+        "status": "queued",
+        "conclusion": null
+      },
+      {
+        "id": 45577929350,
+        "path": ".github/workflows/phase-a-round067-import-disk-payload-read-noauth.yml",
+        "status": "queued",
+        "conclusion": null
+      },
+      {
+        "id": 45577929590,
+        "path": ".github/workflows/systemd-package-readiness.yml",
+        "status": "queued",
+        "conclusion": null
+      },
+      {
+        "id": 45577929107,
+        "path": ".github/workflows/physical-evidence-rootless.yml",
+        "status": "queued",
+        "conclusion": null
+      },
+      {
+        "id": 45577929116,
+        "path": ".github/workflows/phase-a-round074-real-raw-fallback-source-noauth.yml",
+        "status": "queued",
+        "conclusion": null
+      },
+      {
+        "id": 45577929166,
+        "path": ".github/workflows/phase-a-round072-original-mm-bio-authority-decoder-noauth-source-push.yml",
+        "status": "queued",
+        "conclusion": null
+      },
+      {
+        "id": 45577929110,
+        "path": ".github/workflows/phase-a-round059-cross-suite-codec-host-noauth.yml",
+        "status": "queued",
+        "conclusion": null
+      },
+      {
+        "id": 45577929091,
+        "path": ".github/workflows/phase-a-round057-transaction-product-noauth.yml",
+        "status": "queued",
+        "conclusion": null
+      },
+      {
+        "id": 45577929104,
+        "path": ".github/workflows/phase-a-round063-original-mm-dm-carrier-noauth-source-push.yml",
+        "status": "queued",
+        "conclusion": null
+      }
+    ]
+  },
+  "scope": {
+    "dedicated_4k": "IMPLEMENTED_DORMANT",
+    "original_ceiling": 3568,
+    "experimental_4095_storage": "NO_GO",
+    "packed_storage_publication": "NO_GO",
+    "mapping": "single existing 20-byte primary map, explicit test-only state bit 0x40 and bounded typed metadata, raw/ordinary compressed/typed overwrite and discard",
+    "gc": "actual allocator dead-segment eligibility/claim, recovery and rotation commit pin guard; actual GC relocation via ordered callbacks",
+    "decoder": "opaque independently retained lease callback; actual decoding not executed",
+    "lower": "RAM-only host callbacks, no physical persistence claim",
+    "upper_ack": "NONE",
+    "sidecar_records": 8,
+    "pin_capacity": 8,
+    "storage_allocation": "caller preallocated, no dynamic allocation",
+    "disk_blocks_per_dedicated_record": 1,
+    "logical_disk_gain_vs_raw_bytes": 0,
+    "ordinary_map_growth_bytes": 0,
+    "authority_growth": "one opt-in pointer, zero when guard absent",
+    "ram_scratch_bytes": 12288,
+    "actual_size_measurements": null
+  },
+  "development_errors": [
+    "Verifier-template Round088 docstring anchor not present; initial script stopped before publication; corrected scaffolding.",
+    "Two GitHub GraphQL expected-head update errors as concurrent agents advanced main; reconciled own unpublished blobs against fresh main and byte-exact standards prefix; no force."
+  ],
+  "native": "NOT_RUN",
+  "physical_io": false,
+  "ordinary_map_bytes": 20,
+  "ordinary_cap": 3568,
+  "normal_kbuild_wiring": false,
+  "source_mapped_authenticated": 0,
+  "phase_a": "BLOCKED",
+  "direct_compressed_handoff": "DISABLED",
+  "forced_raw_bypass": "DISABLED",
+  "import_active": 0
+}
