@@ -1,0 +1,137 @@
+{
+  "round": "090",
+  "agent": 11,
+  "conclusion": "IN_PROGRESS_HOST_ONLY_UNAPPLIED_LIFETIME_OVERLAY_NO_GO_LIVE",
+  "assignment": "edf44c4417f14b5836b1b5f90157e24916afcde2",
+  "baseline": "9f7002c896f86226e93f0523b1f6e935de5c6de9",
+  "source_commit": "0131ab0a93f6708ab7de4a21f3cbd35efe05de53",
+  "source_parent": "3f0f52f8f07692d3b2e5614bc58bdae3ceadaff8",
+  "branch": "main",
+  "single_parent": true,
+  "nonforce": true,
+  "expected_head": true,
+  "source_blobs": {
+    "tests/tools/round090-original-mm-lifetime.patch": "337f7ff29e72d955251de0c54a9349f20c2586ec",
+    "tests/runtime/native/fixtures/round090-original-mm-lifetime.c": "a6d761368ebbe6610ddf13bd5d176e6d64fa9ef5",
+    "tests/tools/round090-original-mm-lifetime-verify.py": "f0c32cc54fca7b875f80a2baf2906adaa7f03834",
+    ".github/workflows/phase-a-round090-original-mm-lifetime-host-noauth.yml": "4d57f7d8e9362af1fdda67ebdea45599b406e11a",
+    "src/kernel/zswap-original-ticket.h": "2f850b53708c8142ee95d330192c9db1f9ae9418",
+    "src/kernel/zswap-original-ticket.c": "66df826d86dde1bbd5e1967daa0e62517b58ac8d",
+    "tests/tools/round089-original-mm-carrier.patch": "059d1bf29cf4990e22a2f608d5d552abeec3a8d1",
+    "tests/tools/round089-original-mm-carrier-verify.py": "dce6b2417ea33b598eaf00accf7888730b2e4a54"
+  },
+  "original_linux_pin": "c339f4010dea8b0d754f84ace70cd1b089878ef8",
+  "overlay_postimages": {
+    "mm/zswap.c": "cbf160877e8d8b584d6010c009a3e500f8b99f38",
+    "include/linux/swap_ops.h": "a39a1921daf6f272e9812eb63b1aa64fec96c57f",
+    "include/linux/blk_types.h": "50c94617b08e581021ba25fa6e182a5b88ecfa43",
+    "include/linux/bio.h": "4079365b37690164f85ba962a0bd0918c85899cb",
+    "block/bio.c": "38f24ee2e414107be390d3a01c6b907e06a9dca7",
+    "mm/page_io.c": "c3bd481117dbd29edd821df452f74990d6d5f00a",
+    "include/linux/swapz_mm_carrier.h": "f170d2c2ac63679adb0885f746585ed77c2746a5"
+  },
+  "postimage_status": "CONNECTOR_PREDICTED_EXACT_STAGE; CI_PENDING",
+  "prior_stage_postimages_verified_by_connector": 7,
+  "modified_pristine_blobs_verified_by_connector": 6,
+  "overlay_hunks": 17,
+  "bio_clear_sites": 11,
+  "standards_before": "b3d32260fcd0cc4cb877fc06e3802b5130709678",
+  "standards_after": "8f69e16dbdb64bfdbaaa5729d7b2939f7c8fb8c7",
+  "standards_prefix_verified": true,
+  "publication_reconciliation": "main advanced before ref update; unpublished commit not pushed; reconstructed on fresh parent",
+  "workflow": {
+    "run": 45586374203,
+    "job": 139108905510,
+    "url": "https://github.com/k1moradi/swapz/actions/runs/45586374203/job/139108905510",
+    "status": "queued",
+    "conclusion": null,
+    "artifact": null,
+    "first_error": null,
+    "actual_checks": null,
+    "actual_lifecycle_races": null,
+    "actual_mutant_kills": null,
+    "compiler_results": {}
+  },
+  "first_error": "local git ls-remote exited 128: Could not resolve host: github.com",
+  "first_error_scope": "LOCAL_CHECKOUT_UNAVAILABLE; NOT_CI_OR_COMPILER_FAILURE",
+  "prepublication_packaging_errors": [
+    "JSON parser rejected trailing comma in prior Python dict; corrected",
+    "full patch generator rejected incorrect bio.h old-line anchor; switched to exact postimage overlay"
+  ],
+  "prior_accepted_ci": {
+    "source": "63412e4f2fb6f74cb02996947aca48acf047391c",
+    "run": 45577781770,
+    "job": 139079883750,
+    "artifact": 15006885910,
+    "scope": "AGENT1_ACCEPTED_R089_NOT_REPEATED"
+  },
+  "memory": {
+    "per_entry_cookie_bytes": 8,
+    "prior_full_key_bytes": 120,
+    "source_record_host_bytes_prior": 72,
+    "carrier_host_bytes_prior": 4176,
+    "broker_host_bytes_prior": 160,
+    "sparse_cells": 64,
+    "estimated_kernel_cell_bytes": 80,
+    "estimated_sparse_bytes": 5120,
+    "estimated_sparse_plus_prior_host_carrier_bytes": 9296,
+    "actual_slab_delta": "NOT_RUN",
+    "actual_natural_eviction_hit_rate": "NOT_RUN",
+    "actual_kernel_cpu": "NOT_RUN"
+  },
+  "trace": {
+    "policy": "UNCHANGED_DIRECT_MAPPED_COOKIE_LOW_6_BITS",
+    "stores_per_trace": 1024,
+    "lag": [
+      0,
+      32,
+      64,
+      256
+    ],
+    "expected_lookups": [
+      1024,
+      992,
+      960,
+      768
+    ],
+    "expected_hits": [
+      1024,
+      992,
+      0,
+      0
+    ],
+    "actual_hits": null,
+    "host_cpu_seconds": null,
+    "scope": "DETERMINISTIC_NO_CONTENTION_SOURCE_HELPER_TRACE_NOT_NATURAL_EVICTION"
+  },
+  "automatic_census": 9,
+  "other_automatic_runs": [
+    45586374610,
+    45586374803,
+    45586374212,
+    45586374224,
+    45586374240,
+    45586374455,
+    45586374568,
+    45586374297
+  ],
+  "blockers": [
+    "actual provider/module lifetime and independent broker external entrant quiescence still caller contract; no registered provider",
+    "native BIO/sio/folio live mapping geometry and exact selected clone/route ordering unqualified",
+    "actual kernel compilation/link/RCU/lockdep/workqueue/release latency unqualified",
+    "sparse retention and hash cost under real eviction workload; one carrier plus grace period can throttle optimization",
+    "destination durability and exactly-once upper ACK unproven"
+  ],
+  "kernel_compile": "NOT_RUN",
+  "native": "NOT_RUN",
+  "physical_mutation": false,
+  "new_vm_qualification": false,
+  "manual_dispatch": false,
+  "duplicate_ci": false,
+  "periodic_monitoring": false,
+  "source_mapped_authenticated": 0,
+  "phase_a": "BLOCKED",
+  "direct_handoff": "DISABLED",
+  "forced_raw_bypass": "DISABLED",
+  "import_active": 0
+}
