@@ -1,4 +1,4 @@
-name: Round090 selected-DM composed source host
+name: Round091 selected-DM ordered owner host
 on:
   push:
     branches: [main]
@@ -7,13 +7,15 @@ on:
       - 'tests/tools/round088-selected-dm-admission-verify.py'
       - 'tests/tools/round088-original-dm-selected-clone.patch'
       - 'tests/tools/round089-selected-dm-registry-verify.py'
-      - 'tests/tools/round090-selected-dm-composition-verify.py'
+      - 'tests/tools/round091-selected-dm-ordered-verify.py'
+      - 'tests/runtime/native/fixtures/round091-selected-dm-ordered.c'
+      - 'src/kernel/dm-target.c'
 permissions:
   contents: read
 jobs:
   selected-dm-source-host:
     runs-on: ubuntu-24.04
-    timeout-minutes: 12
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@v4
         with:
@@ -33,13 +35,19 @@ jobs:
           test -z "$(git status --porcelain)"
           git diff --check "$SWAPZ_PUSH_BEFORE_SHA" HEAD
           python3 -B tests/runtime/native/repository-policy-test.py --enforce
+          prior="$(mktemp)"
+          trap 'rm -f "$prior"' EXIT
+          git show "$SWAPZ_PUSH_BEFORE_SHA:docs/testing_standards.md" > "$prior"
+          bytes="$(wc -c < "$prior")"
+          test "$(git hash-object "$prior")" = "$(git rev-parse "$SWAPZ_PUSH_BEFORE_SHA:docs/testing_standards.md")"
+          test "$(wc -c < docs/testing_standards.md)" -gt "$bytes"
+          cmp -n "$bytes" "$prior" docs/testing_standards.md
       - name: Exact target source strict C guard and semantic mutants
         working-directory: swapz
         run: |
           set -Eeuo pipefail
           python3 -B tests/tools/round088-selected-dm-admission-verify.py
           python3 -B tests/tools/round089-selected-dm-registry-verify.py
-          python3 -B tests/tools/round090-selected-dm-composition-verify.py
       - uses: actions/checkout@v4
         with:
           repository: torvalds/linux
@@ -49,6 +57,13 @@ jobs:
           sparse-checkout: |
             drivers/md/dm.c
             include/linux/bvec.h
+            include/linux/lzo.h
+            include/linux/lz4.h
+            lib/lzo/
+            lib/lz4/
+            mm/zswap.c
+            crypto/lzo.c
+            crypto/lz4.c
           sparse-checkout-cone-mode: false
           persist-credentials: false
       - name: Pristine original DM patch applicability and exact postimage
@@ -68,9 +83,22 @@ jobs:
             git apply --check "$patch"
             git apply "$patch"
             if grep -n 'bi_bvec_done' drivers/md/dm.c; then exit 1; fi
-            test "$(git hash-object drivers/md/dm.c)" = 554dd8215ec6be0cfeaa016ca25e772ac6d363ff
+            test "$(git hash-object drivers/md/dm.c)" = e51af0d14465e92323970a84c1d62df3a8eb61c3
             git apply --reverse "$patch"
             test "$(git hash-object drivers/md/dm.c)" = 1881d86111fb2e655893ad898cf21b88f0e4e7f3
           )
           test -z "$(git -C linux status --porcelain)"
-          echo ROUND090_ORIGINAL_DM_PATCH_APPLICABLE_POSTIMAGE_VERIFIED_NOT_COMPILED_AUTH0
+          echo ROUND091_ORIGINAL_DM_PATCH_APPLICABLE_POSTIMAGE_VERIFIED_NOT_COMPILED_AUTH0
+      - name: Actual frozen storage broker and original decoder ordered-host proof
+        working-directory: swapz
+        run: |
+          set -Eeuo pipefail
+          python3 -B tests/tools/round091-selected-dm-ordered-verify.py --linux-root ../linux --evidence-dir "$RUNNER_TEMP/round091-agent3"
+      - name: Retain bounded host evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: round091-agent3-ordered-host
+          path: ${{ runner.temp }}/round091-agent3
+          if-no-files-found: ignore
+          retention-days: 14

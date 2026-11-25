@@ -1,7 +1,7 @@
 diff --git a/drivers/md/dm.c b/drivers/md/dm.c
 --- a/drivers/md/dm.c
 +++ b/drivers/md/dm.c
-@@ -1404,4 +1404,117 @@
+@@ -1404,4 +1404,142 @@
  }
 -
 +
@@ -15,8 +15,8 @@ diff --git a/drivers/md/dm.c b/drivers/md/dm.c
 + */
 +bool dm_swapz_round088_clone_matches(struct dm_target *ti, struct bio *clone,
 +				    const struct bio *expected_origin);
-+bool dm_swapz_round088_clone_matches(struct dm_target *ti, struct bio *clone,
-+				    const struct bio *expected_origin)
++static bool dm_swapz_selected_clone_matches(struct dm_target *ti, struct bio *clone,
++				    const struct bio *expected_origin, bool map_scope)
 +{
 +	struct dm_target_io *tio;
 +	struct dm_io *io;
@@ -30,8 +30,8 @@ diff --git a/drivers/md/dm.c b/drivers/md/dm.c
 +	/* Valid only on a core-created map clone, not a general BIO API. */
 +	tio = clone_to_tio(clone);
 +	if (tio->magic != DM_TIO_MAGIC || !dm_tio_is_normal(tio) ||
-+	    tio->ti != ti || tio->target_bio_nr || !tio->len_ptr ||
-+	    *tio->len_ptr != 8U)
++	    tio->ti != ti || tio->target_bio_nr ||
++	    (map_scope && (!tio->len_ptr || *tio->len_ptr != 8U)))
 +		return false;
 +	io = tio->io;
 +	if (!io || io->magic != DM_IO_MAGIC ||
@@ -72,7 +72,32 @@ diff --git a/drivers/md/dm.c b/drivers/md/dm.c
 +	       !clone_vec.bv_offset && !origin_vec.bv_offset &&
 +	       clone_vec.bv_len == 4096U && origin_vec.bv_len == 4096U;
 +}
++bool dm_swapz_round088_clone_matches(struct dm_target *ti, struct bio *clone,
++				    const struct bio *expected_origin)
++{
++	return dm_swapz_selected_clone_matches(ti, clone, expected_origin, true);
++}
 +EXPORT_SYMBOL_GPL(dm_swapz_round088_clone_matches);
++
++/* Accepted clone revalidation: caller is the sole target completion owner,
++ * holds its descriptor and RCU protects the current table. The core's
++ * transient len_ptr belongs to ->map and MUST NOT be inspected here.
++ * No durable origin or table pointer is returned.
++ */
++bool dm_swapz_round091_accepted_clone_matches(struct dm_target *ti, struct bio *clone);
++bool dm_swapz_round091_accepted_clone_matches(struct dm_target *ti, struct bio *clone)
++{
++	struct dm_target_io *tio;
++
++	if (!ti || !clone || clone->bi_end_io != clone_endio)
++		return false;
++	tio = clone_to_tio(clone);
++	if (tio->magic != DM_TIO_MAGIC || !tio->io ||
++	    tio->io->magic != DM_IO_MAGIC)
++		return false;
++	return dm_swapz_selected_clone_matches(ti, clone, tio->io->orig_bio, false);
++}
++EXPORT_SYMBOL_GPL(dm_swapz_round091_accepted_clone_matches);
 +
 +/* Borrowed only during the real synchronous selected ->map callback. */
 +const struct bio *dm_swapz_round090_selected_origin(struct dm_target *ti,

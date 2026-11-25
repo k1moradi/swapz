@@ -6608,8 +6608,15 @@ int main(void)
         self.assertIn("ctx->preparation_ordered_waits++", ordered)
         self.assertIn("wait_for_completion(&entry->preparation_snapshot_ready)", ordered)
         self.assertIn("prepared = READ_ONCE(entry->prepared_page);", ordered)
-        self.assertLess(ordered.index("wait_for_completion("),
+        self.assertEqual(ordered.count("swapz_process(ctx, entry->bio)"), 1)
+        self.assertLess(ordered.index("wait_for_completion(&entry->preparation_snapshot_ready)"),
                         ordered.index("swapz_process(ctx, entry->bio)"))
+        # The optional original candidate is resolved in the same process
+        # call after ordinary preparation ownership and canonical dequeue.
+        self.assertNotIn("swapz_round091_process_candidate(", ordered)
+        process = source_body("swapz_process", DM)
+        self.assertLess(process.index("swapz_round091_process_candidate(ctx, entry)"),
+                        process.index("swapz_accept_write(ctx, bio)"))
         self.assertIn("prepared_async = ctx->async_prepare && !entry->preparation_inline",
                       accept)
         self.assertIn("prepared->bytes", accept)
