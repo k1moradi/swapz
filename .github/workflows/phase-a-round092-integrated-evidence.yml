@@ -1,0 +1,38 @@
+name: Round092 integrated physical evidence model (rootless only)
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'tests/tools/round092-integrated-evidence.py'
+      - 'tests/runtime/native/round092-integrated-evidence-test.py'
+      - '.github/workflows/phase-a-round092-integrated-evidence.yml'
+permissions:
+  contents: read
+jobs:
+  offline-model:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 2
+      - name: Exact source and complete standards prefix
+        env:
+          BEFORE: ${{ github.event.before }}
+          SOURCE: ${{ github.sha }}
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$SOURCE"
+          test "$(git rev-list --parents -n 1 HEAD)" = "$SOURCE $BEFORE"
+          git diff --check "$BEFORE" "$SOURCE"
+          python3 - <<'PY'
+          import hashlib, subprocess
+          from pathlib import Path
+          before = subprocess.check_output(["git", "show", "HEAD^:docs/testing_standards.md"])
+          after = Path("docs/testing_standards.md").read_bytes()
+          assert len(after) > len(before) and after.startswith(before)
+          print("standards_before", len(before), hashlib.sha256(before).hexdigest())
+          print("standards_after", len(after), hashlib.sha256(after).hexdigest())
+          PY
+      - name: Fabricated evidence consistency and adversarial refusal only
+        run: python3 -B tests/runtime/native/round092-integrated-evidence-test.py -v
