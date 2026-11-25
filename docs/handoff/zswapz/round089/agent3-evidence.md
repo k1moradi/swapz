@@ -1,6 +1,6 @@
 # Round089 Agent3 — canonical selected-DM enqueue and route registry correction
 
-Authority: [immutable task](agent3-selected-dm-correction-p0.md), [frozen contract](frozen-contract.md), [ROUND_OPEN](https://github.com/k1moradi/swapz/issues/207#issuecomment-7144215635), [technical clarification](https://github.com/k1moradi/swapz/issues/207#issuecomment-7155918424). Task 0c893ee7a3ffc158d747c11c96b67fcf0b3efa15; baseline db9252db73721a768be912965ad4402e332039e8. Exact new source SHA/parent will be recorded in a separate evidence update (self-reference impossible).
+Authority: [immutable task](agent3-selected-dm-correction-p0.md), [frozen contract](frozen-contract.md), [ROUND_OPEN](https://github.com/k1moradi/swapz/issues/207#issuecomment-7144215635), [technical clarification](https://github.com/k1moradi/swapz/issues/207#issuecomment-7155918424). Task 0c893ee7a3ffc158d747c11c96b67fcf0b3efa15; baseline db9252db73721a768be912965ad4402e332039e8. Published source [d56ad2e7eb0777b5b957edff3d1dbcc995556ce0](https://github.com/k1moradi/swapz/commit/d56ad2e7eb0777b5b957edff3d1dbcc995556ce0), verified sole parent c808093639d8dc77dad76cb38f0a327d0fe304fd, non-force expected-head direct main FF, remote matched. This evidence-only revision records exact source and CI metadata.
 
 ## Actual prior failure and complete failed-job census
 
@@ -20,3 +20,7 @@ Local sandbox strict GCC 14.2.0 and Clang 17.0.0 with ASan/UBSan: existing uncha
 ## Decision
 
 GO for review of corrected **dormant** candidate and local registry metadata seam; NO-GO live admission. SOURCE_MAPPED_AUTHENTICATED=0; PHASE_A=BLOCKED; DIRECT_COMPRESSED_HANDOFF=DISABLED; FORCED_RAW_BYPASS=DISABLED; import ACTIVE0. No physical mutation, privileged/loaded tests, new VM build/boot, normal Kbuild, source AUTH, durable physical WRITE/FUA or real upper ACK. Linux MM/zswap owns compressed RAM and natural eviction; swapz disk packing/GC only; original typed codec separate; RAW_4096 full original uncompressed 4096; protected SWAPSPACE2 header/UUID/partition and 20B map unchanged.
+
+## Exact new-source GitHub CI observation
+
+[Run 45577530832](https://github.com/k1moradi/swapz/actions/runs/45577530832), [job 139079053334](https://github.com/k1moradi/swapz/actions/runs/45577530832/job/139079053334) QUEUED at inspection, exact head d56ad2e7eb0777b5b957edff3d1dbcc995556ce0; actual remote compiler/registry/pristine apply/postimage and repository-policy results NOT_EXECUTED at observation. No new terminal first error. Full exact commit diff inspected for newly added whitespace, including space-before-tab, and same-commit canonical standards literal prefix/EOF preserved; full exact-tree git diff --check and policy not executed locally. Automatic source census: 28 runs observed (1 in progress, 27 queued); mandatory and historical workflow statuses separate, no manually dispatched/duplicated/periodic/VM qualification added. Agent1 owns reconciliation of other lanes and prior automatic routing. New exact-source CI terminal evidence remains pending.
