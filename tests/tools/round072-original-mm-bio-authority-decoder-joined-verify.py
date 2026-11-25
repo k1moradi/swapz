@@ -56,13 +56,26 @@ def main() -> None:
             "tests/tools/round058-original-stored-bio-chain.py",
     ):
         ast.parse((ROOT / path).read_text())
-    # Use actual frozen product C SHA, not a copied programmatic stub.
+    # Keep frozen native composition provenance separate from current actual
+    # host execution; do not substitute a historical binary for the host test.
     actual = ROOT / "src/kernel"
-    pinned = {
+    historical_commit = "22fbdd0090e302bd17b3811145395ceb0a814a6c"
+    historical_pins = {
         "authority.c": "25bf2dbdc5a3af770d7027547a58254c1ba81265",
         "zswap-import-decoder-owner.c":
             "8e0c8f4d2085af7f2e17df412f3a1af654063571",
     }
+    for name, expected in historical_pins.items():
+        result = subprocess.run(["git", "--no-replace-objects", "show",
+                                 historical_commit + ":src/kernel/" + name],
+                                cwd=ROOT, capture_output=True, timeout=60, check=False)
+        require(result.returncode == 0, "historical-product-unavailable:" + name)
+        content = result.stdout
+        historical_blob = hashlib.sha1(
+            b"blob " + str(len(content)).encode("ascii") +
+            b"\0" + content).hexdigest()
+        require(historical_blob == expected, "historical-product-C-blob:" + name)
+    pinned = historical_pins | {"authority.c": "73b3e2dc98c6a47315519d3ab650c3d3b0656de7"}
     for name, expected in pinned.items():
         content = (actual / name).read_bytes()
         blob = hashlib.sha1(
@@ -70,7 +83,7 @@ def main() -> None:
             b"\0" + content).hexdigest()
         require(blob == expected, "actual-product-C-blob:" + name)
     print("PASS round072_original_MM_XArray_zsmalloc_to_real_BIO_endio_"
-          "actual_authority_independent_decoder_join_source=ASSERTED "
+          "historical_native_and_current_host_product_pins=CHECKED "
           "native=SEPARATE_KUNIT AUTH=0 PHASE_A=BLOCKED", flush=True)
     runs = (
         ("source",

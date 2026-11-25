@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Actual shared typed authority, engine and storage host qualification."""
+"""Round090 current shared authority and admission regression (existing host route)."""
 import json
 import os
 from pathlib import Path
@@ -16,9 +16,9 @@ PINS = {
     "src/kernel/authority.c": "73b3e2dc98c6a47315519d3ab650c3d3b0656de7",
     "src/kernel/authority.h": "c320498ce530c0887bf498cc4d5b121765bb41f3",
     "src/kernel/engine.c": "e7c50c3e78449157439fba9c69e5d23b1c317f4e",
-    "src/kernel/zswap-original-storage.h": "a47d2f7ee8f48addfd4bd6915ac06528081d52e0",
-    "src/kernel/zswap-original-storage.c": "1a2dd5c6a29614f6f52e06cf5bcdd268fd40ed30",
-    "tests/runtime/native/fixtures/round089-shared-original-storage.c": "20f0f86ce4c25623f740a6217c61ffea3d38294e",
+    "src/kernel/zswap-original-storage.h": "0da04b61921e3dbc0544cb9c9c8168513628997b",
+    "src/kernel/zswap-original-storage.c": "d4feaca4d114cfdb1877df65e68e8d6b52859126",
+    "tests/runtime/native/fixtures/round089-shared-original-storage.c": "13ceb16b1e6cc68575c673aba273b534e593eb30",
     "src/kernel/codec.c": "d920dcaac6f2b7de1334d4133770bd649719c66d",
     "src/kernel/codec.h": "e89d316b9cf49f82df0b77648c1be1731607987d",
     "src/kernel/engine.h": "0e505915fb2e1578b4c1cee36e32be8a30f3745f",
@@ -64,9 +64,16 @@ MUTANTS = [
         "engine.c",
         "if (observed.state & SWAPZ_MAP_ORIGINAL)\n\t\treturn -EOPNOTSUPP;",
         "if (observed.state & SWAPZ_MAP_ORIGINAL)\n\t\treturn -ESTALE;"
-    ]
+    ],
+    ["credit_headroom","zswap-original-storage.c","if (!swapz_open_segment_fits(storage->authority, 1U))","if (0)"],
+    ["credit_identity","zswap-original-storage.c","credit == storage->transaction.sequence &&\n\t       credit == a->active_sequence &&","storage->transaction.sequence == a->active_sequence &&"],
+    ["credit_consume","zswap-original-storage.c","storage->pending_decoder = NULL;\n\terror = storage->ops.write","/* mutant: keep consumed lease */\n\terror = storage->ops.write"],
+    ["cancel_abandon","zswap-original-storage.c","error = swapz_abort(storage->authority, &storage->transaction);","error = 0;"],
+    ["mapped_count","authority.c","a->segment_mapped_pages[new_segment]++;","a->segment_mapped_pages[new_segment] += 0U;"],
+    ["typed_sequence","authority.c","a->extent_sequence_delta[tx->start_block] = sequence_delta;","a->extent_sequence_delta[tx->start_block] = 0;"]
 ]
-REPORT = {"compilers": {}, "first_error": None, "phase_a": "BLOCKED",
+REPORT = {"round": "090", "prior_round089_commit": "8089093b8ac23d5430c4d8d6071a34d8692ee193",
+          "compilers": {}, "first_error": None, "phase_a": "BLOCKED",
           "source_mapped_authenticated": 0, "import_active": 0,
           "physical_io": False, "native": "NOT_RUN"}
 
@@ -140,7 +147,7 @@ def main(work):
         binary = tmp / "test"
         for compiler, standard in (("gcc", "c2x"), ("clang", "c23")):
             baseline = compile_run(compiler, standard, sources, binary, "baseline", work)
-            match = re.fullmatch(r"PASS ROUND089_AGENT5 checks=(\d+) storage_bytes=(\d+) map_bytes=(\d+) sidecar_bytes=(\d+)\n",
+            match = re.fullmatch(r"PASS ROUND090_AGENT5 checks=(\d+) storage_bytes=(\d+) map_bytes=(\d+) sidecar_bytes=(\d+)\n",
                                  baseline.stdout)
             if baseline.returncode or not match or baseline.stderr:
                 (work / "first-child-error.log").write_text(baseline.stderr + baseline.stdout)
@@ -179,6 +186,6 @@ if __name__ == "__main__":
         REPORT["conclusion"] = "FAIL" if status else "PASS"
         (work / "results.json").write_text(json.dumps(REPORT, indent=2) + "\n")
         if status:
-            print("ROUND089_AGENT5_FIRST_ERROR " + REPORT["first_error"], file=sys.stderr)
+            print("ROUND090_AGENT5_FIRST_ERROR " + REPORT["first_error"], file=sys.stderr)
             print("Inspect private first-child-error.log if present; repair exact source, no unchanged rerun.", file=sys.stderr)
     raise SystemExit(status)

@@ -20,12 +20,19 @@ ROOT = Path(__file__).resolve().parents[2]
 FIXTURE = ROOT / "tests/runtime/native/fixtures/round069-original-bio-authority-joined.cfrag"
 STAGER = ROOT / "tests/tools/round069-stage-original-bio-authority-joined.py"
 REAL_AUTHORITY = ROOT / "src/kernel/authority.c"
-PRODUCT = {
+HISTORICAL_PRODUCT_COMMIT = "22fbdd0090e302bd17b3811145395ceb0a814a6c"
+HISTORICAL_PRODUCT = {
     "authority.c": "25bf2dbdc5a3af770d7027547a58254c1ba81265",
     "authority.h": "3bb5bab5a5bdb2aa087f5793fc8b5e90d6636031",
     "codec.c": "d920dcaac6f2b7de1334d4133770bd649719c66d",
     "codec.h": "e89d316b9cf49f82df0b77648c1be1731607987d",
     "gc-cost.h": "2d317f1274ef36bdde157ff72acc26a9f7ae1e0e",
+}
+# The native composition remains a frozen historical witness. Current host
+# tests below execute the actual reviewed Round089 shared-publication source.
+PRODUCT = HISTORICAL_PRODUCT | {
+    "authority.c": "73b3e2dc98c6a47315519d3ab650c3d3b0656de7",
+    "authority.h": "c320498ce530c0887bf498cc4d5b121765bb41f3",
 }
 
 
@@ -229,8 +236,14 @@ def verify_exact_original_gc_and_real_codec_guard(joined: str, source: str) -> N
 
 
 def main() -> None:
-    # Actual SOURCE-exact authority files are copied into the pristine
-    # native test image byte-for-byte. No mock implementations are permitted.
+    # Independently retain the historical native composition pins. Current
+    # host qualification uses current files, not the historical checkout.
+    for name, expected in HISTORICAL_PRODUCT.items():
+        result = subprocess.run(["git", "--no-replace-objects", "show",
+                                 HISTORICAL_PRODUCT_COMMIT + ":src/kernel/" + name],
+                                cwd=ROOT, capture_output=True, timeout=60, check=False)
+        if result.returncode or blob(result.stdout) != expected:
+            raise ValueError("historical-product-blob-mismatch:" + name)
     for name, expected in PRODUCT.items():
         actual = ROOT / "src/kernel" / name
         if blob(actual.read_bytes()) != expected:
@@ -251,7 +264,8 @@ def main() -> None:
     assert "sha256(destination, SWAPZ_BLOCK_BYTES, digest)" in joined
     ast.parse(STAGER.read_text())
     assert "SWAPZ_ROUND068_IMPORT_LOWER_BIO_TEST" in REAL_AUTHORITY.read_text()
-    print("PASS exact_real_authority_C_kernel_copy=5 source_native_endio_join=YES "
+    print("PASS historical_native_product_blobs=5 current_host_product_blobs=5 "
+          "native_fixture_source_asserted=YES native_execution=NOT_RUN "
           "frozen_original_LZO1X_LZ4_SHA_CRC_pin_GC_and_AUTH0=CHECKED", flush=True)
 
     # This re-executes the existing actual product-linked GCC/Clang +

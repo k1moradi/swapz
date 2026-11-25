@@ -91,7 +91,8 @@ static void reset(void)
 	fail_write = fail_flush = short_write = 0;
 }
 
-static int store(swapz_u32 page, swapz_u16 length, swapz_u32 generation)
+static int prepare_source(swapz_u32 page, swapz_u16 length, swapz_u32 generation,
+			  swapz_u32 *credit)
 {
 	struct swapz_authority_import_spec spec = {
 		.source_swap_slot = page, .source_entry_identity = 17,
@@ -106,7 +107,12 @@ static int store(swapz_u32 page, swapz_u16 length, swapz_u32 generation)
 	};
 	spec.compressed_crc32c = swapz_crc32c_bytes(bytes, length);
 	input.crc32c = spec.compressed_crc32c;
-	return swapz_shared_storage_write(&storage, &spec, &input);
+	return credit ? swapz_shared_storage_reserve(&storage, &spec, &input, credit) :
+		swapz_shared_storage_write(&storage, &spec, &input);
+}
+static int store(swapz_u32 page, swapz_u16 length, swapz_u32 generation)
+{
+	return prepare_source(page, length, generation, NULL);
 }
 static void raw(swapz_u32 page)
 {
@@ -129,6 +135,107 @@ static void discard(swapz_u32 page)
 	CHECK(!swapz_prevalidate_discard_range(&authority, page, 1));
 	CHECK(!swapz_discard_page(&authority, page));
 }
+static void admission_and_accounting(void)
+{
+	struct swapz_map old;
+	struct swapz_shared_storage_snapshot snapshot, saved;
+	swapz_u32 credit = 0, refused = 0x1234U, other_credit = 0, victim, dest, sequence;
+	swapz_u32 previous_writes, previous_flushes, page = 0;
+	swapz_u64 pin;
+	swapz_u8 first_byte = bytes[0];
+	unsigned long long abandoned;
+
+	reset();
+	raw(0);
+	old = maps[0];
+	victim = old.start_block / SWAPZ_SEGMENT_BLOCKS;
+	CHECK(counts[victim] == 1 && live_bytes[victim] == 4096 && costs[victim] == 8192);
+	CHECK(min_blocks[victim] == 1 && first[victim] == 0 && last[victim] == 0);
+	abandoned = authority.abandoned_blocks;
+	CHECK(!prepare_source(0, 321, 2, &credit) && credit);
+	CHECK(!writes && !flushes && leases == 1 && authority.in_flight);
+	CHECK(!memcmp(&old, &maps[0], sizeof(old)) && live[old.start_block] == 1);
+	CHECK(prepare_source(1, 17, 1, &refused) == -EBUSY && refused == 0x1234U);
+	CHECK(swapz_stage(&authority, &page, 1, 1, &ordinary) == -EBUSY);
+	CHECK(swapz_prevalidate_discard_range(&authority, 0, 1) == -EBUSY);
+	CHECK(swapz_shared_storage_close(&storage) == -EBUSY);
+	CHECK(swapz_shared_storage_cancel_reserved(&storage, credit + 1U) == -ESTALE);
+	CHECK(swapz_shared_storage_commit_reserved(&storage, credit + 1U) == -ESTALE);
+	CHECK(!swapz_shared_storage_cancel_reserved(&storage, credit));
+	CHECK(!authority.in_flight && !leases && !writes && !flushes);
+	CHECK(authority.abandoned_blocks == abandoned + 1U);
+	CHECK(!memcmp(&old, &maps[0], sizeof(old)) && counts[victim] == 1);
+	CHECK(swapz_shared_storage_cancel_reserved(&storage, credit) == -ESTALE);
+	CHECK(swapz_shared_storage_commit_reserved(&storage, credit) == -ESTALE);
+	/* An ordinary fallback after refusal uses the original full page. */
+	raw(0);
+	CHECK(maps[0].raw && maps[0].generation == 2 && counts[victim] == 1);
+	CHECK(live_bytes[victim] == 4096 && costs[victim] == 8192 && !live[old.start_block]);
+	old = maps[0];
+	CHECK(!prepare_source(0, 321, 3, &credit));
+	fail_flush = -EIO;
+	CHECK(swapz_shared_storage_commit_reserved(&storage, credit) == -EIO);
+	CHECK(!authority.in_flight && !leases && !memcmp(&old, &maps[0], sizeof(old)));
+	CHECK(swapz_shared_storage_commit_reserved(&storage, credit) == -ESTALE);
+	fail_flush = 0;
+	previous_writes = writes;
+	previous_flushes = flushes;
+	CHECK(!prepare_source(0, 321, 3, &credit));
+	CHECK(writes == previous_writes && flushes == previous_flushes && leases == 1);
+	bytes[0] ^= 0xffU;
+	CHECK(!swapz_shared_storage_commit_reserved(&storage, credit));
+	bytes[0] = first_byte;
+	CHECK(writes == previous_writes + 1U && flushes == previous_flushes + 1U);
+	CHECK(swapz_shared_storage_commit_reserved(&storage, credit) == -ESTALE);
+	CHECK(maps[0].generation == 3 && (maps[0].state & SWAPZ_MAP_ORIGINAL));
+	CHECK(counts[victim] == 1 && live_bytes[victim] == 321 && costs[victim] == 4417);
+	CHECK(!min_blocks[victim] && !live[old.start_block]);
+	CHECK(!swapz_extent_sequence_lookup(&authority, maps[0].start_block, &sequence));
+	CHECK(sequence == credit);
+	CHECK(!swapz_shared_original_pin(&authority, 0, &pin));
+	CHECK(!swapz_shared_storage_read_pinned(&storage, pin, output, sizeof(output), &snapshot));
+	CHECK(snapshot.spec.logical_page == 0 && snapshot.spec.compressed_length == 321);
+	CHECK(snapshot.map.generation == 3 && snapshot.sequence == credit && snapshot.decoder);
+	CHECK(!memcmp(output, bytes, 321));
+	memcpy(&saved, &snapshot, sizeof(saved));
+	media[snapshot.map.start_block][0] ^= 1U;
+	memset(output, 0xa5, sizeof(output));
+	CHECK(swapz_shared_storage_read_pinned(&storage, pin, output, sizeof(output), &snapshot) == -EBADMSG);
+	CHECK(!memcmp(&saved, &snapshot, sizeof(saved)) && output[0] == 0xa5U);
+	media[snapshot.map.start_block][0] ^= 1U;
+	/* A second typed extent in the same segment must publish a nonzero
+	 * sequence delta, not alias the first extent's sequence. */
+	CHECK(!prepare_source(1, 321, 1, &other_credit));
+	CHECK(other_credit > credit && !swapz_shared_storage_commit_reserved(&storage, other_credit));
+	CHECK(counts[victim] == 2 && live_bytes[victim] == 642 && leases == 2);
+	CHECK(!swapz_extent_sequence_lookup(&authority, maps[1].start_block, &sequence));
+	CHECK(sequence == other_credit);
+	discard(1);
+	CHECK(counts[victim] == 1 && leases == 1);
+	/* A boundary credit cannot call the allocator's recycle callback.
+	 * Ordinary traffic may subsequently select another segment. */
+	authority.next_block = (victim + 1U) * SWAPZ_SEGMENT_BLOCKS;
+	CHECK(prepare_source(1, 321, 1, &refused) == -ENOSPC && refused == 0x1234U);
+	CHECK(!authority.in_flight && leases == 1);
+	raw(0);
+	dest = maps[0].start_block / SWAPZ_SEGMENT_BLOCKS;
+	CHECK(dest != victim && counts[dest] == 1 && !counts[victim]);
+	CHECK(live_bytes[dest] == 4096 && costs[dest] == 8192 && min_blocks[dest] == 1);
+	CHECK(!live_bytes[victim] && !costs[victim] && !min_blocks[victim]);
+	CHECK(swapz_shared_original_segment_pinned(&authority, victim));
+	CHECK(!swapz_shared_storage_read_pinned(&storage, pin, output, sizeof(output), &snapshot));
+	CHECK(snapshot.map.generation == 3 && snapshot.sequence == credit && snapshot.decoder == saved.decoder);
+	CHECK(!memcmp(output, bytes, 321));
+	CHECK(!swapz_shared_original_put(&authority, pin) && !leases);
+	compressed(0);
+	CHECK(maps[0].generation == 5 && !maps[0].raw && !(maps[0].state & SWAPZ_MAP_ORIGINAL));
+	CHECK(counts[dest] == 1 && live_bytes[dest] == 321 && costs[dest] == 4417);
+	CHECK(!swapz_extent_sequence_lookup(&authority, maps[0].start_block, &sequence));
+	CHECK(sequence == ordinary.sequence);
+	discard(0);
+	CHECK(!counts[dest] && !live_bytes[dest] && !costs[dest] && !min_blocks[dest]);
+	CHECK(!swapz_shared_storage_close(&storage));
+}
 int main(void)
 {
 	swapz_u32 index, start, victim, dest, sequence, before_writes;
@@ -140,6 +247,7 @@ int main(void)
 
 	for (index = 0; index < sizeof(bytes); ++index)
 		bytes[index] = (swapz_u8)(index * 13U + 7U);
+	admission_and_accounting();
 	reset();
 	raw(0);
 	old = maps[0];
@@ -213,12 +321,17 @@ int main(void)
 		CHECK(!store(index, 1, 1));
 	before_writes = writes;
 	CHECK(store(9, 1, 1) == -ENOSPC && writes == before_writes);
+	{
+		swapz_u32 refused_credit = 0x1234U;
+		CHECK(prepare_source(9, 1, 1, &refused_credit) == -ENOSPC);
+		CHECK(refused_credit == 0x1234U && !authority.in_flight && writes == before_writes);
+	}
 	CHECK(store(0, 1, 2) == -ENOSPC && writes == before_writes);
 	for (index = 0; index < SWAPZ_SHARED_ORIGINAL_CAPACITY; ++index)
 		discard(index);
 	CHECK(!leases && !swapz_shared_storage_close(&storage));
 	CHECK(sizeof(struct swapz_map) == 20 && SWAPZ_SHARED_ORIGINAL_ACTIVE == 0);
-	printf("PASS ROUND089_AGENT5 checks=%u storage_bytes=%zu map_bytes=%zu sidecar_bytes=%zu\n",
+	printf("PASS ROUND090_AGENT5 checks=%u storage_bytes=%zu map_bytes=%zu sidecar_bytes=%zu\n",
 	       checks, sizeof(storage), sizeof(struct swapz_map), sizeof(storage.owner));
 	return 0;
 }

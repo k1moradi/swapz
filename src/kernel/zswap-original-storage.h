@@ -106,6 +106,10 @@ struct swapz_shared_storage {
 	struct swapz_tx transaction;
 	struct swapz_original_extent extent;
 	struct swapz_original_extent_record record;
+	/* An outstanding reservation owns the actual active allocator transaction,
+	 * sealed image and independent decoder lease, not a second map. */
+	struct swapz_authority_import_spec pending_spec;
+	void *pending_decoder;
 	swapz_u8 image[SWAPZ_BLOCK_BYTES];
 	swapz_u8 read_image[SWAPZ_BLOCK_BYTES];
 	swapz_u8 gc_copy[SWAPZ_BLOCK_BYTES];
@@ -114,6 +118,36 @@ int swapz_shared_storage_init(struct swapz_shared_storage *,
 	struct swapz_authority *, const struct swapz_original_storage_ops *);
 int swapz_shared_storage_write(struct swapz_shared_storage *,
 	const struct swapz_authority_import_spec *, const struct swapz_original_extent_input *);
+/* One preallocated credit under the sleepable ordered owner. Reserve only
+ * within the already OPEN segment (no recycle/GC/lower I/O); exhaustion
+ * declines before claim. The token is the nonwrapping allocator sequence,
+ * scoped to this authority lifetime. All tokens must be drained before
+ * authority reset. No other authority mutation, batch pause or owner
+ * handoff is allowed between reserve and commit/cancel. A canceled stage
+ * abandons its actual log block under ordinary allocator rules, not a
+ * synthetic rollback of the physical cursor. It never changes the map.
+ * Reserve copies sealed bytes, retains a decoder, and leaves output unchanged
+ * on error. Caller may claim only after reserve; cancel on refusal. Commit
+ * consumes the token once and reports actual lower errors, with no upper ACK.
+ * None of these calls is legal under a foreign spinlock. */
+int swapz_shared_storage_reserve(struct swapz_shared_storage *,
+	const struct swapz_authority_import_spec *,
+	const struct swapz_original_extent_input *, swapz_u32 *credit);
+int swapz_shared_storage_cancel_reserved(struct swapz_shared_storage *, swapz_u32 credit);
+int swapz_shared_storage_commit_reserved(struct swapz_shared_storage *, swapz_u32 credit);
+
+/* Immutable value descriptor paired with exact compressed bytes; decoder
+ * is borrowed from the independently retained pin until its final put.
+ * Caller must not release the decoder separately or use it after put.
+ * Both outputs remain unchanged on failure. */
+struct swapz_shared_storage_snapshot {
+	struct swapz_authority_import_spec spec;
+	struct swapz_map map;
+	void *decoder;
+	swapz_u32 sequence;
+};
+int swapz_shared_storage_read_pinned(struct swapz_shared_storage *, swapz_u64 pin,
+	swapz_u8 *, swapz_u32, struct swapz_shared_storage_snapshot *);
 int swapz_shared_storage_read(struct swapz_shared_storage *, swapz_u64,
 	swapz_u8 *, swapz_u32);
 int swapz_shared_storage_relocate(struct swapz_shared_storage *, swapz_u64, swapz_u64);

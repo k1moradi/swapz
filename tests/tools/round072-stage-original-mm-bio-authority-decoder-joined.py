@@ -19,6 +19,8 @@ ORIGINAL_BLOBS = {
     "mm/zswap.c": "ae19e301fced7e357a4c7587dfdd6abb890b9163",
     "block/bio.c": "b0fcc69de653524479e3b328aa29a37e97945b84",
 }
+# Historical native composition only; current host qualification is separate.
+HISTORICAL_PRODUCT_COMMIT = "22fbdd0090e302bd17b3811145395ceb0a814a6c"
 PRODUCT_BLOBS = {
     "authority.c": "25bf2dbdc5a3af770d7027547a58254c1ba81265",
     "authority.h": "3bb5bab5a5bdb2aa087f5793fc8b5e90d6636031",
@@ -117,7 +119,9 @@ def main() -> None:
     source_fixture, bio_fixture, new_fixture = (
         SOURCE_FIXTURE.read_bytes(), BIO_FIXTURE.read_bytes(),
         JOIN_FIXTURE.read_bytes())
-    product = {name: (ROOT / "src/kernel" / name).read_bytes()
+    product = {name: subprocess.check_output([
+        "git", "--no-replace-objects", "-C", str(ROOT), "show",
+        HISTORICAL_PRODUCT_COMMIT + ":src/kernel/" + name], timeout=60)
                for name in PRODUCT_BLOBS}
     base_manifest = json.loads(args.base_manifest.read_text())
     staged = plan(current, base_manifest, original, product,
@@ -172,6 +176,7 @@ def main() -> None:
             raise ValueError("native-original-postimage:" + path)
     args.manifest.write_text(json.dumps({
         "original": LINUX_PIN,
+        "historical_product_commit": HISTORICAL_PRODUCT_COMMIT,
         "tested_original_source": "mm/zswap.c+block/bio.c",
         "source_mapped_authenticated": False,
         "phase_a": "BLOCKED",

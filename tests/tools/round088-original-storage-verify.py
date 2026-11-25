@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Actual isolated extent + allocator + storage adapter host qualification."""
+"""Current legacy-isolated storage regression, preserving exact Round088 provenance."""
 import json
 import os
 from pathlib import Path
@@ -12,7 +12,8 @@ ROOT = Path(__file__).resolve().parents[2]
 KERNEL = ROOT / "src/kernel"
 SOURCE = KERNEL / "zswap-original-storage.c"
 FIXTURE = ROOT / "tests/runtime/native/fixtures/round088-original-storage.c"
-PINS = {
+HISTORICAL_COMMIT = "22fbdd0090e302bd17b3811145395ceb0a814a6c"
+HISTORICAL_PINS = {
     "src/kernel/authority.c": "25bf2dbdc5a3af770d7027547a58254c1ba81265",
     "src/kernel/authority.h": "3bb5bab5a5bdb2aa087f5793fc8b5e90d6636031",
     "src/kernel/codec.c": "d920dcaac6f2b7de1334d4133770bd649719c66d",
@@ -24,6 +25,16 @@ PINS = {
     "src/kernel/zswap-original-extent.h": "34572d01fffe1b276c2d023822266eda29a2137e",
     "src/kernel/Makefile": "ed6e19ae28a84a4a3e92117812adc445d5c2e8e5",
     "tests/runtime/native/repository-policy-test.py": "b200e0ca3e20d4c1f37e350ac9ef1c6426179817"
+}
+# Round089 moved raw publication into the shared helper and added guarded
+# authority/engine paths. Compile CURRENT code without the shared feature
+# macro, not a historical substitute or blanket pin refresh.
+PINS = HISTORICAL_PINS | {
+    "src/kernel/authority.c": "73b3e2dc98c6a47315519d3ab650c3d3b0656de7",
+    "src/kernel/authority.h": "c320498ce530c0887bf498cc4d5b121765bb41f3",
+    "src/kernel/engine.c": "e7c50c3e78449157439fba9c69e5d23b1c317f4e",
+    "src/kernel/zswap-original-storage.c": "d4feaca4d114cfdb1877df65e68e8d6b52859126",
+    "src/kernel/zswap-original-storage.h": "0da04b61921e3dbc0544cb9c9c8168513628997b",
 }
 MUTANTS = [
     [
@@ -123,6 +134,11 @@ def main(work):
     REPORT["parent"] = before
     require(not git("status", "--porcelain", "--untracked-files=all"), "dirty checkout")
     require(not git("diff", "--check", before, sha, "--"), "diff whitespace")
+    for path, expected in HISTORICAL_PINS.items():
+        require(git("rev-parse", HISTORICAL_COMMIT + ":" + path).decode().strip() == expected,
+                "historical blob mismatch " + path)
+    REPORT["historical_commit"] = HISTORICAL_COMMIT
+    REPORT["historical_pins"] = HISTORICAL_PINS
     for path, expected in PINS.items():
         require(git("hash-object", path).decode().strip() == expected, "blob mismatch " + path)
     REPORT["source_blobs"] = PINS | {
@@ -134,9 +150,15 @@ def main(work):
     policy = run([sys.executable, "-B", "tests/runtime/native/repository-policy-test.py", "--enforce"])
     require(policy.returncode == 0, "canonical policy rejected exact push")
     original = SOURCE.read_text()
+    boundary = "#ifdef SWAPZ_SHARED_ORIGINAL_TEST\nstatic int shared_ready"
+    require(original.count(boundary) == 1, "legacy/shared boundary")
+    legacy, shared = original.split(boundary, 1)
+    require((legacy.rstrip() + "\n#endif\n").encode() ==
+            git("show", HISTORICAL_COMMIT + ":src/kernel/zswap-original-storage.c"),
+            "legacy source differs from historical implementation")
     require(len({m[0] for m in MUTANTS}) == len(MUTANTS), "mutation identities")
     for name, old, new in MUTANTS:
-        require(original.count(old) == 1 and old != new, "mutation anchor " + name)
+        require(legacy.count(old) == 1 and old != new, "legacy mutation anchor " + name)
     REPORT["preflight"] = "PASS"
     with tempfile.TemporaryDirectory(prefix="swapz-storage-") as tmp:
         tmp = Path(tmp)
@@ -154,7 +176,7 @@ def main(work):
                        "map_bytes": counts[2], "mutants": []}
             REPORT["compilers"][compiler] = results
             for name, old, new in MUTANTS:
-                mutant.write_text(original.replace(old, new, 1))
+                mutant.write_text(legacy.replace(old, new, 1) + boundary + shared)
                 result = compile_run(compiler, standard, mutant, binary, name, work)
                 if (result.returncode != 77 or result.stdout or
                     not re.fullmatch(r"SEMANTIC_FAIL line=\d+ [^\n]+\n", result.stderr)):

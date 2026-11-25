@@ -30,10 +30,17 @@ ACTUAL_CODEC = KERNEL / "codec.c"
 ORIGINAL_HARNESS = FIXTURES / "round067-import-disk-payload-read.c"
 ORIGINAL_HEADER = KERNEL / "zswap-import-codec.h"
 
-PINNED_BLOBS = {
+HISTORICAL_COMMIT = "22fbdd0090e302bd17b3811145395ceb0a814a6c"
+HISTORICAL_BLOBS = {
     "authority.c": "25bf2dbdc5a3af770d7027547a58254c1ba81265",
     "codec.c": "d920dcaac6f2b7de1334d4133770bd649719c66d",
     "zswap-import-codec.h": "0d888fe4c74115ab2388f1df1dc0b86ae4b9b6c6",
+}
+# Current C differs by reviewed Round089 publication/guard changes. Retain
+# historical pins and run all original semantic negatives on CURRENT C.
+PINNED_BLOBS = HISTORICAL_BLOBS | {
+    "authority.c": "73b3e2dc98c6a47315519d3ab650c3d3b0656de7",
+    "authority.h": "c320498ce530c0887bf498cc4d5b121765bb41f3",
 }
 
 FIXTURE_MUTANTS = (
@@ -145,6 +152,12 @@ def check_source_baseline(fixture: str, actual: str) -> None:
     require("#define SWAPZ_IMPORT_DISK_ACTIVE 0U" in
             (KERNEL / "authority.h").read_text(),
             "real-import-activation-drift")
+    for file_name, expected in HISTORICAL_BLOBS.items():
+        result = subprocess.run(["git", "--no-replace-objects", "show",
+                                 HISTORICAL_COMMIT + ":src/kernel/" + file_name],
+                                cwd=ROOT, capture_output=True, timeout=60, check=False)
+        require(result.returncode == 0 and blob(result.stdout) == expected,
+                "historical-product-blob:" + file_name)
     for file_name, expected in PINNED_BLOBS.items():
         require(blob((KERNEL / file_name).read_bytes()) == expected,
                 "unmodified-real-product-blob:" + file_name)
@@ -228,7 +241,10 @@ def main() -> None:
     authority = ACTUAL_AUTHORITY.read_text()
     check_source_baseline(source, authority)
     report: dict[str, object] = {
-        "source": "round074-actual-authority-src-kernel-unchanged",
+        "source": "round074-current-actual-authority-src-kernel-reviewed-round089",
+        "historical_commit": HISTORICAL_COMMIT,
+        "historical_blobs": HISTORICAL_BLOBS,
+        "current_blobs": PINNED_BLOBS,
         "source_mapped_authenticated": False,
         "phase_a": "BLOCKED",
         "native_original_uml": "NOT_EXECUTED",

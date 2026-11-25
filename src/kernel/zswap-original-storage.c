@@ -446,15 +446,18 @@ int swapz_shared_storage_init(struct swapz_shared_storage *storage,
 	return error;
 }
 
-static int shared_write(struct swapz_shared_storage *storage,
+static int shared_prepare(struct swapz_shared_storage *storage,
 	const struct swapz_authority_import_spec *spec,
 	const struct swapz_original_extent_input *input)
 {
 	struct swapz_authority *a = storage->authority;
-	swapz_u32 completed = 0;
 	void *lease;
-	int error, flushed = 0;
+	int error;
 
+	/* Exclusive in-flight authority also reserves the available sidecar:
+	 * only this ordered owner may publish, and other staging is blocked. */
+	if (a->in_flight || a->batch_pending || storage->pending_decoder)
+		return -EBUSY;
 	if (input->logical_page != spec->logical_page ||
 	    input->length != spec->compressed_length ||
 	    input->crc32c != spec->compressed_crc32c ||
@@ -476,8 +479,43 @@ static int shared_write(struct swapz_shared_storage *storage,
 	if (!lease)
 		return -EAGAIN;
 	error = swapz_stage(a, &spec->logical_page, 1U, 1U, &storage->transaction);
-	if (error)
-		goto release;
+	if (error) {
+		storage->ops.decoder_put(storage->ops.context, lease);
+		return error;
+	}
+	storage->pending_spec = *spec;
+	storage->pending_decoder = lease;
+	return 0;
+}
+
+static int shared_credit_matches(const struct swapz_shared_storage *storage,
+				 swapz_u32 credit)
+{
+	const struct swapz_authority *a = storage->authority;
+
+	return credit && storage->pending_decoder && a->in_flight &&
+	       credit == storage->transaction.sequence &&
+	       credit == a->active_sequence &&
+	       storage->transaction.start_block == a->active_start;
+}
+
+int swapz_shared_storage_commit_reserved(struct swapz_shared_storage *storage,
+					 swapz_u32 credit)
+{
+	struct swapz_authority *a;
+	swapz_u32 completed = 0;
+	void *lease;
+	int error, flushed = 0;
+
+	if (!shared_ready(storage))
+		return -EINVAL;
+	if (!shared_credit_matches(storage, credit))
+		return -ESTALE;
+	a = storage->authority;
+	lease = storage->pending_decoder;
+	/* Consume before any lower callback; a failed completion is not retryable
+	 * through this credit. The caller still owns native error/completion. */
+	storage->pending_decoder = NULL;
 	error = storage->ops.write(storage->ops.context, storage->transaction.start_block,
 				   storage->image, SWAPZ_BLOCK_BYTES, &completed);
 	if (!error && completed != SWAPZ_BLOCK_BYTES)
@@ -486,14 +524,68 @@ static int shared_write(struct swapz_shared_storage *storage,
 		error = storage->ops.flush(storage->ops.context);
 		flushed = !error;
 	}
-	error = swapz_shared_original_finish(a, &storage->transaction, spec,
-		storage->image, SWAPZ_BLOCK_BYTES, completed == SWAPZ_BLOCK_BYTES ? 1U : 0U,
-		error, flushed, lease);
-	if (!error)
-		return 0;
-release:
-	storage->ops.decoder_put(storage->ops.context, lease);
+	error = swapz_shared_original_finish(a, &storage->transaction,
+		&storage->pending_spec, storage->image, SWAPZ_BLOCK_BYTES,
+		completed == SWAPZ_BLOCK_BYTES ? 1U : 0U, error, flushed, lease);
+	if (error)
+		storage->ops.decoder_put(storage->ops.context, lease);
 	return error;
+}
+
+int swapz_shared_storage_cancel_reserved(struct swapz_shared_storage *storage,
+					 swapz_u32 credit)
+{
+	void *lease;
+	int error;
+
+	if (!shared_ready(storage))
+		return -EINVAL;
+	if (!shared_credit_matches(storage, credit))
+		return -ESTALE;
+	error = swapz_abort(storage->authority, &storage->transaction);
+	if (error)
+		return error;
+	lease = storage->pending_decoder;
+	storage->pending_decoder = NULL;
+	storage->ops.decoder_put(storage->ops.context, lease);
+	return 0;
+}
+
+int swapz_shared_storage_reserve(struct swapz_shared_storage *storage,
+	const struct swapz_authority_import_spec *spec,
+	const struct swapz_original_extent_input *input, swapz_u32 *credit)
+{
+	int error;
+
+	if (!shared_ready(storage) || !shared_outside(storage, spec, sizeof(*spec)) ||
+	    !shared_outside(storage, input, sizeof(*input)) ||
+	    !shared_outside(storage, input->bytes, input->bytes_available) ||
+	    !shared_outside(storage, credit, sizeof(*credit)) ||
+	    !disjoint(credit, sizeof(*credit), spec, sizeof(*spec)) ||
+	    !disjoint(credit, sizeof(*credit), input, sizeof(*input)) ||
+	    !disjoint(credit, sizeof(*credit), input->bytes, input->bytes_available))
+		return -EINVAL;
+	if (storage->authority->in_flight || storage->authority->batch_pending ||
+	    storage->authority->gc_allocation || storage->pending_decoder)
+		return -EBUSY;
+	/* This existing allocator proof excludes recycle callbacks and GC.
+	 * Do not reserve a typed block by invoking a possibly sleeping TRIM. */
+	if (!swapz_open_segment_fits(storage->authority, 1U))
+		return -ENOSPC;
+	error = shared_prepare(storage, spec, input);
+	if (!error)
+		*credit = storage->transaction.sequence;
+	return error;
+}
+
+static int shared_write(struct swapz_shared_storage *storage,
+	const struct swapz_authority_import_spec *spec,
+	const struct swapz_original_extent_input *input)
+{
+	int error = shared_prepare(storage, spec, input);
+
+	return error ? error : swapz_shared_storage_commit_reserved(storage,
+							 storage->transaction.sequence);
 }
 
 int swapz_shared_storage_write(struct swapz_shared_storage *storage,
@@ -546,6 +638,29 @@ int swapz_shared_storage_read(struct swapz_shared_storage *storage, swapz_u64 pi
 	return shared_read(storage, pin, output, capacity);
 }
 
+int swapz_shared_storage_read_pinned(struct swapz_shared_storage *storage,
+	swapz_u64 pin, swapz_u8 *output, swapz_u32 capacity,
+	struct swapz_shared_storage_snapshot *snapshot)
+{
+	const struct swapz_shared_original_record *record;
+	int error;
+
+	if (!shared_ready(storage) || !shared_outside(storage, output, capacity) ||
+	    !shared_outside(storage, snapshot, sizeof(*snapshot)) ||
+	    !disjoint(output, capacity, snapshot, sizeof(*snapshot)))
+		return -EINVAL;
+	record = swapz_shared_original_view(storage->authority, pin);
+	if (!record)
+		return -ESTALE;
+	error = shared_read(storage, pin, output, capacity);
+	if (!error)
+		*snapshot = (struct swapz_shared_storage_snapshot) {
+			.spec = record->spec, .map = record->map,
+			.decoder = record->decoder, .sequence = record->sequence,
+		};
+	return error;
+}
+
 int swapz_shared_storage_relocate(struct swapz_shared_storage *storage,
 	swapz_u64 pin, swapz_u64 epoch)
 {
@@ -579,6 +694,8 @@ int swapz_shared_storage_close(struct swapz_shared_storage *storage)
 
 	if (!shared_ready(storage))
 		return -EINVAL;
+	if (storage->pending_decoder)
+		return -EBUSY;
 	error = swapz_shared_original_detach(storage->authority);
 	if (!error)
 		storage->authority = NULL;

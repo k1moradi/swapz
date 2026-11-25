@@ -20,6 +20,8 @@ ORIGINAL_BLOBS = {
     "include/linux/bio.h": "7a794ce723b84b2a148f8f9beccf057b266e8ac9",
     "include/linux/blk_types.h": "0cc09b975d8ffbd45ca3dc47533a71f8e8164de6",
 }
+# Historical native composition only; current host qualification is separate.
+HISTORICAL_PRODUCT_COMMIT = "22fbdd0090e302bd17b3811145395ceb0a814a6c"
 ACTUAL_PRODUCT_BLOBS = {
     "authority.c": "25bf2dbdc5a3af770d7027547a58254c1ba81265",
     "authority.h": "3bb5bab5a5bdb2aa087f5793fc8b5e90d6636031",
@@ -96,7 +98,9 @@ def main() -> None:
     }
     current = {path: (linux / path).read_bytes() for path in ORIGINAL_BLOBS}
     product = {
-        name: (ROOT / "src/kernel" / name).read_bytes()
+        name: subprocess.check_output([
+            "git", "--no-replace-objects", "-C", str(ROOT), "show",
+            HISTORICAL_PRODUCT_COMMIT + ":src/kernel/" + name], timeout=60)
         for name in ACTUAL_PRODUCT_BLOBS
     }
     fixture = FIXTURE.read_bytes()
@@ -146,6 +150,7 @@ def main() -> None:
             raise ValueError("joined-source-postimage:" + path)
     args.manifest.write_text(json.dumps({
         "original": ORIGINAL,
+        "historical_product_commit": HISTORICAL_PRODUCT_COMMIT,
         "original_original_bio_blob": ORIGINAL_BLOBS["block/bio.c"],
         "source_mapped_authenticated": False,
         "import_active": False,
