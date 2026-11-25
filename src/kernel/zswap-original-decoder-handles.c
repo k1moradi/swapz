@@ -9,7 +9,7 @@
 #include <string.h>
 /* Unique until this process unloads the implementation or the counter
  * saturates. This is NOT a production module lifetime credential. */
-static atomic_uint_least64_t next_lifecycle_epoch = ATOMIC_VAR_INIT(1U);
+static atomic_uint_least64_t next_lifecycle_epoch = 1U;
 #else
 #include <linux/atomic.h>
 #include <linux/errno.h>

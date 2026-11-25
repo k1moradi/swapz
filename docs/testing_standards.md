@@ -20598,3 +20598,15 @@ The sole original BIO enters the canonical incoming FIFO once UNCLAIMED; retaine
 The original zswap entry and locked swapcache folio, verified against the actual XArray and stored pool/slot, remain the source of truth until native writeback. An optional nonwrapping 8-byte store cookie is minted only for exact LZ4/LZO1X compressor/driver identity, eligible live route and full-page geometry. Remove the 64-cell direct-mapped metadata cache; perform no CRC/SHA on the compressed-store path and do not add pressure timers, reclaim competition or global BIO limits. At natural eviction only, require current area and pinned original pool/slot/handle, successful full 4096-byte native decode, selected route capability and exact SG compressed byte copy; end SG pin before calculating CRC32C of original bytes and SHA256 of native decoded page. Source-only fields precede independently checked route values, ticket reserve and seal. Eviction-time hashes are not independent store-time corruption detection. Native full-page fallback, original BIO sole completion owner, prior RCU reader grace and broker closure remain mandatory.
 
 The narrow broker trylock can run under target queue_lock only at an already accepted normal descriptor's ordered head after sole-owner sleepable capacity reservation; after successful claim the same descriptor transfers ownership infallibly, with no second link. Revocation ordering, independent refs and cleanup outside foreign locks are required. Stage changes only in pinned Linux scratch copies, never production Kbuild. Strict C23 GCC/Clang ASan+UBSan source-extracted host tests exercise delayed original eviction, nonwrapping generation, stale route/broker credit refusal and CRC/SHA with semantic negatives, and retain exact compiler/artifact evidence. Native Linux compile/lockdep, real reclaim hit rate, slab size, module quiescence, lower durability/ACK and physical testing remain NOT_RUN/NO_GO. AUTH=0; Phase A BLOCKED; direct compressed handoff, forced RAW bypass and import OFF.
+
+## Round091 Agent7 — C23-compatible static generation epoch
+
+The reusable independent original-decoder value-handle host verifier must
+compile the actual handle owner under strict GCC C2x and Clang C23 with
+ASan/UBSan, not only its pinned original codec objects. The host lifecycle
+epoch's static atomic initializer must be valid in C23, without depending on
+the removed ATOMIC_VAR_INIT macro. Keep monotonic compare-exchange,
+nonwrapping lifecycle and per-slot generations, separate record/read leases,
+unchanged-output failures, ABA and concurrent close/retire coverage. A failed
+source SHA and its first compiler error remain historical evidence; qualify
+only a new same-commit source plus applicable testing-standards update.
