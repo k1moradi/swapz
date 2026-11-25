@@ -20610,3 +20610,8 @@ nonwrapping lifecycle and per-slot generations, separate record/read leases,
 unchanged-output failures, ABA and concurrent close/retire coverage. A failed
 source SHA and its first compiler error remain historical evidence; qualify
 only a new same-commit source plus applicable testing-standards update.
+
+
+### Round091 — preserve legacy authority generation semantic mutant (Agent5)
+
+After the kernel `current` namespace correction, the inherited Round059 actual authority test must target the exact renamed `current_mapping->generation + 1U != record->generation` guard and invert the same comparison. Retain uniqueness enforcement, the original directed no_import_map_publication case and all ten compiled/executed semantic mutants per compiler; no skip, broad replacement, historical pin refresh or compile-failure-as-kill. Actual strict GCC/Clang ASan/UBSan current-source qualification remains mandatory. R073 requires its historical product commit in the checkout; routing/checkout correction remains Agent2's exclusive lease. AUTH=0; Phase A BLOCKED; compressed handoff, forced RAW bypass and import OFF.
