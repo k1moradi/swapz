@@ -20557,3 +20557,25 @@ The Round075 pre/post manifest self-test must read immutable historical product 
 ## Round091 Agent10 — current R090 composed native x86 compile-only qualification (AUTH0)
 
 Stage the immutable R090 baseline, the R089 original MM carrier patch followed by the R090 lifetime overlay, then the R090 selected DM patch in isolated pinned Linux. Require actual raw git apply check/application at each ordered stage, per-stage exact Git postimages, final eight-file postimage manifest and unchanged raw source checks. The current DM patch already uses bi_offset; do not repeat obsolete overlays. Where the kernel current macro conflicts with the frozen shared authority member or map-pointer identifier, allow only the explicit anchored scratch-only current-to-is_current and current-to-current_mapping correction and direct field consumer references, with pre/post blobs and counts. No peer edits, macro undefinition, fabricated exports or API stubs. Check real ELF compiler/link/execution prerequisites, full effective config, actual guarded original and product objects including the R090 composition and decoder bridge, one real vmlinux and external module link/modpost attempt if reached. Keep built-in broker ownership and absent module exports visible; record actual symbol definitions/exports and unresolved errors separately. Preserve prior failed evidence, first actual new diagnostic, and distinguish raw stage from compatibility-stage compilation. Verify complete actual-parent testing standards bytes, Git blob, size and append-only prefix before publication and in CI using event.before. No VM build-for-VM/boot, module loading, physical mutation, activation or runtime claim. AUTH0 Phase A BLOCKED direct/forced RAW/import OFF.
+
+## Round091 Agent7 — sustainable value decoder handles
+
+The opt-in original decoder value-handle test must preserve the frozen
+storage callback ABI unchanged while proving a distinct bounded handle
+with a bridge-lifecycle epoch, slot index and nonwrapping generation.
+A retained record owner lease must survive until explicit put; an independently
+retained temporary reader lease must protect an already admitted decode from
+concurrent record retirement. The test must enforce stale/replayed handle
+and wrong-epoch rejection after slot reuse and bridge reinitialization,
+nonwrapping generation saturation, output immutability on decode/guard errors,
+real staged pinned original LZ4/LZO1X + CRC/SHA, independent M3568/M4095,
+concurrent get/put/read and >64 actual record cycles without heap-per-page
+allocation. Both GCC and Clang must execute strict ASan+UBSan with exact
+source/parent/pin checks and fail-only first-error reporting. The historical
+complete testing_standards.md raw byte prefix must remain identical to its
+actual parent and the historical version, accounting solely for the earlier
+single-trailing-space correction; never overwrite using truncated connector
+output. No per-page module get, pointer/integer identity cast, production
+Kbuild, automatic VM or physical mutation is permitted. Module reload epoch
+continuity and independent real decoder provider module owner pinning are not
+established by host tests; retain NO_GO_LIVE.
