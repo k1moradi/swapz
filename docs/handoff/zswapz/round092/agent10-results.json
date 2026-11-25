@@ -1,0 +1,120 @@
+{
+  "round": "092",
+  "agent": 10,
+  "status": "RECOVERED_SOURCE_CI_QUEUED",
+  "task_commit": "ae0e4071bf01d1129d59cc9807e1025ecb6fac45",
+  "frozen_baseline": "2499405464110e6a97f054db5527de54b8aafb3a",
+  "original_linux_pin": "c339f4010dea8b0d754f84ace70cd1b089878ef8",
+  "unpublished_candidate": "693fb97b1b5b0e20179e9ec21e7645bc765a3984",
+  "unpublished_candidate_parent": "0be70076e1e327b4fc695887a0e146acd92f155e",
+  "source_published": true,
+  "observed_main": "0be70076e1e327b4fc695887a0e146acd92f155e",
+  "source_files": {
+    "tests/tools/round092-original-composed-compile-verify.py": "8641232bd41f8916761b85dce5e3869317cb54b0",
+    ".github/workflows/phase-a-round092-original-composed-compile-noauth.yml": "1dfe8159dda7b1e83197fa8844c4efc0d9e1f8ed",
+    "docs/testing_standards.md": "50459bf9ff72e33477be040c62e4a8f71a8a9cfc"
+  },
+  "standards": {
+    "frozen_blob": "e56de5aa3a3193640d358a17e123e62af03c4ae6",
+    "frozen_bytes": 1810731,
+    "parent_blob": "8a605249ee958a99e076ec58ff40df6af0f5f59e",
+    "parent_bytes": 1813675,
+    "candidate_blob": "50459bf9ff72e33477be040c62e4a8f71a8a9cfc",
+    "candidate_bytes": 1815138,
+    "append_bytes": 1463,
+    "full_parent_roundtrip_verified": true,
+    "full_candidate_readback": true,
+    "full_prefix_verified": true,
+    "published": false
+  },
+  "patches": [
+    "059d1bf29cf4990e22a2f608d5d552abeec3a8d1",
+    "337f7ff29e72d955251de0c54a9349f20c2586ec",
+    "94bb74549c54a614406b71f28a9e8e8c22527d6a",
+    "5c8587c3d8205fc1ab346011c092601f2113a45a"
+  ],
+  "predicted_raw_postimages": {
+    "mm/zswap.c": "a9a0201c29f177a37ec95a652e79e4ea2008167a",
+    "include/linux/swap_ops.h": "a39a1921daf6f272e9812eb63b1aa64fec96c57f",
+    "include/linux/blk_types.h": "50c94617b08e581021ba25fa6e182a5b88ecfa43",
+    "include/linux/bio.h": "4079365b37690164f85ba962a0bd0918c85899cb",
+    "block/bio.c": "38f24ee2e414107be390d3a01c6b907e06a9dca7",
+    "mm/page_io.c": "c3bd481117dbd29edd821df452f74990d6d5f00a",
+    "drivers/md/dm.c": "e51af0d14465e92323970a84c1d62df3a8eb61c3",
+    "include/linux/swapz_mm_carrier.h": "a516cab0813a5ecb70054bf488d536b05dcd4c52"
+  },
+  "frozen_product_file_pins": 43,
+  "actual_raw_git_apply": "NOT_RUN",
+  "overlay": {
+    "scope": "scratch-only guarded GPL declarations, no runtime qualification",
+    "mm": {
+      "raw": "a9a0201c29f177a37ec95a652e79e4ea2008167a",
+      "predicted": "f7f9526c340fbc323c6e40dada14907fa739d7db",
+      "symbols": [
+        "swapz_mm_candidate_get",
+        "swapz_mm_register_provider",
+        "swapz_mm_unregister_provider"
+      ]
+    },
+    "broker": {
+      "raw": "7ba56c5ee602853c8d0717f23aad9efc69d111ea",
+      "predicted": "93209c7b2945a4e9527fed8d9bd16128c680ce2d",
+      "symbols": [
+        "swapz_ticket_put",
+        "swapz_ticket_view",
+        "swapz_ticket_broker_put",
+        "swapz_ticket_broker_try_get",
+        "swapz_ticket_claim_under_queue_lock"
+      ]
+    },
+    "actual": "NOT_RUN"
+  },
+  "historical_round091": {
+    "source": "8dc64dfd2c7b19e1f64e7ce42e3d6ba4c8d3fbb3",
+    "run_id": 45599641943,
+    "job_id": 139154826234,
+    "artifact_id": 15014753457,
+    "first_error": "ERROR: modpost: dm-swapz.ko: symbol 'swapz_ticket_put' undefined!",
+    "original_objects": 6,
+    "product_objects": 9,
+    "full_kernel_link": "PASS",
+    "module_modpost": "FAILURE"
+  },
+  "first_error": "GitHub ref update GraphQL error 2C84:35A6B9:A5F4448:F51CFCB:6B070394 on expected-head nonforce main update",
+  "publication_errors": [
+    "GitHubGraphQLAPIError 2C84:35A6B9:A5F4448:F51CFCB:6B070394",
+    "GitHubGraphQLAPIError 1C55:B2E79:A6B4A0A:F571C82:6B0703A7",
+    "ReadTimeout after reconciling main",
+    "ReadTimeout after second reconciliation"
+  ],
+  "local_git": "exit 128 Could not resolve host: github.com",
+  "ci_runs_observed": 0,
+  "ci_run_id": 45650794048,
+  "ci_job_id": null,
+  "ci_artifact": null,
+  "build_attempts": 0,
+  "elf_preflight": "NOT_RUN",
+  "original_objects": "NOT_RUN",
+  "product_objects": "NOT_RUN",
+  "full_kernel_link": "NOT_RUN",
+  "module_modpost": "NOT_RUN",
+  "final_ko": "NOT_RUN",
+  "vm_boot": false,
+  "module_loaded": false,
+  "physical_mutation": false,
+  "manual_duplicate_dispatch": false,
+  "source_mapped_authenticated": 0,
+  "phase_a": "BLOCKED",
+  "direct_handoff": false,
+  "forced_raw_bypass": false,
+  "import_active": false,
+  "conclusion": "NOT_RUN_AT_INSPECTION",
+  "agent1_reconciliation": {
+    "source_recovery_commit": "78f630c9d0a2d5bfb626f2dbdef172f6024cf5ea",
+    "scope": "Agent1 recovered exact verifier/workflow blobs from candidate693fb97b1b5b0e20179e9ec21e7645bc765a3984 into direct-main source78f630c9d0a2d5bfb626f2dbdef172f6024cf5ea, original candidate object not ancestor. Automatic actual compile-only run45650794048 QUEUED. Frozen R091 + authorized isolated eight GPL exports only; actual raw application, compile, module modpost, final .ko NOT_RUN. No duplicate build. R093 carryover same compile lease; review next raw R092 staged boundary and prepare exact staging manifest only, no second full attempt on unchanged inputs.",
+    "prior_evidence_ref": "800f4cad1606d41eea55f3da05325402df66a992",
+    "physical_mutation": false,
+    "vm_boot": false
+  },
+  "recovered_source": "78f630c9d0a2d5bfb626f2dbdef172f6024cf5ea"
+}

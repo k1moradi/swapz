@@ -116,5 +116,12 @@
     "Native RCU/module unload and integrated selected-route ordered claim/commit not qualified",
     "Eviction digest does not establish store-time integrity",
     "Durability and exactly-once native upper ACK unqualified"
-  ]
+  ],
+  "agent1_reconciliation": {
+    "source_recovery_commit": "78f630c9d0a2d5bfb626f2dbdef172f6024cf5ea",
+    "scope": "Agent1 verified evidence commit89c473fc45c100830f3b4599285f34e5c11bbaac reached main, source8141a4a0fdfff0385df3898e937a8a388b833a83 ancestor. Actual focused run45649587401 job139330113237 QUEUED at inspection, not host PASS. Staged module patch62db468c14f23b59e7adaae65a11dcb9969f02b3 contains mm/zswap.c, carrier header and staged broker C/H overlay; normal product broker C7ba56c5ee602853c8d0717f23aad9efc69d111ea no exports. Eight guarded refs, provider_owner field transient module pins through RCU and candidate release; no native compile/unload claim. R093 same carryover CI plus producer-to-consumer ownership audit of actual patch (candidate transfer, module_put on all failure paths, registration/unregistration, external owner quiescence), no duplicate source/CI. A10 previous frozen build does not test actual R092 overlay.",
+    "prior_evidence_ref": "78f630c9d0a2d5bfb626f2dbdef172f6024cf5ea",
+    "physical_mutation": false,
+    "vm_boot": false
+  }
 }

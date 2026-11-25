@@ -77,7 +77,73 @@
       45648914275,
       45648914360,
       45648914478
-    ]
+    ],
+    "followup_snapshot": {
+      "source_commit": "62e1ee2dde6ddbdb79ca79fb1c64db31ac6e9b2a",
+      "registered_attempt1_runs": 10,
+      "success": 5,
+      "failure": 2,
+      "in_progress": 3,
+      "successful_run_ids": [
+        45648914333,
+        45648914261,
+        45648914360,
+        45648914412,
+        45648914400
+      ],
+      "in_progress_run_ids": [
+        45648914478,
+        45648914310,
+        45648914359
+      ],
+      "failed_runs": [
+        {
+          "run_id": 45648918015,
+          "jobs": [
+            {
+              "job_id": 139327655710,
+              "arch": "x86_64"
+            },
+            {
+              "job_id": 139327656002,
+              "arch": "arm64"
+            }
+          ],
+          "first_error": "FAIL: four final foreground-commit sites required",
+          "exit": 1,
+          "preceding_source_contract_tests_per_arch": 182,
+          "owner": "Agent3",
+          "compile_only_success_jobs": [
+            139327656067,
+            139327656134
+          ]
+        },
+        {
+          "run_id": 45648914275,
+          "job_id": 139327643597,
+          "first_error": "kernel-debug-qualification-test.py:522, test_execution_boot_marker_producer_rootless (publication_output_failure): expected PASS marker absent; fixture reports system swap identity changed during isolated run",
+          "exit": 1,
+          "tests": 48,
+          "failures": 1,
+          "scope": "rootless fixture, no actual physical-device failure established; not investigated beyond log",
+          "compile_only_success_job": 139327642977
+        }
+      ],
+      "project_goals": {
+        "run_id": 45648914359,
+        "success_job_ids": [
+          139327642399,
+          139327642737,
+          139327642846,
+          139327643065,
+          139327643130
+        ],
+        "in_progress_job_ids": [
+          139327642969
+        ]
+      },
+      "no_new_dispatch": true
+    }
   },
   "first_error": null,
   "local_execution_blocker": "git ls-remote exit 128: Could not resolve host github.com; no local checkout/test/diff; hosted actual test and hygiene PASS",
@@ -119,5 +185,12 @@
   "branches_created": 0,
   "prs_created": 0,
   "force_pushes": 0,
-  "manual_ci_dispatches": 0
+  "manual_ci_dispatches": 0,
+  "agent1_reconciliation": {
+    "source_recovery_commit": "78f630c9d0a2d5bfb626f2dbdef172f6024cf5ea",
+    "scope": "Agent1 verified exact offline job139327642033 and physical-evidence job139327642142 SUCCESS (3 tests/38 negatives as recorded), current exact-source census at inspection 6 success/2 fail/1 running/1 queued. Mandatory project-goals six individual jobs PASS, aggregate139332710307 queued. Product and debug failure historical, no physical mutation. Actual debug job139327643597 scenario publication_output_failure unexpected HOST_SWAPS_AFTER identity change, 47/48 as reported; preserve strict teardown guard and investigate fixture determinism. Recovered candidate followup evidence 9fc48f02 (previously unpublished), not source. R093 A2 owns debug fixture and evidence collection contract, no duplicate offline model/VM migration.",
+    "prior_evidence_ref": "9fc48f02bb9deadf3b6d0f0b898c4af1c9913bc5",
+    "physical_mutation": false,
+    "vm_boot": false
+  }
 }

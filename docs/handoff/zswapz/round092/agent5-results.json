@@ -1,0 +1,96 @@
+{
+  "round": "092",
+  "agent": 5,
+  "kind": "partial-inherited-pin-correction-publication-blocked",
+  "task_commit": "ae0e4071bf01d1129d59cc9807e1025ecb6fac45",
+  "task_parent": "2499405464110e6a97f054db5527de54b8aafb3a",
+  "conclusion": "PARTIAL_RECOVERED_SOURCE_CI_QUEUED_VALUE_HANDLE_NOT_IMPLEMENTED",
+  "tested_commit": null,
+  "tested_parent": null,
+  "candidate_source_commit": "cd03b16e472a6fef6022666a1a6458c63dacd8bb",
+  "candidate_parent": "0be70076e1e327b4fc695887a0e146acd92f155e",
+  "candidate_published": false,
+  "candidate_ci_runs": 0,
+  "first_error": "local git ls-remote exit 128: Could not resolve host: github.com",
+  "publication_error": "expected-head non-force update_ref ReadTimeout then GitHub GraphQLAPIError request 1F13:5B229:ACD69B4:FEDB06B:6B070442; main remained parent",
+  "current_host_compilers": null,
+  "current_host_cases": 0,
+  "current_host_mutants": 0,
+  "source_ci_preflight": "NOT_RUN",
+  "artifacts": [],
+  "standards": {
+    "frozen_blob": "e56de5aa3a3193640d358a17e123e62af03c4ae6",
+    "frozen_bytes": 1810731,
+    "parent_blob": "8a605249ee958a99e076ec58ff40df6af0f5f59e",
+    "parent_bytes": 1813675,
+    "candidate_blob": "4d8e54f1cde4f4629a8ff5b18a1c928ed089f8cf",
+    "candidate_bytes": 1814606,
+    "append_bytes": 931,
+    "full_readback_and_prefix": true,
+    "actually_published": false
+  },
+  "historical_pins": {
+    "r084_commit": "1095acd05fff26c9da3941d62a12e179dcaeb808",
+    "r084_verified": 13,
+    "r073_commit": "22fbdd0090e302bd17b3811145395ceb0a814a6c",
+    "r073_verified": 8
+  },
+  "prior_ci": {
+    "tested_commit": "b8119c09f2429ea85077ae48213adaa4b1014515",
+    "runs": [
+      {
+        "round": "059",
+        "run_id": 45603612656,
+        "job_id": 139168622628,
+        "conclusion": "success",
+        "gcc_cases": 9,
+        "clang_cases": 9,
+        "gcc_mutants": 10,
+        "clang_mutants": 10
+      },
+      {
+        "round": "060",
+        "run_id": 45603612092,
+        "job_id": 139168619933,
+        "conclusion": "success",
+        "gcc_cases": 9,
+        "clang_cases": 9,
+        "gcc_mutants": 10,
+        "clang_mutants": 10
+      }
+    ],
+    "r066_r067_r068": "NOT_OBSERVED_ON_CORRECTIVE_SHA",
+    "r073_first_error": "historical-product-blob-mismatch:authority.c"
+  },
+  "value_handle": {
+    "abi_blob": "0f103783aee10d18df5c502fdf553f7ac6a0035d",
+    "implementation": "NOT_IMPLEMENTED",
+    "qualification": "NOT_RUN",
+    "shared_record_capacity": 8,
+    "decoder_slot_capacity": 64,
+    "measured_overhead": null
+  },
+  "source_mapped_authenticated": 0,
+  "phase_a": "BLOCKED",
+  "direct_compressed_handoff": "DISABLED",
+  "forced_raw_bypass": "DISABLED",
+  "import_active": 0,
+  "actual_physical_io": false,
+  "vm": false,
+  "manual_dispatch": false,
+  "agent1_reconciliation": {
+    "source_recovery_commit": "78f630c9d0a2d5bfb626f2dbdef172f6024cf5ea",
+    "scope": "Agent1 recovered exact prepared candidate cd03b16e472a6fef6022666a1a6458c63dacd8bb non-standards blobs in source commit78f630c9d0a2d5bfb626f2dbdef172f6024cf5ea after confirming same parent preimages/no overlaps and full standards append. Candidate object itself not ancestor, exact contents recovered. Automatic recovered R073 run45650794093 and R084 run45650794159 QUEUED, no test claim. R091 prior R059/R060 preserved. Actual value-handle integration NOT IMPLEMENTED. R093 implement storage value adapter independently on frozen decoder header; preserve never-issued cancellation and old pointer test path. No duplicate CI or republish unchanged candidate.",
+    "prior_evidence_ref": "f210b0ea96f0ae8fff632cee83f3297e3d6659fd",
+    "physical_mutation": false,
+    "vm_boot": false
+  },
+  "recovered_source": {
+    "sha": "78f630c9d0a2d5bfb626f2dbdef172f6024cf5ea",
+    "run_ids": [
+      45650794093,
+      45650794159
+    ],
+    "status": "queued"
+  }
+}

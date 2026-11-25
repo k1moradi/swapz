@@ -1,0 +1,154 @@
+{
+  "round": "092",
+  "agent": 3,
+  "task_commit": "ae0e4071bf01d1129d59cc9807e1025ecb6fac45",
+  "engineering_baseline": "2499405464110e6a97f054db5527de54b8aafb3a",
+  "original_linux_pin": "c339f4010dea8b0d754f84ace70cd1b089878ef8",
+  "code_commit": "f552b13b7368f2a0a11b85cc3cd69021aec8d68e",
+  "code_parent": "62e1ee2dde6ddbdb79ca79fb1c64db31ac6e9b2a",
+  "source_publication": "VERIFIED_EXPECTED_HEAD_NONFORCE_SINGLE_PARENT_MAIN",
+  "decision": "PASS_HOST_ONLY_NO_GO_LIVE",
+  "conclusion": "PASS_HOST_ONLY_NO_GO_LIVE",
+  "source_blobs": {
+    "tests/tools/round091-selected-dm-ordered-verify.py": "202fa9198f6b8ff36d04ebdc40f29cdf90ea1d8c",
+    "tests/runtime/native/fixtures/round091-selected-dm-ordered.c": "a20893d6539ce9dac99e65d9c4565dd96ff31d0b",
+    "tests/runtime/native/zswap-origin-consumer-source-test.py": "4ea611f463012b207e2e92b24f043e33e9f390f1",
+    ".github/workflows/phase-a-round088-selected-dm-admission-host.yml": "6b3067c91f65cdbe7c7cc1c1cb32e9284ae0bcdc",
+    "src/kernel/dm-target.c": "420751247bdfd0be9c7271b180ee5cfcc7ca5d92"
+  },
+  "standards": {
+    "frozen_blob": "e56de5aa3a3193640d358a17e123e62af03c4ae6",
+    "frozen_bytes": 1810731,
+    "parent_blob": "a005b7847d924c11a1edb2f9a4253c82a9974681",
+    "parent_bytes": 1812180,
+    "postimage_blob": "8a605249ee958a99e076ec58ff40df6af0f5f59e",
+    "postimage_bytes": 1813675,
+    "appended_bytes": 1495,
+    "full_prefix_verified": true
+  },
+  "prior_round091": {
+    "run_id": 45600586745,
+    "job_id": 139158134919,
+    "artifact_id": 15016682335,
+    "conclusion": "FAILURE",
+    "first_error": "fixture baseline: exit 1, expected 0; mixed-version fixture per checkpoint",
+    "executed_ordered_checks": 0
+  },
+  "frozen_interfaces": {
+    "ticket_header": "0630f9e4fad26458ed0778ca6ae040150e28f078",
+    "ticket_c": "7ba56c5ee602853c8d0717f23aad9efc69d111ea",
+    "storage_header": "38924c3931419a93a7783de9ba622024a5e2e65c",
+    "storage_c": "1f9030030f5d0fb3b06d0b0a159dd8aa6818f8dd",
+    "authority_header": "c63741157141b2aa9a15de1e9182e27435fc0a3e",
+    "authority_c": "14fe52cf4cf28f18568d3bf2b6ced449c9c182a3",
+    "shared_fixture": "95cee696fe99b3438f387ff1bf45cb4634f70fab",
+    "bridge_header": "507b25debe0ca7b30b57ed6a350dab4868dced51",
+    "bridge_c": "9324a581e27bad62d4e2d9c90192f6ad8b96faca"
+  },
+  "local": {
+    "checkout": "BLOCKED",
+    "first_error": "git ls-remote exit 128: Could not resolve host: github.com",
+    "compiler": "NOT_RUN"
+  },
+  "github_ci": {
+    "run_id": 45649082619,
+    "head_sha": "f552b13b7368f2a0a11b85cc3cd69021aec8d68e",
+    "run_attempt": 1,
+    "status": "completed",
+    "conclusion": "success",
+    "workflow_url": "https://github.com/k1moradi/swapz/actions/runs/45649082619",
+    "jobs": [
+      {
+        "id": 139328267231,
+        "status": "completed",
+        "conclusion": "success",
+        "url": "https://github.com/k1moradi/swapz/actions/runs/45649082619/job/139328267231"
+      }
+    ],
+    "observed_steps": {
+      "source_policy_prefix_diff": "SUCCESS",
+      "legacy_foreground_contract": "SUCCESS",
+      "pristine_dm_patch": "SUCCESS",
+      "ordered_host_proof": "IN_PROGRESS"
+    },
+    "first_error": null,
+    "artifact": {
+      "id": 15038948080,
+      "sha256": "dc950493ef300ade70697562f7deadf564ca3b80ce4965d87bb1cef328cf73f3",
+      "archive_inspected": true
+    },
+    "compilers": {
+      "gcc": {
+        "status": "PASS",
+        "checks": 12708,
+        "claims": 5,
+        "refusals": 3,
+        "typed_reads": 2,
+        "modeled_terminal_owners": 5,
+        "mutants": 4
+      },
+      "clang": {
+        "status": "PASS",
+        "checks": 12708,
+        "claims": 5,
+        "refusals": 3,
+        "typed_reads": 2,
+        "modeled_terminal_owners": 5,
+        "mutants": 4
+      }
+    },
+    "planned_per_compiler": {
+      "scenarios": 8,
+      "claims": 5,
+      "refusals": 3,
+      "typed_reads": 2,
+      "modeled_terminal_owners": 5,
+      "semantic_mutants": 4
+    },
+    "foreground_planned_controls": {
+      "legacy": 24,
+      "typed": 6
+    },
+    "mixed_version_control": "EXECUTION_UNVERIFIED",
+    "related_runs": [
+      {
+        "id": 45649082729,
+        "exact_c_job_ids": [
+          139328268080,
+          139328268337
+        ],
+        "status": "QUEUED"
+      },
+      {
+        "id": 45649082633,
+        "job_id": 139328267409,
+        "status": "QUEUED"
+      }
+    ]
+  },
+  "first_integration_blocker": "NO_TRUSTED_ORDERED_GENERATION_FEED_OR_ACTUAL_STORAGE_DECODER_SETUP_AND_MODULE_LIFETIME",
+  "live_claim_gate": false,
+  "source_mapped_authenticated": false,
+  "AUTH": 0,
+  "phase_a": "BLOCKED",
+  "direct_compressed_handoff": false,
+  "forced_raw_bypass": false,
+  "import_active": 0,
+  "actual_native_dm": false,
+  "actual_lower_durable_io": false,
+  "actual_upper_ack": false,
+  "kernel_compile_link": "NOT_RUN_BY_A3",
+  "physical_mutation": false,
+  "vm_tests": false,
+  "privileged_tests": false,
+  "loaded_tests": false,
+  "same_round_peer_dependency": false,
+  "raw_4096": "FULL_ORIGINAL_UNCOMPRESSED_4096",
+  "agent1_reconciliation": {
+    "source_recovery_commit": "78f630c9d0a2d5bfb626f2dbdef172f6024cf5ea",
+    "scope": "Agent1 recovered evidence candidate1734217b. Exact source f552b13b7368f2a0a11b85cc3cd69021aec8d68e job139328267231 SUCCESS; independently downloaded and extracted artifact15038948080 SHA256 dc950493ef300ade70697562f7deadf564ca3b80ce4965d87bb1cef328cf73f3. Actual GCC and Clang each12708 checks,5 real broker claims,3 refusals,2 typed reads,5 modeled terminal owners,4 mutants killed (ignore_claim_refusal,leak_canceled_credit,fallback_after_commit_failure,leak_read_pin); frozen inventory46, mixed negative PASS, fragment SHA256 ccdc2bd8e5596afd6d9859281ff9550a4e06be2b63659fdf057df3ea753596b2. Legacy17/15/18 each; source verifier30 negatives and two actual compiler helper executions. Product jobs139328268080/139328268337 and prototype139328267409 FAIL outer test_deliberate_source_mutation_refusals count30!=24; actual 30 accepted negative kills, correct outer inventory and prove all old/new witnesses. Exact source snapshot10 success/2 fail/9 running/6 queued. No native DM, real durable lower, auth or physical. Next actual guarded target lifecycle/setup/generation integration.",
+    "prior_evidence_ref": "1734217be46a98ce2d9b69cdfec8069454fb6164",
+    "physical_mutation": false,
+    "vm_boot": false
+  }
+}
