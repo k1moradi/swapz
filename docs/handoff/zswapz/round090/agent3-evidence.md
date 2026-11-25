@@ -1,6 +1,6 @@
 # Round090 Agent3 — guarded actual selected-DM composition
 
-Authority: [immutable assignment](agent3-selected-dm-composition-p0.md), [frozen contract](frozen-contract.md), [ROUND_OPEN](https://github.com/k1moradi/swapz/issues/208#issuecomment-7157990926). Task edf44c4417f14b5836b1b5f90157e24916afcde2, frozen engineering baseline 9f7002c896f86226e93f0523b1f6e935de5c6de9. Exact source SHA/parent will be recorded in separate evidence revision; self-reference impossible.
+Authority: [immutable assignment](agent3-selected-dm-composition-p0.md), [frozen contract](frozen-contract.md), [ROUND_OPEN](https://github.com/k1moradi/swapz/issues/208#issuecomment-7157990926). Task edf44c4417f14b5836b1b5f90157e24916afcde2, frozen engineering baseline 9f7002c896f86226e93f0523b1f6e935de5c6de9. Published source [3917b80eb005adba9efd6a39045265309f3b2035](https://github.com/k1moradi/swapz/commit/3917b80eb005adba9efd6a39045265309f3b2035), verified sole parent ada92cb20d4daa8a10602bdf56e65e745b1fa2cc, fresh expected-head nonforce direct main FF; remote matched after publication. Separate evidence-only revision.
 
 ## Prior accepted evidence
 
@@ -25,3 +25,7 @@ Actual local GCC 14.2.0 and Clang 17.0.0, C GNU11 strict -Wall -Wextra -Wconvers
 ## Safety
 
 SOURCE_MAPPED_AUTHENTICATED=0; PHASE_A=BLOCKED; DIRECT_COMPRESSED_HANDOFF=DISABLED; FORCED_RAW_BYPASS=DISABLED; import ACTIVE0. Original Linux MM/zswap owns compressed RAM and natural eviction; swapz disk packing/GC only. Ordinary RAW_4096 remains original full uncompressed 4096; original codec namespace separate. Protected SWAPSPACE2 page0/UUID/partition table and 20-byte ordinary map unchanged. No branch, PR, force, duplicate dispatch, periodic check, VM, privileged/loaded/physical operation, pressure or activation.
+
+## Exact new-source CI observation
+
+[Run 45587245295](https://github.com/k1moradi/swapz/actions/runs/45587245295), [job 139111859253](https://github.com/k1moradi/swapz/actions/runs/45587245295/job/139111859253) QUEUED, exact head 3917b80eb005adba9efd6a39045265309f3b2035. No remote compiler, original scratch patch apply/postimage/reverse, repository policy or full exact-tree diff check executed at observation; no CI first error yet. Inspected GitHub prospective source commit additions for new trailing whitespace and space-before-tab, verified literal standards prefix and single final newline, exact parent and owned paths. 28 automatic source runs observed queued; inherited routes remain Agent9's assignment. No manual dispatch or unchanged rerun. New focused lane host-only; no new VM qualification/physical operation. No artifact yet. Terminal CI evidence pending; no periodic polling.
