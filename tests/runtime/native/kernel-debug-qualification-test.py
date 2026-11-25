@@ -21,6 +21,7 @@ from unittest import mock
 SCRIPT = Path(__file__).resolve().parents[2] / "tools/kernel-debug-qualify.py"
 WRAPPER = Path(__file__).resolve().parents[2] / "tools/qualify-kernel-debug-owned.sh"
 DEPLOY_HELPER = Path(__file__).resolve().parents[2] / "tools/deploy-nullblk.sh"
+SWAP_INVENTORY = DEPLOY_HELPER.with_name("swap-inventory.sh")
 SPEC = importlib.util.spec_from_file_location("swapz_kernel_debug_qualification", SCRIPT)
 assert SPEC is not None and SPEC.loader is not None
 qualification = importlib.util.module_from_spec(SPEC)
@@ -354,6 +355,17 @@ class KernelDebugQualificationTests(unittest.TestCase):
         # Only this in-memory test copy redirects the immutable production
         # procfs path. Ownership flags disable every real teardown operation.
         cleanup = cleanup.replace(identity_path, '"$TEST_BOOT_ID_FILE"')
+        # Bash's optimized file redirection bypasses a cat mock. Redirect
+        # both real inventory reads, and use the actual bounded stream parser
+        # rather than a mock that exits without draining the pipe.
+        self.assertEqual(cleanup.count("/proc/swaps"), 2)
+        cleanup = cleanup.replace(
+            "swapz_swap_inventory_identity /proc/swaps",
+            'swapz_swap_inventory_identity "$TEST_SWAPS_BEFORE_TEARDOWN"')
+        cleanup = cleanup.replace(
+            "$(< /proc/swaps)", '$(< "$TEST_SWAPS_AFTER_TEARDOWN")')
+        self.assertNotIn("/proc/swaps", cleanup)
+        inventory = SWAP_INVENTORY.read_text(encoding="utf-8")
         # Inject a caller-output failure only after the real tee fanout joins.
         # This exercises publication failure without affecting its log writes.
         joined_fanout = 'wait "$SESSION_TEE_PID" || tee_rc=$?'
@@ -364,14 +376,17 @@ class KernelDebugQualificationTests(unittest.TestCase):
             '    if [[ "$SCENARIO" == publication_output_failure ]]; then\n'
             '        exec {SESSION_OUTPUT_FD}> /dev/full\n'
             '    fi')
-        shell = "set -Eeuo pipefail\n" + reader + "\n" + cleanup + r"""
+        shell = ("set -Eeuo pipefail\n" + inventory + "\n" + reader
+                 + "\n" + cleanup + r"""
 note() { printf '%s\n' "$*"; }
 fail() { printf 'BLOCKED: %s\n' "$*" >&2; exit 1; }
-cat() {
-    [[ "$1" == /proc/swaps ]] || return 91
-    printf 'Filename\tType\tSize\tUsed\tPriority\n'
-}
-swapz_swap_inventory_identity() { printf 'stable\n'; }
+# No actual device or module operation is permitted in this extracted test.
+# Ownership flags below remain zero; unexpected privileged commands fail.
+dmsetup() { return 91; }
+rmmod() { return 91; }
+modprobe() { return 91; }
+swapoff() { return 91; }
+swapon() { return 91; }
 # Delay the fanout deliberately. With stdout redirected to a regular file, a
 # helper that fails to join this tee can return before terminal evidence lands.
 tee() {
@@ -394,7 +409,7 @@ printf 'pid=%s\nsource_sha=%s\n' "$$" "$SOURCE_HEAD" > "$SESSION/.swapz-deploy-o
 if [[ "$SCENARIO" == completion_commit_failure ]]; then
     mkdir "$SESSION/.swapz-deploy-complete"
 fi
-SWAPS_ID_BEFORE="stable"
+SWAPS_ID_BEFORE="$(swapz_swap_inventory_identity "$TEST_SWAPS_INITIAL")"
 OWN_DM=0
 OWN_NULL=0
 OWN_MODULE=0
@@ -431,10 +446,19 @@ case "$SCENARIO" in
     quarantine) QUARANTINE=1 ;;
 esac
 exit 0
-"""
+""")
         other_boot = "00000000-0000-0000-0000-000000000000"
         scenarios = (
             ("clean", BOOT_ID + "\n", 0, "", "", ""),
+            ("usage_changed", BOOT_ID + "\n", 0, "", "", ""),
+            ("identity_changed_before", BOOT_ID + "\n", 1,
+             "teardown", "quarantined", "yes"),
+            ("identity_changed_after", BOOT_ID + "\n", 1,
+             "teardown", "quarantined", "yes"),
+            ("inventory_malformed_before", BOOT_ID + "\n", 1,
+             "teardown", "quarantined", "yes"),
+            ("inventory_malformed_after", BOOT_ID + "\n", 1,
+             "teardown", "quarantined", "yes"),
             ("capture_missing", "", 1, "session_capture", "missing", "yes"),
             ("capture_malformed", "not-a-uuid\n", 1,
              "session_capture", "malformed", "yes"),
@@ -478,11 +502,32 @@ exit 0
                 session_directory.mkdir()
                 identity_file = directory / "boot-id"
                 identity_file.write_text(initial_identity, encoding="utf-8")
+                # All three snapshots are fabricated, exact parser inputs.
+                header = "Filename\t\t\t\tType\t\tSize\t\tUsed\t\tPriority\n"
+                initial = header + "/synthetic-swap file 4096 0 -2\n"
+                changed = header + "/synthetic-other file 4096 0 -2\n"
+                usage = header + "/synthetic-swap file 4096 16 -2\n"
+                snapshots = {
+                    "TEST_SWAPS_INITIAL": initial,
+                    "TEST_SWAPS_BEFORE_TEARDOWN": (
+                        changed if scenario == "identity_changed_before" else
+                        "malformed\n" if scenario == "inventory_malformed_before" else
+                        usage if scenario == "usage_changed" else initial),
+                    "TEST_SWAPS_AFTER_TEARDOWN": (
+                        changed if scenario == "identity_changed_after" else
+                        "malformed\n" if scenario == "inventory_malformed_after" else
+                        usage if scenario == "usage_changed" else initial),
+                }
+                snapshot_env = {}
+                for name, contents in snapshots.items():
+                    snapshot = directory / name
+                    snapshot.write_text(contents, encoding="utf-8")
+                    snapshot_env[name] = str(snapshot)
                 output_file = directory / "execution.log"
                 with output_file.open("w", encoding="utf-8") as output_stream:
                     completed = subprocess.run(
                         ["bash", "-c", shell],
-                        env={**os.environ, "SCENARIO": scenario,
+                        env={**os.environ, **snapshot_env, "SCENARIO": scenario,
                              "TEST_BOOT_ID_FILE": str(identity_file),
                              "TEST_SESSION_DIR": str(session_directory),
                              "STALE_BOOT_ID": other_boot},
@@ -546,6 +591,8 @@ exit 0
                         status,
                         "BLOCKED" if phase in {
                             "teardown", "evidence_flush", "evidence_commit"
+                        } and scenario not in {
+                            "identity_changed_after", "inventory_malformed_after"
                         } else "FAIL",
                         reason)
                     diagnostics = [line for line in output.splitlines()
@@ -565,6 +612,14 @@ exit 0
                     self.assertNotIn(str(session_directory), output)
                     self.assertNotIn(other_boot, output)
                     self.assertNotIn("PASS: loaded isolated", output)
+                    if phase == "teardown":
+                        self.assertIn("resource retained, never forced", output)
+                        self.assertNotIn("PASS: loaded isolated", retained)
+                    if scenario in {"identity_changed_before", "inventory_malformed_before"}:
+                        self.assertIn("QUARANTINED: host swap identity changed before teardown", output)
+                    if scenario in {"identity_changed_after", "inventory_malformed_after"}:
+                        self.assertIn("FAIL: system swap identity changed during isolated run", output)
+        print("R093_TEARDOWN_SCENARIOS=" + str(len(scenarios)))
 
     def test_runtime_state_must_be_active_before_and_after(self) -> None:
         required = ("kcsan",)

@@ -7,6 +7,8 @@ on:
       - 'tests/tools/kernel-debug-qualify.py'
       - 'tests/tools/qualify-kernel-debug-owned.sh'
       - 'tests/runtime/native/kernel-debug-qualification-test.py'
+      - 'tests/runtime/native/round093-native-evidence-collector-test.py'
+      - 'tests/tools/round093-native-evidence-collector.py'
       - 'tests/tools/deploy-nullblk.sh'
       - 'tests/tools/device-roundtrip.c'
       - 'tests/tools/direct-read-probe.c'
@@ -30,12 +32,34 @@ jobs:
     timeout-minutes: 5
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 2
+      - name: Verify exact source and complete standards prefix on R093 fixture changes
+        if: github.event_name == 'push'
+        env:
+          BEFORE: ${{ github.event.before }}
+          SOURCE: ${{ github.sha }}
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$SOURCE"
+          test "$(git rev-list --parents -n 1 HEAD)" = "$SOURCE $BEFORE"
+          git diff --check "$BEFORE" "$SOURCE"
+          python3 - <<'PY'
+          import hashlib, subprocess
+          from pathlib import Path
+          before = subprocess.check_output(["git", "show", "HEAD^:docs/testing_standards.md"])
+          after = Path("docs/testing_standards.md").read_bytes()
+          assert after.startswith(before), "historical standards prefix changed"
+          print("standards_before", len(before), hashlib.sha256(before).hexdigest())
+          print("standards_after", len(after), hashlib.sha256(after).hexdigest())
+          PY
       - name: Reject false kernel-debug PASS and unsafe invocation syntax
         shell: bash
         run: |
           set -euo pipefail
           bash -n tests/tools/qualify-kernel-debug-owned.sh
           python3 -B tests/runtime/native/kernel-debug-qualification-test.py -v
+          python3 -B tests/runtime/native/round093-native-evidence-collector-test.py -v
           python3 -B tests/tools/kernel-debug-qualify.py probe
           # Static and synthetic evidence is NOT a loaded instrumented-kernel PASS.
           echo "KERNEL_DEBUG_LOADED_KASAN_LOCKDEP=NOT_RUN (requires owned KASAN+lockdep host evidence)"
