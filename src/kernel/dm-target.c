@@ -14716,9 +14716,15 @@ static __maybe_unused int swapz_round090_bind_capability(
 	if (!error) {
 		spin_lock_irqsave(&ctx->queue_lock, flags);
 		if (!ctx->accepting || ctx->failed || ctx->original_cap.broker ||
-		    !swapz_round089_route_matches_locked(ctx, &route))
+		    !swapz_round089_route_matches_locked(ctx, &route)) {
+			/* Roll back only this attempt's published incarnation. A
+			 * concurrent revoke or replacement must not be undone.
+			 * The uninstalled capability is released after unlock.
+			 */
+			if (swapz_round089_route_matches_locked(ctx, &route))
+				swapz_round089_revoke_route_locked(ctx);
 			error = -ESTALE;
-		else {
+		} else {
 			ctx->original_cap = cap;
 			cap = (struct swapz_ticket_cap){};
 		}

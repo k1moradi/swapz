@@ -229,15 +229,17 @@ class PinnedProducerConsumerTests(unittest.TestCase):
                 with self.assertRaises((AssertionError, stager.StagingError)):
                     validate_staged(changed)
                 detected += 1
-        # The source-controlled regression adds 24 independent
-        # admission/commit idempotence/codec mutants to this rootless run.
+        # Preserve the 24 original admission/commit controls and separately
+        # require all six guarded typed publication controls.
         consumer = SOURCE.read_text(encoding="utf-8")
         validate_consumer(consumer)
         consumer_mutations = consumer_test.run_negative_mutations(consumer)
         self.assertEqual(consumer_mutations, 24)
-        detected += consumer_mutations
+        typed_mutations = consumer_test.run_typed_negative_mutations(consumer)
+        self.assertEqual(typed_mutations, 6)
+        detected += consumer_mutations + typed_mutations
         self.assertEqual(detected, len(PRODUCER_NEGATIVES) +
-                         len(insertion_mutations) + consumer_mutations)
+                         len(insertion_mutations) + consumer_mutations + typed_mutations)
         print(f"PASS: {detected} producer and consumer mutations rejected")
 
     def test_compiled_real_ordered_owner_commit_helper(self):

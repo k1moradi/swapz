@@ -316,8 +316,13 @@ def run_negative_mutations(source: str) -> int:
     ]
     if len(controls) != 24:
         raise AssertionError("the 24 original adversarial controls were weakened")
+    return reject_mutations(source, controls)
+
+
+def run_typed_negative_mutations(source: str) -> int:
+    """Keep typed publication controls separate from the stable 24-case ABI."""
     typed_hook = "swapz_count_verified_zswap_writeback_commit(ctx, entry->bio);"
-    controls.extend([
+    controls = [
         ("typed commit missing", lambda: replace_exactly_once(source, typed_hook, "")),
         ("typed count doubled", lambda: replace_exactly_once(source, typed_hook, typed_hook + typed_hook)),
         ("typed error counted", lambda: replace_exactly_once(source,
@@ -331,7 +336,13 @@ def run_negative_mutations(source: str) -> int:
         ("typed completion doubled", lambda: replace_exactly_once(source,
             "complete:\n\tswapz_complete(entry->bio, error);",
             "complete:\n\tswapz_complete(entry->bio, error);\n\tswapz_complete(entry->bio, error);")),
-    ])
+    ]
+    if len(controls) != 6:
+        raise AssertionError("the six typed publication controls were weakened")
+    return reject_mutations(source, controls)
+
+
+def reject_mutations(source: str, controls) -> int:
     detected = 0
     for name, mutate in controls:
         changed = mutate()
@@ -455,7 +466,10 @@ def main() -> int:
     validate_source_text(source)
     verify_strict_phase_a_contract(source)
     verify_scoped_original_origin_mutations(source)
-    detected = run_negative_mutations(source)
+    legacy_detected = run_negative_mutations(source)
+    typed_detected = run_typed_negative_mutations(source)
+    detected = legacy_detected + typed_detected
+    print(f"PASS: legacy={legacy_detected} typed={typed_detected} mutation groups")
     compiled = compile_actual_origin_commit_helper(source)
     print(f"PASS: real production-C Phase A source contract; {detected} negative mutations rejected")
     print(f"PASS: {compiled} real C compiler(s) exercised extracted guarded commit helper")
