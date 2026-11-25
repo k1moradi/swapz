@@ -1,0 +1,54 @@
+name: Round093 Agent11 external broker owner host NO_AUTH
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'tests/tools/round093-external-broker-owner-verify.py'
+      - 'tests/runtime/native/fixtures/round093-external-broker-owner.c'
+      - '.github/workflows/phase-a-round093-external-broker-owner-host-noauth.yml'
+permissions:
+  contents: read
+jobs:
+  external-owner-host:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Exact source and canonical policy
+        env:
+          SWAPZ_PUSH_BEFORE_SHA: ${{ github.event.before }}
+        run: |
+          set -Eeuo pipefail
+          test "$GITHUB_REF" = refs/heads/main
+          test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
+          test "$(git branch --show-current)" = main
+          test "$(git rev-parse HEAD^)" = "$SWAPZ_PUSH_BEFORE_SHA"
+          test "$(git rev-list --parents -n1 HEAD | wc -w)" -eq 2
+          test -z "$(git status --porcelain --untracked-files=all)"
+          git diff --check HEAD^ HEAD
+          python3 -B tests/runtime/native/repository-policy-test.py --enforce
+          python3 - <<'PY'
+          from pathlib import Path
+          import hashlib
+          import subprocess
+          previous = subprocess.check_output(["git", "show", "HEAD^:docs/testing_standards.md"])
+          current = Path("docs/testing_standards.md").read_bytes()
+          assert current.startswith(previous) and len(current) > len(previous)
+          print("complete standards prefix", len(previous), len(current), hashlib.sha256(previous).hexdigest())
+          PY
+      - name: Stage frozen broker and qualify distinct external owner scenarios
+        run: |
+          set -Eeuo pipefail
+          umask 077
+          python3 -B tests/tools/round093-external-broker-owner-verify.py --output "$RUNNER_TEMP/round093-agent11"
+      - name: Retain bounded source diagnostics
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: round093-agent11-external-owner-host
+          path: ${{ runner.temp }}/round093-agent11/
+          if-no-files-found: warn
+          retention-days: 14
