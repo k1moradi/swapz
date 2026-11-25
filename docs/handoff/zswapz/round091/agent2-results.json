@@ -2,7 +2,7 @@
   "round": "091",
   "agent": 2,
   "kind": "physical-first-routing-and-admission-plan-only",
-  "conclusion": "IN_PROGRESS",
+  "conclusion": "PASS_FOCUSED_ROUTING_FULL_SOURCE_CI_PARTIAL_FAILURE_NO_GO_LIVE",
   "source_commit": "5ff8ceba8f580715978130bb4585c13ce1a64eb3",
   "tested_commit": "5ff8ceba8f580715978130bb4585c13ce1a64eb3",
   "source_parent": "1b31d2b4107bee88c96ccde4b742dcba5858c895",
@@ -611,7 +611,27 @@
     "artifacts": [],
     "artifact_status": "No new artifact independently retrieved",
     "no_manual_dispatch": true,
-    "no_rerun": true
+    "no_rerun": true,
+    "agent1_terminal_census": {
+      "total": 31,
+      "success": 27,
+      "failure": 4
+    },
+    "agent1_focused": {
+      "job": 139156847990,
+      "status": "completed",
+      "conclusion": "success",
+      "mixed": 13,
+      "manual": 12,
+      "archived": 1,
+      "retained_jobs": 24,
+      "witnesses": 136,
+      "eof": 11,
+      "auto_vm": 0,
+      "negatives": 9,
+      "before": 110,
+      "after": 125
+    }
   },
   "first_error": null,
   "local_execution_blocker": "git ls-remote https://github.com/k1moradi/swapz.git refs/heads/main exit 128: Could not resolve host: github.com; no native full checkout or native git diff --check. Supported connector publication plus exact-source automatic CI. Earlier full-census connector call exceeded tool limit; hosted replay required. First evidence publication attempt hit transient GraphQL error; readback confirmed no evidence paths before retry.",

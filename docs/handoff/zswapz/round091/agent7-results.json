@@ -4,8 +4,8 @@
   "task_sha": "7fa5e3dc74c67330f341ae39c11dc3f8bff01187",
   "frozen_baseline": "e8a3f08000f81dcc3b1bda74b407b9e523ed3bab",
   "pinned_original_linux": "c339f4010dea8b0d754f84ace70cd1b089878ef8",
-  "status": "CORRECTIVE_SOURCE_PUBLISHED_CI_QUEUED_NO_GO_LIVE",
-  "conclusion": "PENDING_CORRECTIVE_SOURCE_CI",
+  "status": "CORRECTED_SOURCE_TERMINAL_FAILURE_NO_GO_LIVE",
+  "conclusion": "FAIL_FIXTURE_UNUSED_VARIABLE",
   "source_commit": "dfd2528e009e218325989a3b7f48ee638b15493a",
   "source_parent": "e12088538d40212838bfed3bc820919a216b233f",
   "source_blobs": {
@@ -46,14 +46,16 @@
   "ci": {
     "run_id": 45603445850,
     "job_id": 139168058707,
-    "status": "queued",
-    "conclusion": null,
-    "actual_gcc_compiled_executed": null,
-    "actual_clang_compiled_executed": null,
-    "actual_checks": null,
-    "first_error": null,
-    "artifact_id": null,
-    "manual_dispatch": false
+    "status": "completed",
+    "conclusion": "failure",
+    "actual_gcc_compiled_executed": 0,
+    "actual_clang_compiled_executed": 0,
+    "actual_checks": 0,
+    "first_error": "round091-original-decoder-handles.c:17:47 rejected_reads defined but not used [-Werror=unused-variable]",
+    "artifact_id": 15017217640,
+    "manual_dispatch": false,
+    "artifact_sha256": "a8868da50ee857ed6f09eed1ee0ea9716f2d838c6a02abb932996f18c0eaae48",
+    "archive_inspected": true
   },
   "fixture_planned": {
     "churn_cycles": 24000,

@@ -222,7 +222,7 @@
       "url": "https://github.com/k1moradi/swapz/actions/runs/45600148185/job/139156637408"
     }
   ],
-  "conclusion": "FAIL_INHERITED_CI_CORRECTION_QUEUED_NO_GO_LIVE",
+  "conclusion": "PASS_HOST_CANCELLATION_AND_CORRECTIVE_R059_FOCUSED_FULL_INHERITED_NOT_QUALIFIED",
   "first_error": "FIRST_ERROR round059-authority-import: nonunique actual source mutant current_generation",
   "local_first_error": "git ls-remote exit 128: Could not resolve host: github.com",
   "local_compilers": "NOT_RUN",
@@ -259,7 +259,7 @@
     "url": "https://github.com/k1moradi/swapz/actions/runs/45600148460/artifacts/15015228313",
     "size_bytes": 1839,
     "sha256": "4f516e2ac602d4f23e486b8346e7431db022e18c0889298ec497d352d0eaaf7a",
-    "verification": "Actions metadata only, archive not extracted"
+    "verification": "Agent1 extracted results.json and independently hashed archive"
   },
   "source_ci_preflight": "PASS focused exact source",
   "prior_round090": {
@@ -420,8 +420,11 @@
     "scope": "two anchor line substitutions, exact unique current guard, same inverted comparison, all ten semantic negatives retained",
     "run_id": 45603612092,
     "job_id": 139168619933,
-    "status": "queued",
-    "actual_mutants": null,
+    "status": "completed",
+    "actual_mutants": {
+      "gcc": 10,
+      "clang": 10
+    },
     "first_error": null,
     "automatic_runs_observed": [
       45603612092,
@@ -429,6 +432,16 @@
       45603612084
     ],
     "other_routes": "R059/R066/R067/R068 exact corrective run not observed; Agent2 owns routing, R073 full history needed; no duplicate manual run",
-    "local_execution": "NOT_RUN"
+    "local_execution": "NOT_RUN",
+    "conclusion": "success",
+    "actual_cases": {
+      "gcc": 9,
+      "clang": 9
+    }
+  },
+  "agent1_initial_census": {
+    "total": 25,
+    "success": 17,
+    "failure": 8
   }
 }

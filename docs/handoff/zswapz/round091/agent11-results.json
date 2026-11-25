@@ -1,7 +1,7 @@
 {
   "round": "091",
   "agent": 11,
-  "decision": "PARTIAL_GCC_HOST_PASS_MUTANT_COMPILE_FAILURE_NEW_FIX_UNQUALIFIED_NO_GO_LIVE",
+  "decision": "PASS_CORRECTED_HOST_ONLY_NO_GO_LIVE",
   "assignment": "7fa5e3dc74c67330f341ae39c11dc3f8bff01187",
   "baseline": "e8a3f08000f81dcc3b1bda74b407b9e523ed3bab",
   "source_commit": "63d60da34182e8870bd5ca661b370455923cd6bd",
@@ -55,12 +55,16 @@
     "run_id": 45638307407,
     "job_id": 139289641783,
     "url": "https://github.com/k1moradi/swapz/actions/runs/45638307407/job/139289641783",
-    "status": "in_progress",
-    "conclusion": null,
-    "actual_gcc_checks": null,
-    "actual_clang_checks": null,
-    "actual_semantic_mutant_kills": null,
-    "artifact": null,
+    "status": "completed",
+    "conclusion": "success",
+    "actual_gcc_checks": 52,
+    "actual_clang_checks": 52,
+    "actual_semantic_mutant_kills": 10,
+    "artifact": {
+      "id": 15033777832,
+      "sha256": "49e7326a9a044e8cf05e445aeee4b071c57aac48f92620d67366d929f9b4fe41",
+      "archive_inspected": true
+    },
     "first_error": null,
     "observed_automatic_runs": [
       {
@@ -143,7 +147,12 @@
         "url": "https://github.com/k1moradi/swapz/actions/runs/45638307083",
         "attempt": 1
       }
-    ]
+    ],
+    "terminal_census": {
+      "total": 10,
+      "success": 9,
+      "failure": 1
+    }
   },
   "real_kernel_compile": "NOT_RUN",
   "native": "NOT_RUN",

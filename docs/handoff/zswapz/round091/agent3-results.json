@@ -7,8 +7,8 @@
   "code_commit": "a44c7d7c0561294471924527bbd30bebea1bd8ac",
   "code_parent": "3c97b5d399076ae45b8a51e770244486ab00f567",
   "source_publication": "VERIFIED_SINGLE_PARENT_EXPECTED_HEAD_NONFORCE_MAIN",
-  "decision": "SOURCE_CANDIDATE_PUBLISHED_CI_QUEUED_NO_GO_LIVE",
-  "conclusion": "IN_PROGRESS",
+  "decision": "FAIL_MIXED_FIXTURE_FROZEN_HEADERS_NO_GO_LIVE",
+  "conclusion": "FAIL_MIXED_FIXTURE_FROZEN_HEADERS_NO_GO_LIVE",
   "source_blobs": {
     "src/kernel/dm-target.c": "6a98df348a2ffef12d8b51f857a12f7b00738fc6",
     "tests/tools/round088-original-dm-selected-clone.patch": "5c8587c3d8205fc1ab346011c092601f2113a45a",
@@ -61,8 +61,8 @@
     }
   },
   "github_ci": {
-    "status": "QUEUED",
-    "conclusion": null,
+    "status": "completed",
+    "conclusion": "failure",
     "head_sha": "a44c7d7c0561294471924527bbd30bebea1bd8ac",
     "run_id": 45600586745,
     "run_attempt": 1,
@@ -71,13 +71,17 @@
       {
         "id": 139158134919,
         "name": "selected-dm-source-host",
-        "status": "QUEUED",
-        "conclusion": null,
+        "status": "completed",
+        "conclusion": "failure",
         "url": "https://github.com/k1moradi/swapz/actions/runs/45600586745/job/139158134919"
       }
     ],
-    "first_error": null,
-    "artifact": null,
+    "first_error": "fixture compile: authority missing shared_unissued_sequence and swapz_shared_original_cancel_unissued; current fixture mixed with frozen R090 headers",
+    "artifact": {
+      "id": 15016682335,
+      "sha256": "6c9a0f68bed5c702b35c9c797f9d486a0b8ee533131d4db49c36ceda2d1836f5",
+      "archive_inspected": true
+    },
     "compilers": {
       "gcc": {
         "status": "NOT_RUN",
@@ -107,6 +111,12 @@
     "initial_automatic_census": {
       "total": 28,
       "queued": 28
+    },
+    "actual_new_checks": 0,
+    "terminal_census": {
+      "total": 28,
+      "success": 25,
+      "failure": 3
     }
   },
   "claim_timing": "ORDERED_HEAD_SAME_DESCRIPTOR_DORMANT",

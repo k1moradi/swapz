@@ -388,5 +388,7 @@
   "compiler": "gcc (Ubuntu 13.3.0-6ubuntu2~24.04.1) 13.3.0",
   "linker": "GNU ld (GNU Binutils for Ubuntu) 2.42",
   "new_dispatch_this_visit": false,
-  "terminal_evidence_only": true
+  "terminal_evidence_only": true,
+  "agent1_artifact_independently_extracted": true,
+  "agent1_scope": "R090 frozen compatibility staged kernel link PASS, final module link FAIL, R091 not compiled"
 }
