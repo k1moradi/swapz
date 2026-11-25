@@ -103,5 +103,47 @@
   "import_active": false,
   "native_runtime": "NOT_RUN",
   "vm": false,
-  "physical": false
+  "physical": false,
+  "round093_execution": {
+    "task_commit": "dc3d55c6c44482f23bb5d263211f2b747e9bee87",
+    "round_open_comment": "https://github.com/k1moradi/swapz/issues/211#issuecomment-7169533015",
+    "source_commit": "489ae36d3df6a5b2e85748c7316566a874f4fe55",
+    "source_parent": "dc3d55c6c44482f23bb5d263211f2b747e9bee87",
+    "source_published": true,
+    "source_blobs": {
+      "verifier": "b33deec1916db285f5a3d77cd9597aa4fa5ea266",
+      "scale_fixture": "6dfa9909f4873a6a2f88a954271055b701008fe4",
+      "frozen_handles_header": "0f103783aee10d18df5c502fdf553f7ac6a0035d",
+      "unchanged_legacy_fixture": "d8539d75276dd7a6bf719d702367799a6ef132ce"
+    },
+    "standards": {
+      "parent_blob": "ec97e4f1ff4b505718b28195edc32dbb6c2941d8",
+      "parent_bytes": 1818848,
+      "post_blob": "a81b1f2ae6a736e3c0430ebdbc6f2d7e935fd574",
+      "post_bytes": 1820050,
+      "append_bytes": 1202,
+      "complete_prefix": true,
+      "remote_readback": true
+    },
+    "ci": {
+      "run_id": 45666015960,
+      "job_id": 139388246410,
+      "attempt": 1,
+      "status": "in_progress",
+      "conclusion": null,
+      "source_policy_preflight": "success",
+      "results": null,
+      "artifact": null
+    },
+    "scale_scope": "Host storage-sidecar model with actual original codec/decoder-owner linkage; 1024 planned simultaneous records, external serialization and epoch modeled; actual native module/production scale unqualified",
+    "source_mapped_authenticated": 0,
+    "phase_a": "BLOCKED",
+    "compressed_handoff": false,
+    "forced_raw_bypass": false,
+    "import_active": false,
+    "native_runtime": "NOT_RUN",
+    "vm": false,
+    "physical": false,
+    "manual_ci_dispatches": 0
+  }
 }
