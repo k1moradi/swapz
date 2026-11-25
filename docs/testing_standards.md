@@ -20635,3 +20635,32 @@ Stage every source/header/helper and shared fixture from exact R091 baseline 249
 ### R092 Agent11 — guarded GPL producer/module lifetime (2026-11-25)
 
 Stage exact immutable R089/R090/R091 original MM/BIO overlays and frozen R091 broker/codec/DM inputs before the new R092 boundary overlay. Verify all four changed Git postimages and the actual eight frozen target imports against only guarded GPL exports; no duplicate built-in broker, mutable state export, fake symvers, or activation. Registration binds the actual calling module without a self-pin; publish owner before the RCU provider and clear only after unpublish/grace. Each actual callback takes a transient module reference, route capability transfers a pin to the sole carrier, retained candidate and duplicated lease each own an independent pin; put after broker unlock, carrier release after reader grace and both broker puts. Failed reserve/retain/lookup releases temporary pins; invariant violation quarantines instead of unsafe reuse. Real external entrant quiescence, owner array lifetime, target revocation/close/drain and kernel module link remain separate gates. New strict source-linked GCC/Clang C23 ASan/UBSan fixture exercises callback/unregister and candidate/deferred release races plus five semantic lifetime mutants; pthread/module ABI shim is not native Linux execution. Keep actual source, first error, complete parent prefix and no normal activation; AUTH0 Phase A BLOCKED, direct/forced RAW/import OFF. No unchanged R091 trace rerun or VM/physical/loaded test.
+
+### Round092 Agent5 inherited extent and reader provenance correction
+
+Keep every R084 historical blob pinned to commit 1095acd05fff26c9da3941d62a12e179dcaeb808. Report separate current source hashes, compile the actual current authority header with the 20-byte map assertion, and retain all 24 actual extent semantic mutants per compiler. The extent host does not link authority C or DM; their separate current-source qualification must not be inferred from it. R073 archived native staging must read the unchanged historical product preimages at 22fbdd0090e302bd17b3811145395ceb0a814a6c; its automatic host-only checkout needs full history for the R069 historical lookup and independent actual-current authority mutations. Preserve the real push-before/diff/canonical-policy checks and original failure evidence; no new VM dispatch or unchanged duplicate run. AUTH0, Phase A BLOCKED, all original handoff/import activation OFF.
+
+## Round092 Agent7 — reusable decoder strict fixture, capacity and lifetime
+
+Qualify the frozen original value-handle ABI under strict GCC C2x/C23 and
+Clang C23/C2x ASan/UBSan using the pinned real staged noDict LZ4/LZO1X objects.
+Remove truly dead race counters; retain joined-thread success/decline accounting.
+Exercise all 64 simultaneous record slots, the 65th refusal with unchanged
+handle, full drain, close refusal with retained record and concurrent readers,
+24,000 serial/parallel churn cycles, the final legal generation and saturated
+slot skip, stale epoch and generation, unchanged failed page output. Measure
+handle, slot and owner sizes on the actual host. Three distinct real C mutants
+must compile, link and execute and fail at their named semantic assertion
+(epoch, retired generation, saturation); sanitizer or compiler failures do not
+count as kills. Retain the actual first diagnostic. Verify the complete parent
+standards bytes in hosted preflight. External entrants must quiesce before
+successful destruction; linked-image epochs alone do not certify module
+reload identity. Keep the 64-live-slot cap and frozen ABI; larger working sets
+need a bounded authenticated sidecar design, not an unreviewed RAM increase.
+No production or upstream adoption, VM or physical testing, or activation.
+
+
+### Round092 Agent10 — immutable R091 compile/link and narrow module boundary (AUTH0)
+
+- Require the exact frozen product and Linux pins; apply R089 MM base, R090 lifetime, R091 eviction, then current DM patch in order, checking each raw stage and all final raw postimages. Compile the actual R091 product namespace fix and value-handle objects, not old compatibility source. Distinguish raw application from the isolated guarded GPL export overlay on the two built-in owners; pin raw and overlay blobs, retain one broker, and never fabricate exports, stubs or symvers. Audit actual current cross-boundary calls including ticket_view, broker_try_get, ordered claim, and accepted clone; preserve default-off configuration.
+- Validate actual libelf header/link/execution and OpenSSL prerequisites before one directed build, full vmlinux, composite and external module modpost/final .ko. Require expected GPL export ownership, complete actual module strong-import resolution against kernel Module.symvers, real decoder value-handle symbols and no duplicate broker definitions. Preserve first failing child status and bounded diagnostic evidence; retain kernel and module binary artifacts within explicit size limits, do not execute or load them. A scratch export link cannot establish provider lifetime, teardown, source authentication, durable I/O or production readiness. No VM, physical test, activation or duplicate unchanged attempt. AUTH0 Phase A BLOCKED.

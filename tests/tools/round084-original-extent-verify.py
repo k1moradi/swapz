@@ -12,6 +12,7 @@ import tempfile
 ROOT = Path(__file__).resolve().parents[2]
 SOURCE = ROOT / "src/kernel/zswap-original-extent.c"
 FIXTURE = ROOT / "tests/runtime/native/fixtures/round084-original-extent.c"
+HISTORICAL_COMMIT = "1095acd05fff26c9da3941d62a12e179dcaeb808"
 PINS = {
     "src/kernel/codec.h": "e89d316b9cf49f82df0b77648c1be1731607987d",
     "src/kernel/codec.c": "d920dcaac6f2b7de1334d4133770bd649719c66d",
@@ -27,6 +28,15 @@ PINS = {
     "tests/runtime/native/fixtures/round084-original-extent.c": "473389e30b193626d8c33dba1cf1aad4c738fd8a",
     "tests/runtime/native/repository-policy-test.py": "b200e0ca3e20d4c1f37e350ac9ef1c6426179817",
 }
+# These are the actual current extent translation inputs that must retain
+# their original exact identity. The current authority header is separately
+# compiled by the fixture (including its 20-byte map assertion); unrelated
+# authority/engine/DM bodies are historical context, not extent host inputs.
+CURRENT_EXTENT_PINS = (
+    "src/kernel/codec.h", "src/kernel/codec.c",
+    "src/kernel/zswap-original-extent.h", "src/kernel/zswap-original-extent.c",
+    "tests/runtime/native/fixtures/round084-original-extent.c",
+)
 MUTANTS = [
     [
         "capacity_init",
@@ -256,11 +266,22 @@ def preflight():
     REPORT["push_before_sha"] = before
     git("merge-base", "--is-ancestor", before, sha)
     require(not git("diff", "--check", before, sha, "--"), "diff whitespace")
+    # Frozen historical provenance and current compiled inputs are distinct.
+    # Never replace a historical hash with a moving checkout identity.
     for path, expected in PINS.items():
-        require(git("hash-object", path) == expected, "pinned blob mismatch " + path)
-    REPORT["source_blobs"] = PINS | {
-        str(p.relative_to(ROOT)): git("hash-object", str(p.relative_to(ROOT)))
-        for p in (SOURCE, SOURCE.with_suffix(".h"), FIXTURE, Path(__file__).resolve())}
+        require(git("rev-parse", HISTORICAL_COMMIT + ":" + path) == expected,
+                "historical pinned blob mismatch " + path)
+        require(git("cat-file", "-t", expected) == "blob",
+                "historical pinned object unavailable " + path)
+    current = {path: git("hash-object", path) for path in PINS}
+    for path in CURRENT_EXTENT_PINS:
+        require(current[path] == PINS[path], "current extent input mismatch " + path)
+    REPORT["historical_commit"] = HISTORICAL_COMMIT
+    REPORT["historical_source_blobs"] = PINS
+    REPORT["source_blobs"] = current | {
+        str(Path(__file__).resolve().relative_to(ROOT)):
+            git("hash-object", str(Path(__file__).resolve().relative_to(ROOT)))}
+    REPORT["current_authority_scope"] = "header compiled; authority C not linked"
     before_standard = git_bytes("show", before + ":docs/testing_standards.md")
     after = (ROOT / "docs/testing_standards.md").read_bytes()
     require(after.startswith(before_standard) and len(after) > len(before_standard),

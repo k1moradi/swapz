@@ -26,6 +26,15 @@ HANDLES_H = ROOT / "src/kernel/zswap-original-decoder-handles.h"
 FIXTURE = ROOT / "tests/runtime/native/fixtures/round091-original-decoder-handles.c"
 PIN = "c339f4010dea8b0d754f84ace70cd1b089878ef8"
 EXPECTED_PREFIX = "# Testing Standards\n"
+MUTANTS = (
+    ("epoch", "handle->lifecycle_epoch != owner->lifecycle_epoch ||",
+     "0 ||", "wrong_epoch"),
+    ("generation", "slot->last_generation != handle->generation ||",
+     "", "retired_not_revived"),
+    ("saturation", "if (candidate->last_generation == ~(swapz_u64)0)",
+     "if (candidate->last_generation == ~(swapz_u64)0 && candidate->active)",
+     "saturated_slot_skipped"),
+)
 
 
 def blob(data: bytes) -> str:
@@ -98,7 +107,7 @@ def run_compiler(compiler: str, linux: Path, directory: Path, previous: dict,
                                timeout=65)
         detected = re.fullmatch(
             r"PASS ROUND091_AGENT7 checks=(\d+) churn=(\d+) codecs=2 "
-            r"races=(\d+)/(\d+) epoch=2 AUTH0\n",
+            r"races=(\d+)/(\d+) epoch=2 handle=(\d+) slot=(\d+) owner=(\d+) AUTH0\n",
             observed.stdout)
         first = previous["runtime_failure"](observed, None)
         if observed.returncode or observed.stderr or first or not detected:
@@ -112,11 +121,50 @@ def run_compiler(compiler: str, linux: Path, directory: Path, previous: dict,
                                   if "FIRST_ERROR" in item), "unavailable"),
             }
             raise RuntimeError("original decoder value-handle execution rejected")
-        checks, churn, wins, declines = map(int, detected.groups())
+        checks, churn, wins, declines, handle_bytes, slot_bytes, owner_bytes = map(int, detected.groups())
         require(checks > 50000 and churn == 24000 and
                 wins + declines == 4, "incomplete value-handle coverage")
-        state.update(status="PASS", stage="complete", checks=checks,
-                     churn=churn, races={"successful": wins, "declined": declines})
+        require(handle_bytes >= 22 and owner_bytes >= 64 * slot_bytes,
+                "invalid measured layout")
+        state.update(checks=checks, churn=churn,
+                     races={"successful": wins, "declined": declines},
+                     layout={"handle_bytes": handle_bytes, "slot_bytes": slot_bytes,
+                             "owner_bytes": owner_bytes, "live_record_slots": 64},
+                     mutants_compiled=0, mutants_executed=0, mutants_killed=[])
+        original = HANDLES_C.read_text()
+        fixed = [obj for obj in objects if obj.name !=
+                 "candidate-" + HANDLES_C.stem + ".o"]
+        require(len(fixed) + 1 == len(objects), "handle object inventory mismatch")
+        for name, old, new, expected in MUTANTS:
+            state["stage"] = "mutant-compile-" + name
+            require(original.count(old) == 1 and old != new, "mutant anchor: " + name)
+            mutant = directory / ("mutant-" + name + ".c")
+            mutant.write_text(original.replace(old, new, 1))
+            mutant_object = mutant.with_suffix(".o")
+            compile_object(compiler, standard, mutant, mutant_object, flags)
+            state["mutants_compiled"] += 1
+            state["stage"] = "mutant-link-" + name
+            executable = mutant.with_suffix("")
+            checked([compiler, "-fsanitize=address,undefined", "-fno-pie", "-no-pie",
+                     str(mutant_object), *(str(obj) for obj in fixed),
+                     "-pthread", "-lcrypto", "-o", str(executable)], name + " link")
+            state["stage"] = "mutant-execute-" + name
+            execution = run_command([str(executable)], name, timeout=65)
+            state["mutants_executed"] += 1
+            semantic = re.fullmatch(
+                r"FIRST_ERROR round091-agent7 " + re.escape(expected) +
+                r" line=\d+\n", execution.stderr)
+            failure = previous["runtime_failure"](execution, None)
+            if execution.returncode != 77 or execution.stdout or not semantic or failure:
+                (evidence / (Path(compiler).name + "-" + name + "-stderr.txt")).write_text(
+                    execution.stderr[:3600], encoding="utf-8")
+                state["first_error"] = failure or {
+                    "kind": "mutant_not_killed", "name": name, "exit": execution.returncode,
+                    "diagnostic": (execution.stderr or execution.stdout)[:330],
+                }
+                raise RuntimeError("semantic mutant not killed: " + name)
+            state["mutants_killed"].append(name)
+        state.update(status="PASS", stage="complete")
         print(f"PASS ROUND091_AGENT7 {compiler} {standard} "
               f"checks={checks} churn={churn} races={wins}/{declines} "
               "original_LZ4_LZO1X", file=sys.stderr)
@@ -125,7 +173,7 @@ def run_compiler(compiler: str, linux: Path, directory: Path, previous: dict,
             state["first_error"] = {
                 "kind": type(error).__name__,
                 "stage": state["stage"], "location": "unavailable",
-                "reason": str(error).split("\n", 1)[0][-180:],
+                "reason": str(error).split("\n", 1)[0][:600],
             }
         print("FIRST_ERROR ROUND091_AGENT7 " + json.dumps(
             state["first_error"], sort_keys=True), file=sys.stderr)
@@ -167,6 +215,15 @@ def main() -> int:
                              "--porcelain", "--untracked-files=all"],
                             "pristine original"), "dirty original checkout")
         previous["stage_plan"](linux, helpers, report)
+        if os.environ.get("GITHUB_ACTIONS") == "true":
+            parent = subprocess.check_output(
+                ["git", "-C", str(ROOT), "show", "HEAD^:docs/testing_standards.md"])
+            current = (ROOT / "docs/testing_standards.md").read_bytes()
+            require(current.startswith(parent), "complete actual parent standards prefix changed")
+            report["standards_prefix"] = {"parent_bytes": len(parent),
+                "current_bytes": len(current), "parent_blob": blob(parent),
+                "current_blob": blob(current)}
+        report["qualification_round"] = "092"
         for source in (HANDLES_C, HANDLES_H, FIXTURE):
             require(source.is_file() and source.stat().st_size > 500,
                     "missing handle bridge source: " + source.name)

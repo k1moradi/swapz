@@ -22,7 +22,8 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
-          fetch-depth: 2
+          # Historical R069 authority pins require actual repository history.
+          fetch-depth: 0
           persist-credentials: false
       - name: Install rootless host compiler and original codec headers
         shell: bash

@@ -14,7 +14,7 @@ int round085_compress(swapz_u8 codec, const swapz_u8 *page, swapz_u32 length,
 
 static struct swapz_original_decoder_handle_owner owner;
 static swapz_u8 page[SWAPZ_BLOCK_BYTES], compressed[4608];
-static unsigned int checks, successful_reads, rejected_reads;
+static unsigned int checks;
 
 static struct swapz_original_decoder_value_snapshot snapshot_for(
 	swapz_u8 codec, swapz_u32 length,
@@ -212,6 +212,27 @@ int main(void)
 			&owner, &handle));
 	}
 	CHECK("record_churn_count", owner.active_records == 0U);
+	/* 64 concurrent records are distinct from 24,000 sequential lifetimes. */
+	{
+		struct swapz_original_decoder_value_handle live[SWAPZ_ORIGINAL_DECODER_HANDLE_SLOTS];
+
+		for (index = 0U; index < SWAPZ_ORIGINAL_DECODER_HANDLE_SLOTS; ++index)
+			CHECK("capacity_get", !swapz_original_decoder_handle_get(
+				&owner, 1U, 1U, &live[index]));
+		CHECK("capacity_full", owner.active_records == SWAPZ_ORIGINAL_DECODER_HANDLE_SLOTS);
+		new_handle = live[0];
+		CHECK("capacity_refusal", swapz_original_decoder_handle_get(
+			&owner, 1U, 1U, &new_handle) == -ENOSPC);
+		CHECK("capacity_output_unchanged",
+			new_handle.lifecycle_epoch == live[0].lifecycle_epoch &&
+			new_handle.generation == live[0].generation &&
+			new_handle.slot_index == live[0].slot_index &&
+			new_handle.codec == live[0].codec && new_handle.version == live[0].version);
+		CHECK("capacity_close_busy", swapz_original_decoder_handles_close(&owner) == -EBUSY);
+		for (index = 0U; index < SWAPZ_ORIGINAL_DECODER_HANDLE_SLOTS; ++index)
+			CHECK("capacity_put", !swapz_original_decoder_handle_put(&owner, &live[index]));
+		CHECK("capacity_drained", owner.active_records == 0U);
+	}
 
 	/* A retiring record cannot invalidate an already retained read lease.
 	 * Racing readers may succeed or decline before admission, never corrupt. */
@@ -225,6 +246,8 @@ int main(void)
 		CHECK("read_start", !pthread_create(&threads[index], NULL,
 			race_reader, &racing[index]));
 	}
+	/* A retained record prevents close; successful teardown follows all joins. */
+	CHECK("race_close_busy", swapz_original_decoder_handles_close(&owner) == -EBUSY);
 	CHECK("race_retire", !swapz_original_decoder_handle_put(&owner, &handle));
 	for (index = 0U; index < 4U; ++index) {
 		CHECK("read_join", !pthread_join(threads[index], NULL));
@@ -262,6 +285,14 @@ int main(void)
 		CHECK("large_put", !swapz_original_decoder_handle_put(
 			&owner, &handle));
 	}
+	/* Exercise the final legal generation before retiring a saturated slot. */
+	owner.slots[0].last_generation = ~(swapz_u64)0 - 1U;
+	CHECK("last_generation_get", !swapz_original_decoder_handle_get(&owner, 1U, 1U, &handle));
+	CHECK("last_generation_exact", handle.slot_index == 0U && handle.generation == ~(swapz_u64)0);
+	CHECK("last_generation_put", !swapz_original_decoder_handle_put(&owner, &handle));
+	CHECK("saturated_slot_skipped", !swapz_original_decoder_handle_get(
+		&owner, 1U, 1U, &new_handle) && new_handle.slot_index != 0U);
+	CHECK("saturated_slot_put", !swapz_original_decoder_handle_put(&owner, &new_handle));
 	/* Exhaust generation per slot without wrapping; no stale handle revive. */
 	for (index = 0U; index < SWAPZ_ORIGINAL_DECODER_HANDLE_SLOTS; ++index)
 		owner.slots[index].last_generation = ~(swapz_u64)0;
@@ -285,7 +316,9 @@ int main(void)
 	CHECK("second_lifecycle_close",
 		!swapz_original_decoder_handles_close(&owner));
 	printf("PASS ROUND091_AGENT7 checks=%u churn=24000 codecs=2 "
-	       "races=%u/%u epoch=2 AUTH0\n",
-		checks, successes, declines);
+	       "races=%u/%u epoch=2 handle=%zu slot=%zu owner=%zu AUTH0\n",
+		checks, successes, declines,
+		sizeof(struct swapz_original_decoder_value_handle),
+		sizeof(struct swapz_original_decoder_value_slot), sizeof(owner));
 	return 0;
 }

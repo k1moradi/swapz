@@ -1,0 +1,87 @@
+name: Round092 frozen original MM DM x86 compile link only AUTH0
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'tests/tools/round092-original-composed-compile-verify.py'
+      - '.github/workflows/phase-a-round092-original-composed-compile-noauth.yml'
+permissions:
+  contents: read
+jobs:
+  frozen-original-x86-compile-link:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 115
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          path: swapz
+          fetch-depth: 2
+          persist-credentials: false
+      - name: Canonical exact source and parent before scratch checkout
+        working-directory: swapz
+        env:
+          SWAPZ_PUSH_BEFORE_SHA: ${{ github.event.before }}
+        run: |
+          set -Eeuo pipefail
+          test "$GITHUB_REF" = refs/heads/main
+          test "$(git branch --show-current)" = main
+          test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
+          test "$(git rev-parse HEAD^)" = "$SWAPZ_PUSH_BEFORE_SHA"
+          test "$(git rev-list --parents -n1 HEAD | wc -w)" -eq 2
+          test -z "$(git status --porcelain --untracked-files=all)"
+          git diff --check "$SWAPZ_PUSH_BEFORE_SHA" HEAD
+          python3 - <<'PY'
+          import hashlib
+          import pathlib
+          import subprocess
+          import os
+          path = 'docs/testing_standards.md'
+          before = os.environ['SWAPZ_PUSH_BEFORE_SHA']
+          previous = subprocess.check_output(['git', 'show', before + ':' + path])
+          current = pathlib.Path(path).read_bytes()
+          if not previous or len(current) <= len(previous) or not current.startswith(previous):
+              raise SystemExit('FAIL: complete parent standards byte prefix not preserved')
+          print('R092_STANDARDS_PREFIX_PASS', len(previous), hashlib.sha256(previous).hexdigest(),
+                len(current), hashlib.sha256(current).hexdigest())
+          PY
+          python3 -B tests/runtime/native/repository-policy-test.py --enforce
+      - uses: actions/checkout@v4
+        with:
+          ref: 2499405464110e6a97f054db5527de54b8aafb3a
+          path: baseline
+          fetch-depth: 1
+          persist-credentials: false
+      - uses: actions/checkout@v4
+        with:
+          repository: torvalds/linux
+          ref: c339f4010dea8b0d754f84ace70cd1b089878ef8
+          path: linux
+          fetch-depth: 1
+          persist-credentials: false
+      - name: Provision compiler, ELF and kernel build prerequisites (runner packages only)
+        run: |
+          set -Eeuo pipefail
+          sudo -n apt-get update -qq
+          sudo -n env DEBIAN_FRONTEND=noninteractive apt-get install -y -qq --no-install-recommends \
+            build-essential binutils bc bison flex libelf-dev libssl-dev pkg-config \
+            openssl perl python3 xz-utils cpio
+          dpkg-query -W libelf-dev libssl-dev gcc binutils
+      - name: Raw immutable stage, directed objects, full x86 kernel and actual product module link
+        env:
+          SWAPZ_PUSH_BEFORE_SHA: ${{ github.event.before }}
+        run: |
+          set -Eeuo pipefail
+          python3 -B swapz/tests/tools/round092-original-composed-compile-verify.py \
+            --baseline baseline --linux linux \
+            --out "$RUNNER_TEMP/round092-x86-build" \
+            --module "$RUNNER_TEMP/round092-product-module" \
+            --evidence round092-compile-evidence \
+            --source-sha "$GITHUB_SHA" --source-parent "$SWAPZ_PUSH_BEFORE_SHA"
+      - name: Preserve exact compile logs and manifest even on failure
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: round092-frozen-original-x86-compile-evidence
+          path: round092-compile-evidence/
+          if-no-files-found: warn
+          retention-days: 14
