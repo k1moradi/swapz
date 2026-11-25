@@ -1,7 +1,7 @@
 diff --git a/drivers/md/dm.c b/drivers/md/dm.c
 --- a/drivers/md/dm.c
 +++ b/drivers/md/dm.c
-@@ -1404,4 +1404,67 @@
+@@ -1404,4 +1404,117 @@
  }
 -
 +
@@ -56,7 +56,14 @@ diff --git a/drivers/md/dm.c b/drivers/md/dm.c
 +	     (REQ_PREFLUSH | REQ_FUA | REQ_NOWAIT | REQ_POLLED | REQ_ATOMIC)) ||
 +	    clone->bi_iter.bi_size != 4096U ||
 +	    expected_origin->bi_iter.bi_size != 4096U ||
-+	    clone->bi_iter.bi_bvec_done || expected_origin->bi_iter.bi_bvec_done)
++	    clone->bi_iter.bi_idx || expected_origin->bi_iter.bi_idx ||
++	    clone->bi_iter.bi_offset || expected_origin->bi_iter.bi_offset ||
++	    !clone->bi_io_vec || clone->bi_io_vec != expected_origin->bi_io_vec ||
++	    expected_origin->bi_vcnt != 1 ||
++	    expected_origin->bi_io_vec[0].bv_offset ||
++	    expected_origin->bi_io_vec[0].bv_len != 4096U ||
++	    bio_flagged(expected_origin, BIO_CLONED) ||
++	    bio_flagged(expected_origin, BIO_REMAPPED))
 +		return false;
 +	clone_vec = bio_iter_iovec(clone, clone->bi_iter);
 +	origin_vec = bio_iter_iovec(expected_origin, expected_origin->bi_iter);
@@ -66,6 +73,49 @@ diff --git a/drivers/md/dm.c b/drivers/md/dm.c
 +	       clone_vec.bv_len == 4096U && origin_vec.bv_len == 4096U;
 +}
 +EXPORT_SYMBOL_GPL(dm_swapz_round088_clone_matches);
++
++/* Borrowed only during the real synchronous selected ->map callback. */
++const struct bio *dm_swapz_round090_selected_origin(struct dm_target *ti,
++						    struct bio *clone);
++const struct bio *dm_swapz_round090_selected_origin(struct dm_target *ti,
++						    struct bio *clone)
++{
++	struct dm_target_io *tio;
++	const struct bio *origin;
++
++	if (!ti || !clone || clone->bi_end_io != clone_endio)
++		return NULL;
++	tio = clone_to_tio(clone);
++	if (tio->magic != DM_TIO_MAGIC || !tio->io ||
++	    tio->io->magic != DM_IO_MAGIC)
++		return NULL;
++	origin = tio->io->orig_bio;
++	return dm_swapz_round088_clone_matches(ti, clone, origin) ? origin : NULL;
++}
++EXPORT_SYMBOL_GPL(dm_swapz_round090_selected_origin);
++
++/* Caller has RCU protection of the registered target and table. No target
++ * or table pointer returned. Reject the suspend gate, inactive table, and
++ * anything other than the actual whole-device selected interval.
++ */
++bool dm_swapz_round090_route_live(struct dm_target *ti,
++				struct block_device *bdev, sector_t sector);
++bool dm_swapz_round090_route_live(struct dm_target *ti,
++				struct block_device *bdev, sector_t sector)
++{
++	struct mapped_device *md;
++
++	if (!ti || !ti->table || !bdev || ti->begin || ti->len < 8 ||
++	    !sector || sector % 8 || sector > ti->len - 8)
++		return false;
++	md = dm_table_get_md(ti->table);
++	return md && bdev == md->disk->part0 &&
++	       !test_bit(DMF_BLOCK_IO_FOR_SUSPEND, &md->flags) &&
++	       rcu_dereference(md->map) == ti->table &&
++	       ti->len == dm_table_get_size(ti->table) &&
++	       dm_table_find_target(ti->table, sector) == ti;
++}
++EXPORT_SYMBOL_GPL(dm_swapz_round090_route_live);
 +#endif /* SWAPZ_ROUND088_SELECTED_DM_CANDIDATE_TEST */
 +
  static void __map_bio(struct bio *clone)

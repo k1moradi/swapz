@@ -1,4 +1,4 @@
-name: Round089 selected-DM canonical admission host
+name: Round090 selected-DM composed source host
 on:
   push:
     branches: [main]
@@ -7,6 +7,7 @@ on:
       - 'tests/tools/round088-selected-dm-admission-verify.py'
       - 'tests/tools/round088-original-dm-selected-clone.patch'
       - 'tests/tools/round089-selected-dm-registry-verify.py'
+      - 'tests/tools/round090-selected-dm-composition-verify.py'
 permissions:
   contents: read
 jobs:
@@ -38,13 +39,16 @@ jobs:
           set -Eeuo pipefail
           python3 -B tests/tools/round088-selected-dm-admission-verify.py
           python3 -B tests/tools/round089-selected-dm-registry-verify.py
+          python3 -B tests/tools/round090-selected-dm-composition-verify.py
       - uses: actions/checkout@v4
         with:
           repository: torvalds/linux
           ref: c339f4010dea8b0d754f84ace70cd1b089878ef8
           path: linux
           fetch-depth: 1
-          sparse-checkout: drivers/md/dm.c
+          sparse-checkout: |
+            drivers/md/dm.c
+            include/linux/bvec.h
           sparse-checkout-cone-mode: false
           persist-credentials: false
       - name: Pristine original DM patch applicability and exact postimage
@@ -52,6 +56,7 @@ jobs:
           set -Eeuo pipefail
           test "$(git -C linux rev-parse HEAD)" = c339f4010dea8b0d754f84ace70cd1b089878ef8
           test "$(git -C linux hash-object drivers/md/dm.c)" = 1881d86111fb2e655893ad898cf21b88f0e4e7f3
+          test "$(git -C linux hash-object include/linux/bvec.h)" = b63914ff56e33df302055fabf2a84ba490bc8d2c
           patch="$GITHUB_WORKSPACE/swapz/tests/tools/round088-original-dm-selected-clone.patch"
           git -C linux apply --check "$patch"
           scratch="$(mktemp -d)"
@@ -62,9 +67,10 @@ jobs:
             cd "$scratch"
             git apply --check "$patch"
             git apply "$patch"
-            test "$(git hash-object drivers/md/dm.c)" = 59ff578305062e9a63f900a661c6ce0cf3d8a9eb
+            if grep -n 'bi_bvec_done' drivers/md/dm.c; then exit 1; fi
+            test "$(git hash-object drivers/md/dm.c)" = 554dd8215ec6be0cfeaa016ca25e772ac6d363ff
             git apply --reverse "$patch"
             test "$(git hash-object drivers/md/dm.c)" = 1881d86111fb2e655893ad898cf21b88f0e4e7f3
           )
           test -z "$(git -C linux status --porcelain)"
-          echo ROUND089_ORIGINAL_DM_PATCH_APPLICABLE_POSTIMAGE_VERIFIED_NOT_COMPILED_AUTH0
+          echo ROUND090_ORIGINAL_DM_PATCH_APPLICABLE_POSTIMAGE_VERIFIED_NOT_COMPILED_AUTH0

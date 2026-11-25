@@ -55,6 +55,18 @@
 #include "predictor-route.h"
 #include "superblock.h"
 #include "swapz-build-info.h"
+#if defined(SWAPZ_ROUND090_SELECTED_DM_COMPOSITION_TEST)
+#if !defined(SWAPZ_ROUND088_SELECTED_DM_CANDIDATE_TEST) || \
+    !defined(SWAPZ_ROUND089_ORIGINAL_DM_CORE_TEST) || \
+    !defined(CONFIG_SWAPZ_ORIGINAL_MM_CARRIER_TEST) || \
+    !defined(SWAPZ_ORIGINAL_TICKET_TEST) || !defined(SWAPZ_SHARED_ORIGINAL_TEST)
+#error "Round090 composition requires the frozen staged MM, DM, broker and storage APIs"
+#endif
+#include <linux/rculist.h>
+#include <linux/swapz_mm_carrier.h>
+#include <linux/swapops.h>
+#include "zswap-original-storage.h"
+#endif
 
 #if PAGE_SIZE != SWAPZ_BLOCK_BYTES
 #error "swapz requires 4KiB PAGE_SIZE"
@@ -609,6 +621,14 @@ struct swapz_bio_ref {
 	bool published_deferred;
 	struct swapz_ack_dwell_batch *ack_batch;
 	int preparation_error;
+#if defined(SWAPZ_ROUND090_SELECTED_DM_COMPOSITION_TEST)
+	/* Exclusive retained reference and immutable view; only after claim.
+	 * Terminal completion moves the ref to preallocated release work.
+	 */
+	struct swapz_ticket_ref original_claim;
+	struct swapz_ticket_view original_view;
+	u64 original_gc_epoch;
+#endif
 #if defined(SWAPZ_ROUND063_ORIGINAL_DM_OWNER_TEST) && \
     defined(SWAPZ_ROUND056_PREERASE_SINGLE_OWNER_TEST) && \
     defined(SWAPZ_ROUND031_MM_BIO_SOURCE) && \
@@ -912,6 +932,21 @@ struct swapz_dm {
 #if defined(SWAPZ_ROUND088_SELECTED_DM_CANDIDATE_TEST)
 	/* Protected by queue_lock; zero registration_epoch means revoked. */
 	struct swapz_round089_route original_route;
+#endif
+#if defined(SWAPZ_ROUND090_SELECTED_DM_COMPOSITION_TEST)
+	/* Registry node is visible only under RCU; drain removes and crosses
+	 * a grace period before dropping the independent capability.
+	 */
+	struct list_head original_registry;
+	bool original_listed;
+	struct swapz_ticket_cap original_cap;
+	struct swapz_ticket_cap original_retired_cap;
+	struct work_struct original_cap_release_work;
+	struct swapz_shared_storage *original_storage;
+	/* Optional single import release slot, NOT an ordinary BIO limit. */
+	atomic_t original_release_busy;
+	struct swapz_ticket_ref original_release_ref;
+	struct work_struct original_release_work;
 #endif
 	struct list_head incoming;
 	bool accepting;
@@ -2287,6 +2322,35 @@ static void swapz_round064_current_owner_put(struct swapz_bio_ref *entry)
 /* ROUND064_CURRENT_TARGET_OWNER_END */
 #endif /* Round064 staged original slot/target candidate only */
 
+#if defined(SWAPZ_ROUND090_SELECTED_DM_COMPOSITION_TEST)
+/* Broker put may not nest under the ordered-owner mutex or queue_lock.
+ * The separate fixed release slot is reserved before claim and remains
+ * charged until this worker completes the put. No BIO pointer survives.
+ */
+static void swapz_round090_release_work(struct work_struct *work)
+{
+	struct swapz_dm *ctx = container_of(work, struct swapz_dm,
+					 original_release_work);
+
+	if (WARN_ON_ONCE(swapz_ticket_put(&ctx->original_release_ref)))
+		return; /* do not recycle an unretired lease */
+	atomic_set_release(&ctx->original_release_busy, 0);
+}
+
+static void swapz_round090_release_claim(struct swapz_dm *ctx,
+					struct swapz_bio_ref *entry)
+{
+	if (!entry->original_claim.broker)
+		return;
+	/* Sole upper completion owner, exclusive reserved slot. */
+	ctx->original_release_ref = entry->original_claim;
+	entry->original_claim = (struct swapz_ticket_ref){};
+	entry->original_view = (struct swapz_ticket_view){};
+	entry->original_gc_epoch = 0;
+	WARN_ON_ONCE(!queue_work(system_unbound_wq, &ctx->original_release_work));
+}
+#endif
+
 static void swapz_complete(struct bio *bio, int error)
 {
 	struct swapz_bio_ref *entry = dm_per_bio_data(bio, sizeof(*entry));
@@ -2318,6 +2382,9 @@ static void swapz_complete(struct bio *bio, int error)
 			atomic_dec(&ctx->preparation_ready_current);
 	}
 	swapz_release_prepared(bio);
+#if defined(SWAPZ_ROUND090_SELECTED_DM_COMPOSITION_TEST)
+	swapz_round090_release_claim(ctx, entry);
+#endif
 #if defined(SWAPZ_ROUND063_ORIGINAL_DM_OWNER_TEST) && \
     defined(SWAPZ_ROUND056_PREERASE_SINGLE_OWNER_TEST) && \
     defined(SWAPZ_ROUND031_MM_BIO_SOURCE) && \
@@ -3622,6 +3689,48 @@ static int swapz_lower_read(void *opaque, swapz_u32 block, swapz_u8 blocks,
 {
 	return swapz_lower(opaque, REQ_OP_READ, block, blocks, destination);
 }
+
+#if defined(SWAPZ_ROUND090_SELECTED_DM_COMPOSITION_TEST)
+/* Frozen shared-storage callback shapes. Real synchronous lower completion,
+ * DATA-relative range checks, and a separate definitive flush. The future
+ * setup owner must provide vmalloc-backed storage (DM_IO_VMA) and genuine
+ * independent decoder callbacks; no current attach/activation caller.
+ */
+static __maybe_unused int swapz_round090_storage_write(void *opaque,
+		swapz_u32 block, const swapz_u8 *bytes, swapz_u32 length,
+		swapz_u32 *completed)
+{
+	int error;
+
+	*completed = 0;
+	if (length != SWAPZ_BLOCK_BYTES)
+		return -EINVAL;
+	error = swapz_lower(opaque, REQ_OP_WRITE, block, 1, (u8 *)bytes);
+	if (!error)
+		*completed = length;
+	return error;
+}
+
+static __maybe_unused int swapz_round090_storage_read(void *opaque,
+		swapz_u32 block, swapz_u8 *bytes, swapz_u32 length,
+		swapz_u32 *completed)
+{
+	int error;
+
+	*completed = 0;
+	if (length != SWAPZ_BLOCK_BYTES)
+		return -EINVAL;
+	error = swapz_lower_read(opaque, block, 1, bytes);
+	if (!error)
+		*completed = length;
+	return error;
+}
+
+static __maybe_unused int swapz_round090_storage_flush(void *opaque)
+{
+	return swapz_issue_flush(opaque);
+}
+#endif
 
 #if defined(SWAPZ_ROUND028_DM_OWNED_READBACK_TEST) && \
     defined(SWAPZ_ROUND024_DM_IMPORT_KBUILD_PROBE)
@@ -7672,6 +7781,10 @@ static int swapz_discard_dead_segment(void *opaque, swapz_u32 segment)
 	 * must not serialize an unrelated K=1 run or staged batch merely because
 	 * some other segment has lower I/O in flight.
 	 */
+#if defined(SWAPZ_ROUND090_SELECTED_DM_COMPOSITION_TEST)
+	if (swapz_shared_original_segment_pinned(a, segment))
+		return -EBUSY;
+#endif
 	if (a->in_flight &&
 	    a->active_start / SWAPZ_SEGMENT_BLOCKS == segment)
 		return -EBUSY;
@@ -9057,6 +9170,32 @@ static int swapz_gc_relocate_one(struct swapz_dm *ctx, swapz_u32 victim,
 	if (!snapshot.valid || snapshot.start_block >= ctx->physical_blocks ||
 	    snapshot.start_block / SWAPZ_SEGMENT_BLOCKS != victim)
 		return -EUCLEAN;
+#if defined(SWAPZ_ROUND090_SELECTED_DM_COMPOSITION_TEST)
+	if (snapshot.state & SWAPZ_MAP_ORIGINAL) {
+		const struct swapz_shared_original_record *record;
+		u64 pin;
+		int release_error;
+
+		if (!ctx->original_storage)
+			return -EOPNOTSUPP;
+		error = swapz_gc_flush(ctx);
+		if (error)
+			return error;
+		error = swapz_shared_original_pin(&ctx->authority, logical, &pin);
+		if (error)
+			return error;
+		record = swapz_shared_original_view(&ctx->authority, pin);
+		if (!record || record->spec.gc_epoch == U64_MAX)
+			error = -ESTALE;
+		else {
+			swapz_invalidate_read_caches(ctx);
+			error = swapz_shared_storage_relocate(ctx->original_storage,
+					pin, record->spec.gc_epoch + 1);
+		}
+		release_error = swapz_shared_original_put(&ctx->authority, pin);
+		return error ? error : release_error;
+	}
+#endif
 	if (snapshot.raw) {
 		error = swapz_gc_flush(ctx);
 		if (error)
@@ -11162,6 +11301,14 @@ static int swapz_read(struct swapz_dm *ctx, struct bio *bio)
 	u64 section_start;
 	int error, decompressed;
 
+#if defined(SWAPZ_ROUND090_SELECTED_DM_COMPOSITION_TEST)
+	/* Never interpret the typed original namespace as predictor/RAW/LZ4
+	 * or consult ordinary caches. The frozen storage read returns bytes,
+	 * not a genuine typed decoder lease; that adapter is still absent.
+	 */
+	if (map->state & SWAPZ_MAP_ORIGINAL)
+		return -EOPNOTSUPP;
+#endif
 	if (!map->valid) {
 		memset(ctx->read_page, 0, SWAPZ_BLOCK_BYTES);
 	} else if (map->raw) {
@@ -11476,6 +11623,10 @@ static bool swapz_read_is_independent(struct swapz_dm *ctx, struct bio *bio)
 		(inflight_active &&
 		 swapz_inflight_run_touches_logical(ctx, logical));
 
+#if defined(SWAPZ_ROUND090_SELECTED_DM_COMPOSITION_TEST)
+	if (ctx->maps[logical].state & SWAPZ_MAP_ORIGINAL)
+		return false;
+#endif
 	/*
 	 * A K=1 lower run has reserved unpublished generations, but its committed
 	 * predecessor mappings remain authoritative until ordered completion.
@@ -11501,6 +11652,11 @@ static bool swapz_read_can_parallel(struct swapz_dm *ctx, struct bio *bio)
 	if (bio_op(bio) != REQ_OP_READ ||
 	    (bio->bi_opf & (REQ_PREFLUSH | REQ_FUA)))
 		return false;
+#if defined(SWAPZ_ROUND090_SELECTED_DM_COMPOSITION_TEST)
+	if (ctx->maps[bio->bi_iter.bi_sector / SWAPZ_SECTORS].state &
+	    SWAPZ_MAP_ORIGINAL)
+		return false;
+#endif
 	if (ctx->batch_count)
 		return swapz_read_is_independent(ctx, bio);
 	logical = (swapz_u32)(bio->bi_iter.bi_sector / SWAPZ_SECTORS);
@@ -11523,6 +11679,10 @@ static bool swapz_parallel_read_extent_mapped(struct swapz_dm *ctx,
 
 	logical = (swapz_u32)(bio->bi_iter.bi_sector / SWAPZ_SECTORS);
 	map = &ctx->maps[logical];
+#if defined(SWAPZ_ROUND090_SELECTED_DM_COMPOSITION_TEST)
+	if (map->state & SWAPZ_MAP_ORIGINAL)
+		return false;
+#endif
 	if (!map->valid || map->raw ||
 	    !swapz_map_extent_bounds_valid(ctx, map))
 		return false;
@@ -12263,11 +12423,107 @@ rejected_chain:
 	return false;
 }
 
+#if defined(SWAPZ_ROUND090_SELECTED_DM_COMPOSITION_TEST)
+/* The actual ordered FIFO owner, never ->map, handles a claimed ticket.
+ * No fallback to ordinary compression after claim. The credit adapter is
+ * currently hard-disabled, and storage/decoder setup is absent.
+ */
+static void swapz_round090_process_claimed(struct swapz_dm *ctx,
+					  struct swapz_bio_ref *entry)
+{
+	const struct swapz_ticket_key *key = &entry->original_view.key;
+	struct swapz_authority_import_spec spec = {};
+	struct swapz_original_extent_input input = {};
+	swp_entry_t slot;
+	int error = -ESTALE;
+
+	if (!ctx->original_storage || !entry->original_gc_epoch ||
+	    !key->dm_generation || key->dm_generation > U32_MAX ||
+	    key->logical_page >= ctx->logical_pages ||
+	    key->swap_type >= MAX_SWAPFILES || !key->area_epoch ||
+	    !key->store_sequence)
+		goto complete;
+	slot = swp_entry(key->swap_type, key->slot_offset);
+	if (swp_type(slot) != key->swap_type || swp_offset(slot) != key->slot_offset)
+		goto complete;
+	ctx->next_window_close = SWAPZ_CLOSE_OTHER;
+	error = swapz_flush_window(ctx);
+	if (!error)
+		error = swapz_finalize_all_inflight(ctx, true);
+	if (error)
+		goto complete;
+	if (ctx->gc_recovery.active || ctx->authority.gc_allocation ||
+	    smp_load_acquire(&ctx->failed)) {
+		error = -EIO;
+		goto complete;
+	}
+	/* Authority is now owned exclusively by the ordered worker. Do not
+	 * synthesize a fresh generation to salvage a stale claimed ticket.
+	 */
+	if (ctx->maps[key->logical_page].generation == U32_MAX ||
+	    key->dm_generation != (u64)ctx->maps[key->logical_page].generation + 1) {
+		error = -ESTALE;
+		goto complete;
+	}
+	/* Opaque identity tuple: activation epoch, actual encoded slot and
+	 * unique original store sequence; no zswap pointer/pool retained.
+	 */
+	spec.source_swap_slot = slot.val;
+	spec.source_entry_identity = key->area_epoch;
+	spec.source_store_generation = key->store_sequence;
+	spec.gc_epoch = entry->original_gc_epoch;
+	spec.logical_page = (u32)key->logical_page;
+	spec.compressed_crc32c = key->crc;
+	spec.compressed_length = (u16)key->length;
+	spec.codec = key->codec;
+	spec.codec_version = key->version;
+	spec.requested_fua = 1;
+	memcpy(spec.original_sha256, key->sha256, sizeof(spec.original_sha256));
+	input = (struct swapz_original_extent_input){
+		.bytes = entry->original_view.bytes,
+		.bytes_available = key->length,
+		.logical_page = spec.logical_page,
+		.generation = (u32)key->dm_generation,
+		.length = key->length,
+		.decoded_length = key->decoded_length,
+		.crc32c = key->crc,
+		.representation = key->representation,
+		.codec = key->codec,
+		.version = key->version,
+		.dictionary_id = key->dictionary,
+	};
+	swapz_invalidate_read_caches(ctx);
+	/* Shared storage writes exact bytes, flushes, then publishes authority.
+	 * No fabricated completion receipt. The future reservation adapter
+	 * must consume its preclaimed storage/decoder credit here.
+	 */
+	error = swapz_shared_storage_write(ctx->original_storage, &spec, &input);
+	if (!error) {
+		entry->published_ns = ktime_get_ns();
+		ctx->logical_write_bytes += SWAPZ_BLOCK_BYTES;
+		ctx->compressed_pages++;
+		swapz_count_verified_zswap_writeback_commit(ctx, entry->bio);
+	}
+complete:
+	swapz_complete(entry->bio, error);
+}
+#endif
+
 static void swapz_process(struct swapz_dm *ctx, struct bio *bio)
 {
 	int error = 0;
 	const enum req_op op = bio_op(bio);
 
+#if defined(SWAPZ_ROUND090_SELECTED_DM_COMPOSITION_TEST)
+	{
+		struct swapz_bio_ref *entry = dm_per_bio_data(bio, sizeof(*entry));
+
+		if (entry->original_claim.broker) {
+			swapz_round090_process_claimed(ctx, entry);
+			return;
+		}
+	}
+#endif
 	/*
 	 * Ordinary WRITE admission only stages immutable upper data in RAM.
 	 * Do not discard validated read residency until a path can actually
@@ -12678,6 +12934,16 @@ static void swapz_worker_pass(struct swapz_dm *ctx)
 			 * own scratch/workmem. If the producer already removed it, retain
 			 * the original completion handoff and never touch its scratch.
 			 */
+#if defined(SWAPZ_ROUND090_SELECTED_DM_COMPOSITION_TEST)
+			if (entry->original_claim.broker) {
+				atomic_set(&ctx->preparation_tail_credit, 0);
+				ctx->worker_has_immediate_followup = entry->list.next != &local;
+				swapz_refresh_accepted_followup(ctx);
+				list_del_init(&entry->list);
+				swapz_process(ctx, entry->bio);
+				goto processed_bio;
+			}
+#endif
 			if (ctx->async_prepare && bio_op(entry->bio) == REQ_OP_WRITE &&
 			    bio_sectors(entry->bio)) {
 				bool accepted_backlog;
@@ -14148,7 +14414,7 @@ static int swapz_round088_try_claim_locked(
 	    bio_op(bio) != REQ_OP_WRITE || !(bio->bi_opf & REQ_SWAP) ||
 	    (bio->bi_opf & (REQ_PREFLUSH | REQ_FUA | REQ_NOWAIT | REQ_POLLED)) ||
 	    bio->bi_iter.bi_size != SWAPZ_BLOCK_BYTES ||
-	    bio->bi_iter.bi_bvec_done)
+	    bio->bi_iter.bi_idx || bio->bi_iter.bi_offset)
 		return -EOPNOTSUPP;
 	vec = bio_iter_iovec(bio, bio->bi_iter);
 	if (!vec.bv_page || vec.bv_offset || vec.bv_len != SWAPZ_BLOCK_BYTES ||
@@ -14170,6 +14436,260 @@ static int swapz_round088_try_claim_locked(
 
 #endif /* SWAPZ_ROUND088_SELECTED_DM_CANDIDATE_TEST */
 
+#if defined(SWAPZ_ROUND090_SELECTED_DM_COMPOSITION_TEST)
+extern const struct bio *dm_swapz_round090_selected_origin(struct dm_target *,
+							 struct bio *);
+extern bool dm_swapz_round090_route_live(struct dm_target *,
+				       struct block_device *, sector_t);
+
+/* Sleepable lifecycle writers; producer readers use RCU and one queue
+ * trylock. Only actual resumed target instances enter this registry.
+ */
+static LIST_HEAD(swapz_round090_targets);
+static DEFINE_MUTEX(swapz_round090_registry_mutex);
+
+static void swapz_round090_publish_target(struct swapz_dm *ctx)
+{
+	mutex_lock(&swapz_round090_registry_mutex);
+	if (!ctx->original_listed) {
+		list_add_tail_rcu(&ctx->original_registry, &swapz_round090_targets);
+		ctx->original_listed = true;
+	}
+	mutex_unlock(&swapz_round090_registry_mutex);
+}
+
+static void swapz_round090_cap_release_work(struct work_struct *work)
+{
+	struct swapz_dm *ctx = container_of(work, struct swapz_dm,
+					 original_cap_release_work);
+
+	if (ctx->original_retired_cap.broker)
+		WARN_ON_ONCE(swapz_ticket_broker_put(&ctx->original_retired_cap));
+}
+
+static void swapz_round090_unpublish_target(struct swapz_dm *ctx)
+{
+	bool release_cap;
+	unsigned long flags;
+
+	mutex_lock(&swapz_round090_registry_mutex);
+	if (ctx->original_listed) {
+		list_del_rcu(&ctx->original_registry);
+		synchronize_rcu();
+		INIT_LIST_HEAD(&ctx->original_registry);
+		ctx->original_listed = false;
+	}
+	spin_lock_irqsave(&ctx->queue_lock, flags);
+	/* Core may hold suspend_lock during drain/dtr. Move the independent
+	 * capability to work instead of taking the broker lock here.
+	 * Lifecycle calls serialize; no new binding until later resume.
+	 */
+	release_cap = ctx->original_cap.broker != NULL;
+	if (release_cap) {
+		ctx->original_retired_cap = ctx->original_cap;
+		ctx->original_cap = (struct swapz_ticket_cap){};
+	}
+	spin_unlock_irqrestore(&ctx->queue_lock, flags);
+	mutex_unlock(&swapz_round090_registry_mutex);
+	if (release_cap) {
+		queue_work(system_unbound_wq, &ctx->original_cap_release_work);
+		flush_work(&ctx->original_cap_release_work);
+	}
+}
+
+/* Setup-only adapter: independent owner must keep broker arrays/code live
+ * through the RCU grace and all MM carrier/claimed leases. No current caller
+ * supplies that lifetime. Caller must be sleepable and outside all foreign
+ * locks; serialize against target lifecycle. Registration is not authentication.
+ */
+static __maybe_unused int swapz_round090_bind_capability(
+		struct dm_target *ti, struct swapz_ticket_broker *broker,
+		u64 session, u64 table_epoch, u64 target_epoch)
+{
+	struct swapz_dm *ctx;
+	struct swapz_ticket_cap cap = {};
+	struct swapz_round089_route route;
+	unsigned long flags;
+	int error;
+
+	if (!ti || !ti->private)
+		return -EINVAL;
+	ctx = ti->private;
+	error = swapz_ticket_broker_try_get(broker, session, table_epoch, &cap);
+	if (error)
+		return error;
+	error = swapz_round089_register_route(ti, session, table_epoch,
+					    target_epoch, &route);
+	if (!error) {
+		spin_lock_irqsave(&ctx->queue_lock, flags);
+		if (!ctx->accepting || ctx->failed || ctx->original_cap.broker ||
+		    !swapz_round089_route_matches_locked(ctx, &route))
+			error = -ESTALE;
+		else {
+			ctx->original_cap = cap;
+			cap = (struct swapz_ticket_cap){};
+		}
+		spin_unlock_irqrestore(&ctx->queue_lock, flags);
+	}
+	if (cap.broker)
+		WARN_ON_ONCE(swapz_ticket_broker_put(&cap));
+	return error;
+}
+
+/* ROUND090_DESTINATION_CREDIT_BEGIN */
+/* The frozen shared storage preflight is ordered-owner-only and does not
+ * reserve an extent, sidecar slot, decoder lease or generation. No map-time
+ * admission credit or generation fence exists. Do not read a worker-owned
+ * map generation under queue_lock or manufacture a route generation.
+ * This precise adapter remains a hard decline until all four reservations
+ * and their revocation semantics can be implemented together.
+ */
+static bool swapz_round090_destination_credit(const struct swapz_dm *ctx,
+		u64 logical, swapz_u8 codec, swapz_u32 length,
+		u64 *generation, u64 *gc_epoch)
+{
+	(void)ctx;
+	(void)logical;
+	(void)codec;
+	(void)length;
+	*generation = 0;
+	*gc_epoch = 0;
+	return false;
+}
+/* ROUND090_DESTINATION_CREDIT_END */
+
+static bool swapz_round090_provider_lookup(struct block_device *bdev,
+		sector_t sector, swapz_u8 codec, swapz_u32 length,
+		struct swapz_mm_route *route)
+{
+	struct swapz_dm *ctx;
+	unsigned long flags;
+	u64 generation, gc_epoch;
+	bool found = false;
+
+	*route = (struct swapz_mm_route){};
+	if (!bdev || !sector || sector % SWAPZ_SECTORS || !length ||
+	    length > SWAPZ_MAX_COMPRESSED ||
+	    (codec != SWAPZ_TICKET_LZ4 && codec != SWAPZ_TICKET_LZO1X))
+		return false;
+
+	/* Called under the MM provider's RCU read-side scope. */
+	list_for_each_entry_rcu(ctx, &swapz_round090_targets, original_registry) {
+		if (!dm_swapz_round090_route_live(ctx->target, bdev, sector))
+			continue;
+		if (!spin_trylock_irqsave(&ctx->queue_lock, flags))
+			return false;
+		if (ctx->accepting && !ctx->failed && ctx->original_cap.broker &&
+		    ctx->original_cap.session == ctx->original_route.broker_session &&
+		    ctx->original_cap.epoch == ctx->original_route.table_epoch &&
+		    ctx->original_storage && ctx->original_route.registration_epoch &&
+		    sector / SWAPZ_SECTORS < ctx->logical_pages &&
+		    swapz_round090_destination_credit(ctx, sector / SWAPZ_SECTORS,
+						codec, length, &generation, &gc_epoch)) {
+			*route = (struct swapz_mm_route){
+				.broker = ctx->original_cap.broker,
+				.target_session = ctx->original_route.broker_session,
+				.table_epoch = ctx->original_route.table_epoch,
+				.target_epoch = ctx->original_route.target_epoch,
+				.logical_page = sector / SWAPZ_SECTORS,
+				.dm_generation = generation,
+			};
+			found = true;
+		}
+		spin_unlock_irqrestore(&ctx->queue_lock, flags);
+		break;
+	}
+	/* MM takes its own cap after callback return but before RCU unlock. */
+	return found;
+}
+
+static bool swapz_round090_provider_eligible(struct block_device *bdev,
+		sector_t sector, swapz_u8 codec, swapz_u32 length)
+{
+	struct swapz_mm_route route;
+
+	return swapz_round090_provider_lookup(bdev, sector, codec, length, &route);
+}
+
+static const struct swapz_mm_route_provider swapz_round090_provider = {
+	.eligible = swapz_round090_provider_eligible,
+	.lookup = swapz_round090_provider_lookup,
+};
+
+/* Actual origin returned only within current core map/SRCU. Retain and
+ * snapshot before acquiring any target lock. View bytes stay valid by ref.
+ */
+static void swapz_round090_candidate_get(struct dm_target *ti, struct bio *bio,
+		struct swapz_ticket_ref *ref, struct swapz_ticket_view *view)
+{
+	const struct bio *origin = dm_swapz_round090_selected_origin(ti, bio);
+
+	if (!origin || swapz_mm_candidate_get(origin, ref))
+		return;
+	if (swapz_ticket_view(ref, view))
+		WARN_ON_ONCE(swapz_ticket_put(ref));
+}
+
+/* ROUND090_ATOMIC_CLAIM_BEGIN */
+static bool swapz_round090_claim_locked(struct swapz_dm *ctx,
+		struct swapz_bio_ref *entry, struct swapz_ticket_ref *ref,
+		const struct swapz_ticket_view *view)
+{
+	const struct swapz_ticket_key *key = &view->key;
+	const struct swapz_round089_route *route = &ctx->original_route;
+	u64 generation, gc_epoch;
+	bool selected;
+
+	lockdep_assert_held(&ctx->queue_lock);
+	if (!ref->broker || !ctx->accepting || ctx->failed ||
+	    !list_empty(&entry->list) || !list_empty(&entry->preparation_list) ||
+	    entry->prepared_page || entry->original_claim.broker ||
+	    !ctx->original_storage || !route->registration_epoch ||
+	    ref->broker != ctx->original_cap.broker ||
+	    ref->session != route->broker_session ||
+	    ctx->original_cap.session != route->broker_session ||
+	    ctx->original_cap.epoch != route->table_epoch ||
+	    key->target_session != route->broker_session ||
+	    key->table_epoch != route->table_epoch ||
+	    key->target_epoch != route->target_epoch ||
+	    key->logical_page != entry->bio->bi_iter.bi_sector / SWAPZ_SECTORS ||
+	    !view->bytes || !key->length || key->length > SWAPZ_MAX_COMPRESSED ||
+	    key->decoded_length != SWAPZ_BLOCK_BYTES ||
+	    key->representation != SWAPZ_TICKET_ORIGINAL ||
+	    (key->codec != SWAPZ_TICKET_LZ4 && key->codec != SWAPZ_TICKET_LZO1X) ||
+	    key->version != 1 || key->dictionary ||
+	    !swapz_round090_destination_credit(ctx, key->logical_page, key->codec,
+					      key->length, &generation, &gc_epoch) ||
+	    !generation || !gc_epoch || key->dm_generation != generation)
+		return false;
+	/* Revalidate the actual selected clone/table while its core SRCU
+	 * lifetime is still held by ->map. No broker operation in RCU.
+	 */
+	rcu_read_lock();
+	selected = dm_swapz_round090_selected_origin(ctx->target, entry->bio) &&
+		dm_swapz_round090_route_live(ctx->target, entry->bio->bi_bdev,
+					   entry->bio->bi_iter.bi_sector);
+	rcu_read_unlock();
+	if (!selected)
+		return false;
+	if (atomic_cmpxchg_acquire(&ctx->original_release_busy, 0, 1))
+		return false;
+	/* Frozen broker's ONLY foreign-lock API; one trylock, no callback.
+	 * All fallible work precedes the one successful claim.
+	 */
+	if (swapz_ticket_claim_under_queue_lock(ref, key)) {
+		atomic_set_release(&ctx->original_release_busy, 0);
+		return false;
+	}
+	entry->original_claim = *ref;
+	entry->original_view = *view;
+	entry->original_gc_epoch = gc_epoch;
+	*ref = (struct swapz_ticket_ref){};
+	return true;
+}
+/* ROUND090_ATOMIC_CLAIM_END */
+#endif
+
 static int swapz_map(struct dm_target *ti, struct bio *bio)
 {
 	struct swapz_dm *ctx = ti->private;
@@ -14179,6 +14699,11 @@ static int swapz_map(struct dm_target *ti, struct bio *bio)
 	sector_t count = bio_sectors(bio);
 	int submitter_lane = -1;
 	bool ordered_owned = false, submitter_dispatch = false;
+#if defined(SWAPZ_ROUND090_SELECTED_DM_COMPOSITION_TEST)
+	struct swapz_ticket_ref original_candidate = {};
+	struct swapz_ticket_view original_view = {};
+	bool original_claimed = false;
+#endif
 #if defined(SWAPZ_ROUND088_SELECTED_DM_CANDIDATE_TEST)
 	/* No trusted carrier adapter in the frozen tree. A future core-owned
 	 * retained candidate must be validated here, before taking queue_lock.
@@ -14276,6 +14801,13 @@ static int swapz_map(struct dm_target *ti, struct bio *bio)
 	if (ctx->async_prepare && bio_op(bio) == REQ_OP_WRITE && count)
 		init_completion(&entry->preparation_snapshot_ready);
 	entry->bio = bio;
+#if defined(SWAPZ_ROUND090_SELECTED_DM_COMPOSITION_TEST)
+	entry->original_claim = (struct swapz_ticket_ref){};
+	entry->original_view = (struct swapz_ticket_view){};
+	entry->original_gc_epoch = 0;
+	if (bio_op(bio) == REQ_OP_WRITE && count == SWAPZ_SECTORS)
+		swapz_round090_candidate_get(ti, bio, &original_candidate, &original_view);
+#endif
 #if defined(SWAPZ_ROUND088_SELECTED_DM_CANDIDATE_TEST)
 	core_matches = swapz_round089_core_matches(ti, bio, candidate);
 #endif
@@ -14342,6 +14874,11 @@ static int swapz_map(struct dm_target *ti, struct bio *bio)
 		 * stream with an idle lower lane tries to own the ordered domain.
 		 * Never sleeps; the decision is re-proved under the owner mutex.
 		 */
+#if defined(SWAPZ_ROUND090_SELECTED_DM_COMPOSITION_TEST)
+		if (original_candidate.broker) {
+			/* Optional candidate owns no submitter-preparation lane. */
+		} else
+#endif
 		if (bio_op(bio) == REQ_OP_WRITE && count && ctx->submitter_prepare &&
 		    ctx->retain_ms && in_task() && !irqs_disabled() &&
 		    !(bio->bi_opf & (REQ_PREFLUSH | REQ_FUA | REQ_NOWAIT)) &&
@@ -14377,6 +14914,10 @@ static int swapz_map(struct dm_target *ti, struct bio *bio)
 				entry->round063_owned_original);
 			entry->round063_owned_original = NULL;
 #endif
+#endif
+#if defined(SWAPZ_ROUND090_SELECTED_DM_COMPOSITION_TEST)
+			if (original_candidate.broker)
+				WARN_ON_ONCE(swapz_ticket_put(&original_candidate));
 #endif
 			return READ_ONCE(ctx->failed) ? DM_MAPIO_KILL : DM_MAPIO_REQUEUE;
 		}
@@ -14418,6 +14959,10 @@ static int swapz_map(struct dm_target *ti, struct bio *bio)
 	 */
 	(void)swapz_round088_try_claim_locked(ti, ctx, entry, candidate, NULL,
 					     candidate_route, core_matches);
+#endif
+#if defined(SWAPZ_ROUND090_SELECTED_DM_COMPOSITION_TEST)
+	original_claimed = swapz_round090_claim_locked(ctx, entry,
+					&original_candidate, &original_view);
 #endif
 	list_add_tail(&entry->list, &ctx->incoming);
 #if defined(SWAPZ_ROUND052_DM_INTERNAL_ONE_SHOT_TEST)
@@ -14461,6 +15006,11 @@ static int swapz_map(struct dm_target *ti, struct bio *bio)
 	}
 /* ROUND053_DM_ACCEPTED_LIFECYCLE_MAP_END */
 #endif /* SWAPZ_ROUND053_DM_ACCEPTED_BIO_LIFECYCLE_TEST */
+#if defined(SWAPZ_ROUND090_SELECTED_DM_COMPOSITION_TEST)
+	if (original_claimed) {
+		/* Claimed bytes belong only to the ordered typed consumer. */
+	} else
+#endif
 	if (ctx->async_prepare && bio_op(bio) == REQ_OP_WRITE && count) {
 		/*
 		 * ID150: ordinary task-context submissions may prepare their already
@@ -14529,6 +15079,11 @@ static int swapz_map(struct dm_target *ti, struct bio *bio)
 	spin_unlock_irqrestore(&ctx->queue_lock, flags);
 	if (ordered_owned && !submitter_dispatch)
 		mutex_unlock(&ctx->ordered_owner);
+#if defined(SWAPZ_ROUND090_SELECTED_DM_COMPOSITION_TEST)
+	/* Stack lease only: descriptor may already have completed after unlock. */
+	if (original_candidate.broker)
+		WARN_ON_ONCE(swapz_ticket_put(&original_candidate));
+#endif
 	if (submitter_dispatch)
 		swapz_submitter_dispatch(ctx, entry, (unsigned int)submitter_lane);
 	else if (submitter_lane >= 0)
@@ -14555,6 +15110,9 @@ static void swapz_drain(struct dm_target *ti)
 	swapz_round089_revoke_route_locked(ctx);
 #endif
 	spin_unlock_irqrestore(&ctx->queue_lock, flags);
+#if defined(SWAPZ_ROUND090_SELECTED_DM_COMPOSITION_TEST)
+	swapz_round090_unpublish_target(ctx);
+#endif
 	/* The callback takes queue_lock. Close admission first, then cancel
 	 * outside that lock before waiting for any worker or freeing it. */
 	hrtimer_cancel(&ctx->retention_timer);
@@ -14633,6 +15191,10 @@ static void swapz_drain(struct dm_target *ti)
 	} else {
 		spin_unlock_irqrestore(&ctx->queue_lock, flags);
 	}
+#if defined(SWAPZ_ROUND090_SELECTED_DM_COMPOSITION_TEST)
+	flush_work(&ctx->original_release_work);
+	WARN_ON_ONCE(atomic_read(&ctx->original_release_busy));
+#endif
 	/* Every admitted BIO was queued under the same lock before this drain. */
 	if (!READ_ONCE(ctx->failed)) {
 		int error = swapz_issue_flush(ctx);
@@ -14653,6 +15215,9 @@ static void swapz_resume(struct dm_target *ti)
 	if (!READ_ONCE(ctx->failed))
 		WRITE_ONCE(ctx->accepting, true);
 	spin_unlock_irqrestore(&ctx->queue_lock, flags);
+#if defined(SWAPZ_ROUND090_SELECTED_DM_COMPOSITION_TEST)
+	swapz_round090_publish_target(ctx);
+#endif
 }
 
 static void swapz_free(struct swapz_dm *ctx)
@@ -14898,6 +15463,12 @@ static int swapz_ctr(struct dm_target *ti, unsigned int argc, char **argv)
 	ctx->delta64_lz4_acceleration =
 		(swapz_u8)swapz_delta64_lz4_acceleration;
 	spin_lock_init(&ctx->queue_lock);
+#if defined(SWAPZ_ROUND090_SELECTED_DM_COMPOSITION_TEST)
+	INIT_LIST_HEAD(&ctx->original_registry);
+	INIT_WORK(&ctx->original_release_work, swapz_round090_release_work);
+	INIT_WORK(&ctx->original_cap_release_work, swapz_round090_cap_release_work);
+	atomic_set(&ctx->original_release_busy, 0);
+#endif
 	mutex_init(&ctx->ordered_owner);
 	INIT_LIST_HEAD(&ctx->incoming);
 	INIT_LIST_HEAD(&ctx->preparation_incoming);
@@ -16526,11 +17097,24 @@ static int __init swapz_dm_init(void)
 	error = swapz_predictor_init();
 	if (error)
 		return error;
-	return dm_register_target(&swapz_target);
+#if defined(SWAPZ_ROUND090_SELECTED_DM_COMPOSITION_TEST)
+	error = swapz_mm_register_provider(&swapz_round090_provider);
+	if (error)
+		return error;
+#endif
+	error = dm_register_target(&swapz_target);
+#if defined(SWAPZ_ROUND090_SELECTED_DM_COMPOSITION_TEST)
+	if (error)
+		WARN_ON_ONCE(swapz_mm_unregister_provider(&swapz_round090_provider));
+#endif
+	return error;
 }
 
 static void __exit swapz_dm_exit(void)
 {
+#if defined(SWAPZ_ROUND090_SELECTED_DM_COMPOSITION_TEST)
+	WARN_ON_ONCE(swapz_mm_unregister_provider(&swapz_round090_provider));
+#endif
 	dm_unregister_target(&swapz_target);
 }
 
