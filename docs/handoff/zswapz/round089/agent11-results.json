@@ -1,0 +1,131 @@
+{
+  "round": "089",
+  "agent": 11,
+  "conclusion": "IN_PROGRESS_HOST_ONLY_NO_GO_LIVE",
+  "assignment": "0c893ee7a3ffc158d747c11c96b67fcf0b3efa15",
+  "baseline": "db9252db73721a768be912965ad4402e332039e8",
+  "source_commit": "63412e4f2fb6f74cb02996947aca48acf047391c",
+  "source_parent": "ef05181f8e7e248df2daa3549be87af58153fa99",
+  "original_linux_pin": "c339f4010dea8b0d754f84ace70cd1b089878ef8",
+  "branch": "main",
+  "expected_head_nonforce": true,
+  "first_error": null,
+  "source_blobs": {
+    "src/kernel/zswap-original-ticket.c": "66df826d86dde1bbd5e1967daa0e62517b58ac8d",
+    "src/kernel/zswap-original-ticket.h": "2f850b53708c8142ee95d330192c9db1f9ae9418",
+    "tests/tools/round089-original-mm-carrier.patch": "059d1bf29cf4990e22a2f608d5d552abeec3a8d1",
+    "tests/tools/round089-original-mm-carrier-verify.py": "dce6b2417ea33b598eaf00accf7888730b2e4a54",
+    "tests/runtime/native/fixtures/round089-original-mm-carrier.c": "bc01d5f7b41e16ab3748e9350d715e85887e91cd",
+    ".github/workflows/phase-a-round089-original-mm-carrier-host-noauth.yml": "71e8ad808de269e6122396b59694ecd78192590c",
+    "src/kernel/codec.c": "d920dcaac6f2b7de1334d4133770bd649719c66d",
+    "src/kernel/codec.h": "e89d316b9cf49f82df0b77648c1be1731607987d",
+    "src/kernel/Makefile": "ed6e19ae28a84a4a3e92117812adc445d5c2e8e5"
+  },
+  "pristine_blobs": {
+    "mm/zswap.c": "ae19e301fced7e357a4c7587dfdd6abb890b9163",
+    "mm/page_io.c": "c6824fcd483e0aa2c412e14dae0d2a356b17c373",
+    "include/linux/swap_ops.h": "57ac6c703f685883d3a15ebc1a5c7f6c298deb1b",
+    "include/linux/blk_types.h": "0cc09b975d8ffbd45ca3dc47533a71f8e8164de6",
+    "include/linux/bio.h": "7a794ce723b84b2a148f8f9beccf057b266e8ac9",
+    "block/bio.c": "b0fcc69de653524479e3b328aa29a37e97945b84",
+    "mm/zsmalloc.c": "7ef80e0da6267661cea4d48a4a615444724782e7",
+    "mm/swapfile.c": "254ce86fa923e6b5f1fefda88c39315c4cc00642",
+    "mm/swap.h": "d5bf21f517dceae58eb94fb0ce5f4e1fdc679409",
+    "include/linux/swap.h": "4f686709d71f005dc43b2f751012b5f61d6b007a",
+    "include/linux/bvec.h": "b63914ff56e33df302055fabf2a84ba490bc8d2c",
+    "include/linux/blkdev.h": "2d5c30823aab9be31d881be1de8ae60feb7a5c57",
+    "include/linux/workqueue.h": "c8a36423cb3465ba8c00735b2ca152eb7122a97a",
+    "include/crypto/acompress.h": "5d5358dfab73458fc4bc345fe00650e938fe36c6",
+    "include/crypto/sha2.h": "22fbc37ae840796ecbafd5eadf23373e51741f9e"
+  },
+  "staged_postimages": {
+    "mm/zswap.c": "8bf7e885376c5ef521adf40b1ec736e062067bff",
+    "mm/page_io.c": "0b0fe917fa3af5deaef8263274edffbf1a62eedb",
+    "include/linux/swap_ops.h": "a39a1921daf6f272e9812eb63b1aa64fec96c57f",
+    "include/linux/blk_types.h": "0bf866c1571fe6b4d2e49d01b1b2c87fcf2cf04c",
+    "include/linux/bio.h": "f4c5f1730514cf1816ffd5e9787562439dfae236",
+    "block/bio.c": "3ba0e12a96ba3235eb909e3b3dd0be44657c6f6e",
+    "include/linux/swapz_mm_carrier.h": "72100483b42a59db8f522d3f2f4ee10d4f856550"
+  },
+  "postimage_status": "CONNECTOR_PREDICTED",
+  "standards_before": "8abec99cffe039a491d615449d389601b44e2fc9",
+  "standards_after": "2d6991f996e200fd24bb07c8c34cee8cb4592eed",
+  "initial": {
+    "source_commit": "c808093639d8dc77dad76cb38f0a327d0fe304fd",
+    "source_parent": "50da7608c7f2a461126824e916dbc37c5585098d",
+    "run": 45577454771,
+    "job": 139078805896,
+    "url": "https://github.com/k1moradi/swapz/actions/runs/45577454771/job/139078805896",
+    "conclusion": "PASS_HOST_ONLY",
+    "checks": {
+      "gcc": 700,
+      "clang": 700
+    },
+    "races": {
+      "gcc": {
+        "count": 32,
+        "claimed": 2,
+        "declined": 30
+      },
+      "clang": {
+        "count": 32,
+        "claimed": 3,
+        "declined": 29
+      }
+    },
+    "artifact": {
+      "id": 15004009556,
+      "url": "https://github.com/k1moradi/swapz/actions/runs/45577454771/artifacts/15004009556",
+      "bytes": 1210,
+      "digest": "sha256:a58f6e42fd50487a52b3e39dadfe5542eb2b9000b90e9106a943727beb560dc0",
+      "archive_independently_extracted": false
+    },
+    "first_error": null
+  },
+  "corrected_ci": {
+    "run": 45577781770,
+    "job": 139079883750,
+    "url": "https://github.com/k1moradi/swapz/actions/runs/45577781770/job/139079883750",
+    "status": "queued",
+    "conclusion": null,
+    "compiler_results": {},
+    "actual_checks": null,
+    "artifact": null,
+    "first_error": null,
+    "log_markers": []
+  },
+  "memory": {
+    "old_key_bytes": 120,
+    "cookie_bytes": 8,
+    "source_record_host_bytes": 72,
+    "sparse_cells": 64,
+    "cell_kernel_estimate_bytes": 80,
+    "sparse_estimate_bytes": 5120,
+    "host_capability_bytes": 24,
+    "host_carrier_bytes": 4176,
+    "host_broker_bytes": 160,
+    "actual_kernel_slab_delta": "NOT_RUN",
+    "cpu_benchmark": "NOT_RUN"
+  },
+  "scope": "actual broker; extracted actual sparse key helper; synthetic external queue lock; original scratch patch not production",
+  "local_checkout": "git ls-remote DNS exit128",
+  "kernel_compile": "NOT_RUN",
+  "native": "NOT_RUN",
+  "semantic_mutants": "NOT_RUN",
+  "source_mapped_authenticated": 0,
+  "phase_a": "BLOCKED",
+  "direct_handoff": "DISABLED",
+  "forced_raw_bypass": "DISABLED",
+  "import_active": 0,
+  "physical_mutation": false,
+  "new_vm": false,
+  "manual_dispatch": false,
+  "periodic_monitoring": false,
+  "blockers": [
+    "actual target provider and selected clone/route ordering not integrated",
+    "actual original kernel compile/link and native lifecycle/lockdep not run",
+    "provider registration lifetime and destroy quiescence must be proven",
+    "actual slab/CPU/hit-rate/peak memory unmeasured",
+    "real lower durability and upper ACK unproven"
+  ]
+}
