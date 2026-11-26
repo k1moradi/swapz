@@ -1,0 +1,76 @@
+name: Independent private byte oracle offline NO_AUTH
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'tests/tools/native-observation-byte-oracle.py'
+      - 'tests/runtime/native/independent-byte-oracle-test.py'
+      - '.github/workflows/phase-a-independent-byte-oracle-noauth.yml'
+permissions:
+  contents: read
+jobs:
+  byte-oracle:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Exact source and full historical prefix
+        env:
+          SWAPZ_PUSH_BEFORE_SHA: ${{ github.event.before }}
+        run: |
+          set -Eeuo pipefail
+          test "$GITHUB_REF" = refs/heads/main
+          test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
+          test "$(git rev-parse HEAD^)" = "$SWAPZ_PUSH_BEFORE_SHA"
+          test "$(git rev-list --parents -n1 HEAD | wc -w)" -eq 2
+          test -z "$(git status --porcelain --untracked-files=all)"
+          git diff --check HEAD^ HEAD
+          mkdir -p "$RUNNER_TEMP/independent-byte-oracle"
+          python3 -B - <<'PY' | tee "$RUNNER_TEMP/independent-byte-oracle/pins.log"
+          from pathlib import Path
+          import hashlib, subprocess
+          freeze = "eea7c4308bbd7a34af4c5a3f933d6ec695e011a1"
+          frozen = subprocess.check_output(["git", "show", freeze + ":docs/testing_standards.md"])
+          previous = subprocess.check_output(["git", "show", "HEAD^:docs/testing_standards.md"])
+          current = Path("docs/testing_standards.md").read_bytes()
+          assert len(frozen) == 1881523 and previous.startswith(frozen)
+          assert current.startswith(previous) and len(current) > len(previous)
+          pins = {
+              "src/kernel/native-observation-adapter.c": "f94371ff06ba8296e292ccec9e28dd230ded5bbd",
+              "src/kernel/native-observation-adapter.h": "27f1140f4dcc510662fbb1f4519f7be4236e1b10",
+              "src/kernel/native-observation-owner.c": "69bd5c018bf4cc502c14c1c3f1cc02c1959c1673",
+              "src/kernel/native-observation-owner.h": "e266f0e0c2dec0d399cc863da329e44f38b0c536",
+              "tests/tools/native-observation-export.py": "0c97be31dce2d7a049335189e114b2c73cd0074c",
+              "tests/tools/native-observation-current-export.py": "bf653586a76d507d2d70f04292faff3df8a00f3c",
+              "src/kernel/dm-target.c": "aaff4d782323f9f17046cb2ba4fabcc0069e51e6",
+              "tests/tools/round098-original-mm-scope-events.patch": "3832b6aa76b783f3790b869cf40512b114d66cd6",
+              "tests/tools/round098-original-dm-upper-observation.patch": "5b0b0a3582b16e54046f1f11355e6814c9ca4e1f",
+              "tests/tools/round096-original-owner-retry.patch": "6ee63e6515dd2f0337c49d1a868f39435b93119c",
+          }
+          for path, blob in pins.items():
+              # A3 may independently publish product edits; pin the frozen
+              # mapped anchors rather than consuming current peer code.
+              ref = "HEAD" if "native-observation" in path else freeze
+              assert subprocess.check_output(["git", "rev-parse", ref + ":" + path], text=True).strip() == blob, path
+          print("full standards prefix", len(previous), len(current), hashlib.sha256(previous).hexdigest())
+          print("exact selected/frozen pins", len(pins))
+          PY
+      - name: New independent full-page and offline witness cases
+        run: |
+          set -Eeuo pipefail
+          umask 077
+          python3 --version
+          # Only redacted diagnostics; no private plan, witness, wire or bytes.
+          python3 -B tests/runtime/native/independent-byte-oracle-test.py "$GITHUB_SHA" \
+            2>&1 | tee "$RUNNER_TEMP/independent-byte-oracle/validation.log"
+      - name: Retain redacted diagnostics only
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: independent-byte-oracle
+          path: ${{ runner.temp }}/independent-byte-oracle/*.log
+          if-no-files-found: warn
+          retention-days: 14
