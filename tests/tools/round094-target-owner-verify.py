@@ -336,11 +336,11 @@ def main():
     evidence.mkdir(parents=True, exist_ok=True)
     report = {"AUTH": 0, "native": False, "first_error": None, "compilers": {}}
     try:
-        source = SOURCE.read_text()
         registry = runpy.run_path(str(REGISTRY))
+        source = registry["read_source"]()
         extract = registry["extract"]
         record = extract(source, "struct swapz_round089_route {", "/* Globally non-reused")
-        revoke = extract(source, "static void swapz_round089_revoke_route_locked(", "#endif")
+        revoke = registry["extract_revoke"](source)
         routes = extract(source, "static __maybe_unused int swapz_round089_register_route(",
                          "/* Original core validation runs")
         def fragment(name):
@@ -408,7 +408,7 @@ def main():
                     program.write_text(registry["ADAPTER"] + record + ADAPTER + revoke + routes + variant + TEST)
                     subprocess.run([compiler, "-std=gnu11", "-O1", "-g", "-Wall", "-Wextra",
                                     "-Wconversion", "-Wshadow", "-Werror", "-fsanitize=address,undefined",
-                                    "-fno-pie", "-no-pie", str(program), "-o", str(binary)], check=True, timeout=30)
+                                    "-fno-sanitize-recover=all", "-fno-pie", "-no-pie", str(program), "-o", str(binary)], check=True, timeout=30)
                     run = subprocess.run([str(binary)], capture_output=True, text=True, timeout=10)
                     if name == "baseline":
                         if run.returncode or run.stderr or not run.stdout.startswith("ROUND094_TARGET_PASS checks="):

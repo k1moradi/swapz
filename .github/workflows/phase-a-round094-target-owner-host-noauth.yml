@@ -36,10 +36,21 @@ jobs:
           test "$(git hash-object "$prior")" = "$(git rev-parse "$SWAPZ_PUSH_BEFORE_SHA:docs/testing_standards.md")"
           test "$(wc -c < docs/testing_standards.md)" -gt "$bytes"
           cmp -n "$bytes" "$prior" docs/testing_standards.md
+      - name: Select independent R100 frozen extraction lane
+        run: |
+          set -Eeuo pipefail
+          changed="$(git diff --name-only HEAD^ HEAD)"
+          if grep -Fxq 'tests/tools/round089-selected-dm-registry-verify.py' <<< "$changed" &&
+             grep -Fxq 'tests/tools/round094-target-owner-verify.py' <<< "$changed" &&
+             ! grep -Evx 'tests/tools/round089-selected-dm-registry-verify.py|tests/tools/round094-target-owner-verify.py|docs/testing_standards.md|.github/workflows/phase-a-round088-selected-dm-admission-host.yml|.github/workflows/phase-a-round094-target-owner-host-noauth.yml' <<< "$changed"; then
+            echo 'SWAPZ_R100_FROZEN_HOST=1' >> "$GITHUB_ENV"
+          fi
       - name: Actual extracted guarded target lifecycle and bounded generation
         run: |
           set -Eeuo pipefail
-          python3 -B tests/tools/round094-target-owner-verify.py "$RUNNER_TEMP/round094-agent3"
+          umask 077
+          mkdir -p "$RUNNER_TEMP/round094-agent3"
+          python3 -B tests/tools/round094-target-owner-verify.py "$RUNNER_TEMP/round094-agent3" 2>&1 | tee "$RUNNER_TEMP/round094-agent3/target-owner.log"
       - name: Retain bounded evidence
         if: always()
         uses: actions/upload-artifact@v4

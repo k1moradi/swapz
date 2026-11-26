@@ -43,7 +43,28 @@ jobs:
           test "$(git hash-object "$prior")" = "$(git rev-parse "$SWAPZ_PUSH_BEFORE_SHA:docs/testing_standards.md")"
           test "$(wc -c < docs/testing_standards.md)" -gt "$bytes"
           cmp -n "$bytes" "$prior" docs/testing_standards.md
+      - name: Select independent R100 frozen extraction lane
+        id: extraction-lane
+        working-directory: swapz
+        run: |
+          set -Eeuo pipefail
+          changed="$(git diff --name-only HEAD^ HEAD)"
+          if grep -Fxq 'tests/tools/round089-selected-dm-registry-verify.py' <<< "$changed" &&
+             grep -Fxq 'tests/tools/round094-target-owner-verify.py' <<< "$changed" &&
+             ! grep -Evx 'tests/tools/round089-selected-dm-registry-verify.py|tests/tools/round094-target-owner-verify.py|docs/testing_standards.md|.github/workflows/phase-a-round088-selected-dm-admission-host.yml|.github/workflows/phase-a-round094-target-owner-host-noauth.yml' <<< "$changed"; then
+            echo 'SWAPZ_R100_FROZEN_HOST=1' >> "$GITHUB_ENV"
+            echo 'frozen=true' >> "$GITHUB_OUTPUT"
+          fi
+      - name: R100 actual frozen registry extraction and original semantic mutants
+        if: steps.extraction-lane.outputs.frozen == 'true'
+        working-directory: swapz
+        run: |
+          set -Eeuo pipefail
+          umask 077
+          mkdir -p "$RUNNER_TEMP/round092-agent3"
+          python3 -B tests/tools/round089-selected-dm-registry-verify.py 2>&1 | tee "$RUNNER_TEMP/round092-agent3/registry.log"
       - name: Exact target source strict C guard and semantic mutants
+        if: steps.extraction-lane.outputs.frozen != 'true'
         working-directory: swapz
         run: |
           set -Eeuo pipefail
@@ -51,6 +72,7 @@ jobs:
           python3 -B tests/tools/round089-selected-dm-registry-verify.py
           python3 -B tests/runtime/native/zswap-origin-consumer-source-test.py
       - uses: actions/checkout@v4
+        if: steps.extraction-lane.outputs.frozen != 'true'
         with:
           repository: torvalds/linux
           ref: c339f4010dea8b0d754f84ace70cd1b089878ef8
@@ -69,6 +91,7 @@ jobs:
           sparse-checkout-cone-mode: false
           persist-credentials: false
       - name: Pristine original DM patch applicability and exact postimage
+        if: steps.extraction-lane.outputs.frozen != 'true'
         run: |
           set -Eeuo pipefail
           test "$(git -C linux rev-parse HEAD)" = c339f4010dea8b0d754f84ace70cd1b089878ef8
@@ -92,6 +115,7 @@ jobs:
           test -z "$(git -C linux status --porcelain)"
           echo ROUND091_ORIGINAL_DM_PATCH_APPLICABLE_POSTIMAGE_VERIFIED_NOT_COMPILED_AUTH0
       - name: Actual frozen storage broker and original decoder ordered-host proof
+        if: steps.extraction-lane.outputs.frozen != 'true'
         working-directory: swapz
         run: |
           set -Eeuo pipefail
