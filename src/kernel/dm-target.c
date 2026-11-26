@@ -15905,13 +15905,16 @@ static void swapz_dtr(struct dm_target *ti)
 	    ctx->original_retired_cap.broker || ctx->original_cap.broker ||
 	    atomic_read(&ctx->original_release_busy)) {
 		DMERR("guarded owner teardown quarantined errno=%d", ctx->original_teardown_error);
-		ti->private = NULL;
-		return;
+		goto detach;
 	}
 	if (ctx->original_owner_session)
 		DMERR("built-in owner remains closed errno=%d", ctx->original_teardown_error);
 #endif
 	swapz_free(ctx);
+#if defined(SWAPZ_ROUND094_TARGET_OWNER_TEST)
+detach:
+#endif
+	/* Both ordinary destruction and guarded quarantine detach exactly once. */
 	ti->private = NULL;
 }
 

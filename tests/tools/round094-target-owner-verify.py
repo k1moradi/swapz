@@ -65,7 +65,7 @@ static struct swapz_ticket_broker broker;
 static u64 session;
 static bool owner_live, owner_closed, owner_busy, refuse_open, refuse_bridge, refuse_storage;
 static bool refuse_begin, refuse_storage_close;
-static unsigned int allocations, allocation_calls, fail_allocation, gets, puts, begins, finishes;
+static unsigned int allocations, allocation_calls, fail_allocation, capability_gets, capability_puts, begins, finishes;
 static void *vzalloc(size_t bytes)
 {
     assert(observed->ordered_owner && !observed->queue_lock);
@@ -138,7 +138,7 @@ static int swapz_mm_broker_owner_open(u32 capacity, u32 max_length, u64 byte_lim
     owner_live = true;
     owner_closed = false;
     broker.caps = 1U;
-    ++gets;
+    ++capability_gets;
     ++session;
     *cap = (struct swapz_ticket_cap){&broker, session, session};
     return 0;
@@ -157,7 +157,7 @@ static int swapz_ticket_broker_put(struct swapz_ticket_cap *cap)
     assert(!observed->ordered_owner && !observed->queue_lock && owner_closed);
     assert(cap->broker == &broker && broker.caps == 1U);
     broker.caps = 0;
-    ++puts;
+    ++capability_puts;
     *cap = (struct swapz_ticket_cap){0};
     return 0;
 }
@@ -174,7 +174,12 @@ static int swapz_mm_broker_owner_finish_close(u64 owner_session, u64 epoch)
 
 TEST = r'''
 static unsigned int checks;
-#define CHECK(x) do { ++checks; if (!(x)) { fprintf(stderr, "R094_ASSERT line=%d\n", __LINE__); return 77; } } while (0)
+/* Negative variants intentionally terminate at the first violated semantic
+ * assertion, possibly with an outstanding allocation. Baseline success
+ * returns normally, retaining leak-sanitizer checks. Never credit a
+ * sanitizer failure or a crash as a semantic rejection.
+ */
+#define CHECK(x) do { ++checks; if (!(x)) { fprintf(stderr, "R094_ASSERT line=%d\n", __LINE__); fflush(stderr); _Exit(77); } } while (0)
 static void late_refusal(void)
 {
     if (observed->original_route.registration_epoch) {
@@ -247,12 +252,12 @@ int main(void)
     before_lock = late_refusal;
     CHECK(swapz_round094_setup(&ctx) == -ESTALE);
     CHECK(!ctx.original_route.registration_epoch && !ctx.original_cap.broker);
-    CHECK(!allocations && !owner_live && gets == puts && !ctx.authority.attached);
+    CHECK(!allocations && !owner_live && capability_gets == capability_puts && !ctx.authority.attached);
     ctx.accepting = true;
     before_lock = replacement_route;
     CHECK(swapz_round094_setup(&ctx) == -ESTALE);
     CHECK(ctx.original_route.registration_epoch && ctx.original_route.target_epoch == 999U);
-    CHECK(!ctx.original_cap.broker && !allocations && !owner_live && gets == puts);
+    CHECK(!ctx.original_cap.broker && !allocations && !owner_live && capability_gets == capability_puts);
     ctx.queue_lock = true;
     swapz_round089_revoke_route_locked(&ctx);
     ctx.queue_lock = false;
@@ -320,7 +325,7 @@ int main(void)
     mutex_lock(&ctx.ordered_owner);
     CHECK(swapz_round094_close_storage(&ctx) == 0);
     mutex_unlock(&ctx.ordered_owner);
-    CHECK(!allocations && !owner_live && gets == puts && begins == gets && finishes >= begins);
+    CHECK(!allocations && !owner_live && capability_gets == capability_puts && begins == capability_gets && finishes >= begins);
     printf("ROUND094_TARGET_PASS checks=%u AUTH=0 host_boundary_only\n", checks);
     return 0;
 }
@@ -365,6 +370,13 @@ def main():
             "drain_workqueue(ctx->workqueue);") < drain.index(
             "flush_work(&ctx->original_release_work);") < drain.index(
             "flush_work(&ctx->original_teardown_work);")
+        destructor = extract(source, "static void swapz_dtr(struct dm_target *ti)\n{",
+                             "static u64 swapz_authority_metadata_ram_bytes(")
+        assert destructor.count("ti->private = NULL;") == 1
+        assert destructor.index("swapz_drain(ti);") < destructor.index("swapz_free(ctx);")
+        assert destructor.index("goto detach;") < destructor.index("swapz_free(ctx);")
+        assert destructor.index("swapz_free(ctx);") < destructor.index("detach:") < destructor.index(
+            "ti->private = NULL;")
         assert "ctx->original_trial = is_nullb && !ctx->physical_backing;" in source
         assert "swapz_round094_setup(ctx)" in source and "swapz_round094_teardown_work" in source
         def mutate(code, old, new):
