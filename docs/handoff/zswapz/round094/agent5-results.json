@@ -1,0 +1,103 @@
+{
+  "round": "094",
+  "agent": 5,
+  "kind": "host-codec-config-correction-and-frozen-real-decoder-storage-join",
+  "conclusion": "QUEUED",
+  "source_published": true,
+  "tested_commit": "7ece3ea3709ccce932467f27a1e9cdc86fde0d30",
+  "parent": "3aa7757db12e2f910ec73c3dc62a806711a46f9e",
+  "engineering_freeze": "efd77858cd20650213559ceb9cb4d0362db32ea5",
+  "workflow_url": "https://github.com/k1moradi/swapz/actions/runs/45757096760",
+  "jobs": [
+    {
+      "run_id": 45757096760,
+      "job_id": 139698173485,
+      "provider": "MODELED",
+      "status": "queued",
+      "conclusion": null,
+      "actual_checks": null,
+      "planned_mutants_per_compiler": 13,
+      "executed_mutants": 0
+    },
+    {
+      "run_id": 45757096760,
+      "job_id": 139698173850,
+      "provider": "ACTUAL_FROZEN_BOUNDED_DECODER",
+      "status": "queued",
+      "conclusion": null,
+      "actual_checks": null,
+      "actual_record_gets": null,
+      "actual_transient_gets": null,
+      "actual_transient_puts": null,
+      "planned_codecs": [
+        1,
+        2
+      ],
+      "planned_reads_per_codec": 5
+    }
+  ],
+  "artifacts": [],
+  "first_error": null,
+  "r093": {
+    "tested_commit": "e849f333b4f89d5ffd84dc14c061dfc93566e8e3",
+    "run_id": 45666497774,
+    "job_id": 139389937913,
+    "conclusion": "failure",
+    "first_error": "zswap-import-codec.h:32:10 fatal error: crypto/sha2.h: No such file or directory",
+    "error_provenance": "Agent1 terminal checkpoint (artifact inspected by Agent1); current job log independently confirms gcc/baseline/compile exit1",
+    "artifact_id": 15047402390,
+    "artifact_sha256": "7cbcf0268f759ff2fc16492b354d8722aefe05555209ef3f8c2f1b487262e667",
+    "checks": 0,
+    "mutants": 0
+  },
+  "source_blobs": {
+    "tests/tools/round092-shared-storage-value-verify.py": "db1b01812451f45a766d74872d40983a0141052a",
+    "tests/runtime/native/fixtures/round094-shared-storage-real-decoder.c": "b5c1a61e9f1f40b321673c7fe3befbe35631ee50",
+    "tests/tools/round094-shared-storage-real-decoder-verify.py": "eb9cfd4d72a795548b4100a0f836dc22ee2e87fe",
+    ".github/workflows/phase-a-round092-shared-storage-value-host-noauth.yml": "5e6fda02dbfea2e0c41b90d7aba503b9119fba45"
+  },
+  "frozen_inputs": {
+    "storage_c": "8f532824e9c63a6498d71fcb1ce4c35b18130f1e",
+    "storage_h": "9b6be5452ff9a7ecb20fb8e661b593c290cc8b7e",
+    "decoder_handles_c": "c01c056fdd7f9f8aa68c7083a9e4e3ca2cdc8d6d",
+    "decoder_handles_h": "0f103783aee10d18df5c502fdf553f7ac6a0035d",
+    "original_linux": "c339f4010dea8b0d754f84ace70cd1b089878ef8",
+    "lz4_compressor_postimage": "63eb4be2e23caf770649af18f6a7b2b82d79a5e7",
+    "lz4_decoder_postimage": "8ca9e57ea0d03918e85e4aabcf472fe906b6bc7f"
+  },
+  "standards": {
+    "parent_blob": "f4951b7cc7bb63f71b7b3f3b8f3d05349803b46c",
+    "parent_bytes": 1834574,
+    "source_blob": "8afa6a105b48e33f43590c891a48ce96d6f53e29",
+    "source_bytes": 1836075,
+    "append_bytes": 1501,
+    "full_prefix_verified": true
+  },
+  "preflight": {
+    "remote_compare": "5 paths, 2 added, 3 modified",
+    "local_git": "DNS unavailable",
+    "local_compile": "NOT_RUN",
+    "git_diff_check": "NOT_RUN",
+    "policy": "NOT_RUN",
+    "remote_static_pins": 22,
+    "publication_error": "GitHub GraphQL DFD3:1478ED:35E3227:4F21538:6B07B8C9; reconciled fresh head and successful nonforce update"
+  },
+  "limitations": {
+    "lower": "MODELED_RAM_ONLY",
+    "native": "NOT_RUN",
+    "production_scale": "UNQUALIFIED",
+    "actual_measured_layout": null,
+    "original_stream_provenance": "host generated original Linux codecs; not MM-authenticated",
+    "same_round_peer_dependency": false,
+    "accepted_corpus_repeated": false
+  },
+  "source_mapped_authenticated": 0,
+  "phase_a": "BLOCKED",
+  "direct_compressed_handoff": "DISABLED",
+  "forced_raw_bypass": "DISABLED",
+  "import_active": 0,
+  "physical_io": false,
+  "vm": false,
+  "module_load": false,
+  "manual_dispatch": false
+}
