@@ -1,0 +1,92 @@
+name: R097 single observation owner host NO_AUTH
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'src/kernel/native-observation-owner.c'
+      - 'src/kernel/native-observation-owner.h'
+      - 'tests/tools/native-observation-current-export.py'
+      - 'tests/runtime/native/fixtures/native-observation-owner-host-model.h'
+      - 'tests/runtime/native/fixtures/native-observation-owner-host.c'
+      - 'tests/runtime/native/native-observation-owner-test.py'
+      - '.github/workflows/phase-a-round097-observation-owner-host-noauth.yml'
+permissions:
+  contents: read
+jobs:
+  owner-host:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 6
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Exact source, selected recorder and full historical standards prefix
+        env:
+          SWAPZ_PUSH_BEFORE_SHA: ${{ github.event.before }}
+        run: |
+          set -Eeuo pipefail
+          test "$GITHUB_REF" = refs/heads/main
+          test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
+          test "$(git branch --show-current)" = main
+          test "$(git rev-parse HEAD^)" = "$SWAPZ_PUSH_BEFORE_SHA"
+          test "$(git rev-list --parents -n1 HEAD | wc -w)" -eq 2
+          test -z "$(git status --porcelain --untracked-files=all)"
+          git diff --check HEAD^ HEAD
+          python3 -B - <<'PY'
+          from pathlib import Path
+          import hashlib, subprocess
+          freeze = "f7cb6969db189c03d592a89cae43e5464946c716"
+          previous = subprocess.check_output(["git", "show", "HEAD^:docs/testing_standards.md"])
+          frozen = subprocess.check_output(["git", "show", freeze + ":docs/testing_standards.md"])
+          current = Path("docs/testing_standards.md").read_bytes()
+          assert len(frozen) == 1868056 and previous.startswith(frozen)
+          assert current.startswith(previous) and len(current) > len(previous)
+          pins = {
+              "src/kernel/native-observation-adapter.c": "f94371ff06ba8296e292ccec9e28dd230ded5bbd",
+              "src/kernel/native-observation-adapter.h": "27f1140f4dcc510662fbb1f4519f7be4236e1b10",
+              "tests/tools/native-observation-export.py": "0c97be31dce2d7a049335189e114b2c73cd0074c",
+              "tests/runtime/native/fixtures/native-observation-adapter-host-model.h": "3dac25d2edb2d7475af3231c98af753f09e4063f",
+          }
+          for path, blob in pins.items():
+              assert subprocess.check_output(["git", "hash-object", path], text=True).strip() == blob, path
+          print("complete standards prefix", len(previous), len(current), hashlib.sha256(previous).hexdigest())
+          print("selected frozen recorder/parser/shim pins", len(pins))
+          PY
+      - name: Actual owner and selected adapter using explicit host substitutes
+        run: |
+          set -Eeuo pipefail
+          umask 077
+          out="$RUNNER_TEMP/round097-observation-owner"
+          mkdir -p "$out/include/linux" "$out/include/crypto"
+          for header in types atomic rcupdate build_bug limits string export kernel mutex slab vmalloc; do
+            printf '#include "native-observation-owner-host-model.h"\n' > "$out/include/linux/$header.h"
+          done
+          printf '#include "native-observation-owner-host-model.h"\n' > "$out/include/crypto/sha2.h"
+          for compiler in gcc clang; do
+            "$compiler" --version | head -1
+            "$compiler" -std=c2x -D_POSIX_C_SOURCE=200809L -DSWAPZ_NATIVE_OBSERVATION_ADAPTER \
+              -DSWAPZ_TRIAL_OBSERVATION "-DSWAPZ_OBSERVATION_BUILD_SOURCE=\"$GITHUB_SHA\"" \
+              -O2 -g -Wall -Wextra -Wconversion -Wsign-conversion -Wshadow -Wpedantic -Werror \
+              -fsanitize=address,undefined -fno-omit-frame-pointer -fno-pie -no-pie -pthread \
+              -I"$out/include" -Isrc/kernel -Itests/runtime/native/fixtures \
+              src/kernel/native-observation-adapter.c src/kernel/native-observation-owner.c \
+              tests/runtime/native/fixtures/native-observation-owner-host.c \
+              -lcrypto -o "$out/$compiler-owner" 2>&1 | tee "$out/$compiler-compile.log"
+            for mode in clean join overflow invalid; do
+              ASAN_OPTIONS=detect_leaks=1:halt_on_error=1 UBSAN_OPTIONS=halt_on_error=1 \
+                timeout 20s "$out/$compiler-owner" "$mode" "$out/$compiler-$mode.wire" \
+                2>&1 | tee "$out/$compiler-$mode.log"
+            done
+            rm "$out/$compiler-owner"
+          done
+          python3 -B tests/runtime/native/native-observation-owner-test.py "$GITHUB_SHA" "$out" \
+            2>&1 | tee "$out/current-validator.log"
+      - name: Retain bounded host diagnostics
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: round097-observation-owner-host
+          path: ${{ runner.temp }}/round097-observation-owner/*.log
+          if-no-files-found: warn
+          retention-days: 14
