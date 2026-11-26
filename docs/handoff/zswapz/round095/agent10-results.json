@@ -1,0 +1,170 @@
+{
+  "round": "095",
+  "agent": 10,
+  "kind": "frozen-integrated-native-kernel-module-compile-link-only",
+  "tested_commit": "771340dc5f568bf853c433636a36024f5ea75794",
+  "source_parent": "20122e158beef6266bd01bb545951a2a4f77d9d5",
+  "engineering_freeze": "ff972661a75ca7f8c3c0458c3feb8b603c185eb8",
+  "linux_pin": "c339f4010dea8b0d754f84ace70cd1b089878ef8",
+  "prior_four_patch_blobs": [
+    "059d1bf29cf4990e22a2f608d5d552abeec3a8d1",
+    "337f7ff29e72d955251de0c54a9349f20c2586ec",
+    "94bb74549c54a614406b71f28a9e8e8c22527d6a",
+    "5c8587c3d8205fc1ab346011c092601f2113a45a"
+  ],
+  "r092_overlay_blob": "62db468c14f23b59e7adaae65a11dcb9969f02b3",
+  "r094_overlay_blob": "e33bb8451210f9e1a97eb6d9bc0423f6b13a2edd",
+  "r094_owner_inc": "0eda8753b91d3209c55f65eb90014fd9b8c6ad7c",
+  "r094_expected_broker_c": "ba5e891ef7f80bf0b3021ee6c676529cb72f1972",
+  "r094_expected_broker_h": "c7f4ff59c11ee3475e7577dcc62f7c8db5a578ea",
+  "frozen_dm_blob": "2400ad0ccaf72c2586c4fd1488edb9a00246e213",
+  "frozen_value_c": "8f532824e9c63a6498d71fcb1ce4c35b18130f1e",
+  "frozen_value_h": "9b6be5452ff9a7ecb20fb8e661b593c290cc8b7e",
+  "frozen_shared_c": "a5432d7330134c08a44356f49ef47cf0d02080ee",
+  "frozen_shared_h": "4cffad5778872b063eda7d8e5d781aa508f547cd",
+  "verifier_blob": "2395bb2a3f827f9cf6333c06e56fb63f971eaffd",
+  "workflow_blob": "45302369c7e1ff0d06bd042fa4189b10aed3899d",
+  "standards_parent_blob": "18b2101a762092abb0febd94ffec25e534040b27",
+  "standards_blob": "7480c39dc8983e83c3f41d21f145e69cdd05d734",
+  "standards_complete_prefix_verified": true,
+  "workflow_url": "https://github.com/k1moradi/swapz/actions/runs/45770431310",
+  "run_id": 45770431310,
+  "job_id": 139741479810,
+  "attempt": 1,
+  "conclusion": "IN_PROGRESS",
+  "first_error": null,
+  "first_error_status": "NOT_YET_KNOWN",
+  "canonical_preflight": "PASS",
+  "runner_packages": "PASS",
+  "elf_prerequisite": "PASS",
+  "openssl_prerequisite": "PASS",
+  "prerequisites_before_linux_checkout": true,
+  "linux_checkout": "PASS",
+  "raw_stage": "PENDING",
+  "directed_objects": "PENDING",
+  "full_kernel_link": "PENDING",
+  "modpost": "PENDING",
+  "final_ko": "PENDING",
+  "artifact": null,
+  "steps": [
+    {
+      "name": "Set up job",
+      "status": "completed",
+      "conclusion": "success",
+      "number": 1
+    },
+    {
+      "name": "Run actions/checkout@v4",
+      "status": "completed",
+      "conclusion": "success",
+      "number": 2
+    },
+    {
+      "name": "Canonical exact source and parent before scratch checkout",
+      "status": "completed",
+      "conclusion": "success",
+      "number": 3
+    },
+    {
+      "name": "Provision compiler, ELF and kernel build prerequisites (runner packages only)",
+      "status": "completed",
+      "conclusion": "success",
+      "number": 4
+    },
+    {
+      "name": "Verify actual ELF and OpenSSL compile/link prerequisites before Linux checkout",
+      "status": "completed",
+      "conclusion": "success",
+      "number": 5
+    },
+    {
+      "name": "Run actions/checkout@v4",
+      "status": "completed",
+      "conclusion": "success",
+      "number": 6
+    },
+    {
+      "name": "Run actions/checkout@v4",
+      "status": "completed",
+      "conclusion": "success",
+      "number": 7
+    },
+    {
+      "name": "Raw immutable stage, directed objects, full x86 kernel and actual product module link",
+      "status": "in_progress",
+      "conclusion": null,
+      "number": 8
+    },
+    {
+      "name": "Preserve exact compile logs and manifest even on failure",
+      "status": "pending",
+      "conclusion": null,
+      "number": 9
+    },
+    {
+      "name": "Post Run actions/checkout@v4",
+      "status": "pending",
+      "conclusion": null,
+      "number": 16
+    },
+    {
+      "name": "Post Run actions/checkout@v4",
+      "status": "pending",
+      "conclusion": null,
+      "number": 17
+    },
+    {
+      "name": "Post Run actions/checkout@v4",
+      "status": "pending",
+      "conclusion": null,
+      "number": 18
+    }
+  ],
+  "old_scratch_exports": false,
+  "expected_gpl_boundary_exports": 15,
+  "expected_forbidden_internal_exports": 5,
+  "expected_owner_imports": 3,
+  "manual_dispatches": 0,
+  "authorized_new_runs": 1,
+  "separate_a7_a11_retries": 0,
+  "no_same_round_peer_inputs": true,
+  "prior_r094": {
+    "conclusion": "PASS_NATIVE_DIRECTED_COMPOSITE_ONLY",
+    "source": "1f8f7023d6fda5617ce021d65e44372cfb391c91",
+    "run_id": 45756538303,
+    "job_id": 139696357119,
+    "artifact_id": 15087284949,
+    "artifact_sha256": "814e42ef8b2942cecc8e8d863bab82c5a4737513ac1ec5e79711a873d4d74f0c",
+    "directed_objects": 12,
+    "composite_bytes": 414144,
+    "composite_sha256": "ba3a7f9f402e1467faf935abb156b7ea19e9f8a07bb5972103c524d2e71877bb",
+    "replayed": false
+  },
+  "prior_native_prerequisite_failures": [
+    {
+      "agent": 7,
+      "job": 139718948300,
+      "artifact": 15091117691,
+      "first_error": "gelf.h: No such file or directory (Agent1 verified checkpoint)",
+      "replayed": false
+    },
+    {
+      "agent": 11,
+      "job": 139711962592,
+      "artifact": 15090136883,
+      "first_error": "objtool/elf.h:10:10: fatal error: gelf.h: No such file or directory",
+      "replayed": false
+    }
+  ],
+  "runtime": "NOT_RUN",
+  "kunit": "NOT_RUN",
+  "vm_build": false,
+  "vm_boot": false,
+  "module_loaded": false,
+  "actual_physical_io": false,
+  "source_mapped_authenticated": 0,
+  "phase_a": "BLOCKED",
+  "direct_handoff": false,
+  "forced_raw_bypass": false,
+  "import_active": false
+}
