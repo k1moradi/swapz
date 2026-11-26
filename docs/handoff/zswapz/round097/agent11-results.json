@@ -2,7 +2,7 @@
   "round": "097",
   "agent": 11,
   "kind": "actual-staged-mm-producer-source-linked-host-only",
-  "conclusion": "QUEUED",
+  "conclusion": "PASS_HOST_SUBSTITUTES_ONLY_EVENT_CONFORMANCE_DEFECT",
   "tested_commit": "23979a8e43ff0796018d0bb63675a63d1c52be8e",
   "source_parent": "f15e3682c87444dde69c1ee75b6e4f3ad146493f",
   "engineering_freeze": "f7cb6969db189c03d592a89cae43e5464946c716",
@@ -15,16 +15,21 @@
     {
       "id": 140037517664,
       "name": "mm-producer-host",
-      "status": "queued",
-      "conclusion": null,
+      "status": "completed",
+      "conclusion": "success",
       "url": "https://github.com/k1moradi/swapz/actions/runs/45856892403/job/140037517664"
     }
   ],
-  "artifact": null,
-  "checks_per_compiler": null,
-  "retries_per_compiler": null,
-  "events_per_compiler": null,
-  "mutants_per_compiler": null,
+  "artifact": {
+    "id": 15137147391,
+    "bytes": 2651,
+    "sha256": "fbb69686a252006f67bc249d2bfab67cbbdf3b228d0b7bb0af4281c8faf3cbc4",
+    "archive_independently_verified": false
+  },
+  "checks_per_compiler": 50,
+  "retries_per_compiler": 3,
+  "events_per_compiler": 9,
+  "mutants_per_compiler": 2,
   "configured_mutants_per_compiler": 2,
   "first_error": null,
   "native": "NOT_RUN",
@@ -45,7 +50,8 @@
     "blob": "dff61588713f8ceeecb5e406cab8788e12990147",
     "bytes": 1874135,
     "complete_prefix_readback": true,
-    "ci_prefix_check": "QUEUED"
+    "ci_prefix_check": "PASS",
+    "parent_sha256": "cae62cbc9a308118f060703ca44ac6468def6e016da3b73985c8b20bc5638c84"
   },
   "pins": {
     "overlay": "c35b35c18cc11f9b86c0b65856dbc0cd2a0bd2c8",
@@ -68,21 +74,10 @@
     "Host RCU/module/geometry/digest/observation wrappers/workqueue substitutes; no native retry scheduling or target detach proof",
     "Original callback status anchor precedes normal redirty/writeback; actual native execution not observed",
     "No same-round recorder or DM consumption; additional guarded correlation accessor requires future integration",
-    "Focused CI queued, no compiled result or artifact yet"
+    "Focused CI queued, no compiled result or artifact yet",
+    "Actual adapter rejects copied CAPTURE fields in subsequent events; permissive R097 wrapper masked defect. R098 correction required."
   ],
-  "agent1_terminal_reconciliation": {
-    "source": "23979a8e43ff0796018d0bb63675a63d1c52be8e",
-    "run": 45856892403,
-    "job": 140037517664,
-    "conclusion": "QUEUED_NOT_ACCEPTED",
-    "artifact": null,
-    "checks_each": null,
-    "mutants_each": null,
-    "first_error": null,
-    "exact_census": {
-      "success": 3,
-      "queued": 7
-    },
-    "scope": "Source staged only; original MM scope static const zero and claim hard-off, no scope publication. Actual producer event construction reuses CAPTURE fields in PREPARATION/BIND/UPPER_ENDIO/CAPTURE_DROP/CARRIER_RELEASE; selected adapter allowlist rejects those nonzero unused fields. This is a source-review integration defect, not observed CI failure. R098 A11 must first reconcile existing run without rerun and report actual results, then fix event construction and scope/correlation contract."
+  "exact_census": {
+    "success": 10
   }
 }

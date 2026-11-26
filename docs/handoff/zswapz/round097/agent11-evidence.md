@@ -35,22 +35,5 @@ Consumer may relinquish exact old session/epoch only after successful begin_clos
 
 Actual-parent standards blob 411cebf374af8a8b8f730016f9bab57de5629daf (1,872,507 bytes) reconstructed as exact Git blob, appended 1,628 bytes, exact complete prefix readback, new dff61588713f8ceeecb5e406cab8788e12990147 (1,874,135 bytes). CI independent push-before verification pending. No historical truncation. No branches/PR/force, VM/boot/load, privileges, physical mutation or tracing activation. AUTH=0, Phase A BLOCKED, compressed handoff/forced RAW/import OFF. No independent native build or disconnected full build. Next: reconcile focused terminal CI; freeze connected producer/consumer/recorder before native full linkage and separately owner-authorized physical preflight.
 
-
-## Agent1 independent reconciliation (A11 still pending)
-```json
-{
-  "source": "23979a8e43ff0796018d0bb63675a63d1c52be8e",
-  "run": 45856892403,
-  "job": 140037517664,
-  "conclusion": "QUEUED_NOT_ACCEPTED",
-  "artifact": null,
-  "checks_each": null,
-  "mutants_each": null,
-  "first_error": null,
-  "exact_census": {
-    "success": 3,
-    "queued": 7
-  },
-  "scope": "Source staged only; original MM scope static const zero and claim hard-off, no scope publication. Actual producer event construction reuses CAPTURE fields in PREPARATION/BIND/UPPER_ENDIO/CAPTURE_DROP/CARRIER_RELEASE; selected adapter allowlist rejects those nonzero unused fields. This is a source-review integration defect, not observed CI failure. R098 A11 must first reconcile existing run without rerun and report actual results, then fix event construction and scope/correlation contract."
-}
-```
+## Terminal reconciliation (R098, no rerun)
+Existing exact run 45856892403/job 140037517664 completed success; all nine steps succeeded. Raw logs GCC and Clang each checks=50 retries=3 events=9; configured two semantic mutants each passed verifier. Artifact 15137147391, 2651 bytes, SHA256 fbb69686a252006f67bc249d2bfab67cbbdf3b228d0b7bb0af4281c8faf3cbc4 (metadata, archive not independently extracted). Prefix CI verified 1872507 -> 1874135, parent SHA256 cae62cbc9a308118f060703ca44ac6468def6e016da3b73985c8b20bc5638c84. Exact source census {"success":10}. This supersedes queued status only. R097 host pass is NOT actual event conformance: copied CAPTURE fields violate selected adapter allowlist in preparation/bind/upper/drop/release, permissive wrapper masks defect. R098 owns correction. No native or physical qualification, AUTH0.
