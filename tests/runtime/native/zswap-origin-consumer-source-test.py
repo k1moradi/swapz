@@ -96,17 +96,31 @@ def typed_commit_region(source: str) -> str:
 
 def verify_typed_foreground_commit(source: str) -> None:
     region = typed_commit_region(source)
+    # R098 adds an exclusive scoped transaction branch; both real branches
+    # must refuse before the one success accounting block.
     exactly_one(region,
+        r"#if defined\(SWAPZ_ROUND098_SCOPED_TARGET_TEST\)\s*"
+        r"if \(!swapz_scope_transaction\(ctx, &spec, &input, &claim_context, &error\)\)"
+        r"\s*goto decline;\s*#else\s*"
         r"if \(!swapz_round091_reserve_claim_commit\(ctx->original_storage, &spec,"
         r"\s*&input, swapz_round091_claim_reserved, &claim_context, &error\)\)"
-        r"\s*goto decline;\s*if \(!error && entry->original_claimed\) \{"
+        r"\s*goto decline;\s*#endif\s*if \(!error && entry->original_claimed\) \{"
         r"\s*entry->published_ns = ktime_get_ns\(\);"
         r"\s*ctx->logical_write_bytes \+= SWAPZ_BLOCK_BYTES;"
         r"\s*ctx->compressed_pages\+\+;"
         r"\s*swapz_count_verified_zswap_writeback_commit\(ctx, entry->bio\);\s*\}",
         "typed claimed publication success before accounting")
+    # A failed cancellation or impossible unclaimed success is quarantined.
+    exactly_one(region,
+        r"\} else if \(!entry->original_claimed\) \{\s*/\*[^*]*\*+(?:[^/*][^*]*\*+)*/"
+        r"\s*swapz_fail\(ctx, error \? error : -EUCLEAN\);"
+        r"\s*if \(!error\)\s*error = -EUCLEAN;\s*\}\s*complete:",
+        "typed unclaimed terminal invariant failure is quarantined")
     exactly_one(region, r"complete:\s*swapz_complete\(entry->bio, error\);\s*return true;"
-                 r"\s*decline:\s*swapz_round091_release_candidate\(ctx, entry\);\s*return false;",
+                 r"\s*decline:\s*#if defined\(SWAPZ_SCOPED_TARGET_OBSERVATION\)\s*"
+                 r"/\*[^*]*\*+(?:[^/*][^*]*\*+)*/\s*"
+                 r"if \(entry->observation_operation\)\s*swapz_scope_observe_invalid\(\);"
+                 r"\s*#endif\s*swapz_round091_release_candidate\(ctx, entry\);\s*return false;",
                  "typed terminal owner versus ordinary fallback")
     if region.count("swapz_complete(") != 1 or region.count(
             "swapz_count_verified_zswap_writeback_commit(") != 1:
@@ -342,6 +356,26 @@ def run_typed_negative_mutations(source: str) -> int:
     return reject_mutations(source, controls)
 
 
+def run_scoped_typed_negative_mutations(source: str) -> int:
+    """Additional R098 controls; do not replace the six original typed cases."""
+    controls = [
+        ("scoped transaction refusal bypassed", lambda: replace_exactly_once(
+            source,
+            "if (!swapz_scope_transaction(ctx, &spec, &input, &claim_context, &error))\n\t\tgoto decline;",
+            "if (!swapz_scope_transaction(ctx, &spec, &input, &claim_context, &error))\n\t\tgoto complete;")),
+        ("scoped transaction claim bypassed", lambda: replace_exactly_once(
+            source, "if (!swapz_scope_transaction(ctx, &spec, &input, &claim_context, &error))",
+            "if (false)")),
+        ("unclaimed terminal quarantine skipped", lambda: replace_exactly_once(
+            source, "swapz_fail(ctx, error ? error : -EUCLEAN);\n\t\tif (!error)",
+            "if (!error)")),
+        ("incomplete scoped fallback accepted", lambda: replace_exactly_once(
+            source, "if (entry->observation_operation)\n\t\tswapz_scope_observe_invalid();\n#endif\n\tswapz_round091_release_candidate(ctx, entry);",
+            "swapz_round091_release_candidate(ctx, entry);\n#endif")),
+    ]
+    return reject_mutations(source, controls)
+
+
 def reject_mutations(source: str, controls) -> int:
     detected = 0
     for name, mutate in controls:
@@ -468,8 +502,9 @@ def main() -> int:
     verify_scoped_original_origin_mutations(source)
     legacy_detected = run_negative_mutations(source)
     typed_detected = run_typed_negative_mutations(source)
-    detected = legacy_detected + typed_detected
-    print(f"PASS: legacy={legacy_detected} typed={typed_detected} mutation groups")
+    scoped_detected = run_scoped_typed_negative_mutations(source)
+    detected = legacy_detected + typed_detected + scoped_detected
+    print(f"PASS: legacy={legacy_detected} typed={typed_detected} scoped_typed={scoped_detected} mutation groups")
     compiled = compile_actual_origin_commit_helper(source)
     print(f"PASS: real production-C Phase A source contract; {detected} negative mutations rejected")
     print(f"PASS: {compiled} real C compiler(s) exercised extracted guarded commit helper")

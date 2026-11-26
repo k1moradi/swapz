@@ -16167,7 +16167,9 @@ static int swapz_map(struct dm_target *ti, struct bio *bio)
 	sector_t sector = bio->bi_iter.bi_sector;
 	sector_t count = bio_sectors(bio);
 	int submitter_lane = -1;
+#if defined(SWAPZ_SCOPED_TARGET_OBSERVATION)
 	int map_refusal = DM_MAPIO_SUBMITTED;
+#endif
 	bool ordered_owned = false, submitter_dispatch = false;
 #if defined(SWAPZ_ROUND090_SELECTED_DM_COMPOSITION_TEST)
 	struct swapz_ticket_ref original_candidate = {};
@@ -16184,8 +16186,12 @@ static int swapz_map(struct dm_target *ti, struct bio *bio)
 #endif
 
 	if (!READ_ONCE(ctx->accepting)) {
+#if defined(SWAPZ_SCOPED_TARGET_OBSERVATION)
 		map_refusal = READ_ONCE(ctx->failed) ? DM_MAPIO_KILL : DM_MAPIO_REQUEUE;
 		goto map_entry;
+#else
+		return READ_ONCE(ctx->failed) ? DM_MAPIO_KILL : DM_MAPIO_REQUEUE;
+#endif
 	}
 	if (bio_op(bio) == REQ_OP_READ || bio_op(bio) == REQ_OP_WRITE) {
 		if ((bio_op(bio) == REQ_OP_WRITE && !count &&
@@ -16193,23 +16199,35 @@ static int swapz_map(struct dm_target *ti, struct bio *bio)
 			/* empty flush represented as PREFLUSH|WRITE */
 		} else if (sector % SWAPZ_SECTORS || count != SWAPZ_SECTORS ||
 			   sector / SWAPZ_SECTORS >= ctx->logical_pages) {
+#if defined(SWAPZ_SCOPED_TARGET_OBSERVATION)
 			map_refusal = DM_MAPIO_KILL;
 			goto map_entry;
+#else
+			return DM_MAPIO_KILL;
+#endif
 		}
 	} else if (bio_op(bio) == REQ_OP_DISCARD) {
 		if (sector % SWAPZ_SECTORS || count % SWAPZ_SECTORS ||
 		    sector / SWAPZ_SECTORS >= ctx->logical_pages ||
 		    count / SWAPZ_SECTORS >
 				ctx->logical_pages - sector / SWAPZ_SECTORS) {
+#if defined(SWAPZ_SCOPED_TARGET_OBSERVATION)
 			map_refusal = DM_MAPIO_KILL;
 			goto map_entry;
+#else
+			return DM_MAPIO_KILL;
+#endif
 		}
 	} else {
 		/* A REQ_OP_FLUSH upper BIO is invalid on Linux: blk-core
 		 * rejects it before dm's ->map. The real empty-flush
 		 * protocol is WRITE|PREFLUSH with zero sectors. */
+#if defined(SWAPZ_SCOPED_TARGET_OBSERVATION)
 		map_refusal = DM_MAPIO_KILL;
 		goto map_entry;
+#else
+		return DM_MAPIO_KILL;
+#endif
 	}
 #if defined(SWAPZ_ROUND043_DM_REAL_MAP_INGRESS_OBSERVATION_TEST) && \
     defined(SWAPZ_ROUND041_DM_TARGET_INTERVAL_MAP_NONAUTHORITY_TEST) && \
@@ -16251,11 +16269,9 @@ static int swapz_map(struct dm_target *ti, struct bio *bio)
 /* ROUND050_DM_ONE_SHOT_MAP_CALLSITE_END */
 #endif /* SWAPZ_ROUND050_DM_ONE_SHOT_NEGATIVE_TEST */
 
+#if defined(SWAPZ_SCOPED_TARGET_OBSERVATION)
+/* Ordinary rejected BIOs never require a descriptor lookup. */
 map_entry:
-#if !defined(SWAPZ_SCOPED_TARGET_OBSERVATION)
-	/* Ordinary rejected BIOs never require a descriptor lookup. */
-	if (map_refusal != DM_MAPIO_SUBMITTED)
-		return map_refusal;
 #endif
 	entry = dm_per_bio_data(bio, sizeof(*entry));
 #if defined(SWAPZ_SCOPED_TARGET_OBSERVATION)
