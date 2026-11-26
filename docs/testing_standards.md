@@ -20993,3 +20993,8 @@ schema and offline fail-closed incomplete lineage. Host substitutes for
 kernel/file/geometry/RCU and explicit fixture consumer records are not
 native observations. R097 terminal result reconciled without rerun; no prior
 accepted test replay. AUTH0 Phase A BLOCKED, direct handoff/forced RAW/import OFF.
+
+
+### Round099 Agent11 — frozen producer host retry integration (NO_AUTH)
+
+Preserve the R098 failed job 140087429484 and artifact 15143272836: separate compilation left the actual static owner_retry_run unused. The new host-only fixture includes the exact staged broker once, schedules (never runs inline), arms close while the retained MM scope cap is the last debt, revokes scope and executes the actual worker after final put. Require one queued/executed worker, drained allocations and stale identity rejection; no dummy reference, warning suppression, synthetic close success or accepted R097 corpus replay. Extract and execute the frozen core origin helper as well as its original-endio helper; reject carrier borrow, offset, stale route and duplicate mint; test already retained original completion after scope revoke. Use exact frozen adapter and owner, zero-loss actual wire and frozen offline validator; bound without consumer lineage must remain BLOCKED. Fixture discard consumer events and Linux BIO/RCU/route/scheduling are host substitutes, not native or physical proof. GCC/Clang C23-family strict warnings and ASan/UBSan; preserve actual first failure and source/parent/pins. No product/overlay change, no same-round dependency, no native build, VM, load or physical operation. AUTH=0, Phase A BLOCKED, handoff/forced RAW/import OFF.
