@@ -301,5 +301,126 @@
   "value_shared_provider_scope": "native linked definitions only, not used by frozen DM target",
   "independent_elf_symbol_import_verification": "PASS",
   "duplicate_broker": false,
-  "terminal_scope": "Frozen R094 actual compile/link only; no R095 peer source, runtime claim, physical or authentication proof"
+  "terminal_scope": "Frozen R094 actual compile/link only; no R095 peer source, runtime claim, physical or authentication proof",
+  "exact_source_workflow_census": {
+    "head_sha": "771340dc5f568bf853c433636a36024f5ea75794",
+    "total": 10,
+    "success": 10,
+    "failure": 0,
+    "cancelled": 0,
+    "in_progress": 0,
+    "queued": 0,
+    "runs": [
+      {
+        "run_id": 45770431257,
+        "name": "Native kernel-C project-goal regressions",
+        "status": "completed",
+        "conclusion": "success",
+        "head_sha": "771340dc5f568bf853c433636a36024f5ea75794",
+        "attempt": 1,
+        "url": "https://github.com/k1moradi/swapz/actions/runs/45770431257"
+      },
+      {
+        "run_id": 45770431210,
+        "name": "Round063 opt-in original STORED clone ref to accepted current production DM NO_AUTH (automatic non-VM source)",
+        "status": "completed",
+        "conclusion": "success",
+        "head_sha": "771340dc5f568bf853c433636a36024f5ea75794",
+        "attempt": 1,
+        "url": "https://github.com/k1moradi/swapz/actions/runs/45770431210"
+      },
+      {
+        "run_id": 45770431239,
+        "name": "Round064 staged original live slot route to current DM candidate NO_AUTH (automatic non-VM source)",
+        "status": "completed",
+        "conclusion": "success",
+        "head_sha": "771340dc5f568bf853c433636a36024f5ea75794",
+        "attempt": 1,
+        "url": "https://github.com/k1moradi/swapz/actions/runs/45770431239"
+      },
+      {
+        "run_id": 45770431243,
+        "name": "Rootless physical evidence adversarial audit",
+        "status": "completed",
+        "conclusion": "success",
+        "head_sha": "771340dc5f568bf853c433636a36024f5ea75794",
+        "attempt": 1,
+        "url": "https://github.com/k1moradi/swapz/actions/runs/45770431243"
+      },
+      {
+        "run_id": 45770431229,
+        "name": "Private kernel debug and static contracts",
+        "status": "completed",
+        "conclusion": "success",
+        "head_sha": "771340dc5f568bf853c433636a36024f5ea75794",
+        "attempt": 1,
+        "url": "https://github.com/k1moradi/swapz/actions/runs/45770431229"
+      },
+      {
+        "run_id": 45770431181,
+        "name": "Round048 genuine pinned DM SRCU table and product async GC dtr NO_AUTH source",
+        "status": "completed",
+        "conclusion": "success",
+        "head_sha": "771340dc5f568bf853c433636a36024f5ea75794",
+        "attempt": 1,
+        "url": "https://github.com/k1moradi/swapz/actions/runs/45770431181"
+      },
+      {
+        "run_id": 45770431262,
+        "name": "Round072 one original MM BIO actual authority independent decoder joined NO_AUTH (automatic non-VM source)",
+        "status": "completed",
+        "conclusion": "success",
+        "head_sha": "771340dc5f568bf853c433636a36024f5ea75794",
+        "attempt": 1,
+        "url": "https://github.com/k1moradi/swapz/actions/runs/45770431262"
+      },
+      {
+        "run_id": 45770431324,
+        "name": "Experimental swapz production C qualification",
+        "status": "completed",
+        "conclusion": "success",
+        "head_sha": "771340dc5f568bf853c433636a36024f5ea75794",
+        "attempt": 1,
+        "url": "https://github.com/k1moradi/swapz/actions/runs/45770431324"
+      },
+      {
+        "run_id": 45770431310,
+        "name": "Round095 frozen integrated R094 kernel module compile link AUTH0",
+        "status": "completed",
+        "conclusion": "success",
+        "head_sha": "771340dc5f568bf853c433636a36024f5ea75794",
+        "attempt": 1,
+        "url": "https://github.com/k1moradi/swapz/actions/runs/45770431310"
+      },
+      {
+        "run_id": 45770431238,
+        "name": "Systemd/package 771340dc5f568bf853c433636a36024f5ea75794 (run 45770431238)",
+        "status": "completed",
+        "conclusion": "success",
+        "head_sha": "771340dc5f568bf853c433636a36024f5ea75794",
+        "attempt": 1,
+        "url": "https://github.com/k1moradi/swapz/actions/runs/45770431238"
+      }
+    ],
+    "scope": "Agent10 exact source only; not current main or newer peer changes"
+  },
+  "post_terminal_artifact_recheck": {
+    "archive_sha256_matches": true,
+    "entries": 48,
+    "crc": "PASS",
+    "all_eight_retained_file_hashes_match": true,
+    "independent_nm_readelf": "PASS",
+    "kernel_global_definitions": 9604,
+    "module_global_definitions": 200,
+    "missing_module_imports": 0,
+    "owner_api_kernel_definition_counts": [
+      1,
+      1,
+      1
+    ],
+    "owner_api_module_imports": 3,
+    "actual_symvers_rows": 3803,
+    "stage_manifest_matches": true,
+    "prior_terminal_result_unchanged": true
+  }
 }
