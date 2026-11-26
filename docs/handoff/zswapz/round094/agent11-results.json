@@ -1,0 +1,97 @@
+{
+  "round": "094",
+  "agent": 11,
+  "status": "IN_PROGRESS",
+  "publication_gate": "ROUND_OPEN",
+  "opening_commit": "e4de57c4e96669add5072290870ca199d17d8a04",
+  "engineering_freeze": "efd77858cd20650213559ceb9cb4d0362db32ea5",
+  "original_linux": "c339f4010dea8b0d754f84ace70cd1b089878ef8",
+  "tested_commit": "40b52f8e7a80680dcb6b074df5be897f57eae1b9",
+  "tested_parent": "344d8512d5d8620b4d68e821a7d21823fa8828ec",
+  "source_published": true,
+  "owned_files": {
+    "src/kernel/zswap-original-broker-owner.inc": "0eda8753b91d3209c55f65eb90014fd9b8c6ad7c",
+    "tests/tools/round094-original-broker-owner.patch": "e33bb8451210f9e1a97eb6d9bc0423f6b13a2edd",
+    "tests/runtime/native/fixtures/round094-owner-shim.h": "bc49e924eeee826496264503d0af1b4f1fb8e611",
+    "tests/runtime/native/fixtures/round094-real-broker-owner.c": "0cef169c8b39aaf0c140141f1fe8969e55b26259",
+    "tests/tools/round094-real-broker-owner-verify.py": "d0207a8bc0021f12c8d11927b4dfbae4444e5c26",
+    ".github/workflows/phase-a-round094-real-broker-owner-host-noauth.yml": "efc3ce1f06bd512608e686ccb33b23ea2ec37f7b",
+    "docs/testing_standards.md": "0c1e9246da8be4c56b66369fe99bbef91f2ac3c5"
+  },
+  "prior_r093": {
+    "tested_commit": "87c9e64c1bd59a4aa958c4979049957b7918f74f",
+    "run_id": 45666646146,
+    "job_id": 139390474464,
+    "status": "PASS_ACTUAL_BROKER_MODELED_EXTERNAL_OWNER_HOST_ONLY",
+    "checks_per_compiler": 69,
+    "scenarios_per_compiler": 5,
+    "mutants_per_compiler": 4,
+    "actual_broker_mutants_per_compiler": 3,
+    "modeled_owner_mutants_per_compiler": 1,
+    "first_error": null,
+    "artifact": {
+      "id": 15048128346,
+      "sha256": "1b0a2815a38a95b0b736018429a707474e674cc6441067e6b3a8455980bba0d6",
+      "size_bytes": 4407,
+      "verification": "fresh metadata and job logs; prior Agent1 extraction, no fresh extraction claimed"
+    },
+    "replayed": false
+  },
+  "r094_owner": {
+    "kind": "actual staged built-in broker owner; host adapter substitutes allocator/locks/module primitives",
+    "capacity_max": 1024,
+    "max_payload_bytes": 4194304,
+    "guard": "CONFIG_SWAPZ_ORIGINAL_MM_CARRIER_TEST",
+    "exports": [
+      "swapz_mm_broker_owner_open",
+      "swapz_mm_broker_owner_begin_close",
+      "swapz_mm_broker_owner_finish_close"
+    ],
+    "existing_exports_preserved": 8,
+    "preimages": {
+      "broker_c": "634b38e52b3b1e6493d6b10a694065ccc4b698ad",
+      "broker_h": "6afac83a0655e532ce1ef9b8f290a367e8aabfce"
+    },
+    "postimages": {
+      "broker_c": "ba5e891ef7f80bf0b3021ee6c676529cb72f1972",
+      "broker_h": "c7f4ff59c11ee3475e7577dcc62f7c8db5a578ea"
+    },
+    "planned_scenarios_per_compiler": 5,
+    "planned_mutants_per_compiler": 6,
+    "actual_checks": null,
+    "actual_mutants_killed": null,
+    "run_id": 45756711070,
+    "job_id": 139696920288,
+    "workflow_url": "https://github.com/k1moradi/swapz/actions/runs/45756711070",
+    "job_url": "https://github.com/k1moradi/swapz/actions/runs/45756711070/job/139696920288",
+    "ci_status": "TERMINAL_UNRECONCILED",
+    "job_conclusion": "success",
+    "first_error": null,
+    "artifact": null,
+    "native_compile": "NOT_RUN",
+    "native_modpost": "NOT_RUN",
+    "native_rcu": "NOT_RUN",
+    "native_owner_integration": "NOT_RUN",
+    "module_unload": "NOT_RUN",
+    "local_git": "DNS resolution failure; no local compile claim"
+  },
+  "standards": {
+    "parent_blob": "13eaf8c16d39a2d5cc5eea55ed24fc4a5f72a383",
+    "published_blob": "0c1e9246da8be4c56b66369fe99bbef91f2ac3c5",
+    "parent_bytes": 1831396,
+    "append_bytes": 1468,
+    "published_bytes": 1832864,
+    "complete_prefix_verified": true
+  },
+  "manual_ci_dispatches": 0,
+  "duplicate_corpus": false,
+  "source_mapped_authenticated": false,
+  "auth": 0,
+  "phase_a": "BLOCKED",
+  "compressed_handoff": false,
+  "forced_raw_bypass": false,
+  "import": false,
+  "vm": false,
+  "module_loaded": false,
+  "physical": false
+}
