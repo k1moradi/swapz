@@ -16167,6 +16167,7 @@ static int swapz_map(struct dm_target *ti, struct bio *bio)
 	sector_t sector = bio->bi_iter.bi_sector;
 	sector_t count = bio_sectors(bio);
 	int submitter_lane = -1;
+	int map_refusal = DM_MAPIO_SUBMITTED;
 	bool ordered_owned = false, submitter_dispatch = false;
 #if defined(SWAPZ_ROUND090_SELECTED_DM_COMPOSITION_TEST)
 	struct swapz_ticket_ref original_candidate = {};
@@ -16182,33 +16183,33 @@ static int swapz_map(struct dm_target *ti, struct bio *bio)
 	bool core_matches;
 #endif
 
-#if defined(SWAPZ_SCOPED_TARGET_OBSERVATION)
-	/* Map may return KILL/REQUEUE before ordinary descriptor initialization.
-	 * A later core callback must never see stale recorder tokens. */
-	entry = dm_per_bio_data(bio, sizeof(*entry));
-	entry->observation_operation = 0;
-#endif
-	if (!READ_ONCE(ctx->accepting))
-		return READ_ONCE(ctx->failed) ? DM_MAPIO_KILL : DM_MAPIO_REQUEUE;
+	if (!READ_ONCE(ctx->accepting)) {
+		map_refusal = READ_ONCE(ctx->failed) ? DM_MAPIO_KILL : DM_MAPIO_REQUEUE;
+		goto map_entry;
+	}
 	if (bio_op(bio) == REQ_OP_READ || bio_op(bio) == REQ_OP_WRITE) {
 		if ((bio_op(bio) == REQ_OP_WRITE && !count &&
 		     (bio->bi_opf & REQ_PREFLUSH))) {
 			/* empty flush represented as PREFLUSH|WRITE */
 		} else if (sector % SWAPZ_SECTORS || count != SWAPZ_SECTORS ||
 			   sector / SWAPZ_SECTORS >= ctx->logical_pages) {
-			return DM_MAPIO_KILL;
+			map_refusal = DM_MAPIO_KILL;
+			goto map_entry;
 		}
 	} else if (bio_op(bio) == REQ_OP_DISCARD) {
 		if (sector % SWAPZ_SECTORS || count % SWAPZ_SECTORS ||
 		    sector / SWAPZ_SECTORS >= ctx->logical_pages ||
 		    count / SWAPZ_SECTORS >
-				ctx->logical_pages - sector / SWAPZ_SECTORS)
-			return DM_MAPIO_KILL;
+				ctx->logical_pages - sector / SWAPZ_SECTORS) {
+			map_refusal = DM_MAPIO_KILL;
+			goto map_entry;
+		}
 	} else {
 		/* A REQ_OP_FLUSH upper BIO is invalid on Linux: blk-core
 		 * rejects it before dm's ->map. The real empty-flush
 		 * protocol is WRITE|PREFLUSH with zero sectors. */
-		return DM_MAPIO_KILL;
+		map_refusal = DM_MAPIO_KILL;
+		goto map_entry;
 	}
 #if defined(SWAPZ_ROUND043_DM_REAL_MAP_INGRESS_OBSERVATION_TEST) && \
     defined(SWAPZ_ROUND041_DM_TARGET_INTERVAL_MAP_NONAUTHORITY_TEST) && \
@@ -16250,7 +16251,20 @@ static int swapz_map(struct dm_target *ti, struct bio *bio)
 /* ROUND050_DM_ONE_SHOT_MAP_CALLSITE_END */
 #endif /* SWAPZ_ROUND050_DM_ONE_SHOT_NEGATIVE_TEST */
 
+map_entry:
+#if !defined(SWAPZ_SCOPED_TARGET_OBSERVATION)
+	/* Ordinary rejected BIOs never require a descriptor lookup. */
+	if (map_refusal != DM_MAPIO_SUBMITTED)
+		return map_refusal;
+#endif
 	entry = dm_per_bio_data(bio, sizeof(*entry));
+#if defined(SWAPZ_SCOPED_TARGET_OBSERVATION)
+	/* Map may return KILL/REQUEUE before ordinary descriptor initialization.
+	 * A later core callback must never see stale recorder tokens. */
+	entry->observation_operation = 0;
+	if (map_refusal != DM_MAPIO_SUBMITTED)
+		return map_refusal;
+#endif
 	INIT_LIST_HEAD(&entry->list);
 	INIT_LIST_HEAD(&entry->preparation_list);
 	entry->prepared_page = NULL;
