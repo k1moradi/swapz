@@ -1,0 +1,122 @@
+{
+  "round": "100",
+  "agent": 11,
+  "kind": "frozen-R089-R094-host-extraction-repair",
+  "conclusion": "PARTIAL_R094_PASS_R089_QUEUED",
+  "tested_commit": "2d524047dd759e5435179d7166ca9eb884edd3a0",
+  "source_parent": "78d1884f353d995ff630226212ca4e0f32ab4272",
+  "engineering_freeze": "78d5a7e5231669cd9c1213e3a2682e3b01dcd79d",
+  "task_commit": "f480021d5d0e10f679a6efbbdc0bda1df64054fc",
+  "frozen_dm": "0f53224a43ef8aec58b2627904c5204e67a6a295",
+  "original_linux": "c339f4010dea8b0d754f84ace70cd1b089878ef8",
+  "workflow_url": "https://github.com/k1moradi/swapz/actions/runs/45910982381",
+  "jobs": [
+    {
+      "run": 45910982381,
+      "id": 140219004747,
+      "status": "completed",
+      "conclusion": "success",
+      "url": "https://github.com/k1moradi/swapz/actions/runs/45910982381/job/140219004747",
+      "checks_per_compiler": 50,
+      "mutants_per_compiler": 6,
+      "compilers": {
+        "gcc": {
+          "checks": 50,
+          "mutants": [
+            "no_generation_invalidate",
+            "ignore_pending_fifo",
+            "ignore_gc",
+            "ignore_route_epoch",
+            "no_install_rollback",
+            "erase_replacement_route"
+          ]
+        },
+        "clang": {
+          "checks": 50,
+          "mutants": [
+            "no_generation_invalidate",
+            "ignore_pending_fifo",
+            "ignore_gc",
+            "ignore_route_epoch",
+            "no_install_rollback",
+            "erase_replacement_route"
+          ]
+        }
+      },
+      "artifact": {
+        "id": 15160017247,
+        "bytes": 826,
+        "sha256": "c05dd27ba100c4a843c3d003bb6ac2fadc761d7dbc5758af12581bc04dafb244",
+        "archive_independently_verified": false
+      },
+      "first_error": null
+    },
+    {
+      "run": 45910982367,
+      "id": 140219004770,
+      "status": "queued",
+      "conclusion": null,
+      "url": "https://github.com/k1moradi/swapz/actions/runs/45910982367/job/140219004770",
+      "checks_per_compiler": null,
+      "mutants_per_compiler": null,
+      "artifact": null,
+      "first_error": null
+    }
+  ],
+  "first_error": null,
+  "prior_failures": [
+    {
+      "run": 45879760634,
+      "job": 140115827812,
+      "first_error": "registry.c:76: error: unterminated #if",
+      "artifact": null
+    },
+    {
+      "run": 45879760597,
+      "job": 140115827772,
+      "first_error": "target.c:201: error: unterminated #if",
+      "artifact": {
+        "id": 15146362690,
+        "bytes": 465,
+        "sha256": "9e7aa51af2e3677891ad7e802ad7c65f55d90af4e2c8070a966e558a1a3f903a"
+      }
+    }
+  ],
+  "standards": {
+    "parent_blob": "188ea3b9fb825e1f6489693280c0bb872699de9d",
+    "parent_bytes": 1886704,
+    "blob": "2e93de743e4babedd627b892879576b15b40824c",
+    "bytes": 1888031,
+    "full_prefix_readback": true,
+    "r094_ci_prefix": "PASS",
+    "r089_ci_prefix": "QUEUED",
+    "appendix_count_erratum": "Original R094 suite has six mutants, not five as appendix says; all six executed and killed."
+  },
+  "pins": {
+    "registry": "407f7d05e755ec7b1eacee911ed7a873179c8771",
+    "owner": "b16bba63c0cecde1da18a73808336f102852b7e4",
+    "registry_workflow": "020aff24c3472d479e1b08c3ac9cadda36ded296",
+    "owner_workflow": "0c232d33262513edbc2022f289b8e7dfe854fad9"
+  },
+  "exact_census": {
+    "success": 1,
+    "queued": 8,
+    "in_progress": 2
+  },
+  "product_edits": false,
+  "source_mapped_authenticated": false,
+  "source_authentication": 0,
+  "phase_a": "BLOCKED",
+  "direct_handoff": "DISABLED",
+  "forced_raw": "DISABLED",
+  "import": 0,
+  "native": "NOT_RUN",
+  "physical": "NOT_RUN",
+  "actual_physical_io": false,
+  "limitations": [
+    "R089 not yet executed; no extraction regression or scoped revoke pass credited",
+    "R094 actual extracted product functions with host-modeled owner/storage/locks; not real kernel or production controller",
+    "Focused frozen workflow selects joint harness-only repair; future joint changes should explicitly revisit frozen lane selection",
+    "Artifact digest metadata only; not independently extracted"
+  ]
+}
