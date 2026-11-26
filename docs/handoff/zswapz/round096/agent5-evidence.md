@@ -32,3 +32,43 @@ Three meaningful negative mutants per compiler, all six killed by semantic asser
 [Standards](https://github.com/k1moradi/swapz/blob/eca2485f2c7bdf75f9075652a7da8ac7bbcfb752/docs/testing_standards.md) freeze blob `4152a1ce0c067ccb6b872f5f7aa0b89507ec8f2e` (1,856,114 B), actual parent blob `7900f5e4b4d9c99ffe986c512afc5c65f4c339b1`, postimage `adf7ec2fa261cd9c21edcbb179fdafad00621a56`. Verified exact full prior blob byte round-trip before append, frozen full prefix and actual push-before prefix enforced by passing CI; no historical deletion. Only the applicable eight-line appendix was added. Evidence-only publication must not alter implementation or standards.
 
 No native broker/target call-site change or A3/A7 overlap. No new owner test, native build, module load, VM, physical I/O/mutation, compressed handoff, forced RAW bypass, import or source authentication. Physical candidate and production qualification remain BLOCKED. Next integration is a separately reviewed native caller lifetime boundary under the assigned owner, not physical admission.
+
+
+## Agent1 independent terminal reconciliation
+```json
+{
+  "source": "eca2485f2c7bdf75f9075652a7da8ac7bbcfb752",
+  "run": 45827673414,
+  "job": 139935916808,
+  "conclusion": "PASS_ACTUAL_GATED_STORAGE_EXACT_STREAM_HOST_ONLY",
+  "artifact": 15120518852,
+  "sha256": "f2a59cf17f919b38cd4c80052185842451d82b10d904b9e567c8bac9eff7ec45",
+  "checks_each": {
+    "lz4": 12550,
+    "lzo1x": 16646
+  },
+  "exact_gc_each_codec_each_compiler": 7,
+  "mutants_each": 3,
+  "lower_reads_each_scenario": 14,
+  "provider_lifetime_get_put_each_scenario": [
+    2,
+    2
+  ],
+  "transient_get_put_each_scenario": [
+    9,
+    9
+  ],
+  "storage_bytes": 15320,
+  "legacy_bytes": 14912,
+  "wrapper_overhead": 408,
+  "gate_bytes": 88,
+  "provider_bytes": 312,
+  "sidecar_bytes": 1112,
+  "handle_bytes": 24,
+  "map_bytes": 20,
+  "exact_census": {
+    "success": 10
+  },
+  "scope": "Actual shared adapter calls frozen gate; modeled lower and fresh external cap. Exact compressed GC bytes and independent decoded page; no actual DM consumer/native persistence."
+}
+```

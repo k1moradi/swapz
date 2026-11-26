@@ -33,3 +33,26 @@ gcc PASS_HOST_ONLY R096 A11 checks=37 retries=4
 clang PASS_HOST_ONLY R096 A11 checks=37 retries=4
 ```
 Two configured semantic mutants per compiler killed (four total) by successful verifier, which requires exit 77 and exact witness rather than compiler failure or crash. Baseline ASan/UBSan and leak detection succeeded. Counts directly from actual logs; mutants established by verifier inventory/success. First focused error: none. [Artifact 15120768402](https://github.com/k1moradi/swapz/actions/runs/45828025182/artifacts/15120768402), 2,667 bytes, SHA256 2e9c6614be3bc3ec6e3c99bcdd0f87ebf1681045f9a4f4075c038248d54c020a; upload log and artifact metadata agree and artifact source head matches. Archive contents not independently extracted in this session. Exact-source workflow census at terminal inspection: {"queued":9,"success":1}. No additional dispatch or rerun, no whole-main qualification. Host RCU/module/workqueue modeling remains explicit; actual native retry compilation, kernel workqueue execution/progress, target detach and physical behavior not qualified. A10 sole independent frozen native lane; new staged retry overlay is not a same-round input for it. No native capture activation; AUTH0, Phase A BLOCKED, compressed handoff/forced RAW/import OFF.
+
+
+## Agent1 independent terminal reconciliation
+```json
+{
+  "source": "83e0f1dcc6d9fbc8aebab5040b1a2e451a5bcd1d",
+  "run": 45828025182,
+  "job": 139937142637,
+  "conclusion": "PASS_ACTUAL_BUILTIN_OWNER_RETRY_HOST_ONLY",
+  "artifact": 15120768402,
+  "sha256": "2e9c6614be3bc3ec6e3c99bcdd0f87ebf1681045f9a4f4075c038248d54c020a",
+  "checks_each": 37,
+  "retries_each": 4,
+  "mutants_each": 2,
+  "exact_census": {
+    "success": 10
+  },
+  "overlay": "6ee63e6515dd2f0337c49d1a868f39435b93119c",
+  "ticket_post": "70109f2c2ce9f60681649bd4807382248d0a41a2",
+  "owner_post": "278a93a3fd3fd260444aebc55d4a87112e56f704",
+  "scope": "Actual staged event-driven retry, host workqueue primitives. Actual DM dtr still quarantines with false independent_retry. Native scheduling/close/reopen not proven; no extra owner API."
+}
+```

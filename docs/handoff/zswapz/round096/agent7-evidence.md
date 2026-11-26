@@ -20,3 +20,25 @@ Frozen standards 4152a1ce0c067ccb6b872f5f7aa0b89507ec8f2e 1856114B; actual paren
 [Focused run 45827821204](https://github.com/k1moradi/swapz/actions/runs/45827821204), [job 139936425051](https://github.com/k1moradi/swapz/actions/runs/45827821204/job/139936425051), attempt 1, terminal SUCCESS. Actual log reports exact source 588d4de2bd1b86ed969493594babd70264de89be and sole parent 58b599346139dd9dbee4120030a23c84a14f03dc. GCC -std=c2x and Clang -std=c23 each PASS 63 checks, three actual broker sessions, two real original codecs, two external pause boundaries, zero new mutants; ASan/UBSan and leak detection enabled. First CI error null. Both exact-source preflight and focused qualification steps succeeded. [Artifact 15121910036](https://github.com/k1moradi/swapz/actions/runs/45827821204/artifacts/15121910036), 3725 bytes, sha256:46f931b3ed25b320fd35fa844ecc068986d3b82386c012699829a8a2468dd17d; upload log and artifact metadata agree, independent ZIP download/extraction not claimed. Nine other automatic workflows were queued/in progress at observation; no all-main-green claim and no manually replayed tests. Local checkout unavailable (git ls-remote: Could not resolve host github.com); connector publication and actual hosted source-linked qualification succeeded. No local compile claimed. This terminal evidence supersedes the earlier queued observation in e33ab5c3cd83a397feb0e9d0d97ccc100a308d9c; no product or standards changes in this evidence-only follow-up.
 
 AUTH0; Phase A BLOCKED; compressed handoff, forced RAW bypass and import OFF. No branches, PR, force, VM, native retry, boot/load, physical mutation, activation or owner-host testing. A10 sole native lease, no same-round peer input.
+
+
+## Agent1 independent terminal reconciliation
+```json
+{
+  "source": "588d4de2bd1b86ed969493594babd70264de89be",
+  "run": 45827821204,
+  "job": 139936425051,
+  "conclusion": "PASS_FROZEN_GATE_BROKER_HOST_ONLY",
+  "artifact": 15121910036,
+  "sha256": "46f931b3ed25b320fd35fa844ecc068986d3b82386c012699829a8a2468dd17d",
+  "checks_each": 63,
+  "broker_sessions_each": 3,
+  "codecs_each": 2,
+  "external_pauses_each": 2,
+  "mutants_each": 0,
+  "exact_census": {
+    "success": 10
+  },
+  "scope": "No provider source changes; real frozen broker/gate, host lifetime primitives; no native unload. Frozen old ungated adapter finding superseded by A5 later source, not same-round test."
+}
+```

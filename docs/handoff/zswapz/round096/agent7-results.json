@@ -144,5 +144,22 @@
     "queued": 8,
     "in_progress": 1
   },
-  "previous_evidence_commit": "e33ab5c3cd83a397feb0e9d0d97ccc100a308d9c"
+  "previous_evidence_commit": "e33ab5c3cd83a397feb0e9d0d97ccc100a308d9c",
+  "agent1_terminal_reconciliation": {
+    "source": "588d4de2bd1b86ed969493594babd70264de89be",
+    "run": 45827821204,
+    "job": 139936425051,
+    "conclusion": "PASS_FROZEN_GATE_BROKER_HOST_ONLY",
+    "artifact": 15121910036,
+    "sha256": "46f931b3ed25b320fd35fa844ecc068986d3b82386c012699829a8a2468dd17d",
+    "checks_each": 63,
+    "broker_sessions_each": 3,
+    "codecs_each": 2,
+    "external_pauses_each": 2,
+    "mutants_each": 0,
+    "exact_census": {
+      "success": 10
+    },
+    "scope": "No provider source changes; real frozen broker/gate, host lifetime primitives; no native unload. Frozen old ungated adapter finding superseded by A5 later source, not same-round test."
+  }
 }

@@ -220,5 +220,40 @@
     "External entrant retain/revoke/join remains an explicit caller contract; host fixture is ordered, not a concurrent native close-race proof.",
     "No production capacity or physical persistence claim.",
     "Other automatic existing workflows were not dispatched separately by Agent5 and are not represented as passed."
-  ]
+  ],
+  "agent1_terminal_reconciliation": {
+    "source": "eca2485f2c7bdf75f9075652a7da8ac7bbcfb752",
+    "run": 45827673414,
+    "job": 139935916808,
+    "conclusion": "PASS_ACTUAL_GATED_STORAGE_EXACT_STREAM_HOST_ONLY",
+    "artifact": 15120518852,
+    "sha256": "f2a59cf17f919b38cd4c80052185842451d82b10d904b9e567c8bac9eff7ec45",
+    "checks_each": {
+      "lz4": 12550,
+      "lzo1x": 16646
+    },
+    "exact_gc_each_codec_each_compiler": 7,
+    "mutants_each": 3,
+    "lower_reads_each_scenario": 14,
+    "provider_lifetime_get_put_each_scenario": [
+      2,
+      2
+    ],
+    "transient_get_put_each_scenario": [
+      9,
+      9
+    ],
+    "storage_bytes": 15320,
+    "legacy_bytes": 14912,
+    "wrapper_overhead": 408,
+    "gate_bytes": 88,
+    "provider_bytes": 312,
+    "sidecar_bytes": 1112,
+    "handle_bytes": 24,
+    "map_bytes": 20,
+    "exact_census": {
+      "success": 10
+    },
+    "scope": "Actual shared adapter calls frozen gate; modeled lower and fresh external cap. Exact compressed GC bytes and independent decoded page; no actual DM consumer/native persistence."
+  }
 }

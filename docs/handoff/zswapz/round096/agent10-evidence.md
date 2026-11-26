@@ -25,3 +25,34 @@ Early real ELF/OpenSSL header/link/execute probes before Linux checkout; real sc
 97 real strong module imports all resolve against 3,803 actual symvers rows; 208 global module definitions; 15 exact GPL boundary exports, 7 actual boundary imports including 3 broker owner APIs. One global built-in definition per owner API and none in module; no unresolved strong kernel/module import, no forbidden internal exports or old scratch exports. Target relocations independently establish bounded bridge init/read/close and legacy shared storage init/close/read_pinned/relocate, each once, and owner open/finish once, begin twice. Zero target references to shared value/provider/gate APIs. Adapter object references the four direct shared provider APIs once each; zero gate references. Gate and adapter definitions are linked but not evidence of active target integration. The source's ordered claim remains hard-off; no safe positive native transaction path, native recorder or physical qualification.
 
 Hosted standards prefix check PASS: complete 1,856,114-byte parent SHA256 d074640d210e15adb693304669f837790ce6a19517c553d9be726b267a50f986 retained, source 1,857,558 bytes SHA256 e6c63cab99a0dbce03720642d2b41c1cbbff316815bb24efa1b616682799c89c. Terminal evidence-only publication parent 43650a6b3d14af6e03463119952e06dc77c3411c; no change to standards or source, no same-round peer code consumed. No separate A7/A11 native build, duplicate corpus, VM, boot, load, physical mutation, authorization or activation. AUTH0, Phase A BLOCKED; compressed handoff, forced RAW bypass and import OFF. Compile/link only, not bootable/physical-ready. Next engineering prerequisite remains real gated target/adapter integration and independent safe owner drain; no owner test requested.
+
+
+## Agent1 independent terminal reconciliation
+```json
+{
+  "source": "e166a63140cf19f360061511824918744ed36389",
+  "run": 45827297021,
+  "job": 139934629800,
+  "conclusion": "PASS_CHANGED_FROZEN_NATIVE_KERNEL_MODULE_COMPILE_LINK_ONLY",
+  "artifact": 15119944864,
+  "sha256": "3d675cf25a574a9eb8f0838f6eddf598cee2a618f92a54fafccddb96312c7abe",
+  "archive_entries": 76,
+  "archive_bytes": 3497194,
+  "steps": 42,
+  "pins": 50,
+  "verified_directed_hashes": 19,
+  "module_imports": 97,
+  "gpl_boundary_exports": 15,
+  "forbidden_exports": 0,
+  "kernel_bytes": 12558632,
+  "kernel_sha256": "54e665e7f223ce98fdcd974a362309535eef109a5b36efb4c6ad1c0fa7d4b33c",
+  "module_bytes": 438512,
+  "module_sha256": "c06018667cd04d63d9122de5479ec2807c8b979f4588957e43c288b06a3bdf49",
+  "composite_bytes": 438640,
+  "composite_sha256": "53c46b82f3688ff7b3d90622303f1e3d384c879ce4e03adb62988bb1e4f1ff26",
+  "exact_census": {
+    "success": 10
+  },
+  "scope": "Actual frozen R095 capture-off overlay, previous owner (no R096 retry), DM bounded bridge, ungated linked storage adapter, native positive path absent, recorder excluded. 19 object hashes plus final binaries independently verified. No physical/boot readiness."
+}
+```

@@ -75,3 +75,42 @@ R095 accepted 1,027,438 checks / 14 scenarios / 98,304 full-capacity records eac
 No actual native producer/upper ACK witness, external revoke/join integration, scoped default-off positive gate, pin-through-final-upper-copy, or proven complete built-in owner drainage at freeze. Shared adapter/provider not the current target's bridge. The old ordinary primary physical helper disables zswap, so it cannot qualify integrated natural-pressure flow. The map names actual frozen call sites and limitations; it is not installed instrumentation. First trial requires reviewed current integrated source/compile, independently source-bound full-page/opaque-compressed oracle, protected page0/UUID/table and exact owner-approved inactive partition scope, bounded natural pressure and safe recovery. No circular requirement for successful trial evidence before first authorized trial, and no authorization now.
 
 Inspect the existing exact-source job when terminal; publish a separate evidence-only update with actual counts, first failure and artifact integrity. No owner make test/fast_test now.
+
+
+## Agent1 independent terminal reconciliation
+```json
+{
+  "source": "fa03b9f09cc4e6892f09282157f044edd694f073",
+  "run": 45849741037,
+  "job": 140012676393,
+  "conclusion": "PASS_SELECTED_RCU_ADAPTER_HOST_SUBSTITUTES_ONLY",
+  "artifact": 15133880782,
+  "sha256": "deccf2324bc455065e2d8a89eca0c621732bfe482d663c76d83b7850553f04b0",
+  "checks_each": 200092,
+  "scenarios_each": 5,
+  "disabled_calls_each": 200000,
+  "disabled_rcu_cas_each": 0,
+  "owner_bytes": 72,
+  "gate_bytes": 24,
+  "wire_bytes": 296,
+  "exact_census": {
+    "success": 8,
+    "in_progress": 2
+  },
+  "selected_paths": [
+    "src/kernel/native-observation-adapter.c",
+    "src/kernel/native-observation-adapter.h"
+  ],
+  "alternative": {
+    "source": "eec8cbdc856c4d9b26da5c342c234a041b3ce727",
+    "job": 139936814544,
+    "run": 45827930586,
+    "artifact": 15121222759,
+    "sha256": "d846f636597b22b904246162b52a441c972b57eca264365b9f46ebb6e2f560bb",
+    "checks_each": 61,
+    "scenarios_each": 3,
+    "status": "HISTORICAL_UNSELECTED_HOST_PASS_NOT_ADDITIVE"
+  },
+  "scope": "One RCU gate instead of external callback-only alternative; no actual native compile or capture yet. Selection conditional on native compilation. Both archives CRC/SHA verified; no duplicate credit."
+}
+```

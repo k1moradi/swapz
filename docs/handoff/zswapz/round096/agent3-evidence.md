@@ -37,3 +37,43 @@ Engineering freeze blob `4152a1ce0c067ccb6b872f5f7aa0b89507ec8f2e` (1,856,114 by
 ## Follow-up correction (after initial evidence snapshot)
 
 [Correction 6025956f8e2d97f6036eb22e7b80a94075e3d1d4](https://github.com/k1moradi/swapz/commit/6025956f8e2d97f6036eb22e7b80a94075e3d1d4) changes only the failed legacy verifier and appends standards text. It keeps the typed-before-cache assertion and adds release-after-copy ordering, and defines the kernel unused annotation for isolated host compile. No DM or accepted R095 fixture modification. Exact current parent standards `ef9dfb936a96af9789488b530e33a287e1ffd128` (1865716 bytes) preserved byte-for-byte in `9c1ec8d4f8ac2b300c93fb07cff9f10e7f5e3046` (1866457 bytes); append 741 bytes. [Corrected legacy CI](https://github.com/k1moradi/swapz/actions/runs/45828552407) observed queued, conclusion not yet available. The original failed run remains recorded; a corrective commit is not a passing result. Round remains PROGRESS/BLOCKED. This evidence-only follow-up leaves all standards bytes unchanged.
+
+
+## Agent1 independent terminal reconciliation
+```json
+{
+  "source": "58b599346139dd9dbee4120030a23c84a14f03dc",
+  "run": 45827740930,
+  "job": 139936147434,
+  "conclusion": "PASS_COMPOSED_HOST_ONLY",
+  "artifact": 15121270263,
+  "sha256": "d21d8de6e111e151859f8ba76a0b179d83a317f81f56508ede772bf44b13e383",
+  "checks_each": 435,
+  "claims_each": 3,
+  "claimed_errors_each": 1,
+  "typed_reads_each": 2,
+  "fallbacks_each": 2,
+  "preparations_each": 2,
+  "reopens_each": 5,
+  "mutants_each": 5,
+  "exact_census": {
+    "success": 29,
+    "failure": 1
+  },
+  "legacy_failed_run": 45827740512,
+  "correction": {
+    "source": "6025956f8e2d97f6036eb22e7b80a94075e3d1d4",
+    "run": 45828552407,
+    "job": 139938953491,
+    "artifact": 15122108402,
+    "sha256": "a82e6208122bb702fb1cd3114b1a9724763b6df45d387d80b0d9923554fd75fb",
+    "conclusion": "PASS",
+    "exact_census": {
+      "success": 10
+    },
+    "legacy_replay_checks_each": 12708,
+    "actual_source_negative_groups": 30
+  },
+  "scope": "Retained pin through upper copy, actual target_can_free(ctx,false) native path still refuses independent retry; old bridge remains; owner retry host boundary modeled. Native gate hard false. Legacy correction accepted separately, not extra new transaction credit."
+}
+```
