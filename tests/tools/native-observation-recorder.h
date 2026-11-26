@@ -6,7 +6,8 @@
  * Host-test opt-in recorder prototype, NOT a kernel capture interface.
  * Caller owns preallocated contiguous storage and external entrant lifetime.
  * No allocation, formatting, hashing, I/O, waiting or callbacks in append.
- * A contended trylock loses evidence, never blocks product progress.
+ * A bounded atomic reservation assigns a unique slot before its private copy.
+ * Exhausted retries or capacity lose evidence, never block product progress.
  */
 #include <stdbool.h>
 #include <stddef.h>
@@ -14,6 +15,7 @@
 #include <stdatomic.h>
 
 #define SWAPZ_OBSERVATION_MAX_RECORDS 8192U
+#define SWAPZ_OBSERVATION_RESERVATION_ATTEMPTS 64U
 #define SWAPZ_OBSERVATION_DIGEST_BYTES 32U
 #define SWAPZ_OBSERVATION_MAPPING_SOURCE "ff972661a75ca7f8c3c0458c3feb8b603c185eb8"
 #define SWAPZ_OBSERVATION_HEADER_BYTES 104U
@@ -94,11 +96,11 @@ struct swapz_observation_record {
 struct swapz_observation_recorder {
 	struct swapz_observation_record *records;
 	size_t capacity;
-	size_t count;
-	uint64_t token_high;
+	atomic_uint count;
+	atomic_uint token_high;
+	unsigned token_limit;
 	uint8_t scope_sha256[SWAPZ_OBSERVATION_DIGEST_BYTES];
 	atomic_bool enabled;
-	atomic_bool locked;
 	atomic_uint loss;
 	bool sealed;
 };
@@ -116,7 +118,9 @@ bool swapz_observation_append(struct swapz_observation_recorder *recorder,
 			      const struct swapz_observation_record *record);
 /*
  * External producer revoke/join MUST precede stop/seal, and outlive export.
- * Stop prevents new writes; an already-entered append detects late stop.
+ * Stop prevents new entries; a reserved append completes its private copy and
+ * marks observed late stop as loss. Seal checks every reserved sequence only
+ * after the external join; it is not safe to inspect concurrently written slots.
  * Seal does not establish external quiescence and must not be used as one.
  * Caller retains recorder and backing array until all entrants have exited.
  */

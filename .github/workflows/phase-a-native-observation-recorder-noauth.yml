@@ -43,7 +43,7 @@ jobs:
           assert current.startswith(previous) and len(current) > len(previous)
           print("complete standards prefix", len(previous), len(current), hashlib.sha256(previous).hexdigest())
           PY
-      - name: Actual recorder host prototype and fabricated export tests
+      - name: Changed recorder reservation concurrency only
         run: |
           set -Eeuo pipefail
           umask 077
@@ -57,18 +57,15 @@ jobs:
               tests/runtime/native/fixtures/native-observation-recorder.c \
               -o "$out/$compiler-recorder" 2>&1 | tee "$out/$compiler-compile.log"
             ASAN_OPTIONS=detect_leaks=1:halt_on_error=1 UBSAN_OPTIONS=halt_on_error=1 \
-              "$out/$compiler-recorder" selftest "$(printf 'ab%.0s' {1..32})" \
+              "$out/$compiler-recorder" concurrent "$(printf 'ab%.0s' {1..32})" \
               2>&1 | tee "$out/$compiler-recorder.log"
-            ASAN_OPTIONS=detect_leaks=1:halt_on_error=1 UBSAN_OPTIONS=halt_on_error=1 \
-              python3 -B tests/runtime/native/native-observation-export-test.py "$out/$compiler-recorder" -v \
-              2>&1 | tee "$out/$compiler-export.log"
             rm "$out/$compiler-recorder"
           done
       - name: Retain bounded prototype diagnostics
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: native-observation-recorder-host
+          name: native-observation-recorder-concurrency-host
           path: ${{ runner.temp }}/native-observation-recorder/*.log
           if-no-files-found: warn
           retention-days: 14

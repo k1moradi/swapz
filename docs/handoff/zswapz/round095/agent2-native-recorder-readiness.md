@@ -1,5 +1,11 @@
 # Agent2 — native observation recorder and direct physical development readiness
 
+> **R095 corrective follow-up:** the lock-based implementation described below
+> is the historical baseline at 8c73b49a87b2faffc950effb651dd218e564d6ce.
+> The bounded atomic reservation correction at the end supersedes its hot-path
+> locking and owner-layout details only; the wire schema and frozen source map
+> are unchanged. No native capture or admission qualification follows.
+
 Frozen engineering source ff972661a75ca7f8c3c0458c3feb8b603c185eb8,
 original Linux c339f4010dea8b0d754f84ace70cd1b089878ef8; task
 20122e158beef6266bd01bb545951a2a4f77d9d5. The R094 offline-only corpus is
@@ -220,3 +226,59 @@ hard-disabled claim must not be toggled for this work.
 
 Every item above is unestablished for R095 native/physical admission.
 AUTH=0, Phase A BLOCKED, compressed handoff, forced RAW and import OFF.
+
+## Corrective follow-up — concurrent reservation, unchanged wire format
+
+The R095 initial actual host job 139744356343 recorded 2048/4096 successful
+Clang threaded appends (sticky contention loss). Keep that immutable
+failure-to-capture result and its successful fail-closed qualification;
+no accepted corpus replay. Owner-exclusive follow-up within the existing
+R095 recorder lane, explicitly requested continuation, no peer outputs.
+
+Use separate saturating atomic unsigned counters for sequence and token
+reservation. Both must be lock-free with the enabled and loss atomics;
+one shared CAS per successful reservation, at most 64 strong-CAS attempts,
+no global lock across field validation or copy, no counter wrap. A producer
+that pauses after reservation owns only its private slot; later slots can
+complete without waiting for it. Retry exhaustion sets sticky contention
+loss; saturation sets sticky overflow and cannot increment a saturated
+counter. No allocation, hashing, formatting or I/O in mint/append.
+The disabled path remains one enabled check. The per-run token limit
+is precomputed at initialization. Initialization clears only sequence
+markers; record data stays private until written. Write the unique
+record's sequence marker last. No simultaneous readers, ring reuse, sort,
+fabricated sequence or ACK. Sequence reservation CAS is the linearization
+point; actual native producers must still establish authoritative
+transition order at their synchronization sites. Host program-order
+preservation is not evidence of a native cross-CPU causal contract.
+
+The external producer revoke/join is still mandatory, including paused
+pre-reservation and reserved-but-not-copied entrants. Seal is a
+post-quiescence scan of all sequence markers; a hole or corrupt count
+sets invalid loss and refuses export instead of reading partial slots.
+Stop is not a replacement for that join. On an observed late stop a
+reserved writer finishes its private copy and marks loss; that observation
+does not make racing teardown safe. No additional per-slot allocation,
+side table or wire change. The sequence marker is ordinary memory, never
+read concurrently. Caller cannot alias input with writable recorder
+storage, mutate immutable input during append, reinitialize concurrently,
+or allow export callbacks to mutate storage. Owner/array lifetime remains
+external; no native implementation or kernel atomic portability claim.
+
+Changed-source host qualification only: actual same recorder C compiled
+under strict GCC/Clang ASan/UBSan, synchronized 2/4/8 producers, four
+separate full-capacity trials per thread count; each thread mints distinct
+tokens, writes private slots, checks uniqueness, exact counts and
+per-producer order, and validates actual wire sequence/token/count/loss.
+Separate concurrent record and token saturation scenarios, deliberate
+post-join abandoned reservation negative, reinit/disabled checks. Require
+zero unexpected loss in these bounded trials; retain actual failure if
+the 64-attempt budget is exhausted. Measure observed host elapsed time
+including joins, not a kernel latency or speedup claim. The prior
+accepted parser fixture/corpus remains intact but is not replayed by
+this changed-reservation workflow. No duplicate workflow or native lane.
+A finite retry budget remains a loss path under extreme contention;
+zero loss in tested schedules is not a universal wait-free guarantee.
+
+All direct physical checklist entries remain unestablished. AUTH0
+Phase A BLOCKED; compressed handoff, forced RAW and import OFF.

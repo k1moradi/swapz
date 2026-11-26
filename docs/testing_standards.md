@@ -20808,3 +20808,25 @@ Require one source-linked host composition of actual frozen R094 staged built-in
 
 ### Round095 Agent3 composed transaction correction
 Preserve failed strict GCC/Clang fixture diagnostics and legacy source-contract failures. Correct fixture-global shadowing without disabling warnings; assert the sole native call passes the hard-false claim permission before ordinary fallback. Exercise actual teardown with deferred release still outstanding: retain target storage, reject close, then join release and verify external capability blocks owner finish until put; require the pending-release guard mutant to fail semantically. This is a frozen-input rootless composition, not native or physical qualification. No duplicate unchanged CI or activation.
+
+## R095 Agent2 corrective recorder reservation qualification (NO AUTH)
+
+Preserve initial exact source 8c73b49a87b2faffc950effb651dd218e564d6ce,
+job 139744356343, including measured Clang 2048/4096 record loss.
+Same owner lane, explicitly requested continuation: replace recorder-wide
+trylock with bounded lock-free atomic saturating sequence/token reservations,
+64 strong-CAS attempts maximum, no wrap, no allocation, wait on a lock,
+hashing, formatting or I/O in mint/append. Each reserved slot is private
+through its synchronous copy; sequence written last, no concurrent reader.
+External revoke/join of every producer entrant remains mandatory before
+stop/seal/export. Seal checks all committed sequence markers, rejects holes
+without fabricating records. No change to wire format, parser or native
+producer source map; finite retry budget still fail-closes on loss.
+Only changed-reservation host qualification: strict GCC/Clang ASan/UBSan,
+synchronized 2/4/8 producers, repeated full-capacity scenarios, token/slot
+uniqueness, per-producer program order, concurrent token/record saturation,
+actual export order/count/loss, abandoned reservation and reinit/disabled
+checks. No accepted old parser or recorder corpus replay, no new workflow
+lane, no native compile/VM/load/physical action. Host timings and zero loss
+in exercised schedules do not establish native performance or completeness.
+AUTH0 Phase A BLOCKED; compressed handoff, forced RAW and import OFF.

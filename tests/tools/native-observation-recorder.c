@@ -1,7 +1,11 @@
 /* SPDX-License-Identifier: GPL-2.0-only */
 #include "native-observation-recorder.h"
 
+#include <limits.h>
 #include <string.h>
+
+_Static_assert(UINT_MAX >= SWAPZ_OBSERVATION_MAX_RECORDS * 8U,
+	       "observation counters must hold the complete token space");
 
 static bool nonzero_digest(const uint8_t digest[32])
 {
@@ -17,34 +21,42 @@ static void mark_loss(struct swapz_observation_recorder *recorder, unsigned flag
 	atomic_fetch_or_explicit(&recorder->loss, flag, memory_order_relaxed);
 }
 
-static bool try_lock(struct swapz_observation_recorder *recorder)
+/* Reservation is the sequence linearization point, not copy completion.
+ * Saturating strong CAS: no counter wrap, no held lock, no unbounded retry.
+ * A paused writer owns only its unique slot, not another writer's progress.
+ */
+static unsigned reserve_next(struct swapz_observation_recorder *recorder,
+			     atomic_uint *counter, unsigned limit)
 {
-	bool expected = false;
+	unsigned previous = atomic_load_explicit(counter, memory_order_relaxed);
 
-	return atomic_compare_exchange_strong_explicit(&recorder->locked, &expected,
-			true, memory_order_acquire, memory_order_relaxed);
+	for (unsigned attempt = 0; attempt < SWAPZ_OBSERVATION_RESERVATION_ATTEMPTS;
+	     ++attempt) {
+		if (previous >= limit) {
+			mark_loss(recorder, SWAPZ_OBS_LOST_OVERFLOW);
+			return 0;
+		}
+		if (atomic_compare_exchange_strong_explicit(counter, &previous,
+				previous + 1U, memory_order_relaxed, memory_order_relaxed))
+			return previous + 1U;
+		/* Failure refreshes previous; retry only within the fixed budget. */
+	}
+	mark_loss(recorder, SWAPZ_OBS_LOST_CONTENTION);
+	return 0;
 }
 
-static void unlock(struct swapz_observation_recorder *recorder)
+/* Disabled entry is cheap. Caller lifetime fence protects this entire call. */
+static bool enter(const struct swapz_observation_recorder *recorder)
 {
-	atomic_store_explicit(&recorder->locked, false, memory_order_release);
+	return recorder && atomic_load_explicit(&recorder->enabled, memory_order_acquire);
 }
 
-/* Disabled entry is cheap. Once entered, losing the race is sticky loss. */
-static bool enter(struct swapz_observation_recorder *recorder)
+static bool check_late_stop(struct swapz_observation_recorder *recorder)
 {
-	if (!recorder || !atomic_load_explicit(&recorder->enabled, memory_order_acquire))
-		return false;
-	if (!try_lock(recorder)) {
-		mark_loss(recorder, SWAPZ_OBS_LOST_CONTENTION);
-		return false;
-	}
-	if (!atomic_load_explicit(&recorder->enabled, memory_order_relaxed)) {
-		mark_loss(recorder, SWAPZ_OBS_LOST_LATE);
-		unlock(recorder);
-		return false;
-	}
-	return true;
+	if (atomic_load_explicit(&recorder->enabled, memory_order_acquire))
+		return true;
+	mark_loss(recorder, SWAPZ_OBS_LOST_LATE);
+	return false;
 }
 
 bool swapz_observation_init(struct swapz_observation_recorder *recorder,
@@ -55,17 +67,21 @@ bool swapz_observation_init(struct swapz_observation_recorder *recorder,
 	    capacity > SWAPZ_OBSERVATION_MAX_RECORDS || !nonzero_digest(scope_sha256))
 		return false;
 	atomic_init(&recorder->enabled, false);
-	atomic_init(&recorder->locked, false);
+	atomic_init(&recorder->count, 0U);
+	atomic_init(&recorder->token_high, 0U);
 	atomic_init(&recorder->loss, 0U);
 	/* No hidden atomic library locks in this prototype's hot path. */
 	if (!atomic_is_lock_free(&recorder->enabled) ||
-	    !atomic_is_lock_free(&recorder->locked) ||
+	    !atomic_is_lock_free(&recorder->count) ||
+	    !atomic_is_lock_free(&recorder->token_high) ||
 	    !atomic_is_lock_free(&recorder->loss))
 		return false;
 	recorder->records = records;
 	recorder->capacity = capacity;
-	recorder->count = 0;
-	recorder->token_high = 0;
+	recorder->token_limit = (unsigned)capacity * 8U;
+	/* Cold initialization of commit markers only; no payload zeroing. */
+	for (size_t index = 0; index < capacity; ++index)
+		records[index].sequence = 0;
 	recorder->sealed = false;
 	memcpy(recorder->scope_sha256, scope_sha256, 32);
 	atomic_store_explicit(&recorder->enabled, true, memory_order_release);
@@ -74,16 +90,13 @@ bool swapz_observation_init(struct swapz_observation_recorder *recorder,
 
 uint64_t swapz_observation_mint(struct swapz_observation_recorder *recorder)
 {
-	uint64_t token = 0;
-
 	if (!enter(recorder))
 		return 0;
 	/* Bounded token space proportional to capture capacity; no wrap/reuse. */
-	if (recorder->token_high >= (uint64_t)recorder->capacity * 8U)
-		mark_loss(recorder, SWAPZ_OBS_LOST_OVERFLOW);
-	else
-		token = ++recorder->token_high;
-	unlock(recorder);
+	const unsigned token = reserve_next(recorder, &recorder->token_high,
+					    recorder->token_limit);
+	if (!token || !check_late_stop(recorder))
+		return 0;
 	return token;
 }
 
@@ -185,35 +198,38 @@ static bool event_fields_valid(const struct swapz_observation_record *record)
 bool swapz_observation_append(struct swapz_observation_recorder *recorder,
 			      const struct swapz_observation_record *record)
 {
-	bool accepted = false;
-
 	if (!enter(recorder))
 		return false;
+	const unsigned token_high = atomic_load_explicit(&recorder->token_high,
+							memory_order_relaxed);
 	if (!record || record->sequence || record->event < SWAPZ_OBS_CAPTURE ||
 	    record->event > SWAPZ_OBS_CLEANUP || !event_fields_valid(record) ||
 	    (record->event == SWAPZ_OBS_CLEANUP ? record->operation != 0 :
 						 record->operation == 0) ||
-	    !token_valid(record->operation, recorder->token_high) ||
-	    !token_valid(record->descriptor, recorder->token_high) ||
-	    !token_valid(record->clone, recorder->token_high) ||
-	    !token_valid(record->original, recorder->token_high) ||
-	    !token_valid(record->lower, recorder->token_high) ||
-	    !token_valid(record->extent, recorder->token_high) ||
-	    !token_valid(record->pin, recorder->token_high)) {
+	    !token_valid(record->operation, token_high) ||
+	    !token_valid(record->descriptor, token_high) ||
+	    !token_valid(record->clone, token_high) ||
+	    !token_valid(record->original, token_high) ||
+	    !token_valid(record->lower, token_high) ||
+	    !token_valid(record->extent, token_high) ||
+	    !token_valid(record->pin, token_high)) {
 		mark_loss(recorder, SWAPZ_OBS_LOST_INVALID);
-	} else if (recorder->count == recorder->capacity) {
-		mark_loss(recorder, SWAPZ_OBS_LOST_OVERFLOW);
-	} else {
-		struct swapz_observation_record *destination =
-			&recorder->records[recorder->count];
-
-		/* Caller owns immutable event input through this synchronous copy. */
-		*destination = *record;
-		destination->sequence = (uint64_t)++recorder->count;
-		accepted = true;
+		return false;
 	}
-	unlock(recorder);
-	return accepted;
+	const unsigned sequence = reserve_next(recorder, &recorder->count,
+					       (unsigned)recorder->capacity);
+	if (!sequence)
+		return false;
+	struct swapz_observation_record *destination = &recorder->records[sequence - 1U];
+
+	/* Caller owns immutable event input through this synchronous copy.
+	 * Unique slot is private until external producer join; no reader may
+	 * observe a partial copy. Sequence is written last as a commit marker.
+	 * Finish even on observed late stop, so export never fabricates a slot.
+	 */
+	*destination = *record;
+	destination->sequence = sequence;
+	return check_late_stop(recorder);
 }
 
 void swapz_observation_stop(struct swapz_observation_recorder *recorder)
@@ -224,11 +240,25 @@ void swapz_observation_stop(struct swapz_observation_recorder *recorder)
 
 bool swapz_observation_seal(struct swapz_observation_recorder *recorder)
 {
-	if (!recorder || atomic_load_explicit(&recorder->enabled, memory_order_acquire) ||
-	    !try_lock(recorder))
+	if (!recorder || atomic_load_explicit(&recorder->enabled, memory_order_acquire))
 		return false;
+	/* Caller has already revoked and joined every producer entrant.
+	 * Never scan sequence markers concurrently with slot writers.
+	 */
+	const unsigned count = atomic_load_explicit(&recorder->count, memory_order_relaxed);
+
+	recorder->sealed = false;
+	if (count > recorder->capacity) {
+		mark_loss(recorder, SWAPZ_OBS_LOST_INVALID);
+		return false;
+	}
+	for (unsigned index = 0; index < count; ++index) {
+		if (recorder->records[index].sequence != (uint64_t)index + 1U) {
+			mark_loss(recorder, SWAPZ_OBS_LOST_INVALID);
+			return false;
+		}
+	}
 	recorder->sealed = true;
-	unlock(recorder);
 	return true;
 }
 
@@ -281,27 +311,31 @@ bool swapz_observation_export(const struct swapz_observation_recorder *recorder,
 	unsigned loss;
 
 	if (!recorder || !sink || !recorder->sealed ||
-	    atomic_load_explicit(&recorder->enabled, memory_order_acquire) ||
-	    recorder->count > recorder->capacity)
+	    atomic_load_explicit(&recorder->enabled, memory_order_acquire))
 		return false;
 	/* External producer fence/join makes count, records and loss immutable. */
+	const unsigned count = atomic_load_explicit(&recorder->count, memory_order_relaxed);
+	const unsigned token_high = atomic_load_explicit(&recorder->token_high,
+							memory_order_relaxed);
+	if (count > recorder->capacity)
+		return false;
 	loss = atomic_load_explicit(&recorder->loss, memory_order_relaxed);
 	put_bytes(&output, "SWZOBS2\0", 8);
 	put_bytes(&output, SWAPZ_OBSERVATION_MAPPING_SOURCE, 40);
 	put_bytes(&output, recorder->scope_sha256, 32);
-	put_u64(&output, (uint64_t)recorder->count);
-	put_u64(&output, recorder->token_high);
+	put_u64(&output, (uint64_t)count);
+	put_u64(&output, token_high);
 	put_u32(&output, (uint32_t)recorder->capacity);
 	put_u32(&output, SWAPZ_OBSERVATION_RECORD_BYTES);
 	if ((size_t)(output - header) != sizeof(header) ||
 	    !sink(context, header, sizeof(header)))
 		return false;
-	for (size_t index = 0; index < recorder->count; ++index)
+	for (size_t index = 0; index < count; ++index)
 		if (!export_record(&recorder->records[index], sink, context))
 			return false;
 	output = footer;
 	put_bytes(&output, "SWZEND2\0", 8);
-	put_u64(&output, (uint64_t)recorder->count);
+	put_u64(&output, (uint64_t)count);
 	put_u32(&output, (uint32_t)loss);
 	put_u32(&output, 0); /* reserved; must remain zero */
 	return (size_t)(output - footer) == sizeof(footer) &&
