@@ -1,0 +1,56 @@
+{
+  "round": "094",
+  "agent": 2,
+  "kind": "offline-per-bio-observation-validator",
+  "conclusion": "QUEUED",
+  "source_published": true,
+  "tested_commit": "9f0a2a7ec0d0cbd7f58abb74b83e423924b19076",
+  "parent": "e0f42294a1969407742779037ddc9eb3174be76e",
+  "engineering_freeze": "efd77858cd20650213559ceb9cb4d0362db32ea5",
+  "linux_source": "c339f4010dea8b0d754f84ace70cd1b089878ef8",
+  "workflow_url": "https://github.com/k1moradi/swapz/actions/runs/45763872508",
+  "jobs": [
+    {
+      "run_id": 45763872508,
+      "job_id": 139719991043,
+      "url": "https://github.com/k1moradi/swapz/actions/runs/45763872508/job/139719991043",
+      "status": "queued",
+      "conclusion": null,
+      "actual_test_methods": null,
+      "actual_semantic_negatives": null,
+      "actual_failure_histories": null,
+      "actual_cli_negatives": null,
+      "artifact_id": null
+    }
+  ],
+  "first_error": null,
+  "local_git_error": "Could not resolve host: github.com",
+  "local_test_execution": false,
+  "owned_blobs": {
+    "parser": "554d1145729e7b5ff02ceb4357b0fff837c4db95",
+    "tests": "cbcb1413fbd51409988bca67a3451f9af069425f",
+    "contract": "2225144877341c48cf5694c0fba7390b1a2cf87d",
+    "workflow": "70c42237fdf1596b306ab5a9942ce2462c167010",
+    "standards": "18b2101a762092abb0febd94ffec25e534040b27"
+  },
+  "standards": {
+    "parent_blob": "48c8fd42e507d04be37b46302bf0292fc9abf7de",
+    "post_blob": "18b2101a762092abb0febd94ffec25e534040b27",
+    "parent_bytes": 1840110,
+    "append_bytes": 1448,
+    "post_bytes": 1841558,
+    "full_prefix_verified": true,
+    "parent_git_hash_roundtrip": true
+  },
+  "source_mapped_authenticated": false,
+  "phase_a": "BLOCKED",
+  "actual_physical_io": false,
+  "native_capture": false,
+  "actual_native_integration": false,
+  "live_admission": false,
+  "direct_compressed_handoff": false,
+  "forced_raw_bypass": false,
+  "import_active": false,
+  "duplicate_manual_ci": false,
+  "same_round_peer_dependency": false
+}
