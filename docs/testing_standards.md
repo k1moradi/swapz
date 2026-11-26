@@ -20904,3 +20904,7 @@ checks and release/entrant semantic mutants are required; no repeat of R095
 accepted guard corpus. Host results do not prove native workqueue progress,
 module unload, target detach or physical admission. AUTH0, Phase A BLOCKED;
 compressed handoff, forced RAW and import remain OFF.
+
+### R096 Agent 3 legacy verifier compatibility correction
+
+The current DM typed READ transfers its authoritative pin to the final BIO copy caller. The historical ordered-host verifier must assert typed-before-cache ordering and the release after upper copy, rather than require the obsolete helper call. Its isolated host compiler defines the kernel-only unused annotation for the extracted historical wrapper; the original frozen fixtures, product dependency pins, semantic mutants, sanitizer flags and acceptance counts are unchanged. This correction addresses a failed automatically triggered regression, not a manual replay of the accepted R095 composition. AUTH0; Phase A BLOCKED; compressed handoff, forced RAW bypass and import OFF.

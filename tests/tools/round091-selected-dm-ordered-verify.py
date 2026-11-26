@@ -130,9 +130,17 @@ def static_checks(source, patch):
     require("swapz_shared_original_segment_pinned(a, segment)" in source and
             "swapz_shared_storage_relocate(ctx->original_storage" in source, "GC and TRIM guard")
     read = source.split("static int swapz_read(struct swapz_dm *ctx, struct bio *bio)", 1)[1].split("static void swapz_read_slot_prepare(", 1)[0]
-    require(read.index("SWAPZ_MAP_ORIGINAL") < read.index("swapz_round091_read_original(") <
-            read.index("swapz_engine_read_page(") < read.index("swapz_copy_bio_accounted("),
-            "typed READ precedes ordinary cache and upper copy")
+    # R096 transfers the authoritative pin to the actual READ caller.
+    # Keep the original typed-before-cache assertion and prove the new
+    # release point is after the final upper BIO copy.
+    typed_call = "swapz_round096_read_original_pinned("
+    release = "swapz_shared_original_put(&ctx->authority, original_pin)"
+    require(typed_call in read and release in read,
+            "typed READ retained pin call/release")
+    require(read.index("SWAPZ_MAP_ORIGINAL") < read.index(typed_call) <
+            read.index("swapz_engine_read_page(") < read.index("swapz_copy_bio_accounted(") <
+            read.index(release),
+            "typed READ precedes ordinary cache and retains pin through upper copy")
     require("bi_bvec_done" not in source, "obsolete bvec member")
 
 
@@ -180,7 +188,8 @@ def run_compiler(compiler, stage, linux, work, prior, helpers, fragments, eviden
                   "-DSWAPZ_ZSWAP_IMPORT_HOST_TEST=1",
                   "-DSWAPZ_ZSWAP_IMPORT_ORIGINAL_LZO_HOST_TEST=1",
                   "-DSWAPZ_ZSWAP_IMPORT_DECODER_HOST_TEST=1",
-                  "-D_POSIX_C_SOURCE=200809L", "-include", "stddef.h"]
+                  "-D_POSIX_C_SOURCE=200809L", "-D__maybe_unused=__attribute__((unused))",
+                  "-include", "stddef.h"]
     for name in ("authority.c", "engine.c", "codec.c", "zswap-original-storage.c",
                  "zswap-original-extent.c", "zswap-original-ticket.c",
                  "zswap-import-decoder-owner.c", "zswap-original-decode.c",
