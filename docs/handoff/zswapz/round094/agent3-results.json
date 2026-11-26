@@ -1,0 +1,150 @@
+{
+  "round": "094",
+  "agent": 3,
+  "kind": "guarded-target-owner-consumer-source",
+  "conclusion": "SOURCE_PUBLISHED_HOST_CI_PENDING_NO_GO_LIVE",
+  "task_commit": "e4de57c4e96669add5072290870ca199d17d8a04",
+  "engineering_freeze": "efd77858cd20650213559ceb9cb4d0362db32ea5",
+  "original_linux": "c339f4010dea8b0d754f84ace70cd1b089878ef8",
+  "tested_commit": "e18e17021065cba3bb343d300b67cd1fdd20407c",
+  "source_parent": "a71c0473aa4f453e62c1c83b51c8d1f28d3df9ef",
+  "main_publication_verified": true,
+  "expected_head_nonforce": true,
+  "r093": {
+    "source": "ee9b6be46dc99a535439e3372b3004255b4d158d",
+    "parent": "6faf5ce07f189baed3ec02c50608057c75bdd3d6",
+    "census": {
+      "success": 28,
+      "failure": 0
+    },
+    "run": 45666285265,
+    "job": 139389189043,
+    "conclusion": "SUCCESS_HOST_ONLY",
+    "artifact": 15046849132,
+    "artifact_sha256": "3cbd9ae38052b6237d40e9e87ef52f0cc3f0c7297e12989c5a2a1a4a4fc1fb80",
+    "artifact_bytes": 656,
+    "new_download": false,
+    "per_compiler": {
+      "checks": 12708,
+      "claims": 5,
+      "refusals": 3,
+      "typed_reads": 2,
+      "ordered_mutants": 4,
+      "rollback_mutants": 2,
+      "registry_checks": 18
+    },
+    "foreground": {
+      "historical": 24,
+      "typed": 6
+    }
+  },
+  "source_blobs": {
+    "src/kernel/dm-target.c": "63705a000274d649c001f47e604f2393098e1201",
+    "tests/tools/round094-target-owner-verify.py": "8f7283166bf0662c11ffc58f4b3fec879d02a115",
+    ".github/workflows/phase-a-round094-target-owner-host-noauth.yml": "07d59ba8f41e15f90f31c0d71296c84776659d54"
+  },
+  "standards": {
+    "parent_blob": "0c1e9246da8be4c56b66369fe99bbef91f2ac3c5",
+    "parent_bytes": 1832864,
+    "postimage_blob": "f4951b7cc7bb63f71b7b3f3b8f3d05349803b46c",
+    "postimage_bytes": 1834574,
+    "append_bytes": 1710,
+    "full_prefix_verified": true,
+    "raw_roundtrip_verified": true
+  },
+  "integration": {
+    "guard": "SWAPZ_ROUND094_TARGET_OWNER_TEST",
+    "constructor_resume_setup": "IMPLEMENTED",
+    "owner_abi_consumer": "IMPLEMENTED",
+    "peer_implementation_used": false,
+    "actual_native_peer_composition": false,
+    "broker_slots": 8,
+    "one_retained_cap": true,
+    "real_lower_callbacks_wired": true,
+    "actual_lower_io": false,
+    "storage_decoder_setup": "IMPLEMENTED_UNQUALIFIED",
+    "pointer_bridge_tokens": 64,
+    "rollback": "IMPLEMENTED_UNQUALIFIED",
+    "generation_publication": "IMPLEMENTED_UNQUALIFIED",
+    "range": {
+      "first": 1,
+      "last": 16,
+      "bytes": 64
+    },
+    "primary_map_bytes": 20,
+    "ordered_claim_gate": false,
+    "normal_kbuild_changed": false,
+    "exceptional_teardown_quarantine": true,
+    "final_dtr_busy_owner_recovery": "UNQUALIFIED",
+    "native_teardown": "NOT_RUN",
+    "native_event_capture": false
+  },
+  "local": {
+    "checkout": "BLOCKED",
+    "first_error": "git ls-remote exit128: Could not resolve host: github.com",
+    "compiler": "NOT_RUN",
+    "diff_check": "NOT_RUN"
+  },
+  "github_ci": {
+    "source": "e18e17021065cba3bb343d300b67cd1fdd20407c",
+    "initial_automatic_runs": 29,
+    "focused": {
+      "run": 45756808031,
+      "job": 139697238859,
+      "status": "QUEUED",
+      "conclusion": null,
+      "first_error": null,
+      "artifact": null,
+      "actual_compiler_checks": null,
+      "actual_killed_mutants": null,
+      "planned_mutants": [
+        "no_generation_invalidate",
+        "ignore_pending_fifo",
+        "ignore_gc",
+        "ignore_route_epoch",
+        "no_install_rollback",
+        "erase_replacement_route"
+      ]
+    },
+    "ordered": {
+      "run": 45756807994,
+      "job": 139697238310,
+      "status": "QUEUED"
+    },
+    "product": {
+      "run": 45756807998,
+      "compile_jobs": [
+        139697238165,
+        139697238433
+      ],
+      "exact_c_jobs": [
+        139697238527,
+        139697238643
+      ],
+      "status": "QUEUED"
+    },
+    "prototype": {
+      "run": 45756808068,
+      "job": 139697238295,
+      "status": "QUEUED"
+    }
+  },
+  "first_error": null,
+  "AUTH": 0,
+  "source_mapped_authenticated": false,
+  "phase_a": "BLOCKED",
+  "direct_compressed_handoff": false,
+  "forced_raw_bypass": false,
+  "import_active": 0,
+  "actual_native_dm": false,
+  "actual_lower_durable_io": false,
+  "actual_upper_ack": false,
+  "new_manual_ci_dispatches": 0,
+  "vm_tests": false,
+  "module_loading": false,
+  "physical_mutation": false,
+  "privileged_tests": false,
+  "branch_created": false,
+  "pr_created": false,
+  "force_push": false
+}
