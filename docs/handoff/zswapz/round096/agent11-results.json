@@ -2,7 +2,7 @@
   "round": "096",
   "agent": 11,
   "kind": "actual-staged-producer-source-linked-host-only",
-  "conclusion": "QUEUED",
+  "conclusion": "PASS_ACTUAL_BUILTIN_OWNER_RETRY_HOST_ONLY",
   "tested_commit": "83e0f1dcc6d9fbc8aebab5040b1a2e451a5bcd1d",
   "source_parent": "eec8cbdc856c4d9b26da5c342c234a041b3ce727",
   "engineering_freeze": "cb38c5de310edc4842e77099b92fc709e1934322",
@@ -15,15 +15,32 @@
     {
       "id": 139937142637,
       "name": "mm-owner-retry-host",
-      "status": "queued",
-      "conclusion": null,
-      "url": "https://github.com/k1moradi/swapz/actions/runs/45828025182/job/139937142637"
+      "status": "completed",
+      "conclusion": "success",
+      "url": "https://github.com/k1moradi/swapz/actions/runs/45828025182/job/139937142637",
+      "steps_success": 9
     }
   ],
-  "artifact": null,
-  "checks_per_compiler": null,
-  "retries_per_compiler": null,
-  "mutants_per_compiler": null,
+  "artifact": {
+    "id": 15120768402,
+    "bytes": 2667,
+    "sha256": "2e9c6614be3bc3ec6e3c99bcdd0f87ebf1681045f9a4f4075c038248d54c020a",
+    "url": "https://github.com/k1moradi/swapz/actions/runs/45828025182/artifacts/15120768402",
+    "archive_independently_extracted": false,
+    "digest_verified_against_upload_log": true
+  },
+  "checks_per_compiler": {
+    "gcc": 37,
+    "clang": 37
+  },
+  "retries_per_compiler": {
+    "gcc": 4,
+    "clang": 4
+  },
+  "mutants_per_compiler": {
+    "gcc": 2,
+    "clang": 2
+  },
   "configured_mutants_per_compiler": 2,
   "first_error": null,
   "local_transport_error": "Could not resolve host: github.com",
@@ -42,7 +59,8 @@
     "blob": "ef9dfb936a96af9789488b530e33a287e1ffd128",
     "bytes": 1865716,
     "complete_prefix_readback": true,
-    "ci_prefix_check": "QUEUED"
+    "ci_prefix_check": "PASS",
+    "parent_sha256": "aa41fce74208f427a7cc70126f3e2f1c888d73e891038a101a83e4650dc5640e"
   },
   "pins": {
     "ticket_c_pre": "ba5e891ef7f80bf0b3021ee6c676529cb72f1972",
@@ -56,8 +74,15 @@
   },
   "limitations": [
     "Host workqueue/RCU/module/geometry modeled; no native workqueue progress or target detach proof",
-    "Exact-source focused host CI queued, no compiled result or artifact yet",
     "Separate staged producer overlay, no change to A10 frozen native composition",
-    "No physical or activation authorization"
-  ]
+    "No physical or activation authorization",
+    "Artifact metadata and upload digest agree; archive not independently extracted"
+  ],
+  "semantic_mutants_total": 4,
+  "actual_git_apply_and_postimages": "PASS",
+  "baseline_asan_ubsan_leak": "PASS_HOST_ONLY",
+  "exact_source_workflow_census": {
+    "queued": 9,
+    "success": 1
+  }
 }

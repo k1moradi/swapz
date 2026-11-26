@@ -23,3 +23,13 @@ Proposed future native observation points (not activated): exact eligible cookie
 ## Standards and safety
 
 Complete actual-parent standards blob 855b4e5a533f60ff5dcf72fb048d6eebea1ee9bf (1,864,270 bytes) reconstructed and matched its exact Git blob SHA; appended 1,446 bytes, read back exact parent prefix + appendix, new blob ef9dfb936a96af9789488b530e33a287e1ffd128 (1,865,716 bytes). No historical truncation. CI independent push-before prefix check pending. No branch/PR/force, VM, boot/load, privileged/physical operation or activation. AUTH=0; Phase A BLOCKED; compressed handoff, forced RAW and import OFF. No qualified native composition or physical candidate claimed.
+
+## Terminal focused reconciliation
+
+**PASS_ACTUAL_BUILTIN_OWNER_RETRY_HOST_ONLY**, superseding the queued publication snapshot above. Exact tested source 83e0f1dcc6d9fbc8aebab5040b1a2e451a5bcd1d, [run 45828025182 / job 139937142637](https://github.com/k1moradi/swapz/actions/runs/45828025182/job/139937142637) terminal success; all nine listed job steps succeeded, including exact source/sole parent/policy/complete standards prefix, pinned original Linux, actual git-apply and postimage checks, strict host compilation/execution and artifact upload. Raw log:
+```
+complete standards prefix 1864270 1865716 aa41fce74208f427a7cc70126f3e2f1c888d73e891038a101a83e4650dc5640e
+gcc PASS_HOST_ONLY R096 A11 checks=37 retries=4
+clang PASS_HOST_ONLY R096 A11 checks=37 retries=4
+```
+Two configured semantic mutants per compiler killed (four total) by successful verifier, which requires exit 77 and exact witness rather than compiler failure or crash. Baseline ASan/UBSan and leak detection succeeded. Counts directly from actual logs; mutants established by verifier inventory/success. First focused error: none. [Artifact 15120768402](https://github.com/k1moradi/swapz/actions/runs/45828025182/artifacts/15120768402), 2,667 bytes, SHA256 2e9c6614be3bc3ec6e3c99bcdd0f87ebf1681045f9a4f4075c038248d54c020a; upload log and artifact metadata agree and artifact source head matches. Archive contents not independently extracted in this session. Exact-source workflow census at terminal inspection: {"queued":9,"success":1}. No additional dispatch or rerun, no whole-main qualification. Host RCU/module/workqueue modeling remains explicit; actual native retry compilation, kernel workqueue execution/progress, target detach and physical behavior not qualified. A10 sole independent frozen native lane; new staged retry overlay is not a same-round input for it. No native capture activation; AUTH0, Phase A BLOCKED, compressed handoff/forced RAW/import OFF.
