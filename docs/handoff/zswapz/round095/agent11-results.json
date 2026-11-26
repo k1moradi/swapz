@@ -2,7 +2,7 @@
   "round": "095",
   "agent": 11,
   "kind": "staged-MM-capture-gate-and-actual-owner-host-boundary",
-  "conclusion": "QUEUED",
+  "conclusion": "PASS_HOST_BOUNDARY_ONLY",
   "engineering_freeze": "ff972661a75ca7f8c3c0458c3feb8b603c185eb8",
   "task_commit": "20122e158beef6266bd01bb545951a2a4f77d9d5",
   "source_commit": "62171f7502ab4d2dcc2e762abb534206bbcff7d6",
@@ -43,7 +43,8 @@
     "dtr_quarantine_recovery_unqualified": true,
     "ordinary_full_page_decompression_remains": true,
     "ordinary_preparation_remains": true,
-    "native_event_mapping": "SOURCE_ANCHORS_ONLY"
+    "native_event_mapping": "SOURCE_ANCHORS_ONLY",
+    "mm_r095_git_apply_postimage": "PASS"
   },
   "standards": {
     "parent_blob": "662bf821b4e1b68fb16dc2d22c7a83988d431d37",
@@ -51,25 +52,39 @@
     "parent_bytes": 1854889,
     "new_bytes": 1856114,
     "appended_bytes": 1225,
-    "complete_prefix_verified": true
+    "complete_prefix_verified": true,
+    "ci_parent_sha256": "3017af065be40b6f733ec3d78436a648b9dc6bc83be24041257ad816acf9bf27"
   },
   "workflow_url": "https://github.com/k1moradi/swapz/actions/runs/45798829320",
   "jobs": [
     {
       "id": 139836382630,
       "run_id": 45798829320,
-      "status": "queued",
-      "conclusion": null,
+      "status": "completed",
+      "conclusion": "success",
       "url": "https://github.com/k1moradi/swapz/actions/runs/45798829320/job/139836382630"
     }
   ],
-  "artifact": null,
+  "artifact": {
+    "id": 15105438172,
+    "bytes": 2559,
+    "sha256": "49f18128969d30ef08e851e053a068516ffdb2007cfec98908dc6929885d26a7",
+    "url": "https://github.com/k1moradi/swapz/actions/runs/45798829320/artifacts/15105438172",
+    "head_sha": "62171f7502ab4d2dcc2e762abb534206bbcff7d6",
+    "archive_extracted": false
+  },
   "first_error": null,
-  "host_counts": null,
-  "mutation_counts": null,
+  "host_counts": {
+    "gcc": 24,
+    "clang": 24
+  },
+  "mutation_counts": {
+    "gcc": 2,
+    "clang": 2
+  },
   "local_compile": "NOT_RUN_DNS",
   "local_transport_first_error": "Could not resolve host: github.com",
-  "strict_warnings": "PENDING",
+  "strict_warnings": "PASS_GCC_CLANG",
   "native": "NOT_RUN_A10_ONLY",
   "native_event_authentication": false,
   "source_mapped_authenticated": false,
@@ -95,5 +110,16 @@
   },
   "no_manual_dispatch": true,
   "no_old_corpus_replay": true,
-  "peer_dependencies": []
+  "peer_dependencies": [],
+  "mutation_witnesses": [
+    "disabled_store",
+    "disabled_eviction"
+  ],
+  "mutation_evidence": "Exact verifier success requires exit 77 and matching witness for both mutants on each compiler; raw logs print baseline counts only; archive not independently extracted.",
+  "exact_source_workflow_census_at_terminal_inspection": {
+    "success": 3,
+    "queued": 5,
+    "in_progress": 2
+  },
+  "evidence_initial_commit": "f6f5b1c233bf3c1e13470401fd9cedf6a1b0d409"
 }
