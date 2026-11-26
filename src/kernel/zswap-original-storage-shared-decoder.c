@@ -56,7 +56,7 @@ static int outside_authority(const struct swapz_authority *a,
 
 static int ready(const struct swapz_shared_storage_decoder *storage)
 {
-	return storage && storage->state == STORAGE_OPEN &&
+	return storage && storage->state == STORAGE_OPEN && storage->ops.gate &&
 		storage->storage.authority &&
 		storage->storage.authority->original == &storage->storage.owner;
 }
@@ -180,22 +180,36 @@ int swapz_shared_storage_decoder_init(struct swapz_shared_storage_decoder *stora
 	int error;
 
 	if (!storage || storage->state || !ops || !ops->write || !ops->flush ||
-	    !ops->read || !ops->reserve_epoch ||
+	    !ops->read || !ops->reserve_epoch || !ops->gate ||
+	    !ops->session || ops->session == ~(swapz_u64)0 ||
+	    ops->session != ops->broker_epoch ||
 	    !outside_authority(authority, storage, sizeof(*storage)) ||
-	    !disjoint(storage, sizeof(*storage), ops, sizeof(*ops)))
+	    !outside_authority(authority, ops->gate, sizeof(*ops->gate)) ||
+	    !disjoint(storage, sizeof(*storage), ops, sizeof(*ops)) ||
+	    !disjoint(storage, sizeof(*storage), ops->gate, sizeof(*ops->gate)) ||
+	    !disjoint(ops, sizeof(*ops), ops->gate, sizeof(*ops->gate)))
 		return -EINVAL;
 	storage->ops = *ops;
-	error = swapz_shared_storage_init(&storage->storage, authority, &lower);
+	storage->epoch = ops->session;
+	/* The actual stable gate burns the exact session before provider init.
+	 * The ordered external owner prevents entry until storage attaches. */
+	storage->state = STORAGE_FAULTED;
+	error = swapz_original_decoder_shared_gate_open(ops->gate, &storage->provider,
+		&decoder, SWAPZ_SHARED_ORIGINAL_CAPACITY, ops->session, ops->broker_epoch);
 	if (error)
 		return error;
-	error = swapz_original_decoder_shared_init(&storage->provider, &decoder,
-		SWAPZ_SHARED_ORIGINAL_CAPACITY, &storage->epoch);
+	error = swapz_shared_storage_init(&storage->storage, authority, &lower);
 	if (error) {
-		/* An uncertain provider unwind must not be reused. */
-		storage->state = STORAGE_FAULTED;
-		if (swapz_shared_storage_close(&storage->storage))
-			return -EUCLEAN;
-		return error;
+		int close_error;
+
+		close_error = swapz_original_decoder_shared_gate_begin_close(ops->gate,
+			storage->epoch);
+		if (!close_error)
+			close_error = swapz_original_decoder_shared_gate_finish_close(ops->gate,
+				storage->epoch);
+		/* A failed initialization is never reusable; uncertain close
+		 * retains the external owner/context instead of losing identity. */
+		return close_error ? close_error : error;
 	}
 	storage->state = STORAGE_OPEN;
 	return 0;
@@ -219,6 +233,7 @@ int swapz_shared_storage_decoder_read(struct swapz_shared_storage_decoder *stora
 		return -EINVAL;
 	for (index = 0; index < sizeof(buffers) / sizeof(buffers[0]); ++index) {
 		if (!disjoint(buffers[index], capacity, storage, sizeof(*storage)) ||
+		    !disjoint(buffers[index], capacity, storage->ops.gate, sizeof(*storage->ops.gate)) ||
 		    !outside_authority(storage->storage.authority, buffers[index], capacity))
 			return -EINVAL;
 		for (prior = 0; prior < index; ++prior)
@@ -235,7 +250,7 @@ int swapz_shared_storage_decoder_read(struct swapz_shared_storage_decoder *stora
 		return error;
 	storage->scoped_pin = pin;
 	storage->scoped_bytes = compressed;
-	error = swapz_original_decoder_shared_read(&storage->provider, pin, &expected,
+	error = swapz_original_decoder_shared_gate_read(storage->ops.gate, epoch, pin, &expected,
 		SWAPZ_ORIGINAL_DECODE_M3568, scratch, capacity, verified, capacity,
 		output, capacity);
 	storage->scoped_bytes = NULL;
@@ -261,9 +276,9 @@ int swapz_shared_storage_decoder_close(struct swapz_shared_storage_decoder *stor
 	if (error)
 		return error;
 	storage->state = STORAGE_FAULTED;
-	error = swapz_original_decoder_shared_begin_close(&storage->provider, storage->epoch);
+	error = swapz_original_decoder_shared_gate_begin_close(storage->ops.gate, storage->epoch);
 	if (!error)
-		error = swapz_original_decoder_shared_finish_close(&storage->provider, storage->epoch);
+		error = swapz_original_decoder_shared_gate_finish_close(storage->ops.gate, storage->epoch);
 	if (!error)
 		storage->state = STORAGE_CLOSED;
 	return error;

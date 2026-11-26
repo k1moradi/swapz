@@ -1,12 +1,12 @@
-name: "Shared storage authoritative pin decoder HOST ONLY NO_AUTH"
+name: "R096 shared storage gated original stream HOST ONLY NO_AUTH"
 on:
   push:
     branches: [main]
     paths:
       - "src/kernel/zswap-original-storage-shared-decoder.c"
       - "src/kernel/zswap-original-storage-shared-decoder.h"
-      - "tests/runtime/native/fixtures/round095-shared-storage-shared-decoder.c"
-      - "tests/tools/round095-shared-storage-shared-decoder-verify.py"
+      - "tests/runtime/native/fixtures/round096-shared-storage-gated-decoder.c"
+      - "tests/tools/round096-shared-storage-gated-decoder-verify.py"
       - ".github/workflows/phase-a-shared-storage-shared-decoder-host-noauth.yml"
 permissions:
   contents: read
@@ -41,16 +41,16 @@ jobs:
             lib/lz4/lz4_compress.c
             lib/lz4/lz4_decompress.c
             lib/lz4/lz4defs.h
-      - name: Actual pinned storage and original codecs, RAM lower only
+      - name: Actual pinned storage gate and original codecs, RAM lower only
         working-directory: swapz
         env:
           SWAPZ_PUSH_BEFORE_SHA: ${{ github.event.before }}
-        run: python3 -B tests/tools/round095-shared-storage-shared-decoder-verify.py ../original-linux "$RUNNER_TEMP/agent5-shared"
+        run: python3 -B tests/tools/round096-shared-storage-gated-decoder-verify.py ../original-linux "$RUNNER_TEMP/agent5-shared"
       - name: Retain private first cause and real join verdict
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: round095-agent5-shared-storage-authoritative-pin
+          name: round096-agent5-shared-storage-gated-exact-stream
           path: ${{ runner.temp }}/agent5-shared
           if-no-files-found: warn
           retention-days: 14

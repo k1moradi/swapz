@@ -18,15 +18,26 @@ struct swapz_shared_storage_decoder_ops {
 	int (*flush)(void *);
 	int (*read)(void *, swapz_u32, swapz_u8 *, swapz_u32, swapz_u32 *);
 	int (*reserve_epoch)(void *, swapz_u64 *);
+	/* Retained external gate and exact fresh broker cap pair. Caller
+	 * initializes the gate once and consumes the cap in reserve_epoch.
+	 * Host fixtures explicitly model that external broker boundary. */
+	struct swapz_original_decoder_shared_gate *gate;
+	swapz_u64 session;
+	swapz_u64 broker_epoch;
 };
 
 /* One externally retained, sleepable ordered owner serializes ALL access,
  * including authority mutations, pin/put, callbacks and close. No reentry,
  * no independent provider entry, no resetting authority while attached.
- * Revoke/join external entrants before close; a pin remains held through
- * the decoder's final output copy. Fresh zeroed instance only at init.
+ * Retain the external gate before entry, through return and exact pin put;
+ * revoke/join all pre-lock entrants before close or freeing the gate.
+ * A pin remains held through the decoder's final output copy.
+ * Fresh zeroed storage instance only at init; never reset the gate on reopen.
  * The legacy decoder field carries a non-owning attachment marker, NOT
  * a provider lease. The actual authority sidecar is the only record table.
+ * Gate lifetime and the fresh exact broker cap are external to storage.
+ * A failed bind burns the session; caller closes that exact cap before
+ * reopening with a new identity, and quarantines any uncertain unwind.
  * The provider lifetime covers all current and retired storage records.
  * Use embedded storage only for frozen write/reserve/commit/cancel/relocate
  * under that owner; never use its init/close or call provider directly.
@@ -48,7 +59,8 @@ int swapz_shared_storage_decoder_init(struct swapz_shared_storage_decoder *,
 /* Existing retained authority pin, not a new pin or a caller snapshot.
  * Caller supplies the captured lifetime epoch, never a refreshed epoch for
  * an old pin. Pins are numeric and may restart after authority reinit.
- * Exactly one lower read. Four disjoint page buffers; output unchanged
+ * Exactly one lower read, followed by actual gate admission. Four
+ * disjoint page buffers (also disjoint from the external gate); output unchanged
  * on error. Caller puts the exact pin separately, only after return. */
 int swapz_shared_storage_decoder_read(struct swapz_shared_storage_decoder *,
 	swapz_u64 epoch, swapz_u64 pin, swapz_u8 *compressed, swapz_u8 *scratch,
