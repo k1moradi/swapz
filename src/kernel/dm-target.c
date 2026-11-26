@@ -12654,7 +12654,8 @@ unlock:
  * The optional candidate never owns another BIO or a producer lane.
  */
 static bool swapz_round091_process_candidate(struct swapz_dm *ctx,
-					      struct swapz_bio_ref *entry)
+					      struct swapz_bio_ref *entry,
+					      bool permit_claim)
 {
 	const struct swapz_ticket_key *key = &entry->original_view.key;
 	struct swapz_authority_import_spec spec = {};
@@ -12666,7 +12667,10 @@ static bool swapz_round091_process_candidate(struct swapz_dm *ctx,
 	if (!entry->original_candidate.broker)
 		return false;
 	lockdep_assert_held(&ctx->ordered_owner);
-	if (!swapz_round091_ordered_claim_permitted() ||
+	/* Only the source-extracted rootless fixture supplies true; the sole
+	 * native caller supplies the hard-false live gate.
+	 */
+	if (!permit_claim ||
 	    !ctx->original_storage || !ctx->original_decoder_bridge ||
 	    ctx->original_storage->authority != &ctx->authority ||
 	    ctx->original_storage->ops.context != ctx->original_decoder_bridge ||
@@ -12755,7 +12759,8 @@ static void swapz_process(struct swapz_dm *ctx, struct bio *bio)
 	{
 		struct swapz_bio_ref *entry = dm_per_bio_data(bio, sizeof(*entry));
 
-		if (swapz_round091_process_candidate(ctx, entry))
+		if (swapz_round091_process_candidate(ctx, entry,
+					swapz_round091_ordered_claim_permitted()))
 			return;
 	}
 #endif
@@ -15108,6 +15113,12 @@ static bool swapz_round090_provider_lookup(struct block_device *bdev,
 	bool found = false;
 
 	*route = (struct swapz_mm_route){};
+	/* No speculative capture, hashing or broker slot consumption when
+	 * the live ordered claim is disabled. Host integration exercises
+	 * the snapshot/retain helpers directly, never this live callback.
+	 */
+	if (!swapz_round091_ordered_claim_permitted())
+		return false;
 	if (!bdev || !sector || sector % SWAPZ_SECTORS || !length ||
 	    length > SWAPZ_MAX_COMPRESSED ||
 	    (codec != SWAPZ_TICKET_LZ4 && codec != SWAPZ_TICKET_LZO1X))
@@ -15170,8 +15181,12 @@ static const struct swapz_mm_route_provider swapz_round090_provider = {
 static void swapz_round090_candidate_get(struct dm_target *ti, struct bio *bio,
 		struct swapz_ticket_ref *ref, struct swapz_ticket_view *view)
 {
-	const struct bio *origin = dm_swapz_round090_selected_origin(ti, bio);
+	const struct bio *origin;
 
+	/* Avoid even the selected-origin lookup/retain while claim is OFF. */
+	if (!swapz_round091_ordered_claim_permitted())
+		return;
+	origin = dm_swapz_round090_selected_origin(ti, bio);
 	if (!origin || swapz_mm_candidate_get(origin, ref))
 		return;
 	if (swapz_ticket_view(ref, view))
