@@ -1,0 +1,122 @@
+{
+  "round": "095",
+  "agent": 5,
+  "kind": "actual-authoritative-storage-pin-shared-decoder-join",
+  "conclusion": "IN_PROGRESS",
+  "tested_commit": "34ef333e5054f6428776dcfab63baa6309c1d4ac",
+  "parent": "1134a184b592a44a4584a444c1933d22ad51a2d8",
+  "engineering_freeze": "ff972661a75ca7f8c3c0458c3feb8b603c185eb8",
+  "task_commit": "20122e158beef6266bd01bb545951a2a4f77d9d5",
+  "source_published": true,
+  "report_ready": false,
+  "workflow_url": "https://github.com/k1moradi/swapz/actions/runs/45770731713",
+  "jobs": [
+    {
+      "run_id": 45770731713,
+      "job_id": 139742467480,
+      "url": "https://github.com/k1moradi/swapz/actions/runs/45770731713/job/139742467480",
+      "status": "in_progress",
+      "conclusion": null,
+      "actual_compilers": null,
+      "actual_checks": null,
+      "actual_layout": null,
+      "actual_mutants": null,
+      "actual_read_counts": null
+    }
+  ],
+  "first_error": null,
+  "artifacts": [],
+  "source_blobs": {
+    "src/kernel/zswap-original-storage-shared-decoder.h": "b18f05a0d326dfe594e6695f13f757e313a1c3d8",
+    "src/kernel/zswap-original-storage-shared-decoder.c": "05fa6a716dcd5b5fd6a531a63908b2e9bb53cb8f",
+    "tests/runtime/native/fixtures/round095-shared-storage-shared-decoder.c": "5f24c1940f6af73878c50ca0c373a7f14d2e0d4c",
+    "tests/tools/round095-shared-storage-shared-decoder-verify.py": "f29f2f363c338e31ccd9f74194d870cf7392dc60",
+    ".github/workflows/phase-a-shared-storage-shared-decoder-host-noauth.yml": "f812f10c01258a8478bbc00b3e35c4d677e8ab65"
+  },
+  "frozen_inputs": {
+    "shared_decoder_c": "a5432d7330134c08a44356f49ef47cf0d02080ee",
+    "shared_decoder_h": "4cffad5778872b063eda7d8e5d781aa508f547cd",
+    "storage_c": "1f9030030f5d0fb3b06d0b0a159dd8aa6818f8dd",
+    "storage_h": "38924c3931419a93a7783de9ba622024a5e2e65c",
+    "authority_c": "14fe52cf4cf28f18568d3bf2b6ced449c9c182a3",
+    "authority_h": "c63741157141b2aa9a15de1e9182e27435fc0a3e",
+    "value_storage_c": "8f532824e9c63a6498d71fcb1ce4c35b18130f1e",
+    "value_storage_h": "9b6be5452ff9a7ecb20fb8e661b593c290cc8b7e",
+    "original_linux": "c339f4010dea8b0d754f84ace70cd1b089878ef8",
+    "lz4_compressor_postimage": "63eb4be2e23caf770649af18f6a7b2b82d79a5e7",
+    "lz4_decoder_postimage": "8ca9e57ea0d03918e85e4aabcf472fe906b6bc7f",
+    "input_pinning": "exact freeze archive plus 17 explicit C/H blobs; current authored source and staging helper hashes checked in new CI"
+  },
+  "standards": {
+    "parent_blob": "f2d115f932ba471599840bced09ea1f616d486e0",
+    "parent_bytes": 1844928,
+    "source_blob": "ba5eaedece0dd7b952a8f1947c47fb529d3ec26e",
+    "source_bytes": 1846390,
+    "append_bytes": 1462,
+    "full_prefix_verified": true
+  },
+  "preflight": {
+    "local_git": "DNS failed exit 128",
+    "local_compile": "NOT_RUN",
+    "local_diff_check": "NOT_RUN",
+    "local_policy": "NOT_RUN",
+    "remote_compare": "one commit, 5 added paths and standards append only",
+    "publication": "first proposed parent advanced before ref update; reattached new files and exact standards appendix to fresh parent; expected-head nonforce success"
+  },
+  "previous_r094": {
+    "source": "f8cac65c8adc76c13fd14b664f8f850b188e91b4",
+    "run_id": 45763614607,
+    "jobs": [
+      139719164506,
+      139719165135
+    ],
+    "conclusion": "PASS_HOST_ONLY",
+    "verified_terminal_logs": true,
+    "checks_each": 8972,
+    "mutants_each": 13,
+    "real_checks_per_compiler": {
+      "lz4": 8349,
+      "lzo1x": 8348
+    },
+    "real_record_get_put_each": [
+      5,
+      5
+    ],
+    "transient_get_put_each": [
+      5,
+      5
+    ],
+    "artifact_ids": [
+      15090673470,
+      15091411797
+    ],
+    "artifact_digest_provenance": "R094 Agent1 independently verified; not downloaded again",
+    "replayed": false
+  },
+  "design": {
+    "new_opt_in_only": true,
+    "ordinary_map_abi": "unchanged",
+    "old_pointer_value_abi": "unchanged",
+    "record_identity": "captured lifecycle epoch, nonwrapping allocator sequence, authoritative sidecar index, codec/version",
+    "new_decoder_record_table": false,
+    "per_record_provider_lease": false,
+    "existing_authority_capacity": 8,
+    "scope": "one sole ordered owner; no callback reentry or independent provider entry; external lifetime retained through final output copy",
+    "single_lower_read": "source contract; actual test counts pending",
+    "epoch": "MODELED_EXTERNAL_HOST_AUTHORITY",
+    "lower": "MODELED_RAM_ONLY",
+    "native": "NOT_RUN",
+    "production_scale": "UNQUALIFIED",
+    "same_round_peer_dependency": false
+  },
+  "source_mapped_authenticated": 0,
+  "phase_a": "BLOCKED",
+  "direct_compressed_handoff": "DISABLED",
+  "forced_raw_bypass": "DISABLED",
+  "import_active": 0,
+  "physical_io": false,
+  "vm": false,
+  "module_load": false,
+  "manual_dispatch": false,
+  "accepted_corpus_replayed": false
+}
