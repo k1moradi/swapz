@@ -1,0 +1,21 @@
+diff --git a/mm/zswap.c b/mm/zswap.c
+--- a/mm/zswap.c
++++ b/mm/zswap.c
+@@ -1029,1 +1029,10 @@
++/* Live ordered claim is hard-disabled in the frozen target. A route snapshot
++ * is not admission. Keep speculative MM capture OFF until a separately
++ * qualified authorization contract exists; no runtime observation bypass.
++ */
++static bool swapz_mm_capture_permitted(void)
++{
++	return false;
++}
++
+ static void swapz_mm_capture(struct zswap_entry *entry, struct folio *folio,
+@@ -1293,1 +1302,1 @@
+-	if (!mapped)
++	if (!mapped && swapz_mm_capture_permitted())
+@@ -1431,1 +1440,2 @@
+-	swapz_mm_preerase(entry, folio, swpentry, &ctx);
++	if (swapz_mm_capture_permitted())
++		swapz_mm_preerase(entry, folio, swpentry, &ctx);

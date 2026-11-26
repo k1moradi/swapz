@@ -20830,3 +20830,8 @@ checks. No accepted old parser or recorder corpus replay, no new workflow
 lane, no native compile/VM/load/physical action. Host timings and zero loss
 in exercised schedules do not establish native performance or completeness.
 AUTH0 Phase A BLOCKED; compressed handoff, forced RAW and import OFF.
+
+
+## Round095 Agent11 — disabled MM capture and actual owner boundary
+
+The frozen R094 target can return a speculative route despite hard-false ordered claim. The R095 staged MM-only overlay must keep capture and preerase call sites hard-disabled (cookie reset retained) until separately qualified authorization exists; no native observation bypass, per-store hash/cache, new reclaim or ordinary fallback change. Original full-page decompression and ordinary disk preparation remain unqualified overhead, not zero-copy claims. Verify exact original Linux and R089/R090/R091/R092 MM pre/postimages, R092/R094 broker C/H, owner include and frozen target. Source-linked host checks exercise disabled store/eviction and actual MM lookup/candidate/deferred-release functions with actual eight-slot M3568 broker; modeled RCU, geometry, module and allocator primitives are not native execution. Strict GCC/Clang C23-family warnings, ASan/UBSan, baseline leak detection and semantic guard-removal witnesses only. No replay of accepted owner corpus, native object retry, VM, load or physical operation; A10 alone qualifies frozen integrated native link. AUTH0, Phase A BLOCKED, direct compressed handoff, forced RAW and import OFF.
