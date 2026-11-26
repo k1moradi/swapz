@@ -1,0 +1,64 @@
+name: Round094 Agent7 actual shared decoder native object NO_AUTH
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'tests/tools/round094-decoder-shared-provider-native-verify.py'
+      - '.github/workflows/phase-a-round094-decoder-shared-provider-native-noauth.yml'
+permissions:
+  contents: read
+jobs:
+  shared-decoder-native-object:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          path: swapz
+          fetch-depth: 2
+          persist-credentials: false
+      - name: Canonical source, actual parent and standards
+        working-directory: swapz
+        env:
+          SWAPZ_PUSH_BEFORE_SHA: ${{ github.event.before }}
+        run: |
+          set -Eeuo pipefail
+          test "$GITHUB_REF" = refs/heads/main
+          test "$(git branch --show-current)" = main
+          test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
+          test "$(git rev-parse HEAD^)" = "$SWAPZ_PUSH_BEFORE_SHA"
+          test "$(git rev-list --parents -n1 HEAD | wc -w)" -eq 2
+          test -z "$(git status --porcelain --untracked-files=all)"
+          git diff --check HEAD^ HEAD
+          python3 -B tests/runtime/native/repository-policy-test.py --enforce
+          python3 - <<'PY'
+          from pathlib import Path
+          import subprocess
+          parent = subprocess.check_output(["git", "show", "HEAD^:docs/testing_standards.md"])
+          current = Path("docs/testing_standards.md").read_bytes()
+          assert current.startswith(parent) and len(current) > len(parent)
+          print("complete standards prefix", len(parent), len(current))
+          PY
+      - uses: actions/checkout@v4
+        with:
+          repository: torvalds/linux
+          ref: c339f4010dea8b0d754f84ace70cd1b089878ef8
+          path: linux
+          fetch-depth: 1
+          persist-credentials: false
+      - name: Single actual shared provider native compile, no host replay
+        run: |
+          set -Eeuo pipefail
+          umask 077
+          python3 -B swapz/tests/tools/round094-decoder-shared-provider-native-verify.py \
+            --linux linux --out "$RUNNER_TEMP/r094-a7-native-build" \
+            --module "$RUNNER_TEMP/r094-a7-native-object" \
+            --evidence "$RUNNER_TEMP/r094-a7-native-evidence"
+      - name: Retain native object and bounded diagnostics
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: round094-agent7-shared-provider-native-object
+          path: ${{ runner.temp }}/r094-a7-native-evidence/
+          if-no-files-found: warn
+          retention-days: 14
