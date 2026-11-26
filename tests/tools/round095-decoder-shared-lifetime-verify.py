@@ -133,7 +133,7 @@ def main():
     evidence = args.evidence_dir.resolve()
     evidence.mkdir(parents=True, exist_ok=True, mode=0o700)
     linux = args.linux_root.resolve()
-    report = {"round": "094", "agent": 7, "status": "FAIL", "linux_pin": PIN,
+    report = {"round": "095", "agent": 7, "status": "FAIL", "linux_pin": PIN,
               "compilers": {}, "first_error": None, "source_authenticated": 0,
               "phase_a": "BLOCKED", "direct_compressed_handoff": False,
               "forced_raw_bypass": False, "import_active": False, "native": "NOT_RUN"}

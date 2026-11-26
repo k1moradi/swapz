@@ -12,6 +12,9 @@ permissions:
   contents: read
 jobs:
   actual-shared-decoder-lifetime-host:
+    # Metadata-only correction is not a new lifetime corpus.
+    if: >-
+      github.event.head_commit.message != 'ci(zswapz): quote the R094 replay exclusion'
     runs-on: ubuntu-24.04
     timeout-minutes: 25
     steps:
