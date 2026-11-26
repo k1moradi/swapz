@@ -369,5 +369,26 @@
     "Controller readiness is source-mapped design, not actual external control implementation; exact scope, upper ACK, built-in retry retirement witness, workload reference binding and native full linkage remain blockers",
     "Existing broad automatic source-push jobs not qualified as whole-main; no manual rerun"
   ],
-  "next_action": "Agent1 integrate independently corrected A3/A11 producer/consumer with selected recorder, qualify actual native SMP connected composition and controller/debt/oracle boundaries before separate bounded approval."
+  "next_action": "Agent1 integrate independently corrected A3/A11 producer/consumer with selected recorder, qualify actual native SMP connected composition and controller/debt/oracle boundaries before separate bounded approval.",
+  "agent1_terminal_reconciliation": {
+    "source": "13ebac98ce9dfcaf6ba77604d0248f6bc54e09c2",
+    "run": 45870066080,
+    "job": 140082863894,
+    "conclusion": "PASS_ACTUAL_SELECTED_RECORDER_EVENT_CONFORMANCE_HOST_ONLY",
+    "artifact": 15141643001,
+    "sha256": "bb7bcfb87a006a147502f973218d98d15fa700a5532672070462efa768b8ebdb",
+    "archive_bytes": 4411,
+    "entries": 20,
+    "checks_each": 130,
+    "scenarios_each": 8,
+    "malformed_rejections_each": 7,
+    "clean_trace_records_each": 30,
+    "frame_checks_each": 23,
+    "semantic_refusals_each": 7,
+    "exact_census": {
+      "success": 9,
+      "queued": 1
+    },
+    "scope": "Actual frozen R097 malformed constructors and DM NULL witness rejected by selected recorder; fresh positive trace synthetic I/O; no native controller, original completion, workload oracle. No source change to selected adapter/owner."
+  }
 }

@@ -206,5 +206,52 @@
       }
     }
   },
-  "followup_evidence_changes_standards": false
+  "followup_evidence_changes_standards": false,
+  "agent1_terminal_reconciliation": {
+    "source": "fdb750848000b59a2ca18b64efdc3f81ee6ebc02",
+    "tested_corrected_source": "bd5b2573adc31ea1e58c6094faf616964cbfafff",
+    "run": 45871228934,
+    "job": 140086855765,
+    "conclusion": "PASS_SCOPED_TARGET_HOST_ONLY_WITH_RETAINED_INITIAL_FAIL",
+    "artifact": 15141444720,
+    "sha256": "dfc948ba3cdc5da889198a52b8782962c7618afaeee8977708a3b40da2d5eb81",
+    "archive_bytes": 827,
+    "checks_each": 130,
+    "connected": {
+      "checks": 67,
+      "claims": 1,
+      "fallbacks": 0,
+      "events": 12,
+      "loss": 0
+    },
+    "revoked": {
+      "checks": 63,
+      "claims": 0,
+      "fallbacks": 1,
+      "events": 10,
+      "loss": 4
+    },
+    "mutants_each": 2,
+    "dm_blob": "aaff4d782323f9f17046cb2ba4fabcc0069e51e6",
+    "initial_failure": {
+      "run": 45870750218,
+      "job": 140085220786,
+      "artifact": 15142447528,
+      "sha256": "4de79976a1c4de9570167353ed610c443a23dfd918abcbdd3a1d89ae2de398b9",
+      "error": "carrier type swapz_mm_route",
+      "correction": "Three double-escaped raw regex literals; DM unchanged."
+    },
+    "exact_census": {
+      "success": 5,
+      "queued": 3,
+      "failure": 1,
+      "in_progress": 1
+    },
+    "legacy_failure": {
+      "run": 45871228833,
+      "job": 140086855188,
+      "error": "Round048 target_map lost actual original lifetime anchor: entry = dm_per_bio_data(bio, sizeof(*entry));"
+    },
+    "scope": "Actual typed-WRITE accessor and selected recorder, seeded producer records; no native controller or physical target; revoked scenario deliberately incomplete (loss4), NOT clean fallback evidence. Source audit: two dm_per_bio_data assignments in swapz_map at 16188/16253, audit expects exactly one. Fix without weakening lifetime proof; preserve early zero-token initialization before early KILL/REQUEUE."
+  }
 }

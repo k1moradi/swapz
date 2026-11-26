@@ -30,3 +30,29 @@ New clean 30-record host trace passes strict current-source v2 validator with tw
 ## Controller and physical gate
 
 [Detailed source-mapped external join and physical preflight](https://github.com/k1moradi/swapz/blob/13ebac98ce9dfcaf6ba77604d0248f6bc54e09c2/docs/handoff/zswapz/round098/agent2-controller-readiness.md) maps actual frozen DM drain 16058–16185, target retirement 16344–16390, pin-through-copy 11582–11591 and R096 exact autonomous retry. Design requires independently approved retained scope (not recorder active), revoke optional producer admissions before joining old borrowers, preserve terminal observations during normal I/O drain, actual core SRCU/target work/deferred carrier and candidate puts, independent built-in exact old-session retry retirement witness even after target detach, authoritative zero cleanup debts and actual quarantine count before seal. Failed join sticky and retains allocation; no synthetic debt zeros, no reopening old scope, no forced removal. Strict source-bound private manifest and independent full4096 workload-reference comparison tied to exact final copy/pin and user-visible data; digest alone cannot certify independent byte oracle. No real controller or external source join installed; scope publication, read/ordinary/discard original completion, exact retry-idle witness and actual workload oracle binding remain blockers. A3/A11 own independently corrected MM/DM event fields and source admission; not consumed or edited here. No normal Kbuild, native build, physical activation, VM, module load, owner tests or device access. AUTH0 Phase A BLOCKED, compressed handoff/forced RAW/import OFF. First separately approved trial requires actual connected full native link and safe exact inactive dedicated SWAPSPACE2 scope, protected first page/UUID/table, existing bounded natural pressure and independent oracle/cleanup; no circular demand for prior physical success.
+
+
+## Agent1 independent terminal reconciliation
+```json
+{
+  "source": "13ebac98ce9dfcaf6ba77604d0248f6bc54e09c2",
+  "run": 45870066080,
+  "job": 140082863894,
+  "conclusion": "PASS_ACTUAL_SELECTED_RECORDER_EVENT_CONFORMANCE_HOST_ONLY",
+  "artifact": 15141643001,
+  "sha256": "bb7bcfb87a006a147502f973218d98d15fa700a5532672070462efa768b8ebdb",
+  "archive_bytes": 4411,
+  "entries": 20,
+  "checks_each": 130,
+  "scenarios_each": 8,
+  "malformed_rejections_each": 7,
+  "clean_trace_records_each": 30,
+  "frame_checks_each": 23,
+  "semantic_refusals_each": 7,
+  "exact_census": {
+    "success": 9,
+    "queued": 1
+  },
+  "scope": "Actual frozen R097 malformed constructors and DM NULL witness rejected by selected recorder; fresh positive trace synthetic I/O; no native controller, original completion, workload oracle. No source change to selected adapter/owner."
+}
+```

@@ -30,3 +30,52 @@ Require actual CONFIG_SMP=y, TREE_RCU=y, NR_CPUS=4, no TINY_RCU before compilati
 Diagnostic composite 330120 bytes, SHA256 5cf24736c442f1d87730ec8fe53eff4b134838832ab0e4fd0fc9b29c909d5dc1; ELF ET_REL, 234 unresolved external symbols expected in this partial diagnostic (not all resolved, not MODPOST or final module). Required cross-object symbols passed verifier resolution checks. Native RCU synchronize_rcu and retry queue_work_on verified. Selected owner has seven public/control definitions and seven actual adapter imports; DM uses three built-in owner APIs, gated storage init/read/close and gate_init, no bridge imports. Storage adapter has four gate imports, zero direct ungated provider imports. Actual MM zswap references active/append/mint; page_io references active/bind/endio. Actual candidate accessor defined but DM does not import it; DM only observation active/append. These compiled call sites are not runtime proof. Frozen scope is const-zero, ordered claim hard-off, missing lineage produces append(NULL), frozen MM event fields are nonconformant. No positive native transaction, physical or source-authentication claim; independent R098 peers not consumed.
 
 Hosted complete actual-parent standards prefix PASS: 1,874,135 bytes SHA256 03c288b603663e773a1b033dded2743222ef30d325333e7eb8809bcf466279f4 retained, source 1,875,291 bytes SHA256 727654ff79fac2bdd22252232e9cefa92a165a687abd28b58a346b98a785ffbe. Terminal evidence-only publication parent 42ab8e761f42251364cdc337636d4bbb3cb86a83; no source/standards change, no repeat, no full kernel or module link, no MODPOST, no VM/boot/load/device/physical/activation/owner tests. AUTH0, Phase A BLOCKED, compressed handoff/forced RAW/import OFF. Next: fully connected reviewed R098 frozen producer/consumer/recorder and full native link in separately assigned scope; no owner action now.
+
+
+## Agent1 independent terminal reconciliation
+```json
+{
+  "source": "da19176ae71c0c1b0ae8e5a55fdb41fdeec1038d",
+  "run": 45869981885,
+  "job": 140082576414,
+  "conclusion": "PASS_CHANGED_SMP_DIRECTED_NATIVE_COMPONENTS_ONLY",
+  "artifact": 15143025907,
+  "sha256": "709cbbd2acc43148515144ee2f7d656c2a0bdcc13e431fbe7771d944472c462d",
+  "archive_bytes": 760331,
+  "entries": 93,
+  "steps": 49,
+  "pins": 56,
+  "objects": 8,
+  "config": {
+    "SMP": true,
+    "TREE_RCU": true,
+    "TINY_RCU": false,
+    "NR_CPUS": 4
+  },
+  "locked_cmpxchg": 2,
+  "config_sha256": "f9bbfa2580fb2bb6a1d95316e0dff1f9f64d1656dc9d8974abcc4f9bc95db8cf",
+  "composite_bytes": 330120,
+  "composite_sha256": "5cf24736c442f1d87730ec8fe53eff4b134838832ab0e4fd0fc9b29c909d5dc1",
+  "composite_external_symbols": 234,
+  "dm_gated_imports": 4,
+  "dm_legacy_bridge_imports": 0,
+  "storage_gate_imports": 4,
+  "storage_direct_ungated_imports": 0,
+  "dm_candidate_accessor_imports": 0,
+  "object_sha256": {
+    "mm/page_io.o": "dd3399cf392f55776188c1b9f7b42fe63c7e4a8f0ff3ffcd15e6ba4b49f85ca5",
+    "native-observation-adapter.o": "3a4e422c5b8f5396e2ddd945a6bc644063fb4b81c632ce05476a4bce9671185c",
+    "native-observation-owner.o": "8c4c1c112d350d46cfc3f850aea21d541a1782bc9558f4ca19af8e8ff9e05959",
+    "zswap-original-ticket.o": "416e3301c0c62add63f8f11fa4c7a651e179e23e088a0ab03ea8a2286ea3ca54",
+    "mm/zswap.o": "f3752d5018f4720a58c3850d86680ed1c584734d2380bf61f44c4efd555bf53b",
+    "dm-target.o": "430949e542c942853a8de4f7512abfb2b3e8521a6ba48446a20a0056d56a97c6",
+    "zswap-original-decoder-shared.o": "a2e80aaee17ed4f321d98b2e4596debbbfb3c74db981c83e1fe1592cc82a1984",
+    "zswap-original-storage-shared-decoder.o": "eeb69e1612f8dfb526915eb580878d1c9d7a285e04b788ee4c855c8a2d57ca4e"
+  },
+  "exact_census": {
+    "success": 9,
+    "queued": 1
+  },
+  "scope": "Actual R097 source freeze5a36cabf..., not R098 producer/DM. All eight hashes/config/composite independently recomputed. Correct SMP config preserved; no full linkage/modpost or loadable final ko. R097 UP failure retained."
+}
+```

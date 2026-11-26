@@ -38,3 +38,55 @@ Remaining: terminal exact-source CI, externally validated scope/controller publi
 Initial exact-source job [140085220786](https://github.com/k1moradi/swapz/actions/runs/45870750218/job/140085220786) completed FAIL before compiler execution: `R098_FIRST_ERROR carrier type swapz_mm_route`. Raw producer postimage verification returned before failing struct extraction. New runner double-escaped raw regex literals for carrier extraction and two verdict parsers. Original failed archive [15142447528](https://github.com/k1moradi/swapz/actions/runs/45870750218/artifacts/15142447528), 484 bytes, SHA256 4de79976a1c4de9570167353ed610c443a23dfd918abcbdd3a1d89ae2de398b9 agrees between log/API, not independently downloaded. No compiler credit.
 
 Narrow [correction](https://github.com/k1moradi/swapz/commit/bd5b2573adc31ea1e58c6094faf616964cbfafff) sole parent 88e485625d7e9c44a614d7abf11844b0d3350f35: only those three verifier literals and standards appendix. DM unchanged. Actual parent 1,879,120 bytes preserved; 667 appended, 1,879,787 total. Corrected [job 140086855765](https://github.com/k1moradi/swapz/actions/runs/45871228934/job/140086855765) terminal PASS_SCOPED_TARGET_ACTUAL_ACCESSOR_RECORDER_HOST_ONLY: GCC c2x and Clang c23, ASan/UBSan, each connected 67 checks/1 claim/12 actual selected recorder records/loss0; revoked 63 checks/0 claims/1 fallback/10 records/loss4; 130 checks and two semantic mutants each (exit77 witnesses in JSON). Actual staged producer postimages verified. [Corrected artifact 15141444720](https://github.com/k1moradi/swapz/actions/runs/45871228934/artifacts/15141444720), 827 bytes SHA256 dfc948ba3cdc5da889198a52b8782962c7618afaeee8977708a3b40da2d5eb81 agrees between log and API, archive not independently downloaded. No manual rerun. First error none on corrected job. Host controller and CAPTURE/BIND seeded explicitly; no native publication, actual original ACK or complete trace claim. External controller, same-session identity agreement, native link, missing operation classes and independent oracle remain blockers. Initial FAIL retained. AUTH0 Phase A BLOCKED, no activation. [Issue notification](https://github.com/k1moradi/swapz/issues/216#issuecomment-7199854664).
+
+
+## Agent1 independent terminal reconciliation
+```json
+{
+  "source": "fdb750848000b59a2ca18b64efdc3f81ee6ebc02",
+  "tested_corrected_source": "bd5b2573adc31ea1e58c6094faf616964cbfafff",
+  "run": 45871228934,
+  "job": 140086855765,
+  "conclusion": "PASS_SCOPED_TARGET_HOST_ONLY_WITH_RETAINED_INITIAL_FAIL",
+  "artifact": 15141444720,
+  "sha256": "dfc948ba3cdc5da889198a52b8782962c7618afaeee8977708a3b40da2d5eb81",
+  "archive_bytes": 827,
+  "checks_each": 130,
+  "connected": {
+    "checks": 67,
+    "claims": 1,
+    "fallbacks": 0,
+    "events": 12,
+    "loss": 0
+  },
+  "revoked": {
+    "checks": 63,
+    "claims": 0,
+    "fallbacks": 1,
+    "events": 10,
+    "loss": 4
+  },
+  "mutants_each": 2,
+  "dm_blob": "aaff4d782323f9f17046cb2ba4fabcc0069e51e6",
+  "initial_failure": {
+    "run": 45870750218,
+    "job": 140085220786,
+    "artifact": 15142447528,
+    "sha256": "4de79976a1c4de9570167353ed610c443a23dfd918abcbdd3a1d89ae2de398b9",
+    "error": "carrier type swapz_mm_route",
+    "correction": "Three double-escaped raw regex literals; DM unchanged."
+  },
+  "exact_census": {
+    "success": 5,
+    "queued": 3,
+    "failure": 1,
+    "in_progress": 1
+  },
+  "legacy_failure": {
+    "run": 45871228833,
+    "job": 140086855188,
+    "error": "Round048 target_map lost actual original lifetime anchor: entry = dm_per_bio_data(bio, sizeof(*entry));"
+  },
+  "scope": "Actual typed-WRITE accessor and selected recorder, seeded producer records; no native controller or physical target; revoked scenario deliberately incomplete (loss4), NOT clean fallback evidence. Source audit: two dm_per_bio_data assignments in swapz_map at 16188/16253, audit expects exactly one. Fix without weakening lifetime proof; preserve early zero-token initialization before early KILL/REQUEUE."
+}
+```

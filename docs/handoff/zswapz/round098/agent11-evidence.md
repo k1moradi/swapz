@@ -44,3 +44,46 @@ Actual-parent standards 4bc31dfed3ffb2db9cee73c267bf6e1ac2ab7d51 (1,879,787 byte
 ## Terminal first attempt — FAIL
 
 Exact job 140087429484 completed failure, staging passed and standards prefix independently passed (SHA256 c699e0d52ed02c9f2fe4ef4181130d1bb997bd3471d7342f32142a693881a423). First error: gcc broker compile: zswap-original-broker-owner.inc:368:13: owner_retry_run defined but not used [-Werror=unused-function]. No fixture execution or event counts. Artifact 15143272836, 790 bytes, SHA256 245a9856914c5a4eeddcd46afa8218f346db1c459b68d92e43915cfa7a32562f (metadata only). No rerun. A narrowly changed host fixture may connect actual retry execution to scope-cap final release without changing frozen owner or MM/core overlays.
+
+
+## Agent1 independent terminal reconciliation
+```json
+{
+  "source": "f209e51d6cb874cec736d224851b0f8c8282601a",
+  "run": 45871396136,
+  "job": 140087429484,
+  "conclusion": "FAIL_HOST_BROKER_COMPILE",
+  "first_error": "zswap-original-broker-owner.inc:368:13: owner_retry_run defined but not used [-Werror=unused-function]",
+  "artifact": 15143272836,
+  "sha256": "245a9856914c5a4eeddcd46afa8218f346db1c459b68d92e43915cfa7a32562f",
+  "archive_bytes": 790,
+  "checks_each": null,
+  "events_each": null,
+  "mutants_each": null,
+  "exact_census": {
+    "success": 3,
+    "failure": 2,
+    "queued": 4,
+    "in_progress": 1
+  },
+  "legacy_failure": {
+    "run": 45871396054,
+    "job": 140087429247,
+    "error": "Round048 target_map duplicate lifetime anchor; same source defect as corrected A3 source audit."
+  },
+  "prior_r097": {
+    "source": "23979a8e43ff0796018d0bb63675a63d1c52be8e",
+    "run": 45856892403,
+    "job": 140037517664,
+    "conclusion": "PASS_HOST_SUBSTITUTES_ONLY_EVENT_CONFORMANCE_DEFECT",
+    "checks_each": 50,
+    "retries_each": 3,
+    "events_each": 9,
+    "mutants_each": 2,
+    "artifact": 15137147391,
+    "sha256": "fbb69686a252006f67bc249d2bfab67cbbdf3b228d0b7bb0af4281c8faf3cbc4",
+    "archive_bytes": 2651
+  },
+  "scope": "R098 source staged only, actual recorder fixture not executed; compile error is static host worker unused, not native failure. Connect real worker to scope cap release and retry test, not warning suppression. Scope publication/revoke guarded no caller, core origin helper unused by target. No R098 successful checks credited."
+}
+```
