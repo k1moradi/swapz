@@ -30,13 +30,13 @@
       "id": 139696357119,
       "url": "https://github.com/k1moradi/swapz/actions/runs/45756538303/job/139696357119",
       "attempt": 1,
-      "status": "in_progress",
-      "conclusion": null
+      "status": "completed",
+      "conclusion": "success"
     }
   ],
-  "conclusion": "IN_PROGRESS",
+  "conclusion": "SUCCESS",
   "first_error": null,
-  "first_error_status": "PENDING_ACTUAL_TERMINAL_LOG",
+  "first_error_status": "NONE_TERMINAL_SUCCESS",
   "canonical_preflight": "PASS",
   "steps": [
     {
@@ -76,34 +76,63 @@
     },
     {
       "name": "Actual raw staging, directed native storage objects and relocatable composite",
-      "status": "in_progress",
-      "conclusion": null
+      "status": "completed",
+      "conclusion": "success"
     },
     {
       "name": "Preserve exact compile logs and manifest even on failure",
-      "status": "pending",
-      "conclusion": null
+      "status": "completed",
+      "conclusion": "success"
     },
     {
       "name": "Post Run actions/checkout@v4",
-      "status": "pending",
-      "conclusion": null
+      "status": "completed",
+      "conclusion": "success"
     },
     {
       "name": "Post Run actions/checkout@v4",
-      "status": "pending",
-      "conclusion": null
+      "status": "completed",
+      "conclusion": "success"
     },
     {
       "name": "Post Run actions/checkout@v4",
-      "status": "pending",
-      "conclusion": null
+      "status": "completed",
+      "conclusion": "success"
+    },
+    {
+      "name": "Complete job",
+      "status": "completed",
+      "conclusion": "success"
     }
   ],
-  "artifact": null,
-  "raw_stage": "PENDING",
-  "directed_native_objects": "PENDING",
-  "composite_link": "PENDING",
+  "artifact": {
+    "id": 15087284949,
+    "url": "https://github.com/k1moradi/swapz/actions/runs/45756538303/artifacts/15087284949",
+    "zip_bytes": 330467,
+    "entries": 42,
+    "crc_check": "PASS",
+    "independent_download": true,
+    "sha256": {
+      "artifact.zip": "814e42ef8b2942cecc8e8d863bab82c5a4737513ac1ec5e79711a873d4d74f0c",
+      "results.json": "7590a14aa3d76642021b38d0cba6af8e4d44607c986069810af468b63197844b",
+      "raw-stage-manifest.json": "5b9921ec5df9c1f966fddf8e6117f938608e79139cdf960dbae8b52a264df9a2",
+      "stage-manifest.json": "bba0a666c5923d07acdb4ad3939b97a03d09c6b9febfc09294efc5eb93868192",
+      "effective.config": "89127024a38ad68dd091c9dd5787bba097b85c8ce69d118cd147a8d7ff4c6d0b",
+      "dm-swapz.o": "ba3a7f9f402e1467faf935abb156b7ea19e9f8a07bb5972103c524d2e71877bb"
+    },
+    "composite_bytes": 414144,
+    "composite_elf": "ELF64 little-endian x86-64 ET_REL",
+    "all_12_directed_object_hashes_match_manifest": true,
+    "selected_object_sha256": {
+      "dm-target.o": "65b8b4b811e290f02ccc1df8c79bf5d2e6f8d58953f31a9175568cc1e02cc145",
+      "zswap-original-storage-value.o": "dd33f5e59abc233909d5e7a4b0680ccf22bb39c9ebe8203b21fac3949aaa804f",
+      "zswap-original-decoder-handles.o": "9d6c647074670cf209dab77004edd6862c69e8cd3ad4556cb316dc6c31cf4860",
+      "round094-native-value-decoder-link.o": "e8081203b96c3424468a427be58756fc9a0a9cee869f459babce532c76277743"
+    }
+  },
+  "raw_stage": "PASS",
+  "directed_native_objects": "PASS",
+  "composite_link": "PASS",
   "new_full_kernel_link": "NOT_RUN",
   "new_modpost": "NOT_RUN",
   "new_final_ko": "NOT_RUN",
@@ -124,8 +153,13 @@
     "module_sha256": "88add0aa34b6f86db24b7e9fb10b2945ed7936f35ac5220243ff07b14198bd56",
     "config_sha256": "89127024a38ad68dd091c9dd5787bba097b85c8ce69d118cd147a8d7ff4c6d0b",
     "job_logs_reverified": true,
-    "new_archive_extraction": false,
-    "hashes_source": "Agent1 terminal checkpoint and GitHub artifact metadata"
+    "new_archive_extraction": true,
+    "hashes_source": "independent fresh archive extraction; checkpoint and GitHub digest match",
+    "zip_crc_check": "PASS",
+    "zip_entries": 36,
+    "kernel_symvers_sha256": "0e2de6fbc9aeb3217736424781db41fb3402c7587655b12bb69f90a8ccace4b3",
+    "config_bytes_identical_to_r094": true,
+    "used_as_reference_not_new_modpost": true
   },
   "callback_scope": "compile-only actual decoder get/put/read wrappers plus real value-storage init; no runtime caller; lower callbacks forwarded, not synthesized",
   "no_same_round_peer_inputs": true,
@@ -140,5 +174,54 @@
   "vm_build": false,
   "vm_boot": false,
   "module_loaded": false,
-  "actual_physical_io": false
+  "actual_physical_io": false,
+  "compiler": "GCC 13.3.0 Ubuntu 24.04",
+  "linker": "GNU ld 2.42",
+  "completed_verifier_steps": 24,
+  "raw_patch_count": 4,
+  "raw_r092_overlay_paths": 4,
+  "raw_final_postimages": 10,
+  "scratch_postimages": 7,
+  "module_inputs": 47,
+  "directed_objects": 12,
+  "additional_composite_dependency_objects": 4,
+  "build_attempts": 1,
+  "actual_raw_r092_overlay": true,
+  "old_scratch_exports": false,
+  "symbols": {
+    "global_definitions": 196,
+    "required_internal_definitions": 22,
+    "unresolved_required_internal": 0,
+    "actual_strong_undefined": 99,
+    "external_kernel_imports": 98,
+    "module_metadata_imports": [
+      "__this_module"
+    ],
+    "missing_prior_export_rows": 0,
+    "boundary_imports": [
+      "dm_swapz_round090_route_live",
+      "dm_swapz_round090_selected_origin",
+      "swapz_mm_candidate_get",
+      "swapz_mm_register_provider",
+      "swapz_mm_unregister_provider",
+      "swapz_ticket_broker_put",
+      "swapz_ticket_put",
+      "swapz_ticket_view"
+    ],
+    "all_eight_prior_gpl_exports_verified": true,
+    "actual_witness_references": [
+      "swapz_original_decoder_handle_get",
+      "swapz_original_decoder_handle_put",
+      "swapz_original_decoder_handle_read",
+      "swapz_shared_storage_value_init"
+    ],
+    "independent_nm_verification": true
+  },
+  "standards_prefix_ci": {
+    "parent_bytes": 1828438,
+    "parent_sha256": "02c09095b4b113d92e62acb8845f55f0ab490209f164186300e13cebf2b33474",
+    "new_bytes": 1830041,
+    "new_sha256": "41c931630211cf955374e66f663f0ab14220d354cef2e11936d1dec875879409",
+    "status": "PASS"
+  }
 }
