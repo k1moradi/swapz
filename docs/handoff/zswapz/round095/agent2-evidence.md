@@ -1,6 +1,6 @@
 # Agent2 — R095 bounded native observation recorder
 
-Status: SOURCE_PUBLISHED / TERMINAL_SUCCESS_LOG_REVIEW_REQUIRED / NO_GO_LIVE.
+Status: SOURCE_PUBLISHED / PASS_HOST_RECORDER_AND_OFFLINE_EXPORT_ONLY / NO_GO_LIVE.
 [Source 8c73b49a87b2faffc950effb651dd218e564d6ce](https://github.com/k1moradi/swapz/commit/8c73b49a87b2faffc950effb651dd218e564d6ce), sole parent
 1eda391009b9813f1e556517ec962ca1604f1ef8; expected-head nonforce main fast-forward verified by remote
 readback. Engineering freeze ff972661a75ca7f8c3c0458c3feb8b603c185eb8,
@@ -36,7 +36,7 @@ No allocation, formatting, logging, hashing or I/O in append. Seal/export
 requires externally revoked/joined producers including pre-lock entrants;
 not itself proof of quiescence. Explicit little-endian 104B header,
 296B records, 24B footer, 8192 cap, 2,424,832B maximum record wire storage
-(303,104B at 1024), not measured C layout until job logs. Exact scope digest
+(303,104B at 1024), measured C layout confirmed below. Exact scope digest
 against independently supplied manifest, no authentication. Concurrent
 partial-order validator tracks separate capture/bind/accept/dispatch,
 claim/refusal/cancel, lower/publish/pin/oracle, clone vs actual original ACK,
@@ -57,7 +57,7 @@ safe drain/cleanup. No device discovery or physical commands.
 ## Qualification
 
 [Run 45771314540](https://github.com/k1moradi/swapz/actions/runs/45771314540), [job 139744356343](https://github.com/k1moradi/swapz/actions/runs/45771314540/job/139744356343), observed
-completed/success. Terminal result captured; detailed diagnostics require review.
+completed/success. All seven steps succeeded; decoded job logs reviewed below.
 Local Git DNS: Could not resolve host: github.com. No local exact-source
 compile or test execution claimed. Dedicated push workflow once; no manual
 dispatch/rerun, no repeat accepted R094 corpus and no additional native
@@ -67,3 +67,45 @@ AUTH=0; Phase A BLOCKED; compressed handoff, forced RAW and import OFF.
 No branch, PR, force, VM, module load, tracing activation, privilege,
 device probe, physical mutation or actual native capture. Physical gate
 cannot be enabled by this prototype.
+
+## Terminal exact-job observations
+
+Run 45771314540 / job 139744356343 completed SUCCESS, seven successful steps,
+strict GCC 13.3.0 and Clang 18.1.3 C2x, ASan/UBSan, actual recorder C and
+fabricated host producer only. Repository policy, whitespace and full parent
+prefix check PASS; parent SHA-256 9fe810c23321cd3a4c9fac8be684ea280e06c9e660be3eca959a202382cec5e5.
+
+| Metric | GCC | Clang |
+| --- | ---: | ---: |
+| C checks | 12,395 | 6,251 |
+| Host threaded append attempts | 4,096 | 4,096 |
+| Accepted / lost | 4,096 / 0 | 2,048 / 2,048 |
+| Sticky loss flags | 0 | 1 |
+| Measured record / owner bytes | 296 / 80 | 296 / 80 |
+| Timing samples per path | 262,144 | 262,144 |
+| Append total ns | 51,342,422 | 46,429,824 |
+| Disabled total ns | 4,806,332 | 640,210 |
+| Approx. append ns / call | 195.86 | 177.12 |
+| Approx. disabled ns / call | 18.33 | 2.44 |
+| Python tests | 5 | 5 |
+| Concurrent / transport / CLI negatives | 41 / 19 / 1 | 41 / 19 / 1 |
+| Observed-failure case | 1 | 1 |
+| Fabricated records / accepted BIOs / claims | 53 / 4 / 2 | 53 / 4 / 2 |
+| Fabricated clone / original upper ACKs | 4 / 4 | 4 / 4 |
+| Fabricated full-page oracle records | 2 | 2 |
+
+Actual host array sizes 2,424,832 bytes at 8192 records, 303,104 bytes at
+1024, plus 80-byte owner (not allocator overhead). Host timings are
+sanitized prototype measurements, not kernel or physical performance.
+The Clang concurrent run lost 50% of attempted records, correctly setting
+sticky loss; **this is a substantive capture completeness limitation**, not
+proof of sufficient native recorder throughput. GCC no observed contention
+is not a guarantee. Any lost native trace must block qualification; review
+contention and producer-safe ordering before a native design is accepted.
+No actual MM/DM producer, kernel compile or physical test. First CI error:
+null. Exact-source broader workflows at observation: 1 success, 9 queued;
+no whole-source green claim.
+
+[Artifact 15094490812](https://github.com/k1moradi/swapz/actions/runs/45771314540/artifacts/15094490812), 2062 bytes,
+SHA-256 f7ffbfaf517a5061a1fb006f98836eb0fa16c63303c18c3f61ff8038f08c8dff. Exact source association and upload-log digest
+match metadata; no independent ZIP extraction or byte-hash claim.
